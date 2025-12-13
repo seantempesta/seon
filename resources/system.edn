@@ -37,12 +37,6 @@
   :port #or [#env NREPL_PORT 7888]
   :bind "127.0.0.1"}
 
- ;; Financial DSL Executor
- ;; Executes Clojure s-expressions against the XTDB database
- :seon/dsl-executor
- {:db #ig/ref :seon/xtdb-node
-  :registry #ig/ref :seon/schema-registry}
-
  ;; HTTP Server for Web UI
  :seon.web.server/http-server
  {:port #or [#env HTTP_PORT 8080]
