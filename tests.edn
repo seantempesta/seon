@@ -1,0 +1,15 @@
+#kaocha/v1
+ {:tests [{:id :unit
+           :test-paths ["test"]
+           :ns-patterns [".*-test$"]}]
+
+  :plugins [:kaocha.plugin/profiling
+            :kaocha.plugin/capture-output]
+
+ ;; Property test configuration
+ ;; Removed randomize/seed config - using defaults
+
+ ;; JVM options for XTDB
+  :kaocha/cli-options ["--add-opens=java.base/java.nio=ALL-UNNAMED"
+                       "-Dio.netty.tryReflectionSetAccessible=true"
+                       "--enable-native-access=ALL-UNNAMED"]}
