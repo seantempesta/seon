@@ -59,13 +59,13 @@
 ;; File to namespace mapping
 (defn file->test-ns
   "Map source file to corresponding test namespace.
-   /path/to/project/src/ml_options/foo.clj → ml-options.foo-test
-   /path/to/project/test/ml_options/foo_test.clj → ml-options.foo-test
-   Also handles relative paths like test/ml_options/foo_test.clj"
+   /path/to/project/src/seon/foo.clj → seon.foo-test
+   /path/to/project/test/seon/foo_test.clj → seon.foo-test
+   Also handles relative paths like test/seon/foo_test.clj"
   [file-path]
-  ;; Find the src/ or test/ directory that contains ml_options (project-specific)
+  ;; Find the src/ or test/ directory that contains seon (project-specific)
   ;; Works with both absolute paths (/...src/) and relative paths (src/)
-  (when-let [match (re-find #"(?:^|/)(?:src|test)/(ml_options/.+)\.clj$" file-path)]
+  (when-let [match (re-find #"(?:^|/)(?:src|test)/(seon/.+)\.clj$" file-path)]
     (let [rel-path (second match)
           ns-path (-> rel-path
                       (str/replace #"/" ".")
@@ -76,11 +76,11 @@
 
 (defn file->source-ns
   "Map source or test file to corresponding source namespace.
-   /path/to/project/src/ml_options/foo.clj → ml-options.foo
-   /path/to/project/test/ml_options/foo_test.clj → ml-options.foo"
+   /path/to/project/src/seon/foo.clj → seon.foo
+   /path/to/project/test/seon/foo_test.clj → seon.foo"
   [file-path]
-  ;; Find the src/ or test/ directory that contains ml_options (project-specific)
-  (when-let [match (re-find #"(?:^|/)(?:src|test)/(ml_options/.+)\.clj$" file-path)]
+  ;; Find the src/ or test/ directory that contains seon (project-specific)
+  (when-let [match (re-find #"(?:^|/)(?:src|test)/(seon/.+)\.clj$" file-path)]
     (let [rel-path (second match)
           ns-path (-> rel-path
                       (str/replace #"/" ".")

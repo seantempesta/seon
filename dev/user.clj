@@ -19,7 +19,7 @@
             [clojure.tools.namespace.repl :as ns-repl]
             [clojure.java.io :as io]
             [aero.core :as aero]
-            [ml-options.system]))
+            [seon.system]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Integrant REPL Setup
@@ -68,7 +68,7 @@
   Handles both integrant.repl (go) and runner (./bin/run) started systems."
   []
   ;; Check if system was started via runner (./bin/run)
-  (if-let [runner-sys-var (resolve 'ml-options.runner/system)]
+  (if-let [runner-sys-var (resolve 'seon.runner/system)]
     (let [sys-atom (deref runner-sys-var)]
       (when @sys-atom
         ;; Runner system is active - use suspend/resume for proper lifecycle
@@ -76,20 +76,20 @@
         (let [refresh (resolve 'clojure.tools.namespace.repl/refresh)]
           ;; First halt the old system (except nREPL which has suspend/resume)
           (let [sys @sys-atom
-                nrepl-server (:ml-options/nrepl-server sys)
-                sys-without-nrepl (dissoc sys :ml-options/nrepl-server)]
+                nrepl-server (:seon/nrepl-server sys)
+                sys-without-nrepl (dissoc sys :seon/nrepl-server)]
             ;; Halt everything except nREPL
             (ig/halt! sys-without-nrepl)
             ;; Refresh namespaces
             (refresh)
             ;; Reload config and start fresh system
-            (require 'ml-options.system)
-            (let [load-config (resolve 'ml-options.system/load-config)
+            (require 'seon.system)
+            (let [load-config (resolve 'seon.system/load-config)
                   config (load-config :dev)
-                  config-without-nrepl (dissoc config :ml-options/nrepl-server)
+                  config-without-nrepl (dissoc config :seon/nrepl-server)
                   new-sys (ig/init config-without-nrepl)]
               ;; Merge back the nREPL server
-              (reset! sys-atom (assoc new-sys :ml-options/nrepl-server nrepl-server))
+              (reset! sys-atom (assoc new-sys :seon/nrepl-server nrepl-server))
               :reset-complete)))))
     ;; No runner system - use standard integrant.repl
     (ig-repl/reset)))
@@ -121,7 +121,7 @@
   "Get the running system, whether started via integrant.repl or runner."
   []
   (or system
-      (when-let [runner-sys-var (resolve 'ml-options.runner/system)]
+      (when-let [runner-sys-var (resolve 'seon.runner/system)]
         ;; runner/system is a var containing an atom - need to deref both
         (deref (deref runner-sys-var)))))
 
@@ -130,13 +130,13 @@
   Works with both integrant.repl (go) and runner (./bin/run)."
   []
   (when-let [sys (current-system)]
-    (:ml-options/xtdb-node sys)))
+    (:seon/xtdb-node sys)))
 
 (defn schema-registry
   "Get the Malli schema registry from the running system."
   []
   (when-let [sys (current-system)]
-    (:ml-options/schema-registry sys)))
+    (:seon/schema-registry sys)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; System Info
@@ -153,8 +153,8 @@
       (when-let [node (xtdb-node)]
         (println "")
         (println "XTDB status:")
-        (require '[ml-options.db.node :as db-node])
-        (clojure.pprint/pprint ((resolve 'ml-options.db.node/status) node))))
+        (require '[seon.db.node :as db-node])
+        (clojure.pprint/pprint ((resolve 'seon.db.node/status) node))))
     (println "System not running. Start with: (go) or ./bin/run")))
 
 ;;; ---------------------------------------------------------------------------
@@ -252,7 +252,7 @@ Python (manual init):
   (init-python!)  Initialize Python bridge
 
 Bulk Loading:
-  (require '[ml-options.data.bulk-load :as bulk-load])
+  (require '[seon.data.bulk-load :as bulk-load])
   (bulk-load/bulk-load-from-repl!
     (xtdb-node)
     [\"SPY\"]
