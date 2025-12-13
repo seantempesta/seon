@@ -98,7 +98,7 @@
   ;; Standalone runner (no nREPL, just Integrant system with console logging)
   ;; Usage: clj -M:dev:run       (dev profile)
   ;;        clj -M:dev:run prod  (prod profile)
-  :run {:main-opts ["-m" "ml-options.runner"]
+  :run {:main-opts ["-m" "seon.runner"]
         :jvm-opts ["-Xms4g"
                    "-Xmx8g"
                    "-XX:MaxDirectMemorySize=4g"

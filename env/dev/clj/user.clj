@@ -19,7 +19,7 @@
    [integrant.core :as ig]
    [integrant.repl :refer [clear go halt prep init reset reset-all]]
    [integrant.repl.state :as state]
-   [ml-options.config :as config]))
+   [seon.config :as config]))
 
 (alter-var-root #'s/*explain-out* (constantly expound/printer))
 
@@ -55,7 +55,7 @@
   "Get the XTDB node from the running system."
   []
   (when state/system
-    (:ml-options/xtdb-node state/system)))
+    (:seon/xtdb-node state/system)))
 
 (defn status
   "Show system status."
@@ -68,8 +68,8 @@
       (when-let [node (xtdb-node)]
         (println "")
         (println "XTDB status:")
-        (require 'ml-options.db.node)
-        (clojure.pprint/pprint ((resolve 'ml-options.db.node/status) node))))
+        (require 'seon.db.node)
+        (clojure.pprint/pprint ((resolve 'seon.db.node/status) node))))
     (println "System not running. Start with: (go) or ./bin/run")))
 
 ;; ========================================
@@ -78,7 +78,7 @@
 
 (defn parse-log-line
   "Parse a logback log line into structured data.
-  Format: 2025-12-02 11:39:25,396 [main] INFO  ml-options.core - Message
+  Format: 2025-12-02 11:39:25,396 [main] INFO  seon.core - Message
   Returns map with :timestamp, :thread, :level, :logger, :message, :raw"
   [line]
   (when (and line (string? line))
