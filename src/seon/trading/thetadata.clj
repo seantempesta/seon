@@ -1,4 +1,4 @@
-(ns seon.data.thetadata
+(ns seon.trading.thetadata
   "ThetaData REST API v3 client.
 
   Connects to Theta Terminal running locally at localhost:25503.
@@ -16,7 +16,7 @@
             [cheshire.core :as json]
             [clojure.string :as str]
             [taoensso.timbre :as log]
-            [seon.data.date-utils :refer [local-date->eod-instant]])
+            [seon.trading.date-utils :refer [local-date->eod-instant]])
   (:import [java.time Instant LocalDate LocalDateTime ZoneId]
            [java.time.format DateTimeFormatter]))
 
@@ -78,7 +78,7 @@
           nil)))))
 
 ;;; ---------------------------------------------------------------------------
-;;; Data Transformations (date utilities in seon.data.date-utils)
+;;; Data Transformations (date utilities in seon.trading.date-utils)
 ;;; ---------------------------------------------------------------------------
 
 (defn- parse-timestamp

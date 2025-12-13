@@ -2,7 +2,7 @@
   "Job manager for bulk import operations.
    Manages a single active job at a time with status tracking."
   (:require [taoensso.timbre :as log]
-            [seon.data.bulk-load :as bulk-load]
+            [seon.trading.bulk-load :as bulk-load]
             [seon.web.sse :as sse]
             [seon.web.stats :as stats])
   (:import [java.time LocalDate Instant]

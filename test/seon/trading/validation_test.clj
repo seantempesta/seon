@@ -1,4 +1,4 @@
-(ns seon.data.validation-test
+(ns seon.trading.validation-test
   "Comprehensive tests for option data validation.
 
   Test Coverage:
@@ -13,7 +13,7 @@
             [clojure.test.check.clojure-test :refer [defspec]]
             [clojure.test.check.properties :as prop]
             [clojure.test.check.generators :as gen]
-            [seon.data.validation :as v]
+            [seon.trading.validation :as v]
             [seon.generators :as custom-gen]))
 
 ;;; ---------------------------------------------------------------------------

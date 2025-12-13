@@ -1,16 +1,16 @@
-(ns seon.data.bulk-load
+(ns seon.trading.bulk-load
   "CLI script for bulk loading options data.
 
   Usage:
-    clojure -M:dev -m seon.data.bulk-load SYMBOL1 SYMBOL2 ... --start YYYY-MM-DD --end YYYY-MM-DD
+    clojure -M:dev -m seon.trading.bulk-load SYMBOL1 SYMBOL2 ... --start YYYY-MM-DD --end YYYY-MM-DD
 
   Example:
-    clojure -M:dev -m seon.data.bulk-load SPY AAPL NVDA --start 2025-05-28 --end 2025-11-27"
-  (:require [seon.data.ingest :as ingest]
-            [seon.data.validation :refer [*quiet*]]
-            [seon.data.thetadata :as theta]
-            [seon.data.ingestion-state :as state]
-            [seon.data.date-utils :refer [local-date->eod-instant]]
+    clojure -M:dev -m seon.trading.bulk-load SPY AAPL NVDA --start 2025-05-28 --end 2025-11-27"
+  (:require [seon.trading.ingest :as ingest]
+            [seon.trading.validation :refer [*quiet*]]
+            [seon.trading.thetadata :as theta]
+            [seon.trading.ingestion-state :as state]
+            [seon.trading.date-utils :refer [local-date->eod-instant]]
             [seon.db.node :as node]
             [xtdb.node :as xtn]
             [clojure.java.io :as io])

@@ -1,4 +1,4 @@
-(ns seon.data.ingest
+(ns seon.trading.ingest
   "ThetaData ingestion pipeline for options Greeks.
 
   Fetches historical option Greeks from ThetaData Terminal, validates,
@@ -19,19 +19,19 @@
   - ingest-symbol-history!: Per-symbol entry point with state tracking
   - run-daily-update!: Daily EOD updates for configured symbols
 
-  For bulk multi-symbol loading, use seon.data.bulk-load/resilient-bulk-load!"
-  (:require [seon.data.thetadata :as theta]
-            [seon.data.validation :as valid :refer [*quiet*]]
-            [seon.data.ingestion-state :as state]
-            [seon.data.date-utils :refer [local-date->eod-instant
-                                                instant->local-date
-                                                weekend?]]
+  For bulk multi-symbol loading, use seon.trading.bulk-load/resilient-bulk-load!"
+  (:require [seon.trading.thetadata :as theta]
+            [seon.trading.validation :as valid :refer [*quiet*]]
+            [seon.trading.ingestion-state :as state]
+            [seon.trading.date-utils :refer [local-date->eod-instant
+                                             instant->local-date
+                                             weekend?]]
             [xtdb.api :as xt]
             [taoensso.timbre :as log])
   (:import [java.time LocalDate Instant]))
 
 ;;; ---------------------------------------------------------------------------
-;;; Date/Time Utilities - see seon.data.date-utils
+;;; Date/Time Utilities - see seon.trading.date-utils
 ;;; ---------------------------------------------------------------------------
 
 ;;; ---------------------------------------------------------------------------

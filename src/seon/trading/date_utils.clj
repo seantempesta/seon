@@ -1,4 +1,4 @@
-(ns seon.data.date-utils
+(ns seon.trading.date-utils
   "Date and time utilities for options data ingestion.
 
   Shared functions for converting between LocalDate and Instant

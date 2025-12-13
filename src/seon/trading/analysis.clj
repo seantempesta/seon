@@ -1,4 +1,4 @@
-(ns seon.agent.analysis
+(ns seon.trading.analysis
   "High-level analysis interface for LLM agents.
 
   This namespace provides the primary interface for agent sessions:
@@ -12,7 +12,7 @@
   2. Single call returns everything needed for decision
   3. Reasoning is human-readable for agent to relay to user
   4. Conservative by default - 'no trade' unless clear signal"
-  (:require [seon.dsl.primitives :as p]
+  (:require [seon.trading.signals :as p]
             [seon.db.queries :as q]
             [seon.db.node :as node]
             [xtdb.api :as xt]))

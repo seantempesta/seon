@@ -1,4 +1,4 @@
-(ns seon.data.ingestion-state
+(ns seon.trading.ingestion-state
   "Ingestion state tracking for resumable data loads.
 
   Tracks progress of options data ingestion in XTDB to enable:
