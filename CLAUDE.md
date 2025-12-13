@@ -18,16 +18,46 @@ Transforming from `ml-options-trading` (options trading system) into Seon. Origi
 
 ## Quick Start
 
+**Seon is a long-running server.** Start it once and leave it running.
+
+### 1. Start the Server (once)
+
 ```bash
-clj -M:dev:nrepl        # Start REPL with dev dependencies
+./bin/run    # Starts EVERYTHING: XTDB, HTTP (8080), nREPL (7888)
 ```
 
-Then in REPL:
+This is the canonical way to run Seon. Logs to stdout, Ctrl+C to stop.
+
+### 2. Connect Your Editor
+
+Connect to the running nREPL on port 7888. The server manages nREPL as an Integrant component.
+
+**DO NOT** start a separate nREPL manually - it will conflict with the server's nREPL.
+
+### 3. Reload Code Changes
+
+After editing code, reload it into the running server:
+
 ```clojure
-(go)      ; Start Integrant system (XTDB, HTTP server)
-(status)  ; Check system health
-(reset)   ; Reload code changes
-(halt)    ; Stop system
+(reset)   ; Reloads ALL changed namespaces, restarts components
+(status)  ; Verify system is healthy
+```
+
+### For Agents (non-interactive)
+
+Use `clj-nrepl-eval` to send commands to the running server:
+
+```bash
+clj-nrepl-eval -p 7888 "(reset)"                    # Reload code
+clj-nrepl-eval -p 7888 "(user/status)"              # Check status
+clj-nrepl-eval -p 7888 "(integrant.repl/reset)"     # Alternative reset
+```
+
+### If You Need to Restart
+
+```bash
+# Ctrl+C the running ./bin/run, then:
+./bin/run
 ```
 
 ---
@@ -99,12 +129,13 @@ These apply to all agents working on this project:
 - Search the web when you need to, but verify with working code
 
 ### Verify Everything via REPL
-```clojure
-(status)                      ; System running?
-(reset)                       ; Code reloaded?
-```
+
+The server must be running (`./bin/run`). Then verify your changes:
+
 ```bash
-curl http://localhost:8080/api/health   ; HTTP working?
+clj-nrepl-eval -p 7888 "(user/status)"    # System running?
+clj-nrepl-eval -p 7888 "(reset)"          # Reload code changes
+curl http://localhost:8080/api/health     # HTTP working?
 ```
 
 ### Incremental Changes
@@ -165,17 +196,47 @@ See `docs/prds/readme.md` for full templates and workflow details.
 
 ## System Lifecycle
 
-### Reload Code (CRITICAL)
+### The Server Model
+
+Seon runs as a **persistent server** started with `./bin/run`. This single process manages:
+- XTDB database node
+- HTTP server (port 8080)
+- nREPL server (port 7888)
+- All Integrant components
+
+**You don't start/stop components manually.** The server handles lifecycle.
+
+### Reloading Code (CRITICAL)
+
 **DO NOT use `(require 'ns :reload)`** - it doesn't work reliably.
 
-**ALWAYS use `(reset)`** - properly reloads ALL changed namespaces in dependency order.
+**ALWAYS use `(reset)`** - properly reloads ALL changed namespaces in dependency order, then restarts components.
+
+```bash
+# From command line (for agents)
+clj-nrepl-eval -p 7888 "(reset)"
+```
+
+```clojure
+;; From connected REPL
+(reset)
+```
 
 **Before resetting, ask: "What's currently running?"** A reset interrupts any running futures, background jobs, or active queries. Run `(status)` first.
 
 ### If Reset Fails
+
 1. Fix the compile error
 2. Run `(reset)` again - it should recover
-3. If still broken: restart the REPL
+3. If still broken: Ctrl+C and restart `./bin/run`
+
+### Checking System Health
+
+```bash
+clj-nrepl-eval -p 7888 "(user/status)"
+```
+
+This shows all running components and XTDB metrics.
 
 ---
 
