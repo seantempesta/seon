@@ -1,5 +1,5 @@
 (ns seon.core
-  "Entry point for the ML Options Trading system.
+  "Entry point for the Seon system.
 
   Provides unified system lifecycle management that works correctly
   with both runner (./bin/run) and REPL (integrant.repl).
@@ -11,7 +11,12 @@
   - This ensures (reset) works regardless of how system was started!
 
   The env.clj provides profile-specific hooks (:init, :start, :stop)
-  that we call during lifecycle events."
+  that we call during lifecycle events.
+
+  DOMAIN MANAGEMENT:
+  Seon manages multiple domains (trading, health, finance, etc.), each with
+  its own XTDB database node. The domain registry tracks active domains and
+  their associated resources."
   (:require
    [clojure.tools.logging :as log]
    [integrant.core :as ig]
@@ -23,6 +28,92 @@
    ;; Load all system component namespaces
    [seon.system])
   (:gen-class))
+
+;;
+;; Domain Registry
+;;
+;; Registry of active domains and their resources.
+;;
+;; Structure:
+;;   {domain-id {:db <xtdb-node>
+;;               :metadata {...}}}
+;;
+;; Example:
+;;   {:trading {:db #<XtdbNode>
+;;              :metadata {:description "Options trading analysis"}}
+;;    :health {:db #<XtdbNode>
+;;             :metadata {:description "Apple Health data"}}}
+
+(defonce domains (atom {}))
+
+(defn register-domain!
+  "Register a domain with its DB node and optional metadata.
+
+  Args:
+    domain-id - keyword identifier (:trading, :health, etc.)
+    db-node - XTDB node instance for this domain
+    metadata - optional map of domain metadata
+
+  Returns:
+    The updated domains atom value
+
+  Example:
+    (register-domain! :trading trading-db {:description \"Options trading\"})"
+  ([domain-id db-node]
+   (register-domain! domain-id db-node {}))
+  ([domain-id db-node metadata]
+   (swap! domains assoc domain-id {:db db-node
+                                   :metadata metadata})))
+
+(defn unregister-domain!
+  "Unregister a domain from the registry.
+
+  Note: This does NOT close the DB node - caller is responsible
+  for proper cleanup.
+
+  Args:
+    domain-id - keyword identifier of domain to remove
+
+  Returns:
+    The updated domains atom value"
+  [domain-id]
+  (swap! domains dissoc domain-id))
+
+(defn domain-db
+  "Get the DB node for a registered domain.
+
+  Args:
+    domain-id - keyword identifier
+
+  Returns:
+    XTDB node instance, or nil if domain not registered
+
+  Example:
+    (domain-db :trading) => #<XtdbNode>"
+  [domain-id]
+  (get-in @domains [domain-id :db]))
+
+(defn list-domains
+  "List all registered domain IDs.
+
+  Returns:
+    Sequence of domain keyword IDs
+
+  Example:
+    (list-domains) => (:trading :health)"
+  []
+  (keys @domains))
+
+(defn domain-info
+  "Get full information about a registered domain.
+
+  Args:
+    domain-id - keyword identifier
+
+  Returns:
+    Map with :db and :metadata keys, or nil if not registered"
+  [domain-id]
+  (get @domains domain-id))
 
 ;; log uncaught exceptions in threads
 (Thread/setDefaultUncaughtExceptionHandler
