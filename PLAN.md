@@ -6,12 +6,13 @@ Transform ml-options-trading into **Seon** - a personal "OS for life" with modul
 
 ## CURRENT STATUS
 
-**Stage 3 COMPLETE**: Domain structure established
-- Trading code moved to `seon.trading.*`
-- Key rename: `primitives.clj` → `signals.clj`
-- 181 tests passing, system verified
+**Stage 4 COMPLETE**: Core infrastructure added
+- `seon.db.factory` - Create domain-specific XTDB nodes
+- `seon.trading.core` - Trading domain public API
+- Domain registry in `seon.core` (register/unregister/list)
+- 185 tests passing, backward compatible
 
-**Next step**: Stage 4 - Seon Core & DB Management (protocols, multi-db)
+**Next step**: Stage 5 - Instrumentation & Agent Interface (Malli, capabilities)
 
 ---
 
