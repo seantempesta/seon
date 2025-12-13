@@ -6,12 +6,12 @@ Transform ml-options-trading into **Seon** - a personal "OS for life" with modul
 
 ## CURRENT STATUS
 
-**Stage 2 COMPLETE**: Namespaces renamed to `seon`
-- All `ml-options` → `seon` throughout codebase
-- 53 files changed, 181 tests passing
-- System verified with `./bin/run` and `(reset)`
+**Stage 3 COMPLETE**: Domain structure established
+- Trading code moved to `seon.trading.*`
+- Key rename: `primitives.clj` → `signals.clj`
+- 181 tests passing, system verified
 
-**Next step**: Stage 3 - Refactor to domain structure (trading/)
+**Next step**: Stage 4 - Seon Core & DB Management (protocols, multi-db)
 
 ---
 
