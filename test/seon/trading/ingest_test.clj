@@ -1,4 +1,4 @@
-(ns seon.data.ingest-test
+(ns seon.trading.ingest-test
   "Tests for options data ingestion pipeline.
 
    Tests the current API:
@@ -6,8 +6,8 @@
    - plan-daily-work (work item generation)
    - execute-daily-work-item! (fetch one day - mocked)"
   (:require [clojure.test :refer [deftest testing is use-fixtures]]
-            [seon.data.ingest :as ingest]
-            [seon.data.validation :as validation])
+            [seon.trading.ingest :as ingest]
+            [seon.trading.validation :as validation])
   (:import [java.time LocalDate Instant ZoneId]
            [java.time.format DateTimeFormatter]))
 

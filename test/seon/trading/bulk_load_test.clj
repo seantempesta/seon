@@ -1,4 +1,4 @@
-(ns seon.data.bulk-load-test
+(ns seon.trading.bulk-load-test
   "Tests for bulk loading pipeline.
 
   Tests cover:
@@ -10,11 +10,11 @@
   Uses mocking to avoid actual database/API calls. Integration tests
   with real XTDB nodes are in separate integration test files."
   (:require [clojure.test :refer [deftest testing is use-fixtures]]
-            [seon.data.bulk-load :as bulk-load]
-            [seon.data.ingest :as ingest]
-            [seon.data.thetadata :as theta]
-            [seon.data.ingestion-state :as state]
-            [seon.data.date-utils :as date-utils]
+            [seon.trading.bulk-load :as bulk-load]
+            [seon.trading.ingest :as ingest]
+            [seon.trading.thetadata :as theta]
+            [seon.trading.ingestion-state :as state]
+            [seon.trading.date-utils :as date-utils]
             [seon.db.node :as node])
   (:import [java.time LocalDate Instant]))
 

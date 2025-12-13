@@ -1,4 +1,4 @@
-(ns seon.dsl.primitives
+(ns seon.trading.signals
   "Financial DSL primitives for the reasoning agent.
 
   Provides executable functions that the LLM can compose:

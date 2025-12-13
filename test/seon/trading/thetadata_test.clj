@@ -1,4 +1,4 @@
-(ns seon.data.thetadata-test
+(ns seon.trading.thetadata-test
   "Tests for ThetaData API client and circuit breaker.
 
   Tests cover:
@@ -7,7 +7,7 @@
   - Health check logic
   - Error handling and edge cases"
   (:require [clojure.test :refer [deftest testing is use-fixtures]]
-            [seon.data.thetadata :as theta])
+            [seon.trading.thetadata :as theta])
   (:import [java.time LocalDate Instant ZoneId]
            [java.time.format DateTimeFormatter]))
 

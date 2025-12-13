@@ -1,4 +1,4 @@
-(ns seon.data.ingestion-state-test
+(ns seon.trading.ingestion-state-test
   "Tests for ingestion state tracking and resumable data loads.
 
   Tests cover:
@@ -7,7 +7,7 @@
   - Database operations (integration tests with fixtures)
   - Edge cases and error handling"
   (:require [clojure.test :refer [deftest testing is use-fixtures]]
-            [seon.data.ingestion-state :as state]
+            [seon.trading.ingestion-state :as state]
             [seon.test-utils :refer [with-test-node *test-node*]]
             [seon.db.node :as node]
             [xtdb.api :as xt])

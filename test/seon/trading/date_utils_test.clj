@@ -1,8 +1,8 @@
 ;; Auto-test hook verification - testing from main agent
-(ns seon.data.date-utils-test
-  "Tests for date utility functions in seon.data.date-utils."
+(ns seon.trading.date-utils-test
+  "Tests for date utility functions in seon.trading.date-utils."
   (:require [clojure.test :refer [deftest is testing]]
-            [seon.data.date-utils :as sut])
+            [seon.trading.date-utils :as sut])
   (:import [java.time LocalDate Instant ZoneId]))
 
 (deftest local-date->eod-instant-test

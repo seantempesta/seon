@@ -1,4 +1,4 @@
-(ns seon.data.validation
+(ns seon.trading.validation
   "Validation layer for option Greeks and quote data.
 
   Validation Philosophy:

@@ -1,4 +1,4 @@
-(ns seon.dsl.primitives-test
+(ns seon.trading.signals-test
   "Tests for DSL financial calculation primitives.
 
   Coverage:
@@ -9,7 +9,7 @@
             [clojure.test.check.clojure-test :refer [defspec]]
             [clojure.test.check.properties :as prop]
             [clojure.test.check.generators :as gen]
-            [seon.dsl.primitives :as p]
+            [seon.trading.signals :as p]
             [seon.test-utils :as tu]
             [xtdb.node :as xtn]
             [xtdb.api :as xt]))
