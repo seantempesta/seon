@@ -1,0 +1,32 @@
+# Clojure
+.cpcache/
+classes/
+*.jar
+pom.xml
+pom.xml.asc
+
+# XTDB data (large, local only)
+data/xtdb/
+data/trading/
+data/health/
+data/*.backup*
+
+# Editor/IDE
+.nrepl-port
+.lsp/.cache/
+.clj-kondo/.cache/
+.calva/output-window/
+.claude/settings.local.json
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets (never commit)
+.env
+*.secret
+credentials.json

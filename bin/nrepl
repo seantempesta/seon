@@ -1,0 +1,10 @@
+#!/bin/bash
+# Start bare nREPL for advanced debugging (system NOT started)
+# Usage: ./bin/nrepl
+#
+# NOTE: For normal use, prefer ./bin/run which auto-starts everything.
+# This script starts only an nREPL. You must run (go) manually to start the system.
+
+export JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home
+export PATH="$JAVA_HOME/bin:$PATH"
+exec clj -J-Xmx4g -M:dev:nrepl "$@"

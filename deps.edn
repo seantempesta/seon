@@ -1,0 +1,131 @@
+{:paths ["src" "resources"]
+
+ :mvn/repos {"central" {:url "https://repo1.maven.org/maven2/"}
+             "clojars" {:url "https://repo.clojars.org/"}}
+
+ :deps {;; Core Clojure
+        org.clojure/clojure {:mvn/version "1.12.0"}
+        org.clojure/core.async {:mvn/version "1.6.681"}
+
+        ;; XTDB v2.1.0-rc0 (fixes compaction bug in v2.0.0)
+        com.xtdb/xtdb-api {:mvn/version "2.1.0-rc0"}
+        com.xtdb/xtdb-core {:mvn/version "2.1.0-rc0"}
+
+        ;; Schema & Validation
+        metosin/malli {:mvn/version "0.17.0"}
+
+        ;; State Management
+        integrant/integrant {:mvn/version "0.10.0"}
+
+        ;; Python Bridge
+        clj-python/libpython-clj {:mvn/version "2.025"}
+        cnuernber/dtype-next {:mvn/version "10.124"}
+
+        ;; Data Processing (Parquet support)
+        techascent/tech.ml.dataset {:mvn/version "7.021"}
+
+        ;; Utilities
+        aero/aero {:mvn/version "1.1.6"}           ; Config
+        com.taoensso/timbre {:mvn/version "6.5.0"} ; Logging
+        com.fzakaria/slf4j-timbre {:mvn/version "0.4.1"} ; SLF4J -> Timbre bridge
+        ch.qos.logback/logback-classic {:mvn/version "1.5.6"} ; XTDB compaction logging
+        tick/tick {:mvn/version "0.7.5"}           ; Time handling
+
+        ;; HTTP & JSON
+        hato/hato {:mvn/version "1.0.0"}           ; HTTP client
+        cheshire/cheshire {:mvn/version "5.13.0"}  ; JSON parsing
+
+        ;; HTTP Server (2.9.0-beta2+ required for SSE)
+        http-kit/http-kit {:mvn/version "2.9.0-beta2"}
+
+        ;; HTML templating (compile-time Hiccup)
+        dev.onionpancakes/chassis {:mvn/version "1.0.365"}
+
+        ;; JSON (fast - replace cheshire)
+        metosin/jsonista {:mvn/version "0.3.11"}
+
+        ;; COMPRESSION (Streaming brotli for SSE)
+        com.aayushatharva.brotli4j/brotli4j {:mvn/version "1.18.0"}
+        ;; Production: assumes linux x86_64 deployment
+        com.aayushatharva.brotli4j/native-linux-x86_64 {:mvn/version "1.18.0"}
+        io.netty/netty-buffer {:mvn/version "4.1.119.Final"}}
+
+ :aliases
+ {:dev {:extra-paths ["env/dev/clj" "env/dev/resources" "test"]
+        :extra-deps {integrant/repl {:mvn/version "0.4.0"}
+                     djblue/portal {:mvn/version "0.57.3"}
+                     org.clojure/tools.namespace {:mvn/version "1.5.0"}
+                     nrepl/nrepl {:mvn/version "1.3.0"}
+                     cider/cider-nrepl {:mvn/version "0.50.2"}
+                     expound/expound {:mvn/version "0.9.0"}
+                     ;; Brotli native libraries for dev (macOS both architectures)
+                     com.aayushatharva.brotli4j/native-osx-x86_64 {:mvn/version "1.18.0"}
+                     com.aayushatharva.brotli4j/native-osx-aarch64 {:mvn/version "1.18.0"}
+                     com.aayushatharva.brotli4j/native-linux-aarch64 {:mvn/version "1.18.0"}}}
+
+  :prod {:extra-paths ["env/prod/clj" "env/prod/resources"]}
+
+  :test {:extra-paths ["env/dev/clj" "env/dev/resources" "test"]
+         :extra-deps {org.clojure/test.check {:mvn/version "1.1.1"}
+                      lambdaisland/kaocha {:mvn/version "1.91.1392"}
+                      com.gfredericks/test.chuck {:mvn/version "0.2.14"}
+                      integrant/repl {:mvn/version "0.4.0"}
+                      expound/expound {:mvn/version "0.9.0"}}
+         :jvm-opts [;; XTDB/Arrow/Netty required flags for Java 21+
+                    "--add-opens=java.base/java.nio=ALL-UNNAMED"
+                    "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
+                    "--add-opens=java.base/java.lang=ALL-UNNAMED"
+                    "-Dio.netty.tryReflectionSetAccessible=true"
+                    "--enable-native-access=ALL-UNNAMED"]}
+
+  :xtdb {:jvm-opts [;; Memory configuration for large workloads (7.6M+ records)
+                    "-Xms8g"
+                    "-Xmx16g"
+                    "-XX:MaxDirectMemorySize=8g"
+                    ;; G1GC tuning
+                    "-XX:+UseG1GC"
+                    "-XX:MaxGCPauseMillis=200"
+                    "-XX:InitiatingHeapOccupancyPercent=35"
+                    "-XX:+ParallelRefProcEnabled"
+                    ;; XTDB/Arrow/Netty required flags for Java 21+
+                    "--add-opens=java.base/java.nio=ALL-UNNAMED"
+                    "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
+                    "--add-opens=java.base/java.lang=ALL-UNNAMED"
+                    "-Dio.netty.tryReflectionSetAccessible=true"
+                    "-XX:+IgnoreUnrecognizedVMOptions"
+                    "--enable-native-access=ALL-UNNAMED"]}
+
+  ;; Standalone runner (no nREPL, just Integrant system with console logging)
+  ;; Usage: clj -M:dev:run       (dev profile)
+  ;;        clj -M:dev:run prod  (prod profile)
+  :run {:main-opts ["-m" "ml-options.runner"]
+        :jvm-opts ["-Xms4g"
+                   "-Xmx8g"
+                   "-XX:MaxDirectMemorySize=4g"
+                   "-XX:+UseG1GC"
+                   "-XX:MaxGCPauseMillis=200"
+                   ;; XTDB/Arrow/Netty required flags for Java 21+
+                   "--add-opens=java.base/java.nio=ALL-UNNAMED"
+                   "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
+                   "--add-opens=java.base/java.lang=ALL-UNNAMED"
+                   "-Dio.netty.tryReflectionSetAccessible=true"
+                   "--enable-native-access=ALL-UNNAMED"]}
+
+  :build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.5"}}
+          :ns-default build}
+
+  ;; Development nREPL - starts nREPL on port 7888 with user namespace loaded
+  ;; Usage: clj -M:dev:nrepl
+  ;; Then connect and use (go) to start the Integrant system
+  :nrepl {:jvm-opts ["-Xms4g"
+                     "-Xmx8g"
+                     "-XX:MaxDirectMemorySize=4g"
+                     "-XX:+UseG1GC"
+                     "-XX:MaxGCPauseMillis=200"
+                     ;; XTDB/Arrow/Netty required flags for Java 21+
+                     "--add-opens=java.base/java.nio=ALL-UNNAMED"
+                     "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
+                     "--add-opens=java.base/java.lang=ALL-UNNAMED"
+                     "-Dio.netty.tryReflectionSetAccessible=true"
+                     "--enable-native-access=ALL-UNNAMED"]
+          :main-opts ["-m" "nrepl"]}}}

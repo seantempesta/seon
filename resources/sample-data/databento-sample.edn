@@ -1,0 +1,135 @@
+[;; Sample Databento options data
+ ;; Apple Inc. (AAPL) December 15, 2023 calls
+ {:symbol "AAPL231215C00185000"
+  :ts_event 1702656000000
+  :bid_px 5.25
+  :ask_px 5.35
+  :bid_sz 100
+  :ask_sz 150
+  :volume 1250
+  :iv 0.35
+  :delta 0.55
+  :gamma 0.05
+  :vega 15.2
+  :theta -0.15}
+
+ {:symbol "AAPL231215C00190000"
+  :ts_event 1702656000000
+  :bid_px 2.85
+  :ask_px 2.95
+  :bid_sz 200
+  :ask_sz 180
+  :volume 890
+  :iv 0.38
+  :delta 0.42
+  :gamma 0.06
+  :vega 16.5
+  :theta -0.18}
+
+ {:symbol "AAPL231215C00195000"
+  :ts_event 1702656000000
+  :bid_px 1.25
+  :ask_px 1.32
+  :bid_sz 150
+  :ask_sz 200
+  :volume 650
+  :iv 0.41
+  :delta 0.28
+  :gamma 0.05
+  :vega 14.8
+  :theta -0.12}
+
+ ;; AAPL puts
+ {:symbol "AAPL231215P00180000"
+  :ts_event 1702656000000
+  :bid_px 3.15
+  :ask_px 3.25
+  :bid_sz 180
+  :ask_sz 160
+  :volume 920
+  :iv 0.36
+  :delta -0.45
+  :gamma 0.05
+  :vega 15.0
+  :theta -0.14}
+
+ {:symbol "AAPL231215P00175000"
+  :ts_event 1702656000000
+  :bid_px 1.85
+  :ask_px 1.92
+  :bid_sz 220
+  :ask_sz 200
+  :volume 780
+  :iv 0.34
+  :delta -0.32
+  :gamma 0.04
+  :vega 13.5
+  :theta -0.11}
+
+ ;; SPY (S&P 500 ETF) options
+ {:symbol "SPY240119C00475000"
+  :ts_event 1702656000000
+  :bid_px 8.50
+  :ask_px 8.65
+  :bid_sz 500
+  :ask_sz 450
+  :volume 5200
+  :iv 0.18
+  :delta 0.62
+  :gamma 0.02
+  :vega 22.5
+  :theta -0.25}
+
+ {:symbol "SPY240119P00470000"
+  :ts_event 1702656000000
+  :bid_px 7.25
+  :ask_px 7.40
+  :bid_sz 400
+  :ask_sz 420
+  :volume 4100
+  :iv 0.19
+  :delta -0.52
+  :gamma 0.02
+  :vega 21.8
+  :theta -0.23}
+
+ ;; TSLA (Tesla) highly volatile options
+ {:symbol "TSLA240126C00250000"
+  :ts_event 1702656000000
+  :bid_px 12.50
+  :ask_px 13.10
+  :bid_sz 80
+  :ask_sz 75
+  :volume 3500
+  :iv 0.65
+  :delta 0.58
+  :gamma 0.08
+  :vega 28.5
+  :theta -0.42}
+
+ {:symbol "TSLA240126P00240000"
+  :ts_event 1702656000000
+  :bid_px 15.25
+  :ask_px 15.85
+  :bid_sz 60
+  :ask_sz 70
+  :volume 2800
+  :iv 0.68
+  :delta -0.62
+  :gamma 0.08
+  :vega 29.2
+  :theta -0.45}
+
+ ;; GOOGL (Alphabet) options
+ {:symbol "GOOGL240216C00140000"
+  :ts_event 1702656000000
+  :bid_px 4.80
+  :ask_px 4.95
+  :bid_sz 120
+  :ask_sz 110
+  :volume 980
+  :iv 0.32
+  :delta 0.51
+  :gamma 0.04
+  :vega 18.5
+  :theta -0.19}]

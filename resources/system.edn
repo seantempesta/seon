@@ -1,0 +1,50 @@
+{;; XTDB v2 Node
+ ;; Persistent storage for dev (data loads); in-memory for tests
+ :ml-options/xtdb-node
+ {:storage #profile {:dev   {:type :local
+                             :path "data/xtdb"}
+                     :test  :in-memory
+                     :prod  {:type :local
+                             :path #or [#env XTDB_DATA_PATH "data/xtdb"]}}
+  :memory-cache #profile {:dev {}
+                          :test {}
+                          :prod {:max-size-ratio 0.5}}
+  :disk-cache nil
+  :compactor #profile {:dev {:threads 2}
+                       :test {:threads 1}
+                       :prod {:threads #or [#env XTDB_COMPACTOR_THREADS 4]}}}
+
+ ;; Python Bridge (libpython-clj) - DISABLED
+ ;; NOTE: Python code moved to src/ml_options/_python_disabled
+ ;; To re-enable, restore the python directory and uncomment this section
+ ;; :ml-options/python-bridge
+ ;; {:conda-env #or [#env ML_OPTIONS_CONDA_ENV "ml-options"]
+ ;;  :auto-initialize? #profile {:dev false
+ ;;                              :test false
+ ;;                              :prod false}}
+
+ ;; Malli Schema Registry
+ ;; Loads all domain schemas on startup
+ :ml-options/schema-registry {}
+
+ ;; nREPL Server - managed by Integrant
+ ;; Dev: Enabled - connect to inspect/modify the running system
+ ;; Test/Prod: Disabled (headless)
+ :ml-options/nrepl-server
+ {:enabled? #profile {:dev true     ; nREPL for REPL-driven development
+                      :test false   ; Tests don't need nREPL
+                      :prod false}  ; Production is headless
+  :port #or [#env NREPL_PORT 7888]
+  :bind "127.0.0.1"}
+
+ ;; Financial DSL Executor
+ ;; Executes Clojure s-expressions against the XTDB database
+ :ml-options/dsl-executor
+ {:db #ig/ref :ml-options/xtdb-node
+  :registry #ig/ref :ml-options/schema-registry}
+
+ ;; HTTP Server for Web UI
+ :ml-options.web.server/http-server
+ {:port #or [#env HTTP_PORT 8080]
+  :bind "0.0.0.0"
+  :node #ig/ref :ml-options/xtdb-node}}

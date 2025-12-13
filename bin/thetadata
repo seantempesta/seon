@@ -1,0 +1,9 @@
+#!/bin/bash
+# Start ThetaData Terminal (required for data loading)
+# Usage: ./bin/thetadata
+#
+# The terminal exposes a REST API on localhost:25503
+# Keep it running while using bulk-load or any ThetaData queries
+
+cd "$(dirname "$0")/../thetadata"
+exec java -jar ThetaTerminalv3.jar "$@"

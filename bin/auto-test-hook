@@ -1,0 +1,268 @@
+#!/usr/bin/env bb
+
+;; Auto-test hook for Claude Code
+;; Runs relevant tests automatically when Clojure files are edited
+;; Strategy B: 100ms debounce using SQLite state tracking
+
+(require '[babashka.pods :as pods]
+         '[babashka.process :as process]
+         '[clojure.string :as str]
+         '[clojure.java.io :as io]
+         '[cheshire.core :as json])
+
+;; Load SQLite pod
+(pods/load-pod 'org.babashka/go-sqlite3 "0.1.0")
+(require '[pod.babashka.go-sqlite3 :as sqlite])
+
+;; Configuration
+(def db-path ".claude/test-hook.db")
+(def log-path ".claude/test-hook.log")
+(def nrepl-port 7888)
+(def debounce-ms 100)
+
+;; Logging
+(defn log! [level msg]
+  (let [timestamp (str (java.time.Instant/now))]
+    (spit log-path (str timestamp " [" (name level) "] " msg "\n") :append true)))
+
+(defn safe-run
+  "Execute f, catching all exceptions. Returns nil on error."
+  [f error-msg]
+  (try
+    (f)
+    (catch Exception e
+      (log! :error (str error-msg ": " (.getMessage e)))
+      nil)))
+
+;; Database initialization
+(defn init-db! []
+  (io/make-parents db-path)
+  (sqlite/execute! db-path
+                   ["CREATE TABLE IF NOT EXISTS hook_events (
+       id INTEGER PRIMARY KEY AUTOINCREMENT,
+       timestamp_ms INTEGER NOT NULL,
+       file_path TEXT NOT NULL,
+       test_namespace TEXT,
+       event_type TEXT NOT NULL,
+       status TEXT,
+       message TEXT,
+       duration_ms INTEGER,
+       test_count INTEGER,
+       pass_count INTEGER,
+       fail_count INTEGER,
+       error_count INTEGER
+     )"])
+  (sqlite/execute! db-path
+                   ["CREATE INDEX IF NOT EXISTS idx_file_timestamp
+      ON hook_events(file_path, timestamp_ms)"]))
+
+;; File to namespace mapping
+(defn file->test-ns
+  "Map source file to corresponding test namespace.
+   /path/to/project/src/ml_options/foo.clj → ml-options.foo-test
+   /path/to/project/test/ml_options/foo_test.clj → ml-options.foo-test
+   Also handles relative paths like test/ml_options/foo_test.clj"
+  [file-path]
+  ;; Find the src/ or test/ directory that contains ml_options (project-specific)
+  ;; Works with both absolute paths (/...src/) and relative paths (src/)
+  (when-let [match (re-find #"(?:^|/)(?:src|test)/(ml_options/.+)\.clj$" file-path)]
+    (let [rel-path (second match)
+          ns-path (-> rel-path
+                      (str/replace #"/" ".")
+                      (str/replace #"_" "-"))]
+      (if (str/ends-with? ns-path "-test")
+        ns-path
+        (str ns-path "-test")))))
+
+(defn file->source-ns
+  "Map source or test file to corresponding source namespace.
+   /path/to/project/src/ml_options/foo.clj → ml-options.foo
+   /path/to/project/test/ml_options/foo_test.clj → ml-options.foo"
+  [file-path]
+  ;; Find the src/ or test/ directory that contains ml_options (project-specific)
+  (when-let [match (re-find #"(?:^|/)(?:src|test)/(ml_options/.+)\.clj$" file-path)]
+    (let [rel-path (second match)
+          ns-path (-> rel-path
+                      (str/replace #"/" ".")
+                      (str/replace #"_" "-"))]
+      (if (str/ends-with? ns-path "-test")
+        (str/replace ns-path #"-test$" "")
+        ns-path))))
+
+;; Debounce check
+(defn should-skip-debounce?
+  "Check if we ran tests for this file within the last debounce-ms."
+  [file-path]
+  (let [cutoff (- (System/currentTimeMillis) debounce-ms)
+        result (sqlite/query db-path
+                             ["SELECT COUNT(*) as cnt FROM hook_events
+                   WHERE file_path = ?
+                   AND event_type = 'test_complete'
+                   AND timestamp_ms > ?"
+                              file-path cutoff])]
+    (pos? (:cnt (first result) 0))))
+
+;; Record event
+(defn record-event! [event-type file-path test-ns status & {:keys [message duration-ms test-count pass-count fail-count error-count]}]
+  (safe-run
+   #(sqlite/execute! db-path
+                     ["INSERT INTO hook_events
+         (timestamp_ms, file_path, test_namespace, event_type, status, message, duration_ms, test_count, pass_count, fail_count, error_count)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                      (System/currentTimeMillis)
+                      file-path
+                      test-ns
+                      event-type
+                      status
+                      message
+                      duration-ms
+                      test-count
+                      pass-count
+                      fail-count
+                      error-count])
+   "Failed to record event"))
+
+;; nREPL check
+(defn nrepl-available? []
+  (let [result (process/sh ["clj-nrepl-eval" "-p" (str nrepl-port) "(+ 1 1)"])]
+    (zero? (:exit result))))
+
+;; Run tests via nREPL
+(defn run-tests [source-ns test-ns]
+  (let [start (System/currentTimeMillis)
+
+        ;; Reload source namespace first (critical for picking up changes!)
+        source-reload (when source-ns
+                        (process/sh
+                         ["clj-nrepl-eval" "-p" (str nrepl-port)
+                          (str "(require '" source-ns " :reload)")]))
+
+        _ (when (and source-ns (not (zero? (:exit source-reload))))
+            (throw (ex-info "Source namespace reload failed"
+                            {:ns source-ns :error (:err source-reload)})))
+
+        ;; Then reload test namespace
+        reload-result (process/sh
+                       ["clj-nrepl-eval" "-p" (str nrepl-port)
+                        (str "(require '" test-ns " :reload)")])
+
+        _ (when-not (zero? (:exit reload-result))
+            (throw (ex-info "Namespace reload failed"
+                            {:ns test-ns :error (:err reload-result)})))
+
+        ;; Run tests
+        test-result (process/sh
+                     ["clj-nrepl-eval" "-p" (str nrepl-port)
+                      (str "(clojure.test/run-tests '" test-ns ")")])
+
+        duration (- (System/currentTimeMillis) start)
+
+        ;; Parse result: {:test 3, :pass 26, :fail 0, :error 0, :type :summary}
+        ;; The summary map appears after "=> " in the output
+        output (str/trim (:out test-result))
+        ;; Find the summary map - look for "=> {:test" or just "{:test" pattern
+        summary-match (re-find #"(?:=> )?\{:test \d+.*?:type :summary\}" output)
+        result-map (when summary-match
+                     (try
+                       (read-string (str/replace summary-match #"^=> " ""))
+                       (catch Exception _ nil)))]
+
+    (if result-map
+      {:duration duration
+       :test-count (:test result-map 0)
+       :pass-count (:pass result-map 0)
+       :fail-count (:fail result-map 0)
+       :error-count (:error result-map 0)
+       :raw-output output}
+      {:duration duration
+       :test-count 0
+       :pass-count 0
+       :fail-count 0
+       :error-count 0
+       :raw-output output
+       :parse-error true})))
+
+;; Parse hook input from Claude Code
+(defn parse-hook-input []
+  (let [input (slurp *in*)
+        data (try (json/parse-string input true) (catch Exception _ nil))]
+    ;; Claude Code PostToolUse sends tool_input with file_path
+    (or (get-in data [:tool_input :file_path])
+        (get-in data [:tool_input :filePath])
+        (get-in data [:file_path])
+        (System/getenv "CLAUDE_FILE_PATH"))))
+
+;; Main
+(defn -main []
+  (try
+    ;; Initialize database
+    (safe-run init-db! "Failed to initialize database")
+
+    ;; Parse file path from hook input
+    (let [file-path (parse-hook-input)]
+
+      ;; Skip if not a Clojure file
+      (when-not (and file-path (str/ends-with? file-path ".clj"))
+        (System/exit 0))
+
+      ;; Get test namespace
+      (let [test-ns (file->test-ns file-path)]
+        (when-not test-ns
+          (log! :debug (str "No test namespace for: " file-path))
+          (System/exit 0))
+
+        ;; Debounce check
+        (when (should-skip-debounce? file-path)
+          (record-event! "test_skipped" file-path test-ns "skipped"
+                         :message "debounced")
+          (System/exit 0))
+
+        ;; Check nREPL
+        (when-not (nrepl-available?)
+          (println "⚠️ Auto-test skipped: nREPL not running on port" nrepl-port)
+          (record-event! "test_skipped" file-path test-ns "skipped"
+                         :message "nREPL not available")
+          (System/exit 0))
+
+        ;; Record test start
+        (record-event! "test_start" file-path test-ns "running")
+
+        ;; Get source namespace for reload
+        (let [source-ns (file->source-ns file-path)
+
+              ;; Run tests (with source ns reload)
+              result (run-tests source-ns test-ns)
+              status (if (and (zero? (:fail-count result 0))
+                              (zero? (:error-count result 0))
+                              (not (:parse-error result)))
+                       "passed"
+                       "failed")]
+
+          ;; Record result
+          (record-event! "test_complete" file-path test-ns status
+                         :duration-ms (:duration result)
+                         :test-count (:test-count result)
+                         :pass-count (:pass-count result)
+                         :fail-count (:fail-count result)
+                         :error-count (:error-count result))
+
+          ;; Print summary
+          (if (= status "passed")
+            ;; Pass: plain text (user sees, Claude doesn't)
+            (println (format "✓ %d tests passed in %s (%dms)"
+                             (:test-count result) test-ns (:duration result)))
+            ;; Fail: JSON with decision:block so Claude sees it
+            (println (json/generate-string
+                      {:decision "block"
+                       :reason (format "❌ %d tests failed in %s. Fix before continuing."
+                                       (+ (:fail-count result 0) (:error-count result 0))
+                                       test-ns)}))))))
+
+    (catch Exception e
+      (log! :fatal (str "Uncaught error: " (.getMessage e)))
+      ;; Never crash - always exit 0
+      (System/exit 0)))
+
+  (System/exit 0))
+
+(-main)
