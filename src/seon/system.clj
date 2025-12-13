@@ -4,7 +4,6 @@
   Defines init-key and halt-key! methods for all system components:
   - :seon/xtdb-node - XTDB v2 database node
   - :seon/schema-registry - Malli schema registry
-  - :seon/dsl-executor - Financial DSL executor
   - :seon.web.server/http-server - HTTP server for web UI
   - :seon/nrepl-server - nREPL for REPL-driven development"
   (:require [integrant.core :as ig]
@@ -125,17 +124,3 @@
     (do (ig/halt-key! key old-server)
         (ig/init-key key opts))))
 
-;;; ---------------------------------------------------------------------------
-;;; DSL Executor Component
-;;; ---------------------------------------------------------------------------
-
-(defmethod ig/init-key :seon/dsl-executor
-  [_ {:keys [db registry]}]
-  (log/info "Initializing DSL executor...")
-  {:db db
-   :registry registry})
-
-(defmethod ig/halt-key! :seon/dsl-executor
-  [_ _]
-  (log/info "DSL executor shutdown")
-  nil)
