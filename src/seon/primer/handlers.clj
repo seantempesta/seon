@@ -21,6 +21,8 @@
   (sse/render-handler
    (fn [request]
      (let [session-id (get-session-id request)]
+       ;; Ensure session exists with initial scene before rendering
+       (actions/ensure-session! session-id)
        (html/primer-content session-id)))))
 
 (defn action-handler [request]
