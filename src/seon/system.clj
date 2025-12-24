@@ -57,12 +57,19 @@
                (let [base-path (if (map? storage) (:path storage) (str storage))]
                  (start-node {:log [:local {:path (io/file base-path "log")}]
                               :storage [:local {:path (io/file base-path "objects")}]})))]
+    ;; Initialize ctx system with this node
+    (require 'seon.primer.ctx)
+    ((resolve 'seon.primer.ctx/init!) node)
+    ((resolve 'seon.primer.ctx/start-auto-sync!) 5000) ; 5 second sync
     (log/info "Primer XTDB node started")
     node))
 
 (defmethod ig/halt-key! :seon.primer/xtdb-node
   [_ node]
   (log/info "Stopping Primer XTDB node...")
+  ;; Stop auto-sync before closing node
+  (require 'seon.primer.ctx)
+  ((resolve 'seon.primer.ctx/stop-auto-sync!))
   (when node
     (.close node))
   (log/info "Primer XTDB node stopped"))
