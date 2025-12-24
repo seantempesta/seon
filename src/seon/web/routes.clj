@@ -31,8 +31,8 @@
     :handler primer-handlers/action-handler}])
 
 (defn match-dynamic-route [method path]
-  (some (fn [{:keys [method pattern params handler] :as route}]
-          (when (= method method)
+  (some (fn [{route-method :method :keys [pattern params handler]}]
+          (when (= method route-method)
             (when-let [matches (re-matches pattern path)]
               {:handler handler
                :path-params (zipmap params (rest matches))})))

@@ -25,5 +25,5 @@
                :defer true :type "module"}]
      [:style styles/base-css]]
     [:body {:style "margin: 0; padding: 0;"}
-     [:div {:data-on-load "@post('/primer')"}]
+     [:div {:data-init "@post('/primer')"}]
      [:main#morph [:p {:style "color: #666; text-align: center; padding: 2rem;"} "Loading..."]]]]))

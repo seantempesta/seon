@@ -21,11 +21,14 @@
 .layer {
   position: absolute;
   top: 0; left: 0; right: 0; bottom: 0;
+  pointer-events: none;
 }
 
 .layer-bg { z-index: 0; }
 .layer-content { z-index: 10; display: flex; align-items: center; justify-content: center; }
+.layer-content * { pointer-events: auto; user-select: text; }
 .layer-actions { z-index: 20; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 3rem; }
+.layer-actions * { pointer-events: auto; }
 
 /* === Content === */
 .narrative {
