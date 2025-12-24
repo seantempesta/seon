@@ -1,6 +1,7 @@
 (ns seon.web.routes
   "Simple map-based router for HTTP endpoints."
-  (:require [seon.web.handlers :as handlers]))
+  (:require [seon.web.handlers :as handlers]
+            [seon.primer.handlers :as primer-handlers]))
 
 (def routes
   {[:get "/"]                  handlers/dashboard
@@ -15,7 +16,10 @@
    [:post "/logs"]             handlers/log-viewer-sse
    [:post "/api/logs/filter"]  handlers/log-filter
    [:post "/api/logs/refresh"] handlers/log-refresh
-   [:post "/api/logs/toggle-scroll"] handlers/log-toggle-scroll})
+   [:post "/api/logs/toggle-scroll"] handlers/log-toggle-scroll
+   ;; Primer routes
+   [:get "/primer"]                primer-handlers/primer-page
+   [:post "/primer"]               primer-handlers/primer-sse})
 
 (defn handler [request]
   (let [method (:request-method request)
