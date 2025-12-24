@@ -1,6 +1,7 @@
 (ns seon.web.routes
   "Simple map-based router for HTTP endpoints."
-  (:require [seon.web.handlers :as handlers]
+  (:require [clojure.string :as str]
+            [seon.web.handlers :as handlers]
             [seon.primer.handlers :as primer-handlers]))
 
 (def routes
@@ -21,12 +22,31 @@
    [:get "/primer"]                primer-handlers/primer-page
    [:post "/primer"]               primer-handlers/primer-sse})
 
+;; Dynamic routes with path parameters
+(def dynamic-routes
+  [;; Primer action route: /primer/action/:action-id
+   {:method :post
+    :pattern #"/primer/action/(.+)"
+    :params [:action-id]
+    :handler primer-handlers/action-handler}])
+
+(defn match-dynamic-route [method path]
+  (some (fn [{:keys [method pattern params handler] :as route}]
+          (when (= method method)
+            (when-let [matches (re-matches pattern path)]
+              {:handler handler
+               :path-params (zipmap params (rest matches))})))
+        dynamic-routes))
+
 (defn handler [request]
   (let [method (:request-method request)
         path   (:uri request)
         route-handler (routes [method path])]
     (if route-handler
       (route-handler request)
-      {:status 404
-       :headers {"Content-Type" "application/json"}
-       :body "{\"error\": \"Not found\"}"})))
+      ;; Try dynamic routes
+      (if-let [{:keys [handler path-params]} (match-dynamic-route method path)]
+        (handler (assoc request :path-params path-params))
+        {:status 404
+         :headers {"Content-Type" "application/json"}
+         :body "{\"error\": \"Not found\"}"}))))
