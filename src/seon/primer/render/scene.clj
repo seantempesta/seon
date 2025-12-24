@@ -4,7 +4,7 @@
 
 (defn render-action [{:keys [action/id action/label]}]
   [:button.action-btn
-   {:data-on-click (str "@post('/primer/action/" (name id) "')")}
+   {:data-on:click (str "@post('/primer/action/" (name id) "')")}
    label])
 
 (defn render-scene [ctx scene]
