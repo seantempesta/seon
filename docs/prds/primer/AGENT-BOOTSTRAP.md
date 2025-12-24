@@ -1,116 +1,85 @@
 # Primer Agent Bootstrap
 
-**You have browser access. Your mission: Get the Primer UI working end-to-end.**
+**Status:** Stages 1-7 Complete, Browser Verified
 
 ---
 
-## Current State
+## Current State (Working)
 
 - Server running at `http://localhost:8080`
-- Primer page at `/primer` shows text but **buttons don't work**
+- Primer page at `/primer` - **fully functional**
 - REPL available on port 7888
+- All success criteria verified
 
-## The Problem
-
-User sees: "Welcome, young explorer..." but clicking "Enter the Library" does nothing.
+### What's Working
+1. ✅ Button clicks → POST fires → ctx updates → browser refreshes via SSE
+2. ✅ REPL scene changes appear in browser immediately
+3. ✅ `ctx/checkpoint!` persists to XTDB
+4. ✅ `ctx/history` shows checkpoints
+5. ✅ `ctx/load-at!` restores historical state (time travel)
 
 ---
 
-## Your Phases
+## Previous Issue (FIXED)
 
-### Phase 1: Diagnose (Browser + Network)
+**Problem:** Buttons weren't firing POST requests.
 
-1. Open `http://localhost:8080/primer` in browser
-2. Open DevTools → Network tab
-3. Click the button
-4. **Check:** Does a POST request fire? To what URL? What's the response?
-5. Check Console for JS errors
+**Root cause:** Datastar uses `data-on:click` (colon) not `data-on-click` (hyphen).
 
-**Report what you see before fixing anything.**
+**Fix:** Changed `src/seon/primer/render/scene.clj:7` from:
+```clojure
+{:data-on-click ...}  ; WRONG
+```
+to:
+```clojure
+{:data-on:click ...}  ; CORRECT
+```
 
-### Phase 2: Verify Backend (REPL)
+**Lesson learned:** Always invoke `datastar-web-ui` skill before debugging Datastar UI issues.
+
+---
+
+## Quick Verification (For New Sessions)
 
 ```bash
-clj-nrepl-eval -p 7888 "(require '[seon.primer.ctx :as ctx])"
-clj-nrepl-eval -p 7888 "(ctx/get \"default\")"
+# 1. Start server (if not running)
+./bin/run
+
+# 2. Verify system health
+clj-nrepl-eval -p 7888 "(status)"
+
+# 3. Open browser to http://localhost:8080/primer
+# 4. Click "Enter the Library" - should navigate to next scene
+
+# 5. Test REPL control
+clj-nrepl-eval -p 7888 "(seon.primer.ctx/assoc! \"default\" :primer/current-scene {:scene/id \"test\" :scene/template :narrative/page :scene/params {:text \"Hello from REPL\"} :scene/actions []})"
+# Browser should update automatically
 ```
 
-Check if session exists. If nil:
-```bash
-clj-nrepl-eval -p 7888 "(require '[seon.primer.actions :as actions])"
-clj-nrepl-eval -p 7888 "(actions/ensure-session! \"default\")"
-```
+---
 
-Test action handler directly:
-```bash
-clj-nrepl-eval -p 7888 "(actions/handle-action \"default\" :enter-library)"
-```
+## Next Steps (Stage 8+)
 
-**Does ctx change? Check browser - did it update?**
+The Primer foundation is working. Possible next directions:
 
-### Phase 3: Fix the Issue
+### Option A: Richer Scene Templates
+- Add more template types beyond `:narrative/page`
+- Image backgrounds, multiple choice layouts
+- Character portraits, speech bubbles
 
-Based on diagnosis, likely issues:
+### Option B: Agent-Driven Content
+- Connect LLM to generate story content
+- Agent writes to ctx, UI renders automatically
+- Spec-constrained generation
 
-1. **Button POST URL wrong** - Check `src/seon/primer/render/scene.clj`:
-   ```clojure
-   {:data-on-click (str "@post('/primer/action/" (name id) "')")}
-   ```
-   Should match route in `src/seon/web/routes.clj`
+### Option C: Voice Integration
+- Gemini Live API for voice interaction
+- Read story aloud, accept voice commands
 
-2. **Route not matching** - Check routes file for `/primer/action/:id` pattern
-
-3. **Handler not updating ctx** - Check `src/seon/primer/handlers.clj` action-handler
-
-4. **SSE not refreshing** - Check ctx watch is firing
-
-### Phase 4: Build Scene via REPL
-
-Once buttons work, demonstrate full control:
-
-```clojure
-;; Create a custom scene
-(ctx/assoc! "default" :primer/current-scene
-  {:scene/id "custom-1"
-   :scene/template :narrative/page
-   :scene/params {:text "This scene was created via REPL!"}
-   :scene/actions [{:action/id :next
-                    :action/label "Continue"}]})
-```
-
-**Verify:** Browser updates automatically via SSE.
-
-### Phase 5: Verify XTDB Persistence
-
-```clojure
-;; Force checkpoint
-(ctx/checkpoint! "default")
-
-;; Check it persisted
-(require '[xtdb.api :as xt])
-(def primer-node (:seon.primer/xtdb-node integrant.repl.state/system))
-(xt/entity (xt/db primer-node) "default")
-```
-
-**Verify:** Data is in XTDB.
-
-### Phase 6: Time Travel Demo
-
-```clojure
-;; Make several scene changes
-(ctx/assoc! "default" :primer/current-scene {:scene/id "v1" ...})
-(ctx/checkpoint! "default")
-(Thread/sleep 1000)
-
-(ctx/assoc! "default" :primer/current-scene {:scene/id "v2" ...})
-(ctx/checkpoint! "default")
-
-;; Query history
-(ctx/history "default")
-
-;; Load old state
-(ctx/load-at! "default" #inst "2024-12-24T08:00:00")
-```
+### Option D: Child Profiles
+- Multi-user session management
+- Progress tracking per child
+- Adaptive difficulty
 
 ---
 
@@ -118,22 +87,12 @@ Once buttons work, demonstrate full control:
 
 | File | Purpose |
 |------|---------|
-| `src/seon/primer/ctx.clj` | Session management, XTDB sync |
-| `src/seon/primer/render/scene.clj` | Renders scene → hiccup, button data-on-click |
-| `src/seon/primer/handlers.clj` | HTTP handlers including action-handler |
+| `src/seon/primer/ctx.clj` | Multi-session ctx API, XTDB sync |
+| `src/seon/primer/render/scene.clj` | Scene renderer, `data-on:click` buttons |
+| `src/seon/primer/handlers.clj` | HTTP handlers |
 | `src/seon/primer/actions.clj` | Action logic, demo scenes |
-| `src/seon/web/routes.clj` | Route definitions |
-| `src/seon/primer/styles.clj` | CSS (pointer-events for clickability) |
-
----
-
-## Success Criteria
-
-1. ✅ Click button → POST fires → ctx updates → browser refreshes
-2. ✅ REPL scene changes appear in browser immediately
-3. ✅ `ctx/checkpoint!` persists to XTDB
-4. ✅ `ctx/history` shows checkpoints
-5. ✅ Can build entire scene from REPL commands
+| `src/seon/primer/styles.clj` | CSS styles |
+| `.claude/skills/datastar-web-ui/SKILL.md` | **Invoke this for Datastar work!** |
 
 ---
 
@@ -148,6 +107,13 @@ clj-nrepl-eval -p 7888 "(reset)"
 
 # Check system status
 clj-nrepl-eval -p 7888 "(status)"
-```
 
-**Start with Phase 1. Report browser network/console findings first.**
+# Create/update scene
+clj-nrepl-eval -p 7888 "(seon.primer.ctx/assoc! \"default\" :primer/current-scene {...})"
+
+# Checkpoint to XTDB
+clj-nrepl-eval -p 7888 "(seon.primer.ctx/checkpoint! \"default\")"
+
+# View history
+clj-nrepl-eval -p 7888 "(seon.primer.ctx/history \"default\")"
+```
