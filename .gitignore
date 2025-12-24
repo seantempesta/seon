@@ -6,10 +6,7 @@ pom.xml
 pom.xml.asc
 
 # XTDB data (large, local only)
-data/xtdb/
-data/trading/
-data/health/
-data/*.backup*
+data/
 
 # Editor/IDE
 .nrepl-port
