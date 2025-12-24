@@ -1,13 +1,18 @@
 (ns seon.primer.html
   "Primer HTML pages and SSE content."
   (:require [dev.onionpancakes.chassis.core :as h]
-            [seon.primer.state :as state]
+            [seon.primer.ctx :as ctx]
             [seon.primer.render :as render]
             [seon.primer.render.scene] ; Load to register renderer
             [seon.primer.styles :as styles]))
 
-(defn primer-content []
-  (h/html (render/render-view @state/ctx)))
+(def ^:const default-session "default")
+
+(defn primer-content
+  "Render primer content for a session."
+  ([] (primer-content default-session))
+  ([session-id]
+   (h/html (render/render-view (ctx/get session-id)))))
 
 (defn primer-page []
   (h/html
@@ -16,7 +21,7 @@
      [:meta {:charset "utf-8"}]
      [:meta {:name "viewport" :content "width=device-width, initial-scale=1"}]
      [:title "Primer"]
-     [:script {:src "https://cdn.jsdelivr.net/npm/@sudodevnull/datastar@1.0.0-beta.1/bundles/datastar.js"
+     [:script {:src "https://cdn.jsdelivr.net/gh/starfederation/datastar@1.0.0-RC.6/bundles/datastar.js"
                :defer true :type "module"}]
      [:style styles/base-css]]
     [:body {:style "margin: 0; padding: 0;"}
