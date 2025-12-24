@@ -42,6 +42,32 @@
   (log/info "XTDB node stopped"))
 
 ;;; ---------------------------------------------------------------------------
+;;; Primer XTDB Node Component
+;;; ---------------------------------------------------------------------------
+
+(defmethod ig/init-key :seon.primer/xtdb-node
+  [_ {:keys [storage]}]
+  (log/info "Starting Primer XTDB node..." {:storage storage})
+  (require '[xtdb.node :as xtn])
+  (require '[xtdb.api :as xt])
+  (let [start-node (resolve 'xtn/start-node)
+        node (if (= storage :in-memory)
+               (start-node)
+               ;; XTDB v2 API: [:local {:path ...}] format
+               (let [base-path (if (map? storage) (:path storage) (str storage))]
+                 (start-node {:log [:local {:path (io/file base-path "log")}]
+                              :storage [:local {:path (io/file base-path "objects")}]})))]
+    (log/info "Primer XTDB node started")
+    node))
+
+(defmethod ig/halt-key! :seon.primer/xtdb-node
+  [_ node]
+  (log/info "Stopping Primer XTDB node...")
+  (when node
+    (.close node))
+  (log/info "Primer XTDB node stopped"))
+
+;;; ---------------------------------------------------------------------------
 ;;; Python Bridge Component - DISABLED
 ;;; ---------------------------------------------------------------------------
 ;;; Python code moved to src/ml_options/_python_disabled

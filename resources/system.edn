@@ -37,6 +37,13 @@
   :port #or [#env NREPL_PORT 7888]
   :bind "127.0.0.1"}
 
+ ;; Primer XTDB Node
+ ;; Separate node for Primer domain (domain isolation)
+ :seon.primer/xtdb-node
+ {:storage #profile {:dev   {:type :local :path "data/primer"}
+                     :test  :in-memory
+                     :prod  {:type :local :path "data/primer"}}}
+
  ;; HTTP Server for Web UI
  :seon.web.server/http-server
  {:port #or [#env HTTP_PORT 8080]
