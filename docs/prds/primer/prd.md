@@ -239,7 +239,7 @@ src/seon/primer/
 
 (defn render-action [{:keys [action/id action/label]}]
   [:button.action-btn
-   {:data-on-click (str "@post('/primer/action/" (name id) "')")}
+   {:data-on:click (str "@post('/primer/action/" (name id) "')")}  ; NOTE: colon, not hyphen!
    label])
 
 (defn render-scene [ctx scene]
@@ -371,7 +371,7 @@ src/seon/primer/
                 :defer true :type "module"}]
       [:style styles/base-css]]
      [:body {:style "margin: 0; padding: 0;"}
-      [:div {:data-on-load "@post('/primer')"}]
+      [:div {:data-on:load "@post('/primer')"}]  ; NOTE: colon, not hyphen!
       [:main#morph [:p {:style "color: #666; text-align: center; padding: 2rem;"} "Loading..."]]]]))
 ```
 
@@ -774,7 +774,7 @@ src/seon/primer/
 
 ## Implementation Summary
 
-**Stages 1-7 Complete** (as of 2024-12-24)
+**Stages 1-7 Complete + Browser Verified** (as of 2024-12-24)
 
 ### What's Working
 - Primer domain skeleton with capabilities
@@ -784,11 +784,16 @@ src/seon/primer/
 - SSE auto-refresh on ctx changes
 - Basic scene template rendering
 - Demo scenes in actions.clj
+- **Button clicks working** (fixed Datastar attribute syntax)
+- **XTDB persistence verified** (checkpoint!/load-at! work)
+- **Time travel working** (history shows all checkpoints)
 
-### Known Issues (Need Browser Testing)
-- **Button clicks not firing** - User sees content but actions don't work
-- Route matching was fixed but may still have issues
-- Need end-to-end verification with actual browser
+### Verified End-to-End (Browser + REPL)
+1. ✅ Click button → POST fires → ctx updates → browser refreshes via SSE
+2. ✅ REPL scene changes appear in browser immediately
+3. ✅ `ctx/checkpoint!` persists to XTDB
+4. ✅ `ctx/history` shows checkpoints
+5. ✅ `ctx/load-at!` restores historical state
 
 ### Files Structure
 ```
