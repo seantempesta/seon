@@ -14,3 +14,11 @@
       (throw (ex-info "Invalid ctx after update"
                       {:errors (m/explain schema/Ctx new-ctx)})))
     new-ctx))
+
+;; Add watch that triggers SSE refresh on ctx change
+(defonce _ctx-watch
+  (add-watch ctx :sse-auto-refresh
+             (fn [_ _ old-val new-val]
+               (when (not= old-val new-val)
+                 (require 'seon.web.sse)
+                 ((resolve 'seon.web.sse/refresh-all!))))))
