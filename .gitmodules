@@ -1,0 +1,6 @@
+[submodule "reference-code/xtdb"]
+	path = reference-code/xtdb
+	url = https://github.com/xtdb/xtdb.git
+[submodule "reference-code/malli"]
+	path = reference-code/malli
+	url = https://github.com/metosin/malli.git
