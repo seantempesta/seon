@@ -270,6 +270,7 @@ This shows all running components and XTDB metrics.
 |-------|-------------|
 | `xtdb-queries` | Writing/debugging queries, XTQL syntax, empty results |
 | `datastar-web-ui` | SSE handlers, Datastar attributes, UI design |
+| `browser-automation` | Testing in browser, debugging UI, network/console inspection |
 | `data-import` | ThetaData API, bulk imports, OCC symbols |
 | `clojure-testing` | Writing tests, debugging failures, mocking |
 
