@@ -29,14 +29,22 @@ State changes trigger automatic UI refresh via SSE:
       (send! (sse/merge-fragment (render-view @app-state))))))
 ```
 
+## CRITICAL: Attribute Syntax
+
+**Datastar uses COLONS, not hyphens** in event attributes:
+- ✅ `data-on:click` (correct)
+- ❌ `data-on-click` (wrong - won't work!)
+
+This applies to all event handlers: `data-on:click`, `data-on:submit`, `data-on:keydown`, etc.
+
 ## Key Datastar Attributes
 
 | Attribute | Purpose | Example |
 |-----------|---------|---------|
 | `data-signals` | Declare reactive state | `{:count 0}` |
 | `data-text` | Bind text content | `"$count"` |
-| `data-on-click` | Handle clicks | `"$count++"` |
-| `data-on-submit` | Form submission | `"@post('/api/submit')"` |
+| `data-on:click` | Handle clicks | `"$count++"` |
+| `data-on:submit` | Form submission | `"@post('/api/submit')"` |
 | `data-model` | Two-way binding | `"$inputValue"` |
 | `data-show` | Conditional display | `"$isVisible"` |
 
@@ -46,7 +54,7 @@ State changes trigger automatic UI refresh via SSE:
 (defn render-counter []
   [:div {:data-signals "{count: 0}"}
    [:span {:data-text "$count"}]
-   [:button {:data-on-click "$count++"} "Increment"]])
+   [:button {:data-on:click "$count++"} "Increment"]])
 ```
 
 ## Action Handler Pattern
