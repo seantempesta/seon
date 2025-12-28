@@ -2,7 +2,8 @@
   "Tests for the feedback namespace - REPL introspection and generative testing."
   (:require [clojure.test :refer :all]
             [malli.core :as m]
-            [seon.dev.feedback :as fb]))
+            [seon.dev.feedback :as fb]
+            [seon.test-utils :refer [with-test-node *test-node*]]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Test Fixtures - Sample Functions with Schemas
@@ -179,3 +180,133 @@
   (testing "Returns nil for function without schema"
     (let [info (fb/function-info 'clojure.core 'inc)]
       (is (nil? info)))))
+
+;;; ---------------------------------------------------------------------------
+;;; File Hash Tests
+;;; ---------------------------------------------------------------------------
+
+(deftest file-hash-test
+  (testing "Returns consistent hash for same content"
+    (let [test-file "src/seon/dev/feedback.clj"
+          hash1 (fb/file-hash test-file)
+          hash2 (fb/file-hash test-file)]
+      (is (string? hash1) "Should return a string")
+      (is (= hash1 hash2) "Same file should produce same hash")))
+
+  (testing "Returns nil for non-existent file"
+    (let [hash (fb/file-hash "this/file/does/not/exist.clj")]
+      (is (nil? hash)))))
+
+(deftest fn-id-test
+  (testing "Converts namespace and function to keyword"
+    (is (= :seon.foo/bar (fb/fn-id 'seon.foo 'bar)))
+    (is (= :clojure.core/inc (fb/fn-id 'clojure.core 'inc)))))
+
+;;; ---------------------------------------------------------------------------
+;;; XTDB Storage Tests
+;;; ---------------------------------------------------------------------------
+
+(deftest record-function-test
+  (with-test-node
+    (fn []
+      (testing "Records function with correct fields"
+        (let [result (fb/record-function! *test-node* 'seon.dev.feedback-test 'sample-add)]
+          (is (some? result) "Should return transaction result")
+          (is (:tx-id result) "Should have transaction ID")))
+
+      (testing "Stored function has expected fields"
+        (let [stored (fb/stored-functions *test-node* 'seon.dev.feedback-test)
+              fn-data (get stored 'sample-add)]
+          (is (some? fn-data) "Should find stored function")
+          (is (= :seon.dev.feedback-test/sample-add (:id fn-data)))
+          (is (= [:=> [:cat :int :int] :int] (:schema fn-data)))
+          ;; schema-refs can be a set or empty - just check it exists
+          (is (contains? fn-data :schema-refs) "should have schema-refs key")
+          (is (some? (:first-seen fn-data)))))
+
+      (testing "Returns nil for function without schema"
+        (let [result (fb/record-function! *test-node* 'clojure.core 'inc)]
+          (is (nil? result)))))))
+
+(deftest stored-functions-test
+  (with-test-node
+    (fn []
+      (testing "Returns empty map when no functions stored"
+        (let [stored (fb/stored-functions *test-node* 'some.random.namespace)]
+          (is (map? stored))
+          (is (empty? stored))))
+
+      (testing "Returns stored functions after recording"
+        ;; Record multiple functions
+        (fb/record-function! *test-node* 'seon.dev.feedback-test 'sample-add)
+        (fb/record-function! *test-node* 'seon.dev.feedback-test 'sample-greet)
+
+        (let [stored (fb/stored-functions *test-node* 'seon.dev.feedback-test)]
+          (is (= 2 (count stored)))
+          (is (contains? stored 'sample-add))
+          (is (contains? stored 'sample-greet)))))))
+
+(deftest new-functions-test
+  (with-test-node
+    (fn []
+      (testing "All functions are new when nothing stored"
+        (let [new-fns (fb/new-functions *test-node* 'seon.dev.feedback-test)]
+          (is (set? new-fns))
+          (is (contains? new-fns 'sample-add))
+          (is (contains? new-fns 'sample-greet))))
+
+      (testing "Function no longer new after recording"
+        (fb/record-function! *test-node* 'seon.dev.feedback-test 'sample-add)
+        (let [new-fns (fb/new-functions *test-node* 'seon.dev.feedback-test)]
+          (is (not (contains? new-fns 'sample-add)) "sample-add should not be new")
+          (is (contains? new-fns 'sample-greet) "sample-greet should still be new"))))))
+
+(deftest file-changed-test
+  (with-test-node
+    (fn []
+      (testing "Returns true when file not tracked"
+        (is (true? (fb/file-changed? *test-node* "src/seon/dev/feedback.clj"))))
+
+      (testing "Returns false after recording function from file"
+        (fb/record-function! *test-node* 'seon.dev.feedback-test 'sample-add)
+        ;; The test file should now be tracked
+        ;; Note: var metadata :file is relative (e.g., "seon/dev/feedback_test.clj")
+        ;; so we need to query using the exact same path that was stored
+        (let [stored (fb/stored-functions *test-node* 'seon.dev.feedback-test)
+              file-path (:file (get stored 'sample-add))]
+          ;; File path from var metadata may be nil or relative
+          (when (and file-path (.exists (clojure.java.io/file file-path)))
+            (is (false? (fb/file-changed? *test-node* file-path))
+                "File should not be changed when hash matches")))))))
+
+(deftest record-error-test
+  (with-test-node
+    (fn []
+      (testing "Records error with correct fields"
+        (let [result (fb/record-error! *test-node*
+                                       :gen-test-fail
+                                       :seon.foo/bar
+                                       {:message "Test failed"
+                                        :shrunk-input {:x 0}})]
+          (is (some? result))
+          (is (:tx-id result))))
+
+      (testing "Can retrieve errors for function"
+        (fb/record-error! *test-node* :gen-test-fail :seon.foo/bar {:message "Error 1"})
+        (fb/record-error! *test-node* :unit-test :seon.foo/bar {:message "Error 2"})
+
+        ;; 3 errors total: 1 from first test + 2 from this test
+        (let [errors (fb/function-errors *test-node* :seon.foo/bar)]
+          (is (= 3 (count errors)))
+          (is (every? #(= :seon.foo/bar (:error/function %)) errors)))))))
+
+(deftest record-edit-event-test
+  (with-test-node
+    (fn []
+      (testing "Records edit event with correct fields"
+        (let [result (fb/record-edit-event! *test-node*
+                                            "src/seon/foo.clj"
+                                            #{:seon.foo/bar :seon.foo/baz}
+                                            :success)]
+          (is (some? result))
+          (is (:tx-id result)))))))

@@ -5,12 +5,21 @@
    - Query Malli function schemas registered in a namespace
    - Extract schema references for context building
    - Run generative tests on schema-annotated functions
+   - Store function/error/edit entities in XTDB (Phase 2)
 
-   This namespace is Phase 1 of the unified dev hook - no XTDB storage yet.
-   That will be added in Phase 2."
-  (:require [clojure.walk :as walk]
+   Entity types stored in XTDB:
+   - :function - Function definitions with schemas
+   - :error - Failure events for pattern detection
+   - :edit-event - Edit history with results"
+  (:require [clojure.java.io :as io]
+            [clojure.walk :as walk]
             [malli.core :as m]
-            [malli.generator :as mg]))
+            [malli.generator :as mg]
+            [seon.db.node :as node]
+            [xtdb.api :as xt])
+  (:import [java.security MessageDigest]
+           [java.time Instant]
+           [java.util Base64 UUID]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schema Introspection
@@ -178,3 +187,229 @@
        :schema-refs (extract-schema-refs schema)
        :var-meta (when var
                    (select-keys (meta var) [:file :line]))})))
+
+;;; ---------------------------------------------------------------------------
+;;; File Hashing
+;;; ---------------------------------------------------------------------------
+
+(defn file-hash
+  "SHA-256 hash of file contents for change detection.
+
+   Returns a Base64-encoded string of the hash, or nil if file doesn't exist.
+
+   Example:
+     (file-hash \"src/seon/foo.clj\")
+     => \"a1b2c3...\" ; base64 encoded SHA-256"
+  [file-path]
+  (let [f (io/file file-path)]
+    (when (.exists f)
+      (let [content (slurp f)
+            md (MessageDigest/getInstance "SHA-256")
+            bytes (.digest md (.getBytes content "UTF-8"))]
+        (.encodeToString (Base64/getEncoder) bytes)))))
+
+;;; ---------------------------------------------------------------------------
+;;; XTDB Storage - Functions
+;;; ---------------------------------------------------------------------------
+
+(defn fn-id
+  "Convert namespace and function symbols to a keyword ID.
+
+   Example:
+     (fn-id 'seon.foo 'bar) => :seon.foo/bar"
+  [ns-sym fn-sym]
+  (keyword (str ns-sym) (str fn-sym)))
+
+(defn record-function!
+  "Store or update a function entity in XTDB.
+
+   Tracks the function's schema, file location, and source hash for
+   change detection. Preserves the original first-seen date on updates.
+
+   Note: Symbols are converted to keywords for XTDB storage since XTDB v2
+   doesn't support Clojure symbols directly.
+
+   Args:
+     node   - XTDB node
+     ns-sym - Namespace symbol (e.g., 'seon.trading.core)
+     fn-sym - Function symbol (e.g., 'process-order)
+
+   Returns:
+     Transaction result, or nil if function has no schema"
+  [node ns-sym fn-sym]
+  (when-let [info (function-info ns-sym fn-sym)]
+    (let [id (fn-id ns-sym fn-sym)
+          file-path (:file (:var-meta info))
+          ;; Check for existing entity to preserve first-seen
+          existing (first (node/xtql-query
+                           node
+                           (xt/template (from :function [{:xt/id ~id} fn/first-seen]))))
+          ;; Convert symbols to keywords for XTDB storage
+          ns-kw (keyword (str ns-sym))
+          fn-kw (keyword (str fn-sym))
+          entity {:xt/id id
+                  :entity/type :function
+                  :fn/namespace ns-kw
+                  :fn/name fn-kw
+                  :fn/schema (:schema info)
+                  :fn/schema-refs (:schema-refs info)
+                  :fn/file file-path
+                  :fn/source-hash (when file-path (file-hash file-path))
+                  :fn/first-seen (or (:fn/first-seen existing) (Instant/now))}]
+      (node/execute-tx! node [[:put-docs :function entity]]))))
+
+(defn record-error!
+  "Store an error event in XTDB for pattern detection.
+
+   Args:
+     node       - XTDB node
+     error-type - Keyword: :gen-test-fail, :syntax, :unit-test, :runtime
+     fn-sym     - Fully qualified function keyword (e.g., :seon.foo/bar)
+     data       - Error details map (message, shrunk input, stack trace, etc.)
+
+   Returns:
+     Transaction result"
+  [node error-type fn-sym data]
+  (let [entity {:xt/id (UUID/randomUUID)
+                :entity/type :error
+                :error/timestamp (Instant/now)
+                :error/type error-type
+                :error/function fn-sym
+                :error/data data}]
+    (node/execute-tx! node [[:put-docs :error entity]])))
+
+(defn record-edit-event!
+  "Store an edit event with result status.
+
+   Args:
+     node              - XTDB node
+     file-path         - Path to edited file
+     functions-changed - Set of function keywords that changed
+     result            - Keyword: :success, :syntax-error, :test-fail, :gen-fail
+
+   Returns:
+     Transaction result"
+  [node file-path functions-changed result]
+  (let [entity {:xt/id (UUID/randomUUID)
+                :entity/type :edit-event
+                :edit/file file-path
+                :edit/timestamp (Instant/now)
+                :edit/functions-changed (set functions-changed)
+                :edit/result result}]
+    (node/execute-tx! node [[:put-docs :edit-event entity]])))
+
+;;; ---------------------------------------------------------------------------
+;;; XTDB Queries - Functions
+;;; ---------------------------------------------------------------------------
+
+(defn stored-functions
+  "Get all stored functions for a namespace from XTDB.
+
+   Returns a map of {fn-sym {:id id :schema schema :schema-refs refs ...}}
+   for all functions stored for the given namespace. The fn-sym keys are
+   symbols (converted from stored keywords).
+
+   Args:
+     node   - XTDB node
+     ns-sym - Namespace symbol
+
+   Returns:
+     Map of function symbol to entity data, or empty map if none found"
+  [node ns-sym]
+  (let [ns-kw (keyword (str ns-sym))
+        results (node/xtql-query
+                 node
+                 (xt/template
+                  (from :function [{:fn/namespace ~ns-kw}
+                                   xt/id fn/name fn/schema fn/schema-refs
+                                   fn/file fn/source-hash fn/first-seen])))]
+    (into {}
+          (map (fn [row]
+                 ;; Convert keyword back to symbol for API consistency
+                 [(symbol (name (:fn/name row)))
+                  {:id (:xt/id row)
+                   :schema (:fn/schema row)
+                   :schema-refs (:fn/schema-refs row)
+                   :file (:fn/file row)
+                   :source-hash (:fn/source-hash row)
+                   :first-seen (:fn/first-seen row)}])
+               results))))
+
+(defn stored-file-hash
+  "Get the stored hash for a file, or nil if not tracked.
+
+   Looks up any function stored with this file path and returns its hash.
+   Returns nil if no functions from this file are stored.
+
+   Args:
+     node      - XTDB node
+     file-path - Path to file
+
+   Returns:
+     Base64-encoded hash string, or nil"
+  [node file-path]
+  (let [result (first (node/xtql-query
+                       node
+                       (xt/template
+                        (-> (from :function [{:fn/file ~file-path} fn/source-hash])
+                            (limit 1)))))]
+    (:fn/source-hash result)))
+
+(defn file-changed?
+  "Check if file contents differ from stored hash.
+
+   Returns true if:
+   - File has no stored hash (new file)
+   - File's current hash differs from stored hash
+
+   Returns false if file hash matches stored hash.
+
+   Args:
+     node      - XTDB node
+     file-path - Path to file
+
+   Returns:
+     Boolean"
+  [node file-path]
+  (let [stored (stored-file-hash node file-path)
+        current (file-hash file-path)]
+    (or (nil? stored)
+        (not= stored current))))
+
+(defn new-functions
+  "Find functions that exist now but aren't stored in XTDB.
+
+   Compares current namespace schemas against stored functions to detect
+   newly created functions (for triggering AI review).
+
+   Args:
+     node   - XTDB node
+     ns-sym - Namespace symbol
+
+   Returns:
+     Set of function symbols that are new (not yet stored)"
+  [node ns-sym]
+  (let [current (schema-fns ns-sym)
+        stored (set (keys (stored-functions node ns-sym)))]
+    (clojure.set/difference current stored)))
+
+(defn function-errors
+  "Get recent errors for a function.
+
+   Args:
+     node   - XTDB node
+     fn-id  - Function keyword (e.g., :seon.foo/bar)
+     limit  - Max errors to return (default 10)
+
+   Returns:
+     Vector of error entities, newest first"
+  ([node fn-id]
+   (function-errors node fn-id 10))
+  ([node fn-id limit]
+   (node/xtql-query
+    node
+    (xt/template
+     (-> (from :error [{:error/function ~fn-id}
+                       xt/id error/timestamp error/type error/function error/data])
+         (order-by {:val error/timestamp :dir :desc})
+         (limit ~limit))))))
