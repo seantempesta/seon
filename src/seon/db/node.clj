@@ -7,39 +7,25 @@
   - Temporal queries use query options or SQL temporal clauses
   - execute-tx is synchronous (no await needed)
 
-  XTQL Execution:
-  - Use `xtql-query` for direct XTQL execution on in-process nodes
-  - This bypasses the JDBC/SQL wrapper used by xt/q
-  - Returns results as Clojure maps with kebab-case keywords"
-  (:require [xtdb.api :as xt]
-            [xtdb.protocols :as xtp]
-            [xtdb.serde :as serde])
-  (:import [java.util.stream Stream]))
+  Query Execution:
+  - Use `xt/q` for both XTQL and SQL queries
+  - XTQL queries are wrapped in SQL and executed via JDBC
+  - Returns results as Clojure maps with kebab-case keywords by default"
+  (:require [xtdb.api :as xt]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Query Execution
 ;;; ---------------------------------------------------------------------------
 
-(defn- stream->vec
-  "Convert a Java Stream to a Clojure vector."
-  [^Stream stream]
-  (try
-    (vec (.toList stream))
-    (finally
-      (.close stream))))
-
 (defn xtql-query
-  "Execute an XTQL query directly on an in-process node.
+  "Execute an XTQL query on the node.
 
-  This uses the native XTQL execution path (xtp/open-xtql-query),
-  bypassing the JDBC/SQL wrapper that xt/q uses. This is the recommended
-  approach for XTQL queries on in-process nodes.
+  Uses xt/q which wraps XTQL in SQL and executes via JDBC.
 
   Args:
-    node - XTDB in-process node
+    node - XTDB node
     query-form - XTQL expression (e.g., (from :table [col1 col2]))
     opts - Optional map with:
-           :args - Query arguments as a vector
            :current-time - Valid-time point for temporal queries
            :snapshot-time - System-time point for temporal queries
            :key-fn - Keyword transformation (default: :kebab-case-keyword)
@@ -49,14 +35,12 @@
   ([node query-form]
    (xtql-query node query-form {}))
   ([node query-form opts]
-   (let [{:keys [args current-time snapshot-time key-fn]
+   (let [{:keys [current-time snapshot-time key-fn]
           :or {key-fn :kebab-case-keyword}} opts
-         query-opts (cond-> {:key-fn (serde/read-key-fn key-fn)}
-                      args (assoc :args args)
+         query-opts (cond-> {:key-fn key-fn}
                       current-time (assoc :current-time current-time)
                       snapshot-time (assoc :snapshot-time snapshot-time))]
-     (-> (xtp/open-xtql-query node query-form query-opts)
-         stream->vec))))
+     (xt/q node query-form query-opts))))
 
 (defn sql-query
   "Execute a SQL query on the node.
@@ -73,24 +57,21 @@
   ([node sql opts]
    (let [{:keys [current-time snapshot-time key-fn]
           :or {key-fn :kebab-case-keyword}} opts
-         query-opts (cond-> {:key-fn (serde/read-key-fn key-fn)}
+         query-opts (cond-> {:key-fn key-fn}
                       current-time (assoc :current-time current-time)
                       snapshot-time (assoc :snapshot-time snapshot-time))]
-     (-> (xtp/open-sql-query node sql query-opts)
-         stream->vec))))
+     (xt/q node sql query-opts))))
 
 (defn query
   "Execute a query against the XTDB node.
 
   Routes to xtql-query for XTQL expressions (sequences) and
-  sql-query for SQL strings. Uses the direct protocol methods
-  for proper XTQL support.
+  sql-query for SQL strings.
 
   Args:
     node - XTDB node
     query-form - SQL string or XTQL expression
     opts - Optional map with:
-           :args - Query arguments (positional for SQL)
            :current-time - Valid-time point for temporal queries
            :snapshot-time - System-time point for temporal queries
 
@@ -100,11 +81,11 @@
    (query node query-form {}))
   ([node query-form opts]
    (cond
-     ;; XTQL expression - use direct protocol method
+     ;; XTQL expression (quoted form)
      (seq? query-form)
      (xtql-query node query-form opts)
 
-     ;; SQL string - use direct protocol method
+     ;; SQL string
      (string? query-form)
      (sql-query node query-form opts)
 

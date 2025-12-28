@@ -20,6 +20,9 @@
   (log/info "Starting XTDB node..." {:storage storage :compactor compactor})
   (require '[xtdb.node :as xtn])
   (require '[xtdb.api :as xt])
+  ;; Ensure XTQL protocol namespaces are loaded to prevent classloader mismatches
+  ;; after (reset). This guarantees the PlanQuery protocol extensions are in place.
+  (require '[xtdb.xtql.plan])
   (let [start-node (resolve 'xtn/start-node)
         node (if (= storage :in-memory)
                (start-node)
