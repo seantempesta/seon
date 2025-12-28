@@ -1,308 +1,314 @@
 (ns seon.ai.gemini
-  "Native Gemini API integration for Seon.
+  "Native Clojure client for the Gemini API.
 
-   This namespace demonstrates the :malli/schema metadata pattern for AI-assisted
-   development. All public functions have schema metadata that can be:
-   - Parsed by LLMs to understand function contracts
-   - Collected via `mi/collect!` for registration
-   - Verified via `mi/check` for generative testing
-   - Instrumented for runtime validation
+   Provides synchronous HTTP access to Google's Gemini language models with
+   support for text generation, Google Search grounding, and Python code
+   execution.
 
-   Usage:
+   All public functions include :malli/schema metadata for contract
+   specification, enabling generative testing via malli.instrument/check
+   and runtime validation via malli.instrument/instrument!.
+
+   Quick start:
+
      (require '[seon.ai.gemini :as gemini])
 
-     ;; Basic generation
-     (gemini/generate api-key \"Explain XTDB\" {})
+     ;; Set API key (or use GEMINI_API_KEY env var)
+     (binding [gemini/*api-key* \"your-key\"]
+       (gemini/ask \"What is the capital of France?\" {}))
 
      ;; With Google Search grounding
-     (gemini/generate-with-search api-key \"Latest Clojure 1.12 features\" {})
+     (gemini/search \"Latest Clojure 1.12 features\" {})
 
-     ;; With code execution
-     (gemini/generate-with-code api-key \"Calculate first 50 primes\" {})
+     ;; With Python code execution
+     (gemini/calculate \"What is the 100th Fibonacci number?\" {})
 
    Schema verification:
+
      (require '[malli.instrument :as mi])
      (mi/collect! {:ns 'seon.ai.gemini})
-     (mi/check {:filters [(mi/-filter-ns 'seon.ai.gemini)]})
-
-   See: docs/research/gemini-native-integration.md for API details."
-  (:require [hato.client :as http]
-            [cheshire.core :as json]
-            [malli.core :as m]
-            [taoensso.timbre :as log]))
-
-;;; ---------------------------------------------------------------------------
-;;; Schema Definitions
-;;; ---------------------------------------------------------------------------
-;;
-;; Schemas are defined inline for clarity and to avoid registry conflicts.
-;; The :malli/schema metadata on functions uses these definitions directly.
-;; For generative testing, use the local-registry function.
-
-(def GeminiApiKey
-  "Non-empty string for API authentication."
-  [:string {:min 1}])
-
-(def GeminiPrompt
-  "Non-empty string for user input."
-  [:string {:min 1}])
-
-(def GeminiModel
-  "Enum of supported model names."
-  [:enum
-   "gemini-2.5-flash"
-   "gemini-2.5-pro"
-   "gemini-3-flash"
-   "gemini-3-pro-preview"])
-
-(def GeminiTimeout
-  "Request timeout in milliseconds (1-600 seconds)."
-  [:int {:min 1000 :max 600000}])
-
-(def GeminiTool
-  "Tool configuration (google_search or code_execution)."
-  [:map
-   [:google_search {:optional true} :map]
-   [:code_execution {:optional true} :map]])
-
-(def GeminiThinkingLevel
-  "Thinking mode intensity."
-  [:enum "low" "medium" "high"])
-
-(def GeminiOptions
-  "Request options map."
-  [:map
-   [:model {:optional true} GeminiModel]
-   [:timeout {:optional true} GeminiTimeout]
-   [:tools {:optional true} [:vector GeminiTool]]
-   [:thinking-level {:optional true} GeminiThinkingLevel]
-   [:system-instruction {:optional true} :string]])
-
-(def GeminiGroundingChunk
-  "Web search result source."
-  [:map
-   [:web {:optional true}
-    [:map
-     [:uri {:optional true} :string]
-     [:title {:optional true} :string]]]])
-
-(def GeminiGroundingMetadata
-  "Grounding metadata from Google Search."
-  [:map
-   [:webSearchQueries {:optional true} [:vector :string]]
-   [:groundingChunks {:optional true} [:vector GeminiGroundingChunk]]])
-
-(def GeminiCodeResult
-  "Code execution result."
-  [:map
-   [:outcome {:optional true} :string]
-   [:output {:optional true} :string]])
-
-(def GeminiUsage
-  "Token usage metadata."
-  [:map
-   [:promptTokenCount {:optional true} :int]
-   [:candidatesTokenCount {:optional true} :int]
-   [:totalTokenCount {:optional true} :int]])
-
-(def GeminiError
-  "Error response details."
-  [:map
-   [:status {:optional true} :int]
-   [:message {:optional true} :string]
-   [:exception {:optional true} :string]])
-
-(def GeminiResponse
-  "Unified response format from Gemini API."
-  [:map
-   [:text :string]
-   [:error {:optional true} GeminiError]
-   [:grounding-metadata {:optional true} [:maybe GeminiGroundingMetadata]]
-   [:code-results {:optional true} [:maybe [:vector GeminiCodeResult]]]
-   [:usage-metadata {:optional true} [:maybe GeminiUsage]]])
-
-(def gemini-schemas
-  "Map of all Gemini schemas for registry use.
-
-   Use with Malli's registry options for validation/generation:
-   (m/validate :gemini/response data {:registry (gemini-registry)})"
-  {:gemini/api-key GeminiApiKey
-   :gemini/prompt GeminiPrompt
-   :gemini/model GeminiModel
-   :gemini/timeout GeminiTimeout
-   :gemini/tool GeminiTool
-   :gemini/thinking-level GeminiThinkingLevel
-   :gemini/options GeminiOptions
-   :gemini/grounding-chunk GeminiGroundingChunk
-   :gemini/grounding-metadata GeminiGroundingMetadata
-   :gemini/code-result GeminiCodeResult
-   :gemini/usage GeminiUsage
-   :gemini/error GeminiError
-   :gemini/response GeminiResponse})
-
-(defn gemini-registry
-  "Create a Malli registry that includes Gemini schemas.
-
-   Returns a composite registry combining default schemas with Gemini-specific ones.
-   Use this for validation and generation of Gemini types.
-
-   Example:
-     (m/validate :gemini/response data {:registry (gemini-registry)})
-     (mg/generate :gemini/options {:registry (gemini-registry)})"
-  []
-  (merge (m/default-schemas) gemini-schemas))
+     (mi/check {:filters [(mi/-filter-ns 'seon.ai.gemini)]})"
+  (:require
+   [cheshire.core :as json]
+   [clojure.string :as str]
+   [hato.client :as http]
+   [malli.core :as m]
+   [malli.registry :as mr]
+   [taoensso.timbre :as log]))
 
 ;;; ---------------------------------------------------------------------------
-;;; Constants
+;;; Schema Registration
+;;; ---------------------------------------------------------------------------
+
+;; Register all Gemini domain schemas in the global mutable registry.
+;; These schemas are available project-wide as :gemini/* keywords.
+
+(mr/set-default-registry!
+ (mr/composite-registry
+  (m/default-schemas)
+  {;; Primitive types
+   :gemini/api-key
+   [:string {:min 1
+             :description "Non-empty Gemini API authentication key"}]
+
+   :gemini/prompt
+   [:string {:min 1
+             :description "Non-empty text prompt for generation"}]
+
+   :gemini/model
+   [:enum
+    "gemini-2.5-flash"
+    "gemini-2.5-pro"
+    "gemini-3-flash"
+    "gemini-3-pro-preview"]
+
+   :gemini/timeout
+   [:int {:min 1000 :max 600000
+          :description "Request timeout in milliseconds (1-600 seconds)"}]
+
+   :gemini/thinking-level
+   [:enum "low" "medium" "high"]
+
+     ;; Tool configuration
+   :gemini/tool
+   [:map
+    [:google_search {:optional true} :map]
+    [:code_execution {:optional true} :map]]
+
+     ;; Request options
+   :gemini/options
+   [:map
+    [:model {:optional true} :gemini/model]
+    [:timeout {:optional true} :gemini/timeout]
+    [:tools {:optional true} [:vector :gemini/tool]]
+    [:thinking-level {:optional true} :gemini/thinking-level]
+    [:system-instruction {:optional true} :string]
+    [:api-key {:optional true} :gemini/api-key]]
+
+     ;; Response components
+   :gemini/grounding-chunk
+   [:map
+    [:web {:optional true}
+     [:map
+      [:uri {:optional true} :string]
+      [:title {:optional true} :string]]]]
+
+   :gemini/grounding-metadata
+   [:map
+    [:webSearchQueries {:optional true} [:vector :string]]
+    [:groundingChunks {:optional true} [:vector :gemini/grounding-chunk]]]
+
+   :gemini/code-result
+   [:map
+    [:outcome {:optional true} :string]
+    [:output {:optional true} :string]]
+
+   :gemini/usage
+   [:map
+    [:promptTokenCount {:optional true} :int]
+    [:candidatesTokenCount {:optional true} :int]
+    [:totalTokenCount {:optional true} :int]]
+
+   :gemini/error
+   [:map
+    [:status {:optional true} :int]
+    [:message {:optional true} :string]
+    [:exception {:optional true} :string]]
+
+     ;; Unified response
+   :gemini/response
+   [:map
+    [:text :string]
+    [:error {:optional true} :gemini/error]
+    [:grounding-metadata {:optional true} [:maybe :gemini/grounding-metadata]]
+    [:code-results {:optional true} [:maybe [:vector :gemini/code-result]]]
+    [:usage-metadata {:optional true} [:maybe :gemini/usage]]]}))
+
+;;; ---------------------------------------------------------------------------
+;;; Configuration
 ;;; ---------------------------------------------------------------------------
 
 (def ^:const base-url
-  "Gemini API base URL."
+  "Gemini API base URL for generateContent requests."
   "https://generativelanguage.googleapis.com/v1beta")
 
 (def ^:const default-timeout-ms
-  "Default request timeout in milliseconds."
+  "Default HTTP request timeout in milliseconds."
   60000)
 
 (def ^:const default-model
-  "Default model for requests."
+  "Default Gemini model for text generation."
   "gemini-2.5-flash")
 
 ;;; ---------------------------------------------------------------------------
-;;; Internal Helpers
+;;; Dynamic Configuration
 ;;; ---------------------------------------------------------------------------
 
-(defn- make-url
-  "Construct API URL for model and method."
+(def ^:dynamic *api-key*
+  "Dynamic var for the default API key.
+
+   Bind this in tests or REPL sessions to avoid passing the key explicitly.
+   Falls back to GEMINI_API_KEY environment variable if nil."
+  nil)
+
+;;; ---------------------------------------------------------------------------
+;;; HTTP Client (Private)
+;;; ---------------------------------------------------------------------------
+
+(defn- build-url
+  "Construct the Gemini API URL for a model and method."
   [model method]
   (format "%s/models/%s:%s" base-url model method))
 
-(defn- request-body
-  "Build request body from prompt and options."
+(defn- build-request-body
+  "Build the JSON request body from prompt and options.
+
+   Constructs the Gemini API request format with optional tools,
+   thinking configuration, and system instructions."
   [prompt {:keys [tools thinking-level system-instruction]}]
   (cond-> {:contents [{:parts [{:text prompt}]}]}
-    tools (assoc :tools tools)
-    thinking-level (assoc-in [:generationConfig :thinkingConfig :thinkingLevel]
-                             thinking-level)
-    system-instruction (assoc :systemInstruction
-                              {:parts [{:text system-instruction}]})))
+    tools
+    (assoc :tools tools)
 
-(defn- parse-response
-  "Parse Gemini API response into unified format."
+    thinking-level
+    (assoc-in [:generationConfig :thinkingConfig :thinkingLevel] thinking-level)
+
+    system-instruction
+    (assoc :systemInstruction {:parts [{:text system-instruction}]})))
+
+(defn- parse-api-response
+  "Parse Gemini API JSON response into unified format.
+
+   Extracts text content, grounding metadata, code execution results,
+   and token usage from the raw API response."
   [parsed]
   (let [candidate (-> parsed :candidates first)
-        parts (-> candidate :content :parts)]
-    {:text (->> parts
-                (filter :text)
-                (map :text)
-                (clojure.string/join "\n"))
-     :grounding-metadata (-> candidate :groundingMetadata)
-     :code-results (->> parts
-                        (filter :codeExecutionResult)
-                        (mapv (fn [p]
-                                (select-keys (:codeExecutionResult p)
-                                             [:outcome :output]))))
-     :usage-metadata (:usageMetadata parsed)}))
+        parts     (-> candidate :content :parts)]
+    {:text              (->> parts
+                             (filter :text)
+                             (map :text)
+                             (str/join "\n"))
+     :grounding-metadata (:groundingMetadata candidate)
+     :code-results       (->> parts
+                              (filter :codeExecutionResult)
+                              (mapv (fn [p]
+                                      (select-keys (:codeExecutionResult p)
+                                                   [:outcome :output]))))
+     :usage-metadata     (:usageMetadata parsed)}))
 
-(defn- make-error
-  "Create error response map."
+(defn- make-error-response
+  "Create a standardized error response map."
   ([status message]
-   {:text ""
+   {:text  ""
     :error {:status status :message message}})
   ([exception-message]
-   {:text ""
+   {:text  ""
     :error {:exception exception-message}}))
 
+(defn- resolve-api-key
+  "Resolve API key from explicit value, dynamic var, or environment.
+
+   Priority:
+   1. Explicitly passed key
+   2. *api-key* dynamic var
+   3. GEMINI_API_KEY environment variable"
+  [explicit-key]
+  (or explicit-key
+      *api-key*
+      (System/getenv "GEMINI_API_KEY")))
+
 ;;; ---------------------------------------------------------------------------
-;;; Core API Functions
+;;; Core API
 ;;; ---------------------------------------------------------------------------
 
 (defn generate
-  "Generate content using Gemini API.
+  "Generate content using the Gemini API.
 
-   Makes a synchronous HTTP request to the Gemini generateContent endpoint.
-   Returns a unified response map with :text and optional metadata.
+   Makes a synchronous HTTP request to the Gemini generateContent endpoint
+   and returns a unified response map.
 
    Arguments:
      api-key - Gemini API key (non-empty string)
      prompt  - Text prompt to send (non-empty string)
      opts    - Options map:
-               :model            - Model name (default: gemini-2.5-flash)
-               :timeout          - Request timeout in ms (default: 60000)
-               :tools            - Vector of tool configs
-               :thinking-level   - \"low\", \"medium\", or \"high\"
-               :system-instruction - System prompt
+               :model             - Model name (default: gemini-2.5-flash)
+               :timeout           - Request timeout in ms (default: 60000)
+               :tools             - Vector of tool configs for search/code
+               :thinking-level    - \"low\", \"medium\", or \"high\"
+               :system-instruction - System prompt for context
 
    Returns:
-     {:text \"response text\"
-      :grounding-metadata {...}  ; if google_search enabled
-      :code-results [...]        ; if code_execution enabled
-      :usage-metadata {...}}     ; token counts
+     Success: {:text \"response text\"
+               :grounding-metadata {...}  ; if google_search enabled
+               :code-results [...]        ; if code_execution enabled
+               :usage-metadata {...}}     ; token counts
 
-   On error:
-     {:text \"\"
-      :error {:status 401 :message \"...\"}}"
-  {:malli/schema [:=> [:cat GeminiApiKey GeminiPrompt GeminiOptions]
-                  GeminiResponse]}
+     Error:   {:text \"\"
+               :error {:status 401 :message \"...\"}}"
+  {:malli/schema [:=> [:cat :gemini/api-key :gemini/prompt :gemini/options]
+                  :gemini/response]}
   [api-key prompt opts]
   (let [{:keys [model timeout]
-         :or {model default-model
-              timeout default-timeout-ms}} opts
-        url (make-url model "generateContent")
-        body (request-body prompt opts)]
+         :or   {model   default-model
+                timeout default-timeout-ms}} opts
+        url  (build-url model "generateContent")
+        body (build-request-body prompt opts)]
     (try
       (let [response (http/post url
-                                {:headers {"Content-Type" "application/json"
+                                {:headers {"Content-Type"  "application/json"
                                            "x-goog-api-key" api-key}
-                                 :body (json/generate-string body)
+                                 :body    (json/generate-string body)
                                  :timeout timeout
-                                 :as :text})
-            status (:status response)]
-        (if (not= 200 status)
-          (do
-            (log/error "Gemini API error" {:status status
-                                           :body (:body response)})
-            (make-error status (:body response)))
+                                 :as      :text})
+            status   (:status response)]
+        (if (= 200 status)
           (-> (:body response)
               (json/parse-string true)
-              parse-response)))
+              parse-api-response)
+          (do
+            (log/error "Gemini API error" {:status status
+                                           :body   (:body response)})
+            (make-error-response status (:body response)))))
       (catch Exception e
         (log/error e "Gemini API request failed" {:model model})
-        (make-error (ex-message e))))))
+        (make-error-response (ex-message e))))))
 
 (defn generate-with-search
   "Generate content with Google Search grounding.
 
-   Convenience wrapper that enables the google_search tool for web-grounded
-   responses. Returns sources in :grounding-metadata.
+   Enables the google_search tool to provide web-grounded responses
+   with source citations. Useful for current events, recent documentation,
+   or factual queries requiring authoritative sources.
 
    Arguments:
      api-key - Gemini API key
      prompt  - Text prompt (often a question about current events)
-     opts    - Additional options (same as generate, but :tools is preset)
+     opts    - Options map (same as generate, :tools is preset)
 
    Returns:
      {:text \"response with citations\"
-      :grounding-metadata {:webSearchQueries [...] :groundingChunks [...]}
+      :grounding-metadata {:webSearchQueries [...]
+                           :groundingChunks [{:web {:uri ... :title ...}}]}
       ...}
 
    Example:
      (generate-with-search api-key \"Latest XTDB v2 release notes\" {})"
-  {:malli/schema [:=> [:cat GeminiApiKey GeminiPrompt GeminiOptions]
-                  GeminiResponse]}
+  {:malli/schema [:=> [:cat :gemini/api-key :gemini/prompt :gemini/options]
+                  :gemini/response]}
   [api-key prompt opts]
   (generate api-key prompt (assoc opts :tools [{:google_search {}}])))
 
 (defn generate-with-code
   "Generate content with Python code execution.
 
-   Convenience wrapper that enables the code_execution tool. Gemini can
-   write and execute Python code to compute results.
+   Enables the code_execution tool, allowing Gemini to write and execute
+   Python code to compute results. Useful for calculations, data analysis,
+   or any task requiring programmatic computation.
 
    Arguments:
      api-key - Gemini API key
      prompt  - Prompt that may require calculation
-     opts    - Additional options (same as generate, but :tools is preset)
+     opts    - Options map (same as generate, :tools is preset)
 
    Returns:
      {:text \"explanation\"
@@ -311,89 +317,83 @@
 
    Example:
      (generate-with-code api-key \"Calculate factorial of 100\" {})"
-  {:malli/schema [:=> [:cat GeminiApiKey GeminiPrompt GeminiOptions]
-                  GeminiResponse]}
+  {:malli/schema [:=> [:cat :gemini/api-key :gemini/prompt :gemini/options]
+                  :gemini/response]}
   [api-key prompt opts]
   (generate api-key prompt (assoc opts :tools [{:code_execution {}}])))
 
 ;;; ---------------------------------------------------------------------------
-;;; REPL Convenience Functions
+;;; Convenience Functions
 ;;; ---------------------------------------------------------------------------
 
-(def ^:dynamic *api-key*
-  "Dynamic var for default API key. Can be bound or set for REPL convenience.
-   Falls back to GEMINI_API_KEY environment variable if nil."
-  nil)
-
-(defn- get-api-key
-  "Get API key from explicit arg, dynamic var, or environment."
-  [explicit-key]
-  (or explicit-key
-      *api-key*
-      (System/getenv "GEMINI_API_KEY")))
+(defn- require-api-key!
+  "Resolve and validate API key, throwing if unavailable."
+  [opts]
+  (let [key (resolve-api-key (:api-key opts))]
+    (when-not key
+      (throw (ex-info "No Gemini API key available. Set GEMINI_API_KEY env var, bind *api-key*, or pass :api-key in opts."
+                      {:reason :missing-api-key})))
+    key))
 
 (defn ask
-  "Ask Gemini a question. Simplest possible interface.
+  "Ask Gemini a question using the simplest possible interface.
 
-   Uses API key from:
-   1. Explicit :api-key option
+   Resolves the API key automatically from (in priority order):
+   1. :api-key option
    2. *api-key* dynamic var
    3. GEMINI_API_KEY environment variable
 
    Arguments:
-     prompt - Question or instruction
-     opts   - Optional map, may include :api-key to override default
+     prompt - Question or instruction (non-empty string)
+     opts   - Options map (same as generate, plus optional :api-key)
 
    Returns:
      Response map (see generate for format)
 
    Throws:
-     ExceptionInfo if no API key is available
+     ExceptionInfo with :reason :missing-api-key if no key available
 
-   Example:
-     (ask \"What is the capital of France?\")
+   Examples:
+     (ask \"What is the capital of France?\" {})
      (ask \"Explain XTDB\" {:model \"gemini-3-pro-preview\"})"
-  {:malli/schema [:=> [:cat GeminiPrompt GeminiOptions]
-                  GeminiResponse]}
+  {:malli/schema [:=> [:cat :gemini/prompt :gemini/options]
+                  :gemini/response]}
   [prompt opts]
-  (let [key (get-api-key (:api-key opts))]
-    (when-not key
-      (throw (ex-info "No Gemini API key available. Set GEMINI_API_KEY env var or pass :api-key in opts."
-                      {:reason :missing-api-key})))
+  (let [key (require-api-key! opts)]
     (generate key prompt (dissoc opts :api-key))))
 
 (defn search
   "Search the web using Gemini with Google Search grounding.
 
-   Convenience function that combines ask with generate-with-search.
+   Combines the convenience of ask with generate-with-search.
+   Returns grounded responses with source citations.
 
    Arguments:
-     query - Search query or question
-     opts  - Optional map (same as ask)
+     query - Search query or question (non-empty string)
+     opts  - Options map (same as ask)
 
    Returns:
      {:text \"answer with citations\"
-      :grounding-metadata {...sources...}}
+      :grounding-metadata {:webSearchQueries [...]
+                           :groundingChunks [...]}}
 
    Example:
      (search \"Latest Clojure 1.12 features\" {})"
-  {:malli/schema [:=> [:cat GeminiPrompt GeminiOptions]
-                  GeminiResponse]}
+  {:malli/schema [:=> [:cat :gemini/prompt :gemini/options]
+                  :gemini/response]}
   [query opts]
-  (let [key (get-api-key (:api-key opts))]
-    (when-not key
-      (throw (ex-info "No Gemini API key available. Set GEMINI_API_KEY env var or pass :api-key in opts."
-                      {:reason :missing-api-key})))
+  (let [key (require-api-key! opts)]
     (generate-with-search key query (dissoc opts :api-key))))
 
 (defn calculate
   "Perform calculation using Gemini's Python code execution.
 
-   Convenience function that combines ask with generate-with-code.
+   Combines the convenience of ask with generate-with-code.
+   Gemini will write and execute Python code to compute the result.
 
    Arguments:
-     prompt - Calculation or coding task
-     opts   - Optional map (same as ask)
+     prompt - Calculation or coding task (non-empty string)
+     opts   - Options map (same as ask)
 
    Returns:
      {:text \"explanation\"
@@ -401,62 +401,85 @@
 
    Example:
      (calculate \"What is the 100th Fibonacci number?\" {})"
-  {:malli/schema [:=> [:cat GeminiPrompt GeminiOptions]
-                  GeminiResponse]}
+  {:malli/schema [:=> [:cat :gemini/prompt :gemini/options]
+                  :gemini/response]}
   [prompt opts]
-  (let [key (get-api-key (:api-key opts))]
-    (when-not key
-      (throw (ex-info "No Gemini API key available. Set GEMINI_API_KEY env var or pass :api-key in opts."
-                      {:reason :missing-api-key})))
+  (let [key (require-api-key! opts)]
     (generate-with-code key prompt (dissoc opts :api-key))))
 
 ;;; ---------------------------------------------------------------------------
-;;; Schema Access Utilities
+;;; Schema Introspection
 ;;; ---------------------------------------------------------------------------
 
-(defn registered-schemas
-  "Return the map of registered Gemini schemas.
+(def gemini-schema-keys
+  "Set of all registered Gemini schema keywords."
+  #{:gemini/api-key
+    :gemini/prompt
+    :gemini/model
+    :gemini/timeout
+    :gemini/thinking-level
+    :gemini/tool
+    :gemini/options
+    :gemini/grounding-chunk
+    :gemini/grounding-metadata
+    :gemini/code-result
+    :gemini/usage
+    :gemini/error
+    :gemini/response})
 
-   Useful for debugging and REPL exploration.
+(defn schema
+  "Retrieve a registered Gemini schema by keyword.
+
+   Arguments:
+     k - Schema keyword (e.g., :gemini/response)
+
+   Returns:
+     The Malli schema, or nil if not found
 
    Example:
-     (registered-schemas)
-     => {:gemini/api-key [...], :gemini/response [...], ...}"
-  []
-  gemini-schemas)
+     (schema :gemini/options)
+     ;; => [:map [:model {:optional true} :gemini/model] ...]"
+  [k]
+  (when (gemini-schema-keys k)
+    (m/schema k)))
 
 (comment
   ;; REPL exploration
 
-  ;; Check registered schemas
-  (registered-schemas)
+  ;; View registered schemas
+  gemini-schema-keys
+  (schema :gemini/response)
+  (m/form (schema :gemini/options))
 
-  ;; Test schema generation (use local registry)
+  ;; Generate sample data
   (require '[malli.generator :as mg])
-  (mg/generate GeminiPrompt)
-  (mg/generate GeminiOptions)
-  (mg/generate GeminiResponse)
+  (mg/generate :gemini/prompt)
+  (mg/generate :gemini/options)
+  (mg/generate :gemini/response)
 
-  ;; Or with registry for keyword lookup
-  (mg/generate :gemini/prompt {:registry (gemini-registry)})
-  (mg/generate :gemini/options {:registry (gemini-registry)})
+  ;; Validate data
+  (m/validate :gemini/api-key "test-key")
+  (m/validate :gemini/model "gemini-2.5-flash")
+  (m/validate :gemini/options {:model "gemini-2.5-pro" :timeout 30000})
 
-  ;; Check function schemas are accessible via metadata
-  (:malli/schema (meta #'generate))
-  (:malli/schema (meta #'generate-with-search))
-
-  ;; Collect and verify schemas
+  ;; Collect and verify function schemas
   (require '[malli.instrument :as mi])
   (mi/collect! {:ns 'seon.ai.gemini})
   (keys (get (m/function-schemas) 'seon.ai.gemini))
 
-  ;; Run generative tests
-  (mi/check {:filters [(mi/-filter-ns 'seon.ai.gemini)]
-             :num-tests 10})
+  ;; View function schema
+  (get-in (m/function-schemas) ['seon.ai.gemini 'generate])
 
-  ;; Manual API test (requires API key)
+  ;; Run generative tests (note: HTTP functions will fail without mocking)
+  ;; (mi/check {:filters [(mi/-filter-ns 'seon.ai.gemini)]})
+
+  ;; Manual API test
   (generate (System/getenv "GEMINI_API_KEY")
             "Say hello in three languages"
             {:model "gemini-2.5-flash"})
+
+  ;; Using convenience functions
+  (binding [*api-key* (System/getenv "GEMINI_API_KEY")]
+    (ask "What is 2+2?" {}))
 
   nil)

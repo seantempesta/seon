@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "./bin/auto-test-hook"
+            "command": "./bin/seon-hook"
           }
         ]
       }
