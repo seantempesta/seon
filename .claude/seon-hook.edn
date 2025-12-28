@@ -1,0 +1,35 @@
+;; Unified development hook configuration
+;;
+;; Controls the behavior of bin/seon-hook for:
+;; - Unit test execution
+;; - Generative testing (Malli schema validation)
+;; - AI-assisted code review (Gemini)
+;;
+;; All state (functions, errors, edit history) is stored in XTDB,
+;; not in config files.
+
+{;; Syntax repair (placeholder - not yet implemented)
+ ;; Would integrate clojure-mcp-light delimiter repair
+ :syntax-repair {:enabled false}
+
+ ;; Unit test execution
+ ;; Runs clojure.test/run-tests on corresponding *-test namespace
+ :unit-tests {:enabled true
+              ;; Block Claude if tests fail
+              :block-on-fail true}
+
+ ;; Generative testing with Malli
+ ;; Runs mg/check on functions with :malli/schema metadata
+ :generative-tests {:enabled true
+                    ;; Number of random inputs to generate (10 = fast smoke test)
+                    :num-tests 10
+                    ;; Block Claude if generative tests fail
+                    :block-on-fail true}
+
+ ;; Gemini AI review
+ ;; Provides context-aware feedback on code changes
+ :gemini {:enabled true
+          ;; Review new functions when first created
+          :on-new-function true
+          ;; Explain counter-examples when generative tests fail
+          :on-gen-fail true}}
