@@ -1,0 +1,447 @@
+#!/usr/bin/env bb
+
+;; Unified development feedback hook for Seon
+;;
+;; Pipeline:
+;;   1. Skip non-Clojure files and non-Edit events
+;;   2. Reload namespace (catch compile errors)
+;;   3. Check file hash - skip if unchanged
+;;   4. Run unit tests if test ns exists
+;;   5. Collect :malli/schema metadata
+;;   6. Run generative tests on schema'd functions
+;;   7. Record functions and results in XTDB
+;;   8. If new function or failure -> Gemini review
+;;
+;; Returns JSON for Claude Code:
+;;   {:continue true}                     - Success, continue
+;;   {:decision "block" :reason "..."}    - Failure, stop
+
+(require '[babashka.process :as process]
+         '[clojure.java.io :as io]
+         '[clojure.string :as str]
+         '[cheshire.core :as json])
+
+;;; ---------------------------------------------------------------------------
+;;; Configuration
+;;; ---------------------------------------------------------------------------
+
+(def config-path ".claude/seon-hook.edn")
+(def log-path ".claude/seon-hook.log")
+(def nrepl-port 7888)
+
+(def default-config
+  {:syntax-repair {:enabled false}  ;; Not yet implemented - placeholder
+   :unit-tests {:enabled true :block-on-fail true}
+   :generative-tests {:enabled true :num-tests 10 :block-on-fail true}
+   :gemini {:enabled true :on-new-function true :on-gen-fail true}})
+
+(defn load-config []
+  (let [f (io/file config-path)]
+    (if (.exists f)
+      (try
+        (merge default-config (read-string (slurp f)))
+        (catch Exception _
+          default-config))
+      default-config)))
+
+;;; ---------------------------------------------------------------------------
+;;; Logging
+;;; ---------------------------------------------------------------------------
+
+(defn log! [level msg & [data]]
+  (let [timestamp (str (java.time.Instant/now))
+        line (str timestamp " [" (name level) "] " msg
+                  (when data (str " " (pr-str data)))
+                  "\n")]
+    (spit log-path line :append true)))
+
+(defn safe-run
+  "Execute f, catching all exceptions. Returns nil on error."
+  [f error-msg]
+  (try
+    (f)
+    (catch Exception e
+      (log! :error (str error-msg ": " (.getMessage e)))
+      nil)))
+
+;;; ---------------------------------------------------------------------------
+;;; Input Parsing
+;;; ---------------------------------------------------------------------------
+
+(defn parse-hook-input
+  "Parse Claude Code hook JSON input from stdin."
+  []
+  (let [input (slurp *in*)
+        data (try (json/parse-string input true) (catch Exception _ nil))]
+    {:event (get data :hook_event_name)
+     :tool (get data :tool_name)
+     :file-path (or (get-in data [:tool_input :file_path])
+                    (get-in data [:tool_input :filePath])
+                    (get-in data [:file_path]))}))
+
+;;; ---------------------------------------------------------------------------
+;;; File to Namespace Mapping
+;;; ---------------------------------------------------------------------------
+
+(defn file->ns
+  "Convert source file path to namespace symbol.
+   src/seon/foo/bar.clj -> seon.foo.bar"
+  [file-path]
+  (when-let [match (re-find #"(?:^|/)src/(seon/.+)\.clj$" file-path)]
+    (-> (second match)
+        (str/replace "/" ".")
+        (str/replace "_" "-")
+        symbol)))
+
+(defn file->test-ns
+  "Convert source file path to test namespace symbol.
+   src/seon/foo.clj -> seon.foo-test"
+  [file-path]
+  (when-let [match (re-find #"(?:^|/)(?:src|test)/(seon/.+)\.clj$" file-path)]
+    (let [rel-path (second match)
+          ns-path (-> rel-path
+                      (str/replace "/" ".")
+                      (str/replace "_" "-"))]
+      (symbol
+       (if (str/ends-with? ns-path "-test")
+         ns-path
+         (str ns-path "-test"))))))
+
+(defn test-ns-exists?
+  "Check if test namespace file exists."
+  [test-ns]
+  (when test-ns
+    (let [path (str "test/" (-> (str test-ns)
+                                (str/replace "." "/")
+                                (str/replace "-" "_"))
+                    ".clj")]
+      (.exists (io/file path)))))
+
+;;; ---------------------------------------------------------------------------
+;;; nREPL Communication
+;;; ---------------------------------------------------------------------------
+
+(defn nrepl-eval
+  "Evaluate code via nREPL. Returns {:exit :out :err}."
+  [code]
+  (let [result (process/sh ["clj-nrepl-eval" "-p" (str nrepl-port) code])]
+    {:exit (:exit result)
+     :out (str/trim (:out result))
+     :err (:err result)}))
+
+(defn nrepl-available?
+  "Check if nREPL is running."
+  []
+  (let [result (process/sh ["clj-nrepl-eval" "-p" (str nrepl-port) "(+ 1 1)"])]
+    (zero? (:exit result))))
+
+;;; ---------------------------------------------------------------------------
+;;; Pipeline Stages
+;;; ---------------------------------------------------------------------------
+
+(defn stage-reload-namespace
+  "Reload the namespace. Returns {:success bool :error str}."
+  [ns-sym]
+  (log! :debug (str "Reloading namespace: " ns-sym))
+  (let [result (nrepl-eval (format "(require '%s :reload)" ns-sym))]
+    (if (zero? (:exit result))
+      {:success true}
+      {:success false
+       :error (or (:err result) (:out result) "Unknown reload error")})))
+
+(defn stage-check-file-hash
+  "Check if file has changed since last check.
+   Returns {:changed bool}."
+  [file-path]
+  (let [result (nrepl-eval
+                (format "(seon.dev.feedback/file-changed? (user/xtdb-node) \"%s\")"
+                        file-path))]
+    (if (zero? (:exit result))
+      {:changed (= "true" (:out result))}
+      ;; If we can't check, assume changed
+      {:changed true})))
+
+(defn stage-unit-tests
+  "Run unit tests if test ns exists. Returns {:success :test-count :fail-count :error-count}."
+  [source-ns test-ns]
+  (log! :debug (str "Running unit tests: " test-ns))
+
+  ;; Reload source namespace first
+  (nrepl-eval (format "(require '%s :reload)" source-ns))
+
+  ;; Reload test namespace
+  (let [reload-result (nrepl-eval (format "(require '%s :reload)" test-ns))]
+    (when-not (zero? (:exit reload-result))
+      (log! :error "Test namespace reload failed" {:ns test-ns :error (:err reload-result)})))
+
+  ;; Run tests
+  (let [result (nrepl-eval (format "(clojure.test/run-tests '%s)" test-ns))
+        output (:out result)
+        ;; Parse summary: {:test N, :pass N, :fail N, :error N, :type :summary}
+        summary-match (re-find #"\{:test \d+.*?:type :summary\}" output)
+        parsed (when summary-match
+                 (try (read-string summary-match) (catch Exception _ nil)))]
+    (if parsed
+      {:success (and (zero? (:fail parsed 0)) (zero? (:error parsed 0)))
+       :test-count (:test parsed 0)
+       :pass-count (:pass parsed 0)
+       :fail-count (:fail parsed 0)
+       :error-count (:error parsed 0)
+       :output output}
+      {:success false
+       :error "Could not parse test results"
+       :output output})))
+
+(defn stage-collect-schemas
+  "Collect Malli schemas for a namespace."
+  [ns-sym]
+  (log! :debug (str "Collecting schemas: " ns-sym))
+  (nrepl-eval (format "(do
+                        (require '[malli.instrument :as mi])
+                        (mi/collect! {:ns '%s}))"
+                      ns-sym)))
+
+(defn stage-generative-tests
+  "Run generative tests on schema-annotated functions.
+   Returns {:success :failures}."
+  [ns-sym num-tests]
+  (log! :debug (str "Running generative tests: " ns-sym " (" num-tests " tests)"))
+  (let [result (nrepl-eval
+                (format "(seon.dev.feedback/check-namespace '%s {:num-tests %d})"
+                        ns-sym num-tests))]
+    (if (zero? (:exit result))
+      (let [parsed (try (read-string (:out result)) (catch Exception _ nil))]
+        (if (and parsed (vector? parsed))
+          {:success (empty? parsed)
+           :failures parsed}
+          {:success true :failures []}))
+      {:success false
+       :error (:err result)})))
+
+(defn stage-check-new-functions
+  "Check for newly created functions (not yet in XTDB).
+   Returns {:new-fns #{...}}."
+  [ns-sym]
+  (let [result (nrepl-eval
+                (format "(seon.dev.feedback/new-functions (user/xtdb-node) '%s)"
+                        ns-sym))]
+    (if (zero? (:exit result))
+      (let [parsed (try (read-string (:out result)) (catch Exception _ nil))]
+        {:new-fns (if (set? parsed) parsed #{})})
+      {:new-fns #{}})))
+
+(defn stage-record-functions
+  "Record all schema-annotated functions in XTDB."
+  [ns-sym]
+  (log! :debug (str "Recording functions: " ns-sym))
+  (nrepl-eval
+   (format "(let [fns (seon.dev.feedback/schema-fns '%s)]
+             (doseq [fn-sym fns]
+               (seon.dev.feedback/record-function! (user/xtdb-node) '%s fn-sym)))"
+           ns-sym ns-sym)))
+
+(defn stage-record-edit-event
+  "Record edit event in XTDB."
+  [file-path result]
+  (nrepl-eval
+   (format "(seon.dev.feedback/record-edit-event! (user/xtdb-node) \"%s\" #{} %s)"
+           file-path result)))
+
+(defn stage-gemini-review
+  "Request Gemini review for new function or failure.
+   Returns {:review-text}."
+  [context-type context-data]
+  (log! :info (str "Requesting Gemini review: " context-type))
+  (let [prompt (case context-type
+                 :new-function
+                 (format "Review this new Clojure function for correctness, edge cases, and best practices:
+
+Namespace: %s
+Function: %s
+
+Provide a brief (2-3 sentences) assessment. Focus on potential issues."
+                         (:ns context-data)
+                         (:fn context-data))
+
+                 :gen-test-fail
+                 (format "A generative test failed for this Clojure function. Explain the failure and suggest a fix:
+
+Function: %s
+Schema: %s
+Shrunk input: %s
+Error: %s
+
+What does this counter-example reveal about the function's contract?"
+                         (:fn context-data)
+                         (:schema context-data)
+                         (:shrunk-input context-data)
+                         (:error context-data))
+
+                 ;; Default
+                 (str "Review: " (pr-str context-data)))
+
+        result (nrepl-eval
+                (format "(seon.ai.gemini/ask \"%s\" {})"
+                        (str/replace prompt "\"" "\\\"")))]
+    (if (zero? (:exit result))
+      {:review-text (:out result)}
+      {:error (:err result)})))
+
+;;; ---------------------------------------------------------------------------
+;;; Response Formatting
+;;; ---------------------------------------------------------------------------
+
+(defn success-response []
+  (json/generate-string {:continue true}))
+
+(defn block-response [reason]
+  (json/generate-string {:decision "block" :reason reason}))
+
+(defn info-message [msg]
+  ;; Plain text messages appear in the terminal but don't block Claude
+  (println msg))
+
+;;; ---------------------------------------------------------------------------
+;;; Main Pipeline
+;;; ---------------------------------------------------------------------------
+
+(defn run-pipeline [file-path config]
+  (let [ns-sym (file->ns file-path)
+        test-ns (file->test-ns file-path)]
+
+    ;; Must have a namespace
+    (when-not ns-sym
+      (log! :debug (str "Not a seon source file: " file-path))
+      (println (success-response))
+      (System/exit 0))
+
+    ;; 1. Reload namespace
+    (let [reload-result (stage-reload-namespace ns-sym)]
+      (when-not (:success reload-result)
+        (log! :error "Namespace reload failed" reload-result)
+        (println (block-response
+                  (format "Compile error in %s: %s" ns-sym (:error reload-result))))
+        (System/exit 0)))
+
+    ;; 2. Check file hash - skip if unchanged
+    (let [{:keys [changed]} (stage-check-file-hash file-path)]
+      (when-not changed
+        (log! :debug "File unchanged, skipping tests")
+        (println (success-response))
+        (System/exit 0)))
+
+    ;; 3. Unit tests (if enabled and test ns exists)
+    (when (and (get-in config [:unit-tests :enabled])
+               (test-ns-exists? test-ns))
+      (let [test-result (stage-unit-tests ns-sym test-ns)]
+        (if (:success test-result)
+          (info-message (format "~~ %d tests passed in %s"
+                                (:test-count test-result) test-ns))
+          (do
+            (log! :warn "Unit tests failed" test-result)
+            (when (get-in config [:unit-tests :block-on-fail])
+              (println (block-response
+                        (format "Unit tests failed in %s: %d failures, %d errors"
+                                test-ns
+                                (:fail-count test-result 0)
+                                (:error-count test-result 0))))
+              (System/exit 0))))))
+
+    ;; 4. Collect Malli schemas
+    (stage-collect-schemas ns-sym)
+
+    ;; 5. Check for new functions
+    (let [{:keys [new-fns]} (stage-check-new-functions ns-sym)
+          has-new-fns? (seq new-fns)]
+
+      ;; 6. Generative tests (if enabled)
+      (when (get-in config [:generative-tests :enabled])
+        (let [num-tests (get-in config [:generative-tests :num-tests] 10)
+              gen-result (stage-generative-tests ns-sym num-tests)]
+          (if (:success gen-result)
+            (info-message (format "~~ Generative tests passed for %s" ns-sym))
+            (do
+              (log! :warn "Generative tests failed" gen-result)
+
+              ;; Gemini review for failures
+              (when (and (get-in config [:gemini :enabled])
+                         (get-in config [:gemini :on-gen-fail]))
+                (doseq [failure (:failures gen-result)]
+                  (let [review (stage-gemini-review
+                                :gen-test-fail
+                                {:fn (:fn failure)
+                                 :error (pr-str (:error failure))
+                                 :shrunk-input (pr-str (get-in failure [:error :shrunk :smallest]))
+                                 :schema ""})]
+                    (when (:review-text review)
+                      (info-message (str "\nGemini Review:\n" (:review-text review)))))))
+
+              (when (get-in config [:generative-tests :block-on-fail])
+                (println (block-response
+                          (format "Generative test failures in %s: %s"
+                                  ns-sym
+                                  (str/join ", " (map :fn (:failures gen-result))))))
+                (System/exit 0))))))
+
+      ;; 7. Record functions in XTDB
+      (stage-record-functions ns-sym)
+      (stage-record-edit-event file-path :success)
+
+      ;; 8. Gemini review for new functions
+      (when (and has-new-fns?
+                 (get-in config [:gemini :enabled])
+                 (get-in config [:gemini :on-new-function]))
+        (doseq [fn-sym new-fns]
+          (let [review (stage-gemini-review
+                        :new-function
+                        {:ns ns-sym :fn fn-sym})]
+            (when (:review-text review)
+              (info-message (format "\nNew function %s - Gemini Review:\n%s"
+                                    fn-sym (:review-text review))))))))
+
+    ;; Success
+    (println (success-response))))
+
+(defn -main []
+  (try
+    ;; Parse input
+    (let [{:keys [event tool file-path]} (parse-hook-input)
+          config (load-config)]
+
+      ;; Skip non-relevant events
+      (when-not (and (= event "PostToolUse")
+                     (or (= tool "Edit") (= tool "Write")))
+        (log! :debug (str "Skipping event: " event " / " tool))
+        (println (success-response))
+        (System/exit 0))
+
+      ;; Skip non-Clojure files
+      (when-not (and file-path (str/ends-with? file-path ".clj"))
+        (log! :debug (str "Skipping non-Clojure file: " file-path))
+        (println (success-response))
+        (System/exit 0))
+
+      ;; Skip if not in src/seon/
+      (when-not (re-find #"src/seon/" (or file-path ""))
+        (log! :debug (str "Skipping non-seon source file: " file-path))
+        (println (success-response))
+        (System/exit 0))
+
+      ;; Check nREPL
+      (when-not (nrepl-available?)
+        (info-message "-- seon-hook: nREPL not available on port 7888")
+        (println (success-response))
+        (System/exit 0))
+
+      ;; Run the pipeline
+      (run-pipeline file-path config))
+
+    (catch Exception e
+      (log! :fatal (str "Uncaught error: " (.getMessage e)))
+      ;; Never crash - always exit gracefully
+      (println (success-response))
+      (System/exit 0)))
+
+  (System/exit 0))
+
+(-main)
