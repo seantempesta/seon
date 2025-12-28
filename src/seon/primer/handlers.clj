@@ -3,6 +3,7 @@
   (:require [seon.primer.html :as html]
             [seon.primer.ctx :as ctx]
             [seon.primer.actions :as actions]
+            [seon.primer.debug :as debug]
             [seon.web.sse :as sse]))
 
 (defn- get-session-id
@@ -32,3 +33,25 @@
     {:status 200
      :headers {"Content-Type" "application/json"}
      :body "{\"ok\": true}"}))
+
+;;; === Debug Endpoints ===
+
+(defn ctx-handler
+  "EDN ctx dump - the canonical debug format.
+   GET /primer/ctx -> Pretty-printed EDN"
+  [request]
+  (let [session-id (get-session-id request)]
+    (actions/ensure-session! session-id)
+    {:status 200
+     :headers {"Content-Type" "application/edn"}
+     :body (debug/ctx->edn (ctx/get session-id))}))
+
+(defn debug-page-handler
+  "Standalone debug page.
+   GET /primer/debug"
+  [request]
+  (let [session-id (get-session-id request)]
+    (actions/ensure-session! session-id)
+    {:status 200
+     :headers {"Content-Type" "text/html"}
+     :body (debug/debug-page session-id)}))

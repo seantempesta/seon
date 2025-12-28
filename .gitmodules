@@ -4,3 +4,6 @@
 [submodule "reference-code/malli"]
 	path = reference-code/malli
 	url = https://github.com/metosin/malli.git
+[submodule "reference-code/gemini-mcp"]
+	path = reference-code/gemini-mcp
+	url = https://github.com/RLabs-Inc/gemini-mcp.git

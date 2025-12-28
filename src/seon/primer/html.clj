@@ -26,4 +26,16 @@
      [:style styles/base-css]]
     [:body {:style "margin: 0; padding: 0;"}
      [:div {:data-init "@post('/primer')"}]
-     [:main#morph [:p {:style "color: #666; text-align: center; padding: 2rem;"} "Loading..."]]]]))
+     [:main#morph [:p {:style "color: #666; text-align: center; padding: 2rem;"} "Loading..."]]
+     ;; Debug toggle - always present, opens debug page
+     [:a#debug-toggle {:href "/primer/debug"
+                       :target "_blank"
+                       :title "Open Debug Panel"
+                       :style "position: fixed; bottom: 1rem; right: 1rem; z-index: 9999;
+                               background: #1f2937; color: white; padding: 0.5rem 0.75rem;
+                               border-radius: 9999px; font-family: monospace; font-size: 0.75rem;
+                               text-decoration: none; box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+                               opacity: 0.7; transition: opacity 0.2s;"}
+      {:data-on:mouseenter "this.style.opacity = '1'"
+       :data-on:mouseleave "this.style.opacity = '0.7'"}
+      "DBG"]]]))

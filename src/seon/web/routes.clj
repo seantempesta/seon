@@ -20,7 +20,10 @@
    [:post "/api/logs/toggle-scroll"] handlers/log-toggle-scroll
    ;; Primer routes
    [:get "/primer"]                primer-handlers/primer-page
-   [:post "/primer"]               primer-handlers/primer-sse})
+   [:post "/primer"]               primer-handlers/primer-sse
+   ;; Primer debug routes
+   [:get "/primer/ctx"]            primer-handlers/ctx-handler
+   [:get "/primer/debug"]          primer-handlers/debug-page-handler})
 
 ;; Dynamic routes with path parameters
 (def dynamic-routes
