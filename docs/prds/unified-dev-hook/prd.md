@@ -230,17 +230,22 @@ After reload, any var with `:malli/schema` not in XTDB = new function → trigge
 ### What's Built
 
 **Core Infrastructure:**
-- `bin/seon-hook` - Unified Babashka hook with full pipeline
-- `src/seon/dev/feedback.clj` - REPL-side generative testing + function tracking
+- `bin/seon-hook` - Thin Babashka wrapper (~150 lines) - JSON parsing and nREPL call
+- `src/seon/dev/hook.clj` - Main orchestrator - `process-hook-event!` entry point
+- `src/seon/dev/context.clj` - Edit/review event tracking (XTDB)
+- `src/seon/dev/codebase.clj` - File introspection, namespace mapping
+- `src/seon/dev/verify.clj` - Unit and generative test orchestration
+- `src/seon/dev/review.clj` - AI review context building
+- `src/seon/dev/repair.clj` - Delimiter repair (parinferish)
 - `src/seon/ai/gemini.clj` - Native Gemini client with search, calculate, review
 - `.claude/seon-hook.edn` - Configuration file
 
 **Hook Behavior:**
-- Syntax repair via `clj-paren-repair-claude-hook` (blocks on unfixable)
+- Syntax repair via parinferish (blocks on unfixable)
 - Unit tests with smart blocking (blocks on real failures, warns on infrastructure issues)
 - Generative tests with Malli schemas (blocks on schema mismatches)
-- Gemini review with 30s debounce (advisory, never blocks)
-- All state stored in XTDB (functions, errors, pending edits)
+- Gemini review with rate limiting (advisory, never blocks)
+- All state stored in XTDB (edit events, review events tracked temporally)
 
 **Gemini Integration:**
 - `gemini/ask` - Simple Q&A
@@ -273,8 +278,13 @@ All warning messages now include actionable fix hints:
 
 | File | Purpose |
 |------|---------|
-| `bin/seon-hook` | Unified hook script (Babashka) |
-| `src/seon/dev/feedback.clj` | REPL utilities, function tracking |
+| `bin/seon-hook` | Thin Babashka wrapper (~150 lines) |
+| `src/seon/dev/hook.clj` | Main orchestrator - `process-hook-event!` |
+| `src/seon/dev/context.clj` | Edit/review event tracking (XTDB) |
+| `src/seon/dev/codebase.clj` | File introspection, namespace mapping |
+| `src/seon/dev/verify.clj` | Unit and generative test orchestration |
+| `src/seon/dev/review.clj` | AI review context building |
+| `src/seon/dev/repair.clj` | Delimiter repair (parinferish) |
 | `src/seon/ai/gemini.clj` | Gemini API client |
 | `.claude/seon-hook.edn` | Hook configuration |
 | `CLAUDE.md` | Gemini API docs for agents |
@@ -543,9 +553,9 @@ Malli schemas can reference other schemas. Need recursive resolution:
 
 ---
 
-## Phase 6: Hook Refactor - Move Logic to Seon (In Progress)
+## Phase 6: Hook Refactor - Move Logic to Seon (Complete)
 
-**Status:** Stage 6b Complete (hook.clj - main orchestrator)
+**Status:** All stages complete
 **Goal:** Move hook logic from Babashka script into properly designed Clojure code.
 **Design Doc:** `research/phase6-design.md`
 
@@ -695,7 +705,6 @@ Replaced 851-line `bin/seon-hook` with a thin ~130-line script:
 
 **Files:**
 - `bin/seon-hook` - New thin script (168 lines including comments)
-- `bin/seon-hook.old` - Old script preserved for reference
 
 **Tested scenarios:**
 - PostToolUse on seon source file: Full pipeline runs (tests, review)
@@ -703,8 +712,14 @@ Replaced 851-line `bin/seon-hook` with a thin ~130-line script:
 - Non-Clojure file: Returns `{:continue true}` immediately
 - Non-seon Clojure file: Returns `{:continue true}` (no full pipeline)
 
-**Remaining stages:**
-- 6d: Cleanup - delete old `feedback.clj` and `bin/seon-hook.old`, update documentation
+### Stage 6d: Cleanup (Complete)
+
+Deleted legacy files and updated documentation:
+- Deleted `src/seon/dev/feedback.clj` - Replaced by `context.clj`
+- Deleted `test/seon/dev/feedback_test.clj` - No longer needed
+- Deleted `bin/seon-hook.old` - Old 851-line script
+- Updated `CLAUDE.md` - Hook internals section now lists all new namespaces
+- Updated PRD - Implementation Summary and Key Files reflect new architecture
 
 ### Problem
 

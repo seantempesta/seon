@@ -507,9 +507,21 @@ Hook config in `.claude/seon-hook.edn`:
 
 ### Hook Internals
 
-- **Script**: `bin/seon-hook` (Babashka)
-- **State**: `.claude/test-hook.db` (SQLite for tracking)
+- **Script**: `bin/seon-hook` (thin Babashka wrapper, ~150 lines)
+- **Logic**: `seon.dev.hook/process-hook-event!` (main orchestrator)
+- **State**: XTDB (edit events, review events tracked temporally)
 - **Gemini**: Uses `seon.ai.gemini` namespace for API calls
+
+**Key namespaces:**
+
+| Namespace | Purpose |
+|-----------|---------|
+| `seon.dev.hook` | Main entry point, pipeline orchestration |
+| `seon.dev.context` | Edit/review event tracking (XTDB) |
+| `seon.dev.codebase` | File introspection, namespace mapping |
+| `seon.dev.verify` | Unit and generative test orchestration |
+| `seon.dev.review` | AI review context building |
+| `seon.dev.repair` | Delimiter repair (parinferish) |
 
 ### Gemini API Pattern
 
