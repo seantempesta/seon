@@ -545,7 +545,7 @@ Malli schemas can reference other schemas. Need recursive resolution:
 
 ## Phase 6: Hook Refactor - Move Logic to Seon (In Progress)
 
-**Status:** Stage 6a-1 Complete (context.clj)
+**Status:** Stage 6a-2 Complete (codebase.clj)
 **Goal:** Move hook logic from Babashka script into properly designed Clojure code.
 **Design Doc:** `research/phase6-design.md`
 
@@ -568,8 +568,27 @@ Created `src/seon/dev/context.clj` - simplified edit/review tracking with:
 - `src/seon/dev/context.clj` - 322 lines
 - `test/seon/dev/context_test.clj` - 10 tests, 41 assertions
 
+### Stage 6a-2: seon.dev.codebase (Complete)
+
+Created `src/seon/dev/codebase.clj` - codebase introspection utilities extracted from `bin/seon-hook`:
+- `clojure-file?` - Check if a file is a Clojure file (.clj, .cljs, .cljc, .bb, .edn)
+- `file->namespace` - Parse namespace symbol from Clojure source file (robust - reads ns form, not path guessing)
+- `file->test-namespace` - Derive test namespace from source file
+- `read-source` - Read file contents safely with result map
+- `namespace->file` - Convert namespace symbol to file path (reverse mapping)
+- `test-file-exists?` - Check if test file for a namespace exists
+
+**Key features:**
+- Robust ns parsing: reads actual ns declaration, handles edge cases like /src/seon/src/seon/
+- Malli schemas per CONVENTIONS.md
+- Comprehensive tests (9 tests, 70 assertions)
+- REPL-verified all functions work correctly
+
+**Files:**
+- `src/seon/dev/codebase.clj` - ~230 lines
+- `test/seon/dev/codebase_test.clj` - 9 tests, 70 assertions
+
 **Remaining stages:**
-- 6a-2: `seon.dev.codebase` - File introspection, ns mapping
 - 6a-3: `seon.dev.verify` - Test orchestration
 - 6a-4: `seon.dev.review` - AI review + context building
 - 6a-5: `seon.dev.repair` - Delimiter repair (port from clojure-mcp-light)
