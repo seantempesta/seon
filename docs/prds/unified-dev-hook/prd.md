@@ -545,7 +545,7 @@ Malli schemas can reference other schemas. Need recursive resolution:
 
 ## Phase 6: Hook Refactor - Move Logic to Seon (In Progress)
 
-**Status:** Stage 6a-3 Complete (verify.clj)
+**Status:** Stage 6a-4 Complete (review.clj)
 **Goal:** Move hook logic from Babashka script into properly designed Clojure code.
 **Design Doc:** `research/phase6-design.md`
 
@@ -611,8 +611,28 @@ Created `src/seon/dev/verify.clj` - test orchestration utilities for the dev hoo
 - `src/seon/dev/verify.clj` - ~440 lines
 - `test/seon/dev/verify_test.clj` - 9 tests, 44 assertions
 
+### Stage 6a-4: seon.dev.review (Complete)
+
+Created `src/seon/dev/review.clj` - AI code review extracted from `bin/seon-hook`:
+- `build-context` - Build context for AI review from edit summary (files, test results, new functions)
+- `call-gemini` - Call Gemini for code review using existing `seon.ai.gemini` client
+- `format-output` - Format review output for display with truncation
+- `review-edits` - Convenience function combining all three steps
+
+**Key features:**
+- Clean separation of concerns (context building, API call, formatting)
+- Uses existing `seon.ai.gemini/review-code` for API calls
+- Loads CONVENTIONS.md for system instruction caching
+- Proper error handling and graceful degradation
+- Malli schemas per CONVENTIONS.md for all public functions
+- Comprehensive tests (10 tests, 40 assertions)
+- REPL-verified all functions work correctly
+
+**Files:**
+- `src/seon/dev/review.clj` - ~280 lines
+- `test/seon/dev/review_test.clj` - 10 tests, 40 assertions
+
 **Remaining stages:**
-- 6a-4: `seon.dev.review` - AI review + context building
 - 6a-5: `seon.dev.repair` - Delimiter repair (port from clojure-mcp-light)
 - 6a-6: `seon.dev.hook` - Main orchestrator
 
