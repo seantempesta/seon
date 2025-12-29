@@ -25,9 +25,10 @@
 
  ;; Gemini AI review with debouncing
  ;; - Edits are tracked in XTDB as pending
- ;; - After 30s of inactivity, triggers batch review
+ ;; - After debounce-seconds of inactivity, triggers batch review
  ;; - Uses structured output for consistent verdict/confidence
  ;; - Blocks only on :verdict :block with :confidence :high
  :gemini {:enabled true
           :on-new-function true
-          :on-gen-fail true}}
+          :on-gen-fail true
+          :debounce-seconds 5}}  ;; Temporarily reduced for testing
