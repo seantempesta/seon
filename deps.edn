@@ -26,9 +26,8 @@
 
         ;; Utilities
         aero/aero {:mvn/version "1.1.6"}           ; Config
-        com.taoensso/timbre {:mvn/version "6.5.0"} ; Logging
-        com.fzakaria/slf4j-timbre {:mvn/version "0.4.1"} ; SLF4J -> Timbre bridge
-        ch.qos.logback/logback-classic {:mvn/version "1.5.6"} ; XTDB compaction logging
+        com.taoensso/timbre {:mvn/version "6.5.0"} ; Logging (app code)
+        ch.qos.logback/logback-classic {:mvn/version "1.5.6"} ; SLF4J provider for XTDB
         tick/tick {:mvn/version "0.7.5"}           ; Time handling
 
         ;; HTTP & JSON
