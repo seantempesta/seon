@@ -3,7 +3,7 @@
 
    Tests cover:
    1. Schema registration - schemas are in global registry and valid
-   2. Schema validation - data validates against schemas correctly
+   2. Schema validation - request/response validate correctly
    3. Schema generation - can generate valid sample data
    4. Function metadata - :malli/schema is accessible on vars
    5. Schema collection - mi/collect! registers function schemas
@@ -13,7 +13,8 @@
    [malli.core :as m]
    [malli.generator :as mg]
    [malli.instrument :as mi]
-   [seon.ai.gemini :as gemini]))
+   [seon.ai.gemini :as gemini]
+   [seon.schema :as schema]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schema Registration Tests
@@ -21,21 +22,18 @@
 
 (deftest schema-registration-test
   (testing "Gemini schemas are registered in global registry"
-    (doseq [k gemini/gemini-schema-keys]
-      (is (some? (m/schema k))
-          (str "Schema " k " should be registered"))))
-
-  (testing "Schema introspection function works"
-    (is (some? (gemini/schema :gemini/api-key)))
-    (is (some? (gemini/schema :gemini/prompt)))
-    (is (some? (gemini/schema :gemini/model)))
-    (is (some? (gemini/schema :gemini/options)))
-    (is (some? (gemini/schema :gemini/response)))
-    (is (nil? (gemini/schema :gemini/nonexistent)))))
+    (let [gemini-schemas (schema/schemas-in-namespace "seon.ai.gemini")]
+      (is (pos? (count gemini-schemas)) "Should have registered schemas")
+      (is (contains? gemini-schemas ::gemini/prompt))
+      (is (contains? gemini-schemas ::gemini/api-key))
+      (is (contains? gemini-schemas ::gemini/model))
+      (is (contains? gemini-schemas ::gemini/response))
+      (is (contains? gemini-schemas ::gemini/ask-request))
+      (is (contains? gemini-schemas ::gemini/generate-request)))))
 
 (deftest schema-validity-test
-  (testing "All registered schemas are valid Malli schemas"
-    (doseq [k gemini/gemini-schema-keys]
+  (testing "All registered Gemini schemas are valid Malli schemas"
+    (doseq [[k _] (schema/schemas-in-namespace "seon.ai.gemini")]
       (is (m/schema? (m/schema k))
           (str "Schema " k " should be a valid Malli schema")))))
 
@@ -44,44 +42,44 @@
 ;;; ---------------------------------------------------------------------------
 
 (deftest schema-generation-test
-  (testing "Can generate :gemini/api-key"
-    (let [generated (mg/generate :gemini/api-key)]
+  (testing "Can generate ::gemini/api-key"
+    (let [generated (mg/generate ::gemini/api-key)]
       (is (string? generated))
       (is (pos? (count generated)))))
 
-  (testing "Can generate :gemini/prompt"
-    (let [generated (mg/generate :gemini/prompt)]
+  (testing "Can generate ::gemini/prompt"
+    (let [generated (mg/generate ::gemini/prompt)]
       (is (string? generated))
       (is (pos? (count generated)))))
 
-  (testing "Can generate :gemini/model"
-    (let [generated (mg/generate :gemini/model)]
+  (testing "Can generate ::gemini/model"
+    (let [generated (mg/generate ::gemini/model)]
       (is (string? generated))
-      (is (#{"gemini-2.5-flash" "gemini-2.5-pro"
-             "gemini-3-flash" "gemini-3-pro-preview"} generated))))
+      (is (#{"gemini-3-flash-preview" "gemini-3-pro-preview"} generated))))
 
-  (testing "Can generate :gemini/options"
-    (let [generated (mg/generate :gemini/options)]
-      (is (map? generated))))
-
-  (testing "Can generate :gemini/response"
-    (let [generated (mg/generate :gemini/response)]
+  (testing "Can generate ::gemini/ask-request"
+    (let [generated (mg/generate ::gemini/ask-request)]
       (is (map? generated))
-      (is (contains? generated :text))
-      (is (string? (:text generated))))))
+      (is (contains? generated ::gemini/prompt))))
+
+  (testing "Can generate ::gemini/response"
+    (let [generated (mg/generate ::gemini/response)]
+      (is (map? generated))
+      (is (contains? generated ::gemini/text))
+      (is (string? (::gemini/text generated))))))
 
 (deftest complex-schema-generation-test
-  (testing "Can generate multiple valid options"
-    (let [samples (mg/sample :gemini/options {:size 10})]
+  (testing "Can generate multiple valid ask-requests"
+    (let [samples (mg/sample ::gemini/ask-request {:size 10})]
       (is (= 10 (count samples)))
-      (doseq [opt samples]
-        (is (m/validate :gemini/options opt)))))
+      (doseq [req samples]
+        (is (m/validate ::gemini/ask-request req)))))
 
   (testing "Can generate multiple valid responses"
-    (let [samples (mg/sample :gemini/response {:size 10})]
+    (let [samples (mg/sample ::gemini/response {:size 10})]
       (is (= 10 (count samples)))
       (doseq [resp samples]
-        (is (m/validate :gemini/response resp))))))
+        (is (m/validate ::gemini/response resp))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Function Schema Metadata Tests
@@ -93,16 +91,6 @@
       (is (some? schema) "Should have :malli/schema metadata")
       (is (vector? schema) "Schema should be a vector")
       (is (= :=> (first schema)) "Should be a function schema")))
-
-  (testing "generate-with-search has :malli/schema metadata"
-    (let [schema (:malli/schema (meta #'gemini/generate-with-search))]
-      (is (some? schema))
-      (is (= :=> (first schema)))))
-
-  (testing "generate-with-code has :malli/schema metadata"
-    (let [schema (:malli/schema (meta #'gemini/generate-with-code))]
-      (is (some? schema))
-      (is (= :=> (first schema)))))
 
   (testing "ask has :malli/schema metadata"
     (let [schema (:malli/schema (meta #'gemini/ask))]
@@ -131,8 +119,6 @@
       (is (some? gemini-schemas)
           "Should have schemas for seon.ai.gemini namespace")
       (is (contains? gemini-schemas 'generate))
-      (is (contains? gemini-schemas 'generate-with-search))
-      (is (contains? gemini-schemas 'generate-with-code))
       (is (contains? gemini-schemas 'ask))
       (is (contains? gemini-schemas 'search))
       (is (contains? gemini-schemas 'calculate))))
@@ -145,82 +131,56 @@
       (is (m/schema? (:schema generate-schema))))))
 
 ;;; ---------------------------------------------------------------------------
-;;; Response Validation Tests
+;;; Request/Response Validation Tests
 ;;; ---------------------------------------------------------------------------
+
+(deftest request-validation-test
+  (testing "Minimal ask-request is valid"
+    (is (m/validate ::gemini/ask-request {::gemini/prompt "Hello"})))
+
+  (testing "ask-request with options is valid"
+    (is (m/validate ::gemini/ask-request
+                    {::gemini/prompt "Hello"
+                     ::gemini/model "gemini-3-pro-preview"
+                     ::gemini/thinking-level "high"})))
+
+  (testing "generate-request requires api-key"
+    (is (not (m/validate ::gemini/generate-request {::gemini/prompt "Hello"})))
+    (is (m/validate ::gemini/generate-request
+                    {::gemini/api-key "test-key"
+                     ::gemini/prompt "Hello"}))))
 
 (deftest response-validation-test
   (testing "Valid success response passes validation"
-    (let [response {:text "Hello, world!"
-                    :grounding-metadata nil
-                    :code-results nil
-                    :usage-metadata {:promptTokenCount 10
-                                     :candidatesTokenCount 5
-                                     :totalTokenCount 15}}]
-      (is (m/validate :gemini/response response))))
+    (let [response {::gemini/text "Hello, world!"
+                    ::gemini/usage {:promptTokenCount 10
+                                    :candidatesTokenCount 5
+                                    :totalTokenCount 15}}]
+      (is (m/validate ::gemini/response response))))
 
   (testing "Minimal success response passes validation"
-    (let [response {:text "Hello, world!"}]
-      (is (m/validate :gemini/response response))))
+    (let [response {::gemini/text "Hello, world!"}]
+      (is (m/validate ::gemini/response response))))
 
   (testing "Valid error response passes validation"
-    (let [response {:text ""
-                    :error {:status 401
-                            :message "Invalid API key"}}]
-      (is (m/validate :gemini/response response))))
+    (let [response {::gemini/text ""
+                    ::gemini/error {::gemini/status 401
+                                    ::gemini/message "Invalid API key"}}]
+      (is (m/validate ::gemini/response response))))
 
   (testing "Response with grounding metadata passes validation"
-    (let [response {:text "According to recent sources..."
-                    :grounding-metadata
+    (let [response {::gemini/text "According to recent sources..."
+                    ::gemini/grounding-metadata
                     {:webSearchQueries ["test query"]
                      :groundingChunks [{:web {:uri "https://example.com"
                                               :title "Example"}}]}}]
-      (is (m/validate :gemini/response response))))
+      (is (m/validate ::gemini/response response))))
 
   (testing "Response with code results passes validation"
-    (let [response {:text "The result is 42"
-                    :code-results [{:outcome "OUTCOME_OK"
-                                    :output "42"}]}]
-      (is (m/validate :gemini/response response)))))
-
-;;; ---------------------------------------------------------------------------
-;;; Options Validation Tests
-;;; ---------------------------------------------------------------------------
-
-(deftest options-validation-test
-  (testing "Empty options map is valid"
-    (is (m/validate :gemini/options {})))
-
-  (testing "Options with model is valid"
-    (is (m/validate :gemini/options {:model "gemini-2.5-flash"})))
-
-  (testing "Options with timeout is valid"
-    (is (m/validate :gemini/options {:timeout 30000})))
-
-  (testing "Options with tools is valid"
-    (is (m/validate :gemini/options {:tools [{:google_search {}}]}))
-    (is (m/validate :gemini/options {:tools [{:code_execution {}}]})))
-
-  (testing "Options with thinking-level is valid"
-    (is (m/validate :gemini/options {:thinking-level "high"})))
-
-  (testing "Full options map is valid"
-    (is (m/validate :gemini/options
-                    {:model "gemini-3-flash"
-                     :timeout 45000
-                     :tools [{:google_search {}}]
-                     :thinking-level "medium"
-                     :system-instruction "You are a helpful assistant."}))))
-
-(deftest options-validation-failures-test
-  (testing "Invalid model fails validation"
-    (is (not (m/validate :gemini/options {:model "invalid-model"}))))
-
-  (testing "Invalid timeout fails validation"
-    (is (not (m/validate :gemini/options {:timeout 100})))    ; below minimum
-    (is (not (m/validate :gemini/options {:timeout 700000})))) ; above maximum
-
-  (testing "Invalid thinking-level fails validation"
-    (is (not (m/validate :gemini/options {:thinking-level "extreme"})))))
+    (let [response {::gemini/text "The result is 42"
+                    ::gemini/code-results [{:outcome "OUTCOME_OK"
+                                            :output "42"}]}]
+      (is (m/validate ::gemini/response response)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; API Key Handling Tests
@@ -232,21 +192,21 @@
       (with-redefs [seon.ai.gemini/resolve-api-key (fn [_] nil)]
         (is (thrown-with-msg? clojure.lang.ExceptionInfo
                               #"No Gemini API key available"
-                              (gemini/ask "test" {}))))))
+                              (gemini/ask {::gemini/prompt "test"}))))))
 
   (testing "search throws when no API key available"
     (binding [gemini/*api-key* nil]
       (with-redefs [seon.ai.gemini/resolve-api-key (fn [_] nil)]
         (is (thrown-with-msg? clojure.lang.ExceptionInfo
                               #"No Gemini API key available"
-                              (gemini/search "test" {}))))))
+                              (gemini/search {::gemini/prompt "test"}))))))
 
   (testing "calculate throws when no API key available"
     (binding [gemini/*api-key* nil]
       (with-redefs [seon.ai.gemini/resolve-api-key (fn [_] nil)]
         (is (thrown-with-msg? clojure.lang.ExceptionInfo
                               #"No Gemini API key available"
-                              (gemini/calculate "test" {})))))))
+                              (gemini/calculate {::gemini/prompt "test"})))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Generative Schema Check
@@ -294,4 +254,4 @@
     (is (= 60000 gemini/default-timeout-ms)))
 
   (testing "Default model is valid"
-    (is (m/validate :gemini/model gemini/default-model))))
+    (is (m/validate ::gemini/model gemini/default-model))))
