@@ -225,7 +225,73 @@ After reload, any var with `:malli/schema` not in XTDB = new function → trigge
 
 ## Implementation Summary
 
-*Fill in after implementation.*
+**Status:** Phases 1-2 complete, Phases 3-5 remaining
+
+### What's Built
+
+**Core Infrastructure:**
+- `bin/seon-hook` - Unified Babashka hook with full pipeline
+- `src/seon/dev/feedback.clj` - REPL-side generative testing + function tracking
+- `src/seon/ai/gemini.clj` - Native Gemini client with search, calculate, review
+- `.claude/seon-hook.edn` - Configuration file
+
+**Hook Behavior:**
+- Syntax repair via `clj-paren-repair-claude-hook` (blocks on unfixable)
+- Unit tests with smart blocking (blocks on real failures, warns on infrastructure issues)
+- Generative tests with Malli schemas (blocks on schema mismatches)
+- Gemini review with 30s debounce (advisory, never blocks)
+- All state stored in XTDB (functions, errors, pending edits)
+
+**Gemini Integration:**
+- `gemini/ask` - Simple Q&A
+- `gemini/search` - Web-grounded responses (for agent research)
+- `gemini/calculate` - Python code execution
+- `gemini/review-code` - Plain text code review (simplified from structured)
+
+### What's Remaining
+
+**Phase 3: Caching Optimization**
+- Move CONVENTIONS.md to system instruction for implicit caching
+- Log `cachedContentTokenCount` to verify cache hits
+- Target 70-80% cache hit rate, 90% cost reduction on cached tokens
+
+**Phase 4: Helpful Error Context**
+- Add actionable fix hints to all warnings (e.g., "nREPL down - restart with ./bin/run")
+- Ensure all feedback uses `add-feedback!` → `additionalContext`
+
+**Phase 5: Configuration Cleanup**
+- Make debounce-seconds configurable via `.claude/seon-hook.edn`
+- Add log-tokens toggle
+- Update PRD with final documentation
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `bin/seon-hook` | Unified hook script (Babashka) |
+| `src/seon/dev/feedback.clj` | REPL utilities, function tracking |
+| `src/seon/ai/gemini.clj` | Gemini API client |
+| `.claude/seon-hook.edn` | Hook configuration |
+| `CLAUDE.md` | Gemini API docs for agents |
+
+### Performance
+
+| Scenario | Time |
+|----------|------|
+| Non-code file | ~120ms |
+| Code file, tests pass | ~1.2s |
+| With Gemini review | ~10-15s (API time) |
+
+### Testing
+
+```bash
+# Test hook manually
+echo '{"hook_event_name":"PostToolUse","tool_name":"Edit","tool_input":{"file_path":"/path/to/file.clj"}}' | bb bin/seon-hook
+
+# Test Gemini search (web grounding)
+clj-nrepl-eval -p 7888 "(require '[seon.ai.gemini :as g])"
+clj-nrepl-eval -p 7888 "(g/search {::g/prompt \"Latest Clojure features\"})"
+```
 
 ---
 
