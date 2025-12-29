@@ -63,15 +63,43 @@ Domain code (trading, health, finance) will use SQL for LLM accessibility. This 
 
 ---
 
-## Findings
-
-*(To be filled in during research)*
+## Findings (Updated 2025-12-29)
 
 ### Column Naming Convention
-TBD
+
+**IMPORTANT**: XTDB uses `$` (not `_`) for namespaced keywords:
+
+| Clojure | SQL Column |
+|---------|------------|
+| `:fn/namespace` | `fn$namespace` |
+| `:fn/first-seen` | `fn$first_seen` |
+| `:edit/file` | `edit$file` |
+| `:xt/id` | `_id` |
+| `:xt/valid-from` | `_valid_from` |
+| `:xt/valid-to` | `_valid_to` |
 
 ### Parameterized Query Syntax
-TBD
+
+```clojure
+;; Positional parameters work
+(xt/q node ["SELECT * FROM users WHERE _id = ?" :user/alice])
+
+;; Keywords work as parameters for _id
+(xt/q node ["SELECT * FROM function WHERE _id = ?" :seon.ai.gemini/ask])
+
+;; Instants work for temporal filtering
+(xt/q node ["SELECT * FROM edit_event WHERE _valid_from > ?" cutoff-instant])
+```
+
+### Filtering on Namespaced Columns
+
+Filtering on columns like `fn$namespace` in SQL is complex. Simpler approach:
+
+```clojure
+;; Fetch all, filter in Clojure
+(->> (xt/q node "SELECT * FROM function")
+     (filter #(= :seon.foo (:fn/namespace %))))
+```
 
 ### Type Mapping
 | Clojure Type | SQL Type | Notes |
@@ -79,9 +107,16 @@ TBD
 | String | VARCHAR | |
 | Long | BIGINT | |
 | Double | DOUBLE | |
-| Keyword | ??? | |
-| Instant | TIMESTAMP | |
+| Keyword | VARCHAR | Stored/returned as keyword |
+| Instant | TIMESTAMP | Use `#inst` or `Instant` |
 | UUID | UUID | |
+| Set | ARRAY | |
+| Map | OBJECT | Nested docs |
+
+### XTQL vs SQL Status
+
+**As of 2025-12-29**: XTQL partially works via `node/query` but has edge cases that fail.
+SQL via `xt/q` works reliably. Since XTQL compiles to SQL anyway, prefer SQL directly.
 
 ---
 
