@@ -131,11 +131,20 @@ docs/prds/{feature}/
 
 ### When You're Stuck
 
-1. Read more context - often the answer is in adjacent files
-2. Check reference docs - see Documentation Reference section below
-3. Invoke relevant skills - they contain project-specific knowledge
-4. Try a different approach - PRDs describe goals, not exact implementations
-5. Document what you tried in notes.md - so the next agent doesn't repeat it
+**Think first, don't guess.** Spend more time researching and understanding, less time trying random things.
+
+1. **Use `(search "query")` via REPL** - This is your best research tool:
+   ```bash
+   clj-nrepl-eval -p 7888 "(search \"How to do X in XTDB v2\")"
+   ```
+   This gives you web-grounded, current information with source citations. Use it liberally.
+
+2. Read more context - often the answer is in adjacent files
+3. Check reference docs - see Documentation Reference section below
+4. Invoke relevant skills - they contain project-specific knowledge
+5. **For XTDB issues** - We have the full source code at `reference-code/xtdb/`. Read it.
+6. Try a different approach - PRDs describe goals, not exact implementations
+7. Document what you tried in notes.md - so the next agent doesn't repeat it
 
 ---
 
@@ -172,9 +181,26 @@ Use `clj-nrepl-eval` to send commands to the running server:
 
 ```bash
 clj-nrepl-eval -p 7888 "(reset)"                    # Reload code
-clj-nrepl-eval -p 7888 "(user/status)"              # Check status
-clj-nrepl-eval -p 7888 "(integrant.repl/reset)"     # Alternative reset
+clj-nrepl-eval -p 7888 "(status)"                   # Check status
+clj-nrepl-eval -p 7888 "(search \"XTDB SQL syntax\")" # Research when stuck
 ```
+
+### REPL Helper Functions
+
+The `user` namespace (loaded automatically) provides these helpers:
+
+| Function | Purpose |
+|----------|---------|
+| `(go)` | Start system |
+| `(halt)` | Stop system |
+| `(reset)` | Reload code and restart |
+| `(status)` | Show system status |
+| `(search "query")` | Web search via Gemini (use when stuck!) |
+| `(ask "query")` | Ask Gemini (no web search) |
+| `(xtdb-node)` | Get XTDB node |
+| `(db-reset!)` | Delete all data and restart fresh |
+
+**Location:** `env/dev/clj/user.clj` (NOT `dev/user.clj`)
 
 ### If You Need to Restart
 
@@ -188,11 +214,12 @@ clj-nrepl-eval -p 7888 "(integrant.repl/reset)"     # Alternative reset
 ## Critical Rules
 
 1. **Invoke skills before searching** - Check if a skill applies before manually grepping/reading
-2. **Use native XTQL, not SQL** - Use `seon.db.node/query`, never raw SQL strings
+2. **Use SQL for XTDB** - We've moved to SQL syntax (not XTQL). See `docs/reference/xtdb-v2-reference.md`
 3. **Write tests** - All code changes require appropriate tests
 4. **REPL-driven development** - Verify changes work via REPL before declaring done
 5. **PRDs may be wrong** - Understand what you're building, don't blindly follow specs
 6. **Domain isolation** - Domains communicate through core protocols, not direct calls
+7. **Research before guessing** - Use `gemini/search` via REPL when stuck. Don't try random things.
 
 ---
 
@@ -361,23 +388,24 @@ This shows all running components and XTDB metrics.
 
 ## XTDB Quick Reference
 
+**We use SQL syntax** - it's more stable than XTQL and better documented.
+
 ```clojure
-;; CORRECT - use our wrapper with XTQL
 (require '[seon.db.node :as node])
-(node/query (xtdb-node) '(from :option-greeks [asset/ticker quote/iv]))
 
-;; CORRECT - with dynamic values
-(require '[xtdb.api :as xt])
-(node/query (xtdb-node)
-  (xt/template (from :option-greeks [{:asset/ticker ~ticker} quote/iv])))
+;; CORRECT - use SQL with our wrapper
+(node/q (xtdb-node) "SELECT ticker, iv FROM option_greeks WHERE ticker = ?" ["SPY"])
 
-;; WRONG - don't use SQL strings or xt/q directly
+;; CORRECT - simple queries
+(node/q (xtdb-node) "SELECT * FROM trades ORDER BY timestamp DESC LIMIT 10")
 ```
 
-**Key gotchas:**
-- `[*]` returns empty maps - always list columns explicitly
-- Use `xt/template` for dynamic values
-- See `docs/reference/xtdb-v2-reference.md` for full reference
+**Key resources:**
+- `docs/reference/xtdb-v2-reference.md` - Our SQL patterns and examples
+- `reference-code/xtdb/` - **Full XTDB source code** - read this when stuck!
+- Use `gemini/search` for XTDB questions - it has current docs
+
+**When you hit XTDB issues:** Don't guess. Read the source code in `reference-code/xtdb/` or use `gemini/search` to get current documentation. XTDB v2 is different from v1.
 
 ---
 

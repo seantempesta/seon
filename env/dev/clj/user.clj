@@ -10,6 +10,7 @@
   This is the key insight: runner doesn't bypass integrant.repl,
   it USES integrant.repl. Unified state management achieved."
   (:require
+   [clojure.java.io :as io]
    [clojure.java.shell]
    [clojure.pprint]
    [clojure.spec.alpha :as s]
@@ -19,6 +20,7 @@
    [integrant.core :as ig]
    [integrant.repl :refer [clear go halt prep init reset reset-all]]
    [integrant.repl.state :as state]
+   [seon.ai.gemini :as gemini]
    [seon.config :as config]))
 
 (alter-var-root #'s/*explain-out* (constantly expound/printer))
@@ -57,6 +59,12 @@
   (when state/system
     (:seon/xtdb-node state/system)))
 
+(defn schema-registry
+  "Get the Malli schema registry from the running system."
+  []
+  (when state/system
+    (:seon/schema-registry state/system)))
+
 (defn status
   "Show system status."
   []
@@ -71,6 +79,55 @@
         (require 'seon.db.node)
         (clojure.pprint/pprint ((resolve 'seon.db.node/status) node))))
     (println "System not running. Start with: (go) or ./bin/run")))
+
+;; ========================================
+;; AI Research (use when stuck!)
+;; ========================================
+
+(defn search
+  "Search the web via Gemini. Use this when you're stuck or need current info.
+
+  Examples:
+    (search \"XTDB v2 SQL syntax for temporal queries\")
+    (search \"Clojure Malli coercion patterns\")"
+  [query]
+  (gemini/search {::gemini/prompt query}))
+
+(defn ask
+  "Ask Gemini a question (no web search, uses model knowledge).
+
+  Examples:
+    (ask \"Explain the difference between XTQL and SQL in XTDB\")"
+  [query]
+  (gemini/ask {::gemini/prompt query}))
+
+;; ========================================
+;; Database Management
+;; ========================================
+
+(defn db-reset!
+  "Delete all XTDB data and restart with fresh database.
+  WARNING: This deletes all data!"
+  []
+  (println "Stopping system...")
+  (halt)
+  (println "Deleting XTDB data directory...")
+  (let [data-dir (io/file "data/xtdb")]
+    (when (.exists data-dir)
+      (doseq [f (reverse (file-seq data-dir))]
+        (.delete f))))
+  (println "Starting fresh system...")
+  (go)
+  (println "Database reset complete."))
+
+(defn list-backups
+  "List available XTDB backups."
+  []
+  (let [backup-dir (io/file "data/backups")]
+    (if (.exists backup-dir)
+      (doseq [f (sort (.listFiles backup-dir))]
+        (println (.getName f)))
+      (println "No backups directory found at data/backups"))))
 
 ;; ========================================
 ;; Log Parsing and Analysis Functions

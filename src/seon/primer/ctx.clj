@@ -4,6 +4,7 @@
   The atom is permissive - store anything. Background sync to XTDB
   skips non-serializable values with warnings. Agent code should
   regenerate runtime-only data on load."
+  (:refer-clojure :exclude [get get-in assoc! dissoc!])
   (:require [taoensso.timbre :as log]
             [seon.db.node :as db]
             [xtdb.api :as xt]))
