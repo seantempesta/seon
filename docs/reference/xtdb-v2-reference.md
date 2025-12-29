@@ -37,18 +37,74 @@
 
 ---
 
-## XTQL Queries
+## CRITICAL: SQL Queries vs XTQL
+
+**As of 2025-12-29**: In this project, **use SQL queries directly** rather than XTQL.
+
+XTQL queries via `xt/q` or `node/xtql-query` currently fail with:
+```
+No implementation of method: :plan-query of protocol: #'xtdb.xtql.plan/PlanQuery found for class: xtdb.xtql.From
+```
+
+### What Works
+
+```clojure
+;; SQL queries work perfectly
+(xt/q node "SELECT * FROM users WHERE name = 'Alice'")
+
+;; Parameterized SQL queries
+(xt/q node ["SELECT * FROM users WHERE _id = ?" user-id])
+
+;; Keywords work as parameters for _id
+(xt/q node ["SELECT * FROM function WHERE _id = ?" :seon.ai.gemini/ask])
+```
+
+### What Doesn't Work
+
+```clojure
+;; XTQL queries fail - DO NOT USE
+(xt/q node '(from :users [name email]))
+(node/xtql-query node '(from :users [name email]))
+```
+
+### Column Name Mapping
+
+XTDB maps namespaced keywords to SQL column names:
+- `:fn/namespace` → `fn$namespace` in SQL
+- `:fn/first-seen` → `fn$first_seen` in SQL
+- `:xt/id` → `_id` in SQL
+- `:xt/valid-from` → `_valid_from` in SQL
+
+**Filtering on namespaced columns**: The SQL syntax for filtering on columns like `fn$namespace` is complex. The simpler approach is to:
+1. Fetch all rows: `SELECT * FROM table`
+2. Filter in Clojure: `(filter #(= value (:col %)) results)`
+
+### Temporal Queries in SQL
+
+```clojure
+;; Filter by valid-time (parameterized)
+(xt/q node ["SELECT * FROM edit_event WHERE _valid_from > ? ORDER BY _valid_from" cutoff-instant])
+
+;; Query at a specific point in time
+(xt/q node "SELECT * FROM users FOR VALID_TIME AS OF TIMESTAMP '2025-01-01T00:00:00Z'")
+```
+
+---
+
+## XTQL Queries (DEPRECATED - USE SQL INSTEAD)
 
 ### Why node/query, Not xt/q?
 
 The public `xt/q` wraps XTQL in SQL strings and sends via JDBC. Our `ml-options.db.node/query` uses `xtp/open-xtql-query` directly for native execution without serialization overhead.
 
-```clojure
-;; CORRECT - use our wrapper
-(node/query my-node '(from :users [name email]))
+**NOTE**: As documented above, XTQL is currently broken. Use SQL instead.
 
-;; WRONG - wraps in SQL, may have issues
-(xt/q my-node '(from :users [name email]))
+```clojure
+;; CORRECT - use SQL
+(xt/q my-node "SELECT * FROM users")
+
+;; BROKEN - XTQL doesn't work
+(node/query my-node '(from :users [name email]))
 ```
 
 ### Basic Queries

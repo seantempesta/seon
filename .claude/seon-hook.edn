@@ -4,7 +4,7 @@
 ;; - Syntax repair (delimiter fix, cljfmt)
 ;; - Unit test execution
 ;; - Generative testing (Malli schema validation)
-;; - AI-assisted code review (Gemini with debouncing)
+;; - AI-assisted code review (Gemini with bounded window model)
 ;;
 ;; All state (functions, errors, edit history) is stored in XTDB.
 
@@ -23,12 +23,17 @@
                     :num-tests 10
                     :block-on-fail true}
 
- ;; Gemini AI review with debouncing
- ;; - Edits are tracked in XTDB as pending
- ;; - After debounce-seconds of inactivity, triggers batch review
- ;; - Uses structured output for consistent verdict/confidence
- ;; - Blocks only on :verdict :block with :confidence :high
+ ;; Gemini AI review with bounded window model
+ ;; - Edits are recorded as immutable facts (never deleted)
+ ;; - A singleton tracks when last review completed
+ ;; - Query only looks at recent edits (bounded by lookback-minutes)
+ ;; - Safety: Even if reviews stop, we only process bounded window
  :gemini {:enabled true
           :on-new-function true
           :on-gen-fail true
-          :debounce-seconds 5}}  ;; Temporarily reduced for testing
+          ;; Wait for user to stop typing before reviewing
+          :debounce-seconds 5
+          ;; Minimum time between reviews (prevents review spam)
+          :cooldown-seconds 30
+          ;; Max edit history to consider (bounds accumulation)
+          :lookback-minutes 5}}
