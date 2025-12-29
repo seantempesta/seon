@@ -413,30 +413,34 @@
    (format "(seon.dev.feedback/record-edit-event! (user/xtdb-node) \"%s\" #{} %s)"
            file-path result)))
 
-(defn stage-record-pending-edit
-  "Record edit as pending for batched review."
+(defn stage-record-edit
+  "Record edit event (immutable fact)."
   [file-path ns-sym new-fns]
-  (log! :debug (str "Recording pending edit: " file-path))
+  (log! :debug (str "Recording edit: " file-path))
   (nrepl-eval
-   (format "(seon.dev.feedback/record-pending-edit! (user/xtdb-node) \"%s\" '%s {:new-functions %s})"
+   (format "(seon.dev.feedback/record-edit! (user/xtdb-node) \"%s\" '%s {:new-functions %s})"
            file-path ns-sym (pr-str (vec new-fns)))))
 
 (defn stage-should-review?
-  "Check if debounce timer expired and review should trigger.
-   Uses :debounce-seconds from config (defaults to 30s)."
+  "Check if review should trigger based on debounce, cooldown, and lookback.
+   Uses config values from :gemini section."
   [config]
-  (let [debounce-secs (get-in config [:gemini :debounce-seconds] 30)
-        result (nrepl-eval (format "(seon.dev.feedback/should-trigger-review? (user/xtdb-node) %d)"
-                                   debounce-secs))
+  (let [debounce-secs (get-in config [:gemini :debounce-seconds] 5)
+        cooldown-secs (get-in config [:gemini :cooldown-seconds] 30)
+        lookback-mins (get-in config [:gemini :lookback-minutes] 5)
+        result (nrepl-eval (format "(seon.dev.feedback/should-trigger-review? (user/xtdb-node) {:debounce-seconds %d :cooldown-seconds %d :lookback-minutes %d})"
+                                   debounce-secs cooldown-secs lookback-mins))
         value (parse-nrepl-value (:out result))
         should-review (= "true" value)]
-    (log! :debug (str "Should review? " should-review " (debounce: " debounce-secs "s, value: " value ", exit: " (:exit result) ")"))
+    (log! :debug (str "Should review? " should-review " (debounce: " debounce-secs "s, cooldown: " cooldown-secs "s, lookback: " lookback-mins "m)"))
     should-review))
 
-(defn stage-get-pending-summary
-  "Get summary of pending edits for review context."
-  []
-  (let [result (nrepl-eval "(seon.dev.feedback/pending-edits-summary (user/xtdb-node))")
+(defn stage-get-unreviewed-summary
+  "Get summary of unreviewed edits for review context."
+  [config]
+  (let [lookback-mins (get-in config [:gemini :lookback-minutes] 5)
+        result (nrepl-eval (format "(seon.dev.feedback/unreviewed-summary (user/xtdb-node) {:lookback-minutes %d})"
+                                   lookback-mins))
         ;; nREPL output is like "=> {:files #{...} ...}\n*=== user..."
         ;; Extract just the EDN value after "=> "
         raw-value (parse-nrepl-value (:out result))]
@@ -560,10 +564,10 @@
         (log! :error (str "Review call failed. Exit: " (:exit result) " Err: " (:err result)))
         (str "⚠ Gemini call failed (exit " (:exit result) ") - check nREPL connection")))))
 
-(defn stage-clear-pending
-  "Clear pending edits after review."
+(defn stage-record-review-completed
+  "Record that a review completed (updates singleton timestamp)."
   []
-  (nrepl-eval "(seon.dev.feedback/clear-pending-edits! (user/xtdb-node))"))
+  (nrepl-eval "(seon.dev.feedback/record-review-completed! (user/xtdb-node))"))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Response Formatting
@@ -732,21 +736,21 @@ Run generative tests manually:
       ;; 7. Record functions in XTDB
       (stage-record-functions ns-sym)
 
-      ;; 8. Record pending edit for batched review
+      ;; 8. Record edit event (immutable fact, bounded window)
       (when (get-in config [:gemini :enabled])
-        (stage-record-pending-edit file-path ns-sym new-fns)
+        (stage-record-edit file-path ns-sym new-fns)
 
-        ;; 9. Check if debounce expired - trigger batch review
+        ;; 9. Check if review should trigger (debounce + cooldown)
         (when (stage-should-review? config)
-          (let [summary (stage-get-pending-summary)]
-            (log! :debug (str "Pending summary: " (pr-str summary)))
+          (let [summary (stage-get-unreviewed-summary config)]
+            (log! :debug (str "Unreviewed summary: " (pr-str summary)))
             (when (and summary (pos? (:edit-count summary 0)))
               (log! :info "Triggering batch review!")
               (let [review-text (stage-batch-review summary test-result)]
                 (log! :debug (str "Review result: " (pr-str (subs review-text 0 (min 100 (count review-text))))))
-                ;; Clear pending edits
-                (stage-clear-pending)
-                (log! :debug "Cleared pending edits")
+                ;; Record review completed (updates singleton timestamp)
+                (stage-record-review-completed)
+                (log! :debug "Recorded review completed")
                 ;; Add review to feedback (truncated) - advisory only
                 (add-feedback! (str "Gemini: " (truncate review-text max-summary-length))))))))
 

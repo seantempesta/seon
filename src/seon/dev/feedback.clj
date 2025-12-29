@@ -15,10 +15,9 @@
             [clojure.walk :as walk]
             [malli.core :as m]
             [malli.generator :as mg]
-            [seon.db.node :as node]
-            [xtdb.api :as xt])
+            [seon.db.node :as node])
   (:import [java.security MessageDigest]
-           [java.time Instant]
+           [java.time Duration Instant]
            [java.util Base64 UUID]))
 
 ;;; ---------------------------------------------------------------------------
@@ -240,10 +239,10 @@
   (when-let [info (function-info ns-sym fn-sym)]
     (let [id (fn-id ns-sym fn-sym)
           file-path (:file (:var-meta info))
-          ;; Check for existing entity to preserve first-seen
-          existing (first (node/xtql-query
+          ;; Check for existing entity to preserve first-seen - use SQL with parameterized _id
+          existing (first (node/sql-query
                            node
-                           (xt/template (from :function [{:xt/id ~id} fn/first-seen]))))
+                           ["SELECT * FROM function WHERE _id = ?" id]))
           ;; Convert symbols to keywords for XTDB storage
           ns-kw (keyword (str ns-sym))
           fn-kw (keyword (str fn-sym))
@@ -317,12 +316,9 @@
      Map of function symbol to entity data, or empty map if none found"
   [node ns-sym]
   (let [ns-kw (keyword (str ns-sym))
-        results (node/xtql-query
-                 node
-                 (xt/template
-                  (from :function [{:fn/namespace ~ns-kw}
-                                   xt/id fn/name fn/schema fn/schema-refs
-                                   fn/file fn/source-hash fn/first-seen])))]
+        ;; Use SQL and filter in Clojure - XTQL has issues with namespaced columns
+        all-fns (node/sql-query node "SELECT * FROM function")
+        results (filter #(= ns-kw (:fn/namespace %)) all-fns)]
     (into {}
           (map (fn [row]
                  ;; Convert keyword back to symbol for API consistency
@@ -348,11 +344,9 @@
    Returns:
      Base64-encoded hash string, or nil"
   [node file-path]
-  (let [result (first (node/xtql-query
-                       node
-                       (xt/template
-                        (-> (from :function [{:fn/file ~file-path} fn/source-hash])
-                            (limit 1)))))]
+  ;; Use SQL and filter in Clojure - XTQL has issues with this version
+  (let [all-fns (node/sql-query node "SELECT * FROM function")
+        result (first (filter #(= file-path (:fn/file %)) all-fns))]
     (:fn/source-hash result)))
 
 (defn file-changed?
@@ -405,116 +399,168 @@
      Vector of error entities, newest first"
   ([node fn-id]
    (function-errors node fn-id 10))
-  ([node fn-id limit]
-   (node/xtql-query
-    node
-    (xt/template
-     (-> (from :error [{:error/function ~fn-id}
-                       xt/id error/timestamp error/type error/function error/data])
-         (order-by {:val error/timestamp :dir :desc})
-         (limit ~limit))))))
+  ([node fn-id limit-n]
+   ;; Use SQL with parameterized query - _id filtering works with keywords
+   (let [all-errors (node/sql-query node "SELECT * FROM error ORDER BY error$timestamp DESC")
+         matching (filter #(= fn-id (:error/function %)) all-errors)]
+     (vec (take limit-n matching)))))
 
 ;;; ---------------------------------------------------------------------------
-;;; Pending Edit Tracking (for debounced code review)
+;;; Bounded Window Edit Tracking (new model)
 ;;; ---------------------------------------------------------------------------
+;;
+;; This model replaces the "pending edits" approach with:
+;; - Edit events as immutable facts (never deleted)
+;; - A singleton tracking last review time
+;; - Bounded queries that only look at recent edits
+;;
+;; Safety: Even if reviews stop, we only process a bounded time window.
 
-(def ^:const review-debounce-seconds
-  "Seconds to wait after last edit before triggering review."
-  30)
+(defn- instant->epoch-millis
+  "Convert Instant or ZonedDateTime to epoch milliseconds."
+  [t]
+  (if (instance? Instant t)
+    (.toEpochMilli t)
+    (.toEpochMilli (.toInstant t))))
 
-(defn record-pending-edit!
-  "Record an edit that's pending review.
+(defn- seconds-since
+  "Calculate seconds elapsed since the given instant."
+  [then now]
+  (/ (- (instant->epoch-millis now) (instant->epoch-millis then)) 1000.0))
 
-   Stores the edit with timestamp for debounce calculation.
-   Multiple edits accumulate until review is triggered.
+(defn record-edit!
+  "Record an edit event. Immutable fact, never deleted.
+
+   Uses XTDB valid-time for timestamp (automatic via put-docs).
 
    Args:
-     node      - XTDB node
-     file-path - Path to edited file
-     ns-sym    - Namespace symbol
-     code-diff - Summary of changes (optional)
+     node - XTDB node
+     file-path - Absolute path to edited file
+     ns-sym - Namespace symbol (e.g., 'seon.foo)
+     opts - Optional {:new-functions #{...}}
 
    Returns:
      Transaction result"
-  [node file-path ns-sym & [{:keys [code-diff new-functions]}]]
+  [node file-path ns-sym & [opts]]
   (let [entity {:xt/id (UUID/randomUUID)
-                :entity/type :pending-edit
+                :entity/type :edit-event
                 :edit/file file-path
                 :edit/namespace (keyword (str ns-sym))
-                :edit/timestamp (Instant/now)
-                :edit/code-diff code-diff
-                :edit/new-functions (set new-functions)}]
-    (node/execute-tx! node [[:put-docs :pending-edit entity]])))
+                :edit/new-functions (set (:new-functions opts))}]
+    (node/execute-tx! node [[:put-docs :edit-event entity]])))
 
-(defn pending-edits
-  "Get all pending edits awaiting review.
-
-   Returns:
-     Vector of pending edit entities, oldest first"
-  [node]
-  (node/xtql-query
-   node
-   '(-> (from :pending-edit [xt/id edit/file edit/namespace
-                             edit/timestamp edit/code-diff edit/new-functions])
-        (order-by {:val edit/timestamp :dir :asc}))))
-
-(defn oldest-pending-edit-age
-  "Get seconds since oldest pending edit, or nil if none pending.
-
-   Used for debounce: trigger review when this exceeds threshold."
-  [node]
-  (when-let [oldest (first (pending-edits node))]
-    (let [ts (:edit/timestamp oldest)
-          ;; Handle both Instant and ZonedDateTime from XTDB
-          then (if (instance? Instant ts)
-                 (.toEpochMilli ts)
-                 (.toEpochMilli (.toInstant ts)))
-          now (.toEpochMilli (Instant/now))]
-      (/ (- now then) 1000.0))))
-
-(defn should-trigger-review?
-  "Check if enough time has passed to trigger a code review.
+(defn record-review-completed!
+  "Update the review state singleton to now.
 
    Args:
-     node            - XTDB node
-     debounce-secs   - Optional override for debounce threshold (default: 30)
-
-   Returns true if:
-   - There are pending edits AND
-   - The oldest edit is older than debounce-secs"
-  ([node]
-   (should-trigger-review? node review-debounce-seconds))
-  ([node debounce-secs]
-   (when-let [age (oldest-pending-edit-age node)]
-     (> age debounce-secs))))
-
-(defn clear-pending-edits!
-  "Clear all pending edits after review completes.
+     node - XTDB node
 
    Returns:
      Transaction result"
   [node]
-  (let [pending (pending-edits node)
-        ids (map :xt/id pending)]
-    (when (seq ids)
-      (node/execute-tx! node (mapv (fn [id] [:delete-docs :pending-edit id]) ids)))))
+  (let [entity {:xt/id :seon.dev/review-state
+                :entity/type :review-state
+                :review/last-completed (Instant/now)}]
+    (node/execute-tx! node [[:put-docs :review-state entity]])))
 
-(defn pending-edits-summary
-  "Get a summary of pending edits for review context.
+(defn get-last-edit-time
+  "Get timestamp of most recent edit, or nil if none.
 
-   Returns map with:
-     :files       - Set of affected file paths
-     :namespaces  - Set of affected namespaces
-     :new-fns     - Set of new function names
-     :edit-count  - Number of edits
-     :oldest-age  - Seconds since oldest edit"
+   Queries the most recent edit event by valid-time."
   [node]
-  (let [edits (pending-edits node)]
+  (let [result (first (node/sql-query
+                       node
+                       "SELECT _valid_from FROM edit_event ORDER BY _valid_from DESC LIMIT 1"))]
+    (:xt/valid-from result)))
+
+(defn get-last-review-time
+  "Get timestamp of last completed review, or nil if never reviewed."
+  [node]
+  ;; Use parameterized SQL query - _id filtering works with keywords
+  (let [result (first (node/sql-query
+                       node
+                       ["SELECT * FROM review_state WHERE _id = ?" :seon.dev/review-state]))]
+    (:review/last-completed result)))
+
+(defn recent-unreviewed-edits
+  "Get edits from the recent window that haven't been reviewed.
+
+   Always bounded by:
+   1. lookback-minutes - Only look at last N minutes of edits
+   2. last-review-time - Only include edits after last review
+
+   Even if no review has ever happened, we only get recent edits.
+
+   Args:
+     node - XTDB node
+     opts - {:lookback-minutes 5}
+
+   Returns:
+     Vector of edit event maps, oldest first"
+  [node & [{:keys [lookback-minutes] :or {lookback-minutes 5}}]]
+  (let [now (Instant/now)
+        window-start (.minus now (Duration/ofMinutes lookback-minutes))
+        last-review (get-last-review-time node)
+        ;; Use whichever is more recent: window start or last review
+        cutoff (if (and last-review (.isAfter last-review window-start))
+                 last-review
+                 window-start)]
+    ;; Use SQL with parameterized timestamp for the cutoff
+    (node/sql-query
+     node
+     ["SELECT *, _valid_from FROM edit_event WHERE _valid_from > ? ORDER BY _valid_from"
+      cutoff])))
+
+(defn unreviewed-summary
+  "Get summary of unreviewed edits for review context.
+
+   Args:
+     node - XTDB node
+     opts - {:lookback-minutes 5}
+
+   Returns:
+     {:files #{...}
+      :namespaces #{...}
+      :new-fns #{...}
+      :edit-count N}"
+  [node & [opts]]
+  (let [edits (recent-unreviewed-edits node opts)]
     {:files (set (map :edit/file edits))
      :namespaces (set (map :edit/namespace edits))
      :new-fns (reduce into #{} (map :edit/new-functions edits))
-     :edit-count (count edits)
-     :oldest-age (oldest-pending-edit-age node)}))
+     :edit-count (count edits)}))
+
+(defn should-trigger-review?
+  "Determine if a review should trigger now.
+
+   Returns true if ALL conditions met:
+   1. There are unreviewed edits in the recent window
+   2. User has stopped typing (debounce met)
+   3. Enough time since last review (cooldown met)
+
+   Args:
+     node - XTDB node
+     opts - {:debounce-seconds 5
+             :cooldown-seconds 30
+             :lookback-minutes 5}"
+  [node & [{:keys [debounce-seconds cooldown-seconds lookback-minutes]
+            :or {debounce-seconds 5 cooldown-seconds 30 lookback-minutes 5}}]]
+  (let [now (Instant/now)
+        last-edit-time (get-last-edit-time node)
+        last-review-time (get-last-review-time node)
+        recent-edits (recent-unreviewed-edits node {:lookback-minutes lookback-minutes})]
+
+    (and
+     ;; 1. Have something to review
+     (seq recent-edits)
+
+     ;; 2. User stopped typing (debounce)
+     (or (nil? last-edit-time)
+         (> (seconds-since last-edit-time now) debounce-seconds))
+
+     ;; 3. Not reviewing too frequently (cooldown)
+     (or (nil? last-review-time)
+         (> (seconds-since last-review-time now) cooldown-seconds)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; File Stability for Cache-Optimized Ordering
@@ -524,20 +570,22 @@
   "Query edit history to compute stability metrics for each file.
    Returns map of {file-path {:edit-count N :first-seen Instant :last-edit Instant}}"
   [node]
-  (let [results (node/xtql-query
-                 node
-                 '(-> (from :edit-event [edit/file edit/timestamp xt/id])
-                      (aggregate {:edit-count (count xt/id)
-                                  :first-seen (min edit/timestamp)
-                                  :last-edit (max edit/timestamp)}
-                                 edit/file)))]
+  ;; Fetch all edits and aggregate in Clojure - SQL aggregation has issues
+  (let [all-edits (node/sql-query node "SELECT * FROM edit_event")
+        by-file (group-by :edit/file all-edits)
+        ;; Compare timestamps using epoch millis
+        ts-compare (fn [a b]
+                     (let [a-ms (instant->epoch-millis a)
+                           b-ms (instant->epoch-millis b)]
+                       (compare a-ms b-ms)))]
     (into {}
-          (map (fn [row]
-                 [(:edit/file row)
-                  {:edit-count (:edit-count row)
-                   :first-seen (:first-seen row)
-                   :last-edit (:last-edit row)}])
-               results))))
+          (map (fn [[file-path edits]]
+                 (let [timestamps (keep :edit/timestamp edits)]
+                   [file-path
+                    {:edit-count (count edits)
+                     :first-seen (when (seq timestamps) (first (sort ts-compare timestamps)))
+                     :last-edit (when (seq timestamps) (last (sort ts-compare timestamps)))}]))
+               by-file))))
 
 (defn stability-score
   "Calculate stability score. Higher = more stable = should come first.
