@@ -413,3 +413,99 @@
                        xt/id error/timestamp error/type error/function error/data])
          (order-by {:val error/timestamp :dir :desc})
          (limit ~limit))))))
+
+;;; ---------------------------------------------------------------------------
+;;; Pending Edit Tracking (for debounced code review)
+;;; ---------------------------------------------------------------------------
+
+(def ^:const review-debounce-seconds
+  "Seconds to wait after last edit before triggering review."
+  30)
+
+(defn record-pending-edit!
+  "Record an edit that's pending review.
+
+   Stores the edit with timestamp for debounce calculation.
+   Multiple edits accumulate until review is triggered.
+
+   Args:
+     node      - XTDB node
+     file-path - Path to edited file
+     ns-sym    - Namespace symbol
+     code-diff - Summary of changes (optional)
+
+   Returns:
+     Transaction result"
+  [node file-path ns-sym & [{:keys [code-diff new-functions]}]]
+  (let [entity {:xt/id (UUID/randomUUID)
+                :entity/type :pending-edit
+                :edit/file file-path
+                :edit/namespace (keyword (str ns-sym))
+                :edit/timestamp (Instant/now)
+                :edit/code-diff code-diff
+                :edit/new-functions (set new-functions)}]
+    (node/execute-tx! node [[:put-docs :pending-edit entity]])))
+
+(defn pending-edits
+  "Get all pending edits awaiting review.
+
+   Returns:
+     Vector of pending edit entities, oldest first"
+  [node]
+  (node/xtql-query
+   node
+   '(-> (from :pending-edit [xt/id edit/file edit/namespace
+                             edit/timestamp edit/code-diff edit/new-functions])
+        (order-by {:val edit/timestamp :dir :asc}))))
+
+(defn oldest-pending-edit-age
+  "Get seconds since oldest pending edit, or nil if none pending.
+
+   Used for debounce: trigger review when this exceeds threshold."
+  [node]
+  (when-let [oldest (first (pending-edits node))]
+    (let [ts (:edit/timestamp oldest)
+          ;; Handle both Instant and ZonedDateTime from XTDB
+          then (if (instance? Instant ts)
+                 (.toEpochMilli ts)
+                 (.toEpochMilli (.toInstant ts)))
+          now (.toEpochMilli (Instant/now))]
+      (/ (- now then) 1000.0))))
+
+(defn should-trigger-review?
+  "Check if enough time has passed to trigger a code review.
+
+   Returns true if:
+   - There are pending edits AND
+   - The oldest edit is older than review-debounce-seconds"
+  [node]
+  (when-let [age (oldest-pending-edit-age node)]
+    (> age review-debounce-seconds)))
+
+(defn clear-pending-edits!
+  "Clear all pending edits after review completes.
+
+   Returns:
+     Transaction result"
+  [node]
+  (let [pending (pending-edits node)
+        ids (map :xt/id pending)]
+    (when (seq ids)
+      (node/execute-tx! node (mapv (fn [id] [:delete-docs :pending-edit id]) ids)))))
+
+(defn pending-edits-summary
+  "Get a summary of pending edits for review context.
+
+   Returns map with:
+     :files       - Set of affected file paths
+     :namespaces  - Set of affected namespaces
+     :new-fns     - Set of new function names
+     :edit-count  - Number of edits
+     :oldest-age  - Seconds since oldest edit"
+  [node]
+  (let [edits (pending-edits node)]
+    {:files (set (map :edit/file edits))
+     :namespaces (set (map :edit/namespace edits))
+     :new-fns (reduce into #{} (map :edit/new-functions edits))
+     :edit-count (count edits)
+     :oldest-age (oldest-pending-edit-age node)}))

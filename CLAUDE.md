@@ -277,6 +277,7 @@ This shows all running components and XTDB metrics.
 ### Reference Docs
 | Document | When to Read |
 |----------|--------------|
+| `CONVENTIONS.md` | Malli schema patterns, public API design |
 | `docs/reference/xtdb-v2-reference.md` | Database work - XTQL queries, temporal |
 | `docs/reference/datastar-quick-reference.md` | Web UI work - attribute reference |
 | `docs/reference/logging-setup.md` | Debugging - log files, REPL functions |
@@ -299,22 +300,28 @@ clj -M:test -m kaocha.runner --watch   # Watch mode
 
 When adding new domains to Seon:
 
-### Standard Domain Structure
+### File Organization
+
+Keep it simple - one file per namespace:
+
 ```
-src/seon/domains/{domain}/
-├── core.clj          ; Public API, protocol implementations
-├── schema.clj        ; Malli schemas for domain entities
-├── queries.clj       ; Domain-specific XTDB queries
-├── ingest.clj        ; Data import (if applicable)
-└── {domain}_test.clj ; Colocated tests
+src/seon/
+├── ai/
+│   └── gemini.clj        ; seon.ai.gemini (schemas + API in one file)
+├── trading/
+│   └── signals.clj       ; seon.trading.signals
+└── polymarket/
+    └── api.clj           ; seon.polymarket.api
 ```
 
+Don't spread code across multiple files (core.clj, schema.clj, etc.) prematurely. Keep schemas with their functions until a file gets unwieldy.
+
 ### Domain Principles
-1. **Self-contained** - Domain can function independently
-2. **DB parameter** - All functions receive `db` as first parameter (no globals)
-3. **Schema-first** - Define Malli schemas before implementation
+1. **Self-contained** - Each namespace can function independently
+2. **DB parameter** - Functions receive `db` as first parameter (no globals)
+3. **Schema-first** - Define Malli schemas before implementation (see `CONVENTIONS.md`)
 4. **Temporal** - Leverage XTDB's bitemporal capabilities
-5. **Testable** - Colocated tests, property-based where appropriate
+5. **Testable** - Tests in `test/` mirror `src/` structure
 
 ### Entity ID Conventions
 - Use namespaced keywords: `:trading/position`, `:health/workout`
@@ -327,3 +334,45 @@ src/seon/domains/{domain}/
 - **PLAN.md** - Transformation roadmap (ml-options → Seon)
 - **PRDs** in `docs/prds/{feature}/prd.md` - Feature specifications
 - **Original project** at `~/src/ml-options-trading` for reference
+
+---
+
+## Dev Hook (bin/seon-hook)
+
+The project uses a unified Babashka hook script for code review and test automation.
+
+### What It Does
+
+After file edits, the hook:
+1. **Detects changed namespaces** from edited files
+2. **Runs targeted tests** for affected namespaces
+3. **Sends code to Gemini** for AI review (via native API integration)
+
+### Configuration
+
+Hook config in `.claude/seon-hook.edn`:
+
+```clojure
+{:gemini {:review-enabled true}     ; Enable/disable Gemini review
+ :testing {:auto-run true           ; Run tests automatically
+           :focus-ns nil}}          ; Focus on specific namespace
+```
+
+### Hook Internals
+
+- **Script**: `bin/seon-hook` (Babashka)
+- **State**: `.claude/test-hook.db` (SQLite for tracking)
+- **Gemini**: Uses `seon.ai.gemini` namespace for API calls
+
+### Gemini API Pattern
+
+The hook uses the new map-based API convention:
+
+```clojure
+(require '[seon.ai.gemini :as gemini])
+
+(gemini/ask {::gemini/prompt "Review this code..."
+             ::gemini/model "gemini-3-flash-preview"})
+```
+
+See `CONVENTIONS.md` for the full schema pattern.
