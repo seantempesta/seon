@@ -545,7 +545,7 @@ Malli schemas can reference other schemas. Need recursive resolution:
 
 ## Phase 6: Hook Refactor - Move Logic to Seon (In Progress)
 
-**Status:** Stage 6a-5 Complete (repair.clj)
+**Status:** Stage 6b Complete (hook.clj - main orchestrator)
 **Goal:** Move hook logic from Babashka script into properly designed Clojure code.
 **Design Doc:** `research/phase6-design.md`
 
@@ -657,8 +657,30 @@ Created `src/seon/dev/repair.clj` - delimiter repair ported from clojure-mcp-lig
 - `src/seon/dev/repair.clj` - ~200 lines
 - `test/seon/dev/repair_test.clj` - 5 tests, 68 assertions
 
+### Stage 6b: seon.dev.hook (Complete)
+
+Created `src/seon/dev/hook.clj` - main orchestrator that wires everything together:
+- `process-hook-event!` - Single public entry point called by BB hook
+- Coordinates all pipeline stages: repair, reload, tests, context tracking, review
+- Handles both PreToolUse (repair only) and PostToolUse (full pipeline)
+- Proper configuration merging with defaults
+- Feedback accumulation for Claude Code additionalContext
+
+**Key features:**
+- Single entry point simplifies BB hook to just JSON parsing and nREPL call
+- Full pipeline: repair -> reload -> unit tests -> gen tests -> record edit -> review
+- Proper blocking/continuation logic with configurable behavior
+- Malli schemas per CONVENTIONS.md for all public schemas
+- Comprehensive tests (13 tests, 32 assertions)
+- REPL-verified all functions work correctly
+
+**Files:**
+- `src/seon/dev/hook.clj` - ~450 lines
+- `test/seon/dev/hook_test.clj` - 13 tests, 32 assertions
+
 **Remaining stages:**
-- 6a-6: `seon.dev.hook` - Main orchestrator
+- 6c: Replace `bin/seon-hook` with thin BB script calling `seon.dev.hook/process-hook-event!`
+- 6d: Cleanup - delete old `feedback.clj`, update documentation
 
 ### Problem
 
