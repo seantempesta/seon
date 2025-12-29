@@ -366,13 +366,26 @@ Hook config in `.claude/seon-hook.edn`:
 
 ### Gemini API Pattern
 
-The hook uses the new map-based API convention:
+The Gemini client provides multiple functions for different use cases:
 
 ```clojure
 (require '[seon.ai.gemini :as gemini])
 
-(gemini/ask {::gemini/prompt "Review this code..."
-             ::gemini/model "gemini-3-flash-preview"})
+;; Simple question/answer
+(gemini/ask {::gemini/prompt "Explain XTDB temporal queries"})
+
+;; Web search with Google grounding (use for current info, verification)
+(gemini/search {::gemini/prompt "Latest Clojure 1.12 features"})
+;; Returns ::grounding-metadata with source URLs
+
+;; Python code execution (calculations, data processing)
+(gemini/calculate {::gemini/prompt "What is the 100th Fibonacci number?"})
+
+;; Code review with structured output
+(gemini/review-code {::gemini/prompt "Review this function"
+                     ::gemini/code "(defn foo [x] ...)"})
 ```
+
+**For agents doing research:** Use `gemini/search` to verify knowledge that may be out of date. It returns web-grounded responses with source citations.
 
 See `CONVENTIONS.md` for the full schema pattern.
