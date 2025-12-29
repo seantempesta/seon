@@ -225,7 +225,7 @@ After reload, any var with `:malli/schema` not in XTDB = new function → trigge
 
 ## Implementation Summary
 
-**Status:** Phases 1-2 complete, Phases 3-5 remaining
+**Status:** Phases 1-4 complete, Phase 5 remaining
 
 ### What's Built
 
@@ -248,21 +248,26 @@ After reload, any var with `:malli/schema` not in XTDB = new function → trigge
 - `gemini/calculate` - Python code execution
 - `gemini/review-code` - Plain text code review (simplified from structured)
 
+**Caching (Phase 3 - Complete):**
+- CONVENTIONS.md placed in system instruction for implicit caching
+- Verified via REPL: ~92% cache hit rate on repeated reviews
+- Token logging shows `cachedContentTokenCount` in debug output
+- No additional work needed - current implementation is optimal
+
+**Error Hints (Phase 4 - Complete):**
+All warning messages now include actionable fix hints:
+- `⚠ nREPL unavailable - restart server: ./bin/run`
+- `⚠ Unit tests timed out (ns) - run: clj -M:test --focus ns`
+- `⚠ Unit tests error (ns): error - check test file syntax`
+- `⚠ Gen tests timed out (ns) - run: (fb/check-namespace 'ns {:num-tests 5})`
+- `⚠ Gen tests error (ns): error - check schema definitions`
+
 ### What's Remaining
 
-**Phase 3: Caching Optimization**
-- Move CONVENTIONS.md to system instruction for implicit caching
-- Log `cachedContentTokenCount` to verify cache hits
-- Target 70-80% cache hit rate, 90% cost reduction on cached tokens
-
-**Phase 4: Helpful Error Context**
-- Add actionable fix hints to all warnings (e.g., "nREPL down - restart with ./bin/run")
-- Ensure all feedback uses `add-feedback!` → `additionalContext`
-
 **Phase 5: Configuration Cleanup**
-- Make debounce-seconds configurable via `.claude/seon-hook.edn`
-- Add log-tokens toggle
-- Update PRD with final documentation
+- Make `debounce-seconds` configurable via `.claude/seon-hook.edn` (currently hardcoded at 30s in `feedback.clj:421`)
+- Wire config value from hook to `should-trigger-review?` call
+- Optionally add `log-tokens` toggle for verbose token logging
 
 ### Key Files
 

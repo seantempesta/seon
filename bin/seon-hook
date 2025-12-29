@@ -645,10 +645,10 @@
                               (cond
                                 ;; Infrastructure failure (timeout, parse error) - continue with warning
                                 (:timeout? result)
-                                (add-feedback! "⚠ Unit tests timed out - check for slow tests or infinite loops")
+                                (add-feedback! (format "⚠ Unit tests timed out (%s) - run: clj -M:test --focus %s" test-ns test-ns))
 
                                 (:error result)
-                                (add-feedback! (format "⚠ Unit tests failed to run: %s" (:error result)))
+                                (add-feedback! (format "⚠ Unit tests error (%s): %s - check test file syntax" test-ns (:error result)))
 
                                 ;; Real test failures - block with instructions
                                 :else
@@ -685,10 +685,10 @@ Or update the test expectations if the behavior change is intentional."
               (cond
                 ;; Infrastructure failure (timeout) - continue with warning
                 (:timeout? gen-result)
-                (add-feedback! "⚠ Generative tests timed out - check for slow generators")
+                (add-feedback! (format "⚠ Gen tests timed out (%s) - run: (fb/check-namespace '%s {:num-tests 5})" ns-sym ns-sym))
 
                 (:error gen-result)
-                (add-feedback! (format "⚠ Generative tests failed to run: %s" (:error gen-result)))
+                (add-feedback! (format "⚠ Gen tests error (%s): %s - check schema definitions" ns-sym (:error gen-result)))
 
                 ;; Real test failures - block with instructions
                 :else
@@ -800,7 +800,7 @@ Run generative tests manually:
 
       ;; Check nREPL
       (when-not (nrepl-available?)
-        (add-feedback! "⚠ nREPL not available (port 7888) - skipping tests")
+        (add-feedback! "⚠ nREPL unavailable - restart server: ./bin/run")
         (println (success-response))
         (System/exit 0))
 

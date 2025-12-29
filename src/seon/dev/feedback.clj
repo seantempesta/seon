@@ -475,12 +475,18 @@
 (defn should-trigger-review?
   "Check if enough time has passed to trigger a code review.
 
+   Args:
+     node            - XTDB node
+     debounce-secs   - Optional override for debounce threshold (default: 30)
+
    Returns true if:
    - There are pending edits AND
-   - The oldest edit is older than review-debounce-seconds"
-  [node]
-  (when-let [age (oldest-pending-edit-age node)]
-    (> age review-debounce-seconds)))
+   - The oldest edit is older than debounce-secs"
+  ([node]
+   (should-trigger-review? node review-debounce-seconds))
+  ([node debounce-secs]
+   (when-let [age (oldest-pending-edit-age node)]
+     (> age debounce-secs))))
 
 (defn clear-pending-edits!
   "Clear all pending edits after review completes.
@@ -509,3 +515,67 @@
      :new-fns (reduce into #{} (map :edit/new-functions edits))
      :edit-count (count edits)
      :oldest-age (oldest-pending-edit-age node)}))
+
+;;; ---------------------------------------------------------------------------
+;;; File Stability for Cache-Optimized Ordering
+;;; ---------------------------------------------------------------------------
+
+(defn file-stability-data
+  "Query edit history to compute stability metrics for each file.
+   Returns map of {file-path {:edit-count N :first-seen Instant :last-edit Instant}}"
+  [node]
+  (let [results (node/xtql-query
+                 node
+                 '(-> (from :edit-event [edit/file edit/timestamp xt/id])
+                      (aggregate {:edit-count (count xt/id)
+                                  :first-seen (min edit/timestamp)
+                                  :last-edit (max edit/timestamp)}
+                                 edit/file)))]
+    (into {}
+          (map (fn [row]
+                 [(:edit/file row)
+                  {:edit-count (:edit-count row)
+                   :first-seen (:first-seen row)
+                   :last-edit (:last-edit row)}])
+               results))))
+
+(defn stability-score
+  "Calculate stability score. Higher = more stable = should come first.
+   Score = days-since-first-seen / edit-count"
+  [edit-count first-seen]
+  (let [now (Instant/now)
+        first-seen-ms (if (instance? Instant first-seen)
+                        (.toEpochMilli first-seen)
+                        (.toEpochMilli (.toInstant first-seen)))
+        age-ms (- (.toEpochMilli now) first-seen-ms)
+        age-days (/ age-ms (* 1000.0 60 60 24))]
+    (if (and (pos? edit-count) (pos? age-days))
+      (/ age-days edit-count)
+      Double/MAX_VALUE)))
+
+(defn order-by-stability
+  "Order files for cache-optimized Gemini requests.
+   Stable files first, recently-edited files last."
+  [stability-data file-paths pending-files]
+  (let [pending-set (set pending-files)
+        regular (remove pending-set file-paths)
+        pending (filter pending-set file-paths)
+
+        regular-sorted (sort-by (fn [f]
+                                  (let [data (get stability-data f)
+                                        score (if data
+                                                (stability-score (:edit-count data)
+                                                                 (:first-seen data))
+                                                0.0)]
+                                    [(- score) f]))
+                                regular)
+
+        pending-sorted (sort-by (fn [f]
+                                  (let [last-edit (get-in stability-data [f :last-edit])]
+                                    (if last-edit
+                                      (if (instance? Instant last-edit)
+                                        (.toEpochMilli last-edit)
+                                        (.toEpochMilli (.toInstant last-edit)))
+                                      Long/MAX_VALUE)))
+                                pending)]
+    (vec (concat regular-sorted pending-sorted))))

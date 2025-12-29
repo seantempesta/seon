@@ -115,6 +115,15 @@ seon/
 
 These apply to all agents working on this project:
 
+### Foreground Agents Only
+**Never use background agents (`run_in_background: true`).** Background agents:
+- Have restricted permissions and can't edit files normally
+- Resort to workarounds like `cat >> file` instead of proper Edit/Write tools
+- Can't be interacted with by the user during execution
+- Are harder to debug when something goes wrong
+
+Always use sequential foreground agents. Wait for each to complete before launching the next. This ensures full-powered agents with proper tool access.
+
 ### Prototype and Iterate, Don't Waterfall
 - PRDs describe goals and constraints, not exact implementations
 - PRDs may be wrong or incomplete - use your judgment
