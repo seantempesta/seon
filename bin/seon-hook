@@ -259,13 +259,26 @@
        :error (or (:err result) (:out result) "Unknown reload error")})))
 
 (defn parse-nrepl-value
-  "Extract the value from nREPL output like '=> true\\n*=== user...'."
+  "Extract the value from nREPL output.
+
+   nREPL output can have multiple '=> ' markers due to debug logging.
+   We want the LAST one, which is the actual return value.
+
+   Example output:
+     => nil
+     *======== user | clj ========*
+     2025-12-29T... DEBUG [...] - Some log message
+     => \"actual result\"
+     *======== user | clj ========*
+
+   This should return '\"actual result\"'."
   [output]
   (when output
-    (let [trimmed (str/trim output)]
-      ;; Match '=> value' at start, take the value part
-      (when-let [match (re-find #"^=>\s+(.+?)(?:\n|$)" trimmed)]
-        (second match)))))
+    ;; Find all '=> value' matches and take the last one
+    (let [matches (re-seq #"=>\s+(.+?)(?:\n|$)" output)]
+      (when (seq matches)
+        ;; Each match is [full-match captured-group], take last captured group
+        (second (last matches))))))
 
 (defn stage-check-file-hash
   "Check if file has changed since last check.
@@ -409,12 +422,15 @@
            file-path ns-sym (pr-str (vec new-fns)))))
 
 (defn stage-should-review?
-  "Check if debounce timer expired and review should trigger."
-  []
-  (let [result (nrepl-eval "(seon.dev.feedback/should-trigger-review? (user/xtdb-node))")
+  "Check if debounce timer expired and review should trigger.
+   Uses :debounce-seconds from config (defaults to 30s)."
+  [config]
+  (let [debounce-secs (get-in config [:gemini :debounce-seconds] 30)
+        result (nrepl-eval (format "(seon.dev.feedback/should-trigger-review? (user/xtdb-node) %d)"
+                                   debounce-secs))
         value (parse-nrepl-value (:out result))
         should-review (= "true" value)]
-    (log! :debug (str "Should review? " should-review " (value: " value ", exit: " (:exit result) ")"))
+    (log! :debug (str "Should review? " should-review " (debounce: " debounce-secs "s, value: " value ", exit: " (:exit result) ")"))
     should-review))
 
 (defn stage-get-pending-summary
@@ -518,10 +534,12 @@
       (:timeout? result)
       (do
         (log! :warn "Gemini review timed out")
-        "[Review timed out] API may be slow, will retry on next edit")
+        "⚠ Gemini timed out - API slow, will retry next edit")
 
       (zero? (:exit result))
-      (let [raw-value (parse-nrepl-value (:out result))]
+      (let [raw-output (:out result)
+            raw-value (parse-nrepl-value raw-output)]
+        (log! :debug (str "Review raw output length: " (count raw-output)))
         ;; raw-value is a quoted string like "\"review text here\""
         ;; We need to read-string to unescape it
         (if raw-value
@@ -531,14 +549,16 @@
                 text
                 (str text)))
             (catch Exception e
-              (log! :error (str "Failed to parse review text: " (.getMessage e)))
-              "[Review parse error] Could not read response"))
-          "[Review empty] No response from Gemini"))
+              (log! :error (str "Failed to parse review text: " (.getMessage e) " raw-value: " (pr-str raw-value)))
+              (str "⚠ Gemini parse error: " (.getMessage e) " - check logs")))
+          (do
+            (log! :error (str "No value found in output. Raw output:\n" (subs raw-output 0 (min 500 (count raw-output)))))
+            "⚠ Gemini empty response - check REPL: (g/review-code {...})")))
 
       :else
       (do
-        (log! :error (str "Review call failed: " (:err result)))
-        "[Review call failed] Check nREPL connection"))))
+        (log! :error (str "Review call failed. Exit: " (:exit result) " Err: " (:err result)))
+        (str "⚠ Gemini call failed (exit " (:exit result) ") - check nREPL connection")))))
 
 (defn stage-clear-pending
   "Clear pending edits after review."
@@ -693,6 +713,7 @@ Or update the test expectations if the behavior change is intentional."
                 ;; Real test failures - block with instructions
                 :else
                 (let [failed-fns (str/join ", " (map :fn (:failures gen-result)))]
+                  (log! :info (str "HOOK END (gen-block) ns=" ns-sym " failed=" failed-fns))
                   (println (block-response
                             (format "Generative tests failed for: %s
 
@@ -716,7 +737,7 @@ Run generative tests manually:
         (stage-record-pending-edit file-path ns-sym new-fns)
 
         ;; 9. Check if debounce expired - trigger batch review
-        (when (stage-should-review?)
+        (when (stage-should-review? config)
           (let [summary (stage-get-pending-summary)]
             (log! :debug (str "Pending summary: " (pr-str summary)))
             (when (and summary (pos? (:edit-count summary 0)))
@@ -730,6 +751,7 @@ Run generative tests manually:
                 (add-feedback! (str "Gemini: " (truncate review-text max-summary-length))))))))
 
     ;; Success
+    (log! :info "HOOK END (post-success)")
     (println (success-response))))))
 
 (defn clojure-file?
@@ -758,6 +780,9 @@ Run generative tests manually:
                         (get-in parsed-input [:file_path]))
           config (load-config)]
 
+      ;; Log hook invocation for debugging duplicates
+      (log! :info (str "HOOK START event=" event " tool=" tool " file=" file-path))
+
       ;; Skip non-relevant events (not Edit/Write on Pre/PostToolUse)
       (when-not (and (or (= event "PreToolUse") (= event "PostToolUse"))
                      (or (= tool "Edit") (= tool "Write")))
@@ -774,23 +799,27 @@ Run generative tests manually:
       ;; === Stage 1: Syntax repair (runs on both Pre and Post) ===
       (when (get-in config [:syntax-repair :enabled])
         (let [repair-result (stage-syntax-repair input-json config)]
+          (log! :debug (str "Syntax repair result: " (pr-str repair-result)))
           (when (and repair-result (not (:success repair-result)))
             ;; Syntax repair blocked - pass through its response
+            (log! :info (str "HOOK END (syntax-block) event=" event))
             (println (:response repair-result))
             (System/exit 0))
           ;; If syntax repair returned a non-blocking response, print it
           ;; (e.g., hookSpecificOutput for content fix)
           (when (and repair-result (:response repair-result) (:success repair-result))
+            (log! :info (str "HOOK END (syntax-response) event=" event))
             (println (:response repair-result))
             (System/exit 0))))
 
       ;; === PreToolUse: Only syntax repair runs ===
       (when (= event "PreToolUse")
-        (log! :debug "PreToolUse complete after syntax repair")
+        (log! :info "HOOK END (pre-success)")
         (println (success-response))
         (System/exit 0))
 
       ;; === PostToolUse: Run full pipeline for seon source files ===
+      (log! :debug "PostToolUse: starting full pipeline")
 
       ;; Skip if not in src/seon/ (only for PostToolUse pipeline)
       (when-not (re-find #"src/seon/" (or file-path ""))

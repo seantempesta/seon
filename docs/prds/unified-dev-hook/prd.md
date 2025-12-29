@@ -1,6 +1,6 @@
 # PRD: Unified Development Feedback Hook
 
-**Status:** Ready for Implementation
+**Status:** Complete
 **Priority:** High
 **Branch:** `feature/unified-dev-hook`
 
@@ -225,7 +225,7 @@ After reload, any var with `:malli/schema` not in XTDB = new function → trigge
 
 ## Implementation Summary
 
-**Status:** Phases 1-4 complete, Phase 5 remaining
+**Status:** All phases complete
 
 ### What's Built
 
@@ -262,12 +262,12 @@ All warning messages now include actionable fix hints:
 - `⚠ Gen tests timed out (ns) - run: (fb/check-namespace 'ns {:num-tests 5})`
 - `⚠ Gen tests error (ns): error - check schema definitions`
 
-### What's Remaining
+### Phase 5: Configuration Cleanup (Complete)
 
-**Phase 5: Configuration Cleanup**
-- Make `debounce-seconds` configurable via `.claude/seon-hook.edn` (currently hardcoded at 30s in `feedback.clj:421`)
-- Wire config value from hook to `should-trigger-review?` call
-- Optionally add `log-tokens` toggle for verbose token logging
+- Added `:debounce-seconds` config option under `:gemini` key in `.claude/seon-hook.edn`
+- Updated `stage-should-review?` in `bin/seon-hook` to read config and pass to `should-trigger-review?`
+- The `should-trigger-review?` function in `feedback.clj` already accepted an optional debounce parameter
+- Default remains 30 seconds for backwards compatibility
 
 ### Key Files
 
