@@ -122,34 +122,15 @@
                    [::thinking-level {:optional true} ::thinking-level]
                    [::api-key {:optional true} ::api-key]])
 
-;; Code Review Schemas (structured output)
-(schema/register! ::review-verdict
-                  [:enum :approve :request-changes :block])
-
-(schema/register! ::review-confidence
-                  [:enum :high :medium :low])
-
-(schema/register! ::review-issue-severity
-                  [:enum :critical :warning :suggestion])
-
-(schema/register! ::review-issue
-                  [:map
-                   [:severity ::review-issue-severity]
-                   [:location {:optional true} :string]
-                   [:description :string]
-                   [:suggestion {:optional true} :string]])
-
-(schema/register! ::code-review-response
-                  [:map
-                   [:verdict ::review-verdict]
-                   [:confidence ::review-confidence]
-                   [:summary :string]
-                   [:issues {:optional true} [:vector ::review-issue]]])
+;; Code Review Schema (plain text advisory)
+(schema/register! ::conventions
+                  [:string {:description "Project conventions (cached in system instruction)"}])
 
 (schema/register! ::code-review-request
                   [:map
                    [::prompt ::prompt]
                    [::code :string]
+                   [::conventions {:optional true} ::conventions]
                    [::context {:optional true} :string]
                    [::model {:optional true} ::model]
                    [::timeout {:optional true} ::timeout]
@@ -221,25 +202,6 @@
 (def ^:const default-model
   "Default Gemini model for text generation."
   "gemini-3-flash-preview")
-
-(def ^:const code-review-json-schema
-  "JSON Schema for structured code review responses.
-   Used with Gemini's structured output mode."
-  {:type "object"
-   :properties {:verdict {:type "string"
-                          :enum ["approve" "request-changes" "block"]}
-                :confidence {:type "string"
-                             :enum ["high" "medium" "low"]}
-                :summary {:type "string"}
-                :issues {:type "array"
-                         :items {:type "object"
-                                 :properties {:severity {:type "string"
-                                                         :enum ["critical" "warning" "suggestion"]}
-                                              :location {:type "string"}
-                                              :description {:type "string"}
-                                              :suggestion {:type "string"}}
-                                 :required ["severity" "description"]}}}
-   :required ["verdict" "confidence" "summary"]})
 
 ;;; ---------------------------------------------------------------------------
 ;;; Dynamic Configuration
@@ -478,69 +440,60 @@
                            :tools [{:code_execution {}}]})))
 
 (defn review-code
-  "Review code changes using Gemini with structured output.
+  "Plain text code review. Returns advisory text, never blocks.
 
-   Returns a structured code review with verdict, confidence, and issues.
-   Uses JSON mode to ensure consistent, parseable responses.
+   For optimal caching, pass static content (like project conventions) in
+   ::conventions - this goes into the system instruction which Gemini caches.
+   Variable content (code, test results) goes in the user prompt.
 
    Request keys:
-     ::prompt  - Required. Description of what to review
-     ::code    - Required. The code to review
-     ::context - Optional. Additional context (e.g., file path, namespace)
-     ::model   - Optional. Model name
-     ::timeout - Optional. Request timeout in ms
-     ::api-key - Optional. Explicit API key
+     ::prompt      - Required. Description of what to review
+     ::code        - Required. The code to review
+     ::conventions - Optional. Project conventions (cached in system instruction)
+     ::context     - Optional. Additional context (test results, new functions, etc.)
+     ::model       - Optional. Model name
+     ::timeout     - Optional. Request timeout in ms
+     ::api-key     - Optional. Explicit API key
 
-   Returns map with:
-     :verdict     - :approve, :request-changes, or :block
-     :confidence  - :high, :medium, or :low
-     :summary     - Brief explanation
-     :issues      - Vector of {:severity :description :location :suggestion}
-
-   Only blocks when :verdict is :block AND :confidence is :high.
+   Returns: String (the review text, or error message if review failed)
 
    Example:
      (review-code {::prompt \"Review this new function\"
-                   ::code \"(defn foo [x] (+ x 1))\"})"
-  [{::keys [prompt code context model timeout api-key]}]
+                   ::code \"(defn foo [x] (+ x 1))\"
+                   ::conventions (slurp \"CONVENTIONS.md\")})"
+  [{::keys [prompt code conventions context model timeout api-key]}]
   (let [key (resolve-api-key! api-key)
-        full-prompt (str prompt "\n\n"
-                         (when context (str "Context: " context "\n\n"))
+        ;; System instruction: static content that Gemini can cache
+        ;; Put conventions here so repeated reviews hit the cache
+        system-instruction (str "You are a code reviewer for Clojure code. "
+                                "Be concise. Point out real issues, not style preferences.\n\n"
+                                (when conventions
+                                  (str "=== PROJECT CONVENTIONS ===\n" conventions "\n\n"))
+                                "Format: Start with a brief summary, then list any concerns.")
+        ;; User prompt: variable content (code, test results, etc.)
+        user-prompt (str prompt "\n\n"
+                         (when context (str context "\n\n"))
                          "Code:\n```clojure\n" code "\n```")
-        system-instruction "You are a code reviewer for Clojure code. Analyze the code for:
-- Correctness and potential bugs
-- Edge cases and error handling
-- Clojure idioms and best practices
-- Security concerns
-
-Be concise. Only flag real issues, not style preferences.
-Use :block verdict only for serious bugs or security issues.
-Use :request-changes for improvements that should be made.
-Use :approve when code is acceptable."
-        result (generate* key full-prompt
+        result (generate* key user-prompt
                           {:model (or model default-model)
                            :timeout (or timeout default-timeout-ms)
-                           :system-instruction system-instruction
-                           :response-schema code-review-json-schema})]
+                           :system-instruction system-instruction})]
+    ;; Log token usage for cost visibility
+    (when-let [usage (::usage result)]
+      (log/debug "Code review tokens" {:prompt (:promptTokenCount usage)
+                                       :response (:candidatesTokenCount usage)
+                                       :cached (:cachedContentTokenCount usage 0)}))
+    ;; Return text on success, clear error message on failure
     (if (::error result)
-      ;; On error, return approve with low confidence to not block
-      {:verdict :approve
-       :confidence :low
-       :summary (str "Review failed: " (get-in result [::error ::message]
-                                               (get-in result [::error ::exception])))
-       :issues []}
-      ;; Parse the JSON response
-      (try
-        (let [parsed (json/parse-string (::text result) true)]
-          {:verdict (keyword (:verdict parsed))
-           :confidence (keyword (:confidence parsed))
-           :summary (:summary parsed)
-           :issues (mapv #(update % :severity keyword) (:issues parsed []))})
-        (catch Exception e
-          {:verdict :approve
-           :confidence :low
-           :summary (str "Failed to parse review: " (ex-message e))
-           :issues []})))))
+      (let [err (::error result)
+            status (::status err)
+            msg (or (::message err) (::exception err) "Unknown error")]
+        (str "[Review failed] "
+             (when status (str "HTTP " status ": "))
+             (if (> (count msg) 200)
+               (str (subs msg 0 200) "...")
+               msg)))
+      (or (::text result) ""))))
 
 (comment
   ;; REPL exploration

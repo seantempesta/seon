@@ -157,3 +157,34 @@ tail -f .claude/seon-hook.log
 2. Gemini review text appears in Claude's output (info message)
 3. No errors in `.claude/seon-hook.log` related to Gemini API calls
 4. Function tracking via XTDB works without protocol errors
+
+---
+
+## Cleanup: Rename "pending" to "review queue"
+
+The term "pending edit" is misleading - edits are already applied, they're just **queued for batch review**.
+
+### Files to update:
+
+**`src/seon/dev/feedback.clj`** (lines 418-511):
+```
+record-pending-edit!     → queue-for-review!
+pending-edits            → review-queue
+oldest-pending-edit-age  → oldest-queued-age
+clear-pending-edits!     → clear-review-queue!
+pending-edits-summary    → review-queue-summary
+:pending-edit (entity)   → :queued-edit
+```
+
+**`bin/seon-hook`** (lines 403-690):
+```
+stage-record-pending-edit  → stage-queue-for-review
+stage-get-pending-summary  → stage-get-review-queue
+stage-clear-pending        → stage-clear-review-queue
+```
+
+**XTDB table**: `:pending-edit` → `:queued-edit`
+
+**Log messages**: Change "pending" to "queued for review"
+
+Note: `trading/ingest.clj` uses `:pending` for work items - that's different context, leave it.

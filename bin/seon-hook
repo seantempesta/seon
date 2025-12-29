@@ -39,8 +39,8 @@
                    :cljfmt true        ;; Run cljfmt after delimiter repair
                    :stats true         ;; Track delimiter stats
                    :revert-on-fail true}  ;; Restore backup if fix fails
-   :unit-tests {:enabled true :block-on-fail false}     ;; Advisory, not blocking
-   :generative-tests {:enabled true :num-tests 10 :block-on-fail false}  ;; Advisory, not blocking
+   :unit-tests {:enabled true :block-on-fail true}
+   :generative-tests {:enabled true :num-tests 10 :block-on-fail true}
    :gemini {:enabled true :on-new-function true :on-gen-fail true}})
 
 (defn load-config []
@@ -566,12 +566,8 @@
   10000)
 
 (def ^:const max-summary-length
-  "Maximum characters for Gemini review summary."
+  "Maximum characters for Gemini review text."
   500)
-
-(def ^:const max-issues-shown
-  "Maximum number of issues to show from Gemini review."
-  5)
 
 (defn truncate
   "Truncate string to max-len chars, adding ellipsis if truncated."
@@ -645,10 +641,14 @@
                                                    (:test-count result) test-ns))
                             (do
                               (log! :warn "Unit tests failed" result)
-                              ;; Advisory warning - never block
-                              (add-feedback! (format "⚠ Unit tests failed (%d failures, %d errors) - see test output above"
-                                                     (:fail-count result 0)
-                                                     (:error-count result 0)))))
+                              (if (get-in config [:unit-tests :block-on-fail])
+                                (do
+                                  (println (block-response
+                                            (format "Unit tests failed in %s: %d failures, %d errors"
+                                                    test-ns (:fail-count result 0) (:error-count result 0))))
+                                  (System/exit 0))
+                                (add-feedback! (format "⚠ Unit tests failed (%d failures, %d errors)"
+                                                       (:fail-count result 0) (:error-count result 0))))))
                           result))]
 
       ;; 4. Collect Malli schemas
@@ -665,10 +665,15 @@
             (add-feedback! (format "✓ Generative tests passed (%s)" ns-sym))
             (do
               (log! :warn "Generative tests failed" gen-result)
-              ;; Advisory warning - never block
               (let [failed-fns (str/join ", " (map :fn (:failures gen-result)))]
-                (add-feedback! (format "⚠ Generative tests failed - check function schemas for: %s"
-                                       (if (str/blank? failed-fns) "unknown" failed-fns))))))))
+                (if (get-in config [:generative-tests :block-on-fail])
+                  (do
+                    (println (block-response
+                              (format "Generative tests failed in %s: %s"
+                                      ns-sym (if (str/blank? failed-fns) "schema errors" failed-fns))))
+                    (System/exit 0))
+                  (add-feedback! (format "⚠ Generative tests failed: %s"
+                                         (if (str/blank? failed-fns) "unknown" failed-fns)))))))))
 
       ;; 7. Record functions in XTDB
       (stage-record-functions ns-sym)
