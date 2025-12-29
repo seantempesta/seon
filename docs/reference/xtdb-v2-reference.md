@@ -87,6 +87,38 @@ XTDB maps namespaced keywords to SQL column names:
 
 ;; Query at a specific point in time
 (xt/q node "SELECT * FROM users FOR VALID_TIME AS OF TIMESTAMP '2025-01-01T00:00:00Z'")
+
+;; Get most recent row (useful for "last event" queries)
+(xt/q node "SELECT _valid_from FROM review_event ORDER BY _valid_from DESC LIMIT 1")
+
+;; Count events in time window
+(xt/q node ["SELECT COUNT(*) as cnt FROM edit_event WHERE _valid_from > ?" cutoff])
+```
+
+### Common Event Tracking Patterns
+
+```clojure
+;; Record an event (uses current time as _valid_from automatically)
+(xt/execute-tx node
+  [[:put-docs :edit-event
+    {:xt/id (UUID/randomUUID)
+     :entity/type :edit-event
+     :edit/file "/path/to/file.clj"}]])
+
+;; Query events since a timestamp
+(defn events-since [node table-name since-instant]
+  (xt/q node
+    [(format "SELECT * FROM %s WHERE _valid_from > ? ORDER BY _valid_from"
+             (name table-name))
+     since-instant]))
+
+;; Get time of most recent event
+(defn last-event-time [node table-name]
+  (-> (xt/q node
+        (format "SELECT _valid_from FROM %s ORDER BY _valid_from DESC LIMIT 1"
+                (name table-name)))
+      first
+      :xt/valid-from))
 ```
 
 ---

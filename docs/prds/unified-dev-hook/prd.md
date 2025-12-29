@@ -543,6 +543,106 @@ Malli schemas can reference other schemas. Need recursive resolution:
 
 ---
 
+## Phase 6: Hook Refactor - Move Logic to Seon (In Progress)
+
+**Status:** Design Complete - Ready for Implementation
+**Goal:** Move hook logic from Babashka script into properly designed Clojure code.
+**Design Doc:** `research/phase6-design.md`
+
+### Problem
+
+The current `bin/seon-hook` is ~850 lines of Babashka doing too much:
+- Can't be tested with our test framework
+- Can't use Malli schemas
+- Complex string interpolation for Gemini context
+- Timing logic is broken (debounce check runs immediately after edit)
+- Hard to debug and iterate on
+
+### Solution: New Domain for Agentic Self-Modification
+
+Create a proper Clojure domain for development tooling and agentic capabilities. Seon should understand itself - its files, namespaces, functions, schemas, and history.
+
+**Naming considerations** (needs design):
+- `seon.dev.*` - development tooling focus
+- `seon.meta.*` - self-awareness/introspection focus
+- `seon.agent.*` - agentic capabilities focus
+
+Current `feedback.clj` name is too vague. What it actually does:
+- Tracks edit events (immutable history)
+- Tracks review state (when last reviewed)
+- Tracks known functions
+- Provides timing queries
+
+Better names might be: `state`, `events`, `history`, `session`, `tracking`
+
+**Proposed namespace structure** (pending design):
+```
+src/seon/???/
+├── hook.clj          ; Hook event processing (main entry point)
+├── ???.clj           ; XTDB state (edits, reviews, functions)
+├── testing.clj       ; Unit + generative test orchestration
+├── review.clj        ; Gemini review logic + context building
+└── introspection.clj ; File→namespace, source reading, etc.
+```
+
+**Thin hook script (`bin/seon-hook`):**
+```clojure
+;; ~50 lines total - just parse JSON and delegate to Seon
+(defn -main []
+  (let [input (json/parse-string (slurp *in*) true)]
+    (-> (nrepl-eval
+          (format "(seon.???/process-hook-event! %s)" (pr-str input)))
+        (json/generate-string)
+        (println))))
+```
+
+### Design Principles
+
+1. **Map in, map out** - All public functions follow CONVENTIONS.md
+2. **Malli schemas** - Every function boundary is specified
+3. **Testable** - All logic can be tested via REPL and clj.test
+4. **Self-aware** - Seon understands its own codebase structure
+5. **Temporal** - All state in XTDB with proper history
+6. **SQL-first** - Use SQL queries per our migration direction
+
+### Key Design Questions
+
+1. **Domain naming**: What's the best namespace structure and names?
+2. **Hook event schema**: What's the canonical representation?
+3. **Review timing**: Background thread vs next-edit trigger vs external timer?
+4. **File introspection**: How does Seon map files→namespaces→functions?
+5. **Test orchestration**: How to run tests and capture structured results?
+6. **Gemini context**: How to build review context cleanly?
+
+### Files to Read for Context
+
+- `CONVENTIONS.md` - Malli schema patterns (MUST follow)
+- `docs/reference/xtdb-v2-reference.md` - SQL patterns (use SQL, not XTQL)
+- `docs/prds/sql-migration/research/sql-syntax-investigation.md` - Column naming
+- `src/seon/dev/feedback.clj` - Current state tracking (to be refactored)
+- `bin/seon-hook` - Current hook logic (to be migrated)
+- `src/seon/ai/gemini.clj` - Gemini client patterns
+
+### Research Approach
+
+Use `gemini/search` for any current web information needed (faster than web search, connected to Google's index). XTDB v2 docs, Malli patterns, etc.
+
+### Research Tasks
+
+- [x] Design namespace structure and naming (`seon.dev.*`)
+- [x] Define Malli schemas for all data types
+- [x] Design the `process-hook-event!` flow
+- [x] Solve the review timing problem (simple rate limiting, not debounce)
+- [x] Design Gemini context building with proper schemas
+- [x] Plan migration from current hook
+- [x] Update XTDB reference doc with new SQL patterns
+- [x] Document BB<->Clojure communication (direct nREPL with bencode)
+- [x] Design paren repair porting strategy
+
+**See `research/phase6-design.md` for complete design.**
+
+---
+
 ## Phase 2: Enhanced Context & Iterative AI (Research Required)
 
 These ideas require the modular Phase 1 system to be working first. Mark as research work.

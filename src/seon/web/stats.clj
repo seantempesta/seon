@@ -10,7 +10,7 @@
 
 (defn get-total-records
   "Query total count of option-greeks records.
-   Returns the count as a number."
+   Returns the count as a number, or 0 if empty/error."
   [xtdb-node]
   (try
     (let [result (node/query xtdb-node
