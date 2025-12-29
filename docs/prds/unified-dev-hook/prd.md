@@ -678,9 +678,33 @@ Created `src/seon/dev/hook.clj` - main orchestrator that wires everything togeth
 - `src/seon/dev/hook.clj` - ~450 lines
 - `test/seon/dev/hook_test.clj` - 13 tests, 32 assertions
 
+### Stage 6c: Thin Babashka Hook (Complete)
+
+Replaced 851-line `bin/seon-hook` with a thin ~130-line script:
+- Uses bencode to communicate directly with nREPL (no external `clj-nrepl-eval` process)
+- Loads config from `.claude/seon-hook.edn`
+- Calls `seon.dev.hook/process-hook-event!` with the event and config
+- Formats response for Claude Code JSON output
+- Graceful error handling (never crashes, returns `{:continue true}` on errors)
+
+**Key improvements:**
+- 80% reduction in code (851 -> 168 lines)
+- All logic now in testable Clojure code (`seon.dev.hook`)
+- Direct nREPL with bencode - no external process spawning
+- EDN in, EDN out - no text parsing
+
+**Files:**
+- `bin/seon-hook` - New thin script (168 lines including comments)
+- `bin/seon-hook.old` - Old script preserved for reference
+
+**Tested scenarios:**
+- PostToolUse on seon source file: Full pipeline runs (tests, review)
+- PreToolUse on seon source file: Only repair stage runs
+- Non-Clojure file: Returns `{:continue true}` immediately
+- Non-seon Clojure file: Returns `{:continue true}` (no full pipeline)
+
 **Remaining stages:**
-- 6c: Replace `bin/seon-hook` with thin BB script calling `seon.dev.hook/process-hook-event!`
-- 6d: Cleanup - delete old `feedback.clj`, update documentation
+- 6d: Cleanup - delete old `feedback.clj` and `bin/seon-hook.old`, update documentation
 
 ### Problem
 
