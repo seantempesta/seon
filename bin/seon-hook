@@ -449,22 +449,22 @@
         (str/replace #"\.clj$" "_test.clj"))))
 
 (defn stage-batch-review
-  "Run structured code review on accumulated changes.
+  "Run plain-text code review on accumulated changes.
 
    Passes to Gemini:
-   - CONVENTIONS.md (project standards)
-   - Source files being reviewed
-   - Corresponding test files
-   - Test results summary
+   - CONVENTIONS.md in system instruction (cached for efficiency)
+   - Source files and test files as code
+   - Test results and new functions as context
 
-   Returns {:verdict :confidence :summary :issues}."
+   Returns plain text review string."
   [files-summary test-results]
   (log! :info "Triggering batch code review")
   (let [source-files (vec (:files files-summary))
         test-files (vec (keep source->test-path source-files))
         all-files (into source-files test-files)
         files-edn (pr-str all-files)
-        new-fns-edn (pr-str (vec (:new-fns files-summary)))
+        new-fns (vec (:new-fns files-summary))
+        new-fns-str (when (seq new-fns) (str/join ", " new-fns))
         ;; Format test results for context
         test-summary (if test-results
                        (if (:success test-results)
@@ -474,16 +474,15 @@
                                  (:error-count test-results 0)
                                  (:test-count test-results 0)))
                        "Tests: not run")
-        ;; Build REPL expression that reads all context
+        ;; Build REPL expression - conventions go to system instruction for caching
         review-expr (format
-                     "(let [;; Read CONVENTIONS.md for project standards
+                     "(let [;; Read CONVENTIONS.md (goes to system instruction for caching)
                             conventions (let [f (clojure.java.io/file \"CONVENTIONS.md\")]
-                                          (if (.exists f)
+                                          (when (.exists f)
                                             (let [content (slurp f)]
                                               (if (> (count content) %d)
                                                 (str (subs content 0 %d) \"\\n[truncated]\")
-                                                content))
-                                            \"\"))
+                                                content))))
                             ;; Read source and test files
                             files %s
                             read-file (fn [f]
@@ -494,51 +493,52 @@
                             file-contents (->> files
                                                (map (fn [f] (str \";;; \" f \"\\n\" (read-file f))))
                                                (clojure.string/join \"\\n\\n\"))
-                            truncated (if (> (count file-contents) %d)
-                                        (str (subs file-contents 0 %d) \"\\n;;; [truncated]\")
-                                        file-contents)
-                            new-fns %s
-                            test-summary \"%s\"
-                            ;; Build full context
-                            full-context (str \"=== PROJECT CONVENTIONS ===\\n\"
-                                              conventions
-                                              \"\\n\\n=== TEST RESULTS ===\\n\"
-                                              test-summary
-                                              \"\\n\\n=== CODE ===\\n\"
-                                              truncated)]
+                            code (if (> (count file-contents) %d)
+                                   (str (subs file-contents 0 %d) \"\\n;;; [truncated]\")
+                                   file-contents)
+                            ;; Build context (test results, new functions)
+                            context (str \"=== TEST RESULTS ===\\n\" \"%s\"
+                                         %s)]
                         (seon.ai.gemini/review-code
-                         {:seon.ai.gemini/prompt (str \"Review these Clojure code changes against project conventions.\"
-                                                      (when (seq new-fns)
-                                                        (str \" New functions: \" (clojure.string/join \", \" new-fns)))
-                                                      (when (clojure.string/includes? test-summary \"failed\")
-                                                        \" Note: Some tests are failing.\"))
-                          :seon.ai.gemini/code full-context}))"
+                         {:seon.ai.gemini/prompt \"Review these Clojure code changes against project conventions.\"
+                          :seon.ai.gemini/code code
+                          :seon.ai.gemini/conventions conventions
+                          :seon.ai.gemini/context context}))"
                      max-conventions-length
                      max-conventions-length
                      files-edn
                      max-code-length
                      max-code-length
-                     new-fns-edn
-                     test-summary)
+                     test-summary
+                     (if new-fns-str
+                       (format "(str \"\\n\\n=== NEW FUNCTIONS ===\\n\" \"%s\")" new-fns-str)
+                       "\"\""))
         result (nrepl-eval review-expr gemini-timeout-secs)]
     (cond
       (:timeout? result)
       (do
         (log! :warn "Gemini review timed out")
-        {:verdict :approve :confidence :low :summary "Review timed out" :issues []})
+        "[Review timed out] API may be slow, will retry on next edit")
 
       (zero? (:exit result))
       (let [raw-value (parse-nrepl-value (:out result))]
+        ;; raw-value is a quoted string like "\"review text here\""
+        ;; We need to read-string to unescape it
         (if raw-value
           (try
-            (read-string raw-value)
+            (let [text (read-string raw-value)]
+              (if (string? text)
+                text
+                (str text)))
             (catch Exception e
-              (log! :error (str "Failed to parse review: " (.getMessage e) " raw: " (subs raw-value 0 (min 100 (count raw-value)))))
-              {:verdict :approve :confidence :low :summary "Parse error" :issues []}))
-          {:verdict :approve :confidence :low :summary "Empty review response" :issues []}))
+              (log! :error (str "Failed to parse review text: " (.getMessage e)))
+              "[Review parse error] Could not read response"))
+          "[Review empty] No response from Gemini"))
 
       :else
-      {:verdict :approve :confidence :low :summary "Review call failed" :issues []})))
+      (do
+        (log! :error (str "Review call failed: " (:err result)))
+        "[Review call failed] Check nREPL connection"))))
 
 (defn stage-clear-pending
   "Clear pending edits after review."
@@ -641,14 +641,30 @@
                                                    (:test-count result) test-ns))
                             (do
                               (log! :warn "Unit tests failed" result)
-                              (if (get-in config [:unit-tests :block-on-fail])
+                              ;; Distinguish infrastructure failures from real test failures
+                              (cond
+                                ;; Infrastructure failure (timeout, parse error) - continue with warning
+                                (:timeout? result)
+                                (add-feedback! "⚠ Unit tests timed out - check for slow tests or infinite loops")
+
+                                (:error result)
+                                (add-feedback! (format "⚠ Unit tests failed to run: %s" (:error result)))
+
+                                ;; Real test failures - block with instructions
+                                :else
                                 (do
                                   (println (block-response
-                                            (format "Unit tests failed in %s: %d failures, %d errors"
-                                                    test-ns (:fail-count result 0) (:error-count result 0))))
-                                  (System/exit 0))
-                                (add-feedback! (format "⚠ Unit tests failed (%d failures, %d errors)"
-                                                       (:fail-count result 0) (:error-count result 0))))))
+                                            (format "Unit tests failed: %d failures, %d errors in %s
+
+Fix the failing tests before continuing. Run tests with:
+  clj -M:test -m kaocha.runner --focus %s
+
+Or update the test expectations if the behavior change is intentional."
+                                                    (:fail-count result 0)
+                                                    (:error-count result 0)
+                                                    test-ns
+                                                    test-ns)))
+                                  (System/exit 0)))))
                           result))]
 
       ;; 4. Collect Malli schemas
@@ -665,15 +681,32 @@
             (add-feedback! (format "✓ Generative tests passed (%s)" ns-sym))
             (do
               (log! :warn "Generative tests failed" gen-result)
-              (let [failed-fns (str/join ", " (map :fn (:failures gen-result)))]
-                (if (get-in config [:generative-tests :block-on-fail])
-                  (do
-                    (println (block-response
-                              (format "Generative tests failed in %s: %s"
-                                      ns-sym (if (str/blank? failed-fns) "schema errors" failed-fns))))
-                    (System/exit 0))
-                  (add-feedback! (format "⚠ Generative tests failed: %s"
-                                         (if (str/blank? failed-fns) "unknown" failed-fns)))))))))
+              ;; Distinguish infrastructure failures from real test failures
+              (cond
+                ;; Infrastructure failure (timeout) - continue with warning
+                (:timeout? gen-result)
+                (add-feedback! "⚠ Generative tests timed out - check for slow generators")
+
+                (:error gen-result)
+                (add-feedback! (format "⚠ Generative tests failed to run: %s" (:error gen-result)))
+
+                ;; Real test failures - block with instructions
+                :else
+                (let [failed-fns (str/join ", " (map :fn (:failures gen-result)))]
+                  (println (block-response
+                            (format "Generative tests failed for: %s
+
+The function schemas don't match the implementation. Fix by:
+1. Check the :malli/schema metadata on the failing functions
+2. Update the schema to match actual behavior, OR
+3. Fix the function to match the declared schema
+
+Run generative tests manually:
+  (require '[seon.dev.feedback :as fb])
+  (fb/check-namespace '%s {:num-tests 10})"
+                                    (if (str/blank? failed-fns) "schema errors" failed-fns)
+                                    ns-sym)))
+                  (System/exit 0)))))))
 
       ;; 7. Record functions in XTDB
       (stage-record-functions ns-sym)
@@ -688,36 +721,13 @@
             (log! :debug (str "Pending summary: " (pr-str summary)))
             (when (and summary (pos? (:edit-count summary 0)))
               (log! :info "Triggering batch review!")
-              (let [review (stage-batch-review summary test-result)]
-                (log! :debug (str "Review result: " (pr-str review)))
+              (let [review-text (stage-batch-review summary test-result)]
+                (log! :debug (str "Review result: " (pr-str (subs review-text 0 (min 100 (count review-text))))))
                 ;; Clear pending edits
                 (stage-clear-pending)
                 (log! :debug "Cleared pending edits")
-
-                ;; Format feedback message with truncation
-                (let [summary (truncate (:summary review) max-summary-length)
-                      issues (take max-issues-shown (:issues review))
-                      issues-str (when (seq issues)
-                                   (str/join " | "
-                                             (map #(str "[" (name (:severity %)) "] "
-                                                        (truncate (:description %) 80))
-                                                  issues)))
-                      ;; Build warning message with actionable context
-                      review-msg (if (= :block (:verdict review))
-                                   ;; Gemini flagged concerns - show as warning with issues
-                                   (str "⚠ Gemini review: " summary
-                                        (when issues-str (str " - issues: " issues-str))
-                                        (when (> (count (:issues review)) max-issues-shown)
-                                          (str " [+" (- (count (:issues review)) max-issues-shown) " more]")))
-                                   ;; Approved - show summary
-                                   (str "Gemini: " (name (:verdict review))
-                                        " (" (name (:confidence review)) ") - "
-                                        summary
-                                        (when issues-str (str " | " issues-str))
-                                        (when (> (count (:issues review)) max-issues-shown)
-                                          (str " [+" (- (count (:issues review)) max-issues-shown) " more]"))))]
-                  ;; Advisory only - never block
-                  (add-feedback! review-msg)))))))
+                ;; Add review to feedback (truncated) - advisory only
+                (add-feedback! (str "Gemini: " (truncate review-text max-summary-length))))))))
 
     ;; Success
     (println (success-response))))))
