@@ -545,9 +545,35 @@ Malli schemas can reference other schemas. Need recursive resolution:
 
 ## Phase 6: Hook Refactor - Move Logic to Seon (In Progress)
 
-**Status:** Design Complete - Ready for Implementation
+**Status:** Stage 6a-1 Complete (context.clj)
 **Goal:** Move hook logic from Babashka script into properly designed Clojure code.
 **Design Doc:** `research/phase6-design.md`
+
+### Stage 6a-1: seon.dev.context (Complete)
+
+Created `src/seon/dev/context.clj` - simplified edit/review tracking with:
+- `record-edit!` - Record file edit events
+- `record-review!` - Record review completion
+- `should-review?` - Simple rate limiting (interval-based, not debounce)
+- `edits-since-last-review` - Get pending edits
+- `edits-summary` - Get summary for context building
+
+**Key simplifications from feedback.clj:**
+- Removed broken debounce logic, replaced with simple rate limiting
+- Removed function tracking (that's for codebase.clj)
+- Added proper Malli schemas per CONVENTIONS.md
+- Uses SQL queries per XTDB migration direction
+
+**Files:**
+- `src/seon/dev/context.clj` - 322 lines
+- `test/seon/dev/context_test.clj` - 10 tests, 41 assertions
+
+**Remaining stages:**
+- 6a-2: `seon.dev.codebase` - File introspection, ns mapping
+- 6a-3: `seon.dev.verify` - Test orchestration
+- 6a-4: `seon.dev.review` - AI review + context building
+- 6a-5: `seon.dev.repair` - Delimiter repair (port from clojure-mcp-light)
+- 6a-6: `seon.dev.hook` - Main orchestrator
 
 ### Problem
 
