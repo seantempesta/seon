@@ -545,7 +545,7 @@ Malli schemas can reference other schemas. Need recursive resolution:
 
 ## Phase 6: Hook Refactor - Move Logic to Seon (In Progress)
 
-**Status:** Stage 6a-4 Complete (review.clj)
+**Status:** Stage 6a-5 Complete (repair.clj)
 **Goal:** Move hook logic from Babashka script into properly designed Clojure code.
 **Design Doc:** `research/phase6-design.md`
 
@@ -632,8 +632,32 @@ Created `src/seon/dev/review.clj` - AI code review extracted from `bin/seon-hook
 - `src/seon/dev/review.clj` - ~280 lines
 - `test/seon/dev/review_test.clj` - 10 tests, 40 assertions
 
+### Stage 6a-5: seon.dev.repair (Complete)
+
+Created `src/seon/dev/repair.clj` - delimiter repair ported from clojure-mcp-light:
+- `delimiter-error?` - Check if code has unbalanced delimiters (uses edamame)
+- `repair` - Attempt to fix delimiter errors using parinferish
+- `repair-and-format` - Repair and optionally format code with cljfmt
+
+**Key features:**
+- Uses edamame for precise delimiter error detection (checks for :edamame/opened-delimiter)
+- Uses parinferish in indent mode to infer correct delimiters from indentation
+- Optional cljfmt formatting after repair
+- Graceful degradation - returns original if repair fails
+- Malli schemas per CONVENTIONS.md for all public functions
+- Comprehensive tests (5 tests, 68 assertions)
+- REPL-verified all functions work correctly
+
+**Dependencies added to deps.edn:**
+- `parinferish/parinferish {:mvn/version "0.8.0"}` - Parinfer implementation
+- `borkdude/edamame {:mvn/version "1.4.27"}` - Fast Clojure parser
+- `dev.weavejester/cljfmt {:mvn/version "0.12.0"}` - Code formatter
+
+**Files:**
+- `src/seon/dev/repair.clj` - ~200 lines
+- `test/seon/dev/repair_test.clj` - 5 tests, 68 assertions
+
 **Remaining stages:**
-- 6a-5: `seon.dev.repair` - Delimiter repair (port from clojure-mcp-light)
 - 6a-6: `seon.dev.hook` - Main orchestrator
 
 ### Problem
