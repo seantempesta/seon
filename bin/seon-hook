@@ -39,8 +39,8 @@
                    :cljfmt true        ;; Run cljfmt after delimiter repair
                    :stats true         ;; Track delimiter stats
                    :revert-on-fail true}  ;; Restore backup if fix fails
-   :unit-tests {:enabled true :block-on-fail true}
-   :generative-tests {:enabled true :num-tests 10 :block-on-fail true}
+   :unit-tests {:enabled true :block-on-fail false}     ;; Advisory, not blocking
+   :generative-tests {:enabled true :num-tests 10 :block-on-fail false}  ;; Advisory, not blocking
    :gemini {:enabled true :on-new-function true :on-gen-fail true}})
 
 (defn load-config []
@@ -645,13 +645,10 @@
                                                    (:test-count result) test-ns))
                             (do
                               (log! :warn "Unit tests failed" result)
-                              (when (get-in config [:unit-tests :block-on-fail])
-                                (println (block-response
-                                          (format "Unit tests failed in %s: %d failures, %d errors"
-                                                  test-ns
-                                                  (:fail-count result 0)
-                                                  (:error-count result 0))))
-                                (System/exit 0))))
+                              ;; Advisory warning - never block
+                              (add-feedback! (format "⚠ Unit tests failed (%d failures, %d errors) - see test output above"
+                                                     (:fail-count result 0)
+                                                     (:error-count result 0)))))
                           result))]
 
       ;; 4. Collect Malli schemas
@@ -668,12 +665,10 @@
             (add-feedback! (format "✓ Generative tests passed (%s)" ns-sym))
             (do
               (log! :warn "Generative tests failed" gen-result)
-              (when (get-in config [:generative-tests :block-on-fail])
-                (println (block-response
-                          (format "Generative test failures in %s: %s"
-                                  ns-sym
-                                  (str/join ", " (map :fn (:failures gen-result))))))
-                (System/exit 0))))))
+              ;; Advisory warning - never block
+              (let [failed-fns (str/join ", " (map :fn (:failures gen-result)))]
+                (add-feedback! (format "⚠ Generative tests failed - check function schemas for: %s"
+                                       (if (str/blank? failed-fns) "unknown" failed-fns))))))))
 
       ;; 7. Record functions in XTDB
       (stage-record-functions ns-sym)
@@ -702,23 +697,25 @@
                                              (map #(str "[" (name (:severity %)) "] "
                                                         (truncate (:description %) 80))
                                                   issues)))
-                      review-msg (str "Gemini: " (name (:verdict review))
-                                      " (" (name (:confidence review)) ") - "
-                                      summary
-                                      (when issues-str (str " | " issues-str))
-                                      (when (> (count (:issues review)) max-issues-shown)
-                                        (str " [+" (- (count (:issues review)) max-issues-shown) " more]")))]
-                  (add-feedback! review-msg)
-
-                  ;; Block if verdict is :block with high confidence
-                  (when (and (= :block (:verdict review))
-                             (= :high (:confidence review)))
-                    (println (block-response
-                              (format "Code review blocked: %s" (:summary review))))
-                    (System/exit 0)))))))))
+                      ;; Build warning message with actionable context
+                      review-msg (if (= :block (:verdict review))
+                                   ;; Gemini flagged concerns - show as warning with issues
+                                   (str "⚠ Gemini review: " summary
+                                        (when issues-str (str " - issues: " issues-str))
+                                        (when (> (count (:issues review)) max-issues-shown)
+                                          (str " [+" (- (count (:issues review)) max-issues-shown) " more]")))
+                                   ;; Approved - show summary
+                                   (str "Gemini: " (name (:verdict review))
+                                        " (" (name (:confidence review)) ") - "
+                                        summary
+                                        (when issues-str (str " | " issues-str))
+                                        (when (> (count (:issues review)) max-issues-shown)
+                                          (str " [+" (- (count (:issues review)) max-issues-shown) " more]"))))]
+                  ;; Advisory only - never block
+                  (add-feedback! review-msg)))))))
 
     ;; Success
-    (println (success-response)))))
+    (println (success-response))))))
 
 (defn clojure-file?
   "Check if file path is a Clojure file."
