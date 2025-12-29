@@ -545,7 +545,7 @@ Malli schemas can reference other schemas. Need recursive resolution:
 
 ## Phase 6: Hook Refactor - Move Logic to Seon (In Progress)
 
-**Status:** Stage 6a-2 Complete (codebase.clj)
+**Status:** Stage 6a-3 Complete (verify.clj)
 **Goal:** Move hook logic from Babashka script into properly designed Clojure code.
 **Design Doc:** `research/phase6-design.md`
 
@@ -588,8 +588,30 @@ Created `src/seon/dev/codebase.clj` - codebase introspection utilities extracted
 - `src/seon/dev/codebase.clj` - ~230 lines
 - `test/seon/dev/codebase_test.clj` - 9 tests, 70 assertions
 
+### Stage 6a-3: seon.dev.verify (Complete)
+
+Created `src/seon/dev/verify.clj` - test orchestration utilities for the dev hook:
+- `run-unit-tests` - Run unit tests for a test namespace, capturing results
+- `run-unit-tests-for-source` - Run tests for source ns (derives test ns)
+- `run-gen-tests` - Run Malli generative tests on schema-annotated functions
+- `format-unit-result` - Format unit test results for display
+- `format-gen-result` - Format generative test results for display
+- `format-results` - Auto-detect and format any test result
+- `check-namespace` - Run both unit and gen tests, return combined result
+
+**Key features:**
+- Proper clojure.test integration with output capture
+- Malli mg/check integration for generative testing
+- Malli schemas per CONVENTIONS.md for all public functions
+- Result maps use namespaced keys (::success, ::failures, etc.)
+- Comprehensive tests (9 tests, 44 assertions)
+- REPL-verified all functions work correctly
+
+**Files:**
+- `src/seon/dev/verify.clj` - ~440 lines
+- `test/seon/dev/verify_test.clj` - 9 tests, 44 assertions
+
 **Remaining stages:**
-- 6a-3: `seon.dev.verify` - Test orchestration
 - 6a-4: `seon.dev.review` - AI review + context building
 - 6a-5: `seon.dev.repair` - Delimiter repair (port from clojure-mcp-light)
 - 6a-6: `seon.dev.hook` - Main orchestrator
