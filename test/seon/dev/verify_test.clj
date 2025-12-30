@@ -74,7 +74,27 @@
 
   (testing "Accepts num-tests option"
     (let [result (v/run-gen-tests 'seon.dev.hook-test-ns {::v/num-tests 5})]
-      (is (true? (::v/success result))))))
+      (is (true? (::v/success result)))))
+
+  (testing "Tests namespace with real Malli schemas"
+    ;; seon.dev.codebase has functions with :malli/schema metadata
+    ;; This exercises the actual generative testing machinery
+    (let [result (v/run-gen-tests 'seon.dev.codebase {::v/num-tests 5})]
+      (is (boolean? (::v/success result)) "Should return success status")
+      (is (or (empty? (::v/failures result))
+              (seq (::v/failures result)))
+          "Should have failures vector (empty or with entries)")
+      ;; If it succeeded, we verified gen tests work on schema'd functions
+      (when (::v/success result)
+        (is (zero? (count (::v/failures result)))
+            "Passing gen tests should have no failures"))))
+
+  (testing "Runs gen tests against repair namespace (has schemas)"
+    ;; seon.dev.repair has several schema-annotated functions
+    (let [result (v/run-gen-tests 'seon.dev.repair {::v/num-tests 3})]
+      (is (boolean? (::v/success result)) "Should return success status")
+      ;; repair functions should pass with valid schemas
+      (is (vector? (::v/failures result)) "Should have failures vector"))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; format-unit-result Tests

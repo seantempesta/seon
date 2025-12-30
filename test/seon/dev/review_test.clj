@@ -10,7 +10,8 @@
 ;;; Test Fixtures
 ;;; ---------------------------------------------------------------------------
 
-(def test-file-path "/Users/sean/src/seon/src/seon/core.clj")
+;; Use relative paths that work from project root
+(def test-file-path "src/seon/core.clj")
 (def nonexistent-file "/nonexistent/path/file.clj")
 
 ;;; ---------------------------------------------------------------------------
