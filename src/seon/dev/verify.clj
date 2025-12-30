@@ -26,6 +26,7 @@
             [clojure.test :as test]
             [malli.core :as m]
             [malli.generator :as mg]
+            [malli.instrument :as mi]
             [seon.schema :as schema]))
 
 ;;; ---------------------------------------------------------------------------
@@ -204,7 +205,8 @@
 (defn- check-function
   "Run generative tests on a single function.
 
-   Returns nil on success, or a failure map on failure."
+   Returns nil on success or if the function can't be tested (no generator).
+   Returns a failure map only for real schema violations."
   [ns-sym fn-sym num-tests]
   (when-let [schema-data (get (get-function-schemas ns-sym) fn-sym)]
     (when-let [var (ns-resolve ns-sym fn-sym)]
@@ -213,8 +215,13 @@
                                @var
                                {:num-tests num-tests})
                      (catch Exception e
-                       {:error {:type :check-exception
-                                :message (ex-message e)}}))]
+                       (let [error-type (:type (ex-data e))]
+                         (if (= error-type :malli.generator/no-generator)
+                           ;; No generator available - skip this function, not a failure
+                           nil
+                           ;; Real error - report it
+                           {:error {:type :check-exception
+                                    :message (ex-message e)}}))))]
         ;; mg/check returns nil on success, or a map with :shrunk on failure
         (when result
           {::fn-symbol fn-sym
@@ -253,6 +260,8 @@
      (try
        ;; Reload namespace first
        (require ns-sym :reload)
+       ;; Collect function schemas from metadata - required for m/function-schemas to work
+       (mi/collect! {:ns ns-sym})
        (let [schemas (get-function-schemas ns-sym)
              failures (if (nil? schemas)
                         []

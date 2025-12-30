@@ -359,57 +359,53 @@
                 (log/debug "Could not determine namespace for" file-path)
                 (success-response @feedback))
 
-              ;; Full pipeline
-              (do
-                ;; 1. Repair
-                (let [repair-result (stage-repair file-path config)]
-                  (when (and repair-result (not (:success repair-result)))
-                    (block-response (:error repair-result))))
-
-                ;; 2. Reload namespace
-                (let [reload-result (stage-reload ns-sym)]
-                  (when-not (:success reload-result)
-                    (block-response (:error reload-result))))
-
-                ;; 3. Unit tests
-                (let [unit-result (stage-unit-tests ns-sym config)]
-                  (when unit-result
-                    (if (::verify/success unit-result)
-                      (swap! feedback conj
-                             (verify/format-unit-result unit-result
-                                                        (codebase/file->test-namespace file-path)))
-                      ;; Unit tests failed
-                      (when (get-in config [:tests :unit :block-on-fail])
-                        (block-response
-                         (format "Unit tests failed: %d failures, %d errors in %s"
-                                 (::verify/fail-count unit-result 0)
-                                 (::verify/error-count unit-result 0)
-                                 (codebase/file->test-namespace file-path))))))
-
-                  ;; 4. Generative tests
-                  (let [gen-result (stage-gen-tests ns-sym config)]
-                    (when gen-result
-                      (if (::verify/success gen-result)
-                        (swap! feedback conj
-                               (verify/format-gen-result gen-result ns-sym))
-                        ;; Gen tests failed
-                        (when (get-in config [:tests :generative :block-on-fail])
-                          (let [failed-fns (str/join ", " (map #(str (::verify/fn-symbol %))
-                                                               (::verify/failures gen-result)))]
-                            (block-response
-                             (format "Generative tests failed for: %s"
-                                     (if (str/blank? failed-fns) "schema errors" failed-fns))))))))
-
-                  ;; 5. Record edit
-                  (stage-record-edit xtdb-node file-path ns-sym)
-
-                  ;; 6. Review (if rate limit allows)
-                  (when (stage-should-review? xtdb-node config)
-                    (when-let [review-text (stage-review xtdb-node config unit-result)]
-                      (swap! feedback conj review-text)))
-
-                  ;; Success
-                  (success-response @feedback))))))))))
+              ;; Full pipeline - run stages, short-circuit on block
+              (let [;; 1. Repair - block if unfixable
+                    repair-result (stage-repair file-path config)
+                    repair-block (when (and repair-result (not (:success repair-result)))
+                                   (block-response (:error repair-result)))]
+                (or repair-block
+                    ;; 2. Reload namespace - block on compile error
+                    (let [reload-result (stage-reload ns-sym)
+                          reload-block (when-not (:success reload-result)
+                                         (block-response (:error reload-result)))]
+                      (or reload-block
+                          ;; 3. Unit tests - optionally block on failure
+                          (let [unit-result (stage-unit-tests ns-sym config)
+                                _ (when (and unit-result (::verify/success unit-result))
+                                    (swap! feedback conj
+                                           (verify/format-unit-result unit-result
+                                                                      (codebase/file->test-namespace file-path))))
+                                unit-block (when (and unit-result
+                                                      (not (::verify/success unit-result))
+                                                      (get-in config [:tests :unit :block-on-fail]))
+                                             (block-response
+                                              (format "Unit tests failed: %d failures, %d errors in %s"
+                                                      (::verify/fail-count unit-result 0)
+                                                      (::verify/error-count unit-result 0)
+                                                      (codebase/file->test-namespace file-path))))]
+                            (or unit-block
+                                ;; 4. Generative tests - optionally block on failure
+                                (let [gen-result (stage-gen-tests ns-sym config)
+                                      _ (when (and gen-result (::verify/success gen-result))
+                                          (swap! feedback conj
+                                                 (verify/format-gen-result gen-result ns-sym)))
+                                      gen-block (when (and gen-result
+                                                           (not (::verify/success gen-result))
+                                                           (get-in config [:tests :generative :block-on-fail]))
+                                                  (let [failed-fns (str/join ", " (map #(str (::verify/fn-symbol %))
+                                                                                       (::verify/failures gen-result)))]
+                                                    (block-response
+                                                     (format "Generative tests failed for: %s"
+                                                             (if (str/blank? failed-fns) "schema errors" failed-fns)))))]
+                                  (or gen-block
+                                      ;; 5. Record edit + 6. Review + 7. Success
+                                      (do
+                                        (stage-record-edit xtdb-node file-path ns-sym)
+                                        (when (stage-should-review? xtdb-node config)
+                                          (when-let [review-text (stage-review xtdb-node config unit-result)]
+                                            (swap! feedback conj review-text)))
+                                        (success-response @feedback)))))))))))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Development Helpers (REPL)
