@@ -898,6 +898,100 @@ When implementing this phase:
 
 ---
 
+## Phase 7b: Observability and Historical Tracking (Pending)
+
+**Goal:** Be able to replay what happened during development - what edits occurred, what feedback was given, test results, Gemini reviews. This enables debugging the hook itself and understanding development patterns.
+
+### Data Model
+
+Store rich event data in XTDB for temporal queries:
+
+```clojure
+;; Edit event (already exists in context.clj, enhance it)
+{:xt/id :hook/edit-<uuid>
+ :hook/event-type :edit
+ :hook/timestamp <inst>
+ :hook/file-path "src/seon/dev/hook.clj"
+ :hook/namespace 'seon.dev.hook
+ :hook/content-hash "sha256:..."  ; For change detection
+
+ ;; Test results
+ :hook/unit-test-result {:success true :test-count 14 :pass-count 37 :fail-count 0}
+ :hook/gen-test-result {:success true :functions-tested 5 :failures []}
+
+ ;; Hook decision
+ :hook/decision :continue  ; or :block
+ :hook/reason nil          ; or "Unit tests failed: 2 failures"
+ :hook/feedback ["✓ 14 tests passed" "..."]}
+
+;; Review event (new)
+{:xt/id :hook/review-<uuid>
+ :hook/event-type :review
+ :hook/timestamp <inst>
+ :hook/files ["src/seon/dev/hook.clj" "src/seon/dev/verify.clj"]
+ :hook/edit-count 3  ; Edits since last review
+
+ ;; Gemini interaction
+ :hook/gemini-prompt "Review these changes..."
+ :hook/gemini-response "The changes look good. Consider..."
+ :hook/gemini-tokens {:prompt 1500 :response 800 :cached 0}
+
+ ;; Context that was sent
+ :hook/review-context {:files-content {...} :test-results {...}}}
+```
+
+### Implementation Tasks
+
+- [ ] **Enhance edit event schema** (`context.clj`)
+  - Add `:hook/content-hash` for change detection
+  - Add `:hook/unit-test-result` and `:hook/gen-test-result`
+  - Add `:hook/decision`, `:hook/reason`, `:hook/feedback`
+  - Update `record-edit!` to accept full result map
+
+- [ ] **Add review event tracking** (`context.clj`)
+  - New function `record-review-event!` that stores full Gemini interaction
+  - Include prompt, response, tokens, context sent
+  - Link to the edits that triggered the review
+
+- [ ] **Wire up in hook.clj**
+  - Pass XTDB node through to review stage
+  - Capture and store all results in edit event
+  - Store Gemini review when it occurs
+
+- [ ] **Add content hash for change detection**
+  - Compute hash of file content before processing
+  - Skip full pipeline if hash unchanged (like old hook did)
+  - Store hash in edit event for debugging
+
+- [ ] **Query helpers for analysis**
+  - `edits-for-file` - All edits to a specific file
+  - `reviews-in-range` - Reviews between timestamps
+  - `failure-rate` - % of edits that resulted in blocks
+  - `gemini-token-usage` - Total tokens used in time period
+
+### Verification Work
+
+- [ ] **Test the hook end-to-end**
+  - Make real edits to seon files
+  - Observe hook output in real time
+  - Query XTDB to see stored events
+  - Verify data is complete and queryable
+
+- [ ] **Write development experience feedback**
+  - Document what works well
+  - Document pain points
+  - Suggest improvements based on actual usage
+
+### Success Criteria
+
+1. Can query "what happened in the last hour" and see all edits + reviews
+2. Can see test pass/fail rates over time
+3. Can replay a Gemini review (see exact prompt and response)
+4. Can detect when same file is edited repeatedly without changes
+5. Agent documents their experience using the hook
+
+---
+
 ## Phase 2: Enhanced Context & Iterative AI (Research Required)
 
 These ideas require the modular Phase 1 system to be working first. Mark as research work.
