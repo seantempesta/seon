@@ -149,11 +149,14 @@
 
 (defn- source->test-path
   "Convert source file path to test file path.
-   src/seon/foo/bar.clj -> test/seon/foo/bar_test.clj"
+   Works with both absolute and relative paths:
+   - src/seon/foo/bar.clj -> test/seon/foo/bar_test.clj
+   - /abs/path/src/seon/foo.clj -> /abs/path/test/seon/foo_test.clj"
   [source-path]
   (when source-path
     (-> source-path
-        (str/replace #"^src/" "test/")
+        ;; Replace /src/ or ^src/ with /test/ or test/
+        (str/replace #"(^|/)src/" "$1test/")
         (str/replace #"\.clj$" "_test.clj"))))
 
 (defn- load-conventions
