@@ -346,6 +346,38 @@
                       ::max-length max-output-length})
       (str "Gemini review failed: " (::error result)))))
 
+(defn review-edits-with-data
+  "Like review-edits but returns full data for observability.
+
+   Returns a map with:
+     ::formatted-text - The formatted output string
+     ::prompt        - The full prompt sent to Gemini
+     ::response      - The raw response from Gemini
+     ::success       - Whether the review succeeded
+
+   This is used by the hook for storing review data in XTDB."
+  [{::keys [files test-results new-functions max-output-length timeout api-key]
+    :as request}]
+  (let [context (build-context {::files files
+                                ::test-results test-results
+                                ::new-functions new-functions})
+        prompt (::prompt context)
+        code (::code context)
+        result (call-gemini {::context context
+                             ::timeout timeout
+                             ::api-key api-key})]
+    (if (::success result)
+      {::formatted-text (format-output {::text (::text result)
+                                         ::max-length max-output-length})
+       ::prompt (str prompt "\n\n" code)
+       ::response (::text result)
+       ::success true}
+      {::formatted-text (str "Gemini review failed: " (::error result))
+       ::prompt (str prompt "\n\n" code)
+       ::response nil
+       ::success false
+       ::error (::error result)})))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Development Helpers (REPL)
 ;;; ---------------------------------------------------------------------------

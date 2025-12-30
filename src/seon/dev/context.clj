@@ -49,19 +49,51 @@
                   [:int {:min 1
                          :description "Minimum seconds between reviews"}])
 
+;; Hook decision
+(schema/register! ::decision
+                  [:enum {:description "Hook decision result"}
+                   :continue :block])
+
+;; Test result summary for storage
+(schema/register! ::test-result-summary
+                  [:map
+                   [:success :boolean]
+                   [:test-count {:optional true} :int]
+                   [:pass-count {:optional true} :int]
+                   [:fail-count {:optional true} :int]
+                   [:error-count {:optional true} :int]
+                   [:error {:optional true} :string]])
+
+;; Enhanced edit event with observability fields
 (schema/register! ::edit-event
                   [:map
                    [:xt/id :uuid]
                    [:entity/type [:= :edit-event]]
                    [:edit/file ::file-path]
-                   [:edit/namespace {:optional true} ::namespace]])
+                   [:edit/namespace {:optional true} ::namespace]
+                   ;; Observability fields (all optional for backwards compat)
+                   [:edit/content-hash {:optional true} :string]
+                   [:edit/unit-test-result {:optional true} ::test-result-summary]
+                   [:edit/gen-test-result {:optional true} ::test-result-summary]
+                   [:edit/decision {:optional true} ::decision]
+                   [:edit/reason {:optional true} :string]
+                   [:edit/feedback {:optional true} [:vector :string]]])
 
+;; Enhanced review event with Gemini interaction details
 (schema/register! ::review-event
                   [:map
                    [:xt/id :uuid]
                    [:entity/type [:= :review-event]]
                    [:review/files [:set ::file-path]]
-                   [:review/edit-count :int]])
+                   [:review/edit-count :int]
+                   ;; Gemini interaction (optional)
+                   [:review/gemini-prompt {:optional true} :string]
+                   [:review/gemini-response {:optional true} :string]
+                   [:review/gemini-tokens {:optional true}
+                    [:map
+                     [:prompt {:optional true} :int]
+                     [:response {:optional true} :int]
+                     [:cached {:optional true} :int]]]])
 
 (schema/register! ::review-options
                   [:map
@@ -107,44 +139,65 @@
    Edit events are immutable facts stored in XTDB. The valid-time is set
    automatically to the current time by XTDB.
 
-   Request keys:
-     node      - XTDB node
-     file-path - Absolute path to the edited file
-     ns-sym    - Namespace symbol (e.g., 'seon.foo)
+   Basic usage (positional args for backwards compat):
+     (record-edit! node \"/path/to/file.clj\" 'seon.foo)
+
+   Enhanced usage (with observability data):
+     (record-edit! node \"/path/to/file.clj\" 'seon.foo
+       {:content-hash \"sha256:abc123\"
+        :unit-test-result {:success true :test-count 5}
+        :gen-test-result {:success true}
+        :decision :continue
+        :feedback [\"5 tests passed\"]})
 
    Returns:
-     Transaction result with :tx-id
-
-   Example:
-     (record-edit! node \"/path/to/file.clj\" 'seon.foo)"
-  [xtdb-node file-path ns-sym]
-  (let [entity {:xt/id (UUID/randomUUID)
-                :entity/type :edit-event
-                :edit/file file-path
-                :edit/namespace (when ns-sym (keyword (str ns-sym)))}]
-    (node/execute-tx! xtdb-node [[:put-docs :edit-event entity]])))
+     Transaction result with :tx-id"
+  ([xtdb-node file-path ns-sym]
+   (record-edit! xtdb-node file-path ns-sym nil))
+  ([xtdb-node file-path ns-sym opts]
+   (let [{:keys [content-hash unit-test-result gen-test-result
+                 decision reason feedback]} opts
+         entity (cond-> {:xt/id (UUID/randomUUID)
+                         :entity/type :edit-event
+                         :edit/file file-path}
+                  ns-sym (assoc :edit/namespace (keyword (str ns-sym)))
+                  content-hash (assoc :edit/content-hash content-hash)
+                  unit-test-result (assoc :edit/unit-test-result unit-test-result)
+                  gen-test-result (assoc :edit/gen-test-result gen-test-result)
+                  decision (assoc :edit/decision decision)
+                  reason (assoc :edit/reason reason)
+                  feedback (assoc :edit/feedback feedback))]
+     (node/execute-tx! xtdb-node [[:put-docs :edit-event entity]]))))
 
 (defn record-review!
   "Record that a review was completed.
 
    Records the files that were reviewed and the count of edits processed.
 
-   Request keys:
-     node  - XTDB node
-     files - Set of file paths that were reviewed
+   Basic usage:
+     (record-review! node #{\"/path/to/file.clj\"})
+
+   Enhanced usage (with Gemini interaction data):
+     (record-review! node #{\"/path/to/file.clj\"}
+       {:gemini-prompt \"Review these changes...\"
+        :gemini-response \"The code looks good...\"
+        :gemini-tokens {:prompt 1500 :response 800 :cached 0}})
 
    Returns:
-     Transaction result with :tx-id
-
-   Example:
-     (record-review! node #{\"/path/to/file.clj\" \"/path/to/other.clj\"})"
-  [xtdb-node files]
-  (let [edit-count (count (edits-since-last-review xtdb-node))
-        entity {:xt/id (UUID/randomUUID)
-                :entity/type :review-event
-                :review/files (set files)
-                :review/edit-count edit-count}]
-    (node/execute-tx! xtdb-node [[:put-docs :review-event entity]])))
+     Transaction result with :tx-id"
+  ([xtdb-node files]
+   (record-review! xtdb-node files nil))
+  ([xtdb-node files opts]
+   (let [{:keys [gemini-prompt gemini-response gemini-tokens]} opts
+         edit-count (count (edits-since-last-review xtdb-node))
+         entity (cond-> {:xt/id (UUID/randomUUID)
+                         :entity/type :review-event
+                         :review/files (set files)
+                         :review/edit-count edit-count}
+                  gemini-prompt (assoc :review/gemini-prompt gemini-prompt)
+                  gemini-response (assoc :review/gemini-response gemini-response)
+                  gemini-tokens (assoc :review/gemini-tokens gemini-tokens))]
+     (node/execute-tx! xtdb-node [[:put-docs :review-event entity]]))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Query Timing
@@ -286,6 +339,118 @@
     (when (seq review-ids)
       (node/execute-tx! xtdb-node
                         (mapv (fn [id] [:erase-docs :review-event id]) review-ids)))))
+
+;;; ---------------------------------------------------------------------------
+;;; Query Helpers for Analysis (Phase 7b Observability)
+;;; ---------------------------------------------------------------------------
+
+(defn edits-for-file
+  "Get all edit events for a specific file.
+
+   Returns vector of edit events, newest first.
+
+   Example:
+     (edits-for-file node \"/path/to/file.clj\")
+     ;; => [{:edit/file \"...\" :edit/decision :continue ...} ...]"
+  [xtdb-node file-path]
+  (node/sql-query
+   xtdb-node
+   ["SELECT *, _valid_from FROM edit_event WHERE edit_file = ? ORDER BY _valid_from DESC"
+    file-path]))
+
+(defn reviews-in-range
+  "Get review events in a time range.
+
+   Arguments:
+     xtdb-node  - XTDB node
+     start-inst - Start time (Instant)
+     end-inst   - End time (Instant), defaults to now
+
+   Returns vector of review events, newest first."
+  ([xtdb-node start-inst]
+   (reviews-in-range xtdb-node start-inst (Instant/now)))
+  ([xtdb-node start-inst end-inst]
+   (node/sql-query
+    xtdb-node
+    ["SELECT *, _valid_from FROM review_event WHERE _valid_from >= ? AND _valid_from <= ? ORDER BY _valid_from DESC"
+     start-inst end-inst])))
+
+(defn failure-rate
+  "Calculate the percentage of edits that resulted in blocks.
+
+   Returns map with:
+     :total - Total edit count
+     :blocked - Number of blocked edits
+     :rate - Failure rate as decimal (0.0 - 1.0)
+
+   Example:
+     (failure-rate node)
+     ;; => {:total 100 :blocked 5 :rate 0.05}"
+  [xtdb-node]
+  (let [total-result (node/sql-query
+                      xtdb-node
+                      "SELECT COUNT(*) as cnt FROM edit_event")
+        blocked-result (node/sql-query
+                        xtdb-node
+                        "SELECT COUNT(*) as cnt FROM edit_event WHERE edit_decision = 'block'")
+        total (or (:cnt (first total-result)) 0)
+        blocked (or (:cnt (first blocked-result)) 0)]
+    {:total total
+     :blocked blocked
+     :rate (if (pos? total)
+             (double (/ blocked total))
+             0.0)}))
+
+(defn gemini-token-usage
+  "Get total Gemini token usage in a time period.
+
+   Arguments:
+     xtdb-node  - XTDB node
+     start-inst - Start time (Instant)
+     end-inst   - End time (Instant), defaults to now
+
+   Returns map with:
+     :prompt-tokens - Total prompt tokens
+     :response-tokens - Total response tokens
+     :cached-tokens - Total cached tokens
+     :review-count - Number of reviews"
+  ([xtdb-node start-inst]
+   (gemini-token-usage xtdb-node start-inst (Instant/now)))
+  ([xtdb-node start-inst end-inst]
+   (let [reviews (reviews-in-range xtdb-node start-inst end-inst)
+         tokens (keep :review/gemini-tokens reviews)]
+     {:prompt-tokens (reduce + 0 (keep :prompt tokens))
+      :response-tokens (reduce + 0 (keep :response tokens))
+      :cached-tokens (reduce + 0 (keep :cached tokens))
+      :review-count (count reviews)})))
+
+(defn recent-activity
+  "Get summary of recent hook activity.
+
+   Arguments:
+     xtdb-node - XTDB node
+     hours     - Hours to look back (default: 1)
+
+   Returns map with edit count, review count, failure rate, tokens used."
+  ([xtdb-node]
+   (recent-activity xtdb-node 1))
+  ([xtdb-node hours]
+   (let [start-inst (.minus (Instant/now) (java.time.Duration/ofHours hours))
+         edits (node/sql-query
+                xtdb-node
+                ["SELECT *, _valid_from FROM edit_event WHERE _valid_from >= ? ORDER BY _valid_from DESC"
+                 start-inst])
+         reviews (reviews-in-range xtdb-node start-inst)
+         blocked (count (filter #(= :block (:edit/decision %)) edits))
+         tokens (gemini-token-usage xtdb-node start-inst)]
+     {:period-hours hours
+      :edit-count (count edits)
+      :review-count (count reviews)
+      :blocked-count blocked
+      :failure-rate (if (pos? (count edits))
+                      (double (/ blocked (count edits)))
+                      0.0)
+      :gemini-tokens tokens})))
 
 (comment
   ;; REPL exploration

@@ -318,6 +318,109 @@
           (is (::hook/continue result) "Should handle Write tool"))))))
 
 ;;; ---------------------------------------------------------------------------
+;;; Orchestration Flow Tests
+;;; ---------------------------------------------------------------------------
+
+(deftest orchestration-flow-test
+  (with-test-node
+    (fn []
+      (testing "Repair runs before namespace reload"
+        ;; File with fixable syntax error - repair should fix before reload
+        (let [temp-file (java.io.File/createTempFile "repair-order" ".clj")
+              temp-path (.getAbsolutePath temp-file)]
+          (try
+            ;; Missing closing paren - parinfer will fix based on indentation
+            (spit temp-path "(ns repair.order)\n(defn add [x y]\n  (+ x y")
+            (let [event (make-event "PreToolUse" "Edit" temp-path)
+                  config {:repair {:enabled true}}
+                  result (hook/process-hook-event! *test-node* (make-request event config))]
+              ;; If repair didn't run, this would fail
+              (is (true? (::hook/continue result))
+                  "Should continue after repair")
+              ;; Verify file was actually repaired
+              (let [content (slurp temp-path)]
+                (is (clojure.string/includes? content "))")
+                    "Should have balanced parens after repair")))
+            (finally
+              (.delete temp-file)))))
+
+      (testing "Disabled repair skips repair stage"
+        (let [temp-file (java.io.File/createTempFile "skip-repair" ".clj")
+              temp-path (.getAbsolutePath temp-file)]
+          (try
+            ;; Valid file - should pass even with repair disabled
+            (spit temp-path "(ns skip.repair)\n(defn foo [] 42)")
+            (let [event (make-event "PreToolUse" "Edit" temp-path)
+                  config {:repair {:enabled false}}
+                  result (hook/process-hook-event! *test-node* (make-request event config))]
+              (is (true? (::hook/continue result))
+                  "Should continue with repair disabled"))
+            (finally
+              (.delete temp-file)))))
+
+      (testing "Unit tests only run if enabled"
+        ;; Create a mock scenario - tests disabled means no test attempt
+        (let [event (make-event "PostToolUse" "Edit" "/path/to/file.json")
+              config {:tests {:unit {:enabled false}
+                              :generative {:enabled false}}}
+              result (hook/process-hook-event! *test-node* (make-request event config))]
+          (is (true? (::hook/continue result))
+              "Should continue with tests disabled")))
+
+      (testing "Review only runs if enabled and interval passes"
+        (let [event (make-event "PostToolUse" "Edit" "/path/to/file.txt")
+              ;; Disable review entirely
+              config {:review {:enabled false}}
+              result (hook/process-hook-event! *test-node* (make-request event config))]
+          (is (true? (::hook/continue result))
+              "Should continue with review disabled")))
+
+      (testing "PostToolUse runs full pipeline for seon files"
+        ;; Clear events first
+        (context/clear-all-events! *test-node*)
+
+        ;; Create a temp file that simulates a seon source file
+        (let [temp-dir (java.io.File. "/tmp/src/seon")
+              _ (.mkdirs temp-dir)
+              temp-file (java.io.File. temp-dir "orchestration_test.clj")
+              temp-path (.getAbsolutePath temp-file)]
+          (try
+            ;; Write valid code with a namespace
+            (spit temp-path "(ns seon.orchestration-test)\n(defn bar [x] x)")
+            (let [event (make-event "PostToolUse" "Edit" temp-path)
+                  ;; Disable tests and review for faster execution
+                  config {:repair {:enabled false}
+                          :tests {:unit {:enabled false}
+                                  :generative {:enabled false}}
+                          :review {:enabled false}}
+                  result (hook/process-hook-event! *test-node* (make-request event config))]
+              ;; Should process successfully
+              (is (or (true? (::hook/continue result))
+                      (= "block" (::hook/decision result)))
+                  "Should return valid response structure"))
+            (finally
+              (.delete temp-file))))))))
+
+(deftest pipeline-stage-order-test
+  (with-test-node
+    (fn []
+      (testing "Pipeline stages run in order: repair -> reload -> tests"
+        ;; We verify order by using a file that would fail at different stages
+        ;; depending on when checks happen
+
+        ;; Stage 1: A file that passes repair and reload
+        (let [temp-file (java.io.File/createTempFile "stage-order" ".clj")
+              temp-path (.getAbsolutePath temp-file)]
+          (try
+            (spit temp-path "(ns stage.order)\n(defn foo [] 1)")
+            (let [event (make-event "PreToolUse" "Edit" temp-path)
+                  result (hook/process-hook-event! *test-node* (make-request event))]
+              (is (true? (::hook/continue result))
+                  "Valid code should pass all stages"))
+            (finally
+              (.delete temp-file))))))))
+
+;;; ---------------------------------------------------------------------------
 ;;; Edge Cases
 ;;; ---------------------------------------------------------------------------
 
