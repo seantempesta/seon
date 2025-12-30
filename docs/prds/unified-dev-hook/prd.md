@@ -1,6 +1,6 @@
 # PRD: Unified Development Feedback Hook
 
-**Status:** Complete
+**Status:** Phase 7 Pending (Bug Fixes)
 **Priority:** High
 **Branch:** `feature/unified-dev-hook`
 
@@ -812,6 +812,92 @@ Use `gemini/search` for any current web information needed (faster than web sear
 - [x] Design paren repair porting strategy
 
 **See `research/phase6-design.md` for complete design.**
+
+---
+
+## Phase 7: Bug Fixes and Test Coverage (Pending)
+
+**Status:** Pending review and fixes
+**Source:** Gemini code review (see `research/phase6-gemini-review.md`)
+
+The Phase 6 refactor was reviewed by Gemini and several issues were identified. Each item below needs to be:
+1. **Investigated** - Confirm the issue exists
+2. **Fixed** - If confirmed, implement a fix
+3. **Tested** - Add real tests that verify the fix works
+
+### Critical Issues
+
+- [ ] **Blocking logic broken** (`hook.clj`)
+  - **Claim:** The `do` block in `process-hook-event!` discards return values from `block-response` calls. Function always returns `success-response`.
+  - **Investigation:** Read lines 268-306, trace the control flow. Does `block-response` ever actually get returned?
+  - **Fix if confirmed:** Refactor to use `or`, `cond`, or early returns
+  - **Test:** Add test that simulates a failure and verifies `::continue false` is returned
+
+- [ ] **Missing mi/collect!** (`verify.clj`)
+  - **Claim:** `run-gen-tests` relies on `m/function-schemas` but never calls `mi/collect!` to register schemas
+  - **Investigation:** Check if `(m/function-schemas)` returns anything for a namespace with `:malli/schema` metadata without calling `collect!`
+  - **Fix if confirmed:** Add `mi/collect!` call before checking schemas
+  - **Test:** Add test that verifies generative tests actually run against a real schema
+
+### Major Issues
+
+- [ ] **Lost file hash change detection**
+  - **Claim:** Old hook checked file hash to skip processing unchanged files. New hook processes every edit.
+  - **Investigation:** Compare old hook line 486 behavior vs new implementation
+  - **Decision:** Is this worth re-adding? May increase latency but reduce redundant processing
+  - **Test:** If fixed, test that identical content doesn't trigger full pipeline
+
+- [ ] **Hardcoded src/ path** (`review.clj:139`)
+  - **Claim:** `source->test-path` hardcodes regex for `^src/`, breaks non-standard layouts
+  - **Investigation:** Check if this affects seon (we use `src/seon/`)
+  - **Fix if needed:** Make path configurable or derive from project structure
+  - **Test:** Add test for different project layouts
+
+### Test Coverage Gaps
+
+- [ ] **No blocking behavior tests**
+  - Add tests to `hook_test.clj` that simulate failures and verify `::continue false`
+  - Test repair failure -> block
+  - Test compile error -> block
+  - Test unit test failure -> block (if configured)
+
+- [ ] **No mi/collect! verification**
+  - Add test that verifies instrumentation is called
+  - Could use spy/mock or check `(m/function-schemas)` before/after
+
+- [ ] **No orchestration flow tests**
+  - Test that repair runs before verify
+  - Test that verify failure affects review stage
+  - Test full pipeline integration
+
+- [ ] **Hardcoded paths in tests**
+  - `review_test.clj` and `codebase_test.clj` use `/Users/sean/src/seon/...`
+  - Refactor to use relative paths or temp files
+  - Tests should pass on any machine
+
+- [ ] **Weak generative test coverage**
+  - Current test runs against namespace with no schemas
+  - Add test with real schema that exercises generative testing
+
+### Minor Issues
+
+- [ ] **Hardcoded nREPL port** (`bin/seon-hook:20`)
+  - Consider reading from `.nrepl-port` file
+  - Low priority - 7888 is our standard port
+
+- [ ] **Truncation marker placement** (`review.clj:131`)
+  - Marker at end may cut off actionable feedback
+  - Consider putting marker at truncation point
+
+### Agent Instructions
+
+When implementing this phase:
+
+1. **Investigate first** - Don't assume Gemini is right. Verify each claim by reading the code.
+2. **Use `(search "query")` in REPL** - When unsure about Clojure/Malli behavior
+3. **Write tests before fixing** - Confirm the bug exists with a failing test
+4. **Commit incrementally** - One issue per commit
+5. **Update checkboxes** - Mark items as done in this PRD
 
 ---
 
