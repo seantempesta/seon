@@ -106,7 +106,7 @@
         (let [edits (ctx/edits-since-last-review *test-node*)]
           (is (= 2 (count edits)))
           (is (= #{"/path/to/a.clj" "/path/to/b.clj"}
-                 (set (map :edit/file edits))))))
+                 (set (map ::ctx/file edits))))))
 
       (testing "Returns only edits after review"
         (ctx/record-review! *test-node* #{"/path/to/a.clj" "/path/to/b.clj"})
@@ -118,7 +118,7 @@
         (ctx/record-edit! *test-node* "/path/to/c.clj" 'seon.c)
         (let [new-edits (ctx/edits-since-last-review *test-node*)]
           (is (= 1 (count new-edits)))
-          (is (= "/path/to/c.clj" (:edit/file (first new-edits)))))))))
+          (is (= "/path/to/c.clj" (::ctx/file (first new-edits)))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; edits-summary Tests

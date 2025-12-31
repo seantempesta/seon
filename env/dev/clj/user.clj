@@ -59,6 +59,13 @@
   (when state/system
     (:seon/xtdb-node state/system)))
 
+(defn dev-xtdb-node
+  "Get the Dev Hook XTDB node from the running system.
+  This is a separate database for dev hook data (edit events, review events)."
+  []
+  (when state/system
+    (:seon.dev/xtdb-node state/system)))
+
 (defn schema-registry
   "Get the Malli schema registry from the running system."
   []

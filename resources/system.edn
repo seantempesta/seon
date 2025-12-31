@@ -44,6 +44,13 @@
                      :test  :in-memory
                      :prod  {:type :local :path "data/primer"}}}
 
+ ;; Dev Hook XTDB Node
+ ;; Separate node for dev hook data (edit events, review events)
+ :seon.dev/xtdb-node
+ {:storage #profile {:dev   {:type :local :path "data/dev-hook"}
+                     :test  :in-memory
+                     :prod  {:type :local :path "data/dev-hook"}}}
+
  ;; HTTP Server for Web UI
  :seon.web.server/http-server
  {:port #or [#env HTTP_PORT 8080]

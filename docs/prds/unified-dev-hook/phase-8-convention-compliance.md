@@ -1,0 +1,333 @@
+# PRD: Phase 8 - Convention Compliance for seon.dev
+
+**Status:** Ready for Implementation
+**Depends On:** Phase 7b (complete)
+**Branch:** `feature/unified-dev-hook`
+
+---
+
+## Context
+
+The `seon.dev.*` namespaces implement the unified development hook system. While functionally complete, they don't follow the project's public API conventions defined in `CONVENTIONS.md`. This makes them inconsistent with the rest of the codebase and reduces the quality of training data we collect.
+
+**Required Reading Before Implementation:**
+1. `CONVENTIONS.md` - The authoritative source for all patterns
+2. `docs/prds/unified-dev-hook/notes.md` - Learnings from Phase 7b
+3. Any existing compliant namespace (e.g., `seon.ai.gemini`) as a reference
+
+---
+
+## Goals
+
+1. **All public functions use map-in/map-out** - Single map argument, returns a map
+2. **All public functions have `:malli/schema` metadata** - Contract enforcement
+3. **All map keys are fully namespaced** - `::key` expands to `:seon.dev.namespace/key`
+4. **Private functions remain unchanged** - Positional args are fine for internal use
+5. **All tests updated** - Callers use new signatures
+6. **Zero breaking changes to hook behavior** - Same functionality, better API
+
+---
+
+## Current State
+
+### Functions Needing Conversion
+
+| Namespace | Public Fns | Has Schema | Uses Map-In | Work |
+|-----------|------------|------------|-------------|------|
+| context.clj | 13 | 0 | 0 | Full conversion |
+| verify.clj | 5 | 5 | 0 | Add map-in |
+| codebase.clj | 6 | 6 | 0 | Add map-in |
+| repair.clj | 3 | 3 | 0 | Add map-in |
+| hook.clj | 1 | 1 | 0 | Add map-in |
+| review.clj | 4 | 3 | 4 | Already done ✓ |
+| **Total** | **32** | **18** | **4** | **28 to convert** |
+
+### Example: Current vs Target
+
+**Before (positional, non-compliant):**
+```clojure
+(defn record-edit!
+  "Record an edit event."
+  [xtdb-node file-path ns-sym opts]
+  ...)
+
+;; Usage
+(record-edit! node "/path/to/file.clj" 'seon.foo {:decision :continue})
+```
+
+**After (map-in/map-out, compliant):**
+```clojure
+(schema/register! ::record-edit-request
+  [:map
+   [::xtdb-node :any]
+   [::file-path ::file-path]
+   [::namespace {:optional true} ::namespace]
+   [::content-hash {:optional true} :string]
+   [::unit-test-result {:optional true} ::test-result-summary]
+   [::decision {:optional true} ::decision]])
+
+(schema/register! ::record-edit-response
+  [:map
+   [::success :boolean]
+   [::tx-id {:optional true} :int]])
+
+(defn record-edit!
+  "Record an edit event.
+
+   Request keys:
+     ::xtdb-node   - XTDB node
+     ::file-path   - Path to edited file
+     ::namespace   - Optional namespace symbol
+     ...
+
+   Response keys:
+     ::success - Whether the transaction succeeded
+     ::tx-id   - Transaction ID"
+  {:malli/schema [:=> [:cat ::record-edit-request] ::record-edit-response]}
+  [{::keys [xtdb-node file-path namespace content-hash unit-test-result decision]}]
+  ...)
+
+;; Usage
+(record-edit! {::xtdb-node node
+               ::file-path "/path/to/file.clj"
+               ::namespace 'seon.foo
+               ::decision :continue})
+```
+
+---
+
+## Implementation Phases
+
+### Phase 8a: context.clj (Highest Impact)
+
+**13 functions to convert.** This namespace is called by hook.clj and has the most callers.
+
+Functions:
+- `record-edit!` - Record edit event
+- `record-review!` - Record review event
+- `get-last-review-time` - Query timing
+- `get-last-edit-time` - Query timing
+- `edits-since-last-review` - Query edits
+- `edits-summary` - Aggregate edits
+- `should-review?` - Rate limiting check
+- `clear-all-events!` - Dev helper
+- `edits-for-file` - Query helper
+- `reviews-in-range` - Query helper
+- `failure-rate` - Analytics
+- `gemini-token-usage` - Analytics
+- `recent-activity` - Analytics
+
+**Callers to update:**
+- `seon.dev.hook` - Main consumer
+- `test/seon/dev/context_test.clj` - Tests
+- `test/seon/dev/hook_test.clj` - Integration tests
+
+### Phase 8b: verify.clj
+
+**5 functions to convert.** Already has schemas, just needs map-in pattern.
+
+Functions:
+- `run-unit-tests` - Run unit tests
+- `run-unit-tests-for-source` - Derive test ns and run
+- `run-gen-tests` - Run generative tests
+- `format-unit-result` - Format for display
+- `format-gen-result` - Format for display
+
+**Callers to update:**
+- `seon.dev.hook` - Uses verify functions
+- `test/seon/dev/verify_test.clj` - Tests
+
+### Phase 8c: codebase.clj
+
+**6 functions to convert.** File introspection utilities.
+
+Functions:
+- `clojure-file?` - Check file type
+- `file->namespace` - Derive namespace from path
+- `file->test-namespace` - Derive test namespace
+- `read-source` - Read file safely
+- `namespace->file` - Derive path from namespace
+- `test-file-exists?` - Check for test file
+
+**Callers to update:**
+- `seon.dev.hook` - Uses for file handling
+- `seon.dev.review` - Uses for context building
+- `test/seon/dev/codebase_test.clj` - Tests
+
+### Phase 8d: repair.clj
+
+**3 functions to convert.** Delimiter repair utilities.
+
+Functions:
+- `delimiter-error?` - Check for syntax errors
+- `repair` - Attempt to fix delimiters
+- `repair-and-format` - Repair and optionally format
+
+**Callers to update:**
+- `seon.dev.hook` - Uses for repair stage
+- `test/seon/dev/repair_test.clj` - Tests
+
+### Phase 8e: hook.clj
+
+**1 function to convert.** The main entry point.
+
+Functions:
+- `process-hook-event!` - Main orchestrator
+
+**Note:** This function already uses namespaced keys internally. The conversion is mostly about the public signature.
+
+**Callers to update:**
+- `bin/seon-hook` - Babashka script (calls via nREPL)
+- `test/seon/dev/hook_test.clj` - Tests
+
+---
+
+## Conversion Pattern
+
+For each function, follow this pattern:
+
+### 1. Register Input Schema
+```clojure
+(schema/register! ::my-function-request
+  [:map
+   [::required-key SomeType]
+   [::optional-key {:optional true} SomeType]])
+```
+
+### 2. Register Output Schema
+```clojure
+(schema/register! ::my-function-response
+  [:map
+   [::success :boolean]
+   [::result-key SomeType]])
+```
+
+### 3. Update Function Signature
+```clojure
+(defn my-function
+  "Docstring with Request keys: and Response keys: sections."
+  {:malli/schema [:=> [:cat ::my-function-request] ::my-function-response]}
+  [{::keys [required-key optional-key]}]
+  ;; Implementation
+  {::success true
+   ::result-key value})
+```
+
+### 4. Update All Callers
+Find all usages and convert from positional to map style.
+
+### 5. Update Tests
+Tests should use the new map signatures.
+
+---
+
+## Special Considerations
+
+### Functions That Take XTDB Node
+
+Many functions take `xtdb-node` as first argument. Options:
+
+**Option A: Include in map (consistent)**
+```clojure
+(record-edit! {::xtdb-node node ::file-path "/path"})
+```
+
+**Option B: Keep as first positional arg (ergonomic)**
+```clojure
+(record-edit! node {::file-path "/path"})
+```
+
+**Recommendation:** Option A for full consistency. The slight verbosity is worth the uniformity.
+
+### Functions That Return Simple Values
+
+Some functions return simple values (boolean, string, number). Options:
+
+**Option A: Wrap in map (consistent)**
+```clojure
+(clojure-file? {::file-path "/path"})
+;; => {::clojure-file true}
+```
+
+**Option B: Return simple value (pragmatic)**
+```clojure
+(clojure-file? {::file-path "/path"})
+;; => true
+```
+
+**Recommendation:** Option B for predicate functions (`*?`). Option A for functions that could fail or return multiple values.
+
+### Multi-Arity Functions
+
+Some functions have multiple arities for convenience:
+```clojure
+(defn should-review?
+  ([xtdb-node] (should-review? xtdb-node {}))
+  ([xtdb-node opts] ...))
+```
+
+**Recommendation:** Convert to single-arity with optional keys:
+```clojure
+(defn should-review?
+  [{::keys [xtdb-node interval-seconds]}]
+  (let [interval (or interval-seconds 60)]
+    ...))
+```
+
+---
+
+## Success Criteria
+
+- [ ] All 28 functions converted to map-in/map-out
+- [ ] All public functions have `:malli/schema` metadata
+- [ ] All keys are fully namespaced (`::key`)
+- [ ] All callers updated (hook.clj, tests, etc.)
+- [ ] All tests pass
+- [ ] Hook still works end-to-end (make edit, verify stored data)
+- [ ] No regressions in functionality
+
+---
+
+## Files to Change
+
+| File | Changes |
+|------|---------|
+| `src/seon/dev/context.clj` | Convert 13 functions, add schemas |
+| `src/seon/dev/verify.clj` | Convert 5 functions to map-in |
+| `src/seon/dev/codebase.clj` | Convert 6 functions to map-in |
+| `src/seon/dev/repair.clj` | Convert 3 functions to map-in |
+| `src/seon/dev/hook.clj` | Convert 1 function, update all internal calls |
+| `test/seon/dev/*_test.clj` | Update all test calls |
+| `bin/seon-hook` | Update nREPL call if needed |
+
+---
+
+## Estimated Effort
+
+- **Phase 8a (context.clj):** Largest - 13 functions, most callers
+- **Phase 8b (verify.clj):** Medium - already has schemas
+- **Phase 8c (codebase.clj):** Medium - utility functions
+- **Phase 8d (repair.clj):** Small - 3 functions
+- **Phase 8e (hook.clj):** Small but careful - main entry point
+
+**Total:** ~2-3 hours of focused agent work, or split across multiple sessions.
+
+---
+
+## Reference Documents
+
+- `CONVENTIONS.md` - **Read this first** - All patterns defined here
+- `src/seon/ai/gemini.clj` - Example of compliant namespace
+- `src/seon/dev/review.clj` - Already uses map-in for most functions
+- `docs/prds/unified-dev-hook/notes.md` - Phase 7b learnings
+
+---
+
+## Agent Instructions
+
+1. **Do one phase at a time** - Complete and test before moving on
+2. **Read CONVENTIONS.md first** - Understand the patterns
+3. **Look at review.clj** - It's already mostly compliant, use as reference
+4. **Run tests after each function** - Catch issues early
+5. **Update callers immediately** - Don't leave broken references
+6. **Test hook end-to-end** - Make real edits to verify functionality

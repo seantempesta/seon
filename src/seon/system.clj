@@ -78,6 +78,32 @@
   (log/info "Primer XTDB node stopped"))
 
 ;;; ---------------------------------------------------------------------------
+;;; Dev Hook XTDB Node Component
+;;; ---------------------------------------------------------------------------
+
+(defmethod ig/init-key :seon.dev/xtdb-node
+  [_ {:keys [storage]}]
+  (log/info "Starting Dev Hook XTDB node..." {:storage storage})
+  (require '[xtdb.node :as xtn])
+  (require '[xtdb.api :as xt])
+  (let [start-node (resolve 'xtn/start-node)
+        node (if (= storage :in-memory)
+               (start-node)
+               ;; XTDB v2 API: [:local {:path ...}] format
+               (let [base-path (if (map? storage) (:path storage) (str storage))]
+                 (start-node {:log [:local {:path (io/file base-path "log")}]
+                              :storage [:local {:path (io/file base-path "objects")}]})))]
+    (log/info "Dev Hook XTDB node started")
+    node))
+
+(defmethod ig/halt-key! :seon.dev/xtdb-node
+  [_ node]
+  (log/info "Stopping Dev Hook XTDB node...")
+  (when node
+    (.close node))
+  (log/info "Dev Hook XTDB node stopped"))
+
+;;; ---------------------------------------------------------------------------
 ;;; Python Bridge Component - DISABLED
 ;;; ---------------------------------------------------------------------------
 ;;; Python code moved to src/ml_options/_python_disabled

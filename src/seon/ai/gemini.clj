@@ -136,6 +136,24 @@
                    [::timeout {:optional true} ::timeout]
                    [::api-key {:optional true} ::api-key]])
 
+;; Token counts for tracking/training data
+(schema/register! ::tokens
+                  [:map {:description "Token usage counts for LLM training data"}
+                   [:prompt {:optional true} :int]
+                   [:response {:optional true} :int]
+                   [:cached {:optional true} :int]])
+
+;; Code review response with full context for training data
+(schema/register! ::code-review-response
+                  [:map {:description "Full code review result with context for training"}
+                   [::text :string]
+                   [::success :boolean]
+                   [::system-instruction {:optional true} :string]
+                   [::user-prompt {:optional true} :string]
+                   [::code {:optional true} :string]
+                   [::tokens {:optional true} ::tokens]
+                   [::error {:optional true} :string]])
+
 ;; Response components (using namespaced keys for public API)
 (schema/register! ::text
                   [:string {:description "Generated text response"}])
@@ -440,7 +458,7 @@
                            :tools [{:code_execution {}}]})))
 
 (defn review-code
-  "Plain text code review. Returns advisory text, never blocks.
+  "Plain text code review. Returns structured map with full context for training data.
 
    For optimal caching, pass static content (like project conventions) in
    ::conventions - this goes into the system instruction which Gemini caches.
@@ -455,12 +473,25 @@
      ::timeout     - Optional. Request timeout in ms
      ::api-key     - Optional. Explicit API key
 
-   Returns: String (the review text, or error message if review failed)
+   Returns: Map with full context for training data:
+     ::text               - The review text (or error message if failed)
+     ::success            - true if review completed successfully
+     ::system-instruction - The full system instruction sent to Gemini
+     ::user-prompt        - The full user prompt sent to Gemini
+     ::code               - The code that was reviewed (separate for easy extraction)
+     ::tokens             - Token counts {:prompt N :response N :cached N}
+     ::error              - Error message if failed (optional)
 
    Example:
      (review-code {::prompt \"Review this new function\"
                    ::code \"(defn foo [x] (+ x 1))\"
-                   ::conventions (slurp \"CONVENTIONS.md\")})"
+                   ::conventions (slurp \"CONVENTIONS.md\")})
+     ;; => {::text \"The code looks good...\"
+     ;;     ::success true
+     ;;     ::system-instruction \"You are a code reviewer...\"
+     ;;     ::user-prompt \"Review this new function...\"
+     ;;     ::code \"(defn foo [x] (+ x 1))\"
+     ;;     ::tokens {:prompt 1500 :response 800 :cached 500}}"
   [{::keys [prompt code conventions context model timeout api-key]}]
   (let [key (resolve-api-key! api-key)
         ;; System instruction: static content that Gemini can cache
@@ -477,23 +508,39 @@
         result (generate* key user-prompt
                           {:model (or model default-model)
                            :timeout (or timeout default-timeout-ms)
-                           :system-instruction system-instruction})]
+                           :system-instruction system-instruction})
+        ;; Extract token counts
+        usage (::usage result)
+        tokens (when usage
+                 {:prompt (:promptTokenCount usage)
+                  :response (:candidatesTokenCount usage)
+                  :cached (:cachedContentTokenCount usage 0)})]
     ;; Log token usage for cost visibility
-    (when-let [usage (::usage result)]
-      (log/debug "Code review tokens" {:prompt (:promptTokenCount usage)
-                                       :response (:candidatesTokenCount usage)
-                                       :cached (:cachedContentTokenCount usage 0)}))
-    ;; Return text on success, clear error message on failure
+    (when tokens
+      (log/debug "Code review tokens" tokens))
+    ;; Return structured map with full context for training data
     (if (::error result)
       (let [err (::error result)
             status (::status err)
-            msg (or (::message err) (::exception err) "Unknown error")]
-        (str "[Review failed] "
-             (when status (str "HTTP " status ": "))
-             (if (> (count msg) 200)
-               (str (subs msg 0 200) "...")
-               msg)))
-      (or (::text result) ""))))
+            msg (or (::message err) (::exception err) "Unknown error")
+            error-text (str "[Review failed] "
+                            (when status (str "HTTP " status ": "))
+                            (if (> (count msg) 200)
+                              (str (subs msg 0 200) "...")
+                              msg))]
+        {::text error-text
+         ::success false
+         ::system-instruction system-instruction
+         ::user-prompt user-prompt
+         ::code code
+         ::tokens tokens
+         ::error error-text})
+      {::text (or (::text result) "")
+       ::success true
+       ::system-instruction system-instruction
+       ::user-prompt user-prompt
+       ::code code
+       ::tokens tokens})))
 
 (comment
   ;; REPL exploration

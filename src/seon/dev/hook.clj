@@ -175,6 +175,24 @@
   {::decision "block"
    ::reason reason})
 
+(defn- extract-unit-summary
+  "Extract a summary from unit test result for storage.
+   Converts ::verify/* keys to simple keys for context.clj schema."
+  [unit-result]
+  (when unit-result
+    {:success (::verify/success unit-result)
+     :test-count (::verify/test-count unit-result)
+     :pass-count (::verify/pass-count unit-result)
+     :fail-count (::verify/fail-count unit-result)
+     :error-count (::verify/error-count unit-result)}))
+
+(defn- extract-gen-summary
+  "Extract a summary from generative test result for storage."
+  [gen-result]
+  (when gen-result
+    {:success (::verify/success gen-result)
+     :error (::verify/error gen-result)}))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Pipeline Stages
 ;;; ---------------------------------------------------------------------------
@@ -248,9 +266,11 @@
       (verify/run-gen-tests source-ns {::verify/num-tests num-tests}))))
 
 (defn- stage-record-edit
-  "Record the edit event in XTDB."
-  [xtdb-node file-path ns-sym]
-  (context/record-edit! xtdb-node file-path ns-sym))
+  "Record the edit event in XTDB with observability data."
+  ([xtdb-node file-path ns-sym]
+   (stage-record-edit xtdb-node file-path ns-sym nil))
+  ([xtdb-node file-path ns-sym opts]
+   (context/record-edit! xtdb-node file-path ns-sym opts)))
 
 (defn- stage-should-review?
   "Check if we should trigger a review based on rate limiting."
@@ -273,9 +293,14 @@
                       {::review/files files
                        ::review/test-results unit-result
                        ::review/max-output-length (get-in config [:review :max-output-length] 500)})]
-          ;; Record that we completed a review
-          (context/record-review! xtdb-node files)
-          result)))))
+          ;; Record review with full Gemini interaction data for training
+          (context/record-review! xtdb-node files
+            {:gemini-prompt (::review/prompt result)
+             :gemini-response (::review/response result)
+             :gemini-system-instruction (::review/gemini-system-instruction result)
+             :gemini-code (::review/gemini-code result)
+             :gemini-tokens (::review/gemini-tokens result)})
+          (::review/formatted-text result))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Main Entry Point
@@ -376,32 +401,49 @@
                                     (swap! feedback conj
                                            (verify/format-unit-result unit-result
                                                                       (codebase/file->test-namespace file-path))))
-                                unit-block (when (and unit-result
-                                                      (not (::verify/success unit-result))
-                                                      (get-in config [:tests :unit :block-on-fail]))
-                                             (block-response
-                                              (format "Unit tests failed: %d failures, %d errors in %s"
-                                                      (::verify/fail-count unit-result 0)
-                                                      (::verify/error-count unit-result 0)
-                                                      (codebase/file->test-namespace file-path))))]
-                            (or unit-block
+                                unit-should-block (and unit-result
+                                                       (not (::verify/success unit-result))
+                                                       (get-in config [:tests :unit :block-on-fail]))]
+                            (if unit-should-block
+                                ;; Record blocked edit then return block response
+                                (let [reason (format "Unit tests failed: %d failures, %d errors in %s"
+                                                     (::verify/fail-count unit-result 0)
+                                                     (::verify/error-count unit-result 0)
+                                                     (codebase/file->test-namespace file-path))]
+                                  (stage-record-edit xtdb-node file-path ns-sym
+                                                     {:unit-test-result (extract-unit-summary unit-result)
+                                                      :decision :block
+                                                      :reason reason
+                                                      :feedback @feedback})
+                                  (block-response reason))
                                 ;; 4. Generative tests - optionally block on failure
                                 (let [gen-result (stage-gen-tests ns-sym config)
                                       _ (when (and gen-result (::verify/success gen-result))
                                           (swap! feedback conj
                                                  (verify/format-gen-result gen-result ns-sym)))
-                                      gen-block (when (and gen-result
-                                                           (not (::verify/success gen-result))
-                                                           (get-in config [:tests :generative :block-on-fail]))
-                                                  (let [failed-fns (str/join ", " (map #(str (::verify/fn-symbol %))
-                                                                                       (::verify/failures gen-result)))]
-                                                    (block-response
-                                                     (format "Generative tests failed for: %s"
-                                                             (if (str/blank? failed-fns) "schema errors" failed-fns)))))]
-                                  (or gen-block
+                                      gen-should-block (and gen-result
+                                                            (not (::verify/success gen-result))
+                                                            (get-in config [:tests :generative :block-on-fail]))]
+                                  (if gen-should-block
+                                      ;; Record blocked edit then return block response
+                                      (let [failed-fns (str/join ", " (map #(str (::verify/fn-symbol %))
+                                                                           (::verify/failures gen-result)))
+                                            reason (format "Generative tests failed for: %s"
+                                                           (if (str/blank? failed-fns) "schema errors" failed-fns))]
+                                        (stage-record-edit xtdb-node file-path ns-sym
+                                                           {:unit-test-result (extract-unit-summary unit-result)
+                                                            :gen-test-result (extract-gen-summary gen-result)
+                                                            :decision :block
+                                                            :reason reason
+                                                            :feedback @feedback})
+                                        (block-response reason))
                                       ;; 5. Record edit + 6. Review + 7. Success
                                       (do
-                                        (stage-record-edit xtdb-node file-path ns-sym)
+                                        (stage-record-edit xtdb-node file-path ns-sym
+                                                           {:unit-test-result (extract-unit-summary unit-result)
+                                                            :gen-test-result (extract-gen-summary gen-result)
+                                                            :decision :continue
+                                                            :feedback @feedback})
                                         (when (stage-should-review? xtdb-node config)
                                           (when-let [review-text (stage-review xtdb-node config unit-result)]
                                             (swap! feedback conj review-text)))

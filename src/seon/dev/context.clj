@@ -25,7 +25,7 @@
 
      ;; Get edits since last review
      (ctx/edits-since-last-review node)
-     ;; => [{:edit/file \"...\" :edit/namespace :seon.foo} ...]
+     ;; => [{::file \"/path/a.clj\" ::namespace :seon.a} ...]
 
      ;; Record review completion
      (ctx/record-review! node #{\"/path/to/file.clj\"})"
@@ -65,35 +65,40 @@
                    [:error {:optional true} :string]])
 
 ;; Enhanced edit event with observability fields
+;; All keys are fully namespaced (::key expands to :seon.dev.context/key)
 (schema/register! ::edit-event
                   [:map
                    [:xt/id :uuid]
-                   [:entity/type [:= :edit-event]]
-                   [:edit/file ::file-path]
-                   [:edit/namespace {:optional true} ::namespace]
+                   [::entity-type [:= :edit-event]]
+                   [::file ::file-path]
+                   [::namespace {:optional true} ::namespace]
                    ;; Observability fields (all optional for backwards compat)
-                   [:edit/content-hash {:optional true} :string]
-                   [:edit/unit-test-result {:optional true} ::test-result-summary]
-                   [:edit/gen-test-result {:optional true} ::test-result-summary]
-                   [:edit/decision {:optional true} ::decision]
-                   [:edit/reason {:optional true} :string]
-                   [:edit/feedback {:optional true} [:vector :string]]])
+                   [::content-hash {:optional true} :string]
+                   [::unit-test-result {:optional true} ::test-result-summary]
+                   [::gen-test-result {:optional true} ::test-result-summary]
+                   [::decision {:optional true} ::decision]
+                   [::reason {:optional true} :string]
+                   [::feedback {:optional true} [:vector :string]]])
 
-;; Enhanced review event with Gemini interaction details
+;; Enhanced review event with full Gemini interaction for training data
+;; All keys are fully namespaced (::key expands to :seon.dev.context/key)
 (schema/register! ::review-event
                   [:map
                    [:xt/id :uuid]
-                   [:entity/type [:= :review-event]]
-                   [:review/files [:set ::file-path]]
-                   [:review/edit-count :int]
-                   ;; Gemini interaction (optional)
-                   [:review/gemini-prompt {:optional true} :string]
-                   [:review/gemini-response {:optional true} :string]
-                   [:review/gemini-tokens {:optional true}
-                    [:map
-                     [:prompt {:optional true} :int]
-                     [:response {:optional true} :int]
-                     [:cached {:optional true} :int]]]])
+                   [::entity-type [:= :review-event]]
+                   [::files [:set ::file-path]]
+                   [::edit-count :int]
+                   ;; Gemini interaction data for LLM training
+                   [::gemini-prompt {:optional true} [:maybe :string]]
+                   [::gemini-response {:optional true} [:maybe :string]]
+                   [::gemini-system-instruction {:optional true} [:maybe :string]]
+                   [::gemini-code {:optional true} [:maybe :string]]
+                   [::gemini-tokens {:optional true}
+                    [:maybe
+                     [:map
+                      [:prompt {:optional true} [:maybe :int]]
+                      [:response {:optional true} [:maybe :int]]
+                      [:cached {:optional true} [:maybe :int]]]]]])
 
 (schema/register! ::review-options
                   [:map
@@ -158,15 +163,15 @@
    (let [{:keys [content-hash unit-test-result gen-test-result
                  decision reason feedback]} opts
          entity (cond-> {:xt/id (UUID/randomUUID)
-                         :entity/type :edit-event
-                         :edit/file file-path}
-                  ns-sym (assoc :edit/namespace (keyword (str ns-sym)))
-                  content-hash (assoc :edit/content-hash content-hash)
-                  unit-test-result (assoc :edit/unit-test-result unit-test-result)
-                  gen-test-result (assoc :edit/gen-test-result gen-test-result)
-                  decision (assoc :edit/decision decision)
-                  reason (assoc :edit/reason reason)
-                  feedback (assoc :edit/feedback feedback))]
+                         ::entity-type :edit-event
+                         ::file file-path}
+                  ns-sym (assoc ::namespace (keyword (str ns-sym)))
+                  content-hash (assoc ::content-hash content-hash)
+                  unit-test-result (assoc ::unit-test-result unit-test-result)
+                  gen-test-result (assoc ::gen-test-result gen-test-result)
+                  decision (assoc ::decision decision)
+                  reason (assoc ::reason reason)
+                  feedback (assoc ::feedback feedback))]
      (node/execute-tx! xtdb-node [[:put-docs :edit-event entity]]))))
 
 (defn record-review!
@@ -177,10 +182,12 @@
    Basic usage:
      (record-review! node #{\"/path/to/file.clj\"})
 
-   Enhanced usage (with Gemini interaction data):
+   Enhanced usage (with full Gemini interaction data for training):
      (record-review! node #{\"/path/to/file.clj\"}
        {:gemini-prompt \"Review these changes...\"
         :gemini-response \"The code looks good...\"
+        :gemini-system-instruction \"You are a code reviewer...\"
+        :gemini-code \"(defn foo ...)\"
         :gemini-tokens {:prompt 1500 :response 800 :cached 0}})
 
    Returns:
@@ -188,15 +195,18 @@
   ([xtdb-node files]
    (record-review! xtdb-node files nil))
   ([xtdb-node files opts]
-   (let [{:keys [gemini-prompt gemini-response gemini-tokens]} opts
+   (let [{:keys [gemini-prompt gemini-response gemini-system-instruction
+                 gemini-code gemini-tokens]} opts
          edit-count (count (edits-since-last-review xtdb-node))
          entity (cond-> {:xt/id (UUID/randomUUID)
-                         :entity/type :review-event
-                         :review/files (set files)
-                         :review/edit-count edit-count}
-                  gemini-prompt (assoc :review/gemini-prompt gemini-prompt)
-                  gemini-response (assoc :review/gemini-response gemini-response)
-                  gemini-tokens (assoc :review/gemini-tokens gemini-tokens))]
+                         ::entity-type :review-event
+                         ::files (set files)
+                         ::edit-count edit-count}
+                  gemini-prompt (assoc ::gemini-prompt gemini-prompt)
+                  gemini-response (assoc ::gemini-response gemini-response)
+                  gemini-system-instruction (assoc ::gemini-system-instruction gemini-system-instruction)
+                  gemini-code (assoc ::gemini-code gemini-code)
+                  gemini-tokens (assoc ::gemini-tokens gemini-tokens))]
      (node/execute-tx! xtdb-node [[:put-docs :review-event entity]]))))
 
 ;;; ---------------------------------------------------------------------------
@@ -269,8 +279,8 @@
       ::edit-count N}"
   [xtdb-node]
   (let [edits (edits-since-last-review xtdb-node)]
-    {::files (set (map :edit/file edits))
-     ::namespaces (set (keep :edit/namespace edits))
+    {::files (set (map ::file edits))
+     ::namespaces (set (keep ::namespace edits))
      ::edit-count (count edits)}))
 
 ;;; ---------------------------------------------------------------------------
@@ -351,11 +361,11 @@
 
    Example:
      (edits-for-file node \"/path/to/file.clj\")
-     ;; => [{:edit/file \"...\" :edit/decision :continue ...} ...]"
+     ;; => [{::file \"...\" ::decision :continue ...} ...]"
   [xtdb-node file-path]
   (node/sql-query
    xtdb-node
-   ["SELECT *, _valid_from FROM edit_event WHERE edit_file = ? ORDER BY _valid_from DESC"
+   ["SELECT *, _valid_from FROM edit_event WHERE seon$dev$context$file = ? ORDER BY _valid_from DESC"
     file-path]))
 
 (defn reviews-in-range
@@ -392,7 +402,7 @@
                       "SELECT COUNT(*) as cnt FROM edit_event")
         blocked-result (node/sql-query
                         xtdb-node
-                        "SELECT COUNT(*) as cnt FROM edit_event WHERE edit_decision = 'block'")
+                        "SELECT COUNT(*) as cnt FROM edit_event WHERE seon$dev$context$decision = 'block'")
         total (or (:cnt (first total-result)) 0)
         blocked (or (:cnt (first blocked-result)) 0)]
     {:total total
@@ -418,7 +428,7 @@
    (gemini-token-usage xtdb-node start-inst (Instant/now)))
   ([xtdb-node start-inst end-inst]
    (let [reviews (reviews-in-range xtdb-node start-inst end-inst)
-         tokens (keep :review/gemini-tokens reviews)]
+         tokens (keep ::gemini-tokens reviews)]
      {:prompt-tokens (reduce + 0 (keep :prompt tokens))
       :response-tokens (reduce + 0 (keep :response tokens))
       :cached-tokens (reduce + 0 (keep :cached tokens))
@@ -441,7 +451,7 @@
                 ["SELECT *, _valid_from FROM edit_event WHERE _valid_from >= ? ORDER BY _valid_from DESC"
                  start-inst])
          reviews (reviews-in-range xtdb-node start-inst)
-         blocked (count (filter #(= :block (:edit/decision %)) edits))
+         blocked (count (filter #(= :block (::decision %)) edits))
          tokens (gemini-token-usage xtdb-node start-inst)]
      {:period-hours hours
       :edit-count (count edits)
