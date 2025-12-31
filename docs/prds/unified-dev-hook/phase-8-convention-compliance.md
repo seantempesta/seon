@@ -180,6 +180,107 @@ Functions:
 - `bin/seon-hook` - Babashka script (calls via nREPL)
 - `test/seon/dev/hook_test.clj` - Tests
 
+### Phase 8f: Compliance Detection Tooling
+
+**New namespace: `seon.dev.compliance`**
+
+Build tooling that the hook can use to detect convention violations in real-time. This enables the hook to warn when edited code doesn't follow conventions.
+
+**Core Functions to Implement:**
+
+```clojure
+(ns seon.dev.compliance
+  "Convention compliance checking for Clojure namespaces.
+
+   Analyzes namespaces for:
+   - Missing :malli/schema metadata on public functions
+   - Positional arguments instead of map-in pattern
+   - Non-namespaced keys in schemas
+   - Missing docstrings")
+
+(defn analyze-namespace
+  "Analyze a namespace for convention compliance.
+
+   Request keys:
+     ::namespace - Symbol of namespace to analyze
+
+   Response keys:
+     ::compliant?     - Boolean, true if fully compliant
+     ::violations     - Vector of violation maps
+     ::public-fns     - Count of public functions
+     ::with-schema    - Count with :malli/schema
+     ::with-map-in    - Count using map-in pattern"
+  [{::keys [namespace]}]
+  ...)
+
+(defn check-function
+  "Check a single function for convention compliance.
+
+   Request keys:
+     ::var - The var to check
+
+   Response keys:
+     ::fn-name        - Function name
+     ::has-schema?    - Has :malli/schema metadata
+     ::has-docstring? - Has docstring
+     ::uses-map-in?   - Uses [{::keys [...]}] pattern
+     ::violations     - Vector of specific violations"
+  [{::keys [var]}]
+  ...)
+
+(defn format-violations
+  "Format violations for hook feedback.
+
+   Request keys:
+     ::violations - Vector of violation maps
+     ::max-length - Optional max output length
+
+   Response keys:
+     ::formatted - Formatted string for display"
+  [{::keys [violations max-length]}]
+  ...)
+```
+
+**Implementation Approach:**
+
+Use Clojure's reflection capabilities:
+```clojure
+;; Get all public vars in a namespace
+(ns-publics 'seon.dev.context)
+;; => {record-edit! #'seon.dev.context/record-edit! ...}
+
+;; Get metadata from a var
+(meta #'seon.dev.context/record-edit!)
+;; => {:arglists ([xtdb-node file-path ns-sym] [xtdb-node file-path ns-sym opts])
+;;     :doc "Record an edit event..."
+;;     :malli/schema [:=> ...]}
+
+;; Check arglist for map destructuring
+(defn uses-map-in? [arglists]
+  (some (fn [arglist]
+          (and (= 1 (count arglist))
+               (map? (first arglist))))
+        arglists))
+```
+
+**Hook Integration:**
+
+After compliance tooling is built, update `hook.clj` to optionally check edited namespaces:
+
+```clojure
+;; In stage after reload, before tests
+(when (get-in config [:compliance :check-enabled])
+  (let [result (compliance/analyze-namespace {::compliance/namespace ns-sym})]
+    (when-not (::compliance/compliant? result)
+      (swap! feedback conj
+             (compliance/format-violations
+               {::compliance/violations (::compliance/violations result)})))))
+```
+
+**Callers:**
+- `seon.dev.hook` - Optional compliance checking stage
+- REPL - Manual compliance audits
+
 ---
 
 ## Conversion Pattern
@@ -285,6 +386,9 @@ Some functions have multiple arities for convenience:
 - [ ] All tests pass
 - [ ] Hook still works end-to-end (make edit, verify stored data)
 - [ ] No regressions in functionality
+- [ ] `seon.dev.compliance` namespace created with analyze/check functions
+- [ ] Hook optionally runs compliance checks on edited namespaces
+- [ ] Compliance violations show in hook feedback
 
 ---
 
@@ -296,8 +400,10 @@ Some functions have multiple arities for convenience:
 | `src/seon/dev/verify.clj` | Convert 5 functions to map-in |
 | `src/seon/dev/codebase.clj` | Convert 6 functions to map-in |
 | `src/seon/dev/repair.clj` | Convert 3 functions to map-in |
-| `src/seon/dev/hook.clj` | Convert 1 function, update all internal calls |
+| `src/seon/dev/hook.clj` | Convert 1 function, update internal calls, add compliance stage |
+| `src/seon/dev/compliance.clj` | **NEW** - Namespace analysis and compliance checking |
 | `test/seon/dev/*_test.clj` | Update all test calls |
+| `test/seon/dev/compliance_test.clj` | **NEW** - Tests for compliance checking |
 | `bin/seon-hook` | Update nREPL call if needed |
 
 ---
@@ -309,8 +415,13 @@ Some functions have multiple arities for convenience:
 - **Phase 8c (codebase.clj):** Medium - utility functions
 - **Phase 8d (repair.clj):** Small - 3 functions
 - **Phase 8e (hook.clj):** Small but careful - main entry point
+- **Phase 8f (compliance.clj):** Medium - new namespace, reflection-based analysis
 
-**Total:** ~2-3 hours of focused agent work, or split across multiple sessions.
+**Total:** ~3-4 hours of focused agent work, or split across multiple sessions.
+
+**Recommended Order:**
+1. **Phase 8f first** - Build compliance tooling so we can use it to verify our own conversions
+2. **Phase 8a-8e** - Convert namespaces, using compliance tooling to verify each one
 
 ---
 
