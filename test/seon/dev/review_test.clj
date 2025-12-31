@@ -186,12 +186,15 @@
 ;;; ---------------------------------------------------------------------------
 
 (deftest review-edits-structure-test
-  (testing "Returns string result"
-    ;; This will likely fail due to API issues but should return a string
+  (testing "Returns map with expected keys"
+    ;; This will likely fail due to API issues but should return expected structure
     (let [result (review/review-edits
                   {::review/files #{}
                    ::review/timeout 1})]
-      (is (string? result) "Should always return a string"))))
+      (is (map? result) "Should return a map")
+      (is (contains? result ::review/formatted-text) "Should have formatted-text")
+      (is (contains? result ::review/prompt) "Should have prompt")
+      (is (contains? result ::review/success) "Should have success flag"))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Edge Cases

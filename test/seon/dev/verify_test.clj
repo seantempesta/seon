@@ -158,47 +158,6 @@
                   ::v/failures []}]
       (is (= "Generative tests timed out" (v/format-gen-result result))))))
 
-;;; ---------------------------------------------------------------------------
-;;; format-results Tests
-;;; ---------------------------------------------------------------------------
-
-(deftest format-results-test
-  (testing "Detects and formats unit test result"
-    (let [result {::v/success true
-                  ::v/test-count 5
-                  ::v/pass-count 5}]
-      (is (= "5 tests passed" (v/format-results result)))))
-
-  (testing "Detects and formats gen test result"
-    (let [result {::v/success true
-                  ::v/failures []}]
-      (is (= "Generative tests passed" (v/format-results result)))))
-
-  (testing "Handles unknown result types gracefully"
-    (let [result {:something "else"}]
-      (is (string? (v/format-results result))))))
-
-;;; ---------------------------------------------------------------------------
-;;; check-namespace Tests
-;;; ---------------------------------------------------------------------------
-
-(deftest check-namespace-test
-  (testing "Runs both test types and returns combined result"
-    ;; This test requires context namespace which has both unit tests and functions
-    (let [result (v/check-namespace 'seon.dev.context)]
-      (is (boolean? (::v/success result)))
-      (is (some? (::v/unit result)) "Should have unit result")
-      (is (some? (::v/gen result)) "Should have gen result")
-      (is (vector? (::v/messages result)) "Should have messages")))
-
-  (testing "Respects skip options"
-    (let [result (v/check-namespace 'seon.dev.context {::v/skip-unit true})]
-      (is (nil? (::v/unit result)) "Should skip unit tests")
-      (is (some? (::v/gen result)) "Should run gen tests"))
-
-    (let [result (v/check-namespace 'seon.dev.context {::v/skip-gen true})]
-      (is (some? (::v/unit result)) "Should run unit tests")
-      (is (nil? (::v/gen result)) "Should skip gen tests"))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schema Validation Tests

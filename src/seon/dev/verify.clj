@@ -4,7 +4,8 @@
    Provides test running and result formatting:
    - run-unit-tests - Run unit tests for specific namespaces
    - run-gen-tests - Run generative tests on schema-annotated functions
-   - format-results - Format test results for display
+   - format-unit-result - Format unit test results for display
+   - format-gen-result - Format generative test results for display
 
    This namespace is designed to be called from the running server via nREPL.
    It wraps clojure.test and Malli generative testing with proper result handling.
@@ -18,10 +19,7 @@
 
      ;; Run generative tests
      (v/run-gen-tests 'seon.core)
-     ;; => {::success true ::failures []}
-
-     ;; Format results for display
-     (v/format-results {::success false ::fail-count 2})"
+     ;; => {::success true ::failures []}"
   (:require [clojure.string :as str]
             [clojure.test :as test]
             [malli.core :as m]
@@ -113,9 +111,15 @@
     [(str output) @summary]))
 
 (defn- require-test-ns
-  "Try to require a test namespace, returning error message on failure."
+  "Try to require a test namespace, returning error message on failure.
+
+   Uses remove-ns before requiring to avoid alias conflicts that occur when
+   reloading a namespace that already has aliases defined."
   [test-ns]
   (try
+    ;; Remove namespace first to avoid alias conflicts on reload
+    (when (find-ns test-ns)
+      (remove-ns test-ns))
     (require test-ns :reload)
     nil
     (catch Exception e
@@ -340,82 +344,6 @@
               (if (str/blank? failed-fns) "schema errors" failed-fns)
               ns-suffix))))))
 
-(defn format-results
-  "Format any test result (unit or gen) for display.
-
-   Detects the result type and calls the appropriate formatter.
-   Used by the hook to generate feedback messages.
-
-   Example:
-     (format-results unit-result 'seon.core-test)
-     (format-results gen-result 'seon.core)"
-  ([result]
-   (format-results result nil))
-  ([result ns-sym]
-   (cond
-     ;; Unit test result (has ::test-count or ::fail-count)
-     (or (contains? result ::test-count)
-         (contains? result ::fail-count)
-         (contains? result ::pass-count))
-     (format-unit-result result ns-sym)
-
-     ;; Gen test result (has ::failures)
-     (contains? result ::failures)
-     (format-gen-result result ns-sym)
-
-     ;; Unknown - just stringify
-     :else
-     (str result))))
-
-;;; ---------------------------------------------------------------------------
-;;; Combined Testing (convenience)
-;;; ---------------------------------------------------------------------------
-
-(defn check-namespace
-  "Run both unit and generative tests for a namespace.
-
-   Runs unit tests first (if test file exists), then generative tests.
-   Returns a combined result.
-
-   Request keys:
-     source-ns - Source namespace symbol (e.g., seon.core)
-     opts      - Optional map with:
-                 ::num-tests     - Gen tests per function (default: 10)
-                 ::skip-unit     - Skip unit tests (default: false)
-                 ::skip-gen      - Skip generative tests (default: false)
-
-   Response keys:
-     ::success    - true if all tests passed
-     ::unit       - Unit test result (or nil if skipped)
-     ::gen        - Generative test result (or nil if skipped)
-     ::messages   - Vector of formatted result messages"
-  ([source-ns]
-   (check-namespace source-ns {}))
-  ([source-ns opts]
-   (let [skip-unit (::skip-unit opts false)
-         skip-gen (::skip-gen opts false)
-
-         ;; Run unit tests
-         unit-result (when-not skip-unit
-                       (run-unit-tests-for-source source-ns))
-
-         ;; Run gen tests
-         gen-result (when-not skip-gen
-                      (run-gen-tests source-ns opts))
-
-         ;; Overall success
-         success (and (or skip-unit (::success unit-result))
-                      (or skip-gen (::success gen-result)))
-
-         ;; Format messages
-         messages (cond-> []
-                    unit-result (conj (format-unit-result unit-result (::test-ns unit-result)))
-                    gen-result (conj (format-gen-result gen-result source-ns)))]
-
-     {::success success
-      ::unit unit-result
-      ::gen gen-result
-      ::messages messages})))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Development Helpers (REPL)
@@ -438,8 +366,5 @@
   ;; Format results
   (format-unit-result {::success true ::test-count 5 ::pass-count 5})
   (format-gen-result {::success false ::failures [{::fn-symbol 'foo}]})
-
-  ;; Run both
-  (check-namespace 'seon.dev.context)
 
   nil)

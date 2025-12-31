@@ -88,12 +88,22 @@
                    [::timeout {:optional true} [:int {:min 1000}]]
                    [::api-key {:optional true} :string]])
 
-;; Review result
+;; Review result with full Gemini context for training data
 (schema/register! ::review-result
                   [:map
                    [::success :boolean]
-                   [::text {:optional true} :string]
-                   [::error {:optional true} :string]])
+                   [::text {:optional true} [:maybe :string]]
+                   [::error {:optional true} [:maybe :string]]
+                   ;; Gemini interaction data for training
+                   [::gemini-system-instruction {:optional true} [:maybe :string]]
+                   [::gemini-user-prompt {:optional true} [:maybe :string]]
+                   [::gemini-code {:optional true} [:maybe :string]]
+                   [::gemini-tokens {:optional true}
+                    [:maybe
+                     [:map
+                      [:prompt {:optional true} [:maybe :int]]
+                      [:response {:optional true} [:maybe :int]]
+                      [:cached {:optional true} [:maybe :int]]]]]])
 
 ;; Format output request
 (schema/register! ::format-output-request
@@ -254,7 +264,7 @@
   "Call Gemini for code review.
 
    Uses the existing seon.ai.gemini client to perform the review.
-   Returns plain text review (advisory, never blocks).
+   Returns review result with full Gemini context for training data.
 
    Request keys:
      ::context  - Review context map from build-context
@@ -262,9 +272,13 @@
      ::api-key  - Optional explicit API key
 
    Response keys:
-     ::success  - true if review completed
-     ::text     - Review text on success
-     ::error    - Error message on failure
+     ::success                  - true if review completed
+     ::text                     - Review text on success
+     ::error                    - Error message on failure
+     ::gemini-system-instruction - System instruction sent to Gemini
+     ::gemini-user-prompt       - User prompt sent to Gemini
+     ::gemini-code              - Code that was reviewed
+     ::gemini-tokens            - Token counts {:prompt N :response N :cached N}
 
    Example:
      (call-gemini {::context {::prompt \"Review...\"
@@ -282,11 +296,20 @@
                      ::gemini/context full-context
                      ::gemini/timeout timeout-ms
                      ::gemini/api-key api-key})]
-        (if (str/starts-with? (or result "") "[Review failed]")
-          {::success false
-           ::error result}
+        ;; gemini/review-code now returns a structured map
+        (if (::gemini/success result)
           {::success true
-           ::text result}))
+           ::text (::gemini/text result)
+           ::gemini-system-instruction (::gemini/system-instruction result)
+           ::gemini-user-prompt (::gemini/user-prompt result)
+           ::gemini-code (::gemini/code result)
+           ::gemini-tokens (::gemini/tokens result)}
+          {::success false
+           ::error (::gemini/error result)
+           ::gemini-system-instruction (::gemini/system-instruction result)
+           ::gemini-user-prompt (::gemini/user-prompt result)
+           ::gemini-code (::gemini/code result)
+           ::gemini-tokens (::gemini/tokens result)}))
       (catch Exception e
         (log/error e "Gemini review failed")
         {::success false
@@ -314,10 +337,10 @@
     (str "Gemini: " (truncate text max-len))))
 
 (defn review-edits
-  "Convenience function: build context, call Gemini, format output.
+  "Build context, call Gemini, return full review data.
 
-   Combines build-context, call-gemini, and format-output into a single call.
-   Returns the formatted review string or an error message.
+   Combines build-context and call-gemini into a single call.
+   Returns full data for observability (prompt, response, formatted text).
 
    Request keys:
      ::files               - Set of file paths that were edited
@@ -327,35 +350,20 @@
      ::timeout             - Optional timeout in ms (default: 60000)
      ::api-key             - Optional explicit API key
 
-   Returns:
-     String - formatted review text or error message
+   Returns map with:
+     ::formatted-text            - The formatted output string
+     ::prompt                    - The full prompt sent to Gemini (legacy, for compatibility)
+     ::response                  - The raw response from Gemini
+     ::success                   - Whether the review succeeded
+     ::error                     - Error message if failed
+     ::gemini-system-instruction - System instruction sent to Gemini
+     ::gemini-user-prompt        - User prompt sent to Gemini
+     ::gemini-code               - Code that was reviewed
+     ::gemini-tokens             - Token counts {:prompt N :response N :cached N}
 
    Example:
      (review-edits {::files #{\"/path/to/file.clj\"}})
-     ;; => \"Gemini: This code looks good...\""
-  [{::keys [files test-results new-functions max-output-length timeout api-key]
-    :as request}]
-  (let [context (build-context {::files files
-                                ::test-results test-results
-                                ::new-functions new-functions})
-        result (call-gemini {::context context
-                             ::timeout timeout
-                             ::api-key api-key})]
-    (if (::success result)
-      (format-output {::text (::text result)
-                      ::max-length max-output-length})
-      (str "Gemini review failed: " (::error result)))))
-
-(defn review-edits-with-data
-  "Like review-edits but returns full data for observability.
-
-   Returns a map with:
-     ::formatted-text - The formatted output string
-     ::prompt        - The full prompt sent to Gemini
-     ::response      - The raw response from Gemini
-     ::success       - Whether the review succeeded
-
-   This is used by the hook for storing review data in XTDB."
+     ;; => {::formatted-text \"Gemini: ...\" ::prompt \"...\" ::response \"...\"}"
   [{::keys [files test-results new-functions max-output-length timeout api-key]
     :as request}]
   (let [context (build-context {::files files
@@ -371,12 +379,22 @@
                                          ::max-length max-output-length})
        ::prompt (str prompt "\n\n" code)
        ::response (::text result)
-       ::success true}
+       ::success true
+       ;; Full Gemini context for training data
+       ::gemini-system-instruction (::gemini-system-instruction result)
+       ::gemini-user-prompt (::gemini-user-prompt result)
+       ::gemini-code (::gemini-code result)
+       ::gemini-tokens (::gemini-tokens result)}
       {::formatted-text (str "Gemini review failed: " (::error result))
        ::prompt (str prompt "\n\n" code)
        ::response nil
        ::success false
-       ::error (::error result)})))
+       ::error (::error result)
+       ;; Still include Gemini context even on failure
+       ::gemini-system-instruction (::gemini-system-instruction result)
+       ::gemini-user-prompt (::gemini-user-prompt result)
+       ::gemini-code (::gemini-code result)
+       ::gemini-tokens (::gemini-tokens result)})))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Development Helpers (REPL)
