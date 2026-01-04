@@ -7,3 +7,6 @@
 [submodule "reference-code/gemini-mcp"]
 	path = reference-code/gemini-mcp
 	url = https://github.com/RLabs-Inc/gemini-mcp.git
+[submodule "reference-code/clj-kondo"]
+	path = reference-code/clj-kondo
+	url = https://github.com/clj-kondo/clj-kondo.git
