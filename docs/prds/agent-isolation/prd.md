@@ -131,20 +131,62 @@ When an agent starts, it receives an atom containing everything it needs:
          [:div.signal (:symbol s) " - " (:direction s)])])))
 ```
 
-### RESEARCH NEEDED
+### RESEARCH COMPLETE
 
-1. **How to inject ctx?** Options:
-   - Bind as dynamic var in nREPL session
-   - Store in well-known atom (e.g., `seon.agent/*ctx*`)
-   - Pass via MCP tool
+See `docs/prds/agent-isolation/research/nrepl-multi-server.md` for full details.
 
-2. **Does render-fn work with Datastar SSE?**
+#### 1. How to inject ctx?
+
+**RESOLVED**: Use custom nREPL middleware that injects `*ctx*` dynamic var into sessions.
+
+```clojure
+(def ^:dynamic *ctx* nil)
+
+(defn make-context-middleware [ctx-atom target-ns]
+  (fn wrap-context [handler]
+    (fn [{:keys [session] :as msg}]
+      (when (and session (not (contains? @session #'*ctx*)))
+        (swap! session assoc
+               #'*ns* (find-ns target-ns)
+               #'*ctx* ctx-atom))
+      (handler msg))))
+```
+
+The middleware runs after `session` (to access the session atom) and before `eval` (to set context).
+
+#### 2. Multiple nREPLs in one JVM?
+
+**RESOLVED: YES** - nREPL fully supports multiple servers.
+
+Each call to `nrepl.server/start-server` creates an independent server with:
+- Its own `ServerSocket` (unique port)
+- Its own `open-transports` atom (connection tracking)
+- Its own `handler` (can be customized per server)
+
+The global `sessions` atom is keyed by UUID, so sessions across servers don't conflict.
+
+**Proof**: nREPL's own test suite runs two servers simultaneously (`test-ack` in `core_test.clj`).
+
+#### 3. Error handling?
+
+**RESOLVED**:
+- Port conflicts throw `java.net.BindException`
+- Use `:port 0` to auto-assign an available port
+- Server implements `java.io.Closeable` for clean shutdown
+
+#### 4. Namespace binding at startup?
+
+**RESOLVED**: Set `#'*ns*` in the session atom via middleware:
+
+```clojure
+(swap! session assoc #'*ns* (find-ns 'seon.trading))
+```
+
+### REMAINING RESEARCH NEEDED
+
+1. **Does render-fn work with Datastar SSE?**
    - Need to scope SSE sessions per namespace
    - How does agent trigger re-renders?
-
-3. **Multiple nREPLs in one JVM?**
-   - Can nREPL server start multiple times on different ports?
-   - How to bind namespace at startup?
 
 ---
 
@@ -182,10 +224,13 @@ The primary `xtdb` database tracks namespaces and agents:
 - [ ] Add namespace registry to orchestrator DB
 
 ### Phase 2: Multiple nREPL Servers
-- [ ] Research: Can nREPL start multiple servers in one JVM?
-- [ ] Start nREPL per namespace with bound ns
-- [ ] Port allocation (7889, 7890, ...)
+- [x] Research: Can nREPL start multiple servers in one JVM? **YES - CONFIRMED**
+- [x] Research: How to bind namespace at startup? **Via custom middleware**
+- [x] Research: Error handling and lifecycle? **Clean API, java.io.Closeable**
+- [ ] Implement `start-namespace-nrepl!` function
+- [ ] Implement port allocation (7889, 7890, ...)
 - [ ] Create `seon-nrepl-eval` that routes to correct port
+- [ ] Add Integrant component for namespace nREPL servers
 
 ### Phase 3: Agent Context Injection
 - [ ] Define ctx schema (Malli specs)
@@ -212,8 +257,8 @@ The primary `xtdb` database tracks namespaces and agents:
 
 ## Open Questions
 
-1. **ctx injection mechanism** - Dynamic var? Well-known atom? MCP?
-2. **nREPL multi-server** - Is this even supported?
+1. ~~**ctx injection mechanism**~~ - **RESOLVED**: Dynamic var `*ctx*` via custom middleware
+2. ~~**nREPL multi-server**~~ - **RESOLVED**: Fully supported, see research doc
 3. **Datastar SSE scoping** - How to isolate SSE per namespace?
 4. **Agent POST handling** - How does agent handle form submissions?
 5. **Worktree sync** - When does agent's code get loaded into shared JVM?
@@ -222,6 +267,8 @@ The primary `xtdb` database tracks namespaces and agents:
 
 ## Related Research
 
+- `docs/prds/agent-isolation/research/nrepl-multi-server.md` - **nREPL multi-server research (COMPLETE)**
 - `docs/prds/agent-isolation/research/complete-isolation.md` - Full JVM isolation research
+- `reference-code/nrepl/` - nREPL source code (git submodule)
 - `reference-code/xtdb/docs/src/content/docs/about/dbs-in-xtdb.md` - XTDB multi-database
 - `reference-code/xtdb/src/test/clojure/xtdb/sql/multi_db_test.clj` - Multi-DB tests

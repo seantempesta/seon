@@ -1,28 +1,108 @@
 # Agent Isolation - Notes & Gotchas
 
-## Key Research Questions (Unresolved)
+## Research Questions - RESOLVED
 
-### 1. Multiple nREPL Servers in One JVM
-Can we start multiple nREPL servers on different ports within the same JVM?
-- Each bound to a different namespace
-- Need to test: `(nrepl.server/start-server :port 7889)` called multiple times
+### 1. Multiple nREPL Servers in One JVM - RESOLVED
 
-### 2. Context Injection
-How does the agent get access to `ctx`?
-- Dynamic var `*ctx*` bound in nREPL session?
-- Well-known atom `seon.agent/ctx`?
-- Query orchestrator DB on demand?
+**Answer: YES, fully supported.**
 
-### 3. Datastar SSE Scoping
+See `docs/prds/agent-isolation/research/nrepl-multi-server.md` for full details.
+
+- Each `nrepl.server/start-server` call creates independent server
+- Sessions are keyed by UUID (global atom, but no conflicts)
+- Thread pools are shared (efficient, not a problem)
+- Server implements `java.io.Closeable` for clean shutdown
+
+### 2. Context Injection - RESOLVED
+
+**Answer: Use custom nREPL middleware with dynamic var.**
+
+```clojure
+(def ^:dynamic *ctx* nil)
+
+(defn make-context-middleware [ctx-atom target-ns]
+  (fn wrap-context [handler]
+    (fn [{:keys [session] :as msg}]
+      (when (and session (not (contains? @session #'*ctx*)))
+        (swap! session assoc
+               #'*ns* (find-ns target-ns)
+               #'*ctx* ctx-atom))
+      (handler msg))))
+```
+
+Middleware descriptor must specify:
+- `:requires #{"session"}` - runs after session middleware
+- `:expects #{"eval"}` - runs before eval middleware
+
+### 3. Datastar SSE Scoping - STILL UNRESOLVED
+
 Current SSE broadcasts to all connected clients. Need:
 - Per-namespace SSE channels
 - Agent's `render-fn` targets only their namespace's channel
 
-### 4. Code Loading in Shared JVM
+### 4. Code Loading in Shared JVM - STILL UNRESOLVED
+
 Agent edits files in worktree, but shared JVM loads from main repo.
 - When does agent's new code get loaded?
 - `(reload)` reloads from main repo, not worktree
 - May need worktree-aware reload or separate classpath
+
+---
+
+## nREPL Implementation Gotchas
+
+### Global Sessions Atom
+
+The `sessions` atom in `nrepl.middleware.session` is JVM-global:
+
+```clojure
+(def ^:private sessions (atom {}))  ; session.clj line 20
+```
+
+This is **NOT a problem** because:
+- Sessions are keyed by UUID (globally unique)
+- Each server can have sessions with the same client
+- `ls-sessions` returns all sessions across all servers (might be surprising)
+
+### Middleware Ordering
+
+Critical for context injection:
+1. `session` middleware must run first (creates the `:session` atom)
+2. Our `wrap-context` runs next (injects `*ns*` and `*ctx*`)
+3. `interruptible-eval` runs last (evaluates code with bindings)
+
+Use `set-descriptor!` to declare ordering:
+
+```clojure
+(set-descriptor! #'wrap-context
+  {:requires #{"session"}   ; Must be AFTER this
+   :expects #{"eval"}})     ; Must be BEFORE this
+```
+
+### Port 0 Auto-Assignment
+
+Use `:port 0` to let the OS assign an available port:
+
+```clojure
+(let [server (nrepl/start-server :port 0)]
+  (println "Server started on port" (:port server)))
+```
+
+The actual port is available in `(:port server)` after startup.
+
+### Thread Pool Sharing
+
+All nREPL servers share these thread pools (defined in `util/threading.clj`):
+
+```clojure
+(def listen-executor ...)   ; Accepts connections
+(def handle-executor ...)   ; Handles messages
+(def transport-executor ...) ; Transport layer
+```
+
+This is efficient (no per-server overhead) but means:
+- A CPU-intensive eval on one server affects others slightly
+- OOM from one server crashes all
 
 ---
 

@@ -13,3 +13,6 @@
 [submodule "reference-code/splint"]
 	path = reference-code/splint
 	url = https://github.com/NoahTheDuke/splint.git
+[submodule "reference-code/nrepl"]
+	path = reference-code/nrepl
+	url = https://github.com/nrepl/nrepl.git
