@@ -1,0 +1,1 @@
+{:lint-as {macros/with-foo clojure.core/let}, :config-in-call {macros/matcher {:ignore [:unresolved-symbol :type-mismatch]}}}

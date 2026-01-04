@@ -138,8 +138,8 @@
           ;; Note: We need to pass the XTDB node from the running system
           code (format
                 "(seon.dev.hook/process-hook-event!
-                   (user/xtdb-node)
-                   {:seon.dev.hook/event %s
+                   {:seon.dev.hook/xtdb-node (user/xtdb-node)
+                    :seon.dev.hook/event %s
                     :seon.dev.hook/config %s})"
                 (pr-str event)
                 (pr-str config))

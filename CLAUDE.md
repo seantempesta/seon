@@ -180,7 +180,7 @@ After editing code, reload it into the running server:
 Use `clj-nrepl-eval` to send commands to the running server:
 
 ```bash
-clj-nrepl-eval -p 7888 "(reset)"                    # Reload code
+clj-nrepl-eval -p 7888 "(reload)"                   # Fast reload (~5ms)
 clj-nrepl-eval -p 7888 "(status)"                   # Check status
 clj-nrepl-eval -p 7888 "(search \"XTDB SQL syntax\")" # Research when stuck
 ```
@@ -193,7 +193,8 @@ The `user` namespace (loaded automatically) provides these helpers:
 |----------|---------|
 | `(go)` | Start system |
 | `(halt)` | Stop system |
-| `(reset)` | Reload code and restart |
+| `(reload)` | **Fast reload changed code** (preserves state, ~2ms) |
+| `(reset)` | Reload + restart components (use when config changes) |
 | `(status)` | Show system status |
 | `(search "query")` | Web search via Gemini (use when stuck!) |
 | `(ask "query")` | Ask Gemini (no web search) |
@@ -352,28 +353,30 @@ Seon runs as a **persistent server** started with `./bin/run`. This single proce
 
 **You don't start/stop components manually.** The server handles lifecycle.
 
-### Reloading Code (CRITICAL)
+### Reloading Code
 
 **DO NOT use `(require 'ns :reload)`** - it doesn't work reliably.
 
-**ALWAYS use `(reset)`** - properly reloads ALL changed namespaces in dependency order, then restarts components.
-
-```bash
-# From command line (for agents)
-clj-nrepl-eval -p 7888 "(reset)"
-```
-
+**Prefer `(reload)`** for fast code sync:
 ```clojure
-;; From connected REPL
-(reset)
+(reload)   ; Fast (~2ms), preserves defonce, only reloads changed files
 ```
 
-**Before resetting, ask: "What's currently running?"** A reset interrupts any running futures, background jobs, or active queries. Run `(status)` first.
+**Use `(reset)` when you need to restart components** (config changes, system state):
+```clojure
+(reset)    ; Slower (~1-2s), reloads code AND restarts Integrant components
+```
 
-### If Reset Fails
+For agents via command line:
+```bash
+clj-nrepl-eval -p 7888 "(reload)"   # Fast code sync
+clj-nrepl-eval -p 7888 "(reset)"    # Full restart
+```
+
+### If Reload/Reset Fails
 
 1. Fix the compile error
-2. Run `(reset)` again - it should recover
+2. Run `(reload)` or `(reset)` again - it should recover
 3. If still broken: Ctrl+C and restart `./bin/run`
 
 ### Checking System Health

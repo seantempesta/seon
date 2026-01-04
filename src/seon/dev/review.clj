@@ -111,6 +111,34 @@
                    [::text :string]
                    [::max-length {:optional true} [:int {:min 1}]]])
 
+;; review-edits request (convenience function)
+(schema/register! ::review-edits-request
+                  [:map
+                   [::files ::files]
+                   [::test-results {:optional true} :map]
+                   [::new-functions {:optional true} ::new-functions]
+                   [::max-output-length {:optional true} [:int {:min 1}]]
+                   [::timeout {:optional true} [:int {:min 1000}]]
+                   [::api-key {:optional true} :string]])
+
+;; review-edits response (includes full data for observability)
+(schema/register! ::review-edits-response
+                  [:map
+                   [::formatted-text :string]
+                   [::prompt :string]
+                   [::response {:optional true} [:maybe :string]]
+                   [::success :boolean]
+                   [::error {:optional true} [:maybe :string]]
+                   [::gemini-system-instruction {:optional true} [:maybe :string]]
+                   [::gemini-user-prompt {:optional true} [:maybe :string]]
+                   [::gemini-code {:optional true} [:maybe :string]]
+                   [::gemini-tokens {:optional true}
+                    [:maybe
+                     [:map
+                      [:prompt {:optional true} [:maybe :int]]
+                      [:response {:optional true} [:maybe :int]]
+                      [:cached {:optional true} [:maybe :int]]]]]])
+
 ;;; ---------------------------------------------------------------------------
 ;;; Configuration Defaults
 ;;; ---------------------------------------------------------------------------
@@ -364,8 +392,8 @@
    Example:
      (review-edits {::files #{\"/path/to/file.clj\"}})
      ;; => {::formatted-text \"Gemini: ...\" ::prompt \"...\" ::response \"...\"}"
-  [{::keys [files test-results new-functions max-output-length timeout api-key]
-    :as request}]
+  {:malli/schema [:=> [:cat ::review-edits-request] ::review-edits-response]}
+  [{::keys [files test-results new-functions max-output-length timeout api-key]}]
   (let [context (build-context {::files files
                                 ::test-results test-results
                                 ::new-functions new-functions})

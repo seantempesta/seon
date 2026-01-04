@@ -5,6 +5,8 @@
    parinferish. This enables the development hook to fix common LLM-generated
    errors like missing closing parentheses.
 
+   All public functions use map-in pattern per CONVENTIONS.md.
+
    Main functions:
    - delimiter-error? - Check if code has unbalanced delimiters
    - repair - Attempt to fix delimiter errors using parinfer
@@ -14,12 +16,12 @@
      (require '[seon.dev.repair :as repair])
 
      ;; Check for delimiter errors
-     (repair/delimiter-error? \"(defn foo [x] (+ x 1\")
+     (repair/delimiter-error? {::repair/content \"(defn foo [x] (+ x 1\"})
      ;; => true
 
      ;; Repair the code
-     (repair/repair \"(defn foo [x] (+ x 1\")
-     ;; => \"(defn foo [x] (+ x 1))\"
+     (repair/repair {::repair/content \"(defn foo [x] (+ x 1\"})
+     ;; => {::repair/success true ::repair/repaired \"(defn foo [x] (+ x 1))\"}
 
      ;; Repair and format
      (repair/repair-and-format
@@ -48,12 +50,28 @@
 (schema/register! ::error
                   [:string {:description "Error message if operation failed"}])
 
+;; Request/Response schemas for delimiter-error?
+(schema/register! ::delimiter-error-request
+                  [:map
+                   [::content ::content]])
+
+;; Request/Response schemas for repair
 (schema/register! ::repair-request
+                  [:map
+                   [::content ::content]])
+
+(schema/register! ::repair-response
+                  [:map
+                   [::repaired {:optional true} ::content]
+                   [::success :boolean]])
+
+;; Request/Response schemas for repair-and-format
+(schema/register! ::repair-and-format-request
                   [:map
                    [::content ::content]
                    [::format? {:optional true} ::format?]])
 
-(schema/register! ::repair-response
+(schema/register! ::repair-and-format-response
                   [:map
                    [::success ::success]
                    [::content {:optional true} ::content]
@@ -123,19 +141,19 @@
    brackets, and braces.
 
    Request keys:
-     content - Clojure source code string
+     ::content - Clojure source code string
 
    Returns:
      Boolean - true if content has delimiter errors, false otherwise
 
    Example:
-     (delimiter-error? \"(defn foo [x] (+ x 1)\")
+     (delimiter-error? {::content \"(defn foo [x] (+ x 1\"})
      ;; => true (missing closing paren)
 
-     (delimiter-error? \"(defn foo [x] (+ x 1))\")
+     (delimiter-error? {::content \"(defn foo [x] (+ x 1))\"})
      ;; => false (balanced)"
-  {:malli/schema [:=> [:cat ::content] :boolean]}
-  [content]
+  {:malli/schema [:=> [:cat ::delimiter-error-request] :boolean]}
+  [{::keys [content]}]
   (if (or (nil? content) (empty? content))
     false
     (has-delimiter-error? content)))
@@ -148,28 +166,29 @@
    closing parentheses.
 
    Request keys:
-     content - Clojure source code with delimiter errors
+     ::content - Clojure source code with delimiter errors
 
-   Returns:
-     Repaired content string if successful, nil if:
-     - Content has no errors (nothing to repair)
-     - Content cannot be repaired
-     - Repair didn't fix the errors
+   Response keys:
+     ::success  - Whether repair was needed and succeeded
+     ::repaired - The repaired content (only present if repair succeeded)
 
    Example:
-     (repair \"(defn foo [x]\\n  (+ x 1\")
-     ;; => \"(defn foo [x]\\n  (+ x 1))\"
+     (repair {::content \"(defn foo [x]\\n  (+ x 1\"})
+     ;; => {::success true ::repaired \"(defn foo [x]\\n  (+ x 1))\"}
 
-     (repair \"(defn foo [x] (+ x 1))\")
-     ;; => nil (no errors to repair)"
-  {:malli/schema [:=> [:cat ::content] [:maybe ::content]]}
-  [content]
-  (when (and content (not (empty? content)) (delimiter-error? content))
-    (when-let [repaired (try-repair content)]
+     (repair {::content \"(defn foo [x] (+ x 1))\"})
+     ;; => {::success false} (no errors to repair)"
+  {:malli/schema [:=> [:cat ::repair-request] ::repair-response]}
+  [{::keys [content]}]
+  (if (or (nil? content) (empty? content) (not (delimiter-error? {::content content})))
+    {::success false}
+    (if-let [repaired (try-repair content)]
       ;; Only return if repair actually fixed the errors
-      (when (and (not= repaired content)
-                 (not (delimiter-error? repaired)))
-        repaired))))
+      (if (and (not= repaired content)
+               (not (delimiter-error? {::content repaired})))
+        {::success true ::repaired repaired}
+        {::success false})
+      {::success false})))
 
 (defn repair-and-format
   "Repair delimiter errors and optionally format the result.
@@ -195,14 +214,15 @@
      (repair-and-format {::content \"(defn foo [x] (+ x 1))\"})
      ;; => {::success true
      ;;     ::content \"(defn foo [x] (+ x 1))\"}"
-  {:malli/schema [:=> [:cat ::repair-request] ::repair-response]}
+  {:malli/schema [:=> [:cat ::repair-and-format-request] ::repair-and-format-response]}
   [{::keys [content format?]}]
   (let [format? (or format? false)
-        needs-repair? (delimiter-error? content)
-        repaired (if needs-repair?
-                   (or (repair content) content)
+        needs-repair? (delimiter-error? {::content content})
+        repair-result (when needs-repair? (repair {::content content}))
+        repaired (if (and needs-repair? (::success repair-result))
+                   (::repaired repair-result)
                    content)
-        still-broken? (delimiter-error? repaired)
+        still-broken? (delimiter-error? {::content repaired})
         formatted (if (and format? (not still-broken?))
                     (try-format repaired)
                     repaired)]
@@ -221,20 +241,20 @@
   ;; REPL exploration
 
   ;; Check for delimiter errors
-  (delimiter-error? "(defn foo [x] (+ x 1)")        ;; => true (missing paren)
-  (delimiter-error? "(defn foo [x] (+ x 1))")       ;; => false
-  (delimiter-error? "")                               ;; => false
-  (delimiter-error? nil)                              ;; => false
-  (delimiter-error? "(let [x 1")                     ;; => true
-  (delimiter-error? "[1 2 3")                        ;; => true
-  (delimiter-error? "{:a 1")                         ;; => true
+  (delimiter-error? {::content "(defn foo [x] (+ x 1"})  ;; => true (missing paren)
+  (delimiter-error? {::content "(defn foo [x] (+ x 1))"}) ;; => false
+  (delimiter-error? {::content ""})                       ;; => false
+  (delimiter-error? {::content nil})                      ;; => false
+  (delimiter-error? {::content "(let [x 1"})              ;; => true
+  (delimiter-error? {::content "[1 2 3"})                 ;; => true
+  (delimiter-error? {::content "{:a 1"})                  ;; => true
 
   ;; Repair code
-  (repair "(defn foo [x]\n  (+ x 1")
-  ;; => "(defn foo [x]\n  (+ x 1))"
+  (repair {::content "(defn foo [x]\n  (+ x 1"})
+  ;; => {::success true ::repaired "(defn foo [x]\n  (+ x 1))"}
 
-  (repair "(defn foo [x] (+ x 1))")
-  ;; => nil (no errors)
+  (repair {::content "(defn foo [x] (+ x 1))"})
+  ;; => {::success false} (no errors to repair)
 
   ;; Repair and format
   (repair-and-format {::content "(defn foo [x](+ x 1"

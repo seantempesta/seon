@@ -24,8 +24,10 @@
         ::hook/config {:repair {:enabled true}
                        :tests {:unit {:enabled true}}
                        :review {:enabled true :interval-seconds 60}}})"
-  (:require [clojure.string :as str]
+  (:require [clj-reload.core :as reload]
+            [clojure.string :as str]
             [seon.dev.codebase :as codebase]
+            [seon.dev.compliance :as compliance]
             [seon.dev.context :as context]
             [seon.dev.repair :as repair]
             [seon.dev.review :as review]
@@ -86,6 +88,16 @@
                    [:max-code-length {:optional true} [:int {:min 1}]]
                    [:max-output-length {:optional true} [:int {:min 1}]]])
 
+(schema/register! ::compliance-config
+                  [:map {:description "Convention compliance configuration"}
+                   [:enabled {:optional true} :boolean]
+                   [:block {:optional true} :boolean]])
+
+(schema/register! ::feedback-config
+                  [:map {:description "Feedback formatting configuration"}
+                   [:dense {:optional true} :boolean]
+                   [:max-length {:optional true} [:int {:min 1}]]])
+
 (schema/register! ::config
                   [:map {:description "Full hook configuration"}
                    [:repair {:optional true} ::repair-config]
@@ -93,11 +105,17 @@
                     [:map
                      [:unit {:optional true} ::unit-test-config]
                      [:generative {:optional true} ::gen-test-config]]]
-                   [:review {:optional true} ::review-config]])
+                   [:review {:optional true} ::review-config]
+                   [:compliance {:optional true} ::compliance-config]
+                   [:feedback {:optional true} ::feedback-config]])
 
 ;; Request/Response schemas
+(schema/register! ::xtdb-node
+                  [:any {:description "XTDB node instance"}])
+
 (schema/register! ::process-request
                   [:map {:description "Request to process a hook event"}
+                   [::xtdb-node ::xtdb-node]
                    [::event ::hook-event]
                    [::config {:optional true} ::config]])
 
@@ -120,6 +138,7 @@
   "Default configuration when not provided."
   {:repair {:enabled true
             :cljfmt true}
+   :reload {:enabled true}
    :tests {:unit {:enabled true
                   :block-on-fail true
                   :timeout-seconds 30}
@@ -129,7 +148,11 @@
    :review {:enabled true
             :interval-seconds 60
             :max-code-length 12000
-            :max-output-length 500}})
+            :max-output-length 500}
+   :compliance {:enabled true
+                :block false}
+   :feedback {:dense true
+              :max-length 1000}})
 
 (defn- merge-config
   "Deep merge user config with defaults."
@@ -139,10 +162,14 @@
                             (get-in user-config [:tests :unit]))
                :generative (merge (get-in default-config [:tests :generative])
                                   (get-in user-config [:tests :generative]))}
-        review (merge (:review default-config) (:review user-config))]
+        review (merge (:review default-config) (:review user-config))
+        compliance (merge (:compliance default-config) (:compliance user-config))
+        feedback (merge (:feedback default-config) (:feedback user-config))]
     {:repair repair
      :tests tests
-     :review review}))
+     :review review
+     :compliance compliance
+     :feedback feedback}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Private Helpers
@@ -158,7 +185,7 @@
   "Check if file is a Seon source file (in src/seon/)."
   [file-path]
   (and file-path
-       (codebase/clojure-file? file-path)
+       (codebase/clojure-file? {::codebase/file-path file-path})
        (str/includes? file-path "src/seon/")))
 
 (defn- success-response
@@ -193,6 +220,33 @@
     {:success (::verify/success gen-result)
      :error (::verify/error gen-result)}))
 
+(defn- format-dense-success
+  "Format a dense success line with all passing metrics.
+
+   Example: '[checkmark] 5 tests, 3 gen-tests, compliant (0.2s)'
+
+   Returns nil if there's nothing to report."
+  [{:keys [unit-result gen-result compliance-result elapsed-ms]}]
+  (let [parts (cond-> []
+                ;; Unit tests
+                (and unit-result (::verify/success unit-result))
+                (conj (str (::verify/test-count unit-result) " tests"))
+
+                ;; Gen tests - count the number of functions with schemas
+                (and gen-result (::verify/success gen-result))
+                (conj "gen-tests")
+
+                ;; Compliance
+                (and compliance-result (:compliant? compliance-result))
+                (conj "compliant"))
+        ;; Format timing
+        timing (when elapsed-ms
+                 (format "%.1fs" (/ elapsed-ms 1000.0)))]
+    (when (seq parts)
+      (str "\u2713 "  ; checkmark
+           (str/join ", " parts)
+           (when timing (str " (" timing ")"))))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Pipeline Stages
 ;;; ---------------------------------------------------------------------------
@@ -206,13 +260,13 @@
      nil                                 - Repair disabled or not a Clojure file"
   [file-path config]
   (when (and (get-in config [:repair :enabled])
-             (codebase/clojure-file? file-path))
-    (let [read-result (codebase/read-source file-path)]
+             (codebase/clojure-file? {::codebase/file-path file-path}))
+    (let [read-result (codebase/read-source {::codebase/file-path file-path})]
       (if-not (::codebase/success read-result)
         ;; Can't read file - skip repair
         {:success true}
         (let [content (::codebase/content read-result)]
-          (if-not (repair/delimiter-error? content)
+          (if-not (repair/delimiter-error? {::repair/content content})
             ;; No errors - nothing to repair
             {:success true}
             ;; Try to repair
@@ -230,18 +284,23 @@
                  :error "Unable to repair delimiter errors"}))))))))
 
 (defn- stage-reload
-  "Reload the namespace to check for compile errors.
+  "Reload changed namespaces via clj-reload.
 
-   Returns:
-     {:success true}                 - Namespace loaded successfully
-     {:success false :error \"...\"}  - Compile error"
-  [ns-sym]
-  (try
-    (require ns-sym :reload)
-    {:success true}
-    (catch Exception e
-      {:success false
-       :error (str "Compile error: " (.getMessage e))})))
+   Uses clj-reload for fast, dependency-aware reloading that:
+   - Only reloads what actually changed
+   - Preserves defonce values
+   - Reloads dependents in correct order
+
+   Returns (merged with clj-reload result):
+     {:success true :unloaded [...] :loaded [...]}
+     {:success false :error \"...\" :failed ns-sym :unloaded [...] :loaded [...]}"
+  [_ns-sym]
+  (let [result (reload/reload {:throw false})]
+    (if-let [ex (:exception result)]
+      (assoc result
+             :success false
+             :error (str "Compile error in " (:failed result) ": " (ex-message ex)))
+      (assoc result :success true))))
 
 (defn- stage-unit-tests
   "Run unit tests if enabled and test namespace exists.
@@ -250,10 +309,10 @@
   [source-ns config]
   (when (get-in config [:tests :unit :enabled])
     (let [test-ns (codebase/file->test-namespace
-                   (codebase/namespace->file source-ns))]
-      (when (and test-ns (codebase/test-file-exists? test-ns))
+                   {::codebase/file-path (codebase/namespace->file {::codebase/namespace source-ns})})]
+      (when (and test-ns (codebase/test-file-exists? {::codebase/namespace test-ns}))
         (log/debug "Running unit tests for" test-ns)
-        (verify/run-unit-tests test-ns)))))
+        (verify/run-unit-tests {::verify/test-ns test-ns})))))
 
 (defn- stage-gen-tests
   "Run generative tests if enabled.
@@ -263,21 +322,51 @@
   (when (get-in config [:tests :generative :enabled])
     (let [num-tests (get-in config [:tests :generative :num-tests] 10)]
       (log/debug "Running generative tests for" source-ns "with" num-tests "tests")
-      (verify/run-gen-tests source-ns {::verify/num-tests num-tests}))))
+      (verify/run-gen-tests {::verify/namespace source-ns ::verify/num-tests num-tests}))))
+
+(defn- stage-compliance
+  "Run convention compliance checks on namespace.
+
+   Returns:
+     {:compliant? true}                       - All functions comply
+     {:compliant? false :formatted \"...\"}   - Violations found
+     nil                                      - Compliance disabled"
+  [source-ns config]
+  (when (get-in config [:compliance :enabled])
+    (log/debug "Running compliance checks for" source-ns)
+    (let [result (compliance/analyze-namespace {::compliance/namespace source-ns})]
+      (if (::compliance/compliant? result)
+        {:compliant? true
+         :public-fns (::compliance/public-fns result)
+         :with-schema (::compliance/with-schema result)}
+        (let [formatted (compliance/format-violations
+                         {::compliance/violations (::compliance/violations result)
+                          ::compliance/max-length (get-in config [:feedback :max-length] 1000)})]
+          {:compliant? false
+           :formatted (::compliance/formatted formatted)
+           :violation-count (count (::compliance/violations result))})))))
 
 (defn- stage-record-edit
   "Record the edit event in XTDB with observability data."
-  ([xtdb-node file-path ns-sym]
-   (stage-record-edit xtdb-node file-path ns-sym nil))
-  ([xtdb-node file-path ns-sym opts]
-   (context/record-edit! xtdb-node file-path ns-sym opts)))
+  [xtdb-node file-path ns-sym opts]
+  (context/record-edit! (cond-> {::context/xtdb-node xtdb-node
+                                  ::context/file-path file-path}
+                          ns-sym (assoc ::context/namespace ns-sym)
+                          (:content-hash opts) (assoc ::context/content-hash (:content-hash opts))
+                          (:unit-test-result opts) (assoc ::context/unit-test-result (:unit-test-result opts))
+                          (:gen-test-result opts) (assoc ::context/gen-test-result (:gen-test-result opts))
+                          (:decision opts) (assoc ::context/decision (:decision opts))
+                          (:reason opts) (assoc ::context/reason (:reason opts))
+                          (:feedback opts) (assoc ::context/feedback (:feedback opts)))))
 
 (defn- stage-should-review?
   "Check if we should trigger a review based on rate limiting."
   [xtdb-node config]
   (when (get-in config [:review :enabled])
-    (let [interval (get-in config [:review :interval-seconds] 60)]
-      (context/should-review? xtdb-node {::context/interval-seconds interval}))))
+    (let [interval (get-in config [:review :interval-seconds] 60)
+          result (context/should-review? {::context/xtdb-node xtdb-node
+                                           ::context/interval-seconds interval})]
+      (::context/should-review result))))
 
 (defn- stage-review
   "Run AI review on accumulated edits.
@@ -285,7 +374,7 @@
    Returns formatted review text or nil if skipped/failed."
   [xtdb-node config unit-result]
   (when (get-in config [:review :enabled])
-    (let [summary (context/edits-summary xtdb-node)
+    (let [summary (context/edits-summary {::context/xtdb-node xtdb-node})
           files (::context/files summary)]
       (when (seq files)
         (log/info "Running AI review on" (count files) "files")
@@ -294,12 +383,13 @@
                        ::review/test-results unit-result
                        ::review/max-output-length (get-in config [:review :max-output-length] 500)})]
           ;; Record review with full Gemini interaction data for training
-          (context/record-review! xtdb-node files
-            {:gemini-prompt (::review/prompt result)
-             :gemini-response (::review/response result)
-             :gemini-system-instruction (::review/gemini-system-instruction result)
-             :gemini-code (::review/gemini-code result)
-             :gemini-tokens (::review/gemini-tokens result)})
+          (context/record-review! {::context/xtdb-node xtdb-node
+                                    ::context/files files
+                                    ::context/gemini-prompt (::review/prompt result)
+                                    ::context/gemini-response (::review/response result)
+                                    ::context/gemini-system-instruction (::review/gemini-system-instruction result)
+                                    ::context/gemini-code (::review/gemini-code result)
+                                    ::context/gemini-tokens (::review/gemini-tokens result)})
           (::review/formatted-text result))))))
 
 ;;; ---------------------------------------------------------------------------
@@ -319,8 +409,9 @@
    6. Review - Trigger AI review if rate limit allows
 
    Request keys:
-     ::event  - Parsed hook JSON from Claude Code
-     ::config - Configuration (merged with defaults)
+     ::xtdb-node - XTDB node for persistence
+     ::event     - Parsed hook JSON from Claude Code
+     ::config    - Configuration (merged with defaults)
 
    Response keys (for Claude Code JSON):
      ::continue - true to proceed with the edit
@@ -330,13 +421,13 @@
 
    Examples:
      ;; Successful edit
-     (process-hook-event! node {::event {...} ::config {...}})
+     (process-hook-event! {::xtdb-node node ::event {...} ::config {...}})
      ;; => {::continue true ::feedback [\"5 tests passed\"]}
 
      ;; Blocked edit
      ;; => {::decision \"block\" ::reason \"Compile error: ...\"}"
-  {:malli/schema [:=> [:cat :any ::process-request] ::process-response]}
-  [xtdb-node {::keys [event config]}]
+  {:malli/schema [:=> [:cat ::process-request] ::process-response]}
+  [{::keys [xtdb-node event config]}]
   (let [config (merge-config config)
         event-name (:hook_event_name event)
         tool-name (:tool_name event)
@@ -356,7 +447,7 @@
       (success-response @feedback))
 
     ;; Skip non-Clojure files
-    (if-not (codebase/clojure-file? file-path)
+    (if-not (codebase/clojure-file? {::codebase/file-path file-path})
       (do
         (log/debug "Skipping non-Clojure file" file-path)
         (success-response @feedback))
@@ -377,7 +468,7 @@
             (success-response @feedback))
 
           ;; Run full pipeline for seon source files
-          (let [ns-sym (codebase/file->namespace file-path)]
+          (let [ns-sym (codebase/file->namespace {::codebase/file-path file-path})]
             (if-not ns-sym
               ;; Can't determine namespace - skip
               (do
@@ -385,7 +476,11 @@
                 (success-response @feedback))
 
               ;; Full pipeline - run stages, short-circuit on block
-              (let [;; 1. Repair - block if unfixable
+              ;; Track timing for dense feedback
+              (let [start-time (System/currentTimeMillis)
+                    dense? (get-in config [:feedback :dense])
+
+                    ;; 1. Repair - block if unfixable
                     repair-result (stage-repair file-path config)
                     repair-block (when (and repair-result (not (:success repair-result)))
                                    (block-response (:error repair-result)))]
@@ -395,59 +490,88 @@
                           reload-block (when-not (:success reload-result)
                                          (block-response (:error reload-result)))]
                       (or reload-block
-                          ;; 3. Unit tests - optionally block on failure
-                          (let [unit-result (stage-unit-tests ns-sym config)
-                                _ (when (and unit-result (::verify/success unit-result))
-                                    (swap! feedback conj
-                                           (verify/format-unit-result unit-result
-                                                                      (codebase/file->test-namespace file-path))))
-                                unit-should-block (and unit-result
-                                                       (not (::verify/success unit-result))
-                                                       (get-in config [:tests :unit :block-on-fail]))]
-                            (if unit-should-block
-                                ;; Record blocked edit then return block response
-                                (let [reason (format "Unit tests failed: %d failures, %d errors in %s"
-                                                     (::verify/fail-count unit-result 0)
-                                                     (::verify/error-count unit-result 0)
-                                                     (codebase/file->test-namespace file-path))]
-                                  (stage-record-edit xtdb-node file-path ns-sym
-                                                     {:unit-test-result (extract-unit-summary unit-result)
-                                                      :decision :block
-                                                      :reason reason
-                                                      :feedback @feedback})
-                                  (block-response reason))
-                                ;; 4. Generative tests - optionally block on failure
-                                (let [gen-result (stage-gen-tests ns-sym config)
-                                      _ (when (and gen-result (::verify/success gen-result))
-                                          (swap! feedback conj
-                                                 (verify/format-gen-result gen-result ns-sym)))
-                                      gen-should-block (and gen-result
-                                                            (not (::verify/success gen-result))
-                                                            (get-in config [:tests :generative :block-on-fail]))]
-                                  (if gen-should-block
-                                      ;; Record blocked edit then return block response
-                                      (let [failed-fns (str/join ", " (map #(str (::verify/fn-symbol %))
-                                                                           (::verify/failures gen-result)))
-                                            reason (format "Generative tests failed for: %s"
-                                                           (if (str/blank? failed-fns) "schema errors" failed-fns))]
-                                        (stage-record-edit xtdb-node file-path ns-sym
-                                                           {:unit-test-result (extract-unit-summary unit-result)
-                                                            :gen-test-result (extract-gen-summary gen-result)
-                                                            :decision :block
-                                                            :reason reason
-                                                            :feedback @feedback})
-                                        (block-response reason))
-                                      ;; 5. Record edit + 6. Review + 7. Success
-                                      (do
-                                        (stage-record-edit xtdb-node file-path ns-sym
-                                                           {:unit-test-result (extract-unit-summary unit-result)
-                                                            :gen-test-result (extract-gen-summary gen-result)
-                                                            :decision :continue
-                                                            :feedback @feedback})
-                                        (when (stage-should-review? xtdb-node config)
-                                          (when-let [review-text (stage-review xtdb-node config unit-result)]
-                                            (swap! feedback conj review-text)))
-                                        (success-response @feedback)))))))))))))))))
+                          ;; 3. Compliance checks - non-blocking feedback (after reload, before tests)
+                          (let [compliance-result (stage-compliance ns-sym config)
+                                ;; Violations always shown (actionable fixes), regardless of dense mode
+                                _ (when (and compliance-result
+                                             (not (:compliant? compliance-result)))
+                                    (swap! feedback conj (:formatted compliance-result)))
+                                compliance-should-block (and compliance-result
+                                                             (not (:compliant? compliance-result))
+                                                             (get-in config [:compliance :block]))]
+                            (if compliance-should-block
+                              (block-response (:formatted compliance-result))
+                              ;; 4. Unit tests - optionally block on failure
+                              (let [unit-result (stage-unit-tests ns-sym config)
+                                    ;; Only add verbose feedback when not dense mode
+                                    _ (when (and (not dense?)
+                                                 unit-result
+                                                 (::verify/success unit-result))
+                                        (swap! feedback conj
+                                               (verify/format-unit-result {::verify/result unit-result
+                                                                           ::verify/test-ns (codebase/file->test-namespace {::codebase/file-path file-path})})))
+                                    unit-should-block (and unit-result
+                                                           (not (::verify/success unit-result))
+                                                           (get-in config [:tests :unit :block-on-fail]))]
+                                (if unit-should-block
+                                    ;; Record blocked edit then return block response
+                                    (let [reason (format "Unit tests failed: %d failures, %d errors in %s"
+                                                         (::verify/fail-count unit-result 0)
+                                                         (::verify/error-count unit-result 0)
+                                                         (codebase/file->test-namespace {::codebase/file-path file-path}))]
+                                      (stage-record-edit xtdb-node file-path ns-sym
+                                                         {:unit-test-result (extract-unit-summary unit-result)
+                                                          :decision :block
+                                                          :reason reason
+                                                          :feedback @feedback})
+                                      (block-response reason))
+                                    ;; 5. Generative tests - optionally block on failure
+                                    (let [gen-result (stage-gen-tests ns-sym config)
+                                          ;; Only add verbose feedback when not dense mode
+                                          _ (when (and (not dense?)
+                                                       gen-result
+                                                       (::verify/success gen-result))
+                                              (swap! feedback conj
+                                                     (verify/format-gen-result {::verify/result gen-result ::verify/namespace ns-sym})))
+                                          gen-should-block (and gen-result
+                                                                (not (::verify/success gen-result))
+                                                                (get-in config [:tests :generative :block-on-fail]))]
+                                      (if gen-should-block
+                                          ;; Record blocked edit then return block response
+                                          (let [failed-fns (str/join ", " (map #(str (::verify/fn-symbol %))
+                                                                               (::verify/failures gen-result)))
+                                                reason (format "Generative tests failed for: %s"
+                                                               (if (str/blank? failed-fns) "schema errors" failed-fns))]
+                                            (stage-record-edit xtdb-node file-path ns-sym
+                                                               {:unit-test-result (extract-unit-summary unit-result)
+                                                                :gen-test-result (extract-gen-summary gen-result)
+                                                                :decision :block
+                                                                :reason reason
+                                                                :feedback @feedback})
+                                            (block-response reason))
+                                          ;; 6. Record edit + 7. Review + 8. Success
+                                          (let [elapsed-ms (- (System/currentTimeMillis) start-time)]
+                                            (stage-record-edit xtdb-node file-path ns-sym
+                                                               {:unit-test-result (extract-unit-summary unit-result)
+                                                                :gen-test-result (extract-gen-summary gen-result)
+                                                                :decision :continue
+                                                                :feedback @feedback})
+
+                                            ;; Add dense success line if dense mode and everything passed
+                                            (when dense?
+                                              (when-let [dense-line (format-dense-success
+                                                                     {:unit-result unit-result
+                                                                      :gen-result gen-result
+                                                                      :compliance-result compliance-result
+                                                                      :elapsed-ms elapsed-ms})]
+                                                (swap! feedback conj dense-line)))
+
+                                            ;; AI review (if enabled and rate limit allows)
+                                            (when (stage-should-review? xtdb-node config)
+                                              (when-let [review-text (stage-review xtdb-node config unit-result)]
+                                                (swap! feedback conj review-text)))
+
+                                            (success-response @feedback)))))))))))))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Development Helpers (REPL)
@@ -466,14 +590,14 @@
 
   ;; Process with default config
   (process-hook-event!
-   (user/xtdb-node)
-   {::event test-event
+   {::xtdb-node (user/xtdb-node)
+    ::event test-event
     ::config {}})
 
   ;; Process with custom config
   (process-hook-event!
-   (user/xtdb-node)
-   {::event test-event
+   {::xtdb-node (user/xtdb-node)
+    ::event test-event
     ::config {:repair {:enabled false}
               :tests {:unit {:enabled true :block-on-fail false}
                       :generative {:enabled false}}
@@ -481,8 +605,8 @@
 
   ;; Test PreToolUse (only repair)
   (process-hook-event!
-   (user/xtdb-node)
-   {::event {:hook_event_name "PreToolUse"
+   {::xtdb-node (user/xtdb-node)
+    ::event {:hook_event_name "PreToolUse"
              :tool_name "Edit"
              :tool_input {:file_path "/tmp/test.clj"}}
     ::config {}})

@@ -9,45 +9,45 @@
 
 (deftest delimiter-error?-test
   (testing "Detects missing closing parentheses"
-    (is (true? (repair/delimiter-error? "(defn foo [x] (+ x 1")))
-    (is (true? (repair/delimiter-error? "(let [x 1")))
-    (is (true? (repair/delimiter-error? "((("))))
+    (is (true? (repair/delimiter-error? {::repair/content "(defn foo [x] (+ x 1"})))
+    (is (true? (repair/delimiter-error? {::repair/content "(let [x 1"})))
+    (is (true? (repair/delimiter-error? {::repair/content "((("}))))
 
   (testing "Detects missing closing brackets"
-    (is (true? (repair/delimiter-error? "[1 2 3")))
-    (is (true? (repair/delimiter-error? "(defn foo [x")))
-    (is (true? (repair/delimiter-error? "[[[1 2] 3"))))
+    (is (true? (repair/delimiter-error? {::repair/content "[1 2 3"})))
+    (is (true? (repair/delimiter-error? {::repair/content "(defn foo [x"})))
+    (is (true? (repair/delimiter-error? {::repair/content "[[[1 2] 3"}))))
 
   (testing "Detects missing closing braces"
-    (is (true? (repair/delimiter-error? "{:a 1")))
-    (is (true? (repair/delimiter-error? "{:a {:b 1}")))
-    (is (true? (repair/delimiter-error? "{{{"))))
+    (is (true? (repair/delimiter-error? {::repair/content "{:a 1"})))
+    (is (true? (repair/delimiter-error? {::repair/content "{:a {:b 1}"})))
+    (is (true? (repair/delimiter-error? {::repair/content "{{{"}))))
 
   (testing "Returns false for balanced code"
-    (is (false? (repair/delimiter-error? "(defn foo [x] (+ x 1))")))
-    (is (false? (repair/delimiter-error? "[1 2 3]")))
-    (is (false? (repair/delimiter-error? "{:a 1 :b 2}")))
-    (is (false? (repair/delimiter-error? "(let [x {:a [1 2 3]}] x)"))))
+    (is (false? (repair/delimiter-error? {::repair/content "(defn foo [x] (+ x 1))"})))
+    (is (false? (repair/delimiter-error? {::repair/content "[1 2 3]"})))
+    (is (false? (repair/delimiter-error? {::repair/content "{:a 1 :b 2}"})))
+    (is (false? (repair/delimiter-error? {::repair/content "(let [x {:a [1 2 3]}] x)"}))))
 
   (testing "Handles edge cases"
-    (is (false? (repair/delimiter-error? "")))
-    (is (false? (repair/delimiter-error? nil)))
-    (is (false? (repair/delimiter-error? "   ")))
-    (is (false? (repair/delimiter-error? "; just a comment"))))
+    (is (false? (repair/delimiter-error? {::repair/content ""})))
+    (is (false? (repair/delimiter-error? {::repair/content nil})))
+    (is (false? (repair/delimiter-error? {::repair/content "   "})))
+    (is (false? (repair/delimiter-error? {::repair/content "; just a comment"}))))
 
   (testing "Handles complex valid code"
     (is (false? (repair/delimiter-error?
-                 "(defn process-data
+                 {::repair/content "(defn process-data
                      \"Process some data.\"
                      [{:keys [input output]}]
                      (let [result (map inc input)]
-                       {:output result}))"))))
+                       {:output result}))"}))))
 
   (testing "Handles strings and characters"
     ;; Strings should not confuse the parser
-    (is (false? (repair/delimiter-error? "(str \"hello (world)\")")))
-    (is (false? (repair/delimiter-error? "(str \"[brackets]\")")))
-    (is (false? (repair/delimiter-error? "(str \"{braces}\")")))))
+    (is (false? (repair/delimiter-error? {::repair/content "(str \"hello (world)\")"})))
+    (is (false? (repair/delimiter-error? {::repair/content "(str \"[brackets]\")"})))
+    (is (false? (repair/delimiter-error? {::repair/content "(str \"{braces}\")"})))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; repair Tests
@@ -56,40 +56,46 @@
 (deftest repair-test
   (testing "Repairs missing closing parentheses"
     (let [broken "(defn foo [x]\n  (+ x 1"
-          repaired (repair/repair broken)]
-      (is (string? repaired))
-      (is (not (repair/delimiter-error? repaired)))))
+          result (repair/repair {::repair/content broken})]
+      (is (true? (::repair/success result)))
+      (is (string? (::repair/repaired result)))
+      (is (not (repair/delimiter-error? {::repair/content (::repair/repaired result)})))))
 
   (testing "Repairs missing closing brackets"
     (let [broken "[1 2 3"
-          repaired (repair/repair broken)]
-      (is (string? repaired))
-      (is (not (repair/delimiter-error? repaired)))))
+          result (repair/repair {::repair/content broken})]
+      (is (true? (::repair/success result)))
+      (is (string? (::repair/repaired result)))
+      (is (not (repair/delimiter-error? {::repair/content (::repair/repaired result)})))))
 
   (testing "Repairs missing closing braces"
     (let [broken "{:a 1 :b 2"
-          repaired (repair/repair broken)]
-      (is (string? repaired))
-      (is (not (repair/delimiter-error? repaired)))))
+          result (repair/repair {::repair/content broken})]
+      (is (true? (::repair/success result)))
+      (is (string? (::repair/repaired result)))
+      (is (not (repair/delimiter-error? {::repair/content (::repair/repaired result)})))))
 
-  (testing "Returns nil for already valid code"
-    (is (nil? (repair/repair "(defn foo [x] (+ x 1))")))
-    (is (nil? (repair/repair "[1 2 3]")))
-    (is (nil? (repair/repair "{:a 1}"))))
+  (testing "Returns success false for already valid code"
+    (is (false? (::repair/success (repair/repair {::repair/content "(defn foo [x] (+ x 1))"}))))
+    (is (false? (::repair/success (repair/repair {::repair/content "[1 2 3]"}))))
+    (is (false? (::repair/success (repair/repair {::repair/content "{:a 1}"})))))
 
-  (testing "Returns nil for empty/nil input"
-    (is (nil? (repair/repair "")))
-    (is (nil? (repair/repair nil))))
+  (testing "Returns success false for empty/nil input"
+    (is (false? (::repair/success (repair/repair {::repair/content ""}))))
+    (is (false? (::repair/success (repair/repair {::repair/content nil})))))
 
   (testing "Repairs nested structures"
     (let [broken "(let [x {:a [1 2 3"
-          repaired (repair/repair broken)]
-      (is (string? repaired))
-      (is (not (repair/delimiter-error? repaired)))))
+          result (repair/repair {::repair/content broken})]
+      (is (true? (::repair/success result)))
+      (is (string? (::repair/repaired result)))
+      (is (not (repair/delimiter-error? {::repair/content (::repair/repaired result)})))))
 
   (testing "Preserves code structure during repair"
     (let [broken "(defn add [a b]\n  (+ a b"
-          repaired (repair/repair broken)]
+          result (repair/repair {::repair/content broken})
+          repaired (::repair/repaired result)]
+      (is (true? (::repair/success result)))
       (is (string? repaired))
       ;; Should preserve the basic structure
       (is (clojure.string/includes? repaired "defn add"))
@@ -149,11 +155,13 @@
   (testing "Full workflow: detect, repair, format"
     (let [broken "(defn process-items [items]\n  (map inc items"
           ;; 1. Detect error
-          _ (is (true? (repair/delimiter-error? broken)))
+          _ (is (true? (repair/delimiter-error? {::repair/content broken})))
           ;; 2. Repair
-          repaired (repair/repair broken)
+          repair-result (repair/repair {::repair/content broken})
+          repaired (::repair/repaired repair-result)
+          _ (is (true? (::repair/success repair-result)))
           _ (is (string? repaired))
-          _ (is (false? (repair/delimiter-error? repaired)))
+          _ (is (false? (repair/delimiter-error? {::repair/content repaired})))
           ;; 3. Format via repair-and-format
           result (repair/repair-and-format
                   {::repair/content repaired
@@ -167,9 +175,11 @@
   [{:keys [items tax-rate]}]
   (let [subtotal (reduce + (map :price items))]
     (* subtotal (+ 1 tax-rate)"
-          repaired (repair/repair broken)]
+          repair-result (repair/repair {::repair/content broken})
+          repaired (::repair/repaired repair-result)]
+      (is (true? (::repair/success repair-result)))
       (is (string? repaired))
-      (is (false? (repair/delimiter-error? repaired)))
+      (is (false? (repair/delimiter-error? {::repair/content repaired})))
       ;; Should preserve the docstring and structure
       (is (clojure.string/includes? repaired "Calculate the total price"))
       (is (clojure.string/includes? repaired "tax-rate")))))
@@ -181,26 +191,26 @@
 (deftest robustness-test
   (testing "Handles reader conditionals"
     (is (false? (repair/delimiter-error?
-                 "#?(:clj (+ 1 2) :cljs (+ 3 4))"))))
+                 {::repair/content "#?(:clj (+ 1 2) :cljs (+ 3 4))"}))))
 
   (testing "Handles metadata"
     (is (false? (repair/delimiter-error?
-                 "^:private (defn foo [] 1)")))
+                 {::repair/content "^:private (defn foo [] 1)"})))
     (is (false? (repair/delimiter-error?
-                 "(defn ^String foo [] \"hi\")"))))
+                 {::repair/content "(defn ^String foo [] \"hi\")"}))))
 
   (testing "Handles quoted forms"
-    (is (false? (repair/delimiter-error? "'(1 2 3)")))
-    (is (false? (repair/delimiter-error? "`(a ~b ~@c)"))))
+    (is (false? (repair/delimiter-error? {::repair/content "'(1 2 3)"})))
+    (is (false? (repair/delimiter-error? {::repair/content "`(a ~b ~@c)"}))))
 
   (testing "Handles anonymous functions"
-    (is (false? (repair/delimiter-error? "#(+ % 1)")))
-    (is (false? (repair/delimiter-error? "#(+ %1 %2)"))))
+    (is (false? (repair/delimiter-error? {::repair/content "#(+ % 1)"})))
+    (is (false? (repair/delimiter-error? {::repair/content "#(+ %1 %2)"}))))
 
   (testing "Handles sets"
-    (is (false? (repair/delimiter-error? "#{1 2 3}")))
-    (is (true? (repair/delimiter-error? "#{1 2 3"))))
+    (is (false? (repair/delimiter-error? {::repair/content "#{1 2 3}"})))
+    (is (true? (repair/delimiter-error? {::repair/content "#{1 2 3"}))))
 
   (testing "Handles regex literals"
-    (is (false? (repair/delimiter-error? "#\"[a-z]+\"")))
-    (is (false? (repair/delimiter-error? "(re-find #\"\\(\" s)")))))
+    (is (false? (repair/delimiter-error? {::repair/content "#\"[a-z]+\""})))
+    (is (false? (repair/delimiter-error? {::repair/content "(re-find #\"\\(\" s)"})))))
