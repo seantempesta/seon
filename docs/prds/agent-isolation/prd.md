@@ -7,10 +7,10 @@
 
 Transform Seon into an **orchestrator platform** where:
 - The main Seon server manages agent lifecycles and metadata
-- Each agent works on an assigned **namespace** with its own isolated database and nREPL
-- Namespace is THE unique identifier (no artificial naming schemes)
+- Each agent works on an assigned **namespace** with its own isolated nREPL and persisted state
+- Namespace is THE unique identifier (e.g., `seon.trading`)
 - One agent per namespace at a time (shared infrastructure constraint)
-- Agents receive an injected `ctx` atom with everything they need
+- **Agents just use a `ctx` atom** - persistence, validation, and time-travel happen automatically
 - All agent work flows through PRs for proper git integration
 
 ## Problem Statement
@@ -24,11 +24,12 @@ Current subagent architecture shares everything:
 ## Goals
 
 1. **Namespace-scoped agents** - Each agent owns a namespace (e.g., `seon.trading`)
-2. **Isolated databases** - Agent changes don't affect main or other agents
+2. **Isolated state** - Agent changes don't affect main or other agents
 3. **Concurrent REPLs** - One agent's long eval doesn't block others
-4. **Injected context** - Agents receive a `ctx` atom with db, render-fn, etc.
-5. **UI testing** - Agents can test web UI against their database
-6. **Orchestrator visibility** - Track all agents, their state, databases
+4. **ctx-first design** - Agents just `swap!` an atom; system handles persistence
+5. **Automatic time-travel** - Full history of ctx changes via XTDB bitemporality
+6. **Progressive complexity** - Start simple, escape to SQL when needed
+7. **Orchestrator visibility** - Track all agents, their state, history
 
 ---
 
@@ -40,16 +41,14 @@ Current subagent architecture shares everything:
 │                                                                 │
 │  ┌───────────────────────────────────────────────────────────┐  │
 │  │                    XTDB Node (shared)                     │  │
-│  │  ┌─────────┐ ┌─────────────┐ ┌─────────────┐              │  │
-│  │  │  xtdb   │ │ seon.trading│ │ seon.health │  ...         │  │
-│  │  │(primary)│ │  (attached) │ │  (attached) │              │  │
-│  │  └─────────┘ └─────────────┘ └─────────────┘              │  │
+│  │     Attached databases per namespace (internal detail)    │  │
+│  │           Agent never sees database names                 │  │
 │  └───────────────────────────────────────────────────────────┘  │
 │                                                                 │
 │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐                │
 │  │ nREPL :7888 │ │ nREPL :7889 │ │ nREPL :7890 │  ...           │
 │  │(orchestrator)│ │seon.trading │ │ seon.health │                │
-│  │             │ │ (bound ns)  │ │ (bound ns)  │                │
+│  │             │ │   + *ctx*   │ │   + *ctx*   │                │
 │  └─────────────┘ └─────────────┘ └─────────────┘                │
 │                                                                 │
 │  ┌───────────────────────────────────────────────────────────┐  │
@@ -60,12 +59,10 @@ Current subagent architecture shares everything:
 
 File System:
 seon/                              # Main repo (orchestrator view)
-├── data/xtdb/                     # Primary orchestrator DB
-├── data/namespaces/
-│   ├── seon.trading/              # Trading namespace DB
-│   │   ├── log/
-│   │   └── storage/
-│   └── seon.health/               # Health namespace DB
+├── data/xtdb/                     # Orchestrator DB
+├── data/namespaces/               # Per-namespace storage (internal)
+│   ├── seon.trading/
+│   └── seon.health/
 │
 ../seon-trading/                   # Git worktree for seon.trading
 └── src/seon/trading/              # Agent works here
@@ -76,9 +73,9 @@ seon/                              # Main repo (orchestrator view)
 | Concern | Solution |
 |---------|----------|
 | **Concurrent evals** | Separate nREPL per namespace (different threads) |
-| **Data isolation** | XTDB ATTACH DATABASE per namespace |
+| **Data isolation** | Separate XTDB database per namespace (agent never sees this) |
 | **Memory efficiency** | Shared JVM, shared XTDB node (~200-500MB per namespace) |
-| **Cross-ns queries** | Possible via `namespace.table` SQL syntax |
+| **Simplicity** | Agent just uses `ctx` atom; persistence is automatic |
 | **Code isolation** | Git worktrees per namespace |
 
 ### Constraints
@@ -91,45 +88,147 @@ seon/                              # Main repo (orchestrator view)
 
 ## Core Concept: The Agent Context (ctx)
 
-When an agent starts, it receives an atom containing everything it needs:
+**The ctx atom IS the agent's entire world.** Agents don't know about databases, SQL, or persistence. They just `swap!` and `deref` like any Clojure atom.
 
 ```clojure
-(def agent-ctx
-  (atom
-    {;; Identity
-     :seon.agent/namespace     'seon.trading
-     :seon.agent/session-id    "trading-20260104-abc123"
+;; Agent's view: just an atom
+(swap! *ctx* assoc :current-signal {:symbol "AAPL" :direction :long})
+(swap! *ctx* update :signals conj {:symbol "TSLA" :iv-rank 0.85})
 
-     ;; Database (isolated per namespace)
-     :seon.agent/db            <xtdb-connection-to-seon.trading-db>
-
-     ;; Web UI (routes to agent's namespace)
-     :seon.agent/render-fn     (fn [hiccup] ...)      ; Render HTML fragment
-     :seon.agent/sse-push-fn   (fn [fragment] ...)    ; Push SSE update
-
-     ;; File system
-     :seon.agent/worktree-path "/Users/sean/src/seon-trading"
-
-     ;; Metadata
-     :seon.agent/started-at    #inst "2026-01-04T..."
-     :seon.agent/nrepl-port    7889}))
+;; Read state
+(:signals @*ctx*)
 ```
+
+**Behind the scenes, the system automatically:**
+1. Validates state changes against Malli schemas
+2. Persists every change to XTDB
+3. Preserves full history (time-travel for free)
+
+### What's in ctx?
+
+```clojure
+;; The *ctx* dynamic var is bound per-nREPL session
+;; Agent can put ANYTHING in here - it's their scratchpad
+
+@*ctx*
+;; => {:current-signal {:symbol "AAPL" :direction :long}
+;;     :signals [{:symbol "TSLA" :iv-rank 0.85}]
+;;     :notes "investigating volatility spike"
+;;     ... anything the agent wants ...}
+```
+
+The system also provides some reserved keys (prefixed with `:seon.agent/`):
+
+```clojure
+{:seon.agent/namespace   'seon.trading      ; Read-only identity
+ :seon.agent/db          <xtdb-connection>  ; Escape hatch to SQL (Level 3)
+ :seon.agent/render-fn   (fn [hiccup] ...)  ; Push UI updates
+ :seon.agent/worktree    "/path/to/worktree"}
+```
+
+Most agents ignore `:seon.agent/db`. It's there for when they need SQL performance (see Progressive Complexity below).
 
 ### Agent Workflow Example
 
 ```clojure
 ;; Agent code (evaluated in seon.trading namespace via nREPL :7889)
 
-(let [{:seon.agent/keys [db render-fn]} @ctx]
-  ;; Query agent's isolated database
-  (let [signals (xt/q db "SELECT * FROM signals WHERE active = true")]
-    ;; Render to web UI - just provide hiccup
-    (render-fn
-      [:div#signals-panel
-       [:h2 "Active Signals"]
-       (for [s signals]
-         [:div.signal (:symbol s) " - " (:direction s)])])))
+;; Store some state - automatically persisted!
+(swap! *ctx* assoc :active-signals
+  [{:symbol "AAPL" :direction :long :iv-rank 0.92}
+   {:symbol "TSLA" :direction :short :iv-rank 0.78}])
+
+;; Render to web UI
+((:seon.agent/render-fn @*ctx*)
+  [:div#signals-panel
+   [:h2 "Active Signals"]
+   (for [s (:active-signals @*ctx*)]
+     [:div.signal (:symbol s) " - " (:direction s)])])
+
+;; Later: what was my state 10 minutes ago?
+;; (via helper function, if agent learns about it)
+(ctx/at *ctx* #inst "2026-01-04T10:00:00")
 ```
+
+### Progressive Complexity: The Escape Hatch
+
+Agents start with just the ctx atom. When they need more power, they can learn:
+
+| Level | Agent Knowledge | How It Works |
+|-------|-----------------|--------------|
+| **1. ctx atom** | Just `swap!` and `deref` | Full state snapshot persisted |
+| **2. Time travel** | `ctx/at`, `ctx/history` | Query historical states |
+| **3. SQL tables** | Use `:seon.agent/db` + invoke `xtdb-queries` skill | Create tables, indexed queries |
+
+**Level 1 is the default.** Most agents never need more.
+
+**Level 3 example** (after learning from skill):
+```clojure
+;; Agent decides they need a proper signals table for performance
+(let [db (:seon.agent/db @*ctx*)]
+  ;; Create table and insert
+  (xt/execute-tx db [[:put-docs :signals {:xt/id "sig1" :symbol "AAPL"}]])
+  ;; Query with SQL
+  (xt/q db "SELECT * FROM signals WHERE symbol = ?" ["AAPL"]))
+```
+
+---
+
+## Persisted Context: Design Sketch
+
+> **NOTE**: This is pseudocode illustrating the concept. The implementing agent must
+> properly research atom watchers, XTDB persistence patterns, validation timing,
+> and performance implications. Don't assume this design is correct.
+
+### Conceptual Implementation
+
+```clojure
+;; PSEUDOCODE - needs proper research and implementation
+
+(defn make-persisted-ctx
+  "Create a ctx atom that auto-persists to XTDB with validation.
+
+   Questions for implementer:
+   - Persist on every swap! or debounce?
+   - Validate before persist (fail fast) or async?
+   - How to handle validation failures?
+   - What's the performance impact?"
+  [db namespace-sym schema]
+  (let [ctx (atom {}
+              :validator (fn [state]
+                           ;; Malli validation
+                           (m/validate schema state)))]
+    (add-watch ctx ::persist
+      (fn [_ _ old new]
+        (when (not= old new)
+          ;; Persist to XTDB - exact mechanism TBD
+          ;; Could be full snapshot or diff-based
+          (persist-ctx-state! db namespace-sym new))))
+    ctx))
+
+(defn ctx-at
+  "Retrieve ctx state at a specific point in time.
+   Leverages XTDB's bitemporal queries."
+  [db namespace-sym instant]
+  ;; Query historical state - implementation TBD
+  ...)
+
+(defn ctx-history
+  "Get timeline of ctx changes.
+   Useful for debugging: 'what did the agent do?'"
+  [db namespace-sym]
+  ;; Query all valid-time versions - implementation TBD
+  ...)
+```
+
+### Open Design Questions
+
+1. **Persistence granularity** - Every `swap!`? Debounced? Per "turn"?
+2. **Storage format** - Full state snapshot vs incremental diffs?
+3. **Schema evolution** - What happens when ctx structure changes?
+4. **Validation errors** - Throw? Log and skip? Rollback?
+5. **Reserved keys** - How to protect `:seon.agent/*` keys from agent modification?
+6. **Performance** - Acceptable latency for persisted swap!?
 
 ### RESEARCH COMPLETE
 
@@ -217,33 +316,71 @@ The primary `xtdb` database tracks namespaces and agents:
 
 ## Implementation Phases
 
-### Phase 1: XTDB Multi-Database
-- [ ] Test ATTACH DATABASE with namespace-derived names
-- [ ] Create/attach database when namespace first used
-- [ ] Verify cross-database queries work
-- [ ] Add namespace registry to orchestrator DB
+### Phase 1: XTDB Multi-Database (internal infrastructure) - COMPLETE
 
-### Phase 2: Multiple nREPL Servers
+**Completed**: 2026-01-04. See `docs/prds/xtdb-sql-migration/prd.md` for full details.
+
+- [x] Single XTDB node with attached databases (replaces 3 separate nodes)
+- [x] `seon.db.multi` namespace with attach/detach/connection APIs
+- [x] Naming: `seon.trading` → database `seon_trading` → path `data/namespaces/seon.trading/`
+- [x] 16 tests in `test/seon/db/multi_test.clj`
+
+**Current state**: System running with `xtdb`, `seon_primer`, `seon_dev` databases.
+
+### Phase 2: Multiple nREPL Servers - COMPLETE
+
+**Completed**: 2026-01-04
+
 - [x] Research: Can nREPL start multiple servers in one JVM? **YES - CONFIRMED**
 - [x] Research: How to bind namespace at startup? **Via custom middleware**
 - [x] Research: Error handling and lifecycle? **Clean API, java.io.Closeable**
-- [ ] Implement `start-namespace-nrepl!` function
-- [ ] Implement port allocation (7889, 7890, ...)
-- [ ] Create `seon-nrepl-eval` that routes to correct port
-- [ ] Add Integrant component for namespace nREPL servers
+- [x] Implement `start-namespace-nrepl!` function
+- [x] Implement port allocation (7889, 7890, ...)
+- [x] Custom middleware for `*ctx*` and `*ns*` injection
+- [x] Add Integrant component `:seon.orchestrator/namespace-nrepls`
+- [x] Fix ctx injection tests - middleware descriptor now uses var reference
 
-### Phase 3: Agent Context Injection
-- [ ] Define ctx schema (Malli specs)
-- [ ] Inject ctx when agent session starts
-- [ ] Provide db connection, render-fn, sse-push-fn
-- [ ] Test agent can query and render
+**Implementation Summary:**
 
-### Phase 4: Web Routing
+Created `src/seon/orchestrator/nrepl.clj` with:
+- `*ctx*` dynamic var for agent context (contains `:seon.agent/namespace`, `:seon.agent/db`, etc.)
+- Thread-safe port allocation (7889-7999 range) with `allocate-port!` and `release-port!`
+- `start-namespace-nrepl!` - Starts nREPL with custom middleware that injects `*ctx*` and `*ns*`
+- `stop-namespace-nrepl!` - Clean shutdown with port release
+- `list-namespace-servers` - Query running servers
+- Custom middleware that creates namespaces with `clojure.core` referred
+
+**Integrant Component:**
+- `:seon.orchestrator/namespace-nrepls` in `system.clj`
+- Survives `(reset)` via `suspend-key!`/`resume-key`
+- Creates db connections for each namespace if node provided
+
+**Key Fix (2026-01-04):**
+The ctx injection tests were flaky because the middleware descriptor used `"session"` (a string operation name) instead of `#'nrepl.middleware.session/session` (a var reference). The nREPL middleware linearization only recognizes operation names that appear in a middleware's `:handles` map. Since no middleware "handles" an operation called "session", the dependency wasn't recognized and our middleware ran BEFORE the session middleware, seeing session IDs as strings instead of atoms.
+
+**Tests:** 17 tests, 54 assertions in `test/seon/orchestrator/nrepl_test.clj`
+
+### Phase 3: Persisted Context (ctx atom)
+> **This is the key innovation.** Agent just uses an atom; we handle persistence.
+- [ ] Research: atom watchers, validation timing, performance
+- [ ] Implement `make-persisted-ctx` with XTDB backing
+- [ ] Implement `ctx/at` for time-travel queries
+- [ ] Implement `ctx/history` for debugging
+- [ ] Define reserved `:seon.agent/*` keys
+- [ ] Test: swap! -> persisted -> queryable history
+
+### Phase 4: Agent Context Injection
+- [x] Inject `*ctx*` dynamic var via nREPL middleware (done in Phase 2)
+- [x] Populate reserved keys (namespace, db, render-fn, worktree) (done in Phase 2)
+- [ ] Test agent can swap! and see persistence (requires Phase 3)
+- [ ] Test time-travel works (requires Phase 3)
+
+### Phase 5: Web Routing
 - [ ] Route by `X-Namespace` header
 - [ ] Scope SSE sessions per namespace
 - [ ] Agent render-fn delivers to correct session
 
-### Phase 5: Git Worktree Integration
+### Phase 6: Git Worktree Integration
 - [ ] Create worktree when namespace agent starts
 - [ ] Branch naming: `agent/{namespace}/{date}`
 - [ ] Worktree cleanup/archival
@@ -255,7 +392,7 @@ The primary `xtdb` database tracks namespaces and agents:
 - [ ] Implement `activate-agent!` and `deactivate-agent!` functions
 - [ ] Implement `reload-agent-namespaces!` for targeted reload
 
-### Phase 6: Agent Lifecycle
+### Phase 7: Agent Lifecycle
 - [ ] `start-namespace-agent!` - preps everything
 - [ ] `stop-namespace-agent!` - cleanup
 - [ ] Lock namespace while agent active
@@ -264,11 +401,16 @@ The primary `xtdb` database tracks namespaces and agents:
 
 ## Open Questions
 
-1. ~~**ctx injection mechanism**~~ - **RESOLVED**: Dynamic var `*ctx*` via custom middleware
-2. ~~**nREPL multi-server**~~ - **RESOLVED**: Fully supported, see research doc
-3. **Datastar SSE scoping** - How to isolate SSE per namespace?
-4. **Agent POST handling** - How does agent handle form submissions?
-5. ~~**Worktree sync**~~ - **RESOLVED**: clj-reload can load from worktree dirs, one agent at a time
+### Resolved
+1. ~~**ctx injection mechanism**~~ - Dynamic var `*ctx*` via custom middleware
+2. ~~**nREPL multi-server**~~ - Fully supported, see research doc
+3. ~~**Worktree sync**~~ - clj-reload can load from worktree dirs, one agent at a time
+
+### Open
+4. **Persisted ctx implementation** - See design questions in "Persisted Context" section
+5. **Datastar SSE scoping** - How to isolate SSE per namespace?
+6. **Agent POST handling** - How does agent handle form submissions?
+7. **Schema for agent state** - Open schema? Per-namespace? Evolvable?
 
 ---
 

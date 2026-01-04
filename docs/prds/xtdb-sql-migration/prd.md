@@ -1,8 +1,64 @@
 # XTDB SQL Migration & Multi-Database Architecture
 
-**Status**: Phase 2 Complete, Ready for Phase 3
+**Status**: COMPLETE (All Phases Done)
 **Last Updated**: 2026-01-04
-**Priority**: High (blocks agent isolation work)
+**Priority**: High (blocks agent isolation work) - UNBLOCKED
+
+---
+
+## Quick Reference (for agents)
+
+### Current System State
+
+Single XTDB node with 3 attached databases:
+- `xtdb` - Primary orchestrator database
+- `seon_primer` - Primer sessions (was separate node)
+- `seon_dev` - Dev hook events (was separate node)
+
+Verify with: `clj-nrepl-eval -p 7888 "(status)"`
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `src/seon/db/multi.clj` | Multi-database API (attach, detach, connections) |
+| `src/seon/db/node.clj` | SQL query wrapper (`node/q`) |
+| `src/seon/system.clj` | Integrant components |
+| `resources/system.edn` | System configuration |
+| `test/seon/db/multi_test.clj` | Multi-db tests (16 tests) |
+
+### Multi-Database API
+
+```clojure
+(require '[seon.db.multi :as multi])
+
+;; Naming conversions
+(multi/namespace->db-name 'seon.trading)  ; => "seon_trading"
+(multi/db-name->namespace "seon_trading") ; => seon.trading
+
+;; Attach a database (idempotent)
+(multi/ensure-namespace-db! node 'seon.trading)
+
+;; Get connection to namespace database
+(with-open [conn (multi/create-namespace-connection node 'seon.trading)]
+  (xt/q conn "SELECT * FROM signals"))
+
+;; Convenience wrappers
+(multi/q node 'seon.trading "SELECT * FROM signals")
+(multi/execute-tx! node 'seon.trading [[:put-docs :signals {...}]])
+
+;; List attached databases
+(multi/list-attached-databases node)  ; => #{"xtdb" "seon_primer" "seon_dev"}
+```
+
+### Critical Gotchas
+
+1. **ATTACH/DETACH use `jdbc/execute!`** - NOT `xt/execute-tx` (they're DDL, not transactions)
+2. **`:put-docs` doesn't work with connections** - Use SQL `INSERT INTO table RECORDS ?` instead
+3. **Databases persist across restarts** - Handle "already exists" gracefully
+4. **Cross-db queries**: Use `db_name.table` syntax (e.g., `seon_primer.sessions`)
+
+---
 
 ## Context: Agent Isolation Architecture
 
@@ -60,20 +116,38 @@ Seon JVM
     └── ... (per namespace)
 ```
 
-From the agent isolation PRD, agents receive context like:
+From the agent isolation PRD, agents receive a `*ctx*` atom with system-provided keys:
+
 ```clojure
-{:seon.agent/namespace     'seon.trading
- :seon.agent/db            <xtdb-connection-to-seon_trading-db>
- ...}
+{:seon.agent/namespace  'seon.trading
+ :seon.agent/db         <xtdb-connection>  ; For escape hatch to SQL
+ ...agent's own state...}
 ```
+
+**Primary interface**: Agents just `swap!` and `deref` - persistence is automatic.
+**Escape hatch**: When agents need SQL performance, they use `:seon.agent/db` directly.
 
 ### Key Design Decisions (Resolved in Phase 1)
 
 1. **Database creation**: Use `ATTACH DATABASE` with YAML config for log/storage paths
 2. **Connection management**: Use `(.createConnectionBuilder node) (.database "name") (.build)`
-3. **Cross-database queries**: Use `db.table` or `db.schema.table` syntax
-4. **Naming convention**: Convert dots to underscores (e.g., `seon.trading` -> `seon_trading`)
-5. **Storage paths**: `data/namespaces/{ns}/log` and `data/namespaces/{ns}/storage`
+3. **Cross-database queries**: Use `db.table` or `db.schema.table` syntax (orchestrator only)
+4. **Storage paths**: `data/namespaces/{ns}/log` and `data/namespaces/{ns}/storage`
+
+### Database Naming (Internal Detail)
+
+> **Agents never see database names.** This is purely orchestrator infrastructure.
+
+SQL uses dots as hierarchy separators (`db.schema.table`), so database names can't contain dots.
+The orchestrator converts namespace names internally:
+
+| What | Example |
+|------|---------|
+| Namespace (Clojure) | `seon.trading` |
+| Database name (SQL) | `seon_trading` |
+| Storage path | `data/namespaces/seon.trading/` |
+
+Agents interact with a `*ctx*` atom. The system handles persistence to their isolated database transparently. See `docs/prds/agent-isolation/prd.md` for the ctx-first design.
 
 ## Implementation Phases
 
@@ -143,13 +217,58 @@ Test files updated:
 
 All 296 tests pass with 0 failures.
 
-### Phase 3: Multi-Database Implementation
+### Phase 3: Multi-Database Implementation - COMPLETE
 
-- [ ] Implement `seon.db.multi/attach-namespace-db!` function
-- [ ] Implement `seon.db.multi/create-namespace-connection` function
-- [ ] Design Integrant component for multi-db management
-- [ ] Add namespace database registry to orchestrator DB
-- [ ] Test cross-database queries
+**Completed**: 2026-01-04
+
+#### Summary
+Fixed the critical ATTACH DATABASE API bug and completed multi-database support.
+
+#### Changes Made
+
+1. **Fixed `seon.db.multi` namespace**:
+   - Changed `attach-namespace-db!` to use `jdbc/execute!` instead of `xt/execute-tx`
+   - Changed `detach-namespace-db!` to use `jdbc/execute!`
+   - Fixed `list-attached-databases` to use `xtdb.util/component` for db-catalog access
+   - Added graceful handling of "Database already exists" error during restarts
+   - Added `PSQLException` import for error handling
+
+2. **Fixed `seon.primer.ctx` namespace**:
+   - Changed `checkpoint!` to use SQL `INSERT INTO ... RECORDS ?` syntax
+   - The `:put-docs` transaction op doesn't work with XTDB 2.1.0 connections
+   - SQL INSERT with map parameter provides the same upsert semantics
+
+3. **Fixed `seon.system` namespace**:
+   - Removed alias conflict in `require` statement
+
+4. **Created comprehensive tests**:
+   - `test/seon/db/multi_test.clj` with 16 tests covering:
+     - Namespace naming conventions
+     - Database attach/detach lifecycle
+     - Connection management
+     - Query and transaction execution
+     - Database isolation
+     - Cross-database queries
+     - Batch operations
+
+#### Key Technical Findings
+
+1. **ATTACH/DETACH are NOT transactions**: They must use `jdbc/execute!` directly, not `xt/execute-tx`
+
+2. **Connections work with `xt/q` and `xt/execute-tx`**: Both the XTDB API functions work with database connections, not just nodes
+
+3. **`:put-docs` doesn't work with connections in XTDB 2.1.0**: Use SQL `INSERT INTO ... RECORDS ?` with a map parameter instead
+
+4. **Databases persist across restarts**: Attached databases are stored in the primary node's log and restored on startup. Handle the race condition gracefully.
+
+5. **Cross-database queries work**: Use `db_name.table` syntax (e.g., `seon_primer.sessions`)
+
+#### Verification
+
+- `(reset)` succeeds with no errors
+- `(status)` shows healthy system with 3 databases: `xtdb`, `seon_primer`, `seon_dev`
+- All 312 tests pass (1455 assertions, 0 failures)
+- Dev hook and primer functionality work correctly
 
 ### Phase 4: Documentation Update - COMPLETE
 
@@ -161,12 +280,14 @@ All 296 tests pass with 0 failures.
 ## Success Criteria
 
 1. ~~No XTQL code remains in codebase~~ **DONE** - All code uses SQL
-2. ~~All queries use SQL syntax~~ **DONE** - 296 tests pass
-3. Can create/attach separate database per namespace (Phase 3)
-4. Can query across databases with `db.table` syntax (Phase 3)
+2. ~~All queries use SQL syntax~~ **DONE** - 312 tests pass
+3. ~~Can create/attach separate database per namespace~~ **DONE** - Phase 3 complete
+4. ~~Can query across databases with `db.table` syntax~~ **DONE** - Verified in tests
 5. ~~Documentation reflects current SQL-only reality~~ **DONE**
 6. ~~Submodule is at latest stable XTDB release (v2.1.0)~~ **DONE**
 7. ~~deps.edn uses stable v2.1.0 (not rc0)~~ **DONE**
+
+**All success criteria met!**
 
 ## Open Questions (Resolved)
 
