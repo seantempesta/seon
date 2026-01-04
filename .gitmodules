@@ -16,3 +16,6 @@
 [submodule "reference-code/nrepl"]
 	path = reference-code/nrepl
 	url = https://github.com/nrepl/nrepl.git
+[submodule "/Users/sean/src/seon/reference-code/clj-reload"]
+	path = /Users/sean/src/seon/reference-code/clj-reload
+	url = https://github.com/tonsky/clj-reload.git

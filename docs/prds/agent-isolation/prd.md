@@ -247,6 +247,13 @@ The primary `xtdb` database tracks namespaces and agents:
 - [ ] Create worktree when namespace agent starts
 - [ ] Branch naming: `agent/{namespace}/{date}`
 - [ ] Worktree cleanup/archival
+- [x] **RESEARCH COMPLETE**: Worktree code reloading into shared JVM
+  - clj-reload can load from non-classpath directories via `Compiler/load`
+  - One active worktree at a time (global `*config*` state)
+  - Agents must work on non-overlapping namespaces
+  - See `docs/prds/agent-isolation/research/worktree-reloading.md`
+- [ ] Implement `activate-agent!` and `deactivate-agent!` functions
+- [ ] Implement `reload-agent-namespaces!` for targeted reload
 
 ### Phase 6: Agent Lifecycle
 - [ ] `start-namespace-agent!` - preps everything
@@ -261,14 +268,16 @@ The primary `xtdb` database tracks namespaces and agents:
 2. ~~**nREPL multi-server**~~ - **RESOLVED**: Fully supported, see research doc
 3. **Datastar SSE scoping** - How to isolate SSE per namespace?
 4. **Agent POST handling** - How does agent handle form submissions?
-5. **Worktree sync** - When does agent's code get loaded into shared JVM?
+5. ~~**Worktree sync**~~ - **RESOLVED**: clj-reload can load from worktree dirs, one agent at a time
 
 ---
 
 ## Related Research
 
 - `docs/prds/agent-isolation/research/nrepl-multi-server.md` - **nREPL multi-server research (COMPLETE)**
+- `docs/prds/agent-isolation/research/worktree-reloading.md` - **Worktree code reloading research (COMPLETE)**
 - `docs/prds/agent-isolation/research/complete-isolation.md` - Full JVM isolation research
 - `reference-code/nrepl/` - nREPL source code (git submodule)
+- `reference-code/clj-reload/` - clj-reload source code (git submodule)
 - `reference-code/xtdb/docs/src/content/docs/about/dbs-in-xtdb.md` - XTDB multi-database
 - `reference-code/xtdb/src/test/clojure/xtdb/sql/multi_db_test.clj` - Multi-DB tests
