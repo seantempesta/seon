@@ -1,0 +1,103 @@
+;; Splint Configuration
+;; See: https://github.com/NoahTheDuke/splint/blob/main/docs/configuration.md
+
+{;; Output settings
+ output "full"
+ parallel true
+ summary true
+
+ ;; Global exclusions
+ global {:excludes ["target/" "reference-code/" ".cpcache/"]}
+
+ ;; METRICS - Complexity checks (key feature for this project)
+ ;; These are the main complexity metrics we want to enforce
+ metrics/fn-length {:enabled true
+                    ;; Default is 10 lines, but we're more lenient initially
+                    ;; Set to 30 for warning, will add blocking in hook integration
+                    :chosen-style :body  ; count body lines, not total
+                    :length 30}
+
+ metrics/parameter-count {:enabled true
+                          :chosen-style :positional  ; only positional args, not &rest
+                          :count 5}  ; max 5 positional params
+
+ ;; STYLE - Idiomatic Clojure patterns
+ ;; These are auto-fixable and good to enforce
+ style/eq-zero {:enabled true}
+ style/plus-one {:enabled true}
+ style/minus-one {:enabled true}
+ style/not-eq {:enabled true}
+ style/not-nil? {:enabled true}
+ style/eq-nil {:enabled true}
+ style/when-not-call {:enabled true}
+ style/when-not-empty? {:enabled true}
+ style/when-not-do {:enabled true}
+ style/when-do {:enabled true}
+ style/cond-else {:enabled true}
+ style/useless-do {:enabled true}
+ style/nested-addition {:enabled true}
+ style/nested-multiply {:enabled true}
+ style/single-key-in {:enabled true}
+ style/apply-str {:enabled true}
+ style/first-first {:enabled true}
+ style/first-next {:enabled true}
+ style/next-first {:enabled true}
+ style/next-next {:enabled true}
+ style/let-do {:enabled true}
+ style/def-fn {:enabled true}
+ style/prefer-clj-string {:enabled true}
+ style/prefer-clj-math {:enabled true}
+
+ ;; LINT - Potential bugs and code smells
+ ;; Most important for catching real issues
+ lint/assoc-fn {:enabled true}
+ lint/body-unquote-splicing {:enabled true}
+ lint/divide-by-one {:enabled true}
+ lint/dorun-map {:enabled true}
+ lint/dot-class-method {:enabled true}
+ lint/dot-obj-method {:enabled true}
+ lint/duplicate-field-name {:enabled true}
+ lint/fn-wrapper {:enabled true}
+ lint/if-else-nil {:enabled true}
+ lint/if-let-else-nil {:enabled true}
+ lint/if-nil-else {:enabled true}
+ lint/if-not-both {:enabled true}
+ lint/if-not-do {:enabled true}
+ lint/if-not-not {:enabled true}
+ lint/if-same-truthy {:enabled true}
+ lint/into-literal {:enabled true}
+ lint/let-if {:enabled true}
+ lint/loop-empty-when {:enabled true}
+ lint/missing-body-in-when {:enabled true}
+ lint/multiply-by-one {:enabled true}
+ lint/multiply-by-zero {:enabled true}
+ lint/prefer-require-over-use {:enabled true}
+ lint/redundant-call {:enabled true}
+ lint/redundant-str-call {:enabled true}
+ lint/take-repeatedly {:enabled true}
+ lint/thread-first-one {:enabled true}
+ lint/thread-last-one {:enabled true}
+ lint/try-finally {:enabled true}
+ lint/try-splicing {:enabled true}
+ lint/update-in-assoc {:enabled true}
+ lint/warn-on-reflection {:enabled true}
+
+ ;; lint/prefer-method-values - the uniform Class/method syntax
+ ;; This is a Clojure 1.12+ feature, disable if causing too much noise
+ lint/prefer-method-values {:enabled false}  ; too noisy for now
+
+ ;; NAMING - Consistent naming conventions
+ naming/conversion-functions {:enabled true}
+ naming/predicate-functions {:enabled true}
+ naming/single-segment-namespace {:enabled true}
+ naming/record-name {:enabled true}
+ naming/lisp-case {:enabled true}
+
+ ;; PERFORMANCE - Performance-related suggestions
+ performance/assoc-many {:enabled true}
+ performance/avoid-satisfies {:enabled true}
+ performance/dot-equals {:enabled true}
+ performance/get-in-literals {:enabled true}
+ performance/get-keyword {:enabled true}
+ performance/into-transducer {:enabled true}
+ performance/single-literal-merge {:enabled true}}

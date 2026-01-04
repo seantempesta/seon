@@ -84,6 +84,31 @@
                   [:map
                    [::num-tests {:optional true} ::num-tests]])
 
+;;; Request/Response Schemas for Public API
+
+(schema/register! ::run-unit-tests-request
+                  [:map
+                   [::test-ns ::namespace-symbol]])
+
+(schema/register! ::run-unit-tests-for-source-request
+                  [:map
+                   [::source-ns ::namespace-symbol]])
+
+(schema/register! ::run-gen-tests-request
+                  [:map
+                   [::namespace ::namespace-symbol]
+                   [::num-tests {:optional true} ::num-tests]])
+
+(schema/register! ::format-unit-result-request
+                  [:map
+                   [::result ::unit-test-result]
+                   [::test-ns {:optional true} ::namespace-symbol]])
+
+(schema/register! ::format-gen-result-request
+                  [:map
+                   [::result ::gen-test-result]
+                   [::namespace {:optional true} ::namespace-symbol]])
+
 ;;; ---------------------------------------------------------------------------
 ;;; Unit Test Running
 ;;; ---------------------------------------------------------------------------
@@ -132,7 +157,7 @@
    Designed for use from nREPL in the development hook.
 
    Request keys:
-     test-ns - Test namespace symbol (e.g., seon.core-test)
+     ::test-ns - Test namespace symbol (e.g., seon.core-test)
 
    Response keys:
      ::success     - true if all tests passed
@@ -144,10 +169,10 @@
      ::error       - Error message if test loading failed
 
    Example:
-     (run-unit-tests 'seon.core-test)
+     (run-unit-tests {::test-ns 'seon.core-test})
      ;; => {::success true ::test-count 5 ::pass-count 5 ::fail-count 0 ::error-count 0}"
-  {:malli/schema [:=> [:cat ::namespace-symbol] ::unit-test-result]}
-  [test-ns]
+  {:malli/schema [:=> [:cat ::run-unit-tests-request] ::unit-test-result]}
+  [{::keys [test-ns]}]
   (if-let [load-error (require-test-ns test-ns)]
     ;; Failed to load namespace
     {::success false
@@ -177,22 +202,22 @@
    Appends '-test' to the source namespace if not already present.
 
    Request keys:
-     source-ns - Source namespace symbol (e.g., seon.core)
+     ::source-ns - Source namespace symbol (e.g., seon.core)
 
    Response keys:
      Same as run-unit-tests, plus:
      ::test-ns - The derived test namespace
 
    Example:
-     (run-unit-tests-for-source 'seon.core)
+     (run-unit-tests-for-source {::source-ns 'seon.core})
      ;; Runs seon.core-test"
-  {:malli/schema [:=> [:cat ::namespace-symbol] ::unit-test-result]}
-  [source-ns]
+  {:malli/schema [:=> [:cat ::run-unit-tests-for-source-request] ::unit-test-result]}
+  [{::keys [source-ns]}]
   (let [ns-str (str source-ns)
         test-ns (if (str/ends-with? ns-str "-test")
                   source-ns
                   (symbol (str ns-str "-test")))]
-    (assoc (run-unit-tests test-ns)
+    (assoc (run-unit-tests {::test-ns test-ns})
            ::test-ns test-ns)))
 
 ;;; ---------------------------------------------------------------------------
@@ -239,9 +264,8 @@
    and verify the functions produce valid outputs.
 
    Request keys:
-     ns-sym - Namespace symbol (e.g., seon.core)
-     opts   - Optional map with:
-              ::num-tests - Tests per function (default: 10)
+     ::namespace - Namespace symbol (e.g., seon.core)
+     ::num-tests - Optional. Tests per function (default: 10)
 
    Response keys:
      ::success  - true if all tests passed
@@ -251,34 +275,32 @@
                   ::error     - Error details (if check failed)
 
    Example:
-     (run-gen-tests 'seon.core)
+     (run-gen-tests {::namespace 'seon.core})
      ;; => {::success true ::failures []}
 
-     (run-gen-tests 'seon.core {::num-tests 100})
+     (run-gen-tests {::namespace 'seon.core ::num-tests 100})
      ;; => {::success false ::failures [{::fn-symbol process ...}]}"
-  {:malli/schema [:=> [:cat ::namespace-symbol [:? ::gen-test-options]] ::gen-test-result]}
-  ([ns-sym]
-   (run-gen-tests ns-sym {}))
-  ([ns-sym opts]
-   (let [num-tests (or (::num-tests opts) 10)]
-     (try
-       ;; Reload namespace first
-       (require ns-sym :reload)
-       ;; Collect function schemas from metadata - required for m/function-schemas to work
-       (mi/collect! {:ns ns-sym})
-       (let [schemas (get-function-schemas ns-sym)
-             failures (if (nil? schemas)
-                        []
-                        (->> (for [[fn-sym _] schemas]
-                               (check-function ns-sym fn-sym num-tests))
-                             (remove nil?)
-                             (into [])))]
-         {::success (empty? failures)
-          ::failures failures})
-       (catch Exception e
-         {::success false
-          ::failures []
-          ::error (str "Failed to check namespace: " (.getMessage e))})))))
+  {:malli/schema [:=> [:cat ::run-gen-tests-request] ::gen-test-result]}
+  [{::keys [namespace num-tests]}]
+  (let [num-tests (or num-tests 10)]
+    (try
+      ;; Reload namespace first
+      (require namespace :reload)
+      ;; Collect function schemas from metadata - required for m/function-schemas to work
+      (mi/collect! {:ns namespace})
+      (let [schemas (get-function-schemas namespace)
+            failures (if (nil? schemas)
+                       []
+                       (->> (for [[fn-sym _] schemas]
+                              (check-function namespace fn-sym num-tests))
+                            (remove nil?)
+                            (into [])))]
+        {::success (empty? failures)
+         ::failures failures})
+      (catch Exception e
+        {::success false
+         ::failures []
+         ::error (str "Failed to check namespace: " (.getMessage e))}))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Result Formatting
@@ -289,60 +311,73 @@
 
    Returns a single-line summary string suitable for hook feedback.
 
+   Request keys:
+     ::result  - Unit test result map
+     ::test-ns - Optional test namespace symbol for context
+
+   Returns:
+     Formatted string
+
    Example:
-     (format-unit-result {::success true ::test-count 5 ::pass-count 5 ...})
+     (format-unit-result {::result {::success true ::test-count 5 ::pass-count 5}})
+     ;; => \"5 tests passed\"
+
+     (format-unit-result {::result {::success true ::test-count 5} ::test-ns 'seon.core-test})
      ;; => \"5 tests passed (seon.core-test)\""
-  {:malli/schema [:=> [:cat ::unit-test-result [:? ::namespace-symbol]] :string]}
-  ([result]
-   (format-unit-result result nil))
-  ([result test-ns]
-   (let [ns-suffix (when test-ns (str " (" test-ns ")"))]
-     (cond
-       (::timeout result)
-       (str "Unit tests timed out" ns-suffix)
+  {:malli/schema [:=> [:cat ::format-unit-result-request] :string]}
+  [{::keys [result test-ns]}]
+  (let [ns-suffix (when test-ns (str " (" test-ns ")"))]
+    (cond
+      (::timeout result)
+      (str "Unit tests timed out" ns-suffix)
 
-       (::error result)
-       (str "Unit test error: " (::error result) ns-suffix)
+      (::error result)
+      (str "Unit test error: " (::error result) ns-suffix)
 
-       (::success result)
-       (str (::test-count result) " tests passed" ns-suffix)
+      (::success result)
+      (str (::test-count result) " tests passed" ns-suffix)
 
-       :else
-       (str (::fail-count result 0) " failures, "
-            (::error-count result 0) " errors out of "
-            (::test-count result 0) " tests" ns-suffix)))))
+      :else
+      (str (::fail-count result 0) " failures, "
+           (::error-count result 0) " errors out of "
+           (::test-count result 0) " tests" ns-suffix))))
 
 (defn format-gen-result
   "Format generative test result for human display.
 
    Returns a summary string, optionally with failure details.
 
+   Request keys:
+     ::result    - Generative test result map
+     ::namespace - Optional namespace symbol for context
+
+   Returns:
+     Formatted string
+
    Example:
-     (format-gen-result {::success true ::failures []})
+     (format-gen-result {::result {::success true ::failures []}})
      ;; => \"Generative tests passed\"
 
-     (format-gen-result {::success false ::failures [{::fn-symbol 'foo}]})
-     ;; => \"Generative tests failed: foo\""
-  {:malli/schema [:=> [:cat ::gen-test-result [:? ::namespace-symbol]] :string]}
-  ([result]
-   (format-gen-result result nil))
-  ([result ns-sym]
-   (let [ns-suffix (when ns-sym (str " (" ns-sym ")"))]
-     (cond
-       (::timeout result)
-       (str "Generative tests timed out" ns-suffix)
+     (format-gen-result {::result {::success false ::failures [{::fn-symbol 'foo}]} ::namespace 'seon.core})
+     ;; => \"Generative tests failed: foo (seon.core)\""
+  {:malli/schema [:=> [:cat ::format-gen-result-request] :string]}
+  [{::keys [result namespace]}]
+  (let [ns-suffix (when namespace (str " (" namespace ")"))]
+    (cond
+      (::timeout result)
+      (str "Generative tests timed out" ns-suffix)
 
-       (::error result)
-       (str "Generative test error: " (::error result) ns-suffix)
+      (::error result)
+      (str "Generative test error: " (::error result) ns-suffix)
 
-       (::success result)
-       (str "Generative tests passed" ns-suffix)
+      (::success result)
+      (str "Generative tests passed" ns-suffix)
 
-       :else
-       (let [failed-fns (str/join ", " (map #(str (::fn-symbol %)) (::failures result)))]
-         (str "Generative tests failed: "
-              (if (str/blank? failed-fns) "schema errors" failed-fns)
-              ns-suffix))))))
+      :else
+      (let [failed-fns (str/join ", " (map #(str (::fn-symbol %)) (::failures result)))]
+        (str "Generative tests failed: "
+             (if (str/blank? failed-fns) "schema errors" failed-fns)
+             ns-suffix)))))
 
 
 ;;; ---------------------------------------------------------------------------
@@ -354,17 +389,17 @@
   ;; Run these after (require '[seon.dev.verify :as v])
 
   ;; Run unit tests
-  (run-unit-tests 'seon.dev.context-test)
+  (run-unit-tests {::test-ns 'seon.dev.context-test})
 
   ;; Run for source namespace (derives test ns)
-  (run-unit-tests-for-source 'seon.dev.context)
+  (run-unit-tests-for-source {::source-ns 'seon.dev.context})
 
   ;; Run generative tests
-  (run-gen-tests 'seon.dev.context)
-  (run-gen-tests 'seon.dev.context {::num-tests 20})
+  (run-gen-tests {::namespace 'seon.dev.context})
+  (run-gen-tests {::namespace 'seon.dev.context ::num-tests 20})
 
   ;; Format results
-  (format-unit-result {::success true ::test-count 5 ::pass-count 5})
-  (format-gen-result {::success false ::failures [{::fn-symbol 'foo}]})
+  (format-unit-result {::result {::success true ::test-count 5 ::pass-count 5}})
+  (format-gen-result {::result {::success false ::failures [{::fn-symbol 'foo}]}})
 
   nil)

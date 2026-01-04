@@ -1,0 +1,18 @@
+;; clojure-lsp configuration
+;; See: https://clojure-lsp.io/settings/
+
+{;; Ignore large reference code directories to prevent CPU spikes
+ :source-paths-ignore-regex ["reference-code/.*" "target/.*" ".cpcache/.*"]
+
+ ;; Project structure
+ :source-paths #{"src" "test" "env/dev/clj"}
+
+ ;; Don't index dependencies we don't need
+ :dependency-scheme "jar"
+
+ ;; Reduce analysis overhead
+ :copy-kondo-configs? false
+ :lint-project-files-after-startup? false
+
+ ;; Cache location
+ :cache-path ".lsp/.cache"}

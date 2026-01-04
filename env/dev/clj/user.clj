@@ -10,6 +10,7 @@
   This is the key insight: runner doesn't bypass integrant.repl,
   it USES integrant.repl. Unified state management achieved."
   (:require
+   [clj-reload.core :as reload]
    [clojure.java.io :as io]
    [clojure.java.shell]
    [clojure.pprint]
@@ -48,9 +49,24 @@
 ;; Use dev profile by default. Change to test-prep! for running tests.
 (dev-prep!)
 
-(repl/set-refresh-dirs "src")
+(repl/set-refresh-dirs "src" "test")
 
-(def refresh repl/refresh)
+;; Initialize clj-reload for fast code reloading
+;; Unlike tools.namespace, clj-reload:
+;; - Preserves defonce values
+;; - Only reloads what actually changed (no "reload world" on first call)
+;; - Faster and more incremental
+(reload/init {:dirs ["src" "env/dev/clj" "test"]
+              :no-reload '#{user}})
+
+(defn reload
+  "Fast reload of changed code via clj-reload.
+  Preserves defonce values and only reloads what changed.
+  Use this for quick code sync between editor and REPL.
+
+  For full system restart (when changing config, components), use (reset)."
+  []
+  (reload/reload))
 
 ;; Convenience accessors - now always use state/system
 (defn xtdb-node

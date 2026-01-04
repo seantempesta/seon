@@ -36,4 +36,14 @@
           ;; Minimum time between reviews (prevents review spam)
           :cooldown-seconds 10
           ;; Max edit history to consider (bounds accumulation)
-          :lookback-minutes 5}}
+          :lookback-minutes 5}
+
+ ;; Convention compliance checking
+ ;; - Runs after reload, before tests
+ ;; - Currently non-blocking (feedback only)
+ :compliance {:enabled true
+              :block false}
+
+ ;; Feedback formatting
+ :feedback {:dense true
+            :max-length 1000}}

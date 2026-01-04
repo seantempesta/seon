@@ -1,0 +1,141 @@
+#!/usr/bin/env bash
+# Unified linting script for the Seon project
+#
+# Usage:
+#   ./bin/lint              # Run both linters on src/
+#   ./bin/lint src/seon/dev # Run on specific path
+#   ./bin/lint --fix src    # Auto-fix safe issues with Splint
+#   ./bin/lint --kondo      # Run only clj-kondo
+#   ./bin/lint --splint     # Run only Splint
+#   ./bin/lint --metrics    # Run only Splint metrics rules
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+cd "$PROJECT_ROOT"
+
+# Default paths
+DEFAULT_PATHS="src test"
+
+# Parse arguments
+FIX_MODE=false
+KONDO_ONLY=false
+SPLINT_ONLY=false
+METRICS_ONLY=false
+PATHS=()
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --fix|--autocorrect)
+            FIX_MODE=true
+            shift
+            ;;
+        --kondo)
+            KONDO_ONLY=true
+            shift
+            ;;
+        --splint)
+            SPLINT_ONLY=true
+            shift
+            ;;
+        --metrics)
+            METRICS_ONLY=true
+            shift
+            ;;
+        --help|-h)
+            echo "Usage: bin/lint [options] [paths...]"
+            echo ""
+            echo "Options:"
+            echo "  --fix, --autocorrect  Auto-fix safe issues with Splint"
+            echo "  --kondo               Run only clj-kondo"
+            echo "  --splint              Run only Splint"
+            echo "  --metrics             Run only Splint metrics rules"
+            echo "  --help, -h            Show this help"
+            echo ""
+            echo "Examples:"
+            echo "  bin/lint                    # Lint src/ and test/"
+            echo "  bin/lint src/seon/dev       # Lint specific directory"
+            echo "  bin/lint --fix src          # Auto-fix src/"
+            echo "  bin/lint --metrics src      # Check only metrics"
+            exit 0
+            ;;
+        *)
+            PATHS+=("$1")
+            shift
+            ;;
+    esac
+done
+
+# Use default paths if none specified
+if [[ ${#PATHS[@]} -eq 0 ]]; then
+    PATHS=($DEFAULT_PATHS)
+fi
+
+# Color codes
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+echo -e "${BLUE}=== Seon Linting ===${NC}"
+echo ""
+
+KONDO_EXIT=0
+SPLINT_EXIT=0
+
+# Run clj-kondo
+if [[ "$SPLINT_ONLY" != "true" ]] && [[ "$METRICS_ONLY" != "true" ]]; then
+    echo -e "${YELLOW}[clj-kondo]${NC} Checking for bugs and unused code..."
+    if clj-kondo --lint "${PATHS[@]}" 2>&1; then
+        echo -e "${GREEN}clj-kondo: OK${NC}"
+    else
+        KONDO_EXIT=$?
+        echo -e "${RED}clj-kondo: Issues found${NC}"
+    fi
+    echo ""
+fi
+
+# Run Splint
+if [[ "$KONDO_ONLY" != "true" ]]; then
+    echo -e "${YELLOW}[splint]${NC} Checking style and metrics..."
+
+    SPLINT_ARGS=()
+
+    if [[ "$FIX_MODE" == "true" ]]; then
+        SPLINT_ARGS+=("--autocorrect")
+        echo -e "${BLUE}Auto-fix mode enabled${NC}"
+    fi
+
+    if [[ "$METRICS_ONLY" == "true" ]]; then
+        SPLINT_ARGS+=("--only" "metrics")
+    fi
+
+    SPLINT_ARGS+=("${PATHS[@]}")
+
+    if bb -Sdeps '{:deps {io.github.noahtheduke/splint {:mvn/version "1.22.0"}}}' -m noahtheduke.splint "${SPLINT_ARGS[@]}" 2>&1; then
+        echo -e "${GREEN}splint: OK${NC}"
+    else
+        SPLINT_EXIT=$?
+        echo -e "${YELLOW}splint: Style warnings found${NC}"
+    fi
+fi
+
+echo ""
+echo -e "${BLUE}=== Summary ===${NC}"
+if [[ $KONDO_EXIT -eq 0 ]] && [[ $SPLINT_EXIT -eq 0 ]]; then
+    echo -e "${GREEN}All checks passed!${NC}"
+    exit 0
+else
+    if [[ $KONDO_EXIT -ne 0 ]]; then
+        echo -e "${RED}clj-kondo found issues (errors/warnings)${NC}"
+    fi
+    if [[ $SPLINT_EXIT -ne 0 ]]; then
+        echo -e "${YELLOW}Splint found style issues${NC}"
+    fi
+    # Exit with kondo code (errors) or splint code (warnings)
+    [[ $KONDO_EXIT -ne 0 ]] && exit $KONDO_EXIT
+    exit $SPLINT_EXIT
+fi

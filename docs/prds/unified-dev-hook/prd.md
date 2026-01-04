@@ -998,6 +998,69 @@ Enhanced schemas added to `context.clj`:
 
 ---
 
+## Phase 9: Hook Output Optimization (Ready for Implementation)
+
+**Status:** Ready for implementation
+**Goal:** Make every token of feedback count - brief success, actionable failures.
+**PRD:** `docs/prds/unified-dev-hook/phase-9-hook-output-optimization.md`
+
+### Decisions Made
+
+| Question | Decision |
+|----------|----------|
+| Remove success feedback? | **No** - keep brief confirmation, make it dense |
+| Compliance block edits? | **No** (but add config option for later) |
+| Store compliance in XTDB? | **No** - just real-time feedback |
+| Function-level test targeting? | **Defer** - tests run in <1s |
+| Multi-arity public functions? | **No** - map accretion handles extensibility |
+
+### Key Changes
+
+1. **Dense success feedback**
+   - Current: `"5 tests passed (seon.dev.hook-test)"` + `"Generative tests passed"`
+   - Better: `"✓ 5 tests, 3 gen-tests, compliant (0.2s)"`
+   - One line with all signal
+
+2. **Auto-run compliance checks**
+   - Check edited namespaces for convention violations
+   - Uses existing `seon.dev.compliance` namespace from Phase 8f
+   - Violations are warnings, not blocks (config option for later)
+
+3. **Deep schema verification**
+   - Verify schema refs in `:malli/schema` actually exist in registry
+   - Check naming convention: `fn-name-request` / `fn-name-response`
+
+4. **Actionable fix generation**
+   - Generate copy-pasteable fix code from function signature
+   - Show just the missing pieces, not entire function
+   - Include docstring template with example usage and gotchas
+
+### Implementation Phases
+
+- **Phase 9a:** Add compliance stage to hook pipeline
+- **Phase 9b:** Deep schema verification (refs exist, naming convention)
+- **Phase 9c:** Actionable fix generation (schemas, metadata, signature)
+- **Phase 9d:** Dense success feedback format
+
+### Example Output
+
+**All passing (dense):**
+```json
+{"continue": true, "feedback": ["✓ 5 tests, 3 gen-tests, compliant (0.2s)"]}
+```
+
+**Compliance violation (actionable):**
+```json
+{
+  "continue": true,
+  "feedback": [
+    "process-data needs:\n\nSchema registrations:\n  (schema/register! ::process-data-request\n    [:map [::input :any] [::opts {:optional true} :map]])\n  (schema/register! ::process-data-response\n    [:map [::result :any]])\n\nFunction metadata:\n  {:malli/schema [:=> [:cat ::process-data-request] ::process-data-response]}\n  [{::keys [input opts]}]"
+  ]
+}
+```
+
+---
+
 ## Phase 2: Enhanced Context & Iterative AI (Research Required)
 
 These ideas require the modular Phase 1 system to be working first. Mark as research work.

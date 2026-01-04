@@ -12,19 +12,26 @@
   (with-test-node
     (fn []
       (testing "Records edit event with file and namespace"
-        (let [result (ctx/record-edit! *test-node* "/path/to/file.clj" 'seon.foo)]
-          (is (some? result) "Should return transaction result")
-          (is (:tx-id result) "Should have transaction ID")))
+        (let [result (ctx/record-edit! {::ctx/xtdb-node *test-node*
+                                        ::ctx/file-path "/path/to/file.clj"
+                                        ::ctx/namespace 'seon.foo})]
+          (is (true? (::ctx/success result)) "Should return success")
+          (is (::ctx/tx-id result) "Should have transaction ID")))
 
       (testing "Records edit event with nil namespace"
-        (let [result (ctx/record-edit! *test-node* "/path/to/other.clj" nil)]
-          (is (some? result) "Should allow nil namespace")
-          (is (:tx-id result))))
+        (let [result (ctx/record-edit! {::ctx/xtdb-node *test-node*
+                                        ::ctx/file-path "/path/to/other.clj"})]
+          (is (true? (::ctx/success result)) "Should allow nil namespace")
+          (is (::ctx/tx-id result))))
 
       (testing "Multiple edits are recorded separately"
-        (ctx/record-edit! *test-node* "/path/to/a.clj" 'seon.a)
-        (ctx/record-edit! *test-node* "/path/to/b.clj" 'seon.b)
-        (let [edits (ctx/edits-since-last-review *test-node*)]
+        (ctx/record-edit! {::ctx/xtdb-node *test-node*
+                          ::ctx/file-path "/path/to/a.clj"
+                          ::ctx/namespace 'seon.a})
+        (ctx/record-edit! {::ctx/xtdb-node *test-node*
+                          ::ctx/file-path "/path/to/b.clj"
+                          ::ctx/namespace 'seon.b})
+        (let [edits (::ctx/edits (ctx/edits-since-last-review {::ctx/xtdb-node *test-node*}))]
           ;; 4 total: 2 from earlier tests + 2 from this test
           (is (>= (count edits) 4) "Should have recorded all edits"))))))
 
@@ -37,16 +44,19 @@
     (fn []
       (testing "Records review event with files"
         ;; First record some edits
-        (ctx/record-edit! *test-node* "/path/to/file.clj" 'seon.foo)
+        (ctx/record-edit! {::ctx/xtdb-node *test-node*
+                          ::ctx/file-path "/path/to/file.clj"
+                          ::ctx/namespace 'seon.foo})
 
         ;; Then record review
-        (let [result (ctx/record-review! *test-node* #{"/path/to/file.clj"})]
-          (is (some? result) "Should return transaction result")
-          (is (:tx-id result) "Should have transaction ID")))
+        (let [result (ctx/record-review! {::ctx/xtdb-node *test-node*
+                                          ::ctx/files #{"/path/to/file.clj"}})]
+          (is (true? (::ctx/success result)) "Should return success")
+          (is (::ctx/tx-id result) "Should have transaction ID")))
 
       (testing "Review records edit count"
         ;; After review, edits since last review should be empty
-        (let [edits (ctx/edits-since-last-review *test-node*)]
+        (let [edits (::ctx/edits (ctx/edits-since-last-review {::ctx/xtdb-node *test-node*}))]
           (is (empty? edits) "Should have no edits since review"))))))
 
 ;;; ---------------------------------------------------------------------------
@@ -57,22 +67,28 @@
   (with-test-node
     (fn []
       (testing "Returns nil when no edits"
-        (is (nil? (ctx/get-last-edit-time *test-node*))))
+        (is (nil? (::ctx/timestamp (ctx/get-last-edit-time {::ctx/xtdb-node *test-node*})))))
 
       (testing "Returns timestamp after edit"
-        (ctx/record-edit! *test-node* "/path/to/file.clj" 'seon.foo)
-        (let [t (ctx/get-last-edit-time *test-node*)]
+        (ctx/record-edit! {::ctx/xtdb-node *test-node*
+                          ::ctx/file-path "/path/to/file.clj"
+                          ::ctx/namespace 'seon.foo})
+        (let [t (::ctx/timestamp (ctx/get-last-edit-time {::ctx/xtdb-node *test-node*}))]
           (is (some? t) "Should have timestamp")
           ;; XTDB returns ZonedDateTime, not Instant
           (is (instance? java.time.temporal.Temporal t) "Should be a temporal type")))
 
       (testing "Returns most recent edit time"
         (Thread/sleep 10) ; Ensure different timestamps
-        (ctx/record-edit! *test-node* "/path/to/other.clj" 'seon.bar)
-        (let [t1 (ctx/get-last-edit-time *test-node*)]
+        (ctx/record-edit! {::ctx/xtdb-node *test-node*
+                          ::ctx/file-path "/path/to/other.clj"
+                          ::ctx/namespace 'seon.bar})
+        (let [t1 (::ctx/timestamp (ctx/get-last-edit-time {::ctx/xtdb-node *test-node*}))]
           (Thread/sleep 10)
-          (ctx/record-edit! *test-node* "/path/to/third.clj" 'seon.baz)
-          (let [t2 (ctx/get-last-edit-time *test-node*)]
+          (ctx/record-edit! {::ctx/xtdb-node *test-node*
+                            ::ctx/file-path "/path/to/third.clj"
+                            ::ctx/namespace 'seon.baz})
+          (let [t2 (::ctx/timestamp (ctx/get-last-edit-time {::ctx/xtdb-node *test-node*}))]
             (is (.isAfter t2 t1) "Later edit should have later timestamp")))))))
 
 ;;; ---------------------------------------------------------------------------
@@ -83,12 +99,15 @@
   (with-test-node
     (fn []
       (testing "Returns nil when no reviews"
-        (is (nil? (ctx/get-last-review-time *test-node*))))
+        (is (nil? (::ctx/timestamp (ctx/get-last-review-time {::ctx/xtdb-node *test-node*})))))
 
       (testing "Returns timestamp after review"
-        (ctx/record-edit! *test-node* "/path/to/file.clj" 'seon.foo)
-        (ctx/record-review! *test-node* #{"/path/to/file.clj"})
-        (let [t (ctx/get-last-review-time *test-node*)]
+        (ctx/record-edit! {::ctx/xtdb-node *test-node*
+                          ::ctx/file-path "/path/to/file.clj"
+                          ::ctx/namespace 'seon.foo})
+        (ctx/record-review! {::ctx/xtdb-node *test-node*
+                             ::ctx/files #{"/path/to/file.clj"}})
+        (let [t (::ctx/timestamp (ctx/get-last-review-time {::ctx/xtdb-node *test-node*}))]
           (is (some? t) "Should have timestamp")
           ;; XTDB returns ZonedDateTime, not Instant
           (is (instance? java.time.temporal.Temporal t) "Should be a temporal type"))))))
@@ -101,22 +120,29 @@
   (with-test-node
     (fn []
       (testing "Returns all edits when no review"
-        (ctx/record-edit! *test-node* "/path/to/a.clj" 'seon.a)
-        (ctx/record-edit! *test-node* "/path/to/b.clj" 'seon.b)
-        (let [edits (ctx/edits-since-last-review *test-node*)]
+        (ctx/record-edit! {::ctx/xtdb-node *test-node*
+                          ::ctx/file-path "/path/to/a.clj"
+                          ::ctx/namespace 'seon.a})
+        (ctx/record-edit! {::ctx/xtdb-node *test-node*
+                          ::ctx/file-path "/path/to/b.clj"
+                          ::ctx/namespace 'seon.b})
+        (let [edits (::ctx/edits (ctx/edits-since-last-review {::ctx/xtdb-node *test-node*}))]
           (is (= 2 (count edits)))
           (is (= #{"/path/to/a.clj" "/path/to/b.clj"}
                  (set (map ::ctx/file edits))))))
 
       (testing "Returns only edits after review"
-        (ctx/record-review! *test-node* #{"/path/to/a.clj" "/path/to/b.clj"})
-        (let [edits-after-review (ctx/edits-since-last-review *test-node*)]
+        (ctx/record-review! {::ctx/xtdb-node *test-node*
+                             ::ctx/files #{"/path/to/a.clj" "/path/to/b.clj"}})
+        (let [edits-after-review (::ctx/edits (ctx/edits-since-last-review {::ctx/xtdb-node *test-node*}))]
           (is (empty? edits-after-review) "Should be empty after review"))
 
         ;; Add new edit
         (Thread/sleep 10) ; Ensure timestamp is after review
-        (ctx/record-edit! *test-node* "/path/to/c.clj" 'seon.c)
-        (let [new-edits (ctx/edits-since-last-review *test-node*)]
+        (ctx/record-edit! {::ctx/xtdb-node *test-node*
+                          ::ctx/file-path "/path/to/c.clj"
+                          ::ctx/namespace 'seon.c})
+        (let [new-edits (::ctx/edits (ctx/edits-since-last-review {::ctx/xtdb-node *test-node*}))]
           (is (= 1 (count new-edits)))
           (is (= "/path/to/c.clj" (::ctx/file (first new-edits)))))))))
 
@@ -128,16 +154,22 @@
   (with-test-node
     (fn []
       (testing "Returns empty summary when no edits"
-        (let [summary (ctx/edits-summary *test-node*)]
+        (let [summary (ctx/edits-summary {::ctx/xtdb-node *test-node*})]
           (is (= #{} (::ctx/files summary)))
           (is (= #{} (::ctx/namespaces summary)))
           (is (= 0 (::ctx/edit-count summary)))))
 
       (testing "Returns summary of edits"
-        (ctx/record-edit! *test-node* "/path/to/a.clj" 'seon.a)
-        (ctx/record-edit! *test-node* "/path/to/b.clj" 'seon.b)
-        (ctx/record-edit! *test-node* "/path/to/a.clj" 'seon.a) ; same file again
-        (let [summary (ctx/edits-summary *test-node*)]
+        (ctx/record-edit! {::ctx/xtdb-node *test-node*
+                          ::ctx/file-path "/path/to/a.clj"
+                          ::ctx/namespace 'seon.a})
+        (ctx/record-edit! {::ctx/xtdb-node *test-node*
+                          ::ctx/file-path "/path/to/b.clj"
+                          ::ctx/namespace 'seon.b})
+        (ctx/record-edit! {::ctx/xtdb-node *test-node*
+                          ::ctx/file-path "/path/to/a.clj"
+                          ::ctx/namespace 'seon.a}) ; same file again
+        (let [summary (ctx/edits-summary {::ctx/xtdb-node *test-node*})]
           (is (= #{"/path/to/a.clj" "/path/to/b.clj"} (::ctx/files summary)))
           (is (= #{:seon.a :seon.b} (::ctx/namespaces summary)))
           (is (= 3 (::ctx/edit-count summary)) "Should count all edits, not unique files"))))))
@@ -150,28 +182,34 @@
   (with-test-node
     (fn []
       (testing "Returns false when no edits"
-        (is (false? (ctx/should-review? *test-node*))))
+        (is (false? (::ctx/should-review (ctx/should-review? {::ctx/xtdb-node *test-node*})))))
 
       (testing "Returns true after first edit (never reviewed)"
-        (ctx/record-edit! *test-node* "/path/to/file.clj" 'seon.foo)
-        (is (true? (ctx/should-review? *test-node*))
+        (ctx/record-edit! {::ctx/xtdb-node *test-node*
+                          ::ctx/file-path "/path/to/file.clj"
+                          ::ctx/namespace 'seon.foo})
+        (is (true? (::ctx/should-review (ctx/should-review? {::ctx/xtdb-node *test-node*})))
             "Should review immediately when never reviewed"))
 
       (testing "Returns false immediately after review"
-        (ctx/record-review! *test-node* #{"/path/to/file.clj"})
-        (is (false? (ctx/should-review? *test-node*))
+        (ctx/record-review! {::ctx/xtdb-node *test-node*
+                             ::ctx/files #{"/path/to/file.clj"}})
+        (is (false? (::ctx/should-review (ctx/should-review? {::ctx/xtdb-node *test-node*})))
             "Should not review - no new edits"))
 
       (testing "Returns false when interval not passed"
         (Thread/sleep 10)
-        (ctx/record-edit! *test-node* "/path/to/new.clj" 'seon.new)
+        (ctx/record-edit! {::ctx/xtdb-node *test-node*
+                          ::ctx/file-path "/path/to/new.clj"
+                          ::ctx/namespace 'seon.new})
         ;; Default interval is 60 seconds, which hasn't passed
-        (is (false? (ctx/should-review? *test-node*))
+        (is (false? (::ctx/should-review (ctx/should-review? {::ctx/xtdb-node *test-node*})))
             "Should not review - interval not passed"))
 
       (testing "Returns true with short interval"
         ;; With 0 second interval, should immediately return true
-        (is (true? (ctx/should-review? *test-node* {::ctx/interval-seconds 0}))
+        (is (true? (::ctx/should-review (ctx/should-review? {::ctx/xtdb-node *test-node*
+                                                              ::ctx/interval-seconds 0})))
             "Should review with 0 second interval")))))
 
 (deftest should-review?-timing-test
@@ -179,23 +217,30 @@
     (fn []
       (testing "Rate limiting works correctly"
         ;; Record edit
-        (ctx/record-edit! *test-node* "/path/to/file.clj" 'seon.foo)
+        (ctx/record-edit! {::ctx/xtdb-node *test-node*
+                          ::ctx/file-path "/path/to/file.clj"
+                          ::ctx/namespace 'seon.foo})
 
         ;; Review immediately (interval = 0)
-        (is (true? (ctx/should-review? *test-node* {::ctx/interval-seconds 0})))
-        (ctx/record-review! *test-node* #{"/path/to/file.clj"})
+        (is (true? (::ctx/should-review (ctx/should-review? {::ctx/xtdb-node *test-node*
+                                                              ::ctx/interval-seconds 0}))))
+        (ctx/record-review! {::ctx/xtdb-node *test-node*
+                             ::ctx/files #{"/path/to/file.clj"}})
 
         ;; Record new edit
         (Thread/sleep 10)
-        (ctx/record-edit! *test-node* "/path/to/new.clj" 'seon.new)
+        (ctx/record-edit! {::ctx/xtdb-node *test-node*
+                          ::ctx/file-path "/path/to/new.clj"
+                          ::ctx/namespace 'seon.new})
 
-        ;; With 1 second interval, should be false (hasn't passed)
-        ;; Actually, might be true since we slept 10ms. Use larger interval.
-        (is (false? (ctx/should-review? *test-node* {::ctx/interval-seconds 60}))
+        ;; With 60 second interval, should be false (hasn't passed)
+        (is (false? (::ctx/should-review (ctx/should-review? {::ctx/xtdb-node *test-node*
+                                                               ::ctx/interval-seconds 60})))
             "Should not review - 60s interval not passed")
 
         ;; With 0 second interval, should be true
-        (is (true? (ctx/should-review? *test-node* {::ctx/interval-seconds 0}))
+        (is (true? (::ctx/should-review (ctx/should-review? {::ctx/xtdb-node *test-node*
+                                                              ::ctx/interval-seconds 0})))
             "Should review with 0s interval")))))
 
 ;;; ---------------------------------------------------------------------------
@@ -207,20 +252,25 @@
     (fn []
       (testing "Clears all events"
         ;; Record some events
-        (ctx/record-edit! *test-node* "/path/to/a.clj" 'seon.a)
-        (ctx/record-edit! *test-node* "/path/to/b.clj" 'seon.b)
-        (ctx/record-review! *test-node* #{"/path/to/a.clj"})
+        (ctx/record-edit! {::ctx/xtdb-node *test-node*
+                          ::ctx/file-path "/path/to/a.clj"
+                          ::ctx/namespace 'seon.a})
+        (ctx/record-edit! {::ctx/xtdb-node *test-node*
+                          ::ctx/file-path "/path/to/b.clj"
+                          ::ctx/namespace 'seon.b})
+        (ctx/record-review! {::ctx/xtdb-node *test-node*
+                             ::ctx/files #{"/path/to/a.clj"}})
 
         ;; Verify they exist
-        (is (some? (ctx/get-last-edit-time *test-node*)))
-        (is (some? (ctx/get-last-review-time *test-node*)))
+        (is (some? (::ctx/timestamp (ctx/get-last-edit-time {::ctx/xtdb-node *test-node*}))))
+        (is (some? (::ctx/timestamp (ctx/get-last-review-time {::ctx/xtdb-node *test-node*}))))
 
         ;; Clear all
-        (ctx/clear-all-events! *test-node*)
+        (ctx/clear-all-events! {::ctx/xtdb-node *test-node*})
 
         ;; Verify they're gone
-        (is (nil? (ctx/get-last-edit-time *test-node*)))
-        (is (nil? (ctx/get-last-review-time *test-node*)))))))
+        (is (nil? (::ctx/timestamp (ctx/get-last-edit-time {::ctx/xtdb-node *test-node*}))))
+        (is (nil? (::ctx/timestamp (ctx/get-last-review-time {::ctx/xtdb-node *test-node*}))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Edge Cases
@@ -230,16 +280,22 @@
   (with-test-node
     (fn []
       (testing "Empty file set for review"
-        (ctx/record-edit! *test-node* "/path/to/file.clj" 'seon.foo)
-        (let [result (ctx/record-review! *test-node* #{})]
-          (is (some? result) "Should allow empty file set")))
+        (ctx/record-edit! {::ctx/xtdb-node *test-node*
+                          ::ctx/file-path "/path/to/file.clj"
+                          ::ctx/namespace 'seon.foo})
+        (let [result (ctx/record-review! {::ctx/xtdb-node *test-node*
+                                          ::ctx/files #{}})]
+          (is (true? (::ctx/success result)) "Should allow empty file set")))
 
       (testing "Very long file path"
         (let [long-path (str "/very/long/path/" (apply str (repeat 500 "x")) ".clj")]
-          (let [result (ctx/record-edit! *test-node* long-path nil)]
-            (is (some? result) "Should handle long paths"))))
+          (let [result (ctx/record-edit! {::ctx/xtdb-node *test-node*
+                                          ::ctx/file-path long-path})]
+            (is (true? (::ctx/success result)) "Should handle long paths"))))
 
       (testing "Special characters in namespace"
-        (ctx/record-edit! *test-node* "/path/to/file.clj" 'foo-bar.baz_qux)
-        (let [summary (ctx/edits-summary *test-node*)]
+        (ctx/record-edit! {::ctx/xtdb-node *test-node*
+                          ::ctx/file-path "/path/to/file.clj"
+                          ::ctx/namespace 'foo-bar.baz_qux})
+        (let [summary (ctx/edits-summary {::ctx/xtdb-node *test-node*})]
           (is (contains? (::ctx/namespaces summary) :foo-bar.baz_qux)))))))

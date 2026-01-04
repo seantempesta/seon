@@ -4,30 +4,34 @@
    Provides file-to-namespace mapping and source reading capabilities:
    - clojure-file? - Check if a file is a Clojure file
    - file->namespace - Parse namespace from a Clojure source file
+   - file->test-namespace - Derive test namespace from source path
    - read-source - Read file contents safely
    - namespace->file - Convert namespace to likely source file path
+   - test-file-exists? - Check if test file exists
 
    The namespace parsing is robust: it reads the actual ns declaration from
    the file rather than guessing from file paths (which breaks when the project
    path contains 'src', e.g., /Users/sean/src/seon/src/seon/schema.clj).
 
+   All public functions use map-based APIs with namespaced keys (per CONVENTIONS.md).
+
    Example usage:
-     (require '[seon.dev.codebase :as cb])
+     (require '[seon.dev.codebase :as codebase])
 
      ;; Check if file is Clojure
-     (cb/clojure-file? \"src/seon/core.clj\")
+     (codebase/clojure-file? {::codebase/file-path \"src/seon/core.clj\"})
      ;; => true
 
      ;; Get namespace from file
-     (cb/file->namespace \"/path/to/src/seon/core.clj\")
+     (codebase/file->namespace {::codebase/file-path \"/path/to/src/seon/core.clj\"})
      ;; => seon.core
 
      ;; Read source safely
-     (cb/read-source \"/path/to/file.clj\")
-     ;; => {:success true :content \"(ns ...)\"}
+     (codebase/read-source {::codebase/file-path \"/path/to/file.clj\"})
+     ;; => {::codebase/success true ::codebase/content \"(ns ...)\"}
 
      ;; Reverse mapping
-     (cb/namespace->file 'seon.core)
+     (codebase/namespace->file {::codebase/namespace 'seon.core})
      ;; => \"src/seon/core.clj\""
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
@@ -37,11 +41,12 @@
 ;;; Schema Registration (per CONVENTIONS.md)
 ;;; ---------------------------------------------------------------------------
 
+;; Primitive types
 (schema/register! ::file-path
                   [:string {:min 1
                             :description "Path to a file (absolute or relative)"}])
 
-(schema/register! ::namespace-symbol
+(schema/register! ::namespace
                   [:fn {:description "A namespace symbol (e.g., seon.core)"
                         :error/message "must be a symbol"}
                    symbol?])
@@ -49,7 +54,38 @@
 (schema/register! ::source-content
                   [:string {:description "Source code content of a file"}])
 
-(schema/register! ::read-result
+(schema/register! ::source-dir
+                  [:string {:min 1
+                            :description "Base source directory (e.g., 'src', 'test')"}])
+
+;; Request schemas
+(schema/register! ::clojure-file-request
+                  [:map
+                   [::file-path {:optional true} [:maybe ::file-path]]])
+
+(schema/register! ::file->namespace-request
+                  [:map
+                   [::file-path {:optional true} [:maybe ::file-path]]])
+
+(schema/register! ::file->test-namespace-request
+                  [:map
+                   [::file-path {:optional true} [:maybe ::file-path]]])
+
+(schema/register! ::read-source-request
+                  [:map
+                   [::file-path ::file-path]])
+
+(schema/register! ::namespace->file-request
+                  [:map
+                   [::namespace ::namespace]
+                   [::source-dir {:optional true} ::source-dir]])
+
+(schema/register! ::test-file-exists-request
+                  [:map
+                   [::namespace ::namespace]])
+
+;; Response schemas
+(schema/register! ::read-source-response
                   [:map
                    [::success :boolean]
                    [::content {:optional true} ::source-content]
@@ -74,20 +110,20 @@
    - .edn (EDN data)
 
    Request keys:
-     file-path - Path to check (string)
+     ::file-path - Path to check (string, optional/nullable)
 
    Returns:
      Boolean - true if file has a Clojure extension, false otherwise
 
    Example:
-     (clojure-file? \"src/seon/core.clj\")
+     (clojure-file? {::file-path \"src/seon/core.clj\"})
      ;; => true
-     (clojure-file? \"package.json\")
+     (clojure-file? {::file-path \"package.json\"})
      ;; => false
-     (clojure-file? nil)
+     (clojure-file? {::file-path nil})
      ;; => false"
-  {:malli/schema [:=> [:cat [:maybe ::file-path]] :boolean]}
-  [file-path]
+  {:malli/schema [:=> [:cat ::clojure-file-request] :boolean]}
+  [{::keys [file-path]}]
   (if (nil? file-path)
     false
     (let [lower-path (str/lower-case file-path)]
@@ -131,7 +167,7 @@
    This handles edge cases like projects located in paths containing 'src'.
 
    Request keys:
-     file-path - Path to the Clojure file
+     ::file-path - Path to the Clojure file (optional/nullable)
 
    Returns:
      Namespace symbol (e.g., seon.core), or nil if:
@@ -140,13 +176,13 @@
      - Parse error occurs
 
    Example:
-     (file->namespace \"src/seon/core.clj\")
+     (file->namespace {::file-path \"src/seon/core.clj\"})
      ;; => seon.core
 
-     (file->namespace \"/path/to/file-without-ns.clj\")
+     (file->namespace {::file-path \"/path/to/file-without-ns.clj\"})
      ;; => nil"
-  {:malli/schema [:=> [:cat [:maybe ::file-path]] [:maybe ::namespace-symbol]]}
-  [file-path]
+  {:malli/schema [:=> [:cat ::file->namespace-request] [:maybe ::namespace]]}
+  [{::keys [file-path]}]
   (read-ns-form file-path))
 
 (defn file->test-namespace
@@ -156,20 +192,20 @@
    if not already present.
 
    Request keys:
-     file-path - Path to the source file
+     ::file-path - Path to the source file (optional/nullable)
 
    Returns:
      Test namespace symbol, or nil if source has no namespace
 
    Example:
-     (file->test-namespace \"src/seon/core.clj\")
+     (file->test-namespace {::file-path \"src/seon/core.clj\"})
      ;; => seon.core-test
 
-     (file->test-namespace \"test/seon/core_test.clj\")
+     (file->test-namespace {::file-path \"test/seon/core_test.clj\"})
      ;; => seon.core-test (unchanged)"
-  {:malli/schema [:=> [:cat [:maybe ::file-path]] [:maybe ::namespace-symbol]]}
-  [file-path]
-  (when-let [source-ns (file->namespace file-path)]
+  {:malli/schema [:=> [:cat ::file->test-namespace-request] [:maybe ::namespace]]}
+  [{::keys [file-path]}]
+  (when-let [source-ns (file->namespace {::file-path file-path})]
     (let [ns-str (str source-ns)]
       (symbol
        (if (str/ends-with? ns-str "-test")
@@ -187,20 +223,21 @@
    that indicates success/failure.
 
    Request keys:
-     file-path - Path to the file to read
+     ::file-path - Path to the file to read
 
-   Returns:
-     {::success true  ::content \"...\"}  - File read successfully
-     {::success false ::error \"...\"}    - Error occurred
+   Response keys:
+     ::success - true if file read successfully
+     ::content - File contents (on success)
+     ::error   - Error message (on failure)
 
    Example:
-     (read-source \"src/seon/core.clj\")
+     (read-source {::file-path \"src/seon/core.clj\"})
      ;; => {::success true ::content \"(ns seon.core ...)\"}
 
-     (read-source \"nonexistent.clj\")
+     (read-source {::file-path \"nonexistent.clj\"})
      ;; => {::success false ::error \"File does not exist\"}"
-  {:malli/schema [:=> [:cat ::file-path] ::read-result]}
-  [file-path]
+  {:malli/schema [:=> [:cat ::read-source-request] ::read-source-response]}
+  [{::keys [file-path]}]
   (let [f (io/file file-path)]
     (cond
       (not (.exists f))
@@ -239,46 +276,45 @@
    a different location. Use file->namespace for authoritative mapping.
 
    Request keys:
-     ns-sym     - Namespace symbol (e.g., seon.core)
-     source-dir - Optional base directory (default: \"src\")
+     ::namespace  - Namespace symbol (e.g., seon.core)
+     ::source-dir - Optional base directory (default: \"src\")
 
    Returns:
      String file path
 
    Example:
-     (namespace->file 'seon.core)
+     (namespace->file {::namespace 'seon.core})
      ;; => \"src/seon/core.clj\"
 
-     (namespace->file 'seon.foo-bar)
+     (namespace->file {::namespace 'seon.foo-bar})
      ;; => \"src/seon/foo_bar.clj\"
 
-     (namespace->file 'seon.core \"other-src\")
+     (namespace->file {::namespace 'seon.core ::source-dir \"other-src\"})
      ;; => \"other-src/seon/core.clj\""
-  {:malli/schema [:=> [:cat ::namespace-symbol [:? :string]] ::file-path]}
-  ([ns-sym]
-   (namespace->file ns-sym "src"))
-  ([ns-sym source-dir]
-   (let [ns-str (str ns-sym)
-         path (-> ns-str
-                  (str/replace "." "/")
-                  (str/replace "-" "_"))]
-     (str source-dir "/" path ".clj"))))
+  {:malli/schema [:=> [:cat ::namespace->file-request] ::file-path]}
+  [{::keys [namespace source-dir]}]
+  (let [source-dir (or source-dir "src")
+        ns-str (str namespace)
+        path (-> ns-str
+                 (str/replace "." "/")
+                 (str/replace "-" "_"))]
+    (str source-dir "/" path ".clj")))
 
 (defn test-file-exists?
   "Check if the test file for a namespace exists.
 
    Request keys:
-     test-ns - Test namespace symbol (e.g., seon.core-test)
+     ::namespace - Test namespace symbol (e.g., seon.core-test)
 
    Returns:
      Boolean - true if test file exists
 
    Example:
-     (test-file-exists? 'seon.core-test)
+     (test-file-exists? {::namespace 'seon.core-test})
      ;; => true (if test/seon/core_test.clj exists)"
-  {:malli/schema [:=> [:cat ::namespace-symbol] :boolean]}
-  [test-ns]
-  (let [path (namespace->file test-ns "test")]
+  {:malli/schema [:=> [:cat ::test-file-exists-request] :boolean]}
+  [{::keys [namespace]}]
+  (let [path (namespace->file {::namespace namespace ::source-dir "test"})]
     (.exists (io/file path))))
 
 ;;; ---------------------------------------------------------------------------
@@ -289,29 +325,29 @@
   ;; REPL exploration
 
   ;; Check file types
-  (clojure-file? "src/seon/core.clj")       ;; => true
-  (clojure-file? "package.json")             ;; => false
-  (clojure-file? "script.bb")                ;; => true
-  (clojure-file? nil)                        ;; => false
+  (clojure-file? {::file-path "src/seon/core.clj"})       ;; => true
+  (clojure-file? {::file-path "package.json"})             ;; => false
+  (clojure-file? {::file-path "script.bb"})                ;; => true
+  (clojure-file? {::file-path nil})                        ;; => false
 
   ;; Parse namespace from files
-  (file->namespace "src/seon/core.clj")
-  (file->namespace "src/seon/dev/codebase.clj")  ;; => seon.dev.codebase
-  (file->namespace "nonexistent.clj")            ;; => nil
+  (file->namespace {::file-path "src/seon/core.clj"})
+  (file->namespace {::file-path "src/seon/dev/codebase.clj"})  ;; => seon.dev.codebase
+  (file->namespace {::file-path "nonexistent.clj"})            ;; => nil
 
   ;; Get test namespace
-  (file->test-namespace "src/seon/core.clj")     ;; => seon.core-test
+  (file->test-namespace {::file-path "src/seon/core.clj"})     ;; => seon.core-test
 
   ;; Read source
-  (read-source "src/seon/core.clj")
-  (read-source "nonexistent.clj")
+  (read-source {::file-path "src/seon/core.clj"})
+  (read-source {::file-path "nonexistent.clj"})
 
   ;; Reverse mapping
-  (namespace->file 'seon.core)               ;; => "src/seon/core.clj"
-  (namespace->file 'seon.foo-bar)            ;; => "src/seon/foo_bar.clj"
-  (namespace->file 'seon.core "other-src")   ;; => "other-src/seon/core.clj"
+  (namespace->file {::namespace 'seon.core})               ;; => "src/seon/core.clj"
+  (namespace->file {::namespace 'seon.foo-bar})            ;; => "src/seon/foo_bar.clj"
+  (namespace->file {::namespace 'seon.core ::source-dir "other-src"})   ;; => "other-src/seon/core.clj"
 
   ;; Check test file exists
-  (test-file-exists? 'seon.core-test)
+  (test-file-exists? {::namespace 'seon.core-test})
 
   nil)
