@@ -100,12 +100,14 @@
   "Save session to XTDB. Skips non-serializable values with warning."
   [session-id]
   (when-let [ctx (get session-id)]
-    (let [persistable (filter-serializable ctx)]
+    (let [persistable (filter-serializable ctx)
+          doc (assoc persistable
+                     :_id session-id
+                     :session/checkpointed-at (java.time.Instant/now))]
+      ;; Use SQL INSERT RECORDS which supports dynamic documents
+      ;; :put-docs doesn't work with XTDB 2.1.0 connections
       (db/execute-tx! @primer-node
-                      [[:put-docs :primer-sessions
-                        (assoc persistable
-                               :xt/id session-id
-                               :session/checkpointed-at (java.time.Instant/now))]])
+                      [["INSERT INTO primer_sessions RECORDS ?" doc]])
       (log/debug "Checkpointed session" {:session-id session-id}))))
 
 (defn checkpoint-all!

@@ -4,6 +4,10 @@
 **XTDB Version**: 2.1.0 (submodule) / 2.1.0-rc0 (deps.edn - needs update)
 **Purpose**: Document multi-database architecture for agent isolation
 
+> **NOTE**: This is internal orchestrator infrastructure. Agents never see database
+> names or SQL. They interact with a `*ctx*` atom; the system handles persistence.
+> See `docs/prds/agent-isolation/prd.md` for the agent-facing design.
+
 ---
 
 ## Executive Summary

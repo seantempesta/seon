@@ -1,5 +1,6 @@
-{;; XTDB v2 Node
- ;; Persistent storage for dev (data loads); in-memory for tests
+{;; XTDB v2 Node (Single node with multi-database support)
+ ;; Primary database: orchestrator data
+ ;; Attached databases: namespace-isolated data (primer, dev)
  :seon/xtdb-node
  {:storage #profile {:dev   {:type :local
                              :path "data/xtdb"}
@@ -13,6 +14,14 @@
   :compactor #profile {:dev {:threads 2}
                        :test {:threads 1}
                        :prod {:threads #or [#env XTDB_COMPACTOR_THREADS 4]}}}
+
+ ;; Namespace Databases
+ ;; Attaches secondary databases for domain isolation.
+ ;; Each namespace gets its own isolated database within the single XTDB node.
+ ;; Storage paths: data/namespaces/{namespace}/log and storage
+ :seon/namespace-dbs
+ {:node #ig/ref :seon/xtdb-node
+  :namespaces [seon.primer seon.dev]}
 
  ;; Python Bridge (libpython-clj) - DISABLED
  ;; NOTE: Python code moved to src/seon/_python_disabled
@@ -36,20 +45,6 @@
                       :prod false}  ; Production is headless
   :port #or [#env NREPL_PORT 7888]
   :bind "127.0.0.1"}
-
- ;; Primer XTDB Node
- ;; Separate node for Primer domain (domain isolation)
- :seon.primer/xtdb-node
- {:storage #profile {:dev   {:type :local :path "data/primer"}
-                     :test  :in-memory
-                     :prod  {:type :local :path "data/primer"}}}
-
- ;; Dev Hook XTDB Node
- ;; Separate node for dev hook data (edit events, review events)
- :seon.dev/xtdb-node
- {:storage #profile {:dev   {:type :local :path "data/dev-hook"}
-                     :test  :in-memory
-                     :prod  {:type :local :path "data/dev-hook"}}}
 
  ;; HTTP Server for Web UI
  :seon.web.server/http-server
