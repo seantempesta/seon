@@ -10,3 +10,6 @@
 [submodule "reference-code/clj-kondo"]
 	path = reference-code/clj-kondo
 	url = https://github.com/clj-kondo/clj-kondo.git
+[submodule "reference-code/splint"]
+	path = reference-code/splint
+	url = https://github.com/NoahTheDuke/splint.git
