@@ -53,18 +53,13 @@
     State map or nil if no state exists"
   [node symbol]
   (first
-   (node/query node
-               (xt/template
-                (from :ingestion-state
-                      [{:xt/id ~(make-state-id symbol)}
-                       xt/id
-                       ingestion/symbol
-                       ingestion/last-date
-                       ingestion/start-date
-                       ingestion/status
-                       ingestion/records-count
-                       ingestion/error
-                       ingestion/updated-at])))))
+   (xt/q node
+         ["SELECT _id, ingestion$symbol, ingestion$last_date, ingestion$start_date,
+                  ingestion$status, ingestion$records_count, ingestion$error, ingestion$updated_at
+           FROM ingestion_state
+           WHERE _id = ?"
+          (make-state-id symbol)]
+         {:key-fn :kebab-case-keyword})))
 
 (defn get-resume-date
   "Get the date to resume ingestion from.
@@ -208,14 +203,15 @@
   [node symbol start-date end-date]
   (let [;; Query all distinct dates we have data for
         ingested-dates (map :date
-                            (node/query node
-                                        (xt/template
-                                         (-> (from :option-greeks
-                                                   [{:symbol ~symbol} date])
-                                             (where (>= date ~start-date)
-                                                    (<= date ~end-date))
-                                             (aggregate {} date)
-                                             (order-by date)))))
+                            (xt/q node
+                                  ["SELECT DISTINCT quote$date as date
+                                    FROM option_greeks
+                                    WHERE asset$ticker = ?
+                                      AND quote$date >= ?
+                                      AND quote$date <= ?
+                                    ORDER BY quote$date"
+                                   symbol start-date end-date]
+                                  {:key-fn :kebab-case-keyword}))
         ingested-set (set ingested-dates)]
     ;; Walk through the date range and identify gaps
     (loop [current start-date
@@ -274,11 +270,12 @@
   Returns:
     Set of LocalDate dates that have been completed"
   [node symbol]
-  (->> (node/query node
-                   (xt/template
-                    (from :bulk-progress
-                          [{:progress/symbol ~symbol}
-                           progress/date])))
+  (->> (xt/q node
+             ["SELECT progress$date
+               FROM bulk_progress
+               WHERE progress$symbol = ?"
+              symbol]
+             {:key-fn :kebab-case-keyword})
        (map :progress/date)
        (set)))
 
@@ -340,14 +337,11 @@
   Returns:
     Vector of state maps"
   [node]
-  (node/query node
-              '(from :ingestion-state
-                     [xt/id
-                      ingestion/symbol
-                      ingestion/status
-                      ingestion/last-date
-                      ingestion/records-count
-                      ingestion/updated-at])))
+  (xt/q node
+        "SELECT _id, ingestion$symbol, ingestion$status, ingestion$last_date,
+                ingestion$records_count, ingestion$updated_at
+         FROM ingestion_state"
+        {:key-fn :kebab-case-keyword}))
 
 (defn list-in-progress
   "List all symbols with in-progress ingestion.
@@ -358,15 +352,13 @@
   Returns:
     Vector of state maps with :in-progress status"
   [node]
-  (node/query node
-              '(-> (from :ingestion-state
-                         [{:ingestion/status :in-progress}
-                          xt/id
-                          ingestion/symbol
-                          ingestion/last-date
-                          ingestion/records-count
-                          ingestion/updated-at])
-                   (order-by ingestion/updated-at))))
+  (xt/q node
+        "SELECT _id, ingestion$symbol, ingestion$last_date,
+                ingestion$records_count, ingestion$updated_at
+         FROM ingestion_state
+         WHERE ingestion$status = 'in-progress'
+         ORDER BY ingestion$updated_at"
+        {:key-fn :kebab-case-keyword}))
 
 (defn list-failed
   "List all symbols with failed ingestion.
@@ -377,11 +369,9 @@
   Returns:
     Vector of state maps with :failed status"
   [node]
-  (node/query node
-              '(-> (from :ingestion-state
-                         [{:ingestion/status :failed}
-                          xt/id
-                          ingestion/symbol
-                          ingestion/error
-                          ingestion/updated-at])
-                   (order-by ingestion/updated-at))))
+  (xt/q node
+        "SELECT _id, ingestion$symbol, ingestion$error, ingestion$updated_at
+         FROM ingestion_state
+         WHERE ingestion$status = 'failed'
+         ORDER BY ingestion$updated_at"
+        {:key-fn :kebab-case-keyword}))

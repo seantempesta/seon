@@ -3,8 +3,7 @@
 
    Uses pre-computed stats stored in XTDB for instant dashboard loads.
    Full table scans only happen when explicitly recomputing stats."
-  (:require [seon.db.node :as node]
-            [xtdb.api :as xt]
+  (:require [xtdb.api :as xt]
             [clojure.java.io :as io])
   (:import [java.time Instant]))
 
@@ -13,10 +12,10 @@
    Returns the count as a number, or 0 if empty/error."
   [xtdb-node]
   (try
-    (let [result (node/query xtdb-node
-                             '(-> (from :option-greeks [xt/id])
-                                  (aggregate {:count (count xt/id)})))]
-      (or (:count (first result)) 0))
+    (let [result (xt/q xtdb-node
+                       "SELECT COUNT(*) as cnt FROM option_greeks"
+                       {:key-fn :kebab-case-keyword})]
+      (or (:cnt (first result)) 0))
     (catch Exception _
       0)))
 
@@ -25,10 +24,10 @@
    Returns {:earliest LocalDate :latest LocalDate} or nil if empty."
   [xtdb-node]
   (try
-    (let [result (first (node/query xtdb-node
-                                    '(-> (from :option-greeks [quote/date])
-                                         (aggregate {:earliest (min quote/date)
-                                                     :latest (max quote/date)}))))]
+    (let [result (first (xt/q xtdb-node
+                              "SELECT MIN(quote$date) as earliest, MAX(quote$date) as latest
+                               FROM option_greeks"
+                              {:key-fn :kebab-case-keyword}))]
       ;; Return nil if earliest or latest are nil (empty DB)
       (when (and (:earliest result) (:latest result))
         result))
@@ -40,10 +39,11 @@
    Returns a vector of ticker symbols."
   [xtdb-node]
   (try
-    (let [results (node/query xtdb-node
-                              '(-> (from :option-greeks [asset/ticker])
-                                   (aggregate {} asset/ticker)
-                                   (order-by asset/ticker)))]
+    (let [results (xt/q xtdb-node
+                        "SELECT DISTINCT asset$ticker
+                         FROM option_greeks
+                         ORDER BY asset$ticker"
+                        {:key-fn :kebab-case-keyword})]
       (vec (map :asset/ticker results)))
     (catch Exception _
       [])))
@@ -53,9 +53,10 @@
    Returns an Instant or nil if empty."
   [xtdb-node]
   (try
-    (let [result (first (node/query xtdb-node
-                                    '(-> (from :option-greeks [quote/timestamp])
-                                         (aggregate {:latest (max quote/timestamp)}))))]
+    (let [result (first (xt/q xtdb-node
+                              "SELECT MAX(quote$timestamp) as latest
+                               FROM option_greeks"
+                              {:key-fn :kebab-case-keyword}))]
       (when-let [ts (:latest result)]
         ;; Convert ZonedDateTime to Instant if needed
         (if (instance? java.time.ZonedDateTime ts)
@@ -69,9 +70,11 @@
    Returns a list of {:asset/ticker symbol :count n} maps sorted by count descending."
   [xtdb-node]
   (try
-    (->> (node/query xtdb-node
-                     '(-> (from :option-greeks [xt/id asset/ticker])
-                          (aggregate {:count (count xt/id)} asset/ticker)))
+    (->> (xt/q xtdb-node
+               "SELECT asset$ticker, COUNT(*) as count
+                FROM option_greeks
+                GROUP BY asset$ticker"
+               {:key-fn :kebab-case-keyword})
          (sort-by :count >))
     (catch Exception _
       [])))
@@ -81,11 +84,11 @@
    Returns a list of {:asset/ticker symbol :min-date LocalDate :max-date LocalDate}."
   [xtdb-node]
   (try
-    (->> (node/query xtdb-node
-                     '(-> (from :option-greeks [asset/ticker quote/date])
-                          (aggregate {:min-date (min quote/date)
-                                      :max-date (max quote/date)}
-                                     asset/ticker)))
+    (->> (xt/q xtdb-node
+               "SELECT asset$ticker, MIN(quote$date) as min_date, MAX(quote$date) as max_date
+                FROM option_greeks
+                GROUP BY asset$ticker"
+               {:key-fn :kebab-case-keyword})
          (sort-by :asset/ticker))
     (catch Exception e
       (println "Error getting date ranges:" (.getMessage e))
@@ -164,13 +167,15 @@
    Returns nil if no stats document exists yet."
   [xtdb-node]
   (try
-    (first (node/query xtdb-node
-                       (xt/template
-                        (from :dashboard-stats [{:xt/id ~stats-doc-id}
-                                                total-records by-symbol date-range
-                                                date-ranges-by-symbol disk-usage
-                                                distinct-symbols symbols-count
-                                                latest-timestamp computed-at]))))
+    (first (xt/q xtdb-node
+                 ["SELECT _id, total_records, by_symbol, date_range,
+                          date_ranges_by_symbol, disk_usage,
+                          distinct_symbols, symbols_count,
+                          latest_timestamp, computed_at
+                   FROM dashboard_stats
+                   WHERE _id = ?"
+                  stats-doc-id]
+                 {:key-fn :kebab-case-keyword}))
     (catch Exception _
       nil)))
 

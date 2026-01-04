@@ -36,10 +36,10 @@
                   {::analysis/analysis analysis
                    ::analysis/fn-name 'analyze-file})]
       (is (vector? (::analysis/callees result)))
-      ;; analyze-file should call run-clj-kondo
+      ;; analyze-file should call run-clj-kondo-lib (library-based)
       (let [callee-names (set (map :name (::analysis/callees result)))]
-        (is (contains? callee-names 'run-clj-kondo)
-            "analyze-file should call run-clj-kondo")))))
+        (is (contains? callee-names 'run-clj-kondo-lib)
+            "analyze-file should call run-clj-kondo-lib")))))
 
 (deftest callers-of-test
   (testing "finds functions that call a specific function"
@@ -47,11 +47,11 @@
                     {::analysis/file-path "src/seon/dev/analysis.clj"})
           result (analysis/callers-of
                   {::analysis/analysis analysis
-                   ::analysis/fn-name 'run-clj-kondo})]
+                   ::analysis/fn-name 'run-clj-kondo-lib})]
       (is (vector? (::analysis/callers result)))
-      ;; run-clj-kondo should be called by analyze-file
+      ;; run-clj-kondo-lib should be called by analyze-file
       (is (contains? (set (::analysis/callers result)) 'analyze-file)
-          "run-clj-kondo should be called by analyze-file"))))
+          "run-clj-kondo-lib should be called by analyze-file"))))
 
 (deftest public-var-definitions-test
   (testing "filters to only public vars"
@@ -65,7 +65,7 @@
       (is (contains? public-names 'callees-of))
       (is (contains? public-names 'callers-of))
       ;; Should NOT include private helpers
-      (is (not (contains? public-names 'run-clj-kondo))
+      (is (not (contains? public-names 'run-clj-kondo-lib))
           "Should not include private functions"))))
 
 (deftest lint-issues-test

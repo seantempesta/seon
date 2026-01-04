@@ -30,8 +30,7 @@
      (analysis/format-file! {::file-path \"src/seon/dev/hook.clj\"})"
   (:require [clojure.java.io :as io]
             [clojure.java.shell :as shell]
-            [clojure.edn :as edn]
-            [clojure.string :as str]
+            [clj-kondo.core :as clj-kondo]
             [seon.schema :as schema]))
 
 ;;; ---------------------------------------------------------------------------
@@ -161,40 +160,32 @@
                    [::error {:optional true} ::error]])
 
 ;;; ---------------------------------------------------------------------------
-;;; clj-kondo Integration
+;;; clj-kondo Integration (library-based, Phase 11a)
 ;;; ---------------------------------------------------------------------------
 
-(def ^:private clj-kondo-config
-  "clj-kondo configuration for rich analysis."
+(def ^:private clj-kondo-lib-config
+  "clj-kondo config for library usage.
+   Enables analysis data extraction for var definitions, usages, and arglists."
   {:output {:analysis {:arglists true
                        :var-usages true
-                       :var-definitions true}
-            :format :edn}})
+                       :var-definitions true}}})
 
-(defn- run-clj-kondo
-  "Run clj-kondo on a file and return raw output.
-   Returns {:exit int :out string :err string}."
+(defn- run-clj-kondo-lib
+  "Run clj-kondo as a library (in-process).
+   Returns {:findings [...] :analysis {...} :summary {...}}."
   [file-path]
-  (let [config-str (pr-str clj-kondo-config)]
-    (shell/sh "clj-kondo" "--lint" file-path
-              "--config" config-str)))
-
-(defn- parse-clj-kondo-output
-  "Parse clj-kondo EDN output into structured data."
-  [output-str]
-  (try
-    (edn/read-string output-str)
-    (catch Exception e
-      {:error (str "Failed to parse clj-kondo output: " (.getMessage e))})))
+  (clj-kondo/run! {:lint [file-path]
+                   :config clj-kondo-lib-config}))
 
 (defn- extract-namespace
-  "Extract namespace from analysis data."
-  [analysis]
-  (some-> analysis
+  "Extract namespace from clj-kondo result.
+   Uses :namespace-definitions which has the actual ns declaration."
+  [result]
+  (some-> result
           :analysis
-          :namespace-usages
+          :namespace-definitions
           first
-          :from))
+          :name))
 
 (defn- transform-var-definitions
   "Transform clj-kondo var-definitions to our schema."
@@ -287,25 +278,21 @@
        ::error "Path is not a regular file"}
 
       :else
-      (let [{:keys [exit out err]} (run-clj-kondo file-path)
-            duration (- (System/currentTimeMillis) start-time)]
-        (if (and (not= exit 0) (str/blank? out))
+      (try
+        (let [result (run-clj-kondo-lib file-path)
+              duration (- (System/currentTimeMillis) start-time)
+              analysis (:analysis result)]
+          {::success true
+           ::namespace (extract-namespace result)
+           ::var-definitions (transform-var-definitions (:var-definitions analysis))
+           ::var-usages (transform-var-usages (:var-usages analysis))
+           ::namespace-usages (transform-namespace-usages (:namespace-usages analysis))
+           ::findings (transform-findings (:findings result))
+           ::duration-ms duration})
+        (catch Exception e
           {::success false
-           ::error (or err "clj-kondo failed")
-           ::duration-ms duration}
-          (let [parsed (parse-clj-kondo-output out)]
-            (if (:error parsed)
-              {::success false
-               ::error (:error parsed)
-               ::duration-ms duration}
-              (let [analysis (:analysis parsed)]
-                {::success true
-                 ::namespace (extract-namespace parsed)
-                 ::var-definitions (transform-var-definitions (:var-definitions analysis))
-                 ::var-usages (transform-var-usages (:var-usages analysis))
-                 ::namespace-usages (transform-namespace-usages (:namespace-usages analysis))
-                 ::findings (transform-findings (:findings parsed))
-                 ::duration-ms duration}))))))))
+           ::error (.getMessage e)
+           ::duration-ms (- (System/currentTimeMillis) start-time)})))))
 
 (defn callees-of
   "Get all functions called by a specific function.

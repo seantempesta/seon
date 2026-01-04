@@ -7,9 +7,9 @@
         org.clojure/clojure {:mvn/version "1.12.0"}
         org.clojure/core.async {:mvn/version "1.6.681"}
 
-        ;; XTDB v2.1.0-rc0 (fixes compaction bug in v2.0.0)
-        com.xtdb/xtdb-api {:mvn/version "2.1.0-rc0"}
-        com.xtdb/xtdb-core {:mvn/version "2.1.0-rc0"}
+        ;; XTDB v2.1.0 (stable release with multi-database support)
+        com.xtdb/xtdb-api {:mvn/version "2.1.0"}
+        com.xtdb/xtdb-core {:mvn/version "2.1.0"}
 
         ;; Schema & Validation
         metosin/malli {:mvn/version "0.17.0"}

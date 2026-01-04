@@ -1,338 +1,312 @@
-# XTDB v2 Reference Guide
+# XTDB v2 SQL Reference Guide
 
-**Version**: 2.1.0-rc0 | **Last Updated**: 2025-11-29
+**Version**: 2.1.0 | **Last Updated**: 2026-01-04
 
 ---
 
 ## Quick Start
 
 ```clojure
-(require '[ml-options.db.node :as node]
-         '[xtdb.api :as xt])
+(require '[xtdb.api :as xt])
 
-;; Query with XTQL (use node/query, NOT xt/q)
-(node/query my-node '(from :option-quotes [ticker strike iv]))
+;; Query with SQL
+(xt/q node "SELECT ticker, strike, iv FROM option_quotes WHERE ticker = 'AAPL'")
 
-;; With dynamic values
-(let [ticker "AAPL"]
-  (node/query my-node
-    (xt/template (from :option-quotes [{:ticker ~ticker} strike iv]))))
+;; Parameterized SQL
+(xt/q node ["SELECT * FROM users WHERE _id = ?" user-id])
 
 ;; Insert data
-(xt/execute-tx my-node
-  [[:put-docs :option-quotes {:xt/id "opt1" :ticker "AAPL" :strike 150.0}]])
+(xt/execute-tx node
+  [["INSERT INTO option_quotes (_id, ticker, strike, iv) VALUES (?, ?, ?, ?)"
+    "AAPL230616C00150000" "AAPL" 150.0 0.25]])
 ```
 
 ---
 
 ## Table of Contents
 
-1. [XTQL Queries](#xtql-queries) - **READ THIS FIRST**
-2. [XTQL Gotchas](#xtql-gotchas) - Common pitfalls
-3. [Transactions](#transactions)
-4. [Temporal Queries](#temporal-queries)
+1. [SQL Queries](#sql-queries) - **READ THIS FIRST**
+2. [Multi-Database](#multi-database) - Agent isolation architecture
+3. [Transactions](#transactions) - INSERT, DELETE, ERASE
+4. [Temporal Queries](#temporal-queries) - Valid-time and system-time
 5. [Node Setup](#node-setup)
 6. [Data Types](#data-types)
 7. [Quick Reference](#quick-reference)
 
 ---
 
-## CRITICAL: SQL Queries vs XTQL
+## SQL Queries
 
-**As of 2025-12-29**: In this project, **use SQL queries directly** rather than XTQL.
+XTDB v2 uses SQL as the primary query language. XTQL is also supported but SQL is more stable and better documented.
 
-XTQL queries via `xt/q` or `node/xtql-query` currently fail with:
-```
-No implementation of method: :plan-query of protocol: #'xtdb.xtql.plan/PlanQuery found for class: xtdb.xtql.From
-```
-
-### What Works
+### Basic Queries
 
 ```clojure
-;; SQL queries work perfectly
-(xt/q node "SELECT * FROM users WHERE name = 'Alice'")
+;; Select all columns
+(xt/q node "SELECT * FROM users")
 
-;; Parameterized SQL queries
+;; Select specific columns
+(xt/q node "SELECT name, email FROM users")
+
+;; Filter with WHERE
+(xt/q node "SELECT * FROM users WHERE status = 'active'")
+
+;; Parameterized queries (ALWAYS use for user input)
 (xt/q node ["SELECT * FROM users WHERE _id = ?" user-id])
-
-;; Keywords work as parameters for _id
-(xt/q node ["SELECT * FROM function WHERE _id = ?" :seon.ai.gemini/ask])
-```
-
-### What Doesn't Work
-
-```clojure
-;; XTQL queries fail - DO NOT USE
-(xt/q node '(from :users [name email]))
-(node/xtql-query node '(from :users [name email]))
+(xt/q node ["SELECT * FROM option_quotes WHERE ticker = ? AND strike > ?" "AAPL" 150.0])
 ```
 
 ### Column Name Mapping
 
 XTDB maps namespaced keywords to SQL column names:
-- `:fn/namespace` → `fn$namespace` in SQL
-- `:fn/first-seen` → `fn$first_seen` in SQL
-- `:xt/id` → `_id` in SQL
-- `:xt/valid-from` → `_valid_from` in SQL
 
-**Filtering on namespaced columns**: The SQL syntax for filtering on columns like `fn$namespace` is complex. The simpler approach is to:
-1. Fetch all rows: `SELECT * FROM table`
-2. Filter in Clojure: `(filter #(= value (:col %)) results)`
-
-### Temporal Queries in SQL
-
-```clojure
-;; Filter by valid-time (parameterized)
-(xt/q node ["SELECT * FROM edit_event WHERE _valid_from > ? ORDER BY _valid_from" cutoff-instant])
-
-;; Query at a specific point in time
-(xt/q node "SELECT * FROM users FOR VALID_TIME AS OF TIMESTAMP '2025-01-01T00:00:00Z'")
-
-;; Get most recent row (useful for "last event" queries)
-(xt/q node "SELECT _valid_from FROM review_event ORDER BY _valid_from DESC LIMIT 1")
-
-;; Count events in time window
-(xt/q node ["SELECT COUNT(*) as cnt FROM edit_event WHERE _valid_from > ?" cutoff])
-```
-
-### Common Event Tracking Patterns
-
-```clojure
-;; Record an event (uses current time as _valid_from automatically)
-(xt/execute-tx node
-  [[:put-docs :edit-event
-    {:xt/id (UUID/randomUUID)
-     :entity/type :edit-event
-     :edit/file "/path/to/file.clj"}]])
-
-;; Query events since a timestamp
-(defn events-since [node table-name since-instant]
-  (xt/q node
-    [(format "SELECT * FROM %s WHERE _valid_from > ? ORDER BY _valid_from"
-             (name table-name))
-     since-instant]))
-
-;; Get time of most recent event
-(defn last-event-time [node table-name]
-  (-> (xt/q node
-        (format "SELECT _valid_from FROM %s ORDER BY _valid_from DESC LIMIT 1"
-                (name table-name)))
-      first
-      :xt/valid-from))
-```
-
----
-
-## XTQL Queries (DEPRECATED - USE SQL INSTEAD)
-
-### Why node/query, Not xt/q?
-
-The public `xt/q` wraps XTQL in SQL strings and sends via JDBC. Our `ml-options.db.node/query` uses `xtp/open-xtql-query` directly for native execution without serialization overhead.
-
-**NOTE**: As documented above, XTQL is currently broken. Use SQL instead.
-
-```clojure
-;; CORRECT - use SQL
-(xt/q my-node "SELECT * FROM users")
-
-;; BROKEN - XTQL doesn't work
-(node/query my-node '(from :users [name email]))
-```
-
-### Basic Queries
-
-```clojure
-;; Select columns (MUST list explicitly - [*] returns empty maps!)
-(node/query node '(from :option-quotes [ticker strike iv delta gamma]))
-
-;; Pipeline with operators
-(node/query node
-  '(-> (from :option-quotes [ticker strike iv])
-       (where (> iv 0.3))
-       (order-by strike)
-       (limit 10)))
-```
-
-### Dynamic Values with xt/template
-
-Use `xt/template` to inject Clojure values into queries:
-
-```clojure
-(let [ticker "AAPL"
-      min-strike 140.0]
-  (node/query node
-    (xt/template
-      (-> (from :option-quotes [{:ticker ~ticker} strike iv delta])
-          (where (>= strike ~min-strike))))))
-```
-
-### Filtering
-
-**Inline binding** (equality) - in the `from` clause:
-```clojure
-;; Filter where ticker = "AAPL"
-(from :option-quotes [{:ticker "AAPL"} strike iv])
-
-;; Multiple equality filters
-(from :option-quotes [{:ticker "AAPL" :option_type :call} strike iv])
-```
-
-**Where clause** (comparisons):
-```clojure
-(-> (from :option-quotes [{:ticker "AAPL"} strike gamma])
-    (where (>= gamma 0.05)
-           (<= gamma 0.15)))
-```
-
-### Order By
-
-```clojure
-;; Ascending (default)
-(order-by strike)
-
-;; Descending
-(order-by {:val strike :dir :desc})
-
-;; Multiple columns
-(order-by expiry {:val strike :dir :desc})
-```
+| Clojure Keyword | SQL Column |
+|-----------------|------------|
+| `:xt/id` | `_id` |
+| `:xt/valid-from` | `_valid_from` |
+| `:xt/valid-to` | `_valid_to` |
+| `:fn/namespace` | `fn$namespace` |
+| `:asset/ticker` | `asset$ticker` |
 
 ### Aggregation
 
 ```clojure
-;; Group by strike, sum open interest
-(-> (from :option-quotes [strike open_interest])
-    (aggregate {:total_oi (sum open_interest)} strike))
+;; Count
+(xt/q node "SELECT COUNT(*) as cnt FROM users")
+
+;; Group by with aggregation
+(xt/q node "SELECT ticker, SUM(volume) as total_volume
+            FROM option_quotes
+            GROUP BY ticker")
 
 ;; Multiple aggregations
-(-> (from :option-quotes [ticker volume open_interest])
-    (aggregate {:vol (sum volume) :oi (sum open_interest)} ticker))
-
-;; No group-by (aggregate all)
-(-> (from :option-quotes [volume])
-    (aggregate {:total (sum volume)}))
+(xt/q node "SELECT ticker,
+                   AVG(iv) as avg_iv,
+                   MAX(volume) as max_volume
+            FROM option_quotes
+            GROUP BY ticker")
 ```
 
-**Available**: `sum`, `avg`, `count`, `min`, `max`, `array-agg`
-
-### Computed Columns
+### Ordering and Limiting
 
 ```clojure
-(-> (from :option-quotes [strike bid ask])
-    (with {:mid (/ (+ bid ask) 2)
-           :spread (- ask bid)}))
+;; Order ascending
+(xt/q node "SELECT * FROM users ORDER BY created_at")
+
+;; Order descending
+(xt/q node "SELECT * FROM users ORDER BY created_at DESC")
+
+;; Limit results
+(xt/q node "SELECT * FROM users ORDER BY created_at DESC LIMIT 10")
+
+;; Offset for pagination
+(xt/q node "SELECT * FROM users ORDER BY created_at LIMIT 10 OFFSET 20")
 ```
 
-### Joins (Unify)
+### Joins
 
 ```clojure
-(unify (from :option-quotes [{:xt/id opt-id} ticker strike iv])
-       (from :underlying [{:ticker ticker} spot]))
-;; 'ticker' unifies the two tables
+;; Inner join
+(xt/q node "SELECT o.*, u.name
+            FROM orders o
+            JOIN users u ON o.user_id = u._id")
+
+;; Left join
+(xt/q node "SELECT u.*, COUNT(o._id) as order_count
+            FROM users u
+            LEFT JOIN orders o ON u._id = o.user_id
+            GROUP BY u._id, u.name")
 ```
 
 ---
 
-## XTQL Gotchas
+## Multi-Database
 
-### 1. [*] Returns Empty Maps
-```clojure
-;; WRONG - returns [{}]
-(from :table [*])
+XTDB v2.1.0 supports multiple databases within a single node. This enables agent isolation where each namespace gets its own database.
 
-;; CORRECT - list columns explicitly
-(from :table [xt/id ticker strike iv delta gamma])
+### Architecture
+
+```
+Seon JVM
+└── XTDB Node (shared)
+    ├── "xtdb" database (primary - orchestrator)
+    ├── "seon_trading" database (attached)
+    ├── "seon_health" database (attached)
+    └── ... (per namespace)
 ```
 
-### 2. order-by Takes Symbol, NOT Vector
-```clojure
-;; WRONG
-(order-by [strike :asc])
+### Attach a Database
 
-;; CORRECT
-(order-by strike)
-(order-by {:val strike :dir :desc})
+```sql
+-- Run from primary 'xtdb' connection only
+ATTACH DATABASE seon_trading WITH $$
+  log: !Local
+    path: 'data/namespaces/seon.trading/log'
+  storage: !Local
+    path: 'data/namespaces/seon.trading/storage'
+$$
 ```
 
-### 3. aggregate Group-By is Symbol After Map
 ```clojure
-;; WRONG
-(aggregate {:total (sum vol)} [ticker])
-
-;; CORRECT - group-by column is bare symbol after the map
-(aggregate {:total (sum vol)} ticker)
+;; From Clojure
+(xt/execute-tx node
+  [["ATTACH DATABASE seon_trading WITH $$
+      log: !Local
+        path: 'data/namespaces/seon.trading/log'
+      storage: !Local
+        path: 'data/namespaces/seon.trading/storage'
+    $$"]])
 ```
 
-### 4. Use xt/template for Dynamic Values
-```clojure
-;; WRONG - variable not in scope
-(from :table [{:ticker ticker-var} strike])
+### Connect to Specific Database
 
-;; CORRECT
-(xt/template (from :table [{:ticker ~ticker-var} strike]))
+```clojure
+;; Create a connection to a specific database
+(let [conn (-> (.createConnectionBuilder node)
+               (.database "seon_trading")
+               (.build))]
+  (try
+    (xt/q conn "SELECT * FROM signals")
+    (finally
+      (.close conn))))
+
+;; Or use :database option
+(xt/q node "SELECT * FROM signals" {:database :seon_trading})
 ```
 
-### 5. Inline Binding for Equality Only
-```clojure
-;; Equality - use inline binding
-(from :table [{:status "active"} name])
+### Cross-Database Queries
 
-;; Range - use where clause
-(-> (from :table [price name])
-    (where (> price 100)))
+```sql
+-- Query from another database using qualified names
+SELECT * FROM xtdb.users
+
+-- Join across databases
+SELECT s.*, u.name
+FROM signals s
+JOIN xtdb.users u ON s.user_id = u._id
+
+-- Fully qualified
+SELECT * FROM seon_trading.public.signals
 ```
+
+### Table Reference Syntax
+
+| Form | Meaning |
+|------|---------|
+| `table` | `public.table` in current database |
+| `schema.table` | `schema.table` in current database |
+| `database.table` | `public.table` in specified database |
+| `database.schema.table` | `schema.table` in specified database |
+
+### Detach a Database
+
+```sql
+-- Run from primary 'xtdb' connection only
+DETACH DATABASE seon_trading
+```
+
+**Note**: Storage files remain on disk after detach.
+
+### Constraints
+
+1. ATTACH/DETACH only from primary `xtdb` database connection
+2. Cannot run ATTACH/DETACH within a transaction
+3. Database names must be unique
+4. Cannot detach the primary `xtdb` database
 
 ---
 
 ## Transactions
 
+### Insert (SQL)
+
+```clojure
+;; Single insert
+(xt/execute-tx node
+  [["INSERT INTO users (_id, name, email) VALUES (?, ?, ?)"
+    "user-1" "Alice" "alice@example.com"]])
+
+;; Batch insert (multiple rows)
+(xt/execute-tx node
+  [[:sql "INSERT INTO users (_id, name) VALUES (?, ?)"
+    ["user-1" "Alice"]
+    ["user-2" "Bob"]
+    ["user-3" "Carol"]]])
+```
+
 ### Insert (put-docs)
 
 ```clojure
+;; Single document
 (xt/execute-tx node
-  [[:put-docs :option-quotes
-    {:xt/id "AAPL230616C00150000"
-     :ticker "AAPL"
-     :strike 150.0
-     :option_type :call
-     :iv 0.25}]])
+  [[:put-docs :users {:xt/id "user-1" :name "Alice" :email "alice@example.com"}]])
 
-;; With valid-time (backdate)
+;; Multiple documents
 (xt/execute-tx node
-  [[:put-docs :option-quotes
-    {:xt/id "opt1"
-     :ticker "AAPL"
-     :xt/valid-from #inst "2023-06-01"}]])
+  [[:put-docs :users
+    {:xt/id "user-1" :name "Alice"}
+    {:xt/id "user-2" :name "Bob"}
+    {:xt/id "user-3" :name "Carol"}]])
+
+;; With valid-time
+(xt/execute-tx node
+  [[:put-docs :users
+    {:xt/id "user-1"
+     :name "Alice"
+     :xt/valid-from #inst "2025-01-01"}]])
+```
+
+### Update
+
+```clojure
+;; SQL UPDATE
+(xt/execute-tx node
+  [["UPDATE users SET name = ? WHERE _id = ?" "Alicia" "user-1"]])
+
+;; put-docs overwrites
+(xt/execute-tx node
+  [[:put-docs :users {:xt/id "user-1" :name "Alicia" :email "alicia@example.com"}]])
 ```
 
 ### Delete
 
 ```clojure
-;; Delete from now onward
-(xt/execute-tx node [[:delete-docs :option-quotes "opt1"]])
+;; SQL DELETE
+(xt/execute-tx node
+  [["DELETE FROM users WHERE _id = ?" "user-1"]])
+
+;; delete-docs
+(xt/execute-tx node
+  [[:delete-docs :users "user-1"]])
 
 ;; Delete for time range
 (xt/execute-tx node
-  [[:delete-docs :option-quotes "opt1"
-    {:valid-from #inst "2023-01-01"
-     :valid-to #inst "2023-06-01"}]])
+  [[:delete-docs :users "user-1"
+    {:valid-from #inst "2025-01-01"
+     :valid-to #inst "2025-06-01"}]])
 ```
 
-### Erase (Permanent - GDPR)
+### Erase (GDPR - Permanent)
 
 ```clojure
 ;; WARNING: Irreversibly removes all history
-(xt/execute-tx node [[:erase-docs :users "user-id"]])
+(xt/execute-tx node
+  [["ERASE FROM users WHERE _id = ?" "user-1"]])
+
+;; Or
+(xt/execute-tx node
+  [[:erase-docs :users "user-1"]])
 ```
 
-### Batch Insert
+### Transaction Options
 
 ```clojure
 (xt/execute-tx node
-  [[:put-docs :option-quotes
-    {:xt/id "opt1" :ticker "AAPL" :strike 150.0}
-    {:xt/id "opt2" :ticker "AAPL" :strike 155.0}
-    {:xt/id "opt3" :ticker "AAPL" :strike 160.0}]])
+  [[:put-docs :users {:xt/id "user-1" :name "Alice"}]]
+  {:system-time #inst "2025-01-01"  ; Override system time
+   :default-tz "America/New_York"   ; Override timezone
+   :metadata {:correlation-id "abc123"}  ; Transaction metadata (v2.1+)
+   :database :seon_trading})        ; Target specific database
 ```
 
 ---
@@ -340,50 +314,68 @@ Use `xt/template` to inject Clojure values into queries:
 ## Temporal Queries
 
 XTDB maintains two timelines:
-- **Valid Time** (`current-time`): When the fact is true in the real world
-- **System Time** (`snapshot-time`): When XTDB recorded it
+- **Valid Time**: When the fact is true in the real world
+- **System Time**: When XTDB recorded it
 
 ### Query at Valid Time
 
-```clojure
-;; What was true on 2023-06-01?
-(node/query node
-  '(from :option-quotes [ticker strike iv])
-  {:current-time #inst "2023-06-01"})
+```sql
+-- What was true on 2025-06-01?
+SELECT * FROM users
+FOR VALID_TIME AS OF TIMESTAMP '2025-06-01T00:00:00Z'
+
+-- What was true between two dates?
+SELECT * FROM users
+FOR VALID_TIME FROM TIMESTAMP '2025-01-01' TO TIMESTAMP '2025-06-01'
 ```
 
-### Query at System Time
-
 ```clojure
-;; What did we know on 2023-06-01?
-(node/query node
-  '(from :option-quotes [ticker strike iv])
-  {:snapshot-time #inst "2023-06-01"})
-```
-
-### Bitemporal Query
-
-```clojure
-;; What did we know on Dec 31 about June 1?
-(node/query node
-  '(from :option-quotes [ticker strike iv])
-  {:current-time #inst "2023-06-01"
-   :snapshot-time #inst "2023-12-31"})
+(xt/q node
+  "SELECT * FROM users FOR VALID_TIME AS OF TIMESTAMP '2025-06-01T00:00:00Z'")
 ```
 
 ### Query All History
 
-```clojure
-;; All valid-time history
-(node/query node
-  '(from :option-quotes {:for-valid-time :all-time}
-         [xt/id ticker strike xt/valid-from xt/valid-to]))
+```sql
+-- All valid-time history
+SELECT _id, name, _valid_from, _valid_to
+FROM users
+FOR ALL VALID_TIME
 
-;; Full bitemporal history
-(node/query node
-  '(from :option-quotes {:for-valid-time :all-time
-                         :for-system-time :all-time}
-         [xt/id ticker xt/valid-from xt/system-from]))
+-- Full bitemporal history
+SELECT _id, name, _valid_from, _valid_to, _system_from, _system_to
+FROM users
+FOR ALL VALID_TIME
+FOR ALL SYSTEM_TIME
+```
+
+### Query at System Time
+
+```sql
+-- What did we know on 2025-06-01?
+SELECT * FROM users
+FOR SYSTEM_TIME AS OF TIMESTAMP '2025-06-01T00:00:00Z'
+```
+
+### Common Patterns
+
+```clojure
+;; Events since a timestamp
+(defn events-since [node table since-instant]
+  (xt/q node
+    [(format "SELECT * FROM %s WHERE _valid_from > ? ORDER BY _valid_from" table)
+     since-instant]))
+
+;; Most recent event time
+(defn last-event-time [node table]
+  (-> (xt/q node
+        (format "SELECT _valid_from FROM %s ORDER BY _valid_from DESC LIMIT 1" table))
+      first
+      :xt/valid-from))
+
+;; Count events in window
+(xt/q node
+  ["SELECT COUNT(*) as cnt FROM edit_events WHERE _valid_from > ?" cutoff-instant])
 ```
 
 ---
@@ -399,12 +391,12 @@ XTDB maintains two timelines:
 ;; Data lost when closed
 ```
 
-### Persistent
+### Persistent (Production)
 
 ```clojure
 (def node (xtn/start-node
-            {:log-dir "xtdb-data/log"
-             :storage-dir "xtdb-data/storage"}))
+            {:log [:local {:path "data/xtdb/log"}]
+             :storage [:local {:path "data/xtdb/storage"}]}))
 ```
 
 ### JVM Requirements
@@ -412,7 +404,9 @@ XTDB maintains two timelines:
 Requires JDK 21+ with flags:
 ```
 --add-opens=java.base/java.nio=ALL-UNNAMED
---enabled-native-access=ALL-UNNAMED
+--add-opens=java.base/sun.nio.ch=ALL-UNNAMED
+--add-opens=java.base/java.lang=ALL-UNNAMED
+--enable-native-access=ALL-UNNAMED
 -Dio.netty.tryReflectionSetAccessible=true
 ```
 
@@ -420,8 +414,8 @@ Requires JDK 21+ with flags:
 
 ## Data Types
 
-| Clojure | XTDB | Notes |
-|---------|------|-------|
+| Clojure | SQL | Notes |
+|---------|-----|-------|
 | String | VARCHAR | |
 | Long/Integer | BIGINT/INT | |
 | Double | DOUBLE | |
@@ -439,65 +433,47 @@ Requires JDK 21+ with flags:
 
 ### Query Patterns
 
-| Pattern | XTQL |
-|---------|------|
-| Select columns | `(from :t [col1 col2])` |
-| Equality filter | `(from :t [{:field val} col])` |
-| Dynamic value | `(xt/template (from :t [{:f ~var}]))` |
-| Range filter | `(-> (from :t [c]) (where (> c 10)))` |
-| Order asc | `(order-by col)` |
-| Order desc | `(order-by {:val col :dir :desc})` |
-| Aggregate | `(aggregate {:sum (sum c)} group-col)` |
-| Computed | `(with {:new (+ a b)})` |
-| Limit | `(limit 10)` |
-| Valid-time | `{:current-time #inst "..."}` |
-| System-time | `{:snapshot-time #inst "..."}` |
-| All history | `(from :t {:for-valid-time :all-time} [...])` |
+| Pattern | SQL |
+|---------|-----|
+| Select all | `SELECT * FROM table` |
+| Select columns | `SELECT col1, col2 FROM table` |
+| Filter | `SELECT * FROM table WHERE col = ?` |
+| Order asc | `ORDER BY col` |
+| Order desc | `ORDER BY col DESC` |
+| Limit | `LIMIT 10` |
+| Offset | `LIMIT 10 OFFSET 20` |
+| Count | `SELECT COUNT(*) FROM table` |
+| Aggregate | `SELECT col, SUM(x) FROM table GROUP BY col` |
+| Join | `JOIN other ON table.id = other.table_id` |
+| Valid-time | `FOR VALID_TIME AS OF TIMESTAMP '...'` |
+| All history | `FOR ALL VALID_TIME` |
 
 ### Transaction Patterns
 
 | Operation | Syntax |
 |-----------|--------|
-| Insert | `[:put-docs :table {:xt/id "id" ...}]` |
-| Insert w/ time | `[:put-docs :table {:xt/id "id" :xt/valid-from #inst "..."}]` |
-| Delete | `[:delete-docs :table "id"]` |
-| Erase | `[:erase-docs :table "id"]` |
+| Insert (SQL) | `["INSERT INTO t (_id, col) VALUES (?, ?)" id val]` |
+| Insert (put-docs) | `[:put-docs :table {:xt/id id :col val}]` |
+| Update | `["UPDATE t SET col = ? WHERE _id = ?" val id]` |
+| Delete (SQL) | `["DELETE FROM t WHERE _id = ?" id]` |
+| Delete (put-docs) | `[:delete-docs :table id]` |
+| Erase | `["ERASE FROM t WHERE _id = ?" id]` |
 
-### Common Queries
+### Multi-Database
 
-```clojure
-;; Find by ID
-(first (node/query node (xt/template (from :table [{:xt/id ~id}]))))
-
-;; ATM options (within 5% of spot)
-(let [lower (* spot 0.95) upper (* spot 1.05)]
-  (node/query node
-    (xt/template
-      (-> (from :option-quotes [{:ticker ~ticker} strike iv delta])
-          (where (>= strike ~lower) (<= strike ~upper))))))
-
-;; Aggregate OI by strike
-(node/query node
-  (xt/template
-    (-> (from :option-quotes [{:ticker ~ticker} strike open_interest])
-        (aggregate {:total_oi (sum open_interest)} strike)
-        (order-by strike))))
-```
+| Operation | Syntax |
+|-----------|--------|
+| Attach | `ATTACH DATABASE name WITH $$ log: ... storage: ... $$` |
+| Detach | `DETACH DATABASE name` |
+| Cross-db query | `SELECT * FROM other_db.table` |
+| Connection | `(.database (.createConnectionBuilder node) "db")` |
+| Query option | `(xt/q node "..." {:database :db_name})` |
 
 ---
 
-## Bulk Loading and Data Management
-
-See [XTDB Bulk Loading Guide](xtdb-bulk-loading.md) for comprehensive documentation on:
-- Export/import procedures
-- Compaction strategies
-- Performance monitoring
-- Troubleshooting
-- Backup/restore procedures
-
 ## Files
 
-- `src/ml_options/db/node.clj` - Query wrapper (use this)
-- `src/ml_options/db/queries.clj` - Domain queries
-- `src/ml_options/data/bulk_load.clj` - Bulk load CLI with resilience
-- `reference-code/xtdb/` - XTDB v2.1.0-rc0 source
+- `src/seon/db/node.clj` - Query utilities
+- `src/seon/db/queries.clj` - Domain queries
+- `reference-code/xtdb/` - XTDB v2.1.0 source code
+- `docs/prds/xtdb-sql-migration/research/multi-database.md` - Multi-DB research

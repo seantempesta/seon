@@ -70,14 +70,23 @@
         ;; Read responses until done
         (loop [result nil]
           (let [msg (decode-msg (b/read-bencode in))
-                status (get msg "status")]
+                status (get msg "status")
+                err (get msg "err")]
+            ;; Debug: print errors to stderr
+            (when err
+              (binding [*out* *err*]
+                (println "NREPL ERROR:" err)))
             (if (and status (some #{"done"} status))
               result
               (recur (or (get msg "value") result)))))))
-    (catch java.net.ConnectException _
+    (catch java.net.ConnectException e
       ;; nREPL not running - return nil (will result in continue response)
+      (binding [*out* *err*]
+        (println "NREPL CONNECT ERROR:" (.getMessage e)))
       nil)
-    (catch Exception _
+    (catch Exception e
+      (binding [*out* *err*]
+        (println "NREPL EXCEPTION:" (.getMessage e)))
       nil)))
 
 ;;; ---------------------------------------------------------------------------
@@ -88,9 +97,9 @@
   "Format the hook result for Claude Code JSON output.
 
    Takes the result map from process-hook-event! and converts to Claude Code format:
-   - ::continue true -> {:continue true} with optional additionalContext
    - ::decision \"block\" -> {:decision \"block\" :reason \"...\"}
-   - ::feedback -> {:hookSpecificOutput {:additionalContext \"...\"}}"
+   - ::continue true with feedback -> additionalContext (visible to Claude)
+   - ::continue true -> {:continue true}"
   [result]
   (when result
     (let [continue? (get result :seon.dev.hook/continue)
@@ -103,7 +112,7 @@
         {:decision "block"
          :reason (or reason "Blocked by hook")}
 
-        ;; Success with feedback
+        ;; Success with feedback - additionalContext for Claude
         (seq feedback)
         {:continue true
          :hookSpecificOutput
@@ -136,11 +145,13 @@
 
           ;; Build the expression to evaluate
           ;; Note: We need to pass the XTDB node from the running system
+          ;; Require the namespace first to ensure it's loaded
           code (format
-                "(seon.dev.hook/process-hook-event!
-                   {:seon.dev.hook/xtdb-node (user/xtdb-node)
-                    :seon.dev.hook/event %s
-                    :seon.dev.hook/config %s})"
+                "(do (require 'seon.dev.hook)
+                     (seon.dev.hook/process-hook-event!
+                       {:seon.dev.hook/xtdb-node (user/xtdb-node)
+                        :seon.dev.hook/event %s
+                        :seon.dev.hook/config %s}))"
                 (pr-str event)
                 (pr-str config))
 
@@ -157,12 +168,14 @@
           ;; Format for Claude Code
           response (format-response result)]
 
-      ;; Output JSON (only if we have a response)
+      ;; Output JSON response with systemMessage for visibility
       (when (seq response)
         (println (json/generate-string response))))
 
-    (catch Exception _
-      ;; Never crash - graceful degradation
+    (catch Exception e
+      ;; Log exceptions to stderr, don't crash
+      (binding [*out* *err*]
+        (println "HOOK ERROR:" (.getMessage e)))
       nil)))
 
 (-main)

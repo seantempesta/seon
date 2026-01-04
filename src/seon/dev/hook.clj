@@ -158,6 +158,7 @@
   "Deep merge user config with defaults."
   [user-config]
   (let [repair (merge (:repair default-config) (:repair user-config))
+        reload (merge (:reload default-config) (:reload user-config))
         tests {:unit (merge (get-in default-config [:tests :unit])
                             (get-in user-config [:tests :unit]))
                :generative (merge (get-in default-config [:tests :generative])
@@ -166,6 +167,7 @@
         compliance (merge (:compliance default-config) (:compliance user-config))
         feedback (merge (:feedback default-config) (:feedback user-config))]
     {:repair repair
+     :reload reload
      :tests tests
      :review review
      :compliance compliance
@@ -293,14 +295,16 @@
 
    Returns (merged with clj-reload result):
      {:success true :unloaded [...] :loaded [...]}
-     {:success false :error \"...\" :failed ns-sym :unloaded [...] :loaded [...]}"
-  [_ns-sym]
-  (let [result (reload/reload {:throw false})]
-    (if-let [ex (:exception result)]
-      (assoc result
-             :success false
-             :error (str "Compile error in " (:failed result) ": " (ex-message ex)))
-      (assoc result :success true))))
+     {:success false :error \"...\" :failed ns-sym :unloaded [...] :loaded [...]}
+     nil - if reload is disabled"
+  [_ns-sym config]
+  (when (get-in config [:reload :enabled])
+    (let [result (reload/reload {:throw false})]
+      (if-let [ex (:exception result)]
+        (assoc result
+               :success false
+               :error (str "Compile error in " (:failed result) ": " (ex-message ex)))
+        (assoc result :success true)))))
 
 (defn- stage-unit-tests
   "Run unit tests if enabled and test namespace exists.
@@ -486,8 +490,9 @@
                                    (block-response (:error repair-result)))]
                 (or repair-block
                     ;; 2. Reload namespace - block on compile error
-                    (let [reload-result (stage-reload ns-sym)
-                          reload-block (when-not (:success reload-result)
+                    (let [reload-result (stage-reload ns-sym config)
+                          reload-block (when (and reload-result
+                                                  (not (:success reload-result)))
                                          (block-response (:error reload-result)))]
                       (or reload-block
                           ;; 3. Compliance checks - non-blocking feedback (after reload, before tests)

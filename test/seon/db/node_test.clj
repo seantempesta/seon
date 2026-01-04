@@ -2,7 +2,10 @@
   "Integration tests for XTDB node wrapper functions.
 
   Tests the core database operations: query routing, entity retrieval,
-  entity history, and transaction execution."
+  entity history, and transaction execution.
+
+  NOTE: As of XTDB v2.1.0, we use SQL as the primary query language.
+  XTQL is deprecated and will throw errors if used."
   (:require [clojure.test :refer [deftest testing is use-fixtures]]
             [seon.db.node :as node]
             [seon.test-utils :refer [with-test-node *test-node*]]
@@ -79,15 +82,15 @@
                        :xt/valid-from valid-from}]]))
 
 ;;; ---------------------------------------------------------------------------
-;;; Query Function Tests
+;;; SQL Query Function Tests (node/q)
 ;;; ---------------------------------------------------------------------------
 
-(deftest query-xtql-basic-test
-  (testing "query routes XTQL expressions correctly"
+(deftest q-basic-test
+  (testing "q executes SQL queries correctly"
     (let [_ (insert-test-option *test-node* "AAPL-1" "AAPL" 0.25)
           _ (insert-test-option *test-node* "AAPL-2" "AAPL" 0.28)
-          results (node/query *test-node*
-                              '(from :option-greeks [asset/ticker quote/iv]))]
+          results (node/q *test-node*
+                          "SELECT asset$ticker, quote$iv FROM option_greeks")]
 
       (is (seq results) "Should return results")
       (is (every? map? results) "Results should be maps")
@@ -95,57 +98,56 @@
       (is (every? :quote/iv results) "Results should have iv field")
       (is (= 2 (count results)) "Should return both options"))))
 
-(deftest query-xtql-with-filter-test
-  (testing "query with XTQL filter clause"
+(deftest q-with-params-test
+  (testing "q executes parameterized SQL queries"
     (let [_ (insert-test-option *test-node* "AAPL-1" "AAPL" 0.25)
           _ (insert-test-option *test-node* "SPY-1" "SPY" 0.15)
-          results (node/query *test-node*
-                              '(-> (from :option-greeks [asset/ticker quote/iv])
-                                   (where (= asset/ticker "AAPL"))))]
+          results (node/q *test-node*
+                          "SELECT asset$ticker, quote$iv FROM option_greeks WHERE asset$ticker = ?"
+                          ["AAPL"])]
 
       (is (= 1 (count results)) "Should filter to AAPL only")
       (is (= "AAPL" (:asset/ticker (first results))) "Should return AAPL")
       (is (= 0.25 (:quote/iv (first results))) "Should have correct IV"))))
 
-(deftest query-xtql-template-test
-  (testing "query with xt/template for dynamic values"
+(deftest q-with-vector-format-test
+  (testing "q accepts [sql & params] vector format"
     (let [_ (insert-test-option *test-node* "AAPL-1" "AAPL" 0.25)
           _ (insert-test-option *test-node* "SPY-1" "SPY" 0.15)
-          ticker "SPY"
-          results (node/query *test-node*
-                              (xt/template
-                               (-> (from :option-greeks [asset/ticker quote/iv])
-                                   (where (= asset/ticker ~ticker)))))]
+          results (node/q *test-node*
+                          ["SELECT asset$ticker, quote$iv FROM option_greeks WHERE asset$ticker = ?" "SPY"])]
 
       (is (= 1 (count results)) "Should filter to SPY only")
       (is (= "SPY" (:asset/ticker (first results))) "Should return SPY")
       (is (= 0.15 (:quote/iv (first results))) "Should have correct IV"))))
 
+(deftest q-empty-results-test
+  (testing "q returns empty vector when no results"
+    (let [results (node/q *test-node*
+                          "SELECT asset$ticker FROM option_greeks")]
+      (is (vector? results) "Should return vector")
+      (is (empty? results) "Should be empty when no data"))))
+
+;;; ---------------------------------------------------------------------------
+;;; Legacy Query Function Tests (deprecated but still working for SQL)
+;;; ---------------------------------------------------------------------------
+
 (deftest query-sql-string-test
-  (testing "query routes SQL strings correctly"
+  (testing "query routes SQL strings correctly (deprecated but working)"
     (let [_ (insert-test-option *test-node* "AAPL-1" "AAPL" 0.25)
           results (node/query *test-node*
                               "SELECT asset$ticker, quote$iv FROM option_greeks WHERE asset$ticker = 'AAPL'")]
 
       (is (seq results) "Should return results")
       (is (every? map? results) "Results should be maps")
-      ;; SQL returns snake_case by default, but our wrapper uses kebab-case-keyword
-      (is (or (:asset/ticker (first results))
-              (:asset-ticker (first results)))
-          "Should have ticker field"))))
+      (is (:asset/ticker (first results)) "Should have ticker field"))))
 
-(deftest query-sql-with-args-test
-  (testing "query with SQL parameterized query"
-    ;; NOTE: XTDB v2 doesn't support ? placeholders in SQL
-    ;; Use literal values or XTQL with xt/template instead
-    (let [_ (insert-test-option *test-node* "AAPL-1" "AAPL" 0.25)
-          _ (insert-test-option *test-node* "SPY-1" "SPY" 0.15)
-          ;; Use literal value in SQL
-          results (node/query *test-node*
-                              "SELECT asset$ticker, quote$iv FROM option_greeks WHERE asset$ticker = 'SPY'")]
-
-      (is (seq results) "Should return results")
-      (is (= 1 (count results)) "Should filter to SPY only"))))
+(deftest query-xtql-throws-error-test
+  (testing "query throws error for XTQL expressions (deprecated)"
+    (is (thrown-with-msg? Exception #"XTQL queries are no longer supported"
+                          (node/query *test-node*
+                                      '(from :option-greeks [asset/ticker quote/iv])))
+        "Should throw on XTQL expression")))
 
 (deftest query-invalid-type-test
   (testing "query throws on invalid query type"
@@ -155,13 +157,6 @@
     (is (thrown-with-msg? Exception #"Unknown query type"
                           (node/query *test-node* {:invalid "map"}))
         "Should throw on map query")))
-
-(deftest query-empty-results-test
-  (testing "query returns empty vector when no results"
-    (let [results (node/query *test-node*
-                              '(from :option-greeks [asset/ticker]))]
-      (is (vector? results) "Should return vector")
-      (is (empty? results) "Should be empty when no data"))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Entity Function Tests
@@ -246,28 +241,6 @@
     (let [history (node/entity-history *test-node* :option-greeks "NONEXISTENT")]
       (is (empty? history) "Should return empty sequence"))))
 
-(deftest entity-history-temporal-opts-test
-  (testing "entity-history respects temporal options"
-    (let [now (Instant/now)
-          five-days-ago (.minus now 5 ChronoUnit/DAYS)
-          three-days-ago (.minus now 3 ChronoUnit/DAYS)
-          one-day-ago (.minus now 1 ChronoUnit/DAYS)
-
-          ;; Insert 3 versions over time
-          _ (insert-test-option-at-time *test-node* "AAPL-1" "AAPL" 0.20 five-days-ago)
-          _ (insert-test-option-at-time *test-node* "AAPL-1" "AAPL" 0.25 three-days-ago)
-          _ (insert-test-option-at-time *test-node* "AAPL-1" "AAPL" 0.30 one-day-ago)
-
-          ;; Get all history using :all-time
-          full-history (node/entity-history *test-node* :option-greeks "AAPL-1"
-                                            {:for-valid-time :all-time
-                                             :for-system-time :all-time})]
-
-      (is (>= (count full-history) 3) "Full history should have all versions")
-      ;; Verify we got different IV values
-      (let [ivs (set (map :quote/iv full-history))]
-        (is (>= (count ivs) 3) "Should have at least 3 different IV values")))))
-
 ;;; ---------------------------------------------------------------------------
 ;;; Transaction Execution Tests
 ;;; ---------------------------------------------------------------------------
@@ -331,9 +304,8 @@
                                  :greeks/theta -0.1
                                  :greeks/vega 10.0}]])
 
-          results (node/query *test-node*
-                              '(-> (from :option-greeks [xt/id asset/ticker])
-                                   (where (= asset/ticker "BATCH"))))]
+          results (node/q *test-node*
+                          "SELECT _id, asset$ticker FROM option_greeks WHERE asset$ticker = 'BATCH'")]
 
       (is (= 2 (count results)) "Both documents should be inserted")
       (is (= #{"BATCH-1" "BATCH-2"} (set (map :xt/id results)))
@@ -408,11 +380,59 @@
       (is (some? result-now) "Should find document at current time")
       (is (nil? result-before) "Should not find document before valid-from"))))
 
+;;; ---------------------------------------------------------------------------
+;;; Put/Delete Helper Function Tests
+;;; ---------------------------------------------------------------------------
+
+(deftest put-single-doc-test
+  (testing "put! inserts a single document"
+    (let [_ (node/put! *test-node* :test-table
+                       {:xt/id "test-1" :name "Alice" :age 30})
+          result (node/entity *test-node* :test-table "test-1")]
+
+      (is (some? result) "Document should be retrievable")
+      (is (= "Alice" (:name result)) "Should have correct name")
+      (is (= 30 (:age result)) "Should have correct age"))))
+
+(deftest put-multiple-docs-test
+  (testing "put! inserts multiple documents"
+    (let [_ (node/put! *test-node* :test-table
+                       [{:xt/id "test-1" :name "Alice"}
+                        {:xt/id "test-2" :name "Bob"}])
+          results (node/q *test-node*
+                          "SELECT _id, name FROM test_table")]
+
+      (is (= 2 (count results)) "Both documents should be inserted")
+      (is (= #{"Alice" "Bob"} (set (map :name results))) "Should have both names"))))
+
+(deftest delete-single-doc-test
+  (testing "delete! removes a single document"
+    (let [_ (node/put! *test-node* :test-table {:xt/id "del-1" :name "ToDelete"})
+          before (node/entity *test-node* :test-table "del-1")
+          _ (node/delete! *test-node* :test-table "del-1")
+          after (node/entity *test-node* :test-table "del-1")]
+
+      (is (some? before) "Document should exist before delete")
+      (is (nil? after) "Document should not exist after delete"))))
+
+(deftest delete-multiple-docs-test
+  (testing "delete! removes multiple documents"
+    (let [_ (node/put! *test-node* :test-table
+                       [{:xt/id "del-1" :name "Alice"}
+                        {:xt/id "del-2" :name "Bob"}
+                        {:xt/id "del-3" :name "Charlie"}])
+          before-count (count (node/q *test-node* "SELECT _id FROM test_table"))
+          _ (node/delete! *test-node* :test-table ["del-1" "del-2"])
+          after-count (count (node/q *test-node* "SELECT _id FROM test_table"))]
+
+      (is (= 3 before-count) "Should have 3 docs before delete")
+      (is (= 1 after-count) "Should have 1 doc after delete (Charlie remains)"))))
+
 (comment
   ;; Run all tests
   (clojure.test/run-tests 'seon.db.node-test)
 
   ;; Run specific test
-  (clojure.test/test-var #'query-xtql-basic-test)
+  (clojure.test/test-var #'q-basic-test)
   (clojure.test/test-var #'entity-history-basic-test)
   (clojure.test/test-var #'execute-tx-put-docs-test))

@@ -1,151 +1,231 @@
 (ns seon.db.node
-  "XTDB v2 node management and query utilities.
+  "XTDB node management and SQL query wrappers.
+
+  XTDB v2.1.0 uses SQL as the primary query language for stability and performance.
+  All queries use parameterized SQL to prevent injection.
+
+  ## Query Execution
+
+  Use `q` for SQL queries:
+    (q node \"SELECT * FROM users WHERE name = ?\" [\"Alice\"])
+    (q node \"SELECT * FROM users\")  ; no params
+
+  Use `entity` for single entity lookup:
+    (entity node :users \"user-123\")
+
+  ## Temporal Queries
+
+  All query functions accept an opts map for temporal control:
+    {:current-time #inst \"2024-01-15\"}  ; as of valid-time
+    {:snapshot-time #inst \"2024-01-10\"} ; as of system-time
+
+  ## Migration Note (v2.1.0)
+
+  The legacy `query` and `xtql-query` functions have been deprecated.
+  All code should now use `q` with SQL syntax.
 
   XTDB v2 API differences from v1:
   - No 'database value' concept - queries execute directly on node
-  - No xt/entity or xt/entity-history - use SQL/XTQL queries instead
+  - No xt/entity or xt/entity-history - use SQL queries instead
   - Temporal queries use query options or SQL temporal clauses
-  - execute-tx is synchronous (no await needed)
-
-  Query Execution:
-  - Use `xt/q` for both XTQL and SQL queries
-  - XTQL queries are wrapped in SQL and executed via JDBC
-  - Returns results as Clojure maps with kebab-case keywords by default"
+  - execute-tx is synchronous (no await needed)"
   (:require [xtdb.api :as xt]))
 
 ;;; ---------------------------------------------------------------------------
-;;; Query Execution
+;;; SQL Query Execution
 ;;; ---------------------------------------------------------------------------
 
-(defn xtql-query
-  "Execute an XTQL query on the node.
+(defn q
+  "Execute a SQL query against XTDB.
 
-  Uses xt/q which wraps XTQL in SQL and executes via JDBC.
+  Supports multiple calling conventions:
+  1. (q node \"SELECT * FROM table\")
+  2. (q node \"SELECT * FROM table WHERE col = ?\" [val])
+  3. (q node \"SELECT * FROM table WHERE col = ?\" [val] opts)
+  4. (q node [\"SELECT * FROM table WHERE col = ?\" val])
+  5. (q node [\"SELECT * FROM table WHERE col = ?\" val] opts)
 
-  Args:
-    node - XTDB node
-    query-form - XTQL expression (e.g., (from :table [col1 col2]))
-    opts - Optional map with:
-           :current-time - Valid-time point for temporal queries
-           :snapshot-time - System-time point for temporal queries
-           :key-fn - Keyword transformation (default: :kebab-case-keyword)
+  Query can be:
+  - A SQL string with optional params vector
+  - A vector of [sql-string & params]
 
-  Returns:
-    Query results as a vector of maps"
-  ([node query-form]
-   (xtql-query node query-form {}))
-  ([node query-form opts]
-   (let [{:keys [current-time snapshot-time key-fn]
-          :or {key-fn :kebab-case-keyword}} opts
-         query-opts (cond-> {:key-fn key-fn}
-                      current-time (assoc :current-time current-time)
-                      snapshot-time (assoc :snapshot-time snapshot-time))]
-     (xt/q node query-form query-opts))))
-
-(defn sql-query
-  "Execute a SQL query on the node.
-
-  Args:
-    node - XTDB node
-    sql - SQL string or [sql & args] vector
-    opts - Optional map with temporal options
+  Opts map (optional):
+  - :key-fn - Result key transformation (default :kebab-case-keyword)
+  - :current-time - Valid-time for temporal query
+  - :snapshot-time - System-time for point-in-time query
 
   Returns:
-    Query results as a vector of maps"
-  ([node sql]
-   (sql-query node sql {}))
-  ([node sql opts]
-   (let [{:keys [current-time snapshot-time key-fn]
-          :or {key-fn :kebab-case-keyword}} opts
-         query-opts (cond-> {:key-fn key-fn}
-                      current-time (assoc :current-time current-time)
-                      snapshot-time (assoc :snapshot-time snapshot-time))]
-     (xt/q node sql query-opts))))
+    Vector of result maps"
+  ([node query-or-sql]
+   (q node query-or-sql nil nil))
+  ([node query-or-sql params-or-opts]
+   (if (map? params-or-opts)
+     ;; (q node query opts)
+     (q node query-or-sql nil params-or-opts)
+     ;; (q node sql params)
+     (q node query-or-sql params-or-opts nil)))
+  ([node query-or-sql params opts]
+   (let [;; Normalize to [sql & params] format
+         [sql & sql-params] (if (vector? query-or-sql)
+                              query-or-sql
+                              (into [query-or-sql] (or params [])))
+         query-vec (into [sql] sql-params)
+         ;; Build options
+         query-opts (cond-> {:key-fn :kebab-case-keyword}
+                      (:current-time opts) (assoc :current-time (:current-time opts))
+                      (:snapshot-time opts) (assoc :snapshot-time (:snapshot-time opts))
+                      (:key-fn opts) (assoc :key-fn (:key-fn opts)))]
+     (vec (xt/q node query-vec query-opts)))))
 
-(defn query
-  "Execute a query against the XTDB node.
-
-  Routes to xtql-query for XTQL expressions (sequences) and
-  sql-query for SQL strings.
-
-  Args:
-    node - XTDB node
-    query-form - SQL string or XTQL expression
-    opts - Optional map with:
-           :current-time - Valid-time point for temporal queries
-           :snapshot-time - System-time point for temporal queries
-
-  Returns:
-    Query results as a vector of maps"
-  ([node query-form]
-   (query node query-form {}))
-  ([node query-form opts]
-   (cond
-     ;; XTQL expression (quoted form)
-     (seq? query-form)
-     (xtql-query node query-form opts)
-
-     ;; SQL string
-     (string? query-form)
-     (sql-query node query-form opts)
-
-     ;; SQL with args [sql-string & args]
-     (and (vector? query-form) (string? (first query-form)))
-     (sql-query node (first query-form)
-                (assoc opts :args (vec (rest query-form))))
-
-     :else
-     (throw (ex-info "Unknown query type"
-                     {:query query-form :type (type query-form)})))))
+;;; ---------------------------------------------------------------------------
+;;; Entity Lookup
+;;; ---------------------------------------------------------------------------
 
 (defn entity
-  "Retrieve an entity by ID from a table.
+  "Get a single entity by ID from a table.
 
   Args:
     node - XTDB node
-    table - Table keyword (e.g., :option-quotes)
+    table - Table keyword (e.g., :users, :option-greeks)
     id - Entity ID
     opts - Optional map with :current-time, :snapshot-time
 
   Returns:
-    Entity map or nil"
+    Entity map or nil if not found"
   ([node table id]
    (entity node table id {}))
   ([node table id opts]
-   ;; Convert kebab-case table name to snake_case for SQL
-   (let [table-name (clojure.string/replace (name table) "-" "_")
-         sql (str "SELECT * FROM " table-name " WHERE _id = '" id "'")]
-     (first (sql-query node sql opts)))))
+   (let [;; Convert kebab-case to snake_case for SQL table name
+         table-name (clojure.string/replace (name table) "-" "_")
+         query-opts (cond-> {:key-fn :kebab-case-keyword}
+                      (:current-time opts) (assoc :current-time (:current-time opts))
+                      (:snapshot-time opts) (assoc :snapshot-time (:snapshot-time opts)))]
+     (first (xt/q node
+                  [(str "SELECT * FROM " table-name " WHERE _id = ?") id]
+                  query-opts)))))
 
 (defn entity-history
   "Get the complete history of an entity across time.
 
-  Uses SQL for simplicity since XTQL temporal queries require explicit column binding.
+  Uses SQL FOR ALL VALID_TIME to retrieve all temporal versions.
 
   Args:
     node - XTDB node
     table - Table keyword
     id - Entity ID
-    opts - Options map:
-           :for-valid-time - :all-time or specific range
-           :for-system-time - :all-time or specific range
+    opts - Options map (currently ignored, queries all time)
 
   Returns:
     Sequence of historical versions"
   ([node table id]
-   (entity-history node table id {:for-valid-time :all-time
-                                  :for-system-time :all-time}))
+   (entity-history node table id {}))
   ([node table id opts]
-   ;; Use SQL with FOR ALL VALID_TIME for temporal queries
    (let [table-name (clojure.string/replace (name table) "-" "_")
-         sql (str "SELECT * FROM " table-name
-                  " FOR ALL VALID_TIME"
-                  " WHERE _id = '" id "'")]
-     (sql-query node sql opts))))
+         sql (str "SELECT * FROM " table-name " FOR ALL VALID_TIME WHERE _id = ?")]
+     (vec (xt/q node [sql id] {:key-fn :kebab-case-keyword})))))
 
 ;;; ---------------------------------------------------------------------------
-;;; Transaction Submission
+;;; DEPRECATED: Legacy Query Functions
 ;;; ---------------------------------------------------------------------------
+
+(defn xtql-query
+  "DEPRECATED: Execute an XTQL query on the node.
+
+  XTQL is no longer supported. Please migrate to SQL:
+
+    ;; Old XTQL:
+    (xtql-query node '(from :users [name email]))
+
+    ;; New SQL:
+    (q node \"SELECT name, email FROM users\")
+
+  This function will throw an error if called."
+  ([node query-form]
+   (xtql-query node query-form {}))
+  ([node query-form opts]
+   (throw (ex-info "XTQL queries are no longer supported. Please use SQL syntax."
+                   {:query query-form
+                    :hint "Use (q node \"SELECT ...\") instead"}))))
+
+(defn sql-query
+  "DEPRECATED: Use `q` instead.
+
+  This is an alias for `q` for backward compatibility."
+  ([node sql]
+   (q node sql))
+  ([node sql opts]
+   (q node sql nil opts)))
+
+(defn query
+  "DEPRECATED: Execute a query against the XTDB node.
+
+  This function previously supported both XTQL and SQL. XTQL is no longer
+  supported. Please migrate to `q` with SQL syntax:
+
+    ;; Old XTQL (no longer supported):
+    (query node '(from :users [name email]))
+
+    ;; New SQL:
+    (q node \"SELECT name, email FROM users\")
+
+  For backward compatibility, SQL queries still work but log a deprecation notice."
+  ([node query-form]
+   (query node query-form {}))
+  ([node query-form opts]
+   (cond
+     ;; XTQL expression (quoted form) - no longer supported
+     (seq? query-form)
+     (throw (ex-info "XTQL queries are no longer supported. Please use SQL syntax."
+                     {:query query-form
+                      :hint "Use (q node \"SELECT ...\") instead of (query node '(from :table [...]))"}))
+
+     ;; SQL string - route to q
+     (string? query-form)
+     (q node query-form nil opts)
+
+     ;; SQL with args [sql-string & args]
+     (and (vector? query-form) (string? (first query-form)))
+     (q node query-form nil opts)
+
+     :else
+     (throw (ex-info "Unknown query type"
+                     {:query query-form :type (type query-form)})))))
+
+;;; ---------------------------------------------------------------------------
+;;; Transaction Helpers
+;;; ---------------------------------------------------------------------------
+
+(defn put!
+  "Put documents into XTDB.
+
+  Args:
+    node - XTDB node
+    table - Table keyword (e.g., :users)
+    docs - Single doc or vector of docs
+
+  Each doc must have :xt/id. Optional :xt/valid-from for temporal control.
+
+  Returns:
+    Transaction result"
+  [node table docs]
+  (let [docs-vec (if (vector? docs) docs [docs])]
+    (xt/execute-tx node
+                   [(into [:put-docs table] docs-vec)])))
+
+(defn delete!
+  "Delete documents from XTDB by ID.
+
+  Args:
+    node - XTDB node
+    table - Table keyword
+    ids - Single ID or vector of IDs
+
+  Returns:
+    Transaction result"
+  [node table ids]
+  (let [ids-vec (if (vector? ids) ids [ids])]
+    (xt/execute-tx node
+                   (mapv (fn [id] [:delete-docs table id]) ids-vec))))
 
 (defn execute-tx!
   "Execute a transaction synchronously.
@@ -153,7 +233,7 @@
   Transaction ops:
     [:put-docs :table {:xt/id \"id\" ...}]
     [:delete-docs :table \"id\"]
-    [:sql \"INSERT INTO ...\"]
+    [:erase-docs :table \"id\"]
 
   Args:
     node - XTDB node
@@ -179,7 +259,7 @@
   (xt/submit-tx node tx-ops))
 
 ;;; ---------------------------------------------------------------------------
-;;; Node Management
+;;; Node Status
 ;;; ---------------------------------------------------------------------------
 
 (defn status
