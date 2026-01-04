@@ -40,12 +40,27 @@ Current SSE broadcasts to all connected clients. Need:
 - Per-namespace SSE channels
 - Agent's `render-fn` targets only their namespace's channel
 
-### 4. Code Loading in Shared JVM - STILL UNRESOLVED
+### 4. Code Loading in Shared JVM - RESOLVED
 
-Agent edits files in worktree, but shared JVM loads from main repo.
-- When does agent's new code get loaded?
-- `(reload)` reloads from main repo, not worktree
-- May need worktree-aware reload or separate classpath
+**Answer: clj-reload can load from worktree directories.**
+
+See `docs/prds/agent-isolation/research/worktree-reloading.md` for full details.
+
+Key findings:
+- clj-reload uses `Compiler/load` with file content, bypassing classpath
+- Call `(reload/init {:dirs ["/path/to/worktree/src" "src" ...]})` to add worktree
+- One active worktree at a time (global state)
+- Agents must work on non-overlapping namespaces
+
+**Implementation approach**:
+```clojure
+(defn activate-agent! [{:seon.agent/keys [worktree-path]}]
+  (reload/init {:dirs [(str worktree-path "/src") "src" "env/dev/clj" "test"]
+                :no-reload '#{user}}))
+
+(defn reload-agent-namespaces! [namespace-sym]
+  (reload/reload {:only (re-pattern (str "^" namespace-sym "\\..*"))}))
+```
 
 ---
 
