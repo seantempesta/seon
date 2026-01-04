@@ -174,12 +174,10 @@
         in-progress (state/list-in-progress node)
         ;; Get all states for overview
         all-states (state/list-all-states node)
-        ;; Count total option records
-        record-count (-> (node/query node
-                                     '(-> (from :option-greeks [xt/id])
-                                          (aggregate {:count (count xt/id)})))
+        ;; Count total option records (using SQL)
+        record-count (-> (node/q node "SELECT COUNT(*) as cnt FROM option_greeks")
                          first
-                         :count
+                         :cnt
                          (or 0))]
     {:symbols-in-progress (mapv #(select-keys % [:ingestion/symbol
                                                  :ingestion/last-date
