@@ -25,6 +25,7 @@
             [malli.core :as m]
             [malli.generator :as mg]
             [malli.instrument :as mi]
+            [malli.registry :as mr]
             [seon.schema :as schema]))
 
 ;;; ---------------------------------------------------------------------------
@@ -224,6 +225,21 @@
 ;;; Generative Test Running
 ;;; ---------------------------------------------------------------------------
 
+(defn- ensure-registry-sync!
+  "Ensure Malli's default registry is in sync with our mutable schema atom.
+
+   After namespace reloads, the Malli registry can get out of sync with
+   our seon.schema/*schemas atom. This refreshes the registry binding
+   to ensure all registered schemas are visible to Malli.
+
+   This is a workaround for a timing issue where defonce in seon.schema
+   may have created the registry before schemas were registered."
+  []
+  (mr/set-default-registry!
+   (mr/composite-registry
+    (m/default-schemas)
+    (mr/mutable-registry @#'schema/*schemas))))
+
 (defn- get-function-schemas
   "Get all functions with Malli schemas in a namespace.
 
@@ -286,8 +302,12 @@
     (try
       ;; Reload namespace first
       (require namespace :reload)
+      ;; Ensure registry is in sync after reload (fixes defonce timing issues)
+      (ensure-registry-sync!)
       ;; Collect function schemas from metadata - required for m/function-schemas to work
-      (mi/collect! {:ns namespace})
+      ;; Use clj-collect! function directly since mi/collect! is a macro that doesn't
+      ;; work well with dynamic namespace symbols at runtime
+      (mi/clj-collect! {:ns namespace})
       (let [schemas (get-function-schemas namespace)
             failures (if (nil? schemas)
                        []

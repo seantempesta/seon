@@ -1,13 +1,8 @@
 (ns seon.db.queries
-  "XTQL query builders for financial data.
+  "SQL query builders for financial data.
 
-  XTDB v2 uses XTQL (composable, data-oriented queries) instead of Datalog.
-  All queries execute directly on the node - no 'db value' concept.
-
-  XTQL Patterns:
-  - Use inline binding {:field ~value} in (from) for equality filters
-  - Use xt/template macro to inject dynamic values
-  - Use (where) for range conditions (>, <, >=, <=)
+  XTDB v2 uses SQL as the primary query language for stability and performance.
+  All queries use parameterized SQL to prevent injection.
 
   Provides composable query functions for:
   - Options chain queries
@@ -36,22 +31,26 @@
   ([node ticker]
    (options-chain node ticker {}))
   ([node ticker opts]
-   (let [{:keys [expiry current-time]} opts]
+   (let [{:keys [expiry current-time]} opts
+         query-opts (cond-> {:key-fn :kebab-case-keyword}
+                      current-time (assoc :current-time current-time))]
      (if expiry
-       (node/query node
-                   (xt/template
-                    (-> (from :option-greeks [{:asset/ticker ~ticker :option/expiry ~expiry}
-                                              xt/id option/id option/strike option/type
-                                              quote/iv greeks/delta greeks/gamma greeks/theta greeks/vega
-                                              quote/bid quote/ask])))
-                   {:current-time current-time})
-       (node/query node
-                   (xt/template
-                    (-> (from :option-greeks [{:asset/ticker ~ticker}
-                                              xt/id option/id option/strike option/type option/expiry
-                                              quote/iv greeks/delta greeks/gamma greeks/theta greeks/vega
-                                              quote/bid quote/ask])))
-                   {:current-time current-time})))))
+       (xt/q node
+             ["SELECT _id, option$id, option$strike, option$type,
+                      quote$iv, greeks$delta, greeks$gamma, greeks$theta, greeks$vega,
+                      quote$bid, quote$ask
+               FROM option_greeks
+               WHERE asset$ticker = ? AND option$expiry = ?"
+              ticker expiry]
+             query-opts)
+       (xt/q node
+             ["SELECT _id, option$id, option$strike, option$type, option$expiry,
+                      quote$iv, greeks$delta, greeks$gamma, greeks$theta, greeks$vega,
+                      quote$bid, quote$ask
+               FROM option_greeks
+               WHERE asset$ticker = ?"
+              ticker]
+             query-opts)))))
 
 (defn atm-options
   "Get at-the-money options for a ticker.
@@ -71,16 +70,19 @@
    (atm-options node ticker spot tolerance {}))
   ([node ticker spot tolerance opts]
    (let [lower (* spot (- 1 tolerance))
-         upper (* spot (+ 1 tolerance))]
-     (node/query node
-                 (xt/template
-                  (-> (from :option-greeks [{:asset/ticker ~ticker}
-                                            xt/id option/id option/strike option/type option/expiry
-                                            quote/iv greeks/delta greeks/gamma greeks/theta greeks/vega
-                                            quote/bid quote/ask])
-                      (where (>= option/strike ~lower)
-                             (<= option/strike ~upper))))
-                 {:current-time (:current-time opts)}))))
+         upper (* spot (+ 1 tolerance))
+         query-opts (cond-> {:key-fn :kebab-case-keyword}
+                      (:current-time opts) (assoc :current-time (:current-time opts)))]
+     (xt/q node
+           ["SELECT _id, option$id, option$strike, option$type, option$expiry,
+                    quote$iv, greeks$delta, greeks$gamma, greeks$theta, greeks$vega,
+                    quote$bid, quote$ask
+             FROM option_greeks
+             WHERE asset$ticker = ?
+               AND option$strike >= ?
+               AND option$strike <= ?"
+            ticker lower upper]
+           query-opts))))
 
 (defn option-by-occ
   "Get a specific option by OCC symbol.
@@ -95,14 +97,17 @@
   ([node occ-symbol]
    (option-by-occ node occ-symbol {}))
   ([node occ-symbol opts]
-   (first
-    (node/query node
-                (xt/template
-                 (-> (from :option-greeks [{:option/id ~occ-symbol}
-                                           xt/id asset/ticker option/strike option/type option/expiry
-                                           quote/iv greeks/delta greeks/gamma greeks/theta greeks/vega
-                                           quote/bid quote/ask])))
-                {:current-time (:current-time opts)}))))
+   (let [query-opts (cond-> {:key-fn :kebab-case-keyword}
+                      (:current-time opts) (assoc :current-time (:current-time opts)))]
+     (first
+      (xt/q node
+            ["SELECT _id, asset$ticker, option$strike, option$type, option$expiry,
+                     quote$iv, greeks$delta, greeks$gamma, greeks$theta, greeks$vega,
+                     quote$bid, quote$ask
+              FROM option_greeks
+              WHERE option$id = ?"
+             occ-symbol]
+            query-opts)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Greeks Queries
@@ -122,14 +127,17 @@
   ([node ticker min-gamma]
    (high-gamma-options node ticker min-gamma {}))
   ([node ticker min-gamma opts]
-   (node/query node
-               (xt/template
-                (-> (from :option-greeks [{:asset/ticker ~ticker}
-                                          xt/id option/id option/strike option/type option/expiry
-                                          quote/iv greeks/delta greeks/gamma greeks/theta greeks/vega
-                                          quote/bid quote/ask])
-                    (where (>= greeks/gamma ~min-gamma))))
-               {:current-time (:current-time opts)})))
+   (let [query-opts (cond-> {:key-fn :kebab-case-keyword}
+                      (:current-time opts) (assoc :current-time (:current-time opts)))]
+     (xt/q node
+           ["SELECT _id, option$id, option$strike, option$type, option$expiry,
+                    quote$iv, greeks$delta, greeks$gamma, greeks$theta, greeks$vega,
+                    quote$bid, quote$ask
+             FROM option_greeks
+             WHERE asset$ticker = ?
+               AND greeks$gamma >= ?"
+            ticker min-gamma]
+           query-opts))))
 
 (defn options-by-delta
   "Find options within a delta range.
@@ -149,15 +157,19 @@
   ([node ticker option-type delta-min delta-max]
    (options-by-delta node ticker option-type delta-min delta-max {}))
   ([node ticker option-type delta-min delta-max opts]
-   (node/query node
-               (xt/template
-                (-> (from :option-greeks [{:asset/ticker ~ticker :option/type ~option-type}
-                                          xt/id option/id option/strike option/expiry
-                                          quote/iv greeks/delta greeks/gamma greeks/theta greeks/vega
-                                          quote/bid quote/ask])
-                    (where (>= greeks/delta ~delta-min)
-                           (<= greeks/delta ~delta-max))))
-               {:current-time (:current-time opts)})))
+   (let [query-opts (cond-> {:key-fn :kebab-case-keyword}
+                      (:current-time opts) (assoc :current-time (:current-time opts)))]
+     (xt/q node
+           ["SELECT _id, option$id, option$strike, option$expiry,
+                    quote$iv, greeks$delta, greeks$gamma, greeks$theta, greeks$vega,
+                    quote$bid, quote$ask
+             FROM option_greeks
+             WHERE asset$ticker = ?
+               AND option$type = ?
+               AND greeks$delta >= ?
+               AND greeks$delta <= ?"
+            ticker option-type delta-min delta-max]
+           query-opts))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; IV Surface Queries
@@ -176,13 +188,15 @@
   ([node ticker]
    (iv-surface node ticker {}))
   ([node ticker opts]
-   (first
-    (node/query node
-                (xt/template
-                 (-> (from :iv-surfaces [{:ticker ~ticker}
-                                         xt/id timestamp surface_data
-                                         atm_iv term_structure skew])))
-                {:current-time (:current-time opts)}))))
+   (let [query-opts (cond-> {:key-fn :kebab-case-keyword}
+                      (:current-time opts) (assoc :current-time (:current-time opts)))]
+     (first
+      (xt/q node
+            ["SELECT _id, timestamp, surface_data, atm_iv, term_structure, skew
+              FROM iv_surfaces
+              WHERE ticker = ?"
+             ticker]
+            query-opts)))))
 
 (defn iv-term-structure
   "Get IV term structure (ATM IV across expirations).
@@ -197,17 +211,21 @@
   ([node ticker]
    (iv-term-structure node ticker {}))
   ([node ticker opts]
-   (->> (node/query node
-                    (xt/template
-                     (-> (from :option-greeks [{:asset/ticker ~ticker}
-                                               option/expiry quote/iv greeks/delta])
-                         ;; ATM options have delta near 0.5 (calls) or -0.5 (puts)
-                         (where (> greeks/delta 0.4)
-                                (< greeks/delta 0.6))
-                         (order-by option/expiry)))
-                    {:current-time (:current-time opts)})
-        (map (fn [row]
-               {:expiry (:option/expiry row) :iv (:quote/iv row)})))))
+   (let [query-opts (cond-> {:key-fn :kebab-case-keyword}
+                      (:current-time opts) (assoc :current-time (:current-time opts)))
+         ;; ATM options have delta near 0.5 (calls) or -0.5 (puts)
+         results (xt/q node
+                       ["SELECT option$expiry, quote$iv, greeks$delta
+                         FROM option_greeks
+                         WHERE asset$ticker = ?
+                           AND greeks$delta > 0.4
+                           AND greeks$delta < 0.6
+                         ORDER BY option$expiry"
+                        ticker]
+                       query-opts)]
+     (map (fn [row]
+            {:expiry (:option/expiry row) :iv (:quote/iv row)})
+          results))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Bitemporal Queries
@@ -239,16 +257,16 @@
 
   Args:
     node - XTDB node
-    query-form - XTQL or SQL query to execute
-    args - Query arguments (unused in XTQL - use xt/template)
+    query-form - SQL query to execute
+    args - Query arguments
     valid-time - The business time
     system-time - Optional: when the data was recorded
 
   Returns:
     Query results as of the specified time"
-  ([node query-form _args valid-time]
-   (query-at-time node query-form nil valid-time nil))
-  ([node query-form _args valid-time system-time]
+  ([node query-form args valid-time]
+   (query-at-time node query-form args valid-time nil))
+  ([node query-form args valid-time system-time]
    (node/query node query-form
                {:current-time valid-time
                 :snapshot-time system-time})))
@@ -274,18 +292,15 @@
         now (java.time.Instant/now)
         start-date (.minus now lookback-days java.time.temporal.ChronoUnit/DAYS)
         ;; Query all valid-time history within the lookback period
-        results (node/query node
-                            (xt/template
-                             (-> (from :option-greeks
-                                       {:for-valid-time :all-time
-                                        :bind [asset/ticker quote/iv greeks/delta
-                                               xt/valid-from xt/valid-to]})
-                                 ;; Filter by ticker and delta range
-                                 (where (= asset/ticker ~ticker)
-                                        (> greeks/delta 0.4)
-                                        (< greeks/delta 0.6)
-                                        ;; Filter to lookback period
-                                        (>= xt/valid-from ~start-date)))))]
+        results (xt/q node
+                      ["SELECT asset$ticker, quote$iv, greeks$delta, _valid_from, _valid_to
+                        FROM option_greeks FOR ALL VALID_TIME
+                        WHERE asset$ticker = ?
+                          AND greeks$delta > 0.4
+                          AND greeks$delta < 0.6
+                          AND _valid_from >= ?"
+                       ticker start-date]
+                      {:key-fn :kebab-case-keyword})]
     (map :quote/iv results)))
 
 (defn aggregate-open-interest
@@ -303,9 +318,12 @@
   ([node ticker opts]
    ;; Note: open_interest is not available in our :option-greeks schema
    ;; This function is a placeholder and will return empty results
-   (node/query node
-               (xt/template
-                (-> (from :option-greeks [{:asset/ticker ~ticker}
-                                          option/strike])
-                    (order-by option/strike)))
-               {:current-time (:current-time opts)})))
+   (let [query-opts (cond-> {:key-fn :kebab-case-keyword}
+                      (:current-time opts) (assoc :current-time (:current-time opts)))]
+     (xt/q node
+           ["SELECT option$strike
+             FROM option_greeks
+             WHERE asset$ticker = ?
+             ORDER BY option$strike"
+            ticker]
+           query-opts))))

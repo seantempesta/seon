@@ -83,16 +83,17 @@
    (iv-rank db ticker lookback {}))
   ([db ticker lookback opts]
    (let [ticker-str (name ticker)
-         query-opts {:current-time (:as-of opts)}
+         query-opts (cond-> {:key-fn :kebab-case-keyword}
+                      (:as-of opts) (assoc :current-time (:as-of opts)))
          ;; Query all historical ATM IV values (up to as-of date if specified)
-         results (node/query db
-                             (xt/template
-                              (-> (from :option-greeks
-                                        [asset/ticker quote/iv greeks/delta xt/valid-from])
-                                  (where (= asset/ticker ~ticker-str)
-                                         (> greeks/delta 0.4)
-                                         (< greeks/delta 0.6))))
-                             query-opts)
+         results (xt/q db
+                       ["SELECT asset$ticker, quote$iv, greeks$delta, _valid_from
+                         FROM option_greeks
+                         WHERE asset$ticker = ?
+                           AND greeks$delta > 0.4
+                           AND greeks$delta < 0.6"
+                        ticker-str]
+                       query-opts)
          historical-ivs (map :quote/iv results)]
      (if (seq historical-ivs)
        ;; Get the most recent IV (latest valid-from)
@@ -124,16 +125,17 @@
    (iv-percentile db ticker percentile lookback {}))
   ([db ticker percentile lookback opts]
    (let [ticker-str (name ticker)
-         query-opts {:current-time (:as-of opts)}
+         query-opts (cond-> {:key-fn :kebab-case-keyword}
+                      (:as-of opts) (assoc :current-time (:as-of opts)))
          ;; Query all historical ATM IV values (up to as-of date if specified)
-         results (node/query db
-                             (xt/template
-                              (-> (from :option-greeks
-                                        [asset/ticker quote/iv greeks/delta])
-                                  (where (= asset/ticker ~ticker-str)
-                                         (> greeks/delta 0.4)
-                                         (< greeks/delta 0.6))))
-                             query-opts)
+         results (xt/q db
+                       ["SELECT asset$ticker, quote$iv, greeks$delta
+                         FROM option_greeks
+                         WHERE asset$ticker = ?
+                           AND greeks$delta > 0.4
+                           AND greeks$delta < 0.6"
+                        ticker-str]
+                       query-opts)
          historical-ivs (map :quote/iv results)]
      (if (seq historical-ivs)
        (or (calculate-percentile historical-ivs percentile) 0.20)
@@ -343,8 +345,8 @@
   [db index-ticker component-tickers weights]
   ;; TODO: Implement proper correlation calculation
   ;; Requires querying actual volatilities from the database
-  ;; σ_I² = Σw_i²σ_i² + ΣΣw_iw_jσ_iσ_jρ_ij
-  ;; Solve for average ρ
+  ;; sigma_I^2 = sum(w_i^2 * sigma_i^2) + sum(sum(w_i * w_j * sigma_i * sigma_j * rho_ij))
+  ;; Solve for average rho
   ;;
   ;; Current implementation has hardcoded volatilities which makes it unusable.
   ;; Returning nil until properly implemented.

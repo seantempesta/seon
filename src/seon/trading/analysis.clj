@@ -278,26 +278,31 @@
 (defn- get-spot-price
   "Get current underlying price for ticker."
   [node ticker opts]
-  (let [query-opts {:current-time (:as-of opts)}
-        result (first (node/query node
-                                  (xt/template
-                                   (-> (from :option-greeks [{:asset/ticker ~(name ticker)}
-                                                             underlying/price]
-                                             (limit 1))))
-                                  query-opts))]
+  (let [query-opts (cond-> {:key-fn :kebab-case-keyword}
+                     (:as-of opts) (assoc :current-time (:as-of opts)))
+        result (first (xt/q node
+                            ["SELECT underlying$price
+                              FROM option_greeks
+                              WHERE asset$ticker = ?
+                              LIMIT 1"
+                             (name ticker)]
+                            query-opts))]
     (:underlying/price result)))
 
 (defn- get-atm-iv
   "Get current ATM implied volatility."
   [node ticker opts]
-  (let [query-opts {:current-time (:as-of opts)}
-        results (node/query node
-                            (xt/template
-                             (-> (from :option-greeks [{:asset/ticker ~(name ticker)}
-                                                       quote/iv greeks/delta]
-                                       (where (> greeks/delta 0.4) (< greeks/delta 0.6))
-                                       (limit 20))))
-                            query-opts)]
+  (let [query-opts (cond-> {:key-fn :kebab-case-keyword}
+                     (:as-of opts) (assoc :current-time (:as-of opts)))
+        results (xt/q node
+                      ["SELECT quote$iv, greeks$delta
+                        FROM option_greeks
+                        WHERE asset$ticker = ?
+                          AND greeks$delta > 0.4
+                          AND greeks$delta < 0.6
+                        LIMIT 20"
+                       (name ticker)]
+                      query-opts)]
     (when (seq results)
       (/ (reduce + (map :quote/iv results)) (count results)))))
 

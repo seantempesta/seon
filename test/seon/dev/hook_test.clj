@@ -391,8 +391,10 @@
             ;; Write valid code with a namespace
             (spit temp-path "(ns seon.orchestration-test)\n(defn bar [x] x)")
             (let [event (make-event "PostToolUse" "Edit" temp-path)
-                  ;; Disable tests and review for faster execution
+                  ;; Disable everything - temp file not on classpath
                   config {:repair {:enabled false}
+                          :reload {:enabled false}
+                          :compliance {:enabled false}
                           :tests {:unit {:enabled false}
                                   :generative {:enabled false}}
                           :review {:enabled false}}

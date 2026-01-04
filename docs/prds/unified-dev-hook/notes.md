@@ -279,6 +279,35 @@ All success criteria verified:
 
 ---
 
+### Malli Registry Sync Issue (2026-01-04)
+
+**Problem:** Generative tests were failing with `:malli.core/register-function-schema` error when running via the hook.
+
+**Root Cause:** After namespace reloads, Malli's default registry can get out of sync with our `seon.schema/*schemas` mutable atom. The `defonce` in `seon.schema` creates the composite registry at load time, but subsequent reloads can break the link between the mutable registry and the atom.
+
+**Symptoms:**
+- `mi/collect!` throws `:malli.core/register-function-schema` error
+- Nested cause shows `:malli.core/invalid-schema` for registered schemas
+- `(schema/registered? ::some-key)` returns true but `(m/schema ::some-key)` throws
+
+**Solution:** Added `ensure-registry-sync!` function in `verify.clj` that refreshes the Malli registry before collecting function schemas:
+
+```clojure
+(defn- ensure-registry-sync!
+  "Ensure Malli's default registry is in sync with our mutable schema atom."
+  []
+  (mr/set-default-registry!
+   (mr/composite-registry
+    (m/default-schemas)
+    (mr/mutable-registry @#'schema/*schemas))))
+```
+
+Called in `run-gen-tests` before `mi/clj-collect!`.
+
+**Also:** Use `mi/clj-collect!` (function) instead of `mi/collect!` (macro) for dynamic namespace symbols at runtime.
+
+---
+
 ## References
 
 - [Malli Function Schemas](https://github.com/metosin/malli/blob/master/docs/function-schemas.md)

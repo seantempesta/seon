@@ -364,17 +364,16 @@
   {:malli/schema [:=> [:cat ::record-edit-request] ::record-edit-response]}
   [{::keys [xtdb-node file-path namespace content-hash unit-test-result
             gen-test-result decision reason feedback]}]
-  (let [entity (cond-> {:xt/id (UUID/randomUUID)
-                        ::entity-type :edit-event
-                        ::file file-path}
-                 namespace (assoc ::namespace (keyword (str namespace)))
-                 content-hash (assoc ::content-hash content-hash)
-                 unit-test-result (assoc ::unit-test-result unit-test-result)
-                 gen-test-result (assoc ::gen-test-result gen-test-result)
-                 decision (assoc ::decision decision)
-                 reason (assoc ::reason reason)
-                 feedback (assoc ::feedback feedback))
-        result (node/execute-tx! xtdb-node [[:put-docs :edit-event entity]])]
+  (let [id (UUID/randomUUID)
+        entity-type :edit-event
+        ns-kw (when namespace (keyword (str namespace)))
+        ;; Use SQL INSERT instead of :put-docs due to XTDB v2.1.0-rc0 bug
+        ;; where put-docs fails with "invalid-tx-op" error
+        result (node/execute-tx!
+                xtdb-node
+                [["INSERT INTO edit_event (_id, seon$dev$context$entity_type, seon$dev$context$file, seon$dev$context$namespace, seon$dev$context$content_hash, seon$dev$context$unit_test_result, seon$dev$context$gen_test_result, seon$dev$context$decision, seon$dev$context$reason, seon$dev$context$feedback) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                  id entity-type file-path ns-kw content-hash unit-test-result
+                  gen-test-result decision reason feedback]])]
     {::success (some? result)
      ::tx-id (:tx-id result)}))
 
@@ -405,17 +404,17 @@
   {:malli/schema [:=> [:cat ::record-review-request] ::record-review-response]}
   [{::keys [xtdb-node files gemini-prompt gemini-response
             gemini-system-instruction gemini-code gemini-tokens]}]
-  (let [edit-count (count (::edits (edits-since-last-review {::xtdb-node xtdb-node})))
-        entity (cond-> {:xt/id (UUID/randomUUID)
-                        ::entity-type :review-event
-                        ::files (set files)
-                        ::edit-count edit-count}
-                 gemini-prompt (assoc ::gemini-prompt gemini-prompt)
-                 gemini-response (assoc ::gemini-response gemini-response)
-                 gemini-system-instruction (assoc ::gemini-system-instruction gemini-system-instruction)
-                 gemini-code (assoc ::gemini-code gemini-code)
-                 gemini-tokens (assoc ::gemini-tokens gemini-tokens))
-        result (node/execute-tx! xtdb-node [[:put-docs :review-event entity]])]
+  (let [id (UUID/randomUUID)
+        entity-type :review-event
+        files-set (set files)
+        edit-count (count (::edits (edits-since-last-review {::xtdb-node xtdb-node})))
+        ;; Use SQL INSERT instead of :put-docs due to XTDB v2.1.0-rc0 bug
+        ;; where put-docs fails with "invalid-tx-op" error
+        result (node/execute-tx!
+                xtdb-node
+                [["INSERT INTO review_event (_id, seon$dev$context$entity_type, seon$dev$context$files, seon$dev$context$edit_count, seon$dev$context$gemini_prompt, seon$dev$context$gemini_response, seon$dev$context$gemini_system_instruction, seon$dev$context$gemini_code, seon$dev$context$gemini_tokens) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                  id entity-type files-set edit-count gemini-prompt gemini-response
+                  gemini-system-instruction gemini-code gemini-tokens]])]
     {::success (some? result)
      ::tx-id (:tx-id result)}))
 
@@ -591,12 +590,11 @@
   [{::keys [xtdb-node]}]
   (let [edit-ids (map :xt/id (node/sql-query xtdb-node "SELECT _id FROM edit_event"))
         review-ids (map :xt/id (node/sql-query xtdb-node "SELECT _id FROM review_event"))]
-    (when (seq edit-ids)
-      (node/execute-tx! xtdb-node
-                        (mapv (fn [id] [:erase-docs :edit-event id]) edit-ids)))
-    (when (seq review-ids)
-      (node/execute-tx! xtdb-node
-                        (mapv (fn [id] [:erase-docs :review-event id]) review-ids)))
+    ;; Use SQL ERASE instead of :erase-docs due to XTDB v2.1.0-rc0 bug
+    (doseq [id edit-ids]
+      (node/execute-tx! xtdb-node [["ERASE FROM edit_event WHERE _id = ?" id]]))
+    (doseq [id review-ids]
+      (node/execute-tx! xtdb-node [["ERASE FROM review_event WHERE _id = ?" id]]))
     {::success true}))
 
 ;;; ---------------------------------------------------------------------------
