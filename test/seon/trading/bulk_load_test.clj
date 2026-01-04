@@ -114,7 +114,7 @@
   (testing "Returns map with all required keys"
     (with-redefs [state/list-in-progress (fn [_] [])
                   state/list-all-states (fn [_] [])
-                  node/query (fn [_ _] [{:count 0}])
+                  node/q (fn [_ _ & _] [{:cnt 0}])
                   theta/circuit-status (fn [] {:state :closed :consecutive-failures 0})
                   theta/rate-limit-status (fn [] {:requests-remaining 100})]
       (let [mock-node (make-mock-node)
@@ -140,7 +140,7 @@
   (testing "Memory stats include expected fields"
     (with-redefs [state/list-in-progress (fn [_] [])
                   state/list-all-states (fn [_] [])
-                  node/query (fn [_ _] [{:count 0}])
+                  node/q (fn [_ _ & _] [{:cnt 0}])
                   theta/circuit-status (fn [] {:state :closed})
                   theta/rate-limit-status (fn [] {})]
       (let [mock-node (make-mock-node)
@@ -164,7 +164,7 @@
                             :ingestion/status :in-progress
                             :xt/id "ingestion-state-SPY"}])
                   state/list-all-states (fn [_] [])
-                  node/query (fn [_ _] [{:count 0}])
+                  node/q (fn [_ _ & _] [{:cnt 0}])
                   theta/circuit-status (fn [] {:state :closed})
                   theta/rate-limit-status (fn [] {})]
       (let [mock-node (make-mock-node)
@@ -185,7 +185,7 @@
   (testing "Queries and returns total option records count"
     (with-redefs [state/list-in-progress (fn [_] [])
                   state/list-all-states (fn [_] [])
-                  node/query (fn [_ _] [{:count 123456}])
+                  node/q (fn [_ _ & _] [{:cnt 123456}])
                   theta/circuit-status (fn [] {:state :closed})
                   theta/rate-limit-status (fn [] {})]
       (let [mock-node (make-mock-node)
@@ -197,7 +197,7 @@
   (testing "Handles nil count gracefully"
     (with-redefs [state/list-in-progress (fn [_] [])
                   state/list-all-states (fn [_] [])
-                  node/query (fn [_ _] [{:count nil}])
+                  node/q (fn [_ _ & _] [{:cnt nil}])
                   theta/circuit-status (fn [] {:state :closed})
                   theta/rate-limit-status (fn [] {})]
       (let [mock-node (make-mock-node)

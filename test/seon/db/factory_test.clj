@@ -4,7 +4,9 @@
   Tests cover:
   - In-memory node creation and lifecycle
   - Persistent node creation (file-based)
-  - Proper cleanup"
+  - Proper cleanup
+
+  NOTE: As of XTDB v2.1.0, we use SQL for all queries."
   (:require
    [clojure.test :refer [deftest testing is use-fixtures]]
    [seon.db.factory :as factory]
@@ -18,8 +20,8 @@
       (try
         (is (some? xtdb-node) "Node should be created")
 
-        ;; Verify node is functional by running a simple query
-        (let [result (node/query xtdb-node '(from :nonexistent [*]))]
+        ;; Verify node is functional by running a simple SQL query
+        (let [result (node/q xtdb-node "SELECT * FROM nonexistent")]
           (is (vector? result) "Should be able to query node"))
 
         (finally
@@ -43,8 +45,8 @@
         (is (.exists (File. (str test-path "/log"))) "Log dir should exist")
         (is (.exists (File. (str test-path "/storage"))) "Storage dir should exist")
 
-        ;; Verify node is functional by running a simple query
-        (let [result (node/query xtdb-node '(from :nonexistent [*]))]
+        ;; Verify node is functional by running a simple SQL query
+        (let [result (node/q xtdb-node "SELECT * FROM nonexistent")]
           (is (vector? result) "Should be able to query node"))
 
         (finally
@@ -64,10 +66,10 @@
           node2 (factory/create-node :domain2 {:in-memory? true})]
       (try
         ;; Write to node1 using XTDB v2 transaction format
-        (node/execute-tx! node1 [[:put-docs :test/doc1 {:xt/id :test/doc1 :domain :domain1}]])
+        (node/execute-tx! node1 [[:put-docs :test-doc {:xt/id "test-doc1" :domain "domain1"}]])
 
-        ;; Verify node2 doesn't see node1's data
-        (let [result (node/query node2 '(from :test/doc1 [xt/id domain]))]
+        ;; Verify node2 doesn't see node1's data (using SQL)
+        (let [result (node/q node2 "SELECT _id, domain FROM test_doc")]
           (is (empty? result) "Node2 should not see Node1's data"))
 
         (finally
