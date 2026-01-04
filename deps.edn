@@ -49,6 +49,9 @@
         ;; Code formatting
         dev.weavejester/cljfmt {:mvn/version "0.12.0"}
 
+        ;; Code analysis (clj-kondo as library for in-process linting)
+        clj-kondo/clj-kondo {:mvn/version "2025.12.23"}
+
         ;; JSON (fast - replace cheshire)
         metosin/jsonista {:mvn/version "0.3.11"}
 
@@ -79,6 +82,7 @@
                       lambdaisland/kaocha {:mvn/version "1.91.1392"}
                       com.gfredericks/test.chuck {:mvn/version "0.2.14"}
                       integrant/repl {:mvn/version "0.4.0"}
+                      io.github.tonsky/clj-reload {:mvn/version "1.0.0"}
                       expound/expound {:mvn/version "0.9.0"}}
          :jvm-opts [;; XTDB/Arrow/Netty required flags for Java 21+
                     "--add-opens=java.base/java.nio=ALL-UNNAMED"
