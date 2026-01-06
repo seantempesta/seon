@@ -91,12 +91,12 @@ seon/                              # Main repo (orchestrator view)
 **The ctx atom IS the agent's entire world.** Agents don't know about databases, SQL, or persistence. They just `swap!` and `deref` like any Clojure atom.
 
 ```clojure
-;; Agent's view: just an atom
-(swap! *ctx* assoc :current-signal {:symbol "AAPL" :direction :long})
-(swap! *ctx* update :signals conj {:symbol "TSLA" :iv-rank 0.85})
+;; Agent's view: just an atom (all keys must be namespaced)
+(swap! *ctx* assoc :seon.trading/current-signal {:symbol "AAPL" :direction :long})
+(swap! *ctx* update :seon.trading/signals conj {:symbol "TSLA" :iv-rank 0.85})
 
 ;; Read state
-(:signals @*ctx*)
+(:seon.trading/signals @*ctx*)
 ```
 
 **Behind the scenes, the system automatically:**
@@ -108,22 +108,23 @@ seon/                              # Main repo (orchestrator view)
 
 ```clojure
 ;; The *ctx* dynamic var is bound per-nREPL session
-;; Agent can put ANYTHING in here - it's their scratchpad
+;; Agent stores state with namespaced keys (auto-persisted)
 
 @*ctx*
-;; => {:current-signal {:symbol "AAPL" :direction :long}
-;;     :signals [{:symbol "TSLA" :iv-rank 0.85}]
-;;     :notes "investigating volatility spike"
-;;     ... anything the agent wants ...}
+;; => {:seon.trading/current-signal {:symbol "AAPL" :direction :long}
+;;     :seon.trading/signals [{:symbol "TSLA" :iv-rank 0.85}]
+;;     :seon.trading/notes "investigating volatility spike"
+;;     :seon.agent/namespace seon.trading   ; reserved, read-only
+;;     :seon.agent/db <xtdb-connection>}    ; reserved, read-only
 ```
 
 The system also provides some reserved keys (prefixed with `:seon.agent/`):
 
 ```clojure
 {:seon.agent/namespace   'seon.trading      ; Read-only identity
- :seon.agent/db          <xtdb-connection>  ; Escape hatch to SQL (Level 3)
- :seon.agent/render-fn   (fn [hiccup] ...)  ; Push UI updates
- :seon.agent/worktree    "/path/to/worktree"}
+ :seon.agent/db          <xtdb-connection>  ; Direct SQL access (Level 3)
+ :seon.agent/render      (fn [hiccup] ...)  ; Push UI updates (Phase 5)
+ :seon.agent/worktree    "/path/to/worktree"} ; Git worktree (Phase 6)
 ```
 
 Most agents ignore `:seon.agent/db`. It's there for when they need SQL performance (see Progressive Complexity below).
@@ -133,21 +134,22 @@ Most agents ignore `:seon.agent/db`. It's there for when they need SQL performan
 ```clojure
 ;; Agent code (evaluated in seon.trading namespace via nREPL :7889)
 
-;; Store some state - automatically persisted!
-(swap! *ctx* assoc :active-signals
+;; Store state in ctx - automatically persisted!
+(swap! *ctx* assoc :seon.trading/active-signals
   [{:symbol "AAPL" :direction :long :iv-rank 0.92}
    {:symbol "TSLA" :direction :short :iv-rank 0.78}])
 
 ;; Render to web UI
-((:seon.agent/render-fn @*ctx*)
+((:seon.agent/render @*ctx*)
   [:div#signals-panel
    [:h2 "Active Signals"]
-   (for [s (:active-signals @*ctx*)]
+   (for [s (:seon.trading/active-signals @*ctx*)]
      [:div.signal (:symbol s) " - " (:direction s)])])
 
 ;; Later: what was my state 10 minutes ago?
-;; (via helper function, if agent learns about it)
-(ctx/at *ctx* #inst "2026-01-04T10:00:00")
+(ctx/at {::ctx/db (:seon.agent/db @*ctx*)
+         ::ctx/namespace 'seon.trading
+         ::ctx/instant #inst "2026-01-04T10:00:00"})
 ```
 
 ### Progressive Complexity: The Escape Hatch
@@ -158,19 +160,38 @@ Agents start with just the ctx atom. When they need more power, they can learn:
 |-------|-----------------|--------------|
 | **1. ctx atom** | Just `swap!` and `deref` | Full state snapshot persisted |
 | **2. Time travel** | `ctx/at`, `ctx/history` | Query historical states |
-| **3. SQL tables** | Use `:seon.agent/db` + invoke `xtdb-queries` skill | Create tables, indexed queries |
+| **3. SQL tables** | `sql`, `sql!`, `sql-batch!` helpers | Create tables, indexed queries |
 
 **Level 1 is the default.** Most agents never need more.
 
-**Level 3 example** (after learning from skill):
+**Level 3: SQL Helpers** (available in `seon.agent.helpers`):
+
 ```clojure
-;; Agent decides they need a proper signals table for performance
-(let [db (:seon.agent/db @*ctx*)]
-  ;; Create table and insert
-  (xt/execute-tx db [[:put-docs :signals {:xt/id "sig1" :symbol "AAPL"}]])
-  ;; Query with SQL
-  (xt/q db "SELECT * FROM signals WHERE symbol = ?" ["AAPL"]))
+;; The helpers use *ctx* implicitly - no need to extract :seon.agent/db
+
+;; Query - returns vector of keyword maps
+(sql "SELECT * FROM signals")
+(sql "SELECT * FROM signals WHERE symbol = ?" "AAPL")
+;; => [{:xt/id "sig-1" :symbol "AAPL" :direction "long" :iv_rank 0.92}]
+
+;; Insert (table created implicitly on first INSERT)
+(sql! "INSERT INTO signals (_id, symbol, direction, iv_rank) VALUES (?, ?, ?, ?)"
+      "sig-1" "AAPL" "long" 0.92)
+
+;; Batch insert - multiple rows in one transaction
+(sql-batch! "INSERT INTO signals (_id, symbol, direction) VALUES (?, ?, ?)"
+            ["sig-1" "AAPL" "long"]
+            ["sig-2" "TSLA" "short"])
+
+;; Update and delete
+(sql! "UPDATE signals SET direction = ? WHERE _id = ?" "short" "sig-1")
+(sql! "DELETE FROM signals WHERE _id = ?" "sig-1")
 ```
+
+**SQL column naming**: Use `snake_case` for columns. Namespaced keywords use `$` separator:
+`:signal/symbol` → `signal$symbol` in SQL.
+
+**Alternative**: Use XTDB API directly via `:seon.agent/db` (see `xtdb-queries` skill).
 
 ---
 
@@ -734,40 +755,105 @@ All features verified working in live REPL session:
 - Restore does NOT create new snapshot (verified count unchanged)
 - Swap after restore DOES persist (new snapshot created)
 
-### Phase 4: Agent Session API
+### Phase 4: Agent Session API - COMPLETE
 
-**Status**: Ready to implement
+**Completed**: 2026-01-06
 
 **Goal**: Provide a simple, opaque session abstraction so agents don't need to know about XTDB, nREPL ports, or persistence mechanics.
 
-#### Design Overview
+#### Implementation Summary
+
+Created `src/seon/orchestrator/session.clj` with the full session API:
+
+**Public Functions** (following CONVENTIONS.md - map in, map out):
+
+- `start-agent-session!` - Creates everything, returns session info
+  - Generates 8-char hex session ID via `SecureRandom`
+  - Auto-attaches XTDB database if not exists (`multi/ensure-namespace-db!`)
+  - Creates namespace connection (`multi/create-namespace-connection`)
+  - Creates persisted ctx (`ctx/make-persisted-ctx`) with automatic resume
+  - Starts namespace nREPL with the persisted ctx atom injected
+  - Stores session in XTDB orchestrator database
+  - Returns `{::id, ::namespace, ::status, ::nrepl-port, ::started-at, ::db-name}`
+
+- `stop-agent-session!` - Cleans up everything
+  - Flushes pending ctx state via `flush!`
+  - Stops namespace nREPL
+  - Closes persisted ctx via `close!`
+  - Closes namespace database connection
+  - Updates session status in XTDB
+  - Returns `{::id, ::status, ::stopped-at}`
+
+- `list-agent-sessions` - Returns active sessions from in-memory registry
+- `get-agent-session` - Returns single session info (checks registry then XTDB)
+- `get-session-port` - Returns nREPL port for session ID (used by agent-eval)
+- `recover-sessions!` - Marks orphaned "running" sessions as stopped on startup
+
+**CLI Tool**: `bin/agent-eval`
+
+Babashka script that provides opaque session-based evaluation:
+```bash
+# Usage: agent-eval <session-id> '<clojure-code>'
+agent-eval acdb234f '(+ 1 2)'
+agent-eval acdb234f '(swap! *ctx* assoc :seon.trading/signals [...])'
+```
+
+The script:
+1. Validates session ID format (8 hex chars)
+2. Queries orchestrator for session-id → port mapping via nREPL
+3. Evaluates code on the agent's namespace nREPL
+4. Returns result (stdout/stderr/value)
+5. Handles errors gracefully (session not found, connection failed)
+
+**Integration with Phase 2 (nREPL)**:
+
+Modified `start-namespace-nrepl!` to accept optional `:ctx-atom` parameter:
+- When provided, uses the external atom (persisted ctx) directly
+- When not provided, creates a plain atom (backward compatible)
+- Skips updating reserved keys on external atoms (they have protection)
+
+**Tests**: 12 tests, 35 assertions in `test/seon/orchestrator/session_test.clj`
+
+- Session ID format (8 hex chars)
+- Session lifecycle (start, stop, cleanup)
+- Session query functions (get, list, port)
+- nREPL integration (connect, eval, *ctx* available, *ns* bound)
+- Session resume (start, add data, stop, resume with data restored)
+- Multiple sessions isolation (separate ports, separate ctx)
+- Session recovery (marks orphaned sessions as stopped)
+
+#### API Examples
 
 **Orchestrator's view** (Clojure API):
 ```clojure
 ;; Start a fresh session
-(start-agent-session! {::session/namespace 'seon.trading})
-;; => {::session/id "acdb234"
+(start-agent-session! {::session/node xtdb-node ::session/namespace 'seon.trading})
+;; => {::session/id "acdb234f"
 ;;     ::session/namespace 'seon.trading
-;;     ::session/status :running}
+;;     ::session/status :running
+;;     ::session/nrepl-port 7889
+;;     ::session/started-at #inst "..."
+;;     ::session/db-name "seon_trading"}
 
-;; Resume existing session (loads previous ctx state)
-(start-agent-session! {::session/namespace 'seon.trading
+;; Resume existing session (loads previous ctx state - default behavior)
+(start-agent-session! {::session/node xtdb-node
+                       ::session/namespace 'seon.trading
                        ::session/resume? true})
 
 ;; List active sessions
-(list-agent-sessions)
-;; => [{::session/id "acdb234" ::session/namespace 'seon.trading ...}]
+(list-agent-sessions {::session/node xtdb-node})
+;; => [{::session/id "acdb234f" ::session/namespace 'seon.trading ...}]
 
 ;; Stop session (flushes ctx, stops nREPL)
-(stop-agent-session! {::session/id "acdb234"})
+(stop-agent-session! {::session/node xtdb-node ::session/id "acdb234f"})
 ```
 
 **Agent's view** (CLI tool):
 ```bash
 # Agent receives session-id from orchestrator, uses it for all evals
-agent-eval acdb234 '(swap! *ctx* assoc :seon.trading/signals [...])'
-agent-eval acdb234 '(:seon.trading/signals @*ctx*)'
-agent-eval acdb234 '(search "XTDB temporal queries")'
+agent-eval acdb234f '(swap! *ctx* assoc :seon.trading/signals [...])'
+agent-eval acdb234f '(:seon.trading/signals @*ctx*)'
+agent-eval acdb234f '(search "XTDB temporal queries")'
 
 # That's it. Agent doesn't know about:
 # - nREPL ports
@@ -783,102 +869,33 @@ agent-eval acdb234 '(search "XTDB temporal queries")'
 | XTDB database creation | `start-agent-session!` auto-attaches if needed |
 | nREPL port allocation | Session registry maps session-id → port |
 | ctx persistence | `seon.agent.ctx` handles debounced writes |
-| State recovery | `resume?` flag loads latest persisted state |
+| State recovery | `resume?` flag loads latest persisted state (default: true) |
 | Cleanup | `stop-agent-session!` flushes and closes everything |
 
 #### What Agent Gets
 
-1. **Session ID** - Opaque identifier (e.g., "acdb234")
+1. **Session ID** - Opaque 8-char hex identifier (e.g., "acdb234f")
 2. **`*ctx*` atom** - Just works, persistence is transparent
 3. **`*ns*`** - Bound to assigned namespace
 4. **Helper functions** - `search`, `ask` for research
-
-#### Implementation Tasks
-
-**Namespace: `seon.orchestrator.session`**
-
-- [ ] Create session registry (in XTDB orchestrator db)
-  ```clojure
-  {:xt/id "session-acdb234"
-   :session/id "acdb234"
-   :session/namespace 'seon.trading
-   :session/nrepl-port 7889
-   :session/status :running
-   :session/started-at #inst "..."
-   :session/db-name "seon_trading"}
-  ```
-
-- [ ] Implement `start-agent-session!`
-  - Generate unique session ID (8 char hex)
-  - Auto-attach XTDB database if not exists (`multi/attach-namespace-db!`)
-  - Create database connection
-  - Create persisted ctx (`ctx/make-persisted-ctx`) with `resume?` support
-  - Start namespace nREPL with ctx injected
-  - Register session in orchestrator db
-  - Return session info map
-
-- [ ] Implement `stop-agent-session!`
-  - Look up session by ID
-  - Call `flush!` on persisted ctx
-  - Stop namespace nREPL
-  - Call `close!` on persisted ctx
-  - Update session status in orchestrator db
-  - Return confirmation
-
-- [ ] Implement `list-agent-sessions`
-  - Query orchestrator db for active sessions
-  - Return list with id, namespace, status, started-at
-
-- [ ] Implement `get-agent-session`
-  - Look up single session by ID
-  - Return full session info including port
-
-**CLI Tool: `bin/agent-eval`**
-
-- [ ] Create Babashka script `bin/agent-eval`
-  ```bash
-  #!/usr/bin/env bb
-  # Usage: agent-eval <session-id> '<clojure-code>'
-
-  # 1. Query orchestrator for session-id → port mapping
-  # 2. Call clj-nrepl-eval with resolved port
-  # 3. Return result
-  ```
-
-- [ ] Handle session not found error gracefully
-- [ ] Support multi-line code via stdin or heredoc
-
-**Integration with Phase 2 (nREPL)**
-
-- [ ] Modify `start-namespace-nrepl!` to accept persisted ctx atom
-- [ ] Store `flush!` and `close!` in server registry
-- [ ] Update `stop-namespace-nrepl!` to call cleanup functions
-
-**Tests**
-
-- [ ] Session lifecycle (start fresh, stop, verify cleanup)
-- [ ] Session resume (start, add data, stop, resume, verify data present)
-- [ ] Multiple concurrent sessions on different namespaces
-- [ ] agent-eval CLI integration test
-- [ ] Error handling (invalid session-id, namespace conflicts)
 
 #### Agent Instructions Template
 
 When launching an agent, orchestrator provides:
 
 ```
-You have been assigned session ID: acdb234
+You have been assigned session ID: acdb234f
 Namespace: seon.trading
 
 To evaluate Clojure code, use:
-  agent-eval acdb234 '(your-code-here)'
+  agent-eval acdb234f '(your-code-here)'
 
 Your context atom `*ctx*` is available. Use namespaced keys:
-  agent-eval acdb234 '(swap! *ctx* assoc :seon.trading/signals [...])'
-  agent-eval acdb234 '(:seon.trading/signals @*ctx*)'
+  agent-eval acdb234f '(swap! *ctx* assoc :seon.trading/signals [...])'
+  agent-eval acdb234f '(:seon.trading/signals @*ctx*)'
 
 For research, use the search helper:
-  agent-eval acdb234 '(search "your question here")'
+  agent-eval acdb234f '(search "your question here")'
 
 All state is automatically persisted. You don't need to save anything manually.
 ```
@@ -915,12 +932,12 @@ All state is automatically persisted. You don't need to save anything manually.
 2. ~~**nREPL multi-server**~~ - Fully supported, see research doc
 3. ~~**Worktree sync**~~ - clj-reload can load from worktree dirs, one agent at a time
 4. ~~**Persisted ctx implementation**~~ - Phase 3b complete with full test coverage
+5. ~~**Session ID format**~~ - 8-char lowercase hex via `SecureRandom` (e.g., "acdb234f")
 
 ### Open
-5. **Datastar SSE scoping** - How to isolate SSE per namespace?
-6. **Agent POST handling** - How does agent handle form submissions?
-7. **Schema for agent state** - Open schema? Per-namespace? Evolvable?
-8. **Session ID format** - 8 char hex? UUID? Namespace-prefixed?
+6. **Datastar SSE scoping** - How to isolate SSE per namespace?
+7. **Agent POST handling** - How does agent handle form submissions?
+8. **Schema for agent state** - Open schema? Per-namespace? Evolvable?
 
 ---
 

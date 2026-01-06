@@ -32,7 +32,7 @@
 
 **Trade-off accepted**: Shared heap means one OOM crashes all, but that's rare.
 
-**RESEARCH NEEDED**: Can nREPL start multiple servers in one JVM?
+**RESOLVED**: Yes, nREPL fully supports multiple servers in one JVM. Each `nrepl.server/start-server` creates an independent server with its own socket and handler. See `docs/prds/agent-isolation/research/nrepl-multi-server.md`.
 
 ---
 
@@ -53,42 +53,65 @@
 ## Decision 4: Injected Context Atom (ctx)
 
 **Date**: 2026-01-04
+**Updated**: 2026-01-06
 
-**Decision**: When an agent is assigned a namespace, inject a `ctx` atom with fully spec'd keys.
+**Decision**: When an agent is assigned a namespace, inject a `*ctx*` atom via custom nREPL middleware.
 
-**Proposed ctx structure** (`:seon.agent/` namespace):
+**Final ctx structure** (`:seon.agent/` reserved keys):
 ```clojure
-{:seon.agent/namespace     'seon.trading
- :seon.agent/session-id    "trading-20260104-abc123"
- :seon.agent/db            <xtdb-connection>       ; Namespace's isolated DB
- :seon.agent/render-fn     (fn [hiccup] ...)       ; Render to web UI
- :seon.agent/sse-push-fn   (fn [fragment] ...)     ; Push SSE update
- :seon.agent/worktree-path "/path/to/worktree"
- :seon.agent/nrepl-port    7889
- :seon.agent/started-at    #inst "..."}
+{:seon.agent/namespace   'seon.trading      ; Read-only identity
+ :seon.agent/db          <xtdb-connection>  ; Direct SQL access (Level 3)
+ :seon.agent/render      (fn [hiccup] ...)  ; Push UI updates (Phase 5)
+ :seon.agent/worktree    "/path/to/worktree"} ; Git worktree (Phase 6)
 ```
 
-**RESEARCH NEEDED**: How to inject? Options:
-1. Dynamic var in nREPL session
-2. Well-known atom (e.g., `seon.agent/*ctx*`)
-3. MCP tool that returns context
+Agent state uses namespaced keys:
+```clojure
+{:seon.trading/signals [{:symbol "AAPL" ...}]
+ :seon.trading/notes "analysis in progress"}
+```
+
+**RESOLVED**: Use custom nREPL middleware that injects `*ctx*` dynamic var into sessions:
+
+```clojure
+(def ^:dynamic *ctx* nil)
+
+(defn make-context-middleware [ctx-atom target-ns]
+  (fn wrap-context [handler]
+    (fn [{:keys [session] :as msg}]
+      (when (and session (not (contains? @session #'*ctx*)))
+        (swap! session assoc
+               #'*ns* (find-ns target-ns)
+               #'*ctx* ctx-atom))
+      (handler msg))))
+```
+
+Middleware descriptor uses **var references** (not strings):
+```clojure
+(set-descriptor! #'wrap-context
+  {:requires #{#'nrepl.middleware.session/session}
+   :expects #{#'nrepl.middleware.interruptible-eval/interruptible-eval}})
+```
+
+See `src/seon/orchestrator/nrepl.clj` for implementation.
 
 ---
 
 ## Decision 5: Agent-Provided Hiccup
 
 **Date**: 2026-01-04
+**Updated**: 2026-01-06
 
 **Decision**: Agents provide Hiccup EDN, orchestrator handles rendering and SSE delivery.
 
 **Example**:
 ```clojure
-(let [{:seon.agent/keys [db render-fn]} @ctx]
+(let [{:seon.agent/keys [db render]} @*ctx*]
   (let [trades (xt/q db "SELECT * FROM trades")]
-    (render-fn
+    (render
       [:div#trades-list
        (for [t trades]
          [:div.trade (:symbol t)])])))
 ```
 
-**RESEARCH NEEDED**: Does this work with Datastar SSE?
+**RESEARCH NEEDED**: Does this work with Datastar SSE? Need to scope SSE sessions per namespace.
