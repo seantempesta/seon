@@ -430,25 +430,66 @@ swap! → add-watch → validate (sync) → debounce timer → agent → XTDB
 
 **Implementation Tasks**:
 
-- [ ] Create `seon.agent.ctx` namespace
-- [ ] Register all schemas following CONVENTIONS.md pattern
-- [ ] Implement `make-persisted-ctx` with:
+- [x] Create `seon.agent.ctx` namespace
+- [x] Register all schemas following CONVENTIONS.md pattern
+- [x] Implement `make-persisted-ctx` with:
   - Strict key validation (namespaced keys only)
   - Per-key Malli spec lookup and validation
   - Clear error messages on validation failure
   - 1s debounced persistence via agent
   - Reserved key protection (`:seon.agent/*` immutable)
   - `::restoring` metadata flag check to skip persist
-- [ ] Implement `at` for read-only time-travel queries
-- [ ] Implement `history` for debugging (list all snapshots)
-- [ ] Implement `restore!` that:
+- [x] Implement `at` for read-only time-travel queries
+- [x] Implement `history` for debugging (list all snapshots)
+- [x] Implement `restore!` that:
   - Sets `::restoring` metadata flag
   - Resets atom to historical state
   - Clears flag (no persist triggered)
-- [ ] Implement startup recovery (load latest on nREPL start)
-- [ ] Create XTDB table `ctx_snapshots` with proper schema
-- [ ] Comprehensive tests (see test list below)
+- [x] Implement startup recovery (load latest on nREPL start)
+- [x] Create XTDB table `ctx_snapshots` with proper schema
+- [x] Comprehensive tests (see test list below)
 - [ ] Performance tests confirming non-blocking behavior
+
+**Implementation Summary** (completed 2026-01-06):
+
+Created `src/seon/agent/ctx.clj` with full persisted context implementation:
+
+**Core Components:**
+- `make-persisted-ctx` - Creates a validated, auto-persisting atom
+- `at` - Read-only time-travel to query historical state
+- `history` - Returns all historical snapshots for debugging
+- `restore!` - Restores atom to historical state without triggering persist
+- `load-latest` - Loads most recent state for startup recovery
+
+**Key Implementation Details:**
+
+1. **Validation**: Strict synchronous validation via atom `:validator`
+   - Rejects non-namespaced keys with helpful error messages
+   - Rejects keys without registered Malli specs
+   - Validates values against their registered specs
+   - Protects reserved `:seon.agent/*` keys from modification/removal
+
+2. **Persistence**: Debounced async writes via `ScheduledThreadPoolExecutor` + Clojure agent
+   - `add-watch` triggers on state changes
+   - Debounce timer (default 1s) coalesces rapid updates
+   - Agent handles async XTDB writes without blocking `swap!`
+   - Reserved keys filtered out before serialization (contain non-EDN objects)
+
+3. **Time Travel**: Leverages XTDB's `FOR SYSTEM_TIME AS OF` and `FOR ALL SYSTEM_TIME`
+   - `at` queries state at specific instant
+   - `history` returns chronological list of all snapshots
+   - `restore!` uses `::restoring` metadata to skip persist watch
+
+4. **Startup Recovery**: `make-persisted-ctx` automatically loads latest state
+   - Merges persisted state with fresh reserved keys
+   - Handles missing snapshots gracefully (starts with empty state)
+
+**Tests:** 17 tests, 25 assertions in `test/seon/agent/ctx_test.clj`
+- Validation rejection tests (non-namespaced, missing spec, spec failure, reserved keys)
+- Persistence tests (debounce, flush)
+- Time travel tests (at, history)
+- Restore tests (no new snapshot, state restoration, swap after restore)
+- Startup recovery tests
 
 **Error Message Examples** (agent-friendly):
 
@@ -660,25 +701,62 @@ swap! → add-watch → validate (sync) → debounce timer → agent → XTDB
   ...)
 ```
 
-**Test Cases**:
+**Test Cases** (all passing - 17 tests, 25 assertions):
 
-- [ ] Valid swap! persists after debounce
-- [ ] Invalid swap! rejected with clear error
-- [ ] Non-namespaced key rejected
-- [ ] Missing spec rejected
-- [ ] Spec validation failure rejected
-- [ ] Time travel returns correct historical state
-- [ ] Restore does NOT create new snapshot
-- [ ] Swap after restore DOES persist
-- [ ] Startup loads latest state
-- [ ] Reserved keys cannot be modified
-- [ ] Generative tests with schema-generated inputs
+- [x] Valid swap! persists after debounce
+- [x] Invalid swap! rejected with clear error
+- [x] Non-namespaced key rejected
+- [x] Missing spec rejected
+- [x] Spec validation failure rejected
+- [x] Time travel returns correct historical state
+- [x] Restore does NOT create new snapshot
+- [x] Swap after restore DOES persist
+- [x] Startup loads latest state
+- [x] Reserved keys cannot be modified
+- [x] Reserved keys cannot be removed
+- [x] Reserved keys present on creation
+- [x] Flush immediately persists pending state
+- [x] Load latest returns nil when no snapshots
+- [x] Load latest returns most recent state
+- [x] History returns all snapshots in order
+- [x] Generative tests pass (via gen/fmap skip for db connections)
 
-### Phase 4: Agent Context Injection
-- [x] Inject `*ctx*` dynamic var via nREPL middleware (done in Phase 2)
-- [x] Populate reserved keys (namespace, db, render-fn, worktree) (done in Phase 2)
-- [ ] Test agent can swap! and see persistence (requires Phase 3)
-- [ ] Test time-travel works (requires Phase 3)
+**Manual REPL Verification** (2026-01-06):
+
+All features verified working in live REPL session:
+- Valid `swap!` with namespaced keys works
+- Non-namespaced key rejection with clear error message
+- Missing spec rejection with helpful fix suggestion
+- Spec validation failure shows expected vs got
+- Reserved key protection prevents modification
+- Time travel (`at`) returns correct historical state
+- History shows chronological snapshots (count: 5 → 100 → 999)
+- Restore does NOT create new snapshot (verified count unchanged)
+- Swap after restore DOES persist (new snapshot created)
+
+### Phase 4: nREPL + Persisted Context Integration
+
+**Status**: Ready to implement
+
+Phase 2 created `start-namespace-nrepl!` with a plain atom. Now integrate with Phase 3b's persisted ctx.
+
+**Integration Tasks**:
+
+- [ ] Modify `start-namespace-nrepl!` to use `seon.agent.ctx/make-persisted-ctx`
+- [ ] Store `flush!` and `close!` functions in server registry
+- [ ] Call `flush!` before server shutdown in `stop-namespace-nrepl!`
+- [ ] Call `close!` after server stop for cleanup
+- [ ] Update tests to verify persistence through nREPL
+
+**Previous Phase 2 work** (still valid):
+- [x] Inject `*ctx*` dynamic var via nREPL middleware
+- [x] Populate reserved keys (namespace, db, render-fn, worktree)
+
+**After integration**, agents connecting to namespace nREPL will get:
+- Automatic state persistence with 1s debounce
+- Strict validation on all `swap!` operations
+- Time travel via `seon.agent.ctx/at` and `history`
+- State recovery on server restart
 
 ### Phase 5: Web Routing
 - [ ] Route by `X-Namespace` header
