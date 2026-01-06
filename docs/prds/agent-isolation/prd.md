@@ -362,12 +362,317 @@ The ctx injection tests were flaky because the middleware descriptor used `"sess
 
 ### Phase 3: Persisted Context (ctx atom)
 > **This is the key innovation.** Agent just uses an atom; we handle persistence.
-- [ ] Research: atom watchers, validation timing, performance
-- [ ] Implement `make-persisted-ctx` with XTDB backing
-- [ ] Implement `ctx/at` for time-travel queries
-- [ ] Implement `ctx/history` for debugging
-- [ ] Define reserved `:seon.agent/*` keys
-- [ ] Test: swap! -> persisted -> queryable history
+
+#### Phase 3a: Research - COMPLETE
+
+**Completed**: 2026-01-04. See `docs/prds/agent-isolation/research/persisted-ctx.md` for full details.
+
+**Summary of Findings**:
+
+1. **Non-blocking persistence**: Use `add-watch` + Clojure `agent` with `send-off`
+   - Adds only ~660 ns overhead to `swap!` (97ns -> 757ns)
+   - Agent queues writes sequentially, never blocks caller
+   - With debouncing (50-100ms), 100 rapid updates collapse to 1 persist
+
+2. **Storage format**: Full snapshots (not diffs)
+   - Typical ctx is 5-20KB - trivial for XTDB
+   - Diffs add complexity without proportional benefit given debouncing
+   - XTDB's bitemporality handles versioning natively
+
+3. **XTDB patterns**:
+   - Store snapshots in `ctx_snapshots` table with `namespace`, `state` (EDN), `created_at`
+   - Time travel via `FOR SYSTEM_TIME AS OF ?` queries
+   - History via `FOR ALL SYSTEM_TIME` queries
+   - ~1ms per temporal query
+
+4. **Validation**: Synchronous before persist queue
+   - Malli validation is fast (~1.6 us with compiled validator)
+   - Log and skip invalid states (don't block swap!)
+
+5. **Benchmarks established**:
+   - Plain atom: 97 ns/op
+   - Persisted atom (with debounce): ~2,300 ns/op (24x baseline but still instant)
+   - XTDB execute-tx: 7.1 ms/op (why we need async)
+   - XTDB temporal query: 1.0 ms/op
+
+**Recommended Architecture**:
+```
+swap! → add-watch → validate (sync) → debounce timer → agent → XTDB
+                    (~1.6 us)        (50-100ms)      (async)  (~7ms)
+```
+
+#### Phase 3b: Implementation
+
+**Design Decisions** (confirmed 2026-01-04):
+
+1. **Debounce window**: 1 second (for time-travel/backup, not recording every change)
+
+2. **Validation rules** (STRICT - reject invalid updates):
+   - Value must be a map
+   - ALL keys must be fully namespaced (`:seon.trading/signals`, not `:signals`)
+   - Each key must have a Malli spec registered in `seon.db.schema/registry`
+   - The value for each key must validate against its spec
+   - Reserved `:seon.agent/*` keys are immutable after creation
+
+3. **Validation failure behavior**:
+   - **Reject the `swap!`** - invalid data never enters the atom
+   - Return clear error message explaining exactly what failed and how to fix it
+   - Agent sees the error immediately (not async)
+
+4. **Recovery on startup**: Load latest persisted state from XTDB
+
+5. **Time travel semantics**:
+   - `at` is **read-only** - queries historical state, doesn't modify atom
+   - `restore!` sets atom to historical state **without triggering persist**
+   - Uses `::restoring` metadata flag to skip the watch during restore
+   - History is **never deleted** - only agent `swap!` creates new snapshots
+   - Next `swap!` after restore persists normally (from the restored state)
+
+**Implementation Tasks**:
+
+- [ ] Create `seon.agent.ctx` namespace
+- [ ] Register all schemas following CONVENTIONS.md pattern
+- [ ] Implement `make-persisted-ctx` with:
+  - Strict key validation (namespaced keys only)
+  - Per-key Malli spec lookup and validation
+  - Clear error messages on validation failure
+  - 1s debounced persistence via agent
+  - Reserved key protection (`:seon.agent/*` immutable)
+  - `::restoring` metadata flag check to skip persist
+- [ ] Implement `at` for read-only time-travel queries
+- [ ] Implement `history` for debugging (list all snapshots)
+- [ ] Implement `restore!` that:
+  - Sets `::restoring` metadata flag
+  - Resets atom to historical state
+  - Clears flag (no persist triggered)
+- [ ] Implement startup recovery (load latest on nREPL start)
+- [ ] Create XTDB table `ctx_snapshots` with proper schema
+- [ ] Comprehensive tests (see test list below)
+- [ ] Performance tests confirming non-blocking behavior
+
+**Error Message Examples** (agent-friendly):
+
+```clojure
+;; Non-namespaced key
+(swap! *ctx* assoc :signals [...])
+;; => ExceptionInfo: Invalid ctx key :signals
+;;    All keys must be fully namespaced (e.g., :seon.trading/signals)
+;;    To fix: Use (swap! *ctx* assoc :seon.trading/signals [...])
+
+;; Missing spec
+(swap! *ctx* assoc :seon.trading/foo "bar")
+;; => ExceptionInfo: No spec registered for key :seon.trading/foo
+;;    Register a Malli spec in seon.db.schema/registry first.
+;;    To fix: Add [:seon.trading/foo <schema>] to the schema registry
+
+;; Spec validation failure
+(swap! *ctx* assoc :seon.trading/signals "not-a-vector")
+;; => ExceptionInfo: Value for :seon.trading/signals failed validation
+;;    Expected: [:vector :seon.trading/signal]
+;;    Got: "not-a-vector"
+;;    To fix: Provide a vector of signal maps
+
+;; Reserved key modification
+(swap! *ctx* assoc :seon.agent/namespace 'something-else)
+;; => ExceptionInfo: Cannot modify reserved key :seon.agent/namespace
+;;    Reserved :seon.agent/* keys are set by the system and immutable.
+```
+
+**API Surface** (following CONVENTIONS.md - map in, map out):
+
+```clojure
+(ns seon.agent.ctx
+  (:require [seon.db.schema :as schema]))
+
+;;; Schema Registration
+
+(schema/register! ::db
+                  [:any {:description "XTDB database connection"}])
+
+(schema/register! ::namespace
+                  [:symbol {:description "Agent namespace symbol"}])
+
+(schema/register! ::debounce-ms
+                  [:int {:min 100 :max 60000
+                         :description "Debounce window in milliseconds"}])
+
+(schema/register! ::instant
+                  [:inst {:description "Point in time for time-travel"}])
+
+(schema/register! ::atom
+                  [:any {:description "The persisted ctx atom"}])
+
+(schema/register! ::state
+                  [:map {:description "Ctx state (namespaced keys only)"}])
+
+;;; Request/Response Schemas
+
+(schema/register! ::make-request
+                  [:map
+                   [::db ::db]
+                   [::namespace ::namespace]
+                   [::debounce-ms {:optional true} ::debounce-ms]])
+
+(schema/register! ::make-response
+                  [:map
+                   [::atom ::atom]
+                   [::flush! [:fn {:description "Force immediate persist"}]]
+                   [::close! [:fn {:description "Cleanup resources"}]]])
+
+(schema/register! ::at-request
+                  [:map
+                   [::db ::db]
+                   [::namespace ::namespace]
+                   [::instant ::instant]])
+
+(schema/register! ::at-response
+                  [:map
+                   [::state ::state]
+                   [::system-time ::instant]])
+
+(schema/register! ::history-request
+                  [:map
+                   [::db ::db]
+                   [::namespace ::namespace]])
+
+(schema/register! ::history-response
+                  [:map
+                   [::snapshots [:vector [:map
+                                          [::state ::state]
+                                          [::system-time ::instant]]]]])
+
+(schema/register! ::restore-request
+                  [:map
+                   [::atom ::atom]
+                   [::db ::db]
+                   [::namespace ::namespace]
+                   [::instant ::instant]])
+
+(schema/register! ::restore-response
+                  [:map
+                   [::state ::state]
+                   [::restored-from ::instant]])
+
+(schema/register! ::load-latest-request
+                  [:map
+                   [::db ::db]
+                   [::namespace ::namespace]])
+
+(schema/register! ::load-latest-response
+                  [:map
+                   [::state [:maybe ::state]]
+                   [::system-time [:maybe ::instant]]])
+
+;;; Public API
+
+(defn make-persisted-ctx
+  "Create a persisted context atom for an agent.
+
+   Request keys:
+     ::db          - Required. XTDB database connection
+     ::namespace   - Required. Agent namespace symbol
+     ::debounce-ms - Optional. Debounce window (default: 1000)
+
+   Response keys:
+     ::atom   - The persisted ctx atom
+     ::flush! - Force immediate persist (for shutdown)
+     ::close! - Cleanup resources
+
+   Example:
+     (make-persisted-ctx {::db conn ::namespace 'seon.trading})
+     ;; From outside namespace:
+     (ctx/make-persisted-ctx {::ctx/db conn ::ctx/namespace 'seon.trading})"
+  {:malli/schema [:=> [:cat ::make-request] ::make-response]}
+  [{::keys [db namespace debounce-ms]}]
+  ...)
+
+(defn at
+  "Get ctx state at a specific point in time (read-only time-travel).
+
+   Request keys:
+     ::db        - Required. XTDB database connection
+     ::namespace - Required. Agent namespace symbol
+     ::instant   - Required. Point in time
+
+   Response keys:
+     ::state       - The ctx state at that time
+     ::system-time - Actual XTDB system time of the snapshot
+
+   Example:
+     (at {::db conn ::namespace 'seon.trading ::instant #inst \"2026-01-04T10:00\"})"
+  {:malli/schema [:=> [:cat ::at-request] ::at-response]}
+  [{::keys [db namespace instant]}]
+  ...)
+
+(defn history
+  "Get all historical ctx snapshots for a namespace.
+
+   Request keys:
+     ::db        - Required. XTDB database connection
+     ::namespace - Required. Agent namespace symbol
+
+   Response keys:
+     ::snapshots - Vector of {::state, ::system-time} maps
+
+   Example:
+     (history {::db conn ::namespace 'seon.trading})"
+  {:malli/schema [:=> [:cat ::history-request] ::history-response]}
+  [{::keys [db namespace]}]
+  ...)
+
+(defn restore!
+  "Restore ctx to a historical state WITHOUT triggering persistence.
+   The restored state is already in XTDB history.
+
+   Request keys:
+     ::atom      - Required. The persisted ctx atom
+     ::db        - Required. XTDB database connection
+     ::namespace - Required. Agent namespace symbol
+     ::instant   - Required. Point in time to restore to
+
+   Response keys:
+     ::state         - The restored state
+     ::restored-from - The instant restored from
+
+   Example:
+     (restore! {::atom *ctx* ::db conn ::namespace 'seon.trading
+                ::instant #inst \"2026-01-04T10:00\"})"
+  {:malli/schema [:=> [:cat ::restore-request] ::restore-response]}
+  [{::keys [atom db namespace instant]}]
+  ...)
+
+(defn load-latest
+  "Load the most recent persisted state for a namespace.
+   Used for recovery on startup.
+
+   Request keys:
+     ::db        - Required. XTDB database connection
+     ::namespace - Required. Agent namespace symbol
+
+   Response keys:
+     ::state       - The latest state (nil if none)
+     ::system-time - When it was persisted (nil if none)
+
+   Example:
+     (load-latest {::db conn ::namespace 'seon.trading})"
+  {:malli/schema [:=> [:cat ::load-latest-request] ::load-latest-response]}
+  [{::keys [db namespace]}]
+  ...)
+```
+
+**Test Cases**:
+
+- [ ] Valid swap! persists after debounce
+- [ ] Invalid swap! rejected with clear error
+- [ ] Non-namespaced key rejected
+- [ ] Missing spec rejected
+- [ ] Spec validation failure rejected
+- [ ] Time travel returns correct historical state
+- [ ] Restore does NOT create new snapshot
+- [ ] Swap after restore DOES persist
+- [ ] Startup loads latest state
+- [ ] Reserved keys cannot be modified
+- [ ] Generative tests with schema-generated inputs
 
 ### Phase 4: Agent Context Injection
 - [x] Inject `*ctx*` dynamic var via nREPL middleware (done in Phase 2)
