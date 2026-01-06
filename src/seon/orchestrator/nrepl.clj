@@ -179,6 +179,9 @@
   newly created sessions. This ensures the bindings are present BEFORE
   any eval operations use the session.
 
+  *ctx* is interned directly in the target namespace so agents can use
+  @*ctx* without qualification.
+
   Args:
     ctx-atom - The atom to bind to *ctx*
     target-ns - The namespace symbol to bind to *ns*
@@ -186,36 +189,43 @@
   Returns:
     nREPL middleware function"
   [ctx-atom target-ns]
-  ;; Ensure the namespace exists with clojure.core referred
-  (let [ensure-ns (fn []
-                    ;; First try to require the namespace (if it exists on classpath)
-                    (try
-                      (require target-ns)
-                      (catch java.io.FileNotFoundException _
-                        ;; Namespace doesn't exist on classpath - create it
-                        (log/debug "Creating namespace" {:namespace target-ns}))
-                      (catch Exception e
-                        (log/warn "Could not require namespace"
-                                  {:namespace target-ns :error (.getMessage e)})))
-                    ;; Get or create the namespace
-                    (if-let [ns-obj (find-ns target-ns)]
-                      ns-obj
-                      ;; Create namespace with clojure.core referred
-                      (binding [*ns* (create-ns target-ns)]
-                        (refer-clojure)
-                        *ns*)))]
+  ;; Ensure the namespace exists with clojure.core referred and *ctx* interned
+  (let [ensure-ns-and-ctx (fn []
+                            ;; First try to require the namespace (if it exists on classpath)
+                            (try
+                              (require target-ns)
+                              (catch java.io.FileNotFoundException _
+                                ;; Namespace doesn't exist on classpath - create it
+                                (log/debug "Creating namespace" {:namespace target-ns}))
+                              (catch Exception e
+                                (log/warn "Could not require namespace"
+                                          {:namespace target-ns :error (.getMessage e)})))
+                            ;; Get or create the namespace
+                            (let [ns-obj (or (find-ns target-ns)
+                                             (binding [*ns* (create-ns target-ns)]
+                                               (refer-clojure)
+                                               *ns*))]
+                              ;; Intern *ctx* as a dynamic var in the target namespace
+                              ;; This allows agents to use @*ctx* without qualification
+                              (when-not (ns-resolve ns-obj '*ctx*)
+                                (intern ns-obj (with-meta '*ctx* {:dynamic true}) nil))
+                              ;; Return both the namespace and the *ctx* var
+                              {:ns-obj ns-obj
+                               :ctx-var (ns-resolve ns-obj '*ctx*)}))
+        ;; Cache the setup (resolved once when middleware is created)
+        setup (delay (ensure-ns-and-ctx))]
     (fn wrap-context [handler]
       (fn [{:keys [session] :as msg}]
         ;; Inject bindings when we see a session atom that either:
-        ;; 1. Doesn't have *ctx* yet, OR
+        ;; 1. Doesn't have our *ctx* var yet, OR
         ;; 2. Has a DIFFERENT *ctx* (from a different server/namespace)
         ;; This happens after session middleware has created/retrieved the session
-        (when (and (instance? clojure.lang.Atom session)
-                   (not (identical? (get @session #'*ctx*) ctx-atom)))
-          (let [ns-obj (ensure-ns)]
+        (let [{:keys [ns-obj ctx-var]} @setup]
+          (when (and (instance? clojure.lang.Atom session)
+                     (not (identical? (get @session ctx-var) ctx-atom)))
             (swap! session assoc
                    #'*ns* ns-obj
-                   #'*ctx* ctx-atom)))
+                   ctx-var ctx-atom)))
         (handler msg)))))
 
 ;; Set up the descriptor for the middleware
@@ -272,6 +282,10 @@
     :render-fn - Function to render UI updates (optional)
     :worktree  - Path to git worktree (optional)
     :port      - Port to bind to (auto-assigned if not specified)
+    :ctx-atom  - Existing ctx atom to use (optional, creates new if not provided)
+                 When provided, the atom is used directly. The caller is responsible
+                 for initializing it with :seon.agent/* keys. This is used by
+                 session.clj to inject persisted ctx atoms.
 
   Returns:
     Map with :server, :port, :ctx, :namespace, :status on success
@@ -279,7 +293,7 @@
 
   Throws:
     ex-info if namespace already has a server"
-  [{:keys [namespace db render-fn worktree port] :as opts}]
+  [{:keys [namespace db render-fn worktree port ctx-atom] :as opts}]
   (when-not namespace
     (throw (ex-info "namespace is required" {:opts opts})))
 
@@ -289,12 +303,13 @@
                      :port (get-allocated-port namespace)})))
 
   (try
-    ;; Create the context atom
-    (let [ctx-atom (atom {:seon.agent/namespace namespace
-                          :seon.agent/db db
-                          :seon.agent/render-fn render-fn
-                          :seon.agent/worktree worktree
-                          :seon.agent/started-at (java.util.Date.)})
+    ;; Use provided ctx-atom or create a new one
+    (let [ctx-atom (or ctx-atom
+                       (atom {:seon.agent/namespace namespace
+                              :seon.agent/db db
+                              :seon.agent/render-fn render-fn
+                              :seon.agent/worktree worktree
+                              :seon.agent/started-at (java.util.Date.)}))
 
           ;; Create the middleware function for this ctx/namespace
           ctx-middleware (make-context-middleware ctx-atom namespace)
@@ -324,7 +339,10 @@
       (swap! servers assoc namespace result)
 
       ;; Update ctx with the actual port (might differ if auto-assigned)
-      (swap! ctx-atom assoc :seon.agent/nrepl-port (:port server))
+      ;; Only do this for internally-created atoms; externally provided atoms
+      ;; (like persisted ctx) have reserved key protection
+      (when-not (:ctx-atom opts)
+        (swap! ctx-atom assoc :seon.agent/nrepl-port (:port server)))
 
       (log/info "Started namespace nREPL server"
                 {:namespace namespace

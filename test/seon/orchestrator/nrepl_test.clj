@@ -12,9 +12,14 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn cleanup-servers
-  "Fixture that cleans up any running servers after each test."
+  "Fixture that cleans up any running servers after each test.
+
+   CRITICAL: Must stop servers BEFORE resetting registries, otherwise
+   we lose references to the servers and can't close their sockets."
   [f]
-  ;; Clear state BEFORE test to ensure clean slate
+  ;; BEFORE test: Stop servers first, THEN reset registries
+  (nrepl-multi/stop-all-namespace-nrepls!)
+  (Thread/sleep 20)
   (reset! @#'seon.orchestrator.nrepl/port-registry {})
   (reset! @#'seon.orchestrator.nrepl/servers {})
   ;; Close all existing nREPL sessions
@@ -27,14 +32,12 @@
   (try
     (f)
     (finally
-      ;; Stop all namespace servers
+      ;; AFTER test: Stop servers first, THEN reset registries
       (nrepl-multi/stop-all-namespace-nrepls!)
-      ;; Give threads time to fully terminate
       (Thread/sleep 20)
-      ;; Reset port registry
       (reset! @#'seon.orchestrator.nrepl/port-registry {})
       (reset! @#'seon.orchestrator.nrepl/servers {})
-      ;; Close all sessions again
+      ;; Close all sessions
       (let [sessions-atom @(resolve 'nrepl.middleware.session/sessions)]
         (doseq [[_ session] @sessions-atom]
           (try

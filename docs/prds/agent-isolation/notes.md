@@ -86,13 +86,23 @@ Critical for context injection:
 2. Our `wrap-context` runs next (injects `*ns*` and `*ctx*`)
 3. `interruptible-eval` runs last (evaluates code with bindings)
 
-Use `set-descriptor!` to declare ordering:
+**IMPORTANT**: Use **var references**, not strings:
 
 ```clojure
+;; CORRECT - use var references
 (set-descriptor! #'wrap-context
-  {:requires #{"session"}   ; Must be AFTER this
-   :expects #{"eval"}})     ; Must be BEFORE this
+  {:requires #{#'nrepl.middleware.session/session}
+   :expects #{#'nrepl.middleware.interruptible-eval/interruptible-eval}})
+
+;; WRONG - strings don't work for middleware ordering
+(set-descriptor! #'wrap-context
+  {:requires #{"session"}   ; This refers to operation names, NOT middleware
+   :expects #{"eval"}})     ; Won't work as intended!
 ```
+
+The nREPL middleware linearizer uses var metadata to build the execution order.
+String-based `:requires`/`:expects` refer to operation names (from `:handles` map),
+which is different from middleware ordering. See the Phase 2 "Key Fix" in the PRD.
 
 ### Port 0 Auto-Assignment
 
