@@ -189,14 +189,23 @@ Currently, Seon agents are invoked via Claude Code calling our MCP server. This 
 
 ## Phases
 
-### Phase 1: Core Query API (2-3 hours)
+### Phase 1: Core Query API (2-3 hours) - COMPLETE
 
-- [ ] Create `seon.claude.sdk` namespace
-- [ ] Implement `spawn-claude-code` using clojure.java.process
-- [ ] Implement `query` function with message streaming
-- [ ] Implement `exec` convenience function
-- [ ] Add Malli schemas per CONVENTIONS.md
-- [ ] Basic unit tests
+- [x] Create `seon.claude.sdk` namespace
+- [x] Implement `spawn-claude-code` using clojure.java.process
+- [x] Implement `query` function with message streaming
+- [x] Implement `exec` convenience function
+- [x] Add Malli schemas per CONVENTIONS.md (18 schemas registered)
+- [x] REPL-verified: query and exec work correctly
+- [x] Made `spawn-claude-code` private (bug fix - see below)
+- [x] Added `:malli/schema` metadata with non-generatable `::prompt` schema
+
+**Bug Fix (2026-01-09)**: Discovered that exposing `spawn-claude-code` publicly led to
+misuse where agents called it directly and used blocking IO (`slurp`) on the subprocess
+streams. This blocked nREPL threads indefinitely. Fixed by making `spawn-claude-code`
+private - the public API (`query`/`exec`) properly uses futures and core.async.
+
+See `docs/prds/agent-isolation/prd.md` Phase 4c for full postmortem.
 
 ### Phase 2: Control Requests (2-3 hours)
 
