@@ -1,5 +1,35 @@
 # Agent Isolation - Notes & Gotchas
 
+## Persistent nREPL Sessions (2026-01-09)
+
+**Implementation Notes**:
+
+1. **Session cloning happens in MCP server**: After `create_session` starts the Seon session, the MCP server (`bin/mcp-server`) sends a `clone` op to the agent's nREPL to get a persistent session ID. This ID is then stored via `set-nrepl-session-id!`.
+
+2. **Why clone?** Without a session ID, each eval creates an ephemeral session. This means:
+   - `*1`, `*2`, `*3` don't persist between evals
+   - Can't use nREPL's `interrupt` op (requires session ID)
+   - No ability to kill hung evaluations
+
+3. **nREPL ops used**:
+   - `clone` - Creates a persistent session, returns `new-session` ID
+   - `eval` with `session` key - Evaluates in that session (enables *1/*2/*3)
+   - `interrupt` with `session` key - Attempts to stop running eval
+
+4. **Interrupt behavior**: The `interrupt` op returns status:
+   - `"interrupted"` - Request identified, interruption attempted
+   - `"session-idle"` - No request currently executing
+   - `"interrupt-id-mismatch"` - Wrong interrupt-id (we don't use this)
+   - `"session-ephemeral"` - Can't interrupt ephemeral sessions
+
+5. **MCP tools updated**:
+   - `create_session` - Now returns `nrepl_session_id` in response
+   - `eval` - Passes session ID for persistent *1/*2/*3
+   - `interrupt_eval` - New tool to kill hung evaluations
+   - `list_sessions` - Includes `nrepl_session_id` for debugging
+
+---
+
 ## RESOLVED: Custom Subagent Instructions
 
 **Status**: Working (as of 2026-01-09)
@@ -11,6 +41,26 @@
 **Alternative if regression occurs**: Use Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`) for programmatic agent definitions with guaranteed prompt loading.
 
 **See**: `docs/prds/agent-isolation/research/custom-subagent-investigation.md`
+
+---
+
+## Phase 4c: Session Observability (2026-01-09)
+
+**Implementation Notes**:
+
+1. **Activity tracking is in-memory only**: The `::last-activity-at`, `::eval-count`, and `::current-eval` fields are stored in the session registry atom, NOT in XTDB. This is intentional because:
+   - Updates happen on every eval (too frequent for DB writes)
+   - Data is ephemeral - resets on session restart anyway
+   - Fast access needed for `list_sessions`
+
+2. **MCP server calls orchestrator for activity tracking**: The `record-activity!` helper in `bin/mcp-server` fires nREPL evals to the orchestrator to call `record-eval-start!` and `record-eval-complete!`. This is "fire and forget" with a 1s timeout - activity tracking should never block an actual eval.
+
+3. **Uptime calculation happens in MCP server code**: Rather than adding `::uptime-seconds` to the session registry (which would need constant updates), the Clojure code sent via MCP calculates uptime from `started-at` at query time.
+
+4. **Health check deferred**: The optional health check (ping with timeout) was not implemented. If needed later, it would require:
+   - Sending a simple eval (`(+ 1 1)`) to each session's nREPL
+   - Using a short timeout (2s)
+   - Adding `health: ok/unresponsive` to the output
 
 ---
 

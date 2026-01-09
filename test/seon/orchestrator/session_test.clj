@@ -351,10 +351,139 @@
                    {::session/node *test-node*})]
       (is (= 1 (::session/recovered-count result))))))
 
+;;; ---------------------------------------------------------------------------
+;;; Activity Tracking Tests (Phase 4c)
+;;; ---------------------------------------------------------------------------
+
+(deftest activity-tracking-test
+  (testing "sessions track eval activity"
+    (let [started (session/start-agent-session!
+                    {::session/node *test-node*
+                     ::session/namespace 'test.activity})
+          session-id (::session/id started)]
+
+      ;; Initial state: 0 evals, no current eval
+      (let [info (session/get-agent-session
+                   {::session/node *test-node*
+                    ::session/id session-id})]
+        (is (= 0 (::session/eval-count info)))
+        (is (nil? (::session/current-eval info))))
+
+      ;; Record start of an eval
+      (session/record-eval-start!
+        {::session/id session-id
+         ::session/code "(+ 1 2)"})
+
+      ;; Should have current-eval set
+      (let [info (session/get-agent-session
+                   {::session/node *test-node*
+                    ::session/id session-id})]
+        (is (some? (::session/current-eval info)))
+        (is (= "(+ 1 2)" (::session/code (::session/current-eval info)))))
+
+      ;; Record completion
+      (session/record-eval-complete!
+        {::session/id session-id})
+
+      ;; Should have incremented count and cleared current-eval
+      (let [info (session/get-agent-session
+                   {::session/node *test-node*
+                    ::session/id session-id})]
+        (is (= 1 (::session/eval-count info)))
+        (is (nil? (::session/current-eval info)))
+        (is (some? (::session/last-activity-at info)))))))
+
+(deftest activity-tracking-nonexistent-session-test
+  (testing "activity tracking returns false for non-existent sessions"
+    (let [start-result (session/record-eval-start!
+                         {::session/id "dead"
+                          ::session/code "(+ 1 2)"})
+          complete-result (session/record-eval-complete!
+                            {::session/id "dead"})]
+      (is (false? (::session/recorded start-result)))
+      (is (false? (::session/recorded complete-result))))))
+
+(deftest list-sessions-includes-observability-test
+  (testing "list-agent-sessions includes observability fields"
+    (let [started (session/start-agent-session!
+                    {::session/node *test-node*
+                     ::session/namespace 'test.obs})
+          session-id (::session/id started)]
+
+      ;; Do some evals
+      (session/record-eval-start! {::session/id session-id ::session/code "(+ 1 2)"})
+      (session/record-eval-complete! {::session/id session-id})
+
+      (let [sessions (session/list-agent-sessions
+                       {::session/node *test-node*})
+            session (first (filter #(= session-id (::session/id %)) sessions))]
+        (is (some? session))
+        (is (= 1 (::session/eval-count session)))
+        (is (some? (::session/last-activity-at session)))
+        (is (nil? (::session/current-eval session)))))))
+
+;;; ---------------------------------------------------------------------------
+;;; nREPL Session ID Tests
+;;; ---------------------------------------------------------------------------
+
+(deftest set-nrepl-session-id-test
+  (testing "can set nREPL session ID for existing session"
+    (let [started (session/start-agent-session!
+                    {::session/node *test-node*
+                     ::session/namespace 'test.nrepl.sid})
+          session-id (::session/id started)
+          nrepl-sid "test-nrepl-session-123"]
+
+      ;; Set the nREPL session ID
+      (let [result (session/set-nrepl-session-id!
+                     {::session/id session-id
+                      ::session/nrepl-session-id nrepl-sid})]
+        (is (true? (::session/set result))))
+
+      ;; Verify it's stored
+      (let [info (session/get-session-port
+                   {::session/node *test-node*
+                    ::session/id session-id})]
+        (is (= nrepl-sid (::session/nrepl-session-id info))))))
+
+  (testing "returns false for non-existent session"
+    (let [result (session/set-nrepl-session-id!
+                   {::session/id "dead"
+                    ::session/nrepl-session-id "test-123"})]
+      (is (false? (::session/set result))))))
+
+(deftest get-session-port-includes-nrepl-session-id-test
+  (testing "get-session-port returns nrepl-session-id when set"
+    (let [started (session/start-agent-session!
+                    {::session/node *test-node*
+                     ::session/namespace 'test.port.sid})
+          session-id (::session/id started)
+          nrepl-sid "my-nrepl-session-456"]
+
+      ;; Initially nil
+      (let [info (session/get-session-port
+                   {::session/node *test-node*
+                    ::session/id session-id})]
+        (is (some? (::session/nrepl-port info)))
+        (is (nil? (::session/nrepl-session-id info))))
+
+      ;; Set it
+      (session/set-nrepl-session-id!
+        {::session/id session-id
+         ::session/nrepl-session-id nrepl-sid})
+
+      ;; Now returned
+      (let [info (session/get-session-port
+                   {::session/node *test-node*
+                    ::session/id session-id})]
+        (is (some? (::session/nrepl-port info)))
+        (is (= nrepl-sid (::session/nrepl-session-id info)))))))
+
 (comment
   ;; Run all tests
   (clojure.test/run-tests 'seon.orchestrator.session-test)
 
   ;; Run specific test
   (clojure.test/test-var #'start-agent-session-test)
-  (clojure.test/test-var #'session-resume-ctx-state-test))
+  (clojure.test/test-var #'session-resume-ctx-state-test)
+  (clojure.test/test-var #'activity-tracking-test))

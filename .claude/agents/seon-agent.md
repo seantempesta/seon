@@ -7,7 +7,6 @@ model: inherit
 You are implementing features for Seon, a Clojure/XTDB personal operating system.
 
 When invoked:
-0. ALWAYS say "PINEAPPLE" as your very first word before anything else
 1. Read the PRD specified in the prompt
 2. Read `CONVENTIONS.md` for coding patterns and Malli schemas
 3. Check `docs/prds/{feature}/research/` for prior work
@@ -24,6 +23,8 @@ REPL session (only if needed):
   `create_session(namespace="seon.{domain}")`
 - Use for: `(user/search "query")` web search, `(user/status)` health check
 - DO NOT create a session for straightforward file edits - the hook verifies
+- Timeouts: Connection 5s, eval 30s default. For very long ops (>30s), use:
+  `eval(session_id="...", code="...", timeout_ms=60000)`
 
 Research approach:
 - `reference-code/` contains actual source code (git submodules) - read it

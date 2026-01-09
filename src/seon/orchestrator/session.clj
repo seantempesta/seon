@@ -51,9 +51,9 @@
                                                            {:type :malli.generator/no-generator})))}])
 
 (schema/register! ::id
-                  [:string {:min 8 :max 8
-                            :pattern "^[a-f0-9]{8}$"
-                            :description "8-character hex session ID"}])
+                  [:string {:min 4 :max 4
+                            :pattern "^[a-f0-9]{4}$"
+                            :description "4-character hex session ID"}])
 
 (schema/register! ::namespace
                   [:symbol {:description "Agent namespace symbol"}])
@@ -79,6 +79,22 @@
 
 (schema/register! ::error
                   [:string {:description "Error message if session failed"}])
+
+(schema/register! ::nrepl-session-id
+                  [:string {:description "Persistent nREPL session ID for *1/*2/*3 and interrupt support"}])
+
+;;; Observability schemas (Phase 4c)
+
+(schema/register! ::last-activity-at
+                  [inst? {:description "When the last eval completed"}])
+
+(schema/register! ::eval-count
+                  [:int {:min 0 :description "Total evals in this session"}])
+
+(schema/register! ::current-eval
+                  [:maybe [:map
+                           [::code :string]
+                           [::started-at inst?]]])
 
 ;;; Request/Response Schemas
 
@@ -122,7 +138,11 @@
                    [::status {:optional true} ::status]
                    [::nrepl-port {:optional true} ::nrepl-port]
                    [::started-at {:optional true} ::started-at]
-                   [::db-name {:optional true} ::db-name]])
+                   [::db-name {:optional true} ::db-name]
+                   ;; Observability fields (Phase 4c)
+                   [::last-activity-at {:optional true} ::last-activity-at]
+                   [::eval-count {:optional true} ::eval-count]
+                   [::current-eval {:optional true} ::current-eval]])
 
 (schema/register! ::list-agent-sessions-request
                   [:map
@@ -138,7 +158,8 @@
 
 (schema/register! ::get-session-port-response
                   [:map
-                   [::nrepl-port {:optional true} ::nrepl-port]])
+                   [::nrepl-port {:optional true} ::nrepl-port]
+                   [::nrepl-session-id {:optional true} ::nrepl-session-id]])
 
 (schema/register! ::recover-sessions-request
                   [:map
@@ -276,6 +297,10 @@
                             ::nrepl-port (:port nrepl-result)
                             ::started-at started-at
                             ::db-name db-name
+                            ;; Observability (Phase 4c)
+                            ::last-activity-at started-at
+                            ::eval-count 0
+                            ::current-eval nil
                             ;; Internal - not returned but stored in registry
                             ::flush! flush!
                             ::close! close!
@@ -372,6 +397,14 @@
        ::status :error
        ::error "Session not found"})))
 
+(def ^:private public-session-keys
+  "Keys to include in public session info responses."
+  [::id ::namespace ::status ::nrepl-port ::started-at ::db-name
+   ;; Persistent nREPL session (for *1/*2/*3 and interrupt)
+   ::nrepl-session-id
+   ;; Observability (Phase 4c)
+   ::last-activity-at ::eval-count ::current-eval])
+
 (defn get-agent-session
   "Get information about a specific agent session.
 
@@ -380,12 +413,15 @@
      ::id   - Required. The session ID to look up
 
    Response keys:
-     ::id         - Session ID (present if found)
-     ::namespace  - Agent namespace
-     ::status     - :running, :stopped, or :error
-     ::nrepl-port - nREPL port
-     ::started-at - When started
-     ::db-name    - XTDB database name
+     ::id               - Session ID (present if found)
+     ::namespace        - Agent namespace
+     ::status           - :running, :stopped, or :error
+     ::nrepl-port       - nREPL port
+     ::started-at       - When started
+     ::db-name          - XTDB database name
+     ::last-activity-at - When last eval completed (Phase 4c)
+     ::eval-count       - Total evals in session (Phase 4c)
+     ::current-eval     - Currently running eval info (Phase 4c)
 
    Returns an empty map if session not found.
 
@@ -398,7 +434,7 @@
   [{::keys [node id]}]
   ;; First check in-memory registry
   (if-let [session (get @session-registry id)]
-    (select-keys session [::id ::namespace ::status ::nrepl-port ::started-at ::db-name])
+    (select-keys session public-session-keys)
     ;; Fall back to XTDB (may be stopped session)
     (if-let [db-session (load-session-from-db node id)]
       {::id (:session-id db-session)
@@ -417,7 +453,9 @@
      ::node - Required. XTDB orchestrator node (unused but required for consistency)
 
    Response keys:
-     Vector of session info maps
+     Vector of session info maps, each containing:
+       ::id, ::namespace, ::status, ::nrepl-port, ::started-at, ::db-name,
+       ::last-activity-at, ::eval-count, ::current-eval
 
    Example:
      (list-agent-sessions {::node xtdb-node})
@@ -430,27 +468,138 @@
   ;; node is unused but required for API consistency
   (let [_ node]
     (vec (for [[_ session] @session-registry]
-           (select-keys session [::id ::namespace ::status ::nrepl-port ::started-at ::db-name])))))
+           (select-keys session public-session-keys)))))
 
 (defn get-session-port
-  "Get the nREPL port for a session ID. Used by bin/agent-eval.
+  "Get the nREPL port and session ID for a session. Used by bin/mcp-server.
 
    Request keys:
      ::node - Required. XTDB orchestrator node
-     ::id   - Required. The 8-char session ID
+     ::id   - Required. The 4-char session ID
 
    Response keys:
-     ::nrepl-port - Port number (nil if session not found/not running)
+     ::nrepl-port       - Port number (nil if session not found/not running)
+     ::nrepl-session-id - Persistent nREPL session ID (nil if not set)
 
    Example:
-     (get-session-port {::node xtdb-node ::id \"acdb234f\"})
+     (get-session-port {::node xtdb-node ::id \"a1b2\"})
      ;; From outside namespace:
      (session/get-session-port {::session/node xtdb-node
-                                ::session/id \"acdb234f\"})"
+                                ::session/id \"a1b2\"})"
   {:malli/schema [:=> [:cat ::get-session-port-request] ::get-session-port-response]}
   [{::keys [node id]}]
   (let [session (get-agent-session {::node node ::id id})]
-    {::nrepl-port (::nrepl-port session)}))
+    {::nrepl-port (::nrepl-port session)
+     ::nrepl-session-id (::nrepl-session-id session)}))
+
+;;; ---------------------------------------------------------------------------
+;;; nREPL Session ID Management
+;;; ---------------------------------------------------------------------------
+
+(schema/register! ::set-nrepl-session-id-request
+                  [:map
+                   [::id ::id]
+                   [::nrepl-session-id ::nrepl-session-id]])
+
+(schema/register! ::set-nrepl-session-id-response
+                  [:map
+                   [::set :boolean]])
+
+(defn set-nrepl-session-id!
+  "Set the persistent nREPL session ID for a session.
+   Called by MCP server after cloning the nREPL session.
+
+   Request keys:
+     ::id              - Required. The 4-char session ID
+     ::nrepl-session-id - Required. The nREPL session ID from clone op
+
+   Response keys:
+     ::set - Whether the session ID was set (false if session not found)
+
+   Example:
+     (set-nrepl-session-id! {::id \"a1b2\" ::nrepl-session-id \"abc-123-def\"})"
+  {:malli/schema [:=> [:cat ::set-nrepl-session-id-request] ::set-nrepl-session-id-response]}
+  [{::keys [id nrepl-session-id]}]
+  (if (contains? @session-registry id)
+    (do
+      (swap! session-registry assoc-in [id ::nrepl-session-id] nrepl-session-id)
+      {::set true})
+    {::set false}))
+
+;;; ---------------------------------------------------------------------------
+;;; Activity Tracking (Phase 4c)
+;;; ---------------------------------------------------------------------------
+
+(defn- record-eval-start* [session-id code]
+  (swap! session-registry update session-id
+         assoc ::current-eval {::code code
+                               ::started-at (java.util.Date.)}))
+
+(defn- record-eval-complete* [session-id]
+  (swap! session-registry update session-id
+         (fn [s]
+           (-> s
+               (assoc ::current-eval nil
+                      ::last-activity-at (java.util.Date.))
+               (update ::eval-count (fnil inc 0))))))
+
+;;; Request/Response schemas for activity tracking
+
+(schema/register! ::record-eval-start-request
+                  [:map
+                   [::id ::id]
+                   [::code :string]])
+
+(schema/register! ::record-eval-start-response
+                  [:map
+                   [::recorded :boolean]])
+
+(schema/register! ::record-eval-complete-request
+                  [:map
+                   [::id ::id]])
+
+(schema/register! ::record-eval-complete-response
+                  [:map
+                   [::recorded :boolean]])
+
+(defn record-eval-start!
+  "Record that an eval has started in a session.
+
+   Request keys:
+     ::id   - Required. The session ID
+     ::code - Required. The code being evaluated
+
+   Response keys:
+     ::recorded - Whether the activity was recorded
+
+   Example:
+     (record-eval-start! {::id \"a1b2\" ::code \"(+ 1 2)\"})"
+  {:malli/schema [:=> [:cat ::record-eval-start-request] ::record-eval-start-response]}
+  [{::keys [id code]}]
+  (if (contains? @session-registry id)
+    (do
+      (record-eval-start* id code)
+      {::recorded true})
+    {::recorded false}))
+
+(defn record-eval-complete!
+  "Record that an eval has completed in a session.
+
+   Request keys:
+     ::id - Required. The session ID
+
+   Response keys:
+     ::recorded - Whether the activity was recorded
+
+   Example:
+     (record-eval-complete! {::id \"a1b2\"})"
+  {:malli/schema [:=> [:cat ::record-eval-complete-request] ::record-eval-complete-response]}
+  [{::keys [id]}]
+  (if (contains? @session-registry id)
+    (do
+      (record-eval-complete* id)
+      {::recorded true})
+    {::recorded false}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Session Recovery (on system restart)

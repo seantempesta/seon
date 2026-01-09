@@ -35,6 +35,8 @@
 ;;; Tool Definitions
 ;;; ---------------------------------------------------------------------------
 
+(def default-timeout-ms 30000) ;; 30 second default timeout
+
 (def tools
   [{:name "eval"
     :description "Evaluate Clojure code. Use session_id='orchestrator' for the main REPL, or a 4-char hex session ID for an agent's isolated REPL. Returns result value and current namespace. Use (user/reload) to reload code, (user/search \"query\") for research."
@@ -42,7 +44,9 @@
                   :properties {:session_id {:type "string"
                                             :description "'orchestrator' for main REPL, or 4-char hex session ID (e.g., 'a1b2')"}
                                :code {:type "string"
-                                      :description "Clojure code to evaluate"}}
+                                      :description "Clojure code to evaluate"}
+                               :timeout_ms {:type "integer"
+                                            :description "Timeout in milliseconds (default: 30000)"}}
                   :required ["session_id" "code"]}}
 
    {:name "create_session"
@@ -56,7 +60,14 @@
     :description "Stop an agent session, flushing any pending state and cleaning up resources."
     :inputSchema {:type "object"
                   :properties {:session_id {:type "string"
-                                            :description "8-character hex session ID"}}
+                                            :description "4-character hex session ID"}}
+                  :required ["session_id"]}}
+
+   {:name "interrupt_eval"
+    :description "Interrupt a running evaluation in an agent session. Use when an eval is taking too long or appears hung."
+    :inputSchema {:type "object"
+                  :properties {:session_id {:type "string"
+                                            :description "4-character hex session ID"}}
                   :required ["session_id"]}}
 
    {:name "list_sessions"
@@ -85,6 +96,8 @@
 ;;; nREPL Communication (bencode)
 ;;; ---------------------------------------------------------------------------
 
+(def connect-timeout-ms 5000) ;; 5 second connection timeout (Phase 4c)
+
 (defn bytes->str
   "Convert bencode byte array to string."
   [x]
@@ -103,43 +116,117 @@
                   (bytes->str v))]))
         msg))
 
-(defn nrepl-eval
-  "Evaluate code via nREPL using bencode. Returns {:value :ns :err :out :ex}"
-  [port code]
-  (log-debug "nrepl-eval port:" port "code:" (pr-str code))
+(defn- connect-with-timeout
+  "Create a socket connection with explicit timeout (Phase 4c).
+   Returns connected Socket or throws."
+  [host port timeout-ms]
+  (let [addr (java.net.InetSocketAddress. host port)
+        sock (java.net.Socket.)]
+    (.connect sock addr timeout-ms)
+    sock))
+
+(defn nrepl-send-recv
+  "Send a message to nREPL and receive all responses until done.
+   Returns vector of decoded response messages."
+  [sock msg]
+  (let [out (java.io.BufferedOutputStream. (.getOutputStream sock))
+        in (java.io.PushbackInputStream. (.getInputStream sock))]
+    (log-debug "Sending:" (pr-str msg))
+    (b/write-bencode out msg)
+    (.flush out)
+    (loop [responses []]
+      (let [resp (decode-msg (b/read-bencode in))
+            status (get resp "status")]
+        (log-debug "Received:" (pr-str resp))
+        (if (and status (some #{"done"} status))
+          (conj responses resp)
+          (recur (conj responses resp)))))))
+
+(defn nrepl-clone-session
+  "Clone an nREPL session to get a persistent session ID.
+   Returns the new session ID string, or nil on failure."
+  [port]
+  (log-debug "nrepl-clone-session port:" port)
   (try
-    (with-open [sock (java.net.Socket. "localhost" port)]
-      (let [out (java.io.BufferedOutputStream. (.getOutputStream sock))
-            in (java.io.PushbackInputStream. (.getInputStream sock))
-            id (str (random-uuid))
-            msg-to-send {"op" "eval" "code" code "id" id}]
-        (log-debug "Sending:" (pr-str msg-to-send))
-        (b/write-bencode out msg-to-send)
-        (.flush out)
-        ;; Read responses until done
-        (loop [result {:value nil :ns nil :err nil :out nil :ex nil}]
-          (let [msg (decode-msg (b/read-bencode in))
-                status (get msg "status")
-                value (get msg "value")
-                ns-val (get msg "ns")
-                err (get msg "err")
-                stdout (get msg "out")
-                ex (get msg "ex")]
-            (log-debug "Received:" (pr-str msg))
-            (let [result' (cond-> result
-                            value (assoc :value value)
-                            ns-val (assoc :ns ns-val)
-                            err (update :err str err)
-                            stdout (update :out str stdout)
-                            ex (assoc :ex ex))]
-              (if (and status (some #{"done"} status))
-                result'
-                (recur result')))))))
-    (catch java.net.ConnectException e
-      {:err (str "Connection failed to port " port ": " (.getMessage e))})
+    (with-open [sock (connect-with-timeout "localhost" port connect-timeout-ms)]
+      (let [responses (nrepl-send-recv sock {"op" "clone"})
+            new-session (some #(get % "new-session") responses)]
+        (log-debug "Cloned session:" new-session)
+        new-session))
     (catch Exception e
-      (log-debug "Exception:" (class e) (.getMessage e))
-      {:err (str "Error: " (.getMessage e))})))
+      (log-error "Failed to clone session on port" port ":" (.getMessage e))
+      nil)))
+
+(defn nrepl-interrupt
+  "Send interrupt to an nREPL session. Returns status from response."
+  [port nrepl-session-id]
+  (log-debug "nrepl-interrupt port:" port "session:" nrepl-session-id)
+  (try
+    (with-open [sock (connect-with-timeout "localhost" port connect-timeout-ms)]
+      (let [responses (nrepl-send-recv sock {"op" "interrupt" "session" nrepl-session-id})
+            status (some #(get % "status") responses)]
+        (log-debug "Interrupt status:" status)
+        {:status status}))
+    (catch Exception e
+      (log-error "Failed to interrupt session:" (.getMessage e))
+      {:error (.getMessage e)})))
+
+(defn nrepl-eval
+  "Evaluate code via nREPL using bencode. Returns {:value :ns :err :out :ex}
+   timeout-ms controls how long to wait for responses (default: 30000ms)
+   nrepl-session-id - optional persistent nREPL session ID for *1/*2/*3 support"
+  ([port code] (nrepl-eval port code default-timeout-ms nil))
+  ([port code timeout-ms] (nrepl-eval port code timeout-ms nil))
+  ([port code timeout-ms nrepl-session-id]
+   (log-debug "nrepl-eval port:" port "timeout:" timeout-ms "session:" nrepl-session-id "code:" (pr-str code))
+   (let [timeout-ms (or timeout-ms default-timeout-ms)
+         deadline (+ (System/currentTimeMillis) timeout-ms)]
+     (try
+       (with-open [sock (connect-with-timeout "localhost" port connect-timeout-ms)]
+         (let [out (java.io.BufferedOutputStream. (.getOutputStream sock))
+               in (java.io.PushbackInputStream. (.getInputStream sock))
+               id (str (random-uuid))
+               msg-to-send (cond-> {"op" "eval" "code" code "id" id}
+                             nrepl-session-id (assoc "session" nrepl-session-id))]
+           (log-debug "Sending:" (pr-str msg-to-send))
+           (b/write-bencode out msg-to-send)
+           (.flush out)
+           ;; Read responses until done, tracking total elapsed time
+           (loop [result {:value nil :ns nil :err nil :out nil :ex nil}]
+             (let [remaining (- deadline (System/currentTimeMillis))]
+               (if (<= remaining 0)
+                 ;; Total timeout exceeded
+                 {:err (str "Timeout: evaluation took longer than " timeout-ms "ms. The REPL may be blocked.")
+                  :ex "timeout"}
+                 (do
+                   ;; Set socket timeout to remaining time (capped at 5 seconds for responsiveness)
+                   (.setSoTimeout sock (int (min remaining 5000)))
+                   (let [msg (decode-msg (b/read-bencode in))
+                         status (get msg "status")
+                         value (get msg "value")
+                         ns-val (get msg "ns")
+                         err (get msg "err")
+                         stdout (get msg "out")
+                         ex (get msg "ex")]
+                     (log-debug "Received:" (pr-str msg))
+                     (let [result' (cond-> result
+                                     value (assoc :value value)
+                                     ns-val (assoc :ns ns-val)
+                                     err (update :err str err)
+                                     stdout (update :out str stdout)
+                                     ex (assoc :ex ex))]
+                       (if (and status (some #{"done"} status))
+                         result'
+                         (recur result'))))))))))
+       (catch java.net.SocketTimeoutException _e
+         ;; Individual read timed out - check if total deadline exceeded
+         {:err (str "Timeout: evaluation took longer than " timeout-ms "ms. The REPL may be blocked.")
+          :ex "timeout"})
+       (catch java.net.ConnectException e
+         {:err (str "Connection failed to port " port ": " (.getMessage e))})
+       (catch Exception e
+         (log-debug "Exception:" (class e) (.getMessage e))
+         {:err (str "Error: " (.getMessage e))})))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Session Helpers
@@ -159,6 +246,25 @@
       (when (and value (not= "nil" value))
         (parse-long value)))))
 
+(defn get-session-info
+  "Query orchestrator for the nREPL port and nREPL session ID of a session.
+   Returns {:port <int> :nrepl-session-id <string>} or nil."
+  [session-id]
+  (let [code (format "(do (require 'seon.orchestrator.session)
+                          (let [result (seon.orchestrator.session/get-session-port
+                                         {:seon.orchestrator.session/node (user/xtdb-node)
+                                          :seon.orchestrator.session/id \"%s\"})]
+                            {:port (:seon.orchestrator.session/nrepl-port result)
+                             :nrepl-session-id (:seon.orchestrator.session/nrepl-session-id result)}))"
+                     session-id)
+        result (nrepl-eval orchestrator-port code)]
+    (when-let [value (:value result)]
+      (when (and value (not= "nil" value) (not= "{:port nil, :nrepl-session-id nil}" value))
+        ;; Parse the simple EDN map
+        (try
+          (clojure.edn/read-string value)
+          (catch Exception _ nil))))))
+
 (defn validate-session-id! [session-id]
   (when-not (re-matches #"[a-f0-9]{4}" session-id)
     (throw (ex-info (str "Invalid session ID: " session-id ". Must be 4 lowercase hex characters.")
@@ -168,21 +274,51 @@
 ;;; Tool Execution
 ;;; ---------------------------------------------------------------------------
 
+(defn- record-activity!
+  "Record eval activity start or completion for a session (Phase 4c).
+   action is :start or :complete"
+  [session-id action code]
+  (when (and session-id (not= session-id "orchestrator"))
+    (let [fn-name (if (= action :start)
+                    "record-eval-start!"
+                    "record-eval-complete!")
+          activity-code (if (= action :start)
+                          (format "(seon.orchestrator.session/%s {:seon.orchestrator.session/id \"%s\"
+                                                                   :seon.orchestrator.session/code %s})"
+                                  fn-name session-id (pr-str code))
+                          (format "(seon.orchestrator.session/%s {:seon.orchestrator.session/id \"%s\"})"
+                                  fn-name session-id))]
+      ;; Fire and forget - don't block on activity tracking
+      (try
+        (nrepl-eval orchestrator-port activity-code 1000)
+        (catch Exception e
+          (log-debug "Activity tracking failed:" (.getMessage e)))))))
+
 (defn execute-eval
-  "Execute the eval tool. Returns MCP result format."
-  [{:keys [session_id code]}]
-  (log-debug "execute-eval session:" session_id)
+  "Execute the eval tool. Returns MCP result format.
+   For agent sessions (not orchestrator), tracks activity for observability (Phase 4c).
+   Uses persistent nREPL session ID for *1/*2/*3 support."
+  [{:keys [session_id code timeout_ms]}]
+  (log-debug "execute-eval session:" session_id "timeout:" timeout_ms)
 
-  (let [port (if (= session_id "orchestrator")
-               orchestrator-port
-               (do
-                 (validate-session-id! session_id)
-                 (or (get-session-port session_id)
-                     (throw (ex-info (str "Session not found or not running: " session_id)
-                                     {:session_id session_id})))))]
+  (let [[port nrepl-session-id]
+        (if (= session_id "orchestrator")
+          [orchestrator-port nil]
+          (do
+            (validate-session-id! session_id)
+            (if-let [info (get-session-info session_id)]
+              [(:port info) (:nrepl-session-id info)]
+              (throw (ex-info (str "Session not found or not running: " session_id)
+                              {:session_id session_id})))))]
 
-    (let [result (nrepl-eval port code)]
+    ;; Record eval start for agent sessions (Phase 4c)
+    (record-activity! session_id :start code)
+
+    (let [result (nrepl-eval port code (or timeout_ms default-timeout-ms) nrepl-session-id)]
       (log-debug "Eval result:" (pr-str result))
+
+      ;; Record eval complete for agent sessions (Phase 4c)
+      (record-activity! session_id :complete nil)
 
       (if (:ex result)
         {:content [{:type "text"
@@ -197,10 +333,13 @@
          :isError false}))))
 
 (defn execute-create-session
-  "Execute the create_session tool."
+  "Execute the create_session tool.
+   After creating the session, clones an nREPL session for persistent *1/*2/*3 support
+   and stores it in the session registry."
   [{:keys [namespace]}]
   (log-debug "execute-create-session namespace:" namespace)
 
+  ;; First, create the session in Seon
   (let [code (format "(do (require 'seon.orchestrator.session)
                           (let [result (seon.orchestrator.session/start-agent-session!
                                          {:seon.orchestrator.session/node (user/xtdb-node)
@@ -218,9 +357,33 @@
       {:content [{:type "text"
                   :text (str "Error creating session: " (:err result))}]
        :isError true}
-      {:content [{:type "text"
-                  :text (:value result)}]
-       :isError false})))
+
+      ;; Session created, now clone nREPL session for persistence
+      (let [session-info (try (clojure.edn/read-string (:value result)) (catch Exception _ nil))
+            port (:nrepl_port session-info)
+            session-id (:session_id session-info)]
+        (if (and port session-id)
+          ;; Clone nREPL session
+          (let [nrepl-session-id (nrepl-clone-session port)]
+            (log-debug "Cloned nREPL session:" nrepl-session-id "for session:" session-id)
+
+            ;; Store the nREPL session ID in the Seon session registry
+            (when nrepl-session-id
+              (let [store-code (format "(seon.orchestrator.session/set-nrepl-session-id!
+                                          {:seon.orchestrator.session/id \"%s\"
+                                           :seon.orchestrator.session/nrepl-session-id \"%s\"})"
+                                       session-id nrepl-session-id)]
+                (nrepl-eval orchestrator-port store-code 5000)))
+
+            ;; Return session info with nrepl_session_id
+            {:content [{:type "text"
+                        :text (pr-str (assoc session-info :nrepl_session_id nrepl-session-id))}]
+             :isError false})
+
+          ;; Failed to parse session info, return original
+          {:content [{:type "text"
+                      :text (:value result)}]
+           :isError false})))))
 
 (defn execute-stop-session
   "Execute the stop_session tool."
@@ -247,19 +410,78 @@
                   :text (:value result)}]
        :isError false})))
 
+(defn execute-interrupt-eval
+  "Execute the interrupt_eval tool.
+   Sends an interrupt to the nREPL session for the given Seon session."
+  [{:keys [session_id]}]
+  (log-debug "execute-interrupt-eval session:" session_id)
+  (validate-session-id! session_id)
+
+  (if-let [info (get-session-info session_id)]
+    (let [port (:port info)
+          nrepl-session-id (:nrepl-session-id info)]
+      (if nrepl-session-id
+        (let [result (nrepl-interrupt port nrepl-session-id)]
+          (if (:error result)
+            {:content [{:type "text"
+                        :text (str "Error interrupting: " (:error result))}]
+             :isError true}
+            {:content [{:type "text"
+                        :text (str "Interrupt sent. Status: " (pr-str (:status result)))}]
+             :isError false}))
+        {:content [{:type "text"
+                    :text "Session has no persistent nREPL session ID. Cannot interrupt ephemeral sessions."}]
+         :isError true}))
+    {:content [{:type "text"
+                :text (str "Session not found: " session_id)}]
+     :isError true}))
+
 (defn execute-list-sessions
-  "Execute the list_sessions tool."
+  "Execute the list_sessions tool.
+   Returns session info including observability data (Phase 4c):
+   - uptime_seconds: how long the session has been running
+   - last_activity_at: when the last eval completed
+   - eval_count: total evals in this session
+   - current_eval: info about currently running eval (if any)
+   - nrepl_session_id: persistent nREPL session ID for debugging"
   [_args]
   (log-debug "execute-list-sessions")
 
+  ;; The Clojure code calculates uptime_seconds from started_at and formats dates
   (let [code "(do (require 'seon.orchestrator.session)
-                  (let [sessions (seon.orchestrator.session/list-agent-sessions
+                  (let [now (System/currentTimeMillis)
+                        sessions (seon.orchestrator.session/list-agent-sessions
                                    {:seon.orchestrator.session/node (user/xtdb-node)})]
                     (mapv (fn [s]
-                            {:session_id (:seon.orchestrator.session/id s)
-                             :namespace (str (:seon.orchestrator.session/namespace s))
-                             :nrepl_port (:seon.orchestrator.session/nrepl-port s)
-                             :status (name (:seon.orchestrator.session/status s))})
+                            (let [started-at (:seon.orchestrator.session/started-at s)
+                                  uptime-ms (when started-at
+                                              (- now (.getTime ^java.util.Date started-at)))]
+                              (cond-> {:session_id (:seon.orchestrator.session/id s)
+                                       :namespace (str (:seon.orchestrator.session/namespace s))
+                                       :nrepl_port (:seon.orchestrator.session/nrepl-port s)
+                                       :status (name (:seon.orchestrator.session/status s))}
+                                uptime-ms
+                                (assoc :uptime_seconds (quot uptime-ms 1000))
+
+                                (:seon.orchestrator.session/nrepl-session-id s)
+                                (assoc :nrepl_session_id
+                                       (:seon.orchestrator.session/nrepl-session-id s))
+
+                                (:seon.orchestrator.session/last-activity-at s)
+                                (assoc :last_activity_at
+                                       (str (:seon.orchestrator.session/last-activity-at s)))
+
+                                (:seon.orchestrator.session/eval-count s)
+                                (assoc :eval_count
+                                       (:seon.orchestrator.session/eval-count s))
+
+                                (:seon.orchestrator.session/current-eval s)
+                                (assoc :current_eval
+                                       {:code (:seon.orchestrator.session/code
+                                                (:seon.orchestrator.session/current-eval s))
+                                        :started_at
+                                        (str (:seon.orchestrator.session/started-at
+                                               (:seon.orchestrator.session/current-eval s)))}))))
                           sessions)))"
         result (nrepl-eval orchestrator-port code)]
 
@@ -326,6 +548,7 @@
                    "eval" (execute-eval arguments)
                    "create_session" (execute-create-session arguments)
                    "stop_session" (execute-stop-session arguments)
+                   "interrupt_eval" (execute-interrupt-eval arguments)
                    "list_sessions" (execute-list-sessions arguments)
                    (throw (ex-info (str "Unknown tool: " name) {:tool name})))]
       (send-result id result))

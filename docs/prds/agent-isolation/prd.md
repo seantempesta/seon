@@ -1,6 +1,6 @@
 # Agent Isolation Architecture
 
-**Status**: Phase 4b Complete, Phase 7 research done
+**Status**: Phase 4d Complete, Phase 7 in progress
 **Last Updated**: 2026-01-09
 
 ## Current Status
@@ -11,7 +11,10 @@
 - Phase 3b: Persisted context (`seon.agent.ctx`)
 - Phase 4: Agent Session API (`seon.orchestrator.session`)
 - Phase 4b: MCP Agent Eval Tool (`bin/mcp-server`)
+- Phase 4c: Session Observability (`list_sessions` with uptime, activity tracking, eval counts)
+- Phase 4d: Persistent nREPL Sessions (`clone` op for *1/*2/*3, `interrupt_eval` tool)
 - Claude SDK research complete (see `research/` folder)
+- Claude SDK Phase 1 complete (`seon.claude.sdk` - query/exec functions)
 
 **In Progress:**
 - Phase 7: Clojure Claude SDK implementation (see `docs/prds/clojure-claude-sdk/prd.md`)
@@ -940,6 +943,119 @@ See: [mcp-agent-eval.md](mcp-agent-eval.md) for full details.
 - [x] Test with Claude Code (verified all special chars work)
 - [x] Configure via `claude mcp add` (creates `.mcp.json`)
 - [x] Keep `bin/agent-eval` for manual debugging
+
+### Phase 4c: Session Observability & Timeout Hardening
+
+**Status**: Complete (2026-01-09)
+**Priority**: High (discovered blocking issue in production)
+
+**Problem Discovered (2026-01-09)**:
+
+During testing of the Clojure Claude SDK, agent evals started hanging indefinitely. Investigation revealed:
+
+1. **Root Cause**: Code in an nREPL session called `spawn-claude-code` directly and then used `slurp` to read the subprocess stdout
+2. **Effect**: `slurp` blocks until EOF, but the Claude subprocess never terminates (interactive)
+3. **Result**: nREPL session thread blocked for 13+ minutes, REPL appeared hung
+4. **Fix Applied**: Made `spawn-claude-code` private in `seon.claude.sdk` with warning about blocking IO
+
+**Architectural Insight**:
+
+```
+Subprocess stdout/stderr → blocking read (slurp) → nREPL thread blocked
+                                                     ↓
+                                           All evals to that session hang
+```
+
+The JVM thread dump showed:
+```
+"nREPL-ephemeral-session-6" - elapsed=783.55s
+   java.lang.Thread.State: RUNNABLE
+   at java.io.FileInputStream.readBytes(Native Method)
+   - locked <...> (a java.lang.ProcessImpl$ProcessPipeInputStream)
+   at clojure.core$slurp.invokeStatic(core.clj:7098)
+```
+
+**Immediate Fix** (completed):
+- [x] Made `spawn-claude-code` private (`defn-`)
+- [x] Added warning in docstring about never using blocking IO on streams
+- [x] Public API (`query`/`exec`) properly uses futures and core.async channels
+
+**Observability Requirements**:
+
+When listing sessions via `list_sessions` MCP tool, now exposes:
+
+| Field | Description |
+|-------|-------------|
+| `uptime_seconds` | Duration since session started |
+| `last_activity_at` | When the last eval completed |
+| `eval_count` | Total number of evals in this session |
+| `current_eval` | Currently running eval info (code, started_at) |
+
+**Implementation Tasks** (all complete):
+
+- [x] Add `::last-activity-at` to session registry (updated on each eval)
+- [x] Add `::current-eval` tracking `{::code ::started-at}` (set during eval, cleared after)
+- [x] Add `::uptime` calculation in `list-agent-sessions` (via MCP server)
+- [x] Add connection timeout to MCP server socket creation (5s timeout)
+- [x] Track eval counts per session for debugging (`::eval-count`)
+- [ ] Add optional health check (ping with 2s timeout) to `list_sessions` - deferred
+
+**Files Modified**:
+- `src/seon/orchestrator/session.clj` - Added activity tracking functions (`record-eval-start!`, `record-eval-complete!`)
+- `bin/mcp-server` - Added `record-activity!` helper, enhanced `execute-list-sessions` with observability fields
+
+**Testing** (all passing):
+- [x] `activity-tracking-test` - Verify eval start/complete tracking
+- [x] `activity-tracking-nonexistent-session-test` - Verify graceful handling of unknown sessions
+- [x] `list-sessions-includes-observability-test` - Verify observability fields in list output
+- [x] Connection timeout verified (5s in `connect-with-timeout`)
+
+### Phase 4d: Persistent nREPL Sessions & Interrupt
+
+**Status**: Complete (2026-01-09)
+
+**Problem**: Each eval used an ephemeral nREPL session, meaning:
+- `*1`, `*2`, `*3` didn't persist between evals
+- No way to interrupt hung evals (nREPL's `interrupt` op needs a session ID)
+
+**Solution**: Clone a persistent nREPL session on agent session creation.
+
+**Implementation**:
+
+1. **Session Cloning** (`bin/mcp-server`):
+   - On `create_session`, send `{"op" "clone"}` to agent's nREPL
+   - Store returned `new-session` UUID via `set-nrepl-session-id!`
+   - Pass session ID with every eval for `*1`/`*2`/`*3` support
+
+2. **Session Storage** (`src/seon/orchestrator/session.clj`):
+   - Added `::nrepl-session-id` to session schema
+   - Added `set-nrepl-session-id!` function
+   - Updated `get-session-port` → `get-session-info` (returns port + session ID)
+
+3. **Interrupt Tool** (`bin/mcp-server`):
+   - New `interrupt_eval` MCP tool
+   - Sends `{"op" "interrupt" "session" <nrepl-session-id>}` to agent's nREPL
+   - Returns status: `["done" "interrupted"]` on success
+
+**API Changes**:
+
+```clojure
+;; create_session now returns nrepl_session_id
+{:session_id "a3a4" :nrepl_port 7889 :nrepl_session_id "405d22a3-..."}
+
+;; list_sessions includes nrepl_session_id
+[{:session_id "a3a4" :nrepl_session_id "405d22a3-..." ...}]
+
+;; New interrupt_eval tool
+(mcp__seon__interrupt_eval {:session_id "a3a4"})
+;; => "Interrupt sent. Status: [\"done\" \"interrupted\"]"
+```
+
+**Verified Working**:
+- [x] `*1` persists between evals
+- [x] `interrupt_eval` kills hung `(Thread/sleep 30000)`
+- [x] REPL responsive after interrupt
+- [x] `nrepl_session_id` in create/list responses
 
 ### Phase 5: Web Routing
 - [ ] Route by `X-Namespace` header
