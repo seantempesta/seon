@@ -1,7 +1,7 @@
 # Agent Isolation Architecture
 
-**Status**: Phase 4 Complete (with one known issue)
-**Last Updated**: 2026-01-06
+**Status**: Phase 4b Complete, Phase 7 research done
+**Last Updated**: 2026-01-09
 
 ## Current Status
 
@@ -10,15 +10,18 @@
 - Phase 2: Multi-server nREPL (`seon.orchestrator.nrepl`)
 - Phase 3b: Persisted context (`seon.agent.ctx`)
 - Phase 4: Agent Session API (`seon.orchestrator.session`)
-- *ctx* now accessible without qualification - agents can use `@*ctx*` directly
+- Phase 4b: MCP Agent Eval Tool (`bin/mcp-server`)
+- Claude SDK research complete (see `research/` folder)
 
-**Known Issue:** RESOLVED (2026-01-06)
-- `bin/agent-eval` now works with all special characters when using heredocs
-- Root cause: Shell escaping corrupts `!`, `$`, etc. in arguments
-- Solution: Use `cat << 'END' | agent-eval session-id` syntax
-- See `notes.md` for full details
+**In Progress:**
+- Phase 7: Clojure Claude SDK implementation (see `docs/prds/clojure-claude-sdk/prd.md`)
 
-**Next:** Phase 5 (Web UI integration)
+**Remaining:**
+- Phase 5: Web Routing (SSE scoping)
+- Phase 6: Git Worktree Integration
+- Phase 7: Full Agent Lifecycle
+
+**Next:** Implement Clojure Claude SDK (enables Phase 7's `launch-agent!`)
 
 ## Vision
 
@@ -956,8 +959,29 @@ See: [mcp-agent-eval.md](mcp-agent-eval.md) for full details.
 - [ ] Implement `reload-agent-namespaces!` for targeted reload
 
 ### Phase 7: Full Agent Lifecycle (combines previous phases)
-- [ ] `launch-agent!` - creates session, assigns worktree, provides instructions
+
+**Prerequisite:** Clojure Claude SDK (see `docs/prds/clojure-claude-sdk/prd.md`)
+
+The SDK enables Seon to programmatically spawn and control Claude Code agents from the JVM using `clojure.java.process`. This is the foundation for `launch-agent!`.
+
+- [ ] Implement Clojure Claude SDK (Phase 1-2 of SDK PRD)
+  - [ ] `seon.claude.sdk/query` - spawn Claude Code, stream messages
+  - [ ] `seon.claude.sdk/exec` - blocking convenience wrapper
+  - [ ] Malli schemas per CONVENTIONS.md
+- [ ] Integrate SDK with session API (Phase 3 of SDK PRD)
+  - [ ] Auto-create nREPL session for launched agent
+  - [ ] Pass session context via MCP (eval tool gets session_id)
+  - [ ] Map Claude Code session to Seon session
+- [ ] `launch-agent!` - orchestration function
+  - [ ] Create Seon session (nREPL, ctx, db)
+  - [ ] Spawn Claude Code with SDK
+  - [ ] Configure MCP server with session_id
+  - [ ] Assign worktree (Phase 6)
+  - [ ] Provide agent instructions
 - [ ] `terminate-agent!` - cleanup everything
+  - [ ] Stop Claude Code process
+  - [ ] Stop nREPL session
+  - [ ] Archive/cleanup worktree
 - [ ] Lock namespace while agent active
 - [ ] Agent status dashboard in web UI
 
