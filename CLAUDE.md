@@ -13,248 +13,110 @@
 
 ---
 
-## Are You an Orchestrator or an Agent?
+## Your Role: Orchestrator
 
-**Read this first.** When Claude Code runs on this project, it operates in one of two roles:
+You coordinate work and delegate to agents. **Delegate ~90% of implementation to agents.**
 
-### You Are an ORCHESTRATOR If:
-- You're in the main conversation with the user
-- You can launch subagents via the Task tool
-- The user is asking you to build features or fix bugs
+### Do Directly (10%)
+- Tiny edits (typos, comments, renames)
+- Quick file reads to answer questions
+- Git operations (commits, status)
+- PRD updates
 
-### You Are an AGENT If:
-- You were launched via the Task tool (you'll see this in your context)
-- You received a prompt telling you to work on a specific task
-- You should read the PRD and work autonomously
-
-**If you're unsure, you're probably the orchestrator.**
+### Delegate to Agents (90%)
+- Feature implementation
+- Bug investigation and fixes
+- Research tasks
+- Multi-file changes
 
 ---
 
-## Orchestrator Responsibilities
+## Launching Agents
 
-Your job is **coordination, not implementation**. Delegate ~90% of work to agents.
+### 1. Ensure a PRD Exists
 
-### When to Do Work Directly (10%)
-- Tiny edits (fix a typo, add a comment, rename a variable)
-- Quick file reads to answer a question
-- Git operations (commits, status checks)
-- Updating PRDs with status
+```bash
+cp -r docs/prds/_example-feature docs/prds/{feature-name}
+```
 
-### When to Launch an Agent (90%)
-- Any feature implementation
-- Bug fixes that require investigation
-- Research tasks
-- Multi-file changes
-- Anything requiring reading multiple files to understand
+Write clear goals, success criteria, and relevant context.
 
-### Before Launching Any Agent
-
-1. **Ensure a PRD exists** - Copy template if needed:
-   ```bash
-   cp -r docs/prds/_example-feature docs/prds/{feature-name}
-   ```
-
-2. **Write or update the PRD** with:
-   - Clear goals and success criteria
-   - Known constraints
-   - Relevant context (what files to look at, what patterns to follow)
-
-3. **Point the agent to the PRD** - Don't explain the task yourself. Say:
-   > "Read `docs/prds/{feature}/prd.md` and implement Phase X"
-
-### How to Launch Agents
+### 2. Point the Agent to the PRD
 
 **DO THIS:**
 ```
 Read docs/prds/unified-dev-hook/prd.md and implement Phase 5.
-Update the PRD when done.
 ```
 
 **NOT THIS:**
 ```
 Add a debounce-seconds config option to .claude/seon-hook.edn and
-wire it through to the should-trigger-review? function in feedback.clj...
-[walls of specific instructions]
+wire it through to the should-trigger-review? function...
+[walls of instructions]
 ```
 
-The first approach creates a **smart agent** that will:
-- Read context and understand the full picture
-- Do additional research if needed
-- Make good decisions autonomously
-- Document what it learned
+Smart agents read context and make decisions. Mindless drones follow exact instructions and miss the bigger picture.
 
-The second approach creates a **mindless drone** that:
-- Only does exactly what you said
-- Misses important context
-- Doesn't learn or adapt
-- Produces brittle results
+### 3. Choose the Right Agent Type
+
+| Type | Use For |
+|------|---------|
+| `general-purpose` | Implementation, research, multi-file changes |
+| `Explore` | Quick searches, finding files (read-only) |
+| `Plan` | Architecture planning |
+
+**For implementation tasks**, the `seon-agent` subagent should auto-delegate based on task description. If not, mention it explicitly:
+```
+Use the seon-agent subagent. Read docs/prds/feature/prd.md and implement Phase 1.
+```
+
+**Never use background agents** - they have restricted permissions.
 
 ---
 
-## Agent Responsibilities
+## Quick Reference
 
-You were launched to accomplish a specific task. Work **autonomously and intelligently**.
-
-### First Steps When Launched
-
-1. **Read the PRD** - Your prompt should tell you which one
-2. **Read existing research** - Check `docs/prds/{feature}/research/` for prior work
-3. **Understand the codebase** - Read relevant files, don't just grep blindly
-4. **Invoke skills** - Use project-specific skills before manual searching
-
-### How to Work
-
-- **Be autonomous** - Don't ask permission for every step. Make decisions.
-- **Do research** - If you don't understand something, read more files or search the web
-- **Run tests** - Verify your changes work: `clj -M:test -m kaocha.runner`
-- **Use the REPL** - Verify code works via nREPL before declaring done
-- **Iterate** - If something doesn't work, try a different approach
-
-### Writing to the PRD Folder
-
-```
-docs/prds/{feature}/
-├── prd.md               # The source of truth - keep updated!
-├── decisions.md         # Architectural choices with rationale
-├── notes.md             # Gotchas, surprises, things to remember
-└── research/            # Standalone research files
-    └── {topic}.md       # Focused investigation on a specific topic
-```
-
-**The PRD must always be up to date.** Before completing your work:
-1. Update the "Implementation Summary" section
-2. Mark completed phases/tasks
-3. Document what's remaining
-4. Update decisions.md with any architectural choices you made
-5. Add notes.md entries for gotchas future agents should know
-
-### When You're Stuck
-
-**Think first, don't guess.** Spend more time researching and understanding, less time trying random things.
-
-1. **Use `(search "query")` via REPL** - This is your best research tool:
-   ```bash
-   clj-nrepl-eval -p 7888 "(search \"How to do X in XTDB v2\")"
-   ```
-   This gives you web-grounded, current information with source citations. Use it liberally.
-
-2. Read more context - often the answer is in adjacent files
-3. Check reference docs - see Documentation Reference section below
-4. Invoke relevant skills - they contain project-specific knowledge
-5. **For XTDB issues** - We have the full source code at `reference-code/xtdb/`. Read it.
-6. Try a different approach - PRDs describe goals, not exact implementations
-7. Document what you tried in notes.md - so the next agent doesn't repeat it
-
----
-
-## Quick Start
-
-**Seon is a long-running server.** Start it once and leave it running.
-
-### 1. Start the Server (once)
+### Server
 
 ```bash
-./bin/run    # Starts EVERYTHING: XTDB, HTTP (8080), nREPL (7888)
+./bin/run    # Start everything: XTDB, HTTP (8080), nREPL (7888)
 ```
 
-This is the canonical way to run Seon. Logs to stdout, Ctrl+C to stop.
+The server must be running for agents to work.
 
-### 2. Connect Your Editor
+### Your REPL
 
-Connect to the running nREPL on port 7888. The server manages nREPL as an Integrant component.
-
-**DO NOT** start a separate nREPL manually - it will conflict with the server's nREPL.
-
-### 3. Reload Code Changes
-
-After editing code, reload it into the running server:
-
-```clojure
-(reset)   ; Reloads ALL changed namespaces, restarts components
-(status)  ; Verify system is healthy
-```
-
-### For Agents (non-interactive)
-
-Use `clj-nrepl-eval` to send commands to the running server:
-
-```bash
-clj-nrepl-eval -p 7888 "(reload)"                   # Fast reload (~5ms)
-clj-nrepl-eval -p 7888 "(status)"                   # Check status
-clj-nrepl-eval -p 7888 "(search \"XTDB SQL syntax\")" # Research when stuck
-```
-
-### REPL Helper Functions
-
-The `user` namespace (loaded automatically) provides these helpers:
+Connect your editor to nREPL on port 7888. Use these helpers:
 
 | Function | Purpose |
 |----------|---------|
-| `(go)` | Start system |
-| `(halt)` | Stop system |
-| `(reload)` | **Fast reload changed code** (preserves state, ~2ms) |
-| `(reset)` | Reload + restart components (use when config changes) |
+| `(reload)` | Fast reload changed code (~2ms) |
+| `(reset)` | Reload + restart components |
 | `(status)` | Show system status |
-| `(search "query")` | Web search via Gemini (use when stuck!) |
-| `(ask "query")` | Ask Gemini (no web search) |
-| `(xtdb-node)` | Get XTDB node |
-| `(db-reset!)` | Delete all data and restart fresh |
+| `(search "query")` | Web search via Gemini |
 
-**Location:** `env/dev/clj/user.clj` (NOT `dev/user.clj`)
+### MCP Tools (for orchestrator)
 
-### If You Need to Restart
-
-```bash
-# Ctrl+C the running ./bin/run, then:
-./bin/run
+```
+eval(session_id="orchestrator", code="(user/status)")
+eval(session_id="orchestrator", code="(user/search \"query\")")
 ```
 
 ---
 
-## Critical Rules
-
-1. **Invoke skills before searching** - Check if a skill applies before manually grepping/reading
-2. **Use SQL for XTDB** - We've moved to SQL syntax (not XTQL). See `docs/reference/xtdb-v2-reference.md`
-3. **Write tests** - All code changes require appropriate tests
-4. **REPL-driven development** - Verify changes work via REPL before declaring done
-5. **PRDs may be wrong** - Understand what you're building, don't blindly follow specs
-6. **Domain isolation** - Domains communicate through core protocols, not direct calls
-7. **Research before guessing** - Use `gemini/search` via REPL when stuck. Don't try random things.
-
----
-
-## Architecture Overview
+## Architecture
 
 ```
 seon/
 ├── src/seon/
-│   ├── core.clj              ; System entry, protocols, shared utilities
+│   ├── core.clj              ; System entry, protocols
 │   ├── config.clj            ; Aero config loading
 │   ├── system.clj            ; Integrant system map
-│   │
-│   ├── db/                   ; Database layer (shared across domains)
-│   │   ├── node.clj          ; XTDB node management, query wrapper
-│   │   ├── schema.clj        ; Malli schemas
-│   │   ├── queries.clj       ; Common query patterns
-│   │   └── transactions.clj  ; Transaction helpers
-│   │
-│   ├── domains/              ; Domain modules (future structure)
-│   │   ├── trading/          ; Options trading (from ml-options)
-│   │   ├── health/           ; Apple Health integration (planned)
-│   │   ├── finance/          ; Personal finance (planned)
-│   │   └── tasks/            ; Task/project management (planned)
-│   │
-│   └── web/                  ; Web UI layer
-│       ├── server.clj        ; HTTP-kit server
-│       ├── routes.clj        ; Ring routes
-│       ├── handlers.clj      ; Request handlers
-│       ├── html.clj          ; Hiccup templates
-│       └── sse.clj           ; Server-sent events
-│
-├── data/
-│   └── xtdb/                 ; XTDB storage (git-ignored)
-│
+│   ├── db/                   ; Database layer
+│   ├── domains/              ; Domain modules (trading, health, etc.)
+│   └── web/                  ; HTTP server, SSE, handlers
+├── reference-code/           ; Git submodules of dependency source
+│   └── xtdb/                 ; XTDB source (read when stuck)
 └── docs/
     ├── prds/                 ; Feature specifications
     └── reference/            ; Technical reference docs
@@ -262,292 +124,50 @@ seon/
 
 ---
 
-## Agent Principles
+## Skills
 
-These apply to all agents working on this project:
-
-### Foreground Agents Only
-**Never use background agents (`run_in_background: true`).** Background agents:
-- Have restricted permissions and can't edit files normally
-- Resort to workarounds like `cat >> file` instead of proper Edit/Write tools
-- Can't be interacted with by the user during execution
-- Are harder to debug when something goes wrong
-
-Always use sequential foreground agents. Wait for each to complete before launching the next. This ensures full-powered agents with proper tool access.
-
-### Prototype and Iterate, Don't Waterfall
-- PRDs describe goals and constraints, not exact implementations
-- PRDs may be wrong or incomplete - use your judgment
-- Rapid prototyping beats upfront planning
-- Get something working first, then refine
-- If a PRD's approach isn't working, try a different approach
-
-### Learn by Doing
-- Read reference code, but don't cargo-cult - understand WHY it works
-- Build small experiments to test your understanding
-- When stuck, prototype multiple approaches rather than analyzing forever
-- Search the web when you need to, but verify with working code
-
-### Verify Everything via REPL
-
-The server must be running (`./bin/run`). Then verify your changes:
-
-```bash
-clj-nrepl-eval -p 7888 "(user/status)"    # System running?
-clj-nrepl-eval -p 7888 "(reset)"          # Reload code changes
-curl http://localhost:8080/api/health     # HTTP working?
-```
-
-### Incremental Changes
-- Make small changes, verify each works, then proceed
-- Test the specific functionality you changed
-- Test that reset/restart still works
-- Test that nothing else broke
-
-### No Parallel Implementations
-**Never create v1/v2/v3 or "old"/"new" versions of code.** This clutters the codebase.
-
-- **Accretion**: Prefer adding to existing code when extending functionality
-- **Replacement**: If changing approach, replace the old code entirely - don't keep both
-- **No suffix naming**: Never create `foo_v2.clj`, `foo_new.clj`, `foo_final.clj`
-- **No commented old code**: Delete replaced code, don't comment it out (git has history)
-
-### Testing Philosophy
-- Write tests that catch real bugs, not tests for test coverage
-- Property-based tests for data transformations
-- Integration tests for database operations
-- Don't add useless tests - if a test can't fail meaningfully, skip it
-- Run tests before completing: `clj -M:test -m kaocha.runner`
-
----
-
-## Feature Development Workflow
-
-**PRDs define WHAT/WHY, agents figure out HOW.**
-
-See the Orchestrator and Agent Responsibilities sections above for detailed guidance.
-
-**Subagent types:**
-
-| Type | Write Access | Use For |
-|------|--------------|---------|
-| `general-purpose` | **YES** | Research that writes findings, implementation work |
-| `Explore` | **NO** (read-only) | Quick searches, finding files, answering questions |
-| `Plan` | **YES** | Architecture planning |
-
-**Never use background agents** (`run_in_background: true`) - they have restricted permissions.
-
-See `docs/prds/readme.md` for full templates and workflow details.
-
----
-
-## System Lifecycle
-
-### The Server Model
-
-Seon runs as a **persistent server** started with `./bin/run`. This single process manages:
-- XTDB database node
-- HTTP server (port 8080)
-- nREPL server (port 7888)
-- All Integrant components
-
-**You don't start/stop components manually.** The server handles lifecycle.
-
-### Reloading Code
-
-**DO NOT use `(require 'ns :reload)`** - it doesn't work reliably.
-
-**Prefer `(reload)`** for fast code sync:
-```clojure
-(reload)   ; Fast (~2ms), preserves defonce, only reloads changed files
-```
-
-**Use `(reset)` when you need to restart components** (config changes, system state):
-```clojure
-(reset)    ; Slower (~1-2s), reloads code AND restarts Integrant components
-```
-
-For agents via command line:
-```bash
-clj-nrepl-eval -p 7888 "(reload)"   # Fast code sync
-clj-nrepl-eval -p 7888 "(reset)"    # Full restart
-```
-
-### If Reload/Reset Fails
-
-1. Fix the compile error
-2. Run `(reload)` or `(reset)` again - it should recover
-3. If still broken: Ctrl+C and restart `./bin/run`
-
-### Checking System Health
-
-```bash
-clj-nrepl-eval -p 7888 "(user/status)"
-```
-
-This shows all running components and XTDB metrics.
-
----
-
-## XTDB Quick Reference
-
-**We use SQL syntax** - it's more stable than XTQL and better documented.
-
-```clojure
-(require '[seon.db.node :as node])
-
-;; CORRECT - use SQL with our wrapper
-(node/q (xtdb-node) "SELECT ticker, iv FROM option_greeks WHERE ticker = ?" ["SPY"])
-
-;; CORRECT - simple queries
-(node/q (xtdb-node) "SELECT * FROM trades ORDER BY timestamp DESC LIMIT 10")
-```
-
-**Key resources:**
-- `docs/reference/xtdb-v2-reference.md` - Our SQL patterns and examples
-- `reference-code/xtdb/` - **Full XTDB source code** - read this when stuck!
-- Use `gemini/search` for XTDB questions - it has current docs
-
-**When you hit XTDB issues:** Don't guess. Read the source code in `reference-code/xtdb/` or use `gemini/search` to get current documentation. XTDB v2 is different from v1.
-
----
-
-## Documentation Reference
-
-### Skills (Invoke Before Searching)
+Invoke skills before manual searching - they encode project-specific knowledge.
 
 | Skill | Invoke When |
 |-------|-------------|
-| `xtdb-queries` | Writing/debugging queries, XTQL syntax, empty results |
-| `datastar-web-ui` | SSE handlers, Datastar attributes, UI design |
-| `browser-automation` | Testing in browser, debugging UI, network/console inspection |
-| `data-import` | ThetaData API, bulk imports, OCC symbols |
-| `clojure-testing` | Writing tests, debugging failures, mocking |
-
-### Reference Docs
-| Document | When to Read |
-|----------|--------------|
-| `CONVENTIONS.md` | Malli schema patterns, public API design |
-| `docs/reference/xtdb-v2-reference.md` | Database work - XTQL queries, temporal |
-| `docs/reference/datastar-quick-reference.md` | Web UI work - attribute reference |
-| `docs/reference/logging-setup.md` | Debugging - log files, REPL functions |
-| `PLAN.md` | Transformation roadmap and current status |
+| `xtdb-queries` | Database queries, SQL patterns |
+| `datastar-web-ui` | SSE handlers, Datastar attributes |
+| `browser-automation` | Testing in browser, debugging UI |
+| `data-import` | ThetaData API, bulk imports |
+| `clojure-testing` | Test patterns, mocking, generators |
 
 ---
 
-## Testing
+## Key Documents
 
-```bash
-clj -M:test -m kaocha.runner           # Run all tests
-clj -M:test -m kaocha.runner --watch   # Watch mode
-```
-
-**Invoke the `clojure-testing` skill** for test patterns, mocking, and common gotchas.
-
----
-
-## Domain Design Guidelines
-
-When adding new domains to Seon:
-
-### File Organization
-
-Keep it simple - one file per namespace:
-
-```
-src/seon/
-├── ai/
-│   └── gemini.clj        ; seon.ai.gemini (schemas + API in one file)
-├── trading/
-│   └── signals.clj       ; seon.trading.signals
-└── polymarket/
-    └── api.clj           ; seon.polymarket.api
-```
-
-Don't spread code across multiple files (core.clj, schema.clj, etc.) prematurely. Keep schemas with their functions until a file gets unwieldy.
-
-### Domain Principles
-1. **Self-contained** - Each namespace can function independently
-2. **DB parameter** - Functions receive `db` as first parameter (no globals)
-3. **Schema-first** - Define Malli schemas before implementation (see `CONVENTIONS.md`)
-4. **Temporal** - Leverage XTDB's bitemporal capabilities
-5. **Testable** - Tests in `test/` mirror `src/` structure
-
-### Entity ID Conventions
-- Use namespaced keywords: `:trading/position`, `:health/workout`
-- Include domain prefix in xt/id: `{:xt/id :trading/position-123}`
+| Document | Purpose |
+|----------|---------|
+| `CONVENTIONS.md` | Malli schemas, API design patterns |
+| `docs/reference/xtdb-v2-reference.md` | Database queries (use SQL) |
+| `docs/reference/datastar-quick-reference.md` | Web UI attributes |
+| `PLAN.md` | Transformation roadmap |
 
 ---
 
-## Project Tracking
+## Dev Hook
 
-- **PLAN.md** - Transformation roadmap (ml-options → Seon)
-- **PRDs** in `docs/prds/{feature}/prd.md` - Feature specifications
-- **Original project** at `~/src/ml-options-trading` for reference
+After every Edit/Write, the hook automatically:
+- Reloads code into the running server
+- Runs tests for affected namespaces
+- Validates schemas via generative testing
+- Provides Gemini AI review
+
+Config in `.claude/seon-hook.edn`. Hook blocks if tests fail.
 
 ---
 
-## Dev Hook (bin/seon-hook)
+## Domain Guidelines
 
-The project uses a unified Babashka hook script for code review and test automation.
+When adding domains:
 
-### What It Does
+1. **One file per namespace** - Don't split prematurely
+2. **DB parameter** - Functions receive `db` as first parameter
+3. **Schema-first** - Define Malli schemas before implementation
+4. **Namespaced IDs** - `:trading/position`, `:health/workout`
 
-After file edits, the hook:
-1. **Detects changed namespaces** from edited files
-2. **Runs targeted tests** for affected namespaces
-3. **Sends code to Gemini** for AI review (via native API integration)
-
-### Configuration
-
-Hook config in `.claude/seon-hook.edn`:
-
-```clojure
-{:gemini {:review-enabled true}     ; Enable/disable Gemini review
- :testing {:auto-run true           ; Run tests automatically
-           :focus-ns nil}}          ; Focus on specific namespace
-```
-
-### Hook Internals
-
-- **Script**: `bin/seon-hook` (thin Babashka wrapper, ~150 lines)
-- **Logic**: `seon.dev.hook/process-hook-event!` (main orchestrator)
-- **State**: XTDB (edit events, review events tracked temporally)
-- **Gemini**: Uses `seon.ai.gemini` namespace for API calls
-
-**Key namespaces:**
-
-| Namespace | Purpose |
-|-----------|---------|
-| `seon.dev.hook` | Main entry point, pipeline orchestration |
-| `seon.dev.context` | Edit/review event tracking (XTDB) |
-| `seon.dev.codebase` | File introspection, namespace mapping |
-| `seon.dev.verify` | Unit and generative test orchestration |
-| `seon.dev.review` | AI review context building |
-| `seon.dev.repair` | Delimiter repair (parinferish) |
-
-### Gemini API Pattern
-
-The Gemini client provides multiple functions for different use cases:
-
-```clojure
-(require '[seon.ai.gemini :as gemini])
-
-;; Simple question/answer
-(gemini/ask {::gemini/prompt "Explain XTDB temporal queries"})
-
-;; Web search with Google grounding (use for current info, verification)
-(gemini/search {::gemini/prompt "Latest Clojure 1.12 features"})
-;; Returns ::grounding-metadata with source URLs
-
-;; Python code execution (calculations, data processing)
-(gemini/calculate {::gemini/prompt "What is the 100th Fibonacci number?"})
-
-;; Code review with structured output
-(gemini/review-code {::gemini/prompt "Review this function"
-                     ::gemini/code "(defn foo [x] ...)"})
-```
-
-**For agents doing research:** Use `gemini/search` to verify knowledge that may be out of date. It returns web-grounded responses with source citations.
-
-See `CONVENTIONS.md` for the full schema pattern.
+See `CONVENTIONS.md` for full patterns.

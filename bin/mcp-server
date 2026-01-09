@@ -1,0 +1,397 @@
+#!/usr/bin/env bb
+
+;; MCP Server for Seon Agent Evaluation
+;;
+;; This implements the Model Context Protocol (MCP) over stdio transport.
+;; It provides tools for Claude to manage agent sessions and evaluate Clojure
+;; code in isolated REPL sessions - without shell escaping issues.
+;;
+;; Tools:
+;;   - agent_eval: Evaluate code in an agent session
+;;   - create_session: Create a new agent session
+;;   - stop_session: Stop an agent session
+;;   - list_sessions: List active sessions
+;;
+;; Protocol: JSON-RPC 2.0 over stdin/stdout (line-delimited)
+;;
+;; Usage:
+;;   claude mcp add seon-agent ./bin/mcp-server
+
+(require '[cheshire.core :as json]
+         '[bencode.core :as b]
+         '[clojure.string :as str])
+
+;;; ---------------------------------------------------------------------------
+;;; Configuration
+;;; ---------------------------------------------------------------------------
+
+(def orchestrator-port 7888)
+
+(def server-info
+  {:name "seon"
+   :version "0.2.0"})
+
+;;; ---------------------------------------------------------------------------
+;;; Tool Definitions
+;;; ---------------------------------------------------------------------------
+
+(def tools
+  [{:name "eval"
+    :description "Evaluate Clojure code. Use session_id='orchestrator' for the main REPL, or a 4-char hex session ID for an agent's isolated REPL. Returns result value and current namespace. Use (user/reload) to reload code, (user/search \"query\") for research."
+    :inputSchema {:type "object"
+                  :properties {:session_id {:type "string"
+                                            :description "'orchestrator' for main REPL, or 4-char hex session ID (e.g., 'a1b2')"}
+                               :code {:type "string"
+                                      :description "Clojure code to evaluate"}}
+                  :required ["session_id" "code"]}}
+
+   {:name "create_session"
+    :description "Create a new agent session with an isolated REPL and database. Returns the session_id to use with agent_eval."
+    :inputSchema {:type "object"
+                  :properties {:namespace {:type "string"
+                                           :description "Clojure namespace for the agent (e.g., 'seon.trading')"}}
+                  :required ["namespace"]}}
+
+   {:name "stop_session"
+    :description "Stop an agent session, flushing any pending state and cleaning up resources."
+    :inputSchema {:type "object"
+                  :properties {:session_id {:type "string"
+                                            :description "8-character hex session ID"}}
+                  :required ["session_id"]}}
+
+   {:name "list_sessions"
+    :description "List all active agent sessions with their IDs, namespaces, and ports."
+    :inputSchema {:type "object"
+                  :properties {}}}])
+
+;;; ---------------------------------------------------------------------------
+;;; Logging (to stderr - NEVER stdout!)
+;;; ---------------------------------------------------------------------------
+
+(def ^:dynamic *debug* (= "1" (System/getenv "DEBUG")))
+
+(defn log-debug [& args]
+  (when *debug*
+    (binding [*out* *err*]
+      (apply println "[DEBUG]" (java.time.Instant/now) args)
+      (flush))))
+
+(defn log-error [& args]
+  (binding [*out* *err*]
+    (apply println "[ERROR]" (java.time.Instant/now) args)
+    (flush)))
+
+;;; ---------------------------------------------------------------------------
+;;; nREPL Communication (bencode)
+;;; ---------------------------------------------------------------------------
+
+(defn bytes->str
+  "Convert bencode byte array to string."
+  [x]
+  (if (bytes? x)
+    (String. ^bytes x "UTF-8")
+    x))
+
+(defn decode-msg
+  "Decode bencode message, converting byte arrays to strings."
+  [msg]
+  (into {}
+        (map (fn [[k v]]
+               [(bytes->str k)
+                (if (coll? v)
+                  (mapv bytes->str v)
+                  (bytes->str v))]))
+        msg))
+
+(defn nrepl-eval
+  "Evaluate code via nREPL using bencode. Returns {:value :ns :err :out :ex}"
+  [port code]
+  (log-debug "nrepl-eval port:" port "code:" (pr-str code))
+  (try
+    (with-open [sock (java.net.Socket. "localhost" port)]
+      (let [out (java.io.BufferedOutputStream. (.getOutputStream sock))
+            in (java.io.PushbackInputStream. (.getInputStream sock))
+            id (str (random-uuid))
+            msg-to-send {"op" "eval" "code" code "id" id}]
+        (log-debug "Sending:" (pr-str msg-to-send))
+        (b/write-bencode out msg-to-send)
+        (.flush out)
+        ;; Read responses until done
+        (loop [result {:value nil :ns nil :err nil :out nil :ex nil}]
+          (let [msg (decode-msg (b/read-bencode in))
+                status (get msg "status")
+                value (get msg "value")
+                ns-val (get msg "ns")
+                err (get msg "err")
+                stdout (get msg "out")
+                ex (get msg "ex")]
+            (log-debug "Received:" (pr-str msg))
+            (let [result' (cond-> result
+                            value (assoc :value value)
+                            ns-val (assoc :ns ns-val)
+                            err (update :err str err)
+                            stdout (update :out str stdout)
+                            ex (assoc :ex ex))]
+              (if (and status (some #{"done"} status))
+                result'
+                (recur result')))))))
+    (catch java.net.ConnectException e
+      {:err (str "Connection failed to port " port ": " (.getMessage e))})
+    (catch Exception e
+      (log-debug "Exception:" (class e) (.getMessage e))
+      {:err (str "Error: " (.getMessage e))})))
+
+;;; ---------------------------------------------------------------------------
+;;; Session Helpers
+;;; ---------------------------------------------------------------------------
+
+(defn get-session-port
+  "Query orchestrator for the nREPL port of a session."
+  [session-id]
+  (let [code (format "(do (require 'seon.orchestrator.session)
+                          (:seon.orchestrator.session/nrepl-port
+                            (seon.orchestrator.session/get-session-port
+                              {:seon.orchestrator.session/node (user/xtdb-node)
+                               :seon.orchestrator.session/id \"%s\"})))"
+                     session-id)
+        result (nrepl-eval orchestrator-port code)]
+    (when-let [value (:value result)]
+      (when (and value (not= "nil" value))
+        (parse-long value)))))
+
+(defn validate-session-id! [session-id]
+  (when-not (re-matches #"[a-f0-9]{4}" session-id)
+    (throw (ex-info (str "Invalid session ID: " session-id ". Must be 4 lowercase hex characters.")
+                    {:session_id session-id}))))
+
+;;; ---------------------------------------------------------------------------
+;;; Tool Execution
+;;; ---------------------------------------------------------------------------
+
+(defn execute-eval
+  "Execute the eval tool. Returns MCP result format."
+  [{:keys [session_id code]}]
+  (log-debug "execute-eval session:" session_id)
+
+  (let [port (if (= session_id "orchestrator")
+               orchestrator-port
+               (do
+                 (validate-session-id! session_id)
+                 (or (get-session-port session_id)
+                     (throw (ex-info (str "Session not found or not running: " session_id)
+                                     {:session_id session_id})))))]
+
+    (let [result (nrepl-eval port code)]
+      (log-debug "Eval result:" (pr-str result))
+
+      (if (:ex result)
+        {:content [{:type "text"
+                    :text (str "Error: " (:err result))}]
+         :isError true}
+        {:content [{:type "text"
+                    :text (str (when-let [out (:out result)]
+                                 out)
+                               (or (:value result) "nil")
+                               (when-let [ns (:ns result)]
+                                 (str "\n;; ns: " ns)))}]
+         :isError false}))))
+
+(defn execute-create-session
+  "Execute the create_session tool."
+  [{:keys [namespace]}]
+  (log-debug "execute-create-session namespace:" namespace)
+
+  (let [code (format "(do (require 'seon.orchestrator.session)
+                          (let [result (seon.orchestrator.session/start-agent-session!
+                                         {:seon.orchestrator.session/node (user/xtdb-node)
+                                          :seon.orchestrator.session/namespace '%s})]
+                            {:session_id (:seon.orchestrator.session/id result)
+                             :namespace '%s
+                             :nrepl_port (:seon.orchestrator.session/nrepl-port result)
+                             :status (name (:seon.orchestrator.session/status result))}))"
+                     namespace namespace)
+        result (nrepl-eval orchestrator-port code)]
+
+    (log-debug "Create session result:" (pr-str result))
+
+    (if (:ex result)
+      {:content [{:type "text"
+                  :text (str "Error creating session: " (:err result))}]
+       :isError true}
+      {:content [{:type "text"
+                  :text (:value result)}]
+       :isError false})))
+
+(defn execute-stop-session
+  "Execute the stop_session tool."
+  [{:keys [session_id]}]
+  (log-debug "execute-stop-session session:" session_id)
+  (validate-session-id! session_id)
+
+  (let [code (format "(do (require 'seon.orchestrator.session)
+                          (let [result (seon.orchestrator.session/stop-agent-session!
+                                         {:seon.orchestrator.session/node (user/xtdb-node)
+                                          :seon.orchestrator.session/id \"%s\"})]
+                            {:session_id (:seon.orchestrator.session/id result)
+                             :status (name (:seon.orchestrator.session/status result))}))"
+                     session_id)
+        result (nrepl-eval orchestrator-port code)]
+
+    (log-debug "Stop session result:" (pr-str result))
+
+    (if (:ex result)
+      {:content [{:type "text"
+                  :text (str "Error stopping session: " (:err result))}]
+       :isError true}
+      {:content [{:type "text"
+                  :text (:value result)}]
+       :isError false})))
+
+(defn execute-list-sessions
+  "Execute the list_sessions tool."
+  [_args]
+  (log-debug "execute-list-sessions")
+
+  (let [code "(do (require 'seon.orchestrator.session)
+                  (let [sessions (seon.orchestrator.session/list-agent-sessions
+                                   {:seon.orchestrator.session/node (user/xtdb-node)})]
+                    (mapv (fn [s]
+                            {:session_id (:seon.orchestrator.session/id s)
+                             :namespace (str (:seon.orchestrator.session/namespace s))
+                             :nrepl_port (:seon.orchestrator.session/nrepl-port s)
+                             :status (name (:seon.orchestrator.session/status s))})
+                          sessions)))"
+        result (nrepl-eval orchestrator-port code)]
+
+    (log-debug "List sessions result:" (pr-str result))
+
+    (if (:ex result)
+      {:content [{:type "text"
+                  :text (str "Error listing sessions: " (:err result))}]
+       :isError true}
+      {:content [{:type "text"
+                  :text (if (= "[]" (:value result))
+                          "No active sessions"
+                          (:value result))}]
+       :isError false})))
+
+;;; ---------------------------------------------------------------------------
+;;; JSON-RPC Message Handling
+;;; ---------------------------------------------------------------------------
+
+(defn send-response
+  "Send a JSON-RPC response to stdout."
+  [response]
+  (let [json-str (json/generate-string response)]
+    (log-debug "Sending response:" json-str)
+    (println json-str)
+    (flush)))
+
+(defn send-result
+  "Send a successful JSON-RPC result."
+  [id result]
+  (send-response {:jsonrpc "2.0"
+                  :id id
+                  :result result}))
+
+(defn send-error
+  "Send a JSON-RPC error."
+  [id code message & [data]]
+  (send-response {:jsonrpc "2.0"
+                  :id id
+                  :error (cond-> {:code code :message message}
+                           data (assoc :data data))}))
+
+(defn handle-initialize
+  "Handle the initialize request."
+  [id _params]
+  (log-debug "Handling initialize")
+  (send-result id
+               {:protocolVersion "2024-11-05"
+                :capabilities {:tools {}}
+                :serverInfo server-info}))
+
+(defn handle-tools-list
+  "Handle tools/list request."
+  [id _params]
+  (log-debug "Handling tools/list")
+  (send-result id {:tools tools}))
+
+(defn handle-tools-call
+  "Handle tools/call request."
+  [id {:keys [name arguments]}]
+  (log-debug "Handling tools/call name:" name "arguments:" (pr-str arguments))
+  (try
+    (let [result (case name
+                   "eval" (execute-eval arguments)
+                   "create_session" (execute-create-session arguments)
+                   "stop_session" (execute-stop-session arguments)
+                   "list_sessions" (execute-list-sessions arguments)
+                   (throw (ex-info (str "Unknown tool: " name) {:tool name})))]
+      (send-result id result))
+
+    (catch clojure.lang.ExceptionInfo e
+      (send-result id {:content [{:type "text"
+                                  :text (str "Error: " (ex-message e))}]
+                       :isError true}))
+    (catch Exception e
+      (log-error "Tool execution failed:" (.getMessage e))
+      (send-result id {:content [{:type "text"
+                                  :text (str "Error: " (.getMessage e))}]
+                       :isError true}))))
+
+(defn handle-notifications-initialized
+  "Handle the initialized notification (no response needed)."
+  [_params]
+  (log-debug "Received initialized notification"))
+
+(defn handle-request
+  "Route a JSON-RPC request to the appropriate handler."
+  [{:keys [jsonrpc method params id] :as request}]
+  (log-debug "Received request:" (pr-str request))
+
+  (if (not= jsonrpc "2.0")
+    (when id
+      (send-error id -32600 "Invalid Request: missing or invalid jsonrpc version"))
+    (case method
+      "initialize" (handle-initialize id params)
+      "notifications/initialized" (handle-notifications-initialized params)
+      "tools/list" (handle-tools-list id params)
+      "tools/call" (handle-tools-call id params)
+      (when id
+        (send-error id -32601 (str "Method not found: " method))))))
+
+;;; ---------------------------------------------------------------------------
+;;; Main Loop
+;;; ---------------------------------------------------------------------------
+
+(defn -main
+  "Main entry point. Read JSON-RPC from stdin, process, write to stdout."
+  []
+  (log-debug "MCP Server starting...")
+
+  ;; Check that orchestrator is reachable
+  (try
+    (let [result (nrepl-eval orchestrator-port "(+ 1 1)")]
+      (if (= "2" (:value result))
+        (log-debug "Orchestrator connection verified")
+        (log-error "Orchestrator connection test failed:" result)))
+    (catch Exception e
+      (log-error "Cannot connect to orchestrator on port" orchestrator-port ":" (.getMessage e))))
+
+  ;; Main message loop
+  (let [reader (java.io.BufferedReader. *in*)]
+    (loop []
+      (when-let [line (.readLine reader)]
+        (when-not (str/blank? line)
+          (try
+            (let [request (json/parse-string line true)]
+              (handle-request request))
+            (catch Exception e
+              (log-error "Parse error:" (.getMessage e) "line:" line)
+              (send-error nil -32700 "Parse error"))))
+        (recur))))
+
+  (log-debug "MCP Server shutting down"))
+
+(-main)

@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "seon": {
+      "type": "stdio",
+      "command": "/Users/sean/src/seon/bin/mcp-server",
+      "args": [],
+      "env": {}
+    }
+  }
+}

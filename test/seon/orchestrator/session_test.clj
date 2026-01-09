@@ -82,14 +82,14 @@
 ;;; ---------------------------------------------------------------------------
 
 (deftest session-id-format-test
-  (testing "session IDs are 8 hex characters"
+  (testing "session IDs are 4 hex characters"
     (let [result (session/start-agent-session!
                    {::session/node *test-node*
                     ::session/namespace 'test.id.format})]
       (is (= :running (::session/status result)))
       (is (string? (::session/id result)))
-      (is (= 8 (count (::session/id result))))
-      (is (re-matches #"[a-f0-9]{8}" (::session/id result))))))
+      (is (= 4 (count (::session/id result))))
+      (is (re-matches #"[a-f0-9]{4}" (::session/id result))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Session Lifecycle Tests
@@ -229,9 +229,8 @@
       (with-open [conn (nrepl/connect :port port)]
         (let [client (nrepl/client conn 5000)
               session (clone-session client)
-              _ (eval-in-session client session "(require 'seon.orchestrator.nrepl)")
-              values (eval-in-session client session
-                       "(-> seon.orchestrator.nrepl/*ctx* deref :seon.agent/namespace)")]
+              ;; *ctx* is now available directly in the namespace - no require needed!
+              values (eval-in-session client session "(:seon.agent/namespace @*ctx*)")]
           (is (some #(= "test.ctx.avail" %) values)))))))
 
 (deftest session-ns-bound-test
@@ -263,11 +262,9 @@
       (with-open [conn (nrepl/connect :port port1)]
         (let [client (nrepl/client conn 5000)
               session (clone-session client)]
-          ;; Add a value to ctx
+          ;; Add a value to ctx - *ctx* available directly now
           (eval-in-session client session
-            "(require 'seon.orchestrator.nrepl)")
-          (eval-in-session client session
-            "(swap! seon.orchestrator.nrepl/*ctx* assoc :test.session/value 42)")
+            "(swap! *ctx* assoc :test.session/value 42)")
           ;; Wait for debounce
           (Thread/sleep 200)))
 
@@ -290,10 +287,8 @@
         (with-open [conn (nrepl/connect :port port2)]
           (let [client (nrepl/client conn 5000)
                 session (clone-session client)
-                _ (eval-in-session client session
-                    "(require 'seon.orchestrator.nrepl)")
-                values (eval-in-session client session
-                         "(:test.session/value @seon.orchestrator.nrepl/*ctx*)")]
+                ;; *ctx* available directly now
+                values (eval-in-session client session "(:test.session/value @*ctx*)")]
             (is (some #(= "42" %) values)
                 "Resumed session should have the persisted ctx state")))))))
 
@@ -319,20 +314,16 @@
       (with-open [conn1 (nrepl/connect :port port1)]
         (let [client1 (nrepl/client conn1 5000)
               nrepl-session1 (clone-session client1)]
+          ;; *ctx* available directly now - no require needed
           (eval-in-session client1 nrepl-session1
-            "(require 'seon.orchestrator.nrepl)")
-          ;; Use a schema we've registered
-          (eval-in-session client1 nrepl-session1
-            "(swap! seon.orchestrator.nrepl/*ctx* assoc :test.session/name \"session1\")")))
+            "(swap! *ctx* assoc :test.session/name \"session1\")")))
 
       ;; session2 should not have that key
       (with-open [conn2 (nrepl/connect :port port2)]
         (let [client2 (nrepl/client conn2 5000)
               nrepl-session2 (clone-session client2)
-              _ (eval-in-session client2 nrepl-session2
-                  "(require 'seon.orchestrator.nrepl)")
-              values (eval-in-session client2 nrepl-session2
-                       "(:test.session/name @seon.orchestrator.nrepl/*ctx*)")]
+              ;; *ctx* available directly now
+              values (eval-in-session client2 nrepl-session2 "(:test.session/name @*ctx*)")]
           (is (some #(= "nil" %) values)
               "Session 2 should not have session 1's ctx values"))))))
 
