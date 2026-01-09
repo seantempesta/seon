@@ -224,20 +224,17 @@
           (is (some #(= "3" %) values) "Should evaluate to 3"))))))
 
 (deftest nrepl-ctx-injection-test
-  (testing "*ctx* is available in nREPL sessions"
+  (testing "*ctx* is available in nREPL sessions without qualification"
     (let [{:keys [port]} (nrepl-multi/start-namespace-nrepl!
                           {:namespace 'test.ctx-inject
                            :db {:type :test}})]
       (with-open [conn (nrepl/connect :port port)]
         (let [client (nrepl/client conn 5000)
               session (clone-session client)
-              ;; First, require the nrepl namespace to get *ctx*
-              _ (eval-in-session client session "(require 'seon.orchestrator.nrepl)")
-              ;; Now check *ctx*
-              values (eval-in-session client session
-                       "(-> seon.orchestrator.nrepl/*ctx* deref :seon.agent/namespace)")]
+              ;; *ctx* should be available directly in the namespace - no require needed!
+              values (eval-in-session client session "(:seon.agent/namespace @*ctx*)")]
           (is (some #(= "test.ctx-inject" %) values)
-              "*ctx* should contain the namespace"))))))
+              "*ctx* should be available without qualification"))))))
 
 (deftest nrepl-ns-binding-test
   (testing "*ns* is bound to target namespace in nREPL sessions"

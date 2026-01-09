@@ -1,7 +1,24 @@
 # Agent Isolation Architecture
 
-**Status**: Research & Design
-**Last Updated**: 2026-01-04
+**Status**: Phase 4 Complete (with one known issue)
+**Last Updated**: 2026-01-06
+
+## Current Status
+
+**Completed:**
+- Phase 1: Multi-database XTDB (`seon.db.multi`)
+- Phase 2: Multi-server nREPL (`seon.orchestrator.nrepl`)
+- Phase 3b: Persisted context (`seon.agent.ctx`)
+- Phase 4: Agent Session API (`seon.orchestrator.session`)
+- *ctx* now accessible without qualification - agents can use `@*ctx*` directly
+
+**Known Issue:** RESOLVED (2026-01-06)
+- `bin/agent-eval` now works with all special characters when using heredocs
+- Root cause: Shell escaping corrupts `!`, `$`, etc. in arguments
+- Solution: Use `cat << 'END' | agent-eval session-id` syntax
+- See `notes.md` for full details
+
+**Next:** Phase 5 (Web UI integration)
 
 ## Vision
 
@@ -884,21 +901,42 @@ agent-eval acdb234f '(search "XTDB temporal queries")'
 When launching an agent, orchestrator provides:
 
 ```
-You have been assigned session ID: acdb234f
+You have been assigned session ID: a1b2
 Namespace: seon.trading
 
-To evaluate Clojure code, use:
-  agent-eval acdb234f '(your-code-here)'
+To evaluate Clojure code, use the eval tool:
+
+  eval(session_id="a1b2", code="(your-code-here)")
 
 Your context atom `*ctx*` is available. Use namespaced keys:
-  agent-eval acdb234f '(swap! *ctx* assoc :seon.trading/signals [...])'
-  agent-eval acdb234f '(:seon.trading/signals @*ctx*)'
 
-For research, use the search helper:
-  agent-eval acdb234f '(search "your question here")'
+  eval(session_id="a1b2", code="(swap! *ctx* assoc :seon.trading/signals [...])")
+  eval(session_id="a1b2", code="(:seon.trading/signals @*ctx*)")
+
+Helper functions from user namespace (qualify with user/):
+
+  eval(session_id="a1b2", code="(user/reload)")           ; Reload changed code
+  eval(session_id="a1b2", code="(user/search \"query\")")  ; Web search via Gemini
+  eval(session_id="a1b2", code="(user/status)")           ; System status
 
 All state is automatically persisted. You don't need to save anything manually.
+Each eval response includes the current namespace (;; ns: seon.trading).
 ```
+
+### Phase 4b: MCP Agent Eval Tool - COMPLETE
+
+**Completed**: 2026-01-08
+
+Created `bin/mcp-server` (Babashka) that exposes an `agent_eval` MCP tool. Claude calls it directly with JSON parameters - no shell escaping issues.
+
+See: [mcp-agent-eval.md](mcp-agent-eval.md) for full details.
+
+- [x] Research MCP stdio protocol (JSON-RPC 2.0, line-delimited)
+- [x] Implement MCP server in Babashka (~200 lines, fast startup)
+- [x] Register `agent_eval` tool with session lookup
+- [x] Test with Claude Code (verified all special chars work)
+- [x] Configure via `claude mcp add` (creates `.mcp.json`)
+- [x] Keep `bin/agent-eval` for manual debugging
 
 ### Phase 5: Web Routing
 - [ ] Route by `X-Namespace` header
@@ -945,6 +983,8 @@ All state is automatically persisted. You don't need to save anything manually.
 
 - `docs/prds/agent-isolation/research/nrepl-multi-server.md` - **nREPL multi-server research (COMPLETE)**
 - `docs/prds/agent-isolation/research/worktree-reloading.md` - **Worktree code reloading research (COMPLETE)**
+- `docs/prds/agent-isolation/research/sdk-architecture.md` - **Claude Agent SDK research (COMPLETE)**
+- `docs/prds/agent-isolation/research/custom-subagent-investigation.md` - Markdown vs SDK agents
 - `docs/prds/agent-isolation/research/complete-isolation.md` - Full JVM isolation research
 - `reference-code/nrepl/` - nREPL source code (git submodule)
 - `reference-code/clj-reload/` - clj-reload source code (git submodule)

@@ -2,17 +2,32 @@
 
 ;; Agent eval script - evaluates Clojure code in an agent session
 ;;
-;; Usage: agent-eval <session-id> '<clojure-code>'
+;; Usage:
+;;   agent-eval <session-id> <code>                    # Simple expressions only
+;;   cat << 'END' | agent-eval <session-id>            # Recommended for all code
+;;   <code>
+;;   END
 ;;
 ;; This script:
 ;; 1. Queries the orchestrator for session-id -> port mapping
 ;; 2. Evaluates code on the agent's namespace nREPL
 ;; 3. Returns the result
 ;;
+;; IMPORTANT: Shell quoting corrupts special characters (!, $, etc.)
+;; ALWAYS use heredocs for code containing special characters!
+;;
 ;; Examples:
+;;   # Simple expression (argument OK)
 ;;   agent-eval acdb234f '(+ 1 2)'
-;;   agent-eval acdb234f '(swap! *ctx* assoc :seon.trading/signals [...])'
-;;   agent-eval acdb234f '(:seon.trading/signals @*ctx*)'
+;;
+;;   # Code with ! or other special chars - MUST use heredoc!
+;;   cat << 'END' | agent-eval acdb234f
+;;   (swap! *ctx* assoc :seon.trading/signals [...])
+;;   END
+;;
+;;   cat << 'END' | agent-eval acdb234f
+;;   (do (println "test!") :done)
+;;   END
 
 (require '[bencode.core :as b]
          '[clojure.string :as str])
@@ -41,34 +56,47 @@
                   (bytes->str v))]))
         msg))
 
+(def ^:dynamic *debug* (= "1" (System/getenv "DEBUG")))
+
+(defn debug [& args]
+  (when *debug*
+    (binding [*out* *err*]
+      (apply println "[DEBUG]" args))))
+
 (defn nrepl-eval
-  "Evaluate code via nREPL using bencode. Returns {:value ... :err ... :out ...}"
+  "Evaluate code via nREPL using bencode. Returns {:value ... :err ... :out ... :ex ...}"
   [port code]
+  (debug "nrepl-eval port:" port "code:" (pr-str code))
   (try
     (with-open [sock (java.net.Socket. "localhost" port)]
       (let [out (java.io.BufferedOutputStream. (.getOutputStream sock))
             in (java.io.PushbackInputStream. (.getInputStream sock))
-            id (str (random-uuid))]
-        ;; Send eval request
-        (b/write-bencode out {"op" "eval" "code" code "id" id})
+            id (str (random-uuid))
+            msg-to-send {"op" "eval" "code" code "id" id}]
+        (debug "Sending:" (pr-str msg-to-send))
+        (b/write-bencode out msg-to-send)
         (.flush out)
         ;; Read responses until done
-        (loop [result {:value nil :err nil :out nil}]
+        (loop [result {:value nil :err nil :out nil :ex nil}]
           (let [msg (decode-msg (b/read-bencode in))
                 status (get msg "status")
                 value (get msg "value")
                 err (get msg "err")
-                stdout (get msg "out")]
+                stdout (get msg "out")
+                ex (get msg "ex")]
+            (debug "Received:" (pr-str msg))
             (let [result' (cond-> result
                             value (assoc :value value)
                             err (update :err str err)
-                            stdout (update :out str stdout))]
+                            stdout (update :out str stdout)
+                            ex (assoc :ex ex))]
               (if (and status (some #{"done"} status))
                 result'
                 (recur result')))))))
     (catch java.net.ConnectException e
       {:err (str "Connection failed to port " port ": " (.getMessage e))})
     (catch Exception e
+      (debug "Exception:" (class e) (.getMessage e))
       {:err (str "Error: " (.getMessage e))})))
 
 ;;; ---------------------------------------------------------------------------
@@ -90,29 +118,100 @@
         (parse-long value)))))
 
 ;;; ---------------------------------------------------------------------------
+;;; Stdin Detection
+;;; ---------------------------------------------------------------------------
+
+(defn stdin-available?
+  "Check if stdin has data available (not a TTY)."
+  []
+  (try
+    (not (.ready (java.io.BufferedReader. *in*)))
+    ;; If we get here without exception, stdin exists
+    ;; But we need to check if it's piped or TTY
+    false  ;; Default: assume no stdin
+    (catch Exception _
+      false)))
+
+(defn read-stdin
+  "Read all content from stdin."
+  []
+  (let [sb (StringBuilder.)]
+    (loop []
+      (let [line (read-line)]
+        (if line
+          (do
+            (.append sb line)
+            (.append sb "\n")
+            (recur))
+          (str/trim (str sb)))))))
+
+(defn has-stdin-data?
+  "Check if stdin is connected to a pipe (not a terminal)."
+  []
+  ;; Check if stdin is from a pipe by testing if System.in.available > 0
+  ;; or if System.console() is null (indicating redirected input)
+  (try
+    (or (> (.available System/in) 0)
+        (nil? (System/console)))
+    (catch Exception _
+      false)))
+
+;;; ---------------------------------------------------------------------------
 ;;; Main
 ;;; ---------------------------------------------------------------------------
 
 (defn usage []
-  (println "Usage: agent-eval <session-id> '<clojure-code>'")
+  (println "Usage: agent-eval <session-id> [code]")
+  (println "       cat << 'END' | agent-eval <session-id>")
+  (println "       <code>")
+  (println "       END")
+  (println "")
+  (println "If code is not provided as an argument, it is read from stdin.")
+  (println "")
+  (println "IMPORTANT: Shell quoting corrupts !, $, and other special characters.")
+  (println "ALWAYS use heredocs for code with special characters!")
   (println "")
   (println "Examples:")
+  (println "  # Simple expression (argument OK)")
   (println "  agent-eval acdb234f '(+ 1 2)'")
-  (println "  agent-eval acdb234f '(swap! *ctx* assoc :seon.trading/signals [...])'")
-  (println "  agent-eval acdb234f '(@*ctx*)'")
+  (println "")
+  (println "  # Code with special chars - MUST use heredoc!")
+  (println "  cat << 'END' | agent-eval acdb234f")
+  (println "  (swap! *ctx* assoc :seon.trading/signals [...])")
+  (println "  END")
   (System/exit 1))
 
 (defn -main [& args]
-  (when (< (count args) 2)
+  (debug "Args:" (pr-str args))
+
+  (when (< (count args) 1)
     (usage))
 
   (let [session-id (first args)
-        code (str/join " " (rest args))]
+        ;; Determine code source: args or stdin
+        code-from-args (when (> (count args) 1)
+                         (str/join " " (rest args)))
+        use-stdin (and (nil? code-from-args) (has-stdin-data?))
+        code (cond
+               code-from-args code-from-args
+               use-stdin (read-stdin)
+               :else nil)]
+
+    (debug "Session ID:" session-id)
+    (debug "Code source:" (if code-from-args "args" (if use-stdin "stdin" "none")))
+    (debug "Code:" (pr-str code))
+
+    ;; Validate we have code
+    (when (or (nil? code) (str/blank? code))
+      (binding [*out* *err*]
+        (println "Error: No code provided")
+        (println "Provide code as an argument or pipe it through stdin"))
+      (System/exit 1))
 
     ;; Validate session ID format (8 hex chars)
     (when-not (re-matches #"[a-f0-9]{8}" session-id)
       (binding [*out* *err*]
-        (println (str "Invalid session ID: " session-id))
+        (println (str "Error: Invalid session ID: " session-id))
         (println "Session ID must be 8 lowercase hex characters"))
       (System/exit 1))
 
@@ -120,7 +219,7 @@
     (let [port (get-session-port session-id)]
       (when-not port
         (binding [*out* *err*]
-          (println (str "Session not found or not running: " session-id))
+          (println (str "Error: Session not found or not running: " session-id))
           (println "")
           (println "Possible causes:")
           (println "  - Session was stopped")
@@ -132,16 +231,18 @@
       (let [result (nrepl-eval port code)]
         ;; Print stdout if any
         (when-let [stdout (:out result)]
-          (print stdout))
-        ;; Print stderr if any
-        (when-let [stderr (:err result)]
+          (print stdout)
+          (flush))
+        ;; Print stderr/error if any
+        (when-let [err (:err result)]
           (binding [*out* *err*]
-            (print stderr)))
-        ;; Print value
-        (when-let [value (:value result)]
-          (println value))
-        ;; Exit with error if there was an error
-        (when (:err result)
+            (print err)
+            (flush)))
+        ;; Print value (only if no error)
+        (when (and (:value result) (not (:ex result)))
+          (println (:value result)))
+        ;; Exit with error code if there was an exception
+        (when (:ex result)
           (System/exit 1))))))
 
 (apply -main *command-line-args*)

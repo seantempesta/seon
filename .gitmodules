@@ -16,6 +16,18 @@
 [submodule "reference-code/nrepl"]
 	path = reference-code/nrepl
 	url = https://github.com/nrepl/nrepl.git
-[submodule "/Users/sean/src/seon/reference-code/clj-reload"]
-	path = /Users/sean/src/seon/reference-code/clj-reload
+[submodule "reference-code/clj-reload"]
+	path = reference-code/clj-reload
 	url = https://github.com/tonsky/clj-reload.git
+[submodule "reference-code/clojure-mcp"]
+	path = reference-code/clojure-mcp
+	url = https://github.com/bhauman/clojure-mcp.git
+[submodule "reference-code/claude-agent-sdk-typescript"]
+	path = reference-code/claude-agent-sdk-typescript
+	url = https://github.com/anthropics/claude-agent-sdk-typescript
+[submodule "reference-code/claude-agent-sdk-demos"]
+	path = reference-code/claude-agent-sdk-demos
+	url = https://github.com/anthropics/claude-agent-sdk-demos
+[submodule "reference-code/babashka-process"]
+	path = reference-code/babashka-process
+	url = https://github.com/babashka/process

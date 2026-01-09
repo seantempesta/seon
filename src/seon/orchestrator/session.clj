@@ -155,9 +155,9 @@
 (def ^:private secure-random (SecureRandom.))
 
 (defn- generate-session-id
-  "Generate an 8-character hex session ID."
+  "Generate a 4-character hex session ID."
   []
-  (let [bytes (byte-array 4)]
+  (let [bytes (byte-array 2)]
     (.nextBytes secure-random bytes)
     (apply str (map #(format "%02x" (bit-and % 0xff)) bytes))))
 

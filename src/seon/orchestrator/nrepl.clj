@@ -208,7 +208,8 @@
                               ;; Intern *ctx* as a dynamic var in the target namespace
                               ;; This allows agents to use @*ctx* without qualification
                               (when-not (ns-resolve ns-obj '*ctx*)
-                                (intern ns-obj (with-meta '*ctx* {:dynamic true}) nil))
+                                (let [v (intern ns-obj '*ctx* nil)]
+                                  (.setDynamic v true)))
                               ;; Return both the namespace and the *ctx* var
                               {:ns-obj ns-obj
                                :ctx-var (ns-resolve ns-obj '*ctx*)}))

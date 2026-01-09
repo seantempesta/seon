@@ -1,5 +1,47 @@
 # Agent Isolation - Notes & Gotchas
 
+## RESOLVED: Custom Subagent Instructions
+
+**Status**: Working (as of 2026-01-09)
+
+**Resolution**: Markdown agent body content NOW loads as system prompt. The issue was likely caching from a previous session. Re-testing confirmed agents say "PINEAPPLE" when instructed to (test phrase in body).
+
+**Remaining limitation**: The `skills:` frontmatter field does NOT restrict skills - all project skills remain available. Can only ADD context, not REMOVE tools.
+
+**Alternative if regression occurs**: Use Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`) for programmatic agent definitions with guaranteed prompt loading.
+
+**See**: `docs/prds/agent-isolation/research/custom-subagent-investigation.md`
+
+---
+
+## Claude Agent SDK Research
+
+**Status**: Complete (2026-01-09)
+
+**Summary**: Evaluated SDK for potential migration from markdown agents.
+
+**Key Findings**:
+1. SDK provides `query()` function with `agents` option for programmatic subagent definitions
+2. Agent `prompt` field is **guaranteed** to load as system prompt
+3. Supports in-process MCP servers via `createSdkMcpServer()` (zero startup overhead)
+4. Supports lifecycle hooks (PreToolUse, PostToolUse, etc.) for validation/logging
+5. V2 API (`unstable_v2_*`) supports multi-turn sessions
+
+**Recommendation**: Stick with current approach (markdown agents + bin/mcp-server) because:
+- Markdown agents work now
+- MCP server handles all tool calls cleanly
+- No extra Node.js runtime needed
+
+**Reconsider SDK if**:
+- Markdown agents regress
+- Need per-agent tool restrictions
+- Need lifecycle hooks
+- Building external product
+
+**See**: `docs/prds/agent-isolation/research/sdk-architecture.md`
+
+---
+
 ## Research Questions - RESOLVED
 
 ### 1. Multiple nREPL Servers in One JVM - RESOLVED
@@ -15,20 +57,40 @@ See `docs/prds/agent-isolation/research/nrepl-multi-server.md` for full details.
 
 ### 2. Context Injection - RESOLVED
 
-**Answer: Use custom nREPL middleware with dynamic var.**
+**Answer: Intern `*ctx*` directly in agent's namespace, then bind in session.**
+
+The key insight (from Gemini search): intern the var in the target namespace so agents can use `@*ctx*` without qualification.
 
 ```clojure
-(def ^:dynamic *ctx* nil)
-
 (defn make-context-middleware [ctx-atom target-ns]
-  (fn wrap-context [handler]
-    (fn [{:keys [session] :as msg}]
-      (when (and session (not (contains? @session #'*ctx*)))
-        (swap! session assoc
-               #'*ns* (find-ns target-ns)
-               #'*ctx* ctx-atom))
-      (handler msg))))
+  (let [ensure-ns-and-ctx (fn []
+                            ;; Create namespace if needed
+                            (let [ns-obj (or (find-ns target-ns)
+                                             (binding [*ns* (create-ns target-ns)]
+                                               (refer-clojure)
+                                               *ns*))]
+                              ;; Intern *ctx* as dynamic var in TARGET namespace
+                              (when-not (ns-resolve ns-obj '*ctx*)
+                                (let [v (intern ns-obj '*ctx* nil)]
+                                  (.setDynamic v true)))
+                              {:ns-obj ns-obj
+                               :ctx-var (ns-resolve ns-obj '*ctx*)}))
+        setup (delay (ensure-ns-and-ctx))]
+    (fn wrap-context [handler]
+      (fn [{:keys [session] :as msg}]
+        (let [{:keys [ns-obj ctx-var]} @setup]
+          (when (and (instance? clojure.lang.Atom session)
+                     (not (identical? (get @session ctx-var) ctx-atom)))
+            (swap! session assoc
+                   #'*ns* ns-obj
+                   ctx-var ctx-atom)))  ;; Bind the TARGET ns var, not a central one
+        (handler msg)))))
 ```
+
+**Key points:**
+- Use `intern` + `.setDynamic` to create dynamic var in target namespace
+- `with-meta '*ctx* {:dynamic true}` does NOT work with intern
+- The session binds the TARGET namespace's `*ctx*` var, not a central one
 
 Middleware descriptor must specify:
 - `:requires #{"session"}` - runs after session middleware
@@ -61,6 +123,78 @@ Key findings:
 (defn reload-agent-namespaces! [namespace-sym]
   (reload/reload {:only (re-pattern (str "^" namespace-sym "\\..*"))}))
 ```
+
+---
+
+## bin/agent-eval - Shell Escaping Issue - SUPERSEDED BY MCP
+
+### The Problem (Historical)
+
+The `!` character was being corrupted when passing code as shell arguments:
+
+```bash
+./bin/agent-eval c76a1e81 '(swap! *ctx* assoc :key 1)'  # Failed: \! corrupted the code
+```
+
+### Root Cause
+
+**Shell quoting in zsh/bash escapes `!` even in single quotes.** When you run:
+
+```bash
+echo '(def test! 42)'
+```
+
+The shell outputs `(def test\! 42)` with a backslash before `!`. This is NOT Babashka's fault - it's the shell's behavior. The backslash then gets sent to nREPL, causing a syntax error because `test\!` is tokenized as two symbols.
+
+### Original Workaround (heredocs)
+
+**Use heredocs to pipe code to agent-eval.** Heredocs preserve exact content:
+
+```bash
+# CORRECT - heredoc preserves !
+cat << 'END' | ./bin/agent-eval c76a1e81
+(swap! *ctx* assoc :seon.trading/signals [...])
+END
+```
+
+### Final Solution: MCP Agent Eval Tool
+
+**Created `bin/mcp-server` to bypass shell entirely.** See [mcp-agent-eval.md](mcp-agent-eval.md).
+
+The MCP server:
+1. Claude sends JSON-RPC directly via stdio - no shell involved
+2. Parameters are JSON strings - all characters preserved
+3. Fast startup with Babashka (~50ms)
+
+**Usage:**
+```
+agent_eval(session_id="abc12345", code="(swap! *ctx* assoc :key 1)")
+```
+
+All special characters (`!`, `$`, backticks, quotes) work correctly.
+
+### Characters That Need Heredocs (for bin/agent-eval manual use only)
+
+- `!` - History expansion in bash/zsh
+- `$` - Variable expansion
+- `` ` `` - Command substitution
+- `"` - Requires escaping in double quotes
+- `\` - Escape character itself
+
+### Technical Details
+
+Tested byte-by-byte. The backslash insertion happens at the shell level before the process even starts. Neither `echo`, `printf`, nor direct argument passing preserves the `!` in single quotes.
+
+Only heredocs with quoted delimiter (`<< 'END'`) pass content verbatim.
+
+### MCP Protocol Notes
+
+The MCP server implementation learned:
+- **JSON-RPC 2.0 over stdio**: Line-delimited JSON, one message per line
+- **stdout is sacred**: Only JSON-RPC messages, never log output
+- **stderr for debugging**: Use `DEBUG=1` env var to enable debug logging to stderr
+- **Must flush**: Call `(flush)` after every response
+- **Babashka works**: cheshire (JSON) and bencode.core are built-in
 
 ---
 
