@@ -1,8 +1,8 @@
 # PRD: Clojure Claude SDK
 
-**Status:** Ready for Implementation
+**Status:** Phase 1 Complete
 **Priority:** Medium
-**Branch:** feature/clojure-claude-sdk
+**Branch:** feature/agent-isolation
 
 ---
 
