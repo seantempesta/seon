@@ -112,7 +112,7 @@ The `seon.ai` namespace uses these directly - no new abstractions needed:
 
 ## Implementation Phases
 
-### Phase 1: Create seon.ai Base Namespace
+### Phase 1: Create seon.ai Base Namespace [COMPLETED]
 
 **Goal:** Establish the foundation with schemas and AI-domain functions.
 
@@ -131,6 +131,12 @@ The `seon.ai` namespace uses these directly - no new abstractions needed:
 - Generate sample sessions/messages with `mg/generate`
 - Round-trip: start-session -> add-message -> get-messages -> validate
 - Query functions return valid entities matching schemas
+
+**Implementation Notes:**
+- Functions that take `::node` (XTDB node) do not have `:malli/schema` metadata because
+  the node type cannot be generated for property testing. Schemas are documented in file.
+- Namespace is stored as string (not symbol) for XTDB compatibility
+- XTDB returns ZonedDateTime for timestamps (not Instant) - tests use `temporal?` helper
 
 **Commit:** "feat: add seon.ai base namespace with session/message functions"
 
