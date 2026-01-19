@@ -209,6 +209,14 @@ See `docs/prds/agent-isolation/prd.md` Phase 4c for full postmortem.
 
 ### Phase 2: Control Requests (2-3 hours)
 
+**Research Completed**: 2026-01-19
+
+See `bidirectional-control.md` for full protocol documentation including:
+- Captured message formats (system init, user, assistant, result)
+- Multi-turn conversation pattern using AsyncIterable
+- Session resume with `--resume <session-id>` flag
+- TypeScript SDK V2 API patterns
+
 - [ ] Implement `set-model!` for dynamic model changes
 - [ ] Implement `set-permission-mode!` for permission changes
 - [ ] Implement `interrupt!` for stopping execution

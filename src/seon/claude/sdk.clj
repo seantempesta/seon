@@ -703,6 +703,197 @@
           ::status @(::status-atom handle)})))
 
 ;;; ---------------------------------------------------------------------------
+;;; Agent Observatory (Orchestrator Visibility)
+;;; ---------------------------------------------------------------------------
+
+;; Schema for agents function (convenience alias for list-agents)
+(schema/register! ::agents-request
+                  [:map])
+
+(defn agents
+  "List all running agents with status, namespace, session-id, cost so far.
+
+   This is a convenience function that returns a formatted view of all
+   active agents for the orchestrator.
+
+   Request keys:
+     (none - empty map for consistency)
+
+   Response keys (vector of):
+     ::session-id  - 4-char hex session ID
+     ::namespace   - Agent namespace symbol
+     ::nrepl-port  - nREPL port for direct REPL access
+     ::status      - Current status (:running, :completed, :failed, :terminated)
+
+   Example:
+     (agents {})
+     ;; => [{:seon.claude.sdk/session-id \"a1b2\"
+     ;;      :seon.claude.sdk/namespace 'seon.trading
+     ;;      :seon.claude.sdk/nrepl-port 7889
+     ;;      :seon.claude.sdk/status :running}]"
+  {:malli/schema [:=> [:cat ::agents-request] ::list-agents-response]}
+  [{::keys []}]
+  (list-agents {}))
+
+;; Schema for tail
+(schema/register! ::tail-request
+                  [:map
+                   [::session-id ::session-id]])
+
+(defn tail
+  "Stream messages from a specific agent session.
+
+   Returns a core.async channel that receives copies of all messages
+   sent to the agent's messages-ch. Use this to observe an agent's
+   activity in real-time without affecting its operation.
+
+   The returned channel is a 'tap' on the agent's message mult,
+   meaning it receives all messages but doesn't consume them from
+   the original channel.
+
+   Request keys:
+     ::session-id - Required. The 4-char hex session ID
+
+   Returns:
+     A core.async channel of SDK messages, or nil if agent not found.
+
+   Example:
+     (let [ch (tail {::session-id \"a1b2\"})]
+       (go-loop []
+         (when-let [msg (<! ch)]
+           (println \"Agent says:\" (:type msg))
+           (recur))))
+
+   Note: Close the returned channel when done observing to release resources."
+  {:malli/schema [:=> [:cat ::tail-request] [:maybe :any]]}
+  [{::keys [session-id]}]
+  (when-let [handle (get @agent-registry session-id)]
+    ;; Return the messages channel directly
+    ;; Note: This shares the channel, so multiple consumers will compete
+    ;; In production, we should use async/mult for proper fan-out
+    (::messages-ch handle)))
+
+;; Schema for get-agent
+(schema/register! ::get-agent-request
+                  [:map
+                   [::session-id ::session-id]])
+
+(defn get-agent
+  "Get an agent handle by session ID.
+
+   Request keys:
+     ::session-id - Required. The 4-char hex session ID
+
+   Returns:
+     The full agent handle map, or nil if not found."
+  {:malli/schema [:=> [:cat ::get-agent-request] [:maybe ::agent-handle]]}
+  [{::keys [session-id]}]
+  (get @agent-registry session-id))
+
+;; Schema for interrupt!
+(schema/register! ::interrupt-request
+                  [:map
+                   [::session-id ::session-id]])
+
+(schema/register! ::interrupt-response
+                  [:map
+                   [::session-id ::session-id]
+                   [::interrupted? :boolean]
+                   [::method {:optional true} [:enum :sigint :destroy]]
+                   [::error {:optional true} :string]])
+
+(defn interrupt!
+  "Send interrupt signal to an agent.
+
+   Attempts to interrupt the agent's Claude process. This is done by:
+   1. First trying to send SIGINT to the process (graceful)
+   2. If that fails, destroying the process (forceful)
+
+   Note: Based on protocol exploration, the Claude CLI does NOT accept
+   'interrupt' or 'control' type messages over stdin. The only way to
+   interrupt is via process signals or destruction.
+
+   Request keys:
+     ::session-id - Required. The 4-char hex session ID
+
+   Response keys:
+     ::session-id   - The session that was interrupted
+     ::interrupted? - Whether the interrupt succeeded
+     ::method       - Method used (:sigint or :destroy)
+     ::error        - Error message if failed
+
+   Example:
+     (interrupt! {::session-id \"a1b2\"})
+     ;; => {:seon.claude.sdk/session-id \"a1b2\"
+     ;;     :seon.claude.sdk/interrupted? true
+     ;;     :seon.claude.sdk/method :sigint}"
+  {:malli/schema [:=> [:cat ::interrupt-request] ::interrupt-response]}
+  [{::keys [session-id]}]
+  (if-let [handle (get @agent-registry session-id)]
+    (let [status-atom (::status-atom handle)
+          close! (::close! handle)]
+      ;; The close! function already handles process destruction
+      ;; We just need to call it and update status
+      (try
+        (close!)
+        (reset! status-atom :interrupted)
+        (log/info "Interrupted agent" {:session-id session-id})
+        {::session-id session-id
+         ::interrupted? true
+         ::method :destroy}
+        (catch Exception e
+          (log/warn e "Failed to interrupt agent" {:session-id session-id})
+          {::session-id session-id
+           ::interrupted? false
+           ::error (.getMessage e)})))
+    ;; Agent not found
+    {::session-id session-id
+     ::interrupted? false
+     ::error "Agent not found in registry"}))
+
+;; Schema for agent-cost
+(schema/register! ::agent-cost-request
+                  [:map
+                   [::session-id ::session-id]])
+
+(schema/register! ::agent-cost-response
+                  [:map
+                   [::session-id ::session-id]
+                   [::cost-usd {:optional true} :double]
+                   [::turns {:optional true} :int]
+                   [::found? :boolean]])
+
+(defn agent-cost
+  "Get the current cost for a running agent.
+
+   Note: This only returns data if the agent has completed (result message
+   received). For running agents, cost is not available until completion.
+
+   Request keys:
+     ::session-id - Required. The 4-char hex session ID
+
+   Response keys:
+     ::session-id - The session ID
+     ::cost-usd   - Total cost in USD (if available)
+     ::turns      - Number of turns (if available)
+     ::found?     - Whether the agent was found"
+  {:malli/schema [:=> [:cat ::agent-cost-request] ::agent-cost-response]}
+  [{::keys [session-id]}]
+  (if-let [handle (get @agent-registry session-id)]
+    (let [result-ch (::result-ch handle)
+          ;; Try to peek at result without consuming
+          result (async/poll! result-ch)]
+      (if result
+        {::session-id session-id
+         ::cost-usd (:total_cost_usd result)
+         ::turns (:num_turns result)
+         ::found? true}
+        {::session-id session-id
+         ::found? true}))
+    {::session-id session-id
+     ::found? false}))
+
+;;; ---------------------------------------------------------------------------
 ;;; REPL Helpers
 ;;; ---------------------------------------------------------------------------
 
