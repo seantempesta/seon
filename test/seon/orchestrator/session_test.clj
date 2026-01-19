@@ -18,8 +18,12 @@
   "Fixture that cleans up sessions and nREPL servers after each test.
 
    IMPORTANT: Must stop servers BEFORE resetting registries, otherwise
-   we lose track of the server objects and can't close their sockets."
+   we lose track of the server objects and can't close their sockets.
+
+   Uses port range 17889-17999 to avoid conflicts with dev server (7889-7999)."
   [f]
+  ;; Set test port range to avoid conflicts with dev server
+  (nrepl-multi/set-port-range! 17889 17999)
   ;; BEFORE test: Stop any existing servers FIRST, then reset registries
   ;; This order is critical - resetting first creates zombie sockets
   (nrepl-multi/stop-all-namespace-nrepls!)
@@ -59,7 +63,9 @@
           (try
             ((resolve 'nrepl.middleware.session/close-session) session)
             (catch Exception _)))
-        (reset! sessions-atom {})))))
+        (reset! sessions-atom {}))
+      ;; Reset port range to defaults
+      (nrepl-multi/reset-port-range!))))
 
 (use-fixtures :each (fn [f]
                       (with-test-node
@@ -99,12 +105,13 @@
   (testing "starts a session with all components"
     (let [result (session/start-agent-session!
                    {::session/node *test-node*
-                    ::session/namespace 'test.start})]
+                    ::session/namespace 'test.start})
+          {:keys [base]} (nrepl-multi/get-port-range)]
       (is (= :running (::session/status result)))
       (is (some? (::session/id result)))
       (is (= 'test.start (::session/namespace result)))
       (is (integer? (::session/nrepl-port result)))
-      (is (>= (::session/nrepl-port result) 7889))
+      (is (>= (::session/nrepl-port result) base))
       (is (inst? (::session/started-at result)))
       (is (= "test_start" (::session/db-name result))))))
 

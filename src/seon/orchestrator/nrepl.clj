@@ -71,13 +71,44 @@
 ;;; Port Management
 ;;; ---------------------------------------------------------------------------
 
-(def ^:private base-port
-  "First port to try for namespace nREPLs. Main nREPL is at 7888."
-  7889)
+;; Default port range for namespace nREPLs
+(def ^:private default-base-port 7889)
+(def ^:private default-max-port 7999)
 
-(def ^:private max-port
-  "Maximum port number to try."
-  7999)
+;; Configurable port range (allows tests to use different ports)
+(defonce ^:private port-range (atom {:base default-base-port :max default-max-port}))
+
+(defn set-port-range!
+  "Set the port range for namespace nREPL servers.
+
+   Useful for tests to avoid conflicts with dev server ports.
+
+   Args:
+     base - First port to try (e.g., 17889 for tests)
+     max  - Maximum port number (e.g., 17999 for tests)
+
+   Returns:
+     The new port range map"
+  [base max]
+  (reset! port-range {:base base :max max}))
+
+(defn reset-port-range!
+  "Reset the port range to defaults (7889-7999).
+
+   Call this in test teardown to restore production settings.
+
+   Returns:
+     The default port range map"
+  []
+  (reset! port-range {:base default-base-port :max default-max-port}))
+
+(defn get-port-range
+  "Get the current port range configuration.
+
+   Returns:
+     Map with :base and :max keys"
+  []
+  @port-range)
 
 ;; Map of namespace -> allocated port
 (defonce ^:private port-registry (atom {}))
@@ -92,7 +123,7 @@
       false)))
 
 (defn- find-available-port
-  "Find the next available port starting from base-port.
+  "Find the next available port starting from the configured base port.
 
   Args:
     exclude-ports - Set of ports to skip (already allocated but maybe not bound yet)
@@ -104,22 +135,23 @@
     ex-info if no ports available in range"
   ([] (find-available-port #{}))
   ([exclude-ports]
-   (loop [port base-port]
-     (cond
-       (> port max-port)
-       (throw (ex-info "No available ports in range"
-                       {:base-port base-port
-                        :max-port max-port
-                        :allocated (vals @port-registry)}))
+   (let [{:keys [base max]} @port-range]
+     (loop [port base]
+       (cond
+         (> port max)
+         (throw (ex-info "No available ports in range"
+                         {:base-port base
+                          :max-port max
+                          :allocated (vals @port-registry)}))
 
-       (contains? exclude-ports port)
-       (recur (inc port))
+         (contains? exclude-ports port)
+         (recur (inc port))
 
-       (port-available? port)
-       port
+         (port-available? port)
+         port
 
-       :else
-       (recur (inc port))))))
+         :else
+         (recur (inc port)))))))
 
 ;; Lock for thread-safe port allocation
 (defonce ^:private port-lock (Object.))
