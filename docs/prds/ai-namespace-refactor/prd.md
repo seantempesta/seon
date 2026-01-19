@@ -142,7 +142,7 @@ The `seon.ai` namespace uses these directly - no new abstractions needed:
 
 ---
 
-### Phase 2: Create seon.ai.claude Provider Namespace
+### Phase 2: Create seon.ai.claude Provider Namespace [COMPLETED]
 
 **Goal:** Move Claude-specific code, referencing seon.ai base schemas.
 
@@ -171,6 +171,13 @@ The `seon.ai` namespace uses these directly - no new abstractions needed:
 - Launch agent -> verify session entity created in XTDB
 - SDK messages -> entities -> validate schemas
 - Agent lifecycle (launch, monitor, terminate)
+
+**Implementation Notes:**
+- Functions that spawn processes or require XTDB nodes do not have `:malli/schema` metadata
+  because those types cannot be generated for property testing. Schemas documented in docstrings.
+- Added generator to `::ai/timestamp` schema to enable generation of message entities
+- Cleared stale Malli function-schemas cache during development (was retaining old metadata)
+- `sdk-message->entity` uses map-in pattern: `{::claude/sdk-message msg}` -> entity
 
 **Commit:** "feat: add seon.ai.claude provider namespace"
 

@@ -73,9 +73,12 @@
                    [:map]])
 
 ;; Timestamp for events
+;; Uses :gen/fmap to produce Instant values for generative testing
 (schema/register! ::timestamp
                   [:fn {:description "Event timestamp"
-                        :error/message "Must be a java.time.Instant"}
+                        :error/message "Must be a java.time.Instant"
+                        :gen/fmap (fn [_] (Instant/now))
+                        :gen/schema :int}
                    inst?])
 
 ;; Session ID reference
