@@ -447,6 +447,92 @@ Use `:gen/fmap` for types that need custom generation:
    inst?])
 ```
 
+## Provider Multimethod Pattern
+
+For extensible provider systems (like AI providers), use multimethods with keyword dispatch. This allows adding new providers without modifying existing code.
+
+### Defining Extension Points
+
+Define multimethods in a base namespace with sensible defaults:
+
+```clojure
+(ns seon.ai.agent
+  "Provider-agnostic agent extension points.")
+
+;; Extension points - dispatch on :provider key
+(defmulti normalize-message
+  "Convert provider-specific message to ::ai/message entity.
+   Dispatch on :provider keyword in request map."
+  :provider)
+
+(defmulti result-message?
+  "Check if message is the final result message.
+   Returns boolean."
+  :provider)
+
+(defmulti parse-result
+  "Extract final stats from result message.
+   Returns ::parsed-result map."
+  :provider)
+
+;; Default implementations for unknown providers
+(defmethod normalize-message :default
+  [{:keys [provider]}]
+  (throw (ex-info (str "Unknown provider: " provider
+                       ". Did you require the provider namespace?")
+                  {:provider provider})))
+```
+
+### Implementing Providers
+
+Provider namespaces implement the multimethods:
+
+```clojure
+(ns seon.ai.claude
+  "Claude provider implementation."
+  (:require [seon.ai.agent :as agent]))
+
+;; Implement normalize-message for :claude
+(defmethod agent/normalize-message :claude
+  [{:keys [message session-id]}]
+  (sdk-message->entity {::sdk-message message
+                        ::ai/session-id session-id}))
+
+;; Implement result-message? for :claude
+(defmethod agent/result-message? :claude
+  [{:keys [message]}]
+  (= "result" (:type message)))
+
+;; Implement parse-result for :claude
+(defmethod agent/parse-result :claude
+  [{:keys [message]}]
+  {::status (if (= "success" (:subtype message)) :completed :failed)
+   ::cost-usd (:total_cost_usd message)
+   ;; ... other fields
+   })
+```
+
+### Usage Pattern
+
+```clojure
+;; Call multimethod with provider key in request
+(agent/normalize-message {:provider :claude
+                          :message sdk-msg
+                          :session-id "ses-abc"})
+
+;; Adding a new provider (e.g., Gemini) requires:
+;; 1. New namespace: seon.ai.gemini.agent
+;; 2. Implement: (defmethod agent/normalize-message :gemini ...)
+;; 3. No changes to base namespace or existing providers
+```
+
+### Why Multimethods Over Protocols
+
+- **Keyword dispatch** - Provider is data (:claude, :gemini), not a type
+- **No wrapper objects** - Just pass maps with :provider key
+- **Namespace loading** - (require '[seon.ai.claude]) registers implementations
+- **Extensibility** - Third parties can add providers without modifying source
+
 ## Anti-Patterns to Avoid
 
 ```clojure

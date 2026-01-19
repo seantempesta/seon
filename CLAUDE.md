@@ -179,8 +179,10 @@ See `CONVENTIONS.md` for full patterns.
 The AI namespaces provide a clean, provider-agnostic architecture for AI agent management:
 
 ```
-seon.ai                 ; Base schemas + session/message persistence
-└── seon.ai.claude      ; Claude Code agent lifecycle
+seon.ai                    ; Base schemas + session/message persistence
+├── seon.ai.agent          ; Provider-agnostic agent lifecycle, registry, observatory
+└── seon.ai.claude         ; Claude provider implementation
+    └── seon.ai.claude.sdk ; Claude CLI process management
 ```
 
 ### seon.ai (Base)
@@ -207,7 +209,27 @@ Provider-agnostic schemas and functions for AI sessions and messages:
 (ai/list-sessions {::ai/node xtdb-node ::ai/limit 20})
 ```
 
-### seon.ai.claude (Provider)
+### seon.ai.agent (Provider Extension Points)
+
+Defines multimethods that providers implement and centralized agent registry:
+
+```clojure
+(require '[seon.ai.agent :as agent])
+(require '[seon.ai.claude]) ; Load Claude implementations
+
+;; Multimethods (implemented by providers):
+;; - agent/normalize-message - Convert provider message to ::ai/message
+;; - agent/result-message?   - Check if message is final result
+;; - agent/parse-result      - Extract stats from result message
+
+;; Observatory API (works across all providers):
+(agent/agents {})                              ; List all running agents
+(agent/get-agent {::agent/session-id "a1b2"})  ; Get agent handle
+(agent/tail {::agent/session-id "a1b2"})       ; Stream messages
+(agent/interrupt! {::agent/session-id "a1b2"}) ; Stop agent
+```
+
+### seon.ai.claude (Claude Provider)
 
 Claude-specific agent lifecycle with automatic message persistence:
 
@@ -219,20 +241,27 @@ Claude-specific agent lifecycle with automatic message persistence:
                        ::ai/namespace 'seon.trading
                        ::ai/prompt "Implement feature"})
 
-;; Monitor agents
-(claude/agents {})                           ; List all
+;; Claude-specific observatory (delegates to seon.ai.agent)
+(claude/agents {})                           ; List Claude agents
 (claude/tail {::ai/session-id "a1b2"})       ; Stream messages
 (claude/interrupt! {::ai/session-id "a1b2"}) ; Stop agent
 ```
 
-### Deprecated Namespaces
+### seon.ai.claude.sdk (Claude CLI)
 
-The following namespaces are **deprecated** and should not be used in new code:
+Low-level process management for Claude Code CLI:
 
-| Deprecated | Use Instead |
-|------------|-------------|
-| `seon.claude.sdk` | `seon.ai.claude` |
-| `seon.claude.conversation` | `seon.ai` |
+```clojure
+(require '[seon.ai.claude.sdk :as sdk])
+
+;; Spawn a Claude Code process
+(let [{:keys [process stdin stdout]} (sdk/spawn-claude-code {})]
+  (sdk/write-message! stdin (sdk/make-user-message "Hello"))
+  ;; Read responses from stdout...
+  )
+```
+
+### Research Namespace
 
 The `seon.claude.exploration` namespace is kept as a **research/development tool** for protocol investigation, not for production use.
 
