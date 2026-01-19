@@ -52,17 +52,19 @@
 (defn namespace->db-name
   "Convert a Clojure namespace to a SQL-compatible database name.
 
-  Replaces dots with underscores since SQL uses dots for db.schema.table syntax.
+  Uses munge for standard Clojure->JVM conversion (hyphens to underscores),
+  then replaces dots since SQL uses dots for db.schema.table syntax.
 
   Examples:
-    (namespace->db-name 'seon.primer) => \"seon_primer\"
-    (namespace->db-name 'seon.dev)    => \"seon_dev\"
-    (namespace->db-name \"seon.foo\") => \"seon_foo\""
+    (namespace->db-name 'seon.primer)  => \"seon_primer\"
+    (namespace->db-name 'seon.dev)     => \"seon_dev\"
+    (namespace->db-name 'seon.agent-a) => \"seon_agent_a\""
   [ns-or-name]
   (-> (if (symbol? ns-or-name)
         (str ns-or-name)
         ns-or-name)
-      (str/replace "." "_")))
+      munge                     ; hyphens → underscores (standard Clojure convention)
+      (str/replace "." "_")))   ; dots → underscores (SQL compatibility)
 
 (defn db-name->namespace
   "Convert a database name back to a namespace symbol.
