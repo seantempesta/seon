@@ -171,3 +171,20 @@ When adding domains:
 4. **Namespaced IDs** - `:trading/position`, `:health/workout`
 
 See `CONVENTIONS.md` for full patterns.
+
+---
+
+## File Locations
+
+**Never use `/tmp` or system temp directories.** Use project-local directories instead:
+
+| Directory | Purpose | Git Status |
+|-----------|---------|------------|
+| `logs/` | Debug logs, hook logs, agent activity | Ignored |
+| `tmp/` | Temporary test files, scratch data | Ignored |
+| `data/` | XTDB database files | Ignored |
+
+These directories are gitignored and local to the project. This ensures:
+- Logs are findable and debuggable
+- Multiple projects don't conflict
+- Agents can access their own logs
