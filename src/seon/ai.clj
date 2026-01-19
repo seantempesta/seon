@@ -137,6 +137,39 @@
                          :description "Maximum number of results"}])
 
 ;;; ---------------------------------------------------------------------------
+;;; Tool Call Schemas (Provider-Agnostic)
+;;; ---------------------------------------------------------------------------
+
+;; AI provider identifier
+(schema/register! ::provider
+                  [:enum {:description "AI provider"}
+                   :claude :gemini :openai])
+
+;; Single tool call from assistant
+(schema/register! ::tool-call
+                  [:map {:description "Single tool call from assistant"}
+                   [:id :string]
+                   [:name :string]
+                   [:input {:optional true} :any]])
+
+;; Vector of tool calls from assistant message
+(schema/register! ::tool-calls
+                  [:vector {:description "Tool calls from assistant message"}
+                   ::tool-call])
+
+;; Result of a tool call
+(schema/register! ::tool-result
+                  [:map {:description "Result of a tool call"}
+                   [:tool-use-id :string]
+                   [:content {:optional true} :any]
+                   [:is-error {:optional true} :boolean]])
+
+;; Vector of tool results in user message
+(schema/register! ::tool-results
+                  [:vector {:description "Tool results in user message"}
+                   ::tool-result])
+
+;;; ---------------------------------------------------------------------------
 ;;; Request/Response Schemas
 ;;; ---------------------------------------------------------------------------
 
@@ -221,7 +254,10 @@
                    [::content ::content]
                    [::timestamp ::timestamp]
                    [::input-tokens {:optional true} ::input-tokens]
-                   [::output-tokens {:optional true} ::output-tokens]])
+                   [::output-tokens {:optional true} ::output-tokens]
+                   [::tool-calls {:optional true} ::tool-calls]
+                   [::tool-results {:optional true} ::tool-results]
+                   [::provider {:optional true} ::provider]])
 
 ;; List sessions request
 (schema/register! ::list-sessions-request

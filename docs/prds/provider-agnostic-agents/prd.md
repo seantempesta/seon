@@ -537,7 +537,7 @@ Provider Process                 seon.ai.agent                    XTDB
 
 ## Deliverables
 
-- [ ] `seon.ai` - Add tool schemas (Phase 1)
+- [x] `seon.ai` - Add tool schemas (Phase 1)
 - [ ] `seon.ai.claude.sdk` - Extract SDK process management (Phase 2)
 - [ ] `seon.ai.agent` - Multimethods + registry (Phases 3-4)
 - [ ] `seon.ai.claude` - Implement multimethods, use shared registry (Phases 3-4)
