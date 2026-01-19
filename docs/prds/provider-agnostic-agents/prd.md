@@ -1,6 +1,6 @@
 # PRD: Provider-Agnostic Agent Framework
 
-**Status:** Draft
+**Status:** Complete
 **Priority:** High
 **Branch:** feature/provider-agnostic-agents
 
@@ -543,7 +543,7 @@ Provider Process                 seon.ai.agent                    XTDB
 - [x] `seon.ai.claude` - Implement multimethods (Phase 3)
 - [x] Agent registry in `seon.ai.agent` (Phase 4)
 - [x] Delete deprecated namespaces (Phase 5)
-- [ ] Updated documentation (Phase 6)
+- [x] Updated documentation (Phase 6)
 
 ---
 
@@ -656,7 +656,35 @@ Provider Process                 seon.ai.agent                    XTDB
 ### Notes
 
 - References to deleted namespaces remain in historical PRD documents (e.g., `docs/prds/agent-isolation/prd.md`) - these are documentation of past work, not active dependencies
-- `CLAUDE.md` still lists the deprecated namespace mappings - this will be updated in Phase 6 (documentation)
+
+---
+
+## Phase 6 Implementation Notes
+
+**Completed:** 2026-01-19
+
+### Files Modified
+
+1. **`CLAUDE.md`** (updated)
+   - Rewrote "AI Namespace Hierarchy" section to reflect new structure
+   - Documented all four namespaces: `seon.ai`, `seon.ai.agent`, `seon.ai.claude`, `seon.ai.claude.sdk`
+   - Added code examples for each namespace showing typical usage
+   - Removed deprecated namespace mappings (they no longer exist)
+   - Kept note about `seon.claude.exploration` as research tool
+
+2. **`CONVENTIONS.md`** (updated)
+   - Added new "Provider Multimethod Pattern" section
+   - Documents how to define extension points with multimethods
+   - Shows how providers implement multimethods
+   - Explains why multimethods over protocols for this use case
+
+### Namespace Docstrings
+
+Verified accurate docstrings in all four namespaces:
+- `seon.ai` - Describes base schemas and session/message persistence functions
+- `seon.ai.agent` - Describes multimethods, agent registry, and observatory API
+- `seon.ai.claude` - Describes Claude-specific schemas and agent lifecycle
+- `seon.ai.claude.sdk` - Describes CLI process management functions
 
 ---
 
