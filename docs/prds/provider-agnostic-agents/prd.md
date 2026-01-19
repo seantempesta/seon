@@ -538,11 +538,48 @@ Provider Process                 seon.ai.agent                    XTDB
 ## Deliverables
 
 - [x] `seon.ai` - Add tool schemas (Phase 1)
-- [ ] `seon.ai.claude.sdk` - Extract SDK process management (Phase 2)
-- [ ] `seon.ai.agent` - Multimethods + registry (Phases 3-4)
-- [ ] `seon.ai.claude` - Implement multimethods, use shared registry (Phases 3-4)
+- [x] `seon.ai.claude.sdk` - Extract SDK process management (Phase 2)
+- [x] `seon.ai.agent` - Provider multimethods (Phase 3)
+- [x] `seon.ai.claude` - Implement multimethods (Phase 3)
+- [ ] Agent registry in `seon.ai.agent` (Phase 4)
 - [ ] Delete deprecated namespaces (Phase 5)
 - [ ] Updated documentation (Phase 6)
+
+---
+
+## Phase 3 Implementation Notes
+
+**Completed:** 2026-01-19
+
+### Files Created/Modified
+
+1. **`src/seon/ai/agent.clj`** (new)
+   - Three multimethods: `normalize-message`, `result-message?`, `parse-result`
+   - Each dispatches on `:provider` key
+   - Default implementations throw helpful errors for unknown providers
+   - `::parsed-result` schema for normalized result data
+
+2. **`src/seon/ai/claude.clj`** (modified)
+   - Added require for `seon.ai.agent`
+   - Implemented all three multimethods for `:claude` provider
+   - Fixed schema references: `::permission-mode` etc. now properly reference `::sdk/permission-mode`
+   - Updated `launch-agent!` destructuring to use `::sdk/keys` for SDK options
+
+3. **`test/seon/ai/agent_test.clj`** (new)
+   - 20 tests covering all multimethods
+   - Schema registration and generation tests
+   - Claude implementation tests for various message types
+   - Default implementation error tests
+
+### Design Decisions
+
+1. **Dispatch on `:provider` keyword** - Simple and extensible. Adding a new provider requires implementing three defmethods.
+
+2. **Comments instead of docstrings for defmethod** - Clojure defmethod doesn't support docstrings directly, so documentation is in comments above each implementation.
+
+3. **`::parsed-result` schema in agent.clj** - Normalized result structure that all providers return from `parse-result`, enabling provider-agnostic result handling.
+
+4. **Keep `launch-agent!` in `seon.ai.claude`** - Per PRD guidance, the agent loop stays in provider namespace until we have multiple providers needing shared orchestration.
 
 ---
 

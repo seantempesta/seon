@@ -38,12 +38,12 @@
      ;; Interrupt an agent
      (claude/interrupt! {::ai/session-id \"a1b2\"})"
   (:require
-   [cheshire.core :as json]
-   [clojure.core.async :as async :refer [chan close! go-loop]]
+   [clojure.core.async :as async :refer [chan close!]]
    [clojure.java.io :as io]
-   [clojure.java.process :as process]
    [clojure.string :as str]
    [seon.ai :as ai]
+   [seon.ai.agent :as agent]
+   [seon.ai.claude.sdk :as sdk]
    [seon.orchestrator.session :as session]
    [seon.schema :as schema]
    [taoensso.timbre :as log])
@@ -105,36 +105,6 @@
 (schema/register! ::raw-message
                   [:map {:description "Full SDK message for debugging"}])
 
-;; Permission modes for tool execution
-(schema/register! ::permission-mode
-                  [:enum "default" "acceptEdits" "bypassPermissions" "plan" "dontAsk"])
-
-;; CLI configuration
-(schema/register! ::cli-command
-                  [:string {:min 1}])
-
-(schema/register! ::cwd
-                  [:string {:min 1}])
-
-(schema/register! ::max-turns
-                  [:int {:min 1 :max 1000}])
-
-(schema/register! ::max-budget-usd
-                  [:double {:min 0.0 :max 100.0}])
-
-(schema/register! ::allowed-tools
-                  [:vector :string])
-
-(schema/register! ::disallowed-tools
-                  [:vector :string])
-
-(schema/register! ::mcp-servers
-                  [:map-of :keyword :map])
-
-(schema/register! ::settings-path
-                  [:string {:min 1
-                            :description "Path to settings JSON file for hooks"}])
-
 ;; Agent status
 (schema/register! ::agent-status
                   [:enum :running :completed :failed :terminated :interrupted])
@@ -182,17 +152,18 @@
                    [::raw-message {:optional true} ::raw-message]])
 
 ;; Launch request - uses base schemas where appropriate
+;; SDK-related schemas (permission-mode, max-turns, etc.) are in seon.ai.claude.sdk
 (schema/register! ::launch-agent-request
                   [:map
                    [::ai/node ::ai/node]
                    [::ai/namespace ::ai/namespace]
                    [::ai/prompt ::ai/prompt]
                    [::model {:optional true} ::model]
-                   [::permission-mode {:optional true} ::permission-mode]
-                   [::max-turns {:optional true} ::max-turns]
-                   [::max-budget-usd {:optional true} ::max-budget-usd]
-                   [::allowed-tools {:optional true} ::allowed-tools]
-                   [::disallowed-tools {:optional true} ::disallowed-tools]])
+                   [::sdk/permission-mode {:optional true} ::sdk/permission-mode]
+                   [::sdk/max-turns {:optional true} ::sdk/max-turns]
+                   [::sdk/max-budget-usd {:optional true} ::sdk/max-budget-usd]
+                   [::sdk/allowed-tools {:optional true} ::sdk/allowed-tools]
+                   [::sdk/disallowed-tools {:optional true} ::sdk/disallowed-tools]])
 
 ;; Agent handle returned from launch-agent!
 (schema/register! ::agent-handle
@@ -246,22 +217,6 @@
 ;; :malli/schema metadata because they involve XTDB nodes, process spawning,
 ;; or runtime-generated values that cannot be property tested.
 ;; Schemas are documented in docstrings for reference.
-
-;;; ---------------------------------------------------------------------------
-;;; Configuration
-;;; ---------------------------------------------------------------------------
-
-(def ^:const default-cli-command
-  "Default Claude Code command (Homebrew npm install location)."
-  "/opt/homebrew/bin/claude")
-
-(def ^:const default-model
-  "Default model. Opus 4.5 for complex tasks."
-  "claude-opus-4-5-20251101")
-
-(def ^:const default-permission-mode
-  "Default permission mode."
-  "default")
 
 ;;; ---------------------------------------------------------------------------
 ;;; SDK Message Conversion
@@ -379,6 +334,82 @@
       (:cache_read_input_tokens usage)
       (assoc ::cache-read-tokens (:cache_read_input_tokens usage)))))
 
+;;; ---------------------------------------------------------------------------
+;;; Provider Multimethod Implementations (seon.ai.agent)
+;;; ---------------------------------------------------------------------------
+
+;; normalize-message :claude
+;; Convert Claude SDK message to ::ai/message entity.
+;; The message is expected to be from the Claude Code CLI streaming output.
+;; Converts to the normalized entity format used throughout Seon.
+;;
+;; Request keys:
+;;   :provider   - :claude
+;;   :message    - Claude SDK message map (with :type, :message, :uuid, etc.)
+;;   :session-id - Optional. AI session ID to attach
+;;
+;; Returns entity map suitable for XTDB storage.
+(defmethod agent/normalize-message :claude
+  [{:keys [message session-id]}]
+  (sdk-message->entity (cond-> {::sdk-message message}
+                         session-id (assoc ::ai/session-id session-id))))
+
+;; result-message? :claude
+;; Check if a Claude message is the final result.
+;; Claude Code CLI sends a message with type="result" when the agent
+;; completes (successfully, with error, or interrupted).
+;;
+;; Request keys:
+;;   :provider - :claude
+;;   :message  - Claude SDK message map
+;;
+;; Returns true if message type is "result".
+(defmethod agent/result-message? :claude
+  [{:keys [message]}]
+  (= "result" (:type message)))
+
+;; parse-result :claude
+;; Extract stats from a Claude result message.
+;;
+;; Claude result messages contain:
+;;   - :subtype - "success", "error_during_execution", "error_max_turns",
+;;                "error_max_budget_usd", "interrupted"
+;;   - :total_cost_usd - Total cost
+;;   - :num_turns - Number of turns
+;;   - :duration_ms - Duration in milliseconds
+;;   - :result - Final text result
+;;
+;; Request keys:
+;;   :provider - :claude
+;;   :message  - Claude SDK result message
+;;
+;; Returns parsed result map with normalized keys.
+(defmethod agent/parse-result :claude
+  [{:keys [message]}]
+  (let [subtype (:subtype message)
+        status (case subtype
+                 "success" :completed
+                 "interrupted" :interrupted
+                 ;; All error subtypes map to :failed
+                 ("error_during_execution" "error_max_turns" "error_max_budget_usd") :failed
+                 ;; Unknown subtype defaults to :error
+                 :error)]
+    (cond-> {::agent/status status}
+      (:total_cost_usd message)
+      (assoc ::agent/cost-usd (:total_cost_usd message))
+
+      (:num_turns message)
+      (assoc ::agent/num-turns (:num_turns message))
+
+      (:duration_ms message)
+      (assoc ::agent/duration-ms (:duration_ms message))
+
+      (:result message)
+      (assoc ::agent/result-text (:result message))
+
+      subtype
+      (assoc ::agent/subtype subtype))))
+
 (defn persist-message!
   "Persist a Claude SDK message to XTDB as an AI message entity.
 
@@ -409,86 +440,8 @@
     {::ai/message-id message-id}))
 
 ;;; ---------------------------------------------------------------------------
-;;; Private Implementation (moved from seon.claude.sdk)
+;;; Private Agent Helpers
 ;;; ---------------------------------------------------------------------------
-
-(defn- build-args
-  "Build CLI arguments from options map."
-  [{::keys [model permission-mode max-turns max-budget-usd
-            allowed-tools disallowed-tools mcp-servers cli-command settings-path]}]
-  (let [cmd (or cli-command default-cli-command)
-        model (or model default-model)
-        perm (or permission-mode default-permission-mode)
-        settings (or settings-path ".claude/settings.json")]
-    (cond-> [cmd
-             "--output-format" "stream-json"
-             "--input-format" "stream-json"
-             "--verbose"
-             "--model" model
-             "--permission-mode" perm
-             "--setting-sources" "project,local"
-             "--settings" settings]
-      max-turns
-      (into ["--max-turns" (str max-turns)])
-
-      max-budget-usd
-      (into ["--max-budget-usd" (str max-budget-usd)])
-
-      (seq allowed-tools)
-      (into ["--allowedTools" (str/join "," allowed-tools)])
-
-      (seq disallowed-tools)
-      (into ["--disallowedTools" (str/join "," disallowed-tools)])
-
-      (seq mcp-servers)
-      (into ["--mcp-config" (json/generate-string {:mcpServers mcp-servers})]))))
-
-(defn- build-env
-  "Build environment map with SDK identifier."
-  []
-  (-> (into {} (System/getenv))
-      (assoc "ANTHROPIC_API_KEY" "")
-      (assoc "CLAUDE_USE_SUBSCRIPTION" "true")
-      (assoc "CLAUDE_CODE_ENTRYPOINT" "sdk-clj")))
-
-(defn- make-user-message
-  "Create a user message for the Claude Code CLI."
-  [text]
-  {:type "user"
-   :session_id ""
-   :message {:role "user"
-             :content [{:type "text" :text text}]}
-   :parent_tool_use_id nil})
-
-(defn- write-message!
-  "Write a JSON message to the process stdin."
-  [^java.io.OutputStream stdin msg]
-  (let [json-str (str (json/generate-string msg) "\n")
-        bytes (.getBytes json-str "UTF-8")]
-    (.write stdin bytes)
-    (.flush stdin)))
-
-(defn- parse-line
-  "Parse a JSON line from stdout, returning error map on failure."
-  [line]
-  (try
-    (json/parse-string line true)
-    (catch Exception e
-      {:type "parse_error" :raw line :error (str e)})))
-
-(defn- spawn-claude-code
-  "Spawn Claude Code CLI process."
-  [{::keys [cwd] :as opts}]
-  (let [args (build-args opts)
-        env (build-env)
-        dir (or cwd ".")
-        _ (log/debug "Spawning Claude Code" {:args args :cwd dir})
-        proc (apply process/start {:dir dir :env env} args)]
-    {:process proc
-     :stdin (process/stdin proc)
-     :stdout (process/stdout proc)
-     :stderr (process/stderr proc)
-     :exit-ref (process/exit-ref proc)}))
 
 (defn- build-agent-mcp-config
   "Build MCP config that passes session_id to the agent."
@@ -546,15 +499,15 @@
    On completion, the AI session is closed with final stats (tokens, cost).
 
    Request keys:
-     ::ai/node            - Required. XTDB orchestrator node
-     ::ai/namespace       - Required. Agent namespace (string or symbol)
-     ::ai/prompt          - Required. Task description for the agent
-     ::model              - Optional. Claude model (default: opus)
-     ::permission-mode    - Optional. Permission mode (default: bypassPermissions)
-     ::max-turns          - Optional. Max conversation turns
-     ::max-budget-usd     - Optional. Cost limit
-     ::allowed-tools      - Optional. Tool whitelist
-     ::disallowed-tools   - Optional. Tool denylist
+     ::ai/node               - Required. XTDB orchestrator node
+     ::ai/namespace          - Required. Agent namespace (string or symbol)
+     ::ai/prompt             - Required. Task description for the agent
+     ::model                 - Optional. Claude model (default: opus)
+     ::sdk/permission-mode   - Optional. Permission mode (default: bypassPermissions)
+     ::sdk/max-turns         - Optional. Max conversation turns
+     ::sdk/max-budget-usd    - Optional. Cost limit
+     ::sdk/allowed-tools     - Optional. Tool whitelist
+     ::sdk/disallowed-tools  - Optional. Tool denylist
 
    Response keys (agent handle):
      ::ai/session-id      - 4-char hex session ID (Seon agent session)
@@ -571,7 +524,8 @@
                      ::ai/namespace 'seon.trading
                      ::ai/prompt \"Implement the signals dashboard\"})"
   [{::ai/keys [node namespace prompt]
-    ::keys [model permission-mode max-turns max-budget-usd allowed-tools disallowed-tools]}]
+    ::keys [model]
+    ::sdk/keys [permission-mode max-turns max-budget-usd allowed-tools disallowed-tools]}]
   (log/info "Launching agent" {:namespace namespace})
 
   ;; 1. Create Seon session (nREPL, ctx, db)
@@ -602,13 +556,13 @@
           ;; 5. Spawn Claude Code with configured MCP
           status-atom (atom :running)
           {:keys [process stdin stdout]}
-          (spawn-claude-code {::model (or model default-model)
-                              ::permission-mode (or permission-mode "bypassPermissions")
-                              ::max-turns max-turns
-                              ::max-budget-usd max-budget-usd
-                              ::allowed-tools allowed-tools
-                              ::disallowed-tools disallowed-tools
-                              ::mcp-servers mcp-config})
+          (sdk/spawn-claude-code {::sdk/model (or model sdk/default-model)
+                                  ::sdk/permission-mode (or permission-mode "bypassPermissions")
+                                  ::sdk/max-turns max-turns
+                                  ::sdk/max-budget-usd max-budget-usd
+                                  ::sdk/allowed-tools allowed-tools
+                                  ::sdk/disallowed-tools disallowed-tools
+                                  ::sdk/mcp-servers mcp-config})
 
           messages-ch (chan 100)
           result-ch (chan 1)
@@ -621,7 +575,7 @@
                         (loop []
                           (when-let [line (.readLine rdr)]
                             (when-not (str/blank? line)
-                              (let [msg (parse-line line)
+                              (let [msg (sdk/parse-line line)
                                     msg-type (:type msg)
                                     claude-session-id (:session_id msg)]
                                 ;; Map Claude's session_id to our Seon session_id (once)
@@ -725,7 +679,7 @@
                   ::close! close-fn}]
 
       ;; 8. Send initial prompt
-      (write-message! stdin (make-user-message full-prompt))
+      (sdk/write-message! stdin (sdk/make-user-message full-prompt))
 
       ;; 9. Register agent
       (swap! agent-registry assoc id handle)
