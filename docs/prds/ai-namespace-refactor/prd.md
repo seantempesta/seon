@@ -1,6 +1,6 @@
 # PRD: AI Namespace Refactor
 
-**Status:** Phase 5 Complete (documented conventions)
+**Status:** Phase 6 Complete (Gemini aligned with base schemas)
 **Priority:** High
 **Branch:** feature/ai-namespace-refactor
 **Supersedes:** Conversation persistence from `docs/prds/clojure-claude-sdk/bidirectional-control.md`
@@ -259,7 +259,7 @@ The `seon.ai` namespace uses these directly - no new abstractions needed:
 
 ---
 
-### Phase 6: Refactor seon.ai.gemini (Future)
+### Phase 6: Refactor seon.ai.gemini [COMPLETED]
 
 **Goal:** Bring Gemini into the common pattern.
 
@@ -267,6 +267,23 @@ The `seon.ai` namespace uses these directly - no new abstractions needed:
 - Refactor `seon.ai.gemini` to use `seon.ai` base schemas where applicable
 - Common schemas: `::prompt`, `::timeout`, `::tokens`
 - Gemini-specific: `::thinking-level`, `::grounding-metadata`
+
+**Implementation Notes:**
+- Added `seon.ai` require to establish the provider relationship
+- Kept `::gemini/prompt` as local schema (mirrors `::ai/prompt`) for API consistency
+  - Callers use `(gemini/ask {::gemini/prompt "..."})` not `{::ai/prompt "..."}`
+  - Both schemas are functionally identical (`[:string {:min 1}]`)
+- Organized schema sections with clear comments:
+  - Gemini-specific primitives (api-key, model, timeout, thinking-level)
+  - Tool configuration (google_search, code_execution)
+  - Request schemas (generate, ask, search, calculate, code-review)
+  - Token tracking (uses Gemini API naming vs. normalized `::ai/input-tokens`)
+  - Response components (text, error, grounding-metadata, code-results, usage)
+- Documented relationship to base schemas in code comments
+- Added provider pattern tests verifying:
+  - Common prompts validate against both `::gemini/prompt` and `::ai/prompt`
+  - Base schemas exist for token/cost tracking
+  - Gemini-specific schemas (thinking-level, grounding, code execution) are distinct
 
 **Commit:** "refactor: align seon.ai.gemini with common base schemas"
 

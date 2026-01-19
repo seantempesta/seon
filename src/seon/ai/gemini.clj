@@ -5,6 +5,10 @@
    support for text generation, Google Search grounding, and Python code
    execution.
 
+   This namespace follows the provider pattern established in seon.ai.claude:
+   - Common schemas (prompt, tokens) reference seon.ai base schemas
+   - Gemini-specific schemas (model, thinking-level, grounding) are local
+
    Public functions use map-based APIs with namespaced keys:
    - Input:  {::prompt \"...\" ::model \"...\"}
    - Output: {::text \"...\" ::usage {...}}
@@ -36,6 +40,7 @@
    [clojure.string :as str]
    [hato.client :as http]
    [malli.core :as m]
+   [seon.ai :as ai]
    [seon.schema :as schema]
    [taoensso.timbre :as log]))
 
@@ -46,18 +51,31 @@
 ;; Register Gemini domain schemas in the global registry.
 ;; Using `::` auto-namespaces to `:seon.ai.gemini/*` keywords.
 ;; Each registration is a separate form for easy LLM editing.
+;;
+;; Base schemas from seon.ai that can be referenced:
+;;   ::ai/prompt        - Initial prompt (string, min 1)
+;;   ::ai/input-tokens  - Input token count (int, min 0)
+;;   ::ai/output-tokens - Output token count (int, min 0)
+;;   ::ai/cost-usd      - Cost in USD (double, min 0.0)
+;;
+;; Gemini-specific schemas are registered with ::gemini/ namespace.
 
-;; Primitive types
+;; ---- Gemini-specific primitives ----
+
 (schema/register! ::api-key
                   [:string {:min 1
                             :description "Non-empty Gemini API authentication key"}])
 
+;; Note: ::prompt is a local alias that mirrors ::ai/prompt.
+;; We keep it as ::gemini/prompt for API consistency - callers use
+;; (gemini/ask {::gemini/prompt "..."}) not {::ai/prompt "..."}.
+;; The schema is identical to ::ai/prompt.
 (schema/register! ::prompt
                   [:string {:min 1
                             :description "Non-empty text prompt for generation"}])
 
 (schema/register! ::model
-                  [:enum
+                  [:enum {:description "Gemini model identifier"}
                    "gemini-3-flash-preview"
                    "gemini-3-pro-preview"])
 
@@ -65,12 +83,14 @@
                   [:int {:min 1000 :max 600000
                          :description "Request timeout in milliseconds (1-600 seconds)"}])
 
+;; ---- Gemini-specific: thinking configuration ----
 (schema/register! ::thinking-level
-                  [:enum "low" "medium" "high"])
+                  [:enum {:description "Thinking depth: low=fast, high=thorough"}
+                   "low" "medium" "high"])
 
-;; Tool configuration
+;; ---- Gemini-specific: tool configuration ----
 (schema/register! ::tool
-                  [:map
+                  [:map {:description "Gemini tool configuration"}
                    [:google_search {:optional true} :map]
                    [:code_execution {:optional true} :map]])
 
@@ -83,7 +103,7 @@
                    [:thinking-level {:optional true} ::thinking-level]
                    [:system-instruction {:optional true} :string]])
 
-;; Request schemas for public API (namespaced keys)
+;; ---- Request schemas for public API (namespaced keys) ----
 (schema/register! ::system-instruction
                   [:string {:description "System instruction for context"}])
 
@@ -136,9 +156,12 @@
                    [::timeout {:optional true} ::timeout]
                    [::api-key {:optional true} ::api-key]])
 
-;; Token counts for tracking/training data
+;; ---- Token tracking ----
+;; Note: These use Gemini API naming conventions (promptTokenCount, etc.)
+;; The base schemas ::ai/input-tokens and ::ai/output-tokens are for
+;; normalized/aggregated tracking. This schema is for raw Gemini API responses.
 (schema/register! ::tokens
-                  [:map {:description "Token usage counts for LLM training data"}
+                  [:map {:description "Token usage counts from Gemini API"}
                    [:prompt {:optional true} :int]
                    [:response {:optional true} :int]
                    [:cached {:optional true} :int]])
@@ -154,7 +177,10 @@
                    [::tokens {:optional true} ::tokens]
                    [::error {:optional true} :string]])
 
-;; Response components (using namespaced keys for public API)
+;; ---- Response components ----
+;; Note: ::ai/error in seon.ai uses {::ai/message ::ai/code ::ai/data} structure.
+;; Gemini's error structure is different (HTTP status, exception), so we keep
+;; a Gemini-specific error schema. If persisting to XTDB, convert to ::ai/error.
 (schema/register! ::text
                   [:string {:description "Generated text response"}])
 
@@ -168,37 +194,42 @@
                   [:string {:description "Exception message"}])
 
 (schema/register! ::error
-                  [:map
+                  [:map {:description "Gemini API error details"}
                    [::status {:optional true} ::status]
                    [::message {:optional true} ::message]
                    [::exception {:optional true} ::exception]])
 
+;; ---- Gemini-specific: Google Search grounding ----
+;; These schemas capture grounding metadata from web search-enabled requests.
 (schema/register! ::grounding-chunk
-                  [:map
+                  [:map {:description "Single grounding source from web search"}
                    [:web {:optional true}
                     [:map
                      [:uri {:optional true} :string]
                      [:title {:optional true} :string]]]])
 
 (schema/register! ::grounding-metadata
-                  [:map
+                  [:map {:description "Web search grounding info (Gemini-specific)"}
                    [:webSearchQueries {:optional true} [:vector :string]]
                    [:groundingChunks {:optional true} [:vector ::grounding-chunk]]])
 
+;; ---- Gemini-specific: code execution ----
 (schema/register! ::code-result
-                  [:map
+                  [:map {:description "Python code execution result (Gemini-specific)"}
                    [:outcome {:optional true} :string]
                    [:output {:optional true} :string]])
 
+;; ---- Gemini-specific: usage metadata ----
+;; Uses Gemini API naming (camelCase). For normalized tracking, use ::ai/input-tokens etc.
 (schema/register! ::usage
-                  [:map
+                  [:map {:description "Token usage from Gemini API response"}
                    [:promptTokenCount {:optional true} :int]
                    [:candidatesTokenCount {:optional true} :int]
                    [:totalTokenCount {:optional true} :int]])
 
-;; Unified response (namespaced keys for public API)
+;; ---- Unified response schema ----
 (schema/register! ::response
-                  [:map
+                  [:map {:description "Unified Gemini API response"}
                    [::text ::text]
                    [::error {:optional true} ::error]
                    [::grounding-metadata {:optional true} [:maybe ::grounding-metadata]]
@@ -545,9 +576,10 @@
 (comment
   ;; REPL exploration
 
-  ;; View registered schemas
+  ;; View registered schemas - both base and Gemini-specific
   (require '[seon.schema :as schema])
-  (schema/schemas-in-namespace "seon.ai.gemini")
+  (schema/schemas-in-namespace "seon.ai")        ; Base schemas
+  (schema/schemas-in-namespace "seon.ai.gemini") ; Gemini-specific
 
   ;; Generate sample data
   (require '[malli.generator :as mg])

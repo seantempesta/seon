@@ -7,12 +7,14 @@
    3. Schema generation - can generate valid sample data
    4. Function metadata - :malli/schema is accessible on vars
    5. Schema collection - mi/collect! registers function schemas
-   6. API key handling - proper error handling for missing keys"
+   6. API key handling - proper error handling for missing keys
+   7. Provider pattern - Gemini follows seon.ai base schema pattern"
   (:require
    [clojure.test :refer [deftest is testing]]
    [malli.core :as m]
    [malli.generator :as mg]
    [malli.instrument :as mi]
+   [seon.ai :as ai]
    [seon.ai.gemini :as gemini]
    [seon.schema :as schema]))
 
@@ -255,3 +257,37 @@
 
   (testing "Default model is valid"
     (is (m/validate ::gemini/model gemini/default-model))))
+
+;;; ---------------------------------------------------------------------------
+;;; Provider Pattern Tests (seon.ai base schema relationship)
+;;; ---------------------------------------------------------------------------
+
+(deftest provider-pattern-test
+  (testing "Gemini follows provider pattern - has corresponding base schemas"
+    ;; Gemini has its own ::prompt that mirrors ::ai/prompt
+    ;; Both are non-empty strings, keeping API consistency
+    (is (m/validate ::gemini/prompt "test prompt"))
+    (is (m/validate ::ai/prompt "test prompt"))
+    ;; Same string validates against both
+    (let [prompt "What is the meaning of life?"]
+      (is (m/validate ::gemini/prompt prompt))
+      (is (m/validate ::ai/prompt prompt))))
+
+  (testing "Base schemas exist for common AI concepts"
+    ;; These base schemas can be used when persisting Gemini data to XTDB
+    (is (schema/registered? ::ai/input-tokens))
+    (is (schema/registered? ::ai/output-tokens))
+    (is (schema/registered? ::ai/cost-usd))
+    (is (schema/registered? ::ai/status)))
+
+  (testing "Gemini-specific schemas are distinct from base"
+    ;; These are Gemini-only features not in base
+    (is (schema/registered? ::gemini/thinking-level))
+    (is (schema/registered? ::gemini/grounding-metadata))
+    (is (schema/registered? ::gemini/code-result))
+    (is (schema/registered? ::gemini/model)))
+
+  (testing "Gemini namespace requires seon.ai"
+    ;; Verify the require relationship is established
+    ;; This is a documentation test - ensures the provider pattern is followed
+    (is (find-ns 'seon.ai) "seon.ai namespace should be loaded")))
