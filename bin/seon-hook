@@ -16,7 +16,7 @@
          '[clojure.edn :as edn]
          '[clojure.java.io :as io])
 
-(def nrepl-port 7888)
+(def orchestrator-port 7888)
 (def config-path ".claude/seon-hook.edn")
 
 ;;; ---------------------------------------------------------------------------
@@ -58,9 +58,9 @@
 
 (defn nrepl-eval
   "Evaluate code via nREPL using bencode. Returns result value or nil on error."
-  [code]
+  [port code]
   (try
-    (with-open [sock (java.net.Socket. "localhost" nrepl-port)]
+    (with-open [sock (java.net.Socket. "localhost" port)]
       (let [out (java.io.BufferedOutputStream. (.getOutputStream sock))
             in (java.io.PushbackInputStream. (.getInputStream sock))
             id (str (random-uuid))]
@@ -88,6 +88,55 @@
       (binding [*out* *err*]
         (println "NREPL EXCEPTION:" (.getMessage e)))
       nil)))
+
+;;; ---------------------------------------------------------------------------
+;;; Session Port Resolution
+;;; ---------------------------------------------------------------------------
+
+(defn- lookup-seon-session
+  "Look up Seon session_id from Claude's UUID via mapping file.
+   Returns the original session-id if not a UUID or not found in mapping."
+  [session-id]
+  (if (and session-id
+           (> (count session-id) 8))  ; UUIDs are 36 chars, our IDs are 4
+    ;; Looks like a UUID - check mapping file
+    (let [map-file (io/file "logs" "session-map.edn")]
+      (if (.exists map-file)
+        (try
+          (let [mapping (edn/read-string (slurp map-file))]
+            (get mapping session-id session-id))
+          (catch Exception _
+            session-id))
+        session-id))
+    session-id))
+
+(defn get-port-for-session
+  "Query orchestrator for the nREPL port of a session.
+   Returns orchestrator-port (7888) if session_id is nil, 'orchestrator', or not found.
+   For agent sessions (4-char hex IDs), queries the session registry.
+   Also handles Claude's UUID session_ids by looking up the mapping."
+  [session-id]
+  ;; First, resolve UUID to Seon session_id if needed
+  (let [seon-session-id (lookup-seon-session session-id)]
+    (if (or (nil? seon-session-id)
+            (= seon-session-id "orchestrator")
+            (= seon-session-id ""))
+      orchestrator-port
+      ;; Query orchestrator for session's port
+      (let [code (format
+                  "(do (require 'seon.orchestrator.session)
+                       (:seon.orchestrator.session/nrepl-port
+                         (seon.orchestrator.session/get-session-port
+                           {:seon.orchestrator.session/node (user/xtdb-node)
+                            :seon.orchestrator.session/id %s})))"
+                  (pr-str seon-session-id))
+            result (nrepl-eval orchestrator-port code)]
+        (or (when result
+              (try
+                (edn/read-string result)
+                (catch Exception _
+                  nil)))
+            orchestrator-port)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Response Formatting
@@ -132,6 +181,12 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn -main []
+  ;; HOOK INVOCATION LOGGING - detect if hooks are being called at all
+  ;; Write to logs/ directory (gitignored, project-local)
+  (let [log-dir (io/file "logs")
+        _ (when-not (.exists log-dir) (.mkdirs log-dir))
+        log-file (io/file log-dir "hook-debug.log")]
+    (spit log-file (str (java.util.Date.) " | HOOK INVOKED | cwd=" (System/getProperty "user.dir") "\n") :append true))
   (try
     (let [;; Read input from stdin
           input-json (slurp *in*)
@@ -140,8 +195,38 @@
                   (catch Exception _
                     nil))
 
+          ;; Log event details to file (more reliable than stderr for spawned processes)
+          _ (let [log-file (io/file "logs" "hook-debug.log")
+                  file-path (or (get-in event [:tool_input :file_path])
+                                (get-in event [:tool_input :filePath])
+                                "unknown")]
+              (spit log-file
+                    (str (java.util.Date.)
+                         " | " (:hook_event_name event)
+                         " | tool=" (:tool_name event)
+                         " | session=" (or (:session_id event) "orchestrator")
+                         " | file=" file-path
+                         "\n")
+                    :append true))
+
           ;; Load config
           config (load-config)
+
+          ;; Resolve target nREPL port based on session_id
+          ;; Claude Code passes its UUID, which we map to our 4-char Seon session_id
+          claude-session-id (:session_id event)
+          seon-session-id (lookup-seon-session claude-session-id)
+          target-port (get-port-for-session claude-session-id)
+
+          ;; Log port resolution (show both Claude UUID and resolved Seon session)
+          _ (spit (io/file "logs" "hook-debug.log")
+                  (str (java.util.Date.)
+                       " | PORT_RESOLVED"
+                       " | claude=" (or claude-session-id "nil")
+                       " | seon=" (or seon-session-id "nil")
+                       " | port=" target-port
+                       "\n")
+                  :append true)
 
           ;; Build the expression to evaluate
           ;; Note: We need to pass the XTDB node from the running system
@@ -155,8 +240,8 @@
                 (pr-str event)
                 (pr-str config))
 
-          ;; Evaluate via nREPL
-          result-str (nrepl-eval code)
+          ;; Evaluate via nREPL on the resolved target port
+          result-str (nrepl-eval target-port code)
 
           ;; Parse the result (it's an EDN string)
           result (when result-str
@@ -166,14 +251,26 @@
                        nil)))
 
           ;; Format for Claude Code
-          response (format-response result)]
+          response (format-response result)
 
-      ;; Output JSON response with systemMessage for visibility
+          ;; Log completion
+          _ (spit (io/file "logs" "hook-debug.log")
+                  (str (java.util.Date.)
+                       " | COMPLETE | session=" (or claude-session-id "orchestrator")
+                       " | decision=" (or (:decision response) "continue")
+                       " | has-feedback=" (boolean (get-in response [:hookSpecificOutput :additionalContext]))
+                       "\n")
+                  :append true)]
+
+      ;; Output JSON response
       (when (seq response)
         (println (json/generate-string response))))
 
     (catch Exception e
-      ;; Log exceptions to stderr, don't crash
+      ;; Log exceptions to file and stderr
+      (spit (io/file "logs" "hook-debug.log")
+            (str (java.util.Date.) " | ERROR | " (.getMessage e) "\n")
+            :append true)
       (binding [*out* *err*]
         (println "HOOK ERROR:" (.getMessage e)))
       nil)))
