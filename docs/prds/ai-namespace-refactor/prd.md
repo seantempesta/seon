@@ -1,6 +1,6 @@
 # PRD: AI Namespace Refactor
 
-**Status:** Phase 4 Complete (deprecated old namespaces)
+**Status:** Phase 5 Complete (documented conventions)
 **Priority:** High
 **Branch:** feature/ai-namespace-refactor
 **Supersedes:** Conversation persistence from `docs/prds/clojure-claude-sdk/bidirectional-control.md`
@@ -240,7 +240,7 @@ The `seon.ai` namespace uses these directly - no new abstractions needed:
 
 ---
 
-### Phase 5: Document and Update Conventions (Future)
+### Phase 5: Document and Update Conventions [COMPLETED]
 
 **Goal:** Update CONVENTIONS.md with namespace composition patterns.
 
@@ -248,6 +248,12 @@ The `seon.ai` namespace uses these directly - no new abstractions needed:
 - Add section on "Schema Inheritance Across Namespaces"
 - Show pattern for provider namespaces extending base
 - Document entity-centric thinking for XTDB
+
+**Implementation Notes:**
+- CONVENTIONS.md already had "Schema Composition Across Namespaces" from earlier phases
+- Enhanced "Same Entity, Multiple Namespaces" to "Entity-Centric Thinking (XTDB/Datomic Pattern)"
+- Added "Converter Functions (Map-In Pattern)" section showing `sdk-message->entity` pattern
+- Documented why map-in pattern benefits even converter functions
 
 **Commit:** "docs: add namespace composition patterns to CONVENTIONS.md"
 

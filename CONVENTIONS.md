@@ -319,18 +319,29 @@ Provider namespaces extend base namespaces by referencing their schemas. This is
    [::cache-tokens {:optional true} ::cache-tokens]])
 ```
 
-### Same Entity, Multiple Namespaces
+### Entity-Centric Thinking (XTDB/Datomic Pattern)
 
-A single XTDB entity can have attributes from multiple namespaces:
+**Key insight:** In XTDB, an entity is a bag of namespaced attributes, not a row in a table. A single entity can have attributes from multiple namespaces:
 
 ```clojure
+;; This is ONE entity, not separate "rows" in different "tables"
 {:xt/id "msg-abc123"
- :seon.ai/type :message           ; Generic
- :seon.ai/role "assistant"        ; Generic
- :seon.ai/content "Hello!"        ; Generic
- :seon.ai.claude/message-type "assistant"  ; Claude-specific
- :seon.ai.claude/cache-tokens 150}         ; Claude-specific
+ ;; Base seon.ai attributes (generic to all providers)
+ :seon.ai/type :message
+ :seon.ai/role "assistant"
+ :seon.ai/content "Hello!"
+ :seon.ai/timestamp #inst "2026-01-19T..."
+ ;; Claude-specific attributes (only present for Claude messages)
+ :seon.ai.claude/message-type "assistant"
+ :seon.ai.claude/cache-tokens 150
+ :seon.ai.claude/uuid "sdk-msg-xyz"}
 ```
+
+**Why this matters:**
+- No schema migration needed when adding provider-specific fields
+- Queries can filter by any attribute from any namespace
+- Generic code works on `:seon.ai/*` attributes, provider code adds its own
+- The "table name" in XTDB is just a type tag for SQL queries, not a rigid schema
 
 ### When NOT to Use `:malli/schema`
 
@@ -359,6 +370,40 @@ Some types cannot be generated for property testing. Omit `:malli/schema` metada
 ```
 
 **Rule:** If a function takes XTDB nodes, spawns processes, or returns channels/atoms, skip `:malli/schema`. Document the expected types in docstrings.
+
+## Converter Functions (Map-In Pattern)
+
+When converting external data (like SDK messages) to internal entities, use the map-in pattern:
+
+```clojure
+(defn sdk-message->entity
+  "Convert a Claude SDK message to a seon.ai message entity.
+
+   Request keys:
+     ::sdk-message   - Required. Raw SDK message map
+     ::ai/session-id - Optional. Parent session to attach
+
+   Returns entity map suitable for XTDB storage."
+  [{::keys [sdk-message] ::ai/keys [session-id]}]
+  (let [msg-type (:type sdk-message)
+        content (extract-content sdk-message)]
+    (cond-> {:xt/id (generate-id "msg")
+             ::ai/type :message
+             ::ai/content content}
+      session-id (assoc ::ai/session-id session-id))))
+```
+
+**Why map-in?** Even converter functions benefit from the pattern:
+- Extensible: Add optional context (session-id, metadata) without changing signature
+- Consistent: Same API style as all other public functions
+- Traceable: Can add logging/debugging keys later
+
+**Anti-pattern:**
+```clojure
+;; BAD: positional args limit extensibility
+(defn sdk-message->entity [sdk-message session-id]
+  ...)
+```
 
 ## XTDB Compatibility Notes
 
