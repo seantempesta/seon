@@ -15,8 +15,9 @@ data/
 .calva/output-window/
 .claude/settings.local.json
 
-# Logs
+# Logs and temporary files (local only)
 logs/
+tmp/
 *.log
 
 # OS
