@@ -1,7 +1,7 @@
 # Agent Isolation Architecture
 
-**Status**: Phase 4d Complete, Phase 7 in progress
-**Last Updated**: 2026-01-09
+**Status**: Phase 7 Complete
+**Last Updated**: 2026-01-14
 
 ## Current Status
 
@@ -15,16 +15,13 @@
 - Phase 4d: Persistent nREPL Sessions (`clone` op for *1/*2/*3, `interrupt_eval` tool)
 - Claude SDK research complete (see `research/` folder)
 - Claude SDK Phase 1 complete (`seon.claude.sdk` - query/exec functions)
-
-**In Progress:**
-- Phase 7: Clojure Claude SDK implementation (see `docs/prds/clojure-claude-sdk/prd.md`)
+- Phase 7: Full Agent Lifecycle (`launch-agent!`, `terminate-agent!`, `list-agents`)
 
 **Remaining:**
 - Phase 5: Web Routing (SSE scoping)
 - Phase 6: Git Worktree Integration
-- Phase 7: Full Agent Lifecycle
 
-**Next:** Implement Clojure Claude SDK (enables Phase 7's `launch-agent!`)
+**Next:** Phase 5 or 6 based on priority
 
 ## Vision
 
@@ -1074,32 +1071,61 @@ When listing sessions via `list_sessions` MCP tool, now exposes:
 - [ ] Implement `activate-agent!` and `deactivate-agent!` functions
 - [ ] Implement `reload-agent-namespaces!` for targeted reload
 
-### Phase 7: Full Agent Lifecycle (combines previous phases)
+### Phase 7: Full Agent Lifecycle (combines previous phases) - COMPLETE
 
-**Prerequisite:** Clojure Claude SDK (see `docs/prds/clojure-claude-sdk/prd.md`)
+**Completed**: 2026-01-14
 
-The SDK enables Seon to programmatically spawn and control Claude Code agents from the JVM using `clojure.java.process`. This is the foundation for `launch-agent!`.
+The SDK enables Seon to programmatically spawn and control Claude Code agents from the JVM using `clojure.java.process`. Combined with the session API, this provides full agent lifecycle management.
 
-- [ ] Implement Clojure Claude SDK (Phase 1-2 of SDK PRD)
-  - [ ] `seon.claude.sdk/query` - spawn Claude Code, stream messages
-  - [ ] `seon.claude.sdk/exec` - blocking convenience wrapper
-  - [ ] Malli schemas per CONVENTIONS.md
-- [ ] Integrate SDK with session API (Phase 3 of SDK PRD)
-  - [ ] Auto-create nREPL session for launched agent
-  - [ ] Pass session context via MCP (eval tool gets session_id)
-  - [ ] Map Claude Code session to Seon session
-- [ ] `launch-agent!` - orchestration function
-  - [ ] Create Seon session (nREPL, ctx, db)
-  - [ ] Spawn Claude Code with SDK
-  - [ ] Configure MCP server with session_id
-  - [ ] Assign worktree (Phase 6)
-  - [ ] Provide agent instructions
-- [ ] `terminate-agent!` - cleanup everything
-  - [ ] Stop Claude Code process
-  - [ ] Stop nREPL session
-  - [ ] Archive/cleanup worktree
-- [ ] Lock namespace while agent active
-- [ ] Agent status dashboard in web UI
+**Implementation**: `src/seon/claude/sdk.clj`
+
+- [x] Implement Clojure Claude SDK (Phase 1-2 of SDK PRD)
+  - [x] `seon.claude.sdk/query` - spawn Claude Code, stream messages
+  - [x] `seon.claude.sdk/exec` - blocking convenience wrapper
+  - [x] Malli schemas per CONVENTIONS.md (18+ schemas)
+- [x] Integrate SDK with session API (Phase 3 of SDK PRD)
+  - [x] Auto-create nREPL session for launched agent
+  - [x] Pass session context via MCP (eval tool gets session_id)
+  - [x] Map Claude Code session to Seon session
+- [x] `launch-agent!` - orchestration function
+  - [x] Create Seon session (nREPL, ctx, db)
+  - [x] Spawn Claude Code with SDK
+  - [x] Configure MCP server with session_id (via environment variable)
+  - [x] Build agent prompt with session instructions
+  - [x] Track agent in registry
+- [x] `terminate-agent!` - cleanup everything
+  - [x] Stop Claude Code process
+  - [x] Stop nREPL session (flushes ctx)
+  - [x] Remove from registry
+- [x] `list-agents` - view active agents
+- [ ] Assign worktree (Phase 6 - deferred)
+- [ ] Lock namespace while agent active (future)
+- [ ] Agent status dashboard in web UI (future)
+
+**API Summary**:
+
+```clojure
+;; Launch agent with isolated session
+(def handle (sdk/launch-agent! {::sdk/node xtdb-node
+                                ::sdk/namespace 'seon.trading
+                                ::sdk/prompt "Implement feature X"}))
+
+;; Monitor
+@(::sdk/status-atom handle)  ;; => :running, :completed, :failed, :terminated
+(sdk/list-agents {})          ;; => [{::session-id "a1b2" ...}]
+
+;; Terminate
+(sdk/terminate-agent! {::sdk/agent-handle handle
+                       ::sdk/node xtdb-node})
+```
+
+**How it works**:
+1. `launch-agent!` calls `session/start-agent-session!` to create isolated nREPL + ctx + db
+2. Builds prompt that includes session_id and eval instructions
+3. Configures MCP server with `SEON_SESSION_ID` environment variable
+4. Spawns Claude Code via `spawn-claude-code` with streaming message handling
+5. Returns handle with channels for monitoring and status atom
+6. `terminate-agent!` destroys Claude process and calls `session/stop-agent-session!`
 
 ---
 

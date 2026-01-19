@@ -1,6 +1,6 @@
 # PRD: Clojure Claude SDK
 
-**Status:** Phase 1 Complete
+**Status:** Phase 3 Complete (Session Integration)
 **Priority:** Medium
 **Branch:** feature/agent-isolation
 
@@ -215,14 +215,23 @@ See `docs/prds/agent-isolation/prd.md` Phase 4c for full postmortem.
 - [ ] Add control request/response handling
 - [ ] Test control flow
 
-### Phase 3: Session Integration (3-4 hours)
+### Phase 3: Session Integration (3-4 hours) - COMPLETE
 
-- [ ] Integrate with existing `seon.orchestrator.session` API
-- [ ] Auto-create nREPL sessions for launched Claude Code agents
-- [ ] Pass session context (db, namespace, nREPL port) to agents via MCP
-- [ ] Map Claude Code sessions to Seon sessions bidirectionally
-- [ ] Handle session lifecycle (create, stop, list)
-- [ ] Ensure agents can use `mcp__seon__eval` with their assigned session
+**Completed**: 2026-01-14
+
+- [x] Integrate with existing `seon.orchestrator.session` API
+- [x] Auto-create nREPL sessions for launched Claude Code agents
+- [x] Pass session context (db, namespace, nREPL port) to agents via MCP
+- [x] Map Claude Code sessions to Seon sessions bidirectionally
+- [x] Handle session lifecycle (create, stop, list)
+- [x] Ensure agents can use `mcp__seon__eval` with their assigned session
+
+**Implementation**: Added to `src/seon/claude/sdk.clj`:
+- `launch-agent!` - Creates Seon session, spawns Claude Code, configures MCP
+- `terminate-agent!` - Cleans up Claude process and Seon session
+- `list-agents` - Lists active agents with status
+- Agent registry for tracking active agents
+- Session instructions embedded in agent prompt
 
 ### Phase 4: Hooks & Events (3-4 hours)
 
