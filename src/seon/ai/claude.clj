@@ -306,6 +306,7 @@
 
    Request keys:
      ::sdk-message - Required. Raw SDK message map with keys like :type, :message, :uuid
+     ::ai/session-id - Optional. Parent AI session ID to attach to entity
 
    Response keys:
      Returns a message entity map with :xt/id and namespaced attributes
@@ -326,7 +327,7 @@
    Note: This function does not have :malli/schema metadata because the output
    contains runtime-generated values (timestamps, UUIDs) that cannot be
    property tested. Schemas are documented above for reference."
-  [{::keys [sdk-message]}]
+  [{::keys [sdk-message] ::ai/keys [session-id]}]
   (let [sdk-msg sdk-message
         msg-type (:type sdk-msg)
         inner-msg (:message sdk-msg)
@@ -351,6 +352,10 @@
              ::ai/content text-content
              ::ai/timestamp (Instant/now)
              ::message-type msg-type}
+      ;; Session reference
+      session-id
+      (assoc ::ai/session-id session-id)
+
       ;; Claude-specific optional fields
       (:uuid sdk-msg)
       (assoc ::uuid (:uuid sdk-msg))
@@ -373,6 +378,35 @@
 
       (:cache_read_input_tokens usage)
       (assoc ::cache-read-tokens (:cache_read_input_tokens usage)))))
+
+(defn persist-message!
+  "Persist a Claude SDK message to XTDB as an AI message entity.
+
+   Converts the SDK message to an entity and stores it in the ai_messages table.
+   This is used internally by launch-agent! to auto-persist all messages.
+
+   Request keys:
+     ::ai/node       - Required. XTDB node instance
+     ::ai/session-id - Required. AI session ID (from ai/start-session!)
+     ::sdk-message   - Required. Raw SDK message from Claude Code CLI
+
+   Response keys:
+     ::ai/message-id - The generated message ID
+
+   Example:
+     (persist-message! {::ai/node db
+                        ::ai/session-id \"ses-abc123\"
+                        ::sdk-message {:type \"assistant\" ...}})
+
+   Note: This function does not have :malli/schema metadata because it
+   takes XTDB nodes which cannot be property tested."
+  [{::ai/keys [node session-id] ::keys [sdk-message]}]
+  (let [entity (sdk-message->entity {::sdk-message sdk-message
+                                      ::ai/session-id session-id})
+        message-id (:xt/id entity)]
+    ;; Store using seon.db.node (already required via seon.ai)
+    ((requiring-resolve 'seon.db.node/put!) node :ai_messages entity)
+    {::ai/message-id message-id}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Private Implementation (moved from seon.claude.sdk)
@@ -491,6 +525,13 @@
 ;;; Public API
 ;;; ---------------------------------------------------------------------------
 
+(defn- persistable-message-type?
+  "Check if message type should be persisted to XTDB.
+   We persist user, assistant, system, and result messages.
+   We skip keep_alive and parse_error messages."
+  [msg-type]
+  (#{"user" "assistant" "system" "result"} msg-type))
+
 (defn launch-agent!
   "Launch a Claude Code agent with an isolated Seon session.
 
@@ -499,6 +540,10 @@
    - Persisted ctx atom for state management
    - Dedicated nREPL server
    - Claude Code process with MCP configured
+   - AI session in XTDB for conversation persistence
+
+   All SDK messages are automatically persisted to XTDB during execution.
+   On completion, the AI session is closed with final stats (tokens, cost).
 
    Request keys:
      ::ai/node            - Required. XTDB orchestrator node
@@ -512,13 +557,14 @@
      ::disallowed-tools   - Optional. Tool denylist
 
    Response keys (agent handle):
-     ::ai/session-id  - 4-char hex session ID
-     ::ai/namespace   - Agent namespace
-     ::nrepl-port     - nREPL port for the agent
-     ::messages-ch    - Channel of SDK messages
-     ::result-ch      - Channel receiving final result
-     ::status-atom    - Atom with current status (:running, :completed, :failed)
-     ::close!         - Function to terminate agent
+     ::ai/session-id      - 4-char hex session ID (Seon agent session)
+     ::ai-session-id      - AI conversation session ID (for XTDB queries)
+     ::ai/namespace       - Agent namespace
+     ::nrepl-port         - nREPL port for the agent
+     ::messages-ch        - Channel of SDK messages
+     ::result-ch          - Channel receiving final result
+     ::status-atom        - Atom with current status (:running, :completed, :failed)
+     ::close!             - Function to terminate agent
 
    Example:
      (launch-agent! {::ai/node xtdb-node
@@ -540,13 +586,20 @@
 
     (log/info "Created agent session" {:session-id id :port nrepl-port})
 
-    ;; 2. Build agent prompt with session context
-    (let [full-prompt (build-agent-prompt id namespace prompt)
+    ;; 2. Create AI session for conversation persistence
+    (let [{ai-session-id ::ai/session-id}
+          (ai/start-session! {::ai/node node
+                              ::ai/namespace namespace
+                              ::ai/prompt prompt})
+          _ (log/info "Created AI session for persistence" {:ai-session-id ai-session-id})
 
-          ;; 3. Build MCP config with session_id in environment
+          ;; 3. Build agent prompt with session context
+          full-prompt (build-agent-prompt id namespace prompt)
+
+          ;; 4. Build MCP config with session_id in environment
           mcp-config (build-agent-mcp-config id)
 
-          ;; 4. Spawn Claude Code with configured MCP
+          ;; 5. Spawn Claude Code with configured MCP
           status-atom (atom :running)
           {:keys [process stdin stdout]}
           (spawn-claude-code {::model (or model default-model)
@@ -560,7 +613,7 @@
           messages-ch (chan 100)
           result-ch (chan 1)
 
-          ;; 5. Start reader that updates status on completion
+          ;; 6. Start reader that persists messages and updates status
           claude-session-mapped? (atom false)
           _reader (future
                     (try
@@ -569,6 +622,7 @@
                           (when-let [line (.readLine rdr)]
                             (when-not (str/blank? line)
                               (let [msg (parse-line line)
+                                    msg-type (:type msg)
                                     claude-session-id (:session_id msg)]
                                 ;; Map Claude's session_id to our Seon session_id (once)
                                 (when (and claude-session-id
@@ -582,24 +636,58 @@
                                     (reset! claude-session-mapped? true)
                                     (log/info "Mapped Claude session to Seon session"
                                               {:claude-session claude-session-id :seon-session id})))
-                                (log/trace "Agent message" {:session-id id :type (:type msg)})
+
+                                ;; Persist message to XTDB (skip keep_alive, parse_error)
+                                (when (persistable-message-type? msg-type)
+                                  (try
+                                    (persist-message! {::ai/node node
+                                                       ::ai/session-id ai-session-id
+                                                       ::sdk-message msg})
+                                    (catch Exception e
+                                      (log/warn e "Failed to persist message"
+                                                {:session-id id :msg-type msg-type}))))
+
+                                (log/trace "Agent message" {:session-id id :type msg-type})
                                 (async/>!! messages-ch msg)
-                                (when (= (:type msg) "result")
+
+                                ;; Handle result message - end AI session with stats
+                                (when (= msg-type "result")
                                   (async/>!! result-ch msg)
-                                  ;; Update status based on result
-                                  (reset! status-atom
-                                          (if (= "success" (:subtype msg))
-                                            :completed
-                                            :failed)))))
+                                  ;; End AI session with final stats
+                                  (let [final-status (if (= "success" (:subtype msg))
+                                                       :completed
+                                                       :failed)]
+                                    (try
+                                      (ai/end-session! {::ai/node node
+                                                        ::ai/session-id ai-session-id
+                                                        ::ai/status final-status
+                                                        ::ai/cost-usd (:total_cost_usd msg)})
+                                      (log/info "Ended AI session"
+                                                {:ai-session-id ai-session-id
+                                                 :status final-status
+                                                 :cost (:total_cost_usd msg)
+                                                 :turns (:num_turns msg)})
+                                      (catch Exception e
+                                        (log/warn e "Failed to end AI session"
+                                                  {:ai-session-id ai-session-id})))
+                                    ;; Update agent status
+                                    (reset! status-atom final-status)))))
                             (recur))))
                       (catch Exception e
                         (log/warn e "Agent reader error" {:session-id id})
-                        (reset! status-atom :failed))
+                        (reset! status-atom :failed)
+                        ;; End AI session as failed on reader error
+                        (try
+                          (ai/end-session! {::ai/node node
+                                            ::ai/session-id ai-session-id
+                                            ::ai/status :failed
+                                            ::ai/error {::ai/message (.getMessage e)}})
+                          (catch Exception _)))
                       (finally
                         (close! messages-ch)
                         (close! result-ch))))
 
-          ;; 6. Build close function that cleans up everything
+          ;; 7. Build close function that cleans up everything
           close-fn (fn close-agent []
                      (log/info "Terminating agent" {:session-id id})
                      ;; Destroy Claude process
@@ -610,6 +698,14 @@
                      ;; Close channels
                      (close! messages-ch)
                      (close! result-ch)
+                     ;; End AI session as interrupted if still active
+                     (when (= :running @status-atom)
+                       (try
+                         (ai/end-session! {::ai/node node
+                                           ::ai/session-id ai-session-id
+                                           ::ai/status :interrupted})
+                         (catch Exception e
+                           (log/warn e "Failed to end AI session on close"))))
                      ;; Stop Seon session (flushes ctx, stops nREPL)
                      (session/stop-agent-session! {::session/node node
                                                    ::session/id id})
@@ -620,6 +716,7 @@
                        (reset! status-atom :terminated)))
 
           handle {::ai/session-id id
+                  ::ai-session-id ai-session-id
                   ::ai/namespace (str namespace)
                   ::nrepl-port nrepl-port
                   ::messages-ch messages-ch
@@ -627,13 +724,16 @@
                   ::status-atom status-atom
                   ::close! close-fn}]
 
-      ;; 7. Send initial prompt
+      ;; 8. Send initial prompt
       (write-message! stdin (make-user-message full-prompt))
 
-      ;; 8. Register agent
+      ;; 9. Register agent
       (swap! agent-registry assoc id handle)
 
-      (log/info "Agent launched" {:session-id id :namespace namespace :port nrepl-port})
+      (log/info "Agent launched" {:session-id id
+                                  :ai-session-id ai-session-id
+                                  :namespace namespace
+                                  :port nrepl-port})
 
       handle)))
 
