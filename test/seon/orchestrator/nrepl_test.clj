@@ -15,8 +15,12 @@
   "Fixture that cleans up any running servers after each test.
 
    CRITICAL: Must stop servers BEFORE resetting registries, otherwise
-   we lose references to the servers and can't close their sockets."
+   we lose references to the servers and can't close their sockets.
+
+   Uses port range 17889-17999 to avoid conflicts with dev server (7889-7999)."
   [f]
+  ;; Set test port range to avoid conflicts with dev server
+  (nrepl-multi/set-port-range! 17889 17999)
   ;; BEFORE test: Stop servers first, THEN reset registries
   (nrepl-multi/stop-all-namespace-nrepls!)
   (Thread/sleep 20)
@@ -43,7 +47,9 @@
           (try
             ((resolve 'nrepl.middleware.session/close-session) session)
             (catch Exception _)))
-        (reset! sessions-atom {})))))
+        (reset! sessions-atom {}))
+      ;; Reset port range to defaults
+      (nrepl-multi/reset-port-range!))))
 
 (use-fixtures :each cleanup-servers)
 
@@ -53,8 +59,9 @@
 
 (deftest allocate-port-test
   (testing "allocates ports starting from base port"
-    (let [port1 (nrepl-multi/allocate-port! 'test.ns1)]
-      (is (>= port1 7889) "First port should be >= 7889")))
+    (let [port1 (nrepl-multi/allocate-port! 'test.ns1)
+          {:keys [base]} (nrepl-multi/get-port-range)]
+      (is (>= port1 base) "First port should be >= configured base port")))
 
   (testing "returns same port for same namespace"
     (let [port1 (nrepl-multi/allocate-port! 'test.ns2)
