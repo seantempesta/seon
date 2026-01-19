@@ -174,6 +174,70 @@ See `CONVENTIONS.md` for full patterns.
 
 ---
 
+## AI Namespace Hierarchy
+
+The AI namespaces provide a clean, provider-agnostic architecture for AI agent management:
+
+```
+seon.ai                 ; Base schemas + session/message persistence
+└── seon.ai.claude      ; Claude Code agent lifecycle
+```
+
+### seon.ai (Base)
+
+Provider-agnostic schemas and functions for AI sessions and messages:
+
+```clojure
+(require '[seon.ai :as ai])
+
+;; Start a session
+(ai/start-session! {::ai/node xtdb-node
+                    ::ai/namespace 'seon.trading
+                    ::ai/prompt "Analyze data"})
+
+;; Add messages
+(ai/add-message! {::ai/node xtdb-node
+                  ::ai/session-id "ses-abc123"
+                  ::ai/role "assistant"
+                  ::ai/content "I'll analyze..."})
+
+;; Query
+(ai/get-session {::ai/node xtdb-node ::ai/session-id "ses-abc123"})
+(ai/get-messages {::ai/node xtdb-node ::ai/session-id "ses-abc123"})
+(ai/list-sessions {::ai/node xtdb-node ::ai/limit 20})
+```
+
+### seon.ai.claude (Provider)
+
+Claude-specific agent lifecycle with automatic message persistence:
+
+```clojure
+(require '[seon.ai.claude :as claude])
+
+;; Launch agent (auto-persists all messages to XTDB)
+(claude/launch-agent! {::ai/node xtdb-node
+                       ::ai/namespace 'seon.trading
+                       ::ai/prompt "Implement feature"})
+
+;; Monitor agents
+(claude/agents {})                           ; List all
+(claude/tail {::ai/session-id "a1b2"})       ; Stream messages
+(claude/interrupt! {::ai/session-id "a1b2"}) ; Stop agent
+```
+
+### Deprecated Namespaces
+
+The following namespaces are **deprecated** and should not be used in new code:
+
+| Deprecated | Use Instead |
+|------------|-------------|
+| `seon.claude.sdk` | `seon.ai.claude` |
+| `seon.claude.conversation` | `seon.ai` |
+
+The `seon.claude.exploration` namespace is kept as a **research/development tool** for protocol investigation, not for production use.
+
+---
+
 ## File Locations
 
 **Never use `/tmp` or system temp directories.** Use project-local directories instead:

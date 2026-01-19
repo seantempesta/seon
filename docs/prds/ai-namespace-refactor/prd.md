@@ -1,6 +1,6 @@
 # PRD: AI Namespace Refactor
 
-**Status:** Phase 3 Complete (auto-persist working)
+**Status:** Phase 4 Complete (deprecated old namespaces)
 **Priority:** High
 **Branch:** feature/ai-namespace-refactor
 **Supersedes:** Conversation persistence from `docs/prds/clojure-claude-sdk/bidirectional-control.md`
@@ -212,7 +212,7 @@ The `seon.ai` namespace uses these directly - no new abstractions needed:
 
 ---
 
-### Phase 4: Deprecate Old Namespaces
+### Phase 4: Deprecate Old Namespaces [COMPLETED]
 
 **Goal:** Clean up and redirect old code.
 
@@ -227,6 +227,14 @@ The `seon.ai` namespace uses these directly - no new abstractions needed:
 **Tests:**
 - All existing tests still pass
 - Deprecation warnings appear when using old namespaces
+
+**Implementation Notes:**
+- Deprecation notices added to ns docstrings with migration guides
+- `seon.claude.exploration` marked as EXPERIMENTAL research/dev tool
+- CLAUDE.md updated with AI namespace hierarchy documentation
+- No external imports of deprecated namespaces found (only internal references)
+- Test file `test/seon/claude/sdk_test.clj` marked as deprecated
+- New comprehensive tests in `test/seon/ai/claude_test.clj`
 
 **Commit:** "chore: deprecate seon.claude.* in favor of seon.ai.*"
 

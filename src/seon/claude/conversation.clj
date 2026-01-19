@@ -1,5 +1,28 @@
 (ns seon.claude.conversation
-  "Conversation persistence for Claude Code agents.
+  "DEPRECATED: Use seon.ai instead.
+
+   This namespace is maintained for backwards compatibility only.
+   All new code should use seon.ai for session/message persistence.
+
+   Migration guide:
+   - seon.claude.conversation/start-session!        -> seon.ai/start-session!
+   - seon.claude.conversation/end-session!          -> seon.ai/end-session!
+   - seon.claude.conversation/persist-message!      -> seon.ai.claude/persist-message!
+   - seon.claude.conversation/get-session           -> seon.ai/get-session
+   - seon.claude.conversation/get-session-messages  -> seon.ai/get-messages
+   - seon.claude.conversation/list-recent-sessions  -> seon.ai/list-sessions
+
+   The new namespaces provide:
+   - Provider-agnostic base schemas in seon.ai
+   - Claude-specific extensions in seon.ai.claude
+   - Better schema composition and validation
+   - Simpler API with namespaced keys
+
+   ---
+
+   LEGACY DOCS (for reference during migration):
+
+   Conversation persistence for Claude Code agents.
 
    Stores all agent conversations in XTDB for:
    - Future model fine-tuning

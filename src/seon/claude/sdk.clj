@@ -1,5 +1,26 @@
 (ns seon.claude.sdk
-  "Native Clojure SDK for spawning Claude Code CLI agents.
+  "DEPRECATED: Use seon.ai.claude instead.
+
+   This namespace is maintained for backwards compatibility only.
+   All new code should use seon.ai.claude for agent management
+   and seon.ai for base AI session/message functions.
+
+   Migration guide:
+   - seon.claude.sdk/launch-agent! -> seon.ai.claude/launch-agent!
+   - seon.claude.sdk/agents        -> seon.ai.claude/agents
+   - seon.claude.sdk/interrupt!    -> seon.ai.claude/interrupt!
+   - seon.claude.sdk/tail          -> seon.ai.claude/tail
+
+   The new namespaces provide:
+   - Better schema composition (Claude extends base AI schemas)
+   - Automatic message persistence to XTDB
+   - Session cost tracking and analytics
+
+   ---
+
+   LEGACY DOCS (for reference during migration):
+
+   Native Clojure SDK for spawning Claude Code CLI agents.
 
    Spawns and controls Claude Code agents from the JVM using the JSON-RPC
    protocol over stdin/stdout. Uses clojure.java.process (Clojure 1.12+).
