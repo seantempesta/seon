@@ -51,7 +51,15 @@
       (is (contains? ai-schemas ::ai/output-tokens))
       (is (contains? ai-schemas ::ai/cost-usd))
       (is (contains? ai-schemas ::ai/namespace))
-      (is (contains? ai-schemas ::ai/prompt)))))
+      (is (contains? ai-schemas ::ai/prompt))))
+
+  (testing "Tool call schemas are registered"
+    (let [ai-schemas (schema/schemas-in-namespace "seon.ai")]
+      (is (contains? ai-schemas ::ai/provider))
+      (is (contains? ai-schemas ::ai/tool-call))
+      (is (contains? ai-schemas ::ai/tool-calls))
+      (is (contains? ai-schemas ::ai/tool-result))
+      (is (contains? ai-schemas ::ai/tool-results)))))
 
 (deftest schema-validity-test
   (testing "All registered AI schemas are valid Malli schemas"
@@ -107,6 +115,106 @@
       (is (= 10 (count samples)))
       (doseq [status samples]
         (is (m/validate ::ai/status status))))))
+
+;;; ---------------------------------------------------------------------------
+;;; Tool Call Schema Tests
+;;; ---------------------------------------------------------------------------
+
+(deftest provider-schema-test
+  (testing "Can generate ::ai/provider"
+    (let [generated (mg/generate ::ai/provider)]
+      (is (#{:claude :gemini :openai} generated))))
+
+  (testing "Can generate multiple valid providers"
+    (let [samples (mg/sample ::ai/provider {:size 10})]
+      (is (= 10 (count samples)))
+      (doseq [provider samples]
+        (is (m/validate ::ai/provider provider))))))
+
+(deftest tool-call-schema-test
+  (testing "Can generate ::ai/tool-call"
+    (let [generated (mg/generate ::ai/tool-call)]
+      (is (map? generated))
+      (is (contains? generated :id))
+      (is (contains? generated :name))
+      (is (string? (:id generated)))
+      (is (string? (:name generated)))))
+
+  (testing "tool-call validates correctly"
+    (is (m/validate ::ai/tool-call {:id "tool-123" :name "read_file"}))
+    (is (m/validate ::ai/tool-call {:id "tool-456" :name "write_file" :input {:path "/tmp/test.txt"}}))
+    (is (not (m/validate ::ai/tool-call {:name "missing-id"})))
+    (is (not (m/validate ::ai/tool-call {:id "missing-name"})))))
+
+(deftest tool-calls-schema-test
+  (testing "Can generate ::ai/tool-calls"
+    (let [generated (mg/generate ::ai/tool-calls)]
+      (is (vector? generated))
+      (doseq [tc generated]
+        (is (m/validate ::ai/tool-call tc)))))
+
+  (testing "tool-calls validates correctly"
+    (is (m/validate ::ai/tool-calls []))
+    (is (m/validate ::ai/tool-calls [{:id "t1" :name "read"}]))
+    (is (m/validate ::ai/tool-calls [{:id "t1" :name "read"} {:id "t2" :name "write" :input {:data "x"}}]))))
+
+(deftest tool-result-schema-test
+  (testing "Can generate ::ai/tool-result"
+    (let [generated (mg/generate ::ai/tool-result)]
+      (is (map? generated))
+      (is (contains? generated :tool-use-id))
+      (is (string? (:tool-use-id generated)))))
+
+  (testing "tool-result validates correctly"
+    (is (m/validate ::ai/tool-result {:tool-use-id "tool-123"}))
+    (is (m/validate ::ai/tool-result {:tool-use-id "tool-456" :content "Success!"}))
+    (is (m/validate ::ai/tool-result {:tool-use-id "tool-789" :content {:data "structured"} :is-error false}))
+    (is (m/validate ::ai/tool-result {:tool-use-id "tool-err" :is-error true :content "File not found"}))
+    (is (not (m/validate ::ai/tool-result {:content "missing tool-use-id"})))))
+
+(deftest tool-results-schema-test
+  (testing "Can generate ::ai/tool-results"
+    (let [generated (mg/generate ::ai/tool-results)]
+      (is (vector? generated))
+      (doseq [tr generated]
+        (is (m/validate ::ai/tool-result tr)))))
+
+  (testing "tool-results validates correctly"
+    (is (m/validate ::ai/tool-results []))
+    (is (m/validate ::ai/tool-results [{:tool-use-id "t1"}]))
+    (is (m/validate ::ai/tool-results [{:tool-use-id "t1" :content "ok"} {:tool-use-id "t2" :is-error true}]))))
+
+(deftest message-entity-with-tools-test
+  (testing "message-entity validates with tool-calls"
+    (let [msg {:xt/id "msg-123"
+               ::ai/type :message
+               ::ai/session-id "ses-456"
+               ::ai/role "assistant"
+               ::ai/content "I'll read that file for you."
+               ::ai/timestamp (Instant/now)
+               ::ai/tool-calls [{:id "tc-1" :name "read_file" :input {:path "/tmp/test.txt"}}]
+               ::ai/provider :claude}]
+      (is (m/validate ::ai/message-entity msg))))
+
+  (testing "message-entity validates with tool-results"
+    (let [msg {:xt/id "msg-789"
+               ::ai/type :message
+               ::ai/session-id "ses-456"
+               ::ai/role "user"
+               ::ai/content "Tool results"
+               ::ai/timestamp (Instant/now)
+               ::ai/tool-results [{:tool-use-id "tc-1" :content "file contents here"}]
+               ::ai/provider :claude}]
+      (is (m/validate ::ai/message-entity msg))))
+
+  (testing "message-entity validates without tool fields (backwards compatible)"
+    (let [msg {:xt/id "msg-simple"
+               ::ai/type :message
+               ::ai/session-id "ses-123"
+               ::ai/role "user"
+               ::ai/content "Hello!"
+               ::ai/timestamp (Instant/now)}]
+      (is (m/validate ::ai/message-entity msg)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Session Lifecycle Tests
