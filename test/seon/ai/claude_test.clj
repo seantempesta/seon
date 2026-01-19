@@ -5,15 +5,34 @@
    1. Schema registration - Claude-specific schemas are in global registry
    2. Schema generation - can generate valid sample data
    3. Schema composition - Claude schemas reference base seon.ai schemas
-   4. sdk-message->entity conversion - SDK messages convert to entities correctly"
+   4. sdk-message->entity conversion - SDK messages convert to entities correctly
+   5. Persistence integration - persist-message! stores entities correctly"
   (:require
-   [clojure.test :refer [deftest is testing]]
+   [clojure.test :refer [deftest is testing use-fixtures]]
    [malli.core :as m]
    [malli.generator :as mg]
    [seon.ai :as ai]
    [seon.ai.claude :as claude]
-   [seon.schema :as schema])
-  (:import [java.time Instant]))
+   [seon.schema :as schema]
+   [seon.test-utils :refer [with-test-node *test-node*]])
+  (:import [java.time Instant ZonedDateTime]))
+
+;;; ---------------------------------------------------------------------------
+;;; Test Fixtures
+;;; ---------------------------------------------------------------------------
+
+(use-fixtures :each with-test-node)
+
+;;; ---------------------------------------------------------------------------
+;;; Helpers
+;;; ---------------------------------------------------------------------------
+
+(defn temporal?
+  "Check if value is a temporal type (Instant or ZonedDateTime).
+   XTDB returns ZonedDateTime for timestamps, not Instant."
+  [v]
+  (or (instance? Instant v)
+      (instance? ZonedDateTime v)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schema Registration Tests
@@ -258,6 +277,168 @@
       (is (vector? result)))))
 
 ;;; ---------------------------------------------------------------------------
+;;; Persistence Integration Tests
+;;; ---------------------------------------------------------------------------
+
+(deftest sdk-message-to-entity-with-session-id-test
+  (testing "sdk-message->entity includes session-id when provided"
+    (let [sdk-msg {:type "assistant"
+                   :uuid "msg-123"
+                   :message {:role "assistant"
+                             :content [{:type "text" :text "Hello!"}]}}
+          entity (claude/sdk-message->entity {::claude/sdk-message sdk-msg
+                                               ::ai/session-id "ses-test123"})]
+      (is (= "ses-test123" (::ai/session-id entity)))
+      (is (= :message (::ai/type entity)))
+      (is (= "assistant" (::ai/role entity)))))
+
+  (testing "sdk-message->entity omits session-id when not provided"
+    (let [sdk-msg {:type "assistant"
+                   :message {:role "assistant"
+                             :content [{:type "text" :text "Hello!"}]}}
+          entity (claude/sdk-message->entity {::claude/sdk-message sdk-msg})]
+      (is (nil? (::ai/session-id entity))))))
+
+(deftest persist-message-test
+  (testing "persist-message! stores SDK message in XTDB"
+    ;; Create an AI session first
+    (let [{session-id ::ai/session-id}
+          (ai/start-session! {::ai/node *test-node*
+                              ::ai/namespace 'seon.test
+                              ::ai/prompt "Test prompt"})
+          ;; Persist an assistant message
+          sdk-msg {:type "assistant"
+                   :uuid "msg-abc123"
+                   :message {:role "assistant"
+                             :content [{:type "text" :text "I will help you."}]}}
+          {message-id ::ai/message-id}
+          (claude/persist-message! {::ai/node *test-node*
+                                    ::ai/session-id session-id
+                                    ::claude/sdk-message sdk-msg})]
+      ;; Verify the message was stored
+      (is (string? message-id))
+      (is (clojure.string/starts-with? message-id "msg-"))
+      ;; Retrieve messages for the session
+      (let [messages (ai/get-messages {::ai/node *test-node*
+                                        ::ai/session-id session-id})]
+        (is (= 1 (count messages)))
+        (let [msg (first messages)]
+          (is (= :message (::ai/type msg)))
+          (is (= session-id (::ai/session-id msg)))
+          (is (= "assistant" (::ai/role msg)))
+          (is (= "I will help you." (::ai/content msg)))
+          (is (= "assistant" (::claude/message-type msg)))
+          (is (= "msg-abc123" (::claude/uuid msg)))
+          (is (temporal? (::ai/timestamp msg)))))))
+
+  (testing "persist-message! stores tool calls"
+    (let [{session-id ::ai/session-id}
+          (ai/start-session! {::ai/node *test-node*})
+          sdk-msg {:type "assistant"
+                   :message {:role "assistant"
+                             :content [{:type "text" :text "Reading file..."}
+                                       {:type "tool_use"
+                                        :id "tool-xyz"
+                                        :name "Read"
+                                        :input {:file_path "/tmp/test.txt"}}]}}
+          _ (claude/persist-message! {::ai/node *test-node*
+                                      ::ai/session-id session-id
+                                      ::claude/sdk-message sdk-msg})
+          messages (ai/get-messages {::ai/node *test-node*
+                                     ::ai/session-id session-id})]
+      (is (= 1 (count messages)))
+      (let [msg (first messages)
+            tool-calls (::claude/tool-calls msg)]
+        (is (= 1 (count tool-calls)))
+        (is (= "tool-xyz" (:id (first tool-calls))))
+        (is (= "Read" (:name (first tool-calls))))))))
+
+(deftest persist-message-result-test
+  (testing "persist-message! handles result messages with stats"
+    (let [{session-id ::ai/session-id}
+          (ai/start-session! {::ai/node *test-node*})
+          sdk-msg {:type "result"
+                   :result "Task completed"
+                   :subtype "success"
+                   :num_turns 5
+                   :total_cost_usd 0.05
+                   :duration_ms 10000}
+          _ (claude/persist-message! {::ai/node *test-node*
+                                      ::ai/session-id session-id
+                                      ::claude/sdk-message sdk-msg})
+          messages (ai/get-messages {::ai/node *test-node*
+                                     ::ai/session-id session-id})]
+      (is (= 1 (count messages)))
+      (let [msg (first messages)]
+        (is (= "result" (::claude/message-type msg)))
+        (is (= "Task completed" (::ai/content msg)))
+        ;; Result maps to assistant role
+        (is (= "assistant" (::ai/role msg)))))))
+
+(deftest session-lifecycle-integration-test
+  (testing "Full session lifecycle: start -> persist messages -> end -> query"
+    ;; Start AI session
+    (let [{session-id ::ai/session-id}
+          (ai/start-session! {::ai/node *test-node*
+                              ::ai/namespace 'seon.integration-test
+                              ::ai/prompt "Test the integration"})]
+      ;; Persist a user message
+      (claude/persist-message! {::ai/node *test-node*
+                                ::ai/session-id session-id
+                                ::claude/sdk-message {:type "user"
+                                                       :message {:role "user"
+                                                                 :content [{:type "text"
+                                                                            :text "What is 2+2?"}]}}})
+      ;; Persist an assistant response
+      (claude/persist-message! {::ai/node *test-node*
+                                ::ai/session-id session-id
+                                ::claude/sdk-message {:type "assistant"
+                                                       :uuid "msg-resp"
+                                                       :message {:role "assistant"
+                                                                 :content [{:type "text"
+                                                                            :text "2+2 equals 4."}]}}})
+      ;; Persist a result message
+      (claude/persist-message! {::ai/node *test-node*
+                                ::ai/session-id session-id
+                                ::claude/sdk-message {:type "result"
+                                                       :result "Success"
+                                                       :subtype "success"
+                                                       :num_turns 2
+                                                       :total_cost_usd 0.01}})
+      ;; End session with stats
+      (ai/end-session! {::ai/node *test-node*
+                        ::ai/session-id session-id
+                        ::ai/status :completed
+                        ::ai/cost-usd 0.01})
+      ;; Verify session state
+      (let [session (ai/get-session {::ai/node *test-node*
+                                     ::ai/session-id session-id})]
+        (is (= :completed (::ai/status session)))
+        (is (= 0.01 (::ai/cost-usd session)))
+        (is (= "seon.integration-test" (::ai/namespace session))))
+      ;; Verify messages
+      (let [messages (ai/get-messages {::ai/node *test-node*
+                                       ::ai/session-id session-id})]
+        (is (= 3 (count messages)))
+        (is (= ["user" "assistant" "assistant"]
+               (mapv ::ai/role messages)))
+        (is (= ["user" "assistant" "result"]
+               (mapv ::claude/message-type messages)))))))
+
+(deftest persistable-message-type-test
+  (testing "Only user, assistant, system, result messages are persistable"
+    ;; This tests the internal filtering logic used by launch-agent!
+    ;; We use the private function via var deref
+    (let [persistable? @#'claude/persistable-message-type?]
+      ;; Set lookup returns the element if found (truthy), nil if not
+      (is (persistable? "user"))
+      (is (persistable? "assistant"))
+      (is (persistable? "system"))
+      (is (persistable? "result"))
+      (is (nil? (persistable? "keep_alive")))
+      (is (nil? (persistable? "parse_error"))))))
+
+;;; ---------------------------------------------------------------------------
 ;;; Development Helpers
 ;;; ---------------------------------------------------------------------------
 
@@ -269,5 +450,7 @@
   (clojure.test/test-var #'schema-registration-test)
   (clojure.test/test-var #'sdk-message-to-entity-basic-test)
   (clojure.test/test-var #'sdk-message-to-entity-tool-use-test)
+  (clojure.test/test-var #'persist-message-test)
+  (clojure.test/test-var #'session-lifecycle-integration-test)
 
   nil)

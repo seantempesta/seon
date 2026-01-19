@@ -1,6 +1,6 @@
 # PRD: AI Namespace Refactor
 
-**Status:** Ready for Implementation (Phase 1)
+**Status:** Phase 3 Complete (auto-persist working)
 **Priority:** High
 **Branch:** feature/ai-namespace-refactor
 **Supersedes:** Conversation persistence from `docs/prds/clojure-claude-sdk/bidirectional-control.md`
@@ -183,7 +183,7 @@ The `seon.ai` namespace uses these directly - no new abstractions needed:
 
 ---
 
-### Phase 3: Wire Auto-Persistence into Agent Lifecycle
+### Phase 3: Wire Auto-Persistence into Agent Lifecycle [COMPLETED]
 
 **Goal:** Automatically persist all messages during agent execution.
 
@@ -198,6 +198,15 @@ The `seon.ai` namespace uses these directly - no new abstractions needed:
 - Launch agent with simple task
 - Query XTDB for session and messages
 - Verify message count, token totals, cost tracking
+
+**Implementation Notes:**
+- `launch-agent!` creates AI session via `ai/start-session!` immediately after Seon session
+- Reader loop uses `persist-message!` helper that converts SDK messages to entities
+- `persistable-message-type?` filters out keep_alive and parse_error messages
+- On "result" message, calls `ai/end-session!` with final status and cost
+- On reader error or interrupt, session ends with :failed or :interrupted status
+- Agent handle includes `::ai-session-id` for querying conversation history
+- Tests cover full lifecycle without spawning real agents (unit-testable)
 
 **Commit:** "feat: auto-persist agent conversations to XTDB"
 
