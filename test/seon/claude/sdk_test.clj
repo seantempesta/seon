@@ -1,5 +1,16 @@
 (ns seon.claude.sdk-test
-  "Tests for seon.claude.sdk.
+  "DEPRECATED: Tests for the deprecated seon.claude.sdk namespace.
+
+   This test file is maintained for backwards compatibility only.
+   New tests should be added to seon.ai.claude-test instead.
+
+   See seon.ai.claude-test for comprehensive tests of the new namespace.
+
+   ---
+
+   LEGACY DOCS (for reference):
+
+   Tests for seon.claude.sdk.
 
    Note: Integration tests that spawn Claude Code processes are not included
    here as they require external dependencies and incur API costs. Those are

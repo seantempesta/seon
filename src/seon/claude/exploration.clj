@@ -1,5 +1,20 @@
 (ns seon.claude.exploration
-  "Protocol exploration and capture for Claude Code bidirectional control.
+  "EXPERIMENTAL: Protocol exploration and research for Claude Code CLI.
+
+   STATUS: This namespace is kept as a research/development tool.
+   It is NOT deprecated, but is not intended for production use.
+
+   Use this namespace for:
+   - Investigating Claude Code CLI protocol behavior
+   - Capturing raw stdin/stdout message exchanges
+   - Testing undocumented message types
+   - Debugging bidirectional control issues
+
+   For production agent code, use:
+   - seon.ai.claude for agent lifecycle (launch-agent!, agents, interrupt!)
+   - seon.ai for session/message persistence
+
+   ---
 
    NOTE: This is EXPLORATION/RESEARCH code for REPL experimentation.
    It intentionally uses simpler patterns for quick iteration.
