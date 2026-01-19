@@ -202,24 +202,76 @@ Enable automatic validation during development:
 (dev/start!)
 ```
 
-### Testing Pattern
+### Testing Strategy
 
-Test through public functions with schema-generated inputs:
+Tests serve two purposes:
+1. **Example tests** - Document intended usage, show how functions compose
+2. **Generative tests** - Find edge cases, validate schema contracts
+
+**Always write both.** Generative tests alone don't show real-world usage patterns.
+
+#### Example Tests (Documentation + Integration)
+
+Show the intended workflow. These serve as executable documentation:
 
 ```clojure
-(ns seon.trading.signals-test
-  (:require [clojure.test :refer :all]
-            [malli.generator :as mg]
-            [malli.instrument :as mi]
-            [malli.core :as m]
-            [seon.trading.signals :as signals]))
+(deftest session-lifecycle-test
+  (testing "Complete workflow: start -> messages -> end -> retrieve"
+    ;; Start session
+    (let [{::ai/keys [session-id]} (ai/start-session!
+                                     {::ai/node *test-node*
+                                      ::ai/namespace 'seon.trading
+                                      ::ai/prompt "Analyze AAPL"})]
+      ;; Add conversation
+      (ai/add-message! {::ai/node *test-node*
+                        ::ai/session-id session-id
+                        ::ai/role "user"
+                        ::ai/content "What's the trend?"})
+      (ai/add-message! {::ai/node *test-node*
+                        ::ai/session-id session-id
+                        ::ai/role "assistant"
+                        ::ai/content "AAPL shows bullish momentum."
+                        ::ai/output-tokens 15})
 
+      ;; End with stats
+      (ai/end-session! {::ai/node *test-node*
+                        ::ai/session-id session-id
+                        ::ai/status :completed
+                        ::ai/cost-usd 0.002})
+
+      ;; Verify round-trip
+      (let [messages (ai/get-messages {::ai/node *test-node*
+                                       ::ai/session-id session-id})]
+        (is (= 2 (count messages)))
+        (is (= ["user" "assistant"] (mapv ::ai/role messages)))))))
+```
+
+#### Generative Tests (Contract Validation)
+
+Find edge cases the schema allows but you didn't think of:
+
+```clojure
 (deftest analyze-generative-test
   (testing "analyze handles all valid inputs"
-    (mi/collect! {:ns 'seon.trading.signals})
     (doseq [request (mg/sample ::signals/analyze-request {:size 20})]
       (let [response (signals/analyze request)]
         (is (m/validate ::signals/analyze-response response))))))
+```
+
+#### Edge Case Tests
+
+Document tricky scenarios explicitly:
+
+```clojure
+(deftest edge-cases-test
+  (testing "get-session returns nil for non-existent session"
+    (is (nil? (ai/get-session {::ai/node *test-node*
+                               ::ai/session-id "ses-nonexistent"}))))
+
+  (testing "handles structured content (maps, not just strings)"
+    (let [content {:type "tool_result" :tool-use-id "abc" :data {...}}]
+      ;; ... test that map content round-trips correctly
+      )))
 ```
 
 ### Schema Introspection
@@ -241,6 +293,115 @@ Use the global registry for schema introspection:
 (keys (get (m/function-schemas) 'seon.ai.gemini))
 ```
 
+## Schema Composition Across Namespaces
+
+Provider namespaces extend base namespaces by referencing their schemas. This is the XTDB/Datomic pattern: entities are bags of namespaced attributes.
+
+### Base + Provider Pattern
+
+```clojure
+;; seon.ai - base namespace defines generic schemas
+(schema/register! ::session-id [:string {:min 1}])
+(schema/register! ::role [:enum "user" "assistant" "system"])
+
+;; seon.ai.claude - provider extends base
+(ns seon.ai.claude
+  (:require [seon.ai :as ai]))
+
+;; Reference base schemas in composite schemas
+(schema/register! ::message-entity
+  [:map
+   [:xt/id ::ai/message-id]        ; Reference base!
+   [::ai/role ::ai/role]           ; Reference base!
+   [::ai/content ::ai/content]     ; Reference base!
+   ;; Claude-specific attributes
+   [::message-type ::message-type]
+   [::cache-tokens {:optional true} ::cache-tokens]])
+```
+
+### Same Entity, Multiple Namespaces
+
+A single XTDB entity can have attributes from multiple namespaces:
+
+```clojure
+{:xt/id "msg-abc123"
+ :seon.ai/type :message           ; Generic
+ :seon.ai/role "assistant"        ; Generic
+ :seon.ai/content "Hello!"        ; Generic
+ :seon.ai.claude/message-type "assistant"  ; Claude-specific
+ :seon.ai.claude/cache-tokens 150}         ; Claude-specific
+```
+
+### When NOT to Use `:malli/schema`
+
+Some types cannot be generated for property testing. Omit `:malli/schema` metadata and document in docstrings instead:
+
+```clojure
+;; XTDB nodes - opaque Java objects
+(defn start-session!
+  "Start a new AI session.
+
+   Request keys:
+     ::node - Required. XTDB node instance (cannot be generated)
+     ..."
+  ;; NO :malli/schema here - node can't be generated
+  [{::keys [node namespace prompt]}]
+  ...)
+
+;; Process handles, channels, atoms - runtime objects
+(defn launch-agent!
+  "Launch an agent. Returns handle with channels and atoms.
+
+   Note: No :malli/schema - involves process spawning and
+   runtime objects that cannot be property tested."
+  [{...}]
+  ...)
+```
+
+**Rule:** If a function takes XTDB nodes, spawns processes, or returns channels/atoms, skip `:malli/schema`. Document the expected types in docstrings.
+
+## XTDB Compatibility Notes
+
+### Namespace as String
+
+Clojure symbols don't round-trip through XTDB. Store namespaces as strings:
+
+```clojure
+;; Store
+(db/put! node :ai_sessions
+  {:xt/id session-id
+   ::namespace (str namespace)})  ; 'seon.trading -> "seon.trading"
+
+;; Query (compare as string)
+(db/q node "SELECT * FROM ai_sessions WHERE seon$ai$namespace = ?"
+      [(str namespace)])
+```
+
+### Timestamps: Instant vs ZonedDateTime
+
+XTDB returns `ZonedDateTime`, not `Instant`. Handle both in tests:
+
+```clojure
+(defn temporal? [v]
+  (or (instance? java.time.Instant v)
+      (instance? java.time.ZonedDateTime v)))
+
+;; In tests
+(is (temporal? (::ai/timestamp entity)))  ; Not (inst? ...)
+```
+
+### Custom Generators for Complex Types
+
+Use `:gen/fmap` for types that need custom generation:
+
+```clojure
+(schema/register! ::timestamp
+  [:fn {:description "Event timestamp"
+        :gen/fmap (fn [_] (Instant/now))
+        :gen/schema :int}  ; Dummy schema for generator input
+   inst?])
+```
+
 ## Anti-Patterns to Avoid
 
 ```clojure
@@ -260,6 +421,12 @@ Use the global registry for schema introspection:
 ;; BAD: using :or in destructuring for optional API values
 (defn process [{:keys [model] :or {model "default"}}]
   ...)  ; doesn't work when {:model nil} is passed
+
+;; BAD: Only generative tests, no example tests
+(deftest foo-test
+  (doseq [input (mg/sample ::input)]
+    (is (m/validate ::output (foo input)))))
+;; Missing: tests showing intended usage patterns!
 ```
 
 ## File Organization
