@@ -542,7 +542,7 @@ Provider Process                 seon.ai.agent                    XTDB
 - [x] `seon.ai.agent` - Provider multimethods (Phase 3)
 - [x] `seon.ai.claude` - Implement multimethods (Phase 3)
 - [x] Agent registry in `seon.ai.agent` (Phase 4)
-- [ ] Delete deprecated namespaces (Phase 5)
+- [x] Delete deprecated namespaces (Phase 5)
 - [ ] Updated documentation (Phase 6)
 
 ---
@@ -621,6 +621,42 @@ Provider Process                 seon.ai.agent                    XTDB
 3. **`interrupt!` uses close! function** - Provider-agnostic interruption. Each provider's `launch-agent!` sets up its own close! function that handles provider-specific cleanup (process destruction, channel closing, session ending).
 
 4. **Dual-key handles** - Claude handles include both `::agent/` and `::claude/`/`::ai/` keys. This allows both the shared registry functions and Claude-specific code to access handle fields without breaking changes.
+
+---
+
+## Phase 5 Implementation Notes
+
+**Completed:** 2026-01-19
+
+### Files Deleted
+
+1. **`src/seon/claude/sdk.clj`** (~1000 lines)
+   - Deprecated process management code, fully superseded by `seon.ai.claude.sdk`
+
+2. **`src/seon/claude/conversation.clj`** (~600 lines)
+   - Deprecated session/message persistence, fully superseded by `seon.ai`
+
+3. **`test/seon/claude/sdk_test.clj`**
+   - Tests for the deprecated namespace
+
+4. **`test/seon/claude/`** directory
+   - Removed empty directory after test deletion
+
+### Files Kept
+
+- **`src/seon/claude/exploration.clj`** - Research/development tool for protocol investigation, explicitly not deprecated per PRD
+
+### Verification
+
+- Searched for all requires of `seon.claude.sdk` and `seon.claude.conversation` in src/ and test/
+- No remaining runtime dependencies found
+- All tests pass (439 tests, 2124 assertions)
+- `seon.ai.claude` namespace loads successfully
+
+### Notes
+
+- References to deleted namespaces remain in historical PRD documents (e.g., `docs/prds/agent-isolation/prd.md`) - these are documentation of past work, not active dependencies
+- `CLAUDE.md` still lists the deprecated namespace mappings - this will be updated in Phase 6 (documentation)
 
 ---
 
