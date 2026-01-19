@@ -541,7 +541,7 @@ Provider Process                 seon.ai.agent                    XTDB
 - [x] `seon.ai.claude.sdk` - Extract SDK process management (Phase 2)
 - [x] `seon.ai.agent` - Provider multimethods (Phase 3)
 - [x] `seon.ai.claude` - Implement multimethods (Phase 3)
-- [ ] Agent registry in `seon.ai.agent` (Phase 4)
+- [x] Agent registry in `seon.ai.agent` (Phase 4)
 - [ ] Delete deprecated namespaces (Phase 5)
 - [ ] Updated documentation (Phase 6)
 
@@ -580,6 +580,47 @@ Provider Process                 seon.ai.agent                    XTDB
 3. **`::parsed-result` schema in agent.clj** - Normalized result structure that all providers return from `parse-result`, enabling provider-agnostic result handling.
 
 4. **Keep `launch-agent!` in `seon.ai.claude`** - Per PRD guidance, the agent loop stays in provider namespace until we have multiple providers needing shared orchestration.
+
+---
+
+## Phase 4 Implementation Notes
+
+**Completed:** 2026-01-19
+
+### Files Modified
+
+1. **`src/seon/ai/agent.clj`** (extended)
+   - Added `agent-registry` atom for cross-provider agent tracking
+   - Added observatory schemas: `::agent-status`, `::session-id`, `::namespace`, `::provider`, `::agent-summary`, `::interrupt-request`, `::interrupt-response`, `::agents-request`, `::agents-response`
+   - Added `agents` function - list all running agents across providers
+   - Added `get-agent` function - get handle by session ID
+   - Added `tail` function - get messages channel for observing
+   - Added `interrupt!` function - stop any agent via its close! function
+
+2. **`src/seon/ai/claude.clj`** (modified)
+   - Removed local `agent-registry` atom
+   - Updated `launch-agent!` to register in `agent/agent-registry` with standardized handle structure
+   - Handle now includes both `::agent/` prefixed keys (for shared registry) and legacy `::ai/` aliases (for backwards compatibility)
+   - Updated `agents`, `tail`, `interrupt!`, `get-agent` to delegate to `seon.ai.agent` versions
+   - Claude-specific functions filter for `:claude` provider and map response keys for backwards compatibility
+
+3. **`test/seon/ai/agent_test.clj`** (extended)
+   - Added `reset-registry-fixture` to clean registry between tests
+   - Added schema registration and generation tests for observatory schemas
+   - Added `agents-empty-test`, `agents-with-registered-agent-test`, `agents-multiple-providers-test`
+   - Added `get-agent-not-found-test`, `get-agent-found-test`
+   - Added `tail-not-found-test`, `tail-returns-channel-test`
+   - Added `interrupt-not-found-test`, `interrupt-calls-close-test`, `interrupt-no-close-fn-test`, `interrupt-exception-test`
+
+### Design Decisions
+
+1. **Standardized handle structure** - Agent handles must include `::agent/session-id`, `::agent/namespace`, `::agent/provider`, `::agent/status-atom`, `::agent/close!`, and `::agent/messages-ch`. Optional fields: `::agent/nrepl-port`, `::agent/ai-session-id`.
+
+2. **Backwards compatibility in seon.ai.claude** - Claude functions delegate to `seon.ai.agent` but map response keys to Claude-specific namespace. This allows existing code using `claude/agents` to continue working.
+
+3. **`interrupt!` uses close! function** - Provider-agnostic interruption. Each provider's `launch-agent!` sets up its own close! function that handles provider-specific cleanup (process destruction, channel closing, session ending).
+
+4. **Dual-key handles** - Claude handles include both `::agent/` and `::claude/`/`::ai/` keys. This allows both the shared registry functions and Claude-specific code to access handle fields without breaking changes.
 
 ---
 

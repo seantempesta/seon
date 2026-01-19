@@ -469,10 +469,14 @@
        "TASK:\n" prompt))
 
 ;;; ---------------------------------------------------------------------------
-;;; Agent Registry
+;;; Agent Registry (uses shared seon.ai.agent registry)
 ;;; ---------------------------------------------------------------------------
 
-(defonce ^:private agent-registry (atom {}))
+;; NOTE: The agent registry has been moved to seon.ai.agent for cross-provider
+;; observability. Claude agents register in agent/agent-registry with the
+;; required fields (::agent/session-id, ::agent/namespace, ::agent/provider,
+;; ::agent/status-atom, ::agent/close!, ::agent/messages-ch) plus Claude-specific
+;; fields (::nrepl-port, ::ai-session-id, ::result-ch).
 
 ;;; ---------------------------------------------------------------------------
 ;;; Public API
@@ -663,26 +667,39 @@
                      ;; Stop Seon session (flushes ctx, stops nREPL)
                      (session/stop-agent-session! {::session/node node
                                                    ::session/id id})
-                     ;; Remove from registry
-                     (swap! agent-registry dissoc id)
+                     ;; Remove from shared registry
+                     (swap! agent/agent-registry dissoc id)
                      ;; Update status
                      (when (= :running @status-atom)
                        (reset! status-atom :terminated)))
 
-          handle {::ai/session-id id
+          ;; Handle uses ::agent/ prefixed keys for shared registry compatibility
+          ;; plus Claude-specific keys
+          handle {;; Required by seon.ai.agent registry
+                  ::agent/session-id id
+                  ::agent/namespace (str namespace)
+                  ::agent/provider :claude
+                  ::agent/status-atom status-atom
+                  ::agent/close! close-fn
+                  ::agent/messages-ch messages-ch
+                  ;; Claude-specific fields
+                  ::agent/nrepl-port nrepl-port
+                  ::agent/ai-session-id ai-session-id
+                  ::result-ch result-ch
+                  ;; Legacy aliases for backwards compatibility
+                  ::ai/session-id id
                   ::ai-session-id ai-session-id
                   ::ai/namespace (str namespace)
                   ::nrepl-port nrepl-port
                   ::messages-ch messages-ch
-                  ::result-ch result-ch
                   ::status-atom status-atom
                   ::close! close-fn}]
 
       ;; 8. Send initial prompt
       (sdk/write-message! stdin (sdk/make-user-message full-prompt))
 
-      ;; 9. Register agent
-      (swap! agent-registry assoc id handle)
+      ;; 9. Register agent in shared registry
+      (swap! agent/agent-registry assoc id handle)
 
       (log/info "Agent launched" {:session-id id
                                   :ai-session-id ai-session-id
@@ -692,7 +709,10 @@
       handle)))
 
 (defn agents
-  "List all running agents with status, namespace, session-id.
+  "List all running Claude agents with status, namespace, session-id.
+
+   Delegates to seon.ai.agent/agents and filters for Claude agents,
+   mapping response keys to Claude-specific namespace for backwards compatibility.
 
    Request keys:
      (none - empty map for consistency)
@@ -708,20 +728,23 @@
      ;; => [{:seon.ai/session-id \"a1b2\"
      ;;      :seon.ai/namespace \"seon.trading\"
      ;;      :seon.ai.claude/nrepl-port 7889
-     ;;      :seon.ai.claude/agent-status :running}]"
+     ;;      :seon.ai.claude/agent-status :running}]
+
+   Note: For cross-provider agent listing, use seon.ai.agent/agents instead."
   [_request]
-  (vec (for [[id handle] @agent-registry]
-         {::ai/session-id id
-          ::ai/namespace (::ai/namespace handle)
-          ::nrepl-port (::nrepl-port handle)
-          ::agent-status @(::status-atom handle)})))
+  (->> (agent/agents {})
+       (filter #(= :claude (::agent/provider %)))
+       (mapv (fn [a]
+               {::ai/session-id (::agent/session-id a)
+                ::ai/namespace (::agent/namespace a)
+                ::nrepl-port (::agent/nrepl-port a)
+                ::agent-status (::agent/agent-status a)}))))
 
 (defn interrupt!
-  "Send interrupt signal to an agent.
+  "Interrupt a Claude agent.
 
-   Attempts to interrupt the agent's Claude process by destroying it.
-   This is the only reliable way to stop a running agent since the
-   Claude CLI does not accept interrupt messages over stdin.
+   Delegates to seon.ai.agent/interrupt! and maps response keys
+   to Claude-specific namespace for backwards compatibility.
 
    Request keys:
      ::ai/session-id - Required. The 4-char hex session ID
@@ -729,40 +752,32 @@
    Response keys:
      ::ai/session-id  - The session that was interrupted
      ::interrupted?   - Whether the interrupt succeeded
-     ::method         - Method used (:destroy)
+     ::method         - Method used (:close -> :destroy for backwards compat)
      ::error          - Error message if failed
 
    Example:
      (interrupt! {::ai/session-id \"a1b2\"})
      ;; => {:seon.ai/session-id \"a1b2\"
      ;;     :seon.ai.claude/interrupted? true
-     ;;     :seon.ai.claude/method :destroy}"
+     ;;     :seon.ai.claude/method :destroy}
+
+   Note: For provider-agnostic interruption, use seon.ai.agent/interrupt! instead."
   [{::ai/keys [session-id]}]
-  (if-let [handle (get @agent-registry session-id)]
-    (let [status-atom (::status-atom handle)
-          close! (::close! handle)]
-      (try
-        (close!)
-        (reset! status-atom :interrupted)
-        (log/info "Interrupted agent" {:session-id session-id})
-        {::ai/session-id session-id
-         ::interrupted? true
-         ::method :destroy}
-        (catch Exception e
-          (log/warn e "Failed to interrupt agent" {:session-id session-id})
-          {::ai/session-id session-id
-           ::interrupted? false
-           ::error (.getMessage e)})))
-    ;; Agent not found
-    {::ai/session-id session-id
-     ::interrupted? false
-     ::error "Agent not found in registry"}))
+  (let [result (agent/interrupt! {::agent/session-id session-id})]
+    ;; Map to Claude-specific response format for backwards compatibility
+    (cond-> {::ai/session-id session-id
+             ::interrupted? (::agent/interrupted? result)}
+      (::agent/method result)
+      (assoc ::method (if (= :close (::agent/method result))
+                        :destroy  ; backwards compat: close -> destroy
+                        (::agent/method result)))
+      (::agent/error result)
+      (assoc ::error (::agent/error result)))))
 
 (defn tail
-  "Stream messages from a specific agent session.
+  "Stream messages from a Claude agent session.
 
-   Returns the agent's messages channel. Use this to observe an agent's
-   activity in real-time.
+   Delegates to seon.ai.agent/tail.
 
    Request keys:
      ::ai/session-id - Required. The 4-char hex session ID
@@ -777,21 +792,24 @@
            (println \"Agent says:\" (:type msg))
            (recur))))
 
-   Note: Close the returned channel when done observing to release resources."
+   Note: For provider-agnostic tail, use seon.ai.agent/tail instead."
   [{::ai/keys [session-id]}]
-  (when-let [handle (get @agent-registry session-id)]
-    (::messages-ch handle)))
+  (agent/tail {::agent/session-id session-id}))
 
 (defn get-agent
-  "Get an agent handle by session ID.
+  "Get a Claude agent handle by session ID.
+
+   Delegates to seon.ai.agent/get-agent.
 
    Request keys:
      ::ai/session-id - Required. The 4-char hex session ID
 
    Returns:
-     The full agent handle map, or nil if not found."
+     The full agent handle map, or nil if not found.
+
+   Note: For provider-agnostic lookup, use seon.ai.agent/get-agent instead."
   [{::ai/keys [session-id]}]
-  (get @agent-registry session-id))
+  (agent/get-agent {::agent/session-id session-id}))
 
 (comment
   ;; REPL exploration
