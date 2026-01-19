@@ -13,6 +13,7 @@
    [malli.generator :as mg]
    [seon.ai :as ai]
    [seon.ai.claude :as claude]
+   [seon.ai.claude.sdk :as sdk]
    [seon.schema :as schema]
    [seon.test-utils :refer [with-test-node *test-node*]])
   (:import [java.time Instant ZonedDateTime]))
@@ -92,8 +93,8 @@
       (is (int? generated))
       (is (>= generated 0))))
 
-  (testing "Can generate ::claude/permission-mode"
-    (let [generated (mg/generate ::claude/permission-mode)]
+  (testing "Can generate ::sdk/permission-mode"
+    (let [generated (mg/generate ::sdk/permission-mode)]
       (is (#{"default" "acceptEdits" "bypassPermissions" "plan" "dontAsk"} generated)))))
 
 (deftest complex-schema-generation-test
@@ -257,13 +258,13 @@
 
 (deftest constants-test
   (testing "Default CLI command is set"
-    (is (= "/opt/homebrew/bin/claude" claude/default-cli-command)))
+    (is (= "/opt/homebrew/bin/claude" sdk/default-cli-command)))
 
   (testing "Default model is valid"
-    (is (m/validate ::claude/model claude/default-model)))
+    (is (m/validate ::claude/model sdk/default-model)))
 
   (testing "Default permission mode is valid"
-    (is (m/validate ::claude/permission-mode claude/default-permission-mode))))
+    (is (m/validate ::sdk/permission-mode sdk/default-permission-mode))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Agent Registry Tests (unit tests without spawning processes)
