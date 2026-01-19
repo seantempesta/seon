@@ -23,6 +23,20 @@
            (recur)))
        (<!! (::sdk/result-ch handle)))
 
+   Agent lifecycle (Phase 7):
+
+     ;; Launch agent with isolated session
+     (def agent (sdk/launch-agent!
+                  {::sdk/node xtdb-node
+                   ::sdk/namespace 'seon.trading
+                   ::sdk/prompt \"Implement feature X\"}))
+
+     ;; Monitor
+     @(::sdk/result-ch agent)
+
+     ;; Terminate
+     (sdk/terminate-agent! {::sdk/agent-handle agent})
+
    Schema verification:
 
      (require '[malli.instrument :as mi])
@@ -34,6 +48,7 @@
    [clojure.java.io :as io]
    [clojure.java.process :as process]
    [clojure.string :as str]
+   [seon.orchestrator.session :as session]
    [seon.schema :as schema]
    [taoensso.timbre :as log]))
 
@@ -73,6 +88,10 @@
 
 (schema/register! ::mcp-servers
                   [:map-of :keyword :map])
+
+(schema/register! ::settings-path
+                  [:string {:min 1
+                            :description "Path to settings JSON file for hooks"}])
 
 ;; Query options
 (schema/register! ::query-options
@@ -141,6 +160,64 @@
                    [::close! fn?]])        ; function to close/cleanup
 
 ;;; ---------------------------------------------------------------------------
+;;; Agent Launch Schemas (Phase 7)
+;;; ---------------------------------------------------------------------------
+
+;; XTDB node - cannot be generated (requires real database)
+(schema/register! ::node
+                  [:any {:description "XTDB orchestrator node"
+                         :gen/fmap (fn [_] (throw (ex-info "Cannot generate XTDB node"
+                                                           {:type :malli.generator/no-generator})))}])
+
+(schema/register! ::namespace
+                  [:symbol {:description "Agent namespace symbol"}])
+
+(schema/register! ::session-id
+                  [:string {:min 4 :max 4
+                            :pattern "^[a-f0-9]{4}$"
+                            :description "4-character hex session ID"}])
+
+(schema/register! ::agent-status
+                  [:enum :running :completed :failed :terminated])
+
+;; Launch request
+(schema/register! ::launch-agent-request
+                  [:map
+                   [::node ::node]
+                   [::namespace ::namespace]
+                   [::prompt ::prompt]
+                   [::model {:optional true} ::model]
+                   [::permission-mode {:optional true} ::permission-mode]
+                   [::max-turns {:optional true} ::max-turns]
+                   [::max-budget-usd {:optional true} ::max-budget-usd]
+                   [::allowed-tools {:optional true} ::allowed-tools]
+                   [::disallowed-tools {:optional true} ::disallowed-tools]])
+
+;; Agent handle (returned from launch-agent!)
+(schema/register! ::agent-handle
+                  [:map
+                   [::session-id ::session-id]
+                   [::namespace ::namespace]
+                   [::nrepl-port :int]
+                   [::messages-ch :any]    ; core.async channel
+                   [::result-ch :any]      ; core.async channel
+                   [::status-atom :any]    ; atom with agent status
+                   [::close! fn?]])        ; function to terminate
+
+;; Terminate request
+(schema/register! ::terminate-agent-request
+                  [:map
+                   [::agent-handle ::agent-handle]
+                   [::node ::node]])
+
+;; Terminate response
+(schema/register! ::terminate-agent-response
+                  [:map
+                   [::session-id ::session-id]
+                   [::status ::agent-status]
+                   [::result {:optional true} ::result-message]])
+
+;;; ---------------------------------------------------------------------------
 ;;; Configuration
 ;;; ---------------------------------------------------------------------------
 
@@ -163,17 +240,21 @@
 (defn- build-args
   "Build CLI arguments from options map."
   [{::keys [model permission-mode max-turns max-budget-usd
-            allowed-tools disallowed-tools mcp-servers cli-command]}]
+            allowed-tools disallowed-tools mcp-servers cli-command settings-path]}]
   (let [cmd (or cli-command default-cli-command)
         model (or model default-model)
-        perm (or permission-mode default-permission-mode)]
+        perm (or permission-mode default-permission-mode)
+        ;; Default to project settings.json so hooks are loaded
+        settings (or settings-path ".claude/settings.json")]
     ;; Note: "claude" is a standalone executable (npm installed), not a node script
     (cond-> [cmd
              "--output-format" "stream-json"
              "--input-format" "stream-json"
              "--verbose"  ; REQUIRED for stream-json to work
              "--model" model
-             "--permission-mode" perm]
+             "--permission-mode" perm
+             "--setting-sources" "project,local"  ; Load project settings (contains hooks)
+             "--settings" settings]  ; Also load hooks from explicit path
       max-turns
       (into ["--max-turns" (str max-turns)])
 
@@ -374,6 +455,254 @@
     result))
 
 ;;; ---------------------------------------------------------------------------
+;;; Agent Lifecycle (Phase 7)
+;;; ---------------------------------------------------------------------------
+
+;; Registry of active agents for tracking
+(defonce ^:private agent-registry (atom {}))
+
+(defn- build-agent-mcp-config
+  "Build MCP config that passes session_id to the agent.
+   The agent will use this session_id for all eval calls."
+  [session-id]
+  {:seon {:command "./bin/mcp-server"
+          :env {"SEON_SESSION_ID" session-id}}})
+
+(defn- build-agent-prompt
+  "Build the agent prompt with session context."
+  [session-id namespace prompt]
+  (str "You have been assigned session ID: " session-id "\n"
+       "Namespace: " namespace "\n\n"
+       "To evaluate Clojure code, use the eval tool:\n\n"
+       "  eval(session_id=\"" session-id "\", code=\"(your-code-here)\")\n\n"
+       "Your context atom `*ctx*` is available. Use namespaced keys:\n\n"
+       "  eval(session_id=\"" session-id "\", code=\"(swap! *ctx* assoc :" namespace "/signals [...])\")\n"
+       "  eval(session_id=\"" session-id "\", code=\"(:" namespace "/signals @*ctx*)\")\n\n"
+       "Helper functions from user namespace (qualify with user/):\n\n"
+       "  eval(session_id=\"" session-id "\", code=\"(user/reload)\")           ; Reload changed code\n"
+       "  eval(session_id=\"" session-id "\", code=\"(user/search \\\"query\\\")\")  ; Web search via Gemini\n"
+       "  eval(session_id=\"" session-id "\", code=\"(user/status)\")           ; System status\n\n"
+       "All state is automatically persisted. You don't need to save anything manually.\n"
+       "Each eval response includes the current namespace (;; ns: " namespace ").\n\n"
+       "---\n\n"
+       "TASK:\n" prompt))
+
+(defn launch-agent!
+  "Launch a Claude Code agent with an isolated Seon session.
+
+   Creates everything the agent needs:
+   - Isolated XTDB database for the namespace
+   - Persisted ctx atom for state management
+   - Dedicated nREPL server
+   - Claude Code process with MCP configured
+
+   Request keys:
+     ::node            - Required. XTDB orchestrator node
+     ::namespace       - Required. Agent namespace symbol (e.g., 'seon.trading)
+     ::prompt          - Required. Task description for the agent
+     ::model           - Optional. Claude model (default: opus)
+     ::permission-mode - Optional. Permission mode (default: bypassPermissions)
+     ::max-turns       - Optional. Max conversation turns
+     ::max-budget-usd  - Optional. Cost limit
+     ::allowed-tools   - Optional. Tool whitelist
+     ::disallowed-tools - Optional. Tool denylist
+
+   Response keys (agent handle):
+     ::session-id   - 4-char hex session ID
+     ::namespace    - Agent namespace
+     ::nrepl-port   - nREPL port for the agent
+     ::messages-ch  - Channel of SDK messages
+     ::result-ch    - Channel receiving final result
+     ::status-atom  - Atom with current status (:running, :completed, :failed)
+     ::close!       - Function to terminate agent
+
+   Example:
+     (launch-agent! {::node xtdb-node
+                     ::namespace 'seon.trading
+                     ::prompt \"Implement the signals dashboard\"})"
+  {:malli/schema [:=> [:cat ::launch-agent-request] ::agent-handle]}
+  [{::keys [node namespace prompt model permission-mode
+            max-turns max-budget-usd allowed-tools disallowed-tools]}]
+  (log/info "Launching agent" {:namespace namespace})
+
+  ;; 1. Create Seon session (nREPL, ctx, db)
+  (let [{::session/keys [id nrepl-port] :as session-result}
+        (session/start-agent-session! {::session/node node
+                                       ::session/namespace namespace})]
+
+    (when (= :error (::session/status session-result))
+      (throw (ex-info "Failed to create agent session"
+                      {:namespace namespace
+                       :error (::session/error session-result)})))
+
+    (log/info "Created agent session" {:session-id id :port nrepl-port})
+
+    ;; 2. Build agent prompt with session context
+    (let [full-prompt (build-agent-prompt id namespace prompt)
+
+          ;; 3. Build MCP config with session_id in environment
+          mcp-config (build-agent-mcp-config id)
+
+          ;; 4. Spawn Claude Code with configured MCP
+          status-atom (atom :running)
+          {:keys [process stdin stdout]}
+          (spawn-claude-code {::model (or model default-model)
+                              ::permission-mode (or permission-mode "bypassPermissions")
+                              ::max-turns max-turns
+                              ::max-budget-usd max-budget-usd
+                              ::allowed-tools allowed-tools
+                              ::disallowed-tools disallowed-tools
+                              ::mcp-servers mcp-config})
+
+          messages-ch (chan 100)
+          result-ch (chan 1)
+
+          ;; 5. Start reader that updates status on completion
+          ;; Also captures Claude's internal session_id for hook routing
+          claude-session-mapped? (atom false)
+          _reader (future
+                    (try
+                      (with-open [rdr (io/reader stdout)]
+                        (loop []
+                          (when-let [line (.readLine rdr)]
+                            (when-not (str/blank? line)
+                              (let [msg (parse-line line)
+                                    claude-session-id (:session_id msg)]
+                                ;; Map Claude's session_id to our Seon session_id (once)
+                                (when (and claude-session-id
+                                           (not @claude-session-mapped?))
+                                  (let [map-file (io/file "logs" "session-map.edn")
+                                        existing (if (.exists map-file)
+                                                   (try (read-string (slurp map-file))
+                                                        (catch Exception _ {}))
+                                                   {})]
+                                    (spit map-file (pr-str (assoc existing claude-session-id id)))
+                                    (reset! claude-session-mapped? true)
+                                    (log/info "Mapped Claude session to Seon session"
+                                              {:claude-session claude-session-id :seon-session id})))
+                                (log/trace "Agent message" {:session-id id :type (:type msg)})
+                                (async/>!! messages-ch msg)
+                                (when (= (:type msg) "result")
+                                  (async/>!! result-ch msg)
+                                  ;; Update status based on result
+                                  (reset! status-atom
+                                          (if (= "success" (:subtype msg))
+                                            :completed
+                                            :failed)))))
+                            (recur))))
+                      (catch Exception e
+                        (log/warn e "Agent reader error" {:session-id id})
+                        (reset! status-atom :failed))
+                      (finally
+                        (close! messages-ch)
+                        (close! result-ch))))
+
+          ;; 6. Build close function that cleans up everything
+          close-fn (fn close-agent []
+                     (log/info "Terminating agent" {:session-id id})
+                     ;; Destroy Claude process
+                     (try
+                       (.destroy process)
+                       (catch Exception e
+                         (log/warn e "Error destroying Claude process")))
+                     ;; Close channels
+                     (close! messages-ch)
+                     (close! result-ch)
+                     ;; Stop Seon session (flushes ctx, stops nREPL)
+                     (session/stop-agent-session! {::session/node node
+                                                   ::session/id id})
+                     ;; Remove from registry
+                     (swap! agent-registry dissoc id)
+                     ;; Update status
+                     (when (= :running @status-atom)
+                       (reset! status-atom :terminated)))
+
+          handle {::session-id id
+                  ::namespace namespace
+                  ::nrepl-port nrepl-port
+                  ::messages-ch messages-ch
+                  ::result-ch result-ch
+                  ::status-atom status-atom
+                  ::close! close-fn}]
+
+      ;; 7. Send initial prompt
+      (write-message! stdin (make-user-message full-prompt))
+
+      ;; 8. Register agent
+      (swap! agent-registry assoc id handle)
+
+      (log/info "Agent launched" {:session-id id :namespace namespace :port nrepl-port})
+
+      handle)))
+
+(defn terminate-agent!
+  "Terminate a running agent, cleaning up all resources.
+
+   Request keys:
+     ::agent-handle - Required. The handle returned from launch-agent!
+     ::node         - Required. XTDB orchestrator node
+
+   Response keys:
+     ::session-id - The terminated session ID
+     ::status     - Final status (:terminated, :completed, :failed)
+     ::result     - Final result message (if available)
+
+   Example:
+     (terminate-agent! {::agent-handle agent ::node xtdb-node})"
+  {:malli/schema [:=> [:cat ::terminate-agent-request] ::terminate-agent-response]}
+  [{::keys [agent-handle node]}]
+  (let [session-id (::session-id agent-handle)
+        result-ch (::result-ch agent-handle)
+        status-atom (::status-atom agent-handle)
+        close! (::close! agent-handle)]
+
+    ;; Try to get final result (non-blocking)
+    (let [result (async/poll! result-ch)]
+
+      ;; Call close function
+      (close!)
+
+      {::session-id session-id
+       ::status @status-atom
+       ::result result})))
+
+;; List agents request/response schemas
+(schema/register! ::list-agents-request
+                  [:map])
+
+(schema/register! ::agent-summary
+                  [:map
+                   [::session-id ::session-id]
+                   [::namespace ::namespace]
+                   [::nrepl-port :int]
+                   [::status ::agent-status]])
+
+(schema/register! ::list-agents-response
+                  [:vector ::agent-summary])
+
+(defn list-agents
+  "List all active agents launched via launch-agent!
+
+   Request keys:
+     (none - empty map for consistency)
+
+   Response keys (vector of):
+     ::session-id  - Agent session ID
+     ::namespace   - Agent namespace
+     ::nrepl-port  - nREPL port
+     ::status      - Current status
+
+   Example:
+     (list-agents {})"
+  {:malli/schema [:=> [:cat ::list-agents-request] ::list-agents-response]}
+  [{::keys []}]
+  (vec (for [[id handle] @agent-registry]
+         {::session-id id
+          ::namespace (::namespace handle)
+          ::nrepl-port (::nrepl-port handle)
+          ::status @(::status-atom handle)})))
+
+;;; ---------------------------------------------------------------------------
 ;;; REPL Helpers
 ;;; ---------------------------------------------------------------------------
 
@@ -383,6 +712,48 @@
   ;; View registered schemas
   (require '[seon.schema :as schema])
   (schema/schemas-in-namespace "seon.claude.sdk")
+
+  ;; =========================================================================
+  ;; Agent Lifecycle (Phase 7)
+  ;; =========================================================================
+
+  ;; Get the running orchestrator XTDB node (from Integrant system)
+  ;; This is NOT a new database - it's the shared orchestrator node
+  ;; that tracks session metadata and attaches namespace-specific databases
+  (require '[user :refer [xtdb-node]])
+
+  ;; Launch an agent with isolated session
+  ;; - Creates namespace-specific database (e.g., test_agent) if needed
+  ;; - Starts dedicated nREPL server for the agent
+  ;; - Spawns Claude Code with MCP configured to use the session
+  (def agent-handle
+    (launch-agent! {::node (xtdb-node)
+                    ::namespace 'test.agent
+                    ::prompt "Say hello and then evaluate (+ 1 2) using the eval tool."
+                    ::max-turns 5}))
+
+  ;; Check agent status
+  @(::status-atom agent-handle)
+  ;; => :running, :completed, :failed, or :terminated
+
+  ;; List active agents
+  (list-agents {})
+
+  ;; Stream messages from agent
+  (require '[clojure.core.async :refer [<!! go-loop <!]])
+  (go-loop []
+    (when-let [msg (<! (::messages-ch agent-handle))]
+      (println "Agent msg:" (:type msg))
+      (recur)))
+
+  ;; Wait for result
+  (def result (<!! (::result-ch agent-handle)))
+  (:result result)
+  (:total_cost_usd result)
+
+  ;; Terminate agent (cleans up Claude process, nREPL, flushes ctx)
+  (terminate-agent! {::agent-handle agent-handle
+                     ::node (xtdb-node)})
 
   ;; Generate sample data
   (require '[malli.generator :as mg])
