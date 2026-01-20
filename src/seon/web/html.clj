@@ -51,7 +51,7 @@
 ;; ========================================
 
 (defn nav-bar
-  "Shared navigation component using Tailwind. active-page is :dashboard or :logs"
+  "Shared navigation component using Tailwind. active-page is :dashboard, :logs, or :agents"
   [active-page]
   [:nav {:class "flex gap-1 mb-6 bg-zinc-200 p-1 rounded-lg w-fit"}
    [:a {:href "/"
@@ -60,6 +60,12 @@
                       "bg-white text-zinc-900 shadow-sm"
                       "text-zinc-600 hover:text-zinc-900 hover:bg-white/50"))}
     "Dashboard"]
+   [:a {:href "/agents"
+        :class (str "px-4 py-2 rounded-md text-sm font-medium transition-all "
+                    (if (= active-page :agents)
+                      "bg-white text-zinc-900 shadow-sm"
+                      "text-zinc-600 hover:text-zinc-900 hover:bg-white/50"))}
+    "Agents"]
    [:a {:href "/logs"
         :class (str "px-4 py-2 rounded-md text-sm font-medium transition-all "
                     (if (= active-page :logs)

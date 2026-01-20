@@ -27,6 +27,10 @@
 
 (def orchestrator-port 7888)
 
+;; SEON_SESSION_ID env var enforces session isolation for agents.
+;; When set, this MCP server only allows evals to that session (not orchestrator).
+(def enforced-session-id (System/getenv "SEON_SESSION_ID"))
+
 (def server-info
   {:name "seon"
    :version "0.2.0"})
@@ -37,17 +41,31 @@
 
 (def default-timeout-ms 30000) ;; 30 second default timeout
 
+;; Tool definitions change based on whether session is enforced
 (def tools
   [{:name "eval"
-    :description "Evaluate Clojure code. Use session_id='orchestrator' for the main REPL, or a 4-char hex session ID for an agent's isolated REPL. Returns result value and current namespace. Use (user/reload) to reload code, (user/search \"query\") for research."
-    :inputSchema {:type "object"
-                  :properties {:session_id {:type "string"
-                                            :description "'orchestrator' for main REPL, or 4-char hex session ID (e.g., 'a1b2')"}
-                               :code {:type "string"
-                                      :description "Clojure code to evaluate"}
-                               :timeout_ms {:type "integer"
-                                            :description "Timeout in milliseconds (default: 30000)"}}
-                  :required ["session_id" "code"]}}
+    :description (if enforced-session-id
+                   ;; Agent mode: session is implicit, simpler interface
+                   "Evaluate Clojure code in your isolated REPL. Returns result and namespace. Use (user/reload) to reload code, (user/search \"query\") for research."
+                   ;; Orchestrator mode: requires explicit session_id
+                   "Evaluate Clojure code. Use session_id='orchestrator' for the main REPL, or a 4-char hex session ID for an agent's isolated REPL. Returns result value and current namespace. Use (user/reload) to reload code, (user/search \"query\") for research.")
+    :inputSchema (if enforced-session-id
+                   ;; Agent mode: no session_id param - it's implicit
+                   {:type "object"
+                    :properties {:code {:type "string"
+                                        :description "Clojure code to evaluate"}
+                                 :timeout_ms {:type "integer"
+                                              :description "Timeout in milliseconds (default: 30000)"}}
+                    :required ["code"]}
+                   ;; Orchestrator mode: session_id required
+                   {:type "object"
+                    :properties {:session_id {:type "string"
+                                              :description "'orchestrator' for main REPL, or 4-char hex session ID (e.g., 'a1b2')"}
+                                 :code {:type "string"
+                                        :description "Clojure code to evaluate"}
+                                 :timeout_ms {:type "integer"
+                                              :description "Timeout in milliseconds (default: 30000)"}}
+                    :required ["session_id" "code"]})}
 
    {:name "create_session"
     :description "Create a new agent session with an isolated REPL and database. Returns the session_id to use with agent_eval."
@@ -297,40 +315,47 @@
 (defn execute-eval
   "Execute the eval tool. Returns MCP result format.
    For agent sessions (not orchestrator), tracks activity for observability (Phase 4c).
-   Uses persistent nREPL session ID for *1/*2/*3 support."
+   Uses persistent nREPL session ID for *1/*2/*3 support.
+
+   When SEON_SESSION_ID env var is set, session_id param is ignored and the
+   enforced session is used instead (agent isolation)."
   [{:keys [session_id code timeout_ms]}]
-  (log-debug "execute-eval session:" session_id "timeout:" timeout_ms)
+  ;; Use enforced session if set, otherwise use provided session_id
+  (let [effective-session (or enforced-session-id session_id)]
+    (log-debug "execute-eval session:" effective-session
+               "(enforced:" enforced-session-id "provided:" session_id ")"
+               "timeout:" timeout_ms)
 
-  (let [[port nrepl-session-id]
-        (if (= session_id "orchestrator")
-          [orchestrator-port nil]
-          (do
-            (validate-session-id! session_id)
-            (if-let [info (get-session-info session_id)]
-              [(:port info) (:nrepl-session-id info)]
-              (throw (ex-info (str "Session not found or not running: " session_id)
-                              {:session_id session_id})))))]
+    (let [[port nrepl-session-id]
+          (if (= effective-session "orchestrator")
+            [orchestrator-port nil]
+            (do
+              (validate-session-id! effective-session)
+              (if-let [info (get-session-info effective-session)]
+                [(:port info) (:nrepl-session-id info)]
+                (throw (ex-info (str "Session not found or not running: " effective-session)
+                                {:session_id effective-session})))))]
 
-    ;; Record eval start for agent sessions (Phase 4c)
-    (record-activity! session_id :start code)
+      ;; Record eval start for agent sessions (Phase 4c)
+      (record-activity! effective-session :start code)
 
-    (let [result (nrepl-eval port code (or timeout_ms default-timeout-ms) nrepl-session-id)]
-      (log-debug "Eval result:" (pr-str result))
+      (let [result (nrepl-eval port code (or timeout_ms default-timeout-ms) nrepl-session-id)]
+        (log-debug "Eval result:" (pr-str result))
 
-      ;; Record eval complete for agent sessions (Phase 4c)
-      (record-activity! session_id :complete nil)
+        ;; Record eval complete for agent sessions (Phase 4c)
+        (record-activity! effective-session :complete nil)
 
-      (if (:ex result)
-        {:content [{:type "text"
-                    :text (str "Error: " (:err result))}]
-         :isError true}
-        {:content [{:type "text"
-                    :text (str (when-let [out (:out result)]
-                                 out)
-                               (or (:value result) "nil")
-                               (when-let [ns (:ns result)]
-                                 (str "\n;; ns: " ns)))}]
-         :isError false}))))
+        (if (:ex result)
+          {:content [{:type "text"
+                      :text (str "Error: " (:err result))}]
+           :isError true}
+          {:content [{:type "text"
+                      :text (str (when-let [out (:out result)]
+                                   out)
+                                 (or (:value result) "nil")
+                                 (when-let [ns (:ns result)]
+                                   (str "\n;; ns: " ns)))}]
+           :isError false})))))
 
 (defn execute-create-session
   "Execute the create_session tool.

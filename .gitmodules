@@ -31,3 +31,12 @@
 [submodule "reference-code/datastar"]
 	path = reference-code/datastar
 	url = https://github.com/starfederation/datastar.git
+[submodule "reference-code/portal"]
+	path = reference-code/portal
+	url = https://github.com/djblue/portal.git
+[submodule "reference-code/reveal"]
+	path = reference-code/reveal
+	url = https://github.com/vlaaad/reveal.git
+[submodule "reference-code/xtdb-inspector"]
+	path = reference-code/xtdb-inspector
+	url = https://github.com/tatut/xtdb-inspector.git

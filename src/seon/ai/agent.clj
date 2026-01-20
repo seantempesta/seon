@@ -371,6 +371,40 @@
      ::interrupted? false
      ::error "Agent not found in registry"}))
 
+(defn shutdown-all!
+  "Shut down all running agents in the registry.
+
+   This is called before integrant reset to prevent core.async protocol
+   corruption. When namespaces are reloaded while channels are open,
+   the old channel instances don't recognize the reloaded protocols.
+
+   Request keys:
+     (none - empty map for consistency)
+
+   Response keys:
+     ::shutdown-count - Number of agents that were shut down
+     ::errors         - Vector of errors encountered (may be empty)
+
+   Example:
+     (shutdown-all! {})
+     ;; => {:seon.ai.agent/shutdown-count 3
+     ;;     :seon.ai.agent/errors []}"
+  [_request]
+  (let [agents @agent-registry
+        errors (atom [])]
+    (doseq [[id handle] agents]
+      (try
+        (when-let [close! (::close! handle)]
+          (log/info "Shutting down agent for reset" {:session-id id})
+          (close!))
+        (catch Exception e
+          (log/warn e "Error shutting down agent" {:session-id id})
+          (swap! errors conj {:session-id id :error (.getMessage e)}))))
+    ;; Clear registry in case close! didn't remove entries
+    (reset! agent-registry {})
+    {::shutdown-count (count agents)
+     ::errors @errors}))
+
 (comment
   ;; REPL exploration
 
