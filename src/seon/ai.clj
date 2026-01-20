@@ -268,6 +268,37 @@
                    [::status {:optional true} ::status]])
 
 ;;; ---------------------------------------------------------------------------
+;;; Session Stats Schemas
+;;; ---------------------------------------------------------------------------
+
+;; Token breakdown for stats
+(schema/register! ::tokens
+                  [:map {:description "Token usage breakdown"}
+                   [:input :int]
+                   [:output :int]
+                   [:cache-read :int]
+                   [:cache-creation :int]])
+
+;; Cache hit rate (ratio)
+(schema/register! ::cache-hit-rate
+                  [:double {:min 0.0 :max 1.0
+                            :description "Cache hit rate: cache-read / (cache-read + input)"}])
+
+;; Session stats request
+(schema/register! ::session-stats-request
+                  [:map
+                   [::node ::node]])
+
+;; Session stats response
+(schema/register! ::session-stats-response
+                  [:map
+                   [::total-cost-usd :double]
+                   [::total-sessions :int]
+                   [::total-messages :int]
+                   [::tokens ::tokens]
+                   [::cache-hit-rate ::cache-hit-rate]])
+
+;;; ---------------------------------------------------------------------------
 ;;; ID Generation
 ;;; ---------------------------------------------------------------------------
 
@@ -441,6 +472,61 @@
                        (str " WHERE " (clojure.string/join " AND " conditions)))
         sql (str base-sql where-clause " ORDER BY seon$ai$started_at DESC LIMIT ?")]
     (db/q node sql (conj params limit))))
+
+(defn session-stats
+  "Get aggregate statistics across all AI sessions.
+
+   Provides totals for cost, sessions, messages, and token usage,
+   including cache hit rate for Claude sessions.
+
+   Request keys:
+     ::node - Required. XTDB node instance
+
+   Response keys:
+     ::total-cost-usd  - Total cost across all sessions
+     ::total-sessions  - Number of sessions
+     ::total-messages  - Number of messages
+     ::tokens          - Map with :input, :output, :cache-read, :cache-creation
+     ::cache-hit-rate  - Ratio of cache-read / (cache-read + input)
+
+   Example:
+     (session-stats {::node db})
+     ;; => {::total-cost-usd 12.34
+     ;;     ::total-sessions 47
+     ;;     ::total-messages 892
+     ;;     ::tokens {:input 450000 :output 89000
+     ;;               :cache-read 120000 :cache-creation 35000}
+     ;;     ::cache-hit-rate 0.21}"
+  [{::keys [node]}]
+  (let [;; Aggregate session data (cost, count)
+        session-stats (first (db/q node
+                                   "SELECT COALESCE(SUM(s.seon$ai$cost_usd), 0) as total_cost,
+                                           COUNT(*) as total_sessions
+                                    FROM ai_sessions s"))
+        ;; Aggregate message data (count, tokens)
+        message-stats (first (db/q node
+                                   "SELECT COUNT(*) as total_messages,
+                                           COALESCE(SUM(m.seon$ai$input_tokens), 0) as input_tokens,
+                                           COALESCE(SUM(m.seon$ai$output_tokens), 0) as output_tokens,
+                                           COALESCE(SUM(m.\"seon$ai$claude$cache_read_tokens\"), 0) as cache_read,
+                                           COALESCE(SUM(m.\"seon$ai$claude$cache_creation_tokens\"), 0) as cache_creation
+                                    FROM ai_messages m"))
+        input-tokens (long (:input-tokens message-stats))
+        cache-read (long (:cache-read message-stats))
+        ;; Calculate cache hit rate: cache-read / (cache-read + input)
+        ;; Avoid division by zero
+        total-input (+ cache-read input-tokens)
+        cache-hit-rate (if (pos? total-input)
+                         (/ (double cache-read) total-input)
+                         0.0)]
+    {::total-cost-usd (double (:total-cost session-stats))
+     ::total-sessions (long (:total-sessions session-stats))
+     ::total-messages (long (:total-messages message-stats))
+     ::tokens {:input input-tokens
+               :output (long (:output-tokens message-stats))
+               :cache-read cache-read
+               :cache-creation (long (:cache-creation message-stats))}
+     ::cache-hit-rate cache-hit-rate}))
 
 (comment
   ;; REPL exploration
