@@ -82,8 +82,10 @@
   (let [running (running-agents)
         running-ids (set (map ::agent/ai-session-id running))
         completed (completed-sessions 50)
-        ;; Filter out sessions that are currently running
-        completed-not-running (remove #(running-ids (:xt/id %)) completed)
+        ;; Filter out sessions that are currently running or don't have agent-session-id
+        completed-not-running (->> completed
+                                   (remove #(running-ids (:xt/id %)))
+                                   (filter ::ai/agent-session-id))
         ;; Batch fetch message counts to avoid N+1
         msg-counts (message-counts-by-session)]
     {:running running
@@ -149,13 +151,12 @@
                         :type :running
                         ;; Use log file mtime for sorting, fallback to max long
                         :sort-time (or (log-file-mtime id) Long/MAX_VALUE)})
-        ;; Build completed rows - extract 4-char hex from "ses-UUID"
+        ;; Build completed rows - use agent-session-id for log file lookup
         completed-rows (for [session completed
-                             :let [full-id (:xt/id session)
-                                   short-id (when full-id
-                                              (subs full-id 4 (min 8 (count full-id))))
+                             :let [;; Use the stored agent session ID (4-char hex) for log files
+                                   agent-sid (::ai/agent-session-id session)
                                    started-at (::ai/started-at session)]]
-                         {:id short-id
+                         {:id agent-sid
                           :namespace (::ai/namespace session)
                           :status (::ai/status session)
                           :session-id (:xt/id session)
@@ -163,7 +164,7 @@
                           :started-at started-at
                           :type :completed
                           ;; Use log file mtime, then started-at, then 0
-                          :sort-time (or (log-file-mtime short-id)
+                          :sort-time (or (when agent-sid (log-file-mtime agent-sid))
                                          (when started-at (.toEpochMilli (.toInstant started-at)))
                                          0)})
         ;; Filter completed if hidden

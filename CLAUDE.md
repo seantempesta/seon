@@ -161,6 +161,29 @@ Config in `.claude/seon-hook.edn`. Hook blocks if tests fail.
 
 ---
 
+## Code Reloading
+
+**The dev hook handles code reloading automatically** after every Edit/Write. You rarely need to reload manually.
+
+### Safe operations:
+```clojure
+(user/reload)  ; Fast reload via clj-reload (what the hook uses)
+(user/reset)   ; Full system restart - use when changing config/components
+(user/status)  ; Check system health
+```
+
+### Avoid raw require with :reload:
+```clojure
+;; Don't do this - bypasses proper cleanup:
+(require 'some.namespace :reload)
+(require 'some.namespace :reload-all)
+```
+
+### If something breaks:
+Restart the server cleanly: `pkill -f "clojure.*seon" && ./bin/run`
+
+---
+
 ## Domain Guidelines
 
 When adding domains:

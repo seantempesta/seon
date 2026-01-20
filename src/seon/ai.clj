@@ -120,6 +120,11 @@
                   [:string {:min 1
                             :description "Initial prompt that started a session"}])
 
+;; Agent session ID - 4-char hex ID used for MCP sessions and log files
+(schema/register! ::agent-session-id
+                  [:string {:min 1
+                            :description "4-char hex Seon session ID (for log files)"}])
+
 ;; Error details
 (schema/register! ::error
                   [:map {:description "Error details"}
@@ -178,7 +183,8 @@
                   [:map
                    [::node ::node]
                    [::namespace {:optional true} ::namespace]
-                   [::prompt {:optional true} ::prompt]])
+                   [::prompt {:optional true} ::prompt]
+                   [::agent-session-id {:optional true} ::agent-session-id]])
 
 ;; Start session response
 (schema/register! ::start-session-response
@@ -232,6 +238,7 @@
                    [::started-at ::timestamp]
                    [::namespace {:optional true} ::namespace]
                    [::prompt {:optional true} ::prompt]
+                   [::agent-session-id {:optional true} ::agent-session-id]
                    [::ended-at {:optional true} ::timestamp]
                    [::input-tokens {:optional true} ::input-tokens]
                    [::output-tokens {:optional true} ::output-tokens]
@@ -317,16 +324,17 @@
    Creates a session entity in XTDB with status :active.
 
    Request keys:
-     ::node      - Required. XTDB node instance
-     ::namespace - Optional. Clojure namespace context (symbol or string)
-     ::prompt    - Optional. Initial prompt
+     ::node             - Required. XTDB node instance
+     ::namespace        - Optional. Clojure namespace context (symbol or string)
+     ::prompt           - Optional. Initial prompt
+     ::agent-session-id - Optional. 4-char hex Seon session ID (for log files)
 
    Response keys:
      ::session-id - The generated session ID
 
    Example:
      (start-session! {::node db ::namespace 'seon.trading ::prompt \"Analyze data\"})"
-  [{::keys [node namespace prompt]}]
+  [{::keys [node namespace prompt agent-session-id]}]
   (let [session-id (generate-id "ses")
         ;; Convert namespace to string for XTDB compatibility
         ns-str (when namespace (str namespace))
@@ -335,7 +343,8 @@
                         ::status :active
                         ::started-at (Instant/now)}
                  ns-str (assoc ::namespace ns-str)
-                 prompt (assoc ::prompt prompt))]
+                 prompt (assoc ::prompt prompt)
+                 agent-session-id (assoc ::agent-session-id agent-session-id))]
     (db/put! node :ai_sessions entity)
     {::session-id session-id}))
 
