@@ -28,3 +28,6 @@
 [submodule "reference-code/babashka-process"]
 	path = reference-code/babashka-process
 	url = https://github.com/babashka/process
+[submodule "reference-code/datastar"]
+	path = reference-code/datastar
+	url = https://github.com/starfederation/datastar.git

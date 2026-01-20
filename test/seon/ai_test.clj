@@ -447,6 +447,70 @@
       (is (vector? messages))
       (is (empty? messages)))))
 
+;;; ---------------------------------------------------------------------------
+;;; Session Stats Tests
+;;; ---------------------------------------------------------------------------
+
+(deftest session-stats-empty-db-test
+  (testing "session-stats returns zeros for empty database"
+    (let [stats (ai/session-stats {::ai/node *test-node*})]
+      (is (map? stats))
+      (is (= 0.0 (::ai/total-cost-usd stats)))
+      (is (= 0 (::ai/total-sessions stats)))
+      (is (= 0 (::ai/total-messages stats)))
+      (is (= {:input 0 :output 0 :cache-read 0 :cache-creation 0}
+             (::ai/tokens stats)))
+      (is (= 0.0 (::ai/cache-hit-rate stats))))))
+
+(deftest session-stats-with-data-test
+  (testing "session-stats aggregates session and message data"
+    ;; Create sessions with cost
+    (let [{session1 ::ai/session-id} (ai/start-session! {::ai/node *test-node*})
+          {session2 ::ai/session-id} (ai/start-session! {::ai/node *test-node*})]
+      ;; End sessions with costs
+      (ai/end-session! {::ai/node *test-node*
+                        ::ai/session-id session1
+                        ::ai/cost-usd 1.50})
+      (ai/end-session! {::ai/node *test-node*
+                        ::ai/session-id session2
+                        ::ai/cost-usd 2.25})
+      ;; Add messages with token counts
+      (ai/add-message! {::ai/node *test-node*
+                        ::ai/session-id session1
+                        ::ai/role "assistant"
+                        ::ai/content "Response 1"
+                        ::ai/input-tokens 100
+                        ::ai/output-tokens 50})
+      (ai/add-message! {::ai/node *test-node*
+                        ::ai/session-id session2
+                        ::ai/role "assistant"
+                        ::ai/content "Response 2"
+                        ::ai/input-tokens 200
+                        ::ai/output-tokens 75})
+      ;; Get stats
+      (let [stats (ai/session-stats {::ai/node *test-node*})]
+        (is (= 3.75 (::ai/total-cost-usd stats)))
+        (is (= 2 (::ai/total-sessions stats)))
+        (is (= 2 (::ai/total-messages stats)))
+        (is (= 300 (:input (::ai/tokens stats))))
+        (is (= 125 (:output (::ai/tokens stats))))))))
+
+(deftest session-stats-cache-hit-rate-test
+  (testing "cache-hit-rate is calculated correctly"
+    ;; With cache-read = 800 and input = 200, rate should be 0.8
+    ;; But we can't directly add Claude cache tokens via add-message!
+    ;; So we test the edge case: no cache tokens means 0.0 rate
+    (let [{session-id ::ai/session-id} (ai/start-session! {::ai/node *test-node*})]
+      (ai/add-message! {::ai/node *test-node*
+                        ::ai/session-id session-id
+                        ::ai/role "assistant"
+                        ::ai/content "Test"
+                        ::ai/input-tokens 100
+                        ::ai/output-tokens 50})
+      (let [stats (ai/session-stats {::ai/node *test-node*})]
+        ;; With input tokens but no cache-read, rate should be 0.0
+        (is (= 0.0 (::ai/cache-hit-rate stats)))))))
+
 (deftest structured-content-test
   (testing "add-message! handles structured content (map)"
     (let [start-result (ai/start-session! {::ai/node *test-node*})
