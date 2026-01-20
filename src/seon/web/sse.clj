@@ -189,12 +189,20 @@
 (defn init-sse!
   "Initialize the SSE broadcast infrastructure.
 
+  Safe to call multiple times - closes old channels before creating new ones.
+  This prevents core.async protocol corruption during reloads.
+
   Options:
   - :max-refresh-ms - Throttle to max refresh rate (milliseconds)
                       If nil, no throttling (updates happen immediately)
 
   Returns: refresh-mult that should be added to requests"
   [& {:keys [max-refresh-ms]}]
+  ;; Close old channel if it exists (prevents protocol corruption on reload)
+  (when-let [old-ch @refresh-ch_]
+    (try
+      (a/close! old-ch)
+      (catch Exception _)))
   (let [<refresh-ch (a/chan (a/dropping-buffer 1))
         _           (reset! refresh-ch_ <refresh-ch)
         refresh-mult (-> (if max-refresh-ms
@@ -204,6 +212,16 @@
     (log/info "SSE broadcast initialized"
               {:throttle-ms max-refresh-ms})
     refresh-mult))
+
+(defn shutdown-sse!
+  "Shut down SSE infrastructure. Call on server halt to prevent protocol corruption."
+  []
+  (when-let [ch @refresh-ch_]
+    (try
+      (a/close! ch)
+      (catch Exception _))
+    (reset! refresh-ch_ nil)
+    (log/info "SSE broadcast shut down")))
 
 (defn wrap-refresh-mult
   "Ring middleware that adds refresh-mult to requests.

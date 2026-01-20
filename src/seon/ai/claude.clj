@@ -546,10 +546,12 @@
     (log/info "Created agent session" {:session-id id :port nrepl-port})
 
     ;; 2. Create AI session for conversation persistence
+    ;;    Store the Seon session ID so completed sessions can find their log files
     (let [{ai-session-id ::ai/session-id}
           (ai/start-session! {::ai/node node
                               ::ai/namespace namespace
-                              ::ai/prompt prompt})
+                              ::ai/prompt prompt
+                              ::ai/agent-session-id id})
           _ (log/info "Created AI session for persistence" {:ai-session-id ai-session-id})
 
           ;; 2b. Create structured agent log for real-time tailing

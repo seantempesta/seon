@@ -33,6 +33,8 @@
 
 (defmethod ig/halt-key! ::http-server
   [_ state]
+  ;; Shut down SSE first to prevent core.async protocol corruption on reload
+  (sse/shutdown-sse!)
   (when-let [server (:server state)]
     (server :timeout 3000)  ;; Graceful shutdown with 3s timeout
     (log/info "HTTP server stopped")))
