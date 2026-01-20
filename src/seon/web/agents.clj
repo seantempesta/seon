@@ -243,10 +243,12 @@
            :skeleton (agents-skeleton)})})
 
 (def agents-sse
-  "SSE handler for live agent updates."
+  "SSE handler for live agent updates.
+   Polls every 2 seconds to detect agent state changes."
   (sse/render-handler
    (fn [_request]
-     (agents-content))))
+     (agents-content))
+   :poll-ms 2000))
 
 (defn toggle-completed-handler
   "Toggle show/hide completed agents and trigger SSE refresh."
@@ -377,10 +379,12 @@
              :skeleton (agent-detail-skeleton agent-id)})}))
 
 (defn agent-detail-sse
-  "SSE handler for agent detail page - streams log updates."
+  "SSE handler for agent detail page - streams log updates.
+   Polls every 1 second to show new log lines in real-time."
   [request]
   (let [agent-id (get-in request [:path-params :agent-id])]
     ((sse/render-handler
       (fn [_req]
-        (agent-detail-content agent-id)))
+        (agent-detail-content agent-id))
+      :poll-ms 1000)
      request)))

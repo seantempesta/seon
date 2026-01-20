@@ -9,10 +9,6 @@
   {[:get "/"]                  handlers/dashboard
    [:post "/"]                 handlers/dashboard-sse
    [:get "/api/health"]        handlers/health
-   [:post "/api/import/start"] handlers/start-import
-   [:post "/api/import/stop"]  handlers/stop-import
-   [:get "/api/import/status"] handlers/job-status
-   [:get "/api/stats"]         handlers/database-stats
    ;; Log viewer routes
    [:get "/logs"]              handlers/log-viewer
    [:post "/logs"]             handlers/log-viewer-sse
