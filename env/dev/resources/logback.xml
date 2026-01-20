@@ -79,6 +79,7 @@
     <logger name="io.undertow" level="WARN" />
     <logger name="org.apache.arrow" level="WARN" />
     <logger name="io.netty" level="WARN" />
+    <logger name="io.micrometer" level="WARN" />
 
     <!-- XTDB loggers - separate file, more verbose during dev -->
     <logger name="xtdb" level="INFO" additivity="false">

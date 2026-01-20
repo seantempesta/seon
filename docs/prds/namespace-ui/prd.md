@@ -1,8 +1,8 @@
 # PRD: Namespace UI
 
-**Status:** Planning
+**Status:** In Progress (Phase 0)
 **Priority:** High
-**Branch:** TBD (after agent-observatory completes)
+**Branch:** feature/namespace-ui
 
 ---
 
@@ -10,15 +10,16 @@
 
 | Phase | Goal | Days | Test |
 |-------|------|------|------|
-| 1 | Viewer system + introspection | 2-3 | `/seon.ai.claude` shows functions, vars, atoms |
+| **0** | **Cleanup trading code** | **1** | **`/` shows namespace dashboard, not import form** |
+| 1 | Viewer system + introspection | 2-3 | `/ns/seon.ai.claude` shows functions, vars, atoms |
 | 2 | Expand/collapse + styling | 2 | Click `{` to expand maps |
 | 3 | Malli schema viewer | 1-2 | Schemas listed with clickable refs |
 | 4 | XTDB entity browser | 2-3 | Forward + reverse refs navigable |
 | 5 | Live atom updates | 2-3 | REPL change → browser update in 100ms |
-| 6 | Dashboard | 2 | `/` shows namespace tree |
+| 6 | Dashboard polish | 1 | Namespace tree expandable, agent counts |
 | 7 | Custom renderers | 2 | `:seon.ui/render-fn` in ctx works |
 
-**Total: 12-18 days**
+**Total: 12-16 days**
 
 All introspection is **runtime** - no hardcoded table names, schema keys, or function names.
 
@@ -94,6 +95,103 @@ Based on research (see `research/viewer-architecture.md`), here are actionable p
 - Malli schemas: Query `malli.core/default-registry` at runtime
 - XTDB tables: Discover via `information_schema` or `xt/q`
 - Atoms: Detect via `(instance? clojure.lang.IAtom (var-get v))`
+
+---
+
+## Phase 0: Cleanup & New Dashboard
+
+**Goal:** Remove trading-specific wiring from startup, replace dashboard with namespace UI, fix noisy logging.
+
+**Duration:** 1 day
+
+**Scope:** Keep `src/seon/trading/` code - just remove wiring. Everything is a namespace going forward.
+
+### 0.1 Dashboard Replacement
+
+Replace trading dashboard at `/` with namespace-focused UI:
+
+**Remove from `seon.web.handlers`:**
+- `start-import`, `stop-import`, `job-status` handlers
+- Trading-specific dashboard-sse content
+
+**Remove from `seon.web.routes`:**
+- `/api/import/start`, `/api/import/stop`, `/api/import/status` routes
+
+**Keep but simplify:**
+- `seon.web.jobs` - archive, not wired to routes
+- `seon.web.stats` - archive, not wired to routes
+
+**New dashboard content in `seon.web.html`:**
+```clojure
+;; Simple namespace-focused dashboard
+(defn dashboard-content []
+  [:main#morph
+   [:h1 "Seon"]
+   [:p "Personal operating system for life"]
+
+   ;; Running agents with link
+   [:section
+    [:h2 "Agents"]
+    [:p (str (count (seon.ai.agent/agents {})) " running")]
+    [:a {:href "/agents"} "View Observatory →"]]
+
+   ;; Loaded seon.* namespaces
+   [:section
+    [:h2 "Namespaces"]
+    (namespace-list (all-seon-namespaces))]])
+```
+
+### 0.2 Logging Cleanup
+
+Fix `env/dev/resources/logback.xml`:
+
+**Add Micrometer filter** (super noisy with gauge registration):
+```xml
+<logger name="io.micrometer" level="WARN" />
+```
+
+**Remove old reference:**
+```xml
+<!-- Remove: <logger name="ml-options" level="DEBUG" /> -->
+```
+
+**Change root level to INFO** (DEBUG is too noisy):
+```xml
+<root level="INFO">
+```
+
+### 0.3 Agent System Understanding (for reference)
+
+Current clean architecture:
+- `seon.ai.claude/launch-agent!` - spawns agent with isolated resources
+- `seon.orchestrator.session` - creates namespace-isolated XTDB + nREPL
+- `seon.db.multi` - per-namespace database attachment
+- `seon.ai.agent` - cross-provider registry and observatory API
+
+Each agent gets:
+- Own XTDB database: `data/namespaces/{namespace}/`
+- Own nREPL server: ports 7889-7999
+- Own persisted ctx atom
+- Log file: `logs/agents/{session-id}.log`
+
+### Test
+
+```
+1. Restart server
+2. http://localhost:8080/ shows "Seon" dashboard with namespace list
+3. No import form, no trading stats
+4. Logs are cleaner (no Micrometer gauge spam)
+5. /agents still works
+```
+
+### Deliverables
+
+- [ ] Remove import handlers from `handlers.clj`
+- [ ] Remove import routes from `routes.clj`
+- [ ] New dashboard content in `html.clj`
+- [ ] Silence Micrometer in `logback.xml`
+- [ ] Root log level INFO
+- [ ] Remove `ml-options` logger reference
 
 ---
 

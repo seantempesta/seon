@@ -33,6 +33,13 @@ You coordinate work and delegate to agents. **Delegate ~90% of implementation to
 
 ## Launching Agents
 
+Use the Clojure agent system (`seon.ai.claude`) to launch agents. This gives you:
+- **Isolated nREPL** - Each agent gets its own REPL on a unique port
+- **Isolated database** - Each agent gets its own XTDB database
+- **Observatory UI** - Watch agent progress at http://localhost:8080/agents
+- **Message persistence** - All messages saved to XTDB for review
+- **Dev hook integration** - Agent edits trigger reload/test/review
+
 ### 1. Ensure a PRD Exists
 
 ```bash
@@ -41,36 +48,82 @@ cp -r docs/prds/_example-feature docs/prds/{feature-name}
 
 Write clear goals, success criteria, and relevant context.
 
-### 2. Point the Agent to the PRD
+### 2. Launch via MCP
 
-**DO THIS:**
-```
-Read docs/prds/unified-dev-hook/prd.md and implement Phase 5.
-```
-
-**NOT THIS:**
-```
-Add a debounce-seconds config option to .claude/seon-hook.edn and
-wire it through to the should-trigger-review? function...
-[walls of instructions]
+```clojure
+;; Via MCP eval tool (preferred for orchestrator)
+(claude/launch-agent! {::ai/node (:seon/xtdb-node integrant.repl.state/system)
+                       ::ai/namespace 'seon.feature-name
+                       ::ai/prompt "Read docs/prds/feature-name/prd.md and implement Phase 1."})
 ```
 
-Smart agents read context and make decisions. Mindless drones follow exact instructions and miss the bigger picture.
+**Point agents to the PRD**, don't give walls of instructions:
 
-### 3. Choose the Right Agent Type
+```clojure
+;; DO THIS:
+::ai/prompt "Read docs/prds/namespace-ui/prd.md and implement Phase 0."
 
-| Type | Use For |
-|------|---------|
-| `general-purpose` | Implementation, research, multi-file changes |
-| `Explore` | Quick searches, finding files (read-only) |
-| `Plan` | Architecture planning |
-
-**For implementation tasks**, the `seon-agent` subagent should auto-delegate based on task description. If not, mention it explicitly:
-```
-Use the seon-agent subagent. Read docs/prds/feature/prd.md and implement Phase 1.
+;; NOT THIS:
+::ai/prompt "Add a debounce-seconds config to .claude/seon-hook.edn and wire it through..."
 ```
 
-**Never use background agents** - they have restricted permissions.
+Smart agents read context and make decisions.
+
+### 3. Monitor and Wait for Completion
+
+**UI Monitoring:**
+- Observatory: http://localhost:8080/agents
+- Dashboard: http://localhost:8080/
+
+**Wait for completion (background task pattern):**
+
+```bash
+# Start agent, get session ID (e.g., "a1b2")
+# Then start background wait:
+tail -f logs/agents/a1b2.log | grep -m1 "COMPLETE"  # run_in_background=true
+
+# Continue other work...
+
+# When ready to check, use TaskOutput with block=true
+# The COMPLETE line includes: subtype, cost, messages, duration
+```
+
+**REPL monitoring:**
+```clojure
+(agent/agents {})                        ; List running agents
+(agent/tail {::agent/session-id "xxxx"}) ; Stream messages channel
+```
+
+### 4. Agent Instructions (Automatic)
+
+Agents automatically receive `.claude/AGENT.md` as part of their prompt. This tells them:
+- They're subagents being observed via Observatory
+- To think out loud and summarize results
+- Project conventions and tool usage
+
+Edit AGENT.md to change what all agents know.
+
+### 5. Choosing Namespaces
+
+The `::ai/namespace` parameter sets:
+- The **default REPL namespace** for the agent's session
+- The **isolated XTDB database** name
+
+**Choose the namespace the agent will primarily work in:**
+
+```clojure
+;; GOOD - agent working on web agents code
+::ai/namespace 'seon.web.agents
+
+;; GOOD - agent building new trading signals feature
+::ai/namespace 'seon.trading.signals
+
+;; BAD - throwaway/task-based names
+::ai/namespace 'seon.fix-bug-123
+::ai/namespace 'seon.observatory-fix
+```
+
+The namespace doesn't restrict the agent's work - they can edit any file and switch REPL namespaces. But it sets their starting context and database isolation.
 
 ---
 
@@ -197,96 +250,25 @@ See `CONVENTIONS.md` for full patterns.
 
 ---
 
-## AI Namespace Hierarchy
-
-The AI namespaces provide a clean, provider-agnostic architecture for AI agent management:
+## AI Architecture (Reference)
 
 ```
 seon.ai                    ; Base schemas + session/message persistence
-├── seon.ai.agent          ; Provider-agnostic agent lifecycle, registry, observatory
-└── seon.ai.claude         ; Claude provider implementation
-    └── seon.ai.claude.sdk ; Claude CLI process management
+├── seon.ai.agent          ; Agent registry, observatory API
+└── seon.ai.claude         ; Claude provider (what you use)
+    └── seon.ai.claude.sdk ; Low-level CLI process management
 ```
 
-### seon.ai (Base)
-
-Provider-agnostic schemas and functions for AI sessions and messages:
+As orchestrator, you primarily use `seon.ai.claude`:
 
 ```clojure
-(require '[seon.ai :as ai])
-
-;; Start a session
-(ai/start-session! {::ai/node xtdb-node
-                    ::ai/namespace 'seon.trading
-                    ::ai/prompt "Analyze data"})
-
-;; Add messages
-(ai/add-message! {::ai/node xtdb-node
-                  ::ai/session-id "ses-abc123"
-                  ::ai/role "assistant"
-                  ::ai/content "I'll analyze..."})
-
-;; Query
-(ai/get-session {::ai/node xtdb-node ::ai/session-id "ses-abc123"})
-(ai/get-messages {::ai/node xtdb-node ::ai/session-id "ses-abc123"})
-(ai/list-sessions {::ai/node xtdb-node ::ai/limit 20})
+(claude/launch-agent! ...)       ; Launch (see "Launching Agents" above)
+(claude/agents {})               ; List running agents
+(claude/tail {::ai/session-id "xxxx"})  ; Stream messages
+(claude/interrupt! {::ai/session-id "xxxx"})  ; Stop agent
 ```
 
-### seon.ai.agent (Provider Extension Points)
-
-Defines multimethods that providers implement and centralized agent registry:
-
-```clojure
-(require '[seon.ai.agent :as agent])
-(require '[seon.ai.claude]) ; Load Claude implementations
-
-;; Multimethods (implemented by providers):
-;; - agent/normalize-message - Convert provider message to ::ai/message
-;; - agent/result-message?   - Check if message is final result
-;; - agent/parse-result      - Extract stats from result message
-
-;; Observatory API (works across all providers):
-(agent/agents {})                              ; List all running agents
-(agent/get-agent {::agent/session-id "a1b2"})  ; Get agent handle
-(agent/tail {::agent/session-id "a1b2"})       ; Stream messages
-(agent/interrupt! {::agent/session-id "a1b2"}) ; Stop agent
-```
-
-### seon.ai.claude (Claude Provider)
-
-Claude-specific agent lifecycle with automatic message persistence:
-
-```clojure
-(require '[seon.ai.claude :as claude])
-
-;; Launch agent (auto-persists all messages to XTDB)
-(claude/launch-agent! {::ai/node xtdb-node
-                       ::ai/namespace 'seon.trading
-                       ::ai/prompt "Implement feature"})
-
-;; Claude-specific observatory (delegates to seon.ai.agent)
-(claude/agents {})                           ; List Claude agents
-(claude/tail {::ai/session-id "a1b2"})       ; Stream messages
-(claude/interrupt! {::ai/session-id "a1b2"}) ; Stop agent
-```
-
-### seon.ai.claude.sdk (Claude CLI)
-
-Low-level process management for Claude Code CLI:
-
-```clojure
-(require '[seon.ai.claude.sdk :as sdk])
-
-;; Spawn a Claude Code process
-(let [{:keys [process stdin stdout]} (sdk/spawn-claude-code {})]
-  (sdk/write-message! stdin (sdk/make-user-message "Hello"))
-  ;; Read responses from stdout...
-  )
-```
-
-### Research Namespace
-
-The `seon.claude.exploration` namespace is kept as a **research/development tool** for protocol investigation, not for production use.
+The lower-level namespaces (`seon.ai`, `seon.ai.agent`, `seon.ai.claude.sdk`) are for extending the system, not daily use.
 
 ---
 

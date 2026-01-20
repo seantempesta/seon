@@ -450,24 +450,41 @@
   {:seon {:command "./bin/mcp-server"
           :env {"SEON_SESSION_ID" session-id}}})
 
+(def ^:private agent-instructions-path ".claude/AGENT.md")
+
+(defn- load-agent-instructions
+  "Load agent instructions from AGENT.md, returning empty string if not found."
+  []
+  (let [f (io/file agent-instructions-path)]
+    (if (.exists f)
+      (str (slurp f) "\n\n---\n\n")
+      "")))
+
 (defn- build-agent-prompt
-  "Build the agent prompt with session context."
+  "Build the agent prompt with session context and AGENT.md instructions."
   [session-id namespace prompt]
-  (str "You have been assigned session ID: " session-id "\n"
-       "Namespace: " namespace "\n\n"
-       "To evaluate Clojure code, use the eval tool:\n\n"
-       "  eval(session_id=\"" session-id "\", code=\"(your-code-here)\")\n\n"
-       "Your context atom `*ctx*` is available. Use namespaced keys:\n\n"
-       "  eval(session_id=\"" session-id "\", code=\"(swap! *ctx* assoc :" namespace "/signals [...])\")\n"
-       "  eval(session_id=\"" session-id "\", code=\"(:" namespace "/signals @*ctx*)\")\n\n"
-       "Helper functions from user namespace (qualify with user/):\n\n"
-       "  eval(session_id=\"" session-id "\", code=\"(user/reload)\")           ; Reload changed code\n"
-       "  eval(session_id=\"" session-id "\", code=\"(user/search \\\"query\\\")\")  ; Web search via Gemini\n"
-       "  eval(session_id=\"" session-id "\", code=\"(user/status)\")           ; System status\n\n"
-       "All state is automatically persisted. You don't need to save anything manually.\n"
-       "Each eval response includes the current namespace (;; ns: " namespace ").\n\n"
+  (str (load-agent-instructions)
+       "# Session Context\n\n"
+       "- **Session ID**: " session-id "\n"
+       "- **Namespace**: " namespace "\n\n"
+       "## MCP Tools\n\n"
+       "To evaluate Clojure code:\n\n"
+       "```\n"
+       "eval(session_id=\"" session-id "\", code=\"(your-code-here)\")\n"
+       "```\n\n"
+       "Your context atom `*ctx*` is available with namespaced keys:\n\n"
+       "```clojure\n"
+       "(swap! *ctx* assoc :" namespace "/data [...])\n"
+       "(:" namespace "/data @*ctx*)\n"
+       "```\n\n"
+       "Helper functions (qualify with user/):\n\n"
+       "```clojure\n"
+       "(user/reload)           ; Reload changed code\n"
+       "(user/search \"query\")  ; Web search via Gemini\n"
+       "(user/status)           ; System status\n"
+       "```\n\n"
        "---\n\n"
-       "TASK:\n" prompt))
+       "# Your Task\n\n" prompt))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Agent Registry (uses shared seon.ai.agent registry)

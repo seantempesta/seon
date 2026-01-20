@@ -98,6 +98,22 @@
               (a/close! <out-ch)))
     <out-ch))
 
+(defn- do-render
+  "Render view and send SSE update if changed. Returns new hash for next iteration."
+  [render-fn req out br ch last-view-hash]
+  (try
+    (when-some [new-view-str (render-fn req)]
+      (let [new-view-hash (Integer/toHexString (hash new-view-str))]
+        (when (not= last-view-hash new-view-hash)
+          (log/debug "Sending SSE update" {:hash new-view-hash :size (count new-view-str)})
+          (->> (patch-elements new-view-hash new-view-str)
+               (br/compress-stream out br)
+               (send! ch)))
+        new-view-hash))
+    (catch Exception e
+      (log/error e "Error rendering SSE view")
+      last-view-hash)))
+
 (defn render-handler
   "Create an SSE handler that re-renders on refresh events.
 
@@ -110,9 +126,11 @@
   - :on-close          - (fn [req]) called when connection closes
   - :br-window-size    - Brotli LZ77 window size (default: 18 = 262KB)
   - :render-on-connect - Render immediately on connect? (default: true)
+  - :poll-ms           - If set, poll for changes at this interval (milliseconds)
+                         Useful for views that don't have explicit refresh triggers.
 
   Returns: Ring handler function for http-kit"
-  [render-fn & {:keys [on-open on-close br-window-size render-on-connect]
+  [render-fn & {:keys [on-open on-close br-window-size render-on-connect poll-ms]
                 :or   {br-window-size    18
                        render-on-connect true}}]
   (fn handler [req]
@@ -127,48 +145,33 @@
       (hk/as-channel req
                      {:on-open
                       (fn hk-on-open [ch]
-           ;; Virtual thread for handling SSE stream
+                        ;; Virtual thread for handling SSE stream
                         (.start (Thread/ofVirtual)
                                 (fn []
                                   (with-open [out (br/byte-array-out-stream)
                                               br  (br/compress-out-stream out
                                                                           :window-size br-window-size)]
                                     (loop [last-view-hash (get-in req [:headers "last-event-id"])]
-                                      (a/alt!!
-                           ;; Cancel signal from on-close
-                                        [<cancel]
-                                        (do (a/close! <ch)
-                                            (a/close! <cancel))
+                                      (let [[val port]
+                                            (if poll-ms
+                                              ;; With polling: wait for refresh, cancel, or timeout
+                                              (a/alts!! [<cancel <ch (a/timeout poll-ms)]
+                                                        :priority true)
+                                              ;; Without polling: wait for refresh or cancel
+                                              (a/alts!! [<cancel <ch]
+                                                        :priority true))]
+                                        (cond
+                                          ;; Cancel signal - stop the loop
+                                          (= port <cancel)
+                                          (do (a/close! <ch)
+                                              (a/close! <cancel))
 
-                           ;; Refresh event
-                                        [<ch]
-                                        ([_]
-                                         (when-some [recur-hash
-                                                     (try
-                                          ;; Render view (chassis h/html returns strings)
-                                                       (when-some [new-view-str (render-fn req)]
-                                                         (let [;; Fast hash for change detection
-                                                               new-view-hash (Integer/toHexString
-                                                                              (hash new-view-str))]
-                                              ;; Only send if view actually changed
-                                                           (when (not= last-view-hash new-view-hash)
-                                                             (log/debug "Sending SSE update"
-                                                                        {:hash new-view-hash
-                                                                         :size (count new-view-str)})
-                                                             (->> (patch-elements new-view-hash new-view-str)
-                                                                  (br/compress-stream out br)
-                                                                  (send! ch)))
-                                                           new-view-hash))
-                                                       (catch Exception e
-                                                         (log/error e "Error rendering SSE view")
-                                            ;; Continue with last hash on error
-                                                         last-view-hash))]
-                                           (recur recur-hash)))
-
-                           ;; Priority for cancellation
-                                        :priority true)))
-                     ;; Close on error or when thread stops
-                                  (hk/close ch)))
+                                          ;; Refresh or timeout - render and continue
+                                          :else
+                                          (when-some [new-hash (do-render render-fn req out br ch last-view-hash)]
+                                            (recur new-hash)))))
+                                    ;; Close on error or when thread stops
+                                    (hk/close ch))))
                         (when on-open (on-open req)))
 
                       :on-close
