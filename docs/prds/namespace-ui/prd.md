@@ -6,6 +6,24 @@
 
 ---
 
+## Phase Summary
+
+| Phase | Goal | Days | Test |
+|-------|------|------|------|
+| 1 | Viewer system + introspection | 2-3 | `/seon.ai.claude` shows functions, vars, atoms |
+| 2 | Expand/collapse + styling | 2 | Click `{` to expand maps |
+| 3 | Malli schema viewer | 1-2 | Schemas listed with clickable refs |
+| 4 | XTDB entity browser | 2-3 | Forward + reverse refs navigable |
+| 5 | Live atom updates | 2-3 | REPL change → browser update in 100ms |
+| 6 | Dashboard | 2 | `/` shows namespace tree |
+| 7 | Custom renderers | 2 | `:seon.ui/render-fn` in ctx works |
+
+**Total: 12-18 days**
+
+All introspection is **runtime** - no hardcoded table names, schema keys, or function names.
+
+---
+
 ## Vision
 
 Every Clojure namespace in Seon becomes a viewable, introspectable "app". The system provides:
@@ -67,251 +85,445 @@ The namespace IS the route. Session ID is optional query param.
 
 ---
 
-## Phase 1: Dynamic Routing + Namespace Introspection
+## Implementation Phases
 
-**Goal:** Any namespace accessible via URL, basic introspection data available.
+Based on research (see `research/viewer-architecture.md`), here are actionable phases.
 
-### 1.1 Dynamic Route Handler
+**Key Principle:** All introspection is RUNTIME. Nothing is hardcoded.
+- Namespaces: `ns-publics`, `ns-interns`, var metadata
+- Malli schemas: Query `malli.core/default-registry` at runtime
+- XTDB tables: Discover via `information_schema` or `xt/q`
+- Atoms: Detect via `(instance? clojure.lang.IAtom (var-get v))`
+
+---
+
+## Phase 1: Viewer System + Basic Introspection
+
+**Goal:** Render any Clojure value as styled Hiccup. Introspect namespaces generically.
+
+**Duration:** 2-3 days
+
+### 1.1 Value Viewer (Multimethod Dispatch)
 
 ```clojure
-;; Route: GET /{namespace}
-;; Examples: /seon.ai.claude, /seon.trading, /seon.health.workout
+(ns seon.ui.viewer)
 
-(defn namespace-handler [{:keys [path-params query-params]}]
-  (let [ns-str (:namespace path-params)
-        session-id (:id query-params)
-        ns-sym (symbol ns-str)]
-    (if (find-ns ns-sym)
-      (render-namespace ns-sym session-id)
-      {:status 404 :body "Namespace not found"})))
+;; Dispatch on type or ::viewer metadata
+(defmulti render-value (fn [v _opts] (or (::viewer (meta v)) (type v))))
+
+(defmethod render-value :default [v _] [:code (pr-str v)])
+(defmethod render-value nil [_ _] [:span.text-gray-400 "nil"])
+(defmethod render-value Boolean [v _] [:span.text-blue-600 (str v)])
+(defmethod render-value Number [v _] [:span.text-green-600 (str v)])
+(defmethod render-value String [v _] [:span.text-amber-600 (pr-str v)])
+(defmethod render-value clojure.lang.Keyword [v _] [:span.text-purple-600 (str v)])
+(defmethod render-value clojure.lang.IPersistentMap [m opts] ...)
+(defmethod render-value clojure.lang.IPersistentVector [v opts] ...)
 ```
 
-### 1.2 Namespace Introspection
+### 1.2 Namespace Introspection (Generic, Runtime)
 
 ```clojure
 (ns seon.ns.introspect)
 
 (defn introspect
-  "Return structured data about a namespace.
-
-   Response:
-     {:ns-name    'seon.ai.claude
-      :doc        \"Claude provider namespace...\"
-      :functions  [{:name 'launch-agent! :arglists '([request]) :doc \"...\"}]
-      :vars       [{:name '*default-model* :value \"claude-opus-4-5\"}]
-      :atoms      [{:name 'agent-registry :value-preview \"{2 agents}\"}]
-      :schemas    [{:name ::message-entity :schema [:map ...]}]
-      :requires   ['seon.ai 'seon.schema]}"
+  "Introspect ANY loaded namespace at runtime."
   [ns-sym]
+  (when-let [ns (find-ns ns-sym)]
+    (let [publics (ns-publics ns)]
+      {:ns-name ns-sym
+       :doc (-> ns meta :doc)
+       :functions (->> publics
+                       (filter (fn [[_ v]] (fn? (var-get v))))
+                       (map (fn [[k v]] {:name k
+                                         :arglists (:arglists (meta v))
+                                         :doc (:doc (meta v))})))
+       :vars (->> publics
+                  (filter (fn [[_ v]] (not (fn? (var-get v)))))
+                  (filter (fn [[_ v]] (not (instance? clojure.lang.IAtom (var-get v)))))
+                  (map (fn [[k v]] {:name k :value (var-get v)})))
+       :atoms (->> publics
+                   (filter (fn [[_ v]] (instance? clojure.lang.IAtom (var-get v))))
+                   (map (fn [[k v]] {:name k :atom v})))
+       :requires (ns-aliases ns)})))
+```
+
+### 1.3 Dynamic Route Handler
+
+```clojure
+;; Route: GET /{namespace}
+(defn namespace-handler [{:keys [path-params query-params]}]
+  (let [ns-sym (symbol (:namespace path-params))
+        session-id (:id query-params)]
+    (if-let [data (introspect ns-sym)]
+      (render-namespace-view data session-id)
+      {:status 404 :body "Namespace not found"})))
+```
+
+### Test
+
+```clojure
+;; In REPL:
+(introspect 'seon.ai.claude)
+;; => {:ns-name seon.ai.claude, :functions [...], :atoms [...], ...}
+
+;; In browser:
+;; GET /seon.ai.claude -> renders basic HTML
+```
+
+### Deliverables
+
+- [ ] `seon.ui.viewer` namespace with multimethod dispatch
+- [ ] `seon.ns.introspect/introspect` function (runtime, generic)
+- [ ] Route handler at `/{namespace}`
+- [ ] Basic unstyled HTML output
+
+---
+
+## Phase 2: Expand/Collapse + Styling
+
+**Goal:** Collections expand/collapse, styled with Tailwind.
+
+**Duration:** 2 days
+
+### 2.1 Datastar Expand/Collapse
+
+```clojure
+;; Map viewer with expand/collapse
+(defmethod render-value clojure.lang.IPersistentMap [m opts]
+  (let [id (gensym "map")]
+    [:div {:data-signals (str "{" id ": false}")}
+     [:span.cursor-pointer
+      {:data-on-click (str "$" id " = !$" id "}")}
+      "{"]
+     ;; Collapsed: show count
+     [:span {:data-show (str "!$" id)}
+      [:span.text-gray-400 (str (count m) " entries")]]
+     ;; Expanded: show entries
+     [:div.pl-4 {:data-show (str "$" id)}
+      (for [[k v] m]
+        [:div.flex.gap-2
+         (render-value k opts)
+         (render-value v opts)])]
+     "}"]))
+```
+
+### 2.2 Truncation for Large Values
+
+```clojure
+(defn render-with-truncation [coll {:keys [limit] :or {limit 20}}]
+  (let [total (count coll)
+        visible (take limit coll)]
+    [:div
+     (for [item visible] (render-value item {}))
+     (when (> total limit)
+       [:button.text-blue-500
+        {:data-on-click "..."}
+        (str "+" (- total limit) " more")])]))
+```
+
+### Test
+
+```clojure
+;; In browser:
+;; - Click on `{` to expand/collapse maps
+;; - Large collections show "20 items" collapsed, expand on click
+```
+
+### Deliverables
+
+- [ ] Expand/collapse for maps, vectors, sets
+- [ ] Truncation with "show more" for large collections
+- [ ] Tailwind styling (colors match Clerk/Portal conventions)
+- [ ] Function cards with docstring expand
+
+---
+
+## Phase 3: Malli Schema Viewer (Runtime)
+
+**Goal:** Query and render Malli schemas for any namespace.
+
+**Duration:** 1-2 days
+
+### 3.1 Schema Discovery (Runtime)
+
+Malli schemas are in `malli.core/default-registry`. Query at runtime:
+
+```clojure
+(ns seon.ns.introspect)
+
+(defn schemas-for-namespace
+  "Find all Malli schemas whose keyword namespace matches ns-sym."
+  [ns-sym]
+  (let [ns-str (str ns-sym)
+        registry (malli.registry/schemas malli.core/default-registry)]
+    (->> registry
+         (filter (fn [[k _]]
+                   (and (keyword? k)
+                        (= (namespace k) ns-str))))
+         (map (fn [[k schema]]
+                {:name k
+                 :schema (malli.core/form schema)
+                 :type (malli.core/type schema)})))))
+
+;; Usage:
+(schemas-for-namespace 'seon.ai)
+;; => [{:name :seon.ai/message :schema [:map ...]} ...]
+```
+
+### 3.2 Schema Viewer with Clickable Refs
+
+```clojure
+(defmethod render-value ::schema [{:keys [name schema]} opts]
+  [:div.border.rounded.p-2
+   [:div.font-bold (str name)]
+   [:pre.text-sm.mt-2
+    (render-schema-form schema opts)]])
+
+(defn render-schema-form [form opts]
+  (cond
+    ;; Keyword refs are clickable
+    (keyword? form)
+    [:a.text-purple-600.hover:underline
+     {:href (str "/" (namespace form) "?schema=" (name form))}
+     (str form)]
+
+    ;; Recurse into vectors
+    (vector? form)
+    [:span "[" (interpose " " (map #(render-schema-form % opts) form)) "]"]
+
+    :else (pr-str form)))
+```
+
+### Test
+
+```clojure
+;; GET /seon.ai.claude shows schemas section
+;; Click on ::ai/node navigates to that schema
+```
+
+### Deliverables
+
+- [ ] `schemas-for-namespace` function (runtime query)
+- [ ] Schema viewer component
+- [ ] Clickable cross-references between schemas
+
+---
+
+## Phase 4: XTDB Entity Browser (Generic)
+
+**Goal:** Browse XTDB entities for any namespace/session.
+
+**Duration:** 2-3 days
+
+### 4.1 Table Discovery (Runtime)
+
+XTDB v2 - discover tables dynamically, no hardcoding:
+
+```clojure
+(defn list-tables
+  "List all tables in an XTDB node."
+  [node]
+  (db/q node "SELECT table_name FROM information_schema.tables"))
+
+(defn table-columns
+  "Get columns for a table."
+  [node table-name]
+  (db/q node
+    "SELECT column_name FROM information_schema.columns WHERE table_name = ?"
+    [table-name]))
+
+(defn table-row-count
+  "Count rows in a table."
+  [node table-name]
+  (-> (db/q node (str "SELECT COUNT(*) as cnt FROM " table-name))
+      first :cnt))
+```
+
+### 4.2 Entity Viewer with Forward Refs
+
+```clojure
+(defn render-entity [node entity]
+  [:div.border.rounded.p-2
+   (for [[k v] entity]
+     [:div.flex.gap-2
+      [:span.text-purple-600 (str k)]
+      (if (looks-like-entity-id? v)
+        ;; Clickable link to referenced entity
+        [:a.text-blue-500.hover:underline
+         {:href (str "?entity=" v)}
+         (str v)]
+        (render-value v {}))])])
+
+(defn looks-like-entity-id?
+  "Heuristic: UUIDs, strings starting with known prefixes, etc."
+  [v]
+  (or (uuid? v)
+      (and (string? v) (re-matches #"^[a-z]+-[a-f0-9]+" v))))
+```
+
+### 4.3 Bidirectional References
+
+Find "what references this entity":
+
+```clojure
+(defn references-to
+  "Find all entities that reference target-id in any column."
+  [node target-id]
+  (let [tables (list-tables node)]
+    (->> tables
+         (mapcat (fn [{:keys [table_name]}]
+                   (let [cols (table-columns node table_name)]
+                     (->> cols
+                          (mapcat (fn [{:keys [column_name]}]
+                                    (let [results (db/q node
+                                                   (str "SELECT xt$id FROM " table_name
+                                                        " WHERE " column_name " = ?")
+                                                   [target-id])]
+                                      (when (seq results)
+                                        [{:table table_name
+                                          :column column_name
+                                          :count (count results)}]))))))))
+         (into []))))
+```
+
+### Test
+
+```clojure
+;; GET /seon.ai.claude?id=e45gf shows:
+;; - Tables in that session's DB with row counts
+;; - Click entity -> see details with forward refs
+;; - "Referenced by" section shows reverse refs
+```
+
+### Deliverables
+
+- [ ] `list-tables`, `table-columns` (generic discovery)
+- [ ] Entity viewer with clickable forward refs
+- [ ] `references-to` for bidirectional navigation
+- [ ] Integration with session-specific DBs
+
+---
+
+## Phase 5: Live Atom Updates
+
+**Goal:** Atoms update in real-time via SSE.
+
+**Duration:** 2-3 days
+
+### 5.1 Watch Registry
+
+```clojure
+(ns seon.ui.live)
+
+(defonce watch-registry (atom {}))
+
+(defn watch-atom!
+  "Watch an atom and push updates via SSE. Returns cleanup fn."
+  [session-id atom-var selector]
+  (let [watch-key (keyword "seon.ui.live" session-id)
+        debounce-ms 100
+        last-sent (atom nil)]
+
+    ;; Initial render
+    (sse/merge-fragment session-id selector
+      (render-value @atom-var {}))
+
+    ;; Watch with debounce
+    (add-watch atom-var watch-key
+      (fn [_ _ _ new-val]
+        (future
+          (Thread/sleep debounce-ms)
+          (when (and (= @atom-var new-val)
+                     (not= @last-sent new-val))
+            (reset! last-sent new-val)
+            (sse/merge-fragment session-id selector
+              (render-value new-val {}))))))
+
+    ;; Cleanup
+    (fn [] (remove-watch atom-var watch-key))))
+```
+
+### 5.2 Atom Viewer Component
+
+```clojure
+(defn atom-viewer [atom-var]
+  (let [id (str "atom-" (hash atom-var))]
+    [:div.border.rounded.p-2
+     [:div.flex.items-center.gap-2
+      [:span.font-bold (str (:name (meta atom-var)))]
+      [:span.text-xs.text-green-500 "● live"]]
+     [:div {:id id}
+      (render-value @atom-var {})]]))
+```
+
+### Test
+
+```clojure
+;; In browser: view namespace with atom
+;; In REPL: (swap! some-atom assoc :new-key "value")
+;; Browser updates within 100ms
+```
+
+### Deliverables
+
+- [ ] `watch-atom!` with debounce
+- [ ] SSE integration for pushing updates
+- [ ] Visual "live" indicator
+- [ ] Cleanup on session disconnect
+
+---
+
+## Phase 6: Orchestrator Dashboard
+
+**Goal:** `/` shows namespace tree and active sessions.
+
+**Duration:** 2 days
+
+### 6.1 Namespace Discovery
+
+```clojure
+(defn all-seon-namespaces
+  "Find all loaded seon.* namespaces."
+  []
+  (->> (all-ns)
+       (filter #(str/starts-with? (str (ns-name %)) "seon."))
+       (map ns-name)
+       (sort)))
+
+(defn namespace-tree
+  "Group namespaces into hierarchical tree."
+  [namespaces]
+  ;; seon.ai.claude -> {:seon {:ai {:claude {:_ns 'seon.ai.claude}}}}
   ...)
 ```
 
-**Key decisions:**
-- Only introspect loaded namespaces (use `find-ns`)
-- Atoms show preview, not full value (could be huge)
-- Schemas from `seon.schema` registry for this namespace
-- Functions include arglists and docstrings
+### 6.2 Dashboard View
 
-### 1.3 Basic HTML Renderer
-
-Render introspection data as simple HTML. No styling yet, just structure:
-
-```html
-<h1>seon.ai.claude</h1>
-<p>Claude Code provider namespace...</p>
-
-<h2>Functions (15)</h2>
-<ul>
-  <li>launch-agent! ([request]) - Launch a Claude Code agent...</li>
-  ...
-</ul>
-
-<h2>Vars (2)</h2>
-...
+```clojure
+(defn dashboard-handler [_request]
+  (let [namespaces (all-seon-namespaces)
+        tree (namespace-tree namespaces)
+        sessions (session/list-agent-sessions)]
+    (render-dashboard {:tree tree :sessions sessions})))
 ```
 
 ### Deliverables
 
-- [ ] `seon.ns.introspect/introspect` function
-- [ ] Route handler at `/{namespace}`
-- [ ] Basic HTML template
-- [ ] 404 handling for unknown namespaces
-
----
-
-## Phase 2: Default Renderer (Debug View)
-
-**Goal:** Polished default view useful for debugging and exploration.
-
-### 2.1 Function Display
-
-```
-+-------------------------------------------------------------+
-| launch-agent!                                               |
-| ([{::ai/keys [node namespace prompt] ...}])                 |
-+-------------------------------------------------------------+
-| Launch a Claude Code agent with an isolated Seon session.   |
-|                                                             |
-| Creates everything the agent needs:                         |
-| - Isolated XTDB database for the namespace                  |
-| - Persisted ctx atom for state management                   |
-| ...                                                         |
-+-------------------------------------------------------------+
-```
-
-- Syntax highlighted arglists
-- Collapsible docstrings (expand on click)
-- No invoke button (agents use REPL)
-
-### 2.2 Atom Display (Live Updates)
-
-```
-+-------------------------------------------------------------+
-| agent-registry                                   * live     |
-+-------------------------------------------------------------+
-| {"a1b2" {:session-id "a1b2" :namespace "seon.trading" ...}  |
-|  "f602" {:session-id "f602" :namespace "seon.ai" ...}}      |
-|                                                             |
-| 2 entries                                      [refresh]    |
-+-------------------------------------------------------------+
-```
-
-- Show current value (pretty-printed, truncated if large)
-- SSE for live updates (or poll button)
-- Entry count for collections
-
-### 2.3 Schema Display
-
-```
-+-------------------------------------------------------------+
-| ::launch-agent-request                                      |
-+-------------------------------------------------------------+
-| [:map                                                       |
-|   [::ai/node ::ai/node]                                     |
-|   [::ai/namespace ::ai/namespace]                           |
-|   [::ai/prompt ::ai/prompt]                                 |
-|   [::model {:optional true} ::model]                        |
-|   ...]                                                      |
-+-------------------------------------------------------------+
-```
-
-- Query `seon.schema` registry for schemas in this namespace
-- Pretty-print Malli schemas
-- Link to referenced schemas (clickable `::ai/node`)
-
-### 2.4 DB Entities (Session-Aware)
-
-When viewing with session ID (`?id=e45gf`):
-
-```
-+-------------------------------------------------------------+
-| XTDB Entities (session: e45gf)                              |
-+-------------------------------------------------------------+
-| Table: ai_sessions (1 row)                                  |
-| Table: ai_messages (47 rows)                                |
-|                                                    [browse] |
-+-------------------------------------------------------------+
-```
-
-Without session: show orchestrator DB entities related to namespace.
-
-### Research: Existing Clojure UI Tools
-
-Before implementing, research these for patterns:
-
-| Tool | What to Learn |
-|------|---------------|
-| [Portal](https://github.com/djblue/portal) | Atom/var rendering, lazy loading large values |
-| [Clerk](https://github.com/nextjournal/clerk) | Notebook-style rendering, viewer dispatch |
-| [Reveal](https://github.com/vlaaad/reveal) | REPL integration, value navigation |
-| [XTDB Console](https://github.com/xtdb/xtdb) | Entity browsing patterns |
-| Datomic Console | Entity relationship visualization |
-
-### Deliverables
-
-- [ ] Research doc: `exploration.md` with findings from tools above
-- [ ] Styled function cards with syntax highlighting
-- [ ] Atom viewer with live updates (SSE)
-- [ ] Schema browser with cross-references
-- [ ] DB entity summary (integrates with agent-observatory `/db` browser)
-- [ ] Tailwind styling consistent with agent-observatory
-
----
-
-## Phase 3: Orchestrator Dashboard
-
-**Goal:** `/` shows all namespaces with mini-previews.
-
-### 3.1 Namespace Tree
-
-```
-+-------------------------------------------------------------+
-| Seon Namespaces                                             |
-+-------------------------------------------------------------+
-| > seon.ai                                                   |
-|   +- seon.ai.claude         | 15 fns | 2 atoms | 12 schemas|
-|   +- seon.ai.claude.sdk     |  8 fns | 0 atoms |  7 schemas|
-|   +- seon.ai.agent          |  6 fns | 1 atom  |  9 schemas|
-|   +- seon.ai.gemini         |  3 fns | 0 atoms |  2 schemas|
-| > seon.domains                                              |
-|   +- seon.trading           |  ...   |         |           |
-|   +- seon.health            |  ...   |         |           |
-| > seon.web                                                  |
-|   ...                                                       |
-+-------------------------------------------------------------+
-```
-
-- Hierarchical tree based on namespace segments
-- Click row to navigate to `/seon.ai.claude`
-- Quick stats (fn count, atom count, schema count)
-
-### 3.2 Live Tiles (Mini Views)
-
-```
-+--------------------+ +--------------------+ +--------------------+
-| seon.ai.agent      | | seon.trading       | | seon.health        |
-| -----------------  | | -----------------  | | -----------------  |
-| 2 agents running   | | 5 positions        | | 3 workouts today   |
-| f602: seon.trading | | P&L: +$234.50      | | 450 cal burned     |
-| a1b2: seon.ai      | |                    | |                    |
-|            [open]  | |            [open]  | |            [open]  |
-+--------------------+ +--------------------+ +--------------------+
-```
-
-- Configurable tile sizes (small, medium, large)
-- Each tile shows namespace-specific summary
-- Default: introspection stats
-- Custom: namespace can define `tile-render-fn`
-
-### 3.3 Active Sessions Panel
-
-```
-+-------------------------------------------------------------+
-| Active Sessions                                             |
-+-------------------------------------------------------------+
-| e45gf | seon.trading    | port 7891 | 5 evals |    [view]  |
-| a1b2  | seon.ai.claude  | port 7892 | 47 evals|    [view]  |
-+-------------------------------------------------------------+
-```
-
-- Shows all running sessions (from `session/list-agent-sessions`)
-- Click to navigate to session view
-- Integrates with agent-observatory
-
-### Deliverables
-
-- [ ] `/` route with namespace tree
-- [ ] Tile grid layout (CSS grid, responsive)
+- [ ] `/` route with dashboard
+- [ ] Namespace tree (expandable)
 - [ ] Active sessions panel
-- [ ] Navigation to namespace/session views
+- [ ] Click to navigate
 
 ---
 
-## Phase 4: Custom Renderers
+## Phase 7: Custom Renderers
 
 **Goal:** Namespaces can override default rendering.
 
-### 4.1 Render Function Convention
+**Duration:** 2 days
+
+### 7.1 Render Function Convention
 
 If a namespace's ctx atom contains `:seon.ui/render-fn`, use it:
 
@@ -337,7 +549,7 @@ If a namespace's ctx atom contains `:seon.ui/render-fn`, use it:
     :full  (render-full-dashboard ctx db)))
 ```
 
-### 4.2 View Modes
+### 7.2 View Modes
 
 | Mode | Use Case | Typical Size |
 |------|----------|--------------|
@@ -345,9 +557,7 @@ If a namespace's ctx atom contains `:seon.ui/render-fn`, use it:
 | `:half` | Side-by-side comparison | 50% viewport |
 | `:full` | Dedicated view | Full viewport |
 
-Custom renderers receive view mode and should adapt content accordingly.
-
-### 4.3 Fallback Chain
+### 7.3 Fallback Chain
 
 ```
 1. Check ctx for :seon.ui/render-fn -> use custom renderer
@@ -363,39 +573,16 @@ Custom renderers receive view mode and should adapt content accordingly.
 
 ---
 
-## Phase 5: Tile System / Window Management
+## Phase 8 (Future): Tile System / Window Management
 
 **Goal:** Drag-and-drop tile management, persistent layouts.
 
-### 5.1 Tile Configuration
+**Lower priority** - the basic dashboard covers 80% of use cases.
 
-```clojure
-;; Stored in orchestrator ctx or XTDB
-{:seon.ui/layout
- {:tiles [{:namespace "seon.ai.agent" :size :medium :position [0 0]}
-          {:namespace "seon.trading" :size :large :position [1 0]}
-          {:namespace "seon.health" :size :small :position [0 1]}]}}
-```
-
-### 5.2 Drag-and-Drop
-
-- CSS Grid for layout
-- Drag tiles to reposition
-- Resize handles for changing tile size
-- Persist layout changes to ctx/XTDB
-
-### 5.3 Window Mode (Future)
-
-Eventually: floating windows, minimize/maximize, window snapping.
-
-This is lower priority - the tile system covers 80% of use cases.
-
-### Deliverables
-
-- [ ] Tile size configuration
-- [ ] Drag-and-drop reordering
-- [ ] Layout persistence
-- [ ] Resize handles
+- Tile size configuration
+- Drag-and-drop reordering
+- Layout persistence in XTDB
+- Eventually: floating windows, minimize/maximize
 
 ---
 
@@ -411,11 +598,13 @@ This is lower priority - the tile system covers 80% of use cases.
 
 ## Success Criteria
 
-1. **Phase 1:** Can navigate to any namespace via URL and see basic info
-2. **Phase 2:** Default renderer shows useful debug information
-3. **Phase 3:** Dashboard at `/` shows all namespaces with quick navigation
-4. **Phase 4:** Agent can customize a namespace's rendering
-5. **Phase 5:** User can arrange tiles on dashboard
+1. **Phase 1:** Navigate to `/seon.ai.claude` and see functions, vars, atoms listed
+2. **Phase 2:** Click on `{` to expand/collapse maps in the viewer
+3. **Phase 3:** Navigate to `/seon.ai.claude` and see Malli schemas for that namespace
+4. **Phase 4:** Browse XTDB entities, click ID to navigate, see "Referenced by" section
+5. **Phase 5:** View atom in browser, change in REPL, see browser update within 100ms
+6. **Phase 6:** Navigate to `/` and see tree of all seon.* namespaces
+7. **Phase 7:** Set `:seon.ui/render-fn` in ctx, see custom view render
 
 ---
 
@@ -468,10 +657,19 @@ Once this is working:
 
 ---
 
-## Research Documents
+## Research Documents (Completed)
 
-Create these as we go:
+| Document | Contents |
+|----------|----------|
+| `research/clerk-research.md` | Clerk viewer architecture, why we're building our own |
+| `research/viewer-architecture.md` | Deep dive on Portal, Reveal, XTDB Inspector patterns |
+| `research/chatgpt-research.md` | Surface-level overview (less useful) |
 
-- `exploration.md` - Research on Portal, Clerk, Reveal, etc.
-- `routing-design.md` - Detailed route handler implementation
-- `introspection-api.md` - Full introspection function design
+## Reference Code (Git Submodules)
+
+| Repository | Location | What to Study |
+|------------|----------|---------------|
+| Portal | `reference-code/portal/` | Watch mechanism, datafy/nav, lazy loading |
+| Reveal | `reference-code/reveal/` | Multimethod dispatch, annotation threading |
+| Clerk | `reference-code/clerk/` | Viewer predicates, pagination |
+| XTDB Inspector | `reference-code/xtdb-inspector/` | Reverse lookup queries, entity browser |
