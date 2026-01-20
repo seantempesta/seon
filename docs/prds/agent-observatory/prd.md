@@ -1,8 +1,30 @@
 # PRD: Agent Observatory
 
-**Status:** Draft
+**Status:** In Progress (Phase 2 - Bug Fixes Needed)
 **Priority:** High
-**Branch:** feature/agent-observatory
+**Branch:** feature/agent-isolation
+**Last Updated:** 2026-01-20
+
+---
+
+## Current State
+
+### Completed
+- **Phase 1: Per-agent logging** - `logs/agents/{session-id}.log`
+- **Phase 2.1: Agent list view** - `/agents` route with sorting/filtering
+- **Phase 2.2: Agent detail view** - `/agents/:id` route (partial)
+- **SSE extensions** - `patch-elements` supports `:mode` and `:selector`
+- **Session isolation fix** - Agents can't use orchestrator REPL
+- **Safe reset** - `seon.ai.agent/shutdown-all!` prevents core.async corruption
+
+### Known Bugs
+1. **Log file not found** - Detail page uses wrong ID (ai-session-id vs session-id)
+2. **Toggle may not work** - Datastar signal wiring needs verification
+
+### Files Created
+- `src/seon/ai/agent/log.clj` - Per-agent logging
+- `src/seon/web/agents.clj` - List and detail handlers
+- `test/seon/ai/agent/log_test.clj` - Tests
 
 ---
 
@@ -222,11 +244,12 @@ From `streaming-research.md`:
 
 ## Success Criteria
 
-- [ ] `tail -f logs/agents.log` shows real-time agent activity
-- [ ] Web UI at `/agents` shows all agents
-- [ ] Can click into agent and see live message stream
-- [ ] Can browse XTDB entities at `/db`
-- [ ] Orchestrator can monitor without burning tokens
+- [x] `tail -f logs/agents/{id}.log` shows real-time agent activity (Phase 1)
+- [x] Web UI at `/agents` shows all agents (Phase 2.1)
+- [~] Can click into agent and see log (Phase 2.2 - bug: wrong ID used)
+- [ ] Live SSE streaming for agent detail view
+- [ ] Can browse XTDB entities at `/db` (Phase 2.3)
+- [x] Orchestrator can monitor via background `tail -f` + TaskOutput pattern
 
 ---
 

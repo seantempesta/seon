@@ -19,7 +19,7 @@
    [clojure.tools.namespace.repl :as repl]
    [expound.alpha :as expound]
    [integrant.core :as ig]
-   [integrant.repl :refer [clear go halt prep init reset reset-all]]
+   [integrant.repl :refer [clear go halt prep init reset-all]]
    [integrant.repl.state :as state]
    [seon.ai.gemini :as gemini]
    [seon.config :as config]))
@@ -67,6 +67,29 @@
   For full system restart (when changing config, components), use (reset)."
   []
   (reload/reload))
+
+(defn reset
+  "Safe system reset that shuts down agents before reloading.
+
+  Standard integrant.repl/reset can cause core.async protocol corruption
+  when agents have open channels. This function:
+  1. Shuts down all running agents (closes channels, destroys processes)
+  2. Calls integrant.repl/reset
+
+  This prevents the 'No implementation of method: :exec of protocol:
+  #'clojure.core.async.impl.protocols/Executor' error."
+  []
+  ;; Shut down agents first to prevent core.async protocol corruption
+  (try
+    (require 'seon.ai.agent)
+    (let [shutdown! (resolve 'seon.ai.agent/shutdown-all!)
+          result (shutdown! {})]
+      (when (pos? (:seon.ai.agent/shutdown-count result))
+        (println "Shut down" (:seon.ai.agent/shutdown-count result) "agents before reset")))
+    (catch Exception e
+      (println "Warning: Could not shut down agents:" (.getMessage e))))
+  ;; Now do the standard reset
+  (integrant.repl/reset))
 
 ;; Convenience accessors - now always use state/system
 (defn xtdb-node

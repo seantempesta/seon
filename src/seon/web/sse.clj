@@ -17,14 +17,53 @@
 (defonce ^:private refresh-ch_ (atom nil))
 
 (defn patch-elements
-  "Build a datastar SSE event for patching the main element.
+  "Build a datastar SSE event for patching elements.
 
-  event-id - Hash of the view content (for idempotency)
-  elements - HTML string to patch into main#morph"
-  [event-id elements]
-  (str "event: datastar-patch-elements"
-       "\nid: " event-id
-       "\ndata: elements " (clojure.string/replace elements "\n" "\ndata: elements ")
+  Two call signatures:
+  1. (patch-elements opts elements) - New API with options map
+  2. (patch-elements event-id elements) - Backward compatible
+
+  Options map:
+  - :selector - CSS selector for target element (default: uses element's own ID)
+  - :mode     - Patch mode keyword (default: :outer)
+                :outer   - Morph element into existing element
+                :inner   - Replace inner HTML of existing element
+                :append  - Append inside existing element
+                :prepend - Prepend inside existing element
+                :before  - Insert before existing element
+                :after   - Insert after existing element
+                :replace - Replace existing element entirely
+                :remove  - Remove existing element
+  - :event-id - For idempotency/resumption (hash of content)
+
+  elements - HTML string to patch"
+  [opts-or-event-id elements]
+  (let [{:keys [selector mode event-id]}
+        (if (map? opts-or-event-id)
+          opts-or-event-id
+          {:event-id opts-or-event-id})
+        mode-str (when (and mode (not= mode :outer))
+                   (name mode))]
+    (str "event: datastar-patch-elements"
+         (when event-id (str "\nid: " event-id))
+         (when selector (str "\ndata: selector " selector))
+         (when mode-str (str "\ndata: mode " mode-str))
+         "\ndata: elements " (clojure.string/replace elements "\n" "\ndata: elements ")
+         "\n\n\n")))
+
+(defn execute-script
+  "Build a datastar SSE event for executing JavaScript.
+
+  Options:
+  - :script   - JavaScript code to execute (required)
+  - :event-id - For idempotency/resumption (optional)
+
+  Example:
+  (execute-script {:script \"document.getElementById('chat').scrollTop = 9999999\"})"
+  [{:keys [script event-id]}]
+  (str "event: datastar-execute-script"
+       (when event-id (str "\nid: " event-id))
+       "\ndata: script " (clojure.string/replace script "\n" "\ndata: script ")
        "\n\n\n"))
 
 (defn send!

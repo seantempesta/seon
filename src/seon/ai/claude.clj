@@ -43,6 +43,7 @@
    [clojure.string :as str]
    [seon.ai :as ai]
    [seon.ai.agent :as agent]
+   [seon.ai.agent.log :as agent-log]
    [seon.ai.claude.sdk :as sdk]
    [seon.orchestrator.session :as session]
    [seon.schema :as schema]
@@ -551,6 +552,11 @@
                               ::ai/prompt prompt})
           _ (log/info "Created AI session for persistence" {:ai-session-id ai-session-id})
 
+          ;; 2b. Create structured agent log for real-time tailing
+          agent-logger (agent-log/create-logger! {::agent-log/session-id id})
+          _ (agent-log/log-launch! agent-logger {::agent-log/namespace (str namespace)
+                                                  ::agent-log/port nrepl-port})
+
           ;; 3. Build agent prompt with session context
           full-prompt (build-agent-prompt id namespace prompt)
 
@@ -605,6 +611,9 @@
                                       (log/warn e "Failed to persist message"
                                                 {:session-id id :msg-type msg-type}))))
 
+                                ;; Log to agent log file for real-time tailing
+                                (agent-log/log-sdk-message! agent-logger msg)
+
                                 (log/trace "Agent message" {:session-id id :type msg-type})
                                 (async/>!! messages-ch msg)
 
@@ -642,8 +651,27 @@
                                             ::ai/error {::ai/message (.getMessage e)}})
                           (catch Exception _)))
                       (finally
+                        ;; If status is still :running, the process ended without
+                        ;; sending a result message (crash, external kill, etc.)
+                        (when (= :running @status-atom)
+                          (log/info "Agent reader ended without result message"
+                                    {:session-id id})
+                          (reset! status-atom :terminated)
+                          ;; End AI session as terminated
+                          (try
+                            (ai/end-session! {::ai/node node
+                                              ::ai/session-id ai-session-id
+                                              ::ai/status :terminated})
+                            (catch Exception _)))
+                        ;; Clean up channels
                         (close! messages-ch)
-                        (close! result-ch))))
+                        (close! result-ch)
+                        ;; Close agent logger
+                        (agent-log/close-logger! agent-logger)
+                        ;; Remove from registry now that agent is done
+                        (swap! agent/agent-registry dissoc id)
+                        (log/info "Agent cleanup complete" {:session-id id
+                                                            :final-status @status-atom}))))
 
           ;; 7. Build close function that cleans up everything
           close-fn (fn close-agent []
@@ -656,6 +684,8 @@
                      ;; Close channels
                      (close! messages-ch)
                      (close! result-ch)
+                     ;; Close agent logger
+                     (agent-log/close-logger! agent-logger)
                      ;; End AI session as interrupted if still active
                      (when (= :running @status-atom)
                        (try
