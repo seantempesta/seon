@@ -137,6 +137,9 @@
       [:link {:rel "preconnect" :href "https://fonts.googleapis.com"}]
       [:link {:rel "preconnect" :href "https://fonts.gstatic.com" :crossorigin "anonymous"}]
       [:link {:rel "stylesheet" :href jetbrains-mono-cdn}]
+      ;; Highlight.js for syntax highlighting in code blocks
+      [:link {:rel "stylesheet"
+              :href "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css"}]
       [:script {:src tailwind-cdn}]
       [:script {:defer "defer" :type "module" :src datastar-cdn}]
       [:style {:type "text/tailwindcss"} custom-theme]
@@ -149,6 +152,18 @@
         .animate-skeleton { animation: skeleton-pulse 1.5s ease-in-out infinite; }
       "]]
      [:body {:class "bg-base-950 text-text-50 min-h-screen p-4 font-mono antialiased"}
+      ;; Highlight.js scripts at end of body for faster page load
+      [:script {:src "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"}]
+      [:script {:src "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/clojure.min.js"}]
+      [:script {:src "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"}]
+      [:script {:src "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/diff.min.js"}]
+      ;; Initialize highlight.js and re-run after Datastar morphs
+      [:script "
+        document.addEventListener('DOMContentLoaded', () => hljs.highlightAll());
+        document.addEventListener('datastar-morph', () => {
+          document.querySelectorAll('pre code:not(.hljs)').forEach(el => hljs.highlightElement(el));
+        });
+      "]
       [:div {:class "max-w-7xl mx-auto"}
        ;; Datastar init div - auto-POSTs on load and reconnects on online event
        [:div {:data-init on-load-js
