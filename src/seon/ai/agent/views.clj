@@ -223,19 +223,23 @@
     [:span {:class (or value-class "text-text-200 break-all")} value]]))
 
 (defn- hover-code-block
-  "Code block for hover cards with optional label."
-  ([code] (hover-code-block nil code))
-  ([label code]
+  "Code block for hover cards with optional label and language for syntax highlighting.
+   language - one of \"clojure\", \"bash\", \"diff\" or nil for plain text"
+  ([code] (hover-code-block nil code nil))
+  ([label code] (hover-code-block label code nil))
+  ([label code language]
    (let [lines (str/split-lines (or code ""))
          truncated? (> (count lines) hover-preview-lines)
-         display-lines (if truncated? (take hover-preview-lines lines) lines)]
+         display-lines (if truncated? (take hover-preview-lines lines) lines)
+         lang-class (when language (str "language-" language))]
      [:div {:class "mt-1"}
       (when label
         [:div {:class "text-text-400 text-2xs mb-0.5"} label])
-      [:div {:class "bg-base-900 rounded p-1.5 overflow-x-auto whitespace-pre text-2xs"}
-       (str/join "\n" display-lines)
-       (when truncated?
-         [:div {:class "text-text-500 mt-1"} (str "... " (- (count lines) hover-preview-lines) " more lines")])]])))
+      [:pre {:class "bg-base-900 rounded p-1.5 overflow-x-auto text-2xs"}
+       [:code {:class lang-class}
+        (str/join "\n" display-lines)
+        (when truncated?
+          [:span {:class "text-text-500 block mt-1"} (str "... " (- (count lines) hover-preview-lines) " more lines")])]]])))
 
 (defn- hover-diff-block
   "Diff block for hover cards showing old/new strings."
@@ -247,18 +251,20 @@
            display (if truncated?
                      (str (str/join "\n" (take hover-preview-lines lines)) "\n...")
                      old-str)]
-       [:div {:class "bg-error/10 rounded p-1.5 overflow-x-auto whitespace-pre text-2xs text-error/80"}
-        [:span {:class "text-error font-medium"} "- "]
-        display]))
+       [:pre {:class "bg-error/10 rounded p-1.5 overflow-x-auto text-2xs text-error/80"}
+        [:code {:class "language-clojure"}
+         [:span {:class "text-error font-medium"} "- "]
+         display]]))
    (when (not (str/blank? new-str))
      (let [lines (str/split-lines new-str)
            truncated? (> (count lines) hover-preview-lines)
            display (if truncated?
                      (str (str/join "\n" (take hover-preview-lines lines)) "\n...")
                      new-str)]
-       [:div {:class "bg-success/10 rounded p-1.5 overflow-x-auto whitespace-pre text-2xs text-success/80"}
-        [:span {:class "text-success font-medium"} "+ "]
-        display]))])
+       [:pre {:class "bg-success/10 rounded p-1.5 overflow-x-auto text-2xs text-success/80"}
+        [:code {:class "language-clojure"}
+         [:span {:class "text-success font-medium"} "+ "]
+         display]]))])
 
 ;;; ---------------------------------------------------------------------------
 ;;; Agent Summary View - :seon.ai.agent/summary
@@ -421,7 +427,17 @@
         stats (compute-diff-stats old_string new_string)
         stats-str (format-diff-stats stats)
         old-preview (truncate old_string 60)
-        new-preview (truncate new_string 60)]
+        new-preview (truncate new_string 60)
+        ;; Detect language from file extension
+        lang (when file_path
+               (cond
+                 (str/ends-with? file_path ".clj") "clojure"
+                 (str/ends-with? file_path ".cljs") "clojure"
+                 (str/ends-with? file_path ".cljc") "clojure"
+                 (str/ends-with? file_path ".edn") "clojure"
+                 (str/ends-with? file_path ".sh") "bash"
+                 :else nil))
+        lang-class (when lang (str "language-" lang))]
     [:span {:class "flex gap-2 flex-1 min-w-0 items-start"}
      [:span {:class "text-log-tool font-medium shrink-0"} "Edit"]
      [:span {:class "text-text-50 shrink-0"
@@ -439,26 +455,24 @@
        (when (not (str/blank? old_string))
          [:div {:class "text-error/80"}
           [:span {:class "text-error font-medium"} "- "]
-          [:span {:class "whitespace-pre-wrap break-all"}
-           (if (> (count old_string) 200)
-             [:details
-              [:summary {:class "cursor-pointer list-none inline"}
-               old-preview
-               [:span {:class "text-info ml-1"} (str "+" (- (count old_string) 60) " more")]]
-              [:div {:class "whitespace-pre-wrap"} old_string]]
-             old_string)]])
+          (if (> (count old_string) 200)
+            [:details
+             [:summary {:class "cursor-pointer list-none inline"}
+              [:code {:class lang-class} old-preview]
+              [:span {:class "text-info ml-1"} (str "+" (- (count old_string) 60) " more")]]
+             [:pre [:code {:class lang-class} old_string]]]
+            [:code {:class lang-class} old_string])])
        ;; New string (green)
        (when (not (str/blank? new_string))
          [:div {:class "text-success/80"}
           [:span {:class "text-success font-medium"} "+ "]
-          [:span {:class "whitespace-pre-wrap break-all"}
-           (if (> (count new_string) 200)
-             [:details
-              [:summary {:class "cursor-pointer list-none inline"}
-               new-preview
-               [:span {:class "text-info ml-1"} (str "+" (- (count new_string) 60) " more")]]
-              [:div {:class "whitespace-pre-wrap"} new_string]]
-             new_string)]])]]]))
+          (if (> (count new_string) 200)
+            [:details
+             [:summary {:class "cursor-pointer list-none inline"}
+              [:code {:class lang-class} new-preview]
+              [:span {:class "text-info ml-1"} (str "+" (- (count new_string) 60) " more")]]
+             [:pre [:code {:class lang-class} new_string]]]
+            [:code {:class lang-class} new_string])])]]]))
 
 (defmethod render-tool-hover "Edit"
   [_tool-name parsed-input _raw-input]
@@ -545,17 +559,17 @@
         [:span {:class "text-text-200"} description]
         [:details {:class "text-text-400 mt-0.5" :data-preserve-attr "open"}
          [:summary {:class "cursor-pointer list-none text-2xs text-info"} "cmd"]
-         [:div {:class "pl-2 border-l-2 border-log-tool/30 whitespace-pre-wrap break-all font-mono"}
-          command]]]
+         [:pre {:class "pl-2 border-l-2 border-log-tool/30"}
+          [:code {:class "language-bash"} command]]]]
        ;; No description - show command directly
        (if long?
          [:details {:class "text-text-200 min-w-0" :data-preserve-attr "open"}
           [:summary {:class "cursor-pointer list-none truncate"}
-           cmd-preview
+           [:code {:class "language-bash"} cmd-preview]
            [:span {:class "text-info ml-1"} "..."]]
-          [:div {:class "pl-2 border-l-2 border-log-tool/30 whitespace-pre-wrap break-all"}
-           command]]
-         [:span {:class "text-text-200 truncate"} command]))
+          [:pre {:class "pl-2 border-l-2 border-log-tool/30"}
+           [:code {:class "language-bash"} command]]]
+         [:code {:class "language-bash text-text-200 truncate"} command]))
      (when timeout
        [:span {:class "text-text-500 text-2xs shrink-0"} (str "timeout=" timeout "ms")])]))
 
@@ -566,7 +580,7 @@
      [:div {:class "space-y-1"}
       (when description
         (hover-line "description" description "text-text-200"))
-      (hover-code-block "command" command)
+      (hover-code-block "command" command "bash")
       (when timeout
         (hover-line "timeout" (str timeout "ms")))])))
 
@@ -603,12 +617,21 @@
 (defmethod render-tool-hover "Write"
   [_tool-name parsed-input _raw-input]
   (let [{:keys [file_path content]} parsed-input
-        line-count (count-lines content)]
+        line-count (count-lines content)
+        ;; Detect language from file extension
+        lang (when file_path
+               (cond
+                 (str/ends-with? file_path ".clj") "clojure"
+                 (str/ends-with? file_path ".cljs") "clojure"
+                 (str/ends-with? file_path ".cljc") "clojure"
+                 (str/ends-with? file_path ".edn") "clojure"
+                 (str/ends-with? file_path ".sh") "bash"
+                 :else nil))]
     (hover-card
      [:div {:class "space-y-1"}
       (hover-line "path" file_path "text-text-50")
       (hover-line "lines" (str line-count))
-      (hover-code-block "content preview" content)])))
+      (hover-code-block "content preview" content lang)])))
 
 ;; mcp__seon__eval - show Clojure code
 (defmethod render-tool-html "mcp__seon__eval"
@@ -625,16 +648,17 @@
      (if multi-line?
        [:details {:class "text-text-200 min-w-0 flex-1" :data-preserve-attr "open"}
         [:summary {:class "cursor-pointer list-none"}
-         [:span {:class "text-eval/70"} preview]
+         [:code {:class "language-clojure text-eval/70"} preview]
          [:span {:class "text-info ml-1 text-2xs"} (str (count code-lines) " lines")]]
-        [:div {:class "pl-2 border-l-2 border-eval/30 whitespace-pre-wrap break-all mt-1"}
-         (if (> (count code-lines) code-preview-lines)
-           [:span
-            (str/join "\n" (take code-preview-lines code-lines))
-            [:div {:class "text-info text-2xs mt-1"}
-             (str "... " (- (count code-lines) code-preview-lines) " more lines")]]
-           code)]]
-       [:span {:class "text-eval/70 truncate"} preview])
+        [:pre {:class "pl-2 border-l-2 border-eval/30 mt-1"}
+         [:code {:class "language-clojure"}
+          (if (> (count code-lines) code-preview-lines)
+            [:span
+             (str/join "\n" (take code-preview-lines code-lines))
+             [:span {:class "text-info text-2xs block mt-1"}
+              (str "... " (- (count code-lines) code-preview-lines) " more lines")]]
+            code)]]]
+       [:code {:class "language-clojure text-eval/70 truncate"} preview])
      (when timeout_ms
        [:span {:class "text-text-500 text-2xs shrink-0"} (str timeout_ms "ms")])]))
 
@@ -647,7 +671,7 @@
       (when session_id (hover-line "session" session_id))
       (hover-line "lines" (str (count code-lines)))
       (when timeout_ms (hover-line "timeout" (str timeout_ms "ms")))
-      (hover-code-block "code" code)])))
+      (hover-code-block "code" code "clojure")])))
 
 ;; Task tool - show agent launch info
 (defmethod render-tool-html "Task"
@@ -670,7 +694,8 @@
       (when description
         (hover-line "description" description))
       (when prompt
-        (hover-code-block "prompt" prompt))])))
+        ;; Prompts are typically plain text, not code
+        (hover-code-block "prompt" prompt nil))])))
 
 ;; TodoWrite tool - show todo count
 (defmethod render-tool-html "TodoWrite"
