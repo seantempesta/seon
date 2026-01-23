@@ -3,10 +3,10 @@
   (:require [integrant.core :as ig]
             [org.httpkit.server :as hk]
             [taoensso.timbre :as log]
+            [seon.ai.agent :as ai-agent]
             [seon.web.routes :as routes]
             [seon.web.jobs :as jobs]
             [seon.web.agents :as agents]
-            [seon.web.logs :as logs]
             [seon.web.sse :as sse]))
 
 (defmethod ig/init-key ::http-server
@@ -14,14 +14,11 @@
   ;; Initialize modules with XTDB node
   (when node
     (jobs/init! node)
-    (agents/init! node))
+    (agents/init! node)
+    (ai-agent/init! node))
 
   ;; Initialize SSE broadcast infrastructure with 100ms throttle
   (let [refresh-mult (sse/init-sse! :max-refresh-ms 100)]
-
-    ;; Initialize log viewer with state watcher
-    (logs/init-log-watcher!)
-
     ;; Wrap handler with SSE middleware
     ;; Use var wrapper so handler picks up namespace reloads
     (let [handler-fn (or handler #'routes/handler)

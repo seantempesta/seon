@@ -342,6 +342,12 @@
       (let [result (nrepl-eval port code (or timeout_ms default-timeout-ms) nrepl-session-id)]
         (log-debug "Eval result:" (pr-str result))
 
+        ;; Auto-interrupt on timeout (Phase 0.5) - the eval thread continues running
+        ;; after timeout, so we send an interrupt to kill it
+        (when (and (= (:ex result) "timeout") nrepl-session-id)
+          (log-debug "Timeout detected, sending interrupt to session:" nrepl-session-id)
+          (nrepl-interrupt port nrepl-session-id))
+
         ;; Record eval complete for agent sessions (Phase 4c)
         (record-activity! effective-session :complete nil)
 

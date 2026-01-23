@@ -46,12 +46,17 @@
 
 (schema/register! ::tool-name
                   [:enum {:description "The tool that triggered the event"}
-                   "Edit" "Write"])
+                   "Edit" "Write" "TodoWrite"])
 
 (schema/register! ::tool-input
                   [:map {:description "Tool-specific input parameters"}
                    [:file_path {:optional true} :string]
-                   [:filePath {:optional true} :string]])
+                   [:filePath {:optional true} :string]
+                   [:todos {:optional true}
+                    [:vector [:map
+                              [:content :string]
+                              [:status [:enum "pending" "in_progress" "completed"]]
+                              [:activeForm :string]]]]])
 
 (schema/register! ::session-id
                   [:string {:description "Claude Code session identifier"}])
@@ -442,15 +447,26 @@
                                         :tool tool-name
                                         :file file-path})
 
-    ;; Skip non-relevant events
-    (when-not (and (or (= event-name "PreToolUse")
+    ;; Handle TodoWrite events specially - just record to XTDB, no other processing
+    (if (and (= event-name "PostToolUse") (= tool-name "TodoWrite"))
+      (let [session-id (:session_id event)
+            todos (get-in event [:tool_input :todos])]
+        (when (and session-id todos)
+          (context/record-todos! {::context/xtdb-node xtdb-node
+                                   ::context/session-id session-id
+                                   ::context/todos todos}))
+        (success-response @feedback))
+
+      ;; Skip non-relevant events (not Edit/Write)
+      (if-not (and (or (= event-name "PreToolUse")
                        (= event-name "PostToolUse"))
                    (or (= tool-name "Edit")
-                       (= tool-name "Write")))
-      (log/debug "Skipping non-relevant event")
-      (success-response @feedback))
+                        (= tool-name "Write")))
+        (do
+          (log/debug "Skipping non-relevant event")
+          (success-response @feedback))
 
-    ;; Skip non-Clojure files
+        ;; Skip non-Clojure files
     (if-not (codebase/clojure-file? {::codebase/file-path file-path})
       (do
         (log/debug "Skipping non-Clojure file" file-path)
@@ -576,7 +592,7 @@
                                               (when-let [review-text (stage-review xtdb-node config unit-result)]
                                                 (swap! feedback conj review-text)))
 
-                                            (success-response @feedback)))))))))))))))))))
+                                            (success-response @feedback)))))))))))))))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Development Helpers (REPL)

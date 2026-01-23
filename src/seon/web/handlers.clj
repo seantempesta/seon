@@ -19,13 +19,22 @@
    :headers {"Content-Type" "text/html; charset=utf-8"}
    :body (html/shim-page)})
 
-;; SSE handler for dashboard updates
+;; ---------------------------------------------------------------------------
+;; SSE Handlers (use var references for hot reload support)
+;; ---------------------------------------------------------------------------
+;; Pattern: Define render fn separately, pass var reference to render-handler.
+;; This enables hot reload because vars deref to current binding on each call.
+;; The after-ns-reload hook ensures handler objects are recreated on reload.
+
+(defn- dashboard-sse-render
+  "Render function for dashboard SSE. Defined separately for hot reload."
+  [_request]
+  (let [running-agents (agent/agents {})]
+    (html/dashboard-content running-agents)))
+
 (def dashboard-sse
-  (sse/render-handler
-   (fn [_request]
-     ;; Render namespace-focused dashboard content
-     (let [running-agents (agent/agents {})]
-       (html/dashboard-content running-agents)))))
+  "SSE handler for dashboard updates."
+  (sse/render-handler #'dashboard-sse-render))
 
 (defn parse-form-body
   "Parse form-urlencoded body into a map."
@@ -47,15 +56,18 @@
    :headers {"Content-Type" "text/html; charset=utf-8"}
    :body (html/log-viewer-shim)})
 
+(defn- log-viewer-sse-render
+  "Render function for log viewer SSE. Defined separately for hot reload."
+  [_request]
+  (logs/refresh-logs!)
+  (let [state (logs/get-state)
+        filtered-entries (logs/get-filtered-entries)]
+    (html/log-viewer-content
+     (assoc state :entries filtered-entries))))
+
 (def log-viewer-sse
-  "SSE handler for live log updates."
-  (sse/render-handler
-   (fn [_request]
-     ;; Render filtered log entries on each refresh
-     (let [state (logs/get-state)
-           filtered-entries (logs/get-filtered-entries)]
-       (html/log-viewer-content
-        (assoc state :entries filtered-entries))))))
+  "SSE handler for live log updates. Polls every 2 seconds."
+  (sse/render-handler #'log-viewer-sse-render :poll-ms 2000))
 
 (defn log-filter
   "Update log level filter."
@@ -87,16 +99,17 @@
        :headers {"Content-Type" "application/json"}
        :body (json/write-value-as-string {:error (.getMessage e)})})))
 
-(defn log-toggle-scroll
-  "Toggle auto-scroll setting."
-  [_request]
-  (try
-    (logs/toggle-auto-scroll!)
-    (let [auto-scroll (:auto-scroll (logs/get-state))]
-      {:status 200
-       :headers {"Content-Type" "application/json"}
-       :body (json/write-value-as-string {:ok "Auto-scroll toggled" :auto-scroll auto-scroll})})
-    (catch Exception e
-      {:status 500
-       :headers {"Content-Type" "application/json"}
-       :body (json/write-value-as-string {:error (.getMessage e)})})))
+;; ---------------------------------------------------------------------------
+;; Hot Reload Support
+;; ---------------------------------------------------------------------------
+;; clj-reload calls this after reloading the namespace.
+;; Recreates SSE handler objects so they use updated render functions.
+
+(defn after-ns-reload
+  "Called by clj-reload after namespace reload. Recreates SSE handlers."
+  []
+  (alter-var-root #'dashboard-sse
+                  (constantly (sse/render-handler #'dashboard-sse-render)))
+  (alter-var-root #'log-viewer-sse
+                  (constantly (sse/render-handler #'log-viewer-sse-render :poll-ms 2000))))
+

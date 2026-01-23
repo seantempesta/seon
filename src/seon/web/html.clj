@@ -17,20 +17,52 @@
 (def tailwind-cdn
   "https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4")
 
+(def jetbrains-mono-cdn
+  "Google Fonts CDN for JetBrains Mono - excellent readability at small sizes."
+  "https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap")
+
 ;; ========================================
 ;; Custom Theme (Tailwind v4 @theme)
 ;; ========================================
 
 (def custom-theme
   "Custom theme tokens using Tailwind v4 @theme directive.
-   Extends Tailwind's built-in design tokens."
+   Phosphor Terminal theme - warm blacks, cream text, amber accents.
+   See docs/prds/namespace-ui/design-system.md for details."
   "
   @theme {
-    --font-mono: 'SF Mono', ui-monospace, Menlo, Monaco, 'Cascadia Mono', 'Consolas', monospace;
-    --color-success: #22c55e;
-    --color-error: #ef4444;
-    --color-warning: #f59e0b;
-    --color-running: #8b5cf6;
+    /* Fonts - JetBrains Mono for terminal aesthetic */
+    --font-mono: 'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, Monaco, 'Cascadia Mono', monospace;
+
+    /* Base colors (warm blacks) */
+    --color-base-950: #0d0d0c;
+    --color-base-900: #1a1918;
+    --color-base-850: #252422;
+    --color-base-800: #302e2b;
+    --color-base-700: #3d3a36;
+
+    /* Text colors (cream, not white) */
+    --color-text-50: #faf9f7;
+    --color-text-200: #d4d0c8;
+    --color-text-400: #8c8578;
+    --color-text-500: #6b6459;
+
+    /* Semantic colors */
+    --color-signal: #f0b429;
+    --color-success: #34d399;
+    --color-error: #f87171;
+    --color-warning: #fbbf24;
+    --color-info: #60a5fa;
+    --color-eval: #c084fc;
+
+    /* Log type colors */
+    --color-log-launch: #a78bfa;
+    --color-log-message: #60a5fa;
+    --color-log-tool: #fbbf24;
+    --color-log-result: #34d399;
+    --color-log-hook: #22d3ee;
+    --color-log-done: #4ade80;
+    --color-log-error: #f87171;
   }
   ")
 
@@ -52,39 +84,28 @@
 ;; ========================================
 
 (defn nav-bar
-  "Shared navigation component using Tailwind. active-page is :dashboard, :logs, or :agents"
+  "Minimal tab bar navigation. Active: text-50 + 2px amber underline. No background pills."
   [active-page]
-  [:nav {:class "flex gap-1 mb-6 bg-zinc-200 p-1 rounded-lg w-fit"}
-   [:a {:href "/"
-        :class (str "px-4 py-2 rounded-md text-sm font-medium transition-all "
-                    (if (= active-page :dashboard)
-                      "bg-white text-zinc-900 shadow-sm"
-                      "text-zinc-600 hover:text-zinc-900 hover:bg-white/50"))}
-    "Dashboard"]
-   [:a {:href "/agents"
-        :class (str "px-4 py-2 rounded-md text-sm font-medium transition-all "
-                    (if (= active-page :agents)
-                      "bg-white text-zinc-900 shadow-sm"
-                      "text-zinc-600 hover:text-zinc-900 hover:bg-white/50"))}
-    "Agents"]
-   [:a {:href "/logs"
-        :class (str "px-4 py-2 rounded-md text-sm font-medium transition-all "
-                    (if (= active-page :logs)
-                      "bg-white text-zinc-900 shadow-sm"
-                      "text-zinc-600 hover:text-zinc-900 hover:bg-white/50"))}
-    "Logs"]])
+  [:nav {:class "flex gap-6 mb-4 border-b border-base-700"}
+   (for [[page label] [[:dashboard "dashboard"] [:agents "agents"] [:logs "logs"]]]
+     [:a {:href (case page :dashboard "/" :agents "/agents" :logs "/logs")
+          :class (str "pb-2 text-sm font-medium transition-colors "
+                      (if (= active-page page)
+                        "text-text-50 border-b-2 border-signal -mb-px"
+                        "text-text-400 hover:text-text-200"))}
+      label])])
 
 (defn status-badge
-  "Status badge with appropriate colors."
+  "Status badge with Phosphor theme colors."
   [status]
-  (let [base-class "inline-block px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wide"
+  (let [base-class "inline-block px-3 py-1 rounded text-xs font-semibold uppercase tracking-wide"
         status-class (case status
-                       :running "bg-violet-100 text-violet-600"
-                       :completed "bg-green-100 text-green-600"
-                       :failed "bg-red-100 text-red-600"
-                       :cancelled "bg-zinc-100 text-zinc-500"
-                       :stopping "bg-amber-100 text-amber-600"
-                       "bg-zinc-100 text-zinc-500")]
+                       :running "bg-info/20 text-info"
+                       :completed "bg-success/20 text-success"
+                       :failed "bg-error/20 text-error"
+                       :cancelled "bg-base-700 text-text-500"
+                       :stopping "bg-warning/20 text-warning"
+                       "bg-base-700 text-text-500")]
     [:span {:class (str base-class " " status-class)}
      (case status
        :running "Running"
@@ -112,6 +133,10 @@
       [:meta {:charset "UTF-8"}]
       [:meta {:name "viewport" :content "width=device-width, initial-scale=1.0"}]
       [:title title]
+      ;; JetBrains Mono font for terminal aesthetic
+      [:link {:rel "preconnect" :href "https://fonts.googleapis.com"}]
+      [:link {:rel "preconnect" :href "https://fonts.gstatic.com" :crossorigin "anonymous"}]
+      [:link {:rel "stylesheet" :href jetbrains-mono-cdn}]
       [:script {:src tailwind-cdn}]
       [:script {:defer "defer" :type "module" :src datastar-cdn}]
       [:style {:type "text/tailwindcss"} custom-theme]
@@ -123,7 +148,7 @@
         }
         .animate-skeleton { animation: skeleton-pulse 1.5s ease-in-out infinite; }
       "]]
-     [:body {:class "bg-zinc-50 text-zinc-900 min-h-screen p-4 font-sans antialiased"}
+     [:body {:class "bg-base-950 text-text-50 min-h-screen p-4 font-mono antialiased"}
       [:div {:class "max-w-7xl mx-auto"}
        ;; Datastar init div - auto-POSTs on load and reconnects on online event
        [:div {:data-init on-load-js
@@ -162,21 +187,21 @@
   []
   [:div
    ;; Header
-   [:div {:class "mb-8"}
-    [:h1 {:class "text-4xl font-bold tracking-tight"} "Seon"]
-    [:p {:class "text-zinc-500 mt-2"} "Personal operating system for life"]]
+   [:div {:class "mb-4"}
+    [:h1 {:class "text-lg font-bold tracking-tight"} "Seon"]
+    [:p {:class "text-text-400 mt-1 text-sm"} "Personal operating system for life"]]
    ;; Skeleton sections
-   [:div {:class "grid grid-cols-1 lg:grid-cols-2 gap-6"}
+   [:div {:class "grid grid-cols-1 lg:grid-cols-2 gap-4"}
     ;; Agents skeleton
-    [:div {:class "bg-white rounded-lg shadow-sm p-6"}
-     [:div {:class "h-5 w-24 bg-zinc-200 rounded animate-skeleton mb-4"}]
-     [:div {:class "h-8 w-16 bg-zinc-200 rounded animate-skeleton mb-2"}]
-     [:div {:class "h-4 w-32 bg-zinc-200 rounded animate-skeleton"}]]
+    [:div {:class "bg-base-850 rounded p-3"}
+     [:div {:class "h-4 w-20 bg-base-700 rounded animate-skeleton mb-2"}]
+     [:div {:class "h-5 w-24 bg-base-700 rounded animate-skeleton mb-2"}]
+     [:div {:class "h-4 w-28 bg-base-700 rounded animate-skeleton"}]]
     ;; Namespaces skeleton
-    [:div {:class "bg-white rounded-lg shadow-sm p-6"}
-     [:div {:class "h-5 w-32 bg-zinc-200 rounded animate-skeleton mb-4"}]
+    [:div {:class "bg-base-850 rounded p-3"}
+     [:div {:class "h-4 w-24 bg-base-700 rounded animate-skeleton mb-2"}]
      (for [_ (range 5)]
-       [:div {:class "h-4 w-48 bg-zinc-200 rounded animate-skeleton my-2"}])]]])
+       [:div {:class "h-3 w-40 bg-base-700 rounded animate-skeleton my-1"}])]]])
 
 ;; ========================================
 ;; Dashboard Shim Page
@@ -215,10 +240,10 @@
     [:div {:class "space-y-2"}
      (for [[prefix ns-list] (sort-by first grouped)]
        [:div {:class "py-1"}
-        [:div {:class "font-medium text-zinc-700 text-sm"} prefix]
+        [:div {:class "font-medium text-text-200 text-sm"} prefix]
         [:div {:class "pl-4 space-y-0.5"}
          (for [ns-sym ns-list]
-           [:div {:class "font-mono text-xs text-zinc-500 hover:text-zinc-700 cursor-default"}
+           [:div {:class "font-mono text-xs text-text-400 hover:text-text-200 cursor-default"}
             (str ns-sym)])]])]))
 
 (defn dashboard-content
@@ -229,32 +254,29 @@
     (h/html
      [:main#morph
       ;; Header
-      [:div {:class "mb-8"}
-       [:h1 {:class "text-4xl font-bold tracking-tight"} "Seon"]
-       [:p {:class "text-zinc-500 mt-2"} "Personal operating system for life"]]
+      [:div {:class "mb-4"}
+       [:h1 {:class "text-lg font-bold tracking-tight"} "Seon"]
+       [:p {:class "text-text-400 mt-1 text-sm"} "Personal operating system for life"]]
 
       ;; Main content grid
-      [:div {:class "grid grid-cols-1 lg:grid-cols-2 gap-6"}
+      [:div {:class "grid grid-cols-1 lg:grid-cols-2 gap-4"}
        ;; Agents Section
-       [:div {:class "bg-white rounded-lg shadow-sm p-6"}
-        [:h2 {:class "text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-4"}
+       [:div {:class "bg-base-850 rounded p-3"}
+        [:h2 {:class "text-xs font-semibold text-text-400 uppercase tracking-wider mb-2"}
          "Agents"]
-        [:div {:class "text-4xl font-bold font-mono mb-2"}
-         agent-count]
-        [:p {:class "text-zinc-500 text-sm mb-4"}
-         (if (zero? agent-count)
-           "No agents running"
-           (str agent-count " agent" (when (not= 1 agent-count) "s") " running"))]
+        [:div {:class "flex items-baseline gap-2"}
+         [:span {:class "text-lg font-semibold font-mono"} agent-count]
+         [:span {:class "text-xs text-text-400"} (if (zero? agent-count) "agents" "running")]]
         [:a {:href "/agents"
-             :class "inline-flex items-center gap-2 text-sm font-medium text-blue-600 hover:text-blue-700 transition-colors"}
+             :class "inline-flex items-center gap-2 text-sm font-medium text-signal hover:text-warning transition-colors mt-2"}
          "View Observatory"
          [:span {:class "text-lg"} "\u2192"]]]
 
        ;; Namespaces Section
-       [:div {:class "bg-white rounded-lg shadow-sm p-6"}
-        [:h2 {:class "text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-4"}
+       [:div {:class "bg-base-850 rounded p-3"}
+        [:h2 {:class "text-xs font-semibold text-text-400 uppercase tracking-wider mb-2"}
          "Namespaces"]
-        [:p {:class "text-zinc-500 text-sm mb-4"}
+        [:p {:class "text-text-400 text-sm mb-2"}
          (str (count namespaces) " loaded seon.* namespaces")]
         [:div {:class "max-h-64 overflow-y-auto"}
          (namespace-list namespaces)]]]])))
@@ -268,16 +290,16 @@
   []
   [:div
    [:h1 {:class "text-3xl font-bold tracking-tight"} "Log Viewer"]
-   [:p {:class "text-zinc-500 text-sm mt-1 mb-4"} "Connecting..."]
-   [:div {:class "bg-white rounded-lg shadow-sm p-4 mb-4"}
+   [:p {:class "text-text-400 text-sm mt-1 mb-4"} "Connecting..."]
+   [:div {:class "bg-base-850 rounded p-4 mb-4"}
     [:div {:class "flex gap-3 items-center"}
-     [:div {:class "h-9 w-32 bg-zinc-200 rounded animate-skeleton"}]
-     [:div {:class "h-9 w-28 bg-zinc-200 rounded animate-skeleton"}]
-     [:div {:class "h-9 w-36 bg-zinc-200 rounded animate-skeleton"}]]]
-   [:div {:class "bg-zinc-900 rounded-lg p-4 h-96"}
-    [:div {:class "h-4 w-3/4 bg-zinc-700 rounded animate-skeleton mb-2"}]
-    [:div {:class "h-4 w-1/2 bg-zinc-700 rounded animate-skeleton mb-2"}]
-    [:div {:class "h-4 w-2/3 bg-zinc-700 rounded animate-skeleton"}]]])
+     [:div {:class "h-9 w-32 bg-base-700 rounded animate-skeleton"}]
+     [:div {:class "h-9 w-28 bg-base-700 rounded animate-skeleton"}]
+     [:div {:class "h-9 w-36 bg-base-700 rounded animate-skeleton"}]]]
+   [:div {:class "bg-base-900 rounded p-4 h-96"}
+    [:div {:class "h-4 w-3/4 bg-base-700 rounded animate-skeleton mb-2"}]
+    [:div {:class "h-4 w-1/2 bg-base-700 rounded animate-skeleton mb-2"}]
+    [:div {:class "h-4 w-2/3 bg-base-700 rounded animate-skeleton"}]]])
 
 ;; ========================================
 ;; Log Viewer Shim Page
@@ -296,59 +318,74 @@
 ;; ========================================
 
 (defn render-log-entry
-  "Render a single log entry with syntax highlighting."
+  "Render a single log entry with Phosphor terminal styling."
   [{:keys [timestamp level logger message]}]
   (let [level-class (case level
-                      :error "text-red-400"
-                      :warn "text-amber-400"
-                      :info "text-blue-400"
-                      :debug "text-violet-400"
-                      "text-zinc-400")]
-    [:div {:class "flex gap-3 my-0.5 text-[13px]"}
-     [:span {:class "text-zinc-500 shrink-0 w-[75px]"} (subs timestamp 11 19)]
+                      :error "text-log-error"
+                      :warn "text-warning"
+                      :info "text-info"
+                      :debug "text-eval"
+                      "text-text-400")]
+    [:div {:class "flex gap-3 my-0.5 text-xs leading-tight py-0.5 hover:bg-base-800"}
+     [:span {:class "text-text-400 shrink-0 w-[75px]"} (subs timestamp 11 19)]
      [:span {:class (str "font-semibold uppercase shrink-0 w-[50px] " level-class)}
       (str/upper-case (name level))]
-     [:span {:class "text-zinc-500 text-xs shrink-0 w-[200px] truncate opacity-80"} logger]
-     [:span {:class "text-zinc-300 flex-1 break-words"} message]]))
+     [:span {:class "text-text-500 text-xs shrink-0 w-[200px] truncate"} logger]
+     [:span {:class "text-text-50 flex-1 break-words"} message]]))
 
 (defn log-viewer-content
   "Renders the log viewer content for SSE updates."
-  [{:keys [entries level-filter auto-scroll]}]
-  (h/html
-   [:main#morph
-    ;; Header
-    [:h1 {:class "text-3xl font-bold tracking-tight"} "Log Viewer"]
-    [:p {:class "text-zinc-500 text-sm mt-1 mb-4"}
-     (str "Showing " (count entries) " recent entries")]
+  [{:keys [entries level-filter]}]
+  (let [last-entry (last entries)
+        last-time (when last-entry
+                    (try
+                      (java.time.LocalTime/parse (subs (:timestamp last-entry) 11 19))
+                      (catch Exception _ nil)))
+        now (java.time.LocalTime/now)
+        seconds-ago (when last-time
+                      (.getSeconds (java.time.Duration/between last-time now)))]
+    (h/html
+     [:main#morph
+      ;; Header with status
+      [:div {:class "flex items-center justify-between mb-4"}
+       [:div
+        [:h1 {:class "text-3xl font-bold tracking-tight"} "Log Viewer"]
+        [:p {:class "text-text-400 text-sm mt-1"}
+         (str "Showing " (count entries) " recent entries")]]
+       ;; Status indicator
+       (when last-entry
+         [:div {:class "flex items-center gap-2"}
+          [:span {:class (str "w-2 h-2 rounded-full "
+                              (if (and seconds-ago (< seconds-ago 10))
+                                "bg-success animate-pulse"
+                                "bg-text-500"))}]
+          [:span {:class "text-sm text-text-400"}
+           (if seconds-ago
+             (str "Last log: " seconds-ago "s ago")
+             "Live")]])]
 
-    ;; Controls
-    [:div {:class "bg-white rounded-lg shadow-sm p-4 mb-4 flex flex-wrap gap-3 items-center"}
-     [:label {:for "level-filter" :class "text-sm font-medium text-zinc-600 mr-2"} "Level:"]
-     [:select {:id "level-filter"
-               :class "px-3 py-2 border border-zinc-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-               :data-on-change "@post('/api/logs/filter', {contentType: 'form'})"}
-      [:option {:value "all" :selected (= :all level-filter)} "All Levels"]
-      [:option {:value "error" :selected (= :error level-filter)} "Error"]
-      [:option {:value "warn" :selected (= :warn level-filter)} "Warning"]
-      [:option {:value "info" :selected (= :info level-filter)} "Info"]
-      [:option {:value "debug" :selected (= :debug level-filter)} "Debug"]]
+      ;; Controls
+      [:div {:class "bg-base-850 rounded p-4 mb-4 flex flex-wrap gap-3 items-center"}
+       [:label {:for "level-filter" :class "text-sm font-medium text-text-400 mr-2"} "Level:"]
+       [:select {:id "level-filter"
+                 :class "px-3 py-2 border border-base-700 rounded text-sm bg-base-900 text-text-50 focus:outline-none focus:ring-2 focus:ring-signal"
+                 :data-on-change "@post('/api/logs/filter', {contentType: 'form'})"}
+        [:option {:value "all" :selected (= :all level-filter)} "All Levels"]
+        [:option {:value "error" :selected (= :error level-filter)} "Error"]
+        [:option {:value "warn" :selected (= :warn level-filter)} "Warning"]
+        [:option {:value "info" :selected (= :info level-filter)} "Info"]
+        [:option {:value "debug" :selected (= :debug level-filter)} "Debug"]]
 
-     [:button {:class "px-4 py-2 border border-zinc-300 rounded-lg text-sm font-medium hover:bg-zinc-50 transition-colors"
-               :data-on-click "@post('/api/logs/refresh')"}
-      "Refresh Now"]
+       [:button {:class "px-4 py-2 border border-base-700 rounded text-sm font-medium text-text-200 hover:bg-base-800 transition-colors"
+                 :data-on-click "@post('/api/logs/refresh')"}
+        "Refresh Now"]]
 
-     [:button {:class (str "px-4 py-2 rounded-lg text-sm font-medium transition-colors "
-                           (if auto-scroll
-                             "bg-blue-500 text-white"
-                             "border border-zinc-300 hover:bg-zinc-50"))
-               :data-on-click "@post('/api/logs/toggle-scroll')"}
-      (if auto-scroll "Auto-scroll: ON" "Auto-scroll: OFF")]]
-
-    ;; Log Container - dark terminal-style
-    [:div {:class "bg-zinc-900 rounded-lg shadow-sm p-4 font-mono overflow-y-auto"
-           :style "height: calc(100vh - 280px); min-height: 400px;"}
-     (if (seq entries)
-       (for [entry entries]
-         (render-log-entry entry))
-       [:div {:class "text-zinc-500 text-center py-12"}
-        "No log entries match the current filter."])]]))
+      ;; Log Container - dark terminal-style with flex-col-reverse for auto-scroll to bottom
+      [:div {:class "bg-base-900 rounded p-4 font-mono overflow-y-auto flex flex-col-reverse"
+             :style "height: calc(100vh - 280px); min-height: 400px;"}
+       [:div
+        (if (seq entries)
+          (for [entry entries]
+            (render-log-entry entry))
+          [:div {:class "text-text-500 text-center py-12"}
+           "No log entries match the current filter."])]]])))

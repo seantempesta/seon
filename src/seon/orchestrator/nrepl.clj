@@ -110,7 +110,7 @@
   []
   @port-range)
 
-;; Map of namespace -> allocated port
+;; Map of session-id -> allocated port
 (defonce ^:private port-registry (atom {}))
 
 (defn- port-available?
@@ -157,48 +157,48 @@
 (defonce ^:private port-lock (Object.))
 
 (defn allocate-port!
-  "Allocate a port for a namespace.
+  "Allocate a port for a session.
 
-  If the namespace already has a port allocated, returns that port.
+  If the session already has a port allocated, returns that port.
   Otherwise finds the next available port and registers it.
 
   Thread-safe - uses locking to prevent race conditions.
 
   Args:
-    namespace - Namespace symbol
+    session-id - Session ID string
 
   Returns:
     Port number"
-  [namespace]
+  [session-id]
   (locking port-lock
-    (if-let [existing (get @port-registry namespace)]
+    (if-let [existing (get @port-registry session-id)]
       existing
       (let [allocated-ports (set (vals @port-registry))
             port (find-available-port allocated-ports)]
-        (swap! port-registry assoc namespace port)
-        (log/debug "Allocated port for namespace" {:namespace namespace :port port})
+        (swap! port-registry assoc session-id port)
+        (log/debug "Allocated port for session" {:session-id session-id :port port})
         port))))
 
 (defn release-port!
-  "Release a port allocation for a namespace.
+  "Release a port allocation for a session.
 
   Args:
-    namespace - Namespace symbol"
-  [namespace]
-  (when-let [port (get @port-registry namespace)]
-    (swap! port-registry dissoc namespace)
-    (log/debug "Released port for namespace" {:namespace namespace :port port})))
+    session-id - Session ID string"
+  [session-id]
+  (when-let [port (get @port-registry session-id)]
+    (swap! port-registry dissoc session-id)
+    (log/debug "Released port for session" {:session-id session-id :port port})))
 
 (defn get-allocated-port
-  "Get the port allocated to a namespace, or nil if none.
+  "Get the port allocated to a session, or nil if none.
 
   Args:
-    namespace - Namespace symbol
+    session-id - Session ID string
 
   Returns:
     Port number or nil"
-  [namespace]
-  (get @port-registry namespace))
+  [session-id]
+  (get @port-registry session-id))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Custom Middleware for Context Injection
@@ -278,62 +278,67 @@
 ;;; Server Registry
 ;;; ---------------------------------------------------------------------------
 
-;; Map of namespace -> server info
+;; Map of session-id -> server info
 ;; Each entry contains:
 ;; - :server - The nREPL server object
 ;; - :port - Port the server is bound to
 ;; - :ctx - The context atom for this namespace
 ;; - :namespace - The namespace symbol
+;; - :session-id - The session ID
 ;; - :status - :running or :stopped
 (defonce ^:private servers (atom {}))
 
-(defn namespace-server-running?
-  "Check if a namespace has a running nREPL server.
+(defn session-server-running?
+  "Check if a session has a running nREPL server.
 
   Args:
-    namespace - Namespace symbol
+    session-id - Session ID string
 
   Returns:
     Boolean"
-  [namespace]
-  (contains? @servers namespace))
+  [session-id]
+  (contains? @servers session-id))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Server Lifecycle
 ;;; ---------------------------------------------------------------------------
 
 (defn start-namespace-nrepl!
-  "Start an nREPL server for a namespace with injected context.
+  "Start an nREPL server for a session with injected context.
 
   Creates a new nREPL server bound to an available port. All sessions on this
   server will have *ctx* bound to an atom containing the agent context, and
   *ns* bound to the target namespace.
 
   Options:
-    :namespace - The Clojure namespace symbol (required)
-    :db        - XTDB connection for this namespace (optional)
-    :render-fn - Function to render UI updates (optional)
-    :worktree  - Path to git worktree (optional)
-    :port      - Port to bind to (auto-assigned if not specified)
-    :ctx-atom  - Existing ctx atom to use (optional, creates new if not provided)
-                 When provided, the atom is used directly. The caller is responsible
-                 for initializing it with :seon.agent/* keys. This is used by
-                 session.clj to inject persisted ctx atoms.
+    :session-id - The session ID string (required)
+    :namespace  - The Clojure namespace symbol (required)
+    :db         - XTDB connection for this namespace (optional)
+    :render-fn  - Function to render UI updates (optional)
+    :worktree   - Path to git worktree (optional)
+    :port       - Port to bind to (auto-assigned if not specified)
+    :ctx-atom   - Existing ctx atom to use (optional, creates new if not provided)
+                  When provided, the atom is used directly. The caller is responsible
+                  for initializing it with :seon.agent/* keys. This is used by
+                  session.clj to inject persisted ctx atoms.
 
   Returns:
-    Map with :server, :port, :ctx, :namespace, :status on success
+    Map with :server, :port, :ctx, :namespace, :session-id, :status on success
     Map with :status :error or :port-conflict on failure
 
   Throws:
-    ex-info if namespace already has a server"
-  [{:keys [namespace db render-fn worktree port ctx-atom] :as opts}]
+    ex-info if session already has a server"
+  [{:keys [session-id namespace db render-fn worktree port ctx-atom] :as opts}]
+  (when-not session-id
+    (throw (ex-info "session-id is required" {:opts opts})))
   (when-not namespace
     (throw (ex-info "namespace is required" {:opts opts})))
 
-  (when (namespace-server-running? namespace)
-    (throw (ex-info "Namespace already has an nREPL server running"
-                    {:namespace namespace
-                     :port (get-allocated-port namespace)})))
+  (when (session-server-running? session-id)
+    (throw (ex-info "Session already has an nREPL server running"
+                    {:session-id session-id
+                     :namespace namespace
+                     :port (get-allocated-port session-id)})))
 
   (try
     ;; Use provided ctx-atom or create a new one
@@ -347,12 +352,12 @@
           ;; Create the middleware function for this ctx/namespace
           ctx-middleware (make-context-middleware ctx-atom namespace)
 
-          ;; Allocate port
-          port (or port (allocate-port! namespace))
+          ;; Allocate port by session-id (allows multiple agents on same namespace)
+          port (or port (allocate-port! session-id))
 
           ;; Create a var-like wrapper so we can set the descriptor
           ;; We use alter-meta! on a var to attach the descriptor
-          middleware-var (intern *ns* (gensym (str "ctx-middleware-" namespace "-")))
+          middleware-var (intern *ns* (gensym (str "ctx-middleware-" session-id "-")))
           _ (alter-var-root middleware-var (constantly ctx-middleware))
           _ (set-context-descriptor! middleware-var)
 
@@ -365,11 +370,12 @@
                   :port (:port server)
                   :ctx ctx-atom
                   :namespace namespace
+                  :session-id session-id
                   :status :running
                   :middleware-var middleware-var}]
 
-      ;; Register
-      (swap! servers assoc namespace result)
+      ;; Register by session-id (not namespace)
+      (swap! servers assoc session-id result)
 
       ;; Update ctx with the actual port (might differ if auto-assigned)
       ;; Only do this for internally-created atoms; externally provided atoms
@@ -378,43 +384,46 @@
         (swap! ctx-atom assoc :seon.agent/nrepl-port (:port server)))
 
       (log/info "Started namespace nREPL server"
-                {:namespace namespace
+                {:session-id session-id
+                 :namespace namespace
                  :port (:port server)})
 
       result)
 
     (catch java.net.BindException e
-      (release-port! namespace)
+      (release-port! session-id)
       (log/warn "Port conflict starting namespace nREPL"
-                {:namespace namespace :port port :error (.getMessage e)})
+                {:session-id session-id :namespace namespace :port port :error (.getMessage e)})
       {:status :port-conflict
+       :session-id session-id
        :namespace namespace
        :error (str "Port " port " already in use")})
 
     (catch Exception e
-      (release-port! namespace)
+      (release-port! session-id)
       (log/error "Error starting namespace nREPL"
-                 {:namespace namespace :error (.getMessage e)})
+                 {:session-id session-id :namespace namespace :error (.getMessage e)})
       {:status :error
+       :session-id session-id
        :namespace namespace
        :error (.getMessage e)})))
 
 (defn stop-namespace-nrepl!
-  "Stop the nREPL server for a namespace.
+  "Stop the nREPL server for a session.
 
   Closes the server socket and all active connections, cleans up the port
   allocation, and removes the server from the registry.
 
   Args:
-    namespace - Namespace symbol
+    session-id - Session ID string
 
   Returns:
-    Map with :status :stopped, :namespace, :port on success
+    Map with :status :stopped, :session-id, :namespace, :port on success
     nil if no server was running"
-  [namespace]
-  (when-let [{:keys [server port middleware-var]} (get @servers namespace)]
+  [session-id]
+  (when-let [{:keys [server port namespace middleware-var]} (get @servers session-id)]
     (log/info "Stopping namespace nREPL server"
-              {:namespace namespace :port port})
+              {:session-id session-id :namespace namespace :port port})
 
     ;; Stop the server (closes socket and connections)
     (nrepl/stop-server server)
@@ -424,10 +433,11 @@
       (ns-unmap *ns* (symbol (name (.sym middleware-var)))))
 
     ;; Release port and remove from registry
-    (release-port! namespace)
-    (swap! servers dissoc namespace)
+    (release-port! session-id)
+    (swap! servers dissoc session-id)
 
     {:status :stopped
+     :session-id session-id
      :namespace namespace
      :port port}))
 
@@ -438,8 +448,8 @@
     Sequence of stop results"
   []
   (doall
-   (for [namespace (keys @servers)]
-     (stop-namespace-nrepl! namespace))))
+   (for [session-id (keys @servers)]
+     (stop-namespace-nrepl! session-id))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Server Query Functions
@@ -449,35 +459,36 @@
   "List all running namespace nREPL servers.
 
   Returns:
-    Sequence of maps with :namespace, :port, :status, :started-at"
+    Sequence of maps with :session-id, :namespace, :port, :status, :started-at"
   []
-  (for [[ns {:keys [port status ctx]}] @servers]
-    {:namespace ns
+  (for [[session-id {:keys [namespace port status ctx]}] @servers]
+    {:session-id session-id
+     :namespace namespace
      :port port
      :status status
      :started-at (:seon.agent/started-at @ctx)}))
 
-(defn get-namespace-server
-  "Get information about a namespace's nREPL server.
+(defn get-session-server
+  "Get information about a session's nREPL server.
 
   Args:
-    namespace - Namespace symbol
+    session-id - Session ID string
 
   Returns:
     Server info map or nil if not running"
-  [namespace]
-  (get @servers namespace))
+  [session-id]
+  (get @servers session-id))
 
-(defn get-namespace-ctx
-  "Get the context atom for a namespace's nREPL server.
+(defn get-session-ctx
+  "Get the context atom for a session's nREPL server.
 
   Args:
-    namespace - Namespace symbol
+    session-id - Session ID string
 
   Returns:
     The ctx atom or nil if no server running"
-  [namespace]
-  (:ctx (get @servers namespace)))
+  [session-id]
+  (:ctx (get @servers session-id)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Integrant Component

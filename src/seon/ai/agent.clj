@@ -60,7 +60,12 @@
 
      ;; Interrupt an agent
      (agent/interrupt! {::session-id \"a1b2\"})"
-  (:require [seon.ai :as ai]
+  (:require [clojure.java.io :as io]
+            [clojure.java.shell :as shell]
+            [clojure.string :as str]
+            [seon.ai :as ai]
+            [seon.db.node :as db]
+            [seon.ns.view :as view]
             [seon.schema :as schema]
             [taoensso.timbre :as log]))
 
@@ -102,14 +107,16 @@
 
 ;; Agent summary for list views (generic structure)
 (schema/register! ::agent-summary
-                  [:map {:description "Agent summary for list views"}
+                  [:map {:description "Agent summary for list views"
+                         :seon/view :seon.ai.agent/summary}
                    [::session-id ::session-id]
                    [::namespace ::namespace]
                    [::provider ::provider]
                    [::agent-status ::agent-status]
                    ;; Optional provider-specific fields
                    [::nrepl-port {:optional true} :int]
-                   [::ai-session-id {:optional true} :string]])
+                   [::ai-session-id {:optional true} :string]
+                   [::cost-usd {:optional true} [:double {:min 0.0}]]])
 
 ;; Interrupt request
 (schema/register! ::interrupt-request
@@ -404,6 +411,239 @@
     (reset! agent-registry {})
     {::shutdown-count (count agents)
      ::errors @errors}))
+
+;;; ---------------------------------------------------------------------------
+;;; XTDB Node Reference (for completed sessions)
+;;; ---------------------------------------------------------------------------
+
+(defonce xtdb-node (atom nil))
+
+(defn init!
+  "Initialize the agent module with the XTDB node.
+   Called by the server component at startup."
+  [node]
+  (reset! xtdb-node node)
+  (log/info "Agent module initialized with XTDB node"))
+
+;;; ---------------------------------------------------------------------------
+;;; Render Support
+;;; ---------------------------------------------------------------------------
+
+(defn- valid-agent-id?
+  "Validate agent-id is a safe hex string (4 chars)."
+  [agent-id]
+  (and (string? agent-id)
+       (re-matches #"[a-f0-9]{4}" agent-id)))
+
+(defn- read-agent-log
+  "Read the last N lines from an agent's log file."
+  [agent-id max-lines]
+  (if-not (valid-agent-id? agent-id)
+    []
+    (let [log-path (str "logs/agents/" agent-id ".log")
+          f (io/file log-path)]
+      (if (.exists f)
+        (try
+          (let [result (shell/sh "tail" "-n" (str max-lines) log-path)]
+            (if (zero? (:exit result))
+              (str/split-lines (:out result))
+              []))
+          (catch Exception _ []))
+        []))))
+
+(defn- parse-log-line
+  "Parse an agent log line into structured data.
+   Format: timestamp | TYPE | field1 | field2 | ...
+
+   Returns map with :type and type-specific fields:
+   - LAUNCH: :namespace, :port
+   - MESSAGE: :role, :content
+   - TOOL: :tool-name, :input
+   - RESULT: :tool-name, :output
+   - HOOK: :file-type, :tests-status, :gemini-status
+   - COMPLETE: :subtype, :cost, :messages, :duration-ms
+   - ERROR: :error"
+  [line]
+  (when (and line (string? line) (not (str/blank? line)))
+    (let [parts (str/split line #" \| ")
+          timestamp (first parts)
+          log-type (when (second parts) (str/trim (second parts)))]
+      (when log-type
+        (case log-type
+          "LAUNCH"
+          (let [[_ _ ns-str port-str] parts]
+            {:type "LAUNCH"
+             :timestamp timestamp
+             :namespace ns-str
+             :port (when port-str
+                     (when-let [[_ p] (re-find #"port=(\d+)" port-str)]
+                       (parse-long p)))})
+
+          "MESSAGE"
+          (let [[_ _ role content] parts]
+            {:type "MESSAGE"
+             :timestamp timestamp
+             :role role
+             :content (when content (str/replace content #"^\"|\"$" ""))})
+
+          "TOOL"
+          (let [[_ _ tool-name input] parts]
+            {:type "TOOL"
+             :timestamp timestamp
+             :tool-name tool-name
+             :input input})
+
+          "RESULT"
+          (let [[_ _ tool-id output] parts]
+            {:type "RESULT"
+             :timestamp timestamp
+             :tool-name tool-id
+             :output output})
+
+          "HOOK"
+          (let [details (str/join " | " (drop 2 parts))
+                tests (second (re-find #"tests=(\w+)" details))
+                gemini (second (re-find #"gemini=(\w+)" details))]
+            {:type "HOOK"
+             :timestamp timestamp
+             :file-type (nth parts 2 nil)
+             :tests-status tests
+             :gemini-status gemini})
+
+          "COMPLETE"
+          (let [details (str/join " | " (drop 2 parts))
+                subtype (second (re-find #"subtype=(\w+)" details))
+                cost (when-let [c (second (re-find #"cost=\$?([\d.]+)" details))]
+                       (parse-double c))
+                msgs (when-let [m (second (re-find #"messages=(\d+)" details))]
+                       (parse-long m))
+                dur (when-let [d (second (re-find #"duration=(\d+)" details))]
+                      (parse-long d))]
+            {:type "COMPLETE"
+             :timestamp timestamp
+             :subtype subtype
+             :cost cost
+             :messages msgs
+             :duration-ms dur})
+
+          "ERROR"
+          {:type "ERROR"
+           :timestamp timestamp
+           :error (str/join " | " (drop 2 parts))}
+
+          ;; Unknown type - return basic structure
+          {:type log-type
+           :timestamp timestamp
+           :details (str/join " | " (drop 2 parts))})))))
+
+(defn- completed-sessions
+  "Get recent completed/failed sessions from XTDB."
+  [limit]
+  (when-let [node @xtdb-node]
+    (ai/list-sessions {::ai/node node
+                       ::ai/limit limit})))
+
+(defn- running-agent-ids
+  "Get set of AI session IDs for running agents."
+  []
+  (set (keep ::ai-session-id (vals @agent-registry))))
+
+(defn- all-agents-data
+  "Get combined list of running agents and completed sessions for list view."
+  []
+  (let [running (agents {})
+        running-ids (running-agent-ids)
+        completed (->> (completed-sessions 50)
+                       (remove #(running-ids (:xt/id %)))
+                       (filter ::ai/agent-session-id))]
+    {:running running
+     :completed completed}))
+
+(defn- agent-detail-data
+  "Get agent detail data including log lines."
+  [agent-id]
+  (let [;; Check running agents first
+        running (first (filter #(= agent-id (::session-id %)) (agents {})))
+        ;; Get log lines
+        log-lines (->> (read-agent-log agent-id 200)
+                       (keep parse-log-line))]
+    (when (or running (seq log-lines))
+      (cond-> {::session-id agent-id
+               ::agent-status (or (::agent-status running) :completed)
+               ::log-lines log-lines}
+        running (merge (select-keys running [::namespace ::nrepl-port ::ai-session-id]))))))
+
+;;; ---------------------------------------------------------------------------
+;;; Render Function (called by seon.ns.routes convention)
+;;; ---------------------------------------------------------------------------
+
+(defn- typed-value
+  "Helper to create typed value for rendering.
+   Wraps view/typed with positional args for internal use."
+  [view-type value]
+  (view/typed {::view/view-type view-type ::view/value value}))
+
+(defn render
+  "Render agent view in the requested format.
+
+   Called by seon.ns.routes when visiting /ns/seon.ai.agent
+
+   Params:
+     :format - :html, :ai, :human, or :raw
+     :id     - Optional agent session ID for detail view
+
+   Returns rendered content in the requested format."
+  [{:keys [format id]}]
+  ;; Ensure views are loaded
+  (require 'seon.ai.agent.views)
+  (if id
+    ;; Detail view
+    (if-let [data (agent-detail-data id)]
+      (view/render (typed-value :seon.ai.agent/detail data) format)
+      [:div {:class "text-center py-12 text-text-400"}
+       "Agent not found: " [:code {:class "text-signal"} id]])
+    ;; List view
+    (let [{:keys [running completed]} (all-agents-data)
+          running-count (count running)
+          completed-count (count completed)]
+      [:div
+       ;; Header
+       [:div {:class "flex items-center justify-between mb-4"}
+        [:div
+         [:h1 {:class "text-base font-bold tracking-tight"} "Agent Observatory"]
+         [:p {:class "text-text-400 text-xs mt-0.5"}
+          (str running-count " running"
+               (when (pos? completed-count)
+                 (str " · " completed-count " completed")))]]]
+       ;; Table
+       [:div {:class "bg-base-850 rounded overflow-hidden"}
+        [:table {:class "w-full"}
+         [:thead
+          [:tr {:class "border-b border-base-700"}
+           [:th {:class "text-left py-1.5 px-3 text-xs font-medium text-text-400 uppercase tracking-wider"} "ID"]
+           [:th {:class "text-left py-1.5 px-3 text-xs font-medium text-text-400 uppercase tracking-wider"} "Namespace"]
+           [:th {:class "text-left py-1.5 px-3 text-xs font-medium text-text-400 uppercase tracking-wider"} "Status"]
+           [:th {:class "text-right py-1.5 px-3 text-xs font-medium text-text-400 uppercase tracking-wider"} "Port"]
+           [:th {:class "text-right py-1.5 px-3 text-xs font-medium text-text-400 uppercase tracking-wider"} "Cost"]]]
+         [:tbody
+          (if (and (empty? running) (empty? completed))
+            [:tr
+             [:td {:class "py-8 px-4 text-center text-text-500 italic" :colspan "5"}
+              "No agents found"]]
+            (concat
+             ;; Running agents
+             (for [agent running]
+               (view/render (typed-value :seon.ai.agent/summary agent) format))
+             ;; Completed sessions
+             (for [session completed
+                   :let [agent-sid (::ai/agent-session-id session)]]
+               (view/render (typed-value :seon.ai.agent/summary
+                                         {::session-id agent-sid
+                                          ::namespace (::ai/namespace session)
+                                          ::provider :claude
+                                          ::agent-status (::ai/status session)
+                                          ::cost-usd (::ai/cost-usd session)})
+                            format))))]]]])))
 
 (comment
   ;; REPL exploration
