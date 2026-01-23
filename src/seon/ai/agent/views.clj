@@ -67,6 +67,10 @@
   "Lines of context to show around diff changes."
   2)
 
+(def ^:private hover-preview-lines
+  "Max lines to show in hover card code preview."
+  6)
+
 ;;; ---------------------------------------------------------------------------
 ;;; Helper Functions
 ;;; ---------------------------------------------------------------------------
@@ -195,6 +199,68 @@
   (view/typed {::view/view-type view-type ::view/value value}))
 
 ;;; ---------------------------------------------------------------------------
+;;; Hover Card Components
+;;; ---------------------------------------------------------------------------
+
+(defn- hover-card
+  "CSS-only hover card that appears below a log line on hover.
+   Uses Tailwind group/group-hover pattern.
+
+   content - Hiccup content for the hover card body"
+  [content]
+  [:div {:class (str "hover-card hidden group-hover:block absolute left-0 top-full z-20 "
+                     "bg-base-850 border border-base-700 rounded shadow-lg "
+                     "mt-1 p-2 max-w-xl min-w-64 "
+                     "text-xs font-mono")}
+   content])
+
+(defn- hover-line
+  "A label:value line for hover cards."
+  ([label value] (hover-line label value nil))
+  ([label value value-class]
+   [:div {:class "flex gap-2"}
+    [:span {:class "text-text-400 shrink-0"} (str label ":")]
+    [:span {:class (or value-class "text-text-200 break-all")} value]]))
+
+(defn- hover-code-block
+  "Code block for hover cards with optional label."
+  ([code] (hover-code-block nil code))
+  ([label code]
+   (let [lines (str/split-lines (or code ""))
+         truncated? (> (count lines) hover-preview-lines)
+         display-lines (if truncated? (take hover-preview-lines lines) lines)]
+     [:div {:class "mt-1"}
+      (when label
+        [:div {:class "text-text-400 text-2xs mb-0.5"} label])
+      [:div {:class "bg-base-900 rounded p-1.5 overflow-x-auto whitespace-pre text-2xs"}
+       (str/join "\n" display-lines)
+       (when truncated?
+         [:div {:class "text-text-500 mt-1"} (str "... " (- (count lines) hover-preview-lines) " more lines")])]])))
+
+(defn- hover-diff-block
+  "Diff block for hover cards showing old/new strings."
+  [old-str new-str]
+  [:div {:class "mt-1 space-y-1"}
+   (when (not (str/blank? old-str))
+     (let [lines (str/split-lines old-str)
+           truncated? (> (count lines) hover-preview-lines)
+           display (if truncated?
+                     (str (str/join "\n" (take hover-preview-lines lines)) "\n...")
+                     old-str)]
+       [:div {:class "bg-error/10 rounded p-1.5 overflow-x-auto whitespace-pre text-2xs text-error/80"}
+        [:span {:class "text-error font-medium"} "- "]
+        display]))
+   (when (not (str/blank? new-str))
+     (let [lines (str/split-lines new-str)
+           truncated? (> (count lines) hover-preview-lines)
+           display (if truncated?
+                     (str (str/join "\n" (take hover-preview-lines lines)) "\n...")
+                     new-str)]
+       [:div {:class "bg-success/10 rounded p-1.5 overflow-x-auto whitespace-pre text-2xs text-success/80"}
+        [:span {:class "text-success font-medium"} "+ "]
+        display]))])
+
+;;; ---------------------------------------------------------------------------
 ;;; Agent Summary View - :seon.ai.agent/summary
 ;;; ---------------------------------------------------------------------------
 
@@ -245,14 +311,20 @@
 (defmethod view/render* [:html :agent.log/launch]
   [entry _format]
   (let [{:keys [timestamp namespace port]} entry]
-    [:div {:class "font-mono text-xs leading-tight py-0.5 border-b border-base-700/50 hover:bg-base-800"}
+    [:div {:class "group relative font-mono text-xs leading-tight py-0.5 border-b border-base-700/50 hover:bg-base-800"}
      [:div {:class "flex gap-2"}
       [:span {:class "text-text-400 shrink-0" :title timestamp} (format-local-time timestamp)]
       [:span {:class "text-log-launch font-semibold shrink-0 w-16"} "LAUNCH"]
       [:span {:class "text-text-50"}
        [:span {:class "text-log-launch"} namespace]
        (when port
-         [:span {:class "text-text-400 ml-2"} (str "port=" port)])]]]))
+         [:span {:class "text-text-400 ml-2"} (str "port=" port)])]]
+     ;; Hover card with full details
+     (hover-card
+      [:div {:class "space-y-1"}
+       (hover-line "namespace" namespace "text-log-launch")
+       (when port (hover-line "nREPL port" (str port)))
+       (hover-line "timestamp" timestamp "text-text-400")])]))
 
 (defmethod view/render* [:ai :agent.log/launch]
   [entry _format]
@@ -263,8 +335,9 @@
 (defmethod view/render* [:html :agent.log/message]
   [entry _format]
   (let [{:keys [timestamp role content]} entry
-        long? (and content (> (count content) preview-length))]
-    [:div {:class "font-mono text-xs leading-tight py-0.5 border-b border-base-700/50 hover:bg-base-800"}
+        long? (and content (> (count content) preview-length))
+        char-count (count (or content ""))]
+    [:div {:class "group relative font-mono text-xs leading-tight py-0.5 border-b border-base-700/50 hover:bg-base-800"}
      [:div {:class "flex gap-2"}
       [:span {:class "text-text-400 shrink-0" :title timestamp} (format-local-time timestamp)]
       [:span {:class "text-log-message shrink-0 w-16"} "MESSAGE"]
@@ -276,7 +349,16 @@
           [:span {:class "text-info ml-1"} (str "+" (- (count content) preview-length) " more")]]
          [:div {:class "break-all mt-1 pl-2 border-l-2 border-base-700"}
           content]]
-        [:span {:class "text-text-50 break-all"} content])]]))
+        [:span {:class "text-text-50 break-all"} content])]
+     ;; Hover card with more message text
+     (hover-card
+      [:div {:class "space-y-1"}
+       (hover-line "role" role "text-log-message")
+       (hover-line "length" (str char-count " chars"))
+       [:div {:class "mt-2 text-text-200 break-words max-h-32 overflow-y-auto"}
+        (if (> char-count 500)
+          (str (subs content 0 500) "...")
+          content)]])]))
 
 (defmethod view/render* [:ai :agent.log/message]
   [entry _format]
@@ -298,6 +380,12 @@
    Returns hiccup for the tool content (everything after timestamp and TOOL label)."
   (fn [tool-name _parsed-input _raw-input] tool-name))
 
+(defmulti render-tool-hover
+  "Render hover card content for a tool call.
+   Dispatches on tool-name string.
+   Returns hiccup wrapped in hover-card, or nil for no hover."
+  (fn [tool-name _parsed-input _raw-input] tool-name))
+
 (defmethod render-tool-html :default
   [tool-name parsed-input raw-input]
   ;; Fallback: show tool name and raw input
@@ -314,6 +402,16 @@
           [:div {:class "break-all mt-1 pl-2 border-l-2 border-log-tool/30 whitespace-pre-wrap"}
            display-input]]
          [:span {:class "text-text-200 truncate"} display-input]))]))
+
+(defmethod render-tool-hover :default
+  [tool-name parsed-input raw-input]
+  ;; Fallback: show tool name and full input
+  (let [display-input (or raw-input (pr-str parsed-input))]
+    (hover-card
+     [:div {:class "space-y-1"}
+      (hover-line "tool" tool-name "text-log-tool")
+      (when display-input
+        (hover-code-block "input" display-input))])))
 
 ;; Edit tool - show file path and diff stats
 (defmethod render-tool-html "Edit"
@@ -362,6 +460,18 @@
               [:div {:class "whitespace-pre-wrap"} new_string]]
              new_string)]])]]]))
 
+(defmethod render-tool-hover "Edit"
+  [_tool-name parsed-input _raw-input]
+  (let [{:keys [file_path old_string new_string replace_all]} parsed-input
+        stats (compute-diff-stats old_string new_string)]
+    (hover-card
+     [:div {:class "space-y-1"}
+      (hover-line "path" file_path "text-text-50")
+      (hover-line "changes" (format-diff-stats stats))
+      (when replace_all
+        (hover-line "mode" "replace-all" "text-warning"))
+      (hover-diff-block old_string new_string)])))
+
 ;; Read tool - show file path and line range
 (defmethod render-tool-html "Read"
   [_tool-name parsed-input _raw-input]
@@ -377,6 +487,15 @@
      [:span {:class "text-text-50"
              :title file_path}
       (str file-name range-str)]]))
+
+(defmethod render-tool-hover "Read"
+  [_tool-name parsed-input _raw-input]
+  (let [{:keys [file_path offset limit]} parsed-input]
+    (hover-card
+     [:div {:class "space-y-1"}
+      (hover-line "path" file_path "text-text-50")
+      (when offset (hover-line "offset" (str offset)))
+      (when limit (hover-line "limit" (str limit " lines")))])))
 
 ;; Grep tool - show pattern and path
 (defmethod render-tool-html "Grep"
@@ -399,6 +518,18 @@
      [:span {:class "text-text-500 text-2xs"} mode-str]
      (when head_limit
        [:span {:class "text-text-500 text-2xs"} (str "limit=" head_limit)])]))
+
+(defmethod render-tool-hover "Grep"
+  [_tool-name parsed-input _raw-input]
+  (let [{:keys [pattern path output_mode glob type head_limit]} parsed-input]
+    (hover-card
+     [:div {:class "space-y-1"}
+      (hover-line "pattern" pattern "text-eval")
+      (hover-line "path" (or path ".") "text-text-50")
+      (when glob (hover-line "glob" glob))
+      (when type (hover-line "type" type))
+      (hover-line "mode" (or output_mode "files_with_matches"))
+      (when head_limit (hover-line "limit" (str head_limit)))])))
 
 ;; Bash tool - show command with description
 (defmethod render-tool-html "Bash"
@@ -428,6 +559,17 @@
      (when timeout
        [:span {:class "text-text-500 text-2xs shrink-0"} (str "timeout=" timeout "ms")])]))
 
+(defmethod render-tool-hover "Bash"
+  [_tool-name parsed-input _raw-input]
+  (let [{:keys [command description timeout]} parsed-input]
+    (hover-card
+     [:div {:class "space-y-1"}
+      (when description
+        (hover-line "description" description "text-text-200"))
+      (hover-code-block "command" command)
+      (when timeout
+        (hover-line "timeout" (str timeout "ms")))])))
+
 ;; Glob tool - show pattern and path
 (defmethod render-tool-html "Glob"
   [_tool-name parsed-input _raw-input]
@@ -439,6 +581,14 @@
      (when path
        [:span {:class "text-text-400"} (str "in " path-display)])]))
 
+(defmethod render-tool-hover "Glob"
+  [_tool-name parsed-input _raw-input]
+  (let [{:keys [pattern path]} parsed-input]
+    (hover-card
+     [:div {:class "space-y-1"}
+      (hover-line "pattern" pattern "text-eval")
+      (hover-line "path" (or path ".") "text-text-50")])))
+
 ;; Write tool - show file path
 (defmethod render-tool-html "Write"
   [_tool-name parsed-input _raw-input]
@@ -449,6 +599,16 @@
      [:span {:class "text-log-tool font-medium shrink-0"} "Write"]
      [:span {:class "text-text-50" :title file_path} file-name]
      [:span {:class "text-text-400"} (str "(" line-count " lines)")]]))
+
+(defmethod render-tool-hover "Write"
+  [_tool-name parsed-input _raw-input]
+  (let [{:keys [file_path content]} parsed-input
+        line-count (count-lines content)]
+    (hover-card
+     [:div {:class "space-y-1"}
+      (hover-line "path" file_path "text-text-50")
+      (hover-line "lines" (str line-count))
+      (hover-code-block "content preview" content)])))
 
 ;; mcp__seon__eval - show Clojure code
 (defmethod render-tool-html "mcp__seon__eval"
@@ -478,6 +638,17 @@
      (when timeout_ms
        [:span {:class "text-text-500 text-2xs shrink-0"} (str timeout_ms "ms")])]))
 
+(defmethod render-tool-hover "mcp__seon__eval"
+  [_tool-name parsed-input _raw-input]
+  (let [{:keys [code session_id timeout_ms]} parsed-input
+        code-lines (str/split-lines (or code ""))]
+    (hover-card
+     [:div {:class "space-y-1"}
+      (when session_id (hover-line "session" session_id))
+      (hover-line "lines" (str (count code-lines)))
+      (when timeout_ms (hover-line "timeout" (str timeout_ms "ms")))
+      (hover-code-block "code" code)])))
+
 ;; Task tool - show agent launch info
 (defmethod render-tool-html "Task"
   [_tool-name parsed-input _raw-input]
@@ -489,6 +660,17 @@
        [:span {:class "text-text-200"} description])
      (when (and prompt (not description))
        [:span {:class "text-text-400 truncate"} (truncate prompt 60)])]))
+
+(defmethod render-tool-hover "Task"
+  [_tool-name parsed-input _raw-input]
+  (let [{:keys [description prompt subagent_type]} parsed-input]
+    (hover-card
+     [:div {:class "space-y-1"}
+      (hover-line "type" (or subagent_type "agent") "text-log-launch")
+      (when description
+        (hover-line "description" description))
+      (when prompt
+        (hover-code-block "prompt" prompt))])))
 
 ;; TodoWrite tool - show todo count
 (defmethod render-tool-html "TodoWrite"
@@ -505,16 +687,41 @@
      (when (pos? completed)
        [:span {:class "text-success"} (str completed " done")])]))
 
+(defmethod render-tool-hover "TodoWrite"
+  [_tool-name parsed-input _raw-input]
+  (let [{:keys [todos]} parsed-input
+        todo-count (count todos)]
+    (hover-card
+     [:div {:class "space-y-1"}
+      (hover-line "total" (str todo-count " todos"))
+      (when (seq todos)
+        [:div {:class "mt-2 space-y-0.5 max-h-32 overflow-y-auto"}
+         (for [{:keys [content status]} (take 8 todos)]
+           [:div {:class "flex gap-2 items-center text-2xs"}
+            [:span {:class (case status
+                             "completed" "text-success"
+                             "in_progress" "text-warning"
+                             "text-text-400")}
+             (case status
+               "completed" "done"
+               "in_progress" "active"
+               "pending")]
+            [:span {:class "text-text-200 truncate"} content]])
+         (when (> todo-count 8)
+           [:div {:class "text-text-500 text-2xs"} (str "... " (- todo-count 8) " more")])])])))
+
 ;; TOOL - Amber/yellow, uses tool-specific renderer via multimethod
 (defmethod view/render* [:html :agent.log/tool]
   [entry _format]
   (let [{:keys [timestamp tool-name input]} entry
         parsed (parse-tool-input input)]
-    [:div {:class "font-mono text-xs leading-tight py-0.5 border-b border-base-700/50 hover:bg-base-800"}
+    [:div {:class "group relative font-mono text-xs leading-tight py-0.5 border-b border-base-700/50 hover:bg-base-800"}
      [:div {:class "flex gap-2 items-start"}
       [:span {:class "text-text-400 shrink-0" :title timestamp} (format-local-time timestamp)]
       [:span {:class "text-log-tool shrink-0 w-16"} "TOOL"]
-      (render-tool-html tool-name parsed input)]]))
+      (render-tool-html tool-name parsed input)]
+     ;; Hover card with tool-specific details
+     (render-tool-hover tool-name parsed input)]))
 
 (defmethod view/render* [:ai :agent.log/tool]
   [entry _format]
@@ -535,8 +742,9 @@
 (defmethod view/render* [:html :agent.log/result]
   [entry _format]
   (let [{:keys [timestamp tool-name output]} entry
-        long? (and output (> (count output) preview-length))]
-    [:div {:class "font-mono text-xs leading-tight py-0.5 border-b border-base-700/50 hover:bg-base-800"}
+        long? (and output (> (count output) preview-length))
+        output-len (count (or output ""))]
+    [:div {:class "group relative font-mono text-xs leading-tight py-0.5 border-b border-base-700/50 hover:bg-base-800"}
      [:div {:class "flex gap-2"}
       [:span {:class "text-text-400 shrink-0" :title timestamp} (format-local-time timestamp)]
       [:span {:class "text-log-result shrink-0 w-16"} "RESULT"]
@@ -549,7 +757,14 @@
             [:span {:class "text-info ml-1"} (str "+" (- (count output) preview-length) " more")]]
            [:div {:class "break-all mt-1 pl-2 border-l-2 border-log-result/30"}
             output]]
-          [:span {:class "text-text-200 ml-2 break-all"} output]))]]))
+          [:span {:class "text-text-200 ml-2 break-all"} output]))]
+     ;; Hover card with result details
+     (hover-card
+      [:div {:class "space-y-1"}
+       (hover-line "tool" tool-name "text-log-result")
+       (hover-line "length" (str output-len " chars"))
+       (when output
+         (hover-code-block "output" output))])]))
 
 (defmethod view/render* [:ai :agent.log/result]
   [entry _format]
@@ -559,8 +774,8 @@
 ;; HOOK - Cyan, shows hook output
 (defmethod view/render* [:html :agent.log/hook]
   [entry _format]
-  (let [{:keys [timestamp file-type tests-status gemini-status]} entry]
-    [:div {:class "font-mono text-xs leading-tight py-0.5 border-b border-base-700/50 hover:bg-base-800"}
+  (let [{:keys [timestamp file-type tests-status gemini-status test-output gemini-feedback]} entry]
+    [:div {:class "group relative font-mono text-xs leading-tight py-0.5 border-b border-base-700/50 hover:bg-base-800"}
      [:div {:class "flex gap-2"}
       [:span {:class "text-text-400 shrink-0" :title timestamp} (format-local-time timestamp)]
       [:span {:class "text-log-hook shrink-0 w-16"} "HOOK"]
@@ -568,7 +783,20 @@
       [:span {:class (if (= tests-status "pass") "text-success" "text-warning")}
        (str "tests=" tests-status)]
       [:span {:class (if (= gemini-status "pass") "text-success" "text-text-400")}
-       (str "gemini=" gemini-status)]]]))
+       (str "gemini=" gemini-status)]]
+     ;; Hover card with hook details
+     (hover-card
+      [:div {:class "space-y-1"}
+       (hover-line "file type" file-type "text-log-hook")
+       (hover-line "tests" tests-status (if (= tests-status "pass") "text-success" "text-warning"))
+       (hover-line "gemini" gemini-status (if (= gemini-status "pass") "text-success" "text-text-400"))
+       (when test-output
+         (hover-code-block "test output" test-output))
+       (when gemini-feedback
+         [:div {:class "mt-2"}
+          [:div {:class "text-text-400 text-2xs mb-0.5"} "gemini feedback:"]
+          [:div {:class "text-text-200 text-2xs max-h-24 overflow-y-auto"}
+           gemini-feedback]])])]))
 
 (defmethod view/render* [:ai :agent.log/hook]
   [entry _format]
@@ -578,8 +806,8 @@
 ;; COMPLETE - Green bold, shows stats
 (defmethod view/render* [:html :agent.log/complete]
   [entry _format]
-  (let [{:keys [timestamp subtype cost messages duration-ms]} entry]
-    [:div {:class "font-mono text-xs leading-tight py-1 border-b border-base-700/50 hover:bg-base-800 bg-success/5"}
+  (let [{:keys [timestamp subtype cost messages duration-ms input-tokens output-tokens]} entry]
+    [:div {:class "group relative font-mono text-xs leading-tight py-1 border-b border-base-700/50 hover:bg-base-800 bg-success/5"}
      [:div {:class "flex gap-2"}
       [:span {:class "text-text-400 shrink-0" :title timestamp} (format-local-time timestamp)]
       [:span {:class "text-log-done font-semibold shrink-0 w-16"} "COMPLETE"]
@@ -590,7 +818,17 @@
       (when messages
         [:span {:class "text-text-200"} (str "messages=" messages)])
       (when duration-ms
-        [:span {:class "text-text-400"} (str "duration=" (format-duration duration-ms))])]]))
+        [:span {:class "text-text-400"} (str "duration=" (format-duration duration-ms))])]
+     ;; Hover card with completion details
+     (hover-card
+      [:div {:class "space-y-1"}
+       (when subtype (hover-line "subtype" subtype "text-success"))
+       (when cost (hover-line "cost" (format-cost cost) "text-text-50"))
+       (when messages (hover-line "messages" (str messages)))
+       (when duration-ms (hover-line "duration" (format-duration duration-ms)))
+       (when input-tokens (hover-line "input tokens" (str input-tokens)))
+       (when output-tokens (hover-line "output tokens" (str output-tokens)))
+       (hover-line "timestamp" timestamp "text-text-400")])]))
 
 (defmethod view/render* [:ai :agent.log/complete]
   [entry _format]
@@ -605,11 +843,17 @@
 (defmethod view/render* [:html :agent.log/error]
   [entry _format]
   (let [{:keys [timestamp error]} entry]
-    [:div {:class "font-mono text-xs leading-tight py-1 border-b border-base-700/50 hover:bg-base-800 bg-error/5"}
+    [:div {:class "group relative font-mono text-xs leading-tight py-1 border-b border-base-700/50 hover:bg-base-800 bg-error/5"}
      [:div {:class "flex gap-2"}
       [:span {:class "text-text-400 shrink-0" :title timestamp} (format-local-time timestamp)]
       [:span {:class "text-log-error font-semibold shrink-0 w-16"} "ERROR"]
-      [:span {:class "text-error break-all"} error]]]))
+      [:span {:class "text-error break-all"} (truncate error 100)]]
+     ;; Hover card with full error
+     (hover-card
+      [:div {:class "space-y-1"}
+       (hover-line "timestamp" timestamp "text-text-400")
+       [:div {:class "mt-2 bg-error/10 rounded p-2 text-error text-2xs max-h-32 overflow-y-auto whitespace-pre-wrap break-all"}
+        error]])]))
 
 (defmethod view/render* [:ai :agent.log/error]
   [entry _format]
