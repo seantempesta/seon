@@ -28,7 +28,7 @@
 
 (deftest mcp-eval-basic-test
   (testing "MCP eval can evaluate (+ 1 2) and return 3"
-    (let [{:keys [port]} (nrepl-multi/start-namespace-nrepl! {:namespace 'test.mcp.eval})]
+    (let [{:keys [port]} (nrepl-multi/start-namespace-nrepl! {:session-id "mcp1" :namespace 'test.mcp.eval})]
       (with-open [conn (nrepl/connect :port port)]
         (let [client (nrepl/client conn 5000)
               ;; Send eval request (same as MCP server does)

@@ -209,10 +209,13 @@
   (require 'seon.db.multi)
   (let [start! (resolve 'seon.orchestrator.nrepl/start-namespace-nrepl!)
         create-conn (resolve 'seon.db.multi/create-namespace-connection)
+        ;; Generate a deterministic session-id from namespace (for Integrant-managed nREPLs)
+        ns->session-id (fn [ns-sym] (str "ig-" (hash ns-sym)))
         ;; Start an nREPL for each namespace
         results (into {}
                       (for [ns-sym namespaces]
-                        (let [;; Create a db connection for this namespace if node is provided
+                        (let [session-id (ns->session-id ns-sym)
+                              ;; Create a db connection for this namespace if node is provided
                               db (when node
                                    (try
                                      (create-conn node ns-sym)
@@ -220,9 +223,10 @@
                                        (log/warn "Could not create db connection"
                                                  {:namespace ns-sym :error (.getMessage e)})
                                        nil)))
-                              result (start! {:namespace ns-sym
+                              result (start! {:session-id session-id
+                                              :namespace ns-sym
                                               :db db})]
-                          [ns-sym result])))]
+                          [ns-sym (assoc result :session-id session-id)])))]
     (log/info "Namespace nREPL servers started"
               {:servers (into {} (for [[ns {:keys [port status]}] results]
                                    [ns {:port port :status status}]))})
@@ -234,17 +238,17 @@
   (log/info "Stopping namespace nREPL servers...")
   (require 'seon.orchestrator.nrepl)
   (let [stop! (resolve 'seon.orchestrator.nrepl/stop-namespace-nrepl!)]
-    (doseq [[ns-sym {:keys [ctx]}] servers]
+    (doseq [[ns-sym {:keys [ctx session-id]}] servers]
       (try
         ;; Close any db connection we created
         (when-let [db (:seon.agent/db @ctx)]
           (when (instance? java.io.Closeable db)
             (.close ^java.io.Closeable db)))
-        ;; Stop the nREPL server
-        (stop! ns-sym)
+        ;; Stop the nREPL server (keyed by session-id, not namespace)
+        (stop! session-id)
         (catch Exception e
           (log/warn "Error stopping namespace nREPL"
-                    {:namespace ns-sym :error (.getMessage e)})))))
+                    {:namespace ns-sym :session-id session-id :error (.getMessage e)})))))
   (log/info "Namespace nREPL servers stopped"))
 
 ;; Keep namespace nREPLs alive during (reset) like the main nREPL

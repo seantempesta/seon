@@ -530,6 +530,7 @@
      ::sdk/max-budget-usd    - Optional. Cost limit
      ::sdk/allowed-tools     - Optional. Tool whitelist
      ::sdk/disallowed-tools  - Optional. Tool denylist
+     ::ai/force?             - Optional. Force launch even if namespace has running agent
 
    Response keys (agent handle):
      ::ai/session-id      - 4-char hex session ID (Seon agent session)
@@ -545,10 +546,27 @@
      (launch-agent! {::ai/node xtdb-node
                      ::ai/namespace 'seon.trading
                      ::ai/prompt \"Implement the signals dashboard\"})"
-  [{::ai/keys [node namespace prompt]
+  [{::ai/keys [node namespace prompt force?]
     ::keys [model]
     ::sdk/keys [permission-mode max-turns max-budget-usd allowed-tools disallowed-tools]}]
   (log/info "Launching agent" {:namespace namespace})
+
+  ;; Check for existing running agents on the same namespace
+  ;; Use agent/agents directly since our `agents` fn is defined later in this file
+  (let [ns-str (str namespace)
+        existing (->> (agent/agents {})
+                      (filter #(and (= ns-str (:seon.ai.agent/namespace %))
+                                    (= :running (:seon.ai.agent/status %))))
+                      first)]
+    (when existing
+      (if force?
+        (log/warn "Launching agent on namespace with existing running agent"
+                  {:namespace namespace
+                   :existing-session (:seon.ai.agent/session-id existing)
+                   :force? true})
+        (throw (ex-info "Namespace already has a running agent. Use ::ai/force? true to override."
+                        {:namespace namespace
+                         :existing-session (:seon.ai.agent/session-id existing)})))))
 
   ;; 1. Create Seon session (nREPL, ctx, db)
   (let [{::session/keys [id nrepl-port] :as session-result}
@@ -595,6 +613,22 @@
 
           messages-ch (chan 100)
           result-ch (chan 1)
+
+          ;; 5b. Register process exit watcher to unblock reader on unexpected death
+          ;; This handles the case where Claude crashes without sending a result message
+          ;; and the readLine call blocks indefinitely waiting for more data.
+          _ (-> (.onExit process)
+                (.thenAccept
+                 (reify java.util.function.Consumer
+                   (accept [_ _exit-code]
+                     (when (= :running @status-atom)
+                       (log/info "Process exited while agent was running, closing streams"
+                                 {:session-id id})
+                       ;; Close stdout to unblock the reader's readLine call
+                       (try
+                         (.close stdout)
+                         (catch Exception e
+                           (log/debug "Error closing stdout on process exit" {:error (str e)}))))))))
 
           ;; 6. Start reader that persists messages and updates status
           claude-session-mapped? (atom false)

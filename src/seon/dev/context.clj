@@ -148,6 +148,21 @@
                    [::gemini-code {:optional true} [:maybe :string]]
                    [::gemini-tokens {:optional true} [:maybe ::gemini-tokens]]])
 
+;; Todo item from TodoWrite tool
+(schema/register! ::todo-item
+                  [:map
+                   [:content :string]
+                   [:status [:enum "pending" "in_progress" "completed"]]
+                   [:activeForm :string]])
+
+;; Todo event - captures agent's todo list at a point in time
+(schema/register! ::todo-event
+                  [:map
+                   [:xt/id :uuid]
+                   [::entity-type [:= :todo-event]]
+                   [::session-id :string]
+                   [::todos [:vector ::todo-item]]])
+
 ;;; ---------------------------------------------------------------------------
 ;;; Request/Response Schemas
 ;;; ---------------------------------------------------------------------------
@@ -185,6 +200,29 @@
                   [:map
                    [::success :boolean]
                    [::tx-id {:optional true} ::tx-id]])
+
+;; record-todos! schemas
+(schema/register! ::record-todos-request
+                  [:map
+                   [::xtdb-node ::xtdb-node]
+                   [::session-id :string]
+                   [::todos [:vector ::todo-item]]])
+
+(schema/register! ::record-todos-response
+                  [:map
+                   [::success :boolean]
+                   [::tx-id {:optional true} ::tx-id]])
+
+;; latest-todos schemas
+(schema/register! ::latest-todos-request
+                  [:map
+                   [::xtdb-node ::xtdb-node]
+                   [::session-id :string]])
+
+(schema/register! ::latest-todos-response
+                  [:map
+                   [::todos {:optional true} [:maybe [:vector ::todo-item]]]
+                   [::timestamp {:optional true} [:maybe ::timestamp]]])
 
 ;; get-last-review-time schemas
 (schema/register! ::get-last-review-time-request
@@ -415,6 +453,37 @@
                 [["INSERT INTO review_event (_id, seon$dev$context$entity_type, seon$dev$context$files, seon$dev$context$edit_count, seon$dev$context$gemini_prompt, seon$dev$context$gemini_response, seon$dev$context$gemini_system_instruction, seon$dev$context$gemini_code, seon$dev$context$gemini_tokens) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
                   id entity-type files-set edit-count gemini-prompt gemini-response
                   gemini-system-instruction gemini-code gemini-tokens]])]
+    {::success (some? result)
+     ::tx-id (:tx-id result)}))
+
+(defn record-todos!
+  "Record an agent's todo list snapshot.
+
+   Todo events capture the agent's current todo list at a point in time,
+   enabling widgets to show task progress.
+
+   Request keys:
+     ::xtdb-node  - Required. XTDB node instance
+     ::session-id - Required. Agent session ID (e.g., 'a1b2')
+     ::todos      - Required. Vector of todo items
+
+   Response keys:
+     ::success - Boolean indicating if transaction succeeded
+     ::tx-id   - Transaction ID if successful
+
+   Example:
+     (record-todos! {::xtdb-node node
+                     ::session-id \"a1b2\"
+                     ::todos [{:content \"Fix bug\" :status \"completed\" :activeForm \"Fixing bug\"}
+                              {:content \"Add tests\" :status \"in_progress\" :activeForm \"Adding tests\"}]})"
+  {:malli/schema [:=> [:cat ::record-todos-request] ::record-todos-response]}
+  [{::keys [xtdb-node session-id todos]}]
+  (let [id (UUID/randomUUID)
+        entity-type :todo-event
+        result (node/execute-tx!
+                xtdb-node
+                [["INSERT INTO todo_event (_id, seon$dev$context$entity_type, seon$dev$context$session_id, seon$dev$context$todos) VALUES (?, ?, ?, ?)"
+                  id entity-type session-id todos]])]
     {::success (some? result)
      ::tx-id (:tx-id result)}))
 
@@ -741,6 +810,91 @@
                       (double (/ blocked (count edits)))
                       0.0)
      ::gemini-tokens tokens}))
+
+;;; ---------------------------------------------------------------------------
+;;; Widget Query Functions (Phase 0.5)
+;;; ---------------------------------------------------------------------------
+
+(defn latest-todos
+  "Get the most recent todo list for an agent session.
+
+   Returns the latest todo_event for the given session, or nil if none exists.
+
+   Request keys:
+     ::xtdb-node  - Required. XTDB node instance
+     ::session-id - Required. Agent session ID (e.g., 'a1b2')
+
+   Response keys:
+     ::todos     - Vector of todo items, or nil if no todos recorded
+     ::timestamp - When the todo list was recorded
+
+   Example:
+     (latest-todos {::xtdb-node node ::session-id \"a1b2\"})
+     ;; => {::todos [{:content \"Fix bug\" :status \"completed\" ...}]
+     ;;     ::timestamp #inst \"2024-01-15T12:00:00Z\"}"
+  {:malli/schema [:=> [:cat ::latest-todos-request] ::latest-todos-response]}
+  [{::keys [xtdb-node session-id]}]
+  (let [result (first (node/sql-query
+                       xtdb-node
+                       ["SELECT seon$dev$context$todos, _valid_from FROM todo_event WHERE seon$dev$context$session_id = ? ORDER BY _valid_from DESC LIMIT 1"
+                        session-id]))]
+    {::todos (::todos result)
+     ::timestamp (:xt/valid-from result)}))
+
+(defn latest-test-result
+  "Get the most recent test result for an agent session.
+
+   Returns the latest edit_event with test data for the session.
+   Filters to edit events that have unit or gen test results.
+
+   Request keys:
+     ::xtdb-node  - Required. XTDB node instance
+     ::session-id - Required. Agent session ID (used to find session's edits)
+
+   Response keys:
+     ::unit-test-result - Unit test summary or nil
+     ::gen-test-result  - Gen test summary or nil
+     ::file             - File that was tested
+     ::timestamp        - When the test ran
+
+   Example:
+     (latest-test-result {::xtdb-node node ::session-id \"a1b2\"})"
+  [{::keys [xtdb-node _session-id]}]
+  ;; Note: edit_events don't have session_id, they're stored by the hook.
+  ;; For now, just get the most recent edit event with test results.
+  ;; TODO: Add session_id to edit_events for proper filtering
+  (let [result (first (node/sql-query
+                       xtdb-node
+                       "SELECT seon$dev$context$unit_test_result, seon$dev$context$gen_test_result, seon$dev$context$file, _valid_from FROM edit_event WHERE seon$dev$context$unit_test_result IS NOT NULL OR seon$dev$context$gen_test_result IS NOT NULL ORDER BY _valid_from DESC LIMIT 1"))]
+    {::unit-test-result (::unit-test-result result)
+     ::gen-test-result (::gen-test-result result)
+     ::file (::file result)
+     ::timestamp (:xt/valid-from result)}))
+
+(defn latest-review
+  "Get the most recent Gemini review.
+
+   Returns the latest review_event with response data.
+
+   Request keys:
+     ::xtdb-node - Required. XTDB node instance
+
+   Response keys:
+     ::gemini-response - The review text
+     ::gemini-tokens   - Token usage {:prompt N :response N :cached N}
+     ::files           - Files that were reviewed
+     ::timestamp       - When the review occurred
+
+   Example:
+     (latest-review {::xtdb-node node})"
+  [{::keys [xtdb-node]}]
+  (let [result (first (node/sql-query
+                       xtdb-node
+                       "SELECT seon$dev$context$gemini_response, seon$dev$context$gemini_tokens, seon$dev$context$files, _valid_from FROM review_event WHERE seon$dev$context$gemini_response IS NOT NULL ORDER BY _valid_from DESC LIMIT 1"))]
+    {::gemini-response (::gemini-response result)
+     ::gemini-tokens (::gemini-tokens result)
+     ::files (::files result)
+     ::timestamp (:xt/valid-from result)}))
 
 (comment
   ;; REPL exploration

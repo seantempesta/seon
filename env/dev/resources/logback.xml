@@ -79,7 +79,8 @@
     <logger name="io.undertow" level="WARN" />
     <logger name="org.apache.arrow" level="WARN" />
     <logger name="io.netty" level="WARN" />
-    <logger name="io.micrometer" level="WARN" />
+    <!-- Suppress "Gauge already registered" noise during reloads -->
+    <logger name="io.micrometer" level="ERROR" />
 
     <!-- XTDB loggers - separate file, more verbose during dev -->
     <logger name="xtdb" level="INFO" additivity="false">

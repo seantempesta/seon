@@ -573,3 +573,87 @@ src/seon/
 ```
 
 Don't split into core.clj, schema.clj, etc. prematurely. Tests go in `test/` mirroring the `src/` structure.
+
+## SSE Handler Hot Reload Pattern
+
+SSE handlers use `def` to create handler objects. By default, `clj-reload` doesn't re-evaluate `def` forms unless the actual code changes, causing stale handlers that don't pick up changes to render functions.
+
+### The Problem
+
+```clojure
+;; BAD: This closure is captured ONCE at def time
+(def my-sse-handler
+  (sse/render-handler
+   (fn [_request]
+     (render-my-page))))  ; Changes to render-my-page won't propagate!
+```
+
+### The Solution: Var References + after-ns-reload Hook
+
+1. **Define render function separately** - enables var indirection
+2. **Pass var reference** - `#'render-fn` derefs to current binding each call
+3. **Add `after-ns-reload` hook** - recreates handler objects after reload
+
+```clojure
+(ns seon.web.myhandlers
+  (:require [seon.web.sse :as sse]))
+
+;; 1. Define render function separately
+(defn- my-page-sse-render
+  "Render function for SSE. Defined separately for hot reload."
+  [_request]
+  (render-my-page))
+
+;; 2. Pass var reference to render-handler
+(def my-page-sse
+  "SSE handler for my page."
+  (sse/render-handler #'my-page-sse-render :poll-ms 2000))
+
+;; 3. Add after-ns-reload hook (called automatically by clj-reload)
+(defn after-ns-reload
+  "Called by clj-reload after namespace reload. Recreates SSE handlers."
+  []
+  (alter-var-root #'my-page-sse
+                  (constantly (sse/render-handler #'my-page-sse-render :poll-ms 2000))))
+```
+
+### Dynamic Handlers (per-request state)
+
+For handlers that need per-request state (e.g., agent-id from path params), cache handlers and clear on reload:
+
+```clojure
+;; Cache handlers per-key for connection reuse
+(defonce ^:private my-handlers (atom {}))
+
+(defn- get-my-handler
+  "Get or create SSE handler for a specific resource."
+  [resource-id]
+  (if-let [handler (get @my-handlers resource-id)]
+    handler
+    (let [render-fn (fn [_req] (render-content resource-id))
+          handler (sse/render-handler render-fn :poll-ms 1000)]
+      (swap! my-handlers assoc resource-id handler)
+      handler)))
+
+(defn my-resource-sse
+  "SSE handler for resource view."
+  [request]
+  (let [resource-id (get-in request [:path-params :id])
+        handler (get-my-handler resource-id)]
+    (handler request)))
+
+(defn after-ns-reload
+  "Clear handler cache on reload."
+  []
+  (reset! my-handlers {}))
+```
+
+### Why This Works
+
+1. **Var references are IFn** - `#'render-fn` derefs to current binding each call
+2. **`after-ns-reload` hook** - clj-reload calls this after namespace reload
+3. **Handler recreation** - new handler objects capture updated var references
+
+### Note on HTTP Handlers
+
+Regular HTTP handlers (Ring functions) **don't need this pattern** - they're called directly through vars. This pattern is specifically for SSE handlers because `render-handler` captures the render function at creation time.

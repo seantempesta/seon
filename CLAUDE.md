@@ -50,11 +50,23 @@ Write clear goals, success criteria, and relevant context.
 
 ### 2. Launch via MCP
 
+**Always check for existing agents first:**
+```clojure
+;; Check before launching to avoid duplicate agents on same namespace
+(claude/agents {})
+```
+
 ```clojure
 ;; Via MCP eval tool (preferred for orchestrator)
 (claude/launch-agent! {::ai/node (:seon/xtdb-node integrant.repl.state/system)
                        ::ai/namespace 'seon.feature-name
                        ::ai/prompt "Read docs/prds/feature-name/prd.md and implement Phase 1."})
+
+;; If you intentionally want multiple agents on the same namespace:
+(claude/launch-agent! {::ai/node (:seon/xtdb-node integrant.repl.state/system)
+                       ::ai/namespace 'seon.feature-name
+                       ::ai/prompt "..."
+                       ::ai/force? true})  ; Override duplicate namespace check
 ```
 
 **Point agents to the PRD**, don't give walls of instructions:
@@ -191,6 +203,46 @@ Invoke skills before manual searching - they encode project-specific knowledge.
 
 ---
 
+## UI Development
+
+Seon uses a **Phosphor Terminal** theme - warm blacks, cream text, amber accents. Think Lisp machine, not generic web app.
+
+### Before Writing UI Code
+
+1. **Read the design system:** `docs/prds/namespace-ui/design-system.md`
+2. **Use the component library:** `src/seon/web/components.clj`
+3. **Invoke skills:** `/datastar-web-ui` for SSE patterns, `/browser-automation` to test
+
+### Component Library
+
+```clojure
+(require '[seon.web.components :as ui])
+
+(ui/page-header "Title" :subtitle "optional")
+(ui/section-header "SECTION")
+(ui/card (ui/section-header "Card") content...)
+(ui/status-dot :running :label "running")  ; NOT pill badges
+(ui/log-line {:timestamp ts :type "TOOL" :content "..."})
+```
+
+### Key Rules
+
+- **Density over whitespace** - `p-3` not `p-6`, `gap-4` not `gap-6`
+- **Small text** - `text-xs` (11px) primary, `text-lg` max for titles
+- **Warm colors** - `bg-base-*`, `text-text-*`, never `bg-white` or `text-zinc-*`
+- **Dot+text status** - `● running` not pill badges
+- **Monospace everywhere** - `font-mono` on body
+
+### Reference Files
+
+| File | Purpose |
+|------|---------|
+| `docs/prds/namespace-ui/design-system.md` | Full color palette, typography, spacing |
+| `src/seon/web/components.clj` | Reusable UI components |
+| `src/seon/web/html.clj` | Base template, nav, shared functions |
+
+---
+
 ## Key Documents
 
 | Document | Purpose |
@@ -198,6 +250,7 @@ Invoke skills before manual searching - they encode project-specific knowledge.
 | `CONVENTIONS.md` | Malli schemas, API design patterns |
 | `docs/reference/xtdb-v2-reference.md` | Database queries (use SQL) |
 | `docs/reference/datastar-quick-reference.md` | Web UI attributes |
+| `docs/prds/namespace-ui/design-system.md` | UI colors, typography, spacing |
 | `PLAN.md` | Transformation roadmap |
 
 ---

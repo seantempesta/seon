@@ -73,9 +73,9 @@
           (io/delete-file (::agent-log/path logger) true))))))
 
 (deftest log-message-test
-  (testing "log-message! writes MESSAGE event with truncated content"
+  (testing "log-message! writes MESSAGE event with full content (no truncation)"
     (let [logger (agent-log/create-logger! {::agent-log/session-id "test-003"})
-          long-content (apply str (repeat 300 "x"))]
+          long-content (apply str (repeat 500 "x"))]
       (try
         (agent-log/log-message! logger {::agent-log/role "assistant"
                                          ::agent-log/content long-content})
@@ -84,8 +84,8 @@
               [_ event role content] (parse-log-line (first lines))]
           (is (= "MESSAGE" event))
           (is (= "assistant" role))
-          (is (str/includes? content "...") "Long content should be truncated")
-          (is (< (count content) 250) "Content should be under max length"))
+          ;; Full content preserved - UI handles display truncation
+          (is (str/includes? content "xxxxx") "Content should be preserved"))
         (finally
           (io/delete-file (::agent-log/path logger) true))))))
 

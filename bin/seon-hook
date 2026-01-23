@@ -253,14 +253,36 @@
           ;; Format for Claude Code
           response (format-response result)
 
-          ;; Log completion
+          ;; Log completion to debug log
           _ (spit (io/file "logs" "hook-debug.log")
                   (str (java.util.Date.)
                        " | COMPLETE | session=" (or claude-session-id "orchestrator")
                        " | decision=" (or (:decision response) "continue")
                        " | has-feedback=" (boolean (get-in response [:hookSpecificOutput :additionalContext]))
                        "\n")
-                  :append true)]
+                  :append true)
+
+          ;; Write to agent log file (if this is an agent session)
+          ;; Format: timestamp | HOOK | tool | file | full feedback (no truncation)
+          ;; The UI handles display with expand/collapse, so we log everything
+          _ (when (and seon-session-id (re-matches #"[a-f0-9]{4}" seon-session-id))
+              (let [agent-log-file (io/file "logs" "agents" (str seon-session-id ".log"))
+                    timestamp (.format (java.time.format.DateTimeFormatter/ofPattern "yyyy-MM-dd'T'HH:mm:ss'Z'")
+                                       (.atOffset (java.time.Instant/now) java.time.ZoneOffset/UTC))
+                    tool-name (:tool_name event)
+                    file-name (when-let [fp (or (get-in event [:tool_input :file_path])
+                                                (get-in event [:tool_input :filePath]))]
+                                (last (clojure.string/split fp #"/")))
+                    decision (or (:decision response) "continue")
+                    feedback (get-in response [:hookSpecificOutput :additionalContext])
+                    ;; Build details: decision + full feedback (UI handles truncation/expand)
+                    details (if feedback
+                              (str decision " | " feedback)
+                              decision)
+                    log-line (str timestamp " | HOOK     | " (or tool-name "unknown")
+                                  " | " (or file-name "unknown") " | " details "\n")]
+                (when (.exists (.getParentFile agent-log-file))
+                  (spit agent-log-file log-line :append true))))]
 
       ;; Output JSON response
       (when (seq response)

@@ -281,9 +281,10 @@
                                        ::ctx/namespace namespace})
 
               ;; 4. Start namespace nREPL with the persisted ctx atom
-              _ (log/debug "Starting namespace nREPL" {:namespace namespace})
+              _ (log/debug "Starting namespace nREPL" {:session-id session-id :namespace namespace})
               nrepl-result (nrepl-multi/start-namespace-nrepl!
-                            {:namespace namespace
+                            {:session-id session-id
+                             :namespace namespace
                              :db ns-conn
                              :ctx-atom atom})
 
@@ -359,9 +360,9 @@
         (log/debug "Flushing ctx" {:session-id id})
         (flush!))
 
-      ;; 2. Stop namespace nREPL
+      ;; 2. Stop namespace nREPL (keyed by session-id, not namespace)
       (log/debug "Stopping nREPL" {:session-id id :namespace (::namespace session)})
-      (nrepl-multi/stop-namespace-nrepl! (::namespace session))
+      (nrepl-multi/stop-namespace-nrepl! id)
 
       ;; 3. Close persisted ctx (cleanup resources)
       (when-let [close! (::close! session)]

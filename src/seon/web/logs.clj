@@ -13,7 +13,6 @@
 (defonce log-state
   (atom {:entries []
          :level-filter :all
-         :auto-scroll true
          :max-entries 200}))
 
 ;; ========================================
@@ -64,11 +63,6 @@
   [level]
   (swap! log-state assoc :level-filter level))
 
-(defn toggle-auto-scroll!
-  "Toggle auto-scroll setting."
-  []
-  (swap! log-state update :auto-scroll not))
-
 (defn refresh-logs!
   "Reload logs from disk and update state.
   This is called on-demand or via a background poller."
@@ -88,38 +82,3 @@
       entries
       (filter #(= level-filter (:level %)) entries))))
 
-;; ========================================
-;; Initialization & Background Updates
-;; ========================================
-
-(defn init-log-watcher!
-  "Initialize state watcher that triggers SSE refresh on log state changes.
-  Call this during system startup."
-  []
-  (remove-watch log-state :sse-auto-refresh)
-  (add-watch log-state :sse-auto-refresh
-             (fn [_key _ref old-state new-state]
-               (when (not= old-state new-state)
-                 (try
-                   ;; Dynamically resolve to avoid circular dependency
-                   (require 'seon.web.sse)
-                   ((resolve 'seon.web.sse/refresh-all!))
-                   (catch Exception e
-                     (log/error e "Error triggering SSE refresh from log watcher"))))))
-  ;; Load initial logs
-  (refresh-logs!)
-  (log/info "Log viewer state watcher initialized"))
-
-(defn start-background-refresher!
-  "Start a background thread that periodically refreshes logs.
-  Returns the future for cancellation."
-  [interval-ms]
-  (future
-    (try
-      (while (not (Thread/interrupted))
-        (Thread/sleep interval-ms)
-        (refresh-logs!))
-      (catch InterruptedException _
-        (log/info "Background log refresher stopped"))
-      (catch Exception e
-        (log/error e "Error in background log refresher")))))
