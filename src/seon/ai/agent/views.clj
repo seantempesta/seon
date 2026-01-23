@@ -45,7 +45,11 @@
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
             [seon.ns.view :as view]
-            [seon.web.components :as ui]))
+            [seon.web.components :as ui])
+  (:import [java.time Instant ZoneId LocalDate ZonedDateTime]
+           [java.time.format TextStyle DateTimeFormatter]
+           [java.time.temporal ChronoUnit]
+           [java.util Locale]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Constants
@@ -73,6 +77,41 @@
   (if (and s (> (count s) max-len))
     (str (subs s 0 (- max-len 3)) "...")
     s))
+
+(defn- format-local-time
+  "Format ISO timestamp as compact local time for display.
+   Today: '14:23'
+   This week: 'Mon 14:23'
+   Older: 'Jan 15 14:23'
+   Returns nil for nil/invalid input."
+  [iso-timestamp]
+  (when (and iso-timestamp (string? iso-timestamp) (seq iso-timestamp))
+    (try
+      (let [instant (Instant/parse iso-timestamp)
+            zone (ZoneId/systemDefault)
+            zdt (ZonedDateTime/ofInstant instant zone)
+            today (LocalDate/now zone)
+            ts-date (.toLocalDate zdt)
+            days-ago (.between ChronoUnit/DAYS ts-date today)
+            time-fmt (DateTimeFormatter/ofPattern "HH:mm")]
+        (cond
+          ;; Today: just time
+          (= ts-date today)
+          (.format zdt time-fmt)
+
+          ;; Within last 7 days: day name + time
+          (and (>= days-ago 0) (<= days-ago 6))
+          (str (.getDisplayName (.getDayOfWeek zdt) TextStyle/SHORT (Locale/getDefault))
+               " "
+               (.format zdt time-fmt))
+
+          ;; Older: month day + time
+          :else
+          (let [month-day-fmt (DateTimeFormatter/ofPattern "MMM d HH:mm")]
+            (.format zdt month-day-fmt))))
+      (catch Exception _
+        ;; Return original on parse failure
+        iso-timestamp))))
 
 (defn parse-tool-input
   "Parse tool input EDN string into a map.
@@ -208,7 +247,7 @@
   (let [{:keys [timestamp namespace port]} entry]
     [:div {:class "font-mono text-xs leading-tight py-0.5 border-b border-base-700/50 hover:bg-base-800"}
      [:div {:class "flex gap-2"}
-      [:span {:class "text-text-400 shrink-0"} timestamp]
+      [:span {:class "text-text-400 shrink-0" :title timestamp} (format-local-time timestamp)]
       [:span {:class "text-log-launch font-semibold shrink-0 w-16"} "LAUNCH"]
       [:span {:class "text-text-50"}
        [:span {:class "text-log-launch"} namespace]
@@ -227,7 +266,7 @@
         long? (and content (> (count content) preview-length))]
     [:div {:class "font-mono text-xs leading-tight py-0.5 border-b border-base-700/50 hover:bg-base-800"}
      [:div {:class "flex gap-2"}
-      [:span {:class "text-text-400 shrink-0"} timestamp]
+      [:span {:class "text-text-400 shrink-0" :title timestamp} (format-local-time timestamp)]
       [:span {:class "text-log-message shrink-0 w-16"} "MESSAGE"]
       [:span {:class "text-text-400 shrink-0 w-16"} role]
       (if long?
@@ -473,7 +512,7 @@
         parsed (parse-tool-input input)]
     [:div {:class "font-mono text-xs leading-tight py-0.5 border-b border-base-700/50 hover:bg-base-800"}
      [:div {:class "flex gap-2 items-start"}
-      [:span {:class "text-text-400 shrink-0"} timestamp]
+      [:span {:class "text-text-400 shrink-0" :title timestamp} (format-local-time timestamp)]
       [:span {:class "text-log-tool shrink-0 w-16"} "TOOL"]
       (render-tool-html tool-name parsed input)]]))
 
@@ -499,7 +538,7 @@
         long? (and output (> (count output) preview-length))]
     [:div {:class "font-mono text-xs leading-tight py-0.5 border-b border-base-700/50 hover:bg-base-800"}
      [:div {:class "flex gap-2"}
-      [:span {:class "text-text-400 shrink-0"} timestamp]
+      [:span {:class "text-text-400 shrink-0" :title timestamp} (format-local-time timestamp)]
       [:span {:class "text-log-result shrink-0 w-16"} "RESULT"]
       [:span {:class "text-text-400 shrink-0"} tool-name]
       (when output
@@ -523,7 +562,7 @@
   (let [{:keys [timestamp file-type tests-status gemini-status]} entry]
     [:div {:class "font-mono text-xs leading-tight py-0.5 border-b border-base-700/50 hover:bg-base-800"}
      [:div {:class "flex gap-2"}
-      [:span {:class "text-text-400 shrink-0"} timestamp]
+      [:span {:class "text-text-400 shrink-0" :title timestamp} (format-local-time timestamp)]
       [:span {:class "text-log-hook shrink-0 w-16"} "HOOK"]
       [:span {:class "text-text-50"} file-type]
       [:span {:class (if (= tests-status "pass") "text-success" "text-warning")}
@@ -542,7 +581,7 @@
   (let [{:keys [timestamp subtype cost messages duration-ms]} entry]
     [:div {:class "font-mono text-xs leading-tight py-1 border-b border-base-700/50 hover:bg-base-800 bg-success/5"}
      [:div {:class "flex gap-2"}
-      [:span {:class "text-text-400 shrink-0"} timestamp]
+      [:span {:class "text-text-400 shrink-0" :title timestamp} (format-local-time timestamp)]
       [:span {:class "text-log-done font-semibold shrink-0 w-16"} "COMPLETE"]
       (when subtype
         [:span {:class "text-success"} subtype])
@@ -568,7 +607,7 @@
   (let [{:keys [timestamp error]} entry]
     [:div {:class "font-mono text-xs leading-tight py-1 border-b border-base-700/50 hover:bg-base-800 bg-error/5"}
      [:div {:class "flex gap-2"}
-      [:span {:class "text-text-400 shrink-0"} timestamp]
+      [:span {:class "text-text-400 shrink-0" :title timestamp} (format-local-time timestamp)]
       [:span {:class "text-log-error font-semibold shrink-0 w-16"} "ERROR"]
       [:span {:class "text-error break-all"} error]]]))
 
