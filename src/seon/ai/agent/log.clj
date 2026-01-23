@@ -20,9 +20,9 @@
    ## Event Types
 
    - LAUNCH   - Agent started
-   - MESSAGE  - Assistant or user message (content truncated)
-   - TOOL     - Tool call started (input truncated)
-   - RESULT   - Tool result received (content truncated)
+   - MESSAGE  - Assistant or user message
+   - TOOL     - Tool call started
+   - RESULT   - Tool result received
    - HOOK     - Dev hook feedback
    - COMPLETE - Agent finished with stats
 
@@ -64,17 +64,6 @@
 
 (def ^:private log-dir "logs/agents")
 
-(def ^:private max-content-length
-  "Maximum length of content (message text, tool input/output) before truncation."
-  200)
-
-(def ^:private max-tool-input-length
-  "Maximum length of tool input before truncation."
-  100)
-
-(def ^:private max-tool-output-length
-  "Maximum length of tool output before truncation."
-  150)
 
 (def ^:private iso-formatter
   "ISO 8601 timestamp formatter for log lines."
@@ -96,13 +85,6 @@
   []
   (.format iso-formatter (.atOffset (Instant/now) ZoneOffset/UTC)))
 
-(defn- truncate
-  "Truncate string to max-len, adding ... if truncated."
-  [s max-len]
-  (if (and s (> (count s) max-len))
-    (str (subs s 0 (- max-len 3)) "...")
-    s))
-
 (defn- escape-newlines
   "Replace newlines with spaces for single-line log format."
   [s]
@@ -113,12 +95,10 @@
         str/trim)))
 
 (defn- format-content
-  "Format content for log: escape newlines, truncate, and quote."
-  [content max-len]
+  "Format content for log: escape newlines and quote. No truncation - UI handles display."
+  [content]
   (when content
-    (let [clean (escape-newlines (str content))
-          truncated (truncate clean max-len)]
-      (str "\"" truncated "\""))))
+    (str "\"" (escape-newlines (str content)) "\"")))
 
 (defn- format-log-line
   "Format a structured log line.
@@ -150,6 +130,7 @@
      ::session-id - The session ID
      ::writer - The BufferedWriter for the log file
      ::path - Path to the log file
+     ::tool-id->name - Atom tracking tool_use_id to tool name mapping
 
    Example:
      (def logger (create-logger! {::session-id \"f602\"}))"
@@ -159,7 +140,8 @@
         writer (BufferedWriter. (FileWriter. (io/file path) true))] ; true = append
     {::session-id session-id
      ::writer writer
-     ::path path}))
+     ::path path
+     ::tool-id->name (atom {})}))
 
 (defn close-logger!
   "Close a logger's file writer."
@@ -183,30 +165,30 @@
 (defn log-message!
   "Log a message event (assistant or user).
 
-   Fields: role | \"truncated content\""
+   Fields: role | \"content\""
   [{::keys [writer]} {::keys [role content]}]
   (when writer
-    (let [formatted-content (format-content content max-content-length)
+    (let [formatted-content (format-content content)
           line (format-log-line "MESSAGE" role formatted-content)]
       (write-line! writer line))))
 
 (defn log-tool!
   "Log a tool call event.
 
-   Fields: tool-name | \"truncated input\""
+   Fields: tool-name | \"input\""
   [{::keys [writer]} {::keys [tool-name input]}]
   (when writer
-    (let [formatted-input (format-content input max-tool-input-length)
+    (let [formatted-input (format-content input)
           line (format-log-line "TOOL" tool-name formatted-input)]
       (write-line! writer line))))
 
 (defn log-result!
   "Log a tool result event.
 
-   Fields: tool-name | \"truncated output\""
+   Fields: tool-name | \"output\""
   [{::keys [writer]} {::keys [tool-name output]}]
   (when writer
-    (let [formatted-output (format-content output max-tool-output-length)
+    (let [formatted-output (format-content output)
           line (format-log-line "RESULT" tool-name formatted-output)]
       (write-line! writer line))))
 
@@ -243,7 +225,7 @@
    Fields: \"error message\""
   [{::keys [writer]} {::keys [error]}]
   (when writer
-    (let [line (format-log-line "ERROR" (format-content error max-content-length))]
+    (let [line (format-log-line "ERROR" (format-content error))]
       (write-line! writer line))))
 
 ;;; ---------------------------------------------------------------------------
@@ -251,25 +233,31 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- extract-tool-calls
-  "Extract tool call info from assistant message content blocks."
+  "Extract tool call info from assistant message content blocks.
+   Returns a map with:
+     :tool-calls - seq of {::tool-name, ::input} maps for logging
+     :id->name   - map of tool_use_id to tool name for result lookup"
   [content]
   (when (sequential? content)
-    (->> content
-         (filter #(= "tool_use" (:type %)))
-         (map (fn [block]
-                {::tool-name (:name block)
-                 ::input (pr-str (:input block))}))
-         seq)))
+    (let [tool-uses (filter #(= "tool_use" (:type %)) content)]
+      (when (seq tool-uses)
+        {:tool-calls (map (fn [block]
+                            {::tool-name (:name block)
+                             ::input (pr-str (:input block))})
+                          tool-uses)
+         :id->name (into {} (map (juxt :id :name) tool-uses))}))))
 
 (defn- extract-tool-results
-  "Extract tool result info from user message content blocks."
-  [content]
+  "Extract tool result info from user message content blocks.
+   Uses id->name mapping to resolve tool_use_id to actual tool name."
+  [content id->name]
   (when (sequential? content)
     (->> content
          (filter #(= "tool_result" (:type %)))
          (map (fn [block]
-                {::tool-name (:tool_use_id block)
-                 ::output (pr-str (:content block))}))
+                (let [tool-id (:tool_use_id block)]
+                  {::tool-name (get id->name tool-id tool-id) ; fallback to ID if not found
+                   ::output (pr-str (:content block))})))
          seq)))
 
 (defn- extract-text-content
@@ -291,12 +279,16 @@
    - assistant messages with text and/or tool_use blocks
    - user messages with tool_result blocks
    - result messages with completion stats
-   - system messages"
+   - system messages
+
+   Tracks tool_use_id -> tool_name mapping across messages so that
+   RESULT lines show actual tool names instead of opaque IDs."
   [logger sdk-message]
   (let [msg-type (:type sdk-message)
         inner-msg (:message sdk-message)
         role (or (:role inner-msg) msg-type)
-        content (or (:content inner-msg) (:result sdk-message))]
+        content (or (:content inner-msg) (:result sdk-message))
+        id->name-atom (::tool-id->name logger)]
     (case msg-type
       ;; Assistant messages - log text and any tool calls
       "assistant"
@@ -304,14 +296,20 @@
         ;; Log the text content if any
         (when-let [text (not-empty (extract-text-content content))]
           (log-message! logger {::role "assistant" ::content text}))
-        ;; Log each tool call
-        (doseq [tool-call (extract-tool-calls content)]
-          (log-tool! logger tool-call)))
+        ;; Extract tool calls and update id->name mapping
+        (when-let [{:keys [tool-calls id->name]} (extract-tool-calls content)]
+          ;; Store mapping for subsequent tool_result messages
+          (when id->name-atom
+            (swap! id->name-atom merge id->name))
+          ;; Log each tool call
+          (doseq [tool-call tool-calls]
+            (log-tool! logger tool-call))))
 
       ;; User messages - usually tool results from the SDK
       "user"
-      (doseq [tool-result (extract-tool-results content)]
-        (log-result! logger tool-result))
+      (let [id->name (if id->name-atom @id->name-atom {})]
+        (doseq [tool-result (extract-tool-results content id->name)]
+          (log-result! logger tool-result)))
 
       ;; System messages
       "system"
