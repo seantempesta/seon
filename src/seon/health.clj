@@ -20,7 +20,9 @@
    ;;     :seon.health/checks {:xtdb {:ok true}, :nrepl {:ok true}, ...}
    ;;     :seon.health/resources {:agents 2, :ports 3, :sessions 2}}
    ```"
-  (:require [seon.db.node :as db]
+  (:require [clojure.java.shell :as shell]
+            [clojure.string :as str]
+            [seon.db.node :as db]
             [seon.ai.agent :as agent]
             [seon.schema :as schema]
             [taoensso.timbre :as log])
@@ -274,6 +276,29 @@
       (log/warn e "Failed to find orphaned ports")
       [])))
 
+(defn- find-listening-orphans
+  "Find ports in the agent range (7889-7999) that are listening but NOT in registry.
+  These are truly orphaned nREPL servers that survived a reset."
+  []
+  (try
+    (require 'seon.orchestrator.nrepl)
+    (let [nrepl-ns (find-ns 'seon.orchestrator.nrepl)
+          ;; port-range is an atom, need double deref
+          {:keys [base max]} @@(ns-resolve nrepl-ns 'port-range)
+          port-registry @(ns-resolve nrepl-ns 'port-registry)
+          servers @(ns-resolve nrepl-ns 'servers)
+          registered-ports (set (concat (vals @port-registry)
+                                        (map :port (vals @servers))))]
+      (for [port (range base (inc max))
+            :let [result (check-port port 100)]
+            :when (and (:ok result)
+                       (not (contains? registered-ports port)))]
+        {:port port
+         :status :listening-but-unregistered}))
+    (catch Exception e
+      (log/warn e "Failed to find listening orphans")
+      [])))
+
 (defn- find-orphaned-servers
   "Find nREPL servers in the registry but not accepting connections."
   []
@@ -295,27 +320,64 @@
                   [:map
                    [::node ::node]])
 
+(schema/register! ::ports-released
+                  [:int {:min 0 :description "Number of stale port registry entries released"}])
+
+(schema/register! ::servers-removed
+                  [:int {:min 0 :description "Number of stale server registry entries removed"}])
+
+(schema/register! ::orphans-killed
+                  [:int {:min 0 :description "Number of orphaned nREPL servers killed by port"}])
+
+(schema/register! ::cleanup-error
+                  [:map
+                   [:type [:enum :port :server :orphan]]
+                   [:port {:optional true} :int]
+                   [:session-id {:optional true} :string]
+                   [:error :string]])
+
+(schema/register! ::cleanup-errors
+                  [:vector ::cleanup-error])
+
 (schema/register! ::cleanup-orphaned-resources-response
                   [:map
-                   [:ports-released :int]
-                   [:servers-removed :int]
-                   [:errors [:vector [:map-of :keyword :any]]]])
+                   [::ports-released ::ports-released]
+                   [::servers-removed ::servers-removed]
+                   [::orphans-killed ::orphans-killed]
+                   [::cleanup-errors ::cleanup-errors]])
+
+(defn- kill-port!
+  "Kill any process listening on a port. Returns true if successful."
+  [port]
+  (try
+    (let [result (shell/sh "lsof" "-ti" (str ":" port))]
+      (when (zero? (:exit result))
+        (let [pids (str/split-lines (str/trim (:out result)))]
+          (doseq [pid pids]
+            (when-not (str/blank? pid)
+              (log/info "Killing orphaned nREPL process" {:port port :pid pid})
+              (shell/sh "kill" "-9" pid)))
+          true)))
+    (catch Exception e
+      (log/warn e "Failed to kill process on port" {:port port})
+      false)))
 
 (defn cleanup-orphaned-resources!
-  "Clean up orphaned resources from previous crashes.
+  "Clean up orphaned resources from previous crashes or resets.
 
-   This function:
-   1. Finds ports registered but not listening
-   2. Releases those port allocations
-   3. Removes stale server entries
+   This function handles three types of orphans:
+   1. Registry entries pointing to dead ports (stale entries)
+   2. nREPL servers listening but not in registry (survived reset)
+   3. Both types are cleaned up to restore a consistent state
 
    Request keys:
      ::node - Required. XTDB node
 
    Response keys:
-     :ports-released - Number of ports released
-     :servers-removed - Number of server entries removed
-     :errors - Vector of error maps
+     ::ports-released - Number of stale port registry entries released
+     ::servers-removed - Number of stale server registry entries removed
+     ::orphans-killed - Number of orphaned nREPL servers killed by port
+     ::cleanup-errors - Vector of error maps
 
    Example:
      (cleanup-orphaned-resources! {::node xtdb-node})"
@@ -325,28 +387,39 @@
   (let [_ node ; unused but required for consistency
         errors (atom [])
 
-        ;; Clean up orphaned ports
+        ;; 1. Clean up stale registry entries (registered but not listening)
         orphaned-ports (find-orphaned-ports)
         _ (doseq [{:keys [session-id port]} orphaned-ports]
             (try
-              (log/info "Releasing orphaned port" {:session-id session-id :port port})
+              (log/info "Releasing stale port registry entry" {:session-id session-id :port port})
               ((resolve 'seon.orchestrator.nrepl/release-port!) session-id)
               (catch Exception e
-                (swap! errors conj {:type :port :session-id session-id :error (.getMessage e)}))))
+                (swap! errors conj {:type :port :session-id session-id :port port :error (.getMessage e)}))))
 
-        ;; Clean up orphaned servers
+        ;; 2. Clean up stale server entries
         orphaned-servers (find-orphaned-servers)
         _ (doseq [{:keys [session-id port]} orphaned-servers]
             (try
-              (log/info "Removing orphaned server entry" {:session-id session-id :port port})
+              (log/info "Removing stale server registry entry" {:session-id session-id :port port})
               (let [servers-atom (ns-resolve (find-ns 'seon.orchestrator.nrepl) 'servers)]
                 (swap! @servers-atom dissoc session-id))
               (catch Exception e
-                (swap! errors conj {:type :server :session-id session-id :error (.getMessage e)}))))]
+                (swap! errors conj {:type :server :session-id session-id :port port :error (.getMessage e)}))))
 
-    {:ports-released (count orphaned-ports)
-     :servers-removed (count orphaned-servers)
-     :errors @errors}))
+        ;; 3. Kill truly orphaned servers (listening but not in registry)
+        listening-orphans (find-listening-orphans)
+        killed-count (atom 0)
+        _ (doseq [{:keys [port]} listening-orphans]
+            (try
+              (when (kill-port! port)
+                (swap! killed-count inc))
+              (catch Exception e
+                (swap! errors conj {:type :orphan :port port :error (.getMessage e)}))))]
+
+    {::ports-released (count orphaned-ports)
+     ::servers-removed (count orphaned-servers)
+     ::orphans-killed @killed-count
+     ::cleanup-errors @errors}))
 
 (comment
   ;; REPL exploration

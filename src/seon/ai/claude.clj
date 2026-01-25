@@ -763,7 +763,10 @@
                                                   {:ai-session-id ai-session-id})))
                                     ;; Update agent status
                                     (reset! status-atom final-status)))))
-                            (recur))))
+                            ;; Only recur if still running - exit loop on result/failure
+                            ;; This allows the finally block to run and clean up resources
+                            (when (= :running @status-atom)
+                              (recur)))))
                       (catch Exception e
                         (log/warn e "Agent reader error" {:session-id id})
                         (reset! status-atom :failed)
@@ -787,6 +790,11 @@
                                               ::ai/session-id ai-session-id
                                               ::ai/status :terminated})
                             (catch Exception _)))
+                        ;; Destroy Claude process to prevent orphans
+                        (try
+                          (.destroy process)
+                          (catch Exception e
+                            (log/debug "Error destroying Claude process" {:error (str e)})))
                         ;; Clean up channels
                         (close! messages-ch)
                         (close! result-ch)
