@@ -2,14 +2,68 @@
 
 ## What is Seon?
 
-**Seon** - from the archaic "to see", and inspired by the Seons of Brandon Sanderson's *Elantris*: sentient, luminous beings that serve and assist their bonded humans. A personal operating system for life - a unified platform integrating multiple life domains: trading, health, finance, tasks, knowledge, and more. Built on a foundation of Clojure, XTDB, and AI agents.
+**Seon** - from the archaic "to see", and inspired by the Seons of Brandon Sanderson's *Elantris*: sentient, luminous beings that serve and assist their bonded humans.
 
-### Vision
-- **One database, many domains** - XTDB as unified temporal store across all life data
-- **Protocol-based architecture** - Core defines interfaces, domains implement
-- **AI-native** - Built for collaboration between humans and AI agents
-- **Temporal by default** - Full history of all data, point-in-time queries
-- **Local-first** - Your data lives on your machine
+Seon is **infrastructure for AI agents to write reliable software**.
+
+The personal domains (trading, health, finance) are test cases, not the point. The real product is a codebase architecture where AI agents can own and evolve code responsibly - with contracts they can discover, history they can learn from, and isolation that prevents conflicts.
+
+### The Problem with AI-Assisted Development Today
+
+Current approaches bolt AI onto codebases designed for humans:
+- No contracts → agents hallucinate interfaces
+- No history → agents can't learn from what worked
+- No isolation → agents step on each other
+- No verification → bad code ships
+
+### Seon's Answer
+
+Build a codebase from the ground up optimized for agent ownership:
+
+- **Schema-first** - Every function has Malli schemas. Agents know the shape before writing code. Property tests validate contracts automatically.
+- **Namespaced keys everywhere** - Fully qualified keys (`:seon.trading/position`) are queryable. "What functions accept this input shape?" is a database lookup, not a hallucination.
+- **Temporal database** - XTDB stores full history. Agents can query "this function used to return X, now returns Y, what changed?"
+- **Namespace isolation** - One agent owns `seon.trading.signals`, another owns `seon.trading.execution`. They communicate through schemas, not shared state.
+- **Dev hooks** - Every edit triggers tests + AI review. Bad changes are blocked before they land.
+
+### Why Clojure?
+
+Not despite the small community - because of the language properties:
+
+- **Stable APIs** - 10-year-old documentation is still valid. Agents don't need to track API churn.
+- **Data as interface** - Maps in, maps out. No hidden object state to reason about.
+- **Homoiconicity** - Code is data. Agents can manipulate programs as data structures.
+- **REPL-driven** - Interactive development matches how agents work (try something, see result, iterate).
+- **Immutable by default** - No spooky action at a distance. Function outputs depend only on inputs.
+
+### The Vision
+
+Agents own namespaces long-term. They see:
+- Live system health and status
+- Other agents' work and outputs
+- Function signatures with examples and documentation
+- Usage history (who called what, with what, when)
+- Test results and coverage
+
+Over time, agents learn from this data. They evolve their code based on actual usage patterns. The system grows more reliable as agents accumulate experience.
+
+**Success looks like:** A non-technical person gives the system a real problem. From scratch, agents build it to spec. It's useful. It responds to feedback. It grows with the user over months and years.
+
+### Core Infrastructure
+
+- **XTDB** - Bitemporal database. Every fact has valid-time and transaction-time. Query any point in history.
+- **Malli** - Schema validation, generative testing, function contracts. The type system agents actually use.
+- **Integrant** - Component lifecycle. Clean start/stop semantics for the whole system.
+- **Datastar/SSE** - Real-time UI updates. Agents can see their work reflected immediately.
+
+### What's Built So Far
+
+- Agent orchestration with isolated resources (nREPL, database, logs per agent)
+- Dev hooks that validate edits with tests + AI review
+- Observatory UI to watch agent progress
+- Health checks and resource cleanup
+- Schema registry with introspection
+- Message persistence for replay and learning (data collection phase)
 
 ---
 

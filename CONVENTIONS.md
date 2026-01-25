@@ -1,11 +1,26 @@
 # Seon Code Conventions
 
+## Why These Conventions Matter
+
+These aren't arbitrary style rules. They're the foundation for **AI agents to write reliable software**.
+
+When every function has:
+- **Namespaced keys** → Agents can query "what accepts `:seon.trading/position`?" instead of guessing
+- **Malli schemas** → Contracts are machine-readable. Property tests validate automatically.
+- **Map-in/map-out** → Extensible APIs. Adding a field doesn't break callers.
+- **Registered schemas** → A queryable database of all data shapes in the system
+
+The result: agents can discover, compose, and validate code without hallucinating interfaces.
+
+---
+
 ## Malli Schema Patterns
 
 All public APIs use Malli schemas for contract specification. This enables:
 - Automatic validation via `malli.dev/start!`
 - Generative testing via `mi/check`
 - Self-documenting APIs for agents
+- **Function discovery** - "What functions return `::trading/signal`?" is a database query
 
 ### Understanding `::` Keyword Syntax
 
