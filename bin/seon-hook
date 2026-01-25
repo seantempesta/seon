@@ -177,6 +177,92 @@
         {:continue true}))))
 
 ;;; ---------------------------------------------------------------------------
+;;; Self-Edit Protection (Phase 7)
+;;; ---------------------------------------------------------------------------
+
+(def protected-files
+  "Files that are critical to the hook system. Syntax errors in these files
+   can brick the hook system, creating a chicken-and-egg problem."
+  #{"src/seon/dev/hook.clj"
+    "bin/seon-hook"})
+
+(defn- critical-file?
+  "Check if a file path is a critical hook infrastructure file."
+  [file-path]
+  (when file-path
+    (some #(clojure.string/ends-with? file-path %) protected-files)))
+
+(defn- validate-clojure-syntax
+  "Validate Clojure syntax by attempting to read all forms.
+   Returns {:valid true} or {:valid false :error \"message\"}."
+  [code-string]
+  (try
+    ;; Read all forms from the string to validate syntax
+    (let [reader (java.io.PushbackReader. (java.io.StringReader. code-string))]
+      (loop []
+        (let [form (try
+                     (clojure.core/read {:eof ::eof} reader)
+                     (catch Exception e
+                       (throw (ex-info "Syntax error" {:error (.getMessage e)}))))]
+          (when (not= form ::eof)
+            (recur)))))
+    {:valid true}
+    (catch clojure.lang.ExceptionInfo e
+      {:valid false :error (-> e ex-data :error)})
+    (catch Exception e
+      {:valid false :error (.getMessage e)})))
+
+(defn- reconstruct-file-content
+  "Reconstruct the file content after an Edit operation.
+   For Write, this is just the new content.
+   For Edit, we need to apply the replacement to the current file."
+  [event]
+  (let [tool-name (:tool_name event)
+        tool-input (:tool_input event)
+        file-path (or (:file_path tool-input) (:filePath tool-input))]
+    (cond
+      ;; Write: new_content is the full file
+      (= tool-name "Write")
+      (:content tool-input)
+
+      ;; Edit: apply old_string -> new_string replacement
+      (= tool-name "Edit")
+      (let [old-string (:old_string tool-input)
+            new-string (:new_string tool-input)]
+        (when (and file-path old-string)
+          (try
+            (let [current-content (slurp file-path)
+                  new-content (if (:replace_all tool-input)
+                                (clojure.string/replace current-content old-string new-string)
+                                (clojure.string/replace-first current-content old-string new-string))]
+              new-content)
+            (catch Exception _
+              nil))))
+
+      :else nil)))
+
+(defn- validate-critical-edit
+  "For PreToolUse on critical files, validate syntax before allowing the edit.
+   Returns nil if valid (continue), or a block response if invalid."
+  [event]
+  (let [hook-event (:hook_event_name event)
+        tool-input (:tool_input event)
+        file-path (or (:file_path tool-input) (:filePath tool-input))]
+    ;; Only validate PreToolUse on critical Clojure files
+    (when (and (= hook-event "PreToolUse")
+               (critical-file? file-path)
+               (clojure.string/ends-with? file-path ".clj"))
+      (let [new-content (reconstruct-file-content event)]
+        (when new-content
+          (let [validation (validate-clojure-syntax new-content)]
+            (when-not (:valid validation)
+              ;; Block the edit with clear error message
+              {:decision "block"
+               :reason (str "Syntax error in critical hook file. "
+                           "This edit would break the hook system. "
+                           "Error: " (:error validation))})))))))
+
+;;; ---------------------------------------------------------------------------
 ;;; Main
 ;;; ---------------------------------------------------------------------------
 
@@ -209,7 +295,21 @@
                          "\n")
                     :append true))
 
-          ;; Load config
+          ;; Phase 7: Check for syntax errors in critical hook infrastructure files
+          ;; This runs BEFORE nREPL call to catch errors that would brick the hook system
+          critical-block (validate-critical-edit event)
+          _ (when critical-block
+              (spit (io/file "logs" "hook-debug.log")
+                    (str (java.util.Date.)
+                         " | CRITICAL_BLOCK | " (:reason critical-block)
+                         "\n")
+                    :append true))]
+
+      ;; Short-circuit if critical file validation failed
+      (if critical-block
+        (println (json/generate-string critical-block))
+
+        (let [;; Load config
           config (load-config)
 
           ;; Resolve target nREPL port based on session_id
@@ -286,7 +386,7 @@
 
       ;; Output JSON response
       (when (seq response)
-        (println (json/generate-string response))))
+        (println (json/generate-string response))))))
 
     (catch Exception e
       ;; Log exceptions to file and stderr

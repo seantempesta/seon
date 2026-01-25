@@ -792,6 +792,14 @@
                         (close! result-ch)
                         ;; Close agent logger
                         (agent-log/close-logger! agent-logger)
+                        ;; Stop Seon session (flushes ctx, stops nREPL)
+                        ;; This is critical to avoid orphaned nREPL servers
+                        (try
+                          (session/stop-agent-session! {::session/node node
+                                                        ::session/id id})
+                          (catch Exception e
+                            (log/warn e "Failed to stop agent session on reader exit"
+                                       {:session-id id})))
                         ;; Remove from registry now that agent is done
                         (swap! agent/agent-registry dissoc id)
                         (log/info "Agent cleanup complete" {:session-id id
