@@ -713,17 +713,30 @@
                                               {:claude-session claude-session-id :seon-session id})))
 
                                 ;; Persist message to XTDB (skip keep_alive, parse_error)
+                                ;; Retry once after 100ms on failure
                                 (when (persistable-message-type? msg-type)
                                   (try
                                     (persist-message! {::ai/node node
                                                        ::ai/session-id ai-session-id
                                                        ::sdk-message msg})
                                     (catch Exception e
-                                      (log/warn e "Failed to persist message"
-                                                {:session-id id :msg-type msg-type}))))
+                                      (log/debug "First persist attempt failed, retrying..."
+                                                 {:session-id id :msg-type msg-type})
+                                      (Thread/sleep 100)
+                                      (try
+                                        (persist-message! {::ai/node node
+                                                           ::ai/session-id ai-session-id
+                                                           ::sdk-message msg})
+                                        (catch Exception e2
+                                          (log/warn e2 "Failed to persist message after retry"
+                                                    {:session-id id :msg-type msg-type}))))))
 
                                 ;; Log to agent log file for real-time tailing
-                                (agent-log/log-sdk-message! agent-logger msg)
+                                (try
+                                  (agent-log/log-sdk-message! agent-logger msg)
+                                  (catch Exception e
+                                    (log/warn e "Failed to log SDK message"
+                                              {:session-id id :msg-type msg-type})))
 
                                 (log/trace "Agent message" {:session-id id :type msg-type})
                                 (async/>!! messages-ch msg)
