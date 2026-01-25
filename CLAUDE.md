@@ -81,30 +81,40 @@ Write clear goals, success criteria, and relevant context.
 
 Smart agents read context and make decisions.
 
-### 3. Monitor and Wait for Completion
+### 3. Wait for Completion
+
+**Blocking launch (recommended):**
+
+```clojure
+;; Launch and wait for result - blocks until agent completes
+(claude/launch-agent!! {::ai/node (:seon/xtdb-node integrant.repl.state/system)
+                        ::ai/namespace 'seon.feature-name
+                        ::ai/prompt "Read docs/prds/feature-name/prd.md and implement Phase 1."
+                        ::claude/timeout-ms 600000})  ; 10 min timeout
+
+;; Returns result directly:
+;; {::claude/result-text "## Summary\n\n..."
+;;  ::claude/agent-status :completed
+;;  ::claude/cost-usd 0.23
+;;  ::claude/duration-ms 45000
+;;  ::claude/num-turns 5}
+```
+
+**Non-blocking launch (for parallel work):**
+
+```clojure
+;; Launch without waiting
+(def handle (claude/launch-agent! {...}))
+;; => {::ai/session-id "a1b2" ...}
+
+;; Check result later
+(claude/get-result {::ai/session-id "a1b2"})
+;; => {::claude/result-text "..." ::claude/agent-status :completed}
+```
 
 **UI Monitoring:**
 - Observatory: http://localhost:8080/agents
 - Dashboard: http://localhost:8080/
-
-**Wait for completion (background task pattern):**
-
-```bash
-# Start agent, get session ID (e.g., "a1b2")
-# Then start background wait:
-tail -f logs/agents/a1b2.log | grep -m1 "COMPLETE"  # run_in_background=true
-
-# Continue other work...
-
-# When ready to check, use TaskOutput with block=true
-# The COMPLETE line includes: subtype, cost, messages, duration
-```
-
-**REPL monitoring:**
-```clojure
-(agent/agents {})                        ; List running agents
-(agent/tail {::agent/session-id "xxxx"}) ; Stream messages channel
-```
 
 ### 4. Agent Instructions (Automatic)
 
@@ -149,6 +159,26 @@ The namespace doesn't restrict the agent's work - they can edit any file and swi
 
 The server must be running for agents to work.
 
+### Running Tests
+
+```bash
+# Specific namespace (preferred - fast feedback)
+clojure -M:test -m kaocha.runner --focus seon.ai.claude-test
+
+# Specific test var
+clojure -M:test -m kaocha.runner --focus seon.ai.claude-test/constants-test
+
+# All tests (slow - use sparingly)
+clojure -M:test -m kaocha.runner
+
+# Watch mode (re-runs on file changes)
+clojure -M:test -m kaocha.runner --watch --focus seon.ai.claude-test
+```
+
+**Always run focused tests first** when fixing bugs or verifying changes. Only run the full suite before committing or when changes affect multiple namespaces.
+
+For test patterns, mocking, and debugging test failures, invoke `/clojure-testing`.
+
 ### Your REPL
 
 Connect your editor to nREPL on port 7888. Use these helpers:
@@ -189,17 +219,23 @@ seon/
 
 ---
 
-## Skills
+## Skills (IMPORTANT)
 
-Invoke skills before manual searching - they encode project-specific knowledge.
+**ALWAYS invoke the relevant skill FIRST** before searching, grepping, or trial-and-error. Skills encode project-specific knowledge that saves significant time.
 
 | Skill | Invoke When |
 |-------|-------------|
-| `xtdb-queries` | Database queries, SQL patterns |
-| `datastar-web-ui` | SSE handlers, Datastar attributes |
-| `browser-automation` | Testing in browser, debugging UI |
-| `data-import` | ThetaData API, bulk imports |
-| `clojure-testing` | Test patterns, mocking, generators |
+| `/xtdb-queries` | Writing queries, debugging empty results, working with `xt/q` |
+| `/datastar-web-ui` | SSE handlers, `data-*` attributes, streaming responses |
+| `/browser-automation` | Testing UI in browser, debugging frontend issues |
+| `/clojure-testing` | **Running tests**, test failures, kaocha, mocking, generators |
+
+**Examples of when to invoke skills:**
+- "How do I run tests?" → `/clojure-testing` (don't guess at CLI commands)
+- "Query returns empty" → `/xtdb-queries` (don't grep for examples)
+- "SSE not updating" → `/datastar-web-ui` (don't read random handler files)
+
+The skill provides the exact commands, patterns, and gotchas for this codebase.
 
 ---
 
