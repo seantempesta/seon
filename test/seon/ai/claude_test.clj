@@ -257,8 +257,10 @@
 ;;; ---------------------------------------------------------------------------
 
 (deftest constants-test
-  (testing "Default CLI command is set"
-    (is (= "/opt/homebrew/bin/claude" sdk/default-cli-command)))
+  (testing "Default CLI command is a non-empty path"
+    (is (string? sdk/default-cli-command))
+    (is (pos? (count sdk/default-cli-command)))
+    (is (clojure.string/ends-with? sdk/default-cli-command "claude")))
 
   (testing "Default model is valid"
     (is (m/validate ::claude/model sdk/default-model)))

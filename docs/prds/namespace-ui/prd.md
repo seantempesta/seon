@@ -13,7 +13,8 @@
 | **0** | **Cleanup + UI Unification** | **✅ Done** | **`/` shows namespace dashboard, logs/agents unified** |
 | **0.5** | **Live Agent Widgets** | **✅ Done** | **Widgets query XTDB for real-time status** |
 | **1a** | **Render convention + view system** | **✅ Done** | **`/ns/seon.ai.agent` renders via `render` fn** |
-| 1b | Observatory UI improvements | 🔄 Next | RESULT shows tool name, local timestamps, hover cards work |
+| 1b | Observatory UI improvements | 🔄 In Progress | RESULT shows tool name, local timestamps, hover cards work |
+| 1c | Agent robustness | Pending | Defensive error handling, hook fixes |
 | 2 | Expand/collapse + styling | Pending | Click `{` to expand maps |
 | 3 | Malli schema viewer | Pending | Schemas listed with clickable refs |
 | 4 | XTDB entity browser | Pending | Forward + reverse refs navigable |
@@ -1055,7 +1056,7 @@ Namespaces can provide a `render` function:
 
 **Goal:** Fix tool rendering issues with minimal changes - extend existing systems, use CSS for progressive disclosure.
 
-**Status:** 🔄 Ready to Implement
+**Status:** 🔄 In Progress (1b.1-1b.4 done, 1b.5-1b.6 pending, hover overflow bug)
 **Date:** 2026-01-23
 
 **Key Document:** `research/rendering-review.md` - Critical review that identified simpler approach
@@ -1266,13 +1267,18 @@ Per review recommendations:
 ### Test Checklist
 
 ```
-1b.1 [ ] RESULT lines show tool name, not tool_use_id
-1b.2 [ ] Timestamps show local time (14:23 not 2026-01-23T14:23:20Z)
-1b.3 [ ] Hover card appears on mouse hover in browser
-1b.4 [ ] Code blocks have syntax highlighting
+1b.1 [x] RESULT lines show tool name, not tool_use_id
+1b.2 [x] Timestamps show local time (14:23 not 2026-01-23T14:23:20Z)
+1b.3 [~] Hover card appears on mouse hover (BUG: overflow clipped by parent)
+1b.4 [x] Code blocks have syntax highlighting
 1b.5 [ ] All tool types render useful one-liners
 1b.6 [ ] TOOL+RESULT display as grouped unit
 ```
+
+**Known Bug:** Hover cards are clipped by parent `overflow-y-auto` container. Fix options:
+1. Remove overflow constraint from log container
+2. Use `position: fixed` with JS positioning
+3. Render hover cards in portal outside scroll container
 
 ---
 
@@ -1281,6 +1287,87 @@ Per review recommendations:
 - `research/rendering-review.md` - Full architectural review with rationale
 - `research/datafy-render-research.md` - Original research (superseded by review)
 - `research/malli-render-research.md` - Schema approach research
+
+---
+
+## Phase 1c: Agent Robustness
+
+**Goal:** Make agents resilient to errors so they don't exit unexpectedly.
+
+**Status:** Pending
+**Date:** 2026-01-23
+
+**Background:** Investigation found agents getting `:interrupted` status (exiting without sending result message) when users did not interrupt them. While no single smoking gun was found, several defensive improvements are needed.
+
+---
+
+### Findings from Investigation
+
+1. **Basic flow works** - Test agents complete successfully
+2. **Incomplete agents have `:interrupted` status** - Not crashes, but unexpected exits
+3. **`log-sdk-message!` lacks try/catch** - If logging fails, reader loop crashes
+4. **Alias error is confusing** - `(require '[x :as alias])` throws if alias exists, returns as error
+5. **TodoWrite hooks firing incorrectly** - Matcher `(Edit|Write)` matches `TodoWrite` via substring
+
+---
+
+### Implementation
+
+#### 1c.1 Defensive Logging ✅ Testable
+
+**Problem:** `log-sdk-message!` at claude.clj:668 is not wrapped in try/catch. If it throws, the entire agent reader loop fails.
+
+**File:** `src/seon/ai/claude.clj`
+
+```clojure
+;; Before (line 668):
+(agent-log/log-sdk-message! agent-logger msg)
+
+;; After:
+(try
+  (agent-log/log-sdk-message! agent-logger msg)
+  (catch Exception e
+    (log/warn e "Failed to log SDK message" {:session-id id :msg-type msg-type})))
+```
+
+**Test:** Agent continues even if log file is unwritable.
+
+#### 1c.2 Fix Hook Matcher ✅ Testable
+
+**Problem:** Hook matcher `(Edit|Write)` matches `TodoWrite` via substring.
+
+**File:** `.claude/settings.json`
+
+```json
+// Before:
+"matcher": "(Edit|Write)"
+
+// After - use anchors for exact match:
+"matcher": "^(Edit|Write)$"
+```
+
+**Test:** TodoWrite no longer triggers seon-hook.
+
+#### 1c.3 Graceful Alias Handling (Optional)
+
+**Problem:** `(require '[x :as alias])` throws if alias exists. This returns as "Error" which may confuse agents.
+
+**Options:**
+1. Document this as expected behavior in AGENT.md
+2. Add helper `(safe-require ...)` that checks first
+3. Modify MCP eval to catch and return as warning
+
+**Recommendation:** Start with documentation. If agents repeatedly struggle, add helper.
+
+---
+
+### Test Checklist
+
+```
+1c.1 [ ] log-sdk-message! wrapped in try/catch
+1c.2 [ ] TodoWrite does not trigger seon-hook
+1c.3 [ ] AGENT.md documents alias behavior (if needed)
+```
 
 ---
 

@@ -31,13 +31,27 @@ You have access to the Seon MCP server with these tools:
 
 Use `(user/reload)` after editing files to load changes into the running server.
 
+## Skills (Use These!)
+
+You have access to project-specific skills that encode domain knowledge. **Invoke them before searching or guessing.**
+
+| Skill | When to Use |
+|-------|-------------|
+| `/clojure-testing` | Running tests, test failures, kaocha, mocking |
+| `/xtdb-queries` | Database queries, SQL patterns, empty results |
+| `/datastar-web-ui` | SSE handlers, `data-*` attributes, streaming |
+| `/browser-automation` | Testing UI in browser |
+
+Example: If you need to run tests, invoke `/clojure-testing` first - it has the exact commands.
+
 ## Workflow
 
 1. **Read the PRD first** - The orchestrator pointed you to it for a reason
-2. **Understand before coding** - Explore existing code, understand patterns
-3. **Make incremental changes** - Small commits of working code
-4. **Test as you go** - The dev hook runs tests automatically on file save
-5. **Ask if stuck** - Use clear questions the orchestrator can answer
+2. **Invoke relevant skills** - Before searching, check if a skill covers your task
+3. **Understand before coding** - Explore existing code, understand patterns
+4. **Make incremental changes** - Small commits of working code
+5. **Test as you go** - The dev hook runs tests automatically on file save
+6. **Ask if stuck** - Use clear questions the orchestrator can answer
 
 ## Code Conventions
 

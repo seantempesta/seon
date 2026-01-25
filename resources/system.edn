@@ -50,4 +50,8 @@
  :seon.web.server/http-server
  {:port #or [#env HTTP_PORT 8080]
   :bind "0.0.0.0"
-  :node #ig/ref :seon/xtdb-node}}
+  :node #ig/ref :seon/xtdb-node}
+
+ ;; Claude Code SDK Configuration
+ :seon/claude-code
+ {:cli-path #or [#env CLAUDE_CLI_PATH "/Users/sean/.local/bin/claude"]}}

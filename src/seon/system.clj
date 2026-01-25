@@ -260,3 +260,14 @@
     old-state
     (do (ig/halt-key! key old-state)
         (ig/init-key key opts))))
+
+;;; ---------------------------------------------------------------------------
+;;; Claude Code SDK Configuration
+;;; ---------------------------------------------------------------------------
+;;; Configuration for the Claude Code CLI. Currently just holds the CLI path.
+;;; The actual CLI interaction is in seon.ai.claude.sdk.
+
+(defmethod ig/init-key :seon/claude-code
+  [_ config]
+  (log/info "Claude Code SDK configured" {:cli-path (:cli-path config)})
+  config)

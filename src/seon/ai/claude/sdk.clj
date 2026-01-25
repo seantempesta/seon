@@ -85,9 +85,10 @@
 ;;; Configuration Constants
 ;;; ---------------------------------------------------------------------------
 
-(def ^:const default-cli-command
-  "Default Claude Code command (Homebrew npm install location)."
-  "/opt/homebrew/bin/claude")
+(def default-cli-command
+  "Default Claude Code command. Reads from CLAUDE_CLI_PATH env var or uses user-local installation."
+  (or (System/getenv "CLAUDE_CLI_PATH")
+      "/Users/sean/.local/bin/claude"))
 
 (def ^:const default-model
   "Default model. Opus 4.5 for complex tasks."
@@ -105,7 +106,7 @@
   "Build CLI arguments from options map.
 
    Options (all optional):
-     ::cli-command     - Path to Claude CLI (default: /opt/homebrew/bin/claude)
+     ::cli-command     - Path to Claude CLI (default: ~/.local/bin/claude)
      ::model           - Model name (default: claude-opus-4-5-20251101)
      ::permission-mode - Permission mode (default: default)
      ::max-turns       - Maximum conversation turns

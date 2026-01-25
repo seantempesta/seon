@@ -219,27 +219,32 @@
                  (do
                    ;; Set socket timeout to remaining time (capped at 5 seconds for responsiveness)
                    (.setSoTimeout sock (int (min remaining 5000)))
-                   (let [msg (decode-msg (b/read-bencode in))
-                         status (get msg "status")
-                         value (get msg "value")
-                         ns-val (get msg "ns")
-                         err (get msg "err")
-                         stdout (get msg "out")
-                         ex (get msg "ex")]
-                     (log-debug "Received:" (pr-str msg))
-                     (let [result' (cond-> result
-                                     value (assoc :value value)
-                                     ns-val (assoc :ns ns-val)
-                                     err (update :err str err)
-                                     stdout (update :out str stdout)
-                                     ex (assoc :ex ex))]
-                       (if (and status (some #{"done"} status))
-                         result'
-                         (recur result'))))))))))
-       (catch java.net.SocketTimeoutException _e
-         ;; Individual read timed out - check if total deadline exceeded
-         {:err (str "Timeout: evaluation took longer than " timeout-ms "ms. The REPL may be blocked.")
-          :ex "timeout"})
+                   ;; Try to read, handling socket timeout separately from other errors
+                   (let [read-result (try
+                                       {:msg (decode-msg (b/read-bencode in))}
+                                       (catch java.net.SocketTimeoutException _e
+                                         {:timeout true}))]
+                     (if (:timeout read-result)
+                       ;; Socket timed out but deadline not exceeded - keep waiting
+                       (recur result)
+                       ;; Got a message - process it
+                       (let [msg (:msg read-result)
+                             status (get msg "status")
+                             value (get msg "value")
+                             ns-val (get msg "ns")
+                             err (get msg "err")
+                             stdout (get msg "out")
+                             ex (get msg "ex")]
+                         (log-debug "Received:" (pr-str msg))
+                         (let [result' (cond-> result
+                                         value (assoc :value value)
+                                         ns-val (assoc :ns ns-val)
+                                         err (update :err str err)
+                                         stdout (update :out str stdout)
+                                         ex (assoc :ex ex))]
+                           (if (and status (some #{"done"} status))
+                             result'
+                             (recur result'))))))))))))
        (catch java.net.ConnectException e
          {:err (str "Connection failed to port " port ": " (.getMessage e))})
        (catch Exception e

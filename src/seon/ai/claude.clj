@@ -207,6 +207,64 @@
                   [:map
                    [::ai/session-id ::ai/session-id]])
 
+;; Get result request (4-char hex agent session ID)
+(schema/register! ::get-result-request
+                  [:map
+                   [::ai/session-id ::ai/session-id]])
+
+;; Result text from completed agent
+(schema/register! ::result-text
+                  [:string {:description "Final result text from agent"}])
+
+;; Duration in milliseconds
+(schema/register! ::duration-ms
+                  [:int {:min 0
+                         :description "Duration in milliseconds"}])
+
+;; Number of conversation turns
+(schema/register! ::num-turns
+                  [:int {:min 0
+                         :description "Number of conversation turns"}])
+
+;; Get result response
+(schema/register! ::get-result-response
+                  [:map
+                   [::result-text {:optional true} ::result-text]
+                   [::agent-status ::agent-status]
+                   [::cost-usd {:optional true} [:double {:min 0.0}]]
+                   [::duration-ms {:optional true} ::duration-ms]
+                   [::num-turns {:optional true} ::num-turns]
+                   [::error {:optional true} :string]])
+
+;; Timeout for blocking operations (defaults to indefinite)
+(schema/register! ::timeout-ms
+                  [:int {:min 0
+                         :description "Timeout in milliseconds for blocking operations"}])
+
+;; Launch agent!! (blocking) request - extends launch-agent! request with timeout
+(schema/register! ::launch-agent!!-request
+                  [:map
+                   [::ai/node ::ai/node]
+                   [::ai/namespace ::ai/namespace]
+                   [::ai/prompt ::ai/prompt]
+                   [::model {:optional true} ::model]
+                   [::sdk/permission-mode {:optional true} ::sdk/permission-mode]
+                   [::sdk/max-turns {:optional true} ::sdk/max-turns]
+                   [::sdk/max-budget-usd {:optional true} ::sdk/max-budget-usd]
+                   [::sdk/allowed-tools {:optional true} ::sdk/allowed-tools]
+                   [::sdk/disallowed-tools {:optional true} ::sdk/disallowed-tools]
+                   [::timeout-ms {:optional true} ::timeout-ms]])
+
+;; Launch agent!! (blocking) response
+(schema/register! ::launch-agent!!-response
+                  [:map
+                   [::result-text {:optional true} ::result-text]
+                   [::agent-status ::agent-status]
+                   [::cost-usd {:optional true} [:double {:min 0.0}]]
+                   [::duration-ms {:optional true} ::duration-ms]
+                   [::num-turns {:optional true} ::num-turns]
+                   [::error {:optional true} :string]])
+
 ;; Agents (list) request/response
 (schema/register! ::agents-request
                   [:map])
@@ -791,6 +849,103 @@
 
       handle)))
 
+(defn launch-agent!!
+  "Launch a Claude Code agent and block until completion.
+
+   This is a blocking variant of `launch-agent!` that waits for the agent
+   to complete and returns the result. Useful for orchestrators that need
+   to wait for agent completion before proceeding.
+
+   Request keys:
+     ::ai/node               - Required. XTDB orchestrator node
+     ::ai/namespace          - Required. Agent namespace (string or symbol)
+     ::ai/prompt             - Required. Task description for the agent
+     ::model                 - Optional. Claude model (default: opus)
+     ::sdk/permission-mode   - Optional. Permission mode (default: bypassPermissions)
+     ::sdk/max-turns         - Optional. Max conversation turns
+     ::sdk/max-budget-usd    - Optional. Cost limit
+     ::sdk/allowed-tools     - Optional. Tool whitelist
+     ::sdk/disallowed-tools  - Optional. Tool denylist
+     ::ai/force?             - Optional. Force launch even if namespace has running agent
+     ::timeout-ms            - Optional. Timeout in milliseconds (default: wait indefinitely)
+
+   Response keys:
+     ::result-text   - The final result text (if completed successfully)
+     ::agent-status  - Final status (:completed, :failed, :timeout, :interrupted)
+     ::cost-usd      - Total cost in USD (if available)
+     ::duration-ms   - Duration in milliseconds
+     ::num-turns     - Number of conversation turns
+     ::error         - Error message (if failed or timeout)
+
+   Example:
+     (launch-agent!! {::ai/node xtdb-node
+                      ::ai/namespace 'seon.trading
+                      ::ai/prompt \"Implement the signals dashboard\"
+                      ::timeout-ms 300000})  ; 5 minute timeout
+     ;; => {::result-text \"## Summary\\n\\n...\"
+     ;;     ::agent-status :completed
+     ;;     ::cost-usd 0.23
+     ;;     ::duration-ms 15185
+     ;;     ::num-turns 3}"
+  [{::ai/keys [node namespace prompt force?]
+    ::keys [model timeout-ms]
+    ::sdk/keys [permission-mode max-turns max-budget-usd allowed-tools disallowed-tools]
+    :as request}]
+  (log/info "Launching blocking agent" {:namespace namespace :timeout-ms timeout-ms})
+
+  ;; Launch the agent (non-blocking)
+  (let [handle (launch-agent! (dissoc request ::timeout-ms))
+        session-id (::ai/session-id handle)
+        result-ch (::result-ch handle)
+        close-fn (::close! handle)
+        start-time (System/currentTimeMillis)]
+
+    ;; Block on result-ch with optional timeout
+    (let [result-msg (if timeout-ms
+                       ;; With timeout
+                       (async/alt!!
+                         result-ch ([v] v)
+                         (async/timeout timeout-ms) ::timeout)
+                       ;; No timeout - wait indefinitely
+                       (async/<!! result-ch))]
+
+      (cond
+        ;; Timeout occurred
+        (= result-msg ::timeout)
+        (do
+          (log/warn "Agent timed out" {:session-id session-id :timeout-ms timeout-ms})
+          ;; Clean up the agent
+          (when close-fn (close-fn))
+          {::agent-status :timeout
+           ::duration-ms (- (System/currentTimeMillis) start-time)
+           ::error (str "Agent timed out after " timeout-ms "ms")})
+
+        ;; Got a result message - parse it
+        result-msg
+        (let [parsed (agent/parse-result {:provider :claude :message result-msg})]
+          (log/info "Agent completed" {:session-id session-id
+                                        :status (::agent/status parsed)
+                                        :cost (::agent/cost-usd parsed)})
+          (cond-> {::agent-status (::agent/status parsed)
+                   ::duration-ms (or (::agent/duration-ms parsed)
+                                     (- (System/currentTimeMillis) start-time))}
+            (::agent/result-text parsed)
+            (assoc ::result-text (::agent/result-text parsed))
+
+            (::agent/cost-usd parsed)
+            (assoc ::cost-usd (::agent/cost-usd parsed))
+
+            (::agent/num-turns parsed)
+            (assoc ::num-turns (::agent/num-turns parsed))))
+
+        ;; Channel closed without result (unexpected termination)
+        :else
+        (do
+          (log/warn "Agent terminated unexpectedly" {:session-id session-id})
+          {::agent-status :terminated
+           ::duration-ms (- (System/currentTimeMillis) start-time)
+           ::error "Agent terminated without returning a result"})))))
+
 (defn agents
   "List all running Claude agents with status, namespace, session-id.
 
@@ -893,6 +1048,96 @@
    Note: For provider-agnostic lookup, use seon.ai.agent/get-agent instead."
   [{::ai/keys [session-id]}]
   (agent/get-agent {::agent/session-id session-id}))
+
+(defn get-result
+  "Get the final result from a completed agent session.
+
+   Retrieves the result text and stats from a completed agent. The session-id
+   is the 4-char hex Seon agent session ID (like \"d465\"), not the AI session ID.
+
+   Request keys:
+     ::ai/session-id - Required. The 4-char hex agent session ID
+
+   Response keys:
+     ::result-text   - The final result text (if completed successfully)
+     ::agent-status  - Current status (:running, :completed, :failed, :terminated, :interrupted)
+     ::cost-usd      - Total cost in USD (if available)
+     ::duration-ms   - Duration in milliseconds (if completed)
+     ::num-turns     - Number of conversation turns (counted from assistant messages)
+     ::error         - Error message if agent not found
+
+   Example:
+     (get-result {::ai/session-id \"d465\"})
+     ;; => {::result-text \"## Summary\\n\\n**REPL connection verified...**\"
+     ;;     ::agent-status :completed
+     ;;     ::cost-usd 0.23
+     ;;     ::duration-ms 15185
+     ;;     ::num-turns 3}
+
+   Note: This function queries the database, so it works for both running
+   and completed agents. For running agents, ::result-text will be nil."
+  [{::ai/keys [session-id]}]
+  (let [node (:seon/xtdb-node integrant.repl.state/system)]
+    (if-not node
+      {::agent-status :failed
+       ::error "System not running - no XTDB node available"}
+      ;; Find AI session by agent-session-id
+      (let [sessions ((requiring-resolve 'seon.db.node/q)
+                      node
+                      "SELECT * FROM ai_sessions WHERE seon$ai$agent_session_id = ?"
+                      [session-id])]
+        (if (empty? sessions)
+          {::agent-status :failed
+           ::error (str "Agent session not found: " session-id)}
+          (let [session (first sessions)
+                ai-session-id (:xt/id session)
+                status (::ai/status session)
+                ;; Map AI session status to agent status
+                agent-status (case status
+                               :active :running
+                               :completed :completed
+                               :failed :failed
+                               :interrupted :interrupted
+                               :terminated)
+                ;; Calculate duration from timestamps
+                started-at (::ai/started-at session)
+                ended-at (::ai/ended-at session)
+                duration-ms (when (and started-at ended-at)
+                              (let [start-inst (if (instance? java.time.Instant started-at)
+                                                 started-at
+                                                 (.toInstant started-at))
+                                    end-inst (if (instance? java.time.Instant ended-at)
+                                               ended-at
+                                               (.toInstant ended-at))]
+                                (- (.toEpochMilli end-inst) (.toEpochMilli start-inst))))
+                ;; Get result message if completed
+                result-msg (when (= :completed status)
+                             (first ((requiring-resolve 'seon.db.node/q)
+                                     node
+                                     "SELECT seon$ai$content FROM ai_messages
+                                      WHERE seon$ai$session_id = ?
+                                      AND seon$ai$claude$message_type = 'result'"
+                                     [ai-session-id])))
+                ;; Count assistant messages for num-turns
+                turn-count (first ((requiring-resolve 'seon.db.node/q)
+                                   node
+                                   "SELECT COUNT(*) as cnt FROM ai_messages
+                                    WHERE seon$ai$session_id = ?
+                                    AND seon$ai$role = 'assistant'
+                                    AND seon$ai$claude$message_type = 'assistant'"
+                                   [ai-session-id]))]
+            (cond-> {::agent-status agent-status}
+              (::ai/cost-usd session)
+              (assoc ::cost-usd (::ai/cost-usd session))
+
+              duration-ms
+              (assoc ::duration-ms (int duration-ms))
+
+              (:cnt turn-count)
+              (assoc ::num-turns (int (:cnt turn-count)))
+
+              (::ai/content result-msg)
+              (assoc ::result-text (::ai/content result-msg)))))))))
 
 (comment
   ;; REPL exploration
