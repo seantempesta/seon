@@ -159,6 +159,23 @@ The namespace doesn't restrict the agent's work - they can edit any file and swi
 
 The server must be running for agents to work.
 
+### Health Checks
+
+```bash
+curl http://localhost:8080/api/health
+```
+
+Returns component status (XTDB, nREPL, agents) with latencies. HTTP 200 = healthy, 503 = unhealthy.
+
+```clojure
+;; In REPL - check health
+(require '[seon.health :as health])
+(health/deep-check {::health/node (:seon/xtdb-node integrant.repl.state/system)})
+
+;; Clean up orphaned resources after crash
+(health/cleanup-orphaned-resources! {::health/node node})
+```
+
 ### Running Tests
 
 ```bash
