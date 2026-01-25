@@ -166,6 +166,97 @@ curl http://localhost:8080/api/health/deep
 
 This order ensures we can see problems before we try to fix them.
 
+### Phase 5: Agent Robustness (from namespace-ui PRD Phase 1c)
+
+**Goal:** Make agents resilient to errors so they don't exit unexpectedly.
+
+**Background:** Investigation found agents getting `:interrupted` status (exiting without sending result message) when users did not interrupt them. Agent d35d died silently mid-task without the system detecting it:
+- Claude process terminated but `agent-status` remained `:running`
+- nREPL server orphaned (still listening on port)
+- No COMPLETE marker in log file
+
+#### 5.1 Defensive Logging
+
+**Problem:** `log-sdk-message!` at claude.clj:668 is not wrapped in try/catch. If it throws, the entire agent reader loop fails.
+
+**File:** `src/seon/ai/claude.clj`
+
+```clojure
+;; Before (line 668):
+(agent-log/log-sdk-message! agent-logger msg)
+
+;; After:
+(try
+  (agent-log/log-sdk-message! agent-logger msg)
+  (catch Exception e
+    (log/warn e "Failed to log SDK message" {:session-id id :msg-type msg-type})))
+```
+
+#### 5.2 Fix Hook Matcher
+
+**Problem:** Hook matcher `(Edit|Write)` matches `TodoWrite` via substring.
+
+**File:** `.claude/settings.json`
+
+```json
+// Before:
+"matcher": "(Edit|Write)"
+
+// After - use anchors for exact match:
+"matcher": "^(Edit|Write)$"
+```
+
+#### 5.3 Process Death Detection
+
+**Problem:** Reader loop in `src/seon/ai/claude.clj:619-696` should detect process death via `readLine` returning `nil`, then set status to `:terminated` in the `finally` block. This isn't always happening.
+
+**Fixes needed:**
+1. Add process health check / watchdog
+2. Monitor `exit-ref` from process
+3. Timeout-based stuck detection
+4. Cleanup orphaned nREPL servers when process dies
+
+### Phase 6: MCP Eval Timeout Fix
+
+**Problem:** Agent e84d got stuck on an `mcp__seon__eval` that hung indefinitely. The 30s timeout returns an error but doesn't kill the blocked eval thread.
+
+**File:** `bin/mcp-server`
+
+**Fix:** Add auto-interrupt after timeout:
+```clojure
+;; After timeout, also send interrupt
+(when (= (:ex result) "timeout")
+  (nrepl-interrupt port nrepl-session-id))
+```
+
+### Phase 7: Hook Self-Edit Protection
+
+**Problem:** When an agent edits `hook.clj` itself and breaks its syntax, the nREPL eval to call the repair code fails because the broken code can't compile. This creates a chicken-and-egg problem.
+
+**Potential fixes:**
+1. Move syntax repair to `bin/seon-hook` (Babashka) so it runs before Clojure load
+2. Special-case `hook.clj` edits with pre-edit syntax validation
+3. Keep a backup of last-known-good `hook.clj` and restore on compile failure
+4. Add a "hook health check" that validates hook.clj can compile before proceeding
+
+---
+
+## Files to Create/Modify (Updated)
+
+| File | Action | Purpose |
+|------|--------|---------|
+| `src/seon/health.clj` | **CREATE** | Health check functions |
+| `src/seon/web/handlers.clj` | Modify | Enhanced /health, add /health/deep |
+| `src/seon/web/routes.clj` | Modify | Add /api/health/deep route |
+| `src/seon/system.clj` | Modify | Call cleanup on startup |
+| `src/seon/orchestrator/session.clj` | Modify | Enhanced recovery, error boundaries |
+| `src/seon/orchestrator/nrepl.clj` | Modify | Port cleanup, error boundaries |
+| `src/seon/ai/claude.clj` | Modify | Retry on message persistence, defensive logging, death detection |
+| `src/seon/ai/agent/log.clj` | Modify | Defensive try/catch in log functions |
+| `bin/mcp-server` | Modify | Fail fast if orchestrator unreachable, auto-interrupt on timeout |
+| `bin/seon-hook` | Modify | Pre-Clojure syntax validation for hook.clj |
+| `.claude/settings.json` | Modify | Fix hook matcher regex |
+
 ---
 
 ## Success Criteria
@@ -175,3 +266,7 @@ This order ensures we can see problems before we try to fix them.
 3. Database failures are caught and logged, not propagated
 4. Server startup cleans up orphaned resources from previous crashes
 5. Observatory shows system health status
+6. Agent logging failures don't crash the reader loop
+7. TodoWrite no longer triggers seon-hook incorrectly
+8. MCP eval timeouts properly interrupt blocked threads
+9. Hook self-edits that break syntax are caught before they brick the system
