@@ -354,11 +354,11 @@ Seon uses a **Phosphor Terminal** theme - warm blacks, cream text, amber accents
 
 | Document | Purpose |
 |----------|---------|
+| `VISION.md` | Full thesis, architecture layers, progress tracking |
 | `CONVENTIONS.md` | Malli schemas, API design patterns |
 | `docs/reference/xtdb-v2-reference.md` | Database queries (use SQL) |
 | `docs/reference/datastar-quick-reference.md` | Web UI attributes |
 | `docs/prds/namespace-ui/design-system.md` | UI colors, typography, spacing |
-| `PLAN.md` | Transformation roadmap |
 
 ---
 
