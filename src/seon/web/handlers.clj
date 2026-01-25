@@ -9,42 +9,12 @@
             [seon.health :as health]))
 
 (defn health
-  "Quick health check endpoint for load balancers.
-   Returns 200 if system is healthy, 503 if unhealthy."
+  "Health check endpoint with full component breakdown.
+   Returns 200 if healthy/degraded, 503 if unhealthy."
   [request]
   (let [node (get-in request [:system :seon/xtdb-node])
         now (java.time.Instant/now)]
     (if node
-      ;; Full health check when node is available
-      (let [result (health/quick-check {::health/node node})
-            status-code (case (::health/status result)
-                          :healthy 200
-                          :degraded 200
-                          :unhealthy 503
-                          503)]
-        {:status status-code
-         :headers {"Content-Type" "application/json"}
-         :body (json/write-value-as-string
-                {:status (if (= :healthy (::health/status result)) "ok" (name (::health/status result)))
-                 :timestamp (str now)
-                 :checks (when-let [checks (::health/checks result)]
-                           (into {} (for [[k v] checks]
-                                      [(name k) v])))})})
-      ;; Basic response when node not injected (e.g., in tests)
-      {:status 200
-       :headers {"Content-Type" "application/json"}
-       :body (json/write-value-as-string
-              {:status "ok"
-               :timestamp (str now)})})))
-
-(defn health-deep
-  "Deep health check endpoint for debugging and monitoring.
-   Returns comprehensive component-by-component breakdown."
-  [request]
-  (let [node (get-in request [:system :seon/xtdb-node])
-        now (java.time.Instant/now)]
-    (if node
-      ;; Full deep check when node is available
       (let [result (health/deep-check {::health/node node})
             status-code (case (::health/status result)
                           :healthy 200
@@ -59,7 +29,6 @@
                  :checks (into {} (for [[k v] (::health/checks result)]
                                     [(name k) v]))
                  :resources (::health/resources result)})})
-      ;; Minimal response when node not injected
       {:status 200
        :headers {"Content-Type" "application/json"}
        :body (json/write-value-as-string
