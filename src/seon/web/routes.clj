@@ -12,6 +12,7 @@
   {[:get "/"]                  #'handlers/dashboard
    [:post "/"]                 #'handlers/dashboard-sse
    [:get "/api/health"]        #'handlers/health
+   [:get "/api/health/deep"]   #'handlers/health-deep
    ;; Log viewer routes
    [:get "/logs"]              #'handlers/log-viewer
    [:post "/logs"]             #'handlers/log-viewer-sse

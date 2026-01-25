@@ -194,17 +194,22 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- store-session!
-  "Store session info in XTDB orchestrator database."
+  "Store session info in XTDB orchestrator database.
+   Logs and continues on failure - session still works in-memory."
   [node session-info]
-  (xt/execute-tx node
-    [[:sql "INSERT INTO sessions (_id, session$id, session$namespace, session$nrepl_port, session$status, session$started_at, session$db_name) VALUES (?, ?, ?, ?, ?, ?, ?)"
-      [(str "session-" (::id session-info))
-       (::id session-info)
-       (str (::namespace session-info))
-       (::nrepl-port session-info)
-       (name (::status session-info))
-       (::started-at session-info)
-       (::db-name session-info)]]]))
+  (try
+    (xt/execute-tx node
+      [[:sql "INSERT INTO sessions (_id, session$id, session$namespace, session$nrepl_port, session$status, session$started_at, session$db_name) VALUES (?, ?, ?, ?, ?, ?, ?)"
+        [(str "session-" (::id session-info))
+         (::id session-info)
+         (str (::namespace session-info))
+         (::nrepl-port session-info)
+         (name (::status session-info))
+         (::started-at session-info)
+         (::db-name session-info)]]])
+    (catch Exception e
+      (log/warn e "Failed to store session in XTDB, continuing with in-memory only"
+                {:session-id (::id session-info)}))))
 
 (defn- update-session-status!
   "Update session status in XTDB orchestrator database."

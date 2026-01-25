@@ -9,6 +9,12 @@
             [seon.web.agents :as agents]
             [seon.web.sse :as sse]))
 
+(defn- wrap-system
+  "Middleware that injects system components into requests."
+  [handler system]
+  (fn [request]
+    (handler (assoc request :system system))))
+
 (defmethod ig/init-key ::http-server
   [_ {:keys [port bind handler node]}]
   ;; Initialize modules with XTDB node
@@ -18,11 +24,14 @@
     (ai-agent/init! node))
 
   ;; Initialize SSE broadcast infrastructure with 100ms throttle
-  (let [refresh-mult (sse/init-sse! :max-refresh-ms 100)]
-    ;; Wrap handler with SSE middleware
+  (let [refresh-mult (sse/init-sse! :max-refresh-ms 100)
+        ;; Build system map to inject into requests
+        system {:seon/xtdb-node node}]
+    ;; Wrap handler with SSE middleware and system injection
     ;; Use var wrapper so handler picks up namespace reloads
     (let [handler-fn (or handler #'routes/handler)
-          wrapped-handler (sse/wrap-refresh-mult handler-fn refresh-mult)
+          with-system (wrap-system handler-fn system)
+          wrapped-handler (sse/wrap-refresh-mult with-system refresh-mult)
           server (hk/run-server wrapped-handler {:port port :ip bind})]
       (log/info "HTTP server started" {:port port :bind bind})
       {:server server
