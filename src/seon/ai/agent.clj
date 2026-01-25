@@ -382,23 +382,32 @@
   "Shut down all running agents in the registry.
 
    This is called before integrant reset to prevent core.async protocol
-   corruption. When namespaces are reloaded while channels are open,
-   the old channel instances don't recognize the reloaded protocols.
+   corruption and orphaned nREPL servers. When namespaces are reloaded
+   while channels are open, the old channel instances don't recognize
+   the reloaded protocols.
+
+   This function:
+   1. Calls each agent's close! function (stops process, channels, session)
+   2. As a safety net, also calls stop-all-namespace-nrepls! to ensure
+      no nREPL servers survive even if close! fails
 
    Request keys:
      (none - empty map for consistency)
 
    Response keys:
      ::shutdown-count - Number of agents that were shut down
+     ::nrepl-count    - Number of nREPL servers stopped (safety net)
      ::errors         - Vector of errors encountered (may be empty)
 
    Example:
      (shutdown-all! {})
      ;; => {:seon.ai.agent/shutdown-count 3
+     ;;     :seon.ai.agent/nrepl-count 0
      ;;     :seon.ai.agent/errors []}"
   [_request]
   (let [agents @agent-registry
         errors (atom [])]
+    ;; Step 1: Call each agent's close! function
     (doseq [[id handle] agents]
       (try
         (when-let [close! (::close! handle)]
@@ -409,8 +418,21 @@
           (swap! errors conj {:session-id id :error (.getMessage e)}))))
     ;; Clear registry in case close! didn't remove entries
     (reset! agent-registry {})
-    {::shutdown-count (count agents)
-     ::errors @errors}))
+
+    ;; Step 2: Safety net - stop any remaining nREPL servers
+    ;; This catches servers that survived if close! threw an exception
+    ;; or if there's a race condition during shutdown
+    (let [nrepl-results (try
+                          (require 'seon.orchestrator.nrepl)
+                          (let [stop-all! (resolve 'seon.orchestrator.nrepl/stop-all-namespace-nrepls!)]
+                            (stop-all!))
+                          (catch Exception e
+                            (log/warn e "Error stopping remaining nREPL servers")
+                            (swap! errors conj {:type :nrepl-cleanup :error (.getMessage e)})
+                            []))]
+      {::shutdown-count (count agents)
+       ::nrepl-count (count nrepl-results)
+       ::errors @errors})))
 
 ;;; ---------------------------------------------------------------------------
 ;;; XTDB Node Reference (for completed sessions)
