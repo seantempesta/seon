@@ -1,6 +1,6 @@
 # PRD: Namespace UI
 
-**Status:** Phase 1 In Progress (render convention done, interactions pending)
+**Status:** Vision Document (phases split into focused PRDs)
 **Priority:** High
 **Branch:** feature/namespace-ui
 
@@ -8,21 +8,21 @@
 
 ## Phase Summary
 
-| Phase | Goal | Status | Test |
-|-------|------|--------|------|
-| **0** | **Cleanup + UI Unification** | **✅ Done** | **`/` shows namespace dashboard, logs/agents unified** |
-| **0.5** | **Live Agent Widgets** | **✅ Done** | **Widgets query XTDB for real-time status** |
-| **1a** | **Render convention + view system** | **✅ Done** | **`/ns/seon.ai.agent` renders via `render` fn** |
-| 1b | Observatory UI improvements | 🔄 In Progress | RESULT shows tool name, local timestamps, hover cards work |
-| 1c | Agent robustness | Pending | Defensive error handling, hook fixes |
-| 2 | Expand/collapse + styling | Pending | Click `{` to expand maps |
-| 3 | Malli schema viewer | Pending | Schemas listed with clickable refs |
-| 4 | XTDB entity browser | Pending | Forward + reverse refs navigable |
-| 5 | Live atom updates | Pending | REPL change → browser update in 100ms |
-| 6 | Dashboard polish | Pending | Namespace tree expandable, agent counts |
-| 7 | Custom renderers | Pending | `:seon.ui/render-fn` in ctx works |
+| Phase | Goal | Status | Focused PRD |
+|-------|------|--------|-------------|
+| **0** | **Cleanup + UI Unification** | **✅ Done** | - |
+| **0.5** | **Live Agent Widgets** | **✅ Done** | - |
+| **1a** | **Render convention + view system** | **✅ Done** | - |
+| **1b** | **Observatory UI improvements** | **🔄 In Progress** | [`observatory-polish`](../observatory-polish/prd.md) |
+| **1c** | **Agent robustness** | **✅ Done** | [`stability-improvements`](../stability-improvements/prd.md) |
+| 2 | Expand/collapse + styling | Pending | [`data-viewer`](../data-viewer/prd.md) |
+| 3 | Malli schema viewer | Pending | [`schema-viewer`](../schema-viewer/prd.md) |
+| 4 | XTDB entity browser | Pending | [`xtdb-browser`](../xtdb-browser/prd.md) |
+| 5 | Live atom updates | Pending | [`live-updates`](../live-updates/prd.md) |
+| 6 | Dashboard polish | Pending | [`dashboard-polish`](../dashboard-polish/prd.md) |
+| 7 | Custom renderers | Pending | [`custom-renderers`](../custom-renderers/prd.md) |
 
-**Total: 12-16 days**
+**Note:** This document now serves as the vision and design philosophy reference. Implementation details have been moved to focused PRDs for better tracking.
 
 All introspection is **runtime** - no hardcoded table names, schema keys, or function names.
 
