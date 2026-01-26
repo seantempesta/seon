@@ -164,6 +164,28 @@
           document.querySelectorAll('pre code:not(.hljs)').forEach(el => hljs.highlightElement(el));
         });
       "]
+      ;; Hover card positioning - fixes overflow clipping by using fixed positioning
+      [:script "
+        document.addEventListener('mouseover', (e) => {
+          const line = e.target.closest('.log-line');
+          if (!line) return;
+          const card = line.querySelector('.hover-card');
+          if (!card) return;
+
+          const rect = line.getBoundingClientRect();
+          card.style.left = rect.left + 'px';
+
+          // Position below if room, else above
+          const spaceBelow = window.innerHeight - rect.bottom;
+          if (spaceBelow > 200) {
+            card.style.top = (rect.bottom + 4) + 'px';
+            card.style.bottom = 'auto';
+          } else {
+            card.style.top = 'auto';
+            card.style.bottom = (window.innerHeight - rect.top + 4) + 'px';
+          }
+        });
+      "]
       [:div {:class "max-w-7xl mx-auto"}
        ;; Datastar init div - auto-POSTs on load and reconnects on online event
        [:div {:data-init on-load-js

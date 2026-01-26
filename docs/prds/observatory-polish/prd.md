@@ -1,6 +1,6 @@
 # PRD: Observatory UI Polish
 
-**Status:** In Progress (1b.1-1b.4 done, 1b.5-1b.6 pending, hover overflow bug)
+**Status:** Complete (1b.1-1b.7 done)
 **Priority:** High
 **Branch:** feature/namespace-ui
 **Parent PRD:** docs/prds/namespace-ui/prd.md (Phase 1b, lines 1055-1290)
@@ -29,7 +29,7 @@ Phase 1b of the namespace-ui PRD brought significant improvements to Observatory
 | Hover cards | Done | `views.clj:205-242` - CSS-only `hover-card` with `group-hover` pattern |
 | Syntax highlighting | Done | `html.clj` - highlight.js CDN, `views.clj` - language classes on code blocks |
 
-### Tool Renderers Implemented (9 of 14 common tools)
+### Tool Renderers Implemented (14 of 14 common tools)
 
 | Tool | Inline Summary | Hover | Code Location |
 |------|----------------|-------|---------------|
@@ -42,62 +42,45 @@ Phase 1b of the namespace-ui PRD brought significant improvements to Observatory
 | mcp__seon__eval | code preview + lines | session, timeout, code | `views.clj:637-674` |
 | Task | agent type + description | type, prompt | `views.clj:677-698` |
 | TodoWrite | `5 todos (2 active)` | status breakdown, list | `views.clj:701-736` |
+| WebSearch | `"query"` + domain count | query, allowed/blocked domains | `views.clj:739-759` |
+| WebFetch | domain + prompt preview | full URL, prompt | `views.clj:762-784` |
+| AskUserQuestion | question text or count | all questions with options | `views.clj:787-813` |
+| Skill | `/skill-name` + args | skill, args | `views.clj:816-832` |
+| NotebookEdit | `file.ipynb` mode [type] | path, mode, type, cell_id, content | `views.clj:835-864` |
 
-### Not Started
+### Done (1b.6)
 
-| Item | Status |
-|------|--------|
-| TOOL+RESULT pairing (1b.6) | Pending |
-| Hover overflow fix (1b.7) | Known bug |
-| Additional tool renderers | 5 tools use fallback default |
+| Item | Status | Code Location |
+|------|--------|---------------|
+| TOOL+RESULT pairing | Done | `agents.clj:463-536` - `pair-tool-results`, `paired-log-line-component` |
+
+### Done (1b.7)
+
+| Item | Status | Code Location |
+|------|--------|---------------|
+| Hover overflow fix | Done | `views.clj:205-216` - fixed positioning, `html.clj:167-187` - JS positioning |
 
 ---
 
 ## Remaining Work
 
-### Phase 5: Complete Tool Renderers (1b.5)
+### Phase 5: Complete Tool Renderers (1b.5) ✅ DONE
 
 **Goal:** Every tool type shows a useful inline summary with hover detail.
 
-**Missing renderers** (currently use `:default` fallback at `views.clj:395-420`):
+**Implemented:** All 5 missing renderers added to `views.clj:739-864`:
 
-| Tool | Suggested Inline | Priority |
-|------|------------------|----------|
-| WebSearch | `"query"` | Medium - agents search docs |
-| WebFetch | `url` + prompt preview | Medium |
-| AskUserQuestion | `N questions` | Low - rarely in logs |
-| Skill | skill name | Low |
-| NotebookEdit | cell info | Low - rare in Seon |
+| Tool | Inline Summary | Hover Details |
+|------|----------------|---------------|
+| WebSearch | `"query"` + domain count | query, allowed/blocked domains |
+| WebFetch | domain + prompt preview | full URL, prompt |
+| AskUserQuestion | question text (1) or count (N) | all questions with headers and option counts |
+| Skill | `/skill-name` + args | skill name, args |
+| NotebookEdit | `file.ipynb` mode [type] cell=id | path, mode, type, cell_id, content preview |
 
-**Implementation pattern** (follow existing renderers):
+**Verified:** All renderers tested via REPL with sample inputs.
 
-```clojure
-;; In views.clj, add after TodoWrite renderer (~line 736)
-
-(defmethod render-tool-html "WebSearch"
-  [_tool-name parsed-input _raw-input]
-  (let [{:keys [query]} parsed-input]
-    [:span {:class "flex gap-2 flex-1 min-w-0"}
-     [:span {:class "text-log-tool font-medium shrink-0"} "WebSearch"]
-     [:span {:class "text-eval font-medium truncate"} (str "\"" query "\"")]]))
-
-(defmethod render-tool-hover "WebSearch"
-  [_tool-name parsed-input _raw-input]
-  (let [{:keys [query allowed_domains blocked_domains]} parsed-input]
-    (hover-card
-     [:div {:class "space-y-1"}
-      (hover-line "query" query "text-eval")
-      (when (seq allowed_domains)
-        (hover-line "allowed" (str/join ", " allowed_domains)))
-      (when (seq blocked_domains)
-        (hover-line "blocked" (str/join ", " blocked_domains)))])))
-```
-
-**Files to modify:** `src/seon/ai/agent/views.clj`
-
-**Test:** Each tool type renders readable one-liner (not raw JSON) in agent detail view.
-
-### Phase 6: TOOL+RESULT Pairing (1b.6)
+### Phase 6: TOOL+RESULT Pairing (1b.6) ✅ DONE
 
 **Goal:** Display TOOL and its corresponding RESULT as a grouped visual unit.
 
@@ -310,22 +293,23 @@ Follow Phosphor Terminal patterns from `docs/prds/namespace-ui/design-system.md`
 ## Test Checklist
 
 ```
-1b.5 [ ] WebSearch shows query, not raw JSON
-1b.5 [ ] WebFetch shows URL and prompt preview
-1b.5 [ ] AskUserQuestion shows question count
-1b.5 [ ] Skill shows skill name
-1b.6 [ ] TOOL+RESULT pairs display as single grouped line
-1b.6 [ ] Orphan TOOLs (no result yet) display normally
-1b.6 [ ] Grouped line shows ✓ for success, ✗ for error
-1b.7 [ ] Hover card visible when hovering line at top of scroll container
-1b.7 [ ] Hover card visible when hovering line at bottom of scroll container
+1b.5 [x] WebSearch shows query, not raw JSON
+1b.5 [x] WebFetch shows URL and prompt preview
+1b.5 [x] AskUserQuestion shows question count (or text for single question)
+1b.5 [x] Skill shows skill name
+1b.5 [x] NotebookEdit shows file, mode, type, cell_id
+1b.6 [x] TOOL+RESULT pairs display as single grouped line
+1b.6 [x] Orphan TOOLs (no result yet) display normally
+1b.6 [x] Grouped line shows ✓ for success, ✗ for error
+1b.7 [x] Hover card visible when hovering line at top of scroll container
+1b.7 [x] Hover card visible when hovering line at bottom of scroll container
 ```
 
 ---
 
 ## Deliverables
 
-- [ ] 1b.5: Tool renderers for WebSearch, WebFetch, AskUserQuestion, Skill
-- [ ] 1b.6: TOOL+RESULT pairing in view layer
-- [ ] 1b.7: Hover overflow fix with fixed positioning
+- [x] 1b.5: Tool renderers for WebSearch, WebFetch, AskUserQuestion, Skill, NotebookEdit
+- [x] 1b.6: TOOL+RESULT pairing in view layer
+- [x] 1b.7: Hover overflow fix with fixed positioning
 - [ ] Unit tests for new renderers in `seon.ai.agent.views-test`
