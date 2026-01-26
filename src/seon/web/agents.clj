@@ -460,6 +460,84 @@
   "Valid log types for filtering."
   ["LAUNCH" "MESSAGE" "TOOL" "RESULT" "HOOK" "COMPLETE" "ERROR"])
 
+;;; ---------------------------------------------------------------------------
+;;; TOOL+RESULT Pairing (Phase 1b.6)
+;;; ---------------------------------------------------------------------------
+
+(defn- get-tool-name
+  "Extract tool name from log line details.
+   TOOL format: 'ToolName | {input...}'
+   RESULT format: 'ToolName | output...'"
+  [line]
+  (when-let [details (:details line)]
+    (first (str/split details #" \| " 2))))
+
+(defn- result-indicates-error?
+  "Check if a RESULT line indicates an error.
+   Looks for specific error markers, not just 'error' anywhere in content."
+  [result-line]
+  (when-let [details (:details result-line)]
+    (or
+     ;; Claude tool error wrapper
+     (str/includes? details "<tool_use_error>")
+     ;; Error at start of result output (after tool name)
+     ;; Format: "ToolName | \"Error: ..." or "ToolName | Error: ..."
+     (re-find #"\| \"*Error:" details)
+     ;; is_error field in JSON results
+     (str/includes? details "\"is_error\": true")
+     (str/includes? details "\"is_error\":true"))))
+
+(defn- pair-tool-results
+  "Group consecutive TOOL/RESULT pairs by tool name.
+   Returns a seq of items where paired entries become:
+   {:type :tool-with-result :tool {...} :result {...} :success? bool}
+
+   Non-paired entries pass through unchanged.
+
+   A TOOL is paired with the immediately following RESULT if:
+   1. The RESULT comes right after the TOOL (no other entries between)
+   2. The tool names match"
+  [parsed-lines]
+  (loop [lines parsed-lines
+         result []
+         pending-tool nil]
+    (if-let [line (first lines)]
+      (let [line-type (:type line)]
+        (cond
+          ;; TOOL line - save as pending
+          (= "TOOL" line-type)
+          (recur (rest lines)
+                 ;; If there was a previous pending tool, emit it unpaired
+                 (if pending-tool (conj result pending-tool) result)
+                 line)
+
+          ;; RESULT line - try to pair with pending tool
+          (and (= "RESULT" line-type) pending-tool)
+          (let [tool-name (get-tool-name pending-tool)
+                result-name (get-tool-name line)]
+            (if (= tool-name result-name)
+              ;; Names match - create paired entry
+              (recur (rest lines)
+                     (conj result {:type :tool-with-result
+                                   :tool pending-tool
+                                   :result line
+                                   :success? (not (result-indicates-error? line))})
+                     nil)
+              ;; Names don't match - emit both separately
+              (recur (rest lines)
+                     (conj result pending-tool line)
+                     nil)))
+
+          ;; Other line type - emit pending tool if any, then this line
+          :else
+          (recur (rest lines)
+                 (if pending-tool
+                   (conj result pending-tool line)
+                   (conj result line))
+                 nil)))
+      ;; Done - emit any remaining pending tool
+      (if pending-tool (conj result pending-tool) result))))
+
 (defn- log-line-component
   "Render a single log line with Phosphor terminal styling.
    Long details use HTML <details>/<summary> for native expand/collapse.
@@ -507,6 +585,30 @@
           [:span {:class "text-text-50 break-all"} details])]
        [:span {:class "text-text-400"} raw])]))
 
+(defn- paired-log-line-component
+  "Render a paired TOOL+RESULT entry as a single line with success indicator.
+   Shows the tool call with a ✓ (success) or ✗ (error) indicator."
+  [{:keys [tool result success?]} _line-idx]
+  (let [{:keys [timestamp details]} tool
+        [tool-name input] (str/split details #" \| " 2)
+        parsed (agent-views/parse-tool-input input)]
+    [:div {:class "font-mono text-xs leading-tight py-0.5 border-b border-base-700/50 last:border-0 hover:bg-base-800"}
+     [:div {:class "flex gap-2 items-start"}
+      [:span {:class "text-text-400 shrink-0"} timestamp]
+      [:span {:class "shrink-0 w-16 text-log-tool"} "TOOL"]
+      ;; Tool content with success/error indicator
+      [:div {:class "flex-1 min-w-0 flex items-start gap-2"}
+       (agent-views/render-tool-html tool-name parsed input)
+       [:span {:class (str "shrink-0 " (if success? "text-success" "text-error"))}
+        (if success? "✓" "✗")]]]]))
+
+(defn- render-log-item
+  "Render a log item, handling both regular lines and paired TOOL+RESULT entries."
+  [item idx]
+  (if (= :tool-with-result (:type item))
+    (paired-log-line-component item idx)
+    (log-line-component item idx)))
+
 (defn- agent-detail-skeleton
   "Skeleton for agent detail page."
   [agent-id]
@@ -551,7 +653,12 @@
         type-filter (or (:type-filter @ui-state) :all)
         filtered-lines (if (= type-filter :all)
                          parsed-lines
-                         (filter #(= (name type-filter) (:type %)) parsed-lines))]
+                         (filter #(= (name type-filter) (:type %)) parsed-lines))
+        ;; Apply TOOL+RESULT pairing when showing all types or both TOOL and RESULT
+        ;; Pairing only makes sense when consecutive entries are visible
+        display-items (if (= type-filter :all)
+                        (pair-tool-results filtered-lines)
+                        filtered-lines)]
     (h/html
      [:main#morph
       ;; Header with back link and status
@@ -563,7 +670,7 @@
         [:h1 {:class "text-2xl font-semibold tracking-tight font-mono text-text-50"} agent-id]
         (when exists
           [:span {:class "text-text-400 text-xs"}
-           (str (count filtered-lines) "/" (count parsed-lines) " lines")])]
+           (str (count display-items) "/" (count parsed-lines) " lines")])]
        ;; Status badge on the right
        (when log-status
          (status-badge log-status))]
@@ -594,7 +701,7 @@
           [:p {:class "font-medium text-sm"} "Error reading log"]
           [:p {:class "text-xs"} error]]
 
-         (empty? filtered-lines)
+         (empty? display-items)
          [:div {:class "p-8 text-center text-text-400"}
           (if (= type-filter :all)
             "No log entries yet"
@@ -604,7 +711,7 @@
          [:div {:class "p-3 max-h-[70vh] overflow-y-auto flex flex-col-reverse"}
           ;; flex-col-reverse for auto-scroll to bottom
           [:div
-           (map-indexed (fn [idx line] (log-line-component line idx)) filtered-lines)]])]])))
+           (map-indexed (fn [idx item] (render-log-item item idx)) display-items)]])]])))
 
 (defn agent-detail-page
   "Serve the agent detail HTML shim page."

@@ -203,14 +203,15 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- hover-card
-  "CSS-only hover card that appears below a log line on hover.
-   Uses Tailwind group/group-hover pattern.
+  "Hover card that appears on log line hover.
+   Uses Tailwind group/group-hover pattern with fixed positioning.
+   Position is set by JavaScript in html.clj to avoid overflow clipping.
 
    content - Hiccup content for the hover card body"
   [content]
-  [:div {:class (str "hover-card hidden group-hover:block absolute left-0 top-full z-20 "
+  [:div {:class (str "hover-card hidden group-hover:block fixed z-50 "
                      "bg-base-850 border border-base-700 rounded shadow-lg "
-                     "mt-1 p-2 max-w-xl min-w-64 "
+                     "p-2 max-w-xl min-w-64 "
                      "text-xs font-mono")}
    content])
 
@@ -317,7 +318,7 @@
 (defmethod view/render* [:html :agent.log/launch]
   [entry _format]
   (let [{:keys [timestamp namespace port]} entry]
-    [:div {:class "group relative font-mono text-xs leading-tight py-0.5 border-b border-base-700/50 hover:bg-base-800"}
+    [:div {:class "log-line group relative font-mono text-xs leading-tight py-0.5 border-b border-base-700/50 hover:bg-base-800"}
      [:div {:class "flex gap-2"}
       [:span {:class "text-text-400 shrink-0" :title timestamp} (format-local-time timestamp)]
       [:span {:class "text-log-launch font-semibold shrink-0 w-16"} "LAUNCH"]
@@ -343,7 +344,7 @@
   (let [{:keys [timestamp role content]} entry
         long? (and content (> (count content) preview-length))
         char-count (count (or content ""))]
-    [:div {:class "group relative font-mono text-xs leading-tight py-0.5 border-b border-base-700/50 hover:bg-base-800"}
+    [:div {:class "log-line group relative font-mono text-xs leading-tight py-0.5 border-b border-base-700/50 hover:bg-base-800"}
      [:div {:class "flex gap-2"}
       [:span {:class "text-text-400 shrink-0" :title timestamp} (format-local-time timestamp)]
       [:span {:class "text-log-message shrink-0 w-16"} "MESSAGE"]
@@ -740,7 +741,7 @@
   [entry _format]
   (let [{:keys [timestamp tool-name input]} entry
         parsed (parse-tool-input input)]
-    [:div {:class "group relative font-mono text-xs leading-tight py-0.5 border-b border-base-700/50 hover:bg-base-800"}
+    [:div {:class "log-line group relative font-mono text-xs leading-tight py-0.5 border-b border-base-700/50 hover:bg-base-800"}
      [:div {:class "flex gap-2 items-start"}
       [:span {:class "text-text-400 shrink-0" :title timestamp} (format-local-time timestamp)]
       [:span {:class "text-log-tool shrink-0 w-16"} "TOOL"]
@@ -769,7 +770,7 @@
   (let [{:keys [timestamp tool-name output]} entry
         long? (and output (> (count output) preview-length))
         output-len (count (or output ""))]
-    [:div {:class "group relative font-mono text-xs leading-tight py-0.5 border-b border-base-700/50 hover:bg-base-800"}
+    [:div {:class "log-line group relative font-mono text-xs leading-tight py-0.5 border-b border-base-700/50 hover:bg-base-800"}
      [:div {:class "flex gap-2"}
       [:span {:class "text-text-400 shrink-0" :title timestamp} (format-local-time timestamp)]
       [:span {:class "text-log-result shrink-0 w-16"} "RESULT"]
@@ -800,7 +801,7 @@
 (defmethod view/render* [:html :agent.log/hook]
   [entry _format]
   (let [{:keys [timestamp file-type tests-status gemini-status test-output gemini-feedback]} entry]
-    [:div {:class "group relative font-mono text-xs leading-tight py-0.5 border-b border-base-700/50 hover:bg-base-800"}
+    [:div {:class "log-line group relative font-mono text-xs leading-tight py-0.5 border-b border-base-700/50 hover:bg-base-800"}
      [:div {:class "flex gap-2"}
       [:span {:class "text-text-400 shrink-0" :title timestamp} (format-local-time timestamp)]
       [:span {:class "text-log-hook shrink-0 w-16"} "HOOK"]
@@ -832,7 +833,7 @@
 (defmethod view/render* [:html :agent.log/complete]
   [entry _format]
   (let [{:keys [timestamp subtype cost messages duration-ms input-tokens output-tokens]} entry]
-    [:div {:class "group relative font-mono text-xs leading-tight py-1 border-b border-base-700/50 hover:bg-base-800 bg-success/5"}
+    [:div {:class "log-line group relative font-mono text-xs leading-tight py-1 border-b border-base-700/50 hover:bg-base-800 bg-success/5"}
      [:div {:class "flex gap-2"}
       [:span {:class "text-text-400 shrink-0" :title timestamp} (format-local-time timestamp)]
       [:span {:class "text-log-done font-semibold shrink-0 w-16"} "COMPLETE"]
@@ -868,7 +869,7 @@
 (defmethod view/render* [:html :agent.log/error]
   [entry _format]
   (let [{:keys [timestamp error]} entry]
-    [:div {:class "group relative font-mono text-xs leading-tight py-1 border-b border-base-700/50 hover:bg-base-800 bg-error/5"}
+    [:div {:class "log-line group relative font-mono text-xs leading-tight py-1 border-b border-base-700/50 hover:bg-base-800 bg-error/5"}
      [:div {:class "flex gap-2"}
       [:span {:class "text-text-400 shrink-0" :title timestamp} (format-local-time timestamp)]
       [:span {:class "text-log-error font-semibold shrink-0 w-16"} "ERROR"]
