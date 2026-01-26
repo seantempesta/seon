@@ -1168,6 +1168,175 @@
               (::ai/content result-msg)
               (assoc ::result-text (::ai/content result-msg)))))))))
 
+(defn agent-messages
+  "Get recent messages from an agent session.
+
+   Queries XTDB for messages, returning them in chronological order.
+   Useful for checking agent progress without blocking.
+
+   Request keys:
+     ::ai/session-id - Required. The 4-char hex agent session ID
+     ::limit         - Optional. Max messages to return (default: 20)
+
+   Response keys:
+     ::messages      - Vector of message maps with role, content, timestamp
+     ::agent-status  - Current status (:running, :completed, :failed, etc.)
+     ::message-count - Total messages in session
+     ::error         - Error message if agent not found
+
+   Example:
+     (agent-messages {::ai/session-id \"a1b2\"})
+     ;; => {::messages [{:role \"assistant\" :content \"I'll start by...\"}
+     ;;                 {:role \"assistant\" :content \"[tool: Read]\"}]
+     ;;     ::agent-status :running
+     ;;     ::message-count 5}"
+  [{::ai/keys [session-id] ::keys [limit] :or {limit 20}}]
+  (let [node (:seon/xtdb-node integrant.repl.state/system)]
+    (if-not node
+      {::agent-status :failed
+       ::error "System not running - no XTDB node available"}
+      ;; Find AI session by agent-session-id
+      (let [sessions ((requiring-resolve 'seon.db.node/q)
+                      node
+                      "SELECT * FROM ai_sessions WHERE seon$ai$agent_session_id = ?"
+                      [session-id])]
+        (if (empty? sessions)
+          {::agent-status :not-found
+           ::error (str "Agent session not found: " session-id)}
+          (let [session (first sessions)
+                ai-session-id (:xt/id session)
+                status (::ai/status session)
+                agent-status (case status
+                               :active :running
+                               :completed :completed
+                               :failed :failed
+                               :interrupted :interrupted
+                               :terminated)
+                ;; Get message count
+                count-result (first ((requiring-resolve 'seon.db.node/q)
+                                     node
+                                     "SELECT COUNT(*) as cnt FROM ai_messages
+                                      WHERE seon$ai$session_id = ?"
+                                     [ai-session-id]))
+                ;; Get recent messages (most recent first, then reverse for chronological)
+                messages ((requiring-resolve 'seon.db.node/q)
+                          node
+                          "SELECT seon$ai$role as role,
+                                  seon$ai$content as content,
+                                  seon$ai$claude$message_type as msg_type,
+                                  seon$ai$claude$tool_calls as tool_calls
+                           FROM ai_messages
+                           WHERE seon$ai$session_id = ?
+                           ORDER BY seon$ai$timestamp DESC
+                           LIMIT ?"
+                          [ai-session-id limit])
+                ;; Reverse to get chronological order and format for display
+                messages (->> messages
+                              reverse
+                              (mapv (fn [m]
+                                      (let [content (:content m)
+                                            tools (:tool_calls m)
+                                            summary (cond
+                                                      ;; Has text content
+                                                      (and content (not (str/blank? content)))
+                                                      (if (> (count content) 150)
+                                                        (str (subs content 0 150) "...")
+                                                        content)
+                                                      ;; Has tool calls
+                                                      (seq tools)
+                                                      (str "[" (str/join ", " (map :name tools)) "]")
+                                                      ;; Empty
+                                                      :else nil)]
+                                        (cond-> {:role (:role m)}
+                                          (:msg_type m) (assoc :type (:msg_type m))
+                                          summary (assoc :summary summary)))))
+                              ;; Filter out empty system/user messages
+                              (filterv :summary))]
+            {::messages messages
+             ::agent-status agent-status
+             ::message-count (:cnt count-result 0)}))))))
+
+(defn wait-for-agent!!
+  "Block until a running agent completes and return its result.
+
+   Use this to re-attach to an agent after an MCP eval timeout, or to wait
+   for an agent launched with `launch-agent!`.
+
+   Request keys:
+     ::ai/session-id - Required. The 4-char hex agent session ID
+     ::timeout-ms    - Optional. Timeout in milliseconds (default: wait indefinitely)
+
+   Response keys:
+     ::result-text   - The final result text (if completed successfully)
+     ::agent-status  - Final status (:completed, :failed, :timeout, :not-found)
+     ::cost-usd      - Total cost in USD (if available)
+     ::duration-ms   - Duration in milliseconds
+     ::num-turns     - Number of conversation turns
+     ::error         - Error message (if failed, timeout, or not found)
+
+   Example:
+     ;; After MCP eval timeout, re-attach to running agent
+     (wait-for-agent!! {::ai/session-id \"a1b2\"})
+     ;; => {::result-text \"## Summary\\n\\n...\" ::agent-status :completed}
+
+   Note: If the agent already completed, returns the result from the database."
+  [{::ai/keys [session-id] ::keys [timeout-ms]}]
+  (log/info "Waiting for agent" {:session-id session-id :timeout-ms timeout-ms})
+
+  ;; First check if agent is in registry (still running)
+  (if-let [handle (agent/get-agent {::agent/session-id session-id})]
+    (let [result-ch (::result-ch handle)
+          status-atom (::agent/status-atom handle)
+          start-time (System/currentTimeMillis)]
+
+      ;; Check if already completed
+      (if (not= :running @status-atom)
+        ;; Already done - get result from database
+        (do
+          (log/info "Agent already completed" {:session-id session-id :status @status-atom})
+          (get-result {::ai/session-id session-id}))
+
+        ;; Still running - block on result channel
+        (let [result-msg (if timeout-ms
+                           (async/alt!!
+                             result-ch ([v] v)
+                             (async/timeout timeout-ms) ::timeout)
+                           (async/<!! result-ch))]
+          (cond
+            (= result-msg ::timeout)
+            (do
+              (log/warn "Wait timed out" {:session-id session-id :timeout-ms timeout-ms})
+              {::agent-status :timeout
+               ::duration-ms (- (System/currentTimeMillis) start-time)
+               ::error (str "Timed out waiting for agent after " timeout-ms "ms")})
+
+            result-msg
+            (let [parsed (agent/parse-result {:provider :claude :message result-msg})]
+              (log/info "Agent completed" {:session-id session-id :status (::agent/status parsed)})
+              (cond-> {::agent-status (::agent/status parsed)
+                       ::duration-ms (or (::agent/duration-ms parsed)
+                                         (- (System/currentTimeMillis) start-time))}
+                (::agent/result-text parsed)
+                (assoc ::result-text (::agent/result-text parsed))
+                (::agent/cost-usd parsed)
+                (assoc ::cost-usd (::agent/cost-usd parsed))
+                (::agent/num-turns parsed)
+                (assoc ::num-turns (::agent/num-turns parsed))))
+
+            :else
+            {::agent-status :terminated
+             ::duration-ms (- (System/currentTimeMillis) start-time)
+             ::error "Agent terminated unexpectedly"}))))
+
+    ;; Not in registry - check database for completed agent
+    (let [result (get-result {::ai/session-id session-id})]
+      (if (= :running (::agent-status result))
+        ;; Weird state: DB says running but not in registry
+        {::agent-status :not-found
+         ::error (str "Agent " session-id " not found in registry. It may have crashed.")}
+        ;; Already completed
+        result))))
+
 (comment
   ;; REPL exploration
 

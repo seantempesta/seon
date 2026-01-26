@@ -127,6 +127,61 @@
     (println "System not running. Start with: (go) or ./bin/run")))
 
 ;; ========================================
+;; Agent Management (convenience wrappers)
+;; ========================================
+;; These mirror seon.ai.claude functions but auto-fill the XTDB node.
+;; Use from any namespace via user/launch-agent!! etc.
+
+(defn launch-agent!!
+  "Launch agent and block until completion. Returns result map.
+
+  Example: (user/launch-agent!! 'seon.trading \"Read the PRD and implement Phase 1.\")"
+  [namespace prompt]
+  ((requiring-resolve 'seon.ai.claude/launch-agent!!)
+   #:seon.ai{:node (xtdb-node) :namespace namespace :prompt prompt}))
+
+(defn launch-agent!
+  "Launch agent without blocking. Returns handle with ::ai/session-id.
+
+  Example: (user/launch-agent! 'seon.trading \"Implement feature X\")"
+  [namespace prompt]
+  ((requiring-resolve 'seon.ai.claude/launch-agent!)
+   #:seon.ai{:node (xtdb-node) :namespace namespace :prompt prompt}))
+
+(defn agents
+  "List running agents with status, namespace, session-id, port."
+  []
+  ((requiring-resolve 'seon.ai.claude/agents) {}))
+
+(defn interrupt-agent!
+  "Interrupt an agent by session-id (4-char hex like \"a1b2\")."
+  [session-id]
+  ((requiring-resolve 'seon.ai.claude/interrupt!)
+   #:seon.ai{:session-id session-id}))
+
+(defn agent-result
+  "Get result from a completed agent by session-id."
+  [session-id]
+  ((requiring-resolve 'seon.ai.claude/get-result)
+   #:seon.ai{:session-id session-id}))
+
+(defn wait-for-agent!!
+  "Block until a running agent completes. Use to re-attach after MCP timeout.
+
+  Example: (user/wait-for-agent!! \"a1b2\")"
+  [session-id]
+  ((requiring-resolve 'seon.ai.claude/wait-for-agent!!)
+   #:seon.ai{:session-id session-id}))
+
+(defn agent-messages
+  "Get recent messages from an agent to check progress.
+
+  Example: (user/agent-messages \"a1b2\")"
+  [session-id]
+  ((requiring-resolve 'seon.ai.claude/agent-messages)
+   #:seon.ai{:session-id session-id}))
+
+;; ========================================
 ;; AI Research (use when stuck!)
 ;; ========================================
 

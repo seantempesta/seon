@@ -214,7 +214,11 @@
              (let [remaining (- deadline (System/currentTimeMillis))]
                (if (<= remaining 0)
                  ;; Total timeout exceeded
-                 {:err (str "Timeout: evaluation took longer than " timeout-ms "ms. The REPL may be blocked.")
+                 {:err (str "Timeout after " (/ timeout-ms 1000) "s. "
+                            "If you launched an agent, it's still running. "
+                            "Check progress: (user/agents) and (user/agent-messages \"id\"). "
+                            "Wait for completion: (user/wait-for-agent!! \"id\"). "
+                            "For blocking launches, set timeout_ms=600000.")
                   :ex "timeout"}
                  (do
                    ;; Set socket timeout to remaining time (capped at 5 seconds for responsiveness)
