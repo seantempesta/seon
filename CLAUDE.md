@@ -102,69 +102,72 @@ cp -r docs/prds/_example-feature docs/prds/{feature-name}
 
 Write clear goals, success criteria, and relevant context.
 
-### 2. Launch via MCP
+### 2. Launch via MCP (Blocking - Default)
 
 **Always check for existing agents first:**
 ```clojure
-;; Check before launching to avoid duplicate agents on same namespace
-(claude/agents {})
+(user/agents)
 ```
 
-```clojure
-;; Via MCP eval tool (preferred for orchestrator)
-(claude/launch-agent! {::ai/node (:seon/xtdb-node integrant.repl.state/system)
-                       ::ai/namespace 'seon.feature-name
-                       ::ai/prompt "Read docs/prds/feature-name/prd.md and implement Phase 1."})
+**Launch and wait for completion** using `user/launch-agent!!` (double-bang = blocking):
 
-;; If you intentionally want multiple agents on the same namespace:
-(claude/launch-agent! {::ai/node (:seon/xtdb-node integrant.repl.state/system)
-                       ::ai/namespace 'seon.feature-name
-                       ::ai/prompt "..."
-                       ::ai/force? true})  ; Override duplicate namespace check
+```
+eval(session_id="orchestrator", timeout_ms=600000,
+     code="(user/launch-agent!! 'seon.feature-name \"Read docs/prds/feature-name/prd.md and implement Phase 1.\")")
+```
+
+**MCP Timeout Behavior:** The MCP eval has a 30-second default timeout. If it times out:
+- The agent **keeps running** in the background
+- Use `(user/agents)` to see it's still running
+- Use `(user/wait-for-agent!! "session-id")` to re-attach and wait for completion
+
+Set `timeout_ms=600000` (10 min) to avoid premature timeouts on blocking calls.
+
+**Returns result directly when agent completes:**
+```clojure
+{::claude/result-text "## Summary\n\n..."
+ ::claude/agent-status :completed
+ ::claude/cost-usd 0.23
+ ::claude/duration-ms 45000
+ ::claude/num-turns 5}
 ```
 
 **Point agents to the PRD**, don't give walls of instructions:
-
 ```clojure
 ;; DO THIS:
-::ai/prompt "Read docs/prds/namespace-ui/prd.md and implement Phase 0."
+"Read docs/prds/namespace-ui/prd.md and implement Phase 0."
 
 ;; NOT THIS:
-::ai/prompt "Add a debounce-seconds config to .claude/seon-hook.edn and wire it through..."
+"Add a debounce-seconds config to .claude/seon-hook.edn and wire it through..."
 ```
 
-Smart agents read context and make decisions.
+### 3. Non-Blocking Launch (Parallel Work)
 
-### 3. Wait for Completion
-
-**Blocking launch (recommended):**
-
-```clojure
-;; Launch and wait for result - blocks until agent completes
-(claude/launch-agent!! {::ai/node (:seon/xtdb-node integrant.repl.state/system)
-                        ::ai/namespace 'seon.feature-name
-                        ::ai/prompt "Read docs/prds/feature-name/prd.md and implement Phase 1."
-                        ::claude/timeout-ms 600000})  ; 10 min timeout
-
-;; Returns result directly:
-;; {::claude/result-text "## Summary\n\n..."
-;;  ::claude/agent-status :completed
-;;  ::claude/cost-usd 0.23
-;;  ::claude/duration-ms 45000
-;;  ::claude/num-turns 5}
-```
-
-**Non-blocking launch (for parallel work):**
+Only use `launch-agent!` (single-bang) when running multiple agents in parallel:
 
 ```clojure
 ;; Launch without waiting
-(def handle (claude/launch-agent! {...}))
+(user/launch-agent! 'seon.feature-name "Implement feature X")
 ;; => {::ai/session-id "a1b2" ...}
 
 ;; Check result later
-(claude/get-result {::ai/session-id "a1b2"})
+(user/agent-result "a1b2")
 ;; => {::claude/result-text "..." ::claude/agent-status :completed}
 ```
+
+### Agent Helper Functions
+
+All available in the `user` namespace:
+
+| Function | Purpose |
+|----------|---------|
+| `(user/launch-agent!! 'ns "prompt")` | Launch and wait for result (blocking) |
+| `(user/launch-agent! 'ns "prompt")` | Launch without waiting (returns handle) |
+| `(user/agents)` | List running agents |
+| `(user/agent-messages "a1b2")` | Check agent progress (recent messages) |
+| `(user/agent-result "a1b2")` | Get result from completed agent |
+| `(user/wait-for-agent!! "a1b2")` | Re-attach and wait for running agent |
+| `(user/interrupt-agent! "a1b2")` | Stop a running agent |
 
 **UI Monitoring:**
 - Observatory: http://localhost:8080/agents
