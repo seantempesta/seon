@@ -40,6 +40,9 @@
         ;; HTML templating (compile-time Hiccup)
         dev.onionpancakes/chassis {:mvn/version "1.0.365"}
 
+        ;; Markdown parsing (for agent message rendering)
+        markdown-clj/markdown-clj {:mvn/version "1.12.4"}
+
         ;; Code repair (delimiter balancing via parinfer)
         parinferish/parinferish {:mvn/version "0.8.0"}
 
@@ -76,7 +79,9 @@
                      com.aayushatharva.brotli4j/native-linux-aarch64 {:mvn/version "1.18.0"}
                      ;; Datalevin - local from git submodule (v0.10.3, 2026-01-27)
                      ;; Uses embedded LMDB, Datalog queries, lower memory than XTDB
-                     datalevin/datalevin {:local/root "reference-code/datalevin"}}}
+                     datalevin/datalevin {:local/root "reference-code/datalevin"}
+                     ;; Durable atom for agent *ctx* persistence
+                     duratom/duratom {:mvn/version "0.5.9"}}}
 
   :prod {:extra-paths ["env/prod/clj" "env/prod/resources"]}
 

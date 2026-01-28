@@ -317,6 +317,20 @@ The skill provides the exact commands, patterns, and gotchas for this codebase.
 
 Seon uses a **Phosphor Terminal** theme - warm blacks, cream text, amber accents. Think Lisp machine, not generic web app.
 
+### Tailwind CSS (Auto-Rebuilds)
+
+We use **local Tailwind** with `@tailwindcss/typography` for prose/markdown styling.
+
+**Automatic:** `./bin/run` starts Tailwind watcher in background - CSS rebuilds when you edit `.clj` files or `input.css`.
+
+**Manual** (if needed):
+```bash
+npm run css:build   # Build CSS once
+npm run css:watch   # Watch mode separately
+```
+
+Theme defined in `resources/public/css/input.css`.
+
 ### Before Writing UI Code
 
 1. **Read the design system:** `docs/prds/namespace-ui/design-system.md`
@@ -350,6 +364,8 @@ Seon uses a **Phosphor Terminal** theme - warm blacks, cream text, amber accents
 | `docs/prds/namespace-ui/design-system.md` | Full color palette, typography, spacing |
 | `src/seon/web/components.clj` | Reusable UI components |
 | `src/seon/web/html.clj` | Base template, nav, shared functions |
+| `resources/public/css/input.css` | Tailwind theme source (edit this) |
+| `resources/public/css/output.css` | Built CSS (don't edit directly) |
 
 ---
 

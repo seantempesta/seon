@@ -1,70 +1,29 @@
 (ns seon.web.html
   "HTML templating using Chassis (compile-time Hiccup).
 
-   Uses Tailwind CSS v4 via CDN for styling. All pages share a common
-   base layout with unified theme."
+   Uses Tailwind CSS v4 (local build) for styling. Build CSS with:
+     npm run css:build   ; one-time build
+     npm run css:watch   ; watch mode for development
+
+   All pages share a common base layout with unified theme."
   (:require [dev.onionpancakes.chassis.core :as h]
             [clojure.string :as str]
             [seon.ai.agent :as agent]))
 
 ;; ========================================
-;; CDN Resources
+;; External Resources
 ;; ========================================
 
 (def datastar-cdn
   "https://cdn.jsdelivr.net/gh/starfederation/datastar@1.0.0-RC.6/bundles/datastar.js")
 
-(def tailwind-cdn
-  "https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4")
+;; Local Tailwind CSS with @tailwindcss/typography plugin for prose classes.
+;; Build with: npm run css:build (or npm run css:watch for development)
+(def tailwind-css "/css/output.css")
 
 (def jetbrains-mono-cdn
   "Google Fonts CDN for JetBrains Mono - excellent readability at small sizes."
   "https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap")
-
-;; ========================================
-;; Custom Theme (Tailwind v4 @theme)
-;; ========================================
-
-(def custom-theme
-  "Custom theme tokens using Tailwind v4 @theme directive.
-   Phosphor Terminal theme - warm blacks, cream text, amber accents.
-   See docs/prds/namespace-ui/design-system.md for details."
-  "
-  @theme {
-    /* Fonts - JetBrains Mono for terminal aesthetic */
-    --font-mono: 'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, Monaco, 'Cascadia Mono', monospace;
-
-    /* Base colors (warm blacks) */
-    --color-base-950: #0d0d0c;
-    --color-base-900: #1a1918;
-    --color-base-850: #252422;
-    --color-base-800: #302e2b;
-    --color-base-700: #3d3a36;
-
-    /* Text colors (cream, not white) */
-    --color-text-50: #faf9f7;
-    --color-text-200: #d4d0c8;
-    --color-text-400: #8c8578;
-    --color-text-500: #6b6459;
-
-    /* Semantic colors */
-    --color-signal: #f0b429;
-    --color-success: #34d399;
-    --color-error: #f87171;
-    --color-warning: #fbbf24;
-    --color-info: #60a5fa;
-    --color-eval: #c084fc;
-
-    /* Log type colors */
-    --color-log-launch: #a78bfa;
-    --color-log-message: #60a5fa;
-    --color-log-tool: #fbbf24;
-    --color-log-result: #34d399;
-    --color-log-hook: #22d3ee;
-    --color-log-done: #4ade80;
-    --color-log-error: #f87171;
-  }
-  ")
 
 ;; ========================================
 ;; Datastar SSE Init
@@ -137,20 +96,12 @@
       [:link {:rel "preconnect" :href "https://fonts.googleapis.com"}]
       [:link {:rel "preconnect" :href "https://fonts.gstatic.com" :crossorigin "anonymous"}]
       [:link {:rel "stylesheet" :href jetbrains-mono-cdn}]
+      ;; Tailwind CSS (local build with @tailwindcss/typography for prose classes)
+      [:link {:rel "stylesheet" :href tailwind-css}]
       ;; Highlight.js for syntax highlighting in code blocks
       [:link {:rel "stylesheet"
               :href "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css"}]
-      [:script {:src tailwind-cdn}]
-      [:script {:defer "defer" :type "module" :src datastar-cdn}]
-      [:style {:type "text/tailwindcss"} custom-theme]
-      ;; Skeleton animation keyframes
-      [:style "
-        @keyframes skeleton-pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.5; }
-        }
-        .animate-skeleton { animation: skeleton-pulse 1.5s ease-in-out infinite; }
-      "]]
+      [:script {:defer "defer" :type "module" :src datastar-cdn}]]
      [:body {:class "bg-base-950 text-text-50 min-h-screen p-4 font-mono antialiased"}
       ;; Highlight.js scripts at end of body for faster page load
       [:script {:src "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"}]

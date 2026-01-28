@@ -1,0 +1,23 @@
+{
+  "name": "seon",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "test": "test"
+  },
+  "scripts": {
+    "css:build": "tailwindcss -i resources/public/css/input.css -o resources/public/css/output.css",
+    "css:watch": "tailwindcss -i resources/public/css/input.css -o resources/public/css/output.css --watch"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.1.18",
+    "@tailwindcss/typography": "^0.5.19",
+    "tailwindcss": "^4.1.18"
+  }
+}

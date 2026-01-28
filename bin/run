@@ -1,11 +1,11 @@
 #!/bin/bash
-# Start the ML Options Trading system
+# Start the Seon system
 # Usage: ./bin/run [profile]
 #   ./bin/run        # dev profile (default) - includes nREPL on port 7888
 #   ./bin/run prod   # production profile
 #
-# This is the canonical way to run the system.
-# Starts XTDB, nREPL, and all components. Logs to stdout. Ctrl+C to stop.
+# Starts XTDB, nREPL, HTTP server, and Tailwind watcher (via Integrant).
+# Ctrl+C to stop cleanly.
 
 export JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home
 export PATH="$JAVA_HOME/bin:$PATH"

@@ -52,6 +52,16 @@
   :bind "0.0.0.0"
   :node #ig/ref :seon/xtdb-node}
 
+ ;; Tailwind CSS Watcher
+ ;; Dev: Enabled - auto-rebuild CSS on file changes
+ ;; Prod: Disabled - CSS pre-built during deployment
+ :seon.web/tailwind-watcher
+ {:enabled? #profile {:dev true
+                      :test false
+                      :prod false}
+  :input "resources/public/css/input.css"
+  :output "resources/public/css/output.css"}
+
  ;; Claude Code SDK Configuration
  :seon/claude-code
  {:cli-path #or [#env CLAUDE_CLI_PATH "/Users/sean/.local/bin/claude"]}}

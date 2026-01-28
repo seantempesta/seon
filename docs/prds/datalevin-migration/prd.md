@@ -1,209 +1,482 @@
-# PRD: XTDB to Datalevin Migration
+# PRD: Datalevin Database Platform
 
-**Status:** Research Complete → Ready for Implementation
+**Status:** Implementation Ready
 **Priority:** High
 **Branch:** feature/datalevin-migration
 
 ---
 
-## Goals
+## Vision
 
-1. **Replace XTDB with Datalevin** - Migrate from XTDB v2 (SQL-based) to Datalevin (Datalog-based) for better query ergonomics and performance
-2. **Embedded database** - Use Datalevin's embedded mode for direct LMDB access without network overhead
-3. **Lower resource footprint** - Reduce memory usage and startup time
-4. **Better query composition** - Datalog queries compose naturally vs SQL string building
-5. **Unified Malli schemas** - Single source of truth for validation AND database schema
-
----
-
-## Problem Statement
-
-XTDB v2 has friction points in our use case:
-
-- **SQL is awkward in Clojure** - Building SQL strings, escaping column names (e.g., `option$strike`), handling namespaced keywords is verbose
-- **Query composition is hard** - SQL doesn't compose well; we end up with string concatenation or complex query builders
-- **Memory usage** - XTDB's Arrow-based storage and query engine has significant memory overhead
-- **Startup time** - XTDB node takes several seconds to start
-
-**What we lose:** Explicit bitemporality (valid-time + system-time queries). Research confirmed:
-- We rarely use system-time queries in practice
-- All 7 temporal use cases can be handled with explicit timestamp columns
-- Git-based backups of data directory provide disaster recovery
-
-**What we gain:**
-- Datalog queries that compose naturally
-- Implicit joins via entity references
-- Lower memory footprint (LMDB is memory-mapped, not in-heap)
-- Faster startup (no JVM warm-up of query engine)
-- Simpler embedded usage (no ports, no server process)
-- **Malli → Datalevin schema compilation** - define once, use everywhere
+Build a rock-solid database platform where:
+- **Orchestrator manages all database connections** - single point of control
+- **Each namespace gets its own isolated database** - performance isolation
+- **Agents receive connections via `*ctx*`** - simple, consistent interface
+- **Malli schemas define the data contracts** - shared across all databases
 
 ---
 
-## Resources
+## Architecture
 
-| Resource | Purpose |
-|----------|---------|
-| `reference-code/datalevin/` | Datalevin v0.10.3 source (2026-01-27) |
-| `reference-code/malli/` | Malli source - schema transformation patterns |
-| `reference-code/malli-datomic/` | Reference for Malli→Datomic bridges |
-| `reference-code/spectomic/` | Type inference patterns for schema generation |
-| `src/seon/schema.clj` | Current Malli registry pattern |
+### Single Server, Multiple Databases
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Seon System (Integrant)                  │
+│                                                             │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │            :seon/datalevin-server                     │  │
+│  │                                                       │  │
+│  │  • Runs inside orchestrator JVM                       │  │
+│  │  • Port 8898 (configurable)                           │  │
+│  │  • Root: data/datalevin/                              │  │
+│  │                                                       │  │
+│  │  Databases:                                           │  │
+│  │    /seon/           ← Master (always exists)          │  │
+│  │    /seon.trading/   ← Created lazily on first request │  │
+│  │    /seon.health/    ← Created lazily on first request │  │
+│  └───────────────────────────────────────────────────────┘  │
+│                            │                                │
+│  ┌─────────────────────────┼─────────────────────────────┐  │
+│  │    :seon/connection-manager                           │  │
+│  │                                                       │  │
+│  │  • Manages client connections to server               │  │
+│  │  • Caches connections per namespace                   │  │
+│  │  • Applies compiled Malli schemas on connect          │  │
+│  │  • Provides connections to agents via *ctx*           │  │
+│  └───────────────────────────────────────────────────────┘  │
+│                            │                                │
+│  ┌─────────────────────────┼─────────────────────────────┐  │
+│  │           Orchestrator (client)                       │  │
+│  │                                                       │  │
+│  │  • Uses master DB (/seon/) for:                       │  │
+│  │    - Session registry                                 │  │
+│  │    - AI messages (Observatory)                        │  │
+│  │    - Cross-namespace queries                          │  │
+│  └───────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
+                             │
+        Agent processes connect as clients
+                             │
+         ┌───────────────────┼───────────────────┐
+         ▼                   ▼                   ▼
+     Agent a1b2          Agent c3d4          Agent e5f6
+     (JVM 2)             (JVM 3)             (JVM 4)
+
+     *ctx* contains:     *ctx* contains:     *ctx* contains:
+     :seon.ns/conn →     :seon.ns/conn →     :seon.ns/conn →
+       seon.trading        seon.trading        seon.health
+```
+
+### Key Design Decisions
+
+| Decision | Rationale |
+|----------|-----------|
+| **Server mode, not embedded** | Multiple agent JVMs need to share namespace DBs |
+| **Single server process** | Managed by Integrant like all Seon components |
+| **Lazy DB creation** | Don't waste resources on unused namespaces |
+| **Connection caching** | Don't reconnect on every request |
+| **Schema on connect** | All DBs have full schema, enabling data flow |
+
+### Resource Efficiency
+
+- **Datalevin server is lightweight** - ~50MB memory baseline
+- **LMDB is memory-mapped** - OS manages actual memory usage
+- **Lazy DB creation** - Namespace DBs only exist when needed
+- **Connection pooling** - Reuse connections, don't thrash
 
 ---
 
-## Research Phase ✅ COMPLETE
+## Data Separation
 
-### Phase 0: External Research ✅
-- [x] **Datalevin API patterns** → `research/api-patterns.md`
-- [x] **Schema design** → `research/schema-design.md`
-- [x] **Embedded mode confirmed** - Works perfectly, tested in REPL
-- [x] **Multi-database** - Each agent gets own LMDB directory
-- [x] **Malli integration** → `research/malli-integration.md`
+### Master Database (`/seon/`)
 
-### Phase 1: Internal Code Audit ✅
-- [x] **Catalog all XTDB usage** → `research/xtdb-audit.md` (22 files)
-- [x] **Identify temporal queries** → 7 files use temporal features
-- [x] **Document data shapes** → 11 entity types documented
-- [x] **Temporal strategy** → `research/temporal-strategy.md`
+Orchestrator's view of the system:
 
-### Key Findings
+| Entity | Purpose |
+|--------|---------|
+| `session/*` | Agent session registry (id, namespace, status, ports) |
+| `ai.session/*` | AI session metadata (cost, tokens, duration) |
+| `ai.message/*` | All agent messages (for Observatory, replay) |
 
-**No true bitemporality needed.** All temporal features map to:
-- **Option A (explicit timestamps)** for facts (trading data, events)
-- **Option B (append-only snapshots)** for contexts that need point-in-time queries
+### Namespace Databases (`/seon.{namespace}/`)
 
-**Single abstraction point.** All production code goes through `seon.db.node`. This makes the swap feasible - we just change the implementation behind the interface.
+Domain-specific data, isolated per namespace:
 
-**AI domain is simplest.** Good proof-of-concept: `ai_sessions` + `ai_messages` with clear schemas.
+| Entity | Purpose |
+|--------|---------|
+| `ctx.version/*` | Agent `*ctx*` snapshots (keyed by session-id) |
+| Domain entities | Whatever the namespace defines (quotes, signals, etc.) |
+
+### Why This Separation?
+
+1. **Performance isolation** - Trading queries (millions of records) don't affect health namespace
+2. **Namespace ownership** - Each namespace owns its domain data
+3. **Shared visibility** - Orchestrator sees all sessions/messages for Observatory
+4. **Resource control** - Can kill namespace DB without affecting others
 
 ---
 
-## Solution Design
+## Agent Context (`*ctx*`)
 
-### Core Architecture: Malli → Datalevin Schema Compiler
-
-Create `seon.schema.datalevin` that transforms Malli schemas to Datalevin format (same pattern as Malli's JSON Schema transformer):
+Agents receive a `*ctx*` atom with:
 
 ```clojure
-;; Define schema ONCE in Malli with :datalevin/* properties
-(schema/register!
-  ::session-id [:string {:datalevin/unique :db.unique/identity}])
+{:seon.ns/conn       <Datalevin connection to namespace DB>
+ :seon.ns/session-id "a1b2"
+ :seon.ns/namespace  "seon.trading"
 
-;; Generate Datalevin schema automatically
-(def datalevin-schema
-  (dl/entity-schema :ai.session Session))
-;; => {:ai.session/id {:db/valueType :db.type/string
-;;                     :db/unique :db.unique/identity}}
+ ;; Agent's working memory (EDN-serializable)
+ :signals []
+ :positions []
+ :analysis nil}
 ```
 
-### Agent Session Architecture
+### Two Storage Mechanisms
 
-When an agent starts, it gets:
-1. **Own REPL** - Isolated nREPL on unique port
-2. **Own Datalevin instance** - Separate LMDB directory
-3. **Shared schema preloaded** - Core entities (sessions, messages) ready
-4. **Malli schemas in namespace** - Define data structures that match DB
+| Mechanism | Purpose | Characteristics |
+|-----------|---------|-----------------|
+| **`*ctx*` atom** | Working memory | Small, versioned, EDN-only, time-travel |
+| **`:seon.ns/conn`** | Domain data | Large, indexed, queryable, structured |
 
+### The Atom → Database Progression
+
+```clojure
+;; Stage 1: Prototyping - just use the atom
+(swap! *ctx* update :signals conj new-signal)
+
+;; Stage 2: Need queries - use the connection
+(d/transact! (:seon.ns/conn @*ctx*)
+  [{:signal/id (random-uuid) :signal/ticker "SPY" :signal/type :buy}])
+
+(d/q '[:find ?ticker
+       :where [?e :signal/type :buy] [?e :signal/ticker ?ticker]]
+     @(:seon.ns/conn @*ctx*))
 ```
-data/datalevin/
-├── orchestrator/     # Main database
-├── seon_trading/     # Agent's isolated DB
-├── seon_health/      # Another agent
-└── ...
+
+### Durable Atom: Duratom + Watchers
+
+**Decision:** Use [duratom](https://github.com/jimpil/duratom) for persistence, add versioning via watchers.
+
+**Why duratom:**
+- Drop-in atom replacement (`swap!`, `reset!`, `@` all work)
+- Custom serializers filter non-EDN keys (`:seon.ns/conn`)
+- Sync or async commit modes
+- Active maintenance
+
+**Pattern:**
+```clojure
+(def ctx (dur/duratom :local-file
+           :file-path "data/ctx/session-id.edn"
+           :rw {:write (fn [p d] (spit p (pr-str (filter-serializable d))))}
+           :init {}))
+
+;; Add versioning via watcher
+(add-watch ctx ::versioning
+  (fn [_ _ old new]
+    (swap! versions conj {:timestamp (Instant/now) :state new})))
 ```
 
-### Type Mapping: Malli → Datalevin
+See `research/durable-atoms.md` for full implementation.
 
-| Malli Type | Datalevin Type |
-|------------|----------------|
-| `:string` | `:db.type/string` |
-| `:int` | `:db.type/long` |
-| `:double` | `:db.type/double` |
-| `:boolean` | `:db.type/boolean` |
-| `:uuid` | `:db.type/uuid` |
-| `:keyword` | `:db.type/keyword` |
-| `inst?` | `:db.type/instant` |
-| `:vector` | `:db.cardinality/many` |
-| `:enum` | `:db.type/keyword` |
+---
 
-### Temporal Strategy
+## Schema System
 
-| Use Case | Current | Datalevin Approach |
-|----------|---------|-------------------|
-| Agent ctx recovery | `FOR SYSTEM_TIME` | Append-only snapshots |
-| IV time series | `FOR ALL VALID_TIME` | Explicit `:quote/recorded-at` |
-| Backtesting lockdown | `:current-time` option | Filter by timestamp |
-| Historical inserts | `:xt/valid-from` | Explicit `:quote/recorded-at` |
+### Malli as Source of Truth
+
+```clojure
+(ns seon.trading.schema
+  (:require [seon.schema :as schema]))
+
+;; Register with Datalevin properties
+(schema/register! ::signal-id
+  [:uuid {:datalevin/unique :db.unique/identity}])
+
+(schema/register! ::ticker
+  [:string {:datalevin/index true}])
+
+(schema/register! ::signal-type
+  [:enum :buy :sell :hold])
+
+(schema/register! ::signal
+  [:map
+   [::signal-id]
+   [::ticker]
+   [::signal-type]
+   [::recorded-at inst?]])
+```
+
+### Schema Compilation
+
+```clojure
+(require '[seon.schema.datalevin :as dl])
+
+;; Compile all registered schemas
+(dl/compile-schemas)
+;; => {:seon.trading/signal-id {:db/valueType :db.type/uuid
+;;                              :db/unique :db.unique/identity}
+;;    :seon.trading/ticker {:db/valueType :db.type/string
+;;                          :db/index true}
+;;    ...}
+```
+
+### Schema Loading
+
+When a namespace connection is created:
+1. Load all registered Malli schemas
+2. Compile to Datalevin format
+3. Apply via `d/update-schema`
+
+This means all DBs can store any registered entity type.
 
 ---
 
 ## Implementation Phases
 
-### Phase 1: Schema Compiler
-- [ ] Create `seon.schema.datalevin` namespace
-- [ ] Implement primitive type transformations
+### Phase 0: Database Platform Foundation
+
+**Goal:** Rock-solid database infrastructure, no breaking changes.
+
+#### 0.1 Datalevin Server Component
+```clojure
+;; resources/config.edn
+{:seon/datalevin-server
+ {:port 8898
+  :root "data/datalevin"
+  :opts {:validate-data? true}}}
+```
+
+- [ ] Create `src/seon/db/datalevin/server.clj`
+- [ ] Integrant component: `:seon/datalevin-server`
+- [ ] Start server on system start
+- [ ] Graceful shutdown on system stop
+- [ ] Health check integration
+
+#### 0.2 Connection Manager
+```clojure
+;; API
+(conn/get-master-conn!)           ;; → /seon/ connection
+(conn/get-namespace-conn! 'seon.trading)  ;; → /seon.trading/ connection (lazy create)
+(conn/close-namespace-conn! 'seon.trading) ;; → close and remove from cache
+```
+
+- [ ] Create `src/seon/db/datalevin/conn.clj`
+- [ ] Integrant component: `:seon/connection-manager`
+- [ ] Depends on `:seon/datalevin-server`
+- [ ] Connection caching per namespace
+- [ ] Lazy database creation
+- [ ] Schema application on connect
+
+#### 0.3 Schema Compiler
+- [ ] Create `src/seon/schema/datalevin.clj`
+- [ ] Multimethod for type transformation
 - [ ] Handle `:datalevin/*` properties
-- [ ] Test with AI entity schemas
+- [ ] `compile-schemas` → full Datalevin schema map
 
-### Phase 2: Connection Layer
-- [ ] Create `seon.db.datalevin` namespace
-- [ ] Integrant component for connection lifecycle
-- [ ] Factory for per-agent database directories
-- [ ] Basic query/transact wrappers
+#### 0.4 Health & Diagnostics
+- [ ] `/api/health` includes Datalevin server status
+- [ ] `/api/health/datalevin` detailed DB stats
+- [ ] Connection count, DB sizes, query latency
 
-### Phase 3: AI Domain Migration
-- [ ] Migrate `ai_sessions` entity
-- [ ] Migrate `ai_messages` entity
-- [ ] Update `seon.ai` to use Datalevin
-- [ ] Property tests with Malli generators
-
-### Phase 4: Agent Integration
-- [ ] Update agent session startup
-- [ ] Preload shared schema on agent REPL start
-- [ ] Test agent isolation
-- [ ] Performance benchmarks
-
-### Phase 5: Full Migration
-- [ ] Migrate remaining domains
-- [ ] Create `/datalevin-queries` skill
-- [ ] Remove XTDB dependency
-- [ ] Update documentation
+**Success Criteria:**
+- [ ] Server starts with system, stops cleanly
+- [ ] `get-namespace-conn!` creates DB on first call
+- [ ] Schema compiler produces valid Datalevin schemas
+- [ ] Health checks pass
+- [ ] Zero changes to existing XTDB code
 
 ---
 
-## Constraints
+### Phase 1: Dual-Write AI Domain
 
-- Must not break existing functionality during migration
-- Must maintain agent isolation (separate DBs per namespace)
-- Must be REPL-friendly (hot reload, interactive development)
-- Must include property tests for all migrated functionality
-- Malli schemas are single source of truth
+**Goal:** Verify Datalevin works by writing to both DBs.
+
+#### 1.1 Dual-Write Layer
+- [ ] Create `src/seon/db/dual.clj` - writes to both XTDB and Datalevin
+- [ ] Feature flag in config: `:db/dual-write? true`
+- [ ] Log any discrepancies between DBs
+
+#### 1.2 AI Session/Message Dual-Write
+- [ ] Update `seon.ai/save-session!`
+- [ ] Update `seon.ai/save-message!`
+- [ ] Verification queries compare both DBs
+
+**Success Criteria:**
+- [ ] All AI data in both XTDB and Datalevin
+- [ ] Data matches exactly
+- [ ] Existing tests still pass (read from XTDB)
+
+---
+
+### Phase 2: Read Migration
+
+**Goal:** Switch reads to Datalevin, XTDB becomes backup.
+
+#### 2.1 Query Migration
+- [ ] Rewrite SQL queries as Datalog
+- [ ] Feature flag: `:db/read-from :datalevin`
+- [ ] A/B query comparison logging
+
+#### 2.2 Switch Reads
+- [ ] `seon.ai` reads from Datalevin
+- [ ] Observatory reads from Datalevin
+- [ ] Stop XTDB writes for AI domain
+
+**Success Criteria:**
+- [ ] AI domain fully on Datalevin
+- [ ] All tests pass
+- [ ] Observatory works
+
+---
+
+### Phase 3: Agent Context System
+
+**Goal:** Implement `*ctx*` with `:seon.ns/conn` injection.
+
+#### 3.1 Durable Atom (Duratom)
+- [ ] Create `src/seon/agent/durable_ctx.clj`
+- [ ] Integrate duratom with custom serializer for filtering
+- [ ] Add watcher-based versioning with bounded history
+
+#### 3.2 Orchestrator Context Factory
+```clojure
+(defn create-agent-ctx [{:keys [namespace session-id]}]
+  (let [conn (conn/get-namespace-conn! namespace)
+        previous (load-ctx-versions conn session-id)]
+    (durable-atom
+      {:initial {:seon.ns/conn conn
+                 :seon.ns/session-id session-id
+                 :seon.ns/namespace (str namespace)}
+       :skip-keys #{:seon.ns/conn}
+       :persist-to conn})))
+```
+
+- [ ] Create `src/seon/orchestrator/ctx.clj`
+- [ ] Context injection on agent launch
+- [ ] Session resume loads previous `*ctx*`
+
+**Success Criteria:**
+- [ ] Agents get `*ctx*` with working `:seon.ns/conn`
+- [ ] `*ctx*` persists (minus non-EDN keys)
+- [ ] Session resume works
+
+---
+
+### Phase 4: Domain Migration
+
+**Goal:** Move remaining domains to Datalevin.
+
+#### 4.1 Trading Domain
+- [ ] Migrate `option_greeks` (millions of records)
+- [ ] Performance verification
+- [ ] Bulk loader updates
+
+#### 4.2 Dev Hook Domain
+- [ ] Migrate edit/review/todo events
+
+#### 4.3 Orchestrator Domain
+- [ ] Session registry to master DB
+
+**Success Criteria:**
+- [ ] All domains on Datalevin
+- [ ] Performance equal or better than XTDB
+
+---
+
+### Phase 5: XTDB Removal
+
+**Goal:** Clean removal of XTDB.
+
+- [ ] Remove XTDB from `deps.edn`
+- [ ] Remove XTDB Integrant components
+- [ ] Update documentation
+- [ ] Create `/datalevin-queries` skill
+- [ ] Delete XTDB data (after backup)
+
+**Success Criteria:**
+- [ ] XTDB completely removed
+- [ ] All tests pass
+- [ ] Documentation updated
+
+---
+
+## File Structure
+
+```
+src/seon/
+├── schema/
+│   └── datalevin.clj        # Malli → Datalevin compiler
+│
+├── db/
+│   ├── datalevin/
+│   │   ├── server.clj       # Integrant server component
+│   │   └── conn.clj         # Connection manager
+│   ├── dual.clj             # Dual-write layer (temporary)
+│   └── node.clj             # Existing XTDB wrapper (eventually remove)
+│
+├── agent/
+│   └── durable_ctx.clj      # Duratom-based *ctx* with versioning
+│
+└── orchestrator/
+    └── ctx.clj              # Agent *ctx* factory (injects conn)
+```
+
+---
+
+## Configuration
+
+```clojure
+;; resources/config.edn
+{:seon/datalevin-server
+ {:port #long #or [#env PORT_DATALEVIN 8898]
+  :root "data/datalevin"
+  :opts {:validate-data? true
+         :auto-entity-time? false}}
+
+ :seon/connection-manager
+ {:server #ig/ref :seon/datalevin-server
+  :schema-ns 'seon.schema}
+
+ ;; Feature flags for migration
+ :db/dual-write? false
+ :db/read-from :xtdb}  ;; :xtdb | :datalevin
+```
 
 ---
 
 ## Success Criteria
 
-1. **Schema compiler works** - Malli schemas generate valid Datalevin schemas
-2. **Property tests pass** - Generated entities round-trip through DB
-3. **AI domain migrated** - Sessions and messages on Datalevin
-4. **Agent isolation works** - Each agent has isolated database
-5. **Performance improved** - Lower memory, faster startup
+| Criterion | Measurement |
+|-----------|-------------|
+| **Reliability** | Zero data loss during migration |
+| **Performance** | Query latency ≤ XTDB |
+| **Isolation** | Namespace DBs don't affect each other |
+| **Resource efficiency** | Memory usage < XTDB |
+| **Developer experience** | Simpler queries, better errors |
 
 ---
 
-## Deliverables
+## Research Documents
 
-### Research Phase ✅
-- [x] `research/api-patterns.md` - Datalevin API guide
-- [x] `research/schema-design.md` - Entity schemas
-- [x] `research/xtdb-audit.md` - Current usage catalog
-- [x] `research/temporal-strategy.md` - Time travel alternatives
-- [x] `research/malli-integration.md` - Schema unification approach
+| Document | Status | Purpose |
+|----------|--------|---------|
+| `research/api-patterns.md` | ✅ | Datalevin API guide |
+| `research/schema-design.md` | ✅ | Entity schemas |
+| `research/xtdb-audit.md` | ✅ | Current usage catalog |
+| `research/temporal-strategy.md` | ✅ | Time travel alternatives |
+| `research/malli-integration.md` | ✅ | Schema unification |
+| `research/concurrent-access.md` | ✅ | Multi-process constraints |
+| `research/multi-db-queries.md` | ✅ | Cross-DB query patterns |
+| `research/durable-atoms.md` | ✅ | Duratom chosen for persistence |
 
-### Implementation Phase
-- [ ] `src/seon/schema/datalevin.clj` - Malli→Datalevin compiler
-- [ ] `src/seon/db/datalevin.clj` - Core wrapper
-- [ ] `src/seon/db/datalevin/factory.clj` - Per-agent DB creation
-- [ ] `.claude/skills/datalevin-queries.md` - Agent skill
-- [ ] Property tests for entity roundtrips
+---
+
+## Risks & Mitigations
+
+| Risk | Mitigation |
+|------|------------|
+| Data loss during migration | Dual-write phase, keep XTDB until Phase 5 |
+| Performance regression | Benchmark each phase, feature flags to rollback |
+| Agent disruption | Gradual rollout, existing code keeps working |
+| Server process failure | Health checks, auto-restart via Integrant |

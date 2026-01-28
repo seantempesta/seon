@@ -1,0 +1,75 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+/* Scan Clojure source files for classes */
+@source "../../../src/**/*.clj";
+
+/* Custom theme tokens using Tailwind v4 @theme directive.
+   Phosphor Terminal theme - warm blacks, cream text, amber accents.
+   See docs/prds/namespace-ui/design-system.md for details. */
+@theme {
+  /* Fonts - JetBrains Mono for terminal aesthetic */
+  --font-mono: 'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, Monaco, 'Cascadia Mono', monospace;
+
+  /* Base colors (warm blacks) */
+  --color-base-950: #0d0d0c;
+  --color-base-900: #1a1918;
+  --color-base-850: #252422;
+  --color-base-800: #302e2b;
+  --color-base-700: #3d3a36;
+
+  /* Text colors (cream, not white) */
+  --color-text-50: #faf9f7;
+  --color-text-200: #d4d0c8;
+  --color-text-400: #8c8578;
+  --color-text-500: #6b6459;
+
+  /* Semantic colors */
+  --color-signal: #f0b429;
+  --color-success: #34d399;
+  --color-error: #f87171;
+  --color-warning: #fbbf24;
+  --color-info: #60a5fa;
+  --color-eval: #c084fc;
+
+  /* Log type colors */
+  --color-log-launch: #a78bfa;
+  --color-log-message: #60a5fa;
+  --color-log-tool: #fbbf24;
+  --color-log-result: #34d399;
+  --color-log-hook: #22d3ee;
+  --color-log-done: #4ade80;
+  --color-log-error: #f87171;
+}
+
+/* Skeleton animation keyframes */
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.animate-skeleton {
+  animation: skeleton-pulse 1.5s ease-in-out infinite;
+}
+
+/* Customize prose for dark theme */
+.prose {
+  --tw-prose-body: #d4d0c8;
+  --tw-prose-headings: #faf9f7;
+  --tw-prose-lead: #8c8578;
+  --tw-prose-links: #f0b429;
+  --tw-prose-bold: #faf9f7;
+  --tw-prose-counters: #8c8578;
+  --tw-prose-bullets: #6b6459;
+  --tw-prose-hr: #3d3a36;
+  --tw-prose-quotes: #d4d0c8;
+  --tw-prose-quote-borders: #f0b429;
+  --tw-prose-captions: #8c8578;
+  --tw-prose-kbd: #faf9f7;
+  --tw-prose-kbd-shadows: 0 0 0;
+  --tw-prose-code: #faf9f7;
+  --tw-prose-pre-code: #d4d0c8;
+  --tw-prose-pre-bg: #1a1918;
+  --tw-prose-th-borders: #3d3a36;
+  --tw-prose-td-borders: #302e2b;
+}

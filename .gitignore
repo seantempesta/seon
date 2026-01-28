@@ -34,3 +34,7 @@ reference-code/
 
 # Editor config
 .calva/
+
+# Node.js / Tailwind build
+node_modules/
+resources/public/css/output.css
