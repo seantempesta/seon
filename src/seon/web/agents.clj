@@ -760,14 +760,17 @@
 
    Params:
      :format - :html, :ai, or nil (defaults to :html)
-     :id     - Agent session ID (4-char hex string)
+     :id     - Agent session ID (4-char hex string), or nil for list view
 
-   Returns HTML content for the agent detail view."
+   Returns HTML content for either:
+   - Agent detail view (when id provided)
+   - Agents list view (when no id)"
   [{:keys [format id]}]
-  (case format
-    :html (agent-detail-content id)
-    :ai   (agent-detail-content id)  ; TODO: structured AI format
-    nil   (agent-detail-content id)))
+  (if id
+    ;; Show specific agent detail
+    (agent-detail-content id)
+    ;; Show agents list (same as /agents page)
+    (agents-content)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Hot Reload Support
