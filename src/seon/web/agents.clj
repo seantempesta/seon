@@ -749,6 +749,27 @@
     (handler request)))
 
 ;;; ---------------------------------------------------------------------------
+;;; Custom Render for /ns/seon.web.agents
+;;; ---------------------------------------------------------------------------
+;;; Enables `/ns/seon.web.agents?id=XXXX` to show the same agent detail view
+;;; as `/agents/XXXX`. See docs/prds/namespace-render-toggle/prd.md.
+
+(defn render
+  "Custom render for Observatory agent view.
+   Called by /ns/seon.web.agents?id=session_id via seon.ns.routes.
+
+   Params:
+     :format - :html, :ai, or nil (defaults to :html)
+     :id     - Agent session ID (4-char hex string)
+
+   Returns HTML content for the agent detail view."
+  [{:keys [format id]}]
+  (case format
+    :html (agent-detail-content id)
+    :ai   (agent-detail-content id)  ; TODO: structured AI format
+    nil   (agent-detail-content id)))
+
+;;; ---------------------------------------------------------------------------
 ;;; Hot Reload Support
 ;;; ---------------------------------------------------------------------------
 ;;; clj-reload calls this after reloading the namespace.
