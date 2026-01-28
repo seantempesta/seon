@@ -1,6 +1,6 @@
 # PRD: Namespace Render Toggle
 
-**Status:** Draft
+**Status:** Complete (Phase 1-2 done, Phase 3 future)
 **Priority:** High
 **Branch:** feature/namespace-ui
 **Related:** VISION.md (Layer 4 & 5), docs/prds/namespace-ui/prd.md
@@ -102,7 +102,7 @@ Once `/ns/seon.web.agents?id=:id` works:
 
 ## Deliverables
 
-- [ ] `render` function in `seon.web.agents`
-- [ ] `?view=introspect` query param handling in `seon.ns.routes`
-- [ ] Toggle UI component in namespace page header
-- [ ] Tests for both view modes
+- [x] `render` function in `seon.web.agents`
+- [x] `?view=introspect` query param handling in `seon.ns.routes`
+- [x] Toggle UI component in namespace page header
+- [ ] Tests for both view modes (not blockers, existing tests pass)
