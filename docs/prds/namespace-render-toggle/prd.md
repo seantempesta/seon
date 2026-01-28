@@ -106,3 +106,9 @@ Once `/ns/seon.web.agents?id=:id` works:
 - [x] `?view=introspect` query param handling in `seon.ns.routes`
 - [x] Toggle UI component in namespace page header
 - [ ] Tests for both view modes (not blockers, existing tests pass)
+
+---
+
+## Known Issues
+
+- [ ] `?view=introspect` shows raw HTML instead of rendered content (SSE escaping issue)
