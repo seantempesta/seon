@@ -75,12 +75,17 @@
        [:td {:class "py-1 px-2 font-mono text-text-200"} (str ns)]])]])
 
 (defn- namespace-has-render?
-  "Check if namespace has a public render function."
+  "Check if namespace has a public render function for page rendering.
+   The render function must accept a single map argument with :format and :id keys.
+   This distinguishes page render functions from other render functions like seon.ns.view/render."
   [ns-sym]
   (when-let [ns-obj (find-ns ns-sym)]
     (when-let [render-var (ns-resolve ns-obj 'render)]
       (and (var? render-var)
-           (fn? @render-var)))))
+           (fn? @render-var)
+           ;; Check that it accepts a single argument (the options map)
+           (let [arglists (:arglists (meta render-var))]
+             (some #(= 1 (count %)) arglists))))))
 
 (defn- call-namespace-render
   "Call the namespace's render function with format and id."
@@ -88,104 +93,158 @@
   (let [render-fn @(ns-resolve (find-ns ns-sym) 'render)]
     (render-fn {:format format :id id})))
 
+(defn- view-toggle-button
+  "Toggle button to switch between custom render and introspection view.
+   Only shown when namespace has a render function."
+  [ns-sym current-view session-id]
+  (let [introspect? (= current-view "introspect")
+        ;; Build toggle URL preserving id param
+        base-url (str "/ns/" ns-sym)
+        toggle-url (if introspect?
+                     (if session-id
+                       (str base-url "?id=" session-id)
+                       base-url)
+                     (if session-id
+                       (str base-url "?id=" session-id "&view=introspect")
+                       (str base-url "?view=introspect")))]
+    [:a {:href toggle-url
+         :class "px-2 py-1 text-xs font-mono rounded border transition-colors text-text-500 border-base-700 hover:border-base-600 hover:text-text-200"}
+     (if introspect?
+       "← Custom View"
+       "Introspect →")]))
+
+(defn- render-introspection-view
+  "Render the introspection view for a namespace (functions, vars, atoms, etc.)."
+  [ns-sym session-id show-toggle?]
+  (if-let [data (introspect/introspect ns-sym)]
+    (let [{:keys [ns-name doc functions vars atoms multimethods requires]} data]
+      (h/html
+       [:main#morph
+        ;; Header with optional toggle
+        [:div {:class "mb-4"}
+         [:div {:class "flex items-center justify-between"}
+          [:h1 {:class "text-lg font-semibold tracking-tight font-mono"} (str ns-name)]
+          (when show-toggle?
+            (view-toggle-button ns-sym "introspect" session-id))]
+         (when session-id
+           [:p {:class "text-text-400 text-xs mt-0.5"}
+            "Session: " [:code {:class "text-signal"} session-id]])
+         (when doc
+           [:p {:class "text-text-400 text-sm mt-2 whitespace-pre-wrap max-w-3xl"} doc])]
+
+        ;; Functions section
+        (when (seq functions)
+          [:section {:class "mb-6"}
+           (ui/section-header (str "FUNCTIONS (" (count functions) ")"))
+           [:div {:class "bg-base-850 rounded overflow-hidden"}
+            [:table {:class "w-full"}
+             [:thead
+              [:tr {:class "border-b border-base-700"}
+               [:th {:class "text-left py-1.5 px-3 text-xs font-medium text-text-400 uppercase tracking-wider w-48"} "Name"]
+               [:th {:class "text-left py-1.5 px-3 text-xs font-medium text-text-400 uppercase tracking-wider"} "Arglists"]
+               [:th {:class "text-left py-1.5 px-3 text-xs font-medium text-text-400 uppercase tracking-wider"} "Doc"]]]
+             [:tbody
+              (for [f functions]
+                (render-function-row f))]]]])
+
+        ;; Multimethods section
+        (when (seq multimethods)
+          [:section {:class "mb-6"}
+           (ui/section-header (str "MULTIMETHODS (" (count multimethods) ")"))
+           [:div {:class "bg-base-850 rounded overflow-hidden"}
+            [:table {:class "w-full"}
+             [:thead
+              [:tr {:class "border-b border-base-700"}
+               [:th {:class "text-left py-1.5 px-3 text-xs font-medium text-text-400 uppercase tracking-wider w-48"} "Name"]
+               [:th {:class "text-left py-1.5 px-3 text-xs font-medium text-text-400 uppercase tracking-wider"} "Info"]]]
+             [:tbody
+              (for [mm multimethods]
+                (render-multimethod-row mm))]]]])
+
+        ;; Atoms section (live values)
+        (when (seq atoms)
+          [:section {:class "mb-6"}
+           (ui/section-header (str "ATOMS (" (count atoms) ")"))
+           [:div {:class "bg-base-850 rounded overflow-hidden"}
+            [:table {:class "w-full"}
+             [:thead
+              [:tr {:class "border-b border-base-700"}
+               [:th {:class "text-left py-1.5 px-3 text-xs font-medium text-text-400 uppercase tracking-wider w-48"} "Name"]
+               [:th {:class "text-left py-1.5 px-3 text-xs font-medium text-text-400 uppercase tracking-wider"} "Value"]]]
+             [:tbody
+              (for [a atoms]
+                (render-atom-row a))]]]])
+
+        ;; Vars section
+        (when (seq vars)
+          [:section {:class "mb-6"}
+           (ui/section-header (str "VARS (" (count vars) ")"))
+           [:div {:class "bg-base-850 rounded overflow-hidden"}
+            [:table {:class "w-full"}
+             [:thead
+              [:tr {:class "border-b border-base-700"}
+               [:th {:class "text-left py-1.5 px-3 text-xs font-medium text-text-400 uppercase tracking-wider w-48"} "Name"]
+               [:th {:class "text-left py-1.5 px-3 text-xs font-medium text-text-400 uppercase tracking-wider"} "Value"]]]
+             [:tbody
+              (for [v vars]
+                (render-var-row v))]]]])
+
+        ;; Requires section
+        (when (seq requires)
+          [:section {:class "mb-6"}
+           (ui/section-header (str "REQUIRES (" (count requires) ")"))
+           [:div {:class "bg-base-850 rounded p-3"}
+            (render-requires-table requires)]])]))
+
+    ;; Namespace not found
+    (h/html
+     [:main#morph
+      [:div {:class "text-center py-12"}
+       [:h1 {:class "text-lg font-semibold text-text-50 mb-4"} "Namespace Not Found"]
+       [:p {:class "text-text-400 text-sm"}
+        "The namespace " [:code {:class "font-mono text-eval"} (str ns-sym)] " is not loaded."]
+       [:a {:href "/"
+            :class "inline-block mt-4 text-signal hover:text-warning text-sm"}
+        "Back to Dashboard"]]])))
+
+(defn- render-custom-view
+  "Render namespace with its custom render function, including toggle button.
+   The custom render function returns an HTML string (already rendered).
+   We prepend a toggle button by injecting it after the opening main tag."
+  [ns-sym session-id]
+  (let [custom-html (call-namespace-render ns-sym :html session-id)
+        toggle-html (h/html
+                     [:div {:class "mb-4 flex justify-end"}
+                      (view-toggle-button ns-sym nil session-id)])]
+    ;; Inject toggle after <main id="morph"> opening tag
+    (str/replace custom-html
+                 #"(<main[^>]*>)"
+                 (str "$1" toggle-html))))
+
 (defn- render-namespace-content
   "Render full namespace view content.
    If namespace has a `render` function, calls it with {:format :html :id id}.
-   Otherwise falls back to introspection view."
-  [ns-sym session-id]
-  ;; Check for custom render function first
-  (if (namespace-has-render? ns-sym)
-    (h/html
-     [:main#morph
-      (call-namespace-render ns-sym :html session-id)])
-    ;; Fall back to introspection
-    (if-let [data (introspect/introspect ns-sym)]
-      (let [{:keys [ns-name doc functions vars atoms multimethods requires]} data]
-        (h/html
-         [:main#morph
-          ;; Header
-          [:div {:class "mb-4"}
-           [:h1 {:class "text-lg font-semibold tracking-tight font-mono"} (str ns-name)]
-           (when session-id
-             [:p {:class "text-text-400 text-xs mt-0.5"}
-              "Session: " [:code {:class "text-signal"} session-id]])
-           (when doc
-             [:p {:class "text-text-400 text-sm mt-2 whitespace-pre-wrap max-w-3xl"} doc])]
+   Otherwise falls back to introspection view.
 
-          ;; Functions section
-          (when (seq functions)
-            [:section {:class "mb-6"}
-             (ui/section-header (str "FUNCTIONS (" (count functions) ")"))
-             [:div {:class "bg-base-850 rounded overflow-hidden"}
-              [:table {:class "w-full"}
-               [:thead
-                [:tr {:class "border-b border-base-700"}
-                 [:th {:class "text-left py-1.5 px-3 text-xs font-medium text-text-400 uppercase tracking-wider w-48"} "Name"]
-                 [:th {:class "text-left py-1.5 px-3 text-xs font-medium text-text-400 uppercase tracking-wider"} "Arglists"]
-                 [:th {:class "text-left py-1.5 px-3 text-xs font-medium text-text-400 uppercase tracking-wider"} "Doc"]]]
-               [:tbody
-                (for [f functions]
-                  (render-function-row f))]]]])
+   Params:
+   - ns-sym: The namespace symbol
+   - session-id: Optional session/instance ID
+   - view: Optional view mode - \"introspect\" forces introspection view"
+  [ns-sym session-id view]
+  (let [has-render? (namespace-has-render? ns-sym)
+        force-introspect? (= view "introspect")]
+    (cond
+      ;; Force introspection view if requested
+      force-introspect?
+      (render-introspection-view ns-sym session-id has-render?)
 
-          ;; Multimethods section
-          (when (seq multimethods)
-            [:section {:class "mb-6"}
-             (ui/section-header (str "MULTIMETHODS (" (count multimethods) ")"))
-             [:div {:class "bg-base-850 rounded overflow-hidden"}
-              [:table {:class "w-full"}
-               [:thead
-                [:tr {:class "border-b border-base-700"}
-                 [:th {:class "text-left py-1.5 px-3 text-xs font-medium text-text-400 uppercase tracking-wider w-48"} "Name"]
-                 [:th {:class "text-left py-1.5 px-3 text-xs font-medium text-text-400 uppercase tracking-wider"} "Info"]]]
-               [:tbody
-                (for [mm multimethods]
-                  (render-multimethod-row mm))]]]])
+      ;; Use custom render if available
+      has-render?
+      (render-custom-view ns-sym session-id)
 
-          ;; Atoms section (live values)
-          (when (seq atoms)
-            [:section {:class "mb-6"}
-             (ui/section-header (str "ATOMS (" (count atoms) ")"))
-             [:div {:class "bg-base-850 rounded overflow-hidden"}
-              [:table {:class "w-full"}
-               [:thead
-                [:tr {:class "border-b border-base-700"}
-                 [:th {:class "text-left py-1.5 px-3 text-xs font-medium text-text-400 uppercase tracking-wider w-48"} "Name"]
-                 [:th {:class "text-left py-1.5 px-3 text-xs font-medium text-text-400 uppercase tracking-wider"} "Value"]]]
-               [:tbody
-                (for [a atoms]
-                  (render-atom-row a))]]]])
-
-          ;; Vars section
-          (when (seq vars)
-            [:section {:class "mb-6"}
-             (ui/section-header (str "VARS (" (count vars) ")"))
-             [:div {:class "bg-base-850 rounded overflow-hidden"}
-              [:table {:class "w-full"}
-               [:thead
-                [:tr {:class "border-b border-base-700"}
-                 [:th {:class "text-left py-1.5 px-3 text-xs font-medium text-text-400 uppercase tracking-wider w-48"} "Name"]
-                 [:th {:class "text-left py-1.5 px-3 text-xs font-medium text-text-400 uppercase tracking-wider"} "Value"]]]
-               [:tbody
-                (for [v vars]
-                  (render-var-row v))]]]])
-
-          ;; Requires section
-          (when (seq requires)
-            [:section {:class "mb-6"}
-             (ui/section-header (str "REQUIRES (" (count requires) ")"))
-             [:div {:class "bg-base-850 rounded p-3"}
-              (render-requires-table requires)]])]))
-
-      ;; Namespace not found
-      (h/html
-       [:main#morph
-        [:div {:class "text-center py-12"}
-         [:h1 {:class "text-lg font-semibold text-text-50 mb-4"} "Namespace Not Found"]
-         [:p {:class "text-text-400 text-sm"}
-          "The namespace " [:code {:class "font-mono text-eval"} (str ns-sym)] " is not loaded."]
-         [:a {:href "/"
-              :class "inline-block mt-4 text-signal hover:text-warning text-sm"}
-          "Back to Dashboard"]]]))))
+      ;; Default to introspection (no toggle since no custom render exists)
+      :else
+      (render-introspection-view ns-sym session-id false))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Skeleton Loading State
@@ -236,8 +295,9 @@
     handler
     (let [render-fn (fn [req]
                       (let [params (parse-query-params req)
-                            session-id (get params "id")]
-                        (render-namespace-content ns-sym session-id)))
+                            session-id (get params "id")
+                            view (get params "view")]
+                        (render-namespace-content ns-sym session-id view)))
           handler (sse/render-handler render-fn :poll-ms 2000)]
       (swap! namespace-handlers assoc ns-sym handler)
       handler)))
