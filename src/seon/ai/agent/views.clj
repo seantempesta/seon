@@ -71,6 +71,10 @@
   "Max lines to show in hover card code preview."
   6)
 
+(def ^:private max-inline-lines
+  "Max lines to show inline in log content before truncating."
+  4)
+
 ;;; ---------------------------------------------------------------------------
 ;;; Helper Functions
 ;;; ---------------------------------------------------------------------------
@@ -81,6 +85,22 @@
   (if (and s (> (count s) max-len))
     (str (subs s 0 (- max-len 3)) "...")
     s))
+
+(defn- truncate-lines
+  "Truncate content to max lines for inline display.
+   Returns {:truncated? bool :preview string :hidden-lines int}."
+  [content max-lines]
+  (if (str/blank? content)
+    {:truncated? false :preview content :hidden-lines 0}
+    (let [lines (str/split-lines content)
+          total (count lines)]
+      (if (> total max-lines)
+        {:truncated? true
+         :preview (str/join "\n" (take max-lines lines))
+         :hidden-lines (- total max-lines)}
+        {:truncated? false
+         :preview content
+         :hidden-lines 0}))))
 
 (defn- format-local-time
   "Format ISO timestamp as compact local time for display.
@@ -338,25 +358,21 @@
   (let [{:keys [timestamp namespace port]} entry]
     (str timestamp " LAUNCH " namespace (when port (str " port=" port)))))
 
-;; MESSAGE - Blue, shows assistant text (truncated)
+;; MESSAGE - Blue, shows assistant text (truncated to max-inline-lines)
 (defmethod view/render* [:html :agent.log/message]
   [entry _format]
   (let [{:keys [timestamp role content]} entry
-        long? (and content (> (count content) preview-length))
+        {:keys [truncated? preview hidden-lines]} (truncate-lines content max-inline-lines)
         char-count (count (or content ""))]
     [:div {:class "log-line group relative font-mono text-xs leading-tight py-0.5 border-b border-base-700/50 hover:bg-base-800"}
-     [:div {:class "flex gap-2"}
+     [:div {:class "flex gap-2 items-start"}
       [:span {:class "text-text-400 shrink-0" :title timestamp} (format-local-time timestamp)]
       [:span {:class "text-log-message shrink-0 w-16"} "MESSAGE"]
       [:span {:class "text-text-400 shrink-0 w-16"} role]
-      (if long?
-        [:details {:class "text-text-50 inline" :data-preserve-attr "open"}
-         [:summary {:class "cursor-pointer list-none"}
-          (subs content 0 preview-length)
-          [:span {:class "text-info ml-1"} (str "+" (- (count content) preview-length) " more")]]
-         [:div {:class "break-all mt-1 pl-2 border-l-2 border-base-700"}
-          content]]
-        [:span {:class "text-text-50 break-all"} content])]
+      [:div {:class "text-text-50 min-w-0 flex-1"}
+       [:pre {:class "whitespace-pre-wrap break-words"} preview]
+       (when truncated?
+         [:span {:class "text-text-500"} (str "... " hidden-lines " more lines")])]]
      ;; Hover card with more message text
      (hover-card
       [:div {:class "space-y-1"}
@@ -395,20 +411,16 @@
 
 (defmethod render-tool-html :default
   [tool-name parsed-input raw-input]
-  ;; Fallback: show tool name and raw input
+  ;; Fallback: show tool name and raw input (truncated to max-inline-lines)
   (let [display-input (or raw-input (pr-str parsed-input))
-        long? (and display-input (> (count display-input) preview-length))]
-    [:span {:class "flex gap-2 flex-1 min-w-0"}
+        {:keys [truncated? preview hidden-lines]} (truncate-lines display-input max-inline-lines)]
+    [:span {:class "flex gap-2 flex-1 min-w-0 items-start"}
      [:span {:class "text-log-tool font-medium shrink-0"} tool-name]
      (when display-input
-       (if long?
-         [:details {:class "text-text-200 inline min-w-0" :data-preserve-attr "open"}
-          [:summary {:class "cursor-pointer list-none truncate"}
-           (subs display-input 0 preview-length)
-           [:span {:class "text-info ml-1"} (str "+" (- (count display-input) preview-length) " more")]]
-          [:div {:class "break-all mt-1 pl-2 border-l-2 border-log-tool/30 whitespace-pre-wrap"}
-           display-input]]
-         [:span {:class "text-text-200 truncate"} display-input]))]))
+       [:div {:class "text-text-200 min-w-0 flex-1"}
+        [:pre {:class "whitespace-pre-wrap break-words"} preview]
+        (when truncated?
+          [:span {:class "text-text-500"} (str "... " hidden-lines " more lines")])])]))
 
 (defmethod render-tool-hover :default
   [tool-name parsed-input raw-input]
@@ -764,26 +776,22 @@
            "mcp__seon__eval" (truncate (:code parsed) 80)
            (truncate input 100)))))
 
-;; RESULT - Green, shows result preview
+;; RESULT - Green, shows result preview (truncated to max-inline-lines)
 (defmethod view/render* [:html :agent.log/result]
   [entry _format]
   (let [{:keys [timestamp tool-name output]} entry
-        long? (and output (> (count output) preview-length))
+        {:keys [truncated? preview hidden-lines]} (truncate-lines output max-inline-lines)
         output-len (count (or output ""))]
     [:div {:class "log-line group relative font-mono text-xs leading-tight py-0.5 border-b border-base-700/50 hover:bg-base-800"}
-     [:div {:class "flex gap-2"}
+     [:div {:class "flex gap-2 items-start"}
       [:span {:class "text-text-400 shrink-0" :title timestamp} (format-local-time timestamp)]
       [:span {:class "text-log-result shrink-0 w-16"} "RESULT"]
       [:span {:class "text-text-400 shrink-0"} tool-name]
       (when output
-        (if long?
-          [:details {:class "text-text-200 inline ml-2" :data-preserve-attr "open"}
-           [:summary {:class "cursor-pointer list-none"}
-            (subs output 0 preview-length)
-            [:span {:class "text-info ml-1"} (str "+" (- (count output) preview-length) " more")]]
-           [:div {:class "break-all mt-1 pl-2 border-l-2 border-log-result/30"}
-            output]]
-          [:span {:class "text-text-200 ml-2 break-all"} output]))]
+        [:div {:class "text-text-200 ml-2 min-w-0 flex-1"}
+         [:pre {:class "whitespace-pre-wrap break-words"} preview]
+         (when truncated?
+           [:span {:class "text-text-500"} (str "... " hidden-lines " more lines")])])]
      ;; Hover card with result details
      (hover-card
       [:div {:class "space-y-1"}
