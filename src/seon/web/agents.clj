@@ -11,16 +11,20 @@
             [clojure.java.io :as io]
             [clojure.java.shell :as shell]
             [clojure.string :as str]
+            [clojure.pprint :as pprint]
             [seon.ai :as ai]
             [seon.ai.agent :as agent]
             [seon.ai.agent.views :as agent-views]
+            [seon.ai.claude :as claude]
             [seon.db.node :as db]
             [seon.web.sse :as sse]
             [seon.web.html :as html]
             [dev.onionpancakes.chassis.core :as h])
   (:import [java.io File]
-           [java.time Instant Duration]
-           [java.time.format DateTimeFormatter]))
+           [java.time Instant Duration ZonedDateTime ZoneId LocalDate]
+           [java.time.format DateTimeFormatter TextStyle]
+           [java.time.temporal ChronoUnit]
+           [java.util Locale]))
 
 ;; XTDB node reference - initialized at startup via init!
 (defonce xtdb-node (atom nil))
@@ -50,6 +54,286 @@
   "Set the type filter for agent detail view."
   [type-kw]
   (swap! ui-state assoc :type-filter type-kw))
+
+;;; ---------------------------------------------------------------------------
+;;; XTDB Message Queries (Phase 1)
+;;; ---------------------------------------------------------------------------
+
+(defn- find-ai-session-id
+  "Find the AI session ID (ses-xxx) for a given agent session ID (4-char hex).
+   Returns nil if not found."
+  [agent-session-id]
+  (when-let [node (get-node)]
+    (let [results (db/q node
+                        "SELECT _id FROM ai_sessions
+                         WHERE seon$ai$agent_session_id = ?
+                         LIMIT 1"
+                        [agent-session-id])]
+      (:xt/id (first results)))))
+
+(defn- load-session-messages
+  "Load all messages for an AI session from XTDB.
+   Returns messages ordered by timestamp."
+  [ai-session-id]
+  (when-let [node (get-node)]
+    (db/q node
+          "SELECT * FROM ai_messages
+           WHERE seon$ai$session_id = ?
+           ORDER BY seon$ai$timestamp"
+          [ai-session-id])))
+
+(defn- pair-tool-calls-with-results
+  "Match tool calls with their results by tool_use_id.
+   Modifies messages with tool-calls to include :result on each call."
+  [messages]
+  (let [;; Build index of tool-use-id -> result content
+        results-by-id (->> messages
+                           (filter ::claude/tool-results)
+                           (mapcat (fn [msg]
+                                     (for [r (::claude/tool-results msg)]
+                                       [(:tool-use-id r) r])))
+                           (into {}))]
+    ;; Attach results to tool calls
+    (map (fn [msg]
+           (if-let [calls (::claude/tool-calls msg)]
+             (assoc msg ::claude/tool-calls
+                    (mapv #(assoc % :result (get results-by-id (:id %))) calls))
+             msg))
+         messages)))
+
+;;; ---------------------------------------------------------------------------
+;;; Message Rendering Helpers
+;;; ---------------------------------------------------------------------------
+
+(defn- format-local-time
+  "Format timestamp as compact local time for display.
+   Today: '14:23'
+   This week: 'Mon 14:23'
+   Older: 'Jan 15 14:23'
+   Returns nil for nil/invalid input."
+  [timestamp]
+  (when timestamp
+    (try
+      (let [instant (cond
+                      (instance? Instant timestamp) timestamp
+                      (instance? ZonedDateTime timestamp) (.toInstant timestamp)
+                      (string? timestamp) (Instant/parse timestamp)
+                      :else nil)
+            _ (when-not instant (throw (ex-info "Unknown timestamp type" {})))
+            zone (ZoneId/systemDefault)
+            zdt (ZonedDateTime/ofInstant instant zone)
+            today (LocalDate/now zone)
+            ts-date (.toLocalDate zdt)
+            days-ago (.between ChronoUnit/DAYS ts-date today)
+            time-fmt (DateTimeFormatter/ofPattern "HH:mm")]
+        (cond
+          ;; Today: just time
+          (= ts-date today)
+          (.format zdt time-fmt)
+
+          ;; Within last 7 days: day name + time
+          (and (>= days-ago 0) (<= days-ago 6))
+          (str (.getDisplayName (.getDayOfWeek zdt) TextStyle/SHORT (Locale/getDefault))
+               " "
+               (.format zdt time-fmt))
+
+          ;; Older: month day + time
+          :else
+          (let [month-day-fmt (DateTimeFormatter/ofPattern "MMM d HH:mm")]
+            (.format zdt month-day-fmt))))
+      (catch Exception _
+        nil))))
+
+(def ^:private max-preview-lines
+  "Max lines to show in content preview."
+  4)
+
+(defn- truncate-lines
+  "Truncate content to max lines for display.
+   Returns {:truncated? bool :preview string :hidden-lines int}."
+  [content max-lines]
+  (if (str/blank? content)
+    {:truncated? false :preview content :hidden-lines 0}
+    (let [lines (str/split-lines content)
+          total (count lines)]
+      (if (> total max-lines)
+        {:truncated? true
+         :preview (str/join "\n" (take max-lines lines))
+         :hidden-lines (- total max-lines)}
+        {:truncated? false
+         :preview content
+         :hidden-lines 0}))))
+
+(defn- detect-language
+  "Detect syntax highlighting language from file path or tool name."
+  [file-path tool-name]
+  (cond
+    ;; Clojure files
+    (and file-path (re-find #"\.(clj[scx]?|edn)$" file-path)) "clojure"
+    ;; JavaScript/TypeScript
+    (and file-path (re-find #"\.(js|jsx|ts|tsx)$" file-path)) "javascript"
+    ;; Python
+    (and file-path (re-find #"\.py$" file-path)) "python"
+    ;; Shell
+    (and file-path (re-find #"\.(sh|bash|zsh)$" file-path)) "bash"
+    ;; Markdown
+    (and file-path (re-find #"\.md$" file-path)) "markdown"
+    ;; Tool-based detection
+    (= tool-name "Bash") "bash"
+    (= tool-name "mcp__seon__eval") "clojure"
+    :else nil))
+
+(defn- basename
+  "Extract filename from path."
+  [path]
+  (when path
+    (last (str/split path #"/"))))
+
+(defn- pp-str
+  "Pretty print a Clojure value to string."
+  [v]
+  (with-out-str (pprint/pprint v)))
+
+;;; ---------------------------------------------------------------------------
+;;; Message-Centric View Components
+;;; ---------------------------------------------------------------------------
+
+(defn- render-tool-call
+  "Render a single tool call with its result as a collapsible block."
+  [{:keys [id name input result]} timestamp]
+  (let [file-path (or (:file-path input) (:file_path input))
+        target (or file-path
+                   (:pattern input)
+                   (when-let [cmd (:command input)]
+                     (if (> (count cmd) 50)
+                       (str (subs cmd 0 47) "...")
+                       cmd))
+                   (when-let [code (:code input)]
+                     (let [first-line (first (str/split-lines code))]
+                       (if (> (count first-line) 50)
+                         (str (subs first-line 0 47) "...")
+                         first-line))))
+        result-content (:content result)
+        result-text (cond
+                      (string? result-content) result-content
+                      (sequential? result-content)
+                      (->> result-content
+                           (filter #(= "text" (:type %)))
+                           (map :text)
+                           (str/join "\n"))
+                      :else (str result-content))
+        has-error? (or (:is_error result)
+                       (str/includes? (str result-text) "<tool_use_error>"))
+        lang (detect-language file-path name)
+        {:keys [truncated? preview hidden-lines]} (truncate-lines result-text max-preview-lines)]
+    [:div {:class "mb-2"}
+     ;; Tool call header
+     [:details {:class "group" :data-preserve-attr "open"}
+      [:summary {:class (str "cursor-pointer list-none flex items-center gap-2 py-1 px-2 rounded "
+                             "hover:bg-base-800 text-xs font-mono")}
+       ;; Expand indicator
+       [:span {:class "text-text-400 group-open:rotate-90 transition-transform"} "▶"]
+       ;; Timestamp
+       [:span {:class "text-text-500"} (format-local-time timestamp)]
+       ;; Tool name
+       [:span {:class "text-log-tool font-medium"} name]
+       ;; Target
+       (when target
+         [:span {:class "text-text-200 truncate max-w-md"} target])
+       ;; Status indicator
+       [:span {:class (if has-error? "text-error" "text-success") :title (if has-error? "Error" "Success")}
+        (if has-error? "✗" "✓")]]
+      ;; Expanded content
+      [:div {:class "ml-6 mt-1 pl-3 border-l-2 border-base-700"}
+       ;; Input (for Edit, show old/new strings)
+       (when (= name "Edit")
+         (let [old-str (:old_string input)
+               new-str (:new_string input)]
+           [:div {:class "mb-2 space-y-1"}
+            (when (and old-str (not (str/blank? old-str)))
+              [:pre {:class "bg-error/10 p-2 rounded text-2xs overflow-x-auto"}
+               [:code {:class (when lang (str "language-" lang))}
+                [:span {:class "text-error font-medium"} "- "]
+                (let [{:keys [truncated? preview hidden-lines]} (truncate-lines old-str max-preview-lines)]
+                  [:span
+                   preview
+                   (when truncated?
+                     [:span {:class "text-text-500 block"} (str "... " hidden-lines " more lines")])])]])
+            (when (and new-str (not (str/blank? new-str)))
+              [:pre {:class "bg-success/10 p-2 rounded text-2xs overflow-x-auto"}
+               [:code {:class (when lang (str "language-" lang))}
+                [:span {:class "text-success font-medium"} "+ "]
+                (let [{:keys [truncated? preview hidden-lines]} (truncate-lines new-str max-preview-lines)]
+                  [:span
+                   preview
+                   (when truncated?
+                     [:span {:class "text-text-500 block"} (str "... " hidden-lines " more lines")])])]])]))
+       ;; Result preview
+       (when (and result-text (not (str/blank? result-text)))
+         [:pre {:class (str "bg-base-900 p-2 rounded text-2xs overflow-x-auto "
+                            (when has-error? "border border-error/30"))}
+          [:code {:class (when lang (str "language-" lang))}
+           preview
+           (when truncated?
+             [:span {:class "text-text-500 block mt-1"} (str "... " hidden-lines " more lines")])]])]]]))
+
+(defn- render-assistant-text
+  "Render assistant message text as flowing prose."
+  [content timestamp]
+  (when (and content (not (str/blank? content)))
+    (let [{:keys [truncated? preview hidden-lines]} (truncate-lines content max-preview-lines)]
+      [:div {:class "py-2 px-3 text-text-200 text-sm font-mono"}
+       [:span {:class "text-text-500 text-xs mr-2"} (format-local-time timestamp)]
+       [:span {:class "whitespace-pre-wrap"} preview]
+       (when truncated?
+         [:span {:class "text-text-500 text-xs ml-1"} (str "... " hidden-lines " more lines")])])))
+
+(defn- render-message
+  "Render a single message based on its type."
+  [msg]
+  (let [role (::ai/role msg)
+        content (::ai/content msg)
+        timestamp (::ai/timestamp msg)
+        tool-calls (::claude/tool-calls msg)
+        msg-type (::claude/message-type msg)]
+    (cond
+      ;; Skip system messages
+      (= role "system") nil
+
+      ;; Skip result messages (final summary)
+      (= msg-type "result") nil
+
+      ;; User messages with tool results are handled by tool-call pairing
+      (and (= role "user") (seq (::claude/tool-results msg))) nil
+
+      ;; Assistant message with tool calls
+      (seq tool-calls)
+      [:div
+       ;; Show any text content first
+       (when (and content (not (str/blank? content)))
+         (render-assistant-text content timestamp))
+       ;; Then each tool call
+       (for [call tool-calls]
+         ^{:key (:id call)}
+         (render-tool-call call timestamp))]
+
+      ;; Pure text assistant message
+      (and (= role "assistant") content (not (str/blank? content)))
+      (render-assistant-text content timestamp)
+
+      ;; Other messages (shouldn't happen often)
+      :else nil)))
+
+(defn- render-messages-view
+  "Render all messages in message-centric view."
+  [messages]
+  (let [paired-messages (pair-tool-calls-with-results messages)]
+    [:div {:class "space-y-1"}
+     (for [msg paired-messages
+           :let [rendered (render-message msg)]
+           :when rendered]
+       ^{:key (:xt/id msg)}
+       rendered)]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Data Queries (private)
@@ -645,20 +929,33 @@
      type-str]))
 
 (defn- agent-detail-content
-  "Render the agent detail page content with Phosphor terminal styling."
+  "Render the agent detail page content with Phosphor terminal styling.
+   Uses XTDB to load messages when available, falls back to log files."
   [agent-id]
-  (let [{:keys [lines exists error]} (read-agent-log agent-id 200)
-        parsed-lines (keep parse-log-line lines)
-        log-status (when (seq parsed-lines) (analyze-log-status parsed-lines agent-id))
+  (let [;; Try XTDB first
+        ai-session-id (find-ai-session-id agent-id)
+        messages (when ai-session-id (load-session-messages ai-session-id))
+        use-xtdb? (seq messages)
+        ;; Fall back to log files if no XTDB data
+        {:keys [lines exists error]} (when-not use-xtdb? (read-agent-log agent-id 200))
+        parsed-lines (when-not use-xtdb? (keep parse-log-line lines))
+        log-status (cond
+                     use-xtdb?
+                     {:status (get-agent-status agent-id)
+                      :time-ago nil}
+                     (seq parsed-lines)
+                     (analyze-log-status parsed-lines agent-id))
+        ;; For log file fallback
         type-filter (or (:type-filter @ui-state) :all)
-        filtered-lines (if (= type-filter :all)
-                         parsed-lines
-                         (filter #(= (name type-filter) (:type %)) parsed-lines))
-        ;; Apply TOOL+RESULT pairing when showing all types or both TOOL and RESULT
-        ;; Pairing only makes sense when consecutive entries are visible
-        display-items (if (= type-filter :all)
-                        (pair-tool-results filtered-lines)
-                        filtered-lines)]
+        filtered-lines (when-not use-xtdb?
+                         (if (= type-filter :all)
+                           parsed-lines
+                           (filter #(= (name type-filter) (:type %)) parsed-lines)))
+        display-items (when-not use-xtdb?
+                        (if (= type-filter :all)
+                          (pair-tool-results filtered-lines)
+                          filtered-lines))
+        message-count (if use-xtdb? (count messages) (count parsed-lines))]
     (h/html
      [:main#morph
       ;; Header with back link and status
@@ -668,15 +965,14 @@
              :class "text-text-400 hover:text-text-200 transition-colors"}
          "← Back"]
         [:h1 {:class "text-2xl font-semibold tracking-tight font-mono text-text-50"} agent-id]
-        (when exists
-          [:span {:class "text-text-400 text-xs"}
-           (str (count display-items) "/" (count parsed-lines) " lines")])]
+        [:span {:class "text-text-400 text-xs"}
+         (str message-count (if use-xtdb? " messages" " lines"))]]
        ;; Status badge on the right
        (when log-status
          (status-badge log-status))]
 
-      ;; Type filter controls - warm dark background
-      (when (seq parsed-lines)
+      ;; Type filter controls - only for log file fallback
+      (when (and (not use-xtdb?) (seq parsed-lines))
         [:div {:class "bg-base-850 rounded p-3 mb-4 flex flex-wrap gap-2 items-center"}
          [:span {:class "text-text-400 text-xs mr-2"} "Filter:"]
          [:button {:class (str "px-2 py-1 text-xs font-mono rounded border transition-colors "
@@ -688,28 +984,36 @@
          (for [t log-types]
            (type-filter-button t type-filter))])
 
-      ;; Log content - Phosphor terminal style with warm blacks
+      ;; Main content - XTDB messages or log file fallback
       [:div {:class "bg-base-900 rounded overflow-hidden"}
        (cond
-         (not exists)
-         [:div {:class "p-8 text-center text-text-400"}
-          [:p {:class "text-sm font-medium"} "Log file not found"]
-          [:p {:class "text-xs mt-2 text-text-500"} (str "logs/agents/" agent-id ".log")]]
+         ;; XTDB message-centric view
+         use-xtdb?
+         [:div {:class "p-3 max-h-[70vh] overflow-y-auto"}
+          (render-messages-view messages)]
 
+         ;; Log file fallback - file not found
+         (and (not use-xtdb?) (not exists))
+         [:div {:class "p-8 text-center text-text-400"}
+          [:p {:class "text-sm font-medium"} "No messages found"]
+          [:p {:class "text-xs mt-2 text-text-500"} (str "Agent " agent-id " has no XTDB messages")]]
+
+         ;; Log file fallback - error
          error
          [:div {:class "p-4 bg-error/10 text-error"}
           [:p {:class "font-medium text-sm"} "Error reading log"]
           [:p {:class "text-xs"} error]]
 
+         ;; Log file fallback - empty
          (empty? display-items)
          [:div {:class "p-8 text-center text-text-400"}
           (if (= type-filter :all)
             "No log entries yet"
             (str "No " (name type-filter) " entries"))]
 
+         ;; Log file fallback - render log items
          :else
          [:div {:class "p-3 max-h-[70vh] overflow-y-auto flex flex-col-reverse"}
-          ;; flex-col-reverse for auto-scroll to bottom
           [:div
            (map-indexed (fn [idx item] (render-log-item item idx)) display-items)]])]])))
 
