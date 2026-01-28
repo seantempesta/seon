@@ -13,7 +13,10 @@
 | 0 | Cleanup + Dashboard | Done | - |
 | 0.5 | Live Agent Widgets | Done | - |
 | 1a | Render convention + view system | Done | - |
-| 1b | Observatory UI improvements | In Progress | [`observatory-polish`](../observatory-polish/prd.md) |
+| 1b.1-7 | Observatory tool renderers, hover, pairing | Done | [`observatory-polish`](../observatory-polish/prd.md) |
+| 1b.8 | Truncated log view (4-line max) | Done | [`truncated-log-view`](../truncated-log-view/prd.md) |
+| 1b.9 | Namespace render toggle | Done | [`namespace-render-toggle`](../namespace-render-toggle/prd.md) |
+| 1b.10 | **XTDB-based Observatory** | **Active** | [`observatory-xtdb`](../observatory-xtdb/prd.md) |
 | 1c | Agent robustness | Done | [`stability-improvements`](../stability-improvements/prd.md) |
 | 2 | Expand/collapse + styling | Pending | [`data-viewer`](../data-viewer/prd.md) |
 | 3 | Malli schema viewer | Pending | [`schema-viewer`](../schema-viewer/prd.md) |
