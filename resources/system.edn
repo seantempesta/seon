@@ -23,6 +23,17 @@
  {:node #ig/ref :seon/xtdb-node
   :namespaces [seon.primer seon.dev]}
 
+ ;; Datalevin Server (Phase 0 of migration from XTDB)
+ ;; Runs in-process, agents connect as clients to namespace-isolated databases.
+ ;; Each namespace gets its own database under root/{namespace}/
+ ;; Default credentials: datalevin:datalevin (change in production!)
+ :seon/datalevin-server
+ {:port #or [#env DATALEVIN_PORT 8898]
+  :root #profile {:dev "data/datalevin"
+                  :test "tmp/datalevin-test"
+                  :prod #or [#env DATALEVIN_ROOT "data/datalevin"]}
+  :opts {:idle-timeout 300000}}
+
  ;; Python Bridge (libpython-clj) - DISABLED
  ;; NOTE: Python code moved to src/seon/_python_disabled
  ;; To re-enable, restore the python directory and uncomment this section

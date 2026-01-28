@@ -4,6 +4,7 @@
   Defines init-key and halt-key! methods for all system components:
   - :seon/xtdb-node - XTDB v2 database node (single node with attached databases)
   - :seon/namespace-dbs - Manages attached databases for namespaces
+  - :seon/datalevin-server - Datalevin server for agent namespace isolation
   - :seon/schema-registry - Malli schema registry
   - :seon.web.server/http-server - HTTP server for web UI
   - :seon/nrepl-server - nREPL for REPL-driven development
@@ -18,13 +19,19 @@
   - 'seon_primer' database: primer sessions (data/namespaces/seon.primer)
   - 'seon_dev' database: dev hook events (data/namespaces/seon.dev)
 
-  This reduces memory usage significantly while maintaining isolation."
+  This reduces memory usage significantly while maintaining isolation.
+
+  ## Datalevin Migration (Phase 0)
+
+  A Datalevin server component (:seon/datalevin-server) is being added for
+  eventual migration from XTDB. See docs/prds/datalevin-migration/prd.md."
   (:require [integrant.core :as ig]
             [clojure.java.io :as io]
             [taoensso.timbre :as log]
             [seon.db.schema :as schema]
             ;; Load component namespaces for their ig/init-key methods
-            [seon.web.tailwind]))
+            [seon.web.tailwind]
+            [seon.db.datalevin.server]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; XTDB Node Component
