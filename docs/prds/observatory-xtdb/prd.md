@@ -251,18 +251,174 @@ The query was correct; the issue was server caching.
 7. **Collapsible blocks** - Click to collapse/expand individual tool calls
 8. **Error highlighting** - Failed tools show ✗ with error background
 
-### Remaining Visual Issues (Future Work)
+### Remaining Visual Issues
 
-1. **Render markdown** - Assistant text with `##`, `**`, lists should render as HTML
-   - Use a lightweight markdown-to-HTML converter (clj-markdown or similar)
-   - Apply to `::ai/content` in assistant messages
+1. ✅ **Render markdown** - COMPLETE
+   - Added markdown-clj v1.12.4 for markdown-to-HTML conversion
+   - Built local Tailwind with @tailwindcss/typography plugin
+   - Prose classes now properly style headers (h2=20px), bold, code, lists
+   - Dark theme prose customization in input.css
 
-2. **Smart auto-scroll** - Follow new content without fighting user
-   - Auto-scroll to bottom when user is near bottom
-   - Stop auto-scrolling if user scrolls up to read history
-   - Resume auto-scroll when user scrolls back to bottom
-   - Consider a "Jump to latest" button when not at bottom
+2. ✅ **Smart auto-scroll** - COMPLETE
+   - MutationObserver-based auto-scroll in agent-detail-skeleton
+   - Tracks user scroll position, only auto-scrolls when pinned to bottom (within 150px)
+   - Respects user reading history by pausing when scrolled up
 
-3. **TodoWrite as component** - Not raw message, show as checkbox list
+3. **TodoWrite as component** - Not raw message, show as checkbox list (future)
 
-4. **Syntax highlighting** - Add highlight.js for code blocks
+4. **Syntax highlighting** - Already working via highlight.js (highlight.min.js CDN)
+
+---
+
+## Phase 1b.11: Local Tailwind Build - ✅ COMPLETE
+
+**Problem:** Tailwind Browser CDN doesn't include the `@tailwindcss/typography` plugin which provides the `prose` classes for styled markdown rendering. Headers, bold, code, lists all render but without visual distinction.
+
+**Solution:** Built Tailwind locally with the typography plugin.
+
+### Tasks
+
+1. **Initialize npm project** (if not exists)
+   ```bash
+   npm init -y
+   npm install -D tailwindcss @tailwindcss/typography
+   npx tailwindcss init
+   ```
+
+2. **Configure Tailwind** (`tailwind.config.js`)
+   ```javascript
+   module.exports = {
+     content: ['./src/**/*.clj', './resources/**/*.html'],
+     theme: {
+       extend: {
+         // Custom colors from html.clj custom-theme
+         colors: {
+           base: { 950: '#0d0d0c', 900: '#1a1918', 850: '#252422', 800: '#302e2b', 700: '#3d3a36' },
+           text: { 50: '#faf9f7', 200: '#d4d0c8', 400: '#8c8578', 500: '#6b6459' },
+           signal: '#f0b429',
+           success: '#34d399',
+           error: '#f87171',
+           // ... rest of theme
+         },
+         fontFamily: {
+           mono: ['JetBrains Mono', 'SF Mono', 'ui-monospace', 'monospace'],
+         },
+       },
+     },
+     plugins: [require('@tailwindcss/typography')],
+   }
+   ```
+
+3. **Create input CSS** (`resources/public/css/input.css`)
+   ```css
+   @tailwind base;
+   @tailwind components;
+   @tailwind utilities;
+   ```
+
+4. **Build script** (add to `package.json` or `bin/`)
+   ```bash
+   npx tailwindcss -i resources/public/css/input.css -o resources/public/css/output.css --watch
+   ```
+
+5. **Update html.clj** - Replace CDN with local CSS file
+   ```clojure
+   ;; Remove: tailwind-cdn script
+   ;; Add: [:link {:rel "stylesheet" :href "/css/output.css"}]
+   ```
+
+6. **Add to .gitignore**
+   ```
+   node_modules/
+   resources/public/css/output.css
+   ```
+
+7. **Add build to startup** - Run Tailwind build before/during dev
+
+### Success Criteria
+
+- `prose` classes properly style markdown headers, bold, code, lists
+- No CDN dependency for Tailwind
+- Build integrates with existing dev workflow
+- Theme colors preserved from current implementation
+
+### Implementation Notes (2026-01-28)
+
+Used Tailwind v4 CSS-based configuration (no `tailwind.config.js`):
+
+**Files created:**
+- `package.json` - npm project with tailwindcss, @tailwindcss/cli, @tailwindcss/typography
+- `resources/public/css/input.css` - Tailwind directives + @theme + prose customization
+- `resources/public/css/output.css` - Built CSS (gitignored)
+
+**Files modified:**
+- `src/seon/web/html.clj` - Replaced CDN script with local CSS link
+- `src/seon/web/routes.clj` - Added static file serving for /css/*
+- `.gitignore` - Added node_modules/ and output.css
+
+**Build commands:**
+```bash
+npm run css:build   # One-time build
+npm run css:watch   # Watch mode for development
+```
+
+**Key difference from plan:** Tailwind v4 uses `@plugin` directive in CSS instead of JS config:
+```css
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+@source "../../../src/**/*.clj";
+```
+
+---
+
+## Phase 1b.12: Tailwind Watcher as Integrant Component
+
+**Problem:** Shell script approaches to starting Tailwind watcher are unreliable (process gets orphaned, signal handling issues with npm).
+
+**Solution:** Add Tailwind watcher as an Integrant component so it:
+- Starts automatically with the system
+- Stops cleanly on `(reset)` or system shutdown
+- Survives code reloads
+- Gets killed properly when JVM exits (child process)
+
+### Implementation
+
+1. **Create component** in `src/seon/web/tailwind.clj`:
+   ```clojure
+   (ns seon.web.tailwind
+     "Tailwind CSS watcher component.
+      Spawns tailwindcss --watch as a child process, managed by Integrant.")
+
+   (defmethod ig/init-key :seon.web/tailwind-watcher [_ opts]
+     ;; Spawn: node_modules/.bin/tailwindcss -i input.css -o output.css --watch
+     ;; Return process handle
+     )
+
+   (defmethod ig/halt-key! :seon.web/tailwind-watcher [_ state]
+     ;; Kill the process
+     )
+   ```
+
+2. **Add to system.clj**:
+   ```clojure
+   :seon.web/tailwind-watcher {:enabled? (not= profile :prod)}
+   ```
+
+3. **Process management**:
+   - Use `ProcessBuilder` to spawn the process
+   - Redirect stdout/stderr to `logs/tailwind.log`
+   - On halt: call `.destroy()` or `.destroyForcibly()`
+
+### Behavior
+
+- **Dev mode**: Watcher runs, rebuilds CSS on file changes
+- **Prod mode**: Disabled (CSS pre-built during deployment)
+- **Reset**: Process killed and restarted (picks up any config changes)
+- **pkill JVM**: Child process dies with parent
+
+### Success Criteria
+
+- `./bin/run` starts Tailwind watcher automatically
+- `(reset)` in REPL restarts watcher cleanly
+- No orphaned processes after shutdown
+- CSS rebuilds when `.clj` files or `input.css` change

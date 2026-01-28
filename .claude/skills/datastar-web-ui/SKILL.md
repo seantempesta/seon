@@ -70,13 +70,36 @@ This applies to all event handlers: `data-on:click`, `data-on:submit`, `data-on:
 
 | File | Purpose |
 |------|---------|
-| `src/ml_options/web/sse.clj` | SSE handler, brotli streaming |
-| `src/ml_options/web/html.clj` | Hiccup components, base layout |
-| `src/ml_options/web/handlers.clj` | Route handlers, actions |
-| `src/ml_options/web/routes.clj` | Route definitions |
+| `src/seon/web/sse.clj` | SSE handler, brotli streaming |
+| `src/seon/web/html.clj` | Hiccup components, base layout |
+| `src/seon/web/handlers.clj` | Route handlers, actions |
+| `src/seon/web/routes.clj` | Route definitions |
+| `src/seon/web/components.clj` | Reusable UI components |
+| `resources/public/css/input.css` | Tailwind source with theme |
+| `resources/public/css/output.css` | Built CSS (don't edit directly) |
+
+## Tailwind Build (Local, NOT CDN)
+
+We use local Tailwind with `@tailwindcss/typography` for prose/markdown styling.
+
+```bash
+# Build CSS once
+npm run css:build
+
+# Watch for changes during development
+npm run css:watch
+```
+
+The theme is defined in `resources/public/css/input.css` using Tailwind v4 syntax:
+- `@theme { }` block for custom colors
+- `@plugin "@tailwindcss/typography"` for prose classes
+- `@source` directive to scan Clojure files for classes
+
+**After editing input.css, rebuild the CSS.**
 
 ## For More Details
 
+- **Design system**: See `docs/prds/namespace-ui/design-system.md` for Phosphor Terminal theme
 - **Datastar attributes**: See `docs/reference/datastar-quick-reference.md`
-- **Design principles**: See [references/design-principles.md](references/design-principles.md) for typography, colors, avoiding generic aesthetics
-- **Extended patterns**: See `docs/reference/datastar-extended-patterns.md` for charts, modals, auth
+- **Design principles**: See [references/design-principles.md](references/design-principles.md)
+- **Extended patterns**: See `docs/reference/datastar-extended-patterns.md`

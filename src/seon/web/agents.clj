@@ -12,6 +12,7 @@
             [clojure.java.shell :as shell]
             [clojure.string :as str]
             [clojure.pprint :as pprint]
+            [markdown.core :as md]
             [seon.ai :as ai]
             [seon.ai.agent :as agent]
             [seon.ai.agent.views :as agent-views]
@@ -300,13 +301,24 @@
              [:span {:class "text-text-500 block mt-1"} (str "... " hidden-lines " more lines")])]])]]]))
 
 (defn- render-assistant-text
-  "Render assistant message text as flowing prose."
+  "Render assistant message text as markdown prose.
+   Converts markdown to HTML for proper formatting of headers, bold, code, etc."
   [content timestamp]
   (when (and content (not (str/blank? content)))
-    (let [{:keys [truncated? preview hidden-lines]} (truncate-lines content max-preview-lines)]
+    (let [{:keys [truncated? preview hidden-lines]} (truncate-lines content max-preview-lines)
+          ;; Convert markdown to HTML - markdown-clj wraps in <p> tags
+          html-content (md/md-to-html-string preview)]
       [:div {:class "py-2 px-3 text-text-200 text-sm font-mono"}
        [:span {:class "text-text-500 text-xs mr-2"} (format-local-time timestamp)]
-       [:span {:class "whitespace-pre-wrap"} preview]
+       ;; Inject rendered markdown as raw HTML with prose styling
+       [:div {:class "prose prose-sm prose-invert max-w-none
+                      prose-headings:text-text-100 prose-headings:font-semibold prose-headings:mt-2 prose-headings:mb-1
+                      prose-p:my-1 prose-p:text-text-200
+                      prose-strong:text-text-100 prose-strong:font-semibold
+                      prose-code:text-signal prose-code:bg-base-800 prose-code:px-1 prose-code:rounded prose-code:text-xs
+                      prose-pre:bg-base-900 prose-pre:p-2 prose-pre:rounded prose-pre:text-xs
+                      prose-ul:my-1 prose-ol:my-1 prose-li:my-0"}
+        (h/raw html-content)]
        (when truncated?
          [:span {:class "text-text-500 text-xs ml-1"} (str "... " hidden-lines " more lines")])])))
 
@@ -915,8 +927,53 @@
     (paired-log-line-component item idx)
     (log-line-component item idx)))
 
+(def ^:private auto-scroll-script
+  "JavaScript for smart auto-scroll behavior.
+   Scrolls to bottom when new content arrives, but only if user is already near bottom.
+   Respects user scroll position when reading history."
+  "
+  (function() {
+    let pinnedToBottom = true;
+    const THRESHOLD = 150; // pixels from bottom to consider 'pinned'
+
+    // Track scroll state
+    function updatePinned(el) {
+      pinnedToBottom = (el.scrollHeight - el.scrollTop - el.clientHeight) < THRESHOLD;
+    }
+
+    // Scroll to bottom if pinned
+    function maybeScroll(el) {
+      if (pinnedToBottom) {
+        el.scrollTop = el.scrollHeight;
+      }
+    }
+
+    // Set up observer for content changes
+    const observer = new MutationObserver(function(mutations) {
+      const el = document.getElementById('messages-scroll');
+      if (el) maybeScroll(el);
+    });
+
+    // Watch for the container to appear, then observe it
+    function setupObserver() {
+      const el = document.getElementById('messages-scroll');
+      if (el) {
+        el.addEventListener('scroll', function() { updatePinned(el); });
+        observer.observe(el, { childList: true, subtree: true });
+        // Initial scroll to bottom
+        el.scrollTop = el.scrollHeight;
+      } else {
+        // Container not ready yet, try again
+        setTimeout(setupObserver, 100);
+      }
+    }
+
+    setupObserver();
+  })();
+  ")
+
 (defn- agent-detail-skeleton
-  "Skeleton for agent detail page."
+  "Skeleton for agent detail page with auto-scroll script."
   [agent-id]
   [:div
    [:div {:class "flex items-center gap-4 mb-6"}
@@ -927,7 +984,9 @@
    [:div {:class "bg-base-850 rounded p-4"}
     [:div {:class "h-4 w-32 bg-base-700 rounded animate-skeleton mb-4"}]
     (for [_ (range 10)]
-      [:div {:class "h-3 w-full bg-base-700 rounded animate-skeleton my-2"}])]])
+      [:div {:class "h-3 w-full bg-base-700 rounded animate-skeleton my-2"}])]
+   ;; Auto-scroll script - runs once on page load, sets up MutationObserver
+   [:script (h/raw auto-scroll-script)]])
 
 (defn- type-filter-button
   "Render a type filter button with Phosphor log-type colors."
@@ -1016,7 +1075,8 @@
        (cond
          ;; XTDB message-centric view
          use-xtdb?
-         [:div {:class "p-3 max-h-[70vh] overflow-y-auto"}
+         [:div {:id "messages-scroll"
+                :class "p-3 max-h-[70vh] overflow-y-auto"}
           (render-messages-view messages)]
 
          ;; Log file fallback - file not found

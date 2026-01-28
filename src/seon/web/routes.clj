@@ -1,6 +1,8 @@
 (ns seon.web.routes
-  "Simple map-based router for HTTP endpoints."
+  "Simple map-based router for HTTP endpoints.
+   Includes static file serving for /css/* from resources/public/."
   (:require [clojure.string :as str]
+            [clojure.java.io :as io]
             [seon.web.handlers :as handlers]
             [seon.web.agents :as agents]
             [seon.web.namespace :as namespace]
@@ -76,6 +78,17 @@
                :path-params (zipmap params (rest matches))})))
         dynamic-routes))
 
+(defn- serve-static
+  "Serve static files from resources/public. Returns nil if not found."
+  [path]
+  (when (str/starts-with? path "/css/")
+    (let [resource-path (str "public" path)]
+      (when-let [resource (io/resource resource-path)]
+        {:status 200
+         :headers {"Content-Type" "text/css"
+                   "Cache-Control" "public, max-age=31536000"}
+         :body (slurp resource)}))))
+
 (defn handler [request]
   (let [method (:request-method request)
         path   (:uri request)
@@ -85,6 +98,8 @@
       ;; Try dynamic routes
       (if-let [{:keys [handler path-params]} (match-dynamic-route method path)]
         (handler (assoc request :path-params path-params))
-        {:status 404
-         :headers {"Content-Type" "application/json"}
-         :body "{\"error\": \"Not found\"}"}))))
+        ;; Try static files
+        (or (when (= method :get) (serve-static path))
+            {:status 404
+             :headers {"Content-Type" "application/json"}
+             :body "{\"error\": \"Not found\"}"})))))

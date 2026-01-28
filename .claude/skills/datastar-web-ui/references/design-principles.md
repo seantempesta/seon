@@ -1,135 +1,115 @@
 # Frontend Design Principles
 
-Avoid generic "AI slop" aesthetics. Create distinctive, memorable interfaces.
+Seon uses a **Phosphor Terminal** aesthetic - warm blacks, cream text, amber accents. Think Lisp machine, not generic web app.
 
-## Current Project Aesthetic
+## Tailwind Build
 
-This project uses a **data-focused professional dashboard** aesthetic:
-- Clean, functional layouts prioritizing data readability
-- Zinc-based neutral palette with purple accent for activity states
-- Monospace fonts for data, clean sans-serif for UI
-- Minimal decoration, generous whitespace
+We use **local Tailwind** (not CDN) with `@tailwindcss/typography` plugin:
 
-## Design Decisions Before Coding
+```bash
+npm run css:build   # Build once
+npm run css:watch   # Watch mode for development
+```
 
-1. **Purpose**: What data/action does this interface serve?
-2. **Tone**: Professional/utilitarian, but not boring
-3. **Differentiation**: What makes this memorable and useful?
+Theme defined in `resources/public/css/input.css`.
+
+## Color Palette (Phosphor Terminal)
+
+```css
+/* Base colors (warm blacks) */
+--color-base-950: #0d0d0c;  /* Deepest background */
+--color-base-900: #1a1918;  /* Card backgrounds */
+--color-base-850: #252422;  /* Elevated surfaces */
+--color-base-800: #302e2b;  /* Borders, dividers */
+--color-base-700: #3d3a36;  /* Subtle borders */
+
+/* Text colors (cream, NOT white) */
+--color-text-50: #faf9f7;   /* Primary text */
+--color-text-200: #d4d0c8;  /* Secondary text */
+--color-text-400: #8c8578;  /* Muted text */
+--color-text-500: #6b6459;  /* Disabled text */
+
+/* Semantic colors */
+--color-signal: #f0b429;    /* Amber accent (primary) */
+--color-success: #34d399;   /* Green */
+--color-error: #f87171;     /* Red */
+--color-warning: #fbbf24;   /* Yellow */
+--color-info: #60a5fa;      /* Blue */
+```
+
+**NEVER use**: `bg-white`, `text-zinc-*`, `bg-gray-*`, `text-white`
 
 ## Typography
 
-**Avoid**: Generic fonts (Arial, Inter, Roboto, system-ui)
+- **Font**: JetBrains Mono everywhere (`font-mono` on body)
+- **Primary text**: `text-xs` (11px) for density
+- **Max header size**: `text-lg` for page titles
+- **Line height**: Tight (`leading-tight`)
 
-**Current choices**:
-- Data/code: SF Mono, Menlo, Monaco (monospace)
-- Consider: JetBrains Mono, Fira Code for data tables
+## Spacing & Density
 
-**For future enhancement**, consider distinctive fonts via Google Fonts:
-```css
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap');
-```
+Terminal-dense, not spacious:
 
-## Color & Theme
+| Use | Not |
+|-----|-----|
+| `p-3` | `p-6` |
+| `gap-4` | `gap-6` |
+| `py-2` | `py-4` |
 
-Use CSS variables (Tailwind v4 `@theme`) for consistency:
+## Status Indicators
 
-```css
-@theme {
-  /* Current palette - zinc-based with purple accent */
-  --color-success: #22c55e;
-  --color-error: #ef4444;
-  --color-warning: #f59e0b;
-  --color-running: #8b5cf6;
-}
-```
+Use **dot + text**, not pill badges:
 
-**Principles**:
-- Dominant neutral (zinc) with sharp accent colors
-- Status colors should be instantly recognizable
-- Avoid purple gradients on white (overused AI aesthetic)
-
-## Motion & Interactions
-
-Prioritize high-impact moments over scattered micro-interactions:
-
-```css
-/* Page load staggered reveal */
-.fade-in { animation: fadeIn 0.3s ease-out forwards; }
-.fade-in-delay-1 { animation-delay: 0.1s; }
-.fade-in-delay-2 { animation-delay: 0.2s; }
-
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-```
-
-**SSE-specific**: Use transitions when fragments update:
 ```clojure
-[:div {:class "transition-all duration-200"} content]
+;; Good: dot with label
+[:div {:class "flex items-center gap-1.5"}
+ [:div {:class "w-1.5 h-1.5 rounded-full bg-success"}]
+ [:span {:class "text-xs text-success"} "running"]]
+
+;; Bad: pill badge
+[:span {:class "px-2 py-1 bg-green-100 text-green-800 rounded-full"} "Running"]
 ```
 
-## Spatial Composition
+## Component Library
 
-**Data dashboards**:
-- Card-based layouts with consistent spacing
-- Generous padding inside cards (p-6, not p-2)
-- Clear visual hierarchy: title → summary → details
+Always use components from `src/seon/web/components.clj`:
 
-**Tables**:
-- Alternating row colors for scanability
-- Sticky headers for long tables
-- Right-align numbers, left-align text
-
-## Backgrounds & Details
-
-**Avoid**: Flat solid backgrounds everywhere
-
-**Better**:
 ```clojure
-;; Subtle gradient background
-[:div {:class "min-h-screen bg-gradient-to-br from-zinc-50 to-zinc-100"}]
+(require '[seon.web.components :as ui])
 
-;; Card with subtle shadow and border
-[:div {:class "bg-white rounded-lg shadow-sm border border-zinc-200 p-6"}]
+(ui/page-header "Title" :subtitle "optional")
+(ui/section-header "SECTION NAME")
+(ui/card (ui/section-header "Card") content...)
+(ui/status-dot :running :label "running")
+(ui/log-line {:timestamp ts :type "TOOL" :content "..."})
 ```
 
-## Component Patterns
+## Prose/Markdown Styling
 
-### Status Badges
+For rendered markdown content, use prose classes:
+
 ```clojure
-(defn status-badge [status]
-  (let [colors {:running "bg-violet-100 text-violet-700 ring-violet-200"
-                :completed "bg-green-100 text-green-700 ring-green-200"
-                :failed "bg-red-100 text-red-700 ring-red-200"}]
-    [:span {:class (str "px-2.5 py-0.5 rounded-full text-xs font-medium ring-1 ring-inset "
-                        (get colors status "bg-zinc-100 text-zinc-600"))}
-     (name status)]))
+[:div {:class "prose prose-sm max-w-none"}
+ (h/raw (md/md-to-html-string content))]
 ```
 
-### Data Cards
-```clojure
-(defn stat-card [label value]
-  [:div {:class "bg-white rounded-lg shadow-sm border border-zinc-200 p-6"}
-   [:dt {:class "text-sm font-medium text-zinc-500"} label]
-   [:dd {:class "mt-1 text-3xl font-semibold text-zinc-900"} value]])
-```
+The typography plugin provides dark-theme prose styling via CSS variables in input.css.
 
-### Loading States
-```clojure
-;; Skeleton loader
-[:div {:class "animate-pulse bg-zinc-200 rounded h-4 w-32"}]
+## Anti-Patterns
 
-;; Spinner
-[:div {:class "animate-spin h-5 w-5 border-2 border-violet-500 border-t-transparent rounded-full"}]
-```
+| Bad | Why | Good |
+|-----|-----|------|
+| `bg-white` | Not warm | `bg-base-900` |
+| `text-zinc-*` | Wrong palette | `text-text-*` |
+| Pill badges | Generic | Dot + text |
+| `p-6` padding | Too spacious | `p-3` |
+| `text-base` size | Too large | `text-xs` |
+| Rounded-full buttons | Generic | Sharp corners |
 
-## Anti-Patterns to Avoid
+## Key Reference Files
 
-| Bad | Why | Better |
-|-----|-----|--------|
-| `bg-white` everywhere | Flat, lifeless | Subtle gradients, shadows |
-| `text-gray-500` on everything | Low contrast | Intentional hierarchy |
-| Purple gradient hero | AI cliche | Project-specific aesthetic |
-| Rounded everything (`rounded-full`) | Generic feel | Mix: `rounded-lg` + sharp edges |
-| Centered everything | Lazy layout | Intentional alignment |
+| File | Purpose |
+|------|---------|
+| `docs/prds/namespace-ui/design-system.md` | Full design system spec |
+| `src/seon/web/components.clj` | Reusable UI components |
+| `resources/public/css/input.css` | Tailwind theme source |

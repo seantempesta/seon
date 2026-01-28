@@ -22,7 +22,9 @@
   (:require [integrant.core :as ig]
             [clojure.java.io :as io]
             [taoensso.timbre :as log]
-            [seon.db.schema :as schema]))
+            [seon.db.schema :as schema]
+            ;; Load component namespaces for their ig/init-key methods
+            [seon.web.tailwind]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; XTDB Node Component
