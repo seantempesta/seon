@@ -1,6 +1,6 @@
 # PRD: Observatory XTDB-Based Display
 
-**Status:** Active (Phase 1b.10) - BLOCKED on session mapping fix
+**Status:** Complete (Phase 1b.10) - Core XTDB view working
 **Priority:** High
 **Branch:** feature/namespace-ui
 **Parent:** docs/prds/namespace-ui/prd.md
@@ -230,42 +230,39 @@ Agent analyzed 82 sessions and 3,517 messages. Key findings:
 
 ---
 
-## CURRENT BLOCKER
+## COMPLETED (2026-01-28)
 
-The XTDB-based view isn't displaying because `find-ai-session-id` can't map 4-char session ID to AI session ID.
+### Session Mapping: RESOLVED
 
-### Root Cause
+The XTDB-based view now works. The `ai_sessions` table exists and contains the mapping:
+- `ai_sessions._id` = full session ID (ses-xxx)
+- `ai_sessions.seon$ai$agent_session_id` = 4-char hex ID
 
-1. Agent implemented query against non-existent `ai_sessions` table
-2. The AI session ID (`ses-xxx`) is stored in `ai_messages.seon$ai$session_id`
-3. The 4-char session ID is stored in `ai_sessions.seon$ai$agent_session_id` (created in claude.clj:645-647)
+The query was correct; the issue was server caching.
 
-### Fix Required
+### Implemented Features
 
-Update `find-ai-session-id` in `src/seon/web/agents.clj`:
+1. **XTDB data source** - Reads structured messages from database, not parsed log files
+2. **Session status** - Shows running/done/completed from XTDB session metadata
+3. **Expanded by default** - Tool calls show content immediately like Claude Code
+4. **Truncated paths** - `/Users/sean/src/seon/docs/foo.md` → `docs/foo.md`
+5. **8-line preview** - More context visible in code/results
+6. **TOOL+RESULT linked** - Results embedded in tool call blocks via tool_use_id pairing
+7. **Collapsible blocks** - Click to collapse/expand individual tool calls
+8. **Error highlighting** - Failed tools show ✗ with error background
 
-```clojure
-(defn- find-ai-session-id
-  "Find the AI session ID (ses-xxx) for a given agent session ID (4-char hex)."
-  [agent-session-id]
-  (when-let [node (get-node)]
-    ;; Query ai_sessions table - the session entity has ::ai/agent-session-id
-    (let [results (db/q node
-                        "SELECT _id FROM ai_sessions
-                         WHERE seon$ai$agent_session_id = ?"
-                        [agent-session-id])]
-      (:xt/id (first results)))))
-```
+### Remaining Visual Issues (Future Work)
 
-But first verify the table exists and has data:
-```clojure
-(xt/q node "SELECT * FROM ai_sessions LIMIT 3")
-```
+1. **Render markdown** - Assistant text with `##`, `**`, lists should render as HTML
+   - Use a lightweight markdown-to-HTML converter (clj-markdown or similar)
+   - Apply to `::ai/content` in assistant messages
 
-### Visual Issues to Fix After Session Mapping Works
+2. **Smart auto-scroll** - Follow new content without fighting user
+   - Auto-scroll to bottom when user is near bottom
+   - Stop auto-scrolling if user scrolls up to read history
+   - Resume auto-scroll when user scrolls back to bottom
+   - Consider a "Jump to latest" button when not at bottom
 
-1. **Remove rigid columns** - Don't use fixed-width timestamp/type columns
-2. **Render markdown** - Assistant text with `##`, `**`, lists should render as HTML
-3. **Link TOOL+RESULT visually** - Indent result under tool, or collapse together
-4. **TodoWrite as component** - Not raw message, show as checkbox list
-5. **Pretty print code** - Use pprint for Clojure data, syntax highlight
+3. **TodoWrite as component** - Not raw message, show as checkbox list
+
+4. **Syntax highlighting** - Add highlight.js for code blocks
