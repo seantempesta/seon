@@ -40,3 +40,12 @@
 [submodule "reference-code/xtdb-inspector"]
 	path = reference-code/xtdb-inspector
 	url = https://github.com/tatut/xtdb-inspector.git
+[submodule "reference-code/datalevin"]
+	path = reference-code/datalevin
+	url = https://github.com/datalevin/datalevin.git
+[submodule "reference-code/malli-datomic"]
+	path = reference-code/malli-datomic
+	url = https://github.com/Blasterai/malli-datomic
+[submodule "reference-code/spectomic"]
+	path = reference-code/spectomic
+	url = https://github.com/Provisdom/spectomic
