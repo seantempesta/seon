@@ -264,6 +264,22 @@
 ;;; Default Renderers - :html format (Hiccup)
 ;;; ---------------------------------------------------------------------------
 
+(defn- safe-map?
+  "Check if v is safe to recursively render as a map.
+   Returns false for Java objects that implement map interfaces but aren't true Clojure maps.
+   This prevents stack overflow when rendering complex Java objects like XTDB nodes."
+  [v]
+  (and (map? v)
+       (let [class-name (.getName (class v))]
+         (or (str/starts-with? class-name "clojure.lang.")
+             ;; Also allow user-defined records (namespaced class names)
+             (and (str/includes? class-name ".")
+                  (not (str/starts-with? class-name "java."))
+                  (not (str/starts-with? class-name "javax."))
+                  (not (str/starts-with? class-name "xtdb."))
+                  (not (str/starts-with? class-name "io."))
+                  (not (str/starts-with? class-name "org.")))))))
+
 (defmethod render* [:html :default] [value _format]
   (cond
     (nil? value)
@@ -289,7 +305,7 @@
     (boolean? value)
     [:span {:class "text-info font-medium"} (str value)]
 
-    (map? value)
+    (safe-map? value)
     (if (empty? value)
       [:span {:class "text-text-400"} "{}"]
       [:div {:class "pl-3 border-l border-base-700 ml-1"}
