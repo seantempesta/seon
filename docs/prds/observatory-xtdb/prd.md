@@ -1,6 +1,6 @@
 # PRD: Observatory XTDB-Based Display
 
-**Status:** Active (Phase 1b.10)
+**Status:** Active (Phase 1b.10) - BLOCKED on session mapping fix
 **Priority:** High
 **Branch:** feature/namespace-ui
 **Parent:** docs/prds/namespace-ui/prd.md
@@ -227,3 +227,45 @@ Agent analyzed 82 sessions and 3,517 messages. Key findings:
 | Tool invocation | Yes | No | Collapsible tool block |
 | Tool result | No | Yes | (embedded in tool block) |
 | Final result | No | No | Session stats |
+
+---
+
+## CURRENT BLOCKER
+
+The XTDB-based view isn't displaying because `find-ai-session-id` can't map 4-char session ID to AI session ID.
+
+### Root Cause
+
+1. Agent implemented query against non-existent `ai_sessions` table
+2. The AI session ID (`ses-xxx`) is stored in `ai_messages.seon$ai$session_id`
+3. The 4-char session ID is stored in `ai_sessions.seon$ai$agent_session_id` (created in claude.clj:645-647)
+
+### Fix Required
+
+Update `find-ai-session-id` in `src/seon/web/agents.clj`:
+
+```clojure
+(defn- find-ai-session-id
+  "Find the AI session ID (ses-xxx) for a given agent session ID (4-char hex)."
+  [agent-session-id]
+  (when-let [node (get-node)]
+    ;; Query ai_sessions table - the session entity has ::ai/agent-session-id
+    (let [results (db/q node
+                        "SELECT _id FROM ai_sessions
+                         WHERE seon$ai$agent_session_id = ?"
+                        [agent-session-id])]
+      (:xt/id (first results)))))
+```
+
+But first verify the table exists and has data:
+```clojure
+(xt/q node "SELECT * FROM ai_sessions LIMIT 3")
+```
+
+### Visual Issues to Fix After Session Mapping Works
+
+1. **Remove rigid columns** - Don't use fixed-width timestamp/type columns
+2. **Render markdown** - Assistant text with `##`, `**`, lists should render as HTML
+3. **Link TOOL+RESULT visually** - Indent result under tool, or collapse together
+4. **TodoWrite as component** - Not raw message, show as checkbox list
+5. **Pretty print code** - Use pprint for Clojure data, syntax highlight
