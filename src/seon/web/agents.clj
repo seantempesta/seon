@@ -82,6 +82,17 @@
            ORDER BY seon$ai$timestamp"
           [ai-session-id])))
 
+(defn- load-session-info
+  "Load session metadata (status, timestamps, cost) from XTDB.
+   Returns map with :status, :started-at, :ended-at, :cost-usd."
+  [ai-session-id]
+  (when-let [node (get-node)]
+    (first (db/q node
+                 "SELECT seon$ai$status, seon$ai$started_at, seon$ai$ended_at, seon$ai$cost_usd
+                  FROM ai_sessions
+                  WHERE _id = ?"
+                 [ai-session-id]))))
+
 (defn- pair-tool-calls-with-results
   "Match tool calls with their results by tool_use_id.
    Modifies messages with tool-calls to include :result on each call."
@@ -145,8 +156,8 @@
         nil))))
 
 (def ^:private max-preview-lines
-  "Max lines to show in content preview."
-  4)
+  "Max lines to show in content preview. Higher value shows more context like Claude Code."
+  8)
 
 (defn- truncate-lines
   "Truncate content to max lines for display.
@@ -189,6 +200,16 @@
   (when path
     (last (str/split path #"/"))))
 
+(defn- truncate-path
+  "Strip working directory prefix from path for cleaner display.
+   /Users/sean/src/seon/src/foo.clj -> src/foo.clj"
+  [path]
+  (when path
+    (let [cwd (str (System/getProperty "user.dir") "/")]
+      (if (str/starts-with? path cwd)
+        (subs path (count cwd))
+        path))))
+
 (defn- pp-str
   "Pretty print a Clojure value to string."
   [v]
@@ -202,7 +223,8 @@
   "Render a single tool call with its result as a collapsible block."
   [{:keys [id name input result]} timestamp]
   (let [file-path (or (:file-path input) (:file_path input))
-        target (or file-path
+        ;; Truncate paths to project-relative for cleaner display
+        target (or (truncate-path file-path)
                    (:pattern input)
                    (when-let [cmd (:command input)]
                      (if (> (count cmd) 50)
@@ -227,11 +249,11 @@
         lang (detect-language file-path name)
         {:keys [truncated? preview hidden-lines]} (truncate-lines result-text max-preview-lines)]
     [:div {:class "mb-2"}
-     ;; Tool call header
-     [:details {:class "group" :data-preserve-attr "open"}
+     ;; Tool call - expanded by default like Claude Code
+     [:details {:class "group" :open true :data-preserve-attr "open"}
       [:summary {:class (str "cursor-pointer list-none flex items-center gap-2 py-1 px-2 rounded "
                              "hover:bg-base-800 text-xs font-mono")}
-       ;; Expand indicator
+       ;; Expand indicator (rotated when open)
        [:span {:class "text-text-400 group-open:rotate-90 transition-transform"} "▶"]
        ;; Timestamp
        [:span {:class "text-text-500"} (format-local-time timestamp)]
@@ -939,10 +961,15 @@
         ;; Fall back to log files if no XTDB data
         {:keys [lines exists error]} (when-not use-xtdb? (read-agent-log agent-id 200))
         parsed-lines (when-not use-xtdb? (keep parse-log-line lines))
+        ;; Get session info from XTDB for status
+        session-info (when use-xtdb? (load-session-info ai-session-id))
         log-status (cond
                      use-xtdb?
-                     {:status (get-agent-status agent-id)
-                      :time-ago nil}
+                     {:status (or (get-agent-status agent-id)  ; Running agent?
+                                  (::ai/status session-info)   ; XTDB status
+                                  :unknown)
+                      :time-ago nil
+                      :cost (::ai/cost-usd session-info)}
                      (seq parsed-lines)
                      (analyze-log-status parsed-lines agent-id))
         ;; For log file fallback
