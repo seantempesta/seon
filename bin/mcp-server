@@ -294,22 +294,24 @@
          {:err (str "Error: " (.getMessage e))})))))
 
 ;;; ---------------------------------------------------------------------------
-;;; Session Helpers
+;;; MCP Result Builders
 ;;; ---------------------------------------------------------------------------
 
-(defn get-session-port
-  "Query orchestrator for the nREPL port of a session."
-  [session-id]
-  (let [code (format "(do (require 'seon.orchestrator.session)
-                          (:seon.orchestrator.session/nrepl-port
-                            (seon.orchestrator.session/get-session-port
-                              {:seon.orchestrator.session/node (user/xtdb-node)
-                               :seon.orchestrator.session/id \"%s\"})))"
-                     session-id)
-        result (nrepl-eval orchestrator-port code)]
-    (when-let [value (:value result)]
-      (when (and value (not= "nil" value))
-        (parse-long value)))))
+(defn mcp-success
+  "Build an MCP success result with text content."
+  [text]
+  {:content [{:type "text" :text text}]
+   :isError false})
+
+(defn mcp-error
+  "Build an MCP error result with text content."
+  [text]
+  {:content [{:type "text" :text (str "Error: " text)}]
+   :isError true})
+
+;;; ---------------------------------------------------------------------------
+;;; Session Helpers
+;;; ---------------------------------------------------------------------------
 
 (defn get-session-info
   "Query orchestrator for the nREPL port and nREPL session ID of a session.
@@ -325,9 +327,11 @@
         result (nrepl-eval orchestrator-port code)]
     (when-let [value (:value result)]
       (when (and value (not= "nil" value) (not= "{:port nil, :nrepl-session-id nil}" value))
-        ;; Parse the simple EDN map
+        ;; Parse the simple EDN map and validate port is present
         (try
-          (clojure.edn/read-string value)
+          (let [info (clojure.edn/read-string value)]
+            (when (:port info)  ;; Ensure port is non-nil
+              info))
           (catch Exception _ nil))))))
 
 (defn validate-session-id! [session-id]
@@ -384,19 +388,23 @@
                "(enforced:" enforced-session-id "provided:" session_id ")"
                "timeout:" timeout_ms)
 
-    ;; Check for concurrent orchestrator eval
+    ;; For orchestrator: atomically check-and-set eval state to prevent race conditions
     (when (= effective-session "orchestrator")
-      (when-let [running @orchestrator-eval-state]
-        (let [elapsed-sec (quot (- (System/currentTimeMillis) (:started-at running)) 1000)
-              warning (when (> elapsed-sec 120)
-                        " WARNING: Running >2min - may be stuck.")]
-          (throw (ex-info (str "Orchestrator busy (running for " elapsed-sec "s)." warning "\n"
-                               "Code: `" (:code-preview running) "`\n"
-                               "Options:\n"
-                               "  1. Wait for completion\n"
-                               "  2. interrupt_eval(session_id=\"orchestrator\") to unblock\n"
-                               "  3. Restart server if interrupt fails")
-                          {:busy true :elapsed-sec elapsed-sec})))))
+      (let [new-state {:started-at (System/currentTimeMillis)
+                       :code-preview (truncate-code-preview code 50)}]
+        (when-not (compare-and-set! orchestrator-eval-state nil new-state)
+          ;; Failed to set - another eval is running
+          (let [running @orchestrator-eval-state
+                elapsed-sec (quot (- (System/currentTimeMillis) (:started-at running)) 1000)
+                warning (when (> elapsed-sec 120)
+                          " WARNING: Running >2min - may be stuck.")]
+            (throw (ex-info (str "Orchestrator busy (running for " elapsed-sec "s)." warning "\n"
+                                 "Code: `" (:code-preview running) "`\n"
+                                 "Options:\n"
+                                 "  1. Wait for completion\n"
+                                 "  2. interrupt_eval(session_id=\"orchestrator\") to unblock\n"
+                                 "  3. Restart server if interrupt fails")
+                            {:busy true :elapsed-sec elapsed-sec}))))))
 
     (let [[port nrepl-session-id]
           (if (= effective-session "orchestrator")
@@ -407,11 +415,6 @@
                 [(:port info) (:nrepl-session-id info)]
                 (throw (ex-info (str "Session not found or not running: " effective-session)
                                 {:session_id effective-session})))))]
-
-      ;; Set orchestrator state before eval
-      (when (= effective-session "orchestrator")
-        (reset! orchestrator-eval-state {:started-at (System/currentTimeMillis)
-                                         :code-preview (truncate-code-preview code 50)}))
 
       (try
         ;; Record eval start for agent sessions (Phase 4c)
@@ -430,16 +433,12 @@
           (record-activity! effective-session :complete nil)
 
           (if (:ex result)
-            {:content [{:type "text"
-                        :text (str "Error: " (:err result))}]
-             :isError true}
-            {:content [{:type "text"
-                        :text (str (when-let [out (:out result)]
-                                     out)
-                                   (or (:value result) "nil")
-                                   (when-let [ns (:ns result)]
-                                     (str "\n;; ns: " ns)))}]
-             :isError false}))
+            (mcp-error (:err result))
+            (mcp-success (str (when-let [out (:out result)]
+                                out)
+                              (or (:value result) "nil")
+                              (when-let [ns (:ns result)]
+                                (str "\n;; ns: " ns))))))
 
         (finally
           ;; Always clear orchestrator state when done
@@ -468,9 +467,7 @@
     (log-debug "Create session result:" (pr-str result))
 
     (if (:ex result)
-      {:content [{:type "text"
-                  :text (str "Error creating session: " (:err result))}]
-       :isError true}
+      (mcp-error (str "creating session: " (:err result)))
 
       ;; Session created, now clone nREPL session for persistence
       (let [session-info (try (clojure.edn/read-string (:value result)) (catch Exception _ nil))
@@ -490,14 +487,10 @@
                 (nrepl-eval orchestrator-port store-code 5000)))
 
             ;; Return session info with nrepl_session_id
-            {:content [{:type "text"
-                        :text (pr-str (assoc session-info :nrepl_session_id nrepl-session-id))}]
-             :isError false})
+            (mcp-success (pr-str (assoc session-info :nrepl_session_id nrepl-session-id))))
 
           ;; Failed to parse session info, return original
-          {:content [{:type "text"
-                      :text (:value result)}]
-           :isError false})))))
+          (mcp-success (:value result)))))))
 
 (defn execute-stop-session
   "Execute the stop_session tool."
@@ -517,12 +510,47 @@
     (log-debug "Stop session result:" (pr-str result))
 
     (if (:ex result)
-      {:content [{:type "text"
-                  :text (str "Error stopping session: " (:err result))}]
-       :isError true}
-      {:content [{:type "text"
-                  :text (:value result)}]
-       :isError false})))
+      (mcp-error (str "stopping session: " (:err result)))
+      (mcp-success (:value result)))))
+
+(defn- cancel-running-future-if!
+  "Cancel the running eval future if it matches the given session."
+  [session-id]
+  (when-let [running @running-eval]
+    (when (or (= session-id (:session-id running))
+              (and (= session-id "orchestrator")
+                   (= "orchestrator" (:session-id running))))
+      (log-info "Cancelling running future for session:" session-id)
+      (future-cancel (:future running))
+      (reset! running-eval nil))))
+
+(defn- interrupt-orchestrator
+  "Interrupt the orchestrator nREPL session. Returns MCP result."
+  []
+  (if-let [nrepl-session-id @orchestrator-nrepl-session]
+    (let [result (nrepl-interrupt orchestrator-port nrepl-session-id)]
+      ;; Clear the eval state since we're interrupting
+      (reset! orchestrator-eval-state nil)
+      (if (:error result)
+        (mcp-error (str "interrupting orchestrator: " (:error result)))
+        (mcp-success (str "Orchestrator interrupt sent. Status: " (pr-str (:status result))
+                          ". The REPL should be responsive now."))))
+    (mcp-error "No orchestrator nREPL session available. MCP server may need restart.")))
+
+(defn- interrupt-agent-session
+  "Interrupt an agent nREPL session. Returns MCP result."
+  [session-id]
+  (validate-session-id! session-id)
+  (if-let [info (get-session-info session-id)]
+    (let [port (:port info)
+          nrepl-session-id (:nrepl-session-id info)]
+      (if nrepl-session-id
+        (let [result (nrepl-interrupt port nrepl-session-id)]
+          (if (:error result)
+            (mcp-error (str "interrupting: " (:error result)))
+            (mcp-success (str "Interrupt sent. Status: " (pr-str (:status result))))))
+        (mcp-error "Session has no persistent nREPL session ID. Cannot interrupt ephemeral sessions.")))
+    (mcp-error (str "Session not found: " session-id))))
 
 (defn execute-interrupt-eval
   "Execute the interrupt_eval tool.
@@ -531,55 +559,10 @@
    Supports session_id='orchestrator' to interrupt stuck orchestrator evals."
   [{:keys [session_id]}]
   (log-debug "execute-interrupt-eval session:" session_id)
-
-  ;; Cancel the running future if it matches this session
-  (when-let [running @running-eval]
-    (when (or (= session_id (:session-id running))
-              (and (= session_id "orchestrator")
-                   (= "orchestrator" (:session-id running))))
-      (log-info "Cancelling running future for session:" session_id)
-      (future-cancel (:future running))
-      (reset! running-eval nil)))
-
-  ;; Handle orchestrator interrupt specially
+  (cancel-running-future-if! session_id)
   (if (= session_id "orchestrator")
-    (if-let [nrepl-session-id @orchestrator-nrepl-session]
-      (let [result (nrepl-interrupt orchestrator-port nrepl-session-id)]
-        ;; Clear the eval state since we're interrupting
-        (reset! orchestrator-eval-state nil)
-        (if (:error result)
-          {:content [{:type "text"
-                      :text (str "Error interrupting orchestrator: " (:error result))}]
-           :isError true}
-          {:content [{:type "text"
-                      :text (str "Orchestrator interrupt sent. Status: " (pr-str (:status result))
-                                 ". The REPL should be responsive now.")}]
-           :isError false}))
-      {:content [{:type "text"
-                  :text "No orchestrator nREPL session available. MCP server may need restart."}]
-       :isError true})
-
-    ;; Handle agent session interrupt
-    (do
-      (validate-session-id! session_id)
-      (if-let [info (get-session-info session_id)]
-        (let [port (:port info)
-              nrepl-session-id (:nrepl-session-id info)]
-          (if nrepl-session-id
-            (let [result (nrepl-interrupt port nrepl-session-id)]
-              (if (:error result)
-                {:content [{:type "text"
-                            :text (str "Error interrupting: " (:error result))}]
-                 :isError true}
-                {:content [{:type "text"
-                            :text (str "Interrupt sent. Status: " (pr-str (:status result)))}]
-                 :isError false}))
-            {:content [{:type "text"
-                        :text "Session has no persistent nREPL session ID. Cannot interrupt ephemeral sessions."}]
-             :isError true}))
-        {:content [{:type "text"
-                    :text (str "Session not found: " session_id)}]
-         :isError true}))))
+    (interrupt-orchestrator)
+    (interrupt-agent-session session_id)))
 
 (defn execute-list-sessions
   "Execute the list_sessions tool.
@@ -633,14 +616,10 @@
     (log-debug "List sessions result:" (pr-str result))
 
     (if (:ex result)
-      {:content [{:type "text"
-                  :text (str "Error listing sessions: " (:err result))}]
-       :isError true}
-      {:content [{:type "text"
-                  :text (if (= "[]" (:value result))
-                          "No active sessions"
-                          (:value result))}]
-       :isError false})))
+      (mcp-error (str "listing sessions: " (:err result)))
+      (mcp-success (if (= "[]" (:value result))
+                     "No active sessions"
+                     (:value result))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; JSON-RPC Message Handling
@@ -727,14 +706,10 @@
                 (let [result (execute-tool-sync name arguments)]
                   (queue-response! id result))
                 (catch clojure.lang.ExceptionInfo e
-                  (queue-response! id {:content [{:type "text"
-                                                  :text (str "Error: " (ex-message e))}]
-                                       :isError true}))
+                  (queue-response! id (mcp-error (ex-message e))))
                 (catch Exception e
                   (log-error "Tool execution failed:" (.getMessage e))
-                  (queue-response! id {:content [{:type "text"
-                                                  :text (str "Error: " (.getMessage e))}]
-                                       :isError true}))
+                  (queue-response! id (mcp-error (.getMessage e))))
                 (finally
                   ;; Clear running-eval when done
                   (reset! running-eval nil))))]
@@ -750,14 +725,10 @@
       (let [result (execute-tool-sync name arguments)]
         (send-result id result))
       (catch clojure.lang.ExceptionInfo e
-        (send-result id {:content [{:type "text"
-                                    :text (str "Error: " (ex-message e))}]
-                         :isError true}))
+        (send-result id (mcp-error (ex-message e))))
       (catch Exception e
         (log-error "Tool execution failed:" (.getMessage e))
-        (send-result id {:content [{:type "text"
-                                    :text (str "Error: " (.getMessage e))}]
-                         :isError true})))))
+        (send-result id (mcp-error (.getMessage e)))))))
 
 (defn handle-notifications-initialized
   "Handle the initialized notification (no response needed)."
@@ -792,9 +763,33 @@
       (reset! response-queue [])
       (doseq [{:keys [id result error]} responses]
         (if error
-          (send-result id {:content [{:type "text" :text (str "Error: " error)}]
-                          :isError true})
+          (send-result id (mcp-error error))
           (send-result id result))))))
+
+(defn- init-orchestrator-session!
+  "Initialize connection to orchestrator and clone a persistent nREPL session.
+   Returns true if successful, false otherwise."
+  []
+  (try
+    (let [result (nrepl-eval orchestrator-port "(+ 1 1)")]
+      (if (= "2" (:value result))
+        (do
+          (log-debug "Orchestrator connection verified")
+          ;; Clone a persistent session for interrupt support
+          (if-let [session-id (nrepl-clone-session orchestrator-port)]
+            (do
+              (reset! orchestrator-nrepl-session session-id)
+              (log-debug "Cloned orchestrator nREPL session:" session-id)
+              true)
+            (do
+              (log-error "Failed to clone orchestrator nREPL session - interrupts won't work")
+              false)))
+        (do
+          (log-error "Orchestrator connection test failed:" result)
+          false)))
+    (catch Exception e
+      (log-error "Cannot connect to orchestrator on port" orchestrator-port ":" (.getMessage e))
+      false)))
 
 (defn -main
   "Main entry point. Read JSON-RPC from stdin, process, write to stdout.
@@ -807,22 +802,7 @@
    brick the entire MCP server."
   []
   (log-info "MCP Server v0.3.0 starting (async mode)...")
-
-  ;; Check that orchestrator is reachable and clone a persistent session
-  (try
-    (let [result (nrepl-eval orchestrator-port "(+ 1 1)")]
-      (if (= "2" (:value result))
-        (do
-          (log-debug "Orchestrator connection verified")
-          ;; Clone a persistent session for interrupt support
-          (if-let [session-id (nrepl-clone-session orchestrator-port)]
-            (do
-              (reset! orchestrator-nrepl-session session-id)
-              (log-debug "Cloned orchestrator nREPL session:" session-id))
-            (log-error "Failed to clone orchestrator nREPL session - interrupts won't work")))
-        (log-error "Orchestrator connection test failed:" result)))
-    (catch Exception e
-      (log-error "Cannot connect to orchestrator on port" orchestrator-port ":" (.getMessage e))))
+  (init-orchestrator-session!)
 
   ;; Main message loop - non-blocking to stay responsive
   (let [reader (java.io.BufferedReader. *in*)]
