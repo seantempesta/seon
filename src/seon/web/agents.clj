@@ -10,6 +10,7 @@
   (:require [taoensso.timbre :as log]
             [clojure.string :as str]
             [clojure.pprint :as pprint]
+            [clojure.data.json :as json]
             [markdown.core :as md]
             [seon.ai :as ai]
             [seon.ai.agent :as agent]
@@ -85,6 +86,38 @@
                   FROM ai_sessions
                   WHERE _id = ?"
                  [ai-session-id]))))
+
+(defn- aggregate-message-stats
+  "Aggregate token counts and compute turns from messages.
+   Returns map with :input-tokens, :output-tokens, :num-turns, :duration-ms."
+  [messages]
+  (let [;; Sum tokens across all messages
+        input-tokens (->> messages
+                          (keep ::ai/input-tokens)
+                          (reduce + 0))
+        output-tokens (->> messages
+                           (keep ::ai/output-tokens)
+                           (reduce + 0))
+        ;; Count assistant messages as turns
+        num-turns (->> messages
+                       (filter #(= "assistant" (::ai/role %)))
+                       count)
+        ;; Compute duration from first to last message
+        timestamps (->> messages
+                        (keep ::ai/timestamp)
+                        (map #(cond
+                                (instance? Instant %) %
+                                (instance? ZonedDateTime %) (.toInstant %)
+                                :else nil))
+                        (remove nil?)
+                        sort)
+        duration-ms (when (>= (count timestamps) 2)
+                      (- (.toEpochMilli (last timestamps))
+                         (.toEpochMilli (first timestamps))))]
+    {:input-tokens (when (pos? input-tokens) input-tokens)
+     :output-tokens (when (pos? output-tokens) output-tokens)
+     :num-turns (when (pos? num-turns) num-turns)
+     :duration-ms duration-ms}))
 
 (defn- pair-tool-calls-with-results
   "Match tool calls with their results by tool_use_id.
@@ -194,6 +227,37 @@
   [v]
   (with-out-str (pprint/pprint v)))
 
+(defn- render-task-list-result
+  "Render TaskList result as formatted task list with status indicators."
+  [result-text]
+  (try
+    ;; Parse the JSON result - TaskList returns an array of tasks
+    (let [data (json/read-str result-text :key-fn keyword)
+          tasks (cond
+                  ;; Direct array of tasks
+                  (sequential? data) data
+                  ;; Wrapped in {:tasks [...]}
+                  (:tasks data) (:tasks data)
+                  :else nil)]
+      (when (seq tasks)
+        [:div {:class "space-y-0.5"}
+         (for [{:keys [id subject status blockedBy]} tasks]
+           (let [[indicator indicator-class]
+                 (case (str status)
+                   "completed" ["✓" "text-success"]
+                   "in_progress" ["●" "text-warning"]
+                   "pending" ["○" "text-text-400"]
+                   ["?" "text-text-500"])]
+             [:div {:class "flex items-center gap-2 text-xs font-mono"}
+              [:span {:class "text-text-500 w-4"} id]
+              [:span {:class indicator-class} indicator]
+              [:span {:class "text-text-200 flex-1 truncate"} subject]
+              (when (seq blockedBy)
+                [:span {:class "text-text-500 text-2xs"} (str "blocked by: " (str/join ", " blockedBy))])]))]))
+    (catch Exception _
+      ;; Fall back to raw display on parse error
+      nil)))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Message-Centric View Components
 ;;; ---------------------------------------------------------------------------
@@ -245,15 +309,20 @@
         [:div {:class "ml-6 mt-1 pl-3 border-l-2 border-base-700"}
          (when is-repl?
            [:span {:class "text-text-500 text-2xs block mb-1"} "→ result:"])
-         [:pre {:class (str "bg-base-900 p-2 rounded text-2xs overflow-x-auto font-mono "
-                            (when has-error? "border border-error/30"))}
-          [:code {:class (when lang (str "language-" lang))}
-           preview
-           (when truncated?
-             [:details {:class "inline" :data-preserve-attr "open"}
-              [:summary {:class "cursor-pointer list-none text-info hover:text-info/80 block mt-1"}
-               (str "... " hidden-lines " more lines ▸")]
-              [:span {:class "block mt-1"} (subs full-content (count preview))]])]]])]
+         ;; Special formatting for TaskList results
+         (if-let [task-list-view (and (= name "TaskList") (render-task-list-result result-text))]
+           [:div {:class "bg-base-900 p-2 rounded text-2xs"}
+            task-list-view]
+           ;; Default: show as code block
+           [:pre {:class (str "bg-base-900 p-2 rounded text-2xs overflow-x-auto font-mono "
+                              (when has-error? "border border-error/30"))}
+            [:code {:class (when lang (str "language-" lang))}
+             preview
+             (when truncated?
+               [:details {:class "inline" :data-preserve-attr "open"}
+                [:summary {:class "cursor-pointer list-none text-info hover:text-info/80 block mt-1"}
+                 (str "... " hidden-lines " more lines ▸")]
+                [:span {:class "block mt-1"} (subs full-content (count preview))]])]])])]
      ;; Hover card via multimethod
      (agent-views/render-tool-hover name parsed-input raw-input)]))
 
@@ -429,6 +498,25 @@
   (if cost
     (format "$%.2f" (double cost))
     "-"))
+
+(defn- format-tokens
+  "Format token count with K suffix for thousands."
+  [tokens]
+  (when tokens
+    (if (>= tokens 1000)
+      (format "%.1fk" (/ tokens 1000.0))
+      (str tokens))))
+
+(defn- format-duration
+  "Format duration-ms as human readable string."
+  [duration-ms]
+  (when duration-ms
+    (let [seconds (quot duration-ms 1000)
+          minutes (quot seconds 60)
+          secs (mod seconds 60)]
+      (if (pos? minutes)
+        (format "%dm %ds" minutes secs)
+        (format "%ds" secs)))))
 
 (defn- agent-status-badge
   "Render a status badge with Phosphor pattern: dot + word, pulse for active states.
@@ -610,6 +698,108 @@
       (:seon.ai.agent/agent-status a))))
 
 
+(defn- extract-current-activity
+  "Extract the current activity summary from the most recent messages.
+   Returns a map with :activity-type and :activity-text for display."
+  [messages]
+  (when (seq messages)
+    (let [;; Look at the last few messages to find current activity
+          recent (->> messages reverse (take 5))
+          ;; Find most recent tool call or assistant message
+          latest-with-activity
+          (first
+           (for [msg recent
+                 :let [tool-calls (::claude/tool-calls msg)
+                       content (::ai/content msg)
+                       role (::ai/role msg)]
+                 :when (or (seq tool-calls)
+                           (and (= "assistant" role) (not (str/blank? content))))]
+             (cond
+               ;; Has tool calls - show the most recent tool
+               (seq tool-calls)
+               (let [tool (last tool-calls)
+                     tool-name (:name tool)
+                     input (:input tool)]
+                 (case tool-name
+                   "Edit" {:type :edit
+                           :text (str "Edit " (or (:file-path input) (:file_path input) "file"))}
+                   "Read" {:type :read
+                           :text (str "Read " (or (:file-path input) (:file_path input) "file"))}
+                   "Write" {:type :write
+                            :text (str "Write " (or (:file-path input) (:file_path input) "file"))}
+                   "Bash" {:type :bash
+                           :text (or (:description input) "Running command")}
+                   "Grep" {:type :grep
+                           :text (str "Grep \"" (:pattern input) "\"")}
+                   "Glob" {:type :glob
+                           :text (str "Glob " (:pattern input))}
+                   "mcp__seon__eval" {:type :repl
+                                      :text "Evaluating in REPL"}
+                   "Task" {:type :task
+                           :text (or (:description input) "Launching subagent")}
+                   "TaskCreate" {:type :task
+                                 :text (str "Creating task: " (:subject input))}
+                   "TaskUpdate" {:type :task
+                                 :text (str "Updating task #" (:taskId input))}
+                   ;; Default
+                   {:type :tool
+                    :text tool-name}))
+               ;; Assistant thinking/responding
+               :else
+               {:type :thinking
+                :text (let [preview (subs content 0 (min 60 (count content)))]
+                        (if (> (count content) 60)
+                          (str preview "...")
+                          preview))})))]
+      latest-with-activity)))
+
+(defn- progress-summary
+  "Render a sticky progress line showing current activity."
+  [{:keys [status activity]}]
+  (when (and activity (= status :running))
+    (let [{:keys [type text]} activity
+          icon (case type
+                 :edit "✎"
+                 :read "📖"
+                 :write "✎"
+                 :bash "⚡"
+                 :grep "🔍"
+                 :glob "📁"
+                 :repl "λ"
+                 :task "🔀"
+                 :thinking "💭"
+                 "●")]
+      [:div {:class "flex items-center gap-2 text-xs font-mono bg-base-800 rounded px-3 py-1.5 mb-3"}
+       [:span {:class "text-signal animate-pulse"} icon]
+       [:span {:class "text-text-300"} "Working on:"]
+       [:span {:class "text-text-100 truncate"} text]])))
+
+(defn- metrics-display
+  "Render metrics row for agent detail header.
+   Shows tokens, turns, duration, and cost in a compact format."
+  [{:keys [input-tokens output-tokens num-turns duration-ms cost]}]
+  [:div {:class "flex items-center gap-4 text-xs font-mono"}
+   ;; Tokens: ↑ input  ↓ output
+   (when (or input-tokens output-tokens)
+     [:span {:class "text-text-400"}
+      (when input-tokens
+        [:span {:title "Input tokens"} "↑ " (format-tokens input-tokens)])
+      (when (and input-tokens output-tokens) "  ")
+      (when output-tokens
+        [:span {:title "Output tokens"} "↓ " (format-tokens output-tokens)])])
+   ;; Turns
+   (when num-turns
+     [:span {:class "text-text-400" :title "Conversation turns"}
+      (str "Turn " num-turns)])
+   ;; Duration
+   (when duration-ms
+     [:span {:class "text-text-400" :title "Duration"}
+      (format-duration duration-ms)])
+   ;; Cost
+   (when cost
+     [:span {:class "text-text-200" :title "Cost"}
+      (format-cost cost)])])
+
 (defn- status-badge
   "Render a status badge with Phosphor pattern for agent detail header.
    Uses dot + word style with pulse for active states."
@@ -706,18 +896,29 @@
         session-info (when ai-session-id (load-session-info ai-session-id))
         ;; Get message stats for stuck detection
         message-stats (or (message-stats-by-session) {})
+        ;; Compute aggregated metrics from messages
+        agg-stats (when (seq messages) (aggregate-message-stats messages))
         ;; Compute status
         base-status (or (get-registry-status agent-id)  ; Running agent in registry
                         (::ai/status session-info)      ; Status from XTDB session
                         :unknown)
-        status-info {:status (compute-effective-status ai-session-id base-status message-stats)
+        effective-status (compute-effective-status ai-session-id base-status message-stats)
+        status-info {:status effective-status
                      :time-ago nil
                      :cost (::ai/cost-usd session-info)}
+        ;; Merge session cost into metrics
+        metrics {:input-tokens (:input-tokens agg-stats)
+                 :output-tokens (:output-tokens agg-stats)
+                 :num-turns (:num-turns agg-stats)
+                 :duration-ms (:duration-ms agg-stats)
+                 :cost (::ai/cost-usd session-info)}
+        ;; Extract current activity for progress line
+        current-activity (when (seq messages) (extract-current-activity messages))
         message-count (count messages)]
     (h/html
      [:main#morph
       ;; Header with back link and status
-      [:div {:class "flex items-center justify-between mb-6"}
+      [:div {:class "flex items-center justify-between mb-4"}
        [:div {:class "flex items-center gap-4"}
         [:a {:href "/agents"
              :class "text-text-400 hover:text-text-200 transition-colors"}
@@ -727,6 +928,11 @@
          (str message-count " messages")]]
        ;; Status badge on the right
        (status-badge status-info)]
+      ;; Metrics row
+      [:div {:class "mb-4"}
+       (metrics-display metrics)]
+      ;; Progress summary (only for running agents)
+      (progress-summary {:status effective-status :activity current-activity})
 
       ;; Main content
       [:div {:class "bg-base-900 rounded overflow-hidden"}
@@ -760,28 +966,16 @@
              :active-page :agents
              :skeleton (agent-detail-skeleton agent-id)})}))
 
-;; Agent detail SSE uses a different pattern - it needs per-request state (agent-id).
-;; We create handlers dynamically but cache them to enable hot reload.
-(defonce ^:private agent-detail-handlers (atom {}))
-
-(defn- get-agent-detail-handler
-  "Get or create SSE handler for agent detail page.
-   Handlers are cached per agent-id for connection reuse."
-  [agent-id]
-  (if-let [handler (get @agent-detail-handlers agent-id)]
-    handler
-    (let [;; Create render fn that closes over agent-id
-          render-fn (fn [_req] (agent-detail-content agent-id))
-          handler (sse/render-handler render-fn :poll-ms 1000)]
-      (swap! agent-detail-handlers assoc agent-id handler)
-      handler)))
+;; No handler cache needed - fresh handler each request guarantees current bindings.
+;; This is the permanent fix for SSE live reload issues.
 
 (defn agent-detail-sse
   "SSE handler for agent detail page - streams log updates.
-   Polls every 1 second to show new log lines in real-time."
+   Creates a fresh handler per request to ensure current function bindings."
   [request]
   (let [agent-id (get-in request [:path-params :agent-id])
-        handler (get-agent-detail-handler agent-id)]
+        render-fn (fn [_req] (agent-detail-content agent-id))
+        handler (sse/render-handler render-fn :poll-ms 1000)]
     (handler request)))
 
 ;;; ---------------------------------------------------------------------------
@@ -815,11 +1009,9 @@
 ;;; Recreates SSE handler objects so they use updated render functions.
 
 (defn after-ns-reload
-  "Called by clj-reload after namespace reload. Recreates SSE handlers."
+  "Called by clj-reload after namespace reload. Recreates list view SSE handler."
   []
-  (log/debug "Clearing SSE handler caches after namespace reload")
+  (log/debug "Recreating agents-sse handler after namespace reload")
   ;; Recreate agents-sse with current var reference
   (alter-var-root #'agents-sse
-                  (constantly (sse/render-handler #'agents-sse-render :poll-ms 2000)))
-  ;; Clear agent detail handlers cache - they'll be recreated on next request
-  (reset! agent-detail-handlers {}))
+                  (constantly (sse/render-handler #'agents-sse-render :poll-ms 2000))))

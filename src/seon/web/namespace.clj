@@ -61,41 +61,18 @@
              :active-page nil  ; No nav item highlighted
              :skeleton (namespace-skeleton ns-sym)})}))
 
-;; Namespace SSE uses dynamic handler creation per-namespace.
-;; Cache handlers by namespace only (not session-id) to avoid unbounded growth.
-;; Session-id is passed at render time via request, not closure.
-(defonce ^:private namespace-handlers (atom {}))
-
-(defn- get-namespace-handler
-  "Get or create SSE handler for a namespace view.
-   Handlers are cached per namespace for connection reuse."
-  [ns-sym]
-  (if-let [handler (get @namespace-handlers ns-sym)]
-    handler
-    (let [;; Render fn extracts session-id from request at render time
-          render-fn (fn [req]
-                      (let [session-id (get-in req [:query-params "id"])]
-                        (namespace-content ns-sym session-id)))
-          handler (sse/render-handler render-fn :poll-ms 2000)]
-      (swap! namespace-handlers assoc ns-sym handler)
-      handler)))
+;; No handler cache needed - fresh handler each request guarantees current bindings.
+;; This is the permanent fix for SSE live reload issues.
 
 (defn namespace-sse
   "SSE handler for namespace view - renders introspection data.
-   Polls every 2 seconds to catch changes (hot reload, atom updates)."
+   Creates a fresh handler per request to ensure current function bindings."
   [request]
   (let [ns-str (get-in request [:path-params :namespace])
         ns-sym (symbol ns-str)
-        handler (get-namespace-handler ns-sym)]
+        session-id (get-in request [:query-params "id"])
+        render-fn (fn [_req] (namespace-content ns-sym session-id))
+        handler (sse/render-handler render-fn :poll-ms 2000)]
     (handler request)))
 
-;; ============================================================================
-;; Hot Reload Support
-;; ============================================================================
-;; clj-reload calls this after reloading the namespace.
-;; Clears handler cache so they're recreated with updated render functions.
-
-(defn after-ns-reload
-  "Called by clj-reload after namespace reload. Clears SSE handler cache."
-  []
-  (reset! namespace-handlers {}))
+;; No after-ns-reload needed - per-entity handlers are created fresh each request.
