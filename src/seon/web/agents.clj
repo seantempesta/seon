@@ -407,10 +407,25 @@
   "Milliseconds without activity before considering an agent stuck (2 minutes)."
   (* 120 1000))
 
-(defn- effective-agent-status
-  "Get effective status for a running agent, detecting stuck state from log activity.
-   Only applies stuck detection if the agent is actually running - completed/failed/interrupted
-   agents keep their terminal status regardless of log file age."
+(defn- compute-effective-status
+  "Compute effective status for an agent, detecting stuck state from log activity.
+
+   This is the SINGLE source of truth for agent status computation.
+   Both the list view and detail view use this function.
+
+   Arguments:
+     agent-id    - 4-char hex session ID
+     base-status - Status from registry or XTDB (:running, :completed, :failed, etc.)
+
+   Returns:
+     Effective status keyword - may return :stuck if a running agent has no
+     activity for stuck-threshold-ms (2 minutes).
+
+   Logic:
+   - Terminal statuses (:completed, :failed, :interrupted) pass through unchanged
+   - Running agents are checked against log file modification time
+   - If log file is stale (> 2 min), returns :stuck
+   - If no log file found, returns base-status as-is"
   [agent-id base-status]
   ;; Only apply stuck detection to running agents
   (if (= :running base-status)
@@ -498,7 +513,7 @@
                                  base-status (::agent/agent-status agent)]]
                        {:id id
                         :namespace (::agent/namespace agent)
-                        :status (effective-agent-status id base-status)
+                        :status (compute-effective-status id base-status)
                         :session-id (::agent/ai-session-id agent)
                         :provider (::agent/provider agent)
                         :type :running
@@ -690,10 +705,6 @@
   "Max chars to show before truncating with expand option."
   120)
 
-(def ^:private stuck-threshold-seconds
-  "Seconds without activity before considering an agent stuck."
-  120)
-
 (defn- parse-log-timestamp
   "Parse ISO timestamp from log line. Returns Instant or nil."
   [timestamp-str]
@@ -712,39 +723,41 @@
       (< minutes 60) (str minutes "m ago")
       :else (str hours "h " (mod minutes 60) "m ago"))))
 
-(defn- get-agent-status
+(defn- get-registry-status
   "Get agent status from registry. Returns :running, :completed, or nil."
   [agent-id]
   (let [running-agents (agent/agents {})]
     (when-let [a (first (filter #(= agent-id (:seon.ai.agent/session-id %)) running-agents))]
       (:seon.ai.agent/agent-status a))))
 
-(defn- analyze-log-status
-  "Analyze log lines to determine status and last activity.
+(defn- compute-detail-status
+  "Compute status info for agent detail view.
+
+   Uses compute-effective-status for the actual status determination,
+   ensuring consistency with the list view. Adds display-only fields
+   like time-ago for the detail UI.
+
    Returns {:status :running/:completed/:stuck/:unknown
             :last-activity Instant
             :last-type string
-            :time-ago string}"
+            :time-ago string
+            :seconds-ago number}"
   [parsed-lines agent-id]
   (let [last-line (last parsed-lines)
         last-timestamp (when last-line (parse-log-timestamp (:timestamp last-line)))
         now (Instant/now)
         duration (when last-timestamp (Duration/between last-timestamp now))
         seconds-ago (when duration (.toSeconds duration))
-        registry-status (get-agent-status agent-id)
-        ;; Determine final status
-        log-status (cond
-                     (some #(= "COMPLETE" (:type %)) parsed-lines) :completed
-                     (some #(= "ERROR" (:type %)) parsed-lines) :error
-                     :else nil)
-        final-status (cond
-                       log-status log-status
-                       (= :running registry-status)
-                       (if (and seconds-ago (> seconds-ago stuck-threshold-seconds))
-                         :stuck
-                         :running)
-                       (= :completed registry-status) :completed
-                       :else :unknown)]
+        ;; Check for terminal status in logs first
+        log-terminal-status (cond
+                              (some #(= "COMPLETE" (:type %)) parsed-lines) :completed
+                              (some #(= "ERROR" (:type %)) parsed-lines) :error
+                              :else nil)
+        ;; Get base status from registry or log terminal status
+        registry-status (get-registry-status agent-id)
+        base-status (or log-terminal-status registry-status :unknown)
+        ;; Use unified status computation (handles stuck detection)
+        final-status (compute-effective-status agent-id base-status)]
     {:status final-status
      :last-activity last-timestamp
      :last-type (:type last-line)
@@ -769,7 +782,7 @@
                           (when pulse? " animate-pulse"))}]
       [:span {:class (str "text-xs font-medium " text-class)} label]]
      (when time-ago
-       [:span {:class (str "text-xs " (if (and seconds-ago (> seconds-ago stuck-threshold-seconds))
+       [:span {:class (str "text-xs " (if (and seconds-ago (> seconds-ago (quot stuck-threshold-ms 1000)))
                                          "text-warning font-medium"
                                          "text-text-400"))}
         (str "Last activity: " time-ago)])]))
@@ -1022,15 +1035,17 @@
         parsed-lines (when-not use-xtdb? (keep parse-log-line lines))
         ;; Get session info from XTDB for status
         session-info (when use-xtdb? (load-session-info ai-session-id))
+        ;; Compute status using unified function for both XTDB and log file paths
         log-status (cond
                      use-xtdb?
-                     {:status (or (get-agent-status agent-id)  ; Running agent?
-                                  (::ai/status session-info)   ; XTDB status
-                                  :unknown)
-                      :time-ago nil
-                      :cost (::ai/cost-usd session-info)}
+                     (let [base-status (or (get-registry-status agent-id)  ; Running agent?
+                                           (::ai/status session-info)      ; XTDB status
+                                           :unknown)]
+                       {:status (compute-effective-status agent-id base-status)
+                        :time-ago nil
+                        :cost (::ai/cost-usd session-info)})
                      (seq parsed-lines)
-                     (analyze-log-status parsed-lines agent-id))
+                     (compute-detail-status parsed-lines agent-id))
         ;; For log file fallback
         type-filter (or (:type-filter @ui-state) :all)
         filtered-lines (when-not use-xtdb?
