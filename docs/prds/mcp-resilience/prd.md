@@ -1,6 +1,6 @@
 # MCP Server Resilience
 
-## Status: Research Phase
+## Status: Phase 1 Complete - Async Request Processing Implemented
 
 ## Problem Statement
 
@@ -74,53 +74,72 @@ seon.ai.claude (agent management)
 
 ---
 
-## Hypotheses (Unverified)
+## Research Findings (Phase 0 Complete)
 
-### Hypothesis 1: Single-Threaded MCP Server
+### nREPL Session Model - VERIFIED
 
-The MCP server appears to use a synchronous read loop. If `nrepl-eval` blocks waiting for a response, the server cannot read new incoming requests (including interrupts).
+**Key finding:** nREPL strictly serializes all evaluations within a single session.
 
-**Evidence:** Both new evals AND interrupt calls hang when in stuck state.
+From [nREPL documentation](https://nrepl.org/nrepl/ops.html):
+> "All requests within the same session are serialized, so if you want to evaluate two expressions simultaneously you'll have to do this in separate sessions."
 
-**Uncertainty:** We haven't traced the exact execution flow during cancellation.
+Each session has a dedicated execution thread. Evaluations queue up and execute one at a time.
 
-### Hypothesis 2: State Cleared Prematurely
+**Interrupt mechanism:**
+- Interrupt CAN use a separate TCP connection - sessions are "persistent, cross-connection REPL sessions"
+- Interrupt sends a signal, waits 100ms, then 5000ms, then forcibly stops the thread
+- A new execution thread is spawned with preserved dynamic bindings
+- **Ephemeral sessions cannot be interrupted** - only persistent/cloned sessions work
 
-When the user cancels an MCP request, the `finally` block may run and clear `orchestrator-eval-state`, but the actual nREPL evaluation continues running.
+### Babashka Threading - VERIFIED
 
-**Evidence:** Concurrent check doesn't trigger on subsequent evals.
+**Key finding:** Babashka supports real JVM threads via `future`.
 
-**Uncertainty:** We don't know exactly when/how MCP request cancellation propagates.
+From [Babashka documentation](https://book.babashka.org/):
+> "Babashka supports real JVM threads and like Clojure, supports futures and dynamic thread-locally bound vars."
 
-### Hypothesis 3: nREPL Session Queueing
+Available primitives:
+- `future` - for async computation ✓
+- `promise` - for coordination ✓
+- `clojure.core.async` - full support ✓
+- `atom` - for thread-safe state ✓
 
-We switched to a persistent nREPL session for interrupt support. If evals on the same session are serialized, new evals queue behind the blocked one.
+### Root Cause Analysis - CONFIRMED
 
-**Evidence:** Behavior changed after adding persistent session.
+The MCP server main loop (lines 718-728) is **synchronous**:
 
-**Uncertainty:** nREPL session threading model not fully understood.
+```clojure
+(loop []
+  (when-let [line (.readLine reader)]  ; 1. Read request
+    (handle-request request)            ; 2. BLOCKS here during eval
+    (recur)))                           ; 3. Can't reach until step 2 completes
+```
 
-### Hypothesis 4: Interrupt Requires Live Connection
+When `handle-request` → `execute-eval` → `nrepl-eval` is called:
+1. It opens a TCP socket to nREPL
+2. Sends the eval request
+3. **Blocks reading responses** until "done" status received
+4. The main loop cannot read new stdin until this returns
 
-The interrupt may require the MCP server to be able to make a new TCP connection to nREPL, which it can't do if blocked in its read loop.
+When user cancels:
+1. Claude Code stops waiting for the MCP response
+2. MCP server process continues running, still blocked in socket read
+3. New requests from Claude Code arrive on stdin
+4. MCP server **cannot read them** because it's still in step 3
+5. Everything hangs
 
-**Evidence:** Interrupt hangs along with everything else.
+**Why concurrent detection doesn't help:** The detection code runs INSIDE `execute-eval`. But we never get to `execute-eval` for the new request because we can't even read it from stdin.
 
-**Uncertainty:** Haven't verified if the interrupt code path is even reached.
+**Why interrupt hangs:** The interrupt request arrives on stdin, but the main loop is blocked reading the previous request's nREPL response. The interrupt code path is never reached.
 
----
+### Hypotheses - Resolved
 
-## What We Don't Know
-
-1. **MCP cancellation semantics** - What happens at the protocol level when user cancels? Does the MCP server receive a signal?
-
-2. **nREPL session model** - How does nREPL handle multiple concurrent evals on the same session? Different sessions?
-
-3. **Babashka threading** - What threading primitives are available? Can we run interrupt handling on a separate thread?
-
-4. **Failure modes** - Are there other scenarios that lead to stuck state? (timeouts, agent crashes, network issues)
-
-5. **Recovery options** - Is there a way to forcibly reset nREPL session state? Kill specific evaluations?
+| Hypothesis | Status | Explanation |
+|------------|--------|-------------|
+| Single-threaded MCP server | **CONFIRMED** | Main loop blocks on nrepl-eval |
+| State cleared prematurely | **SECONDARY** | True, but not the root cause |
+| nREPL session queueing | **CONFIRMED** | Sessions serialize evals |
+| Interrupt requires live connection | **NOT THE ISSUE** | Issue is main loop can't read request |
 
 ---
 
@@ -138,77 +157,154 @@ The interrupt may require the MCP server to be able to make a new TCP connection
 
 ---
 
-## Proposed Approach
+## Proposed Solution
 
-### Phase 0: Research & Instrumentation
+### Architecture Change: Async Request Processing
 
-**Goal:** Understand the actual failure modes before changing anything.
+**Core idea:** Process eval requests in a `future` so the main loop stays responsive.
 
-**Tasks:**
-1. Add logging/tracing to MCP server to see exactly what happens during cancellation
-2. Research nREPL session/threading model
-3. Research Babashka concurrency options
-4. Document the exact sequence of events in each failure scenario
-5. Update this PRD with findings
+```
+Current (broken):
+  stdin → read → handle-request (BLOCKS) → respond → read next
 
-**Output:** Updated PRD with verified understanding and proposed solution.
+Proposed (fixed):
+  stdin → read → dispatch to future → read next (RESPONSIVE)
+                      ↓
+              handle-request
+                      ↓
+              respond (via atom + flush)
+```
 
-### Phase 1: Minimal Fix
+### Phase 1: Async Eval Processing (Minimal Fix)
 
-**Goal:** Make interrupt work reliably.
+**Goal:** Make the main loop non-blocking so interrupt requests can be processed.
 
-Scope TBD based on Phase 0 findings. Possible directions:
-- Separate thread/process for interrupt handling
-- Different nREPL session for control operations
-- Signal-based interrupt mechanism
+**Changes to `bin/mcp-server`:**
 
-### Phase 2: Robustness
+1. **Add response queue/atom:**
+   ```clojure
+   (def response-queue (atom []))
+   ```
 
-**Goal:** Prevent stuck states proactively.
+2. **Wrap blocking operations in `future`:**
+   ```clojure
+   (defn handle-tools-call-async [id {:keys [name arguments]}]
+     (future
+       (try
+         ;; existing tool dispatch logic
+         (let [result (case name ...)]
+           (swap! response-queue conj [:result id result]))
+         (catch Exception e
+           (swap! response-queue conj [:error id e])))))
+   ```
 
-Scope TBD. Possible directions:
-- Better state tracking that survives cancellation
-- Watchdog that detects stuck states
-- Automatic recovery mechanisms
+3. **Non-blocking main loop:**
+   ```clojure
+   (loop []
+     ;; Flush any pending responses first
+     (doseq [[type id payload] @response-queue]
+       (case type
+         :result (send-result id payload)
+         :error (send-error id ...)))
+     (reset! response-queue [])
 
-### Phase 3: Observability
+     ;; Non-blocking read with short timeout
+     (when (.ready reader)
+       (when-let [line (.readLine reader)]
+         (handle-request request)))  ; dispatch, don't block
 
-**Goal:** Always know what's happening.
+     (Thread/sleep 10)  ; prevent busy loop
+     (recur))
+   ```
 
-Scope TBD. Possible directions:
-- Health endpoint that works even when stuck
-- Out-of-band status mechanism
-- Better error messages throughout
+4. **Track running eval for interrupt:**
+   ```clojure
+   (def running-eval (atom nil))  ; {:future f :session-id sid}
+   ```
+
+**Why this works:**
+- Main loop can always read new requests (including interrupts)
+- Interrupt can cancel the `future` and send nREPL interrupt
+- Concurrent detection works because we can read the new request
+- Responses are serialized through the atom
+
+**Estimated scope:** ~50-100 lines of changes to `bin/mcp-server`
+
+### Phase 2: Robustness (Optional)
+
+After Phase 1 is working:
+
+1. **Watchdog timer** - Auto-interrupt evals that exceed timeout
+2. **Graceful shutdown** - Handle MCP server shutdown cleanly
+3. **Connection recovery** - Reconnect to nREPL if connection drops
+
+### Phase 3: Observability (Optional)
+
+1. **Health endpoint** - Out-of-band HTTP endpoint for status
+2. **Structured logging** - JSON logs for debugging
+3. **Metrics** - Eval counts, durations, errors
 
 ---
 
-## Testing Strategy
+## Implementation Notes
 
-Each phase must include:
+### Thread Safety Considerations
 
-1. **Unit tests** - Individual functions behave correctly
-2. **Integration tests** - Components work together
-3. **Failure injection** - Deliberately trigger failure modes
-4. **Manual verification** - Actually cancel evals, kill processes, etc.
+1. **Response serialization** - Only one thread writes to stdout at a time
+2. **State consistency** - Use atoms for all shared state
+3. **Exception handling** - Catch all exceptions in futures to prevent silent failures
 
-Specific test scenarios to cover:
-- Cancel eval at various points in execution
-- Multiple rapid cancellations
-- Cancel during agent startup vs. during agent work vs. during result collection
-- Interrupt when nothing is running
-- Interrupt when something is running
-- Interrupt when already stuck
-- Network issues between MCP server and nREPL
-- nREPL server restart while eval in progress
+### Testing Strategy
+
+1. **Unit test:** Verify async dispatch doesn't break normal eval flow
+2. **Integration test:** Cancel eval mid-execution, verify interrupt works
+3. **Stress test:** Rapid cancellation, multiple concurrent requests
+4. **Manual test:** Reproduce original failure scenario, verify fix
+
+### Rollback Plan
+
+Keep the old synchronous code path as a fallback (env var toggle) in case async approach introduces unexpected issues.
+
+---
+
+## Implementation Summary (Phase 1)
+
+**Version:** MCP Server v0.3.0 (async mode)
+
+**Changes to `bin/mcp-server`:**
+
+1. **Response queue atom** - Futures push responses here, main loop sends them
+2. **Running eval tracking** - Tracks current eval future for interrupt support
+3. **Thread-safe stdout** - Uses `locking` to prevent interleaved output
+4. **Async tool dispatch** - Blocking tools (`eval`, `create_session`) run in `future`
+5. **Non-blocking main loop** - Uses `.ready()` check, processes interrupts immediately
+6. **Enhanced interrupt** - Cancels running future AND sends nREPL interrupt
+
+**Key functions added:**
+- `queue-response!`, `queue-error!` - Queue responses from futures
+- `execute-tool-sync` - Synchronous tool execution
+- `blocking-tool?` - Identifies tools that need async handling
+- `flush-response-queue!` - Sends queued responses from main loop
+- `log-info` - Info-level logging for startup messages
+
+**Behavior change:**
+- Main loop now polls stdin with 10ms sleep (100 checks/sec)
+- Blocking evals run in background threads
+- Interrupt requests are processed immediately, even during long-running evals
 
 ---
 
 ## Related Work
 
-### Recently Completed
+### Recently Completed (This PR)
+- **Phase 0:** Research confirmed root cause (single-threaded blocking main loop)
+- **Phase 1:** Implemented async request processing with futures
+- MCP Server version bumped to 0.3.0
+
+### Previously Completed
 - Added persistent orchestrator nREPL session for interrupt support
 - Added `interrupt_eval(session_id="orchestrator")` tool
-- Added concurrent eval detection (not working as intended)
+- Added concurrent eval detection (now works with async processing)
 - Improved "busy" error message with guidance
 
 ### In Progress (Paused)
@@ -224,13 +320,20 @@ Specific test scenarios to cover:
 
 ---
 
-## Open Questions
+## Remaining Questions
 
-1. Should the MCP server be a long-running process, or spawn fresh per-request?
-2. Is there a way to make the orchestrator REPL stateless/restartable without losing agent state?
-3. Should we have a "supervisor" process that can restart the MCP server?
-4. Are there patterns from other MCP implementations we can learn from?
-5. What's the Claude Code team's recommended approach for long-running operations?
+1. **MCP cancellation semantics** - Does Claude Code send a signal when user cancels? (Probably not - likely just closes stdin or stops reading stdout)
+2. **Response ordering** - Does JSON-RPC require responses in request order? (Research suggests no, but verify)
+3. **Timeout behavior** - Should async evals auto-cancel after timeout, or just return timeout error while continuing?
+
+## Resolved Questions
+
+| Question | Answer |
+|----------|--------|
+| Should MCP server be long-running or per-request? | Long-running is fine if we fix the blocking issue |
+| Can we make orchestrator restartable? | Not needed if interrupt works |
+| Need supervisor process? | Not needed if interrupt works |
+| Claude Code team patterns? | Not needed - standard async pattern solves it |
 
 ---
 
