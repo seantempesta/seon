@@ -713,43 +713,140 @@
         ;; Prompts are typically plain text, not code
         (hover-code-block "prompt" prompt nil))])))
 
-;; TodoWrite tool - show todo count
-(defmethod render-tool-html "TodoWrite"
-  [_tool-name parsed-input _raw-input]
-  (let [{:keys [todos]} parsed-input
-        todo-count (count todos)
-        in-progress (count (filter #(= "in_progress" (:status %)) todos))
-        completed (count (filter #(= "completed" (:status %)) todos))]
-    [:span {:class "flex gap-2 flex-1 min-w-0"}
-     [:span {:class "text-log-tool font-medium shrink-0"} "TodoWrite"]
-     [:span {:class "text-text-200"} (str todo-count " todos")]
-     (when (pos? in-progress)
-       [:span {:class "text-warning"} (str in-progress " active")])
-     (when (pos? completed)
-       [:span {:class "text-success"} (str completed " done")])]))
+;;; ---------------------------------------------------------------------------
+;;; Task Tool Renderers (TaskCreate, TaskList, TaskUpdate, TaskGet)
+;;; ---------------------------------------------------------------------------
+;;
+;; Status indicators:
+;;   ✓ - completed (green)
+;;   ● - in_progress (amber)
+;;   ○ - pending (gray)
 
-(defmethod render-tool-hover "TodoWrite"
+(defn- task-status-indicator
+  "Return status indicator character and class for a task status."
+  [status]
+  (case (str status)
+    "completed" ["✓" "text-success"]
+    "in_progress" ["●" "text-warning"]
+    "pending" ["○" "text-text-400"]
+    ["?" "text-text-500"]))
+
+;; TaskList tool - show numbered task list with status
+(defmethod render-tool-html "TaskList"
+  [_tool-name _parsed-input _raw-input]
+  [:span {:class "flex gap-2 flex-1 min-w-0"}
+   [:span {:class "text-log-tool font-medium shrink-0"} "TaskList"]
+   [:span {:class "text-text-400"} "checking tasks..."]])
+
+(defmethod render-tool-hover "TaskList"
+  [_tool-name _parsed-input _raw-input]
+  (hover-card
+   [:div {:class "space-y-1"}
+    (hover-line "tool" "TaskList" "text-log-tool")
+    [:div {:class "text-text-400 text-2xs"} "Lists all tasks in the current session"]]))
+
+;; TaskCreate tool - show new task being added
+(defmethod render-tool-html "TaskCreate"
   [_tool-name parsed-input _raw-input]
-  (let [{:keys [todos]} parsed-input
-        todo-count (count todos)]
+  (let [{:keys [subject description]} parsed-input]
+    [:span {:class "flex gap-2 flex-1 min-w-0 items-start"}
+     [:span {:class "text-log-tool font-medium shrink-0"} "TaskCreate"]
+     [:span {:class "text-success font-medium shrink-0"} "+"]
+     [:span {:class "text-text-200 truncate"} (or subject (truncate description 60))]]))
+
+(defmethod render-tool-hover "TaskCreate"
+  [_tool-name parsed-input _raw-input]
+  (let [{:keys [subject description]} parsed-input]
     (hover-card
      [:div {:class "space-y-1"}
-      (hover-line "total" (str todo-count " todos"))
-      (when (seq todos)
-        [:div {:class "mt-2 space-y-0.5 max-h-32 overflow-y-auto"}
-         (for [{:keys [content status]} (take 8 todos)]
-           [:div {:class "flex gap-2 items-center text-2xs"}
-            [:span {:class (case status
-                             "completed" "text-success"
-                             "in_progress" "text-warning"
-                             "text-text-400")}
-             (case status
-               "completed" "done"
-               "in_progress" "active"
-               "pending")]
-            [:span {:class "text-text-200 truncate"} content]])
-         (when (> todo-count 8)
-           [:div {:class "text-text-500 text-2xs"} (str "... " (- todo-count 8) " more")])])])))
+      (hover-line "tool" "TaskCreate" "text-log-tool")
+      (hover-line "subject" subject "text-text-200")
+      (when description
+        [:div {:class "mt-2"}
+         [:div {:class "text-text-400 text-2xs mb-0.5"} "description:"]
+         [:div {:class "text-text-300 text-2xs max-h-24 overflow-y-auto whitespace-pre-wrap"}
+          description]])])))
+
+;; TaskUpdate tool - show status transitions
+(defmethod render-tool-html "TaskUpdate"
+  [_tool-name parsed-input _raw-input]
+  (let [{:keys [taskId status subject]} parsed-input
+        [indicator indicator-class] (when status (task-status-indicator status))]
+    [:span {:class "flex gap-2 flex-1 min-w-0 items-center"}
+     [:span {:class "text-log-tool font-medium shrink-0"} "TaskUpdate"]
+     [:span {:class "text-text-400 shrink-0"} (str "#" taskId)]
+     (when status
+       [:span {:class "flex items-center gap-1"}
+        [:span {:class "text-text-500"} "→"]
+        [:span {:class indicator-class} indicator]
+        [:span {:class indicator-class} status]])
+     (when subject
+       [:span {:class "text-text-300 truncate"} (str "\"" (truncate subject 40) "\"")])]))
+
+(defmethod render-tool-hover "TaskUpdate"
+  [_tool-name parsed-input _raw-input]
+  (let [{:keys [taskId status subject description]} parsed-input]
+    (hover-card
+     [:div {:class "space-y-1"}
+      (hover-line "tool" "TaskUpdate" "text-log-tool")
+      (hover-line "task ID" taskId)
+      (when status
+        (let [[indicator indicator-class] (task-status-indicator status)]
+          (hover-line "new status" [:span {:class indicator-class} (str indicator " " status)])))
+      (when subject
+        (hover-line "subject" subject "text-text-200"))
+      (when description
+        [:div {:class "mt-2"}
+         [:div {:class "text-text-400 text-2xs mb-0.5"} "description:"]
+         [:div {:class "text-text-300 text-2xs max-h-24 overflow-y-auto whitespace-pre-wrap"}
+          description]])])))
+
+;; TaskGet tool - show task retrieval
+(defmethod render-tool-html "TaskGet"
+  [_tool-name parsed-input _raw-input]
+  (let [{:keys [taskId]} parsed-input]
+    [:span {:class "flex gap-2 flex-1 min-w-0"}
+     [:span {:class "text-log-tool font-medium shrink-0"} "TaskGet"]
+     [:span {:class "text-text-400"} (str "#" taskId)]]))
+
+(defmethod render-tool-hover "TaskGet"
+  [_tool-name parsed-input _raw-input]
+  (let [{:keys [taskId]} parsed-input]
+    (hover-card
+     [:div {:class "space-y-1"}
+      (hover-line "tool" "TaskGet" "text-log-tool")
+      (hover-line "task ID" taskId)])))
+
+;;; ---------------------------------------------------------------------------
+;;; Legacy Todo Tool (TodoWrite)
+;;; ---------------------------------------------------------------------------
+
+;; TodoWrite tool - show full task list inline with status indicators
+;; Status: ✓ completed (green), ● in_progress (amber), ○ pending (gray)
+(defmethod render-tool-html "TodoWrite"
+  [_tool-name parsed-input _raw-input]
+  (let [{:keys [todos]} parsed-input]
+    [:span {:class "flex flex-col gap-0.5 flex-1 min-w-0"}
+     [:span {:class "text-log-tool font-medium"} "TodoWrite"]
+     (when (seq todos)
+       [:div {:class "ml-2 space-y-0.5"}
+        (for [[idx {:keys [content status]}] (map-indexed vector todos)]
+          [:div {:class "flex items-center gap-2 text-xs font-mono"}
+           [:span {:class "text-text-500 w-4 text-right"} (inc idx)]
+           [:span {:class (case status
+                            "completed" "text-success"
+                            "in_progress" "text-warning"
+                            "text-text-400")}
+            (case status
+              "completed" "✓"
+              "in_progress" "●"
+              "○")]
+           [:span {:class "text-text-200"} content]])])]))
+
+(defmethod render-tool-hover "TodoWrite"
+  [_tool-name _parsed-input _raw-input]
+  ;; No hover needed - full list shown inline
+  nil)
 
 ;; TOOL - Amber/yellow, uses tool-specific renderer via multimethod
 (defmethod view/render* [:html :agent.log/tool]
