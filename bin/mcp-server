@@ -33,7 +33,7 @@
 
 (def server-info
   {:name "seon"
-   :version "0.2.0"})
+   :version "0.3.0"})  ;; v0.3.0: Async request processing for MCP resilience
 
 ;; Track orchestrator eval state to detect concurrent calls.
 ;; When non-nil, contains {:started-at <ms> :code-preview <str>}
@@ -42,6 +42,36 @@
 ;; Persistent orchestrator nREPL session ID for interrupt support.
 ;; Cloned at startup so we can interrupt stuck orchestrator evals.
 (def orchestrator-nrepl-session (atom nil))
+
+;;; ---------------------------------------------------------------------------
+;;; Async Request Processing (Phase 1 - MCP Resilience)
+;;; ---------------------------------------------------------------------------
+;;
+;; The main loop must stay responsive to process interrupt requests even while
+;; a long-running eval is in progress. We achieve this by:
+;; 1. Processing tool calls in futures (background threads)
+;; 2. Queuing responses for the main loop to send
+;; 3. Using non-blocking stdin reads
+;;
+;; This allows interrupt_eval to be processed immediately even when another
+;; eval is blocked waiting for nREPL responses.
+
+;; Response queue - futures push responses here, main loop sends them
+;; Each entry is {:id <request-id> :result <mcp-result>} or {:id <request-id> :error <msg>}
+(def response-queue (atom []))
+
+;; Currently running eval future for interrupt support
+;; Contains {:future <future> :session-id <str> :request-id <id> :started-at <ms>} or nil
+(def running-eval (atom nil))
+
+;; Lock for stdout writes to prevent interleaved output from multiple threads
+(def stdout-lock (Object.))
+
+(defn log-info [& args]
+  "Log info message to stderr."
+  (binding [*out* *err*]
+    (apply println "[INFO]" (java.time.Instant/now) args)
+    (flush)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Tool Definitions
@@ -497,9 +527,19 @@
 (defn execute-interrupt-eval
   "Execute the interrupt_eval tool.
    Sends an interrupt to the nREPL session for the given Seon session.
+   Also cancels any running future in the MCP server.
    Supports session_id='orchestrator' to interrupt stuck orchestrator evals."
   [{:keys [session_id]}]
   (log-debug "execute-interrupt-eval session:" session_id)
+
+  ;; Cancel the running future if it matches this session
+  (when-let [running @running-eval]
+    (when (or (= session_id (:session-id running))
+              (and (= session_id "orchestrator")
+                   (= "orchestrator" (:session-id running))))
+      (log-info "Cancelling running future for session:" session_id)
+      (future-cancel (:future running))
+      (reset! running-eval nil)))
 
   ;; Handle orchestrator interrupt specially
   (if (= session_id "orchestrator")
@@ -607,12 +647,14 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn send-response
-  "Send a JSON-RPC response to stdout."
+  "Send a JSON-RPC response to stdout.
+   Thread-safe - uses stdout-lock to prevent interleaved output."
   [response]
   (let [json-str (json/generate-string response)]
     (log-debug "Sending response:" json-str)
-    (println json-str)
-    (flush)))
+    (locking stdout-lock
+      (println json-str)
+      (flush))))
 
 (defn send-result
   "Send a successful JSON-RPC result."
@@ -644,29 +686,78 @@
   (log-debug "Handling tools/list")
   (send-result id {:tools tools}))
 
+(defn- queue-response!
+  "Queue a response to be sent by the main loop."
+  [id result]
+  (swap! response-queue conj {:id id :result result}))
+
+(defn- queue-error!
+  "Queue an error response to be sent by the main loop."
+  [id message]
+  (swap! response-queue conj {:id id :error message}))
+
+(defn- execute-tool-sync
+  "Execute a tool synchronously. Returns MCP result or throws."
+  [name arguments]
+  (case name
+    "eval" (execute-eval arguments)
+    "create_session" (execute-create-session arguments)
+    "stop_session" (execute-stop-session arguments)
+    "interrupt_eval" (execute-interrupt-eval arguments)
+    "list_sessions" (execute-list-sessions arguments)
+    (throw (ex-info (str "Unknown tool: " name) {:tool name}))))
+
+(defn- blocking-tool?
+  "Returns true if this tool might block for a long time."
+  [name]
+  (contains? #{"eval" "create_session"} name))
+
 (defn handle-tools-call
-  "Handle tools/call request."
+  "Handle tools/call request.
+   Blocking tools (eval, create_session) run in a future so the main loop
+   stays responsive for interrupt requests."
   [id {:keys [name arguments]}]
   (log-debug "Handling tools/call name:" name "arguments:" (pr-str arguments))
-  (try
-    (let [result (case name
-                   "eval" (execute-eval arguments)
-                   "create_session" (execute-create-session arguments)
-                   "stop_session" (execute-stop-session arguments)
-                   "interrupt_eval" (execute-interrupt-eval arguments)
-                   "list_sessions" (execute-list-sessions arguments)
-                   (throw (ex-info (str "Unknown tool: " name) {:tool name})))]
-      (send-result id result))
 
-    (catch clojure.lang.ExceptionInfo e
-      (send-result id {:content [{:type "text"
-                                  :text (str "Error: " (ex-message e))}]
-                       :isError true}))
-    (catch Exception e
-      (log-error "Tool execution failed:" (.getMessage e))
-      (send-result id {:content [{:type "text"
-                                  :text (str "Error: " (.getMessage e))}]
-                       :isError true}))))
+  (if (blocking-tool? name)
+    ;; Run potentially blocking tools in a future
+    (let [session-id (or (:session_id arguments) enforced-session-id "unknown")
+          f (future
+              (try
+                (let [result (execute-tool-sync name arguments)]
+                  (queue-response! id result))
+                (catch clojure.lang.ExceptionInfo e
+                  (queue-response! id {:content [{:type "text"
+                                                  :text (str "Error: " (ex-message e))}]
+                                       :isError true}))
+                (catch Exception e
+                  (log-error "Tool execution failed:" (.getMessage e))
+                  (queue-response! id {:content [{:type "text"
+                                                  :text (str "Error: " (.getMessage e))}]
+                                       :isError true}))
+                (finally
+                  ;; Clear running-eval when done
+                  (reset! running-eval nil))))]
+      ;; Track the running eval for interrupt support
+      (reset! running-eval {:future f
+                            :session-id session-id
+                            :request-id id
+                            :started-at (System/currentTimeMillis)})
+      (log-debug "Started async tool execution for" name "session:" session-id))
+
+    ;; Run quick tools synchronously (interrupt, list, stop)
+    (try
+      (let [result (execute-tool-sync name arguments)]
+        (send-result id result))
+      (catch clojure.lang.ExceptionInfo e
+        (send-result id {:content [{:type "text"
+                                    :text (str "Error: " (ex-message e))}]
+                         :isError true}))
+      (catch Exception e
+        (log-error "Tool execution failed:" (.getMessage e))
+        (send-result id {:content [{:type "text"
+                                    :text (str "Error: " (.getMessage e))}]
+                         :isError true})))))
 
 (defn handle-notifications-initialized
   "Handle the initialized notification (no response needed)."
@@ -693,10 +784,29 @@
 ;;; Main Loop
 ;;; ---------------------------------------------------------------------------
 
-(defn -main
-  "Main entry point. Read JSON-RPC from stdin, process, write to stdout."
+(defn- flush-response-queue!
+  "Send all queued responses. Called from main loop."
   []
-  (log-debug "MCP Server starting...")
+  (let [responses @response-queue]
+    (when (seq responses)
+      (reset! response-queue [])
+      (doseq [{:keys [id result error]} responses]
+        (if error
+          (send-result id {:content [{:type "text" :text (str "Error: " error)}]
+                          :isError true})
+          (send-result id result))))))
+
+(defn -main
+  "Main entry point. Read JSON-RPC from stdin, process, write to stdout.
+
+   Uses non-blocking reads so the main loop can:
+   1. Process interrupt requests even while an eval is running
+   2. Flush queued responses from background futures
+
+   This fixes the MCP resilience issue where cancelling an eval would
+   brick the entire MCP server."
+  []
+  (log-info "MCP Server v0.3.0 starting (async mode)...")
 
   ;; Check that orchestrator is reachable and clone a persistent session
   (try
@@ -714,19 +824,39 @@
     (catch Exception e
       (log-error "Cannot connect to orchestrator on port" orchestrator-port ":" (.getMessage e))))
 
-  ;; Main message loop
+  ;; Main message loop - non-blocking to stay responsive
   (let [reader (java.io.BufferedReader. *in*)]
-    (loop []
-      (when-let [line (.readLine reader)]
-        (when-not (str/blank? line)
-          (try
-            (let [request (json/parse-string line true)]
-              (handle-request request))
-            (catch Exception e
-              (log-error "Parse error:" (.getMessage e) "line:" line)
-              (send-error nil -32700 "Parse error"))))
-        (recur))))
+    (loop [iterations 0]
+      ;; 1. Flush any pending responses from background futures
+      (flush-response-queue!)
 
-  (log-debug "MCP Server shutting down"))
+      ;; 2. Check for and process incoming requests (non-blocking)
+      (let [has-input (.ready reader)]
+        (when has-input
+          (if-let [line (.readLine reader)]
+            (when-not (str/blank? line)
+              (try
+                (let [request (json/parse-string line true)]
+                  (handle-request request))
+                (catch Exception e
+                  (log-error "Parse error:" (.getMessage e) "line:" line)
+                  (send-error nil -32700 "Parse error"))))
+            ;; readLine returned nil - EOF
+            (do
+              (log-info "Stdin closed, shutting down")
+              (System/exit 0)))))
+
+      ;; 3. Small sleep to prevent busy-looping (10ms = 100 checks/sec)
+      (Thread/sleep 10)
+
+      ;; 4. Periodic health logging (every ~30 seconds)
+      (when (and *debug* (zero? (mod iterations 3000)))
+        (log-debug "Main loop healthy, iterations:" iterations
+                   "running-eval:" (boolean @running-eval)
+                   "queued-responses:" (count @response-queue)))
+
+      (recur (inc iterations))))
+
+  (log-info "MCP Server shutting down"))
 
 (-main)
