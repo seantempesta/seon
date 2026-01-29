@@ -1,6 +1,6 @@
 # PRD: Observatory XTDB-Based Display
 
-**Status:** Complete (Phase 1b.10) - Core XTDB view working
+**Status:** Paused (Phase 1b.10 complete, 1b.13 in progress) - Pausing for MCP resilience work
 **Priority:** High
 **Branch:** feature/namespace-ui
 **Parent:** docs/prds/namespace-ui/prd.md
@@ -422,3 +422,158 @@ npm run css:watch   # Watch mode for development
 - `(reset)` in REPL restarts watcher cleanly
 - No orphaned processes after shutdown
 - CSS rebuilds when `.clj` files or `input.css` change
+
+---
+
+## Phase 1b.13: Consolidate Agent View Rendering to XTDB
+
+**Status:** In Progress
+**Problem:** Two separate rendering pipelines exist for agent tool calls - this is confusing and brittle.
+
+| Path | Location | Used When |
+|------|----------|-----------|
+| **XTDB messages** | `agents.clj` `render-tool-call` | `use-xtdb?` is true |
+| **Log file fallback** | `agent-views` multimethod | `use-xtdb?` is false |
+
+**Decision:** Migrate everything to XTDB. The log file fallback is brittle.
+
+### Tasks
+
+1. **Phase 1: Add multimethod dispatch + hover cards**
+   - Create multimethods in `agents.clj`: `render-tool-inline`, `render-tool-hover`, `render-tool-expanded`
+   - Port hover card helpers from views.clj: `hover-card`, `hover-line`, `hover-code-block`
+   - Implement methods for each tool type (REPL, Edit, Read, Grep, Bash, Task)
+   - Keep `render-tool-call` as orchestrator that calls multimethods
+   - Test: Same visual output, hover cards work
+
+2. **Phase 2: Improve loading/empty states**
+   - Show agent metadata from registry (ID, namespace, status, nREPL port) while waiting
+   - Show "Waiting for first message..." with pulse animation
+   - Show skeleton for content area
+
+3. **Phase 3: Remove log file fallback**
+   - Remove `log-line-component`, `paired-log-line-component`, `render-log-item`
+   - Remove type filter controls (log-file specific)
+   - Remove `use-xtdb?` conditional branches
+   - Remove `parse-log-line`, `tail-log-file` helpers
+
+4. **Phase 4: Clean up agent-views.clj**
+   - Keep `:agent.log/*` view types for list view rendering
+   - Remove `render-tool-html` multimethod (replaced by agents.clj version)
+   - Remove log-file specific helpers
+
+5. **Phase 5: Final cleanup**
+   - Change "REPL-TEST" back to "REPL"
+   - Remove debug logging
+   - Run full test suite
+   - Commit
+
+### Files to Modify
+
+| File | Action |
+|------|--------|
+| `src/seon/web/agents.clj` | Port hover cards, remove log file fallback |
+| `src/seon/ai/agent/views.clj` | Clean up unused log-file code |
+
+---
+
+## Phase 1b.14: Make launch-agent!! Interruptible
+
+**Status:** Planned
+**Problem:** When the orchestrator runs `launch-agent!!` and the MCP call is canceled (user presses Escape), the nREPL thread stays blocked waiting for the agent to complete. This locks up the orchestrator.
+
+### Root Cause Analysis (2026-01-29)
+
+1. `launch-agent!!` blocks on `(async/<!! result-ch)` at line 943 of `claude.clj`
+2. When MCP client aborts, the server-side eval continues running
+3. The nREPL thread stays blocked until agent completes or is killed
+4. New MCP evals may use the same nREPL session, queueing behind the blocked eval
+
+### Solution Design
+
+**Option A: Use interruptible blocking with timeout (Recommended)**
+- Replace `async/<!!` with `async/alt!!` that includes a interrupt check
+- Use a `future` with `.cancel(true)` support
+- When MCP abort comes in, the MCP server can interrupt the eval
+
+**Option B: Always non-blocking with polling**
+- `launch-agent!!` starts agent but doesn't block
+- Returns immediately with agent handle
+- Caller polls for completion
+- Less elegant API but inherently interruptible
+
+**Option C: Separate thread pool**
+- Run blocking agent waits in a separate thread pool
+- MCP evals use main pool
+- Prevents blocking main nREPL
+
+### Tasks
+
+1. **Research `clojure.java.process`** - Clojure 1.12 has new process API, may have better cancellation
+2. **Add interrupt support to launch-agent!!** - Track thread, support interruption
+3. **Update MCP server** - On abort, call interrupt API
+4. **Test cancellation** - Verify orchestrator stays responsive after cancel
+
+---
+
+## Phase 1b.15: Agent Visibility Improvements
+
+**Status:** Planned
+**Problem:** When an agent is "thinking" (waiting for Anthropic API response), there's no visibility. The UI shows "stuck" after 2 minutes of no log activity, but the agent may be legitimately waiting.
+
+### Issues Identified (2026-01-29)
+
+1. **"Stuck" detection is log-based** - No activity in log = stuck, even if agent is waiting for API
+2. **No token streaming** - Token counts only appear in final "result" message
+3. **No "thinking" indicator** - Can't tell if agent is working vs truly stuck
+4. **TCP monitoring via shell** - We use `lsof` to check connections, should be from Clojure
+
+### Proposed Features
+
+#### 1. "Thinking" Indicator in UI
+Show distinct states:
+- `● running` - Normal, recent activity
+- `● thinking` - No activity but process alive with open TCP connections
+- `● stuck` - No activity, no TCP connections, may be deadlocked
+- `● completed` - Agent finished
+
+#### 2. Token Streaming (if possible)
+The Claude CLI may emit streaming events we're not capturing. Research:
+- What events does Claude CLI emit during streaming?
+- Can we get partial token counts?
+- Can we show a "tokens received" counter?
+
+#### 3. Process Monitoring from Clojure
+Replace shell-based monitoring with JVM APIs:
+- `ProcessHandle` for process info (Clojure 1.12)
+- Java NIO for network connections
+- Or use `clojure.java.process` utilities
+
+#### 4. Activity Heartbeat
+Add heartbeat from agent process:
+- Agent periodically writes timestamp to shared atom/file
+- UI checks heartbeat freshness
+- More reliable than log activity
+
+### Tasks
+
+1. **Research Claude CLI streaming** - What events are emitted?
+2. **Implement process monitoring in Clojure** - Replace `lsof` with JVM APIs
+3. **Add "thinking" state to status computation** - Process alive + connections = thinking
+4. **Add heartbeat mechanism** - Agent writes periodic activity marker
+5. **Update UI** - Show thinking indicator, token progress if available
+
+### Research Questions
+
+- Does Claude CLI emit `content_block_delta` or similar events during streaming?
+- Can we monitor TCP connections from JVM without shelling out?
+- What's the best way to share state between agent process and orchestrator?
+
+---
+
+## Future Enhancements
+
+1. **Token totals in agent header** - Running total of input/output tokens
+2. **Cost estimation during run** - Approximate cost based on tokens so far
+3. **Cache hit indicator** - Show when prompt caching is active
+4. **Conversation tree view** - Visualize multi-turn conversation structure

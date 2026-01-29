@@ -672,3 +672,86 @@ For handlers that need per-request state (e.g., agent-id from path params), cach
 ### Note on HTTP Handlers
 
 Regular HTTP handlers (Ring functions) **don't need this pattern** - they're called directly through vars. This pattern is specifically for SSE handlers because `render-handler` captures the render function at creation time.
+
+## Numeric Limits and Defaults
+
+Avoid arbitrary "magic numbers" that cause bugs or confusion. Every limit should have a documented source.
+
+### Categories of Limits
+
+| Category | Example | Guideline |
+|----------|---------|-----------|
+| **External constraints** | API rate limits, protocol specs | Document the source |
+| **Domain bounds** | Percentages 0-100, IV rank 0-1 | Mathematical constraints - always add |
+| **Internal allocations** | Port ranges, batch sizes | Document why and how to override |
+| **Safety caps** | Max recursion, timeout | Document rationale, make configurable |
+
+### Rule: Don't Set Arbitrary Defaults for "No Limit"
+
+**Bad - arbitrary large number to mean "unlimited":**
+```clojure
+::max-turns (or max-turns 999999)  ; Magic number!
+```
+
+**Good - don't pass the flag when unlimited:**
+```clojure
+(cond-> base-args
+  max-turns (into ["--max-turns" (str max-turns)]))
+```
+
+### Rule: Document Limit Sources in Schemas
+
+```clojure
+;; GOOD - source documented
+(schema/register! ::nrepl-port
+  [:int {:min 7889 :max 7999
+         :description "nREPL port for agent sessions (reserved range)"}])
+
+(schema/register! ::iv-rank
+  [:double {:min 0.0 :max 1.0
+            :description "IV percentile rank (mathematical bound)"}])
+
+;; BAD - arbitrary, undocumented
+(schema/register! ::timeout
+  [:int {:min 1000 :max 300000}])  ; Why these numbers?
+```
+
+### When to Add `:max` Constraints
+
+✅ **Add `:max` when:**
+- External API/protocol enforces the limit
+- Mathematical/domain constraint exists (percentages, ratios)
+- Memory/performance safety requires it (document why)
+
+❌ **Don't add `:max` when:**
+- "Just to be safe" with no specific reason
+- The underlying system has no limit
+- To prevent hypothetical abuse (use rate limiting instead)
+
+### Pattern: Optional Unbounded Parameters
+
+When a parameter can legitimately be "unlimited":
+
+```clojure
+;; Schema: min only, no max
+(schema/register! ::max-results
+  [:int {:min 1
+         :description "Max results. Omit for unlimited."}])
+
+;; Function: handle omission gracefully
+(defn search [{::keys [max-results]}]
+  (cond-> (base-query)
+    max-results (add-limit max-results)))
+```
+
+### Batch Sizes and Tuning Parameters
+
+Document the rationale and how to override:
+
+```clojure
+(def ^:const xtdb-batch-size
+  "Documents per XTDB transaction.
+   Tuned for memory vs latency tradeoff.
+   Override for bulk loads or constrained envs."
+  1000)
+```

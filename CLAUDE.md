@@ -123,6 +123,15 @@ eval(session_id="orchestrator", timeout_ms=600000,
 
 Set `timeout_ms=600000` (10 min) to avoid premature timeouts on blocking calls.
 
+**Emergency Escape Hatch:** If the orchestrator REPL gets stuck (e.g., blocking on a dead agent):
+```
+interrupt_eval(session_id="orchestrator")
+```
+This interrupts the running eval and unblocks the REPL. Use when:
+- You cancelled an MCP eval but the REPL is still blocked
+- An agent hit a limit and `launch-agent!!` won't return
+- Any blocking call that won't complete
+
 **Returns result directly when agent completes:**
 ```clojure
 {::claude/result-text "## Summary\n\n..."

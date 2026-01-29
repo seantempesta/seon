@@ -14,6 +14,7 @@
    [clojure.java.io :as io]
    [clojure.java.shell]
    [clojure.pprint]
+   [clojure.repl :refer [doc source apropos dir]]
    [clojure.spec.alpha :as s]
    [clojure.string]
    [clojure.tools.namespace.repl :as repl]
@@ -180,6 +181,75 @@
   [session-id]
   ((requiring-resolve 'seon.ai.claude/agent-messages)
    #:seon.ai{:session-id session-id}))
+
+(defn agent-health
+  "Get comprehensive health status for an agent.
+
+  Returns a map with:
+    :session-id      - The agent session ID
+    :status          - Current status (:running, :completed, :failed, etc.)
+    :process-alive?  - Whether the Java Process is still alive
+    :result-subtype  - Why it failed (\"error_max_turns\", etc.) if applicable
+    :last-activity   - When the agent last had activity
+    :idle-seconds    - Seconds since last activity
+    :running-seconds - Total time the agent has been running
+    :diagnosis       - Human-readable health assessment
+
+  Example: (user/agent-health \"a1b2\")"
+  [session-id]
+  (let [;; Get running agent info
+        running-agents ((requiring-resolve 'seon.ai.claude/agents) {})
+        running (first (filter #(= session-id (:seon.ai/session-id %)) running-agents))
+        ;; Get result info from DB
+        result ((requiring-resolve 'seon.ai.claude/get-result)
+                #:seon.ai{:session-id session-id})
+        status (:seon.ai.claude/agent-status result)
+        now (java.time.Instant/now)]
+    (if running
+      ;; Running agent - compute health metrics
+      (let [last-activity (:seon.ai.claude/last-activity-at running)
+            process-alive? (:seon.ai.claude/process-alive? running)
+            idle-ms (when last-activity
+                      (- (.toEpochMilli now) (.toEpochMilli last-activity)))
+            idle-seconds (when idle-ms (/ idle-ms 1000.0))
+            diagnosis (cond
+                        (not process-alive?)
+                        "STUCK: Process is dead but status shows running"
+
+                        (and idle-seconds (> idle-seconds 300))
+                        (str "WARNING: No activity for " (int idle-seconds) " seconds")
+
+                        (and idle-seconds (> idle-seconds 60))
+                        (str "SLOW: Idle for " (int idle-seconds) " seconds")
+
+                        :else "HEALTHY: Agent is active")]
+        {:session-id session-id
+         :status (:seon.ai.claude/agent-status running)
+         :process-alive? process-alive?
+         :last-activity last-activity
+         :idle-seconds idle-seconds
+         :diagnosis diagnosis})
+      ;; Completed/failed agent - get info from result
+      (cond-> {:session-id session-id
+               :status status
+               :process-alive? false
+               :diagnosis (case status
+                            :completed "DONE: Agent completed successfully"
+                            :failed "FAILED: Agent encountered an error"
+                            :interrupted "INTERRUPTED: Agent was stopped"
+                            :terminated "TERMINATED: Agent process died"
+                            "UNKNOWN: Agent not found")}
+        (:seon.ai.claude/result-subtype result)
+        (assoc :result-subtype (:seon.ai.claude/result-subtype result))
+
+        (:seon.ai.claude/duration-ms result)
+        (assoc :running-seconds (/ (:seon.ai.claude/duration-ms result) 1000.0))
+
+        (:seon.ai.claude/cost-usd result)
+        (assoc :cost-usd (:seon.ai.claude/cost-usd result))
+
+        (:seon.ai.claude/num-turns result)
+        (assoc :num-turns (:seon.ai.claude/num-turns result))))))
 
 ;; ========================================
 ;; AI Research (use when stuck!)
