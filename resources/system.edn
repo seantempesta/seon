@@ -34,6 +34,16 @@
                   :prod #or [#env DATALEVIN_ROOT "data/datalevin"]}
   :opts {:idle-timeout 300000}}
 
+ ;; Datalevin Connection Manager (Phase 0.2)
+ ;; Manages client connections to the Datalevin server with:
+ ;; - Connection caching per namespace
+ ;; - Lazy database creation on first connection
+ ;; - TTL-based cleanup of idle connections
+ :seon/connection-manager
+ {:server #ig/ref :seon/datalevin-server
+  :ttl-ms #or [#env DATALEVIN_CONN_TTL_MS 300000]           ; 5 minutes
+  :cleanup-interval-ms #or [#env DATALEVIN_CLEANUP_MS 60000]}
+
  ;; Python Bridge (libpython-clj) - DISABLED
  ;; NOTE: Python code moved to src/seon/_python_disabled
  ;; To re-enable, restore the python directory and uncomment this section
