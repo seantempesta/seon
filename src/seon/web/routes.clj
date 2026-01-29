@@ -28,8 +28,7 @@
    ;; Agent observatory routes
    [:get "/agents"]                #'agents/agents-page
    [:post "/agents"]               #'agents/agents-sse
-   [:post "/api/agents/toggle-completed"] #'agents/toggle-completed-handler
-   [:post "/api/agents/type-filter"] #'agents/type-filter-handler})
+   [:post "/api/agents/toggle-completed"] #'agents/toggle-completed-handler})
 
 ;; Dynamic routes with path parameters
 ;; Use var references (#') so handlers resolve to current fn after reload

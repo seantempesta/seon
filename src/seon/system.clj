@@ -31,7 +31,8 @@
             [seon.db.schema :as schema]
             ;; Load component namespaces for their ig/init-key methods
             [seon.web.tailwind]
-            [seon.db.datalevin.server]))
+            [seon.db.datalevin.server]
+            [seon.db.datalevin.conn]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; XTDB Node Component

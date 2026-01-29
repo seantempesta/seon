@@ -57,13 +57,14 @@
                   [:string {:min 1
                             :description "Working directory for CLI process"}])
 
+;; No arbitrary max limits - let Anthropic API limits be the constraint
 (schema/register! ::max-turns
-                  [:int {:min 1 :max 1000
-                         :description "Maximum conversation turns"}])
+                  [:int {:min 1
+                         :description "Maximum conversation turns (optional - no limit if not set)"}])
 
 (schema/register! ::max-budget-usd
-                  [:double {:min 0.0 :max 100.0
-                            :description "Cost limit in USD"}])
+                  [:double {:min 0.0
+                            :description "Cost limit in USD (optional - no limit if not set)"}])
 
 (schema/register! ::allowed-tools
                   [:vector {:description "Tool whitelist"}
@@ -101,6 +102,13 @@
 (def ^:const default-permission-mode
   "Default permission mode."
   "default")
+
+;; REMOVED: default-max-turns
+;; We no longer set a default max-turns. The only limits should be:
+;; 1. Anthropic API limits (tokens, rate limits)
+;; 2. Explicit cost limits set by user (::max-budget-usd)
+;; The Claude CLI's internal default of 100 turns is overridden by passing
+;; a very high value only when launching agents (see seon.ai.claude/launch-agent!)
 
 ;;; ---------------------------------------------------------------------------
 ;;; CLI Argument and Environment Construction
@@ -140,6 +148,7 @@
       chrome
       (conj "--chrome")
 
+      ;; Only pass max-turns if explicitly set - no arbitrary defaults
       max-turns
       (into ["--max-turns" (str max-turns)])
 

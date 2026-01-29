@@ -267,12 +267,14 @@
      (none - empty map for consistency)
 
    Response keys (vector of):
-     ::session-id    - Agent session ID
-     ::namespace     - Agent namespace
-     ::provider      - Provider keyword (:claude, :gemini)
-     ::agent-status  - Current status (:running, :completed, :failed, :terminated)
-     ::nrepl-port    - Optional. nREPL port for direct REPL access
-     ::ai-session-id - Optional. AI conversation session ID
+     ::session-id       - Agent session ID
+     ::namespace        - Agent namespace
+     ::provider         - Provider keyword (:claude, :gemini)
+     ::agent-status     - Current status (:running, :completed, :failed, :terminated)
+     ::nrepl-port       - Optional. nREPL port for direct REPL access
+     ::ai-session-id    - Optional. AI conversation session ID
+     ::last-activity-at - Optional. Instant of last message received
+     ::process-alive?   - Optional. Whether the Java Process is still alive
 
    Example:
      (agents {})
@@ -280,7 +282,9 @@
      ;;      :seon.ai.agent/namespace \"seon.trading\"
      ;;      :seon.ai.agent/provider :claude
      ;;      :seon.ai.agent/agent-status :running
-     ;;      :seon.ai.agent/nrepl-port 7889}]"
+     ;;      :seon.ai.agent/nrepl-port 7889
+     ;;      :seon.ai.agent/process-alive? true
+     ;;      :seon.ai.agent/last-activity-at #inst \"...\"}]"
   [_request]
   (vec (for [[id handle] @agent-registry]
          (cond-> {::session-id id
@@ -290,7 +294,11 @@
            (::nrepl-port handle)
            (assoc ::nrepl-port (::nrepl-port handle))
            (::ai-session-id handle)
-           (assoc ::ai-session-id (::ai-session-id handle))))))
+           (assoc ::ai-session-id (::ai-session-id handle))
+           (::last-activity-at handle)
+           (assoc ::last-activity-at @(::last-activity-at handle))
+           (::process handle)
+           (assoc ::process-alive? (.isAlive ^Process (::process handle)))))))
 
 (defn get-agent
   "Get an agent handle by session ID.

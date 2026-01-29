@@ -393,7 +393,11 @@
       (assoc ::cache-creation-tokens (:cache_creation_input_tokens usage))
 
       (:cache_read_input_tokens usage)
-      (assoc ::cache-read-tokens (:cache_read_input_tokens usage)))))
+      (assoc ::cache-read-tokens (:cache_read_input_tokens usage))
+
+      ;; Result subtype (success, error_max_turns, etc.)
+      (:subtype sdk-msg)
+      (assoc ::result-subtype (:subtype sdk-msg)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Provider Multimethod Implementations (seon.ai.agent)
@@ -662,16 +666,21 @@
           mcp-config (build-agent-mcp-config id)
 
           ;; 5. Spawn Claude Code with configured MCP
+          ;; NOTE: Despite docs claiming "no default limit", Claude CLI v2.1.x appears to
+          ;; have an undocumented 100 turn limit. We override with 10000 to effectively
+          ;; disable it. The real constraints should be API token limits and cost budgets.
+          ;; TODO: File bug report / verify with Anthropic about actual default behavior.
+          effective-max-turns (or max-turns 10000)
           status-atom (atom :running)
           {:keys [process stdin stdout]}
-          (sdk/spawn-claude-code {::sdk/model (or model sdk/default-model)
-                                  ::sdk/permission-mode (or permission-mode "bypassPermissions")
-                                  ::sdk/max-turns max-turns
-                                  ::sdk/max-budget-usd max-budget-usd
-                                  ::sdk/allowed-tools allowed-tools
-                                  ::sdk/disallowed-tools disallowed-tools
-                                  ::sdk/mcp-servers mcp-config
-                                  ::sdk/chrome chrome})
+          (sdk/spawn-claude-code (cond-> {::sdk/model (or model sdk/default-model)
+                                          ::sdk/permission-mode (or permission-mode "bypassPermissions")
+                                          ::sdk/mcp-servers mcp-config
+                                          ::sdk/max-turns effective-max-turns}
+                                   max-budget-usd (assoc ::sdk/max-budget-usd max-budget-usd)
+                                   allowed-tools (assoc ::sdk/allowed-tools allowed-tools)
+                                   disallowed-tools (assoc ::sdk/disallowed-tools disallowed-tools)
+                                   chrome (assoc ::sdk/chrome chrome)))
 
           messages-ch (chan 100)
           result-ch (chan 1)
@@ -692,7 +701,10 @@
                          (catch Exception e
                            (log/debug "Error closing stdout on process exit" {:error (str e)}))))))))
 
-          ;; 6. Start reader that persists messages and updates status
+          ;; 6. Track last activity time for stuck detection
+          last-activity-at (atom (Instant/now))
+
+          ;; 7. Start reader that persists messages and updates status
           claude-session-mapped? (atom false)
           _reader (future
                     (try
@@ -700,6 +712,8 @@
                         (loop []
                           (when-let [line (.readLine rdr)]
                             (when-not (str/blank? line)
+                              ;; Update last activity time for stuck detection
+                              (reset! last-activity-at (Instant/now))
                               (let [msg (sdk/parse-line line)
                                     msg-type (:type msg)
                                     claude-session-id (:session_id msg)]
@@ -859,6 +873,8 @@
                   ;; Claude-specific fields
                   ::agent/nrepl-port nrepl-port
                   ::agent/ai-session-id ai-session-id
+                  ::agent/last-activity-at last-activity-at
+                  ::agent/process process
                   ::result-ch result-ch
                   ;; Legacy aliases for backwards compatibility
                   ::ai/session-id id
@@ -989,27 +1005,35 @@
      (none - empty map for consistency)
 
    Response keys (vector of):
-     ::ai/session-id  - 4-char hex session ID
-     ::ai/namespace   - Agent namespace
-     ::nrepl-port     - nREPL port for direct REPL access
-     ::agent-status   - Current status (:running, :completed, :failed, :terminated)
+     ::ai/session-id    - 4-char hex session ID
+     ::ai/namespace     - Agent namespace
+     ::nrepl-port       - nREPL port for direct REPL access
+     ::agent-status     - Current status (:running, :completed, :failed, :terminated)
+     ::last-activity-at - Instant of last message received
+     ::process-alive?   - Whether the Java Process is still alive
 
    Example:
      (agents {})
      ;; => [{:seon.ai/session-id \"a1b2\"
      ;;      :seon.ai/namespace \"seon.trading\"
      ;;      :seon.ai.claude/nrepl-port 7889
-     ;;      :seon.ai.claude/agent-status :running}]
+     ;;      :seon.ai.claude/agent-status :running
+     ;;      :seon.ai.claude/process-alive? true
+     ;;      :seon.ai.claude/last-activity-at #inst \"...\"}]
 
    Note: For cross-provider agent listing, use seon.ai.agent/agents instead."
   [_request]
   (->> (agent/agents {})
        (filter #(= :claude (::agent/provider %)))
        (mapv (fn [a]
-               {::ai/session-id (::agent/session-id a)
-                ::ai/namespace (::agent/namespace a)
-                ::nrepl-port (::agent/nrepl-port a)
-                ::agent-status (::agent/agent-status a)}))))
+               (cond-> {::ai/session-id (::agent/session-id a)
+                        ::ai/namespace (::agent/namespace a)
+                        ::nrepl-port (::agent/nrepl-port a)
+                        ::agent-status (::agent/agent-status a)}
+                 (::agent/last-activity-at a)
+                 (assoc ::last-activity-at (::agent/last-activity-at a))
+                 (some? (::agent/process-alive? a))
+                 (assoc ::process-alive? (::agent/process-alive? a)))))))
 
 (defn interrupt!
   "Interrupt a Claude agent.
@@ -1092,17 +1116,19 @@
      ::ai/session-id - Required. The 4-char hex agent session ID
 
    Response keys:
-     ::result-text   - The final result text (if completed successfully)
-     ::agent-status  - Current status (:running, :completed, :failed, :terminated, :interrupted)
-     ::cost-usd      - Total cost in USD (if available)
-     ::duration-ms   - Duration in milliseconds (if completed)
-     ::num-turns     - Number of conversation turns (counted from assistant messages)
-     ::error         - Error message if agent not found
+     ::result-text    - The final result text (if completed successfully)
+     ::agent-status   - Current status (:running, :completed, :failed, :terminated, :interrupted)
+     ::result-subtype - Result subtype (\"success\", \"error_max_turns\", etc.) if available
+     ::cost-usd       - Total cost in USD (if available)
+     ::duration-ms    - Duration in milliseconds (if completed)
+     ::num-turns      - Number of conversation turns (counted from assistant messages)
+     ::error          - Error message if agent not found
 
    Example:
      (get-result {::ai/session-id \"d465\"})
      ;; => {::result-text \"## Summary\\n\\n**REPL connection verified...**\"
      ;;     ::agent-status :completed
+     ;;     ::result-subtype \"success\"
      ;;     ::cost-usd 0.23
      ;;     ::duration-ms 15185
      ;;     ::num-turns 3}
@@ -1143,11 +1169,12 @@
                                                ended-at
                                                (.toInstant ended-at))]
                                 (- (.toEpochMilli end-inst) (.toEpochMilli start-inst))))
-                ;; Get result message if completed
-                result-msg (when (= :completed status)
+                ;; Get result message if completed (or failed - to get subtype)
+                result-msg (when (#{:completed :failed} status)
                              (first ((requiring-resolve 'seon.db.node/q)
                                      node
-                                     "SELECT seon$ai$content FROM ai_messages
+                                     "SELECT seon$ai$content, seon$ai$claude$result_subtype as subtype
+                                      FROM ai_messages
                                       WHERE seon$ai$session_id = ?
                                       AND seon$ai$claude$message_type = 'result'"
                                      [ai-session-id])))
@@ -1170,7 +1197,10 @@
               (assoc ::num-turns (int (:cnt turn-count)))
 
               (::ai/content result-msg)
-              (assoc ::result-text (::ai/content result-msg)))))))))
+              (assoc ::result-text (::ai/content result-msg))
+
+              (:subtype result-msg)
+              (assoc ::result-subtype (:subtype result-msg)))))))))
 
 (defn agent-messages
   "Get recent messages from an agent session.
