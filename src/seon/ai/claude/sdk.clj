@@ -81,6 +81,10 @@
                   [:string {:min 1
                             :description "Path to settings JSON file for hooks"}])
 
+;; Chrome integration for browser automation
+(schema/register! ::chrome
+                  [:boolean {:description "Enable Claude in Chrome integration for browser automation"}])
+
 ;;; ---------------------------------------------------------------------------
 ;;; Configuration Constants
 ;;; ---------------------------------------------------------------------------
@@ -115,10 +119,11 @@
      ::disallowed-tools - Vector of disallowed tool names
      ::mcp-servers     - MCP server configuration map
      ::settings-path   - Path to settings JSON file
+     ::chrome          - Enable Chrome integration for browser automation
 
    Returns vector of CLI arguments."
   [{::keys [model permission-mode max-turns max-budget-usd
-            allowed-tools disallowed-tools mcp-servers cli-command settings-path]}]
+            allowed-tools disallowed-tools mcp-servers cli-command settings-path chrome]}]
   (let [cmd (or cli-command default-cli-command)
         model (or model default-model)
         perm (or permission-mode default-permission-mode)
@@ -131,6 +136,10 @@
              "--permission-mode" perm
              "--setting-sources" "project,local"
              "--settings" settings]
+      ;; Enable Chrome integration for browser automation
+      chrome
+      (conj "--chrome")
+
       max-turns
       (into ["--max-turns" (str max-turns)])
 

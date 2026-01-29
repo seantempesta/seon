@@ -646,7 +646,7 @@
       (hover-line "lines" (str line-count))
       (hover-code-block "content preview" content lang)])))
 
-;; mcp__seon__eval - show Clojure code
+;; mcp__seon__eval - show Clojure code (displayed as "REPL" for friendlier UI)
 (defmethod render-tool-html "mcp__seon__eval"
   [_tool-name parsed-input _raw-input]
   (let [{:keys [code timeout_ms]} parsed-input
@@ -657,21 +657,23 @@
                   (str (subs first-line 0 57) "...")
                   first-line)]
     [:span {:class "flex gap-2 flex-1 min-w-0 items-start"}
-     [:span {:class "text-eval font-medium shrink-0"} "eval"]
+     [:span {:class "text-eval font-medium shrink-0"} "REPL"]
      (if multi-line?
        [:details {:class "text-text-200 min-w-0 flex-1" :data-preserve-attr "open"}
         [:summary {:class "cursor-pointer list-none"}
          [:code {:class "language-clojure text-eval/70"} preview]
          [:span {:class "text-info ml-1 text-2xs"} (str (count code-lines) " lines")]]
-        [:pre {:class "pl-2 border-l-2 border-eval/30 mt-1"}
+        [:pre {:class "pl-2 border-l-2 border-eval/30 mt-1 font-mono"}
          [:code {:class "language-clojure"}
           (if (> (count code-lines) code-preview-lines)
             [:span
              (str/join "\n" (take code-preview-lines code-lines))
-             [:span {:class "text-info text-2xs block mt-1"}
-              (str "... " (- (count code-lines) code-preview-lines) " more lines")]]
+             [:details {:class "inline" :data-preserve-attr "open"}
+              [:summary {:class "cursor-pointer list-none text-info text-2xs block mt-1"}
+               (str "... " (- (count code-lines) code-preview-lines) " more lines ▸")]
+              [:span {:class "block"} (str/join "\n" (drop code-preview-lines code-lines))]]]
             code)]]]
-       [:code {:class "language-clojure text-eval/70 truncate"} preview])
+       [:code {:class "language-clojure text-eval/70 truncate font-mono"} preview])
      (when timeout_ms
        [:span {:class "text-text-500 text-2xs shrink-0"} (str timeout_ms "ms")])]))
 
@@ -681,6 +683,7 @@
         code-lines (str/split-lines (or code ""))]
     (hover-card
      [:div {:class "space-y-1"}
+      (hover-line "tool" "REPL (mcp__seon__eval)" "text-eval")
       (when session_id (hover-line "session" session_id))
       (hover-line "lines" (str (count code-lines)))
       (when timeout_ms (hover-line "timeout" (str timeout_ms "ms")))

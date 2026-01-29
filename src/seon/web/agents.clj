@@ -162,19 +162,21 @@
 
 (defn- truncate-lines
   "Truncate content to max lines for display.
-   Returns {:truncated? bool :preview string :hidden-lines int}."
+   Returns {:truncated? bool :preview string :hidden-lines int :full-content string}."
   [content max-lines]
   (if (str/blank? content)
-    {:truncated? false :preview content :hidden-lines 0}
+    {:truncated? false :preview content :hidden-lines 0 :full-content content}
     (let [lines (str/split-lines content)
           total (count lines)]
       (if (> total max-lines)
         {:truncated? true
          :preview (str/join "\n" (take max-lines lines))
-         :hidden-lines (- total max-lines)}
+         :hidden-lines (- total max-lines)
+         :full-content content}
         {:truncated? false
          :preview content
-         :hidden-lines 0}))))
+         :hidden-lines 0
+         :full-content content}))))
 
 (defn- detect-language
   "Detect syntax highlighting language from file path or tool name."
@@ -194,6 +196,13 @@
     (= tool-name "Bash") "bash"
     (= tool-name "mcp__seon__eval") "clojure"
     :else nil))
+
+(defn- friendly-tool-name
+  "Return a user-friendly display name for a tool."
+  [tool-name]
+  (case tool-name
+    "mcp__seon__eval" "REPL"
+    tool-name))
 
 (defn- basename
   "Extract filename from path."
@@ -221,9 +230,11 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- render-tool-call
-  "Render a single tool call with its result as a collapsible block."
+  "Render a single tool call with its result as a collapsible block.
+   Uses <details> elements for expandable sections that can be toggled."
   [{:keys [id name input result]} timestamp]
   (let [file-path (or (:file-path input) (:file_path input))
+        display-name (friendly-tool-name name)
         ;; Truncate paths to project-relative for cleaner display
         target (or (truncate-path file-path)
                    (:pattern input)
@@ -248,7 +259,10 @@
         has-error? (or (:is_error result)
                        (str/includes? (str result-text) "<tool_use_error>"))
         lang (detect-language file-path name)
-        {:keys [truncated? preview hidden-lines]} (truncate-lines result-text max-preview-lines)]
+        {:keys [truncated? preview hidden-lines full-content]} (truncate-lines result-text max-preview-lines)
+        ;; For REPL calls, show code input as well
+        is-repl? (= name "mcp__seon__eval")
+        repl-code (:code input)]
     [:div {:class "mb-2"}
      ;; Tool call - expanded by default like Claude Code
      [:details {:class "group" :open true :data-preserve-attr "open"}
@@ -258,8 +272,8 @@
        [:span {:class "text-text-400 group-open:rotate-90 transition-transform"} "▶"]
        ;; Timestamp
        [:span {:class "text-text-500"} (format-local-time timestamp)]
-       ;; Tool name
-       [:span {:class "text-log-tool font-medium"} name]
+       ;; Tool name (friendly name for REPL)
+       [:span {:class (if is-repl? "text-eval font-medium" "text-log-tool font-medium")} display-name]
        ;; Target
        (when target
          [:span {:class "text-text-200 truncate max-w-md"} target])
@@ -268,37 +282,61 @@
         (if has-error? "✗" "✓")]]
       ;; Expanded content
       [:div {:class "ml-6 mt-1 pl-3 border-l-2 border-base-700"}
+       ;; For REPL calls, show the code input
+       (when (and is-repl? repl-code (not (str/blank? repl-code)))
+         (let [{:keys [truncated? preview hidden-lines full-content]} (truncate-lines repl-code max-preview-lines)]
+           [:div {:class "mb-2"}
+            [:pre {:class "bg-eval/10 p-2 rounded text-2xs overflow-x-auto font-mono"}
+             [:code {:class "language-clojure"}
+              preview
+              (when truncated?
+                ;; Expandable "... N more lines" using nested details
+                [:details {:class "inline" :data-preserve-attr "open"}
+                 [:summary {:class "cursor-pointer list-none text-info hover:text-info/80"}
+                  (str "... " hidden-lines " more lines ▸")]
+                 [:span {:class "block mt-1"} (subs full-content (count preview))]])]]]))
        ;; Input (for Edit, show old/new strings)
        (when (= name "Edit")
          (let [old-str (:old_string input)
                new-str (:new_string input)]
            [:div {:class "mb-2 space-y-1"}
             (when (and old-str (not (str/blank? old-str)))
-              [:pre {:class "bg-error/10 p-2 rounded text-2xs overflow-x-auto"}
-               [:code {:class (when lang (str "language-" lang))}
-                [:span {:class "text-error font-medium"} "- "]
-                (let [{:keys [truncated? preview hidden-lines]} (truncate-lines old-str max-preview-lines)]
-                  [:span
-                   preview
-                   (when truncated?
-                     [:span {:class "text-text-500 block"} (str "... " hidden-lines " more lines")])])]])
+              (let [{:keys [truncated? preview hidden-lines full-content]} (truncate-lines old-str max-preview-lines)]
+                [:pre {:class "bg-error/10 p-2 rounded text-2xs overflow-x-auto font-mono"}
+                 [:code {:class (when lang (str "language-" lang))}
+                  [:span {:class "text-error font-medium"} "- "]
+                  preview
+                  (when truncated?
+                    [:details {:class "inline" :data-preserve-attr "open"}
+                     [:summary {:class "cursor-pointer list-none text-info hover:text-info/80"}
+                      (str "... " hidden-lines " more lines ▸")]
+                     [:span {:class "block mt-1"} (subs full-content (count preview))]])]]))
             (when (and new-str (not (str/blank? new-str)))
-              [:pre {:class "bg-success/10 p-2 rounded text-2xs overflow-x-auto"}
-               [:code {:class (when lang (str "language-" lang))}
-                [:span {:class "text-success font-medium"} "+ "]
-                (let [{:keys [truncated? preview hidden-lines]} (truncate-lines new-str max-preview-lines)]
-                  [:span
-                   preview
-                   (when truncated?
-                     [:span {:class "text-text-500 block"} (str "... " hidden-lines " more lines")])])]])]))
-       ;; Result preview
+              (let [{:keys [truncated? preview hidden-lines full-content]} (truncate-lines new-str max-preview-lines)]
+                [:pre {:class "bg-success/10 p-2 rounded text-2xs overflow-x-auto font-mono"}
+                 [:code {:class (when lang (str "language-" lang))}
+                  [:span {:class "text-success font-medium"} "+ "]
+                  preview
+                  (when truncated?
+                    [:details {:class "inline" :data-preserve-attr "open"}
+                     [:summary {:class "cursor-pointer list-none text-info hover:text-info/80"}
+                      (str "... " hidden-lines " more lines ▸")]
+                     [:span {:class "block mt-1"} (subs full-content (count preview))]])]]))]))
+       ;; Result preview (shown for all tools, styled consistently)
        (when (and result-text (not (str/blank? result-text)))
-         [:pre {:class (str "bg-base-900 p-2 rounded text-2xs overflow-x-auto "
-                            (when has-error? "border border-error/30"))}
-          [:code {:class (when lang (str "language-" lang))}
-           preview
-           (when truncated?
-             [:span {:class "text-text-500 block mt-1"} (str "... " hidden-lines " more lines")])]])]]]))
+         [:div {:class "mt-1"}
+          (when is-repl?
+            [:span {:class "text-text-500 text-2xs block mb-1"} "→ result:"])
+          [:pre {:class (str "bg-base-900 p-2 rounded text-2xs overflow-x-auto font-mono "
+                             (when has-error? "border border-error/30"))}
+           [:code {:class (when lang (str "language-" lang))}
+            preview
+            (when truncated?
+              ;; Expandable result section
+              [:details {:class "inline" :data-preserve-attr "open"}
+               [:summary {:class "cursor-pointer list-none text-info hover:text-info/80 block mt-1"}
+                (str "... " hidden-lines " more lines ▸")]
+               [:span {:class "block mt-1"} (subs full-content (count preview))]])]]])]]]))
 
 (defn- render-assistant-text
   "Render assistant message text as markdown prose.
