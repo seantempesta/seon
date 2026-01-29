@@ -164,7 +164,8 @@
                    [::sdk/max-turns {:optional true} ::sdk/max-turns]
                    [::sdk/max-budget-usd {:optional true} ::sdk/max-budget-usd]
                    [::sdk/allowed-tools {:optional true} ::sdk/allowed-tools]
-                   [::sdk/disallowed-tools {:optional true} ::sdk/disallowed-tools]])
+                   [::sdk/disallowed-tools {:optional true} ::sdk/disallowed-tools]
+                   [::sdk/chrome {:optional true} ::sdk/chrome]])
 
 ;; Agent handle returned from launch-agent!
 (schema/register! ::agent-handle
@@ -253,6 +254,7 @@
                    [::sdk/max-budget-usd {:optional true} ::sdk/max-budget-usd]
                    [::sdk/allowed-tools {:optional true} ::sdk/allowed-tools]
                    [::sdk/disallowed-tools {:optional true} ::sdk/disallowed-tools]
+                   [::sdk/chrome {:optional true} ::sdk/chrome]
                    [::timeout-ms {:optional true} ::timeout-ms]])
 
 ;; Launch agent!! (blocking) response
@@ -588,6 +590,7 @@
      ::sdk/max-budget-usd    - Optional. Cost limit
      ::sdk/allowed-tools     - Optional. Tool whitelist
      ::sdk/disallowed-tools  - Optional. Tool denylist
+     ::sdk/chrome            - Optional. Enable Chrome integration for browser automation
      ::ai/force?             - Optional. Force launch even if namespace has running agent
 
    Response keys (agent handle):
@@ -606,7 +609,7 @@
                      ::ai/prompt \"Implement the signals dashboard\"})"
   [{::ai/keys [node namespace prompt force?]
     ::keys [model]
-    ::sdk/keys [permission-mode max-turns max-budget-usd allowed-tools disallowed-tools]}]
+    ::sdk/keys [permission-mode max-turns max-budget-usd allowed-tools disallowed-tools chrome]}]
   (log/info "Launching agent" {:namespace namespace})
 
   ;; Check for existing running agents on the same namespace
@@ -667,7 +670,8 @@
                                   ::sdk/max-budget-usd max-budget-usd
                                   ::sdk/allowed-tools allowed-tools
                                   ::sdk/disallowed-tools disallowed-tools
-                                  ::sdk/mcp-servers mcp-config})
+                                  ::sdk/mcp-servers mcp-config
+                                  ::sdk/chrome chrome})
 
           messages-ch (chan 100)
           result-ch (chan 1)
