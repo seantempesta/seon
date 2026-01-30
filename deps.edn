@@ -5,7 +5,7 @@
 
  :deps {;; Core Clojure
         org.clojure/clojure {:mvn/version "1.12.0"}
-        org.clojure/core.async {:mvn/version "1.6.681"}
+        org.clojure/core.async {:mvn/version "1.9.829-alpha2"}
 
         ;; XTDB v2.1.0 (stable release with multi-database support)
         com.xtdb/xtdb-api {:mvn/version "2.1.0"}
