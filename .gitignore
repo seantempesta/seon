@@ -29,9 +29,6 @@ Thumbs.db
 *.secret
 credentials.json
 
-# Reference code (cloned repos for research)
-reference-code/
-
 # Editor config
 .calva/
 
