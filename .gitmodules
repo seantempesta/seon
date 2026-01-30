@@ -49,3 +49,9 @@
 [submodule "reference-code/spectomic"]
 	path = reference-code/spectomic
 	url = https://github.com/Provisdom/spectomic
+[submodule "reference-code/eliza"]
+	path = reference-code/eliza
+	url = https://github.com/elizaOS/eliza.git
+[submodule "reference-code/core.async"]
+	path = reference-code/core.async
+	url = https://github.com/clojure/core.async.git

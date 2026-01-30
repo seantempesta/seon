@@ -682,7 +682,10 @@
                                    disallowed-tools (assoc ::sdk/disallowed-tools disallowed-tools)
                                    chrome (assoc ::sdk/chrome chrome)))
 
-          messages-ch (chan 100)
+          ;; Use sliding buffer to prevent blocking when channel fills up.
+          ;; Without this, >!! blocks at 100 messages and deadlocks the reader.
+          ;; Old messages drop if not consumed, but agent keeps running.
+          messages-ch (chan (async/sliding-buffer 1000))
           result-ch (chan 1)
 
           ;; 5b. Register process exit watcher to unblock reader on unexpected death
