@@ -274,11 +274,74 @@
 ;;; Message-Centric View Components
 ;;; ---------------------------------------------------------------------------
 
+(defn- extract-error-preview
+  "Extract first line of error message for inline display."
+  [result-text]
+  (when result-text
+    (let [text (str/trim result-text)
+          ;; Strip <tool_use_error> tags if present
+          clean-text (-> text
+                         (str/replace #"^<tool_use_error>\s*" "")
+                         (str/replace #"\s*</tool_use_error>$" ""))
+          first-line (first (str/split-lines clean-text))]
+      (when (and first-line (> (count first-line) 0))
+        (if (> (count first-line) 60)
+          (str (subs first-line 0 57) "...")
+          first-line)))))
+
+(defn- render-result-content
+  "Render result content for expanded view with appropriate formatting."
+  [result-text tool-name has-error? lang]
+  (cond
+    ;; REPL results - pretty print Clojure data
+    (= tool-name "mcp__seon__eval")
+    (let [pretty-result (try
+                          (-> result-text read-string pp-str)
+                          (catch Exception _ result-text))
+          {:keys [truncated? preview hidden-lines]} (truncate-lines pretty-result 8)]
+      [:div
+       [:span {:class "text-text-500 text-2xs block mb-1"} "→ result:"]
+       [:pre {:class (str "bg-base-900 p-2 rounded text-2xs overflow-x-auto font-mono "
+                          (when has-error? "border border-error/30"))}
+        [:code {:class "language-clojure"}
+         preview
+         (when truncated?
+           [:details {:class "block mt-1" :data-preserve-attr "open"}
+            [:summary {:class "cursor-pointer list-none text-info text-2xs hover:text-info/80"}
+             (str "... " hidden-lines " more lines ▸")]
+            [:code {:class "language-clojure block mt-1"}
+             (subs pretty-result (count preview))]])]]])
+
+    ;; TaskList results - formatted task list
+    (= tool-name "TaskList")
+    (if-let [task-list-view (render-task-list-result result-text)]
+      [:div {:class "bg-base-900 p-2 rounded text-2xs"} task-list-view]
+      [:pre {:class "bg-base-900 p-2 rounded text-2xs overflow-x-auto font-mono"}
+       [:code result-text]])
+
+    ;; Default: show as code block with truncation
+    :else
+    (let [{:keys [truncated? preview hidden-lines full-content]} (truncate-lines result-text max-preview-lines)]
+      [:pre {:class (str "bg-base-900 p-2 rounded text-2xs overflow-x-auto font-mono "
+                         (when has-error? "border border-error/30"))}
+       [:code {:class (when lang (str "language-" lang))}
+        preview
+        (when truncated?
+          [:details {:class "inline" :data-preserve-attr "open"}
+           [:summary {:class "cursor-pointer list-none text-info hover:text-info/80 block mt-1"}
+            (str "... " hidden-lines " more lines ▸")]
+           [:span {:class "block mt-1"} (subs full-content (count preview))]])]])))
+
 (defn- render-tool-call
-  "Render a single tool call with its result as a collapsible block.
-   Uses multimethod dispatch from agent-views for tool-specific rendering,
-   with hover cards for additional detail. Results are shown in an expandable section."
-  [{:keys [id name input result]} timestamp]
+  "Render a single tool call with its result as a unified collapsible block.
+
+   New structure (single expand level):
+   - Summary: arrow + timestamp + header + error preview + status
+   - Collapsed: shows 3-line preview of input
+   - Expanded: shows full input + separator + full result
+
+   The expand-default? parameter controls initial open state."
+  [{:keys [id name input result]} timestamp expand-default?]
   (let [;; Extract result text
         result-content (:content result)
         raw-result-text (cond
@@ -289,83 +352,52 @@
                                (map :text)
                                (str/join "\n"))
                           :else (str result-content))
-        ;; Filter out boilerplate messages from all tool results
         result-text (filter-boilerplate raw-result-text)
-        ;; Check for errors - only at the start of result (not just anywhere in file content)
+        ;; Check for errors
         has-error? (or (:is_error result)
                        (str/starts-with? (str/trim (str result-text)) "<tool_use_error>"))
-        ;; Parse input for multimethod dispatch (convert keys to snake_case for consistency)
+        error-preview (when has-error? (extract-error-preview result-text))
+        ;; Parse input for multimethod dispatch
         parsed-input (into {} (map (fn [[k v]] [(keyword (str/replace (clojure.core/name k) "-" "_")) v]) input))
-        raw-input (pr-str input)
         ;; For result display
         file-path (or (:file-path input) (:file_path input))
-        lang (detect-language file-path name)
-        {:keys [truncated? preview hidden-lines full-content]} (truncate-lines result-text max-preview-lines)
-        is-repl? (= name "mcp__seon__eval")]
-    ;; Wrap in log-line class for hover card positioning
-    [:div {:class "log-line group relative mb-2"}
-     ;; Tool call header with multimethod rendering
-     [:details {:class "tool-details" :open true :data-preserve-attr "open"}
-      [:summary {:class (str "cursor-pointer list-none flex items-center gap-2 py-1 px-2 rounded "
-                             "hover:bg-base-800 text-xs font-mono")}
-       ;; Expand indicator
-       [:span {:class "text-text-400 group-open:rotate-90 transition-transform"} "▶"]
-       ;; Timestamp
-       [:span {:class "text-text-500 shrink-0"} (format-local-time timestamp)]
-       ;; Tool-specific inline rendering via multimethod
-       (agent-views/render-tool-html name parsed-input raw-input)
-       ;; Status indicator
-       [:span {:class (str "shrink-0 ml-auto " (if has-error? "text-error" "text-success"))
-               :title (if has-error? "Error" "Success")}
-        (if has-error? "✗" "✓")]]
-      ;; Expanded content - show result
-      (when (and result-text (not (str/blank? result-text)))
-        [:div {:class "ml-6 mt-1 pl-3 border-l-2 border-base-700"}
-         ;; Special formatting for REPL results - pretty print and syntax highlight
-         (cond
-           ;; REPL results - pretty print Clojure data
-           is-repl?
-           (let [pretty-result (try
-                                 (-> result-text
-                                     read-string
-                                     pp-str)
-                                 (catch Exception _ result-text))
-                 {:keys [truncated? preview hidden-lines]} (truncate-lines pretty-result 6)]
-             [:div
-              [:span {:class "text-text-500 text-2xs block mb-1"} "→ result:"]
-              [:pre {:class (str "bg-base-900 p-2 rounded text-2xs overflow-x-auto font-mono "
-                                 (when has-error? "border border-error/30"))}
-               [:code {:class "language-clojure"}
-                preview
-                (when truncated?
-                  [:details {:class "block mt-1" :data-preserve-attr "open"}
-                   [:summary {:class "cursor-pointer list-none text-info text-2xs hover:text-info/80"}
-                    (str "... " hidden-lines " more lines ▸")]
-                   [:code {:class "language-clojure block mt-1"}
-                    (subs pretty-result (count preview))]])]]])
+        lang (detect-language file-path name)]
+    [:div {:class "tool-call mb-2"}
+     [:details {:class "tool-call-details" :open expand-default? :data-preserve-attr "open"}
+      ;; SUMMARY: Header line + preview (always visible in collapsed state)
+      [:summary {:class "cursor-pointer list-none"}
+       [:div {:class (str "flex items-start gap-2 py-1 px-2 rounded "
+                          "hover:bg-base-800 text-xs font-mono")}
+        ;; Arrow (rotates when open)
+        [:span {:class "tool-arrow text-text-400 shrink-0 transition-transform duration-150"} "▶"]
+        ;; Timestamp
+        [:span {:class "text-text-500 shrink-0"} (format-local-time timestamp)]
+        ;; Tool-specific header via new multimethod
+        (agent-views/render-tool-header name parsed-input)
+        ;; Error preview (inline in header)
+        (when error-preview
+          [:span {:class "text-error text-2xs truncate max-w-xs ml-2"}
+           (str "| ✗ " error-preview)])
+        ;; Status indicator (right side)
+        [:span {:class (str "shrink-0 ml-auto " (if has-error? "text-error" "text-success"))}
+         (if has-error? "✗" "✓")]]
+       ;; Preview (clipped input, part of summary - visible when collapsed)
+       [:div {:class "tool-preview ml-6 mt-1"}
+        (agent-views/render-tool-preview name parsed-input)]]
 
-           ;; TaskList results - formatted task list
-           (= name "TaskList")
-           (if-let [task-list-view (render-task-list-result result-text)]
-             [:div {:class "bg-base-900 p-2 rounded text-2xs"}
-              task-list-view]
-             ;; Fallback to raw display
-             [:pre {:class "bg-base-900 p-2 rounded text-2xs overflow-x-auto font-mono"}
-              [:code preview]])
-
-           ;; Default: show as code block
-           :else
-           [:pre {:class (str "bg-base-900 p-2 rounded text-2xs overflow-x-auto font-mono "
-                              (when has-error? "border border-error/30"))}
-            [:code {:class (when lang (str "language-" lang))}
-             preview
-             (when truncated?
-               [:details {:class "inline" :data-preserve-attr "open"}
-                [:summary {:class "cursor-pointer list-none text-info hover:text-info/80 block mt-1"}
-                 (str "... " hidden-lines " more lines ▸")]
-                [:span {:class "block mt-1"} (subs full-content (count preview))]])]])])]
-     ;; Hover card via multimethod
-     (agent-views/render-tool-hover name parsed-input raw-input)]))
+      ;; EXPANDED: Full input + separator + result
+      [:div {:class "tool-expanded ml-6 mt-2 pl-3 border-l-2 border-base-700"}
+       ;; Full input
+       [:div {:class "mb-2"}
+        [:span {:class "text-text-500 text-2xs block mb-1"} "input:"]
+        (agent-views/render-tool-input name parsed-input)]
+       ;; Separator
+       [:hr {:class "border-base-700 my-2"}]
+       ;; Result
+       (when (and result-text (not (str/blank? result-text)))
+         [:div
+          [:span {:class "text-text-500 text-2xs block mb-1"} "result:"]
+          (render-result-content result-text name has-error? lang)])]]]))
 
 (def ^:private prose-classes
   "Shared prose/markdown classes for consistent rendering."
@@ -415,8 +447,9 @@
         (h/raw html-content)]])))
 
 (defn- render-message
-  "Render a single message based on its type."
-  [msg]
+  "Render a single message based on its type.
+   expand-tools? controls whether tool calls default to expanded (for first/last messages)."
+  [msg expand-tools?]
   (let [role (::ai/role msg)
         content (::ai/content msg)
         timestamp (::ai/timestamp msg)
@@ -439,10 +472,10 @@
        ;; Show any text content first
        (when (and content (not (str/blank? content)))
          (render-assistant-text content timestamp))
-       ;; Then each tool call
+       ;; Then each tool call (collapsed by default unless expand-tools?)
        (for [call tool-calls]
          ^{:key (:id call)}
-         (render-tool-call call timestamp))]
+         (render-tool-call call timestamp expand-tools?))]
 
       ;; Pure text assistant message
       (and (= role "assistant") content (not (str/blank? content)))
@@ -452,12 +485,18 @@
       :else nil)))
 
 (defn- render-messages-view
-  "Render all messages in message-centric view."
+  "Render all messages in message-centric view.
+   First and last messages have tools expanded by default; middle messages are collapsed."
   [messages]
-  (let [paired-messages (pair-tool-calls-with-results messages)]
+  (let [paired-messages (pair-tool-calls-with-results messages)
+        msg-count (count paired-messages)]
     [:div {:class "space-y-1"}
-     (for [msg paired-messages
-           :let [rendered (render-message msg)]
+     (for [[idx msg] (map-indexed vector paired-messages)
+           :let [is-first? (zero? idx)
+                 is-last? (= idx (dec msg-count))
+                 ;; First message (initial prompt) and last message expanded
+                 expand-tools? (or is-first? is-last?)
+                 rendered (render-message msg expand-tools?)]
            :when rendered]
        ^{:key (:xt/id msg)}
        rendered)]))
