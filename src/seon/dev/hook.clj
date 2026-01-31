@@ -507,6 +507,9 @@
                 (or repair-block
                     ;; 2. Reload namespace - block on compile error
                     (let [reload-result (stage-reload ns-sym config)
+                          ;; Add feedback about what was reloaded
+                          _ (when-let [loaded (seq (:loaded reload-result))]
+                              (swap! feedback conj (str "Reloaded: " (str/join ", " (map str loaded)))))
                           reload-block (when (and reload-result
                                                   (not (:success reload-result)))
                                          (block-response (:error reload-result)))]

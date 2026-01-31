@@ -14,8 +14,9 @@
 ;; External Resources
 ;; ========================================
 
-(def datastar-cdn
-  "https://cdn.jsdelivr.net/gh/starfederation/datastar@1.0.0-RC.6/bundles/datastar.js")
+;; Local Datastar bundle from reference-code/datastar submodule (v1.0.0-RC.7)
+;; This is an ES module - requires type="module" on script tag
+(def datastar-js "/js/datastar.js")
 
 ;; Local Tailwind CSS with @tailwindcss/typography plugin for prose classes.
 ;; Build with: npm run css:build (or npm run css:watch for development)
@@ -101,7 +102,7 @@
       ;; Highlight.js for syntax highlighting in code blocks
       [:link {:rel "stylesheet"
               :href "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css"}]
-      [:script {:defer "defer" :type "module" :src datastar-cdn}]]
+      [:script {:type "module" :src datastar-js}]]
      [:body {:class "bg-base-950 text-text-50 min-h-screen p-4 font-mono antialiased"}
       ;; Highlight.js scripts at end of body for faster page load
       [:script {:src "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"}]
