@@ -28,6 +28,38 @@
             [taoensso.timbre :as log]))
 
 ;;; ---------------------------------------------------------------------------
+;;; Time Formatting
+;;; ---------------------------------------------------------------------------
+
+(defn- relative-time
+  "Format an instant as relative time (e.g., '5 min ago')."
+  [^java.util.Date inst]
+  (let [now (System/currentTimeMillis)
+        then (.getTime inst)
+        diff-ms (- now then)
+        diff-min (quot diff-ms 60000)
+        diff-hours (quot diff-min 60)
+        diff-days (quot diff-hours 24)]
+    (cond
+      (< diff-min 1) "just now"
+      (< diff-min 60) (str diff-min " min ago")
+      (< diff-hours 24) (str diff-hours (if (= diff-hours 1) " hour ago" " hours ago"))
+      :else (str diff-days (if (= diff-days 1) " day ago" " days ago")))))
+
+;;; ---------------------------------------------------------------------------
+;;; Instance Helpers
+;;; ---------------------------------------------------------------------------
+
+(defn- instances-for-namespace
+  "Get all instances for a specific namespace, sorted newest first."
+  [ns-sym]
+  (let [all-ids (::instance/instances (instance/list-instances {}))]
+    (->> all-ids
+         (map #(instance/get-instance {::instance/id %}))
+         (filter #(= (::instance/namespace %) ns-sym))
+         (sort-by ::instance/created-at #(compare %2 %1)))))
+
+;;; ---------------------------------------------------------------------------
 ;;; Namespace View Rendering
 ;;; ---------------------------------------------------------------------------
 
@@ -79,6 +111,68 @@
       [:tr {:class "hover:bg-base-800"}
        [:td {:class "py-1 px-2 font-mono text-eval w-24"} (str alias)]
        [:td {:class "py-1 px-2 font-mono text-text-200"} (str ns)]])]])
+
+(defn- render-instance-row
+  "Render an instance as a table row."
+  [ns-sym {:keys [::instance/id ::instance/created-at]}]
+  (let [client-count (::instance/count (instance/client-count {::instance/id id}))]
+    [:tr {:class "hover:bg-base-800 border-b border-base-700/50"}
+     ;; ID (clickable link)
+     [:td {:class "py-2 px-3"}
+      [:a {:href (str "/ns/" ns-sym "?instance=" id)
+           :class "font-mono text-signal hover:text-warning text-sm"}
+       id]]
+     ;; Clients with status dot
+     [:td {:class "py-2 px-3"}
+      [:span {:class "inline-flex items-center gap-1.5"}
+       [:span {:class (str "w-1.5 h-1.5 rounded-full "
+                           (if (pos? client-count) "bg-signal animate-pulse" "bg-text-500"))}]
+       [:span {:class "text-xs text-text-200"} client-count]]]
+     ;; Created time
+     [:td {:class "py-2 px-3 text-xs text-text-400"}
+      (relative-time created-at)]
+     ;; Actions
+     [:td {:class "py-2 px-3 text-right"}
+      [:div {:class "inline-flex gap-2"}
+       [:a {:href (str "/ns/" ns-sym "?instance=" id)
+            :class "px-2 py-0.5 text-xs font-mono rounded border text-text-400 border-base-700 hover:border-base-600 hover:text-text-200"}
+        "View"]
+       [:form {:method "POST"
+               :action (str "/ns/" ns-sym "/destroy-instance!?id=" id)
+               :class "inline"}
+        [:button {:type "submit"
+                  :class "px-2 py-0.5 text-xs font-mono rounded border text-error/70 border-base-700 hover:border-error/50 hover:text-error"}
+         "×"]]]]]))
+
+(defn- render-instances-section
+  "Render the instances section for a reactive namespace."
+  [ns-sym]
+  (let [instances (instances-for-namespace ns-sym)]
+    [:section {:class "mb-6"}
+     [:div {:class "flex items-center justify-between mb-2"}
+      (ui/section-header (str "INSTANCES (" (count instances) ")"))
+      [:form {:method "POST"
+              :action (str "/ns/" ns-sym "/create-instance!")
+              :class "inline"}
+       [:button {:type "submit"
+                 :class "px-2 py-1 text-xs font-mono rounded border text-signal border-signal/30 hover:border-signal/50 hover:bg-signal/10"}
+        "+ New Instance"]]]
+     (if (seq instances)
+       [:div {:class "bg-base-850 rounded overflow-hidden"}
+        [:table {:class "w-full"}
+         [:thead
+          [:tr {:class "border-b border-base-700"}
+           [:th {:class "text-left py-1.5 px-3 text-xs font-medium text-text-400 uppercase tracking-wider w-20"} "ID"]
+           [:th {:class "text-left py-1.5 px-3 text-xs font-medium text-text-400 uppercase tracking-wider w-20"} "Clients"]
+           [:th {:class "text-left py-1.5 px-3 text-xs font-medium text-text-400 uppercase tracking-wider"} "Created"]
+           [:th {:class "text-right py-1.5 px-3 text-xs font-medium text-text-400 uppercase tracking-wider w-32"} "Actions"]]]
+         [:tbody
+          (for [inst instances]
+            (render-instance-row ns-sym inst))]]]
+       ;; Empty state
+       [:div {:class "bg-base-850 rounded p-6 text-center"}
+        [:p {:class "text-text-500 text-sm"} "No active instances"]
+        [:p {:class "text-text-400 text-xs mt-1"} "Create one to get started"]])]))
 
 (defn- namespace-has-render?
   "Check if namespace has a public render function for page rendering.
@@ -155,7 +249,8 @@
   "Render the introspection view for a namespace (functions, vars, atoms, etc.)."
   [ns-sym session-id show-toggle?]
   (if-let [data (introspect/introspect ns-sym)]
-    (let [{:keys [ns-name doc functions vars atoms multimethods requires]} data]
+    (let [{:keys [ns-name doc functions vars atoms multimethods requires]} data
+          is-reactive? (namespace-has-reactive-render? ns-sym)]
       (h/html
        [:main#morph
         ;; Header with optional toggle
@@ -169,6 +264,10 @@
             "Session: " [:code {:class "text-signal"} session-id]])
          (when doc
            [:p {:class "text-text-400 text-sm mt-2 whitespace-pre-wrap max-w-3xl"} doc])]
+
+        ;; Instances section (only for reactive namespaces)
+        (when is-reactive?
+          (render-instances-section ns-sym))
 
         ;; Functions section
         (when (seq functions)
@@ -494,6 +593,34 @@
 ;;; Function Call Handler
 ;;; ---------------------------------------------------------------------------
 
+(defn- handle-create-instance!
+  "Handle POST /ns/:namespace/create-instance! - creates new instance and redirects."
+  [ns-sym]
+  (let [initial-val (get-initial-state ns-sym)
+        result (instance/create-instance! {::instance/namespace ns-sym
+                                           ::instance/initial-value initial-val})
+        new-id (::instance/id result)
+        render-fn (get-render-content-fn ns-sym)]
+    (when render-fn
+      (instance/set-render-fn! {::instance/id new-id
+                                ::instance/render-fn render-fn}))
+    (log/info "Created instance via action" {:ns ns-sym :instance new-id})
+    {:status 302
+     :headers {"Location" (str "/ns/" ns-sym "?instance=" new-id)}}))
+
+(defn- handle-destroy-instance!
+  "Handle POST /ns/:namespace/destroy-instance!?id=xxxx - destroys instance and redirects."
+  [ns-sym instance-id]
+  (if instance-id
+    (do
+      (instance/destroy-instance! {::instance/id instance-id})
+      (log/info "Destroyed instance via action" {:ns ns-sym :instance instance-id})
+      {:status 302
+       :headers {"Location" (str "/ns/" ns-sym "?view=introspect")}})
+    {:status 400
+     :headers {"Content-Type" "application/json"}
+     :body "{\"success\":false,\"error\":\"Missing id parameter\"}"}))
+
 (defn function-call-handler
   "Handle POST /ns/:namespace/:function requests.
 
@@ -509,14 +636,25 @@
         fn-str (get-in request [:path-params :function])
         params (parse-query-params request)
         instance-id (get params "instance")
+        id-param (get params "id")
         ;; URL-decode function name to handle %21 -> ! etc.
         fn-decoded (codec/url-decode fn-str)
         ns-sym (symbol ns-str)
         fn-sym (symbol fn-decoded)
         body (:body request)]
     (log/info "Function call" {:ns ns-sym :fn fn-sym :instance instance-id :body body})
-    (if-let [action-fn (actions/resolve-action ns-sym fn-sym)]
-      (try
+    (cond
+      ;; Instance management actions
+      (= fn-sym 'create-instance!)
+      (handle-create-instance! ns-sym)
+
+      (= fn-sym 'destroy-instance!)
+      (handle-destroy-instance! ns-sym id-param)
+
+      ;; Regular function call
+      :else
+      (if-let [action-fn (actions/resolve-action ns-sym fn-sym)]
+        (try
         (let [base-signals (actions/extract-signals body)
               ;; Add instance ctx if present
               signals (if instance-id
@@ -536,11 +674,11 @@
           {:status 500
            :headers {"Content-Type" "application/json"}
            :body (str "{\"success\":false,\"error\":\"" (.getMessage e) "\"}")}))
-      (do
-        (log/warn "Function not found" {:ns ns-sym :fn fn-sym})
-        {:status 404
-         :headers {"Content-Type" "application/json"}
-         :body "{\"success\":false,\"error\":\"Function not found\"}"}))))
+        (do
+          (log/warn "Function not found" {:ns ns-sym :fn fn-sym})
+          {:status 404
+           :headers {"Content-Type" "application/json"}
+           :body "{\"success\":false,\"error\":\"Function not found\"}"})))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Route Registration Helper
