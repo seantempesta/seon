@@ -1,6 +1,6 @@
 # PRD: Reactive UI Architecture
 
-**Status:** Phase 3 Complete - Browser Bridge ✅
+**Status:** Phase 4 Complete - Instance-Based Architecture ✅
 **Branch:** `feature/sse-live-reload`
 **Date:** 2026-01-31
 **Namespace:** `seon.web.reactive`
@@ -14,15 +14,18 @@ Build a Reagent-like experience for server-side Clojure. Agents write pure Cloju
 **The Goal:**
 ```clojure
 ;; Agent writes this - no framework concepts leak through
-(defn add-signal! [{::keys [name price]}]
-  (swap! *ctx* update ::signals conj {::name name ::price price}))
+(defn initial-state []
+  {:signals []})
 
-(defn render [_]
+(defn add-signal! [{:seon.reactive/keys [ctx] :keys [name price]}]
+  (swap! ctx update :signals conj {:name name :price price}))
+
+(defn render-content [{:keys [signals]}]
   [:main
-   [:ul (for [s (::signals @*ctx*)] [:li (::name s)])]
+   [:ul (for [s signals] [:li (:name s)])]
    [:form {:on:submit :add-signal!}
-    [:input {:field ::name}]
-    [:input {:field ::price :type "number"}]
+    [:input {:field :name}]
+    [:input {:field :price :type "number"}]
     [:button "Add"]]])
 ```
 
@@ -185,16 +188,100 @@ Clients are tracked per-namespace in the ctx registry (`seon.web.reactive.ctx`):
 
 ---
 
+### Phase 4: Instance-Based Architecture ✅ DONE
+
+Each browser tab gets its own isolated instance with independent state.
+
+**URL Pattern:**
+```
+GET  /ns/seon.web.reactive.demo              → Creates instance, redirects to ?instance=xxxx
+GET  /ns/seon.web.reactive.demo?instance=a1b2 → Serves page for instance a1b2
+POST /ns/seon.web.reactive.demo?instance=a1b2 → SSE connection for instance a1b2
+POST /ns/seon.web.reactive.demo/increment!?instance=a1b2 → Action call for instance
+```
+
+**How It Works:**
+
+1. User visits `/ns/seon.web.reactive.demo`
+2. `routes.clj` detects reactive namespace (has `render-content` fn)
+3. Creates new instance with `initial-state` value
+4. Redirects to `?instance=xxxx` (4-char hex ID)
+5. Each tab gets its own instance with isolated state
+6. Actions receive `{:seon.reactive/ctx atom ...}` in signals
+
+**Creating a Reactive Namespace:**
+
+```clojure
+(ns seon.trading.signals
+  "A reactive namespace for trading signals.")
+
+;; Optional: Initial state for new instances (default: {})
+(defn initial-state []
+  {:signals []
+   :filter nil})
+
+;; Required: Render function takes ctx VALUE, returns hiccup
+(defn render-content [{:keys [signals filter]}]
+  [:div#app
+   [:h1 "Trading Signals (" (count signals) ")"]
+   [:ul (for [s signals] [:li (:symbol s) " - $" (:price s)])]
+   [:form {:on:submit :add-signal!}
+    [:input {:field :symbol :placeholder "Symbol"}]
+    [:input {:field :price :type "number"}]
+    [:button "Add"]]])
+
+;; Action functions receive ctx in signals
+(defn add-signal! [{:seon.reactive/keys [ctx] :keys [symbol price]}]
+  (when (and ctx symbol price)
+    (swap! ctx update :signals conj {:symbol symbol :price (parse-double price)})))
+```
+
+**Files:**
+- `src/seon/web/reactive/instance.clj` - Instance registry and lifecycle
+- `src/seon/ns/routes.clj` - Routing with instance detection and SSE
+
+### Instance API Reference
+
+```clojure
+(require '[seon.web.reactive.instance :as instance])
+
+;; Create instance programmatically
+(instance/create-instance! {::instance/namespace 'seon.trading
+                            ::instance/initial-value {:signals []}})
+;; => {::instance/id "a1b2" ::instance/namespace ... ::instance/created-at ...}
+
+;; Get instance info
+(instance/get-instance {::instance/id "a1b2"})
+;; => {::instance/id "a1b2" ::instance/atom #<Atom...> ::instance/clients #<Atom#{...}>}
+
+;; Get ctx atom directly
+(::instance/atom (instance/instance-ctx {::instance/id "a1b2"}))
+;; => #<Atom {:signals [...] :filter nil}>
+
+;; Set render function (framework does this automatically)
+(instance/set-render-fn! {::instance/id "a1b2"
+                          ::instance/render-fn render-content})
+
+;; Client management (framework handles this)
+(instance/register-client! {::instance/id "a1b2" ::instance/channel ch})
+(instance/unregister-client! {::instance/id "a1b2" ::instance/channel ch})
+(instance/client-count {::instance/id "a1b2"})
+;; => {::instance/count 2}
+
+;; Force push current state to all clients
+(instance/force-push! {::instance/id "a1b2"})
+
+;; List all instances
+(instance/list-instances {})
+;; => {::instance/instances ["a1b2" "c3d4" "e5f6"]}
+
+;; Cleanup
+(instance/destroy-instance! {::instance/id "a1b2"})
+```
+
+---
+
 ## Future Phases
-
-### Phase 4: Multi-Instance (MEDIUM RISK)
-
-Same namespace, multiple independent instances:
-```
-/ns/seon.email           → default instance
-/ns/seon.email:work      → "work" instance
-/ns/seon.email:personal  → "personal" instance
-```
 
 ### Phase 5: Polish & Edge Cases
 
@@ -202,6 +289,7 @@ Same namespace, multiple independent instances:
 - Debouncing for text inputs
 - Error handling and display
 - JS interop escape hatches
+- Instance cleanup (auto-destroy after inactivity)
 
 ---
 
@@ -210,9 +298,11 @@ Same namespace, multiple independent instances:
 | File | Purpose | Status |
 |------|---------|--------|
 | `src/seon/web/reactive/transform.clj` | Hiccup → Datastar | ✅ Working |
-| `src/seon/web/reactive/ctx.clj` | Reactive ctx + SSE push + client tracking | ✅ Working |
-| `src/seon/web/reactive/actions.clj` | Action endpoint | ✅ Working |
-| `src/seon/web/reactive/demo.clj` | Demo page | ✅ Working |
+| `src/seon/web/reactive/instance.clj` | Instance registry + SSE push | ✅ Working |
+| `src/seon/web/reactive/ctx.clj` | Legacy global ctx (deprecated) | ⚠️ Legacy |
+| `src/seon/web/reactive/actions.clj` | Action endpoint signal extraction | ✅ Working |
+| `src/seon/web/reactive/demo.clj` | Demo page (instance-based) | ✅ Working |
+| `src/seon/ns/routes.clj` | Namespace routing + instance detection | ✅ Working |
 | `src/seon/web/browser.clj` | REPL-to-browser bridge (`eval!`, `cljs!`) | ✅ Working |
 | `src/seon/web/server.clj` | HTTP server + JSON middleware | ✅ Working |
 | `resources/public/js/scittle.js` | ClojureScript interpreter for browser | ✅ Working |
@@ -231,9 +321,9 @@ Simpler, better firewall traversal, matches existing patterns.
 
 Send Clojure to browser for execution with JS interop. ~400KB interpreter.
 
-### Clients tracked in `*ctx*`
+### Instance-based isolation
 
-Browser connections stored as channels per instance. Observable from REPL.
+Each browser tab gets its own instance with independent state. Instances are tracked in a registry with 4-char hex IDs. Browser connections stored as channels per instance.
 
 ### `/ns/namespace/fn` URL pattern
 
@@ -246,7 +336,9 @@ Keep close to Clojure concepts. Namespace is the route, function is the path seg
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                         AGENT CODE                               │
-│  (Pure Clojure: atoms, functions, hiccup)                       │
+│  initial-state: fn [] → initial ctx value                       │
+│  render-content: fn [ctx-value] → hiccup                        │
+│  action-fn!: fn [{:seon.reactive/ctx atom ...}] → side effects  │
 └─────────────────────────────────────────────────────────────────┘
                               │
                     ┌─────────▼─────────┐
@@ -257,12 +349,12 @@ Keep close to Clojure concepts. Namespace is the route, function is the path seg
                               │
 ┌─────────────────────────────▼───────────────────────────────────┐
 │                      FRAMEWORK LAYER                             │
-│  - Action endpoint (/ns/:ns/:fn)                                │
-│  - Signal extraction + Malli coercion                           │
-│  - *ctx* atom management + watches                              │
-│  - SSE push on ctx change                                       │
+│  - Instance registry (per-tab isolation)                        │
+│  - Action endpoint (/ns/:ns/:fn?instance=xxxx)                  │
+│  - Signal extraction + ctx injection                            │
+│  - SSE push on ctx change (via atom watch)                      │
 │  - Browser bridge (eval!, cljs!)                                │
-│  - Client tracking per namespace                                │
+│  - Client tracking per instance                                 │
 └─────────────────────────────────────────────────────────────────┘
                               │
                     ┌─────────▼─────────┐

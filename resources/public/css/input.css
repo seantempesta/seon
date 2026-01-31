@@ -52,8 +52,24 @@
   animation: skeleton-pulse 1.5s ease-in-out infinite;
 }
 
-/* Edit diff: hide preview when expanded, show full diff */
-details.edit-diff[open] > summary {
+/* Tool call unified expand/collapse */
+details.tool-call-details > summary {
+  list-style: none;
+}
+details.tool-call-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+/* Arrow rotation when expanded */
+details.tool-call-details .tool-arrow {
+  transition: transform 0.15s ease;
+}
+details.tool-call-details[open] .tool-arrow {
+  transform: rotate(90deg);
+}
+
+/* Hide preview when expanded (full input shown instead) */
+details.tool-call-details[open] .tool-preview {
   display: none;
 }
 

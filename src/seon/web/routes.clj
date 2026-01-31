@@ -8,8 +8,7 @@
             [seon.web.namespace :as namespace]
             [seon.web.browser :as browser]
             [seon.ns.routes :as ns-routes]
-            [seon.primer.handlers :as primer-handlers]
-            [seon.web.reactive.demo :as reactive-demo]))
+            [seon.primer.handlers :as primer-handlers]))
 
 ;; Use var references (#') so handlers resolve to current fn after reload
 (def routes
@@ -31,9 +30,6 @@
    [:get "/agents"]                #'agents/agents-page
    [:post "/agents"]               #'agents/agents-sse
    [:post "/api/agents/toggle-completed"] #'agents/toggle-completed-handler
-   ;; Reactive UI demo routes (GET=page, POST=SSE)
-   [:get "/reactive-demo"]         #'reactive-demo/handler
-   [:post "/reactive-demo"]        #'reactive-demo/handler
    ;; Browser execution bridge result callback
    [:post "/api/browser/result"]   #'browser/result-handler})
 

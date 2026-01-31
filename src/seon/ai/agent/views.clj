@@ -409,6 +409,36 @@
    Returns hiccup wrapped in hover-card, or nil for no hover."
   (fn [tool-name _parsed-input _raw-input] tool-name))
 
+;;; ---------------------------------------------------------------------------
+;;; New Unified Tool Rendering Multimethods
+;;; ---------------------------------------------------------------------------
+;;
+;; These three multimethods provide the new collapsed/expanded UI:
+;; - render-tool-header: Concise one-liner (icon + name + file/key info)
+;; - render-tool-preview: Clipped preview (first 3 lines, shown in summary)
+;; - render-tool-input: Full input (shown when expanded)
+
+(def ^:private tool-preview-lines
+  "Max lines to show in collapsed preview."
+  3)
+
+(defmulti render-tool-header
+  "Render tool header for collapsed view.
+   Returns hiccup span with icon, tool name, and key info (filename, etc).
+   Should be a concise one-liner."
+  (fn [tool-name _parsed-input] tool-name))
+
+(defmulti render-tool-preview
+  "Render tool input preview for collapsed view.
+   Returns hiccup with first 3 lines of input (diff, code, command).
+   Returns nil if no preview is appropriate for this tool."
+  (fn [tool-name _parsed-input] tool-name))
+
+(defmulti render-tool-input
+  "Render full tool input for expanded view.
+   Returns hiccup with complete input content."
+  (fn [tool-name _parsed-input] tool-name))
+
 (defmethod render-tool-html :default
   [tool-name parsed-input raw-input]
   ;; Fallback: show tool name and raw input (truncated to max-inline-lines)
@@ -421,6 +451,26 @@
         [:pre {:class "whitespace-pre-wrap break-words"} preview]
         (when truncated?
           [:span {:class "text-text-500"} (str "... " hidden-lines " more lines")])])]))
+
+;; Default implementations for new unified rendering multimethods
+
+(defmethod render-tool-header :default
+  [tool-name _parsed-input]
+  [:span {:class "flex items-center gap-2"}
+   [:span {:class "text-log-tool"} "●"]
+   [:span {:class "text-text-300"} tool-name]])
+
+(defmethod render-tool-preview :default
+  [_tool-name _parsed-input]
+  ;; Most tools don't need a preview in collapsed state
+  nil)
+
+(defmethod render-tool-input :default
+  [tool-name parsed-input]
+  ;; Fallback: show raw input
+  (when parsed-input
+    [:pre {:class "bg-base-900 p-2 rounded text-2xs font-mono overflow-x-auto"}
+     [:code (pr-str parsed-input)]]))
 
 (defmethod render-tool-hover :default
   [tool-name parsed-input raw-input]
@@ -835,6 +885,350 @@
   ;; No hover needed - full list shown inline
   nil)
 
+;;; ---------------------------------------------------------------------------
+;;; New Unified Tool Rendering Implementations
+;;; ---------------------------------------------------------------------------
+
+;; Edit tool - header, preview, and full input
+(defmethod render-tool-header "Edit"
+  [_name {:keys [file_path old_string new_string replace_all]}]
+  (let [stats (compute-diff-stats old_string new_string)
+        stats-str (format-diff-stats stats)]
+    [:span {:class "flex items-center gap-2"}
+     [:span {:class "text-info"} "✎"]
+     [:span {:class "text-text-300"} "Edit"]
+     [:code {:class "text-text-200 text-2xs"} (basename file_path)]
+     [:span {:class "text-text-500 text-2xs"} (str "(" stats-str ")")]
+     (when replace_all
+       [:span {:class "text-warning text-2xs"} "replace-all"])]))
+
+(defmethod render-tool-preview "Edit"
+  [_name {:keys [old_string new_string]}]
+  (let [old-lines (when (not (str/blank? old_string))
+                    (take tool-preview-lines (str/split-lines old_string)))
+        new-lines (when (not (str/blank? new_string))
+                    (take tool-preview-lines (str/split-lines new_string)))]
+    (when (or (seq old-lines) (seq new-lines))
+      [:pre {:class "mt-1 text-2xs bg-base-900 p-2 rounded font-mono overflow-x-auto"}
+       (render-diff-lines old-lines new-lines)])))
+
+(defmethod render-tool-input "Edit"
+  [_name {:keys [old_string new_string]}]
+  (let [old-lines (when (not (str/blank? old_string)) (str/split-lines old_string))
+        new-lines (when (not (str/blank? new_string)) (str/split-lines new_string))]
+    [:pre {:class "bg-base-900 p-2 rounded text-2xs font-mono overflow-x-auto"}
+     (render-diff-lines old-lines new-lines)]))
+
+;; Read tool - header only
+(defmethod render-tool-header "Read"
+  [_name {:keys [file_path offset limit]}]
+  (let [range-str (cond
+                    (and offset limit) (str ":" offset "-" (+ offset limit))
+                    offset (str ":" offset "+")
+                    limit (str ":1-" limit)
+                    :else "")]
+    [:span {:class "flex items-center gap-2"}
+     [:span {:class "text-info"} "📖"]
+     [:span {:class "text-text-300"} "Read"]
+     [:code {:class "text-text-200 text-2xs"} (str (basename file_path) range-str)]]))
+
+(defmethod render-tool-input "Read"
+  [_name {:keys [file_path offset limit]}]
+  [:div {:class "text-2xs text-text-400"}
+   [:div "Path: " [:span {:class "text-text-200"} file_path]]
+   (when offset [:div "Offset: " [:span {:class "text-text-200"} offset]])
+   (when limit [:div "Limit: " [:span {:class "text-text-200"} (str limit " lines")]])])
+
+;; Grep tool - header and input
+(defmethod render-tool-header "Grep"
+  [_name {:keys [pattern path glob type]}]
+  [:span {:class "flex items-center gap-2"}
+   [:span {:class "text-info"} "🔍"]
+   [:span {:class "text-text-300"} "Grep"]
+   [:span {:class "text-eval font-medium text-2xs"} (str "\"" (truncate pattern 30) "\"")]
+   [:span {:class "text-text-500 text-2xs"} (str "in " (or (basename path) "."))]
+   (when glob [:span {:class "text-text-500 text-2xs"} (str "(" glob ")")])
+   (when type [:span {:class "text-text-500 text-2xs"} (str "[" type "]")])])
+
+(defmethod render-tool-input "Grep"
+  [_name {:keys [pattern path output_mode glob type head_limit]}]
+  [:div {:class "text-2xs space-y-0.5"}
+   [:div "Pattern: " [:span {:class "text-eval"} pattern]]
+   [:div "Path: " [:span {:class "text-text-200"} (or path ".")]]
+   (when glob [:div "Glob: " [:span {:class "text-text-200"} glob]])
+   (when type [:div "Type: " [:span {:class "text-text-200"} type]])
+   [:div "Mode: " [:span {:class "text-text-200"} (or output_mode "files_with_matches")]]
+   (when head_limit [:div "Limit: " [:span {:class "text-text-200"} head_limit]])])
+
+;; Glob tool - header only
+(defmethod render-tool-header "Glob"
+  [_name {:keys [pattern path]}]
+  [:span {:class "flex items-center gap-2"}
+   [:span {:class "text-info"} "📁"]
+   [:span {:class "text-text-300"} "Glob"]
+   [:span {:class "text-eval font-medium text-2xs"} (str "\"" pattern "\"")]
+   (when path [:span {:class "text-text-500 text-2xs"} (str "in " (basename path))])])
+
+(defmethod render-tool-input "Glob"
+  [_name {:keys [pattern path]}]
+  [:div {:class "text-2xs space-y-0.5"}
+   [:div "Pattern: " [:span {:class "text-eval"} pattern]]
+   [:div "Path: " [:span {:class "text-text-200"} (or path ".")]]])
+
+;; Bash tool - header, preview, and full input
+(defmethod render-tool-header "Bash"
+  [_name {:keys [description command timeout]}]
+  (let [display (or description (truncate command 50))]
+    [:span {:class "flex items-center gap-2"}
+     [:span {:class "text-warning"} "⚡"]
+     [:span {:class "text-text-300"} "Bash"]
+     [:span {:class "text-text-200 text-2xs truncate max-w-md"} display]
+     (when timeout [:span {:class "text-text-500 text-2xs"} (str timeout "ms")])]))
+
+(defmethod render-tool-preview "Bash"
+  [_name {:keys [command]}]
+  (when command
+    (let [lines (str/split-lines command)
+          preview-lines (take tool-preview-lines lines)]
+      (when (> (count lines) 1)  ; Only show preview if multi-line
+        [:pre {:class "mt-1 text-2xs bg-base-900 p-2 rounded font-mono overflow-x-auto"}
+         [:code {:class "language-bash"}
+          (str/join "\n" preview-lines)
+          (when (> (count lines) tool-preview-lines)
+            [:span {:class "text-text-500 block"} (str "... " (- (count lines) tool-preview-lines) " more")])]]))))
+
+(defmethod render-tool-input "Bash"
+  [_name {:keys [command description timeout]}]
+  [:div {:class "space-y-2"}
+   (when description
+     [:div {:class "text-2xs text-text-400"} "Description: " [:span {:class "text-text-200"} description]])
+   [:pre {:class "bg-base-900 p-2 rounded text-2xs font-mono overflow-x-auto"}
+    [:code {:class "language-bash"} command]]
+   (when timeout
+     [:div {:class "text-2xs text-text-400"} "Timeout: " [:span {:class "text-text-200"} (str timeout "ms")]])])
+
+;; Write tool - header, preview, and full input
+(defmethod render-tool-header "Write"
+  [_name {:keys [file_path content]}]
+  (let [line-count (count-lines content)]
+    [:span {:class "flex items-center gap-2"}
+     [:span {:class "text-info"} "✎"]
+     [:span {:class "text-text-300"} "Write"]
+     [:code {:class "text-text-200 text-2xs"} (basename file_path)]
+     [:span {:class "text-text-500 text-2xs"} (str "(" line-count " lines)")]]))
+
+(defmethod render-tool-preview "Write"
+  [_name {:keys [content file_path]}]
+  (when content
+    (let [lines (str/split-lines content)
+          preview-lines (take tool-preview-lines lines)
+          lang (when file_path
+                 (cond
+                   (re-find #"\.(clj[scx]?|edn)$" file_path) "clojure"
+                   (re-find #"\.(js|jsx|ts|tsx)$" file_path) "javascript"
+                   (re-find #"\.py$" file_path) "python"
+                   (re-find #"\.(sh|bash)$" file_path) "bash"
+                   :else nil))]
+      [:pre {:class "mt-1 text-2xs bg-base-900 p-2 rounded font-mono overflow-x-auto"}
+       [:code {:class (when lang (str "language-" lang))}
+        (str/join "\n" preview-lines)
+        (when (> (count lines) tool-preview-lines)
+          [:span {:class "text-text-500 block"} (str "... " (- (count lines) tool-preview-lines) " more")])]])))
+
+(defmethod render-tool-input "Write"
+  [_name {:keys [content file_path]}]
+  (let [lang (when file_path
+               (cond
+                 (re-find #"\.(clj[scx]?|edn)$" file_path) "clojure"
+                 (re-find #"\.(js|jsx|ts|tsx)$" file_path) "javascript"
+                 (re-find #"\.py$" file_path) "python"
+                 (re-find #"\.(sh|bash)$" file_path) "bash"
+                 :else nil))]
+    [:pre {:class "bg-base-900 p-2 rounded text-2xs font-mono overflow-x-auto max-h-96 overflow-y-auto"}
+     [:code {:class (when lang (str "language-" lang))} content]]))
+
+;; REPL (mcp__seon__eval) - header, preview, and full input
+(defmethod render-tool-header "mcp__seon__eval"
+  [_name {:keys [code timeout_ms]}]
+  (let [first-line (first (str/split-lines (or code "")))
+        preview (if (> (count first-line) 50) (str (subs first-line 0 47) "...") first-line)]
+    [:span {:class "flex items-center gap-2"}
+     [:span {:class "text-eval"} "λ"]
+     [:span {:class "text-text-300"} "REPL"]
+     [:code {:class "text-eval/70 text-2xs truncate max-w-md"} preview]
+     (when timeout_ms [:span {:class "text-text-500 text-2xs"} (str timeout_ms "ms")])]))
+
+(defmethod render-tool-preview "mcp__seon__eval"
+  [_name {:keys [code]}]
+  (when code
+    (let [lines (str/split-lines code)
+          preview-lines (take tool-preview-lines lines)]
+      (when (> (count lines) 1)  ; Only show preview if multi-line
+        [:pre {:class "mt-1 text-2xs bg-base-900 p-2 rounded font-mono overflow-x-auto"}
+         [:code {:class "language-clojure"}
+          (str/join "\n" preview-lines)
+          (when (> (count lines) tool-preview-lines)
+            [:span {:class "text-text-500 block"} (str "... " (- (count lines) tool-preview-lines) " more")])]]))))
+
+(defmethod render-tool-input "mcp__seon__eval"
+  [_name {:keys [code session_id timeout_ms]}]
+  [:div {:class "space-y-2"}
+   (when session_id
+     [:div {:class "text-2xs text-text-400"} "Session: " [:span {:class "text-text-200"} session_id]])
+   [:pre {:class "bg-base-900 p-2 rounded text-2xs font-mono overflow-x-auto"}
+    [:code {:class "language-clojure"} code]]
+   (when timeout_ms
+     [:div {:class "text-2xs text-text-400"} "Timeout: " [:span {:class "text-text-200"} (str timeout_ms "ms")]])])
+
+;; Task tool - header and input
+(defmethod render-tool-header "Task"
+  [_name {:keys [description subagent_type]}]
+  [:span {:class "flex items-center gap-2"}
+   [:span {:class "text-log-launch"} "🔀"]
+   [:span {:class "text-text-300"} "Task"]
+   [:span {:class "text-log-launch text-2xs"} (or subagent_type "agent")]
+   (when description
+     [:span {:class "text-text-200 text-2xs truncate max-w-md"} description])])
+
+(defmethod render-tool-input "Task"
+  [_name {:keys [description prompt subagent_type]}]
+  [:div {:class "space-y-2 text-2xs"}
+   [:div {:class "text-text-400"} "Type: " [:span {:class "text-log-launch"} (or subagent_type "agent")]]
+   (when description
+     [:div {:class "text-text-400"} "Description: " [:span {:class "text-text-200"} description]])
+   (when prompt
+     [:div
+      [:div {:class "text-text-400 mb-1"} "Prompt:"]
+      [:pre {:class "bg-base-900 p-2 rounded font-mono overflow-x-auto max-h-48 overflow-y-auto"}
+       prompt]])])
+
+;; TaskCreate - header and input
+(defmethod render-tool-header "TaskCreate"
+  [_name {:keys [subject]}]
+  [:span {:class "flex items-center gap-2"}
+   [:span {:class "text-success"} "+"]
+   [:span {:class "text-text-300"} "TaskCreate"]
+   [:span {:class "text-text-200 text-2xs truncate max-w-md"} (str "\"" subject "\"")]])
+
+(defmethod render-tool-input "TaskCreate"
+  [_name {:keys [subject description]}]
+  [:div {:class "space-y-2 text-2xs"}
+   [:div {:class "text-text-400"} "Subject: " [:span {:class "text-text-200"} subject]]
+   (when description
+     [:div
+      [:div {:class "text-text-400 mb-1"} "Description:"]
+      [:pre {:class "bg-base-900 p-2 rounded font-mono overflow-x-auto whitespace-pre-wrap"}
+       description]])])
+
+;; TaskUpdate - header and input
+(defmethod render-tool-header "TaskUpdate"
+  [_name {:keys [taskId status]}]
+  (let [[indicator indicator-class] (when status (task-status-indicator status))]
+    [:span {:class "flex items-center gap-2"}
+     [:span {:class "text-info"} "→"]
+     [:span {:class "text-text-300"} "TaskUpdate"]
+     [:span {:class "text-text-400 text-2xs"} (str "#" taskId)]
+     (when status
+       [:span {:class "flex items-center gap-1"}
+        [:span {:class "text-text-500"} "→"]
+        [:span {:class indicator-class} indicator]
+        [:span {:class (str indicator-class " text-2xs")} status]])]))
+
+(defmethod render-tool-input "TaskUpdate"
+  [_name {:keys [taskId status subject description]}]
+  [:div {:class "space-y-1 text-2xs"}
+   [:div {:class "text-text-400"} "Task ID: " [:span {:class "text-text-200"} taskId]]
+   (when status
+     (let [[indicator indicator-class] (task-status-indicator status)]
+       [:div {:class "text-text-400"} "Status: " [:span {:class indicator-class} (str indicator " " status)]]))
+   (when subject [:div {:class "text-text-400"} "Subject: " [:span {:class "text-text-200"} subject]])
+   (when description
+     [:div
+      [:div {:class "text-text-400 mb-1"} "Description:"]
+      [:pre {:class "bg-base-900 p-2 rounded font-mono overflow-x-auto whitespace-pre-wrap"}
+       description]])])
+
+;; TaskList - header only
+(defmethod render-tool-header "TaskList"
+  [_name _parsed-input]
+  [:span {:class "flex items-center gap-2"}
+   [:span {:class "text-info"} "☰"]
+   [:span {:class "text-text-300"} "TaskList"]])
+
+;; TaskGet - header and input
+(defmethod render-tool-header "TaskGet"
+  [_name {:keys [taskId]}]
+  [:span {:class "flex items-center gap-2"}
+   [:span {:class "text-info"} "→"]
+   [:span {:class "text-text-300"} "TaskGet"]
+   [:span {:class "text-text-400 text-2xs"} (str "#" taskId)]])
+
+(defmethod render-tool-input "TaskGet"
+  [_name {:keys [taskId]}]
+  [:div {:class "text-2xs text-text-400"}
+   "Task ID: " [:span {:class "text-text-200"} taskId]])
+
+;; TodoWrite (legacy) - header, preview with task list, full input
+(def ^:private max-preview-todos
+  "Max todos to show in collapsed preview."
+  10)
+
+(defn- render-todo-item
+  "Render a single todo item with index and status indicator."
+  [idx {:keys [content status]}]
+  [:div {:class "flex items-center gap-2 text-xs font-mono"}
+   [:span {:class "text-text-500 w-4 text-right"} (inc idx)]
+   [:span {:class (case status
+                    "completed" "text-success"
+                    "in_progress" "text-warning"
+                    "text-text-400")}
+    (case status
+      "completed" "✓"
+      "in_progress" "●"
+      "○")]
+   [:span {:class "text-text-200"} content]])
+
+(defmethod render-tool-header "TodoWrite"
+  [_name {:keys [todos]}]
+  (let [total (count todos)
+        completed (count (filter #(= "completed" (:status %)) todos))
+        in-progress (count (filter #(= "in_progress" (:status %)) todos))]
+    [:span {:class "flex items-center gap-2"}
+     [:span {:class "text-success"} "☑"]
+     [:span {:class "text-text-300"} "TodoWrite"]
+     [:span {:class "text-text-500 text-2xs"}
+      (str completed "/" total " done"
+           (when (pos? in-progress) (str ", " in-progress " active")))]]))
+
+(defmethod render-tool-preview "TodoWrite"
+  [_name {:keys [todos]}]
+  (when (seq todos)
+    (let [total (count todos)
+          needs-truncation? (> total max-preview-todos)
+          ;; Show last N items (the active/pending ones, not old completed)
+          hidden-count (- total max-preview-todos)
+          visible-todos (if needs-truncation?
+                          (drop hidden-count todos)
+                          todos)
+          ;; Preserve original indices for display
+          start-idx (if needs-truncation? hidden-count 0)]
+      [:div {:class "mt-1 space-y-0.5"}
+       (when needs-truncation?
+         [:div {:class "text-text-500 text-xs font-mono pl-6"}
+          (str "... " hidden-count " more items")])
+       (for [[offset todo] (map-indexed vector visible-todos)]
+         ^{:key offset}
+         (render-todo-item (+ start-idx offset) todo))])))
+
+(defmethod render-tool-input "TodoWrite"
+  [_name {:keys [todos]}]
+  ;; Full list (only shown in expanded view, meaningful when > 10 items)
+  (when (seq todos)
+    [:div {:class "space-y-0.5"}
+     (for [[idx todo] (map-indexed vector todos)]
+       ^{:key idx}
+       (render-todo-item idx todo))]))
+
 ;; TOOL - Amber/yellow, uses tool-specific renderer via multimethod
 (defmethod view/render* [:html :agent.log/tool]
   [entry _format]
@@ -844,9 +1238,7 @@
      [:div {:class "flex gap-2 items-start"}
       [:span {:class "text-text-400 shrink-0" :title timestamp} (format-local-time timestamp)]
       [:span {:class "text-log-tool shrink-0 w-16"} "TOOL"]
-      (render-tool-html tool-name parsed input)]
-     ;; Hover card with tool-specific details
-     (render-tool-hover tool-name parsed input)]))
+      (render-tool-html tool-name parsed input)]]))
 
 (defmethod view/render* [:ai :agent.log/tool]
   [entry _format]

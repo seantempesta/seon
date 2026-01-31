@@ -15,6 +15,7 @@
    the pattern of other web handlers in seon.web.*"
   (:require [clojure.string :as str]
             [dev.onionpancakes.chassis.core :as h]
+            [org.httpkit.server :as hk]
             [ring.util.codec :as codec]
             [seon.ns.introspect :as introspect]
             [seon.ns.view :as view]
@@ -22,6 +23,8 @@
             [seon.web.sse :as sse]
             [seon.web.components :as ui]
             [seon.web.reactive.actions :as actions]
+            [seon.web.reactive.instance :as instance]
+            [seon.web.reactive.transform :as transform]
             [taoensso.timbre :as log]))
 
 ;;; ---------------------------------------------------------------------------
@@ -89,6 +92,38 @@
            ;; Check that it accepts a single argument (the options map)
            (let [arglists (:arglists (meta render-var))]
              (some #(= 1 (count %)) arglists))))))
+
+(defn- namespace-has-reactive-render?
+  "Check if namespace has a reactive render-content function.
+   A reactive namespace has:
+   - A public render-content function that takes 1 arg (ctx value map)
+   This is distinct from render which takes {:format :id} options map."
+  [ns-sym]
+  (when-let [ns-obj (find-ns ns-sym)]
+    (when-let [render-var (ns-resolve ns-obj 'render-content)]
+      (and (var? render-var)
+           (fn? @render-var)
+           (let [arglists (:arglists (meta render-var))]
+             (some #(= 1 (count %)) arglists))))))
+
+(defn- get-initial-state
+  "Get initial state for a reactive namespace.
+   Calls the namespace's initial-state function if it exists,
+   otherwise returns an empty map."
+  [ns-sym]
+  (if-let [ns-obj (find-ns ns-sym)]
+    (if-let [init-var (ns-resolve ns-obj 'initial-state)]
+      (when (and (var? init-var) (fn? @init-var))
+        (@init-var))
+      {})
+    {}))
+
+(defn- get-render-content-fn
+  "Get the render-content function from a namespace."
+  [ns-sym]
+  (when-let [ns-obj (find-ns ns-sym)]
+    (when-let [render-var (ns-resolve ns-obj 'render-content)]
+      @render-var)))
 
 (defn- call-namespace-render
   "Call the namespace's render function with format and id."
@@ -250,6 +285,88 @@
       (render-introspection-view ns-sym session-id false))))
 
 ;;; ---------------------------------------------------------------------------
+;;; Reactive Instance Page Rendering
+;;; ---------------------------------------------------------------------------
+
+(defn- reactive-instance-page
+  "Render full HTML page for a reactive instance.
+   Similar to demo.clj's full-page but using the instance's render-content."
+  [ns-sym instance-id]
+  (let [instance-info (instance/get-instance {::instance/id instance-id})
+        ctx-atom (::instance/atom instance-info)]
+    (if ctx-atom
+      (let [render-fn (get-render-content-fn ns-sym)
+            ctx-val @ctx-atom
+            content-hiccup (when render-fn (render-fn ctx-val))
+            transformed (when content-hiccup
+                          (transform/transform-hiccup ns-sym content-hiccup instance-id))]
+        (str
+         "<!DOCTYPE html>"
+         (h/html
+          [:html {:lang "en"}
+           [:head
+            [:meta {:charset "UTF-8"}]
+            [:meta {:name "viewport" :content "width=device-width, initial-scale=1.0"}]
+            [:title (str ns-sym " - Seon")]
+            [:link {:rel "stylesheet" :href "/css/output.css"}]
+            [:script {:type "module" :src html/datastar-js}]
+            [:script {:src "/js/scittle.js"}]
+            [:script {:src "/js/seon-debug.js"}]]
+           [:body.bg-base-bg.text-text-primary.font-mono.min-h-screen
+            [:div.container.mx-auto.p-6.max-w-4xl
+             [:header.mb-6
+              [:div.flex.items-center.justify-between
+               [:h1.text-xl.font-bold.text-accent-primary (str ns-sym)]
+               [:a {:href (str "/ns/" ns-sym "?view=introspect&instance=" instance-id)
+                    :class "px-2 py-1 text-xs font-mono rounded border text-text-500 border-base-700 hover:border-base-600 hover:text-text-200"}
+                "Introspect →"]]
+              [:p.text-text-secondary.text-sm.mt-1
+               "Instance: " [:code.text-signal instance-id]]]
+             ;; Main content - SSE connects via data-init
+             [:main#reactive-content
+              {:data-init (str "@post('/ns/" ns-sym "?instance=" instance-id "')")}
+              (or transformed [:div.text-text-muted "Loading..."])]
+             [:footer.mt-8.pt-4.border-t.border-surface-2.text-text-muted.text-sm
+              [:a.text-accent-primary.hover:underline {:href "/"} "← Back to dashboard"]]]]])))
+      ;; Instance not found
+      (str
+       "<!DOCTYPE html>"
+       (h/html
+        [:html {:lang "en"}
+         [:head
+          [:meta {:charset "UTF-8"}]
+          [:title "Instance Not Found"]]
+         [:body.bg-base-bg.text-text-primary.font-mono.min-h-screen.flex.items-center.justify-center
+          [:div.text-center
+           [:h1.text-xl.font-bold.text-error "Instance Not Found"]
+           [:p.text-text-muted.mt-2 "The instance " [:code instance-id] " does not exist."]
+           [:a.text-accent-primary.hover:underline.mt-4.inline-block
+            {:href (str "/ns/" ns-sym)} "Create new instance"]]]])))))
+
+(defn- instance-sse-handler
+  "SSE handler for reactive instance updates.
+   Registers the client channel with the instance for push updates."
+  [ns-sym instance-id request]
+  (hk/as-channel request
+    {:on-open (fn [channel]
+                (log/debug "SSE client connected for instance" {:ns ns-sym :instance instance-id})
+                ;; Send headers once when connection opens
+                (hk/send! channel
+                          {:status 200
+                           :headers {"Content-Type" "text/event-stream"
+                                     "Cache-Control" "no-cache"
+                                     "Connection" "keep-alive"}}
+                          false)
+                ;; Register client and push initial content
+                (instance/register-client! {::instance/id instance-id
+                                            ::instance/channel channel})
+                (instance/force-push! {::instance/id instance-id}))
+     :on-close (fn [channel _status]
+                 (log/debug "SSE client disconnected from instance" {:ns ns-sym :instance instance-id})
+                 (instance/unregister-client! {::instance/id instance-id
+                                               ::instance/channel channel}))}))
+
+;;; ---------------------------------------------------------------------------
 ;;; Skeleton Loading State
 ;;; ---------------------------------------------------------------------------
 
@@ -266,23 +383,8 @@
        [:div {:class "h-3 w-48 bg-base-700 rounded animate-skeleton"}]])]])
 
 ;;; ---------------------------------------------------------------------------
-;;; HTTP Handlers
+;;; Query Parameter Parsing
 ;;; ---------------------------------------------------------------------------
-
-(defn namespace-page
-  "Serve the namespace view HTML page."
-  [request]
-  (let [ns-str (get-in request [:path-params :namespace])
-        ns-sym (symbol ns-str)]
-    {:status 200
-     :headers {"Content-Type" "text/html; charset=utf-8"}
-     :body (html/base-page
-            {:title (str ns-str " - Seon")
-             :active-page nil
-             :skeleton (namespace-skeleton ns-sym)})}))
-
-;; Dynamic handler cache - keyed by namespace only
-(defonce ^:private namespace-handlers (atom {}))
 
 (defn- parse-query-params
   "Parse query string into map. Ring middleware isn't applied to SSE routes."
@@ -290,6 +392,60 @@
   (or (:query-params req)
       (when-let [qs (:query-string req)]
         (codec/form-decode qs))))
+
+;;; ---------------------------------------------------------------------------
+;;; HTTP Handlers
+;;; ---------------------------------------------------------------------------
+
+(defn namespace-page
+  "Serve the namespace view HTML page.
+
+   For reactive namespaces (those with render-content fn):
+   - Without ?instance param: Create new instance and redirect
+   - With ?instance param: Serve reactive page for that instance
+
+   For non-reactive namespaces:
+   - Serve introspection view as before"
+  [request]
+  (let [ns-str (get-in request [:path-params :namespace])
+        ns-sym (symbol ns-str)
+        params (parse-query-params request)
+        instance-id (get params "instance")
+        view (get params "view")
+        is-reactive? (namespace-has-reactive-render? ns-sym)]
+    (cond
+      ;; Reactive namespace without instance → create and redirect
+      (and is-reactive? (nil? instance-id) (not= view "introspect"))
+      (let [initial-val (get-initial-state ns-sym)
+            result (instance/create-instance! {::instance/namespace ns-sym
+                                               ::instance/initial-value initial-val})
+            new-id (::instance/id result)
+            render-fn (get-render-content-fn ns-sym)]
+        ;; Set render function for SSE push
+        (when render-fn
+          (instance/set-render-fn! {::instance/id new-id
+                                    ::instance/render-fn render-fn}))
+        (log/info "Created reactive instance, redirecting" {:ns ns-sym :instance new-id})
+        {:status 302
+         :headers {"Location" (str "/ns/" ns-sym "?instance=" new-id)}})
+
+      ;; Reactive with instance → serve instance page
+      (and is-reactive? instance-id (not= view "introspect"))
+      {:status 200
+       :headers {"Content-Type" "text/html; charset=utf-8"}
+       :body (reactive-instance-page ns-sym instance-id)}
+
+      ;; Not reactive or explicit introspect view → existing behavior
+      :else
+      {:status 200
+       :headers {"Content-Type" "text/html; charset=utf-8"}
+       :body (html/base-page
+              {:title (str ns-str " - Seon")
+               :active-page nil
+               :skeleton (namespace-skeleton ns-sym)})})))
+
+;; Dynamic handler cache - keyed by namespace only
+(defonce ^:private namespace-handlers (atom {}))
 
 (defn- get-namespace-handler
   "Get or create SSE handler for a namespace view."
@@ -306,12 +462,24 @@
       handler)))
 
 (defn namespace-sse
-  "SSE handler for namespace view - renders introspection data."
+  "SSE handler for namespace view.
+
+   For reactive instances (with ?instance param):
+   - Uses instance SSE handler with push updates
+
+   For introspection view:
+   - Uses polling SSE handler"
   [request]
   (let [ns-str (get-in request [:path-params :namespace])
         ns-sym (symbol ns-str)
-        handler (get-namespace-handler ns-sym)]
-    (handler request)))
+        params (parse-query-params request)
+        instance-id (get params "instance")]
+    (if instance-id
+      ;; Instance-based SSE with push updates
+      (instance-sse-handler ns-sym instance-id request)
+      ;; Legacy polling SSE for introspection
+      (let [handler (get-namespace-handler ns-sym)]
+        (handler request)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Hot Reload Support
@@ -332,20 +500,33 @@
    This is the new URL pattern for reactive UI actions.
    Reuses signal extraction and function resolution from actions.clj.
 
+   For instance-based calls (?instance=xxxx):
+   - Adds :seon.reactive/ctx atom to signals for action to use
+
    Function names are URL-decoded to handle %21 -> ! etc."
   [request]
   (let [ns-str (get-in request [:path-params :namespace])
         fn-str (get-in request [:path-params :function])
+        params (parse-query-params request)
+        instance-id (get params "instance")
         ;; URL-decode function name to handle %21 -> ! etc.
         fn-decoded (codec/url-decode fn-str)
         ns-sym (symbol ns-str)
         fn-sym (symbol fn-decoded)
         body (:body request)]
-    (log/info "Function call" {:ns ns-sym :fn fn-sym :body body})
+    (log/info "Function call" {:ns ns-sym :fn fn-sym :instance instance-id :body body})
     (if-let [action-fn (actions/resolve-action ns-sym fn-sym)]
       (try
-        (let [signals (actions/extract-signals body)]
-          (log/info "Executing function" {:ns ns-sym :fn fn-sym :signals signals})
+        (let [base-signals (actions/extract-signals body)
+              ;; Add instance ctx if present
+              signals (if instance-id
+                        (let [inst (instance/get-instance {::instance/id instance-id})
+                              ctx-atom (::instance/atom inst)]
+                          (if ctx-atom
+                            (assoc base-signals :seon.reactive/ctx ctx-atom)
+                            base-signals))
+                        base-signals)]
+          (log/info "Executing function" {:ns ns-sym :fn fn-sym :signals (dissoc signals :seon.reactive/ctx)})
           (action-fn signals)
           {:status 200
            :headers {"Content-Type" "application/json"}

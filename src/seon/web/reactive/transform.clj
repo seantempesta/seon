@@ -63,11 +63,15 @@
   "Transform {:on:click :fn-name} to Datastar format.
 
    Returns [new-key new-value] pair.
-   Uses /ns/:namespace/:function URL pattern."
-  [ns-sym k v]
+   Uses /ns/:namespace/:function URL pattern.
+   If instance-id is provided, appends ?instance=id to URL."
+  [ns-sym instance-id k v]
   (let [event (extract-event-name k)
         fn-name (if (keyword? v) (name v) (str v))
-        url (str "/ns/" ns-sym "/" fn-name)
+        base-url (str "/ns/" ns-sym "/" fn-name)
+        url (if instance-id
+              (str base-url "?instance=" instance-id)
+              base-url)
         datastar-key (keyword (str "data-on:" event))]
     [datastar-key (str "@post('" url "')")]))
 
@@ -94,26 +98,29 @@
 (defn transform-attrs
   "Transform a single attribute map.
 
-   ns-sym - The namespace symbol for action URLs
-   attrs  - The attribute map to transform
+   ns-sym      - The namespace symbol for action URLs
+   attrs       - The attribute map to transform
+   instance-id - Optional instance ID to include in action URLs
 
    Returns transformed attribute map."
-  {:malli/schema [:=> [:cat NamespaceSymbol [:maybe AttrMap]] [:maybe AttrMap]]}
-  [ns-sym attrs]
-  (if-not (map? attrs)
-    attrs
-    (if (contains? attrs :field)
-      ;; Field attribute gets special handling
-      (transform-field-attr (:field attrs) (dissoc attrs :field))
-      ;; Process other attributes
-      (reduce-kv
-       (fn [m k v]
-         (if (event-attr? k)
-           (let [[new-k new-v] (transform-event-attr ns-sym k v)]
-             (assoc m new-k new-v))
-           (assoc m k v)))
-       {}
-       attrs))))
+  {:malli/schema [:=> [:cat NamespaceSymbol [:maybe AttrMap] [:? [:maybe :string]]] [:maybe AttrMap]]}
+  ([ns-sym attrs]
+   (transform-attrs ns-sym attrs nil))
+  ([ns-sym attrs instance-id]
+   (if-not (map? attrs)
+     attrs
+     (if (contains? attrs :field)
+       ;; Field attribute gets special handling
+       (transform-field-attr (:field attrs) (dissoc attrs :field))
+       ;; Process other attributes
+       (reduce-kv
+        (fn [m k v]
+          (if (event-attr? k)
+            (let [[new-k new-v] (transform-event-attr ns-sym instance-id k v)]
+              (assoc m new-k new-v))
+            (assoc m k v)))
+        {}
+        attrs)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Hiccup Walking
@@ -135,20 +142,23 @@
 (defn transform-hiccup
   "Transform hiccup tree, converting reactive attributes to Datastar format.
 
-   ns-sym - The namespace symbol for action URLs (e.g., 'seon.trading)
-   hiccup - The hiccup data structure to transform
+   ns-sym      - The namespace symbol for action URLs (e.g., 'seon.trading)
+   hiccup      - The hiccup data structure to transform
+   instance-id - Optional instance ID to include in action URLs
 
    Returns transformed hiccup with Datastar attributes."
-  {:malli/schema [:=> [:cat NamespaceSymbol :any] :any]}
-  [ns-sym hiccup]
-  (walk/postwalk
-   (fn [form]
-     (if (and (hiccup-element? form) (has-attrs? form))
-       (let [[tag attrs & children] form
-             new-attrs (transform-attrs ns-sym attrs)]
-         (into [tag new-attrs] children))
-       form))
-   hiccup))
+  {:malli/schema [:=> [:cat NamespaceSymbol :any [:? [:maybe :string]]] :any]}
+  ([ns-sym hiccup]
+   (transform-hiccup ns-sym hiccup nil))
+  ([ns-sym hiccup instance-id]
+   (walk/postwalk
+    (fn [form]
+      (if (and (hiccup-element? form) (has-attrs? form))
+        (let [[tag attrs & children] form
+              new-attrs (transform-attrs ns-sym attrs instance-id)]
+          (into [tag new-attrs] children))
+        form))
+    hiccup)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Convenience Functions
