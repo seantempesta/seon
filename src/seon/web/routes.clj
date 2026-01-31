@@ -7,7 +7,9 @@
             [seon.web.agents :as agents]
             [seon.web.namespace :as namespace]
             [seon.ns.routes :as ns-routes]
-            [seon.primer.handlers :as primer-handlers]))
+            [seon.primer.handlers :as primer-handlers]
+            [seon.web.reactive.demo :as reactive-demo]
+            [seon.web.reactive.actions :as reactive-actions]))
 
 ;; Use var references (#') so handlers resolve to current fn after reload
 (def routes
@@ -28,12 +30,20 @@
    ;; Agent observatory routes
    [:get "/agents"]                #'agents/agents-page
    [:post "/agents"]               #'agents/agents-sse
-   [:post "/api/agents/toggle-completed"] #'agents/toggle-completed-handler})
+   [:post "/api/agents/toggle-completed"] #'agents/toggle-completed-handler
+   ;; Reactive UI demo routes (GET=page, POST=SSE)
+   [:get "/reactive-demo"]         #'reactive-demo/handler
+   [:post "/reactive-demo"]        #'reactive-demo/handler})
 
 ;; Dynamic routes with path parameters
 ;; Use var references (#') so handlers resolve to current fn after reload
 (def dynamic-routes
-  [;; Primer action route: /primer/action/:action-id
+  [;; Reactive UI action route: /action/:namespace/:function
+   {:method :post
+    :pattern #"/action/([^/]+)/([^/]+)"
+    :params [:namespace :function]
+    :handler #'reactive-actions/action-handler}
+   ;; Primer action route: /primer/action/:action-id
    {:method :post
     :pattern #"/primer/action/(.+)"
     :params [:action-id]
@@ -78,14 +88,17 @@
         dynamic-routes))
 
 (defn- serve-static
-  "Serve static files from resources/public. Returns nil if not found."
+  "Serve static files from resources/public. Returns nil if not found.
+   Cache headers are handled by wrap-no-cache middleware in server.clj."
   [path]
-  (when (str/starts-with? path "/css/")
+  (when-let [[content-type] (cond
+                              (str/starts-with? path "/css/") ["text/css"]
+                              (str/starts-with? path "/js/")  ["application/javascript"]
+                              :else nil)]
     (let [resource-path (str "public" path)]
       (when-let [resource (io/resource resource-path)]
         {:status 200
-         :headers {"Content-Type" "text/css"
-                   "Cache-Control" "public, max-age=31536000"}
+         :headers {"Content-Type" content-type}
          :body (slurp resource)}))))
 
 (defn handler [request]

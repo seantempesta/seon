@@ -21,8 +21,8 @@
      [:meta {:charset "utf-8"}]
      [:meta {:name "viewport" :content "width=device-width, initial-scale=1"}]
      [:title "Primer"]
-     [:script {:src "https://cdn.jsdelivr.net/gh/starfederation/datastar@1.0.0-RC.6/bundles/datastar.js"
-               :defer true :type "module"}]
+     ;; Local Datastar (ES module)
+     [:script {:src "/js/datastar.js" :type "module"}]
      [:style styles/base-css]]
     [:body {:style "margin: 0; padding: 0;"}
      [:div {:data-init "@post('/primer')"}]
