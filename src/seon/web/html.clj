@@ -110,14 +110,14 @@
       [:script {:src "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"}]
       [:script {:src "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/diff.min.js"}]
       ;; Initialize highlight.js and re-run after Datastar morphs
-      [:script "
+      [:script (h/raw "
         document.addEventListener('DOMContentLoaded', () => hljs.highlightAll());
         document.addEventListener('datastar-morph', () => {
           document.querySelectorAll('pre code:not(.hljs)').forEach(el => hljs.highlightElement(el));
         });
-      "]
+      ")]
       ;; Hover card positioning - fixes overflow clipping by using fixed positioning
-      [:script "
+      [:script (h/raw "
         document.addEventListener('mouseover', (e) => {
           const line = e.target.closest('.log-line');
           if (!line) return;
@@ -137,7 +137,7 @@
             card.style.bottom = (window.innerHeight - rect.top + 4) + 'px';
           }
         });
-      "]
+      ")]
       [:div {:class "max-w-7xl mx-auto"}
        ;; Datastar init div - auto-POSTs on load and reconnects on online event
        [:div {:data-init on-load-js

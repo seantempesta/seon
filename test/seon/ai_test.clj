@@ -528,6 +528,98 @@
       (is (= 1 (count messages)))
       (is (= structured-content (::ai/content (first messages)))))))
 
+;;; ---------------------------------------------------------------------------
+;;; Initial Context Schema Tests
+;;; ---------------------------------------------------------------------------
+
+(deftest file-context-schema-test
+  (testing "::ai/file-context generates and validates correctly"
+    (let [fc {::ai/path "test.clj"
+              ::ai/content "(ns test)"
+              ::ai/language "clojure"
+              ::ai/byte-count 10
+              ::ai/read-success true}]
+      (is (m/validate ::ai/file-context fc))))
+
+  (testing "::ai/file-context validates with error"
+    (let [fc {::ai/path "missing.clj"
+              ::ai/content ""
+              ::ai/language ""
+              ::ai/byte-count 0
+              ::ai/read-success false
+              ::ai/error "File not found"}]
+      (is (m/validate ::ai/file-context fc))))
+
+  (testing "::ai/file-context rejects invalid data"
+    (is (not (m/validate ::ai/file-context {:path "test.clj"})))  ; Missing required keys
+    (is (not (m/validate ::ai/file-context {::ai/path 123})))))  ; Wrong type
+
+(deftest files-context-schema-test
+  (testing "::ai/files-context validates vector of file contexts"
+    (let [fcs [{::ai/path "a.clj"
+                ::ai/content "(ns a)"
+                ::ai/language "clojure"
+                ::ai/byte-count 6
+                ::ai/read-success true}
+               {::ai/path "b.md"
+                ::ai/content "# Title"
+                ::ai/language "markdown"
+                ::ai/byte-count 7
+                ::ai/read-success true}]]
+      (is (m/validate ::ai/files-context fcs))))
+
+  (testing "::ai/files-context validates empty vector"
+    (is (m/validate ::ai/files-context []))))
+
+(deftest initial-context-schema-test
+  (testing "::ai/initial-context validates with all fields"
+    (let [ctx {::ai/task-prompt "Implement the feature"
+               ::ai/files-context [{::ai/path "prd.md"
+                                    ::ai/content "# PRD"
+                                    ::ai/language "markdown"
+                                    ::ai/byte-count 5
+                                    ::ai/read-success true}]
+               ::ai/agent-instructions "You are a helpful agent..."
+               ::ai/agent-instructions-path ".claude/AGENT.md"}]
+      (is (m/validate ::ai/initial-context ctx))))
+
+  (testing "::ai/initial-context validates with only required field"
+    (let [ctx {::ai/task-prompt "Do the thing"}]
+      (is (m/validate ::ai/initial-context ctx))))
+
+  (testing "::ai/initial-context rejects missing task-prompt"
+    (is (not (m/validate ::ai/initial-context {})))))
+
+;;; ---------------------------------------------------------------------------
+;;; Initial Context Persistence Tests
+;;; ---------------------------------------------------------------------------
+
+(deftest start-session-with-initial-context-test
+  (testing "start-session! stores and retrieves initial context"
+    (let [initial-ctx {::ai/task-prompt "Test task for initial context"
+                       ::ai/files-context [{::ai/path "test.clj"
+                                            ::ai/content "(ns test)\n(defn hello [])"
+                                            ::ai/language "clojure"
+                                            ::ai/byte-count 30
+                                            ::ai/read-success true}]
+                       ::ai/agent-instructions "You are a test agent."
+                       ::ai/agent-instructions-path ".claude/AGENT.md"}
+          {sid ::ai/session-id} (ai/start-session! {::ai/node *test-node*
+                                                     ::ai/namespace 'seon.test
+                                                     ::ai/prompt "Test prompt"
+                                                     ::ai/initial-context initial-ctx})
+          session (ai/get-session {::ai/node *test-node* ::ai/session-id sid})]
+      (is (some? session))
+      (is (= initial-ctx (::ai/initial-context session)))))
+
+  (testing "start-session! works without initial context (backwards compatible)"
+    (let [{sid ::ai/session-id} (ai/start-session! {::ai/node *test-node*
+                                                     ::ai/namespace 'seon.test
+                                                     ::ai/prompt "Test prompt"})
+          session (ai/get-session {::ai/node *test-node* ::ai/session-id sid})]
+      (is (some? session))
+      (is (nil? (::ai/initial-context session))))))
+
 (comment
   ;; Run all tests
   (clojure.test/run-tests 'seon.ai-test)

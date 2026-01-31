@@ -52,6 +52,11 @@
   animation: skeleton-pulse 1.5s ease-in-out infinite;
 }
 
+/* Edit diff: hide preview when expanded, show full diff */
+details.edit-diff[open] > summary {
+  display: none;
+}
+
 /* Customize prose for dark theme */
 .prose {
   --tw-prose-body: #d4d0c8;

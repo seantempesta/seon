@@ -152,6 +152,11 @@
                    [::cache-read-tokens {:optional true} ::cache-read-tokens]
                    [::raw-message {:optional true} ::raw-message]])
 
+;; Files to include in agent context (vector of relative file paths)
+(schema/register! ::files
+                  [:vector {:description "Vector of relative file paths to include as context in the agent prompt"}
+                   :string])
+
 ;; Launch request - uses base schemas where appropriate
 ;; SDK-related schemas (permission-mode, max-turns, etc.) are in seon.ai.claude.sdk
 (schema/register! ::launch-agent-request
@@ -160,6 +165,7 @@
                    [::ai/namespace ::ai/namespace]
                    [::ai/prompt ::ai/prompt]
                    [::model {:optional true} ::model]
+                   [::files {:optional true} ::files]
                    [::sdk/permission-mode {:optional true} ::sdk/permission-mode]
                    [::sdk/max-turns {:optional true} ::sdk/max-turns]
                    [::sdk/max-budget-usd {:optional true} ::sdk/max-budget-usd]
@@ -249,6 +255,7 @@
                    [::ai/namespace ::ai/namespace]
                    [::ai/prompt ::ai/prompt]
                    [::model {:optional true} ::model]
+                   [::files {:optional true} ::files]
                    [::sdk/permission-mode {:optional true} ::sdk/permission-mode]
                    [::sdk/max-turns {:optional true} ::sdk/max-turns]
                    [::sdk/max-budget-usd {:optional true} ::sdk/max-budget-usd]
@@ -524,31 +531,110 @@
       (str (slurp f) "\n\n---\n\n")
       "")))
 
+(defn- expand-home
+  "Expand ~ to user's home directory in file paths."
+  [path]
+  (if (str/starts-with? path "~")
+    (str/replace-first path "~" (System/getProperty "user.home"))
+    path))
+
+(defn- detect-language
+  "Detect language from file extension for syntax highlighting."
+  [path]
+  (let [ext (some-> path (str/split #"\.") last)]
+    (case ext
+      ("clj" "cljs" "cljc" "edn") "clojure"
+      ("md" "markdown") "markdown"
+      ("json") "json"
+      ("js" "mjs") "javascript"
+      ("ts" "tsx") "typescript"
+      ("html" "htm") "html"
+      ("css") "css"
+      ("sql") "sql"
+      ("sh" "bash") "bash"
+      ("yaml" "yml") "yaml"
+      "")))
+
+(defn- read-file-context
+  "Read a file and return structured context map.
+   Returns map with ::ai/path, ::ai/content, ::ai/language, ::ai/byte-count,
+   ::ai/read-success, and optionally ::ai/error."
+  [path]
+  (try
+    (let [expanded-path (expand-home path)
+          f (io/file expanded-path)
+          content (slurp f)
+          lang (detect-language path)]
+      {::ai/path path
+       ::ai/content content
+       ::ai/language lang
+       ::ai/byte-count (count (.getBytes content "UTF-8"))
+       ::ai/read-success true})
+    (catch Exception e
+      (log/warn "Failed to read file for agent context" {:path path :error (.getMessage e)})
+      {::ai/path path
+       ::ai/content ""
+       ::ai/language ""
+       ::ai/byte-count 0
+       ::ai/read-success false
+       ::ai/error (.getMessage e)})))
+
+(defn- build-files-context
+  "Build structured files context from a vector of file paths.
+   Returns vector of file context maps suitable for ::ai/files-context."
+  [files]
+  (when (seq files)
+    (mapv read-file-context files)))
+
+(defn- format-file-context
+  "Read files and format them as context for the agent prompt.
+   Returns formatted string or nil if no files/errors.
+
+   Files can be relative paths (from project root), absolute paths, or use ~ for home."
+  [files]
+  (when (seq files)
+    (let [file-contents
+          (for [path files]
+            (try
+              (let [expanded-path (expand-home path)
+                    f (io/file expanded-path)
+                    content (slurp f)
+                    ;; Detect file type for syntax highlighting
+                    ext (some-> path (str/split #"\.") last)
+                    lang (case ext
+                           ("clj" "cljs" "cljc" "edn") "clojure"
+                           ("md" "markdown") "markdown"
+                           ("json") "json"
+                           ("js" "mjs") "javascript"
+                           ("ts" "tsx") "typescript"
+                           ("html" "htm") "html"
+                           ("css") "css"
+                           ("sql") "sql"
+                           ("sh" "bash") "bash"
+                           ("yaml" "yml") "yaml"
+                           "")]
+                (str "### " path "\n```" lang "\n" content "\n```\n"))
+              (catch Exception e
+                (log/warn "Failed to read file for agent context" {:path path :error (.getMessage e)})
+                (str "### " path "\n[Error reading file: " (.getMessage e) "]\n"))))]
+      (str "\n\n---\n\n# Reference Files\n\n"
+           "The following files are provided as context for your task:\n\n"
+           (str/join "\n" file-contents)))))
+
 (defn- build-agent-prompt
-  "Build the agent prompt with session context and AGENT.md instructions."
-  [session-id namespace prompt]
-  (str (load-agent-instructions)
-       "# Session Context\n\n"
-       "- **Session ID**: " session-id "\n"
-       "- **Namespace**: " namespace "\n\n"
-       "## MCP Tools\n\n"
-       "To evaluate Clojure code:\n\n"
-       "```\n"
-       "eval(session_id=\"" session-id "\", code=\"(your-code-here)\")\n"
-       "```\n\n"
-       "Your context atom `*ctx*` is available with namespaced keys:\n\n"
-       "```clojure\n"
-       "(swap! *ctx* assoc :" namespace "/data [...])\n"
-       "(:" namespace "/data @*ctx*)\n"
-       "```\n\n"
-       "Helper functions (qualify with user/):\n\n"
-       "```clojure\n"
-       "(user/reload)           ; Reload changed code\n"
-       "(user/search \"query\")  ; Web search via Gemini\n"
-       "(user/status)           ; System status\n"
-       "```\n\n"
-       "---\n\n"
-       "# Your Task\n\n" prompt))
+  "Build the agent prompt with session context, AGENT.md instructions, and optional file context."
+  [session-id namespace prompt files]
+  (let [file-context (format-file-context files)]
+    (str (load-agent-instructions)
+         ;; Just the dynamic values - AGENT.md already explains how to use them
+         "# Your Session\n\n"
+         "- **Session ID**: `" session-id "`\n"
+         "- **Namespace**: `" namespace "`\n"
+         "- **MCP eval**: `eval(session_id=\"" session-id "\", code=\"...\")`\n\n"
+         ;; Include file context if provided
+         (when file-context file-context)
+         "---\n\n"
+         "# Your Task\n\n" prompt)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Agent Registry (uses shared seon.ai.agent registry)
@@ -589,6 +675,9 @@
      ::ai/namespace          - Required. Agent namespace (string or symbol)
      ::ai/prompt             - Required. Task description for the agent
      ::model                 - Optional. Claude model (default: opus)
+     ::files                 - Optional. Vector of file paths to include as context.
+                               Files are read and included in the agent's prompt.
+                               Use this to share PRDs, plans, or relevant code.
      ::sdk/permission-mode   - Optional. Permission mode (default: bypassPermissions)
      ::sdk/max-turns         - Optional. Max conversation turns
      ::sdk/max-budget-usd    - Optional. Cost limit
@@ -610,9 +699,16 @@
    Example:
      (launch-agent! {::ai/node xtdb-node
                      ::ai/namespace 'seon.trading
-                     ::ai/prompt \"Implement the signals dashboard\"})"
+                     ::ai/prompt \"Implement the signals dashboard\"})
+
+     ;; With file context
+     (launch-agent! {::ai/node xtdb-node
+                     ::ai/namespace 'seon.trading
+                     ::ai/prompt \"Read the PRD and implement Phase 1.\"
+                     ::files [\"docs/prds/my-feature/prd.md\"
+                              \"docs/prds/my-feature/plan.md\"]})"
   [{::ai/keys [node namespace prompt force?]
-    ::keys [model]
+    ::keys [model files]
     ::sdk/keys [permission-mode max-turns max-budget-usd allowed-tools disallowed-tools chrome]}]
   (log/info "Launching agent" {:namespace namespace})
 
@@ -645,22 +741,33 @@
 
     (log/info "Created agent session" {:session-id id :port nrepl-port})
 
-    ;; 2. Create AI session for conversation persistence
-    ;;    Store the Seon session ID so completed sessions can find their log files
-    (let [{ai-session-id ::ai/session-id}
+    ;; 2. Build initial context for persistence
+    ;;    This captures the structured data (files, instructions) separately from the prompt
+    (let [files-context (build-files-context files)
+          agent-instructions (load-agent-instructions)
+          initial-context (cond-> {::ai/task-prompt prompt}
+                            (seq files-context) (assoc ::ai/files-context files-context)
+                            (not (str/blank? agent-instructions))
+                            (assoc ::ai/agent-instructions agent-instructions
+                                   ::ai/agent-instructions-path agent-instructions-path))
+
+          ;; 2b. Create AI session for conversation persistence
+          ;;     Store the Seon session ID so completed sessions can find their log files
+          {ai-session-id ::ai/session-id}
           (ai/start-session! {::ai/node node
                               ::ai/namespace namespace
                               ::ai/prompt prompt
-                              ::ai/agent-session-id id})
+                              ::ai/agent-session-id id
+                              ::ai/initial-context initial-context})
           _ (log/info "Created AI session for persistence" {:ai-session-id ai-session-id})
 
-          ;; 2b. Create structured agent log for real-time tailing
+          ;; 2c. Create structured agent log for real-time tailing
           agent-logger (agent-log/create-logger! {::agent-log/session-id id})
           _ (agent-log/log-launch! agent-logger {::agent-log/namespace (str namespace)
                                                   ::agent-log/port nrepl-port})
 
-          ;; 3. Build agent prompt with session context
-          full-prompt (build-agent-prompt id namespace prompt)
+          ;; 3. Build agent prompt with session context and optional file context
+          full-prompt (build-agent-prompt id namespace prompt files)
 
           ;; 4. Build MCP config with session_id in environment
           mcp-config (build-agent-mcp-config id)
@@ -676,11 +783,12 @@
           (sdk/spawn-claude-code (cond-> {::sdk/model (or model sdk/default-model)
                                           ::sdk/permission-mode (or permission-mode "bypassPermissions")
                                           ::sdk/mcp-servers mcp-config
-                                          ::sdk/max-turns effective-max-turns}
+                                          ::sdk/max-turns effective-max-turns
+                                          ;; Enable Chrome by default for browser automation
+                                          ::sdk/chrome (if (some? chrome) chrome true)}
                                    max-budget-usd (assoc ::sdk/max-budget-usd max-budget-usd)
                                    allowed-tools (assoc ::sdk/allowed-tools allowed-tools)
-                                   disallowed-tools (assoc ::sdk/disallowed-tools disallowed-tools)
-                                   chrome (assoc ::sdk/chrome chrome)))
+                                   disallowed-tools (assoc ::sdk/disallowed-tools disallowed-tools)))
 
           ;; Use sliding buffer to prevent blocking when channel fills up.
           ;; Without this, >!! blocks at 100 messages and deadlocks the reader.
@@ -913,6 +1021,9 @@
      ::ai/namespace          - Required. Agent namespace (string or symbol)
      ::ai/prompt             - Required. Task description for the agent
      ::model                 - Optional. Claude model (default: opus)
+     ::files                 - Optional. Vector of file paths to include as context.
+                               Files are read and included in the agent's prompt.
+                               Use this to share PRDs, plans, or relevant code.
      ::sdk/permission-mode   - Optional. Permission mode (default: bypassPermissions)
      ::sdk/max-turns         - Optional. Max conversation turns
      ::sdk/max-budget-usd    - Optional. Cost limit
@@ -934,13 +1045,19 @@
                       ::ai/namespace 'seon.trading
                       ::ai/prompt \"Implement the signals dashboard\"
                       ::timeout-ms 300000})  ; 5 minute timeout
+
+     ;; With file context
+     (launch-agent!! {::ai/node xtdb-node
+                      ::ai/namespace 'seon.feature
+                      ::ai/prompt \"Implement the feature.\"
+                      ::files [\"docs/prds/feature/prd.md\"]})
      ;; => {::result-text \"## Summary\\n\\n...\"
      ;;     ::agent-status :completed
      ;;     ::cost-usd 0.23
      ;;     ::duration-ms 15185
      ;;     ::num-turns 3}"
   [{::ai/keys [node namespace prompt force?]
-    ::keys [model timeout-ms]
+    ::keys [model files timeout-ms]
     ::sdk/keys [permission-mode max-turns max-budget-usd allowed-tools disallowed-tools]
     :as request}]
   (log/info "Launching blocking agent" {:namespace namespace :timeout-ms timeout-ms})
@@ -1373,6 +1490,41 @@
          ::error (str "Agent " session-id " not found in registry. It may have crashed.")}
         ;; Already completed
         result))))
+
+(defn wait-for-agents!!
+  "Block until all agents complete and return their results.
+
+   Waits for multiple agents in parallel using core.async.
+   Returns a map of session-id -> result.
+
+   Request keys:
+     ::ai/session-ids - Required. Vector of 4-char hex agent session IDs
+     ::timeout-ms     - Optional. Timeout in milliseconds (default: wait indefinitely)
+
+   Example:
+     (wait-for-agents!! {::ai/session-ids [\"a1b2\" \"c3d4\" \"e5f6\"]})
+     ;; => {\"a1b2\" {::result-text \"...\" ::agent-status :completed}
+     ;;     \"c3d4\" {::result-text \"...\" ::agent-status :completed}
+     ;;     \"e5f6\" {::result-text \"...\" ::agent-status :completed}}"
+  [{::ai/keys [session-ids] ::keys [timeout-ms]}]
+  (log/info "Waiting for agents" {:session-ids session-ids :timeout-ms timeout-ms})
+
+  ;; Launch async waits for each agent
+  (let [result-chs (into {}
+                         (map (fn [sid]
+                                [sid (async/thread
+                                       (wait-for-agent!! {::ai/session-id sid
+                                                          ::timeout-ms timeout-ms}))]))
+                         session-ids)
+        results (atom {})]
+
+    ;; Collect all results
+    (doseq [[sid ch] result-chs]
+      (let [result (async/<!! ch)]
+        (swap! results assoc sid result)))
+
+    (log/info "All agents completed" {:count (count session-ids)})
+    @results))
 
 (comment
   ;; REPL exploration

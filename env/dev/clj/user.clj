@@ -58,7 +58,8 @@
 ;; - Only reloads what actually changed (no "reload world" on first call)
 ;; - Faster and more incremental
 (reload/init {:dirs ["src" "env/dev/clj" "test"]
-              :no-reload '#{user}})
+              :no-reload '#{user}
+              :reload-hook 'after-ns-reload})
 
 (defn reload
   "Fast reload of changed code via clj-reload.
@@ -136,18 +137,39 @@
 (defn launch-agent!!
   "Launch agent and block until completion. Returns result map.
 
-  Example: (user/launch-agent!! 'seon.trading \"Read the PRD and implement Phase 1.\")"
-  [namespace prompt]
+  Options:
+    :files - Vector of file paths to include as context in the agent's prompt.
+             Use this to share PRDs, plans, or relevant code with the agent.
+
+  Examples:
+    (user/launch-agent!! 'seon.trading \"Read the PRD and implement Phase 1.\")
+
+    ;; With file context (preferred for non-trivial tasks)
+    (user/launch-agent!! 'seon.feature \"Implement the feature.\"
+                         :files [\"docs/prds/feature/prd.md\"
+                                 \"docs/prds/feature/plan.md\"])"
+  [namespace prompt & {:keys [files]}]
   ((requiring-resolve 'seon.ai.claude/launch-agent!!)
-   #:seon.ai{:node (xtdb-node) :namespace namespace :prompt prompt}))
+   (cond-> #:seon.ai{:node (xtdb-node) :namespace namespace :prompt prompt}
+     files (assoc :seon.ai.claude/files files))))
 
 (defn launch-agent!
   "Launch agent without blocking. Returns handle with ::ai/session-id.
 
-  Example: (user/launch-agent! 'seon.trading \"Implement feature X\")"
-  [namespace prompt]
+  Options:
+    :files - Vector of file paths to include as context in the agent's prompt.
+             Use this to share PRDs, plans, or relevant code with the agent.
+
+  Examples:
+    (user/launch-agent! 'seon.trading \"Implement feature X\")
+
+    ;; With file context
+    (user/launch-agent! 'seon.feature \"Implement the feature.\"
+                        :files [\"docs/prds/feature/prd.md\"])"
+  [namespace prompt & {:keys [files]}]
   ((requiring-resolve 'seon.ai.claude/launch-agent!)
-   #:seon.ai{:node (xtdb-node) :namespace namespace :prompt prompt}))
+   (cond-> #:seon.ai{:node (xtdb-node) :namespace namespace :prompt prompt}
+     files (assoc :seon.ai.claude/files files))))
 
 (defn agents
   "List running agents with status, namespace, session-id, port."
@@ -167,12 +189,24 @@
    #:seon.ai{:session-id session-id}))
 
 (defn wait-for-agent!!
-  "Block until a running agent completes. Use to re-attach after MCP timeout.
+  "Block until running agent(s) complete. Use to re-attach after MCP timeout.
 
-  Example: (user/wait-for-agent!! \"a1b2\")"
-  [session-id]
-  ((requiring-resolve 'seon.ai.claude/wait-for-agent!!)
-   #:seon.ai{:session-id session-id}))
+  Accepts either a single session-id or a vector of session-ids.
+
+  Examples:
+    ;; Single agent
+    (user/wait-for-agent!! \"a1b2\")
+    ;; => {::claude/result-text \"...\" ::claude/agent-status :completed}
+
+    ;; Multiple agents (waits in parallel, returns when ALL complete)
+    (user/wait-for-agent!! [\"a1b2\" \"c3d4\" \"e5f6\"])
+    ;; => {\"a1b2\" {...} \"c3d4\" {...} \"e5f6\" {...}}"
+  [session-id-or-ids]
+  (if (vector? session-id-or-ids)
+    ((requiring-resolve 'seon.ai.claude/wait-for-agents!!)
+     #:seon.ai{:session-ids session-id-or-ids})
+    ((requiring-resolve 'seon.ai.claude/wait-for-agent!!)
+     #:seon.ai{:session-id session-id-or-ids})))
 
 (defn agent-messages
   "Get recent messages from an agent to check progress.
@@ -258,11 +292,24 @@
 (defn search
   "Search the web via Gemini. Use this when you're stuck or need current info.
 
+  STRONGLY ENCOURAGED: Include :files to give Gemini your actual code!
+  This prevents vague guessing and gets you real answers.
+
   Examples:
+    ;; Simple search (use sparingly)
     (search \"XTDB v2 SQL syntax for temporal queries\")
-    (search \"Clojure Malli coercion patterns\")"
-  [query]
-  (gemini/search {::gemini/prompt query}))
+
+    ;; WITH CODE CONTEXT - do this! (preferred)
+    (search \"Why doesn't hot reload work?\"
+            :files [\"src/seon/web/server.clj\"
+                    \"src/seon/web/routes.clj\"])
+
+    ;; Debugging with full context
+    (search \"Getting nil from query, what's wrong?\"
+            :files [\"src/seon/db/queries.clj\"])"
+  [query & {:keys [files]}]
+  (gemini/search (cond-> {:seon.ai.gemini/prompt query}
+                   files (assoc :seon.ai.gemini/files files))))
 
 (defn ask
   "Ask Gemini a question (no web search, uses model knowledge).
@@ -270,7 +317,7 @@
   Examples:
     (ask \"Explain the difference between XTQL and SQL in XTDB\")"
   [query]
-  (gemini/ask {::gemini/prompt query}))
+  (gemini/ask {:seon.ai.gemini/prompt query}))
 
 ;; ========================================
 ;; Database Management

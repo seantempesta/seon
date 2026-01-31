@@ -1,10 +1,11 @@
 (ns seon.ns.routes
-  "HTTP routes for namespace introspection views.
+  "HTTP routes for namespace introspection and function calls.
 
    Provides:
    - /ns/{namespace} - Custom render (if namespace has `render` fn)
                        or static introspection view (vars, functions, schemas)
    - /ns/{namespace}?id={id} - Instance view (passed to render)
+   - /ns/{namespace}/{function} - Function call (POST only, for reactive UI actions)
 
    Convention: If a namespace has a public `render` function, it will be called
    with {:format :html/:ai/:raw :id optional-id}. This allows namespaces to
@@ -19,7 +20,9 @@
             [seon.ns.view :as view]
             [seon.web.html :as html]
             [seon.web.sse :as sse]
-            [seon.web.components :as ui]))
+            [seon.web.components :as ui]
+            [seon.web.reactive.actions :as actions]
+            [taoensso.timbre :as log]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Namespace View Rendering
@@ -320,16 +323,66 @@
   (reset! namespace-handlers {}))
 
 ;;; ---------------------------------------------------------------------------
+;;; Function Call Handler
+;;; ---------------------------------------------------------------------------
+
+(defn function-call-handler
+  "Handle POST /ns/:namespace/:function requests.
+
+   This is the new URL pattern for reactive UI actions.
+   Reuses signal extraction and function resolution from actions.clj.
+
+   Function names are URL-decoded to handle %21 -> ! etc."
+  [request]
+  (let [ns-str (get-in request [:path-params :namespace])
+        fn-str (get-in request [:path-params :function])
+        ;; URL-decode function name to handle %21 -> ! etc.
+        fn-decoded (codec/url-decode fn-str)
+        ns-sym (symbol ns-str)
+        fn-sym (symbol fn-decoded)
+        body (:body request)]
+    (log/info "Function call" {:ns ns-sym :fn fn-sym :body body})
+    (if-let [action-fn (actions/resolve-action ns-sym fn-sym)]
+      (try
+        (let [signals (actions/extract-signals body)]
+          (log/info "Executing function" {:ns ns-sym :fn fn-sym :signals signals})
+          (action-fn signals)
+          {:status 200
+           :headers {"Content-Type" "application/json"}
+           :body "{\"success\":true}"})
+        (catch Exception e
+          (log/error e "Function execution failed" {:ns ns-sym :fn fn-sym})
+          {:status 500
+           :headers {"Content-Type" "application/json"}
+           :body (str "{\"success\":false,\"error\":\"" (.getMessage e) "\"}")}))
+      (do
+        (log/warn "Function not found" {:ns ns-sym :fn fn-sym})
+        {:status 404
+         :headers {"Content-Type" "application/json"}
+         :body "{\"success\":false,\"error\":\"Function not found\"}"}))))
+
+;;; ---------------------------------------------------------------------------
 ;;; Route Registration Helper
 ;;; ---------------------------------------------------------------------------
 
 (def route-patterns
-  "Dynamic route patterns for namespace introspection.
-   Use with seon.web.routes/dynamic-routes."
-  [{:method :get
+  "Dynamic route patterns for namespace introspection and function calls.
+   Use with seon.web.routes/dynamic-routes.
+
+   Order matters: function call pattern must come BEFORE namespace pattern
+   because the function pattern is more specific."
+  [;; Function call: POST /ns/:namespace/:function
+   ;; Function names can contain ! ? - _ etc.
+   {:method :post
+    :pattern #"/ns/([a-z][a-z0-9._-]*)/([a-zA-Z][a-zA-Z0-9_!?*-]*)"
+    :params [:namespace :function]
+    :handler #'function-call-handler}
+   ;; Namespace view: GET /ns/:namespace
+   {:method :get
     :pattern #"/ns/([a-z][a-z0-9._-]*)"
     :params [:namespace]
     :handler #'namespace-page}
+   ;; Namespace SSE: POST /ns/:namespace (no function = SSE for introspection)
    {:method :post
     :pattern #"/ns/([a-z][a-z0-9._-]*)"
     :params [:namespace]

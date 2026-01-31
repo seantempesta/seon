@@ -133,7 +133,7 @@
     [:input#input-message.w-full.px-3.py-2.bg-surface-2.text-text-primary.rounded.border.border-surface-3
      {:field :message
       :placeholder "Type something..."
-      :data-on:input "@post('/action/seon.web.reactive.demo/set-message!')"}]
+      :data-on:input "@post('/ns/seon.web.reactive.demo/set-message!')"}]
     [:p.mt-2.text-text-secondary
      "You typed: "
      [:span#span-message.text-accent-primary.font-mono (or message "(nothing yet)")]]]])
@@ -157,6 +157,8 @@
         [:link {:rel "stylesheet" :href "/css/output.css"}]
         ;; Datastar from shared constant
         [:script {:type "module" :src html/datastar-js}]
+        ;; Scittle - ClojureScript interpreter for browser eval
+        [:script {:src "/js/scittle.js"}]
         ;; Debug panel - shows SSE connection status, events, errors
         ;; Access window.SEON_DEBUG in console for full state
         [:script {:src "/js/seon-debug.js"}]]

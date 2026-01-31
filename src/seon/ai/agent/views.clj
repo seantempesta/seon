@@ -432,72 +432,69 @@
       (when display-input
         (hover-code-block "input" display-input))])))
 
-;; Edit tool - show file path and diff stats
+(defn- render-diff-lines
+  "Render diff lines with - prefix for old, + prefix for new."
+  [old-lines new-lines]
+  [:code
+   (when (seq old-lines)
+     [:span {:class "text-error/80 block"}
+      (str/join "\n" (map #(str "- " %) old-lines))])
+   (when (seq new-lines)
+     [:span {:class "text-success/80 block"}
+      (str/join "\n" (map #(str "+ " %) new-lines))])])
+
+(def ^:private diff-preview-lines
+  "Max lines to show in diff preview before truncating."
+  3)
+
+;; Edit tool - show file path with inline diff preview, expandable for long diffs
 (defmethod render-tool-html "Edit"
   [_tool-name parsed-input _raw-input]
   (let [{:keys [file_path old_string new_string replace_all]} parsed-input
         file-name (basename file_path)
         stats (compute-diff-stats old_string new_string)
         stats-str (format-diff-stats stats)
-        old-preview (truncate old_string 60)
-        new-preview (truncate new_string 60)
-        ;; Detect language from file extension
-        lang (when file_path
-               (cond
-                 (str/ends-with? file_path ".clj") "clojure"
-                 (str/ends-with? file_path ".cljs") "clojure"
-                 (str/ends-with? file_path ".cljc") "clojure"
-                 (str/ends-with? file_path ".edn") "clojure"
-                 (str/ends-with? file_path ".sh") "bash"
-                 :else nil))
-        lang-class (when lang (str "language-" lang))]
-    [:span {:class "flex gap-2 flex-1 min-w-0 items-start"}
-     [:span {:class "text-log-tool font-medium shrink-0"} "Edit"]
-     [:span {:class "text-text-50 shrink-0"
-             :title file_path}
-      file-name]
-     [:span {:class "text-text-400 shrink-0"} (str "(" stats-str ")")]
-     (when replace_all
-       [:span {:class "text-warning text-2xs shrink-0"} "replace-all"])
-     ;; Expandable diff preview
-     [:details {:class "text-text-200 min-w-0" :data-preserve-attr "open"}
-      [:summary {:class "cursor-pointer list-none text-info text-2xs"}
-       "diff"]
-      [:div {:class "mt-1 pl-2 border-l-2 border-log-tool/30 space-y-1"}
-       ;; Old string (red)
-       (when (not (str/blank? old_string))
-         [:div {:class "text-error/80"}
-          [:span {:class "text-error font-medium"} "- "]
-          (if (> (count old_string) 200)
-            [:details
-             [:summary {:class "cursor-pointer list-none inline"}
-              [:code {:class lang-class} old-preview]
-              [:span {:class "text-info ml-1"} (str "+" (- (count old_string) 60) " more")]]
-             [:pre [:code {:class lang-class} old_string]]]
-            [:code {:class lang-class} old_string])])
-       ;; New string (green)
-       (when (not (str/blank? new_string))
-         [:div {:class "text-success/80"}
-          [:span {:class "text-success font-medium"} "+ "]
-          (if (> (count new_string) 200)
-            [:details
-             [:summary {:class "cursor-pointer list-none inline"}
-              [:code {:class lang-class} new-preview]
-              [:span {:class "text-info ml-1"} (str "+" (- (count new_string) 60) " more")]]
-             [:pre [:code {:class lang-class} new_string]]]
-            [:code {:class lang-class} new_string])])]]]))
+        ;; Format full diff content upfront
+        old-lines (when (not (str/blank? old_string)) (str/split-lines old_string))
+        new-lines (when (not (str/blank? new_string)) (str/split-lines new_string))
+        ;; Check if we need truncation (> 8 total lines)
+        total-lines (+ (count old-lines) (count new-lines))
+        needs-truncation? (> total-lines 8)
+        ;; Preview lines for truncated view
+        old-preview (take diff-preview-lines old-lines)
+        new-preview (take diff-preview-lines new-lines)
+        hidden-lines (- total-lines (+ (count old-preview) (count new-preview)))]
+    [:span {:class "flex-1 min-w-0"}
+     ;; Header line with icon, tool name, file, and stats
+     [:span {:class "flex items-center gap-2"}
+      [:span {:class "text-info"} "✎"]
+      [:span {:class "text-text-300"} "Edit"]
+      [:code {:class "text-text-200 text-2xs"} file-name]
+      [:span {:class "text-text-500 text-2xs"} (str "(" stats-str ")")]
+      (when replace_all
+        [:span {:class "text-warning text-2xs"} "replace-all"])]
+     ;; Diff display
+     (if needs-truncation?
+       ;; Truncated: use details/summary where summary IS the preview
+       ;; When closed: shows preview + "N more lines"
+       ;; When open: shows full diff (replaces preview)
+       [:details {:class "mt-1 edit-diff" :data-preserve-attr "open"}
+        [:summary {:class "cursor-pointer list-none"}
+         [:pre {:class "text-2xs bg-base-900 p-2 rounded overflow-x-auto font-mono inline-block w-full"}
+          (render-diff-lines old-preview new-preview)
+          [:span {:class "text-info text-2xs block mt-1"}
+           (str "... " hidden-lines " more lines ▸")]]]
+        ;; Full diff shown when expanded (CSS hides the summary content)
+        [:pre {:class "text-2xs bg-base-900 p-2 rounded overflow-x-auto font-mono"}
+         (render-diff-lines old-lines new-lines)]]
+       ;; Short enough: show full diff inline
+       [:pre {:class "mt-1 text-2xs bg-base-900 p-2 rounded overflow-x-auto font-mono"}
+        (render-diff-lines old-lines new-lines)])]))
 
 (defmethod render-tool-hover "Edit"
-  [_tool-name parsed-input _raw-input]
-  (let [{:keys [file_path old_string new_string replace_all]} parsed-input
-        stats (compute-diff-stats old_string new_string)]
-    (hover-card
-     [:div {:class "space-y-1"}
-      (hover-line "path" file_path "text-text-50")
-      (hover-line "changes" (format-diff-stats stats))
-      (when replace_all
-        (hover-line "mode" "replace-all" "text-warning"))
-      (hover-diff-block old_string new_string)])))
+  [_tool-name _parsed-input _raw-input]
+  ;; No hover card for Edit - diff is shown inline with expand
+  nil)
 
 ;; Read tool - show file path and line range
 (defmethod render-tool-html "Read"
@@ -558,33 +555,23 @@
       (hover-line "mode" (or output_mode "files_with_matches"))
       (when head_limit (hover-line "limit" (str head_limit)))])))
 
-;; Bash tool - show command with description
+;; Bash tool - show command inline with clipping
 (defmethod render-tool-html "Bash"
   [_tool-name parsed-input _raw-input]
   (let [{:keys [command description timeout]} parsed-input
-        cmd-preview (truncate command 80)
-        long? (> (count command) 80)]
-    [:span {:class "flex gap-2 flex-1 min-w-0 items-start"}
-     [:span {:class "text-log-tool font-medium shrink-0"} "Bash"]
-     (if description
-       ;; Show description as primary, command in details
-       [:span {:class "flex-1 min-w-0"}
-        [:span {:class "text-text-200"} description]
-        [:details {:class "text-text-400 mt-0.5" :data-preserve-attr "open"}
-         [:summary {:class "cursor-pointer list-none text-2xs text-info"} "cmd"]
-         [:pre {:class "pl-2 border-l-2 border-log-tool/30"}
-          [:code {:class "language-bash"} command]]]]
-       ;; No description - show command directly
-       (if long?
-         [:details {:class "text-text-200 min-w-0" :data-preserve-attr "open"}
-          [:summary {:class "cursor-pointer list-none truncate"}
-           [:code {:class "language-bash"} cmd-preview]
-           [:span {:class "text-info ml-1"} "..."]]
-          [:pre {:class "pl-2 border-l-2 border-log-tool/30"}
-           [:code {:class "language-bash"} command]]]
-         [:code {:class "language-bash text-text-200 truncate"} command]))
+        ;; Use description if available, otherwise command
+        display-text (or description command "")
+        max-len 100
+        clipped (if (> (count display-text) max-len)
+                  (str (subs display-text 0 max-len) "...")
+                  display-text)]
+    [:span {:class "flex items-center gap-2 flex-1 min-w-0"}
+     [:span {:class "text-warning shrink-0"} "⚡"]
+     [:span {:class "text-text-300 shrink-0"} "Bash"]
+     [:code {:class "text-text-200 truncate text-2xs bg-base-800 px-1.5 py-0.5 rounded font-mono"}
+      clipped]
      (when timeout
-       [:span {:class "text-text-500 text-2xs shrink-0"} (str "timeout=" timeout "ms")])]))
+       [:span {:class "text-text-500 text-2xs shrink-0"} (str timeout "ms")])]))
 
 (defmethod render-tool-hover "Bash"
   [_tool-name parsed-input _raw-input]

@@ -8,7 +8,7 @@
      [:input {:field :user-name}]
 
    Framework transforms to:
-     [:button {:data-on:click \"@post('/action/ns/increment')\"} \"Add\"]
+     [:button {:data-on:click \"@post('/ns/seon.example/increment')\"} \"Add\"]
      [:input {:name \"user-name\" :data-bind:user-name true}]
 
    This is a pure transformation layer - no side effects, no state.
@@ -62,11 +62,12 @@
 (defn- transform-event-attr
   "Transform {:on:click :fn-name} to Datastar format.
 
-   Returns [new-key new-value] pair."
+   Returns [new-key new-value] pair.
+   Uses /ns/:namespace/:function URL pattern."
   [ns-sym k v]
   (let [event (extract-event-name k)
         fn-name (if (keyword? v) (name v) (str v))
-        url (str "/action/" ns-sym "/" fn-name)
+        url (str "/ns/" ns-sym "/" fn-name)
         datastar-key (keyword (str "data-on:" event))]
     [datastar-key (str "@post('" url "')")]))
 
@@ -178,9 +179,9 @@
   ;; [:div
   ;;  [:h1 "Trading Signals"]
   ;;  [:ul ([:li "AAPL"] [:li "GOOG"])]
-  ;;  [:form {:data-on:submit "@post('/action/seon.trading/add-signal!')"}
+  ;;  [:form {:data-on:submit "@post('/ns/seon.trading/add-signal!')"}
   ;;   [:input {:name "symbol" :data-bind:symbol true :placeholder "Symbol"}]
   ;;   [:input {:name "price" :data-bind:price true :type "number"}]
-  ;;   [:button {:data-on:click "@post('/action/seon.trading/add-signal!')"} "Add"]]]
+  ;;   [:button {:data-on:click "@post('/ns/seon.trading/add-signal!')"} "Add"]]]
 
   )

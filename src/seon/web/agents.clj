@@ -77,12 +77,12 @@
           [ai-session-id])))
 
 (defn- load-session-info
-  "Load session metadata (status, timestamps, cost) from XTDB.
-   Returns map with :status, :started-at, :ended-at, :cost-usd."
+  "Load session metadata (status, timestamps, cost, initial-context) from XTDB.
+   Returns map with :status, :started-at, :ended-at, :cost-usd, :initial-context."
   [ai-session-id]
   (when-let [node (get-node)]
     (first (db/q node
-                 "SELECT seon$ai$status, seon$ai$started_at, seon$ai$ended_at, seon$ai$cost_usd
+                 "SELECT seon$ai$status, seon$ai$started_at, seon$ai$ended_at, seon$ai$cost_usd, seon$ai$initial_context
                   FROM ai_sessions
                   WHERE _id = ?"
                  [ai-session-id]))))
@@ -227,12 +227,24 @@
   [v]
   (with-out-str (pprint/pprint v)))
 
+(defn- filter-boilerplate
+  "Remove common boilerplate messages from tool results.
+   These messages add noise without useful information."
+  [text]
+  (when text
+    (-> text
+        (str/replace #"Todos have been modified successfully\..*?Please proceed with the current tasks if applicable\.?\s*" "")
+        str/trim)))
+
 (defn- render-task-list-result
-  "Render TaskList result as formatted task list with status indicators."
+  "Render TaskList result as formatted task list with status indicators.
+   Filters out boilerplate messages like 'Todos have been modified successfully'."
   [result-text]
   (try
-    ;; Parse the JSON result - TaskList returns an array of tasks
-    (let [data (json/read-str result-text :key-fn keyword)
+    ;; Filter out boilerplate message before parsing
+    (let [filtered-text (filter-boilerplate result-text)
+          _ (when (str/blank? filtered-text) (throw (ex-info "Empty after filter" {})))
+          data (json/read-str filtered-text :key-fn keyword)
           tasks (cond
                   ;; Direct array of tasks
                   (sequential? data) data
@@ -269,14 +281,16 @@
   [{:keys [id name input result]} timestamp]
   (let [;; Extract result text
         result-content (:content result)
-        result-text (cond
-                      (string? result-content) result-content
-                      (sequential? result-content)
-                      (->> result-content
-                           (filter #(= "text" (:type %)))
-                           (map :text)
-                           (str/join "\n"))
-                      :else (str result-content))
+        raw-result-text (cond
+                          (string? result-content) result-content
+                          (sequential? result-content)
+                          (->> result-content
+                               (filter #(= "text" (:type %)))
+                               (map :text)
+                               (str/join "\n"))
+                          :else (str result-content))
+        ;; Filter out boilerplate messages from all tool results
+        result-text (filter-boilerplate raw-result-text)
         ;; Check for errors - only at the start of result (not just anywhere in file content)
         has-error? (or (:is_error result)
                        (str/starts-with? (str/trim (str result-text)) "<tool_use_error>"))
@@ -307,13 +321,40 @@
       ;; Expanded content - show result
       (when (and result-text (not (str/blank? result-text)))
         [:div {:class "ml-6 mt-1 pl-3 border-l-2 border-base-700"}
-         (when is-repl?
-           [:span {:class "text-text-500 text-2xs block mb-1"} "→ result:"])
-         ;; Special formatting for TaskList results
-         (if-let [task-list-view (and (= name "TaskList") (render-task-list-result result-text))]
-           [:div {:class "bg-base-900 p-2 rounded text-2xs"}
-            task-list-view]
+         ;; Special formatting for REPL results - pretty print and syntax highlight
+         (cond
+           ;; REPL results - pretty print Clojure data
+           is-repl?
+           (let [pretty-result (try
+                                 (-> result-text
+                                     read-string
+                                     pp-str)
+                                 (catch Exception _ result-text))
+                 {:keys [truncated? preview hidden-lines]} (truncate-lines pretty-result 6)]
+             [:div
+              [:span {:class "text-text-500 text-2xs block mb-1"} "→ result:"]
+              [:pre {:class (str "bg-base-900 p-2 rounded text-2xs overflow-x-auto font-mono "
+                                 (when has-error? "border border-error/30"))}
+               [:code {:class "language-clojure"}
+                preview
+                (when truncated?
+                  [:details {:class "block mt-1" :data-preserve-attr "open"}
+                   [:summary {:class "cursor-pointer list-none text-info text-2xs hover:text-info/80"}
+                    (str "... " hidden-lines " more lines ▸")]
+                   [:code {:class "language-clojure block mt-1"}
+                    (subs pretty-result (count preview))]])]]])
+
+           ;; TaskList results - formatted task list
+           (= name "TaskList")
+           (if-let [task-list-view (render-task-list-result result-text)]
+             [:div {:class "bg-base-900 p-2 rounded text-2xs"}
+              task-list-view]
+             ;; Fallback to raw display
+             [:pre {:class "bg-base-900 p-2 rounded text-2xs overflow-x-auto font-mono"}
+              [:code preview]])
+
            ;; Default: show as code block
+           :else
            [:pre {:class (str "bg-base-900 p-2 rounded text-2xs overflow-x-auto font-mono "
                               (when has-error? "border border-error/30"))}
             [:code {:class (when lang (str "language-" lang))}
@@ -326,27 +367,52 @@
      ;; Hover card via multimethod
      (agent-views/render-tool-hover name parsed-input raw-input)]))
 
+(def ^:private prose-classes
+  "Shared prose/markdown classes for consistent rendering."
+  "prose prose-sm prose-invert max-w-none
+   prose-headings:text-text-100 prose-headings:font-semibold prose-headings:mt-2 prose-headings:mb-1
+   prose-p:my-1 prose-p:text-text-200
+   prose-strong:text-text-100 prose-strong:font-semibold
+   prose-code:text-signal prose-code:bg-base-800 prose-code:px-1 prose-code:rounded prose-code:text-xs
+   prose-pre:bg-base-900 prose-pre:p-2 prose-pre:rounded prose-pre:text-xs
+   prose-ul:my-1 prose-ol:my-1 prose-li:my-0")
+
 (defn- render-assistant-text
   "Render assistant message text as markdown prose.
-   Converts markdown to HTML for proper formatting of headers, bold, code, etc."
+   Converts markdown to HTML for proper formatting of headers, bold, code, etc.
+   Truncation is expandable via details element."
   [content timestamp]
   (when (and content (not (str/blank? content)))
-    (let [{:keys [truncated? preview hidden-lines]} (truncate-lines content max-preview-lines)
+    (let [{:keys [truncated? preview hidden-lines full-content]} (truncate-lines content max-preview-lines)
           ;; Convert markdown to HTML - markdown-clj wraps in <p> tags
-          html-content (md/md-to-html-string preview)]
+          html-content (md/md-to-html-string preview)
+          ;; For expansion, render full content (not remainder) to avoid breaking mid-list
+          full-html (when truncated? (md/md-to-html-string full-content))]
       [:div {:class "py-2 px-3 text-text-200 text-sm font-mono"}
        [:span {:class "text-text-500 text-xs mr-2"} (format-local-time timestamp)]
        ;; Inject rendered markdown as raw HTML with prose styling
-       [:div {:class "prose prose-sm prose-invert max-w-none
-                      prose-headings:text-text-100 prose-headings:font-semibold prose-headings:mt-2 prose-headings:mb-1
-                      prose-p:my-1 prose-p:text-text-200
-                      prose-strong:text-text-100 prose-strong:font-semibold
-                      prose-code:text-signal prose-code:bg-base-800 prose-code:px-1 prose-code:rounded prose-code:text-xs
-                      prose-pre:bg-base-900 prose-pre:p-2 prose-pre:rounded prose-pre:text-xs
-                      prose-ul:my-1 prose-ol:my-1 prose-li:my-0"}
+       [:div {:class prose-classes}
         (h/raw html-content)]
+       ;; Expandable truncation - shows full content, not just remainder
        (when truncated?
-         [:span {:class "text-text-500 text-xs ml-1"} (str "... " hidden-lines " more lines")])])))
+         [:details {:class "mt-1" :data-preserve-attr "open"}
+          [:summary {:class "cursor-pointer text-info text-xs hover:text-info/80"}
+           (str "... " hidden-lines " more lines ▸")]
+          [:div {:class (str prose-classes " mt-2")}
+           (h/raw full-html)]])])))
+
+(defn- render-result-summary
+  "Render the final result/summary message with full markdown, no truncation.
+   The content typically starts with '## Summary' so we don't add another label."
+  [content timestamp]
+  (when (and content (not (str/blank? content)))
+    (let [html-content (md/md-to-html-string content)]
+      [:div {:class "py-3 px-4 bg-base-850 rounded border border-success/30 mt-4"}
+       [:div {:class "flex items-center gap-2 mb-2"}
+        [:span {:class "text-success"} "✓"]
+        [:span {:class "text-text-500 text-xs"} (format-local-time timestamp)]]
+       [:div {:class prose-classes}
+        (h/raw html-content)]])))
 
 (defn- render-message
   "Render a single message based on its type."
@@ -360,8 +426,9 @@
       ;; Skip system messages
       (= role "system") nil
 
-      ;; Skip result messages (final summary)
-      (= msg-type "result") nil
+      ;; Result messages - show as full summary with no truncation
+      (= msg-type "result")
+      (render-result-summary content timestamp)
 
       ;; User messages with tool results are handled by tool-call pairing
       (and (= role "user") (seq (::claude/tool-results msg))) nil
@@ -823,6 +890,88 @@
                                          "text-text-400"))}
         (str "Last activity: " time-ago)])]))
 
+;;; ---------------------------------------------------------------------------
+;;; Initial Context Components
+;;; ---------------------------------------------------------------------------
+
+(defn- format-byte-size
+  "Format byte count as human-readable size."
+  [bytes]
+  (cond
+    (nil? bytes) ""
+    (< bytes 1024) (str bytes " B")
+    (< bytes (* 1024 1024)) (format "%.1f KB" (/ bytes 1024.0))
+    :else (format "%.1f MB" (/ bytes (* 1024.0 1024)))))
+
+(defn- render-file-context
+  "Render a single file context as a collapsible block.
+   Shows path + size in summary, full content with syntax highlighting when expanded."
+  [{:keys [seon.ai/path seon.ai/content seon.ai/language seon.ai/byte-count seon.ai/read-success seon.ai/error]}]
+  (let [lang (or language "")
+        size-str (format-byte-size byte-count)
+        ;; Generate unique ID for highlight.js targeting
+        code-id (str "code-" (hash path))]
+    [:details {:class "border border-base-700 rounded mb-2"
+               :data-preserve-attr "open"
+               ;; Trigger syntax highlighting when expanded
+               :data-on-toggle (str "if(this.open){const el=document.getElementById('" code-id "');if(el&&!el.classList.contains('hljs'))hljs.highlightElement(el)}")}
+     [:summary {:class "cursor-pointer px-3 py-2 bg-base-800 hover:bg-base-750 flex items-center gap-2 text-xs font-mono"}
+      [:span {:class "text-text-400"} "▶"]
+      [:span {:class "text-text-200 flex-1 truncate"} path]
+      [:span {:class "text-text-500"} size-str]
+      (when (not read-success)
+        [:span {:class "text-error"} "✗"])]
+     [:div {:class "p-0 max-h-96 overflow-auto"}
+      (if read-success
+        [:pre {:class "bg-base-900 p-3 text-2xs font-mono overflow-x-auto m-0"}
+         [:code {:id code-id
+                 :class (when (seq lang) (str "language-" lang))}
+          content]]
+        [:div {:class "p-3 text-error text-xs"}
+         (str "Error reading file: " error)])]]))
+
+(defn- render-initial-context
+  "Render the initial context section with task prompt and collapsible files.
+   Shows above messages in agent detail view. Task prompt and agent instructions
+   are rendered as markdown."
+  [initial-context]
+  (when initial-context
+    (let [{:keys [seon.ai/task-prompt seon.ai/files-context seon.ai/agent-instructions]} initial-context
+          file-count (count files-context)]
+      [:div {:class "mb-4"}
+       ;; Section header
+       [:div {:class "flex items-center gap-2 mb-2"}
+        [:span {:class "text-xs font-semibold text-text-400 uppercase tracking-wider"} "Initial Context"]]
+
+       ;; Task prompt (always visible, rendered as markdown)
+       (when (and task-prompt (not (str/blank? task-prompt)))
+         [:div {:class "bg-base-850 rounded p-3 mb-3 border border-base-700"}
+          [:div {:class "text-2xs text-text-500 uppercase tracking-wider mb-1"} "Task"]
+          [:div {:class prose-classes}
+           (h/raw (md/md-to-html-string task-prompt))]])
+
+       ;; Reference files (collapsed by default)
+       (when (seq files-context)
+         [:details {:class "mb-3" :data-preserve-attr "open"}
+          [:summary {:class "cursor-pointer text-xs text-text-300 hover:text-text-200 flex items-center gap-2"}
+           [:span {:class "text-text-400"} "▶"]
+           [:span "Reference Files"]
+           [:span {:class "text-text-500"} (str "(" file-count " file" (when (> file-count 1) "s") ")")]]
+          [:div {:class "mt-2 ml-4"}
+           (for [fc files-context]
+             ^{:key (::ai/path fc)}
+             (render-file-context fc))]])
+
+       ;; System instructions (collapsed by default, rendered as markdown)
+       (when (and agent-instructions (not (str/blank? agent-instructions)))
+         [:details {:class "mb-3" :data-preserve-attr "open"}
+          [:summary {:class "cursor-pointer text-xs text-text-300 hover:text-text-200 flex items-center gap-2"}
+           [:span {:class "text-text-400"} "▶"]
+           [:span "System Instructions"]
+           [:span {:class "text-text-500"} "(AGENT.md)"]]
+          [:div {:class "mt-2 ml-4 max-h-64 overflow-auto"}
+           [:div {:class prose-classes}
+            (h/raw (md/md-to-html-string agent-instructions))]]])])))
 
 (def ^:private auto-scroll-script
   "JavaScript for smart auto-scroll behavior.
@@ -914,7 +1063,9 @@
                  :cost (::ai/cost-usd session-info)}
         ;; Extract current activity for progress line
         current-activity (when (seq messages) (extract-current-activity messages))
-        message-count (count messages)]
+        message-count (count messages)
+        ;; Extract initial context from session info
+        initial-context (::ai/initial-context session-info)]
     (h/html
      [:main#morph
       ;; Header with back link and status
@@ -934,20 +1085,26 @@
       ;; Progress summary (only for running agents)
       (progress-summary {:status effective-status :activity current-activity})
 
-      ;; Main content
+      ;; Main content - single scroll container for initial context + messages
       [:div {:class "bg-base-900 rounded overflow-hidden"}
        (cond
-         ;; Has messages - render message view
+         ;; Has messages - render initial context + messages in one scroll area
          (seq messages)
          [:div {:id "messages-scroll"
-                :class "p-3 max-h-[70vh] overflow-y-auto"}
+                :class "p-3 max-h-[calc(100vh-180px)] overflow-y-auto"}
+          ;; Initial context as first item (scrolls with messages)
+          (render-initial-context initial-context)
           (render-messages-view messages)]
 
          ;; Session exists but no messages yet (agent just started)
          ai-session-id
-         [:div {:class "p-8 text-center text-text-400"}
-          [:p {:class "text-sm font-medium"} "Waiting for messages..."]
-          [:p {:class "text-xs mt-2 text-text-500"} "Agent is starting up"]]
+         [:div {:id "messages-scroll"
+                :class "p-3 max-h-[calc(100vh-180px)] overflow-y-auto"}
+          ;; Show initial context if available
+          (render-initial-context initial-context)
+          [:div {:class "p-8 text-center text-text-400"}
+           [:p {:class "text-sm font-medium"} "Waiting for messages..."]
+           [:p {:class "text-xs mt-2 text-text-500"} "Agent is starting up"]]]
 
          ;; No session found at all
          :else

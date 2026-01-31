@@ -4,10 +4,10 @@
 
 (deftest transform-attrs-test
   (testing "event attributes transform to Datastar format"
-    (is (= {:data-on:click "@post('/action/seon.test/increment')"}
+    (is (= {:data-on:click "@post('/ns/seon.test/increment')"}
            (transform/transform-attrs 'seon.test {:on:click :increment})))
 
-    (is (= {:data-on:submit "@post('/action/seon.trading/create-order')"}
+    (is (= {:data-on:submit "@post('/ns/seon.trading/create-order')"}
            (transform/transform-attrs 'seon.trading {:on:submit :create-order}))))
 
   (testing "field attributes transform to data-bind (value syntax to avoid camelCase)"
@@ -28,7 +28,7 @@
 
 (deftest transform-hiccup-test
   (testing "simple element with event"
-    (is (= [:button {:data-on:click "@post('/action/seon.test/increment')"} "Add"]
+    (is (= [:button {:data-on:click "@post('/ns/seon.test/increment')"} "Add"]
            (transform/transform-hiccup 'seon.test
              [:button {:on:click :increment} "Add"]))))
 
@@ -40,9 +40,9 @@
   (testing "nested structure"
     (is (= [:div {:class "container"}
             [:h1 {} "Title"]
-            [:form {:data-on:submit "@post('/action/seon.trading/submit')"}
+            [:form {:data-on:submit "@post('/ns/seon.trading/submit')"}
              [:input {:name "symbol" :data-bind "symbol"}]
-             [:button {:data-on:click "@post('/action/seon.trading/submit')"} "Go"]]]
+             [:button {:data-on:click "@post('/ns/seon.trading/submit')"} "Go"]]]
            (transform/transform-hiccup 'seon.trading
              [:div {:class "container"}
               [:h1 {} "Title"]
@@ -68,7 +68,7 @@
   (testing "creates bound transformer function"
     (let [tx (transform/make-transformer 'seon.demo)]
       (is (fn? tx))
-      (is (= [:button {:data-on:click "@post('/action/seon.demo/click')"}]
+      (is (= [:button {:data-on:click "@post('/ns/seon.demo/click')"}]
              (tx [:button {:on:click :click}]))))))
 
 (deftest edge-cases-test
@@ -80,7 +80,7 @@
     (is (= [:div {}
             [:div {}
              [:div {}
-              [:button {:data-on:click "@post('/action/seon.test/deep')"} "Deep"]]]]
+              [:button {:data-on:click "@post('/ns/seon.test/deep')"} "Deep"]]]]
            (transform/transform-hiccup 'seon.test
              [:div {}
               [:div {}
@@ -88,7 +88,7 @@
                 [:button {:on:click :deep} "Deep"]]]]))))
 
   (testing "multiple events on same element"
-    (is (= [:input {:data-on:focus "@post('/action/seon.test/focused')"
-                    :data-on:blur "@post('/action/seon.test/blurred')"}]
+    (is (= [:input {:data-on:focus "@post('/ns/seon.test/focused')"
+                    :data-on:blur "@post('/ns/seon.test/blurred')"}]
            (transform/transform-hiccup 'seon.test
              [:input {:on:focus :focused :on:blur :blurred}])))))

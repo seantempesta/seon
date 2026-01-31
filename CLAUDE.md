@@ -113,8 +113,14 @@ Write clear goals, success criteria, and relevant context.
 
 ```
 eval(session_id="orchestrator", timeout_ms=600000,
-     code="(user/launch-agent!! 'seon.feature-name \"Read docs/prds/feature-name/prd.md and implement Phase 1.\")")
+     code="(user/launch-agent!! 'seon.feature-name
+             \"Implement Phase 1 per the PRD. Start with the URL refactor,
+              then add client tracking. Test each step with curl.\"
+             :files [\"docs/prds/feature-name/prd.md\"
+                     \"src/seon/ns/routes.clj\"])")
 ```
+
+**The `:files` option** reads files and includes them in the agent's context with syntax highlighting. Use this instead of pasting file contents into prompts - it's cleaner and the agent gets properly formatted code.
 
 **MCP Timeout Behavior:** The MCP eval has a 30-second default timeout. If it times out:
 - The agent **keeps running** in the background
@@ -141,14 +147,21 @@ This interrupts the running eval and unblocks the REPL. Use when:
  ::claude/num-turns 5}
 ```
 
-**Point agents to the PRD**, don't give walls of instructions:
+**Use `:files` to include context**, don't paste file contents into prompts:
 ```clojure
-;; DO THIS:
-"Read docs/prds/namespace-ui/prd.md and implement Phase 0."
+;; DO THIS - files are read and included automatically:
+(user/launch-agent!! 'seon.feature
+                     "Implement Phase 1. Focus on the URL refactor first.
+                      Make sure to test with curl before marking complete."
+                     :files ["docs/prds/feature/prd.md"
+                             "docs/prds/feature/plan.md"
+                             "src/seon/ns/routes.clj"])
 
-;; NOT THIS:
-"Add a debounce-seconds config to .claude/seon-hook.edn and wire it through..."
+;; NOT THIS - copy-pasting entire file contents into the prompt:
+"Here's the PRD:\n\n# PRD: Feature...\n[500 lines of content]\n\nNow implement it."
 ```
+
+The `:files` option reads files and formats them with syntax highlighting. You can still give detailed instructions in the prompt - just don't manually paste file contents.
 
 ### 3. Non-Blocking Launch (Parallel Work)
 
@@ -156,7 +169,8 @@ Only use `launch-agent!` (single-bang) when running multiple agents in parallel:
 
 ```clojure
 ;; Launch without waiting
-(user/launch-agent! 'seon.feature-name "Implement feature X")
+(user/launch-agent! 'seon.feature-name "Implement feature X"
+                    :files ["docs/prds/feature/prd.md"])
 ;; => {::ai/session-id "a1b2" ...}
 
 ;; Check result later
@@ -170,13 +184,15 @@ All available in the `user` namespace:
 
 | Function | Purpose |
 |----------|---------|
-| `(user/launch-agent!! 'ns "prompt")` | Launch and wait for result (blocking) |
-| `(user/launch-agent! 'ns "prompt")` | Launch without waiting (returns handle) |
+| `(user/launch-agent!! 'ns "prompt" :files [...])` | Launch and wait for result (blocking) |
+| `(user/launch-agent! 'ns "prompt" :files [...])` | Launch without waiting (returns handle) |
 | `(user/agents)` | List running agents |
 | `(user/agent-messages "a1b2")` | Check agent progress (recent messages) |
 | `(user/agent-result "a1b2")` | Get result from completed agent |
 | `(user/wait-for-agent!! "a1b2")` | Re-attach and wait for running agent |
 | `(user/interrupt-agent! "a1b2")` | Stop a running agent |
+
+**The `:files` option is optional but recommended.** Include PRDs, plans, and relevant code so agents have full context from the start.
 
 **UI Monitoring:**
 - Observatory: http://localhost:8080/agents
@@ -279,6 +295,57 @@ Connect your editor to nREPL on port 7888. Use these helpers:
 eval(session_id="orchestrator", code="(user/status)")
 eval(session_id="orchestrator", code="(user/search \"query\")")
 ```
+
+---
+
+## Using Gemini Search (CRITICAL)
+
+**When debugging or investigating issues, ALWAYS include relevant source code files with your Gemini search.** Don't send vague queries - send the actual code so Gemini can see what's happening.
+
+### Why This Matters
+
+Previous agents kept trying the same approaches and declaring victory without solving problems. The root cause: they searched with vague queries like "http-kit hot reload not working" instead of showing Gemini the actual code. Gemini can't help if it's just guessing at what your code looks like.
+
+### How to Use
+
+The `user/search` function accepts `:files` - a vector of relative file paths to include:
+
+```clojure
+;; BAD - vague query, Gemini has to guess
+(user/search "why doesn't hot reload work in Clojure http-kit")
+
+;; GOOD - includes actual code, Gemini can analyze it
+(user/search "Why doesn't hot reload work?"
+             :files ["src/seon/web/server.clj"
+                     "src/seon/web/routes.clj"])
+```
+
+Via MCP eval:
+```
+eval(session_id="orchestrator",
+     code="(user/search \"Why doesn't hot reload work?\"
+                        :files [\"src/seon/web/server.clj\"
+                                \"src/seon/web/routes.clj\"])")
+```
+
+### When to Include Files
+
+**ALWAYS include files when:**
+- Debugging unexpected behavior
+- Investigating "why doesn't X work?"
+- Trying to understand how existing code works
+- Getting errors you don't understand
+- The same approach keeps failing
+
+**Files to include:**
+- The file(s) exhibiting the problem
+- Related configuration files
+- Any files in the error stack trace
+- Files that interact with the problem area
+
+### Rule of Thumb
+
+If you're about to search for a problem and you haven't included the relevant source files, **STOP and include them**. The 30 seconds it takes to list the files will save hours of going in circles.
 
 ---
 

@@ -126,9 +126,14 @@
                    [::system-instruction {:optional true} ::system-instruction]
                    [::api-key {:optional true} ::api-key]])
 
+(schema/register! ::files
+                  [:vector {:description "Vector of relative file paths to include as context"}
+                   :string])
+
 (schema/register! ::search-request
                   [:map
                    [::prompt ::prompt]
+                   [::files {:optional true} ::files]
                    [::model {:optional true} ::model]
                    [::timeout {:optional true} ::timeout]
                    [::thinking-level {:optional true} ::thinking-level]
@@ -438,6 +443,22 @@
                            :thinking-level thinking-level
                            :system-instruction system-instruction})))
 
+(defn- format-file-context
+  "Read files and format them as context for the prompt.
+   Returns formatted string or nil if no files/errors."
+  [files]
+  (when (seq files)
+    (let [file-contents
+          (for [path files]
+            (try
+              (let [content (slurp path)]
+                (str "### " path "\n```clojure\n" content "\n```\n"))
+              (catch Exception e
+                (str "### " path "\n[Error reading file: " (.getMessage e) "]\n"))))]
+      (str "\n\n## SOURCE CODE CONTEXT\n\n"
+           "The following source files are provided for reference:\n\n"
+           (str/join "\n" file-contents)))))
+
 (defn search
   "Search the web using Gemini with Google Search grounding.
 
@@ -446,6 +467,9 @@
 
    Request keys:
      ::prompt         - Required. Search query or question
+     ::files          - Optional. Vector of file paths to include as context
+                        Files are read and appended to the prompt with formatting.
+                        Use this to give Gemini your actual code when debugging.
      ::model          - Optional. Model name
      ::timeout        - Optional. Request timeout in ms
      ::thinking-level - Optional. \"low\", \"medium\", or \"high\"
@@ -453,15 +477,25 @@
 
    Response includes ::grounding-metadata with search sources.
 
-   Example:
-     (search {::prompt \"Latest Clojure 1.12 features\"})"
+   Examples:
+     ;; Simple search
+     (search {::prompt \"Latest Clojure 1.12 features\"})
+
+     ;; Search with code context - STRONGLY ENCOURAGED for debugging!
+     (search {::prompt \"Why doesn't hot reload work?\"
+              ::files [\"src/seon/web/server.clj\"
+                       \"src/seon/web/routes.clj\"]})"
   {:malli/schema [:=> [:cat ::search-request] ::response]}
-  [{::keys [prompt model timeout thinking-level api-key]}]
-  (let [key (resolve-api-key! api-key)]
-    (generate* key prompt {:model model
-                           :timeout timeout
-                           :thinking-level thinking-level
-                           :tools [{:google_search {}}]})))
+  [{::keys [prompt files model timeout thinking-level api-key]}]
+  (let [key (resolve-api-key! api-key)
+        file-context (format-file-context files)
+        full-prompt (if file-context
+                      (str prompt file-context)
+                      prompt)]
+    (generate* key full-prompt {:model model
+                                :timeout (or timeout 120000) ;; Longer timeout for code context
+                                :thinking-level thinking-level
+                                :tools [{:google_search {}}]})))
 
 (defn calculate
   "Perform calculation using Gemini's Python code execution.
