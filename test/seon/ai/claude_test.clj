@@ -442,6 +442,67 @@
       (is (nil? (persistable? "parse_error"))))))
 
 ;;; ---------------------------------------------------------------------------
+;;; File Context Reading Tests
+;;; ---------------------------------------------------------------------------
+
+(deftest read-file-context-success-test
+  (testing "Reads file and returns structured context"
+    (let [tmp (java.io.File/createTempFile "test" ".clj")]
+      (spit tmp "(ns test)")
+      (try
+        (let [read-file-context @#'claude/read-file-context
+              ctx (read-file-context (.getPath tmp))]
+          (is (true? (::ai/read-success ctx)))
+          (is (= "(ns test)" (::ai/content ctx)))
+          (is (= "clojure" (::ai/language ctx)))
+          (is (= 9 (::ai/byte-count ctx)))
+          (is (nil? (::ai/error ctx))))
+        (finally (.delete tmp))))))
+
+(deftest read-file-context-failure-test
+  (testing "Handles missing file gracefully"
+    (let [read-file-context @#'claude/read-file-context
+          ctx (read-file-context "/nonexistent/file-that-does-not-exist.clj")]
+      (is (false? (::ai/read-success ctx)))
+      (is (string? (::ai/error ctx)))
+      (is (= "" (::ai/content ctx)))
+      (is (= 0 (::ai/byte-count ctx))))))
+
+(deftest detect-language-test
+  (testing "Detects language from file extension"
+    (let [detect-language @#'claude/detect-language]
+      (is (= "clojure" (detect-language "test.clj")))
+      (is (= "clojure" (detect-language "test.cljs")))
+      (is (= "clojure" (detect-language "test.edn")))
+      (is (= "markdown" (detect-language "README.md")))
+      (is (= "javascript" (detect-language "app.js")))
+      (is (= "typescript" (detect-language "app.tsx")))
+      (is (= "bash" (detect-language "script.sh")))
+      (is (= "" (detect-language "unknown.xyz"))))))
+
+(deftest build-files-context-test
+  (testing "Builds context from multiple files"
+    (let [tmp1 (java.io.File/createTempFile "test1" ".clj")
+          tmp2 (java.io.File/createTempFile "test2" ".md")]
+      (spit tmp1 "(ns one)")
+      (spit tmp2 "# Title")
+      (try
+        (let [build-files-context @#'claude/build-files-context
+              contexts (build-files-context [(.getPath tmp1) (.getPath tmp2)])]
+          (is (= 2 (count contexts)))
+          (is (every? #(true? (::ai/read-success %)) contexts))
+          (is (= "(ns one)" (::ai/content (first contexts))))
+          (is (= "# Title" (::ai/content (second contexts)))))
+        (finally
+          (.delete tmp1)
+          (.delete tmp2)))))
+
+  (testing "Returns nil for empty input"
+    (let [build-files-context @#'claude/build-files-context]
+      (is (nil? (build-files-context nil)))
+      (is (nil? (build-files-context []))))))
+
+;;; ---------------------------------------------------------------------------
 ;;; Development Helpers
 ;;; ---------------------------------------------------------------------------
 

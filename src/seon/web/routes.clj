@@ -6,10 +6,10 @@
             [seon.web.handlers :as handlers]
             [seon.web.agents :as agents]
             [seon.web.namespace :as namespace]
+            [seon.web.browser :as browser]
             [seon.ns.routes :as ns-routes]
             [seon.primer.handlers :as primer-handlers]
-            [seon.web.reactive.demo :as reactive-demo]
-            [seon.web.reactive.actions :as reactive-actions]))
+            [seon.web.reactive.demo :as reactive-demo]))
 
 ;; Use var references (#') so handlers resolve to current fn after reload
 (def routes
@@ -33,16 +33,20 @@
    [:post "/api/agents/toggle-completed"] #'agents/toggle-completed-handler
    ;; Reactive UI demo routes (GET=page, POST=SSE)
    [:get "/reactive-demo"]         #'reactive-demo/handler
-   [:post "/reactive-demo"]        #'reactive-demo/handler})
+   [:post "/reactive-demo"]        #'reactive-demo/handler
+   ;; Browser execution bridge result callback
+   [:post "/api/browser/result"]   #'browser/result-handler})
 
 ;; Dynamic routes with path parameters
 ;; Use var references (#') so handlers resolve to current fn after reload
 (def dynamic-routes
-  [;; Reactive UI action route: /action/:namespace/:function
+  [;; Function call route: POST /ns/:namespace/:function
+   ;; Must come BEFORE namespace routes (more specific pattern)
+   ;; Pattern includes % to allow URL-encoded characters like %21 for !
    {:method :post
-    :pattern #"/action/([^/]+)/([^/]+)"
+    :pattern #"/ns/([a-z][a-z0-9._-]*)/([a-zA-Z][a-zA-Z0-9_!?*%.-]*)"
     :params [:namespace :function]
-    :handler #'reactive-actions/action-handler}
+    :handler #'ns-routes/function-call-handler}
    ;; Primer action route: /primer/action/:action-id
    {:method :post
     :pattern #"/primer/action/(.+)"
@@ -57,7 +61,7 @@
     :pattern #"/agents/([a-f0-9]+)"
     :params [:agent-id]
     :handler #'agents/agent-detail-sse}
-   ;; New namespace view routes: /ns/{namespace}?id=session_id
+   ;; Namespace view routes: /ns/{namespace}?id=session_id
    ;; Uses seon.ns.view multimethod rendering system
    {:method :get
     :pattern #"/ns/([a-z][a-z0-9._-]*)"

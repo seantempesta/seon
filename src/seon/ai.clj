@@ -142,6 +142,33 @@
                          :description "Maximum number of results"}])
 
 ;;; ---------------------------------------------------------------------------
+;;; Initial Context Schemas (for agent launch)
+;;; ---------------------------------------------------------------------------
+
+;; File context - information about a single file provided to agent
+(schema/register! ::file-context
+                  [:map {:description "Context file provided to agent"}
+                   [::path :string]
+                   [::content :string]
+                   [::language :string]
+                   [::byte-count :int]
+                   [::read-success :boolean]
+                   [::error {:optional true} :string]])
+
+;; Vector of file contexts
+(schema/register! ::files-context
+                  [:vector {:description "Files provided as context to agent"}
+                   ::file-context])
+
+;; Initial context - the full context provided to launch an agent
+(schema/register! ::initial-context
+                  [:map {:description "Initial context provided when launching agent"}
+                   [::task-prompt :string]
+                   [::files-context {:optional true} ::files-context]
+                   [::agent-instructions {:optional true} :string]
+                   [::agent-instructions-path {:optional true} :string]])
+
+;;; ---------------------------------------------------------------------------
 ;;; Tool Call Schemas (Provider-Agnostic)
 ;;; ---------------------------------------------------------------------------
 
@@ -184,7 +211,8 @@
                    [::node ::node]
                    [::namespace {:optional true} ::namespace]
                    [::prompt {:optional true} ::prompt]
-                   [::agent-session-id {:optional true} ::agent-session-id]])
+                   [::agent-session-id {:optional true} ::agent-session-id]
+                   [::initial-context {:optional true} ::initial-context]])
 
 ;; Start session response
 (schema/register! ::start-session-response
@@ -239,6 +267,7 @@
                    [::namespace {:optional true} ::namespace]
                    [::prompt {:optional true} ::prompt]
                    [::agent-session-id {:optional true} ::agent-session-id]
+                   [::initial-context {:optional true} ::initial-context]
                    [::ended-at {:optional true} ::timestamp]
                    [::input-tokens {:optional true} ::input-tokens]
                    [::output-tokens {:optional true} ::output-tokens]
@@ -328,13 +357,14 @@
      ::namespace        - Optional. Clojure namespace context (symbol or string)
      ::prompt           - Optional. Initial prompt
      ::agent-session-id - Optional. 4-char hex Seon session ID (for log files)
+     ::initial-context  - Optional. Initial context with task-prompt, files-context, agent-instructions
 
    Response keys:
      ::session-id - The generated session ID
 
    Example:
      (start-session! {::node db ::namespace 'seon.trading ::prompt \"Analyze data\"})"
-  [{::keys [node namespace prompt agent-session-id]}]
+  [{::keys [node namespace prompt agent-session-id initial-context]}]
   (let [session-id (generate-id "ses")
         ;; Convert namespace to string for XTDB compatibility
         ns-str (when namespace (str namespace))
@@ -344,7 +374,8 @@
                         ::started-at (Instant/now)}
                  ns-str (assoc ::namespace ns-str)
                  prompt (assoc ::prompt prompt)
-                 agent-session-id (assoc ::agent-session-id agent-session-id))]
+                 agent-session-id (assoc ::agent-session-id agent-session-id)
+                 initial-context (assoc ::initial-context initial-context))]
     (db/put! node :ai_sessions entity)
     {::session-id session-id}))
 

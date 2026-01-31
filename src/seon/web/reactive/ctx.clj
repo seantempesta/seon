@@ -203,13 +203,21 @@
       true)
     false))
 
+(defn clients
+  "Get the set of connected client channels for a namespace.
+
+   Returns a set of http-kit channels, or nil if namespace not registered.
+   Use this from the REPL to inspect connected browsers."
+  {:malli/schema [:=> [:cat :symbol] [:maybe [:set :any]]]}
+  [ns-sym]
+  (when-let [{:seon.reactive/keys [clients]} (get-entry ns-sym)]
+    @clients))
+
 (defn client-count
   "Get the number of connected clients for a namespace."
   {:malli/schema [:=> [:cat :symbol] :int]}
   [ns-sym]
-  (if-let [{:seon.reactive/keys [clients]} (get-entry ns-sym)]
-    (count @clients)
-    0))
+  (count (or (clients ns-sym) #{})))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Manual Push (for testing)
@@ -246,6 +254,7 @@
   ;; Check state
   (list-contexts)
   (client-count 'seon.example)
+  (clients 'seon.example)  ; => #{#object[AsyncChannel ...]}
 
   ;; Cleanup
   (destroy! 'seon.example)

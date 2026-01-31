@@ -76,7 +76,8 @@
     (let [response (handlers/dashboard (mock-request))
           body (:body response)]
       (is (clojure.string/includes? body "datastar"))
-      (is (clojure.string/includes? body "cdn.jsdelivr.net"))))
+      ;; Using local copy now, not CDN
+      (is (clojure.string/includes? body "/js/datastar.js"))))
 
   (testing "HTML includes SSE connection initialization"
     (let [response (handlers/dashboard (mock-request))
