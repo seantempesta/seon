@@ -87,6 +87,20 @@
                   WHERE _id = ?"
                  [ai-session-id]))))
 
+(defn- load-context-tokens
+  "Load context token usage from the result message for a session.
+   Returns cache-creation-tokens as approximate context window usage."
+  [ai-session-id]
+  (when-let [node (get-node)]
+    (let [result (first (db/q node
+                              "SELECT seon$ai$claude$cache_creation_tokens as tokens
+                               FROM ai_messages
+                               WHERE seon$ai$session_id = ?
+                                 AND seon$ai$claude$message_type = 'result'
+                               LIMIT 1"
+                              [ai-session-id]))]
+      (:tokens result))))
+
 (defn- aggregate-message-stats
   "Aggregate token counts and compute turns from messages.
    Returns map with :input-tokens, :output-tokens, :num-turns, :duration-ms."
@@ -577,6 +591,20 @@
     ;; Non-running statuses are terminal - return as-is
     base-status))
 
+(defn- context-tokens-by-session
+  "Get context token counts for all sessions in one query.
+   Returns map of session-id -> token-count (from cache-creation-tokens)."
+  []
+  (when-let [node (get-node)]
+    (let [results (db/q node
+                        "SELECT seon$ai$session_id as session_id,
+                                seon$ai$claude$cache_creation_tokens as tokens
+                         FROM ai_messages
+                         WHERE seon$ai$claude$message_type = 'result'
+                           AND seon$ai$claude$cache_creation_tokens IS NOT NULL"
+                        [])]
+      (into {} (map (fn [r] [(:session-id r) (:tokens r)]) results)))))
+
 (defn- all-agents
   "Get combined list of running agents and recent completed sessions."
   []
@@ -588,10 +616,13 @@
                                    (remove #(running-ids (:xt/id %)))
                                    (filter ::ai/agent-session-id))
         ;; Batch fetch message stats (counts + timestamps) to avoid N+1
-        msg-stats (or (message-stats-by-session) {})]
+        msg-stats (or (message-stats-by-session) {})
+        ;; Batch fetch context tokens for all sessions
+        ctx-tokens (or (context-tokens-by-session) {})]
     {:running running
      :completed completed-not-running
      :message-stats msg-stats
+     :context-tokens ctx-tokens
      :show-completed (:show-completed @ui-state)}))
 
 ;;; ---------------------------------------------------------------------------
@@ -664,7 +695,7 @@
 (defn- agents-table
   "Render the agents table with Phosphor terminal styling.
    Design: table over cards, monospace, dense rows, warm colors."
-  [{:keys [running completed message-stats show-completed]}]
+  [{:keys [running completed message-stats context-tokens show-completed]}]
   (let [;; Build running agent rows using XTDB timestamps for sorting
         running-rows (for [agent running
                            :let [id (::agent/session-id agent)
@@ -689,7 +720,6 @@
                           :namespace (::ai/namespace session)
                           :status (::ai/status session)
                           :session-id session-id
-                          :cost (::ai/cost-usd session)
                           :started-at started-at
                           :type :completed
                           ;; Use XTDB message timestamp, then started-at, then 0
@@ -710,13 +740,13 @@
         [:th {:class "text-left py-1.5 px-4 text-xs font-medium text-text-400 uppercase tracking-wider"} "Namespace"]
         [:th {:class "text-left py-1.5 px-4 text-xs font-medium text-text-400 uppercase tracking-wider"} "Status"]
         [:th {:class "text-left py-1.5 px-4 text-xs font-medium text-text-400 uppercase tracking-wider"} "Msgs"]
-        [:th {:class "text-right py-1.5 px-4 text-xs font-medium text-text-400 uppercase tracking-wider"} "Cost"]]]
+        [:th {:class "text-right py-1.5 px-4 text-xs font-medium text-text-400 uppercase tracking-wider"} "Tokens"]]]
       [:tbody
        (if (empty? all-rows)
          [:tr
           [:td {:class "py-8 px-4 text-center text-text-500 italic" :colspan "5"}
            "No agents found. Start an agent to see it here."]]
-         (for [{:keys [id namespace status session-id cost]} all-rows]
+         (for [{:keys [id namespace status session-id]} all-rows]
            [:tr {:class "border-b border-base-700 hover:bg-base-800 cursor-pointer transition-colors"
                  :data-on:click (str "window.location.href='/agents/" id "'")}
             [:td {:class "py-2 px-4 font-mono text-sm font-medium text-text-50"} id]
@@ -727,7 +757,9 @@
                (:count stats)
                "-")]
             [:td {:class "py-2 px-4 font-mono text-sm text-text-400 text-right"}
-             (format-cost cost)]]))]]]))
+             (if-let [tokens (get context-tokens session-id)]
+               (format-tokens tokens)
+               "-")]]))]]]))
 
 (defn- agents-content
   "Render the main agents page content with Phosphor styling."
@@ -880,19 +912,34 @@
        [:span {:class "text-text-300"} "Working on:"]
        [:span {:class "text-text-100 truncate"} text]])))
 
+(def ^:private context-window-tokens
+  "Approximate context window size for Claude Opus 4.5 (200K tokens)."
+  200000)
+
+(defn- context-bar
+  "Render a context window usage bar.
+   Shows approximate usage based on cache-creation-tokens."
+  [context-tokens]
+  (when (and context-tokens (pos? context-tokens))
+    (let [percent (min 100 (* 100 (/ context-tokens context-window-tokens)))
+          bar-color (cond
+                      (>= percent 90) "bg-error"
+                      (>= percent 70) "bg-warning"
+                      :else "bg-signal")]
+      [:div {:class "flex items-center gap-2"
+             :title (str "Context: " (format-tokens context-tokens) " / " (format-tokens context-window-tokens) " tokens")}
+       [:div {:class "w-24 h-1.5 bg-base-700 rounded-full overflow-hidden"}
+        [:div {:class (str bar-color " h-full rounded-full transition-all")
+               :style (str "width: " percent "%")}]]
+       [:span {:class "text-text-500 text-2xs"} (str (format-tokens context-tokens))]])))
+
 (defn- metrics-display
   "Render metrics row for agent detail header.
-   Shows tokens, turns, duration, and cost in a compact format."
-  [{:keys [input-tokens output-tokens num-turns duration-ms cost]}]
+   Shows context usage, turns, and duration in a compact format."
+  [{:keys [num-turns duration-ms context-tokens]}]
   [:div {:class "flex items-center gap-4 text-xs font-mono"}
-   ;; Tokens: ↑ input  ↓ output
-   (when (or input-tokens output-tokens)
-     [:span {:class "text-text-400"}
-      (when input-tokens
-        [:span {:title "Input tokens"} "↑ " (format-tokens input-tokens)])
-      (when (and input-tokens output-tokens) "  ")
-      (when output-tokens
-        [:span {:title "Output tokens"} "↓ " (format-tokens output-tokens)])])
+   ;; Context window usage bar
+   (context-bar context-tokens)
    ;; Turns
    (when num-turns
      [:span {:class "text-text-400" :title "Conversation turns"}
@@ -900,11 +947,7 @@
    ;; Duration
    (when duration-ms
      [:span {:class "text-text-400" :title "Duration"}
-      (format-duration duration-ms)])
-   ;; Cost
-   (when cost
-     [:span {:class "text-text-200" :title "Cost"}
-      (format-cost cost)])])
+      (format-duration duration-ms)])])
 
 (defn- status-badge
   "Render a status badge with Phosphor pattern for agent detail header.
@@ -1082,6 +1125,7 @@
         ai-session-id (find-ai-session-id agent-id)
         messages (when ai-session-id (load-session-messages ai-session-id))
         session-info (when ai-session-id (load-session-info ai-session-id))
+        context-tokens (when ai-session-id (load-context-tokens ai-session-id))
         ;; Get message stats for stuck detection
         message-stats (or (message-stats-by-session) {})
         ;; Compute aggregated metrics from messages
@@ -1092,14 +1136,11 @@
                         :unknown)
         effective-status (compute-effective-status ai-session-id base-status message-stats)
         status-info {:status effective-status
-                     :time-ago nil
-                     :cost (::ai/cost-usd session-info)}
-        ;; Merge session cost into metrics
-        metrics {:input-tokens (:input-tokens agg-stats)
-                 :output-tokens (:output-tokens agg-stats)
-                 :num-turns (:num-turns agg-stats)
+                     :time-ago nil}
+        ;; Metrics: turns, duration, context usage (no cost - using Max plan)
+        metrics {:num-turns (:num-turns agg-stats)
                  :duration-ms (:duration-ms agg-stats)
-                 :cost (::ai/cost-usd session-info)}
+                 :context-tokens context-tokens}
         ;; Extract current activity for progress line
         current-activity (when (seq messages) (extract-current-activity messages))
         message-count (count messages)
@@ -1107,20 +1148,39 @@
         initial-context (::ai/initial-context session-info)]
     (h/html
      [:main#morph
-      ;; Header with back link and status
-      [:div {:class "flex items-center justify-between mb-4"}
-       [:div {:class "flex items-center gap-4"}
+      ;; Header: left side (back + ID) larger, right side (metrics) smaller
+      [:div {:class "flex items-center justify-between mb-3"}
+       ;; Left: back arrow and agent ID
+       [:div {:class "flex items-center gap-3"}
         [:a {:href "/agents"
-             :class "text-text-400 hover:text-text-200 transition-colors"}
-         "← Back"]
-        [:h1 {:class "text-2xl font-semibold tracking-tight font-mono text-text-50"} agent-id]
-        [:span {:class "text-text-400 text-xs"}
-         (str message-count " messages")]]
-       ;; Status badge on the right
-       (status-badge status-info)]
-      ;; Metrics row
-      [:div {:class "mb-4"}
-       (metrics-display metrics)]
+             :class "text-text-400 hover:text-text-200 transition-colors text-lg"}
+         "←"]
+        [:span {:class "text-xl font-semibold font-mono text-text-50"} agent-id]]
+       ;; Right: status and metrics
+       [:div {:class "flex items-center gap-3 text-xs font-mono"}
+        ;; Status dot + label
+        (let [{:keys [status]} status-info
+              [dot-class text-class label pulse?]
+              (case status
+                :running ["bg-signal" "text-signal" "running" true]
+                :completed ["bg-success" "text-success" "done" false]
+                :stuck ["bg-warning" "text-warning" "stuck" false]
+                :error ["bg-error" "text-error" "error" false]
+                ["bg-text-500" "text-text-500" (name (or status :unknown)) false])]
+          [:span {:class "inline-flex items-center gap-1"}
+           [:span {:class (str "w-1.5 h-1.5 rounded-full " dot-class (when pulse? " animate-pulse"))}]
+           [:span {:class text-class} label]])
+        ;; Context tokens
+        (when context-tokens
+          [:span {:class "text-text-400"} (format-tokens context-tokens)])
+        ;; Turns
+        (when (:num-turns metrics)
+          [:span {:class "text-text-400"} (str "T" (:num-turns metrics))])
+        ;; Duration
+        (when (:duration-ms metrics)
+          [:span {:class "text-text-400"} (format-duration (:duration-ms metrics))])
+        ;; Message count
+        [:span {:class "text-text-500"} (str message-count " msgs")]]]
       ;; Progress summary (only for running agents)
       (progress-summary {:status effective-status :activity current-activity})
 
