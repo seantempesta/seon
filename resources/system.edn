@@ -21,7 +21,7 @@
  ;; Storage paths: data/namespaces/{namespace}/log and storage
  :seon/namespace-dbs
  {:node #ig/ref :seon/xtdb-node
-  :namespaces [seon.primer seon.dev]}
+  :namespaces [seon.dev]}
 
  ;; Datalevin Server (Phase 0 of migration from XTDB)
  ;; Runs in-process, agents connect as clients to namespace-isolated databases.
