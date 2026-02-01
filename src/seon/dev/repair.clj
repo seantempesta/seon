@@ -93,7 +93,11 @@
   (try
     (edamame/parse-string-all content {:all true
                                        :read-cond :allow
-                                       :features #{:clj}})
+                                       :features #{:clj :cljs}
+                                       ;; Accept any namespace alias (e.g., ::codebase/foo)
+                                       :auto-resolve (fn [_] 'user)
+                                       ;; Accept any reader tag (e.g., #env, #profile, #ig/ref)
+                                       :readers (fn [_tag] identity)})
     false
     (catch clojure.lang.ExceptionInfo ex
       (let [data (ex-data ex)]
