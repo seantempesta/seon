@@ -8,11 +8,11 @@
 ;;
 ;; All state (functions, errors, edit history) is stored in XTDB.
 
-{;; Syntax repair via clj-paren-repair-claude-hook
- :syntax-repair {:enabled true
-                 :cljfmt true
-                 :stats true
-                 :revert-on-fail true}
+{;; Syntax repair via seon.dev.repair
+ ;; Key is :repair (not :syntax-repair) to match what hook.clj expects
+ :repair {:enabled true
+          :cljfmt true
+          :revert-on-fail true}
 
  ;; Test execution
  ;; NOTE: generative block-on-fail temporarily disabled due to pre-existing issue where
