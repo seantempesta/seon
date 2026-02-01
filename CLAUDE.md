@@ -469,6 +469,63 @@ Config in `.claude/seon-hook.edn`. Hook blocks if tests fail.
 
 ---
 
+## Valid Clojure Edits
+
+The dev hook validates Clojure syntax **before** applying edits. Invalid edits are blocked.
+
+### What Gets Validated
+- All files: `.clj`, `.cljs`, `.cljc`, `.bb`, `.edn`
+- Both Edit and Write operations
+- Validation happens at PreToolUse (before file is modified)
+
+### If Your Edit is Blocked
+
+You'll see:
+```
+BLOCKED: Invalid Clojure syntax.
+Error: EOF while reading, expected ) to match ( at [,]
+```
+
+This means your `old_string` → `new_string` replacement would create broken code. Check:
+1. Balanced delimiters in `new_string`
+2. `old_string` matches file content exactly (whitespace matters!)
+3. Complete forms (don't leave expressions unfinished)
+
+### Escape Hatch
+
+If struggling with complex edits or whitespace issues, use **Write** to replace the entire function or file section. Read the file first to understand exact formatting.
+
+### Code Smell: Functions Too Complex to Edit
+
+If you repeatedly fail to edit a function—even when trying to Write the entire thing—that's a signal the function is too complex. **Refactor it first:**
+
+1. Extract helper functions for distinct concerns
+2. Keep each function under ~30 lines with shallow nesting
+3. Name functions by what they do, making the main function read like prose
+
+Example: A 150-line `-main` with 6 levels of nesting → refactor to:
+```clojure
+(defn -main []
+  (init-logging!)
+  (backup-critical-files!)
+  (let [event (parse-event)]
+    (cond
+      (skip-nrepl? event) (fast-path! event)
+      (validation-blocks? event) (block! event)
+      :else (process-via-nrepl! event))))
+```
+
+**If an AI can't edit your code, it's too complex for humans too.**
+
+### Hook File Safety
+
+Critical files (`bin/seon-hook`, `src/seon/dev/hook.clj`) have extra protection:
+- Backups stored in `tmp/hook-backup/`
+- Auto-restore if corrupted on hook startup
+- Invalid edits blocked with detailed error messages
+
+---
+
 ## Code Reloading
 
 **The dev hook handles code reloading automatically** after every Edit/Write. You rarely need to reload manually.
