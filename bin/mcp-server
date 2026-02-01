@@ -157,7 +157,9 @@ You must then either:
                                :line_end {:type "integer"
                                           :description "Only match within this line range (end)"}
                                :replace_all {:type "boolean"
-                                             :description "Replace ALL occurrences (required if multiple matches)"}}
+                                             :description "Replace ALL occurrences (required if multiple matches)"}
+                               :dry_run {:type "boolean"
+                                         :description "Preview changes without writing file"}}
                   :required ["file_path" "match" "replace"]}}])
 
 ;;; ---------------------------------------------------------------------------
@@ -653,7 +655,7 @@ You must then either:
 (defn execute-clojure-edit
   "Execute the clojure_edit tool via nREPL.
    Calls seon.dev.clojure-edit/edit-sexp! on the orchestrator."
-  [{:keys [file_path match replace line_start line_end replace_all]}]
+  [{:keys [file_path match replace line_start line_end replace_all dry_run]}]
   (log-debug "execute-clojure-edit file:" file_path "match:" match)
 
   (let [code (format "(do (require 'seon.dev.clojure-edit)
@@ -663,13 +665,15 @@ You must then either:
                                                     :replace %s
                                                     :line-start %s
                                                     :line-end %s
-                                                    :replace-all? %s}))"
+                                                    :replace-all? %s
+                                                    :dry-run? %s}))"
                      (pr-str file_path)
                      (pr-str match)
                      (pr-str replace)
                      (if line_start (str line_start) "nil")
                      (if line_end (str line_end) "nil")
-                     (if replace_all "true" "false"))
+                     (if replace_all "true" "false")
+                     (if dry_run "true" "false"))
         result (nrepl-eval orchestrator-port code 30000)]
 
     (log-debug "Clojure edit result:" (pr-str result))
