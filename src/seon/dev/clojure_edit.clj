@@ -325,8 +325,9 @@
                   ::replace \"new-fn\"
                   ::replace-all? true})"
   {:malli/schema [:=> [:cat ::edit-request] ::edit-response]}
-  [{::keys [file-path match replace line-start line-end replace-all?]}]
+  [{::keys [file-path match replace line-start line-end replace-all? dry-run?]}]
   (let [replace-all? (or replace-all? false)
+        dry-run? (or dry-run? false)
         match-parsed (parse-expr match)
         replace-parsed (parse-expr replace)]
     (cond
@@ -368,10 +369,14 @@
             :else
             (let [new-source (replace-matches source matches replace-node)
                   diff (line-diff source new-source file-path)]
-              (spit file-path new-source)
+              (when-not dry-run?
+                (spit file-path new-source))
               {::success true
-               ::message (format "Replaced %d occurrence(s) in %s"
-                                 (count matches) file-path)
+               ::message (if dry-run?
+                           (format "DRY RUN: Would replace %d occurrence(s) in %s"
+                                   (count matches) file-path)
+                           (format "Replaced %d occurrence(s) in %s"
+                                   (count matches) file-path))
                ::replacements (count matches)
                ::diff diff})))
         (catch java.io.FileNotFoundException _
