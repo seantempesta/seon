@@ -245,6 +245,30 @@
     (str (subs s 0 max-len) "...")
     s))
 
+(defn- find-similar-forms
+  "Find forms with the same head symbol as target, for error context.
+   Returns up to 3 similar forms with their locations.
+   Helps users understand why their match didn't work."
+  [zloc target-sexpr]
+  (when (and (seq? target-sexpr) (symbol? (first target-sexpr)))
+    (let [head-sym (first target-sexpr)]
+      (->> (loop [loc zloc, found []]
+             (if (z/end? loc)
+               found
+               (let [found' (try
+                              (let [sexpr (z/sexpr loc)]
+                                (if (and (seq? sexpr)
+                                         (= (first sexpr) head-sym)
+                                         (not= sexpr target-sexpr))
+                                  (let [[line _col] (z/position loc)]
+                                    (conj found {:line line
+                                                 :form (z/string loc)}))
+                                  found))
+                              (catch Exception _ found))]
+                 (recur (z/next loc) found'))))
+           (take 3)
+           vec))))
+
 (defn- replace-matches
   "Replace all matches in the source.
    Uses position-based replacement from end to start to preserve positions."
