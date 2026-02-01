@@ -101,6 +101,22 @@
       (is (not (str/includes? (read-test-file) "(+ 1 2)")))
       (is (= 3 (count (re-seq #"\(\+ 1 3\)" (read-test-file))))))))
 
+(deftest dry-run-test
+  (testing "Dry run shows diff but doesn't modify file"
+    (write-test-file! "(defn foo [] (+ 1 2))")
+    (let [original (read-test-file)
+          result (edit/edit-sexp!
+                  {::edit/file-path *test-file*
+                   ::edit/match "(+ 1 2)"
+                   ::edit/replace "(+ 1 3)"
+                   ::edit/dry-run? true})]
+      (is (::edit/success result))
+      (is (str/includes? (::edit/message result) "DRY RUN"))
+      (is (= 1 (::edit/replacements result)))
+      (is (some? (::edit/diff result)))
+      ;; File should be unchanged
+      (is (= original (read-test-file))))))
+
 (deftest line-range-disambiguation-test
   (testing "Line range narrows match scope"
     (write-test-file! "(defn foo [] (+ 1 2))
