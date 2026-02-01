@@ -161,14 +161,28 @@
       (is (str/includes? (::edit/error result) "Invalid replace expression")))))
 
 (deftest match-not-found-test
-  (testing "No match returns error"
+  (testing "No match returns error with similar forms hint"
     (write-test-file! "(defn foo [] (+ 1 2))")
     (let [result (edit/edit-sexp!
                   {::edit/file-path *test-file*
                    ::edit/match "(+ 3 4)"
                    ::edit/replace "(+ 5 6)"})]
       (is (not (::edit/success result)))
-      (is (str/includes? (::edit/error result) "Match not found")))))
+      (is (str/includes? (::edit/error result) "Match not found"))
+      ;; Should show similar form (+ 1 2) since it has same head symbol
+      (is (str/includes? (::edit/error result) "Similar forms"))
+      (is (str/includes? (::edit/error result) "(+ 1 2)"))))
+
+  (testing "No match with no similar forms is clean"
+    (write-test-file! "(defn foo [] (+ 1 2))")
+    (let [result (edit/edit-sexp!
+                  {::edit/file-path *test-file*
+                   ::edit/match "(bar x y)"
+                   ::edit/replace "(baz x y)"})]
+      (is (not (::edit/success result)))
+      (is (str/includes? (::edit/error result) "Match not found"))
+      ;; No similar forms since bar doesn't exist
+      (is (not (str/includes? (::edit/error result) "Similar forms"))))))
 
 (deftest file-not-found-test
   (testing "Non-existent file returns error"

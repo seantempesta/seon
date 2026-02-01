@@ -373,10 +373,16 @@
               replace-node (:node replace-parsed)
               matches (find-all-matches zloc match-sexpr line-start line-end)]
           (cond
-            ;; No matches found
+            ;; No matches found - provide helpful context
             (empty? matches)
-            {::success false
-             ::error (str "Match not found: " match)}
+            (let [similar (find-similar-forms zloc match-sexpr)
+                  hint (when (seq similar)
+                         (str "\n\nSimilar forms with same head symbol:\n"
+                              (str/join "\n"
+                                (map #(str "  Line " (:line %) ": " (:form %))
+                                     similar))))]
+              {::success false
+               ::error (str "Match not found: " match hint)})
 
             ;; Multiple matches without replace_all → REJECT with locations
             (and (> (count matches) 1) (not replace-all?))
