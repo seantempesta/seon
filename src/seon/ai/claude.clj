@@ -299,13 +299,43 @@
          (mapv #(select-keys % [:id :name :input]))
          not-empty)))
 
+(def ^:private max-tool-result-content-size
+  "Maximum size for tool result content before truncation.
+   Large file reads from Claude Code can be 50-100KB, which overloads XTDB.
+   2KB preview is enough to understand what was read."
+  2048)
+
+(defn- truncate-tool-result-content
+  "Truncate large tool result content to prevent XTDB overload.
+   Returns content map with :content-preview, :content-size, :truncated? for large content."
+  [content]
+  (cond
+    ;; String content - truncate if large
+    (string? content)
+    (if (> (count content) max-tool-result-content-size)
+      {:content-preview (subs content 0 max-tool-result-content-size)
+       :content-size (count content)
+       :truncated? true}
+      content)
+
+    ;; Already a map - check for nested content
+    (map? content)
+    content
+
+    ;; Other types - pass through
+    :else content))
+
 (defn- extract-tool-results
-  "Extract tool_result blocks from user message content."
+  "Extract tool_result blocks from user message content.
+   Large content (>2KB) is truncated to prevent XTDB overload from file reads."
   [content]
   (when (sequential? content)
     (->> content
          (filter #(= "tool_result" (:type %)))
-         (mapv #(select-keys % [:tool_use_id :content :is_error]))
+         (mapv (fn [tr]
+                 (let [base (select-keys tr [:tool_use_id :is_error])
+                       content (:content tr)]
+                   (assoc base :content (truncate-tool-result-content content)))))
          not-empty)))
 
 (defn- extract-text-content
