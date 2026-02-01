@@ -153,6 +153,50 @@ Follow patterns in `CONVENTIONS.md`:
 - Malli schemas for contracts
 - One file per namespace (don't split prematurely)
 
+---
+
+## Valid Edits (Your Edits Are Validated)
+
+The hook validates your edits **before** they're applied. Invalid Clojure = blocked.
+
+### Rules
+1. **Balance delimiters** - Every `(` needs `)`, every `[` needs `]`, every `{` needs `}`
+2. **Complete forms** - Don't leave `(defn foo` without closing
+3. **Exact old_string** - Must match file content exactly (whitespace matters!)
+
+### If Your Edit is Blocked
+
+You'll see a message like:
+```
+BLOCKED: Invalid Clojure syntax.
+Error: Unmatched delimiter )
+```
+
+This means your `old_string` → `new_string` replacement would create broken code. Check:
+1. Balanced delimiters in `new_string`
+2. `old_string` matches file content exactly
+3. Complete forms (don't leave expressions unfinished)
+
+### Escape Hatch
+
+If you're struggling with whitespace or complex edits:
+- **Use Write** to replace the entire function or file section
+- Read the file first to understand exact formatting
+
+### Don't Fight the Hook
+
+The hook protects the codebase. If your edit is blocked, the problem is your edit, not the hook.
+
+### Code Smell: Can't Edit a Function?
+
+If you repeatedly fail to edit a function—even when trying to Write the whole thing—**the function is too complex**. Refactor it:
+
+1. Extract helper functions for each concern
+2. Keep functions under ~30 lines, shallow nesting
+3. Make the main function read like prose
+
+**If you can't edit it, it's too complex for anyone.**
+
 ## File Locations
 
 - `logs/` - Debug logs (gitignored)
