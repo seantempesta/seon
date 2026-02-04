@@ -598,6 +598,144 @@
                                             (success-response @feedback)))))))))))))))))))))
 
 ;;; ---------------------------------------------------------------------------
+;;; MCP Edit Integration
+;;; ---------------------------------------------------------------------------
+
+(schema/register! ::mcp-edit-request
+                  [:map {:description "Request to process an MCP edit event"}
+                   [::xtdb-node ::xtdb-node]
+                   [::file-path :string]
+                   [::config {:optional true} ::config]])
+
+(schema/register! ::mcp-edit-response
+                  [:map {:description "Response from MCP edit processing"}
+                   [::success :boolean]
+                   [::feedback [:vector :string]]
+                   [::blocked {:optional true} :boolean]
+                   [::reason {:optional true} :string]])
+
+(defn- run-post-edit-pipeline!
+  "Run the post-edit pipeline stages. Shared by process-hook-event! and process-mcp-edit!.
+   Returns {:success :feedback :blocked :reason}."
+  [{::keys [xtdb-node file-path ns-sym config feedback start-time]}]
+  (let [dense? (get-in config [:feedback :dense])
+        reload-result (stage-reload ns-sym config)
+        _ (when-let [loaded (seq (:loaded reload-result))]
+            (swap! feedback conj (str "Reloaded: " (str/join ", " (map str loaded)))))]
+    (if (and reload-result (not (:success reload-result)))
+      {:success false :blocked true :reason (:error reload-result) :feedback @feedback}
+      (let [compliance-result (stage-compliance ns-sym config)
+            _ (when (and compliance-result (not (:compliant? compliance-result)))
+                (swap! feedback conj (:formatted compliance-result)))
+            compliance-block? (and compliance-result (not (:compliant? compliance-result))
+                                   (get-in config [:compliance :block]))]
+        (if compliance-block?
+          {:success false :blocked true :reason (:formatted compliance-result) :feedback @feedback}
+          (let [unit-result (stage-unit-tests ns-sym config)
+                test-ns (codebase/file->test-namespace {::codebase/file-path file-path})
+                _ (when (and (not dense?) unit-result (::verify/success unit-result))
+                    (swap! feedback conj (verify/format-unit-result
+                                          {::verify/result unit-result ::verify/test-ns test-ns})))
+                unit-block? (and unit-result (not (::verify/success unit-result))
+                                 (get-in config [:tests :unit :block-on-fail]))]
+            (if unit-block?
+              (let [reason (format "Unit tests failed: %d failures, %d errors in %s"
+                                   (::verify/fail-count unit-result 0)
+                                   (::verify/error-count unit-result 0) test-ns)]
+                (stage-record-edit xtdb-node file-path ns-sym
+                                   {:unit-test-result (extract-unit-summary unit-result)
+                                    :decision :block :reason reason :feedback @feedback})
+                {:success false :blocked true :reason reason :feedback @feedback})
+              (let [gen-result (stage-gen-tests ns-sym config)
+                    _ (when (and (not dense?) gen-result (::verify/success gen-result))
+                        (swap! feedback conj (verify/format-gen-result
+                                              {::verify/result gen-result ::verify/namespace ns-sym})))
+                    gen-block? (and gen-result (not (::verify/success gen-result))
+                                    (get-in config [:tests :generative :block-on-fail]))]
+                (if gen-block?
+                  (let [failed-fns (str/join ", " (map #(str (::verify/fn-symbol %))
+                                                       (::verify/failures gen-result)))
+                        reason (format "Generative tests failed for: %s"
+                                       (if (str/blank? failed-fns) "schema errors" failed-fns))]
+                    (stage-record-edit xtdb-node file-path ns-sym
+                                       {:unit-test-result (extract-unit-summary unit-result)
+                                        :gen-test-result (extract-gen-summary gen-result)
+                                        :decision :block :reason reason :feedback @feedback})
+                    {:success false :blocked true :reason reason :feedback @feedback})
+                  (let [elapsed-ms (- (System/currentTimeMillis) start-time)]
+                    (stage-record-edit xtdb-node file-path ns-sym
+                                       {:unit-test-result (extract-unit-summary unit-result)
+                                        :gen-test-result (extract-gen-summary gen-result)
+                                        :decision :continue :feedback @feedback})
+                    (when dense?
+                      (when-let [dense-line (format-dense-success
+                                             {:unit-result unit-result :gen-result gen-result
+                                              :compliance-result compliance-result :elapsed-ms elapsed-ms})]
+                        (swap! feedback conj dense-line)))
+                    (when (stage-should-review? xtdb-node config)
+                      (when-let [review-text (stage-review xtdb-node config unit-result)]
+                        (swap! feedback conj review-text)))
+                    {:success true :feedback (vec @feedback)}))))))))))
+
+(defn process-mcp-edit!
+  "Process an MCP edit (clojure_edit) through the same pipeline as PostToolUse.
+
+   This gives clojure_edit feature parity with the regular Edit hook:
+   1. Reload - Reload changed namespaces via clj-reload
+   2. Unit Tests - Run if test namespace exists
+   3. Gen Tests - Run generative tests on schema'd functions
+   4. Compliance - Check convention compliance
+   5. Record - Store edit event in XTDB
+   6. Review - Trigger AI review if rate limit allows
+
+   Called by bin/mcp-server after successful clojure_edit.
+
+   Request keys:
+     ::xtdb-node - XTDB node for persistence
+     ::file-path - Path to the edited file
+     ::config    - Configuration (merged with defaults, optional)
+
+   Response keys:
+     ::success  - true if pipeline completed without blocking issues
+     ::feedback - Vector of feedback messages
+     ::blocked  - true if a blocking issue occurred
+     ::reason   - Reason for block (if blocked)
+
+   Example:
+     (process-mcp-edit!
+       {::xtdb-node node
+        ::file-path \"/path/to/file.clj\"})
+     ;; => {::success true
+     ;;     ::feedback [\"✓ 5 tests, gen-tests, compliant (0.3s)\"]}"
+  {:malli/schema [:=> [:cat ::mcp-edit-request] ::mcp-edit-response]}
+  [{::keys [xtdb-node file-path config]}]
+  (let [config (merge-config (or config {}))
+        ns-sym (codebase/file->namespace {::codebase/file-path file-path})]
+    (cond
+      (not (codebase/clojure-file? {::codebase/file-path file-path}))
+      {::success true ::feedback []}
+
+      (not (seon-source-file? file-path))
+      {::success true ::feedback []}
+
+      (not ns-sym)
+      {::success true ::feedback []}
+
+      :else
+      (let [feedback (atom [])
+            result (run-post-edit-pipeline!
+                    {::xtdb-node xtdb-node
+                     ::file-path file-path
+                     ::ns-sym ns-sym
+                     ::config config
+                     ::feedback feedback
+                     ::start-time (System/currentTimeMillis)})]
+        (cond-> {::success (:success result)
+                 ::feedback (:feedback result)}
+          (:blocked result) (assoc ::blocked true)
+          (:reason result) (assoc ::reason (:reason result)))))))
+
+;;; ---------------------------------------------------------------------------
 ;;; Development Helpers (REPL)
 ;;; ---------------------------------------------------------------------------
 

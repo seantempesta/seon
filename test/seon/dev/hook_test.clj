@@ -490,3 +490,44 @@
               config {:feedback {:dense false}}
               result (hook/process-hook-event! (make-request *test-node* event config))]
           (is (::hook/continue result)))))))
+
+;;; ---------------------------------------------------------------------------
+;;; MCP Edit Integration Tests
+;;; ---------------------------------------------------------------------------
+
+(deftest process-mcp-edit-test
+  (with-test-node
+    (fn []
+      (testing "process-mcp-edit! skips non-Clojure files"
+        (let [result (hook/process-mcp-edit!
+                      {::hook/xtdb-node *test-node*
+                       ::hook/file-path "/path/to/file.json"})]
+          (is (true? (::hook/success result)))
+          (is (empty? (::hook/feedback result)))))
+
+      (testing "process-mcp-edit! skips non-seon source files"
+        (let [result (hook/process-mcp-edit!
+                      {::hook/xtdb-node *test-node*
+                       ::hook/file-path "/other/project/file.clj"})]
+          (is (true? (::hook/success result)))
+          (is (empty? (::hook/feedback result)))))
+
+      (testing "process-mcp-edit! runs pipeline for seon source files"
+        (let [temp-dir (java.io.File. "/tmp/src/seon")
+              _ (.mkdirs temp-dir)
+              temp-file (java.io.File. temp-dir "mcp_edit_test.clj")
+              temp-path (.getAbsolutePath temp-file)]
+          (try
+            (spit temp-path "(ns seon.mcp-edit-test)\n(defn foo [x] x)")
+            (let [result (hook/process-mcp-edit!
+                          {::hook/xtdb-node *test-node*
+                           ::hook/file-path temp-path
+                           ::hook/config {:reload {:enabled false}
+                                          :compliance {:enabled false}
+                                          :tests {:unit {:enabled false}
+                                                  :generative {:enabled false}}
+                                          :review {:enabled false}}})]
+              (is (true? (::hook/success result)))
+              (is (vector? (::hook/feedback result))))
+            (finally
+              (.delete temp-file))))))))
