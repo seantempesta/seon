@@ -35,8 +35,8 @@
             [rewrite-clj.parser :as p]
             [rewrite-clj.node :as n]
             [cljfmt.core :as cljfmt]
-            [clj-kondo.core :as clj-kondo]
             [clojure.string :as str]
+            [seon.dev.lint :as lint]
             [seon.schema :as schema]))
 
 ;;; ---------------------------------------------------------------------------
@@ -140,62 +140,6 @@
                    [::replacements {:optional true} ::replacements]
                    [::matches {:optional true} ::matches]
                    [::lint-findings {:optional true} ::lint-findings]])
-
-;;; ---------------------------------------------------------------------------
-;;; Static Analysis (clj-kondo)
-;;; ---------------------------------------------------------------------------
-
-(def ^:private lint-config
-  "clj-kondo configuration for pre-write validation.
-   Focus on errors that indicate broken code, not style issues."
-  {:linters {:unresolved-symbol {:level :error}
-             :unresolved-namespace {:level :error}
-             :unresolved-var {:level :error}
-             :invalid-arity {:level :error}
-             :missing-else-branch {:level :off}  ; Style, not error
-             :redundant-do {:level :off}         ; Style, not error
-             :unused-binding {:level :off}       ; Style, not error
-             :type-mismatch {:level :warning}}
-   :output {:progress false}})
-
-(defn- lint-source
-  "Run clj-kondo static analysis on source string.
-   Returns {:valid? bool :findings [...] :error-count int :warning-count int}
-
-   This is PURE STATIC ANALYSIS - no code execution, no side effects.
-   Safe to run on any code."
-  [source file-path]
-  (try
-    (let [result (with-in-str source
-                   (clj-kondo/run! {:lint ["-"]
-                                    :filename file-path
-                                    :config lint-config
-                                    :cache false}))
-          findings (:findings result)
-          summary (:summary result)
-          errors (or (:error summary) 0)
-          warnings (or (:warning summary) 0)]
-      {:valid? (zero? errors)
-       :findings (vec findings)
-       :error-count errors
-       :warning-count warnings})
-    (catch Exception e
-      {:valid? false
-       :findings [{:type :lint-error
-                   :message (str "clj-kondo failed: " (.getMessage e))
-                   :row 1
-                   :col 1}]
-       :error-count 1
-       :warning-count 0})))
-
-(defn- format-lint-findings
-  "Format lint findings for error message."
-  [findings]
-  (str/join "\n"
-            (map (fn [{:keys [type message row col level]}]
-                   (format "  Line %d, Col %d [%s]: %s"
-                           row col (or level type) message))
-                 findings)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Diff Generation
@@ -679,31 +623,30 @@
                   ;; Generate diff BEFORE cljfmt so we only show semantic changes
                   diff (line-diff source new-source-raw file-path)
                   new-source (format-source new-source-raw)
-                  ;; Static analysis BEFORE writing - catch errors early (if enabled)
-                  lint-result (when lint? (lint-source new-source file-path))]
-              (if (and lint-result (not (:valid? lint-result)))
-                ;; Lint errors - don't write, return structured findings
+                  ;; Static analysis BEFORE writing - uses unified validation with suggestions
+                  lint-result (when lint? (lint/validate-for-write
+                                           {::lint/content new-source
+                                            ::lint/file-path file-path
+                                            ::lint/full-lint? true}))]
+              (if (and lint-result (not (::lint/valid? lint-result)))
+                ;; Lint errors - don't write, return structured findings with suggestions
                 {::success false
-                 ::error (str "Static analysis found " (:error-count lint-result) " error(s):\n"
-                              (format-lint-findings (:findings lint-result))
+                 ::error (str (::lint/error-msg lint-result)
                               "\n\nFile NOT modified. Fix the issues and try again.")
-                 ::lint-findings (:findings lint-result)
+                 ::lint-findings (::lint/findings lint-result)
                  ::diff diff}
                 ;; Lint passed (or disabled) - safe to write
                 (do
                   (when-not dry-run?
                     (spit file-path new-source))
-                  (cond-> {::success true
-                           ::message (if dry-run?
-                                       (format "DRY RUN: Would replace %d occurrence(s) in %s"
-                                               (count matches) file-path)
-                                       (format "Replaced %d occurrence(s) in %s"
-                                               (count matches) file-path))
-                           ::replacements (count matches)
-                           ::diff diff}
-                    ;; Include warnings (non-blocking) if any
-                    (and lint-result (pos? (:warning-count lint-result)))
-                    (assoc ::lint-findings (:findings lint-result))))))))
+                  {::success true
+                   ::message (if dry-run?
+                               (format "DRY RUN: Would replace %d occurrence(s) in %s"
+                                       (count matches) file-path)
+                               (format "Replaced %d occurrence(s) in %s"
+                                       (count matches) file-path))
+                   ::replacements (count matches)
+                   ::diff diff})))))
         (catch java.io.FileNotFoundException _
           {::success false
            ::error (str "File not found: " file-path)})

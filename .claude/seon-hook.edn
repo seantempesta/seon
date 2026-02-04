@@ -8,7 +8,11 @@
 ;;
 ;; All state (functions, errors, edit history) is stored in XTDB.
 
-{;; Syntax repair via seon.dev.repair
+{;; PreToolUse validation - blocks edits BEFORE they're applied
+ ;; Catches syntax errors (unbalanced delimiters) before file is modified
+ :lint {:enabled true}
+
+ ;; Syntax repair via seon.dev.repair (PostToolUse)
  ;; Key is :repair (not :syntax-repair) to match what hook.clj expects
  :repair {:enabled true
           :cljfmt true
@@ -24,20 +28,17 @@
                       :num-tests 10
                       :block-on-fail false}}
 
- ;; Gemini AI review with bounded window model
+ ;; AI review (Gemini) with rate limiting
  ;; - Edits are recorded as immutable facts (never deleted)
- ;; - A singleton tracks when last review completed
- ;; - Query only looks at recent edits (bounded by lookback-minutes)
- ;; - Safety: Even if reviews stop, we only process bounded window
- :gemini {:enabled true
-          :on-new-function true
-          :on-gen-fail true
-          ;; Wait for user to stop typing before reviewing
-          :debounce-seconds 5
+ ;; - Reviews are rate-limited by interval-seconds
+ ;; - Query only looks at recent edits (bounded window)
+ :review {:enabled true
           ;; Minimum time between reviews (prevents review spam)
-          :cooldown-seconds 10
-          ;; Max edit history to consider (bounds accumulation)
-          :lookback-minutes 5}
+          :interval-seconds 60
+          ;; Max code length to include in review
+          :max-code-length 12000
+          ;; Max output length for review response
+          :max-output-length 500}
 
  ;; Convention compliance checking
  ;; - Runs after reload, before tests

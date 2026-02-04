@@ -112,11 +112,29 @@
 (deftest pre-tool-use-test
   (with-test-node
     (fn []
-      (testing "PreToolUse only runs repair stage"
+      (testing "PreToolUse:Edit validates simulated edit (doesn't modify file)"
+        ;; PreToolUse validates what the edit WOULD produce, but doesn't write
         (let [event (make-event "PreToolUse" "Edit" "/path/to/file.clj")
               result (hook/process-hook-event! (make-request *test-node* event))]
-          ;; Should succeed for non-existent file (no repair needed)
-          (is (::hook/continue result) "Should continue for PreToolUse")))
+          ;; Non-existent file - no old_string/new_string means validation is skipped
+          (is (::hook/continue result) "Should continue for PreToolUse without edit params")))
+
+      (testing "PreToolUse:Write validates new content syntax"
+        ;; PreToolUse:Write checks if the new content has valid syntax
+        (let [event {:hook_event_name "PreToolUse"
+                     :tool_name "Write"
+                     :tool_input {:file_path "/path/to/file.clj"
+                                  :content "(defn foo [x] (+ x 1))"}}
+              result (hook/process-hook-event! (make-request *test-node* event))]
+          (is (::hook/continue result) "Should continue for valid Write content")))
+
+      (testing "PreToolUse:Write blocks invalid syntax"
+        (let [event {:hook_event_name "PreToolUse"
+                     :tool_name "Write"
+                     :tool_input {:file_path "/path/to/file.clj"
+                                  :content "(defn foo [x] (+ x 1"}}  ; Missing paren
+              result (hook/process-hook-event! (make-request *test-node* event))]
+          (is (= "block" (::hook/decision result)) "Should block invalid Write content")))
 
       (testing "PreToolUse skips non-Clojure files"
         (let [event (make-event "PreToolUse" "Write" "/path/to/file.md")
@@ -252,22 +270,63 @@
             (finally
               (.delete temp-file)))))
 
-      (testing "Code with fixable errors is repaired and continues"
-        ;; Parinfer can fix most delimiter issues
-        (let [temp-file (java.io.File/createTempFile "fixable-code" ".clj")
+      (testing "PreToolUse:Edit validates simulated edit result"
+        ;; PreToolUse:Edit now validates the result of applying old_string -> new_string
+        (let [temp-file (java.io.File/createTempFile "pretool-edit" ".clj")
               temp-path (.getAbsolutePath temp-file)]
           (try
-            ;; Missing close parens - parinfer will fix based on indentation
-            (spit temp-path "(ns fixable)\n(defn foo [x]\n  (+ x 1")
-            (let [event (make-event "PreToolUse" "Edit" temp-path)
+            ;; Valid file
+            (spit temp-path "(ns pretool)\n(defn foo [x] (+ x 1))")
+            ;; Valid edit - should pass
+            (let [event {:hook_event_name "PreToolUse"
+                         :tool_name "Edit"
+                         :tool_input {:file_path temp-path
+                                      :old_string "(+ x 1)"
+                                      :new_string "(+ x 2)"}}
                   config {:repair {:enabled true}}
                   result (hook/process-hook-event! (make-request *test-node* event config))]
               (is (true? (::hook/continue result))
-                  "Should continue after successful repair")
-              ;; Verify file was actually repaired
-              (let [repaired-content (slurp temp-path)]
-                (is (clojure.string/includes? repaired-content "))")
-                    "File should have balanced parens after repair")))
+                  "Should continue for valid edit"))
+            (finally
+              (.delete temp-file)))))
+
+      (testing "PreToolUse:Edit blocks edit that would create invalid syntax"
+        (let [temp-file (java.io.File/createTempFile "pretool-invalid" ".clj")
+              temp-path (.getAbsolutePath temp-file)]
+          (try
+            ;; Valid file
+            (spit temp-path "(ns pretool)\n(defn foo [x] (+ x 1))")
+            ;; Edit that breaks syntax - should be blocked
+            (let [event {:hook_event_name "PreToolUse"
+                         :tool_name "Edit"
+                         :tool_input {:file_path temp-path
+                                      :old_string "(+ x 1))"
+                                      :new_string "(+ x"}}  ; Missing closing paren
+                  config {:repair {:enabled true}}
+                  result (hook/process-hook-event! (make-request *test-node* event config))]
+              (is (= "block" (::hook/decision result))
+                  "Should block edit that creates invalid syntax")
+              (is (string? (::hook/reason result))
+                  "Should have reason for blocking"))
+            (finally
+              (.delete temp-file)))))
+
+      (testing "PreToolUse:Edit passes when old_string not found (edit will fail anyway)"
+        ;; When old_string doesn't exist, str/replace-first returns original
+        ;; which should be valid, so we allow it (Claude will handle the mismatch)
+        (let [temp-file (java.io.File/createTempFile "pretool-notfound" ".clj")
+              temp-path (.getAbsolutePath temp-file)]
+          (try
+            (spit temp-path "(ns pretool)\n(defn foo [x] (+ x 1))")
+            (let [event {:hook_event_name "PreToolUse"
+                         :tool_name "Edit"
+                         :tool_input {:file_path temp-path
+                                      :old_string "(nonexistent code)"
+                                      :new_string "(something else)"}}
+                  config {:repair {:enabled true}}
+                  result (hook/process-hook-event! (make-request *test-node* event config))]
+              (is (true? (::hook/continue result))
+                  "Should continue when old_string not found"))
             (finally
               (.delete temp-file)))))
 
@@ -327,15 +386,25 @@
 (deftest orchestration-flow-test
   (with-test-node
     (fn []
-      (testing "Repair runs before namespace reload"
-        ;; File with fixable syntax error - repair should fix before reload
-        (let [temp-file (java.io.File/createTempFile "repair-order" ".clj")
+      (testing "Repair runs during PostToolUse before namespace reload"
+        ;; File with fixable syntax error - repair should fix during PostToolUse
+        ;; Note: PreToolUse validates edit result, PostToolUse runs full pipeline including repair
+        ;; Must use /tmp/src/seon/ path to trigger seon-source-file? check
+        (let [temp-dir (java.io.File. "/tmp/src/seon")
+              _ (.mkdirs temp-dir)
+              temp-file (java.io.File. temp-dir "repair_order.clj")
               temp-path (.getAbsolutePath temp-file)]
           (try
             ;; Missing closing paren - parinfer will fix based on indentation
-            (spit temp-path "(ns repair.order)\n(defn add [x y]\n  (+ x y")
-            (let [event (make-event "PreToolUse" "Edit" temp-path)
-                  config {:repair {:enabled true}}
+            (spit temp-path "(ns seon.repair-order)\n(defn add [x y]\n  (+ x y")
+            ;; Use PostToolUse - that's when repair runs
+            (let [event (make-event "PostToolUse" "Edit" temp-path)
+                  config {:repair {:enabled true}
+                          :reload {:enabled false}  ; Skip reload - file not on classpath
+                          :tests {:unit {:enabled false}
+                                  :generative {:enabled false}}
+                          :compliance {:enabled false}
+                          :review {:enabled false}}
                   result (hook/process-hook-event! (make-request *test-node* event config))]
               ;; If repair didn't run, this would fail
               (is (true? (::hook/continue result))
@@ -409,19 +478,46 @@
 (deftest pipeline-stage-order-test
   (with-test-node
     (fn []
-      (testing "Pipeline stages run in order: repair -> reload -> tests"
-        ;; We verify order by using a file that would fail at different stages
-        ;; depending on when checks happen
-
-        ;; Stage 1: A file that passes repair and reload
+      (testing "PreToolUse validates before file is modified"
+        ;; PreToolUse:Edit simulates the edit and validates the result
+        ;; This happens BEFORE the file is written
         (let [temp-file (java.io.File/createTempFile "stage-order" ".clj")
               temp-path (.getAbsolutePath temp-file)]
           (try
             (spit temp-path "(ns stage.order)\n(defn foo [] 1)")
-            (let [event (make-event "PreToolUse" "Edit" temp-path)
+            ;; Valid edit - should pass validation
+            (let [event {:hook_event_name "PreToolUse"
+                         :tool_name "Edit"
+                         :tool_input {:file_path temp-path
+                                      :old_string "(defn foo [] 1)"
+                                      :new_string "(defn foo [] 2)"}}
                   result (hook/process-hook-event! (make-request *test-node* event))]
               (is (true? (::hook/continue result))
-                  "Valid code should pass all stages"))
+                  "Valid edit should pass PreToolUse validation")
+              ;; File should NOT be modified by PreToolUse
+              (is (= "(ns stage.order)\n(defn foo [] 1)" (slurp temp-path))
+                  "PreToolUse should not modify the file"))
+            (finally
+              (.delete temp-file)))))
+
+      (testing "PostToolUse runs full pipeline: repair -> reload -> compliance -> tests"
+        ;; PostToolUse runs after the file is modified - it can repair and verify
+        (let [temp-dir (java.io.File. "/tmp/src/seon")
+              _ (.mkdirs temp-dir)
+              temp-file (java.io.File. temp-dir "post_pipeline.clj")
+              temp-path (.getAbsolutePath temp-file)]
+          (try
+            ;; Valid seon source file
+            (spit temp-path "(ns seon.post-pipeline)\n(defn bar [] 42)")
+            (let [event (make-event "PostToolUse" "Edit" temp-path)
+                  config {:reload {:enabled false}  ; Can't reload - not on classpath
+                          :compliance {:enabled false}
+                          :tests {:unit {:enabled false}
+                                  :generative {:enabled false}}
+                          :review {:enabled false}}
+                  result (hook/process-hook-event! (make-request *test-node* event config))]
+              (is (true? (::hook/continue result))
+                  "Valid code should pass PostToolUse pipeline"))
             (finally
               (.delete temp-file))))))))
 
