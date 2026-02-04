@@ -421,7 +421,8 @@
                    ::repl/replace "(undefined-fn x)"
                    ::repl/lint? true})]
       (is (not (::repl/success result)))
-      (is (str/includes? (::repl/error result) "Static analysis"))
+      ;; Uses unified error format with LINT ERRORS header
+      (is (str/includes? (::repl/error result) "LINT ERRORS"))
       (is (some? (::repl/lint-findings result)))
       (is (str/includes? (read-test-file) "(+ x 1)")))))
 

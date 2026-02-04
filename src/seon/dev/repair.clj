@@ -29,9 +29,9 @@
         ::repair/format? true})
      ;; => {::repair/success true
      ;;     ::repair/content \"(defn foo [x]\\n  (+ x 1))\"}"
-  (:require [edamame.core :as edamame]
-            [parinferish.core :as parinferish]
+  (:require [parinferish.core :as parinferish]
             [cljfmt.core :as cljfmt]
+            [seon.dev.lint :as lint]
             [seon.schema :as schema]))
 
 ;;; ---------------------------------------------------------------------------
@@ -80,34 +80,6 @@
 ;;; ---------------------------------------------------------------------------
 ;;; Private Implementation
 ;;; ---------------------------------------------------------------------------
-
-(defn- has-delimiter-error?
-  "Check if content has delimiter-related parse errors.
-
-   Uses edamame to parse the content. Returns true if parsing fails due to
-   unbalanced delimiters (indicated by :edamame/opened-delimiter in ex-data).
-
-   This is more precise than catching all parse errors - we specifically
-   detect delimiter issues that parinfer can fix."
-  [content]
-  (try
-    (edamame/parse-string-all content {:all true
-                                       :read-cond :allow
-                                       :features #{:clj :cljs}
-                                       ;; Accept any namespace alias (e.g., ::codebase/foo)
-                                       :auto-resolve (fn [_] 'user)
-                                       ;; Accept any reader tag (e.g., #env, #profile, #ig/ref)
-                                       :readers (fn [_tag] identity)})
-    false
-    (catch clojure.lang.ExceptionInfo ex
-      (let [data (ex-data ex)]
-        ;; Only return true for delimiter errors, not other parse errors
-        (boolean
-         (and (= :edamame/error (:type data))
-              (or (contains? data :edamame/opened-delimiter)
-                  ;; Also catch "unmatched delimiter" errors
-                  (when-let [msg (.getMessage ex)]
-                    (re-find #"(?i)unmatched|unclosed|expected.*\]|\)|\}" msg)))))))))
 
 (defn- try-repair
   "Attempt to repair content using parinferish indent mode.
@@ -158,9 +130,8 @@
      ;; => false (balanced)"
   {:malli/schema [:=> [:cat ::delimiter-error-request] :boolean]}
   [{::keys [content]}]
-  (if (or (nil? content) (empty? content))
-    false
-    (has-delimiter-error? content)))
+  ;; Delegate to shared lint module
+  (lint/syntax-error? {::lint/content content}))
 
 (defn repair
   "Attempt to repair delimiter errors in content using parinfer.

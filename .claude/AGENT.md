@@ -155,9 +155,53 @@ Follow patterns in `CONVENTIONS.md`:
 
 ---
 
+## Editing Tools
+
+You have multiple tools for editing Clojure files. Choose based on the situation:
+
+| Tool | Best For | Validation |
+|------|----------|------------|
+| `Edit` | Small string replacements | Syntax/lint pre-check |
+| `Write` | New files, rewrites | Syntax/lint pre-check |
+| `clojure_replace` (MCP) | Structural Clojure edits | Full lint + post-edit pipeline |
+
+**Prefer `clojure_replace` for Clojure code** because:
+- Whitespace-insensitive matching (structural, not string-based)
+- Preserves or updates comments
+- Full clj-kondo validation before write
+- Triggers the full post-edit pipeline (reload, tests, review)
+
+```
+clojure_replace(file_path="src/seon/foo.clj",
+                match="(defn old [x] ...)",
+                replace="(defn old [x] (new-impl x))")
+```
+
+**Use Edit/Write when:**
+- Non-Clojure files (config, markdown)
+- Very simple changes where exact string match is clear
+
+Both Edit/Write and clojure_replace trigger validation. Errors include "Did you mean?" suggestions for undefined symbols.
+
+---
+
 ## Valid Edits (Your Edits Are Validated)
 
 The hook validates your edits **before** they're applied. Invalid Clojure = blocked.
+
+### How Validation Works
+
+**PreToolUse (before edit):**
+1. Reads current file content
+2. Simulates your edit: `str/replace-first(current, old_string, new_string)`
+3. Validates the simulated result:
+   - **Seon files** (`src/seon/`): Full clj-kondo lint (undefined symbols, arity errors, etc.)
+   - **Other files**: Fast syntax check (delimiter balance)
+4. **Blocks** if validation fails, **allows** if valid
+
+The file is NEVER modified if validation fails. This prevents broken code from being written.
+
+**Error messages include "Did you mean?" suggestions** for undefined symbols.
 
 ### Rules
 1. **Balance delimiters** - Every `(` needs `)`, every `[` needs `]`, every `{` needs `}`
@@ -166,26 +210,43 @@ The hook validates your edits **before** they're applied. Invalid Clojure = bloc
 
 ### If Your Edit is Blocked
 
-You'll see a message like:
+You'll see a detailed message like:
 ```
-BLOCKED: Invalid Clojure syntax.
-Error: Unmatched delimiter )
+Edit would create invalid Clojure.
+
+SYNTAX ERROR: EOF while reading, expected ) to match ( at [1,15]
+
+Common causes:
+- Missing closing paren/bracket/brace
+- Extra closing delimiter
+- Unclosed string literal
+
+Fix: Check delimiter balance in your new_string.
+If the file was already broken, make ONE edit that fixes ALL syntax issues.
 ```
 
-This means your `old_string` → `new_string` replacement would create broken code. Check:
-1. Balanced delimiters in `new_string`
-2. `old_string` matches file content exactly
-3. Complete forms (don't leave expressions unfinished)
+**Read the error message carefully.** It tells you exactly what's wrong:
+- Line/column where the error was detected
+- What delimiter is missing or extra
+- Guidance on how to fix it
+
+### What to Do
+
+1. **Check your `new_string`** - Most blocks are caused by unbalanced delimiters in what you're adding
+2. **If file was already broken** - Make ONE comprehensive edit that fixes ALL issues, not partial fixes
+3. **Use Write for complex changes** - Replace the entire function or section instead of surgical edits
+4. **Read the file first** - Understand exact formatting before editing
 
 ### Escape Hatch
 
 If you're struggling with whitespace or complex edits:
 - **Use Write** to replace the entire function or file section
 - Read the file first to understand exact formatting
+- For broken files, write a corrected version of the entire affected area
 
 ### Don't Fight the Hook
 
-The hook protects the codebase. If your edit is blocked, the problem is your edit, not the hook.
+The hook protects the codebase. If your edit is blocked, the problem is your edit, not the hook. The error message tells you what to fix.
 
 ### Code Smell: Can't Edit a Function?
 

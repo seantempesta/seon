@@ -389,6 +389,53 @@ The skill provides the exact commands, patterns, and gotchas for this codebase.
 
 ---
 
+## Editing Tools
+
+You have multiple tools for editing files. Choose based on the situation:
+
+### Quick Reference
+
+| Tool | Best For | Validation |
+|------|----------|------------|
+| `Edit` | Small, exact string replacements | Syntax (non-seon) or full lint (seon) |
+| `Write` | New files, complete rewrites | Syntax (non-seon) or full lint (seon) |
+| `clojure_replace` (MCP) | Clojure code changes | Full clj-kondo + tests + review |
+
+### When to Use Each
+
+**Use `clojure_replace` (MCP) for Clojure files when:**
+- Replacing function bodies or expressions
+- Need whitespace-insensitive matching (it's structural)
+- Want lint errors caught before write (undefined symbols, arity)
+- Working with comments that need preservation
+
+```
+clojure_replace(file_path="src/seon/foo.clj",
+                match="(defn old-impl [x] ...)",
+                replace="(defn old-impl [x] (new-impl x))")
+```
+
+**Use `Edit` for:**
+- Simple string replacements
+- Non-Clojure files (config, markdown, etc.)
+- When exact match is required
+
+**Use `Write` for:**
+- Creating new files
+- Complete file rewrites
+- When Edit keeps failing on complex changes
+
+### Validation Summary
+
+All Clojure edits are validated:
+- **PreToolUse (Edit/Write):** Fast syntax check for non-seon files (~1ms), full clj-kondo for seon files (~50-100ms)
+- **PostToolUse (Edit/Write):** Full pipeline for seon files (repair, reload, tests, review)
+- **clojure_replace:** Full clj-kondo pre-write + post-edit pipeline
+
+Errors include "Did you mean?" suggestions for undefined symbols.
+
+---
+
 ## UI Development
 
 Seon uses a **Phosphor Terminal** theme - warm blacks, cream text, amber accents. Think Lisp machine, not generic web app.
@@ -473,23 +520,57 @@ Config in `.claude/seon-hook.edn`. Hook blocks if tests fail.
 
 The dev hook validates Clojure syntax **before** applying edits. Invalid edits are blocked.
 
+### How Validation Works
+
+**PreToolUse (before edit):**
+1. Reads current file content
+2. Simulates your edit: `str/replace-first(current, old_string, new_string)`
+3. Checks if the simulated result has valid syntax (balanced delimiters)
+4. **Blocks** if syntax is broken, **allows** if valid
+
+The file is NEVER modified if validation fails. This prevents broken code from being written.
+
+**PostToolUse (after edit):**
+- Runs repair (parinfer) if delimiters are slightly off
+- Reloads code into running server
+- Runs unit tests and generative tests
+- Checks convention compliance
+- Triggers AI review (rate-limited)
+
 ### What Gets Validated
 - All files: `.clj`, `.cljs`, `.cljc`, `.bb`, `.edn`
 - Both Edit and Write operations
-- Validation happens at PreToolUse (before file is modified)
+- PreToolUse checks **syntax only** (fast, ~1ms)
+- PostToolUse runs full **linting** (clj-kondo) for semantic errors
 
 ### If Your Edit is Blocked
 
-You'll see:
+You'll see a detailed error message:
 ```
-BLOCKED: Invalid Clojure syntax.
-Error: EOF while reading, expected ) to match ( at [,]
+Edit would create invalid Clojure.
+
+SYNTAX ERROR: EOF while reading, expected ) to match ( at [1,15]
+
+Common causes:
+- Missing closing paren/bracket/brace
+- Extra closing delimiter
+- Unclosed string literal
+
+Fix: Check delimiter balance in your new_string.
+If the file was already broken, make ONE edit that fixes ALL syntax issues.
 ```
 
-This means your `old_string` → `new_string` replacement would create broken code. Check:
-1. Balanced delimiters in `new_string`
-2. `old_string` matches file content exactly (whitespace matters!)
-3. Complete forms (don't leave expressions unfinished)
+**Read the error carefully.** It tells you:
+- Exactly where the error was detected (line, column)
+- What delimiter is missing or extra
+- How to fix it
+
+### What to Do When Blocked
+
+1. **Check your `new_string`** - Most blocks are unbalanced delimiters in what you're adding
+2. **If file was already broken** - Make ONE comprehensive edit that fixes ALL issues
+3. **Use Write for complex changes** - Replace the entire function/section
+4. **Read the file first** - Understand exact formatting before editing
 
 ### Escape Hatch
 

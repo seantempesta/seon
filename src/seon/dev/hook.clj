@@ -29,6 +29,7 @@
             [seon.dev.codebase :as codebase]
             [seon.dev.compliance :as compliance]
             [seon.dev.context :as context]
+            [seon.dev.lint :as lint]
             [seon.dev.repair :as repair]
             [seon.dev.review :as review]
             [seon.dev.verify :as verify]
@@ -98,6 +99,10 @@
                    [:enabled {:optional true} :boolean]
                    [:block {:optional true} :boolean]])
 
+(schema/register! ::lint-config
+                  [:map {:description "PreToolUse lint validation configuration"}
+                   [:enabled {:optional true} :boolean]])
+
 (schema/register! ::feedback-config
                   [:map {:description "Feedback formatting configuration"}
                    [:dense {:optional true} :boolean]
@@ -105,6 +110,7 @@
 
 (schema/register! ::config
                   [:map {:description "Full hook configuration"}
+                   [:lint {:optional true} ::lint-config]
                    [:repair {:optional true} ::repair-config]
                    [:tests {:optional true}
                     [:map
@@ -141,7 +147,8 @@
 
 (def ^:const default-config
   "Default configuration when not provided."
-  {:repair {:enabled true
+  {:lint {:enabled true}  ; PreToolUse syntax validation
+   :repair {:enabled true
             :cljfmt true}
    :reload {:enabled true}
    :tests {:unit {:enabled true
@@ -162,7 +169,8 @@
 (defn- merge-config
   "Deep merge user config with defaults."
   [user-config]
-  (let [repair (merge (:repair default-config) (:repair user-config))
+  (let [lint (merge (:lint default-config) (:lint user-config))
+        repair (merge (:repair default-config) (:repair user-config))
         reload (merge (:reload default-config) (:reload user-config))
         tests {:unit (merge (get-in default-config [:tests :unit])
                             (get-in user-config [:tests :unit]))
@@ -171,7 +179,8 @@
         review (merge (:review default-config) (:review user-config))
         compliance (merge (:compliance default-config) (:compliance user-config))
         feedback (merge (:feedback default-config) (:feedback user-config))]
-    {:repair repair
+    {:lint lint
+     :repair repair
      :reload reload
      :tests tests
      :review review
@@ -189,11 +198,12 @@
       (:filePath tool-input)))
 
 (defn- seon-source-file?
-  "Check if file is a Seon source file (in src/seon/)."
+  "Check if file is a Seon source or test file (in src/seon/ or test/seon/)."
   [file-path]
   (and file-path
        (codebase/clojure-file? {::codebase/file-path file-path})
-       (str/includes? file-path "src/seon/")))
+       (or (str/includes? file-path "src/seon/")
+           (str/includes? file-path "test/seon/"))))
 
 (defn- success-response
   "Build a success response with optional feedback messages."
@@ -473,27 +483,38 @@
             (log/debug "Skipping non-Clojure file" file-path)
             (success-response @feedback))
 
-      ;; === PreToolUse: Validate before tool runs ===
+      ;; === PreToolUse: Validate code before tool runs ===
+          ;; Uses unified validate-for-write for consistent error messages and suggestions.
+          ;; For Seon source files: full clj-kondo validation (~50-100ms) catches:
+          ;;   - Syntax errors, undefined symbols, wrong arity, private var access
+          ;; For other files: fast syntax check (~1ms) catches delimiter errors only
           (if (= event-name "PreToolUse")
-            (cond
-              ;; For Write: validate the NEW content being written
-              (= tool-name "Write")
-              (let [new-content (:content (:tool_input event))]
-                (if new-content
-                  ;; Try to parse the new content - block if invalid syntax
-                  (if (repair/delimiter-error? {::repair/content new-content})
-                    (block-response "Invalid Clojure syntax in new content")
-                    (success-response @feedback))
-                  ;; No content - allow (shouldn't happen)
-                  (success-response @feedback)))
-              
-              ;; For Edit: allow - we validate in PostToolUse after edit is applied
-              (= tool-name "Edit")
+            (if-not (get-in config [:lint :enabled])
+              ;; Lint validation disabled - skip
               (success-response @feedback)
-              
-              ;; Default
-              :else
-              (success-response @feedback))
+              (let [full-lint? (seon-source-file? file-path)
+                    ;; Get content to validate based on tool type
+                    content-to-validate
+                    (case tool-name
+                      "Write" (:content (:tool_input event))
+                      "Edit"  (let [old-string (:old_string (:tool_input event))
+                                    new-string (:new_string (:tool_input event))
+                                    current (try (slurp file-path) (catch Exception _ nil))]
+                                (when (and old-string new-string current)
+                                  (str/replace-first current old-string new-string)))
+                      nil)]
+                (if content-to-validate
+                  ;; Validate using unified function
+                  (let [result (lint/validate-for-write
+                                {::lint/content content-to-validate
+                                 ::lint/file-path file-path
+                                 ::lint/full-lint? full-lint?})
+                        prefix (str tool-name " would create invalid Clojure")]
+                    (if (::lint/valid? result)
+                      (success-response @feedback)
+                      (block-response (::lint/error-msg result))))
+                  ;; No content to validate - allow (missing params or can't read file)
+                  (success-response @feedback))))
 
         ;; === PostToolUse: Full pipeline ===
             (if-not (seon-source-file? file-path)
