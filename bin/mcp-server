@@ -652,9 +652,28 @@ You must then either:
                      "No active sessions"
                      (:value result))))))
 
+(defn- run-hook-pipeline!
+  "Run the hook pipeline after a successful clojure_edit.
+   Returns {:feedback [...] :blocked bool :reason str} or nil on error."
+  [file-path]
+  (let [code (format "(do (require 'seon.dev.hook)
+                          (seon.dev.hook/process-mcp-edit!
+                            #:seon.dev.hook{:xtdb-node (:seon/xtdb-node integrant.repl.state/system)
+                                            :file-path %s}))"
+                     (pr-str file-path))
+        result (nrepl-eval orchestrator-port code 60000)]
+    (when-not (:ex result)
+      (try
+        (let [parsed (clojure.edn/read-string (:value result))]
+          {:feedback (:seon.dev.hook/feedback parsed)
+           :blocked (:seon.dev.hook/blocked parsed)
+           :reason (:seon.dev.hook/reason parsed)})
+        (catch Exception _ nil)))))
+
 (defn execute-clojure-edit
   "Execute the clojure_edit tool via nREPL.
-   Calls seon.dev.clojure-edit/edit-sexp! on the orchestrator."
+   Calls seon.dev.clojure-edit/edit-sexp! on the orchestrator.
+   On success (non-dry-run), also runs the hook pipeline for reload/tests/review."
   [{:keys [file_path match replace line_start line_end replace_all dry_run]}]
   (log-debug "execute-clojure-edit file:" file_path "match:" match)
 
@@ -684,9 +703,23 @@ You must then either:
       ;; Parse the EDN result and format appropriately
       (let [parsed (try (clojure.edn/read-string (:value result)) (catch Exception _ nil))]
         (if (and parsed (:seon.dev.clojure-edit/success parsed))
-          (mcp-success (str (:seon.dev.clojure-edit/message parsed)
-                            "\n\n"
-                            (:seon.dev.clojure-edit/diff parsed)))
+          ;; Success - run hook pipeline if not dry-run
+          (let [edit-msg (str (:seon.dev.clojure-edit/message parsed)
+                              "\n\n"
+                              (:seon.dev.clojure-edit/diff parsed))
+                hook-result (when-not dry_run
+                              (run-hook-pipeline! file_path))]
+            (if (and hook-result (:blocked hook-result))
+              ;; Hook blocked the edit (tests failed, etc.)
+              (mcp-error (str edit-msg "\n\n--- Hook Pipeline ---\n"
+                              "BLOCKED: " (:reason hook-result)
+                              (when-let [fb (:feedback hook-result)]
+                                (str "\n" (str/join "\n" fb)))))
+              ;; Success - include hook feedback
+              (mcp-success (str edit-msg
+                                (when-let [fb (seq (:feedback hook-result))]
+                                  (str "\n\n--- Hook Pipeline ---\n"
+                                       (str/join "\n" fb)))))))
           ;; Error case - include match locations if available
           (let [error-msg (:seon.dev.clojure-edit/error parsed)
                 matches (:seon.dev.clojure-edit/matches parsed)]
