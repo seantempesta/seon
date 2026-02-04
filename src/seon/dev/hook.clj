@@ -239,7 +239,8 @@
                 (and unit-result (::verify/success unit-result))
                 (conj (str (::verify/test-count unit-result) " tests"))
 
-                ;; Gen tests - count the number of functions with schemas
+                ;; Gen tests passed
+
                 (and gen-result (::verify/success gen-result))
                 (conj "gen-tests")
 
@@ -359,7 +360,7 @@
   "Record the edit event in XTDB with observability data."
   [xtdb-node file-path ns-sym opts]
   (context/record-edit! (cond-> {::context/xtdb-node xtdb-node
-                                  ::context/file-path file-path}
+                                 ::context/file-path file-path}
                           ns-sym (assoc ::context/namespace ns-sym)
                           (:content-hash opts) (assoc ::context/content-hash (:content-hash opts))
                           (:unit-test-result opts) (assoc ::context/unit-test-result (:unit-test-result opts))
@@ -374,7 +375,7 @@
   (when (get-in config [:review :enabled])
     (let [interval (get-in config [:review :interval-seconds] 60)
           result (context/should-review? {::context/xtdb-node xtdb-node
-                                           ::context/interval-seconds interval})]
+                                          ::context/interval-seconds interval})]
       (::context/should-review result))))
 
 (defn- stage-review
@@ -393,12 +394,12 @@
                        ::review/max-output-length (get-in config [:review :max-output-length] 500)})]
           ;; Record review with full Gemini interaction data for training
           (context/record-review! {::context/xtdb-node xtdb-node
-                                    ::context/files files
-                                    ::context/gemini-prompt (::review/prompt result)
-                                    ::context/gemini-response (::review/response result)
-                                    ::context/gemini-system-instruction (::review/gemini-system-instruction result)
-                                    ::context/gemini-code (::review/gemini-code result)
-                                    ::context/gemini-tokens (::review/gemini-tokens result)})
+                                   ::context/files files
+                                   ::context/gemini-prompt (::review/prompt result)
+                                   ::context/gemini-response (::review/response result)
+                                   ::context/gemini-system-instruction (::review/gemini-system-instruction result)
+                                   ::context/gemini-code (::review/gemini-code result)
+                                   ::context/gemini-tokens (::review/gemini-tokens result)})
           (::review/formatted-text result))))))
 
 ;;; ---------------------------------------------------------------------------
@@ -453,114 +454,128 @@
             todos (get-in event [:tool_input :todos])]
         (when (and session-id todos)
           (context/record-todos! {::context/xtdb-node xtdb-node
-                                   ::context/session-id session-id
-                                   ::context/todos todos}))
+                                  ::context/session-id session-id
+                                  ::context/todos todos}))
         (success-response @feedback))
 
       ;; Skip non-relevant events (not Edit/Write)
       (if-not (and (or (= event-name "PreToolUse")
                        (= event-name "PostToolUse"))
                    (or (= tool-name "Edit")
-                        (= tool-name "Write")))
+                       (= tool-name "Write")))
         (do
           (log/debug "Skipping non-relevant event")
           (success-response @feedback))
 
         ;; Skip non-Clojure files
-    (if-not (codebase/clojure-file? {::codebase/file-path file-path})
-      (do
-        (log/debug "Skipping non-Clojure file" file-path)
-        (success-response @feedback))
-
-      ;; === PreToolUse: Only repair ===
-      (if (= event-name "PreToolUse")
-        ;; PreToolUse - just check syntax if file exists
-        (let [repair-result (stage-repair file-path config)]
-          (if (and repair-result (not (:success repair-result)))
-            (block-response (:error repair-result))
-            (success-response @feedback)))
-
-        ;; === PostToolUse: Full pipeline ===
-        (if-not (seon-source-file? file-path)
-          ;; Not a seon source file - skip full pipeline
+        (if-not (codebase/clojure-file? {::codebase/file-path file-path})
           (do
-            (log/debug "Skipping non-seon source file" file-path)
+            (log/debug "Skipping non-Clojure file" file-path)
             (success-response @feedback))
 
-          ;; Run full pipeline for seon source files
-          (let [ns-sym (codebase/file->namespace {::codebase/file-path file-path})]
-            (if-not ns-sym
-              ;; Can't determine namespace - skip
+      ;; === PreToolUse: Validate before tool runs ===
+          (if (= event-name "PreToolUse")
+            (cond
+              ;; For Write: validate the NEW content being written
+              (= tool-name "Write")
+              (let [new-content (:content (:tool_input event))]
+                (if new-content
+                  ;; Try to parse the new content - block if invalid syntax
+                  (if (repair/delimiter-error? {::repair/content new-content})
+                    (block-response "Invalid Clojure syntax in new content")
+                    (success-response @feedback))
+                  ;; No content - allow (shouldn't happen)
+                  (success-response @feedback)))
+              
+              ;; For Edit: allow - we validate in PostToolUse after edit is applied
+              (= tool-name "Edit")
+              (success-response @feedback)
+              
+              ;; Default
+              :else
+              (success-response @feedback))
+
+        ;; === PostToolUse: Full pipeline ===
+            (if-not (seon-source-file? file-path)
+          ;; Not a seon source file - skip full pipeline
               (do
-                (log/debug "Could not determine namespace for" file-path)
+                (log/debug "Skipping non-seon source file" file-path)
                 (success-response @feedback))
+
+          ;; Run full pipeline for seon source files
+              (let [ns-sym (codebase/file->namespace {::codebase/file-path file-path})]
+                (if-not ns-sym
+              ;; Can't determine namespace - skip
+                  (do
+                    (log/debug "Could not determine namespace for" file-path)
+                    (success-response @feedback))
 
               ;; Full pipeline - run stages, short-circuit on block
               ;; Track timing for dense feedback
-              (let [start-time (System/currentTimeMillis)
-                    dense? (get-in config [:feedback :dense])
+                  (let [start-time (System/currentTimeMillis)
+                        dense? (get-in config [:feedback :dense])
 
                     ;; 1. Repair - block if unfixable
-                    repair-result (stage-repair file-path config)
-                    repair-block (when (and repair-result (not (:success repair-result)))
-                                   (block-response (:error repair-result)))]
-                (or repair-block
+                        repair-result (stage-repair file-path config)
+                        repair-block (when (and repair-result (not (:success repair-result)))
+                                       (block-response (:error repair-result)))]
+                    (or repair-block
                     ;; 2. Reload namespace - block on compile error
-                    (let [reload-result (stage-reload ns-sym config)
+                        (let [reload-result (stage-reload ns-sym config)
                           ;; Add feedback about what was reloaded
-                          _ (when-let [loaded (seq (:loaded reload-result))]
-                              (swap! feedback conj (str "Reloaded: " (str/join ", " (map str loaded)))))
-                          reload-block (when (and reload-result
-                                                  (not (:success reload-result)))
-                                         (block-response (:error reload-result)))]
-                      (or reload-block
+                              _ (when-let [loaded (seq (:loaded reload-result))]
+                                  (swap! feedback conj (str "Reloaded: " (str/join ", " (map str loaded)))))
+                              reload-block (when (and reload-result
+                                                      (not (:success reload-result)))
+                                             (block-response (:error reload-result)))]
+                          (or reload-block
                           ;; 3. Compliance checks - non-blocking feedback (after reload, before tests)
-                          (let [compliance-result (stage-compliance ns-sym config)
+                              (let [compliance-result (stage-compliance ns-sym config)
                                 ;; Violations always shown (actionable fixes), regardless of dense mode
-                                _ (when (and compliance-result
-                                             (not (:compliant? compliance-result)))
-                                    (swap! feedback conj (:formatted compliance-result)))
-                                compliance-should-block (and compliance-result
-                                                             (not (:compliant? compliance-result))
-                                                             (get-in config [:compliance :block]))]
-                            (if compliance-should-block
-                              (block-response (:formatted compliance-result))
+                                    _ (when (and compliance-result
+                                                 (not (:compliant? compliance-result)))
+                                        (swap! feedback conj (:formatted compliance-result)))
+                                    compliance-should-block (and compliance-result
+                                                                 (not (:compliant? compliance-result))
+                                                                 (get-in config [:compliance :block]))]
+                                (if compliance-should-block
+                                  (block-response (:formatted compliance-result))
                               ;; 4. Unit tests - optionally block on failure
-                              (let [unit-result (stage-unit-tests ns-sym config)
+                                  (let [unit-result (stage-unit-tests ns-sym config)
                                     ;; Only add verbose feedback when not dense mode
-                                    _ (when (and (not dense?)
-                                                 unit-result
-                                                 (::verify/success unit-result))
-                                        (swap! feedback conj
-                                               (verify/format-unit-result {::verify/result unit-result
-                                                                           ::verify/test-ns (codebase/file->test-namespace {::codebase/file-path file-path})})))
-                                    unit-should-block (and unit-result
-                                                           (not (::verify/success unit-result))
-                                                           (get-in config [:tests :unit :block-on-fail]))]
-                                (if unit-should-block
+                                        _ (when (and (not dense?)
+                                                     unit-result
+                                                     (::verify/success unit-result))
+                                            (swap! feedback conj
+                                                   (verify/format-unit-result {::verify/result unit-result
+                                                                               ::verify/test-ns (codebase/file->test-namespace {::codebase/file-path file-path})})))
+                                        unit-should-block (and unit-result
+                                                               (not (::verify/success unit-result))
+                                                               (get-in config [:tests :unit :block-on-fail]))]
+                                    (if unit-should-block
                                     ;; Record blocked edit then return block response
-                                    (let [reason (format "Unit tests failed: %d failures, %d errors in %s"
-                                                         (::verify/fail-count unit-result 0)
-                                                         (::verify/error-count unit-result 0)
-                                                         (codebase/file->test-namespace {::codebase/file-path file-path}))]
-                                      (stage-record-edit xtdb-node file-path ns-sym
-                                                         {:unit-test-result (extract-unit-summary unit-result)
-                                                          :decision :block
-                                                          :reason reason
-                                                          :feedback @feedback})
-                                      (block-response reason))
+                                      (let [reason (format "Unit tests failed: %d failures, %d errors in %s"
+                                                           (::verify/fail-count unit-result 0)
+                                                           (::verify/error-count unit-result 0)
+                                                           (codebase/file->test-namespace {::codebase/file-path file-path}))]
+                                        (stage-record-edit xtdb-node file-path ns-sym
+                                                           {:unit-test-result (extract-unit-summary unit-result)
+                                                            :decision :block
+                                                            :reason reason
+                                                            :feedback @feedback})
+                                        (block-response reason))
                                     ;; 5. Generative tests - optionally block on failure
-                                    (let [gen-result (stage-gen-tests ns-sym config)
+                                      (let [gen-result (stage-gen-tests ns-sym config)
                                           ;; Only add verbose feedback when not dense mode
-                                          _ (when (and (not dense?)
-                                                       gen-result
-                                                       (::verify/success gen-result))
-                                              (swap! feedback conj
-                                                     (verify/format-gen-result {::verify/result gen-result ::verify/namespace ns-sym})))
-                                          gen-should-block (and gen-result
-                                                                (not (::verify/success gen-result))
-                                                                (get-in config [:tests :generative :block-on-fail]))]
-                                      (if gen-should-block
+                                            _ (when (and (not dense?)
+                                                         gen-result
+                                                         (::verify/success gen-result))
+                                                (swap! feedback conj
+                                                       (verify/format-gen-result {::verify/result gen-result ::verify/namespace ns-sym})))
+                                            gen-should-block (and gen-result
+                                                                  (not (::verify/success gen-result))
+                                                                  (get-in config [:tests :generative :block-on-fail]))]
+                                        (if gen-should-block
                                           ;; Record blocked edit then return block response
                                           (let [failed-fns (str/join ", " (map #(str (::verify/fn-symbol %))
                                                                                (::verify/failures gen-result)))
@@ -678,9 +693,9 @@
                     {:success true :feedback (vec @feedback)}))))))))))
 
 (defn process-mcp-edit!
-  "Process an MCP edit (clojure_edit) through the same pipeline as PostToolUse.
+  "Process an MCP edit (clojure_replace) through the same pipeline as PostToolUse.
 
-   This gives clojure_edit feature parity with the regular Edit hook:
+   This gives clojure_replace feature parity with the regular Edit hook:
    1. Reload - Reload changed namespaces via clj-reload
    2. Unit Tests - Run if test namespace exists
    3. Gen Tests - Run generative tests on schema'd functions
@@ -688,7 +703,7 @@
    5. Record - Store edit event in XTDB
    6. Review - Trigger AI review if rate limit allows
 
-   Called by bin/mcp-server after successful clojure_edit.
+   Called by bin/mcp-server after successful clojure_replace.
 
    Request keys:
      ::xtdb-node - XTDB node for persistence
