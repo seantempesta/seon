@@ -131,14 +131,23 @@
     :inputSchema {:type "object"
                   :properties {}}}
 
-   {:name "clojure_edit"
+   {:name "clojure_replace"
     :description "Edit Clojure/EDN files by matching and replacing s-expressions.
 More reliable than string-based Edit - matches structurally, ignoring whitespace.
 
-Example: Replace (if (nil? x) default x) with (or x default):
+COMMENT-AWARE: Include comments in match/replace patterns to change them.
+- Match without comment: existing comments PRESERVED
+- Match with comment: comment must match exactly or fails
+- Replace with comment: adds/replaces the comment
+
+Example: Replace code (preserves adjacent comments):
   {\"file_path\": \"src/foo.clj\",
    \"match\": \"(if (nil? x) default x)\",
    \"replace\": \"(or x default)\"}
+
+Example: Replace code AND comment:
+  {\"match\": \";; old comment\\n(+ x 10)\",
+   \"replace\": \";; new comment\\n(* x 2)\"}
 
 IMPORTANT: If multiple matches found, the edit is REJECTED with all locations.
 You must then either:
@@ -149,9 +158,9 @@ You must then either:
                   :properties {:file_path {:type "string"
                                            :description "Path to Clojure/EDN file"}
                                :match {:type "string"
-                                       :description "S-expression to find (whitespace-insensitive)"}
+                                       :description "S-expression to find (whitespace-insensitive). Include comments to match/change them."}
                                :replace {:type "string"
-                                         :description "S-expression to replace with"}
+                                         :description "S-expression to replace with. Include comments to add/change them."}
                                :line_start {:type "integer"
                                             :description "Only match within this line range (start)"}
                                :line_end {:type "integer"
@@ -653,7 +662,7 @@ You must then either:
                      (:value result))))))
 
 (defn- run-hook-pipeline!
-  "Run the hook pipeline after a successful clojure_edit.
+  "Run the hook pipeline after a successful clojure_replace.
    Returns {:feedback [...] :blocked bool :reason str} or nil on error."
   [file-path]
   (let [code (format "(do (require 'seon.dev.hook)
@@ -670,22 +679,22 @@ You must then either:
            :reason (:seon.dev.hook/reason parsed)})
         (catch Exception _ nil)))))
 
-(defn execute-clojure-edit
-  "Execute the clojure_edit tool via nREPL.
-   Calls seon.dev.clojure-edit/edit-sexp! on the orchestrator.
+(defn execute-clojure-replace
+  "Execute the clojure_replace tool via nREPL.
+   Calls seon.dev.clojure-replace/replace-sexp! on the orchestrator.
    On success (non-dry-run), also runs the hook pipeline for reload/tests/review."
   [{:keys [file_path match replace line_start line_end replace_all dry_run]}]
-  (log-debug "execute-clojure-edit file:" file_path "match:" match)
+  (log-debug "execute-clojure-replace file:" file_path "match:" match)
 
-  (let [code (format "(do (require 'seon.dev.clojure-edit)
-                          (seon.dev.clojure-edit/edit-sexp!
-                            #:seon.dev.clojure-edit{:file-path %s
-                                                    :match %s
-                                                    :replace %s
-                                                    :line-start %s
-                                                    :line-end %s
-                                                    :replace-all? %s
-                                                    :dry-run? %s}))"
+  (let [code (format "(do (require 'seon.dev.clojure-replace)
+                          (seon.dev.clojure-replace/replace-sexp!
+                            #:seon.dev.clojure-replace{:file-path %s
+                                                       :match %s
+                                                       :replace %s
+                                                       :line-start %s
+                                                       :line-end %s
+                                                       :replace-all? %s
+                                                       :dry-run? %s}))"
                      (pr-str file_path)
                      (pr-str match)
                      (pr-str replace)
@@ -695,18 +704,18 @@ You must then either:
                      (if dry_run "true" "false"))
         result (nrepl-eval orchestrator-port code 30000)]
 
-    (log-debug "Clojure edit result:" (pr-str result))
+    (log-debug "Clojure replace result:" (pr-str result))
 
     (if (:ex result)
-      (mcp-error (str "clojure_edit failed: " (:err result)))
+      (mcp-error (str "clojure_replace failed: " (:err result)))
 
       ;; Parse the EDN result and format appropriately
       (let [parsed (try (clojure.edn/read-string (:value result)) (catch Exception _ nil))]
-        (if (and parsed (:seon.dev.clojure-edit/success parsed))
+        (if (and parsed (:seon.dev.clojure-replace/success parsed))
           ;; Success - run hook pipeline if not dry-run
-          (let [edit-msg (str (:seon.dev.clojure-edit/message parsed)
+          (let [edit-msg (str (:seon.dev.clojure-replace/message parsed)
                               "\n\n"
-                              (:seon.dev.clojure-edit/diff parsed))
+                              (:seon.dev.clojure-replace/diff parsed))
                 hook-result (when-not dry_run
                               (run-hook-pipeline! file_path))]
             (if (and hook-result (:blocked hook-result))
@@ -721,8 +730,8 @@ You must then either:
                                   (str "\n\n--- Hook Pipeline ---\n"
                                        (str/join "\n" fb)))))))
           ;; Error case - include match locations if available
-          (let [error-msg (:seon.dev.clojure-edit/error parsed)
-                matches (:seon.dev.clojure-edit/matches parsed)]
+          (let [error-msg (:seon.dev.clojure-replace/error parsed)
+                matches (:seon.dev.clojure-replace/matches parsed)]
             (if matches
               (mcp-error (str error-msg "\n\nMatches found:\n"
                               (str/join "\n"
@@ -730,9 +739,9 @@ You must then either:
                                          (fn [i m]
                                            (format "  %d. Line %d, Col %d: %s"
                                                    (inc i)
-                                                   (:seon.dev.clojure-edit/line m)
-                                                   (:seon.dev.clojure-edit/column m)
-                                                   (:seon.dev.clojure-edit/context m)))
+                                                   (:seon.dev.clojure-replace/line m)
+                                                   (:seon.dev.clojure-replace/column m)
+                                                   (:seon.dev.clojure-replace/context m)))
                                          matches))))
               (mcp-error (or error-msg "Unknown error")))))))))
 
@@ -799,7 +808,7 @@ You must then either:
     "stop_session" (execute-stop-session arguments)
     "interrupt_eval" (execute-interrupt-eval arguments)
     "list_sessions" (execute-list-sessions arguments)
-    "clojure_edit" (execute-clojure-edit arguments)
+    "clojure_replace" (execute-clojure-replace arguments)
     (throw (ex-info (str "Unknown tool: " name) {:tool name}))))
 
 (defn- blocking-tool?
