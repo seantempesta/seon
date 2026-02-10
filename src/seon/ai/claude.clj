@@ -41,6 +41,7 @@
    [clojure.core.async :as async :refer [chan close!]]
    [clojure.java.io :as io]
    [clojure.string :as str]
+   [integrant.repl.state :as state]
    [seon.ai :as ai]
    [seon.ai.agent :as agent]
    [seon.ai.agent.log :as agent-log]
@@ -535,10 +536,17 @@
    takes XTDB nodes which cannot be property tested."
   [{::ai/keys [node session-id] ::keys [sdk-message]}]
   (let [entity (sdk-message->entity {::sdk-message sdk-message
-                                      ::ai/session-id session-id})
+                                     ::ai/session-id session-id})
         message-id (:xt/id entity)]
     ;; Store using seon.db.node (already required via seon.ai)
     ((requiring-resolve 'seon.db.node/put!) node :ai_messages entity)
+    ;; Dual-write to Datalevin for stress testing
+    (try
+      (require 'seon.ai.datalevin)
+      (when @(resolve 'seon.ai.datalevin/enabled?)
+        ((resolve 'seon.ai.datalevin/save-message!) entity))
+      (catch Exception e
+        (log/debug "Datalevin dual-write failed (non-fatal)" {:error (.getMessage e)})))
     {::ai/message-id message-id}))
 
 ;;; ---------------------------------------------------------------------------
@@ -794,7 +802,7 @@
           ;; 2c. Create structured agent log for real-time tailing
           agent-logger (agent-log/create-logger! {::agent-log/session-id id})
           _ (agent-log/log-launch! agent-logger {::agent-log/namespace (str namespace)
-                                                  ::agent-log/port nrepl-port})
+                                                 ::agent-log/port nrepl-port})
 
           ;; 3. Build agent prompt with session context and optional file context
           full-prompt (build-agent-prompt id namespace prompt files)
@@ -966,7 +974,7 @@
                                                         ::session/id id})
                           (catch Exception e
                             (log/warn e "Failed to stop agent session on reader exit"
-                                       {:session-id id})))
+                                      {:session-id id})))
                         ;; Remove from registry now that agent is done
                         (swap! agent/agent-registry dissoc id)
                         (log/info "Agent cleanup complete" {:session-id id
@@ -1123,8 +1131,8 @@
         result-msg
         (let [parsed (agent/parse-result {:provider :claude :message result-msg})]
           (log/info "Agent completed" {:session-id session-id
-                                        :status (::agent/status parsed)
-                                        :cost (::agent/cost-usd parsed)})
+                                       :status (::agent/status parsed)
+                                       :cost (::agent/cost-usd parsed)})
           (cond-> {::agent-status (::agent/status parsed)
                    ::duration-ms (or (::agent/duration-ms parsed)
                                      (- (System/currentTimeMillis) start-time))}
@@ -1286,7 +1294,7 @@
    Note: This function queries the database, so it works for both running
    and completed agents. For running agents, ::result-text will be nil."
   [{::ai/keys [session-id]}]
-  (let [node (:seon/xtdb-node integrant.repl.state/system)]
+  (let [node (:seon/xtdb-node state/system)]
     (if-not node
       {::agent-status :failed
        ::error "System not running - no XTDB node available"}
@@ -1375,7 +1383,7 @@
      ;;     ::agent-status :running
      ;;     ::message-count 5}"
   [{::ai/keys [session-id] ::keys [limit] :or {limit 20}}]
-  (let [node (:seon/xtdb-node integrant.repl.state/system)]
+  (let [node (:seon/xtdb-node state/system)]
     (if-not node
       {::agent-status :failed
        ::error "System not running - no XTDB node available"}
@@ -1576,8 +1584,8 @@
 
   ;; Test sdk-message->entity (uses map-in pattern)
   (sdk-message->entity {::sdk-message {:type "assistant"
-                                        :uuid "msg-123"
-                                        :message {:role "assistant"
-                                                  :content [{:type "text" :text "Hello!"}]}}})
+                                       :uuid "msg-123"
+                                       :message {:role "assistant"
+                                                 :content [{:type "text" :text "Hello!"}]}}})
 
   nil)

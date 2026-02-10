@@ -1,30 +1,79 @@
 # PRD: Agent Observatory
 
-**Status:** In Progress (Phase 2 - Bug Fixes Needed)
-**Priority:** High
-**Branch:** feature/agent-isolation
-**Last Updated:** 2026-01-20
+**Status:** Mostly Complete (Phase 2.3 Remaining)
+**Priority:** Medium
+**Branch:** feature/agent-isolation → merged to main
+**Last Updated:** 2026-02-10
+**Last Audit:** 2026-02-10 by agent 2564
 
 ---
 
 ## Current State
 
-### Completed
-- **Phase 1: Per-agent logging** - `logs/agents/{session-id}.log`
-- **Phase 2.1: Agent list view** - `/agents` route with sorting/filtering
-- **Phase 2.2: Agent detail view** - `/agents/:id` route (partial)
-- **SSE extensions** - `patch-elements` supports `:mode` and `:selector`
-- **Session isolation fix** - Agents can't use orchestrator REPL
-- **Safe reset** - `seon.ai.agent/shutdown-all!` prevents core.async corruption
+### ✅ Fully Working
 
-### Known Bugs
-1. **Log file not found** - Detail page uses wrong ID (ai-session-id vs session-id)
-2. **Toggle may not work** - Datastar signal wiring needs verification
+**Phase 1: Per-agent logging** - COMPLETE
+- Log files created at `logs/agents/{session-id}.log`
+- Real-time `tail -f` works perfectly
+- Format: ISO timestamp, pipe-delimited, structured events
+- Handles: LAUNCH, MESSAGE, TOOL, RESULT, COMPLETE, ERROR
+- SDK message parsing correctly extracts tool calls and results
+- Tests pass: `test/seon/ai/agent/log_test.clj`
+
+**Phase 2.1: Agent list view** - COMPLETE
+- `/agents` route shows all running + recent completed agents
+- SSE streaming with 2-second polling
+- Sorting by most recent activity (uses XTDB message timestamps)
+- "Show/Hide Completed" toggle working
+- Status badges with "stuck" detection (>2 min no activity)
+- Click row to drill into detail
+
+**Phase 2.2: Agent detail view** - COMPLETE
+- `/agents/:id` shows full message history from XTDB
+- ID mapping works correctly: agent session-id (4-char hex) → AI session-id (ses-xxx)
+- Initial context (task prompt, reference files, agent instructions) displayed
+- Messages rendered with tool call/result pairing
+- Tool-specific rendering (Edit shows diff, Bash shows command, REPL shows code)
+- Markdown rendering for assistant text
+- Auto-scroll with user-scroll-up detection (MutationObserver)
+- Progress summary for running agents
+- Context token usage bar
+
+**SSE Infrastructure** - COMPLETE
+- `patch-elements` supports `:mode` (append, prepend, etc.) and `:selector`
+- `execute-script` for client-side JS execution
+- Hash-based change detection prevents redundant updates
+- Streaming brotli compression
+
+**Session Isolation** - COMPLETE
+- Each agent has isolated nREPL (unique port) and XTDB database
+- Agents cannot use orchestrator REPL
+- `seon.ai.agent/shutdown-all!` prevents core.async corruption
+
+### 🔶 Minor Enhancements (Not Bugs)
+
+1. **Uses polling, not live SSE streaming** - Detail view polls at 1 second intervals rather than using append-mode SSE streaming. Works well, but research for true streaming is in `streaming-research.md`.
+
+2. **Context bar hardcoded to 200K** - Assumes Claude Opus 4.5 context window. Could be dynamic based on model.
+
+### ❌ Not Started
+
+**Phase 2.3: XTDB Entity Browser** - NOT STARTED
+- `/db` route to browse XTDB entities
+- Table list, entity detail view
+- Low priority - not critical for agent observability
+
+### Previously Reported Bugs (Now Fixed)
+
+The previous PRD noted these bugs:
+1. ~~**Log file not found** - Detail page uses wrong ID~~ **FIXED**: `find-ai-session-id` correctly maps agent session-id to AI session-id
+2. ~~**Toggle may not work**~~ **FIXED**: Toggle works correctly, triggers `sse/refresh-all!`
 
 ### Files Created
-- `src/seon/ai/agent/log.clj` - Per-agent logging
-- `src/seon/web/agents.clj` - List and detail handlers
-- `test/seon/ai/agent/log_test.clj` - Tests
+- `src/seon/ai/agent/log.clj` - Per-agent logging (327 lines)
+- `src/seon/ai/agent/views.clj` - Tool-specific renderers (1491 lines)
+- `src/seon/web/agents.clj` - List and detail handlers (1274 lines)
+- `test/seon/ai/agent/log_test.clj` - Tests (206 lines)
 
 ---
 
@@ -246,10 +295,44 @@ From `streaming-research.md`:
 
 - [x] `tail -f logs/agents/{id}.log` shows real-time agent activity (Phase 1)
 - [x] Web UI at `/agents` shows all agents (Phase 2.1)
-- [~] Can click into agent and see log (Phase 2.2 - bug: wrong ID used)
-- [ ] Live SSE streaming for agent detail view
-- [ ] Can browse XTDB entities at `/db` (Phase 2.3)
+- [x] Can click into agent and see full message history (Phase 2.2)
+- [x] Initial context displayed (task, files, instructions) (Phase 2.2)
+- [x] Tool calls rendered with tool-specific formatting (Phase 2.2)
+- [~] Live SSE streaming for agent detail view (works via polling, not true streaming)
+- [ ] Can browse XTDB entities at `/db` (Phase 2.3 - not started)
 - [x] Orchestrator can monitor via background `tail -f` + TaskOutput pattern
+
+---
+
+## Next Steps (For Future Agents)
+
+### If Assigned to This Feature
+
+1. **Phase 2.3: XTDB Browser** (optional)
+   - Add `/db` route
+   - List tables from XTDB
+   - Show entities with pagination
+   - Use existing SSE patterns from `/agents`
+
+2. **True SSE Streaming** (optional optimization)
+   - Research is complete in `streaming-research.md`
+   - Use append mode instead of full re-render
+   - Bridge `agent/tail` channel to SSE
+   - Would reduce latency from 1s polling to near-instant
+
+3. **Dynamic Context Window** (trivial)
+   - Query model info to get context window size
+   - Currently hardcoded to 200K
+
+### Architecture Notes
+
+The codebase is well-organized:
+- `seon.web.agents` - HTTP handlers and HTML rendering
+- `seon.ai.agent.views` - Tool-specific multimethod renderers
+- `seon.ai.agent.log` - File logging (separate from XTDB persistence)
+- `seon.web.sse` - SSE infrastructure with full mode support
+
+All data comes from XTDB via `seon.ai` namespace functions. The UI is purely a view layer.
 
 ---
 
@@ -283,11 +366,11 @@ This creates a live, introspectable system where you can see everything. But tha
 
 ---
 
-## Open Questions
+## Open Questions (Resolved)
 
-1. How much message content to show in logs? Full or truncated?
-2. Should we persist agent metadata separately from AI sessions?
-3. ~~SSE or WebSocket for live updates?~~ **Resolved: SSE with append mode**
+1. ~~How much message content to show in logs?~~ **Resolved:** Full content in log files, UI handles truncation with expand/collapse
+2. ~~Should we persist agent metadata separately from AI sessions?~~ **Resolved:** No, registry provides running agents, XTDB provides completed sessions
+3. ~~SSE or WebSocket for live updates?~~ **Resolved:** SSE with polling (true streaming researched but not implemented)
 
 ---
 

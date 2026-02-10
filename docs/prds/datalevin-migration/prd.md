@@ -480,3 +480,394 @@ src/seon/
 | Performance regression | Benchmark each phase, feature flags to rollback |
 | Agent disruption | Gradual rollout, existing code keeps working |
 | Server process failure | Health checks, auto-restart via Integrant |
+
+---
+
+## Implementation Progress (Audit: 2026-02-10)
+
+### ✅ Phase 0.1 & 0.2: Server & Connection Manager COMPLETE
+
+Both server and connection manager are fully implemented:
+
+| Component | File | Status |
+|-----------|------|--------|
+| Datalevin Server | `src/seon/db/datalevin/server.clj` | ✅ Complete |
+| Connection Manager | `src/seon/db/datalevin/conn.clj` | ✅ Complete |
+| Integrant Components | `src/seon/system.clj` | ✅ Integrated |
+
+Features implemented:
+- ✅ Server starts/stops with Integrant lifecycle
+- ✅ TCP health check (`healthy?` function)
+- ✅ Connection caching with TTL-based cleanup
+- ✅ Lazy database creation via `get-namespace-conn!`
+- ✅ Suspend/resume survives `(reset)`
+
+### 🔲 Phase 0.3: Schema Compiler NOT STARTED
+
+The Malli→Datalevin schema compiler (`src/seon/schema/datalevin.clj`) does not exist yet.
+
+**Impact:** Connections currently use no schema. Schema-on-connect is not working.
+
+### 🔲 Phase 0.4: Health Integration NOT STARTED
+
+Datalevin is not integrated into `/api/health` endpoint.
+
+---
+
+## Current XTDB Dependencies (Complete Audit)
+
+### Critical Files (29 files use XTDB directly or via wrappers)
+
+| Category | Files | XTDB Functions | Temporal? |
+|----------|-------|----------------|-----------|
+| **Core DB Layer** | | | |
+| `db/node.clj` | xt/q, xt/execute-tx | YES |
+| `db/queries.clj` | node/q | YES |
+| `db/multi.clj` | xt/execute-tx, xt/q, .submitTx | NO |
+| **AI System** | | | |
+| `ai.clj` | xt/execute-tx, xt/q | NO |
+| `ai/agent.clj` | uses seon.ai functions | NO |
+| `ai/agent/log.clj` | xt/execute-tx | NO |
+| `ai/claude.clj` | uses seon.ai functions | NO |
+| **Agent System** | | | |
+| `agent/ctx.clj` | xt/execute-tx, xt/q | **YES - CRITICAL** |
+| `agent/helpers.clj` | node/q | NO |
+| **Trading Domain** | | | |
+| `trading/bulk_load.clj` | xt/execute-tx | YES |
+| `trading/ingestion_state.clj` | node/q, node/execute-tx! | NO |
+| `trading/signals.clj` | node/q | YES |
+| `trading/analysis.clj` | node/q | NO |
+| `trading/ingest.clj` | node/execute-tx! | NO |
+| **Orchestrator** | | | |
+| `orchestrator/session.clj` | xt/execute-tx, xt/q | NO |
+| **Primer** | | | |
+| `primer/ctx.clj` | node/execute-tx!, node/entity | YES |
+| **Dev Hook** | | | |
+| `dev/context.clj` | node/execute-tx!, node/sql-query | YES |
+| **Web Layer** | | | |
+| `web/agents.clj` | db/q | NO |
+| `web/stats.clj` | node/q | NO |
+| `web/handlers.clj` | uses db functions | NO |
+| `web/jobs.clj` | uses db functions | NO |
+| **Infrastructure** | | | |
+| `health.clj` | xt/q | NO |
+| `system.clj` | xt/start-node | NO |
+| `ns/view.clj` | uses db functions | NO |
+
+### Temporal Query Patterns in Use
+
+| Pattern | Files Using | Datalevin Strategy |
+|---------|-------------|-------------------|
+| `FOR ALL VALID_TIME` | db/node.clj, db/queries.clj | Append-only snapshots |
+| `FOR SYSTEM_TIME AS OF` | agent/ctx.clj | Append-only snapshots |
+| `_valid_from` filtering | dev/context.clj, trading/signals.clj | Explicit `:recorded-at` |
+| `:xt/valid-from` on insert | trading/bulk_load.clj | Explicit `:quote/recorded-at` |
+| `{:current-time instant}` | db/node.clj, primer/ctx.clj | Explicit filtering in query |
+
+### Query Language Translation Required
+
+XTDB uses SQL. Datalevin uses Datalog. All queries must be rewritten:
+
+```clojure
+;; XTDB (current)
+(xt/q node ["SELECT * FROM ai_sessions WHERE status = ?" status])
+
+;; Datalevin (target)
+(d/q '[:find (pull ?e [*])
+       :in $ ?status
+       :where [?e :ai.session/status ?status]]
+     @conn status)
+```
+
+**Estimated queries to rewrite:** 40-50 across the codebase.
+
+---
+
+## Migration Risks - Deep Analysis
+
+### HIGH RISK: Query Language Translation Errors
+
+**Issue:** SQL → Datalog translation is error-prone. Different semantics can cause subtle bugs.
+
+**Specific Concerns:**
+1. JOIN semantics differ (Datalevin is inner-join only)
+2. NULL handling differs between SQL and Datalog
+3. Aggregate functions have different syntax
+4. ORDER BY behavior with ties
+
+**Mitigation:**
+- Create comprehensive query test suite BEFORE migration
+- Add parallel query execution during dual-write (compare results)
+- Log all query result differences for manual review
+
+### HIGH RISK: Temporal Feature Loss
+
+**Issue:** XTDB has built-in bitemporality. Datalevin has single-timeline history.
+
+**Files at Risk:**
+- `agent/ctx.clj` - Uses SYSTEM_TIME for debugging time-travel
+- `primer/ctx.clj` - Uses `{:current-time instant}` for point-in-time
+- `trading/bulk_load.clj` - Uses `:xt/valid-from` for historical data
+
+**Mitigation:**
+- Implement append-only snapshot pattern (already documented in temporal-strategy.md)
+- Add explicit `:recorded-at` columns to all temporal entities
+- Test time-travel queries extensively before switching
+
+### MEDIUM RISK: Multi-Database Query Complexity
+
+**Issue:** Cross-namespace queries require multiple database connections.
+
+**Example:** Observatory needs to query all agent messages across namespaces.
+
+**Mitigation:**
+- Research verified: Multi-DB queries work (`research/multi-db-queries.md`)
+- Performance tested: 13ms for 1003 results across DBs
+- Pattern: Use `:in $db1 $db2 $db3` syntax
+
+### MEDIUM RISK: Schema Drift
+
+**Issue:** Malli schemas and Datalevin schemas could diverge.
+
+**Mitigation:**
+- Build schema compiler (Phase 0.3) FIRST
+- Generate Datalevin schema from Malli at connection time
+- Add schema validation tests
+
+### LOW RISK: Connection Lifecycle
+
+**Issue:** Agent JVMs connecting/disconnecting could stress connection manager.
+
+**Mitigation:**
+- Already implemented: TTL-based cleanup (5-minute default)
+- Connection caching prevents thrashing
+- Health checks detect stale connections
+
+---
+
+## Gaps Identified in Current Plan
+
+### Gap 1: No Schema Compiler Implementation Path
+
+**Problem:** Phase 0.3 says "Create `src/seon/schema/datalevin.clj`" but doesn't specify:
+- Which Malli types map to which Datalevin types
+- How to handle nested maps (EDN-encode vs flatten)
+- How to handle optionality
+
+**Resolution:** Add detailed type mapping table (see research/malli-integration.md)
+
+### Gap 2: No Query Migration Guide
+
+**Problem:** Plan says "Rewrite SQL queries as Datalog" but doesn't provide:
+- Mapping from XTDB SQL patterns to Datalog patterns
+- Common pitfalls to avoid
+- Testing strategy for query equivalence
+
+**Resolution:** Create `research/query-migration-guide.md` before Phase 2
+
+### Gap 3: Observatory Cross-DB Query Pattern
+
+**Problem:** Observatory needs to query ALL agent messages, but agents use separate DBs.
+
+**Resolution:**
+- Option A: Keep all messages in master DB (simpler)
+- Option B: Aggregate queries across namespace DBs (already tested, works)
+
+**Recommendation:** Option A - all AI messages stay in master DB, only domain data in namespace DBs.
+
+### Gap 4: Test Migration Strategy
+
+**Problem:** Existing tests use XTDB. No plan for migrating test fixtures.
+
+**Resolution:**
+- Add `seon.db.test-utils` that abstracts DB setup
+- Tests should work against either XTDB or Datalevin
+- Feature flag `:test/db-backend` determines which to use
+
+### Gap 5: Data Migration Scripts
+
+**Problem:** No scripts defined for migrating existing XTDB data to Datalevin.
+
+**Resolution:** Add to Phase 4:
+- Create `src/seon/db/migration.clj`
+- One-time migration functions per entity type
+- Verification queries after migration
+
+---
+
+## Validation Checklist
+
+### Phase 0: Foundation
+
+- [ ] Datalevin server starts with system
+- [ ] Health check passes: `(dtlv-server/healthy? {::port 8898})`
+- [ ] Connection to master DB works: `(get-master-conn!)`
+- [ ] Namespace DB created lazily: `(get-namespace-conn! 'seon.trading)`
+- [ ] Schema compiler generates valid Datalevin schemas
+- [ ] TTL cleanup removes idle connections
+- [ ] Server survives `(reset)` without losing connections
+
+### Phase 1: Dual-Write
+
+- [ ] All `ai_sessions` writes go to both XTDB and Datalevin
+- [ ] All `ai_messages` writes go to both XTDB and Datalevin
+- [ ] Data in both DBs matches exactly (verification query)
+- [ ] No test failures
+- [ ] Observatory still works (reading from XTDB)
+
+### Phase 2: Read Migration
+
+- [ ] All AI queries rewritten to Datalog
+- [ ] Query results match XTDB results (logged comparison)
+- [ ] Observatory works with Datalevin backend
+- [ ] Session list loads correctly
+- [ ] Message timeline displays correctly
+- [ ] Token/cost stats are accurate
+- [ ] No test failures
+
+### Phase 3: Agent Context
+
+- [ ] Agents receive `*ctx*` with working `:seon.ns/conn`
+- [ ] `swap!` persists to namespace DB (filtered)
+- [ ] Time-travel works: can query historical `*ctx*` states
+- [ ] Session resume loads previous context
+- [ ] Non-EDN keys (connections) are filtered from persistence
+
+### Phase 4: Domain Migration
+
+- [ ] Trading quotes migrated (count matches XTDB)
+- [ ] Query performance ≤ XTDB latency
+- [ ] Bulk loader works with Datalevin
+- [ ] Dev hook events migrated
+- [ ] Orchestrator sessions migrated
+
+### Phase 5: XTDB Removal
+
+- [ ] XTDB removed from `deps.edn`
+- [ ] All Integrant XTDB components removed
+- [ ] No references to `xt/*` in codebase
+- [ ] All tests pass
+- [ ] `/xtdb-queries` skill replaced with `/datalevin-queries`
+- [ ] Documentation updated
+
+---
+
+## Recommended Execution Order
+
+Based on the audit, here's the recommended priority:
+
+1. **Phase 0.3: Schema Compiler** - Must complete before any data migration
+2. **Phase 0.4: Health Integration** - Important for observability
+3. **Phase 1: Dual-Write AI** - Low risk, high visibility
+4. **Create Query Migration Guide** - Before Phase 2
+5. **Phase 2: Read Migration** - Carefully with A/B testing
+6. **Phase 3: Agent Context** - Enables namespace isolation vision
+7. **Phase 4: Domain Migration** - Trading data is largest and riskiest
+8. **Phase 5: XTDB Removal** - Only after everything verified
+
+**Estimated Timeline:**
+- Phases 0-2: Can be done incrementally with minimal disruption
+- Phase 3: Requires careful orchestrator changes
+- Phase 4: Bulk of the work, needs dedicated focus
+- Phase 5: Final cleanup, low effort if earlier phases succeeded
+
+---
+
+## Stress Testing (Phase 1 - IMPLEMENTED)
+
+### What's Implemented
+
+A parallel dual-write layer that writes AI sessions and messages to both XTDB and Datalevin simultaneously. This allows stress testing Datalevin under real production load without risking data loss.
+
+**Files:**
+- `src/seon/ai/datalevin.clj` - Parallel storage namespace
+- `src/seon/ai.clj` - Modified to call dual-write after XTDB writes
+- `src/seon/ai/claude.clj` - Modified to dual-write Claude messages
+
+### How It Works
+
+1. All `start-session!`, `end-session!`, `add-message!` calls in `seon.ai` now also write to Datalevin
+2. All `persist-message!` calls in `seon.ai.claude` also write to Datalevin
+3. Writes are fire-and-forget: Datalevin errors are logged but don't affect the main flow
+4. Can be toggled on/off at runtime
+
+### Toggling Dual-Write
+
+```clojure
+(require '[seon.ai.datalevin :as dl])
+
+;; Check current state
+@dl/enabled?  ;; => true
+
+;; Disable (if Datalevin has issues)
+(dl/set-enabled! false)
+
+;; Re-enable
+(dl/set-enabled! true)
+```
+
+### Monitoring
+
+```clojure
+;; View write statistics
+(dl/stats)
+;; => {:write-count 94
+;;     :error-count 0
+;;     :last-write-at #inst "..."
+;;     :session-writes 63
+;;     :message-writes 17}
+
+;; Count entities in Datalevin
+(dl/count-entities)
+;; => {:sessions 63 :messages 17}
+
+;; Compare with XTDB (historical data won't match)
+(dl/verify-sync)
+;; => {:datalevin {:sessions 63 :messages 17}
+;;     :xtdb {:sessions 161 :messages 10304}
+;;     :in-sync? false}  ;; Expected: XTDB has historical data
+
+;; Query recent sessions
+(dl/query-sessions {:limit 5})
+
+;; Query messages for a session
+(dl/query-messages {:session-id "ses-abc123" :limit 20})
+```
+
+### What to Watch For
+
+1. **Error count increasing** - Check `(:error-count (dl/stats))` regularly
+2. **Write latency** - Monitor `:last-write-at` to ensure writes are happening
+3. **Memory usage** - Watch for memory growth in Datalevin server
+4. **Disk usage** - Check `data/datalevin/` directory size
+5. **Server stability** - Does Datalevin survive `(reset)` and long-running sessions?
+
+### Stress Test Procedures
+
+**Light stress test (recommended first):**
+1. Launch 2-3 agents simultaneously
+2. Monitor `(dl/stats)` for error count
+3. Run for 30+ minutes
+4. Verify no crashes or hangs
+
+**Heavy stress test:**
+1. Launch 5+ agents simultaneously
+2. Include agents that generate many messages (complex multi-file edits)
+3. Run for several hours
+4. Compare final counts: `(dl/verify-sync)`
+
+**Crash recovery test:**
+1. While agents are running, stop the server abruptly (`pkill -9`)
+2. Restart with `./bin/run`
+3. Verify Datalevin recovers without data loss
+4. Check `(dl/count-entities)` matches expected values
+
+### Success Criteria for Migration
+
+Before proceeding to Phase 2 (switching reads to Datalevin):
+
+- [ ] Zero errors after 24+ hours of normal use
+- [ ] Server survives multiple `(reset)` cycles without issues
+- [ ] No memory leaks observed
+- [ ] Crash recovery works reliably
+- [ ] Write latency acceptable (< 10ms per entity)

@@ -208,6 +208,16 @@
     ((requiring-resolve 'seon.ai.claude/wait-for-agent!!)
      #:seon.ai{:session-id session-id-or-ids})))
 
+(defn wait-for-agents!!
+  "Block until ALL agents complete. Returns map of session-id → result.
+
+  Example:
+    (user/wait-for-agents!! [\"a1b2\" \"c3d4\" \"e5f6\"])
+    ;; => {\"a1b2\" {...} \"c3d4\" {...} \"e5f6\" {...}}"
+  [session-ids]
+  ((requiring-resolve 'seon.ai.claude/wait-for-agents!!)
+   #:seon.ai{:session-ids session-ids}))
+
 (defn agent-messages
   "Get recent messages from an agent to check progress.
 
