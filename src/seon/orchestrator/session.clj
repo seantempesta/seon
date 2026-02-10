@@ -98,11 +98,17 @@
 
 ;;; Request/Response Schemas
 
+(schema/register! ::datalevin-manager
+                  [:any {:description "Datalevin connection manager (optional)"
+                         :gen/fmap (fn [_] (throw (ex-info "Cannot generate connection manager"
+                                                           {:type :malli.generator/no-generator})))}])
+
 (schema/register! ::start-agent-session-request
                   [:map
                    [::node ::node]
                    [::namespace ::namespace]
-                   [::resume? {:optional true} ::resume?]])
+                   [::resume? {:optional true} ::resume?]
+                   [::datalevin-manager {:optional true} ::datalevin-manager]])
 
 (schema/register! ::start-agent-session-response
                   [:map
@@ -264,7 +270,7 @@
      (session/start-agent-session! {::session/node xtdb-node
                                     ::session/namespace 'seon.trading})"
   {:malli/schema [:=> [:cat ::start-agent-session-request] ::start-agent-session-response]}
-  [{::keys [node namespace resume?]}]
+  [{::keys [node namespace resume? datalevin-manager]}]
   (let [resume? (if (nil? resume?) true resume?)
         session-id (generate-session-id)
         db-name (multi/namespace->db-name namespace)
@@ -276,14 +282,33 @@
       (multi/ensure-namespace-db! node namespace)
 
       ;; 2. Create connection to namespace database
-      (let [ns-conn (multi/create-namespace-connection node namespace)]
+      (let [ns-conn (multi/create-namespace-connection node namespace)
+
+            ;; 2b. Get Datalevin namespace connection if manager available
+            dl-conn (when datalevin-manager
+                      (try
+                        (require 'seon.db.datalevin.conn)
+                        ((resolve 'seon.db.datalevin.conn/get-namespace-conn!)
+                         {:seon.db.datalevin.conn/manager datalevin-manager
+                          :seon.db.datalevin.conn/namespace namespace})
+                        (catch Exception e
+                          (log/warn "Failed to get Datalevin namespace conn"
+                                    {:namespace namespace :error (.getMessage e)})
+                          nil)))]
 
         ;; 3. Create persisted ctx with the namespace connection
         ;; If resume? is true, make-persisted-ctx automatically loads latest state
-        (log/debug "Creating persisted ctx" {:namespace namespace :resume? resume?})
+        (log/debug "Creating persisted ctx" {:namespace namespace :resume? resume?
+                                             :datalevin? (some? dl-conn)})
         (let [{::ctx/keys [atom flush! close!]}
-              (ctx/make-persisted-ctx {::ctx/db ns-conn
-                                       ::ctx/namespace namespace})
+              (ctx/make-persisted-ctx
+               (cond-> {::ctx/db ns-conn
+                        ::ctx/namespace namespace}
+                 ;; Inject Datalevin connection as reserved key
+                 dl-conn (assoc ::ctx/extra-reserved
+                                {:seon.ns/conn dl-conn
+                                 :seon.ns/session-id session-id
+                                 :seon.ns/namespace (str namespace)})))
 
               ;; 4. Start namespace nREPL with the persisted ctx atom
               _ (log/debug "Starting namespace nREPL" {:session-id session-id :namespace namespace})
