@@ -189,7 +189,8 @@ All available in the `user` namespace:
 | `(user/agents)` | List running agents |
 | `(user/agent-messages "a1b2")` | Check agent progress (recent messages) |
 | `(user/agent-result "a1b2")` | Get result from completed agent |
-| `(user/wait-for-agent!! "a1b2")` | Re-attach and wait for running agent |
+| `(user/wait-for-agent!! "a1b2")` | Re-attach and wait for single agent |
+| `(user/wait-for-agents!! ["a1b2" "c3d4"])` | Wait for multiple agents in parallel |
 | `(user/interrupt-agent! "a1b2")` | Stop a running agent |
 
 **The `:files` option is optional but recommended.** Include PRDs, plans, and relevant code so agents have full context from the start.

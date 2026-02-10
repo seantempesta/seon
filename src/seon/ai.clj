@@ -43,10 +43,34 @@
                        ::ai/session-id \"ses-abc123\"
                        ::ai/role \"assistant\"
                        ::ai/content \"I'll analyze the data...\"})"
-  (:require [seon.db.node :as db]
-            [seon.schema :as schema])
+  (:require [clojure.string :as str]
+            [seon.db.node :as db]
+            [seon.schema :as schema]
+            [taoensso.timbre :as log])
   (:import [java.time Instant]
            [java.util UUID]))
+
+;;; ---------------------------------------------------------------------------
+;;; Datalevin Dual-Write Support
+;;; ---------------------------------------------------------------------------
+
+(defn- datalevin-dual-write!
+  "Fire-and-forget write to Datalevin for stress testing.
+   Requires and calls seon.ai.datalevin lazily to avoid circular deps."
+  [op entity]
+  (try
+    (require 'seon.ai.datalevin)
+    (let [enabled? @(resolve 'seon.ai.datalevin/enabled?)]
+      (when @enabled?
+        (case op
+          :save-session (let [save! (resolve 'seon.ai.datalevin/save-session!)]
+                          (save! entity))
+          :update-session (let [update! (resolve 'seon.ai.datalevin/update-session!)]
+                            (update! entity))
+          :save-message (let [save! (resolve 'seon.ai.datalevin/save-message!)]
+                          (save! entity)))))
+    (catch Exception e
+      (log/debug "Datalevin dual-write failed (non-fatal)" {:op op :error (.getMessage e)}))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schema Registration
@@ -377,6 +401,8 @@
                  agent-session-id (assoc ::agent-session-id agent-session-id)
                  initial-context (assoc ::initial-context initial-context))]
     (db/put! node :ai_sessions entity)
+    ;; Dual-write to Datalevin for stress testing
+    (datalevin-dual-write! :save-session entity)
     {::session-id session-id}))
 
 (defn end-session!
@@ -415,6 +441,8 @@
                   cost-usd (assoc ::cost-usd cost-usd)
                   error (assoc ::error error))]
     (db/put! node :ai_sessions updated)
+    ;; Dual-write to Datalevin for stress testing
+    (datalevin-dual-write! :update-session updated)
     {::session-id session-id
      ::status final-status}))
 
@@ -450,6 +478,8 @@
                  input-tokens (assoc ::input-tokens input-tokens)
                  output-tokens (assoc ::output-tokens output-tokens))]
     (db/put! node :ai_messages entity)
+    ;; Dual-write to Datalevin for stress testing
+    (datalevin-dual-write! :save-message entity)
     {::message-id message-id}))
 
 (defn get-session
@@ -509,7 +539,7 @@
                  namespace (conj (str namespace))
                  status (conj (name status)))
         where-clause (when (seq conditions)
-                       (str " WHERE " (clojure.string/join " AND " conditions)))
+                       (str " WHERE " (str/join " AND " conditions)))
         sql (str base-sql where-clause " ORDER BY seon$ai$started_at DESC LIMIT ?")]
     (db/q node sql (conj params limit))))
 

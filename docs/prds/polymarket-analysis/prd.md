@@ -1,8 +1,64 @@
 # PRD: Polymarket Trader Analysis Tools
 
-**Status:** In Progress
+**Status:** Incomplete (Stages 1-3 Complete, Stages 4-7 Remaining)
 **Priority:** High
 **Branch:** `feature/polymarket-analysis`
+**Last Audited:** 2026-02-10
+
+---
+
+## Current State (Audit: 2026-02-10)
+
+### What's Complete
+
+| Stage | Description | Status | Notes |
+|-------|-------------|--------|-------|
+| 1 | API Client Foundation | ✅ Complete | All endpoints working |
+| 2 | Paginated Data Download | ✅ Complete | 171k records downloaded |
+| 3 | Basic Analysis Functions | ✅ Complete | Summary, grouping, totals |
+
+**Working Code:**
+- `src/seon/polymarket/api.clj` - Full HTTP client with pagination
+- `src/seon/polymarket/analysis.clj` - Basic aggregation functions
+- `test/seon/polymarket/api_test.clj` - 13 tests passing
+- `test/seon/polymarket/analysis_test.clj` - 12 tests passing
+- `data/polymarket/rn1/activity.edn` - 142MB, 171,500 records
+- `data/polymarket/rn1/positions.edn` - 88KB positions snapshot
+
+**Verified REPL Usage:**
+```clojure
+(require '[seon.polymarket.api :as api])
+(require '[seon.polymarket.analysis :as analysis])
+(def data (api/load-activity "data/polymarket/rn1/activity.edn"))
+(analysis/summarize-activity data)
+;; => {:total 171500, :by-type {"TRADE" 171480, "REDEEM" 20}, ...}
+(analysis/top-markets-by-volume data 5)
+;; => NBA markets dominating (~$22M total volume)
+```
+
+### What's Remaining
+
+| Stage | Description | Status | Effort |
+|-------|-------------|--------|--------|
+| 4 | Arbitrage Detection | ❌ Not started | Medium |
+| 5 | Profitability Analysis | ❌ Not started | Medium |
+| 6 | Trade Timing Analysis | ⚠️ Partial | Low (mostly done) |
+| 7 | Public API & Documentation | ❌ Not started | Low |
+
+**Stage 6 Partial Work:** The following timing functions exist:
+- `group-by-date`, `daily-volume`, `daily-trade-count`
+
+Still needed: `trades-per-day`, `trades-by-hour`, `holding-periods`, `trade-velocity`
+
+### Key Insight from Data
+
+The downloaded data shows RN1 is primarily doing **high-frequency sports betting** on NBA markets, not traditional arbitrage. The data shows:
+- 171,480 trades, only 20 redemptions
+- 100% BUY side (no SELL trades visible in activity)
+- All trades from a single day (2025-12-27)
+- Top markets are NBA games
+
+This suggests the original "arbitrage" hypothesis may need revisiting - the strategy appears to be **market making or high-frequency trading**, not cross-market arbitrage.
 
 ---
 
@@ -272,13 +328,13 @@ data/polymarket/
 
 ## Deliverables
 
-- [ ] `src/seon/polymarket/api.clj` - HTTP client
-- [ ] `src/seon/polymarket/analysis.clj` - Analysis functions
-- [ ] `src/seon/polymarket/core.clj` - Public API
-- [ ] `test/seon/polymarket/api_test.clj` - API tests
-- [ ] `test/seon/polymarket/analysis_test.clj` - Analysis tests
-- [ ] `data/polymarket/rn1/` - Downloaded data (git-ignored)
-- [ ] Git commits for each stage
+- [x] `src/seon/polymarket/api.clj` - HTTP client (complete)
+- [x] `src/seon/polymarket/analysis.clj` - Basic analysis (partial - needs arbitrage/profitability)
+- [ ] `src/seon/polymarket/core.clj` - Public API (not started)
+- [x] `test/seon/polymarket/api_test.clj` - API tests (13 tests passing)
+- [x] `test/seon/polymarket/analysis_test.clj` - Analysis tests (12 tests passing)
+- [x] `data/polymarket/rn1/` - Downloaded data (142MB activity, 88KB positions)
+- [ ] Git commits for each stage (stages 1-3 committed)
 
 ---
 
@@ -291,3 +347,64 @@ data/polymarket/
 | `src/seon/trading/signals.clj` | Analysis function pattern |
 | [Polymarket Data API Docs](https://docs.polymarket.com/developers/CLOB/trades/trades-data-api) | API documentation |
 | [Data API Gist](https://gist.github.com/shaunlebron/0dd3338f7dea06b8e9f8724981bb13bf) | Detailed endpoint docs |
+
+---
+
+## Next Steps for Future Agent
+
+If resuming this work, here's what to do:
+
+### 1. Re-evaluate the Hypothesis
+
+The original PRD assumed RN1 was doing **cross-market arbitrage**. The data suggests something different:
+- All 171k trades are BUYs (no SELLs in activity)
+- Only 20 redemptions
+- Concentrated on NBA markets
+
+**Action:** Before implementing Stage 4 (arbitrage detection), analyze the data more carefully. Possibilities:
+- The `/activity` endpoint may not show all trade types
+- RN1 may be using a different strategy (market making, liquidity provision)
+- May need to fetch `/trades` separately to see SELL activity
+
+### 2. Quick Wins (Stage 6 Completion)
+
+The timing analysis functions are mostly there. Just add:
+```clojure
+(defn trades-per-day [data] ...)  ;; Already have daily-trade-count
+(defn trades-by-hour [data] ...)  ;; Group by hour, similar to group-by-date
+```
+
+### 3. If Continuing with Arbitrage Analysis
+
+Stage 4 functions to implement:
+```clojure
+(defn find-opposing-positions [data]
+  "Find markets where trader holds both YES and NO outcomes."
+  (->> (group-by-market data)
+       (filter (fn [[_ records]]
+                 (> (count (distinct (map :outcome records))) 1)))
+       ...))
+```
+
+### 4. Test Commands
+
+```bash
+# Run all polymarket tests
+clojure -M:test -m kaocha.runner --focus seon.polymarket.api-test
+clojure -M:test -m kaocha.runner --focus seon.polymarket.analysis-test
+
+# REPL exploration
+(require '[seon.polymarket.api :as api])
+(require '[seon.polymarket.analysis :as analysis])
+(def data (api/load-activity "data/polymarket/rn1/activity.edn"))
+```
+
+### 5. Decision Point
+
+This PRD may be **better archived** if:
+- The arbitrage hypothesis is wrong and further analysis isn't valuable
+- RN1's strategy isn't replicable or interesting
+
+Or **continue** if:
+- Want to understand high-frequency sports betting on Polymarket
+- Want to build general-purpose trader analysis tools
