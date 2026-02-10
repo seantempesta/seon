@@ -62,6 +62,22 @@
                          :gen/fmap (fn [_] (throw (ex-info "Cannot generate database connection"
                                                            {:type :malli.generator/no-generator})))}])
 
+;; Datalevin namespace isolation keys (per PRD spec)
+;; These provide agents with isolated namespace databases
+(schema/register! :seon.ns/conn
+                  [:any {:description "Datalevin connection to namespace DB (read-only in ctx)"
+                         :gen/fmap (fn [_] (throw (ex-info "Cannot generate Datalevin connection"
+                                                           {:type :malli.generator/no-generator})))}])
+
+(schema/register! :seon.ns/session-id
+                  [:string {:min 4 :max 4
+                            :pattern "^[a-f0-9]{4}$"
+                            :description "4-character hex session ID (read-only in ctx)"}])
+
+(schema/register! :seon.ns/namespace
+                  [:string {:min 1
+                            :description "Agent namespace as string (read-only in ctx)"}])
+
 (schema/register! ::debounce-ms
                   [:int {:min 100 :max 60000
                          :description "Debounce window in milliseconds"}])
@@ -91,11 +107,15 @@
 
 ;;; Request/Response Schemas
 
+(schema/register! ::extra-reserved
+                  [:map {:description "Additional reserved keys to inject into ctx"}])
+
 (schema/register! ::make-request
                   [:map
                    [::db ::db]
                    [::namespace ::namespace]
-                   [::debounce-ms {:optional true} ::debounce-ms]])
+                   [::debounce-ms {:optional true} ::debounce-ms]
+                   [::extra-reserved {:optional true} ::extra-reserved]])
 
 (schema/register! ::make-response
                   [:map
@@ -156,10 +176,10 @@
        (some? (namespace k))))
 
 (defn- reserved-key?
-  "Check if a key is a reserved :seon.agent/* key."
+  "Check if a key is a reserved :seon.agent/* or :seon.ns/* key."
   [k]
   (and (keyword? k)
-       (= "seon.agent" (namespace k))))
+       (contains? #{"seon.agent" "seon.ns"} (namespace k))))
 
 (defn- validate-key
   "Validate a single key. Returns nil if valid, error map if invalid."
@@ -254,8 +274,8 @@
           serializable (persistable-state state)
           state-edn (pr-str serializable)]
       (xt/execute-tx db
-        [[:sql "INSERT INTO ctx_snapshots (_id, namespace, state) VALUES (?, ?, ?)"
-          [(str (random-uuid)) ns-str state-edn]]]))
+                     [[:sql "INSERT INTO ctx_snapshots (_id, namespace, state) VALUES (?, ?, ?)"
+                       [(str (random-uuid)) ns-str state-edn]]]))
     (catch Exception e
       (log/error "Failed to persist ctx snapshot"
                  {:namespace namespace
@@ -284,18 +304,18 @@
      ;; From outside namespace:
      (ctx/make-persisted-ctx {::ctx/db conn ::ctx/namespace 'seon.trading})"
   {:malli/schema [:=> [:cat ::make-request] ::make-response]}
-  [{::keys [db namespace debounce-ms]}]
+  [{::keys [db namespace debounce-ms extra-reserved]}]
   (let [debounce-ms (or debounce-ms 1000)
 
         ;; Load latest state if exists
         latest (try
                  (first (xt/q db
-                           ["SELECT state, _system_from FROM ctx_snapshots
+                              ["SELECT state, _system_from FROM ctx_snapshots
                              WHERE namespace = ?
                              ORDER BY _system_from DESC
                              LIMIT 1"
-                            (str namespace)]
-                           {:key-fn :kebab-case-keyword}))
+                               (str namespace)]
+                              {:key-fn :kebab-case-keyword}))
                  (catch Exception _
                    nil))
 
@@ -304,8 +324,10 @@
                         {})
 
         ;; Reserved keys - set by system, immutable
-        reserved {:seon.agent/namespace namespace
-                  :seon.agent/db db}
+        ;; Includes :seon.agent/* keys plus any extra-reserved (e.g., :seon.ns/*)
+        reserved (merge {:seon.agent/namespace namespace
+                         :seon.agent/db db}
+                        extra-reserved)
 
         ;; Merge reserved keys into initial state
         initial-with-reserved (merge initial-state reserved)
@@ -332,35 +354,35 @@
         ;; Actual persist function
         do-persist! (fn [state]
                       (send-off persist-agent
-                        (fn [_]
-                          (try
-                            (persist-to-xtdb! db namespace state)
-                            (log/debug "Persisted ctx snapshot"
-                                       {:namespace namespace})
-                            (catch Exception e
-                              (log/error "ctx persist failed"
-                                         {:namespace namespace
-                                          :error (.getMessage e)})))
-                          nil)))
+                                (fn [_]
+                                  (try
+                                    (persist-to-xtdb! db namespace state)
+                                    (log/debug "Persisted ctx snapshot"
+                                               {:namespace namespace})
+                                    (catch Exception e
+                                      (log/error "ctx persist failed"
+                                                 {:namespace namespace
+                                                  :error (.getMessage e)})))
+                                  nil)))
 
         ;; Watch for changes
         _ (add-watch ctx-atom ::persist
-            (fn [_ _ old new]
-              (when (and (not= old new)
+                     (fn [_ _ old new]
+                       (when (and (not= old new)
                          ;; Don't persist during restore
-                         (not (::restoring (meta new))))
+                                  (not (::restoring (meta new))))
                 ;; Schedule debounced persist
-                (reset! pending-state new)
-                (when-let [^ScheduledFuture task @scheduled-task]
-                  (.cancel task false))
-                (reset! scheduled-task
-                  (.schedule scheduler
-                    ^Runnable (fn []
-                                (when-let [state @pending-state]
-                                  (reset! pending-state nil)
-                                  (do-persist! state)))
-                    debounce-ms
-                    TimeUnit/MILLISECONDS)))))
+                         (reset! pending-state new)
+                         (when-let [^ScheduledFuture task @scheduled-task]
+                           (.cancel task false))
+                         (reset! scheduled-task
+                                 (.schedule scheduler
+                                            ^Runnable (fn []
+                                                        (when-let [state @pending-state]
+                                                          (reset! pending-state nil)
+                                                          (do-persist! state)))
+                                            debounce-ms
+                                            TimeUnit/MILLISECONDS)))))
 
         ;; Flush function - persist immediately
         flush! (fn []
@@ -407,13 +429,13 @@
   (let [ns-str (str namespace)
         ;; Query for state at the given time
         result (first (xt/q db
-                        [(str "SELECT state, _system_from FROM ctx_snapshots "
-                              "FOR SYSTEM_TIME AS OF ? "
-                              "WHERE namespace = ? "
-                              "ORDER BY _system_from DESC "
-                              "LIMIT 1")
-                         instant ns-str]
-                        {:key-fn :kebab-case-keyword}))]
+                            [(str "SELECT state, _system_from FROM ctx_snapshots "
+                                  "FOR SYSTEM_TIME AS OF ? "
+                                  "WHERE namespace = ? "
+                                  "ORDER BY _system_from DESC "
+                                  "LIMIT 1")
+                             instant ns-str]
+                            {:key-fn :kebab-case-keyword}))]
     (if result
       {::state (edn/read-string (:state result))
        ::system-time (:system-from result)}
@@ -436,12 +458,12 @@
   [{::keys [db namespace]}]
   (let [ns-str (str namespace)
         results (xt/q db
-                  ["SELECT _system_from, state FROM ctx_snapshots
+                      ["SELECT _system_from, state FROM ctx_snapshots
                     FOR ALL SYSTEM_TIME
                     WHERE namespace = ?
                     ORDER BY _system_from"
-                   ns-str]
-                  {:key-fn :kebab-case-keyword})]
+                       ns-str]
+                      {:key-fn :kebab-case-keyword})]
     {::snapshots (mapv (fn [{:keys [system-from state]}]
                          {::state (edn/read-string state)
                           ::system-time system-from})
@@ -497,12 +519,12 @@
   [{::keys [db namespace]}]
   (let [ns-str (str namespace)
         result (first (xt/q db
-                        ["SELECT state, _system_from FROM ctx_snapshots
+                            ["SELECT state, _system_from FROM ctx_snapshots
                           WHERE namespace = ?
                           ORDER BY _system_from DESC
                           LIMIT 1"
-                         ns-str]
-                        {:key-fn :kebab-case-keyword}))]
+                             ns-str]
+                            {:key-fn :kebab-case-keyword}))]
     (if result
       {::state (edn/read-string (:state result))
        ::system-time (:system-from result)}

@@ -769,8 +769,11 @@
 
   ;; 1. Create Seon session (nREPL, ctx, db)
   (let [{::session/keys [id nrepl-port] :as session-result}
-        (session/start-agent-session! {::session/node node
-                                       ::session/namespace namespace})]
+        (session/start-agent-session!
+         (let [dl-mgr (:seon/connection-manager state/system)]
+           (cond-> {::session/node node
+                    ::session/namespace namespace}
+             dl-mgr (assoc ::session/datalevin-manager dl-mgr))))]
 
     (when (= :error (::session/status session-result))
       (throw (ex-info "Failed to create agent session"
