@@ -25,3 +25,28 @@
 
 ### Port allocation
 - `allocate-port!` increments `::next-port` atomically via `swap-vals!`. Ports are never recycled within a pool lifetime. If you create and dispose many JVMs, ports will eventually exceed 7999 and violate the `::port` schema. In practice, this would require 100 JVM lifecycles which doesn't happen in normal operation.
+
+## Phase 2: Knowledge Graph Foundation Gotchas
+
+### Datalevin dependency placement
+- Datalevin is a dev-only dependency (in `:dev` alias). It was NOT in the `:test` alias initially, causing `FileNotFoundException: Could not locate datalevin/core__init.class`. Added `datalevin/datalevin {:local/root "reference-code/datalevin"}` to the `:test` alias in `deps.edn`.
+
+### REPL comment blocks and namespace aliases
+- `::alias/keyword` syntax in `(comment ...)` blocks causes read-time failures if the alias is not declared in the `ns` form. Dynamic `(require '[... :as alias])` inside comment blocks does NOT make `::alias/keyword` resolve -- the reader needs the alias at read time, not runtime. Use fully-qualified keywords like `:seon.db.datalevin.conn/manager` instead.
+
+### Datalevin local connections for tests
+- Tests use `(d/get-conn dir)` with a temp directory instead of a Datalevin server connection. This gives each test an isolated database without needing the server running. Clean up with `(d/close conn)` and `(delete-dir dir)` in a fixture.
+
+### Datalevin get-else for optional attributes
+- `call-graph` and `callers-of` use `[(get-else $ ?e :graph/line -1) ?line]` to handle entities without `:graph/line`. Datalevin's Datalog requires binding all variables, so optional attributes need `get-else` with a sentinel value.
+
+### Bulk ingestion strategy
+- `ingest-analysis!` does a full retract-by-type then re-insert. This is simple and correct but means the graph is briefly empty during re-ingestion. For Phase 3+ consider making this atomic.
+- `ingest-incremental!` is smarter: only retracts entities for the affected namespace(s), then inserts new ones. This preserves the rest of the graph during incremental updates.
+
+### analyze-form implementation
+- The PRD suggested using `seon.dev.lint/lint-source` for per-form analysis. However, `lint-source` uses a different clj-kondo config (focused on error detection, not analysis extraction). Instead, `analyze-form` uses `clj-kondo/run!` directly with the same `project-kondo-config` that `analyze-project!` uses. This ensures consistent analysis output for both modes.
+
+### Entity deduplication
+- Namespace dependency entities (`ns-dependency`) are deduplicated with `(distinct)` during extraction because clj-kondo can report multiple usages of the same required namespace.
+- Function entities are NOT deduplicated during extraction because each function definition is unique by namespace + name.
