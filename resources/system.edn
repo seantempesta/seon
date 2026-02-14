@@ -83,6 +83,18 @@
   :input "resources/public/css/input.css"
   :output "resources/public/css/output.css"}
 
+ ;; Agent JVM Pool
+ ;; Pre-warmed JVM pool for instant agent startup.
+ ;; Each agent gets an isolated JVM with its own nREPL, Malli registry, and
+ ;; Datalevin client connection. Depends on Datalevin server for agent DB access.
+ :seon/agent-pool
+ {:size #or [#env AGENT_POOL_SIZE 3]
+  :base-port #or [#env AGENT_BASE_PORT 7900]
+  :datalevin-server #ig/ref :seon/datalevin-server
+  :enabled? #profile {:dev true
+                      :test false   ; Unit tests mock pool structure
+                      :prod true}}
+
  ;; Claude Code SDK Configuration
  :seon/claude-code
  {:cli-path #or [#env CLAUDE_CLI_PATH "/Users/sean/.local/bin/claude"]}}
