@@ -69,26 +69,53 @@ Agent JVM (186MB each)
 ### Phase 1: Agent JVM Pool (Production-Ready)
 **Goal**: Reliable, production-ready agent JVM pool with lifecycle management.
 
-**Already prototyped** in `src/seon/flow/pool.clj` and `src/seon/flow/agent_runner.clj`. Remaining work:
+**Already prototyped** in `src/seon/flow/pool.clj` and `src/seon/flow/agent_runner.clj`.
 
-**Build**:
-- Fix concurrency: `acquire!` race condition → use compare-and-swap or blocking queue
-- Parallel pool creation: spawn JVMs concurrently (6.5s → ~3.5s)
-- Auto-replenishment: when a JVM is acquired, spawn replacement in background
-- Health checks: periodic nREPL ping to detect crashed JVMs
-- Integrant component: wrap pool as system component for clean start/stop
-- Datalevin client verification: test actual connection + query from agent JVM to orchestrator server
+#### Phase 1a: Core Pool (DONE)
+- [x] Fix concurrency: `acquire!` race condition → `LinkedBlockingQueue` for thread-safe acquisition
+- [x] Parallel pool creation: spawn JVMs concurrently via futures
+- [x] Auto-replenishment: when a JVM is acquired, spawn replacement in background via `replenish-pool!`
+- [x] Health checks: periodic nREPL ping via `ScheduledExecutorService`, replaces unhealthy JVMs
+- [x] Integrant component: `:seon/agent-pool` with suspend/resume for `(reset)` survival
+- [x] Datalevin URI: passed to agent JVMs via `--datalevin-uri` CLI arg
+- [x] Port allocation: atomic via `swap-vals!` to prevent race conditions
+- [x] Unit tests + integration tests in `test/seon/flow/pool_test.clj`
+- [x] Config in `system.edn` with `#ig/ref :seon/datalevin-server` dependency
+
+#### Phase 1b: Production Hardening (DONE)
+Three issues discovered during Integrant lifecycle testing:
+
+**1b.1: Non-blocking pool startup**
+- [x] `create-pool!` returns immediately with empty pool, JVMs spawn in background futures
+- [x] `::warming?` flag in pool state atom, initially `true`, set to `false` when all JVMs spawned
+- [x] `pool-warming?` and `await-warm` helper functions for callers
+- [x] `pool-status` includes `::warming?` in response
+- [x] Logs "Pool warming in background" at creation, "Pool ready" when warm
+
+**1b.2: Blocking acquire with timeout**
+- [x] `acquire!` accepts optional `::timeout-ms` -- uses `.poll(timeout, TimeUnit/MILLISECONDS)`
+- [x] Without `::timeout-ms`, behavior is identical to before (non-blocking `.poll()`)
+- [x] `acquire!!` convenience function blocks indefinitely via `.take`
+- [x] Extracted `activate-jvm!` helper to avoid duplication between acquire! and acquire!!
+
+**1b.3: Stale process cleanup on startup**
+- [x] `cleanup-stale-agents!` checks TCP ports, finds PIDs via `lsof`, kills with `kill`
+- [x] Safety check: only operates on ports in 7900-7999 range
+- [x] Called at start of `create-pool!` before spawning any JVMs
+- [x] 16 unit tests, 51 assertions, 0 failures (10 new tests for Phase 1b)
 
 **Existing code**:
-- `src/seon/flow/pool.clj` — Pool prototype (acquire!, release!, dispose!)
+- `src/seon/flow/pool.clj` — Current pool implementation
 - `src/seon/flow/agent_runner.clj` — Agent JVM entry point
 - `bin/agent-runner` — Launch script
 - `deps.edn` `:agent` alias — 7-dep minimal classpath
+- `test/seon/flow/pool_test.clj` — Unit + integration tests
 
-**Test**:
-- Spawn pool of 3. Acquire 2 agents on `seon.trading.signals`. Each `defn ema` independently. Verify no clobbering.
-- Kill an agent JVM. Verify pool detects and respawns.
-- Verify Datalevin client from agent JVM can query orchestrator's database.
+**Test (Phase 1b)**:
+- Start Seon, verify pool warms in background (HTTP server available before pool ready)
+- Kill Seon hard (`kill -9`), restart, verify stale agent JVMs cleaned up and new pool starts
+- Exhaust pool, call `acquire!` with timeout, verify it blocks then returns when JVM released
+- All existing tests still pass
 
 ### Phase 2: Knowledge Graph Foundation
 **Goal**: Every namespace, function, spec, and dependency queryable in Datalevin.
