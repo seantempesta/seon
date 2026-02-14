@@ -22,9 +22,9 @@
 ;; Build with: npm run css:build (or npm run css:watch for development)
 (def tailwind-css "/css/output.css")
 
-(def jetbrains-mono-cdn
-  "Google Fonts CDN for JetBrains Mono - excellent readability at small sizes."
-  "https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap")
+;; NOTE: JetBrains Mono font removed from external CDN for offline resilience.
+;; The font-mono stack in input.css falls back to system monospace fonts.
+;; To add JetBrains Mono locally, download woff2 files to /fonts/ and add @font-face.
 
 ;; ========================================
 ;; Datastar SSE Init
@@ -93,24 +93,20 @@
       [:meta {:charset "UTF-8"}]
       [:meta {:name "viewport" :content "width=device-width, initial-scale=1.0"}]
       [:title title]
-      ;; JetBrains Mono font for terminal aesthetic
-      [:link {:rel "preconnect" :href "https://fonts.googleapis.com"}]
-      [:link {:rel "preconnect" :href "https://fonts.gstatic.com" :crossorigin "anonymous"}]
-      [:link {:rel "stylesheet" :href jetbrains-mono-cdn}]
+      ;; All assets served locally for offline/slow network resilience
       ;; Tailwind CSS (local build with @tailwindcss/typography for prose classes)
       [:link {:rel "stylesheet" :href tailwind-css}]
-      ;; Highlight.js for syntax highlighting in code blocks
-      [:link {:rel "stylesheet"
-              :href "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css"}]
+      ;; Highlight.js for syntax highlighting (local)
+      [:link {:rel "stylesheet" :href "/css/highlight-github-dark.css"}]
       [:script {:type "module" :src datastar-js}]]
      [:body {:class "bg-base-950 text-text-50 min-h-screen p-4 font-mono antialiased"}
-      ;; Highlight.js scripts at end of body for faster page load
-      [:script {:src "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"}]
-      [:script {:src "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/clojure.min.js"}]
-      [:script {:src "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"}]
-      [:script {:src "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/diff.min.js"}]
-      ;; Initialize highlight.js and re-run after Datastar morphs
-      [:script (h/raw "
+      ;; Highlight.js scripts - defer to avoid blocking page load/spinner
+      [:script {:src "/js/highlight.min.js" :defer true}]
+      [:script {:src "/js/highlight-clojure.min.js" :defer true}]
+      [:script {:src "/js/highlight-bash.min.js" :defer true}]
+      [:script {:src "/js/highlight-diff.min.js" :defer true}]
+      ;; Initialize highlight.js after deferred scripts load
+      [:script {:defer true} (h/raw "
         document.addEventListener('DOMContentLoaded', () => hljs.highlightAll());
         document.addEventListener('datastar-morph', () => {
           document.querySelectorAll('pre code:not(.hljs)').forEach(el => hljs.highlightElement(el));

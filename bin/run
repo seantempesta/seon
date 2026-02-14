@@ -5,8 +5,17 @@
 #   ./bin/run prod   # production profile
 #
 # Starts XTDB, nREPL, HTTP server, and Tailwind watcher (via Integrant).
+# If Caddy is installed, starts HTTP/2 reverse proxy on https://localhost:3030.
 # Ctrl+C to stop cleanly.
 
 export JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home
 export PATH="$JAVA_HOME/bin:$PATH"
+
+# Start Caddy reverse proxy for HTTP/2 (if installed)
+if command -v caddy &>/dev/null; then
+    caddy start --config Caddyfile 2>>logs/caddy.log
+    trap "caddy stop 2>/dev/null" EXIT
+    echo "Caddy running on https://localhost:3030 (HTTP/2)"
+fi
+
 exec clj -J-Xmx4g -M:dev:run "$@"

@@ -8,6 +8,7 @@
   4. Throttling - Max refresh rate to prevent overload
   5. hk/as-channel - http-kit's async API for SSE"
   (:require [clojure.core.async :as a]
+            [clojure.string :as str]
             [taoensso.timbre :as log]
             [org.httpkit.server :as hk]
             [seon.web.brotli :as br]))
@@ -98,18 +99,34 @@
               (a/close! <out-ch)))
     <out-ch))
 
+(def ^:private keepalive-comment
+  "SSE comment used as keepalive to detect dead connections."
+  ": keepalive\n\n")
+
 (defn- do-render
-  "Render view and send SSE update if changed. Returns new hash for next iteration."
+  "Render view and send SSE update if changed. Returns new hash, or nil if connection dead."
   [render-fn req out br ch last-view-hash]
   (try
     (when-some [new-view-str (render-fn req)]
       (let [new-view-hash (Integer/toHexString (hash new-view-str))]
-        (when (not= last-view-hash new-view-hash)
-          (log/debug "Sending SSE update" {:hash new-view-hash :size (count new-view-str)})
-          (->> (patch-elements new-view-hash new-view-str)
-               (br/compress-stream out br)
-               (send! ch)))
-        new-view-hash))
+        (if (not= last-view-hash new-view-hash)
+          ;; View changed - send update
+          (let [sent? (->> (patch-elements new-view-hash new-view-str)
+                           (br/compress-stream out br)
+                           (send! ch))]
+            (if sent?
+              (do (log/debug "Sending SSE update" {:hash new-view-hash :size (count new-view-str)})
+                  new-view-hash)
+              (do (log/debug "SSE send failed, closing dead connection")
+                  nil)))
+          ;; View unchanged - send keepalive to detect dead connections
+          (let [sent? (->> keepalive-comment
+                           (br/compress-stream out br)
+                           (send! ch))]
+            (if sent?
+              new-view-hash
+              (do (log/debug "SSE keepalive failed, closing dead connection")
+                  nil))))))
     (catch Exception e
       (log/error e "Error rendering SSE view")
       last-view-hash)))
