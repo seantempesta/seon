@@ -1,0 +1,7 @@
+# Caddy reverse proxy for HTTP/2 + TLS
+# Eliminates Chrome's 6-connection limit on HTTP/1.1
+# which blocks SSE-heavy pages (Datastar) when multiple tabs are open.
+
+https://localhost:3030 {
+	reverse_proxy localhost:8080
+}

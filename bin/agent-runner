@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Launches an isolated agent JVM with minimal dependencies.
+# No XTDB, no Arrow, no web stack - just nREPL + Datalevin + Malli.
+#
+# Usage:
+#   ./bin/agent-runner --port 7890 --namespace seon.test.hello
+#   ./bin/agent-runner --port 7890 --namespace seon.test.hello --datalevin-uri "dtlv://datalevin:datalevin@127.0.0.1:8898/test-agent"
+#
+# Memory: ~128-256MB heap + ~64MB metaspace (vs ~8GB for main Seon JVM)
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+
+cd "$PROJECT_DIR"
+
+echo "Starting isolated agent JVM..."
+echo "Args: $@"
+
+exec clojure -M:agent "$@"

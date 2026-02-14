@@ -747,19 +747,24 @@
           [:td {:class "py-8 px-4 text-center text-text-500 italic" :colspan "5"}
            "No agents found. Start an agent to see it here."]]
          (for [{:keys [id namespace status session-id]} all-rows]
-           [:tr {:class "border-b border-base-700 hover:bg-base-800 cursor-pointer transition-colors"
-                 :data-on:click (str "window.location.href='/agents/" id "'")}
-            [:td {:class "py-2 px-4 font-mono text-sm font-medium text-text-50"} id]
-            [:td {:class "py-2 px-4 font-mono text-sm text-text-200"} (or namespace "-")]
-            [:td {:class "py-2 px-4"} (agent-status-badge status)]
-            [:td {:class "py-2 px-4 font-mono text-sm text-text-400"}
-             (if-let [stats (get message-stats session-id)]
-               (:count stats)
-               "-")]
-            [:td {:class "py-2 px-4 font-mono text-sm text-text-400 text-right"}
-             (if-let [tokens (get context-tokens session-id)]
-               (format-tokens tokens)
-               "-")]]))]]]))
+           (let [href (str "/agents/" id)
+                 ;; Wrap cell content in <a> for proper link behavior (shift/cmd-click)
+                 cell (fn [class content]
+                        [:td {:class "p-0"}
+                         [:a {:href href :class (str "block py-2 px-4 " class)} content]])]
+             [:tr {:class "border-b border-base-700 hover:bg-base-800 transition-colors"}
+              (cell "font-mono text-sm font-medium text-text-50" id)
+              (cell "font-mono text-sm text-text-200" (or namespace "-"))
+              [:td {:class "p-0"}
+               [:a {:href href :class "block py-2 px-4"} (agent-status-badge status)]]
+              (cell "font-mono text-sm text-text-400"
+                    (if-let [stats (get message-stats session-id)]
+                      (:count stats)
+                      "-"))
+              (cell "font-mono text-sm text-text-400 text-right"
+                    (if-let [tokens (get context-tokens session-id)]
+                      (format-tokens tokens)
+                      "-"))])))]]]))
 
 (defn- agents-content
   "Render the main agents page content with Phosphor styling."

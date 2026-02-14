@@ -33,7 +33,12 @@
 
 (def server-info
   {:name "seon"
-   :version "0.3.0"})  ;; v0.3.0: Async request processing for MCP resilience
+   :version "0.4.0"})  ;; v0.4.0: Self-healing nREPL sessions + parent watchdog
+
+;; Parent PID at startup - used by watchdog to detect orphaning
+(def parent-pid (let [parent (.parent (java.lang.ProcessHandle/current))]
+                  (when (.isPresent parent)
+                    (.pid (.get parent)))))
 
 ;; Track orchestrator eval state to detect concurrent calls.
 ;; When non-nil, contains {:started-at <ms> :code-preview <str>}
@@ -323,7 +328,11 @@ You must then either:
                                          ns-val (assoc :ns ns-val)
                                          err (update :err str err)
                                          stdout (update :out str stdout)
-                                         ex (assoc :ex ex))]
+                                         ex (assoc :ex ex)
+                                         ;; nREPL returns "unknown-session" when session ID is stale
+                                         (and status (some #{"unknown-session"} status))
+                                         (assoc :ex "unknown-session"
+                                                :err "nREPL session expired (server restarted?)"))]
                            (if (and status (some #{"done"} status))
                              result'
                              (recur result'))))))))))))
