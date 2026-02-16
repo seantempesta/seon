@@ -364,11 +364,12 @@ feat: Super REPL core with form routing, agent environment, and graduation
 
 ## Phase 4: Namespace Harness — Flow-Routed Agent Isolation — COMPLETED
 
-**Commit**: `2d0d86c feat: enhance Super REPL with agent environment and dynamic context features`
+**Commits**: `f477651` through `29adfbe` (6 commits)
 
-**Goal**: Namespace-level process isolation via core.async.flow, with TCP socket channels as flow in-ports/out-ports bridging orchestrator and agent JVMs. Blocking request/reply, backpressure, observability events.
+**Goal**: Namespace-level process isolation via core.async.flow, with TCP socket channels as flow in-ports/out-ports bridging orchestrator and agent JVMs. Blocking request/reply, backpressure, observability events, transparent cross-namespace calls, real pool JVM integration.
 
 Detailed design: [`flow-buildout.md`](flow-buildout.md)
+Visualization plan: [`flow-viz-plan.md`](flow-viz-plan.md)
 
 ### What Was Built
 
@@ -376,37 +377,47 @@ Dual-flow model: orchestrator flow topology + agent JVM mini-flow, connected by 
 
 - **Message envelope schemas** (`seon.flow.msg`) — Malli-registered request, reply, and event schemas with version key from day one. Error taxonomy: `:execution`, `:timeout`, `:overload`, `:serialization`, `:not-found`.
 - **TCP channel adapter** (`seon.flow.harness.channel`) — Bidirectional TCP-to-core.async adapter with length-prefixed EDN framing. `start-server!` / `connect!` API.
-- **Bridge step function** (`seon.flow.harness.bridge`) — Agent JVM mini-flow process. Receives requests via TCP, resolves and calls local functions, returns reply envelopes. Handles `*ctx*` persistence on stop.
-- **Namespace step function** (`seon.flow.harness`) — Orchestrator-side flow process. Acquires JVM from pool, starts TCP bridge, loads bridge code via nREPL. Queue cap (32 dev default) with typed `:overload` error path. Emits observability events: `:start`, `:ok`, `:error`, `:overload`, `:timeout`.
-- **Reply router and topology** (`seon.flow.topology`) — `build-topology!` wires namespace processes + reply router. `request!` provides blocking cross-namespace function calls through the flow graph.
+- **Bridge step function** (`seon.flow.harness.bridge`) — Agent JVM mini-flow process. Receives requests via TCP, resolves and calls local functions, returns reply envelopes. Reverse channel for cross-ns calls (`remote-call!`).
+- **Namespace step function** (`seon.flow.harness`) — Orchestrator-side flow process. Queue cap (32 dev default) with typed `:overload` error path. Emits observability events. `start-namespace-jvm!` acquires pool JVM, starts TCP, loads bridge via nREPL.
+- **Reply router and topology** (`seon.flow.topology`) — `build-topology!` wires namespace processes + reply router + event/error sinks. `request!` provides blocking cross-namespace function calls. Cycle detection at build time (DFS). Cross-ns relay go-loops for agent-to-agent calls.
+- **Proxy namespaces** (`seon.flow.harness.proxy`) — `proxy-ns!` creates namespaces in agent JVMs with proxy vars that route calls through the flow. Agents write normal Clojure: `(nutrition/metabolic-rate {::weight 80})` — routing is invisible.
+- **Flow observability** (`seon.flow.registry`, `seon.flow.status`) — Central flow registry, on-demand status collection via `flow/ping`, throughput tracking, error accumulation. `(user/flow-status)` REPL helper for AI agent diagnostics.
+- **Real pool JVM integration** — `start-namespace-jvm!` acquires JVM, loads bridge code via nREPL, starts request-reply loop. Tested with lifting + nutrition domains on separate JVMs.
 
 ### Key Files
 
 | File | Purpose |
 |------|---------|
 | `src/seon/flow/msg.clj` | Message envelope schemas (source of truth) |
-| `src/seon/flow/harness.clj` | Namespace-step, ctx persistence, lifecycle |
-| `src/seon/flow/harness/bridge.clj` | Agent JVM bridge step-fn |
+| `src/seon/flow/harness.clj` | Namespace-step, ctx persistence, JVM lifecycle |
+| `src/seon/flow/harness/bridge.clj` | Agent JVM bridge + reverse channel for cross-ns calls |
 | `src/seon/flow/harness/channel.clj` | TCP socket to core.async channel adapter |
-| `src/seon/flow/topology.clj` | Flow graph wiring + reply router + `request!` |
-| `test/seon/flow/msg_test.clj` | Schema validation + EDN round-trip |
-| `test/seon/flow/harness_test.clj` | Integration: full cross-ns lifecycle |
-| `test/seon/flow/harness/bridge_test.clj` | Bridge step-fn tests |
-| `test/seon/flow/harness/channel_test.clj` | TCP adapter tests |
-| `test/seon/flow/topology_test.clj` | Topology + request! tests |
+| `src/seon/flow/harness/proxy.clj` | Transparent proxy namespace generation |
+| `src/seon/flow/topology.clj` | Flow wiring + reply router + cycle detection + cross-ns relay |
+| `src/seon/flow/registry.clj` | Central flow registry |
+| `src/seon/flow/status.clj` | Status collector with throughput + error tracking |
+| `test/seon/flow/integration_test.clj` | Domain tests with mock channels (14 tests) |
+| `test/seon/flow/pool_integration_test.clj` | Real pool JVM tests (3 tests) |
+| `test/seon/flow/domain_integration_test.clj` | Full domain tests on real JVMs (7 tests) |
 
 ### Build Checklist
 
 - [x] Message envelope schemas with Malli registration and version key
 - [x] TCP channel adapter (length-prefixed EDN, server + client)
-- [x] Bridge step-fn (agent JVM side: receive request, call fn, return reply)
-- [x] Namespace step-fn (orchestrator side: JVM acquire, TCP bridge, queue cap, observability events)
-- [x] Reply router + topology wiring
+- [x] Bridge step-fn (agent JVM side: execute-local + error taxonomy)
+- [x] Namespace step-fn (orchestrator side: queue cap, observability events)
+- [x] Reply router + topology wiring + event/error sinks
 - [x] `topology/request!` blocking cross-namespace calls
 - [x] `*ctx*` persistence (serializable keys saved, non-serializable warned)
 - [x] Overload path (queue cap exceeded returns typed `:overload` error)
 - [x] Observability events emitted on start/ok/error/overload/timeout
-- [x] 44 tests, 192 assertions, 0 failures
+- [x] Transparent proxy namespaces — agents call remote fns with normal Clojure syntax
+- [x] Reverse channel + cross-ns relay for agent-to-agent calls
+- [x] Cycle detection at topology build time (DFS)
+- [x] Real pool JVM integration (`start-namespace-jvm!` + `stop-namespace-jvm!`)
+- [x] Domain integration tests (lifting + nutrition on real JVMs, 7 scenarios)
+- [x] Flow registry + status collector + `user/flow-status` REPL helper
+- [x] 75+ flow tests, 300+ assertions, 0 failures (667 total suite)
 
 ### Notes
 
