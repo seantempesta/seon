@@ -291,3 +291,95 @@
           (is (= {:echo ["world"]} r2)))
         (finally
           (stop-echo-topology! topo))))))
+
+;;; ---------------------------------------------------------------------------
+;;; Cycle Detection Tests
+;;; ---------------------------------------------------------------------------
+
+(deftest detect-cycles-no-cycles-test
+  (testing "detect-cycles returns nil when no cycles exist"
+    (let [configs {"seon.health.lifting" {}
+                   "seon.health.nutrition" {}}]
+      (is (nil? (topology/detect-cycles configs))))))
+
+(deftest detect-cycles-direct-cycle-test
+  (testing "detect-cycles detects direct cycle (A→B→A)"
+    (let [configs {"seon.health.lifting"
+                   {::topology/proxy-targets #{"seon.health.nutrition"}}
+                   "seon.health.nutrition"
+                   {::topology/proxy-targets #{"seon.health.lifting"}}}]
+      (let [cycles (topology/detect-cycles configs)]
+        (is (some? cycles))
+        (is (= 1 (count cycles)))
+        ;; Cycle should contain both namespaces (path includes the closing node)
+        (let [cycle (first cycles)]
+          (is (= 3 (count cycle)))
+          (is (contains? (set cycle) "seon.health.lifting"))
+          (is (contains? (set cycle) "seon.health.nutrition"))
+          ;; First and last should be the same (cycle closure)
+          (is (= (first cycle) (last cycle))))))))
+
+(deftest detect-cycles-indirect-cycle-test
+  (testing "detect-cycles detects indirect cycle (A→B→C→A)"
+    (let [configs {"seon.health.lifting"
+                   {::topology/proxy-targets #{"seon.health.nutrition"}}
+                   "seon.health.nutrition"
+                   {::topology/proxy-targets #{"seon.health.recovery"}}
+                   "seon.health.recovery"
+                   {::topology/proxy-targets #{"seon.health.lifting"}}}]
+      (let [cycles (topology/detect-cycles configs)]
+        (is (some? cycles))
+        (is (>= (count cycles) 1))
+        ;; At least one cycle with 4 elements (3 nodes + closing node)
+        (is (some (fn [cycle] (= 4 (count cycle))) cycles))))))
+
+(deftest detect-cycles-no-cycle-in-larger-graph-test
+  (testing "detect-cycles finds no cycle in larger acyclic graph"
+    (let [configs {"seon.health.lifting" {::topology/proxy-targets #{"seon.health.nutrition"}}
+                   "seon.health.nutrition" {::topology/proxy-targets #{"seon.health.recovery"}}
+                   "seon.health.recovery" {}
+                   "seon.trading.signals" {::topology/proxy-targets #{"seon.trading.execution"}}
+                   "seon.trading.execution" {}}]
+      (is (nil? (topology/detect-cycles configs))))))
+
+(deftest detect-cycles-missing-proxy-targets-test
+  (testing "detect-cycles treats missing ::proxy-targets as empty set"
+    (let [configs {"seon.health.lifting" {}
+                   "seon.health.nutrition" {}}]
+      (is (nil? (topology/detect-cycles configs))))))
+
+(deftest detect-cycles-self-loop-test
+  (testing "detect-cycles detects self-referential cycle (A→A)"
+    (let [configs {"seon.health.lifting"
+                   {::topology/proxy-targets #{"seon.health.lifting"}}}]
+      (let [cycles (topology/detect-cycles configs)]
+        (is (some? cycles))))))
+
+(deftest build-topology-rejects-cycles-test
+  (testing "build-topology! throws when cycles detected"
+    (let [jvm-request-ch (async/chan 32)
+          jvm-reply-ch (async/chan 32)]
+      (try
+        (let [ex (try
+                   (topology/build-topology!
+                    {::topology/namespaces
+                     {"seon.health.lifting"
+                      {::topology/proxy-targets #{"seon.health.nutrition"}
+                       :seon.flow.harness/in-ports
+                       {:seon.flow.in/jvm-reply jvm-reply-ch}
+                       :seon.flow.harness/out-ports
+                       {:seon.flow.out/jvm-request jvm-request-ch}}
+                      "seon.health.nutrition"
+                      {::topology/proxy-targets #{"seon.health.lifting"}
+                       :seon.flow.harness/in-ports
+                       {:seon.flow.in/jvm-reply jvm-reply-ch}
+                       :seon.flow.harness/out-ports
+                       {:seon.flow.out/jvm-request jvm-request-ch}}}})
+                   nil
+                   (catch clojure.lang.ExceptionInfo e e))]
+          (is (some? ex) "Should have thrown")
+          (is (= true (get (ex-data ex) :cycle-detected)))
+          (is (some? (get (ex-data ex) :cycles))))
+        (finally
+          (async/close! jvm-request-ch)
+          (async/close! jvm-reply-ch))))))

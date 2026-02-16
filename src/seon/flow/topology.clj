@@ -11,6 +11,7 @@
    It also starts relay go-loops for cross-namespace calls from agent JVMs."
   (:require [clojure.core.async :as async]
             [clojure.core.async.flow :as flow]
+            [clojure.string :as str]
             [seon.flow.harness :as harness]
             [seon.flow.msg :as msg]
             [seon.schema :as schema])
@@ -201,6 +202,64 @@
       (recur))))
 
 ;;; ---------------------------------------------------------------------------
+;;; Cycle Detection
+;;; ---------------------------------------------------------------------------
+
+(defn- dfs-cycles
+  "DFS to detect cycles in directed graph. Returns vector of cycle paths, or nil if none.
+   Each path is a vector of node values representing the cycle."
+  [graph]
+  (let [visited (atom #{})
+        rec-stack (atom #{})
+        cycles (atom [])]
+    (letfn [(visit [node path]
+              (swap! visited conj node)
+              (swap! rec-stack conj node)
+
+              ;; Visit each neighbor
+              (doseq [neighbor (get graph node #{})]
+                (cond
+                  ;; Found a cycle: neighbor is in recursion stack
+                  (contains? @rec-stack neighbor)
+                  (let [cycle-start-idx (.indexOf path neighbor)
+                        cycle (if (>= cycle-start-idx 0)
+                                (-> (subvec path cycle-start-idx) (conj neighbor))
+                                [neighbor])]
+                    (swap! cycles conj cycle))
+
+                  ;; Not visited yet: continue DFS
+                  (not (contains? @visited neighbor))
+                  (visit neighbor (conj path neighbor))))
+
+              (swap! rec-stack disj node))]
+
+      ;; Run DFS from each unvisited node
+      (doseq [node (keys graph)]
+        (when (not (contains? @visited node))
+          (visit node [node]))))
+
+    (when (seq @cycles) @cycles)))
+
+(defn detect-cycles
+  "Detect circular dependencies in namespace proxy configs.
+
+   Returns nil if no cycles found, or a vector of cycle paths if found.
+   Each cycle path is a vector of namespace strings.
+   E.g., [[\"seon.health.lifting\" \"seon.health.nutrition\" \"seon.health.lifting\"]]
+
+   Namespace configs should have optional ::proxy-targets key with a set of
+   namespace strings that this namespace proxies to. Missing or empty set means
+   no proxy calls."
+  [namespace-configs]
+  (let [;; Build directed graph: namespace -> set of namespaces it proxies to
+        graph
+        (into {}
+              (map (fn [[ns-str config]]
+                     [ns-str (or (::proxy-targets config) #{})])
+                   namespace-configs))]
+    (dfs-cycles graph)))
+
+;;; ---------------------------------------------------------------------------
 ;;; build-topology! — Wire namespace steps + reply router
 ;;; ---------------------------------------------------------------------------
 
@@ -213,9 +272,13 @@
                       ::harness/queue-cap - Queue cap override
                       ::harness/in-ports  - External in-port channels
                       ::harness/out-ports - External out-port channels
+                      ::proxy-targets     - Optional set of namespace strings this
+                                           namespace proxies to (for cycle detection)
                     For cross-namespace relay (reverse channel):
                       ::reverse-request-ch - Channel agent JVM sends cross-ns requests on
                       ::reverse-reply-ch   - Channel to send cross-ns replies back to agent JVM
+
+   Throws ex-info with :cycle-detected if circular dependencies found.
 
    Returns map with:
      ::flow        - The flow object (pass to request!, stop-topology!)
@@ -229,13 +292,23 @@
                        ::harness/in-ports {:seon.flow.in/jvm-reply reply-ch}
                        ::harness/out-ports {:seon.flow.out/jvm-request req-ch}}}})"
   [{::keys [namespaces]}]
+  ;; Detect cycles at build time
+  (when-let [cycles (detect-cycles namespaces)]
+    (let [cycle-strs (map (fn [cycle]
+                            (str/join " → " cycle))
+                          cycles)]
+      (throw (ex-info "Circular dependency detected in namespace proxies"
+                      {:cycle-detected true
+                       :cycles cycles
+                       :cycle-descriptions cycle-strs}))))
+
   (let [;; Build process definitions
         ns-procs
         (into {}
               (map (fn [[ns-str config]]
                      (let [pid (keyword "ns" ns-str)
-                           ;; Strip relay channels from config before passing to harness
-                           harness-config (dissoc config ::reverse-request-ch ::reverse-reply-ch)]
+                           ;; Strip relay channels and proxy-targets from config before passing to harness
+                           harness-config (dissoc config ::reverse-request-ch ::reverse-reply-ch ::proxy-targets)]
                        [pid {:proc (flow/process #'harness/namespace-step)
                              :args (merge {::harness/namespace ns-str}
                                           harness-config)}])))

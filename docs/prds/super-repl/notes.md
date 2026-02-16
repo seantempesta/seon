@@ -12,6 +12,28 @@
 - `acquire!!` uses `.take` which blocks FOREVER. If the pool is shut down while a thread is blocked on `.take`, that thread will be stuck. Use `acquire!` with `::timeout-ms` in production.
 - Both `acquire!` and `acquire!!` call `activate-jvm!` which does `setup-namespace!` (nREPL eval). If the JVM died between being enqueued and being acquired, `activate-jvm!` will throw. Callers should handle this.
 
+## Phase 4: Pool Integration (start-namespace-jvm!) Gotchas
+
+### Agent JVM classpath includes all src/
+- The `:agent` alias uses `:replace-paths ["src"]` so all `seon.flow.harness.*` namespaces are available in agent JVMs. No need to send source code via nREPL -- just `(require ...)`.
+
+### Bridge loop is a simple future, not a full flow
+- For MVP, the agent JVM runs a `(future (loop [] ...))` that reads requests from a TCP channel, calls `bridge/execute-local`, and writes replies. This is simpler than running a full core.async.flow graph in the agent JVM. The bridge step-fn's `execute-local` does the real work.
+
+### TCP server port 0 for random assignment
+- `start-namespace-jvm!` uses `(channel/start-server! {::channel/port 0})` to get a random port, then tells the agent JVM to connect to that port via nREPL eval. This avoids port conflicts.
+
+### nREPL eval for code loading is two-phase
+- Phase 1: `require` the channel and bridge namespaces (these are on classpath).
+- Phase 2: Define the TCP connection and start the bridge loop. The bridge loop var is `bridge-loop` in the agent JVM's current namespace.
+- If either phase fails, `start-namespace-jvm!` cleans up the TCP server and releases the JVM back to the pool.
+
+### Integration tests create their own pool
+- `pool_integration_test.clj` creates a 1-JVM pool on port 7950 (to avoid conflict with the main pool on 7900). Tests self-skip if pool creation fails. The pool fixture uses `:once` so JVM startup cost is paid only once.
+
+### Disposing vs releasing after integration tests
+- `stop-namespace-jvm!` calls `pool/release!` which resets the namespace and returns the JVM to the idle queue. If the bridge loop left state in the JVM, release may fail and fall back to `dispose!` (kills the process).
+
 ### Stale process cleanup
 - `cleanup-stale-agents!` uses `lsof -ti :PORT` to find PIDs. On macOS, `lsof` is always available. On Linux, the `lsof` package may need to be installed.
 - The safety range is hardcoded to 7900-7999. If agent ports are configured outside this range, cleanup will skip them and log a warning.
