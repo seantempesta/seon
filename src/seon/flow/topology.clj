@@ -7,7 +7,8 @@
    `request!` is the blocking entry point: it creates a promise, injects
    a request into the flow, and derefs the promise with a timeout.
 
-   `build-topology!` wires namespace steps + reply router into a flow."
+   `build-topology!` wires namespace steps + reply router into a flow.
+   It also starts relay go-loops for cross-namespace calls from agent JVMs."
   (:require [clojure.core.async :as async]
             [clojure.core.async.flow :as flow]
             [seon.flow.harness :as harness]
@@ -152,6 +153,54 @@
         (throw e)))))
 
 ;;; ---------------------------------------------------------------------------
+;;; Cross-Namespace Relay
+;;; ---------------------------------------------------------------------------
+
+(defn- start-cross-ns-relay!
+  "Start a relay that forwards cross-ns requests from an agent JVM to the topology.
+
+   Reads requests from `reverse-request-ch` (sent by agent proxy functions),
+   calls `request!` to route them through the flow, and sends the reply
+   back on `reverse-reply-ch` (delivered to the agent's bridge).
+
+   Returns the go channel (for cleanup)."
+  [flow reverse-request-ch reverse-reply-ch]
+  (async/go-loop []
+    (when-let [req (async/<! reverse-request-ch)]
+      (let [target-ns (::msg/to-ns req)
+            fn-name   (::msg/fn req)
+            args      (::msg/args req)
+            request-id (::msg/id req)]
+        ;; Run the blocking request! call on a thread
+        (async/thread
+          (let [reply (try
+                        (let [result (request! {::flow      flow
+                                                ::target-ns target-ns
+                                                ::fn        fn-name
+                                                ::args      args
+                                                ::timeout-ms 10000
+                                                ::from-ns   (::msg/from-ns req)})]
+                          {::msg/id        request-id
+                           ::msg/version   1
+                           ::msg/type      :reply
+                           ::msg/status    :ok
+                           ::msg/value     result
+                           ::msg/from-ns   (or target-ns "")
+                           ::msg/duration-ms 0})
+                        (catch Exception e
+                          (let [data (ex-data e)]
+                            {::msg/id            request-id
+                             ::msg/version       1
+                             ::msg/type          :reply
+                             ::msg/status        (or (::msg/status data) :error)
+                             ::msg/error-type    (or (::msg/error-type data) :execution)
+                             ::msg/error-message (.getMessage e)
+                             ::msg/from-ns       (or target-ns "")
+                             ::msg/duration-ms   0})))]
+            (async/>!! reverse-reply-ch reply))))
+      (recur))))
+
+;;; ---------------------------------------------------------------------------
 ;;; build-topology! — Wire namespace steps + reply router
 ;;; ---------------------------------------------------------------------------
 
@@ -164,10 +213,14 @@
                       ::harness/queue-cap - Queue cap override
                       ::harness/in-ports  - External in-port channels
                       ::harness/out-ports - External out-port channels
+                    For cross-namespace relay (reverse channel):
+                      ::reverse-request-ch - Channel agent JVM sends cross-ns requests on
+                      ::reverse-reply-ch   - Channel to send cross-ns replies back to agent JVM
 
    Returns map with:
      ::flow        - The flow object (pass to request!, stop-topology!)
      ::chans       - {:report-chan ... :error-chan ...}
+     ::relays      - Go channels for cross-ns relays (for cleanup)
 
    Example:
      (build-topology!
@@ -180,10 +233,12 @@
         ns-procs
         (into {}
               (map (fn [[ns-str config]]
-                     (let [pid (keyword "ns" ns-str)]
+                     (let [pid (keyword "ns" ns-str)
+                           ;; Strip relay channels from config before passing to harness
+                           harness-config (dissoc config ::reverse-request-ch ::reverse-reply-ch)]
                        [pid {:proc (flow/process #'harness/namespace-step)
                              :args (merge {::harness/namespace ns-str}
-                                          config)}])))
+                                          harness-config)}])))
               namespaces)
 
         ;; Reply router process
@@ -204,8 +259,19 @@
         fl (flow/create-flow config)
         chans (flow/start fl)]
     (flow/resume fl)
-    {::flow fl
-     ::chans chans}))
+
+    ;; Start cross-ns relays for namespaces that have reverse channels
+    (let [relays
+          (into []
+                (keep (fn [[_ns-str config]]
+                        (let [req-ch (::reverse-request-ch config)
+                              rep-ch (::reverse-reply-ch config)]
+                          (when (and req-ch rep-ch)
+                            (start-cross-ns-relay! fl req-ch rep-ch)))))
+                namespaces)]
+      {::flow fl
+       ::chans chans
+       ::relays relays})))
 
 (defn stop-topology!
   "Stop a running topology. Returns nil."
