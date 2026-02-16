@@ -14,6 +14,8 @@
             [clojure.string :as str]
             [seon.flow.harness :as harness]
             [seon.flow.msg :as msg]
+            [seon.flow.registry :as registry]
+            [seon.flow.status :as status]
             [seon.schema :as schema])
   (:import [java.time Instant]))
 
@@ -26,6 +28,84 @@
 
 (schema/register! ::target-ns
   [:string {:min 1 :description "Target namespace for the request"}])
+
+;;; ---------------------------------------------------------------------------
+;;; Sink Step Functions
+;;; ---------------------------------------------------------------------------
+
+(defn event-sink-step
+  "Consumes observability events from namespace steps.
+
+   Maintains a vector of recent events for observability purposes.
+   Events are received on :seon.flow.out/event and stored in memory.
+
+   No outputs - this is a terminal sink."
+  ;; describe
+  ([]
+   {:ins {:seon.flow.out/event "Observability events from namespace steps"}
+    :outs {}
+    :workload :io})
+
+  ;; init
+  ([_args]
+   {::recent-events []
+    ::max-events 100})
+
+  ;; transition
+  ([state transition]
+   (case transition
+     :clojure.core.async.flow/stop state
+     :clojure.core.async.flow/pause state
+     :clojure.core.async.flow/resume state
+     state))
+
+  ;; transform
+  ([state input-id event]
+   (case input-id
+     :seon.flow.out/event
+     (let [events (::recent-events state)
+           events' (if (< (count events) (::max-events state))
+                     (conj events event)
+                     (conj (subvec events 1) event))]
+       [(assoc state ::recent-events events') nil])
+     [state nil])))
+
+(defn error-sink-step
+  "Consumes error replies from namespace steps.
+
+   Maintains a vector of recent errors for observability and debugging.
+   Errors are received on :seon.flow.out/error and stored in memory.
+
+   No outputs - this is a terminal sink."
+  ;; describe
+  ([]
+   {:ins {:seon.flow.out/error "Error replies from namespace steps"}
+    :outs {}
+    :workload :io})
+
+  ;; init
+  ([_args]
+   {::recent-errors []
+    ::max-errors 100})
+
+  ;; transition
+  ([state transition]
+   (case transition
+     :clojure.core.async.flow/stop state
+     :clojure.core.async.flow/pause state
+     :clojure.core.async.flow/resume state
+     state))
+
+  ;; transform
+  ([state input-id error]
+   (case input-id
+     :seon.flow.out/error
+     (let [errors (::recent-errors state)
+           errors' (if (< (count errors) (::max-errors state))
+                     (conj errors error)
+                     (conj (subvec errors 1) error))]
+       [(assoc state ::recent-errors errors') nil])
+     [state nil])))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Reply Router Step Function
@@ -319,15 +399,37 @@
         {:seon.flow/reply-router
          {:proc (flow/process #'reply-router-step)}}
 
-        ;; Connections: each namespace's reply output -> reply router
-        conns
-        (mapv (fn [[ns-str _]]
-                (let [pid (keyword "ns" ns-str)]
-                  [[pid :seon.flow.out/reply]
-                   [:seon.flow/reply-router :seon.flow.in/reply]]))
-              namespaces)
+        ;; Sink processes for event and error outputs
+        sink-procs
+        {:seon.flow/event-sink
+         {:proc (flow/process #'event-sink-step)}
+         :seon.flow/error-sink
+         {:proc (flow/process #'error-sink-step)}}
 
-        config {:procs (merge ns-procs router-proc)
+        ;; Build connections: reply -> reply-router, events -> event-sink, errors -> error-sink
+        conns
+        (into []
+              (concat
+                ;; Each namespace's reply output -> reply router
+                (mapv (fn [[ns-str _]]
+                        (let [pid (keyword "ns" ns-str)]
+                          [[pid :seon.flow.out/reply]
+                           [:seon.flow/reply-router :seon.flow.in/reply]]))
+                      namespaces)
+                ;; Each namespace's event output -> event sink
+                (mapv (fn [[ns-str _]]
+                        (let [pid (keyword "ns" ns-str)]
+                          [[pid :seon.flow.out/event]
+                           [:seon.flow/event-sink :seon.flow.out/event]]))
+                      namespaces)
+                ;; Each namespace's error output -> error sink
+                (mapv (fn [[ns-str _]]
+                        (let [pid (keyword "ns" ns-str)]
+                          [[pid :seon.flow.out/error]
+                           [:seon.flow/error-sink :seon.flow.out/error]]))
+                      namespaces)))
+
+        config {:procs (merge ns-procs router-proc sink-procs)
                 :conns conns}
         fl (flow/create-flow config)
         chans (flow/start fl)]
@@ -341,14 +443,28 @@
                               rep-ch (::reverse-reply-ch config)]
                           (when (and req-ch rep-ch)
                             (start-cross-ns-relay! fl req-ch rep-ch)))))
-                namespaces)]
-      {::flow fl
-       ::chans chans
-       ::relays relays})))
+                namespaces)
+          label (or (::label (meta namespaces))
+                    (str "topology-" (count namespaces) "ns"))
+          flow-id (keyword "seon.flow" label)
+          result {::flow fl
+                  ::chans chans
+                  ::relays relays
+                  ::flow-id flow-id}]
+      ;; Register in flow registry
+      (registry/register! {::registry/id flow-id
+                           ::registry/flow fl
+                           ::registry/chans chans
+                           ::registry/label label})
+      ;; Start error drain for status collection
+      (when-let [error-chan (:error-chan chans)]
+        (status/start-error-drain! {::status/id flow-id
+                                    ::status/error-chan error-chan}))
+      result)))
 
 (defn stop-topology!
   "Stop a running topology. Returns nil."
-  [{::keys [flow]}]
+  [{::keys [flow flow-id]}]
   (when flow
     (flow/stop flow)
     ;; Clean up any lingering promises
@@ -357,4 +473,8 @@
                   ::msg/error-type :timeout
                   ::msg/error-message "Topology stopped"}))
     (reset! pending-promises {}))
+  ;; Unregister from flow registry and stop error drain
+  (when flow-id
+    (status/stop-error-drain! {::status/id flow-id})
+    (registry/unregister! {::registry/id flow-id}))
   nil)
