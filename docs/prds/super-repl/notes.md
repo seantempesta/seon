@@ -50,3 +50,26 @@
 ### Entity deduplication
 - Namespace dependency entities (`ns-dependency`) are deduplicated with `(distinct)` during extraction because clj-kondo can report multiple usages of the same required namespace.
 - Function entities are NOT deduplicated during extraction because each function definition is unique by namespace + name.
+
+## Phase 4: Flow Topology (Step 5) Gotchas
+
+### pending-promises is a global atom
+- The reply-router step-fn delivers promises registered in a global `topology/pending-promises` atom. This is necessary because `request!` must register the promise BEFORE calling `flow/inject`, and the reply-router process runs in a separate thread. The atom bridges the two.
+- `defonce` is used so REPL reloads don't lose in-flight promises.
+
+### flow/inject works for request delivery
+- `flow/inject` successfully puts messages onto a process's input channel asynchronously. The coord is `[pid input-id]` where pid is the process keyword in the flow def and input-id matches the `:ins` key.
+- `flow/inject` returns a future. We don't need to deref it for request delivery since the promise mechanism handles completion.
+
+### Process naming convention
+- Namespace processes use `(keyword "ns" ns-string)` as their pid, e.g. `:ns/seon.test.beta`. This keeps them distinct from infrastructure processes like `:seon.flow/reply-router`.
+
+### Flow lifecycle: create -> start -> resume
+- `create-flow` creates the flow but does NOT start it.
+- `start` starts processes but they begin PAUSED.
+- `resume` actually starts message processing.
+- Tests need a small `Thread/sleep` after `resume` for processes to be ready.
+
+### Mock JVM channels for testing
+- Tests simulate agent JVMs with go-loops that read from the out-port channel and write replies to the in-port channel. This avoids needing real JVMs or TCP connections.
+- The harness's `::harness/in-ports` and `::harness/out-ports` keys inject channels that become `::flow/in-ports` and `::flow/out-ports` in the process state.

@@ -30,23 +30,32 @@ Orchestrator JVM (3.4GB)
 ├── Datalevin Server (port 8898)
 ├── nREPL (port 7888)
 ├── HTTP/SSE Server (port 8080)
-├── core.async.flow topology
-│   ├── NS Owner: trading.*     (supervisor flow node)
-│   ├── NS Owner: web.agents    (supervisor flow node)
-│   └── Agent Proxy: .a13b      (flow node → nREPL to agent JVM)
+├── core.async.flow topology (Phase 4)
+│   ├── :ns/seon.test.alpha     (namespace-step process)
+│   │   ├── :seon.flow.in/request   ← cross-ns calls
+│   │   ├── :seon.flow.out/reply    → responses
+│   │   ├── :seon.flow.out/error    → error monitor
+│   │   ├── :seon.flow.out/event    → observability events
+│   │   ├── ::flow/in-ports  ← TCP ← agent JVM replies
+│   │   └── ::flow/out-ports → TCP → agent JVM requests
+│   ├── :seon.flow/reply-router  (delivers promises for blocking callers)
+│   └── :seon.flow/error-monitor (tracks rates, emits events)
 ├── Knowledge Graph (Datalevin)
-├── Super REPL (form router)
+├── Super REPL (form router — Phase 3, not yet built)
 └── JVM Pool Manager
     ├── Warm JVM #1 (186MB, idle, port 7900)
     ├── Warm JVM #2 (186MB, idle, port 7901)
     └── Warm JVM #3 (186MB, idle, port 7902)
 
 Agent JVM (186MB each)
-├── Clojure 1.12 + nREPL
+├── Clojure 1.12 + nREPL (code loading only)
 ├── Malli (own global registry)
-├── core.async
+├── core.async mini-flow (Phase 4)
+│   └── :seon.flow/bridge (bridge-step)
+│       ├── ::flow/in-ports  ← TCP ← orchestrator requests
+│       └── ::flow/out-ports → TCP → orchestrator replies
 ├── Datalevin CLIENT (→ orchestrator:8898)
-├── *ctx* atom (Datalevin-backed)
+├── *ctx* atom (Datalevin-backed, persisted on stop)
 └── The real namespace (seon.trading.signals)
     ├── All defns live here
     ├── ::keywords resolve correctly
@@ -114,7 +123,9 @@ Production-ready agent JVM pool with:
 
 ---
 
-## Phase 2: Knowledge Graph Foundation
+## Phase 2: Knowledge Graph Foundation — COMPLETED
+
+**Commit**: `c482e83 feat: knowledge graph foundation with Datalevin storage`
 
 **Goal**: Make every namespace, function, and dependency in the project queryable via Datalevin.
 
@@ -225,9 +236,11 @@ feat: knowledge graph foundation with Datalevin storage
 
 ---
 
-## Phase 3: Super REPL Core + Agent Environment
+## Phase 3: Super REPL Core + Agent Environment — NOT STARTED
 
 **Goal**: Agents eval forms through the Super REPL. Forms are stored in Datalevin with versioning. Analysis runs automatically. Agent JVMs get namespace-scoped databases and a shared environment namespace.
+
+**Current state**: Code loading into agent JVMs works via `pool/nrepl-eval!` (Phase 1) and cross-namespace function calls work via the flow harness `topology/request!` (Phase 4). The Super REPL layers on top of this for the development workflow: form storage, versioning, dynamic context suggestions, and graduation to disk.
 
 ### Files to Create/Modify
 
@@ -349,78 +362,58 @@ feat: Super REPL core with form routing, agent environment, and graduation
 
 ---
 
-## Phase 4: Agent-as-Flow-Node
+## Phase 4: Namespace Harness — Flow-Routed Agent Isolation — COMPLETED
 
-**Goal**: Wrap agent JVMs as core.async.flow processes with hierarchical supervision, error handling, and delegation.
+**Commit**: `2d0d86c feat: enhance Super REPL with agent environment and dynamic context features`
 
-### Files to Create
+**Goal**: Namespace-level process isolation via core.async.flow, with TCP socket channels as flow in-ports/out-ports bridging orchestrator and agent JVMs. Blocking request/reply, backpressure, observability events.
+
+Detailed design: [`flow-buildout.md`](flow-buildout.md)
+
+### What Was Built
+
+Dual-flow model: orchestrator flow topology + agent JVM mini-flow, connected by TCP socket channels wired as flow in-ports/out-ports.
+
+- **Message envelope schemas** (`seon.flow.msg`) — Malli-registered request, reply, and event schemas with version key from day one. Error taxonomy: `:execution`, `:timeout`, `:overload`, `:serialization`, `:not-found`.
+- **TCP channel adapter** (`seon.flow.harness.channel`) — Bidirectional TCP-to-core.async adapter with length-prefixed EDN framing. `start-server!` / `connect!` API.
+- **Bridge step function** (`seon.flow.harness.bridge`) — Agent JVM mini-flow process. Receives requests via TCP, resolves and calls local functions, returns reply envelopes. Handles `*ctx*` persistence on stop.
+- **Namespace step function** (`seon.flow.harness`) — Orchestrator-side flow process. Acquires JVM from pool, starts TCP bridge, loads bridge code via nREPL. Queue cap (32 dev default) with typed `:overload` error path. Emits observability events: `:start`, `:ok`, `:error`, `:overload`, `:timeout`.
+- **Reply router and topology** (`seon.flow.topology`) — `build-topology!` wires namespace processes + reply router. `request!` provides blocking cross-namespace function calls through the flow graph.
+
+### Key Files
 
 | File | Purpose |
 |------|---------|
-| `src/seon/flow/proxy.clj` | Flow process wrapping a remote agent JVM |
-| `src/seon/flow/supervisor.clj` | Namespace owner flow process — monitors proxies |
-| `src/seon/flow/topology.clj` | Flow graph management and wiring |
-| `test/seon/flow/proxy_test.clj` | Tests |
-| `test/seon/flow/supervisor_test.clj` | Tests |
-| `test/seon/flow/topology_test.clj` | Tests |
-
-### Existing Code to Reuse
-
-**`seon.web.sse.flow` (`src/seon/web/sse/flow.clj`)** — Proven flow step function patterns. Study how flow processes are defined with `describe`, `init`, and `transform`.
-
-**`seon.flow.pool` (`src/seon/flow/pool.clj`)** — Pool acquisition/release for proxy nodes.
-
-**`seon.ai.agent` (`src/seon/ai/agent.clj`)** — Agent registry pattern. Proxy nodes should register similarly.
-
-**`seon.ai.claude.sdk` (`src/seon/ai/claude/sdk.clj`)** — Process lifecycle management patterns.
-
-**`seon.repl.super` (from Phase 3)** — Form routing through Super REPL.
+| `src/seon/flow/msg.clj` | Message envelope schemas (source of truth) |
+| `src/seon/flow/harness.clj` | Namespace-step, ctx persistence, lifecycle |
+| `src/seon/flow/harness/bridge.clj` | Agent JVM bridge step-fn |
+| `src/seon/flow/harness/channel.clj` | TCP socket to core.async channel adapter |
+| `src/seon/flow/topology.clj` | Flow graph wiring + reply router + `request!` |
+| `test/seon/flow/msg_test.clj` | Schema validation + EDN round-trip |
+| `test/seon/flow/harness_test.clj` | Integration: full cross-ns lifecycle |
+| `test/seon/flow/harness/bridge_test.clj` | Bridge step-fn tests |
+| `test/seon/flow/harness/channel_test.clj` | TCP adapter tests |
+| `test/seon/flow/topology_test.clj` | Topology + request! tests |
 
 ### Build Checklist
 
-- [ ] **`seon.flow.proxy`** — Flow process wrapping a remote agent JVM:
-  - [ ] `describe` returns `{:ins {:commands :messages} :outs {:results :errors :health}}`
-  - [ ] `init` — Acquire JVM from pool, assign namespace, setup ctx
-  - [ ] `transform` — `[state [port value]] → [new-state {port [values]}]`:
-    - `:commands` port → eval form via Super REPL on agent JVM
-    - Capture errors → emit on `:errors` port
-    - Periodic health → emit on `:health` port
-  - [ ] Agent JVM knows nothing about flow — it just responds to nREPL evals
+- [x] Message envelope schemas with Malli registration and version key
+- [x] TCP channel adapter (length-prefixed EDN, server + client)
+- [x] Bridge step-fn (agent JVM side: receive request, call fn, return reply)
+- [x] Namespace step-fn (orchestrator side: JVM acquire, TCP bridge, queue cap, observability events)
+- [x] Reply router + topology wiring
+- [x] `topology/request!` blocking cross-namespace calls
+- [x] `*ctx*` persistence (serializable keys saved, non-serializable warned)
+- [x] Overload path (queue cap exceeded returns typed `:overload` error)
+- [x] Observability events emitted on start/ok/error/overload/timeout
+- [x] 44 tests, 192 assertions, 0 failures
 
-- [ ] **`seon.flow.supervisor`** — Namespace owner as flow process:
-  - [ ] Monitors `:errors` and `:health` channels from proxy nodes
-  - [ ] Tracks metrics: error rate, latency, throughput
-  - [ ] Triggers remediation: launch new agent when errors exceed threshold
-  - [ ] Scales: add proxies when demand grows, release when idle
-  - [ ] **Hierarchical delegation**: supervisors can delegate sub-tasks to other supervisors. A `trading.*` supervisor can spawn a `trading.signals` sub-supervisor. Each supervisor owns its channels and error connections. The orchestrator talks to top-level supervisors; it does NOT manage every agent directly.
-  - [ ] Supervisor-to-supervisor wiring: a supervisor can send `:commands` to a child supervisor's `:commands` port, and receive results/errors back. This creates a tree of responsibility, not a flat fan-out.
+### Notes
 
-- [ ] **`seon.flow.topology`** — Flow graph management:
-  - [ ] Register namespace owners at any level of the hierarchy
-  - [ ] Wire proxy nodes to their owning supervisor
-  - [ ] Wire supervisors to parent supervisors (tree structure)
-  - [ ] Wire across namespace boundaries using dependency edges from knowledge graph
-  - [ ] Expose topology as a tree for Observatory visualization (not just flat list)
-
-### Test Checklist
-
-- [ ] Launch 2 agent proxy nodes → verify forms flow through correctly
-- [ ] Inject error on one agent → verify supervisor receives it and responds
-- [ ] Supervisor spawns remediation agent → verify it acquires from pool
-- [ ] Create 2-level hierarchy: parent supervisor → child supervisor → proxy. Verify commands flow down and errors flow up.
-- [ ] View topology data as tree (structured map, not UI yet)
-- [ ] All tests pass: `clojure -M:test -m kaocha.runner`
-
-### Commit Message Template
-
-```
-feat: agent-as-flow-node with proxy, supervisor, and topology
-
-- seon.flow.proxy: flow process wrapping remote agent JVMs
-- seon.flow.supervisor: namespace owner with error monitoring
-- seon.flow.topology: flow graph management and wiring
-- Tests for proxy, supervisor, and topology
-```
+- `::flow/in-ports` and `::flow/out-ports` are merged into process inputs/outputs after `init` returns (flow/impl.clj:261-263). They are not visible to other flow processes — they are the boundary between flow and external channels.
+- nREPL is used only for code loading into agent JVMs. All runtime data flows through TCP socket channels.
+- Queue cap default (32) lives in `system.edn` under `:seon/flow-defaults`. Per-namespace overrides go in namespace code, not global config.
+- Flow state (harness bookkeeping) is distinct from `*ctx*` (agent-facing atom). Agents interact with `*ctx*`; they never see flow internals.
 
 ---
 
@@ -430,11 +423,13 @@ feat: agent-as-flow-node with proxy, supervisor, and topology
 
 **Key insight**: The goal is **dynamic context, not a rolling list of messages**. When an agent evals a form, the response should include relevant discoveries from the knowledge graph. When an agent starts working in a namespace, they should see what's already available across the system.
 
+**Infrastructure ready**: The flow harness (Phase 4) already emits observability events (`:start`, `:ok`, `:error`, `:overload`, `:timeout`) on `:seon.flow.out/event`. The context engine can subscribe to these events to track namespace health and agent activity in real time.
+
 ### Files to Create/Modify
 
 | File | Action | Purpose |
 |------|--------|---------|
-| `src/seon/repl/context.clj` | Create | Context engine: compute relevant context from graph + eval history |
+| `src/seon/repl/context.clj` | Create | Context engine: compute relevant context from graph + eval history + flow events |
 | `bin/mcp-server` | Modify | Add `query_graph`, `namespace_health`, `agent_status` tools |
 | `.claude/AGENT.md` | Modify | Tell agents about dynamic context and MCP tools |
 | `test/seon/repl/context_test.clj` | Create | Tests |
@@ -444,6 +439,8 @@ feat: agent-as-flow-node with proxy, supervisor, and topology
 - `seon.graph.query` (Phase 2) — Datalog query API
 - `seon.repl.super` (Phase 3) — `suggest-context` hook point after each eval
 - `seon.agent.env` (Phase 3) — Agent-side search and discovery
+- `seon.flow.msg` (Phase 4) — `::msg/event` schema for observability events
+- `seon.flow.topology` (Phase 4) — Flow topology provides event streams per namespace
 - `bin/mcp-server` tool registration pattern — see `tools` vector and `execute-tool-sync` dispatch
 
 ### Build Checklist
@@ -451,9 +448,9 @@ feat: agent-as-flow-node with proxy, supervisor, and topology
 - [ ] **`seon.repl.context`** — Context engine:
   - [ ] `compute-context` — Given a form's analysis (what keys it uses, what namespaces it touches), query the graph for: related functions, Malli schemas with overlapping keys, cross-namespace data producers/consumers. Return a compact summary.
   - [ ] `session-context` — When an agent starts a session, compute initial context: what exists in their namespace, what data structures are available system-wide, what other agents are working on nearby namespaces.
-  - [ ] `typeahead-suggest` — Given a partial function name or keyword, return matches from the knowledge graph. This powers real-time suggestions as agents type.
+  - [ ] `typeahead-suggest` — Given a partial function name or keyword, return matches from the knowledge graph.
 - [ ] `query_graph` MCP tool — accepts Datalog query, runs against knowledge graph
-- [ ] `namespace_health` MCP tool — error rates, test status, recent failures for a namespace
+- [ ] `namespace_health` MCP tool — error rates from flow events, test status, recent failures for a namespace
 - [ ] `agent_status` MCP tool — running agents, tasks, JVM ports
 - [ ] Update AGENT.md with documentation on both proactive context and explicit query tools
 
@@ -462,7 +459,7 @@ feat: agent-as-flow-node with proxy, supervisor, and topology
 - [ ] Agent defines function using `:health/workout` → dynamic context returns related functions from other namespaces
 - [ ] Agent starts session in `seon.trading` → session context shows existing trading functions and available schemas
 - [ ] Agent calls `query_graph` → gets accurate dependency results
-- [ ] `namespace_health` returns meaningful metrics
+- [ ] `namespace_health` returns meaningful metrics (sourced from flow observability events)
 - [ ] All tests pass: `clojure -M:test -m kaocha.runner`
 
 ### Commit Message Template
@@ -470,7 +467,7 @@ feat: agent-as-flow-node with proxy, supervisor, and topology
 ```
 feat: dynamic context engine + MCP cockpit tools
 
-- seon.repl.context: proactive context computation from knowledge graph
+- seon.repl.context: proactive context computation from knowledge graph + flow events
 - query_graph, namespace_health, agent_status MCP tools
 - Updated AGENT.md with context and tool documentation
 ```
@@ -480,6 +477,8 @@ feat: dynamic context engine + MCP cockpit tools
 ## Phase 6: Inter-Agent Messaging
 
 **Goal**: Typed, schema-validated messages between agents via flow channels and Datalevin.
+
+**Infrastructure ready**: Cross-namespace function calls already work via `topology/request!` (Phase 4). Messaging builds on top of this — `request!` handles synchronous RPC; messaging adds asynchronous, Datalevin-persisted communication (feature requests, bug reports, status updates) that agents can check at their own pace.
 
 ### Files to Create
 
@@ -493,11 +492,11 @@ feat: dynamic context engine + MCP cockpit tools
 - [ ] Message schemas: `:seon.msg/feature-request`, `:seon.msg/bug-report`, `:seon.msg/status-update`
 - [ ] `seon.flow.mailbox` — Per-namespace message queue (Datalevin-backed)
 - [ ] MCP tools: `check_mailbox`, `send_message`
-- [ ] Supervisor routes messages between namespace owners
+- [ ] Route async messages through flow topology (complement to synchronous `request!`)
 
 ### Test Checklist
 
-- [ ] Agent A sends feature request to B's namespace → supervisor evaluates → result flows back
+- [ ] Agent A sends feature request to B's namespace → persisted in Datalevin → B retrieves it
 - [ ] All tests pass: `clojure -M:test -m kaocha.runner`
 
 ### Commit Message Template
