@@ -67,6 +67,26 @@ Agent JVM (186MB each)
 
 **Graduation**: When an agent's work is ready to merge, the Super REPL generates the namespace file from Datalevin-stored forms, writes to disk, git commits, reloads the orchestrator.
 
+### Data Architecture
+
+**Three tiers of Datalevin storage:**
+
+1. **Master DB** (`seon`) — Orchestrator-owned. Stores the knowledge graph (namespaces, functions, dependencies, call graph), session registry, and system-wide metadata. All graph queries in `seon.graph.query` run against this DB.
+
+2. **Namespace DBs** (`seon.trading`, `seon.health`, etc.) — One per domain namespace, created lazily via `conn/get-namespace-conn!`. Agents working in a namespace get a connection to its DB. This is where domain-specific data lives long-term: workout records, trading positions, health metrics. Data persists across agent sessions — a new agent picking up `seon.health` can see everything previous agents stored there.
+
+3. **Agent `*ctx*` atom** (backed by namespace DB) — Each agent JVM has a `*ctx*` atom that is loaded from and persisted to its namespace DB. Sessions can be fresh (empty ctx) or resuming (load previous ctx). The ctx stores agent-specific working state: current task, intermediate results, learned preferences.
+
+**Cross-namespace discovery**: Agents can query the master knowledge graph to find code and data structures across the entire system. Example: an agent building `seon.health.calories` can search for existing functions that produce `:health/workout` data, find them in `seon.health.tracking`, and reuse them directly. The graph stores Malli schemas, function signatures, and dependency edges — agents should always search before building.
+
+**Agent environment**: Every agent JVM loads `seon.agent.env` at startup. This namespace provides:
+- `(env/search "calories")` — Search knowledge graph for matching functions/schemas
+- `(env/ctx-save!)` / `(env/ctx-load!)` — Persist/restore `*ctx*` to namespace DB
+- `(env/ns-conn)` — Get connection to the agent's namespace DB
+- `(env/related-schemas :health/workout)` — Find schemas that share keys with a given schema
+
+This namespace is the agent's "toolkit" — updating it updates all future agents.
+
 ---
 
 ## Phase 1: Agent JVM Pool — COMPLETED
@@ -205,9 +225,9 @@ feat: knowledge graph foundation with Datalevin storage
 
 ---
 
-## Phase 3: Super REPL Core
+## Phase 3: Super REPL Core + Agent Environment
 
-**Goal**: Agents eval forms through the Super REPL. Forms are stored in Datalevin with versioning. Analysis runs automatically.
+**Goal**: Agents eval forms through the Super REPL. Forms are stored in Datalevin with versioning. Analysis runs automatically. Agent JVMs get namespace-scoped databases and a shared environment namespace.
 
 ### Files to Create/Modify
 
@@ -215,9 +235,12 @@ feat: knowledge graph foundation with Datalevin storage
 |------|--------|---------|
 | `src/seon/repl/super.clj` | Create | Form router: receive → route → store → analyze → respond |
 | `src/seon/repl/graduate.clj` | Create | Assemble Datalevin forms → .clj file → git commit |
+| `src/seon/agent/env.clj` | Create | Agent environment: graph queries, ctx persistence, discovery |
+| `src/seon/flow/agent_runner.clj` | Modify | Load `seon.agent.env`, connect to namespace DB (not port-named DB) |
 | `bin/mcp-server` | Modify | Route pool-assigned sessions through Super REPL |
 | `test/seon/repl/super_test.clj` | Create | Tests |
 | `test/seon/repl/graduate_test.clj` | Create | Tests |
+| `test/seon/agent/env_test.clj` | Create | Tests |
 
 ### Existing Code to Reuse
 
@@ -275,6 +298,24 @@ The MCP server (`bin/mcp-server`) is a Babashka script. It routes `eval` calls b
     7. Return `{:file-path "..." :form-count N}`
   - [ ] `preview` — Same as graduate but returns the file content without writing.
 
+- [ ] **`seon.agent.env`** — Agent environment (loaded into every agent JVM):
+  - [ ] `search` — Query the knowledge graph from an agent JVM. Calls orchestrator's `seon.graph.query/search-functions` via nREPL. `(env/search "calories")` → matching functions across all namespaces.
+  - [ ] `ns-conn` — Get this agent's namespace DB connection. Uses the namespace the agent was assigned (not a port-based throwaway DB).
+  - [ ] `ctx-save!` — Persist current `*ctx*` atom to namespace DB. Called on session end or explicit save.
+  - [ ] `ctx-load!` — Load `*ctx*` from namespace DB. Called on session start when resuming.
+  - [ ] `related-schemas` — Find Malli schemas that share keys with a given schema. Queries the knowledge graph.
+  - [ ] `who-produces` — "What functions return data matching this shape?" Graph query wrapper.
+  - [ ] `who-consumes` — "What functions accept data matching this shape?" Graph query wrapper.
+
+- [ ] **`agent_runner.clj` modifications**:
+  - [ ] Change Datalevin URI to use **namespace name** instead of port number. Currently: `agent-7901`. Should be: `seon.trading.signals` (the assigned namespace). This gives each namespace a persistent DB across agent sessions.
+  - [ ] `(require 'seon.agent.env)` at startup so all agents have the toolkit available.
+  - [ ] Wire `*ctx*` persistence: if namespace DB has a saved ctx, load it into `*ctx*` on startup.
+
+- [ ] **`seon.repl.super` dynamic context**:
+  - [ ] After `eval-form!` stores and analyzes a form, compute **relevant context** to return alongside the eval result. If the agent just defined a function that takes `:health/workout`, search the graph for other functions that produce or consume that shape. Return these suggestions in the eval response so the agent sees them without having to ask.
+  - [ ] `suggest-context` — Given a form's analysis, query the graph for related functions, schemas, and namespace dependencies. Return a compact summary suitable for injecting into the agent's context.
+
 - [ ] **`bin/mcp-server` modification**:
   - [ ] In `execute-eval`, add a branch: if session is a pool session (check via orchestrator query), route through `seon.repl.super/eval-form!` instead of raw nREPL eval
   - [ ] The routing check: eval code on orchestrator that checks if this session_id has a pool-assigned JVM. If yes, return port + super-repl flag.
@@ -287,24 +328,30 @@ The MCP server (`bin/mcp-server`) is a Babashka script. It routes `eval` calls b
 - [ ] `classify-form` correctly identifies defn, def, ns, require, expression
 - [ ] `graduate!` a namespace with 3 forms → correct .clj file generated, git diff shows expected content
 - [ ] `preview` returns file content without side effects
+- [ ] `env/search` from agent JVM returns matching functions from knowledge graph
+- [ ] `env/ctx-save!` + `env/ctx-load!` round-trip: save ctx, restart agent, load ctx, verify data
+- [ ] Agent JVM connects to namespace DB (not port-named DB)
+- [ ] `suggest-context` returns relevant functions when agent defines a function using known schema keys
 - [ ] All tests pass: `clojure -M:test -m kaocha.runner`
 
 ### Commit Message Template
 
 ```
-feat: Super REPL core with form routing and graduation
+feat: Super REPL core with form routing, agent environment, and graduation
 
-- seon.repl.super: form classification, routing, Datalevin storage, versioning
+- seon.repl.super: form classification, routing, Datalevin storage, versioning, dynamic context
 - seon.repl.graduate: namespace assembly and graduation to disk
+- seon.agent.env: agent toolkit with graph queries, ctx persistence, cross-ns discovery
+- agent_runner: namespace-scoped Datalevin DB, auto-load seon.agent.env
 - MCP server routing for pool-assigned sessions
-- Tests for form lifecycle and graduation
+- Tests for form lifecycle, graduation, and agent environment
 ```
 
 ---
 
 ## Phase 4: Agent-as-Flow-Node
 
-**Goal**: Wrap agent JVMs as core.async.flow processes with supervision and error handling.
+**Goal**: Wrap agent JVMs as core.async.flow processes with hierarchical supervision, error handling, and delegation.
 
 ### Files to Create
 
@@ -345,19 +392,23 @@ feat: Super REPL core with form routing and graduation
   - [ ] Tracks metrics: error rate, latency, throughput
   - [ ] Triggers remediation: launch new agent when errors exceed threshold
   - [ ] Scales: add proxies when demand grows, release when idle
+  - [ ] **Hierarchical delegation**: supervisors can delegate sub-tasks to other supervisors. A `trading.*` supervisor can spawn a `trading.signals` sub-supervisor. Each supervisor owns its channels and error connections. The orchestrator talks to top-level supervisors; it does NOT manage every agent directly.
+  - [ ] Supervisor-to-supervisor wiring: a supervisor can send `:commands` to a child supervisor's `:commands` port, and receive results/errors back. This creates a tree of responsibility, not a flat fan-out.
 
 - [ ] **`seon.flow.topology`** — Flow graph management:
-  - [ ] Register namespace owners
-  - [ ] Wire proxy nodes to owners
-  - [ ] Wire owners to each other (using dependency edges from knowledge graph)
-  - [ ] Expose topology for Observatory visualization
+  - [ ] Register namespace owners at any level of the hierarchy
+  - [ ] Wire proxy nodes to their owning supervisor
+  - [ ] Wire supervisors to parent supervisors (tree structure)
+  - [ ] Wire across namespace boundaries using dependency edges from knowledge graph
+  - [ ] Expose topology as a tree for Observatory visualization (not just flat list)
 
 ### Test Checklist
 
 - [ ] Launch 2 agent proxy nodes → verify forms flow through correctly
 - [ ] Inject error on one agent → verify supervisor receives it and responds
 - [ ] Supervisor spawns remediation agent → verify it acquires from pool
-- [ ] View topology data (structured map, not UI yet)
+- [ ] Create 2-level hierarchy: parent supervisor → child supervisor → proxy. Verify commands flow down and errors flow up.
+- [ ] View topology data as tree (structured map, not UI yet)
 - [ ] All tests pass: `clojure -M:test -m kaocha.runner`
 
 ### Commit Message Template
@@ -373,33 +424,43 @@ feat: agent-as-flow-node with proxy, supervisor, and topology
 
 ---
 
-## Phase 5: Dynamic Cockpit via MCP
+## Phase 5: Dynamic Context + MCP Cockpit
 
-**Goal**: Agents query the knowledge graph for live, contextual information via MCP tools.
+**Goal**: Agents receive proactive, relevant context as they work — not just tools they have to call. The Super REPL watches what agents are doing and injects useful information (related code, schemas, data structures) into their context window. MCP tools provide explicit query access as a complement.
+
+**Key insight**: The goal is **dynamic context, not a rolling list of messages**. When an agent evals a form, the response should include relevant discoveries from the knowledge graph. When an agent starts working in a namespace, they should see what's already available across the system.
 
 ### Files to Create/Modify
 
 | File | Action | Purpose |
 |------|--------|---------|
-| `bin/mcp-server` | Modify | Add `query_graph`, `namespace_health`, `agent_status`, `suggest_context` tools |
-| `.claude/AGENT.md` | Modify | Tell agents about new MCP tools |
-| `test/seon/graph/query_test.clj` | Modify | Add integration tests for MCP queries |
+| `src/seon/repl/context.clj` | Create | Context engine: compute relevant context from graph + eval history |
+| `bin/mcp-server` | Modify | Add `query_graph`, `namespace_health`, `agent_status` tools |
+| `.claude/AGENT.md` | Modify | Tell agents about dynamic context and MCP tools |
+| `test/seon/repl/context_test.clj` | Create | Tests |
 
 ### Existing Code to Reuse
 
 - `seon.graph.query` (Phase 2) — Datalog query API
+- `seon.repl.super` (Phase 3) — `suggest-context` hook point after each eval
+- `seon.agent.env` (Phase 3) — Agent-side search and discovery
 - `bin/mcp-server` tool registration pattern — see `tools` vector and `execute-tool-sync` dispatch
 
 ### Build Checklist
 
+- [ ] **`seon.repl.context`** — Context engine:
+  - [ ] `compute-context` — Given a form's analysis (what keys it uses, what namespaces it touches), query the graph for: related functions, Malli schemas with overlapping keys, cross-namespace data producers/consumers. Return a compact summary.
+  - [ ] `session-context` — When an agent starts a session, compute initial context: what exists in their namespace, what data structures are available system-wide, what other agents are working on nearby namespaces.
+  - [ ] `typeahead-suggest` — Given a partial function name or keyword, return matches from the knowledge graph. This powers real-time suggestions as agents type.
 - [ ] `query_graph` MCP tool — accepts Datalog query, runs against knowledge graph
 - [ ] `namespace_health` MCP tool — error rates, test status, recent failures for a namespace
 - [ ] `agent_status` MCP tool — running agents, tasks, JVM ports
-- [ ] `suggest_context` MCP tool — task-aware: "you're writing specs → here are related schemas"
-- [ ] Update AGENT.md with tool documentation
+- [ ] Update AGENT.md with documentation on both proactive context and explicit query tools
 
 ### Test Checklist
 
+- [ ] Agent defines function using `:health/workout` → dynamic context returns related functions from other namespaces
+- [ ] Agent starts session in `seon.trading` → session context shows existing trading functions and available schemas
 - [ ] Agent calls `query_graph` → gets accurate dependency results
 - [ ] `namespace_health` returns meaningful metrics
 - [ ] All tests pass: `clojure -M:test -m kaocha.runner`
@@ -407,10 +468,11 @@ feat: agent-as-flow-node with proxy, supervisor, and topology
 ### Commit Message Template
 
 ```
-feat: dynamic cockpit with knowledge graph MCP tools
+feat: dynamic context engine + MCP cockpit tools
 
-- query_graph, namespace_health, agent_status, suggest_context MCP tools
-- Updated AGENT.md with tool documentation
+- seon.repl.context: proactive context computation from knowledge graph
+- query_graph, namespace_health, agent_status MCP tools
+- Updated AGENT.md with context and tool documentation
 ```
 
 ---
