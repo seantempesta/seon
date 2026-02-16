@@ -21,7 +21,9 @@
   (:require [clojure.edn :as edn]
             [clojure.tools.logging :as log]
             [datalevin.core :as d]
+            [seon.flow.harness.channel :as channel]
             [seon.flow.msg :as msg]
+            [seon.flow.pool :as pool]
             [seon.schema :as schema])
   (:import [java.time Instant]))
 
@@ -155,6 +157,99 @@
 
        ;; Unknown input
        [state nil]))))
+
+;;; ---------------------------------------------------------------------------
+;;; Production JVM Init (Pool Integration)
+;;; ---------------------------------------------------------------------------
+
+(defn start-namespace-jvm!
+  "Acquire a pool JVM, start TCP bridge, load bridge code via nREPL.
+
+   Returns a map compatible with namespace-step init (in-ports/out-ports)
+   plus handles for cleanup.
+
+   Request keys:
+     ::pool       - JVM pool (from Integrant system)
+     ::namespace  - Namespace string this harness manages
+     ::timeout-ms - Pool acquire timeout in ms (default 30000)
+
+   Returns:
+     ::in-ports   - {jvm-reply channel} for namespace-step
+     ::out-ports  - {jvm-request channel} for namespace-step
+     ::jvm        - Pool JVM handle (for release)
+     ::tcp-server - TCP server handle (for cleanup)
+     ::pool       - Pool reference (for release)"
+  [{::keys [pool namespace timeout-ms]}]
+  (let [timeout (or timeout-ms 30000)
+        ;; 1. Acquire JVM from pool
+        jvm (pool/acquire! pool {::pool/namespace (symbol namespace)
+                                 ::pool/timeout-ms timeout})
+        _ (when-not jvm
+            (throw (ex-info "Failed to acquire JVM from pool"
+                            {::namespace namespace ::timeout-ms timeout})))
+        nrepl-port (::pool/port jvm)
+        ;; 2. Start TCP server on random port
+        tcp-server (channel/start-server! {::channel/port 0})
+        bridge-port (::channel/port tcp-server)]
+    (try
+      ;; 3. Load bridge code into agent JVM via nREPL
+      ;;    Agent JVM has src/ on classpath so we can require directly
+      (pool/nrepl-eval! nrepl-port
+        (pr-str
+         '(do
+            (require '[clojure.core.async :as async])
+            (require '[seon.flow.harness.channel :as channel])
+            (require '[seon.flow.harness.bridge :as bridge])
+            :ok)))
+
+      ;; 4. Connect agent JVM back to our TCP server and start request loop
+      (pool/nrepl-eval! nrepl-port
+        (str "(do"
+             " (def ^:private bridge-tcp"
+             "   (channel/connect! {::channel/host \"localhost\""
+             "                      ::channel/port " bridge-port "}))"
+             " (def ^:private bridge-ns \"" namespace "\")"
+             " (def ^:private bridge-loop"
+             "   (future"
+             "     (loop []"
+             "       (when-let [request (async/<!! (::channel/in-ch bridge-tcp))]"
+             "         (let [reply (bridge/execute-local request"
+             "                       {::bridge/namespace bridge-ns})]"
+             "           (async/>!! (::channel/out-ch bridge-tcp) reply))"
+             "         (recur)))))"
+             " :bridge-started)"))
+
+      ;; Return channels + handles
+      {::in-ports  {:seon.flow.in/jvm-reply (::channel/in-ch tcp-server)}
+       ::out-ports {:seon.flow.out/jvm-request (::channel/out-ch tcp-server)}
+       ::jvm jvm
+       ::tcp-server tcp-server
+       ::pool pool
+       ::namespace namespace}
+      (catch Exception e
+        ;; Cleanup on failure
+        ((::channel/close! tcp-server))
+        (pool/release! pool jvm)
+        (throw (ex-info "Failed to start namespace JVM"
+                        {::namespace namespace
+                         ::nrepl-port nrepl-port
+                         ::bridge-port bridge-port}
+                        e))))))
+
+(defn stop-namespace-jvm!
+  "Shut down a namespace JVM started by start-namespace-jvm!.
+
+   Closes TCP connection, releases JVM back to pool.
+
+   Request keys:
+     ::jvm        - Pool JVM handle
+     ::tcp-server - TCP server handle
+     ::pool       - Pool reference"
+  [{::keys [jvm tcp-server pool]}]
+  (when tcp-server
+    (try ((::channel/close! tcp-server)) (catch Exception _)))
+  (when (and pool jvm)
+    (try (pool/release! pool jvm) (catch Exception _))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; *ctx* Persistence
