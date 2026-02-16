@@ -4,8 +4,13 @@
    Runs inside the agent JVM as a mini-flow process. Receives function
    call requests from the orchestrator via TCP (as ::flow/in-ports),
    executes the function locally, and returns reply envelopes via TCP
-   (as ::flow/out-ports)."
-  (:require [clojure.core.async.flow :as flow]
+   (as ::flow/out-ports).
+
+   Also provides a reverse channel for cross-namespace calls: agent code
+   calls remote functions via `remote-call!`, which sends a request to the
+   orchestrator and blocks until a reply arrives."
+  (:require [clojure.core.async :as async]
+            [clojure.core.async.flow :as flow]
             [clojure.edn :as edn]
             [seon.flow.msg :as msg]
             [seon.schema :as schema])
@@ -20,6 +25,83 @@
 
 (schema/register! ::bridge-port
   [:int {:min 1 :max 65535 :description "TCP port for orchestrator connection"}])
+
+(schema/register! ::remote-call-timeout-ms
+  [:int {:min 1 :description "Timeout for remote cross-namespace calls (default 10000ms)"}])
+
+;;; ---------------------------------------------------------------------------
+;;; Reverse Channel — Cross-Namespace Remote Calls
+;;; ---------------------------------------------------------------------------
+
+;; Pending promises for remote calls, keyed by request-id.
+;; Used by remote-call! (registers) and bridge-step (delivers on reply).
+(defonce pending-remote-promises (atom {}))
+
+(defn remote-call!
+  "Blocking remote function call through the reverse channel.
+
+   Called by proxy functions in the agent JVM. Sends a request to the
+   orchestrator via the bridge's out-port, waits for a reply on the
+   bridge's in-port (delivered by bridge-step transform).
+
+   Request keys:
+     ::request-ch  - Channel to send requests on (bridge's reverse out-port)
+     ::msg/to-ns   - Target namespace string
+     ::msg/fn      - Fully qualified function name string
+     ::msg/args    - Vector of arguments
+     ::msg/from-ns - This namespace string
+     ::remote-call-timeout-ms - Timeout in ms (default 10000)
+
+   Returns the ::msg/value from the reply on success.
+   Throws ex-info on timeout or remote error."
+  [{::keys [request-ch remote-call-timeout-ms] :as req}]
+  (let [timeout-ms (or remote-call-timeout-ms 10000)
+        to-ns      (::msg/to-ns req)
+        fn-name    (::msg/fn req)
+        args       (::msg/args req)
+        from-ns    (::msg/from-ns req)
+        request-id (random-uuid)
+        p          (promise)
+        request    {::msg/id         request-id
+                    ::msg/version    1
+                    ::msg/type       :request
+                    ::msg/from-ns    (or from-ns "unknown")
+                    ::msg/to-ns      to-ns
+                    ::msg/fn         fn-name
+                    ::msg/args       (or args [])
+                    ::msg/created-at (Instant/now)}]
+    ;; Register promise BEFORE sending
+    (swap! pending-remote-promises assoc request-id p)
+    (try
+      ;; Send request to orchestrator via reverse channel
+      (when-not (async/>!! request-ch request)
+        (throw (ex-info "Reverse channel closed"
+                        {::msg/status :error
+                         ::msg/error-type :execution
+                         ::msg/id request-id})))
+      ;; Wait for reply
+      (let [reply (deref p timeout-ms ::timed-out)]
+        (if (= reply ::timed-out)
+          (do
+            (swap! pending-remote-promises dissoc request-id)
+            (throw (ex-info "Remote call timed out"
+                            {::msg/status :timeout
+                             ::msg/error-type :timeout
+                             ::msg/id request-id
+                             ::msg/to-ns to-ns
+                             ::msg/fn fn-name})))
+          ;; Got a reply
+          (case (::msg/status reply)
+            :ok (::msg/value reply)
+            (throw (ex-info (or (::msg/error-message reply)
+                                (str "Remote call failed: " (::msg/status reply)))
+                            (select-keys reply [::msg/status ::msg/error-type
+                                                ::msg/error-class ::msg/error-message
+                                                ::msg/error-data ::msg/id
+                                                ::msg/duration-ms]))))))
+      (catch Exception e
+        (swap! pending-remote-promises dissoc request-id)
+        (throw e)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Function Execution
@@ -98,7 +180,8 @@
   "Agent JVM bridge step-fn.
 
    Receives requests from orchestrator via TCP, executes local functions,
-   returns reply envelopes. Designed for use with core.async.flow.
+   returns reply envelopes. Also handles reverse-channel replies for
+   cross-namespace calls initiated by proxy functions.
 
    Params:
      ::namespace   - Namespace this bridge serves
@@ -106,9 +189,11 @@
 
    In-ports (from TCP):
      :seon.flow.in/request - Incoming function call requests
+     :seon.flow.in/reply   - Replies for cross-ns calls (reverse channel)
 
    Out-ports (to TCP):
-     :seon.flow.out/reply - Outgoing reply envelopes"
+     :seon.flow.out/reply   - Outgoing reply envelopes
+     :seon.flow.out/request - Outgoing cross-ns call requests (reverse channel)"
   ;; describe
   ([]
    {:params {::namespace   "Namespace to serve"
@@ -117,9 +202,6 @@
 
   ;; init
   ([{::keys [namespace bridge-port] :as args}]
-   ;; For MVP, channels are injected externally (via test or harness setup).
-   ;; When used with real TCP, the harness wires channel/connect! results
-   ;; as ::flow/in-ports and ::flow/out-ports before starting the flow.
    {::namespace (or namespace "unknown")
     ::bridge-port bridge-port})
 
@@ -128,7 +210,14 @@
    (case transition
      ::flow/resume state
      ::flow/pause  state
-     ::flow/stop   state
+     ::flow/stop   (do
+                     ;; Deliver error to any pending remote promises
+                     (doseq [[_id p] @pending-remote-promises]
+                       (deliver p {::msg/status :error
+                                   ::msg/error-type :timeout
+                                   ::msg/error-message "Bridge stopped"}))
+                     (reset! pending-remote-promises {})
+                     state)
      state))
 
   ;; transform
@@ -137,4 +226,13 @@
      :seon.flow.in/request
      (let [reply (execute-local msg state)]
        [state {:seon.flow.out/reply [reply]}])
+
+     ;; Reverse channel: deliver reply to waiting remote-call! promise
+     :seon.flow.in/reply
+     (let [request-id (::msg/id msg)]
+       (when-let [p (get @pending-remote-promises request-id)]
+         (swap! pending-remote-promises dissoc request-id)
+         (deliver p msg))
+       [state nil])
+
      [state nil])))
