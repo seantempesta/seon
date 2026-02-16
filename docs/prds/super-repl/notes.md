@@ -95,3 +95,47 @@
 ### Mock JVM channels for testing
 - Tests simulate agent JVMs with go-loops that read from the out-port channel and write replies to the in-port channel. This avoids needing real JVMs or TCP connections.
 - The harness's `::harness/in-ports` and `::harness/out-ports` keys inject channels that become `::flow/in-ports` and `::flow/out-ports` in the process state.
+
+## Phase 4b: Transparent Proxy Calls + Real JVM Integration
+
+### Proxy namespaces for transparent remote calls
+- `proxy-ns!` creates real Clojure namespaces in agent JVMs with `create-ns` + `intern`. Proxy vars call `bridge/remote-call!` under the hood.
+- Agents write `(nutrition/metabolic-rate {::weight 80})` — normal Clojure. The proxy routing is invisible.
+- `::proxy?` metadata flag on vars is visible via `(meta #'var)`. Intentional for introspection.
+- Partial namespace creation has no rollback — if `proxy-ns!` fails mid-way, you get a partially populated namespace.
+
+### Reverse channel for agent-to-agent calls
+- Bridge has `pending-remote-promises` atom (same pattern as topology's `pending-promises`).
+- `remote-call!` sends request on reverse channel, blocks on promise, returns value.
+- Cross-ns relay in topology: go-loop per namespace reads reverse requests, calls `topology/request!`, sends reply back. Uses `async/thread` per request — no deadlock on A→B→A calls.
+- **Livelock risk**: deep circular call chains with low queue-cap could exhaust capacity. Queue-cap > depth of call chains avoids this.
+
+### Real pool JVM integration
+- `start-namespace-jvm!` acquires JVM, starts TCP server on port 0, loads bridge code in two phases via nREPL (require namespaces, then start TCP client + loop).
+- Simple `future` loop in agent JVM (not a full flow) — reads request, calls `execute-local`, writes reply. Simpler than running flow in the agent JVM.
+- Pool integration tests use port range 7950-7969 to avoid conflicts with dev pool.
+- Domain tests use port range 7960-7969.
+- Tests self-skip if pool creation fails (no hard dependency on running server).
+
+### Cycle detection
+- DFS-based cycle detection runs at `build-topology!` time. Checks `::proxy-targets` in namespace configs.
+- Throws `ex-info` with `:cycle-detected true` and human-readable cycle descriptions.
+
+### Event/error sink processes
+- Flow throws "can't resolve channel with coord" if a process emits to an unwired output.
+- Fixed by adding `event-sink-step` and `error-sink-step` processes to every topology. They store recent events/errors in ring buffers (max 100) for observability.
+
+### Flow observability
+- `flow/ping` returns per-process status, message count, and state. Cheap (<1ms).
+- `datafy` returns static topology (connections).
+- `error-chan` streams all errors with full context.
+- No public API for channel buffer depth — skip in v1.
+- `user/flow-status` returns structured map of all registered flows with process states, throughput, errors, alerts.
+
+### Performance on real JVMs
+- Fast calls (log-meal, log-workout): ~1-2ms round-trip through TCP
+- Simulated DB lookup (20-70ms sleep): ~35ms total
+- Simulated computation (50-150ms sleep): ~134ms total
+- TCP + flow overhead: ~1-2ms on top of function execution time
+- Timeout recovery works: namespace stays responsive after timeout
+- Burst load (10 concurrent): all succeed
