@@ -47,8 +47,8 @@
   "Minimal tab bar navigation. Active: text-50 + 2px amber underline. No background pills."
   [active-page]
   [:nav {:class "flex gap-6 mb-4 border-b border-base-700"}
-   (for [[page label] [[:dashboard "dashboard"] [:agents "agents"] [:logs "logs"]]]
-     [:a {:href (case page :dashboard "/" :agents "/agents" :logs "/logs")
+   (for [[page label] [[:dashboard "dashboard"] [:agents "agents"] [:flows "flows"] [:logs "logs"]]]
+     [:a {:href (case page :dashboard "/" :agents "/agents" :flows "/flows" :logs "/logs")
           :class (str "pb-2 text-sm font-medium transition-colors "
                       (if (= active-page page)
                         "text-text-50 border-b-2 border-signal -mb-px"
