@@ -143,7 +143,9 @@ The target architecture uses reactive invalidation (watcher-driven push) rather 
 
 ## Data Separation
 
-### Master Database (`/seon/`)
+### Master Database (`/seon/`) — Single Source of Truth
+
+The master database is the **single source of truth** for all code metadata and system state. Everything that needs to understand the codebase — renderer resolution, agent context building, cross-namespace discovery — queries this database. How data gets in (startup scan, Super REPL eval, dev hook, git merge) is just plumbing.
 
 Orchestrator's view of the system:
 
