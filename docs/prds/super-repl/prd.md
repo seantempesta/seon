@@ -344,14 +344,14 @@ The MCP server (`bin/mcp-server`) is a Babashka script. It routes `eval` calls b
     7. Return `{:file-path "..." :form-count N}`
   - [ ] `preview` — Same as graduate but returns the file content without writing.
 
-- [ ] **`seon.agent.env`** — Agent environment (loaded into every agent JVM):
+- [x] **`seon.agent.env`** — Agent environment (loaded into every agent JVM):
   - [ ] Provides unified `*ctx*` per instance (not per namespace). Multiple agents in the same namespace each get their own instance ID and `*ctx*`.
-  - [ ] `search` — Query the knowledge graph from an agent JVM. Calls orchestrator's `seon.graph.query/search-functions` via nREPL. `(env/search "calories")` → matching functions across all namespaces.
+  - [x] `search` — Query the knowledge graph from an agent JVM. Wraps `seon.graph.query/search-functions`. `(env/search {::env/conn conn ::env/pattern "calories"})` → matching functions across all namespaces.
   - [ ] `ns-conn` — Get this agent's namespace DB connection. Uses the namespace the agent was assigned (not a port-based throwaway DB).
-  - [ ] `ctx-save!` / `ctx-load!` — Delegates to `harness/persist-ctx!` and `harness/load-ctx!` which already handle Datalevin serialization. Note: flow harness already handles ctx persistence — the agent env just wraps it.
-  - [ ] `related-schemas` — Find Malli schemas that share keys with a given schema. Queries the knowledge graph.
-  - [ ] `who-produces` — "What functions return data matching this shape?" Graph query wrapper.
-  - [ ] `who-consumes` — "What functions accept data matching this shape?" Graph query wrapper.
+  - [x] `ctx-save!` / `ctx-load` — Instance-scoped context persistence to Datalevin with `seon.ctx/*` schema. Round-trips EDN-serializable data keyed by instance-id.
+  - [x] `related-schemas` — Find Malli schemas that share keys with a given schema. Queries the knowledge graph.
+  - [x] `who-produces` — "What functions return data matching this shape?" Graph query via fn/output-spec refs.
+  - [x] `who-consumes` — "What functions accept data matching this shape?" Graph query via fn/input-spec refs.
 
 - [ ] **`agent_runner.clj` modifications**:
   - [ ] Creates instance-scoped ctx with shared `::conn` injection on startup. Each agent instance gets its own `*ctx*` atom, but the Datalevin `::conn` is shared per namespace.
