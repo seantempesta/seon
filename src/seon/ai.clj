@@ -482,6 +482,14 @@
     (datalevin-dual-write! :save-message entity)
     {::message-id message-id}))
 
+(defn- dl-read?
+  "Check if reads should come from Datalevin."
+  []
+  (try
+    (require 'seon.ai.datalevin)
+    (= :datalevin @(resolve 'seon.ai.datalevin/read-from))
+    (catch Exception _ false)))
+
 (defn get-session
   "Get a session by ID.
 
@@ -495,7 +503,9 @@
    Example:
      (get-session {::node db ::session-id \"ses-abc123\"})"
   [{::keys [node session-id]}]
-  (db/entity node :ai_sessions session-id))
+  (if (dl-read?)
+    ((requiring-resolve 'seon.ai.datalevin/dl-get-session) session-id)
+    (db/entity node :ai_sessions session-id)))
 
 (defn get-messages
   "Get all messages for a session.
@@ -510,9 +520,11 @@
    Example:
      (get-messages {::node db ::session-id \"ses-abc123\"})"
   [{::keys [node session-id]}]
-  (db/q node
-        "SELECT * FROM ai_messages WHERE seon$ai$session_id = ? ORDER BY seon$ai$timestamp ASC"
-        [session-id]))
+  (if (dl-read?)
+    ((requiring-resolve 'seon.ai.datalevin/dl-get-messages) session-id)
+    (db/q node
+          "SELECT * FROM ai_messages WHERE seon$ai$session_id = ? ORDER BY seon$ai$timestamp ASC"
+          [session-id])))
 
 (defn list-sessions
   "List recent sessions.
@@ -541,7 +553,12 @@
         where-clause (when (seq conditions)
                        (str " WHERE " (str/join " AND " conditions)))
         sql (str base-sql where-clause " ORDER BY seon$ai$started_at DESC LIMIT ?")]
-    (db/q node sql (conj params limit))))
+    (if (dl-read?)
+      ((requiring-resolve 'seon.ai.datalevin/dl-list-sessions)
+       (cond-> {:limit limit}
+         namespace (assoc :namespace (str namespace))
+         status (assoc :status status)))
+      (db/q node sql (conj params limit)))))
 
 (defn session-stats
   "Get aggregate statistics across all AI sessions.
@@ -568,35 +585,35 @@
      ;;               :cache-read 120000 :cache-creation 35000}
      ;;     ::cache-hit-rate 0.21}"
   [{::keys [node]}]
-  (let [;; Aggregate session data (cost, count)
-        session-stats (first (db/q node
+  (if (dl-read?)
+    ((requiring-resolve 'seon.ai.datalevin/dl-session-stats))
+    (let [;; Aggregate session data (cost, count)
+          session-agg (first (db/q node
                                    "SELECT COALESCE(SUM(s.seon$ai$cost_usd), 0) as total_cost,
                                            COUNT(*) as total_sessions
                                     FROM ai_sessions s"))
-        ;; Aggregate message data (count, tokens)
-        message-stats (first (db/q node
+          ;; Aggregate message data (count, tokens)
+          message-agg (first (db/q node
                                    "SELECT COUNT(*) as total_messages,
                                            COALESCE(SUM(m.seon$ai$input_tokens), 0) as input_tokens,
                                            COALESCE(SUM(m.seon$ai$output_tokens), 0) as output_tokens,
                                            COALESCE(SUM(m.\"seon$ai$claude$cache_read_tokens\"), 0) as cache_read,
                                            COALESCE(SUM(m.\"seon$ai$claude$cache_creation_tokens\"), 0) as cache_creation
                                     FROM ai_messages m"))
-        input-tokens (long (:input-tokens message-stats))
-        cache-read (long (:cache-read message-stats))
-        ;; Calculate cache hit rate: cache-read / (cache-read + input)
-        ;; Avoid division by zero
-        total-input (+ cache-read input-tokens)
-        cache-hit-rate (if (pos? total-input)
-                         (/ (double cache-read) total-input)
-                         0.0)]
-    {::total-cost-usd (double (:total-cost session-stats))
-     ::total-sessions (long (:total-sessions session-stats))
-     ::total-messages (long (:total-messages message-stats))
-     ::tokens {:input input-tokens
-               :output (long (:output-tokens message-stats))
-               :cache-read cache-read
-               :cache-creation (long (:cache-creation message-stats))}
-     ::cache-hit-rate cache-hit-rate}))
+          input-tokens (long (:input-tokens message-agg))
+          cache-read (long (:cache-read message-agg))
+          total-input (+ cache-read input-tokens)
+          cache-hit-rate (if (pos? total-input)
+                           (/ (double cache-read) total-input)
+                           0.0)]
+      {::total-cost-usd (double (:total-cost session-agg))
+       ::total-sessions (long (:total-sessions session-agg))
+       ::total-messages (long (:total-messages message-agg))
+       ::tokens {:input input-tokens
+                 :output (long (:output-tokens message-agg))
+                 :cache-read cache-read
+                 :cache-creation (long (:cache-creation message-agg))}
+       ::cache-hit-rate cache-hit-rate})))
 
 (comment
   ;; REPL exploration
