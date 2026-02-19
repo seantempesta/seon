@@ -158,3 +158,20 @@
 - Each test uses `:each` fixture with a fresh temp Datalevin conn
 - But within a single test, multiple `testing` blocks share the same DB state
 - Version numbers accumulate across `testing` blocks in the same `deftest`
+
+## Phase 3: Agent Environment (seon.agent.env)
+
+### Datalevin uses java.util.Date, not java.time.Instant
+- Datalevin schema with `:db.type/instant` expects `java.util.Date`, NOT `java.time.Instant`
+- Using `Instant/now` in transact data causes `ClassCastException`
+- Use `(java.util.Date.)` instead
+
+### d/q with `(pull ...)` returns tuples
+- `(d/q '[:find (pull ?e [...]) ...] ...)` returns vectors of `[pulled-map]` tuples
+- Use `ffirst` to get the actual map, not `first`
+- This differs from `(d/pull @conn [...] eid)` which returns the map directly
+
+### ctx-schema must be merged with graph schema
+- `env/ctx-schema` defines `:seon.ctx/*` attributes for context persistence
+- When creating a Datalevin conn for tests, merge: `(merge ingest/datalevin-schema env/ctx-schema)`
+- In production, the connection manager should include both schemas
