@@ -16,7 +16,7 @@
             [seon.ai.agent :as agent]
             [seon.ai.agent.views :as agent-views]
             [seon.ai.claude :as claude]
-            [seon.db.node :as db]
+            [seon.ai.datalevin :as dl]
             [seon.web.sse :as sse]
             [seon.web.html :as html]
             [dev.onionpancakes.chassis.core :as h])
@@ -25,23 +25,14 @@
            [java.time.temporal ChronoUnit]
            [java.util Locale]))
 
-;; XTDB node reference - initialized at startup via init!
-(defonce xtdb-node (atom nil))
-
 ;; UI state - hide completed by default
 (defonce ui-state (atom {:show-completed false}))
 
 (defn init!
-  "Initialize the agents module with the XTDB node.
-   Called by the server component at startup."
-  [node]
-  (reset! xtdb-node node)
-  (log/info "Agents module initialized with XTDB node"))
-
-(defn get-node
-  "Get the XTDB node reference."
-  []
-  @xtdb-node)
+  "Initialize the agents module. Called by the server component at startup.
+   Node parameter kept for API compatibility but is no longer used."
+  [_node]
+  (log/info "Agents module initialized"))
 
 (defn toggle-show-completed!
   "Toggle the show-completed filter."
@@ -50,76 +41,32 @@
 
 
 ;;; ---------------------------------------------------------------------------
-;;; Read Source Helper
-;;; ---------------------------------------------------------------------------
-
-(defn- dl-read?
-  "Check if reads should come from Datalevin."
-  []
-  (try
-    (require 'seon.ai.datalevin)
-    (= :datalevin @(resolve 'seon.ai.datalevin/read-from))
-    (catch Exception _ false)))
-
-;;; ---------------------------------------------------------------------------
-;;; XTDB Message Queries (Phase 1)
+;;; Datalevin Queries (Phase E3 - Datalevin only)
 ;;; ---------------------------------------------------------------------------
 
 (defn- find-ai-session-id
   "Find the AI session ID (ses-xxx) for a given agent session ID (4-char hex).
    Returns nil if not found."
   [agent-session-id]
-  (if (dl-read?)
-    ((requiring-resolve 'seon.ai.datalevin/dl-find-ai-session-id) agent-session-id)
-    (when-let [node (get-node)]
-      (let [results (db/q node
-                          "SELECT _id FROM ai_sessions
-                           WHERE seon$ai$agent_session_id = ?
-                           LIMIT 1"
-                          [agent-session-id])]
-        (:xt/id (first results))))))
+  (dl/dl-find-ai-session-id agent-session-id))
 
 (defn- load-session-messages
   "Load all messages for an AI session.
    Returns messages ordered by timestamp."
   [ai-session-id]
-  (if (dl-read?)
-    ((requiring-resolve 'seon.ai.datalevin/dl-load-session-messages) ai-session-id)
-    (when-let [node (get-node)]
-      (db/q node
-            "SELECT * FROM ai_messages
-             WHERE seon$ai$session_id = ?
-             ORDER BY seon$ai$timestamp"
-            [ai-session-id]))))
+  (dl/dl-load-session-messages ai-session-id))
 
 (defn- load-session-info
   "Load session metadata (status, timestamps, cost, initial-context).
    Returns session entity or a selected subset."
   [ai-session-id]
-  (if (dl-read?)
-    ((requiring-resolve 'seon.ai.datalevin/dl-load-session-info) ai-session-id)
-    (when-let [node (get-node)]
-      (first (db/q node
-                   "SELECT seon$ai$status, seon$ai$started_at, seon$ai$ended_at, seon$ai$cost_usd, seon$ai$initial_context
-                    FROM ai_sessions
-                    WHERE _id = ?"
-                   [ai-session-id])))))
+  (dl/dl-load-session-info ai-session-id))
 
 (defn- load-context-tokens
   "Load context token usage from the result message for a session.
    Returns cache-creation-tokens as approximate context window usage."
   [ai-session-id]
-  (if (dl-read?)
-    ((requiring-resolve 'seon.ai.datalevin/dl-load-context-tokens) ai-session-id)
-    (when-let [node (get-node)]
-      (let [result (first (db/q node
-                                "SELECT seon$ai$claude$cache_creation_tokens as tokens
-                                 FROM ai_messages
-                                 WHERE seon$ai$session_id = ?
-                                   AND seon$ai$claude$message_type = 'result'
-                                 LIMIT 1"
-                                [ai-session-id]))]
-        (:tokens result)))))
+  (dl/dl-load-context-tokens ai-session-id))
 
 (defn- aggregate-message-stats
   "Aggregate token counts and compute turns from messages.
@@ -545,29 +492,16 @@
   (agent/agents {}))
 
 (defn- completed-sessions
-  "Get recent completed/failed sessions from XTDB."
+  "Get recent completed/failed sessions from Datalevin."
   [limit]
-  (when-let [node (get-node)]
-    (ai/list-sessions {::ai/node node
-                       ::ai/limit limit})))
+  (ai/list-sessions {::ai/node nil
+                     ::ai/limit limit}))
 
 (defn- message-stats-by-session
   "Get message counts and latest timestamps for all sessions in one query.
    Returns map of session-id -> {:count n :latest-ts instant}."
   []
-  (if (dl-read?)
-    ((requiring-resolve 'seon.ai.datalevin/dl-message-stats-by-session))
-    (when-let [node (get-node)]
-      (let [results (db/q node
-                      "SELECT seon$ai$session_id as session_id,
-                              COUNT(*) as cnt,
-                              MAX(seon$ai$timestamp) as latest_ts
-                       FROM ai_messages
-                       GROUP BY seon$ai$session_id"
-                      [])]
-        (into {} (map (fn [r] [(:session-id r) {:count (:cnt r)
-                                                 :latest-ts (:latest-ts r)}])
-                      results))))))
+  (dl/dl-message-stats-by-session))
 
 (defn- latest-activity-ms
   "Get the latest activity timestamp in epoch milliseconds for a session.
@@ -617,17 +551,7 @@
   "Get context token counts for all sessions in one query.
    Returns map of session-id -> token-count (from cache-creation-tokens)."
   []
-  (if (dl-read?)
-    ((requiring-resolve 'seon.ai.datalevin/dl-context-tokens-by-session))
-    (when-let [node (get-node)]
-      (let [results (db/q node
-                          "SELECT seon$ai$session_id as session_id,
-                                  seon$ai$claude$cache_creation_tokens as tokens
-                           FROM ai_messages
-                           WHERE seon$ai$claude$message_type = 'result'
-                             AND seon$ai$claude$cache_creation_tokens IS NOT NULL"
-                          [])]
-        (into {} (map (fn [r] [(:session-id r) (:tokens r)]) results))))))
+  (dl/dl-context-tokens-by-session))
 
 (defn- all-agents
   "Get combined list of running agents and recent completed sessions."

@@ -68,11 +68,11 @@
 
 (defmethod ig/init-key ::http-server
   [_ {:keys [port bind handler node]}]
-  ;; Initialize modules with XTDB node
+  ;; Initialize modules (node is optional, kept for trading/jobs)
   (when node
-    (jobs/init! node)
-    (agents/init! node)
-    (ai-agent/init! node))
+    (jobs/init! node))
+  (agents/init! node)
+  (ai-agent/init! node)
 
   ;; Initialize SSE broadcast infrastructure with 100ms throttle
   (let [refresh-mult (sse/init-sse! :max-refresh-ms 100)

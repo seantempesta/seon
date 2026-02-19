@@ -107,16 +107,20 @@
 ;;; Connection Helpers
 ;;; ---------------------------------------------------------------------------
 
+;; Override connection for testing. When set, used instead of Integrant system.
+(def ^:dynamic *test-conn* nil)
+
 (defn- get-conn
-  "Get Datalevin master connection from Integrant system.
+  "Get Datalevin master connection from Integrant system or test override.
    Returns nil if system not running or connection unavailable."
   []
-  (when-let [mgr (:seon/connection-manager state/system)]
-    (try
-      (conn/get-master-conn! {::conn/manager mgr})
-      (catch Exception e
-        (log/warn "Failed to get Datalevin connection" {:error (.getMessage e)})
-        nil))))
+  (or *test-conn*
+      (when-let [mgr (:seon/connection-manager state/system)]
+        (try
+          (conn/get-master-conn! {::conn/manager mgr})
+          (catch Exception e
+            (log/warn "Failed to get Datalevin connection" {:error (.getMessage e)})
+            nil)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Entity Conversion
@@ -361,37 +365,11 @@
        :messages message-count})))
 
 ;;; ---------------------------------------------------------------------------
-;;; Verification (Compare with XTDB)
+;;; Read Source Configuration (Legacy - kept for backward compatibility)
 ;;; ---------------------------------------------------------------------------
 
-(defn verify-sync
-  "Compare Datalevin counts with XTDB counts.
-
-   Returns:
-     Map with :datalevin, :xtdb, and :in-sync? keys"
-  []
-  (let [dl-counts (count-entities)
-        node (:seon/xtdb-node state/system)
-        xtdb-sessions (when node
-                        (require 'seon.db.node)
-                        (let [q-fn (resolve 'seon.db.node/q)]
-                          (count (q-fn node "SELECT _id FROM ai_sessions"))))
-        xtdb-messages (when node
-                        (require 'seon.db.node)
-                        (let [q-fn (resolve 'seon.db.node/q)]
-                          (count (q-fn node "SELECT _id FROM ai_messages"))))]
-    {:datalevin dl-counts
-     :xtdb {:sessions xtdb-sessions
-            :messages xtdb-messages}
-     :in-sync? (and (= (:sessions dl-counts) xtdb-sessions)
-                    (= (:messages dl-counts) xtdb-messages))}))
-
-;;; ---------------------------------------------------------------------------
-;;; Read Source Configuration
-;;; ---------------------------------------------------------------------------
-
-;; Controls whether AI reads come from XTDB or Datalevin.
-;; Default :datalevin since Phase B2 (Datalevin is now primary).
+;; Datalevin is the only AI data store since Phase E3.
+;; This atom is kept so existing code that checks it doesn't break.
 (defonce read-from (atom :datalevin))
 
 ;;; ---------------------------------------------------------------------------
@@ -433,14 +411,14 @@
         (dissoc :db/id ::entity-type ::stored-at ::xtdb-id))))
 
 (defn dl-get-session
-  "Find session by session-id from Datalevin.
+  "Find session by session-id (xt/id) from Datalevin.
    Returns session entity map or nil."
   [session-id]
   (when-let [results (q '[:find ?e
                            :in $ ?sid
                            :where
                            [?e ::entity-type :session]
-                           [?e :seon.ai/session-id ?sid]]
+                           [?e ::xtdb-id ?sid]]
                         session-id)]
     (when-let [eid (ffirst results)]
       (dl-entity->session (pull-entity eid)))))
@@ -670,8 +648,5 @@
 
   ;; Query messages
   (query-messages {:limit 10})
-
-  ;; Verify sync with XTDB
-  (verify-sync)
 
   nil)
