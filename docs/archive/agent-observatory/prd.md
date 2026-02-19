@@ -1,4 +1,5 @@
 # PRD: Agent Observatory
+## Status: COMPLETE — Observatory UI at /agents with per-agent logging and live message streaming
 
 **Status:** Mostly Complete (Phase 2.3 Remaining)
 **Priority:** Medium

@@ -1,4 +1,5 @@
 # PRD: Reactive UI Architecture
+## Status: SUPERSEDED by render-pipeline — unified render pipeline replaces reactive instance architecture
 
 **Status:** Phase 4 Complete - Instance-Based Architecture ✅
 **Branch:** `feature/sse-live-reload`

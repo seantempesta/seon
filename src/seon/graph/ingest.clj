@@ -29,6 +29,7 @@
        (ingest/ingest-incremental! {::conn my-conn ::entities entities}))"
   (:require [datalevin.core :as d]
             [seon.graph.analyzer :as analyzer]
+            [seon.render :as render]
             [seon.schema :as schema]
             [taoensso.timbre :as log]))
 
@@ -289,6 +290,7 @@
                     ::ns-dependency-count (count ns-deps)
                     ::spec-count (count (or specs []))}]
         (log/info "Knowledge graph ingestion complete" result)
+        (render/invalidate-render-cache!)
         result))))
 
 (defn ingest-incremental!
@@ -358,6 +360,7 @@
       (when (seq ns-deps)
         (d/transact! conn (vec ns-deps)))
 
+      (render/invalidate-render-cache!)
       {::namespace-count (count namespaces)
        ::function-count (count all-fns)
        ::var-usage-count (count qualified-usages)

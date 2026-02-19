@@ -208,3 +208,136 @@
       ;; Load after destroy still works from Datalevin
       (let [loaded (ctx/load! {::ctx/conn conn ::ctx/instance-id "ld01"})]
         (is (= true (:persisted loaded)))))))
+
+;;; ---------------------------------------------------------------------------
+;;; ID Generation
+;;; ---------------------------------------------------------------------------
+
+(deftest generate-id-test
+  (testing "generate-id produces 4-char hex strings"
+    (let [id (ctx/generate-id)]
+      (is (string? id))
+      (is (= 4 (count id)))
+      (is (re-matches #"[a-f0-9]{4}" id))))
+
+  (testing "generate-id produces unique values"
+    (let [ids (set (repeatedly 100 ctx/generate-id))]
+      (is (> (count ids) 90) "should produce mostly unique IDs"))))
+
+;;; ---------------------------------------------------------------------------
+;;; Client Tracking
+;;; ---------------------------------------------------------------------------
+
+(deftest client-tracking-lifecycle-test
+  (testing "Client tracking: register, count, unregister"
+    (ctx/create! {::ctx/instance-id "c001"
+                  ::ctx/persist? false
+                  ::ctx/sse-push? false
+                  ::ctx/track-clients? true})
+
+    ;; Initially no clients
+    (is (= 0 (ctx/client-count {::ctx/instance-id "c001"})))
+    (is (= #{} (ctx/clients {::ctx/instance-id "c001"})))
+
+    ;; Register clients (use sentinel objects)
+    (let [ch1 (Object.)
+          ch2 (Object.)]
+      (is (true? (ctx/register-client! {::ctx/instance-id "c001" ::ctx/channel ch1})))
+      (is (= 1 (ctx/client-count {::ctx/instance-id "c001"})))
+
+      (is (true? (ctx/register-client! {::ctx/instance-id "c001" ::ctx/channel ch2})))
+      (is (= 2 (ctx/client-count {::ctx/instance-id "c001"})))
+      (is (= #{ch1 ch2} (ctx/clients {::ctx/instance-id "c001"})))
+
+      ;; Unregister one
+      (is (true? (ctx/unregister-client! {::ctx/instance-id "c001" ::ctx/channel ch1})))
+      (is (= 1 (ctx/client-count {::ctx/instance-id "c001"})))
+      (is (= #{ch2} (ctx/clients {::ctx/instance-id "c001"}))))
+
+    (ctx/destroy! {::ctx/instance-id "c001"})))
+
+(deftest client-tracking-disabled-test
+  (testing "Client operations on non-tracking instance return false"
+    (ctx/create! {::ctx/instance-id "c002"
+                  ::ctx/persist? false
+                  ::ctx/sse-push? false
+                  ::ctx/track-clients? false})
+
+    (is (false? (ctx/register-client! {::ctx/instance-id "c002" ::ctx/channel (Object.)})))
+    (is (nil? (ctx/clients {::ctx/instance-id "c002"})))
+    (is (= 0 (ctx/client-count {::ctx/instance-id "c002"})))
+
+    (ctx/destroy! {::ctx/instance-id "c002"})))
+
+(deftest client-nonexistent-instance-test
+  (testing "Client operations on nonexistent instance return false"
+    (is (false? (ctx/register-client! {::ctx/instance-id "nope" ::ctx/channel (Object.)})))
+    (is (false? (ctx/unregister-client! {::ctx/instance-id "nope" ::ctx/channel (Object.)})))
+    (is (nil? (ctx/clients {::ctx/instance-id "nope"})))
+    (is (= 0 (ctx/client-count {::ctx/instance-id "nope"})))))
+
+;;; ---------------------------------------------------------------------------
+;;; Render Function
+;;; ---------------------------------------------------------------------------
+
+(deftest set-render-fn-test
+  (testing "set-render-fn! stores render function"
+    (ctx/create! {::ctx/instance-id "r001"
+                  ::ctx/persist? false
+                  ::ctx/sse-push? false
+                  ::ctx/track-clients? true})
+
+    (let [my-fn (fn [_] [:div "hello"])]
+      (is (true? (ctx/set-render-fn! {::ctx/instance-id "r001" ::ctx/render-fn my-fn})))
+      (is (= my-fn (:render-fn (ctx/get-entry {::ctx/instance-id "r001"})))))
+
+    (is (false? (ctx/set-render-fn! {::ctx/instance-id "nope" ::ctx/render-fn identity})))
+
+    (ctx/destroy! {::ctx/instance-id "r001"})))
+
+(deftest force-push-nonexistent-test
+  (testing "force-push! on nonexistent instance returns false"
+    (is (false? (ctx/force-push! {::ctx/instance-id "nope"})))))
+
+;;; ---------------------------------------------------------------------------
+;;; Namespace Helpers
+;;; ---------------------------------------------------------------------------
+
+(deftest instances-for-namespace-test
+  (testing "instances-for-namespace filters by namespace"
+    (ctx/create! {::ctx/instance-id "n001"
+                  ::ctx/namespace 'seon.health
+                  ::ctx/persist? false
+                  ::ctx/sse-push? false
+                  ::ctx/track-clients? true})
+    (ctx/create! {::ctx/instance-id "n002"
+                  ::ctx/namespace 'seon.health
+                  ::ctx/persist? false
+                  ::ctx/sse-push? false
+                  ::ctx/track-clients? true})
+    (ctx/create! {::ctx/instance-id "n003"
+                  ::ctx/namespace 'seon.trading
+                  ::ctx/persist? false
+                  ::ctx/sse-push? false
+                  ::ctx/track-clients? true})
+
+    (let [health-instances (ctx/instances-for-namespace 'seon.health)
+          ids (set (map ::ctx/instance-id health-instances))]
+      (is (= 2 (count health-instances)))
+      (is (contains? ids "n001"))
+      (is (contains? ids "n002"))
+      (is (not (contains? ids "n003"))))
+
+    (is (= 1 (count (ctx/instances-for-namespace 'seon.trading))))
+    (is (= 0 (count (ctx/instances-for-namespace 'seon.nonexistent))))
+
+    ;; Test namespace client aggregation
+    (ctx/register-client! {::ctx/instance-id "n001" ::ctx/channel :ch1})
+    (ctx/register-client! {::ctx/instance-id "n002" ::ctx/channel :ch2})
+    (is (= #{:ch1 :ch2} (ctx/clients-for-namespace 'seon.health)))
+    (is (= 2 (ctx/client-count-for-namespace 'seon.health)))
+    (is (= 0 (ctx/client-count-for-namespace 'seon.trading)))
+
+    (ctx/destroy! {::ctx/instance-id "n001"})
+    (ctx/destroy! {::ctx/instance-id "n002"})
+    (ctx/destroy! {::ctx/instance-id "n003"})))

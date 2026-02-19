@@ -3,7 +3,6 @@
 
    Demonstrates:
    - Schema registration with seon.schema
-   - Renderer registration with inheritance
    - Typed values and multi-format rendering
    - for-ai helper for AI agents
 
@@ -34,30 +33,41 @@
                    [::price ::price]])
 
 ;;; ---------------------------------------------------------------------------
-;;; Renderer Registration
+;;; Spec-Driven Render Specs (for Datalevin resolution)
 ;;; ---------------------------------------------------------------------------
 
-(render/register-renderer! ::position
-  {:ai (fn [{::keys [ticker quantity price]}]
-         (str ticker " x" quantity " @ $" (format "%.2f" price)))
+(schema/register! ::position-render-request
+                  [:map
+                   [::ticker ::ticker]
+                   [::quantity ::quantity]
+                   [::price ::price]])
 
-   :html (fn [{::keys [ticker quantity price]}]
-           [:div.position-card
-            {:class "p-2 border border-border-subtle rounded"}
-            [:span.ticker.font-bold ticker]
-            [:span.mx-2 "×"]
-            [:span.quantity quantity]
-            [:span.mx-2 "@"]
-            [:span.price (str "$" (format "%.2f" price))]])
+(schema/register! ::position-render-response
+                  [:map
+                   [:seon.render/html :any]
+                   [:seon.render/ai :string]
+                   [:seon.render/human :string]])
 
-   :raw (fn [v] v)
+;;; ---------------------------------------------------------------------------
+;;; Render Function (discovered by scanner via naming convention)
+;;; ---------------------------------------------------------------------------
 
-   :human (fn [{::keys [ticker quantity price]}]
-            (str "Position\n"
-                 "  Ticker:   " ticker "\n"
-                 "  Quantity: " quantity "\n"
-                 "  Price:    $" (format "%.2f" price) "\n"
-                 "  Value:    $" (format "%.2f" (* quantity price))))})
+(defn position-render
+  "Render a position for all formats."
+  [{::keys [ticker quantity price]}]
+  {:seon.render/ai (str ticker " x" quantity " @ $" (format "%.2f" (double price)))
+   :seon.render/html [:div.position-card
+                      {:class "p-2 border border-border-subtle rounded"}
+                      [:span.ticker.font-bold ticker]
+                      [:span.mx-2 "\u00d7"]
+                      [:span.quantity quantity]
+                      [:span.mx-2 "@"]
+                      [:span.price (str "$" (format "%.2f" (double price)))]]
+   :seon.render/human (str "Position\n"
+                           "  Ticker:   " ticker "\n"
+                           "  Quantity: " quantity "\n"
+                           "  Price:    $" (format "%.2f" (double price)) "\n"
+                           "  Value:    $" (format "%.2f" (* quantity (double price))))})
 
 ;;; ---------------------------------------------------------------------------
 ;;; Factory Functions
@@ -139,29 +149,15 @@
   (meta aapl)  ; => {:seon/schema :seon.render.example/position}
   (render/schema-of aapl)  ; => :seon.render.example/position
 
-  ;; Render in different formats
+  ;; Render in different formats (falls back to pprint-clipped without Datalevin)
   (render/render aapl :ai)
-  ;; => "AAPL x100 @ $150.00"
-
   (render/render aapl :html)
-  ;; => [:div.position-card {...} ...]
-
   (render/render aapl :human)
-  ;; => "Position\n  Ticker:   AAPL\n  ..."
-
   (render/render aapl :raw)
-  ;; => {:seon.render.example/ticker "AAPL" ...}
 
   ;; Run demos
   (demo-single-position)
   (demo-portfolio)
   (demo-for-ai)
-
-  ;; for-ai on complex nested structure
-  (render/for-ai {:portfolio [aapl googl]
-                  :metrics {:total-value 22000.0
-                            :day-change 150.0}
-                  :tags #{:tech :growth}})
-  ;; => "{:portfolio [AAPL x100 @ $150.00, GOOGL x50 @ $140.00], ...}"
 
   nil)

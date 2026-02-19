@@ -1,4 +1,5 @@
 # PRD: Namespace Render Toggle
+## Status: SUPERSEDED by render-pipeline — render toggle folded into unified render pipeline
 
 **Status:** Complete (Phase 1-2 done, Phase 3 future)
 **Priority:** High
