@@ -538,15 +538,16 @@
   (let [entity (sdk-message->entity {::sdk-message sdk-message
                                      ::ai/session-id session-id})
         message-id (:xt/id entity)]
-    ;; Store using seon.db.node (already required via seon.ai)
-    ((requiring-resolve 'seon.db.node/put!) node :ai_messages entity)
-    ;; Dual-write to Datalevin for stress testing
-    (try
-      (require 'seon.ai.datalevin)
-      (when @(resolve 'seon.ai.datalevin/enabled?)
-        ((resolve 'seon.ai.datalevin/save-message!) entity))
-      (catch Exception e
-        (log/debug "Datalevin dual-write failed (non-fatal)" {:error (.getMessage e)})))
+    ;; Primary write to Datalevin (Phase B2). Falls back to XTDB if unavailable.
+    (let [dl-ok? (try
+                   (require 'seon.ai.datalevin)
+                   (when @(resolve 'seon.ai.datalevin/enabled?)
+                     ((resolve 'seon.ai.datalevin/save-message!) entity))
+                   (catch Exception e
+                     (log/debug "Datalevin write failed, falling back to XTDB" {:error (.getMessage e)})
+                     false))]
+      (when-not dl-ok?
+        ((requiring-resolve 'seon.db.node/put!) node :ai_messages entity)))
     {::ai/message-id message-id}))
 
 ;;; ---------------------------------------------------------------------------
@@ -1298,7 +1299,8 @@
    and completed agents. For running agents, ::result-text will be nil."
   [{::ai/keys [session-id]}]
   (let [use-dl? (try (require 'seon.ai.datalevin)
-                     (= :datalevin @(resolve 'seon.ai.datalevin/read-from))
+                     (and (= :datalevin @(resolve 'seon.ai.datalevin/read-from))
+                          (some? (:seon/connection-manager state/system)))
                      (catch Exception _ false))]
     (if use-dl?
       ;; Datalevin path
@@ -1381,7 +1383,8 @@
      ;;     ::message-count 5}"
   [{::ai/keys [session-id] ::keys [limit] :or {limit 20}}]
   (let [use-dl? (try (require 'seon.ai.datalevin)
-                     (= :datalevin @(resolve 'seon.ai.datalevin/read-from))
+                     (and (= :datalevin @(resolve 'seon.ai.datalevin/read-from))
+                          (some? (:seon/connection-manager state/system)))
                      (catch Exception _ false))]
     (if use-dl?
       ;; Datalevin path

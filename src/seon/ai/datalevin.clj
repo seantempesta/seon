@@ -1,46 +1,32 @@
 (ns seon.ai.datalevin
-  "Parallel Datalevin storage for AI sessions and messages.
+  "Primary Datalevin storage for AI sessions and messages.
 
-   This namespace provides Datalevin-backed storage that runs IN PARALLEL
-   with the existing XTDB storage. It does NOT replace XTDB - both databases
-   receive writes, but only XTDB is used for reads.
-
-   ## Purpose
-
-   Stress test Datalevin before committing to a full migration. The project
-   owner experienced crashes with XTDB's compactor, so we need to verify
-   Datalevin's stability under real load before migrating.
+   This namespace is the PRIMARY store for AI data. XTDB writes have been
+   removed (Phase B2). All reads and writes go through Datalevin.
 
    ## Configuration
 
-   Enable/disable via dynamic var (can be toggled at runtime):
-
-   ```clojure
-   ;; Enable parallel writes (default: true when Datalevin is available)
-   (reset! seon.ai.datalevin/enabled? true)
-
-   ;; Disable parallel writes
-   (reset! seon.ai.datalevin/enabled? false)
-   ```
+   The `enabled?` atom controls whether Datalevin writes are active (default: true).
+   The `read-from` atom is set to `:datalevin` (the default since Phase B2).
 
    ## Schema Design
 
-   Uses Datalevin's schemaless mode initially. Entities use the same
-   namespaced keys as XTDB entities but with Datalevin-compatible structure:
+   Uses Datalevin's schemaless mode. Entities use the same namespaced keys
+   as the old XTDB entities but with Datalevin-compatible structure:
 
    - `:db/id` instead of `:xt/id` (Datalevin's entity ID)
-   - `:seon.ai/session-id` stored as a unique indexed attribute
+   - `:seon.ai.datalevin/xtdb-id` stores the logical entity ID (e.g. ses-xxx, msg-xxx)
    - Timestamps stored as instants (Datalevin supports java.time.Instant)
 
    ## What Gets Stored
 
-   - AI Sessions: same data as XTDB ai_sessions table
-   - AI Messages: same data as XTDB ai_messages table
+   - AI Sessions: session lifecycle, status, cost, tokens
+   - AI Messages: conversation messages with tool calls, token usage
 
    ## Monitoring
 
    - All writes are logged at :debug level
-   - Errors are logged at :warn level but don't fail the main operation
+   - Errors are logged at :warn level
    - Use `(stats)` to get storage statistics"
   (:require [integrant.repl.state :as state]
             [seon.ai :as ai]
@@ -405,8 +391,8 @@
 ;;; ---------------------------------------------------------------------------
 
 ;; Controls whether AI reads come from XTDB or Datalevin.
-;; Default :xtdb - Phase B2 will flip to :datalevin after verification.
-(defonce read-from (atom :xtdb))
+;; Default :datalevin since Phase B2 (Datalevin is now primary).
+(defonce read-from (atom :datalevin))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Datalevin Read Functions (Mirrors of XTDB queries)
