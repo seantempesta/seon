@@ -311,8 +311,8 @@ The MCP server (`bin/mcp-server`) is a Babashka script. It routes `eval` calls b
 
 ### Build Checklist
 
-- [ ] **`seon.repl.super`** — Form routing:
-  - [ ] `eval-form!` — Main entry point. Receives `{:form/source "(defn ema ...)" :form/namespace 'seon.trading.signals :form/agent-id "a13b"}`. Steps:
+- [x] **`seon.repl.super`** — Form routing:
+  - [x] `eval-form!` — Main entry point. Receives `{:form/source "(defn ema ...)" :form/namespace 'seon.trading.signals :form/agent-id "a13b"}`. Steps:
     1. Classify form type (defn, def, ns, require, expression) by parsing with edamame
     2. Route to agent JVM via `pool/nrepl-eval!`
     3. Store form in Datalevin:
@@ -329,9 +329,9 @@ The MCP server (`bin/mcp-server`) is a Babashka script. It routes `eval` calls b
     4. Run `graph/analyze-form` on the source
     5. Run `graph/ingest-incremental!` with analysis results
     6. Return eval result + any analysis warnings
-  - [ ] `classify-form` — Parse form and return type. Use `edamame.core/parse-string` to get the form as data, check `(first form)` for `'defn`, `'def`, `'ns`, `'require`, etc.
-  - [ ] `current-forms` — Query Datalevin for all current forms in a namespace (latest version of each named form). Used by graduation.
-  - [ ] `form-history` — Query all versions of a specific form.
+  - [x] `classify-form` — Parse form and return type. Use `edamame.core/parse-string` to get the form as data, check `(first form)` for `'defn`, `'def`, `'ns`, `'require`, etc.
+  - [x] `current-forms` — Query Datalevin for all current forms in a namespace (latest version of each named form). Used by graduation.
+  - [x] `form-history` — Query all versions of a specific form.
 
 - [ ] **`seon.repl.graduate`** — Graduation to disk:
   - [ ] `graduate!` — Takes namespace symbol. Steps:
@@ -373,8 +373,8 @@ The MCP server (`bin/mcp-server`) is a Babashka script. It routes `eval` calls b
 
 - [ ] `eval-form!` with `(defn ema [period data] ...)` → form stored in Datalevin, knowledge graph updated, eval result returned
 - [ ] `eval-form!` same function twice → version increments (v1, v2)
-- [ ] `current-forms` returns latest version of each form
-- [ ] `classify-form` correctly identifies defn, def, ns, require, expression
+- [x] `current-forms` returns latest version of each form
+- [x] `classify-form` correctly identifies defn, def, ns, require, expression
 - [ ] `graduate!` a namespace with 3 forms → correct .clj file generated, git diff shows expected content
 - [ ] `preview` returns file content without side effects
 - [ ] `env/search` from agent JVM returns matching functions from knowledge graph
