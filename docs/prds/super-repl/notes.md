@@ -139,3 +139,22 @@
 - TCP + flow overhead: ~1-2ms on top of function execution time
 - Timeout recovery works: namespace stays responsive after timeout
 - Burst load (10 concurrent): all succeed
+
+## Phase 3: Super REPL Form Router Gotchas
+
+### Datalevin requires java.util.Date, not java.time.Instant
+- `:db.type/instant` in Datalevin expects `java.util.Date`, not `java.time.Instant`
+- Use `(Date.)` not `(Instant/now)` for `:form/created-at`
+
+### Datalevin cannot store nil values
+- If `:form/name` is nil (for expressions), omit the key entirely from the entity map
+- Use `cond->` to conditionally assoc nullable fields
+
+### Datalevin aggregate queries (max, min) return SpillableSet
+- `(d/q '[:find ?name (max ?v) ...])` returns results where the aggregate value is a SpillableSet, not a plain value
+- Workaround: query raw tuples `[:find ?e ?name ?v ...]` and compute max in Clojure with `group-by` + `max-key`
+
+### Test fixture isolation
+- Each test uses `:each` fixture with a fresh temp Datalevin conn
+- But within a single test, multiple `testing` blocks share the same DB state
+- Version numbers accumulate across `testing` blocks in the same `deftest`
