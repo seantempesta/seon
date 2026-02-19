@@ -5,11 +5,12 @@
   debounced persistence and SSE push. The sessions atom provides a
   unified view for SSE refresh triggers."
   (:refer-clojure :exclude [get get-in assoc! dissoc!])
-  (:require [taoensso.timbre :as log]
-            [seon.ctx :as ctx]))
+  (:require [seon.ctx :as ctx]
+            [seon.db.datalevin.conn :as conn]
+            [taoensso.timbre :as log]))
 
-;; Datalevin connection (set on system start)
-(defonce ^:private dl-conn (atom nil))
+;; Connection manager (set on system start)
+(defonce ^:private dl-mgr (atom nil))
 
 ;; Track which session IDs have ctx instances
 (defonce ^:private session-ids (atom #{}))
@@ -17,11 +18,19 @@
 (defn- instance-id [session-id]
   (str "primer:" session-id))
 
+(defn- get-dl-conn
+  "Get Datalevin connection lazily via connection manager."
+  []
+  (when-let [mgr @dl-mgr]
+    (conn/get-namespace-conn! {::conn/manager mgr
+                               ::conn/namespace 'seon.primer
+                               ::conn/schema ctx/datalevin-schema})))
+
 (defn init!
-  "Initialize ctx system with Datalevin connection. Called by Integrant."
-  [conn]
-  (reset! dl-conn conn)
-  (log/info "Primer ctx system initialized with Datalevin"))
+  "Initialize ctx system with connection manager. Called by Integrant."
+  [mgr]
+  (reset! dl-mgr mgr)
+  (log/info "Primer ctx system initialized with connection manager"))
 
 (declare create!)
 
@@ -75,10 +84,10 @@
     ;; Destroy existing instance if any
     (ctx/destroy! {::ctx/instance-id iid})
     ;; Create new ctx instance with Datalevin persistence
-    (ctx/create! {::ctx/conn @dl-conn
+    (ctx/create! {::ctx/conn (get-dl-conn)
                   ::ctx/instance-id iid
                   ::ctx/initial-value data
-                  ::ctx/persist? (some? @dl-conn)
+                  ::ctx/persist? (some? (get-dl-conn))
                   ::ctx/sse-push? true})
     (swap! session-ids conj session-id)
     data))
@@ -94,8 +103,8 @@
 (defn checkpoint!
   "Manually persist session to Datalevin."
   [session-id]
-  (when @dl-conn
-    (ctx/persist! {::ctx/conn @dl-conn
+  (when (get-dl-conn)
+    (ctx/persist! {::ctx/conn (get-dl-conn)
                    ::ctx/instance-id (instance-id session-id)})))
 
 (defn checkpoint-all!
@@ -109,7 +118,7 @@
 (defn load!
   "Load session from Datalevin into memory. Returns ctx or nil."
   [session-id]
-  (when-let [data (ctx/load! {::ctx/conn @dl-conn
+  (when-let [data (ctx/load! {::ctx/conn (get-dl-conn)
                               ::ctx/instance-id (instance-id session-id)})]
     ;; Create a live ctx instance with the loaded data
     (create! session-id data)

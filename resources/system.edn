@@ -95,6 +95,16 @@
                       :test false   ; Unit tests mock pool structure
                       :prod true}}
 
+ ;; Primer Ctx System
+ ;; Initializes primer session management with lazy Datalevin connections.
+ :seon/primer-ctx
+ {:connection-manager #ig/ref :seon/connection-manager}
+
+ ;; Orchestrator Sessions
+ ;; Initializes orchestrator session storage with lazy Datalevin connections.
+ :seon/orchestrator-sessions
+ {:connection-manager #ig/ref :seon/connection-manager}
+
  ;; Code Scanner (Knowledge Graph)
  ;; Analyzes codebase at startup and populates Datalevin with the knowledge graph.
  ;; Depends on connection-manager for Datalevin access.

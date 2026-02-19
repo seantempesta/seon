@@ -79,34 +79,13 @@
   (log/info "Attaching namespace databases..." {:namespaces namespaces})
   (require 'seon.db.multi)
   (let [attach-all! (resolve 'seon.db.multi/attach-all-namespace-dbs!)
-        create-conn (resolve 'seon.db.multi/create-namespace-connection)
-        results (attach-all! node namespaces)
-        ;; Create persistent connections for namespaces that need them
-        connections (atom {})]
+        results (attach-all! node namespaces)]
     (log/info "Namespace databases attached" {:results results})
-
-    ;; Initialize primer ctx system (Datalevin persistence via seon.ctx)
-    ;; Primer ctx works without a connection (in-memory only).
-    ;; A Datalevin connection can be provided later via primer.ctx/init!
-    (require 'seon.primer.ctx)
-    ((resolve 'seon.primer.ctx/init!) nil)
-    (log/info "Primer ctx system initialized (in-memory, no persistence)")
-
-    ;; Return state for halt
     {:node node
-     :namespaces namespaces
-     :connections connections}))
+     :namespaces namespaces}))
 
 (defmethod ig/halt-key! :seon/namespace-dbs
-  [_ {:keys [connections]}]
-  (log/info "Cleaning up namespace database connections...")
-  ;; Close all connections
-  (doseq [[ns-sym conn] @connections]
-    (try
-      (.close conn)
-      (log/debug "Closed connection for namespace" {:namespace ns-sym})
-      (catch Exception e
-        (log/warn "Error closing connection" {:namespace ns-sym :error (.getMessage e)}))))
+  [_ _]
   (log/info "Namespace database connections cleaned up"))
 
 ;;; ---------------------------------------------------------------------------
@@ -263,6 +242,28 @@
     old-state
     (do (ig/halt-key! key old-state)
         (ig/init-key key opts))))
+
+;;; ---------------------------------------------------------------------------
+;;; Primer Ctx Component
+;;; ---------------------------------------------------------------------------
+;;; Initializes the primer ctx system with the Datalevin connection manager.
+
+(defmethod ig/init-key :seon/primer-ctx
+  [_ {:keys [connection-manager]}]
+  (require 'seon.primer.ctx)
+  ((resolve 'seon.primer.ctx/init!) connection-manager)
+  {:connection-manager connection-manager})
+
+;;; ---------------------------------------------------------------------------
+;;; Orchestrator Sessions Component
+;;; ---------------------------------------------------------------------------
+;;; Initializes the orchestrator session system with the Datalevin connection manager.
+
+(defmethod ig/init-key :seon/orchestrator-sessions
+  [_ {:keys [connection-manager]}]
+  (require 'seon.orchestrator.session)
+  ((resolve 'seon.orchestrator.session/init!) connection-manager)
+  {:connection-manager connection-manager})
 
 ;;; ---------------------------------------------------------------------------
 ;;; Code Scanner Component

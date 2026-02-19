@@ -1,6 +1,6 @@
 # PRD: Spec-Driven Rendering + Code Index
 
-## Status: Draft
+## Status: In Progress (Phase 1 ~95%, Phase 2 ~50%, Phase 3 ~80%)
 
 ## Summary
 
@@ -414,42 +414,62 @@ No special configuration system. Agents write functions, the system discovers th
 
 ## Phases
 
-### Phase 1: Data Model + Scanner
-- Migrate `seon.graph.*` from `:graph/*` to `:seon.fn/*`, `:seon.spec/*`, `:seon.ns/*`, `:seon.call/*`
-- Add `:seon.ns/target` to namespace entities (`:clj`, `:cljs`, `:cljc`)
-- Add static spec extraction (parse `schema/register!` calls from source → spec entities with `:seon.spec/contains-keys`)
-- Add static `:malli/schema` metadata extraction (from source → input-spec, output-spec on fn entities)
-- Pre-compute `:seon.fn/render-input-keys` for render functions
-- Wire ingestion pipeline (startup scan + dev hook + Super REPL eval all feed same path)
-- [ ] Not started
+### Phase 1: Data Model + Scanner — ~95% COMPLETE
 
-### Phase 2: Renderer Resolution
-- Implement `find-renderer` with resolution algorithm
-- Add resolution cache with scanner-triggered invalidation
-- Wire into SSE rendering pipeline (replace `seon.render/render`)
-- Fallback to `pprint-clipped` for unmatched data
-- [ ] Not started
+**What's done:**
+- [x] Datalevin schema with all entity types (`seon.fn/*`, `seon.spec/*`, `seon.ns/*`, `seon.call/*`) — `src/seon/graph/ingest.clj` lines 39-78
+- [x] Migrated from `:graph/*` to `:seon.fn/*` etc.
+- [x] `:seon.ns/target` on namespace entities (`:clj`, `:cljs`, `:cljc`)
+- [x] Static spec extraction via edamame — `src/seon/graph/scanner.clj` parses `schema/register!` calls, extracts `:seon.spec/contains-keys`
+- [x] Pre-compute `:seon.fn/render-input-keys` for render functions — `scanner.clj:link-fns-to-specs`
+- [x] Ingestion pipeline wired: startup scan + dev hook + Super REPL all feed same `ingest-analysis!` / `ingest-incremental!`
+- [x] `:seon.fn/input-spec` and `:seon.fn/output-spec` as `:db.type/ref` to spec entities
+- [x] Stub entities for external functions (ensures refs resolve)
+- [x] Ingestion order enforced: specs → fns → calls
 
-### Phase 3: Topological Context Builder
-- Recursive pull on ref-based subgraph from target function/namespace
-- Topological sort (reuse `seon.flow.topology` DFS pattern) for dependency ordering
-- Render each entity via `:seon.render/ai` resolution into linear context string
-- Cycle detection for circular dependencies
-- Integrate into agent launch (provide topological context automatically)
-- [ ] Not started
+**What's missing:**
+- [ ] Static `:malli/schema` metadata extraction from source (edamame parse of `(defn ^{:malli/schema [...]} ...)` forms). Currently `link-fns-to-specs` uses naming convention (`fn-name-request`/`fn-name-response`) as the only matching strategy. This works but doesn't scale to functions that don't follow the convention.
 
-### Phase 4: Agent Context Cockpit
-- Context cockpit = render pipeline with `:seon.render/ai` output format
-- Different context levels as different render functions (dev detail, review compact, onboarding)
-- Agent runtime override: agent defines more specific render fn, scanner picks it up, next refresh uses it
-- Session cleanup: agent session ends, custom renderers gone, defaults win
-- [ ] Not started
+**Key files:** `src/seon/graph/analyzer.clj`, `src/seon/graph/scanner.clj`, `src/seon/graph/ingest.clj`, `src/seon/graph/query.clj`
 
-### Phase 5: Render Agent Pattern
-- Document `.render` companion namespace convention
-- Build example render agent for one domain
-- Scanner picks up render functions automatically
-- [ ] Not started
+### Phase 2: Renderer Resolution — ~50% COMPLETE
+
+**What's done:**
+- [x] `find-renderer` algorithm implemented — `src/seon/render.clj` lines 244-293
+- [x] Resolution order correct: specificity (key-count DESC), recency (updated-at DESC), name (ASC)
+- [x] Queries Datalevin for functions with `:seon.fn/render-input-keys`
+
+**What's missing:**
+- [ ] Resolution cache keyed by `[format (set (keys data))]` with scanner-triggered invalidation
+- [ ] Wire `find-renderer` into SSE rendering pipeline — currently NOT called by any rendering code
+- [ ] Remove old manual registry (`*renderers` atom, `register-renderer!`, `get-renderer`, `clear-renderers!`) — superseded by Datalevin discovery
+- [ ] `pprint-clipped` fallback (current fallback is `[:pre [:code (pr-str value)]]`)
+- [ ] **No render functions exist** in the codebase — nobody has written a function whose output spec contains `:seon.render/html` or `:seon.render/ai`. The pipeline has nothing to discover.
+
+### Phase 3: Topological Context Builder — ~80% COMPLETE
+
+**What's done:**
+- [x] Recursive pull from seed function — `src/seon/graph/context.clj:pull-subgraph`
+- [x] Topological sort via Kahn's algorithm — `src/seon/graph/context.clj:toposort`
+- [x] Cycle detection (appends remaining if cycle exists)
+- [x] Entity rendering to compact text (`render-fn-entity`, `render-ns-entity`, `render-spec-entity`)
+- [x] Public API: `build` (from seed fn) and `build-for-namespace` (all fns in ns)
+
+**What's missing:**
+- [ ] Wire into agent launch — `seon.graph.context/build-for-namespace` should be called during agent startup to provide topological context
+- [ ] Use `:seon.render/ai` resolution for entity rendering (currently uses hardcoded text format)
+
+### Phase 4: Agent Context Cockpit — NOT STARTED
+- [ ] Context cockpit = render pipeline with `:seon.render/ai` output format
+- [ ] Different context levels as different render functions (dev detail, review compact, onboarding)
+- [ ] Agent runtime override: agent defines more specific render fn, scanner picks it up, next refresh uses it
+- [ ] Session cleanup: agent session ends, custom renderers gone, defaults win
+
+### Phase 5: Render Agent Pattern — NOT STARTED
+- [ ] Create first `.render` companion namespace with real render functions
+- [ ] Document the convention
+- [ ] Verify scanner picks up render functions automatically
+- [ ] Verify `find-renderer` discovers them end-to-end
 
 ## Related PRDs
 

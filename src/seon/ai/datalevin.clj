@@ -7,7 +7,6 @@
    ## Configuration
 
    The `enabled?` atom controls whether Datalevin writes are active (default: true).
-   The `read-from` atom is set to `:datalevin` (the default since Phase B2).
 
    ## Schema Design
 
@@ -365,15 +364,7 @@
        :messages message-count})))
 
 ;;; ---------------------------------------------------------------------------
-;;; Read Source Configuration (Legacy - kept for backward compatibility)
-;;; ---------------------------------------------------------------------------
-
-;; Datalevin is the only AI data store since Phase E3.
-;; This atom is kept so existing code that checks it doesn't break.
-(defonce read-from (atom :datalevin))
-
-;;; ---------------------------------------------------------------------------
-;;; Datalevin Read Functions (Mirrors of XTDB queries)
+;;; Datalevin Read Functions
 ;;; ---------------------------------------------------------------------------
 
 (defn- q

@@ -18,15 +18,12 @@
    :tool_input {:file_path file-path}})
 
 (defn make-request
-  "Create a hook request for testing.
-   Now includes the XTDB node as required by the new API."
-  ([xtdb-node event]
-   {::hook/xtdb-node xtdb-node
-    ::hook/event event
+  "Create a hook request for testing."
+  ([event]
+   {::hook/event event
     ::hook/config {}})
-  ([xtdb-node event config]
-   {::hook/xtdb-node xtdb-node
-    ::hook/event event
+  ([event config]
+   {::hook/event event
     ::hook/config config}))
 
 ;;; ---------------------------------------------------------------------------
@@ -40,18 +37,18 @@
         (let [event {:hook_event_name "PostToolUse"
                      :tool_name "Read"
                      :tool_input {:file_path "/path/to/file.clj"}}
-              result (hook/process-hook-event! (make-request *test-node* event))]
+              result (hook/process-hook-event! (make-request event))]
           (is (::hook/continue result) "Should continue for non-Edit/Write events")))
 
       (testing "Skips non-Clojure files"
         (let [event (make-event "PostToolUse" "Edit" "/path/to/file.json")
-              result (hook/process-hook-event! (make-request *test-node* event))]
+              result (hook/process-hook-event! (make-request event))]
           (is (::hook/continue result) "Should continue for non-Clojure files")))
 
       (testing "Handles various Clojure file extensions"
         (doseq [ext [".clj" ".cljs" ".cljc" ".bb" ".edn"]]
           (let [event (make-event "PostToolUse" "Edit" (str "/path/to/file" ext))
-                result (hook/process-hook-event! (make-request *test-node* event))]
+                result (hook/process-hook-event! (make-request event))]
             ;; These should pass through (continue=true) since they're not in src/seon/
             (is (::hook/continue result) (str "Should handle " ext " files"))))))))
 
@@ -60,12 +57,12 @@
     (fn []
       (testing "Skips files not in src/seon/"
         (let [event (make-event "PostToolUse" "Edit" "/path/to/other/file.clj")
-              result (hook/process-hook-event! (make-request *test-node* event))]
+              result (hook/process-hook-event! (make-request event))]
           (is (::hook/continue result) "Should continue for non-seon files")))
 
       (testing "Skips test files"
         (let [event (make-event "PostToolUse" "Edit" "/path/to/test/seon/core_test.clj")
-              result (hook/process-hook-event! (make-request *test-node* event))]
+              result (hook/process-hook-event! (make-request event))]
           (is (::hook/continue result) "Should continue for test files"))))))
 
 ;;; ---------------------------------------------------------------------------
@@ -77,7 +74,7 @@
     (fn []
       (testing "Success response has correct format"
         (let [event (make-event "PostToolUse" "Edit" "/path/to/file.txt")
-              result (hook/process-hook-event! (make-request *test-node* event))]
+              result (hook/process-hook-event! (make-request event))]
           (is (true? (::hook/continue result)) "Should have ::continue true")
           (is (nil? (::hook/decision result)) "Should not have ::decision")
           (is (nil? (::hook/reason result)) "Should not have ::reason"))))))
@@ -94,7 +91,7 @@
         ;; With repair disabled, should skip repair stage
         (let [event (make-event "PreToolUse" "Edit" "/path/to/file.clj")
               config {:repair {:enabled false}}
-              result (hook/process-hook-event! (make-request *test-node* event config))]
+              result (hook/process-hook-event! (make-request event config))]
           (is (::hook/continue result) "Should continue with repair disabled"))))))
 
 (deftest config-defaults-test
@@ -102,7 +99,7 @@
     (with-test-node
       (fn []
         (let [event (make-event "PostToolUse" "Edit" "/path/to/file.json")
-              result (hook/process-hook-event! (make-request *test-node* event))]
+              result (hook/process-hook-event! (make-request event))]
           (is (::hook/continue result) "Should work with default config"))))))
 
 ;;; ---------------------------------------------------------------------------
@@ -115,7 +112,7 @@
       (testing "PreToolUse:Edit validates simulated edit (doesn't modify file)"
         ;; PreToolUse validates what the edit WOULD produce, but doesn't write
         (let [event (make-event "PreToolUse" "Edit" "/path/to/file.clj")
-              result (hook/process-hook-event! (make-request *test-node* event))]
+              result (hook/process-hook-event! (make-request event))]
           ;; Non-existent file - no old_string/new_string means validation is skipped
           (is (::hook/continue result) "Should continue for PreToolUse without edit params")))
 
@@ -125,7 +122,7 @@
                      :tool_name "Write"
                      :tool_input {:file_path "/path/to/file.clj"
                                   :content "(defn foo [x] (+ x 1))"}}
-              result (hook/process-hook-event! (make-request *test-node* event))]
+              result (hook/process-hook-event! (make-request event))]
           (is (::hook/continue result) "Should continue for valid Write content")))
 
       (testing "PreToolUse:Write blocks invalid syntax"
@@ -133,12 +130,12 @@
                      :tool_name "Write"
                      :tool_input {:file_path "/path/to/file.clj"
                                   :content "(defn foo [x] (+ x 1"}}  ; Missing paren
-              result (hook/process-hook-event! (make-request *test-node* event))]
+              result (hook/process-hook-event! (make-request event))]
           (is (= "block" (::hook/decision result)) "Should block invalid Write content")))
 
       (testing "PreToolUse skips non-Clojure files"
         (let [event (make-event "PreToolUse" "Write" "/path/to/file.md")
-              result (hook/process-hook-event! (make-request *test-node* event))]
+              result (hook/process-hook-event! (make-request event))]
           (is (::hook/continue result) "Should skip non-Clojure files"))))))
 
 ;;; ---------------------------------------------------------------------------
@@ -152,20 +149,20 @@
         (let [event {:hook_event_name "PostToolUse"
                      :tool_name "Edit"
                      :tool_input {:file_path "/path/to/file.clj"}}
-              result (hook/process-hook-event! (make-request *test-node* event))]
+              result (hook/process-hook-event! (make-request event))]
           (is (some? result) "Should process event with file_path")))
 
       (testing "Extracts filePath from tool_input (camelCase)"
         (let [event {:hook_event_name "PostToolUse"
                      :tool_name "Edit"
                      :tool_input {:filePath "/path/to/file.clj"}}
-              result (hook/process-hook-event! (make-request *test-node* event))]
+              result (hook/process-hook-event! (make-request event))]
           (is (some? result) "Should process event with filePath")))
 
       (testing "Handles missing tool_input gracefully"
         (let [event {:hook_event_name "PostToolUse"
                      :tool_name "Edit"}
-              result (hook/process-hook-event! (make-request *test-node* event))]
+              result (hook/process-hook-event! (make-request event))]
           (is (::hook/continue result) "Should continue with missing tool_input"))))))
 
 ;;; ---------------------------------------------------------------------------
@@ -177,7 +174,7 @@
     (fn []
       (testing "Records edit events via context namespace"
         ;; Clear any existing events first
-        (context/clear-all-events! {::context/xtdb-node *test-node*})
+        (context/clear-all-events! {})
 
         ;; Process an edit event using a temp file to avoid hardcoded paths
         ;; Create a valid Clojure file in a path that looks like src/seon/
@@ -195,7 +192,7 @@
               ;; This may fail if the namespace can't be resolved, which is expected
               ;; The key thing is that it doesn't throw an uncaught exception
               (let [result (try
-                             (hook/process-hook-event! (make-request *test-node* event config))
+                             (hook/process-hook-event! (make-request event config))
                              (catch Exception _
                                ;; Expected if namespace can't be loaded
                                {::hook/continue true}))]
@@ -214,7 +211,7 @@
     (fn []
       (testing "Empty feedback returns minimal response"
         (let [event (make-event "PostToolUse" "Edit" "/path/to/file.md")
-              result (hook/process-hook-event! (make-request *test-node* event))]
+              result (hook/process-hook-event! (make-request event))]
           (is (true? (::hook/continue result)))
           ;; Feedback may or may not be present, but should be vector if present
           (when (::hook/feedback result)
@@ -222,7 +219,7 @@
 
       (testing "Feedback is accumulated as vector"
         (let [event (make-event "PostToolUse" "Edit" "/path/to/file.clj")
-              result (hook/process-hook-event! (make-request *test-node* event))]
+              result (hook/process-hook-event! (make-request event))]
           (when (::hook/feedback result)
             (is (vector? (::hook/feedback result)) "Feedback should be a vector")))))))
 
@@ -262,7 +259,7 @@
             (spit temp-path "(ns valid.code)\n(defn foo [x] x)")
             (let [event (make-event "PreToolUse" "Edit" temp-path)
                   config {:repair {:enabled true}}
-                  result (hook/process-hook-event! (make-request *test-node* event config))]
+                  result (hook/process-hook-event! (make-request event config))]
               (is (true? (::hook/continue result))
                   "Should continue for valid code")
               (is (nil? (::hook/decision result))
@@ -284,7 +281,7 @@
                                       :old_string "(+ x 1)"
                                       :new_string "(+ x 2)"}}
                   config {:repair {:enabled true}}
-                  result (hook/process-hook-event! (make-request *test-node* event config))]
+                  result (hook/process-hook-event! (make-request event config))]
               (is (true? (::hook/continue result))
                   "Should continue for valid edit"))
             (finally
@@ -303,7 +300,7 @@
                                       :old_string "(+ x 1))"
                                       :new_string "(+ x"}}  ; Missing closing paren
                   config {:repair {:enabled true}}
-                  result (hook/process-hook-event! (make-request *test-node* event config))]
+                  result (hook/process-hook-event! (make-request event config))]
               (is (= "block" (::hook/decision result))
                   "Should block edit that creates invalid syntax")
               (is (string? (::hook/reason result))
@@ -324,7 +321,7 @@
                                       :old_string "(nonexistent code)"
                                       :new_string "(something else)"}}
                   config {:repair {:enabled true}}
-                  result (hook/process-hook-event! (make-request *test-node* event config))]
+                  result (hook/process-hook-event! (make-request event config))]
               (is (true? (::hook/continue result))
                   "Should continue when old_string not found"))
             (finally
@@ -333,8 +330,7 @@
       (testing "Response structure supports blocking"
         ;; Verify the response format when things pass
         (let [result (hook/process-hook-event!
-                      {::hook/xtdb-node *test-node*
-                       ::hook/event {:hook_event_name "PostToolUse"
+                      {::hook/event {:hook_event_name "PostToolUse"
                                      :tool_name "Edit"
                                      :tool_input {:file_path "/tmp/test.clj"}}
                        ::hook/config {}})]
@@ -351,7 +347,7 @@
       (testing "Handles malformed events gracefully"
         (let [event {:hook_event_name "UnknownEvent"
                      :tool_name "UnknownTool"}
-              result (hook/process-hook-event! (make-request *test-node* event))]
+              result (hook/process-hook-event! (make-request event))]
           ;; Should return success (skip unknown events)
           (is (::hook/continue result) "Should continue for unknown events")))
 
@@ -359,7 +355,7 @@
         (let [event {:hook_event_name "PostToolUse"
                      :tool_name "Edit"
                      :tool_input {:file_path nil}}
-              result (hook/process-hook-event! (make-request *test-node* event))]
+              result (hook/process-hook-event! (make-request event))]
           (is (::hook/continue result) "Should continue for nil file path"))))))
 
 ;;; ---------------------------------------------------------------------------
@@ -371,12 +367,12 @@
     (fn []
       (testing "Handles Edit tool"
         (let [event (make-event "PostToolUse" "Edit" "/path/to/file.txt")
-              result (hook/process-hook-event! (make-request *test-node* event))]
+              result (hook/process-hook-event! (make-request event))]
           (is (::hook/continue result) "Should handle Edit tool")))
 
       (testing "Handles Write tool"
         (let [event (make-event "PostToolUse" "Write" "/path/to/file.txt")
-              result (hook/process-hook-event! (make-request *test-node* event))]
+              result (hook/process-hook-event! (make-request event))]
           (is (::hook/continue result) "Should handle Write tool"))))))
 
 ;;; ---------------------------------------------------------------------------
@@ -405,7 +401,7 @@
                                   :generative {:enabled false}}
                           :compliance {:enabled false}
                           :review {:enabled false}}
-                  result (hook/process-hook-event! (make-request *test-node* event config))]
+                  result (hook/process-hook-event! (make-request event config))]
               ;; If repair didn't run, this would fail
               (is (true? (::hook/continue result))
                   "Should continue after repair")
@@ -424,7 +420,7 @@
             (spit temp-path "(ns skip.repair)\n(defn foo [] 42)")
             (let [event (make-event "PreToolUse" "Edit" temp-path)
                   config {:repair {:enabled false}}
-                  result (hook/process-hook-event! (make-request *test-node* event config))]
+                  result (hook/process-hook-event! (make-request event config))]
               (is (true? (::hook/continue result))
                   "Should continue with repair disabled"))
             (finally
@@ -435,7 +431,7 @@
         (let [event (make-event "PostToolUse" "Edit" "/path/to/file.json")
               config {:tests {:unit {:enabled false}
                               :generative {:enabled false}}}
-              result (hook/process-hook-event! (make-request *test-node* event config))]
+              result (hook/process-hook-event! (make-request event config))]
           (is (true? (::hook/continue result))
               "Should continue with tests disabled")))
 
@@ -443,13 +439,13 @@
         (let [event (make-event "PostToolUse" "Edit" "/path/to/file.txt")
               ;; Disable review entirely
               config {:review {:enabled false}}
-              result (hook/process-hook-event! (make-request *test-node* event config))]
+              result (hook/process-hook-event! (make-request event config))]
           (is (true? (::hook/continue result))
               "Should continue with review disabled")))
 
       (testing "PostToolUse runs full pipeline for seon files"
         ;; Clear events first
-        (context/clear-all-events! {::context/xtdb-node *test-node*})
+        (context/clear-all-events! {})
 
         ;; Create a temp file that simulates a seon source file
         (let [temp-dir (java.io.File. "/tmp/src/seon")
@@ -467,7 +463,7 @@
                           :tests {:unit {:enabled false}
                                   :generative {:enabled false}}
                           :review {:enabled false}}
-                  result (hook/process-hook-event! (make-request *test-node* event config))]
+                  result (hook/process-hook-event! (make-request event config))]
               ;; Should process successfully
               (is (or (true? (::hook/continue result))
                       (= "block" (::hook/decision result)))
@@ -491,7 +487,7 @@
                          :tool_input {:file_path temp-path
                                       :old_string "(defn foo [] 1)"
                                       :new_string "(defn foo [] 2)"}}
-                  result (hook/process-hook-event! (make-request *test-node* event))]
+                  result (hook/process-hook-event! (make-request event))]
               (is (true? (::hook/continue result))
                   "Valid edit should pass PreToolUse validation")
               ;; File should NOT be modified by PreToolUse
@@ -515,7 +511,7 @@
                           :tests {:unit {:enabled false}
                                   :generative {:enabled false}}
                           :review {:enabled false}}
-                  result (hook/process-hook-event! (make-request *test-node* event config))]
+                  result (hook/process-hook-event! (make-request event config))]
               (is (true? (::hook/continue result))
                   "Valid code should pass PostToolUse pipeline"))
             (finally
@@ -531,17 +527,17 @@
       (testing "Very long file path"
         (let [long-path (str "/very/long/path/" (apply str (repeat 500 "x")) ".clj")
               event (make-event "PostToolUse" "Edit" long-path)
-              result (hook/process-hook-event! (make-request *test-node* event))]
+              result (hook/process-hook-event! (make-request event))]
           (is (::hook/continue result) "Should handle long paths")))
 
       (testing "File path with spaces"
         (let [event (make-event "PostToolUse" "Edit" "/path/to/my file.clj")
-              result (hook/process-hook-event! (make-request *test-node* event))]
+              result (hook/process-hook-event! (make-request event))]
           (is (::hook/continue result) "Should handle paths with spaces")))
 
       (testing "Empty config map"
         (let [event (make-event "PostToolUse" "Edit" "/path/to/file.txt")
-              result (hook/process-hook-event! (make-request *test-node* event {}))]
+              result (hook/process-hook-event! (make-request event {}))]
           (is (::hook/continue result) "Should handle empty config"))))))
 
 ;;; ---------------------------------------------------------------------------
@@ -574,7 +570,7 @@
         ;; Test with dense mode enabled (default)
         (let [event (make-event "PostToolUse" "Edit" "/path/to/file.txt")
               config {:feedback {:dense true}}
-              result (hook/process-hook-event! (make-request *test-node* event config))]
+              result (hook/process-hook-event! (make-request event config))]
           (is (::hook/continue result))
           ;; Non-seon files don't produce feedback
           (is (or (nil? (::hook/feedback result))
@@ -584,7 +580,7 @@
         ;; Test with dense mode disabled
         (let [event (make-event "PostToolUse" "Edit" "/path/to/file.txt")
               config {:feedback {:dense false}}
-              result (hook/process-hook-event! (make-request *test-node* event config))]
+              result (hook/process-hook-event! (make-request event config))]
           (is (::hook/continue result)))))))
 
 ;;; ---------------------------------------------------------------------------
@@ -596,15 +592,13 @@
     (fn []
       (testing "process-mcp-edit! skips non-Clojure files"
         (let [result (hook/process-mcp-edit!
-                      {::hook/xtdb-node *test-node*
-                       ::hook/file-path "/path/to/file.json"})]
+                      {::hook/file-path "/path/to/file.json"})]
           (is (true? (::hook/success result)))
           (is (empty? (::hook/feedback result)))))
 
       (testing "process-mcp-edit! skips non-seon source files"
         (let [result (hook/process-mcp-edit!
-                      {::hook/xtdb-node *test-node*
-                       ::hook/file-path "/other/project/file.clj"})]
+                      {::hook/file-path "/other/project/file.clj"})]
           (is (true? (::hook/success result)))
           (is (empty? (::hook/feedback result)))))
 
@@ -616,8 +610,7 @@
           (try
             (spit temp-path "(ns seon.mcp-edit-test)\n(defn foo [x] x)")
             (let [result (hook/process-mcp-edit!
-                          {::hook/xtdb-node *test-node*
-                           ::hook/file-path temp-path
+                          {::hook/file-path temp-path
                            ::hook/config {:reload {:enabled false}
                                           :compliance {:enabled false}
                                           :tests {:unit {:enabled false}
