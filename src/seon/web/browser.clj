@@ -31,7 +31,7 @@
             [clojure.string :as str]
             [malli.core :as m]
             [org.httpkit.server :as hk]
-            [seon.web.reactive.ctx :as ctx]
+            [seon.ctx :as ctx]
             [taoensso.timbre :as log]))
 
 ;;; ---------------------------------------------------------------------------
@@ -158,12 +158,12 @@
 (defn connected?
   "Check if there are any connected browser clients for a namespace."
   [ns-sym]
-  (pos? (ctx/client-count ns-sym)))
+  (pos? (ctx/client-count-for-namespace ns-sym)))
 
 (defn clients
   "Get connected client channels for a namespace."
   [ns-sym]
-  (ctx/clients ns-sym))
+  (ctx/clients-for-namespace ns-sym))
 
 (defn- js-type->keyword
   "Convert JavaScript type string to keyword."

@@ -17,13 +17,13 @@
             [dev.onionpancakes.chassis.core :as h]
             [org.httpkit.server :as hk]
             [ring.util.codec :as codec]
+            [seon.ctx :as ctx]
             [seon.ns.introspect :as introspect]
             [seon.ns.view :as view]
             [seon.web.html :as html]
             [seon.web.sse :as sse]
             [seon.web.components :as ui]
             [seon.web.reactive.actions :as actions]
-            [seon.web.reactive.instance :as instance]
             [seon.web.reactive.transform :as transform]
             [taoensso.timbre :as log]))
 
@@ -53,11 +53,7 @@
 (defn- instances-for-namespace
   "Get all instances for a specific namespace, sorted newest first."
   [ns-sym]
-  (let [all-ids (::instance/instances (instance/list-instances {}))]
-    (->> all-ids
-         (map #(instance/get-instance {::instance/id %}))
-         (filter #(= (::instance/namespace %) ns-sym))
-         (sort-by ::instance/created-at #(compare %2 %1)))))
+  (ctx/instances-for-namespace ns-sym))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Namespace View Rendering
@@ -114,35 +110,35 @@
 
 (defn- render-instance-row
   "Render an instance as a table row."
-  [ns-sym {:keys [::instance/id ::instance/created-at]}]
-  (let [client-count (::instance/count (instance/client-count {::instance/id id}))]
+  [ns-sym {::ctx/keys [instance-id] :keys [created-at]}]
+  (let [cc (ctx/client-count {::ctx/instance-id instance-id})]
     [:tr {:class "hover:bg-base-800 border-b border-base-700/50"}
      ;; ID (clickable link)
      [:td {:class "py-2 px-3"}
-      [:a {:href (str "/ns/" ns-sym "?instance=" id)
+      [:a {:href (str "/ns/" ns-sym "?instance=" instance-id)
            :class "font-mono text-signal hover:text-warning text-sm"}
-       id]]
+       instance-id]]
      ;; Clients with status dot
      [:td {:class "py-2 px-3"}
       [:span {:class "inline-flex items-center gap-1.5"}
        [:span {:class (str "w-1.5 h-1.5 rounded-full "
-                           (if (pos? client-count) "bg-signal animate-pulse" "bg-text-500"))}]
-       [:span {:class "text-xs text-text-200"} client-count]]]
+                           (if (pos? cc) "bg-signal animate-pulse" "bg-text-500"))}]
+       [:span {:class "text-xs text-text-200"} cc]]]
      ;; Created time
      [:td {:class "py-2 px-3 text-xs text-text-400"}
       (relative-time created-at)]
      ;; Actions
      [:td {:class "py-2 px-3 text-right"}
       [:div {:class "inline-flex gap-2"}
-       [:a {:href (str "/ns/" ns-sym "?instance=" id)
+       [:a {:href (str "/ns/" ns-sym "?instance=" instance-id)
             :class "px-2 py-0.5 text-xs font-mono rounded border text-text-400 border-base-700 hover:border-base-600 hover:text-text-200"}
         "View"]
        [:form {:method "POST"
-               :action (str "/ns/" ns-sym "/destroy-instance!?id=" id)
+               :action (str "/ns/" ns-sym "/destroy-instance!?id=" instance-id)
                :class "inline"}
         [:button {:type "submit"
                   :class "px-2 py-0.5 text-xs font-mono rounded border text-error/70 border-base-700 hover:border-error/50 hover:text-error"}
-         "×"]]]]]))
+         "x"]]]]]))
 
 (defn- render-instances-section
   "Render the instances section for a reactive namespace."
@@ -242,8 +238,8 @@
     [:a {:href toggle-url
          :class "px-2 py-1 text-xs font-mono rounded border transition-colors text-text-500 border-base-700 hover:border-base-600 hover:text-text-200"}
      (if introspect?
-       "← Custom View"
-       "Introspect →")]))
+       "<- Custom View"
+       "Introspect ->")]))
 
 (defn- render-introspection-view
   "Render the introspection view for a namespace (functions, vars, atoms, etc.)."
@@ -391,8 +387,7 @@
   "Render full HTML page for a reactive instance.
    Similar to demo.clj's full-page but using the instance's render-content."
   [ns-sym instance-id]
-  (let [instance-info (instance/get-instance {::instance/id instance-id})
-        ctx-atom (::instance/atom instance-info)]
+  (let [ctx-atom (ctx/get-atom {::ctx/instance-id instance-id})]
     (if ctx-atom
       (let [render-fn (get-render-content-fn ns-sym)
             ctx-val @ctx-atom
@@ -418,7 +413,7 @@
                [:h1.text-xl.font-bold.text-accent-primary (str ns-sym)]
                [:a {:href (str "/ns/" ns-sym "?view=introspect&instance=" instance-id)
                     :class "px-2 py-1 text-xs font-mono rounded border text-text-500 border-base-700 hover:border-base-600 hover:text-text-200"}
-                "Introspect →"]]
+                "Introspect ->"]]
               [:p.text-text-secondary.text-sm.mt-1
                "Instance: " [:code.text-signal instance-id]]]
              ;; Main content - SSE connects via data-init
@@ -426,7 +421,7 @@
               {:data-init (str "@post('/ns/" ns-sym "?instance=" instance-id "')")}
               (or transformed [:div.text-text-muted "Loading..."])]
              [:footer.mt-8.pt-4.border-t.border-surface-2.text-text-muted.text-sm
-              [:a.text-accent-primary.hover:underline {:href "/"} "← Back to dashboard"]]]]])))
+              [:a.text-accent-primary.hover:underline {:href "/"} "<- Back to dashboard"]]]]])))
       ;; Instance not found
       (str
        "<!DOCTYPE html>"
@@ -457,13 +452,13 @@
                                      "Connection" "keep-alive"}}
                           false)
                 ;; Register client and push initial content
-                (instance/register-client! {::instance/id instance-id
-                                            ::instance/channel channel})
-                (instance/force-push! {::instance/id instance-id}))
+                (ctx/register-client! {::ctx/instance-id instance-id
+                                       ::ctx/channel channel})
+                (ctx/force-push! {::ctx/instance-id instance-id}))
      :on-close (fn [channel _status]
                  (log/debug "SSE client disconnected from instance" {:ns ns-sym :instance instance-id})
-                 (instance/unregister-client! {::instance/id instance-id
-                                               ::instance/channel channel}))}))
+                 (ctx/unregister-client! {::ctx/instance-id instance-id
+                                          ::ctx/channel channel}))}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Skeleton Loading State
@@ -513,28 +508,29 @@
         view (get params "view")
         is-reactive? (namespace-has-reactive-render? ns-sym)]
     (cond
-      ;; Reactive namespace without instance → create and redirect
+      ;; Reactive namespace without instance -> create and redirect
       (and is-reactive? (nil? instance-id) (not= view "introspect"))
       (let [initial-val (get-initial-state ns-sym)
-            result (instance/create-instance! {::instance/namespace ns-sym
-                                               ::instance/initial-value initial-val})
-            new-id (::instance/id result)
+            new-id (ctx/generate-id)
             render-fn (get-render-content-fn ns-sym)]
-        ;; Set render function for SSE push
-        (when render-fn
-          (instance/set-render-fn! {::instance/id new-id
-                                    ::instance/render-fn render-fn}))
+        (ctx/create! {::ctx/instance-id new-id
+                      ::ctx/namespace ns-sym
+                      ::ctx/initial-value initial-val
+                      ::ctx/persist? false
+                      ::ctx/sse-push? false
+                      ::ctx/track-clients? true
+                      ::ctx/render-fn render-fn})
         (log/info "Created reactive instance, redirecting" {:ns ns-sym :instance new-id})
         {:status 302
          :headers {"Location" (str "/ns/" ns-sym "?instance=" new-id)}})
 
-      ;; Reactive with instance → serve instance page
+      ;; Reactive with instance -> serve instance page
       (and is-reactive? instance-id (not= view "introspect"))
       {:status 200
        :headers {"Content-Type" "text/html; charset=utf-8"}
        :body (reactive-instance-page ns-sym instance-id)}
 
-      ;; Not reactive or explicit introspect view → existing behavior
+      ;; Not reactive or explicit introspect view -> existing behavior
       :else
       {:status 200
        :headers {"Content-Type" "text/html; charset=utf-8"}
@@ -597,13 +593,15 @@
   "Handle POST /ns/:namespace/create-instance! - creates new instance and redirects."
   [ns-sym]
   (let [initial-val (get-initial-state ns-sym)
-        result (instance/create-instance! {::instance/namespace ns-sym
-                                           ::instance/initial-value initial-val})
-        new-id (::instance/id result)
+        new-id (ctx/generate-id)
         render-fn (get-render-content-fn ns-sym)]
-    (when render-fn
-      (instance/set-render-fn! {::instance/id new-id
-                                ::instance/render-fn render-fn}))
+    (ctx/create! {::ctx/instance-id new-id
+                  ::ctx/namespace ns-sym
+                  ::ctx/initial-value initial-val
+                  ::ctx/persist? false
+                  ::ctx/sse-push? false
+                  ::ctx/track-clients? true
+                  ::ctx/render-fn render-fn})
     (log/info "Created instance via action" {:ns ns-sym :instance new-id})
     {:status 302
      :headers {"Location" (str "/ns/" ns-sym "?instance=" new-id)}}))
@@ -613,7 +611,7 @@
   [ns-sym instance-id]
   (if instance-id
     (do
-      (instance/destroy-instance! {::instance/id instance-id})
+      (ctx/destroy! {::ctx/instance-id instance-id})
       (log/info "Destroyed instance via action" {:ns ns-sym :instance instance-id})
       {:status 302
        :headers {"Location" (str "/ns/" ns-sym "?view=introspect")}})
@@ -658,8 +656,7 @@
         (let [base-signals (actions/extract-signals body)
               ;; Add instance ctx if present
               signals (if instance-id
-                        (let [inst (instance/get-instance {::instance/id instance-id})
-                              ctx-atom (::instance/atom inst)]
+                        (let [ctx-atom (ctx/get-atom {::ctx/instance-id instance-id})]
                           (if ctx-atom
                             (assoc base-signals :seon.reactive/ctx ctx-atom)
                             base-signals))

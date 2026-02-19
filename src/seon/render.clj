@@ -1,13 +1,15 @@
 (ns seon.render
-  "Multi-format rendering based on schema type metadata.
+  "Multi-format rendering with Datalevin-based renderer resolution.
 
-   This namespace provides a unified rendering system that dispatches on both
-   format (:ai, :html, :raw, :human) and schema type (from value metadata).
+   Two dispatch paths:
+   1. Metadata-based: Values with `:seon/schema` metadata use the typed dispatch
+   2. Datalevin-based: Plain data maps are matched to render functions by key shape
 
    Core concepts:
    - Values carry `:seon/schema` metadata identifying their type
-   - Renderers are registered per schema-key and inherit from parent schemas
-   - Multiple output formats support different contexts (AI agents, web UI, REPL)
+   - Render functions live in `.render` companion namespaces
+   - Scanner discovers render functions by naming convention (input/output specs)
+   - Resolution is cached and invalidated when the code graph updates
 
    Usage:
      (require '[seon.render :as render])
@@ -24,65 +26,32 @@
      (render/for-ai {:positions [pos pos2] :total 25000.0})"
   (:require [clojure.pprint :as pp]
             [clojure.string :as str]
+            [datalevin.core :as d]
             [seon.schema :as schema]))
 
 ;;; ---------------------------------------------------------------------------
-;;; Renderer Registry
+;;; Datalevin Connection
 ;;; ---------------------------------------------------------------------------
 
-;; Registry mapping schema keywords to render function maps.
-;; Structure: {schema-key {:ai fn, :html fn, :raw fn, :human fn}}
-(defonce ^:private *renderers (atom {}))
+(defonce ^:private *conn (atom nil))
 
-(defn register-renderer!
-  "Register render functions for a schema key.
+(defn set-conn!
+  "Set the Datalevin connection for renderer resolution.
+   Called during system startup."
+  [conn]
+  (reset! *conn conn))
 
-   The schema must be registered in seon.schema registry.
+;;; ---------------------------------------------------------------------------
+;;; Resolution Cache
+;;; ---------------------------------------------------------------------------
 
-   Arguments:
-     schema-key - Fully-namespaced keyword (e.g., :trading/position)
-     render-map - Map of format->function {:ai fn, :html fn, ...}
+(defonce ^:private resolution-cache (atom {}))
 
-   Options:
-     :inherit - Parent schema key to inherit renderers from
-
-   Returns:
-     The schema-key.
-
-   Example:
-     (register-renderer! :trading/position
-       {:ai (fn [v] (str (:ticker v) \" x\" (:quantity v)))
-        :html (fn [v] [:div.position (:ticker v)])}
-       :inherit :trading/base-entity)"
-  [schema-key render-map & {:keys [inherit]}]
-  (when-not (schema/registered? schema-key)
-    (throw (ex-info (str "Schema not registered: " schema-key
-                         ". Register with seon.schema/register! first.")
-                    {:schema-key schema-key})))
-  (let [parent-render (when inherit
-                        (or (get @*renderers inherit)
-                            (throw (ex-info (str "Parent schema not in render registry: " inherit)
-                                            {:parent inherit :schema-key schema-key}))))
-        final-render (merge parent-render render-map)]
-    (swap! *renderers assoc schema-key final-render)
-    schema-key))
-
-(defn get-renderer
-  "Get the render function for a schema-key and format.
-
-   Returns nil if no renderer is registered."
-  [schema-key format]
-  (get-in @*renderers [schema-key format]))
-
-(defn registered-renderers
-  "Return all registered renderers. Useful for debugging."
+(defn invalidate-render-cache!
+  "Clear the renderer resolution cache.
+   Called by the scanner after code graph updates."
   []
-  @*renderers)
-
-(defn clear-renderers!
-  "Clear all registered renderers. USE WITH CAUTION - only for testing."
-  []
-  (reset! *renderers {}))
+  (reset! resolution-cache {}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Value Typing
@@ -114,21 +83,115 @@
     (:seon/schema (meta value))))
 
 ;;; ---------------------------------------------------------------------------
+;;; Datalevin-Based Renderer Resolution
+;;; ---------------------------------------------------------------------------
+
+(defn find-renderer
+  "Find the best render function for the given data and format.
+
+   Queries Datalevin for functions with :seon.fn/render-input-keys
+   that are a subset of the data's keys.
+
+   Resolution order:
+   1. Most input keys matched (specificity)
+   2. Newest updated-at (recency)
+   3. Alphabetical qualified-name (deterministic tiebreaker)
+
+   Arguments:
+     conn   - Datalevin connection
+     data   - Map of data to render
+     format - :html or :ai
+
+   Returns the qualified-name string of the best renderer, or nil."
+  [conn data format]
+  (let [data-keys (set (keys data))
+        format-key (case format :html :seon.render/html :ai :seon.render/ai)
+        ;; Pull all fn entities that have render-input-keys
+        candidates (d/q '[:find ?e
+                          :where
+                          [?e :seon.fn/render-input-keys]]
+                        @conn)
+        entities (map (fn [[eid]]
+                        (d/pull @conn
+                                [:seon.fn/qualified-name
+                                 :seon.fn/render-input-keys
+                                 :seon.fn/updated-at
+                                 {:seon.fn/output-spec [:seon.spec/contains-keys]}]
+                                eid))
+                      candidates)
+        ;; Filter: input keys must be subset of data keys
+        ;; AND output spec must contain the format key
+        matching (->> entities
+                      (filter (fn [e]
+                                (let [rkeys (:seon.fn/render-input-keys e)
+                                      out-keys (set (get-in e [:seon.fn/output-spec :seon.spec/contains-keys]))]
+                                  (and (every? data-keys rkeys)
+                                       (contains? out-keys format-key))))))]
+    (when (seq matching)
+      (->> matching
+           (sort-by (juxt (comp - count :seon.fn/render-input-keys)
+                          (comp - (fn [e] (if-let [t (:seon.fn/updated-at e)]
+                                            (.getTime ^java.util.Date t)
+                                            0)))
+                          :seon.fn/qualified-name))
+           first
+           :seon.fn/qualified-name))))
+
+;;; ---------------------------------------------------------------------------
+;;; Cached Resolution + Requiring-Resolve
+;;; ---------------------------------------------------------------------------
+
+(defn- pprint-clipped
+  "Pretty-print truncated to max-chars (default 500)."
+  ([v] (pprint-clipped v 500))
+  ([v max-chars]
+   (let [s (with-out-str (pp/pprint v))]
+     (if (> (count s) max-chars)
+       (str (subs s 0 max-chars) "...")
+       s))))
+
+(defn- resolve-renderer-from-datalevin
+  "Look up a render function from Datalevin, using cache.
+   Returns the resolved var or ::no-renderer."
+  [data format]
+  (let [cache-key [format (set (keys data))]
+        cached (get @resolution-cache cache-key ::miss)]
+    (if (not= cached ::miss)
+      cached
+      (let [conn @*conn
+            result (if conn
+                     (if-let [qn (find-renderer conn data format)]
+                       (or (requiring-resolve (symbol qn)) ::no-renderer)
+                       ::no-renderer)
+                     ::no-renderer)]
+        (swap! resolution-cache assoc cache-key result)
+        result))))
+
+(defn- call-datalevin-renderer
+  "Try to render data via Datalevin-discovered render function.
+   Returns rendered value for the format, or nil if no renderer found."
+  [data format]
+  (let [resolved (resolve-renderer-from-datalevin data format)]
+    (when (not= resolved ::no-renderer)
+      (let [result (resolved data)
+            format-key (case format :html :seon.render/html :ai :seon.render/ai)]
+        (get result format-key)))))
+
+;;; ---------------------------------------------------------------------------
 ;;; Core Rendering
 ;;; ---------------------------------------------------------------------------
 
 (defn render
   "Render a value for a specific format.
 
-   Uses the `:seon/schema` metadata to dispatch to registered renderers.
-   Falls back to default rendering if no renderer is found.
+   Dispatch:
+   1. If value has `:seon/schema` metadata, try Datalevin resolution for that schema
+   2. If value is a plain map, try Datalevin resolution by data keys
+   3. Fall back to format-appropriate default
 
    Arguments:
-     value  - The value to render (should have `:seon/schema` metadata)
+     value  - The value to render
      format - Output format (:ai, :html, :raw, :human)
-
-   Options:
-     default-schema - Schema to use if value has no metadata
 
    Returns:
      Rendered output appropriate for the format.
@@ -138,28 +201,29 @@
      (render pos :html)       ; => [:div.position ...]
      (render pos :raw)        ; => {:ticker \"AAPL\" ...}
      (render pos :human)      ; => pretty-printed string"
-  ([value format] (render value format nil))
-  ([value format default-schema]
-   (let [schema-key (or (schema-of value) default-schema)
-         render-fn (when schema-key (get-renderer schema-key format))]
-     (cond
-       ;; Have a registered renderer
-       render-fn (render-fn value)
+  [value format]
+  (let [;; Try Datalevin resolution for maps
+        datalevin-result (when (and (map? value)
+                                    (#{:html :ai} format))
+                           (call-datalevin-renderer value format))]
+    (cond
+      ;; Datalevin renderer found
+      datalevin-result datalevin-result
 
-       ;; Raw format always returns the value
-       (= format :raw) value
+      ;; Raw format always returns the value
+      (= format :raw) value
 
-       ;; Human format uses pprint
-       (= format :human) (with-out-str (pp/pprint value))
+      ;; Human format uses pprint
+      (= format :human) (pprint-clipped value)
 
-       ;; AI format falls back to pr-str
-       (= format :ai) (pr-str value)
+      ;; AI format falls back to pprint-clipped
+      (= format :ai) (pprint-clipped value)
 
-       ;; HTML format falls back to code block
-       (= format :html) [:pre [:code (pr-str value)]]
+      ;; HTML format falls back to code block
+      (= format :html) [:pre [:code (pprint-clipped value)]]
 
-       ;; Unknown format
-       :else (pr-str value)))))
+      ;; Unknown format
+      :else (pr-str value))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Collection Rendering
@@ -187,7 +251,7 @@
    Recursively renders nested structures, producing concise text output
    suitable for AI agents in nREPL sessions.
 
-   Typed values use their registered :ai renderer.
+   Typed values use Datalevin-resolved :ai renderers.
    Collections are rendered with their contents.
    Primitives are converted to strings.
 
@@ -209,25 +273,21 @@
     (boolean? v) (str v)
     (symbol? v) (str v)
 
-    ;; Has explicit schema type - use :ai renderer
-    (schema-of v)
-    (let [render-fn (get-renderer (schema-of v) :ai)]
-      (if render-fn
-        (render-fn v)
-        (pr-str v)))
+    ;; Map - try Datalevin renderer first, then recurse
+    (map? v)
+    (let [ai-result (call-datalevin-renderer v :ai)]
+      (if ai-result
+        ai-result
+        (str "{"
+             (str/join ", "
+                       (map (fn [[k val]]
+                              (str (pr-str k) " " (for-ai val)))
+                            v))
+             "}")))
 
     ;; Sequential - recurse
     (sequential? v)
     (str "[" (str/join ", " (map for-ai v)) "]")
-
-    ;; Map - recurse on values
-    (map? v)
-    (str "{"
-         (str/join ", "
-                   (map (fn [[k val]]
-                          (str (pr-str k) " " (for-ai val)))
-                        v))
-         "}")
 
     ;; Set
     (set? v)
@@ -243,23 +303,13 @@
 (comment
   ;; REPL exploration
 
-  ;; Check registry state
-  (registered-renderers)
-
-  ;; Schema must be registered first
-  (schema/register! :example/widget [:map [:name :string]])
-
-  ;; Then register renderer
-  (register-renderer! :example/widget
-                      {:ai (fn [w] (str "Widget: " (:name w)))
-                       :html (fn [w] [:div.widget (:name w)])})
-
   ;; Create typed value
+  (schema/register! :example/widget [:map [:name :string]])
   (def w (typed :example/widget {:name "Foo"}))
 
   ;; Render in different formats
-  (render w :ai)    ; => "Widget: Foo"
-  (render w :html)  ; => [:div.widget "Foo"]
+  (render w :ai)    ; => pprint-clipped fallback
+  (render w :html)  ; => [:pre [:code ...]]
   (render w :raw)   ; => {:name "Foo"}
   (render w :human) ; => pretty-printed
 

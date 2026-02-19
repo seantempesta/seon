@@ -136,6 +136,28 @@
     :inputSchema {:type "object"
                   :properties {}}}
 
+   {:name "query_graph"
+    :description "Search the knowledge graph for functions, namespaces, or specs. Use this to discover existing code before writing new code."
+    :inputSchema {:type "object"
+                  :properties {:query {:type "string"
+                                       :description "Search pattern (e.g., 'workout', 'calories', 'seon.health')"}
+                               :type {:type "string"
+                                      :description "What to search for: 'functions' (default), 'namespaces', or 'context'"
+                                      :enum ["functions" "namespaces" "context"]}}
+                  :required ["query"]}}
+
+   {:name "namespace_health"
+    :description "Get health overview of a namespace: functions, dependencies, test coverage hints."
+    :inputSchema {:type "object"
+                  :properties {:namespace {:type "string"
+                                           :description "Namespace to inspect (e.g., 'seon.health.workout')"}}
+                  :required ["namespace"]}}
+
+   {:name "agent_status"
+    :description "Get current agent pool status, running sessions, and system health."
+    :inputSchema {:type "object"
+                  :properties {}}}
+
    {:name "clojure_replace"
     :description "Edit Clojure/EDN files by matching and replacing s-expressions.
 More reliable than string-based Edit - matches structurally, ignoring whitespace.
@@ -670,14 +692,95 @@ You must then either:
                      "No active sessions"
                      (:value result))))))
 
+(defn execute-query-graph
+  "Execute the query_graph tool. Searches the knowledge graph."
+  [{:keys [query type]}]
+  (let [type (or type "functions")
+        code (case type
+               "functions"
+               (format "(do (require 'seon.graph.query 'seon.db.datalevin.conn)
+                            (let [mgr (:seon/connection-manager integrant.repl.state/system)
+                                  conn (seon.db.datalevin.conn/get-master-conn!
+                                         {:seon.db.datalevin.conn/manager mgr})]
+                              (pr-str (seon.graph.query/search-functions
+                                        {:seon.graph.query/conn conn
+                                         :seon.graph.query/pattern %s}))))"
+                       (pr-str query))
+
+               "namespaces"
+               (format "(do (require 'seon.graph.query 'seon.db.datalevin.conn)
+                            (let [mgr (:seon/connection-manager integrant.repl.state/system)
+                                  conn (seon.db.datalevin.conn/get-master-conn!
+                                         {:seon.db.datalevin.conn/manager mgr})]
+                              (pr-str {:dependents (seon.graph.query/dependents-of
+                                                     {:seon.graph.query/conn conn
+                                                      :seon.graph.query/ns-name %s})
+                                       :dependencies (seon.graph.query/dependencies-of
+                                                       {:seon.graph.query/conn conn
+                                                        :seon.graph.query/ns-name %s})})))"
+                       (pr-str query) (pr-str query))
+
+               "context"
+               (format "(do (require 'seon.repl.context 'seon.db.datalevin.conn)
+                            (let [mgr (:seon/connection-manager integrant.repl.state/system)
+                                  conn (seon.db.datalevin.conn/get-master-conn!
+                                         {:seon.db.datalevin.conn/manager mgr})]
+                              (seon.repl.context/for-function
+                                {:seon.repl.context/conn conn
+                                 :seon.repl.context/qualified-name %s})))"
+                       (pr-str query)))
+        result (nrepl-eval orchestrator-port code)]
+    (if (:ex result)
+      (mcp-error (str "query_graph failed: " (:err result)))
+      (mcp-success (or (:value result) "nil")))))
+
+(defn execute-namespace-health
+  "Execute the namespace_health tool. Gets namespace overview."
+  [{:keys [namespace]}]
+  (let [code (format "(do (require 'seon.repl.context 'seon.graph.query 'seon.db.datalevin.conn)
+                          (let [mgr (:seon/connection-manager integrant.repl.state/system)
+                                conn (seon.db.datalevin.conn/get-master-conn!
+                                       {:seon.db.datalevin.conn/manager mgr})
+                                ctx (seon.repl.context/for-namespace
+                                      {:seon.repl.context/conn conn
+                                       :seon.repl.context/namespace %s})
+                                fns (seon.graph.query/functions-in-ns
+                                      {:seon.graph.query/conn conn
+                                       :seon.graph.query/ns-name %s})
+                                deps (seon.graph.query/dependencies-of
+                                       {:seon.graph.query/conn conn
+                                        :seon.graph.query/ns-name %s})
+                                dependents (seon.graph.query/dependents-of
+                                             {:seon.graph.query/conn conn
+                                              :seon.graph.query/ns-name %s})]
+                            (str ctx
+                                 \"\\n\\n## Summary\\n\"
+                                 \"Functions: \" (count fns) \"\\n\"
+                                 \"Dependencies: \" (count deps) \"\\n\"
+                                 \"Dependents: \" (count dependents))))"
+                     (pr-str namespace) (pr-str namespace)
+                     (pr-str namespace) (pr-str namespace))
+        result (nrepl-eval orchestrator-port code)]
+    (if (:ex result)
+      (mcp-error (str "namespace_health failed: " (:err result)))
+      (mcp-success (or (:value result) "nil")))))
+
+(defn execute-agent-status
+  "Execute the agent_status tool. Returns system health."
+  [_args]
+  (let [code "(user/status)"
+        result (nrepl-eval orchestrator-port code)]
+    (if (:ex result)
+      (mcp-error (str "agent_status failed: " (:err result)))
+      (mcp-success (or (:value result) "nil")))))
+
 (defn- run-hook-pipeline!
   "Run the hook pipeline after a successful clojure_replace.
    Returns {:feedback [...] :blocked bool :reason str} or nil on error."
   [file-path]
   (let [code (format "(do (require 'seon.dev.hook)
                           (seon.dev.hook/process-mcp-edit!
-                            #:seon.dev.hook{:xtdb-node (:seon/xtdb-node integrant.repl.state/system)
-                                            :file-path %s}))"
+                            #:seon.dev.hook{:file-path %s}))"
                      (pr-str file-path))
         result (nrepl-eval orchestrator-port code 60000)]
     (when-not (:ex result)
@@ -818,6 +921,9 @@ You must then either:
     "interrupt_eval" (execute-interrupt-eval arguments)
     "list_sessions" (execute-list-sessions arguments)
     "clojure_replace" (execute-clojure-replace arguments)
+    "query_graph" (execute-query-graph arguments)
+    "namespace_health" (execute-namespace-health arguments)
+    "agent_status" (execute-agent-status arguments)
     (throw (ex-info (str "Unknown tool: " name) {:tool name}))))
 
 (defn- blocking-tool?

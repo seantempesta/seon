@@ -32,7 +32,8 @@
             ;; Load component namespaces for their ig/init-key methods
             [seon.web.tailwind]
             [seon.db.datalevin.server]
-            [seon.db.datalevin.conn]))
+            [seon.db.datalevin.conn]
+            [seon.flow.pool]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; XTDB Node Component
@@ -78,42 +79,13 @@
   (log/info "Attaching namespace databases..." {:namespaces namespaces})
   (require 'seon.db.multi)
   (let [attach-all! (resolve 'seon.db.multi/attach-all-namespace-dbs!)
-        create-conn (resolve 'seon.db.multi/create-namespace-connection)
-        results (attach-all! node namespaces)
-        ;; Create persistent connections for namespaces that need them
-        connections (atom {})]
+        results (attach-all! node namespaces)]
     (log/info "Namespace databases attached" {:results results})
-
-    ;; Initialize primer ctx system with a connection to its database
-    (when (some #(= 'seon.primer %) namespaces)
-      (let [primer-conn (create-conn node 'seon.primer)]
-        (swap! connections assoc 'seon.primer primer-conn)
-        (require 'seon.primer.ctx)
-        ((resolve 'seon.primer.ctx/init!) primer-conn)
-        ((resolve 'seon.primer.ctx/start-auto-sync!) 5000)
-        (log/info "Primer ctx system initialized with namespace database")))
-
-    ;; Return state for halt
     {:node node
-     :namespaces namespaces
-     :connections connections}))
+     :namespaces namespaces}))
 
 (defmethod ig/halt-key! :seon/namespace-dbs
-  [_ {:keys [connections]}]
-  (log/info "Cleaning up namespace database connections...")
-  ;; Stop primer auto-sync
-  (try
-    (require 'seon.primer.ctx)
-    ((resolve 'seon.primer.ctx/stop-auto-sync!))
-    (catch Exception e
-      (log/debug "Could not stop primer auto-sync" {:error (.getMessage e)})))
-  ;; Close all connections
-  (doseq [[ns-sym conn] @connections]
-    (try
-      (.close conn)
-      (log/debug "Closed connection for namespace" {:namespace ns-sym})
-      (catch Exception e
-        (log/warn "Error closing connection" {:namespace ns-sym :error (.getMessage e)}))))
+  [_ _]
   (log/info "Namespace database connections cleaned up"))
 
 ;;; ---------------------------------------------------------------------------
@@ -270,6 +242,99 @@
     old-state
     (do (ig/halt-key! key old-state)
         (ig/init-key key opts))))
+
+;;; ---------------------------------------------------------------------------
+;;; Primer Ctx Component
+;;; ---------------------------------------------------------------------------
+;;; Initializes the primer ctx system with the Datalevin connection manager.
+
+(defmethod ig/init-key :seon/primer-ctx
+  [_ {:keys [connection-manager]}]
+  (require 'seon.primer.ctx)
+  ((resolve 'seon.primer.ctx/init!) connection-manager)
+  {:connection-manager connection-manager})
+
+;;; ---------------------------------------------------------------------------
+;;; Orchestrator Sessions Component
+;;; ---------------------------------------------------------------------------
+;;; Initializes the orchestrator session system with the Datalevin connection manager.
+
+(defmethod ig/init-key :seon/orchestrator-sessions
+  [_ {:keys [connection-manager]}]
+  (require 'seon.orchestrator.session)
+  ((resolve 'seon.orchestrator.session/init!) connection-manager)
+  {:connection-manager connection-manager})
+
+;;; ---------------------------------------------------------------------------
+;;; Code Scanner Component
+;;; ---------------------------------------------------------------------------
+;;; Populates the Datalevin knowledge graph at startup by analyzing the
+;;; codebase with clj-kondo and scanning for schema/register! calls.
+
+(defmethod ig/init-key :seon/code-scanner
+  [_ {:keys [connection-manager paths enabled?]}]
+  (when enabled?
+    (require 'seon.graph.analyzer)
+    (require 'seon.graph.scanner)
+    (require 'seon.graph.ingest)
+    (require 'datalevin.core)
+    (require 'seon.db.datalevin.conn)
+    (let [;; Resolve functions
+          analyze-project! (resolve 'seon.graph.analyzer/analyze-project!)
+          extract-entities (resolve 'seon.graph.analyzer/extract-entities)
+          scan-directory (resolve 'seon.graph.scanner/scan-directory)
+          link-fns-to-specs (resolve 'seon.graph.scanner/link-fns-to-specs)
+          ingest-analysis! (resolve 'seon.graph.ingest/ingest-analysis!)
+          datalevin-schema (deref (resolve 'seon.graph.ingest/datalevin-schema))
+          ;; Get a graph connection with schema via the connection manager internals
+          get-conn (resolve 'datalevin.core/get-conn)
+          build-uri-fn (fn [mgr db-name]
+                         (format "dtlv://%s:%s@%s:%d/%s"
+                                 (or (:seon.db.datalevin.conn/username mgr) "datalevin")
+                                 (or (:seon.db.datalevin.conn/password mgr) "datalevin")
+                                 (or (:seon.db.datalevin.conn/host mgr) "127.0.0.1")
+                                 (:seon.db.datalevin.conn/port mgr)
+                                 db-name))
+          graph-uri (build-uri-fn connection-manager "seon-graph")
+          conn (get-conn graph-uri datalevin-schema)]
+      (try
+        ;; Full project analysis
+        (log/info "Code scanner: analyzing project..." {:paths paths})
+        (let [project (analyze-project! {:seon.graph.analyzer/paths paths})]
+          (if-not (:seon.graph.analyzer/success project)
+            (log/warn "Code scanner: analysis failed" {:error (:seon.graph.analyzer/error project)})
+            (let [entities (extract-entities {:seon.graph.analyzer/raw-analysis
+                                             (:seon.graph.analyzer/raw-analysis project)})
+                  ;; Scan for specs
+                  specs (into [] (mapcat #(scan-directory {:seon.graph.scanner/dir-path %})) paths)
+                  ;; Link functions to specs
+                  linked-fns (link-fns-to-specs (:seon.graph.analyzer/functions entities) specs)
+                  entities (assoc entities :seon.graph.analyzer/functions linked-fns)
+                  ;; Ingest everything
+                  result (ingest-analysis! {:seon.graph.ingest/conn conn
+                                            :seon.graph.ingest/entities entities
+                                            :seon.graph.ingest/specs specs})]
+              (log/info "Code scanner initialized" result))))
+        ;; Wire the graph connection into the render system for Datalevin resolution
+        (require 'seon.render)
+        ((resolve 'seon.render/set-conn!) conn)
+        (log/info "Render system connected to graph database")
+        {:conn conn :paths paths}
+        (catch Exception e
+          (log/error "Code scanner failed" {:error (.getMessage e)})
+          ;; Still return conn so halt can close it
+          {:conn conn :paths paths})))))
+
+(defmethod ig/halt-key! :seon/code-scanner
+  [_ state]
+  (when-let [conn (:conn state)]
+    (log/info "Stopping code scanner...")
+    ;; Disconnect render system before closing the graph connection
+    (require 'seon.render)
+    ((resolve 'seon.render/set-conn!) nil)
+    (require 'datalevin.core)
+    ((resolve 'datalevin.core/close) conn)
+    (log/info "Code scanner stopped")))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Claude Code SDK Configuration

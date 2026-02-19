@@ -538,15 +538,12 @@
   (let [entity (sdk-message->entity {::sdk-message sdk-message
                                      ::ai/session-id session-id})
         message-id (:xt/id entity)]
-    ;; Store using seon.db.node (already required via seon.ai)
-    ((requiring-resolve 'seon.db.node/put!) node :ai_messages entity)
-    ;; Dual-write to Datalevin for stress testing
     (try
       (require 'seon.ai.datalevin)
       (when @(resolve 'seon.ai.datalevin/enabled?)
         ((resolve 'seon.ai.datalevin/save-message!) entity))
       (catch Exception e
-        (log/debug "Datalevin dual-write failed (non-fatal)" {:error (.getMessage e)})))
+        (log/warn "Failed to persist message to Datalevin" {:error (.getMessage e)})))
     {::ai/message-id message-id}))
 
 ;;; ---------------------------------------------------------------------------
@@ -1297,72 +1294,27 @@
    Note: This function queries the database, so it works for both running
    and completed agents. For running agents, ::result-text will be nil."
   [{::ai/keys [session-id]}]
-  (let [node (:seon/xtdb-node state/system)]
-    (if-not node
-      {::agent-status :failed
-       ::error "System not running - no XTDB node available"}
-      ;; Find AI session by agent-session-id
-      (let [sessions ((requiring-resolve 'seon.db.node/q)
-                      node
-                      "SELECT * FROM ai_sessions WHERE seon$ai$agent_session_id = ?"
-                      [session-id])]
-        (if (empty? sessions)
-          {::agent-status :failed
-           ::error (str "Agent session not found: " session-id)}
-          (let [session (first sessions)
-                ai-session-id (:xt/id session)
-                status (::ai/status session)
-                ;; Map AI session status to agent status
-                agent-status (case status
-                               :active :running
-                               :completed :completed
-                               :failed :failed
-                               :interrupted :interrupted
-                               :terminated)
-                ;; Calculate duration from timestamps
-                started-at (::ai/started-at session)
-                ended-at (::ai/ended-at session)
-                duration-ms (when (and started-at ended-at)
-                              (let [start-inst (if (instance? java.time.Instant started-at)
-                                                 started-at
-                                                 (.toInstant started-at))
-                                    end-inst (if (instance? java.time.Instant ended-at)
-                                               ended-at
-                                               (.toInstant ended-at))]
-                                (- (.toEpochMilli end-inst) (.toEpochMilli start-inst))))
-                ;; Get result message if completed (or failed - to get subtype)
-                result-msg (when (#{:completed :failed} status)
-                             (first ((requiring-resolve 'seon.db.node/q)
-                                     node
-                                     "SELECT seon$ai$content, seon$ai$claude$result_subtype as subtype
-                                      FROM ai_messages
-                                      WHERE seon$ai$session_id = ?
-                                      AND seon$ai$claude$message_type = 'result'"
-                                     [ai-session-id])))
-                ;; Count assistant messages for num-turns
-                turn-count (first ((requiring-resolve 'seon.db.node/q)
-                                   node
-                                   "SELECT COUNT(*) as cnt FROM ai_messages
-                                    WHERE seon$ai$session_id = ?
-                                    AND seon$ai$role = 'assistant'
-                                    AND seon$ai$claude$message_type = 'assistant'"
-                                   [ai-session-id]))]
-            (cond-> {::agent-status agent-status}
-              (::ai/cost-usd session)
-              (assoc ::cost-usd (::ai/cost-usd session))
-
-              duration-ms
-              (assoc ::duration-ms (int duration-ms))
-
-              (:cnt turn-count)
-              (assoc ::num-turns (int (:cnt turn-count)))
-
-              (::ai/content result-msg)
-              (assoc ::result-text (::ai/content result-msg))
-
-              (:subtype result-msg)
-              (assoc ::result-subtype (:subtype result-msg)))))))))
-
+  (let [session ((requiring-resolve 'seon.ai.datalevin/dl-find-by-agent-session-id) session-id)]
+    (if-not session
+      {::agent-status :failed ::error (str "Agent session not found: " session-id)}
+      (let [ai-sid (:xt/id session)
+            status (::ai/status session)
+            agent-status (case status :active :running :completed :completed :failed :failed :interrupted :interrupted :terminated)
+            started (::ai/started-at session)
+            ended (::ai/ended-at session)
+            dur (when (and started ended)
+                  (let [s (if (instance? java.time.Instant started) started (.toInstant started))
+                        e (if (instance? java.time.Instant ended) ended (.toInstant ended))]
+                    (- (.toEpochMilli e) (.toEpochMilli s))))
+            result-msg (when (#{:completed :failed} status)
+                         ((requiring-resolve 'seon.ai.datalevin/dl-get-result-message) ai-sid))
+            turns ((requiring-resolve 'seon.ai.datalevin/dl-count-assistant-turns) ai-sid)]
+        (cond-> {::agent-status agent-status}
+          (::ai/cost-usd session) (assoc ::cost-usd (::ai/cost-usd session))
+          dur (assoc ::duration-ms (int dur))
+          (pos? turns) (assoc ::num-turns turns)
+          (::ai/content result-msg) (assoc ::result-text (::ai/content result-msg))
+          (::result-subtype result-msg) (assoc ::result-subtype (::result-subtype result-msg)))))))
 (defn agent-messages
   "Get recent messages from an agent session.
 
@@ -1386,71 +1338,30 @@
      ;;     ::agent-status :running
      ;;     ::message-count 5}"
   [{::ai/keys [session-id] ::keys [limit] :or {limit 20}}]
-  (let [node (:seon/xtdb-node state/system)]
-    (if-not node
-      {::agent-status :failed
-       ::error "System not running - no XTDB node available"}
-      ;; Find AI session by agent-session-id
-      (let [sessions ((requiring-resolve 'seon.db.node/q)
-                      node
-                      "SELECT * FROM ai_sessions WHERE seon$ai$agent_session_id = ?"
-                      [session-id])]
-        (if (empty? sessions)
-          {::agent-status :not-found
-           ::error (str "Agent session not found: " session-id)}
-          (let [session (first sessions)
-                ai-session-id (:xt/id session)
-                status (::ai/status session)
-                agent-status (case status
-                               :active :running
-                               :completed :completed
-                               :failed :failed
-                               :interrupted :interrupted
-                               :terminated)
-                ;; Get message count
-                count-result (first ((requiring-resolve 'seon.db.node/q)
-                                     node
-                                     "SELECT COUNT(*) as cnt FROM ai_messages
-                                      WHERE seon$ai$session_id = ?"
-                                     [ai-session-id]))
-                ;; Get recent messages (most recent first, then reverse for chronological)
-                messages ((requiring-resolve 'seon.db.node/q)
-                          node
-                          "SELECT seon$ai$role as role,
-                                  seon$ai$content as content,
-                                  seon$ai$claude$message_type as msg_type,
-                                  seon$ai$claude$tool_calls as tool_calls
-                           FROM ai_messages
-                           WHERE seon$ai$session_id = ?
-                           ORDER BY seon$ai$timestamp DESC
-                           LIMIT ?"
-                          [ai-session-id limit])
-                ;; Reverse to get chronological order and format for display
-                messages (->> messages
-                              reverse
-                              (mapv (fn [m]
-                                      (let [content (:content m)
-                                            tools (:tool_calls m)
-                                            summary (cond
-                                                      ;; Has text content
-                                                      (and content (not (str/blank? content)))
-                                                      (if (> (count content) 150)
-                                                        (str (subs content 0 150) "...")
-                                                        content)
-                                                      ;; Has tool calls
-                                                      (seq tools)
-                                                      (str "[" (str/join ", " (map :name tools)) "]")
-                                                      ;; Empty
-                                                      :else nil)]
-                                        (cond-> {:role (:role m)}
-                                          (:msg_type m) (assoc :type (:msg_type m))
-                                          summary (assoc :summary summary)))))
-                              ;; Filter out empty system/user messages
-                              (filterv :summary))]
-            {::messages messages
-             ::agent-status agent-status
-             ::message-count (:cnt count-result 0)}))))))
-
+  (let [session ((requiring-resolve 'seon.ai.datalevin/dl-find-by-agent-session-id) session-id)]
+    (if-not session
+      {::agent-status :not-found ::error (str "Agent session not found: " session-id)}
+      (let [ai-sid (:xt/id session)
+            status (::ai/status session)
+            agent-status (case status :active :running :completed :completed :failed :failed :interrupted :interrupted :terminated)
+            msg-count ((requiring-resolve 'seon.ai.datalevin/dl-message-count) ai-sid)
+            raw-msgs ((requiring-resolve 'seon.ai.datalevin/dl-recent-messages) ai-sid limit)
+            messages (->> (or raw-msgs [])
+                          (mapv (fn [m]
+                                  (let [content (::ai/content m)
+                                        tools (::tool-calls m)
+                                        summary (cond
+                                                  (and content (not (str/blank? content)))
+                                                  (if (> (count content) 150)
+                                                    (str (subs content 0 150) "...") content)
+                                                  (seq tools)
+                                                  (str "[" (str/join ", " (map :name tools)) "]")
+                                                  :else nil)]
+                                    (cond-> {:role (::ai/role m)}
+                                      (::message-type m) (assoc :type (::message-type m))
+                                      summary (assoc :summary summary)))))
+                          (filterv :summary))]
+        {::messages messages ::agent-status agent-status ::message-count msg-count}))))
 (defn wait-for-agent!!
   "Block until a running agent completes and return its result.
 

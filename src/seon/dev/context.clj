@@ -2,12 +2,16 @@
   "Agent context tracking for development feedback.
 
    Maintains context of edits and reviews for the development hook:
-   - Records edit events (immutable facts in XTDB)
+   - Records edit events (in-memory, ephemeral per dev session)
    - Records review completion events
    - Provides simple rate-limited review triggering
 
    This replaces the complex debounce logic with straightforward rate limiting:
    at most one review per N seconds.
+
+   Events are stored in-memory atoms. They are ephemeral and reset on server
+   restart, which is appropriate since they only matter within a single dev
+   session for rate-limiting AI reviews and tracking recent edits.
 
    Entity types stored:
    - :edit-event - When a file was edited
@@ -17,23 +21,20 @@
      (require '[seon.dev.context :as ctx])
 
      ;; Record an edit
-     (ctx/record-edit! {::ctx/xtdb-node node
-                        ::ctx/file-path \"/path/to/file.clj\"
+     (ctx/record-edit! {::ctx/file-path \"/path/to/file.clj\"
                         ::ctx/namespace 'seon.foo})
 
      ;; Check if we should review
-     (ctx/should-review? {::ctx/xtdb-node node})
+     (ctx/should-review? {})
      ;; => {::should-review true}
 
      ;; Get edits since last review
-     (ctx/edits-since-last-review {::ctx/xtdb-node node})
+     (ctx/edits-since-last-review {})
      ;; => {::edits [{::file \"/path/a.clj\" ::namespace :seon.a} ...]}
 
      ;; Record review completion
-     (ctx/record-review! {::ctx/xtdb-node node
-                          ::ctx/files #{\"/path/to/file.clj\"}})"
-  (:require [seon.db.node :as node]
-            [seon.schema :as schema])
+     (ctx/record-review! {  ::ctx/files #{\"/path/to/file.clj\"}})"
+  (:require [seon.schema :as schema])
   (:import [java.time Instant]
            [java.util UUID]))
 
@@ -42,9 +43,6 @@
 ;;; ---------------------------------------------------------------------------
 
 ;; Primitive types
-(schema/register! ::xtdb-node
-                  [:any {:description "XTDB node instance"}])
-
 (schema/register! ::file-path
                   [:string {:min 1
                             :description "Absolute path to a file"}])
@@ -118,14 +116,12 @@
                   [:int {:min 0}])
 
 ;; Enhanced edit event with observability fields
-;; All keys are fully namespaced (::key expands to :seon.dev.context/key)
 (schema/register! ::edit-event
                   [:map
                    [:xt/id :uuid]
                    [::entity-type [:= :edit-event]]
                    [::file ::file-path]
                    [::namespace {:optional true} ::namespace]
-                   ;; Observability fields (all optional for backwards compat)
                    [::content-hash {:optional true} ::content-hash]
                    [::unit-test-result {:optional true} ::test-result-summary]
                    [::gen-test-result {:optional true} ::test-result-summary]
@@ -134,14 +130,12 @@
                    [::feedback {:optional true} ::feedback]])
 
 ;; Enhanced review event with full Gemini interaction for training data
-;; All keys are fully namespaced (::key expands to :seon.dev.context/key)
 (schema/register! ::review-event
                   [:map
                    [:xt/id :uuid]
                    [::entity-type [:= :review-event]]
                    [::files ::files]
                    [::edit-count ::edit-count]
-                   ;; Gemini interaction data for LLM training
                    [::gemini-prompt {:optional true} [:maybe :string]]
                    [::gemini-response {:optional true} [:maybe :string]]
                    [::gemini-system-instruction {:optional true} [:maybe :string]]
@@ -155,7 +149,7 @@
                    [:status [:enum "pending" "in_progress" "completed"]]
                    [:activeForm :string]])
 
-;; Todo event - captures agent's todo list at a point in time
+;; Todo event
 (schema/register! ::todo-event
                   [:map
                    [:xt/id :uuid]
@@ -170,7 +164,7 @@
 ;; record-edit! schemas
 (schema/register! ::record-edit-request
                   [:map
-                   [::xtdb-node ::xtdb-node]
+
                    [::file-path ::file-path]
                    [::namespace {:optional true} [:maybe ::namespace-symbol]]
                    [::content-hash {:optional true} ::content-hash]
@@ -188,7 +182,7 @@
 ;; record-review! schemas
 (schema/register! ::record-review-request
                   [:map
-                   [::xtdb-node ::xtdb-node]
+
                    [::files ::files]
                    [::gemini-prompt {:optional true} [:maybe :string]]
                    [::gemini-response {:optional true} [:maybe :string]]
@@ -204,7 +198,7 @@
 ;; record-todos! schemas
 (schema/register! ::record-todos-request
                   [:map
-                   [::xtdb-node ::xtdb-node]
+
                    [::session-id :string]
                    [::todos [:vector ::todo-item]]])
 
@@ -216,7 +210,7 @@
 ;; latest-todos schemas
 (schema/register! ::latest-todos-request
                   [:map
-                   [::xtdb-node ::xtdb-node]
+
                    [::session-id :string]])
 
 (schema/register! ::latest-todos-response
@@ -226,8 +220,7 @@
 
 ;; get-last-review-time schemas
 (schema/register! ::get-last-review-time-request
-                  [:map
-                   [::xtdb-node ::xtdb-node]])
+                  [:map])
 
 (schema/register! ::get-last-review-time-response
                   [:map
@@ -235,8 +228,7 @@
 
 ;; get-last-edit-time schemas
 (schema/register! ::get-last-edit-time-request
-                  [:map
-                   [::xtdb-node ::xtdb-node]])
+                  [:map])
 
 (schema/register! ::get-last-edit-time-response
                   [:map
@@ -244,8 +236,7 @@
 
 ;; edits-since-last-review schemas
 (schema/register! ::edits-since-last-review-request
-                  [:map
-                   [::xtdb-node ::xtdb-node]])
+                  [:map])
 
 (schema/register! ::edits-since-last-review-response
                   [:map
@@ -253,8 +244,7 @@
 
 ;; edits-summary schemas
 (schema/register! ::edits-summary-request
-                  [:map
-                   [::xtdb-node ::xtdb-node]])
+                  [:map])
 
 (schema/register! ::edits-summary-response
                   [:map
@@ -265,7 +255,7 @@
 ;; should-review? schemas
 (schema/register! ::should-review-request
                   [:map
-                   [::xtdb-node ::xtdb-node]
+
                    [::interval-seconds {:optional true} ::interval-seconds]])
 
 (schema/register! ::should-review-response
@@ -274,8 +264,7 @@
 
 ;; clear-all-events! schemas
 (schema/register! ::clear-all-events-request
-                  [:map
-                   [::xtdb-node ::xtdb-node]])
+                  [:map])
 
 (schema/register! ::clear-all-events-response
                   [:map
@@ -284,7 +273,7 @@
 ;; edits-for-file schemas
 (schema/register! ::edits-for-file-request
                   [:map
-                   [::xtdb-node ::xtdb-node]
+
                    [::file-path ::file-path]])
 
 (schema/register! ::edits-for-file-response
@@ -294,7 +283,7 @@
 ;; reviews-in-range schemas
 (schema/register! ::reviews-in-range-request
                   [:map
-                   [::xtdb-node ::xtdb-node]
+
                    [::start-instant ::timestamp]
                    [::end-instant {:optional true} ::timestamp]])
 
@@ -304,8 +293,7 @@
 
 ;; failure-rate schemas
 (schema/register! ::failure-rate-request
-                  [:map
-                   [::xtdb-node ::xtdb-node]])
+                  [:map])
 
 (schema/register! ::failure-rate-response
                   [:map
@@ -316,7 +304,7 @@
 ;; gemini-token-usage schemas
 (schema/register! ::gemini-token-usage-request
                   [:map
-                   [::xtdb-node ::xtdb-node]
+
                    [::start-instant ::timestamp]
                    [::end-instant {:optional true} ::timestamp]])
 
@@ -330,7 +318,7 @@
 ;; recent-activity schemas
 (schema/register! ::recent-activity-request
                   [:map
-                   [::xtdb-node ::xtdb-node]
+
                    [::hours {:optional true} ::hours]])
 
 (schema/register! ::recent-activity-response
@@ -341,6 +329,24 @@
                    [::blocked-count :int]
                    [::failure-rate :double]
                    [::gemini-tokens ::gemini-token-usage-response]])
+
+;;; ---------------------------------------------------------------------------
+;;; In-Memory Storage
+;;; ---------------------------------------------------------------------------
+
+;; Events are stored in-memory atoms, sorted by timestamp.
+;; These are ephemeral - they reset on server restart, which is appropriate
+;; since they only matter for rate-limiting within a single dev session.
+
+(defonce ^:private edit-events (atom []))
+(defonce ^:private review-events (atom []))
+(defonce ^:private todo-events (atom []))
+
+;; Monotonic counter for tx-id simulation
+(defonce ^:private tx-counter (atom 0))
+
+(defn- next-tx-id []
+  (swap! tx-counter inc))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Time Utilities
@@ -376,12 +382,10 @@
 (defn record-edit!
   "Record an edit event for a file.
 
-   Edit events are immutable facts stored in XTDB. The valid-time is set
-   automatically to the current time by XTDB.
+   Edit events are stored in-memory. The timestamp is set to the current time.
 
    Request keys:
-     ::xtdb-node        - Required. XTDB node instance
-     ::file-path        - Required. Absolute path to the edited file
+::file-path        - Required. Absolute path to the edited file
      ::namespace        - Optional. Namespace symbol (e.g., 'seon.foo)
      ::content-hash     - Optional. SHA256 hash of file content
      ::unit-test-result - Optional. Unit test result summary
@@ -391,29 +395,34 @@
      ::feedback         - Optional. Vector of feedback messages
 
    Response keys:
-     ::success - Boolean indicating if transaction succeeded
-     ::tx-id   - Transaction ID if successful
+     ::success - Boolean indicating if event was recorded
+     ::tx-id   - Synthetic transaction ID
 
    Example:
-     (record-edit! {::xtdb-node node
-                    ::file-path \"/path/to/file.clj\"
+     (record-edit! {                    ::file-path \"/path/to/file.clj\"
                     ::namespace 'seon.foo
                     ::decision :continue})"
   {:malli/schema [:=> [:cat ::record-edit-request] ::record-edit-response]}
-  [{::keys [xtdb-node file-path namespace content-hash unit-test-result
+  [{::keys [file-path namespace content-hash unit-test-result
             gen-test-result decision reason feedback]}]
   (let [id (UUID/randomUUID)
-        entity-type :edit-event
+        now (Instant/now)
         ns-kw (when namespace (keyword (str namespace)))
-        ;; Use SQL INSERT instead of :put-docs due to XTDB v2.1.0-rc0 bug
-        ;; where put-docs fails with "invalid-tx-op" error
-        result (node/execute-tx!
-                xtdb-node
-                [["INSERT INTO edit_event (_id, seon$dev$context$entity_type, seon$dev$context$file, seon$dev$context$namespace, seon$dev$context$content_hash, seon$dev$context$unit_test_result, seon$dev$context$gen_test_result, seon$dev$context$decision, seon$dev$context$reason, seon$dev$context$feedback) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-                  id entity-type file-path ns-kw content-hash unit-test-result
-                  gen-test-result decision reason feedback]])]
-    {::success (some? result)
-     ::tx-id (:tx-id result)}))
+        tx-id (next-tx-id)
+        event {:xt/id id
+               ::entity-type :edit-event
+               ::file file-path
+               ::namespace ns-kw
+               ::content-hash content-hash
+               ::unit-test-result unit-test-result
+               ::gen-test-result gen-test-result
+               ::decision decision
+               ::reason reason
+               ::feedback feedback
+               :xt/valid-from now}]
+    (swap! edit-events conj event)
+    {::success true
+     ::tx-id tx-id}))
 
 (defn record-review!
   "Record that a review was completed.
@@ -422,7 +431,7 @@
    Optionally stores full Gemini interaction data for LLM training.
 
    Request keys:
-     ::xtdb-node                 - Required. XTDB node instance
+
      ::files                     - Required. Set of reviewed file paths
      ::gemini-prompt             - Optional. The prompt sent to Gemini
      ::gemini-response           - Optional. The response from Gemini
@@ -431,30 +440,34 @@
      ::gemini-tokens             - Optional. Token usage map {:prompt N :response N :cached N}
 
    Response keys:
-     ::success - Boolean indicating if transaction succeeded
-     ::tx-id   - Transaction ID if successful
+     ::success - Boolean indicating if event was recorded
+     ::tx-id   - Synthetic transaction ID
 
    Example:
-     (record-review! {::xtdb-node node
-                      ::files #{\"/path/to/file.clj\"}
+     (record-review! {::files #{\"/path/to/file.clj\"}
                       ::gemini-prompt \"Review these changes...\"
                       ::gemini-response \"The code looks good...\"})"
   {:malli/schema [:=> [:cat ::record-review-request] ::record-review-response]}
-  [{::keys [xtdb-node files gemini-prompt gemini-response
+  [{::keys [files gemini-prompt gemini-response
             gemini-system-instruction gemini-code gemini-tokens]}]
   (let [id (UUID/randomUUID)
-        entity-type :review-event
+        now (Instant/now)
+        tx-id (next-tx-id)
         files-set (set files)
-        edit-count (count (::edits (edits-since-last-review {::xtdb-node xtdb-node})))
-        ;; Use SQL INSERT instead of :put-docs due to XTDB v2.1.0-rc0 bug
-        ;; where put-docs fails with "invalid-tx-op" error
-        result (node/execute-tx!
-                xtdb-node
-                [["INSERT INTO review_event (_id, seon$dev$context$entity_type, seon$dev$context$files, seon$dev$context$edit_count, seon$dev$context$gemini_prompt, seon$dev$context$gemini_response, seon$dev$context$gemini_system_instruction, seon$dev$context$gemini_code, seon$dev$context$gemini_tokens) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-                  id entity-type files-set edit-count gemini-prompt gemini-response
-                  gemini-system-instruction gemini-code gemini-tokens]])]
-    {::success (some? result)
-     ::tx-id (:tx-id result)}))
+        edit-count (count (::edits (edits-since-last-review {})))
+        event {:xt/id id
+               ::entity-type :review-event
+               ::files files-set
+               ::edit-count edit-count
+               ::gemini-prompt gemini-prompt
+               ::gemini-response gemini-response
+               ::gemini-system-instruction gemini-system-instruction
+               ::gemini-code gemini-code
+               ::gemini-tokens gemini-tokens
+               :xt/valid-from now}]
+    (swap! review-events conj event)
+    {::success true
+     ::tx-id tx-id}))
 
 (defn record-todos!
   "Record an agent's todo list snapshot.
@@ -463,29 +476,30 @@
    enabling widgets to show task progress.
 
    Request keys:
-     ::xtdb-node  - Required. XTDB node instance
-     ::session-id - Required. Agent session ID (e.g., 'a1b2')
+::session-id - Required. Agent session ID (e.g., 'a1b2')
      ::todos      - Required. Vector of todo items
 
    Response keys:
-     ::success - Boolean indicating if transaction succeeded
-     ::tx-id   - Transaction ID if successful
+     ::success - Boolean indicating if event was recorded
+     ::tx-id   - Synthetic transaction ID
 
    Example:
-     (record-todos! {::xtdb-node node
-                     ::session-id \"a1b2\"
+     (record-todos! {                     ::session-id \"a1b2\"
                      ::todos [{:content \"Fix bug\" :status \"completed\" :activeForm \"Fixing bug\"}
                               {:content \"Add tests\" :status \"in_progress\" :activeForm \"Adding tests\"}]})"
   {:malli/schema [:=> [:cat ::record-todos-request] ::record-todos-response]}
-  [{::keys [xtdb-node session-id todos]}]
+  [{::keys [session-id todos]}]
   (let [id (UUID/randomUUID)
-        entity-type :todo-event
-        result (node/execute-tx!
-                xtdb-node
-                [["INSERT INTO todo_event (_id, seon$dev$context$entity_type, seon$dev$context$session_id, seon$dev$context$todos) VALUES (?, ?, ?, ?)"
-                  id entity-type session-id todos]])]
-    {::success (some? result)
-     ::tx-id (:tx-id result)}))
+        now (Instant/now)
+        tx-id (next-tx-id)
+        event {:xt/id id
+               ::entity-type :todo-event
+               ::session-id session-id
+               ::todos todos
+               :xt/valid-from now}]
+    (swap! todo-events conj event)
+    {::success true
+     ::tx-id tx-id}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Query Timing
@@ -494,46 +508,36 @@
 (defn get-last-review-time
   "Get the timestamp of the most recent review, or nil if never reviewed.
 
-   Uses XTDB valid-time (_valid_from) as the authoritative timestamp.
-
    Request keys:
-     ::xtdb-node - Required. XTDB node instance
+
 
    Response keys:
-     ::timestamp - java.time.Instant or ZonedDateTime, nil if never reviewed
+     ::timestamp - java.time.Instant, nil if never reviewed
 
    Example:
-     (get-last-review-time {::xtdb-node node})
+     (get-last-review-time {})
      ;; => {::timestamp #inst \"2024-01-15T12:00:00Z\"}"
   {:malli/schema [:=> [:cat ::get-last-review-time-request] ::get-last-review-time-response]}
-  [{::keys [xtdb-node]}]
-  {::timestamp (-> (node/sql-query
-                    xtdb-node
-                    "SELECT _valid_from FROM review_event ORDER BY _valid_from DESC LIMIT 1")
-                   first
-                   :xt/valid-from)})
+  [_request]
+  {::timestamp (when-let [events (seq @review-events)]
+                 (:xt/valid-from (last events)))})
 
 (defn get-last-edit-time
   "Get the timestamp of the most recent edit, or nil if no edits.
 
-   Uses XTDB valid-time (_valid_from) as the authoritative timestamp.
-
    Request keys:
-     ::xtdb-node - Required. XTDB node instance
+
 
    Response keys:
-     ::timestamp - java.time.Instant or ZonedDateTime, nil if no edits
+     ::timestamp - java.time.Instant, nil if no edits
 
    Example:
-     (get-last-edit-time {::xtdb-node node})
+     (get-last-edit-time {})
      ;; => {::timestamp #inst \"2024-01-15T12:00:00Z\"}"
   {:malli/schema [:=> [:cat ::get-last-edit-time-request] ::get-last-edit-time-response]}
-  [{::keys [xtdb-node]}]
-  {::timestamp (-> (node/sql-query
-                    xtdb-node
-                    "SELECT _valid_from FROM edit_event ORDER BY _valid_from DESC LIMIT 1")
-                   first
-                   :xt/valid-from)})
+  [_request]
+  {::timestamp (when-let [events (seq @edit-events)]
+                 (:xt/valid-from (last events)))})
 
 ;;; ---------------------------------------------------------------------------
 ;;; Query Edits
@@ -545,25 +549,22 @@
    If no review has occurred, returns all edits.
 
    Request keys:
-     ::xtdb-node - Required. XTDB node instance
+
 
    Response keys:
      ::edits - Vector of edit event maps, oldest first
 
    Example:
-     (edits-since-last-review {::xtdb-node node})
+     (edits-since-last-review {})
      ;; => {::edits [{::file \"/path/to/a.clj\" ::namespace :seon.a} ...]}"
   {:malli/schema [:=> [:cat ::edits-since-last-review-request] ::edits-since-last-review-response]}
-  [{::keys [xtdb-node]}]
-  (let [last-review (::timestamp (get-last-review-time {::xtdb-node xtdb-node}))]
-    {::edits (vec (if last-review
-                    (node/sql-query
-                     xtdb-node
-                     ["SELECT *, _valid_from FROM edit_event WHERE _valid_from > ? ORDER BY _valid_from"
-                      last-review])
-                    (node/sql-query
-                     xtdb-node
-                     "SELECT *, _valid_from FROM edit_event ORDER BY _valid_from")))}))
+  [_request]
+  (let [last-review-ts (::timestamp (get-last-review-time {}))
+        all-edits @edit-events]
+    {::edits (vec (if last-review-ts
+                    (let [review-ms (instant->epoch-ms last-review-ts)]
+                      (filter #(> (instant->epoch-ms (:xt/valid-from %)) review-ms) all-edits))
+                    all-edits))}))
 
 (defn edits-summary
   "Get a summary of edits since last review.
@@ -571,7 +572,7 @@
    Returns a map suitable for building review context.
 
    Request keys:
-     ::xtdb-node - Required. XTDB node instance
+
 
    Response keys:
      ::files      - Set of file paths that were edited
@@ -579,11 +580,11 @@
      ::edit-count - Total number of edit events
 
    Example:
-     (edits-summary {::xtdb-node node})
+     (edits-summary {})
      ;; => {::files #{\"a.clj\" \"b.clj\"} ::namespaces #{:seon.a} ::edit-count 5}"
   {:malli/schema [:=> [:cat ::edits-summary-request] ::edits-summary-response]}
-  [{::keys [xtdb-node]}]
-  (let [edits (::edits (edits-since-last-review {::xtdb-node xtdb-node}))]
+  [request]
+  (let [edits (::edits (edits-since-last-review request))]
     {::files (set (map ::file edits))
      ::namespaces (set (keep ::namespace edits))
      ::edit-count (count edits)}))
@@ -596,30 +597,25 @@
   "Determine if a review should trigger now.
 
    Uses simple rate limiting: at most one review per interval-seconds.
-   This is simpler and more reliable than debounce logic.
 
    Returns true if ALL conditions are met:
    1. There are edits since the last review
    2. Either: never reviewed, OR interval has passed since last review
 
    Request keys:
-     ::xtdb-node        - Required. XTDB node instance
-     ::interval-seconds - Optional. Minimum seconds between reviews (default: 60)
+::interval-seconds - Optional. Minimum seconds between reviews (default: 60)
 
    Response keys:
      ::should-review - Boolean indicating if review should trigger
 
    Example:
-     (should-review? {::xtdb-node node})
-     ;; => {::should-review true}
-
-     (should-review? {::xtdb-node node ::interval-seconds 30})
+     (should-review? {})
      ;; => {::should-review true}"
   {:malli/schema [:=> [:cat ::should-review-request] ::should-review-response]}
-  [{::keys [xtdb-node interval-seconds]}]
+  [{::keys [interval-seconds]}]
   (let [interval-seconds (or interval-seconds 60)
-        last-review (::timestamp (get-last-review-time {::xtdb-node xtdb-node}))
-        last-edit (::timestamp (get-last-edit-time {::xtdb-node xtdb-node}))
+        last-review (::timestamp (get-last-review-time {}))
+        last-edit (::timestamp (get-last-edit-time {}))
         now (Instant/now)]
     {::should-review
      (boolean
@@ -644,27 +640,21 @@
 (defn clear-all-events!
   "Clear all edit and review events. USE WITH CAUTION - for testing only.
 
-   This deletes all events permanently using XTDB erase.
-
    Request keys:
-     ::xtdb-node - Required. XTDB node instance
+
 
    Response keys:
      ::success - Boolean indicating if operation completed
 
    Example:
-     (clear-all-events! {::xtdb-node node})
+     (clear-all-events! {})
      ;; => {::success true}"
   {:malli/schema [:=> [:cat ::clear-all-events-request] ::clear-all-events-response]}
-  [{::keys [xtdb-node]}]
-  (let [edit-ids (map :xt/id (node/sql-query xtdb-node "SELECT _id FROM edit_event"))
-        review-ids (map :xt/id (node/sql-query xtdb-node "SELECT _id FROM review_event"))]
-    ;; Use SQL ERASE instead of :erase-docs due to XTDB v2.1.0-rc0 bug
-    (doseq [id edit-ids]
-      (node/execute-tx! xtdb-node [["ERASE FROM edit_event WHERE _id = ?" id]]))
-    (doseq [id review-ids]
-      (node/execute-tx! xtdb-node [["ERASE FROM review_event WHERE _id = ?" id]]))
-    {::success true}))
+  [_request]
+  (reset! edit-events [])
+  (reset! review-events [])
+  (reset! todo-events [])
+  {::success true})
 
 ;;; ---------------------------------------------------------------------------
 ;;; Query Helpers for Analysis (Phase 7b Observability)
@@ -676,27 +666,24 @@
    Returns vector of edit events, newest first.
 
    Request keys:
-     ::xtdb-node - Required. XTDB node instance
+
      ::file-path - Required. Path to the file
 
    Response keys:
      ::edits - Vector of edit event maps, newest first
 
    Example:
-     (edits-for-file {::xtdb-node node ::file-path \"/path/to/file.clj\"})
+     (edits-for-file {::file-path \"/path/to/file.clj\"})
      ;; => {::edits [{::file \"...\" ::decision :continue ...} ...]}"
   {:malli/schema [:=> [:cat ::edits-for-file-request] ::edits-for-file-response]}
-  [{::keys [xtdb-node file-path]}]
-  {::edits (vec (node/sql-query
-                 xtdb-node
-                 ["SELECT *, _valid_from FROM edit_event WHERE seon$dev$context$file = ? ORDER BY _valid_from DESC"
-                  file-path]))})
+  [{::keys [file-path]}]
+  {::edits (vec (reverse (filter #(= file-path (::file %)) @edit-events)))})
 
 (defn reviews-in-range
   "Get review events in a time range.
 
    Request keys:
-     ::xtdb-node     - Required. XTDB node instance
+
      ::start-instant - Required. Start time (Instant)
      ::end-instant   - Optional. End time (Instant), defaults to now
 
@@ -704,21 +691,23 @@
      ::reviews - Vector of review event maps, newest first
 
    Example:
-     (reviews-in-range {::xtdb-node node
-                        ::start-instant (.minus (Instant/now) (Duration/ofHours 1))})"
+     (reviews-in-range {  ::start-instant (.minus (Instant/now) (Duration/ofHours 1))})"
   {:malli/schema [:=> [:cat ::reviews-in-range-request] ::reviews-in-range-response]}
-  [{::keys [xtdb-node start-instant end-instant]}]
-  (let [end-instant (or end-instant (Instant/now))]
-    {::reviews (vec (node/sql-query
-                     xtdb-node
-                     ["SELECT *, _valid_from FROM review_event WHERE _valid_from >= ? AND _valid_from <= ? ORDER BY _valid_from DESC"
-                      start-instant end-instant]))}))
+  [{::keys [start-instant end-instant]}]
+  (let [end-instant (or end-instant (Instant/now))
+        start-ms (instant->epoch-ms start-instant)
+        end-ms (instant->epoch-ms end-instant)]
+    {::reviews (vec (reverse
+                     (filter (fn [r]
+                               (let [t-ms (instant->epoch-ms (:xt/valid-from r))]
+                                 (and (>= t-ms start-ms) (<= t-ms end-ms))))
+                             @review-events)))}))
 
 (defn failure-rate
   "Calculate the percentage of edits that resulted in blocks.
 
    Request keys:
-     ::xtdb-node - Required. XTDB node instance
+
 
    Response keys:
      ::total   - Total edit count
@@ -726,18 +715,13 @@
      ::rate    - Failure rate as decimal (0.0 - 1.0)
 
    Example:
-     (failure-rate {::xtdb-node node})
+     (failure-rate {})
      ;; => {::total 100 ::blocked 5 ::rate 0.05}"
   {:malli/schema [:=> [:cat ::failure-rate-request] ::failure-rate-response]}
-  [{::keys [xtdb-node]}]
-  (let [total-result (node/sql-query
-                      xtdb-node
-                      "SELECT COUNT(*) as cnt FROM edit_event")
-        blocked-result (node/sql-query
-                        xtdb-node
-                        "SELECT COUNT(*) as cnt FROM edit_event WHERE seon$dev$context$decision = 'block'")
-        total (or (:cnt (first total-result)) 0)
-        blocked (or (:cnt (first blocked-result)) 0)]
+  [_request]
+  (let [all-edits @edit-events
+        total (count all-edits)
+        blocked (count (filter #(= :block (::decision %)) all-edits))]
     {::total total
      ::blocked blocked
      ::rate (if (pos? total)
@@ -748,7 +732,7 @@
   "Get total Gemini token usage in a time period.
 
    Request keys:
-     ::xtdb-node     - Required. XTDB node instance
+
      ::start-instant - Required. Start time (Instant)
      ::end-instant   - Optional. End time (Instant), defaults to now
 
@@ -759,13 +743,10 @@
      ::review-count    - Number of reviews
 
    Example:
-     (gemini-token-usage {::xtdb-node node
-                          ::start-instant (.minus (Instant/now) (Duration/ofHours 24))})"
+     (gemini-token-usage {    ::start-instant (.minus (Instant/now) (Duration/ofHours 24))})"
   {:malli/schema [:=> [:cat ::gemini-token-usage-request] ::gemini-token-usage-response]}
-  [{::keys [xtdb-node start-instant end-instant]}]
-  (let [reviews (::reviews (reviews-in-range {::xtdb-node xtdb-node
-                                               ::start-instant start-instant
-                                               ::end-instant end-instant}))
+  [{::keys [start-instant end-instant] :as request}]
+  (let [reviews (::reviews (reviews-in-range request))
         tokens (keep ::gemini-tokens reviews)]
     {::prompt-tokens (reduce + 0 (keep :prompt tokens))
      ::response-tokens (reduce + 0 (keep :response tokens))
@@ -776,7 +757,7 @@
   "Get summary of recent hook activity.
 
    Request keys:
-     ::xtdb-node - Required. XTDB node instance
+
      ::hours     - Optional. Hours to look back (default: 1)
 
    Response keys:
@@ -788,20 +769,17 @@
      ::gemini-tokens - Token usage summary
 
    Example:
-     (recent-activity {::xtdb-node node ::hours 24})"
+     (recent-activity {::hours 24})"
   {:malli/schema [:=> [:cat ::recent-activity-request] ::recent-activity-response]}
-  [{::keys [xtdb-node hours]}]
+  [{::keys [hours] :as request}]
   (let [hours (or hours 1)
         start-inst (.minus (Instant/now) (java.time.Duration/ofHours hours))
-        edits (node/sql-query
-               xtdb-node
-               ["SELECT *, _valid_from FROM edit_event WHERE _valid_from >= ? ORDER BY _valid_from DESC"
-                start-inst])
-        reviews (::reviews (reviews-in-range {::xtdb-node xtdb-node
-                                               ::start-instant start-inst}))
+        start-ms (instant->epoch-ms start-inst)
+        edits (filter #(>= (instant->epoch-ms (:xt/valid-from %)) start-ms)
+                       @edit-events)
+        reviews (::reviews (reviews-in-range (assoc request ::start-instant start-inst)))
         blocked (count (filter #(= :block (::decision %)) edits))
-        tokens (gemini-token-usage {::xtdb-node xtdb-node
-                                     ::start-instant start-inst})]
+        tokens (gemini-token-usage (assoc request ::start-instant start-inst))]
     {::period-hours hours
      ::edit-count (count edits)
      ::review-count (count reviews)
@@ -821,25 +799,23 @@
    Returns the latest todo_event for the given session, or nil if none exists.
 
    Request keys:
-     ::xtdb-node  - Required. XTDB node instance
-     ::session-id - Required. Agent session ID (e.g., 'a1b2')
+::session-id - Required. Agent session ID (e.g., 'a1b2')
 
    Response keys:
      ::todos     - Vector of todo items, or nil if no todos recorded
      ::timestamp - When the todo list was recorded
 
    Example:
-     (latest-todos {::xtdb-node node ::session-id \"a1b2\"})
+     (latest-todos {::session-id \"a1b2\"})
      ;; => {::todos [{:content \"Fix bug\" :status \"completed\" ...}]
      ;;     ::timestamp #inst \"2024-01-15T12:00:00Z\"}"
   {:malli/schema [:=> [:cat ::latest-todos-request] ::latest-todos-response]}
-  [{::keys [xtdb-node session-id]}]
-  (let [result (first (node/sql-query
-                       xtdb-node
-                       ["SELECT seon$dev$context$todos, _valid_from FROM todo_event WHERE seon$dev$context$session_id = ? ORDER BY _valid_from DESC LIMIT 1"
-                        session-id]))]
-    {::todos (::todos result)
-     ::timestamp (:xt/valid-from result)}))
+  [{::keys [session-id]}]
+  (let [matching (->> @todo-events
+                      (filter #(= session-id (::session-id %)))
+                      last)]
+    {::todos (::todos matching)
+     ::timestamp (:xt/valid-from matching)}))
 
 (defn latest-test-result
   "Get the most recent test result for an agent session.
@@ -848,8 +824,7 @@
    Filters to edit events that have unit or gen test results.
 
    Request keys:
-     ::xtdb-node  - Required. XTDB node instance
-     ::session-id - Required. Agent session ID (used to find session's edits)
+::session-id - Required. Agent session ID (used to find session's edits)
 
    Response keys:
      ::unit-test-result - Unit test summary or nil
@@ -858,14 +833,11 @@
      ::timestamp        - When the test ran
 
    Example:
-     (latest-test-result {::xtdb-node node ::session-id \"a1b2\"})"
-  [{::keys [xtdb-node _session-id]}]
-  ;; Note: edit_events don't have session_id, they're stored by the hook.
-  ;; For now, just get the most recent edit event with test results.
-  ;; TODO: Add session_id to edit_events for proper filtering
-  (let [result (first (node/sql-query
-                       xtdb-node
-                       "SELECT seon$dev$context$unit_test_result, seon$dev$context$gen_test_result, seon$dev$context$file, _valid_from FROM edit_event WHERE seon$dev$context$unit_test_result IS NOT NULL OR seon$dev$context$gen_test_result IS NOT NULL ORDER BY _valid_from DESC LIMIT 1"))]
+     (latest-test-result {::session-id \"a1b2\"})"
+  [{::keys [_session-id]}]
+  (let [result (->> @edit-events
+                    (filter #(or (::unit-test-result %) (::gen-test-result %)))
+                    last)]
     {::unit-test-result (::unit-test-result result)
      ::gen-test-result (::gen-test-result result)
      ::file (::file result)
@@ -877,7 +849,7 @@
    Returns the latest review_event with response data.
 
    Request keys:
-     ::xtdb-node - Required. XTDB node instance
+
 
    Response keys:
      ::gemini-response - The review text
@@ -886,11 +858,11 @@
      ::timestamp       - When the review occurred
 
    Example:
-     (latest-review {::xtdb-node node})"
-  [{::keys [xtdb-node]}]
-  (let [result (first (node/sql-query
-                       xtdb-node
-                       "SELECT seon$dev$context$gemini_response, seon$dev$context$gemini_tokens, seon$dev$context$files, _valid_from FROM review_event WHERE seon$dev$context$gemini_response IS NOT NULL ORDER BY _valid_from DESC LIMIT 1"))]
+     (latest-review {})"
+  [_request]
+  (let [result (->> @review-events
+                    (filter ::gemini-response)
+                    last)]
     {::gemini-response (::gemini-response result)
      ::gemini-tokens (::gemini-tokens result)
      ::files (::files result)
@@ -899,37 +871,32 @@
 (comment
   ;; REPL exploration
 
-  ;; Start with a test node (requires running server)
   (require '[seon.dev.context :as ctx])
-  (def node (user/xtdb-node))
 
   ;; Record some edits
-  (record-edit! {::xtdb-node node
-                 ::file-path "/tmp/test.clj"
+  (record-edit! {                 ::file-path "/tmp/test.clj"
                  ::namespace 'seon.test})
-  (record-edit! {::xtdb-node node
-                 ::file-path "/tmp/other.clj"
+  (record-edit! {                 ::file-path "/tmp/other.clj"
                  ::namespace 'seon.other})
 
   ;; Check timing
-  (get-last-edit-time {::xtdb-node node})
-  (get-last-review-time {::xtdb-node node})  ; {::timestamp nil} initially
+  (get-last-edit-time {})
+  (get-last-review-time {})
 
   ;; Should we review?
-  (should-review? {::xtdb-node node})  ; {::should-review true} - never reviewed
+  (should-review? {})
 
   ;; Get edits
-  (edits-since-last-review {::xtdb-node node})
-  (edits-summary {::xtdb-node node})
+  (edits-since-last-review {})
+  (edits-summary {})
 
   ;; Record review completion
-  (record-review! {::xtdb-node node
-                   ::files #{"/tmp/test.clj" "/tmp/other.clj"}})
+  (record-review! {                   ::files #{"/tmp/test.clj" "/tmp/other.clj"}})
 
   ;; Now should-review? returns false (just reviewed)
-  (should-review? {::xtdb-node node})  ; {::should-review false}
+  (should-review? {})
 
-  ;; With shorter interval, can test timing
-  (should-review? {::xtdb-node node ::interval-seconds 1})
+  ;; Clear all
+  (clear-all-events! {})
 
   nil)

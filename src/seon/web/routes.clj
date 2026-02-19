@@ -6,6 +6,7 @@
             [seon.web.handlers :as handlers]
             [seon.web.agents :as agents]
             [seon.web.namespace :as namespace]
+            [seon.web.flows :as flows]
             [seon.web.browser :as browser]
             [seon.ns.routes :as ns-routes]
             [seon.primer.handlers :as primer-handlers]))
@@ -26,6 +27,9 @@
    ;; Primer debug routes
    [:get "/primer/ctx"]            #'primer-handlers/ctx-handler
    [:get "/primer/debug"]          #'primer-handlers/debug-page-handler
+   ;; Flow monitor routes
+   [:get "/flows"]                 #'flows/flows-page
+   [:post "/flows"]                #'flows/flows-sse
    ;; Agent observatory routes
    [:get "/agents"]                #'agents/agents-page
    [:post "/agents"]               #'agents/agents-sse
