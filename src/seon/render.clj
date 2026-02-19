@@ -24,6 +24,7 @@
      (render/for-ai {:positions [pos pos2] :total 25000.0})"
   (:require [clojure.pprint :as pp]
             [clojure.string :as str]
+            [datalevin.core :as d]
             [seon.schema :as schema]))
 
 ;;; ---------------------------------------------------------------------------
@@ -235,6 +236,61 @@
 
     ;; Anything else
     :else (pr-str v)))
+
+;;; ---------------------------------------------------------------------------
+;;; Datalevin-Based Renderer Resolution
+;;; ---------------------------------------------------------------------------
+
+(defn find-renderer
+  "Find the best render function for the given data and format.
+
+   Queries Datalevin for functions with :seon.fn/render-input-keys
+   that are a subset of the data's keys.
+
+   Resolution order:
+   1. Most input keys matched (specificity)
+   2. Newest updated-at (recency)
+   3. Alphabetical qualified-name (deterministic tiebreaker)
+
+   Arguments:
+     conn   - Datalevin connection
+     data   - Map of data to render
+     format - :html or :ai
+
+   Returns the qualified-name string of the best renderer, or nil."
+  [conn data format]
+  (let [data-keys (set (keys data))
+        format-key (case format :html :seon.render/html :ai :seon.render/ai)
+        ;; Pull all fn entities that have render-input-keys
+        candidates (d/q '[:find ?e
+                          :where
+                          [?e :seon.fn/render-input-keys]]
+                        @conn)
+        entities (map (fn [[eid]]
+                        (d/pull @conn
+                                [:seon.fn/qualified-name
+                                 :seon.fn/render-input-keys
+                                 :seon.fn/updated-at
+                                 {:seon.fn/output-spec [:seon.spec/contains-keys]}]
+                                eid))
+                      candidates)
+        ;; Filter: input keys must be subset of data keys
+        ;; AND output spec must contain the format key
+        matching (->> entities
+                      (filter (fn [e]
+                                (let [rkeys (:seon.fn/render-input-keys e)
+                                      out-keys (set (get-in e [:seon.fn/output-spec :seon.spec/contains-keys]))]
+                                  (and (every? data-keys rkeys)
+                                       (contains? out-keys format-key))))))]
+    (when (seq matching)
+      (->> matching
+           (sort-by (juxt (comp - count :seon.fn/render-input-keys)
+                          (comp - (fn [e] (if-let [t (:seon.fn/updated-at e)]
+                                            (.getTime ^java.util.Date t)
+                                            0)))
+                          :seon.fn/qualified-name))
+           first
+           :seon.fn/qualified-name))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; REPL / Development

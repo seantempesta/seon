@@ -85,6 +85,70 @@
     (is (nil? (scanner/extract-contains-keys [:int {:min 0}])))
     (is (nil? (scanner/extract-contains-keys :string)))))
 
+(deftest link-fns-to-specs-test
+  (testing "links functions to matching request/response specs"
+    (let [fns [{:seon.fn/qualified-name "seon.health.workout/log-workout"
+                :seon.fn/namespace "seon.health.workout"
+                :seon.fn/name "log-workout"}]
+          specs [{:seon.spec/key :seon.health.workout/log-workout-request
+                  :seon.spec/namespace "seon.health.workout"
+                  :seon.spec/base-type :map
+                  :seon.spec/contains-keys [:seon.health.workout/exercise
+                                            :seon.health.workout/sets]
+                  :seon.spec/definition "[:map ...]"
+                  :seon.spec/updated-at (java.util.Date.)}
+                 {:seon.spec/key :seon.health.workout/log-workout-response
+                  :seon.spec/namespace "seon.health.workout"
+                  :seon.spec/base-type :map
+                  :seon.spec/contains-keys [:seon.health.workout/id]
+                  :seon.spec/definition "[:map ...]"
+                  :seon.spec/updated-at (java.util.Date.)}]
+          result (scanner/link-fns-to-specs fns specs)
+          fn-entity (first result)]
+      (is (= [:seon.spec/key :seon.health.workout/log-workout-request]
+             (:seon.fn/input-spec fn-entity)))
+      (is (= [:seon.spec/key :seon.health.workout/log-workout-response]
+             (:seon.fn/output-spec fn-entity)))
+      (is (inst? (:seon.fn/updated-at fn-entity)))
+      (is (nil? (:seon.fn/render-input-keys fn-entity))
+          "Non-render function should not have render-input-keys")))
+
+  (testing "detects render functions and populates render-input-keys"
+    (let [fns [{:seon.fn/qualified-name "seon.health.workout.render/workout-set"
+                :seon.fn/namespace "seon.health.workout.render"
+                :seon.fn/name "workout-set"}]
+          specs [{:seon.spec/key :seon.health.workout.render/workout-set-request
+                  :seon.spec/namespace "seon.health.workout.render"
+                  :seon.spec/base-type :map
+                  :seon.spec/contains-keys [:seon.health.workout/exercise
+                                            :seon.health.workout/sets
+                                            :seon.health.workout/reps]
+                  :seon.spec/definition "[:map ...]"
+                  :seon.spec/updated-at (java.util.Date.)}
+                 {:seon.spec/key :seon.health.workout.render/workout-set-response
+                  :seon.spec/namespace "seon.health.workout.render"
+                  :seon.spec/base-type :map
+                  :seon.spec/contains-keys [:seon.render/html :seon.render/ai]
+                  :seon.spec/definition "[:map ...]"
+                  :seon.spec/updated-at (java.util.Date.)}]
+          result (scanner/link-fns-to-specs fns specs)
+          fn-entity (first result)]
+      (is (= [:seon.health.workout/exercise
+              :seon.health.workout/sets
+              :seon.health.workout/reps]
+             (:seon.fn/render-input-keys fn-entity))
+          "Render function should have input keys populated")))
+
+  (testing "handles functions with no matching specs"
+    (let [fns [{:seon.fn/qualified-name "seon.foo/bar"
+                :seon.fn/namespace "seon.foo"
+                :seon.fn/name "bar"}]
+          result (scanner/link-fns-to-specs fns [])]
+      (is (= 1 (count result)))
+      (is (nil? (:seon.fn/input-spec (first result))))
+      (is (nil? (:seon.fn/output-spec (first result))))
+      (is (inst? (:seon.fn/updated-at (first result)))))))
+
 (comment
   (require '[kaocha.repl :as k])
   (k/run 'seon.graph.scanner-test)

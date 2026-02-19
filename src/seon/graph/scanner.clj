@@ -253,6 +253,57 @@
            vec))))
 
 ;;; ---------------------------------------------------------------------------
+;;; Function-to-Spec Linking
+;;; ---------------------------------------------------------------------------
+
+(defn link-fns-to-specs
+  "Link function entities to their input/output spec entities by naming convention.
+
+   For a function `seon.foo/bar`, looks for:
+   - Input spec:  `:seon.foo/bar-request`
+   - Output spec: `:seon.foo/bar-response`
+
+   If the output spec contains `:seon.render/html` or `:seon.render/ai` in its
+   `:seon.spec/contains-keys`, the function is a render function and gets
+   `:seon.fn/render-input-keys` populated from the input spec's contains-keys.
+
+   Arguments:
+     fns   - Vector of fn entity maps (with :seon.fn/qualified-name)
+     specs - Vector of spec entity maps (with :seon.spec/key)
+
+   Returns vector of fn entity maps with added keys:
+     :seon.fn/input-spec        - Lookup ref [:seon.spec/key ...] when matched
+     :seon.fn/output-spec       - Lookup ref [:seon.spec/key ...] when matched
+     :seon.fn/render-input-keys - Vector of keywords from input spec (render fns only)
+     :seon.fn/updated-at        - Current timestamp"
+  [fns specs]
+  (let [spec-by-key (into {} (map (juxt :seon.spec/key identity)) specs)
+        now (java.util.Date.)
+        render-keys #{:seon.render/html :seon.render/ai}]
+    (mapv (fn [fn-entity]
+            (let [qn (:seon.fn/qualified-name fn-entity)
+                  ;; Derive expected spec keys from qualified name
+                  input-key (keyword (str qn "-request"))
+                  output-key (keyword (str qn "-response"))
+                  input-spec (get spec-by-key input-key)
+                  output-spec (get spec-by-key output-key)
+                  ;; Check if output spec contains render keys
+                  output-contains (set (:seon.spec/contains-keys output-spec))
+                  is-render? (and output-spec
+                                  (some render-keys output-contains))
+                  input-contains (:seon.spec/contains-keys input-spec)]
+              (cond-> (assoc fn-entity :seon.fn/updated-at now)
+                input-spec
+                (assoc :seon.fn/input-spec [:seon.spec/key input-key])
+
+                output-spec
+                (assoc :seon.fn/output-spec [:seon.spec/key output-key])
+
+                (and is-render? (seq input-contains))
+                (assoc :seon.fn/render-input-keys (vec input-contains)))))
+          fns)))
+
+;;; ---------------------------------------------------------------------------
 ;;; REPL Helpers
 ;;; ---------------------------------------------------------------------------
 
