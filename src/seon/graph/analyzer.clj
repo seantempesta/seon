@@ -23,6 +23,7 @@
      (analyzer/extract-entities {::raw-analysis {...}})
      ;; => {::namespaces [...] ::functions [...] ::var-usages [...] ::namespace-usages [...]}"
   (:require [clj-kondo.core :as clj-kondo]
+            [clojure.string :as str]
             [seon.schema :as schema]))
 
 ;;; ---------------------------------------------------------------------------
@@ -54,36 +55,32 @@
 ;; Entity schemas for extract-entities output
 (schema/register! ::namespace-entity
                   [:map
-                   [:graph/type [:= :namespace]]
-                   [:graph/name :string]
-                   [:graph/file {:optional true} :string]
-                   [:graph/doc {:optional true} :string]])
+                   [:seon.ns/name :string]
+                   [:seon.ns/file {:optional true} :string]
+                   [:seon.ns/doc {:optional true} :string]
+                   [:seon.ns/target {:optional true} :keyword]])
 
 (schema/register! ::function-entity
                   [:map
-                   [:graph/type [:= :function]]
-                   [:graph/name :string]
-                   [:graph/ns :string]
-                   [:graph/arglists {:optional true} [:vector :string]]
-                   [:graph/public? {:optional true} :boolean]
-                   [:graph/line {:optional true} :int]
-                   [:graph/doc {:optional true} :string]])
+                   [:seon.fn/qualified-name :string]
+                   [:seon.fn/name :string]
+                   [:seon.fn/namespace :string]
+                   [:seon.fn/arglists {:optional true} :string]
+                   [:seon.fn/private {:optional true} :boolean]
+                   [:seon.fn/row {:optional true} :int]
+                   [:seon.fn/doc {:optional true} :string]])
 
 (schema/register! ::ns-dependency-entity
                   [:map
-                   [:graph/type [:= :ns-dependency]]
-                   [:graph/from-ns :string]
-                   [:graph/to-ns :string]
-                   [:graph/alias {:optional true} :string]])
+                   [:seon.ns.dep/from-ns :string]
+                   [:seon.ns.dep/to-ns :string]
+                   [:seon.ns.dep/alias {:optional true} :string]])
 
 (schema/register! ::var-usage-entity
                   [:map
-                   [:graph/type [:= :var-usage]]
-                   [:graph/from-ns :string]
-                   [:graph/from-var {:optional true} :string]
-                   [:graph/to-ns :string]
-                   [:graph/name :string]
-                   [:graph/line {:optional true} :int]])
+                   [:seon.call/from-fn :string]
+                   [:seon.call/to-fn :string]
+                   [:seon.call/row {:optional true} :int]])
 
 (schema/register! ::namespaces
                   [:vector ::namespace-entity])
@@ -143,56 +140,69 @@
                        :var-definitions {:shallow true}
                        :namespace-definitions {:shallow true}}}})
 
+(defn- file->target
+  "Derive target platform keyword from file extension.
+   .clj -> :clj, .cljs -> :cljs, .cljc -> :cljc. Defaults to :clj."
+  [filename]
+  (cond
+    (str/ends-with? filename ".cljs") :cljs
+    (str/ends-with? filename ".cljc") :cljc
+    :else :clj))
+
 (defn- extract-namespace-entities
-  "Transform clj-kondo namespace-definitions to graph namespace entities."
+  "Transform clj-kondo namespace-definitions to namespace entities."
   [ns-defs]
   (->> (or ns-defs [])
        (map (fn [nd]
-              (cond-> {:graph/type :namespace
-                       :graph/name (str (:name nd))}
-                (:filename nd) (assoc :graph/file (:filename nd))
-                (:doc nd)      (assoc :graph/doc (:doc nd)))))
+              (cond-> {:seon.ns/name (str (:name nd))}
+                (:filename nd) (assoc :seon.ns/file (:filename nd)
+                                      :seon.ns/target (file->target (:filename nd)))
+                (:doc nd)      (assoc :seon.ns/doc (:doc nd)))))
        vec))
 
 (defn- extract-function-entities
-  "Transform clj-kondo var-definitions to graph function entities."
+  "Transform clj-kondo var-definitions to function entities."
   [var-defs]
   (->> (or var-defs [])
        (map (fn [vd]
-              (cond-> {:graph/type :function
-                       :graph/name (str (:name vd))
-                       :graph/ns (str (:ns vd))}
-                (:arglist-strs vd) (assoc :graph/arglists (vec (:arglist-strs vd)))
-                (some? (:private vd)) (assoc :graph/public? (not (:private vd)))
-                (nil? (:private vd)) (assoc :graph/public? true)
-                (:row vd) (assoc :graph/line (:row vd))
-                (:doc vd) (assoc :graph/doc (:doc vd)))))
+              (let [ns-str (str (:ns vd))
+                    name-str (str (:name vd))]
+                (cond-> {:seon.fn/qualified-name (str ns-str "/" name-str)
+                         :seon.fn/name name-str
+                         :seon.fn/namespace ns-str}
+                  (:arglist-strs vd) (assoc :seon.fn/arglists (pr-str (vec (:arglist-strs vd))))
+                  (some? (:private vd)) (assoc :seon.fn/private (:private vd))
+                  (nil? (:private vd)) (assoc :seon.fn/private false)
+                  (:row vd) (assoc :seon.fn/row (:row vd))
+                  (:doc vd) (assoc :seon.fn/doc (:doc vd))))))
        vec))
 
 (defn- extract-ns-dependency-entities
-  "Transform clj-kondo namespace-usages to graph dependency entities."
+  "Transform clj-kondo namespace-usages to dependency entities."
   [ns-usages]
   (->> (or ns-usages [])
        (map (fn [nu]
-              (cond-> {:graph/type :ns-dependency
-                       :graph/from-ns (str (:from nu))
-                       :graph/to-ns (str (:to nu))}
-                (:alias nu) (assoc :graph/alias (str (:alias nu))))))
+              (cond-> {:seon.ns.dep/from-ns (str (:from nu))
+                       :seon.ns.dep/to-ns (str (:to nu))}
+                (:alias nu) (assoc :seon.ns.dep/alias (str (:alias nu))))))
        ;; Deduplicate: same from-ns -> to-ns can appear multiple times
        (distinct)
        vec))
 
 (defn- extract-var-usage-entities
-  "Transform clj-kondo var-usages to graph var-usage entities."
+  "Transform clj-kondo var-usages to call entities."
   [var-usages]
   (->> (or var-usages [])
        (map (fn [vu]
-              (cond-> {:graph/type :var-usage
-                       :graph/from-ns (str (:from vu))
-                       :graph/to-ns (str (:to vu))
-                       :graph/name (str (:name vu))}
-                (:from-var vu) (assoc :graph/from-var (str (:from-var vu)))
-                (:row vu) (assoc :graph/line (:row vu)))))
+              (let [from-ns (str (:from vu))
+                    from-var (when (:from-var vu) (str (:from-var vu)))
+                    to-ns (str (:to vu))
+                    to-name (str (:name vu))]
+                (cond-> {:seon.call/from-fn (if from-var
+                                              (str from-ns "/" from-var)
+                                              from-ns)
+                         :seon.call/to-fn (str to-ns "/" to-name)}
+                  (:row vu) (assoc :seon.call/row (:row vu))))))
        vec))
 
 ;;; ---------------------------------------------------------------------------
@@ -277,15 +287,12 @@
    Response keys:
      ::namespaces       - Vector of namespace entities
      ::functions        - Vector of function entities
-     ::var-usages       - Vector of var-usage entities
+     ::var-usages       - Vector of call entities
      ::namespace-usages - Vector of namespace dependency entities
 
    Example:
      (let [{::keys [raw-analysis]} (analyze-project! {})]
-       (extract-entities {::raw-analysis raw-analysis}))
-     ;; => {::namespaces [{:graph/type :namespace :graph/name \"seon.core\" ...}]
-     ;;     ::functions [{:graph/type :function :graph/name \"start\" ...}]
-     ;;     ...}"
+       (extract-entities {::raw-analysis raw-analysis}))"
   [{::keys [raw-analysis]}]
   {::namespaces (extract-namespace-entities (:namespace-definitions raw-analysis))
    ::functions (extract-function-entities (:var-definitions raw-analysis))
@@ -311,7 +318,7 @@
 
   ;; Check specific namespace
   (->> (::namespaces entities)
-       (filter #(= "seon.ai.claude" (:graph/name %)))
+       (filter #(= "seon.ai.claude" (:seon.ns/name %)))
        first)
 
   ;; Per-form analysis

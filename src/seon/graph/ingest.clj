@@ -8,11 +8,11 @@
    - Bulk: ingest-analysis! for full project analysis at startup
    - Incremental: ingest-incremental! for single-form updates during agent work
 
-   Entity types stored:
-   - :namespace  - Namespace definitions with file paths and docs
-   - :function   - Function definitions with arglists, visibility, line numbers
-   - :ns-dependency - Namespace require/use edges
-   - :var-usage  - Function call edges (who calls what)
+   Entity types stored (discriminated by unique identity attrs, no :graph/type):
+   - :seon.ns/*       - Namespace definitions (identity: :seon.ns/name)
+   - :seon.fn/*       - Function definitions (identity: :seon.fn/qualified-name)
+   - :seon.call/*     - Function call edges
+   - :seon.ns.dep/*   - Namespace dependency edges
 
    Example:
      (require '[seon.graph.ingest :as ingest])
@@ -31,6 +31,37 @@
             [seon.graph.analyzer :as analyzer]
             [seon.schema :as schema]
             [taoensso.timbre :as log]))
+
+;;; ---------------------------------------------------------------------------
+;;; Datalevin Schema
+;;; ---------------------------------------------------------------------------
+
+(def datalevin-schema
+  "Schema for the knowledge graph in Datalevin."
+  {;; Namespace entities
+   :seon.ns/name       {:db/valueType :db.type/string :db/unique :db.unique/identity}
+   :seon.ns/doc        {:db/valueType :db.type/string}
+   :seon.ns/file       {:db/valueType :db.type/string}
+   :seon.ns/target     {:db/valueType :db.type/keyword}
+
+   ;; Function entities
+   :seon.fn/qualified-name {:db/valueType :db.type/string :db/unique :db.unique/identity}
+   :seon.fn/namespace      {:db/valueType :db.type/string}
+   :seon.fn/name           {:db/valueType :db.type/string}
+   :seon.fn/doc            {:db/valueType :db.type/string}
+   :seon.fn/arglists       {:db/valueType :db.type/string}
+   :seon.fn/row            {:db/valueType :db.type/long}
+   :seon.fn/private        {:db/valueType :db.type/boolean}
+
+   ;; Call graph (strings for now, refs in A2)
+   :seon.call/from-fn  {:db/valueType :db.type/string}
+   :seon.call/to-fn    {:db/valueType :db.type/string}
+   :seon.call/row      {:db/valueType :db.type/long}
+
+   ;; NS dependencies
+   :seon.ns.dep/from-ns {:db/valueType :db.type/string}
+   :seon.ns.dep/to-ns   {:db/valueType :db.type/string}
+   :seon.ns.dep/alias   {:db/valueType :db.type/string}})
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schema Registration
@@ -69,15 +100,13 @@
 ;;; Private Implementation
 ;;; ---------------------------------------------------------------------------
 
-(defn- retract-by-type!
-  "Retract all entities of a given :graph/type from Datalevin.
+(defn- retract-all-with-attr!
+  "Retract all entities that have the given attribute.
    Used before bulk re-ingestion to avoid stale data."
-  [conn graph-type]
-  (let [eids (d/q '[:find ?e
-                     :in $ ?type
-                     :where
-                     [?e :graph/type ?type]]
-                   @conn graph-type)]
+  [conn attr]
+  (let [eids (d/q (list :find '?e
+                        :where ['?e attr])
+                  @conn)]
     (when (seq eids)
       (d/transact! conn (mapv (fn [[eid]] [:db/retractEntity eid]) eids)))))
 
@@ -88,24 +117,27 @@
   (let [eids (d/q '[:find ?e
                      :in $ ?ns
                      :where
-                     [?e :graph/type :function]
-                     [?e :graph/ns ?ns]]
+                     [?e :seon.fn/namespace ?ns]]
                    @conn ns-name)]
     (when (seq eids)
       (d/transact! conn (mapv (fn [[eid]] [:db/retractEntity eid]) eids)))))
 
-(defn- retract-var-usages-from-ns!
-  "Retract all var-usage entities originating from a specific namespace.
+(defn- retract-calls-from-ns!
+  "Retract all call entities originating from functions in a specific namespace.
    Used during incremental updates."
   [conn ns-name]
-  (let [eids (d/q '[:find ?e
-                     :in $ ?ns
+  (let [prefix (str ns-name "/")
+        ;; Find calls where from-fn starts with ns-name/ or equals ns-name (top-level)
+        eids (d/q '[:find ?e ?from
                      :where
-                     [?e :graph/type :var-usage]
-                     [?e :graph/from-ns ?ns]]
-                   @conn ns-name)]
-    (when (seq eids)
-      (d/transact! conn (mapv (fn [[eid]] [:db/retractEntity eid]) eids)))))
+                     [?e :seon.call/from-fn ?from]]
+                   @conn)
+        matching (filter (fn [[_ from]]
+                           (or (= from ns-name)
+                               (.startsWith ^String from prefix)))
+                         eids)]
+    (when (seq matching)
+      (d/transact! conn (mapv (fn [[eid _]] [:db/retractEntity eid]) matching)))))
 
 (defn- retract-ns-deps-from-ns!
   "Retract all ns-dependency entities originating from a specific namespace."
@@ -113,8 +145,7 @@
   (let [eids (d/q '[:find ?e
                      :in $ ?ns
                      :where
-                     [?e :graph/type :ns-dependency]
-                     [?e :graph/from-ns ?ns]]
+                     [?e :seon.ns.dep/from-ns ?ns]]
                    @conn ns-name)]
     (when (seq eids)
       (d/transact! conn (mapv (fn [[eid]] [:db/retractEntity eid]) eids)))))
@@ -161,10 +192,10 @@
         ns-deps (::analyzer/namespace-usages entities)]
     ;; Clear existing graph data
     (log/debug "Clearing existing graph data...")
-    (retract-by-type! conn :namespace)
-    (retract-by-type! conn :function)
-    (retract-by-type! conn :var-usage)
-    (retract-by-type! conn :ns-dependency)
+    (retract-all-with-attr! conn :seon.ns/name)
+    (retract-all-with-attr! conn :seon.fn/qualified-name)
+    (retract-all-with-attr! conn :seon.call/from-fn)
+    (retract-all-with-attr! conn :seon.ns.dep/from-ns)
 
     ;; Ingest new data in batches
     (log/debug "Ingesting namespaces..." {:count (count namespaces)})
@@ -193,7 +224,7 @@
    new ones. This is used after each agent eval to keep the graph current.
 
    For namespaces and functions, retract-then-insert ensures no stale data.
-   Var-usages and ns-dependencies from the affected namespace are also replaced.
+   Call entities and ns-dependencies from the affected namespace are also replaced.
 
    Note: No :malli/schema - conn is a runtime object that cannot be generated.
 
@@ -217,32 +248,27 @@
         ;; Determine affected namespaces for targeted retraction
         affected-ns-names (into #{}
                                 (concat
-                                 (map :graph/name namespaces)
-                                 (map :graph/ns functions)
-                                 (map :graph/from-ns var-usages)
-                                 (map :graph/from-ns ns-deps)))]
+                                 (map :seon.ns/name namespaces)
+                                 (map :seon.fn/namespace functions)
+                                 (keep (fn [vu]
+                                         (let [from (:seon.call/from-fn vu)]
+                                           ;; Extract ns from "ns/fn" or just "ns"
+                                           (if (.contains ^String from "/")
+                                             (subs from 0 (.indexOf ^String from "/"))
+                                             from)))
+                                       var-usages)
+                                 (map :seon.ns.dep/from-ns ns-deps)))]
     ;; Retract existing data for affected namespaces only
     (doseq [ns-name affected-ns-names]
       (retract-functions-in-ns! conn ns-name)
-      (retract-var-usages-from-ns! conn ns-name)
+      (retract-calls-from-ns! conn ns-name)
       (retract-ns-deps-from-ns! conn ns-name))
 
-    ;; Upsert namespace entities (by name)
-    (doseq [ns-entity namespaces]
-      (let [ns-name (:graph/name ns-entity)
-            existing (d/q '[:find ?e
-                            :in $ ?name
-                            :where
-                            [?e :graph/type :namespace]
-                            [?e :graph/name ?name]]
-                          @conn ns-name)]
-        (if (seq existing)
-          ;; Update existing namespace
-          (d/transact! conn [(assoc ns-entity :db/id (ffirst existing))])
-          ;; Insert new namespace
-          (d/transact! conn [ns-entity]))))
+    ;; Upsert namespace entities (identity attr :seon.ns/name handles upsert)
+    (when (seq namespaces)
+      (d/transact! conn (vec namespaces)))
 
-    ;; Insert new functions, var-usages, ns-dependencies
+    ;; Insert new functions (identity attr :seon.fn/qualified-name handles upsert)
     (when (seq functions)
       (d/transact! conn (vec functions)))
     (when (seq var-usages)
@@ -285,7 +311,7 @@
   (ingest-incremental! {::conn dl-conn ::entities form-entities})
 
   ;; Check what's in the graph
-  (d/q '[:find ?name :where [?e :graph/type :namespace] [?e :graph/name ?name]]
+  (d/q '[:find ?name :where [?e :seon.ns/name ?name]]
        @dl-conn)
 
   nil)
