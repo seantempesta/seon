@@ -61,7 +61,19 @@
    ;; NS dependencies
    :seon.ns.dep/from-ns {:db/valueType :db.type/string}
    :seon.ns.dep/to-ns   {:db/valueType :db.type/string}
-   :seon.ns.dep/alias   {:db/valueType :db.type/string}})
+   :seon.ns.dep/alias   {:db/valueType :db.type/string}
+
+   ;; Spec/schema entities (from static source scanning)
+   :seon.spec/key           {:db/valueType :db.type/keyword :db/unique :db.unique/identity}
+   :seon.spec/namespace     {:db/valueType :db.type/string}
+   :seon.spec/definition    {:db/valueType :db.type/string}
+   :seon.spec/base-type     {:db/valueType :db.type/keyword}
+   :seon.spec/contains-keys {:db/valueType :db.type/keyword :db/cardinality :db.cardinality/many}
+   :seon.spec/updated-at    {:db/valueType :db.type/instant}
+
+   ;; Function-to-spec links (populated by future phases)
+   :seon.fn/input-spec  {:db/valueType :db.type/ref}
+   :seon.fn/output-spec {:db/valueType :db.type/ref}})
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schema Registration
@@ -89,12 +101,25 @@
 (schema/register! ::ns-dependency-count
                   [:int {:min 0 :description "Number of ns-dependencies ingested"}])
 
+(schema/register! ::spec-count
+                  [:int {:min 0 :description "Number of specs ingested"}])
+
+(schema/register! ::specs
+                  [:vector {:description "Spec entities from scanner"}
+                   [:map
+                    [:seon.spec/key :keyword]
+                    [:seon.spec/namespace :string]
+                    [:seon.spec/definition :string]
+                    [:seon.spec/base-type :keyword]
+                    [:seon.spec/updated-at inst?]]])
+
 (schema/register! ::ingest-result
                   [:map
                    [::namespace-count ::namespace-count]
                    [::function-count ::function-count]
                    [::var-usage-count ::var-usage-count]
-                   [::ns-dependency-count ::ns-dependency-count]])
+                   [::ns-dependency-count ::ns-dependency-count]
+                   [::spec-count {:optional true} ::spec-count]])
 
 ;;; ---------------------------------------------------------------------------
 ;;; Private Implementation
@@ -207,16 +232,18 @@
    Request keys:
      ::conn     - Required. Datalevin connection (runtime object)
      ::entities - Required. Extracted entities from analyzer/extract-entities
+     ::specs    - Optional. Spec entities from scanner/scan-directory
 
    Response keys:
      ::namespace-count     - Number of namespaces ingested
      ::function-count      - Number of functions ingested
      ::var-usage-count     - Number of var-usages ingested
      ::ns-dependency-count - Number of namespace dependencies ingested
+     ::spec-count          - Number of specs ingested (0 if none provided)
 
    Example:
-     (ingest-analysis! {::conn conn ::entities entities})"
-  [{::keys [conn entities]}]
+     (ingest-analysis! {::conn conn ::entities entities ::specs specs})"
+  [{::keys [conn entities specs]}]
   (let [namespaces (::analyzer/namespaces entities)
         functions (::analyzer/functions entities)
         var-usages (::analyzer/var-usages entities)
@@ -227,6 +254,7 @@
     (retract-all-with-attr! conn :seon.ns.dep/from-ns)
     (retract-all-with-attr! conn :seon.fn/qualified-name)
     (retract-all-with-attr! conn :seon.ns/name)
+    (retract-all-with-attr! conn :seon.spec/key)
 
     ;; Ingest new data in order: namespaces, functions+stubs, calls (with lookup refs)
     (log/debug "Ingesting namespaces..." {:count (count namespaces)})
@@ -248,10 +276,16 @@
       (log/debug "Ingesting ns-dependencies..." {:count (count ns-deps)})
       (transact-in-batches! conn ns-deps batch-size)
 
+      ;; Ingest specs if provided
+      (when (seq specs)
+        (log/debug "Ingesting specs..." {:count (count specs)})
+        (transact-in-batches! conn specs batch-size))
+
       (let [result {::namespace-count (count namespaces)
                     ::function-count (count all-fns)
                     ::var-usage-count (count qualified-usages)
-                    ::ns-dependency-count (count ns-deps)}]
+                    ::ns-dependency-count (count ns-deps)
+                    ::spec-count (count (or specs []))}]
         (log/info "Knowledge graph ingestion complete" result)
         result))))
 
