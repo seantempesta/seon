@@ -95,6 +95,16 @@
                       :test false   ; Unit tests mock pool structure
                       :prod true}}
 
+ ;; Code Scanner (Knowledge Graph)
+ ;; Analyzes codebase at startup and populates Datalevin with the knowledge graph.
+ ;; Depends on connection-manager for Datalevin access.
+ :seon/code-scanner
+ {:connection-manager #ig/ref :seon/connection-manager
+  :paths ["src/"]
+  :enabled? #profile {:dev true
+                      :test false
+                      :prod true}}
+
  ;; Claude Code SDK Configuration
  :seon/claude-code
  {:cli-path #or [#env CLAUDE_CLI_PATH "/Users/sean/.local/bin/claude"]}}
