@@ -85,14 +85,12 @@
         connections (atom {})]
     (log/info "Namespace databases attached" {:results results})
 
-    ;; Initialize primer ctx system with a connection to its database
-    (when (some #(= 'seon.primer %) namespaces)
-      (let [primer-conn (create-conn node 'seon.primer)]
-        (swap! connections assoc 'seon.primer primer-conn)
-        (require 'seon.primer.ctx)
-        ((resolve 'seon.primer.ctx/init!) primer-conn)
-        ((resolve 'seon.primer.ctx/start-auto-sync!) 5000)
-        (log/info "Primer ctx system initialized with namespace database")))
+    ;; Initialize primer ctx system (Datalevin persistence via seon.ctx)
+    ;; Primer ctx works without a connection (in-memory only).
+    ;; A Datalevin connection can be provided later via primer.ctx/init!
+    (require 'seon.primer.ctx)
+    ((resolve 'seon.primer.ctx/init!) nil)
+    (log/info "Primer ctx system initialized (in-memory, no persistence)")
 
     ;; Return state for halt
     {:node node
@@ -102,12 +100,6 @@
 (defmethod ig/halt-key! :seon/namespace-dbs
   [_ {:keys [connections]}]
   (log/info "Cleaning up namespace database connections...")
-  ;; Stop primer auto-sync
-  (try
-    (require 'seon.primer.ctx)
-    ((resolve 'seon.primer.ctx/stop-auto-sync!))
-    (catch Exception e
-      (log/debug "Could not stop primer auto-sync" {:error (.getMessage e)})))
   ;; Close all connections
   (doseq [[ns-sym conn] @connections]
     (try
