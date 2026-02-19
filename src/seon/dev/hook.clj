@@ -266,6 +266,43 @@
            (when timing (str " (" timing ")"))))))
 
 ;;; ---------------------------------------------------------------------------
+;;; Code Index Update (Best-Effort)
+;;; ---------------------------------------------------------------------------
+
+(defn- update-code-index!
+  "Update the Datalevin code index after a file change.
+   Best-effort: logs warnings on failure, never blocks the hook."
+  [file-path]
+  (try
+    (require 'integrant.repl.state)
+    (when-let [scanner (get @(resolve 'integrant.repl.state/system) :seon/code-scanner)]
+      (when-let [conn (:conn scanner)]
+        (require 'seon.graph.analyzer)
+        (require 'seon.graph.scanner)
+        (require 'seon.graph.ingest)
+        (let [analyze-form (resolve 'seon.graph.analyzer/analyze-form)
+              extract-entities (resolve 'seon.graph.analyzer/extract-entities)
+              scan-file (resolve 'seon.graph.scanner/scan-file)
+              link-fns-to-specs (resolve 'seon.graph.scanner/link-fns-to-specs)
+              ingest-incremental! (resolve 'seon.graph.ingest/ingest-incremental!)
+              ;; Analyze the changed file
+              source (slurp file-path)
+              analysis (analyze-form {:seon.graph.analyzer/source source
+                                      :seon.graph.analyzer/file-path file-path})]
+          (when (:seon.graph.analyzer/success analysis)
+            (let [entities (extract-entities {:seon.graph.analyzer/raw-analysis
+                                             (:seon.graph.analyzer/raw-analysis analysis)})
+                  ;; Scan file for specs
+                  specs (scan-file {:seon.graph.scanner/file-path file-path})
+                  ;; Link functions to specs
+                  linked-fns (link-fns-to-specs (:seon.graph.analyzer/functions entities) specs)
+                  entities (assoc entities :seon.graph.analyzer/functions linked-fns)]
+              (ingest-incremental! {:seon.graph.ingest/conn conn
+                                    :seon.graph.ingest/entities entities}))))))
+    (catch Exception e
+      (log/debug "Code index update failed (non-blocking)" {:error (.getMessage e)}))))
+
+;;; ---------------------------------------------------------------------------
 ;;; Pipeline Stages
 ;;; ---------------------------------------------------------------------------
 
@@ -546,6 +583,9 @@
                           ;; Add feedback about what was reloaded
                               _ (when-let [loaded (seq (:loaded reload-result))]
                                   (swap! feedback conj (str "Reloaded: " (str/join ", " (map str loaded)))))
+                              ;; Best-effort code index update after successful reload
+                              _ (when (and reload-result (:success reload-result))
+                                  (update-code-index! file-path))
                               reload-block (when (and reload-result
                                                       (not (:success reload-result)))
                                              (block-response (:error reload-result)))]
@@ -657,7 +697,10 @@
   (let [dense? (get-in config [:feedback :dense])
         reload-result (stage-reload ns-sym config)
         _ (when-let [loaded (seq (:loaded reload-result))]
-            (swap! feedback conj (str "Reloaded: " (str/join ", " (map str loaded)))))]
+            (swap! feedback conj (str "Reloaded: " (str/join ", " (map str loaded)))))
+        ;; Best-effort code index update after successful reload
+        _ (when (and reload-result (:success reload-result))
+            (update-code-index! file-path))]
     (if (and reload-result (not (:success reload-result)))
       {:success false :blocked true :reason (:error reload-result) :feedback @feedback}
       (let [compliance-result (stage-compliance ns-sym config)
