@@ -443,19 +443,6 @@
        ::errors @errors})))
 
 ;;; ---------------------------------------------------------------------------
-;;; XTDB Node Reference (for completed sessions)
-;;; ---------------------------------------------------------------------------
-
-(defonce xtdb-node (atom nil))
-
-(defn init!
-  "Initialize the agent module with the XTDB node.
-   Called by the server component at startup."
-  [node]
-  (reset! xtdb-node node)
-  (log/info "Agent module initialized with XTDB node"))
-
-;;; ---------------------------------------------------------------------------
 ;;; Render Support
 ;;; ---------------------------------------------------------------------------
 
@@ -567,11 +554,10 @@
            :details (str/join " | " (drop 2 parts))})))))
 
 (defn- completed-sessions
-  "Get recent completed/failed sessions from XTDB."
+  "Get recent completed/failed sessions from Datalevin."
   [limit]
-  (when-let [node @xtdb-node]
-    (ai/list-sessions {::ai/node node
-                       ::ai/limit limit})))
+  (ai/list-sessions {::ai/node nil
+                     ::ai/limit limit}))
 
 (defn- running-agent-ids
   "Get set of AI session IDs for running agents."

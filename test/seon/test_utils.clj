@@ -49,6 +49,40 @@
          ~@body))))
 
 ;;; ---------------------------------------------------------------------------
+;;; Datalevin Test Fixture
+;;; ---------------------------------------------------------------------------
+
+(defn with-test-datalevin
+  "Fixture that provides a temporary Datalevin connection for AI tests.
+   Sets seon.ai.datalevin/*test-conn* so AI functions use it instead
+   of the Integrant system connection.
+
+   Usage:
+     (use-fixtures :each with-test-datalevin)
+
+   Can be composed with with-test-node for tests needing both."
+  [f]
+  (require 'datalevin.core)
+  (require 'seon.ai.datalevin)
+  (let [dir (str "tmp/dl-test-" (UUID/randomUUID))
+        get-conn (resolve 'datalevin.core/get-conn)
+        close-fn (resolve 'datalevin.core/close)
+        conn (get-conn dir)
+        test-conn-var (resolve 'seon.ai.datalevin/*test-conn*)]
+    (try
+      (push-thread-bindings {test-conn-var conn})
+      (try
+        (f)
+        (finally
+          (pop-thread-bindings)))
+      (finally
+        (close-fn conn)
+        ;; Clean up temp directory
+        (let [d (java.io.File. dir)]
+          (doseq [child (reverse (file-seq d))]
+            (.delete child)))))))
+
+;;; ---------------------------------------------------------------------------
 ;;; Test Data Generators
 ;;; ---------------------------------------------------------------------------
 

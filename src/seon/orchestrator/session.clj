@@ -2,12 +2,13 @@
   "Agent session management - the high-level API for agent lifecycle.
 
   Provides a simple, opaque session abstraction so agents don't need to know
-  about XTDB, nREPL ports, or persistence mechanics.
+  about Datalevin, nREPL ports, or persistence mechanics.
 
   ## Overview
 
   Sessions tie together:
-  - Isolated XTDB database (via multi-db)
+  - Isolated XTDB database for domain data (via multi-db)
+  - Datalevin persistence for session metadata
   - Persisted ctx atom (via agent.ctx)
   - Dedicated nREPL server (via orchestrator.nrepl)
 
@@ -32,12 +33,13 @@
   ;; List active sessions
   (list-agent-sessions {::node xtdb-node})
   ```"
-  (:require [seon.agent.ctx :as ctx]
+  (:require [datalevin.core :as d]
+            [seon.agent.ctx :as ctx]
+            [seon.db.datalevin.conn :as conn]
             [seon.db.multi :as multi]
             [seon.orchestrator.nrepl :as nrepl-multi]
             [seon.schema :as schema]
-            [taoensso.timbre :as log]
-            [xtdb.api :as xt])
+            [taoensso.timbre :as log])
   (:import [java.security SecureRandom]))
 
 ;;; ---------------------------------------------------------------------------
@@ -45,8 +47,9 @@
 ;;; ---------------------------------------------------------------------------
 
 ;; XTDB node - cannot be generated (requires real database)
+;; Still used for domain data (trading etc.), session metadata is in Datalevin
 (schema/register! ::node
-                  [:any {:description "XTDB orchestrator node"
+                  [:any {:description "XTDB node (for domain data)"
                          :gen/fmap (fn [_] (throw (ex-info "Cannot generate XTDB node"
                                                            {:type :malli.generator/no-generator})))}])
 
@@ -196,52 +199,110 @@
 (defonce ^:private session-registry (atom {}))
 
 ;;; ---------------------------------------------------------------------------
-;;; XTDB Session Storage
+;;; Datalevin Session Storage
 ;;; ---------------------------------------------------------------------------
 
+(def ^:private dl-schema
+  "Datalevin schema for orchestrator sessions."
+  {:orch.session/id         {:db/valueType :db.type/string :db/unique :db.unique/identity}
+   :orch.session/namespace  {:db/valueType :db.type/string}
+   :orch.session/nrepl-port {:db/valueType :db.type/long}
+   :orch.session/status     {:db/valueType :db.type/string}
+   :orch.session/started-at {:db/valueType :db.type/instant}
+   :orch.session/stopped-at {:db/valueType :db.type/instant}
+   :orch.session/db-name    {:db/valueType :db.type/string}})
+
+;; Connection manager (set via init! from Integrant)
+(defonce ^:private dl-mgr (atom nil))
+
+(defn init!
+  "Initialize orchestrator sessions with a Datalevin connection manager.
+   Called by Integrant during system startup."
+  [mgr]
+  (reset! dl-mgr mgr)
+  (log/info "Orchestrator sessions initialized with connection manager"))
+
+(defn- get-dl-conn
+  "Get Datalevin connection for orchestrator sessions.
+   Returns nil if connection manager not initialized."
+  []
+  (when-let [mgr @dl-mgr]
+    (try
+      (conn/get-namespace-conn! {::conn/manager mgr
+                                 ::conn/namespace 'seon.orchestrator
+                                 ::conn/schema dl-schema})
+      (catch Exception e
+        (log/debug "Datalevin conn unavailable for orchestrator sessions" {:error (.getMessage e)})
+        nil))))
+
 (defn- store-session!
-  "Store session info in XTDB orchestrator database.
+  "Store session info in Datalevin orchestrator database.
    Logs and continues on failure - session still works in-memory."
-  [node session-info]
+  [_node session-info]
   (try
-    (xt/execute-tx node
-      [[:sql "INSERT INTO sessions (_id, session$id, session$namespace, session$nrepl_port, session$status, session$started_at, session$db_name) VALUES (?, ?, ?, ?, ?, ?, ?)"
-        [(str "session-" (::id session-info))
-         (::id session-info)
-         (str (::namespace session-info))
-         (::nrepl-port session-info)
-         (name (::status session-info))
-         (::started-at session-info)
-         (::db-name session-info)]]])
+    (when-let [conn (get-dl-conn)]
+      (d/transact! conn [{:orch.session/id         (::id session-info)
+                           :orch.session/namespace  (str (::namespace session-info))
+                           :orch.session/nrepl-port (long (::nrepl-port session-info))
+                           :orch.session/status     (name (::status session-info))
+                           :orch.session/started-at (::started-at session-info)
+                           :orch.session/db-name    (::db-name session-info)}]))
     (catch Exception e
-      (log/warn e "Failed to store session in XTDB, continuing with in-memory only"
+      (log/warn e "Failed to store session in Datalevin, continuing with in-memory only"
                 {:session-id (::id session-info)}))))
 
 (defn- update-session-status!
-  "Update session status in XTDB orchestrator database."
-  [node session-id status stopped-at]
-  (let [doc-id (str "session-" session-id)]
-    (if stopped-at
-      (xt/execute-tx node
-        [[:sql "UPDATE sessions SET session$status = ?, session$stopped_at = ? WHERE _id = ?"
-          [(name status) stopped-at doc-id]]])
-      (xt/execute-tx node
-        [[:sql "UPDATE sessions SET session$status = ? WHERE _id = ?"
-          [(name status) doc-id]]]))))
+  "Update session status in Datalevin orchestrator database."
+  [_node session-id status stopped-at]
+  (try
+    (when-let [conn (get-dl-conn)]
+      (let [entity (cond-> {:orch.session/id session-id
+                             :orch.session/status (name status)}
+                     stopped-at (assoc :orch.session/stopped-at stopped-at))]
+        (d/transact! conn [entity])))
+    (catch Exception e
+      (log/warn "Failed to update session status in Datalevin" {:error (.getMessage e)}))))
 
 (defn- load-session-from-db
-  "Load session info from XTDB orchestrator database."
-  [node session-id]
-  (first (xt/q node
-               ["SELECT * FROM sessions WHERE _id = ?" (str "session-" session-id)]
-               {:key-fn :kebab-case-keyword})))
+  "Load session info from Datalevin orchestrator database."
+  [_node session-id]
+  (try
+    (when-let [conn (get-dl-conn)]
+      (let [results (d/q '[:find (pull ?e [*])
+                            :in $ ?sid
+                            :where [?e :orch.session/id ?sid]]
+                          @conn session-id)]
+        (when-let [entity (ffirst results)]
+          {:session-id         (:orch.session/id entity)
+           :session-namespace  (:orch.session/namespace entity)
+           :session-nrepl-port (:orch.session/nrepl-port entity)
+           :session-status     (:orch.session/status entity)
+           :session-started-at (:orch.session/started-at entity)
+           :session-stopped-at (:orch.session/stopped-at entity)
+           :session-db-name    (:orch.session/db-name entity)})))
+    (catch Exception e
+      (log/warn "Failed to load session from Datalevin" {:error (.getMessage e)})
+      nil)))
 
 (defn- load-active-sessions-from-db
-  "Load all active sessions from XTDB orchestrator database."
-  [node]
-  (xt/q node
-        ["SELECT * FROM sessions WHERE session$status = 'running'"]
-        {:key-fn :kebab-case-keyword}))
+  "Load all active sessions from Datalevin orchestrator database."
+  [_node]
+  (try
+    (when-let [conn (get-dl-conn)]
+      (let [results (d/q '[:find (pull ?e [*])
+                            :where
+                            [?e :orch.session/id _]
+                            [?e :orch.session/status "running"]]
+                          @conn)]
+        (mapv (fn [[entity]]
+                {:session-id         (:orch.session/id entity)
+                 :session-namespace  (:orch.session/namespace entity)
+                 :session-status     (:orch.session/status entity)
+                 :session-started-at (:orch.session/started-at entity)})
+              results)))
+    (catch Exception e
+      (log/warn "Failed to load active sessions from Datalevin" {:error (.getMessage e)})
+      [])))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Public API
@@ -287,10 +348,9 @@
             ;; 2b. Get Datalevin namespace connection if manager available
             dl-conn (when datalevin-manager
                       (try
-                        (require 'seon.db.datalevin.conn)
-                        ((resolve 'seon.db.datalevin.conn/get-namespace-conn!)
-                         {:seon.db.datalevin.conn/manager datalevin-manager
-                          :seon.db.datalevin.conn/namespace namespace})
+                        (conn/get-namespace-conn!
+                         {::conn/manager datalevin-manager
+                          ::conn/namespace namespace})
                         (catch Exception e
                           (log/warn "Failed to get Datalevin namespace conn"
                                     {:namespace namespace :error (.getMessage e)})
@@ -338,7 +398,7 @@
                             ::ns-conn ns-conn
                             ::ctx-atom atom}]
 
-          ;; 5. Store in registry and XTDB
+          ;; 5. Store in registry and Datalevin
           (swap! session-registry assoc session-id session-info)
           (store-session! node session-info)
 
@@ -404,7 +464,7 @@
         (log/debug "Closing namespace connection" {:session-id id})
         (.close conn))
 
-      ;; 5. Update registry and XTDB
+      ;; 5. Update registry and Datalevin
       (swap! session-registry dissoc id)
       (let [stopped-at (java.util.Date.)]
         (update-session-status! node id :stopped stopped-at)
@@ -466,7 +526,7 @@
   ;; First check in-memory registry
   (if-let [session (get @session-registry id)]
     (select-keys session public-session-keys)
-    ;; Fall back to XTDB (may be stopped session)
+    ;; Fall back to Datalevin (may be stopped session)
     (if-let [db-session (load-session-from-db node id)]
       {::id (:session-id db-session)
        ::namespace (symbol (:session-namespace db-session))
@@ -637,10 +697,10 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn recover-sessions!
-  "Recover sessions from XTDB on system restart.
+  "Recover sessions from Datalevin on system restart.
 
    This function:
-   1. Loads sessions marked as 'running' from XTDB
+   1. Loads sessions marked as 'running' from Datalevin
    2. Marks them as 'stopped' (since nREPL servers are gone)
 
    Sessions can be resumed via start-agent-session! with ::resume? true.

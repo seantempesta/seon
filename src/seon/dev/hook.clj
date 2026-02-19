@@ -17,7 +17,6 @@
 
      ;; Process a hook event
      (hook/process-hook-event!
-       (user/xtdb-node)
        {::hook/event {:hook_event_name \"PostToolUse\"
                       :tool_name \"Edit\"
                       :tool_input {:file_path \"/path/to/file.clj\"}}
@@ -121,12 +120,8 @@
                    [:feedback {:optional true} ::feedback-config]])
 
 ;; Request/Response schemas
-(schema/register! ::xtdb-node
-                  [:any {:description "XTDB node instance"}])
-
 (schema/register! ::process-request
                   [:map {:description "Request to process a hook event"}
-                   [::xtdb-node ::xtdb-node]
                    [::event ::hook-event]
                    [::config {:optional true} ::config]])
 
@@ -266,6 +261,43 @@
            (when timing (str " (" timing ")"))))))
 
 ;;; ---------------------------------------------------------------------------
+;;; Code Index Update (Best-Effort)
+;;; ---------------------------------------------------------------------------
+
+(defn- update-code-index!
+  "Update the Datalevin code index after a file change.
+   Best-effort: logs warnings on failure, never blocks the hook."
+  [file-path]
+  (try
+    (require 'integrant.repl.state)
+    (when-let [scanner (get @(resolve 'integrant.repl.state/system) :seon/code-scanner)]
+      (when-let [conn (:conn scanner)]
+        (require 'seon.graph.analyzer)
+        (require 'seon.graph.scanner)
+        (require 'seon.graph.ingest)
+        (let [analyze-form (resolve 'seon.graph.analyzer/analyze-form)
+              extract-entities (resolve 'seon.graph.analyzer/extract-entities)
+              scan-file (resolve 'seon.graph.scanner/scan-file)
+              link-fns-to-specs (resolve 'seon.graph.scanner/link-fns-to-specs)
+              ingest-incremental! (resolve 'seon.graph.ingest/ingest-incremental!)
+              ;; Analyze the changed file
+              source (slurp file-path)
+              analysis (analyze-form {:seon.graph.analyzer/source source
+                                      :seon.graph.analyzer/file-path file-path})]
+          (when (:seon.graph.analyzer/success analysis)
+            (let [entities (extract-entities {:seon.graph.analyzer/raw-analysis
+                                             (:seon.graph.analyzer/raw-analysis analysis)})
+                  ;; Scan file for specs
+                  specs (scan-file {:seon.graph.scanner/file-path file-path})
+                  ;; Link functions to specs
+                  linked-fns (link-fns-to-specs (:seon.graph.analyzer/functions entities) specs)
+                  entities (assoc entities :seon.graph.analyzer/functions linked-fns)]
+              (ingest-incremental! {:seon.graph.ingest/conn conn
+                                    :seon.graph.ingest/entities entities}))))))
+    (catch Exception e
+      (log/debug "Code index update failed (non-blocking)" {:error (.getMessage e)}))))
+
+;;; ---------------------------------------------------------------------------
 ;;; Pipeline Stages
 ;;; ---------------------------------------------------------------------------
 
@@ -367,10 +399,9 @@
            :violation-count (count (::compliance/violations result))})))))
 
 (defn- stage-record-edit
-  "Record the edit event in XTDB with observability data."
-  [xtdb-node file-path ns-sym opts]
-  (context/record-edit! (cond-> {::context/xtdb-node xtdb-node
-                                 ::context/file-path file-path}
+  "Record the edit event with observability data."
+  [file-path ns-sym opts]
+  (context/record-edit! (cond-> {::context/file-path file-path}
                           ns-sym (assoc ::context/namespace ns-sym)
                           (:content-hash opts) (assoc ::context/content-hash (:content-hash opts))
                           (:unit-test-result opts) (assoc ::context/unit-test-result (:unit-test-result opts))
@@ -381,20 +412,19 @@
 
 (defn- stage-should-review?
   "Check if we should trigger a review based on rate limiting."
-  [xtdb-node config]
+  [config]
   (when (get-in config [:review :enabled])
     (let [interval (get-in config [:review :interval-seconds] 60)
-          result (context/should-review? {::context/xtdb-node xtdb-node
-                                          ::context/interval-seconds interval})]
+          result (context/should-review? {::context/interval-seconds interval})]
       (::context/should-review result))))
 
 (defn- stage-review
   "Run AI review on accumulated edits.
 
    Returns formatted review text or nil if skipped/failed."
-  [xtdb-node config unit-result]
+  [config unit-result]
   (when (get-in config [:review :enabled])
-    (let [summary (context/edits-summary {::context/xtdb-node xtdb-node})
+    (let [summary (context/edits-summary {})
           files (::context/files summary)]
       (when (seq files)
         (log/info "Running AI review on" (count files) "files")
@@ -403,8 +433,7 @@
                        ::review/test-results unit-result
                        ::review/max-output-length (get-in config [:review :max-output-length] 500)})]
           ;; Record review with full Gemini interaction data for training
-          (context/record-review! {::context/xtdb-node xtdb-node
-                                   ::context/files files
+          (context/record-review! {::context/files files
                                    ::context/gemini-prompt (::review/prompt result)
                                    ::context/gemini-response (::review/response result)
                                    ::context/gemini-system-instruction (::review/gemini-system-instruction result)
@@ -429,9 +458,8 @@
    6. Review - Trigger AI review if rate limit allows
 
    Request keys:
-     ::xtdb-node - XTDB node for persistence
-     ::event     - Parsed hook JSON from Claude Code
-     ::config    - Configuration (merged with defaults)
+     ::event  - Parsed hook JSON from Claude Code
+     ::config - Configuration (merged with defaults)
 
    Response keys (for Claude Code JSON):
      ::continue - true to proceed with the edit
@@ -441,13 +469,13 @@
 
    Examples:
      ;; Successful edit
-     (process-hook-event! {::xtdb-node node ::event {...} ::config {...}})
+     (process-hook-event! {::event {...} ::config {...}})
      ;; => {::continue true ::feedback [\"5 tests passed\"]}
 
      ;; Blocked edit
      ;; => {::decision \"block\" ::reason \"Compile error: ...\"}"
   {:malli/schema [:=> [:cat ::process-request] ::process-response]}
-  [{::keys [xtdb-node event config]}]
+  [{::keys [event config]}]
   (let [config (merge-config config)
         event-name (:hook_event_name event)
         tool-name (:tool_name event)
@@ -463,8 +491,7 @@
       (let [session-id (:session_id event)
             todos (get-in event [:tool_input :todos])]
         (when (and session-id todos)
-          (context/record-todos! {::context/xtdb-node xtdb-node
-                                  ::context/session-id session-id
+          (context/record-todos! {::context/session-id session-id
                                   ::context/todos todos}))
         (success-response @feedback))
 
@@ -546,6 +573,9 @@
                           ;; Add feedback about what was reloaded
                               _ (when-let [loaded (seq (:loaded reload-result))]
                                   (swap! feedback conj (str "Reloaded: " (str/join ", " (map str loaded)))))
+                              ;; Best-effort code index update after successful reload
+                              _ (when (and reload-result (:success reload-result))
+                                  (update-code-index! file-path))
                               reload-block (when (and reload-result
                                                       (not (:success reload-result)))
                                              (block-response (:error reload-result)))]
@@ -579,7 +609,7 @@
                                                            (::verify/fail-count unit-result 0)
                                                            (::verify/error-count unit-result 0)
                                                            (codebase/file->test-namespace {::codebase/file-path file-path}))]
-                                        (stage-record-edit xtdb-node file-path ns-sym
+                                        (stage-record-edit file-path ns-sym
                                                            {:unit-test-result (extract-unit-summary unit-result)
                                                             :decision :block
                                                             :reason reason
@@ -602,7 +632,7 @@
                                                                                (::verify/failures gen-result)))
                                                 reason (format "Generative tests failed for: %s"
                                                                (if (str/blank? failed-fns) "schema errors" failed-fns))]
-                                            (stage-record-edit xtdb-node file-path ns-sym
+                                            (stage-record-edit file-path ns-sym
                                                                {:unit-test-result (extract-unit-summary unit-result)
                                                                 :gen-test-result (extract-gen-summary gen-result)
                                                                 :decision :block
@@ -611,7 +641,7 @@
                                             (block-response reason))
                                           ;; 6. Record edit + 7. Review + 8. Success
                                           (let [elapsed-ms (- (System/currentTimeMillis) start-time)]
-                                            (stage-record-edit xtdb-node file-path ns-sym
+                                            (stage-record-edit file-path ns-sym
                                                                {:unit-test-result (extract-unit-summary unit-result)
                                                                 :gen-test-result (extract-gen-summary gen-result)
                                                                 :decision :continue
@@ -627,8 +657,8 @@
                                                 (swap! feedback conj dense-line)))
 
                                             ;; AI review (if enabled and rate limit allows)
-                                            (when (stage-should-review? xtdb-node config)
-                                              (when-let [review-text (stage-review xtdb-node config unit-result)]
+                                            (when (stage-should-review? config)
+                                              (when-let [review-text (stage-review config unit-result)]
                                                 (swap! feedback conj review-text)))
 
                                             (success-response @feedback)))))))))))))))))))))
@@ -639,7 +669,6 @@
 
 (schema/register! ::mcp-edit-request
                   [:map {:description "Request to process an MCP edit event"}
-                   [::xtdb-node ::xtdb-node]
                    [::file-path :string]
                    [::config {:optional true} ::config]])
 
@@ -653,11 +682,14 @@
 (defn- run-post-edit-pipeline!
   "Run the post-edit pipeline stages. Shared by process-hook-event! and process-mcp-edit!.
    Returns {:success :feedback :blocked :reason}."
-  [{::keys [xtdb-node file-path ns-sym config feedback start-time]}]
+  [{::keys [file-path ns-sym config feedback start-time]}]
   (let [dense? (get-in config [:feedback :dense])
         reload-result (stage-reload ns-sym config)
         _ (when-let [loaded (seq (:loaded reload-result))]
-            (swap! feedback conj (str "Reloaded: " (str/join ", " (map str loaded)))))]
+            (swap! feedback conj (str "Reloaded: " (str/join ", " (map str loaded)))))
+        ;; Best-effort code index update after successful reload
+        _ (when (and reload-result (:success reload-result))
+            (update-code-index! file-path))]
     (if (and reload-result (not (:success reload-result)))
       {:success false :blocked true :reason (:error reload-result) :feedback @feedback}
       (let [compliance-result (stage-compliance ns-sym config)
@@ -678,7 +710,7 @@
               (let [reason (format "Unit tests failed: %d failures, %d errors in %s"
                                    (::verify/fail-count unit-result 0)
                                    (::verify/error-count unit-result 0) test-ns)]
-                (stage-record-edit xtdb-node file-path ns-sym
+                (stage-record-edit file-path ns-sym
                                    {:unit-test-result (extract-unit-summary unit-result)
                                     :decision :block :reason reason :feedback @feedback})
                 {:success false :blocked true :reason reason :feedback @feedback})
@@ -693,13 +725,13 @@
                                                        (::verify/failures gen-result)))
                         reason (format "Generative tests failed for: %s"
                                        (if (str/blank? failed-fns) "schema errors" failed-fns))]
-                    (stage-record-edit xtdb-node file-path ns-sym
+                    (stage-record-edit file-path ns-sym
                                        {:unit-test-result (extract-unit-summary unit-result)
                                         :gen-test-result (extract-gen-summary gen-result)
                                         :decision :block :reason reason :feedback @feedback})
                     {:success false :blocked true :reason reason :feedback @feedback})
                   (let [elapsed-ms (- (System/currentTimeMillis) start-time)]
-                    (stage-record-edit xtdb-node file-path ns-sym
+                    (stage-record-edit file-path ns-sym
                                        {:unit-test-result (extract-unit-summary unit-result)
                                         :gen-test-result (extract-gen-summary gen-result)
                                         :decision :continue :feedback @feedback})
@@ -708,8 +740,8 @@
                                              {:unit-result unit-result :gen-result gen-result
                                               :compliance-result compliance-result :elapsed-ms elapsed-ms})]
                         (swap! feedback conj dense-line)))
-                    (when (stage-should-review? xtdb-node config)
-                      (when-let [review-text (stage-review xtdb-node config unit-result)]
+                    (when (stage-should-review? config)
+                      (when-let [review-text (stage-review config unit-result)]
                         (swap! feedback conj review-text)))
                     {:success true :feedback (vec @feedback)}))))))))))
 
@@ -727,7 +759,6 @@
    Called by bin/mcp-server after successful clojure_replace.
 
    Request keys:
-     ::xtdb-node - XTDB node for persistence
      ::file-path - Path to the edited file
      ::config    - Configuration (merged with defaults, optional)
 
@@ -739,12 +770,11 @@
 
    Example:
      (process-mcp-edit!
-       {::xtdb-node node
-        ::file-path \"/path/to/file.clj\"})
+       {::file-path \"/path/to/file.clj\"})
      ;; => {::success true
      ;;     ::feedback [\"✓ 5 tests, gen-tests, compliant (0.3s)\"]}"
   {:malli/schema [:=> [:cat ::mcp-edit-request] ::mcp-edit-response]}
-  [{::keys [xtdb-node file-path config]}]
+  [{::keys [file-path config]}]
   (let [config (merge-config (or config {}))
         ns-sym (codebase/file->namespace {::codebase/file-path file-path})]
     (cond
@@ -760,8 +790,7 @@
       :else
       (let [feedback (atom [])
             result (run-post-edit-pipeline!
-                    {::xtdb-node xtdb-node
-                     ::file-path file-path
+                    {::file-path file-path
                      ::ns-sym ns-sym
                      ::config config
                      ::feedback feedback
@@ -788,14 +817,12 @@
 
   ;; Process with default config
   (process-hook-event!
-   {::xtdb-node (user/xtdb-node)
-    ::event test-event
+   {::event test-event
     ::config {}})
 
   ;; Process with custom config
   (process-hook-event!
-   {::xtdb-node (user/xtdb-node)
-    ::event test-event
+   {::event test-event
     ::config {:repair {:enabled false}
               :tests {:unit {:enabled true :block-on-fail false}
                       :generative {:enabled false}}
@@ -803,8 +830,7 @@
 
   ;; Test PreToolUse (only repair)
   (process-hook-event!
-   {::xtdb-node (user/xtdb-node)
-    ::event {:hook_event_name "PreToolUse"
+   {::event {:hook_event_name "PreToolUse"
              :tool_name "Edit"
              :tool_input {:file_path "/tmp/test.clj"}}
     ::config {}})

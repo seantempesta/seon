@@ -197,7 +197,7 @@
      {:all true                              ; Parse all forms
       :read-cond :allow                      ; Allow reader conditionals
       :features #{:clj :cljs}                ; Support both Clojure and ClojureScript
-      :auto-resolve (fn [_alias] 'user)      ; Accept any namespace alias
+      :auto-resolve (fn [alias] (if alias (symbol (str "ns." alias)) 'user))  ; Unique ns per alias
       :readers (fn [_tag] identity)})        ; Accept any reader tag
     {:valid true}
     (catch Exception e
@@ -325,8 +325,7 @@
     (let [code (format
                 "(do (require 'seon.dev.hook)
                      (seon.dev.hook/process-hook-event!
-                       {:seon.dev.hook/xtdb-node (user/xtdb-node)
-                        :seon.dev.hook/event %s
+                       {:seon.dev.hook/event %s
                         :seon.dev.hook/config %s}))"
                 (pr-str event)
                 (pr-str config))

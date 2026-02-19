@@ -1,5 +1,11 @@
 # Seon - Claude Code Instructions
 
+## Agent Model Policy
+
+**Never use haiku for coding tasks.** Only use haiku for quick file reads or context gathering. All implementation, bug fixes, and verification that involves writing code must use opus 4.6 (default model).
+
+---
+
 ## What is Seon?
 
 **Seon** - from the archaic "to see", and inspired by the Seons of Brandon Sanderson's *Elantris*: sentient, luminous beings that serve and assist their bonded humans.

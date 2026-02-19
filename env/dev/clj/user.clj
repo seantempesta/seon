@@ -299,6 +299,18 @@
 ;; AI Research (use when stuck!)
 ;; ========================================
 
+(defn flow-status
+  "Show flow system status. No args = all flows. With id = single flow detail.
+
+  Examples:
+    (flow-status)              ; All flows
+    (flow-status :sse-pipeline) ; Single flow detail"
+  ([]
+   ((requiring-resolve 'seon.flow.status/collect-status)))
+  ([flow-id]
+   ((requiring-resolve 'seon.flow.status/collect-flow-status)
+    {:seon.flow.status/id flow-id})))
+
 (defn search
   "Search the web via Gemini. Use this when you're stuck or need current info.
 

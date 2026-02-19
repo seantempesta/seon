@@ -4,7 +4,6 @@
             [org.httpkit.server :as hk]
             [taoensso.timbre :as log]
             [jsonista.core :as json]
-            [seon.ai.agent :as ai-agent]
             [seon.web.routes :as routes]
             [seon.web.jobs :as jobs]
             [seon.web.agents :as agents]
@@ -68,11 +67,10 @@
 
 (defmethod ig/init-key ::http-server
   [_ {:keys [port bind handler node]}]
-  ;; Initialize modules with XTDB node
+  ;; Initialize modules (node is optional, kept for trading/jobs)
   (when node
-    (jobs/init! node)
-    (agents/init! node)
-    (ai-agent/init! node))
+    (jobs/init! node))
+  (agents/init! node)
 
   ;; Initialize SSE broadcast infrastructure with 100ms throttle
   (let [refresh-mult (sse/init-sse! :max-refresh-ms 100)

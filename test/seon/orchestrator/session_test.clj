@@ -4,6 +4,7 @@
   Tests session lifecycle, ctx persistence, nREPL integration,
   and recovery functionality."
   (:require [clojure.test :refer [deftest testing is use-fixtures]]
+            [datalevin.core :as d]
             [nrepl.core :as nrepl]
             [seon.orchestrator.session :as session]
             [seon.orchestrator.nrepl :as nrepl-multi]
@@ -340,23 +341,38 @@
 
 (deftest recover-sessions-test
   (testing "recover-sessions! marks orphaned sessions as stopped"
-    ;; Manually insert a "running" session into XTDB (simulating crash)
-    (require '[xtdb.api :as xt])
-    (let [xt-exec (resolve 'xt/execute-tx)]
-      (xt-exec *test-node*
-               [[:put-docs :sessions
-                 {:xt/id "session-orphan123"
-                  :session/id "orphan12"
-                  :session/namespace "test.orphan"
-                  :session/nrepl-port 7890
-                  :session/status "running"
-                  :session/started-at (java.util.Date.)
-                  :session/db-name "test_orphan"}]]))
+    ;; Create a temp Datalevin connection for testing
+    (let [dir (str "tmp/test-recover-" (System/currentTimeMillis))
+          dl-schema @#'session/dl-schema
+          conn (d/get-conn dir dl-schema)]
+      (try
+        ;; Insert a "running" session into Datalevin (simulating crash)
+        (d/transact! conn [{:orch.session/id "orph"
+                             :orch.session/namespace "test.orphan"
+                             :orch.session/nrepl-port 7890
+                             :orch.session/status "running"
+                             :orch.session/started-at (java.util.Date.)
+                             :orch.session/db-name "test_orphan"}])
 
-    ;; Run recovery
-    (let [result (session/recover-sessions!
-                   {::session/node *test-node*})]
-      (is (= 1 (::session/recovered-count result))))))
+        ;; Temporarily override the private get-dl-conn to return our test conn
+        (with-redefs-fn {#'session/get-dl-conn (constantly conn)}
+          (fn []
+            (let [result (session/recover-sessions!
+                           {::session/node *test-node*})]
+              (is (= 1 (::session/recovered-count result)))
+
+              ;; Verify status was updated to stopped
+              (let [sessions (d/q '[:find (pull ?e [*])
+                                    :where [?e :orch.session/id "orph"]]
+                                  @conn)
+                    entity (ffirst sessions)]
+                (is (= "stopped" (:orch.session/status entity)))))))
+        (finally
+          (d/close conn)
+          ;; Clean up temp dir
+          (let [dir-file (java.io.File. dir)]
+            (doseq [f (reverse (file-seq dir-file))]
+              (.delete f))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Activity Tracking Tests (Phase 4c)
