@@ -315,6 +315,10 @@
                                             :seon.graph.ingest/entities entities
                                             :seon.graph.ingest/specs specs})]
               (log/info "Code scanner initialized" result))))
+        ;; Wire the graph connection into the render system for Datalevin resolution
+        (require 'seon.render)
+        ((resolve 'seon.render/set-conn!) conn)
+        (log/info "Render system connected to graph database")
         {:conn conn :paths paths}
         (catch Exception e
           (log/error "Code scanner failed" {:error (.getMessage e)})
@@ -325,6 +329,9 @@
   [_ state]
   (when-let [conn (:conn state)]
     (log/info "Stopping code scanner...")
+    ;; Disconnect render system before closing the graph connection
+    (require 'seon.render)
+    ((resolve 'seon.render/set-conn!) nil)
     (require 'datalevin.core)
     ((resolve 'datalevin.core/close) conn)
     (log/info "Code scanner stopped")))
