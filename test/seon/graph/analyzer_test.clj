@@ -76,22 +76,24 @@
           entities (analyzer/extract-entities
                     {::analyzer/raw-analysis (::analyzer/raw-analysis project)})
           ns-entities (::analyzer/namespaces entities)
-          analyzer-ns (first (filter #(= "seon.graph.analyzer" (:graph/name %)) ns-entities))]
+          analyzer-ns (first (filter #(= "seon.graph.analyzer" (:seon.ns/name %)) ns-entities))]
       (is analyzer-ns "Should find seon.graph.analyzer namespace")
-      (is (= :namespace (:graph/type analyzer-ns)))
-      (is (string? (:graph/name analyzer-ns)))
-      (is (string? (:graph/file analyzer-ns)))))
+      (is (string? (:seon.ns/name analyzer-ns)))
+      (is (string? (:seon.ns/file analyzer-ns)))
+      (is (keyword? (:seon.ns/target analyzer-ns)))
+      (is (= :clj (:seon.ns/target analyzer-ns)))))
 
   (testing "function entities have correct structure"
     (let [project (analyzer/analyze-project! {::analyzer/paths ["src/seon/graph/"]})
           entities (analyzer/extract-entities
                     {::analyzer/raw-analysis (::analyzer/raw-analysis project)})
           fn-entities (::analyzer/functions entities)
-          analyze-fn (first (filter #(= "analyze-project!" (:graph/name %)) fn-entities))]
+          analyze-fn (first (filter #(= "analyze-project!" (:seon.fn/name %)) fn-entities))]
       (is analyze-fn "Should find analyze-project! function")
-      (is (= :function (:graph/type analyze-fn)))
-      (is (= "seon.graph.analyzer" (:graph/ns analyze-fn)))
-      (is (boolean? (:graph/public? analyze-fn)))))
+      (is (= "seon.graph.analyzer" (:seon.fn/namespace analyze-fn)))
+      (is (= "seon.graph.analyzer/analyze-project!" (:seon.fn/qualified-name analyze-fn)))
+      (is (boolean? (:seon.fn/private analyze-fn)))
+      (is (= false (:seon.fn/private analyze-fn)))))
 
   (testing "extracts entities from single form analysis"
     (let [form-result (analyzer/analyze-form
@@ -99,11 +101,10 @@
           entities (analyzer/extract-entities
                     {::analyzer/raw-analysis (::analyzer/raw-analysis form-result)})
           fn-entities (::analyzer/functions entities)]
-      (is (some #(= "ema" (:graph/name %)) fn-entities)
+      (is (some #(= "ema" (:seon.fn/name %)) fn-entities)
           "Should find the ema function entity")
-      (let [ema-fn (first (filter #(= "ema" (:graph/name %)) fn-entities))]
-        (is (= :function (:graph/type ema-fn)))
-        (is (= true (:graph/public? ema-fn))))))
+      (let [ema-fn (first (filter #(= "ema" (:seon.fn/name %)) fn-entities))]
+        (is (= false (:seon.fn/private ema-fn))))))
 
   (testing "handles nil analysis gracefully"
     (let [entities (analyzer/extract-entities {::analyzer/raw-analysis {}})]

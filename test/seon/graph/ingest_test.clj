@@ -35,7 +35,7 @@
 
 (defn with-temp-conn [f]
   (let [dir (temp-dir)
-        conn (d/get-conn dir)]
+        conn (d/get-conn dir ingest/datalevin-schema)]
     (try
       (binding [*test-conn* conn]
         (f))
@@ -66,22 +66,20 @@
       ;; Verify namespaces are queryable
       (let [ns-names (d/q '[:find ?name
                             :where
-                            [?e :graph/type :namespace]
-                            [?e :graph/name ?name]]
+                            [?e :seon.ns/name ?name]]
                           @*test-conn*)]
         (is (seq ns-names) "Should have namespace entities in DB")
         (is (some #(= ["seon.graph.analyzer"] %) ns-names)
             "Should find seon.graph.analyzer namespace"))
 
       ;; Verify functions are queryable
-      (let [fn-names (d/q '[:find ?name ?ns
+      (let [fn-data (d/q '[:find ?name ?ns
                             :where
-                            [?e :graph/type :function]
-                            [?e :graph/name ?name]
-                            [?e :graph/ns ?ns]]
+                            [?e :seon.fn/name ?name]
+                            [?e :seon.fn/namespace ?ns]]
                           @*test-conn*)]
-        (is (seq fn-names) "Should have function entities in DB")
-        (is (some #(= ["analyze-project!" "seon.graph.analyzer"] %) fn-names)
+        (is (seq fn-data) "Should have function entities in DB")
+        (is (some #(= ["analyze-project!" "seon.graph.analyzer"] %) fn-data)
             "Should find analyze-project! function"))))
 
   (testing "re-ingesting clears stale data"
@@ -96,7 +94,7 @@
           ;; Count namespaces -- should NOT double
           ns-count (count (d/q '[:find ?e
                                  :where
-                                 [?e :graph/type :namespace]]
+                                 [?e :seon.ns/name]]
                                @*test-conn*))]
       (is (= (::ingest/namespace-count result) ns-count)
           "Re-ingesting should replace, not duplicate"))))
@@ -113,9 +111,8 @@
       ;; Query to confirm function exists
       (let [fns (d/q '[:find ?name
                         :where
-                        [?e :graph/type :function]
-                        [?e :graph/name ?name]
-                        [?e :graph/ns "my.test"]]
+                        [?e :seon.fn/name ?name]
+                        [?e :seon.fn/namespace "my.test"]]
                       @*test-conn*)]
         (is (some #(= ["my-new-fn"] %) fns)
             "Should find the newly ingested function"))))
@@ -140,9 +137,8 @@
         ;; Should have 2 functions now (updatable + new-fn), not 3
         (let [fns (d/q '[:find ?name
                           :where
-                          [?e :graph/type :function]
-                          [?e :graph/ns "my.update-test"]
-                          [?e :graph/name ?name]]
+                          [?e :seon.fn/namespace "my.update-test"]
+                          [?e :seon.fn/name ?name]]
                         @*test-conn*)]
           (is (= 2 (count fns))
               "Should have exactly 2 functions after update")

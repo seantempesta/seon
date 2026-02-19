@@ -22,17 +22,17 @@
 
      ;; Function call graph
      (gq/call-graph {::gq/conn conn ::gq/ns-name \"seon.ai.claude\" ::gq/fn-name \"launch-agent!\"})
-     ;; => [{:graph/to-ns \"seon.flow.pool\" :graph/name \"acquire!\"} ...]
+     ;; => [{:seon.call/to-fn \"seon.flow.pool/acquire!\"} ...]
 
      (gq/callers-of {::gq/conn conn ::gq/ns-name \"seon.flow.pool\" ::gq/fn-name \"acquire!\"})
-     ;; => [{:graph/from-ns \"seon.ai.claude\" :graph/from-var \"launch-agent!\"} ...]
+     ;; => [{:seon.call/from-fn \"seon.ai.claude/launch-agent!\"} ...]
 
      ;; Discovery
      (gq/functions-in-ns {::gq/conn conn ::gq/ns-name \"seon.flow.pool\"})
-     ;; => [{:graph/name \"acquire!\" :graph/arglists [\"[pool opts]\"] ...} ...]
+     ;; => [{:seon.fn/name \"acquire!\" :seon.fn/arglists \"...\" ...} ...]
 
      (gq/search-functions {::gq/conn conn ::gq/pattern \"acquire\"})
-     ;; => [{:graph/name \"acquire!\" :graph/ns \"seon.flow.pool\"} ...]"
+     ;; => [{:seon.fn/name \"acquire!\" :seon.fn/namespace \"seon.flow.pool\"} ...]"
   (:require [datalevin.core :as d]
             [clojure.string :as str]
             [seon.schema :as schema]))
@@ -60,7 +60,7 @@
 (defn dependents-of
   "Find namespaces that depend on (require) the given namespace.
 
-   Returns a vector of namespace name strings that have a :ns-dependency
+   Returns a vector of namespace name strings that have a :seon.ns.dep/*
    edge pointing to the target namespace.
 
    Note: No :malli/schema - conn is a runtime object.
@@ -79,9 +79,8 @@
   (->> (d/q '[:find ?from-ns
               :in $ ?target-ns
               :where
-              [?e :graph/type :ns-dependency]
-              [?e :graph/to-ns ?target-ns]
-              [?e :graph/from-ns ?from-ns]]
+              [?e :seon.ns.dep/to-ns ?target-ns]
+              [?e :seon.ns.dep/from-ns ?from-ns]]
             @conn ns-name)
        (map first)
        sort
@@ -91,7 +90,7 @@
   "Find namespaces that the given namespace depends on (requires).
 
    Returns a vector of namespace name strings that the target namespace
-   has :ns-dependency edges pointing to.
+   has :seon.ns.dep/* edges pointing to.
 
    Request keys:
      ::conn    - Required. Datalevin connection
@@ -107,9 +106,8 @@
   (->> (d/q '[:find ?to-ns
               :in $ ?source-ns
               :where
-              [?e :graph/type :ns-dependency]
-              [?e :graph/from-ns ?source-ns]
-              [?e :graph/to-ns ?to-ns]]
+              [?e :seon.ns.dep/from-ns ?source-ns]
+              [?e :seon.ns.dep/to-ns ?to-ns]]
             @conn ns-name)
        (map first)
        sort
@@ -126,28 +124,25 @@
      ::fn-name - Required. Name of the calling function
 
    Returns:
-     Vector of maps with :graph/to-ns, :graph/name, :graph/line keys
+     Vector of maps with :seon.call/to-fn, :seon.call/row keys
 
    Example:
      (call-graph {::conn conn ::ns-name \"seon.ai.claude\" ::fn-name \"launch-agent!\"})
-     ;; => [{:graph/to-ns \"seon.flow.pool\" :graph/name \"acquire!\" :graph/line 42} ...]"
+     ;; => [{:seon.call/to-fn \"seon.flow.pool/acquire!\" :seon.call/row 42} ...]"
   [{::keys [conn ns-name fn-name]}]
-  (->> (d/q '[:find ?to-ns ?name ?line
-              :in $ ?from-ns ?from-var
-              :where
-              [?e :graph/type :var-usage]
-              [?e :graph/from-ns ?from-ns]
-              [?e :graph/from-var ?from-var]
-              [?e :graph/to-ns ?to-ns]
-              [?e :graph/name ?name]
-              [(get-else $ ?e :graph/line -1) ?line]]
-            @conn ns-name fn-name)
-       (map (fn [[to-ns name line]]
-              (cond-> {:graph/to-ns to-ns
-                       :graph/name name}
-                (not= line -1) (assoc :graph/line line))))
-       (sort-by (juxt :graph/to-ns :graph/name))
-       vec))
+  (let [from-fn (str ns-name "/" fn-name)]
+    (->> (d/q '[:find ?to-fn ?row
+                :in $ ?from-fn
+                :where
+                [?e :seon.call/from-fn ?from-fn]
+                [?e :seon.call/to-fn ?to-fn]
+                [(get-else $ ?e :seon.call/row -1) ?row]]
+              @conn from-fn)
+         (map (fn [[to-fn row]]
+                (cond-> {:seon.call/to-fn to-fn}
+                  (not= row -1) (assoc :seon.call/row row))))
+         (sort-by :seon.call/to-fn)
+         vec)))
 
 (defn callers-of
   "Find what functions call the given function (incoming edges).
@@ -160,28 +155,25 @@
      ::fn-name - Required. Name of the called function
 
    Returns:
-     Vector of maps with :graph/from-ns, :graph/from-var, :graph/line keys
+     Vector of maps with :seon.call/from-fn, :seon.call/row keys
 
    Example:
      (callers-of {::conn conn ::ns-name \"seon.flow.pool\" ::fn-name \"acquire!\"})
-     ;; => [{:graph/from-ns \"seon.ai.claude\" :graph/from-var \"launch-agent!\"} ...]"
+     ;; => [{:seon.call/from-fn \"seon.ai.claude/launch-agent!\"} ...]"
   [{::keys [conn ns-name fn-name]}]
-  (->> (d/q '[:find ?from-ns ?from-var ?line
-              :in $ ?to-ns ?name
-              :where
-              [?e :graph/type :var-usage]
-              [?e :graph/to-ns ?to-ns]
-              [?e :graph/name ?name]
-              [?e :graph/from-ns ?from-ns]
-              [?e :graph/from-var ?from-var]
-              [(get-else $ ?e :graph/line -1) ?line]]
-            @conn ns-name fn-name)
-       (map (fn [[from-ns from-var line]]
-              (cond-> {:graph/from-ns from-ns
-                       :graph/from-var from-var}
-                (not= line -1) (assoc :graph/line line))))
-       (sort-by (juxt :graph/from-ns :graph/from-var))
-       vec))
+  (let [to-fn (str ns-name "/" fn-name)]
+    (->> (d/q '[:find ?from-fn ?row
+                :in $ ?to-fn
+                :where
+                [?e :seon.call/to-fn ?to-fn]
+                [?e :seon.call/from-fn ?from-fn]
+                [(get-else $ ?e :seon.call/row -1) ?row]]
+              @conn to-fn)
+         (map (fn [[from-fn row]]
+                (cond-> {:seon.call/from-fn from-fn}
+                  (not= row -1) (assoc :seon.call/row row))))
+         (sort-by :seon.call/from-fn)
+         vec)))
 
 (defn functions-in-ns
   "Find all functions defined in a namespace.
@@ -193,23 +185,22 @@
      ::ns-name - Required. Namespace name (string)
 
    Returns:
-     Vector of maps with :graph/name, :graph/arglists, :graph/public?, :graph/line, :graph/doc
+     Vector of maps with :seon.fn/name, :seon.fn/arglists, :seon.fn/private, :seon.fn/row, :seon.fn/doc
 
    Example:
      (functions-in-ns {::conn conn ::ns-name \"seon.flow.pool\"})
-     ;; => [{:graph/name \"acquire!\" :graph/arglists [\"[pool opts]\"] :graph/public? true} ...]"
+     ;; => [{:seon.fn/name \"acquire!\" :seon.fn/arglists \"...\" :seon.fn/private false} ...]"
   [{::keys [conn ns-name]}]
   (->> (d/q '[:find ?e
               :in $ ?ns
               :where
-              [?e :graph/type :function]
-              [?e :graph/ns ?ns]]
+              [?e :seon.fn/namespace ?ns]]
             @conn ns-name)
        (map (fn [[eid]]
-              (d/pull @conn '[:graph/name :graph/arglists :graph/public?
-                              :graph/line :graph/doc]
+              (d/pull @conn '[:seon.fn/name :seon.fn/arglists :seon.fn/private
+                              :seon.fn/row :seon.fn/doc]
                       eid)))
-       (sort-by :graph/name)
+       (sort-by :seon.fn/name)
        vec))
 
 (defn search-functions
@@ -222,26 +213,25 @@
      ::pattern - Required. Search pattern (case-insensitive substring)
 
    Returns:
-     Vector of maps with :graph/name, :graph/ns, :graph/arglists, :graph/public?
+     Vector of maps with :seon.fn/name, :seon.fn/namespace, :seon.fn/arglists, :seon.fn/private
 
    Example:
      (search-functions {::conn conn ::pattern \"acquire\"})
-     ;; => [{:graph/name \"acquire!\" :graph/ns \"seon.flow.pool\" ...}
-     ;;     {:graph/name \"acquire!!\" :graph/ns \"seon.flow.pool\" ...}]"
+     ;; => [{:seon.fn/name \"acquire!\" :seon.fn/namespace \"seon.flow.pool\" ...}
+     ;;     {:seon.fn/name \"acquire!!\" :seon.fn/namespace \"seon.flow.pool\" ...}]"
   [{::keys [conn pattern]}]
   (let [pattern-lower (str/lower-case pattern)]
     (->> (d/q '[:find ?e ?name ?ns
                 :where
-                [?e :graph/type :function]
-                [?e :graph/name ?name]
-                [?e :graph/ns ?ns]]
+                [?e :seon.fn/name ?name]
+                [?e :seon.fn/namespace ?ns]]
               @conn)
          (filter (fn [[_ name _]]
                    (str/includes? (str/lower-case name) pattern-lower)))
          (map (fn [[eid name ns-name]]
-                (-> (d/pull @conn '[:graph/arglists :graph/public? :graph/line :graph/doc] eid)
-                    (assoc :graph/name name :graph/ns ns-name))))
-         (sort-by (juxt :graph/ns :graph/name))
+                (-> (d/pull @conn '[:seon.fn/arglists :seon.fn/private :seon.fn/row :seon.fn/doc] eid)
+                    (assoc :seon.fn/name name :seon.fn/namespace ns-name))))
+         (sort-by (juxt :seon.fn/namespace :seon.fn/name))
          vec)))
 
 ;;; ---------------------------------------------------------------------------

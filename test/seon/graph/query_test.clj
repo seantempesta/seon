@@ -32,7 +32,7 @@
 
 (defn with-populated-graph [f]
   (let [dir (temp-dir)
-        conn (d/get-conn dir)]
+        conn (d/get-conn dir ingest/datalevin-schema)]
     (try
       ;; Populate graph with project analysis (just graph/ namespace for speed)
       (let [project (analyzer/analyze-project! {::analyzer/paths ["src/seon/graph/"]})
@@ -107,7 +107,7 @@
                                   ::gq/ns-name "seon.graph.analyzer"
                                   ::gq/fn-name "extract-namespace-entities"})]
       (is (vector? callers))
-      (is (some #(= "extract-entities" (:graph/from-var %)) callers)
+      (is (some #(= "seon.graph.analyzer/extract-entities" (:seon.call/from-fn %)) callers)
           "extract-entities should call extract-namespace-entities")))
 
   (testing "returns empty for function with no callers"
@@ -126,7 +126,7 @@
                                    ::gq/ns-name "seon.graph.analyzer"})]
       (is (vector? fns))
       (is (seq fns) "Should find functions in seon.graph.analyzer")
-      (let [fn-names (set (map :graph/name fns))]
+      (let [fn-names (set (map :seon.fn/name fns))]
         (is (contains? fn-names "analyze-project!")
             "Should find analyze-project!")
         (is (contains? fn-names "analyze-form")
@@ -146,7 +146,7 @@
       (is (vector? results))
       (is (seq results) "Should find functions matching 'analyze'")
       (is (every? #(clojure.string/includes?
-                    (clojure.string/lower-case (:graph/name %))
+                    (clojure.string/lower-case (:seon.fn/name %))
                     "analyze")
                   results)
           "All results should contain 'analyze' in name")))
@@ -156,8 +156,8 @@
                                       ::gq/pattern "extract"})
           upper (gq/search-functions {::gq/conn *test-conn*
                                       ::gq/pattern "Extract"})]
-      (is (= (set (map :graph/name lower))
-             (set (map :graph/name upper)))
+      (is (= (set (map :seon.fn/name lower))
+             (set (map :seon.fn/name upper)))
           "Case should not affect results")))
 
   (testing "returns empty for no-match pattern"
@@ -181,13 +181,13 @@
       ;; Should find via functions-in-ns
       (let [fns (gq/functions-in-ns {::gq/conn *test-conn*
                                      ::gq/ns-name "seon.graph.test-ns"})]
-        (is (some #(= "brand-new-fn" (:graph/name %)) fns)
+        (is (some #(= "brand-new-fn" (:seon.fn/name %)) fns)
             "Newly ingested function should appear in functions-in-ns"))
 
       ;; Should find via search
       (let [results (gq/search-functions {::gq/conn *test-conn*
                                           ::gq/pattern "brand-new"})]
-        (is (some #(= "brand-new-fn" (:graph/name %)) results)
+        (is (some #(= "brand-new-fn" (:seon.fn/name %)) results)
             "Newly ingested function should appear in search results")))))
 
 (comment
