@@ -30,6 +30,10 @@ Orchestrator JVM (3.4GB)
 ├── Datalevin Server (port 8898)
 ├── nREPL (port 7888)
 ├── HTTP/SSE Server (port 8080)
+├── HTTP Server (port 8080) — thin proxy for /ns/ routes
+│   ├── Static pages (dashboard, agents, flow monitor) — rendered in main JVM
+│   └── /ns/:namespace — proxied through flow topology via topology/request!
+│       └── Agent JVM render-content called remotely → hiccup returned via TCP
 ├── core.async.flow topology (Phase 4)
 │   ├── :ns/seon.test.alpha     (namespace-step process)
 │   │   ├── :seon.flow.in/request   ← cross-ns calls
@@ -55,7 +59,10 @@ Agent JVM (186MB each)
 │       ├── ::flow/in-ports  ← TCP ← orchestrator requests
 │       └── ::flow/out-ports → TCP → orchestrator replies
 ├── Datalevin CLIENT (→ orchestrator:8898)
-├── *ctx* atom (Datalevin-backed, persisted on stop)
+├── *ctx* atom (Datalevin-persisted, SSE watcher for live UI push)
+│   ├── Serializable keys saved via harness/persist-ctx!
+│   ├── add-watch triggers render-and-push! to SSE clients
+│   └── See datalevin-migration PRD Phase 3 for unified ctx spec
 └── The real namespace (seon.trading.signals)
     ├── All defns live here
     ├── ::keywords resolve correctly
@@ -84,7 +91,7 @@ Agent JVM (186MB each)
 
 2. **Namespace DBs** (`seon.trading`, `seon.health`, etc.) — One per domain namespace, created lazily via `conn/get-namespace-conn!`. Agents working in a namespace get a connection to its DB. This is where domain-specific data lives long-term: workout records, trading positions, health metrics. Data persists across agent sessions — a new agent picking up `seon.health` can see everything previous agents stored there.
 
-3. **Agent `*ctx*` atom** (backed by namespace DB) — Each agent JVM has a `*ctx*` atom that is loaded from and persisted to its namespace DB. Sessions can be fresh (empty ctx) or resuming (load previous ctx). The ctx stores agent-specific working state: current task, intermediate results, learned preferences.
+3. **Agent `*ctx*` atom** (backed by namespace DB) — Each agent instance has a `*ctx*` atom scoped to its instance ID (not just namespace). Loaded from and persisted to Datalevin via `harness/persist-ctx!` and `harness/load-ctx!`. Multiple agents can work in the same namespace — each gets its own instance ID and own `*ctx*`. See [`datalevin-migration` PRD Phase 3](../datalevin-migration/prd.md) for the unified ctx persistence spec.
 
 **Cross-namespace discovery**: Agents can query the master knowledge graph to find code and data structures across the entire system. Example: an agent building `seon.health.calories` can search for existing functions that produce `:health/workout` data, find them in `seon.health.tracking`, and reuse them directly. The graph stores Malli schemas, function signatures, and dependency edges — agents should always search before building.
 
@@ -95,6 +102,42 @@ Agent JVM (186MB each)
 - `(env/related-schemas :health/workout)` — Find schemas that share keys with a given schema
 
 This namespace is the agent's "toolkit" — updating it updates all future agents.
+
+### Everything is a Flow
+
+The web server is a thin proxy — namespace content rendering goes through the flow topology, not direct function calls.
+
+**How it works:**
+- HTTP request to `/ns/seon.trading` hits the main JVM's web server
+- Web server calls `topology/request!` targeting the `seon.trading` namespace step
+- The namespace step forwards to the agent JVM via TCP
+- Agent JVM's `render-content` function executes locally, returns hiccup
+- Hiccup travels back via TCP reply, web server converts to HTML
+
+**What this enables:**
+- **Backpressure** — Queue cap (default 32) rejects overload with typed `:overload` errors
+- **Multi-instance load balancing** — Multiple agent JVMs can serve the same namespace (future)
+- **Crash isolation** — Agent JVM crash doesn't take down the web server
+- **Observability** — Every request/reply emits flow events for monitoring
+
+**What stays in the main JVM:**
+- Monitoring infrastructure pages (dashboard, agents, flow monitor)
+- Static pages that don't depend on namespace content
+- The flow topology itself and its wiring
+
+**Unified `render` function:** Every agent JVM namespace should expose a `render` function with key-driven behavior:
+
+```clojure
+;; Static namespace view (no live state)
+(render {::format :html})              ; → hiccup
+(render {::format :ai})                ; → string summary
+
+;; Dynamic instance view (live agent state)
+(render {::format :html ::ctx *ctx* ::conn conn})  ; → hiccup with live data
+(render {::format :ai ::ctx *ctx* ::conn conn})    ; → text summary with state
+```
+
+The presence of `::ctx` determines static vs dynamic rendering. `:html` returns hiccup; `:ai` returns a string for agent consumption.
 
 ---
 
@@ -312,18 +355,26 @@ The MCP server (`bin/mcp-server`) is a Babashka script. It routes `eval` calls b
   - [ ] `preview` — Same as graduate but returns the file content without writing.
 
 - [ ] **`seon.agent.env`** — Agent environment (loaded into every agent JVM):
+  - [ ] Provides unified `*ctx*` per instance (not per namespace). Multiple agents in the same namespace each get their own instance ID and `*ctx*`.
   - [ ] `search` — Query the knowledge graph from an agent JVM. Calls orchestrator's `seon.graph.query/search-functions` via nREPL. `(env/search "calories")` → matching functions across all namespaces.
   - [ ] `ns-conn` — Get this agent's namespace DB connection. Uses the namespace the agent was assigned (not a port-based throwaway DB).
-  - [ ] `ctx-save!` — Persist current `*ctx*` atom to namespace DB. Called on session end or explicit save.
-  - [ ] `ctx-load!` — Load `*ctx*` from namespace DB. Called on session start when resuming.
+  - [ ] `ctx-save!` / `ctx-load!` — Delegates to `harness/persist-ctx!` and `harness/load-ctx!` which already handle Datalevin serialization. Note: flow harness already handles ctx persistence — the agent env just wraps it.
   - [ ] `related-schemas` — Find Malli schemas that share keys with a given schema. Queries the knowledge graph.
   - [ ] `who-produces` — "What functions return data matching this shape?" Graph query wrapper.
   - [ ] `who-consumes` — "What functions accept data matching this shape?" Graph query wrapper.
 
 - [ ] **`agent_runner.clj` modifications**:
+  - [ ] Creates instance-scoped ctx with shared `::conn` injection on startup. Each agent instance gets its own `*ctx*` atom, but the Datalevin `::conn` is shared per namespace.
   - [ ] Change Datalevin URI to use **namespace name** instead of port number. Currently: `agent-7901`. Should be: `seon.trading.signals` (the assigned namespace). This gives each namespace a persistent DB across agent sessions.
   - [ ] `(require 'seon.agent.env)` at startup so all agents have the toolkit available.
-  - [ ] Wire `*ctx*` persistence: if namespace DB has a saved ctx, load it into `*ctx*` on startup.
+  - [ ] Wire `*ctx*` persistence: if namespace DB has a saved ctx for this instance, load it into `*ctx*` on startup.
+
+- [ ] **Unified `render` function** — Every agent JVM namespace should expose a callable `render` that takes a map arg (key-driven):
+  - [ ] `{::format :html}` — static namespace view (returns hiccup)
+  - [ ] `{::format :html ::ctx <atom> ::conn <conn>}` — dynamic instance view with live state (returns hiccup)
+  - [ ] `{::format :ai}` — text summary for agents (returns string)
+  - [ ] `{::format :ai ::ctx <atom> ::conn <conn>}` — text summary with instance state (returns string)
+  - [ ] Presence of `::ctx` determines static vs dynamic. Agents interact through Super REPL to modify `*ctx*` dynamically; changes persist if serializable.
 
 - [ ] **`seon.repl.super` dynamic context**:
   - [ ] After `eval-form!` stores and analyzes a form, compute **relevant context** to return alongside the eval result. If the agent just defined a function that takes `:health/workout`, search the graph for other functions that produce or consume that shape. Return these suggestions in the eval response so the agent sees them without having to ask.
@@ -538,7 +589,13 @@ feat: inter-agent messaging with schema-validated mailboxes
 
 ## Prerequisites (Do Not Proceed Without)
 
-| Prerequisite | PRD | Key Remaining Work |
-|-------------|-----|-------------------|
-| **Datalevin as primary DB** | [`datalevin-migration`](docs/prds/datalevin-migration/prd.md) | Phase 0.3 (Schema Compiler), Phase 2 (Read Migration) |
-| **Observatory on Datalevin** | [`namespace-ui`](docs/prds/namespace-ui/prd.md) Phase 1b.10 | Switch reads from XTDB → Datalevin |
+| Prerequisite | PRD | Key Remaining Work | Blocking? |
+|-------------|-----|-------------------|-----------|
+| **Datalevin Read Migration** | [`datalevin-migration`](../datalevin-migration/prd.md) Phase 2 | Migrate reads from XTDB to Datalevin | **Yes** — required for Super REPL Phase 3 |
+| **Schema Compiler** | [`datalevin-migration`](../datalevin-migration/prd.md) Phase 0.3 | Auto-generate Datalevin schema from Malli | Nice-to-have, not blocking |
+| **Observatory on Datalevin** | [`namespace-ui`](../namespace-ui/prd.md) Phase 1b.10 | Switch reads from XTDB → Datalevin | No — can proceed in parallel |
+
+## Related PRDs
+
+- **[`datalevin-migration`](../datalevin-migration/prd.md)** — Database layer: Datalevin as primary DB, ctx persistence spec, schema compiler
+- **[`namespace-ui`](../namespace-ui/prd.md)** — Presentation layer: namespace introspection views, design system, reactive UI components

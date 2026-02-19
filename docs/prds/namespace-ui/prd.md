@@ -16,14 +16,15 @@
 | 1b.1-7 | Observatory tool renderers, hover, pairing | Done | [`observatory-polish`](../observatory-polish/prd.md) |
 | 1b.8 | Truncated log view (4-line max) | Done | [`truncated-log-view`](../truncated-log-view/prd.md) |
 | 1b.9 | Namespace render toggle | Done | [`namespace-render-toggle`](../namespace-render-toggle/prd.md) |
-| 1b.10 | **XTDB-based Observatory** | **Active** | [`observatory-xtdb`](../observatory-xtdb/prd.md) |
+| 1b.10 | **Datalevin-based Observatory** | **Active** | [`observatory-xtdb`](../observatory-xtdb/prd.md) |
 | 1c | Agent robustness | Done | [`stability-improvements`](../stability-improvements/prd.md) |
 | 2 | Expand/collapse + styling | Pending | [`data-viewer`](../data-viewer/prd.md) |
 | 3 | Malli schema viewer | Pending | [`schema-viewer`](../schema-viewer/prd.md) |
-| 4 | XTDB entity browser | Pending | - |
+| 4 | Datalevin entity browser | Pending | - |
 | 5 | Live atom updates | Pending | [`live-updates`](../live-updates/prd.md) |
 | 6 | Dashboard polish | Pending | [`dashboard-polish`](../dashboard-polish/prd.md) |
 | 7 | Custom renderers | Pending | [`custom-renderers`](../custom-renderers/prd.md) |
+| 8 | Flow-routed namespace rendering | Pending | - |
 
 **Implementation details live in focused PRDs.** This document defines vision, philosophy, and shared context.
 
@@ -45,6 +46,8 @@ Think of Seon as an OS where namespaces are apps:
 - Direct the orchestrator to create new namespaces and watch agents build them live
 
 **All introspection is runtime** - no hardcoded table names, schema keys, or function names.
+
+**Flow-routed rendering:** In the flow architecture, namespace views render inside agent JVMs, not the main orchestrator JVM. The orchestrator proxies `/ns/` requests through the flow topology via `topology/request!`, receiving hiccup back over TCP. This means each namespace's UI is rendered in the same isolated process that owns its state -- the orchestrator just caches and serves the result.
 
 ---
 
@@ -91,7 +94,7 @@ See [`design-system.md`](design-system.md) for:
 Currently, understanding a namespace requires:
 - Reading source code directly
 - Using REPL to inspect vars/atoms
-- Querying XTDB manually for related data
+- Querying the database manually for related data
 
 There's no unified view that shows "what's in this namespace and what's its current state?"
 
@@ -129,7 +132,7 @@ Different skills are relevant for different work:
 ### When Working with Data/Queries
 
 ```
-/xtdb-queries        -> SQL patterns, temporal queries, multi-database
+/xtdb-queries        -> SQL/Datalog patterns, queries (migrating to Datalevin)
 /clojure-testing     -> Test patterns, generators, mocking
 ```
 
@@ -146,18 +149,39 @@ Different skills are relevant for different work:
 
 ## Architecture Overview
 
+### Flow-Routed Rendering
+
+When flows are running, namespace views render inside agent JVMs and are proxied back to the browser:
+
+```
+Browser → GET /ns/seon.trading?instance=a1b2
+  → SSE connection to orchestrator
+  → orchestrator checks render cache for instance a1b2
+  → if cached and not invalidated: serve cached HTML immediately
+  → if stale: topology/request! to seon.trading flow process
+    → TCP to agent JVM
+    → (render {::format :html ::ctx *ctx* ::conn conn})  ; key-driven
+    → hiccup via TCP → orchestrator caches + SSE merge-fragment
+```
+
+The `topology/request!` function (in `seon.flow.topology`) is the blocking entry point for cross-namespace calls. It creates a promise, injects a request into the flow via `flow/inject`, and derefs the promise with a timeout. Replies are delivered by the `reply-router-step` which matches reply envelopes to waiting promises by request ID. For agent JVMs, cross-namespace relay go-loops forward requests from the agent's TCP bridge through the same `request!` mechanism.
+
 ### Render Convention
 
-Namespaces can provide a `render` function:
+Each namespace exposes a single `render` function with a map argument. Behavior is key-driven:
 
-```clojure
-(defn render
-  "Called by /ns/{namespace} route."
-  [{:keys [format id]}]
-  (if id
-    (view/render (view/typed :my-ns/detail (get-detail id)) format)
-    (view/render (view/typed :my-ns/list (get-list)) format)))
-```
+| Keys Present | Meaning | Returns |
+|-------------|---------|---------|
+| `{::format :html}` | Static namespace view (no instance running) | Hiccup |
+| `{::format :html ::ctx <atom> ::conn <conn>}` | Dynamic instance view with live state | Hiccup |
+| `{::format :ai}` | Text summary for agents (static) | String |
+| `{::format :ai ::ctx <atom> ::conn <conn>}` | Text summary with instance state | String |
+
+**URL mapping:**
+- `/ns/seon.trading` (no `?instance=` param) → calls `render` without `::ctx` — shows namespace info + instance list (static view)
+- `/ns/seon.trading?instance=a1b2` → calls `render` with `::ctx` injected — shows dynamic view with live state
+
+Cached at orchestrator, invalidated on `*ctx*` change (via the watch-based push pattern from `seon.web.reactive.instance`).
 
 ### View Multimethod
 
@@ -194,7 +218,7 @@ Namespaces can provide a `render` function:
 1. Navigate to `/ns/seon.ai.claude` and see functions, vars, atoms listed
 2. Click collections to expand/collapse
 3. Browse Malli schemas with clickable cross-references
-4. Browse XTDB entities with forward/reverse refs
+4. Browse Datalevin entities with forward/reverse refs
 5. View atom in browser, change in REPL, see browser update within 100ms
 6. Dashboard shows namespace tree and active sessions
 7. Custom renderers work via `:seon.ui/render-fn` in ctx
@@ -207,7 +231,7 @@ Once this is working:
 
 1. **Live coding** - Watch namespace update as agent writes code
 2. **Entity relationships** - Visualize how namespaces connect via requires
-3. **Time travel** - XTDB bitemporal queries to see past states
+3. **Time travel** - Datalevin history queries to see past states
 4. **Agent marketplace** - Share namespace "apps" with others
 5. **Voice control** - "Show me the trading dashboard"
 
@@ -217,7 +241,7 @@ Once this is working:
 
 1. **Namespace filtering** - Show all `seon.*` or also user namespaces?
 2. **Launch session UX** - Button on read-only view? Or separate action?
-3. **Tile persistence** - Store in orchestrator ctx or separate XTDB table?
+3. **Tile persistence** - Store in orchestrator ctx or separate Datalevin entity?
 
 ---
 
@@ -231,6 +255,30 @@ Once this is working:
 | `reference-code/datastar-clojure/` | Datastar SDK |
 | `docs/reference/datastar-quick-reference.md` | SSE patterns |
 | `docs/reference/xtdb-v2-reference.md` | Database queries |
+
+---
+
+## Phase 8: Flow-Routed Namespace Rendering
+
+The capstone phase where `/ns/` routes go through the flow topology to agent JVMs. This is the culmination of the flow harness (super-repl) and the namespace rendering system.
+
+**Goal:** When an agent JVM owns a namespace, `GET /ns/seon.trading` renders inside that JVM via `topology/request!`, not in the orchestrator. The orchestrator becomes a pure proxy + cache layer for namespace views.
+
+**Key work:**
+- Wire `/ns/` route handler to detect flow-owned namespaces and route through `topology/request!`
+- Implement render cache at orchestrator with `*ctx*` watch-based invalidation
+- Handle fallback: if no flow is running for a namespace, render locally (current behavior)
+- SSE push path: `*ctx*` change in agent JVM -> flow event -> orchestrator cache invalidation -> SSE merge-fragment to browser
+- Error handling: timeouts, agent JVM crashes, graceful degradation to static view
+
+**Depends on:** Phase 7 (custom renderers), super-repl flow harness (Phase 4+), datalevin-migration
+
+---
+
+## Related PRDs
+
+- [`datalevin-migration`](../datalevin-migration/prd.md) — Database layer migration from XTDB to Datalevin
+- [`super-repl`](../super-repl/prd.md) — Flow harness, namespace isolation, agent JVM pool, cross-ns calls via `topology/request!`
 
 ---
 
