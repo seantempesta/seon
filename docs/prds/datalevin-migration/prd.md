@@ -68,6 +68,60 @@ Build a rock-solid database platform where:
        seon.trading        seon.trading        seon.health
 ```
 
+---
+
+## Unified `*ctx*` System
+
+### Problem: Three Separate Context Systems
+
+The codebase has three independent ctx/state management systems that overlap in purpose:
+
+| System | File | Storage | Push/Notify | Keyed By | Persistence |
+|--------|------|---------|-------------|----------|-------------|
+| **Reactive Instance** | `seon.web.reactive.instance` | In-memory atom | SSE push via watcher | 4-char hex instance ID | None (ephemeral) |
+| **Flow Harness** | `seon.flow.harness` | Datalevin via `persist-ctx!`/`load-ctx!` | None | Namespace string | Datalevin (EDN serialized) |
+| **Primer Ctx** | `seon.primer.ctx` | In-memory atom + XTDB checkpoint | SSE refresh-all via watcher | Session ID string | XTDB (background auto-sync) |
+
+All three filter non-serializable values, all three use atoms, and all three solve the same core problem: giving a running process isolated mutable state with persistence and notification.
+
+### Unified Design
+
+One system replaces all three. Key properties:
+
+- **Per-instance, not per-namespace** -- multiple agents/UIs in the same namespace each get their own ctx
+- **Keyed by instance ID** (4-char hex, same format as agent sessions)
+- **Datalevin entity per instance:**
+  ```clojure
+  {:ctx/instance-id "a1b2"
+   :ctx/namespace   "seon.trading"
+   :ctx/data        "<EDN string>"
+   :ctx/updated-at  #inst "2026-02-18T..."}
+  ```
+- **Shared `::conn` per namespace** -- all instances in the same namespace share one Datalevin DB connection (from connection manager)
+- **Atom with composite watcher** that does both:
+  1. Persist filtered EDN to Datalevin (proven pattern from `flow.harness/persist-ctx!`)
+  2. Notify SSE clients (proven pattern from `reactive.instance/make-watch`)
+- **Serialization filter** strips `::conn` and other non-EDN values (same `filter-serializable` pattern used by all three current systems)
+- **Resume on create** -- if Datalevin has stored data for an instance ID, load it as initial value
+
+### Coverage Matrix
+
+| Capability | reactive.instance | flow.harness | primer.ctx | **Unified** |
+|------------|:-:|:-:|:-:|:-:|
+| In-memory atom | yes | no (persist only) | yes | yes |
+| Datalevin persistence | no | yes | no (XTDB) | yes |
+| SSE push on change | yes | no | yes (refresh-all) | yes |
+| Per-instance isolation | yes | no (per-ns) | yes (per-session) | yes |
+| Resume/reload | no | yes | yes | yes |
+| Render function | yes | no | no | yes |
+| Shared DB connection | n/a | n/a | n/a | yes (per-ns) |
+
+### Note on Reactive Invalidation
+
+The target architecture uses reactive invalidation (watcher-driven push) rather than polling. The initial implementation may use polling for some UI views; this is acceptable as a stepping stone. The watcher pattern from `reactive.instance` is the proven approach and should be carried forward.
+
+---
+
 ### Key Design Decisions
 
 | Decision | Rationale |
@@ -288,24 +342,26 @@ This means all DBs can store any registered entity type.
 
 ---
 
-### Phase 1: Dual-Write AI Domain
+### Phase 1: Dual-Write AI Domain -- COMPLETE
 
 **Goal:** Verify Datalevin works by writing to both DBs.
 
+**Status:** COMPLETE. See "Stress Testing" section below for implementation details.
+
 #### 1.1 Dual-Write Layer
-- [ ] Create `src/seon/db/dual.clj` - writes to both XTDB and Datalevin
-- [ ] Feature flag in config: `:db/dual-write? true`
-- [ ] Log any discrepancies between DBs
+- [x] Created `src/seon/ai/datalevin.clj` - parallel writes to Datalevin
+- [x] Runtime toggle via `seon.ai.datalevin/enabled?` atom
+- [x] Errors logged but non-fatal (fire-and-forget)
 
 #### 1.2 AI Session/Message Dual-Write
-- [ ] Update `seon.ai/save-session!`
-- [ ] Update `seon.ai/save-message!`
-- [ ] Verification queries compare both DBs
+- [x] Updated `seon.ai/start-session!`, `end-session!`, `add-message!`
+- [x] Updated `seon.ai.claude/persist-message!`
+- [x] Verification via `(dl/verify-sync)` and `(dl/stats)`
 
 **Success Criteria:**
-- [ ] All AI data in both XTDB and Datalevin
-- [ ] Data matches exactly
-- [ ] Existing tests still pass (read from XTDB)
+- [x] All AI data written to both XTDB and Datalevin
+- [x] Existing tests still pass (read from XTDB)
+- [x] Zero errors after extended use
 
 ---
 
@@ -314,7 +370,33 @@ This means all DBs can store any registered entity type.
 **Goal:** Switch reads to Datalevin, XTDB becomes backup.
 
 #### 2.1 Query Migration
-- [ ] Rewrite SQL queries as Datalog
+
+SQL queries to port to Datalevin Datalog (~25 queries). All are SELECTs with no temporal features -- straightforward translation.
+
+**`seon.ai` (5 queries):**
+1. `get-session` -- `SELECT * FROM ai_sessions WHERE _id = ?`
+2. `get-messages` -- `SELECT * FROM ai_messages WHERE session_id = ? ORDER BY timestamp`
+3. `list-sessions` -- `SELECT * FROM ai_sessions [WHERE ns/status] ORDER BY started_at DESC LIMIT ?`
+4. `session-stats` (sessions) -- `SELECT SUM(cost), COUNT(*) FROM ai_sessions`
+5. `session-stats` (messages) -- `SELECT COUNT(*), SUM(tokens...) FROM ai_messages`
+
+**`seon.ai.claude` (5 queries):**
+6. `agent-result` -- `SELECT * FROM ai_sessions WHERE agent_session_id = ?`
+7. `agent-result` (result msg) -- `SELECT content, subtype FROM ai_messages WHERE session_id = ? AND message_type = 'result'`
+8. `agent-result` (turn count) -- `SELECT COUNT(*) FROM ai_messages WHERE session_id = ? AND role = 'assistant' AND message_type = 'assistant'`
+9. `agent-messages` -- `SELECT * FROM ai_sessions WHERE agent_session_id = ?`
+10. `agent-messages` (count) -- `SELECT COUNT(*) FROM ai_messages WHERE session_id = ?`
+11. `agent-messages` (recent) -- `SELECT role, content, msg_type, tool_calls FROM ai_messages WHERE session_id = ? ORDER BY timestamp DESC LIMIT ?`
+
+**`seon.web.agents` (6 queries):**
+12. `find-ai-session-id` -- `SELECT _id FROM ai_sessions WHERE agent_session_id = ?`
+13. `load-session-messages` -- `SELECT * FROM ai_messages WHERE session_id = ? ORDER BY timestamp`
+14. `load-session-info` -- `SELECT status, started_at, ended_at, cost, context FROM ai_sessions WHERE _id = ?`
+15. `load-context-tokens` -- `SELECT cache_creation_tokens FROM ai_messages WHERE session_id = ? AND message_type = 'result'`
+16. `message-stats-by-session` -- `SELECT session_id, COUNT(*), MAX(timestamp) FROM ai_messages GROUP BY session_id`
+17. `context-tokens-by-session` -- `SELECT session_id, cache_creation_tokens FROM ai_messages WHERE message_type = 'result'`
+
+- [ ] Port all ~25 queries to Datalog
 - [ ] Feature flag: `:db/read-from :datalevin`
 - [ ] A/B query comparison logging
 
@@ -330,36 +412,54 @@ This means all DBs can store any registered entity type.
 
 ---
 
-### Phase 3: Agent Context System
+### Phase 3: Unified Agent Context System
 
-**Goal:** Implement `*ctx*` with `:seon.ns/conn` injection.
+**Goal:** Replace all three ctx systems with unified per-instance ctx backed by Datalevin.
 
-#### 3.1 Durable Atom (Duratom)
-- [ ] Create `src/seon/agent/durable_ctx.clj`
-- [ ] Integrate duratom with custom serializer for filtering
-- [ ] Add watcher-based versioning with bounded history
+#### 3.1 Unified Ctx Module
+- [ ] Create `src/seon/ctx.clj` (top-level, shared by all consumers)
+- [ ] Per-instance atom keyed by 4-char hex instance ID
+- [ ] Shared `::conn` per namespace from connection manager
+- [ ] `create-ctx!` -- creates atom, attaches composite watcher, loads previous state from Datalevin if exists
+- [ ] `destroy-ctx!` -- removes watchers, cleans up registry entry
 
-#### 3.2 Orchestrator Context Factory
+#### 3.2 Composite Watcher (persist + notify)
+
+The atom gets a single watcher that does two things on every state change:
+
+1. **Persist** -- filter non-EDN values, write to Datalevin as `{:ctx/instance-id :ctx/namespace :ctx/data :ctx/updated-at}`. Proven pattern from `seon.flow.harness/persist-ctx!`.
+2. **Notify SSE clients** -- render and push to connected channels. Proven pattern from `seon.web.reactive.instance/make-watch`.
+
 ```clojure
-(defn create-agent-ctx [{:keys [namespace session-id]}]
-  (let [conn (conn/get-namespace-conn! namespace)
-        previous (load-ctx-versions conn session-id)]
-    (durable-atom
-      {:initial {:seon.ns/conn conn
-                 :seon.ns/session-id session-id
-                 :seon.ns/namespace (str namespace)}
-       :skip-keys #{:seon.ns/conn}
-       :persist-to conn})))
+(defn create-ctx!
+  [{::keys [instance-id namespace conn initial-value]}]
+  (let [previous (load-ctx conn instance-id)
+        ctx-atom (atom (or previous initial-value {}))]
+    (add-watch ctx-atom ::persist-and-notify
+      (fn [_ _ old new]
+        (when (not= old new)
+          (persist-ctx! conn instance-id namespace new)
+          (notify-sse-clients! instance-id new))))
+    ctx-atom))
 ```
 
-- [ ] Create `src/seon/orchestrator/ctx.clj`
-- [ ] Context injection on agent launch
-- [ ] Session resume loads previous `*ctx*`
+#### 3.3 Migration from Existing Systems
+- [ ] Replace `seon.web.reactive.instance` usage with unified ctx
+- [ ] Replace `seon.primer.ctx` usage with unified ctx
+- [ ] Flow harness `persist-ctx!`/`load-ctx!` already uses Datalevin -- adapt to per-instance keying
+
+**Key Design Points:**
+- Multiple agents/UIs in the same namespace each get their own ctx (per-instance, not per-namespace)
+- All instances in the same namespace share one Datalevin connection (`::conn`)
+- Instance ID is the primary key in Datalevin, not namespace
+- Future goal: full reactive invalidation (watcher-driven push replaces all polling)
 
 **Success Criteria:**
-- [ ] Agents get `*ctx*` with working `:seon.ns/conn`
-- [ ] `*ctx*` persists (minus non-EDN keys)
-- [ ] Session resume works
+- [ ] Agents get `*ctx*` with working `::conn`
+- [ ] `swap!` triggers both persist and SSE push
+- [ ] Session resume loads previous context from Datalevin
+- [ ] Non-EDN keys (connections, channels) filtered from persistence
+- [ ] `seon.primer.ctx` and `seon.web.reactive.instance` no longer used
 
 ---
 
@@ -390,6 +490,8 @@ This means all DBs can store any registered entity type.
 
 - [ ] Remove XTDB from `deps.edn`
 - [ ] Remove XTDB Integrant components
+- [ ] Remove `seon.primer.ctx` (superseded by unified ctx in Phase 3)
+- [ ] Remove `seon.web.reactive.instance` (superseded by unified ctx in Phase 3)
 - [ ] Update documentation
 - [ ] Create `/datalevin-queries` skill
 - [ ] Delete XTDB data (after backup)
@@ -770,6 +872,33 @@ Based on the audit, here's the recommended priority:
 - Phase 3: Requires careful orchestrator changes
 - Phase 4: Bulk of the work, needs dedicated focus
 - Phase 5: Final cleanup, low effort if earlier phases succeeded
+
+---
+
+## Unified Render Contract
+
+Single `render` function per namespace, replacing both `render` and `render-content` conventions. Behavior is driven by the argument map:
+
+| Call | Returns | Purpose |
+|------|---------|---------|
+| `(render {::format :html})` | Hiccup | Static namespace view (no instance state) |
+| `(render {::format :html ::ctx <atom> ::conn <conn>})` | Hiccup | Dynamic instance view with live state |
+| `(render {::format :ai})` | String | Text summary for agents (no instance state) |
+| `(render {::format :ai ::ctx <atom> ::conn <conn>})` | String | Text summary with instance state |
+
+**Rules:**
+- `:html` format always returns hiccup vectors
+- `:ai` format always returns a plain string
+- When `::ctx` and `::conn` are present, render includes instance-specific data
+- When absent, render shows a static/default view of the namespace
+- This replaces the current split between `render` (page frame) and `render-content` (inner HTML)
+
+---
+
+## Related PRDs
+
+- **Super REPL** (`docs/prds/super-repl/prd.md`) -- Runtime flow harness, pool JVMs, cross-namespace calls. Ctx persistence originated here.
+- **Namespace UI** (`docs/prds/namespace-ui/`) -- Presentation layer, design system, reactive instance pattern. Render contract originated here.
 
 ---
 
