@@ -1,4 +1,5 @@
 # PRD: Custom Renderers
+## Status: SUPERSEDED by spec-driven-rendering — renderers resolved via fn-spec linking
 
 **Status:** Ready for Implementation
 **Priority:** Medium

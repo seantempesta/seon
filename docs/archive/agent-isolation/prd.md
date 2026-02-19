@@ -1,4 +1,5 @@
 # Agent Isolation Architecture
+## Status: COMPLETE — Isolated nREPL + DB per agent via flow harness and session API
 
 **Status**: Phase 7 Complete
 **Last Updated**: 2026-01-14

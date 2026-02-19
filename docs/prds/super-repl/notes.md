@@ -197,3 +197,27 @@
 ### Removed `*test-dl-conn*` dynamic var
 - Orchestrator session tests use `with-redefs-fn` on the private `get-dl-conn` function
 - Eliminates coupling between test infrastructure and production code
+
+## Render Pipeline WP4-6: Client Tracking + Migration
+
+### seon.ctx client tracking
+- `::track-clients?` defaults to false. Existing ctx instances (flow, primer) are unaffected.
+- Client push uses `requiring-resolve` for http-kit and chassis to avoid hard deps from ctx.clj.
+- `render-and-push!` uses `seon.web.reactive.transform/transform-hiccup` -- that module survives deletion.
+- `::render-fn` on ctx is a temporary bridge. Later replaced by Datalevin resolution via `find-renderer`.
+
+### Migration from reactive.instance
+- `instances-for-namespace` returns registry entries with `::ctx/instance-id` added (not `::instance/id`).
+- routes.clj destructures with `{::ctx/keys [instance-id] :keys [created-at]}` for instance rows.
+- ID generation moved to `ctx/generate-id` (public fn), called by routes before `ctx/create!`.
+
+### Deleted files
+- `src/seon/web/reactive/instance.clj` - replaced by seon.ctx with `::track-clients? true`
+- `src/seon/web/reactive/ctx.clj` - replaced by `ctx/clients-for-namespace` and `ctx/client-count-for-namespace`
+- `seon.ai.agent/xtdb-node` atom and `init!` fn removed (set but never read)
+- `seon.web.server` no longer requires `seon.ai.agent`
+
+### Surviving reactive modules
+- `seon.web.reactive.transform` - pure hiccup transformation, used by ctx.clj and routes.clj
+- `seon.web.reactive.actions` - action resolution and signal extraction, used by routes.clj
+- `seon.primer.render` - has active callers in primer/html.clj

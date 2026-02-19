@@ -1,4 +1,5 @@
 # PRD: Live Atom Updates
+## Status: SUPERSEDED by render-pipeline — live updates handled by unified render pipeline
 
 **Status:** Pending
 **Priority:** High (Phase 5 of namespace-ui)

@@ -59,7 +59,7 @@ These are already built and working:
 
 ## Phases
 
-### Phase 1: First Render Function (Proof of Life)
+### Phase 1: First Render Function (Proof of Life) [COMPLETE]
 
 **Goal**: One working render function discovered from Datalevin, producing output for both formats.
 
@@ -88,7 +88,7 @@ These are already built and working:
 
 **Files**: `src/seon/health/workout/render.clj` (new), test file
 
-### Phase 2: Wire Resolution + Cache + Cleanup
+### Phase 2: Wire Resolution + Cache + Cleanup [COMPLETE]
 
 **Goal**: `seon.render/render` uses Datalevin discovery, old manual registry removed.
 
@@ -110,7 +110,7 @@ These are already built and working:
 
 **Files**: `src/seon/render.clj`, `src/seon/graph/ingest.clj` (add invalidation call)
 
-### Phase 3: Client Tracking in seon.ctx
+### Phase 3: Client Tracking in seon.ctx [COMPLETE]
 
 **Goal**: `seon.ctx` tracks connected clients per instance for targeted push.
 
@@ -124,7 +124,7 @@ These are already built and working:
 
 **Files**: `src/seon/ctx.clj`
 
-### Phase 4: Migrate seon.ns.routes
+### Phase 4: Migrate seon.ns.routes [COMPLETE]
 
 **Goal**: `seon.ns.routes` uses `seon.ctx` instead of `seon.web.reactive.instance`.
 
@@ -142,7 +142,7 @@ This is mostly mechanical — same lifecycle concepts, different namespace:
 
 **Files**: `src/seon/ns/routes.clj` (20+ call sites to update)
 
-### Phase 5: Migrate seon.web.browser + Delete Old Code
+### Phase 5: Migrate seon.web.browser + Delete Old Code [COMPLETE]
 
 **Goal**: Remove all old rendering infrastructure.
 

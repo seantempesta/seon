@@ -443,19 +443,6 @@
        ::errors @errors})))
 
 ;;; ---------------------------------------------------------------------------
-;;; XTDB Node Reference (for completed sessions)
-;;; ---------------------------------------------------------------------------
-
-(defonce xtdb-node (atom nil))
-
-(defn init!
-  "Initialize the agent module with the XTDB node.
-   Called by the server component at startup."
-  [node]
-  (reset! xtdb-node node)
-  (log/info "Agent module initialized with XTDB node"))
-
-;;; ---------------------------------------------------------------------------
 ;;; Render Support
 ;;; ---------------------------------------------------------------------------
 
