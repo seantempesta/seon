@@ -71,7 +71,9 @@ Agent JVM (186MB each)
 
 ### Core Concepts
 
-**Super REPL**: A form router in the orchestrator. Receives forms from Claude Code agents (via MCP), sends to the right agent JVM via nREPL, stores forms in Datalevin, runs clj-kondo analysis.
+**Datalevin as Source of Truth**: The Seon Datalevin database is the single source of truth for all code metadata — namespaces, functions, specs, and their relationships. Agent JVMs are ephemeral workspaces. When an agent's work is ready, it gets ingested into Datalevin and optionally graduated to disk. The system always queries Datalevin to understand what code exists, never runtime registries or file scans.
+
+**Super REPL**: A form router in the orchestrator. Receives forms from Claude Code agents (via MCP), sends to the right agent JVM via nREPL, stores forms in Datalevin, runs analysis and updates the code index.
 
 **Agent JVM**: A minimal Clojure process (7 deps, 186MB). Connects to orchestrator's Datalevin server as a client. Has its own nREPL.
 

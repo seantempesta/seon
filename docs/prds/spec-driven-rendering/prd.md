@@ -4,9 +4,11 @@
 
 ## Summary
 
-Replace the in-memory atom-based render registry (`seon.render`) with a Datalevin-backed code index that discovers render functions automatically from Malli `:malli/schema` metadata. Any function whose output spec contains `:seon.render/html` or `:seon.render/ai` is a render function. Resolution picks the most specific input match (key-count DESC), with newest timestamp as tiebreaker.
+The Seon Datalevin database is the **single source of truth** for all code metadata: what namespaces exist, what functions they contain, what specs they define, and how they relate to each other. Everything queries Datalevin to understand the system.
 
-The same Datalevin index serves double duty: rendering resolution AND agent context building (function discovery, cross-namespace queries, spec introspection).
+How data gets into Datalevin is just plumbing — startup scan, Super REPL eval, dev hook, git merge — the details of ingestion don't matter to consumers. The system always asks Datalevin "what renderers match this data?" or "what functions accept this key?" regardless of how the code got there.
+
+Render functions are discovered automatically: any function whose output spec contains `:seon.render/html` or `:seon.render/ai` is a render function. Resolution picks the most specific input match (key-count DESC), with newest timestamp as tiebreaker.
 
 ## Motivation
 
@@ -54,7 +56,7 @@ Notes:
 
 #### Spec Entities (`:seon.spec/*`)
 
-Populated from Malli registry (`seon.schema/registered-schemas`).
+Populated from static source analysis of `schema/register!` calls in source files. The scanner parses these calls using edamame/clj-kondo AST — it does NOT read from the Malli global registry at runtime. This is critical because agent JVMs have their own registries, ClojureScript has a different runtime, and code on disk that isn't loaded won't be in any registry.
 
 ```clojure
 {:seon.spec/key           :seon.health.workout/log-workout-request  ; unique identity
@@ -70,15 +72,20 @@ Populated from Malli registry (`seon.schema/registered-schemas`).
 
 #### Namespace Entities (`:seon.ns/*`)
 
-Populated from clj-kondo namespace-definitions + `seon.ns.introspect`.
+Populated from clj-kondo namespace-definitions + file extension analysis.
 
 ```clojure
 {:seon.ns/name       "seon.health.workout"  ; unique identity
  :seon.ns/doc        "Weightlifting tracking domain"
  :seon.ns/file       "src/seon/health/workout.clj"
+ :seon.ns/target     :clj                   ; extracted from file extension (.clj, .cljs, .cljc)
  :seon.ns/requires   ["seon.schema" "seon.db.datalevin"]
  :seon.ns/updated-at #inst "2026-02-19"}
 ```
+
+Notes:
+- `:seon.ns/target` indicates the runtime target: `:clj` (JVM), `:cljs` (ClojureScript), `:cljc` (both). Domain code should prefer `:cljc` when possible — no JVM-specific deps, plain data in/out. Seon infrastructure (`seon.web.*`, `seon.db.*`, `seon.flow.*`) is `:clj`-only.
+- Target is critical for graduation (writing code back to disk in the right format) and for knowing which sessions can load the code (JVM vs ClojureScript).
 
 #### Call Graph Entities (`:seon.call/*`)
 
@@ -124,6 +131,7 @@ Populated from clj-kondo var-usages. `:seon.call/from-fn` and `:seon.call/to-fn`
  :seon.ns/name       {:db/valueType :db.type/string :db/unique :db.unique/identity}
  :seon.ns/doc        {:db/valueType :db.type/string}
  :seon.ns/file       {:db/valueType :db.type/string}
+ :seon.ns/target     {:db/valueType :db.type/keyword}  ; :clj, :cljs, :cljc
  :seon.ns/requires   {:db/valueType :db.type/string :db/cardinality :db.cardinality/many}
  :seon.ns/updated-at {:db/valueType :db.type/instant}
 
@@ -204,50 +212,63 @@ The scanner extends `seon.graph.analyzer` and `seon.graph.ingest` rather than bu
 
 ### Data Sources
 
-| Source | Extracts | Existing Code |
-|--------|----------|---------------|
-| clj-kondo analysis | var-definitions, var-usages, namespace-definitions | `seon.graph.analyzer` |
-| Malli registry | spec keys, definitions, base-types, contains-keys | `seon.schema/registered-schemas` (new scan) |
-| Runtime var metadata | `:malli/schema` -> input-spec, output-spec | `seon.ns.introspect` + var meta (new scan) |
-| clj-kondo var-usages | call graph (from-fn, to-fn) | `seon.graph.analyzer` |
+All data lives in **Datalevin**. How it gets there (source file parsing, Super REPL eval, etc.) is an implementation detail of the ingestion pipeline. No consumer ever reads runtime state directly — they always query Datalevin.
 
-### Scan Triggers
+| What's Stored | Source | Method |
+|---------------|--------|--------|
+| Namespace entities (name, doc, file, target, requires) | clj-kondo namespace-definitions + file extension | `seon.graph.analyzer` (existing) |
+| Function entities (name, arglists, doc, line, specs) | clj-kondo var-definitions + `:malli/schema` metadata | `seon.graph.analyzer` (existing) + static metadata parsing |
+| Spec entities (key, definition, base-type, contains-keys) | Static parsing of `schema/register!` calls from source | edamame parse of source → extract keyword + schema form |
+| Call graph (from-fn → to-fn) | clj-kondo var-usages | `seon.graph.analyzer` (existing) |
+| `:seon.ns/target` (`:clj`, `:cljs`, `:cljc`) | File extension | Trivial — derive from file path |
 
-- **Startup:** Full project scan (`analyze-project!` + Malli registry + runtime metadata)
-- **Dev hook (PostToolUse):** Incremental scan of affected namespaces only
-- **Debounce:** Scanner debounces at 100ms to batch rapid edits
+### Ingestion (How Data Gets Into Datalevin)
 
-### Spec Key Extraction
+Multiple paths feed the code index. Consumers don't care which path was used — they always query Datalevin.
 
-For map specs, extract contained keys recursively:
+| Path | When | Scope |
+|------|------|-------|
+| Startup scan | System boot | Full project — all source files on disk |
+| Dev hook | After file edit (PostToolUse) | Changed files only |
+| Super REPL eval | Agent writes code in isolated JVM | Single form |
+| Git merge / graduation | Code moves from branch/REPL to disk | Changed namespaces |
+
+**Debounce:** Scanner debounces at 100ms to batch rapid edits. All paths converge on the same `ingest!` functions — the code index doesn't know or care where the analysis came from.
+
+### Spec Key Extraction (Static — From Source)
+
+For `schema/register!` calls parsed from source files, extract contained keys from the schema definition form (which is just data — a vector):
 
 ```clojure
 (defn extract-contains-keys
-  "Extract all top-level keys from a Malli map schema."
-  [schema-key]
-  (let [schema (m/schema schema-key)
-        children (m/children schema)]
-    (when (= :map (m/type schema))
-      (->> children
-           (map first)  ; key from [key opts schema] triples
-           (filter keyword?)
-           vec))))
+  "Extract all top-level keys from a schema definition form (parsed as data).
+   Works on the raw EDN form, NOT the Malli runtime registry."
+  [schema-form]
+  (when (and (vector? schema-form) (= :map (first schema-form)))
+    (->> (rest schema-form)
+         (filter vector?)
+         (map first)
+         (filter keyword?)
+         vec)))
+
+;; Example: parsing (schema/register! ::workout [:map [::exercise ...] [::sets ...]])
+;; schema-form = [:map [::exercise ::exercise] [::sets ::sets]]
+;; => [::exercise ::sets]
 ```
 
-### Runtime Metadata Extraction
+### Function Schema Extraction (Static — From Source)
 
-For functions with `:malli/schema` metadata, extract input and output spec references:
+For functions with `:malli/schema` metadata, extract input and output spec references from the parsed source form:
 
 ```clojure
 (defn extract-fn-specs
-  "Extract input/output spec keywords from :malli/schema metadata.
-   Returns nil if schema is not in [:=> [:cat input] output] form."
-  [var-meta]
-  (when-let [schema (:malli/schema var-meta)]
-    (when (and (vector? schema) (= :=> (first schema)))
-      (let [[_ [_ input-spec] output-spec] schema]
-        {:input-spec (when (keyword? input-spec) input-spec)
-         :output-spec (when (keyword? output-spec) output-spec)}))))
+  "Extract input/output spec keywords from :malli/schema metadata form.
+   Parses the raw EDN form from source, NOT runtime var metadata."
+  [schema-form]
+  (when (and (vector? schema-form) (= :=> (first schema-form)))
+    (let [[_ [_ input-spec] output-spec] schema-form]
+      {:input-spec (when (keyword? input-spec) input-spec)
+       :output-spec (when (keyword? output-spec) output-spec)})))
 ```
 
 ## Render Agent Pattern
@@ -395,10 +416,11 @@ No special configuration system. Agents write functions, the system discovers th
 
 ### Phase 1: Data Model + Scanner
 - Migrate `seon.graph.*` from `:graph/*` to `:seon.fn/*`, `:seon.spec/*`, `:seon.ns/*`, `:seon.call/*`
-- Add Malli registry scanning (spec entities with `:seon.spec/contains-keys`)
-- Add runtime metadata extraction (`:malli/schema` -> input-spec, output-spec)
+- Add `:seon.ns/target` to namespace entities (`:clj`, `:cljs`, `:cljc`)
+- Add static spec extraction (parse `schema/register!` calls from source → spec entities with `:seon.spec/contains-keys`)
+- Add static `:malli/schema` metadata extraction (from source → input-spec, output-spec on fn entities)
 - Pre-compute `:seon.fn/render-input-keys` for render functions
-- Integrate into dev hook for incremental updates
+- Wire ingestion pipeline (startup scan + dev hook + Super REPL eval all feed same path)
 - [ ] Not started
 
 ### Phase 2: Renderer Resolution
@@ -439,7 +461,8 @@ No special configuration system. Agents write functions, the system discovers th
 
 | Decision | Rationale |
 |----------|-----------|
-| Strings not symbols for qualified names | Consistent serialization, XTDB compatibility |
+| **Datalevin is the single source of truth** | All code metadata queries go to Datalevin. How data gets in (scan, REPL, merge) is plumbing. No runtime registry reads. |
+| Strings not symbols for qualified names | Consistent serialization, Datalevin compatibility |
 | Pre-computed render-input-keys | Avoids N+1 queries during resolution |
 | No source code storage by default | Large, changes often, available via `source-fn` |
 | Extend `seon.graph.*` not new scanner | Avoid duplication, reuse clj-kondo + Datalevin infra |
