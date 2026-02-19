@@ -401,6 +401,264 @@
                     (= (:messages dl-counts) xtdb-messages))}))
 
 ;;; ---------------------------------------------------------------------------
+;;; Read Source Configuration
+;;; ---------------------------------------------------------------------------
+
+;; Controls whether AI reads come from XTDB or Datalevin.
+;; Default :xtdb - Phase B2 will flip to :datalevin after verification.
+(defonce read-from (atom :xtdb))
+
+;;; ---------------------------------------------------------------------------
+;;; Datalevin Read Functions (Mirrors of XTDB queries)
+;;; ---------------------------------------------------------------------------
+
+(defn- q
+  "Run a Datalevin query against the master connection.
+   Returns nil if connection unavailable."
+  [query & args]
+  (when-let [conn (get-conn)]
+    (require 'datalevin.core)
+    (let [q-fn (resolve 'datalevin.core/q)]
+      (apply q-fn query @conn args))))
+
+(defn- pull-entity
+  "Pull all attributes for an entity from Datalevin."
+  [eid]
+  (when-let [conn (get-conn)]
+    (require 'datalevin.core)
+    (let [pull-fn (resolve 'datalevin.core/pull)]
+      (pull-fn @conn '[*] eid))))
+
+(defn- dl-entity->session
+  "Convert a Datalevin entity (from pull) to the shape callers expect.
+   Maps :seon.ai.datalevin/xtdb-id back to :xt/id and removes Datalevin-internal keys."
+  [entity]
+  (when entity
+    (-> entity
+        (assoc :xt/id (::xtdb-id entity))
+        (dissoc :db/id ::entity-type ::stored-at ::xtdb-id))))
+
+(defn- dl-entity->message
+  "Convert a Datalevin message entity to the shape callers expect."
+  [entity]
+  (when entity
+    (-> entity
+        (assoc :xt/id (::xtdb-id entity))
+        (dissoc :db/id ::entity-type ::stored-at ::xtdb-id))))
+
+(defn dl-get-session
+  "Find session by session-id from Datalevin.
+   Returns session entity map or nil."
+  [session-id]
+  (when-let [results (q '[:find ?e
+                           :in $ ?sid
+                           :where
+                           [?e ::entity-type :session]
+                           [?e :seon.ai/session-id ?sid]]
+                        session-id)]
+    (when-let [eid (ffirst results)]
+      (dl-entity->session (pull-entity eid)))))
+
+(defn dl-get-messages
+  "All messages for a session, ordered by timestamp ASC."
+  [session-id]
+  (when-let [results (q '[:find ?e ?ts
+                           :in $ ?sid
+                           :where
+                           [?e ::entity-type :message]
+                           [?e :seon.ai/session-id ?sid]
+                           [?e :seon.ai/timestamp ?ts]]
+                        session-id)]
+    (->> results
+         (sort-by second)
+         (mapv (comp dl-entity->message pull-entity first)))))
+
+(defn dl-list-sessions
+  "List sessions with optional namespace/status filter, ordered by started-at DESC.
+   Opts: :namespace, :status, :limit (default 20)."
+  ([] (dl-list-sessions {}))
+  ([{:keys [namespace status limit] :or {limit 20}}]
+   (let [;; Build query dynamically based on filters
+         base-where '[[?e ::entity-type :session]
+                       [?e :seon.ai/started-at ?started]]
+         ns-where (when namespace
+                    [['?e :seon.ai/namespace (str namespace)]])
+         status-where (when status
+                        [['?e :seon.ai/status status]])
+         all-where (vec (concat base-where ns-where status-where))
+         query {:find '[?e ?started]
+                :in (if (or namespace status) '[$] '[$])
+                :where all-where}
+         results (q query)]
+     (when results
+       (->> results
+            (sort-by second #(compare %2 %1))
+            (take limit)
+            (mapv (comp dl-entity->session pull-entity first)))))))
+
+(defn dl-session-stats
+  "Aggregate stats: total cost, sessions, messages, token counts."
+  []
+  (let [sessions (q '[:find ?e ?cost
+                       :where
+                       [?e ::entity-type :session]
+                       [(get-else $ ?e :seon.ai/cost-usd 0.0) ?cost]])
+        messages (q '[:find ?e ?in ?out ?cr ?cc
+                       :where
+                       [?e ::entity-type :message]
+                       [(get-else $ ?e :seon.ai/input-tokens 0) ?in]
+                       [(get-else $ ?e :seon.ai/output-tokens 0) ?out]
+                       [(get-else $ ?e :seon.ai.claude/cache-read-tokens 0) ?cr]
+                       [(get-else $ ?e :seon.ai.claude/cache-creation-tokens 0) ?cc]])
+        total-cost (reduce + 0.0 (map second sessions))
+        total-sessions (count sessions)
+        total-messages (count messages)
+        input-tokens (reduce + 0 (map #(nth % 1) messages))
+        output-tokens (reduce + 0 (map #(nth % 2) messages))
+        cache-read (reduce + 0 (map #(nth % 3) messages))
+        cache-creation (reduce + 0 (map #(nth % 4) messages))
+        total-input (+ cache-read input-tokens)
+        cache-hit-rate (if (pos? total-input)
+                         (/ (double cache-read) total-input)
+                         0.0)]
+    {:seon.ai/total-cost-usd (double total-cost)
+     :seon.ai/total-sessions (long total-sessions)
+     :seon.ai/total-messages (long total-messages)
+     :seon.ai/tokens {:input (long input-tokens)
+                      :output (long output-tokens)
+                      :cache-read (long cache-read)
+                      :cache-creation (long cache-creation)}
+     :seon.ai/cache-hit-rate cache-hit-rate}))
+
+(defn dl-find-by-agent-session-id
+  "Find session by 4-char agent session ID."
+  [agent-session-id]
+  (when-let [results (q '[:find ?e
+                           :in $ ?asid
+                           :where
+                           [?e ::entity-type :session]
+                           [?e :seon.ai/agent-session-id ?asid]]
+                        agent-session-id)]
+    (when-let [eid (ffirst results)]
+      (dl-entity->session (pull-entity eid)))))
+
+(defn dl-get-result-message
+  "Get the result message for a session (message-type = 'result')."
+  [ai-session-id]
+  (when-let [results (q '[:find ?e
+                           :in $ ?sid
+                           :where
+                           [?e ::entity-type :message]
+                           [?e :seon.ai/session-id ?sid]
+                           [?e :seon.ai.claude/message-type "result"]]
+                        ai-session-id)]
+    (when-let [eid (ffirst results)]
+      (dl-entity->message (pull-entity eid)))))
+
+(defn dl-count-assistant-turns
+  "Count assistant turns in a session (role=assistant, message-type=assistant)."
+  [ai-session-id]
+  (let [results (q '[:find ?e
+                      :in $ ?sid
+                      :where
+                      [?e ::entity-type :message]
+                      [?e :seon.ai/session-id ?sid]
+                      [?e :seon.ai/role "assistant"]
+                      [?e :seon.ai.claude/message-type "assistant"]]
+                   ai-session-id)]
+    (count (or results []))))
+
+(defn dl-message-count
+  "Total messages in a session."
+  [ai-session-id]
+  (let [results (q '[:find ?e
+                      :in $ ?sid
+                      :where
+                      [?e ::entity-type :message]
+                      [?e :seon.ai/session-id ?sid]]
+                   ai-session-id)]
+    (count (or results []))))
+
+(defn dl-recent-messages
+  "Recent N messages for a session, ordered by timestamp DESC then reversed to chronological."
+  [ai-session-id limit]
+  (when-let [results (q '[:find ?e ?ts
+                           :in $ ?sid
+                           :where
+                           [?e ::entity-type :message]
+                           [?e :seon.ai/session-id ?sid]
+                           [?e :seon.ai/timestamp ?ts]]
+                        ai-session-id)]
+    (->> results
+         (sort-by second #(compare %2 %1))
+         (take limit)
+         reverse
+         (mapv (comp dl-entity->message pull-entity first)))))
+
+(defn dl-message-stats-by-session
+  "Batch: message counts + latest timestamp per session.
+   Returns map of session-id -> {:count n :latest-ts instant}."
+  []
+  (when-let [results (q '[:find ?sid ?ts
+                           :where
+                           [?e ::entity-type :message]
+                           [?e :seon.ai/session-id ?sid]
+                           [?e :seon.ai/timestamp ?ts]])]
+    (->> results
+         (group-by first)
+         (reduce-kv
+          (fn [acc sid entries]
+            (let [timestamps (map second entries)
+                  latest (apply max-key #(.toEpochMilli %) timestamps)]
+              (assoc acc sid {:count (count entries)
+                              :latest-ts latest})))
+          {}))))
+
+(defn dl-context-tokens-by-session
+  "Batch: cache creation tokens per session (from result messages).
+   Returns map of session-id -> token-count."
+  []
+  (when-let [results (q '[:find ?sid ?tokens
+                           :where
+                           [?e ::entity-type :message]
+                           [?e :seon.ai/session-id ?sid]
+                           [?e :seon.ai.claude/message-type "result"]
+                           [?e :seon.ai.claude/cache-creation-tokens ?tokens]])]
+    (into {} results)))
+
+(defn dl-find-ai-session-id
+  "Find the AI session ID (ses-xxx) for a given agent session ID (4-char hex).
+   Returns the xtdb-id string or nil."
+  [agent-session-id]
+  (when-let [session (dl-find-by-agent-session-id agent-session-id)]
+    (:xt/id session)))
+
+(defn dl-load-session-messages
+  "Load all messages for an AI session, ordered by timestamp.
+   Alias for dl-get-messages."
+  [ai-session-id]
+  (dl-get-messages ai-session-id))
+
+(defn dl-load-session-info
+  "Load session metadata by AI session ID (ses-xxx).
+   Returns session entity or nil."
+  [ai-session-id]
+  (when-let [results (q '[:find ?e
+                           :in $ ?xtdb-id
+                           :where
+                           [?e ::entity-type :session]
+                           [?e ::xtdb-id ?xtdb-id]]
+                        ai-session-id)]
+    (when-let [eid (ffirst results)]
+      (dl-entity->session (pull-entity eid)))))
+
+(defn dl-load-context-tokens
+  "Load context token usage from the result message for a session."
+  [ai-session-id]
+  (when-let [result-msg (dl-get-result-message ai-session-id)]
+    (:seon.ai.claude/cache-creation-tokens result-msg)))
+
+;;; ---------------------------------------------------------------------------
 ;;; REPL Helpers
 ;;; ---------------------------------------------------------------------------
 
