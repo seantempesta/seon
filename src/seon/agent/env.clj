@@ -21,9 +21,9 @@
      (env/ctx-load {::env/conn conn ::env/instance-id \"a13b\"})"
   (:require [clojure.edn :as edn]
             [datalevin.core :as d]
+            [seon.ctx :as ctx]
             [seon.graph.query :as gq]
-            [seon.schema :as schema])
-)
+            [seon.schema :as schema]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schema Registration
@@ -58,11 +58,8 @@
 ;;; ---------------------------------------------------------------------------
 
 (def ctx-schema
-  "Additional Datalevin schema for agent context persistence.
-   Merge with ingest/datalevin-schema when creating connections."
-  {:seon.ctx/instance-id {:db/valueType :db.type/string :db/unique :db.unique/identity}
-   :seon.ctx/data        {:db/valueType :db.type/string}
-   :seon.ctx/updated-at  {:db/valueType :db.type/instant}})
+  "Alias for seon.ctx/datalevin-schema. Use the canonical schema from seon.ctx."
+  ctx/datalevin-schema)
 
 ;;; ---------------------------------------------------------------------------
 ;;; Graph Query Wrappers

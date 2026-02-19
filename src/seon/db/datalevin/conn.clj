@@ -98,10 +98,14 @@
                   [:map
                    [::manager ::manager]])
 
+(schema/register! ::schema
+                  [:any {:description "Optional Datalevin schema to apply on connection"}])
+
 (schema/register! ::get-namespace-conn-request
                   [:map
                    [::manager ::manager]
-                   [::namespace ::namespace]])
+                   [::namespace ::namespace]
+                   [::schema {:optional true} ::schema]])
 
 (schema/register! ::close-namespace-conn-request
                   [:map
@@ -323,17 +327,21 @@
    Request keys:
      ::manager   - Required. Connection manager instance
      ::namespace - Required. Namespace symbol or string
+     ::schema    - Optional. Datalevin schema to apply on connection
 
    Returns:
      Datalevin connection to the namespace database.
 
    Example:
      (get-namespace-conn! {::manager manager
-                           ::namespace 'seon.trading})"
-  [{::keys [manager namespace]}]
+                           ::namespace 'seon.trading})
+     (get-namespace-conn! {::manager manager
+                           ::namespace 'seon.trading
+                           ::schema my-schema})"
+  [{::keys [manager namespace schema]}]
   (let [ns-str (namespace->db-name namespace)
         ns-key (keyword ns-str)]
-    (get-or-create-connection! manager ns-key ns-str nil)))
+    (get-or-create-connection! manager ns-key ns-str schema)))
 
 (defn close-namespace-conn!
   "Explicitly close a namespace connection.

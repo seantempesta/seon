@@ -269,11 +269,11 @@ feat: knowledge graph foundation with Datalevin storage
 
 ---
 
-## Phase 3: Super REPL Core + Agent Environment — NOT STARTED
+## Phase 3: Super REPL Core + Agent Environment — PARTIALLY COMPLETE
 
 **Goal**: Agents eval forms through the Super REPL. Forms are stored in Datalevin with versioning. Analysis runs automatically. Agent JVMs get namespace-scoped databases and a shared environment namespace.
 
-**Current state**: Code loading into agent JVMs works via `pool/nrepl-eval!` (Phase 1) and cross-namespace function calls work via the flow harness `topology/request!` (Phase 4). The Super REPL layers on top of this for the development workflow: form storage, versioning, dynamic context suggestions, and graduation to disk.
+**Current state**: The Super REPL form router (`seon.repl.super`) is built — form classification, routing, Datalevin storage, and versioning all work. Agent environment (`seon.agent.env`) is built with graph queries, ctx persistence, schema discovery. What's NOT done: graduation to disk, MCP routing, dynamic context suggestions, and agent_runner modifications.
 
 ### Files to Create/Modify
 
@@ -464,13 +464,15 @@ Dual-flow model: orchestrator flow topology + agent JVM mini-flow, connected by 
 
 ---
 
-## Phase 5: Dynamic Context + MCP Cockpit
+## Phase 5: Dynamic Context + MCP Cockpit — DEFERRED
+
+**Status**: Infrastructure exists (`seon.graph.context` builds topological context from Datalevin) but not wired into agent launch or MCP tools. Deferred until spec-driven rendering pipeline is complete — context rendering should use the same `find-renderer` resolution as HTML rendering (`:seon.render/ai` format).
 
 **Goal**: Agents receive proactive, relevant context as they work — not just tools they have to call. The Super REPL watches what agents are doing and injects useful information (related code, schemas, data structures) into their context window. MCP tools provide explicit query access as a complement.
 
 **Key insight**: The goal is **dynamic context, not a rolling list of messages**. When an agent evals a form, the response should include relevant discoveries from the knowledge graph. When an agent starts working in a namespace, they should see what's already available across the system.
 
-**Infrastructure ready**: The flow harness (Phase 4) already emits observability events (`:start`, `:ok`, `:error`, `:overload`, `:timeout`) on `:seon.flow.out/event`. The context engine can subscribe to these events to track namespace health and agent activity in real time.
+**Infrastructure ready**: The flow harness (Phase 4) already emits observability events (`:start`, `:ok`, `:error`, `:overload`, `:timeout`) on `:seon.flow.out/event`. The context engine can subscribe to these events to track namespace health and agent activity in real time. The topological context builder (`seon.graph.context`) can already do recursive pull + toposort + text rendering — it just needs to be wired in.
 
 ### Files to Create/Modify
 

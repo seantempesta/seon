@@ -68,9 +68,8 @@
 ;;; Schema Registration
 ;;; ---------------------------------------------------------------------------
 
-;; NOTE: Functions that take ::node (XTDB node) do not have :malli/schema
-;; metadata because the node type cannot be generated for property testing.
-;; The schemas are still documented in this file for reference.
+;; NOTE: Functions take ::node for API consistency but all writes go to Datalevin
+;; (since Phase E3). The node type cannot be generated for property testing.
 
 ;; Entity type discriminator
 (schema/register! ::type
@@ -126,7 +125,7 @@
                   [:double {:min 0.0
                             :description "Cost in USD"}])
 
-;; Clojure namespace context (stored as string for XTDB compatibility)
+;; Clojure namespace context (stored as string for database compatibility)
 (schema/register! ::namespace
                   [:string {:min 1
                             :description "Clojure namespace name"}])
@@ -148,9 +147,9 @@
                    [::code {:optional true} :string]
                    [::data {:optional true} :map]])
 
-;; XTDB node (opaque type, not validated beyond presence)
+;; Database node (legacy param kept for API consistency; writes go to Datalevin)
 (schema/register! ::node
-                  [:any {:description "XTDB node instance"}])
+                  [:any {:description "Database node (legacy, writes go to Datalevin)"}])
 
 ;; Limit for pagination
 (schema/register! ::limit
@@ -366,10 +365,10 @@
 (defn start-session!
   "Start a new AI session.
 
-   Creates a session entity in XTDB with status :active.
+   Creates a session entity in Datalevin with status :active.
 
    Request keys:
-     ::node             - Required. XTDB node instance
+     ::node             - Required. Database node (legacy param, writes go to Datalevin)
      ::namespace        - Optional. Clojure namespace context (symbol or string)
      ::prompt           - Optional. Initial prompt
      ::agent-session-id - Optional. 4-char hex Seon session ID (for log files)
@@ -382,7 +381,7 @@
      (start-session! {::node db ::namespace 'seon.trading ::prompt \"Analyze data\"})"
   [{::keys [node namespace prompt agent-session-id initial-context]}]
   (let [session-id (generate-id "ses")
-        ;; Convert namespace to string for XTDB compatibility
+        ;; Convert namespace to string for database compatibility
         ns-str (when namespace (str namespace))
         entity (cond-> {:xt/id session-id
                         ::type :session
@@ -401,7 +400,7 @@
    Updates the session with final status and optional usage statistics.
 
    Request keys:
-     ::node          - Required. XTDB node instance
+     ::node          - Required. Database node (legacy param, writes go to Datalevin)
      ::session-id    - Required. Session to end
      ::status        - Optional. Final status (default: :completed)
      ::input-tokens  - Optional. Total input tokens
@@ -439,7 +438,7 @@
    Creates a message entity linked to the session.
 
    Request keys:
-     ::node          - Required. XTDB node instance
+     ::node          - Required. Database node (legacy param, writes go to Datalevin)
      ::session-id    - Required. Parent session
      ::role          - Required. Message role (\"user\", \"assistant\", \"system\")
      ::content       - Required. Message content
@@ -471,7 +470,7 @@
   "Get a session by ID.
 
    Request keys:
-     ::node       - Required. XTDB node instance
+     ::node       - Required. Database node (legacy param, writes go to Datalevin)
      ::session-id - Required. Session ID
 
    Returns:
@@ -486,7 +485,7 @@
   "Get all messages for a session.
 
    Request keys:
-     ::node       - Required. XTDB node instance
+     ::node       - Required. Database node (legacy param, writes go to Datalevin)
      ::session-id - Required. Session ID
 
    Returns:
@@ -501,7 +500,7 @@
   "List recent sessions.
 
    Request keys:
-     ::node      - Required. XTDB node instance
+     ::node      - Required. Database node (legacy param, writes go to Datalevin)
      ::limit     - Optional. Max results (default: 20, max: 1000)
      ::namespace - Optional. Filter by namespace
      ::status    - Optional. Filter by status
@@ -526,7 +525,7 @@
    including cache hit rate for Claude sessions.
 
    Request keys:
-     ::node - Required. XTDB node instance
+     ::node - Required. Database node (legacy param, writes go to Datalevin)
 
    Response keys:
      ::total-cost-usd  - Total cost across all sessions

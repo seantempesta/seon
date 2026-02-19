@@ -175,3 +175,25 @@
 - `env/ctx-schema` defines `:seon.ctx/*` attributes for context persistence
 - When creating a Datalevin conn for tests, merge: `(merge ingest/datalevin-schema env/ctx-schema)`
 - In production, the connection manager should include both schemas
+
+## Phase E: Uniform Namespace Treatment (Refinement)
+
+### Lazy connection via connection manager
+- Primer ctx and orchestrator sessions now store a connection manager ref (not a raw conn)
+- Connections are obtained lazily on first use via `conn/get-namespace-conn!`
+- This eliminates the race condition where system.clj tried to resolve connections during init
+- Both use Integrant keys (`:seon/primer-ctx`, `:seon/orchestrator-sessions`) with `#ig/ref :seon/connection-manager`
+
+### `get-namespace-conn!` accepts optional `::schema`
+- Callers that need schema pass `::conn/schema dl-schema` when getting their connection
+- Others don't change — schema defaults to nil (no schema applied)
+- This lets each namespace define its own Datalevin schema without a central compiler
+
+### Port conflict test fix
+- `start-namespace-nrepl!` now retries up to 3 times on BindException (TOCTOU race between port check and bind)
+- Explicit port requests don't retry (port-conflict-test still validates error handling)
+- Test fixture sleep increased from 20ms to 100ms for OS socket release
+
+### Removed `*test-dl-conn*` dynamic var
+- Orchestrator session tests use `with-redefs-fn` on the private `get-dl-conn` function
+- Eliminates coupling between test infrastructure and production code

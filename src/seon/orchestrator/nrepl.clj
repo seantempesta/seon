@@ -340,73 +340,84 @@
                      :namespace namespace
                      :port (get-allocated-port session-id)})))
 
-  (try
-    ;; Use provided ctx-atom or create a new one
-    (let [ctx-atom (or ctx-atom
-                       (atom {:seon.agent/namespace namespace
-                              :seon.agent/db db
-                              :seon.agent/render-fn render-fn
-                              :seon.agent/worktree worktree
-                              :seon.agent/started-at (java.util.Date.)}))
+  (let [explicit-port? (some? port)
+        max-attempts (if explicit-port? 1 3)]
+    (loop [attempt 1]
+      (let [result
+            (try
+              ;; Use provided ctx-atom or create a new one
+              (let [ctx-atom (or ctx-atom
+                                 (atom {:seon.agent/namespace namespace
+                                        :seon.agent/db db
+                                        :seon.agent/render-fn render-fn
+                                        :seon.agent/worktree worktree
+                                        :seon.agent/started-at (java.util.Date.)}))
 
-          ;; Create the middleware function for this ctx/namespace
-          ctx-middleware (make-context-middleware ctx-atom namespace)
+                    ;; Create the middleware function for this ctx/namespace
+                    ctx-middleware (make-context-middleware ctx-atom namespace)
 
-          ;; Allocate port by session-id (allows multiple agents on same namespace)
-          port (or port (allocate-port! session-id))
+                    ;; Allocate port by session-id (allows multiple agents on same namespace)
+                    port (or port (allocate-port! session-id))
 
-          ;; Create a var-like wrapper so we can set the descriptor
-          ;; We use alter-meta! on a var to attach the descriptor
-          middleware-var (intern *ns* (gensym (str "ctx-middleware-" session-id "-")))
-          _ (alter-var-root middleware-var (constantly ctx-middleware))
-          _ (set-context-descriptor! middleware-var)
+                    ;; Create a var-like wrapper so we can set the descriptor
+                    middleware-var (intern *ns* (gensym (str "ctx-middleware-" session-id "-")))
+                    _ (alter-var-root middleware-var (constantly ctx-middleware))
+                    _ (set-context-descriptor! middleware-var)
 
-          ;; Start server with the custom handler
-          ;; We add our middleware to the default handler chain
-          handler (nrepl/default-handler middleware-var)
-          server (nrepl/start-server :port port :handler handler)
+                    ;; Start server with the custom handler
+                    handler (nrepl/default-handler middleware-var)
+                    server (nrepl/start-server :port port :handler handler)
 
-          result {:server server
-                  :port (:port server)
-                  :ctx ctx-atom
-                  :namespace namespace
-                  :session-id session-id
-                  :status :running
-                  :middleware-var middleware-var}]
+                    result {:server server
+                            :port (:port server)
+                            :ctx ctx-atom
+                            :namespace namespace
+                            :session-id session-id
+                            :status :running
+                            :middleware-var middleware-var}]
 
-      ;; Register by session-id (not namespace)
-      (swap! servers assoc session-id result)
+                ;; Register by session-id (not namespace)
+                (swap! servers assoc session-id result)
 
-      ;; Update ctx with the actual port (might differ if auto-assigned)
-      ;; Only do this for internally-created atoms; externally provided atoms
-      ;; (like persisted ctx) have reserved key protection
-      (when-not (:ctx-atom opts)
-        (swap! ctx-atom assoc :seon.agent/nrepl-port (:port server)))
+                ;; Update ctx with the actual port (might differ if auto-assigned)
+                ;; Only do this for internally-created atoms; externally provided atoms
+                ;; (like persisted ctx) have reserved key protection
+                (when-not (:ctx-atom opts)
+                  (swap! ctx-atom assoc :seon.agent/nrepl-port (:port server)))
 
-      (log/info "Started namespace nREPL server"
-                {:session-id session-id
+                (log/info "Started namespace nREPL server"
+                          {:session-id session-id
+                           :namespace namespace
+                           :port (:port server)})
+
+                result)
+
+              (catch java.net.BindException e
+                (release-port! session-id)
+                (if (< attempt max-attempts)
+                  (do
+                    (log/debug "Port bind failed, retrying"
+                               {:session-id session-id :attempt attempt :error (.getMessage e)})
+                    ::retry)
+                  (do
+                    (log/warn "Port conflict starting namespace nREPL"
+                              {:session-id session-id :namespace namespace :port port :error (.getMessage e)})
+                    {:status :port-conflict
+                     :session-id session-id
+                     :namespace namespace
+                     :error (str "Port " port " already in use")})))
+
+              (catch Exception e
+                (release-port! session-id)
+                (log/error "Error starting namespace nREPL"
+                           {:session-id session-id :namespace namespace :error (.getMessage e)})
+                {:status :error
+                 :session-id session-id
                  :namespace namespace
-                 :port (:port server)})
-
-      result)
-
-    (catch java.net.BindException e
-      (release-port! session-id)
-      (log/warn "Port conflict starting namespace nREPL"
-                {:session-id session-id :namespace namespace :port port :error (.getMessage e)})
-      {:status :port-conflict
-       :session-id session-id
-       :namespace namespace
-       :error (str "Port " port " already in use")})
-
-    (catch Exception e
-      (release-port! session-id)
-      (log/error "Error starting namespace nREPL"
-                 {:session-id session-id :namespace namespace :error (.getMessage e)})
-      {:status :error
-       :session-id session-id
-       :namespace namespace
-       :error (.getMessage e)})))
+                 :error (.getMessage e)}))]
+        (if (= result ::retry)
+          (recur (inc attempt))
+          result)))))
 
 (defn stop-namespace-nrepl!
   "Stop the nREPL server for a session.

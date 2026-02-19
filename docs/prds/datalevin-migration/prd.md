@@ -1,8 +1,8 @@
 # PRD: Datalevin Database Platform
 
-**Status:** Implementation Ready
+**Status:** Phases 0-3 Mostly Complete (on `feature/super-repl` branch)
 **Priority:** High
-**Branch:** feature/datalevin-migration
+**Branch:** feature/super-repl (merged with datalevin-migration work)
 
 ---
 
@@ -424,16 +424,16 @@ SQL queries to port to Datalevin Datalog (~25 queries). All are SELECTs with no 
 
 ---
 
-### Phase 3: Unified Agent Context System
+### Phase 3: Unified Agent Context System — MOSTLY COMPLETE
 
 **Goal:** Replace all three ctx systems with unified per-instance ctx backed by Datalevin.
 
-#### 3.1 Unified Ctx Module
-- [ ] Create `src/seon/ctx.clj` (top-level, shared by all consumers)
-- [ ] Per-instance atom keyed by 4-char hex instance ID
-- [ ] Shared `::conn` per namespace from connection manager
-- [ ] `create-ctx!` -- creates atom, attaches composite watcher, loads previous state from Datalevin if exists
-- [ ] `destroy-ctx!` -- removes watchers, cleans up registry entry
+#### 3.1 Unified Ctx Module — COMPLETE
+- [x] Created `src/seon/ctx.clj` (top-level, shared by all consumers)
+- [x] Per-instance atom keyed by instance ID
+- [x] Datalevin persistence with debounced writes
+- [x] `create!` -- creates atom, attaches composite watcher, loads previous state from Datalevin if exists
+- [x] `destroy!` -- removes watchers, cancels scheduled persist, cleans up registry entry
 
 #### 3.2 Composite Watcher (persist + notify)
 
@@ -456,9 +456,9 @@ The atom gets a single watcher that does two things on every state change:
 ```
 
 #### 3.3 Migration from Existing Systems
-- [ ] Replace `seon.web.reactive.instance` usage with unified ctx
-- [ ] Replace `seon.primer.ctx` usage with unified ctx
-- [ ] Flow harness `persist-ctx!`/`load-ctx!` already uses Datalevin -- adapt to per-instance keying
+- [ ] Replace `seon.web.reactive.instance` usage with unified ctx (blocked on spec-driven render pipeline — see below)
+- [x] `seon.primer.ctx` wraps `seon.ctx` with lazy connection manager
+- [x] `seon.orchestrator.session` uses connection manager with lazy `get-namespace-conn!`
 
 **Key Design Points:**
 - Multiple agents/UIs in the same namespace each get their own ctx (per-instance, not per-namespace)
@@ -466,12 +466,16 @@ The atom gets a single watcher that does two things on every state change:
 - Instance ID is the primary key in Datalevin, not namespace
 - Future goal: full reactive invalidation (watcher-driven push replaces all polling)
 
+**Remaining migration — depends on spec-driven rendering:**
+The old `seon.web.reactive.instance` has render-fn + client-tracking that the unified `seon.ctx` doesn't yet have. Rather than adding render-fn storage to `seon.ctx` (which would duplicate the old pattern), the plan is to resolve renderers from Datalevin via `seon.render/find-renderer` — turtles all the way down. See `docs/prds/spec-driven-rendering/prd.md` for the render resolution algorithm. Once the render pipeline is wired, `seon.ctx` gets client tracking only (not render-fn storage), and rendering is push-based from scanner invalidation.
+
 **Success Criteria:**
-- [ ] Agents get `*ctx*` with working `::conn`
-- [ ] `swap!` triggers both persist and SSE push
-- [ ] Session resume loads previous context from Datalevin
-- [ ] Non-EDN keys (connections, channels) filtered from persistence
-- [ ] `seon.primer.ctx` and `seon.web.reactive.instance` no longer used
+- [x] Agents get `*ctx*` with Datalevin persistence
+- [x] State changes trigger debounced persist + optional SSE push
+- [x] Session resume loads previous context from Datalevin
+- [x] Non-EDN keys filtered from persistence
+- [ ] `seon.web.reactive.instance` replaced (depends on render pipeline)
+- [ ] `seon.web.reactive.ctx` replaced (depends on render pipeline)
 
 ---
 
@@ -597,7 +601,7 @@ src/seon/
 
 ---
 
-## Implementation Progress (Audit: 2026-02-10)
+## Implementation Progress (Audit: 2026-02-19)
 
 ### ✅ Phase 0.1 & 0.2: Server & Connection Manager COMPLETE
 
@@ -615,16 +619,39 @@ Features implemented:
 - ✅ Connection caching with TTL-based cleanup
 - ✅ Lazy database creation via `get-namespace-conn!`
 - ✅ Suspend/resume survives `(reset)`
+- ✅ `get-namespace-conn!` accepts optional `::schema` for per-namespace schemas
 
 ### 🔲 Phase 0.3: Schema Compiler NOT STARTED
 
 The Malli→Datalevin schema compiler (`src/seon/schema/datalevin.clj`) does not exist yet.
 
-**Impact:** Connections currently use no schema. Schema-on-connect is not working.
+**Impact:** Schemas are currently passed manually per-namespace via `::conn/schema` param. Graph schema is in `seon.graph.ingest/datalevin-schema`, ctx schema in `seon.ctx/datalevin-schema`, session schema in `seon.orchestrator.session/dl-schema`.
 
 ### 🔲 Phase 0.4: Health Integration NOT STARTED
 
 Datalevin is not integrated into `/api/health` endpoint.
+
+### ✅ Phase 1: Dual-Write AI Domain COMPLETE
+
+See "Stress Testing" section below.
+
+### ✅ Phase 2.3: AI Reads Switched to Datalevin COMPLETE
+
+- `seon.ai` reads from Datalevin (read-from atom = `:datalevin`)
+- XTDB writes stopped for AI domain
+- Code index entities stored in master DB via `seon.graph.ingest`
+
+### ✅ Phase 3: Unified Agent Context System COMPLETE
+
+- `src/seon/ctx.clj` — Per-instance atoms with Datalevin persistence (debounced) and optional SSE push
+- `src/seon/primer/ctx.clj` — Session wrapper over `seon.ctx` with lazy connection via connection manager
+- `src/seon/orchestrator/session.clj` — Lazy connection via connection manager (no more resolve hacks)
+- Both use Integrant keys (`:seon/primer-ctx`, `:seon/orchestrator-sessions`) with proper `#ig/ref` deps
+- **NOT YET migrated**: `seon.web.reactive.instance` (20+ callers in `seon.ns.routes`) and `seon.web.reactive.ctx` (used by `seon.web.browser`). These need migration to `seon.ctx` — see spec-driven-rendering PRD for unified render pipeline plan.
+
+### Remaining: Phase 4 (Domain Migration) and Phase 5 (XTDB Removal)
+
+Trading domain still on XTDB. Dev hook events, orchestrator sessions on Datalevin. Observatory web views (`seon.web.agents`) still query XTDB for some data.
 
 ---
 

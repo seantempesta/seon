@@ -780,8 +780,7 @@ You must then either:
   [file-path]
   (let [code (format "(do (require 'seon.dev.hook)
                           (seon.dev.hook/process-mcp-edit!
-                            #:seon.dev.hook{:xtdb-node (:seon/xtdb-node integrant.repl.state/system)
-                                            :file-path %s}))"
+                            #:seon.dev.hook{:file-path %s}))"
                      (pr-str file-path))
         result (nrepl-eval orchestrator-port code 60000)]
     (when-not (:ex result)
