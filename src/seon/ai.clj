@@ -51,11 +51,11 @@
            [java.util UUID]))
 
 ;;; ---------------------------------------------------------------------------
-;;; Datalevin Dual-Write Support
+;;; Datalevin Write Support (Primary Store since Phase B2)
 ;;; ---------------------------------------------------------------------------
 
 (defn- datalevin-dual-write!
-  "Fire-and-forget write to Datalevin for stress testing.
+  "Write to Datalevin (primary store since Phase B2).
    Requires and calls seon.ai.datalevin lazily to avoid circular deps."
   [op entity]
   (try
@@ -400,9 +400,10 @@
                  prompt (assoc ::prompt prompt)
                  agent-session-id (assoc ::agent-session-id agent-session-id)
                  initial-context (assoc ::initial-context initial-context))]
-    (db/put! node :ai_sessions entity)
-    ;; Dual-write to Datalevin for stress testing
-    (datalevin-dual-write! :save-session entity)
+    ;; Primary write to Datalevin (Phase B2). Falls back to XTDB if Datalevin unavailable.
+    (if (datalevin-dual-write! :save-session entity)
+      (log/trace "Session saved to Datalevin" {:session-id session-id})
+      (db/put! node :ai_sessions entity))
     {::session-id session-id}))
 
 (defn end-session!
@@ -431,8 +432,13 @@
                     ::output-tokens 800})"
   [{::keys [node session-id status input-tokens output-tokens cost-usd error]}]
   (let [final-status (or status :completed)
-        ;; Get existing session to preserve fields
-        existing (db/entity node :ai_sessions session-id)
+        ;; Read existing session from Datalevin (primary) or fall back to stub
+        dl? (try (require 'seon.ai.datalevin)
+                 (= :datalevin @(resolve 'seon.ai.datalevin/read-from))
+                 (catch Exception _ false))
+        existing (if dl?
+                   ((requiring-resolve 'seon.ai.datalevin/dl-get-session) session-id)
+                   (db/entity node :ai_sessions session-id))
         updated (cond-> (or existing {:xt/id session-id ::type :session})
                   true (assoc ::status final-status
                               ::ended-at (Instant/now))
@@ -440,9 +446,9 @@
                   output-tokens (assoc ::output-tokens output-tokens)
                   cost-usd (assoc ::cost-usd cost-usd)
                   error (assoc ::error error))]
-    (db/put! node :ai_sessions updated)
-    ;; Dual-write to Datalevin for stress testing
-    (datalevin-dual-write! :update-session updated)
+    ;; Primary write to Datalevin (Phase B2). Falls back to XTDB if Datalevin unavailable.
+    (when-not (datalevin-dual-write! :update-session updated)
+      (db/put! node :ai_sessions updated))
     {::session-id session-id
      ::status final-status}))
 
@@ -477,17 +483,21 @@
                         ::timestamp (Instant/now)}
                  input-tokens (assoc ::input-tokens input-tokens)
                  output-tokens (assoc ::output-tokens output-tokens))]
-    (db/put! node :ai_messages entity)
-    ;; Dual-write to Datalevin for stress testing
-    (datalevin-dual-write! :save-message entity)
+    ;; Primary write to Datalevin (Phase B2). Falls back to XTDB if Datalevin unavailable.
+    (when-not (datalevin-dual-write! :save-message entity)
+      (db/put! node :ai_messages entity))
     {::message-id message-id}))
 
 (defn- dl-read?
-  "Check if reads should come from Datalevin."
+  "Check if reads should come from Datalevin.
+   Returns true only if read-from is :datalevin AND the Integrant system
+   has a connection manager (i.e., Datalevin is actually available)."
   []
   (try
     (require 'seon.ai.datalevin)
-    (= :datalevin @(resolve 'seon.ai.datalevin/read-from))
+    (require 'integrant.repl.state)
+    (and (= :datalevin @(resolve 'seon.ai.datalevin/read-from))
+         (some? (:seon/connection-manager @(resolve 'integrant.repl.state/system))))
     (catch Exception _ false)))
 
 (defn get-session
