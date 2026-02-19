@@ -8,21 +8,21 @@
    4. sdk-message->entity conversion - SDK messages convert to entities correctly
    5. Persistence integration - persist-message! stores entities correctly"
   (:require
-   [clojure.test :refer [deftest is testing use-fixtures]]
+   [clojure.test :refer [deftest is testing use-fixtures compose-fixtures]]
    [malli.core :as m]
    [malli.generator :as mg]
    [seon.ai :as ai]
    [seon.ai.claude :as claude]
    [seon.ai.claude.sdk :as sdk]
    [seon.schema :as schema]
-   [seon.test-utils :refer [with-test-node *test-node*]])
+   [seon.test-utils :refer [with-test-node with-test-datalevin *test-node*]])
   (:import [java.time Instant ZonedDateTime]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Test Fixtures
 ;;; ---------------------------------------------------------------------------
 
-(use-fixtures :each with-test-node)
+(use-fixtures :each (compose-fixtures with-test-node with-test-datalevin))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Helpers
