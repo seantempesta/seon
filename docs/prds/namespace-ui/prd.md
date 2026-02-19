@@ -47,7 +47,7 @@ Think of Seon as an OS where namespaces are apps:
 
 **All introspection is runtime** - no hardcoded table names, schema keys, or function names.
 
-**Flow-routed rendering:** In the flow architecture, namespace views render inside agent JVMs, not the main orchestrator JVM. The orchestrator proxies `/ns/` requests through the flow topology via `topology/request!`, receiving hiccup back over TCP. This means each namespace's UI is rendered in the same isolated process that owns its state -- the orchestrator just caches and serves the result.
+**Flow-routed rendering:** In the flow architecture, agent JVMs return domain data maps (not hiccup). The orchestrator resolves the appropriate renderer via spec-driven resolution (see [`spec-driven-rendering`](../spec-driven-rendering/prd.md)), caches the rendered output, and serves it via SSE. This means agent JVMs stay free of UI dependencies -- the orchestrator owns all rendering.
 
 ---
 
@@ -151,7 +151,7 @@ Different skills are relevant for different work:
 
 ### Flow-Routed Rendering
 
-When flows are running, namespace views render inside agent JVMs and are proxied back to the browser:
+When flows are running, agent JVMs return domain data maps. The orchestrator resolves renderers via the code index and renders locally:
 
 ```
 Browser → GET /ns/seon.trading?instance=a1b2
@@ -160,26 +160,27 @@ Browser → GET /ns/seon.trading?instance=a1b2
   → if cached and not invalidated: serve cached HTML immediately
   → if stale: topology/request! to seon.trading flow process
     → TCP to agent JVM
-    → (render {::format :html ::ctx *ctx* ::conn conn})  ; key-driven
-    → hiccup via TCP → orchestrator caches + SSE merge-fragment
+    → agent returns domain data map (e.g. {:seon.trading/positions [...], ...})
+    → orchestrator resolves renderer via spec-driven resolution (code index)
+    → rendered hiccup cached + SSE merge-fragment to browser
 ```
 
 The `topology/request!` function (in `seon.flow.topology`) is the blocking entry point for cross-namespace calls. It creates a promise, injects a request into the flow via `flow/inject`, and derefs the promise with a timeout. Replies are delivered by the `reply-router-step` which matches reply envelopes to waiting promises by request ID. For agent JVMs, cross-namespace relay go-loops forward requests from the agent's TCP bridge through the same `request!` mechanism.
 
+Renderer resolution uses the spec-driven algorithm from [`spec-driven-rendering`](../spec-driven-rendering/prd.md): the code index matches data keys against `:seon.fn/render-input-keys`, picking the most specific function. No per-namespace `render` function is required.
+
 ### Render Convention
 
-Each namespace exposes a single `render` function with a map argument. Behavior is key-driven:
+Rendering is spec-driven, not per-namespace. There is no explicit `render` function per namespace. Instead:
 
-| Keys Present | Meaning | Returns |
-|-------------|---------|---------|
-| `{::format :html}` | Static namespace view (no instance running) | Hiccup |
-| `{::format :html ::ctx <atom> ::conn <conn>}` | Dynamic instance view with live state | Hiccup |
-| `{::format :ai}` | Text summary for agents (static) | String |
-| `{::format :ai ::ctx <atom> ::conn <conn>}` | Text summary with instance state | String |
+1. **Agent JVMs return domain data maps** -- plain maps with namespaced keys (e.g. `{:seon.trading/positions [...]}`)
+2. **The orchestrator resolves a renderer** via the code index (see [`spec-driven-rendering`](../spec-driven-rendering/prd.md)) -- matching data keys against `:seon.fn/render-input-keys`
+3. **Render functions live in `.render` companion namespaces** by convention (e.g. `seon.trading.render`), keeping domain code free of UI dependencies
+4. **Fallback** -- if no renderer matches, `pprint-clipped` provides a default view
 
 **URL mapping:**
-- `/ns/seon.trading` (no `?instance=` param) → calls `render` without `::ctx` — shows namespace info + instance list (static view)
-- `/ns/seon.trading?instance=a1b2` → calls `render` with `::ctx` injected — shows dynamic view with live state
+- `/ns/seon.trading` (no `?instance=` param) → static namespace view from introspection (functions, vars, schemas)
+- `/ns/seon.trading?instance=a1b2` → `topology/request!` to agent JVM → domain data → spec-driven render → cached hiccup
 
 Cached at orchestrator, invalidated on `*ctx*` change (via the watch-based push pattern from `seon.web.reactive.instance`).
 
@@ -262,16 +263,18 @@ Once this is working:
 
 The capstone phase where `/ns/` routes go through the flow topology to agent JVMs. This is the culmination of the flow harness (super-repl) and the namespace rendering system.
 
-**Goal:** When an agent JVM owns a namespace, `GET /ns/seon.trading` renders inside that JVM via `topology/request!`, not in the orchestrator. The orchestrator becomes a pure proxy + cache layer for namespace views.
+**Goal:** When an agent JVM owns a namespace, `GET /ns/seon.trading` fetches domain data from the agent JVM via `topology/request!`, then the orchestrator resolves the renderer via the code index and caches the result. Agent JVMs never produce hiccup -- they return plain data maps.
 
 **Key work:**
 - Wire `/ns/` route handler to detect flow-owned namespaces and route through `topology/request!`
-- Implement render cache at orchestrator with `*ctx*` watch-based invalidation
-- Handle fallback: if no flow is running for a namespace, render locally (current behavior)
+- Agent JVM returns domain data map (namespaced keys, no UI dependencies)
+- Orchestrator resolves renderer via spec-driven resolution (`find-renderer` from code index)
+- Implement render cache at orchestrator keyed by `[format (set (keys data))]`, invalidated on scanner updates or `*ctx*` change
+- Handle fallback: if no flow is running for a namespace, render locally (current behavior); if no renderer matches, `pprint-clipped`
 - SSE push path: `*ctx*` change in agent JVM -> flow event -> orchestrator cache invalidation -> SSE merge-fragment to browser
 - Error handling: timeouts, agent JVM crashes, graceful degradation to static view
 
-**Depends on:** Phase 7 (custom renderers), super-repl flow harness (Phase 4+), datalevin-migration
+**Depends on:** spec-driven-rendering (Phase 2: renderer resolution), super-repl flow harness (Phase 4+), datalevin-migration
 
 ---
 
@@ -279,6 +282,7 @@ The capstone phase where `/ns/` routes go through the flow topology to agent JVM
 
 - [`datalevin-migration`](../datalevin-migration/prd.md) — Database layer migration from XTDB to Datalevin
 - [`super-repl`](../super-repl/prd.md) — Flow harness, namespace isolation, agent JVM pool, cross-ns calls via `topology/request!`
+- [`spec-driven-rendering`](../spec-driven-rendering/prd.md) — Code index, automatic renderer discovery, resolution algorithm
 
 ---
 

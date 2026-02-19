@@ -152,6 +152,10 @@ Orchestrator's view of the system:
 | `session/*` | Agent session registry (id, namespace, status, ports) |
 | `ai.session/*` | AI session metadata (cost, tokens, duration) |
 | `ai.message/*` | All agent messages (for Observatory, replay) |
+| `seon.fn/*` | Function entities from code index (specs, docs, render keys) |
+| `seon.spec/*` | Malli spec entities (keys, definitions, contains-keys) |
+| `seon.ns/*` | Namespace entities (requires, docs, file paths) |
+| `seon.call/*` | Call graph edges (from-fn, to-fn) |
 
 ### Namespace Databases (`/seon.{namespace}/`)
 
@@ -400,13 +404,19 @@ SQL queries to port to Datalevin Datalog (~25 queries). All are SELECTs with no 
 - [ ] Feature flag: `:db/read-from :datalevin`
 - [ ] A/B query comparison logging
 
-#### 2.2 Switch Reads
+#### 2.2 Code Index Entities in Master DB
+- [ ] Master DB schema includes `seon.fn/*`, `seon.spec/*`, `seon.ns/*`, `seon.call/*` entities
+- [ ] Existing `seon.graph.*` entities (`:graph/*` keys) migrated to new key prefixes
+- [ ] Scanner writes code index to master DB (see spec-driven-rendering PRD Phase 1)
+
+#### 2.3 Switch Reads
 - [ ] `seon.ai` reads from Datalevin
 - [ ] Observatory reads from Datalevin
 - [ ] Stop XTDB writes for AI domain
 
 **Success Criteria:**
 - [ ] AI domain fully on Datalevin
+- [ ] Code index entities stored in master DB
 - [ ] All tests pass
 - [ ] Observatory works
 
@@ -875,30 +885,19 @@ Based on the audit, here's the recommended priority:
 
 ---
 
-## Unified Render Contract
+## Render Contract
 
-Single `render` function per namespace, replacing both `render` and `render-content` conventions. Behavior is driven by the argument map:
+**Superseded by:** Spec-Driven Rendering PRD (`docs/prds/spec-driven-rendering/prd.md`).
 
-| Call | Returns | Purpose |
-|------|---------|---------|
-| `(render {::format :html})` | Hiccup | Static namespace view (no instance state) |
-| `(render {::format :html ::ctx <atom> ::conn <conn>})` | Hiccup | Dynamic instance view with live state |
-| `(render {::format :ai})` | String | Text summary for agents (no instance state) |
-| `(render {::format :ai ::ctx <atom> ::conn <conn>})` | String | Text summary with instance state |
-
-**Rules:**
-- `:html` format always returns hiccup vectors
-- `:ai` format always returns a plain string
-- When `::ctx` and `::conn` are present, render includes instance-specific data
-- When absent, render shows a static/default view of the namespace
-- This replaces the current split between `render` (page frame) and `render-content` (inner HTML)
+The render contract is no longer per-namespace `render` functions with `::format` dispatch. Instead, render functions are discovered automatically from the Datalevin code index via Malli `:malli/schema` metadata. Resolution picks the most specific input match by key count, with newest timestamp as tiebreaker. See the spec-driven-rendering PRD for full details.
 
 ---
 
 ## Related PRDs
 
 - **Super REPL** (`docs/prds/super-repl/prd.md`) -- Runtime flow harness, pool JVMs, cross-namespace calls. Ctx persistence originated here.
-- **Namespace UI** (`docs/prds/namespace-ui/`) -- Presentation layer, design system, reactive instance pattern. Render contract originated here.
+- **Namespace UI** (`docs/prds/namespace-ui/`) -- Presentation layer, design system, reactive instance pattern.
+- **Spec-Driven Rendering** (`docs/prds/spec-driven-rendering/prd.md`) -- Automatic render function discovery via code index. Replaces the per-namespace render contract. Code index entities (`seon.fn/*`, `seon.spec/*`, `seon.ns/*`, `seon.call/*`) live in the master DB.
 
 ---
 

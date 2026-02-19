@@ -33,7 +33,7 @@ Orchestrator JVM (3.4GB)
 ├── HTTP Server (port 8080) — thin proxy for /ns/ routes
 │   ├── Static pages (dashboard, agents, flow monitor) — rendered in main JVM
 │   └── /ns/:namespace — proxied through flow topology via topology/request!
-│       └── Agent JVM render-content called remotely → hiccup returned via TCP
+│       └── Agent JVM returns domain data via TCP → orchestrator resolves renderer
 ├── core.async.flow topology (Phase 4)
 │   ├── :ns/seon.test.alpha     (namespace-step process)
 │   │   ├── :seon.flow.in/request   ← cross-ns calls
@@ -111,33 +111,21 @@ The web server is a thin proxy — namespace content rendering goes through the 
 - HTTP request to `/ns/seon.trading` hits the main JVM's web server
 - Web server calls `topology/request!` targeting the `seon.trading` namespace step
 - The namespace step forwards to the agent JVM via TCP
-- Agent JVM's `render-content` function executes locally, returns hiccup
-- Hiccup travels back via TCP reply, web server converts to HTML
+- Agent JVM executes domain functions locally, returns **data maps** (not hiccup)
+- Data travels back via TCP reply; orchestrator resolves the appropriate renderer via spec-driven resolution (see [`spec-driven-rendering` PRD](../spec-driven-rendering/prd.md))
 
 **What this enables:**
 - **Backpressure** — Queue cap (default 32) rejects overload with typed `:overload` errors
 - **Multi-instance load balancing** — Multiple agent JVMs can serve the same namespace (future)
 - **Crash isolation** — Agent JVM crash doesn't take down the web server
 - **Observability** — Every request/reply emits flow events for monitoring
+- **No UI deps in agent JVMs** — Agent JVMs stay minimal; rendering lives in the orchestrator
 
 **What stays in the main JVM:**
 - Monitoring infrastructure pages (dashboard, agents, flow monitor)
 - Static pages that don't depend on namespace content
 - The flow topology itself and its wiring
-
-**Unified `render` function:** Every agent JVM namespace should expose a `render` function with key-driven behavior:
-
-```clojure
-;; Static namespace view (no live state)
-(render {::format :html})              ; → hiccup
-(render {::format :ai})                ; → string summary
-
-;; Dynamic instance view (live agent state)
-(render {::format :html ::ctx *ctx* ::conn conn})  ; → hiccup with live data
-(render {::format :ai ::ctx *ctx* ::conn conn})    ; → text summary with state
-```
-
-The presence of `::ctx` determines static vs dynamic rendering. `:html` returns hiccup; `:ai` returns a string for agent consumption.
+- **Renderer resolution** — The orchestrator's Datalevin code index discovers render functions automatically from `:malli/schema` metadata. Agent JVMs return domain data; the orchestrator finds the best renderer by input key specificity. See [`spec-driven-rendering` PRD](../spec-driven-rendering/prd.md) for the full algorithm.
 
 ---
 
@@ -369,12 +357,7 @@ The MCP server (`bin/mcp-server`) is a Babashka script. It routes `eval` calls b
   - [ ] `(require 'seon.agent.env)` at startup so all agents have the toolkit available.
   - [ ] Wire `*ctx*` persistence: if namespace DB has a saved ctx for this instance, load it into `*ctx*` on startup.
 
-- [ ] **Unified `render` function** — Every agent JVM namespace should expose a callable `render` that takes a map arg (key-driven):
-  - [ ] `{::format :html}` — static namespace view (returns hiccup)
-  - [ ] `{::format :html ::ctx <atom> ::conn <conn>}` — dynamic instance view with live state (returns hiccup)
-  - [ ] `{::format :ai}` — text summary for agents (returns string)
-  - [ ] `{::format :ai ::ctx <atom> ::conn <conn>}` — text summary with instance state (returns string)
-  - [ ] Presence of `::ctx` determines static vs dynamic. Agents interact through Super REPL to modify `*ctx*` dynamically; changes persist if serializable.
+- [ ] **Domain functions with `:malli/schema` metadata** — Agent JVM functions should have Malli schema annotations so the spec-driven scanner can discover them. Rendering is handled by the orchestrator, not the agent JVM. See [`spec-driven-rendering` PRD](../spec-driven-rendering/prd.md) for the render function convention (`.render` companion namespaces in the orchestrator).
 
 - [ ] **`seon.repl.super` dynamic context**:
   - [ ] After `eval-form!` stores and analyzes a form, compute **relevant context** to return alongside the eval result. If the agent just defined a function that takes `:health/workout`, search the graph for other functions that produce or consume that shape. Return these suggestions in the eval response so the agent sees them without having to ask.
@@ -599,3 +582,4 @@ feat: inter-agent messaging with schema-validated mailboxes
 
 - **[`datalevin-migration`](../datalevin-migration/prd.md)** — Database layer: Datalevin as primary DB, ctx persistence spec, schema compiler
 - **[`namespace-ui`](../namespace-ui/prd.md)** — Presentation layer: namespace introspection views, design system, reactive UI components
+- **[`spec-driven-rendering`](../spec-driven-rendering/prd.md)** — Renderer resolution: Datalevin code index discovers render functions from `:malli/schema` metadata, replaces per-namespace render convention
