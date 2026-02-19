@@ -52,6 +52,8 @@
    :seon.fn/arglists       {:db/valueType :db.type/string}
    :seon.fn/row            {:db/valueType :db.type/long}
    :seon.fn/private        {:db/valueType :db.type/boolean}
+   :seon.fn/render-input-keys {:db/valueType :db.type/keyword :db/cardinality :db.cardinality/many}
+   :seon.fn/updated-at     {:db/valueType :db.type/instant}
 
    ;; Call graph (ref-based: points at :seon.fn/qualified-name entities)
    :seon.call/from-fn  {:db/valueType :db.type/ref}
