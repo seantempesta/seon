@@ -53,9 +53,9 @@
    :seon.fn/row            {:db/valueType :db.type/long}
    :seon.fn/private        {:db/valueType :db.type/boolean}
 
-   ;; Call graph (strings for now, refs in A2)
-   :seon.call/from-fn  {:db/valueType :db.type/string}
-   :seon.call/to-fn    {:db/valueType :db.type/string}
+   ;; Call graph (ref-based: points at :seon.fn/qualified-name entities)
+   :seon.call/from-fn  {:db/valueType :db.type/ref}
+   :seon.call/to-fn    {:db/valueType :db.type/ref}
    :seon.call/row      {:db/valueType :db.type/long}
 
    ;; NS dependencies
@@ -124,20 +124,16 @@
 
 (defn- retract-calls-from-ns!
   "Retract all call entities originating from functions in a specific namespace.
-   Used during incremental updates."
+   Uses ref join: finds calls where from-fn points to a fn entity in the given ns."
   [conn ns-name]
-  (let [prefix (str ns-name "/")
-        ;; Find calls where from-fn starts with ns-name/ or equals ns-name (top-level)
-        eids (d/q '[:find ?e ?from
+  (let [eids (d/q '[:find ?e
+                     :in $ ?ns
                      :where
-                     [?e :seon.call/from-fn ?from]]
-                   @conn)
-        matching (filter (fn [[_ from]]
-                           (or (= from ns-name)
-                               (.startsWith ^String from prefix)))
-                         eids)]
-    (when (seq matching)
-      (d/transact! conn (mapv (fn [[eid _]] [:db/retractEntity eid]) matching)))))
+                     [?fn :seon.fn/namespace ?ns]
+                     [?e :seon.call/from-fn ?fn]]
+                   @conn ns-name)]
+    (when (seq eids)
+      (d/transact! conn (mapv (fn [[eid]] [:db/retractEntity eid]) eids)))))
 
 (defn- retract-ns-deps-from-ns!
   "Retract all ns-dependency entities originating from a specific namespace."
@@ -155,6 +151,41 @@
   [conn entities batch-size]
   (doseq [batch (partition-all batch-size entities)]
     (d/transact! conn (vec batch))))
+
+(defn- qualified-call?
+  "Returns true if both from-fn and to-fn are qualified (contain '/')."
+  [call-entity]
+  (and (.contains ^String (:seon.call/from-fn call-entity) "/")
+       (.contains ^String (:seon.call/to-fn call-entity) "/")))
+
+(defn- call-entity->lookup-refs
+  "Convert string-valued :seon.call/from-fn and :seon.call/to-fn to lookup refs."
+  [call-entity]
+  (-> call-entity
+      (update :seon.call/from-fn (fn [s] [:seon.fn/qualified-name s]))
+      (update :seon.call/to-fn (fn [s] [:seon.fn/qualified-name s]))))
+
+(defn- compute-stub-entities
+  "Given a set of known fn qualified-names and call entities (with string values),
+   return stub fn entities for any referenced fns not in the known set."
+  [known-qnames call-entities]
+  (let [referenced (->> call-entities
+                        (mapcat (fn [ce] [(:seon.call/from-fn ce) (:seon.call/to-fn ce)]))
+                        (filter #(.contains ^String % "/"))
+                        set)
+        missing (remove known-qnames referenced)]
+    (mapv (fn [qn]
+            (let [slash-idx (.indexOf ^String qn "/")]
+              (if (pos? slash-idx)
+                {:seon.fn/qualified-name qn
+                 :seon.fn/namespace (subs qn 0 slash-idx)
+                 :seon.fn/name (subs qn (inc slash-idx))
+                 :seon.fn/private false}
+                {:seon.fn/qualified-name qn
+                 :seon.fn/namespace qn
+                 :seon.fn/name qn
+                 :seon.fn/private false})))
+          missing)))
 
 (def ^:const batch-size
   "Entities per Datalevin transaction.
@@ -190,32 +221,39 @@
         functions (::analyzer/functions entities)
         var-usages (::analyzer/var-usages entities)
         ns-deps (::analyzer/namespace-usages entities)]
-    ;; Clear existing graph data
+    ;; Clear existing graph data (calls before fns since calls hold refs to fns)
     (log/debug "Clearing existing graph data...")
-    (retract-all-with-attr! conn :seon.ns/name)
-    (retract-all-with-attr! conn :seon.fn/qualified-name)
     (retract-all-with-attr! conn :seon.call/from-fn)
     (retract-all-with-attr! conn :seon.ns.dep/from-ns)
+    (retract-all-with-attr! conn :seon.fn/qualified-name)
+    (retract-all-with-attr! conn :seon.ns/name)
 
-    ;; Ingest new data in batches
+    ;; Ingest new data in order: namespaces, functions+stubs, calls (with lookup refs)
     (log/debug "Ingesting namespaces..." {:count (count namespaces)})
     (transact-in-batches! conn namespaces batch-size)
 
-    (log/debug "Ingesting functions..." {:count (count functions)})
-    (transact-in-batches! conn functions batch-size)
+    ;; Filter to qualified calls only, create stubs, convert to lookup refs
+    (let [qualified-usages (filterv qualified-call? var-usages)
+          known-qnames (into #{} (map :seon.fn/qualified-name) functions)
+          stubs (compute-stub-entities known-qnames qualified-usages)
+          all-fns (into (vec functions) stubs)]
+      (log/debug "Ingesting functions..." {:count (count all-fns) :stubs (count stubs)})
+      (transact-in-batches! conn all-fns batch-size)
 
-    (log/debug "Ingesting var-usages..." {:count (count var-usages)})
-    (transact-in-batches! conn var-usages batch-size)
+      ;; Convert calls to use lookup refs
+      (let [ref-calls (mapv call-entity->lookup-refs qualified-usages)]
+        (log/debug "Ingesting var-usages..." {:count (count ref-calls)})
+        (transact-in-batches! conn ref-calls batch-size))
 
-    (log/debug "Ingesting ns-dependencies..." {:count (count ns-deps)})
-    (transact-in-batches! conn ns-deps batch-size)
+      (log/debug "Ingesting ns-dependencies..." {:count (count ns-deps)})
+      (transact-in-batches! conn ns-deps batch-size)
 
-    (let [result {::namespace-count (count namespaces)
-                  ::function-count (count functions)
-                  ::var-usage-count (count var-usages)
-                  ::ns-dependency-count (count ns-deps)}]
-      (log/info "Knowledge graph ingestion complete" result)
-      result)))
+      (let [result {::namespace-count (count namespaces)
+                    ::function-count (count all-fns)
+                    ::var-usage-count (count qualified-usages)
+                    ::ns-dependency-count (count ns-deps)}]
+        (log/info "Knowledge graph ingestion complete" result)
+        result))))
 
 (defn ingest-incremental!
   "Incrementally ingest entities for a single form/namespace change.
@@ -259,27 +297,35 @@
                                        var-usages)
                                  (map :seon.ns.dep/from-ns ns-deps)))]
     ;; Retract existing data for affected namespaces only
+    ;; Retract calls BEFORE functions (calls use ref joins on fn entities)
     (doseq [ns-name affected-ns-names]
-      (retract-functions-in-ns! conn ns-name)
       (retract-calls-from-ns! conn ns-name)
+      (retract-functions-in-ns! conn ns-name)
       (retract-ns-deps-from-ns! conn ns-name))
 
     ;; Upsert namespace entities (identity attr :seon.ns/name handles upsert)
     (when (seq namespaces)
       (d/transact! conn (vec namespaces)))
 
-    ;; Insert new functions (identity attr :seon.fn/qualified-name handles upsert)
-    (when (seq functions)
-      (d/transact! conn (vec functions)))
-    (when (seq var-usages)
-      (transact-in-batches! conn var-usages batch-size))
-    (when (seq ns-deps)
-      (d/transact! conn (vec ns-deps)))
+    ;; Insert new functions + stubs (identity attr handles upsert)
+    (let [qualified-usages (filterv qualified-call? var-usages)
+          known-qnames (into #{} (map :seon.fn/qualified-name) functions)
+          stubs (compute-stub-entities known-qnames qualified-usages)
+          all-fns (into (vec functions) stubs)]
+      (when (seq all-fns)
+        (d/transact! conn (vec all-fns)))
 
-    {::namespace-count (count namespaces)
-     ::function-count (count functions)
-     ::var-usage-count (count var-usages)
-     ::ns-dependency-count (count ns-deps)}))
+      ;; Convert calls to lookup refs and transact
+      (when (seq qualified-usages)
+        (let [ref-calls (mapv call-entity->lookup-refs qualified-usages)]
+          (transact-in-batches! conn ref-calls batch-size)))
+      (when (seq ns-deps)
+        (d/transact! conn (vec ns-deps)))
+
+      {::namespace-count (count namespaces)
+       ::function-count (count all-fns)
+       ::var-usage-count (count qualified-usages)
+       ::ns-dependency-count (count ns-deps)})))
 
 ;;; ---------------------------------------------------------------------------
 ;;; REPL Helpers

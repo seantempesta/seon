@@ -130,16 +130,18 @@
      (call-graph {::conn conn ::ns-name \"seon.ai.claude\" ::fn-name \"launch-agent!\"})
      ;; => [{:seon.call/to-fn \"seon.flow.pool/acquire!\" :seon.call/row 42} ...]"
   [{::keys [conn ns-name fn-name]}]
-  (let [from-fn (str ns-name "/" fn-name)]
-    (->> (d/q '[:find ?to-fn ?row
-                :in $ ?from-fn
+  (let [from-qn (str ns-name "/" fn-name)]
+    (->> (d/q '[:find ?to-qn ?row
+                :in $ ?from-qn
                 :where
+                [?from-fn :seon.fn/qualified-name ?from-qn]
                 [?e :seon.call/from-fn ?from-fn]
                 [?e :seon.call/to-fn ?to-fn]
+                [?to-fn :seon.fn/qualified-name ?to-qn]
                 [(get-else $ ?e :seon.call/row -1) ?row]]
-              @conn from-fn)
-         (map (fn [[to-fn row]]
-                (cond-> {:seon.call/to-fn to-fn}
+              @conn from-qn)
+         (map (fn [[to-qn row]]
+                (cond-> {:seon.call/to-fn to-qn}
                   (not= row -1) (assoc :seon.call/row row))))
          (sort-by :seon.call/to-fn)
          vec)))
@@ -161,16 +163,18 @@
      (callers-of {::conn conn ::ns-name \"seon.flow.pool\" ::fn-name \"acquire!\"})
      ;; => [{:seon.call/from-fn \"seon.ai.claude/launch-agent!\"} ...]"
   [{::keys [conn ns-name fn-name]}]
-  (let [to-fn (str ns-name "/" fn-name)]
-    (->> (d/q '[:find ?from-fn ?row
-                :in $ ?to-fn
+  (let [to-qn (str ns-name "/" fn-name)]
+    (->> (d/q '[:find ?from-qn ?row
+                :in $ ?to-qn
                 :where
+                [?to-fn :seon.fn/qualified-name ?to-qn]
                 [?e :seon.call/to-fn ?to-fn]
                 [?e :seon.call/from-fn ?from-fn]
+                [?from-fn :seon.fn/qualified-name ?from-qn]
                 [(get-else $ ?e :seon.call/row -1) ?row]]
-              @conn to-fn)
-         (map (fn [[from-fn row]]
-                (cond-> {:seon.call/from-fn from-fn}
+              @conn to-qn)
+         (map (fn [[from-qn row]]
+                (cond-> {:seon.call/from-fn from-qn}
                   (not= row -1) (assoc :seon.call/row row))))
          (sort-by :seon.call/from-fn)
          vec)))
