@@ -137,7 +137,7 @@
 ;; Extends base seon.ai message with Claude attributes
 (schema/register! ::message-entity
                   [:map
-                   [:xt/id ::ai/message-id]
+                   [:seon/id ::ai/message-id]
                    [::ai/type [:= :message]]
                    [::ai/session-id ::ai/session-id]
                    [::ai/role ::ai/role]
@@ -360,14 +360,14 @@
      ::ai/session-id - Optional. Parent AI session ID to attach to entity
 
    Response keys:
-     Returns a message entity map with :xt/id and namespaced attributes
+     Returns a message entity map with :seon/id and namespaced attributes
 
    Example:
      (sdk-message->entity {::sdk-message {:type \"assistant\"
                                           :uuid \"msg-123\"
                                           :message {:role \"assistant\"
                                                     :content [{:type \"text\" :text \"Hello\"}]}}})
-     ;; => {:xt/id \"msg-abc123\"
+     ;; => {:seon/id \"msg-abc123\"
      ;;     :seon.ai/type :message
      ;;     :seon.ai/role \"assistant\"
      ;;     :seon.ai/content \"Hello\"
@@ -397,7 +397,7 @@
                        (extract-tool-results content))
         ;; Extract usage if present (mainly in result messages)
         usage (:usage sdk-msg)]
-    (cond-> {:xt/id (str "msg-" (java.util.UUID/randomUUID))
+    (cond-> {:seon/id (str "msg-" (java.util.UUID/randomUUID))
              ::ai/type :message
              ::ai/role role
              ::ai/content text-content
@@ -529,7 +529,7 @@
   [{::ai/keys [session-id] ::keys [sdk-message]}]
   (let [entity (sdk-message->entity {::sdk-message sdk-message
                                      ::ai/session-id session-id})
-        message-id (:xt/id entity)]
+        message-id (:seon/id entity)]
     (try
       (require 'seon.ai.datalevin)
       (when @(resolve 'seon.ai.datalevin/enabled?)
@@ -1272,7 +1272,7 @@
   (let [session ((requiring-resolve 'seon.ai.datalevin/dl-find-by-agent-session-id) session-id)]
     (if-not session
       {::agent-status :failed ::error (str "Agent session not found: " session-id)}
-      (let [ai-sid (:xt/id session)
+      (let [ai-sid (:seon/id session)
             status (::ai/status session)
             agent-status (case status :active :running :completed :completed :failed :failed :interrupted :interrupted :terminated)
             started (::ai/started-at session)
@@ -1316,7 +1316,7 @@
   (let [session ((requiring-resolve 'seon.ai.datalevin/dl-find-by-agent-session-id) session-id)]
     (if-not session
       {::agent-status :not-found ::error (str "Agent session not found: " session-id)}
-      (let [ai-sid (:xt/id session)
+      (let [ai-sid (:seon/id session)
             status (::ai/status session)
             agent-status (case status :active :running :completed :completed :failed :failed :interrupted :interrupted :terminated)
             msg-count ((requiring-resolve 'seon.ai.datalevin/dl-message-count) ai-sid)

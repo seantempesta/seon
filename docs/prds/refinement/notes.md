@@ -70,8 +70,8 @@ Added self-healing to `execute-eval`: when "unknown-session" is detected, automa
 - Updated comments in `test/seon/ai_test.clj`, `ai/claude_test.clj`, `ai/gemini_test.clj`
 - Fixed `test/seon/orchestrator/session_test.clj` -- wrong db-name expectation (`"test_start"` -> `"test.start"`)
 
-**NOT changed (intentional):**
-- `:xt/id` key usage in `ai/datalevin.clj`, `ai.clj`, `ai/agent.clj`, `web/agents.clj` -- this is the logical entity ID key used throughout the Datalevin persistence layer. Renaming it requires updating the Datalevin schema, all queries, and all consumers. It is a keyword, not an XTDB dependency. Should be a separate focused refactor if desired.
+**Completed separately:**
+- `:xt/id` renamed to `:seon/id` across the AI layer (`ai.clj`, `ai/claude.clj`, `ai/agent.clj`, `web/agents.clj`, and all AI tests). In `ai/datalevin.clj`, the internal field `::xtdb-id` renamed to `::entity-id`. Existing Datalevin data uses the old attribute name `:seon.ai.datalevin/xtdb-id` -- since Datalevin is schemaless, old entities will simply not match queries for `::entity-id`. This is acceptable because AI session data is ephemeral (no long-term history needed). If migration is ever needed, a one-time script can retract old and assert new attributes.
 
 ### Test Suite Results
 - **496 tests, 2476 assertions, 0 failures, 3 errors**
@@ -190,7 +190,7 @@ Not done:
 1. **Large uncommitted diff** -- 9 files changed across 3 tracks, not committed. Risk of losing work or creating a confusing single commit.
 2. **`orchestrator/nrepl.clj` not deleted** -- PRD explicitly says to delete it. Still present.
 3. **Dual ctx systems** -- `session.clj` still imports `seon.agent.ctx`. Goal is ONE ctx system (`seon.ctx`).
-4. **`:xt/id` key name** -- `web/agents.clj` and `ai/datalevin.clj` still use `:xt/id` as the logical entity key. Works but naming is confusing post-XTDB.
+4. **`:xt/id` key name** -- DONE. Renamed to `:seon/id` across AI layer. `::xtdb-id` renamed to `::entity-id` in datalevin.clj.
 5. **`trace.clj` uses `integrant.repl.state/system`** -- directly reaches into global state for Datalevin connection. Fragile; should receive connection via params or component injection.
 6. **No tests run** -- server state unknown, no test results to verify nothing is broken.
 7. **`web/stats.clj`** still references `"data/xtdb"` directory for disk usage reporting.

@@ -160,7 +160,7 @@
      :session-id - Optional. AI session ID to attach to the entity
 
    Returns a map suitable for Datalevin storage with:
-     :xt/id            - Generated message ID
+     :seon/id            - Generated message ID
      :seon.ai/type     - :message
      :seon.ai/role     - \"user\", \"assistant\", or \"system\"
      :seon.ai/content  - Text content
@@ -426,20 +426,8 @@
     ;; Clear registry in case close! didn't remove entries
     (reset! agent-registry {})
 
-    ;; Step 2: Safety net - stop any remaining nREPL servers
-    ;; This catches servers that survived if close! threw an exception
-    ;; or if there's a race condition during shutdown
-    (let [nrepl-results (try
-                          (require 'seon.orchestrator.nrepl)
-                          (let [stop-all! (resolve 'seon.orchestrator.nrepl/stop-all-namespace-nrepls!)]
-                            (stop-all!))
-                          (catch Exception e
-                            (log/warn e "Error stopping remaining nREPL servers")
-                            (swap! errors conj {:type :nrepl-cleanup :error (.getMessage e)})
-                            []))]
-      {::shutdown-count (count agents)
-       ::nrepl-count (count nrepl-results)
-       ::errors @errors})))
+    {::shutdown-count (count agents)
+     ::errors @errors}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Render Support
@@ -568,7 +556,7 @@
   (let [running (agents {})
         running-ids (running-agent-ids)
         completed (->> (completed-sessions 50)
-                       (remove #(running-ids (:xt/id %)))
+                       (remove #(running-ids (:seon/id %)))
                        (filter ::ai/agent-session-id))]
     {:running running
      :completed completed}))

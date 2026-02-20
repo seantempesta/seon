@@ -249,7 +249,7 @@
 ;; Session entity (what get-session returns)
 (schema/register! ::session-entity
                   [:map
-                   [:xt/id ::session-id]
+                   [:seon/id ::session-id]
                    [::type [:= :session]]
                    [::status ::status]
                    [::started-at ::timestamp]
@@ -271,7 +271,7 @@
 ;; Message entity
 (schema/register! ::message-entity
                   [:map
-                   [:xt/id ::message-id]
+                   [:seon/id ::message-id]
                    [::type [:= :message]]
                    [::session-id ::session-id]
                    [::role ::role]
@@ -353,7 +353,7 @@
   (let [session-id (generate-id "ses")
         ;; Convert namespace to string for database compatibility
         ns-str (when namespace (str namespace))
-        entity (cond-> {:xt/id session-id
+        entity (cond-> {:seon/id session-id
                         ::type :session
                         ::status :active
                         ::started-at (Instant/now)}
@@ -389,7 +389,7 @@
   [{::keys [session-id status input-tokens output-tokens cost-usd error]}]
   (let [final-status (or status :completed)
         existing ((requiring-resolve 'seon.ai.datalevin/dl-get-session) session-id)
-        updated (cond-> (or existing {:xt/id session-id ::type :session})
+        updated (cond-> (or existing {:seon/id session-id ::type :session})
                   true (assoc ::status final-status
                               ::ended-at (Instant/now))
                   input-tokens (assoc ::input-tokens input-tokens)
@@ -421,7 +421,7 @@
                     ::content \"I'll analyze the data...\"})"
   [{::keys [session-id role content input-tokens output-tokens]}]
   (let [message-id (generate-id "msg")
-        entity (cond-> {:xt/id message-id
+        entity (cond-> {:seon/id message-id
                         ::type :message
                         ::session-id session-id
                         ::role role
