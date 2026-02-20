@@ -68,7 +68,8 @@
  ;; Orchestrator Sessions
  ;; Initializes orchestrator session storage with lazy Datalevin connections.
  :seon/orchestrator-sessions
- {:connection-manager #ig/ref :seon/connection-manager}
+ {:connection-manager #ig/ref :seon/connection-manager
+  :pool #ig/ref :seon/agent-pool}
 
  ;; Code Scanner (Knowledge Graph)
  ;; Analyzes codebase at startup and populates Datalevin with the knowledge graph.

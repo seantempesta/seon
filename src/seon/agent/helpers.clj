@@ -30,8 +30,12 @@
 
    - Use `snake_case` for simple columns: `iv_rank`, `created_at`
    - Namespaced keywords use `$` separator: `:signal/symbol` -> `signal$symbol`"
-  (:require [seon.orchestrator.nrepl :refer [*ctx*]]
-            [seon.schema :as schema]))
+  (:require [seon.schema :as schema]))
+
+(def ^:dynamic *ctx*
+  "Agent context atom. Bound by the pool JVM setup at session claim time.
+   Contains :seon.agent/* keys (namespace, db, etc.) plus agent-managed keys."
+  nil)
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schema Registration

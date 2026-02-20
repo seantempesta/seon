@@ -55,10 +55,10 @@ An agent uses the Super REPL (via MCP) to execute code in a remote Clojure proce
 
 ---
 
-## Track 2: Unified Agent Runtime — Session-ID as Universal Key -- ~50% DONE (uncommitted)
+## Track 2: Unified Agent Runtime — Session-ID as Universal Key -- ~75% DONE
 
 **Goal:** ONE model for all agents (AI, web, human REPL). Session = session-id + pool JVM + flow channels + ctx. Pool JVMs are the single runtime.
-**Status:** Pool layer has `claim!`/`release-session!`/`get-jvm-by-session` (uncommitted). Session layer partially migrated. `orchestrator/nrepl.clj` NOT deleted yet. `seon.agent.ctx` still imported. No e2e verification.
+**Status:** Pool layer has `claim!`/`release-session!`/`get-jvm-by-session`. Session layer migrated. `orchestrator/nrepl.clj` DELETED. System wiring updated (orchestrator-sessions depends on agent-pool). `seon.agent.ctx` still used by session.clj (provides validated persisted atoms -- different from `seon.ctx`). `health.clj` still has dead dynamic requires (gracefully degraded via try/catch). Remaining: e2e verification, health.clj cleanup, `seon.agent.ctx` vs `seon.ctx` unification.
 
 **The model:** `start-session!(namespace, opts)` →
 1. Generate session-id (4-char hex)
