@@ -1,7 +1,7 @@
 (ns seon.web.agents
   "Agent observatory state and handlers for /agents route.
 
-   Combines running agents from the registry with completed sessions from XTDB
+   Combines running agents from the registry with completed sessions from Datalevin
    to provide a unified view of all agent activity.
 
    Note: HTTP handlers follow Ring conventions (request -> response maps),
@@ -515,14 +515,14 @@
   (* 120 1000))
 
 (defn- compute-effective-status
-  "Compute effective status for an agent, detecting stuck state from XTDB message timestamps.
+  "Compute effective status for an agent, detecting stuck state from Datalevin message timestamps.
 
    This is the SINGLE source of truth for agent status computation.
    Both the list view and detail view use this function.
 
    Arguments:
      session-id    - Full AI session ID (ses-xxx)
-     base-status   - Status from registry or XTDB (:running, :completed, :failed, etc.)
+     base-status   - Status from registry or Datalevin (:running, :completed, :failed, etc.)
      message-stats - Map of session-id -> {:count n :latest-ts ZonedDateTime}
 
    Returns:
@@ -531,7 +531,7 @@
 
    Logic:
    - Terminal statuses (:completed, :failed, :interrupted) pass through unchanged
-   - Running agents are checked against latest message timestamp from XTDB
+   - Running agents are checked against latest message timestamp from Datalevin
    - If last message is stale (> 2 min), returns :stuck
    - If no messages found, returns base-status as-is"
   [session-id base-status message-stats]
@@ -643,7 +643,7 @@
   "Render the agents table with Phosphor terminal styling.
    Design: table over cards, monospace, dense rows, warm colors."
   [{:keys [running completed message-stats context-tokens show-completed]}]
-  (let [;; Build running agent rows using XTDB timestamps for sorting
+  (let [;; Build running agent rows using Datalevin timestamps for sorting
         running-rows (for [agent running
                            :let [id (::agent/session-id agent)
                                  session-id (::agent/ai-session-id agent)
@@ -655,9 +655,9 @@
                         :session-id session-id
                         :provider (::agent/provider agent)
                         :type :running
-                        ;; Use XTDB message timestamp for sorting, fallback to max long (newest first)
+                        ;; Use Datalevin message timestamp for sorting, fallback to max long (newest first)
                         :sort-time (or latest-ms Long/MAX_VALUE)})
-        ;; Build completed rows using XTDB timestamps
+        ;; Build completed rows using Datalevin timestamps
         completed-rows (for [session completed
                              :let [agent-sid (::ai/agent-session-id session)
                                    session-id (:xt/id session)
@@ -669,7 +669,7 @@
                           :session-id session-id
                           :started-at started-at
                           :type :completed
-                          ;; Use XTDB message timestamp, then started-at, then 0
+                          ;; Use Datalevin message timestamp, then started-at, then 0
                           :sort-time (or latest-ms
                                          (when started-at (.toEpochMilli (.toInstant started-at)))
                                          0)})
@@ -1071,9 +1071,9 @@
 
 (defn- agent-detail-content
   "Render the agent detail page content with Phosphor terminal styling.
-   Uses XTDB exclusively for message data."
+   Uses Datalevin exclusively for message data."
   [agent-id]
-  (let [;; Load data from XTDB
+  (let [;; Load data from Datalevin
         ai-session-id (find-ai-session-id agent-id)
         messages (when ai-session-id (load-session-messages ai-session-id))
         session-info (when ai-session-id (load-session-info ai-session-id))
@@ -1084,7 +1084,7 @@
         agg-stats (when (seq messages) (aggregate-message-stats messages))
         ;; Compute status
         base-status (or (get-registry-status agent-id)  ; Running agent in registry
-                        (::ai/status session-info)      ; Status from XTDB session
+                        (::ai/status session-info)      ; Status from Datalevin session
                         :unknown)
         effective-status (compute-effective-status ai-session-id base-status message-stats)
         status-info {:status effective-status

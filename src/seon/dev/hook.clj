@@ -487,7 +487,7 @@
                                         :tool tool-name
                                         :file file-path})
 
-    ;; Handle TodoWrite events specially - just record to XTDB, no other processing
+    ;; Handle TodoWrite events specially - just record to Datalevin, no other processing
     (if (and (= event-name "PostToolUse") (= tool-name "TodoWrite"))
       (let [session-id (:session_id event)
             todos (get-in event [:tool_input :todos])]

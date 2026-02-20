@@ -77,7 +77,7 @@
       ;; No pool in tests, so port is nil
       (is (nil? (::session/nrepl-port result)))
       (is (inst? (::session/started-at result)))
-      (is (= "test_start" (::session/db-name result))))))
+      (is (= "test.start" (::session/db-name result))))))
 
 (deftest stop-agent-session-test
   (testing "stops a running session"

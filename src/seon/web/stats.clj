@@ -1,7 +1,7 @@
 (ns seon.web.stats
   "Database statistics queries for dashboard display.
 
-   Stub namespace - trading stats queries removed with XTDB.
+   Stub namespace - trading stats queries removed during Datalevin migration.
    Retained for disk usage and cache infrastructure used by other modules."
   (:require [clojure.java.io :as io]))
 
@@ -26,16 +26,16 @@
     :else (format "%.2f GB" (/ bytes (* 1024.0 1024 1024)))))
 
 (defn get-disk-usage
-  "Get disk usage for the XTDB data directory.
+  "Get disk usage for the Datalevin data directory.
    Returns {:bytes n :formatted string}."
   []
-  (let [xtdb-path "data/xtdb"
-        bytes (dir-size xtdb-path)]
+  (let [data-path "data/datalevin"
+        bytes (dir-size data-path)]
     {:bytes bytes
      :formatted (format-bytes bytes)}))
 
 (defn get-database-stats
-  "Return empty database stats. Trading stats queries removed with XTDB."
+  "Return empty database stats. Trading stats queries removed during Datalevin migration."
   []
   (let [disk (get-disk-usage)]
     {:total-records 0

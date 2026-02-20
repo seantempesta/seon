@@ -27,7 +27,7 @@
 
 (defn temporal?
   "Check if value is a temporal type (Instant or ZonedDateTime).
-   XTDB returns ZonedDateTime for timestamps, not Instant."
+   Datalevin returns ZonedDateTime for timestamps, not Instant."
   [v]
   (or (instance? Instant v)
       (instance? ZonedDateTime v)))
@@ -515,7 +515,7 @@
   (testing "add-message! handles structured content (map)"
     (let [start-result (ai/start-session! {::ai/node *test-node*})
           session-id (::ai/session-id start-result)
-          ;; Use kebab-case keys since XTDB normalizes keys
+          ;; Use kebab-case keys since Datalevin normalizes keys
           structured-content {:type "tool_result"
                              :tool-use-id "tool-123"
                              :content "Result data"}
