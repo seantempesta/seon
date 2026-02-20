@@ -28,7 +28,7 @@ Build a codebase from the ground up optimized for agent ownership:
 
 - **Schema-first** - Every function has Malli schemas. Agents know the shape before writing code. Property tests validate contracts automatically.
 - **Namespaced keys everywhere** - Fully qualified keys (`:seon.trading/position`) are queryable. "What functions accept this input shape?" is a database lookup, not a hallucination.
-- **Temporal database** - XTDB stores full history. Agents can query "this function used to return X, now returns Y, what changed?"
+- **Datalevin** - Fast embedded Datalog database on LMDB. Datomic-compatible queries. Each agent gets isolated storage.
 - **Namespace isolation** - One agent owns `seon.trading.signals`, another owns `seon.trading.execution`. They communicate through schemas, not shared state.
 - **Dev hooks** - Every edit triggers tests + AI review. Bad changes are blocked before they land.
 
@@ -57,7 +57,7 @@ Over time, agents learn from this data. They evolve their code based on actual u
 
 ### Core Infrastructure
 
-- **XTDB** - Bitemporal database. Every fact has valid-time and transaction-time. Query any point in history.
+- **Datalevin** - Embedded Datalog database on LMDB. EAV datoms, Datomic-compatible queries, ACID transactions.
 - **Malli** - Schema validation, generative testing, function contracts. The type system agents actually use.
 - **Integrant** - Component lifecycle. Clean start/stop semantics for the whole system.
 - **Datastar/SSE** - Real-time UI updates. Agents can see their work reflected immediately.
@@ -89,15 +89,26 @@ You coordinate work and delegate to agents. **Delegate ~90% of implementation to
 - Research tasks
 - Multi-file changes
 
+### Agent Quality Over Quantity
+
+**Prefer small, complete tasks over large, half-done ones.** An agent that finishes 3 files perfectly is more valuable than one that touches 20 files and leaves stubs everywhere.
+
+When scoping agent work:
+- **Max ~7 files per agent** — more than that risks context exhaustion
+- **Each agent must run tests** and report honest results before finishing
+- **Agents can terminate early** — if the task is too big, they should explain how to split it up rather than doing a bad job
+
+**Honesty is paramount.** It is far worse to hide remaining work than to report it. Never mark a task as "done" if there are known issues. Report what's actually working, what's broken, and what's left.
+
 ---
 
 ## Launching Agents
 
 Use the Clojure agent system (`seon.ai.claude`) to launch agents. This gives you:
 - **Isolated nREPL** - Each agent gets its own REPL on a unique port
-- **Isolated database** - Each agent gets its own XTDB database
+- **Isolated database** - Each agent gets its own Datalevin database
 - **Observatory UI** - Watch agent progress at http://localhost:8080/agents
-- **Message persistence** - All messages saved to XTDB for review
+- **Message persistence** - All messages saved to Datalevin for review
 - **Dev hook integration** - Agent edits trigger reload/test/review
 
 ### 1. Ensure a PRD Exists
@@ -218,7 +229,7 @@ Edit AGENT.md to change what all agents know.
 
 The `::ai/namespace` parameter sets:
 - The **default REPL namespace** for the agent's session
-- The **isolated XTDB database** name
+- The **isolated Datalevin database** name
 
 **Choose the namespace the agent will primarily work in:**
 
@@ -243,7 +254,7 @@ The namespace doesn't restrict the agent's work - they can edit any file and swi
 ### Server
 
 ```bash
-./bin/run    # Start everything: XTDB, HTTP (8080), nREPL (7888)
+./bin/run    # Start everything: Datalevin, HTTP (8080), nREPL (7888)
 ```
 
 The server must be running for agents to work.
@@ -254,15 +265,15 @@ The server must be running for agents to work.
 curl http://localhost:8080/api/health
 ```
 
-Returns component status (XTDB, nREPL, agents) with latencies. HTTP 200 = healthy, 503 = unhealthy.
+Returns component status (Datalevin, nREPL, agents) with latencies. HTTP 200 = healthy, 503 = unhealthy.
 
 ```clojure
 ;; In REPL - check health
 (require '[seon.health :as health])
-(health/deep-check {::health/node (:seon/xtdb-node integrant.repl.state/system)})
+(health/deep-check {})
 
 ;; Clean up orphaned resources after crash
-(health/cleanup-orphaned-resources! {::health/node node})
+(health/cleanup-orphaned-resources! {})
 ```
 
 ### Running Tests
@@ -368,7 +379,7 @@ seon/
 │   ├── domains/              ; Domain modules (trading, health, etc.)
 │   └── web/                  ; HTTP server, SSE, handlers
 ├── reference-code/           ; Git submodules of dependency source
-│   └── xtdb/                 ; XTDB source (read when stuck)
+│   └── datalevin/             ; Datalevin source (read when stuck)
 └── docs/
     ├── prds/                 ; Feature specifications
     └── reference/            ; Technical reference docs
@@ -505,7 +516,6 @@ Theme defined in `resources/public/css/input.css`.
 |----------|---------|
 | `VISION.md` | Full thesis, architecture layers, progress tracking |
 | `CONVENTIONS.md` | Malli schemas, API design patterns |
-| `docs/reference/xtdb-v2-reference.md` | Database queries (use SQL) |
 | `docs/reference/datastar-quick-reference.md` | Web UI attributes |
 | `docs/prds/namespace-ui/design-system.md` | UI colors, typography, spacing |
 
@@ -680,7 +690,7 @@ The lower-level namespaces (`seon.ai`, `seon.ai.agent`, `seon.ai.claude.sdk`) ar
 |-----------|---------|------------|
 | `logs/` | Debug logs, hook logs, agent activity | Ignored |
 | `tmp/` | Temporary test files, scratch data | Ignored |
-| `data/` | XTDB database files | Ignored |
+| `data/` | Datalevin database files | Ignored |
 
 These directories are gitignored and local to the project. This ensures:
 - Logs are findable and debuggable
