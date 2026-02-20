@@ -479,7 +479,7 @@
                  expand-tools? (or is-first? is-last?)
                  rendered (render-message msg expand-tools?)]
            :when rendered]
-       ^{:key (:xt/id msg)}
+       ^{:key (:seon/id msg)}
        rendered)]))
 
 ;;; ---------------------------------------------------------------------------
@@ -560,7 +560,7 @@
         completed (completed-sessions 50)
         ;; Filter out sessions that are currently running or don't have agent-session-id
         completed-not-running (->> completed
-                                   (remove #(running-ids (:xt/id %)))
+                                   (remove #(running-ids (:seon/id %)))
                                    (filter ::ai/agent-session-id))
         ;; Batch fetch message stats (counts + timestamps) to avoid N+1
         msg-stats (or (message-stats-by-session) {})
@@ -660,7 +660,7 @@
         ;; Build completed rows using Datalevin timestamps
         completed-rows (for [session completed
                              :let [agent-sid (::ai/agent-session-id session)
-                                   session-id (:xt/id session)
+                                   session-id (:seon/id session)
                                    started-at (::ai/started-at session)
                                    latest-ms (latest-activity-ms session-id message-stats)]]
                          {:id agent-sid
@@ -1069,6 +1069,54 @@
    [:script (h/raw auto-scroll-script)]])
 
 
+(defn- render-flow-events
+  "Render flow event timeline for an agent session.
+   Shows trace events (start/end/error/forward) with timestamps and durations.
+   Returns nil when no events exist."
+  [agent-id]
+  (let [events (trace/events-for-session {::trace/session-id agent-id})]
+    (when (seq events)
+      [:div {:class "mt-4"}
+       [:div {:class "flex items-center gap-2 mb-2"}
+        [:span {:class "text-xs font-semibold text-text-400 uppercase tracking-wider"} "Flow Events"]
+        [:span {:class "text-text-500 text-2xs"} (str "(" (count events) ")")]]
+       [:div {:class "bg-base-850 rounded overflow-hidden"}
+        [:table {:class "w-full"}
+         [:thead
+          [:tr {:class "border-b border-base-700"}
+           [:th {:class "text-left py-1 px-3 text-2xs font-medium text-text-500 uppercase"} "Time"]
+           [:th {:class "text-left py-1 px-3 text-2xs font-medium text-text-500 uppercase"} "Event"]
+           [:th {:class "text-left py-1 px-3 text-2xs font-medium text-text-500 uppercase"} "Function"]
+           [:th {:class "text-right py-1 px-3 text-2xs font-medium text-text-500 uppercase"} "Elapsed"]
+           [:th {:class "text-left py-1 px-3 text-2xs font-medium text-text-500 uppercase"} "Trace"]]]
+         [:tbody
+          (for [evt events
+                :let [event-type (::trace/event evt)
+                      [dot-class label] (case event-type
+                                          :start ["bg-info" "start"]
+                                          :end ["bg-success" "end"]
+                                          :error ["bg-error" "error"]
+                                          :forward ["bg-signal" "fwd"]
+                                          :timeout ["bg-warning" "timeout"]
+                                          :overload ["bg-warning" "overload"]
+                                          ["bg-text-500" (name event-type)])]]
+            [:tr {:class "border-b border-base-700 last:border-0"}
+             [:td {:class "py-1 px-3 text-2xs font-mono text-text-400"}
+              (format-local-time (::trace/timestamp evt))]
+             [:td {:class "py-1 px-3"}
+              [:span {:class "inline-flex items-center gap-1"}
+               [:span {:class (str "w-1.5 h-1.5 rounded-full " dot-class)}]
+               [:span {:class "text-2xs font-mono"} label]]]
+             [:td {:class "py-1 px-3 text-2xs font-mono text-text-200 truncate max-w-xs"}
+              (or (::trace/fn evt) "-")]
+             [:td {:class "py-1 px-3 text-2xs font-mono text-text-400 text-right"}
+              (if-let [ms (::trace/elapsed-ms evt)]
+                (str ms "ms")
+                "-")]
+             [:td {:class "py-1 px-3 text-2xs font-mono text-text-500 truncate max-w-[6rem]"}
+              (when-let [tid (::trace/trace-id evt)]
+                (subs (str tid) 0 (min 8 (count (str tid)))))]])]]]])))
+
 (defn- agent-detail-content
   "Render the agent detail page content with Phosphor terminal styling.
    Uses Datalevin exclusively for message data."
@@ -1145,7 +1193,9 @@
                 :class "p-3 max-h-[calc(100vh-180px)] overflow-y-auto"}
           ;; Initial context as first item (scrolls with messages)
           (render-initial-context initial-context)
-          (render-messages-view messages)]
+          (render-messages-view messages)
+          ;; Flow event timeline (if any events exist for this session)
+          (render-flow-events agent-id)]
 
          ;; Session exists but no messages yet (agent just started)
          ai-session-id

@@ -88,7 +88,7 @@ Drivers (Claude, human, automation) just need session-id to interact.
 
 ---
 
-## Track 3: Flow Logging + Tracing -- ~70% DONE (uncommitted)
+## Track 3: Flow Logging + Tracing -- ~90% DONE (uncommitted)
 
 **Goal:** Full trace visibility from browser/MCP request → flow → agent JVM → response.
 **Status:** `trace.clj` created with Datalevin persistence. Logging added to harness, bridge, and proxy (all uncommitted). No Observatory UI integration. No e2e test.
@@ -96,9 +96,10 @@ Drivers (Claude, human, automation) just need session-id to interact.
 1. Add structured logging to `bridge.clj` (fn resolution, execution start/end, errors, timeouts)
 2. Add structured logging to `harness.clj` (request forwarding, reply reception, overload events)
 3. Add logging to `proxy.clj` (proxy call initiation, response received)
-4. Persist flow events to Datalevin
-5. Surface flow events in Observatory agent detail view
-6. Test: launch agent, verify full trace visible in logs
+4. Persist flow events to Datalevin -- DONE (trace.clj)
+5. Surface flow events in Observatory agent detail view -- DONE (agents.clj render-flow-events)
+6. Tests for trace.clj -- DONE (trace_test.clj, requires running system)
+7. Test: launch agent, verify full trace visible in logs
 
 **Key files:** `src/seon/flow/harness/bridge.clj`, `src/seon/flow/harness.clj`, `src/seon/flow/harness/proxy.clj`, `src/seon/web/agents.clj`
 
