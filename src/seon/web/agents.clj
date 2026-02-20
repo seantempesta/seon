@@ -17,6 +17,7 @@
             [seon.ai.agent.views :as agent-views]
             [seon.ai.claude :as claude]
             [seon.ai.datalevin :as dl]
+            [seon.flow.trace :as trace]
             [seon.web.sse :as sse]
             [seon.web.html :as html]
             [dev.onionpancakes.chassis.core :as h])
@@ -29,9 +30,8 @@
 (defonce ui-state (atom {:show-completed false}))
 
 (defn init!
-  "Initialize the agents module. Called by the server component at startup.
-   Node parameter kept for API compatibility but is no longer used."
-  [_node]
+  "Initialize the agents module. Called by the server component at startup."
+  []
   (log/info "Agents module initialized"))
 
 (defn toggle-show-completed!
@@ -494,8 +494,7 @@
 (defn- completed-sessions
   "Get recent completed/failed sessions from Datalevin."
   [limit]
-  (ai/list-sessions {::ai/node nil
-                     ::ai/limit limit}))
+  (ai/list-sessions {::ai/limit limit}))
 
 (defn- message-stats-by-session
   "Get message counts and latest timestamps for all sessions in one query.

@@ -1,6 +1,3 @@
-[submodule "reference-code/xtdb"]
-	path = reference-code/xtdb
-	url = https://github.com/xtdb/xtdb.git
 [submodule "reference-code/malli"]
 	path = reference-code/malli
 	url = https://github.com/metosin/malli.git
@@ -37,9 +34,6 @@
 [submodule "reference-code/reveal"]
 	path = reference-code/reveal
 	url = https://github.com/vlaaad/reveal.git
-[submodule "reference-code/xtdb-inspector"]
-	path = reference-code/xtdb-inspector
-	url = https://github.com/tatut/xtdb-inspector.git
 [submodule "reference-code/datalevin"]
 	path = reference-code/datalevin
 	url = https://github.com/datalevin/datalevin.git

@@ -94,19 +94,6 @@
   (integrant.repl/reset))
 
 ;; Convenience accessors - now always use state/system
-(defn xtdb-node
-  "Get the XTDB node from the running system."
-  []
-  (when state/system
-    (:seon/xtdb-node state/system)))
-
-(defn dev-xtdb-node
-  "Get the Dev Hook XTDB node from the running system.
-  This is a separate database for dev hook data (edit events, review events)."
-  []
-  (when state/system
-    (:seon.dev/xtdb-node state/system)))
-
 (defn schema-registry
   "Get the Malli schema registry from the running system."
   []
@@ -120,18 +107,13 @@
     (do
       (println "System running with" (count state/system) "components:")
       (doseq [k (sort (keys state/system))]
-        (println "  " k))
-      (when-let [node (xtdb-node)]
-        (println "")
-        (println "XTDB status:")
-        (require 'seon.db.node)
-        (clojure.pprint/pprint ((resolve 'seon.db.node/status) node))))
+        (println "  " k)))
     (println "System not running. Start with: (go) or ./bin/run")))
 
 ;; ========================================
 ;; Agent Management (convenience wrappers)
 ;; ========================================
-;; These mirror seon.ai.claude functions but auto-fill the XTDB node.
+;; These mirror seon.ai.claude functions for convenience.
 ;; Use from any namespace via user/launch-agent!! etc.
 
 (defn launch-agent!!
@@ -150,7 +132,7 @@
                                  \"docs/prds/feature/plan.md\"])"
   [namespace prompt & {:keys [files]}]
   ((requiring-resolve 'seon.ai.claude/launch-agent!!)
-   (cond-> #:seon.ai{:node (xtdb-node) :namespace namespace :prompt prompt}
+   (cond-> #:seon.ai{:namespace namespace :prompt prompt}
      files (assoc :seon.ai.claude/files files))))
 
 (defn launch-agent!
@@ -168,7 +150,7 @@
                         :files [\"docs/prds/feature/prd.md\"])"
   [namespace prompt & {:keys [files]}]
   ((requiring-resolve 'seon.ai.claude/launch-agent!)
-   (cond-> #:seon.ai{:node (xtdb-node) :namespace namespace :prompt prompt}
+   (cond-> #:seon.ai{:namespace namespace :prompt prompt}
      files (assoc :seon.ai.claude/files files))))
 
 (defn agents
@@ -346,28 +328,20 @@
 ;; ========================================
 
 (defn db-reset!
-  "Delete all XTDB data and restart with fresh database.
+  "Delete all data and restart with fresh database.
   WARNING: This deletes all data!"
   []
   (println "Stopping system...")
   (halt)
-  (println "Deleting XTDB data directory...")
-  (let [data-dir (io/file "data/xtdb")]
-    (when (.exists data-dir)
-      (doseq [f (reverse (file-seq data-dir))]
-        (.delete f))))
+  (println "Deleting data directories...")
+  (doseq [dir-name ["data/xtdb" "data/datalevin"]]
+    (let [data-dir (io/file dir-name)]
+      (when (.exists data-dir)
+        (doseq [f (reverse (file-seq data-dir))]
+          (.delete f)))))
   (println "Starting fresh system...")
   (go)
   (println "Database reset complete."))
-
-(defn list-backups
-  "List available XTDB backups."
-  []
-  (let [backup-dir (io/file "data/backups")]
-    (if (.exists backup-dir)
-      (doseq [f (sort (.listFiles backup-dir))]
-        (println (.getName f)))
-      (println "No backups directory found at data/backups"))))
 
 ;; ========================================
 ;; Log Parsing and Analysis Functions
@@ -468,7 +442,6 @@
         log-file (case file
                    :app   "logs/app.log"
                    :error "logs/error.log"
-                   :xtdb  "logs/xtdb.log"
                    (str "logs/" (name file) ".log"))
         entries (read-log-file log-file max-lines)
         filtered (cond->> entries
@@ -512,7 +485,7 @@
   NOW RETURNS STRUCTURED DATA instead of printing."
   []
   (let [health (log-health)
-        file-stats (for [log-file ["logs/app.log" "logs/error.log" "logs/xtdb.log"]]
+        file-stats (for [log-file ["logs/app.log" "logs/error.log"]]
                      (try
                        (let [result (clojure.java.shell/sh "sh" "-c"
                                                            (str "wc -l " log-file " 2>/dev/null | awk '{print $1}'"))]
