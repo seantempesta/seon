@@ -54,25 +54,35 @@ The MCP eval tool currently returns `nil` for all expressions (including `(+ 1 2
 
 ---
 
-## Track 2: Unify Context + Auto-Proxy via Super REPL
+## Track 2: Unified Agent Runtime — Session-ID as Universal Key
 
-**Goal:** One ctx system. Super REPL automatically rewrites cross-ns calls to route through flow.
+**Goal:** ONE model for all agents (AI, web, human REPL). Session = session-id + pool JVM + flow channels + ctx. Pool JVMs are the single runtime.
 
-**Unify ctx (merge 3 → 1):**
-1. Port validation logic (namespaced keys, Malli schemas, reserved key protection) from `seon.agent.ctx` into `seon.ctx`
-2. Update `seon.orchestrator.session` to use `seon.ctx/create!` instead of `agent.ctx/make-persisted-ctx`
-3. Keep nREPL middleware (`seon.orchestrator.nrepl`) — it just injects the unified atom as `*ctx*`
-4. Archive `seon.agent.ctx` (all logic moved to `seon.ctx`)
-5. Update `seon.flow.agent_runner` to use `seon.ctx`
+**The model:** `start-session!(namespace, opts)` →
+1. Generate session-id (4-char hex)
+2. Claim runtime from pool (anonymous JVM gets session-id)
+3. Setup: create namespace, inject `*ctx*`, configure Datalevin
+4. Wire flow: start TCP bridge, register in topology
+5. Auto-proxy: analyze namespace deps, create proxies for cross-ns calls
+6. Register: session-id → {port, namespace, flow-channels, status} in master DB
+7. Return {session-id, nrepl-port}
 
-**Auto-proxy injection:**
-- The Super REPL is the rewrite point — when code is sent to a remote JVM via MCP eval, the Super REPL should:
-  1. Analyze the namespace's `require` forms to find cross-ns deps
-  2. For each seon.* dependency, check if it needs a flow session (via graph DB metadata or arglists)
-  3. Call existing `proxy-ns!` to create transparent proxy
-  4. Agent code calls functions normally — proxy routes through flow channels
+Drivers (Claude, human, automation) just need session-id to interact.
 
-**Key files:** `src/seon/ctx.clj`, `src/seon/agent/ctx.clj`, `src/seon/orchestrator/session.clj`, `src/seon/flow/harness/proxy.clj`, `src/seon/flow/harness/bridge.clj`, `src/seon/flow/harness.clj`
+**Phase 1 (this PR):**
+1. Pool: add `claim!` (assigns session-id to idle JVM, injects `*ctx*`, returns handle)
+2. Pool: add `get-jvm-by-session`, `release!` (clears session-id, returns to idle)
+3. Session: `start-agent-session!` delegates to `pool/claim!` instead of `nrepl/start-namespace-nrepl!`
+4. Session: `stop-agent-session!` delegates to `pool/release!`
+5. System wiring: `:seon/orchestrator-sessions` depends on `:seon/agent-pool`
+6. DELETE `orchestrator/nrepl.clj` — pool replaces everything it does
+7. Verify: MCP eval, `user/launch-agent!!`, `@*ctx*` in agent REPL, Observatory
+
+**Future phases:** auto-proxy at claim time, DB naming `agent-{session-id}`, runtime abstraction (cljs pool same interface).
+
+**Key files:** `src/seon/flow/pool.clj`, `src/seon/orchestrator/session.clj`, `src/seon/orchestrator/nrepl.clj` (delete), `src/seon/ctx.clj`, `src/seon/system.clj`
+
+**Detailed plan:** `docs/prds/refinement/plan-unified-runtime.md`
 
 ---
 
