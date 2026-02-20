@@ -163,6 +163,17 @@
     (when (seq eids)
       (d/transact! conn (mapv (fn [[eid]] [:db/retractEntity eid]) eids)))))
 
+(defn- retract-specs-in-ns!
+  "Retract all spec entities for a specific namespace."
+  [conn ns-name]
+  (let [eids (d/q '[:find ?e
+                     :in $ ?ns
+                     :where
+                     [?e :seon.spec/namespace ?ns]]
+                   @conn ns-name)]
+    (when (seq eids)
+      (d/transact! conn (mapv (fn [[eid]] [:db/retractEntity eid]) eids)))))
+
 (defn- retract-ns-deps-from-ns!
   "Retract all ns-dependency entities originating from a specific namespace."
   [conn ns-name]
@@ -250,14 +261,27 @@
   (let [namespaces (::analyzer/namespaces entities)
         functions (::analyzer/functions entities)
         var-usages (::analyzer/var-usages entities)
-        ns-deps (::analyzer/namespace-usages entities)]
-    ;; Clear existing graph data (calls before fns since calls hold refs to fns)
-    (log/debug "Clearing existing graph data...")
-    (retract-all-with-attr! conn :seon.call/from-fn)
-    (retract-all-with-attr! conn :seon.ns.dep/from-ns)
-    (retract-all-with-attr! conn :seon.fn/qualified-name)
-    (retract-all-with-attr! conn :seon.ns/name)
-    (retract-all-with-attr! conn :seon.spec/key)
+        ns-deps (::analyzer/namespace-usages entities)
+        ;; Compute affected namespaces from all entity types
+        affected-ns-names (into #{}
+                                (concat
+                                 (map :seon.ns/name namespaces)
+                                 (map :seon.fn/namespace functions)
+                                 (keep (fn [vu]
+                                         (let [from (:seon.call/from-fn vu)]
+                                           (if (.contains ^String from "/")
+                                             (subs from 0 (.indexOf ^String from "/"))
+                                             from)))
+                                       var-usages)
+                                 (map :seon.ns.dep/from-ns ns-deps)
+                                 (map :seon.spec/namespace specs)))]
+    ;; Clear existing graph data per-namespace (calls before fns since calls hold refs)
+    (log/debug "Retracting graph data for affected namespaces..." {:count (count affected-ns-names)})
+    (doseq [ns-name affected-ns-names]
+      (retract-calls-from-ns! conn ns-name)
+      (retract-functions-in-ns! conn ns-name)
+      (retract-ns-deps-from-ns! conn ns-name)
+      (retract-specs-in-ns! conn ns-name))
 
     ;; Ingest new data in order: namespaces, functions+stubs, calls (with lookup refs)
     (log/debug "Ingesting namespaces..." {:count (count namespaces)})
@@ -307,16 +331,18 @@
    Request keys:
      ::conn     - Required. Datalevin connection (runtime object)
      ::entities - Required. Extracted entities from analyzer/extract-entities
+     ::specs    - Optional. Spec entities from scanner/scan-file
 
    Response keys:
      ::namespace-count     - Number of namespaces ingested
      ::function-count      - Number of functions ingested
      ::var-usage-count     - Number of var-usages ingested
      ::ns-dependency-count - Number of namespace dependencies ingested
+     ::spec-count          - Number of specs ingested (0 if none provided)
 
    Example:
-     (ingest-incremental! {::conn conn ::entities entities})"
-  [{::keys [conn entities]}]
+     (ingest-incremental! {::conn conn ::entities entities ::specs specs})"
+  [{::keys [conn entities specs]}]
   (let [namespaces (::analyzer/namespaces entities)
         functions (::analyzer/functions entities)
         var-usages (::analyzer/var-usages entities)
@@ -333,13 +359,15 @@
                                              (subs from 0 (.indexOf ^String from "/"))
                                              from)))
                                        var-usages)
-                                 (map :seon.ns.dep/from-ns ns-deps)))]
+                                 (map :seon.ns.dep/from-ns ns-deps)
+                                 (map :seon.spec/namespace specs)))]
     ;; Retract existing data for affected namespaces only
     ;; Retract calls BEFORE functions (calls use ref joins on fn entities)
     (doseq [ns-name affected-ns-names]
       (retract-calls-from-ns! conn ns-name)
       (retract-functions-in-ns! conn ns-name)
-      (retract-ns-deps-from-ns! conn ns-name))
+      (retract-ns-deps-from-ns! conn ns-name)
+      (retract-specs-in-ns! conn ns-name))
 
     ;; Upsert namespace entities (identity attr :seon.ns/name handles upsert)
     (when (seq namespaces)
@@ -360,11 +388,15 @@
       (when (seq ns-deps)
         (d/transact! conn (vec ns-deps)))
 
+      (when (seq specs)
+        (d/transact! conn (vec specs)))
+
       (render/invalidate-render-cache!)
       {::namespace-count (count namespaces)
        ::function-count (count all-fns)
        ::var-usage-count (count qualified-usages)
-       ::ns-dependency-count (count ns-deps)})))
+       ::ns-dependency-count (count ns-deps)
+       ::spec-count (count (or specs []))})))
 
 ;;; ---------------------------------------------------------------------------
 ;;; REPL Helpers

@@ -293,7 +293,8 @@
                   linked-fns (link-fns-to-specs (:seon.graph.analyzer/functions entities) specs)
                   entities (assoc entities :seon.graph.analyzer/functions linked-fns)]
               (ingest-incremental! {:seon.graph.ingest/conn conn
-                                    :seon.graph.ingest/entities entities}))))))
+                                    :seon.graph.ingest/entities entities
+                                    :seon.graph.ingest/specs specs}))))))
     (catch Exception e
       (log/debug "Code index update failed (non-blocking)" {:error (.getMessage e)}))))
 
