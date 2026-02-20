@@ -13,9 +13,6 @@
   (atom {:current nil      ; Currently running job
          :history []}))    ; Completed/failed jobs (last N)
 
-;; XTDB node reference - initialized at startup
-(defonce xtdb-node (atom nil))
-
 ;; Forward declaration for progress callback
 (declare update-progress!)
 
@@ -27,18 +24,6 @@
              (fn [_key _ref old-state new-state]
                (when (not= old-state new-state)
                  (sse/refresh-all!)))))
-
-(defn init!
-  "Initialize the job manager with the XTDB node.
-   Called by the server component at startup."
-  [node]
-  (reset! xtdb-node node)
-  (log/info "Job manager initialized with XTDB node"))
-
-(defn get-node
-  "Get the XTDB node reference."
-  []
-  @xtdb-node)
 
 (defn new-job-id []
   (str (UUID/randomUUID)))
@@ -106,9 +91,8 @@
 
                   (log/info "Bulk import job completed" {:job-id job-id})
 
-                  ;; Refresh dashboard stats after successful import
-                  (log/info "Refreshing dashboard stats after import...")
-                  (stats/recompute-and-save-stats! node))
+                  ;; Invalidate dashboard stats cache after import
+                  (stats/invalidate-cache!))
 
                 (catch InterruptedException _
                   (log/info "Job interrupted" {:job-id job-id})
@@ -129,11 +113,8 @@
                                (assoc-in [:current :error] (.getMessage e))
                                (update :history conj (dissoc (:current state) :future)))))
 
-                  ;; Refresh stats even after failure (partial data may have loaded)
-                  (log/info "Refreshing dashboard stats after failed import...")
-                  (try
-                    (stats/recompute-and-save-stats! node)
-                    (catch Exception _)))))]
+                  ;; Invalidate stats cache after failure (partial data may have loaded)
+                  (stats/invalidate-cache!))))]
 
         ;; Store the future for cancellation
         (swap! job-state assoc-in [:current :future] import-future))

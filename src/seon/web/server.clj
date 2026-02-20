@@ -5,7 +5,6 @@
             [taoensso.timbre :as log]
             [jsonista.core :as json]
             [seon.web.routes :as routes]
-            [seon.web.jobs :as jobs]
             [seon.web.agents :as agents]
             [seon.web.sse :as sse])
   (:import [java.io InputStream]))
@@ -66,16 +65,14 @@
                "Expires" "0"}))))
 
 (defmethod ig/init-key ::http-server
-  [_ {:keys [port bind handler node]}]
-  ;; Initialize modules (node is optional, kept for trading/jobs)
-  (when node
-    (jobs/init! node))
-  (agents/init! node)
+  [_ {:keys [port bind handler]}]
+  ;; Initialize modules
+  (agents/init!)
 
   ;; Initialize SSE broadcast infrastructure with 100ms throttle
   (let [refresh-mult (sse/init-sse! :max-refresh-ms 100)
         ;; Build system map to inject into requests
-        system {:seon/xtdb-node node}
+        system {}
         ;; HOT RELOAD FIX: Use requiring-resolve at REQUEST TIME.
         ;;
         ;; WHY: clj-reload can create NEW Var objects when reloading namespaces.

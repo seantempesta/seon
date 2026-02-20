@@ -455,7 +455,7 @@
    2. Reload - Check for compile errors
    3. Unit Tests - Run if test namespace exists
    4. Gen Tests - Run generative tests on schema'd functions
-   5. Record - Store edit event in XTDB
+   5. Record - Store edit event
    6. Review - Trigger AI review if rate limit allows
 
    Request keys:
@@ -754,7 +754,7 @@
    2. Unit Tests - Run if test namespace exists
    3. Gen Tests - Run generative tests on schema'd functions
    4. Compliance - Check convention compliance
-   5. Record - Store edit event in XTDB
+   5. Record - Store edit event
    6. Review - Trigger AI review if rate limit allows
 
    Called by bin/mcp-server after successful clojure_replace.
@@ -810,7 +810,7 @@
 
   (require '[seon.dev.hook :as hook])
 
-  ;; Test event processing (requires running XTDB node)
+  ;; Test event processing
   (def test-event
     {:hook_event_name "PostToolUse"
      :tool_name "Edit"

@@ -2,7 +2,6 @@
   "System health checks and monitoring.
 
    Provides comprehensive health checking for all system components:
-   - XTDB database connectivity and responsiveness
    - nREPL server availability
    - Agent registry status
    - Resource utilization (ports, sessions, channels)
@@ -11,18 +10,17 @@
 
    ```clojure
    ;; Quick health check (for load balancers)
-   (quick-check {:seon.health/node xtdb-node})
+   (quick-check {})
    ;; => {:seon.health/status :healthy, :seon.health/timestamp #inst \"...\"}
 
    ;; Deep health check (for debugging)
-   (deep-check {:seon.health/node xtdb-node})
+   (deep-check {})
    ;; => {:seon.health/status :healthy
-   ;;     :seon.health/checks {:xtdb {:ok true}, :nrepl {:ok true}, ...}
+   ;;     :seon.health/checks {:nrepl {:ok true}, ...}
    ;;     :seon.health/resources {:agents 2, :ports 3, :sessions 2}}
    ```"
   (:require [clojure.java.shell :as shell]
             [clojure.string :as str]
-            [seon.db.node :as db]
             [seon.ai.agent :as agent]
             [seon.schema :as schema]
             [taoensso.timbre :as log])
@@ -53,12 +51,8 @@
                    [:sessions :int]
                    [:nrepl-servers :int]])
 
-(schema/register! ::node
-                  [:any {:description "XTDB node reference"}])
-
 (schema/register! ::quick-check-request
-                  [:map
-                   [::node ::node]])
+                  [:map])
 
 (schema/register! ::quick-check-response
                   [:map
@@ -67,8 +61,7 @@
                    [::checks {:optional true} ::checks]])
 
 (schema/register! ::deep-check-request
-                  [:map
-                   [::node ::node]])
+                  [:map])
 
 (schema/register! ::deep-check-response
                   [:map
@@ -80,21 +73,6 @@
 ;;; ---------------------------------------------------------------------------
 ;;; Component Health Checks (Internal)
 ;;; ---------------------------------------------------------------------------
-
-(defn- check-xtdb
-  "Check XTDB node health by executing a simple query."
-  [node]
-  (let [start (System/currentTimeMillis)]
-    (try
-      (let [status (db/status node)
-            latency (- (System/currentTimeMillis) start)]
-        {:ok true
-         :latency-ms latency
-         :details {:latest-completed-tx (:latest-completed-tx status)}})
-      (catch Exception e
-        {:ok false
-         :latency-ms (- (System/currentTimeMillis) start)
-         :error (.getMessage e)}))))
 
 (defn- check-port
   "Check if a port is accepting connections."
@@ -170,22 +148,17 @@
 
    - :healthy - All checks pass
    - :degraded - Some non-critical checks fail
-   - :unhealthy - Critical checks fail (XTDB)"
+   - :unhealthy - Critical checks fail"
   [checks]
-  (let [xtdb-ok? (get-in checks [:xtdb :ok] false)
-        all-ok? (every? :ok (vals checks))]
-    (cond
-      (not xtdb-ok?) :unhealthy
-      (not all-ok?) :degraded
-      :else :healthy)))
+  (let [all-ok? (every? :ok (vals checks))]
+    (if all-ok? :healthy :degraded)))
 
 (defn quick-check
   "Quick health check suitable for load balancers and monitoring.
 
-   Only checks critical components (XTDB) for speed.
+   Quick check for load balancers. Checks nREPL availability.
 
-   Request keys:
-     ::node - Required. XTDB node to check
+   Request keys: (none)
 
    Response keys:
      ::status - :healthy, :degraded, or :unhealthy
@@ -193,27 +166,25 @@
      ::checks - Map of component -> result (only if not healthy)
 
    Example:
-     (quick-check {::node xtdb-node})"
+     (quick-check {})"
   {:malli/schema [:=> [:cat ::quick-check-request] ::quick-check-response]}
-  [{::keys [node]}]
-  (let [xtdb-check (check-xtdb node)
-        status (if (:ok xtdb-check) :healthy :unhealthy)]
+  [{}]
+  (let [nrepl-check (check-nrepl)
+        status (if (:ok nrepl-check) :healthy :degraded)]
     (cond-> {::status status
              ::timestamp (java.util.Date.)}
       (not= status :healthy)
-      (assoc ::checks {:xtdb xtdb-check}))))
+      (assoc ::checks {:nrepl nrepl-check}))))
 
 (defn deep-check
   "Comprehensive health check for debugging and monitoring.
 
    Checks all components:
-   - XTDB database
    - Main nREPL server
    - Agent subsystem
    - All namespace nREPL servers
 
-   Request keys:
-     ::node - Required. XTDB node to check
+   Request keys: (none)
 
    Response keys:
      ::status - :healthy, :degraded, or :unhealthy
@@ -222,11 +193,10 @@
      ::resources - Current resource utilization
 
    Example:
-     (deep-check {::node xtdb-node})"
+     (deep-check {})"
   {:malli/schema [:=> [:cat ::deep-check-request] ::deep-check-response]}
-  [{::keys [node]}]
-  (let [xtdb-check (check-xtdb node)
-        nrepl-check (check-nrepl)
+  [{}]
+  (let [nrepl-check (check-nrepl)
         agents-check (check-agents)
         resources (check-resources)
         ;; Check all namespace nREPL servers
@@ -246,8 +216,7 @@
                                        :details {:failed (into {} failed)}}))))
                               (catch Exception e
                                 {:ok false :error (.getMessage e)}))
-        checks {:xtdb xtdb-check
-                :nrepl nrepl-check
+        checks {:nrepl nrepl-check
                 :agents agents-check
                 :nrepl-servers nrepl-servers-check}
         status (determine-status checks)]
@@ -317,8 +286,7 @@
 
 ;; Request/response schemas for cleanup
 (schema/register! ::cleanup-orphaned-resources-request
-                  [:map
-                   [::node ::node]])
+                  [:map])
 
 (schema/register! ::ports-released
                   [:int {:min 0 :description "Number of stale port registry entries released"}])
@@ -370,8 +338,7 @@
    2. nREPL servers listening but not in registry (survived reset)
    3. Both types are cleaned up to restore a consistent state
 
-   Request keys:
-     ::node - Required. XTDB node
+   Request keys: (none)
 
    Response keys:
      ::ports-released - Number of stale port registry entries released
@@ -380,12 +347,11 @@
      ::cleanup-errors - Vector of error maps
 
    Example:
-     (cleanup-orphaned-resources! {::node xtdb-node})"
+     (cleanup-orphaned-resources! {})"
   {:malli/schema [:=> [:cat ::cleanup-orphaned-resources-request] ::cleanup-orphaned-resources-response]}
-  [{::keys [node]}]
+  [{}]
   (log/info "Cleaning up orphaned resources")
-  (let [_ node ; unused but required for consistency
-        errors (atom [])
+  (let [errors (atom [])
 
         ;; 1. Clean up stale registry entries (registered but not listening)
         orphaned-ports (find-orphaned-ports)
@@ -424,17 +390,13 @@
 (comment
   ;; REPL exploration
 
-  (require '[integrant.repl.state :as state])
-  (def node (:seon/xtdb-node state/system))
-
   ;; Quick check
-  (quick-check {::node node})
+  (quick-check {})
 
   ;; Deep check
-  (deep-check {::node node})
+  (deep-check {})
 
   ;; Check individual components
-  (check-xtdb node)
   (check-nrepl)
   (check-agents)
   (check-resources)
@@ -444,6 +406,6 @@
   (find-orphaned-servers)
 
   ;; Clean up
-  (cleanup-orphaned-resources! {::node node})
+  (cleanup-orphaned-resources! {})
 
   nil)
