@@ -186,7 +186,7 @@
 
 (deftest message-entity-with-tools-test
   (testing "message-entity validates with tool-calls"
-    (let [msg {:xt/id "msg-123"
+    (let [msg {:seon/id "msg-123"
                ::ai/type :message
                ::ai/session-id "ses-456"
                ::ai/role "assistant"
@@ -197,7 +197,7 @@
       (is (m/validate ::ai/message-entity msg))))
 
   (testing "message-entity validates with tool-results"
-    (let [msg {:xt/id "msg-789"
+    (let [msg {:seon/id "msg-789"
                ::ai/type :message
                ::ai/session-id "ses-456"
                ::ai/role "user"
@@ -208,7 +208,7 @@
       (is (m/validate ::ai/message-entity msg))))
 
   (testing "message-entity validates without tool fields (backwards compatible)"
-    (let [msg {:xt/id "msg-simple"
+    (let [msg {:seon/id "msg-simple"
                ::ai/type :message
                ::ai/session-id "ses-123"
                ::ai/role "user"
@@ -366,7 +366,7 @@
     ;; End one session
     (let [active-sessions (ai/list-sessions {::ai/node *test-node*
                                              ::ai/status :active})
-          first-session-id (:xt/id (first active-sessions))]
+          first-session-id (:seon/id (first active-sessions))]
       (ai/end-session! {::ai/node *test-node*
                         ::ai/session-id first-session-id
                         ::ai/status :completed})
