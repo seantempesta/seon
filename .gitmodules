@@ -55,3 +55,6 @@
 [submodule "reference-code/rewrite-clj"]
 	path = reference-code/rewrite-clj
 	url = https://github.com/clj-commons/rewrite-clj.git
+[submodule "reference-code/openclaw"]
+	path = reference-code/openclaw
+	url = https://github.com/openclaw/openclaw.git

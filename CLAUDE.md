@@ -382,14 +382,14 @@ seon/
 
 | Skill | Invoke When |
 |-------|-------------|
-| `/xtdb-queries` | Writing queries, debugging empty results, working with `xt/q` |
+| `/datalevin` | Writing Datalog queries, transacting data, debugging empty results, working with `d/q` |
 | `/datastar-web-ui` | SSE handlers, `data-*` attributes, streaming responses |
 | `/browser-automation` | Testing UI in browser, debugging frontend issues |
 | `/clojure-testing` | **Running tests**, test failures, kaocha, mocking, generators |
 
 **Examples of when to invoke skills:**
 - "How do I run tests?" → `/clojure-testing` (don't guess at CLI commands)
-- "Query returns empty" → `/xtdb-queries` (don't grep for examples)
+- "Query returns empty" → `/datalevin` (don't grep for examples)
 - "SSE not updating" → `/datastar-web-ui` (don't read random handler files)
 
 The skill provides the exact commands, patterns, and gotchas for this codebase.
