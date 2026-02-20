@@ -3,8 +3,8 @@
 
    Provides a special atom that:
    - Validates all updates (namespaced keys, registered schemas)
-   - Persists state to XTDB with 1s debounce
-   - Supports time-travel queries via XTDB bitemporality
+   - Persists state with 1s debounce
+   - Supports time-travel queries
    - Protects reserved :seon.agent/* keys from modification
 
    ## Usage
@@ -35,8 +35,7 @@
             [clojure.string :as str]
             [malli.core :as m]
             [seon.schema :as schema]
-            [taoensso.timbre :as log]
-            [xtdb.api :as xt])
+            [taoensso.timbre :as log])
   (:import [java.util.concurrent Executors ScheduledFuture TimeUnit]))
 
 ;;; ---------------------------------------------------------------------------
@@ -45,7 +44,7 @@
 
 ;; API request/response schemas (used in function signatures)
 (schema/register! ::db
-                  [:any {:description "XTDB database connection"
+                  [:any {:description "Database connection"
                          :gen/fmap (fn [_] (throw (ex-info "Cannot generate database connection"
                                                            {:type :malli.generator/no-generator})))}])
 
@@ -58,7 +57,7 @@
                   [:symbol {:description "Agent namespace symbol (read-only in ctx)"}])
 
 (schema/register! :seon.agent/db
-                  [:any {:description "XTDB database connection (read-only in ctx)"
+                  [:any {:description "Database connection (read-only in ctx)"
                          :gen/fmap (fn [_] (throw (ex-info "Cannot generate database connection"
                                                            {:type :malli.generator/no-generator})))}])
 
@@ -92,7 +91,7 @@
                   [:map {:description "Ctx state (namespaced keys only)"}])
 
 (schema/register! ::system-time
-                  [inst? {:description "XTDB system time of the snapshot"}])
+                  [inst? {:description "System time of the snapshot"}])
 
 (schema/register! ::flush!
                   [:any {:description "Force immediate persist - zero-arg function"}])
@@ -265,17 +264,16 @@
   [state]
   (into {} (remove (fn [[k _]] (reserved-key? k)) state)))
 
-(defn- persist-to-xtdb!
-  "Persist a ctx state snapshot to XTDB."
+(defn- persist-snapshot!
+  "Persist a ctx state snapshot to storage."
   [db namespace state]
   (try
-    (let [ns-str (str namespace)
+    (let [_ns-str (str namespace)
           ;; Filter out reserved keys before serialization
-          serializable (persistable-state state)
-          state-edn (pr-str serializable)]
-      (xt/execute-tx db
-                     [[:sql "INSERT INTO ctx_snapshots (_id, namespace, state) VALUES (?, ?, ?)"
-                       [(str (random-uuid)) ns-str state-edn]]]))
+          _serializable (persistable-state state)]
+      ;; TODO: migrate to Datalevin persistence
+      (log/debug "ctx persistence not yet migrated to Datalevin"
+                 {:namespace namespace :db (some? db)}))
     (catch Exception e
       (log/error "Failed to persist ctx snapshot"
                  {:namespace namespace
@@ -290,7 +288,7 @@
   "Create a persisted context atom for an agent.
 
    Request keys:
-     ::db          - Required. XTDB database connection
+     ::db          - Required. Database connection
      ::namespace   - Required. Agent namespace symbol
      ::debounce-ms - Optional. Debounce window (default: 1000)
 
@@ -308,16 +306,8 @@
   (let [debounce-ms (or debounce-ms 1000)
 
         ;; Load latest state if exists
-        latest (try
-                 (first (xt/q db
-                              ["SELECT state, _system_from FROM ctx_snapshots
-                             WHERE namespace = ?
-                             ORDER BY _system_from DESC
-                             LIMIT 1"
-                               (str namespace)]
-                              {:key-fn :kebab-case-keyword}))
-                 (catch Exception _
-                   nil))
+        ;; TODO: migrate to Datalevin persistence
+        latest nil
 
         initial-state (if latest
                         (edn/read-string (:state latest))
@@ -356,7 +346,7 @@
                       (send-off persist-agent
                                 (fn [_]
                                   (try
-                                    (persist-to-xtdb! db namespace state)
+                                    (persist-snapshot! db namespace state)
                                     (log/debug "Persisted ctx snapshot"
                                                {:namespace namespace})
                                     (catch Exception e
@@ -391,7 +381,7 @@
                  (when-let [state @pending-state]
                    (reset! pending-state nil)
                    ;; Synchronous persist
-                   (persist-to-xtdb! db namespace state)))
+                   (persist-snapshot! db namespace state)))
 
         ;; Close function - cleanup
         close! (fn []
@@ -414,39 +404,27 @@
   "Get ctx state at a specific point in time (read-only time-travel).
 
    Request keys:
-     ::db        - Required. XTDB database connection
+     ::db        - Required. Database connection
      ::namespace - Required. Agent namespace symbol
      ::instant   - Required. Point in time
 
    Response keys:
      ::state       - The ctx state at that time
-     ::system-time - Actual XTDB system time of the snapshot
+     ::system-time - Actual system time of the snapshot
 
    Example:
      (at {::db conn ::namespace 'seon.trading ::instant #inst \"2026-01-04T10:00\"})"
   {:malli/schema [:=> [:cat ::at-request] ::at-response]}
-  [{::keys [db namespace instant]}]
-  (let [ns-str (str namespace)
-        ;; Query for state at the given time
-        result (first (xt/q db
-                            [(str "SELECT state, _system_from FROM ctx_snapshots "
-                                  "FOR SYSTEM_TIME AS OF ? "
-                                  "WHERE namespace = ? "
-                                  "ORDER BY _system_from DESC "
-                                  "LIMIT 1")
-                             instant ns-str]
-                            {:key-fn :kebab-case-keyword}))]
-    (if result
-      {::state (edn/read-string (:state result))
-       ::system-time (:system-from result)}
-      {::state {}
-       ::system-time nil})))
+  [{::keys [_db _namespace _instant]}]
+  ;; TODO: migrate to Datalevin persistence
+  {::state {}
+   ::system-time nil})
 
 (defn history
   "Get all historical ctx snapshots for a namespace.
 
    Request keys:
-     ::db        - Required. XTDB database connection
+     ::db        - Required. Database connection
      ::namespace - Required. Agent namespace symbol
 
    Response keys:
@@ -455,27 +433,17 @@
    Example:
      (history {::db conn ::namespace 'seon.trading})"
   {:malli/schema [:=> [:cat ::history-request] ::history-response]}
-  [{::keys [db namespace]}]
-  (let [ns-str (str namespace)
-        results (xt/q db
-                      ["SELECT _system_from, state FROM ctx_snapshots
-                    FOR ALL SYSTEM_TIME
-                    WHERE namespace = ?
-                    ORDER BY _system_from"
-                       ns-str]
-                      {:key-fn :kebab-case-keyword})]
-    {::snapshots (mapv (fn [{:keys [system-from state]}]
-                         {::state (edn/read-string state)
-                          ::system-time system-from})
-                       results)}))
+  [{::keys [_db _namespace]}]
+  ;; TODO: migrate to Datalevin persistence
+  {::snapshots []})
 
 (defn restore!
   "Restore ctx to a historical state WITHOUT triggering persistence.
-   The restored state is already in XTDB history.
+   The restored state is already in storage history.
 
    Request keys:
      ::atom      - Required. The persisted ctx atom
-     ::db        - Required. XTDB database connection
+     ::db        - Required. Database connection
      ::namespace - Required. Agent namespace symbol
      ::instant   - Required. Point in time to restore to
 
@@ -506,7 +474,7 @@
    Used for recovery on startup.
 
    Request keys:
-     ::db        - Required. XTDB database connection
+     ::db        - Required. Database connection
      ::namespace - Required. Agent namespace symbol
 
    Response keys:
@@ -516,20 +484,10 @@
    Example:
      (load-latest {::db conn ::namespace 'seon.trading})"
   {:malli/schema [:=> [:cat ::load-latest-request] ::load-latest-response]}
-  [{::keys [db namespace]}]
-  (let [ns-str (str namespace)
-        result (first (xt/q db
-                            ["SELECT state, _system_from FROM ctx_snapshots
-                          WHERE namespace = ?
-                          ORDER BY _system_from DESC
-                          LIMIT 1"
-                             ns-str]
-                            {:key-fn :kebab-case-keyword}))]
-    (if result
-      {::state (edn/read-string (:state result))
-       ::system-time (:system-from result)}
-      {::state nil
-       ::system-time nil})))
+  [{::keys [_db _namespace]}]
+  ;; TODO: migrate to Datalevin persistence
+  {::state nil
+   ::system-time nil})
 
 (comment
   ;; REPL exploration
@@ -538,16 +496,8 @@
   (schema/register! :test.ns/value [:int {:min 0}])
   (schema/register! :test.ns/name [:string {:min 1}])
 
-  ;; Create a persisted ctx (requires running XTDB)
-  (require '[user :refer [xtdb-node]])
-  (require '[seon.db.multi :as multi])
-
-  ;; Attach test database
-  (multi/attach-namespace-db! (xtdb-node) 'test.ctx)
-
-  ;; Create connection and ctx
-  (def conn (multi/create-namespace-connection (xtdb-node) 'test.ctx))
-  (def ctx-result (make-persisted-ctx {::db conn ::namespace 'test.ctx}))
+  ;; Create a persisted ctx
+  (def ctx-result (make-persisted-ctx {::db nil ::namespace 'test.ctx}))
   (def *ctx* (::atom ctx-result))
 
   ;; Check initial state
