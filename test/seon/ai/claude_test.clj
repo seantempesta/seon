@@ -30,7 +30,7 @@
 
 (defn temporal?
   "Check if value is a temporal type (Instant or ZonedDateTime).
-   XTDB returns ZonedDateTime for timestamps, not Instant."
+   Datalevin returns ZonedDateTime for timestamps, not Instant."
   [v]
   (or (instance? Instant v)
       (instance? ZonedDateTime v)))
@@ -275,7 +275,7 @@
 (deftest agents-empty-test
   (testing "agents returns empty vector when no agents running"
     ;; This tests the agents function without any active agents
-    ;; (actual agent launching requires XTDB and process spawning)
+    ;; (actual agent launching requires Datalevin and process spawning)
     (let [result (claude/agents {})]
       (is (vector? result)))))
 
@@ -303,7 +303,7 @@
       (is (nil? (::ai/session-id entity))))))
 
 (deftest persist-message-test
-  (testing "persist-message! stores SDK message in XTDB"
+  (testing "persist-message! stores SDK message in Datalevin"
     ;; Create an AI session first
     (let [{session-id ::ai/session-id}
           (ai/start-session! {::ai/node *test-node*

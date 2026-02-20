@@ -339,7 +339,7 @@
 
     (try
       ;; 1. Get Datalevin namespace connection if manager available
-      (let [ns-conn nil  ;; No XTDB namespace connection needed
+      (let [ns-conn nil  ;; No namespace connection needed
             dl-conn (when datalevin-manager
                       (try
                         (conn/get-namespace-conn!

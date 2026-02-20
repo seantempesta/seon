@@ -9,7 +9,7 @@
  ;; Property test configuration
  ;; Removed randomize/seed config - using defaults
 
- ;; JVM options for XTDB
+ ;; JVM options for native access (Arrow/Netty)
   :kaocha/cli-options ["--add-opens=java.base/java.nio=ALL-UNNAMED"
                        "-Dio.netty.tryReflectionSetAccessible=true"
                        "--enable-native-access=ALL-UNNAMED"]}

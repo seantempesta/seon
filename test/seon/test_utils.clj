@@ -1,8 +1,8 @@
 (ns seon.test-utils
-  "Testing utilities and fixtures for ML Options Trading.
+  "Testing utilities and fixtures for Seon.
 
   Provides:
-  - In-memory XTDB node fixture
+  - Datalevin test fixture
   - Test data generators
   - Property-based testing helpers"
   (:require [clojure.test :refer :all]
@@ -11,42 +11,17 @@
   (:import [java.util UUID]))
 
 ;;; ---------------------------------------------------------------------------
-;;; XTDB Test Fixture
+;;; Legacy Test Node Fixture (stub)
 ;;; ---------------------------------------------------------------------------
 
 (def ^:dynamic *test-node*
-  "Dynamic var for test XTDB node."
+  "Dynamic var for test database node. Retained for backward compatibility."
   nil)
 
 (defn with-test-node
-  "Fixture that provides an in-memory XTDB node for tests.
-
-  Usage:
-    (use-fixtures :each with-test-node)
-
-  Then access the node via *test-node*"
+  "Legacy fixture stub. Tests that need a database should use with-test-datalevin instead."
   [f]
-  ;; Require at runtime to avoid loading XTDB during compilation
-  (require '[xtdb.node :as xtn])
-  (require '[xtdb.api :as xt])
-  (let [start-node (resolve 'xtn/start-node)]
-    (with-open [node (start-node)]
-      (binding [*test-node* node]
-        (f)))))
-
-(defmacro with-temp-node
-  "Execute body with a temporary XTDB node.
-
-  Usage:
-    (with-temp-node [node]
-      (xt/submit-tx node [...])
-      (is (= ...)))"
-  [[node-sym] & body]
-  `(do
-     (require '[xtdb.node :as xtn#])
-     (let [start-node# (resolve 'xtn#/start-node)]
-       (with-open [~node-sym (start-node#)]
-         ~@body))))
+  (f))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Datalevin Test Fixture

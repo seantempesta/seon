@@ -41,7 +41,7 @@
   "Starts a bulk import job. Returns {:ok job-id} or {:error message}.
 
    Args:
-   - node: XTDB node
+   - node: database node
    - symbols: Vector of ticker symbols
    - start-date: LocalDate
    - end-date: LocalDate
