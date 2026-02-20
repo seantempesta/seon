@@ -1,29 +1,4 @@
-{;; XTDB v2 Node (Single node with multi-database support)
- ;; Primary database: orchestrator data
- ;; Attached databases: namespace-isolated data (primer, dev)
- :seon/xtdb-node
- {:storage #profile {:dev   {:type :local
-                             :path "data/xtdb"}
-                     :test  :in-memory
-                     :prod  {:type :local
-                             :path #or [#env XTDB_DATA_PATH "data/xtdb"]}}
-  :memory-cache #profile {:dev {}
-                          :test {}
-                          :prod {:max-size-ratio 0.5}}
-  :disk-cache nil
-  :compactor #profile {:dev {:threads 2}
-                       :test {:threads 1}
-                       :prod {:threads #or [#env XTDB_COMPACTOR_THREADS 4]}}}
-
- ;; Namespace Databases
- ;; Attaches secondary databases for domain isolation.
- ;; Each namespace gets its own isolated database within the single XTDB node.
- ;; Storage paths: data/namespaces/{namespace}/log and storage
- :seon/namespace-dbs
- {:node #ig/ref :seon/xtdb-node
-  :namespaces [seon.dev]}
-
- ;; Datalevin Server (Phase 0 of migration from XTDB)
+{;; Datalevin Server (primary and only database)
  ;; Runs in-process, agents connect as clients to namespace-isolated databases.
  ;; Each namespace gets its own database under root/{namespace}/
  ;; Default credentials: datalevin:datalevin (change in production!)
@@ -34,7 +9,7 @@
                   :prod #or [#env DATALEVIN_ROOT "data/datalevin"]}
   :opts {:idle-timeout 300000}}
 
- ;; Datalevin Connection Manager (Phase 0.2)
+ ;; Datalevin Connection Manager
  ;; Manages client connections to the Datalevin server with:
  ;; - Connection caching per namespace
  ;; - Lazy database creation on first connection
@@ -43,15 +18,6 @@
  {:server #ig/ref :seon/datalevin-server
   :ttl-ms #or [#env DATALEVIN_CONN_TTL_MS 300000]           ; 5 minutes
   :cleanup-interval-ms #or [#env DATALEVIN_CLEANUP_MS 60000]}
-
- ;; Python Bridge (libpython-clj) - DISABLED
- ;; NOTE: Python code moved to src/seon/_python_disabled
- ;; To re-enable, restore the python directory and uncomment this section
- ;; :seon/python-bridge
- ;; {:conda-env #or [#env SEON_CONDA_ENV "seon"]
- ;;  :auto-initialize? #profile {:dev false
- ;;                              :test false
- ;;                              :prod false}}
 
  ;; Malli Schema Registry
  ;; Loads all domain schemas on startup
@@ -70,8 +36,7 @@
  ;; HTTP Server for Web UI
  :seon.web.server/http-server
  {:port #or [#env HTTP_PORT 8080]
-  :bind "0.0.0.0"
-  :node #ig/ref :seon/xtdb-node}
+  :bind "0.0.0.0"}
 
  ;; Tailwind CSS Watcher
  ;; Dev: Enabled - auto-rebuild CSS on file changes

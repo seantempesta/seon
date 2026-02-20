@@ -19,41 +19,26 @@
 
    ## Functions
 
-   All functions use map-in, map-out with namespaced keys:
+   All functions use map-in, map-out with namespaced keys.
+   All data is stored in Datalevin.
 
-   - `(start-session! {::node db ::namespace 'seon.trading ::prompt \"...\"})`
-   - `(end-session! {::node db ::session-id \"...\" ::status :completed})`
-   - `(add-message! {::node db ::session-id \"...\" ::role \"assistant\" ::content \"...\"})`
-   - `(get-session {::node db ::session-id \"...\"})`
-   - `(get-messages {::node db ::session-id \"...\"})`
-   - `(list-sessions {::node db ::limit 20})`
-
-   Example:
-
-     (require '[seon.ai :as ai])
-     (require '[seon.db.node :as db])
-
-     ;; Start a session
-     (ai/start-session! {::ai/node my-xtdb-node
-                         ::ai/namespace 'seon.trading
-                         ::ai/prompt \"Analyze options data\"})
-
-     ;; Add a message
-     (ai/add-message! {::ai/node my-xtdb-node
-                       ::ai/session-id \"ses-abc123\"
-                       ::ai/role \"assistant\"
-                       ::ai/content \"I'll analyze the data...\"})"
+   - `(start-session! {::namespace 'seon.trading ::prompt \"...\"})`
+   - `(end-session! {::session-id \"...\" ::status :completed})`
+   - `(add-message! {::session-id \"...\" ::role \"assistant\" ::content \"...\"})`
+   - `(get-session {::session-id \"...\"})`
+   - `(get-messages {::session-id \"...\"})`
+   - `(list-sessions {::limit 20})`"
   (:require [seon.schema :as schema]
             [taoensso.timbre :as log])
   (:import [java.time Instant]
            [java.util UUID]))
 
 ;;; ---------------------------------------------------------------------------
-;;; Datalevin Write Support (Primary and Only Store since Phase E3)
+;;; Datalevin Write Support (Primary and Only Store)
 ;;; ---------------------------------------------------------------------------
 
 (defn- datalevin-write!
-  "Write to Datalevin (the only AI data store since Phase E3).
+  "Write to Datalevin (the only AI data store).
    Requires and calls seon.ai.datalevin lazily to avoid circular deps."
   [op entity]
   (require 'seon.ai.datalevin)
@@ -67,9 +52,6 @@
 ;;; ---------------------------------------------------------------------------
 ;;; Schema Registration
 ;;; ---------------------------------------------------------------------------
-
-;; NOTE: Functions take ::node for API consistency but all writes go to Datalevin
-;; (since Phase E3). The node type cannot be generated for property testing.
 
 ;; Entity type discriminator
 (schema/register! ::type
@@ -147,10 +129,6 @@
                    [::code {:optional true} :string]
                    [::data {:optional true} :map]])
 
-;; Database node (legacy param kept for API consistency; writes go to Datalevin)
-(schema/register! ::node
-                  [:any {:description "Database node (legacy, writes go to Datalevin)"}])
-
 ;; Limit for pagination
 (schema/register! ::limit
                   [:int {:min 1 :max 1000
@@ -223,7 +201,6 @@
 ;; Start session request
 (schema/register! ::start-session-request
                   [:map
-                   [::node ::node]
                    [::namespace {:optional true} ::namespace]
                    [::prompt {:optional true} ::prompt]
                    [::agent-session-id {:optional true} ::agent-session-id]
@@ -237,7 +214,6 @@
 ;; End session request
 (schema/register! ::end-session-request
                   [:map
-                   [::node ::node]
                    [::session-id ::session-id]
                    [::status {:optional true} ::status]
                    [::input-tokens {:optional true} ::input-tokens]
@@ -254,7 +230,6 @@
 ;; Add message request
 (schema/register! ::add-message-request
                   [:map
-                   [::node ::node]
                    [::session-id ::session-id]
                    [::role ::role]
                    [::content ::content]
@@ -269,7 +244,6 @@
 ;; Get session request
 (schema/register! ::get-session-request
                   [:map
-                   [::node ::node]
                    [::session-id ::session-id]])
 
 ;; Session entity (what get-session returns)
@@ -292,7 +266,6 @@
 ;; Get messages request
 (schema/register! ::get-messages-request
                   [:map
-                   [::node ::node]
                    [::session-id ::session-id]])
 
 ;; Message entity
@@ -313,7 +286,6 @@
 ;; List sessions request
 (schema/register! ::list-sessions-request
                   [:map
-                   [::node ::node]
                    [::limit {:optional true} ::limit]
                    [::namespace {:optional true} ::namespace]
                    [::status {:optional true} ::status]])
@@ -337,8 +309,7 @@
 
 ;; Session stats request
 (schema/register! ::session-stats-request
-                  [:map
-                   [::node ::node]])
+                  [:map])
 
 ;; Session stats response
 (schema/register! ::session-stats-response
@@ -368,7 +339,6 @@
    Creates a session entity in Datalevin with status :active.
 
    Request keys:
-     ::node             - Required. Database node (legacy param, writes go to Datalevin)
      ::namespace        - Optional. Clojure namespace context (symbol or string)
      ::prompt           - Optional. Initial prompt
      ::agent-session-id - Optional. 4-char hex Seon session ID (for log files)
@@ -378,8 +348,8 @@
      ::session-id - The generated session ID
 
    Example:
-     (start-session! {::node db ::namespace 'seon.trading ::prompt \"Analyze data\"})"
-  [{::keys [node namespace prompt agent-session-id initial-context]}]
+     (start-session! {::namespace 'seon.trading ::prompt \"Analyze data\"})"
+  [{::keys [namespace prompt agent-session-id initial-context]}]
   (let [session-id (generate-id "ses")
         ;; Convert namespace to string for database compatibility
         ns-str (when namespace (str namespace))
@@ -400,7 +370,6 @@
    Updates the session with final status and optional usage statistics.
 
    Request keys:
-     ::node          - Required. Database node (legacy param, writes go to Datalevin)
      ::session-id    - Required. Session to end
      ::status        - Optional. Final status (default: :completed)
      ::input-tokens  - Optional. Total input tokens
@@ -413,12 +382,11 @@
      ::status     - The final status
 
    Example:
-     (end-session! {::node db
-                    ::session-id \"ses-abc123\"
+     (end-session! {::session-id \"ses-abc123\"
                     ::status :completed
                     ::input-tokens 1500
                     ::output-tokens 800})"
-  [{::keys [node session-id status input-tokens output-tokens cost-usd error]}]
+  [{::keys [session-id status input-tokens output-tokens cost-usd error]}]
   (let [final-status (or status :completed)
         existing ((requiring-resolve 'seon.ai.datalevin/dl-get-session) session-id)
         updated (cond-> (or existing {:xt/id session-id ::type :session})
@@ -438,7 +406,6 @@
    Creates a message entity linked to the session.
 
    Request keys:
-     ::node          - Required. Database node (legacy param, writes go to Datalevin)
      ::session-id    - Required. Parent session
      ::role          - Required. Message role (\"user\", \"assistant\", \"system\")
      ::content       - Required. Message content
@@ -449,11 +416,10 @@
      ::message-id - The generated message ID
 
    Example:
-     (add-message! {::node db
-                    ::session-id \"ses-abc123\"
+     (add-message! {::session-id \"ses-abc123\"
                     ::role \"assistant\"
                     ::content \"I'll analyze the data...\"})"
-  [{::keys [node session-id role content input-tokens output-tokens]}]
+  [{::keys [session-id role content input-tokens output-tokens]}]
   (let [message-id (generate-id "msg")
         entity (cond-> {:xt/id message-id
                         ::type :message
@@ -470,37 +436,34 @@
   "Get a session by ID.
 
    Request keys:
-     ::node       - Required. Database node (legacy param, writes go to Datalevin)
      ::session-id - Required. Session ID
 
    Returns:
      Session entity map or nil if not found.
 
    Example:
-     (get-session {::node db ::session-id \"ses-abc123\"})"
-  [{::keys [node session-id]}]
+     (get-session {::session-id \"ses-abc123\"})"
+  [{::keys [session-id]}]
   ((requiring-resolve 'seon.ai.datalevin/dl-get-session) session-id))
 
 (defn get-messages
   "Get all messages for a session.
 
    Request keys:
-     ::node       - Required. Database node (legacy param, writes go to Datalevin)
      ::session-id - Required. Session ID
 
    Returns:
      Vector of message entities, ordered by timestamp.
 
    Example:
-     (get-messages {::node db ::session-id \"ses-abc123\"})"
-  [{::keys [node session-id]}]
+     (get-messages {::session-id \"ses-abc123\"})"
+  [{::keys [session-id]}]
   ((requiring-resolve 'seon.ai.datalevin/dl-get-messages) session-id))
 
 (defn list-sessions
   "List recent sessions.
 
    Request keys:
-     ::node      - Required. Database node (legacy param, writes go to Datalevin)
      ::limit     - Optional. Max results (default: 20, max: 1000)
      ::namespace - Optional. Filter by namespace
      ::status    - Optional. Filter by status
@@ -509,9 +472,9 @@
      Vector of session entities, ordered by started_at descending.
 
    Example:
-     (list-sessions {::node db ::limit 10})
-     (list-sessions {::node db ::namespace 'seon.trading ::status :active})"
-  [{::keys [node limit namespace status]}]
+     (list-sessions {::limit 10})
+     (list-sessions {::namespace 'seon.trading ::status :active})"
+  [{::keys [limit namespace status]}]
   (let [limit (or limit 20)]
     ((requiring-resolve 'seon.ai.datalevin/dl-list-sessions)
      (cond-> {:limit limit}
@@ -521,12 +484,6 @@
 (defn session-stats
   "Get aggregate statistics across all AI sessions.
 
-   Provides totals for cost, sessions, messages, and token usage,
-   including cache hit rate for Claude sessions.
-
-   Request keys:
-     ::node - Required. Database node (legacy param, writes go to Datalevin)
-
    Response keys:
      ::total-cost-usd  - Total cost across all sessions
      ::total-sessions  - Number of sessions
@@ -535,14 +492,8 @@
      ::cache-hit-rate  - Ratio of cache-read / (cache-read + input)
 
    Example:
-     (session-stats {::node db})
-     ;; => {::total-cost-usd 12.34
-     ;;     ::total-sessions 47
-     ;;     ::total-messages 892
-     ;;     ::tokens {:input 450000 :output 89000
-     ;;               :cache-read 120000 :cache-creation 35000}
-     ;;     ::cache-hit-rate 0.21}"
-  [{::keys [node]}]
+     (session-stats {})"
+  [_request]
   ((requiring-resolve 'seon.ai.datalevin/dl-session-stats)))
 
 (comment
@@ -563,10 +514,5 @@
   (m/validate ::role "assistant")
   (m/validate ::content "Hello world")
   (m/validate ::content {:type "text" :data "structured"})
-
-  ;; Collect function schemas
-  (require '[malli.instrument :as mi])
-  (mi/collect! {:ns 'seon.ai})
-  (keys (get (m/function-schemas) 'seon.ai))
 
   nil)
