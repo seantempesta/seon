@@ -33,6 +33,9 @@
 (schema/register! ::file-path
                   [:string {:min 1 :description "Path to a Clojure source file"}])
 
+(schema/register! ::source
+                  [:string {:min 1 :description "Clojure source code string to scan"}])
+
 (schema/register! ::dir-path
                   [:string {:min 1 :description "Directory path to scan recursively"}])
 
@@ -186,6 +189,35 @@
 ;;; Public API
 ;;; ---------------------------------------------------------------------------
 
+(defn scan-source
+  "Scan a Clojure source string for schema/register! calls.
+   Like scan-file but works on source strings directly.
+
+   Request keys:
+     ::source - Clojure source code string
+
+   Returns vector of spec entity maps.
+
+   Example:
+     (scan-source {::source (slurp \"src/seon/flow/pool.clj\")})"
+  [{::keys [source]}]
+  (let [parsed (parse-source source)]
+    (if-not parsed
+      []
+      (let [{:keys [ns-name forms]} parsed
+            register-calls (find-register-calls forms)
+            now (java.util.Date.)]
+        (mapv (fn [[spec-key schema-form]]
+                (let [contains-keys (extract-contains-keys schema-form)]
+                  (cond-> {:seon.spec/key spec-key
+                           :seon.spec/namespace ns-name
+                           :seon.spec/definition (pr-str schema-form)
+                           :seon.spec/base-type (extract-base-type schema-form)
+                           :seon.spec/updated-at now}
+                    (seq contains-keys)
+                    (assoc :seon.spec/contains-keys contains-keys))))
+              register-calls)))))
+
 (defn scan-file
   "Scan a Clojure source file for schema/register! calls.
 
@@ -203,23 +235,7 @@
   (let [file (io/file file-path)]
     (if-not (.exists file)
       []
-      (let [source (slurp file)
-            parsed (parse-source source)]
-        (if-not parsed
-          []
-          (let [{:keys [ns-name forms]} parsed
-                register-calls (find-register-calls forms)
-                now (java.util.Date.)]
-            (mapv (fn [[spec-key schema-form]]
-                    (let [contains-keys (extract-contains-keys schema-form)]
-                      (cond-> {:seon.spec/key spec-key
-                               :seon.spec/namespace ns-name
-                               :seon.spec/definition (pr-str schema-form)
-                               :seon.spec/base-type (extract-base-type schema-form)
-                               :seon.spec/updated-at now}
-                        (seq contains-keys)
-                        (assoc :seon.spec/contains-keys contains-keys))))
-                  register-calls)))))))
+      (scan-source {::source (slurp file)}))))
 
 (defn scan-directory
   "Scan all Clojure source files in a directory for schema/register! calls.

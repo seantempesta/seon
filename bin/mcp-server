@@ -477,39 +477,65 @@ You must then either:
                                  "  3. Restart server if interrupt fails")
                             {:busy true :elapsed-sec elapsed-sec}))))))
 
-    (let [[port nrepl-session-id]
-          (if (= effective-session "orchestrator")
-            [orchestrator-port @orchestrator-nrepl-session]
-            (do
-              (validate-session-id! effective-session)
-              (if-let [info (get-session-info effective-session)]
-                [(:port info) (:nrepl-session-id info)]
-                (throw (ex-info (str "Session not found or not running: " effective-session)
-                                {:session_id effective-session})))))]
+    (let [resolve-port-and-session
+          (fn []
+            (if (= effective-session "orchestrator")
+              [orchestrator-port @orchestrator-nrepl-session]
+              (do
+                (validate-session-id! effective-session)
+                (if-let [info (get-session-info effective-session)]
+                  [(:port info) (:nrepl-session-id info)]
+                  (throw (ex-info (str "Session not found or not running: " effective-session)
+                                  {:session_id effective-session}))))))
+
+          do-eval
+          (fn [port nrepl-session-id]
+            (record-activity! effective-session :start code)
+            (let [result (nrepl-eval port code (or timeout_ms default-timeout-ms) nrepl-session-id)]
+              (log-debug "Eval result:" (pr-str result))
+
+              ;; Auto-interrupt on timeout
+              (when (and (= (:ex result) "timeout") nrepl-session-id)
+                (log-debug "Timeout detected, sending interrupt to session:" nrepl-session-id)
+                (nrepl-interrupt port nrepl-session-id))
+
+              (record-activity! effective-session :complete nil)
+              result))
+
+          [port nrepl-session-id] (resolve-port-and-session)]
 
       (try
-        ;; Record eval start for agent sessions (Phase 4c)
-        (record-activity! effective-session :start code)
+        (let [result (do-eval port nrepl-session-id)]
+          ;; Self-heal: if nREPL session expired (server restarted), re-clone and retry
+          (if (= (:ex result) "unknown-session")
+            (do
+              (log-info "nREPL session expired, re-cloning...")
+              (if (= effective-session "orchestrator")
+                ;; Re-clone orchestrator session
+                (if-let [new-session (nrepl-clone-session orchestrator-port)]
+                  (do
+                    (reset! orchestrator-nrepl-session new-session)
+                    (log-info "Re-cloned orchestrator session:" new-session)
+                    (let [retry-result (do-eval orchestrator-port new-session)]
+                      (if (:ex retry-result)
+                        (mcp-error (:err retry-result))
+                        (mcp-success (str (when-let [out (:out retry-result)]
+                                            out)
+                                          (or (:value retry-result) "nil")
+                                          (when-let [ns (:ns retry-result)]
+                                            (str "\n;; ns: " ns)))))))
+                  (mcp-error "Failed to re-clone orchestrator nREPL session. Is the server running?"))
+                ;; Agent session - just report the error
+                (mcp-error (:err result))))
 
-        (let [result (nrepl-eval port code (or timeout_ms default-timeout-ms) nrepl-session-id)]
-          (log-debug "Eval result:" (pr-str result))
-
-          ;; Auto-interrupt on timeout (Phase 0.5) - the eval thread continues running
-          ;; after timeout, so we send an interrupt to kill it
-          (when (and (= (:ex result) "timeout") nrepl-session-id)
-            (log-debug "Timeout detected, sending interrupt to session:" nrepl-session-id)
-            (nrepl-interrupt port nrepl-session-id))
-
-          ;; Record eval complete for agent sessions (Phase 4c)
-          (record-activity! effective-session :complete nil)
-
-          (if (:ex result)
-            (mcp-error (:err result))
-            (mcp-success (str (when-let [out (:out result)]
-                                out)
-                              (or (:value result) "nil")
-                              (when-let [ns (:ns result)]
-                                (str "\n;; ns: " ns))))))
+            ;; Normal path
+            (if (:ex result)
+              (mcp-error (:err result))
+              (mcp-success (str (when-let [out (:out result)]
+                                  out)
+                                (or (:value result) "nil")
+                                (when-let [ns (:ns result)]
+                                  (str "\n;; ns: " ns)))))))
 
         (finally
           ;; Always clear orchestrator state when done
