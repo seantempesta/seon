@@ -17,7 +17,7 @@
             {:status "ok"
              :timestamp (str now)
              :checks {}
-             :resources {:agents 0 :ports 0 :sessions 0 :nrepl-servers 0}})}))
+             :resources {:agents 0 :pool-jvms 0 :sessions 0}})}))
 
 (defn dashboard [_request]
   {:status 200

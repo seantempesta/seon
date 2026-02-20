@@ -8,7 +8,7 @@
 
   Sessions tie together:
   - Datalevin persistence for session metadata
-  - Persisted ctx atom (via agent.ctx)
+  - Persisted ctx atom (via seon.ctx)
   - Pool JVM with nREPL (via flow.pool)
 
   Agents just receive a session ID and use it for all evals.
@@ -33,7 +33,7 @@
   (list-agent-sessions {})
   ```"
   (:require [datalevin.core :as d]
-            [seon.agent.ctx :as ctx]
+            [seon.ctx :as ctx]
             [seon.db.datalevin.conn :as conn]
             [seon.flow.pool :as pool]
             [seon.schema :as schema]
@@ -186,7 +186,7 @@
 ;;; Session Registry (in-memory for quick lookups)
 ;;; ---------------------------------------------------------------------------
 
-;; Map of session-id -> session info (includes flush!/close! fns)
+;; Map of session-id -> session info
 (defonce ^:private session-registry (atom {}))
 
 ;;; ---------------------------------------------------------------------------
@@ -353,18 +353,24 @@
         ;; 3. Create persisted ctx with the namespace connection
         (log/debug "Creating persisted ctx" {:namespace namespace :resume? resume?
                                              :datalevin? (some? dl-conn)})
-        (let [{::ctx/keys [atom flush! close!]}
-              (ctx/make-persisted-ctx
-               (cond-> {::ctx/db ns-conn
-                        ::ctx/namespace namespace}
-                 dl-conn (assoc ::ctx/extra-reserved
-                                {:seon.ns/conn dl-conn
-                                 :seon.ns/session-id session-id
-                                 :seon.ns/namespace (str namespace)})))
+        (let [ctx-atom
+              (ctx/create! {::ctx/instance-id session-id
+                            ::ctx/namespace namespace
+                            ::ctx/conn dl-conn
+                            ::ctx/persist? (some? dl-conn)
+                            ::ctx/sse-push? false
+                            ::ctx/validate? true
+                            ::ctx/debounce-ms 1000
+                            ::ctx/reserved-keys
+                            (cond-> {:seon.agent/namespace namespace
+                                     :seon.agent/db ns-conn}
+                              dl-conn (merge {:seon.ns/conn dl-conn
+                                              :seon.ns/session-id session-id
+                                              :seon.ns/namespace (str namespace)}))})
 
               ;; 4. Claim a pool JVM and inject *ctx*
               _ (log/debug "Claiming pool JVM" {:session-id session-id :namespace namespace})
-              ctx-value @atom
+              ctx-value @ctx-atom
               jvm-handle (when pool
                            (pool/claim! pool
                                         {::pool/session-id session-id
@@ -389,10 +395,8 @@
                             ::eval-count 0
                             ::current-eval nil
                             ;; Internal - not returned but stored in registry
-                            ::flush! flush!
-                            ::close! close!
                             ::ns-conn ns-conn
-                            ::ctx-atom atom
+                            ::ctx-atom ctx-atom
                             ::pool pool}]
 
           ;; 5. Store in registry and Datalevin
@@ -402,10 +406,7 @@
           (log/info "Started agent session"
                     {:session-id session-id
                      :namespace namespace
-                     :port nrepl-port
-                     :resumed? (and resume? (some? (::ctx/state (ctx/load-latest
-                                                                  {::ctx/db ns-conn
-                                                                   ::ctx/namespace namespace}))))})
+                     :port nrepl-port})
 
           ;; Return public session info (without internal fns)
           (select-keys session-info [::id ::namespace ::status ::nrepl-port ::started-at ::db-name])))
@@ -439,20 +440,14 @@
     (try
       (log/info "Stopping agent session" {:session-id id :namespace (::namespace session)})
 
-      ;; 1. Flush pending ctx state
-      (when-let [flush! (::flush! session)]
-        (log/debug "Flushing ctx" {:session-id id})
-        (flush!))
-
-      ;; 2. Release pool JVM back to pool
+      ;; 1. Release pool JVM back to pool
       (when-let [pool (::pool session)]
         (log/debug "Releasing pool JVM" {:session-id id})
         (pool/release-session! pool id))
 
-      ;; 3. Close persisted ctx (cleanup resources)
-      (when-let [close! (::close! session)]
-        (log/debug "Closing ctx" {:session-id id})
-        (close!))
+      ;; 2. Destroy ctx instance (flushes persistence, cleans up scheduler/watches)
+      (log/debug "Destroying ctx" {:session-id id})
+      (ctx/destroy! {::ctx/instance-id id})
 
       ;; 4. Update registry and Datalevin
       (swap! session-registry dissoc id)
