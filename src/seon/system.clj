@@ -78,57 +78,6 @@
         (ig/init-key key opts))))
 
 ;;; ---------------------------------------------------------------------------
-;;; Namespace nREPL Servers Component
-;;; ---------------------------------------------------------------------------
-;;; Manages per-namespace nREPL servers for agent isolation.
-;;; Each namespace gets its own nREPL on a unique port with injected *ctx*.
-
-(defmethod ig/init-key :seon.orchestrator/namespace-nrepls
-  [_ {:keys [namespaces]}]
-  (log/info "Starting namespace nREPL servers..." {:namespaces namespaces})
-  (require 'seon.orchestrator.nrepl)
-  (let [start! (resolve 'seon.orchestrator.nrepl/start-namespace-nrepl!)
-        ;; Generate a deterministic session-id from namespace (for Integrant-managed nREPLs)
-        ns->session-id (fn [ns-sym] (str "ig-" (hash ns-sym)))
-        ;; Start an nREPL for each namespace
-        results (into {}
-                      (for [ns-sym namespaces]
-                        (let [session-id (ns->session-id ns-sym)
-                              result (start! {:session-id session-id
-                                              :namespace ns-sym
-                                              :db nil})]
-                          [ns-sym (assoc result :session-id session-id)])))]
-    (log/info "Namespace nREPL servers started"
-              {:servers (into {} (for [[ns {:keys [port status]}] results]
-                                   [ns {:port port :status status}]))})
-    {:namespaces namespaces
-     :servers results}))
-
-(defmethod ig/halt-key! :seon.orchestrator/namespace-nrepls
-  [_ {:keys [servers]}]
-  (log/info "Stopping namespace nREPL servers...")
-  (require 'seon.orchestrator.nrepl)
-  (let [stop! (resolve 'seon.orchestrator.nrepl/stop-namespace-nrepl!)]
-    (doseq [[ns-sym {:keys [session-id]}] servers]
-      (try
-        ;; Stop the nREPL server (keyed by session-id, not namespace)
-        (stop! session-id)
-        (catch Exception e
-          (log/warn "Error stopping namespace nREPL"
-                    {:namespace ns-sym :session-id session-id :error (.getMessage e)})))))
-  (log/info "Namespace nREPL servers stopped"))
-
-;; Keep namespace nREPLs alive during (reset) like the main nREPL
-(defmethod ig/suspend-key! :seon.orchestrator/namespace-nrepls [_ state] state)
-
-(defmethod ig/resume-key :seon.orchestrator/namespace-nrepls
-  [key opts old-opts old-state]
-  (if (= (:namespaces opts) (:namespaces old-opts))
-    old-state
-    (do (ig/halt-key! key old-state)
-        (ig/init-key key opts))))
-
-;;; ---------------------------------------------------------------------------
 ;;; Primer Ctx Component
 ;;; ---------------------------------------------------------------------------
 ;;; Initializes the primer ctx system with the Datalevin connection manager.
@@ -145,10 +94,10 @@
 ;;; Initializes the orchestrator session system with the Datalevin connection manager.
 
 (defmethod ig/init-key :seon/orchestrator-sessions
-  [_ {:keys [connection-manager]}]
+  [_ {:keys [connection-manager pool]}]
   (require 'seon.orchestrator.session)
-  ((resolve 'seon.orchestrator.session/init!) connection-manager)
-  {:connection-manager connection-manager})
+  ((resolve 'seon.orchestrator.session/init!) connection-manager :pool pool)
+  {:connection-manager connection-manager :pool pool})
 
 ;;; ---------------------------------------------------------------------------
 ;;; Code Scanner Component

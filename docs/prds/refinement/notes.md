@@ -79,7 +79,34 @@ Added self-healing to `execute-eval`: when "unknown-session" is detected, automa
 
 ## Track 2: Context Unification
 
-_(to be filled by agent)_
+### What Was Done (2026-02-20)
+
+**Deleted `orchestrator/nrepl.clj` and both test files:**
+- `src/seon/orchestrator/nrepl.clj` -- replaced by pool JVM lifecycle
+- `test/seon/orchestrator/nrepl_test.clj` -- 362 lines, tested dead code
+- `test/seon/orchestrator/mcp_test.clj` -- 48 lines, depended on orchestrator.nrepl
+
+**Removed references from 3 files:**
+- `src/seon/agent/helpers.clj` -- declared its own `*ctx*` dynamic var instead of importing from orchestrator.nrepl
+- `src/seon/ai/agent.clj` -- removed "safety net" nREPL cleanup in `shutdown-all-agents!` (pool handles JVM lifecycle)
+- `src/seon/system.clj` -- deleted dead `namespace-nrepls` Integrant component (not in system.edn), wired pool into orchestrator-sessions init
+
+**System wiring:**
+- `resources/system.edn` -- `:seon/orchestrator-sessions` now depends on `:seon/agent-pool` via `#ig/ref`
+- `src/seon/system.clj` -- `init-key :seon/orchestrator-sessions` passes pool to `session/init!`
+
+### Remaining References
+
+`health.clj` still has ~10 dynamic requires of `seon.orchestrator.nrepl` -- all inside try/catch blocks, so they degrade gracefully (return `{:agents 0 :ports 0 ...}`). Should be cleaned up in a follow-up.
+
+### Gotchas
+
+- `seon.agent.ctx` and `seon.ctx` are NOT drop-in replacements. `agent.ctx` provides validated persisted atoms with reserved key protection and schema checking. `seon.ctx` is a simpler instance registry for web contexts. Unifying them requires deciding which validation model wins.
+- `agent/helpers.clj` now declares its own `*ctx*` -- this means there are now two `*ctx*` vars: `seon.agent.helpers/*ctx*` and the one pool JVMs inject at claim time. The pool injects into the agent's namespace directly, so helpers needs to resolve from there, not from its own var. This may need attention.
+
+### Test Results
+- 483 tests, 2417 assertions, 0 failures related to changes
+- 3 errors + 5 failures are pre-existing (flow pool-integration-test, flow trace-test)
 
 ## Track 3: Flow Logging
 
