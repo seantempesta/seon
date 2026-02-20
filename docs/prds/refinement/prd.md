@@ -23,22 +23,23 @@ An agent uses the Super REPL (via MCP) to execute code in a remote Clojure proce
 
 ---
 
-## Track 0: Fix MCP REPL (Prerequisite)
+## Track 0: Fix MCP REPL (Prerequisite) -- DONE
 
 **Goal:** Orchestrator MCP REPL (`mcp__seon__eval`) works reliably. Agents can use it for live REPL-driven development and testing.
 
-The MCP eval tool currently returns `nil` for all expressions (including `(+ 1 2)`). This must be fixed before any other work can begin, since all tracks depend on REPL-driven development.
+**Status:** Complete (commit `e07a866`). Self-healing session logic added to `bin/mcp-server`.
 
-1. Diagnose why MCP eval returns nil — check `bin/mcp-server`, nREPL connection, response serialization
-2. Fix the issue
-3. Verify: `(+ 1 2)` → `3`, `(user/status)` returns system info
-4. Verify agent sessions can be created via `mcp__seon__create_session`
+1. ~~Diagnose why MCP eval returns nil~~ -- done
+2. ~~Fix the issue~~ -- done (self-healing nREPL session re-clone)
+3. ~~Verify: `(+ 1 2)` → `3`, `(user/status)` returns system info~~ -- done
+4. ~~Verify agent sessions can be created via `mcp__seon__create_session`~~ -- done
 
 ---
 
-## Track 1: Remove XTDB + `reference-code/`
+## Track 1: Remove XTDB + `reference-code/` -- ~70% DONE (uncommitted)
 
 **Goal:** Zero XTDB in the codebase. Trading archived. reference-code removed.
+**Status:** AI/agent/orchestrator layer cleaned (commits `7572f29`, `9e69b14`). `deps.edn` and `system.edn` cleanup uncommitted. 12 files still reference XTDB (mostly `ai/datalevin.clj` legacy naming and `web/` files using `:xt/id`). Trading not archived. `reference-code/` not removed.
 
 1. Move `src/seon/trading/` → `docs/archive/trading/`
 2. Remove from `system.clj`: `:seon/xtdb-node`, `:seon/namespace-dbs`, XTDB dep from http-server
@@ -54,9 +55,10 @@ The MCP eval tool currently returns `nil` for all expressions (including `(+ 1 2
 
 ---
 
-## Track 2: Unified Agent Runtime — Session-ID as Universal Key
+## Track 2: Unified Agent Runtime — Session-ID as Universal Key -- ~50% DONE (uncommitted)
 
 **Goal:** ONE model for all agents (AI, web, human REPL). Session = session-id + pool JVM + flow channels + ctx. Pool JVMs are the single runtime.
+**Status:** Pool layer has `claim!`/`release-session!`/`get-jvm-by-session` (uncommitted). Session layer partially migrated. `orchestrator/nrepl.clj` NOT deleted yet. `seon.agent.ctx` still imported. No e2e verification.
 
 **The model:** `start-session!(namespace, opts)` →
 1. Generate session-id (4-char hex)
@@ -86,9 +88,10 @@ Drivers (Claude, human, automation) just need session-id to interact.
 
 ---
 
-## Track 3: Flow Logging + Tracing
+## Track 3: Flow Logging + Tracing -- ~70% DONE (uncommitted)
 
 **Goal:** Full trace visibility from browser/MCP request → flow → agent JVM → response.
+**Status:** `trace.clj` created with Datalevin persistence. Logging added to harness, bridge, and proxy (all uncommitted). No Observatory UI integration. No e2e test.
 
 1. Add structured logging to `bridge.clj` (fn resolution, execution start/end, errors, timeouts)
 2. Add structured logging to `harness.clj` (request forwarding, reply reception, overload events)
