@@ -79,6 +79,11 @@
 (schema/register! ::pid
                   [:int {:min 0 :description "OS process ID of agent JVM"}])
 
+(schema/register! ::session-id
+                  [:string {:min 4 :max 4
+                            :pattern "^[a-f0-9]{4}$"
+                            :description "4-char hex session ID assigned to a claimed JVM"}])
+
 (schema/register! ::status
                   [:enum :idle :active :spawning
                    {:description "Agent JVM lifecycle status"}])
@@ -456,6 +461,7 @@
       (log/info "Cleaned up stale agent JVMs" {:count cleaned})))
   (let [idle-queue (LinkedBlockingQueue.)
         pool-state (atom {::all-jvms {}
+                          ::session->port {}
                           ::target-size size
                           ::next-port base-port
                           ::datalevin-port datalevin-port
@@ -604,6 +610,72 @@
       (log/info "Disposed agent JVM" {:port port})
       ;; Spawn replacement in background
       (replenish-pool! state idle-queue))))
+
+;;; ---------------------------------------------------------------------------
+;;; Session-based claiming (Track 2: Unified Agent Runtime)
+;;; ---------------------------------------------------------------------------
+
+(defn claim!
+  "Claim an idle JVM for a session. Assigns session-id, sets up namespace,
+   and injects *ctx* via nREPL eval. Returns JVM handle with session-id,
+   or nil if no JVM available within timeout.
+
+   Options:
+     ::session-id  - Required. 4-char hex session ID
+     ::namespace   - Required. Namespace symbol to create
+     ::forms       - Optional. Vector of forms to eval
+     ::timeout-ms  - Optional. Ms to wait for idle JVM (default: 30000)
+     ::ctx-value   - Optional. Map to inject as *ctx* value
+
+   Returns agent handle map with ::session-id, ::port, etc. or nil."
+  [pool {::keys [session-id namespace forms timeout-ms ctx-value]}]
+  (let [timeout-ms (or timeout-ms 30000)
+        handle (acquire! pool {::namespace namespace
+                               ::forms forms
+                               ::timeout-ms timeout-ms})]
+    (when handle
+      (let [port (::port handle)]
+        ;; Track session-id on the JVM
+        (swap! (::state pool) (fn [s]
+                                (-> s
+                                    (assoc-in [::all-jvms port ::session-id] session-id)
+                                    (assoc-in [::session->port session-id] port))))
+        ;; Inject *ctx* via nREPL eval if ctx-value provided
+        (when ctx-value
+          (let [ns-sym namespace
+                code (pr-str `(do (intern '~ns-sym '~'*ctx*
+                                          (atom ~ctx-value))
+                                  (.setDynamic (resolve (symbol (str '~ns-sym) "*ctx*")) true)
+                                  :ok))]
+            (nrepl-eval! port code)))
+        (assoc handle ::session-id session-id)))))
+
+(defn get-jvm-by-session
+  "Look up a JVM by session-id. Returns JVM map or nil."
+  [pool session-id]
+  (let [state @(::state pool)]
+    (when-let [port (get-in state [::session->port session-id])]
+      (get-in state [::all-jvms port]))))
+
+(defn release-session!
+  "Release a claimed JVM back to the pool by session-id.
+   Clears session tracking, resets namespace, returns JVM to idle."
+  [pool session-id]
+  (if-let [jvm (get-jvm-by-session pool session-id)]
+    (let [port (::port jvm)
+          ns-sym (::namespace jvm)]
+      ;; Clear session tracking
+      (swap! (::state pool) (fn [s]
+                              (-> s
+                                  (update-in [::all-jvms port] dissoc ::session-id)
+                                  (update ::session->port dissoc session-id))))
+      ;; Delegate to existing release!
+      (release! pool {::port port ::namespace ns-sym})
+      (log/info "Released session from pool" {:session-id session-id :port port})
+      true)
+    (do
+      (log/warn "No JVM found for session" {:session-id session-id})
+      false)))
 
 (defn pool-status
   "Return current pool status.
