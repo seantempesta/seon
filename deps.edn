@@ -7,10 +7,6 @@
         org.clojure/clojure {:mvn/version "1.12.0"}
         org.clojure/core.async {:mvn/version "1.9.829-alpha2"}
 
-        ;; XTDB v2.1.0 (stable release with multi-database support)
-        com.xtdb/xtdb-api {:mvn/version "2.1.0"}
-        com.xtdb/xtdb-core {:mvn/version "2.1.0"}
-
         ;; Schema & Validation
         metosin/malli {:mvn/version "0.17.0"}
 
@@ -108,22 +104,6 @@
                     "-Dio.netty.tryReflectionSetAccessible=true"
                     "--enable-native-access=ALL-UNNAMED"]}
 
-  :xtdb {:jvm-opts [;; Memory configuration for large workloads (7.6M+ records)
-                    "-Xms8g"
-                    "-Xmx16g"
-                    "-XX:MaxDirectMemorySize=8g"
-                    ;; G1GC tuning
-                    "-XX:+UseG1GC"
-                    "-XX:MaxGCPauseMillis=200"
-                    "-XX:InitiatingHeapOccupancyPercent=35"
-                    "-XX:+ParallelRefProcEnabled"
-                    ;; XTDB/Arrow/Netty required flags for Java 21+
-                    "--add-opens=java.base/java.nio=ALL-UNNAMED"
-                    "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
-                    "--add-opens=java.base/java.lang=ALL-UNNAMED"
-                    "-Dio.netty.tryReflectionSetAccessible=true"
-                    "-XX:+IgnoreUnrecognizedVMOptions"
-                    "--enable-native-access=ALL-UNNAMED"]}
 
   ;; Standalone runner (no nREPL, just Integrant system with console logging)
   ;; Usage: clj -M:dev:run       (dev profile)
