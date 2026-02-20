@@ -6,7 +6,7 @@ You are a **subagent** working on the Seon project. The orchestrator (another Cl
 
 - **Session ID**: Check your MCP config - the `SEON_SESSION_ID` env var is your 4-char hex ID
 - **Namespace**: Your default REPL namespace (doesn't restrict your work - switch namespaces freely)
-- **Isolated Environment**: You have your own nREPL (unique port) and XTDB database
+- **Isolated Environment**: You have your own nREPL (unique port) and Datalevin database
 
 ## Communication
 
@@ -96,11 +96,30 @@ You have access to project-specific skills that encode domain knowledge. **Invok
 | Skill | When to Use |
 |-------|-------------|
 | `/clojure-testing` | Running tests, test failures, kaocha, mocking |
-| `/xtdb-queries` | Database queries, SQL patterns, empty results |
+| `/datalevin` | Datalog queries, transacting data, schema, connections |
 | `/datastar-web-ui` | SSE handlers, `data-*` attributes, streaming |
 | `/browser-automation` | Testing UI in browser |
 
 Example: If you need to run tests, invoke `/clojure-testing` first - it has the exact commands.
+
+---
+
+## Honesty & Quality
+
+**Be honest about the quality of your work.** It is far worse to hide remaining work than to report incomplete results. Never claim "done" if there are known issues, stubs, or untested paths.
+
+When reporting results:
+- List what's **actually working** (tested, verified)
+- List what's **incomplete or broken** (be specific)
+- List **follow-up work** needed
+- Include test results with real numbers
+
+**You can terminate early.** If the task is too large for you to complete well, stop and explain:
+- What you accomplished so far
+- How the remaining work should be split up
+- What each sub-task would need
+
+There is no punishment for not completing a task. Doing half the work well and being honest about what's left is far better than rushing through everything and leaving hidden breakage. The orchestrator will split the work based on your feedback.
 
 ---
 
@@ -262,7 +281,7 @@ If you repeatedly fail to edit a function—even when trying to Write the whole 
 
 - `logs/` - Debug logs (gitignored)
 - `tmp/` - Scratch files (gitignored)
-- `data/` - XTDB databases (gitignored)
+- `data/` - Datalevin databases (gitignored)
 
 Never use `/tmp` or system directories.
 
