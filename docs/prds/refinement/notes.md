@@ -23,6 +23,31 @@ Added self-healing to `execute-eval`: when "unknown-session" is detected, automa
 - Kill processes with `pkill -9 -f "java.*seon"` not `pkill -f "clojure.*seon"` (child JVMs).
 - Many orphaned caddy processes accumulate; clean up with `pkill -f caddy`.
 
+## Datalevin Skill Creation
+
+### What Was Done
+
+- Created `.claude/skills/datalevin/SKILL.md` as the comprehensive Datalevin reference for agents
+- Deleted `.claude/skills/xtdb-queries/SKILL.md` (XTDB is no longer the primary database)
+- Updated `CLAUDE.md` skill table to reference `/datalevin` instead of `/xtdb-queries`
+
+### Key Learnings from Source Code Analysis
+
+1. **Schema is optional** -- Datalevin does schema-on-write. Untyped attributes are stored as EDN blobs. Seon uses this extensively (schemaless by default).
+2. **Connection model** -- Connections are atoms wrapping DB values. `(d/db conn)` or `@conn` gets the immutable snapshot. Queries take DB values, not connections. Number one gotcha.
+3. **No history** -- Unlike Datomic/XTDB, deletions are permanent. No `as-of` or `valid-time` queries.
+4. **Seon's architecture** -- Client/server mode with in-process server. Connection manager (`seon.db.datalevin.conn`) provides TTL-cached connections per namespace.
+5. **Two indexes only** -- `:eav` and `:ave`. Cost-based optimizer compensates.
+6. **Cardinality many adds, never replaces** -- Must retract first to replace values.
+7. **Nil values silently dropped** -- `{:name "Alice" :age nil}` stores only `:name`.
+
+### Performance Expectations (from LMDB characteristics and Datalevin benchmarks)
+
+- Sync writes: ~50-200ms for 1K entities, ~500-2000ms for 10K
+- Async writes (`transact-async`): 10-100x faster via adaptive batching
+- Point reads: sub-millisecond
+- Simple queries: 1-5ms
+
 ## Track 1: XTDB Removal
 
 _(to be filled by agent)_
