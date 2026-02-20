@@ -114,7 +114,56 @@ _(to be filled by agent)_
 
 ## Track 4: Render Pipeline E2E
 
-_(to be filled by agent)_
+### Investigation Date: 2026-02-20
+
+### Pipeline Status: Fully Wired, Zero Consumers
+
+The render pipeline is complete from a wiring perspective -- every component is connected. But no render function exists that would exercise the Datalevin-based resolution path.
+
+### What's Wired (all working)
+
+1. **Scanner runs at startup** via `:seon/code-scanner` Integrant component in `system.edn`. It:
+   - Runs clj-kondo `analyze-project!` on `["src/"]`
+   - Runs `scanner/scan-directory` to find `schema/register!` calls
+   - Calls `scanner/link-fns-to-specs` to detect render functions
+   - Calls `ingest/ingest-analysis!` to populate Datalevin graph DB
+   - Calls `render/set-conn!` to wire graph DB into render system
+
+2. **`link-fns-to-specs`** (`scanner.clj:275-320`) links functions to specs by naming convention: for function `ns/foo`, looks for `:ns/foo-request` and `:ns/foo-response` specs. If the response spec contains `:seon.render/html` or `:seon.render/ai` in its `:seon.spec/contains-keys`, the function is tagged as a renderer with `:seon.fn/render-input-keys` from the request spec.
+
+3. **`render/find-renderer`** (`render.clj:89-138`) queries Datalevin for functions with `:seon.fn/render-input-keys` that are a subset of the data's keys, filtered by output format.
+
+4. **`render/set-conn!`** is called by the code scanner at startup (`system.clj:153-154`).
+
+### Test Renderer Exists
+
+`src/seon/health/workout/render.clj` is a working example following the convention:
+- Function: `workout-set` (qualified: `seon.health.workout.render/workout-set`)
+- Request spec: `::workout-set-request` with keys `[:seon.health.workout/exercise :seon.health.workout/sets :seon.health.workout/reps :seon.health.workout/weight]`
+- Response spec: `::workout-set-response` with keys `[:seon.render/html :seon.render/ai]`
+
+`link-fns-to-specs` detects this as a render function and populates `:seon.fn/render-input-keys` with the workout keys. `find-renderer` can then match any map containing those keys to this renderer.
+
+Tests in `test/seon/health/workout/render_test.clj` verify the scanner picks up the specs correctly.
+
+### Two Separate Render Systems (by design)
+
+1. **Direct namespace render** (`ns/routes.clj`): Looks for `render` or `render-content` functions directly in a namespace. Used by `/ns/:namespace` HTTP routes.
+
+2. **Datalevin-based render** (`seon.render`): Queries graph DB for best-matching renderer by data key shape. Used by `render/for-ai` and `render/render`. Intended for AI agents and programmatic rendering.
+
+These are complementary, not competing. The `/ns/` routes should NOT use `find-renderer` -- they serve a different purpose.
+
+### No Changes Needed
+
+The pipeline is correctly wired end-to-end:
+- Scanner runs at startup and discovers `seon.health.workout.render/workout-set` as a render function
+- Graph DB is populated with `:seon.fn/render-input-keys` for the workout renderer
+- `render/set-conn!` connects the graph DB to the render system
+- `find-renderer` can resolve the workout renderer for maps with matching keys
+- 18 tests, 67 assertions, 0 failures across scanner, ingest, render, and workout render tests
+
+The pipeline works. Future domains just need to follow the same convention as `seon.health.workout.render`.
 
 ---
 
@@ -243,3 +292,19 @@ Not done:
 9. **Run full test suite** -- Fix any failures from the XTDB removal and session changes.
 
 10. **Delete `src/seon/experimental/context_injection.clj`** if it exists.
+
+---
+
+## Track 5: Ctx Unification
+
+### What Changed
+- `seon.ctx/create!` now accepts `::validate?` (default false) and `::reserved-keys` (default {})
+- When `validate?` is true, atom gets a `:validator` fn that checks: map type, namespaced keys, registered schemas, value validation, reserved key immutability
+- `session.clj` uses `ctx/create!` with `validate?: true` and `reserved-keys` for agent isolation, then `ctx/destroy!` for cleanup
+- `seon.agent.ctx` deleted entirely -- all its TODO stubs (time-travel, persist-snapshot) were dead code
+
+### Gotchas
+- The atom `:validator` function runs on every `swap!`/`reset!` -- if validation is expensive, set `::validate? false`
+- Reserved keys are tracked in an atom (`reserved-keys-snapshot`) inside the closure, not in the atom value itself
+- `session.clj` no longer stores `::flush!` / `::close!` in the session registry -- cleanup goes through `ctx/destroy!`
+- The `::persist?` in session is conditional on having a dl-conn, so agents without Datalevin still work

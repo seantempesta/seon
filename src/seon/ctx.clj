@@ -26,6 +26,7 @@
      (ctx/destroy! {::instance-id \"a13b\"})"
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
+            [malli.core :as m]
             [seon.schema :as schema]
             [taoensso.timbre :as log])
   (:import [java.security SecureRandom]
@@ -81,6 +82,35 @@
                   [:any {:description "http-kit async channel"
                          :gen/fmap (fn [_] (throw (ex-info "Cannot generate channel"
                                                            {:type :malli.generator/no-generator})))}])
+
+(schema/register! ::validate?
+                  [:boolean {:description "Enable Malli validation on swap! (default false)"}])
+
+(schema/register! ::reserved-keys
+                  [:map {:description "Immutable keys to inject and protect after creation"}])
+
+;; Reserved keys used by agent sessions (formerly in seon.agent.ctx)
+(schema/register! :seon.agent/namespace
+                  [:symbol {:description "Agent namespace symbol (read-only in ctx)"}])
+
+(schema/register! :seon.agent/db
+                  [:any {:description "Database connection (read-only in ctx)"
+                         :gen/fmap (fn [_] (throw (ex-info "Cannot generate database connection"
+                                                           {:type :malli.generator/no-generator})))}])
+
+(schema/register! :seon.ns/conn
+                  [:any {:description "Datalevin connection to namespace DB (read-only in ctx)"
+                         :gen/fmap (fn [_] (throw (ex-info "Cannot generate Datalevin connection"
+                                                           {:type :malli.generator/no-generator})))}])
+
+(schema/register! :seon.ns/session-id
+                  [:string {:min 4 :max 4
+                            :pattern "^[a-f0-9]{4}$"
+                            :description "4-character hex session ID (read-only in ctx)"}])
+
+(schema/register! :seon.ns/namespace
+                  [:string {:min 1
+                            :description "Agent namespace as string (read-only in ctx)"}])
 
 ;;; ---------------------------------------------------------------------------
 ;;; Datalevin Schema
@@ -239,6 +269,82 @@
       (render-and-push! instance-id new-val))))
 
 ;;; ---------------------------------------------------------------------------
+;;; Validation Helpers (for ::validate? mode)
+;;; ---------------------------------------------------------------------------
+
+(defn- namespaced-key?
+  "Check if a keyword is fully namespaced."
+  [k]
+  (and (keyword? k)
+       (some? (namespace k))))
+
+(defn- reserved-key?
+  "Check if a key is a reserved :seon.agent/* or :seon.ns/* key."
+  [k]
+  (and (keyword? k)
+       (contains? #{"seon.agent" "seon.ns"} (namespace k))))
+
+(defn- validate-key
+  "Validate a single key. Returns nil if valid, error map if invalid."
+  [k v reserved-keys]
+  (cond
+    ;; Cannot add new reserved keys
+    (and (reserved-key? k)
+         (not (contains? reserved-keys k)))
+    {:error :reserved-key-addition
+     :key k
+     :message (format "Cannot add reserved key %s" k)}
+
+    ;; Cannot modify existing reserved keys
+    (and (reserved-key? k)
+         (contains? reserved-keys k)
+         (not= v (get reserved-keys k)))
+    {:error :reserved-key-modification
+     :key k
+     :message (format "Cannot modify reserved key %s" k)}
+
+    ;; Skip further validation for reserved keys
+    (reserved-key? k)
+    nil
+
+    ;; Must be namespaced
+    (not (namespaced-key? k))
+    {:error :non-namespaced-key
+     :key k
+     :message (format "Invalid ctx key %s - must be fully namespaced" k)}
+
+    ;; Must have registered schema
+    (not (schema/registered? k))
+    {:error :missing-spec
+     :key k
+     :message (format "No spec registered for key %s" k)}
+
+    ;; Value must validate against schema
+    :else
+    (let [spec (schema/schema-definition k)]
+      (when-not (m/validate spec v)
+        {:error :validation-failure
+         :key k
+         :message (format "Value for %s failed validation" k)}))))
+
+(defn- validate-state
+  "Validate a complete ctx state. Returns nil if valid, throws if invalid."
+  [new-state reserved-keys]
+  (when-not (map? new-state)
+    (throw (ex-info "ctx state must be a map"
+                    {:error :not-a-map :got (type new-state)})))
+  ;; Check for removed reserved keys
+  (doseq [k (keys reserved-keys)]
+    (when-not (contains? new-state k)
+      (throw (ex-info (format "Cannot remove reserved key %s" k)
+                      {:error :reserved-key-removal :key k}))))
+  ;; Validate each key
+  (doseq [[k v] new-state]
+    (when-let [error (validate-key k v reserved-keys)]
+      (throw (ex-info (:message error) error))))
+  nil)
+
+;;; ---------------------------------------------------------------------------
 ;;; Public API
 ;;; ---------------------------------------------------------------------------
 
@@ -258,17 +364,26 @@
      ::track-clients?  - Optional. Track connected clients (default false)
      ::render-fn       - Optional. Function (ctx-value) -> hiccup (for SSE push)
      ::debounce-ms     - Optional. Debounce window in ms (default 100)
+     ::validate?       - Optional. Enable Malli validation on swap! (default false)
+     ::reserved-keys   - Optional. Map of immutable keys to inject and protect
 
    Returns:
      The ctx atom."
   [{::keys [conn instance-id namespace initial-value persist? sse-push?
-            track-clients? render-fn debounce-ms]}]
+            track-clients? render-fn debounce-ms validate? reserved-keys]}]
   (let [persist? (if (some? persist?) persist? true)
         sse-push? (if (some? sse-push?) sse-push? true)
         track-clients? (if (some? track-clients?) track-clients? false)
+        validate? (if (some? validate?) validate? false)
         debounce-ms (or debounce-ms 100)
-        initial-value (or initial-value {})
-        ctx-atom (atom initial-value)
+        reserved-keys (or reserved-keys {})
+        initial-value (merge (or initial-value {}) reserved-keys)
+        reserved-keys-snapshot (atom reserved-keys)
+        ctx-atom (atom initial-value
+                       :validator (when validate?
+                                    (fn [new-state]
+                                      (validate-state new-state @reserved-keys-snapshot)
+                                      true)))
         created-at (java.util.Date.)
         ^ScheduledExecutorService scheduler (when persist?
                                               (Executors/newSingleThreadScheduledExecutor))
@@ -280,6 +395,8 @@
                :persist? persist?
                :sse-push? sse-push?
                :track-clients? track-clients?
+               :validate? validate?
+               :reserved-keys reserved-keys-snapshot
                :clients (when track-clients? (atom #{}))
                :render-fn render-fn
                :created-at created-at
@@ -320,7 +437,8 @@
                                        :namespace namespace
                                        :persist? persist?
                                        :sse-push? sse-push?
-                                       :track-clients? track-clients?})
+                                       :track-clients? track-clients?
+                                       :validate? validate?})
     ctx-atom))
 
 (defn get-atom

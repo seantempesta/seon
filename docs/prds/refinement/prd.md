@@ -43,8 +43,8 @@ An agent uses the Super REPL (via MCP) to execute code in a remote Clojure proce
 - System wiring: `:seon/orchestrator-sessions` depends on `:seon/agent-pool`
 - Session tests simplified for pool-based model
 
-**Not done (see Track 5 below):**
-- `session.clj` still imports `seon.agent.ctx` — needs ctx unification first
+**Done (Track 5):**
+- `session.clj` migrated from `seon.agent.ctx` to `seon.ctx` — `agent.ctx` deleted
 - `health.clj` has dead dynamic requires of deleted nrepl (gracefully degraded)
 - No e2e verification (MCP eval → pool JVM → `@*ctx*` → Observatory)
 - Auto-proxy injection not started
@@ -63,36 +63,15 @@ An agent uses the Super REPL (via MCP) to execute code in a remote Clojure proce
 
 ## What's Next
 
-### Track 5: Unify Context Systems (NEW — prerequisite for Track 2 completion)
+### Track 5: Unify Context Systems -- DONE
 
-**Problem:** Two ctx systems exist and they're architecturally different:
-
-| System | File | What it does |
-|--------|------|-------------|
-| `seon.agent.ctx` | `src/seon/agent/ctx.clj` | Validated persisted atoms with Malli schema enforcement, reserved key protection (`::namespace`, `::session-id` can't be overwritten), snapshot history, Datalevin persistence |
-| `seon.ctx` | `src/seon/ctx.clj` | Simpler instance registry — `create!`/`get`/`destroy!` lifecycle, client tracking, less validation |
-
-They are NOT drop-in replacements. The agent that attempted the swap correctly identified this and stopped.
-
-**Goal:** ONE ctx system that has:
-- Validated persisted atoms (from `agent.ctx`)
-- Instance registry lifecycle (from `seon.ctx`)
-- Client tracking (from `seon.ctx`)
-- Reserved key protection (from `agent.ctx`)
-
-**Approach:**
-1. Research both files — understand every public fn and who calls it
-2. Design merged API
-3. Implement in `seon.ctx` (the keeper)
-4. Migrate all callers from `agent.ctx` → `seon.ctx`
-5. Delete `seon.agent.ctx`
-6. Run tests
-
-**Key files:**
-- `src/seon/ctx.clj` (keep, extend)
-- `src/seon/agent/ctx.clj` (read, then delete)
-- `src/seon/orchestrator/session.clj` (primary caller of agent.ctx)
-- `src/seon/flow/agent_runner.clj` (may import agent.ctx)
+Unified `seon.agent.ctx` into `seon.ctx`. Changes:
+- Added `::validate?` and `::reserved-keys` options to `ctx/create!`
+- Ported Malli validation (namespaced keys, registered schemas, value validation)
+- Ported reserved key protection (`:seon.agent/*` and `:seon.ns/*` immutable after creation)
+- Migrated `session.clj` to use `ctx/create!` + `ctx/destroy!` instead of `make-persisted-ctx`/`flush!`/`close!`
+- Deleted `src/seon/agent/ctx.clj`
+- Added 7 new tests for validation and reserved keys
 
 ### Track 4: Render Pipeline E2E + Code Scanner
 

@@ -1,7 +1,8 @@
 (ns seon.ctx-test
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [datalevin.core :as d]
-            [seon.ctx :as ctx]))
+            [seon.ctx :as ctx]
+            [seon.schema :as schema]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Test Fixtures
@@ -341,3 +342,108 @@
     (ctx/destroy! {::ctx/instance-id "n001"})
     (ctx/destroy! {::ctx/instance-id "n002"})
     (ctx/destroy! {::ctx/instance-id "n003"})))
+
+;;; ---------------------------------------------------------------------------
+;;; Validation Tests
+;;; ---------------------------------------------------------------------------
+
+(deftest validate-rejects-non-namespaced-keys-test
+  (testing "Validation rejects non-namespaced keys"
+    (schema/register! :test.ctx/value [:int {:min 0}])
+    (let [a (ctx/create! {::ctx/instance-id "v001"
+                          ::ctx/persist? false
+                          ::ctx/sse-push? false
+                          ::ctx/validate? true})]
+      ;; Valid namespaced key works
+      (swap! a assoc :test.ctx/value 42)
+      (is (= 42 (:test.ctx/value @a)))
+
+      ;; Non-namespaced key throws
+      (is (thrown-with-msg? Exception #"must be fully namespaced"
+                           (swap! a assoc :bad 1)))
+
+      (ctx/destroy! {::ctx/instance-id "v001"}))))
+
+(deftest validate-rejects-invalid-values-test
+  (testing "Validation rejects values that fail schema"
+    (schema/register! :test.ctx/count [:int {:min 0}])
+    (let [a (ctx/create! {::ctx/instance-id "v002"
+                          ::ctx/persist? false
+                          ::ctx/sse-push? false
+                          ::ctx/validate? true})]
+      (swap! a assoc :test.ctx/count 5)
+      (is (= 5 (:test.ctx/count @a)))
+
+      ;; String where int expected
+      (is (thrown-with-msg? Exception #"failed validation"
+                           (swap! a assoc :test.ctx/count "nope")))
+
+      (ctx/destroy! {::ctx/instance-id "v002"}))))
+
+(deftest validate-rejects-unregistered-keys-test
+  (testing "Validation rejects keys without registered schemas"
+    (let [a (ctx/create! {::ctx/instance-id "v003"
+                          ::ctx/persist? false
+                          ::ctx/sse-push? false
+                          ::ctx/validate? true})]
+      (is (thrown-with-msg? Exception #"No spec registered"
+                           (swap! a assoc :test.ctx/unknown-key-xyz 1)))
+
+      (ctx/destroy! {::ctx/instance-id "v003"}))))
+
+;;; ---------------------------------------------------------------------------
+;;; Reserved Keys Tests
+;;; ---------------------------------------------------------------------------
+
+(deftest reserved-keys-injected-test
+  (testing "Reserved keys are injected into initial value"
+    (let [a (ctx/create! {::ctx/instance-id "rk01"
+                          ::ctx/persist? false
+                          ::ctx/sse-push? false
+                          ::ctx/validate? true
+                          ::ctx/reserved-keys {:seon.agent/namespace 'test.ns}})]
+      (is (= 'test.ns (:seon.agent/namespace @a)))
+      (ctx/destroy! {::ctx/instance-id "rk01"}))))
+
+(deftest reserved-keys-immutable-test
+  (testing "Reserved keys cannot be modified"
+    (let [a (ctx/create! {::ctx/instance-id "rk02"
+                          ::ctx/persist? false
+                          ::ctx/sse-push? false
+                          ::ctx/validate? true
+                          ::ctx/reserved-keys {:seon.agent/namespace 'test.ns}})]
+      (is (thrown-with-msg? Exception #"Cannot modify reserved key"
+                           (swap! a assoc :seon.agent/namespace 'other.ns)))
+      (ctx/destroy! {::ctx/instance-id "rk02"}))))
+
+(deftest reserved-keys-cannot-be-removed-test
+  (testing "Reserved keys cannot be removed"
+    (let [a (ctx/create! {::ctx/instance-id "rk03"
+                          ::ctx/persist? false
+                          ::ctx/sse-push? false
+                          ::ctx/validate? true
+                          ::ctx/reserved-keys {:seon.agent/namespace 'test.ns}})]
+      (is (thrown-with-msg? Exception #"Cannot remove reserved key"
+                           (swap! a dissoc :seon.agent/namespace)))
+      (ctx/destroy! {::ctx/instance-id "rk03"}))))
+
+(deftest reserved-keys-no-new-additions-test
+  (testing "Cannot add new reserved-namespace keys"
+    (let [a (ctx/create! {::ctx/instance-id "rk04"
+                          ::ctx/persist? false
+                          ::ctx/sse-push? false
+                          ::ctx/validate? true
+                          ::ctx/reserved-keys {:seon.agent/namespace 'test.ns}})]
+      (is (thrown-with-msg? Exception #"Cannot add reserved key"
+                           (swap! a assoc :seon.agent/sneaky "haha")))
+      (ctx/destroy! {::ctx/instance-id "rk04"}))))
+
+(deftest no-validation-by-default-test
+  (testing "Without validate?, any keys are allowed"
+    (let [a (ctx/create! {::ctx/instance-id "nv01"
+                          ::ctx/persist? false
+                          ::ctx/sse-push? false})]
+      ;; Non-namespaced key works fine without validation
+      (swap! a assoc :anything "goes")
+      (is (= "goes" (:anything @a)))
+      (ctx/destroy! {::ctx/instance-id "nv01"}))))
