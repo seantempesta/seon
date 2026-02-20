@@ -24,6 +24,7 @@
             [seon.flow.harness.channel :as channel]
             [seon.flow.msg :as msg]
             [seon.flow.pool :as pool]
+            [seon.flow.trace :as trace]
             [seon.schema :as schema])
   (:import [java.time Instant]))
 
@@ -128,20 +129,25 @@
 
   ;; transform
   ([state input-id msg]
-   (let [ns-str (::namespace state)]
+   (let [ns-str (::namespace state)
+         trace (or (::msg/trace-id msg) (::msg/id msg))]
      (case input-id
        ;; Incoming cross-ns request
        :seon.flow.in/request
        (if (>= (::pending state) (::queue-cap state))
          ;; Overload: return error immediately + emit event
-         [state
-          {:seon.flow.out/reply [(make-overload-reply msg ns-str)]
-           :seon.flow.out/event [(make-event ns-str :overload
-                                             :seon.flow.harness/queue-cap (::queue-cap state)
-                                             :seon.flow.harness/pending (::pending state))]}]
+         (do (log/warn "Harness overload" {:trace-id trace :ns ns-str :fn (::msg/fn msg) :pending (::pending state) :queue-cap (::queue-cap state) :event :overload})
+             (future (trace/persist-event! {::trace/trace-id trace ::trace/ns ns-str ::trace/fn (::msg/fn msg) ::trace/event :overload}))
+             [state
+              {:seon.flow.out/reply [(make-overload-reply msg ns-str)]
+               :seon.flow.out/event [(make-event ns-str :overload
+                                                 :seon.flow.harness/queue-cap (::queue-cap state)
+                                                 :seon.flow.harness/pending (::pending state))]}])
          ;; Forward to agent JVM
-         [(update state ::pending inc)
-          {:seon.flow.out/jvm-request [msg]}])
+         (do (log/debug "Harness forwarding request" {:trace-id trace :ns ns-str :fn (::msg/fn msg) :from-ns (::msg/from-ns msg) :pending (inc (::pending state)) :event :forward})
+             (future (trace/persist-event! {::trace/trace-id trace ::trace/ns ns-str ::trace/fn (::msg/fn msg) ::trace/event :forward}))
+             [(update state ::pending inc)
+              {:seon.flow.out/jvm-request [msg]}]))
 
        ;; Reply from agent JVM
        :seon.flow.in/jvm-reply
@@ -150,6 +156,11 @@
                         (update ::pending dec)
                         (cond-> error? (update ::error-count inc)))
              event-kind (if error? :error :ok)]
+         (if error?
+           (do (log/warn "Harness received error reply" {:trace-id trace :ns ns-str :status (::msg/status msg) :error-type (::msg/error-type msg) :duration-ms (::msg/duration-ms msg) :event :error})
+               (future (trace/persist-event! {::trace/trace-id trace ::trace/ns ns-str ::trace/fn (::msg/fn msg) ::trace/event :error ::trace/status (::msg/status msg) ::trace/elapsed-ms (::msg/duration-ms msg) ::trace/error-message (::msg/error-message msg)})))
+           (do (log/debug "Harness received ok reply" {:trace-id trace :ns ns-str :duration-ms (::msg/duration-ms msg) :event :ok})
+               (future (trace/persist-event! {::trace/trace-id trace ::trace/ns ns-str ::trace/fn (::msg/fn msg) ::trace/event :end ::trace/status :ok ::trace/elapsed-ms (::msg/duration-ms msg)}))))
          [state'
           (cond-> {:seon.flow.out/reply [msg]
                    :seon.flow.out/event [(make-event ns-str event-kind)]}
@@ -181,16 +192,19 @@
      ::pool       - Pool reference (for release)"
   [{::keys [pool namespace timeout-ms]}]
   (let [timeout (or timeout-ms 30000)
+        _ (log/info "Starting namespace JVM" {:ns namespace :timeout-ms timeout :event :start})
         ;; 1. Acquire JVM from pool
         jvm (pool/acquire! pool {::pool/namespace (symbol namespace)
                                  ::pool/timeout-ms timeout})
         _ (when-not jvm
+            (log/error "Failed to acquire JVM from pool" {:ns namespace :timeout-ms timeout :event :error})
             (throw (ex-info "Failed to acquire JVM from pool"
                             {::namespace namespace ::timeout-ms timeout})))
         nrepl-port (::pool/port jvm)
         ;; 2. Start TCP server on random port
         tcp-server (channel/start-server! {::channel/port 0})
-        bridge-port (::channel/port tcp-server)]
+        bridge-port (::channel/port tcp-server)
+        _ (log/info "Namespace JVM acquired" {:ns namespace :nrepl-port nrepl-port :bridge-port bridge-port})]
     (try
       ;; 3. Load bridge code into agent JVM via nREPL
       ;;    Agent JVM has src/ on classpath so we can require directly
@@ -220,6 +234,7 @@
              " :bridge-started)"))
 
       ;; Return channels + handles
+      (log/info "Namespace JVM started" {:ns namespace :nrepl-port nrepl-port :bridge-port bridge-port :event :end})
       {::in-ports  {:seon.flow.in/jvm-reply (::channel/in-ch tcp-server)}
        ::out-ports {:seon.flow.out/jvm-request (::channel/out-ch tcp-server)}
        ::jvm jvm
@@ -228,6 +243,7 @@
        ::namespace namespace}
       (catch Exception e
         ;; Cleanup on failure
+        (log/error "Failed to start namespace JVM" {:ns namespace :nrepl-port nrepl-port :bridge-port bridge-port :event :error :error (.getMessage e)})
         ((::channel/close! tcp-server))
         (pool/release! pool jvm)
         (throw (ex-info "Failed to start namespace JVM"
@@ -245,11 +261,13 @@
      ::jvm        - Pool JVM handle
      ::tcp-server - TCP server handle
      ::pool       - Pool reference"
-  [{::keys [jvm tcp-server pool]}]
+  [{::keys [jvm tcp-server pool namespace]}]
+  (log/info "Stopping namespace JVM" {:ns namespace :event :stop})
   (when tcp-server
     (try ((::channel/close! tcp-server)) (catch Exception _)))
   (when (and pool jvm)
-    (try (pool/release! pool jvm) (catch Exception _))))
+    (try (pool/release! pool jvm) (catch Exception _)))
+  (log/info "Namespace JVM stopped" {:ns namespace :event :stopped}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; *ctx* Persistence
