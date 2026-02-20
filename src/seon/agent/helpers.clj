@@ -31,8 +31,7 @@
    - Use `snake_case` for simple columns: `iv_rank`, `created_at`
    - Namespaced keywords use `$` separator: `:signal/symbol` -> `signal$symbol`"
   (:require [seon.orchestrator.nrepl :refer [*ctx*]]
-            [seon.schema :as schema]
-            [xtdb.api :as xt]))
+            [seon.schema :as schema]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schema Registration
@@ -57,7 +56,7 @@
                   [:vector ::result-row {:description "Query results"}])
 
 (schema/register! ::tx-result
-                  [:map {:description "Transaction result from XTDB"}])
+                  [:map {:description "Transaction result"}])
 
 ;;; ---------------------------------------------------------------------------
 ;;; Private Helpers
@@ -86,11 +85,9 @@
      (sql \"SELECT * FROM signals WHERE symbol = ?\" \"AAPL\")
      (sql \"SELECT * FROM signals WHERE symbol = ? AND score > ?\" \"AAPL\" 0.8)"
   {:malli/schema [:=> [:cat ::query [:* :any]] ::query-result]}
-  [query & params]
-  (let [db (get-db)]
-    (if (seq params)
-      (xt/q db (into [query] params))
-      (xt/q db query))))
+  [query & _params]
+  (throw (ex-info "SQL helpers not yet migrated from XTDB to Datalevin"
+                  {:query query})))
 
 (defn sql!
   "Execute a SQL write statement (INSERT/UPDATE/DELETE).
@@ -103,11 +100,9 @@
      (sql! \"UPDATE signals SET direction = ? WHERE _id = ?\" \"short\" \"sig-1\")
      (sql! \"DELETE FROM signals WHERE _id = ?\" \"sig-1\")"
   {:malli/schema [:=> [:cat ::statement [:* :any]] ::tx-result]}
-  [stmt & params]
-  (let [db (get-db)]
-    (if (seq params)
-      (xt/execute-tx db [[:sql stmt (vec params)]])
-      (xt/execute-tx db [[:sql stmt]]))))
+  [stmt & _params]
+  (throw (ex-info "SQL helpers not yet migrated from XTDB to Datalevin"
+                  {:statement stmt})))
 
 (defn sql-batch!
   "Execute a batch INSERT with multiple rows in one transaction.
@@ -120,9 +115,9 @@
                  [\"sig-2\" \"TSLA\" \"short\"]
                  [\"sig-3\" \"GOOG\" \"long\"])"
   {:malli/schema [:=> [:cat ::statement [:* ::param-row]] ::tx-result]}
-  [stmt & param-rows]
-  (let [db (get-db)]
-    (xt/execute-tx db [(into [:sql stmt] param-rows)])))
+  [stmt & _param-rows]
+  (throw (ex-info "SQL helpers not yet migrated from XTDB to Datalevin"
+                  {:statement stmt})))
 
 (comment
   ;; REPL testing (requires running agent session with *ctx* bound)

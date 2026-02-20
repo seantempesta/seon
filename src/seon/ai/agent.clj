@@ -64,7 +64,6 @@
             [clojure.java.shell :as shell]
             [clojure.string :as str]
             [seon.ai :as ai]
-            [seon.db.node :as db]
             [seon.ns.view :as view]
             [seon.schema :as schema]
             [taoensso.timbre :as log]))
@@ -160,7 +159,7 @@
      :message    - Provider-specific message map
      :session-id - Optional. AI session ID to attach to the entity
 
-   Returns a map suitable for XTDB storage with:
+   Returns a map suitable for Datalevin storage with:
      :xt/id            - Generated message ID
      :seon.ai/type     - :message
      :seon.ai/role     - \"user\", \"assistant\", or \"system\"
@@ -556,8 +555,7 @@
 (defn- completed-sessions
   "Get recent completed/failed sessions from Datalevin."
   [limit]
-  (ai/list-sessions {::ai/node nil
-                     ::ai/limit limit}))
+  (ai/list-sessions {::ai/limit limit}))
 
 (defn- running-agent-ids
   "Get set of AI session IDs for running agents."

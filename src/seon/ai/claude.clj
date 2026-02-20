@@ -28,8 +28,7 @@
      (require '[seon.ai :as ai])
 
      ;; Launch an agent
-     (claude/launch-agent! {::ai/node xtdb-node
-                            ::ai/namespace 'seon.trading
+     (claude/launch-agent! {::ai/namespace 'seon.trading
                             ::ai/prompt \"Implement feature X\"})
 
      ;; List running agents
@@ -162,7 +161,6 @@
 ;; SDK-related schemas (permission-mode, max-turns, etc.) are in seon.ai.claude.sdk
 (schema/register! ::launch-agent-request
                   [:map
-                   [::ai/node ::ai/node]
                    [::ai/namespace ::ai/namespace]
                    [::ai/prompt ::ai/prompt]
                    [::model {:optional true} ::model]
@@ -252,7 +250,6 @@
 ;; Launch agent!! (blocking) request - extends launch-agent! request with timeout
 (schema/register! ::launch-agent!!-request
                   [:map
-                   [::ai/node ::ai/node]
                    [::ai/namespace ::ai/namespace]
                    [::ai/prompt ::ai/prompt]
                    [::model {:optional true} ::model]
@@ -283,7 +280,7 @@
                   [:vector ::agent-summary])
 
 ;; Note: sdk-message->entity and agent lifecycle functions do not have
-;; :malli/schema metadata because they involve XTDB nodes, process spawning,
+;; :malli/schema metadata because they involve process spawning
 ;; or runtime-generated values that cannot be property tested.
 ;; Schemas are documented in docstrings for reference.
 
@@ -302,12 +299,12 @@
 
 (def ^:private max-tool-result-content-size
   "Maximum size for tool result content before truncation.
-   Large file reads from Claude Code can be 50-100KB, which overloads XTDB.
+   Large file reads from Claude Code can be 50-100KB, which overloads storage.
    2KB preview is enough to understand what was read."
   2048)
 
 (defn- truncate-tool-result-content
-  "Truncate large tool result content to prevent XTDB overload.
+  "Truncate large tool result content to prevent storage overload.
    Returns content map with :content-preview, :content-size, :truncated? for large content."
   [content]
   (cond
@@ -328,7 +325,7 @@
 
 (defn- extract-tool-results
   "Extract tool_result blocks from user message content.
-   Large content (>2KB) is truncated to prevent XTDB overload from file reads."
+   Large content (>2KB) is truncated to prevent storage overload from file reads."
   [content]
   (when (sequential? content)
     (->> content
@@ -355,7 +352,7 @@
   "Convert a Claude SDK message to a seon.ai message entity.
 
    Takes a request map with the SDK message and converts it to a normalized
-   entity suitable for XTDB storage. Claude-specific attributes are preserved
+   entity suitable for Datalevin storage. Claude-specific attributes are preserved
    under the ::seon.ai.claude namespace.
 
    Request keys:
@@ -451,7 +448,7 @@
 ;;   :message    - Claude SDK message map (with :type, :message, :uuid, etc.)
 ;;   :session-id - Optional. AI session ID to attach
 ;;
-;; Returns entity map suitable for XTDB storage.
+;; Returns entity map suitable for Datalevin storage.
 (defmethod agent/normalize-message :claude
   [{:keys [message session-id]}]
   (sdk-message->entity (cond-> {::sdk-message message}
@@ -514,13 +511,12 @@
       (assoc ::agent/subtype subtype))))
 
 (defn persist-message!
-  "Persist a Claude SDK message to XTDB as an AI message entity.
+  "Persist a Claude SDK message as an AI message entity.
 
-   Converts the SDK message to an entity and stores it in the ai_messages table.
+   Converts the SDK message to an entity and stores it in Datalevin.
    This is used internally by launch-agent! to auto-persist all messages.
 
    Request keys:
-     ::ai/node       - Required. XTDB node instance
      ::ai/session-id - Required. AI session ID (from ai/start-session!)
      ::sdk-message   - Required. Raw SDK message from Claude Code CLI
 
@@ -528,13 +524,9 @@
      ::ai/message-id - The generated message ID
 
    Example:
-     (persist-message! {::ai/node db
-                        ::ai/session-id \"ses-abc123\"
-                        ::sdk-message {:type \"assistant\" ...}})
-
-   Note: This function does not have :malli/schema metadata because it
-   takes XTDB nodes which cannot be property tested."
-  [{::ai/keys [node session-id] ::keys [sdk-message]}]
+     (persist-message! {::ai/session-id \"ses-abc123\"
+                        ::sdk-message {:type \"assistant\" ...}})"
+  [{::ai/keys [session-id] ::keys [sdk-message]}]
   (let [entity (sdk-message->entity {::sdk-message sdk-message
                                      ::ai/session-id session-id})
         message-id (:xt/id entity)]
@@ -686,7 +678,7 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- persistable-message-type?
-  "Check if message type should be persisted to XTDB.
+  "Check if message type should be persisted.
    We persist user, assistant, system, and result messages.
    We skip keep_alive and parse_error messages."
   [msg-type]
@@ -696,17 +688,15 @@
   "Launch a Claude Code agent with an isolated Seon session.
 
    Creates everything the agent needs:
-   - Isolated XTDB database for the namespace
    - Persisted ctx atom for state management
    - Dedicated nREPL server
    - Claude Code process with MCP configured
-   - AI session in XTDB for conversation persistence
+   - AI session in Datalevin for conversation persistence
 
-   All SDK messages are automatically persisted to XTDB during execution.
+   All SDK messages are automatically persisted to Datalevin during execution.
    On completion, the AI session is closed with final stats (tokens, cost).
 
    Request keys:
-     ::ai/node               - Required. XTDB orchestrator node
      ::ai/namespace          - Required. Agent namespace (string or symbol)
      ::ai/prompt             - Required. Task description for the agent
      ::model                 - Optional. Claude model (default: opus)
@@ -723,7 +713,7 @@
 
    Response keys (agent handle):
      ::ai/session-id      - 4-char hex session ID (Seon agent session)
-     ::ai-session-id      - AI conversation session ID (for XTDB queries)
+     ::ai-session-id      - AI conversation session ID (for Datalevin queries)
      ::ai/namespace       - Agent namespace
      ::nrepl-port         - nREPL port for the agent
      ::messages-ch        - Channel of SDK messages
@@ -732,17 +722,15 @@
      ::close!             - Function to terminate agent
 
    Example:
-     (launch-agent! {::ai/node xtdb-node
-                     ::ai/namespace 'seon.trading
+     (launch-agent! {::ai/namespace 'seon.trading
                      ::ai/prompt \"Implement the signals dashboard\"})
 
      ;; With file context
-     (launch-agent! {::ai/node xtdb-node
-                     ::ai/namespace 'seon.trading
+     (launch-agent! {::ai/namespace 'seon.trading
                      ::ai/prompt \"Read the PRD and implement Phase 1.\"
                      ::files [\"docs/prds/my-feature/prd.md\"
                               \"docs/prds/my-feature/plan.md\"]})"
-  [{::ai/keys [node namespace prompt force?]
+  [{::ai/keys [namespace prompt force?]
     ::keys [model files]
     ::sdk/keys [permission-mode max-turns max-budget-usd allowed-tools disallowed-tools chrome]}]
   (log/info "Launching agent" {:namespace namespace})
@@ -768,8 +756,7 @@
   (let [{::session/keys [id nrepl-port] :as session-result}
         (session/start-agent-session!
          (let [dl-mgr (:seon/connection-manager state/system)]
-           (cond-> {::session/node node
-                    ::session/namespace namespace}
+           (cond-> {::session/namespace namespace}
              dl-mgr (assoc ::session/datalevin-manager dl-mgr))))]
 
     (when (= :error (::session/status session-result))
@@ -792,8 +779,7 @@
           ;; 2b. Create AI session for conversation persistence
           ;;     Store the Seon session ID so completed sessions can find their log files
           {ai-session-id ::ai/session-id}
-          (ai/start-session! {::ai/node node
-                              ::ai/namespace namespace
+          (ai/start-session! {::ai/namespace namespace
                               ::ai/prompt prompt
                               ::ai/agent-session-id id
                               ::ai/initial-context initial-context})
@@ -879,20 +865,18 @@
                                     (log/info "Mapped Claude session to Seon session"
                                               {:claude-session claude-session-id :seon-session id})))
 
-                                ;; Persist message to XTDB (skip keep_alive, parse_error)
+                                ;; Persist message to Datalevin (skip keep_alive, parse_error)
                                 ;; Retry once after 100ms on failure
                                 (when (persistable-message-type? msg-type)
                                   (try
-                                    (persist-message! {::ai/node node
-                                                       ::ai/session-id ai-session-id
+                                    (persist-message! {::ai/session-id ai-session-id
                                                        ::sdk-message msg})
                                     (catch Exception e
                                       (log/debug "First persist attempt failed, retrying..."
                                                  {:session-id id :msg-type msg-type})
                                       (Thread/sleep 100)
                                       (try
-                                        (persist-message! {::ai/node node
-                                                           ::ai/session-id ai-session-id
+                                        (persist-message! {::ai/session-id ai-session-id
                                                            ::sdk-message msg})
                                         (catch Exception e2
                                           (log/warn e2 "Failed to persist message after retry"
@@ -916,8 +900,7 @@
                                                        :completed
                                                        :failed)]
                                     (try
-                                      (ai/end-session! {::ai/node node
-                                                        ::ai/session-id ai-session-id
+                                      (ai/end-session! {::ai/session-id ai-session-id
                                                         ::ai/status final-status
                                                         ::ai/cost-usd (:total_cost_usd msg)})
                                       (log/info "Ended AI session"
@@ -939,8 +922,7 @@
                         (reset! status-atom :failed)
                         ;; End AI session as failed on reader error
                         (try
-                          (ai/end-session! {::ai/node node
-                                            ::ai/session-id ai-session-id
+                          (ai/end-session! {::ai/session-id ai-session-id
                                             ::ai/status :failed
                                             ::ai/error {::ai/message (.getMessage e)}})
                           (catch Exception _)))
@@ -953,8 +935,7 @@
                           (reset! status-atom :terminated)
                           ;; End AI session as terminated
                           (try
-                            (ai/end-session! {::ai/node node
-                                              ::ai/session-id ai-session-id
+                            (ai/end-session! {::ai/session-id ai-session-id
                                               ::ai/status :terminated})
                             (catch Exception _)))
                         ;; Destroy Claude process to prevent orphans
@@ -970,8 +951,7 @@
                         ;; Stop Seon session (flushes ctx, stops nREPL)
                         ;; This is critical to avoid orphaned nREPL servers
                         (try
-                          (session/stop-agent-session! {::session/node node
-                                                        ::session/id id})
+                          (session/stop-agent-session! {::session/id id})
                           (catch Exception e
                             (log/warn e "Failed to stop agent session on reader exit"
                                       {:session-id id})))
@@ -996,14 +976,12 @@
                      ;; End AI session as interrupted if still active
                      (when (= :running @status-atom)
                        (try
-                         (ai/end-session! {::ai/node node
-                                           ::ai/session-id ai-session-id
+                         (ai/end-session! {::ai/session-id ai-session-id
                                            ::ai/status :interrupted})
                          (catch Exception e
                            (log/warn e "Failed to end AI session on close"))))
                      ;; Stop Seon session (flushes ctx, stops nREPL)
-                     (session/stop-agent-session! {::session/node node
-                                                   ::session/id id})
+                     (session/stop-agent-session! {::session/id id})
                      ;; Remove from shared registry
                      (swap! agent/agent-registry dissoc id)
                      ;; Update status
@@ -1055,7 +1033,6 @@
    to wait for agent completion before proceeding.
 
    Request keys:
-     ::ai/node               - Required. XTDB orchestrator node
      ::ai/namespace          - Required. Agent namespace (string or symbol)
      ::ai/prompt             - Required. Task description for the agent
      ::model                 - Optional. Claude model (default: opus)
@@ -1079,14 +1056,12 @@
      ::error         - Error message (if failed or timeout)
 
    Example:
-     (launch-agent!! {::ai/node xtdb-node
-                      ::ai/namespace 'seon.trading
+     (launch-agent!! {::ai/namespace 'seon.trading
                       ::ai/prompt \"Implement the signals dashboard\"
                       ::timeout-ms 300000})  ; 5 minute timeout
 
      ;; With file context
-     (launch-agent!! {::ai/node xtdb-node
-                      ::ai/namespace 'seon.feature
+     (launch-agent!! {::ai/namespace 'seon.feature
                       ::ai/prompt \"Implement the feature.\"
                       ::files [\"docs/prds/feature/prd.md\"]})
      ;; => {::result-text \"## Summary\\n\\n...\"
@@ -1094,7 +1069,7 @@
      ;;     ::cost-usd 0.23
      ;;     ::duration-ms 15185
      ;;     ::num-turns 3}"
-  [{::ai/keys [node namespace prompt force?]
+  [{::ai/keys [namespace prompt force?]
     ::keys [model files timeout-ms]
     ::sdk/keys [permission-mode max-turns max-budget-usd allowed-tools disallowed-tools]
     :as request}]
@@ -1318,7 +1293,7 @@
 (defn agent-messages
   "Get recent messages from an agent session.
 
-   Queries XTDB for messages, returning them in chronological order.
+   Queries Datalevin for messages, returning them in chronological order.
    Useful for checking agent progress without blocking.
 
    Request keys:

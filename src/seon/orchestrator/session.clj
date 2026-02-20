@@ -7,10 +7,9 @@
   ## Overview
 
   Sessions tie together:
-  - Isolated XTDB database for domain data (via multi-db)
   - Datalevin persistence for session metadata
   - Persisted ctx atom (via agent.ctx)
-  - Dedicated nREPL server (via orchestrator.nrepl)
+  - Pool JVM with nREPL (via flow.pool)
 
   Agents just receive a session ID and use it for all evals.
 
@@ -18,26 +17,25 @@
 
   ```clojure
   ;; Orchestrator starts a session
-  (def s (start-agent-session! {::node xtdb-node ::namespace 'seon.trading}))
-  ;; => {::id \"acdb234f\" ::namespace 'seon.trading ::status :running ...}
+  (def s (start-agent-session! {::namespace 'seon.trading}))
+  ;; => {::id \"acdb\" ::namespace 'seon.trading ::status :running ...}
 
   ;; Agent uses session ID for evals (via bin/agent-eval)
-  ;; agent-eval acdb234f '(swap! *ctx* assoc :seon.trading/signals [...])'
+  ;; agent-eval acdb '(swap! *ctx* assoc :seon.trading/signals [...])'
 
   ;; Resume existing session (loads previous ctx state)
-  (start-agent-session! {::node xtdb-node ::namespace 'seon.trading ::resume? true})
+  (start-agent-session! {::namespace 'seon.trading ::resume? true})
 
-  ;; Stop session (flushes ctx, stops nREPL)
-  (stop-agent-session! {::node xtdb-node ::id \"acdb234f\"})
+  ;; Stop session (flushes ctx, releases pool JVM)
+  (stop-agent-session! {::id \"acdb\"})
 
   ;; List active sessions
-  (list-agent-sessions {::node xtdb-node})
+  (list-agent-sessions {})
   ```"
   (:require [datalevin.core :as d]
             [seon.agent.ctx :as ctx]
             [seon.db.datalevin.conn :as conn]
-            [seon.db.multi :as multi]
-            [seon.orchestrator.nrepl :as nrepl-multi]
+            [seon.flow.pool :as pool]
             [seon.schema :as schema]
             [taoensso.timbre :as log])
   (:import [java.security SecureRandom]))
@@ -45,13 +43,6 @@
 ;;; ---------------------------------------------------------------------------
 ;;; Schema Registration
 ;;; ---------------------------------------------------------------------------
-
-;; XTDB node - cannot be generated (requires real database)
-;; Still used for domain data (trading etc.), session metadata is in Datalevin
-(schema/register! ::node
-                  [:any {:description "XTDB node (for domain data)"
-                         :gen/fmap (fn [_] (throw (ex-info "Cannot generate XTDB node"
-                                                           {:type :malli.generator/no-generator})))}])
 
 (schema/register! ::id
                   [:string {:min 4 :max 4
@@ -75,7 +66,7 @@
                   [inst? {:description "When the session was stopped"}])
 
 (schema/register! ::db-name
-                  [:string {:description "XTDB database name"}])
+                  [:string {:description "Database name for the namespace"}])
 
 (schema/register! ::resume?
                   [:boolean {:description "Whether to resume previous ctx state"}])
@@ -106,12 +97,17 @@
                          :gen/fmap (fn [_] (throw (ex-info "Cannot generate connection manager"
                                                            {:type :malli.generator/no-generator})))}])
 
+(schema/register! ::pool
+                  [:any {:description "Agent JVM pool (optional)"
+                         :gen/fmap (fn [_] (throw (ex-info "Cannot generate pool"
+                                                           {:type :malli.generator/no-generator})))}])
+
 (schema/register! ::start-agent-session-request
                   [:map
-                   [::node ::node]
                    [::namespace ::namespace]
                    [::resume? {:optional true} ::resume?]
-                   [::datalevin-manager {:optional true} ::datalevin-manager]])
+                   [::datalevin-manager {:optional true} ::datalevin-manager]
+                   [::pool {:optional true} ::pool]])
 
 (schema/register! ::start-agent-session-response
                   [:map
@@ -125,7 +121,6 @@
 
 (schema/register! ::stop-agent-session-request
                   [:map
-                   [::node ::node]
                    [::id ::id]])
 
 (schema/register! ::stop-agent-session-response
@@ -137,7 +132,6 @@
 
 (schema/register! ::get-agent-session-request
                   [:map
-                   [::node ::node]
                    [::id ::id]])
 
 (schema/register! ::get-agent-session-response
@@ -154,15 +148,13 @@
                    [::current-eval {:optional true} ::current-eval]])
 
 (schema/register! ::list-agent-sessions-request
-                  [:map
-                   [::node ::node]])
+                  [:map])
 
 (schema/register! ::list-agent-sessions-response
                   [:vector ::get-agent-session-response])
 
 (schema/register! ::get-session-port-request
                   [:map
-                   [::node ::node]
                    [::id ::id]])
 
 (schema/register! ::get-session-port-response
@@ -171,8 +163,7 @@
                    [::nrepl-session-id {:optional true} ::nrepl-session-id]])
 
 (schema/register! ::recover-sessions-request
-                  [:map
-                   [::node ::node]])
+                  [:map])
 
 (schema/register! ::recover-sessions-response
                   [:map
@@ -199,6 +190,12 @@
 (defonce ^:private session-registry (atom {}))
 
 ;;; ---------------------------------------------------------------------------
+;;; Pool reference (set via init! from Integrant)
+;;; ---------------------------------------------------------------------------
+
+(defonce ^:private agent-pool (atom nil))
+
+;;; ---------------------------------------------------------------------------
 ;;; Datalevin Session Storage
 ;;; ---------------------------------------------------------------------------
 
@@ -216,11 +213,15 @@
 (defonce ^:private dl-mgr (atom nil))
 
 (defn init!
-  "Initialize orchestrator sessions with a Datalevin connection manager.
+  "Initialize orchestrator sessions with a Datalevin connection manager
+   and optional agent pool.
    Called by Integrant during system startup."
-  [mgr]
+  [mgr & {:keys [pool]}]
   (reset! dl-mgr mgr)
-  (log/info "Orchestrator sessions initialized with connection manager"))
+  (when pool
+    (reset! agent-pool pool))
+  (log/info "Orchestrator sessions initialized"
+            {:connection-manager (some? mgr) :pool (some? pool)}))
 
 (defn- get-dl-conn
   "Get Datalevin connection for orchestrator sessions.
@@ -309,43 +310,36 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn start-agent-session!
-  "Start a new agent session with isolated database, persisted ctx, and nREPL.
+  "Start a new agent session with isolated database, persisted ctx, and pool JVM.
 
    Request keys:
-     ::node      - Required. XTDB orchestrator node
      ::namespace - Required. The Clojure namespace symbol for the agent
      ::resume?   - Optional. If true, load previous ctx state (default: true)
+     ::pool      - Optional. Agent pool (falls back to init!-provided pool)
 
    Response keys:
-     ::id          - 8-char hex session ID
+     ::id          - 4-char hex session ID
      ::namespace   - The namespace symbol
      ::status      - :running, :stopped, or :error
      ::nrepl-port  - Port for nREPL connection
      ::started-at  - When session was started
-     ::db-name     - XTDB database name
+     ::db-name     - Database name
      ::error       - Error message if failed
 
    Example:
-     (start-agent-session! {::node xtdb-node ::namespace 'seon.trading})
+     (start-agent-session! {::namespace 'seon.trading})
      ;; From outside namespace:
-     (session/start-agent-session! {::session/node xtdb-node
-                                    ::session/namespace 'seon.trading})"
-  {:malli/schema [:=> [:cat ::start-agent-session-request] ::start-agent-session-response]}
-  [{::keys [node namespace resume? datalevin-manager]}]
+     (session/start-agent-session! {::session/namespace 'seon.trading})"
+  [{::keys [namespace resume? datalevin-manager pool]}]
   (let [resume? (if (nil? resume?) true resume?)
+        pool (or pool @agent-pool)
         session-id (generate-session-id)
-        db-name (multi/namespace->db-name namespace)
+        db-name (str namespace)
         started-at (java.util.Date.)]
 
     (try
-      ;; 1. Ensure XTDB database exists for this namespace
-      (log/debug "Ensuring namespace database" {:namespace namespace :db-name db-name})
-      (multi/ensure-namespace-db! node namespace)
-
-      ;; 2. Create connection to namespace database
-      (let [ns-conn (multi/create-namespace-connection node namespace)
-
-            ;; 2b. Get Datalevin namespace connection if manager available
+      ;; 1. Get Datalevin namespace connection if manager available
+      (let [ns-conn nil  ;; No XTDB namespace connection needed
             dl-conn (when datalevin-manager
                       (try
                         (conn/get-namespace-conn!
@@ -357,35 +351,37 @@
                           nil)))]
 
         ;; 3. Create persisted ctx with the namespace connection
-        ;; If resume? is true, make-persisted-ctx automatically loads latest state
         (log/debug "Creating persisted ctx" {:namespace namespace :resume? resume?
                                              :datalevin? (some? dl-conn)})
         (let [{::ctx/keys [atom flush! close!]}
               (ctx/make-persisted-ctx
                (cond-> {::ctx/db ns-conn
                         ::ctx/namespace namespace}
-                 ;; Inject Datalevin connection as reserved key
                  dl-conn (assoc ::ctx/extra-reserved
                                 {:seon.ns/conn dl-conn
                                  :seon.ns/session-id session-id
                                  :seon.ns/namespace (str namespace)})))
 
-              ;; 4. Start namespace nREPL with the persisted ctx atom
-              _ (log/debug "Starting namespace nREPL" {:session-id session-id :namespace namespace})
-              nrepl-result (nrepl-multi/start-namespace-nrepl!
-                            {:session-id session-id
-                             :namespace namespace
-                             :db ns-conn
-                             :ctx-atom atom})
+              ;; 4. Claim a pool JVM and inject *ctx*
+              _ (log/debug "Claiming pool JVM" {:session-id session-id :namespace namespace})
+              ctx-value @atom
+              jvm-handle (when pool
+                           (pool/claim! pool
+                                        {::pool/session-id session-id
+                                         ::pool/namespace namespace
+                                         ::pool/ctx-value ctx-value}))
 
-              _ (when-not (= :running (:status nrepl-result))
-                  (throw (ex-info "Failed to start nREPL"
-                                  {:result nrepl-result})))
+              ;; If no pool available, fail
+              _ (when (and pool (nil? jvm-handle))
+                  (throw (ex-info "No pool JVM available"
+                                  {:session-id session-id :namespace namespace})))
+
+              nrepl-port (when jvm-handle (::pool/port jvm-handle))
 
               session-info {::id session-id
                             ::namespace namespace
                             ::status :running
-                            ::nrepl-port (:port nrepl-result)
+                            ::nrepl-port nrepl-port
                             ::started-at started-at
                             ::db-name db-name
                             ;; Observability (Phase 4c)
@@ -396,16 +392,17 @@
                             ::flush! flush!
                             ::close! close!
                             ::ns-conn ns-conn
-                            ::ctx-atom atom}]
+                            ::ctx-atom atom
+                            ::pool pool}]
 
           ;; 5. Store in registry and Datalevin
           (swap! session-registry assoc session-id session-info)
-          (store-session! node session-info)
+          (store-session! nil session-info)
 
           (log/info "Started agent session"
                     {:session-id session-id
                      :namespace namespace
-                     :port (:port nrepl-result)
+                     :port nrepl-port
                      :resumed? (and resume? (some? (::ctx/state (ctx/load-latest
                                                                   {::ctx/db ns-conn
                                                                    ::ctx/namespace namespace}))))})
@@ -422,10 +419,9 @@
          ::error (.getMessage e)}))))
 
 (defn stop-agent-session!
-  "Stop an agent session, flushing ctx and cleaning up resources.
+  "Stop an agent session, flushing ctx and releasing the pool JVM.
 
    Request keys:
-     ::node - Required. XTDB orchestrator node
      ::id   - Required. The session ID to stop
 
    Response keys:
@@ -435,12 +431,10 @@
      ::error      - Error message if failed
 
    Example:
-     (stop-agent-session! {::node xtdb-node ::id \"acdb234f\"})
+     (stop-agent-session! {::id \"acdb\"})
      ;; From outside namespace:
-     (session/stop-agent-session! {::session/node xtdb-node
-                                   ::session/id \"acdb234f\"})"
-  {:malli/schema [:=> [:cat ::stop-agent-session-request] ::stop-agent-session-response]}
-  [{::keys [node id]}]
+     (session/stop-agent-session! {::session/id \"acdb\"})"
+  [{::keys [id]}]
   (if-let [session (get @session-registry id)]
     (try
       (log/info "Stopping agent session" {:session-id id :namespace (::namespace session)})
@@ -450,24 +444,20 @@
         (log/debug "Flushing ctx" {:session-id id})
         (flush!))
 
-      ;; 2. Stop namespace nREPL (keyed by session-id, not namespace)
-      (log/debug "Stopping nREPL" {:session-id id :namespace (::namespace session)})
-      (nrepl-multi/stop-namespace-nrepl! id)
+      ;; 2. Release pool JVM back to pool
+      (when-let [pool (::pool session)]
+        (log/debug "Releasing pool JVM" {:session-id id})
+        (pool/release-session! pool id))
 
       ;; 3. Close persisted ctx (cleanup resources)
       (when-let [close! (::close! session)]
         (log/debug "Closing ctx" {:session-id id})
         (close!))
 
-      ;; 4. Close namespace connection
-      (when-let [conn (::ns-conn session)]
-        (log/debug "Closing namespace connection" {:session-id id})
-        (.close conn))
-
-      ;; 5. Update registry and Datalevin
+      ;; 4. Update registry and Datalevin
       (swap! session-registry dissoc id)
       (let [stopped-at (java.util.Date.)]
-        (update-session-status! node id :stopped stopped-at)
+        (update-session-status! nil id :stopped stopped-at)
 
         (log/info "Stopped agent session" {:session-id id})
 
@@ -500,7 +490,6 @@
   "Get information about a specific agent session.
 
    Request keys:
-     ::node - Required. XTDB orchestrator node
      ::id   - Required. The session ID to look up
 
    Response keys:
@@ -509,7 +498,7 @@
      ::status           - :running, :stopped, or :error
      ::nrepl-port       - nREPL port
      ::started-at       - When started
-     ::db-name          - XTDB database name
+     ::db-name          - Database name
      ::last-activity-at - When last eval completed (Phase 4c)
      ::eval-count       - Total evals in session (Phase 4c)
      ::current-eval     - Currently running eval info (Phase 4c)
@@ -517,17 +506,16 @@
    Returns an empty map if session not found.
 
    Example:
-     (get-agent-session {::node xtdb-node ::id \"acdb234f\"})
+     (get-agent-session {::id \"acdb\"})
      ;; From outside namespace:
-     (session/get-agent-session {::session/node xtdb-node
-                                 ::session/id \"acdb234f\"})"
+     (session/get-agent-session {::session/id \"acdb\"})"
   {:malli/schema [:=> [:cat ::get-agent-session-request] ::get-agent-session-response]}
-  [{::keys [node id]}]
+  [{::keys [id]}]
   ;; First check in-memory registry
   (if-let [session (get @session-registry id)]
     (select-keys session public-session-keys)
     ;; Fall back to Datalevin (may be stopped session)
-    (if-let [db-session (load-session-from-db node id)]
+    (if-let [db-session (load-session-from-db nil id)]
       {::id (:session-id db-session)
        ::namespace (symbol (:session-namespace db-session))
        ::status (keyword (:session-status db-session))
@@ -541,7 +529,7 @@
   "List all active agent sessions.
 
    Request keys:
-     ::node - Required. XTDB orchestrator node (unused but required for consistency)
+     (none - empty map for consistency)
 
    Response keys:
      Vector of session info maps, each containing:
@@ -549,23 +537,18 @@
        ::last-activity-at, ::eval-count, ::current-eval
 
    Example:
-     (list-agent-sessions {::node xtdb-node})
-     ;; => [{::id \"acdb234f\" ::namespace 'seon.trading ...}]
-     ;; From outside namespace:
-     (session/list-agent-sessions {::session/node xtdb-node})"
+     (list-agent-sessions {})
+     ;; => [{::id \"acdb\" ::namespace 'seon.trading ...}]"
   {:malli/schema [:=> [:cat ::list-agent-sessions-request] ::list-agent-sessions-response]}
-  [{::keys [node]}]
+  [_request]
   ;; Return from in-memory registry (only active sessions)
-  ;; node is unused but required for API consistency
-  (let [_ node]
-    (vec (for [[_ session] @session-registry]
-           (select-keys session public-session-keys)))))
+  (vec (for [[_ session] @session-registry]
+         (select-keys session public-session-keys))))
 
 (defn get-session-port
   "Get the nREPL port and session ID for a session. Used by bin/mcp-server.
 
    Request keys:
-     ::node - Required. XTDB orchestrator node
      ::id   - Required. The 4-char session ID
 
    Response keys:
@@ -573,13 +556,12 @@
      ::nrepl-session-id - Persistent nREPL session ID (nil if not set)
 
    Example:
-     (get-session-port {::node xtdb-node ::id \"a1b2\"})
+     (get-session-port {::id \"a1b2\"})
      ;; From outside namespace:
-     (session/get-session-port {::session/node xtdb-node
-                                ::session/id \"a1b2\"})"
+     (session/get-session-port {::session/id \"a1b2\"})"
   {:malli/schema [:=> [:cat ::get-session-port-request] ::get-session-port-response]}
-  [{::keys [node id]}]
-  (let [session (get-agent-session {::node node ::id id})]
+  [{::keys [id]}]
+  (let [session (get-agent-session {::id id})]
     {::nrepl-port (::nrepl-port session)
      ::nrepl-session-id (::nrepl-session-id session)}))
 
@@ -701,56 +683,51 @@
 
    This function:
    1. Loads sessions marked as 'running' from Datalevin
-   2. Marks them as 'stopped' (since nREPL servers are gone)
+   2. Marks them as 'stopped' (since pool JVMs are gone)
 
    Sessions can be resumed via start-agent-session! with ::resume? true.
 
    Called during system startup.
 
    Request keys:
-     ::node - Required. XTDB orchestrator node
+     (none - empty map for consistency)
 
    Response keys:
      ::recovered-count - Number of sessions marked as stopped
 
    Example:
-     (recover-sessions! {::node xtdb-node})
-     ;; From outside namespace:
-     (session/recover-sessions! {::session/node xtdb-node})"
+     (recover-sessions! {})"
   {:malli/schema [:=> [:cat ::recover-sessions-request] ::recover-sessions-response]}
-  [{::keys [node]}]
+  [_request]
   (log/info "Recovering sessions from previous run")
-  (let [active-sessions (load-active-sessions-from-db node)
+  (let [active-sessions (load-active-sessions-from-db nil)
         now (java.util.Date.)]
     (doseq [session active-sessions]
       (log/info "Marking orphaned session as stopped"
                 {:session-id (:session-id session)
                  :namespace (:session-namespace session)})
-      (update-session-status! node (:session-id session) :stopped now))
+      (update-session-status! nil (:session-id session) :stopped now))
     {::recovered-count (count active-sessions)}))
 
 (comment
   ;; REPL exploration
 
-  ;; First get the XTDB node
-  (require '[user :refer [xtdb-node]])
-
   ;; Start a session
-  (def s (start-agent-session! {::node (xtdb-node) ::namespace 'test.agent}))
+  (def s (start-agent-session! {::namespace 'test.agent}))
 
   ;; Check session info
-  (get-agent-session {::node (xtdb-node) ::id (::id s)})
+  (get-agent-session {::id (::id s)})
 
   ;; List all sessions
-  (list-agent-sessions {::node (xtdb-node)})
+  (list-agent-sessions {})
 
   ;; Get port for agent-eval
-  (get-session-port {::node (xtdb-node) ::id (::id s)})
+  (get-session-port {::id (::id s)})
 
   ;; Stop the session
-  (stop-agent-session! {::node (xtdb-node) ::id (::id s)})
+  (stop-agent-session! {::id (::id s)})
 
   ;; Resume a session (loads previous ctx state)
-  (start-agent-session! {::node (xtdb-node) ::namespace 'test.agent ::resume? true})
+  (start-agent-session! {::namespace 'test.agent ::resume? true})
 
   nil)

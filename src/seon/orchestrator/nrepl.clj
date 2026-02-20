@@ -57,7 +57,7 @@
 
   Contains:
   - :seon.agent/namespace - The Clojure namespace symbol (read-only)
-  - :seon.agent/db - XTDB connection for this namespace (if provided)
+  - :seon.agent/db - Database connection for this namespace (if provided)
   - :seon.agent/render-fn - Function to render UI updates (if provided)
   - :seon.agent/nrepl-port - The port this nREPL is running on
   - :seon.agent/started-at - When this server was started
@@ -313,7 +313,7 @@
   Options:
     :session-id - The session ID string (required)
     :namespace  - The Clojure namespace symbol (required)
-    :db         - XTDB connection for this namespace (optional)
+    :db         - Database connection for this namespace (optional)
     :render-fn  - Function to render UI updates (optional)
     :worktree   - Path to git worktree (optional)
     :port       - Port to bind to (auto-assigned if not specified)
