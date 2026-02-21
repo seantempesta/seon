@@ -10,7 +10,7 @@
 
 | Phase | Description | Status | Agent | Notes |
 |-------|-------------|--------|-------|-------|
-| 1 | Runtime registry + schema + unified ID | Pending | -- | Create `seon.runtime` with `generate-id`, register Integrant components |
+| 1 | Runtime registry + schema + unified ID | **Done** | orchestrator | `seon.runtime` created, `:seon/graph-db` component, 6-char hex IDs, Integrant components registered |
 | 2 | Session integration | Pending | -- | Sessions write to runtime registry, use unified ID |
 | 2.5 | Instance messaging router | Pending | -- | `::msg/from-id`/`::msg/to-id`, `runtime/send!`, generalize bridge pattern |
 | 2.6 | Schema-driven routing | Pending | -- | `seon.runtime.router`, key-based Datalog lookup, Malli validation, claims |
@@ -20,6 +20,34 @@
 | 6 | Startup hydration | Pending | -- | Hydrate caches from Datalevin on boot |
 | 7 | Flow registry absorption | Pending | -- | Delete `seon.flow.registry`, use runtime |
 | 8 | Observatory + flows page | Pending | -- | UI shows runtime instances with graph data |
+
+---
+
+## Phase 1 Implementation Summary (2026-02-21)
+
+### Files Created
+- `src/seon/runtime.clj` — unified runtime registry with 6-char hex ID generation
+- `test/seon/runtime_test.clj` — 10 tests, 33 assertions
+
+### Files Modified
+- `src/seon/system.clj` — added `:seon/graph-db` component, register/unregister calls
+- `resources/system.edn` — added `:seon/graph-db` with dependency wiring
+- `src/seon/ctx.clj` — `generate-id` now delegates to `seon.runtime/generate-id`
+- `src/seon/orchestrator/session.clj` — `generate-session-id` now delegates to runtime
+- `test/seon/ctx_test.clj` — updated for 6-char IDs
+- `test/seon/orchestrator/session_test.clj` — updated for 6-char IDs
+
+### Key Changes
+1. **`:seon/graph-db` Integrant component** — owns the seon-graph Datalevin connection with merged schema (graph + runtime)
+2. **`seon.runtime/runtime-schema`** — Datalevin schema for `:seon.runtime/*` entities
+3. **`seon.runtime/generate-id`** — canonical 6-char hex generator with collision checking
+4. **`seon.runtime/register!` / `unregister!`** — in-memory cache + Datalevin persistence
+5. **`seon.runtime/mark-crashed!`** — called on startup to detect dirty shutdown
+6. **Integrant components registered** — datalevin-server, http-server, nrepl-server, schema-registry, code-scanner, graph-db
+
+### Test Results
+- 504 unit tests pass, 0 failures
+- Runtime tests: 10 tests, 33 assertions
 
 ---
 
@@ -35,12 +63,12 @@ The codebase has four ID generators, but only two unique algorithms:
 
 A single agent launch creates THREE IDs: 4-char hex (infra), AI session UUID, Claude SDK UUID.
 
-### Decision: Unified 4-char Hex
+### Decision: Unified 6-char Hex (Implemented)
 
-- **Phase 1 must include** `seon.runtime/generate-id` as the single canonical generator
-- Delete duplicates in `seon.ctx` and `seon.orchestrator.session`
-- Add collision check against runtime registry
-- AI session should use same 4-char hex (drop the `"ses-"` prefix UUID)
+- **Done:** `seon.runtime/generate-id` is the single canonical generator (6-char hex, 3 bytes)
+- **Done:** `seon.ctx/generate-id` and `seon.orchestrator.session/generate-session-id` delegate to runtime
+- **Done:** Collision check against in-memory `generated-ids` set atom
+- AI session should use same hex ID (drop the `"ses-"` prefix UUID) - Phase 2
 
 ### Decision: Instance-Addressed Messaging
 

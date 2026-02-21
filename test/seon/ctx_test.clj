@@ -215,15 +215,15 @@
 ;;; ---------------------------------------------------------------------------
 
 (deftest generate-id-test
-  (testing "generate-id produces 4-char hex strings"
+  (testing "generate-id produces 6-char hex strings"
     (let [id (ctx/generate-id)]
       (is (string? id))
-      (is (= 4 (count id)))
-      (is (re-matches #"[a-f0-9]{4}" id))))
+      (is (= 6 (count id)))
+      (is (re-matches #"[a-f0-9]{6}" id))))
 
   (testing "generate-id produces unique values"
     (let [ids (set (repeatedly 100 ctx/generate-id))]
-      (is (> (count ids) 90) "should produce mostly unique IDs"))))
+      (is (= 100 (count ids)) "all IDs should be unique (collision checked)"))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Client Tracking

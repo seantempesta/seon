@@ -38,17 +38,16 @@
             [seon.db.datalevin.conn :as conn]
             [seon.flow.pool :as pool]
             [seon.schema :as schema]
-            [taoensso.timbre :as log])
-  (:import [java.security SecureRandom]))
+            [taoensso.timbre :as log]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schema Registration
 ;;; ---------------------------------------------------------------------------
 
 (schema/register! ::id
-                  [:string {:min 4 :max 4
-                            :pattern "^[a-f0-9]{4}$"
-                            :description "4-character hex session ID"}])
+                  [:string {:min 4 :max 6
+                            :pattern "^[a-f0-9]{4,6}$"
+                            :description "4-6 character hex session ID"}])
 
 (schema/register! ::namespace
                   [:symbol {:description "Agent namespace symbol"}])
@@ -174,14 +173,13 @@
 ;;; Session ID Generation
 ;;; ---------------------------------------------------------------------------
 
-(def ^:private secure-random (SecureRandom.))
-
 (defn- generate-session-id
-  "Generate a 4-character hex session ID."
+  "Generate a 6-character hex session ID.
+
+   Delegates to seon.runtime/generate-id for unified ID generation
+   with collision checking."
   []
-  (let [bytes (byte-array 2)]
-    (.nextBytes secure-random bytes)
-    (apply str (map #(format "%02x" (bit-and % 0xff)) bytes))))
+  (:seon.runtime/id ((requiring-resolve 'seon.runtime/generate-id) {})))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Session Registry (in-memory for quick lookups)
