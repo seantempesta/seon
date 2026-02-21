@@ -702,3 +702,104 @@ Incrementally. Each phase is independently buildable and testable. The existing 
 5. All existing tests pass. This is additive, not a rewrite.
 
 6. The flows page shows historical data with code graph enrichment.
+
+---
+
+## Instance Identification and Inter-Instance Messaging
+
+### Current State (Research, 2026-02-21)
+
+#### Four ID Systems Exist
+
+| System | Generator | Format | Storage | Example |
+|--------|-----------|--------|---------|---------|
+| `seon.ctx/generate-id` | 2 random bytes, hex | 4-char hex string | In-memory atom + Datalevin | `"a13b"` |
+| `seon.orchestrator.session/generate-session-id` | Identical to above | 4-char hex string | In-memory atom + Datalevin | `"d4e5"` |
+| `seon.ai/start-session!` | `"ses-" + UUID` | UUID with prefix | Datalevin | `"ses-550e8400-..."` |
+| Claude SDK | Internal | UUID | Process stdout | `"sess_..."` |
+
+The ctx generator and session generator are **duplicated code** -- identical algorithms in two files.
+
+#### ID Flow Through Agent Launch
+
+```
+launch-agent!
+  -> session/start-agent-session!
+       generates 4-char hex "a1b2"          <-- PRIMARY ID
+       -> ctx/create! (instance-id = "a1b2")
+       -> pool/claim! (session-id = "a1b2")
+  -> ai/start-session!
+       generates "ses-UUID..."              <-- SEPARATE AI ID
+       stores ::ai/agent-session-id "a1b2"  <-- links back
+  -> agent-registry stores both IDs
+  -> Claude SDK generates its own session UUID
+```
+
+A single agent has **three IDs**: the 4-char hex (infrastructure), the AI session UUID (conversation persistence), and Claude's own session UUID (SDK internal).
+
+#### Current Communication
+
+| Channel | Mechanism | Addressing | Reply Routing |
+|---------|-----------|------------|---------------|
+| Agent -> System | MCP tool calls via `bin/mcp-server` | `SEON_SESSION_ID` env var -> nREPL port lookup | Synchronous (request/response) |
+| Cross-namespace (flow) | `seon.flow.msg` envelopes via TCP bridge | `::msg/from-ns` / `::msg/to-ns` (namespace strings) | `::msg/id` UUID -> promise map |
+| Observation | `agent/tail` returns messages channel | `::agent/session-id` (4-char hex) | N/A (read-only) |
+| Agent -> Agent | **Does not exist** | -- | -- |
+
+#### Collision Risk
+
+4-char hex = 65,536 values. No collision check exists. With 3-5 concurrent agents, birthday paradox probability is ~0.01% -- negligible but unguarded.
+
+### Recommendations
+
+#### 1. Unified ID: Keep 4-char hex, consolidate generators
+
+The 4-char hex works well. It's human-readable, compact, and already used consistently across ctx, sessions, pool, and agent registry.
+
+Changes:
+- **Single generator** in `seon.runtime/generate-id` (delete duplicates in `seon.ctx` and `seon.orchestrator.session`)
+- **Collision check** against runtime registry before assignment
+- **Drop AI session UUID prefix** -- use the same 4-char hex as AI session primary key (current 1:1 mapping makes the separate UUID unnecessary)
+
+#### 2. Instance-Addressed Messaging
+
+Extend `seon.flow.msg` envelope with instance-ID addressing:
+
+```clojure
+;; New fields (optional, alongside existing ::msg/from-ns / ::msg/to-ns)
+::msg/from-id  ;; 4-char hex instance ID of sender
+::msg/to-id    ;; 4-char hex instance ID of target
+```
+
+This enables "send to instance a1b2" in addition to "send to namespace seon.trading".
+
+#### 3. Message Router in `seon.runtime`
+
+Generalize the bridge's promise-based reply pattern:
+
+```clojure
+(runtime/send! {::runtime/to-id "a1b2"
+                ::msg/fn "seon.trading.signals/ema"
+                ::msg/args [[1.0 2.0 3.0]]})
+;; => promise that delivers the reply
+
+;; Or by namespace (routes to the running instance of that namespace):
+(runtime/send! {::msg/to-ns "seon.trading.signals"
+                ::msg/fn "seon.trading.signals/ema"
+                ::msg/args [[1.0 2.0 3.0]]})
+```
+
+The router:
+1. Looks up target in runtime registry (by ID or namespace)
+2. In-process target: resolve and call directly
+3. External target: route via TCP bridge (existing infrastructure)
+4. Returns promise/channel for reply (using `::msg/id` correlation)
+
+#### 4. What Can Be Reused
+
+- **`seon.flow.msg` envelope schema** -- already has request/reply/event types, trace-id, error handling
+- **`seon.flow.harness.bridge/pending-remote-promises`** -- the promise-per-request-id pattern is exactly right
+- **`seon.flow.harness.bridge/execute-local`** -- function resolution and execution with error handling
+- **TCP bridge** -- for external JVM communication, already works
+
+What's new is the **routing layer** that sits between callers and the bridge/direct-call decision.
