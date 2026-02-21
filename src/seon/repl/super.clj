@@ -4,6 +4,7 @@
    updates the code index after each eval."
   (:require [datalevin.core :as d]
             [edamame.core :as edamame]
+            [seon.db :as db]
             [seon.flow.pool :as pool]
             [seon.graph.analyzer :as analyzer]
             [seon.graph.ingest :as ingest]
@@ -146,7 +147,7 @@
                         :form/version version
                         :form/created-at (Date.)}
                  form-name (assoc :form/name form-name))]
-    (d/transact! conn [entity])
+    (db/transact! conn [entity])
     entity))
 
 ;;; ---------------------------------------------------------------------------

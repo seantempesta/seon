@@ -137,6 +137,7 @@
         perm (or permission-mode default-permission-mode)
         settings (or settings-path ".claude/settings.json")]
     (cond-> [cmd
+             "--print"
              "--output-format" "stream-json"
              "--input-format" "stream-json"
              "--verbose"
@@ -171,6 +172,7 @@
    Sets CLAUDE_USE_SUBSCRIPTION=true and CLAUDE_CODE_ENTRYPOINT=sdk-clj."
   []
   (-> (into {} (System/getenv))
+      (dissoc "CLAUDECODE")
       (assoc "ANTHROPIC_API_KEY" "")
       (assoc "CLAUDE_USE_SUBSCRIPTION" "true")
       (assoc "CLAUDE_CODE_ENTRYPOINT" "sdk-clj")))
@@ -249,7 +251,7 @@
         env (build-env)
         dir (or cwd ".")
         _ (log/debug "Spawning Claude Code" {:args args :cwd dir})
-        proc (apply process/start {:dir dir :env env} args)]
+        proc (apply process/start {:dir dir :env env :clear-env true} args)]
     {:process proc
      :stdin (process/stdin proc)
      :stdout (process/stdout proc)

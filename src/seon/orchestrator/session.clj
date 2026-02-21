@@ -34,6 +34,7 @@
   ```"
   (:require [datalevin.core :as d]
             [seon.ctx :as ctx]
+            [seon.db :as db]
             [seon.db.datalevin.conn :as conn]
             [seon.flow.pool :as pool]
             [seon.schema :as schema]
@@ -242,7 +243,7 @@
   [_node session-info]
   (try
     (when-let [conn (get-dl-conn)]
-      (d/transact! conn [{:orch.session/id         (::id session-info)
+      (db/transact! conn [{:orch.session/id         (::id session-info)
                            :orch.session/namespace  (str (::namespace session-info))
                            :orch.session/nrepl-port (long (::nrepl-port session-info))
                            :orch.session/status     (name (::status session-info))
@@ -260,7 +261,7 @@
       (let [entity (cond-> {:orch.session/id session-id
                              :orch.session/status (name status)}
                      stopped-at (assoc :orch.session/stopped-at stopped-at))]
-        (d/transact! conn [entity])))
+        (db/transact! conn [entity])))
     (catch Exception e
       (log/warn "Failed to update session status in Datalevin" {:error (.getMessage e)}))))
 
@@ -330,9 +331,9 @@
      (start-agent-session! {::namespace 'seon.trading})
      ;; From outside namespace:
      (session/start-agent-session! {::session/namespace 'seon.trading})"
-  [{::keys [namespace resume? datalevin-manager pool]}]
+  [{::keys [namespace resume? datalevin-manager pool] :as request}]
   (let [resume? (if (nil? resume?) true resume?)
-        pool (or pool @agent-pool)
+        pool (if (contains? request ::pool) pool @agent-pool)
         session-id (generate-session-id)
         db-name (str namespace)
         started-at (java.util.Date.)]

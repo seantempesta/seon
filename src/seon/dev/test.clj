@@ -21,7 +21,9 @@
      (:failures (t/last-results))
      ;; => []"
   (:refer-clojure :exclude [test])
-  (:require [clojure.test :as ct]
+  (:require [clojure.java.io :as io]
+            [clojure.string :as str]
+            [clojure.test :as ct]
             [seon.dev.verify :as verify]
             [seon.dev.test-select :as ts]))
 
@@ -229,6 +231,74 @@
                           {:target target})))]
     (store-result! result)
     result))
+
+(defn- find-test-namespaces
+  "Find all *-test namespace symbols by scanning the test directory."
+  []
+  (let [test-dir (io/file "test")]
+    (when (.isDirectory test-dir)
+      (->> (file-seq test-dir)
+           (filter #(and (.isFile ^java.io.File %)
+                         (str/ends-with? (.getName ^java.io.File %) "_test.clj")))
+           (map (fn [^java.io.File f]
+                  (let [path (.getPath f)
+                        ;; Remove test/ prefix and .clj suffix, convert to ns symbol
+                        rel (subs path (inc (count (.getPath test-dir)))
+                                  (- (count path) 4))]
+                    (-> rel
+                        (str/replace "/" ".")
+                        (str/replace "_" "-")
+                        symbol))))
+           sort
+           vec))))
+
+(defn- integration-ns?
+  "Check if a test namespace has ^:integration metadata."
+  [ns-sym]
+  (try
+    (require ns-sym)
+    (when-let [ns-obj (find-ns ns-sym)]
+      (:integration (meta ns-obj)))
+    (catch Exception _ false)))
+
+(defn- safe-run-ns-tests
+  "Run tests for a single namespace, catching Throwable to prevent
+   LMDB native crashes from killing the REPL session."
+  [test-ns-sym]
+  (try
+    (run-ns-tests test-ns-sym)
+    (catch Throwable t
+      {::success false
+       ::test-count 0
+       ::pass-count 0
+       ::fail-count 0
+       ::error-count 1
+       ::failures [{::test-var test-ns-sym
+                    ::type :error
+                    ::message (str "Namespace crashed: " (.getMessage t))
+                    ::expected nil
+                    ::actual (str (class t) ": " (.getMessage t))}]
+       ::duration-ms 0
+       ::target test-ns-sym
+       ::timestamp (java.util.Date.)})))
+
+(defn test-all
+  "Run all unit test namespaces. Excludes ^:integration tagged namespaces.
+   Each namespace runs in isolation — a crash in one does not kill the rest.
+   Returns aggregated structured results."
+  []
+  (let [all-nses (find-test-namespaces)
+        unit-nses (remove integration-ns? all-nses)]
+    (if (empty? unit-nses)
+      (let [r {::success true ::test-count 0 ::pass-count 0 ::fail-count 0
+               ::error-count 0 ::failures [] ::duration-ms 0
+               ::target :all ::timestamp (java.util.Date.)}]
+        (store-result! r)
+        r)
+      (let [results (mapv safe-run-ns-tests unit-nses)
+            result (aggregate-results results :all)]
+        (store-result! result)
+        result))))
 
 (defn test-affected
   "Run tests for ns and all its dependents. Returns aggregated results.

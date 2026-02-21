@@ -283,11 +283,14 @@
 
 (defn run-tests
   "Run tests. Returns structured data.
-   (run-tests 'seon.graph.query-test)           ; single ns
-   (run-tests 'seon.graph.query-test/some-test) ; single var
+   (run-tests)                                        ; ALL unit tests
+   (run-tests 'seon.graph.query-test)                 ; single ns
+   (run-tests 'seon.graph.query-test/some-test)       ; single var
    (run-tests ['seon.db-test 'seon.graph.query-test]) ; multiple"
-  [target]
-  ((requiring-resolve 'seon.dev.test/test) target))
+  ([]
+   ((requiring-resolve 'seon.dev.test/test-all)))
+  ([target]
+   ((requiring-resolve 'seon.dev.test/test) target)))
 
 (defn test-affected
   "Run tests for ns + all dependents. Returns structured data.

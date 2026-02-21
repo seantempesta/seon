@@ -22,6 +22,7 @@
   (:require [clojure.edn :as edn]
             [datalevin.core :as d]
             [seon.ctx :as ctx]
+            [seon.db :as db]
             [seon.graph.query :as gq]
             [seon.schema :as schema]))
 
@@ -256,7 +257,7 @@
      (ctx-save! {::conn conn ::instance-id \"a13b\" ::data {:results [1 2 3]}})"
   [{::keys [conn instance-id data]}]
   (let [edn-str (pr-str data)]
-    (d/transact! conn [{:seon.ctx/instance-id instance-id
+    (db/transact! conn [{:seon.ctx/instance-id instance-id
                          :seon.ctx/data edn-str
                          :seon.ctx/updated-at (java.util.Date.)}])
     data))

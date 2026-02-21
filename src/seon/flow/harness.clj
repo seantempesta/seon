@@ -19,13 +19,14 @@
      Out-ports (to TCP / agent JVM):
        :seon.flow.out/jvm-request - Requests forwarded to agent JVM"
   (:require [clojure.edn :as edn]
-            [taoensso.timbre :as log]
             [datalevin.core :as d]
+            [seon.db :as db]
             [seon.flow.harness.channel :as channel]
             [seon.flow.msg :as msg]
             [seon.flow.pool :as pool]
             [seon.flow.trace :as trace]
-            [seon.schema :as schema])
+            [seon.schema :as schema]
+            [taoensso.timbre :as log])
   (:import [java.time Instant]))
 
 ;;; ---------------------------------------------------------------------------
@@ -311,7 +312,7 @@
   (let [data (if (instance? clojure.lang.Atom ctx) @ctx ctx)
         filtered (filter-serializable data)
         edn-str (pr-str filtered)]
-    (d/transact! conn [{:ctx/namespace namespace
+    (db/transact! conn [{:ctx/namespace namespace
                         :ctx/data edn-str
                         :ctx/updated-at (Instant/now)}])
     filtered))

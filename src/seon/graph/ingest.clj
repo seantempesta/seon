@@ -28,6 +28,7 @@
            entities (analyzer/extract-entities {::analyzer/raw-analysis (::analyzer/raw-analysis analysis)})]
        (ingest/ingest-incremental! {::conn my-conn ::entities entities}))"
   (:require [datalevin.core :as d]
+            [seon.db :as db]
             [seon.graph.analyzer :as analyzer]
             [seon.render :as render]
             [seon.schema :as schema]
@@ -136,7 +137,7 @@
                         :where ['?e attr])
                   @conn)]
     (when (seq eids)
-      (d/transact! conn (mapv (fn [[eid]] [:db/retractEntity eid]) eids)))))
+      (db/transact! conn (mapv (fn [[eid]] [:db/retractEntity eid]) eids)))))
 
 (defn- retract-functions-in-ns!
   "Retract all function entities for a specific namespace.
@@ -148,7 +149,7 @@
                      [?e :seon.fn/namespace ?ns]]
                    @conn ns-name)]
     (when (seq eids)
-      (d/transact! conn (mapv (fn [[eid]] [:db/retractEntity eid]) eids)))))
+      (db/transact! conn (mapv (fn [[eid]] [:db/retractEntity eid]) eids)))))
 
 (defn- retract-calls-from-ns!
   "Retract all call entities originating from functions in a specific namespace.
@@ -161,7 +162,7 @@
                      [?e :seon.call/from-fn ?fn]]
                    @conn ns-name)]
     (when (seq eids)
-      (d/transact! conn (mapv (fn [[eid]] [:db/retractEntity eid]) eids)))))
+      (db/transact! conn (mapv (fn [[eid]] [:db/retractEntity eid]) eids)))))
 
 (defn- retract-specs-in-ns!
   "Retract all spec entities for a specific namespace."
@@ -172,7 +173,7 @@
                      [?e :seon.spec/namespace ?ns]]
                    @conn ns-name)]
     (when (seq eids)
-      (d/transact! conn (mapv (fn [[eid]] [:db/retractEntity eid]) eids)))))
+      (db/transact! conn (mapv (fn [[eid]] [:db/retractEntity eid]) eids)))))
 
 (defn- retract-ns-deps-from-ns!
   "Retract all ns-dependency entities originating from a specific namespace."
@@ -183,13 +184,13 @@
                      [?e :seon.ns.dep/from-ns ?ns]]
                    @conn ns-name)]
     (when (seq eids)
-      (d/transact! conn (mapv (fn [[eid]] [:db/retractEntity eid]) eids)))))
+      (db/transact! conn (mapv (fn [[eid]] [:db/retractEntity eid]) eids)))))
 
 (defn- transact-in-batches!
   "Transact entities in batches to avoid overwhelming Datalevin."
   [conn entities batch-size]
   (doseq [batch (partition-all batch-size entities)]
-    (d/transact! conn (vec batch))))
+    (db/transact! conn (vec batch))))
 
 (defn- qualified-call?
   "Returns true if both from-fn and to-fn are qualified (contain '/')."
@@ -371,7 +372,7 @@
 
     ;; Upsert namespace entities (identity attr :seon.ns/name handles upsert)
     (when (seq namespaces)
-      (d/transact! conn (vec namespaces)))
+      (db/transact! conn (vec namespaces)))
 
     ;; Insert new functions + stubs (identity attr handles upsert)
     (let [qualified-usages (filterv qualified-call? var-usages)
@@ -379,17 +380,17 @@
           stubs (compute-stub-entities known-qnames qualified-usages)
           all-fns (into (vec functions) stubs)]
       (when (seq all-fns)
-        (d/transact! conn (vec all-fns)))
+        (db/transact! conn (vec all-fns)))
 
       ;; Convert calls to lookup refs and transact
       (when (seq qualified-usages)
         (let [ref-calls (mapv call-entity->lookup-refs qualified-usages)]
           (transact-in-batches! conn ref-calls batch-size)))
       (when (seq ns-deps)
-        (d/transact! conn (vec ns-deps)))
+        (db/transact! conn (vec ns-deps)))
 
       (when (seq specs)
-        (d/transact! conn (vec specs)))
+        (db/transact! conn (vec specs)))
 
       (render/invalidate-render-cache!)
       {::namespace-count (count namespaces)
