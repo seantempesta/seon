@@ -16,7 +16,6 @@
   (:require [clojure.string :as str]
             [dev.onionpancakes.chassis.core :as h]
             [org.httpkit.server :as hk]
-            [ring.util.codec :as codec]
             [seon.ctx :as ctx]
             [seon.ns.introspect :as introspect]
             [seon.ns.view :as view]
@@ -485,7 +484,10 @@
   [req]
   (or (:query-params req)
       (when-let [qs (:query-string req)]
-        (codec/form-decode qs))))
+        (into {} (for [pair (.split ^String qs "&")
+                       :let [[k v] (.split ^String pair "=" 2)]]
+                   [(java.net.URLDecoder/decode k "UTF-8")
+                    (when v (java.net.URLDecoder/decode v "UTF-8"))])))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; HTTP Handlers
@@ -636,7 +638,7 @@
         instance-id (get params "instance")
         id-param (get params "id")
         ;; URL-decode function name to handle %21 -> ! etc.
-        fn-decoded (codec/url-decode fn-str)
+        fn-decoded (java.net.URLDecoder/decode fn-str "UTF-8")
         ns-sym (symbol ns-str)
         fn-sym (symbol fn-decoded)
         body (:body request)]

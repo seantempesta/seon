@@ -283,9 +283,14 @@
       (retract-ns-deps-from-ns! conn ns-name)
       (retract-specs-in-ns! conn ns-name))
 
-    ;; Ingest new data in order: namespaces, functions+stubs, calls (with lookup refs)
+    ;; Ingest new data in order: namespaces, specs, functions+stubs, calls (with lookup refs)
     (log/debug "Ingesting namespaces..." {:count (count namespaces)})
     (transact-in-batches! conn namespaces batch-size)
+
+    ;; Ingest specs BEFORE functions (functions reference specs via lookup refs)
+    (when (seq specs)
+      (log/debug "Ingesting specs..." {:count (count specs)})
+      (transact-in-batches! conn specs batch-size))
 
     ;; Filter to qualified calls only, create stubs, convert to lookup refs
     (let [qualified-usages (filterv qualified-call? var-usages)
@@ -302,11 +307,6 @@
 
       (log/debug "Ingesting ns-dependencies..." {:count (count ns-deps)})
       (transact-in-batches! conn ns-deps batch-size)
-
-      ;; Ingest specs if provided
-      (when (seq specs)
-        (log/debug "Ingesting specs..." {:count (count specs)})
-        (transact-in-batches! conn specs batch-size))
 
       (let [result {::namespace-count (count namespaces)
                     ::function-count (count all-fns)
