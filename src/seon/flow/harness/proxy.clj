@@ -10,7 +10,7 @@
    The proxy functions use `bridge/remote-call!` to send requests through
    the reverse channel to the orchestrator, which routes them to the
    target namespace."
-  (:require [clojure.tools.logging :as log]
+  (:require [taoensso.timbre :as log]
             [seon.flow.harness.bridge :as bridge]
             [seon.flow.msg :as msg]
             [seon.schema :as schema]))

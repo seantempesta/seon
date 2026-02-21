@@ -12,7 +12,7 @@
   (:require [clojure.core.async :as async]
             [clojure.core.async.flow :as flow]
             [clojure.edn :as edn]
-            [clojure.tools.logging :as log]
+            [taoensso.timbre :as log]
             [seon.flow.msg :as msg]
             [seon.schema :as schema])
   (:import [java.time Instant]))

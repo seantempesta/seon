@@ -33,8 +33,9 @@
 
      (gq/search-functions {::gq/conn conn ::gq/pattern \"acquire\"})
      ;; => [{:seon.fn/name \"acquire!\" :seon.fn/namespace \"seon.flow.pool\"} ...]"
-  (:require [datalevin.core :as d]
+  (:require [clojure.set]
             [clojure.string :as str]
+            [datalevin.core :as d]
             [seon.schema :as schema]))
 
 ;;; ---------------------------------------------------------------------------
@@ -206,6 +207,35 @@
                       eid)))
        (sort-by :seon.fn/name)
        vec))
+
+(defn transitive-dependents-of
+  "Find all namespaces that transitively depend on the given namespace.
+
+   Walks the dependency graph iteratively: starts with direct dependents,
+   then finds dependents of dependents, etc. Returns the full transitive
+   closure (not including the input namespace itself).
+
+   Request keys:
+     ::conn    - Required. Datalevin connection
+     ::ns-name - Required. Target namespace name (string)
+
+   Returns:
+     Vector of namespace name strings (sorted)
+
+   Example:
+     (transitive-dependents-of {::conn conn ::ns-name \"seon.schema\"})
+     ;; => [\"seon.ai\" \"seon.ai.claude\" \"seon.dev.hook\" ...]"
+  [{::keys [conn ns-name]}]
+  (loop [frontier #{ns-name}
+         visited #{}]
+    (let [new-deps (->> frontier
+                        (mapcat (fn [ns]
+                                  (dependents-of {::conn conn ::ns-name ns})))
+                        set
+                        (#(clojure.set/difference % visited frontier)))]
+      (if (empty? new-deps)
+        (-> (disj (into visited frontier) ns-name) sort vec)
+        (recur new-deps (into visited frontier))))))
 
 (defn search-functions
   "Search for functions matching a name pattern (substring match).
