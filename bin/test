@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# bin/test — Fast, agent-friendly test runner
+#
+# Usage:
+#   bin/test                              # All unit tests (skip integration)
+#   bin/test --unit                       # Same as above
+#   bin/test --all                        # All tests including integration
+#   bin/test seon.graph.query-test        # Focused: one namespace
+#   bin/test seon.graph.query-test seon.db-test  # Focused: multiple namespaces
+#
+# Exit codes: 0 = pass, 1 = fail
+# Output: Clear PASS/FAIL summary. On failure, shows only failing tests + errors.
+
+set -uo pipefail
+cd "$(dirname "$0")/.."
+
+MODE="unit"
+FOCUS_NS=()
+
+for arg in "$@"; do
+  case "$arg" in
+    --unit) MODE="unit" ;;
+    --all)  MODE="all" ;;
+    --help|-h)
+      echo "Usage: bin/test [--unit|--all] [namespace ...]"
+      echo ""
+      echo "  bin/test                        Unit tests (default, <60s)"
+      echo "  bin/test --all                  All tests including integration"
+      echo "  bin/test seon.graph.query-test  Focused namespace(s) (<10s)"
+      exit 0
+      ;;
+    *) FOCUS_NS+=("$arg") ;;
+  esac
+done
+
+# Build kaocha args
+KAOCHA_ARGS=()
+
+if [ ${#FOCUS_NS[@]} -gt 0 ]; then
+  for ns in "${FOCUS_NS[@]}"; do
+    KAOCHA_ARGS+=(--focus "$ns")
+  done
+  KAOCHA_ARGS+=(unit)
+elif [ "$MODE" = "all" ]; then
+  :
+else
+  KAOCHA_ARGS+=(unit)
+fi
+
+# Run kaocha, capture output and exit code
+TMPOUT=$(mktemp)
+trap "rm -f $TMPOUT" EXIT
+
+START=$(date +%s)
+
+clojure -M:test -m kaocha.runner \
+  --reporter kaocha.report/dots \
+  --no-capture-output \
+  "${KAOCHA_ARGS[@]}" 2>&1 | tee "$TMPOUT"
+
+EXIT_CODE=${PIPESTATUS[0]}
+END=$(date +%s)
+ELAPSED=$((END - START))
+
+echo ""
+echo "========================================"
+if [ $EXIT_CODE -eq 0 ]; then
+  echo "PASS (${ELAPSED}s)"
+else
+  echo "FAIL (${ELAPSED}s)"
+  echo ""
+  echo "Failing tests:"
+  # Extract FAIL/ERROR lines from kaocha output
+  grep -E "^(FAIL|ERROR) in" "$TMPOUT" || true
+  echo ""
+  # Show the assertion messages (lines after FAIL/ERROR, up to next blank line)
+  grep -A 5 -E "^(FAIL|ERROR) in" "$TMPOUT" | grep -v "^--$" || true
+fi
+echo "========================================"
+
+exit $EXIT_CODE
