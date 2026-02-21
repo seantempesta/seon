@@ -5,7 +5,6 @@
             [clojure.java.io :as io]
             [seon.web.handlers :as handlers]
             [seon.web.agents :as agents]
-            [seon.web.namespace :as namespace]
             [seon.web.flows :as flows]
             [seon.web.browser :as browser]
             [seon.ns.routes :as ns-routes]
@@ -63,6 +62,7 @@
     :handler #'agents/agent-detail-sse}
    ;; Namespace view routes: /ns/{namespace}?id=session_id
    ;; Uses seon.ns.view multimethod rendering system
+   ;; Also handles legacy /{dotted.namespace} URLs via redirect below
    {:method :get
     :pattern #"/ns/([a-z][a-z0-9._-]*)"
     :params [:namespace]
@@ -71,17 +71,15 @@
     :pattern #"/ns/([a-z][a-z0-9._-]*)"
     :params [:namespace]
     :handler #'ns-routes/namespace-sse}
-   ;; Legacy namespace introspection routes: /{namespace} where namespace contains dots
-   ;; e.g., /seon.ai.claude, /seon.web.handlers
-   ;; Must be last since it's a catch-all for dotted paths
+   ;; Legacy redirect: /seon.foo.bar -> /ns/seon.foo.bar
+   ;; Keeps old bookmarks working while unifying on /ns/ pattern
    {:method :get
     :pattern #"/([a-z][a-z0-9._-]*\.[a-z][a-z0-9._-]*)"
     :params [:namespace]
-    :handler #'namespace/namespace-page}
-   {:method :post
-    :pattern #"/([a-z][a-z0-9._-]*\.[a-z][a-z0-9._-]*)"
-    :params [:namespace]
-    :handler #'namespace/namespace-sse}])
+    :handler (fn [req]
+               {:status 301
+                :headers {"Location" (str "/ns/" (get-in req [:path-params :namespace]))}
+                :body ""})}])
 
 (defn match-dynamic-route [method path]
   (some (fn [{route-method :method :keys [pattern params handler]}]
