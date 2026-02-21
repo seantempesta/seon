@@ -245,7 +245,7 @@
     (when-let [conn (get-dl-conn)]
       (db/transact! conn [{:orch.session/id         (::id session-info)
                            :orch.session/namespace  (str (::namespace session-info))
-                           :orch.session/nrepl-port (long (::nrepl-port session-info))
+                           :orch.session/nrepl-port (when-let [p (::nrepl-port session-info)] (long p))
                            :orch.session/status     (name (::status session-info))
                            :orch.session/started-at (::started-at session-info)
                            :orch.session/db-name    (::db-name session-info)}]))
