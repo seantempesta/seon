@@ -40,7 +40,8 @@
 
      ;; Shut down entire pool
      (shutdown! pool)"
-  (:require [clojure.java.process :as process]
+  (:require [clojure.edn :as edn]
+            [clojure.java.process :as process]
             [clojure.java.shell :as shell]
             [clojure.string :as str]
             [integrant.core :as ig]
@@ -641,12 +642,28 @@
                                     (assoc-in [::all-jvms port ::session-id] session-id)
                                     (assoc-in [::session->port session-id] port))))
         ;; Inject *ctx* via nREPL eval if ctx-value provided
+        ;; Filter out non-serializable values (live connections, atoms, etc.)
+        ;; The agent JVM creates its own connections during setup.
+        ;; We serialize ctx as EDN string and read it on the agent side
+        ;; to avoid syntax-quote issues with symbols/special values.
         (when ctx-value
           (let [ns-sym namespace
-                code (pr-str `(do (intern '~ns-sym '~'*ctx*
-                                          (atom ~ctx-value))
-                                  (.setDynamic (resolve (symbol (str '~ns-sym) "*ctx*")) true)
-                                  :ok))]
+                serializable-ctx (reduce-kv
+                                  (fn [acc k v]
+                                    (try
+                                      (let [s (pr-str v)]
+                                        (edn/read-string s)
+                                        (assoc acc k v))
+                                      (catch Exception _
+                                        (log/debug "Stripping non-serializable ctx key for nREPL transfer" {:key k :type (type v)})
+                                        acc)))
+                                  {}
+                                  ctx-value)
+                ctx-edn (pr-str serializable-ctx)
+                code (str "(do (intern '" ns-sym " '*ctx*"
+                          " (atom (clojure.edn/read-string " (pr-str ctx-edn) ")))"
+                          " (.setDynamic (resolve (symbol \"" ns-sym "\" \"*ctx*\")) true)"
+                          " :ok)")]
             (nrepl-eval! port code)))
         (assoc handle ::session-id session-id)))))
 
