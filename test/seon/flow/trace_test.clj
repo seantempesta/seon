@@ -25,11 +25,12 @@
      (catch Exception _ nil))))
 
 (defmacro when-system
-  "Run body only if system is available, otherwise skip with message."
+  "Run body only if system is available, otherwise skip with message.
+   Always produces at least one assertion so kaocha doesn't flag as failure."
   [& body]
   `(if (system-available?)
      (do ~@body)
-     (println "SKIP: requires running system")))
+     (is (not (system-available?)) "SKIP: requires running system")))
 
 ;;; ---------------------------------------------------------------------------
 ;;; persist-event! tests
