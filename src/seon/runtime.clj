@@ -197,7 +197,39 @@
    {:db/valueType :db.type/instant}
 
    :seon.runtime/component-key
-   {:db/valueType :db.type/keyword}})
+   {:db/valueType :db.type/keyword}
+
+   ;; Agent run entities
+   :seon.agent.run/id
+   {:db/valueType :db.type/string
+    :db/unique    :db.unique/identity}
+
+   :seon.agent.run/runtime
+   {:db/valueType :db.type/ref}
+
+   :seon.agent.run/provider
+   {:db/valueType :db.type/keyword}
+
+   :seon.agent.run/status
+   {:db/valueType :db.type/keyword}
+
+   :seon.agent.run/started-at
+   {:db/valueType :db.type/instant}
+
+   :seon.agent.run/stopped-at
+   {:db/valueType :db.type/instant}
+
+   :seon.agent.run/cost-usd
+   {:db/valueType :db.type/double}
+
+   :seon.agent.run/num-turns
+   {:db/valueType :db.type/long}
+
+   :seon.agent.run/duration-ms
+   {:db/valueType :db.type/long}
+
+   :seon.agent.run/namespace
+   {:db/valueType :db.type/string}})
 
 ;;; ---------------------------------------------------------------------------
 ;;; ID Generation
@@ -446,6 +478,177 @@
       (log/info "Hydrated runtime cache" {:count instance-count})
       {::hydrated-count instance-count})
     {::hydrated-count 0}))
+
+;;; ---------------------------------------------------------------------------
+;;; Agent Run Schemas
+;;; ---------------------------------------------------------------------------
+
+(schema/register! ::agent-run-id
+                  [:string {:min 1 :description "Agent run identifier (session ID)"}])
+
+(schema/register! ::provider
+                  [:keyword {:description "AI provider (e.g. :claude)"}])
+
+(schema/register! ::cost-usd
+                  [:double {:min 0.0 :description "Total cost in USD"}])
+
+(schema/register! ::num-turns
+                  [:int {:min 0 :description "Number of conversation turns"}])
+
+(schema/register! ::duration-ms
+                  [:int {:min 0 :description "Duration in milliseconds"}])
+
+(schema/register! ::start-agent-run-request
+                  [:map
+                   [::agent-run-id ::agent-run-id]
+                   [::namespace ::namespace]
+                   [::provider ::provider]])
+
+(schema/register! ::start-agent-run-response
+                  [:map
+                   [::agent-run-id ::agent-run-id]
+                   [::status ::status]])
+
+(schema/register! ::complete-agent-run-request
+                  [:map
+                   [::agent-run-id ::agent-run-id]
+                   [::status [:enum :completed :failed :interrupted :terminated]]
+                   [::cost-usd {:optional true} ::cost-usd]
+                   [::num-turns {:optional true} ::num-turns]
+                   [::duration-ms {:optional true} ::duration-ms]])
+
+(schema/register! ::complete-agent-run-response
+                  [:map
+                   [::agent-run-id ::agent-run-id]
+                   [::status [:enum :completed :failed :interrupted :terminated]]])
+
+(schema/register! ::agent-runs-request
+                  [:map
+                   [::namespace {:optional true} ::namespace]])
+
+(schema/register! ::agent-run-entity
+                  [:map
+                   [:seon.agent.run/id :string]
+                   [:seon.agent.run/status :keyword]
+                   [:seon.agent.run/namespace {:optional true} :string]
+                   [:seon.agent.run/provider {:optional true} :keyword]
+                   [:seon.agent.run/started-at {:optional true} inst?]
+                   [:seon.agent.run/stopped-at {:optional true} inst?]
+                   [:seon.agent.run/cost-usd {:optional true} :double]
+                   [:seon.agent.run/num-turns {:optional true} :int]
+                   [:seon.agent.run/duration-ms {:optional true} :int]])
+
+(schema/register! ::agent-runs-response
+                  [:vector ::agent-run-entity])
+
+;;; ---------------------------------------------------------------------------
+;;; Agent Run API
+;;; ---------------------------------------------------------------------------
+
+(defn start-agent-run!
+  "Record the start of an agent run in Datalevin.
+
+   Creates a :seon.agent.run/* entity with status :running, linked to the
+   runtime instance via ref if it exists.
+
+   Request keys:
+     ::agent-run-id - Required. Run identifier (typically the session ID)
+     ::namespace    - Required. Agent namespace string
+     ::provider     - Required. AI provider keyword (e.g. :claude)
+
+   Response keys:
+     ::agent-run-id - The run ID
+     ::status       - :running"
+  {:malli/schema [:=> [:cat ::start-agent-run-request] ::start-agent-run-response]}
+  [{::keys [agent-run-id namespace provider]}]
+  (when-let [c @conn]
+    (let [now (java.util.Date.)
+          ;; Look up runtime instance entity for ref linkage
+          runtime-eid (ffirst
+                       (d/q '[:find ?e
+                              :in $ ?ns
+                              :where [?e :seon.runtime/namespace ?ns]]
+                            @c namespace))
+          tx-map (cond-> {:seon.agent.run/id agent-run-id
+                          :seon.agent.run/namespace namespace
+                          :seon.agent.run/provider provider
+                          :seon.agent.run/status :running
+                          :seon.agent.run/started-at now}
+                   runtime-eid (assoc :seon.agent.run/runtime runtime-eid))]
+      (db/transact! c [tx-map])))
+  {::agent-run-id agent-run-id
+   ::status :running})
+
+(defn complete-agent-run!
+  "Record the completion of an agent run in Datalevin.
+
+   Updates the :seon.agent.run/* entity with final status and stats.
+
+   Request keys:
+     ::agent-run-id - Required. Run identifier
+     ::status       - Required. Final status (:completed, :failed, :interrupted, :terminated)
+     ::cost-usd     - Optional. Total cost in USD
+     ::num-turns    - Optional. Number of conversation turns
+     ::duration-ms  - Optional. Duration in milliseconds
+
+   Response keys:
+     ::agent-run-id - The run ID
+     ::status       - The final status"
+  {:malli/schema [:=> [:cat ::complete-agent-run-request] ::complete-agent-run-response]}
+  [{::keys [agent-run-id status cost-usd num-turns duration-ms]}]
+  (when-let [c @conn]
+    (let [now (java.util.Date.)
+          tx-map (cond-> {:seon.agent.run/id agent-run-id
+                          :seon.agent.run/status status
+                          :seon.agent.run/stopped-at now}
+                   cost-usd (assoc :seon.agent.run/cost-usd (double cost-usd))
+                   num-turns (assoc :seon.agent.run/num-turns (long num-turns))
+                   duration-ms (assoc :seon.agent.run/duration-ms (long duration-ms)))]
+      (db/transact! c [tx-map])))
+  {::agent-run-id agent-run-id
+   ::status status})
+
+(defn agent-runs
+  "Query all agent runs from Datalevin.
+
+   Optionally filtered by namespace.
+
+   Request keys:
+     ::namespace - Optional. Filter by namespace string
+
+   Response keys:
+     Vector of agent run entity maps."
+  {:malli/schema [:=> [:cat ::agent-runs-request] ::agent-runs-response]}
+  [{::keys [namespace]}]
+  (if-let [c @conn]
+    (let [results (if namespace
+                    (d/q '[:find (pull ?e [:seon.agent.run/id
+                                          :seon.agent.run/namespace
+                                          :seon.agent.run/provider
+                                          :seon.agent.run/status
+                                          :seon.agent.run/started-at
+                                          :seon.agent.run/stopped-at
+                                          :seon.agent.run/cost-usd
+                                          :seon.agent.run/num-turns
+                                          :seon.agent.run/duration-ms])
+                            :in $ ?ns
+                            :where
+                            [?e :seon.agent.run/id _]
+                            [?e :seon.agent.run/namespace ?ns]]
+                          @c namespace)
+                    (d/q '[:find (pull ?e [:seon.agent.run/id
+                                          :seon.agent.run/namespace
+                                          :seon.agent.run/provider
+                                          :seon.agent.run/status
+                                          :seon.agent.run/started-at
+                                          :seon.agent.run/stopped-at
+                                          :seon.agent.run/cost-usd
+                                          :seon.agent.run/num-turns
+                                          :seon.agent.run/duration-ms])
+                            :where [?e :seon.agent.run/id _]]
+                          @c))]
+      (mapv first results))
+    []))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Testing Helpers

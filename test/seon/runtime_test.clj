@@ -254,6 +254,89 @@
 
     (is (= 0 (count (runtime/instances {}))))))
 
+;;; ---------------------------------------------------------------------------
+;;; Agent Run Tests
+;;; ---------------------------------------------------------------------------
+
+(deftest start-agent-run-test
+  (testing "start-agent-run! creates an entity in Datalevin"
+    (let [result (runtime/start-agent-run! {::runtime/agent-run-id "test1234"
+                                            ::runtime/namespace "seon.test.agent"
+                                            ::runtime/provider :claude})]
+      (is (= "test1234" (::runtime/agent-run-id result)))
+      (is (= :running (::runtime/status result)))
+
+      ;; Verify in Datalevin
+      (let [runs (d/q '[:find ?status ?ns ?provider
+                         :in $ ?id
+                         :where
+                         [?e :seon.agent.run/id ?id]
+                         [?e :seon.agent.run/status ?status]
+                         [?e :seon.agent.run/namespace ?ns]
+                         [?e :seon.agent.run/provider ?provider]]
+                       @@test-conn "test1234")]
+        (is (= #{[:running "seon.test.agent" :claude]} runs)))))
+
+  (testing "start-agent-run! links to runtime instance if present"
+    ;; Register a runtime instance first
+    (runtime/register! {::runtime/namespace "seon.linked.agent"
+                        ::runtime/status :running
+                        ::runtime/location :external})
+    (runtime/start-agent-run! {::runtime/agent-run-id "linked01"
+                               ::runtime/namespace "seon.linked.agent"
+                               ::runtime/provider :claude})
+    ;; Verify ref exists
+    (let [refs (d/q '[:find ?ref
+                       :in $ ?id
+                       :where
+                       [?e :seon.agent.run/id ?id]
+                       [?e :seon.agent.run/runtime ?ref]]
+                     @@test-conn "linked01")]
+      (is (= 1 (count refs))))))
+
+(deftest complete-agent-run-test
+  (testing "complete-agent-run! updates status and stats"
+    (runtime/start-agent-run! {::runtime/agent-run-id "comp1234"
+                               ::runtime/namespace "seon.test.complete"
+                               ::runtime/provider :claude})
+    (let [result (runtime/complete-agent-run! {::runtime/agent-run-id "comp1234"
+                                              ::runtime/status :completed
+                                              ::runtime/cost-usd 0.45
+                                              ::runtime/num-turns 8
+                                              ::runtime/duration-ms 30000})]
+      (is (= "comp1234" (::runtime/agent-run-id result)))
+      (is (= :completed (::runtime/status result)))
+
+      ;; Verify in Datalevin
+      (let [runs (d/q '[:find ?status ?cost ?turns ?dur
+                         :in $ ?id
+                         :where
+                         [?e :seon.agent.run/id ?id]
+                         [?e :seon.agent.run/status ?status]
+                         [?e :seon.agent.run/cost-usd ?cost]
+                         [?e :seon.agent.run/num-turns ?turns]
+                         [?e :seon.agent.run/duration-ms ?dur]]
+                       @@test-conn "comp1234")]
+        (is (= #{[:completed 0.45 8 30000]} runs))))))
+
+(deftest agent-runs-test
+  (testing "agent-runs returns all runs"
+    (runtime/start-agent-run! {::runtime/agent-run-id "run-a"
+                               ::runtime/namespace "seon.test.a"
+                               ::runtime/provider :claude})
+    (runtime/start-agent-run! {::runtime/agent-run-id "run-b"
+                               ::runtime/namespace "seon.test.b"
+                               ::runtime/provider :claude})
+
+    (let [runs (runtime/agent-runs {})]
+      (is (= 2 (count runs)))
+      (is (every? #(= :running (:seon.agent.run/status %)) runs))))
+
+  (testing "agent-runs filters by namespace"
+    (let [runs (runtime/agent-runs {::runtime/namespace "seon.test.a"})]
+      (is (= 1 (count runs)))
+      (is (= "seon.test.a" (:seon.agent.run/namespace (first runs)))))))
+
 (comment
   (require '[kaocha.repl :as k])
   (k/run 'seon.runtime-test)

@@ -46,6 +46,7 @@
    [seon.ai.agent.log :as agent-log]
    [seon.ai.claude.sdk :as sdk]
    [seon.orchestrator.session :as session]
+   [seon.runtime :as runtime]
    [seon.schema :as schema]
    [taoensso.timbre :as log])
   (:import [java.time Instant]))
@@ -955,6 +956,14 @@
                           (catch Exception e
                             (log/warn e "Failed to stop agent session on reader exit"
                                       {:session-id id})))
+                        ;; Complete agent run in runtime registry
+                        (try
+                          (runtime/complete-agent-run!
+                           {::runtime/agent-run-id id
+                            ::runtime/status (or @status-atom :failed)})
+                          (catch Exception e
+                            (log/warn "Failed to complete agent run in runtime"
+                                      {:error (.getMessage e)})))
                         ;; Remove from registry now that agent is done
                         (swap! agent/agent-registry dissoc id)
                         (log/info "Agent cleanup complete" {:session-id id
@@ -982,6 +991,14 @@
                            (log/warn e "Failed to end AI session on close"))))
                      ;; Stop Seon session (flushes ctx, stops nREPL)
                      (session/stop-agent-session! {::session/id id})
+                     ;; Complete agent run in runtime registry
+                     (try
+                       (runtime/complete-agent-run!
+                        {::runtime/agent-run-id id
+                         ::runtime/status :interrupted})
+                       (catch Exception e
+                         (log/warn "Failed to complete agent run on close"
+                                   {:error (.getMessage e)})))
                      ;; Remove from shared registry
                      (swap! agent/agent-registry dissoc id)
                      ;; Update status
@@ -1017,6 +1034,14 @@
 
       ;; 9. Register agent in shared registry
       (swap! agent/agent-registry assoc id handle)
+
+      ;; 10. Record agent run in runtime registry
+      (try
+        (runtime/start-agent-run! {::runtime/agent-run-id id
+                                   ::runtime/namespace (str namespace)
+                                   ::runtime/provider :claude})
+        (catch Exception e
+          (log/warn "Failed to start agent run in runtime" {:error (.getMessage e)})))
 
       (log/info "Agent launched" {:session-id id
                                   :ai-session-id ai-session-id
