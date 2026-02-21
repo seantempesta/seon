@@ -1,13 +1,23 @@
 #kaocha/v1
  {:tests [{:id :unit
            :test-paths ["test"]
-           :ns-patterns [".*-test$"]}]
+           :ns-patterns [".*-test$"]
+           :kaocha.filter/skip-meta [:integration]}
+
+          {:id :integration
+           :test-paths ["test"]
+           :ns-patterns [".*-test$"]
+           :kaocha.filter/focus-meta [:integration]}]
 
   :plugins [:kaocha.plugin/profiling
             :kaocha.plugin/capture-output]
 
- ;; Property test configuration
- ;; Removed randomize/seed config - using defaults
+ ;; Run unit tests only (default for dev):
+ ;;   clojure -M:test -m kaocha.runner unit
+ ;; Run integration tests only:
+ ;;   clojure -M:test -m kaocha.runner integration
+ ;; Run all:
+ ;;   clojure -M:test -m kaocha.runner
 
  ;; JVM options for native access (Arrow/Netty)
   :kaocha/cli-options ["--add-opens=java.base/java.nio=ALL-UNNAMED"
