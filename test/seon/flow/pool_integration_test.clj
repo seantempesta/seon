@@ -45,7 +45,7 @@
 ;;; Test 1: start-namespace-jvm! basic round-trip
 ;;; ---------------------------------------------------------------------------
 
-(deftest start-namespace-jvm-basic-test
+(deftest ^:integration start-namespace-jvm-basic-test
   (testing "acquire JVM, start TCP bridge, send request, get reply"
     (when-let [p @test-pool]
       (let [ns-handle (harness/start-namespace-jvm!
@@ -80,7 +80,7 @@
 ;;; Test 2: Error propagation through real JVM
 ;;; ---------------------------------------------------------------------------
 
-(deftest real-jvm-error-propagation-test
+(deftest ^:integration real-jvm-error-propagation-test
   (testing "calling non-existent function returns :not-found error"
     (when-let [p @test-pool]
       (let [ns-handle (harness/start-namespace-jvm!
@@ -111,7 +111,7 @@
 ;;; Test 3: Full topology with real JVM
 ;;; ---------------------------------------------------------------------------
 
-(deftest real-jvm-topology-test
+(deftest ^:integration real-jvm-topology-test
   (testing "build-topology! with real JVM, request! round-trip"
     (when-let [p @test-pool]
       (let [ns-handle (harness/start-namespace-jvm!
