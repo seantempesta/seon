@@ -10,11 +10,11 @@
 
 | Phase | Description | Status | Agent | Notes |
 |-------|-------------|--------|-------|-------|
-| 1 | Runtime registry + schema + unified ID | **Done** | orchestrator | `seon.runtime` created, `:seon/graph-db` component, 6-char hex IDs, Integrant components registered |
-| 2 | Session integration | Pending | -- | Sessions write to runtime registry, use unified ID |
+| 1 | Runtime registry + schema + unified ID | **Done** | seon-agent | `seon.runtime` created, `:seon/graph-db` component, 6-char hex IDs, Integrant components registered |
+| 2 | Session integration | **Done** | seon-agent | Sessions dual-write to runtime registry on start/stop |
 | 2.5 | Instance messaging router | Pending | -- | `::msg/from-id`/`::msg/to-id`, `runtime/send!`, generalize bridge pattern |
 | 2.6 | Schema-driven routing | Pending | -- | `seon.runtime.router`, key-based Datalog lookup, Malli validation, claims |
-| 3 | Agent run entities | Pending | -- | Agent runs persist as `:seon.agent.run/*` |
+| 3 | Agent run entities | **Done** | seon-agent | `:seon.agent.run/*` entities with start/complete/query, wired into claude.clj |
 | 4 | Flow snapshots | Pending | -- | Snapshot on shutdown/backup |
 | 5 | Ctx unification | Pending | -- | One persistence path, delete `ctx/*` |
 | 6 | Startup hydration | Pending | -- | Hydrate caches from Datalevin on boot |
