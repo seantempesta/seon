@@ -15,7 +15,7 @@
 
   Datalevin is the sole database."
   (:require
-   [clojure.tools.logging :as log]
+   [taoensso.timbre :as log]
    [integrant.core :as ig]
    [integrant.repl :as ig-repl]
    [integrant.repl.state :as state]

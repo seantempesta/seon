@@ -19,7 +19,7 @@
      Out-ports (to TCP / agent JVM):
        :seon.flow.out/jvm-request - Requests forwarded to agent JVM"
   (:require [clojure.edn :as edn]
-            [clojure.tools.logging :as log]
+            [taoensso.timbre :as log]
             [datalevin.core :as d]
             [seon.flow.harness.channel :as channel]
             [seon.flow.msg :as msg]

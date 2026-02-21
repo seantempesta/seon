@@ -278,6 +278,36 @@
         (assoc :num-turns (:seon.ai.claude/num-turns result))))))
 
 ;; ========================================
+;; Dependency-Aware Test Selection
+;; ========================================
+
+(defn test-affected!
+  "Run tests for a namespace and all its dependents in the code graph.
+
+  Uses the knowledge graph to find what depends on the given namespace,
+  then runs their test suites. Falls back to just the namespace's own
+  test if the graph is not populated.
+
+  Options:
+    :depth - :direct (default) or :transitive
+
+  Examples:
+    (test-affected! \"seon.schema\")
+    (test-affected! \"seon.trading.signals\" :depth :transitive)"
+  [ns-name & {:keys [depth] :or {depth :direct}}]
+  (let [ts (requiring-resolve 'seon.dev.test-select/run-affected-tests!)
+        ;; Try to get graph conn from running system
+        conn (try
+               (when state/system
+                 (let [mgr (:seon/connection-manager state/system)
+                       get-conn (requiring-resolve 'seon.db.datalevin.conn/get-master-conn!)]
+                   (get-conn {:seon.db.datalevin.conn/manager mgr})))
+               (catch Exception _ nil))]
+    (ts {:seon.dev.test-select/conn conn
+         :seon.dev.test-select/ns-name ns-name
+         :seon.dev.test-select/depth depth})))
+
+;; ========================================
 ;; AI Research (use when stuck!)
 ;; ========================================
 

@@ -15,7 +15,7 @@
      :seon.flow.trace/timestamp  - When event occurred
      :seon.flow.trace/status     - Reply status (:ok, :error, etc.)
      :seon.flow.trace/error-message - Error message (when applicable)"
-  (:require [clojure.tools.logging :as log]
+  (:require [taoensso.timbre :as log]
             [integrant.repl.state :as state]
             [seon.db.datalevin.conn :as conn]
             [seon.schema :as schema])
