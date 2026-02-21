@@ -37,6 +37,7 @@
             [seon.db :as db]
             [seon.db.datalevin.conn :as conn]
             [seon.flow.pool :as pool]
+            [seon.runtime :as runtime]
             [seon.schema :as schema]
             [taoensso.timbre :as log]))
 
@@ -179,7 +180,7 @@
    Delegates to seon.runtime/generate-id for unified ID generation
    with collision checking."
   []
-  (:seon.runtime/id ((requiring-resolve 'seon.runtime/generate-id) {})))
+  (::runtime/id (runtime/generate-id {})))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Session Registry (in-memory for quick lookups)
@@ -402,6 +403,18 @@
           (swap! session-registry assoc session-id session-info)
           (store-session! nil session-info)
 
+          ;; 6. Dual-write to runtime registry
+          (try
+            (runtime/register! (cond-> {::runtime/namespace (str namespace)
+                                        ::runtime/status :running
+                                        ::runtime/location :external
+                                        ::runtime/session-id session-id
+                                        ::runtime/started-at started-at}
+                                 nrepl-port (assoc ::runtime/nrepl-port nrepl-port)))
+            (catch Exception e
+              (log/warn "Failed to register session in runtime registry"
+                        {:session-id session-id :error (.getMessage e)})))
+
           (log/info "Started agent session"
                     {:session-id session-id
                      :namespace namespace
@@ -452,6 +465,13 @@
       (swap! session-registry dissoc id)
       (let [stopped-at (java.util.Date.)]
         (update-session-status! nil id :stopped stopped-at)
+
+        ;; 5. Dual-write to runtime registry
+        (try
+          (runtime/unregister! {::runtime/namespace (str (::namespace session))})
+          (catch Exception e
+            (log/warn "Failed to unregister session from runtime registry"
+                      {:session-id id :error (.getMessage e)})))
 
         (log/info "Stopped agent session" {:session-id id})
 
@@ -700,7 +720,11 @@
       (log/info "Marking orphaned session as stopped"
                 {:session-id (:session-id session)
                  :namespace (:session-namespace session)})
-      (update-session-status! nil (:session-id session) :stopped now))
+      (update-session-status! nil (:session-id session) :stopped now)
+      ;; Also unregister from runtime registry
+      (try
+        (runtime/unregister! {::runtime/namespace (:session-namespace session)})
+        (catch Exception _)))
     {::recovered-count (count active-sessions)}))
 
 (comment

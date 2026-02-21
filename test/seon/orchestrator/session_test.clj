@@ -7,6 +7,7 @@
   (:require [clojure.test :refer [deftest testing is use-fixtures]]
             [datalevin.core :as d]
             [seon.orchestrator.session :as session]
+            [seon.runtime :as runtime]
             [seon.schema :as schema]
             [seon.test-utils :refer [with-test-node *test-node*]]))
 
@@ -24,6 +25,7 @@
       (session/stop-agent-session! {::session/node *test-node* ::session/id id})
       (catch Exception _)))
   (reset! @#'seon.orchestrator.session/session-registry {})
+  (runtime/reset-registry! {})
   (let [orig-dl-mgr @(deref #'seon.orchestrator.session/dl-mgr)]
     (reset! @#'seon.orchestrator.session/dl-mgr nil)
     (try
@@ -35,6 +37,7 @@
             (catch Exception _)))
         (Thread/sleep 50)
         (reset! @#'seon.orchestrator.session/session-registry {})
+        (runtime/reset-registry! {})
         (reset! @#'seon.orchestrator.session/dl-mgr orig-dl-mgr)))))
 
 (use-fixtures :each (fn [f]
@@ -338,6 +341,47 @@
                    {::session/node *test-node*
                     ::session/id session-id})]
         (is (= nrepl-sid (::session/nrepl-session-id info)))))))
+
+;;; ---------------------------------------------------------------------------
+;;; Runtime Registry Integration Tests (Phase 2)
+;;; ---------------------------------------------------------------------------
+
+(deftest start-session-registers-in-runtime-test
+  (testing "start-agent-session! registers instance in runtime registry"
+    (let [result (session/start-agent-session!
+                   {::session/node *test-node*
+                    ::session/namespace 'test.runtime.start
+                    ::session/pool nil})
+          session-id (::session/id result)
+          instances (runtime/instances {})]
+      (is (= 1 (count instances)))
+      (let [inst (first instances)]
+        (is (= "test.runtime.start" (::runtime/namespace inst)))
+        (is (= :running (::runtime/status inst)))
+        (is (= :external (::runtime/location inst)))
+        (is (= session-id (::runtime/session-id inst)))
+        (is (inst? (::runtime/started-at inst)))
+        ;; No pool in tests, so no nrepl-port
+        (is (nil? (::runtime/nrepl-port inst)))))))
+
+(deftest stop-session-unregisters-from-runtime-test
+  (testing "stop-agent-session! sets runtime status to :stopped"
+    (let [started (session/start-agent-session!
+                    {::session/node *test-node*
+                     ::session/namespace 'test.runtime.stop
+                     ::session/pool nil})
+          session-id (::session/id started)]
+      ;; Verify running first
+      (let [inst (runtime/instance {::runtime/namespace "test.runtime.stop"})]
+        (is (= :running (::runtime/status inst))))
+
+      ;; Stop it
+      (session/stop-agent-session! {::session/id session-id})
+
+      ;; Verify stopped in runtime
+      (let [inst (runtime/instance {::runtime/namespace "test.runtime.stop"})]
+        (is (= :stopped (::runtime/status inst)))
+        (is (inst? (::runtime/stopped-at inst)))))))
 
 (comment
   ;; Run all tests
