@@ -10,14 +10,52 @@
 
 | Phase | Description | Status | Agent | Notes |
 |-------|-------------|--------|-------|-------|
-| 1 | Runtime registry + schema | Pending | -- | Create `seon.runtime`, register Integrant components |
-| 2 | Session integration | Pending | -- | Sessions write to runtime registry |
+| 1 | Runtime registry + schema + unified ID | Pending | -- | Create `seon.runtime` with `generate-id`, register Integrant components |
+| 2 | Session integration | Pending | -- | Sessions write to runtime registry, use unified ID |
+| 2.5 | Instance messaging router | Pending | -- | `::msg/from-id`/`::msg/to-id`, `runtime/send!`, generalize bridge pattern |
 | 3 | Agent run entities | Pending | -- | Agent runs persist as `:seon.agent.run/*` |
 | 4 | Flow snapshots | Pending | -- | Snapshot on shutdown/backup |
 | 5 | Ctx unification | Pending | -- | One persistence path, delete `ctx/*` |
 | 6 | Startup hydration | Pending | -- | Hydrate caches from Datalevin on boot |
 | 7 | Flow registry absorption | Pending | -- | Delete `seon.flow.registry`, use runtime |
 | 8 | Observatory + flows page | Pending | -- | UI shows runtime instances with graph data |
+
+---
+
+## Instance ID Research (2026-02-21)
+
+### Finding: Four Duplicate ID Systems
+
+The codebase has four ID generators, but only two unique algorithms:
+1. `seon.ctx/generate-id` -- 4-char hex (2 random bytes)
+2. `seon.orchestrator.session/generate-session-id` -- identical code to #1
+3. `seon.ai/start-session!` -- `"ses-" + UUID` (separate AI conversation ID)
+4. Claude SDK -- its own internal UUID
+
+A single agent launch creates THREE IDs: 4-char hex (infra), AI session UUID, Claude SDK UUID.
+
+### Decision: Unified 4-char Hex
+
+- **Phase 1 must include** `seon.runtime/generate-id` as the single canonical generator
+- Delete duplicates in `seon.ctx` and `seon.orchestrator.session`
+- Add collision check against runtime registry
+- AI session should use same 4-char hex (drop the `"ses-"` prefix UUID)
+
+### Decision: Instance-Addressed Messaging
+
+- Add `::msg/from-id` and `::msg/to-id` to `seon.flow.msg` envelope schema
+- Build message router in `seon.runtime` that generalizes the bridge pattern
+- Reuse `seon.flow.harness.bridge` promise-per-request-id for reply correlation
+- New Phase 2.5 for this work (between session integration and agent run entities)
+
+### Key Files for ID Consolidation
+
+| File | Current ID Generation | Action |
+|------|----------------------|--------|
+| `src/seon/ctx.clj:133-138` | `generate-id` (4-char hex) | Delete, delegate to `seon.runtime` |
+| `src/seon/orchestrator/session.clj:179-184` | `generate-session-id` (identical) | Delete, delegate to `seon.runtime` |
+| `src/seon/ai.clj` (via `start-session!`) | `"ses-" + UUID` | Change to use 4-char hex |
+| `src/seon/flow/msg.clj` | N/A (uses caller-provided `::msg/id` UUID) | Add `::msg/from-id`, `::msg/to-id` |
 
 ---
 
