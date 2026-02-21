@@ -33,7 +33,7 @@
 
 (def server-info
   {:name "seon"
-   :version "0.4.0"})  ;; v0.4.0: Self-healing nREPL sessions + parent watchdog
+   :version "0.4.1"})  ;; v0.4.1: Fix silent nil on server crash (ConnectException now sets :ex)
 
 ;; Parent PID at startup - used by watchdog to detect orphaning
 (def parent-pid (let [parent (.parent (java.lang.ProcessHandle/current))]
@@ -358,11 +358,21 @@ You must then either:
                            (if (and status (some #{"done"} status))
                              result'
                              (recur result'))))))))))))
-       (catch java.net.ConnectException e
-         {:err (str "Connection failed to port " port ": " (.getMessage e))})
+       ;; ConnectException means the Seon server is down. Set :ex so callers
+      ;; don't treat this as a successful eval that returned nil.
+      ;; This was the root cause of silent nil responses when the server crashed
+      ;; (e.g., LMDB corruption → server dies → nREPL port 7888 unreachable →
+      ;; ConnectException caught here → :err set but :ex nil → execute-eval
+      ;; falls through to success path → returns "nil" to user).
+      (catch java.net.ConnectException _e
+         {:err (str "Seon server is not running (cannot connect to nREPL on port " port ").\n"
+                    "Start it with: ./bin/run\n"
+                    "Check logs/startup.log for crash details (LMDB errors, port conflicts, OOM).")
+          :ex "connection-refused"})
        (catch Exception e
          (log-debug "Exception:" (class e) (.getMessage e))
-         {:err (str "Error: " (.getMessage e))})))))
+         {:err (str "Error: " (.getMessage e))
+          :ex "error"})))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; MCP Result Builders
@@ -390,8 +400,7 @@ You must then either:
   [session-id]
   (let [code (format "(do (require 'seon.orchestrator.session)
                           (let [result (seon.orchestrator.session/get-session-port
-                                         {:seon.orchestrator.session/node (user/xtdb-node)
-                                          :seon.orchestrator.session/id \"%s\"})]
+                                         {:seon.orchestrator.session/id \"%s\"})]
                             {:port (:seon.orchestrator.session/nrepl-port result)
                              :nrepl-session-id (:seon.orchestrator.session/nrepl-session-id result)}))"
                      session-id)
@@ -552,8 +561,7 @@ You must then either:
   ;; First, create the session in Seon
   (let [code (format "(do (require 'seon.orchestrator.session)
                           (let [result (seon.orchestrator.session/start-agent-session!
-                                         {:seon.orchestrator.session/node (user/xtdb-node)
-                                          :seon.orchestrator.session/namespace '%s})]
+                                         {:seon.orchestrator.session/namespace '%s})]
                             {:session_id (:seon.orchestrator.session/id result)
                              :namespace '%s
                              :nrepl_port (:seon.orchestrator.session/nrepl-port result)
@@ -597,8 +605,7 @@ You must then either:
 
   (let [code (format "(do (require 'seon.orchestrator.session)
                           (let [result (seon.orchestrator.session/stop-agent-session!
-                                         {:seon.orchestrator.session/node (user/xtdb-node)
-                                          :seon.orchestrator.session/id \"%s\"})]
+                                         {:seon.orchestrator.session/id \"%s\"})]
                             {:session_id (:seon.orchestrator.session/id result)
                              :status (name (:seon.orchestrator.session/status result))}))"
                      session_id)
@@ -675,8 +682,7 @@ You must then either:
   ;; The Clojure code calculates uptime_seconds from started_at and formats dates
   (let [code "(do (require 'seon.orchestrator.session)
                   (let [now (System/currentTimeMillis)
-                        sessions (seon.orchestrator.session/list-agent-sessions
-                                   {:seon.orchestrator.session/node (user/xtdb-node)})]
+                        sessions (seon.orchestrator.session/list-agent-sessions {})]
                     (mapv (fn [s]
                             (let [started-at (:seon.orchestrator.session/started-at s)
                                   uptime-ms (when started-at
@@ -713,7 +719,7 @@ You must then either:
     (log-debug "List sessions result:" (pr-str result))
 
     (if (:ex result)
-      (mcp-error (str "listing sessions: " (:err result)))
+      (mcp-error (str "Server connection: DOWN\n" (:err result)))
       (mcp-success (if (= "[]" (:value result))
                      "No active sessions"
                      (:value result))))))
@@ -792,13 +798,14 @@ You must then either:
       (mcp-success (or (:value result) "nil")))))
 
 (defn execute-agent-status
-  "Execute the agent_status tool. Returns system health."
+  "Execute the agent_status tool. Returns system health.
+   Reports server connection status prominently."
   [_args]
   (let [code "(user/status)"
         result (nrepl-eval orchestrator-port code)]
     (if (:ex result)
-      (mcp-error (str "agent_status failed: " (:err result)))
-      (mcp-success (or (:value result) "nil")))))
+      (mcp-error (str "Server connection: DOWN\n" (:err result)))
+      (mcp-success (str "Server connection: OK\n" (or (:value result) "nil"))))))
 
 (defn- run-hook-pipeline!
   "Run the hook pipeline after a successful clojure_replace.
@@ -1067,7 +1074,7 @@ You must then either:
    This fixes the MCP resilience issue where cancelling an eval would
    brick the entire MCP server."
   []
-  (log-info "MCP Server v0.3.0 starting (async mode)...")
+  (log-info "MCP Server v0.4.1 starting (async mode)...")
   (init-orchestrator-session!)
 
   ;; Main message loop - non-blocking to stay responsive
