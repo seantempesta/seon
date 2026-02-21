@@ -56,7 +56,8 @@
   (testing "session IDs are 4 hex characters"
     (let [result (session/start-agent-session!
                    {::session/node *test-node*
-                    ::session/namespace 'test.id.format})]
+                    ::session/namespace 'test.id.format
+                    ::session/pool nil})]
       (is (= :running (::session/status result)))
       (is (string? (::session/id result)))
       (is (= 4 (count (::session/id result))))
@@ -70,7 +71,8 @@
   (testing "starts a session (no pool = nil port)"
     (let [result (session/start-agent-session!
                    {::session/node *test-node*
-                    ::session/namespace 'test.start})]
+                    ::session/namespace 'test.start
+                    ::session/pool nil})]
       (is (= :running (::session/status result)))
       (is (some? (::session/id result)))
       (is (= 'test.start (::session/namespace result)))
@@ -83,7 +85,8 @@
   (testing "stops a running session"
     (let [started (session/start-agent-session!
                     {::session/node *test-node*
-                     ::session/namespace 'test.stop})
+                     ::session/namespace 'test.stop
+                     ::session/pool nil})
           session-id (::session/id started)]
       (is (= :running (::session/status started)))
 
@@ -109,7 +112,8 @@
   (testing "returns session info for running session"
     (let [started (session/start-agent-session!
                     {::session/node *test-node*
-                     ::session/namespace 'test.get})
+                     ::session/namespace 'test.get
+                     ::session/pool nil})
           session-id (::session/id started)
           retrieved (session/get-agent-session
                       {::session/node *test-node*
@@ -132,10 +136,12 @@
   (testing "lists all active sessions"
     (session/start-agent-session!
       {::session/node *test-node*
-       ::session/namespace 'test.list1})
+       ::session/namespace 'test.list1
+       ::session/pool nil})
     (session/start-agent-session!
       {::session/node *test-node*
-       ::session/namespace 'test.list2})
+       ::session/namespace 'test.list2
+       ::session/pool nil})
 
     (let [sessions (session/list-agent-sessions
                      {::session/node *test-node*})]
@@ -148,7 +154,8 @@
   (testing "returns nil port when no pool (no pool in tests)"
     (let [started (session/start-agent-session!
                     {::session/node *test-node*
-                     ::session/namespace 'test.port})
+                     ::session/namespace 'test.port
+                     ::session/pool nil})
           session-id (::session/id started)
           result (session/get-session-port
                    {::session/node *test-node*
@@ -206,7 +213,8 @@
   (testing "sessions track eval activity"
     (let [started (session/start-agent-session!
                     {::session/node *test-node*
-                     ::session/namespace 'test.activity})
+                     ::session/namespace 'test.activity
+                     ::session/pool nil})
           session-id (::session/id started)]
 
       ;; Initial state: 0 evals, no current eval
@@ -254,7 +262,8 @@
   (testing "list-agent-sessions includes observability fields"
     (let [started (session/start-agent-session!
                     {::session/node *test-node*
-                     ::session/namespace 'test.obs})
+                     ::session/namespace 'test.obs
+                     ::session/pool nil})
           session-id (::session/id started)]
 
       ;; Do some evals
@@ -277,7 +286,8 @@
   (testing "can set nREPL session ID for existing session"
     (let [started (session/start-agent-session!
                     {::session/node *test-node*
-                     ::session/namespace 'test.nrepl.sid})
+                     ::session/namespace 'test.nrepl.sid
+                     ::session/pool nil})
           session-id (::session/id started)
           nrepl-sid "test-nrepl-session-123"]
 
@@ -303,7 +313,8 @@
   (testing "get-session-port returns nrepl-session-id when set"
     (let [started (session/start-agent-session!
                     {::session/node *test-node*
-                     ::session/namespace 'test.port.sid})
+                     ::session/namespace 'test.port.sid
+                     ::session/pool nil})
           session-id (::session/id started)
           nrepl-sid "my-nrepl-session-456"]
 

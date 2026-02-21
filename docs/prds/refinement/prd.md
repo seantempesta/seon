@@ -1,9 +1,9 @@
 # PRD: Refinement — One System, End to End
 
-**Status:** In Progress (Tracks 0-3 mostly complete, Track 4 + ctx unification remaining)
+**Status:** In Progress (Tracks 0-3, 5 complete; Track 4 + E2E verification remaining)
 **Priority:** High
-**Branch:** `feature/refinement` — 15 commits ahead of main
-**Last updated:** 2026-02-20
+**Branch:** `feature/refinement` — ~28 commits ahead of main
+**Last updated:** 2026-02-21
 
 ---
 
@@ -34,20 +34,25 @@ An agent uses the Super REPL (via MCP) to execute code in a remote Clojure proce
 - Datalevin skill created (`.claude/skills/datalevin/SKILL.md`), xtdb-queries skill deleted
 - CLAUDE.md and AGENT.md updated: all XTDB refs → Datalevin
 - **5 files have intentional XTDB mentions** (accurate comments like "XTDB has been removed")
-- **483 tests, 2417 assertions, 0 failures** (down from 712 — deleted tests for removed code)
+- **494 tests, 0 failures** (down from 712 — deleted tests for removed code, added new tests)
 
-### Track 2: Unified Agent Runtime — ~75% DONE
+### Track 2: Unified Agent Runtime — ~95% DONE
 **Done:**
 - Pool layer: `claim!`, `release-session!`, `get-jvm-by-session`, `::session->port` tracking (`src/seon/flow/pool.clj`)
 - `orchestrator/nrepl.clj` DELETED (536 lines) + tests
 - System wiring: `:seon/orchestrator-sessions` depends on `:seon/agent-pool`
 - Session tests simplified for pool-based model
-
-**Done (Track 5):**
 - `session.clj` migrated from `seon.agent.ctx` to `seon.ctx` — `agent.ctx` deleted
-- `health.clj` has dead dynamic requires of deleted nrepl (gracefully degraded)
-- No e2e verification (MCP eval → pool JVM → `@*ctx*` → Observatory)
+- Ctx serialization fixed: `pool.clj` `claim!` filters non-serializable keys, uses EDN string
+
+**Remaining:**
+- E2e verification (MCP eval → pool JVM → `@*ctx*` → Observatory)
 - Auto-proxy injection not started
+
+### Phase 1: DB Write Coordination — DONE
+- `seon.db` — agent-facing API (`transact!`, `q`, `pull`, `pause-writes!`, `resume-writes!`)
+- `seon.db.datalevin.writer` — flow step-fn for coordinated writes
+- All 23 `d/transact!` callsites identified for migration (Track 4)
 
 ### Track 3: Flow Logging + Tracing — ~90% DONE
 **Done:**
@@ -108,7 +113,7 @@ After Tracks 4 and 5:
 3. **Honesty > completion.** Agents should terminate early and explain how to split work rather than leaving hidden breakage. (Added to CLAUDE.md and AGENT.md.)
 4. **The MCP REPL session can go stale** after server restart. `bin/mcp-server` now self-heals by re-cloning the nREPL session.
 5. **Kill JVMs with `pkill -9 -f "java.*seon"`** not `pkill -f "clojure.*seon"`.
-6. **`seon.agent.ctx` and `seon.ctx` are not drop-in replacements.** agent.ctx has validation + persistence that ctx doesn't. Need proper merge.
+6. **`seon.agent.ctx` and `seon.ctx` were not drop-in replacements.** agent.ctx had validation + persistence that ctx didn't. Now unified into `seon.ctx` with `::validate?` and `::reserved-keys` options.
 7. **Use `user/search` with `:files`** when debugging — Gemini can't help without seeing the actual code.
 
 ---
@@ -123,8 +128,11 @@ After Tracks 4 and 5:
 | `src/seon/flow/harness/bridge.clj` | TCP bridge for cross-JVM fn calls |
 | `src/seon/flow/harness/proxy.clj` | Transparent proxy for cross-ns routing |
 | `src/seon/orchestrator/session.clj` | Agent session lifecycle (uses pool) |
-| `src/seon/ctx.clj` | Context system (to be extended) |
-| `src/seon/agent/ctx.clj` | Old ctx system (to be merged into ctx.clj then deleted) |
+| `src/seon/ctx.clj` | Unified context system (validation, reserved keys) |
+| `src/seon/db.clj` | Agent-facing DB API (transact!, q, pull, pause/resume) |
+| `src/seon/db/datalevin/writer.clj` | Flow step-fn for coordinated writes |
+| `src/seon/dev/test.clj` | REPL-first test system (run-tests, test-affected, test-gen) |
+| `src/seon/dev/test_select.clj` | Dependency-aware test namespace selection |
 | `src/seon/render.clj` | `find-renderer` + Datalevin resolution cache |
 | `src/seon/graph/scanner.clj` | Code scanner for graph DB |
 | `src/seon/ns/routes.clj` | Namespace browser routes |
@@ -153,8 +161,8 @@ After Tracks 4 and 5:
 
 ## Coordination
 
-- **Track 5 (ctx unification) should run first** — Track 2 completion depends on it
-- **Track 4 (render E2E) can run in parallel** with Track 5 — independent concern
+- **Track 5 (ctx unification) — DONE**
+- **Track 4 (render E2E) — next up**
 - **Track 6 (e2e verification) runs last** — depends on everything else
 - Each agent edits max ~7 files
 - Orchestrator reviews commits, resolves conflicts, runs integration
@@ -163,9 +171,9 @@ After Tracks 4 and 5:
 
 ## Success Criteria
 
-1. `grep -ri "xtdb" src/` → only intentional comments
-2. Only ONE ctx system: `seon.ctx` — no `seon.agent.ctx` in active code
+1. ✅ `grep -ri "xtdb" src/` → only intentional comments
+2. ✅ Only ONE ctx system: `seon.ctx` — `seon.agent.ctx` deleted
 3. Launch agent via MCP → pool JVM claimed → `@*ctx*` returns session context → visible in Observatory
 4. Cross-ns call routes through flow → visible in trace logs
 5. `/ns/seon.health.workout` renders in browser via render pipeline
-6. Full test suite: 0 failures, 0 errors
+6. ✅ Full test suite: 494 tests, 0 failures

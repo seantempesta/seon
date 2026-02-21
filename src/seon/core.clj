@@ -20,6 +20,7 @@
    [integrant.repl :as ig-repl]
    [integrant.repl.state :as state]
    [seon.config :as config]
+   [seon.db :as db]
    [seon.env :refer [defaults]]
 
    ;; Load all system component namespaces
@@ -96,6 +97,8 @@
        (Runtime/getRuntime)
        (Thread. ^Runnable (fn []
                             (log/info "Shutdown signal received")
+                            (log/info "Flushing writer flows...")
+                            (db/shutdown-writers!)
                             (stop-app)
                             (shutdown-agents))))
 

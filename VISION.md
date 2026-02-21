@@ -36,13 +36,13 @@ McCarthy designed Lisp for AI. Maybe the killer app was always agents writing Li
 
 ### The Right Database
 
-XTDB provides bitemporal history:
-- **Valid time**: When was this fact true in the world?
-- **Transaction time**: When did we record this fact?
+Datalevin is an embedded Datalog database on LMDB:
+- **Datomic-compatible** - EAV datoms, pull API, Datalog queries
+- **Embedded** - No separate process, fast local storage
+- **Agent isolation** - Each agent gets namespace-scoped database via connection manager
+- **ACID transactions** - Reliable writes with proper isolation
 
-Agents can query: "What did this function return last week?" "How has this data evolved?" "What changed between working and broken?"
-
-Most databases can't answer these questions. For agents learning from experience, they're essential.
+Agents query data with Datalog: "What functions return this schema?" "Which namespaces depend on this one?" Session history and messages persist across restarts.
 
 ### The Right Contracts
 
@@ -81,8 +81,10 @@ Malli schemas with fully namespaced keys create machine-readable contracts:
 
 **What exists now:**
 - Each agent gets isolated nREPL (own port, own REPL state)
-- Each agent gets isolated XTDB database
+- Each agent gets isolated Datalevin database (namespace-scoped via connection manager)
 - Each agent gets isolated log files
+- Pool-based JVM model: pre-warmed JVMs with isolated nREPL + Datalevin connections
+- `seon.flow.pool` manages `claim!`/`release-session!` lifecycle
 - Registry tracks running agents
 - Health checks detect orphaned resources
 
@@ -102,6 +104,9 @@ Malli schemas with fully namespaced keys create machine-readable contracts:
 - Generative testing via Malli schemas
 - AI review (Gemini) for style/correctness
 - Hooks block on test failure
+- REPL-first test system (`seon.dev.test`) with structured results (maps, not text)
+- Dependency-aware testing (`seon.dev.test-select`) uses code graph for smart test selection
+- Kaocha config with unit/integration suite split (494 unit tests, 13 integration tests)
 
 **What's next:**
 - **Semantic diff** - Did behavior change, not just syntax?
@@ -143,9 +148,9 @@ Malli schemas with fully namespaced keys create machine-readable contracts:
 ### Layer 6: Learning from History
 
 **What exists now:**
-- All agent messages persisted to XTDB
-- Temporal queries available
+- All agent messages persisted to Datalevin
 - Session metadata (cost, duration, status)
+- Flow event tracing for cross-JVM calls
 
 **What's next:**
 - **Session replay** - Re-run agent sessions to understand decisions
@@ -178,13 +183,18 @@ Malli schemas with fully namespaced keys create machine-readable contracts:
 | Component | Description |
 |-----------|-------------|
 | Agent orchestration | Launch, monitor, interrupt agents via REPL |
-| Resource isolation | Isolated nREPL, XTDB, logs per agent |
+| Resource isolation | Isolated nREPL, Datalevin, logs per agent |
 | Dev hooks | Tests + AI review on every edit |
 | Observatory UI | Watch agent progress, view logs |
 | Health system | Component checks, orphan cleanup |
 | Schema registry | Malli schemas queryable at runtime |
-| Message persistence | All messages saved to XTDB |
+| Message persistence | All messages saved to Datalevin |
 | SSE infrastructure | Real-time UI updates |
+| REPL-first test system | `seon.dev.test` + `seon.dev.test-select` with structured results |
+| DB write coordination | `seon.db` + `seon.db.datalevin.writer` flow step-fn |
+| Ctx unification | Single `seon.ctx` system (`seon.agent.ctx` deleted) |
+| Timbre migration | 5 files switched from clojure.tools.logging |
+| Agent robustness | Pool-based JVM model, health checks, orphan cleanup |
 
 ### In Progress
 
@@ -192,7 +202,6 @@ Malli schemas with fully namespaced keys create machine-readable contracts:
 |-----------|-----|--------|
 | Namespace UI vision | [`namespace-ui`](docs/prds/namespace-ui/prd.md) | Vision complete |
 | Observatory polish | [`observatory-polish`](docs/prds/observatory-polish/prd.md) | Active |
-| Agent robustness | [`stability-improvements`](docs/prds/stability-improvements/prd.md) | Done |
 
 ### Next Up
 

@@ -61,3 +61,6 @@
 [submodule "reference-code/kaocha"]
 	path = reference-code/kaocha
 	url = https://github.com/lambdaisland/kaocha.git
+[submodule "reference-code/claude-code-lsps"]
+	path = reference-code/claude-code-lsps
+	url = https://github.com/boostvolt/claude-code-lsps.git

@@ -29,6 +29,7 @@
    - Default credentials: datalevin:datalevin (change in production!)"
   (:require [integrant.core :as ig]
             [clojure.java.io :as io]
+            [seon.db.datalevin.backup :as backup]
             [taoensso.timbre :as log])
   (:import [java.net Socket InetSocketAddress]))
 
@@ -166,17 +167,42 @@
 ;;; Integrant Component
 ;;; ---------------------------------------------------------------------------
 
+(defn- delete-dir-recursive!
+  "Delete directory and all contents."
+  [^java.io.File dir]
+  (when (.exists dir)
+    (run! #(.delete ^java.io.File %) (reverse (file-seq dir)))))
+
+(defn- attempt-recovery!
+  "Attempt LMDB recovery: restore from backup or clear data directory."
+  [root]
+  (let [backup-dir "data/backups"
+        backups (backup/list-backups {::backup/backup-dir backup-dir})]
+    (if (seq backups)
+      (do
+        (log/warn "Restoring from most recent backup" {:backup (::backup/backup-path (first backups))})
+        (backup/restore! {::backup/backup-path (::backup/backup-path (first backups))
+                          ::backup/data-dir root}))
+      (do
+        (log/warn "No backups available, clearing data directory" {:root root})
+        (delete-dir-recursive! (io/file root))
+        (.mkdirs (io/file root))))))
+
 (defmethod ig/init-key :seon/datalevin-server
   [_ {:keys [port root opts]
       :or {port 8898
            root "data/datalevin"}}]
   (log/info "Starting Datalevin server..." {:port port :root root})
-  (let [server (create-server {:port port :root root :opts opts})]
-    (start-server! server)
-    ;; Return component state with config for health checks
-    {:server server
-     :port port
-     :root root}))
+  (let [start-fn (fn []
+                   (let [server (create-server {:port port :root root :opts opts})]
+                     (start-server! server)
+                     {:server server :port port :root root}))]
+    (try
+      (start-fn)
+      (catch Throwable e
+        (log/warn e "LMDB corruption detected, attempting recovery from backup")
+        (attempt-recovery! root)
+        (start-fn)))))
 
 (defmethod ig/halt-key! :seon/datalevin-server
   [_ {:keys [server]}]
