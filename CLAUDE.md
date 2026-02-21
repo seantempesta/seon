@@ -264,21 +264,41 @@ Returns component status (Datalevin, nREPL, agents) with latencies. HTTP 200 = h
 
 ### Running Tests
 
-```bash
-# Specific namespace (preferred - fast feedback)
-clojure -M:test -m kaocha.runner --focus seon.ai.claude-test
+**REPL-first (preferred — structured data, no grep gymnastics):**
 
-# Specific test var
-clojure -M:test -m kaocha.runner --focus seon.ai.claude-test/constants-test
+```clojure
+;; Focused namespace — returns structured data
+(user/run-tests 'seon.ai.claude-test)
+;; => {::success true ::test-count 5 ::pass-count 5 ::failures [] ...}
 
-# All tests (slow - use sparingly)
-clojure -M:test -m kaocha.runner
+;; Single var
+(user/run-tests 'seon.ai.claude-test/constants-test)
 
-# Watch mode (re-runs on file changes)
-clojure -M:test -m kaocha.runner --watch --focus seon.ai.claude-test
+;; Multiple namespaces
+(user/run-tests ['seon.db-test 'seon.graph.query-test])
+
+;; Dependency-aware — tests ns + all dependents
+(user/test-affected 'seon.graph.query)
+
+;; Generative tests on schema-annotated functions
+(user/test-gen 'seon.graph.query)
+
+;; Inspect last results without re-running
+(user/last-test-results)
+(:failures (user/last-test-results))
 ```
 
-**Always run focused tests first** when fixing bugs or verifying changes. Only run the full suite before committing or when changes affect multiple namespaces.
+Results are **data** (maps), not text. Store them: `(def *r* (user/run-tests 'foo-test))` then inspect `(:failures *r*)`.
+
+**CLI (for full suite runs):**
+
+```bash
+bin/test                           # Unit tests only (fast, <60s)
+bin/test seon.graph.query-test     # Focused namespace
+bin/test --all                     # Everything including integration
+```
+
+**Always use REPL-first** when developing. Only use CLI for final verification.
 
 For test patterns, mocking, and debugging test failures, invoke `/clojure-testing`.
 

@@ -137,7 +137,24 @@ This pattern is recursive. If the orchestrator decomposes and launches a sub-age
 2. **Invoke relevant skills** - Before searching, check if a skill covers your task
 3. **Understand before coding** - Explore existing code, understand patterns
 4. **Make incremental changes** - Small commits of working code
-5. **Test as you go** - The dev hook runs tests automatically on file save
+5. **Test via REPL, never grep CLI output** - Tests return structured data. The pattern:
+   ```clojure
+   ;; Step 1: Run once, save result (runs tests, returns small summary map)
+   (def *r* (user/run-tests 'seon.foo-test))
+   ;; => {::success false ::test-count 5 ::fail-count 1 ::failures [...]}
+
+   ;; Step 2: Inspect failures WITHOUT re-running (zero cost, just data)
+   (:failures *r*)
+   ;; => [{::test-var 'seon.foo-test/bar-test ::expected '(= 1 2) ::actual '(not (= 1 2)) ...}]
+
+   ;; Step 3: After fixing, run again
+   (def *r* (user/run-tests 'seon.foo-test))
+
+   ;; Even if you forgot to def, results are cached:
+   (user/last-test-results)
+   ```
+   For dependency-aware testing: `(user/test-affected 'seon.foo)` tests foo + all dependents.
+   **NEVER** shell out to `clojure -M:test` and grep output. That wastes tokens and time.
 6. **Use Gemini when stuck** - After 2 failed attempts, search with file context
 
 ---
