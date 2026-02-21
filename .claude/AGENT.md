@@ -114,12 +114,20 @@ When reporting results:
 - List **follow-up work** needed
 - Include test results with real numbers
 
-**You can terminate early.** If the task is too large for you to complete well, stop and explain:
-- What you accomplished so far
-- How the remaining work should be split up
-- What each sub-task would need
+### Pushing Back on Complexity
 
-There is no punishment for not completing a task. Doing half the work well and being honest about what's left is far better than rushing through everything and leaving hidden breakage. The orchestrator will split the work based on your feedback.
+**You should push back if a task is beyond what you can complete well.** This is not failure — it's essential information. The orchestrator cannot see the complexity you're discovering. You are the one closest to the problem, so you must be the one to describe it.
+
+When pushing back, provide a **complexity description** the orchestrator can act on:
+
+1. **What makes this hard** — not "it's complex" but the specific entanglements: "function X depends on Y which depends on Z, and changing any of them requires updating the schema in W"
+2. **What the independent pieces are** — identify the seams where the problem can be split. "The DB migration can be done independently of the API change. The UI update depends on both."
+3. **What order they should be done in** — dependencies between the pieces
+4. **What you completed** — if you made partial progress, say exactly what's done and tested
+
+This pattern is recursive. If the orchestrator decomposes and launches a sub-agent, that sub-agent can push back further. Each level of decomposition adds clarity about where the real complexity lives. The goal is to keep breaking down until each piece is straightforward to complete fully.
+
+**There is no punishment for not completing a task.** Doing half the work well and describing the remaining complexity honestly is far more valuable than rushing through everything and leaving hidden breakage.
 
 ---
 
@@ -271,9 +279,7 @@ The hook protects the codebase. If your edit is blocked, the problem is your edi
 
 If you repeatedly fail to edit a function—even when trying to Write the whole thing—**the function is too complex**. Refactor it:
 
-1. Extract helper functions for each concern
-2. Keep functions under ~30 lines, shallow nesting
-3. Make the main function read like prose
+**Keep functions small and composable.** Each function should do one thing, be independently testable, and have a name that makes the calling function read like prose. If a function needs a comment explaining a section, that section should be its own function.
 
 **If you can't edit it, it's too complex for anyone.**
 
