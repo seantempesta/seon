@@ -15,7 +15,8 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn cleanup-sessions
-  "Fixture that cleans up sessions after each test."
+  "Fixture that cleans up sessions after each test.
+   Also resets dl-mgr to nil so tests don't try to connect to a remote Datalevin."
   [f]
   ;; Clear any existing sessions
   (doseq [[id _] @(deref #'seon.orchestrator.session/session-registry)]
@@ -23,15 +24,18 @@
       (session/stop-agent-session! {::session/node *test-node* ::session/id id})
       (catch Exception _)))
   (reset! @#'seon.orchestrator.session/session-registry {})
-  (try
-    (f)
-    (finally
-      (doseq [[id _] @(deref #'seon.orchestrator.session/session-registry)]
-        (try
-          (session/stop-agent-session! {::session/node *test-node* ::session/id id})
-          (catch Exception _)))
-      (Thread/sleep 50)
-      (reset! @#'seon.orchestrator.session/session-registry {}))))
+  (let [orig-dl-mgr @(deref #'seon.orchestrator.session/dl-mgr)]
+    (reset! @#'seon.orchestrator.session/dl-mgr nil)
+    (try
+      (f)
+      (finally
+        (doseq [[id _] @(deref #'seon.orchestrator.session/session-registry)]
+          (try
+            (session/stop-agent-session! {::session/node *test-node* ::session/id id})
+            (catch Exception _)))
+        (Thread/sleep 50)
+        (reset! @#'seon.orchestrator.session/session-registry {})
+        (reset! @#'seon.orchestrator.session/dl-mgr orig-dl-mgr)))))
 
 (use-fixtures :each (fn [f]
                       (with-test-node
