@@ -122,12 +122,19 @@
 
 ;;; --- Writer Flow Coordination ---
 
+(defn all-conns
+  "Returns all connections that have active writer flows."
+  []
+  (mapv :conn (vals @writers)))
+
 (defn pause-writes!
   "Pause the writer flow for conn, triggering d/sync via the transition hook.
+   Blocks until the pause transition completes (flush is done).
    Use before backups to ensure all writes are flushed."
   [conn]
   (when-let [{:keys [flow]} (get @writers (conn-id conn))]
     (flow/pause flow)
+    (flow/ping flow 5000)
     (log/info "Paused writer for conn" (conn-id conn))))
 
 (defn resume-writes!
@@ -138,13 +145,17 @@
     (log/info "Resumed writer for conn" (conn-id conn))))
 
 (defn shutdown-writers!
-  "Stop all writer flows. Call on system shutdown."
+  "Stop all writer flows safely. Uses pause -> ping -> stop to ensure
+   the transition hook (flush) completes before stopping the flow.
+   Call on system shutdown before closing Datalevin connections."
   []
   (doseq [[id {:keys [flow]}] @writers]
     (try
+      (flow/pause flow)
+      (flow/ping flow 5000)
       (flow/stop flow)
       (log/debug "Stopped writer flow" id)
-      (catch Exception e
+      (catch Throwable e
         (log/warn e "Error stopping writer flow" id))))
   (reset! writers {})
   (log/info "All writer flows stopped"))
