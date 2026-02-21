@@ -19,6 +19,15 @@
   :ttl-ms #or [#env DATALEVIN_CONN_TTL_MS 300000]           ; 5 minutes
   :cleanup-interval-ms #or [#env DATALEVIN_CLEANUP_MS 60000]}
 
+ ;; Graph Database (Code Graph + Runtime Registry)
+ ;; Owns the seon-graph Datalevin connection used by:
+ ;; - Code scanner (code graph entities)
+ ;; - Runtime registry (namespace instance tracking)
+ ;; - Render system (function resolution)
+ ;; Initializes runtime registry and marks crashed instances on startup.
+ :seon/graph-db
+ {:connection-manager #ig/ref :seon/connection-manager}
+
  ;; Malli Schema Registry
  ;; Loads all domain schemas on startup
  :seon/schema-registry {}
@@ -73,9 +82,9 @@
 
  ;; Code Scanner (Knowledge Graph)
  ;; Analyzes codebase at startup and populates Datalevin with the knowledge graph.
- ;; Depends on connection-manager for Datalevin access.
+ ;; Receives graph connection from :seon/graph-db component.
  :seon/code-scanner
- {:connection-manager #ig/ref :seon/connection-manager
+ {:graph-db #ig/ref :seon/graph-db
   :paths ["src/"]
   :enabled? #profile {:dev true
                       :test false

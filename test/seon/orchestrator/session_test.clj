@@ -57,15 +57,15 @@
 ;;; ---------------------------------------------------------------------------
 
 (deftest session-id-format-test
-  (testing "session IDs are 4 hex characters"
+  (testing "session IDs are 6 hex characters"
     (let [result (session/start-agent-session!
                    {::session/node *test-node*
                     ::session/namespace 'test.id.format
                     ::session/pool nil})]
       (is (= :running (::session/status result)))
       (is (string? (::session/id result)))
-      (is (= 4 (count (::session/id result))))
-      (is (re-matches #"[a-f0-9]{4}" (::session/id result))))))
+      (is (= 6 (count (::session/id result))))
+      (is (re-matches #"[a-f0-9]{6}" (::session/id result))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Session Lifecycle Tests
