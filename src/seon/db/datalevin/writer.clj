@@ -91,7 +91,7 @@
            ;; Flush by issuing an empty transaction
            (d/transact! conn [])
            (log/debug "Flushed writes on" (name transition) "for" (::db-name state)))
-         (catch Exception e
+         (catch Throwable e
            (log/warn e "Failed to flush on" (name transition) "for" (::db-name state))))
        state)
 
