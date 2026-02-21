@@ -508,7 +508,8 @@
   [session-id message-stats]
   (when-let [stats (get message-stats session-id)]
     (when-let [ts (:latest-ts stats)]
-      (.toEpochMilli (.toInstant ts)))))
+      (let [instant (if (instance? Instant ts) ts (.toInstant ts))]
+        (.toEpochMilli instant)))))
 
 (def ^:private stuck-threshold-ms
   "Milliseconds without activity before considering an agent stuck (2 minutes)."
