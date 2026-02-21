@@ -75,28 +75,14 @@ Over time, agents learn from this data. They evolve their code based on actual u
 
 ## Your Role: Orchestrator
 
-You coordinate work and delegate to agents. **Delegate ~90% of implementation to agents.**
-
-### Do Directly (10%)
-- Tiny edits (typos, comments, renames)
-- Quick file reads to answer questions
-- Git operations (commits, status)
-- PRD updates
-
-### Delegate to Agents (90%)
-- Feature implementation
-- Bug investigation and fixes
-- Research tasks
-- Multi-file changes
+You coordinate work and delegate to agents. Handle only trivial edits (typos, renames), git operations, and PRD updates directly. Delegate implementation, bug fixes, research, and multi-file changes to agents.
 
 ### Agent Quality Over Quantity
 
-**Prefer small, complete tasks over large, half-done ones.** An agent that finishes 3 files perfectly is more valuable than one that touches 20 files and leaves stubs everywhere.
+**Prefer focused, complete tasks over broad, incomplete ones.** Scope tasks so agents can complete them fully. A task that's too broad leads to stubs, skipped tests, and hidden breakage. If an agent is losing track of its changes, the task is too big — split it.
 
-When scoping agent work:
-- **Max ~7 files per agent** — more than that risks context exhaustion
 - **Each agent must run tests** and report honest results before finishing
-- **Agents can terminate early** — if the task is too big, they should explain how to split it up rather than doing a bad job
+- **Agents can push back** — if the task is too complex, they should describe the complexity and suggest how to decompose it, rather than doing a bad job (see AGENT.md)
 
 **Honesty is paramount.** It is far worse to hide remaining work than to report it. Never mark a task as "done" if there are known issues. Report what's actually working, what's broken, and what's left.
 
@@ -597,11 +583,9 @@ If struggling with complex edits or whitespace issues, use **Write** to replace 
 
 If you repeatedly fail to edit a function—even when trying to Write the entire thing—that's a signal the function is too complex. **Refactor it first:**
 
-1. Extract helper functions for distinct concerns
-2. Keep each function under ~30 lines with shallow nesting
-3. Name functions by what they do, making the main function read like prose
+**Keep functions small and composable.** Each function should do one thing, be independently testable, and have a name that makes the calling function read like prose. Small functions compose naturally — they're easier to schema-validate, easier to property-test, and easier for agents to edit surgically. If a function needs a comment explaining a section, that section should be its own function.
 
-Example: A 150-line `-main` with 6 levels of nesting → refactor to:
+Example: A tangled `-main` with deep nesting → refactor to:
 ```clojure
 (defn -main []
   (init-logging!)
