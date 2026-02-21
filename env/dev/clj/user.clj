@@ -278,6 +278,42 @@
         (assoc :num-turns (:seon.ai.claude/num-turns result))))))
 
 ;; ========================================
+;; REPL-First Test System
+;; ========================================
+
+(defn run-tests
+  "Run tests. Returns structured data.
+   (run-tests 'seon.graph.query-test)           ; single ns
+   (run-tests 'seon.graph.query-test/some-test) ; single var
+   (run-tests ['seon.db-test 'seon.graph.query-test]) ; multiple"
+  [target]
+  ((requiring-resolve 'seon.dev.test/test) target))
+
+(defn test-affected
+  "Run tests for ns + all dependents. Returns structured data.
+   (test-affected 'seon.graph.query)
+   (test-affected 'seon.graph.query :depth :transitive)"
+  [ns-sym & opts]
+  (apply (requiring-resolve 'seon.dev.test/test-affected) ns-sym opts))
+
+(defn test-gen
+  "Run generative tests. Returns structured data.
+   (test-gen 'seon.graph.query)
+   (test-gen 'seon.graph.query/dependents-of :num-tests 50)"
+  [target & opts]
+  (apply (requiring-resolve 'seon.dev.test/test-gen) target opts))
+
+(defn last-test-results
+  "Most recent test run result."
+  []
+  ((requiring-resolve 'seon.dev.test/last-results)))
+
+(defn test-history
+  "Last n test run results (default 10)."
+  ([] ((requiring-resolve 'seon.dev.test/results-history)))
+  ([n] ((requiring-resolve 'seon.dev.test/results-history) n)))
+
+;; ========================================
 ;; Dependency-Aware Test Selection
 ;; ========================================
 
