@@ -46,7 +46,7 @@
         (d/close conn)
         (delete-dir dir)))))
 
-(use-fixtures :each with-populated-graph)
+(use-fixtures :once with-populated-graph)
 
 ;;; ---------------------------------------------------------------------------
 ;;; Dependency Query Tests
