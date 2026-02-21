@@ -803,3 +803,202 @@ The router:
 - **TCP bridge** -- for external JVM communication, already works
 
 What's new is the **routing layer** that sits between callers and the bridge/direct-call decision.
+
+---
+
+## Schema-Driven Namespace Routing
+
+### The Insight
+
+Routing between namespace instances should be driven by **data shapes** (Malli schemas), not manual wiring. The system already has all the pieces:
+
+1. **Malli schemas** on every function declare what data they accept and produce
+2. **The code graph** (in Datalevin) indexes all functions with their schemas, including `:seon.spec/contains-keys`
+3. **Datalevin** tracks which namespace instances are running (via runtime registry)
+4. **The schema registry** (`seon.schema`) knows all 628+ registered schemas
+
+So routing becomes: "I have data shaped like X, find me a running instance that has a function accepting X." No config files, no manual registration -- the router resolves from schemas + the live instance table.
+
+### REPL Validation (2026-02-21)
+
+The building blocks were tested in the REPL. Key findings:
+
+**What works today:**
+- The graph stores 660 specs with `:seon.spec/contains-keys` indexed (213 map specs)
+- 66 functions have `:seon.fn/input-spec` refs linking them to their input schemas
+- Key-based Datalog routing works: query `contains-keys` to find candidate specs, join to functions via `input-spec`
+- Malli validation is fast: 2.3ms to validate data against 44 candidate schemas
+- The `find-routes` function (below) correctly finds and ranks matches by specificity
+
+**Limitations discovered:**
+- Only functions with `:malli/schema` metadata get `input-spec` links (66 of ~800+ functions). Coverage grows as more functions get schemas.
+- Malli map schemas are **open by default** -- naive `m/validate` produces false positives. Key-based routing (contains-keys subset check) is more precise and should be the primary mechanism.
+- Schema definitions stored as strings reference other registered schemas by keyword. Parsing requires the live registry, which is fine at runtime but means the routing table can't be built from Datalevin alone -- it needs the running JVM's schema registry.
+
+### Three Levels of Routing Control
+
+**Level 1: Automatic (default, zero effort)**
+
+A namespace defines functions with Malli schemas. The system discovers them via the code graph. When data arrives matching a function's input schema, it routes there. The namespace does nothing special.
+
+```clojure
+(ns seon.trading.signals
+  (:require [seon.schema :as schema]))
+
+(schema/register! ::symbol [:string {:min 1}])
+(schema/register! ::price [:double {:min 0}])
+(schema/register! ::analyze-request
+  [:map [::symbol ::symbol] [::price ::price]])
+
+;; This function's schema says it accepts {::symbol string?, ::price double?}
+;; The system discovers this automatically via the code graph and routes matching data here.
+(defn analyze
+  {:malli/schema [:=> [:cat ::analyze-request] :any]}
+  [signal]
+  ...)
+```
+
+The scanner extracts `:seon.spec/contains-keys #{:seon.trading.signals/symbol :seon.trading.signals/price}` and links via `:seon.fn/input-spec`. The router finds this function when data contains those keys.
+
+**Level 2: Namespace preferences (optional conventional functions)**
+
+A namespace can define conventional functions to control routing behavior:
+
+```clojure
+;; Optional: how to pick among multiple instances of this namespace
+(defn route-preference []
+  {:strategy :least-loaded})  ;; or :round-robin, :sticky, :broadcast
+
+;; Optional: priority when multiple namespaces can handle the same data shape
+(defn route-priority [] 10)  ;; higher = preferred
+```
+
+The router looks for these functions by name at discovery time. If absent, defaults apply (`:strategy :single`, priority 0).
+
+**Level 3: Instance-level claims (runtime)**
+
+A specific running instance can claim specific data patterns at runtime:
+
+```clojure
+;; At startup, this instance claims AAPL signals specifically
+(defn on-start [ctx]
+  (runtime/claim! ctx {:seon.trading.signals/symbol "AAPL"}))
+```
+
+Claims are value-specific refinements stored in Datalevin. The router checks claims first (most specific), then falls back to schema matching (less specific).
+
+### Routing Resolution Algorithm
+
+```
+route(data) -> destination
+  1. Extract keys from data map: #{:seon.trading.signals/symbol :seon.trading.signals/price}
+
+  2. Check instance claims (Datalevin):
+     - Find claims where claim-pattern is a subset of data
+     - If found, route to claiming instance
+     - Claims are most specific, checked first
+
+  3. Key-based schema lookup (Datalevin, fast):
+     - Query: find specs whose contains-keys are ALL present in data keys
+     - Join to functions via :seon.fn/input-spec
+     - Join to running instances via namespace match against runtime registry
+     - Rank by specificity (most required keys = best match)
+
+  4. Optional: Malli validation (precise, ~2ms):
+     - For top candidates from step 3, parse schema from stored definition
+     - Run m/validate against actual data values (not just key presence)
+     - Eliminates false positives from key-only matching
+
+  5. Apply routing strategy:
+     - If one match: route directly
+     - If multiple matches in same namespace: use route-preference (round-robin, least-loaded)
+     - If multiple matches across namespaces: use route-priority, then specificity
+     - If no match: dead letter queue or error (configurable)
+
+  6. Reply routing:
+     - ::msg/from-id on the request ensures replies go back to sender
+     - Reuses existing bridge promise-per-request-id pattern
+```
+
+### Datalog Queries the Router Uses
+
+**Find functions matching data keys (the core routing query):**
+
+```clojure
+;; Step 1: Datalog finds candidate specs sharing keys with data
+(d/q '[:find ?spec-key ?required-key ?fn-qn ?ns
+        :in $ [?data-key ...]
+        :where
+        [?spec :seon.spec/contains-keys ?data-key]       ;; spec has at least one of our keys
+        [?spec :seon.spec/contains-keys ?required-key]    ;; get ALL required keys for this spec
+        [?spec :seon.spec/key ?spec-key]
+        [?fn :seon.fn/input-spec ?spec]                   ;; function accepts this spec
+        [?fn :seon.fn/qualified-name ?fn-qn]
+        [?fn :seon.fn/namespace ?ns]]
+      @graph-conn (vec data-keys))
+
+;; Step 2: Clojure filters to specs where ALL required keys are in data
+(->> (group-by-spec results)
+     (filter (fn [[_ {:keys [required-keys]}]]
+               (every? data-key-set required-keys)))
+     (sort-by specificity descending))
+```
+
+**Join to running instances:**
+
+```clojure
+;; After finding target namespace, check if it's running
+(d/q '[:find (pull ?r [*])
+        :in $ ?ns
+        :where
+        [?r :seon.runtime/namespace ?ns]
+        [?r :seon.runtime/status :running]]
+      @runtime-conn target-ns)
+```
+
+**Check instance claims:**
+
+```clojure
+;; Claims stored as: {:seon.route.claim/instance-id "a1b2"
+;;                    :seon.route.claim/pattern "{:seon.trading.signals/symbol \"AAPL\"}"}
+(d/q '[:find ?instance-id ?pattern
+        :where
+        [?c :seon.route.claim/instance-id ?instance-id]
+        [?c :seon.route.claim/pattern ?pattern]]
+      @runtime-conn)
+;; Then match in Clojure: (every? (fn [[k v]] (= (get data k) v)) claim-pattern)
+```
+
+### How This Simplifies the Overall Design
+
+**Before:** Manual wiring. Each namespace explicitly names its targets. The flow topology hardcodes which processes connect to which. Adding a new consumer requires editing topology configuration.
+
+**After:** Data-driven discovery. A namespace defines functions with schemas. The system discovers them. Data flows to where it fits. Adding a new consumer means writing a function with the right input schema -- zero configuration.
+
+The router replaces:
+- Manual topology wiring for function dispatch
+- Hardcoded namespace-to-namespace connections
+- The harness's static routing table
+
+It does NOT replace:
+- The flow infrastructure (core.async.flow channels still move data)
+- The TCP bridge (still needed for external JVMs)
+- The harness lifecycle management (start/stop/pause)
+
+### What Happens When No Route Matches
+
+Three options, configurable per-sender:
+
+1. **Error (default):** Return `::msg/status :error` with `::msg/error-type :not-found`. Caller gets immediate feedback.
+2. **Dead letter:** Write unroutable message to Datalevin for inspection. Useful for debugging routing gaps.
+3. **Queue:** Hold message until a matching instance starts. Useful for startup ordering where producers start before consumers.
+
+### Routing Table Lifecycle
+
+The routing table is a cached, derived view. It rebuilds when:
+
+1. **Code graph changes** (scanner runs after code edits) -- new functions/schemas discovered
+2. **Runtime registry changes** (instance starts/stops) -- available targets change
+3. **Claims change** (instance claims/releases patterns) -- specific routing rules change
+
+Rebuild is cheap (~5ms for the Datalog query + Clojure filter). Cache invalidation uses watches on the graph conn and runtime registry atom.

@@ -13,6 +13,7 @@
 | 1 | Runtime registry + schema + unified ID | Pending | -- | Create `seon.runtime` with `generate-id`, register Integrant components |
 | 2 | Session integration | Pending | -- | Sessions write to runtime registry, use unified ID |
 | 2.5 | Instance messaging router | Pending | -- | `::msg/from-id`/`::msg/to-id`, `runtime/send!`, generalize bridge pattern |
+| 2.6 | Schema-driven routing | Pending | -- | `seon.runtime.router`, key-based Datalog lookup, Malli validation, claims |
 | 3 | Agent run entities | Pending | -- | Agent runs persist as `:seon.agent.run/*` |
 | 4 | Flow snapshots | Pending | -- | Snapshot on shutdown/backup |
 | 5 | Ctx unification | Pending | -- | One persistence path, delete `ctx/*` |
@@ -73,12 +74,69 @@ A single agent launch creates THREE IDs: 4-char hex (infra), AI session UUID, Cl
 
 ---
 
+## Schema-Driven Routing Research (2026-02-21)
+
+### REPL Findings
+
+**Graph data available:**
+- 660 specs indexed in the graph DB, 213 with `:seon.spec/contains-keys`
+- 66 functions have `:seon.fn/input-spec` refs linking to their input schema
+- Functions across 15 namespaces are linked (seon.ai.claude, seon.ai.agent, seon.dev.*, seon.health, etc.)
+
+**Key-based routing works:**
+```clojure
+;; Given data keys, find functions that accept data with those keys.
+;; Two-phase: Datalog finds candidates by key overlap, Clojure filters for subset match.
+;; Example: data with {:seon.ai.agent/session-id "a1b2"} routes to:
+;;   seon.ai.agent/get-agent (specificity 1)
+;;   seon.ai.agent/tail (specificity 1)
+```
+
+**Performance:** 2.3ms to validate data against 44 candidate Malli schemas. Datalog key-lookup is sub-millisecond.
+
+**Open map problem:** Malli maps are open by default. `m/validate` against `[:map]` (no required keys) matches anything. Key-based routing via `:seon.spec/contains-keys` is more precise and should be primary. Malli validation is secondary (value-level precision).
+
+**Coverage:** Only 66/800+ functions have input-spec links. These are functions with `:malli/schema` metadata. As schema coverage grows, routing coverage grows automatically.
+
+### Phase 2.6 Implementation Plan
+
+1. Create `src/seon/runtime/router.clj`:
+   - `build-routing-table` -- Datalog query + Clojure filter, returns cached routing table
+   - `route` -- given data map, find best matching function + running instance
+   - `claim!` / `release!` -- instance-level value claims in Datalevin
+   - Routing table cache with invalidation on graph/registry changes
+
+2. Add claim schema to Datalevin:
+   - `:seon.route.claim/instance-id` (string, identity)
+   - `:seon.route.claim/pattern` (string, EDN blob of key-value constraints)
+
+3. Convention functions discovery:
+   - At routing table build time, check each namespace for `route-preference` and `route-priority` vars
+   - Store results in the routing table cache
+
+4. Integration with `runtime/send!` (Phase 2.5):
+   - When `::msg/to-ns` is omitted, use router to find destination from data shape
+   - When provided, skip routing (explicit addressing)
+
+### Malli Capabilities Discovered
+
+- `m/validate` works for runtime shape matching against stored schema definitions (parsed from EDN strings)
+- Schema definitions stored in graph reference other registered schemas by keyword -- parsing requires the live `seon.schema` registry
+- `m/schema` parses stored definition strings; 64/66 parse successfully (2 failures due to edge cases)
+- No built-in subtype/supertype checking in Malli, but not needed -- key-based routing + validation is sufficient
+- Schema registry introspection via `seon.schema/schemas-in-namespace` and `seon.schema/registered-schemas` works
+
+---
+
 ## Open Questions
 
 - [ ] Should `seon.runtime` be an Integrant component itself, or a stateless namespace that takes a conn parameter? (Leaning toward component -- it needs the graph DB conn.)
 - [ ] How to handle the transition period where both `seon.flow.registry` and `seon.runtime` exist? (Phase 7 deletes registry, but intermediate phases need both.)
 - [ ] Should in-process namespace instances have ctx atoms? System components (Datalevin server, HTTP server) don't currently have ctx. Maybe only register them without ctx.
 - [ ] The `seon.orchestrator.session` module has its own Datalevin namespace DB (`seon.orchestrator`). When migrating to master DB, do we need to migrate old data? (Probably not -- session data is ephemeral.)
+- [ ] Schema-driven routing: should the router validate values (Malli) or just check key presence (Datalog)? Key-only is faster and avoids open-map false positives. Value validation adds precision but costs ~2ms per route lookup. Leaning toward key-only with optional value validation for ambiguous cases.
+- [ ] Schema-driven routing: how to handle functions without `:malli/schema` metadata (currently 90%+ of functions)? Options: (a) require schemas for routable functions, (b) fall back to explicit `::msg/to-ns` addressing, (c) gradually add schemas. Leaning toward (b) + (c) -- routing is opt-in via schemas.
+- [ ] Instance claims: should claims be Datalevin entities or in-memory? Datalevin survives restarts but adds write overhead. Claims change rarely so Datalevin seems right.
 
 ---
 
