@@ -4,7 +4,7 @@
 #   ./bin/run        # dev profile (default) - includes nREPL on port 7888
 #   ./bin/run prod   # production profile
 #
-# Starts XTDB, nREPL, HTTP server, and Tailwind watcher (via Integrant).
+# Starts Datalevin, nREPL, HTTP server, and Tailwind watcher (via Integrant).
 # If Caddy is installed, starts HTTP/2 reverse proxy on https://localhost:3030.
 # Ctrl+C to stop cleanly.
 
@@ -16,6 +16,14 @@ if command -v caddy &>/dev/null; then
     caddy start --config Caddyfile 2>>logs/caddy.log
     trap "caddy stop 2>/dev/null" EXIT
     echo "Caddy running on https://localhost:3030 (HTTP/2)"
+fi
+
+# Ensure classpath is fresh (stale .cpcache causes missing-dep errors)
+if [ -f .cpcache/*/classpath ]; then
+    if [ deps.edn -nt .cpcache/*/classpath ]; then
+        echo "deps.edn changed — refreshing classpath..."
+        rm -rf .cpcache
+    fi
 fi
 
 exec clj -J-Xmx4g -M:dev:run "$@"
