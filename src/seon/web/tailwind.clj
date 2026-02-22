@@ -38,7 +38,7 @@
 (defn- start-tailwind-process!
   "Start the Tailwind watcher process.
    Returns the Process object."
-  [{:keys [input output] :as opts}]
+  [{:keys [_input _output] :as opts}]
   (.mkdirs (io/file "logs"))
   (let [command (build-command opts)
         log-file (io/file "logs/tailwind.log")
@@ -105,10 +105,10 @@
 (defmethod ig/suspend-key! :seon.web/tailwind [_ state] state)
 
 (defmethod ig/resume-key :seon.web/tailwind
-  [key opts old-opts old-state]
+  [_ opts old-opts old-state]
   (if (and (= opts old-opts)
            (:process old-state)
            (.isAlive ^Process (:process old-state)))
     old-state
-    (do (ig/halt-key! key old-state)
-        (ig/init-key key opts))))
+    (do (ig/halt-key! :seon.web/tailwind old-state)
+        (ig/init-key :seon.web/tailwind opts))))
