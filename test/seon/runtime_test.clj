@@ -337,6 +337,55 @@
       (is (= 1 (count runs)))
       (is (= "seon.test.a" (:seon.agent.run/namespace (first runs)))))))
 
+;;; ---------------------------------------------------------------------------
+;;; Flow Snapshot Tests
+;;; ---------------------------------------------------------------------------
+
+(deftest snapshot-persistence-test
+  (testing "snapshot entity can be written and queried back"
+    (let [now (java.util.Date.)
+          snap-id (str "test-flow/" (.toInstant now))
+          data-str (pr-str {:proc-a {:state 42} :proc-b {:state "ok"}})]
+      ;; Write directly to Datalevin (no real flow needed)
+      (d/transact! @test-conn [{:seon.flow.snap/id snap-id
+                                 :seon.flow.snap/label "test-flow"
+                                 :seon.flow.snap/created-at now
+                                 :seon.flow.snap/reason :shutdown
+                                 :seon.flow.snap/data data-str}])
+
+      ;; Query back via latest-snapshot
+      (let [snap (runtime/latest-snapshot {::runtime/label "test-flow"})]
+        (is (some? snap))
+        (is (= snap-id (:seon.flow.snap/id snap)))
+        (is (= "test-flow" (:seon.flow.snap/label snap)))
+        (is (= :shutdown (:seon.flow.snap/reason snap)))
+        (is (= data-str (:seon.flow.snap/data snap)))))))
+
+(deftest latest-snapshot-returns-most-recent-test
+  (testing "latest-snapshot returns the newest snapshot by created-at"
+    (let [old-time (java.util.Date. (- (System/currentTimeMillis) 60000))
+          new-time (java.util.Date.)
+          old-id (str "multi-flow/" (.toInstant old-time))
+          new-id (str "multi-flow/" (.toInstant new-time))]
+      (d/transact! @test-conn [{:seon.flow.snap/id old-id
+                                 :seon.flow.snap/label "multi-flow"
+                                 :seon.flow.snap/created-at old-time
+                                 :seon.flow.snap/reason :backup
+                                 :seon.flow.snap/data (pr-str {:old true})}
+                                {:seon.flow.snap/id new-id
+                                 :seon.flow.snap/label "multi-flow"
+                                 :seon.flow.snap/created-at new-time
+                                 :seon.flow.snap/reason :manual
+                                 :seon.flow.snap/data (pr-str {:new true})}])
+
+      (let [snap (runtime/latest-snapshot {::runtime/label "multi-flow"})]
+        (is (= new-id (:seon.flow.snap/id snap)))
+        (is (= :manual (:seon.flow.snap/reason snap)))))))
+
+(deftest latest-snapshot-nil-when-none-test
+  (testing "latest-snapshot returns nil for unknown label"
+    (is (nil? (runtime/latest-snapshot {::runtime/label "nonexistent"})))))
+
 (comment
   (require '[kaocha.repl :as k])
   (k/run 'seon.runtime-test)

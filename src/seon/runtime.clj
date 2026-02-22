@@ -37,7 +37,8 @@
    ;; Unregister (sets status to :stopped)
    (runtime/unregister! {::namespace \"seon.web.server\"})
    ```"
-  (:require [datalevin.core :as d]
+  (:require [clojure.core.async.flow :as flow]
+            [datalevin.core :as d]
             [seon.db :as db]
             [seon.schema :as schema]
             [taoensso.timbre :as log])
@@ -235,6 +236,23 @@
    {:db/valueType :db.type/long}
 
    :seon.agent.run/namespace
+   {:db/valueType :db.type/string}
+
+   ;; Flow snapshot entities
+   :seon.flow.snap/id
+   {:db/valueType :db.type/string
+    :db/unique    :db.unique/identity}
+
+   :seon.flow.snap/label
+   {:db/valueType :db.type/string}
+
+   :seon.flow.snap/created-at
+   {:db/valueType :db.type/instant}
+
+   :seon.flow.snap/reason
+   {:db/valueType :db.type/keyword}
+
+   :seon.flow.snap/data
    {:db/valueType :db.type/string}})
 
 ;;; ---------------------------------------------------------------------------
@@ -672,6 +690,82 @@
                           @c))]
       (mapv first results))
     []))
+
+;;; ---------------------------------------------------------------------------
+;;; Flow Snapshot API
+;;; ---------------------------------------------------------------------------
+
+(schema/register! ::flow
+                  [:any {:description "A core.async.flow object"}])
+
+(schema/register! ::label
+                  [:string {:min 1 :description "Flow label string"}])
+
+(schema/register! ::reason
+                  [:enum :shutdown :backup :manual :error])
+
+(schema/register! ::snapshot-request
+                  [:map
+                   [::flow ::flow]
+                   [::label ::label]
+                   [::reason ::reason]])
+
+(schema/register! ::snapshot-response
+                  [:maybe [:map
+                           [:seon.flow.snap/id :string]
+                           [:seon.flow.snap/label :string]
+                           [:seon.flow.snap/reason ::reason]]])
+
+(schema/register! ::latest-snapshot-request
+                  [:map
+                   [::label ::label]])
+
+(defn snapshot-topology!
+  "Capture flow state and persist to Datalevin.
+   Call AFTER pausing the flow (caller must pause first).
+
+   Request keys:
+     ::flow    - The flow object (already paused)
+     ::label   - Flow label string
+     ::reason  - :shutdown, :backup, :manual, :error
+
+   Returns snapshot entity map or nil if ping fails or no connection."
+  {:malli/schema [:=> [:cat ::snapshot-request] ::snapshot-response]}
+  [{::keys [flow label reason]}]
+  (when-let [c @conn]
+    (let [states (flow/ping flow :timeout-ms 5000)
+          now (java.util.Date.)
+          snap-id (str label "/" (.toInstant now))
+          data-str (pr-str states)]
+      (db/transact! c [{:seon.flow.snap/id snap-id
+                        :seon.flow.snap/label label
+                        :seon.flow.snap/created-at now
+                        :seon.flow.snap/reason reason
+                        :seon.flow.snap/data data-str}])
+      {:seon.flow.snap/id snap-id
+       :seon.flow.snap/label label
+       :seon.flow.snap/reason reason})))
+
+(defn latest-snapshot
+  "Get the most recent snapshot for a flow label.
+
+   Request keys:
+     ::label - Flow label string
+
+   Returns the snapshot entity map or nil if not found."
+  [{::keys [label]}]
+  (when-let [c @conn]
+    (let [results (d/q '[:find (pull ?e [*]) ?t
+                         :in $ ?label
+                         :where
+                         [?e :seon.flow.snap/label ?label]
+                         [?e :seon.flow.snap/created-at ?t]]
+                       @c label)]
+      (when (seq results)
+        (->> results
+             (sort-by second #(compare %2 %1))
+             first
+             first)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Testing Helpers
