@@ -533,15 +533,15 @@ With hierarchies, an agent can:
 8. **Add halt methods to primer-ctx and orchestrator-sessions**
 9. **Fix caddy-proxy resume-key signature**
 
-### Phase 3: Config Validation (1 agent, new infrastructure)
+### Phase 3: Config Validation (1 agent, new infrastructure) -- DONE
 
-10. **Create Malli config schemas** per component
-11. **Implement assert-key** validation using registered schemas
-12. **Create component introspection API** -- `(components)`, `(component key)`, `(describe-component key)`
+10. **Create Malli config schemas** per component -- DONE (`src/seon/system/config.clj`)
+11. **Implement assert-key** validation using registered schemas -- DONE (`:seon/component` hierarchy + generic assert-key)
+12. **Create component introspection API** -- DONE (`seon.system.config/describe`)
 
 ### Phase 4: Agent Control (1 agent, significant)
 
-13. **Add component hierarchy** via `integrant/hierarchy.edn`
+13. **Add component hierarchy** via `integrant/hierarchy.edn` -- DONE (`resources/integrant/hierarchy.edn`)
 14. **Create `seon.system.control`** namespace with `restart!`, `healthy?`, `components`
 15. **Wire into agent REPL** so agents can discover and control components programmatically
 
