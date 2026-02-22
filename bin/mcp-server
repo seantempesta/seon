@@ -85,6 +85,7 @@
 (def default-timeout-ms 30000) ;; 30 second default timeout
 (def max-eval-output-chars 2000)   ;; truncate nREPL :value beyond this
 (def truncated-preview-chars 1500) ;; how much to show when truncated
+(def full-output-prefix "#_:full ")  ;; prefix code with this to skip truncation
 
 ;; Tool definitions change based on whether session is enforced
 (def tools
@@ -471,17 +472,18 @@ You must then either:
 
 (defn- format-eval-output
   "Format nREPL result with truncation and storage hints.
-   result-key and var-name come from wrap-code-with-autosave."
-  [result result-key var-name]
+   result-key and var-name come from wrap-code-with-autosave.
+   full? skips truncation (opt-in via #_:full prefix)."
+  [result result-key var-name full?]
   (let [val-str (or (:value result) "nil")
         hint (str "\n;; stored as " result-key " in @" var-name)
-        big? (> (count val-str) max-eval-output-chars)]
+        big? (and (not full?) (> (count val-str) max-eval-output-chars))]
     (str (when-let [o (:out result)] o)
          (if big?
            (str (subs val-str 0 truncated-preview-chars)
                 "\n;; ... truncated (" (count val-str) " chars → " truncated-preview-chars " shown)"
                 hint
-                "\n;; Dig in: (" result-key " @" var-name ") | (keys (" result-key " @" var-name "))")
+                "\n;; Dig in: (" result-key " @" var-name ") or prefix code with #_:full")
            (str val-str hint))
          (when-let [ns (:ns result)]
            (str "\n;; ns: " ns)))))
@@ -497,8 +499,10 @@ You must then either:
    For orchestrator session: detects concurrent evals to prevent lockup when
    user cancels MCP call mid-eval. Returns error if orchestrator already busy."
   [{:keys [session_id code timeout_ms]}]
-  ;; Use enforced session if set, otherwise use provided session_id
-  (let [effective-session (or enforced-session-id session_id)]
+  ;; Detect #_:full prefix — opt-in to skip truncation
+  (let [full? (str/starts-with? (str/trim (str code)) full-output-prefix)
+        code (if full? (str/replace-first code full-output-prefix "") code)
+        effective-session (or enforced-session-id session_id)]
     (log-debug "execute-eval session:" effective-session
                "(enforced:" enforced-session-id "provided:" session_id ")"
                "timeout:" timeout_ms)
@@ -566,7 +570,7 @@ You must then either:
                     (let [retry-result (do-eval orchestrator-port new-session)]
                       (if (:ex retry-result)
                         (mcp-error (:err retry-result))
-                        (mcp-success (format-eval-output retry-result result-key var-name)))))
+                        (mcp-success (format-eval-output retry-result result-key var-name full?)))))
                   (mcp-error "Failed to re-clone orchestrator nREPL session. Is the server running?"))
                 ;; Agent session - just report the error
                 (mcp-error (:err result))))
@@ -574,7 +578,7 @@ You must then either:
             ;; Normal path
             (if (:ex result)
               (mcp-error (:err result))
-              (mcp-success (format-eval-output result result-key var-name)))))
+              (mcp-success (format-eval-output result result-key var-name full?)))))
 
         (finally
           ;; Always clear orchestrator state when done

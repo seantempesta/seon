@@ -285,21 +285,26 @@ Returns component status (Datalevin, nREPL, agents) with latencies. HTTP 200 = h
 (user/test-gen 'seon.graph.query)
 ```
 
-**Results are auto-saved.** Every eval result is stored in `@user/*repl-<session>*` under a hash key. Dig into results without re-running:
+**Results are auto-saved.** Every eval result is stored in `@user/*repl-<session>*` under a hash key. Results > 2000 chars are truncated with a hint showing the key.
 
 ```clojure
-;; Large test result was truncated — retrieve the full data:
-(:r-2108 @user/*repl-orchestrator*)
+;; Truncated output shows:
+;; ... truncated (8432 chars → 1500 shown)
+;; stored as :r-2108 in @user/*repl-orchestrator*
+;; Dig in: (:r-2108 @user/*repl-orchestrator*) or prefix code with #_:full
 
-;; Inspect just the failures (zero cost, no re-run):
+;; Dig into structure without the full blob (stays truncated):
 (:failures (:r-2108 @user/*repl-orchestrator*))
+(keys (:r-2108 @user/*repl-orchestrator*))
+
+;; Opt in to full output when you need it (prefix with #_:full):
+#_:full (:seon.ai.gemini/text (:r-5137 @user/*repl-orchestrator*))
 
 ;; See all stored results:
 (keys @user/*repl-orchestrator*)
-;; => (:r-2108 :r-1731 :r-3274 ...)
 ```
 
-Results > 2000 chars are truncated in the MCP response with a hint showing the key. **Never re-run tests just to see a different part of the output** — the full result is already saved.
+**Never re-run code just to see more output.** Dig into the saved result by key, or use `#_:full` to get the untruncated value.
 
 **CLI (for full suite runs):**
 
