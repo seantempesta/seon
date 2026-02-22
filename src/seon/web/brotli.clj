@@ -5,7 +5,10 @@
 
   Key insight: Streaming compression over the SSE connection lifetime
   achieves 90-100x compression by maintaining compressor state across writes.
-  This is far more efficient than per-message compression."
+  This is far more efficient than per-message compression.
+
+  Main API for SSE integration:
+  - [[->write-profile]] - Creates SDK-compatible write profile for seon.web.sse"
   (:require
    [clojure.java.io :as io]
    [clojure.math :as m])
@@ -13,7 +16,8 @@
            (com.aayushatharva.brotli4j.encoder Encoder Encoder$Parameters
                                                Encoder$Mode BrotliOutputStream)
            (com.aayushatharva.brotli4j.decoder Decoder BrotliInputStream)
-           (java.io ByteArrayOutputStream IOException)))
+           (java.io ByteArrayOutputStream IOException OutputStreamWriter)
+           (java.nio.charset StandardCharsets)))
 
 ;; Ensure brotli native library is loaded on namespace init.
 #_:clj-kondo/ignore
@@ -77,16 +81,16 @@
 
   out    - ByteArrayOutputStream that accumulates compressed output
   br     - BrotliOutputStream that maintains compression state
-  chunk  - String data to compress
+  data   - String data to compress
 
   Returns: Compressed byte array for this chunk (out is reset after reading)
 
   This is the key function for SSE compression - it maintains state across
   multiple calls, allowing the compressor to learn patterns and achieve
   90-100x compression over the connection lifetime."
-  [^ByteArrayOutputStream out ^BrotliOutputStream br chunk]
+  [^ByteArrayOutputStream out ^BrotliOutputStream br data]
   (doto br
-    (.write  (String/.getBytes chunk "UTF-8"))
+    (.write (String/.getBytes ^String data "UTF-8"))
     (.flush))
   (let [result (.toByteArray out)]
     (.reset out)
@@ -116,12 +120,52 @@
               out (ByteArrayOutputStream/new)]
     (.enableEagerOutput in)
     (try ;; Allows decompressing of incomplete streams
-      (loop [read (.read in)]
-        (when (> read -1)
-          (.write out read)
+      (loop [b (.read in)]
+        (when (> b -1)
+          (.write out b)
           (recur (.read in))))
       (catch IOException _))
     (str out)))
+
+;;; ---------------------------------------------------------------------------
+;;; SDK-Compatible Write Profile for SSE
+;;; ---------------------------------------------------------------------------
+
+(defn ->brotli-output-stream
+  "Create a BrotliOutputStream wrapping a ByteArrayOutputStream.
+
+  opts - Encoder options (see encoder-params):
+    :quality     - Compression quality 0-11 (default: 5)
+    :window-size - LZ77 window size 10-24 (default: 24)"
+  ^BrotliOutputStream
+  [^ByteArrayOutputStream baos & {:as opts}]
+  (BrotliOutputStream/new baos (encoder-params opts) 16384))
+
+(defn ->write-profile
+  "Create an SSE write profile using Brotli compression.
+
+  This returns a map compatible with seon.web.sse/render-handler's
+  :write-profile option. The compression state is maintained across
+  all writes, achieving 90-100x compression over connection lifetime.
+
+  Options (passed to encoder):
+  - :quality     - Compression quality 0-11 (default: 5)
+  - :window-size - LZ77 window size 10-24 (default: 24)
+
+  Example:
+    (sse/render-handler render-fn :write-profile (brotli/->write-profile))
+
+  Note: Uses raw namespaced keywords to avoid circular dependency
+  (sse lazy-requires brotli for auto-negotiation)."
+  [& {:as opts}]
+  {;; Use raw keywords to avoid circular dep with seon.web.sse
+   :seon.web.sse/wrap-output-stream
+   (fn [^ByteArrayOutputStream baos]
+     (-> baos
+         (->brotli-output-stream opts)
+         (OutputStreamWriter. StandardCharsets/UTF_8)))
+
+   :seon.web.sse/content-encoding "br"})
 
 (comment
   ;; Test basic compression/decompression
@@ -136,4 +180,9 @@
     ;; Second chunk
     (compress-stream out br "World!")
     ;; The compressor maintains state across both calls
-    ))
+    )
+
+  ;; Test write profile
+  (->write-profile)
+  ;; => {:seon.web.sse/wrap-output-stream #fn, :seon.web.sse/content-encoding "br"}
+  )

@@ -479,18 +479,84 @@ You must then either:
     (str ";; ... stdout truncated (" (count out) " chars, showing last " max-chars ")\n"
          (subs out (- (count out) max-chars)))))
 
+;;; ---------------------------------------------------------------------------
+;;; AI Auto-Render (makes second read-only nREPL call to try AI rendering)
+;;; ---------------------------------------------------------------------------
+
+(def min-ai-render-chars 80) ;; Only attempt AI render for maps > this size
+
+(defn- try-ai-render
+  "Attempt to render a map value using a registered AI renderer.
+   Makes a read-only nREPL call to seon.render/try-render.
+
+   Arguments:
+     port            - nREPL port to use
+     nrepl-session-id - nREPL session ID
+     val-str         - The string representation of the evaluated value
+
+   Returns:
+     {:ai-text \"...\"} if renderer found and returned a string
+     {:no-renderer true :keys [...]} if no renderer exists
+     nil if value is not eligible (not a map, too small, etc.)"
+  [port nrepl-session-id val-str]
+  (when (and val-str
+             (str/starts-with? val-str "{")
+             (> (count val-str) min-ai-render-chars))
+    (try
+      ;; Parse the value to get keys for hint message
+      (let [parsed (clojure.edn/read-string val-str)
+            data-keys (when (map? parsed) (keys parsed))]
+        (when (and (map? parsed) (seq data-keys))
+          ;; Make read-only call to try-render
+          (let [render-code (str "(do (require 'seon.render)"
+                                 " (seon.render/try-render "
+                                 val-str
+                                 " :ai))")
+                result (nrepl-eval port render-code 5000 nrepl-session-id)]
+            (if (and (:value result)
+                     (not= "nil" (:value result))
+                     (not (:ex result)))
+              ;; Renderer found - value is a quoted string, need to parse it
+              (let [ai-text (try
+                              (clojure.edn/read-string (:value result))
+                              (catch Exception _ (:value result)))]
+                (when (string? ai-text)
+                  {:ai-text ai-text}))
+              ;; No renderer found
+              {:no-renderer true
+               :keys (vec (take 5 data-keys))}))))
+      (catch Exception e
+        (log-debug "AI render attempt failed:" (.getMessage e))
+        nil))))
+
 (defn- format-eval-output
   "Format nREPL result with truncation and storage hints.
    result-key and var-name come from wrap-code-with-autosave.
-   full? skips truncation (opt-in via #_:full prefix)."
-  [result result-key var-name full?]
+   full? skips truncation (opt-in via #_:full prefix).
+   ai-render-result is optional {:ai-text ...} or {:no-renderer true :keys [...]}."
+  [result result-key var-name full? ai-render-result]
   (let [val-str (or (:value result) "nil")
         hint (str "\n;; stored as " result-key " in @" var-name)
         big-val? (and (not full?) (> (count val-str) max-eval-output-chars))
         out-str (if full?
                   (:out result)
-                  (truncate-stdout (:out result) max-eval-output-chars))]
+                  (truncate-stdout (:out result) max-eval-output-chars))
+        ;; Format AI render comment
+        ai-comment (cond
+                     (:ai-text ai-render-result)
+                     (str ";; AI: " (:ai-text ai-render-result) "\n")
+
+                     (:no-renderer ai-render-result)
+                     nil  ;; Don't show hint inline, add at end
+
+                     :else nil)
+        ;; Format no-renderer hint (shown at end)
+        no-renderer-hint (when (:no-renderer ai-render-result)
+                           (str "\n;; No AI renderer for keys " (pr-str (:keys ai-render-result))
+                                ".\n;; Define a render fn with matching -request/-response specs"
+                                "\n;; containing :seon.render/ai to control how you see this data."))]
     (str (when out-str out-str)
+         ai-comment
          (if big-val?
            (str (subs val-str 0 truncated-preview-chars)
                 "\n;; ... truncated (" (count val-str) " chars → " truncated-preview-chars " shown)"
@@ -498,7 +564,8 @@ You must then either:
                 "\n;; Dig in: (" result-key " @" var-name ") or prefix code with #_:full")
            (str val-str hint))
          (when-let [ns (:ns result)]
-           (str "\n;; ns: " ns)))))
+           (str "\n;; ns: " ns))
+         no-renderer-hint)))
 
 (defn execute-eval
   "Execute the eval tool. Returns MCP result format.
@@ -582,7 +649,9 @@ You must then either:
                     (let [retry-result (do-eval orchestrator-port new-session)]
                       (if (:ex retry-result)
                         (mcp-error (:err retry-result))
-                        (mcp-success (format-eval-output retry-result result-key var-name full?)))))
+                        (let [ai-render (when-not full?
+                                          (try-ai-render orchestrator-port new-session (:value retry-result)))]
+                          (mcp-success (format-eval-output retry-result result-key var-name full? ai-render))))))
                   (mcp-error "Failed to re-clone orchestrator nREPL session. Is the server running?"))
                 ;; Agent session - just report the error
                 (mcp-error (:err result))))
@@ -590,7 +659,9 @@ You must then either:
             ;; Normal path
             (if (:ex result)
               (mcp-error (:err result))
-              (mcp-success (format-eval-output result result-key var-name full?)))))
+              (let [ai-render (when-not full?
+                                (try-ai-render port nrepl-session-id (:value result)))]
+                (mcp-success (format-eval-output result result-key var-name full? ai-render))))))
 
         (finally
           ;; Always clear orchestrator state when done
@@ -776,20 +847,16 @@ You must then either:
   (let [type (or type "functions")
         code (case type
                "functions"
-               (format "(do (require 'seon.graph.query 'seon.db.datalevin.conn)
-                            (let [mgr (:seon.db.datalevin/connections integrant.repl.state/system)
-                                  conn (seon.db.datalevin.conn/get-master-conn!
-                                         {:seon.db.datalevin.conn/manager mgr})]
+               (format "(do (require 'seon.graph.query)
+                            (let [conn (:conn (:seon/runtime-db integrant.repl.state/system))]
                               (pr-str (seon.graph.query/search-functions
                                         {:seon.graph.query/conn conn
                                          :seon.graph.query/pattern %s}))))"
                        (pr-str query))
 
                "namespaces"
-               (format "(do (require 'seon.graph.query 'seon.db.datalevin.conn)
-                            (let [mgr (:seon.db.datalevin/connections integrant.repl.state/system)
-                                  conn (seon.db.datalevin.conn/get-master-conn!
-                                         {:seon.db.datalevin.conn/manager mgr})]
+               (format "(do (require 'seon.graph.query)
+                            (let [conn (:conn (:seon/runtime-db integrant.repl.state/system))]
                               (pr-str {:dependents (seon.graph.query/dependents-of
                                                      {:seon.graph.query/conn conn
                                                       :seon.graph.query/ns-name %s})
@@ -799,10 +866,8 @@ You must then either:
                        (pr-str query) (pr-str query))
 
                "context"
-               (format "(do (require 'seon.repl.context 'seon.db.datalevin.conn)
-                            (let [mgr (:seon.db.datalevin/connections integrant.repl.state/system)
-                                  conn (seon.db.datalevin.conn/get-master-conn!
-                                         {:seon.db.datalevin.conn/manager mgr})]
+               (format "(do (require 'seon.repl.context)
+                            (let [conn (:conn (:seon/runtime-db integrant.repl.state/system))]
                               (seon.repl.context/for-function
                                 {:seon.repl.context/conn conn
                                  :seon.repl.context/qualified-name %s})))"
@@ -810,15 +875,18 @@ You must then either:
         result (nrepl-eval orchestrator-port code)]
     (if (:ex result)
       (mcp-error (str "query_graph failed: " (:err result)))
-      (mcp-success (or (:value result) "nil")))))
+      (let [val-str (or (:value result) "nil")]
+        (if (> (count val-str) max-eval-output-chars)
+          (mcp-success (str (subs val-str 0 truncated-preview-chars)
+                            "\n;; ... truncated (" (count val-str) " chars)"
+                            "\n;; Narrow your query for fewer results"))
+          (mcp-success val-str))))))
 
 (defn execute-namespace-health
   "Execute the namespace_health tool. Gets namespace overview."
   [{:keys [namespace]}]
-  (let [code (format "(do (require 'seon.repl.context 'seon.graph.query 'seon.db.datalevin.conn)
-                          (let [mgr (:seon.db.datalevin/connections integrant.repl.state/system)
-                                conn (seon.db.datalevin.conn/get-master-conn!
-                                       {:seon.db.datalevin.conn/manager mgr})
+  (let [code (format "(do (require 'seon.repl.context 'seon.graph.query)
+                          (let [conn (:conn (:seon/runtime-db integrant.repl.state/system))
                                 ctx (seon.repl.context/for-namespace
                                       {:seon.repl.context/conn conn
                                        :seon.repl.context/namespace %s})
@@ -841,7 +909,12 @@ You must then either:
         result (nrepl-eval orchestrator-port code)]
     (if (:ex result)
       (mcp-error (str "namespace_health failed: " (:err result)))
-      (mcp-success (or (:value result) "nil")))))
+      (let [val-str (or (:value result) "nil")]
+        (if (> (count val-str) max-eval-output-chars)
+          (mcp-success (str (subs val-str 0 truncated-preview-chars)
+                            "\n;; ... truncated (" (count val-str) " chars)"
+                            "\n;; Narrow your query for fewer results"))
+          (mcp-success val-str))))))
 
 (defn execute-agent-status
   "Execute the agent_status tool. Returns system health.
