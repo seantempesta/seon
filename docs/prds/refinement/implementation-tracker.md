@@ -2,7 +2,7 @@
 
 **PRD:** `docs/prds/refinement/prd-flow-state.md`
 **Branch:** `feature/refinement`
-**Last updated:** 2026-02-21
+**Last updated:** 2026-02-22
 
 ---
 
@@ -13,12 +13,12 @@
 | 1 | Runtime registry + schema + unified ID | **Done** | seon-agent | `seon.runtime` created, `:seon/graph-db` component, 6-char hex IDs |
 | 2 | Session integration | **Done** | seon-agent | Sessions dual-write to runtime registry on start/stop |
 | 3 | Agent run entities | **Done** | seon-agent | `:seon.agent.run/*` entities with start/complete/query |
-| 4 | DB consolidation | Pending | -- | Rename seon-graph→seon.runtime, kill dual-write, AI sessions→namespace DBs |
-| 5 | Ctx unification | Pending | -- | Delete harness duplicate, one persistence path |
-| 6 | Flow snapshots | Pending | -- | Snapshot on shutdown/backup via pause→ping→serialize |
-| 7 | Startup hydration | Pending | -- | Hydrate caches from Datalevin on boot |
-| 8 | Flow registry absorption | Pending | -- | Delete `seon.flow.registry`, use runtime |
-| 9 | Observatory UI (two-level lookup) | Pending | -- | List from seon.runtime DB, detail from namespace DB |
+| 4 | DB consolidation | **Done** | task-agent | Renamed seon-graph→seon.runtime, killed orchestrator dual-write. AI session migration deferred. |
+| 5 | Ctx unification | **Done** | task-agent | Deleted harness duplicate ctx persistence |
+| 6 | Flow snapshots | **Done** | task-agent | pause→snapshot→stop in topology, snapshot schema in Datalevin |
+| 7 | Startup hydration | **Done** | task-agent | hydrate-cache! populates registry from Datalevin on boot |
+| 8 | Flow registry absorption | **Done** | task-agent | Deleted `seon.flow.registry`, flow handles in `seon.runtime` |
+| 9 | Observatory UI (two-level lookup) | **Done** | orchestrator | Running agents enriched with runtime data, runtime instances table added |
 
 **Deferred (future work, not blocking):**
 - Phase 2.5: Instance messaging router (`::msg/from-id`/`::msg/to-id`)

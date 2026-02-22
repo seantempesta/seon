@@ -17,6 +17,7 @@
             [seon.ai.agent.views :as agent-views]
             [seon.ai.claude :as claude]
             [seon.ai.datalevin :as dl]
+            [seon.runtime :as runtime]
             [seon.flow.trace :as trace]
             [seon.web.sse :as sse]
             [seon.web.html :as html]
@@ -487,9 +488,24 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- running-agents
-  "Get all currently running agents from the registry."
+  "Get all currently running agents from the registry, enriched with runtime data.
+   Merges agent-run metadata (cost, turns, duration) from Datalevin when available."
   []
-  (agent/agents {}))
+  (let [agents (agent/agents {})
+        runs (runtime/agent-runs {})
+        ;; Index runs by their ID for fast lookup
+        runs-by-id (into {} (map (juxt :seon.agent.run/id identity)) runs)]
+    (mapv (fn [agent]
+            (let [sid (::agent/session-id agent)
+                  run (get runs-by-id sid)]
+              (cond-> agent
+                (:seon.agent.run/cost-usd run)
+                (assoc ::agent/cost-usd (:seon.agent.run/cost-usd run))
+                (:seon.agent.run/num-turns run)
+                (assoc ::agent/num-turns (:seon.agent.run/num-turns run))
+                (:seon.agent.run/duration-ms run)
+                (assoc ::agent/duration-ms (:seon.agent.run/duration-ms run)))))
+          agents)))
 
 (defn- completed-sessions
   "Get recent completed/failed sessions from Datalevin."
@@ -741,7 +757,34 @@
         (if show-completed "Hide Completed" "Show Completed")]]
 
       ;; Agents table
-      (agents-table data)])))
+      (agents-table data)
+
+      ;; Runtime instances summary
+      (let [all-instances (runtime/instances {})
+            running-instances (filter #(= :running (::runtime/status %)) all-instances)]
+        (when (seq all-instances)
+          [:div {:class "mt-4"}
+           [:div {:class "flex items-center gap-2 mb-2"}
+            [:span {:class "text-xs font-semibold text-text-400 uppercase tracking-wider"} "Runtime Instances"]
+            [:span {:class "text-text-500 text-xs"}
+             (str (count running-instances) " running / " (count all-instances) " total")]]
+           [:div {:class "bg-base-850 rounded overflow-hidden"}
+            [:table {:class "w-full"}
+             [:thead
+              [:tr {:class "border-b border-base-700"}
+               [:th {:class "text-left py-1.5 px-4 text-xs font-medium text-text-400 uppercase tracking-wider"} "Namespace"]
+               [:th {:class "text-left py-1.5 px-4 text-xs font-medium text-text-400 uppercase tracking-wider"} "Status"]
+               [:th {:class "text-left py-1.5 px-4 text-xs font-medium text-text-400 uppercase tracking-wider"} "Location"]
+               [:th {:class "text-left py-1.5 px-4 text-xs font-medium text-text-400 uppercase tracking-wider"} "Since"]]]
+             [:tbody
+              (for [inst (sort-by ::runtime/namespace all-instances)]
+                [:tr {:class "border-b border-base-700 last:border-0"}
+                 [:td {:class "py-2 px-4 font-mono text-sm text-text-200"} (::runtime/namespace inst)]
+                 [:td {:class "py-2 px-4"} (agent-status-badge (::runtime/status inst))]
+                 [:td {:class "py-2 px-4 font-mono text-sm text-text-400"} (name (::runtime/location inst))]
+                 [:td {:class "py-2 px-4 font-mono text-sm text-text-400"}
+                  (format-local-time (::runtime/started-at inst))]])]]]]))
+      ])))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Handlers
