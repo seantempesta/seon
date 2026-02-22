@@ -470,6 +470,15 @@ You must then either:
      :result-key result-key
      :var-name var-name}))
 
+(defn- truncate-stdout
+  "Truncate stdout to last N chars, keeping the tail (most recent output).
+   Prepends a note if truncated."
+  [out max-chars]
+  (if (or (nil? out) (<= (count out) max-chars))
+    out
+    (str ";; ... stdout truncated (" (count out) " chars, showing last " max-chars ")\n"
+         (subs out (- (count out) max-chars)))))
+
 (defn- format-eval-output
   "Format nREPL result with truncation and storage hints.
    result-key and var-name come from wrap-code-with-autosave.
@@ -477,9 +486,12 @@ You must then either:
   [result result-key var-name full?]
   (let [val-str (or (:value result) "nil")
         hint (str "\n;; stored as " result-key " in @" var-name)
-        big? (and (not full?) (> (count val-str) max-eval-output-chars))]
-    (str (when-let [o (:out result)] o)
-         (if big?
+        big-val? (and (not full?) (> (count val-str) max-eval-output-chars))
+        out-str (if full?
+                  (:out result)
+                  (truncate-stdout (:out result) max-eval-output-chars))]
+    (str (when out-str out-str)
+         (if big-val?
            (str (subs val-str 0 truncated-preview-chars)
                 "\n;; ... truncated (" (count val-str) " chars → " truncated-preview-chars " shown)"
                 hint
