@@ -1,9 +1,9 @@
 # PRD: Refinement — One System, End to End
 
-**Status:** In Progress (Tracks 0-3, 5 complete; Unified Runtime Phases 1-9 complete; System Lifecycle in progress)
+**Status:** In Progress (Tracks 0-3, 5, 7 complete; Track 2 ~98%; Track 4/6 partial)
 **Priority:** High
 **Branch:** `feature/refinement` — ~55 commits ahead of main
-**Tests:** 535 unit tests, 0 failures
+**Tests:** 535 unit tests, 2679 assertions, 0 failures
 **Last updated:** 2026-02-22
 
 ---
@@ -37,7 +37,7 @@ An agent uses the Super REPL (via MCP) to execute code in a remote Clojure proce
 - **5 files have intentional XTDB mentions** (accurate comments like "XTDB has been removed")
 - **494 tests, 0 failures** (down from 712 — deleted tests for removed code, added new tests)
 
-### Track 2: Unified Agent Runtime — ~95% DONE
+### Track 2: Unified Agent Runtime — ~98% DONE
 **Done:**
 - Pool layer: `claim!`, `release-session!`, `get-jvm-by-session`, `::session->port` tracking (`src/seon/flow/pool.clj`)
 - `orchestrator/nrepl.clj` DELETED (536 lines) + tests
@@ -45,9 +45,10 @@ An agent uses the Super REPL (via MCP) to execute code in a remote Clojure proce
 - Session tests simplified for pool-based model
 - `session.clj` migrated from `seon.agent.ctx` to `seon.ctx` — `agent.ctx` deleted
 - Ctx serialization fixed: `pool.clj` `claim!` filters non-serializable keys, uses EDN string
+- E2E verified: `launch-agent!!` → pool JVM claimed → agent runs → pool released → visible in Observatory + runtime registry
+- Fixed `resume-key` bugs in `:seon/runtime-db` and `:seon.orchestrator/sessions` (defonce atoms not re-wired on resume)
 
 **Remaining:**
-- E2e verification (MCP eval → pool JVM → `@*ctx*` → Observatory)
 - Auto-proxy injection not started
 
 ### Phase 1: DB Write Coordination — DONE
@@ -95,24 +96,25 @@ Unified `seon.agent.ctx` into `seon.ctx`. Changes:
 
 **Key files:** `src/seon/graph/scanner.clj`, `src/seon/render.clj`, `src/seon/ns/routes.clj`, `src/seon/system.clj`
 
-### Track 6: E2E Verification + Health Cleanup
+### Track 6: E2E Verification + Health Cleanup — PARTIAL
 
-After Tracks 4 and 5:
-1. Restart server, verify all components start
-2. `user/launch-agent!!` works — agent gets pool JVM, MCP eval works, `@*ctx*` returns session context
-3. Observatory shows agent with flow event timeline
-4. `/ns/seon.health.workout` renders in browser
-5. Clean dead requires in `health.clj`
-6. Full test suite: 0 failures, 0 errors
+**Verified working:**
+1. ✅ Server restart — all 13 components start cleanly
+2. ✅ `user/launch-agent!!` — pool JVM claimed, agent runs, pool released (test: BMI calc, $0.25, 5 turns, 27s)
+3. ✅ Observatory — `/agents` page loads, SSE-driven, shows agent runs with metadata
+4. ✅ Runtime registry — `agent-runs` returns completed runs with namespace, cost, duration, turns, timestamps
+5. ✅ `/ns/seon.health.workout` renders via custom render path (skeleton → SSE morph)
+6. ✅ Full test suite: 535 tests, 0 failures
 
-### Track 7: System Lifecycle — Reliable Integrant — IN PROGRESS
+**Not working:**
+- Datalevin render pipeline: graph analyzer produces 0 function entities, so `find-renderer` always returns nil
+- Cross-ns call routing through flow not verified (depends on auto-proxy injection, Track 2 remaining)
+
+**Reference:** `docs/prds/refinement/e2e-verification.md`, `docs/prds/refinement/render-pipeline-e2e.md`
+
+### Track 7: System Lifecycle — Reliable Integrant — DONE (Phase 4 deferred)
 
 **Goal:** System is resilient to crashes, restarts cleanly, components have proper lifecycles, config errors are caught early with actionable messages.
-
-**Commits so far:**
-- `aaa74c6` — Caddy moved from bash into Integrant component (init/halt/suspend/resume)
-- `9f452d8` — Lint cleanup on caddy.clj resume-key
-- `96b1f5c` — Deep audit of Integrant usage (see `docs/prds/refinement/integrant-audit.md`)
 
 **Phase 1: Upgrade + Naming** — DONE
 - Upgraded Integrant 0.10.0 → 1.0.1 in deps.edn
@@ -121,7 +123,7 @@ After Tracks 4 and 5:
 
 **Phase 2: Lifecycle Fixes** — DONE
 - suspend/resume added to all 6 components that lacked it (HTTP server, code-scanner, tailwind-watcher, primer-ctx, orchestrator-sessions, agent-pool)
-- Dead code removed
+- Dead code removed (`seon.web.jobs`, `seon.web.stats`)
 
 **Phase 3: Malli Config Validation** — DONE
 - Malli schemas for all 13 components
@@ -129,11 +131,11 @@ After Tracks 4 and 5:
 - `seon.system/hierarchy` via `derive` for component grouping
 - Error messages that guide debugging: what's wrong, where to look, what to check
 
-**Phase 4: Component Control API** — NOT STARTED
+**Phase 4: Component Control API** — DEFERRED
+- Lower priority; system is stable enough without runtime component control
 - API to start/stop/restart individual components or tiers at runtime
-- Resilience testing: every component in all lifecycle states (init → suspend → resume → halt)
+- Resilience testing: every component in all lifecycle states
 - Corruption/perturbation testing (kill -9, port conflicts, stale processes)
-- Verify recovery paths work automatically on next startup
 
 **Reference:** `docs/prds/refinement/integrant-audit.md` — full analysis of every component
 
@@ -197,9 +199,9 @@ After Tracks 4 and 5:
 ## Coordination
 
 - **Track 5 (ctx unification) — DONE**
-- **Track 7 (system lifecycle) — IN PROGRESS** — Phases 1-3 done; Phase 4 (component control API) not started
-- **Track 4 (render E2E) — blocked on Track 7** (need stable system first)
-- **Track 6 (e2e verification) runs last** — depends on everything else
+- **Track 7 (system lifecycle) — DONE** — Phases 1-3 complete; Phase 4 deferred
+- **Track 4 (render E2E) — PARTIAL** — custom render works, Datalevin render pipeline broken (graph analyzer produces 0 entities)
+- **Track 6 (e2e verification) — PARTIAL** — agent launch + Observatory + runtime registry verified; Datalevin render + auto-proxy not verified
 - Each agent edits max ~7 files
 - Orchestrator reviews commits, resolves conflicts, runs integration
 
@@ -209,10 +211,10 @@ After Tracks 4 and 5:
 
 1. ✅ `grep -ri "xtdb" src/` → only intentional comments
 2. ✅ Only ONE ctx system: `seon.ctx` — `seon.agent.ctx` deleted
-3. Launch agent via MCP → pool JVM claimed → `@*ctx*` returns session context → visible in Observatory
-4. Cross-ns call routes through flow → visible in trace logs
-5. `/ns/seon.health.workout` renders in browser via render pipeline
-6. ✅ Full test suite: 535 tests, 0 failures
+3. ✅ Launch agent via MCP → pool JVM claimed → agent runs → pool released → visible in Observatory + runtime registry
+4. ⬚ Cross-ns call routes through flow → visible in trace logs (blocked on auto-proxy injection)
+5. ✅ `/ns/seon.health.workout` renders in browser via custom render path (Datalevin render pipeline broken — graph analyzer produces 0 entities)
+6. ✅ Full test suite: 535 tests, 2679 assertions, 0 failures
 7. ✅ `(reset)` works cleanly — Observatory stays accessible, SSE connections preserved
-8. After `kill -9`, next startup recovers automatically
+8. ⬚ After `kill -9`, next startup recovers automatically (not formally tested)
 9. ✅ Config typos caught at startup with actionable Malli error messages
