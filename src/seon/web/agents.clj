@@ -136,6 +136,7 @@
       (let [instant (cond
                       (instance? Instant timestamp) timestamp
                       (instance? ZonedDateTime timestamp) (.toInstant timestamp)
+                      (instance? java.util.Date timestamp) (.toInstant timestamp)
                       (string? timestamp) (Instant/parse timestamp)
                       :else nil)
             _ (when-not instant (throw (ex-info "Unknown timestamp type" {})))
@@ -593,13 +594,6 @@
 ;;; HTML Components (private)
 ;;; ---------------------------------------------------------------------------
 
-(defn- format-cost
-  "Format cost as USD string."
-  [cost]
-  (if cost
-    (format "$%.2f" (double cost))
-    "-"))
-
 (defn- format-tokens
   "Format token count with K suffix for thousands."
   [tokens]
@@ -908,65 +902,7 @@
        [:span {:class "text-text-300"} "Working on:"]
        [:span {:class "text-text-100 truncate"} text]])))
 
-(def ^:private context-window-tokens
-  "Approximate context window size for Claude Opus 4.5 (200K tokens)."
-  200000)
 
-(defn- context-bar
-  "Render a context window usage bar.
-   Shows approximate usage based on cache-creation-tokens."
-  [context-tokens]
-  (when (and context-tokens (pos? context-tokens))
-    (let [percent (min 100 (* 100 (/ context-tokens context-window-tokens)))
-          bar-color (cond
-                      (>= percent 90) "bg-error"
-                      (>= percent 70) "bg-warning"
-                      :else "bg-signal")]
-      [:div {:class "flex items-center gap-2"
-             :title (str "Context: " (format-tokens context-tokens) " / " (format-tokens context-window-tokens) " tokens")}
-       [:div {:class "w-24 h-1.5 bg-base-700 rounded-full overflow-hidden"}
-        [:div {:class (str bar-color " h-full rounded-full transition-all")
-               :style (str "width: " percent "%")}]]
-       [:span {:class "text-text-500 text-2xs"} (str (format-tokens context-tokens))]])))
-
-(defn- metrics-display
-  "Render metrics row for agent detail header.
-   Shows context usage, turns, and duration in a compact format."
-  [{:keys [num-turns duration-ms context-tokens]}]
-  [:div {:class "flex items-center gap-4 text-xs font-mono"}
-   ;; Context window usage bar
-   (context-bar context-tokens)
-   ;; Turns
-   (when num-turns
-     [:span {:class "text-text-400" :title "Conversation turns"}
-      (str "Turn " num-turns)])
-   ;; Duration
-   (when duration-ms
-     [:span {:class "text-text-400" :title "Duration"}
-      (format-duration duration-ms)])])
-
-(defn- status-badge
-  "Render a status badge with Phosphor pattern for agent detail header.
-   Uses dot + word style with pulse for active states."
-  [{:keys [status time-ago seconds-ago]}]
-  (let [;; Phosphor status design: [dot-color text-color label pulse?]
-        [dot-class text-class label pulse?]
-        (case status
-          :running ["bg-signal" "text-signal" "running" true]
-          :completed ["bg-success" "text-success" "done" false]
-          :stuck ["bg-warning" "text-warning" "stuck" false]
-          :error ["bg-error" "text-error" "error" false]
-          ["bg-text-500" "text-text-500" (name (or status :unknown)) false])]
-    [:div {:class "flex items-center gap-3"}
-     [:span {:class "inline-flex items-center gap-1.5"}
-      [:span {:class (str "w-1.5 h-1.5 rounded-full " dot-class
-                          (when pulse? " animate-pulse"))}]
-      [:span {:class (str "text-xs font-medium " text-class)} label]]
-     (when time-ago
-       [:span {:class (str "text-xs " (if (and seconds-ago (> seconds-ago (quot stuck-threshold-ms 1000)))
-                                         "text-warning font-medium"
-                                         "text-text-400"))}
-        (str "Last activity: " time-ago)])]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Initial Context Components

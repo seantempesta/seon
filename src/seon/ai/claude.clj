@@ -840,6 +840,13 @@
           ;; 6. Track last activity time for stuck detection
           last-activity-at (atom (Instant/now))
 
+          ;; 6b. Atoms to capture agent run stats from result message
+          ;; These are set when the result message arrives, then read in the finally block
+          ;; to pass to runtime/complete-agent-run!
+          run-cost-usd (atom nil)
+          run-num-turns (atom nil)
+          run-duration-ms (atom nil)
+
           ;; 7. Start reader that persists messages and updates status
           claude-session-mapped? (atom false)
           _reader (future
@@ -912,6 +919,10 @@
                                       (catch Exception e
                                         (log/warn e "Failed to end AI session"
                                                   {:ai-session-id ai-session-id})))
+                                    ;; Capture run stats for complete-agent-run!
+                                    (reset! run-cost-usd (:total_cost_usd msg))
+                                    (reset! run-num-turns (:num_turns msg))
+                                    (reset! run-duration-ms (:duration_ms msg))
                                     ;; Update agent status
                                     (reset! status-atom final-status)))))
                             ;; Only recur if still running - exit loop on result/failure
@@ -959,8 +970,11 @@
                         ;; Complete agent run in runtime registry
                         (try
                           (runtime/complete-agent-run!
-                           {::runtime/agent-run-id id
-                            ::runtime/status (or @status-atom :failed)})
+                           (cond-> {::runtime/agent-run-id id
+                                    ::runtime/status (or @status-atom :failed)}
+                             @run-cost-usd (assoc ::runtime/cost-usd @run-cost-usd)
+                             @run-num-turns (assoc ::runtime/num-turns @run-num-turns)
+                             @run-duration-ms (assoc ::runtime/duration-ms @run-duration-ms)))
                           (catch Exception e
                             (log/warn "Failed to complete agent run in runtime"
                                       {:error (.getMessage e)})))
