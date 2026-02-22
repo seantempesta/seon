@@ -22,6 +22,22 @@
             [seon.flow.pool]))
 
 ;;; ---------------------------------------------------------------------------
+;;; Config Validation (assert-key)
+;;; ---------------------------------------------------------------------------
+;;; Validates all :seon/component configs against Malli schemas before init.
+;;; The hierarchy in resources/integrant/hierarchy.edn derives all component
+;;; keys from :seon/component, so this single method catches everything.
+
+(defmethod ig/assert-key :seon/component
+  [component-key value]
+  (require 'seon.system.config)
+  (when-let [errors ((resolve 'seon.system.config/validate) component-key value)]
+    (throw (ex-info (str "Invalid config for " component-key ":\n"
+                         (pr-str errors)
+                         "\n\nCheck resources/system.edn")
+                    {:key component-key :value value :errors errors}))))
+
+;;; ---------------------------------------------------------------------------
 ;;; Schema Registry Component
 ;;; ---------------------------------------------------------------------------
 
@@ -41,11 +57,11 @@
 (defmethod ig/suspend-key! :seon.schema/registry [_ state] state)
 
 (defmethod ig/resume-key :seon.schema/registry
-  [key opts old-opts old-state]
+  [_ opts old-opts old-state]
   (if (= opts old-opts)
     old-state
-    (do (ig/halt-key! key old-state)
-        (ig/init-key key opts))))
+    (do (ig/halt-key! :seon.schema/registry old-state)
+        (ig/init-key :seon.schema/registry opts))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; nREPL Server Component
@@ -84,11 +100,11 @@
 (defmethod ig/suspend-key! :seon.dev/nrepl [_ server] server)
 
 (defmethod ig/resume-key :seon.dev/nrepl
-  [key opts old-opts old-server]
+  [_ opts old-opts old-server]
   (if (= opts old-opts)
     old-server
-    (do (ig/halt-key! key old-server)
-        (ig/init-key key opts))))
+    (do (ig/halt-key! :seon.dev/nrepl old-server)
+        (ig/init-key :seon.dev/nrepl opts))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Primer Ctx Component
@@ -108,11 +124,11 @@
 (defmethod ig/suspend-key! :seon.primer/ctx [_ state] state)
 
 (defmethod ig/resume-key :seon.primer/ctx
-  [key opts old-opts old-state]
+  [_ opts old-opts old-state]
   (if (= opts old-opts)
     old-state
-    (do (ig/halt-key! key old-state)
-        (ig/init-key key opts))))
+    (do (ig/halt-key! :seon.primer/ctx old-state)
+        (ig/init-key :seon.primer/ctx opts))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Orchestrator Sessions Component
@@ -132,11 +148,11 @@
 (defmethod ig/suspend-key! :seon.orchestrator/sessions [_ state] state)
 
 (defmethod ig/resume-key :seon.orchestrator/sessions
-  [key opts old-opts old-state]
+  [_ opts old-opts old-state]
   (if (= opts old-opts)
     old-state
-    (do (ig/halt-key! key old-state)
-        (ig/init-key key opts))))
+    (do (ig/halt-key! :seon.orchestrator/sessions old-state)
+        (ig/init-key :seon.orchestrator/sessions opts))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Graph Database Component
@@ -205,11 +221,11 @@
 (defmethod ig/suspend-key! :seon/runtime-db [_ state] state)
 
 (defmethod ig/resume-key :seon/runtime-db
-  [key opts old-opts old-state]
+  [_ opts old-opts old-state]
   (if (= (:connection-manager opts) (:connection-manager old-opts))
     old-state
-    (do (ig/halt-key! key old-state)
-        (ig/init-key key opts))))
+    (do (ig/halt-key! :seon/runtime-db old-state)
+        (ig/init-key :seon/runtime-db opts))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Code Scanner Component
@@ -240,7 +256,7 @@
             (if-not (:seon.graph.analyzer/success project)
               (log/warn "Code scanner: analysis failed" {:error (:seon.graph.analyzer/error project)})
               (let [entities (extract-entities {:seon.graph.analyzer/raw-analysis
-                                               (:seon.graph.analyzer/raw-analysis project)})
+                                                (:seon.graph.analyzer/raw-analysis project)})
                     ;; Scan for specs
                     specs (into [] (mapcat #(scan-directory {:seon.graph.scanner/dir-path %})) paths)
                     ;; Link functions to specs
@@ -275,11 +291,11 @@
 (defmethod ig/suspend-key! :seon.graph/scanner [_ state] state)
 
 (defmethod ig/resume-key :seon.graph/scanner
-  [key opts old-opts old-state]
+  [_ opts old-opts old-state]
   (if (= (:paths opts) (:paths old-opts))
     old-state
-    (do (ig/halt-key! key old-state)
-        (ig/init-key key opts))))
+    (do (ig/halt-key! :seon.graph/scanner old-state)
+        (ig/init-key :seon.graph/scanner opts))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Claude Code SDK Configuration
