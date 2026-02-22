@@ -239,6 +239,61 @@
       (is (= #{[:stopped]} results)))))
 
 ;;; ---------------------------------------------------------------------------
+;;; Hydrate Cache Tests
+;;; ---------------------------------------------------------------------------
+
+(deftest hydrate-cache-test
+  (testing "hydrate-cache! populates registry-cache from Datalevin"
+    ;; Register two instances (persists to Datalevin + cache)
+    (runtime/register! {::runtime/namespace "test.hydrate.a"
+                        ::runtime/status :running
+                        ::runtime/location :in-process
+                        ::runtime/component-key :seon/a})
+    (runtime/register! {::runtime/namespace "test.hydrate.b"
+                        ::runtime/status :running
+                        ::runtime/location :external
+                        ::runtime/session-id "abcdef"
+                        ::runtime/nrepl-port 9999})
+
+    ;; Clear cache (simulates restart)
+    (runtime/reset-registry! {})
+    (is (= 0 (count (runtime/instances {}))))
+
+    ;; Hydrate from Datalevin
+    (let [{::runtime/keys [hydrated-count]} (runtime/hydrate-cache! {})]
+      (is (= 2 hydrated-count)))
+
+    ;; Verify instances are back in cache with correct keys
+    (let [a (runtime/instance {::runtime/namespace "test.hydrate.a"})
+          b (runtime/instance {::runtime/namespace "test.hydrate.b"})]
+      (is (some? a))
+      (is (= :running (::runtime/status a)))
+      (is (= :in-process (::runtime/location a)))
+      (is (= :seon/a (::runtime/component-key a)))
+      (is (some? b))
+      (is (= :external (::runtime/location b)))
+      (is (= "abcdef" (::runtime/session-id b)))
+      (is (= 9999 (::runtime/nrepl-port b))))))
+
+(deftest mark-crashed-then-hydrate-test
+  (testing "mark-crashed! + hydrate-cache! shows crashed instances in cache"
+    ;; Register a running instance
+    (runtime/register! {::runtime/namespace "test.crash.hydrate"
+                        ::runtime/status :running
+                        ::runtime/location :in-process})
+
+    ;; Simulate restart: clear cache, mark crashed, hydrate
+    (runtime/reset-registry! {})
+    (runtime/mark-crashed! {})
+    (runtime/hydrate-cache! {})
+
+    ;; Instance should be in cache with :crashed status
+    (let [inst (runtime/instance {::runtime/namespace "test.crash.hydrate"})]
+      (is (some? inst))
+      (is (= :crashed (::runtime/status inst)))
+      (is (inst? (::runtime/stopped-at inst))))))
+
+;;; ---------------------------------------------------------------------------
 ;;; Reset Tests
 ;;; ---------------------------------------------------------------------------
 
