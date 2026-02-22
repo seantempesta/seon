@@ -89,7 +89,7 @@ You have access to the Seon MCP server with these tools:
 
 Use `(user/reload)` after editing files to load changes into the running server.
 
-**Auto-saved results:** Every eval result is stored in `@user/*repl-<your-session>*`. If output is truncated, the hint tells you the key to retrieve the full data. Never re-run code just to see more output.
+**Auto-saved results:** Every eval result is stored in `@user/*repl-<your-session>*`. Large output is truncated — dig into the key or prefix with `#_:full` for untruncated output. Never re-run code just to see more output.
 
 ## Skills (Use These!)
 
@@ -149,14 +149,14 @@ This pattern is recursive. If the orchestrator decomposes and launches a sub-age
    ;; Step 2: Dig into failures WITHOUT re-running (zero cost)
    (:failures (:r-a1b2 @user/*repl-a1b2*))
 
-   ;; Step 3: After fixing, run again (new result overwrites same key)
-   (user/run-tests 'seon.foo-test)
+   ;; Step 3: Need full untruncated output? Prefix with #_:full
+   #_:full (:r-a1b2 @user/*repl-a1b2*)
 
-   ;; See all saved results from this session:
-   (keys @user/*repl-a1b2*)
+   ;; Step 4: After fixing, run again (same key, updated value)
+   (user/run-tests 'seon.foo-test)
    ```
-   Large results (>2000 chars) are **truncated** in the response — the hint tells you the key.
-   **Never re-run tests to see a different part of the output.** The full data is already saved.
+   Large results (>2000 chars) are **truncated** — the hint shows the key and `#_:full` syntax.
+   **Never re-run code to see more output.** Dig into the key, or use `#_:full` for the full value.
    For dependency-aware testing: `(user/test-affected 'seon.foo)` tests foo + all dependents.
    **NEVER** shell out to `clojure -M:test` and grep output. That wastes tokens and time.
 6. **Use Gemini when stuck** - After 2 failed attempts, search with file context
