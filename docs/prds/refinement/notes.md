@@ -308,3 +308,72 @@ Not done:
 - Reserved keys are tracked in an atom (`reserved-keys-snapshot`) inside the closure, not in the atom value itself
 - `session.clj` no longer stores `::flush!` / `::close!` in the session registry -- cleanup goes through `ctx/destroy!`
 - The `::persist?` in session is conditional on having a dl-conn, so agents without Datalevin still work
+
+---
+
+## E2E Verification (2026-02-22)
+
+### Pre-flight
+
+Server started clean with 12 components (11 + `:seon/graph-db`). `(user/agents)` empty, `(runtime/instances {})` empty. Health endpoint returns 200.
+
+**LMDB corruption from prior session**: First attempt to launch agent failed with `Assert failed: LMDB env is closed` in `datalevin.binding.cpp.CppLMDB.check_ready`. Root cause was stale/corrupted Datalevin data from a previous `pkill -9`. Fix: `rm -rf data/datalevin/` and restart server. Standard recovery per MEMORY.md.
+
+### Agent Launch
+
+Command: `(user/launch-agent!! 'seon.health "List files in src/seon/health/ ..." :files [".claude/AGENT.md"])`
+
+Result: **SUCCESS**
+- Status: `:completed`
+- Duration: 22.6s
+- Cost: $0.25
+- Turns: 6 (Claude reports T14 which includes tool calls)
+- Messages: 22
+- Agent correctly listed 2 health namespaces and provided detailed analysis
+
+### Runtime State After Completion
+
+1. **`(runtime/agent-runs {})`** -- Shows completed run with `:seon.agent.run/id "e925d6"`, start/stop timestamps, status `:completed`, namespace, provider. **Missing**: cost, turns, duration fields not persisted to agent-runs (only available in the return value from `launch-agent!!`).
+
+2. **`(user/agents)`** -- Empty (agent cleaned up properly).
+
+3. **`(runtime/instances {})`** -- Shows 3 entries:
+   - `seon.graph.db` -- running, in-process
+   - `seon.graph.scanner` -- running, in-process
+   - `seon.health` -- stopped, external, with session-id and nrepl-port
+
+### Observatory UI
+
+1. **Agent list** (`/agents`) -- Shows "0 running, 1 completed (hidden)" with "Show Completed" toggle. Clicking reveals agent `e925d6` with namespace `seon.health`, status "done", 22 msgs, 22.6k tokens. Runtime instances table shows all 3 instances with correct status dots and locations.
+
+2. **Agent detail** (`/agents/e925d6`) -- Full conversation visible with markdown rendering. Header shows "done 22.6k T14 22s 22 msgs". Messages include tool calls (collapsed with "18 more lines" toggle) and final summary. All working.
+
+### Issues Found
+
+1. **Agent-runs missing cost/duration/turns** -- `runtime/agent-runs` returns only id, namespace, provider, status, timestamps. The cost ($0.25), duration (22.6s), and turn count are available in the `launch-agent!!` return value but not persisted to the runtime registry. This means Observatory cannot show cost data for completed agents.
+
+2. **`runtime/agent-runs {}` NPE** -- When called before any agents have run (fresh DB), throws `NullPointerException: Cannot invoke "java.lang.Number.doubleValue()" because "x" is null`. Should return empty list gracefully.
+
+3. **`:files` path resolution** -- `AGENT.md` (without `.claude/` prefix) logs "No such file or directory". The working path is `.claude/AGENT.md`. File paths are resolved relative to project root, not `.claude/`.
+
+4. **Runtime persist warning** -- On first launch attempt (with corrupted DB), logged `WARN seon.runtime: Failed to persist runtime instance ... "Calling close-transact-kv without opening"`. This is expected with corrupted LMDB but the warning is misleading -- it suggests the transact-kv was never opened rather than that the env is closed/corrupted.
+
+5. **"SINCE" column empty** -- Runtime instances table in Observatory shows timestamps in the data but the "SINCE" column is blank in the UI.
+
+### What Works End-to-End
+
+- Server startup with all 12 components
+- Agent pool JVM provisioning (port 7901, 159ms setup)
+- Ctx instance creation with persistence
+- AI session creation for message persistence
+- Claude Code subprocess spawn with MCP config
+- Agent message streaming and persistence (22 messages captured)
+- Agent completion detection and cleanup
+- Runtime registry updates (register on start, update on stop)
+- Observatory list view with show/hide completed toggle
+- Observatory detail view with full conversation and markdown rendering
+- Session cleanup (agent removed from active list)
+
+### Verdict
+
+**The E2E agent pipeline works.** The core flow (launch -> execute -> complete -> cleanup -> view in Observatory) is functional. The gaps are minor: missing cost persistence in runtime, NPE on empty agent-runs, empty SINCE column in UI.
