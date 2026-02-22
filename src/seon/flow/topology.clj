@@ -16,7 +16,9 @@
             [seon.flow.msg :as msg]
             [seon.flow.registry :as registry]
             [seon.flow.status :as status]
-            [seon.schema :as schema])
+            [seon.runtime :as runtime]
+            [seon.schema :as schema]
+            [taoensso.timbre :as log])
   (:import [java.time Instant]))
 
 ;;; ---------------------------------------------------------------------------
@@ -463,9 +465,19 @@
       result)))
 
 (defn stop-topology!
-  "Stop a running topology. Returns nil."
-  [{::keys [flow flow-id]}]
+  "Stop a running topology. Snapshots state before stopping. Returns nil."
+  [{::keys [flow flow-id label]}]
   (when flow
+    ;; Snapshot state before stopping: pause → snapshot → stop
+    (try
+      (flow/pause flow)
+      (let [snap-label (or label (when flow-id (name flow-id)))]
+        (when snap-label
+          (runtime/snapshot-topology! {::runtime/flow flow
+                                       ::runtime/label snap-label
+                                       ::runtime/reason :shutdown})))
+      (catch Throwable t
+        (log/warn "Failed to snapshot topology before stop" {:error (.getMessage t)})))
     (flow/stop flow)
     ;; Clean up any lingering promises
     (doseq [[_id p] @pending-promises]
