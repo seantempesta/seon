@@ -33,13 +33,21 @@
                   [:vector {:description "Collection of workout sets"}
                    ::workout-set])
 
-(schema/register! ::render-request
-                  [:map
-                   [:format [:enum :html :ai :raw]]
-                   [:id {:optional true} [:maybe :string]]])
+;;; ---------------------------------------------------------------------------
+;;; Spec-Driven Render Specs (for Datalevin resolution)
+;;; ---------------------------------------------------------------------------
 
-(schema/register! ::render-response
-                  [:or :string [:map [::workouts ::workouts]]])
+(schema/register! ::workout-set-render-request
+                  [:map
+                   [::exercise ::exercise]
+                   [::sets ::sets]
+                   [::reps ::reps]
+                   [::weight ::weight]])
+
+(schema/register! ::workout-set-render-response
+                  [:map
+                   [:seon.render/html :any]
+                   [:seon.render/ai :string]])
 
 ;;; ---------------------------------------------------------------------------
 ;;; Sample Data
@@ -54,17 +62,31 @@
    {::exercise "Barbell Row" ::sets 5 ::reps 5 ::weight 70}])
 
 ;;; ---------------------------------------------------------------------------
-;;; Rendering
+;;; Render Function (discovered by scanner via naming convention)
+;;; ---------------------------------------------------------------------------
+
+(defn workout-set-render
+  "Render a single workout set for all formats.
+   Discovered by scanner via ::workout-set-render-request/-response specs.
+
+   Returns map with :seon.render/html and :seon.render/ai keys."
+  {:malli/schema [:=> [:cat ::workout-set-render-request] ::workout-set-render-response]}
+  [{::keys [exercise sets reps weight]}]
+  {:seon.render/ai (str exercise " " sets "x" reps " @ " weight "kg")
+   :seon.render/html [:tr {:class "hover:bg-base-800 border-b border-base-700/50"}
+                      [:td {:class "py-2 px-3 font-mono text-text-50 text-sm"} exercise]
+                      [:td {:class "py-2 px-3 text-text-200 text-sm text-center"} (str sets)]
+                      [:td {:class "py-2 px-3 text-text-200 text-sm text-center"} (str reps)]
+                      [:td {:class "py-2 px-3 text-text-200 text-sm text-right"} (str weight " kg")]]})
+
+;;; ---------------------------------------------------------------------------
+;;; Page Rendering (for /ns/seon.health.workout route)
 ;;; ---------------------------------------------------------------------------
 
 (defn- render-workout-row
-  "Render a single workout as a table row."
-  [{::keys [exercise sets reps weight]}]
-  [:tr {:class "hover:bg-base-800 border-b border-base-700/50"}
-   [:td {:class "py-2 px-3 font-mono text-text-50 text-sm"} exercise]
-   [:td {:class "py-2 px-3 text-text-200 text-sm text-center"} (str sets)]
-   [:td {:class "py-2 px-3 text-text-200 text-sm text-center"} (str reps)]
-   [:td {:class "py-2 px-3 text-text-200 text-sm text-right"} (str weight " kg")]])
+  "Render a single workout as a table row using workout-set-render."
+  [workout]
+  (:seon.render/html (workout-set-render workout)))
 
 (defn render
   "Render workout view. Called by ns/routes when visiting /ns/seon.health.workout.
