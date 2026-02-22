@@ -64,3 +64,6 @@
 [submodule "reference-code/claude-code-lsps"]
 	path = reference-code/claude-code-lsps
 	url = https://github.com/boostvolt/claude-code-lsps.git
+[submodule "reference-code/integrant"]
+	path = reference-code/integrant
+	url = https://github.com/weavejester/integrant.git

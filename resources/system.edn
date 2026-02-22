@@ -90,6 +90,16 @@
                       :test false
                       :prod true}}
 
+ ;; Caddy Reverse Proxy (HTTP/2 + TLS)
+ ;; Dev: Enabled - serves https://localhost:3030 → http://localhost:8080
+ ;; Depends on HTTP server so Caddy starts after upstream is ready.
+ :seon/caddy-proxy
+ {:enabled? #profile {:dev true
+                      :test false
+                      :prod false}
+  :config-file "Caddyfile"
+  :http-server #ig/ref :seon.web.server/http-server}
+
  ;; Claude Code SDK Configuration
  :seon/claude-code
  {:cli-path #or [#env CLAUDE_CLI_PATH "/Users/sean/.local/bin/claude"]}}
