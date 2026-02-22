@@ -16,6 +16,7 @@
             [seon.runtime :as runtime]
             ;; Load component namespaces for their ig/init-key methods
             [seon.web.tailwind]
+            [seon.web.caddy]
             [seon.db.datalevin.server]
             [seon.db.datalevin.conn]
             [seon.flow.pool]))
