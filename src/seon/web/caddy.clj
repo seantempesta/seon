@@ -10,20 +10,25 @@
   (:require [clojure.java.io :as io]
             [integrant.core :as ig]
             [taoensso.timbre :as log])
-  (:import [java.lang ProcessBuilder ProcessBuilder$Redirect]))
+  (:import [java.lang ProcessBuilder ProcessBuilder$Redirect]
+           [java.net Socket InetSocketAddress]))
 
-(defn- ensure-log-dir!
-  "Ensure the logs directory exists."
-  []
-  (let [log-dir (io/file "logs")]
-    (when-not (.exists log-dir)
-      (.mkdirs log-dir))))
+(defn- port-open?
+  "Check if a port is accepting connections."
+  [port timeout-ms]
+  (try
+    (let [socket (Socket.)]
+      (.connect socket (InetSocketAddress. "localhost" (int port)) (int timeout-ms))
+      (.close socket)
+      true)
+    (catch Exception _ false)))
 
 (defn- kill-stale-caddy!
-  "Kill any stale Caddy processes from previous runs."
+  "Kill any stale Caddy processes from previous runs.
+   Matches specifically 'caddy run' to avoid killing unrelated processes."
   []
   (try
-    (let [builder (ProcessBuilder. ^java.util.List ["pkill" "-f" "caddy"])]
+    (let [builder (ProcessBuilder. ^java.util.List ["pkill" "-f" "caddy run"])]
       (.redirectOutput builder ProcessBuilder$Redirect/DISCARD)
       (.redirectErrorStream builder true)
       (let [process (.start builder)]
@@ -38,7 +43,7 @@
 (defn- start-caddy-process!
   "Start the Caddy process. Returns the Process object or nil on failure."
   [{:keys [config-file]}]
-  (ensure-log-dir!)
+  (.mkdirs (io/file "logs"))
   (let [command ["caddy" "run" "--config" config-file]
         log-file (io/file "logs/caddy.log")
         builder (ProcessBuilder. ^java.util.List command)]
@@ -51,6 +56,8 @@
       (if (.isAlive process)
         (do
           (log/info "Caddy started" {:pid (.pid process)})
+          (when-not (port-open? 3030 2000)
+            (log/warn "Caddy process alive but port 3030 not yet accepting connections"))
           process)
         (let [exit-code (.exitValue process)]
           (log/error "Caddy failed to start" {:exit-code exit-code
@@ -81,7 +88,11 @@
     (do
       (kill-stale-caddy!)
       (let [process (start-caddy-process! {:config-file config-file})]
-        {:process process :config-file config-file}))
+        {:process process
+         :config-file config-file
+         :pid (when process (.pid process))
+         :url "https://localhost:3030"
+         :upstream "http://localhost:8080"}))
     (do
       (log/info "Caddy proxy disabled")
       {:process nil})))

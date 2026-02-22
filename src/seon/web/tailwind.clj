@@ -16,15 +16,7 @@
   (:require [clojure.java.io :as io]
             [integrant.core :as ig]
             [taoensso.timbre :as log])
-  (:import [java.io File]
-           [java.lang ProcessBuilder ProcessBuilder$Redirect]))
-
-(defn- ensure-log-dir!
-  "Ensure the logs directory exists."
-  []
-  (let [log-dir (io/file "logs")]
-    (when-not (.exists log-dir)
-      (.mkdirs log-dir))))
+  (:import [java.lang ProcessBuilder ProcessBuilder$Redirect]))
 
 (defn- tailwind-cli-path
   "Get the path to the tailwindcss CLI."
@@ -47,7 +39,7 @@
   "Start the Tailwind watcher process.
    Returns the Process object."
   [{:keys [input output] :as opts}]
-  (ensure-log-dir!)
+  (.mkdirs (io/file "logs"))
   (let [command (build-command opts)
         log-file (io/file "logs/tailwind.log")
         builder (ProcessBuilder. ^java.util.List command)]
@@ -96,6 +88,7 @@
   (if enabled?
     (let [process (start-tailwind-process! {:input input :output output})]
       {:process process
+       :pid (when process (.pid process))
        :input input
        :output output})
     (do
