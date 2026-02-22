@@ -27,6 +27,7 @@
   (:require [clojure.pprint :as pp]
             [clojure.string :as str]
             [datalevin.core :as d]
+            [integrant.repl.state]
             [seon.schema :as schema]))
 
 ;;; ---------------------------------------------------------------------------
@@ -176,6 +177,49 @@
       (let [result (resolved data)
             format-key (case format :html :seon.render/html :ai :seon.render/ai)]
         (get result format-key)))))
+
+;;; ---------------------------------------------------------------------------
+;;; Public API: try-render and has-renderer?
+;;; ---------------------------------------------------------------------------
+
+(defn try-render
+  "Try to render data using a registered Datalevin renderer.
+
+   Unlike `render`, this returns nil if no renderer is found instead of
+   falling back to pprint. Use this when you want to know if a specific
+   renderer exists without fallback behavior.
+
+   Arguments:
+     data   - Map of data to render
+     format - :html or :ai
+
+   Returns:
+     Rendered value if renderer found, nil otherwise.
+
+   Example:
+     (try-render {:seon.health.workout/exercise \"Squat\" ...} :ai)
+     ;; => \"Squat 5x5 @ 100kg\" or nil"
+  [data format]
+  (when (and (map? data) (#{:html :ai} format))
+    (call-datalevin-renderer data format)))
+
+(defn has-renderer?
+  "Check if a registered renderer exists for the given data and format.
+
+   Arguments:
+     data   - Map of data to check
+     format - :html or :ai
+
+   Returns:
+     true if a renderer is registered, false otherwise.
+
+   Example:
+     (has-renderer? {:seon.health.workout/exercise \"Squat\" ...} :ai)
+     ;; => true"
+  [data format]
+  (when (and (map? data) (#{:html :ai} format))
+    (let [resolved (resolve-renderer-from-datalevin data format)]
+      (not= resolved ::no-renderer))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Core Rendering
