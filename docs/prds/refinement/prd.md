@@ -2,8 +2,8 @@
 
 **Status:** In Progress (Tracks 0-3, 5 complete; Unified Runtime Phases 1-9 complete; System Lifecycle in progress)
 **Priority:** High
-**Branch:** `feature/refinement` — ~48 commits ahead of main
-**Tests:** 531 unit tests, 0 failures
+**Branch:** `feature/refinement` — ~55 commits ahead of main
+**Tests:** 535 unit tests, 0 failures
 **Last updated:** 2026-02-22
 
 ---
@@ -114,28 +114,26 @@ After Tracks 4 and 5:
 - `9f452d8` — Lint cleanup on caddy.clj resume-key
 - `96b1f5c` — Deep audit of Integrant usage (see `docs/prds/refinement/integrant-audit.md`)
 
-**Phase 1: Upgrade + Naming** (not started)
-- Upgrade Integrant 0.10.0 → 1.0.1 in deps.edn
-- Rename component keys to match their namespaces (see audit Section 4)
-- Rename `:seon/graph-db` → `:seon/runtime` (it's Datalevin, not a graph DB)
+**Phase 1: Upgrade + Naming** — DONE
+- Upgraded Integrant 0.10.0 → 1.0.1 in deps.edn
+- All component keys renamed to match their namespaces
+- `:seon/graph-db` → `:seon/runtime`
 
-**Phase 2: Lifecycle Fixes** (not started)
-- Add suspend/resume to HTTP server (prevents SSE drops on reset)
-- Add suspend/resume to code-scanner (prevents wasteful re-analysis)
-- Add suspend/resume to tailwind-watcher
-- Add halt to primer-ctx and orchestrator-sessions
+**Phase 2: Lifecycle Fixes** — DONE
+- suspend/resume added to all 6 components that lacked it (HTTP server, code-scanner, tailwind-watcher, primer-ctx, orchestrator-sessions, agent-pool)
+- Dead code removed
 
-**Phase 3: Malli Config Validation** (not started)
-- Malli schema per component config
+**Phase 3: Malli Config Validation** — DONE
+- Malli schemas for all 13 components
 - `ig/assert-key` validation before init
+- `seon.system/hierarchy` via `derive` for component grouping
 - Error messages that guide debugging: what's wrong, where to look, what to check
-- Component introspection API for agents
 
-**Phase 4: Resilience Testing** (not started)
-- Test every component in all lifecycle states (init → suspend → resume → halt)
+**Phase 4: Component Control API** — NOT STARTED
+- API to start/stop/restart individual components or tiers at runtime
+- Resilience testing: every component in all lifecycle states (init → suspend → resume → halt)
 - Corruption/perturbation testing (kill -9, port conflicts, stale processes)
 - Verify recovery paths work automatically on next startup
-- Component hierarchy via `derive` for tier-based control
 
 **Reference:** `docs/prds/refinement/integrant-audit.md` — full analysis of every component
 
@@ -199,7 +197,7 @@ After Tracks 4 and 5:
 ## Coordination
 
 - **Track 5 (ctx unification) — DONE**
-- **Track 7 (system lifecycle) — IN PROGRESS** — Caddy component done, audit done, upgrade + lifecycle fixes next
+- **Track 7 (system lifecycle) — IN PROGRESS** — Phases 1-3 done; Phase 4 (component control API) not started
 - **Track 4 (render E2E) — blocked on Track 7** (need stable system first)
 - **Track 6 (e2e verification) runs last** — depends on everything else
 - Each agent edits max ~7 files
@@ -214,7 +212,7 @@ After Tracks 4 and 5:
 3. Launch agent via MCP → pool JVM claimed → `@*ctx*` returns session context → visible in Observatory
 4. Cross-ns call routes through flow → visible in trace logs
 5. `/ns/seon.health.workout` renders in browser via render pipeline
-6. ✅ Full test suite: 531 tests, 0 failures
-7. `(reset)` works cleanly — Observatory stays accessible, SSE connections preserved
+6. ✅ Full test suite: 535 tests, 0 failures
+7. ✅ `(reset)` works cleanly — Observatory stays accessible, SSE connections preserved
 8. After `kill -9`, next startup recovers automatically
-9. Config typos caught at startup with actionable Malli error messages
+9. ✅ Config typos caught at startup with actionable Malli error messages
