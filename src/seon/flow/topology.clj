@@ -14,7 +14,6 @@
             [clojure.string :as str]
             [seon.flow.harness :as harness]
             [seon.flow.msg :as msg]
-            [seon.flow.registry :as registry]
             [seon.flow.status :as status]
             [seon.runtime :as runtime]
             [seon.schema :as schema]
@@ -377,7 +376,7 @@
   ;; Detect cycles at build time
   (when-let [cycles (detect-cycles namespaces)]
     (let [cycle-strs (map (fn [cycle]
-                            (str/join " → " cycle))
+                            (str/join " \u2192 " cycle))
                           cycles)]
       (throw (ex-info "Circular dependency detected in namespace proxies"
                       {:cycle-detected true
@@ -453,11 +452,11 @@
                   ::chans chans
                   ::relays relays
                   ::flow-id flow-id}]
-      ;; Register in flow registry
-      (registry/register! {::registry/id flow-id
-                           ::registry/flow fl
-                           ::registry/chans chans
-                           ::registry/label label})
+      ;; Register in runtime flow registry
+      (runtime/register-flow! {::runtime/flow-id flow-id
+                               ::runtime/flow fl
+                               ::runtime/chans chans
+                               ::runtime/label label})
       ;; Start error drain for status collection
       (when-let [error-chan (:error-chan chans)]
         (status/start-error-drain! {::status/id flow-id
@@ -468,7 +467,7 @@
   "Stop a running topology. Snapshots state before stopping. Returns nil."
   [{::keys [flow flow-id label]}]
   (when flow
-    ;; Snapshot state before stopping: pause → snapshot → stop
+    ;; Snapshot state before stopping: pause -> snapshot -> stop
     (try
       (flow/pause flow)
       (let [snap-label (or label (when flow-id (name flow-id)))]
@@ -485,8 +484,8 @@
                   ::msg/error-type :timeout
                   ::msg/error-message "Topology stopped"}))
     (reset! pending-promises {}))
-  ;; Unregister from flow registry and stop error drain
+  ;; Unregister from runtime flow registry and stop error drain
   (when flow-id
     (status/stop-error-drain! {::status/id flow-id})
-    (registry/unregister! {::registry/id flow-id}))
+    (runtime/unregister-flow! {::runtime/flow-id flow-id}))
   nil)

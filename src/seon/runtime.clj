@@ -794,6 +794,71 @@
              first)))))
 
 ;;; ---------------------------------------------------------------------------
+;;; Flow Handle Registry (In-Memory Only)
+;;; ---------------------------------------------------------------------------
+
+;; Map of flow-id (keyword) -> {:flow flow-obj :chans chans-map :label string}
+;; Flow objects are opaque and not serializable, so this is in-memory only.
+(defonce ^:private flow-handles (atom {}))
+
+(defn register-flow!
+  "Register a flow handle (in-memory only -- flow objects aren't serializable).
+
+   Also registers in the runtime registry for Datalevin persistence.
+
+   Request keys:
+     ::flow-id - Keyword identifier for the flow
+     ::flow    - The flow object (opaque, from core.async.flow)
+     ::chans   - Map with :error-chan and :report-chan
+     ::label   - Human-readable label
+
+   Returns the registered handle map."
+  [{::keys [flow-id flow chans label]}]
+  (let [now (java.time.Instant/now)
+        handle {:flow flow :chans chans :label label :started-at now}]
+    (swap! flow-handles assoc flow-id handle)
+    ;; Also register in runtime registry for Datalevin persistence
+    (register! {::namespace (str "flow." (name flow-id))
+                ::status :running
+                ::location :in-process})
+    handle))
+
+(defn unregister-flow!
+  "Remove a flow handle.
+
+   Request keys:
+     ::flow-id - Flow identifier to remove
+
+   Returns the removed handle, or nil if not found."
+  [{::keys [flow-id]}]
+  (let [removed (get @flow-handles flow-id)]
+    (swap! flow-handles dissoc flow-id)
+    (unregister! {::namespace (str "flow." (name flow-id))})
+    removed))
+
+(defn get-flow
+  "Get a flow handle by ID.
+
+   Request keys:
+     ::flow-id - Flow identifier
+
+   Returns the handle map or nil."
+  [{::keys [flow-id]}]
+  (get @flow-handles flow-id))
+
+(defn list-flows
+  "List all registered flow handles.
+
+   Returns map of flow-id -> handle."
+  [_request]
+  @flow-handles)
+
+(defn clear-flows!
+  "Remove all flow handles. For testing only."
+  []
+  (reset! flow-handles {}))
+
+;;; ---------------------------------------------------------------------------
 ;;; Testing Helpers
 ;;; ---------------------------------------------------------------------------
 
@@ -809,6 +874,7 @@
   [_request]
   (reset! registry-cache {})
   (reset! generated-ids #{})
+  (reset! flow-handles {})
   {::reset true})
 
 ;;; ---------------------------------------------------------------------------
