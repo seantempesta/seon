@@ -72,7 +72,7 @@
    Returns map with :seon.render/html and :seon.render/ai keys."
   {:malli/schema [:=> [:cat ::workout-set-render-request] ::workout-set-render-response]}
   [{::keys [exercise sets reps weight]}]
-  {:seon.render/ai (str exercise " " sets "x" reps " @ " weight "kg")
+  {:seon.render/ai (str exercise " — " sets "x" reps " @ " weight "kg")
    :seon.render/html [:tr {:class "hover:bg-base-800 border-b border-base-700/50"}
                       [:td {:class "py-2 px-3 font-mono text-text-50 text-sm"} exercise]
                       [:td {:class "py-2 px-3 text-text-200 text-sm text-center"} (str sets)]

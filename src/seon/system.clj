@@ -199,10 +199,6 @@
     (let [{::runtime/keys [hydrated-count]} (runtime/hydrate-cache! {})]
       (when (pos? hydrated-count)
         (log/info "Hydrated runtime cache from Datalevin" {:count hydrated-count})))
-    ;; Wire into render system
-    (require 'seon.render)
-    ((resolve 'seon.render/set-conn!) conn)
-    (log/info "Render system connected to graph database")
     ;; Register this component
     (runtime/register! {::runtime/namespace "seon.graph.db"
                         ::runtime/status :running
@@ -216,9 +212,6 @@
     (log/info "Stopping graph database...")
     ;; Unregister this component
     (runtime/unregister! {::runtime/namespace "seon.graph.db"})
-    ;; Disconnect render system before closing
-    (require 'seon.render)
-    ((resolve 'seon.render/set-conn!) nil)
     (require 'datalevin.core)
     ((resolve 'datalevin.core/close) conn)
     (log/info "Graph database stopped")))
@@ -230,11 +223,9 @@
   [_ opts old-opts old-state]
   (if (= (:connection-manager opts) (:connection-manager old-opts))
     (do
-      ;; Re-wire runtime atom and render conn — defonce atoms survive reload
+      ;; Re-wire runtime atom — defonce atoms survive reload
       ;; but may hold stale refs if conn was closed by a previous halt cycle
       (runtime/init! {::runtime/conn (:conn old-state)})
-      (require 'seon.render)
-      ((resolve 'seon.render/set-conn!) (:conn old-state))
       old-state)
     (do (ig/halt-key! :seon/runtime-db old-state)
         (ig/init-key :seon/runtime-db opts))))

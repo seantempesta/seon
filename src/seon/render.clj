@@ -34,13 +34,14 @@
 ;;; Datalevin Connection
 ;;; ---------------------------------------------------------------------------
 
-(defonce ^:private *conn (atom nil))
+(defonce ^:private *conn-override (atom nil))
 
-(defn set-conn!
-  "Set the Datalevin connection for renderer resolution.
-   Called during system startup."
-  [conn]
-  (reset! *conn conn))
+(defn- get-conn
+  "Get Datalevin connection. Checks override first (for tests),
+   then looks up from running Integrant system."
+  []
+  (or @*conn-override
+      (some-> integrant.repl.state/system :seon/runtime-db :conn)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Resolution Cache
@@ -53,6 +54,13 @@
    Called by the scanner after code graph updates."
   []
   (reset! resolution-cache {}))
+
+(defn set-conn!
+  "Override the Datalevin connection for renderer resolution.
+   Invalidates the render cache. Use only in tests."
+  [conn]
+  (reset! *conn-override conn)
+  (invalidate-render-cache!))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Value Typing
@@ -159,7 +167,7 @@
         cached (get @resolution-cache cache-key ::miss)]
     (if (not= cached ::miss)
       cached
-      (let [conn @*conn
+      (let [conn (get-conn)
             result (if conn
                      (if-let [qn (find-renderer conn data format)]
                        (or (requiring-resolve (symbol qn)) ::no-renderer)
