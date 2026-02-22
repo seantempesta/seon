@@ -89,6 +89,8 @@ You have access to the Seon MCP server with these tools:
 
 Use `(user/reload)` after editing files to load changes into the running server.
 
+**Auto-saved results:** Every eval result is stored in `@user/*repl-<your-session>*`. If output is truncated, the hint tells you the key to retrieve the full data. Never re-run code just to see more output.
+
 ## Skills (Use These!)
 
 You have access to project-specific skills that encode domain knowledge. **Invoke them before searching or guessing.**
@@ -137,22 +139,24 @@ This pattern is recursive. If the orchestrator decomposes and launches a sub-age
 2. **Invoke relevant skills** - Before searching, check if a skill covers your task
 3. **Understand before coding** - Explore existing code, understand patterns
 4. **Make incremental changes** - Small commits of working code
-5. **Test via REPL, never grep CLI output** - Tests return structured data. The pattern:
+5. **Test via REPL, never grep CLI output** - Every eval result is **auto-saved** to `@user/*repl-<session>*`. Run once, dig in without re-running:
    ```clojure
-   ;; Step 1: Run once, save result (runs tests, returns small summary map)
-   (def *r* (user/run-tests 'seon.foo-test))
-   ;; => {::success false ::test-count 5 ::fail-count 1 ::failures [...]}
+   ;; Step 1: Run tests (result auto-saved under a hash key)
+   (user/run-tests 'seon.foo-test)
+   ;; => {::success false ::fail-count 1 ::failures [...]}
+   ;; => stored as :r-a1b2 in @user/*repl-a1b2*
 
-   ;; Step 2: Inspect failures WITHOUT re-running (zero cost, just data)
-   (:failures *r*)
-   ;; => [{::test-var 'seon.foo-test/bar-test ::expected '(= 1 2) ::actual '(not (= 1 2)) ...}]
+   ;; Step 2: Dig into failures WITHOUT re-running (zero cost)
+   (:failures (:r-a1b2 @user/*repl-a1b2*))
 
-   ;; Step 3: After fixing, run again
-   (def *r* (user/run-tests 'seon.foo-test))
+   ;; Step 3: After fixing, run again (new result overwrites same key)
+   (user/run-tests 'seon.foo-test)
 
-   ;; Even if you forgot to def, results are cached:
-   (user/last-test-results)
+   ;; See all saved results from this session:
+   (keys @user/*repl-a1b2*)
    ```
+   Large results (>2000 chars) are **truncated** in the response — the hint tells you the key.
+   **Never re-run tests to see a different part of the output.** The full data is already saved.
    For dependency-aware testing: `(user/test-affected 'seon.foo)` tests foo + all dependents.
    **NEVER** shell out to `clojure -M:test` and grep output. That wastes tokens and time.
 6. **Use Gemini when stuck** - After 2 failed attempts, search with file context

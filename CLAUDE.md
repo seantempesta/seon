@@ -270,6 +270,7 @@ Returns component status (Datalevin, nREPL, agents) with latencies. HTTP 200 = h
 ;; Focused namespace — returns structured data
 (user/run-tests 'seon.ai.claude-test)
 ;; => {::success true ::test-count 5 ::pass-count 5 ::failures [] ...}
+;; => stored as :r-2108 in @user/*repl-orchestrator*
 
 ;; Single var
 (user/run-tests 'seon.ai.claude-test/constants-test)
@@ -282,13 +283,23 @@ Returns component status (Datalevin, nREPL, agents) with latencies. HTTP 200 = h
 
 ;; Generative tests on schema-annotated functions
 (user/test-gen 'seon.graph.query)
-
-;; Inspect last results without re-running
-(user/last-test-results)
-(:failures (user/last-test-results))
 ```
 
-Results are **data** (maps), not text. Store them: `(def *r* (user/run-tests 'foo-test))` then inspect `(:failures *r*)`.
+**Results are auto-saved.** Every eval result is stored in `@user/*repl-<session>*` under a hash key. Dig into results without re-running:
+
+```clojure
+;; Large test result was truncated — retrieve the full data:
+(:r-2108 @user/*repl-orchestrator*)
+
+;; Inspect just the failures (zero cost, no re-run):
+(:failures (:r-2108 @user/*repl-orchestrator*))
+
+;; See all stored results:
+(keys @user/*repl-orchestrator*)
+;; => (:r-2108 :r-1731 :r-3274 ...)
+```
+
+Results > 2000 chars are truncated in the MCP response with a hint showing the key. **Never re-run tests just to see a different part of the output** — the full result is already saved.
 
 **CLI (for full suite runs):**
 
