@@ -136,6 +136,10 @@
     (let [{::runtime/keys [crashed-count]} (runtime/mark-crashed! {})]
       (when (pos? crashed-count)
         (log/warn "Found crashed instances from previous run" {:count crashed-count})))
+    ;; Hydrate in-memory cache from Datalevin (includes crashed instances)
+    (let [{::runtime/keys [hydrated-count]} (runtime/hydrate-cache! {})]
+      (when (pos? hydrated-count)
+        (log/info "Hydrated runtime cache from Datalevin" {:count hydrated-count})))
     ;; Wire into render system
     (require 'seon.render)
     ((resolve 'seon.render/set-conn!) conn)

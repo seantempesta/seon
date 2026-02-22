@@ -496,11 +496,32 @@
       {::crashed-count (count running)})
     {::crashed-count 0}))
 
+(defn- datalevin->cache
+  "Convert a Datalevin entity map (`:seon.runtime/*` keys) to the
+   in-memory cache format (`::runtime/*` keys). Drops :db/id and any
+   keys not part of the runtime schema."
+  [entity]
+  (let [key-map {:seon.runtime/namespace  ::namespace
+                 :seon.runtime/status     ::status
+                 :seon.runtime/location   ::location
+                 :seon.runtime/session-id ::session-id
+                 :seon.runtime/nrepl-port ::nrepl-port
+                 :seon.runtime/started-at ::started-at
+                 :seon.runtime/stopped-at ::stopped-at
+                 :seon.runtime/component-key ::component-key}]
+    (reduce-kv (fn [m k v]
+                 (if-let [cache-key (key-map k)]
+                   (assoc m cache-key v)
+                   m))
+               {}
+               entity)))
+
 (defn hydrate-cache!
   "Load all runtime instances from Datalevin into the in-memory cache.
 
-   Called after mark-crashed! to populate the cache with historical data.
-   Only loads instances that are :running (should be none after mark-crashed!).
+   Called after mark-crashed! to populate the cache with persisted state.
+   This ensures the cache reflects what Datalevin knows (e.g. crashed
+   instances from a previous run).
 
    Request keys:
      (none - empty map for consistency)
@@ -514,10 +535,15 @@
                          :where
                          [?e :seon.runtime/namespace _]]
                        @c)
-          instance-count (count results)]
-      ;; Don't populate cache with historical data - only track active instances
-      (log/info "Hydrated runtime cache" {:count instance-count})
-      {::hydrated-count instance-count})
+          instances (map first results)
+          cache-map (reduce (fn [m entity]
+                              (let [inst (datalevin->cache entity)]
+                                (assoc m (::namespace inst) inst)))
+                            {}
+                            instances)]
+      (reset! registry-cache cache-map)
+      (log/info "Hydrated runtime cache" {:count (count cache-map)})
+      {::hydrated-count (count cache-map)})
     {::hydrated-count 0}))
 
 ;;; ---------------------------------------------------------------------------
