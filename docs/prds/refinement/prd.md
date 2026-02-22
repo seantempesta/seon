@@ -1,9 +1,9 @@
 # PRD: Refinement — One System, End to End
 
-**Status:** In Progress (Tracks 0-3, 5 complete; Unified Runtime Phases 1-9 complete; E2E verification next)
+**Status:** In Progress (Tracks 0-3, 5 complete; Unified Runtime Phases 1-9 complete; System Lifecycle in progress)
 **Priority:** High
-**Branch:** `feature/refinement` — ~41 commits ahead of main
-**Tests:** 527 unit tests, 0 failures
+**Branch:** `feature/refinement` — ~48 commits ahead of main
+**Tests:** 531 unit tests, 0 failures
 **Last updated:** 2026-02-22
 
 ---
@@ -105,6 +105,40 @@ After Tracks 4 and 5:
 5. Clean dead requires in `health.clj`
 6. Full test suite: 0 failures, 0 errors
 
+### Track 7: System Lifecycle — Reliable Integrant — IN PROGRESS
+
+**Goal:** System is resilient to crashes, restarts cleanly, components have proper lifecycles, config errors are caught early with actionable messages.
+
+**Commits so far:**
+- `aaa74c6` — Caddy moved from bash into Integrant component (init/halt/suspend/resume)
+- `9f452d8` — Lint cleanup on caddy.clj resume-key
+- `96b1f5c` — Deep audit of Integrant usage (see `docs/prds/refinement/integrant-audit.md`)
+
+**Phase 1: Upgrade + Naming** (not started)
+- Upgrade Integrant 0.10.0 → 1.0.1 in deps.edn
+- Rename component keys to match their namespaces (see audit Section 4)
+- Rename `:seon/graph-db` → `:seon/runtime` (it's Datalevin, not a graph DB)
+
+**Phase 2: Lifecycle Fixes** (not started)
+- Add suspend/resume to HTTP server (prevents SSE drops on reset)
+- Add suspend/resume to code-scanner (prevents wasteful re-analysis)
+- Add suspend/resume to tailwind-watcher
+- Add halt to primer-ctx and orchestrator-sessions
+
+**Phase 3: Malli Config Validation** (not started)
+- Malli schema per component config
+- `ig/assert-key` validation before init
+- Error messages that guide debugging: what's wrong, where to look, what to check
+- Component introspection API for agents
+
+**Phase 4: Resilience Testing** (not started)
+- Test every component in all lifecycle states (init → suspend → resume → halt)
+- Corruption/perturbation testing (kill -9, port conflicts, stale processes)
+- Verify recovery paths work automatically on next startup
+- Component hierarchy via `derive` for tier-based control
+
+**Reference:** `docs/prds/refinement/integrant-audit.md` — full analysis of every component
+
 ---
 
 ## Key Lessons Learned
@@ -143,6 +177,8 @@ After Tracks 4 and 5:
 | `docs/prds/refinement/plan.md` | Original master plan |
 | `docs/prds/refinement/plan-unified-runtime.md` | Detailed pool/session unification plan |
 | `docs/prds/refinement/notes.md` | Agent findings and gotchas |
+| `docs/prds/refinement/integrant-audit.md` | Integrant version, naming, lifecycle analysis |
+| `src/seon/web/caddy.clj` | Caddy reverse proxy Integrant component |
 | `.claude/skills/datalevin/SKILL.md` | Datalevin skill for agents |
 
 ---
@@ -163,7 +199,8 @@ After Tracks 4 and 5:
 ## Coordination
 
 - **Track 5 (ctx unification) — DONE**
-- **Track 4 (render E2E) — next up**
+- **Track 7 (system lifecycle) — IN PROGRESS** — Caddy component done, audit done, upgrade + lifecycle fixes next
+- **Track 4 (render E2E) — blocked on Track 7** (need stable system first)
 - **Track 6 (e2e verification) runs last** — depends on everything else
 - Each agent edits max ~7 files
 - Orchestrator reviews commits, resolves conflicts, runs integration
@@ -177,4 +214,7 @@ After Tracks 4 and 5:
 3. Launch agent via MCP → pool JVM claimed → `@*ctx*` returns session context → visible in Observatory
 4. Cross-ns call routes through flow → visible in trace logs
 5. `/ns/seon.health.workout` renders in browser via render pipeline
-6. ✅ Full test suite: 494 tests, 0 failures
+6. ✅ Full test suite: 531 tests, 0 failures
+7. `(reset)` works cleanly — Observatory stays accessible, SSE connections preserved
+8. After `kill -9`, next startup recovers automatically
+9. Config typos caught at startup with actionable Malli error messages
