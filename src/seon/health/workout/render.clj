@@ -1,7 +1,8 @@
 (ns seon.health.workout.render
   "Render companion for workout data.
    Demonstrates the .render namespace convention for spec-driven rendering."
-  (:require [seon.schema :as schema]))
+  (:require [seon.health.workout :as workout]
+            [seon.schema :as schema]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schema Registration
@@ -9,10 +10,10 @@
 
 (schema/register! ::workout-set-request
                   [:map
-                   [:seon.health.workout/exercise :string]
-                   [:seon.health.workout/sets :int]
-                   [:seon.health.workout/reps :int]
-                   [:seon.health.workout/weight :number]])
+                   [::workout/exercise ::workout/exercise]
+                   [::workout/sets ::workout/sets]
+                   [::workout/reps ::workout/reps]
+                   [::workout/weight ::workout/weight]])
 
 (schema/register! ::workout-set-response
                   [:map
