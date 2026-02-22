@@ -94,8 +94,8 @@
 (defmethod ig/suspend-key! :seon/caddy-proxy [_ state] state)
 
 (defmethod ig/resume-key :seon/caddy-proxy
-  [key opts old-opts old-state]
+  [_ opts _old-opts old-state]
   (if (and (:process old-state) (.isAlive ^Process (:process old-state)))
     old-state
-    (do (ig/halt-key! key old-state)
-        (ig/init-key key opts))))
+    (do (ig/halt-key! :seon/caddy-proxy old-state)
+        (ig/init-key :seon/caddy-proxy opts))))
