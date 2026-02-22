@@ -110,3 +110,15 @@
   (when-let [server (:server state)]
     (server :timeout 3000)  ;; Graceful shutdown with 3s timeout
     (log/info "HTTP server stopped")))
+
+;; Suspend/resume: keep server alive during (reset).
+;; The handler uses requiring-resolve for late binding, so code changes
+;; are picked up without restart. Only restart if config changes.
+(defmethod ig/suspend-key! ::http-server [_ state] state)
+
+(defmethod ig/resume-key ::http-server
+  [key opts old-opts old-state]
+  (if (= opts old-opts)
+    old-state
+    (do (ig/halt-key! key old-state)
+        (ig/init-key key opts))))

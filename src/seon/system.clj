@@ -37,6 +37,16 @@
   (log/info "Schema registry shutdown")
   nil)
 
+;; Pure value, survives reset. Only re-init if config changes.
+(defmethod ig/suspend-key! :seon/schema-registry [_ state] state)
+
+(defmethod ig/resume-key :seon/schema-registry
+  [key opts old-opts old-state]
+  (if (= opts old-opts)
+    old-state
+    (do (ig/halt-key! key old-state)
+        (ig/init-key key opts))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; nREPL Server Component
 ;;; ---------------------------------------------------------------------------
@@ -91,6 +101,19 @@
   ((resolve 'seon.primer.ctx/init!) connection-manager)
   {:connection-manager connection-manager})
 
+(defmethod ig/halt-key! :seon/primer-ctx
+  [_ _]
+  (log/info "Primer ctx shutdown"))
+
+(defmethod ig/suspend-key! :seon/primer-ctx [_ state] state)
+
+(defmethod ig/resume-key :seon/primer-ctx
+  [key opts old-opts old-state]
+  (if (= opts old-opts)
+    old-state
+    (do (ig/halt-key! key old-state)
+        (ig/init-key key opts))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Orchestrator Sessions Component
 ;;; ---------------------------------------------------------------------------
@@ -101,6 +124,19 @@
   (require 'seon.orchestrator.session)
   ((resolve 'seon.orchestrator.session/init!) connection-manager :pool pool)
   {:connection-manager connection-manager :pool pool})
+
+(defmethod ig/halt-key! :seon/orchestrator-sessions
+  [_ _]
+  (log/info "Orchestrator sessions shutdown"))
+
+(defmethod ig/suspend-key! :seon/orchestrator-sessions [_ state] state)
+
+(defmethod ig/resume-key :seon/orchestrator-sessions
+  [key opts old-opts old-state]
+  (if (= opts old-opts)
+    old-state
+    (do (ig/halt-key! key old-state)
+        (ig/init-key key opts))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Graph Database Component
@@ -232,6 +268,18 @@
     ;; Unregister from runtime (connection owned by graph-db, not closed here)
     (runtime/unregister! {::runtime/namespace "seon.graph.scanner"})
     (log/info "Code scanner stopped")))
+
+;; Suspend/resume: keep scanner results alive during (reset).
+;; The graph-db connection survives reset, so re-scanning is wasteful.
+;; Only re-scan if paths changed.
+(defmethod ig/suspend-key! :seon/code-scanner [_ state] state)
+
+(defmethod ig/resume-key :seon/code-scanner
+  [key opts old-opts old-state]
+  (if (= (:paths opts) (:paths old-opts))
+    old-state
+    (do (ig/halt-key! key old-state)
+        (ig/init-key key opts))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Claude Code SDK Configuration

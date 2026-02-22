@@ -106,5 +106,16 @@
   [_ {:keys [process]}]
   (stop-tailwind-process! process))
 
-;; Suspend/resume: restart on reset to pick up config changes
-;; (Unlike nREPL, we DO want to restart Tailwind on reset)
+;; Suspend/resume: keep process alive during (reset).
+;; Tailwind watcher is a long-running process that doesn't need restart
+;; unless config changes. Only restart if process died or config changed.
+(defmethod ig/suspend-key! :seon.web/tailwind-watcher [_ state] state)
+
+(defmethod ig/resume-key :seon.web/tailwind-watcher
+  [key opts old-opts old-state]
+  (if (and (= opts old-opts)
+           (:process old-state)
+           (.isAlive ^Process (:process old-state)))
+    old-state
+    (do (ig/halt-key! key old-state)
+        (ig/init-key key opts))))
