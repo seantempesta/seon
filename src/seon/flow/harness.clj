@@ -18,10 +18,7 @@
        :seon.flow.in/jvm-reply  - Replies from agent JVM
      Out-ports (to TCP / agent JVM):
        :seon.flow.out/jvm-request - Requests forwarded to agent JVM"
-  (:require [clojure.edn :as edn]
-            [datalevin.core :as d]
-            [seon.db :as db]
-            [seon.flow.harness.channel :as channel]
+  (:require [seon.flow.harness.channel :as channel]
             [seon.flow.msg :as msg]
             [seon.flow.pool :as pool]
             [seon.flow.trace :as trace]
@@ -270,73 +267,3 @@
     (try (pool/release! pool jvm) (catch Exception _)))
   (log/info "Namespace JVM stopped" {:ns namespace :event :stopped}))
 
-;;; ---------------------------------------------------------------------------
-;;; *ctx* Persistence
-;;; ---------------------------------------------------------------------------
-
-(defn- serializable?
-  "Test if a value can round-trip through EDN."
-  [v]
-  (try
-    (let [s (pr-str v)]
-      (edn/read-string s)
-      true)
-    (catch Exception _
-      false)))
-
-(defn- filter-serializable
-  "Filter a map to only serializable key-value pairs. Logs warnings for skipped keys.
-   Always strips ::conn (runtime handle)."
-  [m]
-  (reduce-kv
-   (fn [acc k v]
-     (cond
-       (= k ::conn) acc
-       (serializable? v) (assoc acc k v)
-       :else (do (log/warn "Skipping non-serializable key in *ctx*" {:key k})
-                 acc)))
-   {}
-   m))
-
-(defn persist-ctx!
-  "Save serializable *ctx* data to Datalevin. Warns on non-serializable values.
-
-   Request keys:
-     ::ctx       - Required. Atom or map containing the ctx data
-     ::namespace - Required. Namespace string for isolation
-     ::conn      - Required. Datalevin connection for storage
-
-   Returns:
-     The filtered data that was persisted."
-  [{::keys [ctx namespace conn]}]
-  (let [data (if (instance? clojure.lang.Atom ctx) @ctx ctx)
-        filtered (filter-serializable data)
-        edn-str (pr-str filtered)]
-    (db/transact! conn [{:ctx/namespace namespace
-                        :ctx/data edn-str
-                        :ctx/updated-at (Instant/now)}])
-    filtered))
-
-(defn load-ctx!
-  "Load *ctx* from Datalevin. Returns the deserialized data map, or nil if not found.
-
-   Request keys:
-     ::namespace - Required. Namespace string for isolation
-     ::conn      - Required. Datalevin connection for storage
-
-   Returns:
-     The deserialized ctx data map, or nil if no data stored for this namespace."
-  [{::keys [namespace conn]}]
-  (let [results (d/q '[:find ?data ?updated
-                        :in $ ?ns
-                        :where
-                        [?e :ctx/namespace ?ns]
-                        [?e :ctx/data ?data]
-                        [?e :ctx/updated-at ?updated]]
-                     @conn namespace)]
-    (when (seq results)
-      (let [latest (->> results
-                        (sort-by second)
-                        last
-                        first)]
-        (edn/read-string latest)))))

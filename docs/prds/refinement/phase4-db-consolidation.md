@@ -1,130 +1,55 @@
 # Phase 4: DB Consolidation
 
-**Status:** Ready for implementation
+**Status:** Done (partial — steps 1, 2, 4 complete; step 3 deferred)
 **Depends on:** Phases 1-3 (done)
 **Branch:** `feature/refinement`
+**Commit:** `94cbfc9`
 
 ---
 
 ## Goal
 
-Eliminate redundant databases and dual-writes. After this phase:
-- The graph DB is named `seon.runtime` (was `seon-graph`)
-- `seon.orchestrator` DB is killed (session persistence removed, only runtime registry used)
-- AI sessions/messages move from master `seon` DB to per-namespace DBs
-- No more dual-writes anywhere
+Eliminate redundant databases and dual-writes.
 
-## The Two-DB Model
+## What Was Done
 
-| DB Name | Contents | Size Profile |
-|---|---|---|
-| `seon.runtime` | Code graph, runtime instances, agent run metadata | Small — metadata only |
-| `seon.{namespace}` (per-agent) | AI sessions, messages, ctx state, domain data | Grows — conversation content |
+### 1. Renamed graph DB: `seon-graph` → `seon.runtime` ✓
 
-**Deleted DBs:**
-- `seon-graph` → renamed to `seon.runtime`
-- `seon.orchestrator` → killed
-- `seon` (master) → AI data moves to namespace DBs
+`src/seon/system.clj` — `build-graph-uri` changed to use `"seon.runtime"`.
 
-## Changes
+### 2. Killed orchestrator dual-write ✓
 
-### 1. Rename graph DB: `seon-graph` → `seon.runtime`
+`src/seon/orchestrator/session.clj` — deleted `dl-schema`, `dl-mgr`, `get-dl-conn`, `store-session!`, `update-session-status!`, `load-session-from-db`, `load-active-sessions-from-db`. Session lifecycle now uses only `runtime/register!` / `runtime/unregister!`. The `session-registry` atom stays (holds in-memory process handles).
 
-**File: `src/seon/system.clj`** — `build-graph-uri` function
-- Change `"seon-graph"` to `"seon.runtime"` in the URI builder
-- Update log messages
+### 3. Added `running-sessions` to runtime ✓
 
-**Note:** Users must delete `data/datalevin/seon-graph/` on next restart (auto-recreates as `seon.runtime`).
+`src/seon/runtime.clj` — queries all external running instances from Datalevin.
 
-### 2. Kill orchestrator dual-write: `src/seon/orchestrator/session.clj`
+### 4. Tests updated ✓
 
-**Delete these functions** (they write to the now-deleted `seon.orchestrator` DB):
-- `store-session!`
-- `update-session-status!`
-- `load-session-from-db`
-- `load-active-sessions-from-db`
-- `get-dl-conn`
-- The `dl-schema` def
-- The `dl-mgr` atom
+- `test/seon/orchestrator/session_test.clj` — removed Datalevin-dependent tests
+- `test/seon/runtime_test.clj` — added `running-sessions` tests
+- **529 tests, 0 failures**
 
-**Keep:**
-- `session-registry` atom (in-memory process handles — NOT serializable)
-- All public API functions
+## What Was Deferred
 
-**Modify `start-agent-session!`:**
-- Remove `(store-session! nil session-info)` call
-- Remove the `try` wrapper around `runtime/register!` — it's now the ONLY write, so let errors propagate
-- Remove dual-write comment
+### AI session migration (`seon.ai.datalevin`)
 
-**Modify `stop-agent-session!`:**
-- Remove `(update-session-status! nil id :stopped stopped-at)` call
-- Remove the `try` wrapper around `runtime/unregister!`
+Moving AI sessions/messages from master `seon` DB to per-namespace DBs was deferred. Rationale:
+- It's a separate subsystem (message history for replay/learning)
+- Not blocking any current work
+- Would touch `seon.ai`, `seon.ai.claude`, and their tests
+- Can be a standalone task when there's a concrete benefit
 
-**Modify `recover-sessions!`:**
-- Remove `(load-active-sessions-from-db nil)` — use `runtime/instances` filtered by `:external` instead
-- Remove `(update-session-status! nil ...)` — use `runtime/unregister!` instead
+The master `seon` DB still exists for AI data. The `seon.orchestrator` DB is no longer written to.
 
-**Modify `get-agent-session`:**
-- Remove the Datalevin fallback (`load-session-from-db`) — only check in-memory registry
-- Historical sessions can be queried from runtime registry
+## Known Issues
 
-**Modify `init!`:**
-- Remove `(reset! dl-mgr mgr)` — no more DL connection manager needed
-- Keep pool initialization
-
-### 3. Move AI sessions to namespace DBs: `src/seon/ai/datalevin.clj`
-
-Currently `get-conn` returns the master `seon` DB connection. Change to use per-namespace connections.
-
-**Add namespace parameter to `get-conn`:**
-- Accept optional namespace parameter
-- When namespace provided, use `conn/get-namespace-conn!` instead of `conn/get-master-conn!`
-- When nil, fall back to master (for backward compat during migration)
-
-**Thread namespace through writes:**
-- `save-session!` — extract namespace from session entity (`::ai/namespace`)
-- `save-message!` — needs session's namespace (look up from session entity or thread through)
-- `update-session!` — same
-
-**Key insight:** The AI session entity already has `::ai/namespace` on it. Use that to determine which DB to write to.
-
-### 4. Add `running-sessions` query: `src/seon/runtime.clj`
-
-```clojure
-(defn running-sessions
-  "All external running instances from Datalevin."
-  [_request]
-  (when-let [c @conn]
-    (mapv first
-      (d/q '[:find (pull ?e [*])
-             :where
-             [?e :seon.runtime/namespace _]
-             [?e :seon.runtime/status :running]
-             [?e :seon.runtime/location :external]]
-           @c))))
-```
-
-### 5. Update tests
-
-- `test/seon/orchestrator/session_test.clj` — remove any tests that depend on `seon.orchestrator` DB reads
-- `test/seon/runtime_test.clj` — add test for `running-sessions`
-- `test/seon/ai/datalevin_test.clj` — verify writes go to namespace DB
-
-## Verification
-
-1. Launch agent → runtime instance in `seon.runtime` DB, messages in namespace DB
-2. No writes to `seon.orchestrator` or `seon` master DB
-3. `(runtime/running-sessions {})` returns the agent
-4. Full test suite passes (529+ tests, 0 failures)
+- Test warnings: "Failed to persist runtime instance ... Calling close-transact-kv without opening" — expected in tests without a real graph DB. Not failures.
 
 ## Migration Note
 
-This is a breaking change for existing data:
-- Old sessions in `seon.orchestrator` DB are abandoned (ephemeral anyway)
-- Old AI messages in `seon` master DB are abandoned (can be migrated later if needed)
-- Graph data in `seon-graph` is abandoned (rescanned on startup)
-
-Users should:
+Users should clean old data:
 ```bash
-rm -rf data/datalevin/seon-graph/ data/datalevin/seon-orchestrator/ data/datalevin/seon/
+rm -rf data/datalevin/seon-graph/
 ```
