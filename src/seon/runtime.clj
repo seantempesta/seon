@@ -146,6 +146,12 @@
 (schema/register! ::instances-response
                   [:vector ::instance-response])
 
+(schema/register! ::running-sessions-request
+                  [:map])
+
+(schema/register! ::running-sessions-response
+                  [:vector ::instance-response])
+
 (schema/register! ::mark-crashed-request
                   [:map])
 
@@ -173,7 +179,7 @@
 
 (def runtime-schema
   "Datalevin schema for runtime entities.
-   Merged with graph schema when creating the seon-graph connection."
+   Merged with graph schema when creating the seon.runtime connection."
   {:seon.runtime/namespace
    {:db/valueType :db.type/string
     :db/unique    :db.unique/identity}
@@ -423,6 +429,23 @@
   {:malli/schema [:=> [:cat ::instances-request] ::instances-response]}
   [_request]
   (vec (vals @registry-cache)))
+
+(defn running-sessions
+  "All external running instances from the in-memory cache.
+
+   Useful for finding active agent sessions (location :external, status :running).
+
+   Request keys:
+     (none - empty map for consistency)
+
+   Response keys:
+     Vector of instance maps matching external + running."
+  {:malli/schema [:=> [:cat ::running-sessions-request] ::running-sessions-response]}
+  [_request]
+  (->> (vals @registry-cache)
+       (filter #(and (= :external (::location %))
+                     (= :running (::status %))))
+       vec))
 
 (defn mark-crashed!
   "Mark all :running instances as :crashed.

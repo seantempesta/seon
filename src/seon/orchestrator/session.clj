@@ -2,12 +2,12 @@
   "Agent session management - the high-level API for agent lifecycle.
 
   Provides a simple, opaque session abstraction so agents don't need to know
-  about Datalevin, nREPL ports, or persistence mechanics.
+  about nREPL ports or persistence mechanics.
 
   ## Overview
 
   Sessions tie together:
-  - Datalevin persistence for session metadata
+  - Runtime registry persistence (via seon.runtime)
   - Persisted ctx atom (via seon.ctx)
   - Pool JVM with nREPL (via flow.pool)
 
@@ -32,9 +32,7 @@
   ;; List active sessions
   (list-agent-sessions {})
   ```"
-  (:require [datalevin.core :as d]
-            [seon.ctx :as ctx]
-            [seon.db :as db]
+  (:require [seon.ctx :as ctx]
             [seon.db.datalevin.conn :as conn]
             [seon.flow.pool :as pool]
             [seon.runtime :as runtime]
@@ -196,114 +194,18 @@
 (defonce ^:private agent-pool (atom nil))
 
 ;;; ---------------------------------------------------------------------------
-;;; Datalevin Session Storage
+;;; Initialization
 ;;; ---------------------------------------------------------------------------
 
-(def ^:private dl-schema
-  "Datalevin schema for orchestrator sessions."
-  {:orch.session/id         {:db/valueType :db.type/string :db/unique :db.unique/identity}
-   :orch.session/namespace  {:db/valueType :db.type/string}
-   :orch.session/nrepl-port {:db/valueType :db.type/long}
-   :orch.session/status     {:db/valueType :db.type/string}
-   :orch.session/started-at {:db/valueType :db.type/instant}
-   :orch.session/stopped-at {:db/valueType :db.type/instant}
-   :orch.session/db-name    {:db/valueType :db.type/string}})
-
-;; Connection manager (set via init! from Integrant)
-(defonce ^:private dl-mgr (atom nil))
-
 (defn init!
-  "Initialize orchestrator sessions with a Datalevin connection manager
-   and optional agent pool.
-   Called by Integrant during system startup."
-  [mgr & {:keys [pool]}]
-  (reset! dl-mgr mgr)
+  "Initialize orchestrator sessions with optional agent pool.
+   Called by Integrant during system startup.
+   The connection manager argument is accepted for backward compatibility
+   but no longer used (persistence is handled by runtime registry)."
+  [_mgr & {:keys [pool]}]
   (when pool
     (reset! agent-pool pool))
-  (log/info "Orchestrator sessions initialized"
-            {:connection-manager (some? mgr) :pool (some? pool)}))
-
-(defn- get-dl-conn
-  "Get Datalevin connection for orchestrator sessions.
-   Returns nil if connection manager not initialized."
-  []
-  (when-let [mgr @dl-mgr]
-    (try
-      (conn/get-namespace-conn! {::conn/manager mgr
-                                 ::conn/namespace 'seon.orchestrator
-                                 ::conn/schema dl-schema})
-      (catch Exception e
-        (log/debug "Datalevin conn unavailable for orchestrator sessions" {:error (.getMessage e)})
-        nil))))
-
-(defn- store-session!
-  "Store session info in Datalevin orchestrator database.
-   Logs and continues on failure - session still works in-memory."
-  [_node session-info]
-  (try
-    (when-let [conn (get-dl-conn)]
-      (db/transact! conn [{:orch.session/id         (::id session-info)
-                           :orch.session/namespace  (str (::namespace session-info))
-                           :orch.session/nrepl-port (when-let [p (::nrepl-port session-info)] (long p))
-                           :orch.session/status     (name (::status session-info))
-                           :orch.session/started-at (::started-at session-info)
-                           :orch.session/db-name    (::db-name session-info)}]))
-    (catch Exception e
-      (log/warn e "Failed to store session in Datalevin, continuing with in-memory only"
-                {:session-id (::id session-info)}))))
-
-(defn- update-session-status!
-  "Update session status in Datalevin orchestrator database."
-  [_node session-id status stopped-at]
-  (try
-    (when-let [conn (get-dl-conn)]
-      (let [entity (cond-> {:orch.session/id session-id
-                             :orch.session/status (name status)}
-                     stopped-at (assoc :orch.session/stopped-at stopped-at))]
-        (db/transact! conn [entity])))
-    (catch Exception e
-      (log/warn "Failed to update session status in Datalevin" {:error (.getMessage e)}))))
-
-(defn- load-session-from-db
-  "Load session info from Datalevin orchestrator database."
-  [_node session-id]
-  (try
-    (when-let [conn (get-dl-conn)]
-      (let [results (d/q '[:find (pull ?e [*])
-                            :in $ ?sid
-                            :where [?e :orch.session/id ?sid]]
-                          @conn session-id)]
-        (when-let [entity (ffirst results)]
-          {:session-id         (:orch.session/id entity)
-           :session-namespace  (:orch.session/namespace entity)
-           :session-nrepl-port (:orch.session/nrepl-port entity)
-           :session-status     (:orch.session/status entity)
-           :session-started-at (:orch.session/started-at entity)
-           :session-stopped-at (:orch.session/stopped-at entity)
-           :session-db-name    (:orch.session/db-name entity)})))
-    (catch Exception e
-      (log/warn "Failed to load session from Datalevin" {:error (.getMessage e)})
-      nil)))
-
-(defn- load-active-sessions-from-db
-  "Load all active sessions from Datalevin orchestrator database."
-  [_node]
-  (try
-    (when-let [conn (get-dl-conn)]
-      (let [results (d/q '[:find (pull ?e [*])
-                            :where
-                            [?e :orch.session/id _]
-                            [?e :orch.session/status "running"]]
-                          @conn)]
-        (mapv (fn [[entity]]
-                {:session-id         (:orch.session/id entity)
-                 :session-namespace  (:orch.session/namespace entity)
-                 :session-status     (:orch.session/status entity)
-                 :session-started-at (:orch.session/started-at entity)})
-              results)))
-    (catch Exception e
-      (log/warn "Failed to load active sessions from Datalevin" {:error (.getMessage e)})
-      [])))
+  (log/info "Orchestrator sessions initialized" {:pool (some? pool)}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Public API
@@ -318,7 +220,7 @@
      ::pool      - Optional. Agent pool (falls back to init!-provided pool)
 
    Response keys:
-     ::id          - 4-char hex session ID
+     ::id          - 6-char hex session ID
      ::namespace   - The namespace symbol
      ::status      - :running, :stopped, or :error
      ::nrepl-port  - Port for nREPL connection
@@ -350,7 +252,7 @@
                                     {:namespace namespace :error (.getMessage e)})
                           nil)))]
 
-        ;; 3. Create persisted ctx with the namespace connection
+        ;; 2. Create persisted ctx with the namespace connection
         (log/debug "Creating persisted ctx" {:namespace namespace :resume? resume?
                                              :datalevin? (some? dl-conn)})
         (let [ctx-atom
@@ -368,7 +270,7 @@
                                               :seon.ns/session-id session-id
                                               :seon.ns/namespace (str namespace)}))})
 
-              ;; 4. Claim a pool JVM and inject *ctx*
+              ;; 3. Claim a pool JVM and inject *ctx*
               _ (log/debug "Claiming pool JVM" {:session-id session-id :namespace namespace})
               ctx-value @ctx-atom
               jvm-handle (when pool
@@ -399,21 +301,15 @@
                             ::ctx-atom ctx-atom
                             ::pool pool}]
 
-          ;; 5. Store in registry and Datalevin
+          ;; 4. Store in registry and runtime registry
           (swap! session-registry assoc session-id session-info)
-          (store-session! nil session-info)
 
-          ;; 6. Dual-write to runtime registry
-          (try
-            (runtime/register! (cond-> {::runtime/namespace (str namespace)
-                                        ::runtime/status :running
-                                        ::runtime/location :external
-                                        ::runtime/session-id session-id
-                                        ::runtime/started-at started-at}
-                                 nrepl-port (assoc ::runtime/nrepl-port nrepl-port)))
-            (catch Exception e
-              (log/warn "Failed to register session in runtime registry"
-                        {:session-id session-id :error (.getMessage e)})))
+          (runtime/register! (cond-> {::runtime/namespace (str namespace)
+                                      ::runtime/status :running
+                                      ::runtime/location :external
+                                      ::runtime/session-id session-id
+                                      ::runtime/started-at started-at}
+                               nrepl-port (assoc ::runtime/nrepl-port nrepl-port)))
 
           (log/info "Started agent session"
                     {:session-id session-id
@@ -461,17 +357,10 @@
       (log/debug "Destroying ctx" {:session-id id})
       (ctx/destroy! {::ctx/instance-id id})
 
-      ;; 4. Update registry and Datalevin
+      ;; 3. Update registries
       (swap! session-registry dissoc id)
       (let [stopped-at (java.util.Date.)]
-        (update-session-status! nil id :stopped stopped-at)
-
-        ;; 5. Dual-write to runtime registry
-        (try
-          (runtime/unregister! {::runtime/namespace (str (::namespace session))})
-          (catch Exception e
-            (log/warn "Failed to unregister session from runtime registry"
-                      {:session-id id :error (.getMessage e)})))
+        (runtime/unregister! {::runtime/namespace (str (::namespace session))})
 
         (log/info "Stopped agent session" {:session-id id})
 
@@ -525,19 +414,10 @@
      (session/get-agent-session {::session/id \"acdb\"})"
   {:malli/schema [:=> [:cat ::get-agent-session-request] ::get-agent-session-response]}
   [{::keys [id]}]
-  ;; First check in-memory registry
   (if-let [session (get @session-registry id)]
     (select-keys session public-session-keys)
-    ;; Fall back to Datalevin (may be stopped session)
-    (if-let [db-session (load-session-from-db nil id)]
-      {::id (:session-id db-session)
-       ::namespace (symbol (:session-namespace db-session))
-       ::status (keyword (:session-status db-session))
-       ::nrepl-port (:session-nrepl-port db-session)
-       ::started-at (:session-started-at db-session)
-       ::db-name (:session-db-name db-session)}
-      ;; Not found - return empty map
-      {})))
+    ;; Not found in memory - return empty map
+    {}))
 
 (defn list-agent-sessions
   "List all active agent sessions.
@@ -693,11 +573,10 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn recover-sessions!
-  "Recover sessions from Datalevin on system restart.
+  "Recover sessions on system restart.
 
-   This function:
-   1. Loads sessions marked as 'running' from Datalevin
-   2. Marks them as 'stopped' (since pool JVMs are gone)
+   Queries the runtime registry for external running instances (which are
+   orphaned since pool JVMs are gone after restart) and marks them as stopped.
 
    Sessions can be resumed via start-agent-session! with ::resume? true.
 
@@ -714,18 +593,16 @@
   {:malli/schema [:=> [:cat ::recover-sessions-request] ::recover-sessions-response]}
   [_request]
   (log/info "Recovering sessions from previous run")
-  (let [active-sessions (load-active-sessions-from-db nil)
-        now (java.util.Date.)]
-    (doseq [session active-sessions]
+  (let [all-instances (runtime/instances {})
+        orphaned (->> all-instances
+                      (filter #(and (= :external (::runtime/location %))
+                                    (= :running (::runtime/status %)))))]
+    (doseq [inst orphaned]
       (log/info "Marking orphaned session as stopped"
-                {:session-id (:session-id session)
-                 :namespace (:session-namespace session)})
-      (update-session-status! nil (:session-id session) :stopped now)
-      ;; Also unregister from runtime registry
-      (try
-        (runtime/unregister! {::runtime/namespace (:session-namespace session)})
-        (catch Exception _)))
-    {::recovered-count (count active-sessions)}))
+                {:namespace (::runtime/namespace inst)
+                 :session-id (::runtime/session-id inst)})
+      (runtime/unregister! {::runtime/namespace (::runtime/namespace inst)}))
+    {::recovered-count (count orphaned)}))
 
 (comment
   ;; REPL exploration

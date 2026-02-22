@@ -10,16 +10,19 @@
 
 | Phase | Description | Status | Agent | Notes |
 |-------|-------------|--------|-------|-------|
-| 1 | Runtime registry + schema + unified ID | **Done** | seon-agent | `seon.runtime` created, `:seon/graph-db` component, 6-char hex IDs, Integrant components registered |
+| 1 | Runtime registry + schema + unified ID | **Done** | seon-agent | `seon.runtime` created, `:seon/graph-db` component, 6-char hex IDs |
 | 2 | Session integration | **Done** | seon-agent | Sessions dual-write to runtime registry on start/stop |
-| 2.5 | Instance messaging router | Pending | -- | `::msg/from-id`/`::msg/to-id`, `runtime/send!`, generalize bridge pattern |
-| 2.6 | Schema-driven routing | Pending | -- | `seon.runtime.router`, key-based Datalog lookup, Malli validation, claims |
-| 3 | Agent run entities | **Done** | seon-agent | `:seon.agent.run/*` entities with start/complete/query, wired into claude.clj |
-| 4 | Flow snapshots | Pending | -- | Snapshot on shutdown/backup |
-| 5 | Ctx unification | Pending | -- | One persistence path, delete `ctx/*` |
-| 6 | Startup hydration | Pending | -- | Hydrate caches from Datalevin on boot |
-| 7 | Flow registry absorption | Pending | -- | Delete `seon.flow.registry`, use runtime |
-| 8 | Observatory + flows page | Pending | -- | UI shows runtime instances with graph data |
+| 3 | Agent run entities | **Done** | seon-agent | `:seon.agent.run/*` entities with start/complete/query |
+| 4 | DB consolidation | Pending | -- | Rename seon-graph→seon.runtime, kill dual-write, AI sessions→namespace DBs |
+| 5 | Ctx unification | Pending | -- | Delete harness duplicate, one persistence path |
+| 6 | Flow snapshots | Pending | -- | Snapshot on shutdown/backup via pause→ping→serialize |
+| 7 | Startup hydration | Pending | -- | Hydrate caches from Datalevin on boot |
+| 8 | Flow registry absorption | Pending | -- | Delete `seon.flow.registry`, use runtime |
+| 9 | Observatory UI (two-level lookup) | Pending | -- | List from seon.runtime DB, detail from namespace DB |
+
+**Deferred (future work, not blocking):**
+- Phase 2.5: Instance messaging router (`::msg/from-id`/`::msg/to-id`)
+- Phase 2.6: Schema-driven routing (`seon.runtime.router`)
 
 ---
 

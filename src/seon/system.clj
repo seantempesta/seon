@@ -104,7 +104,7 @@
 ;;; ---------------------------------------------------------------------------
 ;;; Graph Database Component
 ;;; ---------------------------------------------------------------------------
-;;; Owns the seon-graph Datalevin connection used by:
+;;; Owns the seon.runtime Datalevin connection used by:
 ;;; - Code scanner (code graph entities)
 ;;; - Runtime registry (namespace instance tracking)
 ;;; - Render system (function resolution)
@@ -117,7 +117,7 @@
           (or (:seon.db.datalevin.conn/password connection-manager) "datalevin")
           (or (:seon.db.datalevin.conn/host connection-manager) "127.0.0.1")
           (:seon.db.datalevin.conn/port connection-manager)
-          "seon-graph"))
+          "seon.runtime"))
 
 (defmethod ig/init-key :seon/graph-db
   [_ {:keys [connection-manager]}]
@@ -129,7 +129,7 @@
         merged-schema (merge graph-schema runtime/runtime-schema)
         graph-uri (build-graph-uri connection-manager)
         conn (get-conn graph-uri merged-schema)]
-    (log/info "Graph database connected" {:uri (str "dtlv://...@.../" "seon-graph")})
+    (log/info "Graph database connected" {:uri (str "dtlv://...@.../" "seon.runtime")})
     ;; Initialize runtime registry with the graph connection
     (runtime/init! {::runtime/conn conn})
     ;; Mark any instances from previous unclean shutdown as crashed

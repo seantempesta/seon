@@ -5,7 +5,6 @@
   Note: nREPL integration tests that require a live pool are in pool_test.clj.
   These tests verify the session layer works correctly without a pool (port=nil)."
   (:require [clojure.test :refer [deftest testing is use-fixtures]]
-            [datalevin.core :as d]
             [seon.orchestrator.session :as session]
             [seon.runtime :as runtime]
             [seon.schema :as schema]
@@ -16,8 +15,7 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn cleanup-sessions
-  "Fixture that cleans up sessions after each test.
-   Also resets dl-mgr to nil so tests don't try to connect to a remote Datalevin."
+  "Fixture that cleans up sessions after each test."
   [f]
   ;; Clear any existing sessions
   (doseq [[id _] @(deref #'seon.orchestrator.session/session-registry)]
@@ -26,19 +24,16 @@
       (catch Exception _)))
   (reset! @#'seon.orchestrator.session/session-registry {})
   (runtime/reset-registry! {})
-  (let [orig-dl-mgr @(deref #'seon.orchestrator.session/dl-mgr)]
-    (reset! @#'seon.orchestrator.session/dl-mgr nil)
-    (try
-      (f)
-      (finally
-        (doseq [[id _] @(deref #'seon.orchestrator.session/session-registry)]
-          (try
-            (session/stop-agent-session! {::session/node *test-node* ::session/id id})
-            (catch Exception _)))
-        (Thread/sleep 50)
-        (reset! @#'seon.orchestrator.session/session-registry {})
-        (runtime/reset-registry! {})
-        (reset! @#'seon.orchestrator.session/dl-mgr orig-dl-mgr)))))
+  (try
+    (f)
+    (finally
+      (doseq [[id _] @(deref #'seon.orchestrator.session/session-registry)]
+        (try
+          (session/stop-agent-session! {::session/node *test-node* ::session/id id})
+          (catch Exception _)))
+      (Thread/sleep 50)
+      (reset! @#'seon.orchestrator.session/session-registry {})
+      (runtime/reset-registry! {}))))
 
 (use-fixtures :each (fn [f]
                       (with-test-node
@@ -107,7 +102,7 @@
   (testing "returns error for non-existent session"
     (let [result (session/stop-agent-session!
                    {::session/node *test-node*
-                    ::session/id "dead"})]
+                    ::session/id "dead00"})]
       (is (= :error (::session/status result)))
       (is (= "Session not found" (::session/error result))))))
 
@@ -132,7 +127,7 @@
   (testing "returns empty map for non-existent session"
     (let [result (session/get-agent-session
                    {::session/node *test-node*
-                    ::session/id "dead"})]
+                    ::session/id "dead00"})]
       (is (= {} result)))))
 
 (deftest list-agent-sessions-test
@@ -172,7 +167,7 @@
   (testing "returns nil port for non-existent session"
     (let [result (session/get-session-port
                    {::session/node *test-node*
-                    ::session/id "dead"})]
+                    ::session/id "dead00"})]
       (is (nil? (::session/nrepl-port result))))))
 
 ;;; ---------------------------------------------------------------------------
@@ -180,37 +175,20 @@
 ;;; ---------------------------------------------------------------------------
 
 (deftest recover-sessions-test
-  (testing "recover-sessions! marks orphaned sessions as stopped"
-    (let [dir (str "tmp/test-recover-" (System/currentTimeMillis))
-          dl-schema @#'session/dl-schema
-          conn (d/get-conn dir dl-schema)]
-      (try
-        ;; Insert a "running" session into Datalevin (simulating crash)
-        (d/transact! conn [{:orch.session/id "orph"
-                             :orch.session/namespace "test.orphan"
-                             :orch.session/nrepl-port 7890
-                             :orch.session/status "running"
-                             :orch.session/started-at (java.util.Date.)
-                             :orch.session/db-name "test_orphan"}])
+  (testing "recover-sessions! marks orphaned external running instances as stopped"
+    ;; Register an external running instance in the runtime registry
+    ;; (simulating a session that was running before crash)
+    (runtime/register! {::runtime/namespace "test.orphan"
+                        ::runtime/status :running
+                        ::runtime/location :external
+                        ::runtime/session-id "orph00"})
 
-        ;; Temporarily override the private get-dl-conn to return our test conn
-        (with-redefs-fn {#'session/get-dl-conn (constantly conn)}
-          (fn []
-            (let [result (session/recover-sessions!
-                           {::session/node *test-node*})]
-              (is (= 1 (::session/recovered-count result)))
+    (let [result (session/recover-sessions! {})]
+      (is (= 1 (::session/recovered-count result)))
 
-              ;; Verify status was updated to stopped
-              (let [sessions (d/q '[:find (pull ?e [*])
-                                    :where [?e :orch.session/id "orph"]]
-                                  @conn)
-                    entity (ffirst sessions)]
-                (is (= "stopped" (:orch.session/status entity)))))))
-        (finally
-          (d/close conn)
-          (let [dir-file (java.io.File. dir)]
-            (doseq [f (reverse (file-seq dir-file))]
-              (.delete f))))))))
+      ;; Verify status was updated to stopped in runtime registry
+      (let [inst (runtime/instance {::runtime/namespace "test.orphan"})]
+        (is (= :stopped (::runtime/status inst)))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Activity Tracking Tests (Phase 4c)
@@ -258,10 +236,10 @@
 (deftest activity-tracking-nonexistent-session-test
   (testing "activity tracking returns false for non-existent sessions"
     (let [start-result (session/record-eval-start!
-                         {::session/id "dead"
+                         {::session/id "dead00"
                           ::session/code "(+ 1 2)"})
           complete-result (session/record-eval-complete!
-                            {::session/id "dead"})]
+                            {::session/id "dead00"})]
       (is (false? (::session/recorded start-result)))
       (is (false? (::session/recorded complete-result))))))
 
@@ -312,7 +290,7 @@
 
   (testing "returns false for non-existent session"
     (let [result (session/set-nrepl-session-id!
-                   {::session/id "dead"
+                   {::session/id "dead00"
                     ::session/nrepl-session-id "test-123"})]
       (is (false? (::session/set result))))))
 
