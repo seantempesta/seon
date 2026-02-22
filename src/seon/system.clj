@@ -2,11 +2,11 @@
   "Integrant system configuration and component definitions.
 
   Defines init-key and halt-key! methods for all system components:
-  - :seon/datalevin-server - Datalevin server for all data storage
-  - :seon/graph-db - Graph database connection (code graph + runtime registry)
-  - :seon/schema-registry - Malli schema registry
+  - :seon.db.datalevin/server - Datalevin server for all data storage
+  - :seon/runtime-db - Runtime database connection (code graph + runtime registry)
+  - :seon.schema/registry - Malli schema registry
   - :seon.web.server/http-server - HTTP server for web UI
-  - :seon/nrepl-server - nREPL for REPL-driven development
+  - :seon.dev/nrepl - nREPL for REPL-driven development
   - :seon.orchestrator/namespace-nrepls - Per-namespace nREPL servers for agent isolation
 
   Datalevin is the sole database. XTDB has been removed."
@@ -25,22 +25,22 @@
 ;;; Schema Registry Component
 ;;; ---------------------------------------------------------------------------
 
-(defmethod ig/init-key :seon/schema-registry
+(defmethod ig/init-key :seon.schema/registry
   [_ _]
   (log/info "Initializing Malli schema registry...")
   (let [registry-value @schema/registry]
     (log/info "Schema registry initialized" {:schema-count (count registry-value)})
     registry-value))
 
-(defmethod ig/halt-key! :seon/schema-registry
+(defmethod ig/halt-key! :seon.schema/registry
   [_ _]
   (log/info "Schema registry shutdown")
   nil)
 
 ;; Pure value, survives reset. Only re-init if config changes.
-(defmethod ig/suspend-key! :seon/schema-registry [_ state] state)
+(defmethod ig/suspend-key! :seon.schema/registry [_ state] state)
 
-(defmethod ig/resume-key :seon/schema-registry
+(defmethod ig/resume-key :seon.schema/registry
   [key opts old-opts old-state]
   (if (= opts old-opts)
     old-state
@@ -51,7 +51,7 @@
 ;;; nREPL Server Component
 ;;; ---------------------------------------------------------------------------
 
-(defmethod ig/init-key :seon/nrepl-server
+(defmethod ig/init-key :seon.dev/nrepl
   [_ {:keys [enabled? port bind]}]
   (if enabled?
     (do
@@ -69,7 +69,7 @@
       (log/info "nREPL server disabled for this profile")
       nil)))
 
-(defmethod ig/halt-key! :seon/nrepl-server
+(defmethod ig/halt-key! :seon.dev/nrepl
   [_ server]
   (when server
     (log/info "Stopping nREPL server...")
@@ -81,9 +81,9 @@
     (log/info "nREPL server stopped")))
 
 ;; Keep nREPL alive during (reset) - critical for REPL-driven development
-(defmethod ig/suspend-key! :seon/nrepl-server [_ server] server)
+(defmethod ig/suspend-key! :seon.dev/nrepl [_ server] server)
 
-(defmethod ig/resume-key :seon/nrepl-server
+(defmethod ig/resume-key :seon.dev/nrepl
   [key opts old-opts old-server]
   (if (= opts old-opts)
     old-server
@@ -95,19 +95,19 @@
 ;;; ---------------------------------------------------------------------------
 ;;; Initializes the primer ctx system with the Datalevin connection manager.
 
-(defmethod ig/init-key :seon/primer-ctx
+(defmethod ig/init-key :seon.primer/ctx
   [_ {:keys [connection-manager]}]
   (require 'seon.primer.ctx)
   ((resolve 'seon.primer.ctx/init!) connection-manager)
   {:connection-manager connection-manager})
 
-(defmethod ig/halt-key! :seon/primer-ctx
+(defmethod ig/halt-key! :seon.primer/ctx
   [_ _]
   (log/info "Primer ctx shutdown"))
 
-(defmethod ig/suspend-key! :seon/primer-ctx [_ state] state)
+(defmethod ig/suspend-key! :seon.primer/ctx [_ state] state)
 
-(defmethod ig/resume-key :seon/primer-ctx
+(defmethod ig/resume-key :seon.primer/ctx
   [key opts old-opts old-state]
   (if (= opts old-opts)
     old-state
@@ -119,19 +119,19 @@
 ;;; ---------------------------------------------------------------------------
 ;;; Initializes the orchestrator session system with the Datalevin connection manager.
 
-(defmethod ig/init-key :seon/orchestrator-sessions
+(defmethod ig/init-key :seon.orchestrator/sessions
   [_ {:keys [connection-manager pool]}]
   (require 'seon.orchestrator.session)
   ((resolve 'seon.orchestrator.session/init!) connection-manager :pool pool)
   {:connection-manager connection-manager :pool pool})
 
-(defmethod ig/halt-key! :seon/orchestrator-sessions
+(defmethod ig/halt-key! :seon.orchestrator/sessions
   [_ _]
   (log/info "Orchestrator sessions shutdown"))
 
-(defmethod ig/suspend-key! :seon/orchestrator-sessions [_ state] state)
+(defmethod ig/suspend-key! :seon.orchestrator/sessions [_ state] state)
 
-(defmethod ig/resume-key :seon/orchestrator-sessions
+(defmethod ig/resume-key :seon.orchestrator/sessions
   [key opts old-opts old-state]
   (if (= opts old-opts)
     old-state
@@ -156,7 +156,7 @@
           (:seon.db.datalevin.conn/port connection-manager)
           "seon.runtime"))
 
-(defmethod ig/init-key :seon/graph-db
+(defmethod ig/init-key :seon/runtime-db
   [_ {:keys [connection-manager]}]
   (require 'datalevin.core)
   (require 'seon.graph.ingest)
@@ -185,10 +185,10 @@
     (runtime/register! {::runtime/namespace "seon.graph.db"
                         ::runtime/status :running
                         ::runtime/location :in-process
-                        ::runtime/component-key :seon/graph-db})
+                        ::runtime/component-key :seon/runtime-db})
     {:conn conn :connection-manager connection-manager}))
 
-(defmethod ig/halt-key! :seon/graph-db
+(defmethod ig/halt-key! :seon/runtime-db
   [_ {:keys [conn]}]
   (when conn
     (log/info "Stopping graph database...")
@@ -202,9 +202,9 @@
     (log/info "Graph database stopped")))
 
 ;; Suspend/resume to survive (reset) like nREPL
-(defmethod ig/suspend-key! :seon/graph-db [_ state] state)
+(defmethod ig/suspend-key! :seon/runtime-db [_ state] state)
 
-(defmethod ig/resume-key :seon/graph-db
+(defmethod ig/resume-key :seon/runtime-db
   [key opts old-opts old-state]
   (if (= (:connection-manager opts) (:connection-manager old-opts))
     old-state
@@ -216,9 +216,9 @@
 ;;; ---------------------------------------------------------------------------
 ;;; Populates the Datalevin knowledge graph at startup by analyzing the
 ;;; codebase with clj-kondo and scanning for schema/register! calls.
-;;; Receives its connection from :seon/graph-db component.
+;;; Receives its connection from :seon/runtime-db component.
 
-(defmethod ig/init-key :seon/code-scanner
+(defmethod ig/init-key :seon.graph/scanner
   [_ {:keys [graph-db paths enabled?]}]
   (when enabled?
     (let [conn (:conn graph-db)]
@@ -255,13 +255,13 @@
           (runtime/register! {::runtime/namespace "seon.graph.scanner"
                               ::runtime/status :running
                               ::runtime/location :in-process
-                              ::runtime/component-key :seon/code-scanner})
+                              ::runtime/component-key :seon.graph/scanner})
           {:conn conn :paths paths}
           (catch Exception e
             (log/error "Code scanner failed" {:error (.getMessage e)})
             {:conn conn :paths paths :error (.getMessage e)}))))))
 
-(defmethod ig/halt-key! :seon/code-scanner
+(defmethod ig/halt-key! :seon.graph/scanner
   [_ state]
   (when (:conn state)
     (log/info "Stopping code scanner...")
@@ -272,9 +272,9 @@
 ;; Suspend/resume: keep scanner results alive during (reset).
 ;; The graph-db connection survives reset, so re-scanning is wasteful.
 ;; Only re-scan if paths changed.
-(defmethod ig/suspend-key! :seon/code-scanner [_ state] state)
+(defmethod ig/suspend-key! :seon.graph/scanner [_ state] state)
 
-(defmethod ig/resume-key :seon/code-scanner
+(defmethod ig/resume-key :seon.graph/scanner
   [key opts old-opts old-state]
   (if (= (:paths opts) (:paths old-opts))
     old-state
@@ -287,7 +287,7 @@
 ;;; Configuration for the Claude Code CLI. Currently just holds the CLI path.
 ;;; The actual CLI interaction is in seon.ai.claude.sdk.
 
-(defmethod ig/init-key :seon/claude-code
+(defmethod ig/init-key :seon.ai.claude/sdk
   [_ config]
   (log/info "Claude Code SDK configured" {:cli-path (:cli-path config)})
   config)

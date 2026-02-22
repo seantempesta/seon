@@ -2,7 +2,7 @@
  ;; Runs in-process, agents connect as clients to namespace-isolated databases.
  ;; Each namespace gets its own database under root/{namespace}/
  ;; Default credentials: datalevin:datalevin (change in production!)
- :seon/datalevin-server
+ :seon.db.datalevin/server
  {:port #or [#env DATALEVIN_PORT 8898]
   :root #profile {:dev "data/datalevin"
                   :test "tmp/datalevin-test"
@@ -14,28 +14,28 @@
  ;; - Connection caching per namespace
  ;; - Lazy database creation on first connection
  ;; - TTL-based cleanup of idle connections
- :seon/connection-manager
- {:server #ig/ref :seon/datalevin-server
+ :seon.db.datalevin/connections
+ {:server #ig/ref :seon.db.datalevin/server
   :ttl-ms #or [#env DATALEVIN_CONN_TTL_MS 300000]           ; 5 minutes
   :cleanup-interval-ms #or [#env DATALEVIN_CLEANUP_MS 60000]}
 
- ;; Graph Database (Code Graph + Runtime Registry)
- ;; Owns the seon-graph Datalevin connection used by:
+ ;; Runtime Database (Code Graph + Runtime Registry)
+ ;; Owns the seon.runtime Datalevin connection used by:
  ;; - Code scanner (code graph entities)
  ;; - Runtime registry (namespace instance tracking)
  ;; - Render system (function resolution)
  ;; Initializes runtime registry and marks crashed instances on startup.
- :seon/graph-db
- {:connection-manager #ig/ref :seon/connection-manager}
+ :seon/runtime-db
+ {:connection-manager #ig/ref :seon.db.datalevin/connections}
 
  ;; Malli Schema Registry
  ;; Loads all domain schemas on startup
- :seon/schema-registry {}
+ :seon.schema/registry {}
 
  ;; nREPL Server - managed by Integrant
  ;; Dev: Enabled - connect to inspect/modify the running system
  ;; Test/Prod: Disabled (headless)
- :seon/nrepl-server
+ :seon.dev/nrepl
  {:enabled? #profile {:dev true     ; nREPL for REPL-driven development
                       :test false   ; Tests don't need nREPL
                       :prod false}  ; Production is headless
@@ -50,7 +50,7 @@
  ;; Tailwind CSS Watcher
  ;; Dev: Enabled - auto-rebuild CSS on file changes
  ;; Prod: Disabled - CSS pre-built during deployment
- :seon.web/tailwind-watcher
+ :seon.web/tailwind
  {:enabled? #profile {:dev true
                       :test false
                       :prod false}
@@ -61,39 +61,39 @@
  ;; Pre-warmed JVM pool for instant agent startup.
  ;; Each agent gets an isolated JVM with its own nREPL, Malli registry, and
  ;; Datalevin client connection. Depends on Datalevin server for agent DB access.
- :seon/agent-pool
+ :seon.flow/pool
  {:size #or [#env AGENT_POOL_SIZE 3]
   :base-port #or [#env AGENT_BASE_PORT 7900]
-  :datalevin-server #ig/ref :seon/datalevin-server
+  :datalevin-server #ig/ref :seon.db.datalevin/server
   :enabled? #profile {:dev true
                       :test false   ; Unit tests mock pool structure
                       :prod true}}
 
  ;; Primer Ctx System
  ;; Initializes primer session management with lazy Datalevin connections.
- :seon/primer-ctx
- {:connection-manager #ig/ref :seon/connection-manager}
+ :seon.primer/ctx
+ {:connection-manager #ig/ref :seon.db.datalevin/connections}
 
  ;; Orchestrator Sessions
  ;; Initializes orchestrator session storage with lazy Datalevin connections.
- :seon/orchestrator-sessions
- {:connection-manager #ig/ref :seon/connection-manager
-  :pool #ig/ref :seon/agent-pool}
+ :seon.orchestrator/sessions
+ {:connection-manager #ig/ref :seon.db.datalevin/connections
+  :pool #ig/ref :seon.flow/pool}
 
  ;; Code Scanner (Knowledge Graph)
  ;; Analyzes codebase at startup and populates Datalevin with the knowledge graph.
- ;; Receives graph connection from :seon/graph-db component.
- :seon/code-scanner
- {:graph-db #ig/ref :seon/graph-db
+ ;; Receives graph connection from :seon/runtime-db component.
+ :seon.graph/scanner
+ {:graph-db #ig/ref :seon/runtime-db
   :paths ["src/"]
   :enabled? #profile {:dev true
                       :test false
                       :prod true}}
 
  ;; Caddy Reverse Proxy (HTTP/2 + TLS)
- ;; Dev: Enabled - serves https://localhost:3030 → http://localhost:8080
+ ;; Dev: Enabled - serves https://localhost:3030 -> http://localhost:8080
  ;; Depends on HTTP server so Caddy starts after upstream is ready.
- :seon/caddy-proxy
+ :seon.web/caddy
  {:enabled? #profile {:dev true
                       :test false
                       :prod false}
@@ -101,5 +101,5 @@
   :http-server #ig/ref :seon.web.server/http-server}
 
  ;; Claude Code SDK Configuration
- :seon/claude-code
+ :seon.ai.claude/sdk
  {:cli-path #or [#env CLAUDE_CLI_PATH "/Users/sean/.local/bin/claude"]}}

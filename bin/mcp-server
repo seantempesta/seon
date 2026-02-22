@@ -765,7 +765,7 @@ You must then either:
         code (case type
                "functions"
                (format "(do (require 'seon.graph.query 'seon.db.datalevin.conn)
-                            (let [mgr (:seon/connection-manager integrant.repl.state/system)
+                            (let [mgr (:seon.db.datalevin/connections integrant.repl.state/system)
                                   conn (seon.db.datalevin.conn/get-master-conn!
                                          {:seon.db.datalevin.conn/manager mgr})]
                               (pr-str (seon.graph.query/search-functions
@@ -775,7 +775,7 @@ You must then either:
 
                "namespaces"
                (format "(do (require 'seon.graph.query 'seon.db.datalevin.conn)
-                            (let [mgr (:seon/connection-manager integrant.repl.state/system)
+                            (let [mgr (:seon.db.datalevin/connections integrant.repl.state/system)
                                   conn (seon.db.datalevin.conn/get-master-conn!
                                          {:seon.db.datalevin.conn/manager mgr})]
                               (pr-str {:dependents (seon.graph.query/dependents-of
@@ -788,7 +788,7 @@ You must then either:
 
                "context"
                (format "(do (require 'seon.repl.context 'seon.db.datalevin.conn)
-                            (let [mgr (:seon/connection-manager integrant.repl.state/system)
+                            (let [mgr (:seon.db.datalevin/connections integrant.repl.state/system)
                                   conn (seon.db.datalevin.conn/get-master-conn!
                                          {:seon.db.datalevin.conn/manager mgr})]
                               (seon.repl.context/for-function
@@ -804,7 +804,7 @@ You must then either:
   "Execute the namespace_health tool. Gets namespace overview."
   [{:keys [namespace]}]
   (let [code (format "(do (require 'seon.repl.context 'seon.graph.query 'seon.db.datalevin.conn)
-                          (let [mgr (:seon/connection-manager integrant.repl.state/system)
+                          (let [mgr (:seon.db.datalevin/connections integrant.repl.state/system)
                                 conn (seon.db.datalevin.conn/get-master-conn!
                                        {:seon.db.datalevin.conn/manager mgr})
                                 ctx (seon.repl.context/for-namespace

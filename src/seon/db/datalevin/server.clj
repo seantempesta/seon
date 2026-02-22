@@ -7,7 +7,7 @@
    ## Configuration
 
    ```clojure
-   {:seon/datalevin-server
+   {:seon.db.datalevin/server
     {:port 8898           ; Server listening port
      :root \"data/datalevin\"  ; Root directory for all databases
      :opts {:idle-timeout 300000}}}  ; Optional server options
@@ -188,7 +188,7 @@
         (delete-dir-recursive! (io/file root))
         (.mkdirs (io/file root))))))
 
-(defmethod ig/init-key :seon/datalevin-server
+(defmethod ig/init-key :seon.db.datalevin/server
   [_ {:keys [port root opts]
       :or {port 8898
            root "data/datalevin"}}]
@@ -204,16 +204,16 @@
         (attempt-recovery! root)
         (start-fn)))))
 
-(defmethod ig/halt-key! :seon/datalevin-server
+(defmethod ig/halt-key! :seon.db.datalevin/server
   [_ {:keys [server]}]
   (log/info "Stopping Datalevin server...")
   (stop-server! server)
   (log/info "Datalevin server stopped"))
 
 ;; Suspend/resume to survive (reset) like nREPL
-(defmethod ig/suspend-key! :seon/datalevin-server [_ state] state)
+(defmethod ig/suspend-key! :seon.db.datalevin/server [_ state] state)
 
-(defmethod ig/resume-key :seon/datalevin-server
+(defmethod ig/resume-key :seon.db.datalevin/server
   [key opts old-opts old-state]
   (if (and (= (:port opts) (:port old-opts))
            (= (:root opts) (:root old-opts)))
@@ -230,14 +230,14 @@
   (require '[integrant.repl.state :as state])
 
   ;; Check if server is in system
-  (:seon/datalevin-server state/system)
+  (:seon.db.datalevin/server state/system)
 
   ;; Health check
   (healthy? {::port 8898})
   (healthy? {::port 8898 ::timeout-ms 500})
 
   ;; Health check from component
-  (let [{:keys [port]} (:seon/datalevin-server state/system)]
+  (let [{:keys [port]} (:seon.db.datalevin/server state/system)]
     (healthy? {::port port}))
 
   ;; Manual server lifecycle

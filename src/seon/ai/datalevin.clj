@@ -113,7 +113,7 @@
    Returns nil if system not running or connection unavailable."
   []
   (or *test-conn*
-      (when-let [mgr (:seon/connection-manager state/system)]
+      (when-let [mgr (:seon.db.datalevin/connections state/system)]
         (try
           (conn/get-master-conn! {::conn/manager mgr})
           (catch Exception e

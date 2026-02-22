@@ -315,7 +315,7 @@
         conn (try
                (require 'integrant.repl.state)
                (when-let [sys @(resolve 'integrant.repl.state/system)]
-                 (let [mgr (:seon/connection-manager sys)
+                 (let [mgr (:seon.db.datalevin/connections sys)
                        get-conn (requiring-resolve 'seon.db.datalevin.conn/get-master-conn!)]
                    (get-conn {:seon.db.datalevin.conn/manager mgr})))
                (catch Exception _ nil))

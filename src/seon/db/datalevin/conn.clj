@@ -10,8 +10,8 @@
    ## Configuration
 
    ```clojure
-   {:seon/connection-manager
-    {:server #ig/ref :seon/datalevin-server
+   {:seon.db.datalevin/connections
+    {:server #ig/ref :seon.db.datalevin/server
      :ttl-ms 300000  ; Connection TTL (5 minutes default)
      :cleanup-interval-ms 60000}}  ; Cleanup check interval (1 minute)
    ```
@@ -412,7 +412,7 @@
 ;;; Integrant Component
 ;;; ---------------------------------------------------------------------------
 
-(defmethod ig/init-key :seon/connection-manager
+(defmethod ig/init-key :seon.db.datalevin/connections
   [_ {:keys [server ttl-ms cleanup-interval-ms]
       :or {ttl-ms 300000           ; 5 minutes default
            cleanup-interval-ms 60000}}]  ; 1 minute default
@@ -428,7 +428,7 @@
     (log/info "Started connection manager" {:port port :ttl-ms ttl-ms})
     (assoc manager ::scheduler scheduler)))
 
-(defmethod ig/halt-key! :seon/connection-manager
+(defmethod ig/halt-key! :seon.db.datalevin/connections
   [_ manager]
   (log/info "Stopping connection manager...")
   (stop-cleanup-scheduler! (::scheduler manager))
@@ -436,9 +436,9 @@
     (log/info "Connection manager stopped" {:connections-closed closed})))
 
 ;; Suspend/resume to survive (reset) without dropping connections
-(defmethod ig/suspend-key! :seon/connection-manager [_ state] state)
+(defmethod ig/suspend-key! :seon.db.datalevin/connections [_ state] state)
 
-(defmethod ig/resume-key :seon/connection-manager
+(defmethod ig/resume-key :seon.db.datalevin/connections
   [key opts old-opts old-state]
   (if (and (= (:ttl-ms opts) (:ttl-ms old-opts))
            (= (get-in opts [:server :port]) (get-in old-opts [:server :port])))
@@ -455,7 +455,7 @@
   (require '[integrant.repl.state :as state])
 
   ;; Get connection manager from system
-  (def mgr (:seon/connection-manager state/system))
+  (def mgr (:seon.db.datalevin/connections state/system))
 
   ;; Get master connection
   (def master-conn (get-master-conn! {::manager mgr}))

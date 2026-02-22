@@ -22,7 +22,7 @@
 
    ## Integrant Component
 
-   Register as `:seon/agent-pool` in system.edn. Depends on `:seon/datalevin-server`
+   Register as `:seon.flow/pool` in system.edn. Depends on `:seon.db.datalevin/server`
    so the server is available when agents start. Supports `suspend-key!`/`resume-key`
    to keep pool alive during `(reset)`.
 
@@ -738,7 +738,7 @@
 ;;; Integrant Component
 ;;; ---------------------------------------------------------------------------
 
-(defmethod ig/init-key :seon/agent-pool
+(defmethod ig/init-key :seon.flow/pool
   [_ {:keys [size base-port datalevin-server enabled?]
       :or {size default-pool-size
            base-port default-base-port
@@ -754,16 +754,16 @@
       (log/info "Agent pool disabled for this profile")
       nil)))
 
-(defmethod ig/halt-key! :seon/agent-pool
+(defmethod ig/halt-key! :seon.flow/pool
   [_ pool]
   (when pool
     (log/info "Stopping agent pool component")
     (shutdown! pool)))
 
 ;; Keep pool alive during (reset) -- JVMs are expensive to spawn
-(defmethod ig/suspend-key! :seon/agent-pool [_ pool] pool)
+(defmethod ig/suspend-key! :seon.flow/pool [_ pool] pool)
 
-(defmethod ig/resume-key :seon/agent-pool
+(defmethod ig/resume-key :seon.flow/pool
   [key opts old-opts old-pool]
   (if (and (= (:size opts) (:size old-opts))
            (= (:base-port opts) (:base-port old-opts)))

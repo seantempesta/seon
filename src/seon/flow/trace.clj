@@ -64,7 +64,7 @@
 (defn- get-conn
   "Get master Datalevin connection from Integrant system."
   []
-  (when-let [mgr (:seon/connection-manager state/system)]
+  (when-let [mgr (:seon.db.datalevin/connections state/system)]
     (try
       (conn/get-master-conn! {::conn/manager mgr})
       (catch Exception e
