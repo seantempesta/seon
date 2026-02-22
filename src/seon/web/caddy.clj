@@ -10,15 +10,14 @@
   (:require [clojure.java.io :as io]
             [integrant.core :as ig]
             [taoensso.timbre :as log])
-  (:import [java.lang ProcessBuilder ProcessBuilder$Redirect]
-           [java.net Socket InetSocketAddress]))
+  (:import [java.lang ProcessBuilder ProcessBuilder$Redirect]))
 
 (defn- port-open?
   "Check if a port is accepting connections."
   [port timeout-ms]
   (try
-    (let [socket (Socket.)]
-      (.connect socket (InetSocketAddress. "localhost" (int port)) (int timeout-ms))
+    (let [socket (java.net.Socket.)]
+      (.connect socket (java.net.InetSocketAddress. "localhost" (int port)) (int timeout-ms))
       (.close socket)
       true)
     (catch Exception _ false)))
