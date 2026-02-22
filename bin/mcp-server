@@ -460,7 +460,7 @@ You must then either:
   [code effective-session]
   (let [hash-val (Math/abs (hash code))
         result-key (str ":r-" (subs (str hash-val) 0 (min 4 (count (str hash-val)))))
-        var-name (str "user/*repl-" effective-session "*")]
+        var-name (str "user/repl-" effective-session)]
     {:wrapped-code (str "(let [__r (do " code "\n)]"
                         " (defonce " var-name " (atom {}))"
                         " (let [__prev (get @" var-name " " result-key ")]"

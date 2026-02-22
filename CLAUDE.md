@@ -270,7 +270,7 @@ Returns component status (Datalevin, nREPL, agents) with latencies. HTTP 200 = h
 ;; Focused namespace — returns structured data
 (user/run-tests 'seon.ai.claude-test)
 ;; => {::success true ::test-count 5 ::pass-count 5 ::failures [] ...}
-;; => stored as :r-2108 in @user/*repl-orchestrator*
+;; => stored as :r-2108 in @user/repl-orchestrator
 
 ;; Single var
 (user/run-tests 'seon.ai.claude-test/constants-test)
@@ -285,23 +285,23 @@ Returns component status (Datalevin, nREPL, agents) with latencies. HTTP 200 = h
 (user/test-gen 'seon.graph.query)
 ```
 
-**Results are auto-saved.** Every eval result is stored in `@user/*repl-<session>*` under a hash key. Results > 2000 chars are truncated with a hint showing the key.
+**Results are auto-saved.** Every eval result is stored in `@user/repl-<session>` under a hash key. Results > 2000 chars are truncated with a hint showing the key.
 
 ```clojure
 ;; Truncated output shows:
 ;; ... truncated (8432 chars → 1500 shown)
-;; stored as :r-2108 in @user/*repl-orchestrator*
-;; Dig in: (:r-2108 @user/*repl-orchestrator*) or prefix code with #_:full
+;; stored as :r-2108 in @user/repl-orchestrator
+;; Dig in: (:r-2108 @user/repl-orchestrator) or prefix code with #_:full
 
 ;; Dig into structure without the full blob (stays truncated):
-(:failures (:r-2108 @user/*repl-orchestrator*))
-(keys (:r-2108 @user/*repl-orchestrator*))
+(:failures (:r-2108 @user/repl-orchestrator))
+(keys (:r-2108 @user/repl-orchestrator))
 
 ;; Opt in to full output when you need it (prefix with #_:full):
-#_:full (:seon.ai.gemini/text (:r-5137 @user/*repl-orchestrator*))
+#_:full (:seon.ai.gemini/text (:r-5137 @user/repl-orchestrator))
 
 ;; See all stored results:
-(keys @user/*repl-orchestrator*)
+(keys @user/repl-orchestrator)
 ```
 
 **Never re-run code just to see more output.** Dig into the saved result by key, or use `#_:full` to get the untruncated value.
