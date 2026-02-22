@@ -9,7 +9,7 @@
    opaque flow objects and core.async channels that cannot be generated."
   (:require [clojure.core.async :as async]
             [clojure.core.async.flow :as flow]
-            [seon.flow.registry :as registry]
+            [seon.runtime :as runtime]
             [seon.schema :as schema])
   (:import [java.time Duration Instant]))
 
@@ -140,10 +140,10 @@
 
    Returns a status map or nil if flow not found."
   [{::keys [id]}]
-  (when-let [entry (registry/get-flow {::registry/id id})]
-    (let [fl (::registry/flow entry)
+  (when-let [handle (runtime/get-flow {::runtime/flow-id id})]
+    (let [fl (:flow handle)
           now (Instant/now)
-          uptime-ms (.toMillis (Duration/between (::registry/started-at entry) now))
+          uptime-ms (.toMillis (Duration/between (:started-at handle) now))
           ping-result (try (flow/ping fl :timeout-ms 2000) (catch Exception _ nil))
           errors (get @*errors id [])
           processes
@@ -166,7 +166,7 @@
                                   ::message (str "Process " (name pid) " is paused")})))
                        processes)]
       (cond-> {::id id
-               ::label (::registry/label entry)
+               ::label (:label handle)
                ::status (if ping-result :running :stopped)
                ::uptime-ms uptime-ms
                ::errors {::total (count errors)
@@ -181,7 +181,7 @@
      ::flows  - Map of flow-id -> flow status
      ::alerts - Vector of all alerts across flows"
   []
-  (let [flows (registry/list-flows)
+  (let [flows (runtime/list-flows {})
         statuses (into {}
                        (map (fn [[id _]]
                               [id (collect-flow-status {::id id})]))

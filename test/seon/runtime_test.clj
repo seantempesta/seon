@@ -441,6 +441,54 @@
   (testing "latest-snapshot returns nil for unknown label"
     (is (nil? (runtime/latest-snapshot {::runtime/label "nonexistent"})))))
 
+;;; ---------------------------------------------------------------------------
+;;; Flow Handle Tests
+;;; ---------------------------------------------------------------------------
+
+(deftest flow-handle-roundtrip-test
+  (testing "register-flow!/get-flow/list-flows/unregister-flow! round-trip"
+    (runtime/register-flow! {::runtime/flow-id :test/flow-a
+                             ::runtime/flow :fake-flow-obj
+                             ::runtime/chans {:error-chan :fake-err :report-chan :fake-rep}
+                             ::runtime/label "Flow A"})
+    (let [handle (runtime/get-flow {::runtime/flow-id :test/flow-a})]
+      (is (some? handle))
+      (is (= :fake-flow-obj (:flow handle)))
+      (is (= "Flow A" (:label handle)))
+      (is (inst? (:started-at handle))))
+
+    (runtime/register-flow! {::runtime/flow-id :test/flow-b
+                             ::runtime/flow :fake-flow-b
+                             ::runtime/chans {:error-chan :e :report-chan :r}
+                             ::runtime/label "Flow B"})
+    (let [flows (runtime/list-flows {})]
+      (is (= 2 (count flows)))
+      (is (contains? flows :test/flow-a))
+      (is (contains? flows :test/flow-b)))
+
+    (let [removed (runtime/unregister-flow! {::runtime/flow-id :test/flow-a})]
+      (is (some? removed))
+      (is (= :fake-flow-obj (:flow removed))))
+    (is (nil? (runtime/get-flow {::runtime/flow-id :test/flow-a})))
+    (is (= 1 (count (runtime/list-flows {}))))))
+
+(deftest flow-handle-overwrite-test
+  (testing "re-registering same flow-id overwrites"
+    (runtime/register-flow! {::runtime/flow-id :test/dup
+                             ::runtime/flow :old
+                             ::runtime/chans {}
+                             ::runtime/label "Old"})
+    (runtime/register-flow! {::runtime/flow-id :test/dup
+                             ::runtime/flow :new
+                             ::runtime/chans {}
+                             ::runtime/label "New"})
+    (is (= :new (:flow (runtime/get-flow {::runtime/flow-id :test/dup}))))
+    (is (= 1 (count (runtime/list-flows {}))))))
+
+(deftest flow-handle-unregister-nonexistent-test
+  (testing "unregistering non-existent flow-id returns nil"
+    (is (nil? (runtime/unregister-flow! {::runtime/flow-id :test/nope})))))
+
 (comment
   (require '[kaocha.repl :as k])
   (k/run 'seon.runtime-test)
