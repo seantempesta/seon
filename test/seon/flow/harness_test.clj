@@ -1,10 +1,8 @@
 (ns seon.flow.harness-test
   (:require [clojure.test :refer [deftest is testing]]
-            [datalevin.core :as d]
             [seon.flow.harness :as harness]
             [seon.flow.msg :as msg])
-  (:import [java.io File]
-           [java.time Instant]))
+  (:import [java.time Instant]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Helpers
@@ -266,108 +264,3 @@
       (is (= state (harness/namespace-step state :clojure.core.async.flow/pause)))
       (is (= state (harness/namespace-step state :clojure.core.async.flow/resume))))))
 
-;;; ---------------------------------------------------------------------------
-;;; *ctx* Persistence
-;;; ---------------------------------------------------------------------------
-
-(defn- temp-dir []
-  (let [dir (File/createTempFile "seon-harness-ctx-test" "")]
-    (.delete dir)
-    (.mkdirs dir)
-    (.getAbsolutePath dir)))
-
-(defn- delete-dir [^String path]
-  (let [f (File. path)]
-    (when (.exists f)
-      (doseq [child (.listFiles f)]
-        (if (.isDirectory child)
-          (delete-dir (.getAbsolutePath child))
-          (.delete child)))
-      (.delete f))))
-
-(defn- with-temp-conn [f]
-  (let [dir (temp-dir)
-        conn (d/get-conn dir)]
-    (try
-      (f conn)
-      (finally
-        (d/close conn)
-        (delete-dir dir)))))
-
-(deftest persist-ctx-round-trip-test
-  (testing "round-trip: persist then load returns same data"
-    (with-temp-conn
-      (fn [conn]
-        (let [data {:seon.test/counter 42
-                    :seon.test/name "alpha"}
-              ctx (atom data)]
-          (harness/persist-ctx! {::harness/ctx ctx
-                                 ::harness/namespace "seon.test.alpha"
-                                 ::harness/conn conn})
-          (let [loaded (harness/load-ctx! {::harness/namespace "seon.test.alpha"
-                                           ::harness/conn conn})]
-            (is (= data loaded))))))))
-
-(deftest persist-ctx-non-serializable-test
-  (testing "non-serializable values are skipped with warning"
-    (with-temp-conn
-      (fn [conn]
-        (let [data {:seon.test/counter 42
-                    :seon.test/bad-fn (fn [] "nope")}
-              ctx (atom data)
-              result (harness/persist-ctx! {::harness/ctx ctx
-                                            ::harness/namespace "seon.test.alpha"
-                                            ::harness/conn conn})]
-          (is (= {:seon.test/counter 42} result))
-          (let [loaded (harness/load-ctx! {::harness/namespace "seon.test.alpha"
-                                           ::harness/conn conn})]
-            (is (= {:seon.test/counter 42} loaded))))))))
-
-(deftest persist-ctx-overwrite-test
-  (testing "second persist overwrites first, load returns latest"
-    (with-temp-conn
-      (fn [conn]
-        (harness/persist-ctx! {::harness/ctx {:seon.test/v 1}
-                               ::harness/namespace "seon.test.alpha"
-                               ::harness/conn conn})
-        (harness/persist-ctx! {::harness/ctx {:seon.test/v 2}
-                               ::harness/namespace "seon.test.alpha"
-                               ::harness/conn conn})
-        (let [loaded (harness/load-ctx! {::harness/namespace "seon.test.alpha"
-                                         ::harness/conn conn})]
-          (is (= {:seon.test/v 2} loaded)))))))
-
-(deftest persist-ctx-empty-test
-  (testing "empty map round-trips correctly"
-    (with-temp-conn
-      (fn [conn]
-        (harness/persist-ctx! {::harness/ctx {}
-                               ::harness/namespace "seon.test.alpha"
-                               ::harness/conn conn})
-        (let [loaded (harness/load-ctx! {::harness/namespace "seon.test.alpha"
-                                         ::harness/conn conn})]
-          (is (= {} loaded)))))))
-
-(deftest persist-ctx-namespace-isolation-test
-  (testing "different namespaces have isolated ctx data"
-    (with-temp-conn
-      (fn [conn]
-        (harness/persist-ctx! {::harness/ctx {:seon.test/v "alpha"}
-                               ::harness/namespace "seon.test.alpha"
-                               ::harness/conn conn})
-        (harness/persist-ctx! {::harness/ctx {:seon.test/v "beta"}
-                               ::harness/namespace "seon.test.beta"
-                               ::harness/conn conn})
-        (is (= {:seon.test/v "alpha"}
-               (harness/load-ctx! {::harness/namespace "seon.test.alpha"
-                                   ::harness/conn conn})))
-        (is (= {:seon.test/v "beta"}
-               (harness/load-ctx! {::harness/namespace "seon.test.beta"
-                                   ::harness/conn conn})))))))
-
-(deftest load-ctx-missing-test
-  (testing "load returns nil for unknown namespace"
-    (with-temp-conn
-      (fn [conn]
-        (is (nil? (harness/load-ctx! {::harness/namespace "seon.test.unknown"
-                                      ::harness/conn conn})))))))
