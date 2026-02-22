@@ -98,7 +98,7 @@
   "Get the Malli schema registry from the running system."
   []
   (when state/system
-    (:seon/schema-registry state/system)))
+    (:seon.schema/registry state/system)))
 
 (defn status
   "Show system status."
@@ -338,7 +338,7 @@
         ;; Try to get graph conn from running system
         conn (try
                (when state/system
-                 (let [mgr (:seon/connection-manager state/system)
+                 (let [mgr (:seon.db.datalevin/connections state/system)
                        get-conn (requiring-resolve 'seon.db.datalevin.conn/get-master-conn!)]
                    (get-conn {:seon.db.datalevin.conn/manager mgr})))
                (catch Exception _ nil))]

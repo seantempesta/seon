@@ -277,7 +277,7 @@
   (require '[integrant.repl.state :as state])
   (require '[seon.db.datalevin.conn :as conn])
 
-  (def mgr (:seon/connection-manager state/system))
+  (def mgr (:seon.db.datalevin/connections state/system))
   (def dl-conn (conn/get-master-conn!
                 {:seon.db.datalevin.conn/manager mgr}))
 

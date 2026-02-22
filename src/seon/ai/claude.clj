@@ -756,7 +756,7 @@
   ;; 1. Create Seon session (nREPL, ctx, db)
   (let [{::session/keys [id nrepl-port] :as session-result}
         (session/start-agent-session!
-         (let [dl-mgr (:seon/connection-manager state/system)]
+         (let [dl-mgr (:seon.db.datalevin/connections state/system)]
            (cond-> {::session/namespace namespace}
              dl-mgr (assoc ::session/datalevin-manager dl-mgr))))]
 

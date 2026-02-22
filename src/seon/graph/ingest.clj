@@ -409,7 +409,7 @@
   (require '[seon.db.datalevin.conn :as conn])
 
   ;; Get connection
-  (def mgr (:seon/connection-manager state/system))
+  (def mgr (:seon.db.datalevin/connections state/system))
   (def dl-conn (conn/get-master-conn!
                 {:seon.db.datalevin.conn/manager mgr}))
 

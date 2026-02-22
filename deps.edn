@@ -11,7 +11,7 @@
         metosin/malli {:mvn/version "0.17.0"}
 
         ;; State Management
-        integrant/integrant {:mvn/version "0.10.0"}
+        integrant/integrant {:mvn/version "1.0.1"}
 
         ;; Python Bridge
         clj-python/libpython-clj {:mvn/version "2.025"}

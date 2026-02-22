@@ -86,7 +86,7 @@
       (start-app {:opts opts})
 
       ;; Show connection info
-      (when-let [nrepl (:seon/nrepl-server state/system)]
+      (when-let [nrepl (:seon.dev/nrepl state/system)]
         (log/info "Connect your editor to nREPL port 7888"))
 
       (log/info "System running. Press Ctrl+C to stop.")

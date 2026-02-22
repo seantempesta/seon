@@ -270,7 +270,7 @@
   [file-path]
   (try
     (require 'integrant.repl.state)
-    (when-let [scanner (get @(resolve 'integrant.repl.state/system) :seon/code-scanner)]
+    (when-let [scanner (get @(resolve 'integrant.repl.state/system) :seon.graph/scanner)]
       (when-let [conn (:conn scanner)]
         (require 'seon.graph.analyzer)
         (require 'seon.graph.scanner)

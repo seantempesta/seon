@@ -89,7 +89,7 @@
 ;;; Integrant Component
 ;;; ---------------------------------------------------------------------------
 
-(defmethod ig/init-key :seon.web/tailwind-watcher
+(defmethod ig/init-key :seon.web/tailwind
   [_ {:keys [enabled? input output]
       :or {input "resources/public/css/input.css"
            output "resources/public/css/output.css"}}]
@@ -102,16 +102,16 @@
       (log/info "Tailwind watcher disabled")
       {:process nil})))
 
-(defmethod ig/halt-key! :seon.web/tailwind-watcher
+(defmethod ig/halt-key! :seon.web/tailwind
   [_ {:keys [process]}]
   (stop-tailwind-process! process))
 
 ;; Suspend/resume: keep process alive during (reset).
 ;; Tailwind watcher is a long-running process that doesn't need restart
 ;; unless config changes. Only restart if process died or config changed.
-(defmethod ig/suspend-key! :seon.web/tailwind-watcher [_ state] state)
+(defmethod ig/suspend-key! :seon.web/tailwind [_ state] state)
 
-(defmethod ig/resume-key :seon.web/tailwind-watcher
+(defmethod ig/resume-key :seon.web/tailwind
   [key opts old-opts old-state]
   (if (and (= opts old-opts)
            (:process old-state)

@@ -74,7 +74,7 @@
 ;;; Integrant Component
 ;;; ---------------------------------------------------------------------------
 
-(defmethod ig/init-key :seon/caddy-proxy
+(defmethod ig/init-key :seon.web/caddy
   [_ {:keys [enabled? config-file]
       :or {config-file "Caddyfile"}}]
   (if enabled?
@@ -86,16 +86,16 @@
       (log/info "Caddy proxy disabled")
       {:process nil})))
 
-(defmethod ig/halt-key! :seon/caddy-proxy
+(defmethod ig/halt-key! :seon.web/caddy
   [_ {:keys [process]}]
   (stop-caddy-process! process))
 
 ;; Suspend/resume: keep Caddy alive during (reset) — expensive to restart, no state to refresh
-(defmethod ig/suspend-key! :seon/caddy-proxy [_ state] state)
+(defmethod ig/suspend-key! :seon.web/caddy [_ state] state)
 
-(defmethod ig/resume-key :seon/caddy-proxy
+(defmethod ig/resume-key :seon.web/caddy
   [_ opts _old-opts old-state]
   (if (and (:process old-state) (.isAlive ^Process (:process old-state)))
     old-state
-    (do (ig/halt-key! :seon/caddy-proxy old-state)
-        (ig/init-key :seon/caddy-proxy opts))))
+    (do (ig/halt-key! :seon.web/caddy old-state)
+        (ig/init-key :seon.web/caddy opts))))

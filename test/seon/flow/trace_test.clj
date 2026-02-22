@@ -20,7 +20,7 @@
   []
   (boolean
    (try
-     (when-let [mgr (:seon/connection-manager state/system)]
+     (when-let [mgr (:seon.db.datalevin/connections state/system)]
        (conn/get-master-conn! {::conn/manager mgr}))
      (catch Exception _ nil))))
 
