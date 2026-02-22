@@ -33,7 +33,7 @@
 
 (def server-info
   {:name "seon"
-   :version "0.4.1"})  ;; v0.4.1: Fix silent nil on server crash (ConnectException now sets :ex)
+   :version "0.5.0"})  ;; v0.5.0: Auto-save REPL results to user/*repl-<session>* + truncate large output
 
 ;; Parent PID at startup - used by watchdog to detect orphaning
 (def parent-pid (let [parent (.parent (java.lang.ProcessHandle/current))]
@@ -83,6 +83,8 @@
 ;;; ---------------------------------------------------------------------------
 
 (def default-timeout-ms 30000) ;; 30 second default timeout
+(def max-eval-output-chars 2000)   ;; truncate nREPL :value beyond this
+(def truncated-preview-chars 1500) ;; how much to show when truncated
 
 ;; Tool definitions change based on whether session is enforced
 (def tools
@@ -451,6 +453,39 @@ You must then either:
       (str (subs s 0 max-len) "...")
       s)))
 
+(defn- wrap-code-with-autosave
+  "Wrap user code so the result is auto-saved to user/*repl-<session>* atom.
+   Returns {:wrapped-code <str> :result-key <str> :var-name <str>}."
+  [code effective-session]
+  (let [hash-val (Math/abs (hash code))
+        result-key (str ":r-" (subs (str hash-val) 0 (min 4 (count (str hash-val)))))
+        var-name (str "user/*repl-" effective-session "*")]
+    {:wrapped-code (str "(let [__r (do " code "\n)]"
+                        " (defonce " var-name " (atom {}))"
+                        " (let [__prev (get @" var-name " " result-key ")]"
+                        "   (when-not (= __prev __r)"
+                        "     (swap! " var-name " assoc " result-key " __r)))"
+                        " __r)")
+     :result-key result-key
+     :var-name var-name}))
+
+(defn- format-eval-output
+  "Format nREPL result with truncation and storage hints.
+   result-key and var-name come from wrap-code-with-autosave."
+  [result result-key var-name]
+  (let [val-str (or (:value result) "nil")
+        hint (str "\n;; stored as " result-key " in @" var-name)
+        big? (> (count val-str) max-eval-output-chars)]
+    (str (when-let [o (:out result)] o)
+         (if big?
+           (str (subs val-str 0 truncated-preview-chars)
+                "\n;; ... truncated (" (count val-str) " chars → " truncated-preview-chars " shown)"
+                hint
+                "\n;; Dig in: (" result-key " @" var-name ") | (keys (" result-key " @" var-name "))")
+           (str val-str hint))
+         (when-let [ns (:ns result)]
+           (str "\n;; ns: " ns)))))
+
 (defn execute-eval
   "Execute the eval tool. Returns MCP result format.
    For agent sessions (not orchestrator), tracks activity for observability (Phase 4c).
@@ -497,10 +532,13 @@ You must then either:
                   (throw (ex-info (str "Session not found or not running: " effective-session)
                                   {:session_id effective-session}))))))
 
+          {:keys [wrapped-code result-key var-name]}
+          (wrap-code-with-autosave code effective-session)
+
           do-eval
           (fn [port nrepl-session-id]
             (record-activity! effective-session :start code)
-            (let [result (nrepl-eval port code (or timeout_ms default-timeout-ms) nrepl-session-id)]
+            (let [result (nrepl-eval port wrapped-code (or timeout_ms default-timeout-ms) nrepl-session-id)]
               (log-debug "Eval result:" (pr-str result))
 
               ;; Auto-interrupt on timeout
@@ -528,11 +566,7 @@ You must then either:
                     (let [retry-result (do-eval orchestrator-port new-session)]
                       (if (:ex retry-result)
                         (mcp-error (:err retry-result))
-                        (mcp-success (str (when-let [out (:out retry-result)]
-                                            out)
-                                          (or (:value retry-result) "nil")
-                                          (when-let [ns (:ns retry-result)]
-                                            (str "\n;; ns: " ns)))))))
+                        (mcp-success (format-eval-output retry-result result-key var-name)))))
                   (mcp-error "Failed to re-clone orchestrator nREPL session. Is the server running?"))
                 ;; Agent session - just report the error
                 (mcp-error (:err result))))
@@ -540,11 +574,7 @@ You must then either:
             ;; Normal path
             (if (:ex result)
               (mcp-error (:err result))
-              (mcp-success (str (when-let [out (:out result)]
-                                  out)
-                                (or (:value result) "nil")
-                                (when-let [ns (:ns result)]
-                                  (str "\n;; ns: " ns)))))))
+              (mcp-success (format-eval-output result result-key var-name)))))
 
         (finally
           ;; Always clear orchestrator state when done
@@ -1074,7 +1104,7 @@ You must then either:
    This fixes the MCP resilience issue where cancelling an eval would
    brick the entire MCP server."
   []
-  (log-info "MCP Server v0.4.1 starting (async mode)...")
+  (log-info "MCP Server v0.5.0 starting (async mode)...")
   (init-orchestrator-session!)
 
   ;; Main message loop - non-blocking to stay responsive
