@@ -41,7 +41,7 @@
                 ::workout/reps 5
                 ::workout/weight 100}
           result (workout/workout-set-render data)]
-      (is (= "Squat 5x5 @ 100kg" (:seon.render/ai result)))
+      (is (= "Squat — 5x5 @ 100kg" (:seon.render/ai result)))
       (is (vector? (:seon.render/html result)))
       (is (= :tr (first (:seon.render/html result)))))))
 
@@ -51,7 +51,7 @@
                  ::workout/sets 3
                  ::workout/reps 8
                  ::workout/weight 80}]
-      (is (= "Bench Press 3x8 @ 80kg"
+      (is (= "Bench Press — 3x8 @ 80kg"
              (:seon.render/ai (workout/workout-set-render bench))))))
 
   (testing "HTML format contains all fields"
