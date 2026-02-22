@@ -4,14 +4,13 @@
   Key insights:
   1. view = f(state) - Render full view, not deltas
   2. Hash-based change detection - Only send if view actually changed
-  3. Streaming brotli - Compression over connection lifetime
+  3. Plain text SSE - No compression (browsers cannot parse compressed event-streams)
   4. Throttling - Max refresh rate to prevent overload
   5. hk/as-channel - http-kit's async API for SSE"
   (:require [clojure.core.async :as a]
             [clojure.string :as str]
             [taoensso.timbre :as log]
-            [org.httpkit.server :as hk]
-            [seon.web.brotli :as br]))
+            [org.httpkit.server :as hk]))
 
 ;; Broadcast infrastructure
 ;; Single channel that gets mult'd to all connections
@@ -27,14 +26,14 @@
   Options map:
   - :selector - CSS selector for target element (default: uses element's own ID)
   - :mode     - Patch mode keyword (default: :outer)
-                :outer   - Morph element into existing element
-                :inner   - Replace inner HTML of existing element
-                :append  - Append inside existing element
-                :prepend - Prepend inside existing element
-                :before  - Insert before existing element
-                :after   - Insert after existing element
-                :replace - Replace existing element entirely
-                :remove  - Remove existing element
+               :outer   - Morph element into existing element
+               :inner   - Replace inner HTML of existing element
+               :append  - Append inside existing element
+               :prepend - Prepend inside existing element
+               :before  - Insert before existing element
+               :after   - Insert after existing element
+               :replace - Replace existing element entirely
+               :remove  - Remove existing element
   - :event-id - For idempotency/resumption (hash of content)
 
   elements - HTML string to patch"
@@ -71,12 +70,11 @@
   "Send an SSE event down the http-kit channel.
 
   ch    - http-kit async channel
-  event - SSE formatted string (already compressed)"
+  event - SSE formatted string (plain text, never compressed)"
   [ch event]
   (hk/send! ch {:status  200
-                :headers {"Content-Type"     "text/event-stream"
-                          "Cache-Control"    "no-store"
-                          "Content-Encoding" "br"}
+                :headers {"Content-Type"  "text/event-stream"
+                          "Cache-Control" "no-store"}
                 :body    event}
             false))  ; false = don't close channel
 
@@ -105,24 +103,20 @@
 
 (defn- do-render
   "Render view and send SSE update if changed. Returns new hash, or nil if connection dead."
-  [render-fn req out br ch last-view-hash]
+  [render-fn req ch last-view-hash]
   (try
     (when-some [new-view-str (render-fn req)]
       (let [new-view-hash (Integer/toHexString (hash new-view-str))]
         (if (not= last-view-hash new-view-hash)
           ;; View changed - send update
-          (let [sent? (->> (patch-elements new-view-hash new-view-str)
-                           (br/compress-stream out br)
-                           (send! ch))]
+          (let [sent? (send! ch (patch-elements new-view-hash new-view-str))]
             (if sent?
               (do (log/debug "Sending SSE update" {:hash new-view-hash :size (count new-view-str)})
                   new-view-hash)
               (do (log/debug "SSE send failed, closing dead connection")
                   nil)))
           ;; View unchanged - send keepalive to detect dead connections
-          (let [sent? (->> keepalive-comment
-                           (br/compress-stream out br)
-                           (send! ch))]
+          (let [sent? (send! ch keepalive-comment)]
             (if sent?
               new-view-hash
               (do (log/debug "SSE keepalive failed, closing dead connection")
@@ -141,15 +135,13 @@
   Options:
   - :on-open           - (fn [req]) called when connection opens
   - :on-close          - (fn [req]) called when connection closes
-  - :br-window-size    - Brotli LZ77 window size (default: 18 = 262KB)
   - :render-on-connect - Render immediately on connect? (default: true)
   - :poll-ms           - If set, poll for changes at this interval (milliseconds)
                          Useful for views that don't have explicit refresh triggers.
 
   Returns: Ring handler function for http-kit"
-  [render-fn & {:keys [on-open on-close br-window-size render-on-connect poll-ms]
-                :or   {br-window-size    18
-                       render-on-connect true}}]
+  [render-fn & {:keys [on-open on-close render-on-connect poll-ms]
+                :or   {render-on-connect true}}]
   (fn handler [req]
     (let [;; Dropping buffer - slow handlers won't block other handlers
           <ch     (a/tap (:seon.web.sse/refresh-mult req)
@@ -165,30 +157,27 @@
                         ;; Virtual thread for handling SSE stream
                         (.start (Thread/ofVirtual)
                                 (fn []
-                                  (with-open [out (br/byte-array-out-stream)
-                                              br  (br/compress-out-stream out
-                                                                          :window-size br-window-size)]
-                                    (loop [last-view-hash (get-in req [:headers "last-event-id"])]
-                                      (let [[val port]
-                                            (if poll-ms
-                                              ;; With polling: wait for refresh, cancel, or timeout
-                                              (a/alts!! [<cancel <ch (a/timeout poll-ms)]
-                                                        :priority true)
-                                              ;; Without polling: wait for refresh or cancel
-                                              (a/alts!! [<cancel <ch]
-                                                        :priority true))]
-                                        (cond
-                                          ;; Cancel signal - stop the loop
-                                          (= port <cancel)
-                                          (do (a/close! <ch)
-                                              (a/close! <cancel))
+                                  (loop [last-view-hash (get-in req [:headers "last-event-id"])]
+                                    (let [[val port]
+                                          (if poll-ms
+                                            ;; With polling: wait for refresh, cancel, or timeout
+                                            (a/alts!! [<cancel <ch (a/timeout poll-ms)]
+                                                      :priority true)
+                                            ;; Without polling: wait for refresh or cancel
+                                            (a/alts!! [<cancel <ch]
+                                                      :priority true))]
+                                      (cond
+                                        ;; Cancel signal - stop the loop
+                                        (= port <cancel)
+                                        (do (a/close! <ch)
+                                            (a/close! <cancel))
 
-                                          ;; Refresh or timeout - render and continue
-                                          :else
-                                          (when-some [new-hash (do-render render-fn req out br ch last-view-hash)]
-                                            (recur new-hash)))))
-                                    ;; Close on error or when thread stops
-                                    (hk/close ch))))
+                                        ;; Refresh or timeout - render and continue
+                                        :else
+                                        (when-some [new-hash (do-render render-fn req ch last-view-hash)]
+                                          (recur new-hash)))))
+                                  ;; Close on error or when thread stops
+                                  (hk/close ch)))
                         (when on-open (on-open req)))
 
                       :on-close
