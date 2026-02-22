@@ -150,7 +150,13 @@
 (defmethod ig/resume-key :seon.orchestrator/sessions
   [_ opts old-opts old-state]
   (if (= opts old-opts)
-    old-state
+    (do
+      ;; Re-wire pool atom — defonce atoms survive reload but init! may not
+      ;; have been called if resume short-circuited on a previous cycle
+      (require 'seon.orchestrator.session)
+      ((resolve 'seon.orchestrator.session/init!)
+       (:connection-manager opts) :pool (:pool opts))
+      old-state)
     (do (ig/halt-key! :seon.orchestrator/sessions old-state)
         (ig/init-key :seon.orchestrator/sessions opts))))
 
@@ -223,7 +229,13 @@
 (defmethod ig/resume-key :seon/runtime-db
   [_ opts old-opts old-state]
   (if (= (:connection-manager opts) (:connection-manager old-opts))
-    old-state
+    (do
+      ;; Re-wire runtime atom and render conn — defonce atoms survive reload
+      ;; but may hold stale refs if conn was closed by a previous halt cycle
+      (runtime/init! {::runtime/conn (:conn old-state)})
+      (require 'seon.render)
+      ((resolve 'seon.render/set-conn!) (:conn old-state))
+      old-state)
     (do (ig/halt-key! :seon/runtime-db old-state)
         (ig/init-key :seon/runtime-db opts))))
 
