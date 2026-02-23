@@ -266,35 +266,29 @@
 
 (defn- update-code-index!
   "Update the Datalevin code index after a file change.
+   Uses the unified extract pipeline + ingest-namespace! for upsert + retract-stale.
    Best-effort: logs warnings on failure, never blocks the hook."
   [file-path]
   (try
     (require 'integrant.repl.state)
     (when-let [scanner (get @(resolve 'integrant.repl.state/system) :seon.graph/scanner)]
       (when-let [conn (:conn scanner)]
-        (require 'seon.graph.analyzer)
-        (require 'seon.graph.scanner)
+        (require 'seon.graph.extract)
         (require 'seon.graph.ingest)
-        (let [analyze-form (resolve 'seon.graph.analyzer/analyze-form)
-              extract-entities (resolve 'seon.graph.analyzer/extract-entities)
-              scan-file (resolve 'seon.graph.scanner/scan-file)
-              link-fns-to-specs (resolve 'seon.graph.scanner/link-fns-to-specs)
-              ingest-incremental! (resolve 'seon.graph.ingest/ingest-incremental!)
-              ;; Analyze the changed file
-              source (slurp file-path)
-              analysis (analyze-form {:seon.graph.analyzer/source source
-                                      :seon.graph.analyzer/file-path file-path})]
-          (when (:seon.graph.analyzer/success analysis)
-            (let [entities (extract-entities {:seon.graph.analyzer/raw-analysis
-                                             (:seon.graph.analyzer/raw-analysis analysis)})
-                  ;; Scan file for specs
-                  specs (scan-file {:seon.graph.scanner/file-path file-path})
-                  ;; Link functions to specs
-                  linked-fns (link-fns-to-specs (:seon.graph.analyzer/functions entities) specs)
-                  entities (assoc entities :seon.graph.analyzer/functions linked-fns)]
-              (ingest-incremental! {:seon.graph.ingest/conn conn
-                                    :seon.graph.ingest/entities entities
-                                    :seon.graph.ingest/specs specs}))))))
+        (let [extract-fn (resolve 'seon.graph.extract/extract-graph-from-file)
+              ingest-ns! (resolve 'seon.graph.ingest/ingest-namespace!)
+              graph (extract-fn {:seon.graph.extract/file-path file-path})
+              ns-str (:seon.graph.extract/ns-name graph)]
+          (when ns-str
+            (ingest-ns!
+             {:seon.graph.ingest/conn conn
+              :seon.graph.ingest/ns-name ns-str
+              :seon.graph.ingest/functions (:seon.graph.extract/functions graph)
+              :seon.graph.ingest/specs (:seon.graph.extract/specs graph)
+              :seon.graph.ingest/vars (:seon.graph.extract/vars graph)
+              :seon.graph.ingest/call-edges (:seon.graph.extract/call-edges graph)
+              :seon.graph.ingest/ns-deps (:seon.graph.extract/ns-deps graph)
+              :seon.graph.ingest/ns-entities (:seon.graph.extract/namespaces graph)})))))
     (catch Exception e
       (log/debug "Code index update failed (non-blocking)" {:error (.getMessage e)}))))
 
@@ -536,8 +530,7 @@
                   (let [result (lint/validate-for-write
                                 {::lint/content content-to-validate
                                  ::lint/file-path file-path
-                                 ::lint/full-lint? full-lint?})
-                        prefix (str tool-name " would create invalid Clojure")]
+                                 ::lint/full-lint? full-lint?})]
                     (if (::lint/valid? result)
                       (success-response @feedback)
                       (block-response (::lint/error-msg result))))

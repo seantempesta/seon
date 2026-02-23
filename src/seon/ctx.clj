@@ -27,6 +27,7 @@
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
             [malli.core :as m]
+            [malli.error :as me]
             [seon.schema :as schema]
             [taoensso.timbre :as log])
   (:import [java.util.concurrent Executors ScheduledExecutorService ScheduledFuture TimeUnit]))
@@ -84,6 +85,9 @@
 
 (schema/register! ::validate?
                   [:boolean {:description "Enable Malli validation on swap! (default false)"}])
+
+(schema/register! ::ctx-schema
+                  [:any {:description "Malli schema (or registry keyword) for whole-state validation on every swap!"}])
 
 (schema/register! ::reserved-keys
                   [:map {:description "Immutable keys to inject and protect after creation"}])
@@ -267,6 +271,27 @@
       (render-and-push! instance-id new-val))))
 
 ;;; ---------------------------------------------------------------------------
+;;; Ctx-Schema Validation (whole-state Malli validation)
+;;; ---------------------------------------------------------------------------
+
+(defn- make-ctx-schema-validator
+  "Create a validator function for ::ctx-schema mode.
+   Validates the entire state against a Malli schema on every swap!.
+   Returns a function suitable for atom :validator."
+  [schema-or-key]
+  (let [resolved (if (keyword? schema-or-key)
+                   (schema/schema-definition schema-or-key)
+                   schema-or-key)
+        validator (m/validator resolved)
+        explainer (m/explainer resolved)]
+    (fn [new-state]
+      (if (validator new-state)
+        true
+        (throw (ex-info "ctx state does not conform to ::ctx-schema"
+                        {:spec schema-or-key
+                         :errors (me/humanize (explainer new-state))}))))))
+
+;;; ---------------------------------------------------------------------------
 ;;; Validation Helpers (for ::validate? mode)
 ;;; ---------------------------------------------------------------------------
 
@@ -364,11 +389,13 @@
      ::debounce-ms     - Optional. Debounce window in ms (default 100)
      ::validate?       - Optional. Enable Malli validation on swap! (default false)
      ::reserved-keys   - Optional. Map of immutable keys to inject and protect
+     ::ctx-schema      - Optional. Malli schema for whole-state validation on every swap!
 
    Returns:
      The ctx atom."
   [{::keys [conn instance-id namespace initial-value persist? sse-push?
-            track-clients? render-fn debounce-ms validate? reserved-keys]}]
+            track-clients? render-fn debounce-ms validate? reserved-keys
+            ctx-schema]}]
   (let [persist? (if (some? persist?) persist? true)
         sse-push? (if (some? sse-push?) sse-push? true)
         track-clients? (if (some? track-clients?) track-clients? false)
@@ -377,8 +404,17 @@
         reserved-keys (or reserved-keys {})
         initial-value (merge (or initial-value {}) reserved-keys)
         reserved-keys-snapshot (atom reserved-keys)
+        schema-validator (when ctx-schema (make-ctx-schema-validator ctx-schema))
         ctx-atom (atom initial-value
-                       :validator (when validate?
+                       :validator (cond
+                                    ;; ctx-schema takes precedence — validates whole state
+                                    schema-validator
+                                    (fn [new-state]
+                                      (when validate?
+                                        (validate-state new-state @reserved-keys-snapshot))
+                                      (schema-validator new-state))
+                                    ;; Legacy per-key validation
+                                    validate?
                                     (fn [new-state]
                                       (validate-state new-state @reserved-keys-snapshot)
                                       true)))

@@ -28,10 +28,8 @@
    - `(get-session {::session-id \"...\"})`
    - `(get-messages {::session-id \"...\"})`
    - `(list-sessions {::limit 20})`"
-  (:require [seon.schema :as schema]
-            [taoensso.timbre :as log])
-  (:import [java.time Instant]
-           [java.util UUID]))
+  (:require [seon.schema :as schema])
+  (:import [java.time Instant]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Datalevin Write Support (Primary and Only Store)
@@ -325,9 +323,10 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- generate-id
-  "Generate a unique ID with a prefix."
+  "Generate a unique ID with a prefix. Delegates to seon.runtime/generate-id."
   [prefix]
-  (str prefix "-" (UUID/randomUUID)))
+  (:seon.runtime/id ((requiring-resolve 'seon.runtime/generate-id)
+                     {:seon.runtime/prefix prefix})))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Public API

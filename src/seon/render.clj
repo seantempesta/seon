@@ -25,10 +25,23 @@
      ;; For AI agents in nREPL - recursively renders nested structures
      (render/for-ai {:positions [pos pos2] :total 25000.0})"
   (:require [clojure.pprint :as pp]
+            [clojure.set :as cset]
             [clojure.string :as str]
             [datalevin.core :as d]
             [integrant.repl.state]
             [seon.schema :as schema]))
+
+;;; ---------------------------------------------------------------------------
+;;; Specs
+;;; ---------------------------------------------------------------------------
+
+(schema/register! ::html :any)
+(schema/register! ::ai :string)
+(schema/register! ::ns-vars :map)
+(schema/register! ::format [:enum :html :ai :raw])
+(schema/register! ::ns-data [:map
+                             [::ns-vars {:optional true} ::ns-vars]
+                             [::format {:optional true} ::format]])
 
 ;;; ---------------------------------------------------------------------------
 ;;; Datalevin Connection
@@ -167,14 +180,19 @@
         cached (get @resolution-cache cache-key ::miss)]
     (if (not= cached ::miss)
       cached
-      (let [conn (get-conn)
-            result (if conn
-                     (if-let [qn (find-renderer conn data format)]
-                       (or (requiring-resolve (symbol qn)) ::no-renderer)
-                       ::no-renderer)
-                     ::no-renderer)]
-        (swap! resolution-cache assoc cache-key result)
-        result))))
+      (try
+        (let [conn (get-conn)
+              result (if conn
+                       (if-let [qn (find-renderer conn data format)]
+                         (or (requiring-resolve (symbol qn)) ::no-renderer)
+                         ::no-renderer)
+                       ::no-renderer)]
+          (swap! resolution-cache assoc cache-key result)
+          result)
+        (catch Exception _
+          ;; Conn may be closed/suspended (e.g. during system reload or tests).
+          ;; Don't cache — let next call retry with a fresh conn.
+          ::no-renderer)))))
 
 (defn- call-datalevin-renderer
   "Try to render data via Datalevin-discovered render function.
@@ -347,6 +365,168 @@
 
     ;; Anything else
     :else (pr-str v)))
+
+;;; ---------------------------------------------------------------------------
+;;; for-html: Recursive HTML Rendering
+;;; ---------------------------------------------------------------------------
+
+(defn for-html
+  "Render any value as hiccup HTML.
+
+   Recursively renders nested structures, producing hiccup data
+   suitable for browser display.
+
+   Maps render as definition-list tables.
+   Vectors/seqs render as ordered lists.
+   Primitives render as text spans.
+   If a map value has a Datalevin renderer, uses it.
+
+   Arguments:
+     v - Any value
+
+   Returns:
+     Hiccup data structure."
+  [v]
+  (cond
+    (nil? v) [:span {:class "text-text-400 italic"} "nil"]
+    (string? v) [:span {:class "text-text-200"} v]
+    (keyword? v) [:span {:class "text-amber-400 font-mono"} (str v)]
+    (number? v) [:span {:class "text-cyan-400 font-mono"} (str v)]
+    (boolean? v) [:span {:class "text-purple-400 font-mono"} (str v)]
+    (symbol? v) [:span {:class "text-text-200 font-mono"} (str v)]
+
+    ;; Map - try Datalevin renderer first, then recurse as table
+    (map? v)
+    (let [html-result (call-datalevin-renderer v :html)]
+      (if html-result
+        html-result
+        [:table {:class "w-full text-sm"}
+         [:tbody
+          (for [[k val] v]
+            [:tr {:class "border-b border-base-700/50"}
+             [:td {:class "py-1 px-2 text-text-400 font-mono text-xs align-top whitespace-nowrap"}
+              (pr-str k)]
+             [:td {:class "py-1 px-2"} (for-html val)]])]]))
+
+    ;; Sequential - render as list
+    (sequential? v)
+    [:ul {:class "list-disc list-inside text-sm"}
+     (for [item v]
+       [:li (for-html item)])]
+
+    ;; Set
+    (set? v)
+    [:ul {:class "list-disc list-inside text-sm"}
+     (for [item v]
+       [:li (for-html item)])]
+
+    ;; Anything else
+    :else [:span {:class "font-mono text-text-300"} (pr-str v)]))
+
+;;; ---------------------------------------------------------------------------
+;;; Page Renderer Resolution
+;;; ---------------------------------------------------------------------------
+
+(defn find-page-renderer
+  "Find a page render function whose input spec keys overlap most with ns-data keys.
+
+   Queries Datalevin for functions with :seon.fn/render-input-keys and
+   output specs containing :seon.render/html or :seon.render/ai.
+   The function with the MOST key overlap wins.
+
+   Arguments:
+     conn    - Datalevin connection
+     ns-data - Map of namespace data (keys to match against)
+
+   Returns:
+     The qualified-name string of the best page renderer, or nil."
+  [conn ns-data]
+  (let [data-keys (set (keys ns-data))
+        candidates (d/q '[:find ?e
+                          :where
+                          [?e :seon.fn/render-input-keys]]
+                        @conn)
+        entities (map (fn [[eid]]
+                        (d/pull @conn
+                                [:seon.fn/qualified-name
+                                 :seon.fn/render-input-keys
+                                 :seon.fn/updated-at
+                                 {:seon.fn/output-spec [:seon.spec/contains-keys]}]
+                                eid))
+                      candidates)
+        matching (->> entities
+                      (filter (fn [e]
+                                (let [rkeys (set (:seon.fn/render-input-keys e))
+                                      out-keys (set (get-in e [:seon.fn/output-spec :seon.spec/contains-keys]))
+                                      overlap (count (cset/intersection rkeys data-keys))]
+                                  (and (pos? overlap)
+                                       (or (contains? out-keys :seon.render/html)
+                                           (contains? out-keys :seon.render/ai)))))))]
+    (when (seq matching)
+      (->> matching
+           (sort-by (juxt (comp - (fn [e]
+                                    (count (cset/intersection
+                                            (set (:seon.fn/render-input-keys e))
+                                            data-keys))))
+                          (comp - (fn [e] (if-let [t (:seon.fn/updated-at e)]
+                                            (.getTime ^java.util.Date t)
+                                            0)))
+                          :seon.fn/qualified-name))
+           first
+           :seon.fn/qualified-name))))
+
+;;; ---------------------------------------------------------------------------
+;;; Namespace Rendering
+;;; ---------------------------------------------------------------------------
+
+(defn default-namespace-render
+  "Generic fallback renderer for namespace data.
+
+   Renders ns-data using the recursive renderers based on format:
+     :html - for-html
+     :ai   - for-ai
+     :raw  - identity
+
+   Arguments:
+     ns-data - Map of namespace data
+     format  - :html, :ai, or :raw
+
+   Returns:
+     Rendered output for the requested format."
+  [ns-data format]
+  (case format
+    :html (for-html ns-data)
+    :ai (for-ai ns-data)
+    :raw ns-data))
+
+(defn render-namespace
+  "Main entry point for rendering a namespace.
+
+   Takes a map with ::ns-data and ::format. Finds the best page renderer
+   via Datalevin. If found, calls it and extracts the format key from the
+   result. If not found, uses default-namespace-render.
+
+   Arguments:
+     request - Map with keys:
+       ::ns-data - Map of namespace data (vars, ctx, etc.)
+       ::format  - :html, :ai, or :raw (default :html)
+
+   Returns:
+     Rendered output for the requested format."
+  [{:keys [::ns-data ::format] :or {format :html}}]
+  (let [conn (get-conn)
+        page-renderer-name (when conn (find-page-renderer conn ns-data))]
+    (if page-renderer-name
+      (let [renderer-fn (requiring-resolve (symbol page-renderer-name))
+            result (renderer-fn ns-data)
+            format-key (case format
+                         :html ::html
+                         :ai ::ai
+                         :raw nil)]
+        (if format-key
+          (get result format-key)
+          ns-data))
+      (default-namespace-render ns-data format))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; REPL / Development

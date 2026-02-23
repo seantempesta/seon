@@ -1,13 +1,16 @@
 (ns seon.health.workout-test
-  "Tests for seon.health.workout namespace.
-   Verifies workout-set-render produces correct output and
-   scanner picks up specs correctly."
+  "Tests for seon.health.workout and seon.health.workout.render.
+   Verifies render functions, scanner detection of *ctx* specs,
+   and page renderer identification."
   (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [datalevin.core :as d]
             [seon.graph.ingest :as ingest]
+            [seon.graph.extract :as extract]
             [seon.graph.scanner :as scanner]
             [seon.health.workout :as workout]
+            [seon.health.workout.render :as workout-render]
             [seon.render :as render]))
 
 ;;; ---------------------------------------------------------------------------
@@ -23,6 +26,7 @@
       (binding [*conn* conn]
         (f))
       (finally
+        (render/set-conn! nil)
         (d/close conn)
         (let [d (io/file dir)]
           (doseq [file (reverse (file-seq d))]
@@ -31,7 +35,7 @@
 (use-fixtures :each with-temp-datalevin)
 
 ;;; ---------------------------------------------------------------------------
-;;; Tests
+;;; workout-set-render Tests
 ;;; ---------------------------------------------------------------------------
 
 (deftest workout-set-render-test
@@ -60,72 +64,119 @@
                     ::workout/reps 5
                     ::workout/weight 150}
           html (:seon.render/html (workout/workout-set-render deadlift))]
-      ;; Check it's a table row with expected structure
       (is (= :tr (first html)))
       (is (= 4 (count (filter #(and (vector? %) (= :td (first %))) html)))))))
+
+;;; ---------------------------------------------------------------------------
+;;; Companion Render Tests
+;;; ---------------------------------------------------------------------------
+
+(deftest companion-workout-set-test
+  (testing "workout.render/workout-set matches parent output"
+    (let [data {::workout/exercise "Squat"
+                ::workout/sets 5
+                ::workout/reps 5
+                ::workout/weight 100}
+          result (workout-render/workout-set data)]
+      (is (= "Squat — 5x5 @ 100kg" (:seon.render/ai result)))
+      (is (= :tr (first (:seon.render/html result)))))))
+
+(deftest page-render-test
+  (testing "page-render produces HTML and AI from ctx data"
+    (let [ctx-val {::workout/workouts workout/workouts}
+          result (workout-render/page-render {::workout/*ctx* ctx-val})]
+      (is (string? (:seon.render/ai result)))
+      (is (str/includes? (:seon.render/ai result) "5 exercises"))
+      (is (str/includes? (:seon.render/ai result) "Squat"))
+      (is (vector? (:seon.render/html result)))
+      (is (= :main#morph (first (:seon.render/html result)))))))
+
+(deftest page-render-empty-test
+  (testing "page-render handles empty workouts"
+    (let [ctx-val {::workout/workouts []}
+          result (workout-render/page-render {::workout/*ctx* ctx-val})]
+      (is (str/includes? (:seon.render/ai result) "0 exercises")))))
+
+;;; ---------------------------------------------------------------------------
+;;; Scanner Tests
+;;; ---------------------------------------------------------------------------
 
 (deftest scanner-picks-up-specs-test
   (testing "scan-file finds request and response specs with correct contains-keys"
     (let [specs (scanner/scan-file
                  {::scanner/file-path "src/seon/health/workout.clj"})
           by-key (into {} (map (juxt :seon.spec/key identity)) specs)]
-      ;; Should find multiple specs (exercise, sets, reps, weight, workout-set, etc.)
       (is (>= (count specs) 2) "Should find render specs")
 
-      ;; Check request spec
       (let [req (get by-key ::workout/workout-set-render-request)]
         (is req "Request spec should exist")
         (is (= :map (:seon.spec/base-type req)))
-        (is (= (set [::workout/exercise
-                     ::workout/sets
-                     ::workout/reps
-                     ::workout/weight])
+        (is (= (set [::workout/exercise ::workout/sets
+                     ::workout/reps ::workout/weight])
                (set (:seon.spec/contains-keys req)))))
 
-      ;; Check response spec
       (let [resp (get by-key ::workout/workout-set-render-response)]
         (is resp "Response spec should exist")
         (is (= (set [:seon.render/html :seon.render/ai])
                (set (:seon.spec/contains-keys resp))))))))
 
-(deftest link-fns-to-specs-test
-  (testing "link-fns-to-specs detects render function and populates render-input-keys"
+(deftest scanner-detects-ctx-spec-test
+  (testing "scan-file marks namespace as dynamic when ::*ctx* spec exists"
     (let [specs (scanner/scan-file
                  {::scanner/file-path "src/seon/health/workout.clj"})
-          fns [{:seon.fn/qualified-name "seon.health.workout/workout-set-render"
-                :seon.fn/namespace "seon.health.workout"
-                :seon.fn/name "workout-set-render"
-                :seon.fn/private false}]
-          linked (scanner/link-fns-to-specs fns specs)
-          fn-entity (first linked)]
+          ns-entity (some #(when (:seon.ns/dynamic? %) %) specs)]
+      (is ns-entity "Should produce a namespace entity with :seon.ns/dynamic?")
+      (is (= "seon.health.workout" (:seon.ns/name ns-entity)))
+      (is (true? (:seon.ns/dynamic? ns-entity))))))
+
+(deftest extract-detects-page-renderer-test
+  (testing "extract-graph marks page-render as page renderer with needs-ctx"
+    (let [graph (extract/extract-graph-from-file
+                 {::extract/file-path "src/seon/health/workout/render.clj"})
+          fn-entity (first (filter #(= "seon.health.workout.render/page-render"
+                                       (:seon.fn/qualified-name %))
+                                   (::extract/functions graph)))]
+      (is (some? fn-entity) "Should find page-render function")
+      (is (true? (:seon.fn/page-renderer? fn-entity))
+          "page-render should be detected as page renderer")
+      (is (true? (:seon.fn/needs-ctx? fn-entity))
+          "page-render should need ctx")
+      (is (nil? (:seon.fn/needs-conn? fn-entity))
+          "page-render should not need conn")
+      (is (= [::workout/*ctx*]
+             (:seon.fn/render-input-keys fn-entity))))))
+
+(deftest extract-links-workout-render-fn-test
+  (testing "extract-graph links workout-set-render to its specs"
+    (let [graph (extract/extract-graph-from-file
+                 {::extract/file-path "src/seon/health/workout.clj"})
+          fn-entity (first (filter #(= "seon.health.workout/workout-set-render"
+                                       (:seon.fn/qualified-name %))
+                                   (::extract/functions graph)))]
+      (is (some? fn-entity) "Should find workout-set-render")
       (is (= [:seon.spec/key ::workout/workout-set-render-request]
              (:seon.fn/input-spec fn-entity)))
       (is (= [:seon.spec/key ::workout/workout-set-render-response]
              (:seon.fn/output-spec fn-entity)))
-      (is (= (set [::workout/exercise
-                   ::workout/sets
-                   ::workout/reps
-                   ::workout/weight])
-             (set (:seon.fn/render-input-keys fn-entity)))))))
+      (is (= (set [::workout/exercise ::workout/sets
+                   ::workout/reps ::workout/weight])
+             (set (:seon.fn/render-input-keys fn-entity))))
+      (is (nil? (:seon.fn/page-renderer? fn-entity))
+          "Item renderer should NOT be a page renderer"))))
+
+;;; ---------------------------------------------------------------------------
+;;; Integration Tests
+;;; ---------------------------------------------------------------------------
 
 (deftest find-renderer-integration-test
   (testing "find-renderer discovers workout-set-render after ingestion"
-    ;; Ingest specs
-    (let [specs (scanner/scan-file
-                 {::scanner/file-path "src/seon/health/workout.clj"})]
-      (d/transact! *conn* (vec specs)))
+    (let [graph (extract/extract-graph-from-file
+                 {::extract/file-path "src/seon/health/workout.clj"})]
+      ;; Transact specs first (functions reference them via lookup refs)
+      (d/transact! *conn* (vec (::extract/specs graph)))
+      ;; Transact linked functions
+      (d/transact! *conn* (vec (::extract/functions graph))))
 
-    ;; Ingest linked fn entity
-    (let [specs (scanner/scan-file
-                 {::scanner/file-path "src/seon/health/workout.clj"})
-          fns [{:seon.fn/qualified-name "seon.health.workout/workout-set-render"
-                :seon.fn/namespace "seon.health.workout"
-                :seon.fn/name "workout-set-render"
-                :seon.fn/private false}]
-          linked (scanner/link-fns-to-specs fns specs)]
-      (d/transact! *conn* (vec linked)))
-
-    ;; find-renderer should discover it
     (let [workout-data {::workout/exercise "Squat"
                         ::workout/sets 3
                         ::workout/reps 8
@@ -137,12 +188,10 @@
 
 (deftest try-render-test
   (testing "try-render returns nil when no renderer is registered"
-    ;; With empty conn, no renderers exist
     (let [data {::workout/exercise "Squat"
                 ::workout/sets 5
                 ::workout/reps 5
                 ::workout/weight 100}]
-      ;; Set conn temporarily
       (render/set-conn! *conn*)
       (is (nil? (render/try-render data :ai)))
       (render/set-conn! nil))))
@@ -156,6 +205,13 @@
                 ::workout/weight 100}]
       (is (not (render/has-renderer? data :ai))))
     (render/set-conn! nil)))
+
+(deftest initial-state-test
+  (testing "initial-state returns map with ::workouts"
+    (let [state (workout/initial-state)]
+      (is (map? state))
+      (is (= workout/workouts (::workout/workouts state)))
+      (is (= 5 (count (::workout/workouts state)))))))
 
 (comment
   (require '[kaocha.repl :as k])

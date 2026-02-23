@@ -22,6 +22,7 @@
    [seon.config :as config]
    [seon.db :as db]
    [seon.env :refer [defaults]]
+   [seon.ns.lifecycle :as lifecycle]
 
    ;; Load all system component namespaces
    [seon.system])
@@ -99,6 +100,12 @@
                             (log/info "Shutdown signal received")
                             (log/info "Flushing writer flows...")
                             (db/shutdown-writers!)
+                            (when-let [conn (some-> state/system :seon/runtime-db :conn)]
+                              (log/info "Backing up ctx instances...")
+                              (try
+                                (lifecycle/backup-all-instances! {::lifecycle/conn conn})
+                                (catch Throwable t
+                                  (log/warn "Failed to backup ctx instances" {:error (.getMessage t)}))))
                             (stop-app)
                             (shutdown-agents))))
 

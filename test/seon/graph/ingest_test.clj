@@ -145,6 +145,91 @@
           (is (= #{["updatable"] ["new-fn"]} (set fns))
               "Should have both updatable and new-fn"))))))
 
+(deftest ingest-namespace-retract-stale-test
+  (testing "removed function gets retracted on re-ingest"
+    (let [now (java.util.Date.)]
+      ;; First ingest: two functions
+      (ingest/ingest-namespace!
+       {::ingest/conn *test-conn*
+        ::ingest/ns-name "my.stale-test"
+        ::ingest/functions [{:seon.fn/qualified-name "my.stale-test/foo"
+                             :seon.fn/namespace "my.stale-test"
+                             :seon.fn/name "foo"
+                             :seon.fn/private false
+                             :seon.fn/updated-at now}
+                            {:seon.fn/qualified-name "my.stale-test/bar"
+                             :seon.fn/namespace "my.stale-test"
+                             :seon.fn/name "bar"
+                             :seon.fn/private false
+                             :seon.fn/updated-at now}]})
+      (is (= 2 (count (d/q '[:find ?e
+                               :where [?e :seon.fn/namespace "my.stale-test"]]
+                             @*test-conn*))))
+
+      ;; Second ingest: only foo remains
+      (ingest/ingest-namespace!
+       {::ingest/conn *test-conn*
+        ::ingest/ns-name "my.stale-test"
+        ::ingest/functions [{:seon.fn/qualified-name "my.stale-test/foo"
+                             :seon.fn/namespace "my.stale-test"
+                             :seon.fn/name "foo"
+                             :seon.fn/private false
+                             :seon.fn/updated-at now}]})
+      (let [fns (d/q '[:find ?name
+                         :where
+                         [?e :seon.fn/namespace "my.stale-test"]
+                         [?e :seon.fn/name ?name]]
+                       @*test-conn*)]
+        (is (= #{["foo"]} (set fns))
+            "bar should be retracted since it was not in the new scan")))))
+
+(deftest ingest-namespace-vars-test
+  (testing "var entities are ingested and queryable"
+    (let [now (java.util.Date.)]
+      (ingest/ingest-namespace!
+       {::ingest/conn *test-conn*
+        ::ingest/ns-name "my.var-test"
+        ::ingest/vars [{:seon.var/qualified-name "my.var-test/config"
+                        :seon.var/namespace "my.var-test"
+                        :seon.var/name "config"
+                        :seon.var/private false
+                        :seon.var/value-type :map
+                        :seon.var/updated-at now}
+                       {:seon.var/qualified-name "my.var-test/items"
+                        :seon.var/namespace "my.var-test"
+                        :seon.var/name "items"
+                        :seon.var/private false
+                        :seon.var/value-type :vector
+                        :seon.var/doc "Sample items"
+                        :seon.var/updated-at now}]})
+      (let [vars (d/q '[:find ?name ?vt
+                          :where
+                          [?e :seon.var/namespace "my.var-test"]
+                          [?e :seon.var/name ?name]
+                          [?e :seon.var/value-type ?vt]]
+                        @*test-conn*)]
+        (is (= #{["config" :map] ["items" :vector]} (set vars))))))
+
+  (testing "stale vars get retracted"
+    (let [now (java.util.Date.)]
+      ;; Re-ingest with only config
+      (ingest/ingest-namespace!
+       {::ingest/conn *test-conn*
+        ::ingest/ns-name "my.var-test"
+        ::ingest/vars [{:seon.var/qualified-name "my.var-test/config"
+                        :seon.var/namespace "my.var-test"
+                        :seon.var/name "config"
+                        :seon.var/private false
+                        :seon.var/value-type :map
+                        :seon.var/updated-at now}]})
+      (let [vars (d/q '[:find ?name
+                          :where
+                          [?e :seon.var/namespace "my.var-test"]
+                          [?e :seon.var/name ?name]]
+                        @*test-conn*)]
+        (is (= #{["config"]} (set vars))
+            "items var should be retracted")))))
+
 (comment
   (require '[kaocha.repl :as k])
   (k/run 'seon.graph.ingest-test)

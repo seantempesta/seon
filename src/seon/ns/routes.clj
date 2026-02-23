@@ -15,10 +15,13 @@
    the pattern of other web handlers in seon.web.*"
   (:require [clojure.string :as str]
             [dev.onionpancakes.chassis.core :as h]
+            [integrant.repl.state :as state]
             [org.httpkit.server :as hk]
             [seon.ctx :as ctx]
             [seon.ns.introspect :as introspect]
+            [seon.ns.lifecycle :as lifecycle]
             [seon.ns.view :as view]
+            [seon.render :as render]
             [seon.web.html :as html]
             [seon.web.sse :as sse]
             [seon.web.components :as ui]
@@ -46,6 +49,26 @@
       :else (str diff-days (if (= diff-days 1) " day ago" " days ago")))))
 
 ;;; ---------------------------------------------------------------------------
+;;; Graph Connection Helper
+;;; ---------------------------------------------------------------------------
+
+(defn- get-conn
+  "Get Datalevin graph connection from running Integrant system."
+  []
+  (some-> state/system :seon/runtime-db :conn))
+
+;;; ---------------------------------------------------------------------------
+;;; Lifecycle Wrappers
+;;; ---------------------------------------------------------------------------
+
+(defn- dynamic-namespace?
+  "Check if namespace is dynamic via lifecycle module."
+  [ns-sym]
+  (when-let [conn (get-conn)]
+    (::lifecycle/dynamic? (lifecycle/dynamic-namespace? {::lifecycle/conn conn
+                                                         ::lifecycle/ns-sym ns-sym}))))
+
+;;; ---------------------------------------------------------------------------
 ;;; Instance Helpers
 ;;; ---------------------------------------------------------------------------
 
@@ -53,6 +76,34 @@
   "Get all instances for a specific namespace, sorted newest first."
   [ns-sym]
   (ctx/instances-for-namespace ns-sym))
+
+;;; ---------------------------------------------------------------------------
+;;; Content Negotiation
+;;; ---------------------------------------------------------------------------
+
+(defn- negotiate-format
+  "Determine output format from request.
+   Priority: ?format= query param > Accept header > default :html."
+  [params request]
+  (if-let [fmt (get params "format")]
+    (case fmt
+      "html" :html
+      "ai" :ai
+      "raw" :raw
+      :html)
+    (let [accept (get-in request [:headers "accept"] "")]
+      (cond
+        (str/includes? accept "text/plain") :ai
+        (str/includes? accept "application/edn") :raw
+        :else :html))))
+
+(defn- build-ns-data
+  "Build namespace data map for render-namespace.
+   Uses introspect to gather namespace info and puts it under ::render/ns-vars."
+  [ns-sym]
+  (let [introspection (introspect/introspect ns-sym)]
+    (cond-> {}
+      introspection (assoc ::render/ns-vars introspection))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Namespace View Rendering
@@ -182,38 +233,6 @@
            (let [arglists (:arglists (meta render-var))]
              (some #(= 1 (count %)) arglists))))))
 
-(defn- namespace-has-reactive-render?
-  "Check if namespace has a reactive render-content function.
-   A reactive namespace has:
-   - A public render-content function that takes 1 arg (ctx value map)
-   This is distinct from render which takes {:format :id} options map."
-  [ns-sym]
-  (when-let [ns-obj (find-ns ns-sym)]
-    (when-let [render-var (ns-resolve ns-obj 'render-content)]
-      (and (var? render-var)
-           (fn? @render-var)
-           (let [arglists (:arglists (meta render-var))]
-             (some #(= 1 (count %)) arglists))))))
-
-(defn- get-initial-state
-  "Get initial state for a reactive namespace.
-   Calls the namespace's initial-state function if it exists,
-   otherwise returns an empty map."
-  [ns-sym]
-  (if-let [ns-obj (find-ns ns-sym)]
-    (if-let [init-var (ns-resolve ns-obj 'initial-state)]
-      (when (and (var? init-var) (fn? @init-var))
-        (@init-var))
-      {})
-    {}))
-
-(defn- get-render-content-fn
-  "Get the render-content function from a namespace."
-  [ns-sym]
-  (when-let [ns-obj (find-ns ns-sym)]
-    (when-let [render-var (ns-resolve ns-obj 'render-content)]
-      @render-var)))
-
 (defn- call-namespace-render
   "Call the namespace's render function with format and id."
   [ns-sym format id]
@@ -245,7 +264,7 @@
   [ns-sym session-id show-toggle?]
   (if-let [data (introspect/introspect ns-sym)]
     (let [{:keys [ns-name doc functions vars atoms multimethods requires]} data
-          is-reactive? (namespace-has-reactive-render? ns-sym)]
+          is-dynamic? (dynamic-namespace? ns-sym)]
       (h/html
        [:main#morph
         ;; Header with optional toggle
@@ -260,8 +279,8 @@
          (when doc
            [:p {:class "text-text-400 text-sm mt-2 whitespace-pre-wrap max-w-3xl"} doc])]
 
-        ;; Instances section (only for reactive namespaces)
-        (when is-reactive?
+        ;; Instances section (only for dynamic namespaces)
+        (when is-dynamic?
           (render-instances-section ns-sym))
 
         ;; Functions section
@@ -353,10 +372,25 @@
                  #"(<main[^>]*>)"
                  (str "$1" toggle-html))))
 
+(defn- render-for-format
+  "Render namespace content for non-HTML formats (:ai, :raw).
+   Uses the render pipeline: page renderer > default renderer."
+  [ns-sym fmt]
+  (let [ns-data (build-ns-data ns-sym)
+        result (render/render-namespace {::render/ns-data ns-data
+                                         ::render/format fmt})]
+    (case fmt
+      :ai {:status 200
+           :headers {"Content-Type" "text/plain; charset=utf-8"}
+           :body (str result)}
+      :raw {:status 200
+            :headers {"Content-Type" "application/edn; charset=utf-8"}
+            :body (pr-str result)})))
+
 (defn- render-namespace-content
-  "Render full namespace view content.
-   If namespace has a `render` function, calls it with {:format :html :id id}.
-   Otherwise falls back to introspection view.
+  "Render full namespace view content for HTML format (SSE polling).
+   Tries legacy render fn first (backward compat), then introspection view.
+   Non-HTML formats are handled separately by render-for-format.
 
    Params:
    - ns-sym: The namespace symbol
@@ -370,11 +404,11 @@
       force-introspect?
       (render-introspection-view ns-sym session-id has-render?)
 
-      ;; Use custom render if available
+      ;; Legacy: namespace has a render function
       has-render?
       (render-custom-view ns-sym session-id)
 
-      ;; Default to introspection (no toggle since no custom render exists)
+      ;; Default: introspection view
       :else
       (render-introspection-view ns-sym session-id false))))
 
@@ -384,11 +418,12 @@
 
 (defn- reactive-instance-page
   "Render full HTML page for a reactive instance.
-   Similar to demo.clj's full-page but using the instance's render-content."
+   Uses the render-fn from the ctx registry (set by lifecycle/ensure-instance!)."
   [ns-sym instance-id]
   (let [ctx-atom (ctx/get-atom {::ctx/instance-id instance-id})]
     (if ctx-atom
-      (let [render-fn (get-render-content-fn ns-sym)
+      (let [entry (ctx/get-entry {::ctx/instance-id instance-id})
+            render-fn (:render-fn entry)
             ctx-val @ctx-atom
             content-hiccup (when render-fn (render-fn ctx-val))
             transformed (when content-hiccup
@@ -490,56 +525,78 @@
                     (when v (java.net.URLDecoder/decode v "UTF-8"))])))))
 
 ;;; ---------------------------------------------------------------------------
+;;; Auto-Injection Helpers
+;;; ---------------------------------------------------------------------------
+
+(defn- inject-ctx-conn
+  "Auto-inject *ctx* and *conn* values into a signal map for a function call.
+   Resolves the namespace's injected dynamic vars and adds their values
+   under the appropriate keys (ending in *ctx* and *conn*)."
+  [ns-sym signals]
+  (let [ctx-var (find-var (symbol (str ns-sym) "*ctx*"))
+        conn-var (find-var (symbol (str ns-sym) "*conn*"))
+        ctx-key (keyword (str ns-sym) "*ctx*")
+        conn-key (keyword (str ns-sym) "*conn*")]
+    (cond-> signals
+      (and ctx-var (bound? ctx-var))
+      (assoc ctx-key @@ctx-var)
+      (and conn-var (bound? conn-var))
+      (assoc conn-key @conn-var))))
+
+;;; ---------------------------------------------------------------------------
 ;;; HTTP Handlers
 ;;; ---------------------------------------------------------------------------
 
 (defn namespace-page
   "Serve the namespace view HTML page.
 
-   For reactive namespaces (those with render-content fn):
-   - Without ?instance param: Create new instance and redirect
+   For dynamic namespaces (detected via lifecycle/dynamic-namespace?):
+   - Without ?instance param: Use lifecycle/ensure-instance! and redirect
    - With ?instance param: Serve reactive page for that instance
 
-   For non-reactive namespaces:
+   For non-dynamic namespaces:
    - Serve introspection view as before"
   [request]
   (let [ns-str (get-in request [:path-params :namespace])
         ns-sym (symbol ns-str)
         params (parse-query-params request)
-        instance-id (get params "instance")
-        view (get params "view")
-        is-reactive? (namespace-has-reactive-render? ns-sym)]
-    (cond
-      ;; Reactive namespace without instance -> create and redirect
-      (and is-reactive? (nil? instance-id) (not= view "introspect"))
-      (let [initial-val (get-initial-state ns-sym)
-            new-id (ctx/generate-id)
-            render-fn (get-render-content-fn ns-sym)]
-        (ctx/create! {::ctx/instance-id new-id
-                      ::ctx/namespace ns-sym
-                      ::ctx/initial-value initial-val
-                      ::ctx/persist? false
-                      ::ctx/sse-push? false
-                      ::ctx/track-clients? true
-                      ::ctx/render-fn render-fn})
-        (log/info "Created reactive instance, redirecting" {:ns ns-sym :instance new-id})
-        {:status 302
-         :headers {"Location" (str "/ns/" ns-sym "?instance=" new-id)}})
+        fmt (negotiate-format params request)]
+    ;; Fast path: non-HTML formats return immediately, no reactive/SSE machinery
+    (if (#{:ai :raw} fmt)
+      (render-for-format ns-sym fmt)
+      (let [instance-id (get params "instance")
+            view (get params "view")
+            conn (get-conn)
+            is-dynamic? (dynamic-namespace? ns-sym)]
+        (cond
+          ;; Dynamic namespace without instance -> ensure-instance! and redirect
+          (and is-dynamic? (nil? instance-id) (not= view "introspect"))
+          (let [{::lifecycle/keys [instance-id]}
+                (lifecycle/ensure-instance! (cond-> {::lifecycle/ns-sym ns-sym}
+                                              conn (assoc ::lifecycle/conn conn)))]
+            (log/info "Ensured dynamic instance, redirecting" {:ns ns-sym :instance instance-id})
+            {:status 302
+             :headers {"Location" (str "/ns/" ns-sym "?instance=" instance-id)}})
 
-      ;; Reactive with instance -> serve instance page
-      (and is-reactive? instance-id (not= view "introspect"))
-      {:status 200
-       :headers {"Content-Type" "text/html; charset=utf-8"}
-       :body (reactive-instance-page ns-sym instance-id)}
+          ;; Dynamic with instance -> serve instance page
+          (and is-dynamic? instance-id (not= view "introspect"))
+          (do
+            ;; Ensure instance exists (resume from Datalevin or create fresh)
+            (lifecycle/ensure-instance! (cond-> {::lifecycle/ns-sym ns-sym
+                                                  ::lifecycle/instance-id instance-id}
+                                          conn (assoc ::lifecycle/conn conn)))
+            {:status 200
+             :headers {"Content-Type" "text/html; charset=utf-8"}
+             :body (reactive-instance-page ns-sym instance-id)})
 
-      ;; Not reactive or explicit introspect view -> existing behavior
-      :else
-      {:status 200
-       :headers {"Content-Type" "text/html; charset=utf-8"}
-       :body (html/base-page
-              {:title (str ns-str " - Seon")
-               :active-page nil
-               :skeleton (namespace-skeleton ns-sym)})})))
+          ;; HTML: existing behavior (SSE page with skeleton)
+          :else
+          {:status 200
+           :headers {"Content-Type" "text/html; charset=utf-8"}
+           :body (html/base-page
+                  {:title (str ns-str " - Seon")
+                   :active-page nil
+                   :skeleton (namespace-skeleton ns-sym)})})))))
 
 ;; Dynamic handler cache - keyed by namespace only
 (defonce ^:private namespace-handlers (atom {}))
@@ -592,21 +649,15 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- handle-create-instance!
-  "Handle POST /ns/:namespace/create-instance! - creates new instance and redirects."
+  "Handle POST /ns/:namespace/create-instance! - uses lifecycle to create instance."
   [ns-sym]
-  (let [initial-val (get-initial-state ns-sym)
-        new-id (ctx/generate-id)
-        render-fn (get-render-content-fn ns-sym)]
-    (ctx/create! {::ctx/instance-id new-id
-                  ::ctx/namespace ns-sym
-                  ::ctx/initial-value initial-val
-                  ::ctx/persist? false
-                  ::ctx/sse-push? false
-                  ::ctx/track-clients? true
-                  ::ctx/render-fn render-fn})
-    (log/info "Created instance via action" {:ns ns-sym :instance new-id})
+  (let [conn (get-conn)
+        {::lifecycle/keys [instance-id]}
+        (lifecycle/ensure-instance! (cond-> {::lifecycle/ns-sym ns-sym}
+                                      conn (assoc ::lifecycle/conn conn)))]
+    (log/info "Created instance via action" {:ns ns-sym :instance instance-id})
     {:status 302
-     :headers {"Location" (str "/ns/" ns-sym "?instance=" new-id)}}))
+     :headers {"Location" (str "/ns/" ns-sym "?instance=" instance-id)}}))
 
 (defn- handle-destroy-instance!
   "Handle POST /ns/:namespace/destroy-instance!?id=xxxx - destroys instance and redirects."
@@ -627,8 +678,11 @@
    This is the new URL pattern for reactive UI actions.
    Reuses signal extraction and function resolution from actions.clj.
 
+   Auto-injects *ctx* and *conn* values from the namespace's injected vars
+   into the signal map, so functions receive ctx/conn without explicit wiring.
+
    For instance-based calls (?instance=xxxx):
-   - Adds :seon.reactive/ctx atom to signals for action to use
+   - Also adds :seon.reactive/ctx atom to signals for action to use
 
    Function names are URL-decoded to handle %21 -> ! etc."
   [request]
@@ -656,13 +710,15 @@
       (if-let [action-fn (actions/resolve-action ns-sym fn-sym)]
         (try
         (let [base-signals (actions/extract-signals body)
-              ;; Add instance ctx if present
+              ;; Auto-inject *ctx* and *conn* from namespace vars
+              injected (inject-ctx-conn ns-sym base-signals)
+              ;; Add instance ctx atom if present
               signals (if instance-id
                         (let [ctx-atom (ctx/get-atom {::ctx/instance-id instance-id})]
                           (if ctx-atom
-                            (assoc base-signals :seon.reactive/ctx ctx-atom)
-                            base-signals))
-                        base-signals)]
+                            (assoc injected :seon.reactive/ctx ctx-atom)
+                            injected))
+                        injected)]
           (log/info "Executing function" {:ns ns-sym :fn fn-sym :signals (dissoc signals :seon.reactive/ctx)})
           (action-fn signals)
           {:status 200
