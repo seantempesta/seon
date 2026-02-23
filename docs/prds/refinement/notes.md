@@ -17,8 +17,17 @@ A function becomes a page renderer iff:
 
 This is detected by `link-fns-to-specs` in `seon.graph.extract`, stored in Datalevin, and queried by `lifecycle/find-page-render-fn`. No other path exists.
 
-### Gotcha
-`ctx/set-render-fn!` exists but is only used in tests. The only production path that sets render-fn on a ctx is `lifecycle/ensure-instance!` which calls `lifecycle/find-page-render-fn` (graph-driven).
+### Gotcha: render-fn lookup crosses namespace boundaries
+`find-page-render-fn` originally queried by `:seon.fn/namespace` matching the target namespace. But the page renderer for `seon.health.workout` lives in `seon.health.workout.render` (a child namespace). The fix: query by `:seon.fn/render-input-keys` matching the namespace's `*ctx*` key instead. The ctx key's namespace IS the parent namespace regardless of where the render function is defined.
+
+### Gotcha: workout-set returns render map, not hiccup
+`page-render` calls `(map workout-set ws)` inside hiccup. `workout-set` returns `{:seon.render/html [...] :seon.render/ai "..."}`. Must extract `:seon.render/html` via `(map (comp :seon.render/html workout-set) ws)`.
+
+### Gotcha: reactive page ID mismatch
+The reactive instance page originally used `[:main#reactive-content {:data-init ...}]` as the SSE target, but the render function produces `[:main#morph ...]`. Datastar's `patch-elements` matches by element ID, so the IDs must match. Fix: put `data-init` on a separate `<div>` and let the rendered `<main#morph>` be directly in the page.
+
+### Gotcha: ctx registry caches render-fn
+`ctx/set-render-fn!` exists but is only used in tests. The only production path that sets render-fn on a ctx is `lifecycle/ensure-instance!` which calls `lifecycle/find-page-render-fn` (graph-driven). After code changes to the render function, instances must be destroyed and recreated to pick up the new function reference.
 
 ---
 

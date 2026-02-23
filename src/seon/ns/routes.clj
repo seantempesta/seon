@@ -441,10 +441,10 @@
                 "Introspect ->"]]
               [:p.text-text-secondary.text-sm.mt-1
                "Instance: " [:code.text-signal instance-id]]]
-             ;; Main content - SSE connects via data-init
-             [:main#reactive-content
-              {:data-init (str "@post('/ns/" ns-sym "?instance=" instance-id "')")}
-              (or transformed [:div.text-text-muted "Loading..."])]
+             ;; SSE init div - triggers POST connection on load
+             [:div {:data-init (str "@post('/ns/" ns-sym "?instance=" instance-id "')")}]
+             ;; Main content - render-fn produces [:main#morph ...] which SSE patches
+             (or transformed [:main#morph [:div.text-text-muted "Loading..."]])
              [:footer.mt-8.pt-4.border-t.border-surface-2.text-text-muted.text-sm
               [:a.text-accent-primary.hover:underline {:href "/"} "<- Back to dashboard"]]]]])))
       ;; Instance not found

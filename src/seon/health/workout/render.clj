@@ -78,7 +78,7 @@
            [:th {:class "text-center py-1.5 px-3 text-xs font-medium text-text-400 uppercase tracking-wider w-20"} "Reps"]
            [:th {:class "text-right py-1.5 px-3 text-xs font-medium text-text-400 uppercase tracking-wider w-24"} "Weight"]]]
          [:tbody
-          (map workout-set ws)]]]]]
+          (map (comp :seon.render/html workout-set) ws)]]]]]
      :seon.render/ai
      (str "Workout: " (count ws) " exercises. "
           (str/join ", " (map #(:seon.render/ai (workout-set %)) ws)))}))

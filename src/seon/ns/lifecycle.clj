@@ -218,7 +218,9 @@
 
 (defn find-page-render-fn
   "Find the page renderer function for a namespace via Datalevin metadata.
-   Queries for :seon.fn/page-renderer? true, then requiring-resolves it.
+   Queries for :seon.fn/page-renderer? true whose :seon.fn/render-input-keys
+   matches the namespace's *ctx* key. This handles renderers in child namespaces
+   (e.g. seon.health.workout.render/page-render for seon.health.workout).
 
    Request keys:
      ::conn   - Required. Datalevin connection
@@ -228,14 +230,14 @@
      ::render-fn - The resolved var, or nil"
   {:malli/schema [:=> [:cat ::find-page-render-fn-request] ::find-page-render-fn-response]}
   [{::keys [conn ns-sym]}]
-  (let [ns-str (str ns-sym)
+  (let [ctx-key (keyword (str ns-sym) "*ctx*")
         results (d/q '[:find ?qname
-                       :in $ ?ns
+                       :in $ ?ctx-key
                        :where
-                       [?e :seon.fn/namespace ?ns]
                        [?e :seon.fn/page-renderer? true]
+                       [?e :seon.fn/render-input-keys ?ctx-key]
                        [?e :seon.fn/qualified-name ?qname]]
-                     @conn ns-str)]
+                     @conn ctx-key)]
     {::render-fn
      (when-let [qname (ffirst results)]
        (let [sym (symbol qname)]
