@@ -1,5 +1,6 @@
 (ns seon.graph.scanner-test
-  "Tests for seon.graph.scanner - static spec/schema extraction."
+  "Tests for seon.graph.scanner - static spec/schema and var extraction.
+   Function extraction and fn-to-spec linking are tested in extract_test.clj."
   (:require [clojure.test :refer [deftest is testing]]
             [seon.graph.scanner :as scanner]))
 
@@ -52,7 +53,8 @@
           "graph directory has files with schema registrations")
 
       ;; Should have specs from multiple namespaces
-      (let [namespaces (set (map :seon.spec/namespace specs))]
+      (let [namespaces (set (map :seon.spec/namespace
+                                 (filter :seon.spec/namespace specs)))]
         (is (contains? namespaces "seon.graph.analyzer")
             "Should include analyzer specs")
         (is (contains? namespaces "seon.graph.ingest")
@@ -85,69 +87,77 @@
     (is (nil? (scanner/extract-contains-keys [:int {:min 0}])))
     (is (nil? (scanner/extract-contains-keys :string)))))
 
-(deftest link-fns-to-specs-test
-  (testing "links functions to matching request/response specs"
-    (let [fns [{:seon.fn/qualified-name "seon.health.workout/log-workout"
-                :seon.fn/namespace "seon.health.workout"
-                :seon.fn/name "log-workout"}]
-          specs [{:seon.spec/key :seon.health.workout/log-workout-request
-                  :seon.spec/namespace "seon.health.workout"
-                  :seon.spec/base-type :map
-                  :seon.spec/contains-keys [:seon.health.workout/exercise
-                                            :seon.health.workout/sets]
-                  :seon.spec/definition "[:map ...]"
-                  :seon.spec/updated-at (java.util.Date.)}
-                 {:seon.spec/key :seon.health.workout/log-workout-response
-                  :seon.spec/namespace "seon.health.workout"
-                  :seon.spec/base-type :map
-                  :seon.spec/contains-keys [:seon.health.workout/id]
-                  :seon.spec/definition "[:map ...]"
-                  :seon.spec/updated-at (java.util.Date.)}]
-          result (scanner/link-fns-to-specs fns specs)
-          fn-entity (first result)]
-      (is (= [:seon.spec/key :seon.health.workout/log-workout-request]
-             (:seon.fn/input-spec fn-entity)))
-      (is (= [:seon.spec/key :seon.health.workout/log-workout-response]
-             (:seon.fn/output-spec fn-entity)))
-      (is (inst? (:seon.fn/updated-at fn-entity)))
-      (is (nil? (:seon.fn/render-input-keys fn-entity))
-          "Non-render function should not have render-input-keys")))
+(deftest scan-source-no-defn-entities-test
+  (testing "scan-source does NOT produce fn entities (handled by extract.clj)"
+    (let [source "(ns seon.example
+  (:require [seon.schema :as schema]))
 
-  (testing "detects render functions and populates render-input-keys"
-    (let [fns [{:seon.fn/qualified-name "seon.health.workout.render/workout-set"
-                :seon.fn/namespace "seon.health.workout.render"
-                :seon.fn/name "workout-set"}]
-          specs [{:seon.spec/key :seon.health.workout.render/workout-set-request
-                  :seon.spec/namespace "seon.health.workout.render"
-                  :seon.spec/base-type :map
-                  :seon.spec/contains-keys [:seon.health.workout/exercise
-                                            :seon.health.workout/sets
-                                            :seon.health.workout/reps]
-                  :seon.spec/definition "[:map ...]"
-                  :seon.spec/updated-at (java.util.Date.)}
-                 {:seon.spec/key :seon.health.workout.render/workout-set-response
-                  :seon.spec/namespace "seon.health.workout.render"
-                  :seon.spec/base-type :map
-                  :seon.spec/contains-keys [:seon.render/html :seon.render/ai]
-                  :seon.spec/definition "[:map ...]"
-                  :seon.spec/updated-at (java.util.Date.)}]
-          result (scanner/link-fns-to-specs fns specs)
-          fn-entity (first result)]
-      (is (= [:seon.health.workout/exercise
-              :seon.health.workout/sets
-              :seon.health.workout/reps]
-             (:seon.fn/render-input-keys fn-entity))
-          "Render function should have input keys populated")))
+(schema/register! ::foo [:string])
 
-  (testing "handles functions with no matching specs"
-    (let [fns [{:seon.fn/qualified-name "seon.foo/bar"
-                :seon.fn/namespace "seon.foo"
-                :seon.fn/name "bar"}]
-          result (scanner/link-fns-to-specs fns [])]
-      (is (= 1 (count result)))
-      (is (nil? (:seon.fn/input-spec (first result))))
-      (is (nil? (:seon.fn/output-spec (first result))))
-      (is (inst? (:seon.fn/updated-at (first result)))))))
+(defn my-public-fn [x] x)
+
+(defn- my-private-fn [x] x)"
+          results (scanner/scan-source {::scanner/source source})
+          fns (filter :seon.fn/qualified-name results)
+          specs (filter :seon.spec/key results)]
+      (is (= 1 (count specs)) "Should find one spec")
+      (is (= 0 (count fns)) "Should NOT find function entities (handled by clj-kondo)"))))
+
+(deftest scan-source-detects-def-test
+  (testing "scan-source finds def forms and infers value types"
+    (let [source "(ns seon.example
+  (:require [seon.schema :as schema]))
+
+(def my-vec [1 2 3])
+
+(def my-map {:a 1})
+
+(def ^:private my-private \"a docstring\" {:secret true})
+
+(def my-string \"hello\")
+
+(def my-num 42)
+
+(def my-kw :foo)
+
+(def my-bool true)
+
+(def my-expr (+ 1 2))
+
+(defn my-fn [x] x)"
+          results (scanner/scan-source {::scanner/source source})
+          vars (filter :seon.var/qualified-name results)]
+      (is (= 8 (count vars)) "Should find 8 def vars (not the defn)")
+
+      (let [by-name (into {} (map (juxt :seon.var/name identity)) vars)]
+        (is (= :vector (:seon.var/value-type (get by-name "my-vec"))))
+        (is (= :map (:seon.var/value-type (get by-name "my-map"))))
+        (is (= :string (:seon.var/value-type (get by-name "my-string"))))
+        (is (= :number (:seon.var/value-type (get by-name "my-num"))))
+        (is (= :keyword (:seon.var/value-type (get by-name "my-kw"))))
+        (is (= :boolean (:seon.var/value-type (get by-name "my-bool"))))
+        (is (= :expr (:seon.var/value-type (get by-name "my-expr"))))
+
+        ;; Docstring extraction
+        (is (= "a docstring" (:seon.var/doc (get by-name "my-private"))))
+
+        ;; Qualified name
+        (is (= "seon.example/my-vec"
+               (:seon.var/qualified-name (get by-name "my-vec"))))
+        (is (= "seon.example" (:seon.var/namespace (get by-name "my-vec"))))
+
+        ;; All vars should have updated-at
+        (is (every? #(inst? (:seon.var/updated-at %)) vars))))))
+
+(deftest scan-workout-finds-def-vars-test
+  (testing "scanning workout.clj finds def vars like workouts"
+    (let [results (scanner/scan-file {::scanner/file-path "src/seon/health/workout.clj"})
+          vars (filter :seon.var/qualified-name results)
+          workouts-var (first (filter #(= "workouts" (:seon.var/name %)) vars))]
+      (is (some? workouts-var) "Should find workouts def var")
+      (is (= "seon.health.workout/workouts"
+             (:seon.var/qualified-name workouts-var)))
+      (is (= :vector (:seon.var/value-type workouts-var))))))
 
 (comment
   (require '[kaocha.repl :as k])

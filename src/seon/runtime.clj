@@ -60,8 +60,8 @@
 
 (schema/register! ::session-id
                   [:string {:min 4 :max 6
-                            :pattern "^[a-f0-9]{4,6}$"
-                            :description "Hex session ID (4-6 chars)"}])
+                            :pattern "^[A-Za-z0-9]{4,6}$"
+                            :description "Base62 session ID (4-6 chars)"}])
 
 (schema/register! ::nrepl-port
                   [:int {:min 1 :max 65535
@@ -81,10 +81,13 @@
                          :gen/fmap (fn [_] (throw (ex-info "Cannot generate Datalevin connection"
                                                            {:type :malli.generator/no-generator})))}])
 
+(schema/register! ::prefix
+                  [:string {:min 1 :max 10
+                            :description "Optional prefix for generated IDs (e.g. \"ses\", \"msg\")"}])
+
 (schema/register! ::id
-                  [:string {:min 6 :max 6
-                            :pattern "^[a-f0-9]{6}$"
-                            :description "6-character hex ID"}])
+                  [:string {:min 6
+                            :description "Base62 ID, optionally prefixed (e.g. \"a1Bx9z\" or \"ses-a1Bx9z\")"}])
 
 (schema/register! ::crashed-count
                   [:int {:min 0 :description "Number of crashed instances"}])
@@ -103,7 +106,8 @@
                    [::initialized :boolean]])
 
 (schema/register! ::generate-id-request
-                  [:map])
+                  [:map
+                   [::prefix {:optional true} ::prefix]])
 
 (schema/register! ::generate-id-response
                   [:map
@@ -261,33 +265,39 @@
 
 (def ^:private secure-random (SecureRandom.))
 
+(def ^:private base62-chars
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")
+
 ;; In-memory set of generated IDs for collision checking
 (defonce ^:private generated-ids (atom #{}))
 
 (defn generate-id
-  "Generate a 6-character hex instance ID.
+  "Generate a 6-character base62 instance ID, optionally prefixed.
 
    Uses SecureRandom and checks against in-memory set to avoid collisions.
+   Base62 charset: A-Z, a-z, 0-9. 6 chars = ~56 billion possible IDs.
 
    Request keys:
-     (none - empty map for consistency)
+     ::prefix - Optional. String prefix separated by \"-\" (e.g. \"ses\", \"msg\")
 
    Response keys:
-     ::id - The generated 6-character hex ID"
+     ::id - The generated ID (e.g. \"a1Bx9z\" or \"ses-a1Bx9z\")"
   {:malli/schema [:=> [:cat ::generate-id-request] ::generate-id-response]}
-  [_request]
+  [{::keys [prefix]}]
   (loop [attempts 0]
     (when (>= attempts 100)
       (throw (ex-info "Failed to generate unique ID after 100 attempts"
                       {:generated-count (count @generated-ids)})))
-    (let [id-bytes (byte-array 3)
-          _ (.nextBytes secure-random id-bytes)
-          id (apply str (map #(format "%02x" (bit-and % 0xff)) id-bytes))]
-      (if (contains? @generated-ids id)
+    (let [sb (StringBuilder. 6)
+          _ (dotimes [_ 6]
+              (.append sb (.charAt base62-chars (.nextInt secure-random 62))))
+          raw-id (str sb)
+          full-id (if prefix (str prefix "-" raw-id) raw-id)]
+      (if (contains? @generated-ids raw-id)
         (recur (inc attempts))
         (do
-          (swap! generated-ids conj id)
-          {::id id})))))
+          (swap! generated-ids conj raw-id)
+          {::id full-id})))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Connection Management

@@ -377,3 +377,68 @@ Result: **SUCCESS**
 ### Verdict
 
 **The E2E agent pipeline works.** The core flow (launch -> execute -> complete -> cleanup -> view in Observatory) is functional. The gaps are minor: missing cost persistence in runtime, NPE on empty agent-runs, empty SINCE column in UI.
+
+---
+
+## Render Pipeline Step 5: Graph Ingestion Wiring
+
+### What Was Broken
+The render pipeline returned generic output despite all the pieces being in place (scanner, linker, ingest, render resolution). Two bugs:
+
+### Bug 1: Test pollution of `render/*conn-override`
+`render_test.clj` called `render/set-conn!` in tests to inject a temp local Datalevin conn, but the `:each` fixture never reset it to nil. When the dev hook ran tests as part of its PostToolUse pipeline, the override atom was left pointing at a closed/empty local Store. All subsequent `render/get-conn` calls returned the stale test conn instead of the system's remote conn.
+
+**Fix:** Added `(render/set-conn! nil)` to the `finally` block of both `render_test.clj` and `workout_test.clj` test fixtures.
+
+**Gotcha for future agents:** Any test that calls `render/set-conn!` MUST clean it up. The dev hook runs tests in-process, so global atom mutations leak into the running system.
+
+### Bug 2: Spec/function ordering in `ingest-incremental!`
+`ingest-incremental!` transacted specs AFTER functions, but `link-fns-to-specs` adds `:seon.fn/output-spec [:seon.spec/key ...]` lookup refs to function entities. When specs don't exist yet, Datalevin throws "Nothing found for entity id". `ingest-analysis!` already had the correct order (specs before functions).
+
+**Fix:** Moved spec transact before function transact in `ingest-incremental!`.
+
+### Verification
+After fixes: `(seon.render/try-render {:seon.health.workout/exercise "Squat" ...} :ai)` returns `"Squat — 5x5 @ 100kg"`. The `for-ai` recursive renderer also discovers workout renderers when rendering ns-data vars.
+
+---
+
+## Code Graph Architecture Research (2026-02-23)
+
+### Key Finding: clj-kondo Does NOT Need Cache for Cross-NS Resolution
+
+The original architecture doc assumed clj-kondo needed a project-level cache to resolve aliased references like `::workout/*ctx*` or `schema/register!`. **This is wrong.** REPL testing proves:
+
+- `cache false` + `lint ["-"]` + `with-in-str` gives FULL cross-namespace resolution
+- clj-kondo reads the `ns` form internally and resolves all aliases
+- `::workout/*ctx*` resolves to `{:ns seon.health.workout, :name "*ctx*", :auto-resolved true}`
+- `schema/register!` resolves to `{:to seon.schema, :name register!}`
+- Works with arbitrary filenames like `"<agent-forms>"` (file doesn't need to exist)
+
+Cache adds lint findings (arity checks, undefined vars) but does NOT change analysis output.
+
+### clj-kondo `:keywords true` Is the Missing Piece
+
+The existing analyzer config was missing `:keywords true` in the analysis options. With it enabled, clj-kondo returns every keyword usage with full namespace resolution. This gives us:
+
+1. Cross-namespace spec references (which specs reference which other specs)
+2. Schema key resolution (what namespaces a spec's keys belong to)
+3. Function parameter key resolution (destructured keyword args)
+
+This makes the cross-namespace linking question trivially solved.
+
+### Tool Responsibilities (Final)
+
+| Tool | Sole Responsibility |
+|------|-------------------|
+| edamame | Extract literal schema data from `schema/register!` args |
+| clj-kondo | Everything else: fn sigs, call graph, ns deps, keyword resolution |
+| Runtime | Compiled Malli schemas from `(meta #'fn)` -> `:malli/schema` |
+
+edamame's role is narrow but irreplaceable. clj-kondo cannot extract function argument values. If we ever move schema registration to runtime-only (no source-level `register!` calls), edamame becomes unnecessary.
+
+### Gotchas for Implementation
+
+1. **clj-kondo var-definitions include arglist-strs** -- these are string representations, not data. Parse them if you need structured arglists.
+2. **Keywords appear duplicated** -- a keyword used in both a `schema/register!` call and a `defn` destructuring appears twice in the keywords list. Deduplicate by `[row, col]`.
+3. **edamame two-pass parse** is necessary -- first pass gets ns info, second pass resolves auto-ns keywords. The scanner already does this correctly.
+4. **`with-in-str` + `lint ["-"]`** works for both files and in-memory forms. No need for temp files.

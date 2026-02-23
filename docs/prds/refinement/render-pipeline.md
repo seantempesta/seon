@@ -246,9 +246,40 @@ After `link-fns-to-specs`:
 - If we create it: contains `workout-set-render` and `page-render`
 - If not: keep in parent namespace. Both work identically.
 
-### Step 5: Graph freshness
+### Step 5: Graph ingestion — connect scanner to Datalevin (DONE)
 
-- Incremental scan trigger in dev hook
+**Status: Complete. The render pipeline discovers functions via Datalevin.**
+
+The wiring was already in place (startup scanner + dev hook incremental ingestion) but two bugs prevented it from working:
+1. `render_test.clj` set a test connection override via `set-conn!` but never cleaned it up, causing `render.clj`'s `get-conn` to return a stale empty local DB instead of the system connection.
+2. `ingest-incremental!` transacted specs AFTER functions, but functions reference specs via lookup refs, causing "Nothing found for entity id" errors during incremental ingestion.
+
+**Fixes applied:**
+- Test fixtures in `render_test.clj` and `workout_test.clj` now call `(render/set-conn! nil)` in `finally` blocks to clean up the override.
+- `ingest-incremental!` now transacts specs BEFORE functions, matching `ingest-analysis!`'s order.
+
+**What exists:**
+- `scanner/scan-source` now detects `defn` forms (returns fn entities alongside spec entities)
+- `scanner/link-fns-to-specs` marks render fns with `:seon.fn/render-input-keys`
+- `ingest/ingest-file!` does scan + link + transact for a single file
+- `render/find-renderer` queries Datalevin for matching render fns
+- `render/for-html` and `for-ai` call `find-renderer` recursively for each map
+
+**What's needed:**
+1. **Get the Datalevin connection correctly.** The system key is `:seon.db.datalevin/connections` (a map), NOT `:seon.db/conn`. Check `src/seon/system.clj` and `src/seon/db/datalevin.clj` for how to get the graph DB connection. The `render.clj` functions use `get-conn` internally — check how THAT works and make `ingest-file!` use the same approach.
+2. **Ingest on startup.** Scan `src/seon/` directory and ingest all files into Datalevin when the system starts. Could be an Integrant component (`:seon.graph/scanner` already exists in the system — check what it does).
+3. **Ingest on reload.** After the dev hook reloads code, re-scan the changed file(s) and re-ingest. The hook knows which files changed.
+4. **Verify end-to-end:** After ingestion, `curl localhost:8080/ns/seon.health.workout?format=ai` should show workout-specific rendering (not generic map printing).
+
+**Key files to read:**
+- `src/seon/system.clj` — find `:seon.graph/scanner` component and `:seon.db.datalevin/connections`
+- `src/seon/db/datalevin.clj` — how connections are managed
+- `src/seon/render.clj` — `get-conn` function (how render.clj finds its connection)
+- `src/seon/graph/ingest.clj` — `ingest-file!` and `ingest-analysis!`
+- `src/seon/dev/hook.clj` — post-reload callbacks
+
+### Step 6: Graph freshness (polish)
+
 - Cache invalidation after re-scan
 - SSE hash change detection → browser patch
 

@@ -219,7 +219,7 @@
     (let [id (ctx/generate-id)]
       (is (string? id))
       (is (= 6 (count id)))
-      (is (re-matches #"[a-f0-9]{6}" id))))
+      (is (re-matches #"[a-zA-Z0-9]{6}" id))))
 
   (testing "generate-id produces unique values"
     (let [ids (set (repeatedly 100 ctx/generate-id))]
@@ -437,6 +437,78 @@
       (is (thrown-with-msg? Exception #"Cannot add reserved key"
                            (swap! a assoc :seon.agent/sneaky "haha")))
       (ctx/destroy! {::ctx/instance-id "rk04"}))))
+
+;;; ---------------------------------------------------------------------------
+;;; Ctx-Schema Tests
+;;; ---------------------------------------------------------------------------
+
+(deftest ctx-schema-valid-swap-test
+  (testing "ctx-schema allows valid state"
+    (schema/register! :test.schema/name [:string])
+    (schema/register! :test.schema/age [:int {:min 0}])
+    (let [test-schema [:map
+                       [:test.schema/name :test.schema/name]
+                       [:test.schema/age :test.schema/age]]
+          a (ctx/create! {::ctx/instance-id "cs01"
+                          ::ctx/persist? false
+                          ::ctx/sse-push? false
+                          ::ctx/ctx-schema test-schema
+                          ::ctx/initial-value {:test.schema/name "Alice"
+                                               :test.schema/age 30}})]
+      (is (= "Alice" (:test.schema/name @a)))
+      ;; Valid swap
+      (swap! a assoc :test.schema/name "Bob")
+      (is (= "Bob" (:test.schema/name @a)))
+      (ctx/destroy! {::ctx/instance-id "cs01"}))))
+
+(deftest ctx-schema-rejects-invalid-swap-test
+  (testing "ctx-schema rejects invalid state with Malli explanation"
+    (schema/register! :test.schema2/count [:int {:min 0}])
+    (let [test-schema [:map [:test.schema2/count :test.schema2/count]]
+          a (ctx/create! {::ctx/instance-id "cs02"
+                          ::ctx/persist? false
+                          ::ctx/sse-push? false
+                          ::ctx/ctx-schema test-schema
+                          ::ctx/initial-value {:test.schema2/count 5}})]
+      ;; Invalid: string where int expected
+      (let [ex (try (swap! a assoc :test.schema2/count "nope") nil
+                    (catch clojure.lang.ExceptionInfo e e)
+                    (catch IllegalStateException e
+                      (let [cause (.getCause e)]
+                        (when (instance? clojure.lang.ExceptionInfo cause) cause))))]
+        (is (some? ex) "should throw on invalid swap")
+        (when ex
+          (is (= "ctx state does not conform to ::ctx-schema" (.getMessage ex)))
+          (is (contains? (ex-data ex) :errors))
+          (is (contains? (ex-data ex) :spec))))
+      ;; State unchanged
+      (is (= 5 (:test.schema2/count @a)))
+      (ctx/destroy! {::ctx/instance-id "cs02"}))))
+
+(deftest ctx-schema-rejects-invalid-initial-value-test
+  (testing "ctx-schema rejects invalid initial value at creation"
+    (let [test-schema [:map [:test.schema3/x [:int]]]]
+      (is (thrown? Exception
+                   (ctx/create! {::ctx/instance-id "cs03"
+                                 ::ctx/persist? false
+                                 ::ctx/sse-push? false
+                                 ::ctx/ctx-schema test-schema
+                                 ::ctx/initial-value {:test.schema3/x "bad"}}))))))
+
+(deftest ctx-schema-with-registry-keyword-test
+  (testing "ctx-schema works with a registry keyword"
+    (schema/register! :test.schema4/items [:vector [:string]])
+    (schema/register! :test.schema4/*ctx* [:map [:test.schema4/items :test.schema4/items]])
+    (let [a (ctx/create! {::ctx/instance-id "cs04"
+                          ::ctx/persist? false
+                          ::ctx/sse-push? false
+                          ::ctx/ctx-schema :test.schema4/*ctx*
+                          ::ctx/initial-value {:test.schema4/items ["a" "b"]}})]
+      (swap! a assoc :test.schema4/items ["a" "b" "c"])
+      (is (= ["a" "b" "c"] (:test.schema4/items @a)))
+      ;; Invalid
+      (is (thrown? Exception (swap! a assoc :test.schema4/items "not-a-vector")))
+      (ctx/destroy! {::ctx/instance-id "cs04"}))))
 
 (deftest no-validation-by-default-test
   (testing "Without validate?, any keys are allowed"

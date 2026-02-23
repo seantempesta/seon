@@ -52,11 +52,16 @@
 ;;; ---------------------------------------------------------------------------
 
 (deftest generate-id-test
-  (testing "generate-id produces 6-char hex strings"
+  (testing "generate-id produces 6-char base62 strings"
     (let [{::runtime/keys [id]} (runtime/generate-id {})]
       (is (string? id))
       (is (= 6 (count id)))
-      (is (re-matches #"[a-f0-9]{6}" id))))
+      (is (re-matches #"[A-Za-z0-9]{6}" id))))
+
+  (testing "generate-id with prefix"
+    (let [{::runtime/keys [id]} (runtime/generate-id {::runtime/prefix "ses"})]
+      (is (string? id))
+      (is (re-matches #"ses-[A-Za-z0-9]{6}" id))))
 
   (testing "generate-id produces unique values with no collisions"
     (let [ids (set (map ::runtime/id (repeatedly 100 #(runtime/generate-id {}))))]

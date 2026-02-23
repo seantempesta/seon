@@ -244,32 +244,41 @@
       (when-not conn
         (log/warn "Code scanner: no graph-db connection available")
         (throw (ex-info "Code scanner requires graph-db connection" {})))
-      (require 'seon.graph.analyzer)
-      (require 'seon.graph.scanner)
+      (require 'seon.graph.extract)
       (require 'seon.graph.ingest)
-      (let [analyze-project! (resolve 'seon.graph.analyzer/analyze-project!)
-            extract-entities (resolve 'seon.graph.analyzer/extract-entities)
-            scan-directory (resolve 'seon.graph.scanner/scan-directory)
-            link-fns-to-specs (resolve 'seon.graph.scanner/link-fns-to-specs)
-            ingest-analysis! (resolve 'seon.graph.ingest/ingest-analysis!)]
+      (let [extract-graph-from-file (resolve 'seon.graph.extract/extract-graph-from-file)
+            ingest-namespace! (resolve 'seon.graph.ingest/ingest-namespace!)]
         (try
-          ;; Full project analysis
-          (log/info "Code scanner: analyzing project..." {:paths paths})
-          (let [project (analyze-project! {:seon.graph.analyzer/paths paths})]
-            (if-not (:seon.graph.analyzer/success project)
-              (log/warn "Code scanner: analysis failed" {:error (:seon.graph.analyzer/error project)})
-              (let [entities (extract-entities {:seon.graph.analyzer/raw-analysis
-                                                (:seon.graph.analyzer/raw-analysis project)})
-                    ;; Scan for specs
-                    specs (into [] (mapcat #(scan-directory {:seon.graph.scanner/dir-path %})) paths)
-                    ;; Link functions to specs
-                    linked-fns (link-fns-to-specs (:seon.graph.analyzer/functions entities) specs)
-                    entities (assoc entities :seon.graph.analyzer/functions linked-fns)
-                    ;; Ingest everything
-                    result (ingest-analysis! {:seon.graph.ingest/conn conn
-                                              :seon.graph.ingest/entities entities
-                                              :seon.graph.ingest/specs specs})]
-                (log/info "Code scanner initialized" result))))
+          (log/info "Code scanner: extracting graph for project..." {:paths paths})
+          (let [clj-files (->> (mapcat #(file-seq (java.io.File. %)) paths)
+                               (filter (fn [^java.io.File f]
+                                         (and (.isFile f)
+                                              (let [n (.getName f)]
+                                                (or (.endsWith n ".clj")
+                                                    (.endsWith n ".cljs")
+                                                    (.endsWith n ".cljc"))))))
+                               vec)
+                total (count clj-files)]
+            (log/info "Code scanner: found files to process" {:count total})
+            (doseq [^java.io.File f clj-files]
+              (try
+                (let [path (.getAbsolutePath f)
+                      graph (extract-graph-from-file {:seon.graph.extract/file-path path})
+                      ns-str (:seon.graph.extract/ns-name graph)]
+                  (when ns-str
+                    (ingest-namespace!
+                     {:seon.graph.ingest/conn conn
+                      :seon.graph.ingest/ns-name ns-str
+                      :seon.graph.ingest/functions (:seon.graph.extract/functions graph)
+                      :seon.graph.ingest/specs (:seon.graph.extract/specs graph)
+                      :seon.graph.ingest/vars (:seon.graph.extract/vars graph)
+                      :seon.graph.ingest/call-edges (:seon.graph.extract/call-edges graph)
+                      :seon.graph.ingest/ns-deps (:seon.graph.extract/ns-deps graph)
+                      :seon.graph.ingest/ns-entities (:seon.graph.extract/namespaces graph)})))
+                (catch Exception e
+                  (log/debug "Code scanner: failed to process file"
+                             {:file (.getName f) :error (.getMessage e)}))))
+            (log/info "Code scanner initialized" {:files-processed total}))
           ;; Register this component in runtime
           (runtime/register! {::runtime/namespace "seon.graph.scanner"
                               ::runtime/status :running
