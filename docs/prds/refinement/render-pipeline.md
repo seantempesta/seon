@@ -9,8 +9,8 @@ Unify Seon's rendering into one spec-driven system. Namespaces declare data shap
 1. **`::*ctx*` spec** → declaring this in a namespace means "spin up a ctx atom per instance." Contents validated by Malli watch on every swap!.
 2. **`*ctx*` and `*conn*`** → injected as dynamic vars in the namespace. Functions access them by declaring these keys in their input specs.
 3. **Companion `.render` namespaces** → use parent's specs directly (fully qualified). Scanner matches by spec keys, not function location.
-4. **Page renderer detection** → render function whose input spec keys overlap with `::ns-data` keys (e.g., `::render/ns-vars`, `::*ctx*`). Most overlap = page renderer.
-5. **No naming hacks** → render function identity comes from output spec containing `:seon.render/html` or `:seon.render/ai`. Page renderer identity comes from input spec matching namespace data shape.
+4. **Page renderer detection** → a function is a page renderer iff its input spec contains a `*ctx*` key AND its output spec contains `:seon.render/html`. Detected by `link-fns-to-specs` in `extract.clj`, stored as `:seon.fn/page-renderer? true` in Datalevin. No explicit declarations anywhere.
+5. **No naming hacks** → render function identity comes entirely from spec shape. No `ns-resolve` for magic names, no registration calls. The graph is the single source of truth.
 
 ## Full Example
 
