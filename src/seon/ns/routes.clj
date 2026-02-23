@@ -2,14 +2,14 @@
   "HTTP routes for namespace introspection and function calls.
 
    Provides:
-   - /ns/{namespace} - Custom render (if namespace has `render` fn)
+   - /ns/{namespace} - Page render (if namespace has a spec-discovered renderer)
                        or static introspection view (vars, functions, schemas)
-   - /ns/{namespace}?id={id} - Instance view (passed to render)
+   - /ns/{namespace}?id={id} - Instance view (passed to renderer)
    - /ns/{namespace}/{function} - Function call (POST only, for reactive UI actions)
 
-   Convention: If a namespace has a public `render` function, it will be called
-   with {:format :html/:ai/:raw :id optional-id}. This allows namespaces to
-   provide custom views of their data in multiple formats.
+   Page renderers are discovered from the code graph, not declared explicitly.
+   A function is a page renderer iff its input spec contains a *ctx* key and
+   its output spec contains :seon.render/html.
 
    Note: Functions here are Ring handlers using positional args, following
    the pattern of other web handlers in seon.web.*"
@@ -220,28 +220,23 @@
         [:p {:class "text-text-500 text-sm"} "No active instances"]
         [:p {:class "text-text-400 text-xs mt-1"} "Create one to get started"]])]))
 
-(defn- namespace-has-render?
-  "Check if namespace has a public render function for page rendering.
-   The render function must accept a single map argument with :format and :id keys.
-   This distinguishes page render functions from other render functions like seon.ns.view/render."
+(defn- find-graph-render-fn
+  "Find the page renderer for a namespace from the code graph.
+   Returns a wrapped function (ctx-value) -> hiccup, or nil.
+   Discovery is 100% spec-driven: the scanner sets :seon.fn/page-renderer?
+   based on input spec containing *ctx* and output spec containing :seon.render/html."
   [ns-sym]
-  (when-let [ns-obj (find-ns ns-sym)]
-    (when-let [render-var (ns-resolve ns-obj 'render)]
-      (and (var? render-var)
-           (fn? @render-var)
-           ;; Check that it accepts a single argument (the options map)
-           (let [arglists (:arglists (meta render-var))]
-             (some #(= 1 (count %)) arglists))))))
-
-(defn- call-namespace-render
-  "Call the namespace's render function with format and id."
-  [ns-sym format id]
-  (let [render-fn @(ns-resolve (find-ns ns-sym) 'render)]
-    (render-fn {:format format :id id})))
+  (when-let [conn (get-conn)]
+    (let [{::lifecycle/keys [render-fn]}
+          (lifecycle/find-page-render-fn {::lifecycle/conn conn
+                                          ::lifecycle/ns-sym ns-sym})]
+      (when render-fn
+        (lifecycle/make-render-fn {::lifecycle/render-fn render-fn
+                                   ::lifecycle/ns-sym ns-sym})))))
 
 (defn- view-toggle-button
   "Toggle button to switch between custom render and introspection view.
-   Only shown when namespace has a render function."
+   Only shown when namespace has a graph-discovered page renderer."
   [ns-sym current-view session-id]
   (let [introspect? (= current-view "introspect")
         ;; Build toggle URL preserving id param
@@ -358,20 +353,6 @@
             :class "inline-block mt-4 text-signal hover:text-warning text-sm"}
         "Back to Dashboard"]]])))
 
-(defn- render-custom-view
-  "Render namespace with its custom render function, including toggle button.
-   The custom render function returns an HTML string (already rendered).
-   We prepend a toggle button by injecting it after the opening main tag."
-  [ns-sym session-id]
-  (let [custom-html (call-namespace-render ns-sym :html session-id)
-        toggle-html (h/html
-                     [:div {:class "mb-4 flex justify-end"}
-                      (view-toggle-button ns-sym nil session-id)])]
-    ;; Inject toggle after <main id="morph"> opening tag
-    (str/replace custom-html
-                 #"(<main[^>]*>)"
-                 (str "$1" toggle-html))))
-
 (defn- render-for-format
   "Render namespace content for non-HTML formats (:ai, :raw).
    Uses the render pipeline: page renderer > default renderer."
@@ -389,7 +370,7 @@
 
 (defn- render-namespace-content
   "Render full namespace view content for HTML format (SSE polling).
-   Tries legacy render fn first (backward compat), then introspection view.
+   Checks the code graph for a spec-discovered page renderer.
    Non-HTML formats are handled separately by render-for-format.
 
    Params:
@@ -397,16 +378,26 @@
    - session-id: Optional session/instance ID
    - view: Optional view mode - \"introspect\" forces introspection view"
   [ns-sym session-id view]
-  (let [has-render? (namespace-has-render? ns-sym)
+  (let [graph-render (find-graph-render-fn ns-sym)
         force-introspect? (= view "introspect")]
     (cond
       ;; Force introspection view if requested
       force-introspect?
-      (render-introspection-view ns-sym session-id has-render?)
+      (render-introspection-view ns-sym session-id (some? graph-render))
 
-      ;; Legacy: namespace has a render function
-      has-render?
-      (render-custom-view ns-sym session-id)
+      ;; Graph-discovered page renderer
+      graph-render
+      (let [ctx-key (::lifecycle/ctx-spec-key
+                     (lifecycle/ctx-spec-key {::lifecycle/ns-sym ns-sym}))
+            ;; Build minimal ctx value for non-dynamic render
+            hiccup (graph-render {ctx-key {}})
+            toggle-html (h/html
+                         [:div {:class "mb-4 flex justify-end"}
+                          (view-toggle-button ns-sym nil session-id)])
+            custom-html (h/html [:main#morph hiccup])]
+        (str/replace custom-html
+                     #"(<main[^>]*>)"
+                     (str "$1" toggle-html)))
 
       ;; Default: introspection view
       :else

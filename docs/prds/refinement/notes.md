@@ -5,6 +5,23 @@ You have domain expertise after doing the work — don't let it evaporate.
 
 ---
 
+## Spec-Driven Renderer Discovery (2026-02-23)
+
+### What Changed
+Removed explicit `ns-resolve` for `'render` symbol in `seon.ns.routes`. The old `namespace-has-render?` and `call-namespace-render` functions did runtime symbol lookup, bypassing the code graph entirely. Replaced with `find-graph-render-fn` which queries Datalevin for `:seon.fn/page-renderer? true` (set by scanner from spec shape).
+
+### The Only Path
+A function becomes a page renderer iff:
+1. Its input spec contains a key ending in `*ctx*`
+2. Its output spec contains `:seon.render/html`
+
+This is detected by `link-fns-to-specs` in `seon.graph.extract`, stored in Datalevin, and queried by `lifecycle/find-page-render-fn`. No other path exists.
+
+### Gotcha
+`ctx/set-render-fn!` exists but is only used in tests. The only production path that sets render-fn on a ctx is `lifecycle/ensure-instance!` which calls `lifecycle/find-page-render-fn` (graph-driven).
+
+---
+
 ## Track 0: MCP REPL Fix
 
 ### What Was Broken
