@@ -750,7 +750,7 @@
                              (if show-completed
                                "bg-base-800 text-text-200 hover:bg-base-700"
                                "bg-base-850 text-text-400 hover:bg-base-800"))
-                 :data-on:click "fetch('/api/agents/toggle-completed',{method:'POST'})"}
+                 :data-on:click "@post('/api/agents/toggle-completed')"}
         (if show-completed "Hide Completed" "Show Completed")]]
 
       ;; Agents table
@@ -808,13 +808,14 @@
   (sse/render-handler #'agents-sse-render :poll-ms 10000))
 
 (defn toggle-completed-handler
-  "Toggle show/hide completed agents and trigger SSE refresh."
+  "Toggle show/hide completed agents and return updated HTML directly.
+   Using text/html response lets Datastar's @post morph the DOM immediately,
+   bypassing the SSE refresh channel (which can drop events or add throttle delay)."
   [_request]
   (toggle-show-completed!)
-  (sse/refresh-all!)
   {:status 200
-   :headers {"Content-Type" "application/json"}
-   :body "{\"ok\": true}"})
+   :headers {"Content-Type" "text/html"}
+   :body (agents-content)})
 
 ;;; ---------------------------------------------------------------------------
 ;;; Agent Detail View
