@@ -132,16 +132,16 @@ If your launch prompt asks you to fix issues (not just audit), work through them
 ### Scope: YOUR namespace only
 
 You may ONLY modify these files:
-- Your namespace source file (e.g., `src/seon/ctx.clj`)
-- Your namespace test file (e.g., `test/seon/ctx_test.clj`)
+- Your namespace source file (e.g., `src/seon/foo.clj`)
+- Your namespace test file (e.g., `test/seon/foo_test.clj`)
 
-You may NOT modify any other namespace's files. If fixing an issue requires changes in a consumer namespace (e.g., updating callers in `seon.ns.routes`), do NOT make those changes yourself. Instead, add them to a **Requested Changes** section in your final report:
+You may NOT modify any other namespace's files. If fixing an issue requires changes in a consumer namespace, do NOT make those changes yourself. Instead, add them to a **Requested Changes** section in your final report:
 
 ```
 ## Requested Changes (for other namespace agents)
 
-- seon.ns.routes: Update calls to `instances-for-namespace` to use map-in pattern `{::ctx/namespace ns-sym}` (lines 450, 512)
-- seon.agent.env: Delete ctx-save!/ctx-load, replace with calls to ctx/persist! and ctx/load! (lines 258-286)
+- seon.bar: Update calls to `my-function` to use new map-in pattern (lines X, Y)
+- seon.baz: Delete duplicated logic, replace with calls to our API (lines X-Y)
 ```
 
 The orchestrator will delegate these to the appropriate namespace agents.
