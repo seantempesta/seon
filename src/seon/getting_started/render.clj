@@ -1,12 +1,78 @@
 (ns seon.getting-started.render
-  "Page renderer for seon.getting-started.
-   Extends the default page layout with step navigation buttons.
-   Each step gets custom right-panel rendering for a premium feel."
+  "## Purpose
+
+   Page renderer for seon.getting-started. Extends the default page layout
+   with step navigation buttons and custom right-panel rendering per step.
+   This creates a 'premium feel' onboarding experience demonstrating Seon's
+   living document UX.
+
+   ## Architecture Position
+   - Provider for: seon.getting-started (renders its *ctx* data)
+   - Consumer: seon.ns.routes-test (tests render→transform round-trip)
+   - Depends on: seon.getting-started (gs/* schemas), seon.render.default-page
+     (dp/* schemas for narrative/messages/user-input), seon.render (humanize),
+     seon.web.components (UI primitives), markdown.core
+
+   ## Consumer Analysis
+   seon.ns.routes-test: Uses page-render in render→transform round-trip test
+   (line 80). Passes {::gs/*ctx* ctx} and checks that transformed HTML has
+   proper Datastar attributes. Clean usage, no workarounds.
+
+   ## Public API Assessment
+   | Function    | Status | Notes                                         |
+   |-------------|--------|-----------------------------------------------|
+   | page-render | OK     | Has :malli/schema, map-in/map-out, documented |
+
+   ## Convention Compliance
+   - Malli schemas: PASS — schemas registered, :malli/schema on page-render
+   - Map-in/map-out: PASS — page-render takes single map, returns render map
+   - Namespaced keys: PASS — all keys properly namespaced
+   - Docstrings: PASS — comprehensive namespace docstring
+   - Tests: PARTIAL — tested indirectly via routes-test, no dedicated test file
+
+   ## Strategic Assessment
+   This namespace is narrowly scoped and well-designed. It handles only the
+   custom rendering for seon.getting-started, delegating shared UI patterns
+   to seon.web.components. The step-aware render-data-panel function is the
+   main complexity, switching on current-step to show different visualizations.
+
+   The private helpers (render-project-ideas, render-proposed-schema, etc.)
+   are specific to this demo and shouldn't be generalized. They demonstrate
+   what a custom renderer looks like for domain-specific UX.
+
+   No restructuring needed. This is a good example of a focused renderer.
+
+   ## Issues (Prioritized)
+   - P3 - No dedicated test file (tested via routes-test, but should have own tests)
+
+   ## What's Good
+   - Clean step-based rendering with case dispatch
+   - Private helpers encapsulate per-step complexity
+   - Format-number utility for stats display
+   - Proper :malli/schema on public function
+   - Form wrapping for Datastar FormData collection
+
+   ## Recommendations
+   1. Create test file with direct page-render tests (small)
+   2. Add tests for step-specific rendering (render-data-panel edge cases)
+
+   ## Incoming Requests
+   - 2026-02-26 from seon.getting-started: Migrate from :seon.render.default/narrative
+     to :seon.render.default-page/narrative, :seon.ctx/messages to
+     :seon.render.default-page/messages, :seon.ctx/user-input to
+     :seon.render.default-page/user-input — DONE
+
+   ## Audit Metadata
+   Audited: 2026-02-26
+   Auditor: claude-opus-4-6
+   Commit: 0461007
+   Tests: Indirectly via routes-test (5 tests, 12 assertions)"
   (:require [clojure.string :as str]
             [dev.onionpancakes.chassis.core :as h]
             [markdown.core :as md]
             [seon.getting-started :as gs]
             [seon.render :as render]
+            [seon.render.default-page :as dp]
             [seon.schema :as schema]
             [seon.web.components :as ui]))
 
@@ -265,8 +331,8 @@
   {:malli/schema [:=> [:cat ::page-render-request] ::page-render-response]}
   [{gs-ctx ::gs/*ctx*}]
   (let [current-step (::gs/current-step gs-ctx 1)
-        narrative (get gs-ctx :seon.render.default/narrative)
-        messages (get gs-ctx :seon.ctx/messages [])
+        narrative (::dp/narrative gs-ctx)
+        messages (::dp/messages gs-ctx [])
         narrative-html (when narrative (md/md-to-html-string narrative))
         max-steps 4]
     {:seon.render/html
@@ -325,7 +391,7 @@
        (ui/section-header "CHAT")
        (render-chat-messages messages)
        [:form {:class "flex gap-2" :onsubmit "return false"}
-        [:input {:field :seon.ctx/user-input
+        [:input {:field ::dp/user-input
                  :type "text"
                  :placeholder "Type a message..."
                  :class "flex-1 bg-base-800 border border-base-700 rounded px-3 py-2 text-sm text-text-50 font-mono placeholder-text-500"}]
