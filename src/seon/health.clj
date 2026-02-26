@@ -113,9 +113,10 @@
           pool-jvms (try
                       (require 'seon.flow.pool)
                       (let [pool-ns (find-ns 'seon.flow.pool)]
-                        ;; Pool ref is stored in session module
-                        (if-let [pool-atom (ns-resolve session-ns 'agent-pool)]
-                          (if-let [pool @pool-atom]
+                        ;; agent-pool is a defonce atom; ns-resolve returns the var
+                        ;; so we need var->atom->pool-map (double deref)
+                        (if-let [pool-var (ns-resolve session-ns 'agent-pool)]
+                          (if-let [pool @@pool-var]
                             (let [status ((ns-resolve pool-ns 'pool-status) pool)]
                               (:seon.flow.pool/total status))
                             0)
@@ -150,8 +151,8 @@
     (require 'seon.orchestrator.session)
     (let [session-ns (find-ns 'seon.orchestrator.session)
           pool-ns (find-ns 'seon.flow.pool)]
-      (if-let [pool-atom (ns-resolve session-ns 'agent-pool)]
-        (if-let [pool @pool-atom]
+      (if-let [pool-var (ns-resolve session-ns 'agent-pool)]
+        (if-let [pool @@pool-var]
           (let [status ((ns-resolve pool-ns 'pool-status) pool)]
             {:ok true
              :details {:total (:seon.flow.pool/total status)

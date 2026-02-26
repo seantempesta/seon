@@ -2,22 +2,24 @@
   "HTTP request handlers."
   (:require [jsonista.core :as json]
             [clojure.string :as str]
+            [seon.health :as health]
             [seon.web.html :as html]
             [seon.web.sse :as sse]
             [seon.web.logs :as logs]
             [seon.ai.agent :as agent]))
 
-(defn health
-  "Health check endpoint with basic status."
+(defn health-check
+  "Health check endpoint. Returns deep system health including pool status."
   [_request]
-  (let [now (java.time.Instant/now)]
-    {:status 200
+  (let [result (health/deep-check {})
+        status-code (if (= ::health/healthy (::health/status result)) 200 503)]
+    {:status status-code
      :headers {"Content-Type" "application/json"}
      :body (json/write-value-as-string
-            {:status "ok"
-             :timestamp (str now)
-             :checks {}
-             :resources {:agents 0 :pool-jvms 0 :sessions 0}})}))
+            {:status (name (::health/status result))
+             :timestamp (str (::health/timestamp result))
+             :checks (::health/checks result)
+             :resources (::health/resources result)})}))
 
 (defn dashboard [_request]
   {:status 200
@@ -55,8 +57,9 @@
 ;; Log Viewer Handlers
 ;; ========================================
 
-(defn log-viewer [_request]
+(defn log-viewer
   "Serve the log viewer HTML shim page."
+  [_request]
   {:status 200
    :headers {"Content-Type" "text/html; charset=utf-8"}
    :body (html/log-viewer-shim)})
