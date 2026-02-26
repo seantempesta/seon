@@ -1,14 +1,13 @@
 (ns seon.web.routes
   "Simple map-based router for HTTP endpoints.
-   Includes static file serving for /css/* from resources/public/."
+   Includes static file serving for /css/* from resources/public."
   (:require [clojure.string :as str]
             [clojure.java.io :as io]
             [seon.web.handlers :as handlers]
             [seon.web.agents :as agents]
             [seon.web.flows :as flows]
             [seon.web.browser :as browser]
-            [seon.ns.routes :as ns-routes]
-            [seon.primer.handlers :as primer-handlers]))
+            [seon.ns.routes :as ns-routes]))
 
 ;; Use var references (#') so handlers resolve to current fn after reload
 (def routes
@@ -20,12 +19,6 @@
    [:post "/logs"]             #'handlers/log-viewer-sse
    [:post "/api/logs/filter"]  #'handlers/log-filter
    [:post "/api/logs/refresh"] #'handlers/log-refresh
-   ;; Primer routes
-   [:get "/primer"]                #'primer-handlers/primer-page
-   [:post "/primer"]               #'primer-handlers/primer-sse
-   ;; Primer debug routes
-   [:get "/primer/ctx"]            #'primer-handlers/ctx-handler
-   [:get "/primer/debug"]          #'primer-handlers/debug-page-handler
    ;; Flow monitor routes
    [:get "/flows"]                 #'flows/flows-page
    [:post "/flows"]                #'flows/flows-sse
@@ -51,11 +44,6 @@
     :pattern #"/ns/([a-z][a-z0-9._-]*)/([a-zA-Z][a-zA-Z0-9_!?*%.-]*)"
     :params [:namespace :function]
     :handler #'ns-routes/function-get-handler}
-   ;; Primer action route: /primer/action/:action-id
-   {:method :post
-    :pattern #"/primer/action/(.+)"
-    :params [:action-id]
-    :handler #'primer-handlers/action-handler}
    ;; Agent detail routes: /agents/:agent-id
    {:method :get
     :pattern #"/agents/([A-Za-z0-9]+)"

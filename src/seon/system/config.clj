@@ -68,11 +68,6 @@
     [:datalevin-server {:optional true} :any]
     [:enabled? {:optional true} :boolean]]
 
-   ;; Primer Ctx
-   :seon.primer/ctx
-   [:map
-    [:connection-manager :any]]
-
    ;; Orchestrator Sessions
    :seon.orchestrator/sessions
    [:map
