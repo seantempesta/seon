@@ -691,15 +691,69 @@ For handlers that need per-request state (e.g., agent-id from path params), cach
 
 Regular HTTP handlers (Ring functions) **don't need this pattern** - they're called directly through vars. This pattern is specifically for SSE handlers because `render-handler` captures the render function at creation time.
 
-## SSE Update Trigger Patterns
+## SSE: Direct Response vs Background Push
 
-SSE pages update via `seon.web.sse/refresh-all!`. There are three trigger sources:
+Two patterns for updating the UI. Pick the right one based on **who initiated the change**.
+
+### Pattern A: Direct Response (user actions)
+
+User clicks a button or submits a form. The handler processes the action and returns HTML. Datastar morphs the DOM from the response. No SSE channel involved.
+
+```clojure
+;; Button in hiccup — @post returns HTML, Datastar morphs it in
+[:button {:data-on:click "@post('/api/agents/toggle-completed')"} "Toggle"]
+
+;; Handler — mutate state, return rendered HTML
+(defn toggle-completed-handler [_request]
+  (toggle-show-completed!)
+  {:status 200
+   :headers {"Content-Type" "text/html"}
+   :body (agents-content)})
+```
+
+**Use for:** toggles, form submissions, any user-initiated mutation.
+**Latency:** ~50-100ms (network + render). Feels instant.
+**Why:** SSE has a broadcast channel with a sliding buffer. Under load, events can be delayed or collapsed. Direct response bypasses all of that — the user gets their result in the HTTP response itself.
+
+### Pattern B: Background Push (system events)
+
+Something changed in the background (agent message, ctx mutation, timer). Call `refresh-all!` to notify all connected SSE clients. Each client re-renders and sends an update only if the view hash changed.
+
+```clojure
+;; After a Datalevin transaction
+(d/transact! conn tx-data)
+(maybe-refresh-sse!)  ; debounced, max once per 200ms
+
+;; Or via atom watch (ctx lifecycle does this automatically)
+(add-watch my-atom ::sse-refresh
+  (fn [_ _ old new]
+    (when (not= old new)
+      (sse/refresh-all!))))
+```
+
+**Use for:** agent progress, real-time data feeds, ctx mutations, any change not triggered by a user click.
+**Latency:** variable (throttle + render loop). Fine for background updates.
+
+### Rule of thumb
+
+**If a user clicked something, return HTML directly. If data changed in the background, use `refresh-all!`.**
+
+### SSE trigger sources (for background push)
 
 1. **ctx-atom pages** — Watches on the ctx atom fire automatically (built into the ctx lifecycle). No manual refresh needed.
 2. **Datalevin-backed pages** — Call `(maybe-refresh-sse!)` after successful `d/transact!` calls. See `seon.ai.datalevin` for the debounced pattern (max once per 200ms via CAS on an atom).
 3. **In-memory atom pages** — Use `add-watch` on the atom to call `refresh-all!` when relevant state changes. See `seon.web.agents/init!` for the agent-registry watch.
 
 `poll-ms` in `render-handler` is a **safety net only** (10+ seconds). Reactive triggers handle timely updates.
+
+### SSE buffer design
+
+The broadcast channel uses a **sliding buffer of size 1**. This means:
+- Under load, only the most recent event is kept (older ones are silently replaced)
+- Clients always converge to the latest state because `render-handler` re-renders from scratch
+- No events are silently dropped — the latest one always gets through
+
+This is why direct response matters for user actions: the SSE channel is optimized for "something changed, re-render" semantics, not for guaranteed delivery of every event.
 
 ## Numeric Limits and Defaults
 
