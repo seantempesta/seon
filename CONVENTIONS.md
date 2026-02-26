@@ -589,6 +589,10 @@ src/seon/
 
 Don't split into core.clj, schema.clj, etc. prematurely. Tests go in `test/` mirroring the `src/` structure.
 
+## Namespace Docstrings
+
+Every namespace should have a comprehensive docstring written by its steward agent. The docstring is a living assessment covering purpose, architecture position, consumer analysis, convention compliance, issues, and recommendations. See `docs/prds/refinement/namespace-stewardship.md` for the full format and process.
+
 ## SSE Handler Hot Reload Pattern
 
 SSE handlers use `def` to create handler objects. By default, `clj-reload` doesn't re-evaluate `def` forms unless the actual code changes, causing stale handlers that don't pick up changes to render functions.
