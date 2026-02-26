@@ -253,10 +253,21 @@
           var elements = argsRaw.elements || '';
           var selector = argsRaw.selector || '(auto)';
           var mode = argsRaw.mode || 'outer';
+          var useVT = argsRaw.useViewTransition || false;
+          var receiveTime = performance.now();
           DEBUG.rawEvents.push({ type: type, argsRaw: argsRaw, time: Date.now() });
           if (DEBUG.rawEvents.length > 20) DEBUG.rawEvents.shift();
+          // Measure DOM patch duration — requestAnimationFrame fires after morph completes
+          requestAnimationFrame(function() {
+            var patchMs = (performance.now() - receiveTime).toFixed(1);
+            DEBUG.lastPatchMs = parseFloat(patchMs);
+            if (DEBUG.lastPatchMs > 100) {
+              console.warn('[seon-debug] slow patch: ' + patchMs + 'ms, viewTransition=' + useVT);
+            }
+          });
           logEvent('datastar-patch-elements',
-                   'selector=' + selector + ' mode=' + mode + '\n' +
+                   'selector=' + selector + ' mode=' + mode +
+                   (useVT ? ' viewTransition=true' : '') + '\n' +
                    truncate(elements, 150));
           break;
 

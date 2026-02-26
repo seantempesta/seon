@@ -239,14 +239,14 @@
 (defn- do-render
   "Render view and send SSE update if changed.
    Returns new hash, or nil if connection dead."
-  [render-fn req send-fn last-view-hash]
+  [render-fn req send-fn last-view-hash use-view-transition?]
   (try
     (when-some [new-view-str (render-fn req)]
       (let [new-view-hash (Integer/toHexString (hash new-view-str))]
         (if (not= last-view-hash new-view-hash)
-          ;; View changed - send update with view transition
+          ;; View changed - send update
           (let [sent? (send-fn (patch-elements {:event-id new-view-hash
-                                                :use-view-transition? true}
+                                                :use-view-transition? use-view-transition?}
                                                new-view-str))]
             (if sent?
               (do (log/debug "Sending SSE update" {:hash new-view-hash :size (count new-view-str)})
@@ -284,12 +284,16 @@
                          If nil and client accepts Brotli, uses Brotli profile.
                          If nil and client doesn't accept Brotli, uses plain text.
   - :auto-brotli?      - Enable automatic Brotli negotiation (default: true)
+  - :use-view-transition? - Enable Chrome View Transitions API on patches (default: false).
+                            Animates DOM changes but adds ~2-3s delay. Only useful for
+                            page-level transitions, not incremental state updates.
 
   Returns: Ring handler function for http-kit"
   [render-fn & {:keys [on-open on-close render-on-connect poll-ms
-                       write-profile auto-brotli?]
+                       write-profile auto-brotli? use-view-transition?]
                 :or   {render-on-connect true
-                       auto-brotli? false}}]
+                       auto-brotli? false
+                       use-view-transition? false}}]
   (fn handler [req]
     (let [;; Dropping buffer - slow handlers won't block other handlers
           <ch     (a/tap (::refresh-mult req)
@@ -337,7 +341,7 @@
 
                                           ;; Refresh or timeout - render and continue
                                           :else
-                                          (when-some [new-hash (do-render render-fn req send-fn last-view-hash)]
+                                          (when-some [new-hash (do-render render-fn req send-fn last-view-hash use-view-transition?)]
                                             (recur new-hash)))))
                                     ;; Cleanup compression resources if any
                                     (when close-fn (close-fn))
