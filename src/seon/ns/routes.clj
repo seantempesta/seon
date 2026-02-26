@@ -657,18 +657,24 @@
    - nil/empty: Returns empty map"
   [body]
   (cond
-    ;; String body: parse URL-encoded form data
+    ;; String body: parse URL-encoded form data or JSON signals
     (string? body)
     (if (str/blank? body)
       {}
-      (into {}
-            (for [pair (str/split body #"&")
-                  :let [[k v] (str/split pair #"=" 2)
-                        k-decoded (java.net.URLDecoder/decode k "UTF-8")
-                        v-decoded (when v (java.net.URLDecoder/decode v "UTF-8"))]]
-              (if (str/starts-with? k-decoded ":")
-                [(edn/read-string k-decoded) (or v-decoded "")]
-                [(keyword k-decoded) (or v-decoded "")]))))
+      (if (str/starts-with? (str/triml body) "{")
+        ;; JSON body from Datastar's default contentType:'json' — signals payload.
+        ;; We don't use signal values as function args, so return empty map.
+        ;; The ctx atom is injected separately via instance-id.
+        {}
+        ;; URL-encoded form data from contentType:'form'
+        (into {}
+              (for [pair (str/split body #"&")
+                    :let [[k v] (str/split pair #"=" 2)
+                          k-decoded (java.net.URLDecoder/decode k "UTF-8")
+                          v-decoded (when v (java.net.URLDecoder/decode v "UTF-8"))]]
+                (if (str/starts-with? k-decoded ":")
+                  [(edn/read-string k-decoded) (or v-decoded "")]
+                  [(keyword k-decoded) (or v-decoded "")])))))
 
     ;; Map body: convert string keys starting with ":" to keywords
     (map? body)
