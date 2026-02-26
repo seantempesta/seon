@@ -1,39 +1,64 @@
 ---
 name: datastar-web-ui
-description: "Patterns for Datastar SSE web UI with Tailwind CSS. Use when editing handlers.clj, html.clj, sse.clj, or routes.clj. Use when working with data-signals, data-on-click, data-text, merge-fragment, or streaming-response. Use when building dashboards, forms, real-time updates, or improving UI design. Use when styling components or making the UI look better."
+description: "Patterns for Datastar SSE web UI with Tailwind CSS. Use when editing handlers, html.clj, sse.clj, or routes.clj. Use when working with data-signals, data-on-click, data-text, merge-fragment, or streaming-response. Use when building dashboards, forms, real-time updates, or improving UI design. Use when styling components or making the UI look better."
 ---
 
 # Datastar Web UI Patterns
 
-## Core Architecture: View = f(State)
+## Two SSE Patterns (IMPORTANT)
 
-State changes trigger automatic UI refresh via SSE:
+Seon has two patterns for updating the UI. **See `CONVENTIONS.md` section "SSE: Direct Response vs Background Push" for the full spec.** Summary below.
+
+### Pattern A: Direct Response (user actions)
+
+User clicks something. Handler returns HTML. Datastar morphs the DOM from the response. No SSE channel involved.
 
 ```clojure
-(defonce app-state (atom {:data nil}))
+;; Handler — mutate state, return rendered HTML
+(defn toggle-completed-handler [_request]
+  (toggle-show-completed!)
+  {:status 200
+   :headers {"Content-Type" "text/html"}
+   :body (render-my-view)})
 
-(add-watch app-state :sse-refresh
+;; Button — @post returns HTML, Datastar morphs it in
+[:button {:data-on:click "@post('/api/my-action')"} "Do Thing"]
+```
+
+**Use for:** toggles, form submissions, any user-initiated mutation.
+
+### Pattern B: Background Push (system events)
+
+Data changed in the background. Call `refresh-all!` to notify SSE clients.
+
+```clojure
+(require '[seon.web.sse :as sse])
+
+;; After a Datalevin transaction
+(d/transact! conn tx-data)
+(sse/refresh-all!)
+
+;; Or via atom watch (ctx lifecycle does this automatically)
+(add-watch my-atom ::sse-refresh
   (fn [_ _ old new]
     (when (not= old new)
       (sse/refresh-all!))))
+
+;; SSE handler re-renders on refresh events
+(def my-sse (sse/render-handler #'my-render-fn :poll-ms 10000))
 ```
 
-## SSE Response Pattern
+**Use for:** agent progress, real-time data feeds, ctx mutations.
 
-```clojure
-(require '[ml-options.web.sse :as sse])
+### Rule of thumb
 
-(defn sse-handler [request]
-  (sse/streaming-response request
-    (fn [send!]
-      (send! (sse/merge-fragment (render-view @app-state))))))
-```
+**If a user clicked something, return HTML directly. If data changed in the background, use `refresh-all!`.**
 
 ## CRITICAL: Attribute Syntax
 
 **Datastar uses COLONS, not hyphens** in event attributes:
-- ✅ `data-on:click` (correct)
-- ❌ `data-on-click` (wrong - won't work!)
+- `data-on:click` (correct)
+- `data-on-click` (WRONG - won't work!)
 
 This applies to all event handlers: `data-on:click`, `data-on:submit`, `data-on:keydown`, etc.
 
@@ -57,26 +82,31 @@ This applies to all event handlers: `data-on:click`, `data-on:submit`, `data-on:
    [:button {:data-on:click "$count++"} "Increment"]])
 ```
 
-## Action Handler Pattern
+## View Transitions
+
+View transitions are **disabled by default** in seon's SSE system (`render-handler`). Opt in only when needed for page-level navigations:
 
 ```clojure
-(defn action-handler [request]
-  (let [result (process (:body request))]
-    (swap! app-state assoc :result result)  ; triggers SSE refresh
-    {:status 200 :body "ok"}))
+(sse/render-handler #'my-render-fn :use-view-transition? true)
 ```
+
+## SSE Buffer Design
+
+The broadcast channel uses a **sliding buffer of size 1**. Under load, only the most recent event is kept. Clients always converge to latest state because `render-handler` re-renders from scratch. This is why Pattern A matters for user actions.
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `src/seon/web/sse.clj` | SSE handler, brotli streaming |
+| `src/seon/web/sse.clj` | SSE core: `render-handler`, `refresh-all!` |
 | `src/seon/web/html.clj` | Hiccup components, base layout |
-| `src/seon/web/handlers.clj` | Route handlers, actions |
 | `src/seon/web/routes.clj` | Route definitions |
+| `src/seon/web/agents.clj` | Example of both Pattern A and B |
 | `src/seon/web/components.clj` | Reusable UI components |
+| `src/seon/ns/routes.clj` | Namespace page handlers, SSE |
 | `resources/public/css/input.css` | Tailwind source with theme |
 | `resources/public/css/output.css` | Built CSS (don't edit directly) |
+| `CONVENTIONS.md` | Ground truth for SSE patterns |
 
 ## Tailwind Build (Local, NOT CDN)
 
@@ -99,7 +129,7 @@ The theme is defined in `resources/public/css/input.css` using Tailwind v4 synta
 
 ## For More Details
 
+- **Full SSE pattern spec**: See `CONVENTIONS.md` section "SSE: Direct Response vs Background Push"
 - **Design system**: See `docs/prds/namespace-ui/design-system.md` for Phosphor Terminal theme
 - **Datastar attributes**: See `docs/reference/datastar-quick-reference.md`
-- **Design principles**: See [references/design-principles.md](references/design-principles.md)
-- **Extended patterns**: See `docs/reference/datastar-extended-patterns.md`
+- **Datastar deep dive**: See `docs/reference/datastar-deep-dive.md`

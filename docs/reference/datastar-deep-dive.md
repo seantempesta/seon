@@ -109,7 +109,7 @@ data: elements </div>
 | `elements` | string | *required* | HTML content to patch |
 | `selector` | string | auto (by ID) | CSS selector for targeting |
 | `mode` | string | `outer` | Patch mode (see table below) |
-| `useViewTransition` | boolean | `false` | Enable View Transitions API |
+| `useViewTransition` | boolean | `false` | Enable View Transitions API (disabled by default in seon's `render-handler` -- opt in with `:use-view-transition? true` only for page-level navigations) |
 
 **Patch Modes:**
 
