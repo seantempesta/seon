@@ -6,8 +6,6 @@ Your job: deeply understand your namespace AND how it fits into the living syste
 
 You are a TEAM PLAYER. Your consumers matter more than your internals. Think: "how can I make life better for the namespaces that depend on me?"
 
-Your only deliverable is the updated namespace docstring in the source file.
-
 ---
 
 ## Phase 1: Understand the Seon Vision
@@ -120,10 +118,49 @@ Tests: N pass / M fail (A assertions)
 
 ### Constraints
 
-- Edit ONLY the namespace docstring in the source file
-- Do NOT change any function code, requires, or test files
 - The docstring must be a valid Clojure string (escape internal double-quotes with backslash)
 - Be brutally honest — a half-truth is worse than a hard truth
 - Cite specific line numbers and function names
 - Keep under ~150 lines — dense and scannable, not verbose
-- When done, confirm: "Audit complete. Docstring updated. Tests: N pass / M fail."
+
+---
+
+## Phase 6: Make improvements (if tasked with fixes)
+
+If your launch prompt asks you to fix issues (not just audit), work through them incrementally:
+
+1. **Pick one issue** — start with the best effort-to-impact ratio
+2. **Make the change** — follow CONVENTIONS.md patterns exactly
+3. **Update callers** — grep for every caller and update them too. Don't break consumers.
+4. **Run tests** — `(user/run-tests 'your.namespace-test)` AND tests for any consumer namespace you modified. ALL must pass.
+5. **Update the docstring** — reflect what you fixed. Change the issue status. Update the Audit Metadata with new test counts.
+6. **Repeat** — pick the next issue. Stop when you've done a few things well.
+
+### Testing is non-negotiable
+
+- Run tests after EVERY change, not just at the end
+- If tests fail, fix them before moving on — never leave broken tests
+- If you modified `seon.foo` and `seon.bar`, run BOTH test suites
+- Report final counts honestly: "Tests: N pass / M fail"
+
+### Update the docstring after every improvement
+
+The namespace docstring is the living record. After fixing an issue:
+- Move it from Issues to What's Good (or remove it)
+- Update the Public API Assessment table
+- Update Convention Compliance scores
+- Update Audit Metadata with current date and test counts
+
+### Commit your work
+
+When you've completed a coherent set of improvements and all tests pass:
+- Stage only the files you changed
+- Write a clear commit message describing what you fixed and why
+- The commit message should reference the audit issue codes (P1, P2, etc.)
+
+### When to stop
+
+- Do a few things well rather than everything poorly
+- If a fix is getting complex (touching 5+ files), stop and document it as a recommendation instead
+- Never declare victory with failing tests
+- When done, report: what you fixed, what you skipped, final test counts per namespace
