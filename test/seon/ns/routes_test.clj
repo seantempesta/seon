@@ -1,5 +1,6 @@
 (ns seon.ns.routes-test
-  (:require [clojure.string :as str]
+  (:require [clojure.edn :as edn]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [seon.ctx :as ctx]
             [seon.getting-started :as gs]
@@ -100,6 +101,32 @@
                             (second %)))
                 nodes)
           "action URLs include instance ID"))))
+
+;;; ---------------------------------------------------------------------------
+;;; GET Function Call Tests
+;;; ---------------------------------------------------------------------------
+
+(deftest function-get-handler-test
+  (testing "GET zero-arg function returns EDN result"
+    (let [request {:request-method :get
+                   :uri "/ns/seon.getting-started/step-3"
+                   :path-params {:namespace "seon.getting-started"
+                                 :function "step-3"}
+                   :query-string ""}
+          response (routes/function-get-handler request)]
+      (is (= 200 (:status response)))
+      (is (str/includes? (get-in response [:headers "Content-Type"]) "edn"))
+      (let [result (edn/read-string (:body response))]
+        (is (= 3 (:seon.getting-started/current-step result))))))
+
+  (testing "GET nonexistent function returns 404"
+    (let [request {:request-method :get
+                   :uri "/ns/seon.getting-started/no-such-fn"
+                   :path-params {:namespace "seon.getting-started"
+                                 :function "no-such-fn"}
+                   :query-string ""}
+          response (routes/function-get-handler request)]
+      (is (= 404 (:status response))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Validation Tests

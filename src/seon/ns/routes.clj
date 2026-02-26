@@ -795,18 +795,54 @@
      :headers {"Content-Type" "application/json"}
      :body "{\"success\":false,\"error\":\"Missing id parameter\"}"}))
 
+(defn- parse-keyword-params
+  "Parse query params into qualified keyword map.
+   Params like ':seon.getting-started/sort-by=date' become
+   {:seon.getting-started/sort-by \"date\"}. Non-keyword params pass through."
+  [query-string]
+  (if (str/blank? query-string)
+    {}
+    (into {}
+          (for [pair (str/split query-string #"&")
+                :let [[k v] (str/split pair #"=" 2)
+                      k-decoded (java.net.URLDecoder/decode k "UTF-8")
+                      v-decoded (when v (java.net.URLDecoder/decode v "UTF-8"))]
+                ;; Skip system params (instance, id, view, format)
+                :when (str/starts-with? k-decoded ":")]
+            [(edn/read-string k-decoded) (or v-decoded "")]))))
+
+(defn- resolve-and-call
+  "Resolve a function, build its input map, validate, and call it.
+   Shared by both GET (query params) and POST (form body) handlers.
+   Returns the function's result or throws on validation failure."
+  [ns-sym fn-sym raw-input instance-id]
+  (if-let [action-fn (actions/resolve-action ns-sym fn-sym)]
+    (let [input-schema (extract-fn-input-schema action-fn)
+          coerced (coerce-with-schema raw-input input-schema)
+          injected (inject-ctx-conn ns-sym coerced)
+          input (if instance-id
+                  (let [ctx-atom (ctx/get-atom {::ctx/instance-id instance-id})]
+                    (if ctx-atom
+                      (assoc injected :seon.reactive/ctx ctx-atom)
+                      injected))
+                  injected)]
+      (when (and input-schema (seq input))
+        (when-not (m/validate input-schema input)
+          (throw (ex-info "Invalid input"
+                          {:errors (me/humanize (m/explain input-schema input))}))))
+      (log/info "Executing function" {:ns ns-sym :fn fn-sym :input (dissoc input :seon.reactive/ctx)})
+      ;; Zero-arg functions (no schema, empty arglists like ([])) get called with no args
+      (let [zero-arg? (and (nil? input-schema)
+                           (some #(empty? %) (:arglists (meta action-fn))))]
+        {:result (if zero-arg? (action-fn) (action-fn input)) :action-fn action-fn}))
+    (throw (ex-info "Function not found" {:ns ns-sym :fn fn-sym :status 404}))))
+
 (defn function-call-handler
   "Handle POST /ns/:namespace/:function requests.
 
    Form data arrives with qualified keyword names from HTML form fields.
-   The parse-form-body function reads ':keyword' strings back to keywords.
    Malli string coercion converts string values to correct types per schema.
-
-   Auto-injects *ctx* and *conn* values from the namespace's injected vars
-   into the parsed form data, so functions receive ctx/conn without explicit wiring.
-
-   Validates coerced input against the function's Malli input schema
-   before calling. Returns 400 with humanized errors on validation failure.
+   Auto-injects *ctx* and *conn* from namespace vars.
 
    Function names are URL-decoded to handle %21 -> ! etc."
   [request]
@@ -815,61 +851,61 @@
         params (parse-query-params request)
         instance-id (get params "instance")
         id-param (get params "id")
-        ;; URL-decode function name to handle %21 -> ! etc.
         fn-decoded (java.net.URLDecoder/decode fn-str "UTF-8")
         ns-sym (symbol ns-str)
         fn-sym (symbol fn-decoded)
         body (:body request)]
-    (log/info "Function call" {:ns ns-sym :fn fn-sym :instance instance-id :body body})
+    (log/info "Function call POST" {:ns ns-sym :fn fn-sym :instance instance-id})
     (cond
-      ;; Instance management actions
       (= fn-sym 'create-instance!)
       (handle-create-instance! ns-sym)
 
       (= fn-sym 'destroy-instance!)
       (handle-destroy-instance! ns-sym id-param)
 
-      ;; Regular function call
       :else
-      (if-let [action-fn (actions/resolve-action ns-sym fn-sym)]
-        (try
-          (let [;; Parse form-encoded body to keyword map
-                form-data (parse-form-body body)
-                ;; Extract input schema for coercion and validation
-                input-schema (extract-fn-input-schema action-fn)
-                ;; Malli coerce string values to correct types per schema
-                coerced (coerce-with-schema form-data input-schema)
-                ;; Auto-inject *ctx* and *conn* from namespace vars
-                injected (inject-ctx-conn ns-sym coerced)
-                ;; Add instance ctx atom if present
-                signals (if instance-id
-                          (let [ctx-atom (ctx/get-atom {::ctx/instance-id instance-id})]
-                            (if ctx-atom
-                              (assoc injected :seon.reactive/ctx ctx-atom)
-                              injected))
-                          injected)
-                ;; Validate after injection so auto-injected keys satisfy schema
-                _ (when (and input-schema (seq signals))
-                    (when-not (m/validate input-schema signals)
-                      (throw (ex-info "Invalid input"
-                                      {:errors (me/humanize (m/explain input-schema signals))}))))]
-            (log/info "Executing function" {:ns ns-sym :fn fn-sym :signals (dissoc signals :seon.reactive/ctx)})
-            (action-fn signals)
-            {:status 200
+      (try
+        (resolve-and-call ns-sym fn-sym (parse-form-body body) instance-id)
+        {:status 200
+         :headers {"Content-Type" "application/json"}
+         :body "{\"success\":true}"}
+        (catch Exception e
+          (let [data (ex-data e)
+                status (or (:status data) (if (:errors data) 400 500))]
+            (log/error e "Function call failed" {:ns ns-sym :fn fn-sym})
+            {:status status
              :headers {"Content-Type" "application/json"}
-             :body "{\"success\":true}"})
-          (catch Exception e
-            (let [data (ex-data e)
-                  status (if (:errors data) 400 500)]
-              (log/error e "Function execution failed" {:ns ns-sym :fn fn-sym})
-              {:status status
-               :headers {"Content-Type" "application/json"}
-               :body (str "{\"success\":false,\"error\":\"" (.getMessage e) "\"}")})))
-        (do
-          (log/warn "Function not found" {:ns ns-sym :fn fn-sym})
-          {:status 404
-           :headers {"Content-Type" "application/json"}
-           :body "{\"success\":false,\"error\":\"Function not found\"}"})))))
+             :body (str "{\"success\":false,\"error\":\"" (.getMessage e) "\"}")}))))))
+
+(defn function-get-handler
+  "Handle GET /ns/:namespace/:function?:qualified/key=value requests.
+
+   Query params with qualified keyword names are parsed, coerced via Malli,
+   and passed to the function. Auto-injects *ctx* and *conn*.
+   Returns the function's result as EDN (or JSON for non-Clojure clients)."
+  [request]
+  (let [ns-str (get-in request [:path-params :namespace])
+        fn-str (get-in request [:path-params :function])
+        params (parse-query-params request)
+        instance-id (get params "instance")
+        fn-decoded (java.net.URLDecoder/decode fn-str "UTF-8")
+        ns-sym (symbol ns-str)
+        fn-sym (symbol fn-decoded)
+        kw-params (parse-keyword-params (:query-string request))]
+    (log/info "Function call GET" {:ns ns-sym :fn fn-sym :params kw-params})
+    (try
+      (let [{:keys [result]} (resolve-and-call ns-sym fn-sym kw-params instance-id)]
+        {:status 200
+         :headers {"Content-Type" "application/edn; charset=utf-8"}
+         :body (pr-str result)})
+      (catch Exception e
+        (let [data (ex-data e)
+              status (or (:status data) (if (:errors data) 400 500))]
+          (log/error e "Function GET failed" {:ns ns-sym :fn fn-sym})
+          {:status status
+           :headers {"Content-Type" "application/edn; charset=utf-8"}
+           :body (pr-str {:error (.getMessage e)
+                          :errors (:errors data)})})))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Route Registration Helper
@@ -881,12 +917,16 @@
 
    Order matters: function call pattern must come BEFORE namespace pattern
    because the function pattern is more specific."
-  [;; Function call: POST /ns/:namespace/:function
-   ;; Function names can contain ! ? - _ etc.
+  [;; Function call: POST /ns/:namespace/:function (mutations)
    {:method :post
     :pattern #"/ns/([a-z][a-z0-9._-]*)/([a-zA-Z][a-zA-Z0-9_!?*-]*)"
     :params [:namespace :function]
     :handler #'function-call-handler}
+   ;; Function call: GET /ns/:namespace/:function (reads)
+   {:method :get
+    :pattern #"/ns/([a-z][a-z0-9._-]*)/([a-zA-Z][a-zA-Z0-9_!?*-]*)"
+    :params [:namespace :function]
+    :handler #'function-get-handler}
    ;; Namespace view: GET /ns/:namespace
    {:method :get
     :pattern #"/ns/([a-z][a-z0-9._-]*)"
