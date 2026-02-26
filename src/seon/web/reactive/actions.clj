@@ -12,7 +12,7 @@
    Security: Only allows calling functions in namespaces under seon.*
    that are explicitly marked as reactive actions."
   (:require [clojure.string :as str]
-            [malli.core :as m]
+            [seon.web.reactive.encoding :as encoding]
             [taoensso.timbre :as log]))
 
 ;;; ---------------------------------------------------------------------------
@@ -36,43 +36,20 @@
 ;;; Signal Extraction
 ;;; ---------------------------------------------------------------------------
 
-(defn- camel->kebab
-  "Convert camelCase to kebab-case.
-   'itemName' → 'item-name'
-   'userName' → 'user-name'"
-  [s]
-  (-> s
-      (str/replace #"([a-z])([A-Z])" "$1-$2")
-      str/lower-case))
-
-(defn- keywordize-signal
-  "Convert string key to proper keyword.
-   - Handles namespaced: 'seon.trading/symbol' → :seon.trading/symbol
-   - Handles camelCase: 'itemName' → :item-name"
-  [k]
-  (if (string? k)
-    (let [[ns-part name-part] (str/split k #"/" 2)]
-      (if name-part
-        ;; Namespaced key - preserve namespace, convert name
-        (keyword ns-part (camel->kebab name-part))
-        ;; Simple key - just convert camelCase
-        (keyword (camel->kebab k))))
-    k))
-
 (defn extract-signals
   "Extract signals from Datastar request body.
 
-   Datastar sends signals as JSON in the request body.
-   Keys are converted from camelCase strings to kebab-case keywords.
-   Namespaced keys are preserved: 'seon.trading/symbol' → :seon.trading/symbol"
+   Delegates to seon.web.reactive.encoding/decode-signals which handles:
+   - Nested JSON from dot-notation signals (preserves full keyword identity)
+   - Flat camelCase keys (legacy format)
+
+   Example:
+     {\"seon\" {\"gettingStarted\" {\"exercise\" \"Pull-up\"}}}
+     → {:seon.getting-started/exercise \"Pull-up\"}"
   {:malli/schema [:=> [:cat [:maybe :map]] [:map-of :keyword :any]]}
   [body]
   (log/debug "extract-signals input" {:body body :type (type body)})
-  (let [result (if (map? body)
-                 (into {}
-                       (map (fn [[k v]] [(keywordize-signal k) v]))
-                       body)
-                 {})]
+  (let [result (encoding/decode-signals body)]
     (log/debug "extract-signals output" {:result result})
     result))
 

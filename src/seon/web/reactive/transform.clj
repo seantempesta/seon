@@ -18,7 +18,8 @@
    is more natural than (transform-hiccup {:ns ns :hiccup hiccup})."
   (:require [clojure.walk :as walk]
             [clojure.string :as str]
-            [malli.core :as m]))
+            [malli.core :as m]
+            [seon.web.reactive.encoding :as encoding]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas
@@ -78,23 +79,23 @@
 (defn- transform-field-attr
   "Transform {:field :name} to Datastar bind format.
 
-   Uses KEY SYNTAX (data-bind:signalName) because Datastar's value syntax
-   evaluates as a JS expression, which breaks with namespaced keys containing
-   dots and slashes (e.g. seon.getting-started/exercise).
+   Uses KEY SYNTAX (data-bind:signalPath) with the full encoded signal path.
+   Datastar's key syntax applies camelCase to each dot-segment, so we
+   proactively camelCase hyphens ourselves (matching Datastar's conversion).
 
-   For qualified keywords like :seon.getting-started/exercise, we use only
-   the name part ('exercise') as the signal name. The server re-namespaces
-   signals based on the target function's namespace when handling POSTs.
+   The encoding layer (seon.web.reactive.encoding) converts qualified keywords
+   to dot-separated camelCase paths that Datastar preserves through its
+   attribute processing. The server decodes these back to qualified keywords.
 
-   Key syntax applies camelCase conversion (user-input → userInput) which
-   is reversed by the server's camel->kebab in extract-signals.
+   Example:
+     :seon.getting-started/exercise → data-bind:seon.gettingStarted.exercise
 
    Returns map of attributes to merge."
   [field-name other-attrs]
-  (let [signal-name (name field-name)
-        bind-key (keyword (str "data-bind:" signal-name))]
+  (let [signal-path (encoding/encode-keyword field-name)
+        bind-key (keyword (str "data-bind:" signal-path))]
     (merge
-     {:name signal-name
+     {:name signal-path
       bind-key true}
      (dissoc other-attrs :field))))
 
@@ -143,9 +144,8 @@
        (map? (second form))))
 
 (defn- collect-field-defaults
-  "Walk hiccup and collect :field names with their default :value attrs.
-   Uses only the name part of qualified keywords (namespace is implicit from URL).
-   Returns a map of {signal-name default-value-str}."
+  "Walk hiccup and collect :field keywords with their default :value attrs.
+   Returns a map of {keyword default-value-str} preserving the full keyword."
   [hiccup]
   (let [fields (atom {})]
     (walk/postwalk
@@ -153,9 +153,8 @@
        (when (and (hiccup-element? form) (has-attrs? form))
          (let [attrs (second form)]
            (when-let [field (:field attrs)]
-             (let [signal-name (name field)
-                   default (get attrs :value "")]
-               (swap! fields assoc signal-name (str default))))))
+             (let [default (get attrs :value "")]
+               (swap! fields assoc field (str default))))))
        form)
      hiccup)
     @fields))
@@ -163,16 +162,12 @@
 (defn- inject-data-signals
   "Wrap transformed hiccup with a data-signals container if any fields exist.
    Datastar requires data-signals on a parent element to initialize the reactive store
-   that data-bind attributes read from and write to."
+   that data-bind attributes read from and write to.
+   Uses encoding/encode-signals-json for proper nested signal paths."
   [hiccup field-defaults]
   (if (empty? field-defaults)
     hiccup
-    (let [signals-json (str "{"
-                            (str/join ", "
-                                      (map (fn [[k v]]
-                                             (str "\"" k "\": \"" v "\""))
-                                           field-defaults))
-                            "}")]
+    (let [signals-json (encoding/encode-signals-json field-defaults)]
       ;; If hiccup is a vector starting with a tag, wrap its content
       ;; by adding data-signals to the root element's attrs
       (if (hiccup-element? hiccup)
