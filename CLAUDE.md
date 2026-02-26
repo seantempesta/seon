@@ -235,6 +235,44 @@ The namespace doesn't restrict the agent's work - they can edit any file and swi
 
 ---
 
+## Namespace Stewardship
+
+Each namespace in Seon should have a **steward** — an agent that deeply understands the namespace, its consumers, and its role in the system. The stewardship process is documented in `docs/prds/refinement/namespace-stewardship.md`.
+
+### Launching a stewardship audit
+
+```clojure
+;; Audit only (assess and document — no code changes)
+(user/launch-agent!! 'seon.ctx
+  "Your namespace is `seon.ctx`. Read `docs/prds/refinement/namespace-stewardship.md` for your full instructions."
+  :files ["docs/prds/refinement/namespace-stewardship.md"])
+
+;; Audit + fix (assess, then improve)
+(user/launch-agent!! 'seon.ctx
+  "Your namespace is `seon.ctx`. Read `docs/prds/refinement/namespace-stewardship.md` for your full instructions. Do both the audit (Phases 1-5) AND fixes (Phase 6)."
+  :files ["docs/prds/refinement/namespace-stewardship.md"])
+```
+
+Or via Task tool (seon-agent subagent):
+```
+Your namespace is `seon.foo`. Read `docs/prds/refinement/namespace-stewardship.md` for your full instructions.
+```
+
+### How it works
+
+1. Agent reads VISION.md and CONVENTIONS.md to understand the system
+2. Deep-dives its own source, tests, and git history
+3. **Reads consumer code** — understands how other namespaces use it and where they struggle
+4. Writes a comprehensive assessment as the namespace docstring
+5. Optionally fixes issues (Phase 6), scoped to its own files only
+6. Reports **Requested Changes** for other namespaces — orchestrator delegates those
+
+### Cascading fixes
+
+When a steward reports Requested Changes, launch stewardship agents on those namespaces with the specific request included in the prompt. This creates a recursive improvement cascade where each namespace agent stays in scope.
+
+---
+
 ## Quick Reference
 
 ### Server
