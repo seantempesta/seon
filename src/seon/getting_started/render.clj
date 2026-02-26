@@ -129,8 +129,9 @@
     [:span {:class "text-xs text-text-500 font-mono"}
      (str (count workouts) " exercise" (when (not= 1 (count workouts)) "s"))]]
    (render-workout-table workouts)
-   ;; Add form
-   [:div {:class "mt-3 bg-base-900 rounded p-3 border border-base-800/50"}
+   ;; Add form — wrapped in <form> so Datastar can collect FormData
+   [:form {:class "mt-3 bg-base-900 rounded p-3 border border-base-800/50"
+           :onsubmit "return false"}
     [:div {:class "text-xs font-semibold text-text-400 uppercase tracking-wider mb-2"} "Add Exercise"]
     [:div {:class "flex gap-2 items-end"}
      [:div {:class "flex-1"}
@@ -158,7 +159,7 @@
                :value "0"
                :class "w-full bg-base-800 border border-base-700 rounded px-2 py-1.5 text-sm text-text-50 font-mono text-center focus:border-signal/50 focus:outline-none"}]]
      [:div {:class "pb-0.5"}
-      [:button {:on:click :add-workout!
+      [:button {:on:click:form :add-workout!
                 :class "px-3 py-1.5 text-sm font-mono rounded bg-signal/20 text-signal border border-signal/30 hover:bg-signal/30 hover:border-signal/50 transition-colors"}
        "+ Add"]]]]])
 
@@ -319,16 +320,16 @@
           "Next \u2192"]
          [:span {:class "text-xs text-text-400 italic"} "End of walkthrough"])]
 
-      ;; BOTTOM: Chat
+      ;; BOTTOM: Chat — wrapped in <form> for FormData collection
       [:section {:class "bg-base-850 rounded p-3"}
        (ui/section-header "CHAT")
        (render-chat-messages messages)
-       [:div {:class "flex gap-2"}
+       [:form {:class "flex gap-2" :onsubmit "return false"}
         [:input {:field :seon.ctx/user-input
                  :type "text"
                  :placeholder "Type a message..."
                  :class "flex-1 bg-base-800 border border-base-700 rounded px-3 py-2 text-sm text-text-50 font-mono placeholder-text-500"}]
-        [:button {:on:click :send-message!
+        [:button {:on:click:form :send-message!
                   :class "px-4 py-2 text-sm font-mono rounded bg-signal/20 text-signal border border-signal/30 hover:bg-signal/30 hover:border-signal/50"}
          "Send"]]]]
 
