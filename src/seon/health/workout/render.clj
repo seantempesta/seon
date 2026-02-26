@@ -78,7 +78,38 @@
            [:th {:class "text-center py-1.5 px-3 text-xs font-medium text-text-400 uppercase tracking-wider w-20"} "Reps"]
            [:th {:class "text-right py-1.5 px-3 text-xs font-medium text-text-400 uppercase tracking-wider w-24"} "Weight"]]]
          [:tbody
-          (map (comp :seon.render/html workout-set) ws)]]]]]
+          (map (comp :seon.render/html workout-set) ws)]]]]
+      [:section {:class "mt-4"}
+       (ui/section-header "ADD EXERCISE")
+       [:div {:class "bg-base-850 rounded p-3 flex gap-2 items-end"}
+        [:div {:class "flex-1"}
+         [:label {:class "text-xs text-text-400 block mb-1"} "Exercise"]
+         [:input {:field ::workout/exercise
+                  :type "text"
+                  :placeholder "e.g. Pull-up"
+                  :class "w-full bg-base-800 border border-base-700 rounded px-2 py-1 text-sm text-text-50 font-mono"}]]
+        [:div {:class "w-16"}
+         [:label {:class "text-xs text-text-400 block mb-1"} "Sets"]
+         [:input {:field ::workout/sets
+                  :type "number"
+                  :value "3"
+                  :class "w-full bg-base-800 border border-base-700 rounded px-2 py-1 text-sm text-text-50 font-mono text-center"}]]
+        [:div {:class "w-16"}
+         [:label {:class "text-xs text-text-400 block mb-1"} "Reps"]
+         [:input {:field ::workout/reps
+                  :type "number"
+                  :value "10"
+                  :class "w-full bg-base-800 border border-base-700 rounded px-2 py-1 text-sm text-text-50 font-mono text-center"}]]
+        [:div {:class "w-20"}
+         [:label {:class "text-xs text-text-400 block mb-1"} "Weight"]
+         [:input {:field ::workout/weight
+                  :type "number"
+                  :value "0"
+                  :class "w-full bg-base-800 border border-base-700 rounded px-2 py-1 text-sm text-text-50 font-mono text-center"}]]
+        [:div
+         [:button {:on:click :add-set!
+                   :class "px-3 py-1 text-sm font-mono rounded bg-signal/20 text-signal border border-signal/30 hover:bg-signal/30 hover:border-signal/50"}
+          "+ Add"]]]]]
      :seon.render/ai
      (str "Workout: " (count ws) " exercises. "
           (str/join ", " (map #(:seon.render/ai (workout-set %)) ws)))}))

@@ -65,7 +65,7 @@
 
   elements - HTML string to patch"
   [opts-or-event-id elements]
-  (let [{:keys [selector mode event-id]}
+  (let [{:keys [selector mode event-id use-view-transition?]}
         (if (map? opts-or-event-id)
           opts-or-event-id
           {:event-id opts-or-event-id})
@@ -73,6 +73,7 @@
                    (name mode))]
     (str "event: datastar-patch-elements"
          (when event-id (str "\nid: " event-id))
+         (when use-view-transition? "\ndata: useViewTransition true")
          (when selector (str "\ndata: selector " selector))
          (when mode-str (str "\ndata: mode " mode-str))
          "\ndata: elements " (str/replace elements "\n" "\ndata: elements ")
@@ -243,8 +244,10 @@
     (when-some [new-view-str (render-fn req)]
       (let [new-view-hash (Integer/toHexString (hash new-view-str))]
         (if (not= last-view-hash new-view-hash)
-          ;; View changed - send update
-          (let [sent? (send-fn (patch-elements new-view-hash new-view-str))]
+          ;; View changed - send update with view transition
+          (let [sent? (send-fn (patch-elements {:event-id new-view-hash
+                                                :use-view-transition? true}
+                                               new-view-str))]
             (if sent?
               (do (log/debug "Sending SSE update" {:hash new-view-hash :size (count new-view-str)})
                   new-view-hash)

@@ -214,9 +214,11 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- format-sse-event
-  "Format HTML as Datastar SSE event (patch-elements format)."
+  "Format HTML as Datastar SSE event (patch-elements format).
+  Includes useViewTransition for smooth CSS view transitions."
   [html-str]
   (str "event: datastar-patch-elements\n"
+       "data: useViewTransition true\n"
        "data: elements " (str/replace html-str "\n" "\ndata: elements ")
        "\n\n\n"))
 

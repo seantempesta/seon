@@ -25,6 +25,7 @@
             [seon.web.html :as html]
             [seon.web.sse :as sse]
             [seon.web.components :as ui]
+            [seon.render.default-page :as default-page]
             [seon.web.reactive.actions :as actions]
             [seon.web.reactive.transform :as transform]
             [taoensso.timbre :as log]))
@@ -234,6 +235,35 @@
         (lifecycle/make-render-fn {::lifecycle/render-fn render-fn
                                    ::lifecycle/ns-sym ns-sym})))))
 
+(defn- build-available-keys
+  "Build the set of available data keys for renderer resolution.
+   Combines ctx key, conn key, web params, and def var keys."
+  [ns-sym params]
+  (let [ns-str (str ns-sym)
+        ctx-key (keyword ns-str "*ctx*")
+        conn-key (keyword ns-str "*conn*")
+        web-params (render/namespace-web-params params ns-str)
+        ;; Start with ctx + conn (always available for dynamic ns)
+        base-keys #{ctx-key conn-key}]
+    (into base-keys (keys web-params))))
+
+(defn- build-renderer-input
+  "Build the full input map for a resolved renderer.
+   Assembles data from all sources: ctx, conn, web params."
+  [ns-sym instance-id params]
+  (let [ns-str (str ns-sym)
+        ctx-key (keyword ns-str "*ctx*")
+        conn-key (keyword ns-str "*conn*")
+        web-params (render/namespace-web-params params ns-str)
+        ctx-atom (when instance-id
+                   (ctx/get-atom {::ctx/instance-id instance-id}))
+        ctx-val (when ctx-atom @ctx-atom)
+        conn (get-conn)]
+    (cond-> {}
+      ctx-val (assoc ctx-key ctx-val)
+      conn (assoc conn-key conn)
+      web-params (merge web-params))))
+
 (defn- view-toggle-button
   "Toggle button to switch between custom render and introspection view.
    Only shown when namespace has a graph-discovered page renderer."
@@ -370,27 +400,59 @@
 
 (defn- render-namespace-content
   "Render full namespace view content for HTML format (SSE polling).
-   Checks the code graph for a spec-discovered page renderer.
+   Uses resolve-renderer with available keys for specificity-based resolution.
    Non-HTML formats are handled separately by render-for-format.
 
    Params:
    - ns-sym: The namespace symbol
    - session-id: Optional session/instance ID
-   - view: Optional view mode - \"introspect\" forces introspection view"
-  [ns-sym session-id view]
-  (let [graph-render (find-graph-render-fn ns-sym)
+   - view: Optional view mode - \"introspect\" forces introspection view
+   - params: Parsed query params map (string keys)"
+  [ns-sym session-id view params]
+  (let [conn (get-conn)
+        available-keys (build-available-keys ns-sym params)
+        resolved (when conn
+                   (render/resolve-renderer conn available-keys (str ns-sym)))
+        graph-render (when-not resolved (find-graph-render-fn ns-sym))
+        has-renderer? (or (some? resolved) (some? graph-render))
         force-introspect? (= view "introspect")]
     (cond
       ;; Force introspection view if requested
       force-introspect?
-      (render-introspection-view ns-sym session-id (some? graph-render))
+      (render-introspection-view ns-sym session-id has-renderer?)
 
-      ;; Graph-discovered page renderer
+      ;; Resolved renderer via specificity algorithm
+      resolved
+      (let [input (build-renderer-input ns-sym session-id params)
+            result (resolved input)
+            hiccup (:seon.render/html result)
+            toggle-html (h/html
+                         [:div {:class "mb-4 flex justify-end"}
+                          (view-toggle-button ns-sym nil session-id)])
+            custom-html (h/html [:main#morph hiccup])]
+        (str/replace custom-html
+                     #"(<main[^>]*>)"
+                     (str "$1" toggle-html)))
+
+      ;; Legacy graph-discovered page renderer
       graph-render
       (let [ctx-key (::lifecycle/ctx-spec-key
                      (lifecycle/ctx-spec-key {::lifecycle/ns-sym ns-sym}))
-            ;; Build minimal ctx value for non-dynamic render
             hiccup (graph-render {ctx-key {}})
+            toggle-html (h/html
+                         [:div {:class "mb-4 flex justify-end"}
+                          (view-toggle-button ns-sym nil session-id)])
+            custom-html (h/html [:main#morph hiccup])]
+        (str/replace custom-html
+                     #"(<main[^>]*>)"
+                     (str "$1" toggle-html)))
+
+      ;; Default page template for dynamic namespaces without custom renderer
+      (dynamic-namespace? ns-sym)
+      (let [ctx-key (keyword (str ns-sym) "*ctx*")
+            input {ctx-key {}}
+            result (default-page/render-default-page input)
+            hiccup (:seon.render/html result)
             toggle-html (h/html
                          [:div {:class "mb-4 flex justify-end"}
                           (view-toggle-button ns-sym nil session-id)])
@@ -409,7 +471,8 @@
 
 (defn- reactive-instance-page
   "Render full HTML page for a reactive instance.
-   Uses the render-fn from the ctx registry (set by lifecycle/ensure-instance!)."
+   Uses base-page for consistent theming (dark bg, nav, highlight.js).
+   The render-fn comes from the ctx registry (set by lifecycle/ensure-instance!)."
   [ns-sym instance-id]
   (let [ctx-atom (ctx/get-atom {::ctx/instance-id instance-id})]
     (if ctx-atom
@@ -418,49 +481,42 @@
             ctx-val @ctx-atom
             content-hiccup (when render-fn (render-fn ctx-val))
             transformed (when content-hiccup
-                          (transform/transform-hiccup ns-sym content-hiccup instance-id))]
-        (str
-         "<!DOCTYPE html>"
-         (h/html
-          [:html {:lang "en"}
-           [:head
-            [:meta {:charset "UTF-8"}]
-            [:meta {:name "viewport" :content "width=device-width, initial-scale=1.0"}]
-            [:title (str ns-sym " - Seon")]
-            [:link {:rel "stylesheet" :href "/css/output.css"}]
-            [:script {:type "module" :src html/datastar-js}]
-            [:script {:src "/js/scittle.js"}]
-            [:script {:src "/js/seon-debug.js"}]]
-           [:body.bg-base-bg.text-text-primary.font-mono.min-h-screen
-            [:div.container.mx-auto.p-6.max-w-4xl
-             [:header.mb-6
-              [:div.flex.items-center.justify-between
-               [:h1.text-xl.font-bold.text-accent-primary (str ns-sym)]
-               [:a {:href (str "/ns/" ns-sym "?view=introspect&instance=" instance-id)
-                    :class "px-2 py-1 text-xs font-mono rounded border text-text-500 border-base-700 hover:border-base-600 hover:text-text-200"}
-                "Introspect ->"]]
-              [:p.text-text-secondary.text-sm.mt-1
-               "Instance: " [:code.text-signal instance-id]]]
-             ;; SSE init div - triggers POST connection on load
-             [:div {:data-init (str "@post('/ns/" ns-sym "?instance=" instance-id "')")}]
-             ;; Main content - render-fn produces [:main#morph ...] which SSE patches
-             (or transformed [:main#morph [:div.text-text-muted "Loading..."]])
-             [:footer.mt-8.pt-4.border-t.border-surface-2.text-text-muted.text-sm
-              [:a.text-accent-primary.hover:underline {:href "/"} "<- Back to dashboard"]]]]])))
+                          (transform/transform-hiccup ns-sym content-hiccup instance-id))
+            ;; The renderer produces [:main#morph ...] but base-page already wraps
+            ;; skeleton in [:main#morph skeleton]. Extract inner content to avoid
+            ;; nested #morph elements (which breaks Datastar's getElementById lookup).
+            morph-children (if (and transformed
+                                    (vector? transformed)
+                                    (= :main#morph (first transformed)))
+                             (if (map? (second transformed))
+                               (let [[_ attrs & children] transformed]
+                                 (into [:div attrs] children))
+                               (into [:div] (rest transformed)))
+                             (or transformed [:div.text-text-500 "Loading..."]))]
+        (html/base-page
+         {:title (str ns-sym " - Seon")
+          :active-page nil
+          :header
+          [:header.mb-6
+           [:div.flex.items-center.justify-between
+            [:h1.text-xl.font-bold.text-amber-400 (str ns-sym)]
+            [:a {:href (str "/ns/" ns-sym "?view=introspect&instance=" instance-id)
+                 :class "px-2 py-1 text-xs font-mono rounded border text-text-500 border-base-700 hover:border-base-600 hover:text-text-200"}
+             "Introspect ->"]]
+           [:p.text-text-400.text-sm.mt-1
+            "Instance: " [:code.text-amber-300 instance-id]]]
+          :skeleton morph-children}))
       ;; Instance not found
-      (str
-       "<!DOCTYPE html>"
-       (h/html
-        [:html {:lang "en"}
-         [:head
-          [:meta {:charset "UTF-8"}]
-          [:title "Instance Not Found"]]
-         [:body.bg-base-bg.text-text-primary.font-mono.min-h-screen.flex.items-center.justify-center
-          [:div.text-center
-           [:h1.text-xl.font-bold.text-error "Instance Not Found"]
-           [:p.text-text-muted.mt-2 "The instance " [:code instance-id] " does not exist."]
-           [:a.text-accent-primary.hover:underline.mt-4.inline-block
-            {:href (str "/ns/" ns-sym)} "Create new instance"]]]])))))
+      (html/base-page
+       {:title "Instance Not Found"
+        :active-page nil
+        :skeleton
+        [:div.flex.items-center.justify-center.min-h-96
+         [:div.text-center
+          [:h1.text-xl.font-bold.text-red-400 "Instance Not Found"]
+          [:p.text-text-400.mt-2 "The instance " [:code instance-id] " does not exist."]
+          [:a.text-amber-400.hover:underline.mt-4.inline-block
+           {:href (str "/ns/" ns-sym)} "Create new instance"]]]}))))
 
 (defn- instance-sse-handler
   "SSE handler for reactive instance updates.
@@ -534,6 +590,26 @@
       (and conn-var (bound? conn-var))
       (assoc conn-key @conn-var))))
 
+(defn- fn-schema-key-map
+  "Build a signal-name -> qualified-keyword mapping from a function's Malli schema.
+   The transform layer strips namespaces from field keys (`:seon.ctx/user-input` becomes
+   signal name `user-input`). This function inspects the target fn's schema to determine
+   the correct qualified key for each signal name.
+   Falls back to namespacing under ns-sym for unmatched signal names."
+  [action-fn _ns-sym]
+  (when-let [schema (:malli/schema (meta action-fn))]
+    ;; Schema is [:=> [:cat [:map ...]] :any]
+    ;; Extract the map entries from the first arg
+    (let [cat-schema (second schema)           ; [:cat [:map ...]]
+          map-schema (second cat-schema)       ; [:map ...]
+          entries (rest map-schema)]           ; ([key opts? schema] ...)
+      (into {}
+            (keep (fn [entry]
+                    (let [k (first entry)]
+                      (when (and (keyword? k) (namespace k))
+                        [(name k) k]))))
+            entries))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; HTTP Handlers
 ;;; ---------------------------------------------------------------------------
@@ -601,7 +677,7 @@
                       (let [params (parse-query-params req)
                             session-id (get params "id")
                             view (get params "view")]
-                        (render-namespace-content ns-sym session-id view)))
+                        (render-namespace-content ns-sym session-id view params)))
           handler (sse/render-handler render-fn :poll-ms 2000)]
       (swap! namespace-handlers assoc ns-sym handler)
       handler)))
@@ -700,7 +776,23 @@
       :else
       (if-let [action-fn (actions/resolve-action ns-sym fn-sym)]
         (try
-        (let [base-signals (actions/extract-signals body)
+        (let [raw-signals (actions/extract-signals body)
+              ;; Re-namespace signal keys using the function's Malli schema.
+              ;; The transform layer strips namespaces from field keys because
+              ;; JS identifiers can't contain dots/slashes. We restore the correct
+              ;; qualified key by matching signal names against schema keys.
+              ;; Example: signal "user-input" -> :seon.ctx/user-input (from schema)
+              ;;          signal "exercise"   -> :seon.getting-started/exercise
+              key-map (or (fn-schema-key-map action-fn ns-sym) {})
+              base-signals (into {}
+                                 (map (fn [[k v]]
+                                        (if (namespace k)
+                                          [k v]
+                                          (let [sig-name (name k)]
+                                            [(or (get key-map sig-name)
+                                                 (keyword (str ns-sym) sig-name))
+                                             v]))))
+                                 raw-signals)
               ;; Auto-inject *ctx* and *conn* from namespace vars
               injected (inject-ctx-conn ns-sym base-signals)
               ;; Add instance ctx atom if present

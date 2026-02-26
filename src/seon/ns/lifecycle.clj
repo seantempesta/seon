@@ -337,9 +337,11 @@
 (defn ensure-instance!
   "Resolve or create a ctx instance for a dynamic namespace.
 
-   If an existing instance is found (via instance-id or most recent),
-   validates saved state against current spec. If valid, resumes.
-   If invalid or not found, creates fresh from initial-value.
+   FIRST checks in-memory registry for existing live instance.
+   If found, returns it immediately (preserving in-memory state).
+
+   If not in memory, checks Datalevin for persisted state.
+   If valid, restores from persistence. Otherwise creates fresh.
 
    Request keys:
      ::conn        - Optional. Datalevin connection
@@ -351,48 +353,57 @@
      ::ctx-atom    - The ctx atom"
   {:malli/schema [:=> [:cat ::ensure-instance-request] ::ensure-instance-response]}
   [{::keys [conn ns-sym instance-id]}]
-  (let [spec-key (::ctx-spec-key (ctx-spec-key {::ns-sym ns-sym}))
-        existing (when conn
-                   (resolve-instance {::conn conn ::ns-sym ns-sym ::instance-id instance-id}))
-        page-render-var (when conn
-                          (::render-fn (find-page-render-fn {::conn conn ::ns-sym ns-sym})))
-        render-fn (when page-render-var
-                    (make-render-fn {::render-fn page-render-var ::ns-sym ns-sym}))
-        ;; Check if saved state is valid against current spec
-        saved-valid? (when existing
-                       (if (schema/registered? spec-key)
-                         (m/validate (schema/schema-definition spec-key)
-                                     (::data existing))
-                         true))
-        use-existing? (and existing saved-valid?)
-        iid (if use-existing?
-              (::instance-id existing)
-              (or instance-id
-                  (:seon.runtime/id (runtime/generate-id {}))))
-        init-val (if use-existing?
-                   (::data existing)
-                   (::data (initial-value {::ns-sym ns-sym})))]
+  ;; CRITICAL: Check in-memory registry FIRST to avoid creating duplicate atoms
+  (if-let [existing-atom (when instance-id
+                           (ctx/get-atom {::ctx/instance-id instance-id}))]
+    ;; Instance already exists in memory - return it
+    (do
+      (log/debug "Using existing in-memory instance" {:ns ns-sym :instance instance-id})
+      {::instance-id instance-id
+       ::ctx-atom existing-atom})
+    ;; Not in memory - check persistence or create fresh
+    (let [spec-key (::ctx-spec-key (ctx-spec-key {::ns-sym ns-sym}))
+          persisted (when conn
+                      (resolve-instance {::conn conn ::ns-sym ns-sym ::instance-id instance-id}))
+          page-render-var (when conn
+                            (::render-fn (find-page-render-fn {::conn conn ::ns-sym ns-sym})))
+          render-fn (when page-render-var
+                      (make-render-fn {::render-fn page-render-var ::ns-sym ns-sym}))
+          ;; Check if persisted state is valid against current spec
+          persisted-valid? (when persisted
+                             (if (schema/registered? spec-key)
+                               (m/validate (schema/schema-definition spec-key)
+                                           (::data persisted))
+                               true))
+          use-persisted? (and persisted persisted-valid?)
+          iid (if use-persisted?
+                (::instance-id persisted)
+                (or instance-id
+                    (:seon.runtime/id (runtime/generate-id {}))))
+          init-val (if use-persisted?
+                     (::data persisted)
+                     (::data (initial-value {::ns-sym ns-sym})))]
 
-    (when (and existing (not saved-valid?))
-      (log/warn "Saved ctx state invalid against current spec, creating fresh"
-                {:ns ns-sym :instance-id (::instance-id existing)}))
+      (when (and persisted (not persisted-valid?))
+        (log/warn "Persisted ctx state invalid against current spec, creating fresh"
+                  {:ns ns-sym :instance-id (::instance-id persisted)}))
 
-    (let [ctx-atom (ctx/create!
-                    (cond-> {::ctx/instance-id iid
-                             ::ctx/namespace ns-sym
-                             ::ctx/initial-value init-val
-                             ::ctx/persist? (some? conn)
-                             ::ctx/sse-push? false
-                             ::ctx/track-clients? true}
-                      conn (assoc ::ctx/conn conn)
-                      render-fn (assoc ::ctx/render-fn render-fn)
-                      (schema/registered? spec-key)
-                      (assoc ::ctx/ctx-schema spec-key)))]
+      (let [ctx-atom (ctx/create!
+                      (cond-> {::ctx/instance-id iid
+                               ::ctx/namespace ns-sym
+                               ::ctx/initial-value init-val
+                               ::ctx/persist? (some? conn)
+                               ::ctx/sse-push? true
+                               ::ctx/track-clients? true}
+                        conn (assoc ::ctx/conn conn)
+                        render-fn (assoc ::ctx/render-fn render-fn)
+                        (schema/registered? spec-key)
+                        (assoc ::ctx/ctx-schema spec-key)))]
 
-      (inject-vars! {::ns-sym ns-sym ::ctx-atom ctx-atom ::conn conn})
+        (inject-vars! {::ns-sym ns-sym ::ctx-atom ctx-atom ::conn conn})
 
-      {::instance-id iid
-       ::ctx-atom ctx-atom})))
+        {::instance-id iid
+         ::ctx-atom ctx-atom}))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Shutdown / Restore

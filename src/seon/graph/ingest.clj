@@ -57,6 +57,7 @@
    :seon.fn/row            {:db/valueType :db.type/long}
    :seon.fn/private        {:db/valueType :db.type/boolean}
    :seon.fn/render-input-keys {:db/valueType :db.type/keyword :db/cardinality :db.cardinality/many}
+   :seon.fn/render-optional-keys {:db/valueType :db.type/keyword :db/cardinality :db.cardinality/many}
    :seon.fn/page-renderer?    {:db/valueType :db.type/boolean}
    :seon.fn/needs-ctx?        {:db/valueType :db.type/boolean}
    :seon.fn/needs-conn?       {:db/valueType :db.type/boolean}
@@ -78,6 +79,7 @@
    :seon.spec/definition    {:db/valueType :db.type/string}
    :seon.spec/base-type     {:db/valueType :db.type/keyword}
    :seon.spec/contains-keys {:db/valueType :db.type/keyword :db/cardinality :db.cardinality/many}
+   :seon.spec/optional-keys {:db/valueType :db.type/keyword :db/cardinality :db.cardinality/many}
    :seon.spec/references    {:db/valueType :db.type/keyword :db/cardinality :db.cardinality/many}
    :seon.spec/updated-at    {:db/valueType :db.type/instant}
 

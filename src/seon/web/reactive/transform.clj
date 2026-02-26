@@ -78,21 +78,24 @@
 (defn- transform-field-attr
   "Transform {:field :name} to Datastar bind format.
 
-   Uses VALUE SYNTAX (data-bind=\"name\") instead of KEY SYNTAX (data-bind:name)
-   because Datastar's key syntax applies camelCase conversion (item-name → itemName)
-   but value syntax preserves the name exactly.
+   Uses KEY SYNTAX (data-bind:signalName) because Datastar's value syntax
+   evaluates as a JS expression, which breaks with namespaced keys containing
+   dots and slashes (e.g. seon.getting-started/exercise).
+
+   For qualified keywords like :seon.getting-started/exercise, we use only
+   the name part ('exercise') as the signal name. The server re-namespaces
+   signals based on the target function's namespace when handling POSTs.
+
+   Key syntax applies camelCase conversion (user-input → userInput) which
+   is reversed by the server's camel->kebab in extract-signals.
 
    Returns map of attributes to merge."
   [field-name other-attrs]
-  (let [field-str (if (qualified-keyword? field-name)
-                    ;; Preserve namespace: :seon.trading/symbol → \"seon.trading/symbol\"
-                    (str (namespace field-name) "/" (name field-name))
-                    ;; Simple keyword: :item-name → \"item-name\"
-                    (name field-name))]
+  (let [signal-name (name field-name)
+        bind-key (keyword (str "data-bind:" signal-name))]
     (merge
-     {:name field-str
-      :data-bind field-str}  ; Value syntax - no camelCase conversion
-     ;; Preserve other attributes like :type, :placeholder, etc.
+     {:name signal-name
+      bind-key true}
      (dissoc other-attrs :field))))
 
 (defn transform-attrs
@@ -139,8 +142,53 @@
   (and (> (count form) 1)
        (map? (second form))))
 
+(defn- collect-field-defaults
+  "Walk hiccup and collect :field names with their default :value attrs.
+   Uses only the name part of qualified keywords (namespace is implicit from URL).
+   Returns a map of {signal-name default-value-str}."
+  [hiccup]
+  (let [fields (atom {})]
+    (walk/postwalk
+     (fn [form]
+       (when (and (hiccup-element? form) (has-attrs? form))
+         (let [attrs (second form)]
+           (when-let [field (:field attrs)]
+             (let [signal-name (name field)
+                   default (get attrs :value "")]
+               (swap! fields assoc signal-name (str default))))))
+       form)
+     hiccup)
+    @fields))
+
+(defn- inject-data-signals
+  "Wrap transformed hiccup with a data-signals container if any fields exist.
+   Datastar requires data-signals on a parent element to initialize the reactive store
+   that data-bind attributes read from and write to."
+  [hiccup field-defaults]
+  (if (empty? field-defaults)
+    hiccup
+    (let [signals-json (str "{"
+                            (str/join ", "
+                                      (map (fn [[k v]]
+                                             (str "\"" k "\": \"" v "\""))
+                                           field-defaults))
+                            "}")]
+      ;; If hiccup is a vector starting with a tag, wrap its content
+      ;; by adding data-signals to the root element's attrs
+      (if (hiccup-element? hiccup)
+        (if (has-attrs? hiccup)
+          (let [[tag attrs & children] hiccup]
+            (into [tag (assoc attrs :data-signals signals-json)] children))
+          ;; Element without attrs map - insert one
+          (let [[tag & children] hiccup]
+            (into [tag {:data-signals signals-json}] children)))
+        ;; Otherwise wrap in a div
+        (into [:div {:data-signals signals-json}] [hiccup])))))
+
 (defn transform-hiccup
   "Transform hiccup tree, converting reactive attributes to Datastar format.
+   Also injects data-signals on the root element to initialize Datastar's
+   reactive store for any fields found in the tree.
 
    ns-sym      - The namespace symbol for action URLs (e.g., 'seon.trading)
    hiccup      - The hiccup data structure to transform
@@ -151,14 +199,16 @@
   ([ns-sym hiccup]
    (transform-hiccup ns-sym hiccup nil))
   ([ns-sym hiccup instance-id]
-   (walk/postwalk
-    (fn [form]
-      (if (and (hiccup-element? form) (has-attrs? form))
-        (let [[tag attrs & children] form
-              new-attrs (transform-attrs ns-sym attrs instance-id)]
-          (into [tag new-attrs] children))
-        form))
-    hiccup)))
+   (let [field-defaults (collect-field-defaults hiccup)
+         transformed (walk/postwalk
+                      (fn [form]
+                        (if (and (hiccup-element? form) (has-attrs? form))
+                          (let [[tag attrs & children] form
+                                new-attrs (transform-attrs ns-sym attrs instance-id)]
+                            (into [tag new-attrs] children))
+                          form))
+                      hiccup)]
+     (inject-data-signals transformed field-defaults))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Convenience Functions
@@ -177,13 +227,13 @@
   ;; Example usage:
 
   (transform-hiccup 'seon.trading
-    [:div
-     [:h1 "Trading Signals"]
-     [:ul (for [s ["AAPL" "GOOG"]] [:li s])]
-     [:form {:on:submit :add-signal!}
-      [:input {:field :symbol :placeholder "Symbol"}]
-      [:input {:field :price :type "number"}]
-      [:button {:on:click :add-signal!} "Add"]]])
+                    [:div
+                     [:h1 "Trading Signals"]
+                     [:ul (for [s ["AAPL" "GOOG"]] [:li s])]
+                     [:form {:on:submit :add-signal!}
+                      [:input {:field :symbol :placeholder "Symbol"}]
+                      [:input {:field :price :type "number"}]
+                      [:button {:on:click :add-signal!} "Add"]]])
 
   ;; =>
   ;; [:div
@@ -193,5 +243,4 @@
   ;;   [:input {:name "symbol" :data-bind:symbol true :placeholder "Symbol"}]
   ;;   [:input {:name "price" :data-bind:price true :type "number"}]
   ;;   [:button {:data-on:click "@post('/ns/seon.trading/add-signal!')"} "Add"]]]
-
   )

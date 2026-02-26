@@ -139,6 +139,63 @@
         "Should not match :ai format when output only has :seon.render/html")))
 
 ;;; ---------------------------------------------------------------------------
+;;; humanize Tests
+;;; ---------------------------------------------------------------------------
+
+(deftest humanize-basic-test
+  (testing "strips namespace and converts kebab-case to Title Case"
+    (is (= "Total Volume" (render/humanize :seon.health.workout/total-volume)))
+    (is (= "Proposed Schema" (render/humanize :proposed-schema)))
+    (is (= "Step Title" (render/humanize "step-title")))
+    (is (= "Exercise" (render/humanize :seon.getting-started/exercise)))))
+
+(deftest humanize-abbreviations-test
+  (testing "uppercases known abbreviations"
+    (is (= "API Key" (render/humanize :api-key)))
+    (is (= "User ID" (render/humanize :user-id)))
+    (is (= "Base URL" (render/humanize :base-url)))
+    (is (= "SSE Target" (render/humanize :sse-target)))))
+
+(deftest humanize-edge-cases-test
+  (testing "nil returns empty string"
+    (is (= "" (render/humanize nil))))
+  (testing "empty string returns empty string"
+    (is (= "" (render/humanize ""))))
+  (testing "single character keyword"
+    (is (= "A" (render/humanize :a))))
+  (testing "non-keyword non-string input"
+    (is (= "42" (render/humanize 42)))))
+
+(deftest humanize-asterisks-test
+  (testing "strips asterisks from dynamic var names"
+    (is (= "Ctx" (render/humanize :*ctx*)))
+    (is (= "Conn" (render/humanize :*conn*)))))
+
+;;; ---------------------------------------------------------------------------
+;;; render-schema Tests
+;;; ---------------------------------------------------------------------------
+
+(deftest render-schema-map-test
+  (testing "renders :map schema as field specification table"
+    (let [schema [:map [:exercise :string] [:sets :int] [:weight :double]]
+          result (render/render-schema schema)]
+      (is (= :div (first result)))
+      ;; Should contain a table
+      (is (some #(and (vector? %) (= :table (first %)))
+                (tree-seq vector? rest result))))))
+
+(deftest render-schema-optional-test
+  (testing "marks optional fields correctly"
+    (let [schema [:map [:name :string] [:note {:optional true} :string]]
+          result (render/render-schema schema)]
+      (is (some? result)))))
+
+(deftest render-schema-non-map-test
+  (testing "non-map schemas render as type badge"
+    (let [result (render/render-schema [:string])]
+      (is (= :span (first result))))))
+
+;;; ---------------------------------------------------------------------------
 ;;; for-html Tests
 ;;; ---------------------------------------------------------------------------
 
@@ -148,11 +205,11 @@
            (render/for-html nil)))
     (is (= [:span {:class "text-text-200"} "hello"]
            (render/for-html "hello")))
-    (is (= [:span {:class "text-amber-400 font-mono"} ":foo/bar"]
+    (is (= [:span {:class "text-text-200"} "Bar"]
            (render/for-html :foo/bar)))
-    (is (= [:span {:class "text-cyan-400 font-mono"} "42"]
+    (is (= [:span {:class "text-signal font-mono"} "42"]
            (render/for-html 42)))
-    (is (= [:span {:class "text-purple-400 font-mono"} "true"]
+    (is (= [:span {:class "text-eval font-mono"} "true"]
            (render/for-html true)))))
 
 (deftest for-html-map-test
@@ -257,6 +314,111 @@
       (is (vector? (render/default-namespace-render data :html)))
       (is (string? (render/default-namespace-render data :ai)))
       (is (= data (render/default-namespace-render data :raw))))))
+
+;;; ---------------------------------------------------------------------------
+;;; namespace-web-params Tests
+;;; ---------------------------------------------------------------------------
+
+(deftest namespace-web-params-basic-test
+  (testing "namespaces query params under target namespace"
+    (is (= {:seon.health.workout/sort-by "weight"
+            :seon.health.workout/page "2"}
+           (render/namespace-web-params {"sort-by" "weight" "page" "2"}
+                                        "seon.health.workout")))))
+
+(deftest namespace-web-params-excludes-system-params-test
+  (testing "excludes system-reserved params"
+    (is (= {:seon.health.workout/sort-by "weight"}
+           (render/namespace-web-params {"sort-by" "weight"
+                                         "instance" "abc123"
+                                         "format" "ai"
+                                         "view" "introspect"}
+                                        "seon.health.workout")))))
+
+(deftest namespace-web-params-empty-test
+  (testing "returns nil for empty/nil params"
+    (is (nil? (render/namespace-web-params {} "seon.foo")))
+    (is (nil? (render/namespace-web-params nil "seon.foo")))))
+
+;;; ---------------------------------------------------------------------------
+;;; resolve-renderer Tests
+;;; ---------------------------------------------------------------------------
+
+(deftest resolve-renderer-specificity-test
+  (testing "picks renderer with most required keys (strict subset)"
+    ;; Renderer A: requires 1 key
+    (d/transact! *conn*
+                 [{:seon.spec/key :test.resolve/a-response
+                   :seon.spec/namespace "test.resolve"
+                   :seon.spec/base-type :map
+                   :seon.spec/contains-keys [:seon.render/html]
+                   :seon.spec/definition "[:map ...]"
+                   :seon.spec/updated-at (java.util.Date.)}
+                  {:seon.fn/qualified-name "test.resolve/renderer-a"
+                   :seon.fn/namespace "test.resolve"
+                   :seon.fn/name "renderer-a"
+                   :seon.fn/render-input-keys [:test/alpha]
+                   :seon.fn/output-spec [:seon.spec/key :test.resolve/a-response]
+                   :seon.fn/updated-at (java.util.Date.)
+                   :seon.fn/private false}])
+    ;; Renderer B: requires 2 keys (more specific)
+    (d/transact! *conn*
+                 [{:seon.spec/key :test.resolve/b-response
+                   :seon.spec/namespace "test.resolve"
+                   :seon.spec/base-type :map
+                   :seon.spec/contains-keys [:seon.render/html]
+                   :seon.spec/definition "[:map ...]"
+                   :seon.spec/updated-at (java.util.Date.)}
+                  {:seon.fn/qualified-name "test.resolve/renderer-b"
+                   :seon.fn/namespace "test.resolve"
+                   :seon.fn/name "renderer-b"
+                   :seon.fn/render-input-keys [:test/alpha :test/beta]
+                   :seon.fn/output-spec [:seon.spec/key :test.resolve/b-response]
+                   :seon.fn/updated-at (java.util.Date.)
+                   :seon.fn/private false}])
+
+    ;; Both keys available -> B wins (more specific)
+    (let [result (render/resolve-renderer *conn*
+                                          #{:test/alpha :test/beta}
+                                          "test.resolve")]
+      ;; resolve-renderer returns a var, not a string
+      ;; but the fn might not exist, so just check it tried the right one
+      ;; For test, we check it doesn't return nil (the fn won't resolve since
+      ;; test.resolve/renderer-b doesn't exist, so it returns nil with a warning)
+      ;; Instead, let's test via find-renderer which returns a string
+      (is (= "test.resolve/renderer-b"
+             (render/find-renderer *conn*
+                                   {:test/alpha 1 :test/beta 2}
+                                   :html))))))
+
+(deftest resolve-renderer-missing-keys-excludes-test
+  (testing "renderer excluded when required keys not all present"
+    ;; Renderer needs alpha + beta, but only alpha available
+    (d/transact! *conn*
+                 [{:seon.spec/key :test.excl/response
+                   :seon.spec/namespace "test.excl"
+                   :seon.spec/base-type :map
+                   :seon.spec/contains-keys [:seon.render/html]
+                   :seon.spec/definition "[:map ...]"
+                   :seon.spec/updated-at (java.util.Date.)}
+                  {:seon.fn/qualified-name "test.excl/needs-two"
+                   :seon.fn/namespace "test.excl"
+                   :seon.fn/name "needs-two"
+                   :seon.fn/render-input-keys [:test/alpha :test/beta]
+                   :seon.fn/output-spec [:seon.spec/key :test.excl/response]
+                   :seon.fn/updated-at (java.util.Date.)
+                   :seon.fn/private false}])
+
+    (is (nil? (render/resolve-renderer *conn*
+                                       #{:test/alpha}
+                                       "test.excl"))
+        "Should not resolve when required key :test/beta is missing")))
+
+(deftest resolve-renderer-no-candidates-test
+  (testing "returns nil when no renderers in DB"
+    (is (nil? (render/resolve-renderer *conn*
+                                       #{:foo/bar}
+                                       "foo")))))
 
 (comment
   (require '[kaocha.repl :as k])
