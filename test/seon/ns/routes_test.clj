@@ -5,7 +5,6 @@
             [seon.getting-started :as gs]
             [seon.getting-started.render :as gs-render]
             [seon.ns.routes :as routes]
-            [seon.web.reactive.encoding :as encoding]
             [seon.web.reactive.transform :as transform]))
 
 ;;; ---------------------------------------------------------------------------
@@ -30,62 +29,37 @@
 (use-fixtures :each with-test-instance)
 
 ;;; ---------------------------------------------------------------------------
-;;; Signal Encoding Round Trip Tests
+;;; Form Data Round Trip Tests
 ;;; ---------------------------------------------------------------------------
 
-(deftest signal-encoding-round-trip-test
-  (testing "qualified keyword encodes and decodes back to itself"
-    (doseq [kw [:seon.getting-started/exercise
-                :seon.ctx/user-input
-                :seon.health.workout/sets]]
-      (let [path (encoding/encode-keyword kw)
-            segments (str/split path #"\.")
-            nested (reduce (fn [acc seg] {seg acc})
-                           "test-value"
-                           (reverse segments))
-            decoded (encoding/decode-signals nested)]
-        (is (= kw (ffirst decoded))
-            (str "round-trip failed for: " kw)))))
-
-  (testing "cross-namespace signals decode correctly from nested JSON"
-    (is (= {:seon.getting-started/exercise "Pull-up"
-            :seon.ctx/user-input "hello"}
-           (encoding/decode-signals
-            {"seon" {"gettingStarted" {"exercise" "Pull-up"}
-                     "ctx" {"userInput" "hello"}}})))))
+(deftest form-data-round-trip-test
+  (testing "qualified keywords survive form POST round trip"
+    ;; Simulates what Datastar sends with contentType:'form'
+    ;; Form field name=":seon.getting-started/exercise" value="Pull-up"
+    ;; arrives as URL-encoded: %3Aseon.getting-started%2Fexercise=Pull-up
+    ;; routes/parse-form-body decodes to {:seon.getting-started/exercise "Pull-up"}
+    (let [form-body ":seon.getting-started/exercise=Pull-up&:seon.getting-started/sets=4"]
+      (is (= {:seon.getting-started/exercise "Pull-up"
+              :seon.getting-started/sets "4"}
+             (#'routes/parse-form-body form-body))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Function Call Handler Tests
 ;;; ---------------------------------------------------------------------------
 
 (deftest function-call-handler-signals-test
-  (testing "send-message! receives cross-namespace signal via encoding"
-    ;; Simulate what Datastar sends: nested JSON from dot-notation signals
-    ;; seon.ctx.userInput -> {"seon": {"ctx": {"userInput": "test message"}}}
-    (let [request {:request-method :post
-                   :uri "/ns/seon.getting-started/send-message!"
-                   :path-params {:namespace "seon.getting-started"
-                                 :function "send-message!"}
-                   :query-string "instance=test-rt"
-                   :body {"seon" {"ctx" {"userInput" "test message"}}}}
-          response (routes/function-call-handler request)
-          ctx-val (ctx/get-value {::ctx/instance-id "test-rt"})]
-      (is (= 200 (:status response)))
-      ;; Step 3 has 4 pre-existing messages; ours is appended
-      (is (= {:role :user :content "test message"}
-             (last (:seon.ctx/messages ctx-val))))))
-
-  (testing "add-workout! receives same-namespace signals via encoding"
-    ;; seon.gettingStarted.exercise -> {"seon": {"gettingStarted": {"exercise": "Pull-up", ...}}}
+  (testing "add-workout! receives form-encoded qualified keywords"
+    ;; Simulate Datastar @post with contentType:'form'
     (let [request {:request-method :post
                    :uri "/ns/seon.getting-started/add-workout!"
                    :path-params {:namespace "seon.getting-started"
                                  :function "add-workout!"}
                    :query-string "instance=test-rt"
-                   :body {"seon" {"gettingStarted" {"exercise" "Pull-up"
-                                                    "sets" "4"
-                                                    "reps" "8"
-                                                    "weight" "10"}}}}
+                   :headers {"content-type" "application/x-www-form-urlencoded"}
+                   :body (str ":seon.getting-started/exercise=Pull-up"
+                              "&:seon.getting-started/sets=4"
+                              "&:seon.getting-started/reps=8"
+                              "&:seon.getting-started/weight=10")}
           response (routes/function-call-handler request)
           ctx-val (ctx/get-value {::ctx/instance-id "test-rt"})
           workouts (::gs/workouts ctx-val)]
@@ -113,17 +87,12 @@
                             (keys (second %))))
                 nodes)
           "transformed has data-on:click")
-      ;; Has data-bind for inputs
+      ;; Form fields have name attributes with qualified keywords
       (is (some #(and (vector? %) (map? (second %))
-                      (some (fn [k] (str/starts-with? (name k) "data-bind:"))
-                            (keys (second %))))
+                      (let [n (:name (second %))]
+                        (and (string? n) (str/starts-with? n ":"))))
                 nodes)
-          "transformed has data-bind")
-      ;; Has data-signals on root
-      (is (some #(and (vector? %) (map? (second %))
-                      (:data-signals (second %)))
-                nodes)
-          "transformed has data-signals")
+          "form fields have qualified keyword names")
       ;; Action URLs include instance ID
       (is (some #(and (vector? %) (map? (second %))
                       (some (fn [[_ v]] (and (string? v)
@@ -143,6 +112,6 @@
                    :path-params {:namespace "seon.getting-started"
                                  :function "nonexistent-fn!"}
                    :query-string "instance=test-rt"
-                   :body {}}
+                   :body ""}
           response (routes/function-call-handler request)]
       (is (= 404 (:status response))))))
