@@ -4,24 +4,23 @@
             [seon.web.reactive.transform :as transform]))
 
 (deftest transform-attrs-test
-  (testing "event attributes transform to Datastar format"
-    (is (= {:data-on:click "@post('/ns/seon.test/increment')"}
+  (testing "event attributes transform to Datastar format with FormData"
+    (is (= {:data-on:click "@post('/ns/seon.test/increment', {contentType:'form'})"}
            (transform/transform-attrs 'seon.test {:on:click :increment})))
 
-    (is (= {:data-on:submit "@post('/ns/seon.trading/create-order')"}
+    (is (= {:data-on:submit "@post('/ns/seon.trading/create-order', {contentType:'form'})"}
            (transform/transform-attrs 'seon.trading {:on:submit :create-order}))))
 
-  (testing "field attributes transform to data-bind with encoded signal path"
-    ;; Unqualified :user-name encodes to camelCase signal path
-    (is (= {:name "userName" :data-bind:userName true}
+  (testing "field attributes produce name with printed keyword"
+    (is (= {:name ":user-name"}
            (transform/transform-attrs 'seon.test {:field :user-name}))))
 
-  (testing "qualified field encodes full signal path"
-    (is (= {:name "seon.gettingStarted.exercise" :data-bind:seon.gettingStarted.exercise true}
+  (testing "qualified field produces full keyword string"
+    (is (= {:name ":seon.getting-started/exercise"}
            (transform/transform-attrs 'seon.test {:field :seon.getting-started/exercise}))))
 
   (testing "field preserves other attributes"
-    (is (= {:name "price" :data-bind:price true :type "number" :placeholder "Enter price"}
+    (is (= {:name ":price" :type "number" :placeholder "Enter price"}
            (transform/transform-attrs 'seon.test {:field :price :type "number" :placeholder "Enter price"}))))
 
   (testing "regular attributes pass through unchanged"
@@ -34,29 +33,29 @@
 
 (deftest transform-hiccup-test
   (testing "simple element with event"
-    (is (= [:button {:data-on:click "@post('/ns/seon.test/increment')"} "Add"]
+    (is (= [:button {:data-on:click "@post('/ns/seon.test/increment', {contentType:'form'})"} "Add"]
            (transform/transform-hiccup 'seon.test
              [:button {:on:click :increment} "Add"]))))
 
-  (testing "input with field gets data-signals injected with encoded path"
-    (is (= [:input {:name "email" :data-bind:email true :type "email"
-                    :data-signals "{\"email\":\"\"}"}]
+  (testing "input with field produces name attribute"
+    (is (= [:input {:name ":email" :type "email"}]
            (transform/transform-hiccup 'seon.test
              [:input {:field :email :type "email"}]))))
 
-  (testing "nested structure gets data-signals on root"
+  (testing "nested structure transforms correctly"
     (let [result (transform/transform-hiccup 'seon.trading
                    [:div {:class "container"}
                     [:h1 {} "Title"]
                     [:form {:on:submit :submit}
                      [:input {:field :symbol}]
                      [:button {:on:click :submit} "Go"]]])]
-      ;; Root element has data-signals
+      ;; Root element keeps class
       (is (= :div (first result)))
-      (is (contains? (second result) :data-signals))
       (is (= "container" (:class (second result))))
-      ;; data-signals contains "symbol"
-      (is (str/includes? (:data-signals (second result)) "symbol"))))
+      ;; No data-signals anywhere (removed)
+      (is (not (some #(and (vector? %) (map? (second %))
+                           (:data-signals (second %)))
+                     (tree-seq sequential? seq result))))))
 
   (testing "elements without attrs unchanged"
     (is (= [:div [:span "hello"]]
@@ -76,7 +75,7 @@
   (testing "creates bound transformer function"
     (let [tx (transform/make-transformer 'seon.example)]
       (is (fn? tx))
-      (is (= [:button {:data-on:click "@post('/ns/seon.example/click')"}]
+      (is (= [:button {:data-on:click "@post('/ns/seon.example/click', {contentType:'form'})"}]
              (tx [:button {:on:click :click}]))))))
 
 (deftest edge-cases-test
@@ -88,7 +87,7 @@
     (is (= [:div {}
             [:div {}
              [:div {}
-              [:button {:data-on:click "@post('/ns/seon.test/deep')"} "Deep"]]]]
+              [:button {:data-on:click "@post('/ns/seon.test/deep', {contentType:'form'})"} "Deep"]]]]
            (transform/transform-hiccup 'seon.test
              [:div {}
               [:div {}
@@ -96,21 +95,30 @@
                 [:button {:on:click :deep} "Deep"]]]]))))
 
   (testing "multiple events on same element"
-    (is (= [:input {:data-on:focus "@post('/ns/seon.test/focused')"
-                    :data-on:blur "@post('/ns/seon.test/blurred')"}]
+    (is (= [:input {:data-on:focus "@post('/ns/seon.test/focused', {contentType:'form'})"
+                    :data-on:blur "@post('/ns/seon.test/blurred', {contentType:'form'})"}]
            (transform/transform-hiccup 'seon.test
              [:input {:on:focus :focused :on:blur :blurred}])))))
 
-(deftest qualified-field-encoding-test
-  (testing "qualified keywords produce full signal paths in data-signals"
+(deftest qualified-field-names-test
+  (testing "qualified keywords produce printed keyword strings as name attrs"
     (let [result (transform/transform-hiccup 'seon.getting-started
                    [:div
                     [:input {:field :seon.getting-started/exercise}]
                     [:input {:field :seon.ctx/user-input}]])]
-      ;; data-signals should contain nested JSON with both namespaces
-      (let [signals-json (:data-signals (second result))]
-        (is (some? signals-json))
-        (is (str/includes? signals-json "gettingStarted"))
-        (is (str/includes? signals-json "exercise"))
-        (is (str/includes? signals-json "ctx"))
-        (is (str/includes? signals-json "userInput"))))))
+      ;; Find input elements and check name attrs
+      (let [nodes (tree-seq sequential? seq result)
+            inputs (filter #(and (vector? %) (= :input (first %)) (map? (second %)))
+                           nodes)]
+        (is (= 2 (count inputs)))
+        (is (some #(= ":seon.getting-started/exercise" (:name (second %))) inputs))
+        (is (some #(= ":seon.ctx/user-input" (:name (second %))) inputs))))))
+
+(deftest instance-id-in-urls-test
+  (testing "instance-id appended to action URLs"
+    (let [result (transform/transform-hiccup 'seon.test
+                   [:button {:on:click :action}]
+                   "inst-123")]
+      (is (str/includes?
+           (get-in result [1 :data-on:click])
+           "instance=inst-123")))))

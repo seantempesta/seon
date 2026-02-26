@@ -1,18 +1,13 @@
 (ns seon.web.reactive.actions
-  "Action endpoint for reactive UI.
+  "Action resolution for reactive UI.
 
-   Handles POST /action/:namespace/:function requests from Datastar.
-
-   Flow:
-   1. Extract namespace and function from URL path
-   2. Extract signals from request body (Datastar sends JSON)
-   3. Resolve and call the function with signals map
-   4. Return 200 (ctx watch handles SSE push separately)
-
+   Resolves namespace-qualified function symbols for action execution.
    Security: Only allows calling functions in namespaces under seon.*
-   that are explicitly marked as reactive actions."
+
+   Note: This namespace uses positional arguments rather than map-in/map-out
+   because it's a pure resolution library where (resolve-action ns fn)
+   is more natural than (resolve-action {::ns ns ::fn fn})."
   (:require [clojure.string :as str]
-            [seon.web.reactive.encoding :as encoding]
             [taoensso.timbre :as log]))
 
 ;;; ---------------------------------------------------------------------------
@@ -31,27 +26,6 @@
   [:map
    [:seon.reactive/success :boolean]
    [:seon.reactive/error {:optional true} :string]])
-
-;;; ---------------------------------------------------------------------------
-;;; Signal Extraction
-;;; ---------------------------------------------------------------------------
-
-(defn extract-signals
-  "Extract signals from Datastar request body.
-
-   Delegates to seon.web.reactive.encoding/decode-signals which handles:
-   - Nested JSON from dot-notation signals (preserves full keyword identity)
-   - Flat camelCase keys (legacy format)
-
-   Example:
-     {\"seon\" {\"gettingStarted\" {\"exercise\" \"Pull-up\"}}}
-     → {:seon.getting-started/exercise \"Pull-up\"}"
-  {:malli/schema [:=> [:cat [:maybe :map]] [:map-of :keyword :any]]}
-  [body]
-  (log/debug "extract-signals input" {:body body :type (type body)})
-  (let [result (encoding/decode-signals body)]
-    (log/debug "extract-signals output" {:result result})
-    result))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Function Resolution
@@ -80,78 +54,3 @@
       (catch Exception e
         (log/warn "Failed to resolve action" {:ns ns-sym :fn fn-sym :error (.getMessage e)})
         nil))))
-
-;;; ---------------------------------------------------------------------------
-;;; Request Handling
-;;; ---------------------------------------------------------------------------
-
-(defn parse-action-path
-  "Parse /action/:namespace/:function path into components.
-
-   Returns map with :seon.reactive/namespace and :seon.reactive/function
-   or nil if path is invalid."
-  {:malli/schema [:=> [:cat :string] [:maybe ActionRequest]]}
-  [path]
-  (when-let [[_ ns-str fn-str] (re-matches #"/action/([^/]+)/([^/]+)" path)]
-    {:seon.reactive/namespace (symbol ns-str)
-     :seon.reactive/function (symbol fn-str)}))
-
-(defn handle-action
-  "Handle an action request.
-
-   request - Ring request map with:
-     :uri - Path like /action/seon.trading/create-order
-     :body - Parsed JSON body with signals
-
-   Returns Ring response map."
-  {:malli/schema [:=> [:cat :map] :map]}
-  [request]
-  (let [path (:uri request)
-        body (:body request)]
-    (log/info "ACTION REQUEST" {:path path :body body :body-type (type body)})
-    (if-let [{:seon.reactive/keys [namespace function]} (parse-action-path path)]
-      (if-let [action-fn (resolve-action namespace function)]
-        (try
-          (let [signals (extract-signals body)]
-            (log/info "Executing action" {:ns namespace :fn function :signals signals})
-            (action-fn signals)
-            {:status 200
-             :headers {"Content-Type" "application/json"}
-             :body "{\"success\":true}"})
-          (catch Exception e
-            (log/error e "Action execution failed" {:ns namespace :fn function})
-            {:status 500
-             :headers {"Content-Type" "application/json"}
-             :body (str "{\"success\":false,\"error\":\"" (.getMessage e) "\"}")}))
-        (do
-          (log/warn "Action not found" {:ns namespace :fn function})
-          {:status 404
-           :headers {"Content-Type" "application/json"}
-           :body "{\"success\":false,\"error\":\"Action not found\"}"}))
-      {:status 400
-       :headers {"Content-Type" "application/json"}
-       :body "{\"success\":false,\"error\":\"Invalid action path\"}"})))
-
-;;; ---------------------------------------------------------------------------
-;;; Ring Handler
-;;; ---------------------------------------------------------------------------
-
-(defn action-handler
-  "Ring handler for action routes.
-
-   Matches POST /action/:namespace/:function requests."
-  {:malli/schema [:=> [:cat :map] [:maybe :map]]}
-  [request]
-  (when (and (= :post (:request-method request))
-             (str/starts-with? (or (:uri request) "") "/action/"))
-    (handle-action request)))
-
-(comment
-  ;; Test parsing
-  (parse-action-path "/action/seon.trading/create-order")
-  ;; => {:seon.reactive/namespace seon.trading, :seon.reactive/function create-order}
-
-  ;; Test signal extraction
-  (extract-signals {"symbol" "AAPL" "quantity" "100"})
-  ;; => {:symbol "AAPL", :quantity "100"}
-  )

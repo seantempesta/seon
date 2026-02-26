@@ -11,26 +11,33 @@
    A function is a page renderer iff its input spec contains a *ctx* key and
    its output spec contains :seon.render/html.
 
+   Function calls receive form-encoded POST bodies with qualified keyword names.
+   Server parses keyword keys via clojure.edn/read-string and Malli-coerces
+   string values to correct types before calling the function.
+
    Note: Functions here are Ring handlers using positional args, following
    the pattern of other web handlers in seon.web.*"
-  (:require [clojure.string :as str]
+  (:require [clojure.edn :as edn]
+            [clojure.string :as str]
             [dev.onionpancakes.chassis.core :as h]
             [integrant.repl.state :as state]
             [org.httpkit.server :as hk]
+            [seon.db.datalevin.conn :as dl-conn]
             [seon.ctx :as ctx]
             [seon.ns.introspect :as introspect]
             [seon.ns.lifecycle :as lifecycle]
             [seon.ns.view :as view]
             [seon.render :as render]
+            [seon.runtime :as runtime]
             [seon.web.html :as html]
             [seon.web.sse :as sse]
             [seon.web.components :as ui]
             [seon.render.default-page :as default-page]
             [seon.web.reactive.actions :as actions]
-            [seon.web.reactive.encoding :as encoding]
             [seon.web.reactive.transform :as transform]
             [malli.core :as m]
             [malli.error :as me]
+            [malli.transform :as mt]
             [taoensso.timbre :as log]))
 
 ;;; ---------------------------------------------------------------------------
@@ -57,9 +64,13 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- get-conn
-  "Get Datalevin graph connection from running Integrant system."
+  "Get Datalevin runtime connection via connection manager."
   []
-  (some-> state/system :seon/runtime-db :conn))
+  (when-let [mgr (:seon.db.datalevin/connections state/system)]
+    (try
+      (dl-conn/get-runtime-conn! {::dl-conn/manager mgr
+                                  ::dl-conn/schema (runtime/runtime-merged-schema)})
+      (catch Exception _ nil))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Lifecycle Wrappers
@@ -575,6 +586,58 @@
                     (when v (java.net.URLDecoder/decode v "UTF-8"))])))))
 
 ;;; ---------------------------------------------------------------------------
+;;; Form Data Parsing
+;;; ---------------------------------------------------------------------------
+
+(defn- parse-form-body
+  "Parse a form-encoded body (string or map) into a map with keyword keys.
+
+   Form data arrives as URL-encoded key=value pairs where keys are printed
+   Clojure keywords (e.g., ':seon.getting-started/exercise=Pull-up').
+
+   Handles three body formats:
+   - String: URL-encoded form body from Datastar's @post with contentType:'form'
+   - Map with string keys: Already parsed by Ring middleware
+   - nil/empty: Returns empty map"
+  [body]
+  (cond
+    ;; String body: parse URL-encoded form data
+    (string? body)
+    (if (str/blank? body)
+      {}
+      (into {}
+            (for [pair (str/split body #"&")
+                  :let [[k v] (str/split pair #"=" 2)
+                        k-decoded (java.net.URLDecoder/decode k "UTF-8")
+                        v-decoded (when v (java.net.URLDecoder/decode v "UTF-8"))]]
+              (if (str/starts-with? k-decoded ":")
+                [(edn/read-string k-decoded) (or v-decoded "")]
+                [(keyword k-decoded) (or v-decoded "")]))))
+
+    ;; Map body: convert string keys starting with ":" to keywords
+    (map? body)
+    (into {}
+          (map (fn [[k v]]
+                 (let [k-str (if (string? k) k (str k))]
+                   (if (str/starts-with? k-str ":")
+                     [(edn/read-string k-str) v]
+                     [(keyword k-str) v])))
+               body))
+
+    :else {}))
+
+(defn- coerce-with-schema
+  "Coerce string values to correct types using a Malli schema.
+   HTML forms always send strings; this uses Malli's string transformer
+   to convert '3' -> 3 when the schema says :int, etc.
+
+   Only coerces keys that appear in the schema. Extra keys pass through as-is."
+  [input-map schema]
+  (if schema
+    (m/decode schema input-map (mt/string-transformer))
+    input-map))
+
+;;; ---------------------------------------------------------------------------
 ;;; Auto-Injection Helpers
 ;;; ---------------------------------------------------------------------------
 
@@ -735,14 +798,14 @@
 (defn function-call-handler
   "Handle POST /ns/:namespace/:function requests.
 
-   Signals arrive as nested JSON from Datastar's dot-notation encoding.
-   The encoding layer (seon.web.reactive.encoding) decodes them back to
-   fully qualified Clojure keywords — no schema introspection needed.
+   Form data arrives with qualified keyword names from HTML form fields.
+   The parse-form-body function reads ':keyword' strings back to keywords.
+   Malli string coercion converts string values to correct types per schema.
 
    Auto-injects *ctx* and *conn* values from the namespace's injected vars
-   into the signal map, so functions receive ctx/conn without explicit wiring.
+   into the parsed form data, so functions receive ctx/conn without explicit wiring.
 
-   Validates decoded signals against the function's Malli input schema
+   Validates coerced input against the function's Malli input schema
    before calling. Returns 400 with humanized errors on validation failure.
 
    Function names are URL-decoded to handle %21 -> ! etc."
@@ -770,12 +833,14 @@
       :else
       (if-let [action-fn (actions/resolve-action ns-sym fn-sym)]
         (try
-          (let [;; Decode signals using the encoding layer — preserves full
-                ;; qualified keywords through the Datastar round-trip.
-                ;; No more schema introspection needed for re-namespacing.
-                decoded-signals (encoding/decode-signals body)
+          (let [;; Parse form-encoded body to keyword map
+                form-data (parse-form-body body)
+                ;; Extract input schema for coercion and validation
+                input-schema (extract-fn-input-schema action-fn)
+                ;; Malli coerce string values to correct types per schema
+                coerced (coerce-with-schema form-data input-schema)
                 ;; Auto-inject *ctx* and *conn* from namespace vars
-                injected (inject-ctx-conn ns-sym decoded-signals)
+                injected (inject-ctx-conn ns-sym coerced)
                 ;; Add instance ctx atom if present
                 signals (if instance-id
                           (let [ctx-atom (ctx/get-atom {::ctx/instance-id instance-id})]
@@ -784,7 +849,6 @@
                               injected))
                           injected)
                 ;; Validate after injection so auto-injected keys satisfy schema
-                input-schema (extract-fn-input-schema action-fn)
                 _ (when (and input-schema (seq signals))
                     (when-not (m/validate input-schema signals)
                       (throw (ex-info "Invalid input"
