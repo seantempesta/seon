@@ -295,9 +295,9 @@
                        auto-brotli? false
                        use-view-transition? false}}]
   (fn handler [req]
-    (let [;; Dropping buffer - slow handlers won't block other handlers
+    (let [;; Sliding buffer - always keeps the latest event, never silently drops
           <ch     (a/tap (::refresh-mult req)
-                         (a/chan (a/dropping-buffer 1)))
+                         (a/chan (a/sliding-buffer 1)))
           ;; Ensure at least one render on connect
           _       (when render-on-connect (a/>!! <ch :first-render))
           ;; Poison pill for work cancelling
