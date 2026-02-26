@@ -33,6 +33,10 @@
 (defn init!
   "Initialize the agents module. Called by the server component at startup."
   []
+  (add-watch agent/agent-registry ::sse-refresh
+             (fn [_ _ old new]
+               (when (not= (set (keys old)) (set (keys new)))
+                 (sse/refresh-all!))))
   (log/info "Agents module initialized"))
 
 (defn toggle-show-completed!
@@ -802,7 +806,7 @@
 
 ;; Handler uses var reference for hot reload support
 (def agents-sse
-  (sse/render-handler #'agents-sse-render :poll-ms 2000))
+  (sse/render-handler #'agents-sse-render :poll-ms 10000))
 
 (defn toggle-completed-handler
   "Toggle show/hide completed agents and trigger SSE refresh."
@@ -1213,7 +1217,7 @@
   [request]
   (let [agent-id (get-in request [:path-params :agent-id])
         render-fn (fn [_req] (agent-detail-content agent-id))
-        handler (sse/render-handler render-fn :poll-ms 1000)]
+        handler (sse/render-handler render-fn :poll-ms 10000)]
     (handler request)))
 
 ;;; ---------------------------------------------------------------------------
@@ -1252,4 +1256,4 @@
   (log/debug "Recreating agents-sse handler after namespace reload")
   ;; Recreate agents-sse with current var reference
   (alter-var-root #'agents-sse
-                  (constantly (sse/render-handler #'agents-sse-render :poll-ms 2000))))
+                  (constantly (sse/render-handler #'agents-sse-render :poll-ms 10000))))

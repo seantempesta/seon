@@ -158,12 +158,12 @@
 (defn connected?
   "Check if there are any connected browser clients for a namespace."
   [ns-sym]
-  (pos? (ctx/client-count-for-namespace ns-sym)))
+  (pos? (ctx/client-count-for-namespace {::ctx/namespace ns-sym})))
 
 (defn clients
   "Get connected client channels for a namespace."
   [ns-sym]
-  (ctx/clients-for-namespace ns-sym))
+  (ctx/clients-for-namespace {::ctx/namespace ns-sym}))
 
 (defn- js-type->keyword
   "Convert JavaScript type string to keyword."

@@ -322,15 +322,15 @@
                   ::ctx/sse-push? false
                   ::ctx/track-clients? true})
 
-    (let [health-instances (ctx/instances-for-namespace 'seon.health)
+    (let [health-instances (ctx/instances-for-namespace {::ctx/namespace 'seon.health})
           ids (set (map ::ctx/instance-id health-instances))]
       (is (= 2 (count health-instances)))
       (is (contains? ids "n001"))
       (is (contains? ids "n002"))
       (is (not (contains? ids "n003"))))
 
-    (is (= 1 (count (ctx/instances-for-namespace 'seon.trading))))
-    (is (= 0 (count (ctx/instances-for-namespace 'seon.nonexistent))))
+    (is (= 1 (count (ctx/instances-for-namespace {::ctx/namespace 'seon.trading}))))
+    (is (= 0 (count (ctx/instances-for-namespace {::ctx/namespace 'seon.nonexistent}))))
 
     ;; Test namespace client aggregation
     (ctx/register-client! {::ctx/instance-id "n001" ::ctx/channel :ch1})

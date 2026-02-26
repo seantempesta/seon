@@ -137,3 +137,5 @@ Remove from `routes.clj`: `namespace-has-reactive-render?`, `get-initial-state`,
 (reset)
 @seon.health.workout/*ctx* ;; → state survived restart
 ```
+
+**Note:** Pages not backed by `*ctx*` atoms (e.g., the agent observatory) use explicit `refresh-all!` calls from their data write functions. See `seon.ai.datalevin/maybe-refresh-sse!` and the `agent-registry` watch in `seon.web.agents/init!`.

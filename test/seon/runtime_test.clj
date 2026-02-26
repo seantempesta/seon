@@ -24,13 +24,15 @@
         conn (d/get-conn dir merged-schema)]
     (reset! test-dir dir)
     (reset! test-conn conn)
-    ;; Initialize runtime with test connection
-    (runtime/init! {::runtime/conn conn})
+    ;; Set test connection override (replaces old init! pattern)
+    (runtime/set-test-conn! conn)
     conn))
 
 (defn- teardown-datalevin! []
   ;; Reset registry first
   (runtime/reset-registry! {})
+  ;; Clear test conn override
+  (runtime/set-test-conn! nil)
   ;; Close connection
   (when-let [conn @test-conn]
     (try (d/close conn) (catch Exception _)))

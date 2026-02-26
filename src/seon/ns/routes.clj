@@ -90,7 +90,7 @@
 (defn- instances-for-namespace
   "Get all instances for a specific namespace, sorted newest first."
   [ns-sym]
-  (ctx/instances-for-namespace ns-sym))
+  (ctx/instances-for-namespace {::ctx/namespace ns-sym}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Content Negotiation
