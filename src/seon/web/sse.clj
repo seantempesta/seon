@@ -289,7 +289,7 @@
   [render-fn & {:keys [on-open on-close render-on-connect poll-ms
                        write-profile auto-brotli?]
                 :or   {render-on-connect true
-                       auto-brotli? true}}]
+                       auto-brotli? false}}]
   (fn handler [req]
     (let [;; Dropping buffer - slow handlers won't block other handlers
           <ch     (a/tap (::refresh-mult req)

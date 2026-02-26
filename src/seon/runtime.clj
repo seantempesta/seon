@@ -15,12 +15,15 @@
    - Location: :in-process or :external
    - Optional: session-id, nrepl-port, component-key
 
+   ## Connection
+
+   The runtime DB connection is managed by the connection manager
+   (:seon.db.datalevin/connections). No manual init! needed -- get-conn
+   lazily obtains the connection with auto-reconnect on staleness.
+
    ## Usage
 
    ```clojure
-   ;; Initialize with graph DB connection (called by Integrant)
-   (runtime/init! {::conn graph-conn})
-
    ;; Mark crashed instances from previous run
    (runtime/mark-crashed! {})
 
@@ -40,6 +43,7 @@
   (:require [clojure.core.async.flow :as flow]
             [datalevin.core :as d]
             [seon.db :as db]
+            [seon.db.datalevin.conn :as dl-conn]
             [seon.schema :as schema]
             [taoensso.timbre :as log])
   (:import [java.security SecureRandom]))
@@ -96,14 +100,6 @@
                   [:int {:min 0 :description "Number of hydrated instances"}])
 
 ;;; Request/Response Schemas
-
-(schema/register! ::init-request
-                  [:map
-                   [::conn ::conn]])
-
-(schema/register! ::init-response
-                  [:map
-                   [::initialized :boolean]])
 
 (schema/register! ::generate-id-request
                   [:map
@@ -259,6 +255,13 @@
    :seon.flow.snap/data
    {:db/valueType :db.type/string}})
 
+(defn runtime-merged-schema
+  "Merge the graph ingest schema with runtime schema.
+   Lazily resolves seon.graph.ingest/datalevin-schema to avoid circular deps."
+  []
+  (require 'seon.graph.ingest)
+  (merge @(resolve 'seon.graph.ingest/datalevin-schema) runtime-schema))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Session ID Validation
 ;;; ---------------------------------------------------------------------------
@@ -317,24 +320,32 @@
 ;;; Connection Management
 ;;; ---------------------------------------------------------------------------
 
-;; Graph DB connection (set via init!)
-(defonce ^:private conn (atom nil))
+;; Test override -- set via set-test-conn! in test fixtures.
+;; Production code uses the connection manager from Integrant.
+(defonce ^:private *test-conn (atom nil))
 
-(defn init!
-  "Initialize the runtime registry with the graph DB connection.
+(defn set-test-conn!
+  "Set a test connection override. When set, all runtime functions use this
+   conn instead of the connection manager. Pass nil to clear."
+  [test-conn]
+  (reset! *test-conn test-conn))
 
-   Called by Integrant during system startup.
+(defn- get-conn
+  "Get the runtime Datalevin connection.
 
-   Request keys:
-     ::conn - Required. Datalevin graph connection
-
-   Response keys:
-     ::initialized - true if initialization succeeded"
-  {:malli/schema [:=> [:cat ::init-request] ::init-response]}
-  [request]
-  (reset! seon.runtime/conn (::conn request))
-  (log/info "Runtime registry initialized")
-  {::initialized true})
+   Checks test override first, then reads from the connection manager
+   on the running Integrant system. Returns nil if unavailable."
+  []
+  (or @*test-conn
+      (when-let [mgr (some-> (try @(requiring-resolve 'integrant.repl.state/system)
+                                   (catch Exception _ nil))
+                              :seon.db.datalevin/connections)]
+        (try
+          (dl-conn/get-runtime-conn! {::dl-conn/manager mgr
+                                      ::dl-conn/schema (runtime-merged-schema)})
+          (catch Exception e
+            (log/warn "Failed to get runtime conn from manager" {:error (.getMessage e)})
+            nil)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; In-Memory Registry Cache
@@ -350,7 +361,7 @@
 (defn- persist-instance!
   "Persist an instance to Datalevin. Upserts via :db.unique/identity."
   [instance]
-  (when-let [c @conn]
+  (when-let [c (get-conn)]
     (try
       (let [;; Build transaction map, only including non-nil values
             tx-map (cond-> {:seon.runtime/namespace (::namespace instance)
@@ -503,7 +514,7 @@
      ::crashed-count - Number of instances marked as crashed"
   {:malli/schema [:=> [:cat ::mark-crashed-request] ::mark-crashed-response]}
   [_request]
-  (if-let [c @conn]
+  (if-let [c (get-conn)]
     (let [running (d/q '[:find ?ns ?e
                          :where
                          [?e :seon.runtime/namespace ?ns]
@@ -554,7 +565,7 @@
      ::hydrated-count - Number of instances loaded"
   {:malli/schema [:=> [:cat ::hydrate-cache-request] ::hydrate-cache-response]}
   [_request]
-  (if-let [c @conn]
+  (if-let [c (get-conn)]
     (let [results (d/q '[:find (pull ?e [*])
                          :where
                          [?e :seon.runtime/namespace _]]
@@ -652,7 +663,7 @@
      ::status       - :running"
   {:malli/schema [:=> [:cat ::start-agent-run-request] ::start-agent-run-response]}
   [{::keys [agent-run-id namespace provider]}]
-  (when-let [c @conn]
+  (when-let [c (get-conn)]
     (let [now (java.util.Date.)
           ;; Look up runtime instance entity for ref linkage
           runtime-eid (ffirst
@@ -687,7 +698,7 @@
      ::status       - The final status"
   {:malli/schema [:=> [:cat ::complete-agent-run-request] ::complete-agent-run-response]}
   [{::keys [agent-run-id status cost-usd num-turns duration-ms]}]
-  (when-let [c @conn]
+  (when-let [c (get-conn)]
     (let [now (java.util.Date.)
           tx-map (cond-> {:seon.agent.run/id agent-run-id
                           :seon.agent.run/status status
@@ -711,7 +722,7 @@
      Vector of agent run entity maps."
   {:malli/schema [:=> [:cat ::agent-runs-request] ::agent-runs-response]}
   [{::keys [namespace]}]
-  (if-let [c @conn]
+  (if-let [c (get-conn)]
     (let [results (if namespace
                     (d/q '[:find (pull ?e [:seon.agent.run/id
                                           :seon.agent.run/namespace
@@ -782,7 +793,7 @@
    Returns snapshot entity map or nil if ping fails or no connection."
   {:malli/schema [:=> [:cat ::snapshot-request] ::snapshot-response]}
   [{::keys [flow label reason]}]
-  (when-let [c @conn]
+  (when-let [c (get-conn)]
     (let [states (flow/ping flow :timeout-ms 5000)
           now (java.util.Date.)
           snap-id (str label "/" (.toInstant now))
@@ -804,7 +815,7 @@
 
    Returns the snapshot entity map or nil if not found."
   [{::keys [label]}]
-  (when-let [c @conn]
+  (when-let [c (get-conn)]
     (let [results (d/q '[:find (pull ?e [*]) ?t
                          :in $ ?label
                          :where

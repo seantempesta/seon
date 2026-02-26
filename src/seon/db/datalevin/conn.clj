@@ -296,6 +296,7 @@
 ;;; ---------------------------------------------------------------------------
 
 (def ^:private master-db-name "seon")
+(def ^:private runtime-db-name "seon.runtime")
 
 (defn get-master-conn!
   "Get connection to the master control database.
@@ -342,6 +343,25 @@
   (let [ns-str (namespace->db-name namespace)
         ns-key (keyword ns-str)]
     (get-or-create-connection! manager ns-key ns-str schema)))
+
+(defn get-runtime-conn!
+  "Get connection to the runtime database (seon.runtime).
+
+   Stores runtime registry, agent runs, flow snapshots, and the code graph.
+   Uses the merged schema (graph + runtime) passed via ::schema.
+
+   Request keys:
+     ::manager - Required. Connection manager instance
+     ::schema  - Optional. Merged Datalevin schema (graph + runtime)
+
+   Returns:
+     Datalevin connection to the runtime database.
+
+   Example:
+     (get-runtime-conn! {::manager mgr
+                         ::schema (merge graph-schema runtime-schema)})"
+  [{::keys [manager schema]}]
+  (get-or-create-connection! manager ::runtime runtime-db-name schema))
 
 (defn close-namespace-conn!
   "Explicitly close a namespace connection.

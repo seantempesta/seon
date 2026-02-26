@@ -825,28 +825,41 @@
 (defn instances-for-namespace
   "Get all instances for a specific namespace.
 
+   Request keys:
+     ::namespace - Required. Namespace symbol for filtering
+
    Returns vector of registry entries with ::instance-id added,
    sorted newest first."
-  [ns-sym]
+  [{::keys [namespace]}]
   (->> @registry
-       (filter (fn [[_ entry]] (= (:namespace entry) ns-sym)))
+       (filter (fn [[_ entry]] (= (:namespace entry) namespace)))
        (map (fn [[id entry]] (assoc entry ::instance-id id)))
        (sort-by :created-at #(compare %2 %1))
        vec))
 
 (defn clients-for-namespace
-  "Get all client channels across all instances in a namespace."
-  [ns-sym]
-  (->> (instances-for-namespace ns-sym)
+  "Get all client channels across all instances in a namespace.
+
+   Request keys:
+     ::namespace - Required. Namespace symbol for filtering
+
+   Returns set of channels."
+  [{::keys [namespace] :as req}]
+  (->> (instances-for-namespace req)
        (mapcat (fn [entry]
                  (when-let [clients-atom (:clients entry)]
                    @clients-atom)))
        set))
 
 (defn client-count-for-namespace
-  "Get total connected clients across all instances in a namespace."
-  [ns-sym]
-  (count (clients-for-namespace ns-sym)))
+  "Get total connected clients across all instances in a namespace.
+
+   Request keys:
+     ::namespace - Required. Namespace symbol for filtering
+
+   Returns integer count."
+  [{::keys [namespace] :as req}]
+  (count (clients-for-namespace req)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Persistence API

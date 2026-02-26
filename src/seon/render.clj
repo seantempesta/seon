@@ -29,6 +29,8 @@
             [clojure.string :as str]
             [datalevin.core :as d]
             [integrant.repl.state]
+            [seon.db.datalevin.conn :as dl-conn]
+            [seon.runtime :as runtime]
             [seon.schema :as schema]
             [taoensso.timbre :as log])
   (:refer-clojure :exclude [format]))
@@ -53,10 +55,14 @@
 
 (defn- get-conn
   "Get Datalevin connection. Checks override first (for tests),
-   then looks up from running Integrant system."
+   then gets from connection manager (handles staleness/auto-reconnect)."
   []
   (or @*conn-override
-      (some-> integrant.repl.state/system :seon/runtime-db :conn)))
+      (when-let [mgr (:seon.db.datalevin/connections integrant.repl.state/system)]
+        (try
+          (dl-conn/get-runtime-conn! {::dl-conn/manager mgr
+                                      ::dl-conn/schema (runtime/runtime-merged-schema)})
+          (catch Exception _ nil)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Resolution Cache

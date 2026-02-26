@@ -110,13 +110,15 @@
 
 (defn handler [request]
   (let [method (:request-method request)
-        path   (:uri request)
+        ;; http-kit backslash-escapes ! ? * in URIs — strip backslashes
+        path   (str/replace (:uri request) "\\" "")
         route-handler (routes [method path])]
     (if route-handler
       (route-handler request)
       ;; Try dynamic routes
       (if-let [{:keys [handler path-params]} (match-dynamic-route method path)]
-        (handler (assoc request :path-params path-params))
+        (handler (assoc request :path-params
+                        (update-vals path-params #(str/replace % "\\" ""))))
         ;; Try static files
         (or (when (= method :get) (serve-static path))
             {:status 404

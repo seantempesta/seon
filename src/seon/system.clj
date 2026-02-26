@@ -13,12 +13,12 @@
   (:require [integrant.core :as ig]
             [taoensso.timbre :as log]
             [seon.db.schema :as schema]
+            [seon.db.datalevin.conn :as dl-conn]
             [seon.runtime :as runtime]
             ;; Load component namespaces for their ig/init-key methods
             [seon.web.tailwind]
             [seon.web.caddy]
             [seon.db.datalevin.server]
-            [seon.db.datalevin.conn]
             [seon.flow.pool]))
 
 ;;; ---------------------------------------------------------------------------
@@ -168,29 +168,13 @@
 ;;; - Runtime registry (namespace instance tracking)
 ;;; - Render system (function resolution)
 
-(defn- build-graph-uri
-  "Build Datalevin URI for the graph database."
-  [connection-manager]
-  (format "dtlv://%s:%s@%s:%d/%s"
-          (or (:seon.db.datalevin.conn/username connection-manager) "datalevin")
-          (or (:seon.db.datalevin.conn/password connection-manager) "datalevin")
-          (or (:seon.db.datalevin.conn/host connection-manager) "127.0.0.1")
-          (:seon.db.datalevin.conn/port connection-manager)
-          "seon.runtime"))
-
 (defmethod ig/init-key :seon/runtime-db
   [_ {:keys [connection-manager]}]
-  (require 'datalevin.core)
-  (require 'seon.graph.ingest)
-  (let [get-conn (resolve 'datalevin.core/get-conn)
-        ;; Merge code graph schema with runtime schema
-        graph-schema (deref (resolve 'seon.graph.ingest/datalevin-schema))
-        merged-schema (merge graph-schema runtime/runtime-schema)
-        graph-uri (build-graph-uri connection-manager)
-        conn (get-conn graph-uri merged-schema)]
-    (log/info "Graph database connected" {:uri (str "dtlv://...@.../" "seon.runtime")})
-    ;; Initialize runtime registry with the graph connection
-    (runtime/init! {::runtime/conn conn})
+  ;; Get conn through the connection manager (handles staleness, auto-reconnect)
+  (let [conn (dl-conn/get-runtime-conn!
+              {::dl-conn/manager connection-manager
+               ::dl-conn/schema (runtime/runtime-merged-schema)})]
+    (log/info "Runtime database connected via connection manager")
     ;; Mark any instances from previous unclean shutdown as crashed
     (let [{::runtime/keys [crashed-count]} (runtime/mark-crashed! {})]
       (when (pos? crashed-count)
@@ -207,14 +191,12 @@
     {:conn conn :connection-manager connection-manager}))
 
 (defmethod ig/halt-key! :seon/runtime-db
-  [_ {:keys [conn]}]
-  (when conn
-    (log/info "Stopping graph database...")
-    ;; Unregister this component
-    (runtime/unregister! {::runtime/namespace "seon.graph.db"})
-    (require 'datalevin.core)
-    ((resolve 'datalevin.core/close) conn)
-    (log/info "Graph database stopped")))
+  [_ _state]
+  (log/info "Stopping runtime-db component...")
+  ;; Unregister this component
+  (runtime/unregister! {::runtime/namespace "seon.graph.db"})
+  ;; Don't close conn directly — connection manager owns it
+  (log/info "Runtime-db component stopped"))
 
 ;; Suspend/resume to survive (reset) like nREPL
 (defmethod ig/suspend-key! :seon/runtime-db [_ state] state)
@@ -222,11 +204,8 @@
 (defmethod ig/resume-key :seon/runtime-db
   [_ opts old-opts old-state]
   (if (= (:connection-manager opts) (:connection-manager old-opts))
-    (do
-      ;; Re-wire runtime atom — defonce atoms survive reload
-      ;; but may hold stale refs if conn was closed by a previous halt cycle
-      (runtime/init! {::runtime/conn (:conn old-state)})
-      old-state)
+    ;; Connection manager unchanged — conn is still valid (manager handles staleness)
+    old-state
     (do (ig/halt-key! :seon/runtime-db old-state)
         (ig/init-key :seon/runtime-db opts))))
 

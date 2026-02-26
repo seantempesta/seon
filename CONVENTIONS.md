@@ -673,6 +673,16 @@ For handlers that need per-request state (e.g., agent-id from path params), cach
 
 Regular HTTP handlers (Ring functions) **don't need this pattern** - they're called directly through vars. This pattern is specifically for SSE handlers because `render-handler` captures the render function at creation time.
 
+## SSE Update Trigger Patterns
+
+SSE pages update via `seon.web.sse/refresh-all!`. There are three trigger sources:
+
+1. **ctx-atom pages** — Watches on the ctx atom fire automatically (built into the ctx lifecycle). No manual refresh needed.
+2. **Datalevin-backed pages** — Call `(maybe-refresh-sse!)` after successful `d/transact!` calls. See `seon.ai.datalevin` for the debounced pattern (max once per 200ms via CAS on an atom).
+3. **In-memory atom pages** — Use `add-watch` on the atom to call `refresh-all!` when relevant state changes. See `seon.web.agents/init!` for the agent-registry watch.
+
+`poll-ms` in `render-handler` is a **safety net only** (10+ seconds). Reactive triggers handle timely updates.
+
 ## Numeric Limits and Defaults
 
 Avoid arbitrary "magic numbers" that cause bugs or confusion. Every limit should have a documented source.
