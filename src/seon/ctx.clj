@@ -108,8 +108,8 @@
 
 (schema/register! :seon.ns/session-id
                   [:string {:min 4 :max 6
-                            :pattern "^[a-f0-9]{4,6}$"
-                            :description "4-6 character hex session ID (read-only in ctx)"}])
+                            :pattern "^[A-Za-z0-9]{4,6}$"
+                            :description "Base62 session ID, 4-6 chars (read-only in ctx)"}])
 
 (schema/register! :seon.ns/namespace
                   [:string {:min 1

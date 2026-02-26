@@ -45,8 +45,8 @@
 
 (schema/register! ::id
                   [:string {:min 4 :max 6
-                            :pattern "^[a-f0-9]{4,6}$"
-                            :description "4-6 character hex session ID"}])
+                            :pattern "^[A-Za-z0-9]{4,6}$"
+                            :description "Base62 session ID, 4-6 chars"}])
 
 (schema/register! ::namespace
                   [:symbol {:description "Agent namespace symbol"}])

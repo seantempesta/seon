@@ -63,7 +63,7 @@
       (is (= :running (::session/status result)))
       (is (string? (::session/id result)))
       (is (= 6 (count (::session/id result))))
-      (is (re-matches #"[a-f0-9]{6}" (::session/id result))))))
+      (is (re-matches #"[A-Za-z0-9]{6}" (::session/id result))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Session Lifecycle Tests

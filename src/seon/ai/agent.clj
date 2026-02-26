@@ -65,6 +65,7 @@
             [clojure.string :as str]
             [seon.ai :as ai]
             [seon.ns.view :as view]
+            [seon.runtime :as runtime]
             [seon.schema :as schema]
             [taoensso.timbre :as log]))
 
@@ -433,16 +434,10 @@
 ;;; Render Support
 ;;; ---------------------------------------------------------------------------
 
-(defn- valid-agent-id?
-  "Validate agent-id is a safe hex string (4 chars)."
-  [agent-id]
-  (and (string? agent-id)
-       (re-matches #"[a-f0-9]{4}" agent-id)))
-
 (defn- read-agent-log
   "Read the last N lines from an agent's log file."
   [agent-id max-lines]
-  (if-not (valid-agent-id? agent-id)
+  (if-not (runtime/session-id? agent-id)
     []
     (let [log-path (str "logs/agents/" agent-id ".log")
           f (io/file log-path)]

@@ -81,9 +81,9 @@
                   [:int {:min 0 :description "OS process ID of agent JVM"}])
 
 (schema/register! ::session-id
-                  [:string {:min 4 :max 4
-                            :pattern "^[a-f0-9]{4}$"
-                            :description "4-char hex session ID assigned to a claimed JVM"}])
+                  [:string {:min 4 :max 6
+                            :pattern "^[A-Za-z0-9]{4,6}$"
+                            :description "Base62 session ID assigned to a claimed JVM"}])
 
 (schema/register! ::status
                   [:enum :idle :active :spawning
