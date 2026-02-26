@@ -558,10 +558,11 @@ You must then either:
     (str (when out-str out-str)
          ai-comment
          (if big-val?
-           (str (subs val-str 0 truncated-preview-chars)
-                "\n;; ... truncated (" (count val-str) " chars → " truncated-preview-chars " shown)"
-                hint
-                "\n;; Dig in: (" result-key " @" var-name ") or prefix code with #_:full")
+           (let [total (count val-str)]
+             (str (subs val-str 0 truncated-preview-chars)
+                  "\n;; " total " chars total, showing 0-" truncated-preview-chars
+                  hint
+                  "\n;; more: (subs (" result-key " @" var-name ") " truncated-preview-chars " " (min total (+ truncated-preview-chars truncated-preview-chars)) ")"))
            (str val-str hint))
          (when-let [ns (:ns result)]
            (str "\n;; ns: " ns))

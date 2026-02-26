@@ -298,7 +298,7 @@ Returns component status (Datalevin, nREPL, agents) with latencies. HTTP 200 = h
 (keys (:r-2108 @user/repl-orchestrator))
 
 ;; Opt in to full output when you need it (prefix with #_:full):
-#_:full (:seon.ai.gemini/text (:r-5137 @user/repl-orchestrator))
+#_:full (:r-5137 @user/repl-orchestrator)
 
 ;; See all stored results:
 (keys @user/repl-orchestrator)
@@ -382,6 +382,30 @@ eval(session_id="orchestrator",
 - Related configuration files
 - Any files in the error stack trace
 - Files that interact with the problem area
+
+### Composing with Search Results
+
+Search returns a plain text string, auto-saved like all REPL output. Truncated results include a ready-to-copy `subs` call for paging:
+
+```clojure
+;; 1. Search (shows first 1500 chars)
+(user/search "datastar custom actions" :files ["src/seon/web/routes.clj"])
+;; => 5047 chars total, showing 0-1500
+;; => stored as :r-4821 in @user/repl-orchestrator
+;; => more: (subs (:r-4821 @user/repl-orchestrator) 1500 3000)
+
+;; 2. Copy-paste the "more:" hint to page through
+(subs (:r-4821 @user/repl-orchestrator) 1500 3000)  ;; chars 1500-3000
+(subs (:r-4821 @user/repl-orchestrator) 3000 5047)  ;; chars 3000-5047 (remainder)
+
+;; 3. Or get everything at once (large context cost)
+#_:full (:r-4821 @user/repl-orchestrator)
+
+;; 4. If you know upfront you want the full result, skip truncation:
+#_:full (user/search "datastar custom actions" :files ["src/seon/web/routes.clj"])
+```
+
+This applies to all auto-saved results. You have a REPL — compose with `subs`, `count`, `keys`, `select-keys`, etc.
 
 ### Rule of Thumb
 
