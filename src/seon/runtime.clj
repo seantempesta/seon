@@ -359,32 +359,33 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- persist-instance!
-  "Persist an instance to Datalevin. Upserts via :db.unique/identity."
+  "Persist an instance to Datalevin asynchronously. Upserts via :db.unique/identity.
+   Non-blocking for the caller — errors are logged, not propagated."
   [instance]
-  (when-let [c (get-conn)]
-    (try
-      (let [;; Build transaction map, only including non-nil values
-            tx-map (cond-> {:seon.runtime/namespace (::namespace instance)
-                            :seon.runtime/status (::status instance)
-                            :seon.runtime/location (::location instance)}
-                     (::session-id instance)
-                     (assoc :seon.runtime/session-id (::session-id instance))
+  (future
+    (when-let [c (get-conn)]
+      (try
+        (let [tx-map (cond-> {:seon.runtime/namespace (::namespace instance)
+                              :seon.runtime/status (::status instance)
+                              :seon.runtime/location (::location instance)}
+                       (::session-id instance)
+                       (assoc :seon.runtime/session-id (::session-id instance))
 
-                     (::nrepl-port instance)
-                     (assoc :seon.runtime/nrepl-port (long (::nrepl-port instance)))
+                       (::nrepl-port instance)
+                       (assoc :seon.runtime/nrepl-port (long (::nrepl-port instance)))
 
-                     (::started-at instance)
-                     (assoc :seon.runtime/started-at (::started-at instance))
+                       (::started-at instance)
+                       (assoc :seon.runtime/started-at (::started-at instance))
 
-                     (::stopped-at instance)
-                     (assoc :seon.runtime/stopped-at (::stopped-at instance))
+                       (::stopped-at instance)
+                       (assoc :seon.runtime/stopped-at (::stopped-at instance))
 
-                     (::component-key instance)
-                     (assoc :seon.runtime/component-key (::component-key instance)))]
-        (db/transact! c [tx-map]))
-      (catch Exception e
-        (log/warn "Failed to persist runtime instance" {:namespace (::namespace instance)
-                                                        :error (.getMessage e)})))))
+                       (::component-key instance)
+                       (assoc :seon.runtime/component-key (::component-key instance)))]
+          (db/transact! c [tx-map]))
+        (catch Exception e
+          (log/warn "Failed to persist runtime instance" {:namespace (::namespace instance)
+                                                          :error (.getMessage e)}))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Public API
