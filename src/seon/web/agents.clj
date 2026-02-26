@@ -44,7 +44,6 @@
   []
   (swap! ui-state update :show-completed not))
 
-
 ;;; ---------------------------------------------------------------------------
 ;;; Datalevin Queries (Phase E3 - Datalevin only)
 ;;; ---------------------------------------------------------------------------
@@ -782,8 +781,7 @@
                  [:td {:class "py-2 px-4"} (agent-status-badge (::runtime/status inst))]
                  [:td {:class "py-2 px-4 font-mono text-sm text-text-400"} (name (::runtime/location inst))]
                  [:td {:class "py-2 px-4 font-mono text-sm text-text-400"}
-                  (format-local-time (::runtime/started-at inst))]])]]]]))
-      ])))
+                  (format-local-time (::runtime/started-at inst))]])]]]]))])))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Handlers
@@ -822,14 +820,12 @@
 ;;; Agent Detail View
 ;;; ---------------------------------------------------------------------------
 
-
 (defn- get-registry-status
   "Get agent status from registry. Returns :running, :completed, or nil."
   [agent-id]
   (let [running-agents (agent/agents {})]
     (when-let [a (first (filter #(= agent-id (:seon.ai.agent/session-id %)) running-agents))]
       (:seon.ai.agent/agent-status a))))
-
 
 (defn- extract-current-activity
   "Extract the current activity summary from the most recent messages.
@@ -906,8 +902,6 @@
        [:span {:class "text-signal animate-pulse"} icon]
        [:span {:class "text-text-300"} "Working on:"]
        [:span {:class "text-text-100 truncate"} text]])))
-
-
 
 ;;; ---------------------------------------------------------------------------
 ;;; Initial Context Components
@@ -1052,7 +1046,6 @@
       [:div {:class "h-3 w-full bg-base-700 rounded animate-skeleton my-2"}])]
    ;; Auto-scroll script - runs once on page load, sets up MutationObserver
    [:script (h/raw auto-scroll-script)]])
-
 
 (defn- render-flow-events
   "Render flow event timeline for an agent session.
