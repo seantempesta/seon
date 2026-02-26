@@ -386,6 +386,20 @@ Some types cannot be generated for property testing. Omit `:malli/schema` metada
 
 **Rule:** If a function takes XTDB nodes, spawns processes, or returns channels/atoms, skip `:malli/schema`. Document the expected types in docstrings.
 
+### Test Code Exemptions
+
+Test namespaces (`*_test.clj`) are exempt from most conventions:
+
+- **No `:malli/schema`** on `deftest` or test helper functions
+- **No map-in/map-out** — test helpers can use positional args for brevity
+- **No namespace docstrings** — tests are self-documenting via test names
+- **Non-namespaced keys are fine** in test data literals (e.g. `{:name "test"}`)
+
+Conventions that **do** apply in tests:
+- **Namespaced keys when calling production functions** — match the real API
+- **Both example and generative tests** — see Testing Strategy below
+- **Meaningful test names** — `session-lifecycle-test` not `test1`
+
 ## Converter Functions (Map-In Pattern)
 
 When converting external data (like SDK messages) to internal entities, use the map-in pattern:
