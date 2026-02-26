@@ -12,7 +12,7 @@
   "Health check endpoint. Returns deep system health including pool status."
   [_request]
   (let [result (health/deep-check {})
-        status-code (if (= ::health/healthy (::health/status result)) 200 503)]
+        status-code (if (= :healthy (::health/status result)) 200 503)]
     {:status status-code
      :headers {"Content-Type" "application/json"}
      :body (json/write-value-as-string

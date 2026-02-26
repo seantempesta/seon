@@ -97,7 +97,7 @@ Everything else belongs to the namespace. An agent that wants pagination just re
 
 And adds them as optional keys to the input spec. Malli validates the values before the function sees them — `?page=garbage` is rejected automatically.
 
-POST body signals (from Datastar `@post()`) work identically — JSON keys are namespaced and merged into the available data.
+POST body params (from Datastar `@post(url, {contentType:'form'})`) use qualified keyword `name` attrs — parsed and merged into the available data. GET function calls (`GET /ns/:ns/:fn?key=value`) also auto-namespace params.
 
 ---
 
@@ -291,13 +291,12 @@ The resolution query:
 |------|--------|
 | `src/seon/graph/extract.clj` | Extract optional vs required input keys separately. Store `:seon.fn/render-optional-keys`. |
 | `src/seon/ns/lifecycle.clj` | Collect available data from all sources. Build available keys set. |
-| `src/seon/ns/routes.clj` | Auto-namespace query params. Merge all data sources. Call resolution algorithm. |
+| `src/seon/ns/routes.clj` | Auto-namespace query params. Merge all data sources. Call resolution algorithm. Shared `resolve-and-call` for GET/POST with Malli coercion. |
 | `src/seon/render.clj` | `resolve-renderer` — the specificity algorithm. Used for both page and component rendering. |
-| `src/seon/web/reactive/actions.clj` | POST signal keys auto-namespaced (already partially done). |
 
 ### What stays the same
 - `ctx.clj` — ctx atom creation, watches, persistence (unchanged)
-- `transform.clj` — hiccup transformation (unchanged)
+- `transform.clj` — hiccup transformation (updated: uses keyword `name` attrs, no encoding layer)
 - `sse.clj` — SSE infrastructure (unchanged)
 - Workout namespace code — already structured correctly
 
@@ -333,7 +332,7 @@ The resolution query:
 - **Level 1 (data shape renderers)** — Introspection view doesn't yet use shape-matched renderers for individual var values
 - **Cross-namespace rendering** — Design exists but no implementation
 - **`?format=ai` end-to-end** — `render-namespace` supports it but route handler doesn't fully wire it
-- **POST body signal namespacing** — Designed but not tested end-to-end
+- **POST FormData keyword parsing** — Implemented (qualified keyword `name` attrs), needs E2E browser test
 - **`*conn*` injection** — Route handler doesn't inject Datalevin connections into renderer input maps yet
 
 ## Verification Plan

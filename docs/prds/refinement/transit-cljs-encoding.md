@@ -3,7 +3,7 @@
 ## Status
 
 - [x] Phase 0: Research (this document)
-- [ ] Phase 1: FormData + keyword names (zero JS)
+- [x] Phase 1: FormData + keyword names (zero JS) — implemented, `seon.web.reactive.encoding` deleted
 - [ ] Phase 2: Scittle + transit client (rich data)
 - [ ] Phase 3: Agent browser execution
 
@@ -303,27 +303,15 @@ data: elements <div id="workout-table">...updated HTML...</div>
 
 ## Implementation Phases
 
-### Phase 1: FormData + Keyword Names (Zero JS, Minimum Viable)
+### Phase 1: FormData + Keyword Names (Zero JS, Minimum Viable) — DONE
 
-**Server-side:**
-- Add form-params middleware that keywordizes `:` prefixed names
-- Add Malli coercion (string -> typed values per function input schema)
-- Update `seon.web.reactive.transform` to emit `name=":keyword"` for `:field`
-- Update `:on:click` to emit `contentType:'form'`
-- Ensure forms wrap field groups with `<form>` tags
-
-**Renderer-side:**
-- `:field` outputs `<input name=":ns/key" ...>` instead of `data-bind` + `data-signals`
-- `:on:click` outputs `@post(url, {contentType:'form'})` instead of `@post(url)`
-- `:form` marker wraps content in `<form>` tag (needed for FormData collection)
-
-**Delete:**
-- `seon.web.reactive.encoding` namespace (~180 lines of tilde/camelCase encoding)
-- All signal key encoding/decoding logic
-- `data-signals` initialization for form fields
-
-**Test:** Submit a workout form via browser, verify server receives qualified keywords,
-verify Malli coercion works, verify SSE pushes re-rendered HTML.
+**What was built:**
+- Form fields use qualified keywords as `name` attrs (e.g. `name=":seon.health/exercise"`)
+- POST: `@post(url, {contentType:'form'})` sends FormData, server parses keyword names
+- GET: `GET /ns/:namespace/:function?key=value` returns EDN
+- Shared `resolve-and-call` for both GET and POST with Malli coercion + validation
+- `seon.web.reactive.encoding` namespace deleted (tilde encoding removed)
+- No `data-signals` initialization for form fields
 
 **What we keep from Datastar:** SSE, `@post` (with `contentType:'form'`),
 `data-on-click`, `data-show`/`data-text` for display-only reactivity,
