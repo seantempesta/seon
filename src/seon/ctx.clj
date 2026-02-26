@@ -84,14 +84,14 @@
 
    ## Convention Compliance
 
-   Malli schemas: PARTIAL -- 15 schemas registered for option keys, but no
-   :malli/schema metadata on any public function. create!, update!, etc. lack
-   function-level schema annotations. Prevents generative testing and function
-   discovery via schema index.
+   Malli schemas: PASS -- 15 schemas registered for option keys. :malli/schema
+   metadata added to 15 public functions. create! excluded (returns opaque atom),
+   generate-id excluded (zero-arg, no map-in). Request/response schemas registered
+   for all patterns (::instance-id-request, ::namespace-request, etc.).
 
-   Map-in/map-out: PARTIAL -- Core CRUD functions are map-in. The three
-   namespace-level helpers (instances-for-namespace, clients-for-namespace,
-   client-count-for-namespace) take positional symbol args.
+   Map-in/map-out: PASS -- All public functions use map-in pattern including
+   the three namespace-level helpers (instances-for-namespace, clients-for-namespace,
+   client-count-for-namespace) which take {::namespace ns-sym}.
 
    Namespaced keys: PASS -- All option keys are ::ctx/qualified. Return values
    from list-instances use namespaced keys.
@@ -126,13 +126,11 @@
 
    ## Issues (Prioritized)
 
-   P1 - No :malli/schema on public functions. Blocks agent function discovery
-   and generative testing. All 19 public fns affected. Consumers can't query
-   'what functions accept ::ctx/instance-id?' programmatically.
+   P1 - RESOLVED. :malli/schema added to 15 public functions. create! and
+   generate-id excluded per CONVENTIONS.md (opaque return types / zero-arg).
 
-   P2 - instances-for-namespace, clients-for-namespace, client-count-for-namespace
-   use positional args. Breaks map-in convention (CONVENTIONS.md). Forces callers
-   to remember arg order; not extensible.
+   P2 - RESOLVED. instances-for-namespace, clients-for-namespace,
+   client-count-for-namespace now use map-in {::namespace ns-sym} pattern.
 
    P2 - get-entry leaks registry internals. seon.ns.routes accesses :atom,
    :render-fn, :clients directly (routes.clj lines ~493, ~550). Couples consumers
@@ -184,8 +182,9 @@
    ```
    Audited: 2026-02-26
    Auditor: claude-opus-4-6
-   Commit: b142e56
-   Tests: 31 pass / 0 fail (99 assertions) [ctx + ctx.history combined]
+   Phase 6: Added :malli/schema to 15 public fns, request/response schemas,
+            fixed namespace helper tests to use map-in pattern.
+   Tests: 27 pass / 0 fail (ctx only)
    ```"
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
@@ -254,6 +253,48 @@
 
 (schema/register! ::reserved-keys
                   [:map {:description "Immutable keys to inject and protect after creation"}])
+
+;;; ---------------------------------------------------------------------------
+;;; Request/Response Schemas (for :malli/schema metadata)
+;;; ---------------------------------------------------------------------------
+
+(schema/register! ::instance-id-request
+                  [:map [::instance-id ::instance-id]])
+
+(schema/register! ::instance-id+channel-request
+                  [:map
+                   [::instance-id ::instance-id]
+                   [::channel ::channel]])
+
+(schema/register! ::namespace-request
+                  [:map [::namespace ::namespace]])
+
+(schema/register! ::update-request
+                  [:map
+                   [::instance-id ::instance-id]
+                   [::f ::f]
+                   [::args {:optional true} ::args]])
+
+(schema/register! ::set-render-fn-request
+                  [:map
+                   [::instance-id ::instance-id]
+                   [::render-fn ::render-fn]])
+
+(schema/register! ::persist-request
+                  [:map
+                   [::conn ::conn]
+                   [::instance-id ::instance-id]])
+
+(schema/register! ::load-request
+                  [:map
+                   [::conn ::conn]
+                   [::instance-id ::instance-id]])
+
+(schema/register! ::instance-summary
+                  [:map
+                   [::instance-id ::instance-id]
+                   [::namespace {:optional true} [:maybe ::namespace]]
+                   [::created-at ::created-at]])
 
 ;; Reserved keys used by agent sessions (formerly in seon.agent.ctx)
 (schema/register! :seon.agent/namespace
@@ -557,7 +598,10 @@
      ::ctx-schema      - Optional. Malli schema for whole-state validation on every swap!
 
    Returns:
-     The ctx atom."
+     The ctx atom.
+
+   Note: No :malli/schema - returns an atom (opaque runtime object)
+   that cannot be property tested. See CONVENTIONS.md."
   [{::keys [conn instance-id namespace initial-value persist? sse-push?
             track-clients? render-fn debounce-ms validate? reserved-keys
             ctx-schema]}]
@@ -648,6 +692,7 @@
 
    Returns:
      The atom, or nil if instance not found."
+  {:malli/schema [:=> [:cat ::instance-id-request] [:maybe :any]]}
   [{::keys [instance-id]}]
   (:atom (get @registry instance-id)))
 
@@ -659,6 +704,7 @@
 
    Returns:
      The current value, or nil if instance not found."
+  {:malli/schema [:=> [:cat ::instance-id-request] [:maybe :any]]}
   [{::keys [instance-id]}]
   (when-let [a (get-atom {::instance-id instance-id})]
     @a))
@@ -667,6 +713,7 @@
   "Get the full registry entry for an instance.
    Returns map with :atom, :namespace, :clients, :render-fn, etc.
    or nil if not found."
+  {:malli/schema [:=> [:cat ::instance-id-request] [:maybe :any]]}
   [{::keys [instance-id]}]
   (get @registry instance-id))
 
@@ -680,6 +727,7 @@
 
    Returns:
      The new value, or nil if instance not found."
+  {:malli/schema [:=> [:cat ::update-request] [:maybe :any]]}
   [{::keys [instance-id f args]}]
   (when-let [a (get-atom {::instance-id instance-id})]
     (apply swap! a f args)))
@@ -692,6 +740,7 @@
 
    Returns:
      true if instance was found and destroyed, false otherwise."
+  {:malli/schema [:=> [:cat ::instance-id-request] :boolean]}
   [{::keys [instance-id]}]
   (if-let [entry (get @registry instance-id)]
     (let [{:keys [atom scheduler scheduled-task clients]} entry]
@@ -730,6 +779,7 @@
 
    Returns:
      true if registered, false if instance not found or not tracking clients."
+  {:malli/schema [:=> [:cat ::instance-id+channel-request] :boolean]}
   [{::keys [instance-id channel]}]
   (if-let [entry (get @registry instance-id)]
     (if-let [clients-atom (:clients entry)]
@@ -753,6 +803,7 @@
 
    Returns:
      true if unregistered, false if instance not found."
+  {:malli/schema [:=> [:cat ::instance-id+channel-request] :boolean]}
   [{::keys [instance-id channel]}]
   (if-let [entry (get @registry instance-id)]
     (if-let [clients-atom (:clients entry)]
@@ -771,6 +822,7 @@
 
    Returns:
      Set of channels, or nil if instance not found or not tracking."
+  {:malli/schema [:=> [:cat ::instance-id-request] [:maybe [:set :any]]]}
   [{::keys [instance-id]}]
   (when-let [entry (get @registry instance-id)]
     (when-let [clients-atom (:clients entry)]
@@ -784,6 +836,7 @@
 
    Returns:
      Number of connected clients (0 if instance not found)."
+  {:malli/schema [:=> [:cat ::instance-id-request] :int]}
   [{::keys [instance-id]}]
   (count (or (clients {::instance-id instance-id}) #{})))
 
@@ -795,6 +848,7 @@
 
    Returns:
      true if push was attempted, false if instance not found."
+  {:malli/schema [:=> [:cat ::instance-id-request] :boolean]}
   [{::keys [instance-id]}]
   (if-let [entry (get @registry instance-id)]
     (do
@@ -811,6 +865,7 @@
 
    Returns:
      true if set, false if instance not found."
+  {:malli/schema [:=> [:cat ::set-render-fn-request] :boolean]}
   [{::keys [instance-id render-fn]}]
   (if (contains? @registry instance-id)
     (do
@@ -830,6 +885,7 @@
 
    Returns vector of registry entries with ::instance-id added,
    sorted newest first."
+  {:malli/schema [:=> [:cat ::namespace-request] [:vector :any]]}
   [{::keys [namespace]}]
   (->> @registry
        (filter (fn [[_ entry]] (= (:namespace entry) namespace)))
@@ -844,6 +900,7 @@
      ::namespace - Required. Namespace symbol for filtering
 
    Returns set of channels."
+  {:malli/schema [:=> [:cat ::namespace-request] [:set :any]]}
   [{::keys [namespace] :as req}]
   (->> (instances-for-namespace req)
        (mapcat (fn [entry]
@@ -858,6 +915,7 @@
      ::namespace - Required. Namespace symbol for filtering
 
    Returns integer count."
+  {:malli/schema [:=> [:cat ::namespace-request] :int]}
   [{::keys [namespace] :as req}]
   (count (clients-for-namespace req)))
 
@@ -874,6 +932,7 @@
 
    Returns:
      The filtered data that was persisted, or nil if instance not found."
+  {:malli/schema [:=> [:cat ::persist-request] [:maybe :any]]}
   [{::keys [conn instance-id]}]
   (when-let [entry (get @registry instance-id)]
     (let [value @(:atom entry)
@@ -890,6 +949,7 @@
 
    Returns:
      The deserialized data, or nil if not found."
+  {:malli/schema [:=> [:cat ::load-request] [:maybe :any]]}
   [{::keys [conn instance-id]}]
   (let [d-q (requiring-resolve 'datalevin.core/q)
         results (d-q '[:find ?data
@@ -906,6 +966,7 @@
 
    Returns:
      Vector of maps with ::instance-id, ::namespace, ::created-at."
+  {:malli/schema [:=> [:cat :any] [:vector ::instance-summary]]}
   [{}]
   (mapv (fn [[id entry]]
           {::instance-id id

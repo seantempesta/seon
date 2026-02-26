@@ -335,9 +335,9 @@
     ;; Test namespace client aggregation
     (ctx/register-client! {::ctx/instance-id "n001" ::ctx/channel :ch1})
     (ctx/register-client! {::ctx/instance-id "n002" ::ctx/channel :ch2})
-    (is (= #{:ch1 :ch2} (ctx/clients-for-namespace 'seon.health)))
-    (is (= 2 (ctx/client-count-for-namespace 'seon.health)))
-    (is (= 0 (ctx/client-count-for-namespace 'seon.trading)))
+    (is (= #{:ch1 :ch2} (ctx/clients-for-namespace {::ctx/namespace 'seon.health})))
+    (is (= 2 (ctx/client-count-for-namespace {::ctx/namespace 'seon.health})))
+    (is (= 0 (ctx/client-count-for-namespace {::ctx/namespace 'seon.trading})))
 
     (ctx/destroy! {::ctx/instance-id "n001"})
     (ctx/destroy! {::ctx/instance-id "n002"})
