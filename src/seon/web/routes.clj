@@ -53,11 +53,11 @@
     :handler #'primer-handlers/action-handler}
    ;; Agent detail routes: /agents/:agent-id
    {:method :get
-    :pattern #"/agents/([a-f0-9]+)"
+    :pattern #"/agents/([A-Za-z0-9]+)"
     :params [:agent-id]
     :handler #'agents/agent-detail-page}
    {:method :post
-    :pattern #"/agents/([a-f0-9]+)"
+    :pattern #"/agents/([A-Za-z0-9]+)"
     :params [:agent-id]
     :handler #'agents/agent-detail-sse}
    ;; Namespace view routes: /ns/{namespace}?id=session_id

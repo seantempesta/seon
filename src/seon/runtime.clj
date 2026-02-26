@@ -260,6 +260,20 @@
    {:db/valueType :db.type/string}})
 
 ;;; ---------------------------------------------------------------------------
+;;; Session ID Validation
+;;; ---------------------------------------------------------------------------
+
+(def session-id-pattern
+  "Regex pattern for base62 session IDs (4-6 alphanumeric chars)."
+  #"[A-Za-z0-9]{4,6}")
+
+(defn session-id?
+  "Returns true if s is a valid base62 session ID (4-6 alphanumeric chars)."
+  [s]
+  (and (string? s)
+       (boolean (re-matches session-id-pattern s))))
+
+;;; ---------------------------------------------------------------------------
 ;;; ID Generation
 ;;; ---------------------------------------------------------------------------
 

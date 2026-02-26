@@ -418,8 +418,8 @@ You must then either:
           (catch Exception _ nil))))))
 
 (defn validate-session-id! [session-id]
-  (when-not (re-matches #"[a-f0-9]{4}" session-id)
-    (throw (ex-info (str "Invalid session ID: " session-id ". Must be 4 lowercase hex characters.")
+  (when-not (re-matches #"[A-Za-z0-9]{4,6}" session-id)
+    (throw (ex-info (str "Invalid session ID: " session-id ". Must be 4-6 base62 characters.")
                     {:session_id session-id}))))
 
 ;;; ---------------------------------------------------------------------------
