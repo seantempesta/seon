@@ -211,10 +211,16 @@
                   is-render? (and output-spec
                                   (some render-keys output-contains))
                   input-contains (:seon.spec/contains-keys input-spec)
-                  has-ctx?  (and is-render? (seq input-contains)
-                                 (some #(str/ends-with? (name %) "*ctx*") input-contains))
-                  has-conn? (and is-render? (seq input-contains)
-                                 (some #(str/ends-with? (name %) "*conn*") input-contains))
+                  input-optional (:seon.spec/optional-keys input-spec)
+                  ;; Required keys = all contains-keys minus optional-keys
+                  required-keys (if (seq input-optional)
+                                  (vec (remove (set input-optional) input-contains))
+                                  (vec input-contains))
+                  optional-keys (vec input-optional)
+                  has-ctx?  (and is-render? (seq required-keys)
+                                 (some #(str/ends-with? (name %) "*ctx*") required-keys))
+                  has-conn? (and is-render? (seq required-keys)
+                                 (some #(str/ends-with? (name %) "*conn*") required-keys))
                   page-renderer? (and is-render? has-ctx?)]
               (cond-> (assoc fn-entity :seon.fn/updated-at now)
                 input-spec
@@ -223,8 +229,11 @@
                 output-spec
                 (assoc :seon.fn/output-spec [:seon.spec/key output-key])
 
-                (and is-render? (seq input-contains))
-                (assoc :seon.fn/render-input-keys (vec input-contains))
+                (and is-render? (seq required-keys))
+                (assoc :seon.fn/render-input-keys (vec required-keys))
+
+                (and is-render? (seq optional-keys))
+                (assoc :seon.fn/render-optional-keys (vec optional-keys))
 
                 page-renderer?
                 (assoc :seon.fn/page-renderer? true)

@@ -40,6 +40,16 @@
                    [::workouts ::workouts]
                    [::selected-exercise {:optional true} ::exercise]])
 
+(schema/register! ::add-set-request
+                  [:map
+                   [:seon.reactive/ctx :any]
+                   [::exercise ::exercise]
+                   [::sets ::sets]
+                   [::reps ::reps]
+                   [::weight ::weight]])
+
+(schema/register! ::add-set-response ::*ctx*)
+
 ;;; ---------------------------------------------------------------------------
 ;;; Spec-Driven Render Specs (for Datalevin resolution)
 ;;; ---------------------------------------------------------------------------
@@ -77,6 +87,34 @@
    Used by the lifecycle system to seed a new ctx instance."
   []
   {::workouts workouts})
+
+;;; ---------------------------------------------------------------------------
+;;; Mutation Functions
+;;; ---------------------------------------------------------------------------
+
+(defn add-set!
+  "Add a workout set to the ctx atom.
+   Called via POST from Datastar @post() in the browser.
+
+   Request keys:
+     :seon.reactive/ctx - The ctx atom (injected by system)
+     ::exercise         - Exercise name
+     ::sets             - Number of sets
+     ::reps             - Number of reps per set
+     ::weight           - Weight in kg
+
+   Response keys:
+     ::workouts           - Updated workout list
+     ::selected-exercise  - (optional) Selected exercise
+
+   Example:
+     (add-set! {:seon.reactive/ctx (atom {::workouts []})
+                ::exercise \"Squat\" ::sets 5 ::reps 5 ::weight 100})"
+  {:malli/schema [:=> [:cat ::add-set-request] ::add-set-response]}
+  [{ctx-atom :seon.reactive/ctx
+    ::keys [exercise sets reps weight]}]
+  (swap! ctx-atom update ::workouts conj
+         {::exercise exercise ::sets sets ::reps reps ::weight weight}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Render Function (discovered by scanner via naming convention)

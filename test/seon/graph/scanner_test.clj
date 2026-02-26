@@ -159,6 +159,51 @@
              (:seon.var/qualified-name workouts-var)))
       (is (= :vector (:seon.var/value-type workouts-var))))))
 
+(deftest extract-optional-keys-test
+  (testing "extracts optional qualified keys from :map schemas"
+    (is (= [:seon.foo/bar]
+           (scanner/extract-optional-keys
+            [:map
+             [:seon.foo/required :string]
+             [:seon.foo/bar {:optional true} :string]]))
+        "Should find keys with {:optional true}")
+
+    (is (= [:seon.foo/a :seon.foo/b]
+           (scanner/extract-optional-keys
+            [:map
+             [:seon.foo/req :int]
+             [:seon.foo/a {:optional true} :string]
+             [:seon.foo/b {:optional true} :int]])))
+
+    (is (= []
+           (scanner/extract-optional-keys
+            [:map [:seon.foo/a :string] [:seon.foo/b :int]]))
+        "No optional keys -> empty vector"))
+
+  (testing "returns nil for non-map schemas"
+    (is (nil? (scanner/extract-optional-keys [:int {:min 0}])))
+    (is (nil? (scanner/extract-optional-keys :string)))))
+
+(deftest scan-source-optional-keys-test
+  (testing "scan-source extracts optional-keys from specs"
+    (let [source "(ns seon.example
+  (:require [seon.schema :as schema]))
+
+(schema/register! ::page-request
+  [:map
+   [::ctx :any]
+   [::sort-by {:optional true} :string]
+   [::page {:optional true} :int]])"
+          results (scanner/scan-source {::scanner/source source})
+          spec (first (filter #(= :seon.example/page-request (:seon.spec/key %)) results))]
+      (is (some? spec))
+      (is (= [:seon.example/ctx :seon.example/sort-by :seon.example/page]
+             (:seon.spec/contains-keys spec))
+          "contains-keys has all keys")
+      (is (= [:seon.example/sort-by :seon.example/page]
+             (:seon.spec/optional-keys spec))
+          "optional-keys has only optional ones"))))
+
 (comment
   (require '[kaocha.repl :as k])
   (k/run 'seon.graph.scanner-test)

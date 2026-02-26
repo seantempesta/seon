@@ -10,12 +10,13 @@
     (is (= {:data-on:submit "@post('/ns/seon.trading/create-order')"}
            (transform/transform-attrs 'seon.trading {:on:submit :create-order}))))
 
-  (testing "field attributes transform to data-bind (value syntax to avoid camelCase)"
-    (is (= {:name "user-name" :data-bind "user-name"}
+  (testing "field attributes transform to data-bind key syntax"
+    ;; Key syntax: data-bind:signalName="true" renders as attribute with colon in name
+    (is (= {:name "user-name" :data-bind:user-name true}
            (transform/transform-attrs 'seon.test {:field :user-name}))))
 
   (testing "field preserves other attributes"
-    (is (= {:name "price" :data-bind "price" :type "number" :placeholder "Enter price"}
+    (is (= {:name "price" :data-bind:price true :type "number" :placeholder "Enter price"}
            (transform/transform-attrs 'seon.test {:field :price :type "number" :placeholder "Enter price"}))))
 
   (testing "regular attributes pass through unchanged"
@@ -32,16 +33,19 @@
            (transform/transform-hiccup 'seon.test
              [:button {:on:click :increment} "Add"]))))
 
-  (testing "input with field"
-    (is (= [:input {:name "email" :data-bind "email" :type "email"}]
+  (testing "input with field gets data-signals injected"
+    ;; Key syntax: data-bind:email renders as attribute with colon in name
+    (is (= [:input {:name "email" :data-bind:email true :type "email"
+                    :data-signals "{\"email\": \"\"}"}]
            (transform/transform-hiccup 'seon.test
              [:input {:field :email :type "email"}]))))
 
-  (testing "nested structure"
-    (is (= [:div {:class "container"}
+  (testing "nested structure gets data-signals on root"
+    (is (= [:div {:class "container"
+                  :data-signals "{\"symbol\": \"\"}"}
             [:h1 {} "Title"]
             [:form {:data-on:submit "@post('/ns/seon.trading/submit')"}
-             [:input {:name "symbol" :data-bind "symbol"}]
+             [:input {:name "symbol" :data-bind:symbol true}]
              [:button {:data-on:click "@post('/ns/seon.trading/submit')"} "Go"]]]
            (transform/transform-hiccup 'seon.trading
              [:div {:class "container"}

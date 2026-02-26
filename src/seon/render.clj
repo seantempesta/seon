@@ -29,7 +29,9 @@
             [clojure.string :as str]
             [datalevin.core :as d]
             [integrant.repl.state]
-            [seon.schema :as schema]))
+            [seon.schema :as schema]
+            [taoensso.timbre :as log])
+  (:refer-clojure :exclude [format]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Specs
@@ -108,6 +110,24 @@
 ;;; Datalevin-Based Renderer Resolution
 ;;; ---------------------------------------------------------------------------
 
+(defn- namespace-proximity
+  "Score namespace proximity for tiebreaking.
+   Same ns = 0 (best), .render child = 1, sibling = 2, distant = 3."
+  [renderer-qname target-ns]
+  (let [renderer-ns (when renderer-qname
+                      (first (str/split renderer-qname #"/")))]
+    (cond
+      (= renderer-ns target-ns) 0
+      (and renderer-ns target-ns
+           (str/starts-with? renderer-ns (str target-ns "."))) 1
+      (and renderer-ns target-ns
+           (let [target-parent (when (str/includes? target-ns ".")
+                                 (subs target-ns 0 (str/last-index-of target-ns ".")))
+                 renderer-parent (when (str/includes? renderer-ns ".")
+                                   (subs renderer-ns 0 (str/last-index-of renderer-ns ".")))]
+             (and target-parent renderer-parent (= target-parent renderer-parent)))) 2
+      :else 3)))
+
 (defn find-renderer
   "Find the best render function for the given data and format.
 
@@ -158,6 +178,87 @@
                           :seon.fn/qualified-name))
            first
            :seon.fn/qualified-name))))
+
+;;; ---------------------------------------------------------------------------
+;;; Web Parameter Namespacing
+;;; ---------------------------------------------------------------------------
+
+(def ^:private system-params
+  "Query params reserved by the system, never injected as namespace data."
+  #{"instance" "format" "view"})
+
+(defn namespace-web-params
+  "Auto-namespace query params under a target namespace.
+   ?sort-by=weight on /ns/seon.health.workout
+   => {:seon.health.workout/sort-by \"weight\"}
+
+   System-reserved params (instance, format, view) are excluded.
+
+   Arguments:
+     params - Map of string key -> string value (from query string)
+     ns-str - Target namespace string
+
+   Returns map of namespaced keyword -> string value."
+  [params ns-str]
+  (when (seq params)
+    (into {}
+          (comp
+           (remove (fn [[k _]] (system-params k)))
+           (map (fn [[k v]] [(keyword ns-str k) v])))
+          params)))
+
+;;; ---------------------------------------------------------------------------
+;;; Specificity-Based Renderer Resolution (PRD algorithm)
+;;; ---------------------------------------------------------------------------
+
+(defn resolve-renderer
+  "Find the best renderer for the given available keys.
+
+   This is the specificity-based resolution algorithm:
+   1. Find all functions with :seon.render/html in output spec
+   2. Filter: ALL required input keys must be present in available-keys
+   3. Rank: most required keys wins (more specific = better)
+   4. Tiebreak: namespace proximity (same ns > .render child > sibling)
+
+   Arguments:
+     conn           - Datalevin connection
+     available-keys - Set of available data keys
+     target-ns      - Target namespace string (for proximity tiebreaking)
+
+   Returns the resolved var, or nil."
+  [conn available-keys target-ns]
+  (let [candidates (d/q '[:find ?e
+                          :where
+                          [?e :seon.fn/render-input-keys]]
+                        @conn)
+        entities (map (fn [[eid]]
+                        (d/pull @conn
+                                [:seon.fn/qualified-name
+                                 :seon.fn/render-input-keys
+                                 :seon.fn/updated-at
+                                 {:seon.fn/output-spec [:seon.spec/contains-keys]}]
+                                eid))
+                      candidates)
+        matching (->> entities
+                      (filter (fn [e]
+                                (let [rkeys (set (:seon.fn/render-input-keys e))
+                                      out-keys (set (get-in e [:seon.fn/output-spec :seon.spec/contains-keys]))]
+                                  (and (cset/subset? rkeys available-keys)
+                                       (contains? out-keys :seon.render/html))))))]
+    (when (seq matching)
+      (let [best (->> matching
+                      (sort-by (juxt (comp - count :seon.fn/render-input-keys)
+                                     (fn [e] (namespace-proximity
+                                              (:seon.fn/qualified-name e)
+                                              target-ns))
+                                     :seon.fn/qualified-name))
+                      first)
+            qname (:seon.fn/qualified-name best)]
+        (try
+          (requiring-resolve (symbol qname))
+          (catch Exception e
+            (log/warn "Failed to resolve renderer" {:fn qname :error (.getMessage e)})
+            nil))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Cached Resolution + Requiring-Resolve
@@ -296,6 +397,160 @@
       :else (pr-str value))))
 
 ;;; ---------------------------------------------------------------------------
+;;; Humanize: Keyword/String → Human-Readable Labels
+;;; ---------------------------------------------------------------------------
+
+(def ^:private special-abbreviations
+  "Abbreviations that should be uppercased, not title-cased."
+  #{"id" "url" "sse" "api" "db" "ui" "html" "css" "js" "http"
+    "https" "sql" "json" "xml" "csv" "uri" "ip" "dns" "tcp" "udp"
+    "ai" "llm" "jwt" "uuid" "edn" "cli" "ux" "pr" "ci" "cd"})
+
+(defn humanize
+  "Transform a keyword or string into a human-readable label.
+
+   - Strips namespace from keywords
+   - Converts kebab-case to Title Case
+   - Handles special abbreviations (ID, URL, SSE, etc.)
+   - Strips leading/trailing asterisks (e.g. *ctx* → Ctx)
+
+   Examples:
+     (humanize :seon.health.workout/total-volume) => \"Total Volume\"
+     (humanize :proposed-schema)                  => \"Proposed Schema\"
+     (humanize :api-key)                          => \"API Key\"
+     (humanize \"step-title\")                      => \"Step Title\"
+     (humanize :*ctx*)                             => \"Ctx\""
+  [k]
+  (let [s (cond
+            (nil? k) ""
+            (keyword? k) (name k)
+            (string? k) k
+            :else (str k))
+        ;; Strip leading/trailing asterisks
+        s (str/replace s #"^\*+|\*+$" "")
+        parts (str/split s #"-")]
+    (str/join " " (keep (fn [part]
+                          (when (seq part)
+                            (if (special-abbreviations (str/lower-case part))
+                              (str/upper-case part)
+                              (str (str/upper-case (subs part 0 1))
+                                   (subs part 1)))))
+                        parts))))
+
+;;; ---------------------------------------------------------------------------
+;;; Malli Schema → Human-Readable Table
+;;; ---------------------------------------------------------------------------
+
+(def ^:private malli-type-labels
+  "Map Malli type keywords to human-readable names."
+  {:string "Text"
+   :int "Number"
+   :double "Decimal"
+   :float "Decimal"
+   :boolean "Yes/No"
+   :keyword "Category"
+   :symbol "Symbol"
+   :uuid "ID"
+   :any "Any"
+   :map "Object"
+   :vector "List"
+   :set "Set"
+   :sequential "List"
+   :enum "Choice"
+   :nil "Empty"})
+
+(defn- malli-schema?
+  "Check if a value looks like a Malli schema form.
+   Malli schemas are vectors starting with a keyword like :map, :string, etc."
+  [v]
+  (and (vector? v)
+       (keyword? (first v))
+       (contains? #{:map :string :int :double :float :boolean :keyword
+                    :vector :set :sequential :enum :cat :tuple :or :and
+                    :maybe :re :fn} (first v))))
+
+(defn- resolve-type-label
+  "Get a human-readable type label for a Malli type form."
+  [type-form]
+  (cond
+    (keyword? type-form)
+    (get malli-type-labels type-form (humanize type-form))
+
+    (= type-form 'number?)
+    "Number"
+
+    (= type-form 'string?)
+    "Text"
+
+    (= type-form 'int?)
+    "Number"
+
+    (symbol? type-form)
+    (str (name type-form))
+
+    (and (vector? type-form) (keyword? (first type-form)))
+    (let [base (first type-form)]
+      (case base
+        :maybe (str (resolve-type-label (last type-form)) " (optional)")
+        :enum (str "One of: " (str/join ", " (map #(humanize (str %)) (rest type-form))))
+        :vector (str "List of " (resolve-type-label (last type-form)))
+        (get malli-type-labels base (humanize base))))
+
+    :else "Value"))
+
+(defn- schema-field-entries
+  "Extract field entries from a :map schema form.
+   Returns seq of {:field-name :type-label :required?}."
+  [schema-form]
+  (when (and (vector? schema-form) (= :map (first schema-form)))
+    (let [entries (rest schema-form)
+          ;; Skip map-level properties if present
+          entries (if (and (seq entries) (map? (first entries)))
+                   (rest entries)
+                   entries)]
+      (for [entry entries
+            :when (vector? entry)]
+        (let [field-key (first entry)
+              ;; Check for optional property map
+              has-props? (and (>= (count entry) 3) (map? (second entry)))
+              props (when has-props? (second entry))
+              type-form (if has-props? (nth entry 2) (second entry))
+              optional? (when props (:optional props))]
+          {:field-name (humanize field-key)
+           :type-label (resolve-type-label type-form)
+           :required? (not optional?)})))))
+
+(defn render-schema
+  "Render a Malli schema as a human-readable field specification table.
+
+   Arguments:
+     schema-form - A Malli schema vector (e.g. [:map [:name :string] ...])
+
+   Returns:
+     Hiccup table showing Field | Type | Required."
+  [schema-form]
+  (if-let [fields (schema-field-entries schema-form)]
+    [:div {:class "overflow-x-auto"}
+     [:table {:class "w-full text-xs border-collapse"}
+      [:thead
+       [:tr {:class "border-b border-base-700 bg-base-900"}
+        [:th {:class "py-1.5 px-2 text-left text-text-400 font-semibold uppercase tracking-wider"} "Field"]
+        [:th {:class "py-1.5 px-2 text-left text-text-400 font-semibold uppercase tracking-wider"} "Type"]
+        [:th {:class "py-1.5 px-2 text-left text-text-400 font-semibold uppercase tracking-wider"} "Required"]]]
+      [:tbody
+       (map-indexed
+        (fn [idx {:keys [field-name type-label required?]}]
+          [:tr {:class "border-b border-base-800/50"
+                :style (str "--i:" idx)}
+           [:td {:class "py-1 px-2 text-text-200"} field-name]
+           [:td {:class "py-1 px-2 text-text-300"} type-label]
+           [:td {:class "py-1 px-2 text-text-400"} (if required? "Yes" "No")]])
+        fields)]]]
+    ;; Not a :map schema, render as a type badge
+    [:span {:class "inline-block px-2 py-0.5 text-xs rounded bg-base-800 text-text-300"}
+     (resolve-type-label schema-form)]))
+
+;;; ---------------------------------------------------------------------------
 ;;; Collection Rendering
 ;;; ---------------------------------------------------------------------------
 
@@ -350,8 +605,8 @@
         ai-result
         (str "{"
              (str/join ", "
-                       (map (fn [[k val]]
-                              (str (pr-str k) " " (for-ai val)))
+                       (map (fn [[k v*]]
+                              (str (pr-str k) " " (for-ai v*)))
                             v))
              "}")))
 
@@ -390,10 +645,14 @@
   (cond
     (nil? v) [:span {:class "text-text-400 italic"} "nil"]
     (string? v) [:span {:class "text-text-200"} v]
-    (keyword? v) [:span {:class "text-amber-400 font-mono"} (str v)]
-    (number? v) [:span {:class "text-cyan-400 font-mono"} (str v)]
-    (boolean? v) [:span {:class "text-purple-400 font-mono"} (str v)]
+    (keyword? v) [:span {:class "text-text-200"} (humanize v)]
+    (number? v) [:span {:class "text-signal font-mono"} (str v)]
+    (boolean? v) [:span {:class "text-eval font-mono"} (str v)]
     (symbol? v) [:span {:class "text-text-200 font-mono"} (str v)]
+
+    ;; Malli schema forms - render as field specification table
+    (malli-schema? v)
+    (render-schema v)
 
     ;; Map - try Datalevin renderer first, then recurse as table
     (map? v)
@@ -402,11 +661,31 @@
         html-result
         [:table {:class "w-full text-sm"}
          [:tbody
-          (for [[k val] v]
+          (for [[k v*] v]
             [:tr {:class "border-b border-base-700/50"}
-             [:td {:class "py-1 px-2 text-text-400 font-mono text-xs align-top whitespace-nowrap"}
-              (pr-str k)]
-             [:td {:class "py-1 px-2"} (for-html val)]])]]))
+             [:td {:class "py-1 px-2 text-text-400 text-xs align-top whitespace-nowrap"}
+              (humanize k)]
+             [:td {:class "py-1 px-2"} (for-html v*)]])]]))
+
+    ;; Vector of maps - render as table with humanized headers
+    (and (sequential? v) (seq v) (every? map? v))
+    (let [all-keys (distinct (mapcat keys v))]
+      [:div {:class "overflow-x-auto"}
+       [:table {:class "w-full text-xs border-collapse"}
+        [:thead
+         [:tr {:class "border-b border-base-700 bg-base-900"}
+          (for [k all-keys]
+            [:th {:class "py-1.5 px-2 text-left text-text-400 font-semibold uppercase tracking-wider"}
+             (humanize k)])]]
+        [:tbody
+         (map-indexed
+          (fn [idx row]
+            [:tr {:class "border-b border-base-800/50 hover:bg-base-800/30"
+                  :style (str "--i:" idx)}
+             (for [k all-keys]
+               [:td {:class "py-1 px-2 text-text-200"}
+                (for-html (get row k))])])
+          v)]]])
 
     ;; Sequential - render as list
     (sequential? v)

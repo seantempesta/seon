@@ -6,8 +6,9 @@
      npm run css:watch   ; watch mode for development
 
    All pages share a common base layout with unified theme."
-  (:require [dev.onionpancakes.chassis.core :as h]
+  (:require [clojure.java.io :as io]
             [clojure.string :as str]
+            [dev.onionpancakes.chassis.core :as h]
             [seon.ai.agent :as agent]))
 
 ;; ========================================
@@ -20,7 +21,10 @@
 
 ;; Local Tailwind CSS with @tailwindcss/typography plugin for prose classes.
 ;; Build with: npm run css:build (or npm run css:watch for development)
-(def tailwind-css "/css/output.css")
+;; Cache-busted at load time so browsers pick up new CSS rules.
+(def tailwind-css
+  (let [f (io/file "resources/public/css/output.css")]
+    (str "/css/output.css?v=" (when (.exists f) (.lastModified f)))))
 
 ;; NOTE: JetBrains Mono font removed from external CDN for offline resilience.
 ;; The font-mono stack in input.css falls back to system monospace fonts.
@@ -84,8 +88,9 @@
    Options:
    - :title - Page title
    - :active-page - :dashboard or :logs for nav highlighting
-   - :skeleton - Hiccup content to show while loading"
-  [{:keys [title active-page skeleton]}]
+   - :skeleton - Hiccup content to show while loading
+   - :header - Optional hiccup rendered BEFORE #morph (outside SSE morph target)"
+  [{:keys [title active-page skeleton header]}]
   (h/html
    [h/doctype-html5
     [:html {:lang "en"}
@@ -143,6 +148,8 @@
         "This application requires JavaScript to be enabled."]
        ;; Navigation
        (nav-bar active-page)
+       ;; Optional header outside morph target (survives SSE updates)
+       header
        ;; Main content area - will be populated via SSE
        [:main#morph skeleton]]]]]))
 

@@ -141,6 +141,29 @@
              (filter namespace))
             entries))))
 
+(defn extract-optional-keys
+  "For :map schemas, extract qualified keyword keys marked {:optional true}.
+   [:map [::a ::a] [::b {:optional true} ::b]] -> [:ns/b]
+   Only includes qualified keywords with :optional true in props."
+  [schema-form]
+  (when (and (vector? schema-form)
+             (= :map (first schema-form)))
+    (let [entries (rest schema-form)
+          entries (if (and (seq entries) (map? (first entries)))
+                    (rest entries)
+                    entries)]
+      (into []
+            (comp
+             (filter vector?)
+             (filter (fn [entry]
+                       (and (>= (count entry) 3)
+                            (map? (second entry))
+                            (:optional (second entry)))))
+             (map first)
+             (filter keyword?)
+             (filter namespace))
+            entries))))
+
 (defn- find-register-calls
   "Walk all parsed forms and collect register! call data.
    Returns vector of [key schema-form] pairs."
@@ -271,14 +294,17 @@
                                   (str/ends-with? (name spec-key) "*ctx*"))
                                 register-calls)
             spec-entities (mapv (fn [[spec-key schema-form]]
-                                  (let [contains-keys (extract-contains-keys schema-form)]
+                                  (let [contains-keys (extract-contains-keys schema-form)
+                                        opt-keys (extract-optional-keys schema-form)]
                                     (cond-> {:seon.spec/key spec-key
                                              :seon.spec/namespace ns-str
                                              :seon.spec/definition (pr-str schema-form)
                                              :seon.spec/base-type (extract-base-type schema-form)
                                              :seon.spec/updated-at now}
                                       (seq contains-keys)
-                                      (assoc :seon.spec/contains-keys contains-keys))))
+                                      (assoc :seon.spec/contains-keys contains-keys)
+                                      (seq opt-keys)
+                                      (assoc :seon.spec/optional-keys opt-keys))))
                                 register-calls)
             var-entities (find-def-forms forms ns-str now)]
         (cond-> (into spec-entities var-entities)
