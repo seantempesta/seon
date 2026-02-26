@@ -46,6 +46,11 @@
     :pattern #"/ns/([a-z][a-z0-9._-]*)/([a-zA-Z][a-zA-Z0-9_!?*%.-]*)"
     :params [:namespace :function]
     :handler #'ns-routes/function-call-handler}
+   ;; Function read: GET /ns/:namespace/:function?:qualified/key=value
+   {:method :get
+    :pattern #"/ns/([a-z][a-z0-9._-]*)/([a-zA-Z][a-zA-Z0-9_!?*%.-]*)"
+    :params [:namespace :function]
+    :handler #'ns-routes/function-get-handler}
    ;; Primer action route: /primer/action/:action-id
    {:method :post
     :pattern #"/primer/action/(.+)"
