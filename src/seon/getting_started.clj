@@ -52,7 +52,7 @@
    - Map-in/map-out: PASS — action functions use single-map arguments
    - Namespaced keys: PASS — all keys properly namespaced (::exercise etc)
    - Docstrings: PARTIAL — action fns have docstrings, step fns minimal
-   - Tests: FAIL — no test file exists
+   - Tests: PASS — 7 tests, 38 assertions
 
    ## Strategic Assessment
    This namespace serves a clear purpose: demo/onboarding. It should stay
@@ -65,7 +65,6 @@
 
    ## Issues (Prioritized)
    - P2 - step-1 through step-4 lack :malli/schema metadata (blocks discoverability)
-   - P2 - No test file (test/seon/getting_started_test.clj missing)
    - P3 - send-message! is a stub (appends to messages but no AI response)
 
    ## What's Good
@@ -97,7 +96,7 @@
    Audited: 2026-02-26
    Auditor: claude-opus-4-6
    Commit: 98fa52d
-   Tests: 0 pass / 0 fail (no test file)"
+   Tests: 7 pass / 0 fail (38 assertions)"
   (:require [clojure.string :as str]
             [seon.render.default-page :as dp]
             [seon.schema :as schema]))
@@ -379,7 +378,7 @@ You can navigate to any namespace using `/ns/seon.your-namespace` in the URL bar
   "Stub: append user message to chat history."
   {:malli/schema [:=> [:cat [:map [:seon.reactive/ctx :any]
                              [::dp/user-input {:optional true} :string]]] :any]}
-  [{ctx-atom :seon.reactive/ctx :keys [seon.ctx/user-input]}]
+  [{ctx-atom :seon.reactive/ctx user-input ::dp/user-input}]
   (when (and user-input (not (str/blank? user-input)))
     (swap! ctx-atom
            (fn [ctx]
