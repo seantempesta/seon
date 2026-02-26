@@ -62,6 +62,27 @@ This is what spinning looks like:
 
 **STOP AT STEP 2.** Ask Gemini with the actual code files. The 30 seconds to include files saves hours.
 
+### Reading Search Results
+
+Search returns a plain text string, auto-saved like all REPL output. Truncated results include a ready-to-copy `subs` call for paging:
+
+```clojure
+;; 1. Search (shows first 1500 chars + paging hint)
+(user/search "SSE push pattern" :files ["src/seon/web/routes.clj"])
+;; => 4200 chars total, showing 0-1500
+;; => stored as :r-4821 in @user/repl-orchestrator
+;; => more: (subs (:r-4821 @user/repl-orchestrator) 1500 3000)
+
+;; 2. Copy-paste the "more:" hint, adjust offsets to keep paging
+(subs (:r-4821 @user/repl-orchestrator) 1500 3000)  ;; next 1500
+(subs (:r-4821 @user/repl-orchestrator) 3000 4200)  ;; remainder
+
+;; 3. Or if you know upfront you want everything, skip truncation:
+#_:full (user/search "SSE push pattern" :files ["src/seon/web/routes.clj"])
+```
+
+**Never re-run a search to see more.** The full result is already saved — page through the original key, or prefix with `#_:full` upfront.
+
 ---
 
 ## CRITICAL: Never Restart the System

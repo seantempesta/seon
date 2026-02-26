@@ -381,8 +381,9 @@
     (search \"Getting nil from query, what's wrong?\"
             :files [\"src/seon/db/queries.clj\"])"
   [query & {:keys [files]}]
-  (gemini/search (cond-> {:seon.ai.gemini/prompt query}
-                   files (assoc :seon.ai.gemini/files files))))
+  (:seon.ai.gemini/text
+   (gemini/search (cond-> {:seon.ai.gemini/prompt query}
+                    files (assoc :seon.ai.gemini/files files)))))
 
 (defn ask
   "Ask Gemini a question (no web search, uses model knowledge).
@@ -390,7 +391,8 @@
   Examples:
     (ask \"Explain the difference between XTQL and SQL in XTDB\")"
   [query]
-  (gemini/ask {:seon.ai.gemini/prompt query}))
+  (:seon.ai.gemini/text
+   (gemini/ask {:seon.ai.gemini/prompt query})))
 
 ;; ========================================
 ;; Database Management
