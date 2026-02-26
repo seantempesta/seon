@@ -63,20 +63,32 @@
   (subs (name k) 3))
 
 (defn- transform-event-attr
-  "Transform {:on:click :fn-name} to Datastar format with FormData transport.
+  "Transform {:on:click :fn-name} or {:on:click:form :fn-name} to Datastar @post.
 
    Returns [new-key new-value] pair.
-   Uses /ns/:namespace/:function URL pattern with {contentType:'form'}.
-   If instance-id is provided, appends ?instance=id to URL."
+   Uses /ns/:namespace/:function URL pattern.
+   If instance-id is provided, appends ?instance=id to URL.
+
+   Two modes:
+   - :on:click (plain) → @post(url) — sends signals as JSON, no form needed
+   - :on:click:form    → @post(url, {contentType:'form'}) — collects FormData
+     from nearest <form> ancestor. Use when button submits form fields."
   [ns-sym instance-id k v]
-  (let [event (extract-event-name k)
+  (let [full-name (name k)
+        form? (str/ends-with? full-name ":form")
+        ;; Strip :form suffix to get the actual event name
+        event (if form?
+                (extract-event-name (keyword (subs full-name 0 (- (count full-name) 5))))
+                (extract-event-name k))
         fn-name (if (keyword? v) (name v) (str v))
         base-url (str "/ns/" ns-sym "/" fn-name)
         url (if instance-id
               (str base-url "?instance=" instance-id)
               base-url)
         datastar-key (keyword (str "data-on:" event))]
-    [datastar-key (str "@post('" url "', {contentType:'form'})")]))
+    [datastar-key (if form?
+                    (str "@post('" url "', {contentType:'form'})")
+                    (str "@post('" url "')"))]))
 
 (defn- transform-field-attr
   "Transform {:field :qualified/keyword} to plain HTML name attribute.

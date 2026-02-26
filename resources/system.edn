@@ -69,11 +69,6 @@
                       :test false   ; Unit tests mock pool structure
                       :prod true}}
 
- ;; Primer Ctx System
- ;; Initializes primer session management with lazy Datalevin connections.
- :seon.primer/ctx
- {:connection-manager #ig/ref :seon.db.datalevin/connections}
-
  ;; Orchestrator Sessions
  ;; Initializes orchestrator session storage with lazy Datalevin connections.
  :seon.orchestrator/sessions

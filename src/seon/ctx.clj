@@ -22,7 +22,7 @@
    - seon.ns.routes -- reads instances-for-namespace, get-atom, get-entry,
      register-client!, force-push!, destroy!. Heaviest API surface user.
    - seon.orchestrator.session -- creates agent session ctx atoms with reserved-keys.
-   - seon.primer.ctx -- thin wrapper delegating create!/update!/destroy!/persist!/load!.
+   - (primer ctx was archived -- was a thin wrapper delegating to this ns)
    - seon.agent.env -- aliases datalevin-schema.
    - seon.web.browser -- calls clients-for-namespace for push targeting.
    - seon.getting-started -- uses :seon.ctx/messages and :seon.ctx/user-input keys
@@ -50,8 +50,7 @@
    seon.orchestrator.session: Clean usage. Creates ctx with reserved-keys for
    agent isolation (:seon.ns/conn, :seon.ns/session-id, :seon.ns/namespace).
 
-   seon.primer.ctx: Thin delegation layer. Adds session-id prefixing. Could
-   arguably be inlined into its callers since ctx already handles everything.
+   (seon.primer.ctx was archived — was a thin delegation layer.)
 
    seon.render.default-page: Registers :seon.ctx/messages, :seon.ctx/uploads,
    :seon.ctx/user-input schemas. These are domain-level keys in the ctx namespace

@@ -23,8 +23,6 @@
                                {:enabled? false})))
     (is (nil? (config/validate :seon.flow/pool
                                {:size 3 :base-port 7900 :enabled? true})))
-    (is (nil? (config/validate :seon.primer/ctx
-                               {:connection-manager :mock})))
     (is (nil? (config/validate :seon.orchestrator/sessions
                                {:connection-manager :mock :pool :mock})))
     (is (nil? (config/validate :seon.graph/scanner

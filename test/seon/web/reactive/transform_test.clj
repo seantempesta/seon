@@ -5,10 +5,10 @@
 
 (deftest transform-attrs-test
   (testing "event attributes transform to Datastar format with FormData"
-    (is (= {:data-on:click "@post('/ns/seon.test/increment', {contentType:'form'})"}
+    (is (= {:data-on:click "@post('/ns/seon.test/increment', )"}
            (transform/transform-attrs 'seon.test {:on:click :increment})))
 
-    (is (= {:data-on:submit "@post('/ns/seon.trading/create-order', {contentType:'form'})"}
+    (is (= {:data-on:submit "@post('/ns/seon.trading/create-order', )"}
            (transform/transform-attrs 'seon.trading {:on:submit :create-order}))))
 
   (testing "field attributes produce name with printed keyword"
@@ -33,7 +33,7 @@
 
 (deftest transform-hiccup-test
   (testing "simple element with event"
-    (is (= [:button {:data-on:click "@post('/ns/seon.test/increment', {contentType:'form'})"} "Add"]
+    (is (= [:button {:data-on:click "@post('/ns/seon.test/increment', )"} "Add"]
            (transform/transform-hiccup 'seon.test
              [:button {:on:click :increment} "Add"]))))
 
@@ -75,7 +75,7 @@
   (testing "creates bound transformer function"
     (let [tx (transform/make-transformer 'seon.demo)]
       (is (fn? tx))
-      (is (= [:button {:data-on:click "@post('/ns/seon.demo/click', {contentType:'form'})"}]
+      (is (= [:button {:data-on:click "@post('/ns/seon.demo/click', )"}]
              (tx [:button {:on:click :click}]))))))
 
 (deftest edge-cases-test
@@ -87,7 +87,7 @@
     (is (= [:div {}
             [:div {}
              [:div {}
-              [:button {:data-on:click "@post('/ns/seon.test/deep', {contentType:'form'})"} "Deep"]]]]
+              [:button {:data-on:click "@post('/ns/seon.test/deep', )"} "Deep"]]]]
            (transform/transform-hiccup 'seon.test
              [:div {}
               [:div {}
@@ -95,8 +95,8 @@
                 [:button {:on:click :deep} "Deep"]]]]))))
 
   (testing "multiple events on same element"
-    (is (= [:input {:data-on:focus "@post('/ns/seon.test/focused', {contentType:'form'})"
-                    :data-on:blur "@post('/ns/seon.test/blurred', {contentType:'form'})"}]
+    (is (= [:input {:data-on:focus "@post('/ns/seon.test/focused', )"
+                    :data-on:blur "@post('/ns/seon.test/blurred', )"}]
            (transform/transform-hiccup 'seon.test
              [:input {:on:focus :focused :on:blur :blurred}])))))
 

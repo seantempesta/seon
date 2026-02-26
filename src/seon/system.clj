@@ -107,29 +107,6 @@
         (ig/init-key :seon.dev/nrepl opts))))
 
 ;;; ---------------------------------------------------------------------------
-;;; Primer Ctx Component
-;;; ---------------------------------------------------------------------------
-;;; Initializes the primer ctx system with the Datalevin connection manager.
-
-(defmethod ig/init-key :seon.primer/ctx
-  [_ {:keys [connection-manager]}]
-  (require 'seon.primer.ctx)
-  ((resolve 'seon.primer.ctx/init!) connection-manager)
-  {:connection-manager connection-manager})
-
-(defmethod ig/halt-key! :seon.primer/ctx
-  [_ _]
-  (log/info "Primer ctx shutdown"))
-
-(defmethod ig/suspend-key! :seon.primer/ctx [_ state] state)
-
-(defmethod ig/resume-key :seon.primer/ctx
-  [_ opts old-opts old-state]
-  (if (= opts old-opts)
-    old-state
-    (do (ig/halt-key! :seon.primer/ctx old-state)
-        (ig/init-key :seon.primer/ctx opts))))
-
 ;;; ---------------------------------------------------------------------------
 ;;; Orchestrator Sessions Component
 ;;; ---------------------------------------------------------------------------
