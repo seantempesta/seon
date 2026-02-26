@@ -1,16 +1,23 @@
-# Datastar/Hyperlith Quick Reference
+# Datastar/SSE Quick Reference
 
 **Target Audience:** Claude Code agents needing to work on this codebase
-**Last Updated:** 2025-12-02
+**Last Updated:** 2026-02-26
 
 ---
 
 ## Mental Model
 
-Server owns all state. Client is a reactive view. Communication is one-way (server → client) via SSE. User actions POST back, server updates state, state watchers trigger SSE refresh. The key insight: **compression beats diffing** - send full HTML views, streaming brotli makes it efficient (90-100x).
+Server owns all state. Client is a reactive view. Two update patterns:
+
+- **Pattern A (Direct Response):** User clicks button, handler returns HTML, Datastar morphs DOM. No SSE involved.
+- **Pattern B (Background Push):** Data changes in background, `refresh-all!` notifies SSE clients, each re-renders if view hash changed.
+
+**Rule of thumb: If a user clicked something, return HTML directly. If data changed in the background, use `refresh-all!`.**
+
+See `CONVENTIONS.md` section "SSE: Direct Response vs Background Push" for the full spec.
 
 **NOT like:** React/Vue/Angular (client-side state management)
-**IS like:** Traditional server-side rendering + WebSockets, but simpler
+**IS like:** Traditional server-side rendering + SSE, but simpler
 
 ---
 
@@ -39,10 +46,8 @@ data: elements </main>
 |-----------|---------|---------|
 | `data-init` | Auto-execute on page load | `data-init="@post('/')"` |
 | `data-on:click` | Click handler (POST to server) | `data-on:click="@post('/api/stop')"` |
-| `data-on:submit` | Form submit | `data-on-submit="@post('/api/start', {contentType: 'form'})"` |
-| `data-on:online__window` | Reconnect when browser online | `data-on:online__window="@post('/')"`
-
- |
+| `data-on:submit` | Form submit | `data-on:submit="@post('/api/start', {contentType: 'form'})"` |
+| `data-on:online__window` | Reconnect when browser online | `data-on:online__window="@post('/')"` |
 | `id="morph"` | Target for SSE updates | `<main id="morph">...</main>` |
 
 **Attributes we DON'T use (yet):**
@@ -55,7 +60,57 @@ data: elements </main>
 
 ## Clojure Patterns (Copy-Paste Ready)
 
-### Pattern 1: Rendering HTML
+### Pattern A: Direct Response (user actions)
+
+```clojure
+;; Handler — process action, return rendered HTML
+(defn my-action-handler [_request]
+  (do-the-thing!)
+  {:status 200
+   :headers {"Content-Type" "text/html"}
+   :body (render-my-view)})
+
+;; Button — @post returns HTML, Datastar morphs it into the DOM
+[:button {:data-on:click "@post('/api/my-action')"} "Do Thing"]
+```
+
+**Flow:** User clicks -> POST -> Handler returns HTML -> Datastar morphs DOM. Instant feedback.
+
+### Pattern B: Background Push (SSE)
+
+```clojure
+(ns your-namespace
+  (:require [seon.web.sse :as sse]))
+
+;; 1. Define an SSE handler with a render function
+(def my-sse
+  (sse/render-handler
+    (fn [_request]
+      ;; Render FULL view on every call
+      (render-my-view @app-state))))
+
+;; 2. After data changes, notify SSE clients
+(d/transact! conn tx-data)
+(sse/refresh-all!)
+
+;; 3. Or use atom watch for automatic push
+(add-watch app-state ::sse-refresh
+  (fn [_ _ old new]
+    (when (not= old new)
+      (sse/refresh-all!))))
+```
+
+**Key insight:** `render-handler` calls your function on every refresh, compares hash, only sends if changed.
+
+### View Transitions
+
+View transitions are **disabled by default** in `render-handler`. Opt in only for page-level navigations:
+
+```clojure
+(sse/render-handler #'my-render-fn :use-view-transition? true)
+```
+
+### Rendering HTML
 
 ```clojure
 (ns your-namespace
@@ -72,62 +127,7 @@ data: elements </main>
 
 **Critical:** Always include `id="morph"` on root element for SSE targeting.
 
-### Pattern 2: SSE Handler
-
-```clojure
-(ns your-namespace
-  (:require [ml-options.web.sse :as sse]
-            [ml-options.web.html :as html]))
-
-(def dashboard-sse
-  (sse/render-handler
-    (fn [_request]
-      ;; Render FULL view on every call
-      (let [state @app-state]
-        (html/dashboard-view state)))))
-```
-
-**Key insight:** render-handler calls your function on every refresh, compares hash, only sends if changed.
-
-### Pattern 3: User Action (POST Handler)
-
-```clojure
-(defn stop-import [_request]
-  (try
-    ;; Modify state (don't send SSE manually!)
-    (swap! job-state assoc-in [:current :status] :stopping)
-
-    ;; Return JSON response
-    {:status 200
-     :headers {"Content-Type" "application/json"}
-     :body (json/write-value-as-string {:ok true})}
-
-    (catch Exception e
-      {:status 500
-       :headers {"Content-Type" "application/json"}
-       :body (json/write-value-as-string {:error (.getMessage e)})})))
-```
-
-**Flow:** User clicks → POST → Handler updates state → Watcher triggers SSE → All clients re-render
-
-### Pattern 4: Auto-Refresh on State Change
-
-```clojure
-(ns your-namespace
-  (:require [ml-options.web.sse :as sse]))
-
-(defonce app-state (atom {:status :idle}))
-
-;; THIS IS THE MAGIC - set once at startup
-(add-watch app-state :sse-auto-refresh
-  (fn [_key _ref old-state new-state]
-    (when (not= old-state new-state)
-      (sse/refresh-all!))))
-```
-
-**Never manually call `sse/refresh-all!`** - let watches handle it.
-
-### Pattern 5: Background Job with Progress
+### Background Job with Progress
 
 ```clojure
 (defn start-import! [symbols start-date end-date]
@@ -142,7 +142,7 @@ data: elements </main>
     (future
       (try
         (doseq [i (range 100)]
-          ;; Update progress (triggers SSE automatically)
+          ;; Update progress (triggers SSE via watch)
           (swap! job-state assoc-in [:current :progress :completed] i)
           (do-work i))
 
@@ -157,9 +157,9 @@ data: elements </main>
     {:ok job-id}))
 ```
 
-**Pattern:** Every `swap!` triggers watch → `refresh-all!` → all clients see update
+**Pattern:** Every `swap!` triggers watch -> `refresh-all!` -> all clients see update
 
-### Pattern 6: Shim Page (Initial HTML)
+### Shim Page (Initial HTML)
 
 ```clojure
 (defn shim-page []
@@ -180,14 +180,14 @@ data: elements </main>
 ```
 
 **Routes:**
-- `GET /` → Returns shim page
-- `POST /` → SSE handler (streaming updates)
+- `GET /` -> Returns shim page
+- `POST /` -> SSE handler (streaming updates)
 
 ---
 
 ## Anti-Patterns (Things That Seem Right But Aren't)
 
-### ❌ Don't: Send Partial Updates
+### Don't: Send Partial Updates
 
 ```clojure
 ;; WRONG
@@ -195,50 +195,33 @@ data: elements </main>
   (sse/send-update! [:div#progress (str percent "%")]))
 ```
 
-**Why not:** Complexity, missed events cause desyncs, compression is less effective.
-
 **Do instead:** Update state, let watch trigger full re-render.
 
-### ❌ Don't: Manual refresh-all! Calls
+### Don't: Return JSON from user actions
 
 ```clojure
-;; WRONG
-(defn update-data [new-data]
-  (reset! app-state new-data)
-  (sse/refresh-all!)  ; Unnecessary!
-  )
+;; WRONG — user won't see the change until next SSE poll
+(defn toggle-handler [_request]
+  (toggle!)
+  {:status 200 :body "{\"ok\": true}"})
 ```
 
-**Why not:** Easy to forget, inconsistent.
+**Do instead:** Return rendered HTML so Datastar morphs it immediately (Pattern A).
 
-**Do instead:** Set up watch once, never call refresh-all! manually.
-
-### ❌ Don't: Track per-connection state
+### Don't: Track per-connection state
 
 ```clojure
 ;; WRONG
 (defonce connection-state (atom {}))
-
-(defn on-connect [req]
-  (swap! connection-state assoc (:channel req) {:user-id ...}))
 ```
-
-**Why not:** Lost on disconnect, hard to debug.
 
 **Do instead:** Store in database/atom indexed by session ID.
 
-### ❌ Don't: Use `(require 'ns :reload)`
+### Don't: Use `(require 'ns :reload)`
 
-```clojure
-;; WRONG
-(require 'ml-options.web.handlers :reload)
-```
+**Do instead:** Use `(user/reload)` or `(user/reset)` from REPL.
 
-**Why not:** Route handlers captured at compile time, reload doesn't update them.
-
-**Do instead:** Always use `(integrant.repl/reset)` from REPL.
-
-### ❌ Don't: Forget IDs on morphed elements
+### Don't: Forget IDs on morphed elements
 
 ```html
 <!-- WRONG -->
@@ -256,110 +239,74 @@ data: elements </main>
 
 ---
 
-## File Map (Our Codebase)
+## File Map (Current Codebase)
 
 | File | Purpose | Key Functions |
 |------|---------|---------------|
-| `src/ml_options/web/sse.clj` | SSE core | `render-handler`, `refresh-all!`, `init-sse!` |
-| `src/ml_options/web/html.clj` | HTML rendering | `shim-page`, `dashboard-content` |
-| `src/ml_options/web/handlers.clj` | HTTP handlers | `dashboard`, `dashboard-sse`, `start-import` |
-| `src/ml_options/web/jobs.clj` | State management | `start-import!`, `stop-job!`, watch setup |
-| `src/ml_options/web/stats.clj` | DB queries (cached) | `get-cached-stats`, `get-database-stats` |
-| `src/ml_options/web/brotli.clj` | Streaming compression | `compress-stream`, `compress-out-stream` |
-| `src/ml_options/web/routes.clj` | URL routing | Route map (path → handler) |
-| `src/ml_options/web/server.clj` | System lifecycle | Integrant keys, startup/shutdown |
+| `src/seon/web/sse.clj` | SSE core | `render-handler`, `refresh-all!` |
+| `src/seon/web/html.clj` | HTML rendering | `shim-page`, base layout |
+| `src/seon/web/routes.clj` | URL routing | Route map (path -> handler) |
+| `src/seon/web/agents.clj` | Agent observatory | Both Pattern A and B |
+| `src/seon/web/components.clj` | Reusable UI | `card`, `status-dot`, `log-line` |
+| `src/seon/ns/routes.clj` | Namespace pages | SSE + function call handlers |
+| `CONVENTIONS.md` | SSE pattern ground truth | Pattern A/B spec |
 
 ---
 
 ## Common Tasks
 
-### Add a new button action
+### Add a new button action (Pattern A)
 
-1. **HTML** (`html.clj`):
+1. **HTML** (hiccup):
 ```clojure
-[:button {"data-on-click" "@post('/api/my-action')"} "Do Thing"]
+[:button {:data-on:click "@post('/api/my-action')"} "Do Thing"]
 ```
 
-2. **Handler** (`handlers.clj`):
+2. **Handler**:
 ```clojure
-(defn my-action [request]
-  (swap! app-state assoc :thing :done)  ; Update state
+(defn my-action [_request]
+  (do-the-thing!)
   {:status 200
-   :headers {"Content-Type" "application/json"}
-   :body "{\"ok\": true}"})
+   :headers {"Content-Type" "text/html"}
+   :body (render-my-view)})
 ```
 
-3. **Route** (`routes.clj`):
+3. **Route**:
 ```clojure
-{:routes [["/api/my-action" {:post handlers/my-action}]]}
+["/api/my-action" {:post my-action}]
 ```
-
-**No need to manually trigger SSE** - state watch handles it!
 
 ### Debug why SSE isn't updating
 
-1. Check logs: `clj-nrepl-eval -p 7888 "(user/logs)"`
-2. Verify state changed: `@ml-options.web.jobs/job-state`
-3. Check watch is installed: Should see in `jobs.clj` line 21
-4. Verify SSE connected: Browser DevTools → Network → POST `/` should be `Pending`
-5. Manual trigger: `(ml-options.web.sse/refresh-all!)` from REPL
+1. Check state changed: inspect atom/db in REPL
+2. Check `refresh-all!` is being called (watch installed? manual call after transact?)
+3. Verify SSE connected: Browser DevTools -> Network -> POST should be `Pending`
+4. Manual trigger from REPL: `(seon.web.sse/refresh-all!)`
+5. Check render function errors: `(user/logs)`
 
-### Reload code changes
+### Debug why button action doesn't update UI
 
-```bash
-# ALWAYS use this (NOT require :reload)
-clj-nrepl-eval -p 7888 "(integrant.repl/reset)"
-```
-
----
-
-## Performance Tips
-
-1. **Throttle refreshes:** Already set to 100ms in `server.clj` (max 10 updates/sec)
-2. **Cache expensive queries:** See `stats.clj` for 30-second cache pattern
-3. **Use dropping buffers:** Already configured in SSE handler (slow clients don't block fast ones)
-4. **Hash-based change detection:** Built into `render-handler` (only send if view changed)
-5. **Virtual threads:** One per SSE connection, scales to thousands
+1. Check handler returns `{"Content-Type" "text/html"}` (not JSON)
+2. Check handler returns rendered HTML in `:body`
+3. Check button uses `@post(...)` not `@get(...)`
+4. Check response HTML has matching `id` attributes for morph targets
 
 ---
 
-## Key Insights (Not Obvious from Code)
+## Performance Notes
 
-1. **POST for SSE, not GET:** Datastar `@post('/')` opens SSE connection (GET returns shim)
-2. **Idiomorph preserves state:** Focus, scroll, input values preserved during DOM updates
-3. **Brotli learns patterns:** First render 5KB, subsequent ~50 bytes (dictionary builds up)
-4. **Throttling is GOOD:** Users can't see >10 updates/sec anyway, saves bandwidth
-5. **view = f(state):** Every render is from scratch, no deltas, compression handles efficiency
-
----
-
-## Quick Debug Checklist
-
-Problem: Dashboard not updating
-
-- [ ] Is SSE connected? (Check browser DevTools Network tab for pending POST)
-- [ ] Is state actually changing? (`@job-state` in REPL)
-- [ ] Is watch installed? (Should be in `jobs.clj:21`)
-- [ ] Is render function erroring? (Check logs with `(user/logs)`)
-- [ ] Is hash changing? (Enable debug logging: `(taoensso.timbre/set-level! :debug)`)
-
-Problem: Code changes not applying
-
-- [ ] Did you use `(integrant.repl/reset)` not `require :reload`?
-- [ ] Is the system actually running? (`(user/status)`)
-- [ ] Did reset fail with errors? (Fix errors, reset again)
-
-Problem: SSE disconnects frequently
-
-- [ ] Are you on HTTP/1.1? (Need HTTP/2 via Caddy reverse proxy)
-- [ ] Browser throttling hidden tabs? (Expected, reconnects automatically)
-- [ ] Network issues? (Check `data-on:online__window` in shim-page)
+1. **Sliding buffer (size 1):** Under load, only most recent event kept. Clients always converge to latest state.
+2. **Hash-based change detection:** Built into `render-handler` (only sends if view changed)
+3. **Brotli disabled by default for SSE:** Small payloads get buffered by brotli, causing latency. Only enable for large views.
+4. **poll-ms is a safety net:** Set to 10+ seconds. Reactive triggers (`refresh-all!`) handle timely updates.
+5. **Virtual threads:** One per SSE connection, scales to thousands.
 
 ---
 
 ## Resources
 
-- **Hyperlith examples:** `/reference-code/hyperlith/examples/` (chat_atom, game_of_life, presence_cursors)
-- **Our docs:** `docs/hyperlith-patterns.md`, `docs/current-sse-implementation.md`
-- **Datastar docs:** https://data-star.dev/ (official site)
-- **Blog post:** https://andersmurphy.com/2025/04/07/clojure-realtime-collaborative-web-apps-without-clojurescript.html
+- **Ground truth:** `CONVENTIONS.md` (SSE patterns section)
+- **Datastar docs:** https://data-star.dev/
+- **Deep dive:** `docs/reference/datastar-deep-dive.md`
+- **Design system:** `docs/prds/namespace-ui/design-system.md`
+- **Hyperlith examples:** `reference-code/hyperlith/examples/`
