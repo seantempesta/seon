@@ -1,31 +1,38 @@
 (ns seon.ai.datalevin
-  "Primary Datalevin storage for AI sessions and messages.
+  "Datalevin storage layer for AI sessions and messages.
 
-   This namespace is the PRIMARY store for AI data. All reads and writes
-   go through Datalevin.
+   Purpose: Persist agent sessions and conversation messages to Datalevin.
+   Fire-and-forget writes (errors logged, not propagated) with debounced SSE
+   refresh to update Observatory UI.
 
-   ## Configuration
+   Depends on: seon.ai (schemas), seon.db (transact!), seon.db.datalevin.conn (connections)
+   Depended on by: seon.ai (primary), seon.ai.claude, seon.web.agents
 
-   The `enabled?` atom controls whether Datalevin writes are active (default: true).
+   Consumers:
+   - seon.ai: Calls write functions via lazy datalevin-write! to avoid circular deps.
+     Uses dl-get-session, dl-get-messages, dl-list-sessions, dl-session-stats for
+     public API implementations. Clean separation — seon.ai owns map-in API, we own storage.
+   - seon.ai.claude: Uses enabled? atom + save-message! for real-time persistence.
+     Queries via dl-find-by-agent-session-id, dl-get-result-message, dl-count-assistant-turns,
+     dl-message-count, dl-recent-messages. All via requiring-resolve.
+   - seon.web.agents: Direct require. Uses dl-* functions for observatory rendering:
+     dl-find-ai-session-id, dl-load-session-messages, dl-load-session-info,
+     dl-load-context-tokens, dl-message-stats-by-session, dl-context-tokens-by-session.
 
-   ## Schema Design
+   Watch out for:
+   - dl-* functions use positional args (internal pattern) but are de-facto public API
+   - Dynamic require/resolve of datalevin.core everywhere (lazy loading, avoid at startup)
+   - entity-id/entity-type keys are our internal Datalevin markers, not seon.ai keys
 
-   Uses Datalevin's schemaless mode. Entities use namespaced keys:
+   Needs work:
+   - P2: No :malli/schema on write functions (justified: fire-and-forget, entity maps vary)
+   - P2: dl-* functions use positional args (would break consumers to change)
 
-   - `:db/id` is Datalevin's entity ID
-   - `:seon.ai.datalevin/entity-id` stores the logical entity ID (e.g. ses-xxx, msg-xxx)
-   - Timestamps stored as instants (Datalevin supports java.time.Instant)
+   Fixed (2026-02-26):
+   - P1: Created test file with 12 tests, 36 assertions
+   - P3: stats function now has :malli/schema and uses namespaced keys
 
-   ## What Gets Stored
-
-   - AI Sessions: session lifecycle, status, cost, tokens
-   - AI Messages: conversation messages with tool calls, token usage
-
-   ## Monitoring
-
-   - All writes are logged at :debug level
-   - Errors are logged at :warn level
-   - Use `(stats)` to get storage statistics"
+   Last audit: 2026-02-26 | Tests: 12 pass / 0 fail | Commit: f1bb8d0"
   (:require [integrant.repl.state :as state]
             [seon.ai :as ai]
             [seon.db :as db]
@@ -73,34 +80,57 @@
 (schema/register! ::message-count
                   [:int {:min 0 :description "Number of messages stored"}])
 
+(schema/register! ::session-writes
+                  [:int {:min 0 :description "Number of session writes"}])
+
+(schema/register! ::message-writes
+                  [:int {:min 0 :description "Number of message writes"}])
+
+(schema/register! ::stats-response
+                  [:map
+                   [::write-count ::write-count]
+                   [::error-count ::error-count]
+                   [::last-write-at [:maybe :any]]
+                   [::session-writes ::session-writes]
+                   [::message-writes ::message-writes]])
+
 ;;; ---------------------------------------------------------------------------
 ;;; Statistics
 ;;; ---------------------------------------------------------------------------
 
 ;; Atom tracking write statistics for monitoring.
 (defonce stats-atom
-  (atom {:write-count 0
-         :error-count 0
-         :last-write-at nil
-         :session-writes 0
-         :message-writes 0}))
+  (atom {::write-count 0
+         ::error-count 0
+         ::last-write-at nil
+         ::session-writes 0
+         ::message-writes 0}))
 
 (defn stats
   "Get current Datalevin storage statistics.
 
-   Returns:
-     Map with :write-count, :error-count, :last-write-at, etc."
+   Returns map with namespaced keys:
+     ::write-count    - Total successful writes
+     ::error-count    - Total failed writes
+     ::last-write-at  - Timestamp of last successful write
+     ::session-writes - Session entities written
+     ::message-writes - Message entities written
+
+   Example:
+     (stats)
+     ;; => {::write-count 42, ::error-count 0, ...}"
+  {:malli/schema [:=> [:cat] ::stats-response]}
   []
   @stats-atom)
 
 (defn reset-stats!
   "Reset statistics counters."
   []
-  (reset! stats-atom {:write-count 0
-                      :error-count 0
-                      :last-write-at nil
-                      :session-writes 0
-                      :message-writes 0}))
+  (reset! stats-atom {::write-count 0
+                      ::error-count 0
+                      ::last-write-at nil
+                      ::session-writes 0
+                      ::message-writes 0}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Connection Helpers
@@ -193,16 +223,16 @@
           (db/transact! conn [dl-entity])
           (swap! stats-atom (fn [s]
                               (-> s
-                                  (update :write-count inc)
-                                  (update :session-writes inc)
-                                  (assoc :last-write-at (Instant/now)))))
+                                  (update ::write-count inc)
+                                  (update ::session-writes inc)
+                                  (assoc ::last-write-at (Instant/now)))))
           (log/debug "Saved session to Datalevin"
                      {:session-id (::ai/session-id entity)
                       :entity-id (:seon/id entity)})
           (maybe-refresh-sse!)
           true))
       (catch Exception e
-        (swap! stats-atom update :error-count inc)
+        (swap! stats-atom update ::error-count inc)
         (log/warn "Failed to save session to Datalevin"
                   {:session-id (::ai/session-id entity)
                    :error (.getMessage e)})
@@ -228,16 +258,16 @@
           (db/transact! conn [dl-entity])
           (swap! stats-atom (fn [s]
                               (-> s
-                                  (update :write-count inc)
-                                  (update :message-writes inc)
-                                  (assoc :last-write-at (Instant/now)))))
+                                  (update ::write-count inc)
+                                  (update ::message-writes inc)
+                                  (assoc ::last-write-at (Instant/now)))))
           (log/trace "Saved message to Datalevin"
                      {:message-id (:seon/id entity)
                       :session-id (::ai/session-id entity)})
           (maybe-refresh-sse!)
           true))
       (catch Exception e
-        (swap! stats-atom update :error-count inc)
+        (swap! stats-atom update ::error-count inc)
         (log/warn "Failed to save message to Datalevin"
                   {:message-id (:seon/id entity)
                    :error (.getMessage e)})
@@ -258,8 +288,7 @@
     false
     (try
       (when-let [conn (get-conn)]
-        (require 'datalevin.core)
-        (let [q-fn (resolve 'datalevin.core/q)
+        (let [q-fn (requiring-resolve 'datalevin.core/q)
               entity-id (:seon/id entity)
               existing (first (q-fn '[:find ?e
                                       :in $ ?entity-id
@@ -273,14 +302,14 @@
               (db/transact! conn [dl-entity])
               (swap! stats-atom (fn [s]
                                   (-> s
-                                      (update :write-count inc)
-                                      (assoc :last-write-at (Instant/now)))))
+                                      (update ::write-count inc)
+                                      (assoc ::last-write-at (Instant/now)))))
               (log/debug "Updated session in Datalevin" {:entity-id entity-id})
               (maybe-refresh-sse!)
               true)
             (save-session! entity))))
       (catch Exception e
-        (swap! stats-atom update :error-count inc)
+        (swap! stats-atom update ::error-count inc)
         (log/warn "Failed to update session in Datalevin"
                   {:session-id (:seon/id entity)
                    :error (.getMessage e)})
