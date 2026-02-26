@@ -1,22 +1,78 @@
 (ns seon.ns.routes
-  "HTTP routes for namespace introspection and function calls.
+  "Namespace HTTP routes: page rendering, introspection, and function calls.
 
-   Provides:
-   - /ns/{namespace} - Page render (if namespace has a spec-discovered renderer)
-                       or static introspection view (vars, functions, schemas)
-   - /ns/{namespace}?id={id} - Instance view (passed to renderer)
-   - /ns/{namespace}/{function} - Function call (POST only, for reactive UI actions)
+   ## Purpose
+   Bridge between HTTP and the namespace system. Every namespace in Seon is
+   browsable at /ns/{namespace}. This namespace handles the routing, content
+   negotiation, renderer resolution, reactive instance lifecycle, and SSE
+   streaming for those URLs. It is the web-facing surface of the namespace
+   system -- lifecycle.clj, introspect.clj, and render.clj do the real work.
 
-   Page renderers are discovered from the code graph, not declared explicitly.
-   A function is a page renderer iff its input spec contains a *ctx* key and
-   its output spec contains :seon.render/html.
+   ## Architecture Position
+   - seon.web.routes: sole consumer. Registers route-patterns for dynamic dispatch.
+   - seon.ns.lifecycle: we delegate instance creation, renderer discovery.
+   - seon.ns.introspect: we delegate namespace var/fn enumeration.
+   - seon.render: we delegate renderer resolution (resolve-renderer) and format rendering.
+   - seon.ctx: we read instances, register/unregister SSE clients, get atoms.
+   - seon.web.reactive.actions: resolves function symbols to callable vars.
+   - seon.web.reactive.transform: transforms hiccup for Datastar (data-on:click etc).
 
-   Function calls receive form-encoded POST bodies with qualified keyword names.
-   Server parses keyword keys via clojure.edn/read-string and Malli-coerces
-   string values to correct types before calling the function.
+   ## Consumer Analysis
+   seon.web.routes is the only direct consumer. It uses route-patterns (a data var)
+   to register regex-based dynamic routes. No other namespace calls our handlers
+   directly. The consumer experience is clean -- just a data var.
 
-   Note: Functions here are Ring handlers using positional args, following
-   the pattern of other web handlers in seon.web.*"
+   ## Public API Assessment
+   | Function               | Status    | Notes                                    |
+   |------------------------|-----------|------------------------------------------|
+   | namespace-page         | OK        | Ring handler, map-in via request          |
+   | namespace-sse          | OK        | Ring handler, map-in via request          |
+   | function-call-handler  | OK        | Ring handler, map-in via request          |
+   | function-get-handler   | OK        | Ring handler, map-in via request          |
+   | after-ns-reload        | OK        | Lifecycle hook, zero-arg by convention    |
+   | route-patterns         | OK        | Data var, consumed by seon.web.routes     |
+
+   ## Convention Compliance
+   - Malli schemas: N/A -- Ring handlers take opaque request maps, not domain maps.
+     Internal helpers (parse-form-body, coerce-with-schema) use Malli for coercion.
+   - Map-in/map-out: PASS -- Ring request IS the input map. Responses are Ring maps.
+   - Namespaced keys: PARTIAL -- ctx/lifecycle calls use namespaced keys correctly.
+     Internal state (namespace-handlers atom) uses plain symbols as keys.
+   - Docstrings: PASS -- all public fns have docstrings.
+   - Tests: PASS -- 5 tests, 13 assertions covering form parsing, function calls,
+     render+transform round trip, GET calls, and validation.
+
+   ## Strategic Assessment
+   This namespace does too much: ~940 lines covering page rendering, introspection
+   view HTML, SSE handlers, form parsing, function dispatch, instance lifecycle
+   wiring, and content negotiation. The introspection view rendering (render-*-row,
+   render-instances-section, render-introspection-view) is ~250 lines of Hiccup that
+   should move to seon.ns.view or a dedicated seon.ns.introspect.view namespace.
+   The function call machinery (parse-form-body, coerce-with-schema, resolve-and-call)
+   could be its own namespace (seon.ns.dispatch). But splitting is a medium-scope
+   refactor best done as a dedicated task.
+
+   ## Issues (Prioritized)
+   - P2 - Namespace too large (~940 lines). Introspection view HTML and function
+     dispatch logic should be extracted to dedicated namespaces.
+   - P3 - namespace-handlers atom uses plain symbol keys (not namespaced).
+   - P3 - resolve-and-call discards the return value of the called function
+     in POST handler (line ~869). Only GET handler returns the result.
+
+   ## What's Good
+   - Clean delegation: lifecycle, introspect, render, ctx each own their domain.
+   - Spec-driven renderer resolution via render/resolve-renderer.
+   - Form parsing correctly handles URL-encoded qualified keywords.
+   - Content negotiation supports html/ai/raw formats.
+   - SSE properly splits between push (instances) and polling (introspection).
+   - Route patterns are pure data -- easy to test and compose.
+   - Tests cover the important integration paths end-to-end.
+
+   ## Audit Metadata
+   Audited: 2026-02-26
+   Auditor: claude-opus-4-6
+   Commit: 45a03c3
+   Tests: 5 tests, 13 pass / 0 fail (13 assertions)"
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
             [dev.onionpancakes.chassis.core :as h]
