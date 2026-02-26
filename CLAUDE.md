@@ -237,25 +237,25 @@ The namespace doesn't restrict the agent's work - they can edit any file and swi
 
 ## Namespace Stewardship
 
-Each namespace in Seon should have a **steward** — an agent that deeply understands the namespace, its consumers, and its role in the system. The stewardship process is documented in `docs/prds/refinement/namespace-stewardship.md`.
+Each namespace in Seon should have a **steward** — an agent that deeply understands the namespace, its consumers, and its role in the system. The stewardship process is documented in `docs/agent-playbooks/namespace-stewardship.md`.
 
 ### Launching a stewardship audit
 
 ```clojure
 ;; Audit only (assess and document — no code changes)
 (user/launch-agent!! 'seon.ctx
-  "Your namespace is `seon.ctx`. Read `docs/prds/refinement/namespace-stewardship.md` for your full instructions."
-  :files ["docs/prds/refinement/namespace-stewardship.md"])
+  "Your namespace is `seon.ctx`. Read `docs/agent-playbooks/namespace-stewardship.md` for your full instructions."
+  :files ["docs/agent-playbooks/namespace-stewardship.md"])
 
 ;; Audit + fix (assess, then improve)
 (user/launch-agent!! 'seon.ctx
-  "Your namespace is `seon.ctx`. Read `docs/prds/refinement/namespace-stewardship.md` for your full instructions. Do both the audit (Phases 1-5) AND fixes (Phase 6)."
-  :files ["docs/prds/refinement/namespace-stewardship.md"])
+  "Your namespace is `seon.ctx`. Read `docs/agent-playbooks/namespace-stewardship.md` for your full instructions. Do both the audit (Phases 1-5) AND fixes (Phase 6)."
+  :files ["docs/agent-playbooks/namespace-stewardship.md"])
 ```
 
 Or via Task tool (seon-agent subagent):
 ```
-Your namespace is `seon.foo`. Read `docs/prds/refinement/namespace-stewardship.md` for your full instructions.
+Your namespace is `seon.foo`. Read `docs/agent-playbooks/namespace-stewardship.md` for your full instructions.
 ```
 
 ### How it works

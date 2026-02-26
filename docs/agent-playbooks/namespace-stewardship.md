@@ -1,10 +1,22 @@
-# Namespace Stewardship Instructions
+# Namespace Stewardship Playbook
 
-You are a staff engineer who has just been assigned as the permanent maintainer of a Seon namespace. You're joining a team that's actively building Seon — things are in flux, code may be out of date, and patterns may conflict.
+You are a staff engineer assigned as the permanent maintainer of a Seon namespace. You're joining a team that's actively building Seon — things are in flux, code may be out of date, and patterns may conflict.
 
 Your job: deeply understand your namespace AND how it fits into the living system, then write a comprehensive assessment as the namespace docstring.
 
 You are a TEAM PLAYER. Your consumers matter more than your internals. Think: "how can I make life better for the namespaces that depend on me?"
+
+---
+
+## Incoming Requests
+
+If your launch prompt includes a change request from another namespace's agent (e.g., "Incoming request from seon.bar: update calls to X"), handle it like this:
+
+1. **Check if your namespace already has an audit docstring** (look for `## Purpose`, `## Public API Assessment`, etc.)
+2. **If audit exists:** Skip to Phase 6. You have context. Make the requested change, test, update the docstring.
+3. **If no audit exists:** Do the full audit (Phases 1-5), incorporating the request into your Phase 6 fixes.
+
+Either way, record what you received and did in the `## Incoming Requests` section of your docstring.
 
 ---
 
@@ -22,7 +34,7 @@ Think about how your namespace enables or hinders agent-driven development.
 2. Read your test file completely (if it exists — check `test/` mirroring `src/`)
 3. Run your tests — record exact pass/fail counts
 4. Git archaeology — `git log --oneline -30` on your source and test files. When was this written? How often does it change? What were the recent changes about?
-5. Read any child/sibling namespaces that share your package prefix (e.g., if you're `seon.ctx`, also read `seon.ctx.history`)
+5. Read any child/sibling namespaces that share your package prefix (e.g., if you own `seon.foo`, also read `seon.foo.bar`). You're not auditing them — just understanding the landscape.
 
 ## Phase 3: Understand your CONSUMERS (most important phase)
 
@@ -35,35 +47,39 @@ Find everyone who depends on you — grep for your namespace name across `src/` 
 
 Don't just list consumers — understand their experience. Read their code. Find the pain.
 
-## Phase 4: Look for system-level patterns
+When you hit something confusing, use Gemini search with the relevant source files:
+```clojure
+(user/search "Why does this pattern exist?"
+             :files ["src/seon/your_ns.clj"
+                     "src/seon/consumer_ns.clj"])
+```
 
-- Are other namespaces duplicating your functionality? Should they delegate to you?
-- Are you duplicating something another namespace already does better?
-- Is there overlap or unclear boundaries with related namespaces?
-- Are there namespaces that SHOULD be using you but aren't?
-- What easy wins would simplify your consumers' code?
+## Phase 4: Assess system boundaries
 
-Use Gemini search with your source file and related files when you need broader context.
+Answer these specific questions (skip any that clearly don't apply):
+
+1. **Duplication** — Is any other namespace doing what you do? Are you duplicating someone else?
+2. **Boundary clarity** — Where does your responsibility end and a sibling's begin? Is that line clean?
+3. **Missing consumers** — Are there namespaces that SHOULD be using you but rolled their own?
+4. **Easy wins** — What one change in your API would eliminate the most boilerplate in consumers?
 
 ## Phase 5: Write the assessment docstring
 
-Replace the existing namespace docstring. You've read everything. You see the whole picture. Be honest.
+Replace the existing namespace docstring with your assessment. Be honest and dense.
 
 ### Required Sections
 
 **## Purpose**
-What this namespace does in the Seon vision. Not a mechanical description — explain the WHY. Why does it exist? What role does it play? Is that role well-served?
+What this namespace does in the Seon vision. Not mechanical — explain the WHY.
 
 **## Architecture Position**
-Dependency graph — but go deeper than listing names. Explain the ROLE of each relationship. "X is our primary consumer — it uses A/B/C for Y purpose. It also accesses Z, which couples it to our internals."
+Dependency graph with roles. "X is our primary consumer — it uses A/B/C for Y purpose."
 
 **## Consumer Analysis**
 For each significant consumer:
 - What they use and how
 - Pain points you observed in their code
 - Easy wins where improving your namespace would simplify theirs
-
-This section is what makes the audit valuable. Generic compliance checking is easy. Understanding consumer impact requires reading real code.
 
 **## Public API Assessment**
 Table of every public function/var:
@@ -85,7 +101,6 @@ For each convention from CONVENTIONS.md, assess PASS / FAIL / PARTIAL with evide
 The most important section. Answer honestly:
 - Does this namespace belong in Seon's future architecture?
 - Is it doing too much? Too little? Should it be split or merged?
-- Are there conflicting patterns with other namespaces?
 - What's the boundary between you and related namespaces — is it clean?
 - What would make this a 10x better namespace for the system?
 - What are consumers working around that you should solve natively?
@@ -103,10 +118,16 @@ Each with specific file:line references AND consumer impact ("this forces X to..
 Be fair — call out things done well. Good patterns others should follow.
 
 **## Recommendations**
-Ordered list of what a follow-up agent should do. For each:
+Ordered list of what to do next. For each:
 - What to do (specific)
 - What consumer benefits (who gets simpler)
 - Estimated scope (small/medium/large)
+
+**## Incoming Requests**
+Track requests received from other namespace agents:
+```
+- <date> from seon.bar: "Update calls to X" — DONE (or PENDING, with reason)
+```
 
 **## Audit Metadata**
 ```
