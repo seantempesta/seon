@@ -127,20 +127,37 @@ Tests: N pass / M fail (A assertions)
 
 ## Phase 6: Make improvements (if tasked with fixes)
 
-If your launch prompt asks you to fix issues (not just audit), work through them incrementally:
+If your launch prompt asks you to fix issues (not just audit), work through them incrementally.
+
+### Scope: YOUR namespace only
+
+You may ONLY modify these files:
+- Your namespace source file (e.g., `src/seon/ctx.clj`)
+- Your namespace test file (e.g., `test/seon/ctx_test.clj`)
+
+You may NOT modify any other namespace's files. If fixing an issue requires changes in a consumer namespace (e.g., updating callers in `seon.ns.routes`), do NOT make those changes yourself. Instead, add them to a **Requested Changes** section in your final report:
+
+```
+## Requested Changes (for other namespace agents)
+
+- seon.ns.routes: Update calls to `instances-for-namespace` to use map-in pattern `{::ctx/namespace ns-sym}` (lines 450, 512)
+- seon.agent.env: Delete ctx-save!/ctx-load, replace with calls to ctx/persist! and ctx/load! (lines 258-286)
+```
+
+The orchestrator will delegate these to the appropriate namespace agents.
+
+### Workflow
 
 1. **Pick one issue** — start with the best effort-to-impact ratio
 2. **Make the change** — follow CONVENTIONS.md patterns exactly
-3. **Update callers** — grep for every caller and update them too. Don't break consumers.
-4. **Run tests** — `(user/run-tests 'your.namespace-test)` AND tests for any consumer namespace you modified. ALL must pass.
-5. **Update the docstring** — reflect what you fixed. Change the issue status. Update the Audit Metadata with new test counts.
-6. **Repeat** — pick the next issue. Stop when you've done a few things well.
+3. **Run tests** — `(user/run-tests 'your.namespace-test)`. Must pass.
+4. **Update the docstring** — reflect what you fixed. Update Audit Metadata.
+5. **Repeat** — pick the next issue. Stop when you've done a few things well.
 
 ### Testing is non-negotiable
 
 - Run tests after EVERY change, not just at the end
 - If tests fail, fix them before moving on — never leave broken tests
-- If you modified `seon.foo` and `seon.bar`, run BOTH test suites
 - Report final counts honestly: "Tests: N pass / M fail"
 
 ### Update the docstring after every improvement
@@ -154,13 +171,13 @@ The namespace docstring is the living record. After fixing an issue:
 ### Commit your work
 
 When you've completed a coherent set of improvements and all tests pass:
-- Stage only the files you changed
+- Stage only the files you changed (your source + test file only)
 - Write a clear commit message describing what you fixed and why
 - The commit message should reference the audit issue codes (P1, P2, etc.)
 
 ### When to stop
 
 - Do a few things well rather than everything poorly
-- If a fix is getting complex (touching 5+ files), stop and document it as a recommendation instead
+- If a fix requires changes outside your namespace, document it in Requested Changes
 - Never declare victory with failing tests
-- When done, report: what you fixed, what you skipped, final test counts per namespace
+- When done, report: what you fixed, what you skipped, Requested Changes, final test counts
