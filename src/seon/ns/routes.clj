@@ -27,7 +27,10 @@
             [seon.web.components :as ui]
             [seon.render.default-page :as default-page]
             [seon.web.reactive.actions :as actions]
+            [seon.web.reactive.encoding :as encoding]
             [seon.web.reactive.transform :as transform]
+            [malli.core :as m]
+            [malli.error :as me]
             [taoensso.timbre :as log]))
 
 ;;; ---------------------------------------------------------------------------
@@ -590,25 +593,15 @@
       (and conn-var (bound? conn-var))
       (assoc conn-key @conn-var))))
 
-(defn- fn-schema-key-map
-  "Build a signal-name -> qualified-keyword mapping from a function's Malli schema.
-   The transform layer strips namespaces from field keys (`:seon.ctx/user-input` becomes
-   signal name `user-input`). This function inspects the target fn's schema to determine
-   the correct qualified key for each signal name.
-   Falls back to namespacing under ns-sym for unmatched signal names."
-  [action-fn _ns-sym]
+(defn- extract-fn-input-schema
+  "Extract the input map schema from a function's Malli schema.
+   Schema is [:=> [:cat [:map ...]] ...]. Returns the [:map ...] or nil."
+  [action-fn]
   (when-let [schema (:malli/schema (meta action-fn))]
-    ;; Schema is [:=> [:cat [:map ...]] :any]
-    ;; Extract the map entries from the first arg
-    (let [cat-schema (second schema)           ; [:cat [:map ...]]
-          map-schema (second cat-schema)       ; [:map ...]
-          entries (rest map-schema)]           ; ([key opts? schema] ...)
-      (into {}
-            (keep (fn [entry]
-                    (let [k (first entry)]
-                      (when (and (keyword? k) (namespace k))
-                        [(name k) k]))))
-            entries))))
+    (let [cat-schema (second schema)
+          map-schema (second cat-schema)]
+      (when (and (vector? map-schema) (= :map (first map-schema)))
+        map-schema))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; HTTP Handlers
@@ -742,14 +735,15 @@
 (defn function-call-handler
   "Handle POST /ns/:namespace/:function requests.
 
-   This is the new URL pattern for reactive UI actions.
-   Reuses signal extraction and function resolution from actions.clj.
+   Signals arrive as nested JSON from Datastar's dot-notation encoding.
+   The encoding layer (seon.web.reactive.encoding) decodes them back to
+   fully qualified Clojure keywords — no schema introspection needed.
 
    Auto-injects *ctx* and *conn* values from the namespace's injected vars
    into the signal map, so functions receive ctx/conn without explicit wiring.
 
-   For instance-based calls (?instance=xxxx):
-   - Also adds :seon.reactive/ctx atom to signals for action to use
+   Validates decoded signals against the function's Malli input schema
+   before calling. Returns 400 with humanized errors on validation failure.
 
    Function names are URL-decoded to handle %21 -> ! etc."
   [request]
@@ -776,42 +770,37 @@
       :else
       (if-let [action-fn (actions/resolve-action ns-sym fn-sym)]
         (try
-        (let [raw-signals (actions/extract-signals body)
-              ;; Re-namespace signal keys using the function's Malli schema.
-              ;; The transform layer strips namespaces from field keys because
-              ;; JS identifiers can't contain dots/slashes. We restore the correct
-              ;; qualified key by matching signal names against schema keys.
-              ;; Example: signal "user-input" -> :seon.ctx/user-input (from schema)
-              ;;          signal "exercise"   -> :seon.getting-started/exercise
-              key-map (or (fn-schema-key-map action-fn ns-sym) {})
-              base-signals (into {}
-                                 (map (fn [[k v]]
-                                        (if (namespace k)
-                                          [k v]
-                                          (let [sig-name (name k)]
-                                            [(or (get key-map sig-name)
-                                                 (keyword (str ns-sym) sig-name))
-                                             v]))))
-                                 raw-signals)
-              ;; Auto-inject *ctx* and *conn* from namespace vars
-              injected (inject-ctx-conn ns-sym base-signals)
-              ;; Add instance ctx atom if present
-              signals (if instance-id
-                        (let [ctx-atom (ctx/get-atom {::ctx/instance-id instance-id})]
-                          (if ctx-atom
-                            (assoc injected :seon.reactive/ctx ctx-atom)
-                            injected))
-                        injected)]
-          (log/info "Executing function" {:ns ns-sym :fn fn-sym :signals (dissoc signals :seon.reactive/ctx)})
-          (action-fn signals)
-          {:status 200
-           :headers {"Content-Type" "application/json"}
-           :body "{\"success\":true}"})
-        (catch Exception e
-          (log/error e "Function execution failed" {:ns ns-sym :fn fn-sym})
-          {:status 500
-           :headers {"Content-Type" "application/json"}
-           :body (str "{\"success\":false,\"error\":\"" (.getMessage e) "\"}")}))
+          (let [;; Decode signals using the encoding layer — preserves full
+                ;; qualified keywords through the Datastar round-trip.
+                ;; No more schema introspection needed for re-namespacing.
+                decoded-signals (encoding/decode-signals body)
+                ;; Auto-inject *ctx* and *conn* from namespace vars
+                injected (inject-ctx-conn ns-sym decoded-signals)
+                ;; Add instance ctx atom if present
+                signals (if instance-id
+                          (let [ctx-atom (ctx/get-atom {::ctx/instance-id instance-id})]
+                            (if ctx-atom
+                              (assoc injected :seon.reactive/ctx ctx-atom)
+                              injected))
+                          injected)
+                ;; Validate after injection so auto-injected keys satisfy schema
+                input-schema (extract-fn-input-schema action-fn)
+                _ (when (and input-schema (seq signals))
+                    (when-not (m/validate input-schema signals)
+                      (throw (ex-info "Invalid input"
+                                      {:errors (me/humanize (m/explain input-schema signals))}))))]
+            (log/info "Executing function" {:ns ns-sym :fn fn-sym :signals (dissoc signals :seon.reactive/ctx)})
+            (action-fn signals)
+            {:status 200
+             :headers {"Content-Type" "application/json"}
+             :body "{\"success\":true}"})
+          (catch Exception e
+            (let [data (ex-data e)
+                  status (if (:errors data) 400 500)]
+              (log/error e "Function execution failed" {:ns ns-sym :fn fn-sym})
+              {:status status
+               :headers {"Content-Type" "application/json"}
+               :body (str "{\"success\":false,\"error\":\"" (.getMessage e) "\"}")})))
         (do
           (log/warn "Function not found" {:ns ns-sym :fn fn-sym})
           {:status 404

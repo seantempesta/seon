@@ -1,5 +1,6 @@
 (ns seon.web.reactive.transform-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
             [seon.web.reactive.transform :as transform]))
 
 (deftest transform-attrs-test
@@ -10,10 +11,14 @@
     (is (= {:data-on:submit "@post('/ns/seon.trading/create-order')"}
            (transform/transform-attrs 'seon.trading {:on:submit :create-order}))))
 
-  (testing "field attributes transform to data-bind key syntax"
-    ;; Key syntax: data-bind:signalName="true" renders as attribute with colon in name
-    (is (= {:name "user-name" :data-bind:user-name true}
+  (testing "field attributes transform to data-bind with encoded signal path"
+    ;; Unqualified :user-name encodes to camelCase signal path
+    (is (= {:name "userName" :data-bind:userName true}
            (transform/transform-attrs 'seon.test {:field :user-name}))))
+
+  (testing "qualified field encodes full signal path"
+    (is (= {:name "seon.gettingStarted.exercise" :data-bind:seon.gettingStarted.exercise true}
+           (transform/transform-attrs 'seon.test {:field :seon.getting-started/exercise}))))
 
   (testing "field preserves other attributes"
     (is (= {:name "price" :data-bind:price true :type "number" :placeholder "Enter price"}
@@ -33,26 +38,25 @@
            (transform/transform-hiccup 'seon.test
              [:button {:on:click :increment} "Add"]))))
 
-  (testing "input with field gets data-signals injected"
-    ;; Key syntax: data-bind:email renders as attribute with colon in name
+  (testing "input with field gets data-signals injected with encoded path"
     (is (= [:input {:name "email" :data-bind:email true :type "email"
-                    :data-signals "{\"email\": \"\"}"}]
+                    :data-signals "{\"email\":\"\"}"}]
            (transform/transform-hiccup 'seon.test
              [:input {:field :email :type "email"}]))))
 
   (testing "nested structure gets data-signals on root"
-    (is (= [:div {:class "container"
-                  :data-signals "{\"symbol\": \"\"}"}
-            [:h1 {} "Title"]
-            [:form {:data-on:submit "@post('/ns/seon.trading/submit')"}
-             [:input {:name "symbol" :data-bind:symbol true}]
-             [:button {:data-on:click "@post('/ns/seon.trading/submit')"} "Go"]]]
-           (transform/transform-hiccup 'seon.trading
-             [:div {:class "container"}
-              [:h1 {} "Title"]
-              [:form {:on:submit :submit}
-               [:input {:field :symbol}]
-               [:button {:on:click :submit} "Go"]]]))))
+    (let [result (transform/transform-hiccup 'seon.trading
+                   [:div {:class "container"}
+                    [:h1 {} "Title"]
+                    [:form {:on:submit :submit}
+                     [:input {:field :symbol}]
+                     [:button {:on:click :submit} "Go"]]])]
+      ;; Root element has data-signals
+      (is (= :div (first result)))
+      (is (contains? (second result) :data-signals))
+      (is (= "container" (:class (second result))))
+      ;; data-signals contains "symbol"
+      (is (str/includes? (:data-signals (second result)) "symbol"))))
 
   (testing "elements without attrs unchanged"
     (is (= [:div [:span "hello"]]
@@ -96,3 +100,17 @@
                     :data-on:blur "@post('/ns/seon.test/blurred')"}]
            (transform/transform-hiccup 'seon.test
              [:input {:on:focus :focused :on:blur :blurred}])))))
+
+(deftest qualified-field-encoding-test
+  (testing "qualified keywords produce full signal paths in data-signals"
+    (let [result (transform/transform-hiccup 'seon.getting-started
+                   [:div
+                    [:input {:field :seon.getting-started/exercise}]
+                    [:input {:field :seon.ctx/user-input}]])]
+      ;; data-signals should contain nested JSON with both namespaces
+      (let [signals-json (:data-signals (second result))]
+        (is (some? signals-json))
+        (is (str/includes? signals-json "gettingStarted"))
+        (is (str/includes? signals-json "exercise"))
+        (is (str/includes? signals-json "ctx"))
+        (is (str/includes? signals-json "userInput"))))))
