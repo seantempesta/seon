@@ -28,6 +28,7 @@
    - Use `(stats)` to get storage statistics"
   (:require [integrant.repl.state :as state]
             [seon.ai :as ai]
+            [seon.db :as db]
             [seon.db.datalevin.conn :as conn]
             [seon.schema :as schema]
             [taoensso.timbre :as log])
@@ -188,10 +189,8 @@
         false)
     (try
       (when-let [conn (get-conn)]
-        (require 'datalevin.core)
-        (let [transact! (resolve 'datalevin.core/transact!)
-              dl-entity (entity->datalevin-session entity)]
-          (transact! conn [dl-entity])
+        (let [dl-entity (entity->datalevin-session entity)]
+          (db/transact! conn [dl-entity])
           (swap! stats-atom (fn [s]
                               (-> s
                                   (update :write-count inc)
@@ -225,10 +224,8 @@
         false)
     (try
       (when-let [conn (get-conn)]
-        (require 'datalevin.core)
-        (let [transact! (resolve 'datalevin.core/transact!)
-              dl-entity (entity->datalevin-message entity)]
-          (transact! conn [dl-entity])
+        (let [dl-entity (entity->datalevin-message entity)]
+          (db/transact! conn [dl-entity])
           (swap! stats-atom (fn [s]
                               (-> s
                                   (update :write-count inc)
@@ -263,20 +260,17 @@
       (when-let [conn (get-conn)]
         (require 'datalevin.core)
         (let [q-fn (resolve 'datalevin.core/q)
-              transact! (resolve 'datalevin.core/transact!)
               entity-id (:seon/id entity)
-              ;; Find existing entity by entity-id
               existing (first (q-fn '[:find ?e
                                       :in $ ?entity-id
                                       :where
                                       [?e :seon.ai.datalevin/entity-id ?entity-id]]
                                     @conn entity-id))]
           (if existing
-            ;; Update existing entity
             (let [db-id (first existing)
                   dl-entity (-> (entity->datalevin-session entity)
                                 (assoc :db/id db-id))]
-              (transact! conn [dl-entity])
+              (db/transact! conn [dl-entity])
               (swap! stats-atom (fn [s]
                                   (-> s
                                       (update :write-count inc)
@@ -284,7 +278,6 @@
               (log/debug "Updated session in Datalevin" {:entity-id entity-id})
               (maybe-refresh-sse!)
               true)
-            ;; No existing entity - insert new one
             (save-session! entity))))
       (catch Exception e
         (swap! stats-atom update :error-count inc)

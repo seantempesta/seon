@@ -80,19 +80,36 @@
 
 ;;; --- Public API (positional, mirrors datalevin.core) ---
 
+(def ^:private default-timeout-ms
+  "Default transaction timeout in milliseconds.
+   Generous — protects against deadlocks, not slow queries."
+  10000)
+
 (defn transact!
   "Transact data into conn. Tracks caller and write count for observability.
    Lazily creates a writer flow for backup coordination.
-   Writes go directly to d/transact! for zero overhead."
+   Wraps d/transact! in a future with timeout to prevent permanent deadlocks
+   from abandoned write transactions (e.g. MCP eval timeout while holding lock)."
   {:malli/schema [:=> [:cat :any [:sequential :any]] :any]}
   ([conn tx-data]
    (transact! conn tx-data nil))
   ([conn tx-data tx-meta]
    (ensure-writer! conn)
    (let [caller (caller-ns)
-         result (if tx-meta
-                  (d/transact! conn tx-data tx-meta)
-                  (d/transact! conn tx-data))]
+         fut (future
+               (if tx-meta
+                 (d/transact! conn tx-data tx-meta)
+                 (d/transact! conn tx-data)))
+         result (deref fut default-timeout-ms ::timeout)]
+     (when (= result ::timeout)
+       (future-cancel fut)
+       (log/error "Datalevin transaction timed out — possible deadlock"
+                  {:caller caller :tx-count (count tx-data)
+                   :timeout-ms default-timeout-ms})
+       (throw (ex-info "Datalevin transaction timed out"
+                       {:timeout-ms default-timeout-ms
+                        :tx-count (count tx-data)
+                        :caller caller})))
      (track-write! caller (count tx-data))
      result)))
 
