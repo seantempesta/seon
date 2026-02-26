@@ -751,21 +751,22 @@
                              (if show-completed
                                "bg-base-800 text-text-200 hover:bg-base-700"
                                "bg-base-850 text-text-400 hover:bg-base-800"))
-                 :data-on:click "@post('/api/agents/toggle-completed')"}
+                 :data-on:click "fetch('/api/agents/toggle-completed',{method:'POST'})"}
         (if show-completed "Hide Completed" "Show Completed")]]
 
       ;; Agents table
       (agents-table data)
 
-      ;; Runtime instances summary
-      (let [all-instances (runtime/instances {})
-            running-instances (filter #(= :running (::runtime/status %)) all-instances)]
-        (when (seq all-instances)
+      ;; Runtime instances summary — only show external (agent) instances
+      (let [external-instances (->> (runtime/instances {})
+                                    (filter #(= :external (::runtime/location %))))
+            running-instances (filter #(= :running (::runtime/status %)) external-instances)]
+        (when (seq external-instances)
           [:div {:class "mt-4"}
            [:div {:class "flex items-center gap-2 mb-2"}
             [:span {:class "text-xs font-semibold text-text-400 uppercase tracking-wider"} "Runtime Instances"]
             [:span {:class "text-text-500 text-xs"}
-             (str (count running-instances) " running / " (count all-instances) " total")]]
+             (str (count running-instances) " running / " (count external-instances) " total")]]
            [:div {:class "bg-base-850 rounded overflow-hidden"}
             [:table {:class "w-full"}
              [:thead
@@ -775,7 +776,7 @@
                [:th {:class "text-left py-1.5 px-4 text-xs font-medium text-text-400 uppercase tracking-wider"} "Location"]
                [:th {:class "text-left py-1.5 px-4 text-xs font-medium text-text-400 uppercase tracking-wider"} "Since"]]]
              [:tbody
-              (for [inst (sort-by ::runtime/namespace all-instances)]
+              (for [inst (sort-by ::runtime/namespace external-instances)]
                 [:tr {:class "border-b border-base-700 last:border-0"}
                  [:td {:class "py-2 px-4 font-mono text-sm text-text-200"} (::runtime/namespace inst)]
                  [:td {:class "py-2 px-4"} (agent-status-badge (::runtime/status inst))]
