@@ -269,6 +269,71 @@
          vec)))
 
 ;;; ---------------------------------------------------------------------------
+;;; Unified Resolution: Functions by Output Key
+;;; ---------------------------------------------------------------------------
+
+(schema/register! ::output-key
+                  [:keyword {:description "Output spec key to search for (e.g. :seon.render/html)"}])
+
+(defn functions-with-output-key
+  "Find functions whose output spec contains a specific key.
+
+   Uses ref join: fn → output-spec → contains-keys.
+   Pulls input spec data and computes required vs optional keys.
+
+   This is the unified discovery pattern for renderers, documentation functions,
+   health checks, and any other discoverable function type. The output-key
+   determines what kind of function you're looking for:
+   - :seon.render/html → HTML renderers
+   - :seon.render/ai → AI renderers
+   - :seon.render/documentation → documentation functions
+   - :seon.health/status → health check functions
+
+   Request keys:
+     ::conn       - Required. Datalevin connection
+     ::output-key - Required. Key to find in output spec's contains-keys
+
+   Returns:
+     Vector of maps with:
+       :seon.fn/qualified-name - e.g. \"seon.foo/bar\"
+       :seon.fn/namespace      - e.g. \"seon.foo\"
+       :seon.fn/name           - e.g. \"bar\"
+       :seon.fn/doc            - docstring (if present)
+       :seon.fn/updated-at     - last update timestamp
+       :required-keys          - set of required input keys
+       :optional-keys          - set of optional input keys
+
+   Example:
+     (functions-with-output-key {::conn conn ::output-key :seon.render/html})
+     ;; => [{:seon.fn/qualified-name \"seon.foo/bar\"
+     ;;      :required-keys #{:seon.foo/x :seon.foo/y}
+     ;;      :optional-keys #{:seon.foo/z}} ...]"
+  [{::keys [conn output-key]}]
+  (let [;; Step 1: Datalog ref join to find candidate entity IDs
+        eids (d/q '[:find ?e
+                    :in $ ?output-key
+                    :where
+                    [?e :seon.fn/output-spec ?out]
+                    [?out :seon.spec/contains-keys ?output-key]]
+                  @conn output-key)]
+    ;; Step 2: Pull fn + nested spec data, Step 3: compute required-keys
+    (mapv (fn [[eid]]
+            (let [pulled (d/pull @conn
+                                 [:seon.fn/qualified-name :seon.fn/namespace
+                                  :seon.fn/name :seon.fn/doc :seon.fn/updated-at
+                                  {:seon.fn/input-spec [:seon.spec/contains-keys
+                                                        :seon.spec/optional-keys]}
+                                  {:seon.fn/output-spec [:seon.spec/contains-keys]}]
+                                 eid)
+                  input-spec (:seon.fn/input-spec pulled)
+                  contains (set (:seon.spec/contains-keys input-spec))
+                  optional (set (:seon.spec/optional-keys input-spec))]
+              (assoc pulled
+                     :required-keys (clojure.set/difference contains optional)
+                     :optional-keys optional)))
+          eids)))
+
+;;; ---------------------------------------------------------------------------
 ;;; REPL Helpers
 ;;; ---------------------------------------------------------------------------
 

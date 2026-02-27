@@ -94,14 +94,55 @@
       (is (= [:seon.spec/key :seon.example/process-request]
              (:seon.fn/input-spec process-fn)))
       (is (= [:seon.spec/key :seon.example/process-response]
-             (:seon.fn/output-spec process-fn))))))
+             (:seon.fn/output-spec process-fn)))))
+
+  (testing "links functions via :malli/schema metadata (not naming convention)"
+    (let [source "(ns seon.example
+  (:require [seon.schema :as schema]))
+
+(schema/register! ::my-input
+                  [:map [::data :string]])
+
+(schema/register! ::my-output
+                  [:map [::result :int]])
+
+(defn transform
+  \"Transform data.\"
+  {:malli/schema [:=> [:cat ::my-input] ::my-output]}
+  [{::keys [data]}]
+  {::result (count data)})"
+          graph (extract/extract-graph {::extract/source source})
+          transform-fn (first (filter #(= "transform" (:seon.fn/name %))
+                                      (::extract/functions graph)))]
+      (is (some? transform-fn))
+      (is (= [:seon.spec/key :seon.example/my-input]
+             (:seon.fn/input-spec transform-fn)))
+      (is (= [:seon.spec/key :seon.example/my-output]
+             (:seon.fn/output-spec transform-fn)))))
+
+  (testing "falls back to naming convention when no :malli/schema metadata"
+    (let [source "(ns seon.example
+  (:require [seon.schema :as schema]))
+
+(schema/register! ::fallback-request [:map [::x :int]])
+(schema/register! ::fallback-response [:map [::y :int]])
+
+(defn fallback [{::keys [x]}] {::y (inc x)})"
+          graph (extract/extract-graph {::extract/source source})
+          fn-entity (first (filter #(= "fallback" (:seon.fn/name %))
+                                   (::extract/functions graph)))]
+      (is (some? fn-entity))
+      (is (= [:seon.spec/key :seon.example/fallback-request]
+             (:seon.fn/input-spec fn-entity)))
+      (is (= [:seon.spec/key :seon.example/fallback-response]
+             (:seon.fn/output-spec fn-entity))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Page Renderer Detection
 ;;; ---------------------------------------------------------------------------
 
 (deftest extract-graph-page-renderer-test
-  (testing "detects page renderers via *ctx* in input and render keys in output"
+  (testing "links functions to specs - derived attrs computed at query time"
     (let [source "(ns seon.example.render
   (:require [seon.schema :as schema]
             [seon.health.workout :as workout]))
@@ -120,12 +161,19 @@
    :seon.render/ai \"page content\"})"
           graph (extract/extract-graph {::extract/source source})
           fn-entity (first (filter #(= "my-page" (:seon.fn/name %))
-                                   (::extract/functions graph)))]
+                                   (::extract/functions graph)))
+          specs (::extract/specs graph)
+          output-spec (first (filter #(= :seon.example.render/my-page-response
+                                         (:seon.spec/key %)) specs))]
       (is (some? fn-entity))
-      (is (true? (:seon.fn/page-renderer? fn-entity)))
-      (is (true? (:seon.fn/needs-ctx? fn-entity)))
-      (is (nil? (:seon.fn/needs-conn? fn-entity)))
-      (is (seq (:seon.fn/render-input-keys fn-entity))))))
+      ;; Function is linked to specs
+      (is (= [:seon.spec/key :seon.example.render/my-page-request]
+             (:seon.fn/input-spec fn-entity)))
+      (is (= [:seon.spec/key :seon.example.render/my-page-response]
+             (:seon.fn/output-spec fn-entity)))
+      ;; Output spec contains render keys (used for resolution at query time)
+      (is (some? output-spec))
+      (is (contains? (set (:seon.spec/contains-keys output-spec)) :seon.render/html)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Var Extraction
@@ -184,11 +232,17 @@
 
       ;; Should have page-render function with spec links
       (let [page-fn (first (filter #(= "page-render" (:seon.fn/name %))
-                                   (::extract/functions graph)))]
+                                   (::extract/functions graph)))
+            specs (::extract/specs graph)
+            output-spec (first (filter #(= :seon.health.workout.render/page-render-response
+                                           (:seon.spec/key %)) specs))]
         (is (some? page-fn) "Should find page-render")
-        (is (true? (:seon.fn/page-renderer? page-fn)))
+        ;; Function is linked to specs (no pre-computed attrs)
         (is (some? (:seon.fn/input-spec page-fn)))
-        (is (some? (:seon.fn/output-spec page-fn)))))))
+        (is (some? (:seon.fn/output-spec page-fn)))
+        ;; Output spec contains :seon.render/html (renderer detection at query time)
+        (is (some? output-spec))
+        (is (contains? (set (:seon.spec/contains-keys output-spec)) :seon.render/html))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Cross-Namespace Resolution

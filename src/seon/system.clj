@@ -145,6 +145,18 @@
 ;;; - Runtime registry (namespace instance tracking)
 ;;; - Render system (function resolution)
 
+(defn runtime-db-conn
+  "Get a fresh runtime database connection from the runtime-db component.
+   Always goes through the connection manager, so handles reconnection
+   after connection pool recycling or server restarts.
+
+   Usage:
+     (runtime-db-conn (:seon/runtime-db state/system))"
+  [{:keys [connection-manager]}]
+  (dl-conn/get-runtime-conn!
+   {::dl-conn/manager connection-manager
+    ::dl-conn/schema (runtime/runtime-merged-schema)}))
+
 (defmethod ig/init-key :seon/runtime-db
   [_ {:keys [connection-manager]}]
   ;; Get conn through the connection manager (handles staleness, auto-reconnect)
@@ -165,7 +177,10 @@
                         ::runtime/status :running
                         ::runtime/location :in-process
                         ::runtime/component-key :seon/runtime-db})
-    {:conn conn :connection-manager connection-manager}))
+    ;; Only store connection-manager — consumers must call runtime-db-conn
+    ;; to get a fresh connection. Storing :conn here causes stale references
+    ;; after TTL cleanup or server restarts.
+    {:connection-manager connection-manager}))
 
 (defmethod ig/halt-key! :seon/runtime-db
   [_ _state]
@@ -248,7 +263,7 @@
 (defmethod ig/init-key :seon.graph/scanner
   [_ {:keys [graph-db paths enabled?]}]
   (when enabled?
-    (let [conn (:conn graph-db)]
+    (let [conn (runtime-db-conn graph-db)]
       (when-not conn
         (log/warn "Code scanner: no graph-db connection available")
         (throw (ex-info "Code scanner requires graph-db connection" {})))
@@ -260,12 +275,13 @@
                           ::runtime/location :in-process
                           ::runtime/component-key :seon.graph/scanner})
       ;; Run scan in background so startup isn't blocked (~3s savings)
+      ;; Store graph-db (not raw conn) so consumers can get fresh connections
       (let [scan-future (future (run-code-scan! conn paths))]
-        {:conn conn :paths paths :scan-future scan-future}))))
+        {:graph-db graph-db :paths paths :scan-future scan-future}))))
 
 (defmethod ig/halt-key! :seon.graph/scanner
   [_ state]
-  (when (:conn state)
+  (when (:graph-db state)
     (log/info "Stopping code scanner...")
     ;; Cancel scan if still running
     (when-let [f (:scan-future state)]
@@ -274,17 +290,16 @@
     (runtime/unregister! {::runtime/namespace "seon.graph.scanner"})
     (log/info "Code scanner stopped")))
 
-;; Suspend/resume: keep scanner results alive during (reset).
-;; The graph-db connection survives reset, so re-scanning is wasteful.
-;; Only re-scan if paths changed.
+;; Always halt+init on resume. The scanner holds a Datalevin connection
+;; captured at init time (passed to run-code-scan! future). After reset,
+;; that connection may be closed by TTL cleanup or server restart.
+;; Re-scanning is cheap (~3s in background) and ensures fresh connections.
 (defmethod ig/suspend-key! :seon.graph/scanner [_ state] state)
 
 (defmethod ig/resume-key :seon.graph/scanner
-  [_ opts old-opts old-state]
-  (if (= (:paths opts) (:paths old-opts))
-    old-state
-    (do (ig/halt-key! :seon.graph/scanner old-state)
-        (ig/init-key :seon.graph/scanner opts))))
+  [_ opts _old-opts old-state]
+  (ig/halt-key! :seon.graph/scanner old-state)
+  (ig/init-key :seon.graph/scanner opts))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Claude Code SDK Configuration

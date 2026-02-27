@@ -235,6 +235,45 @@
      forms)
     @results))
 
+(defn- defn-form?
+  "Returns true if form is a (defn ...) or (defn- ...) form."
+  [form]
+  (and (list? form)
+       (symbol? (first form))
+       (#{'defn 'defn-} (first form))))
+
+(defn- extract-defn-malli-schema
+  "Extract :malli/schema metadata from a defn form.
+   Returns [qualified-name schema-form] or nil.
+
+   Handles the defn attr-map position:
+     (defn name docstring? attr-map? [args] body)"
+  [form ns-str]
+  (when (defn-form? form)
+    (let [parts (rest form)
+          sym (first parts)
+          parts (rest parts)
+          ;; Skip docstring if present
+          parts (if (string? (first parts)) (rest parts) parts)
+          ;; Check for attr-map
+          attr-map (when (map? (first parts)) (first parts))
+          schema (get attr-map :malli/schema)]
+      (when schema
+        [(str ns-str "/" sym) schema]))))
+
+(defn- find-fn-schemas
+  "Walk all parsed forms and collect :malli/schema metadata from defn forms.
+   Returns map of qualified-name -> schema-form."
+  [forms ns-str]
+  (let [results (atom {})]
+    (walk/postwalk
+     (fn [form]
+       (when-let [[qn schema] (extract-defn-malli-schema form ns-str)]
+         (swap! results assoc qn schema))
+       form)
+     forms)
+    @results))
+
 (defn- parse-source
   "Parse Clojure source string with edamame, handling reader macros.
    Does a two-pass approach: first pass extracts ns info for auto-resolve,
@@ -311,6 +350,22 @@
           has-ctx-spec?
           (conj {:seon.ns/name ns-str
                  :seon.ns/dynamic? true}))))))
+
+(defn scan-fn-schemas
+  "Scan source for :malli/schema metadata on defn forms.
+   Returns map of qualified-fn-name -> schema-form.
+
+   Request keys:
+     ::source - Clojure source code string
+
+   Example:
+     (scan-fn-schemas {::source (slurp \"src/seon/ctx.clj\")})
+     ;; => {\"seon.ctx/get-ctx\" [:=> [:cat :seon.ctx/get-ctx-request] :seon.ctx/get-ctx-response] ...}"
+  [{::keys [source]}]
+  (let [parsed (parse-source source)]
+    (if-not parsed
+      {}
+      (find-fn-schemas (:forms parsed) (:ns-str parsed)))))
 
 (defn scan-file
   "Scan a Clojure source file for schema/register! calls and def forms.

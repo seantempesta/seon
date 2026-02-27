@@ -556,7 +556,7 @@
   {:seon {:command "./bin/mcp-server"
           :env {"SEON_SESSION_ID" session-id}}})
 
-(def ^:private agent-instructions-path ".claude/AGENT.md")
+(def ^:private agent-instructions-path "AGENT.md")
 
 (defn- load-agent-instructions
   "Load agent instructions from AGENT.md, returning empty string if not found."

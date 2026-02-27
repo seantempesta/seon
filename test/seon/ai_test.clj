@@ -7,6 +7,7 @@
    3. Session lifecycle - start, add messages, end, retrieve
    4. Query functions - get-session, get-messages, list-sessions"
   (:require
+   [clojure.string :as str]
    [clojure.test :refer [deftest is testing use-fixtures compose-fixtures]]
    [malli.core :as m]
    [malli.generator :as mg]
@@ -226,7 +227,7 @@
       (is (map? result))
       (is (contains? result ::ai/session-id))
       (is (string? (::ai/session-id result)))
-      (is (clojure.string/starts-with? (::ai/session-id result) "ses-"))))
+      (is (str/starts-with? (::ai/session-id result) "ses-"))))
 
   (testing "start-session! with namespace and prompt"
     (let [result (ai/start-session! {::ai/node *test-node*
@@ -580,7 +581,7 @@
                                     ::ai/byte-count 5
                                     ::ai/read-success true}]
                ::ai/agent-instructions "You are a helpful agent..."
-               ::ai/agent-instructions-path ".claude/AGENT.md"}]
+               ::ai/agent-instructions-path "AGENT.md"}]
       (is (m/validate ::ai/initial-context ctx))))
 
   (testing "::ai/initial-context validates with only required field"
@@ -603,7 +604,7 @@
                                             ::ai/byte-count 30
                                             ::ai/read-success true}]
                        ::ai/agent-instructions "You are a test agent."
-                       ::ai/agent-instructions-path ".claude/AGENT.md"}
+                       ::ai/agent-instructions-path "AGENT.md"}
           {sid ::ai/session-id} (ai/start-session! {::ai/node *test-node*
                                                      ::ai/namespace 'seon.test
                                                      ::ai/prompt "Test prompt"

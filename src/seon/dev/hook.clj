@@ -272,11 +272,14 @@
   (try
     (require 'integrant.repl.state)
     (when-let [scanner (get @(resolve 'integrant.repl.state/system) :seon.graph/scanner)]
-      (when-let [conn (:conn scanner)]
+      (when-let [graph-db (:graph-db scanner)]
         (require 'seon.graph.extract)
         (require 'seon.graph.ingest)
+        (require 'seon.system)
         (let [extract-fn (resolve 'seon.graph.extract/extract-graph-from-file)
               ingest-ns! (resolve 'seon.graph.ingest/ingest-namespace!)
+              get-conn (resolve 'seon.system/runtime-db-conn)
+              conn (get-conn graph-db)
               graph (extract-fn {:seon.graph.extract/file-path file-path})
               ns-str (:seon.graph.extract/ns-name graph)]
           (when ns-str

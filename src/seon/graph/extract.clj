@@ -15,7 +15,6 @@
      (extract/extract-graph-from-file {::file-path \"src/seon/foo.clj\"})"
   (:require [clj-kondo.core :as clj-kondo]
             [clojure.edn :as edn]
-            [clojure.string :as str]
             [clojure.walk :as walk]
             [seon.graph.scanner :as scanner]
             [seon.schema :as schema]))
@@ -189,60 +188,71 @@
 ;;; Function-to-Spec Linking (moved from scanner.clj)
 ;;; ---------------------------------------------------------------------------
 
+(defn- extract-spec-keys-from-schema
+  "Parse a :malli/schema form to extract input and output spec keyword references.
+   Returns [input-key output-key] where either may be nil.
+
+   Handles:
+     [:=> [:cat ::request] ::response]           -> [::request ::response]
+     [:function [:=> [:cat ::req] ::resp] ...]   -> [::req ::resp] (first arity)"
+  [schema-form]
+  (let [;; Unwrap [:function ...] to get first [:=> ...] form
+        arrow-form (cond
+                     (and (vector? schema-form)
+                          (= :=> (first schema-form)))
+                     schema-form
+
+                     (and (vector? schema-form)
+                          (= :function (first schema-form)))
+                     (some #(when (and (vector? %) (= :=> (first %))) %)
+                           (rest schema-form))
+
+                     :else nil)]
+    (when arrow-form
+      ;; [:=> [:cat input-spec ...] output-spec]
+      (let [input-form (second arrow-form)
+            output-spec (nth arrow-form 2 nil)
+            ;; Extract first keyword from [:cat ...] as input spec
+            input-spec (when (and (vector? input-form)
+                                  (= :cat (first input-form)))
+                         (let [first-arg (second input-form)]
+                           (when (keyword? first-arg) first-arg)))]
+        [(when (and input-spec (namespace input-spec)) input-spec)
+         (when (and (keyword? output-spec) (namespace output-spec)) output-spec)]))))
+
 (defn- link-fns-to-specs
-  "Link function entities to their input/output spec entities by naming convention.
+  "Link function entities to their input/output spec entities.
 
-   For a function `seon.foo/bar`, looks for:
-   - Input spec:  `:seon.foo/bar-request`
-   - Output spec: `:seon.foo/bar-response`
+   Primary: Parse :malli/schema metadata from defn forms to extract spec references.
+   Fallback: Naming convention (fn `seon.foo/bar` -> specs `::bar-request`/`::bar-response`).
 
-   Enriches fn entities with spec refs, render detection, ctx/conn needs."
-  [fns specs]
+   The graph stores only facts (spec refs). Derived state like 'is this a renderer?'
+   is computed at query time by checking if output spec contains :seon.render/html."
+  [fns specs fn-schemas]
   (let [spec-by-key (into {} (map (juxt :seon.spec/key identity)) specs)
-        now (java.util.Date.)
-        render-keys #{:seon.render/html :seon.render/ai}]
+        now (java.util.Date.)]
     (mapv (fn [fn-entity]
             (let [qn (:seon.fn/qualified-name fn-entity)
-                  input-key (keyword (str qn "-request"))
-                  output-key (keyword (str qn "-response"))
-                  input-spec (get spec-by-key input-key)
-                  output-spec (get spec-by-key output-key)
-                  output-contains (set (:seon.spec/contains-keys output-spec))
-                  is-render? (and output-spec
-                                  (some render-keys output-contains))
-                  input-contains (:seon.spec/contains-keys input-spec)
-                  input-optional (:seon.spec/optional-keys input-spec)
-                  ;; Required keys = all contains-keys minus optional-keys
-                  required-keys (if (seq input-optional)
-                                  (vec (remove (set input-optional) input-contains))
-                                  (vec input-contains))
-                  optional-keys (vec input-optional)
-                  has-ctx?  (and is-render? (seq required-keys)
-                                 (some #(str/ends-with? (name %) "*ctx*") required-keys))
-                  has-conn? (and is-render? (seq required-keys)
-                                 (some #(str/ends-with? (name %) "*conn*") required-keys))
-                  page-renderer? (and is-render? has-ctx?)]
+                  ;; Primary: extract from :malli/schema metadata
+                  schema-form (get fn-schemas qn)
+                  [meta-input meta-output] (when schema-form
+                                             (extract-spec-keys-from-schema schema-form))
+                  ;; Fallback: naming convention
+                  conv-input (keyword (str qn "-request"))
+                  conv-output (keyword (str qn "-response"))
+                  ;; Use metadata keys if they match known specs, else fall back
+                  input-key (if (and meta-input (spec-by-key meta-input))
+                              meta-input
+                              (when (spec-by-key conv-input) conv-input))
+                  output-key (if (and meta-output (spec-by-key meta-output))
+                               meta-output
+                               (when (spec-by-key conv-output) conv-output))]
               (cond-> (assoc fn-entity :seon.fn/updated-at now)
-                input-spec
+                input-key
                 (assoc :seon.fn/input-spec [:seon.spec/key input-key])
 
-                output-spec
-                (assoc :seon.fn/output-spec [:seon.spec/key output-key])
-
-                (and is-render? (seq required-keys))
-                (assoc :seon.fn/render-input-keys (vec required-keys))
-
-                (and is-render? (seq optional-keys))
-                (assoc :seon.fn/render-optional-keys (vec optional-keys))
-
-                page-renderer?
-                (assoc :seon.fn/page-renderer? true)
-
-                has-ctx?
-                (assoc :seon.fn/needs-ctx? true)
-
-                has-conn?
-                (assoc :seon.fn/needs-conn? true))))
+                output-key
+                (assoc :seon.fn/output-spec [:seon.spec/key output-key]))))
           fns)))
 
 ;;; ---------------------------------------------------------------------------
@@ -307,8 +317,11 @@
         ;; Specs: enrich with cross-references
         specs (enrich-specs-with-references edamame-specs)
 
-        ;; 4. Link fns to specs
-        linked-fns (link-fns-to-specs kondo-fns specs)
+        ;; 3b. Extract :malli/schema metadata from defn forms
+        fn-schemas (scanner/scan-fn-schemas {::scanner/source source})
+
+        ;; 4. Link fns to specs (metadata-first, naming convention fallback)
+        linked-fns (link-fns-to-specs kondo-fns specs fn-schemas)
 
         ;; Determine primary ns name
         ns-str (or (:seon.ns/name (first ns-entities))
