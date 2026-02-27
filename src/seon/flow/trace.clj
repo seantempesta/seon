@@ -92,8 +92,8 @@
   [{::keys [trace-id session-id event fn ns elapsed-ms status error-message]}]
   (try
     (when-let [conn (get-conn)]
-      (require 'datalevin.core)
-      (let [transact! (resolve 'datalevin.core/transact!)
+      (require 'seon.db)
+      (let [transact! (resolve 'seon.db/transact!)
             entity (cond-> {::trace-id trace-id
                             ::event event
                             ::timestamp (Instant/now)

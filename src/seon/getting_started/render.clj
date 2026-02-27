@@ -65,7 +65,7 @@
    ## Audit Metadata
    Audited: 2026-02-26
    Auditor: claude-opus-4-6
-   Commit: 0461007
+   Commit: 3f4c0e7
    Tests: Indirectly via routes-test (5 tests, 12 assertions)"
   (:require [clojure.string :as str]
             [dev.onionpancakes.chassis.core :as h]

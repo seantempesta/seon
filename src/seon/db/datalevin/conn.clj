@@ -189,15 +189,26 @@
           (log/warn "Error closing Datalevin connection" {:error (.getMessage e)}))))))
 
 (defn- connection-closed?
-  "Check if a Datalevin connection is closed."
+  "Check if a Datalevin connection is closed.
+   Conservative approach: only return true if we're certain the conn is closed.
+   Returns false if we can't determine status (assumes conn is usable)."
   [conn]
   (when conn
-    (require 'datalevin.core)
-    (let [closed? (resolve 'datalevin.conn/closed?)]
-      (try
-        (closed? conn)
-        (catch Exception _
-          true)))))
+    (try
+      ;; Require the correct namespace (datalevin.conn, not datalevin.core)
+      (require 'datalevin.conn)
+      (if-let [closed-fn (resolve 'datalevin.conn/closed?)]
+        (closed-fn conn)
+        ;; Can't resolve the function - assume conn is usable
+        false)
+      (catch ClassNotFoundException _
+        ;; Namespace not loaded yet - assume conn is usable
+        false)
+      (catch Exception e
+        ;; Log but don't assume closed - let actual transact fail if conn is bad
+        (log/debug "Error checking connection status, assuming usable"
+                   {:error (.getMessage e)})
+        false))))
 
 (defn- touch-connection!
   "Update the last-accessed time for a connection entry."
