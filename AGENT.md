@@ -187,11 +187,26 @@ This pattern is recursive. If the orchestrator decomposes and launches a sub-age
 
 ---
 
-## Workflow
+## Workflow: Investigate, Then Implement
+
+### The #1 Rule: Slow Is Fast
+
+Your training rewards task completion. Override that instinct. It is better to spend 60% of your time reading and testing in the REPL and 40% writing code than the reverse. Agents who charge ahead and declare victory are the most expensive kind of wrong.
+
+**Before writing any code:**
+- **Read the source** you're about to modify. Read the source of libraries you're using (`reference-code/`). Don't guess how Datalevin refs work — read `reference-code/datalevin/`. Don't guess how Integrant resume works — read `reference-code/integrant/`.
+- **Test your assumptions in the REPL.** Before building a function that queries the graph, try the query manually. Before wrapping a library call, call it directly and see what it returns. A 30-second experiment prevents hours of debugging.
+- **Define what failure looks like.** Before implementing, ask: "How would I know if this is broken?" If you can't answer that, you don't understand the problem well enough.
+
+**After writing code:**
+- **Verify in the REPL, not just with tests.** Run the actual operation and observe the live system state. "Tests pass" and "it works correctly" are different things. Query the database, check the data, confirm the state change.
+- **Falsify your work.** Don't look for evidence it works — look for evidence it's broken. Try edge cases. Try the thing that was broken before. Try it twice.
+
+### Steps
 
 1. **Read the PRD first** - The orchestrator pointed you to it for a reason
 2. **Invoke relevant skills** - Before searching, check if a skill covers your task
-3. **Understand before coding** - Explore existing code, understand patterns
+3. **Understand before coding** - Read existing code AND library source in `reference-code/`. Test assumptions in the REPL.
 4. **Make incremental changes** - Small commits of working code
 5. **Test via REPL, never grep CLI output** - Every eval result is **auto-saved** to `@user/repl-<session>`. Run once, dig in without re-running:
    ```clojure

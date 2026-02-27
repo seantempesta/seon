@@ -36,8 +36,8 @@
 ;;; ---------------------------------------------------------------------------
 
 (deftest find-renderer-basic-test
-  (testing "finds a renderer whose input keys are subset of data keys"
-    ;; Create spec entities
+  (testing "finds a renderer whose required keys are subset of data keys"
+    ;; Create spec entities (must be transacted BEFORE fn entities for lookup refs)
     (d/transact! *conn*
                  [{:seon.spec/key :test.render/widget-request
                    :seon.spec/namespace "test.render"
@@ -51,12 +51,11 @@
                    :seon.spec/contains-keys [:seon.render/html :seon.render/ai]
                    :seon.spec/definition "[:map ...]"
                    :seon.spec/updated-at (java.util.Date.)}])
-    ;; Create fn entity with render-input-keys
+    ;; Create fn entity with spec refs (no render-input-keys - computed at query time)
     (d/transact! *conn*
                  [{:seon.fn/qualified-name "test.render/widget"
                    :seon.fn/namespace "test.render"
                    :seon.fn/name "widget"
-                   :seon.fn/render-input-keys [:test/name :test/color]
                    :seon.fn/input-spec [:seon.spec/key :test.render/widget-request]
                    :seon.fn/output-spec [:seon.spec/key :test.render/widget-response]
                    :seon.fn/updated-at (java.util.Date.)
@@ -77,34 +76,48 @@
     (is (nil? (render/find-renderer *conn* {:foo/bar 1} :html)))))
 
 (deftest find-renderer-specificity-test
-  (testing "picks the most specific renderer (most input keys)"
-    ;; General renderer: 1 key
+  (testing "picks the most specific renderer (most required keys)"
+    ;; General renderer: 1 required key
     (d/transact! *conn*
-                 [{:seon.spec/key :test.render/general-response
+                 [{:seon.spec/key :test.render/general-request
+                   :seon.spec/namespace "test.render"
+                   :seon.spec/base-type :map
+                   :seon.spec/contains-keys [:test/name]
+                   :seon.spec/definition "[:map ...]"
+                   :seon.spec/updated-at (java.util.Date.)}
+                  {:seon.spec/key :test.render/general-response
                    :seon.spec/namespace "test.render"
                    :seon.spec/base-type :map
                    :seon.spec/contains-keys [:seon.render/html]
                    :seon.spec/definition "[:map ...]"
-                   :seon.spec/updated-at (java.util.Date.)}
-                  {:seon.fn/qualified-name "test.render/general"
+                   :seon.spec/updated-at (java.util.Date.)}])
+    (d/transact! *conn*
+                 [{:seon.fn/qualified-name "test.render/general"
                    :seon.fn/namespace "test.render"
                    :seon.fn/name "general"
-                   :seon.fn/render-input-keys [:test/name]
+                   :seon.fn/input-spec [:seon.spec/key :test.render/general-request]
                    :seon.fn/output-spec [:seon.spec/key :test.render/general-response]
                    :seon.fn/updated-at (java.util.Date.)
                    :seon.fn/private false}])
-    ;; Specific renderer: 2 keys
+    ;; Specific renderer: 2 required keys
     (d/transact! *conn*
-                 [{:seon.spec/key :test.render/specific-response
+                 [{:seon.spec/key :test.render/specific-request
+                   :seon.spec/namespace "test.render"
+                   :seon.spec/base-type :map
+                   :seon.spec/contains-keys [:test/name :test/color]
+                   :seon.spec/definition "[:map ...]"
+                   :seon.spec/updated-at (java.util.Date.)}
+                  {:seon.spec/key :test.render/specific-response
                    :seon.spec/namespace "test.render"
                    :seon.spec/base-type :map
                    :seon.spec/contains-keys [:seon.render/html]
                    :seon.spec/definition "[:map ...]"
-                   :seon.spec/updated-at (java.util.Date.)}
-                  {:seon.fn/qualified-name "test.render/specific"
+                   :seon.spec/updated-at (java.util.Date.)}])
+    (d/transact! *conn*
+                 [{:seon.fn/qualified-name "test.render/specific"
                    :seon.fn/namespace "test.render"
                    :seon.fn/name "specific"
-                   :seon.fn/render-input-keys [:test/name :test/color]
+                   :seon.fn/input-spec [:seon.spec/key :test.render/specific-request]
                    :seon.fn/output-spec [:seon.spec/key :test.render/specific-response]
                    :seon.fn/updated-at (java.util.Date.)
                    :seon.fn/private false}])
@@ -119,16 +132,23 @@
   (testing "only matches renderers that support the requested format"
     ;; Renderer that only supports :html, not :ai
     (d/transact! *conn*
-                 [{:seon.spec/key :test.render/html-only-response
+                 [{:seon.spec/key :test.render/html-only-request
+                   :seon.spec/namespace "test.render"
+                   :seon.spec/base-type :map
+                   :seon.spec/contains-keys [:test/x]
+                   :seon.spec/definition "[:map ...]"
+                   :seon.spec/updated-at (java.util.Date.)}
+                  {:seon.spec/key :test.render/html-only-response
                    :seon.spec/namespace "test.render"
                    :seon.spec/base-type :map
                    :seon.spec/contains-keys [:seon.render/html]
                    :seon.spec/definition "[:map ...]"
-                   :seon.spec/updated-at (java.util.Date.)}
-                  {:seon.fn/qualified-name "test.render/html-only"
+                   :seon.spec/updated-at (java.util.Date.)}])
+    (d/transact! *conn*
+                 [{:seon.fn/qualified-name "test.render/html-only"
                    :seon.fn/namespace "test.render"
                    :seon.fn/name "html-only"
-                   :seon.fn/render-input-keys [:test/x]
+                   :seon.fn/input-spec [:seon.spec/key :test.render/html-only-request]
                    :seon.fn/output-spec [:seon.spec/key :test.render/html-only-response]
                    :seon.fn/updated-at (java.util.Date.)
                    :seon.fn/private false}])
@@ -234,33 +254,47 @@
 
 (deftest find-page-renderer-overlap-test
   (testing "finds renderer with most key overlap with ns-data"
-    ;; Renderer with 1 overlapping key
+    ;; Renderer with 1 required key
     (d/transact! *conn*
-                 [{:seon.spec/key :test.page/narrow-response
+                 [{:seon.spec/key :test.page/narrow-request
+                   :seon.spec/namespace "test.page"
+                   :seon.spec/base-type :map
+                   :seon.spec/contains-keys [:test/alpha]
+                   :seon.spec/definition "[:map ...]"
+                   :seon.spec/updated-at (java.util.Date.)}
+                  {:seon.spec/key :test.page/narrow-response
                    :seon.spec/namespace "test.page"
                    :seon.spec/base-type :map
                    :seon.spec/contains-keys [:seon.render/html :seon.render/ai]
                    :seon.spec/definition "[:map ...]"
-                   :seon.spec/updated-at (java.util.Date.)}
-                  {:seon.fn/qualified-name "test.page/narrow"
+                   :seon.spec/updated-at (java.util.Date.)}])
+    (d/transact! *conn*
+                 [{:seon.fn/qualified-name "test.page/narrow"
                    :seon.fn/namespace "test.page"
                    :seon.fn/name "narrow"
-                   :seon.fn/render-input-keys [:test/alpha]
+                   :seon.fn/input-spec [:seon.spec/key :test.page/narrow-request]
                    :seon.fn/output-spec [:seon.spec/key :test.page/narrow-response]
                    :seon.fn/updated-at (java.util.Date.)
                    :seon.fn/private false}])
-    ;; Renderer with 2 overlapping keys
+    ;; Renderer with 2 required keys
     (d/transact! *conn*
-                 [{:seon.spec/key :test.page/wide-response
+                 [{:seon.spec/key :test.page/wide-request
+                   :seon.spec/namespace "test.page"
+                   :seon.spec/base-type :map
+                   :seon.spec/contains-keys [:test/alpha :test/beta]
+                   :seon.spec/definition "[:map ...]"
+                   :seon.spec/updated-at (java.util.Date.)}
+                  {:seon.spec/key :test.page/wide-response
                    :seon.spec/namespace "test.page"
                    :seon.spec/base-type :map
                    :seon.spec/contains-keys [:seon.render/html :seon.render/ai]
                    :seon.spec/definition "[:map ...]"
-                   :seon.spec/updated-at (java.util.Date.)}
-                  {:seon.fn/qualified-name "test.page/wide"
+                   :seon.spec/updated-at (java.util.Date.)}])
+    (d/transact! *conn*
+                 [{:seon.fn/qualified-name "test.page/wide"
                    :seon.fn/namespace "test.page"
                    :seon.fn/name "wide"
-                   :seon.fn/render-input-keys [:test/alpha :test/beta]
+                   :seon.fn/input-spec [:seon.spec/key :test.page/wide-request]
                    :seon.fn/output-spec [:seon.spec/key :test.page/wide-response]
                    :seon.fn/updated-at (java.util.Date.)
                    :seon.fn/private false}])
@@ -348,63 +382,77 @@
   (testing "picks renderer with most required keys (strict subset)"
     ;; Renderer A: requires 1 key
     (d/transact! *conn*
-                 [{:seon.spec/key :test.resolve/a-response
+                 [{:seon.spec/key :test.resolve/a-request
+                   :seon.spec/namespace "test.resolve"
+                   :seon.spec/base-type :map
+                   :seon.spec/contains-keys [:test/alpha]
+                   :seon.spec/definition "[:map ...]"
+                   :seon.spec/updated-at (java.util.Date.)}
+                  {:seon.spec/key :test.resolve/a-response
                    :seon.spec/namespace "test.resolve"
                    :seon.spec/base-type :map
                    :seon.spec/contains-keys [:seon.render/html]
                    :seon.spec/definition "[:map ...]"
-                   :seon.spec/updated-at (java.util.Date.)}
-                  {:seon.fn/qualified-name "test.resolve/renderer-a"
+                   :seon.spec/updated-at (java.util.Date.)}])
+    (d/transact! *conn*
+                 [{:seon.fn/qualified-name "test.resolve/renderer-a"
                    :seon.fn/namespace "test.resolve"
                    :seon.fn/name "renderer-a"
-                   :seon.fn/render-input-keys [:test/alpha]
+                   :seon.fn/input-spec [:seon.spec/key :test.resolve/a-request]
                    :seon.fn/output-spec [:seon.spec/key :test.resolve/a-response]
                    :seon.fn/updated-at (java.util.Date.)
                    :seon.fn/private false}])
     ;; Renderer B: requires 2 keys (more specific)
     (d/transact! *conn*
-                 [{:seon.spec/key :test.resolve/b-response
+                 [{:seon.spec/key :test.resolve/b-request
+                   :seon.spec/namespace "test.resolve"
+                   :seon.spec/base-type :map
+                   :seon.spec/contains-keys [:test/alpha :test/beta]
+                   :seon.spec/definition "[:map ...]"
+                   :seon.spec/updated-at (java.util.Date.)}
+                  {:seon.spec/key :test.resolve/b-response
                    :seon.spec/namespace "test.resolve"
                    :seon.spec/base-type :map
                    :seon.spec/contains-keys [:seon.render/html]
                    :seon.spec/definition "[:map ...]"
-                   :seon.spec/updated-at (java.util.Date.)}
-                  {:seon.fn/qualified-name "test.resolve/renderer-b"
+                   :seon.spec/updated-at (java.util.Date.)}])
+    (d/transact! *conn*
+                 [{:seon.fn/qualified-name "test.resolve/renderer-b"
                    :seon.fn/namespace "test.resolve"
                    :seon.fn/name "renderer-b"
-                   :seon.fn/render-input-keys [:test/alpha :test/beta]
+                   :seon.fn/input-spec [:seon.spec/key :test.resolve/b-request]
                    :seon.fn/output-spec [:seon.spec/key :test.resolve/b-response]
                    :seon.fn/updated-at (java.util.Date.)
                    :seon.fn/private false}])
 
     ;; Both keys available -> B wins (more specific)
-    (let [result (render/resolve-renderer *conn*
-                                          #{:test/alpha :test/beta}
-                                          "test.resolve")]
-      ;; resolve-renderer returns a var, not a string
-      ;; but the fn might not exist, so just check it tried the right one
-      ;; For test, we check it doesn't return nil (the fn won't resolve since
-      ;; test.resolve/renderer-b doesn't exist, so it returns nil with a warning)
-      ;; Instead, let's test via find-renderer which returns a string
-      (is (= "test.resolve/renderer-b"
-             (render/find-renderer *conn*
-                                   {:test/alpha 1 :test/beta 2}
-                                   :html))))))
+    ;; Test via find-renderer which returns a string (resolve-renderer returns var which won't resolve)
+    (is (= "test.resolve/renderer-b"
+           (render/find-renderer *conn*
+                                 {:test/alpha 1 :test/beta 2}
+                                 :html)))))
 
 (deftest resolve-renderer-missing-keys-excludes-test
   (testing "renderer excluded when required keys not all present"
     ;; Renderer needs alpha + beta, but only alpha available
     (d/transact! *conn*
-                 [{:seon.spec/key :test.excl/response
+                 [{:seon.spec/key :test.excl/request
+                   :seon.spec/namespace "test.excl"
+                   :seon.spec/base-type :map
+                   :seon.spec/contains-keys [:test/alpha :test/beta]
+                   :seon.spec/definition "[:map ...]"
+                   :seon.spec/updated-at (java.util.Date.)}
+                  {:seon.spec/key :test.excl/response
                    :seon.spec/namespace "test.excl"
                    :seon.spec/base-type :map
                    :seon.spec/contains-keys [:seon.render/html]
                    :seon.spec/definition "[:map ...]"
-                   :seon.spec/updated-at (java.util.Date.)}
-                  {:seon.fn/qualified-name "test.excl/needs-two"
+                   :seon.spec/updated-at (java.util.Date.)}])
+    (d/transact! *conn*
+                 [{:seon.fn/qualified-name "test.excl/needs-two"
                    :seon.fn/namespace "test.excl"
                    :seon.fn/name "needs-two"
-                   :seon.fn/render-input-keys [:test/alpha :test/beta]
+                   :seon.fn/input-spec [:seon.spec/key :test.excl/request]
                    :seon.fn/output-spec [:seon.spec/key :test.excl/response]
                    :seon.fn/updated-at (java.util.Date.)
                    :seon.fn/private false}])

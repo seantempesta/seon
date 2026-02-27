@@ -294,8 +294,8 @@
 (defn- find-graph-render-fn
   "Find the page renderer for a namespace from the code graph.
    Returns a wrapped function (ctx-value) -> hiccup, or nil.
-   Discovery is 100% spec-driven: the scanner sets :seon.fn/page-renderer?
-   based on input spec containing *ctx* and output spec containing :seon.render/html."
+   Discovery is 100% spec-driven: finds functions with :seon.render/html in output spec
+   whose required input keys include *ctx*."
   [ns-sym]
   (when-let [conn (get-conn)]
     (let [{::lifecycle/keys [render-fn]}

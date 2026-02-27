@@ -1,4 +1,6 @@
-# Seon - Claude Code Instructions
+# Seon — Shared Instructions
+
+**Every Claude instance reads this file** — orchestrator, seon agents, and Claude Code subagents. Keep it universal. Role-specific instructions live in `ORCHESTRATOR.md` and `AGENT.md`.
 
 ## Agent Model Policy
 
@@ -14,47 +16,6 @@ Seon is **infrastructure for AI agents to write reliable software**.
 
 The personal domains (trading, health, finance) are test cases, not the point. The real product is a codebase architecture where AI agents can own and evolve code responsibly - with contracts they can discover, history they can learn from, and isolation that prevents conflicts.
 
-### The Problem with AI-Assisted Development Today
-
-Current approaches bolt AI onto codebases designed for humans:
-- No contracts → agents hallucinate interfaces
-- No history → agents can't learn from what worked
-- No isolation → agents step on each other
-- No verification → bad code ships
-
-### Seon's Answer
-
-Build a codebase from the ground up optimized for agent ownership:
-
-- **Schema-first** - Every function has Malli schemas. Agents know the shape before writing code. Property tests validate contracts automatically.
-- **Namespaced keys everywhere** - Fully qualified keys (`:seon.trading/position`) are queryable. "What functions accept this input shape?" is a database lookup, not a hallucination.
-- **Datalevin** - Fast embedded Datalog database on LMDB. Datomic-compatible queries. Each agent gets isolated storage.
-- **Namespace isolation** - One agent owns `seon.trading.signals`, another owns `seon.trading.execution`. They communicate through schemas, not shared state.
-- **Dev hooks** - Every edit triggers tests + AI review. Bad changes are blocked before they land.
-
-### Why Clojure?
-
-Not despite the small community - because of the language properties:
-
-- **Stable APIs** - 10-year-old documentation is still valid. Agents don't need to track API churn.
-- **Data as interface** - Maps in, maps out. No hidden object state to reason about.
-- **Homoiconicity** - Code is data. Agents can manipulate programs as data structures.
-- **REPL-driven** - Interactive development matches how agents work (try something, see result, iterate).
-- **Immutable by default** - No spooky action at a distance. Function outputs depend only on inputs.
-
-### The Vision
-
-Agents own namespaces long-term. They see:
-- Live system health and status
-- Other agents' work and outputs
-- Function signatures with examples and documentation
-- Usage history (who called what, with what, when)
-- Test results and coverage
-
-Over time, agents learn from this data. They evolve their code based on actual usage patterns. The system grows more reliable as agents accumulate experience.
-
-**Success looks like:** A non-technical person gives the system a real problem. From scratch, agents build it to spec. It's useful. It responds to feedback. It grows with the user over months and years.
-
 ### Core Infrastructure
 
 - **Datalevin** - Embedded Datalog database on LMDB. EAV datoms, Datomic-compatible queries, ACID transactions.
@@ -62,456 +23,35 @@ Over time, agents learn from this data. They evolve their code based on actual u
 - **Integrant** - Component lifecycle. Clean start/stop semantics for the whole system.
 - **Datastar/SSE** - Real-time UI updates. Agents can see their work reflected immediately.
 
-### What's Built So Far
+### Why Clojure?
 
-- Agent orchestration with isolated resources (nREPL, database, logs per agent)
-- Dev hooks that validate edits with tests + AI review
-- Observatory UI to watch agent progress
-- Health checks and resource cleanup
-- Schema registry with introspection
-- Message persistence for replay and learning (data collection phase)
+- **Stable APIs** - 10-year-old documentation is still valid. Agents don't need to track API churn.
+- **Data as interface** - Maps in, maps out. No hidden object state to reason about.
+- **Homoiconicity** - Code is data. Agents can manipulate programs as data structures.
+- **REPL-driven** - Interactive development matches how agents work (try something, see result, iterate).
+- **Immutable by default** - No spooky action at a distance. Function outputs depend only on inputs.
 
 ---
 
-## Your Role: Orchestrator
+## Slow Is Fast
 
-You coordinate work and delegate to agents. Handle only trivial edits (typos, renames), git operations, and PRD updates directly. Delegate implementation, bug fixes, research, and multi-file changes to agents.
+**Your default training rewards task completion. Override that instinct.** Charging forward and declaring victory is worse than pausing to verify. Three agents "fixing" the same bug is more expensive than one agent understanding the problem first.
 
-### Agent Quality Over Quantity
+### Before writing code:
 
-**Prefer focused, complete tasks over broad, incomplete ones.** Scope tasks so agents can complete them fully. A task that's too broad leads to stubs, skipped tests, and hidden breakage. If an agent is losing track of its changes, the task is too big — split it.
+1. **Observe the live system.** Query the REPL. Establish current state with actual data, not assumptions.
+2. **Define what failure looks like.** If you can't articulate how you'd know your change is broken, you don't understand the problem well enough to fix it.
+3. **Read the source.** Read the existing code you're modifying. Read library source in `reference-code/` (Datalevin, Malli, Integrant, core.async — they're all there). Agents that guess instead of reading produce confident, wrong answers.
+4. **Test assumptions in the REPL.** Before building a function that queries the graph, try the query manually. Before wrapping a library call, call it directly and see what it returns. A 30-second experiment prevents hours of debugging.
 
-- **Each agent must run tests** and report honest results before finishing
-- **Agents can push back** — if the task is too complex, they should describe the complexity and suggest how to decompose it, rather than doing a bad job (see AGENT.md)
+### After writing code:
+
+5. **Verify in the REPL, not just with tests.** Tests passing is necessary but not sufficient. Query the live system and confirm the actual state matches your intent.
+6. **Falsify, don't confirm.** Don't ask "does my change work?" Ask "how would I know if my change is broken?" Then check for that.
+
+**The REPL is the oracle.** Not the code, not the tests, not the docs. The running system tells you the truth. Every claim should be verifiable with a REPL expression.
 
 **Honesty is paramount.** It is far worse to hide remaining work than to report it. Never mark a task as "done" if there are known issues. Report what's actually working, what's broken, and what's left.
-
----
-
-## Launching Agents
-
-Use the Clojure agent system (`seon.ai.claude`) to launch agents. This gives you:
-- **Isolated nREPL** - Each agent gets its own REPL on a unique port
-- **Isolated database** - Each agent gets its own Datalevin database
-- **Observatory UI** - Watch agent progress at http://localhost:8080/agents
-- **Message persistence** - All messages saved to Datalevin for review
-- **Dev hook integration** - Agent edits trigger reload/test/review
-
-### 1. Ensure a PRD Exists
-
-```bash
-cp -r docs/prds/_example-feature docs/prds/{feature-name}
-```
-
-Write clear goals, success criteria, and relevant context.
-
-### 2. Launch via MCP (Blocking - Default)
-
-**Always check for existing agents first:**
-```clojure
-(user/agents)
-```
-
-**Launch and wait for completion** using `user/launch-agent!!` (double-bang = blocking):
-
-```
-eval(session_id="orchestrator", timeout_ms=600000,
-     code="(user/launch-agent!! 'seon.feature-name
-             \"Implement Phase 1 per the PRD. Start with the URL refactor,
-              then add client tracking. Test each step with curl.\"
-             :files [\"docs/prds/feature-name/prd.md\"
-                     \"src/seon/ns/routes.clj\"])")
-```
-
-**The `:files` option** reads files and includes them in the agent's context with syntax highlighting. Use this instead of pasting file contents into prompts - it's cleaner and the agent gets properly formatted code.
-
-**MCP Timeout Behavior:** The MCP eval has a 30-second default timeout. If it times out:
-- The agent **keeps running** in the background
-- Use `(user/agents)` to see it's still running
-- Use `(user/wait-for-agent!! "session-id")` to re-attach and wait for completion
-
-Set `timeout_ms=600000` (10 min) to avoid premature timeouts on blocking calls.
-
-**Emergency Escape Hatch:** If the orchestrator REPL gets stuck (e.g., blocking on a dead agent):
-```
-interrupt_eval(session_id="orchestrator")
-```
-This interrupts the running eval and unblocks the REPL. Use when:
-- You cancelled an MCP eval but the REPL is still blocked
-- An agent hit a limit and `launch-agent!!` won't return
-- Any blocking call that won't complete
-
-**Returns result directly when agent completes:**
-```clojure
-{::claude/result-text "## Summary\n\n..."
- ::claude/agent-status :completed
- ::claude/cost-usd 0.23
- ::claude/duration-ms 45000
- ::claude/num-turns 5}
-```
-
-**Use `:files` to include context**, don't paste file contents into prompts:
-```clojure
-;; DO THIS - files are read and included automatically:
-(user/launch-agent!! 'seon.feature
-                     "Implement Phase 1. Focus on the URL refactor first.
-                      Make sure to test with curl before marking complete."
-                     :files ["docs/prds/feature/prd.md"
-                             "docs/prds/feature/plan.md"
-                             "src/seon/ns/routes.clj"])
-
-;; NOT THIS - copy-pasting entire file contents into the prompt:
-"Here's the PRD:\n\n# PRD: Feature...\n[500 lines of content]\n\nNow implement it."
-```
-
-The `:files` option reads files and formats them with syntax highlighting. You can still give detailed instructions in the prompt - just don't manually paste file contents.
-
-### 3. Non-Blocking Launch (Parallel Work)
-
-Only use `launch-agent!` (single-bang) when running multiple agents in parallel:
-
-```clojure
-;; Launch without waiting
-(user/launch-agent! 'seon.feature-name "Implement feature X"
-                    :files ["docs/prds/feature/prd.md"])
-;; => {::ai/session-id "a1b2" ...}
-
-;; Check result later
-(user/agent-result "a1b2")
-;; => {::claude/result-text "..." ::claude/agent-status :completed}
-```
-
-### Agent Helper Functions
-
-All available in the `user` namespace:
-
-| Function | Purpose |
-|----------|---------|
-| `(user/launch-agent!! 'ns "prompt" :files [...])` | Launch and wait for result (blocking) |
-| `(user/launch-agent! 'ns "prompt" :files [...])` | Launch without waiting (returns handle) |
-| `(user/agents)` | List running agents |
-| `(user/agent-messages "a1b2")` | Check agent progress (recent messages) |
-| `(user/agent-result "a1b2")` | Get result from completed agent |
-| `(user/wait-for-agent!! "a1b2")` | Re-attach and wait for single agent |
-| `(user/wait-for-agents!! ["a1b2" "c3d4"])` | Wait for multiple agents in parallel |
-| `(user/interrupt-agent! "a1b2")` | Stop a running agent |
-
-**The `:files` option is optional but recommended.** Include PRDs, plans, and relevant code so agents have full context from the start.
-
-**UI Monitoring:**
-- Observatory: http://localhost:8080/agents
-- Dashboard: http://localhost:8080/
-
-### 4. Agent Instructions (Automatic)
-
-Agents automatically receive `.claude/AGENT.md` as part of their prompt. This tells them:
-- They're subagents being observed via Observatory
-- To think out loud and summarize results
-- Project conventions and tool usage
-
-Edit AGENT.md to change what all agents know.
-
-### 5. Choosing Namespaces
-
-The `::ai/namespace` parameter sets:
-- The **default REPL namespace** for the agent's session
-- The **isolated Datalevin database** name
-
-**Choose the namespace the agent will primarily work in:**
-
-```clojure
-;; GOOD - agent working on web agents code
-::ai/namespace 'seon.web.agents
-
-;; GOOD - agent building new trading signals feature
-::ai/namespace 'seon.trading.signals
-
-;; BAD - throwaway/task-based names
-::ai/namespace 'seon.fix-bug-123
-::ai/namespace 'seon.observatory-fix
-```
-
-The namespace doesn't restrict the agent's work - they can edit any file and switch REPL namespaces. But it sets their starting context and database isolation.
-
----
-
-## Namespace Stewardship
-
-Each namespace in Seon should have a **steward** — an agent that deeply understands the namespace, its consumers, and its role in the system. The stewardship process is documented in `docs/agent-playbooks/namespace-stewardship.md`.
-
-### Launching a stewardship audit
-
-```clojure
-;; Audit only (assess and document — no code changes)
-(user/launch-agent!! 'seon.ctx
-  "Your namespace is `seon.ctx`. Read `docs/agent-playbooks/namespace-stewardship.md` for your full instructions."
-  :files ["docs/agent-playbooks/namespace-stewardship.md"])
-
-;; Audit + fix (assess, then improve)
-(user/launch-agent!! 'seon.ctx
-  "Your namespace is `seon.ctx`. Read `docs/agent-playbooks/namespace-stewardship.md` for your full instructions. Do both the audit (Phases 1-5) AND fixes (Phase 6)."
-  :files ["docs/agent-playbooks/namespace-stewardship.md"])
-```
-
-Or via Task tool (seon-agent subagent):
-```
-Your namespace is `seon.foo`. Read `docs/agent-playbooks/namespace-stewardship.md` for your full instructions.
-```
-
-### How it works
-
-1. Agent reads VISION.md and CONVENTIONS.md to understand the system
-2. Deep-dives its own source, tests, and git history
-3. **Reads consumer code** — understands how other namespaces use it and where they struggle
-4. Writes a comprehensive assessment as the namespace docstring
-5. Optionally fixes issues (Phase 6), scoped to its own files only
-6. Reports **Requested Changes** for other namespaces — orchestrator delegates those
-
-### Cascading fixes
-
-When a steward reports Requested Changes, launch stewardship agents on those namespaces with the specific request included in the prompt. This creates a recursive improvement cascade where each namespace agent stays in scope.
-
----
-
-## System Management (CRITICAL)
-
-### This Is a Live System
-
-Seon is a running system with agents potentially doing work. **Never blindly kill processes.** Every restart risks:
-- Killing agents mid-task (lost work, corrupted state)
-- Losing in-progress database transactions
-- Breaking SSH/nREPL sessions other tools depend on
-
-**The orchestrator owns system restarts.** Agents must never restart the system. If something is broken, agents should diagnose WHY and report back — not `pkill` their way out.
-
-### Smart Service Detection
-
-`./bin/run` is intelligent about what's already running:
-- **Seon already healthy?** → prints connection info, exits cleanly
-- **Datalevin already running?** → adopts it (no restart), logs "Using existing Datalevin server"
-- **Caddy already running?** → adopts it (no restart)
-- **Tailwind already running?** → adopts it (no restart)
-- **nREPL/HTTP port conflict?** → fails with PID and kill command (these are in-process, conflict = stale JVM)
-
-On shutdown, only services Seon started are stopped. Adopted services are left alone.
-
-To run Datalevin independently: `./bin/run-datalevin` (then Seon auto-adopts it on start).
-
-### Two-Phase Startup
-
-Seon starts in two phases so you always have a REPL to debug with:
-- **Phase 1 (~1.5s)**: nREPL (7888) + HTTP (8080) + schema registry + Tailwind + Claude SDK
-- **Phase 2 (~5s)**: Datalevin (8898) + connection manager + agent pool + code scanner
-
-If Phase 2 fails, Phase 1 stays alive. You can connect via nREPL and investigate.
-
-### Health Checks
-
-```bash
-curl http://localhost:8080/api/health    # Full system status
-cat logs/startup.log                      # What happened on last boot
-```
-
-```clojure
-(seon.health/check {})                    ;; Full health with service modes
-(seon.health/cleanup-orphaned-resources! {})  ;; After crash recovery
-```
-
-The health endpoint reports every service with its `mode`:
-- `"started"` — Seon started this service
-- `"adopted"` — Seon found it already running and is using it
-- `"not-running"` — service isn't available
-
-Also reports `startup-phase`: `phase-1`, `phase-2`, `ready`, or `degraded`.
-
-### When Something Breaks (Orchestrator Protocol)
-
-**Step 1: Diagnose, don't kill.**
-```clojure
-(seon.health/check {})                    ;; What's actually broken?
-```
-```bash
-cat logs/startup.log                      ;; What happened during boot?
-tail -50 logs/app.log                     ;; Recent application errors
-grep ERROR logs/app.log | tail -20        ;; Error summary
-```
-
-**Step 2: Understand WHY.** A component being unhealthy is a symptom. The root cause matters:
-- Datalevin unreachable → Is the process dead? Disk full? LMDB corruption? Connection deadlock?
-- Pool JVM died → Out of memory? Bad agent code? Datalevin connection lost?
-- HTTP not responding → Thread starvation? Exception in handler?
-
-Debug the cause. If an agent's edit broke something, fix the edit. If a resource leaked, find the leak.
-
-**Step 3: Minimize blast radius.** When restart is truly needed:
-1. Check `(user/agents)` — are agents running? Wait for them or interrupt gracefully
-2. Use `(user/reset)` for a clean Integrant restart (preserves JVM, reloads code)
-3. Only `pkill -9` as absolute last resort (kills everything including agents)
-4. After hard kill: `rm -rf data/datalevin/` ONLY if LMDB corruption confirmed
-
-**Step 4: Verify recovery.**
-```bash
-./bin/run                                 ;; Smart — won't double-start
-curl http://localhost:8080/api/health     ;; Verify all services healthy
-```
-
-### Server
-
-```bash
-./bin/run              # Start everything (smart — adopts existing services)
-./bin/run-datalevin    # Start standalone Datalevin server
-```
-
-The server must be running for agents to work.
-
-### Running Tests
-
-**REPL-first (preferred — structured data, no grep gymnastics):**
-
-```clojure
-;; Focused namespace — returns structured data
-(user/run-tests 'seon.ai.claude-test)
-;; => {::success true ::test-count 5 ::pass-count 5 ::failures [] ...}
-;; => stored as :r-2108 in @user/repl-orchestrator
-
-;; Single var
-(user/run-tests 'seon.ai.claude-test/constants-test)
-
-;; Multiple namespaces
-(user/run-tests ['seon.db-test 'seon.graph.query-test])
-
-;; Dependency-aware — tests ns + all dependents
-(user/test-affected 'seon.graph.query)
-
-;; Generative tests on schema-annotated functions
-(user/test-gen 'seon.graph.query)
-```
-
-**Results are auto-saved.** Every eval result is stored in `@user/repl-<session>` under a hash key. Results > 2000 chars are truncated with a hint showing the key.
-
-```clojure
-;; Truncated output shows:
-;; ... truncated (8432 chars → 1500 shown)
-;; stored as :r-2108 in @user/repl-orchestrator
-;; Dig in: (:r-2108 @user/repl-orchestrator) or prefix code with #_:full
-
-;; Dig into structure without the full blob (stays truncated):
-(:failures (:r-2108 @user/repl-orchestrator))
-(keys (:r-2108 @user/repl-orchestrator))
-
-;; Opt in to full output when you need it (prefix with #_:full):
-#_:full (:r-5137 @user/repl-orchestrator)
-
-;; See all stored results:
-(keys @user/repl-orchestrator)
-```
-
-**Never re-run code just to see more output.** Dig into the saved result by key, or use `#_:full` to get the untruncated value.
-
-**CLI (for full suite runs):**
-
-```bash
-bin/test                           # Unit tests only (fast, <60s)
-bin/test seon.graph.query-test     # Focused namespace
-bin/test --all                     # Everything including integration
-```
-
-**Always use REPL-first** when developing. Only use CLI for final verification.
-
-For test patterns, mocking, and debugging test failures, invoke `/clojure-testing`.
-
-### Your REPL
-
-Connect your editor to nREPL on port 7888. Use these helpers:
-
-| Function | Purpose |
-|----------|---------|
-| `(reload)` | Fast reload changed code (~2ms) |
-| `(reset)` | Reload + restart components |
-| `(status)` | Show system status |
-| `(search "query")` | Web search via Gemini |
-
-### MCP Tools (for orchestrator)
-
-```
-eval(session_id="orchestrator", code="(user/status)")
-eval(session_id="orchestrator", code="(user/search \"query\")")
-```
-
----
-
-## Using Gemini Search (CRITICAL)
-
-**When debugging or investigating issues, ALWAYS include relevant source code files with your Gemini search.** Don't send vague queries - send the actual code so Gemini can see what's happening.
-
-### Why This Matters
-
-Previous agents kept trying the same approaches and declaring victory without solving problems. The root cause: they searched with vague queries like "http-kit hot reload not working" instead of showing Gemini the actual code. Gemini can't help if it's just guessing at what your code looks like.
-
-### How to Use
-
-The `user/search` function accepts `:files` - a vector of relative file paths to include:
-
-```clojure
-;; BAD - vague query, Gemini has to guess
-(user/search "why doesn't hot reload work in Clojure http-kit")
-
-;; GOOD - includes actual code, Gemini can analyze it
-(user/search "Why doesn't hot reload work?"
-             :files ["src/seon/web/server.clj"
-                     "src/seon/web/routes.clj"])
-```
-
-Via MCP eval:
-```
-eval(session_id="orchestrator",
-     code="(user/search \"Why doesn't hot reload work?\"
-                        :files [\"src/seon/web/server.clj\"
-                                \"src/seon/web/routes.clj\"])")
-```
-
-### When to Include Files
-
-**ALWAYS include files when:**
-- Debugging unexpected behavior
-- Investigating "why doesn't X work?"
-- Trying to understand how existing code works
-- Getting errors you don't understand
-- The same approach keeps failing
-
-**Files to include:**
-- The file(s) exhibiting the problem
-- Related configuration files
-- Any files in the error stack trace
-- Files that interact with the problem area
-
-### Composing with Search Results
-
-Search returns a plain text string, auto-saved like all REPL output. Truncated results include a ready-to-copy `subs` call for paging:
-
-```clojure
-;; 1. Search (shows first 1500 chars)
-(user/search "datastar custom actions" :files ["src/seon/web/routes.clj"])
-;; => 5047 chars total, showing 0-1500
-;; => stored as :r-4821 in @user/repl-orchestrator
-;; => more: (subs (:r-4821 @user/repl-orchestrator) 1500 3000)
-
-;; 2. Copy-paste the "more:" hint to page through
-(subs (:r-4821 @user/repl-orchestrator) 1500 3000)  ;; chars 1500-3000
-(subs (:r-4821 @user/repl-orchestrator) 3000 5047)  ;; chars 3000-5047 (remainder)
-
-;; 3. Or get everything at once (large context cost)
-#_:full (:r-4821 @user/repl-orchestrator)
-
-;; 4. If you know upfront you want the full result, skip truncation:
-#_:full (user/search "datastar custom actions" :files ["src/seon/web/routes.clj"])
-```
-
-This applies to all auto-saved results. You have a REPL — compose with `subs`, `count`, `keys`, `select-keys`, etc.
-
-### Rule of Thumb
-
-If you're about to search for a problem and you haven't included the relevant source files, **STOP and include them**. The 30 seconds it takes to list the files will save hours of going in circles.
 
 ---
 
@@ -527,7 +67,10 @@ seon/
 │   ├── domains/              ; Domain modules (trading, health, etc.)
 │   └── web/                  ; HTTP server, SSE, handlers
 ├── reference-code/           ; Git submodules of dependency source
-│   └── datalevin/             ; Datalevin source (read when stuck)
+│   ├── datalevin/            ; Datalevin source (read when stuck)
+│   ├── malli/                ; Malli source
+│   ├── integrant/            ; Integrant source
+│   └── core.async/           ; core.async + flow source
 └── docs/
     ├── prds/                 ; Feature specifications
     └── reference/            ; Technical reference docs
@@ -546,20 +89,9 @@ seon/
 | `/browser-automation` | Testing UI in browser, debugging frontend issues |
 | `/clojure-testing` | **Running tests**, test failures, kaocha, mocking, generators |
 
-**Examples of when to invoke skills:**
-- "How do I run tests?" → `/clojure-testing` (don't guess at CLI commands)
-- "Query returns empty" → `/datalevin` (don't grep for examples)
-- "SSE not updating" → `/datastar-web-ui` (don't read random handler files)
-
-The skill provides the exact commands, patterns, and gotchas for this codebase.
-
 ---
 
 ## Editing Tools
-
-You have multiple tools for editing files. Choose based on the situation:
-
-### Quick Reference
 
 | Tool | Best For | Validation |
 |------|----------|------------|
@@ -567,105 +99,17 @@ You have multiple tools for editing files. Choose based on the situation:
 | `Write` | New files, complete rewrites | Syntax (non-seon) or full lint (seon) |
 | `clojure_replace` (MCP) | Clojure code changes | Full clj-kondo + tests + review |
 
-### When to Use Each
-
-**Use `clojure_replace` (MCP) for Clojure files when:**
-- Replacing function bodies or expressions
-- Need whitespace-insensitive matching (it's structural)
-- Want lint errors caught before write (undefined symbols, arity)
-- Working with comments that need preservation
-
-```
-clojure_replace(file_path="src/seon/foo.clj",
-                match="(defn old-impl [x] ...)",
-                replace="(defn old-impl [x] (new-impl x))")
-```
-
-**Use `Edit` for:**
-- Simple string replacements
-- Non-Clojure files (config, markdown, etc.)
-- When exact match is required
-
-**Use `Write` for:**
-- Creating new files
-- Complete file rewrites
-- When Edit keeps failing on complex changes
-
-### Validation Summary
+**Prefer `clojure_replace` for Clojure** — whitespace-insensitive, structural matching, full lint before write.
 
 All Clojure edits are validated:
-- **PreToolUse (Edit/Write):** Fast syntax check for non-seon files (~1ms), full clj-kondo for seon files (~50-100ms)
-- **PostToolUse (Edit/Write):** Full pipeline for seon files (repair, reload, tests, review)
-- **clojure_replace:** Full clj-kondo pre-write + post-edit pipeline
+- **PreToolUse:** Fast syntax check for non-seon files (~1ms), full clj-kondo for seon files (~50-100ms)
+- **PostToolUse:** Full pipeline for seon files (repair, reload, tests, review)
 
-Errors include "Did you mean?" suggestions for undefined symbols.
+Errors include "Did you mean?" suggestions for undefined symbols. If your edit is blocked, the error message tells you exactly what's wrong — read it.
 
----
+### Code Smell: Functions Too Complex to Edit
 
-## UI Development
-
-Seon uses a **Phosphor Terminal** theme - warm blacks, cream text, amber accents. Think Lisp machine, not generic web app.
-
-### Tailwind CSS (Auto-Rebuilds)
-
-We use **local Tailwind** with `@tailwindcss/typography` for prose/markdown styling.
-
-**Automatic:** `./bin/run` starts Tailwind watcher in background - CSS rebuilds when you edit `.clj` files or `input.css`.
-
-**Manual** (if needed):
-```bash
-npm run css:build   # Build CSS once
-npm run css:watch   # Watch mode separately
-```
-
-Theme defined in `resources/public/css/input.css`.
-
-### Before Writing UI Code
-
-1. **Read the design system:** `docs/prds/namespace-ui/design-system.md`
-2. **Use the component library:** `src/seon/web/components.clj`
-3. **Invoke skills:** `/datastar-web-ui` for SSE patterns, `/browser-automation` to test
-
-### Component Library
-
-```clojure
-(require '[seon.web.components :as ui])
-
-(ui/page-header "Title" :subtitle "optional")
-(ui/section-header "SECTION")
-(ui/card (ui/section-header "Card") content...)
-(ui/status-dot :running :label "running")  ; NOT pill badges
-(ui/log-line {:timestamp ts :type "TOOL" :content "..."})
-```
-
-### Key Rules
-
-- **Density over whitespace** - `p-3` not `p-6`, `gap-4` not `gap-6`
-- **Small text** - `text-xs` (11px) primary, `text-lg` max for titles
-- **Warm colors** - `bg-base-*`, `text-text-*`, never `bg-white` or `text-zinc-*`
-- **Dot+text status** - `● running` not pill badges
-- **Monospace everywhere** - `font-mono` on body
-
-### Reference Files
-
-| File | Purpose |
-|------|---------|
-| `docs/prds/namespace-ui/design-system.md` | Full color palette, typography, spacing |
-| `src/seon/web/components.clj` | Reusable UI components |
-| `src/seon/web/html.clj` | Base template, nav, shared functions |
-| `resources/public/css/input.css` | Tailwind theme source (edit this) |
-| `resources/public/css/output.css` | Built CSS (don't edit directly) |
-
----
-
-## Key Documents
-
-| Document | Purpose |
-|----------|---------|
-| `VISION.md` | Full thesis, architecture layers, progress tracking |
-| `CONVENTIONS.md` | Malli schemas, API design patterns |
-| `docs/reference/datastar-quick-reference.md` | Web UI attributes |
-| `docs/prds/namespace-ui/design-system.md` | UI colors, typography, spacing |
+If you repeatedly fail to edit a function, **the function is too complex**. Refactor it. Keep functions small and composable. If a function needs a comment explaining a section, that section should be its own function. **If an AI can't edit your code, it's too complex for humans too.**
 
 ---
 
@@ -679,126 +123,52 @@ After every Edit/Write, the hook automatically:
 
 Config in `.claude/seon-hook.edn`. Hook blocks if tests fail.
 
----
-
-## Valid Clojure Edits
-
-The dev hook validates Clojure syntax **before** applying edits. Invalid edits are blocked.
-
-### How Validation Works
-
-**PreToolUse (before edit):**
-1. Reads current file content
-2. Simulates your edit: `str/replace-first(current, old_string, new_string)`
-3. Checks if the simulated result has valid syntax (balanced delimiters)
-4. **Blocks** if syntax is broken, **allows** if valid
-
-The file is NEVER modified if validation fails. This prevents broken code from being written.
-
-**PostToolUse (after edit):**
-- Runs repair (parinfer) if delimiters are slightly off
-- Reloads code into running server
-- Runs unit tests and generative tests
-- Checks convention compliance
-- Triggers AI review (rate-limited)
-
-### What Gets Validated
-- All files: `.clj`, `.cljs`, `.cljc`, `.bb`, `.edn`
-- Both Edit and Write operations
-- PreToolUse checks **syntax only** (fast, ~1ms)
-- PostToolUse runs full **linting** (clj-kondo) for semantic errors
-
-### If Your Edit is Blocked
-
-You'll see a detailed error message:
-```
-Edit would create invalid Clojure.
-
-SYNTAX ERROR: EOF while reading, expected ) to match ( at [1,15]
-
-Common causes:
-- Missing closing paren/bracket/brace
-- Extra closing delimiter
-- Unclosed string literal
-
-Fix: Check delimiter balance in your new_string.
-If the file was already broken, make ONE edit that fixes ALL syntax issues.
-```
-
-**Read the error carefully.** It tells you:
-- Exactly where the error was detected (line, column)
-- What delimiter is missing or extra
-- How to fix it
-
-### What to Do When Blocked
-
-1. **Check your `new_string`** - Most blocks are unbalanced delimiters in what you're adding
-2. **If file was already broken** - Make ONE comprehensive edit that fixes ALL issues
-3. **Use Write for complex changes** - Replace the entire function/section
-4. **Read the file first** - Understand exact formatting before editing
-
-### Escape Hatch
-
-If struggling with complex edits or whitespace issues, use **Write** to replace the entire function or file section. Read the file first to understand exact formatting.
-
-### Code Smell: Functions Too Complex to Edit
-
-If you repeatedly fail to edit a function—even when trying to Write the entire thing—that's a signal the function is too complex. **Refactor it first:**
-
-**Keep functions small and composable.** Each function should do one thing, be independently testable, and have a name that makes the calling function read like prose. Small functions compose naturally — they're easier to schema-validate, easier to property-test, and easier for agents to edit surgically. If a function needs a comment explaining a section, that section should be its own function.
-
-Example: A tangled `-main` with deep nesting → refactor to:
-```clojure
-(defn -main []
-  (init-logging!)
-  (backup-critical-files!)
-  (let [event (parse-event)]
-    (cond
-      (skip-nrepl? event) (fast-path! event)
-      (validation-blocks? event) (block! event)
-      :else (process-via-nrepl! event))))
-```
-
-**If an AI can't edit your code, it's too complex for humans too.**
-
-### Hook File Safety
-
-Critical files (`bin/seon-hook`, `src/seon/dev/hook.clj`) have extra protection:
-- Backups stored in `tmp/hook-backup/`
-- Auto-restore if corrupted on hook startup
-- Invalid edits blocked with detailed error messages
+**Read hook feedback.** The hook provides convention violations, lint warnings, and AI review after every edit. This feedback is good — it catches real problems. Don't skip it to move faster. Fix warnings, use existing aliases, address review concerns before moving on. Ignoring feedback to "save time" creates debt that costs more later.
 
 ---
 
 ## Code Reloading
 
-**The dev hook handles code reloading automatically** after every Edit/Write. You rarely need to reload manually.
+The dev hook handles reloading automatically. You rarely need to reload manually.
 
-### Safe operations:
 ```clojure
-(user/reload)  ; Fast reload via clj-reload (what the hook uses)
-(user/reset)   ; Full system restart - use when changing config/components
+(user/reload)  ; Fast reload via clj-reload
+(user/reset)   ; Full Integrant restart — use when changing config/components
 (user/status)  ; Check system health
 ```
 
-### Avoid raw require with :reload:
-```clojure
-;; Don't do this - bypasses proper cleanup:
-(require 'some.namespace :reload)
-(require 'some.namespace :reload-all)
-```
+**Avoid** `(require 'ns :reload)` — it bypasses proper cleanup.
 
-### If something breaks:
-1. Check `(user/status)` — understand what's wrong before acting
-2. Try `(user/reload)` — often fixes code-level issues
-3. Try `(user/reset)` — clean Integrant restart, preserves JVM
-4. **Last resort only:** `pkill -9 -f "java.*seon" && ./bin/run`
+**If something breaks:**
+1. **Observe first.** `(user/status)`, check logs, query the REPL. Understand what's broken and WHY.
+2. **Diagnose the root cause.** Don't fix symptoms — find the disease.
+3. Try `(user/reload)` — often fixes code-level issues.
+4. Try `(user/reset)` — clean Integrant restart. Note: `resume-key` may preserve old state.
+5. **Last resort only:** `pkill -9 -f "java.*seon" && ./bin/run` — document WHY.
+
+---
+
+## UI Development
+
+Seon uses a **Phosphor Terminal** theme - warm blacks, cream text, amber accents. Think Lisp machine, not generic web app.
+
+### Before Writing UI Code
+
+1. **Read the design system:** `docs/prds/namespace-ui/design-system.md`
+2. **Use the component library:** `src/seon/web/components.clj`
+3. **Invoke skills:** `/datastar-web-ui` for SSE patterns, `/browser-automation` to test
+
+### Key Rules
+
+- **Density over whitespace** - `p-3` not `p-6`, `gap-4` not `gap-6`
+- **Small text** - `text-xs` (11px) primary, `text-lg` max for titles
+- **Warm colors** - `bg-base-*`, `text-text-*`, never `bg-white` or `text-zinc-*`
+- **Dot+text status** - `● running` not pill badges
+- **Monospace everywhere** - `font-mono` on body
 
 ---
 
 ## Domain Guidelines
-
-When adding domains:
 
 1. **One file per namespace** - Don't split prematurely
 2. **DB parameter** - Functions receive `db` as first parameter
@@ -809,31 +179,9 @@ See `CONVENTIONS.md` for full patterns.
 
 ---
 
-## AI Architecture (Reference)
-
-```
-seon.ai                    ; Base schemas + session/message persistence
-├── seon.ai.agent          ; Agent registry, observatory API
-└── seon.ai.claude         ; Claude provider (what you use)
-    └── seon.ai.claude.sdk ; Low-level CLI process management
-```
-
-As orchestrator, you primarily use `seon.ai.claude`:
-
-```clojure
-(claude/launch-agent! ...)       ; Launch (see "Launching Agents" above)
-(claude/agents {})               ; List running agents
-(claude/tail {::ai/session-id "xxxx"})  ; Stream messages
-(claude/interrupt! {::ai/session-id "xxxx"})  ; Stop agent
-```
-
-The lower-level namespaces (`seon.ai`, `seon.ai.agent`, `seon.ai.claude.sdk`) are for extending the system, not daily use.
-
----
-
 ## File Locations
 
-**Never use `/tmp` or system temp directories.** Use project-local directories instead:
+**Never use `/tmp` or system temp directories.** Use project-local directories:
 
 | Directory | Purpose | Git Status |
 |-----------|---------|------------|
@@ -841,38 +189,28 @@ The lower-level namespaces (`seon.ai`, `seon.ai.agent`, `seon.ai.claude.sdk`) ar
 | `tmp/` | Temporary test files, scratch data | Ignored |
 | `data/` | Datalevin database files | Ignored |
 
-These directories are gitignored and local to the project. This ensures:
-- Logs are findable and debuggable
-- Multiple projects don't conflict
-- Agents can access their own logs
-
 ---
 
 ## Logging
 
-Seon uses **Timbre** for application logging and **logback** for library logs (Datalevin, nREPL, etc. via SLF4J).
+Seon uses **Timbre** for application logging and **logback** for library logs (SLF4J).
 
-### Log Files
+| File | Contents |
+|------|----------|
+| `logs/app.log` | All application log lines (Timbre) |
+| `logs/startup.log` | Boot sequence only (wiped on startup) |
+| `logs/error.log` | Errors only (logback/library) |
+| `logs/lib.log` | Library logs (SLF4J) |
 
-| File | Contents | Lifecycle |
-|------|----------|-----------|
-| `logs/app.log` | All application log lines (Timbre) | Appended continuously |
-| `logs/startup.log` | Boot sequence only | Wiped on each startup |
-| `logs/error.log` | Errors only (logback/library) | Rotated, 30-day retention |
-| `logs/lib.log` | Library logs (SLF4J) | Rotated, 7-day retention (dev) |
+---
 
-### Quick Commands
+## Key Documents
 
-```bash
-cat logs/startup.log        # What happened on last startup
-tail -f logs/app.log        # Live application logs
-grep ERROR logs/app.log     # Find errors
-```
-
-### How It Works
-
-- All `seon.*` code uses `[taoensso.timbre :as log]` -- outputs to stdout + `logs/app.log` + `logs/startup.log`
-- Library code (Datalevin, nREPL, Integrant) uses SLF4J, routed to logback -- outputs to stdout + `logs/lib.log` + `logs/error.log`
-- Timbre is configured in `src/seon/logging.clj`, called from `seon.core/-main`
-- Logback is configured in `env/{dev,prod,test}/resources/logback.xml`
-- Old dated log files are in `logs/archive/`
+| Document | Purpose |
+|----------|---------|
+| `VISION.md` | Full thesis, architecture layers, progress tracking |
+| `CONVENTIONS.md` | Malli schemas, API design patterns |
+| `ORCHESTRATOR.md` | Orchestrator-specific instructions (launching agents, system management) |
+| `AGENT.md` | Subagent-specific instructions (investigation workflow, reporting) |
+| `docs/reference/datastar-quick-reference.md` | Web UI attributes |
+| `docs/prds/namespace-ui/design-system.md` | UI colors, typography, spacing |

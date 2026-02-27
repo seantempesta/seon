@@ -27,9 +27,9 @@
   (:require [clojure.pprint :as pp]
             [clojure.set :as cset]
             [clojure.string :as str]
-            [datalevin.core :as d]
             [integrant.repl.state]
             [seon.db.datalevin.conn :as dl-conn]
+            [seon.graph.query :as gq]
             [seon.runtime :as runtime]
             [seon.schema :as schema]
             [taoensso.timbre :as log])
@@ -137,11 +137,11 @@
 (defn find-renderer
   "Find the best render function for the given data and format.
 
-   Queries Datalevin for functions with :seon.fn/render-input-keys
-   that are a subset of the data's keys.
+   Uses functions-with-output-key to find candidates via ref join,
+   then filters by required keys subset of data keys.
 
    Resolution order:
-   1. Most input keys matched (specificity)
+   1. Most required keys matched (specificity)
    2. Newest updated-at (recency)
    3. Alphabetical qualified-name (deterministic tiebreaker)
 
@@ -154,30 +154,16 @@
   [conn data format]
   (let [data-keys (set (keys data))
         format-key (case format :html :seon.render/html :ai :seon.render/ai)
-        ;; Pull all fn entities that have render-input-keys
-        candidates (d/q '[:find ?e
-                          :where
-                          [?e :seon.fn/render-input-keys]]
-                        @conn)
-        entities (map (fn [[eid]]
-                        (d/pull @conn
-                                [:seon.fn/qualified-name
-                                 :seon.fn/render-input-keys
-                                 :seon.fn/updated-at
-                                 {:seon.fn/output-spec [:seon.spec/contains-keys]}]
-                                eid))
-                      candidates)
-        ;; Filter: input keys must be subset of data keys
-        ;; AND output spec must contain the format key
-        matching (->> entities
+        ;; Use unified helper to find candidates via ref join
+        candidates (gq/functions-with-output-key {::gq/conn conn ::gq/output-key format-key})
+        ;; Filter: required keys must be subset of data keys
+        matching (->> candidates
                       (filter (fn [e]
-                                (let [rkeys (:seon.fn/render-input-keys e)
-                                      out-keys (set (get-in e [:seon.fn/output-spec :seon.spec/contains-keys]))]
-                                  (and (every? data-keys rkeys)
-                                       (contains? out-keys format-key))))))]
+                                (let [rkeys (:required-keys e)]
+                                  (every? data-keys rkeys)))))]
     (when (seq matching)
       (->> matching
-           (sort-by (juxt (comp - count :seon.fn/render-input-keys)
+           (sort-by (juxt (comp - count :required-keys)
                           (comp - (fn [e] (if-let [t (:seon.fn/updated-at e)]
                                             (.getTime ^java.util.Date t)
                                             0)))
@@ -233,27 +219,15 @@
 
    Returns the resolved var, or nil."
   [conn available-keys target-ns]
-  (let [candidates (d/q '[:find ?e
-                          :where
-                          [?e :seon.fn/render-input-keys]]
-                        @conn)
-        entities (map (fn [[eid]]
-                        (d/pull @conn
-                                [:seon.fn/qualified-name
-                                 :seon.fn/render-input-keys
-                                 :seon.fn/updated-at
-                                 {:seon.fn/output-spec [:seon.spec/contains-keys]}]
-                                eid))
-                      candidates)
-        matching (->> entities
+  (let [;; Use unified helper to find candidates via ref join
+        candidates (gq/functions-with-output-key {::gq/conn conn ::gq/output-key :seon.render/html})
+        ;; Filter: required keys must be subset of available-keys
+        matching (->> candidates
                       (filter (fn [e]
-                                (let [rkeys (set (:seon.fn/render-input-keys e))
-                                      out-keys (set (get-in e [:seon.fn/output-spec :seon.spec/contains-keys]))]
-                                  (and (cset/subset? rkeys available-keys)
-                                       (contains? out-keys :seon.render/html))))))]
+                                (cset/subset? (:required-keys e) available-keys))))]
     (when (seq matching)
       (let [best (->> matching
-                      (sort-by (juxt (comp - count :seon.fn/render-input-keys)
+                      (sort-by (juxt (comp - count :required-keys)
                                      (fn [e] (namespace-proximity
                                               (:seon.fn/qualified-name e)
                                               target-ns))
@@ -715,8 +689,7 @@
 (defn find-page-renderer
   "Find a page render function whose input spec keys overlap most with ns-data keys.
 
-   Queries Datalevin for functions with :seon.fn/render-input-keys and
-   output specs containing :seon.render/html or :seon.render/ai.
+   Uses functions-with-output-key to find HTML renderers via ref join.
    The function with the MOST key overlap wins.
 
    Arguments:
@@ -727,31 +700,19 @@
      The qualified-name string of the best page renderer, or nil."
   [conn ns-data]
   (let [data-keys (set (keys ns-data))
-        candidates (d/q '[:find ?e
-                          :where
-                          [?e :seon.fn/render-input-keys]]
-                        @conn)
-        entities (map (fn [[eid]]
-                        (d/pull @conn
-                                [:seon.fn/qualified-name
-                                 :seon.fn/render-input-keys
-                                 :seon.fn/updated-at
-                                 {:seon.fn/output-spec [:seon.spec/contains-keys]}]
-                                eid))
-                      candidates)
-        matching (->> entities
+        ;; Use unified helper to find HTML renderers via ref join
+        candidates (gq/functions-with-output-key {::gq/conn conn ::gq/output-key :seon.render/html})
+        ;; Filter: at least one required key must overlap with data keys
+        matching (->> candidates
                       (filter (fn [e]
-                                (let [rkeys (set (:seon.fn/render-input-keys e))
-                                      out-keys (set (get-in e [:seon.fn/output-spec :seon.spec/contains-keys]))
+                                (let [rkeys (:required-keys e)
                                       overlap (count (cset/intersection rkeys data-keys))]
-                                  (and (pos? overlap)
-                                       (or (contains? out-keys :seon.render/html)
-                                           (contains? out-keys :seon.render/ai)))))))]
+                                  (pos? overlap)))))]
     (when (seq matching)
       (->> matching
            (sort-by (juxt (comp - (fn [e]
                                     (count (cset/intersection
-                                            (set (:seon.fn/render-input-keys e))
+                                            (:required-keys e)
                                             data-keys))))
                           (comp - (fn [e] (if-let [t (:seon.fn/updated-at e)]
                                             (.getTime ^java.util.Date t)

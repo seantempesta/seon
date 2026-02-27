@@ -130,21 +130,27 @@
       (is (true? (:seon.ns/dynamic? ns-entity))))))
 
 (deftest extract-detects-page-renderer-test
-  (testing "extract-graph marks page-render as page renderer with needs-ctx"
+  (testing "extract-graph links page-render to specs - render detection at query time"
     (let [graph (extract/extract-graph-from-file
                  {::extract/file-path "src/seon/health/workout/render.clj"})
           fn-entity (first (filter #(= "seon.health.workout.render/page-render"
                                        (:seon.fn/qualified-name %))
-                                   (::extract/functions graph)))]
+                                   (::extract/functions graph)))
+          specs (::extract/specs graph)
+          input-spec (first (filter #(= :seon.health.workout.render/page-render-request
+                                        (:seon.spec/key %)) specs))
+          output-spec (first (filter #(= :seon.health.workout.render/page-render-response
+                                         (:seon.spec/key %)) specs))]
       (is (some? fn-entity) "Should find page-render function")
-      (is (true? (:seon.fn/page-renderer? fn-entity))
-          "page-render should be detected as page renderer")
-      (is (true? (:seon.fn/needs-ctx? fn-entity))
-          "page-render should need ctx")
-      (is (nil? (:seon.fn/needs-conn? fn-entity))
-          "page-render should not need conn")
-      (is (= [::workout/*ctx*]
-             (:seon.fn/render-input-keys fn-entity))))))
+      ;; Function is linked to specs
+      (is (some? (:seon.fn/input-spec fn-entity)))
+      (is (some? (:seon.fn/output-spec fn-entity)))
+      ;; Input spec contains *ctx* key (used for page renderer detection at query time)
+      (is (some? input-spec))
+      (is (some #(str/ends-with? (name %) "*ctx*") (:seon.spec/contains-keys input-spec)))
+      ;; Output spec contains :seon.render/html
+      (is (some? output-spec))
+      (is (contains? (set (:seon.spec/contains-keys output-spec)) :seon.render/html)))))
 
 (deftest extract-links-workout-render-fn-test
   (testing "extract-graph links workout-set-render to its specs"
@@ -152,17 +158,20 @@
                  {::extract/file-path "src/seon/health/workout.clj"})
           fn-entity (first (filter #(= "seon.health.workout/workout-set-render"
                                        (:seon.fn/qualified-name %))
-                                   (::extract/functions graph)))]
+                                   (::extract/functions graph)))
+          specs (::extract/specs graph)
+          input-spec (first (filter #(= ::workout/workout-set-render-request
+                                        (:seon.spec/key %)) specs))]
       (is (some? fn-entity) "Should find workout-set-render")
       (is (= [:seon.spec/key ::workout/workout-set-render-request]
              (:seon.fn/input-spec fn-entity)))
       (is (= [:seon.spec/key ::workout/workout-set-render-response]
              (:seon.fn/output-spec fn-entity)))
+      ;; Input spec contains the required keys (used for resolution at query time)
+      (is (some? input-spec))
       (is (= (set [::workout/exercise ::workout/sets
                    ::workout/reps ::workout/weight])
-             (set (:seon.fn/render-input-keys fn-entity))))
-      (is (nil? (:seon.fn/page-renderer? fn-entity))
-          "Item renderer should NOT be a page renderer"))))
+             (set (:seon.spec/contains-keys input-spec)))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Integration Tests

@@ -250,10 +250,11 @@
                             (log/info "Shutdown signal received")
                             (log/info "Flushing writer flows...")
                             (db/shutdown-writers!)
-                            (when-let [conn (some-> state/system :seon/runtime-db :conn)]
+                            (when-let [runtime-db (some-> state/system :seon/runtime-db)]
                               (log/info "Backing up ctx instances...")
                               (try
-                                (lifecycle/backup-all-instances! {::lifecycle/conn conn})
+                                (let [conn ((requiring-resolve 'seon.system/runtime-db-conn) runtime-db)]
+                                  (lifecycle/backup-all-instances! {::lifecycle/conn conn}))
                                 (catch Throwable t
                                   (log/warn "Failed to backup ctx instances"
                                             {:error (.getMessage t)}))))

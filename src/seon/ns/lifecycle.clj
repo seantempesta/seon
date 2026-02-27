@@ -16,10 +16,12 @@
      (lifecycle/backup-all-instances! {::conn graph-conn})
      (lifecycle/restore-instances! {::conn graph-conn})"
   (:require [clojure.edn :as edn]
+            [clojure.string :as str]
             [datalevin.core :as d]
             [malli.core :as m]
             [malli.generator :as mg]
             [seon.ctx :as ctx]
+            [seon.graph.query :as gq]
             [seon.runtime :as runtime]
             [seon.schema :as schema]
             [taoensso.timbre :as log]))
@@ -218,8 +220,9 @@
 
 (defn find-page-render-fn
   "Find the page renderer function for a namespace via Datalevin metadata.
-   Queries for :seon.fn/page-renderer? true whose :seon.fn/render-input-keys
-   matches the namespace's *ctx* key. This handles renderers in child namespaces
+   Uses functions-with-output-key to find HTML renderers, then filters for
+   those whose required-keys include the namespace's *ctx* key.
+   This handles renderers in child namespaces
    (e.g. seon.health.workout.render/page-render for seon.health.workout).
 
    Request keys:
@@ -231,15 +234,19 @@
   {:malli/schema [:=> [:cat ::find-page-render-fn-request] ::find-page-render-fn-response]}
   [{::keys [conn ns-sym]}]
   (let [ctx-key (keyword (str ns-sym) "*ctx*")
-        results (d/q '[:find ?qname
-                       :in $ ?ctx-key
-                       :where
-                       [?e :seon.fn/page-renderer? true]
-                       [?e :seon.fn/render-input-keys ?ctx-key]
-                       [?e :seon.fn/qualified-name ?qname]]
-                     @conn ctx-key)]
+        ;; Find all HTML renderers via ref join
+        candidates (gq/functions-with-output-key {::gq/conn conn ::gq/output-key :seon.render/html})
+        ;; Filter for renderers whose required-keys include the *ctx* key
+        matching (->> candidates
+                      (filter (fn [e]
+                                (some #(str/ends-with? (name %) "*ctx*")
+                                      (:required-keys e))))
+                      ;; Prefer exact match on ctx-key
+                      (sort-by (fn [e]
+                                 (if (contains? (:required-keys e) ctx-key) 0 1)))
+                      first)]
     {::render-fn
-     (when-let [qname (ffirst results)]
+     (when-let [qname (:seon.fn/qualified-name matching)]
        (let [sym (symbol qname)]
          (try
            (requiring-resolve sym)
