@@ -21,14 +21,7 @@ messages-ch (chan (async/sliding-buffer 1000))
 
 **Status**: DEPLOYED. Tested. Agents can run indefinitely now.
 
-### 2. Eliza Analysis
-
-Added `reference-code/eliza` (git clone, not submodule due to gitignore).
-Analysis written to `docs/research/eliza-analysis.md`.
-
-**Key Finding**: Eliza solves conversational agents (chatbots), not code-writing agents. Worth borrowing: plugin dependency resolution, typed events, service lifecycle. Not applicable: character systems, memory embeddings.
-
-### 3. core.async.flow Research
+### 2. core.async.flow Research
 
 Rich Hickey's new dataflow system (April 2025). Three research documents created:
 
@@ -79,12 +72,10 @@ This could enable per-turn context injection ("cockpit" model). BUT:
 - `docs/prds/dynamic-context/prd.md` - Updated with findings
 
 ### Created
-- `docs/research/eliza-analysis.md`
 - `docs/prds/dynamic-context/async-flow-research.md`
 - `docs/prds/dynamic-context/research-findings.md` (if agent wrote it)
 - `docs/architecture/flow-foundation.md`
 - `docs/prds/namespace-ui/sse-flow-solution.md`
-- `reference-code/eliza/` (cloned repo)
 
 ## Immediate Next Steps
 
