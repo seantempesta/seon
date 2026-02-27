@@ -9,7 +9,7 @@
   - :seon.dev/nrepl - nREPL for REPL-driven development
   - :seon.orchestrator/namespace-nrepls - Per-namespace nREPL servers for agent isolation
 
-  Datalevin is the sole database. XTDB has been removed."
+  Datalevin is the sole database."
   (:require [integrant.core :as ig]
             [taoensso.timbre :as log]
             [seon.db.schema :as schema]
@@ -192,6 +192,58 @@
 ;;; Populates the Datalevin knowledge graph at startup by analyzing the
 ;;; codebase with clj-kondo and scanning for schema/register! calls.
 ;;; Receives its connection from :seon/runtime-db component.
+;;; Runs in a background future to avoid blocking startup (~3s savings).
+
+(defn- run-code-scan!
+  "Execute the code scan in the current thread. Called from a future."
+  [conn paths]
+  (let [extract-graph-from-file (resolve 'seon.graph.extract/extract-graph-from-file)
+        ingest-namespace! (resolve 'seon.graph.ingest/ingest-namespace!)]
+    (try
+      (log/info "Code scanner: extracting graph for project..." {:paths paths})
+      (let [clj-files (->> (mapcat #(file-seq (java.io.File. %)) paths)
+                           (filter (fn [^java.io.File f]
+                                     (and (.isFile f)
+                                          (let [n (.getName f)]
+                                            (or (.endsWith n ".clj")
+                                                (.endsWith n ".cljs")
+                                                (.endsWith n ".cljc"))))))
+                           vec)
+            total (count clj-files)]
+        (log/info "Code scanner: found files to process" {:count total})
+        ;; Phase 1: Extract graphs in parallel (CPU-bound, no DB)
+        (let [graphs (->> clj-files
+                          (pmap (fn [^java.io.File f]
+                                  (try
+                                    (extract-graph-from-file
+                                     {:seon.graph.extract/file-path (.getAbsolutePath f)})
+                                    (catch Throwable e
+                                      (log/debug "Code scanner: extract failed"
+                                                 {:file (.getName f) :error (.getMessage e)})
+                                      nil))))
+                          (filter :seon.graph.extract/ns-name)
+                          vec)]
+          ;; Phase 2: Ingest sequentially (DB writes)
+          (doseq [graph graphs]
+            (try
+              (let [ns-str (:seon.graph.extract/ns-name graph)]
+                (ingest-namespace!
+                 {:seon.graph.ingest/conn conn
+                  :seon.graph.ingest/ns-name ns-str
+                  :seon.graph.ingest/functions (:seon.graph.extract/functions graph)
+                  :seon.graph.ingest/specs (:seon.graph.extract/specs graph)
+                  :seon.graph.ingest/vars (:seon.graph.extract/vars graph)
+                  :seon.graph.ingest/call-edges (:seon.graph.extract/call-edges graph)
+                  :seon.graph.ingest/ns-deps (:seon.graph.extract/ns-deps graph)
+                  :seon.graph.ingest/ns-entities (:seon.graph.extract/namespaces graph)}))
+              (catch Exception e
+                (log/debug "Code scanner: ingest failed"
+                           {:ns (:seon.graph.extract/ns-name graph)
+                            :error (.getMessage e)}))))
+          (log/info "Code scanner complete"
+                    {:files-processed total :namespaces-ingested (count graphs)})))
+      (catch Exception e
+        (log/error "Code scanner failed" {:error (.getMessage e)})))))
 
 (defmethod ig/init-key :seon.graph/scanner
   [_ {:keys [graph-db paths enabled?]}]
@@ -202,53 +254,22 @@
         (throw (ex-info "Code scanner requires graph-db connection" {})))
       (require 'seon.graph.extract)
       (require 'seon.graph.ingest)
-      (let [extract-graph-from-file (resolve 'seon.graph.extract/extract-graph-from-file)
-            ingest-namespace! (resolve 'seon.graph.ingest/ingest-namespace!)]
-        (try
-          (log/info "Code scanner: extracting graph for project..." {:paths paths})
-          (let [clj-files (->> (mapcat #(file-seq (java.io.File. %)) paths)
-                               (filter (fn [^java.io.File f]
-                                         (and (.isFile f)
-                                              (let [n (.getName f)]
-                                                (or (.endsWith n ".clj")
-                                                    (.endsWith n ".cljs")
-                                                    (.endsWith n ".cljc"))))))
-                               vec)
-                total (count clj-files)]
-            (log/info "Code scanner: found files to process" {:count total})
-            (doseq [^java.io.File f clj-files]
-              (try
-                (let [path (.getAbsolutePath f)
-                      graph (extract-graph-from-file {:seon.graph.extract/file-path path})
-                      ns-str (:seon.graph.extract/ns-name graph)]
-                  (when ns-str
-                    (ingest-namespace!
-                     {:seon.graph.ingest/conn conn
-                      :seon.graph.ingest/ns-name ns-str
-                      :seon.graph.ingest/functions (:seon.graph.extract/functions graph)
-                      :seon.graph.ingest/specs (:seon.graph.extract/specs graph)
-                      :seon.graph.ingest/vars (:seon.graph.extract/vars graph)
-                      :seon.graph.ingest/call-edges (:seon.graph.extract/call-edges graph)
-                      :seon.graph.ingest/ns-deps (:seon.graph.extract/ns-deps graph)
-                      :seon.graph.ingest/ns-entities (:seon.graph.extract/namespaces graph)})))
-                (catch Exception e
-                  (log/debug "Code scanner: failed to process file"
-                             {:file (.getName f) :error (.getMessage e)}))))
-            (log/info "Code scanner initialized" {:files-processed total}))
-          ;; Register this component in runtime
-          (runtime/register! {::runtime/namespace "seon.graph.scanner"
-                              ::runtime/status :running
-                              ::runtime/location :in-process
-                              ::runtime/component-key :seon.graph/scanner})
-          {:conn conn :paths paths}
-          (catch Exception e
-            (log/error "Code scanner failed" {:error (.getMessage e)})
-            {:conn conn :paths paths :error (.getMessage e)}))))))
+      ;; Register immediately so system sees the component
+      (runtime/register! {::runtime/namespace "seon.graph.scanner"
+                          ::runtime/status :running
+                          ::runtime/location :in-process
+                          ::runtime/component-key :seon.graph/scanner})
+      ;; Run scan in background so startup isn't blocked (~3s savings)
+      (let [scan-future (future (run-code-scan! conn paths))]
+        {:conn conn :paths paths :scan-future scan-future}))))
 
 (defmethod ig/halt-key! :seon.graph/scanner
   [_ state]
   (when (:conn state)
     (log/info "Stopping code scanner...")
+    ;; Cancel scan if still running
+    (when-let [f (:scan-future state)]
+      (future-cancel f))
     ;; Unregister from runtime (connection owned by graph-db, not closed here)
     (runtime/unregister! {::runtime/namespace "seon.graph.scanner"})
     (log/info "Code scanner stopped")))

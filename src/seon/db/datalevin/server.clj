@@ -29,6 +29,7 @@
    - Default credentials: datalevin:datalevin (change in production!)"
   (:require [integrant.core :as ig]
             [clojure.java.io :as io]
+            [clojure.string :as str]
             [seon.db.datalevin.backup :as backup]
             [taoensso.timbre :as log])
   (:import [java.net Socket InetSocketAddress]))
@@ -55,6 +56,9 @@
 
 (schema/register! ::server
                   [:any {:description "Datalevin server instance"}])
+
+(schema/register! ::adopted?
+                  [:boolean {:description "When true, server was already running and we adopted it (don't stop on halt)"}])
 
 (schema/register! ::timeout-ms
                   [:int {:min 0 :description "Connection timeout in milliseconds"}])
@@ -97,6 +101,51 @@
       (throw (ex-info "Datalevin root directory is not writable" {:path root})))
     dir))
 
+(defn- find-pid-on-port
+  "Find the PID holding a port via lsof. Returns PID string or nil."
+  [port]
+  (try
+    (let [proc (.exec (Runtime/getRuntime)
+                      (into-array String ["lsof" "-ti" (str ":" port)]))]
+      (.waitFor proc 2 java.util.concurrent.TimeUnit/SECONDS)
+      (when (zero? (.exitValue proc))
+        (let [output (slurp (.getInputStream proc))]
+          (first (str/split-lines (str/trim output))))))
+    (catch Exception _ nil)))
+
+(defn- check-port-available!
+  "Pre-flight check: throw if port is already bound."
+  [port]
+  (try
+    (with-open [socket (Socket.)]
+      (.connect socket (InetSocketAddress. "127.0.0.1" (int port)) 500))
+    ;; Connection succeeded = something is listening
+    (let [pid (find-pid-on-port port)
+          msg (if pid
+                (str "Port " port " in use (pid " pid "). Fix: kill -9 " pid)
+                (str "Port " port " in use by unknown process. Fix: lsof -ti :" port " | xargs kill -9"))]
+      (throw (ex-info msg {:type :port-conflict :port port :pid pid})))
+    (catch java.net.ConnectException _) ; refused = port is free
+    (catch java.net.SocketTimeoutException _))) ; timeout = port is free
+
+(defn- classify-startup-error
+  "Classify a Datalevin server startup error.
+   Returns :port-conflict, :lmdb-corruption, or :unknown."
+  [^Throwable e]
+  (let [msg (str (ex-message e) " " (some-> (.getCause e) ex-message))]
+    (cond
+      (or (re-find #"(?i)address already in use" msg)
+          (re-find #"(?i)error opening port" msg)
+          (re-find #"(?i)port" msg))
+      :port-conflict
+
+      (or (re-find #"(?i)lmdb" msg)
+          (re-find #"(?i)mmap" msg)
+          (re-find #"(?i)corrupt" msg))
+      :lmdb-corruption
+
+      :else :unknown)))
+
 (defn- create-server
   "Create a Datalevin server instance.
 
@@ -109,6 +158,7 @@
     :or {port 8898
          root "data/datalevin"}}]
   (ensure-root-dir! root)
+  (check-port-available! port)
   (require 'datalevin.server)
   (let [create (resolve 'datalevin.server/create)
         server-opts (merge {:port port
@@ -167,14 +217,9 @@
 ;;; Integrant Component
 ;;; ---------------------------------------------------------------------------
 
-(defn- delete-dir-recursive!
-  "Delete directory and all contents."
-  [^java.io.File dir]
-  (when (.exists dir)
-    (run! #(.delete ^java.io.File %) (reverse (file-seq dir)))))
-
 (defn- attempt-recovery!
-  "Attempt LMDB recovery: restore from backup or clear data directory."
+  "Attempt LMDB recovery: restore from most recent backup.
+   Refuses to delete data if no backups exist — requires manual intervention."
   [root]
   (let [backup-dir "data/backups"
         backups (backup/list-backups {::backup/backup-dir backup-dir})]
@@ -183,32 +228,51 @@
         (log/warn "Restoring from most recent backup" {:backup (::backup/backup-path (first backups))})
         (backup/restore! {::backup/backup-path (::backup/backup-path (first backups))
                           ::backup/data-dir root}))
-      (do
-        (log/warn "No backups available, clearing data directory" {:root root})
-        (delete-dir-recursive! (io/file root))
-        (.mkdirs (io/file root))))))
+      (throw (ex-info (str "LMDB corruption but no backups available. Manual fix: rm -rf " root " && ./bin/run")
+                      {:type :lmdb-corruption :root root})))))
 
 (defmethod ig/init-key :seon.db.datalevin/server
   [_ {:keys [port root opts]
       :or {port 8898
            root "data/datalevin"}}]
-  (log/info "Starting Datalevin server..." {:port port :root root})
-  (let [start-fn (fn []
-                   (let [server (create-server {:port port :root root :opts opts})]
-                     (start-server! server)
-                     {:server server :port port :root root}))]
-    (try
-      (start-fn)
-      (catch Throwable e
-        (log/warn e "LMDB corruption detected, attempting recovery from backup")
-        (attempt-recovery! root)
-        (start-fn)))))
+  (let [{::keys [ok]} (healthy? {::port port ::timeout-ms 500})]
+    (if ok
+      ;; Existing server detected and healthy — adopt it
+      (do
+        (log/info "Using existing Datalevin server" {:port port})
+        {:port port :root root :adopted? true})
+      ;; No server running — start embedded
+      (do
+        (log/info "Starting Datalevin server" {:port port :root root})
+        (let [start-fn (fn []
+                         (let [server (create-server {:port port :root root :opts opts})]
+                           (start-server! server)
+                           {:server server :port port :root root :adopted? false}))]
+          (try
+            (start-fn)
+            (catch Throwable e
+              (let [error-type (classify-startup-error e)]
+                (case error-type
+                  :port-conflict
+                  (throw e)
+
+                  :lmdb-corruption
+                  (do (log/warn e "LMDB corruption detected, attempting backup restore")
+                      (attempt-recovery! root)
+                      (start-fn))
+
+                  :unknown
+                  (do (log/error e "Unknown Datalevin server error")
+                      (throw e)))))))))))
 
 (defmethod ig/halt-key! :seon.db.datalevin/server
-  [_ {:keys [server]}]
-  (log/info "Stopping Datalevin server...")
-  (stop-server! server)
-  (log/info "Datalevin server stopped"))
+  [_ {:keys [server adopted?]}]
+  (if adopted?
+    (log/info "Adopted Datalevin server — not stopping")
+    (when server
+      (log/info "Stopping Datalevin server...")
+      (stop-server! server)
+      (log/info "Datalevin server stopped"))))
 
 ;; Suspend/resume to survive (reset) like nREPL
 (defmethod ig/suspend-key! :seon.db.datalevin/server [_ state] state)

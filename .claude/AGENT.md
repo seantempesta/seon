@@ -85,20 +85,53 @@ Search returns a plain text string, auto-saved like all REPL output. Truncated r
 
 ---
 
-## CRITICAL: Never Restart the System
+## CRITICAL: This Is a Live System — Never Kill, Always Diagnose
 
-**DO NOT run `(user/reset)` or restart the server.** Your agent session runs inside the system - restarting it will crash your session and terminate you immediately.
+**DO NOT run `(user/reset)`, `pkill`, or restart any service.** This is a running system with other agents potentially doing work. Killing processes means:
+- Other agents lose their work mid-task
+- Database transactions may be interrupted
+- The orchestrator loses visibility into what's happening
 
-If you need a system restart:
-1. **Return clear instructions** to the orchestrator
-2. Explain WHY a restart is needed
-3. The orchestrator will restart and re-launch you if necessary
+### If Something Breaks During Your Work
 
-**What you CAN do:**
+**Your job is to diagnose, not restart.** When you hit a system issue:
+
+1. **Stop your current task.** A broken system is the priority.
+2. **Check health:**
+   ```clojure
+   (user/status)    ;; Quick system overview
+   ```
+3. **Understand WHY it's broken.** Read logs, check errors:
+   ```bash
+   tail -50 logs/app.log        # Recent application errors
+   grep ERROR logs/app.log      # Error summary
+   cat logs/startup.log         # Boot sequence (if recent restart)
+   ```
+4. **Report to the orchestrator** with:
+   - What broke (specific error, not "Datalevin isn't working")
+   - What you think caused it (your edit? resource exhaustion? external?)
+   - Whether your task can continue or is blocked
+   - Suggested fix if you have one
+
+**Example of good reporting:**
+> "Datalevin connection refused after my edit to `seon.db.schema`. The edit added a new attribute but I think it caused a schema conflict. Error: `DTLVException: Invalid argument`. I've reverted my edit. The orchestrator should check if `(user/reload)` resolves it, or if a `(user/reset)` is needed."
+
+**Example of bad reporting:**
+> "Datalevin isn't working. Try killing and restarting it."
+
+### What You CAN Do
+
 ```clojure
 (user/reload)  ; Fast code reload (safe, doesn't restart system)
 (user/status)  ; Check system health
 ```
+
+### What You MUST NOT Do
+
+- `(user/reset)` — kills your session and all other agents
+- `pkill` anything — kills the entire system
+- Delete `data/datalevin/` — destroys all databases
+- Kill processes on ports — those belong to the system
 
 ---
 
@@ -337,12 +370,12 @@ Never use `/tmp` or system directories.
 
 ## If Something Breaks
 
-1. **Try `(user/reload)` first** - This reloads code without touching the system
-2. **Check `(user/status)`** - See what's actually wrong
-3. **Use Gemini with file context** - Don't guess, ask with the actual code
-4. **If you need a restart** - Return a clear summary to the orchestrator:
-   - What you tried
-   - Why you believe a restart is needed
-   - What the orchestrator should do after restart
+1. **Stop your task** — a broken system takes priority over feature work
+2. **Check `(user/status)`** — see what's actually wrong
+3. **Read logs** — `tail -50 logs/app.log`, `grep ERROR logs/app.log`
+4. **Try `(user/reload)`** — often fixes code-level issues without touching the system
+5. **Diagnose the root cause** — WHY is it broken? Your edit? Resource leak? External?
+6. **If you caused it, revert your change** — `git checkout -- path/to/file`
+7. **Report to the orchestrator** with specifics — see the "CRITICAL" section above
 
-Never attempt to fix infrastructure issues yourself. Your job is the task at hand.
+**Never attempt to restart services yourself.** Never `pkill`. Never delete data directories. The orchestrator manages the system lifecycle and will coordinate restarts to minimize impact on other running agents.

@@ -3,7 +3,7 @@
 
   Starts a lightweight nREPL server and optionally connects to a Datalevin
   server. Designed to run in a separate JVM with minimal memory footprint
-  (256MB max heap, no XTDB/Arrow dependencies).
+  (256MB max heap, minimal dependencies).
 
   Usage:
     clj -M:agent -m seon.flow.agent-runner --port 7890 --namespace seon.test.hello"

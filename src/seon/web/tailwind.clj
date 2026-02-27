@@ -1,11 +1,12 @@
 (ns seon.web.tailwind
   "Tailwind CSS watcher Integrant component.
 
-  Spawns tailwindcss --watch as a child process, managed by Integrant.
-  The process is started on system init and stopped on halt.
+  Manages tailwindcss --watch as a child process. Auto-detects if a
+  tailwindcss watcher is already running and adopts it instead of
+  starting a duplicate. Only stops the watcher on halt if we started it.
 
   Features:
-  - Child process inherits JVM's process group
+  - Auto-detection of existing tailwindcss processes via pgrep
   - stdout/stderr redirected to logs/tailwind.log
   - ProcessBuilder ensures child dies with JVM (via inheritIO + destroy)
 
@@ -50,9 +51,9 @@
     (.directory builder (io/file "."))
     (log/info "Starting Tailwind watcher" {:command command :log-file (.getPath log-file)})
     (let [process (.start builder)]
-      ;; Give it a moment to start and check if it exited immediately
-      (Thread/sleep 500)
-      (if (.isAlive process)
+      ;; Brief check — did the process exit immediately?
+      ;; .waitFor returns true if process exited, false if still alive
+      (if-not (.waitFor process 50 java.util.concurrent.TimeUnit/MILLISECONDS)
         (do
           (log/info "Tailwind watcher started" {:pid (.pid process)})
           process)
@@ -78,6 +79,20 @@
     (log/info "Tailwind watcher stopped")))
 
 ;;; ---------------------------------------------------------------------------
+;;; Auto-Detection
+;;; ---------------------------------------------------------------------------
+
+(defn- tailwind-already-running?
+  "Check if a tailwindcss watcher process is already running via pgrep."
+  []
+  (try
+    (let [builder (ProcessBuilder. ^java.util.List ["pgrep" "-f" "tailwindcss.*--watch"])
+          process (.start builder)]
+      (.waitFor process 2 java.util.concurrent.TimeUnit/SECONDS)
+      (zero? (.exitValue process)))
+    (catch Exception _ false)))
+
+;;; ---------------------------------------------------------------------------
 ;;; Integrant Component
 ;;; ---------------------------------------------------------------------------
 
@@ -86,18 +101,26 @@
       :or {input "resources/public/css/input.css"
            output "resources/public/css/output.css"}}]
   (if enabled?
-    (let [process (start-tailwind-process! {:input input :output output})]
-      {:process process
-       :pid (when process (.pid process))
-       :input input
-       :output output})
+    (if (tailwind-already-running?)
+      ;; Existing watcher detected — adopt it
+      (do
+        (log/info "Using existing Tailwind watcher")
+        {:process nil :adopted? true :input input :output output})
+      ;; No watcher running — start one
+      (let [process (start-tailwind-process! {:input input :output output})]
+        {:process process
+         :adopted? false
+         :pid (when process (.pid process))
+         :input input
+         :output output}))
     (do
       (log/info "Tailwind watcher disabled")
       {:process nil})))
 
 (defmethod ig/halt-key! :seon.web/tailwind
-  [_ {:keys [process]}]
-  (stop-tailwind-process! process))
+  [_ {:keys [process adopted?]}]
+  (when-not adopted?
+    (stop-tailwind-process! process)))
 
 ;; Suspend/resume: keep process alive during (reset).
 ;; Tailwind watcher is a long-running process that doesn't need restart
@@ -106,9 +129,10 @@
 
 (defmethod ig/resume-key :seon.web/tailwind
   [_ opts old-opts old-state]
-  (if (and (= opts old-opts)
-           (:process old-state)
-           (.isAlive ^Process (:process old-state)))
+  (if (or (:adopted? old-state)
+          (and (= opts old-opts)
+               (:process old-state)
+               (.isAlive ^Process (:process old-state))))
     old-state
     (do (ig/halt-key! :seon.web/tailwind old-state)
         (ig/init-key :seon.web/tailwind opts))))

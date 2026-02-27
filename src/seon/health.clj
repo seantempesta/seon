@@ -10,20 +10,30 @@
    ## Usage
 
    ```clojure
-   ;; Quick health check (for load balancers)
-   (quick-check {})
-   ;; => {:seon.health/status :healthy, :seon.health/timestamp #inst \"...\"}
-
-   ;; Deep health check (for debugging)
-   (deep-check {})
+   ;; Health check
+   (check {})
    ;; => {:seon.health/status :healthy
    ;;     :seon.health/checks {:nrepl {:ok true}, ...}
    ;;     :seon.health/resources {:agents 2, :pool-jvms 3, :sessions 2}}
    ```"
-  (:require [seon.ai.agent :as agent]
+  (:require [clojure.string :as str]
+            [seon.ai.agent :as agent]
             [seon.schema :as schema]
             [taoensso.timbre :as log])
   (:import [java.net Socket InetSocketAddress]))
+
+;;; ---------------------------------------------------------------------------
+;;; Startup Phase Tracking
+;;; ---------------------------------------------------------------------------
+;;; An atom that core.clj updates during two-phase startup.
+;;; Possible values: :phase-1, :phase-2, :ready, :degraded
+
+(defonce startup-phase (atom :phase-1))
+
+(defn set-startup-phase!
+  "Set the current startup phase. Called by seon.core during init."
+  [phase]
+  (reset! startup-phase phase))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schema Registration
@@ -38,6 +48,8 @@
                    [:ok :boolean]
                    [:latency-ms {:optional true} [:int {:min 0}]]
                    [:error {:optional true} :string]
+                   [:mode {:optional true} [:enum :adopted :started :not-running]]
+                   [:port {:optional true} [:int {:min 1 :max 65535}]]
                    [:details {:optional true} [:map-of :keyword :any]]])
 
 (schema/register! ::checks
@@ -49,24 +61,20 @@
                    [:pool-jvms :int]
                    [:sessions :int]])
 
-(schema/register! ::quick-check-request
+(schema/register! ::check-request
                   [:map])
 
-(schema/register! ::quick-check-response
-                  [:map
-                   [::status ::status]
-                   [::timestamp inst?]
-                   [::checks {:optional true} ::checks]])
+(schema/register! ::startup-phase
+                  [:enum {:description "Current startup phase"}
+                   :phase-1 :phase-2 :ready :degraded])
 
-(schema/register! ::deep-check-request
-                  [:map])
-
-(schema/register! ::deep-check-response
+(schema/register! ::check-response
                   [:map
                    [::status ::status]
                    [::timestamp inst?]
                    [::checks ::checks]
-                   [::resources ::resources]])
+                   [::resources ::resources]
+                   [::startup-phase {:optional true} ::startup-phase]])
 
 ;;; ---------------------------------------------------------------------------
 ;;; Component Health Checks (Internal)
@@ -101,6 +109,44 @@
       {:ok false
        :error ".nrepl-port file not found"})))
 
+(defn- get-system
+  "Get the current Integrant system, or nil."
+  []
+  (try
+    (require 'integrant.repl.state)
+    @(resolve 'integrant.repl.state/system)
+    (catch Exception _ nil)))
+
+(defn- component-mode
+  "Determine the mode of a component: :adopted, :started, or :not-running."
+  [component]
+  (cond
+    (nil? component) :not-running
+    (:adopted? component) :adopted
+    :else :started))
+
+(defn- check-datalevin
+  "Check Datalevin server health (port 8898).
+   Also includes connection manager status and mode if available."
+  []
+  (let [tcp-check (check-port 8898 1000)
+        system (get-system)
+        server-component (:seon.db.datalevin/server system)
+        mode (component-mode server-component)]
+    (try
+      (require 'seon.db.datalevin.conn)
+      (if-let [manager (:seon.db.datalevin/connections system)]
+        (let [conn-health ((resolve 'seon.db.datalevin.conn/health)
+                           {:seon.db.datalevin.conn/manager manager})]
+          (assoc tcp-check
+                 :mode mode
+                 :port (or (:port server-component) 8898)
+                 :details {:conn-status (:seon.db.datalevin.conn/status conn-health)
+                           :cached-connections (:seon.db.datalevin.conn/total-connections conn-health)
+                           :server-reachable? (:seon.db.datalevin.conn/server-reachable? conn-health)}))
+        (assoc tcp-check :mode mode :port 8898))
+      (catch Exception _ (assoc tcp-check :mode mode :port 8898)))))
+
 (defn- check-resources
   "Get current resource utilization."
   []
@@ -130,6 +176,31 @@
       {:agents 0
        :pool-jvms 0
        :sessions 0})))
+
+(defn- check-http
+  "Check HTTP server health (port 8080)."
+  []
+  (assoc (check-port 8080 1000) :port 8080 :mode :started))
+
+(defn- check-caddy
+  "Check Caddy reverse proxy health (port 3030)."
+  []
+  (let [system (get-system)
+        caddy-component (:seon.web/caddy system)
+        mode (component-mode caddy-component)
+        tcp-check (check-port 3030 500)]
+    (assoc tcp-check :port 3030 :mode mode)))
+
+(defn- check-tailwind
+  "Check Tailwind watcher status."
+  []
+  (let [system (get-system)
+        tw-component (:seon.web/tailwind system)
+        mode (component-mode tw-component)
+        alive? (or (:adopted? tw-component)
+                   (and (:process tw-component)
+                        (.isAlive ^Process (:process tw-component))))]
+    {:ok (boolean alive?) :mode mode}))
 
 (defn- check-agents
   "Check agent subsystem health."
@@ -169,43 +240,28 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- determine-status
-  "Determine overall health status from individual checks.
+  "Determine overall health status from individual checks and startup phase.
 
-   - :healthy - All checks pass
-   - :degraded - Some non-critical checks fail
+   - :healthy - All checks pass and system is ready
+   - :degraded - Some non-critical checks fail, or startup phase is degraded
    - :unhealthy - Critical checks fail"
   [checks]
-  (let [all-ok? (every? :ok (vals checks))]
-    (if all-ok? :healthy :degraded)))
+  (let [phase @startup-phase
+        all-ok? (every? :ok (vals checks))]
+    (cond
+      (= phase :degraded) :degraded
+      all-ok? :healthy
+      :else :degraded)))
 
-(defn quick-check
-  "Quick health check suitable for load balancers and monitoring.
-
-   Quick check for load balancers. Checks nREPL availability.
-
-   Request keys: (none)
-
-   Response keys:
-     ::status - :healthy, :degraded, or :unhealthy
-     ::timestamp - When the check was performed
-     ::checks - Map of component -> result (only if not healthy)
-
-   Example:
-     (quick-check {})"
-  {:malli/schema [:=> [:cat ::quick-check-request] ::quick-check-response]}
-  [{}]
-  (let [nrepl-check (check-nrepl)
-        status (if (:ok nrepl-check) :healthy :degraded)]
-    (cond-> {::status status
-             ::timestamp (java.util.Date.)}
-      (not= status :healthy)
-      (assoc ::checks {:nrepl nrepl-check}))))
-
-(defn deep-check
+(defn check
   "Comprehensive health check for debugging and monitoring.
 
-   Checks all components:
-   - Main nREPL server
+   Checks all services with mode reporting:
+   - Datalevin server (adopted/started)
+   - nREPL server (started)
+   - HTTP server (started)
+   - Caddy reverse proxy (adopted/started)
+   - Tailwind watcher (adopted/started)
    - Agent subsystem
    - Pool JVM status
 
@@ -214,25 +270,62 @@
    Response keys:
      ::status - :healthy, :degraded, or :unhealthy
      ::timestamp - When the check was performed
-     ::checks - Map of component -> check-result
+     ::checks - Map of service -> check-result (includes :mode and :port)
      ::resources - Current resource utilization
+     ::startup-phase - Current startup phase
 
    Example:
-     (deep-check {})"
-  {:malli/schema [:=> [:cat ::deep-check-request] ::deep-check-response]}
+     (check {})"
+  {:malli/schema [:=> [:cat ::check-request] ::check-response]}
   [{}]
   (let [nrepl-check (check-nrepl)
+        datalevin-check (check-datalevin)
+        http-check (check-http)
+        caddy-check (check-caddy)
+        tailwind-check (check-tailwind)
         agents-check (check-agents)
         pool-check (check-pool)
         resources (check-resources)
-        checks {:nrepl nrepl-check
+        checks {:datalevin datalevin-check
+                :nrepl nrepl-check
+                :http http-check
+                :caddy caddy-check
+                :tailwind tailwind-check
                 :agents agents-check
                 :pool pool-check}
         status (determine-status checks)]
     {::status status
      ::timestamp (java.util.Date.)
      ::checks checks
-     ::resources resources}))
+     ::resources resources
+     ::startup-phase @startup-phase}))
+
+;;; ---------------------------------------------------------------------------
+;;; Startup Summary
+;;; ---------------------------------------------------------------------------
+
+(defn log-startup-summary!
+  "Log a clean summary of all services after startup completes."
+  []
+  (let [system (get-system)
+        dtlv (:seon.db.datalevin/server system)
+        caddy (:seon.web/caddy system)
+        tw (:seon.web/tailwind system)
+        pool-check (check-pool)
+        pool-detail (:details pool-check)
+        mode-str (fn [component] (if (:adopted? component) "adopted" "started"))
+        lines (cond-> [(str "  Datalevin  :" (or (:port dtlv) 8898) "  (" (mode-str dtlv) ")")
+                        "  nREPL      :7888  (started)"
+                        "  HTTP       :8080  (started)"]
+                caddy
+                (conj (str "  Caddy      :3030  (" (mode-str caddy) ")"))
+                tw
+                (conj (str "  Tailwind           (" (mode-str tw) ")"))
+                pool-detail
+                (conj (str "  Pool        "
+                           (:idle pool-detail 0) "/" (:total pool-detail 0)
+                           "   (started)")))]
+    (log/info (str "System ready:\n" (str/join "\n" lines)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Cleanup Functions
@@ -277,7 +370,7 @@
         cleaned (try
                   (require 'seon.flow.pool)
                   (let [cleanup! (resolve 'seon.flow.pool/cleanup-stale-agents!)]
-                    (cleanup! 7900 10))
+                    (cleanup!))
                   (catch Exception e
                     (swap! errors conj {:type :pool :error (.getMessage e)})
                     0))]
@@ -287,11 +380,8 @@
 (comment
   ;; REPL exploration
 
-  ;; Quick check
-  (quick-check {})
-
-  ;; Deep check
-  (deep-check {})
+  ;; Health check
+  (check {})
 
   ;; Check individual components
   (check-nrepl)

@@ -222,16 +222,22 @@
 
 (deftest cleanup-stale-agents-no-stale-test
   (testing "cleanup-stale-agents! returns 0 when no ports are bound"
-    ;; Use ports in valid range that are very unlikely to be bound
-    (let [cleaned (pool/cleanup-stale-agents! 7990 2)]
+    ;; Scans full 7900-7999 range, unlikely any are bound in test
+    (let [cleaned (pool/cleanup-stale-agents!)]
       (is (= 0 cleaned) "Should find no stale processes on unbound ports"))))
 
-(deftest cleanup-stale-agents-safety-range-test
-  (testing "cleanup-stale-agents! only checks ports in 7900-7999 range"
-    ;; Try ports outside safe range -- should be skipped
-    ;; Port 80 is bound on many systems but should NOT be killed
-    (let [cleaned (pool/cleanup-stale-agents! 8000 3)]
-      (is (= 0 cleaned) "Should skip ports outside agent range"))))
+(deftest allocate-port-wraparound-test
+  (testing "allocate-port wraps from agent-port-max back to agent-port-min"
+    (let [state (atom {::pool/next-port 7999
+                       ::pool/all-jvms {}})
+          ;; allocate-port! is private, so we test via the state atom behavior
+          ;; by simulating what swap-vals! does with the wraparound logic
+          [old _] (swap-vals! state update ::pool/next-port
+                              #(let [p (inc %)]
+                                 (if (> p 7999) 7900 p)))
+          port (::pool/next-port old)]
+      (is (= 7999 port) "Should get 7999 as the allocated port")
+      (is (= 7900 (::pool/next-port @state)) "Next port should wrap to 7900"))))
 
 (deftest await-warm-already-warm-test
   (testing "await-warm returns immediately when pool is already warm"

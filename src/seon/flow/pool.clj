@@ -69,6 +69,8 @@
 (def ^:const agent-port-min 7900)
 (def ^:const agent-port-max 7999)
 
+(declare port-bound?)
+
 ;;; ---------------------------------------------------------------------------
 ;;; Schema Registration
 ;;; ---------------------------------------------------------------------------
@@ -142,6 +144,7 @@
                        "--port" (str port)
                        "--namespace" "seon.pool.warm"]
                datalevin-uri (into ["--datalevin-uri" datalevin-uri]))
+        _ (log/info "Spawning agent JVM" {:port port})
         ^Process proc (apply process/start {:dir "."} args)
         stdout (BufferedReader. (InputStreamReader. (process/stdout proc)))
         ready? (promise)
@@ -168,7 +171,9 @@
       (do
         (.destroy proc)
         (throw (ex-info "Agent JVM failed to start within timeout"
-                        {:port port :timeout-ms ready-timeout-ms}))))))
+                        {:port port
+                         :timeout-ms ready-timeout-ms
+                         :port-occupied (port-bound? port)}))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; nREPL communication
@@ -233,10 +238,20 @@
 
 (defn- allocate-port!
   "Atomically allocate the next available port from the pool.
-   Uses swap-vals! to ensure two concurrent callers never get the same port."
+   Skips ports that are already occupied. Uses swap-vals! to ensure
+   two concurrent callers never get the same port."
   [pool-state]
-  (let [[old-state _] (swap-vals! pool-state update ::next-port inc)]
-    (::next-port old-state)))
+  (loop [attempts 0]
+    (when (>= attempts 100)
+      (throw (ex-info "No available ports in agent range" {:attempts attempts})))
+    (let [[old-state _] (swap-vals! pool-state
+                                    update ::next-port
+                                    #(let [p (inc %)]
+                                       (if (> p agent-port-max) agent-port-min p)))
+          port (::next-port old-state)]
+      (if (not (port-bound? port))
+        port
+        (recur (inc attempts))))))
 
 (defn- spawn-and-enqueue!
   "Spawn a new agent JVM and add it to the pool. Returns the JVM map on success,
@@ -384,10 +399,10 @@
       nil)))
 
 (defn- kill-pid!
-  "Kill a process by PID. Returns true if kill succeeded."
+  "Kill a process by PID with SIGKILL. Returns true if kill succeeded."
   [pid-str]
   (try
-    (let [{:keys [exit]} (shell/sh "kill" pid-str)]
+    (let [{:keys [exit]} (shell/sh "kill" "-9" pid-str)]
       (zero? exit))
     (catch Exception e
       (log/debug "kill failed" {:pid pid-str :error (.getMessage e)})
@@ -396,36 +411,35 @@
 (defn cleanup-stale-agents!
   "Clean up stale agent JVM processes from a previous Seon session.
 
-   Checks each port in the agent range (base-port to base-port + size - 1)
-   for bound sockets. If a port is bound, finds and kills the process.
-   Only checks ports in the 7900-7999 safety range.
+   Scans the full agent port range (7900-7999) for bound sockets.
+   If a port is bound, finds and kills the process with SIGKILL,
+   then verifies the port is free.
 
    Returns the count of stale processes cleaned up."
-  [base-port size]
-  (let [ports (range base-port (+ base-port size))
-        ;; Safety: only kill processes on ports in agent range
-        safe-ports (filter #(and (>= % agent-port-min)
-                                 (<= % agent-port-max))
-                           ports)]
-    (when (< (count safe-ports) (count ports))
-      (log/warn "Some ports outside agent range, skipping"
-                {:requested (count ports) :safe (count safe-ports)}))
-    (reduce
-     (fn [cleaned port]
-       (if (port-bound? port)
-         (if-let [pid (find-pid-on-port port)]
-           (do
-             (log/warn "Killed stale agent JVM"
-                       {:port port :pid pid})
-             (kill-pid! pid)
-             (inc cleaned))
-           (do
-             (log/warn "Port bound but could not find PID"
-                       {:port port})
-             cleaned))
-         cleaned))
-     0
-     safe-ports)))
+  []
+  (let [ports (range agent-port-min (inc agent-port-max))
+        cleaned (reduce
+                 (fn [acc port]
+                   (if (port-bound? port)
+                     (if-let [pid (find-pid-on-port port)]
+                       (do
+                         (kill-pid! pid)
+                         ;; Brief pause then verify port is free
+                         (Thread/sleep 100)
+                         (when (port-bound? port)
+                           (log/warn "Port still bound after kill" {:port port :pid pid}))
+                         (conj acc {:port port :pid pid}))
+                       (do
+                         (log/warn "Port bound but no PID found" {:port port})
+                         acc))
+                     acc))
+                 []
+                 ports)]
+    (when (seq cleaned)
+      (log/info "Cleaned stale agent JVMs"
+                {:count (count cleaned)
+                 :ports (mapv :port cleaned)}))
+    (count cleaned)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Pool management (public API)
@@ -454,12 +468,10 @@
   [{::keys [size base-port datalevin-port]
     :or {size default-pool-size
          base-port default-base-port}}]
-  (log/info "Creating agent pool" {:size size :base-port base-port
-                                    :datalevin-port datalevin-port})
-  ;; Clean up stale agent JVMs from previous crash
-  (let [cleaned (cleanup-stale-agents! base-port size)]
-    (when (pos? cleaned)
-      (log/info "Cleaned up stale agent JVMs" {:count cleaned})))
+  (log/debug "Creating agent pool" {:size size :base-port base-port
+                                     :datalevin-port datalevin-port})
+  ;; Clean up stale agent JVMs from previous crash (scans full 7900-7999 range)
+  (cleanup-stale-agents!)
   (let [idle-queue (LinkedBlockingQueue.)
         pool-state (atom {::all-jvms {}
                           ::session->port {}

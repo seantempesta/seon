@@ -273,32 +273,96 @@ When a steward reports Requested Changes, launch stewardship agents on those nam
 
 ---
 
-## Quick Reference
+## System Management (CRITICAL)
 
-### Server
+### This Is a Live System
 
-```bash
-./bin/run    # Start everything: Datalevin, HTTP (8080), nREPL (7888)
-```
+Seon is a running system with agents potentially doing work. **Never blindly kill processes.** Every restart risks:
+- Killing agents mid-task (lost work, corrupted state)
+- Losing in-progress database transactions
+- Breaking SSH/nREPL sessions other tools depend on
 
-The server must be running for agents to work.
+**The orchestrator owns system restarts.** Agents must never restart the system. If something is broken, agents should diagnose WHY and report back — not `pkill` their way out.
+
+### Smart Service Detection
+
+`./bin/run` is intelligent about what's already running:
+- **Seon already healthy?** → prints connection info, exits cleanly
+- **Datalevin already running?** → adopts it (no restart), logs "Using existing Datalevin server"
+- **Caddy already running?** → adopts it (no restart)
+- **Tailwind already running?** → adopts it (no restart)
+- **nREPL/HTTP port conflict?** → fails with PID and kill command (these are in-process, conflict = stale JVM)
+
+On shutdown, only services Seon started are stopped. Adopted services are left alone.
+
+To run Datalevin independently: `./bin/run-datalevin` (then Seon auto-adopts it on start).
+
+### Two-Phase Startup
+
+Seon starts in two phases so you always have a REPL to debug with:
+- **Phase 1 (~1.5s)**: nREPL (7888) + HTTP (8080) + schema registry + Tailwind + Claude SDK
+- **Phase 2 (~5s)**: Datalevin (8898) + connection manager + agent pool + code scanner
+
+If Phase 2 fails, Phase 1 stays alive. You can connect via nREPL and investigate.
 
 ### Health Checks
 
 ```bash
-curl http://localhost:8080/api/health
+curl http://localhost:8080/api/health    # Full system status
+cat logs/startup.log                      # What happened on last boot
 ```
-
-Returns component status (Datalevin, nREPL, agents) with latencies. HTTP 200 = healthy, 503 = unhealthy.
 
 ```clojure
-;; In REPL - check health
-(require '[seon.health :as health])
-(health/deep-check {})
-
-;; Clean up orphaned resources after crash
-(health/cleanup-orphaned-resources! {})
+(seon.health/check {})                    ;; Full health with service modes
+(seon.health/cleanup-orphaned-resources! {})  ;; After crash recovery
 ```
+
+The health endpoint reports every service with its `mode`:
+- `"started"` — Seon started this service
+- `"adopted"` — Seon found it already running and is using it
+- `"not-running"` — service isn't available
+
+Also reports `startup-phase`: `phase-1`, `phase-2`, `ready`, or `degraded`.
+
+### When Something Breaks (Orchestrator Protocol)
+
+**Step 1: Diagnose, don't kill.**
+```clojure
+(seon.health/check {})                    ;; What's actually broken?
+```
+```bash
+cat logs/startup.log                      ;; What happened during boot?
+tail -50 logs/app.log                     ;; Recent application errors
+grep ERROR logs/app.log | tail -20        ;; Error summary
+```
+
+**Step 2: Understand WHY.** A component being unhealthy is a symptom. The root cause matters:
+- Datalevin unreachable → Is the process dead? Disk full? LMDB corruption? Connection deadlock?
+- Pool JVM died → Out of memory? Bad agent code? Datalevin connection lost?
+- HTTP not responding → Thread starvation? Exception in handler?
+
+Debug the cause. If an agent's edit broke something, fix the edit. If a resource leaked, find the leak.
+
+**Step 3: Minimize blast radius.** When restart is truly needed:
+1. Check `(user/agents)` — are agents running? Wait for them or interrupt gracefully
+2. Use `(user/reset)` for a clean Integrant restart (preserves JVM, reloads code)
+3. Only `pkill -9` as absolute last resort (kills everything including agents)
+4. After hard kill: `rm -rf data/datalevin/` ONLY if LMDB corruption confirmed
+
+**Step 4: Verify recovery.**
+```bash
+./bin/run                                 ;; Smart — won't double-start
+curl http://localhost:8080/api/health     ;; Verify all services healthy
+```
+
+### Server
+
+```bash
+./bin/run              # Start everything (smart — adopts existing services)
+./bin/run-datalevin    # Start standalone Datalevin server
+```
+
+The server must be running for agents to work.
 
 ### Running Tests
 
@@ -725,7 +789,10 @@ Critical files (`bin/seon-hook`, `src/seon/dev/hook.clj`) have extra protection:
 ```
 
 ### If something breaks:
-Restart the server cleanly: `pkill -f "clojure.*seon" && ./bin/run`
+1. Check `(user/status)` — understand what's wrong before acting
+2. Try `(user/reload)` — often fixes code-level issues
+3. Try `(user/reset)` — clean Integrant restart, preserves JVM
+4. **Last resort only:** `pkill -9 -f "java.*seon" && ./bin/run`
 
 ---
 
@@ -778,3 +845,34 @@ These directories are gitignored and local to the project. This ensures:
 - Logs are findable and debuggable
 - Multiple projects don't conflict
 - Agents can access their own logs
+
+---
+
+## Logging
+
+Seon uses **Timbre** for application logging and **logback** for library logs (Datalevin, nREPL, etc. via SLF4J).
+
+### Log Files
+
+| File | Contents | Lifecycle |
+|------|----------|-----------|
+| `logs/app.log` | All application log lines (Timbre) | Appended continuously |
+| `logs/startup.log` | Boot sequence only | Wiped on each startup |
+| `logs/error.log` | Errors only (logback/library) | Rotated, 30-day retention |
+| `logs/lib.log` | Library logs (SLF4J) | Rotated, 7-day retention (dev) |
+
+### Quick Commands
+
+```bash
+cat logs/startup.log        # What happened on last startup
+tail -f logs/app.log        # Live application logs
+grep ERROR logs/app.log     # Find errors
+```
+
+### How It Works
+
+- All `seon.*` code uses `[taoensso.timbre :as log]` -- outputs to stdout + `logs/app.log` + `logs/startup.log`
+- Library code (Datalevin, nREPL, Integrant) uses SLF4J, routed to logback -- outputs to stdout + `logs/lib.log` + `logs/error.log`
+- Timbre is configured in `src/seon/logging.clj`, called from `seon.core/-main`
+- Logback is configured in `env/{dev,prod,test}/resources/logback.xml`
+- Old dated log files are in `logs/archive/`
