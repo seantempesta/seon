@@ -218,31 +218,57 @@
            (when entry
              (assoc entry ::last-accessed (Instant/now))))))
 
+(defn- connection-error?
+  "Check if an exception indicates a connection/server error."
+  [^Throwable e]
+  (let [msg (str (.getMessage e) " " (some-> (.getCause e) (.getMessage)))]
+    (boolean
+     (or (re-find #"(?i)connection refused" msg)
+         (re-find #"(?i)connection reset" msg)
+         (re-find #"(?i)broken pipe" msg)
+         (re-find #"(?i)closed" msg)
+         (re-find #"(?i)not connected" msg)
+         (re-find #"(?i)timeout" msg)
+         (instance? java.net.ConnectException e)
+         (instance? java.net.ConnectException (.getCause e))))))
+
 (defn- get-or-create-connection!
   "Get an existing connection or create a new one.
 
-   Thread-safe: uses swap! with compare-and-set semantics."
+   Thread-safe: uses swap! with compare-and-set semantics.
+   On connection error, marks entry as stale and throws."
   [manager ns-key db-name schema]
   (let [connections (::connections manager)]
     ;; First, try to get existing connection
     (if-let [entry (get @connections ns-key)]
       (if (connection-closed? (::connection entry))
         ;; Connection is closed, need to create new one
-        (let [new-conn (get-datalevin-conn manager db-name schema)]
-          (swap! connections assoc ns-key
-                 {::connection new-conn
-                  ::last-accessed (Instant/now)})
-          new-conn)
+        (try
+          (let [new-conn (get-datalevin-conn manager db-name schema)]
+            (swap! connections assoc ns-key
+                   {::connection new-conn
+                    ::last-accessed (Instant/now)})
+            new-conn)
+          (catch Exception e
+            (when (connection-error? e)
+              (log/warn "Server unreachable while reconnecting" {:db db-name :error (.getMessage e)})
+              (swap! connections dissoc ns-key))
+            (throw e)))
         ;; Connection is still valid, touch and return it
         (do
           (touch-connection! connections ns-key)
           (::connection entry)))
       ;; No existing connection, create new one
-      (let [new-conn (get-datalevin-conn manager db-name schema)]
-        (swap! connections assoc ns-key
-               {::connection new-conn
-                ::last-accessed (Instant/now)})
-        new-conn))))
+      (try
+        (let [new-conn (get-datalevin-conn manager db-name schema)]
+          (swap! connections assoc ns-key
+                 {::connection new-conn
+                  ::last-accessed (Instant/now)})
+          new-conn)
+        (catch Exception e
+          (when (connection-error? e)
+            (log/warn "Server unreachable during initial connection" {:db db-name :error (.getMessage e)}))
+          (throw e))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; TTL Cleanup
@@ -438,6 +464,63 @@
     {::total-connections (count connections)
      ::namespaces (remove #{::master} ns-keys)
      ::master-connected? (contains? connections ::master)}))
+
+(defn reconnect!
+  "Force reconnection for a specific namespace (or master/runtime).
+
+   Closes the cached connection if any, then creates a fresh one.
+   Use when a connection is known to be stale or broken.
+
+   Request keys:
+     ::manager   - Required. Connection manager instance
+     ::namespace - Required. Namespace symbol/string, or ::master / ::runtime
+     ::schema    - Optional. Datalevin schema to apply
+
+   Returns:
+     New Datalevin connection."
+  [{::keys [manager namespace schema]}]
+  (let [connections (::connections manager)
+        [ns-key db-name] (case namespace
+                           ::master [::master master-db-name]
+                           ::runtime [::runtime runtime-db-name]
+                           (let [ns-str (namespace->db-name namespace)]
+                             [(keyword ns-str) ns-str]))]
+    ;; Close existing connection if cached
+    (when-let [entry (get @connections ns-key)]
+      (close-datalevin-conn (::connection entry))
+      (swap! connections dissoc ns-key))
+    ;; Create fresh connection
+    (get-or-create-connection! manager ns-key db-name schema)))
+
+(defn health
+  "Get health status of the connection manager.
+
+   Returns a map describing the connection state:
+     ::status - :connected, :disconnected, or :degraded
+     ::total-connections - Number of cached connections
+     ::server-reachable? - Whether the server port accepts TCP connections
+
+   Request keys:
+     ::manager - Required. Connection manager instance"
+  [{::keys [manager]}]
+  (let [connections @(::connections manager)
+        port (::port manager)
+        reachable? (try
+                     (with-open [socket (java.net.Socket.)]
+                       (.connect socket
+                                 (java.net.InetSocketAddress. "127.0.0.1" (int port))
+                                 1000)
+                       true)
+                     (catch Exception _ false))
+        total (count connections)
+        status (cond
+                 (and reachable? (pos? total)) :connected
+                 reachable? :connected
+                 (pos? total) :degraded
+                 :else :disconnected)]
+    {::status status
+     ::total-connections total
+     ::server-reachable? reachable?}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Integrant Component

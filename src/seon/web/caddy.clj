@@ -1,8 +1,9 @@
 (ns seon.web.caddy
   "Caddy reverse proxy Integrant component.
 
-  Spawns `caddy run` as a child process for HTTP/2 + TLS on localhost:3030.
-  Kills stale Caddy processes on startup to prevent port conflicts.
+  Manages Caddy as a child process for HTTP/2 + TLS on localhost:3030.
+  Auto-detects if Caddy is already running and adopts it instead of restarting.
+  Only stops Caddy on halt if we started it ourselves.
 
   Configuration:
   - :enabled? - whether to start Caddy (true in dev only)
@@ -21,23 +22,6 @@
       (.close socket)
       true)
     (catch Exception _ false)))
-
-(defn- kill-stale-caddy!
-  "Kill any stale Caddy processes from previous runs.
-   Matches specifically 'caddy run' to avoid killing unrelated processes."
-  []
-  (try
-    (let [builder (ProcessBuilder. ^java.util.List ["pkill" "-f" "caddy run"])]
-      (.redirectOutput builder ProcessBuilder$Redirect/DISCARD)
-      (.redirectErrorStream builder true)
-      (let [process (.start builder)]
-        (.waitFor process 3 java.util.concurrent.TimeUnit/SECONDS)
-        (when (zero? (.exitValue process))
-          (log/info "Killed stale Caddy processes")
-          ;; Give OS time to release the port
-          (Thread/sleep 500))))
-    (catch Exception e
-      (log/debug "No stale Caddy processes to kill" {:msg (.getMessage e)}))))
 
 (defn- start-caddy-process!
   "Start the Caddy process. Returns the Process object or nil on failure."
@@ -84,10 +68,17 @@
   [_ {:keys [enabled? config-file]
       :or {config-file "Caddyfile"}}]
   (if enabled?
-    (do
-      (kill-stale-caddy!)
+    (if (port-open? 3030 500)
+      ;; Existing Caddy detected and healthy — adopt it
+      (do
+        (log/info "Using existing Caddy" {:port 3030})
+        {:process nil :adopted? true
+         :url "https://localhost:3030"
+         :upstream "http://localhost:8080"})
+      ;; No Caddy running — start one
       (let [process (start-caddy-process! {:config-file config-file})]
         {:process process
+         :adopted? false
          :config-file config-file
          :pid (when process (.pid process))
          :url "https://localhost:3030"
@@ -97,15 +88,17 @@
       {:process nil})))
 
 (defmethod ig/halt-key! :seon.web/caddy
-  [_ {:keys [process]}]
-  (stop-caddy-process! process))
+  [_ {:keys [process adopted?]}]
+  (when-not adopted?
+    (stop-caddy-process! process)))
 
 ;; Suspend/resume: keep Caddy alive during (reset) — expensive to restart, no state to refresh
 (defmethod ig/suspend-key! :seon.web/caddy [_ state] state)
 
 (defmethod ig/resume-key :seon.web/caddy
   [_ opts _old-opts old-state]
-  (if (and (:process old-state) (.isAlive ^Process (:process old-state)))
+  (if (or (:adopted? old-state)
+          (and (:process old-state) (.isAlive ^Process (:process old-state))))
     old-state
     (do (ig/halt-key! :seon.web/caddy old-state)
         (ig/init-key :seon.web/caddy opts))))

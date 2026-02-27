@@ -370,7 +370,7 @@
 
   Examples:
     ;; Simple search (use sparingly)
-    (search \"XTDB v2 SQL syntax for temporal queries\")
+    (search \"Datalevin Datalog query syntax\")
 
     ;; WITH CODE CONTEXT - do this! (preferred)
     (search \"Why doesn't hot reload work?\"
@@ -389,7 +389,7 @@
   "Ask Gemini a question (no web search, uses model knowledge).
 
   Examples:
-    (ask \"Explain the difference between XTQL and SQL in XTDB\")"
+    (ask \"Explain Datalog pull patterns in Datalevin\")"
   [query]
   (:seon.ai.gemini/text
    (gemini/ask {:seon.ai.gemini/prompt query})))
@@ -405,7 +405,7 @@
   (println "Stopping system...")
   (halt)
   (println "Deleting data directories...")
-  (doseq [dir-name ["data/xtdb" "data/datalevin"]]
+  (doseq [dir-name ["data/datalevin"]]
     (let [data-dir (io/file dir-name)]
       (when (.exists data-dir)
         (doseq [f (reverse (file-seq data-dir))]
@@ -534,7 +534,7 @@
   NOW RETURNS STRUCTURED DATA instead of printing.
 
   Options:
-    :file    - Which log file to read (:app, :error, :xtdb). Default: :app
+    :file    - Which log file to read (:app, :error). Default: :app
     :lines   - Number of lines to show. Default: 50, max: 100
     :level   - Filter by log level (:error, :warn, :info, :debug). Default: all
     :grep    - Filter lines containing string. Default: nil
@@ -544,7 +544,7 @@
     (logs :lines 100)               ; Last 100 lines (hard-capped)
     (logs :file :error)             ; Last 50 lines from error.log
     (logs :level :error)            ; Only ERROR level entries
-    (logs :grep \"XTDB\")             ; Lines containing 'XTDB'
+    (logs :grep \"datalevin\")         ; Lines containing 'datalevin'
     (logs :file :error :lines 20)   ; Last 20 errors"
   [& {:keys [file lines level grep]
       :or {file :app lines 50}}]

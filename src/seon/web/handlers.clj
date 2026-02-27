@@ -11,13 +11,14 @@
 (defn health-check
   "Health check endpoint. Returns deep system health including pool status."
   [_request]
-  (let [result (health/deep-check {})
+  (let [result (health/check {})
         status-code (if (= :healthy (::health/status result)) 200 503)]
     {:status status-code
      :headers {"Content-Type" "application/json"}
      :body (json/write-value-as-string
             {:status (name (::health/status result))
              :timestamp (str (::health/timestamp result))
+             :startup-phase (name (::health/startup-phase result))
              :checks (::health/checks result)
              :resources (::health/resources result)})}))
 
