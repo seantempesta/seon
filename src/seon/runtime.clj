@@ -255,12 +255,20 @@
    :seon.flow.snap/data
    {:db/valueType :db.type/string}})
 
+;; Memoized schema computation - avoids re-computing on every get-conn call
+(def ^:private merged-schema-cache (atom nil))
+
 (defn runtime-merged-schema
   "Merge the graph ingest schema with runtime schema.
-   Lazily resolves seon.graph.ingest/datalevin-schema to avoid circular deps."
+   Lazily resolves seon.graph.ingest/datalevin-schema to avoid circular deps.
+   Caches the result since the schema doesn't change at runtime."
   []
-  (require 'seon.graph.ingest)
-  (merge @(resolve 'seon.graph.ingest/datalevin-schema) runtime-schema))
+  (or @merged-schema-cache
+      (let [schema (do
+                     (require 'seon.graph.ingest)
+                     (merge @(resolve 'seon.graph.ingest/datalevin-schema) runtime-schema))]
+        (reset! merged-schema-cache schema)
+        schema)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Session ID Validation
@@ -324,25 +332,60 @@
 ;; Production code uses the connection manager from Integrant.
 (defonce ^:private *test-conn (atom nil))
 
+;; Local connection cache to avoid expensive lookups through connection manager
+;; on every transaction. Cleared on system restart via clear-cached-conn!.
+(defonce ^:private *cached-conn (atom nil))
+
 (defn set-test-conn!
   "Set a test connection override. When set, all runtime functions use this
    conn instead of the connection manager. Pass nil to clear."
   [test-conn]
   (reset! *test-conn test-conn))
 
+(defn clear-cached-conn!
+  "Clear the cached runtime connection. Called on system shutdown to ensure
+   fresh connection on next startup."
+  []
+  (reset! *cached-conn nil))
+
+(defn- conn-usable?
+  "Check if a cached connection is still usable.
+   Conservative check that avoids false positives from exception handling."
+  [conn]
+  (when conn
+    (try
+      (require 'datalevin.conn)
+      (let [closed? (resolve 'datalevin.conn/closed?)]
+        (not (closed? conn)))
+      (catch ClassNotFoundException _
+        ;; datalevin.conn not loaded yet - conn may still be valid
+        ;; Return true to avoid unnecessary reconnection
+        true)
+      (catch Throwable _
+        ;; Other errors mean conn is likely unusable
+        false))))
+
 (defn- get-conn
   "Get the runtime Datalevin connection.
 
-   Checks test override first, then reads from the connection manager
-   on the running Integrant system. Returns nil if unavailable."
+   Uses local cache for fast repeated access. Falls back to connection
+   manager if cache is empty or stale. Returns nil if unavailable."
   []
   (or @*test-conn
+      ;; Check cached conn first (fast path)
+      (when-let [cached @*cached-conn]
+        (when (conn-usable? cached)
+          cached))
+      ;; Cache miss or stale - go through connection manager
       (when-let [mgr (some-> (try @(requiring-resolve 'integrant.repl.state/system)
                                    (catch Exception _ nil))
                               :seon.db.datalevin/connections)]
         (try
-          (dl-conn/get-runtime-conn! {::dl-conn/manager mgr
-                                      ::dl-conn/schema (runtime-merged-schema)})
+          (let [conn (dl-conn/get-runtime-conn! {::dl-conn/manager mgr
+                                                 ::dl-conn/schema (runtime-merged-schema)})]
+            ;; Cache the connection for future use
+            (reset! *cached-conn conn)
+            conn)
           (catch Exception e
             (log/warn "Failed to get runtime conn from manager" {:error (.getMessage e)})
             nil)))))
@@ -911,6 +954,8 @@
   (reset! registry-cache {})
   (reset! generated-ids #{})
   (reset! flow-handles {})
+  (reset! *cached-conn nil)
+  (reset! merged-schema-cache nil)
   {::reset true})
 
 ;;; ---------------------------------------------------------------------------

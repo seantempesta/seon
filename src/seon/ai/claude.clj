@@ -326,15 +326,19 @@
 
 (defn- extract-tool-results
   "Extract tool_result blocks from user message content.
-   Large content (>2KB) is truncated to prevent storage overload from file reads."
+   Large content (>2KB) is truncated to prevent storage overload from file reads.
+   Nil content is omitted (not stored as nil to avoid Datalevin NPE)."
   [content]
   (when (sequential? content)
     (->> content
          (filter #(= "tool_result" (:type %)))
          (mapv (fn [tr]
                  (let [base (select-keys tr [:tool_use_id :is_error])
-                       content (:content tr)]
-                   (assoc base :content (truncate-tool-result-content content)))))
+                       truncated (truncate-tool-result-content (:content tr))]
+                   ;; Only add :content if present (nil breaks Datalevin)
+                   (cond-> base
+                     (some? truncated)
+                     (assoc :content truncated)))))
          not-empty)))
 
 (defn- extract-text-content
@@ -402,8 +406,11 @@
              ::ai/type :message
              ::ai/role role
              ::ai/content text-content
-             ::ai/timestamp (Instant/now)
-             ::message-type msg-type}
+             ::ai/timestamp (Instant/now)}
+      ;; Message type - only include if present (nil breaks Datalevin)
+      msg-type
+      (assoc ::message-type msg-type)
+
       ;; Session reference
       session-id
       (assoc ::ai/session-id session-id)

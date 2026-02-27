@@ -1,190 +1,41 @@
 (ns seon.ctx
-  "## Purpose
-
-   Unified stateful context for namespace instances. Every dynamic namespace page
-   in Seon (health, trading, getting-started, primer) gets its state through a
-   ctx instance: a Clojure atom backed by optional Datalevin persistence, optional
-   per-key Malli validation, optional whole-state schema validation, debounced
-   writes, and SSE push to connected browsers. This is the single source of truth
-   for mutable application state -- the atom IS the namespace's live data.
-
-   Replaced four prior systems (reactive.instance, reactive.ctx, primer.ctx/XTDB,
-   flow.harness) with one module. The unification is complete: no legacy shims remain.
-
-   ## Architecture Position
-
-   Low-level infrastructure. No domain knowledge. Depended on by:
-
-   - seon.ns.lifecycle (primary consumer) -- creates/restores instances, queries
-     Datalevin directly for persisted ctx using ::datalevin-schema attributes,
-     calls create!, get-atom, list-instances, persist!. Has its own parallel
-     persistence queries duplicating load!/persist! logic.
-   - seon.ns.routes -- reads instances-for-namespace, get-atom, get-entry,
-     register-client!, force-push!, destroy!. Heaviest API surface user.
-   - seon.orchestrator.session -- creates agent session ctx atoms with reserved-keys.
-   - (primer ctx was archived -- was a thin wrapper delegating to this ns)
-   - seon.agent.env -- aliases datalevin-schema.
-   - seon.web.browser -- calls clients-for-namespace for push targeting.
-   - seon.getting-started -- uses :seon.ctx/messages and :seon.ctx/user-input keys
-     (registered in seon.render.default-page, not here -- schema ownership unclear).
-   - seon.ctx.history -- sibling, pure diff utilities. No coupling to this ns.
+  "Purpose: Unified stateful context for namespace instances — atom + Datalevin
+   persistence + SSE push + Malli validation in one module. Every dynamic namespace
+   page gets its state through ctx. Replaced four prior systems with no legacy shims.
 
    Depends on: seon.schema, seon.runtime (ID generation), taoensso.timbre.
-   Soft deps (requiring-resolve): datalevin.core, org.httpkit.server,
-   seon.web.sse, seon.web.reactive.transform, dev.onionpancakes.chassis.core.
+   Soft deps: datalevin.core, seon.db, org.httpkit.server, seon.web.sse,
+   seon.web.reactive.transform, dev.onionpancakes.chassis.core.
 
-   ## Consumer Analysis
+   Depended on by: seon.ns.lifecycle (primary), seon.ns.routes, seon.web.browser,
+   seon.orchestrator.session, seon.agent.env (aliases datalevin-schema).
 
-   seon.ns.lifecycle: Primary lifecycle manager. Creates instances via create!,
-   but duplicates persistence queries (lines 307-325, 447-451) instead of using
-   load!. This means two codepaths for the same Datalevin reads. Also queries
-   :seon.ctx/instance-id, :seon.ctx/data, :seon.ctx/namespace directly -- tightly
-   coupled to our Datalevin schema. Easy win: expose a list-persisted-instances
-   function to eliminate duplicated queries.
+   Consumers:
+   - seon.ns.lifecycle: Creates instances, uses resolve-instance to query by
+     namespace (not duplication — load! only supports instance-id lookup). Clean.
+   - seon.ns.routes: Heaviest user. Uses get-entry to access :render-fn and :atom
+     directly — acceptable, these are the interface points for SSE push.
+   - seon.orchestrator.session: Creates ctx with reserved-keys for agent isolation.
+   - seon.web.browser: Uses clients-for-namespace for push targeting. Clean.
 
-   seon.ns.routes: Touches 8+ functions across the API. Uses get-entry to access
-   internal :render-fn and :atom keys directly -- leaky abstraction. Calls
-   register-client! + force-push! for SSE lifecycle. No pain points observed;
-   the map-based API serves it well.
+   Watch out for:
+   - get-entry returns raw registry map — consumers coupled to internal structure
+   - create! returns opaque atom, no :malli/schema (by design per CONVENTIONS.md)
+   - generate-id delegates to seon.runtime/generate-id (zero-arg, no schema)
 
-   seon.orchestrator.session: Clean usage. Creates ctx with reserved-keys for
-   agent isolation (:seon.ns/conn, :seon.ns/session-id, :seon.ns/namespace).
+   Needs work:
+   - P3: No generative tests (most fns have :malli/schema now, could add)
+   - P3: get-entry could return curated map to decouple consumers from internals
 
-   (seon.primer.ctx was archived — was a thin delegation layer.)
+   What's good:
+   - Debounced persistence via ScheduledExecutorService
+   - Two validation modes: per-key (::validate?) and whole-state (::ctx-schema)
+   - Reserved keys for agent isolation (cannot modify :seon.agent/* or :seon.ns/*)
+   - Non-serializable value filtering prevents persistence failures
+   - All public functions use map-in pattern with :malli/schema metadata
+   - Child namespace seon.ctx.history is pure and well-schemaed
 
-   seon.render.default-page: Registers :seon.ctx/messages, :seon.ctx/uploads,
-   :seon.ctx/user-input schemas. These are domain-level keys in the ctx namespace
-   but owned/registered by a renderer -- schema ownership is inverted.
-
-   ## Public API Assessment
-
-   | Function                    | Status    | Notes                                    |
-   |-----------------------------|-----------|------------------------------------------|
-   | create!                     | OK        | Map-in, well-documented, 12 option keys  |
-   | get-atom                    | OK        | Map-in, returns atom or nil              |
-   | get-value                   | OK        | Map-in, convenience over get-atom+deref  |
-   | get-entry                   | OK        | Map-in, returns internal registry entry  |
-   | update!                     | OK        | Map-in, delegates to swap!               |
-   | destroy!                    | OK        | Map-in, full cleanup                     |
-   | register-client!            | OK        | Map-in, SSE channel tracking             |
-   | unregister-client!          | OK        | Map-in, SSE channel removal              |
-   | clients                     | OK        | Map-in, returns channel set              |
-   | client-count                | OK        | Map-in, returns int                      |
-   | force-push!                 | OK        | Map-in, triggers render+push             |
-   | set-render-fn!              | OK        | Map-in, mutates registry                 |
-   | instances-for-namespace     | NO_SCHEMA | Positional arg (symbol), not map-in      |
-   | clients-for-namespace       | NO_SCHEMA | Positional arg (symbol), not map-in      |
-   | client-count-for-namespace  | NO_SCHEMA | Positional arg (symbol), not map-in      |
-   | persist!                    | OK        | Map-in                                   |
-   | load!                       | OK        | Map-in                                   |
-   | list-instances              | OK        | Map-in (empty map)                       |
-   | generate-id                 | OK        | Delegates to seon.runtime/generate-id    |
-   | datalevin-schema            | OK        | Def, not fn. Schema for DB setup         |
-
-   ## Convention Compliance
-
-   Malli schemas: PASS -- 15 schemas registered for option keys. :malli/schema
-   metadata added to 15 public functions. create! excluded (returns opaque atom),
-   generate-id excluded (zero-arg, no map-in). Request/response schemas registered
-   for all patterns (::instance-id-request, ::namespace-request, etc.).
-
-   Map-in/map-out: PASS -- All public functions use map-in pattern including
-   the three namespace-level helpers (instances-for-namespace, clients-for-namespace,
-   client-count-for-namespace) which take {::namespace ns-sym}.
-
-   Namespaced keys: PASS -- All option keys are ::ctx/qualified. Return values
-   from list-instances use namespaced keys.
-
-   Docstring format: PASS -- All public fns document Request keys / Returns.
-
-   Test quality: PASS -- 27 tests, 86 assertions covering lifecycle, persistence,
-   validation, reserved keys, ctx-schema, client tracking, namespace helpers.
-   No generative tests (blocked by missing :malli/schema on functions).
-
-   ## Strategic Assessment
-
-   This namespace is essential and well-positioned. It correctly owns the
-   atom+persistence+SSE triangle. The ctx-schema and reserved-keys features
-   are well-designed for agent isolation.
-
-   Boundary concern: get-entry exposes raw registry internals (:atom, :render-fn,
-   :clients, :scheduler). Consumers access these directly. If registry structure
-   changes, multiple consumers break. Consider returning a curated map or adding
-   accessor functions for common needs.
-
-   The namespace-level helpers break the map-in convention -- they should take
-   {::namespace ns-sym} for consistency and future extensibility.
-
-   Missing from the API: no way to query persisted instances without an active
-   registry entry. lifecycle.clj duplicates Datalevin queries to fill this gap.
-   A list-persisted or load-all function would eliminate that duplication.
-
-   :seon.ctx/messages, :seon.ctx/uploads, :seon.ctx/user-input are registered
-   in seon.render.default-page but live in this namespace's keyword space.
-   Either move those registrations here or use a different namespace prefix.
-
-   ## Issues (Prioritized)
-
-   P1 - RESOLVED. :malli/schema added to 15 public functions. create! and
-   generate-id excluded per CONVENTIONS.md (opaque return types / zero-arg).
-
-   P2 - RESOLVED. instances-for-namespace, clients-for-namespace,
-   client-count-for-namespace now use map-in {::namespace ns-sym} pattern.
-
-   P2 - get-entry leaks registry internals. seon.ns.routes accesses :atom,
-   :render-fn, :clients directly (routes.clj lines ~493, ~550). Couples consumers
-   to internal structure.
-
-   P2 - Schema ownership inversion. :seon.ctx/messages, :seon.ctx/user-input
-   registered in seon.render.default-page (default_page.clj lines 24-37), not
-   here. Confusing: keys in ctx's namespace but defined elsewhere.
-
-   P3 - seon.ns.lifecycle duplicates Datalevin persistence queries instead of
-   calling load!. Divergence risk if schema changes.
-
-   P3 - No generative tests (consequence of P1).
-
-   ## What's Good
-
-   - Clean unification of 4 prior systems into one module with no legacy shims
-   - Debounced persistence via ScheduledExecutorService is well-implemented
-   - Two validation modes (per-key ::validate? and whole-state ::ctx-schema)
-     serve different use cases without conflict
-   - Reserved keys provide clean agent isolation
-   - Comprehensive test suite (27 tests) with good edge case coverage
-   - Non-serializable value filtering prevents persistence failures silently
-   - Child namespace seon.ctx.history is pure, well-schemaed, and exemplary
-
-   ## Recommendations
-
-   1. Add :malli/schema to all public functions. Consumer benefit: agents discover
-      ctx API via schema index. Scope: medium (19 functions, schemas already exist
-      for most option keys -- just need request/response schema compositions).
-
-   2. Convert namespace-level helpers to map-in pattern:
-      (instances-for-namespace {::namespace ns-sym}). Consumer benefit: consistent
-      API, extensible (e.g., add ::limit, ::since filters). Scope: small.
-
-   3. Add list-persisted-instances function that queries Datalevin for all stored
-      instances. Consumer benefit: seon.ns.lifecycle stops duplicating queries.
-      Scope: small.
-
-   4. Move :seon.ctx/messages, :seon.ctx/uploads, :seon.ctx/user-input schema
-      registrations from default-page into this file. Or rename them to
-      :seon.render.default/messages etc. Scope: small.
-
-   5. Add a curated accessor API (e.g., get-render-fn, get-clients-atom) to
-      reduce get-entry usage and decouple consumers from registry internals.
-      Scope: medium.
-
-   ## Audit Metadata
-   ```
-   Audited: 2026-02-26
-   Auditor: claude-opus-4-6
-   Phase 6: Added :malli/schema to 15 public fns, request/response schemas,
-            fixed namespace helper tests to use map-in pattern.
-   Tests: 27 pass / 0 fail (ctx only)
-   ```"
+   Last audit: 2026-02-26 | Tests: 27 pass / 0 fail | Commit: 98fa52d"
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
             [malli.core :as m]
@@ -390,7 +241,7 @@
   (try
     (let [filtered (filter-serializable value)
           edn-str (pr-str filtered)]
-      ((requiring-resolve 'datalevin.core/transact!)
+      ((requiring-resolve 'seon.db/transact!)
        conn [(cond-> {:seon.ctx/instance-id instance-id
                       :seon.ctx/data edn-str
                       :seon.ctx/updated-at (java.util.Date.)}

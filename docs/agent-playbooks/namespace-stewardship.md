@@ -63,86 +63,64 @@ Answer these specific questions (skip any that clearly don't apply):
 3. **Missing consumers** — Are there namespaces that SHOULD be using you but rolled their own?
 4. **Easy wins** — What one change in your API would eliminate the most boilerplate in consumers?
 
-## Phase 5: Write the assessment docstring
+## Phase 5: Write the namespace docstring
 
-Replace the existing namespace docstring with your assessment. Be honest and dense.
+Replace the existing namespace docstring. This is a living document — it grows and improves every time an agent touches this namespace. Don't force sections that don't apply. A 10-line docstring for a small namespace is better than 50 lines of filler.
 
-### Required Sections
+**Target: ~50 lines max.** That's enough for real substance without dominating the file. Scale down for small namespaces.
 
-**## Purpose**
-What this namespace does in the Seon vision. Not mechanical — explain the WHY.
+### Format
 
-**## Architecture Position**
-Dependency graph with roles. "X is our primary consumer — it uses A/B/C for Y purpose."
+Write it as a concise briefing for the next agent who opens this file. What do they need to know?
 
-**## Consumer Analysis**
-For each significant consumer:
-- What they use and how
-- Pain points you observed in their code
-- Easy wins where improving your namespace would simplify theirs
-
-**## Public API Assessment**
-Table of every public function/var:
-
-| Function | Status | Notes |
-|----------|--------|-------|
-
-Status values: `OK` / `NO_SCHEMA` / `ANTI_PATTERN` / `DEAD_CODE` / `STUB`
-
-**## Convention Compliance**
-For each convention from CONVENTIONS.md, assess PASS / FAIL / PARTIAL with evidence:
-- Malli schemas (schema/register! + :malli/schema on functions)
-- Map-in/map-out public APIs
-- Namespaced keys in inputs and outputs
-- Docstring format (Request keys / Response keys)
-- Test quality (example + generative + edge cases)
-
-**## Strategic Assessment**
-The most important section. Answer honestly:
-- Does this namespace belong in Seon's future architecture?
-- Is it doing too much? Too little? Should it be split or merged?
-- What's the boundary between you and related namespaces — is it clean?
-- What would make this a 10x better namespace for the system?
-- What are consumers working around that you should solve natively?
-
-**## Issues (Prioritized)**
-
-- P0 — Existential (wrong abstraction, should be restructured, duplicates another ns)
-- P1 — Blocks agent discoverability (missing schemas, invisible to function index)
-- P2 — Convention violations (positional args, plain keys, leaky abstractions)
-- P3 — Quality gaps (missing tests, stale docs, performance concerns)
-
-Each with specific file:line references AND consumer impact ("this forces X to...").
-
-**## What's Good**
-Be fair — call out things done well. Good patterns others should follow.
-
-**## Recommendations**
-Ordered list of what to do next. For each:
-- What to do (specific)
-- What consumer benefits (who gets simpler)
-- Estimated scope (small/medium/large)
-
-**## Incoming Requests**
-Track requests received from other namespace agents:
 ```
-- <date> from seon.bar: "Update calls to X" — DONE (or PENDING, with reason)
+Purpose: Brief description of what this namespace does and WHY it exists.
+Not mechanical — explain the role it plays in the system.
+
+Depends on: ns.a, ns.b.
+Depended on by: ns.x (primary), ns.y, ns.z.
+
+Consumers:
+- ns.x: Uses foo and bar for lifecycle management. Duplicates our query
+  logic instead of calling our API — divergence risk. Easy win: expose
+  a helper to eliminate that duplication.
+- ns.y: Accesses internals via get-entry — leaky abstraction. Would
+  benefit from a curated accessor function.
+- ns.z: Clean usage, no issues.
+
+Watch out for:
+- get-entry leaks internal structure — consumers coupled to registry shape
+- Some keys in our namespace are registered by another ns — ownership unclear
+- function-x was bypassing the timeout wrapper (fixed 2026-02-26)
+
+Needs work:
+- P2: Leaky abstraction in get-entry — should return curated map
+- P2: Schema ownership inversion — keys registered in wrong namespace
+- P3: No generative tests yet
+
+Incoming requests:
+- 2026-02-26 from ns.other: migrate key names — DONE
+
+Last audit: 2026-02-26 | Tests: 27 pass / 0 fail | Commit: abc123
 ```
 
-**## Audit Metadata**
-```
-Audited: <today's date>
-Auditor: claude-opus-4-6
-Commit: <sha from git log -1 --format=%h>
-Tests: N pass / M fail (A assertions)
-```
+### Section guidance
+
+- **Purpose** — Always include. One or two sentences. Why it exists.
+- **Depends on / Depended on by** — Always include. Names and roles.
+- **Consumers** — The most valuable section. For each significant consumer: what they use, what's clunky, what easy win would help them. Skip for leaf namespaces with no consumers.
+- **Watch out for** — Institutional memory. Landmines, gotchas, non-obvious coupling. What would you warn a colleague about?
+- **Needs work** — Prioritized using P0-P3 scale. P0=existential, P1=blocks discoverability, P2=convention violations, P3=quality gaps. Remove items as they're fixed.
+- **Incoming requests** — Cross-namespace requests received and status. Skip if none.
+- **Last audit** — Date, test counts, commit hash. Always include.
 
 ### Constraints
 
-- The docstring must be a valid Clojure string (escape internal double-quotes with backslash)
-- Be brutally honest — a half-truth is worse than a hard truth
-- Cite specific line numbers and function names
-- Keep under ~150 lines — dense and scannable, not verbose
+- Valid Clojure string (escape internal double-quotes with backslash)
+- Be honest — a half-truth is worse than a hard truth
+- Dense and scannable — no prose where a bullet point works
+- ~50 lines max. Scale down for simple namespaces.
+- Evolves over time — don't try to make it perfect on the first pass
 
 ---
 
