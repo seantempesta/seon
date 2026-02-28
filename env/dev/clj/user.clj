@@ -101,14 +101,10 @@
     (:seon.schema/registry state/system)))
 
 (defn status
-  "Show system status."
+  "Deep system health check. Returns health map from seon.health/check."
   []
-  (if state/system
-    (do
-      (println "System running with" (count state/system) "components:")
-      (doseq [k (sort (keys state/system))]
-        (println "  " k)))
-    (println "System not running. Start with: (go) or ./bin/run")))
+  (require 'seon.health)
+  ((resolve 'seon.health/check) {}))
 
 ;; ========================================
 ;; Agent Management (convenience wrappers)
