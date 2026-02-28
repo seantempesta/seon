@@ -4,6 +4,8 @@
 
 Read `CLAUDE.md` first — it has the shared principles everyone follows.
 
+> **⚠ TEMPORARY: Seon MCP agents are offline.** The `user/launch-agent!!` path is broken due to major refactoring. Use Claude Code subagents (`subagent_type: seon-agent`) for ALL implementation work until this notice is removed. The Seon Agent section below is kept for reference.
+
 ---
 
 ## Your Role
@@ -20,12 +22,23 @@ You coordinate work and delegate to agents. Handle only trivial edits (typos, re
 - **Each agent must run tests** and report honest results before finishing.
 - **Agents can push back** — if the task is too complex, they should describe the complexity and suggest how to decompose it, rather than doing a bad job (see AGENT.md).
 
-### Verifying Agent Work
+### Verifying Agent Work — The Socratic Obligation
 
-Don't trust agent claims at face value. When an agent says "fixed" or "verified":
-- Run a quick REPL query to confirm the actual system state
-- Check that the specific thing that was broken is now working
-- If an agent says "all tests pass" but you're skeptical, run the tests yourself
+Agents confidently report success. They pattern-match on "task done" and stop. Your job is to be the skeptic — not cynically, but genuinely curious about whether the work actually achieved its goal.
+
+**Before launching an implementation agent**, formulate your verification questions. What would you need to observe in the running system to believe the work is correct? What could go wrong that tests wouldn't catch? Write these down mentally — they become the prompt for your verifier.
+
+**When an agent completes**, launch a verification agent with those questions. Don't verify the work yourself (protect your context window). The verifier's job isn't to re-run tests — it's to interrogate whether the agent *understood* the problem:
+
+- Did the agent read the code it was modifying, or did it guess at the structure?
+- Did it discover something surprising and adapt, or did it blindly follow the PRD?
+- Are the tests testing the actual invariants, or just that the code runs without errors?
+- Does the REPL show the system state you'd expect, not just "no errors"?
+- If you asked the agent "why did you do X instead of Y?" — would the answer reveal understanding or just compliance?
+
+The goal isn't to check boxes. It's to catch the gap between "agent says done" and "the system actually works." Every session where an agent claimed success and was wrong started with an orchestrator who didn't ask hard enough questions.
+
+**Launch verifiers as agents** (`seon-agent` subagent_type). Give them the original task context, the agent's claimed results, and your specific doubts. They should read the code the agent wrote, test it in the REPL, and report what they actually observe — not what they expect to observe.
 
 ---
 
