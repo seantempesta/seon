@@ -46,7 +46,10 @@
    [seon.ai.agent.log :as agent-log]
    [seon.ai.claude.sdk :as sdk]
    [seon.orchestrator.session :as session]
+   [seon.render.code :as render-code]
    [seon.runtime :as runtime]
+   [seon.system :as sys]
+   [seon.health :as health]
    [seon.schema :as schema]
    [taoensso.timbre :as log])
   (:import [java.time Instant]))
@@ -255,6 +258,7 @@
                    [::ai/prompt ::ai/prompt]
                    [::model {:optional true} ::model]
                    [::files {:optional true} ::files]
+                   [::skip-context? {:optional true} :boolean]
                    [::sdk/permission-mode {:optional true} ::sdk/permission-mode]
                    [::sdk/max-turns {:optional true} ::sdk/max-turns]
                    [::sdk/max-budget-usd {:optional true} ::sdk/max-budget-usd]
@@ -656,20 +660,62 @@
            "The following files are provided as context for your task:\n\n"
            (str/join "\n" file-contents)))))
 
+(defn- build-namespace-context
+  "Build namespace documentation context from the knowledge graph.
+   Returns a formatted string section, or nil if graph is unavailable."
+  [namespace]
+  (try
+    (when-let [graph-db (some-> state/system :seon.graph/scanner :graph-db)]
+      (when-let [conn (sys/runtime-db-conn graph-db)]
+        (let [ns-str (str namespace)
+              result (render-code/context-for-agent
+                      {::render-code/conn conn
+                       ::render-code/ns-name ns-str})
+              docs (:seon.render/documentation result)]
+          (when-not (str/blank? docs)
+            (str "\n\n---\n\n# Namespace Context\n\n"
+                 "Documentation and call graph for `" ns-str "` from the knowledge graph:\n\n"
+                 docs "\n")))))
+    (catch Exception e
+      (log/warn "Failed to build namespace context" {:namespace namespace :error (.getMessage e)})
+      nil)))
+
+(defn- build-health-context
+  "Build a system health summary for agent prompts.
+   Returns a formatted string section, or nil on failure."
+  []
+  (try
+    (let [result (health/check {})]
+      (str "\n\n# System Health\n\n"
+           "```edn\n" (pr-str result) "\n```\n"))
+    (catch Exception e
+      (log/debug "Failed to build health context" {:error (.getMessage e)})
+      nil)))
+
 (defn- build-agent-prompt
-  "Build the agent prompt with session context, AGENT.md instructions, and optional file context."
-  [session-id namespace prompt files]
-  (let [file-context (format-file-context files)]
-    (str (load-agent-instructions)
-         ;; Just the dynamic values - AGENT.md already explains how to use them
-         "# Your Session\n\n"
-         "- **Session ID**: `" session-id "`\n"
-         "- **Namespace**: `" namespace "`\n"
-         "- **MCP eval**: `eval(session_id=\"" session-id "\", code=\"...\")`\n\n"
-         ;; Include file context if provided
-         (when file-context file-context)
-         "---\n\n"
-         "# Your Task\n\n" prompt)))
+  "Build the agent prompt with session context, AGENT.md instructions, and optional file context.
+   When skip-context? is true, omits the namespace graph context (saves tokens)."
+  ([session-id namespace prompt files]
+   (build-agent-prompt session-id namespace prompt files false))
+  ([session-id namespace prompt files skip-context?]
+   (let [file-context (format-file-context files)
+         health-context (build-health-context)
+         ns-context (when-not skip-context?
+                      (build-namespace-context namespace))]
+     (str (load-agent-instructions)
+          ;; Just the dynamic values - AGENT.md already explains how to use them
+          "# Your Session\n\n"
+          "- **Session ID**: `" session-id "`\n"
+          "- **Namespace**: `" namespace "`\n"
+          "- **MCP eval**: `eval(session_id=\"" session-id "\", code=\"...\")`\n\n"
+          ;; Include system health early so agents know what's working
+          (when health-context health-context)
+          ;; Include namespace context from graph if available
+          (when ns-context ns-context)
+          ;; Include file context if provided
+          (when file-context file-context)
+          "---\n\n"
+          "# Your Task\n\n" prompt))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Agent Registry (uses shared seon.ai.agent registry)
@@ -739,7 +785,7 @@
                      ::files [\"docs/prds/my-feature/prd.md\"
                               \"docs/prds/my-feature/plan.md\"]})"
   [{::ai/keys [namespace prompt force?]
-    ::keys [model files]
+    ::keys [model files skip-context?]
     ::sdk/keys [permission-mode max-turns max-budget-usd allowed-tools disallowed-tools chrome]}]
   (log/info "Launching agent" {:namespace namespace})
 
@@ -799,7 +845,7 @@
                                                  ::agent-log/port nrepl-port})
 
           ;; 3. Build agent prompt with session context and optional file context
-          full-prompt (build-agent-prompt id namespace prompt files)
+          full-prompt (build-agent-prompt id namespace prompt files skip-context?)
 
           ;; 4. Build MCP config with session_id in environment
           mcp-config (build-agent-mcp-config id)
