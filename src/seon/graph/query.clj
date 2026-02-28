@@ -272,22 +272,57 @@
 ;;; Unified Resolution: Functions by Output Key
 ;;; ---------------------------------------------------------------------------
 
-(schema/register! ::output-key
-                  [:keyword {:description "Output spec key to search for (e.g. :seon.render/html)"}])
+(do
+  (schema/register! ::output-key
+                    [:keyword {:description "Output spec key to search for (e.g. :seon.render/html)"}])
+
+  (defonce ^:private output-key-cache (atom {}))
+
+  (defn invalidate-output-key-cache!
+    "Clear the output-key query cache.
+     Called from invalidate-render-cache! on graph rescan."
+    []
+    (reset! output-key-cache {}))
+
+  (defn- query-functions-with-output-key
+    "Internal uncached query for functions-with-output-key."
+    [conn output-key]
+    (let [eids (d/q '[:find ?e
+                      :in $ ?output-key
+                      :where
+                      [?e :seon.fn/output-spec ?out]
+                      [?out :seon.spec/contains-keys ?output-key]]
+                    @conn output-key)]
+      (mapv (fn [[eid]]
+              (let [pulled (d/pull @conn
+                                   [:seon.fn/qualified-name :seon.fn/namespace
+                                    :seon.fn/name :seon.fn/doc :seon.fn/updated-at
+                                    {:seon.fn/input-spec [:seon.spec/contains-keys
+                                                          :seon.spec/optional-keys]}
+                                    {:seon.fn/output-spec [:seon.spec/contains-keys]}]
+                                   eid)
+                    input-spec (:seon.fn/input-spec pulled)
+                    contains (set (:seon.spec/contains-keys input-spec))
+                    optional (set (:seon.spec/optional-keys input-spec))]
+                (assoc pulled
+                       :required-keys (clojure.set/difference contains optional)
+                       :optional-keys optional)))
+            eids))))
 
 (defn functions-with-output-key
   "Find functions whose output spec contains a specific key.
 
-   Uses ref join: fn → output-spec → contains-keys.
+   Uses ref join: fn -> output-spec -> contains-keys.
    Pulls input spec data and computes required vs optional keys.
+   Results are cached; call invalidate-output-key-cache! on graph rescan.
 
    This is the unified discovery pattern for renderers, documentation functions,
    health checks, and any other discoverable function type. The output-key
    determines what kind of function you're looking for:
-   - :seon.render/html → HTML renderers
-   - :seon.render/ai → AI renderers
-   - :seon.render/documentation → documentation functions
-   - :seon.health/status → health check functions
+   - :seon.render/html -> HTML renderers
+   - :seon.render/ai -> AI renderers
+   - :seon.render/documentation -> documentation functions
+   - :seon.health/status -> health check functions
 
    Request keys:
      ::conn       - Required. Datalevin connection
@@ -309,29 +344,12 @@
      ;;      :required-keys #{:seon.foo/x :seon.foo/y}
      ;;      :optional-keys #{:seon.foo/z}} ...]"
   [{::keys [conn output-key]}]
-  (let [;; Step 1: Datalog ref join to find candidate entity IDs
-        eids (d/q '[:find ?e
-                    :in $ ?output-key
-                    :where
-                    [?e :seon.fn/output-spec ?out]
-                    [?out :seon.spec/contains-keys ?output-key]]
-                  @conn output-key)]
-    ;; Step 2: Pull fn + nested spec data, Step 3: compute required-keys
-    (mapv (fn [[eid]]
-            (let [pulled (d/pull @conn
-                                 [:seon.fn/qualified-name :seon.fn/namespace
-                                  :seon.fn/name :seon.fn/doc :seon.fn/updated-at
-                                  {:seon.fn/input-spec [:seon.spec/contains-keys
-                                                        :seon.spec/optional-keys]}
-                                  {:seon.fn/output-spec [:seon.spec/contains-keys]}]
-                                 eid)
-                  input-spec (:seon.fn/input-spec pulled)
-                  contains (set (:seon.spec/contains-keys input-spec))
-                  optional (set (:seon.spec/optional-keys input-spec))]
-              (assoc pulled
-                     :required-keys (clojure.set/difference contains optional)
-                     :optional-keys optional)))
-          eids)))
+  (let [cached (get @output-key-cache output-key ::miss)]
+    (if (not= cached ::miss)
+      cached
+      (let [result (query-functions-with-output-key conn output-key)]
+        (swap! output-key-cache assoc output-key result)
+        result))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; REPL Helpers

@@ -71,10 +71,11 @@
 (defonce ^:private resolution-cache (atom {}))
 
 (defn invalidate-render-cache!
-  "Clear the renderer resolution cache.
+  "Clear the renderer resolution cache and output-key query cache.
    Called by the scanner after code graph updates."
   []
-  (reset! resolution-cache {}))
+  (reset! resolution-cache {})
+  (gq/invalidate-output-key-cache!))
 
 (defn set-conn!
   "Override the Datalevin connection for renderer resolution.
@@ -116,9 +117,12 @@
 ;;; Datalevin-Based Renderer Resolution
 ;;; ---------------------------------------------------------------------------
 
-(defn- namespace-proximity
+(defn namespace-proximity
   "Score namespace proximity for tiebreaking.
-   Same ns = 0 (best), .render child = 1, sibling = 2, distant = 3."
+   Same ns = 0 (best), .render child = 1, sibling = 2, distant = 3.
+
+   Takes a qualified function name (e.g. \"seon.foo/bar\") and a target
+   namespace string. Extracts the namespace from the qualified name."
   [renderer-qname target-ns]
   (let [renderer-ns (when renderer-qname
                       (first (str/split renderer-qname #"/")))]
@@ -486,8 +490,8 @@
     (let [entries (rest schema-form)
           ;; Skip map-level properties if present
           entries (if (and (seq entries) (map? (first entries)))
-                   (rest entries)
-                   entries)]
+                    (rest entries)
+                    entries)]
       (for [entry entries
             :when (vector? entry)]
         (let [field-key (first entry)
