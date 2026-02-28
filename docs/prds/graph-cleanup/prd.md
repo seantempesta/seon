@@ -1,6 +1,6 @@
 # PRD: Graph Cleanup — Remove Derived Attrs, Unify Resolution
 
-**Status:** Phase 0 COMPLETE, Phase 1 COMPLETE (2026-02-27). Spec linkage upgraded to Malli metadata. Phase 2 design at `phase2-design.md`. Flow-based Datalevin writer PRD at `docs/prds/flow-datalevin-writer/prd.md`.
+**Status:** ALL PHASES COMPLETE (2026-02-28). Phases 0-4 done. Only remaining work is the parallel Flow-based Datalevin writer (separate PRD).
 **Priority:** High
 **Branch:** `feature/refinement`
 **Last updated:** 2026-02-27
@@ -375,7 +375,7 @@ Wire `context-for-agent` into `build-agent-prompt` in `seon.ai.claude.clj`.
 - [x] Phase 1: Graph cleanup — remove 5 attrs, rewrite consumers, all render tests pass (47 tests, 136 assertions, 0 failures)
 - [x] Phase 1b: Spec linkage upgraded from naming convention to `:malli/schema` metadata parsing (scanner.clj + extract.clj)
 - [x] Phase 1c: Datalevin conn lifecycle fixes — scanner resume always halt+init, runtime-db stores only conn manager
-- [ ] Phase 2: `seon.render.code` with default doc renderer + tests (design at `phase2-design.md`)
+- [x] Phase 2: `seon.render.code` with default doc renderer + tests (14 tests, 31 assertions, 0 failures)
 - [ ] Parallel: Flow-based Datalevin writer (separate PRD at `docs/prds/flow-datalevin-writer/prd.md`)
-- [ ] Phase 3: Graph-discovered health checks
-- [ ] Phase 4: Agent prompts include dependency context
+- [x] Phase 3: Graph-discovered health checks — already works via Phase 1 spec linkage (`seon.health/check` discoverable via `:seon.health/status`)
+- [x] Phase 4: Agent prompts include namespace context + health status (`build-agent-prompt` in `seon.ai.claude`)
