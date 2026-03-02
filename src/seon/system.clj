@@ -153,15 +153,17 @@
    Usage:
      (runtime-db-conn (:seon/runtime-db state/system))"
   [{:keys [connection-manager]}]
-  (dl-conn/get-runtime-conn!
+  (dl-conn/get-conn!
    {::dl-conn/manager connection-manager
+    ::dl-conn/db :seon.runtime
     ::dl-conn/schema (runtime/runtime-merged-schema)}))
 
 (defmethod ig/init-key :seon/runtime-db
   [_ {:keys [connection-manager]}]
   ;; Get conn through the connection manager (handles staleness, auto-reconnect)
-  (let [conn (dl-conn/get-runtime-conn!
+  (let [conn (dl-conn/get-conn!
               {::dl-conn/manager connection-manager
+               ::dl-conn/db :seon.runtime
                ::dl-conn/schema (runtime/runtime-merged-schema)})]
     (log/info "Runtime database connected via connection manager")
     ;; Mark any instances from previous unclean shutdown as crashed

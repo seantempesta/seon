@@ -76,6 +76,22 @@
                         :gen/schema :int}
                    inst?])
 
+;; Session start time
+(schema/register! ::started-at
+                  [:fn {:description "Session start timestamp"
+                        :error/message "Must be a java.time.Instant"
+                        :gen/fmap (fn [_] (Instant/now))
+                        :gen/schema :int}
+                   inst?])
+
+;; Session end time
+(schema/register! ::ended-at
+                  [:fn {:description "Session end timestamp"
+                        :error/message "Must be a java.time.Instant"
+                        :gen/fmap (fn [_] (Instant/now))
+                        :gen/schema :int}
+                   inst?])
+
 ;; Session ID reference
 (schema/register! ::session-id
                   [:string {:min 1

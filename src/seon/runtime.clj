@@ -381,8 +381,9 @@
                                    (catch Exception _ nil))
                               :seon.db.datalevin/connections)]
         (try
-          (let [conn (dl-conn/get-runtime-conn! {::dl-conn/manager mgr
-                                                 ::dl-conn/schema (runtime-merged-schema)})]
+          (let [conn (dl-conn/get-conn! {::dl-conn/manager mgr
+                                        ::dl-conn/db :seon.runtime
+                                        ::dl-conn/schema (runtime-merged-schema)})]
             ;; Cache the connection for future use
             (reset! *cached-conn conn)
             conn)
@@ -652,6 +653,28 @@
 (schema/register! ::duration-ms
                   [:int {:min 0 :description "Duration in milliseconds"}])
 
+;; Agent run entity attributes — registered so db/transact! enforcement passes
+(schema/register! :seon.agent.run/id
+                  [:string {:min 1 :description "Agent run identifier"}])
+(schema/register! :seon.agent.run/runtime
+                  [:int {:description "Datalevin entity ref to runtime instance"}])
+(schema/register! :seon.agent.run/provider
+                  [:keyword {:description "AI provider keyword"}])
+(schema/register! :seon.agent.run/status
+                  [:keyword {:description "Run status keyword"}])
+(schema/register! :seon.agent.run/started-at
+                  inst?)
+(schema/register! :seon.agent.run/stopped-at
+                  inst?)
+(schema/register! :seon.agent.run/cost-usd
+                  [:double {:min 0.0}])
+(schema/register! :seon.agent.run/num-turns
+                  [:int {:min 0}])
+(schema/register! :seon.agent.run/duration-ms
+                  [:int {:min 0}])
+(schema/register! :seon.agent.run/namespace
+                  [:string {:min 1}])
+
 (schema/register! ::start-agent-run-request
                   [:map
                    [::agent-run-id ::agent-run-id]
@@ -816,6 +839,18 @@
 
 (schema/register! ::reason
                   [:enum :shutdown :backup :manual :error])
+
+;; Flow snapshot entity attributes — registered so db/transact! enforcement passes
+(schema/register! :seon.flow.snap/id
+                  [:string {:min 1 :description "Unique snapshot ID: label/instant"}])
+(schema/register! :seon.flow.snap/label
+                  [:string {:min 1 :description "Flow label this snapshot belongs to"}])
+(schema/register! :seon.flow.snap/created-at
+                  inst?)
+(schema/register! :seon.flow.snap/reason
+                  [:enum :shutdown :backup :manual :error])
+(schema/register! :seon.flow.snap/data
+                  [:string {:description "pr-str of flow state map"}])
 
 (schema/register! ::snapshot-request
                   [:map

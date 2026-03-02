@@ -294,8 +294,9 @@
   (require '[seon.db.datalevin.conn :as dlc])
 
   (def mgr (:seon.db.datalevin/connections state/system))
-  (def conn (dlc/get-master-conn!
-             {:seon.db.datalevin.conn/manager mgr}))
+  (def conn (dlc/get-conn!
+             {:seon.db.datalevin.conn/manager mgr
+              :seon.db.datalevin.conn/db :seon.ai}))
 
   (search {::conn conn ::pattern "acquire"})
   (functions-in {::conn conn ::namespace "seon.flow.pool"})

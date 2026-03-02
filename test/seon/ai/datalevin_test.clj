@@ -11,7 +11,7 @@
 (def ^:private test-dir "tmp/test-datalevin")
 
 (defn- create-test-conn []
-  (d/create-conn test-dir))
+  (d/create-conn test-dir dl/datalevin-schema))
 
 (defn- cleanup-test-db []
   (let [dir (java.io.File. test-dir)]
@@ -78,7 +78,6 @@
   (testing "successful save-session! increments stats"
     (dl/reset-stats!)
     (let [entity {:seon/id "ses-test123"
-                  :seon.ai/type :session
                   :seon.ai/status :active}
           result (dl/save-session! entity)
           s (dl/stats)]
@@ -104,8 +103,7 @@
   (testing "writes return false when disabled"
     (dl/set-enabled! false)
     (try
-      (let [entity {:seon/id "ses-disabled"
-                    :seon.ai/type :session}
+      (let [entity {:seon/id "ses-disabled"}
             result (dl/save-session! entity)]
         (is (false? result)))
       (finally
@@ -118,8 +116,8 @@
 (deftest count-entities-test
   (testing "count-entities returns session and message counts"
     ;; Save some data first
-    (dl/save-session! {:seon/id "ses-count1" :seon.ai/type :session})
-    (dl/save-session! {:seon/id "ses-count2" :seon.ai/type :session})
+    (dl/save-session! {:seon/id "ses-count1"})
+    (dl/save-session! {:seon/id "ses-count2"})
     (dl/save-message! {:seon/id "msg-count1" :seon.ai/session-id "ses-count1"})
 
     (let [counts (dl/count-entities)]
@@ -130,7 +128,6 @@
 (deftest query-sessions-test
   (testing "query-sessions retrieves stored sessions"
     (dl/save-session! {:seon/id "ses-query1"
-                       :seon.ai/type :session
                        :seon.ai/status :active})
 
     (let [sessions (dl/query-sessions {:limit 10})]
@@ -141,7 +138,6 @@
 (deftest dl-get-session-test
   (testing "dl-get-session finds session by logical ID"
     (dl/save-session! {:seon/id "ses-find1"
-                       :seon.ai/type :session
                        :seon.ai/status :active
                        :seon.ai/namespace "seon.test"})
 
@@ -158,7 +154,7 @@
 (deftest dl-get-messages-test
   (testing "dl-get-messages retrieves messages for session"
     (let [session-id "ses-msgs"]
-      (dl/save-session! {:seon/id session-id :seon.ai/type :session})
+      (dl/save-session! {:seon/id session-id})
       (dl/save-message! {:seon/id "msg-1"
                          :seon.ai/session-id session-id
                          :seon.ai/role "user"
@@ -181,14 +177,49 @@
 (deftest update-session-test
   (testing "update-session! modifies existing session"
     (dl/save-session! {:seon/id "ses-update"
-                       :seon.ai/type :session
                        :seon.ai/status :active})
 
     (dl/update-session! {:seon/id "ses-update"
-                         :seon.ai/type :session
                          :seon.ai/status :completed
                          :seon.ai/cost-usd 0.05})
 
     (let [session (dl/dl-get-session "ses-update")]
       (is (= :completed (:seon.ai/status session)))
       (is (= 0.05 (:seon.ai/cost-usd session))))))
+
+;;; ---------------------------------------------------------------------------
+;;; Schema Bridge Tests
+;;; ---------------------------------------------------------------------------
+
+(deftest datalevin-schema-derived-test
+  (testing "datalevin-schema is a non-empty map derived from entity schemas"
+    (is (map? dl/datalevin-schema))
+    (is (pos? (count dl/datalevin-schema))))
+
+  (testing "entity-id has unique identity constraint"
+    (is (= :db.unique/identity
+           (get-in dl/datalevin-schema [:seon.ai.datalevin/entity-id :db/unique]))))
+
+  (testing "core attributes have correct Datalevin types"
+    (is (= :db.type/string
+           (get-in dl/datalevin-schema [:seon.ai.datalevin/entity-id :db/valueType])))
+    (is (= :db.type/keyword
+           (get-in dl/datalevin-schema [:seon.ai.datalevin/entity-type :db/valueType])))
+    (is (= :db.type/instant
+           (get-in dl/datalevin-schema [:seon.ai.datalevin/stored-at :db/valueType]))))
+
+  (testing "AI attributes have correct types"
+    (is (= :db.type/string
+           (get-in dl/datalevin-schema [:seon.ai/session-id :db/valueType])))
+    (is (= :db.type/keyword
+           (get-in dl/datalevin-schema [:seon.ai/status :db/valueType])))
+    (is (= :db.type/double
+           (get-in dl/datalevin-schema [:seon.ai/cost-usd :db/valueType])))
+    (is (= :db.type/long
+           (get-in dl/datalevin-schema [:seon.ai/input-tokens :db/valueType])))
+    (is (= :db.type/string
+           (get-in dl/datalevin-schema [:seon.ai.claude/message-type :db/valueType]))))
+
+  (testing "tx metadata attributes are included"
+    (is (contains? dl/datalevin-schema :seon.db.tx/at))
+    (is (contains? dl/datalevin-schema :seon.db.tx/caller))))

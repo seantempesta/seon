@@ -96,6 +96,56 @@
 ;;; Schema Registration
 ;;; ---------------------------------------------------------------------------
 
+;; Datalevin entity attributes (transacted by ingest functions)
+;; Namespace entity attrs
+(schema/register! :seon.ns/name :string)
+(schema/register! :seon.ns/file :string)
+(schema/register! :seon.ns/doc :string)
+(schema/register! :seon.ns/target :keyword)
+(schema/register! :seon.ns/dynamic? :boolean)
+
+;; Function entity attrs
+(schema/register! :seon.fn/qualified-name :string)
+(schema/register! :seon.fn/namespace :string)
+(schema/register! :seon.fn/name :string)
+(schema/register! :seon.fn/doc :string)
+(schema/register! :seon.fn/arglists :string)
+(schema/register! :seon.fn/row :int)
+(schema/register! :seon.fn/private :boolean)
+(schema/register! :seon.fn/updated-at inst?)
+(schema/register! :seon.fn/input-spec [:any {:description "Ref to :seon.spec/key entity"}])
+(schema/register! :seon.fn/output-spec [:any {:description "Ref to :seon.spec/key entity"}])
+
+;; Var entity attrs
+(schema/register! :seon.var/qualified-name :string)
+(schema/register! :seon.var/namespace :string)
+(schema/register! :seon.var/name :string)
+(schema/register! :seon.var/doc :string)
+(schema/register! :seon.var/row :int)
+(schema/register! :seon.var/private :boolean)
+(schema/register! :seon.var/value-type :keyword)
+(schema/register! :seon.var/updated-at inst?)
+
+;; Call graph attrs
+(schema/register! :seon.call/from-fn [:any {:description "Ref to calling function entity"}])
+(schema/register! :seon.call/to-fn [:any {:description "Ref to called function entity"}])
+(schema/register! :seon.call/row :int)
+
+;; NS dependency attrs
+(schema/register! :seon.ns.dep/from-ns :string)
+(schema/register! :seon.ns.dep/to-ns :string)
+(schema/register! :seon.ns.dep/alias :string)
+
+;; Spec/schema attrs
+(schema/register! :seon.spec/key :keyword)
+(schema/register! :seon.spec/namespace :string)
+(schema/register! :seon.spec/definition :string)
+(schema/register! :seon.spec/base-type :keyword)
+(schema/register! :seon.spec/contains-keys [:vector :keyword])
+(schema/register! :seon.spec/optional-keys [:vector :keyword])
+(schema/register! :seon.spec/references [:vector :keyword])
+(schema/register! :seon.spec/updated-at inst?)
+
 (schema/register! ::conn
                   [:any {:description "Datalevin connection"}])
 
@@ -476,8 +526,9 @@
 
   ;; Get connection
   (def mgr (:seon.db.datalevin/connections state/system))
-  (def dl-conn (conn/get-master-conn!
-                {:seon.db.datalevin.conn/manager mgr}))
+  (def dl-conn (conn/get-conn!
+                {:seon.db.datalevin.conn/manager mgr
+                 :seon.db.datalevin.conn/db :seon.runtime}))
 
   ;; Full project analysis + ingest
   (def project (analyzer/analyze-project! {}))

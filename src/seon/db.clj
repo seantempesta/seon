@@ -19,6 +19,8 @@
             [malli.core :as m]
             [seon.db.datalevin.conn :as conn]
             [seon.db.datalevin.writer :as writer]
+            [seon.db.schema :as db-schema]
+            [seon.schema :as schema]
             [taoensso.timbre :as log])
   (:import [java.time Instant]))
 
@@ -68,6 +70,59 @@
     (catch Throwable _
       true)))
 
+(defn- system-attr?
+  "Returns true for :db/* system attributes that should not be validated
+   against the Malli registry."
+  [k]
+  (and (keyword? k)
+       (= "db" (namespace k))))
+
+(defn- extract-tx-attrs
+  "Extract all attribute keywords from tx-data.
+   Handles both map entities and vector tuples [op e a v]."
+  [tx-data]
+  (into #{}
+        (mapcat (fn [datum]
+                  (cond
+                    (map? datum) (keys datum)
+                    (and (vector? datum) (>= (count datum) 3))
+                    [(nth datum 2)]
+                    :else nil)))
+        tx-data))
+
+(defn- validate-attrs!
+  "Ensure all non-system attrs in tx-data are registered in seon.schema.
+   Throws ex-info if any unregistered attr is found."
+  [attrs]
+  (let [domain-attrs (remove system-attr? attrs)
+        unregistered (into [] (remove schema/registered?) domain-attrs)]
+    (when (seq unregistered)
+      (throw (ex-info (str "Unregistered attributes in transaction: " (pr-str unregistered)
+                           ". Register them with seon.schema/register! first.")
+                      {:unregistered unregistered})))))
+
+(defn- ensure-schema!
+  "For each domain attr, check if it exists in the Datalevin schema for conn.
+   If missing, derive the Datalevin type from the Malli definition and call
+   d/update-schema to add it."
+  [conn attrs]
+  (let [current-schema (d/schema conn)
+        domain-attrs (remove system-attr? attrs)
+        missing (remove #(contains? current-schema %) domain-attrs)]
+    (when (seq missing)
+      (let [schema-update
+            (reduce
+             (fn [acc attr]
+               (let [malli-def (schema/schema-definition attr)
+                     entry-schema (db-schema/malli-map->datalevin-schema
+                                   [:map [attr malli-def]])]
+                 (merge acc entry-schema)))
+             {}
+             missing)]
+        (when (seq schema-update)
+          (log/info "Auto-adding schema for attrs" {:attrs (keys schema-update)})
+          (d/update-schema conn schema-update))))))
+
 (defn- ensure-writer!
   "Lazily create a writer flow for conn if one doesn't exist yet.
    The writer flow provides pause/resume coordination and metrics.
@@ -114,6 +169,9 @@
   ([conn tx-data]
    (transact! conn tx-data nil))
   ([conn tx-data tx-meta]
+   (let [attrs (extract-tx-attrs tx-data)]
+     (validate-attrs! attrs)
+     (ensure-schema! conn attrs))
    (ensure-writer! conn)
    (let [caller (caller-ns)
          fut (future
@@ -181,18 +239,11 @@
         (throw (ex-info "Integrant system not running" {})))))
 
 (defn- db-name->conn-args
-  "Convert a db-name keyword to [get-fn reconnect-namespace].
+  "Convert a db-name keyword to [get-fn reconnect-db].
    get-fn takes a conn manager and returns a connection atom."
   [db-name]
-  (case db-name
-    :seon [#(conn/get-master-conn! {::conn/manager %})
-           :seon.db.datalevin.conn/master]
-    :seon.runtime [#(conn/get-runtime-conn! {::conn/manager %})
-                   :seon.db.datalevin.conn/runtime]
-    ;; Anything else is a namespace db name
-    [(fn [mgr] (conn/get-namespace-conn! {::conn/manager mgr
-                                          ::conn/namespace (name db-name)}))
-     (name db-name)]))
+  [#(conn/get-conn! {::conn/manager % ::conn/db db-name})
+   db-name])
 
 (defn- resolve-db
   "Resolve a db-name keyword to a Datalevin db value.
@@ -229,7 +280,7 @@
                     {:error (.getMessage e)})
           (let [mgr (get-conn-manager)
                 [_ reconnect-ns] (db-name->conn-args db-name)]
-            (conn/reconnect! {::conn/manager mgr ::conn/namespace reconnect-ns})
+            (conn/reconnect! {::conn/manager mgr ::conn/db reconnect-ns})
             (f (resolve-db db-name))))
         (throw e)))))
 

@@ -316,8 +316,9 @@
                (require 'integrant.repl.state)
                (when-let [sys @(resolve 'integrant.repl.state/system)]
                  (let [mgr (:seon.db.datalevin/connections sys)
-                       get-conn (requiring-resolve 'seon.db.datalevin.conn/get-master-conn!)]
-                   (get-conn {:seon.db.datalevin.conn/manager mgr})))
+                       get-conn (requiring-resolve 'seon.db.datalevin.conn/get-conn!)]
+                   (get-conn {:seon.db.datalevin.conn/manager mgr
+                              :seon.db.datalevin.conn/db :seon.runtime})))
                (catch Exception _ nil))
         test-nses (if conn
                     (ts/affected-test-namespaces

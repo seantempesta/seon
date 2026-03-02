@@ -21,7 +21,7 @@
   (boolean
    (try
      (when-let [mgr (:seon.db.datalevin/connections state/system)]
-       (conn/get-master-conn! {::conn/manager mgr}))
+       (conn/get-conn! {::conn/manager mgr ::conn/db :seon.flow}))
      (catch Exception _ nil))))
 
 (defmacro when-system

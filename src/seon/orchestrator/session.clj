@@ -244,9 +244,9 @@
       (let [ns-conn nil  ;; No namespace connection needed
             dl-conn (when datalevin-manager
                       (try
-                        (conn/get-namespace-conn!
+                        (conn/get-conn!
                          {::conn/manager datalevin-manager
-                          ::conn/namespace namespace})
+                          ::conn/db (keyword (str namespace))})
                         (catch Exception e
                           (log/warn "Failed to get Datalevin namespace conn"
                                     {:namespace namespace :error (.getMessage e)})

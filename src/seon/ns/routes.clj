@@ -124,8 +124,9 @@
   []
   (when-let [mgr (:seon.db.datalevin/connections state/system)]
     (try
-      (dl-conn/get-runtime-conn! {::dl-conn/manager mgr
-                                  ::dl-conn/schema (runtime/runtime-merged-schema)})
+      (dl-conn/get-conn! {::dl-conn/manager mgr
+                          ::dl-conn/db :seon.runtime
+                          ::dl-conn/schema (runtime/runtime-merged-schema)})
       (catch Exception _ nil))))
 
 ;;; ---------------------------------------------------------------------------
