@@ -4,6 +4,7 @@
    Tests ID generation, instance registration, and crash detection."
   (:require [clojure.test :refer [deftest testing is use-fixtures]]
             [datalevin.core :as d]
+            [seon.db :as db]
             [seon.graph.ingest :as ingest]
             [seon.runtime :as runtime]))
 
@@ -21,7 +22,7 @@
   (let [dir (temp-dir)
         ;; Merge graph schema with runtime schema (like production)
         merged-schema (merge ingest/datalevin-schema runtime/runtime-schema)
-        conn (d/get-conn dir merged-schema)]
+        conn (d/create-conn dir merged-schema)]
     (reset! test-dir dir)
     (reset! test-conn conn)
     ;; Set test connection override (replaces old init! pattern)
@@ -33,6 +34,8 @@
   (runtime/reset-registry! {})
   ;; Clear test conn override
   (runtime/set-test-conn! nil)
+  ;; Shutdown writer flows before closing conn to prevent SIGSEGV
+  (db/shutdown-writers!)
   ;; Close connection
   (when-let [conn @test-conn]
     (try (d/close conn) (catch Exception _)))

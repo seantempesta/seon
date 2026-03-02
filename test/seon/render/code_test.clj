@@ -113,7 +113,7 @@
 
 (defn- create-test-conn []
   (let [dir (str "tmp/test-render-code-" (System/currentTimeMillis))
-        conn (d/get-conn dir test-schema)]
+        conn (d/create-conn dir test-schema)]
     (d/transact! conn test-data)
     [conn dir]))
 

@@ -60,17 +60,29 @@
   [conn]
   (System/identityHashCode conn))
 
+(defn- conn-closed?
+  "Check if a Datalevin connection is closed. Returns true if closed or nil."
+  [conn]
+  (try
+    (d/closed? conn)
+    (catch Throwable _
+      true)))
+
 (defn- ensure-writer!
   "Lazily create a writer flow for conn if one doesn't exist yet.
    The writer flow provides pause/resume coordination and metrics.
-   Normal writes bypass the flow channel for zero overhead."
+   Normal writes bypass the flow channel for zero overhead.
+   Refuses to create a flow for closed connections."
   [conn]
+  (when (conn-closed? conn)
+    (throw (ex-info "Cannot create writer for closed connection"
+                    {:conn-id (conn-id conn)})))
   (let [id (conn-id conn)]
     (when-not (get @writers id)
       (let [fl (writer/create-writer-flow {::writer/conn conn
                                            ::writer/db-name (str "conn-" id)})]
         (swap! writers assoc id {:flow fl :conn conn})
-        (log/debug "Created writer flow for conn" id)))
+        (log/info "Created writer flow" {:conn-id id})))
     nil))
 
 (defn- track-write!
@@ -300,6 +312,23 @@
         (log/warn e "Error stopping writer flow" id))))
   (reset! writers {})
   (log/info "All writer flows stopped"))
+
+(defn remove-writer!
+  "Stop and remove the writer flow for a specific connection.
+   Use when closing a connection that has a writer flow, to prevent
+   orphaned flows from crashing on later shutdown.
+   Safe to call even if no writer exists for conn."
+  [conn]
+  (let [id (conn-id conn)]
+    (when-let [{:keys [flow]} (get @writers id)]
+      (try
+        (flow/pause flow)
+        (flow/ping flow 5000)
+        (flow/stop flow)
+        (log/debug "Removed writer flow" {:conn-id id})
+        (catch Throwable e
+          (log/warn e "Error removing writer flow" {:conn-id id})))
+      (swap! writers dissoc id))))
 
 (defn writer-status
   "Returns status of writer flows. Nil values mean no writer for that conn."

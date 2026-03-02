@@ -35,7 +35,7 @@
 
 (defn with-temp-conn [f]
   (let [dir (temp-dir)
-        conn (d/get-conn dir ingest/datalevin-schema)]
+        conn (d/create-conn dir ingest/datalevin-schema)]
     (try
       (binding [*test-conn* conn]
         (f))

@@ -36,7 +36,7 @@
 (defn with-temp-conn [f]
   (let [dir (temp-dir)
         schema (merge ingest/datalevin-schema super/datalevin-schema)
-        conn (d/get-conn dir schema)]
+        conn (d/create-conn dir schema)]
     (try
       (binding [*test-conn* conn]
         (f))

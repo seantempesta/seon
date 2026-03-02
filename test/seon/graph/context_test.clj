@@ -31,7 +31,7 @@
 
 (defn with-populated-graph [f]
   (let [dir (temp-dir)
-        conn (d/get-conn dir ingest/datalevin-schema)]
+        conn (d/create-conn dir ingest/datalevin-schema)]
     (try
       (let [project (analyzer/analyze-project! {::analyzer/paths ["src/seon/graph/"]})
             entities (analyzer/extract-entities

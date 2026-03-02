@@ -11,7 +11,7 @@
 (def ^:private test-dir "tmp/test-datalevin")
 
 (defn- create-test-conn []
-  (d/get-conn test-dir))
+  (d/create-conn test-dir))
 
 (defn- cleanup-test-db []
   (let [dir (java.io.File. test-dir)]

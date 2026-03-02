@@ -2,6 +2,7 @@
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [datalevin.core :as d]
             [seon.ctx :as ctx]
+            [seon.db :as db]
             [seon.graph.ingest :as ingest]
             [seon.ns.lifecycle :as lifecycle]
             [seon.runtime :as runtime]))
@@ -22,12 +23,13 @@
         merged-schema (merge ingest/datalevin-schema
                              ctx/datalevin-schema
                              runtime/runtime-schema)
-        conn (d/get-conn dir merged-schema)]
+        conn (d/create-conn dir merged-schema)]
     (reset! test-dir dir)
     (reset! test-conn conn)
     conn))
 
 (defn- teardown-datalevin! []
+  (db/shutdown-writers!)
   (when-let [conn @test-conn]
     (try (d/close conn) (catch Exception _)))
   (when-let [dir @test-dir]

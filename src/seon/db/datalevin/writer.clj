@@ -15,47 +15,47 @@
 ;;; ---------------------------------------------------------------------------
 
 (schema/register! ::conn
-  [:fn {:description "Datalevin connection"} some?])
+                  [:fn {:description "Datalevin connection"} some?])
 
 (schema/register! ::db-name
-  [:string {:min 1 :description "Database name for logging"}])
+                  [:string {:min 1 :description "Database name for logging"}])
 
 (schema/register! ::total-writes
-  [:int {:min 0 :description "Total successful writes"}])
+                  [:int {:min 0 :description "Total successful writes"}])
 
 (schema/register! ::total-errors
-  [:int {:min 0 :description "Total write errors"}])
+                  [:int {:min 0 :description "Total write errors"}])
 
 (schema/register! ::last-write-at
-  [:maybe [:fn {:description "java.time.Instant or nil"} #(or (nil? %) (instance? Instant %))]])
+                  [:maybe [:fn {:description "java.time.Instant or nil"} #(or (nil? %) (instance? Instant %))]])
 
 (schema/register! ::tx-data
-  [:sequential {:description "Datalevin transaction data"} :any])
+                  [:sequential {:description "Datalevin transaction data"} :any])
 
 (schema/register! ::flow
-  [:fn {:description "core.async.flow flow object"} some?])
+                  [:fn {:description "core.async.flow flow object"} some?])
 
 (schema/register! ::correlation-id
-  [:any {:description "Correlation ID for promise delivery (typically UUID)"}])
+                  [:any {:description "Correlation ID for promise delivery (typically UUID)"}])
 
 (schema/register! ::pending-promises
-  [:fn {:description "Atom of {correlation-id -> promise}"} #(instance? clojure.lang.Atom %)])
+                  [:fn {:description "Atom of {correlation-id -> promise}"} #(instance? clojure.lang.Atom %)])
 
 (schema/register! ::tx-msg
-  [:map
-   [::tx-data ::tx-data]
-   [::correlation-id {:optional true} ::correlation-id]])
+                  [:map
+                   [::tx-data ::tx-data]
+                   [::correlation-id {:optional true} ::correlation-id]])
 
 (schema/register! ::create-writer-request
-  [:map
-   [::conn ::conn]
-   [::db-name {:optional true} ::db-name]
-   [::pending-promises {:optional true} ::pending-promises]])
+                  [:map
+                   [::conn ::conn]
+                   [::db-name {:optional true} ::db-name]
+                   [::pending-promises {:optional true} ::pending-promises]])
 
 (schema/register! ::inject-tx-request
-  [:map
-   [::flow ::flow]
-   [::tx-msg ::tx-msg]])
+                  [:map
+                   [::flow ::flow]
+                   [::tx-msg ::tx-msg]])
 
 ;;; ---------------------------------------------------------------------------
 ;;; Step Function
@@ -92,14 +92,26 @@
   ;; transition
   ([state transition]
    (case transition
-     (:clojure.core.async.flow/pause :clojure.core.async.flow/stop)
+     ;; Flush on pause only. Stop is async and races with conn close — never
+     ;; touch the conn during stop. The shutdown-writers! pattern is:
+     ;; pause → ping (waits for this flush) → stop (no-op transition).
+     :clojure.core.async.flow/pause
      (do
        (try
          (when-let [conn (::conn state)]
-           (d/transact! conn [])
-           (log/debug "Flushed writes on" (name transition) "for" (::db-name state)))
+           (if (d/closed? conn)
+             (log/warn "Skipping flush on pause for" (::db-name state)
+                       "— connection already closed")
+             (do
+               (d/transact! conn [])
+               (log/debug "Flushed writes on pause for" (::db-name state)))))
          (catch Throwable e
-           (log/warn e "Failed to flush on" (name transition) "for" (::db-name state))))
+           (log/warn e "Failed to flush on pause for" (::db-name state))))
+       state)
+
+     :clojure.core.async.flow/stop
+     (do
+       (log/debug "Writer stop transition for" (::db-name state) "— no flush (async safety)")
        state)
 
      :clojure.core.async.flow/resume
