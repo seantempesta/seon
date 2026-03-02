@@ -394,18 +394,63 @@
 ;; Database Management
 ;; ========================================
 
+(defn restart-db!
+  "Stop and restart the Datalevin server process.
+  Closes all client connections first (prevents LMDB SIGSEGV during shutdown),
+  then stops the server, starts fresh, connections auto-reconnect on next use.
+
+  Use when:
+  - Datalevin is misbehaving and you want a clean restart
+  - After changing Datalevin server config
+  - After killing the external Datalevin process manually"
+  []
+  (let [sys state/system
+        server-state (:seon.db.datalevin/server sys)
+        conn-mgr (:seon.db.datalevin/connections sys)]
+    (when-not server-state
+      (throw (ex-info "No Datalevin server in running system" {})))
+    (let [old-port (:port server-state)
+          old-adopted? (:adopted? server-state)]
+      ;; Step 1: Close all client connections so no active LMDB transactions
+      (when conn-mgr
+        (println "Closing all Datalevin connections...")
+        (let [closed ((requiring-resolve 'seon.db.datalevin.conn/close-all-connections!)
+                      {:seon.db.datalevin.conn/manager conn-mgr})]
+          (println (str "  Closed " closed " connections"))))
+      ;; Step 2: Stop the server process
+      (println (str "Stopping Datalevin server (port " old-port
+                    ", adopted=" old-adopted? ")..."))
+      (ig/halt-key! :seon.db.datalevin/server server-state)
+      ;; Step 3: Wait for LMDB to fully sync and release files
+      (Thread/sleep 2000)
+      ;; Step 4: Start fresh server
+      (println "Starting Datalevin server...")
+      (let [cfg (config/system-config {:profile :dev})
+            opts (:seon.db.datalevin/server cfg)
+            new-state (ig/init-key :seon.db.datalevin/server opts)]
+        (alter-var-root #'state/system assoc :seon.db.datalevin/server new-state)
+        (println (str "Datalevin server ready (port " (:port new-state)
+                      ", pid=" (or (some-> (:process new-state) (.pid)) (:pid new-state))
+                      ")"))
+        new-state))))
+
 (defn db-reset!
   "Delete all data and restart with fresh database.
-  WARNING: This deletes all data!"
+  WARNING: This deletes all data!
+  Stops the entire system, wipes data/datalevin/, restarts everything."
   []
-  (println "Stopping system...")
+  (println "Stopping system (including Datalevin server)...")
   (halt)
+  ;; Give Datalevin process time to fully shut down and release LMDB files
+  (Thread/sleep 2000)
   (println "Deleting data directories...")
   (doseq [dir-name ["data/datalevin"]]
     (let [data-dir (io/file dir-name)]
       (when (.exists data-dir)
-        (doseq [f (reverse (file-seq data-dir))]
-          (.delete f)))))
+        (let [files (reverse (file-seq data-dir))
+              count (count files)]
+          (doseq [f files] (.delete f))
+          (println (str "  Deleted " count " files from " dir-name))))))
   (println "Starting fresh system...")
   (go)
   (println "Database reset complete."))

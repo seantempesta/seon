@@ -35,14 +35,22 @@
 (schema/register! ::flow
   [:fn {:description "core.async.flow flow object"} some?])
 
+(schema/register! ::correlation-id
+  [:any {:description "Correlation ID for promise delivery (typically UUID)"}])
+
+(schema/register! ::pending-promises
+  [:fn {:description "Atom of {correlation-id -> promise}"} #(instance? clojure.lang.Atom %)])
+
 (schema/register! ::tx-msg
   [:map
-   [::tx-data ::tx-data]])
+   [::tx-data ::tx-data]
+   [::correlation-id {:optional true} ::correlation-id]])
 
 (schema/register! ::create-writer-request
   [:map
    [::conn ::conn]
-   [::db-name {:optional true} ::db-name]])
+   [::db-name {:optional true} ::db-name]
+   [::pending-promises {:optional true} ::pending-promises]])
 
 (schema/register! ::inject-tx-request
   [:map
@@ -56,27 +64,27 @@
 (defn db-writer-step
   "Flow step-fn that writes transactions to a Datalevin connection.
 
-   Init args: {::conn <datalevin-conn> ::db-name <string>}
+   Init args:
+     ::conn             - Datalevin connection (runtime, not serializable)
+     ::db-name          - Database name for logging
+     ::pending-promises - Atom of {correlation-id -> promise} (runtime)
 
    Inputs:
-     :in/transact - Transaction message with ::tx-data key
+     :in/transact - Transaction message with ::tx-data and optional ::correlation-id
 
-   Outputs:
-     :out/result - Successful write result with timing
-     :out/error  - Error details on write failure
-
+   No flow outputs. Results are delivered to promises as side-effects.
    On pause/stop, flushes pending writes via empty transact."
   ;; describe
   ([]
    {:ins {:in/transact "Transaction data maps to write"}
-    :outs {:out/result "Successful write results"
-           :out/error "Write error details"}
+    :outs {}
     :workload :io})
 
   ;; init
-  ([{::keys [conn db-name]}]
+  ([{::keys [conn db-name pending-promises]}]
    {::conn conn
     ::db-name (or db-name "unknown")
+    ::pending-promises pending-promises
     ::total-writes 0
     ::total-errors 0
     ::last-write-at nil})
@@ -88,7 +96,6 @@
      (do
        (try
          (when-let [conn (::conn state)]
-           ;; Flush by issuing an empty transaction
            (d/transact! conn [])
            (log/debug "Flushed writes on" (name transition) "for" (::db-name state)))
          (catch Throwable e
@@ -107,28 +114,34 @@
      :in/transact
      (let [conn (::conn state)
            tx-data (::tx-data tx-msg)
+           cid (::correlation-id tx-msg)
+           promises (::pending-promises state)
            t0 (System/nanoTime)]
        (try
-         (let [_result (d/transact! conn tx-data)
+         (let [tx-report (d/transact! conn tx-data)
                elapsed-ms (/ (- (System/nanoTime) t0) 1e6)
                now (Instant/now)]
+           (when (and cid promises)
+             (when-let [p (get @promises cid)]
+               (swap! promises dissoc cid)
+               (deliver p {::status :ok
+                           ::tx-report tx-report
+                           ::elapsed-ms elapsed-ms})))
            [(-> state
                 (update ::total-writes inc)
                 (assoc ::last-write-at now))
-            {:out/result [{::status :ok
-                           ::db-name (::db-name state)
-                           ::tx-count (count tx-data)
-                           ::elapsed-ms elapsed-ms
-                           ::at now}]}])
+            nil])
          (catch Exception e
            (let [elapsed-ms (/ (- (System/nanoTime) t0) 1e6)]
              (log/warn e "Write failed for" (::db-name state))
+             (when (and cid promises)
+               (when-let [p (get @promises cid)]
+                 (swap! promises dissoc cid)
+                 (deliver p {::status :error
+                             ::error e
+                             ::elapsed-ms elapsed-ms})))
              [(update state ::total-errors inc)
-              {:out/error [{::status :error
-                            ::db-name (::db-name state)
-                            ::error (.getMessage e)
-                            ::elapsed-ms elapsed-ms
-                            ::at (Instant/now)}]}]))))
+              nil]))))
 
      ;; unknown input
      [state nil])))
@@ -146,9 +159,12 @@
 
    Returns the flow object (already started and resumed)."
   {:malli/schema [:=> [:cat ::create-writer-request] ::flow]}
-  [{::keys [conn db-name]}]
-  (let [config {:procs {:writer {:proc (flow/process #'db-writer-step)
-                                 :args {::conn conn ::db-name db-name}}}
+  [{::keys [conn db-name pending-promises]}]
+  (let [promises (or pending-promises (atom {}))
+        config {:procs {:writer {:proc (flow/process #'db-writer-step)
+                                 :args {::conn conn
+                                        ::db-name db-name
+                                        ::pending-promises promises}}}
                 :conns []}
         fl (flow/create-flow config)]
     (flow/start fl)

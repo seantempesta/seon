@@ -31,11 +31,10 @@
 ;;; ---------------------------------------------------------------------------
 
 (deftest describe-test
-  (testing "returns ins, outs, and workload"
+  (testing "returns ins, empty outs, and workload"
     (let [desc (writer/db-writer-step)]
       (is (contains? (:ins desc) :in/transact))
-      (is (contains? (:outs desc) :out/result))
-      (is (contains? (:outs desc) :out/error))
+      (is (= {} (:outs desc)))
       (is (= :io (:workload desc))))))
 
 ;;; ---------------------------------------------------------------------------
@@ -55,59 +54,106 @@
 
   (testing "defaults db-name to unknown"
     (let [state (writer/db-writer-step {::writer/conn (atom nil)})]
-      (is (= "unknown" (::writer/db-name state))))))
+      (is (= "unknown" (::writer/db-name state)))))
+
+  (testing "pending-promises stored in state when provided"
+    (let [promises (atom {})
+          state (writer/db-writer-step {::writer/conn (atom nil)
+                                        ::writer/pending-promises promises})]
+      (is (= promises (::writer/pending-promises state))))))
 
 ;;; ---------------------------------------------------------------------------
-;;; Transform — successful write (3-arity)
+;;; Transform — successful write with promise (3-arity)
 ;;; ---------------------------------------------------------------------------
 
 (deftest transform-write-test
-  (testing "writes tx-data to Datalevin and updates metrics"
+  (testing "writes tx-data and delivers result to promise"
     (with-temp-conn
       (fn [conn]
-        (let [state (writer/db-writer-step {::writer/conn conn
-                                            ::writer/db-name "test"})
-              tx-msg {::writer/tx-data [{:name "Alice" :age 30}]}
+        (let [cid (random-uuid)
+              p (promise)
+              promises (atom {cid p})
+              state (writer/db-writer-step {::writer/conn conn
+                                            ::writer/db-name "test"
+                                            ::writer/pending-promises promises})
+              tx-msg {::writer/tx-data [{:name "Alice" :age 30}]
+                      ::writer/correlation-id cid}
               [state' outputs] (writer/db-writer-step state :in/transact tx-msg)]
           ;; State updated
           (is (= 1 (::writer/total-writes state')))
           (is (= 0 (::writer/total-errors state')))
           (is (instance? Instant (::writer/last-write-at state')))
-          ;; Output sent
-          (is (= 1 (count (:out/result outputs))))
-          (let [result (first (:out/result outputs))]
+          ;; No flow outputs
+          (is (nil? outputs))
+          ;; Promise delivered with :ok status
+          (let [result (deref p 1000 :timeout)]
+            (is (not= :timeout result))
             (is (= :ok (::writer/status result)))
-            (is (= "test" (::writer/db-name result)))
-            (is (= 1 (::writer/tx-count result)))
+            (is (some? (::writer/tx-report result)))
             (is (number? (::writer/elapsed-ms result))))
+          ;; Promise removed from atom
+          (is (empty? @promises))
           ;; Data actually in DB
-          (let [db @conn
-                results (d/q '[:find ?n ?a
+          (let [results (d/q '[:find ?n ?a
                                 :where [?e :name ?n] [?e :age ?a]]
-                              db)]
+                              @conn)]
             (is (= #{["Alice" 30]} (set results)))))))))
 
 ;;; ---------------------------------------------------------------------------
-;;; Transform — error handling (3-arity)
+;;; Transform — error with promise (3-arity)
 ;;; ---------------------------------------------------------------------------
 
 (deftest transform-error-test
-  (testing "handles invalid tx-data gracefully"
+  (testing "handles invalid tx-data and delivers error to promise"
     (with-temp-conn
       (fn [conn]
-        (let [state (writer/db-writer-step {::writer/conn conn
-                                            ::writer/db-name "test"})
-              ;; Pass something that will cause a transact error
-              tx-msg {::writer/tx-data [:not-a-valid-transaction]}
+        (let [cid (random-uuid)
+              p (promise)
+              promises (atom {cid p})
+              state (writer/db-writer-step {::writer/conn conn
+                                            ::writer/db-name "test"
+                                            ::writer/pending-promises promises})
+              tx-msg {::writer/tx-data [:not-a-valid-transaction]
+                      ::writer/correlation-id cid}
               [state' outputs] (writer/db-writer-step state :in/transact tx-msg)]
           ;; Error count incremented
           (is (= 1 (::writer/total-errors state')))
           (is (= 0 (::writer/total-writes state')))
-          ;; Error output sent
-          (is (= 1 (count (:out/error outputs))))
-          (let [err (first (:out/error outputs))]
-            (is (= :error (::writer/status err)))
-            (is (string? (::writer/error err)))))))))
+          ;; No flow outputs
+          (is (nil? outputs))
+          ;; Promise delivered with :error status
+          (let [result (deref p 1000 :timeout)]
+            (is (not= :timeout result))
+            (is (= :error (::writer/status result)))
+            (is (instance? Exception (::writer/error result)))
+            (is (number? (::writer/elapsed-ms result))))
+          ;; Promise removed from atom
+          (is (empty? @promises)))))))
+
+;;; ---------------------------------------------------------------------------
+;;; Transform — write without correlation-id (no promise)
+;;; ---------------------------------------------------------------------------
+
+(deftest transform-without-promise-test
+  (testing "write without correlation-id updates state and DB, no promise needed"
+    (with-temp-conn
+      (fn [conn]
+        (let [promises (atom {})
+              state (writer/db-writer-step {::writer/conn conn
+                                            ::writer/db-name "test"
+                                            ::writer/pending-promises promises})
+              tx-msg {::writer/tx-data [{:name "Bob" :age 25}]}
+              [state' outputs] (writer/db-writer-step state :in/transact tx-msg)]
+          ;; State updated
+          (is (= 1 (::writer/total-writes state')))
+          (is (instance? Instant (::writer/last-write-at state')))
+          ;; No flow outputs
+          (is (nil? outputs))
+          ;; No promises touched
+          (is (empty? @promises))
+          ;; Data in DB
+          (let [results (d/q '[:find ?n :where [?e :name ?n]] @conn)]
+            (is (= #{["Bob"]} (set results)))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Transform — unknown input (3-arity)

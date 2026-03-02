@@ -125,27 +125,39 @@
     (:adopted? component) :adopted
     :else :started))
 
+(defn- datalevin-process-info
+  "Get PID and alive status of the external Datalevin process."
+  [server-component]
+  (let [process (:process server-component)
+        pid (or (when process (.pid ^Process process))
+                (:pid server-component))]
+    (cond-> {}
+      pid (assoc :pid (str pid))
+      process (assoc :process-alive? (.isAlive ^Process process)))))
+
 (defn- check-datalevin
   "Check Datalevin server health (port 8898).
-   Also includes connection manager status and mode if available."
+   Datalevin runs as a separate JVM process — survives Seon restarts.
+   Reports process PID, connection manager status, and mode."
   []
   (let [tcp-check (check-port 8898 1000)
         system (get-system)
         server-component (:seon.db.datalevin/server system)
-        mode (component-mode server-component)]
+        mode (component-mode server-component)
+        proc-info (datalevin-process-info server-component)]
     (try
       (require 'seon.db.datalevin.conn)
       (if-let [manager (:seon.db.datalevin/connections system)]
         (let [conn-health ((resolve 'seon.db.datalevin.conn/health)
                            {:seon.db.datalevin.conn/manager manager})]
-          (assoc tcp-check
-                 :mode mode
-                 :port (or (:port server-component) 8898)
-                 :details {:conn-status (:seon.db.datalevin.conn/status conn-health)
-                           :cached-connections (:seon.db.datalevin.conn/total-connections conn-health)
-                           :server-reachable? (:seon.db.datalevin.conn/server-reachable? conn-health)}))
-        (assoc tcp-check :mode mode :port 8898))
-      (catch Exception _ (assoc tcp-check :mode mode :port 8898)))))
+          (merge tcp-check proc-info
+                 {:mode mode
+                  :port (or (:port server-component) 8898)
+                  :details {:conn-status (:seon.db.datalevin.conn/status conn-health)
+                            :cached-connections (:seon.db.datalevin.conn/total-connections conn-health)
+                            :server-reachable? (:seon.db.datalevin.conn/server-reachable? conn-health)}}))
+        (merge tcp-check proc-info {:mode mode :port 8898}))
+      (catch Exception _ (merge tcp-check proc-info {:mode mode :port 8898})))))
 
 (defn- check-resources
   "Get current resource utilization."

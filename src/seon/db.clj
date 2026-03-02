@@ -6,13 +6,18 @@
    for zero overhead, but each connection gets a lazily-created writer
    flow for coordination (pause/resume for backups, metrics via ping).
 
-   API mirrors datalevin.core signatures exactly so agents
-   don't need to learn new APIs. Positional args are intentional
-   for drop-in compatibility — this is the one namespace where
-   map-in/map-out does not apply."
+   Two API levels:
+   - Raw pass-through: `q`, `pull`, `pull-many`, `entity` — take a db value
+   - Named convenience: `query`, `pull-by-name`, `pull-many-by-name` — take
+     a db-name keyword (`:seon`, `:seon.runtime`, or namespace string),
+     resolve connection via conn manager, handle staleness with retry
+
+   Positional args are intentional for drop-in compatibility — this is
+   the one namespace where map-in/map-out does not apply."
   (:require [clojure.core.async.flow :as flow]
             [datalevin.core :as d]
             [malli.core :as m]
+            [seon.db.datalevin.conn :as conn]
             [seon.db.datalevin.writer :as writer]
             [taoensso.timbre :as log])
   (:import [java.time Instant]))
@@ -136,6 +141,125 @@
   {:malli/schema [:=> [:cat :any :any] :any]}
   [db eid]
   (d/entity db eid))
+
+;;; --- Named Convenience API ---
+;;;
+;;; These functions resolve a db-name keyword to a connection via the
+;;; conn manager, deref it to get a db value, and delegate to datalevin.
+;;; On connection error, they reconnect and retry once.
+
+(def ^:dynamic *conn-manager*
+  "Dynamic var for overriding the connection manager in tests.
+   When nil (default), resolves from Integrant system."
+  nil)
+
+(defn- get-conn-manager
+  "Get the connection manager from *conn-manager* or the running Integrant system.
+   Throws if neither is available."
+  []
+  (or *conn-manager*
+      (if-let [sys-var (try @(requiring-resolve 'integrant.repl.state/system)
+                            (catch Exception _ nil))]
+        (or (:seon.db.datalevin/connections sys-var)
+            (throw (ex-info "Connection manager not available — is the system running?"
+                            {:component :seon.db.datalevin/connections})))
+        (throw (ex-info "Integrant system not running" {})))))
+
+(defn- db-name->conn-args
+  "Convert a db-name keyword to [get-fn reconnect-namespace].
+   get-fn takes a conn manager and returns a connection atom."
+  [db-name]
+  (case db-name
+    :seon [#(conn/get-master-conn! {::conn/manager %})
+           :seon.db.datalevin.conn/master]
+    :seon.runtime [#(conn/get-runtime-conn! {::conn/manager %})
+                   :seon.db.datalevin.conn/runtime]
+    ;; Anything else is a namespace db name
+    [(fn [mgr] (conn/get-namespace-conn! {::conn/manager mgr
+                                           ::conn/namespace (name db-name)}))
+     (name db-name)]))
+
+(defn- resolve-db
+  "Resolve a db-name keyword to a Datalevin db value.
+   Gets connection from conn manager and derefs it."
+  [db-name]
+  (let [mgr (get-conn-manager)
+        [get-fn _] (db-name->conn-args db-name)]
+    @(get-fn mgr)))
+
+(defn- connection-error?
+  "Check if an exception indicates a connection/server error."
+  [^Throwable e]
+  (let [msg (str (.getMessage e) " " (some-> (.getCause e) (.getMessage)))]
+    (boolean
+     (or (re-find #"(?i)connection refused" msg)
+         (re-find #"(?i)connection reset" msg)
+         (re-find #"(?i)broken pipe" msg)
+         (re-find #"(?i)closed" msg)
+         (re-find #"(?i)not connected" msg)
+         (re-find #"(?i)timeout" msg)
+         (instance? java.net.ConnectException e)
+         (instance? java.net.ConnectException (.getCause e))))))
+
+(defn- with-retry
+  "Execute f with a db resolved from db-name. On connection error,
+   reconnect and retry once."
+  [db-name f]
+  (try
+    (f (resolve-db db-name))
+    (catch Exception e
+      (if (connection-error? e)
+        (do
+          (log/warn "Connection error on" db-name "- reconnecting and retrying"
+                    {:error (.getMessage e)})
+          (let [mgr (get-conn-manager)
+                [_ reconnect-ns] (db-name->conn-args db-name)]
+            (conn/reconnect! {::conn/manager mgr ::conn/namespace reconnect-ns})
+            (f (resolve-db db-name))))
+        (throw e)))))
+
+(defn query
+  "Query a named database. Resolves connection by db-name, retries on staleness.
+
+   db-name — :seon, :seon.runtime, or a namespace keyword like :seon.trading
+   datalog-query — Datalog query (same as d/q first arg)
+   inputs — additional query inputs (sources, rules, etc.)
+
+   Example:
+     (query :seon.runtime '[:find ?e ?n :where [?e :seon.fn/name ?n]])
+     (query :seon '[:find ?e :where [?e :name \"test\"]])"
+  {:malli/schema [:=> [:cat :keyword :any [:* :any]] :any]}
+  [db-name datalog-query & inputs]
+  (with-retry db-name
+    (fn [db] (apply d/q datalog-query db inputs))))
+
+(defn pull-by-name
+  "Pull an entity from a named database by selector and eid.
+
+   db-name — :seon, :seon.runtime, or a namespace keyword
+   selector — pull pattern (e.g., '[*] or '[:name :age])
+   eid — entity id or lookup ref
+
+   Example:
+     (pull-by-name :seon.runtime '[*] 1)"
+  {:malli/schema [:=> [:cat :keyword :any :any] :any]}
+  [db-name selector eid]
+  (with-retry db-name
+    (fn [db] (d/pull db selector eid))))
+
+(defn pull-many-by-name
+  "Pull multiple entities from a named database.
+
+   db-name — :seon, :seon.runtime, or a namespace keyword
+   selector — pull pattern
+   eids — collection of entity ids or lookup refs
+
+   Example:
+     (pull-many-by-name :seon.runtime '[:seon.fn/name] [1 2 3])"
+  {:malli/schema [:=> [:cat :keyword :any [:sequential :any]] :any]}
+  [db-name selector eids]
+  (with-retry db-name
+    (fn [db] (d/pull-many db selector eids))))
 
 ;;; --- Writer Flow Coordination ---
 

@@ -1,7 +1,8 @@
 (ns seon.db-test
   (:require [clojure.test :refer [deftest is testing]]
             [datalevin.core :as d]
-            [seon.db :as db]))
+            [seon.db :as db]
+            [seon.db.datalevin.conn :as conn]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Helpers
@@ -82,3 +83,72 @@
         (let [before (:total-writes (db/stats))]
           (db/transact! conn [{:name "Eve" :age 28}])
           (is (= (inc before) (:total-writes (db/stats)))))))))
+
+;;; ---------------------------------------------------------------------------
+;;; Named Convenience API
+;;; ---------------------------------------------------------------------------
+
+(defn- make-fake-manager
+  "Build a fake conn manager backed by a local Datalevin connection.
+   Maps ::master to the given conn."
+  [conn]
+  {::conn/port 0
+   ::conn/ttl-ms 300000
+   ::conn/connections (atom {::conn/master {::conn/connection conn
+                                             ::conn/last-accessed (java.time.Instant/now)}})})
+
+(defn- with-named-db
+  "Set up a local db, bind it as the :seon named database via *conn-manager*,
+   and call f with the raw connection."
+  [f]
+  (with-temp-conn
+    (fn [conn]
+      (binding [db/*conn-manager* (make-fake-manager conn)]
+        (f conn)))))
+
+(deftest query-test
+  (testing "query resolves db by name and runs Datalog"
+    (with-named-db
+      (fn [conn]
+        (d/transact! conn [{:name "Alice" :age 30}])
+        (let [results (db/query :seon '[:find ?n :where [?e :name ?n]])]
+          (is (= #{["Alice"]} (set results))))))))
+
+(deftest query-with-inputs-test
+  (testing "query passes additional inputs to d/q"
+    (with-named-db
+      (fn [conn]
+        (d/transact! conn [{:name "Bob" :age 25}
+                           {:name "Carol" :age 35}])
+        ;; Use an input binding for age threshold
+        (let [results (db/query :seon
+                                '[:find ?n
+                                  :in $ ?min-age
+                                  :where
+                                  [?e :name ?n]
+                                  [?e :age ?a]
+                                  [(>= ?a ?min-age)]]
+                                30)]
+          (is (= #{["Carol"]} (set results))))))))
+
+(deftest pull-by-name-test
+  (testing "pull-by-name resolves entity by eid"
+    (with-named-db
+      (fn [conn]
+        (d/transact! conn [{:name "Dave" :age 40}])
+        (let [eid (ffirst (d/q '[:find ?e :where [?e :name "Dave"]] @conn))
+              result (db/pull-by-name :seon '[:name :age] eid)]
+          (is (= "Dave" (:name result)))
+          (is (= 40 (:age result))))))))
+
+(deftest pull-many-by-name-test
+  (testing "pull-many-by-name resolves multiple entities"
+    (with-named-db
+      (fn [conn]
+        (d/transact! conn [{:name "Eve" :age 28}
+                           {:name "Frank" :age 33}])
+        (let [eids (mapv first (d/q '[:find ?e :where [?e :name _]] @conn))
+              results (db/pull-many-by-name :seon '[:name] eids)]
+          (is (= 2 (count results)))
+          (is (= #{["Eve"] ["Frank"]}
+                 (set (map (comp vector :name) results)))))))))
