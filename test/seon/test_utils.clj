@@ -2,13 +2,15 @@
   "Testing utilities and fixtures for Seon.
 
   Provides:
-  - Datalevin test fixture
+  - Datalevin test helpers with safe connection management
   - Test data generators
   - Property-based testing helpers"
-  (:require [clojure.test :refer :all]
+  (:require [clojure.test :refer [is]]
+            [datalevin.core :as d]
             [seon.db.schema :as schema]
             [malli.generator :as mg])
-  (:import [java.util UUID]))
+  (:import [java.io File]
+           [java.util UUID]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Legacy Test Node Fixture (stub)
@@ -24,8 +26,45 @@
   (f))
 
 ;;; ---------------------------------------------------------------------------
-;;; Datalevin Test Fixture
+;;; Datalevin Test Helpers
 ;;; ---------------------------------------------------------------------------
+
+(def ^:private fast-kv-opts
+  "KV options for fast test databases. :nosync skips fsync for speed."
+  {:flags #{:nordahead :writemap :mapasync :nosync}})
+
+(defn- delete-dir!
+  "Recursively delete a directory and all its contents."
+  [^String path]
+  (let [f (File. path)]
+    (when (.exists f)
+      (doseq [child (reverse (file-seq f))]
+        (.delete ^File child)))))
+
+(defn with-temp-conn
+  "Create a temporary Datalevin connection, run f with it, then clean up.
+
+   Uses d/create-conn (not d/get-conn) to avoid the global connection cache.
+   Uses :nosync for speed. Connection is closed and directory deleted on exit.
+
+   Usage:
+     (with-temp-conn schema
+       (fn [conn]
+         (d/transact! conn [{:name \"test\"}])
+         (is (= 1 (count (d/q '[:find ?e :where [?e :name _]] @conn))))))
+
+   Also works as a test fixture (0-arity schema, 1-arity test-fn):
+     (with-temp-conn (fn [conn] ...))"
+  ([f] (with-temp-conn {} f))
+  ([db-schema f]
+   (let [dir  (str "tmp/test-" (System/nanoTime))
+         conn (d/create-conn dir db-schema {:kv-opts fast-kv-opts})]
+     (try
+       (f conn)
+       (finally
+         (when-not (d/closed? conn)
+           (d/close conn))
+         (delete-dir! dir))))))
 
 (defn with-test-datalevin
   "Fixture that provides a temporary Datalevin connection for AI tests.
@@ -37,12 +76,9 @@
 
    Can be composed with with-test-node for tests needing both."
   [f]
-  (require 'datalevin.core)
   (require 'seon.ai.datalevin)
   (let [dir (str "tmp/dl-test-" (UUID/randomUUID))
-        get-conn (resolve 'datalevin.core/get-conn)
-        close-fn (resolve 'datalevin.core/close)
-        conn (get-conn dir)
+        conn (d/create-conn dir {} {:kv-opts fast-kv-opts})
         test-conn-var (resolve 'seon.ai.datalevin/*test-conn*)]
     (try
       (push-thread-bindings {test-conn-var conn})
@@ -51,11 +87,9 @@
         (finally
           (pop-thread-bindings)))
       (finally
-        (close-fn conn)
-        ;; Clean up temp directory
-        (let [d (java.io.File. dir)]
-          (doseq [child (reverse (file-seq d))]
-            (.delete child)))))))
+        (when-not (d/closed? conn)
+          (d/close conn))
+        (delete-dir! dir)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Test Data Generators
@@ -95,7 +129,7 @@
     Sequence of option quotes"
   [ticker spot n-strikes n-expiries]
   (let [strike-range (range (* spot 0.8) (* spot 1.2) (/ (* spot 0.4) n-strikes))
-        expiries (map #(java.time.Instant/now) (range n-expiries))]
+        expiries (map (fn [_] (java.time.Instant/now)) (range n-expiries))]
     (for [strike strike-range
           expiry expiries
           opt-type [:call :put]]
@@ -113,7 +147,7 @@
 
   Returns:
     Valid IV surface map"
-  [ticker n-points]
+  [_ticker n-points]
   (mg/generate schema/IVSurface {:registry @schema/registry
                                  :size n-points}))
 
@@ -149,51 +183,6 @@
   "Check if a map is a valid trading signal."
   [m]
   (schema/validate schema/TradingSignal m))
-
-;;; ---------------------------------------------------------------------------
-;;; Property Testing Helpers
-;;; ---------------------------------------------------------------------------
-
-(defmacro defprop
-  "Define a property-based test.
-
-  Usage:
-    (defprop my-property
-      {:num-tests 100}
-      [x (mg/generator :int)]
-      (is (= x x)))"
-  [name opts bindings & body]
-  `(clojure.test/deftest ~name
-     (let [result#
-           (clojure.test.check.clojure-test/defspec
-             ~(symbol (str name "-prop"))
-             ~(:num-tests opts 100)
-             (clojure.test.check.properties/for-all
-              ~bindings
-              ~@body))]
-       (is (:pass? result#)
-           (str "Property failed: " (:result result#))))))
-
-;; TODO: Fix this function - for-all is a macro and can't be resolved dynamically
-;; (defn check-property
-;;   "Run a property check with custom options.
-;;
-;;   Args:
-;;     gen - Generator for input
-;;     prop-fn - Property function (returns truthy if property holds)
-;;     opts - Options {:num-tests :seed}
-;;
-;;   Returns:
-;;     Test result map"
-;;   [gen prop-fn & {:keys [num-tests seed] :or {num-tests 100}}]
-;;   (require '[clojure.test.check :as tc])
-;;   (require '[clojure.test.check.properties :as prop])
-;;   (let [quick-check (resolve 'tc/quick-check)
-;;         for-all (resolve 'prop/for-all)]
-;;     (quick-check num-tests
-;;                  (for-all [x gen]
-;;                    (prop-fn x))
-;;                  (when seed {:seed seed}))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Time Helpers

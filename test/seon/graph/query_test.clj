@@ -32,7 +32,7 @@
 
 (defn with-populated-graph [f]
   (let [dir (temp-dir)
-        conn (d/get-conn dir ingest/datalevin-schema)]
+        conn (d/create-conn dir ingest/datalevin-schema)]
     (try
       ;; Populate graph with project analysis (just graph/ namespace for speed)
       (let [project (analyzer/analyze-project! {::analyzer/paths ["src/seon/graph/"]})

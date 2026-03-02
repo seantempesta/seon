@@ -16,7 +16,7 @@
 
 (defn- setup-datalevin! []
   (let [dir (temp-dir)
-        conn (d/get-conn dir ctx/datalevin-schema)]
+        conn (d/create-conn dir ctx/datalevin-schema)]
     (reset! test-dir dir)
     (reset! test-conn conn)
     conn))

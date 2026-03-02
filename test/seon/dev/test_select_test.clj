@@ -31,7 +31,7 @@
 
 (defn with-populated-graph [f]
   (let [dir (temp-dir)
-        conn (d/get-conn dir ingest/datalevin-schema)]
+        conn (d/create-conn dir ingest/datalevin-schema)]
     (try
       ;; Analyze just graph/ namespace for speed - has known dependency chain:
       ;; analyzer <- ingest, query (both depend on analyzer)

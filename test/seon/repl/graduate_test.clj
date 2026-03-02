@@ -38,7 +38,7 @@
   (let [db-dir (temp-dir)
         out-dir (temp-dir)
         schema (merge ingest/datalevin-schema super/datalevin-schema)
-        conn (d/get-conn db-dir schema)]
+        conn (d/create-conn db-dir schema)]
     (try
       (binding [*test-conn* conn
                 *test-dir* out-dir]

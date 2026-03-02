@@ -8,7 +8,8 @@
             [clojure.test :refer [deftest is testing use-fixtures]]
             [datalevin.core :as d]
             [seon.db :as db]
-            [seon.db.datalevin.backup :as backup])
+            [seon.db.datalevin.backup :as backup]
+            [seon.test-utils :as tu])
   (:import [java.io File]))
 
 ;;; ---------------------------------------------------------------------------
@@ -50,12 +51,13 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- create-test-db!
-  "Create a test Datalevin database with some data."
+  "Create a test Datalevin database with some data.
+   Caller is responsible for calling db/shutdown-writers! before d/close."
   [data-dir]
   (let [dir (str test-base-dir "/" data-dir)
         schema {:name {:db/valueType :db.type/string}
                 :value {:db/valueType :db.type/long}}
-        conn (d/get-conn dir schema)]
+        conn (d/create-conn dir schema {:kv-opts {:flags #{:nordahead :writemap :mapasync :nosync}}})]
     ;; Use db/transact! to register a writer flow
     (db/transact! conn [{:name "test" :value 42}])
     conn))
@@ -78,7 +80,8 @@
           backup-dir (str test-base-dir "/backups")
           result (backup/backup! {::backup/data-dir data-dir
                                   ::backup/backup-dir backup-dir})]
-      ;; Close conn after backup
+      ;; Shutdown writers before closing conn to prevent SIGSEGV
+      (db/shutdown-writers!)
       (d/close conn)
 
       ;; Check result
@@ -114,6 +117,7 @@
           _ (Thread/sleep 1100)  ; Ensure different timestamps
           result2 (backup/backup! {::backup/data-dir data-dir
                                    ::backup/backup-dir backup-dir})]
+      (db/shutdown-writers!)
       (d/close conn)
 
       ;; List backups
@@ -147,6 +151,7 @@
         (backup/backup! {::backup/data-dir data-dir
                          ::backup/backup-dir backup-dir})
         (Thread/sleep 1100))  ; Ensure different timestamps
+      (db/shutdown-writers!)
       (d/close conn)
 
       ;; Verify we have 4
@@ -180,7 +185,8 @@
           backup-dir (str test-base-dir "/backups")
           ;; Backup it
           backup-result (backup/backup! {::backup/data-dir data-dir
-                                          ::backup/backup-dir backup-dir})]
+                                         ::backup/backup-dir backup-dir})]
+      (db/shutdown-writers!)
       (d/close conn)
 
       ;; Create a new data directory
@@ -226,4 +232,5 @@
       (let [results (query-test-data conn)]
         (is (= 2 (count results))))
 
+      (db/shutdown-writers!)
       (d/close conn))))

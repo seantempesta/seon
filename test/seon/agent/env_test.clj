@@ -35,7 +35,7 @@
 
 (defn with-test-conn [f]
   (let [dir (temp-dir)
-        conn (d/get-conn dir combined-schema)]
+        conn (d/create-conn dir combined-schema)]
     (try
       (binding [*test-conn* conn]
         (f))

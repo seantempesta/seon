@@ -21,7 +21,7 @@
 
 (defn with-temp-datalevin [f]
   (let [dir (str "tmp/test-workout-" (System/currentTimeMillis))
-        conn (d/get-conn dir ingest/datalevin-schema)]
+        conn (d/create-conn dir ingest/datalevin-schema)]
     (try
       (binding [*conn* conn]
         (f))

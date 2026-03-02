@@ -1,7 +1,8 @@
 (ns seon.db.datalevin.writer-test
-  (:require [clojure.test :refer [deftest is testing use-fixtures]]
+  (:require [clojure.test :refer [deftest is testing]]
             [datalevin.core :as d]
-            [seon.db.datalevin.writer :as writer])
+            [seon.db.datalevin.writer :as writer]
+            [seon.test-utils :as tu])
   (:import [java.time Instant]))
 
 ;;; ---------------------------------------------------------------------------
@@ -13,18 +14,9 @@
    :age  {:db/valueType :db.type/long}})
 
 (defn- with-temp-conn
-  "Create a temp Datalevin connection, run f with it, then close."
+  "Create a temp Datalevin connection using the shared helper."
   [f]
-  (let [dir (str "tmp/test-writer-" (System/nanoTime))
-        conn (d/get-conn dir test-schema)]
-    (try
-      (f conn)
-      (finally
-        (d/close conn)
-        (let [d (java.io.File. dir)]
-          (doseq [child (.listFiles d)]
-            (.delete child))
-          (.delete d))))))
+  (tu/with-temp-conn test-schema f))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Describe (0-arity)
@@ -95,8 +87,8 @@
           (is (empty? @promises))
           ;; Data actually in DB
           (let [results (d/q '[:find ?n ?a
-                                :where [?e :name ?n] [?e :age ?a]]
-                              @conn)]
+                               :where [?e :name ?n] [?e :age ?a]]
+                             @conn)]
             (is (= #{["Alice" 30]} (set results)))))))))
 
 ;;; ---------------------------------------------------------------------------
