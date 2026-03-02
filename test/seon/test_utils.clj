@@ -3,12 +3,9 @@
 
   Provides:
   - Datalevin test helpers with safe connection management
-  - Test data generators
-  - Property-based testing helpers"
+  - Time helpers for test data"
   (:require [clojure.test :refer [is]]
-            [datalevin.core :as d]
-            [seon.db.schema :as schema]
-            [malli.generator :as mg])
+            [datalevin.core :as d])
   (:import [java.io File]
            [java.util UUID]))
 
@@ -51,10 +48,7 @@
      (with-temp-conn schema
        (fn [conn]
          (d/transact! conn [{:name \"test\"}])
-         (is (= 1 (count (d/q '[:find ?e :where [?e :name _]] @conn))))))
-
-   Also works as a test fixture (0-arity schema, 1-arity test-fn):
-     (with-temp-conn (fn [conn] ...))"
+         (is (= 1 (count (d/q '[:find ?e :where [?e :name _]] @conn))))))"
   ([f] (with-temp-conn {} f))
   ([db-schema f]
    (let [dir  (str "tmp/test-" (System/nanoTime))
@@ -69,12 +63,7 @@
 (defn with-test-datalevin
   "Fixture that provides a temporary Datalevin connection for AI tests.
    Sets seon.ai.datalevin/*test-conn* so AI functions use it instead
-   of the Integrant system connection.
-
-   Usage:
-     (use-fixtures :each with-test-datalevin)
-
-   Can be composed with with-test-node for tests needing both."
+   of the Integrant system connection."
   [f]
   (require 'seon.ai.datalevin)
   (let [dir (str "tmp/dl-test-" (UUID/randomUUID))
@@ -92,101 +81,13 @@
         (delete-dir! dir)))))
 
 ;;; ---------------------------------------------------------------------------
-;;; Test Data Generators
+;;; Helpers
 ;;; ---------------------------------------------------------------------------
 
 (defn gen-uuid
   "Generate a random UUID."
   []
   (UUID/randomUUID))
-
-(defn gen-option-quote
-  "Generate a random option quote.
-
-  Args:
-    overrides - Map of fields to override
-
-  Returns:
-    Valid option quote map"
-  ([]
-   (gen-option-quote {}))
-  ([overrides]
-   (merge (mg/generate schema/OptionQuote {:registry @schema/registry
-                                           :size 10})
-          {:xt/id (gen-uuid)}
-          overrides)))
-
-(defn gen-option-chain
-  "Generate a complete options chain for testing.
-
-  Args:
-    ticker - Underlying symbol
-    spot - Current spot price
-    n-strikes - Number of strikes per expiry
-    n-expiries - Number of expiration dates
-
-  Returns:
-    Sequence of option quotes"
-  [ticker spot n-strikes n-expiries]
-  (let [strike-range (range (* spot 0.8) (* spot 1.2) (/ (* spot 0.4) n-strikes))
-        expiries (map (fn [_] (java.time.Instant/now)) (range n-expiries))]
-    (for [strike strike-range
-          expiry expiries
-          opt-type [:call :put]]
-      (gen-option-quote {:asset/ticker ticker
-                         :option/strike strike
-                         :option/type opt-type
-                         :option/expiry expiry}))))
-
-(defn gen-iv-surface
-  "Generate a test IV surface.
-
-  Args:
-    ticker - Underlying symbol
-    n-points - Number of surface points
-
-  Returns:
-    Valid IV surface map"
-  [_ticker n-points]
-  (mg/generate schema/IVSurface {:registry @schema/registry
-                                 :size n-points}))
-
-(defn gen-trading-signal
-  "Generate a test trading signal.
-
-  Args:
-    overrides - Map of fields to override
-
-  Returns:
-    Valid trading signal map"
-  ([]
-   (gen-trading-signal {}))
-  ([overrides]
-   (merge (mg/generate schema/TradingSignal {:registry @schema/registry})
-          overrides)))
-
-;;; ---------------------------------------------------------------------------
-;;; Test Assertions
-;;; ---------------------------------------------------------------------------
-
-(defn valid-quote?
-  "Check if a map is a valid option quote."
-  [m]
-  (schema/validate schema/OptionQuote m))
-
-(defn valid-surface?
-  "Check if a map is a valid IV surface."
-  [m]
-  (schema/validate schema/IVSurface m))
-
-(defn valid-signal?
-  "Check if a map is a valid trading signal."
-  [m]
-  (schema/validate schema/TradingSignal m))
-
-;;; ---------------------------------------------------------------------------
-;;; Time Helpers
-;;; ---------------------------------------------------------------------------
 
 (defn days-ago
   "Create an Instant n days ago."

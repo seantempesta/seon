@@ -12,7 +12,7 @@
   Datalevin is the sole database."
   (:require [integrant.core :as ig]
             [taoensso.timbre :as log]
-            [seon.db.schema :as schema]
+            [seon.schema :as schema]
             [seon.db.datalevin.conn :as dl-conn]
             [seon.runtime :as runtime]
             ;; Load component namespaces for their ig/init-key methods
@@ -44,9 +44,9 @@
 (defmethod ig/init-key :seon.schema/registry
   [_ _]
   (log/info "Initializing Malli schema registry...")
-  (let [registry-value @schema/registry]
-    (log/info "Schema registry initialized" {:schema-count (count registry-value)})
-    registry-value))
+  (let [schemas (schema/registered-schemas)]
+    (log/info "Schema registry initialized" {:schema-count (count schemas)})
+    schemas))
 
 (defmethod ig/halt-key! :seon.schema/registry
   [_ _]

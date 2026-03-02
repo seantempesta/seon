@@ -1,206 +1,145 @@
 (ns seon.db.schema
-  "Malli schemas for financial domain entities.
+  "Malli → Datalevin schema bridge.
 
-  Defines schemas for:
-  - Options quotes (matching OPRA feed structure)
-  - Greeks (Delta, Gamma, Vega, Theta)
-  - Implied Volatility Surface
-  - Trading signals and strategies
+   Derives Datalevin attribute schemas from Malli `:map` schemas.
+   Define your entity once in Malli, get the Datalevin schema for free.
 
-  Includes custom generators for property-based testing."
+   - `malli-type->datalevin-type` — leaf type mapping
+   - `malli-map->datalevin-schema` — full map schema conversion
+
+   Annotate entries with `:db/*` properties for database concerns:
+     [:map [:foo/id {:db/unique :db.unique/identity} :uuid]]"
   (:require [malli.core :as m]
-            [malli.generator :as mg]
-            [malli.registry :as mr]
-            [malli.util :as mu]
-            [tick.core :as t]))
+            [taoensso.timbre :as log]))
 
 ;;; ---------------------------------------------------------------------------
-;;; Custom Generators
+;;; Type Mapping
 ;;; ---------------------------------------------------------------------------
 
-(def gen-ticker
-  "Generator for stock ticker symbols."
-  [:string {:min 1 :max 5
-            :gen/elements ["AAPL" "MSFT" "GOOGL" "AMZN" "META"
-                           "NVDA" "TSLA" "SPY" "QQQ" "IWM"]}])
+(def ^:private leaf-type-map
+  "Maps Malli leaf types to Datalevin value types.
+   Includes both keyword types (:string) and predicate types (inst?)."
+  {:string   :db.type/string
+   'string?  :db.type/string
+   :int      :db.type/long
+   'int?     :db.type/long
+   :double   :db.type/double
+   'double?  :db.type/double
+   :float    :db.type/float
+   'float?   :db.type/float
+   :boolean  :db.type/boolean
+   'boolean? :db.type/boolean
+   :keyword  :db.type/keyword
+   'keyword? :db.type/keyword
+   :symbol   :db.type/symbol
+   'symbol?  :db.type/symbol
+   :uuid     :db.type/uuid
+   'uuid?    :db.type/uuid
+   :inst     :db.type/instant
+   'inst?    :db.type/instant})
 
-(def gen-strike
-  "Generator for strike prices (positive, reasonable range)."
-  [:double {:min 1.0 :max 10000.0}])
-
-(def gen-price
-  "Generator for option prices (non-negative)."
-  [:double {:min 0.0 :max 1000.0}])
-
-(def gen-iv
-  "Generator for implied volatility (0-500% range)."
-  [:double {:min 0.01 :max 5.0}])
-
-(def gen-delta
-  "Generator for delta (-1 to 1)."
-  [:double {:min -1.0 :max 1.0}])
-
-(def gen-gamma
-  "Generator for gamma (non-negative)."
-  [:double {:min 0.0 :max 1.0}])
-
-(def gen-vega
-  "Generator for vega (non-negative)."
-  [:double {:min 0.0 :max 100.0}])
-
-(def gen-theta
-  "Generator for theta (typically negative for long options)."
-  [:double {:min -10.0 :max 0.0}])
+(defn malli-type->datalevin-type
+  "Maps a Malli type to a Datalevin `:db.type/*` keyword.
+   Returns nil for unmappable types."
+  {:malli/schema [:=> [:cat :any] [:maybe :keyword]]}
+  [malli-type]
+  (get leaf-type-map malli-type))
 
 ;;; ---------------------------------------------------------------------------
-;;; Core Schemas
+;;; Internal Helpers
 ;;; ---------------------------------------------------------------------------
 
-(def OptionType
-  "Option type: call or put."
-  [:enum :call :put])
+(defn- infer-enum-type
+  "Infer Datalevin type from enum values. All values must be same type."
+  [values]
+  (let [types (set (map type values))]
+    (when (= 1 (count types))
+      (condp = (first types)
+        clojure.lang.Keyword :db.type/keyword
+        java.lang.String     :db.type/string
+        java.lang.Long       :db.type/long
+        java.lang.Double     :db.type/double
+        nil))))
 
-(def AggressorSide
-  "Trade aggressor side."
-  [:enum :buy :sell])
+(defn- resolve-child-schema
+  "Unwrap :malli.core/val wrapper to get the actual child schema."
+  [entry-schema]
+  (if (= :malli.core/val (m/type entry-schema))
+    (first (m/children entry-schema))
+    entry-schema))
 
-(def OptionQuote
-  "Schema for an options quote (Table 1 from the paper).
+(declare malli-map->datalevin-schema)
 
-  Maps directly to OPRA feed structure with calculated Greeks.
+(defn- schema->datalevin-attr
+  "Convert a single Malli entry schema to [attr-map nested-schemas]."
+  [child-schema]
+  (let [schema-type (m/type child-schema)]
+    (case schema-type
+      (:string :int :double :float :boolean :keyword :symbol :uuid :inst
+       string? int? double? float? boolean? keyword? symbol? uuid? inst?)
+      [(when-let [dt (malli-type->datalevin-type schema-type)]
+         {:db/valueType dt}) nil]
 
-  ID format: \"{OCC_SYMBOL}-{ISO_TIMESTAMP}\" for deterministic deduplication.
-  Example: \"AAPL231215C00185000-2024-11-01T14:00:00Z\""
-  [:map {:closed true}
-   [:xt/id :string]  ; Deterministic ID for deduplication (OCC symbol + timestamp)
-   [:asset/ticker gen-ticker]
-   [:option/id :string]  ; OCC symbol e.g., \"AAPL230616C00150000\"
-   [:option/strike gen-strike]
-   [:option/type OptionType]
-   [:option/expiry inst?]
-   [:quote/bid gen-price]
-   [:quote/ask gen-price]
-   [:quote/iv {:optional true} gen-iv]
-   [:greeks/delta {:optional true} gen-delta]
-   [:greeks/gamma {:optional true} gen-gamma]
-   [:greeks/vega {:optional true} gen-vega]
-   [:greeks/theta {:optional true} gen-theta]
-   [:market/volume {:optional true} :int]
-   [:market/aggressor {:optional true} AggressorSide]])
+      :maybe
+      (let [inner (first (m/children child-schema))]
+        (schema->datalevin-attr inner))
 
-(def Greeks
-  "Schema for option Greeks."
-  [:map
-   [:delta gen-delta]
-   [:gamma gen-gamma]
-   [:vega gen-vega]
-   [:theta gen-theta]
-   [:vanna {:optional true} :double]
-   [:charm {:optional true} :double]
-   [:volga {:optional true} :double]])
+      (:vector :set)
+      (let [inner (first (m/children child-schema))
+            [attr nested] (schema->datalevin-attr inner)]
+        [(when attr
+           (assoc attr :db/cardinality :db.cardinality/many)) nested])
 
-(def IVSurfacePoint
-  "A single point on the implied volatility surface."
-  [:map
-   [:strike gen-strike]
-   [:expiry inst?]
-   [:iv gen-iv]
-   [:delta {:optional true} gen-delta]])
+      :enum
+      (let [values (m/children child-schema)
+            dt (infer-enum-type values)]
+        [(when dt {:db/valueType dt}) nil])
 
-(def IVSurface
-  "Implied volatility surface for a single underlying.
+      :map
+      (let [nested (malli-map->datalevin-schema child-schema)]
+        [{:db/valueType :db.type/ref
+          :db/isComponent true} nested])
 
-  ID format: \"{TICKER}-surface-{ISO_TIMESTAMP}\" for deterministic deduplication."
-  [:map
-   [:xt/id :string]  ; Deterministic ID
-   [:asset/ticker gen-ticker]
-   [:surface/timestamp inst?]
-   [:surface/points [:vector IVSurfacePoint]]
-   ;; SVI parameterization (optional)
-   [:svi/a {:optional true} :double]
-   [:svi/b {:optional true} :double]
-   [:svi/rho {:optional true} :double]
-   [:svi/m {:optional true} :double]
-   [:svi/sigma {:optional true} :double]])
+      :malli.core/schema
+      (schema->datalevin-attr (m/deref child-schema))
 
-(def TradingSignal
-  "A trading signal generated by the DSL."
-  [:map
-   [:signal/id :uuid]
-   [:signal/timestamp inst?]
-   [:signal/ticker gen-ticker]
-   [:signal/action [:enum :buy :sell :hold]]
-   [:signal/strategy [:enum :long-straddle :short-straddle
-                      :gamma-scalp :dispersion
-                      :vol-arb :iron-condor]]
-   [:signal/confidence [:double {:min 0.0 :max 1.0}]]
-   [:signal/reasoning {:optional true} :string]])
+      [nil nil])))
 
 ;;; ---------------------------------------------------------------------------
-;;; Registry
+;;; Public API
 ;;; ---------------------------------------------------------------------------
 
-(def registry
-  "Malli schema registry for the trading domain."
-  (atom
-   (merge
-    (m/default-schemas)
-    {:option/type OptionType
-     :option/quote OptionQuote
-     :option/greeks Greeks
-     :iv/surface-point IVSurfacePoint
-     :iv/surface IVSurface
-     :trading/signal TradingSignal
-     :aggressor/side AggressorSide})))
+(defn malli-map->datalevin-schema
+  "Derive a Datalevin schema map from a Malli `:map` schema.
 
-(defn validate
-  "Validate data against a schema.
+   Each map entry `[key props child-schema]` produces an attribute:
+   - `:db/*` keys in props pass through verbatim
+   - `:maybe` unwraps, `:vector`/`:set` become cardinality-many
+   - `:enum` type inferred from values
+   - Nested `:map` becomes `:db.type/ref` + `:db/isComponent true`
+   - Unmappable types: use `:db/valueType` from props, or warn and skip
 
-  Args:
-    schema - Schema keyword or inline schema
-    data - Data to validate
-
-  Returns:
-    true if valid, false otherwise"
-  [schema data]
-  (m/validate schema data {:registry @registry}))
-
-(defn explain
-  "Explain validation errors.
-
-  Args:
-    schema - Schema keyword or inline schema
-    data - Data to validate
-
-  Returns:
-    Explanation map or nil if valid"
-  [schema data]
-  (m/explain schema data {:registry @registry}))
-
-(defn generate
-  "Generate sample data from a schema.
-
-  Args:
-    schema - Schema keyword or inline schema
-    opts - Generation options (:seed, :size)
-
-  Returns:
-    Generated sample data"
-  ([schema]
-   (generate schema {}))
-  ([schema opts]
-   (mg/generate schema (merge {:registry @registry} opts))))
-
-(defn sample
-  "Generate multiple samples from a schema.
-
-  Args:
-    schema - Schema keyword or inline schema
-    n - Number of samples (default 10)
-
-  Returns:
-    Sequence of generated samples"
-  ([schema]
-   (sample schema 10))
-  ([schema n]
-   (mg/sample schema {:registry @registry :size n})))
+   Returns `{attr {:db/valueType ... :db/cardinality ...}}` map."
+  {:malli/schema [:=> [:cat :any] [:map-of :keyword [:map-of :keyword :any]]]}
+  [malli-schema]
+  (let [schema (if (m/schema? malli-schema) malli-schema (m/schema malli-schema))
+        entries (m/entries schema)]
+    (reduce
+     (fn [acc [k entry-schema]]
+       (let [child (resolve-child-schema entry-schema)
+             props (m/properties entry-schema)
+             db-props (into {} (filter (fn [[pk _]] (= "db" (namespace pk)))) props)
+             [derived-attr nested] (schema->datalevin-attr child)
+             attr (if derived-attr
+                    (merge derived-attr db-props)
+                    (if (seq db-props)
+                      db-props
+                      (do (log/warn "Skipping unmappable attribute" k
+                                    "with Malli type" (m/type child)
+                                    "- add :db/valueType to properties")
+                          nil)))]
+         (cond-> acc
+           attr (assoc k attr)
+           nested (merge nested))))
+     {}
+     entries)))
