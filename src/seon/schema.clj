@@ -45,6 +45,11 @@
     (m/default-schemas)
     (mr/mutable-registry *schemas))))
 
+;; Register :inst as a keyword type (Malli only provides inst? predicate).
+;; This lets schemas use :inst instead of inst? for consistency with :string, :int, etc.
+(defonce ^:private _inst-type
+  (swap! *schemas assoc :inst (m/-simple-schema {:type :inst :pred inst?})))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Registration API
 ;;; ---------------------------------------------------------------------------

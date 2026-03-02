@@ -1,116 +1,134 @@
 (ns seon.db.schema-test
-  "Tests for Malli schema definitions and generators."
-  (:require [clojure.test :refer :all]
-            [clojure.test.check.clojure-test :refer [defspec]]
-            [clojure.test.check.properties :as prop]
-            [malli.generator :as mg]
-            [seon.db.schema :as schema]
-            [seon.generators :as gen]))
+  "Tests for Malli → Datalevin schema bridge."
+  (:require [clojure.test :refer [deftest is testing]]
+            [seon.db.schema :as dbs]
+            [seon.db.tx :as tx]))
 
-;;; ---------------------------------------------------------------------------
-;;; Schema Validation Tests
-;;; ---------------------------------------------------------------------------
+(deftest malli-type->datalevin-type-test
+  (testing "maps basic Malli types to Datalevin types"
+    (is (= :db.type/string  (dbs/malli-type->datalevin-type :string)))
+    (is (= :db.type/long    (dbs/malli-type->datalevin-type :int)))
+    (is (= :db.type/double  (dbs/malli-type->datalevin-type :double)))
+    (is (= :db.type/float   (dbs/malli-type->datalevin-type :float)))
+    (is (= :db.type/boolean (dbs/malli-type->datalevin-type :boolean)))
+    (is (= :db.type/keyword (dbs/malli-type->datalevin-type :keyword)))
+    (is (= :db.type/symbol  (dbs/malli-type->datalevin-type :symbol)))
+    (is (= :db.type/uuid    (dbs/malli-type->datalevin-type :uuid)))
+    (is (= :db.type/instant (dbs/malli-type->datalevin-type :inst))))
 
-(deftest option-quote-schema-test
-  (testing "Valid option quote passes validation"
-    (let [quote (schema/generate schema/OptionQuote)]
-      (is (schema/validate schema/OptionQuote quote)
-          "Generated quote should be valid")))
+  (testing "maps predicate types"
+    (is (= :db.type/string  (dbs/malli-type->datalevin-type 'string?)))
+    (is (= :db.type/instant (dbs/malli-type->datalevin-type 'inst?))))
 
-  (testing "Missing required fields fail validation"
-    (let [invalid {:asset/ticker "AAPL"}]
-      (is (not (schema/validate schema/OptionQuote invalid))
-          "Quote missing required fields should fail")))
+  (testing "returns nil for unmappable types"
+    (is (nil? (dbs/malli-type->datalevin-type :any)))
+    (is (nil? (dbs/malli-type->datalevin-type :map)))))
 
-  (testing "Invalid option type fails validation"
-    (let [quote (assoc (schema/generate schema/OptionQuote)
-                       :option/type :invalid)]
-      (is (not (schema/validate schema/OptionQuote quote))
-          "Invalid option type should fail"))))
+(deftest bridge-basic-types-test
+  (testing "string and int"
+    (is (= {:foo/bar {:db/valueType :db.type/string}
+            :foo/baz {:db/valueType :db.type/long}}
+           (dbs/malli-map->datalevin-schema
+             [:map [:foo/bar :string] [:foo/baz :int]]))))
 
-(deftest greeks-schema-test
-  (testing "Valid Greeks map passes validation"
-    (let [greeks (schema/generate schema/Greeks)]
-      (is (schema/validate schema/Greeks greeks))))
+  (testing ":maybe unwraps to inner type"
+    (is (= {:foo/bar {:db/valueType :db.type/string}}
+           (dbs/malli-map->datalevin-schema
+             [:map [:foo/bar [:maybe :string]]]))))
 
-  (testing "Delta bounds are enforced"
-    (let [invalid {:delta 1.5 :gamma 0.1 :vega 10 :theta -0.5}]
-      (is (not (schema/validate schema/Greeks invalid))
-          "Delta > 1 should fail"))))
+  (testing ":vector becomes cardinality-many"
+    (is (= {:foo/tags {:db/valueType :db.type/keyword
+                       :db/cardinality :db.cardinality/many}}
+           (dbs/malli-map->datalevin-schema
+             [:map [:foo/tags [:vector :keyword]]]))))
 
-(deftest iv-surface-schema-test
-  (testing "Valid IV surface passes validation"
-    (let [surface (schema/generate schema/IVSurface)]
-      (is (schema/validate schema/IVSurface surface)))))
+  (testing ":set same as :vector"
+    (is (= {:foo/tags {:db/valueType :db.type/string
+                       :db/cardinality :db.cardinality/many}}
+           (dbs/malli-map->datalevin-schema
+             [:map [:foo/tags [:set :string]]])))))
 
-(deftest trading-signal-schema-test
-  (testing "Valid trading signal passes validation"
-    (let [signal (schema/generate schema/TradingSignal)]
-      (is (schema/validate schema/TradingSignal signal))))
+(deftest bridge-enum-test
+  (testing "keyword enum infers :db.type/keyword"
+    (is (= {:foo/status {:db/valueType :db.type/keyword}}
+           (dbs/malli-map->datalevin-schema
+             [:map [:foo/status [:enum :active :inactive]]]))))
 
-  (testing "Invalid strategy fails validation"
-    (let [signal (assoc (schema/generate schema/TradingSignal)
-                        :signal/strategy :invalid-strategy)]
-      (is (not (schema/validate schema/TradingSignal signal))))))
+  (testing "string enum infers :db.type/string"
+    (is (= {:foo/role {:db/valueType :db.type/string}}
+           (dbs/malli-map->datalevin-schema
+             [:map [:foo/role [:enum "admin" "user"]]])))))
 
-;;; ---------------------------------------------------------------------------
-;;; Property-Based Tests
-;;; ---------------------------------------------------------------------------
+(deftest bridge-db-props-test
+  (testing ":db/* properties pass through verbatim"
+    (is (= {:foo/id {:db/valueType :db.type/uuid
+                     :db/unique :db.unique/identity}}
+           (dbs/malli-map->datalevin-schema
+             [:map [:foo/id {:db/unique :db.unique/identity} :uuid]]))))
 
-(defspec generated-quotes-are-valid 100
-  (prop/for-all [quote (mg/generator schema/OptionQuote
-                                     {:registry @schema/registry})]
-    (schema/validate schema/OptionQuote quote)))
+  (testing ":db/valueType override for unmappable types"
+    (is (= {:foo/data {:db/valueType :db.type/string}}
+           (dbs/malli-map->datalevin-schema
+             [:map [:foo/data {:db/valueType :db.type/string} :any]]))))
 
-(defspec generated-greeks-are-valid 100
-  (prop/for-all [greeks (mg/generator schema/Greeks
-                                      {:registry @schema/registry})]
-    (schema/validate schema/Greeks greeks)))
+  (testing "nested :map becomes ref + component"
+    (let [result (dbs/malli-map->datalevin-schema
+                   [:map [:foo/child [:map [:bar/name :string]]]])]
+      (is (= {:db/valueType :db.type/ref :db/isComponent true}
+             (:foo/child result)))
+      (is (= {:db/valueType :db.type/string}
+             (:bar/name result))))))
 
-(defspec generated-surfaces-are-valid 50
-  (prop/for-all [surface (mg/generator schema/IVSurface
-                                       {:registry @schema/registry
-                                        :size 5})]
-    (schema/validate schema/IVSurface surface)))
+(deftest bridge-inst-test
+  (testing "inst? predicate maps to :db.type/instant"
+    (is (= {:foo/at {:db/valueType :db.type/instant}}
+           (dbs/malli-map->datalevin-schema
+             [:map [:foo/at inst?]]))))
 
-(defspec generated-signals-are-valid 100
-  (prop/for-all [signal (mg/generator schema/TradingSignal
-                                      {:registry @schema/registry})]
-    (schema/validate schema/TradingSignal signal)))
+  (testing ":inst keyword maps to :db.type/instant"
+    (is (= :db.type/instant (dbs/malli-type->datalevin-type :inst)))))
 
-;;; ---------------------------------------------------------------------------
-;;; Custom Generator Tests
-;;; ---------------------------------------------------------------------------
+(deftest bridge-matches-existing-ctx-schema-test
+  (testing "bridge output matches hand-written seon.ctx schema shape"
+    (let [ctx-malli [:map
+                     [:seon.ctx/instance-id {:db/unique :db.unique/identity} :string]
+                     [:seon.ctx/namespace :string]
+                     [:seon.ctx/data :string]
+                     [:seon.ctx/updated-at inst?]]
+          derived (dbs/malli-map->datalevin-schema ctx-malli)]
+      (is (= :db.type/string (:db/valueType (:seon.ctx/instance-id derived))))
+      (is (= :db.unique/identity (:db/unique (:seon.ctx/instance-id derived))))
+      (is (= :db.type/string (:db/valueType (:seon.ctx/data derived))))
+      (is (= :db.type/instant (:db/valueType (:seon.ctx/updated-at derived)))))))
 
-(deftest custom-generators-produce-valid-data
-  (testing "gen-valid-option-quote produces valid quotes"
-    (let [quotes (gen/sample gen/gen-valid-option-quote 20)]
-      (doseq [q quotes]
-        (is (schema/validate schema/OptionQuote q)
-            (str "Quote should be valid: " (schema/explain schema/OptionQuote q))))))
+(deftest tx-schema-self-consistency-test
+  (testing "datalevin-schema is derived from entity-schema via bridge"
+    (is (= (dbs/malli-map->datalevin-schema tx/entity-schema)
+           tx/datalevin-schema))))
 
-  (testing "gen-greeks produces valid Greeks"
-    (let [greeks-samples (gen/sample gen/gen-greeks 20)]
-      (doseq [g greeks-samples]
-        (is (schema/validate schema/Greeks g))))))
+(deftest tx-build-tx-entity-test
+  (testing "produces valid structure with required fields"
+    (let [entity (tx/build-tx-entity "seon.runtime" nil)]
+      (is (= :db/current-tx (:db/id entity)))
+      (is (inst? (:seon.db.tx/at entity)))
+      (is (= "seon.runtime" (:seon.db.tx/caller entity)))
+      (is (= :system (:seon.db.tx/source entity)))))
 
-;;; ---------------------------------------------------------------------------
-;;; Regression Tests
-;;; ---------------------------------------------------------------------------
+  (testing "REPL caller infers :repl source"
+    (is (= :repl (:seon.db.tx/source (tx/build-tx-entity "user" nil))))
+    (is (= :repl (:seon.db.tx/source (tx/build-tx-entity "user.foo" nil)))))
 
-(deftest schema-explain-provides-useful-errors
-  (testing "Explain identifies specific field errors"
-    (let [invalid {:xt/id (java.util.UUID/randomUUID)
-                   :asset/ticker "AAPL"
-                   :option/id "TEST"
-                   :option/strike "not-a-number"  ; Invalid
-                   :option/type :call
-                   :option/expiry (java.time.Instant/now)
-                   :quote/bid 1.0
-                   :quote/ask 1.5}
-          explanation (schema/explain schema/OptionQuote invalid)]
-      (is (some? explanation)
-          "Should provide explanation for invalid data")
-      (is (some #(= :option/strike (last (:in %)))
-                (:errors explanation))
-          "Should identify the invalid field"))))
+  (testing "agent caller infers :agent source"
+    (is (= :agent (:seon.db.tx/source (tx/build-tx-entity "seon.agent.trading" nil)))))
+
+  (testing "extra metadata merges"
+    (let [entity (tx/build-tx-entity "seon.runtime"
+                   {:seon.db.tx/session-id "a1b2"
+                    :seon.db.tx/op :scan})]
+      (is (= "a1b2" (:seon.db.tx/session-id entity)))
+      (is (= :scan (:seon.db.tx/op entity)))))
+
+  (testing "explicit source overrides inferred"
+    (is (= :migration (:seon.db.tx/source
+                         (tx/build-tx-entity "seon.runtime"
+                           {:seon.db.tx/source :migration}))))))
