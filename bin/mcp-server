@@ -848,16 +848,16 @@ You must then either:
   (let [type (or type "functions")
         code (case type
                "functions"
-               (format "(do (require 'seon.graph.query)
-                            (let [conn (:conn (:seon/runtime-db integrant.repl.state/system))]
+               (format "(do (require 'seon.graph.query 'seon.system)
+                            (let [conn (seon.system/runtime-db-conn (:seon/runtime-db integrant.repl.state/system))]
                               (pr-str (seon.graph.query/search-functions
                                         {:seon.graph.query/conn conn
                                          :seon.graph.query/pattern %s}))))"
                        (pr-str query))
 
                "namespaces"
-               (format "(do (require 'seon.graph.query)
-                            (let [conn (:conn (:seon/runtime-db integrant.repl.state/system))]
+               (format "(do (require 'seon.graph.query 'seon.system)
+                            (let [conn (seon.system/runtime-db-conn (:seon/runtime-db integrant.repl.state/system))]
                               (pr-str {:dependents (seon.graph.query/dependents-of
                                                      {:seon.graph.query/conn conn
                                                       :seon.graph.query/ns-name %s})
@@ -867,8 +867,8 @@ You must then either:
                        (pr-str query) (pr-str query))
 
                "context"
-               (format "(do (require 'seon.repl.context)
-                            (let [conn (:conn (:seon/runtime-db integrant.repl.state/system))]
+               (format "(do (require 'seon.repl.context 'seon.system)
+                            (let [conn (seon.system/runtime-db-conn (:seon/runtime-db integrant.repl.state/system))]
                               (seon.repl.context/for-function
                                 {:seon.repl.context/conn conn
                                  :seon.repl.context/qualified-name %s})))"
@@ -886,8 +886,8 @@ You must then either:
 (defn execute-namespace-health
   "Execute the namespace_health tool. Gets namespace overview."
   [{:keys [namespace]}]
-  (let [code (format "(do (require 'seon.repl.context 'seon.graph.query)
-                          (let [conn (:conn (:seon/runtime-db integrant.repl.state/system))
+  (let [code (format "(do (require 'seon.repl.context 'seon.graph.query 'seon.system)
+                          (let [conn (seon.system/runtime-db-conn (:seon/runtime-db integrant.repl.state/system))
                                 ctx (seon.repl.context/for-namespace
                                       {:seon.repl.context/conn conn
                                        :seon.repl.context/namespace %s})

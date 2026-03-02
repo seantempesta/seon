@@ -13,9 +13,10 @@
 ;;; Test Fixtures
 ;;; ---------------------------------------------------------------------------
 
-(def ^:dynamic *test-conn* nil)
+(def ^:private test-conn (atom nil))
+(def ^:private test-dir (atom nil))
 
-(defn- temp-dir []
+(defn- make-temp-dir []
   (let [dir (File/createTempFile "seon-graph-query-test" "")]
     (.delete dir)
     (.mkdirs dir)
@@ -31,8 +32,10 @@
       (.delete f))))
 
 (defn with-populated-graph [f]
-  (let [dir (temp-dir)
+  (let [dir (make-temp-dir)
         conn (d/create-conn dir ingest/datalevin-schema)]
+    (reset! test-dir dir)
+    (reset! test-conn conn)
     (try
       ;; Populate graph with project analysis (just graph/ namespace for speed)
       (let [project (analyzer/analyze-project! {::analyzer/paths ["src/seon/graph/"]})
@@ -40,9 +43,9 @@
                       {::analyzer/raw-analysis (::analyzer/raw-analysis project)})]
         (ingest/ingest-analysis! {::ingest/conn conn
                                   ::ingest/entities entities}))
-      (binding [*test-conn* conn]
-        (f))
+      (f)
       (finally
+        (reset! test-conn nil)
         (d/close conn)
         (delete-dir dir)))))
 
@@ -54,7 +57,7 @@
 
 (deftest dependents-of-test
   (testing "finds namespaces that depend on seon.graph.analyzer"
-    (let [deps (gq/dependents-of {::gq/conn *test-conn*
+    (let [deps (gq/dependents-of {::gq/conn @test-conn
                                   ::gq/ns-name "seon.graph.analyzer"})]
       (is (vector? deps))
       ;; seon.graph.ingest requires seon.graph.analyzer
@@ -62,13 +65,13 @@
           "seon.graph.ingest should depend on seon.graph.analyzer")))
 
   (testing "returns empty vector for namespace with no dependents"
-    (let [deps (gq/dependents-of {::gq/conn *test-conn*
+    (let [deps (gq/dependents-of {::gq/conn @test-conn
                                   ::gq/ns-name "nonexistent.ns"})]
       (is (= [] deps)))))
 
 (deftest dependencies-of-test
   (testing "finds what seon.graph.ingest depends on"
-    (let [deps (gq/dependencies-of {::gq/conn *test-conn*
+    (let [deps (gq/dependencies-of {::gq/conn @test-conn
                                     ::gq/ns-name "seon.graph.ingest"})]
       (is (vector? deps))
       (is (some #(= "seon.graph.analyzer" %) deps)
@@ -77,7 +80,7 @@
           "seon.graph.ingest should depend on datalevin.core")))
 
   (testing "returns empty vector for namespace with no dependencies"
-    (let [deps (gq/dependencies-of {::gq/conn *test-conn*
+    (let [deps (gq/dependencies-of {::gq/conn @test-conn
                                     ::gq/ns-name "nonexistent.ns"})]
       (is (= [] deps)))))
 
@@ -87,7 +90,7 @@
 
 (deftest call-graph-test
   (testing "finds what a known function calls"
-    (let [calls (gq/call-graph {::gq/conn *test-conn*
+    (let [calls (gq/call-graph {::gq/conn @test-conn
                                 ::gq/ns-name "seon.graph.analyzer"
                                 ::gq/fn-name "analyze-project!"})]
       (is (vector? calls))
@@ -95,7 +98,7 @@
       (is (seq calls) "analyze-project! should call some functions")))
 
   (testing "returns empty vector for unknown function"
-    (let [calls (gq/call-graph {::gq/conn *test-conn*
+    (let [calls (gq/call-graph {::gq/conn @test-conn
                                 ::gq/ns-name "seon.graph.analyzer"
                                 ::gq/fn-name "nonexistent-fn"})]
       (is (= [] calls)))))
@@ -103,7 +106,7 @@
 (deftest callers-of-test
   (testing "finds callers of extract-namespace-entities"
     ;; extract-namespace-entities is called by extract-entities
-    (let [callers (gq/callers-of {::gq/conn *test-conn*
+    (let [callers (gq/callers-of {::gq/conn @test-conn
                                   ::gq/ns-name "seon.graph.analyzer"
                                   ::gq/fn-name "extract-namespace-entities"})]
       (is (vector? callers))
@@ -111,7 +114,7 @@
           "extract-entities should call extract-namespace-entities")))
 
   (testing "returns empty for function with no callers"
-    (let [callers (gq/callers-of {::gq/conn *test-conn*
+    (let [callers (gq/callers-of {::gq/conn @test-conn
                                   ::gq/ns-name "nonexistent"
                                   ::gq/fn-name "nobody"})]
       (is (= [] callers)))))
@@ -122,7 +125,7 @@
 
 (deftest functions-in-ns-test
   (testing "finds functions defined in seon.graph.analyzer"
-    (let [fns (gq/functions-in-ns {::gq/conn *test-conn*
+    (let [fns (gq/functions-in-ns {::gq/conn @test-conn
                                    ::gq/ns-name "seon.graph.analyzer"})]
       (is (vector? fns))
       (is (seq fns) "Should find functions in seon.graph.analyzer")
@@ -135,13 +138,13 @@
             "Should find extract-entities"))))
 
   (testing "returns empty for namespace with no functions"
-    (let [fns (gq/functions-in-ns {::gq/conn *test-conn*
+    (let [fns (gq/functions-in-ns {::gq/conn @test-conn
                                    ::gq/ns-name "nonexistent.ns"})]
       (is (= [] fns)))))
 
 (deftest search-functions-test
   (testing "finds functions matching pattern"
-    (let [results (gq/search-functions {::gq/conn *test-conn*
+    (let [results (gq/search-functions {::gq/conn @test-conn
                                         ::gq/pattern "analyze"})]
       (is (vector? results))
       (is (seq results) "Should find functions matching 'analyze'")
@@ -152,16 +155,16 @@
           "All results should contain 'analyze' in name")))
 
   (testing "search is case-insensitive"
-    (let [lower (gq/search-functions {::gq/conn *test-conn*
+    (let [lower (gq/search-functions {::gq/conn @test-conn
                                       ::gq/pattern "extract"})
-          upper (gq/search-functions {::gq/conn *test-conn*
+          upper (gq/search-functions {::gq/conn @test-conn
                                       ::gq/pattern "Extract"})]
       (is (= (set (map :seon.fn/name lower))
              (set (map :seon.fn/name upper)))
           "Case should not affect results")))
 
   (testing "returns empty for no-match pattern"
-    (let [results (gq/search-functions {::gq/conn *test-conn*
+    (let [results (gq/search-functions {::gq/conn @test-conn
                                         ::gq/pattern "zzzzzzzzzzz"})]
       (is (= [] results)))))
 
@@ -175,17 +178,17 @@
                        {::analyzer/source "(ns seon.graph.test-ns)\n(defn brand-new-fn [a b] (+ a b))"})
           entities (analyzer/extract-entities
                     {::analyzer/raw-analysis (::analyzer/raw-analysis form-result)})]
-      (ingest/ingest-incremental! {::ingest/conn *test-conn*
+      (ingest/ingest-incremental! {::ingest/conn @test-conn
                                     ::ingest/entities entities})
 
       ;; Should find via functions-in-ns
-      (let [fns (gq/functions-in-ns {::gq/conn *test-conn*
+      (let [fns (gq/functions-in-ns {::gq/conn @test-conn
                                      ::gq/ns-name "seon.graph.test-ns"})]
         (is (some #(= "brand-new-fn" (:seon.fn/name %)) fns)
             "Newly ingested function should appear in functions-in-ns"))
 
       ;; Should find via search
-      (let [results (gq/search-functions {::gq/conn *test-conn*
+      (let [results (gq/search-functions {::gq/conn @test-conn
                                           ::gq/pattern "brand-new"})]
         (is (some #(= "brand-new-fn" (:seon.fn/name %)) results)
             "Newly ingested function should appear in search results")))))

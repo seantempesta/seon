@@ -401,34 +401,42 @@
 ;;; Persistence
 ;;; ---------------------------------------------------------------------------
 
-(defn- persist-instance!
-  "Persist an instance to Datalevin asynchronously. Upserts via :db.unique/identity.
-   Non-blocking for the caller — errors are logged, not propagated."
+(defn- build-tx-map
+  "Build a Datalevin transaction map from an instance map."
   [instance]
-  (future
-    (when-let [c (get-conn)]
-      (try
-        (let [tx-map (cond-> {:seon.runtime/namespace (::namespace instance)
-                              :seon.runtime/status (::status instance)
-                              :seon.runtime/location (::location instance)}
-                       (::session-id instance)
-                       (assoc :seon.runtime/session-id (::session-id instance))
+  (cond-> {:seon.runtime/namespace (::namespace instance)
+           :seon.runtime/status (::status instance)
+           :seon.runtime/location (::location instance)}
+    (::session-id instance)
+    (assoc :seon.runtime/session-id (::session-id instance))
 
-                       (::nrepl-port instance)
-                       (assoc :seon.runtime/nrepl-port (long (::nrepl-port instance)))
+    (::nrepl-port instance)
+    (assoc :seon.runtime/nrepl-port (long (::nrepl-port instance)))
 
-                       (::started-at instance)
-                       (assoc :seon.runtime/started-at (::started-at instance))
+    (::started-at instance)
+    (assoc :seon.runtime/started-at (::started-at instance))
 
-                       (::stopped-at instance)
-                       (assoc :seon.runtime/stopped-at (::stopped-at instance))
+    (::stopped-at instance)
+    (assoc :seon.runtime/stopped-at (::stopped-at instance))
 
-                       (::component-key instance)
-                       (assoc :seon.runtime/component-key (::component-key instance)))]
-          (db/transact! c [tx-map]))
-        (catch Exception e
-          (log/warn "Failed to persist runtime instance" {:namespace (::namespace instance)
-                                                          :error (.getMessage e)}))))))
+    (::component-key instance)
+    (assoc :seon.runtime/component-key (::component-key instance))))
+
+(defn- persist-instance!
+  "Persist an instance to Datalevin. Synchronous when test-conn is set,
+   async (future) in production. Upserts via :db.unique/identity."
+  [instance]
+  (let [do-persist (fn []
+                     (when-let [c (get-conn)]
+                       (try
+                         (db/transact! c [(build-tx-map instance)])
+                         (catch Exception e
+                           (log/warn "Failed to persist runtime instance"
+                                     {:namespace (::namespace instance)
+                                      :error (.getMessage e)})))))]
+    (if @*test-conn
+      (do-persist)
+      (future (do-persist)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Public API
