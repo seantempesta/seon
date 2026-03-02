@@ -1,9 +1,17 @@
 (ns seon.db.datalevin.writer
-  "Flow step-fn that writes transactions to a Datalevin connection.
+  "Flow step-fns for writing transactions to a Datalevin connection.
 
-   Provides coordinated database writes via clojure.core.async.flow.
-   Pause/resume gives backup coordination: pausing triggers a flush,
-   ensuring all writes are committed before backup."
+   Two step-fns form a pipeline:
+     db-writer-step  — pure transactor: receives tx-data, writes to Datalevin,
+                       emits results on :out/result or :out/error
+     write-reply-step — terminal sink: receives results, delivers to caller
+                        promises via correlation-id lookup
+
+   This separation follows the same pattern as topology's namespace-step
+   (does work, emits outputs) vs reply-router (delivers promises).
+
+   Pause/resume gives backup coordination: pausing the writer triggers a
+   flush, ensuring all writes are committed before backup."
   (:require [clojure.core.async.flow :as flow]
             [datalevin.core :as d]
             [seon.schema :as schema]
@@ -41,6 +49,9 @@
 (schema/register! ::pending-promises
                   [:fn {:description "Atom of {correlation-id -> promise}"} #(instance? clojure.lang.Atom %)])
 
+(schema/register! ::status
+                  [:enum {:description "Write result status"} :ok :error])
+
 (schema/register! ::tx-msg
                   [:map
                    [::tx-data ::tx-data]
@@ -58,33 +69,40 @@
                    [::tx-msg ::tx-msg]])
 
 ;;; ---------------------------------------------------------------------------
-;;; Step Function
+;;; Writer Step Function (pure transactor — no promise knowledge)
 ;;; ---------------------------------------------------------------------------
 
 (defn db-writer-step
   "Flow step-fn that writes transactions to a Datalevin connection.
 
+   The writer knows nothing about promises. It is a pure transactor:
+   receives tx-data, writes to Datalevin, emits results.
+
    Init args:
-     ::conn             - Datalevin connection (runtime, not serializable)
-     ::db-name          - Database name for logging
-     ::pending-promises - Atom of {correlation-id -> promise} (runtime)
+     ::conn    - Datalevin connection (runtime, not serializable)
+     ::db-name - Database name for logging
 
    Inputs:
      :in/transact - Transaction message with ::tx-data and optional ::correlation-id
 
-   No flow outputs. Results are delivered to promises as side-effects.
-   On pause/stop, flushes pending writes via empty transact."
+   Outputs:
+     :out/result - Success result map with ::status :ok, ::tx-report, ::elapsed-ms,
+                   and pass-through ::correlation-id
+     :out/error  - Error result map with ::status :error, ::error, ::elapsed-ms,
+                   and pass-through ::correlation-id
+
+   On pause, flushes pending writes via empty transact."
   ;; describe
   ([]
    {:ins {:in/transact "Transaction data maps to write"}
-    :outs {}
+    :outs {:out/result "Successful write results"
+           :out/error "Failed write errors"}
     :workload :io})
 
   ;; init
-  ([{::keys [conn db-name pending-promises]}]
+  ([{::keys [conn db-name]}]
    {::conn conn
     ::db-name (or db-name "unknown")
-    ::pending-promises pending-promises
     ::total-writes 0
     ::total-errors 0
     ::last-write-at nil})
@@ -92,16 +110,13 @@
   ;; transition
   ([state transition]
    (case transition
-     ;; Flush on pause only. Stop is async and races with conn close — never
-     ;; touch the conn during stop. The shutdown-writers! pattern is:
-     ;; pause → ping (waits for this flush) → stop (no-op transition).
      :clojure.core.async.flow/pause
      (do
        (try
          (when-let [conn (::conn state)]
            (if (d/closed? conn)
              (log/warn "Skipping flush on pause for" (::db-name state)
-                       "— connection already closed")
+                       "- connection already closed")
              (do
                (d/transact! conn [])
                (log/debug "Flushed writes on pause for" (::db-name state)))))
@@ -111,13 +126,12 @@
 
      :clojure.core.async.flow/stop
      (do
-       (log/debug "Writer stop transition for" (::db-name state) "— no flush (async safety)")
+       (log/debug "Writer stop transition for" (::db-name state) "- no flush (async safety)")
        state)
 
      :clojure.core.async.flow/resume
      state
 
-     ;; default
      state))
 
   ;; transform
@@ -127,47 +141,103 @@
      (let [conn (::conn state)
            tx-data (::tx-data tx-msg)
            cid (::correlation-id tx-msg)
-           promises (::pending-promises state)
            t0 (System/nanoTime)]
        (try
          (let [tx-report (d/transact! conn tx-data)
                elapsed-ms (/ (- (System/nanoTime) t0) 1e6)
-               now (Instant/now)]
-           (when (and cid promises)
-             (when-let [p (get @promises cid)]
-               (swap! promises dissoc cid)
-               (deliver p {::status :ok
-                           ::tx-report tx-report
-                           ::elapsed-ms elapsed-ms})))
+               now (Instant/now)
+               result (cond-> {::status :ok
+                               ::tx-report tx-report
+                               ::elapsed-ms elapsed-ms}
+                        cid (assoc ::correlation-id cid))]
            [(-> state
                 (update ::total-writes inc)
                 (assoc ::last-write-at now))
-            nil])
+            {:out/result [result]}])
          (catch Exception e
            (let [elapsed-ms (/ (- (System/nanoTime) t0) 1e6)]
              (log/warn e "Write failed for" (::db-name state))
-             (when (and cid promises)
-               (when-let [p (get @promises cid)]
-                 (swap! promises dissoc cid)
-                 (deliver p {::status :error
-                             ::error e
-                             ::elapsed-ms elapsed-ms})))
-             [(update state ::total-errors inc)
-              nil]))))
+             (let [error-result (cond-> {::status :error
+                                         ::error e
+                                         ::elapsed-ms elapsed-ms}
+                                  cid (assoc ::correlation-id cid))]
+               [(update state ::total-errors inc)
+                {:out/error [error-result]}])))))
 
      ;; unknown input
      [state nil])))
+
+;;; ---------------------------------------------------------------------------
+;;; Reply Sink Step Function (delivers promises — no DB knowledge)
+;;; ---------------------------------------------------------------------------
+
+(defn write-reply-step
+  "Flow step-fn that delivers write results to waiting callers via promises.
+
+   Terminal sink: receives results from the writer, looks up the corresponding
+   promise by ::correlation-id, and delivers. Messages without correlation-id
+   are silently ignored (fire-and-forget writes).
+
+   Init args:
+     ::pending-promises - Atom of {correlation-id -> promise}
+
+   Inputs:
+     :in/result - Successful write results from the writer
+     :in/error  - Failed write errors from the writer
+
+   No outputs - this is a terminal sink."
+  ;; describe
+  ([]
+   {:ins {:in/result "Successful write results"
+          :in/error "Failed write errors"}
+    :outs {}
+    :workload :io})
+
+  ;; init
+  ([{::keys [pending-promises]}]
+   {::pending-promises pending-promises
+    ::delivered 0
+    ::unmatched 0})
+
+  ;; transition
+  ([state transition]
+   (case transition
+     :clojure.core.async.flow/stop state
+     :clojure.core.async.flow/pause state
+     :clojure.core.async.flow/resume state
+     state))
+
+  ;; transform
+  ([state input-id msg]
+   (let [cid (::correlation-id msg)]
+     (if-not cid
+       ;; No correlation-id — fire-and-forget write, nothing to deliver
+       [state nil]
+       (let [promises (::pending-promises state)]
+         (if-let [p (get @promises cid)]
+           (do
+             (swap! promises dissoc cid)
+             (deliver p msg)
+             [(update state ::delivered inc) nil])
+           ;; No matching promise — stale or already delivered
+           [(update state ::unmatched inc) nil]))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Convenience Helpers
 ;;; ---------------------------------------------------------------------------
 
 (defn create-writer-flow
-  "Create and start a writer flow with a single db-writer-step process.
+  "Create and start a writer flow with writer + reply-sink pipeline.
+
+   The writer transacts data and emits results. The reply-sink delivers
+   results to caller promises. Flow wiring connects them:
+     writer :out/result -> reply :in/result
+     writer :out/error  -> reply :in/error
 
    Request keys:
-     ::conn    - Required. Datalevin connection
-     ::db-name - Optional. Database name for logging
+     ::conn             - Required. Datalevin connection
+     ::db-name          - Optional. Database name for logging
+     ::pending-promises - Optional. Atom for promise tracking (created if nil)
 
    Returns the flow object (already started and resumed)."
   {:malli/schema [:=> [:cat ::create-writer-request] ::flow]}
@@ -175,9 +245,11 @@
   (let [promises (or pending-promises (atom {}))
         config {:procs {:writer {:proc (flow/process #'db-writer-step)
                                  :args {::conn conn
-                                        ::db-name db-name
-                                        ::pending-promises promises}}}
-                :conns []}
+                                        ::db-name db-name}}
+                        :reply  {:proc (flow/process #'write-reply-step)
+                                 :args {::pending-promises promises}}}
+                :conns [[[:writer :out/result] [:reply :in/result]]
+                        [[:writer :out/error]  [:reply :in/error]]]}
         fl (flow/create-flow config)]
     (flow/start fl)
     (flow/resume fl)
