@@ -102,6 +102,25 @@ No new external dependencies needed.
 
 **Verification:** Each check either returns expected data or throws with a clear error explaining what's different from expected.
 
+**Status: COMPLETE (2026-02-28) -- independently verified**
+
+All 5 assumptions verified in REPL (original agent + verification agent):
+
+1. **Nil outputs flow** - CONFIRMED. Step-fn with `{:outs {}}` and `nil` output from transform works. No "can't resolve channel" error. State updates correctly (`write-count` incremented to 1 after one inject), data written to DB (verified with `d/q` returning `#{["verify-1"]}`), no errors on error-chan.
+
+2. **Promise delivery as side-effect** - CONFIRMED. Atom of promises + deliver from transform + caller deref works under flow's threading model (not just a regular function call). Promise delivered with `{:status :ok, :value 42}` via `flow/inject`, no timeout.
+
+3. **TCP channel round-trip** - CONFIRMED. `seon.flow.harness.channel` compiles and works. Maps with `:db/id`, keywords, vectors all round-trip. Bidirectional (client->server and server->client) both work.
+
+4. **Pool JVM acquisition** - CONFIRMED. `pool/acquire!` with 30s timeout returns agent handle in ~6ms. nREPL eval of `(+ 1 2)` returned `"3"`. `pool/release!` returns JVM to pool cleanly.
+
+5. **Topology request! pattern** - CONFIRMED (end-to-end). The previous agent only tested reply-router in isolation and reported `build-topology!` was blocked by a harness compile error. **Verification found this is no longer true.** `seon.flow.harness` compiles cleanly, and the full path works: `build-topology!` creates flow with namespace-step + reply-router, `request!` injects a request, namespace-step forwards it to the external out-port channel, a simulated agent echoes back, reply-router delivers the promise. Result: `{:echo [1 2 3]}`. No blockers for Phase 3.
+
+**Surprises/Notes:**
+- The harness compile error (`runtime/get-flow` not found) reported by the original agent appears to have been fixed. `(require 'seon.flow.harness :reload)` succeeds.
+- Agent JVMs (from `create_session`) don't have native Datalevin on their classpath. All Datalevin testing must happen in the orchestrator REPL.
+- Existing writer tests all pass: 7 tests, 31 assertions, 0 failures.
+
 ---
 
 ### Phase 1: Fix Writer Step-fn (30 min)
@@ -129,7 +148,7 @@ No new external dependencies needed.
 
 ---
 
-### Phase 2: Read Wrappers (30 min)
+### Phase 2: Read Wrappers (30 min) ✅ COMPLETE
 
 **Goal:** Add `seon.db/query` and `seon.db/pull` that hide connection details from callers.
 
@@ -313,7 +332,7 @@ No new external dependencies needed.
 
 | Phase | Description | Status |
 |-------|-------------|--------|
-| 0 | Verify Assumptions in REPL | Pending |
+| 0 | Verify Assumptions in REPL | Complete (verified) |
 | 1 | Fix Writer Step-fn | Pending |
 | 2 | Read Wrappers | Pending |
 | 3 | Synchronous Write API via Topology | Pending |

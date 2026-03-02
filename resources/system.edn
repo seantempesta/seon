@@ -1,5 +1,5 @@
 {;; Datalevin Server (primary and only database)
- ;; Runs in-process, agents connect as clients to namespace-isolated databases.
+ ;; Runs as external JVM process (bin/run-datalevin) — survives Seon restarts.
  ;; Each namespace gets its own database under root/{namespace}/
  ;; Default credentials: datalevin:datalevin (change in production!)
  :seon.db.datalevin/server

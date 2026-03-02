@@ -144,7 +144,7 @@ The dev hook handles reloading automatically. You rarely need to reload manually
 2. **Diagnose the root cause.** Don't fix symptoms — find the disease.
 3. Try `(user/reload)` — often fixes code-level issues.
 4. Try `(user/reset)` — clean Integrant restart. Note: `resume-key` may preserve old state.
-5. **Last resort only:** `pkill -9 -f "java.*seon" && ./bin/run` — document WHY.
+5. **Last resort only:** `(user/restart-db!)` for Datalevin, `pkill -f seon.runner` for the Seon JVM. Document WHY. **Never** `pkill -9 -f java.*seon` — see Process Architecture below.
 
 ---
 
@@ -191,6 +191,71 @@ See `CONVENTIONS.md` for full patterns.
 
 ---
 
+## Process Architecture (IMPORTANT)
+
+Seon runs as **multiple separate JVM processes**. They are independent — killing one does NOT require killing others.
+
+| Process | Port | PID File | What It Does |
+|---------|------|----------|-------------|
+| **Datalevin** | 8898 | `data/datalevin/server.pid` | Database server (LMDB). Survives Seon restarts. |
+| **Seon** | 7888 (nREPL), 8080 (HTTP) | — | Main app: orchestrator, web UI, agents |
+| **Caddy** | 3030 | — | HTTPS reverse proxy (optional) |
+| **Agent JVMs** | 7900-7902 | — | Isolated agent nREPL processes |
+
+### Why This Matters
+
+Datalevin runs as an **external JVM process**, not embedded in Seon. This means:
+- **Killing Seon does NOT kill Datalevin.** Data is safe.
+- **Restarting Seon adopts the existing Datalevin** — no data loss, no LMDB corruption.
+- **`(user/reset)` keeps Datalevin alive** via Integrant suspend/resume.
+- **Agent JVMs connect to Datalevin over TCP** — they're unaffected by Seon restarts.
+
+### How to Check What's Running
+
+```clojure
+(user/status)  ;; Shows all services with :mode (:started/:adopted), :pid, :ok
+```
+
+```bash
+lsof -ti :8898   # Datalevin PID
+lsof -ti :7888   # Seon nREPL PID
+cat data/datalevin/server.pid  # Recorded Datalevin PID
+```
+
+### DO NOT Blindly Kill Processes
+
+**Never run `pkill -9 -f "java.*seon"` or `pkill -9 -f java`** — this kills Datalevin, agents, and everything else. If you must kill something, be surgical:
+
+| Want to... | Do this | NOT this |
+|-----------|---------|----------|
+| Restart Seon only | `pkill -f seon.runner` | `pkill java` |
+| Restart Datalevin | `(user/restart-db!)` | `kill -9 $(lsof -ti :8898)` |
+| Full data wipe | `(user/db-reset!)` | `rm -rf data/datalevin` |
+| Clean restart of everything | `(halt)`, wait 3s, `(go)` | `pkill -9` anything |
+
+After killing Seon: just `./bin/run` — it adopts the still-running Datalevin.
+
+### Recovery Procedures
+
+| Symptom | Diagnosis | Fix |
+|---------|-----------|-----|
+| "Connection refused" on :8898 | Datalevin died | `(user/restart-db!)` or `(user/reset)` (auto-starts new one) |
+| Seon JVM died but Datalevin alive | Normal — Datalevin survives | `./bin/run` (adopts existing) |
+| LMDB lock errors on start | Stale locks from previous kill | Automatic — `clean-stale-locks!` runs on every fresh start |
+| Everything dead | Both processes killed | `./bin/run` (starts both fresh) |
+| Data corrupted | Rare — only from `kill -9` on Datalevin mid-write | `(user/db-reset!)` for clean slate |
+
+### Log Files for Debugging
+
+```bash
+tail -f logs/datalevin.log          # Datalevin process output (starts, stops, client connects)
+tail -f logs/app.log | grep -i datalevin  # Seon-side lifecycle (adopt, start, stop, health)
+cat logs/startup.log | grep -i datalevin  # Boot sequence
+cat data/datalevin/server.pid       # Current Datalevin PID
+```
+
+---
+
 ## Logging
 
 Seon uses **Timbre** for application logging and **logback** for library logs (SLF4J).
@@ -199,6 +264,8 @@ Seon uses **Timbre** for application logging and **logback** for library logs (S
 |------|----------|
 | `logs/app.log` | All application log lines (Timbre) |
 | `logs/startup.log` | Boot sequence only (wiped on startup) |
+| `logs/datalevin.log` | Datalevin JVM stdout/stderr (server messages, client connects) |
+| `logs/caddy.log` | Caddy reverse proxy output |
 | `logs/error.log` | Errors only (logback/library) |
 | `logs/lib.log` | Library logs (SLF4J) |
 

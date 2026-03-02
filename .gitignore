@@ -35,3 +35,4 @@ credentials.json
 # Node.js / Tailwind build
 node_modules/
 resources/public/css/output.css
+hs_err_pid*.log

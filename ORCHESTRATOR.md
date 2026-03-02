@@ -126,52 +126,73 @@ When a steward reports Requested Changes for other namespaces, launch stewardshi
 
 ### This Is a Live System
 
-**Never blindly kill processes.** The orchestrator owns system restarts. Agents diagnose and report — they never restart.
+**Never blindly kill processes.** The orchestrator owns system restarts. Agents diagnose and report — they never restart. See `CLAUDE.md` "Process Architecture" for the full process map.
+
+### Separate Processes — Know What You're Killing
+
+Datalevin runs as an **external JVM** — separate from Seon. Killing Seon leaves Datalevin alive. This is by design.
+
+```bash
+lsof -ti :8898   # Datalevin PID (separate JVM)
+lsof -ti :7888   # Seon nREPL PID
+cat data/datalevin/server.pid  # Recorded Datalevin PID
+```
 
 ### Server
 
 ```bash
-./bin/run              # Start everything (smart — adopts existing services)
-./bin/run-datalevin    # Start standalone Datalevin server
+./bin/run              # Start everything (adopts existing Datalevin if running)
+./bin/run-datalevin    # Start standalone Datalevin server (rarely needed — Seon starts it)
 ```
 
 ### Health Checks
 
+```clojure
+(user/status)  ;; Full health: shows :pid, :mode (:adopted/:started), :ok for every service
+```
 ```bash
 curl http://localhost:8080/api/health
-cat logs/startup.log
-```
-
-```clojure
-(seon.health/check {})
-(seon.health/cleanup-orphaned-resources! {})  ;; After crash recovery
+cat logs/startup.log | grep -i datalevin
+tail -f logs/datalevin.log   ;; Datalevin's own output
 ```
 
 ### Two-Phase Startup
 
 - **Phase 1 (~1.5s)**: nREPL (7888) + HTTP (8080) + schema registry + Tailwind + Claude SDK
-- **Phase 2 (~5s)**: Datalevin (8898) + connection manager + agent pool + code scanner
+- **Phase 2 (~8s)**: Datalevin external JVM (8898) + connection manager + agent pool + code scanner
 
 If Phase 2 fails, Phase 1 stays alive — connect via nREPL and investigate.
+
+### Database Management
+
+| Function | What it does |
+|----------|-------------|
+| `(user/restart-db!)` | Close connections → stop Datalevin → start fresh. Data preserved. |
+| `(user/db-reset!)` | Stop everything → delete all data → fresh start. **Destructive.** |
+| `(user/reset)` | Integrant restart. Datalevin stays alive (suspend/resume). |
 
 ### When Something Breaks
 
 **Step 1: Diagnose, don't kill.**
 ```clojure
-(seon.health/check {})
+(user/status)  ;; Check :datalevin — :ok, :pid, :mode, :process-alive?
 ```
 ```bash
 cat logs/startup.log
-tail -50 logs/app.log
-grep ERROR logs/app.log | tail -20
+tail -50 logs/app.log | grep -i datalevin
+tail -20 logs/datalevin.log
 ```
 
 **Step 2: Understand WHY.** A component being unhealthy is a symptom. Debug the cause.
 
-**Step 3: Minimize blast radius.** When restart is truly needed:
+**Step 3: Minimize blast radius.** Escalation ladder:
 1. Check `(user/agents)` — wait for running agents or interrupt gracefully
-2. `(user/reset)` — clean Integrant restart, preserves JVM
-3. `pkill -9` as absolute last resort — document WHY
+2. `(user/reset)` — Integrant restart, Datalevin stays alive
+3. `(user/restart-db!)` — restart just the Datalevin server
+4. `pkill -f seon.runner` — kill Seon only, Datalevin survives, then `./bin/run`
+5. **Absolute last resort:** `pkill -f "java.*seon" && ./bin/run` — kills everything. Document WHY.
+
+**Never `pkill -9 -f java`** — this kills ALL Java processes including Datalevin mid-write (LMDB corruption risk) and any agent JVMs.
 
 ---
 
