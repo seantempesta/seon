@@ -3,11 +3,16 @@
             [datalevin.core :as d]
             [seon.db :as db]
             [seon.db.datalevin.conn :as conn]
+            [seon.schema :as schema]
             [seon.test-utils :as tu]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Helpers
 ;;; ---------------------------------------------------------------------------
+
+;; Register test attrs so schema enforcement passes
+(schema/register! :name :string)
+(schema/register! :age :int)
 
 (def ^:private test-schema
   {:name {:db/valueType :db.type/string}
@@ -92,8 +97,8 @@
   [conn]
   {::conn/port 0
    ::conn/ttl-ms 300000
-   ::conn/connections (atom {::conn/master {::conn/connection conn
-                                             ::conn/last-accessed (java.time.Instant/now)}})})
+   ::conn/connections (atom {:seon {::conn/connection conn
+                                    ::conn/last-accessed (java.time.Instant/now)}})})
 
 (defn- with-named-db
   "Set up a local db, bind it as the :seon named database via *conn-manager*,
@@ -150,3 +155,58 @@
           (is (= 2 (count results)))
           (is (= #{["Eve"] ["Frank"]}
                  (set (map (comp vector :name) results)))))))))
+
+;;; ---------------------------------------------------------------------------
+;;; Schema enforcement
+;;; ---------------------------------------------------------------------------
+
+(deftest transact-rejects-unregistered-attrs-test
+  (testing "transact! throws for unregistered attributes"
+    (tu/with-temp-conn test-schema
+      (fn [conn]
+        (try
+          (is (thrown-with-msg?
+               clojure.lang.ExceptionInfo
+               #"Unregistered attributes"
+               (db/transact! conn [{:bogus/unregistered "nope"}])))
+          (finally
+            (db/shutdown-writers!)))))))
+
+(deftest transact-rejects-unregistered-vector-tuple-test
+  (testing "transact! throws for unregistered attrs in vector tuples"
+    (tu/with-temp-conn test-schema
+      (fn [conn]
+        (try
+          (is (thrown-with-msg?
+               clojure.lang.ExceptionInfo
+               #"Unregistered attributes"
+               (db/transact! conn [[:db/add 1 :bogus/field "val"]])))
+          (finally
+            (db/shutdown-writers!)))))))
+
+(deftest transact-allows-db-system-attrs-test
+  (testing "transact! allows :db/* system attributes without registration"
+    (tu/with-temp-conn test-schema
+      (fn [conn]
+        (try
+          ;; :db/id is a system attr, should not require registration
+          (let [result (db/transact! conn [{:db/id -1 :name "Sys" :age 1}])]
+            (is (some? result)))
+          (finally
+            (db/shutdown-writers!)))))))
+
+(deftest transact-auto-adds-missing-schema-test
+  (testing "transact! auto-adds Datalevin schema for registered attrs not yet in DB"
+    ;; Use an empty initial schema — attrs are registered but not in Datalevin yet
+    (tu/with-temp-conn {}
+      (fn [conn]
+        (try
+          ;; :name and :age are registered above — transact! should auto-add them
+          (db/transact! conn [{:name "Auto" :age 99}])
+          (let [results (d/q '[:find ?n :where [?e :name ?n]] @conn)]
+            (is (= #{["Auto"]} (set results))))
+          ;; Verify schema was added
+          (is (contains? (d/schema conn) :name))
+          (is (contains? (d/schema conn) :age))
+          (finally
+            (db/shutdown-writers!)))))))

@@ -361,8 +361,9 @@
   (require '[seon.db.datalevin.conn :as conn])
 
   (def mgr (:seon.db.datalevin/connections state/system))
-  (def dl-conn (conn/get-master-conn!
-                {:seon.db.datalevin.conn/manager mgr}))
+  (def dl-conn (conn/get-conn!
+                {:seon.db.datalevin.conn/manager mgr
+                 :seon.db.datalevin.conn/db :seon.runtime}))
 
   ;; Who depends on seon.ai.claude?
   (dependents-of {::conn dl-conn ::ns-name "seon.ai.claude"})

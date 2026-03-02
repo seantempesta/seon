@@ -61,6 +61,24 @@
 (schema/register! ::result
                   [:any {:description "nREPL eval result value"}])
 
+;;; Datalevin attribute registrations (enforcement layer requires these)
+(schema/register! :form/id
+                  [:uuid {:description "Unique form identifier"}])
+(schema/register! :form/namespace
+                  [:string {:min 1 :description "Namespace the form belongs to"}])
+(schema/register! :form/type
+                  [:keyword {:description "Classified form type"}])
+(schema/register! :form/name
+                  [:string {:min 1 :description "Name extracted from form"}])
+(schema/register! :form/source
+                  [:string {:min 1 :description "Clojure source code string"}])
+(schema/register! :form/agent-id
+                  [:string {:min 1 :description "Agent session ID"}])
+(schema/register! :form/version
+                  [:int {:min 1 :description "Form version number"}])
+(schema/register! :form/created-at
+                  [:any {:description "Timestamp of form creation"}])
+
 ;;; ---------------------------------------------------------------------------
 ;;; Form Classification
 ;;; ---------------------------------------------------------------------------

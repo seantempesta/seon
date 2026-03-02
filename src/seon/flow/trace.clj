@@ -18,6 +18,8 @@
   (:require [taoensso.timbre :as log]
             [integrant.repl.state :as state]
             [seon.db.datalevin.conn :as conn]
+            [seon.db.schema :as dbs]
+            [seon.db.tx :as tx]
             [seon.schema :as schema])
   (:import [java.time Instant]))
 
@@ -26,36 +28,63 @@
 ;;; ---------------------------------------------------------------------------
 
 (schema/register! ::trace-id
-  [:uuid {:description "Correlation ID for tracing a request through the flow"}])
+                  [:uuid {:description "Correlation ID for tracing a request through the flow"}])
 
 (schema/register! ::session-id
-  [:string {:min 1 :description "Agent session ID (4-char hex)"}])
+                  [:string {:min 1 :description "Agent session ID (4-char hex)"}])
 
 (schema/register! ::event
-  [:enum :start :end :error :overload :forward :timeout
-   {:description "Flow event kind"}])
+                  [:enum :start :end :error :overload :forward :timeout
+                   {:description "Flow event kind"}])
 
 (schema/register! ::fn
-  [:string {:min 1 :description "Fully qualified function name"}])
+                  [:string {:min 1 :description "Fully qualified function name"}])
 
 (schema/register! ::ns
-  [:string {:min 1 :description "Namespace"}])
+                  [:string {:min 1 :description "Namespace"}])
 
 (schema/register! ::elapsed-ms
-  [:int {:min 0 :description "Duration in milliseconds"}])
+                  [:int {:min 0 :description "Duration in milliseconds"}])
 
 (schema/register! ::timestamp
-  [:fn {:description "Event timestamp"
-        :gen/fmap (fn [_] (Instant/now))
-        :gen/schema :int}
-   inst?])
+                  [:fn {:description "Event timestamp"
+                        :gen/fmap (fn [_] (Instant/now))
+                        :gen/schema :int}
+                   inst?])
 
 (schema/register! ::status
-  [:enum :ok :error :timeout :overload
-   {:description "Reply status"}])
+                  [:enum :ok :error :timeout :overload
+                   {:description "Reply status"}])
 
 (schema/register! ::error-message
-  [:string {:description "Error description"}])
+                  [:string {:description "Error description"}])
+
+(schema/register! ::entity-type
+                  [:keyword {:description "Entity type tag for flow events"}])
+
+;;; ---------------------------------------------------------------------------
+;;; Entity Schema & Datalevin Schema
+;;; ---------------------------------------------------------------------------
+
+(def entity-schema
+  "Malli schema for flow trace entities. Single source of truth."
+  [:map
+   [::trace-id :uuid]
+   [::session-id {:optional true} [:string {:min 1}]]
+   [::event {:db/valueType :db.type/keyword} [:enum :start :end :error :overload :forward :timeout]]
+   [::timestamp {:db/valueType :db.type/instant} inst?]
+   [::fn {:optional true} [:string {:min 1}]]
+   [::ns {:optional true} [:string {:min 1}]]
+   [::elapsed-ms {:optional true} [:int {:min 0}]]
+   [::status {:optional true :db/valueType :db.type/keyword} [:enum :ok :error :timeout :overload]]
+   [::error-message {:optional true} :string]
+   [::entity-type :keyword]])
+
+(def datalevin-schema
+  "Datalevin schema for flow trace attributes.
+   Derived from entity-schema via the bridge, merged with tx metadata."
+  (merge (dbs/malli-map->datalevin-schema entity-schema)
+         tx/datalevin-schema))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Connection
@@ -66,7 +95,9 @@
   []
   (when-let [mgr (:seon.db.datalevin/connections state/system)]
     (try
-      (conn/get-master-conn! {::conn/manager mgr})
+      (conn/get-conn! {::conn/manager mgr
+                       ::conn/db :seon.flow
+                       ::conn/schema datalevin-schema})
       (catch Exception e
         (log/warn "Failed to get Datalevin connection for flow trace" {:error (.getMessage e)})
         nil))))

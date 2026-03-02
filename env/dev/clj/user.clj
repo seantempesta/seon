@@ -335,8 +335,9 @@
         conn (try
                (when state/system
                  (let [mgr (:seon.db.datalevin/connections state/system)
-                       get-conn (requiring-resolve 'seon.db.datalevin.conn/get-master-conn!)]
-                   (get-conn {:seon.db.datalevin.conn/manager mgr})))
+                       get-conn (requiring-resolve 'seon.db.datalevin.conn/get-conn!)]
+                   (get-conn {:seon.db.datalevin.conn/manager mgr
+                              :seon.db.datalevin.conn/db :seon.runtime})))
                (catch Exception _ nil))]
     (ts {:seon.dev.test-select/conn conn
          :seon.dev.test-select/ns-name ns-name

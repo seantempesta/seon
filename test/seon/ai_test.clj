@@ -27,11 +27,12 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn temporal?
-  "Check if value is a temporal type (Instant or ZonedDateTime).
-   Datalevin returns ZonedDateTime for timestamps, not Instant."
+  "Check if value is a temporal type (Instant, ZonedDateTime, or java.util.Date).
+   Datalevin returns java.util.Date for :db.type/instant attrs."
   [v]
   (or (instance? Instant v)
-      (instance? ZonedDateTime v)))
+      (instance? ZonedDateTime v)
+      (instance? java.util.Date v)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schema Registration Tests
@@ -318,19 +319,19 @@
     (let [start-result (ai/start-session! {::ai/node *test-node*})
           session-id (::ai/session-id start-result)
           _ (ai/add-message! {::ai/node *test-node*
-                             ::ai/session-id session-id
-                             ::ai/role "user"
-                             ::ai/content "First message"})
+                              ::ai/session-id session-id
+                              ::ai/role "user"
+                              ::ai/content "First message"})
           _ (Thread/sleep 10) ; Ensure different timestamps
           _ (ai/add-message! {::ai/node *test-node*
-                             ::ai/session-id session-id
-                             ::ai/role "assistant"
-                             ::ai/content "Second message"})
+                              ::ai/session-id session-id
+                              ::ai/role "assistant"
+                              ::ai/content "Second message"})
           _ (Thread/sleep 10)
           _ (ai/add-message! {::ai/node *test-node*
-                             ::ai/session-id session-id
-                             ::ai/role "user"
-                             ::ai/content "Third message"})
+                              ::ai/session-id session-id
+                              ::ai/role "user"
+                              ::ai/content "Third message"})
           messages (ai/get-messages {::ai/node *test-node*
                                      ::ai/session-id session-id})]
       (is (= 3 (count messages)))
@@ -518,8 +519,8 @@
           session-id (::ai/session-id start-result)
           ;; Use kebab-case keys since Datalevin normalizes keys
           structured-content {:type "tool_result"
-                             :tool-use-id "tool-123"
-                             :content "Result data"}
+                              :tool-use-id "tool-123"
+                              :content "Result data"}
           _ (ai/add-message! {::ai/node *test-node*
                               ::ai/session-id session-id
                               ::ai/role "user"
@@ -606,17 +607,23 @@
                        ::ai/agent-instructions "You are a test agent."
                        ::ai/agent-instructions-path "AGENT.md"}
           {sid ::ai/session-id} (ai/start-session! {::ai/node *test-node*
-                                                     ::ai/namespace 'seon.test
-                                                     ::ai/prompt "Test prompt"
-                                                     ::ai/initial-context initial-ctx})
+                                                    ::ai/namespace 'seon.test
+                                                    ::ai/prompt "Test prompt"
+                                                    ::ai/initial-context initial-ctx})
           session (ai/get-session {::ai/node *test-node* ::ai/session-id sid})]
       (is (some? session))
-      (is (= initial-ctx (::ai/initial-context session)))))
+      ;; Datalevin adds :db/id to stored entities — compare only expected keys
+
+      (let [stored (::ai/initial-context session)
+            strip-db-id (fn [m] (dissoc m :db/id))
+            stored-clean (-> (strip-db-id stored)
+                             (update ::ai/files-context #(mapv strip-db-id %)))]
+        (is (= initial-ctx stored-clean)))))
 
   (testing "start-session! works without initial context (backwards compatible)"
     (let [{sid ::ai/session-id} (ai/start-session! {::ai/node *test-node*
-                                                     ::ai/namespace 'seon.test
-                                                     ::ai/prompt "Test prompt"})
+                                                    ::ai/namespace 'seon.test
+                                                    ::ai/prompt "Test prompt"})
           session (ai/get-session {::ai/node *test-node* ::ai/session-id sid})]
       (is (some? session))
       (is (nil? (::ai/initial-context session))))))

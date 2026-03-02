@@ -82,6 +82,12 @@
 (schema/register! ::args
                   [:any {:description "Additional arguments for the update function"}])
 
+(schema/register! ::updated-at
+                  [inst? {:description "When the ctx was last persisted to Datalevin"}])
+
+(schema/register! ::data
+                  [:string {:description "EDN-serialized ctx state for Datalevin persistence"}])
+
 (schema/register! ::created-at
                   [inst? {:description "When the instance was created"}])
 

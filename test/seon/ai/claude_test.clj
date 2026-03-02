@@ -30,11 +30,13 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn temporal?
-  "Check if value is a temporal type (Instant or ZonedDateTime).
-   Datalevin returns ZonedDateTime for timestamps, not Instant."
+  "Check if value is a temporal type (Instant, ZonedDateTime, or Date).
+   Datalevin returns ZonedDateTime for timestamps, not Instant.
+   Malli generators may produce java.util.Date."
   [v]
   (or (instance? Instant v)
-      (instance? ZonedDateTime v)))
+      (instance? ZonedDateTime v)
+      (instance? java.util.Date v)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schema Registration Tests
@@ -325,7 +327,7 @@
                    :message {:role "assistant"
                              :content [{:type "text" :text "Hello!"}]}}
           entity (claude/sdk-message->entity {::claude/sdk-message sdk-msg
-                                               ::ai/session-id "ses-test123"})]
+                                              ::ai/session-id "ses-test123"})]
       (is (= "ses-test123" (::ai/session-id entity)))
       (is (= :message (::ai/type entity)))
       (is (= "assistant" (::ai/role entity)))))
@@ -358,7 +360,7 @@
       (is (str/starts-with? message-id "msg-"))
       ;; Retrieve messages for the session
       (let [messages (ai/get-messages {::ai/node *test-node*
-                                        ::ai/session-id session-id})]
+                                       ::ai/session-id session-id})]
         (is (= 1 (count messages)))
         (let [msg (first messages)]
           (is (= :message (::ai/type msg)))
@@ -424,25 +426,25 @@
       (claude/persist-message! {::ai/node *test-node*
                                 ::ai/session-id session-id
                                 ::claude/sdk-message {:type "user"
-                                                       :message {:role "user"
-                                                                 :content [{:type "text"
-                                                                            :text "What is 2+2?"}]}}})
+                                                      :message {:role "user"
+                                                                :content [{:type "text"
+                                                                           :text "What is 2+2?"}]}}})
       ;; Persist an assistant response
       (claude/persist-message! {::ai/node *test-node*
                                 ::ai/session-id session-id
                                 ::claude/sdk-message {:type "assistant"
-                                                       :uuid "msg-resp"
-                                                       :message {:role "assistant"
-                                                                 :content [{:type "text"
-                                                                            :text "2+2 equals 4."}]}}})
+                                                      :uuid "msg-resp"
+                                                      :message {:role "assistant"
+                                                                :content [{:type "text"
+                                                                           :text "2+2 equals 4."}]}}})
       ;; Persist a result message
       (claude/persist-message! {::ai/node *test-node*
                                 ::ai/session-id session-id
                                 ::claude/sdk-message {:type "result"
-                                                       :result "Success"
-                                                       :subtype "success"
-                                                       :num_turns 2
-                                                       :total_cost_usd 0.01}})
+                                                      :result "Success"
+                                                      :subtype "success"
+                                                      :num_turns 2
+                                                      :total_cost_usd 0.01}})
       ;; End session with stats
       (ai/end-session! {::ai/node *test-node*
                         ::ai/session-id session-id
