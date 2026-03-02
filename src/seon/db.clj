@@ -72,6 +72,7 @@
   "Lazily create a writer flow for conn if one doesn't exist yet.
    The writer flow provides pause/resume coordination and metrics.
    Normal writes bypass the flow channel for zero overhead.
+   Stores pending-promises atom alongside flow for future transact-via-flow! use.
    Refuses to create a flow for closed connections."
   [conn]
   (when (conn-closed? conn)
@@ -79,9 +80,11 @@
                     {:conn-id (conn-id conn)})))
   (let [id (conn-id conn)]
     (when-not (get @writers id)
-      (let [fl (writer/create-writer-flow {::writer/conn conn
-                                           ::writer/db-name (str "conn-" id)})]
-        (swap! writers assoc id {:flow fl :conn conn})
+      (let [promises (atom {})
+            fl (writer/create-writer-flow {::writer/conn conn
+                                           ::writer/db-name (str "conn-" id)
+                                           ::writer/pending-promises promises})]
+        (swap! writers assoc id {:flow fl :conn conn :pending-promises promises})
         (log/info "Created writer flow" {:conn-id id})))
     nil))
 
@@ -188,7 +191,7 @@
                    :seon.db.datalevin.conn/runtime]
     ;; Anything else is a namespace db name
     [(fn [mgr] (conn/get-namespace-conn! {::conn/manager mgr
-                                           ::conn/namespace (name db-name)}))
+                                          ::conn/namespace (name db-name)}))
      (name db-name)]))
 
 (defn- resolve-db
