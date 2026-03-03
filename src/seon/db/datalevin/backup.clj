@@ -177,18 +177,15 @@
   {:malli/schema [:=> [:cat ::backup-request] ::backup-result]}
   [{::keys [data-dir backup-dir]}]
   (let [t0 (System/nanoTime)
-        conns (db/all-conns)
         src-dir (io/file data-dir)
         ts (timestamp-str)
         dest-dir (io/file backup-dir ts)]
     (log/info "Starting backup" {:data-dir data-dir
-                                  :backup-path (.getAbsolutePath dest-dir)
-                                  :conn-count (count conns)})
+                                  :backup-path (.getAbsolutePath dest-dir)})
     (try
-      ;; Pause all writers to flush pending writes
-      (doseq [conn conns]
-        (db/pause-writes! conn))
-      (log/debug "All writers paused")
+      ;; Pause infrastructure writer to flush pending writes
+      (db/pause-writer!)
+      (log/debug "Infrastructure writer paused")
 
       ;; Verify source exists
       (if-not (.exists src-dir)
@@ -211,10 +208,9 @@
          ::error-message (.getMessage e)})
 
       (finally
-        ;; Always resume writers
-        (doseq [conn conns]
-          (db/resume-writes! conn))
-        (log/debug "All writers resumed")))))
+        ;; Always resume writer
+        (db/resume-writer!)
+        (log/debug "Infrastructure writer resumed")))))
 
 (defn restore!
   "Restore a backup to the data directory.

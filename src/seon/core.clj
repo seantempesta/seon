@@ -248,8 +248,8 @@
        (Runtime/getRuntime)
        (Thread. ^Runnable (fn []
                             (log/info "Shutdown signal received")
-                            (log/info "Flushing writer flows...")
-                            (db/shutdown-writers!)
+                            (log/info "Pausing infrastructure writer...")
+                            (try (db/pause-writer!) (catch Exception _))
                             (when-let [runtime-db (some-> state/system :seon/runtime-db)]
                               (log/info "Backing up ctx instances...")
                               (try

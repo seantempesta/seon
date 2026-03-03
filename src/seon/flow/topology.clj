@@ -31,6 +31,9 @@
 (schema/register! ::target-ns
   [:string {:min 1 :description "Target namespace for the request"}])
 
+(schema/register! ::pid
+  [:keyword {:description "Direct process ID for flow injection (e.g. :seon.flow/writer)"}])
+
 ;;; ---------------------------------------------------------------------------
 ;;; Sink Step Functions
 ;;; ---------------------------------------------------------------------------
@@ -234,6 +237,7 @@
         ;; Clean up promise on any exception (including inject failure)
         (swap! pending-promises dissoc request-id)
         (throw e)))))
+
 
 ;;; ---------------------------------------------------------------------------
 ;;; Cross-Namespace Relay

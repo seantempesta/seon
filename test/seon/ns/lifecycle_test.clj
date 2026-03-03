@@ -29,7 +29,6 @@
     conn))
 
 (defn- teardown-datalevin! []
-  (db/shutdown-writers!)
   (when-let [conn @test-conn]
     (try (d/close conn) (catch Exception _)))
   (when-let [dir @test-dir]
