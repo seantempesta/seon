@@ -12,6 +12,7 @@
   (:require [clojure.core.async :as async]
             [clojure.core.async.flow :as flow]
             [clojure.string :as str]
+            [seon.db.datalevin.writer :as writer]
             [seon.flow.harness :as harness]
             [seon.flow.msg :as msg]
             [seon.flow.status :as status]
@@ -470,6 +471,7 @@
     ;; Snapshot state before stopping: pause -> snapshot -> stop
     (try
       (flow/pause flow)
+      (flow/ping flow :timeout-ms 5000)
       (let [snap-label (or label (when flow-id (name flow-id)))]
         (when snap-label
           (runtime/snapshot-topology! {::runtime/flow flow
@@ -489,3 +491,61 @@
     (status/stop-error-drain! {::status/id flow-id})
     (runtime/unregister-flow! {::runtime/flow-id flow-id}))
   nil)
+
+;;; ---------------------------------------------------------------------------
+;;; build-infrastructure! — Infrastructure flow (writer + reply-router + sinks)
+;;; ---------------------------------------------------------------------------
+
+(defn build-infrastructure!
+  "Build and start the infrastructure flow.
+
+   The infrastructure flow handles cross-cutting concerns that are shared
+   across all namespace flows: database writes and reply routing.
+
+   Processes:
+     :seon.flow/writer       - infra-writer-step (multi-DB via connection manager)
+     :seon.flow/reply-router - reply-router-step (delivers promises)
+     :seon.flow/event-sink   - event-sink-step (observability)
+     :seon.flow/error-sink   - error-sink-step (error accumulation)
+
+   Connections:
+     writer reply  -> reply-router
+     writer error  -> error-sink
+
+   Request keys:
+     ::connection-manager - Datalevin connection manager (Integrant component)
+
+   Returns:
+     {::flow fl ::flow-id :seon.flow/infrastructure}"
+  [{::keys [connection-manager]}]
+  (let [flow-id :seon.flow/infrastructure
+        config {:procs {:seon.flow/writer
+                        {:proc (flow/process #'writer/infra-writer-step)
+                         :args {::writer/connection-manager connection-manager}}
+                        :seon.flow/reply-router
+                        {:proc (flow/process #'reply-router-step)}
+                        :seon.flow/event-sink
+                        {:proc (flow/process #'event-sink-step)}
+                        :seon.flow/error-sink
+                        {:proc (flow/process #'error-sink-step)}}
+                :conns [;; writer reply -> reply-router
+                        [[:seon.flow/writer :seon.flow.out/reply]
+                         [:seon.flow/reply-router :seon.flow.in/reply]]
+                        ;; writer error -> error-sink
+                        [[:seon.flow/writer :seon.flow.out/error]
+                         [:seon.flow/error-sink :seon.flow.out/error]]]}
+        fl (flow/create-flow config)
+        chans (flow/start fl)]
+    (flow/resume fl)
+    ;; Register in runtime
+    (runtime/register-flow! {::runtime/flow-id flow-id
+                             ::runtime/flow fl
+                             ::runtime/chans chans
+                             ::runtime/label "infrastructure"})
+    ;; Start error drain
+    (when-let [error-chan (:error-chan chans)]
+      (status/start-error-drain! {::status/id flow-id
+                                  ::status/error-chan error-chan}))
+    {::flow fl
+     ::flow-id flow-id
+     ::chans chans}))

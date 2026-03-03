@@ -76,6 +76,10 @@ seon/
     └── reference/            ; Technical reference docs
 ```
 
+### Flow Topology (routing backbone)
+
+All cross-boundary calls — namespace function calls, database writes, REPL eval — route through `topology/request!` (core.async.flow). One pattern: register promise → inject → step-fn → reply-router → deliver promise. See `docs/prds/unified-flow/design.md`.
+
 ---
 
 ## Skills (IMPORTANT)

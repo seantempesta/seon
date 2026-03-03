@@ -57,6 +57,12 @@
   :input "resources/public/css/input.css"
   :output "resources/public/css/output.css"}
 
+ ;; Infrastructure Flow (writer + reply-router + sinks)
+ ;; Starts at boot. Handles all DB writes via connection manager.
+ ;; Namespace flows are created lazily later (Phase 2+).
+ :seon.flow/infrastructure
+ {:connection-manager #ig/ref :seon.db.datalevin/connections}
+
  ;; Agent JVM Pool
  ;; Pre-warmed JVM pool for instant agent startup.
  ;; Each agent gets an isolated JVM with its own nREPL, Malli registry, and

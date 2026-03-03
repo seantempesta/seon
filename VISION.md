@@ -200,6 +200,7 @@ Malli schemas with fully namespaced keys create machine-readable contracts:
 
 | Component | PRD | Status |
 |-----------|-----|--------|
+| Unified Flow System | [`unified-flow`](docs/prds/unified-flow/design.md) | Phase 0 (doc alignment) |
 | Namespace UI vision | [`namespace-ui`](docs/prds/namespace-ui/prd.md) | Vision complete |
 | Observatory polish | [`observatory-polish`](docs/prds/observatory-polish/prd.md) | Active |
 
