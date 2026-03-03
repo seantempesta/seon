@@ -13,7 +13,7 @@
    Consumers:
    - seon.ns.lifecycle: Creates instances, uses resolve-instance to query by
      namespace (not duplication — load! only supports instance-id lookup). Clean.
-   - seon.ns.routes: Heaviest user. Uses get-entry to access :render-fn and :atom
+   - seon.ns.routes: Heaviest user. Uses get-entry to access ::render-fn and ::atom
      directly — acceptable, these are the interface points for SSE push.
    - seon.orchestrator.session: Creates ctx with reserved-keys for agent isolation.
    - seon.web.browser: Uses clients-for-namespace for push targeting. Clean.
@@ -203,9 +203,9 @@
 ;;; Registry
 ;;; ---------------------------------------------------------------------------
 
-;; Map of instance-id -> {:atom, :conn, :namespace, :persist?, :sse-push?,
-;;                         :track-clients?, :clients, :render-fn,
-;;                         :created-at, :scheduler, :scheduled-task}
+;; Map of instance-id -> {::atom, ::conn, ::namespace, ::persist?, ::sse-push?,
+;;                         ::track-clients?, ::clients, ::render-fn,
+;;                         ::created-at, ::scheduler, ::scheduled-task}
 (defonce ^:private registry (atom {}))
 
 ;;; ---------------------------------------------------------------------------
@@ -298,7 +298,7 @@
   "Push update to all clients for an instance."
   [instance-id html-str]
   (when-let [entry (get @registry instance-id)]
-    (when-let [clients-atom (:clients entry)]
+    (when-let [clients-atom (::clients entry)]
       (let [channels @clients-atom
             results (doall (map #(push-to-client! % html-str) channels))
             failed (count (filter false? results))]
@@ -314,9 +314,9 @@
   "Render current ctx state and push to all clients."
   [instance-id ctx-value]
   (when-let [entry (get @registry instance-id)]
-    (when-let [render-fn (:render-fn entry)]
+    (when-let [render-fn (::render-fn entry)]
       (try
-        (let [ns-sym (:namespace entry)
+        (let [ns-sym (::namespace entry)
               hiccup (render-fn ctx-value)
               transformed ((requiring-resolve 'seon.web.reactive.transform/transform-hiccup)
                            ns-sym hiccup instance-id)
@@ -488,19 +488,19 @@
                                               (Executors/newSingleThreadScheduledExecutor))
         scheduled-task (atom nil)
 
-        entry {:atom ctx-atom
-               :conn conn
-               :namespace namespace
-               :persist? persist?
-               :sse-push? sse-push?
-               :track-clients? track-clients?
-               :validate? validate?
-               :reserved-keys reserved-keys-snapshot
-               :clients (when track-clients? (atom #{}))
-               :render-fn render-fn
-               :created-at created-at
-               :scheduler scheduler
-               :scheduled-task scheduled-task}]
+        entry {::atom ctx-atom
+               ::conn conn
+               ::namespace namespace
+               ::persist? persist?
+               ::sse-push? sse-push?
+               ::track-clients? track-clients?
+               ::validate? validate?
+               ::reserved-keys reserved-keys-snapshot
+               ::clients (when track-clients? (atom #{}))
+               ::render-fn render-fn
+               ::created-at created-at
+               ::scheduler scheduler
+               ::scheduled-task scheduled-task}]
 
     ;; Register in registry
     (swap! registry assoc instance-id entry)
@@ -550,7 +550,7 @@
      The atom, or nil if instance not found."
   {:malli/schema [:=> [:cat ::instance-id-request] [:maybe :any]]}
   [{::keys [instance-id]}]
-  (:atom (get @registry instance-id)))
+  (::atom (get @registry instance-id)))
 
 (defn get-value
   "Get the current ctx value for an instance.
@@ -567,7 +567,7 @@
 
 (defn get-entry
   "Get the full registry entry for an instance.
-   Returns map with :atom, :namespace, :clients, :render-fn, etc.
+   Returns map with ::atom, ::namespace, ::clients, ::render-fn, etc.
    or nil if not found."
   {:malli/schema [:=> [:cat ::instance-id-request] [:maybe :any]]}
   [{::keys [instance-id]}]
@@ -599,7 +599,7 @@
   {:malli/schema [:=> [:cat ::instance-id-request] :boolean]}
   [{::keys [instance-id]}]
   (if-let [entry (get @registry instance-id)]
-    (let [{:keys [atom scheduler scheduled-task clients]} entry]
+    (let [{::keys [atom scheduler scheduled-task clients]} entry]
       ;; Close all client connections
       (when clients
         (doseq [ch @clients]
@@ -638,7 +638,7 @@
   {:malli/schema [:=> [:cat ::instance-id+channel-request] :boolean]}
   [{::keys [instance-id channel]}]
   (if-let [entry (get @registry instance-id)]
-    (if-let [clients-atom (:clients entry)]
+    (if-let [clients-atom (::clients entry)]
       (do
         (swap! clients-atom conj channel)
         (log/debug "Client registered" {:instance-id instance-id})
@@ -662,7 +662,7 @@
   {:malli/schema [:=> [:cat ::instance-id+channel-request] :boolean]}
   [{::keys [instance-id channel]}]
   (if-let [entry (get @registry instance-id)]
-    (if-let [clients-atom (:clients entry)]
+    (if-let [clients-atom (::clients entry)]
       (do
         (swap! clients-atom disj channel)
         (log/debug "Client unregistered" {:instance-id instance-id})
@@ -681,7 +681,7 @@
   {:malli/schema [:=> [:cat ::instance-id-request] [:maybe [:set :any]]]}
   [{::keys [instance-id]}]
   (when-let [entry (get @registry instance-id)]
-    (when-let [clients-atom (:clients entry)]
+    (when-let [clients-atom (::clients entry)]
       @clients-atom)))
 
 (defn client-count
@@ -708,7 +708,7 @@
   [{::keys [instance-id]}]
   (if-let [entry (get @registry instance-id)]
     (do
-      (render-and-push! instance-id @(:atom entry))
+      (render-and-push! instance-id @(::atom entry))
       true)
     false))
 
@@ -725,7 +725,7 @@
   [{::keys [instance-id render-fn]}]
   (if (contains? @registry instance-id)
     (do
-      (swap! registry assoc-in [instance-id :render-fn] render-fn)
+      (swap! registry assoc-in [instance-id ::render-fn] render-fn)
       true)
     false))
 
@@ -744,7 +744,7 @@
   {:malli/schema [:=> [:cat ::namespace-request] [:vector :any]]}
   [{::keys [namespace]}]
   (->> @registry
-       (filter (fn [[_ entry]] (= (:namespace entry) namespace)))
+       (filter (fn [[_ entry]] (= (::namespace entry) namespace)))
        (map (fn [[id entry]] (assoc entry ::instance-id id)))
        (sort-by :created-at #(compare %2 %1))
        vec))
@@ -760,7 +760,7 @@
   [{::keys [namespace] :as req}]
   (->> (instances-for-namespace req)
        (mapcat (fn [entry]
-                 (when-let [clients-atom (:clients entry)]
+                 (when-let [clients-atom (::clients entry)]
                    @clients-atom)))
        set))
 
@@ -791,8 +791,8 @@
   {:malli/schema [:=> [:cat ::persist-request] [:maybe :any]]}
   [{::keys [conn instance-id]}]
   (when-let [entry (get @registry instance-id)]
-    (let [value @(:atom entry)
-          ns-sym (:namespace entry)]
+    (let [value @(::atom entry)
+          ns-sym (::namespace entry)]
       (do-persist! conn instance-id ns-sym value)
       (filter-serializable value))))
 
@@ -826,6 +826,6 @@
   [{}]
   (mapv (fn [[id entry]]
           {::instance-id id
-           ::namespace (:namespace entry)
-           ::created-at (:created-at entry)})
+           ::namespace (::namespace entry)
+           ::created-at (::created-at entry)})
         @registry))

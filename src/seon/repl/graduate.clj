@@ -4,7 +4,7 @@
   (:require [clojure.java.io :as io]
             [clojure.java.shell :as shell]
             [clojure.string :as str]
-            [seon.repl.super :as super]
+            [seon.repl :as super]
             [seon.schema :as schema]
             [taoensso.timbre :as log]))
 

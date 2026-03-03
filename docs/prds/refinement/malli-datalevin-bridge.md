@@ -68,7 +68,7 @@ One function: `malli-map->datalevin-schema`. Define entity schemas once in Malli
 ### `seon.ctx` (4 attrs, 2 registered, 1 type mismatch)
 - `:seon.ctx/namespace` registered as `:symbol`, stored as string — needs alignment
 
-### `seon.repl.super` (8 attrs, 0 registered)
+### `seon.repl` (8 attrs, 0 registered)
 - `form/*` namespace — all missing
 
 ## Step 3: Convert `:seon.ai` database (NEXT)

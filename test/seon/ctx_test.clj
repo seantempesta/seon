@@ -290,7 +290,7 @@
 
     (let [my-fn (fn [_] [:div "hello"])]
       (is (true? (ctx/set-render-fn! {::ctx/instance-id "r001" ::ctx/render-fn my-fn})))
-      (is (= my-fn (:render-fn (ctx/get-entry {::ctx/instance-id "r001"})))))
+      (is (= my-fn (::ctx/render-fn (ctx/get-entry {::ctx/instance-id "r001"})))))
 
     (is (false? (ctx/set-render-fn! {::ctx/instance-id "nope" ::ctx/render-fn identity})))
 

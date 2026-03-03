@@ -548,7 +548,7 @@
   (let [ctx-atom (ctx/get-atom {::ctx/instance-id instance-id})]
     (if ctx-atom
       (let [entry (ctx/get-entry {::ctx/instance-id instance-id})
-            render-fn (:render-fn entry)
+            render-fn (::ctx/render-fn entry)
             ctx-val @ctx-atom
             content-hiccup (when render-fn (render-fn ctx-val))
             transformed (when content-hiccup

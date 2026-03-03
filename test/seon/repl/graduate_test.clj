@@ -4,7 +4,7 @@
             [clojure.string :as str]
             [datalevin.core :as d]
             [seon.graph.ingest :as ingest]
-            [seon.repl.super :as super]
+            [seon.repl :as super]
             [seon.repl.graduate :as grad])
   (:import [java.io File]))
 
