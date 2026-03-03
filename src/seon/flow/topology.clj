@@ -15,6 +15,7 @@
             [seon.db.datalevin.writer :as writer]
             [seon.flow.harness :as harness]
             [seon.flow.msg :as msg]
+            [seon.flow.pool :as pool]
             [seon.flow.status :as status]
             [seon.runtime :as runtime]
             [seon.schema :as schema]
@@ -496,6 +497,84 @@
   nil)
 
 ;;; ---------------------------------------------------------------------------
+;;; REPL Step Function
+;;; ---------------------------------------------------------------------------
+
+(defn repl-step
+  "Flow step-fn for REPL eval in the infrastructure flow.
+
+   Receives eval requests on :seon.flow.in/request, calls pool/nrepl-eval!
+   on the target port, and returns the result as a reply envelope.
+
+   Inputs:
+     :seon.flow.in/request - Message envelope with ::msg/payload containing:
+       :form/source    - Clojure source string to eval
+       :form/port      - nREPL port (int)
+
+   Outputs:
+     :seon.flow.out/reply - Reply envelope for reply-router
+     :seon.flow.out/error - Error envelope for error-sink"
+  ;; describe
+  ([]
+   {:ins {:seon.flow.in/request "REPL eval request envelopes"}
+    :outs {:seon.flow.out/reply "Reply envelopes for reply-router"
+           :seon.flow.out/error "Error envelopes for error-sink"}
+    :workload :io})
+
+  ;; init
+  ([_args]
+   {::total-evals 0
+    ::total-errors 0})
+
+  ;; transition
+  ([state transition]
+   (case transition
+     :clojure.core.async.flow/pause state
+     :clojure.core.async.flow/stop state
+     :clojure.core.async.flow/resume state
+     state))
+
+  ;; transform
+  ([state input-id request]
+   (case input-id
+     :seon.flow.in/request
+     (let [request-id (::msg/id request)
+           payload    (::msg/payload request)
+           source     (:form/source payload)
+           port       (:form/port payload)
+           t0         (System/nanoTime)]
+       (try
+         (let [result     (pool/nrepl-eval! port source)
+               elapsed-ms (long (/ (- (System/nanoTime) t0) 1e6))
+               reply      {::msg/id request-id
+                           ::msg/version 1
+                           ::msg/type :reply
+                           ::msg/status :ok
+                           ::msg/value result
+                           ::msg/from-ns "seon.repl"
+                           ::msg/duration-ms elapsed-ms}]
+           [(update state ::total-evals inc)
+            {:seon.flow.out/reply [reply]}])
+         (catch Exception e
+           (let [elapsed-ms (long (/ (- (System/nanoTime) t0) 1e6))
+                 error-reply {::msg/id request-id
+                              ::msg/version 1
+                              ::msg/type :reply
+                              ::msg/status :error
+                              ::msg/error-type :execution
+                              ::msg/error-class (.getName (class e))
+                              ::msg/error-message (.getMessage e)
+                              ::msg/from-ns "seon.repl"
+                              ::msg/duration-ms elapsed-ms}]
+             (log/warn e "REPL eval failed" {:port port})
+             [(update state ::total-errors inc)
+              {:seon.flow.out/reply [error-reply]
+               :seon.flow.out/error [error-reply]}]))))
+
+     ;; unknown input
+     [state nil])))
+
+;;; ---------------------------------------------------------------------------
 ;;; build-infrastructure! — Infrastructure flow (writer + reply-router + sinks)
 ;;; ---------------------------------------------------------------------------
 
@@ -503,10 +582,11 @@
   "Build and start the infrastructure flow.
 
    The infrastructure flow handles cross-cutting concerns that are shared
-   across all namespace flows: database writes and reply routing.
+   across all namespace flows: database writes, REPL eval, and reply routing.
 
    Processes:
      :seon.flow/writer       - infra-writer-step (multi-DB via connection manager)
+     :seon.flow/repl          - repl-step (nREPL eval via pool)
      :seon.flow/reply-router - reply-router-step (delivers promises)
      :seon.flow/event-sink   - event-sink-step (observability)
      :seon.flow/error-sink   - error-sink-step (error accumulation)
@@ -514,6 +594,8 @@
    Connections:
      writer reply  -> reply-router
      writer error  -> error-sink
+     repl reply    -> reply-router
+     repl error    -> error-sink
 
    Request keys:
      ::connection-manager - Datalevin connection manager (Integrant component)
@@ -525,6 +607,8 @@
         config {:procs {:seon.flow/writer
                         {:proc (flow/process #'writer/infra-writer-step)
                          :args {::writer/connection-manager connection-manager}}
+                        :seon.flow/repl
+                        {:proc (flow/process #'repl-step)}
                         :seon.flow/reply-router
                         {:proc (flow/process #'reply-router-step)}
                         :seon.flow/event-sink
@@ -536,6 +620,12 @@
                          [:seon.flow/reply-router :seon.flow.in/reply]]
                         ;; writer error -> error-sink
                         [[:seon.flow/writer :seon.flow.out/error]
+                         [:seon.flow/error-sink :seon.flow.out/error]]
+                        ;; repl reply -> reply-router
+                        [[:seon.flow/repl :seon.flow.out/reply]
+                         [:seon.flow/reply-router :seon.flow.in/reply]]
+                        ;; repl error -> error-sink
+                        [[:seon.flow/repl :seon.flow.out/error]
                          [:seon.flow/error-sink :seon.flow.out/error]]]}
         fl (flow/create-flow config)
         chans (flow/start fl)]

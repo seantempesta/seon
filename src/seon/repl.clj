@@ -1,16 +1,19 @@
 (ns seon.repl
-  "Super REPL form router.
-   Receives forms, classifies, stores in Datalevin, routes to agent JVMs,
-   updates the code index after each eval."
-  (:require [datalevin.core :as d]
+  "REPL form router.
+   Receives forms, classifies, stores in Datalevin, routes eval through
+   the infrastructure flow topology, updates the code index after each eval."
+  (:require [clojure.core.async.flow :as flow]
+            [datalevin.core :as d]
             [edamame.core :as edamame]
             [seon.db :as db]
+            [seon.flow.msg :as msg]
             [seon.flow.pool :as pool]
             [seon.graph.analyzer :as analyzer]
             [seon.graph.ingest :as ingest]
             [seon.schema :as schema]
             [taoensso.timbre :as log])
-  (:import [java.util Date UUID]))
+  (:import [java.time Instant]
+           [java.util Date UUID]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Datalevin Schema (merged with ingest schema at conn creation)
@@ -189,8 +192,61 @@
 ;;; Public API
 ;;; ---------------------------------------------------------------------------
 
+(defn- get-infra-flow
+  "Get the infrastructure flow object from the runtime flow registry.
+   Uses requiring-resolve to avoid circular dependency."
+  []
+  (let [get-flow (requiring-resolve 'seon.runtime/get-flow)
+        handle (get-flow {:seon.runtime/flow-id :seon.flow/infrastructure})]
+    (when handle
+      (:flow handle))))
+
+(defn- get-pending-promises
+  "Get the pending-promises atom from seon.flow.topology."
+  []
+  @(requiring-resolve 'seon.flow.topology/pending-promises))
+
+(defn- eval-via-flow!
+  "Route an eval through the infrastructure flow's :seon.flow/repl process.
+   Falls back to direct pool/nrepl-eval! when the flow is not running."
+  [port source]
+  (if-let [fl (get-infra-flow)]
+    (let [pending (get-pending-promises)
+          request-id (random-uuid)
+          p (promise)
+          request {::msg/id request-id
+                   ::msg/version 1
+                   ::msg/type :request
+                   ::msg/from-ns "seon.repl"
+                   ::msg/payload {:form/source source
+                                  :form/port port}
+                   ::msg/created-at (Instant/now)}]
+      (swap! pending assoc request-id p)
+      (try
+        (flow/inject fl [:seon.flow/repl :seon.flow.in/request] [request])
+        (let [reply (deref p 30000 ::timed-out)]
+          (if (= reply ::timed-out)
+            (do
+              (swap! pending dissoc request-id)
+              (throw (ex-info "REPL eval timed out"
+                              {::msg/status :timeout
+                               ::msg/id request-id})))
+            (case (::msg/status reply)
+              :ok (::msg/value reply)
+              (throw (ex-info (or (::msg/error-message reply) "REPL eval failed")
+                              (select-keys reply [::msg/status ::msg/error-type
+                                                  ::msg/error-message]))))))
+        (catch Exception e
+          (swap! pending dissoc request-id)
+          (throw e))))
+    ;; Fallback: flow not running (tests, early boot)
+    (pool/nrepl-eval! port source)))
+
 (defn eval-form!
   "Main entry point. Classify, eval, store, and index a form.
+
+   Routes eval through the infrastructure flow's :seon.flow/repl process
+   for observability. Falls back to direct nREPL when the flow is not running.
 
    Note: No :malli/schema - conn and nrepl-port are runtime objects.
 
@@ -216,16 +272,16 @@
   [{::keys [source namespace agent-id conn nrepl-port]}]
   (let [ns-str (str namespace)
         {:keys [::form-type ::form-name]} (classify-form {::source source})
-        ;; Eval on agent JVM if port provided
+        ;; Eval on agent JVM via flow topology
         eval-result (when nrepl-port
-                      (pool/nrepl-eval! nrepl-port source))
+                      (eval-via-flow! nrepl-port source))
         ;; Store in Datalevin
         stored (store-form! conn ns-str form-type form-name source agent-id)
         ;; Update code index
         _ (update-code-index! conn source)]
     (log/debug "Form processed" {:type form-type :name form-name
-                                  :version (:form/version stored)
-                                  :namespace ns-str})
+                                 :version (:form/version stored)
+                                 :namespace ns-str})
     {::result eval-result
      ::form-type form-type
      ::form-name form-name
