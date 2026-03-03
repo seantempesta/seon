@@ -335,13 +335,21 @@
 ;; Suspend: keep flow alive across (reset)
 (defmethod ig/suspend-key! :seon.flow/infrastructure [_ state] state)
 
-;; Resume: only restart if connection-manager changed
+;; Resume: only restart if connection-manager changed.
+;; Always re-register the flow handle — the in-memory atom may have been
+;; cleared by a namespace reload between suspend and resume.
 (defmethod ig/resume-key :seon.flow/infrastructure
   [_ opts old-opts old-state]
-  (if (= (:connection-manager opts) (:connection-manager old-opts))
-    old-state
-    (do (ig/halt-key! :seon.flow/infrastructure old-state)
-        (ig/init-key :seon.flow/infrastructure opts))))
+  (let [state (if (= (:connection-manager opts) (:connection-manager old-opts))
+                old-state
+                (do (ig/halt-key! :seon.flow/infrastructure old-state)
+                    (ig/init-key :seon.flow/infrastructure opts)))]
+    (when-let [fl (::topology/flow state)]
+      (runtime/register-flow! {::runtime/flow-id (::topology/flow-id state)
+                                ::runtime/flow fl
+                                ::runtime/chans (::topology/chans state)
+                                ::runtime/label "infrastructure"}))
+    state))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Claude Code SDK Configuration
