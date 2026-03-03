@@ -174,7 +174,7 @@ Phase 4 (bare keyword cleanup)    ← DONE — ctx registry + topology cycle-det
     ↓
 Phase 5 (rename seon.repl)        ← DONE — renamed seon.repl.super → seon.repl
     ↓
-Phase 6 (repl through topology)   ← 1 agent, ~3 files, integration
+Phase 6 (repl through topology)   ← DONE — eval-form! routes through :seon.flow/repl process
 ```
 
 Each phase commits before next. Each agent runs full test suite. **After each phase**: formulate verification questions, launch verifier if complex.
