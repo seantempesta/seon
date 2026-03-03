@@ -11,7 +11,6 @@
    orchestrator and blocks until a reply arrives."
   (:require [clojure.core.async :as async]
             [clojure.core.async.flow :as flow]
-            [clojure.edn :as edn]
             [taoensso.timbre :as log]
             [seon.flow.msg :as msg]
             [seon.schema :as schema])
@@ -22,13 +21,13 @@
 ;;; ---------------------------------------------------------------------------
 
 (schema/register! ::namespace
-  [:string {:min 1 :description "Namespace this bridge serves"}])
+                  [:string {:min 1 :description "Namespace this bridge serves"}])
 
 (schema/register! ::bridge-port
-  [:int {:min 1 :max 65535 :description "TCP port for orchestrator connection"}])
+                  [:int {:min 1 :max 65535 :description "TCP port for orchestrator connection"}])
 
 (schema/register! ::remote-call-timeout-ms
-  [:int {:min 1 :description "Timeout for remote cross-namespace calls (default 10000ms)"}])
+                  [:int {:min 1 :description "Timeout for remote cross-namespace calls (default 10000ms)"}])
 
 ;;; ---------------------------------------------------------------------------
 ;;; Reverse Channel — Cross-Namespace Remote Calls
@@ -153,7 +152,7 @@
               dur-ms   (quot (- (System/nanoTime) start-ns) 1000000)]
           ;; Verify result is EDN-serializable via round-trip
           (try
-            (edn/read-string (pr-str result))
+            (msg/read-edn (pr-str result))
             (log/debug "Execute local ok" {:trace-id trace :fn fn :ns namespace :elapsed-ms dur-ms :event :end})
             (assoc base
                    ::msg/status :ok
