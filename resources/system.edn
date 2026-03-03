@@ -26,7 +26,8 @@
  ;; - Render system (function resolution)
  ;; Initializes runtime registry and marks crashed instances on startup.
  :seon/runtime-db
- {:connection-manager #ig/ref :seon.db.datalevin/connections}
+ {:connection-manager #ig/ref :seon.db.datalevin/connections
+  :infrastructure #ig/ref :seon.flow/infrastructure}
 
  ;; Malli Schema Registry
  ;; Loads all domain schemas on startup

@@ -34,8 +34,6 @@
   (runtime/reset-registry! {})
   ;; Clear test conn override
   (runtime/set-test-conn! nil)
-  ;; Shutdown writer flows before closing conn to prevent SIGSEGV
-  (db/shutdown-writers!)
   ;; Close connection
   (when-let [conn @test-conn]
     (try (d/close conn) (catch Exception _)))

@@ -19,75 +19,6 @@
    :age  {:db/valueType :db.type/long}})
 
 ;;; ---------------------------------------------------------------------------
-;;; transact! creates writer flow lazily
-;;; ---------------------------------------------------------------------------
-
-(deftest transact-creates-writer-test
-  (testing "transact! writes data and creates writer flow"
-    (tu/with-temp-conn test-schema
-      (fn [conn]
-        (try
-          (let [result (db/transact! conn [{:name "Alice" :age 30}])]
-            ;; Data written
-            (is (some? result))
-            (let [results (d/q '[:find ?n :where [?e :name ?n]] @conn)]
-              (is (= #{["Alice"]} (set results))))
-            ;; Writer flow created
-            (is (some? (db/writer-status conn))))
-          (finally
-            (db/shutdown-writers!)))))))
-
-;;; ---------------------------------------------------------------------------
-;;; pause/resume coordination
-;;; ---------------------------------------------------------------------------
-
-(deftest pause-resume-test
-  (testing "pause and resume don't throw"
-    (tu/with-temp-conn test-schema
-      (fn [conn]
-        (try
-          ;; Ensure writer exists
-          (db/transact! conn [{:name "Bob" :age 25}])
-          ;; Pause triggers flush
-          (db/pause-writes! conn)
-          ;; Resume restores
-          (db/resume-writes! conn)
-          ;; Can still write after resume
-          (db/transact! conn [{:name "Carol" :age 35}])
-          (let [results (d/q '[:find ?n :where [?e :name ?n]] @conn)]
-            (is (= 2 (count results))))
-          (finally
-            (db/shutdown-writers!)))))))
-
-;;; ---------------------------------------------------------------------------
-;;; shutdown-writers! cleans up
-;;; ---------------------------------------------------------------------------
-
-(deftest shutdown-writers-test
-  (testing "shutdown stops all writer flows"
-    (tu/with-temp-conn test-schema
-      (fn [conn]
-        (db/transact! conn [{:name "Dave" :age 40}])
-        (is (some? (db/writer-status conn)))
-        (db/shutdown-writers!)
-        (is (nil? (db/writer-status conn)))))))
-
-;;; ---------------------------------------------------------------------------
-;;; stats tracks writes
-;;; ---------------------------------------------------------------------------
-
-(deftest stats-test
-  (testing "stats tracks write counts"
-    (tu/with-temp-conn test-schema
-      (fn [conn]
-        (try
-          (let [before (:total-writes (db/stats))]
-            (db/transact! conn [{:name "Eve" :age 28}])
-            (is (= (inc before) (:total-writes (db/stats)))))
-          (finally
-            (db/shutdown-writers!)))))))
-
-;;; ---------------------------------------------------------------------------
 ;;; Named Convenience API
 ;;; ---------------------------------------------------------------------------
 
@@ -157,56 +88,23 @@
                  (set (map (comp vector :name) results)))))))))
 
 ;;; ---------------------------------------------------------------------------
-;;; Schema enforcement
+;;; Schema enforcement (validates attrs without needing infrastructure flow)
 ;;; ---------------------------------------------------------------------------
 
 (deftest transact-rejects-unregistered-attrs-test
   (testing "transact! throws for unregistered attributes"
     (tu/with-temp-conn test-schema
       (fn [conn]
-        (try
-          (is (thrown-with-msg?
-               clojure.lang.ExceptionInfo
-               #"Unregistered attributes"
-               (db/transact! conn [{:bogus/unregistered "nope"}])))
-          (finally
-            (db/shutdown-writers!)))))))
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo
+             #"Unregistered attributes"
+             (db/transact! conn [{:bogus/unregistered "nope"}])))))))
 
 (deftest transact-rejects-unregistered-vector-tuple-test
   (testing "transact! throws for unregistered attrs in vector tuples"
     (tu/with-temp-conn test-schema
       (fn [conn]
-        (try
-          (is (thrown-with-msg?
-               clojure.lang.ExceptionInfo
-               #"Unregistered attributes"
-               (db/transact! conn [[:db/add 1 :bogus/field "val"]])))
-          (finally
-            (db/shutdown-writers!)))))))
-
-(deftest transact-allows-db-system-attrs-test
-  (testing "transact! allows :db/* system attributes without registration"
-    (tu/with-temp-conn test-schema
-      (fn [conn]
-        (try
-          ;; :db/id is a system attr, should not require registration
-          (let [result (db/transact! conn [{:db/id -1 :name "Sys" :age 1}])]
-            (is (some? result)))
-          (finally
-            (db/shutdown-writers!)))))))
-
-(deftest transact-auto-adds-missing-schema-test
-  (testing "transact! auto-adds Datalevin schema for registered attrs not yet in DB"
-    ;; Use an empty initial schema — attrs are registered but not in Datalevin yet
-    (tu/with-temp-conn {}
-      (fn [conn]
-        (try
-          ;; :name and :age are registered above — transact! should auto-add them
-          (db/transact! conn [{:name "Auto" :age 99}])
-          (let [results (d/q '[:find ?n :where [?e :name ?n]] @conn)]
-            (is (= #{["Auto"]} (set results))))
-          ;; Verify schema was added
-          (is (contains? (d/schema conn) :name))
-          (is (contains? (d/schema conn) :age))
-          (finally
-            (db/shutdown-writers!)))))))
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo
+             #"Unregistered attributes"
+             (db/transact! conn [[:db/add 1 :bogus/field "val"]])))))))

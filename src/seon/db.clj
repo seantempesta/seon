@@ -2,9 +2,9 @@
   "Seon's database API. Drop-in replacement for datalevin.core.
 
    Agents use this instead of d/transact! directly.
-   Reads pass through directly. Writes go through d/transact! directly
-   for zero overhead, but each connection gets a lazily-created writer
-   flow for coordination (pause/resume for backups, metrics via ping).
+   Reads pass through directly. Writes route through the infrastructure
+   flow's writer process for serialized access, deadlock prevention,
+   and observability.
 
    Two API levels:
    - Raw pass-through: `q`, `pull`, `pull-many`, `entity` — take a db value
@@ -16,59 +16,14 @@
    the one namespace where map-in/map-out does not apply."
   (:require [clojure.core.async.flow :as flow]
             [datalevin.core :as d]
-            [malli.core :as m]
             [seon.db.datalevin.conn :as conn]
-            [seon.db.datalevin.writer :as writer]
             [seon.db.schema :as db-schema]
+            [seon.flow.msg :as msg]
             [seon.schema :as schema]
             [taoensso.timbre :as log])
   (:import [java.time Instant]))
 
-;;; --- Schemas ---
-
-(def WriteStats
-  "Schema for the write statistics map."
-  (m/schema
-   [:map
-    [:total-writes :int]
-    [:last-write-at [:maybe :any]]
-    [:by-caller [:map-of [:maybe :string] :int]]]))
-
-;;; --- State ---
-
-(defonce ^:private write-stats
-  (atom {:total-writes 0
-         :last-write-at nil
-         :by-caller {}}))
-
-;; Map of conn identity -> {:flow flow-obj :conn conn}
-(defonce ^:private writers
-  (atom {}))
-
 ;;; --- Internal ---
-
-(defn- caller-ns
-  "Best-effort extraction of the calling namespace from the stack."
-  []
-  (let [frames (.getStackTrace (Thread/currentThread))]
-    (->> frames
-         (map #(.getClassName ^StackTraceElement %))
-         (filter #(and (.startsWith ^String % "seon.")
-                       (not (.startsWith ^String % "seon.db"))))
-         first)))
-
-(defn- conn-id
-  "Stable identity key for a Datalevin connection."
-  [conn]
-  (System/identityHashCode conn))
-
-(defn- conn-closed?
-  "Check if a Datalevin connection is closed. Returns true if closed or nil."
-  [conn]
-  (try
-    (d/closed? conn)
-    (catch Throwable _
-      true)))
 
 (defn- system-attr?
   "Returns true for :db/* system attributes that should not be validated
@@ -123,48 +78,78 @@
           (log/info "Auto-adding schema for attrs" {:attrs (keys schema-update)})
           (d/update-schema conn schema-update))))))
 
-(defn- ensure-writer!
-  "Lazily create a writer flow for conn if one doesn't exist yet.
-   The writer flow provides pause/resume coordination and metrics.
-   Normal writes bypass the flow channel for zero overhead.
-   Stores pending-promises atom alongside flow for future transact-via-flow! use.
-   Refuses to create a flow for closed connections."
-  [conn]
-  (when (conn-closed? conn)
-    (throw (ex-info "Cannot create writer for closed connection"
-                    {:conn-id (conn-id conn)})))
-  (let [id (conn-id conn)]
-    (when-not (get @writers id)
-      (let [promises (atom {})
-            fl (writer/create-writer-flow {::writer/conn conn
-                                           ::writer/db-name (str "conn-" id)
-                                           ::writer/pending-promises promises})]
-        (swap! writers assoc id {:flow fl :conn conn :pending-promises promises})
-        (log/info "Created writer flow" {:conn-id id})))
-    nil))
+;;; --- Infrastructure Flow Access ---
+;;;
+;;; These functions access the infrastructure flow via requiring-resolve
+;;; to avoid a circular dependency: seon.db -> seon.flow.topology -> seon.runtime -> seon.db
 
-(defn- track-write!
-  "Update write stats after a successful transact."
-  [caller tx-count]
-  (swap! write-stats (fn [s]
-                       (-> s
-                           (update :total-writes inc)
-                           (assoc :last-write-at (Instant/now))
-                           (update-in [:by-caller caller] (fnil inc 0)))))
-  (log/trace "transact!" {:caller caller :tx-count tx-count}))
+(defn- get-infra-flow
+  "Get the infrastructure flow object from the runtime flow registry.
+   Uses requiring-resolve to break the circular dep with seon.flow.topology.
+   Returns the flow object or nil if not running."
+  []
+  (let [get-flow (requiring-resolve 'seon.runtime/get-flow)
+        handle (get-flow {:seon.runtime/flow-id :seon.flow/infrastructure})]
+    (when handle
+      (:flow handle))))
+
+(defn- get-pending-promises
+  "Get the pending-promises atom from seon.flow.topology.
+   Uses requiring-resolve to break the circular dep."
+  []
+  @(requiring-resolve 'seon.flow.topology/pending-promises))
+
+(defn- write!
+  "Route a transaction through the infrastructure flow writer.
+   Falls back to direct d/transact! when the flow is not running
+   (e.g. during tests or early boot)."
+  ([conn tx-data]
+   (write! conn tx-data nil))
+  ([conn tx-data opts]
+   (if-let [fl (get-infra-flow)]
+     ;; Flow is running — route through it
+     (let [pending (get-pending-promises)
+           timeout-ms (or (:timeout-ms opts) 10000)
+           request-id (random-uuid)
+           p (promise)
+           request {::msg/id request-id
+                    ::msg/version 1
+                    ::msg/type :request
+                    ::msg/from-ns "seon.db"
+                    ::msg/payload {:seon.db.datalevin.writer/tx-data tx-data
+                                   :seon.db.datalevin.writer/conn conn}
+                    ::msg/created-at (Instant/now)}]
+       ;; Register promise before injection
+       (swap! pending assoc request-id p)
+       (try
+         (flow/inject fl [:seon.flow/writer :seon.flow.in/request] [request])
+         (let [reply (deref p timeout-ms ::timed-out)]
+           (if (= reply ::timed-out)
+             (do
+               (swap! pending dissoc request-id)
+               (throw (ex-info "Write timed out"
+                               {::msg/status :timeout
+                                ::msg/id request-id
+                                :timeout-ms timeout-ms})))
+             (case (::msg/status reply)
+               :ok (::msg/value reply)
+               (throw (ex-info (or (::msg/error-message reply)
+                                   (str "Write failed: " (::msg/status reply)))
+                               (select-keys reply [::msg/status ::msg/error-type
+                                                   ::msg/error-class ::msg/error-message
+                                                   ::msg/id ::msg/duration-ms]))))))
+         (catch Exception e
+           (swap! pending dissoc request-id)
+           (throw e))))
+     ;; No flow — direct fallback (tests, early boot)
+     (d/transact! conn tx-data))))
 
 ;;; --- Public API (positional, mirrors datalevin.core) ---
 
-(def ^:private default-timeout-ms
-  "Default transaction timeout in milliseconds.
-   Generous — protects against deadlocks, not slow queries."
-  10000)
-
 (defn transact!
-  "Transact data into conn. Tracks caller and write count for observability.
-   Lazily creates a writer flow for backup coordination.
-   Wraps d/transact! in a future with timeout to prevent permanent deadlocks
-   from abandoned write transactions (e.g. MCP eval timeout while holding lock)."
+  "Transact data into conn. Validates attributes, ensures schema, then
+   routes through the infrastructure flow writer for serialized access.
+   Throws if the infrastructure flow is not running."
   {:malli/schema [:=> [:cat :any [:sequential :any]] :any]}
   ([conn tx-data]
    (transact! conn tx-data nil))
@@ -172,24 +157,9 @@
    (let [attrs (extract-tx-attrs tx-data)]
      (validate-attrs! attrs)
      (ensure-schema! conn attrs))
-   (ensure-writer! conn)
-   (let [caller (caller-ns)
-         fut (future
-               (if tx-meta
-                 (d/transact! conn tx-data tx-meta)
-                 (d/transact! conn tx-data)))
-         result (deref fut default-timeout-ms ::timeout)]
-     (when (= result ::timeout)
-       (future-cancel fut)
-       (log/error "Datalevin transaction timed out — possible deadlock"
-                  {:caller caller :tx-count (count tx-data)
-                   :timeout-ms default-timeout-ms})
-       (throw (ex-info "Datalevin transaction timed out"
-                       {:timeout-ms default-timeout-ms
-                        :tx-count (count tx-data)
-                        :caller caller})))
-     (track-write! caller (count tx-data))
-     result)))
+   (when tx-meta
+     (log/debug "tx-meta provided but not yet supported via flow writer" {:tx-meta tx-meta}))
+   (write! conn tx-data)))
 
 (defn q
   "Query the database. Pass-through to datalevin.core/q."
@@ -327,71 +297,20 @@
   (with-retry db-name
     (fn [db] (d/pull-many db selector eids))))
 
-;;; --- Writer Flow Coordination ---
+;;; --- Infrastructure Flow Coordination ---
 
-(defn all-conns
-  "Returns all connections that have active writer flows."
-  []
-  (mapv :conn (vals @writers)))
-
-(defn pause-writes!
-  "Pause the writer flow for conn, triggering d/sync via the transition hook.
-   Blocks until the pause transition completes (flush is done).
+(defn pause-writer!
+  "Pause the infrastructure flow writer. Blocks until paused.
    Use before backups to ensure all writes are flushed."
-  [conn]
-  (when-let [{:keys [flow]} (get @writers (conn-id conn))]
-    (flow/pause flow)
-    (flow/ping flow 5000)
-    (log/info "Paused writer for conn" (conn-id conn))))
-
-(defn resume-writes!
-  "Resume the writer flow for conn after backup completes."
-  [conn]
-  (when-let [{:keys [flow]} (get @writers (conn-id conn))]
-    (flow/resume flow)
-    (log/info "Resumed writer for conn" (conn-id conn))))
-
-(defn shutdown-writers!
-  "Stop all writer flows safely. Uses pause -> ping -> stop to ensure
-   the transition hook (flush) completes before stopping the flow.
-   Call on system shutdown before closing Datalevin connections."
   []
-  (doseq [[id {:keys [flow]}] @writers]
-    (try
-      (flow/pause flow)
-      (flow/ping flow 5000)
-      (flow/stop flow)
-      (log/debug "Stopped writer flow" id)
-      (catch Throwable e
-        (log/warn e "Error stopping writer flow" id))))
-  (reset! writers {})
-  (log/info "All writer flows stopped"))
+  (let [fl (get-infra-flow)]
+    (flow/pause fl)
+    (flow/ping fl 5000)
+    (log/info "Infrastructure writer paused")))
 
-(defn remove-writer!
-  "Stop and remove the writer flow for a specific connection.
-   Use when closing a connection that has a writer flow, to prevent
-   orphaned flows from crashing on later shutdown.
-   Safe to call even if no writer exists for conn."
-  [conn]
-  (let [id (conn-id conn)]
-    (when-let [{:keys [flow]} (get @writers id)]
-      (try
-        (flow/pause flow)
-        (flow/ping flow 5000)
-        (flow/stop flow)
-        (log/debug "Removed writer flow" {:conn-id id})
-        (catch Throwable e
-          (log/warn e "Error removing writer flow" {:conn-id id})))
-      (swap! writers dissoc id))))
-
-(defn writer-status
-  "Returns status of writer flows. Nil values mean no writer for that conn."
-  [conn]
-  (when-let [{:keys [flow]} (get @writers (conn-id conn))]
-    (flow/ping flow)))
-
-(defn stats
-  "Returns write statistics: total writes, last write time, writes by caller namespace."
-  {:malli/schema [:=> [:cat] WriteStats]}
+(defn resume-writer!
+  "Resume the infrastructure flow writer after backup completes."
   []
-  @write-stats)
+  (let [fl (get-infra-flow)]
+    (flow/resume fl)
+    (log/info "Infrastructure writer resumed")))
