@@ -11,20 +11,10 @@
 
    Both return {::in-ch ::out-ch ::close!} for bidirectional communication."
   (:require [clojure.core.async :as a]
-            [clojure.edn :as edn]
+            [seon.flow.msg :as msg]
             [seon.schema :as schema])
   (:import [java.io DataInputStream DataOutputStream EOFException]
-           [java.net ServerSocket Socket InetAddress]
-           [java.time Instant]))
-
-;;; ---------------------------------------------------------------------------
-;;; EDN tagged literal support for java.time.Instant
-;;; ---------------------------------------------------------------------------
-
-(def ^:private edn-readers
-  "EDN readers for tagged literals used in flow messages."
-  {'time/instant #(Instant/parse %)
-   'inst         #(java.util.Date/from (Instant/parse %))})
+           [java.net ServerSocket Socket InetAddress]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schema Registration
@@ -41,7 +31,7 @@
   (let [len (.readInt dis)
         buf (byte-array len)]
     (.readFully dis buf)
-    (edn/read-string {:readers edn-readers} (String. buf "UTF-8"))))
+    (msg/read-edn (String. buf "UTF-8"))))
 
 (defn- write-message!
   "Write one length-prefixed EDN message to output stream."

@@ -3,7 +3,29 @@
 
    Single source of truth for all messages between orchestrator and agent JVMs.
    All keys fully namespaced under `seon.flow.msg`."
-  (:require [seon.schema :as schema]))
+  (:require [clojure.edn :as edn]
+            [seon.schema :as schema])
+  (:import [java.time Instant]))
+
+;;; ---------------------------------------------------------------------------
+;;; Tagged literal support for java.time.Instant
+;;; ---------------------------------------------------------------------------
+
+(defmethod print-method Instant
+  [^Instant inst ^java.io.Writer w]
+  (.write w "#time/instant \"")
+  (.write w (.toString inst))
+  (.write w "\""))
+
+(def edn-readers
+  "EDN readers for tagged literals used in flow messages."
+  {'time/instant #(Instant/parse %)
+   'inst         #(java.util.Date/from (Instant/parse %))})
+
+(defn read-edn
+  "Read EDN string with flow message tagged literal support."
+  [s]
+  (edn/read-string {:readers edn-readers} s))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Envelope Keys
