@@ -167,13 +167,13 @@ This plan makes flow the backbone of the running system — started early, alway
 ## Execution Order
 
 ```
-Phase 0 (doc alignment)           ← orchestrator direct
+Phase 0 (doc alignment)           ← DONE — orchestrator direct
     ↓
-Phase 1 (Integrant topology)      ← 1 agent, ~3 files, foundation
+Phase 1 (Integrant topology)      ← DONE — infrastructure flow boots at startup
     ↓
-Phase 2 (writer in topology)      ← 1 agent, ~4 files, biggest change
+Phase 2 (writer in topology)      ← DONE — transact! routes through flow, -740 lines
     ↓
-Phase 3 (boot order)              ← 1 agent, ~2 files, may merge with Phase 2
+Phase 3 (boot order)              ← DONE — merged into Phase 2 (runtime-db/scanner depend on infra flow)
     ↓
 Phase 4 (bare keyword cleanup)    ← 1 agent, ~4 files, mechanical
     ↓
