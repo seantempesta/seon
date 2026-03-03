@@ -14,6 +14,7 @@
             [taoensso.timbre :as log]
             [seon.schema :as schema]
             [seon.db.datalevin.conn :as dl-conn]
+            [seon.flow.topology :as topology]
             [seon.runtime :as runtime]
             ;; Load component namespaces for their ig/init-key methods
             [seon.web.tailwind]
@@ -302,6 +303,45 @@
   [_ opts _old-opts old-state]
   (ig/halt-key! :seon.graph/scanner old-state)
   (ig/init-key :seon.graph/scanner opts))
+
+;;; ---------------------------------------------------------------------------
+;;; Infrastructure Flow Component
+;;; ---------------------------------------------------------------------------
+;;; Starts the infrastructure flow (writer + reply-router + sinks) at boot.
+;;; The writer handles ALL database writes via the connection manager.
+;;; Namespace flows are NOT part of this — they're created lazily later.
+
+(defmethod ig/init-key :seon.flow/infrastructure
+  [_ {:keys [connection-manager]}]
+  (log/info "Starting infrastructure flow...")
+  (let [result (topology/build-infrastructure!
+                {::topology/connection-manager connection-manager})]
+    (log/info "Infrastructure flow started"
+              {:flow-id (::topology/flow-id result)})
+    result))
+
+(defmethod ig/halt-key! :seon.flow/infrastructure
+  [_ state]
+  (when-let [fl (::topology/flow state)]
+    (log/info "Stopping infrastructure flow...")
+    (try
+      (topology/stop-topology! {::topology/flow fl
+                                ::topology/flow-id (::topology/flow-id state)
+                                ::topology/label "infrastructure"})
+      (catch Throwable t
+        (log/warn "Error stopping infrastructure flow" {:error (.getMessage t)})))
+    (log/info "Infrastructure flow stopped")))
+
+;; Suspend: keep flow alive across (reset)
+(defmethod ig/suspend-key! :seon.flow/infrastructure [_ state] state)
+
+;; Resume: only restart if connection-manager changed
+(defmethod ig/resume-key :seon.flow/infrastructure
+  [_ opts old-opts old-state]
+  (if (= (:connection-manager opts) (:connection-manager old-opts))
+    old-state
+    (do (ig/halt-key! :seon.flow/infrastructure old-state)
+        (ig/init-key :seon.flow/infrastructure opts))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Claude Code SDK Configuration

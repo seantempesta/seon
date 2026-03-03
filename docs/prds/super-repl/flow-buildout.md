@@ -1,5 +1,7 @@
 # Plan: Namespace Harness — Flow-Routed Agent Isolation
 
+> **Status: Executed and completed.** The harness, bridge, proxy, and channel code described here is built and tested. The next step — wiring it into production as the routing backbone — is tracked in [`docs/prds/unified-flow/implementation-plan.md`](../unified-flow/implementation-plan.md).
+
 ## Context
 
 Seon agents own namespaces and write well-spec'd functions. We need process isolation where no namespace can crash the system, with transparent cross-namespace communication via core.async.flow.

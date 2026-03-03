@@ -1,5 +1,7 @@
 # Flow Visualizer: Research & Plan
 
+> **See also:** The unified flow architecture in [`docs/prds/unified-flow/design.md`](../unified-flow/design.md) describes how flow ping/datafy are used for observability across the full topology.
+
 ## 1. What Data the Flow API Exposes
 
 ### `(flow/ping g)` -- Primary introspection tool
