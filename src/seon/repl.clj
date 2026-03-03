@@ -1,4 +1,4 @@
-(ns seon.repl.super
+(ns seon.repl
   "Super REPL form router.
    Receives forms, classifies, stores in Datalevin, routes to agent JVMs,
    updates the code index after each eval."

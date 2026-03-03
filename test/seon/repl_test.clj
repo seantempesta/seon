@@ -1,11 +1,11 @@
-(ns seon.repl.super-test
-  "Tests for seon.repl.super namespace.
+(ns seon.repl-test
+  "Tests for seon.repl namespace.
 
    Uses a temporary local Datalevin database (no server required)."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [datalevin.core :as d]
             [seon.graph.ingest :as ingest]
-            [seon.repl.super :as super])
+            [seon.repl :as super])
   (:import [java.io File]))
 
 ;;; ---------------------------------------------------------------------------

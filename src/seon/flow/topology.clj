@@ -26,13 +26,13 @@
 ;;; ---------------------------------------------------------------------------
 
 (schema/register! ::timeout-ms
-  [:int {:min 1 :description "Request timeout in milliseconds"}])
+                  [:int {:min 1 :description "Request timeout in milliseconds"}])
 
 (schema/register! ::target-ns
-  [:string {:min 1 :description "Target namespace for the request"}])
+                  [:string {:min 1 :description "Target namespace for the request"}])
 
 (schema/register! ::pid
-  [:keyword {:description "Direct process ID for flow injection (e.g. :seon.flow/writer)"}])
+                  [:keyword {:description "Direct process ID for flow injection (e.g. :seon.flow/writer)"}])
 
 ;;; ---------------------------------------------------------------------------
 ;;; Sink Step Functions
@@ -238,7 +238,6 @@
         (swap! pending-promises dissoc request-id)
         (throw e)))))
 
-
 ;;; ---------------------------------------------------------------------------
 ;;; Cross-Namespace Relay
 ;;; ---------------------------------------------------------------------------
@@ -384,9 +383,9 @@
                             (str/join " \u2192 " cycle))
                           cycles)]
       (throw (ex-info "Circular dependency detected in namespace proxies"
-                      {:cycle-detected true
-                       :cycles cycles
-                       :cycle-descriptions cycle-strs}))))
+                      {::cycle-detected true
+                       ::cycles cycles
+                       ::cycle-descriptions cycle-strs}))))
 
   (let [;; Build process definitions
         ns-procs
@@ -417,23 +416,23 @@
         (into []
               (concat
                 ;; Each namespace's reply output -> reply router
-                (mapv (fn [[ns-str _]]
-                        (let [pid (keyword "ns" ns-str)]
-                          [[pid :seon.flow.out/reply]
-                           [:seon.flow/reply-router :seon.flow.in/reply]]))
-                      namespaces)
+               (mapv (fn [[ns-str _]]
+                       (let [pid (keyword "ns" ns-str)]
+                         [[pid :seon.flow.out/reply]
+                          [:seon.flow/reply-router :seon.flow.in/reply]]))
+                     namespaces)
                 ;; Each namespace's event output -> event sink
-                (mapv (fn [[ns-str _]]
-                        (let [pid (keyword "ns" ns-str)]
-                          [[pid :seon.flow.out/event]
-                           [:seon.flow/event-sink :seon.flow.out/event]]))
-                      namespaces)
+               (mapv (fn [[ns-str _]]
+                       (let [pid (keyword "ns" ns-str)]
+                         [[pid :seon.flow.out/event]
+                          [:seon.flow/event-sink :seon.flow.out/event]]))
+                     namespaces)
                 ;; Each namespace's error output -> error sink
-                (mapv (fn [[ns-str _]]
-                        (let [pid (keyword "ns" ns-str)]
-                          [[pid :seon.flow.out/error]
-                           [:seon.flow/error-sink :seon.flow.out/error]]))
-                      namespaces)))
+               (mapv (fn [[ns-str _]]
+                       (let [pid (keyword "ns" ns-str)]
+                         [[pid :seon.flow.out/error]
+                          [:seon.flow/error-sink :seon.flow.out/error]]))
+                     namespaces)))
 
         config {:procs (merge ns-procs router-proc sink-procs)
                 :conns conns}

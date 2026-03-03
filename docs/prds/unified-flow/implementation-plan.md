@@ -141,12 +141,7 @@ This plan makes flow the backbone of the running system — started early, alway
 
 ## Phase 5: Rename Super REPL → `seon.repl` (1 agent, ~4 files)
 
-**Goal**: `seon.repl.super` → `seon.repl`. Clean name.
-
-1. Rename namespace + file
-2. Update all requires
-3. Rename test file
-4. Update PRD docs
+**Goal**: `seon.repl.super` → `seon.repl`. Clean name. **DONE.**
 
 ---
 
@@ -175,9 +170,9 @@ Phase 2 (writer in topology)      ← DONE — transact! routes through flow, -7
     ↓
 Phase 3 (boot order)              ← DONE — merged into Phase 2 (runtime-db/scanner depend on infra flow)
     ↓
-Phase 4 (bare keyword cleanup)    ← 1 agent, ~4 files, mechanical
+Phase 4 (bare keyword cleanup)    ← DONE — ctx registry + topology cycle-detection namespaced
     ↓
-Phase 5 (rename seon.repl)        ← 1 agent, ~4 files, simple
+Phase 5 (rename seon.repl)        ← DONE — renamed seon.repl.super → seon.repl
     ↓
 Phase 6 (repl through topology)   ← 1 agent, ~3 files, integration
 ```

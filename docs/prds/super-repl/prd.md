@@ -275,7 +275,7 @@ feat: knowledge graph foundation with Datalevin storage
 
 **Goal**: Agents eval forms through the Super REPL. Forms are stored in Datalevin with versioning. Analysis runs automatically. Agent JVMs get namespace-scoped databases and a shared environment namespace.
 
-**Current state**: The Super REPL form router (`seon.repl.super`) is built — form classification, routing, Datalevin storage, and versioning all work. Agent environment (`seon.agent.env`) is built with graph queries, ctx persistence, schema discovery. What's NOT done: graduation to disk, MCP routing, dynamic context suggestions, and agent_runner modifications.
+**Current state**: The Super REPL form router (`seon.repl`) is built — form classification, routing, Datalevin storage, and versioning all work. Agent environment (`seon.agent.env`) is built with graph queries, ctx persistence, schema discovery. What's NOT done: graduation to disk, MCP routing, dynamic context suggestions, and agent_runner modifications.
 
 ### Files to Create/Modify
 
@@ -313,7 +313,7 @@ The MCP server (`bin/mcp-server`) is a Babashka script. It routes `eval` calls b
 
 ### Build Checklist
 
-- [x] **`seon.repl.super`** — Form routing:
+- [x] **`seon.repl`** — Form routing:
   - [x] `eval-form!` — Main entry point. Receives `{:form/source "(defn ema ...)" :form/namespace 'seon.trading.signals :form/agent-id "a13b"}`. Steps:
     1. Classify form type (defn, def, ns, require, expression) by parsing with edamame
     2. Route to agent JVM via `pool/nrepl-eval!`
@@ -363,12 +363,12 @@ The MCP server (`bin/mcp-server`) is a Babashka script. It routes `eval` calls b
 
 - [ ] **Domain functions with `:malli/schema` metadata** — Agent JVM functions should have Malli schema annotations so the spec-driven scanner can discover them. Rendering is handled by the orchestrator, not the agent JVM. See [`spec-driven-rendering` PRD](../spec-driven-rendering/prd.md) for the render function convention (`.render` companion namespaces in the orchestrator).
 
-- [ ] **`seon.repl.super` dynamic context**:
+- [ ] **`seon.repl` dynamic context**:
   - [ ] After `eval-form!` stores and analyzes a form, compute **relevant context** to return alongside the eval result. If the agent just defined a function that takes `:health/workout`, search the graph for other functions that produce or consume that shape. Return these suggestions in the eval response so the agent sees them without having to ask.
   - [ ] `suggest-context` — Given a form's analysis, query the graph for related functions, schemas, and namespace dependencies. Return a compact summary suitable for injecting into the agent's context.
 
 - [ ] **`bin/mcp-server` modification**:
-  - [ ] In `execute-eval`, add a branch: if session is a pool session (check via orchestrator query), route through `seon.repl.super/eval-form!` instead of raw nREPL eval
+  - [ ] In `execute-eval`, add a branch: if session is a pool session (check via orchestrator query), route through `seon.repl/eval-form!` instead of raw nREPL eval
   - [ ] The routing check: eval code on orchestrator that checks if this session_id has a pool-assigned JVM. If yes, return port + super-repl flag.
 
 ### Test Checklist
@@ -390,7 +390,7 @@ The MCP server (`bin/mcp-server`) is a Babashka script. It routes `eval` calls b
 ```
 feat: Super REPL core with form routing, agent environment, and graduation
 
-- seon.repl.super: form classification, routing, Datalevin storage, versioning, dynamic context
+- seon.repl: form classification, routing, Datalevin storage, versioning, dynamic context
 - seon.repl.graduate: namespace assembly and graduation to disk
 - seon.agent.env: agent toolkit with graph queries, ctx persistence, cross-ns discovery
 - agent_runner: namespace-scoped Datalevin DB, auto-load seon.agent.env
@@ -488,7 +488,7 @@ Dual-flow model: orchestrator flow topology + agent JVM mini-flow, connected by 
 ### Existing Code to Reuse
 
 - `seon.graph.query` (Phase 2) — Datalog query API
-- `seon.repl.super` (Phase 3) — `suggest-context` hook point after each eval
+- `seon.repl` (Phase 3) — `suggest-context` hook point after each eval
 - `seon.agent.env` (Phase 3) — Agent-side search and discovery
 - `seon.flow.msg` (Phase 4) — `::msg/event` schema for observability events
 - `seon.flow.topology` (Phase 4) — Flow topology provides event streams per namespace
