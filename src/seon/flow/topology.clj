@@ -12,6 +12,7 @@
   (:require [clojure.core.async :as async]
             [clojure.core.async.flow :as flow]
             [clojure.string :as str]
+            [seon.db.datalevin.reader :as reader]
             [seon.db.datalevin.writer :as writer]
             [seon.flow.harness :as harness]
             [seon.flow.msg :as msg]
@@ -588,6 +589,7 @@
 
    Processes:
      :seon.flow/writer       - infra-writer-step (multi-DB via connection manager)
+     :seon.flow/reader       - infra-reader-step (multi-DB reads via connection manager)
      :seon.flow/repl          - repl-step (nREPL eval via pool)
      :seon.flow/reply-router - reply-router-step (delivers promises)
      :seon.flow/event-sink   - event-sink-step (observability)
@@ -596,6 +598,8 @@
    Connections:
      writer reply  -> reply-router
      writer error  -> error-sink
+     reader reply  -> reply-router
+     reader error  -> error-sink
      repl reply    -> reply-router
      repl error    -> error-sink
 
@@ -609,6 +613,9 @@
         config {:procs {:seon.flow/writer
                         {:proc (flow/process #'writer/infra-writer-step)
                          :args {::writer/connection-manager connection-manager}}
+                        :seon.flow/reader
+                        {:proc (flow/process #'reader/infra-reader-step)
+                         :args {::reader/connection-manager connection-manager}}
                         :seon.flow/repl
                         {:proc (flow/process #'repl-step)}
                         :seon.flow/reply-router
@@ -622,6 +629,12 @@
                          [:seon.flow/reply-router :seon.flow.in/reply]]
                         ;; writer error -> error-sink
                         [[:seon.flow/writer :seon.flow.out/error]
+                         [:seon.flow/error-sink :seon.flow.out/error]]
+                        ;; reader reply -> reply-router
+                        [[:seon.flow/reader :seon.flow.out/reply]
+                         [:seon.flow/reply-router :seon.flow.in/reply]]
+                        ;; reader error -> error-sink
+                        [[:seon.flow/reader :seon.flow.out/error]
                          [:seon.flow/error-sink :seon.flow.out/error]]
                         ;; repl reply -> reply-router
                         [[:seon.flow/repl :seon.flow.out/reply]
@@ -641,8 +654,8 @@
         (flow/stop fl)
         (throw (ex-info "Infrastructure flow failed to start: processes did not respond to ping within 5s. Check step-fn init arities."
                         {:flow-id :seon.flow/infrastructure
-                         :processes [:seon.flow/writer :seon.flow/repl :seon.flow/reply-router
-                                     :seon.flow/event-sink :seon.flow/error-sink]}
+                         :processes [:seon.flow/writer :seon.flow/reader :seon.flow/repl
+                                     :seon.flow/reply-router :seon.flow/event-sink :seon.flow/error-sink]}
                         e))))
     ;; Register in runtime
     (runtime/register-flow! {::runtime/flow-id flow-id

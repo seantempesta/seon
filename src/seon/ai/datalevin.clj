@@ -5,7 +5,7 @@
    Fire-and-forget writes (errors logged, not propagated) with debounced SSE
    refresh to update Observatory UI.
 
-   Depends on: seon.ai (schemas), seon.db (transact!), seon.db.datalevin.conn (connections)
+   Depends on: seon.ai (schemas), seon.db (query, transact!, pull-by-name, pull-many-by-name)
    Depended on by: seon.ai (primary), seon.ai.claude, seon.web.agents
 
    Consumers:
@@ -21,22 +21,25 @@
 
    Watch out for:
    - dl-* functions use positional args (internal pattern) but are de-facto public API
-   - Dynamic require/resolve of datalevin.core everywhere (lazy loading, avoid at startup)
    - entity-id/entity-type keys are our internal Datalevin markers, not seon.ai keys
 
    Needs work:
    - P2: No :malli/schema on write functions (justified: fire-and-forget, entity maps vary)
    - P2: dl-* functions use positional args (would break consumers to change)
 
+   Migrated (2026-03-04):
+   - All reads use seon.db/query, pull-by-name, pull-many-by-name
+   - All writes use seon.db/transact! with :seon.ai keyword
+   - Removed *test-conn*, get-conn, private q/pull-entity/pull-many-entities
+   - No direct datalevin.core usage
+
    Fixed (2026-02-26):
    - P1: Created test file with 12 tests, 36 assertions
    - P3: stats function now has :malli/schema and uses namespaced keys
 
-   Last audit: 2026-02-26 | Tests: 12 pass / 0 fail | Commit: f1bb8d0"
-  (:require [integrant.repl.state :as state]
-            [seon.ai :as ai]
+   Last audit: 2026-03-04 | Tests: 12 pass / 0 fail"
+  (:require [seon.ai :as ai]
             [seon.db :as db]
-            [seon.db.datalevin.conn :as conn]
             [seon.db.schema :as dbs]
             [seon.db.tx :as tx]
             [seon.schema :as schema]
@@ -51,6 +54,10 @@
 ;; Atom controlling whether Datalevin writes are enabled.
 ;; Set to false to disable parallel writes (e.g., if Datalevin is unstable).
 (defonce enabled? (atom true))
+
+;; Global monotonic counter for message ordering.
+;; Ensures messages saved in the same millisecond have deterministic order.
+(defonce msg-sequence (atom 0))
 
 (defn set-enabled!
   "Enable or disable Datalevin parallel writes.
@@ -140,6 +147,7 @@
    [:seon.ai/output-tokens {:optional true} :int]
    [:seon.ai/timestamp {:optional true :db/valueType :db.type/instant} inst?]
    [:seon.ai.claude/message-type {:optional true} :string]
+   [:seon.ai/sequence {:optional true :db/valueType :db.type/long} :int]
    [:seon.ai.claude/cache-read-tokens {:optional true} :int]
    [:seon.ai.claude/cache-creation-tokens {:optional true} :int]])
 
@@ -190,26 +198,12 @@
                       ::message-writes 0}))
 
 ;;; ---------------------------------------------------------------------------
-;;; Connection Helpers
+;;; Database Identity
 ;;; ---------------------------------------------------------------------------
 
-;; Override connection for testing. When set, used instead of Integrant system.
-(def ^:dynamic *test-conn* nil)
-
-(defn- get-conn
-  "Get Datalevin master connection from Integrant system or test override.
-   Passes datalevin-schema so the connection has typed attributes.
-   Returns nil if system not running or connection unavailable."
-  []
-  (or *test-conn*
-      (when-let [mgr (:seon.db.datalevin/connections state/system)]
-        (try
-          (conn/get-conn! {::conn/manager mgr
-                          ::conn/db :seon.ai
-                          ::conn/schema datalevin-schema})
-          (catch Exception e
-            (log/warn "Failed to get Datalevin connection" {:error (.getMessage e)})
-            nil)))))
+;; All AI storage operations use this db-name keyword.
+;; Resolved by seon.db to the :seon.ai Datalevin database via conn manager.
+(def ^:private db-name :seon.ai)
 
 ;;; ---------------------------------------------------------------------------
 ;;; Entity Conversion
@@ -302,19 +296,18 @@
     (do (log/trace "Datalevin writes disabled, skipping session")
         false)
     (try
-      (when-let [conn (get-conn)]
-        (let [dl-entity (entity->datalevin-session entity)]
-          (db/transact! conn [dl-entity])
-          (swap! stats-atom (fn [s]
-                              (-> s
-                                  (update ::write-count inc)
-                                  (update ::session-writes inc)
-                                  (assoc ::last-write-at (Instant/now)))))
-          (log/debug "Saved session to Datalevin"
-                     {:session-id (::ai/session-id entity)
-                      :entity-id (:seon/id entity)})
-          (maybe-refresh-sse!)
-          true))
+      (let [dl-entity (entity->datalevin-session entity)]
+        (db/transact! db-name [dl-entity])
+        (swap! stats-atom (fn [s]
+                            (-> s
+                                (update ::write-count inc)
+                                (update ::session-writes inc)
+                                (assoc ::last-write-at (Instant/now)))))
+        (log/debug "Saved session to Datalevin"
+                   {:session-id (::ai/session-id entity)
+                    :entity-id (:seon/id entity)})
+        (maybe-refresh-sse!)
+        true)
       (catch Exception e
         (swap! stats-atom update ::error-count inc)
         (log/warn "Failed to save session to Datalevin"
@@ -337,19 +330,20 @@
     (do (log/trace "Datalevin writes disabled, skipping message")
         false)
     (try
-      (when-let [conn (get-conn)]
-        (let [dl-entity (entity->datalevin-message entity)]
-          (db/transact! conn [dl-entity])
-          (swap! stats-atom (fn [s]
-                              (-> s
-                                  (update ::write-count inc)
-                                  (update ::message-writes inc)
-                                  (assoc ::last-write-at (Instant/now)))))
-          (log/trace "Saved message to Datalevin"
-                     {:message-id (:seon/id entity)
-                      :session-id (::ai/session-id entity)})
-          (maybe-refresh-sse!)
-          true))
+      (let [seq-num (swap! msg-sequence inc)
+            dl-entity (-> (entity->datalevin-message entity)
+                          (assoc :seon.ai/sequence seq-num))]
+        (db/transact! db-name [dl-entity])
+        (swap! stats-atom (fn [s]
+                            (-> s
+                                (update ::write-count inc)
+                                (update ::message-writes inc)
+                                (assoc ::last-write-at (Instant/now)))))
+        (log/trace "Saved message to Datalevin"
+                   {:message-id (:seon/id entity)
+                    :session-id (::ai/session-id entity)})
+        (maybe-refresh-sse!)
+        true)
       (catch Exception e
         (swap! stats-atom update ::error-count inc)
         (log/warn "Failed to save message to Datalevin"
@@ -371,27 +365,26 @@
   (if-not @enabled?
     false
     (try
-      (when-let [conn (get-conn)]
-        (let [q-fn (requiring-resolve 'datalevin.core/q)
-              entity-id (:seon/id entity)
-              existing (first (q-fn '[:find ?e
-                                      :in $ ?entity-id
-                                      :where
-                                      [?e :seon.ai.datalevin/entity-id ?entity-id]]
-                                    @conn entity-id))]
-          (if existing
-            (let [db-id (first existing)
-                  dl-entity (-> (entity->datalevin-session entity)
-                                (assoc :db/id db-id))]
-              (db/transact! conn [dl-entity])
-              (swap! stats-atom (fn [s]
-                                  (-> s
-                                      (update ::write-count inc)
-                                      (assoc ::last-write-at (Instant/now)))))
-              (log/debug "Updated session in Datalevin" {:entity-id entity-id})
-              (maybe-refresh-sse!)
-              true)
-            (save-session! entity))))
+      (let [entity-id (:seon/id entity)
+            existing (first (db/query db-name
+                                      '[:find ?e
+                                        :in $ ?entity-id
+                                        :where
+                                        [?e :seon.ai.datalevin/entity-id ?entity-id]]
+                                      entity-id))]
+        (if existing
+          (let [db-id (first existing)
+                dl-entity (-> (entity->datalevin-session entity)
+                              (assoc :db/id db-id))]
+            (db/transact! db-name [dl-entity])
+            (swap! stats-atom (fn [s]
+                                (-> s
+                                    (update ::write-count inc)
+                                    (assoc ::last-write-at (Instant/now)))))
+            (log/debug "Updated session in Datalevin" {:entity-id entity-id})
+            (maybe-refresh-sse!)
+            true)
+          (save-session! entity)))
       (catch Exception e
         (swap! stats-atom update ::error-count inc)
         (log/warn "Failed to update session in Datalevin"
@@ -414,22 +407,18 @@
      Vector of session entities"
   ([] (query-sessions {}))
   ([opts]
-   (when-let [conn (get-conn)]
-     (require 'datalevin.core)
-     (let [q-fn (resolve 'datalevin.core/q)
-           pull (resolve 'datalevin.core/pull)
-           limit (or (:limit opts) 20)
-           results (q-fn '[:find ?e ?stored
-                           :in $
-                           :where
-                           [?e :seon.ai.datalevin/entity-type :session]
-                           [?e :seon.ai.datalevin/stored-at ?stored]]
-                         @conn)]
-       (->> results
-            (sort-by second #(compare %2 %1))  ; Most recent first
-            (take limit)
-            (mapv (fn [[eid _]]
-                    (pull @conn '[*] eid))))))))
+   (let [limit (or (:limit opts) 20)
+         results (db/query db-name
+                           '[:find ?e ?stored
+                             :in $
+                             :where
+                             [?e :seon.ai.datalevin/entity-type :session]
+                             [?e :seon.ai.datalevin/stored-at ?stored]])]
+     (->> results
+          (sort-by second #(compare %2 %1))
+          (take limit)
+          (mapv (fn [[eid _]]
+                  (db/pull-by-name db-name '[*] eid)))))))
 
 (defn query-messages
   "Query messages from Datalevin for verification.
@@ -442,32 +431,27 @@
      Vector of message entities"
   ([] (query-messages {}))
   ([opts]
-   (when-let [conn (get-conn)]
-     (require 'datalevin.core)
-     (let [q-fn (resolve 'datalevin.core/q)
-           pull (resolve 'datalevin.core/pull)
-           limit (or (:limit opts) 100)
-           session-id (:session-id opts)
-           results (if session-id
-                     ;; Filter by session-id
-                     (q-fn '[:find ?e ?stored
-                             :in $ ?sid
-                             :where
-                             [?e :seon.ai.datalevin/entity-type :message]
-                             [?e :seon.ai/session-id ?sid]
-                             [?e :seon.ai.datalevin/stored-at ?stored]]
-                           @conn session-id)
-                     ;; All messages
-                     (q-fn '[:find ?e ?stored
-                             :where
-                             [?e :seon.ai.datalevin/entity-type :message]
-                             [?e :seon.ai.datalevin/stored-at ?stored]]
-                           @conn))]
-       (->> results
-            (sort-by second #(compare %2 %1))
-            (take limit)
-            (mapv (fn [[eid _]]
-                    (pull @conn '[*] eid))))))))
+   (let [limit (or (:limit opts) 100)
+         session-id (:session-id opts)
+         results (if session-id
+                   (db/query db-name
+                             '[:find ?e ?stored
+                               :in $ ?sid
+                               :where
+                               [?e :seon.ai.datalevin/entity-type :message]
+                               [?e :seon.ai/session-id ?sid]
+                               [?e :seon.ai.datalevin/stored-at ?stored]]
+                             session-id)
+                   (db/query db-name
+                             '[:find ?e ?stored
+                               :where
+                               [?e :seon.ai.datalevin/entity-type :message]
+                               [?e :seon.ai.datalevin/stored-at ?stored]]))]
+     (->> results
+          (sort-by second #(compare %2 %1))
+          (take limit)
+          (mapv (fn [[eid _]]
+                  (db/pull-by-name db-name '[*] eid)))))))
 
 (defn count-entities
   "Count entities in Datalevin by type.
@@ -475,49 +459,20 @@
    Returns:
      Map with :sessions and :messages counts"
   []
-  (when-let [conn (get-conn)]
-    (require 'datalevin.core)
-    (let [q-fn (resolve 'datalevin.core/q)
-          session-count (count (q-fn '[:find ?e
-                                       :where
-                                       [?e :seon.ai.datalevin/entity-type :session]]
-                                     @conn))
-          message-count (count (q-fn '[:find ?e
-                                       :where
-                                       [?e :seon.ai.datalevin/entity-type :message]]
-                                     @conn))]
-      {:sessions session-count
-       :messages message-count})))
+  (let [session-count (count (db/query db-name
+                                       '[:find ?e
+                                         :where
+                                         [?e :seon.ai.datalevin/entity-type :session]]))
+        message-count (count (db/query db-name
+                                       '[:find ?e
+                                         :where
+                                         [?e :seon.ai.datalevin/entity-type :message]]))]
+    {:sessions session-count
+     :messages message-count}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Datalevin Read Functions
 ;;; ---------------------------------------------------------------------------
-
-(defn- q
-  "Run a Datalevin query against the master connection.
-   Returns nil if connection unavailable."
-  [query & args]
-  (when-let [conn (get-conn)]
-    (require 'datalevin.core)
-    (let [q-fn (resolve 'datalevin.core/q)]
-      (apply q-fn query @conn args))))
-
-(defn- pull-entity
-  "Pull all attributes for an entity from Datalevin."
-  [eid]
-  (when-let [conn (get-conn)]
-    (require 'datalevin.core)
-    (let [pull-fn (resolve 'datalevin.core/pull)]
-      (pull-fn @conn '[*] eid))))
-
-(defn- pull-many-entities
-  "Pull all attributes for multiple entities in one batch.
-   Much faster than mapping pull-entity over eids (19ms vs 2400ms for 215 entities)."
-  [eids]
-  (when-let [conn (get-conn)]
-    (require 'datalevin.core)
-    (let [pull-many-fn (resolve 'datalevin.core/pull-many)]
-      (pull-many-fn @conn '[*] eids))))
 
 (defn- dl-entity->session
   "Convert a Datalevin entity (from pull) to the shape callers expect.
@@ -540,39 +495,40 @@
   "Find session by session-id (logical ID) from Datalevin.
    Returns session entity map or nil."
   [session-id]
-  (when-let [results (q '[:find ?e
-                          :in $ ?sid
-                          :where
-                          [?e ::entity-type :session]
-                          [?e ::entity-id ?sid]]
-                        session-id)]
+  (when-let [results (db/query db-name
+                               '[:find ?e
+                                 :in $ ?sid
+                                 :where
+                                 [?e ::entity-type :session]
+                                 [?e ::entity-id ?sid]]
+                               session-id)]
     (when-let [eid (ffirst results)]
-      (dl-entity->session (pull-entity eid)))))
+      (dl-entity->session (db/pull-by-name db-name '[*] eid)))))
 
 (defn dl-get-messages
-  "All messages for a session, ordered by timestamp ASC.
+  "All messages for a session, ordered by timestamp ASC then sequence ASC.
    Uses pull-many for batch retrieval (~19ms vs ~2400ms for 215 messages)."
   [session-id]
-  (when-let [results (q '[:find ?e ?ts
-                          :in $ ?sid
-                          :where
-                          [?e ::entity-type :message]
-                          [?e :seon.ai/session-id ?sid]
-                          [?e :seon.ai/timestamp ?ts]]
-                        session-id)]
-    (let [sorted (sort-by second results)
-          eids (mapv first sorted)
-          entities (pull-many-entities eids)]
-      (mapv dl-entity->message entities))))
+  (when-let [results (db/query db-name
+                               '[:find ?e ?ts ?seq
+                                 :in $ ?sid
+                                 :where
+                                 [?e ::entity-type :message]
+                                 [?e :seon.ai/session-id ?sid]
+                                 [?e :seon.ai/timestamp ?ts]
+                                 [(get-else $ ?e :seon.ai/sequence 0) ?seq]]
+                               session-id)]
+    (let [sorted (sort-by (fn [[_ ts seq]] [ts seq]) results)
+          eids (mapv first sorted)]
+      (mapv dl-entity->message (db/pull-many-by-name db-name '[*] eids)))))
 
 (defn dl-list-sessions
   "List sessions with optional namespace/status filter, ordered by started-at DESC.
    Opts: :namespace, :status, :limit (default 20)."
   ([] (dl-list-sessions {}))
   ([{:keys [namespace status limit] :or {limit 20}}]
-   (let [;; Build query dynamically based on filters
-         base-where '[[?e ::entity-type :session]
-                      [?e :seon.ai/started-at ?started]]
+   (let [base-where '[[?e ::entity-type :session]
+                       [?e :seon.ai/started-at ?started]]
          ns-where (when namespace
                     [['?e :seon.ai/namespace (str namespace)]])
          status-where (when status
@@ -581,26 +537,28 @@
          query {:find '[?e ?started]
                 :in (if (or namespace status) '[$] '[$])
                 :where all-where}
-         results (q query)]
+         results (db/query db-name query)]
      (when results
        (let [taken (->> results (sort-by second #(compare %2 %1)) (take limit))
              eids (mapv first taken)]
-         (mapv dl-entity->session (pull-many-entities eids)))))))
+         (mapv dl-entity->session (db/pull-many-by-name db-name '[*] eids)))))))
 
 (defn dl-session-stats
   "Aggregate stats: total cost, sessions, messages, token counts."
   []
-  (let [sessions (q '[:find ?e ?cost
-                      :where
-                      [?e ::entity-type :session]
-                      [(get-else $ ?e :seon.ai/cost-usd 0.0) ?cost]])
-        messages (q '[:find ?e ?in ?out ?cr ?cc
-                      :where
-                      [?e ::entity-type :message]
-                      [(get-else $ ?e :seon.ai/input-tokens 0) ?in]
-                      [(get-else $ ?e :seon.ai/output-tokens 0) ?out]
-                      [(get-else $ ?e :seon.ai.claude/cache-read-tokens 0) ?cr]
-                      [(get-else $ ?e :seon.ai.claude/cache-creation-tokens 0) ?cc]])
+  (let [sessions (db/query db-name
+                            '[:find ?e ?cost
+                              :where
+                              [?e ::entity-type :session]
+                              [(get-else $ ?e :seon.ai/cost-usd 0.0) ?cost]])
+        messages (db/query db-name
+                            '[:find ?e ?in ?out ?cr ?cc
+                              :where
+                              [?e ::entity-type :message]
+                              [(get-else $ ?e :seon.ai/input-tokens 0) ?in]
+                              [(get-else $ ?e :seon.ai/output-tokens 0) ?out]
+                              [(get-else $ ?e :seon.ai.claude/cache-read-tokens 0) ?cr]
+                              [(get-else $ ?e :seon.ai.claude/cache-creation-tokens 0) ?cc]])
         total-cost (reduce + 0.0 (map second sessions))
         total-sessions (count sessions)
         total-messages (count messages)
@@ -624,75 +582,85 @@
 (defn dl-find-by-agent-session-id
   "Find session by 4-char agent session ID."
   [agent-session-id]
-  (when-let [results (q '[:find ?e
-                          :in $ ?asid
-                          :where
-                          [?e ::entity-type :session]
-                          [?e :seon.ai/agent-session-id ?asid]]
-                        agent-session-id)]
+  (when-let [results (db/query db-name
+                               '[:find ?e
+                                 :in $ ?asid
+                                 :where
+                                 [?e ::entity-type :session]
+                                 [?e :seon.ai/agent-session-id ?asid]]
+                               agent-session-id)]
     (when-let [eid (ffirst results)]
-      (dl-entity->session (pull-entity eid)))))
+      (dl-entity->session (db/pull-by-name db-name '[*] eid)))))
 
 (defn dl-get-result-message
   "Get the result message for a session (message-type = 'result')."
   [ai-session-id]
-  (when-let [results (q '[:find ?e
-                          :in $ ?sid
-                          :where
-                          [?e ::entity-type :message]
-                          [?e :seon.ai/session-id ?sid]
-                          [?e :seon.ai.claude/message-type "result"]]
-                        ai-session-id)]
+  (when-let [results (db/query db-name
+                               '[:find ?e
+                                 :in $ ?sid
+                                 :where
+                                 [?e ::entity-type :message]
+                                 [?e :seon.ai/session-id ?sid]
+                                 [?e :seon.ai.claude/message-type "result"]]
+                               ai-session-id)]
     (when-let [eid (ffirst results)]
-      (dl-entity->message (pull-entity eid)))))
+      (dl-entity->message (db/pull-by-name db-name '[*] eid)))))
 
 (defn dl-count-assistant-turns
   "Count assistant turns in a session (role=assistant, message-type=assistant)."
   [ai-session-id]
-  (let [results (q '[:find ?e
-                     :in $ ?sid
-                     :where
-                     [?e ::entity-type :message]
-                     [?e :seon.ai/session-id ?sid]
-                     [?e :seon.ai/role "assistant"]
-                     [?e :seon.ai.claude/message-type "assistant"]]
-                   ai-session-id)]
+  (let [results (db/query db-name
+                          '[:find ?e
+                            :in $ ?sid
+                            :where
+                            [?e ::entity-type :message]
+                            [?e :seon.ai/session-id ?sid]
+                            [?e :seon.ai/role "assistant"]
+                            [?e :seon.ai.claude/message-type "assistant"]]
+                          ai-session-id)]
     (count (or results []))))
 
 (defn dl-message-count
   "Total messages in a session."
   [ai-session-id]
-  (let [results (q '[:find ?e
-                     :in $ ?sid
-                     :where
-                     [?e ::entity-type :message]
-                     [?e :seon.ai/session-id ?sid]]
-                   ai-session-id)]
+  (let [results (db/query db-name
+                          '[:find ?e
+                            :in $ ?sid
+                            :where
+                            [?e ::entity-type :message]
+                            [?e :seon.ai/session-id ?sid]]
+                          ai-session-id)]
     (count (or results []))))
 
 (defn dl-recent-messages
   "Recent N messages for a session, ordered by timestamp DESC then reversed to chronological."
   [ai-session-id limit]
-  (when-let [results (q '[:find ?e ?ts
-                          :in $ ?sid
-                          :where
-                          [?e ::entity-type :message]
-                          [?e :seon.ai/session-id ?sid]
-                          [?e :seon.ai/timestamp ?ts]]
-                        ai-session-id)]
-    (let [taken (->> results (sort-by second #(compare %2 %1)) (take limit) reverse)
+  (when-let [results (db/query db-name
+                               '[:find ?e ?ts ?seq
+                                 :in $ ?sid
+                                 :where
+                                 [?e ::entity-type :message]
+                                 [?e :seon.ai/session-id ?sid]
+                                 [?e :seon.ai/timestamp ?ts]
+                                 [(get-else $ ?e :seon.ai/sequence 0) ?seq]]
+                               ai-session-id)]
+    (let [taken (->> results
+                     (sort-by (fn [[_ ts seq]] [ts seq]) #(compare %2 %1))
+                     (take limit)
+                     reverse)
           eids (mapv first taken)]
-      (mapv dl-entity->message (pull-many-entities eids)))))
+      (mapv dl-entity->message (db/pull-many-by-name db-name '[*] eids)))))
 
 (defn dl-message-stats-by-session
   "Batch: message counts + latest timestamp per session.
    Returns map of session-id -> {:count n :latest-ts instant}."
   []
-  (when-let [results (q '[:find ?sid ?ts
-                          :where
-                          [?e ::entity-type :message]
-                          [?e :seon.ai/session-id ?sid]
-                          [?e :seon.ai/timestamp ?ts]])]
+  (when-let [results (db/query db-name
+                               '[:find ?sid ?ts
+                                 :where
+                                 [?e ::entity-type :message]
+                                 [?e :seon.ai/session-id ?sid]
+                                 [?e :seon.ai/timestamp ?ts]])]
     (->> results
          (group-by first)
          (reduce-kv
@@ -707,12 +675,13 @@
   "Batch: cache creation tokens per session (from result messages).
    Returns map of session-id -> token-count."
   []
-  (when-let [results (q '[:find ?sid ?tokens
-                          :where
-                          [?e ::entity-type :message]
-                          [?e :seon.ai/session-id ?sid]
-                          [?e :seon.ai.claude/message-type "result"]
-                          [?e :seon.ai.claude/cache-creation-tokens ?tokens]])]
+  (when-let [results (db/query db-name
+                               '[:find ?sid ?tokens
+                                 :where
+                                 [?e ::entity-type :message]
+                                 [?e :seon.ai/session-id ?sid]
+                                 [?e :seon.ai.claude/message-type "result"]
+                                 [?e :seon.ai.claude/cache-creation-tokens ?tokens]])]
     (into {} results)))
 
 (defn dl-find-ai-session-id
@@ -732,14 +701,15 @@
   "Load session metadata by AI session ID (ses-xxx).
    Returns session entity or nil."
   [ai-session-id]
-  (when-let [results (q '[:find ?e
-                          :in $ ?entity-id
-                          :where
-                          [?e ::entity-type :session]
-                          [?e ::entity-id ?entity-id]]
-                        ai-session-id)]
+  (when-let [results (db/query db-name
+                               '[:find ?e
+                                 :in $ ?entity-id
+                                 :where
+                                 [?e ::entity-type :session]
+                                 [?e ::entity-id ?entity-id]]
+                               ai-session-id)]
     (when-let [eid (ffirst results)]
-      (dl-entity->session (pull-entity eid)))))
+      (dl-entity->session (db/pull-by-name db-name '[*] eid)))))
 
 (defn dl-load-context-tokens
   "Load context token usage from the result message for a session."

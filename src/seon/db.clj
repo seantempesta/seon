@@ -1,26 +1,29 @@
 (ns seon.db
-  "Seon's database API. Drop-in replacement for datalevin.core.
+  "Seon's database API. All database access goes through here.
 
    Agents use this instead of d/transact! directly.
-   Reads pass through directly. Writes route through the infrastructure
-   flow's writer process for serialized access, deadlock prevention,
-   and observability.
+   Reads and writes route through the infrastructure flow's reader/writer
+   processes for serialized access, deadlock prevention, and observability.
 
-   Two API levels:
-   - Raw pass-through: `q`, `pull`, `pull-many`, `entity` -- take a db value
-   - Named convenience: `query`, `pull-by-name`, `pull-many-by-name` -- take
-     a db-name keyword (`:seon`, `:seon.runtime`, or namespace string),
-     resolve connection via conn manager, handle staleness with retry
+   Write API:
+   - `transact!` -- takes a db-name keyword (`:seon`, `:seon.runtime`)
+     and tx-data. Routes through the flow writer.
 
-   `transact!` accepts either a keyword db-name (preferred) or a raw
-   connection (deprecated). When given a keyword, the writer resolves
-   and owns the connection itself, enabling retry on failure.
+   Read API (named convenience, takes db-name keyword):
+   - `query` -- Datalog query
+   - `pull-by-name` -- pull entity by selector and eid
+   - `pull-many-by-name` -- pull multiple entities
+   - `entity-by-name` -- get entity by eid
+
+   Connection resolution:
+   - `resolve-conn` -- resolve db-name to raw Datalevin connection
 
    Positional args are intentional for drop-in compatibility -- this is
    the one namespace where map-in/map-out does not apply."
   (:require [clojure.core.async.flow :as flow]
             [datalevin.core :as d]
             [seon.db.datalevin.conn :as conn]
+            [seon.db.datalevin.reader :as reader]
             [seon.db.schema :as db-schema]
             [seon.flow.msg :as msg]
             [seon.schema :as schema]
@@ -82,10 +85,11 @@
           (log/info "Auto-adding schema for attrs" {:attrs (keys schema-update)})
           (d/update-schema conn schema-update))))))
 
-(def ^:dynamic *direct-write*
-  "When true, write! bypasses the infrastructure flow and uses d/transact!
-   directly. For tests only -- production must always route through flow.
-   Bind to true in test fixtures that don't have a running infrastructure flow."
+(def ^:dynamic *direct-mode*
+  "When true, reads and writes bypass the infrastructure flow and use
+   Datalevin directly. For tests only -- production must always route
+   through flow. Bind to true in test fixtures that don't have a running
+   infrastructure flow."
   false)
 
 ;;; --- Infrastructure Flow Access ---
@@ -137,9 +141,10 @@
   [#(conn/get-conn! {::conn/manager % ::conn/db db-name})
    db-name])
 
-(defn- resolve-conn
+(defn resolve-conn
   "Resolve a db-name keyword to a Datalevin connection via conn manager.
-   Used by ensure-schema! and *direct-write* when caller passes a keyword."
+   Used by ensure-schema!, *direct-mode*, and callers that need a raw conn
+   for libraries not yet migrated to the db-name API (e.g. seon.ctx)."
   [db-name]
   (let [mgr (get-conn-manager)
         [get-fn _] (db-name->conn-args db-name)]
@@ -151,135 +156,129 @@
   [db-name]
   @(resolve-conn db-name))
 
+;;; --- Flow Routing (shared by read! and write!) ---
+
+(defn- flow-request!
+  "Send a request through the infrastructure flow and wait for a reply.
+   target is the flow process+input pair, e.g. [:seon.flow/writer :seon.flow.in/request].
+   payload is the domain-specific payload map.
+   opts may contain :timeout-ms (default 10000).
+   Returns the ::msg/value from the reply on success.
+   Throws on timeout or error status."
+  [target payload opts]
+  (let [fl (get-infra-flow)]
+    (when-not fl
+      (throw (ex-info "Infrastructure flow not running"
+                      {:fn "seon.db/flow-request!" :target target})))
+    (let [pending (get-pending-promises)
+          timeout-ms (or (:timeout-ms opts) 10000)
+          request-id (random-uuid)
+          p (promise)
+          request {::msg/id request-id
+                   ::msg/version 1
+                   ::msg/type :request
+                   ::msg/from-ns "seon.db"
+                   ::msg/payload payload
+                   ::msg/created-at (Instant/now)}]
+      (swap! pending assoc request-id p)
+      (try
+        (flow/inject fl target [request])
+        (let [reply (deref p timeout-ms ::timed-out)]
+          (if (= reply ::timed-out)
+            (do
+              (swap! pending dissoc request-id)
+              (log/error "Flow request timed out" {:request-id request-id
+                                                   :timeout-ms timeout-ms
+                                                   :target target})
+              (throw (ex-info "Flow request timed out"
+                              {::msg/status :timeout
+                               ::msg/id request-id
+                               :timeout-ms timeout-ms})))
+            (case (::msg/status reply)
+              :ok (::msg/value reply)
+              (do
+                (log/error "Flow request failed" {:request-id request-id
+                                                  :status (::msg/status reply)
+                                                  :error (::msg/error-message reply)
+                                                  :duration-ms (::msg/duration-ms reply)})
+                (throw (ex-info (or (::msg/error-message reply)
+                                    (str "Flow request failed: " (::msg/status reply)))
+                                (select-keys reply [::msg/status ::msg/error-type
+                                                    ::msg/error-class ::msg/error-message
+                                                    ::msg/id ::msg/duration-ms])))))))
+        (catch Exception e
+          (swap! pending dissoc request-id)
+          (throw e))))))
+
 ;;; --- Write Routing ---
 
 (defn- build-writer-payload
-  "Build the writer payload map. When db-name-or-conn is a keyword,
-   passes ::writer/db-name (string) so the writer resolves its own conn.
-   When it's a connection object, passes ::writer/conn (deprecated path)."
-  [db-name-or-conn tx-data]
-  (let [base {:seon.db.datalevin.writer/tx-data tx-data}]
-    (if (keyword? db-name-or-conn)
-      (assoc base :seon.db.datalevin.writer/db-name (name db-name-or-conn))
-      (assoc base :seon.db.datalevin.writer/conn db-name-or-conn))))
+  "Build the writer payload map. db-name is a keyword; passes
+   ::writer/db-name (string) so the writer resolves its own conn."
+  [db-name tx-data]
+  {:seon.db.datalevin.writer/tx-data tx-data
+   :seon.db.datalevin.writer/db-name (name db-name)})
 
 (defn- write!
   "Route a transaction through the infrastructure flow writer.
-   db-name-or-conn is either a keyword (preferred, writer resolves conn)
-   or a raw connection object (deprecated).
+   db-name is a keyword (e.g. :seon, :seon.runtime).
    Throws if the infrastructure flow is not running.
-   In tests, bind *direct-write* to true to bypass the flow."
-  ([db-name-or-conn tx-data]
-   (write! db-name-or-conn tx-data nil))
-  ([db-name-or-conn tx-data opts]
-   (if *direct-write*
-     (let [c (if (keyword? db-name-or-conn)
-               (resolve-conn db-name-or-conn)
-               db-name-or-conn)]
-       (d/transact! c tx-data))
-     (let [fl (get-infra-flow)]
-       (when-not fl
-         (throw (ex-info "Infrastructure flow not running -- cannot write"
-                         {:fn "seon.db/write!"})))
-       (let [pending (get-pending-promises)
-             timeout-ms (or (:timeout-ms opts) 10000)
-             request-id (random-uuid)
-             p (promise)
-             request {::msg/id request-id
-                      ::msg/version 1
-                      ::msg/type :request
-                      ::msg/from-ns "seon.db"
-                      ::msg/payload (build-writer-payload db-name-or-conn tx-data)
-                      ::msg/created-at (Instant/now)}]
-         ;; Register promise before injection
-         (swap! pending assoc request-id p)
-         (try
-           (flow/inject fl [:seon.flow/writer :seon.flow.in/request] [request])
-           (let [reply (deref p timeout-ms ::timed-out)]
-             (if (= reply ::timed-out)
-               (do
-                 (swap! pending dissoc request-id)
-                 (log/error "Write timed out" {:request-id request-id
-                                               :timeout-ms timeout-ms
-                                               :tx-count (count tx-data)})
-                 (throw (ex-info "Write timed out"
-                                 {::msg/status :timeout
-                                  ::msg/id request-id
-                                  :timeout-ms timeout-ms})))
-               (case (::msg/status reply)
-                 :ok (::msg/value reply)
-                 (do
-                   (log/error "Write failed via flow" {:request-id request-id
-                                                       :status (::msg/status reply)
-                                                       :error (::msg/error-message reply)
-                                                       :duration-ms (::msg/duration-ms reply)})
-                   (throw (ex-info (or (::msg/error-message reply)
-                                       (str "Write failed: " (::msg/status reply)))
-                                   (select-keys reply [::msg/status ::msg/error-type
-                                                       ::msg/error-class ::msg/error-message
-                                                       ::msg/id ::msg/duration-ms])))))))
-           (catch Exception e
-             (swap! pending dissoc request-id)
-             (throw e))))))))
+   In tests, bind *direct-mode* to true to bypass the flow."
+  ([db-name tx-data]
+   (write! db-name tx-data nil))
+  ([db-name tx-data opts]
+   (if *direct-mode*
+     (d/transact! (resolve-conn db-name) tx-data)
+     (flow-request! [:seon.flow/writer :seon.flow.in/request]
+                    (build-writer-payload db-name tx-data)
+                    opts))))
+
+;;; --- Read Routing ---
+
+(defn- read!
+  "Route a read query through the infrastructure flow reader.
+   query-fn is one of :q, :pull, :pull-many, :entity.
+   db-name is a keyword (e.g. :seon, :seon.runtime).
+   args is a vector of arguments for the query function.
+   Throws if the infrastructure flow is not running."
+  [query-fn db-name args]
+  (flow-request! [:seon.flow/reader :seon.flow.in/request]
+                 {::reader/query-fn query-fn
+                  ::reader/db-name (name db-name)
+                  ::reader/args args}
+                 nil))
 
 ;;; --- Public API (positional, mirrors datalevin.core) ---
 
 (defn transact!
-  "Transact data into a database. First arg is either a db-name keyword
-   (e.g. :seon.runtime) or a raw Datalevin connection (deprecated).
+  "Transact data into a named database via the infrastructure flow writer.
 
-   When given a keyword, the writer resolves and owns the connection,
-   enabling automatic retry on connection failure. Schema is checked
-   via a temporary conn from the manager.
+   db-name is a keyword (e.g. :seon.runtime, :seon, or a namespace keyword).
+   The writer resolves and owns the connection, enabling automatic retry
+   on connection failure.
 
-   Validates attributes, ensures schema, then routes through the
-   infrastructure flow writer for serialized access.
-   Throws if the infrastructure flow is not running."
+   Validates attributes against the Malli registry, auto-adds missing
+   Datalevin schema, then routes through the flow writer for serialized access.
+   In tests, bind *direct-mode* to bypass the flow."
   {:malli/schema [:function
-                  [:=> [:cat :any [:sequential :any]] :any]
-                  [:=> [:cat :any [:sequential :any] [:maybe :map]] :any]]}
-  ([db-name-or-conn tx-data]
-   (transact! db-name-or-conn tx-data nil))
-  ([db-name-or-conn tx-data tx-meta]
+                  [:=> [:cat :keyword [:sequential :any]] :any]
+                  [:=> [:cat :keyword [:sequential :any] [:maybe :map]] :any]]}
+  ([db-name tx-data]
+   (transact! db-name tx-data nil))
+  ([db-name tx-data tx-meta]
    (let [attrs (extract-tx-attrs tx-data)
-         conn-for-schema (if (keyword? db-name-or-conn)
-                           (resolve-conn db-name-or-conn)
-                           db-name-or-conn)]
+         conn (resolve-conn db-name)]
      (validate-attrs! attrs)
-     (ensure-schema! conn-for-schema attrs))
+     (ensure-schema! conn attrs))
    (when tx-meta
      (log/debug "tx-meta provided but not yet supported via flow writer" {:tx-meta tx-meta}))
-   (write! db-name-or-conn tx-data)))
-
-(defn q
-  "Query the database. Pass-through to datalevin.core/q."
-  {:malli/schema [:=> [:cat :any [:* :any]] :any]}
-  [query & inputs]
-  (apply d/q query inputs))
-
-(defn pull
-  "Pull an entity by selector and eid. Pass-through to datalevin.core/pull."
-  {:malli/schema [:=> [:cat :any :any :any] :any]}
-  [db selector eid]
-  (d/pull db selector eid))
-
-(defn pull-many
-  "Pull multiple entities. Pass-through to datalevin.core/pull-many."
-  {:malli/schema [:=> [:cat :any :any [:sequential :any]] :any]}
-  [db selector eids]
-  (d/pull-many db selector eids))
-
-(defn entity
-  "Get an entity by eid. Pass-through to datalevin.core/entity."
-  {:malli/schema [:=> [:cat :any :any] :any]}
-  [db eid]
-  (d/entity db eid))
+   (write! db-name tx-data)))
 
 ;;; --- Named Convenience API ---
 ;;;
 ;;; These functions resolve a db-name keyword to a connection via the
-;;; conn manager, deref it to get a db value, and delegate to datalevin.
-;;; On connection error, they reconnect and retry once.
+;;; conn manager. In direct mode, they resolve locally and retry on
+;;; connection error. In flow mode, they route through the reader.
 
 (defn- connection-error?
   "Check if an exception indicates a connection/server error."
@@ -313,7 +312,8 @@
         (throw e)))))
 
 (defn query
-  "Query a named database. Resolves connection by db-name, retries on staleness.
+  "Query a named database. Routes through the infrastructure flow reader,
+   or uses direct connection with retry when *direct-mode* is true.
 
    db-name -- :seon, :seon.runtime, or a namespace keyword like :seon.trading
    datalog-query -- Datalog query (same as d/q first arg)
@@ -324,11 +324,14 @@
      (query :seon '[:find ?e :where [?e :name \"test\"]])"
   {:malli/schema [:=> [:cat :keyword :any [:* :any]] :any]}
   [db-name datalog-query & inputs]
-  (with-retry db-name
-    (fn [db] (apply d/q datalog-query db inputs))))
+  (if *direct-mode*
+    (with-retry db-name
+      (fn [db] (apply d/q datalog-query db inputs)))
+    (read! :q db-name (into [datalog-query] inputs))))
 
 (defn pull-by-name
   "Pull an entity from a named database by selector and eid.
+   Routes through the infrastructure flow reader, or direct with retry.
 
    db-name -- :seon, :seon.runtime, or a namespace keyword
    selector -- pull pattern (e.g., '[*] or '[:name :age])
@@ -338,11 +341,14 @@
      (pull-by-name :seon.runtime '[*] 1)"
   {:malli/schema [:=> [:cat :keyword :any :any] :any]}
   [db-name selector eid]
-  (with-retry db-name
-    (fn [db] (d/pull db selector eid))))
+  (if *direct-mode*
+    (with-retry db-name
+      (fn [db] (d/pull db selector eid)))
+    (read! :pull db-name [selector eid])))
 
 (defn pull-many-by-name
   "Pull multiple entities from a named database.
+   Routes through the infrastructure flow reader, or direct with retry.
 
    db-name -- :seon, :seon.runtime, or a namespace keyword
    selector -- pull pattern
@@ -352,8 +358,26 @@
      (pull-many-by-name :seon.runtime '[:seon.fn/name] [1 2 3])"
   {:malli/schema [:=> [:cat :keyword :any [:sequential :any]] :any]}
   [db-name selector eids]
-  (with-retry db-name
-    (fn [db] (d/pull-many db selector eids))))
+  (if *direct-mode*
+    (with-retry db-name
+      (fn [db] (d/pull-many db selector eids)))
+    (read! :pull-many db-name [selector eids])))
+
+(defn entity-by-name
+  "Get an entity from a named database by eid.
+   Routes through the infrastructure flow reader, or direct with retry.
+
+   db-name -- :seon, :seon.runtime, or a namespace keyword
+   eid -- entity id or lookup ref
+
+   Example:
+     (entity-by-name :seon.runtime 1)"
+  {:malli/schema [:=> [:cat :keyword :any] :any]}
+  [db-name eid]
+  (if *direct-mode*
+    (with-retry db-name
+      (fn [db] (d/entity db eid)))
+    (read! :entity db-name [eid])))
 
 ;;; --- Infrastructure Flow Coordination ---
 

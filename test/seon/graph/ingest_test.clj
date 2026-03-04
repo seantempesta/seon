@@ -5,15 +5,15 @@
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [datalevin.core :as d]
             [seon.db :as db]
+            [seon.db.datalevin.conn :as dl-conn]
             [seon.graph.analyzer :as analyzer]
-            [seon.graph.ingest :as ingest])
+            [seon.graph.ingest :as ingest]
+            [seon.test-utils])
   (:import [java.io File]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Test Fixtures
 ;;; ---------------------------------------------------------------------------
-
-(def ^:dynamic *test-conn* nil)
 
 (defn- temp-dir
   "Create a temporary directory for Datalevin."
@@ -36,10 +36,11 @@
 
 (defn with-temp-conn [f]
   (let [dir (temp-dir)
-        conn (d/create-conn dir ingest/datalevin-schema)]
+        conn (d/create-conn dir ingest/datalevin-schema)
+        mock-manager {::dl-conn/connections (atom {:test-db {::dl-conn/connection conn}})}]
     (try
-      (binding [*test-conn* conn
-                db/*direct-write* true]
+      (binding [db/*direct-mode* true
+                db/*conn-manager* mock-manager]
         (f))
       (finally
         (d/close conn)
@@ -57,7 +58,7 @@
           project (analyzer/analyze-project! {::analyzer/paths ["src/seon/graph/"]})
           entities (analyzer/extract-entities
                     {::analyzer/raw-analysis (::analyzer/raw-analysis project)})
-          result (ingest/ingest-analysis! {::ingest/conn *test-conn*
+          result (ingest/ingest-analysis! {::ingest/db-name :test-db
                                            ::ingest/entities entities})]
       ;; Should report counts
       (is (pos? (::ingest/namespace-count result))
@@ -66,20 +67,20 @@
           "Should ingest functions")
 
       ;; Verify namespaces are queryable
-      (let [ns-names (d/q '[:find ?name
-                            :where
-                            [?e :seon.ns/name ?name]]
-                          @*test-conn*)]
+      (let [ns-names (db/query :test-db
+                               '[:find ?name
+                                 :where
+                                 [?e :seon.ns/name ?name]])]
         (is (seq ns-names) "Should have namespace entities in DB")
         (is (some #(= ["seon.graph.analyzer"] %) ns-names)
             "Should find seon.graph.analyzer namespace"))
 
       ;; Verify functions are queryable
-      (let [fn-data (d/q '[:find ?name ?ns
-                            :where
-                            [?e :seon.fn/name ?name]
-                            [?e :seon.fn/namespace ?ns]]
-                          @*test-conn*)]
+      (let [fn-data (db/query :test-db
+                              '[:find ?name ?ns
+                                :where
+                                [?e :seon.fn/name ?name]
+                                [?e :seon.fn/namespace ?ns]])]
         (is (seq fn-data) "Should have function entities in DB")
         (is (some #(= ["analyze-project!" "seon.graph.analyzer"] %) fn-data)
             "Should find analyze-project! function"))))
@@ -89,15 +90,15 @@
           entities (analyzer/extract-entities
                     {::analyzer/raw-analysis (::analyzer/raw-analysis project)})
           ;; Ingest twice
-          _ (ingest/ingest-analysis! {::ingest/conn *test-conn*
+          _ (ingest/ingest-analysis! {::ingest/db-name :test-db
                                       ::ingest/entities entities})
-          result (ingest/ingest-analysis! {::ingest/conn *test-conn*
+          result (ingest/ingest-analysis! {::ingest/db-name :test-db
                                            ::ingest/entities entities})
           ;; Count namespaces -- should NOT double
-          ns-count (count (d/q '[:find ?e
-                                 :where
-                                 [?e :seon.ns/name]]
-                               @*test-conn*))]
+          ns-count (count (db/query :test-db
+                                    '[:find ?e
+                                      :where
+                                      [?e :seon.ns/name]]))]
       (is (= (::ingest/namespace-count result) ns-count)
           "Re-ingesting should replace, not duplicate"))))
 
@@ -107,15 +108,15 @@
                        {::analyzer/source "(ns my.test)\n(defn my-new-fn [x] (+ x 1))"})
           entities (analyzer/extract-entities
                     {::analyzer/raw-analysis (::analyzer/raw-analysis form-result)})
-          result (ingest/ingest-incremental! {::ingest/conn *test-conn*
+          result (ingest/ingest-incremental! {::ingest/db-name :test-db
                                               ::ingest/entities entities})]
       (is (pos? (::ingest/function-count result)))
       ;; Query to confirm function exists
-      (let [fns (d/q '[:find ?name
-                        :where
-                        [?e :seon.fn/name ?name]
-                        [?e :seon.fn/namespace "my.test"]]
-                      @*test-conn*)]
+      (let [fns (db/query :test-db
+                          '[:find ?name
+                            :where
+                            [?e :seon.fn/name ?name]
+                            [?e :seon.fn/namespace "my.test"]])]
         (is (some #(= ["my-new-fn"] %) fns)
             "Should find the newly ingested function"))))
 
@@ -125,7 +126,7 @@
                  {::analyzer/source "(ns my.update-test)\n(defn updatable [x] x)"})
           entities1 (analyzer/extract-entities
                      {::analyzer/raw-analysis (::analyzer/raw-analysis form1)})]
-      (ingest/ingest-incremental! {::ingest/conn *test-conn*
+      (ingest/ingest-incremental! {::ingest/db-name :test-db
                                     ::ingest/entities entities1})
 
       ;; Second ingest with updated function
@@ -133,15 +134,15 @@
                    {::analyzer/source "(ns my.update-test)\n(defn updatable [x y] (+ x y))\n(defn new-fn [z] z)"})
             entities2 (analyzer/extract-entities
                        {::analyzer/raw-analysis (::analyzer/raw-analysis form2)})]
-        (ingest/ingest-incremental! {::ingest/conn *test-conn*
+        (ingest/ingest-incremental! {::ingest/db-name :test-db
                                       ::ingest/entities entities2})
 
         ;; Should have 2 functions now (updatable + new-fn), not 3
-        (let [fns (d/q '[:find ?name
-                          :where
-                          [?e :seon.fn/namespace "my.update-test"]
-                          [?e :seon.fn/name ?name]]
-                        @*test-conn*)]
+        (let [fns (db/query :test-db
+                            '[:find ?name
+                              :where
+                              [?e :seon.fn/namespace "my.update-test"]
+                              [?e :seon.fn/name ?name]])]
           (is (= 2 (count fns))
               "Should have exactly 2 functions after update")
           (is (= #{["updatable"] ["new-fn"]} (set fns))
@@ -152,7 +153,7 @@
     (let [now (java.util.Date.)]
       ;; First ingest: two functions
       (ingest/ingest-namespace!
-       {::ingest/conn *test-conn*
+       {::ingest/db-name :test-db
         ::ingest/ns-name "my.stale-test"
         ::ingest/functions [{:seon.fn/qualified-name "my.stale-test/foo"
                              :seon.fn/namespace "my.stale-test"
@@ -164,24 +165,24 @@
                              :seon.fn/name "bar"
                              :seon.fn/private false
                              :seon.fn/updated-at now}]})
-      (is (= 2 (count (d/q '[:find ?e
-                               :where [?e :seon.fn/namespace "my.stale-test"]]
-                             @*test-conn*))))
+      (is (= 2 (count (db/query :test-db
+                                 '[:find ?e
+                                   :where [?e :seon.fn/namespace "my.stale-test"]]))))
 
       ;; Second ingest: only foo remains
       (ingest/ingest-namespace!
-       {::ingest/conn *test-conn*
+       {::ingest/db-name :test-db
         ::ingest/ns-name "my.stale-test"
         ::ingest/functions [{:seon.fn/qualified-name "my.stale-test/foo"
                              :seon.fn/namespace "my.stale-test"
                              :seon.fn/name "foo"
                              :seon.fn/private false
                              :seon.fn/updated-at now}]})
-      (let [fns (d/q '[:find ?name
-                         :where
-                         [?e :seon.fn/namespace "my.stale-test"]
-                         [?e :seon.fn/name ?name]]
-                       @*test-conn*)]
+      (let [fns (db/query :test-db
+                           '[:find ?name
+                             :where
+                             [?e :seon.fn/namespace "my.stale-test"]
+                             [?e :seon.fn/name ?name]])]
         (is (= #{["foo"]} (set fns))
             "bar should be retracted since it was not in the new scan")))))
 
@@ -189,7 +190,7 @@
   (testing "var entities are ingested and queryable"
     (let [now (java.util.Date.)]
       (ingest/ingest-namespace!
-       {::ingest/conn *test-conn*
+       {::ingest/db-name :test-db
         ::ingest/ns-name "my.var-test"
         ::ingest/vars [{:seon.var/qualified-name "my.var-test/config"
                         :seon.var/namespace "my.var-test"
@@ -204,19 +205,19 @@
                         :seon.var/value-type :vector
                         :seon.var/doc "Sample items"
                         :seon.var/updated-at now}]})
-      (let [vars (d/q '[:find ?name ?vt
-                          :where
-                          [?e :seon.var/namespace "my.var-test"]
-                          [?e :seon.var/name ?name]
-                          [?e :seon.var/value-type ?vt]]
-                        @*test-conn*)]
+      (let [vars (db/query :test-db
+                           '[:find ?name ?vt
+                             :where
+                             [?e :seon.var/namespace "my.var-test"]
+                             [?e :seon.var/name ?name]
+                             [?e :seon.var/value-type ?vt]])]
         (is (= #{["config" :map] ["items" :vector]} (set vars))))))
 
   (testing "stale vars get retracted"
     (let [now (java.util.Date.)]
       ;; Re-ingest with only config
       (ingest/ingest-namespace!
-       {::ingest/conn *test-conn*
+       {::ingest/db-name :test-db
         ::ingest/ns-name "my.var-test"
         ::ingest/vars [{:seon.var/qualified-name "my.var-test/config"
                         :seon.var/namespace "my.var-test"
@@ -224,11 +225,11 @@
                         :seon.var/private false
                         :seon.var/value-type :map
                         :seon.var/updated-at now}]})
-      (let [vars (d/q '[:find ?name
-                          :where
-                          [?e :seon.var/namespace "my.var-test"]
-                          [?e :seon.var/name ?name]]
-                        @*test-conn*)]
+      (let [vars (db/query :test-db
+                           '[:find ?name
+                             :where
+                             [?e :seon.var/namespace "my.var-test"]
+                             [?e :seon.var/name ?name]])]
         (is (= #{["config"]} (set vars))
             "items var should be retracted")))))
 

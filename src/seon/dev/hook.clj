@@ -279,13 +279,11 @@
         (require 'seon.system)
         (let [extract-fn (resolve 'seon.graph.extract/extract-graph-from-file)
               ingest-ns! (resolve 'seon.graph.ingest/ingest-namespace!)
-              get-conn (resolve 'seon.system/runtime-db-conn)
-              conn (get-conn graph-db)
               graph (extract-fn {:seon.graph.extract/file-path file-path})
               ns-str (:seon.graph.extract/ns-name graph)]
           (when ns-str
             (ingest-ns!
-             {:seon.graph.ingest/conn conn
+             {:seon.graph.ingest/db-name :seon.runtime
               :seon.graph.ingest/ns-name ns-str
               :seon.graph.ingest/functions (:seon.graph.extract/functions graph)
               :seon.graph.ingest/specs (:seon.graph.extract/specs graph)

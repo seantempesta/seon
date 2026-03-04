@@ -15,17 +15,17 @@
      (require '[seon.render.code :as rc])
 
      ;; Find functions compatible with given keys
-     (rc/compatible-functions {::rc/conn conn
+     (rc/compatible-functions {::rc/db-name :seon.runtime
                                ::rc/available-keys #{:seon.foo/x :seon.foo/y}})
 
      ;; Render namespace documentation
-     (rc/render-ns-docs {::rc/conn conn ::rc/ns-name \"seon.graph.query\"})
+     (rc/render-ns-docs {::rc/db-name :seon.runtime ::rc/ns-name \"seon.graph.query\"})
 
      ;; Build full context for an agent
-     (rc/context-for-agent {::rc/conn conn ::rc/ns-name \"seon.graph.query\"})"
+     (rc/context-for-agent {::rc/db-name :seon.runtime ::rc/ns-name \"seon.graph.query\"})"
   (:require [clojure.set :as cset]
             [clojure.string :as str]
-            [datalevin.core :as d]
+            [seon.db :as db]
             [seon.graph.context :as graph-ctx]
             [seon.graph.query :as gq]
             [seon.render :as render]
@@ -36,8 +36,8 @@
 ;;; Schema Registration
 ;;; ---------------------------------------------------------------------------
 
-(schema/register! ::conn
-                  [:any {:description "Datalevin connection"}])
+(schema/register! ::db-name
+                  [:keyword {:description "Database name keyword, e.g. :seon.runtime"}])
 
 (schema/register! ::available-keys
                   [:set :keyword {:description "Set of available data keys"}])
@@ -65,10 +65,10 @@
    This discovers functions that CAN be called with the given data,
    regardless of what they produce.
 
-   Note: No :malli/schema - conn is a runtime object.
+   Note: No :malli/schema - db-name is a runtime keyword.
 
    Request keys:
-     ::conn           - Required. Datalevin connection
+     ::db-name        - Optional. Database name keyword (default :seon.runtime)
      ::available-keys - Required. Set of available data keys
      ::output-filter  - Optional. Only return fns whose output contains this key
 
@@ -77,27 +77,28 @@
      sorted by specificity (most required keys first).
 
    Example:
-     (compatible-functions {::conn conn
+     (compatible-functions {::db-name :seon.runtime
                             ::available-keys #{:seon.foo/x :seon.foo/y}})
      ;; => [{:seon.fn/qualified-name \"seon.foo/bar\"
      ;;      :required-keys #{:seon.foo/x}
      ;;      :optional-keys #{}} ...]"
-  [{::keys [conn available-keys output-filter]}]
-  (let [;; Get all functions with input specs
-        all-fns (d/q '[:find ?e
-                       :where
-                       [?e :seon.fn/input-spec _]]
-                     @conn)
+  [{::keys [db-name available-keys output-filter]}]
+  (let [db-name (or db-name :seon.runtime)
+        ;; Get all functions with input specs
+        all-fns (db/query db-name
+                          '[:find ?e
+                            :where
+                            [?e :seon.fn/input-spec _]])
         ;; Pull and compute required keys for each
         candidates
         (for [[eid] all-fns
-              :let [pulled (d/pull @conn
-                                   [:seon.fn/qualified-name :seon.fn/namespace
-                                    :seon.fn/name :seon.fn/doc :seon.fn/updated-at
-                                    {:seon.fn/input-spec [:seon.spec/contains-keys
-                                                          :seon.spec/optional-keys]}
-                                    {:seon.fn/output-spec [:seon.spec/contains-keys]}]
-                                   eid)
+              :let [pulled (db/pull-by-name db-name
+                                            [:seon.fn/qualified-name :seon.fn/namespace
+                                             :seon.fn/name :seon.fn/doc :seon.fn/updated-at
+                                             {:seon.fn/input-spec [:seon.spec/contains-keys
+                                                                   :seon.spec/optional-keys]}
+                                             {:seon.fn/output-spec [:seon.spec/contains-keys]}]
+                                            eid)
                     input-spec (:seon.fn/input-spec pulled)
                     contains (set (:seon.spec/contains-keys input-spec))
                     optional (set (:seon.spec/optional-keys input-spec))
@@ -171,17 +172,17 @@
 
 (defn- pull-fn-with-specs
   "Pull a function entity with input/output spec data."
-  [conn eid]
-  (d/pull @conn
-          [:seon.fn/qualified-name :seon.fn/namespace
-           :seon.fn/name :seon.fn/arglists :seon.fn/private
-           :seon.fn/doc :seon.fn/row
-           {:seon.fn/input-spec [:seon.spec/contains-keys
-                                 :seon.spec/optional-keys
-                                 :seon.spec/definition]}
-           {:seon.fn/output-spec [:seon.spec/contains-keys
-                                  :seon.spec/definition]}]
-          eid))
+  [db-name eid]
+  (db/pull-by-name db-name
+                   [:seon.fn/qualified-name :seon.fn/namespace
+                    :seon.fn/name :seon.fn/arglists :seon.fn/private
+                    :seon.fn/doc :seon.fn/row
+                    {:seon.fn/input-spec [:seon.spec/contains-keys
+                                          :seon.spec/optional-keys
+                                          :seon.spec/definition]}
+                    {:seon.fn/output-spec [:seon.spec/contains-keys
+                                           :seon.spec/definition]}]
+                   eid))
 
 (defn render-ns-docs
   "Render documentation for a namespace's public API.
@@ -190,10 +191,10 @@
    No namespace cooperation required - works with any namespace that
    has functions with docstrings or schemas.
 
-   Note: No :malli/schema - conn is a runtime object.
+   Note: No :malli/schema - db-name is a runtime keyword.
 
    Request keys:
-     ::conn     - Required. Datalevin connection
+     ::db-name  - Optional. Database name keyword (default :seon.runtime)
      ::ns-name  - Required. Namespace name (string)
      ::detail   - Optional. :summary, :interface (default), or :deep-dive
 
@@ -201,30 +202,33 @@
      {:seon.render/documentation \"...text...\"}
 
    Example:
-     (render-ns-docs {::conn conn ::ns-name \"seon.graph.query\"})
+     (render-ns-docs {::db-name :seon.runtime ::ns-name \"seon.graph.query\"})
      ;; => {:seon.render/documentation \"## seon.graph.query\\n...\"}"
-  [{::keys [conn ns-name detail]}]
+  [{::keys [db-name ns-name detail]}]
   (let [detail (or detail :interface)
+        db-name (or db-name :seon.runtime)
         ;; Get all functions in namespace
-        fn-eids (d/q '[:find ?e
-                       :in $ ?ns
-                       :where
-                       [?e :seon.fn/namespace ?ns]]
-                     @conn ns-name)
+        fn-eids (db/query db-name
+                          '[:find ?e
+                            :in $ ?ns
+                            :where
+                            [?e :seon.fn/namespace ?ns]]
+                          ns-name)
         ;; Pull with specs
         fns (->> fn-eids
-                 (map (fn [[eid]] (pull-fn-with-specs conn eid)))
+                 (map (fn [[eid]] (pull-fn-with-specs db-name eid)))
                  (sort-by :seon.fn/name))
         ;; Filter to public unless deep-dive
         fns (if (= detail :deep-dive)
               fns
               (remove :seon.fn/private fns))
         ;; Get namespace docstring
-        ns-doc (when-let [ns-eid (ffirst (d/q '[:find ?e
-                                                 :in $ ?n
-                                                 :where [?e :seon.ns/name ?n]]
-                                               @conn ns-name))]
-                 (:seon.ns/doc (d/pull @conn [:seon.ns/doc] ns-eid)))
+        ns-doc (when-let [ns-eid (ffirst (db/query db-name
+                                                    '[:find ?e
+                                                      :in $ ?n
+                                                      :where [?e :seon.ns/name ?n]]
+                                                    ns-name))]
+                 (:seon.ns/doc (db/pull-by-name db-name [:seon.ns/doc] ns-eid)))
         ;; Render based on detail level
         render-fn (case detail
                     :summary render-fn-summary
@@ -251,10 +255,10 @@
    If found and the function's required keys match the available data,
    uses that custom renderer. Otherwise returns nil (use default).
 
-   Note: No :malli/schema - conn is a runtime object.
+   Note: No :malli/schema - db-name is a runtime keyword.
 
    Request keys:
-     ::conn           - Required. Datalevin connection
+     ::db-name        - Optional. Database name keyword (default :seon.runtime)
      ::ns-name        - Required. Namespace name (string)
      ::available-keys - Optional. Data keys to match against custom renderers
 
@@ -262,10 +266,10 @@
      The resolved var, or nil (use default).
 
    Example:
-     (resolve-docs {::conn conn ::ns-name \"seon.health.workout\"})"
-  [{::keys [conn ns-name available-keys]}]
+     (resolve-docs {::db-name :seon.runtime ::ns-name \"seon.health.workout\"})"
+  [{::keys [db-name ns-name available-keys]}]
   (let [candidates (gq/functions-with-output-key
-                    {::gq/conn conn
+                    {::gq/db-name (or db-name :seon.runtime)
                      ::gq/output-key :seon.render/documentation})
         ;; Filter by namespace proximity (prefer same ns or child)
         nearby (->> candidates
@@ -304,10 +308,10 @@
    - Call graph (who calls what)
    - Dependency information
 
-   Note: No :malli/schema - conn is a runtime object.
+   Note: No :malli/schema - db-name is a runtime keyword.
 
    Request keys:
-     ::conn          - Required. Datalevin connection
+     ::db-name       - Optional. Database name keyword (default :seon.runtime)
      ::ns-name       - Required. Target namespace
      ::max-entities  - Optional. Entity cap (default 50)
 
@@ -316,10 +320,11 @@
       ::entity-count N}
 
    Example:
-     (context-for-agent {::conn conn ::ns-name \"seon.health.workout\"})"
-  [{::keys [conn ns-name max-entities]}]
-  (let [;; Try custom documentation renderer first
-        custom-renderer (resolve-docs {::conn conn ::ns-name ns-name})
+     (context-for-agent {::db-name :seon.runtime ::ns-name \"seon.health.workout\"})"
+  [{::keys [db-name ns-name max-entities]}]
+  (let [db-name (or db-name :seon.runtime)
+        ;; Try custom documentation renderer first
+        custom-renderer (resolve-docs {::db-name db-name ::ns-name ns-name})
         ;; Get documentation
         docs (if custom-renderer
                (try
@@ -330,10 +335,10 @@
                nil)
         docs (or docs
                  (:seon.render/documentation
-                  (render-ns-docs {::conn conn ::ns-name ns-name ::detail :interface})))
+                  (render-ns-docs {::db-name db-name ::ns-name ns-name ::detail :interface})))
         ;; Build call graph context
         graph-context (graph-ctx/build-for-namespace
-                       {::graph-ctx/conn conn
+                       {::graph-ctx/db-name db-name
                         ::graph-ctx/namespace ns-name
                         ::graph-ctx/max-entities (or max-entities 50)})
         context-text (::graph-ctx/context-text graph-context)

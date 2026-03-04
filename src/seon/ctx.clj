@@ -48,10 +48,8 @@
 ;;; Schema Registration
 ;;; ---------------------------------------------------------------------------
 
-(schema/register! ::conn
-                  [:any {:description "Datalevin connection for persistence"
-                         :gen/fmap (fn [_] (throw (ex-info "Cannot generate Datalevin connection"
-                                                           {:type :malli.generator/no-generator})))}])
+(schema/register! ::db-name
+                  [:keyword {:description "Database name keyword for persistence (e.g. :seon.runtime)"}])
 
 (schema/register! ::instance-id
                   [:string {:min 1
@@ -138,12 +136,12 @@
 
 (schema/register! ::persist-request
                   [:map
-                   [::conn ::conn]
+                   [::db-name ::db-name]
                    [::instance-id ::instance-id]])
 
 (schema/register! ::load-request
                   [:map
-                   [::conn ::conn]
+                   [::db-name ::db-name]
                    [::instance-id ::instance-id]])
 
 (schema/register! ::instance-summary
@@ -161,10 +159,8 @@
                          :gen/fmap (fn [_] (throw (ex-info "Cannot generate database connection"
                                                            {:type :malli.generator/no-generator})))}])
 
-(schema/register! :seon.ns/conn
-                  [:any {:description "Datalevin connection to namespace DB (read-only in ctx)"
-                         :gen/fmap (fn [_] (throw (ex-info "Cannot generate Datalevin connection"
-                                                           {:type :malli.generator/no-generator})))}])
+(schema/register! :seon.ns/db-name
+                  [:keyword {:description "Database name keyword for namespace DB (read-only in ctx)"}])
 
 (schema/register! :seon.ns/session-id
                   [:string {:min 4 :max 6
@@ -203,7 +199,7 @@
 ;;; Registry
 ;;; ---------------------------------------------------------------------------
 
-;; Map of instance-id -> {::atom, ::conn, ::namespace, ::persist?, ::sse-push?,
+;; Map of instance-id -> {::atom, ::db-name, ::namespace, ::persist?, ::sse-push?,
 ;;                         ::track-clients?, ::clients, ::render-fn,
 ;;                         ::created-at, ::scheduler, ::scheduled-task}
 (defonce ^:private registry (atom {}))
@@ -243,9 +239,14 @@
 
 (defn- do-persist!
   "Persist ctx value to Datalevin. Strips non-serializable values.
-   Checks conn usability first to avoid watch exceptions on closed connections."
-  [conn instance-id namespace-sym value]
-  (let [conn-usable? (when conn
+   Resolves conn from db-name internally, checks usability first."
+  [db-name instance-id namespace-sym value]
+  (let [conn (try
+               ((requiring-resolve 'seon.db/resolve-conn) db-name)
+               (catch Exception e
+                 (log/warn "Cannot resolve conn for persist" {:db-name db-name :error (.getMessage e)})
+                 nil))
+        conn-usable? (when conn
                        (try
                          (require 'datalevin.conn)
                          (if-let [closed? (resolve 'datalevin.conn/closed?)]
@@ -253,15 +254,15 @@
                            true)
                          (catch Exception _ true)))]
     (if-not conn-usable?
-      (log/warn "Skipping ctx persist — connection not usable" {:instance-id instance-id})
+      (log/warn "Skipping ctx persist — connection not usable" {:instance-id instance-id :db-name db-name})
       (try
         (let [filtered (filter-serializable value)
               edn-str (pr-str filtered)]
           ((requiring-resolve 'seon.db/transact!)
-           conn [(cond-> {:seon.ctx/instance-id instance-id
-                          :seon.ctx/data edn-str
-                          :seon.ctx/updated-at (java.util.Date.)}
-                   namespace-sym (assoc :seon.ctx/namespace (str namespace-sym)))]))
+           db-name [(cond-> {:seon.ctx/instance-id instance-id
+                             :seon.ctx/data edn-str
+                             :seon.ctx/updated-at (java.util.Date.)}
+                      namespace-sym (assoc :seon.ctx/namespace (str namespace-sym)))]))
         (catch Exception e
           (log/error "Failed to persist ctx" {:instance-id instance-id
                                               :error (.getMessage e)}))))))
@@ -450,7 +451,7 @@
    and SSE push based on configuration.
 
    Request keys:
-     ::conn            - Optional. Datalevin connection for persistence
+     ::db-name         - Optional. Database name keyword for persistence (e.g. :seon.runtime)
      ::instance-id     - Required. Unique instance identifier
      ::namespace       - Optional. Namespace symbol for grouping
      ::initial-value   - Optional. Initial ctx value (default {})
@@ -468,7 +469,7 @@
 
    Note: No :malli/schema - returns an atom (opaque runtime object)
    that cannot be property tested. See CONVENTIONS.md."
-  [{::keys [conn instance-id namespace initial-value persist? sse-push?
+  [{::keys [db-name instance-id namespace initial-value persist? sse-push?
             track-clients? render-fn debounce-ms validate? reserved-keys
             ctx-schema]}]
   (let [persist? (if (some? persist?) persist? true)
@@ -488,7 +489,7 @@
                                       (when validate?
                                         (validate-state new-state @reserved-keys-snapshot))
                                       (schema-validator new-state))
-                                    ;; Legacy per-key validation
+                                    ;; Per-key validation
                                     validate?
                                     (fn [new-state]
                                       (validate-state new-state @reserved-keys-snapshot)
@@ -499,7 +500,7 @@
         scheduled-task (atom nil)
 
         entry {::atom ctx-atom
-               ::conn conn
+               ::db-name db-name
                ::namespace namespace
                ::persist? persist?
                ::sse-push? sse-push?
@@ -516,7 +517,7 @@
     (swap! registry assoc instance-id entry)
 
     ;; Add watch for persistence (debounced)
-    (when (and persist? conn)
+    (when (and persist? db-name)
       (add-watch ctx-atom ::persist
                  (fn [_ _ old-val new-val]
                    (when (not= old-val new-val)
@@ -524,11 +525,11 @@
                      (when-let [^ScheduledFuture task @scheduled-task]
                        (.cancel task false))
                      ;; Schedule new persist — use bound-fn to convey dynamic bindings
-                     ;; (e.g. db/*direct-write* in tests) to the scheduler thread
+                     ;; (e.g. db/*direct-mode* in tests) to the scheduler thread
                      (reset! scheduled-task
                              (.schedule scheduler
                                         ^Runnable (bound-fn []
-                                                    (do-persist! conn instance-id namespace new-val))
+                                                    (do-persist! db-name instance-id namespace new-val))
                                         (long debounce-ms)
                                         TimeUnit/MILLISECONDS))))))
 
@@ -794,37 +795,38 @@
   "Manually persist current value to Datalevin.
 
    Request keys:
-     ::conn        - Required. Datalevin connection
+     ::db-name     - Required. Database name keyword
      ::instance-id - Required. The instance ID
 
    Returns:
      The filtered data that was persisted, or nil if instance not found."
   {:malli/schema [:=> [:cat ::persist-request] [:maybe :any]]}
-  [{::keys [conn instance-id]}]
+  [{::keys [db-name instance-id]}]
   (when-let [entry (get @registry instance-id)]
     (let [value @(::atom entry)
           ns-sym (::namespace entry)]
-      (do-persist! conn instance-id ns-sym value)
+      (do-persist! db-name instance-id ns-sym value)
       (filter-serializable value))))
 
 (defn load!
   "Load persisted value from Datalevin.
 
    Request keys:
-     ::conn        - Required. Datalevin connection
+     ::db-name     - Required. Database name keyword
      ::instance-id - Required. The instance ID
 
    Returns:
      The deserialized data, or nil if not found."
   {:malli/schema [:=> [:cat ::load-request] [:maybe :any]]}
-  [{::keys [conn instance-id]}]
-  (let [d-q (requiring-resolve 'datalevin.core/q)
-        results (d-q '[:find ?data
-                       :in $ ?id
-                       :where
-                       [?e :seon.ctx/instance-id ?id]
-                       [?e :seon.ctx/data ?data]]
-                     @conn instance-id)]
+  [{::keys [db-name instance-id]}]
+  (let [results ((requiring-resolve 'seon.db/query)
+                 db-name
+                 '[:find ?data
+                   :in $ ?id
+                   :where
+                   [?e :seon.ctx/instance-id ?id]
+                   [?e :seon.ctx/data ?data]]
+                 instance-id)]
     (when (seq results)
       (edn/read-string (ffirst results)))))
 

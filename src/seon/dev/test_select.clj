@@ -15,13 +15,14 @@
 
      ;; Find what tests to run after editing seon.schema
      (ts/affected-test-namespaces
-       {::ts/conn graph-conn ::ts/ns-name \"seon.schema\"})
+       {::ts/db-name :seon.runtime ::ts/ns-name \"seon.schema\"})
      ;; => [seon.schema-test seon.ai-test ...]
 
      ;; Run them
      (ts/run-affected-tests!
-       {::ts/conn graph-conn ::ts/ns-name \"seon.schema\"})"
-  (:require [clojure.string :as str]
+       {::ts/db-name :seon.runtime ::ts/ns-name \"seon.schema\"})"
+  (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :as test]
             [seon.dev.verify :as verify]
             [seon.graph.query :as gq]
@@ -32,8 +33,8 @@
 ;;; Schema Registration
 ;;; ---------------------------------------------------------------------------
 
-(schema/register! ::conn
-                  [:any {:description "Datalevin connection for graph queries"}])
+(schema/register! ::db-name
+                  [:keyword {:description "Database name keyword for graph queries"}])
 
 (schema/register! ::ns-name
                   [:string {:min 1 :description "Changed namespace name"}])
@@ -73,12 +74,12 @@
    Returns vector of namespace name strings including the changed ns.
 
    Example:
-     (affected-namespaces {::conn c ::ns-name \"seon.schema\"})
+     (affected-namespaces {::db-name :seon.runtime ::ns-name \"seon.schema\"})
      ;; => [\"seon.schema\" \"seon.ai\" \"seon.dev.hook\" ...]"
-  [{::keys [conn ns-name depth] :or {depth :direct}}]
+  [{::keys [db-name ns-name depth] :or {depth :direct}}]
   (let [dependents (if (= depth :transitive)
-                     (gq/transitive-dependents-of {::gq/conn conn ::gq/ns-name ns-name})
-                     (gq/dependents-of {::gq/conn conn ::gq/ns-name ns-name}))]
+                     (gq/transitive-dependents-of {::gq/db-name db-name ::gq/ns-name ns-name})
+                     (gq/dependents-of {::gq/db-name db-name ::gq/ns-name ns-name}))]
     (into [ns-name] (remove #{ns-name}) dependents)))
 
 (defn affected-test-namespaces
@@ -90,10 +91,10 @@
    Returns vector of test namespace symbols.
 
    Example:
-     (affected-test-namespaces {::conn c ::ns-name \"seon.schema\"})
+     (affected-test-namespaces {::db-name :seon.runtime ::ns-name \"seon.schema\"})
      ;; => [seon.schema-test seon.ai-test]"
-  [{::keys [conn ns-name depth] :or {depth :direct}}]
-  (let [affected (affected-namespaces {::conn conn ::ns-name ns-name ::depth depth})]
+  [{::keys [db-name ns-name depth] :or {depth :direct}}]
+  (let [affected (affected-namespaces {::db-name db-name ::ns-name ns-name ::depth depth})]
     (->> affected
          (map (fn [ns-str]
                 (if (str/ends-with? ns-str "-test")
@@ -122,13 +123,13 @@
      ::warn-threshold-ms - Warn if estimated time exceeds this (default 30000)
 
    Example:
-     (run-affected-tests! {::conn c ::ns-name \"seon.trading.signals\"})
+     (run-affected-tests! {::db-name :seon.runtime ::ns-name \"seon.trading.signals\"})
      ;; => {::success true ::total-tests 12 ::namespaces-tested [seon.trading.signals-test] ...}"
-  [{::keys [conn ns-name depth warn-threshold-ms]
+  [{::keys [db-name ns-name depth warn-threshold-ms]
     :or {depth :direct warn-threshold-ms 30000}}]
-  (let [test-nses (if conn
+  (let [test-nses (if db-name
                     (affected-test-namespaces
-                     {::conn conn ::ns-name ns-name ::depth depth})
+                     {::db-name db-name ::ns-name ns-name ::depth depth})
                     ;; Fallback: no graph, just try the changed ns's test
                     (let [test-sym (symbol (str ns-name "-test"))]
                       (try

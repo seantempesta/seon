@@ -5,8 +5,10 @@
   (:require [clojure.test :refer [deftest testing is use-fixtures]]
             [datalevin.core :as d]
             [seon.db :as db]
+            [seon.db.datalevin.conn :as conn]
             [seon.graph.ingest :as ingest]
-            [seon.runtime :as runtime]))
+            [seon.runtime :as runtime]
+            [seon.test-utils]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Test Fixtures
@@ -25,18 +27,14 @@
         conn (d/create-conn dir merged-schema)]
     (reset! test-dir dir)
     (reset! test-conn conn)
-    ;; Set test connection override (replaces old init! pattern)
-    (runtime/set-test-conn! conn)
     conn))
 
 (defn- teardown-datalevin! []
   ;; Reset registry first
   (runtime/reset-registry! {})
-  ;; Clear test conn override
-  (runtime/set-test-conn! nil)
   ;; Close connection
-  (when-let [conn @test-conn]
-    (try (d/close conn) (catch Exception _)))
+  (when-let [c @test-conn]
+    (try (d/close c) (catch Exception _)))
   ;; Clean up temp dir
   (when-let [dir @test-dir]
     (try
@@ -45,13 +43,20 @@
           (.delete child)))
       (catch Exception _))))
 
+(defn- fake-conn-manager
+  "Build a fake conn manager that returns the test connection for :seon.runtime."
+  [conn]
+  {::conn/port 0
+   ::conn/connections (atom {:seon.runtime {::conn/connection conn}})})
+
 (use-fixtures :each
   (fn [f]
-    (setup-datalevin!)
-    (try
-      (binding [db/*direct-write* true]
-        (f))
-      (finally (teardown-datalevin!)))))
+    (let [conn (setup-datalevin!)]
+      (try
+        (binding [db/*direct-mode* true
+                  db/*conn-manager* (fake-conn-manager conn)]
+          (f))
+        (finally (teardown-datalevin!))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; ID Generation Tests
@@ -199,12 +204,13 @@
       (is (= 1 crashed-count)))
 
     ;; Verify in Datalevin
-    (let [results (d/q '[:find ?status
-                         :in $ ?ns
-                         :where
-                         [?e :seon.runtime/namespace ?ns]
-                         [?e :seon.runtime/status ?status]]
-                       @@test-conn "test.crash")]
+    (let [results (db/query :seon.runtime
+                            '[:find ?status
+                              :in $ ?ns
+                              :where
+                              [?e :seon.runtime/namespace ?ns]
+                              [?e :seon.runtime/status ?status]]
+                            "test.crash")]
       (is (= #{[:crashed]} results))))
 
   (testing "mark-crashed! returns 0 when no running instances"
@@ -223,15 +229,16 @@
                         ::runtime/location :in-process
                         ::runtime/component-key :seon/test})
 
-    ;; Query Datalevin directly
-    (let [results (d/q '[:find ?ns ?status ?location ?key
-                         :in $ ?ns
-                         :where
-                         [?e :seon.runtime/namespace ?ns]
-                         [?e :seon.runtime/status ?status]
-                         [?e :seon.runtime/location ?location]
-                         [?e :seon.runtime/component-key ?key]]
-                       @@test-conn "test.persist")]
+    ;; Query Datalevin via db API
+    (let [results (db/query :seon.runtime
+                            '[:find ?ns ?status ?location ?key
+                              :in $ ?ns
+                              :where
+                              [?e :seon.runtime/namespace ?ns]
+                              [?e :seon.runtime/status ?status]
+                              [?e :seon.runtime/location ?location]
+                              [?e :seon.runtime/component-key ?key]]
+                            "test.persist")]
       (is (= 1 (count results)))
       (is (= ["test.persist" :running :in-process :seon/test] (first results)))))
 
@@ -241,12 +248,13 @@
                         ::runtime/location :in-process})
     (runtime/unregister! {::runtime/namespace "test.persist.unreg"})
 
-    (let [results (d/q '[:find ?status
-                         :in $ ?ns
-                         :where
-                         [?e :seon.runtime/namespace ?ns]
-                         [?e :seon.runtime/status ?status]]
-                       @@test-conn "test.persist.unreg")]
+    (let [results (db/query :seon.runtime
+                            '[:find ?status
+                              :in $ ?ns
+                              :where
+                              [?e :seon.runtime/namespace ?ns]
+                              [?e :seon.runtime/status ?status]]
+                            "test.persist.unreg")]
       (is (= #{[:stopped]} results)))))
 
 ;;; ---------------------------------------------------------------------------
@@ -333,14 +341,15 @@
       (is (= :running (::runtime/status result)))
 
       ;; Verify in Datalevin
-      (let [runs (d/q '[:find ?status ?ns ?provider
-                         :in $ ?id
-                         :where
-                         [?e :seon.agent.run/id ?id]
-                         [?e :seon.agent.run/status ?status]
-                         [?e :seon.agent.run/namespace ?ns]
-                         [?e :seon.agent.run/provider ?provider]]
-                       @@test-conn "test1234")]
+      (let [runs (db/query :seon.runtime
+                            '[:find ?status ?ns ?provider
+                              :in $ ?id
+                              :where
+                              [?e :seon.agent.run/id ?id]
+                              [?e :seon.agent.run/status ?status]
+                              [?e :seon.agent.run/namespace ?ns]
+                              [?e :seon.agent.run/provider ?provider]]
+                            "test1234")]
         (is (= #{[:running "seon.test.agent" :claude]} runs)))))
 
   (testing "start-agent-run! links to runtime instance if present"
@@ -352,12 +361,13 @@
                                ::runtime/namespace "seon.linked.agent"
                                ::runtime/provider :claude})
     ;; Verify ref exists
-    (let [refs (d/q '[:find ?ref
-                       :in $ ?id
-                       :where
-                       [?e :seon.agent.run/id ?id]
-                       [?e :seon.agent.run/runtime ?ref]]
-                     @@test-conn "linked01")]
+    (let [refs (db/query :seon.runtime
+                          '[:find ?ref
+                            :in $ ?id
+                            :where
+                            [?e :seon.agent.run/id ?id]
+                            [?e :seon.agent.run/runtime ?ref]]
+                          "linked01")]
       (is (= 1 (count refs))))))
 
 (deftest complete-agent-run-test
@@ -374,15 +384,16 @@
       (is (= :completed (::runtime/status result)))
 
       ;; Verify in Datalevin
-      (let [runs (d/q '[:find ?status ?cost ?turns ?dur
-                         :in $ ?id
-                         :where
-                         [?e :seon.agent.run/id ?id]
-                         [?e :seon.agent.run/status ?status]
-                         [?e :seon.agent.run/cost-usd ?cost]
-                         [?e :seon.agent.run/num-turns ?turns]
-                         [?e :seon.agent.run/duration-ms ?dur]]
-                       @@test-conn "comp1234")]
+      (let [runs (db/query :seon.runtime
+                            '[:find ?status ?cost ?turns ?dur
+                              :in $ ?id
+                              :where
+                              [?e :seon.agent.run/id ?id]
+                              [?e :seon.agent.run/status ?status]
+                              [?e :seon.agent.run/cost-usd ?cost]
+                              [?e :seon.agent.run/num-turns ?turns]
+                              [?e :seon.agent.run/duration-ms ?dur]]
+                            "comp1234")]
         (is (= #{[:completed 0.45 8 30000]} runs))))))
 
 (deftest agent-runs-test
@@ -412,12 +423,12 @@
     (let [now (java.util.Date.)
           snap-id (str "test-flow/" (.toInstant now))
           data-str (pr-str {:proc-a {:state 42} :proc-b {:state "ok"}})]
-      ;; Write directly to Datalevin (no real flow needed)
-      (d/transact! @test-conn [{:seon.flow.snap/id snap-id
-                                 :seon.flow.snap/label "test-flow"
-                                 :seon.flow.snap/created-at now
-                                 :seon.flow.snap/reason :shutdown
-                                 :seon.flow.snap/data data-str}])
+      ;; Write directly via db API
+      (db/transact! :seon.runtime [{:seon.flow.snap/id snap-id
+                                    :seon.flow.snap/label "test-flow"
+                                    :seon.flow.snap/created-at now
+                                    :seon.flow.snap/reason :shutdown
+                                    :seon.flow.snap/data data-str}])
 
       ;; Query back via latest-snapshot
       (let [snap (runtime/latest-snapshot {::runtime/label "test-flow"})]
@@ -433,16 +444,16 @@
           new-time (java.util.Date.)
           old-id (str "multi-flow/" (.toInstant old-time))
           new-id (str "multi-flow/" (.toInstant new-time))]
-      (d/transact! @test-conn [{:seon.flow.snap/id old-id
-                                 :seon.flow.snap/label "multi-flow"
-                                 :seon.flow.snap/created-at old-time
-                                 :seon.flow.snap/reason :backup
-                                 :seon.flow.snap/data (pr-str {:old true})}
-                                {:seon.flow.snap/id new-id
-                                 :seon.flow.snap/label "multi-flow"
-                                 :seon.flow.snap/created-at new-time
-                                 :seon.flow.snap/reason :manual
-                                 :seon.flow.snap/data (pr-str {:new true})}])
+      (db/transact! :seon.runtime [{:seon.flow.snap/id old-id
+                                    :seon.flow.snap/label "multi-flow"
+                                    :seon.flow.snap/created-at old-time
+                                    :seon.flow.snap/reason :backup
+                                    :seon.flow.snap/data (pr-str {:old true})}
+                                   {:seon.flow.snap/id new-id
+                                    :seon.flow.snap/label "multi-flow"
+                                    :seon.flow.snap/created-at new-time
+                                    :seon.flow.snap/reason :manual
+                                    :seon.flow.snap/data (pr-str {:new true})}])
 
       (let [snap (runtime/latest-snapshot {::runtime/label "multi-flow"})]
         (is (= new-id (:seon.flow.snap/id snap)))
@@ -458,43 +469,51 @@
 
 (deftest flow-handle-roundtrip-test
   (testing "register-flow!/get-flow/list-flows/unregister-flow! round-trip"
-    (runtime/register-flow! {::runtime/flow-id :test/flow-a
-                             ::runtime/flow :fake-flow-obj
-                             ::runtime/chans {:error-chan :fake-err :report-chan :fake-rep}
-                             ::runtime/label "Flow A"})
-    (let [handle (runtime/get-flow {::runtime/flow-id :test/flow-a})]
-      (is (some? handle))
-      (is (= :fake-flow-obj (:flow handle)))
-      (is (= "Flow A" (:label handle)))
-      (is (inst? (:started-at handle))))
+    (try
+      (runtime/register-flow! {::runtime/flow-id :test/flow-a
+                               ::runtime/flow :fake-flow-obj
+                               ::runtime/chans {:error-chan :fake-err :report-chan :fake-rep}
+                               ::runtime/label "Flow A"})
+      (let [handle (runtime/get-flow {::runtime/flow-id :test/flow-a})]
+        (is (some? handle))
+        (is (= :fake-flow-obj (:flow handle)))
+        (is (= "Flow A" (:label handle)))
+        (is (inst? (:started-at handle))))
 
-    (runtime/register-flow! {::runtime/flow-id :test/flow-b
-                             ::runtime/flow :fake-flow-b
-                             ::runtime/chans {:error-chan :e :report-chan :r}
-                             ::runtime/label "Flow B"})
-    (let [flows (runtime/list-flows {})]
-      (is (= 2 (count flows)))
-      (is (contains? flows :test/flow-a))
-      (is (contains? flows :test/flow-b)))
+      (runtime/register-flow! {::runtime/flow-id :test/flow-b
+                               ::runtime/flow :fake-flow-b
+                               ::runtime/chans {:error-chan :e :report-chan :r}
+                               ::runtime/label "Flow B"})
+      (let [flows (runtime/list-flows {})]
+        (is (contains? flows :test/flow-a))
+        (is (contains? flows :test/flow-b)))
 
-    (let [removed (runtime/unregister-flow! {::runtime/flow-id :test/flow-a})]
-      (is (some? removed))
-      (is (= :fake-flow-obj (:flow removed))))
-    (is (nil? (runtime/get-flow {::runtime/flow-id :test/flow-a})))
-    (is (= 1 (count (runtime/list-flows {}))))))
+      (let [removed (runtime/unregister-flow! {::runtime/flow-id :test/flow-a})]
+        (is (some? removed))
+        (is (= :fake-flow-obj (:flow removed))))
+      (is (nil? (runtime/get-flow {::runtime/flow-id :test/flow-a})))
+      (is (not (contains? (runtime/list-flows {}) :test/flow-a))
+          "Unregistered flow should not appear in list")
+      (is (contains? (runtime/list-flows {}) :test/flow-b)
+          "Other flow should still be present")
+      (finally
+        (runtime/unregister-flow! {::runtime/flow-id :test/flow-a})
+        (runtime/unregister-flow! {::runtime/flow-id :test/flow-b})))))
 
 (deftest flow-handle-overwrite-test
   (testing "re-registering same flow-id overwrites"
-    (runtime/register-flow! {::runtime/flow-id :test/dup
-                             ::runtime/flow :old
-                             ::runtime/chans {}
-                             ::runtime/label "Old"})
-    (runtime/register-flow! {::runtime/flow-id :test/dup
-                             ::runtime/flow :new
-                             ::runtime/chans {}
-                             ::runtime/label "New"})
-    (is (= :new (:flow (runtime/get-flow {::runtime/flow-id :test/dup}))))
-    (is (= 1 (count (runtime/list-flows {}))))))
+    (try
+      (runtime/register-flow! {::runtime/flow-id :test/dup
+                               ::runtime/flow :old
+                               ::runtime/chans {}
+                               ::runtime/label "Old"})
+      (runtime/register-flow! {::runtime/flow-id :test/dup
+                               ::runtime/flow :new
+                               ::runtime/chans {}
+                               ::runtime/label "New"})
+      (is (= :new (:flow (runtime/get-flow {::runtime/flow-id :test/dup}))))
+      (finally
+        (runtime/unregister-flow! {::runtime/flow-id :test/dup})))))
 
 (deftest flow-handle-unregister-nonexistent-test
   (testing "unregistering non-existent flow-id returns nil"

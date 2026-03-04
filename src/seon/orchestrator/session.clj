@@ -257,10 +257,11 @@
         ;; 2. Create persisted ctx with the namespace connection
         (log/debug "Creating persisted ctx" {:namespace namespace :resume? resume?
                                              :datalevin? (some? dl-conn)})
-        (let [ctx-atom
+        (let [ns-db-name (when dl-conn (keyword (str namespace)))
+              ctx-atom
               (ctx/create! {::ctx/instance-id session-id
                             ::ctx/namespace namespace
-                            ::ctx/conn dl-conn
+                            ::ctx/db-name ns-db-name
                             ::ctx/persist? (some? dl-conn)
                             ::ctx/sse-push? false
                             ::ctx/validate? true
@@ -268,9 +269,9 @@
                             ::ctx/reserved-keys
                             (cond-> {:seon.agent/namespace namespace
                                      :seon.agent/db ns-conn}
-                              dl-conn (merge {:seon.ns/conn dl-conn
-                                              :seon.ns/session-id session-id
-                                              :seon.ns/namespace (str namespace)}))})
+                              ns-db-name (merge {:seon.ns/db-name ns-db-name
+                                                 :seon.ns/session-id session-id
+                                                 :seon.ns/namespace (str namespace)}))})
 
               ;; 3. Claim a pool JVM and inject *ctx*
               _ (log/debug "Claiming pool JVM" {:session-id session-id :namespace namespace})
@@ -299,7 +300,7 @@
                             ::eval-count 0
                             ::current-eval nil
                             ;; Internal - not returned but stored in registry
-                            ::ns-conn ns-conn
+                            ::ns-db-name ns-db-name
                             ::ctx-atom ctx-atom
                             ::pool pool}]
 
@@ -355,11 +356,20 @@
         (log/debug "Releasing pool JVM" {:session-id id})
         (pool/release-session! pool id))
 
-      ;; 2. Destroy ctx instance (flushes persistence, cleans up scheduler/watches)
+      ;; 2. Close namespace Datalevin connection if one was created
+      (when-let [ns-db-name (::ns-db-name session)]
+        (log/debug "Closing namespace connection" {:session-id id :db ns-db-name})
+        (try
+          (when-let [mgr (:seon.db.datalevin/connections @(requiring-resolve 'integrant.repl.state/system))]
+            (conn/close-conn! {::conn/manager mgr ::conn/db ns-db-name}))
+          (catch Exception e
+            (log/warn "Failed to close namespace connection" {:session-id id :error (.getMessage e)}))))
+
+      ;; 3. Destroy ctx instance (flushes persistence, cleans up scheduler/watches)
       (log/debug "Destroying ctx" {:session-id id})
       (ctx/destroy! {::ctx/instance-id id})
 
-      ;; 3. Update registries
+      ;; 4. Update registries
       (swap! session-registry dissoc id)
       (let [stopped-at (java.util.Date.)]
         (runtime/unregister! {::runtime/namespace (str (::namespace session))})

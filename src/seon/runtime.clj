@@ -17,9 +17,8 @@
 
    ## Connection
 
-   The runtime DB connection is managed by the connection manager
-   (:seon.db.datalevin/connections). No manual init! needed -- get-conn
-   lazily obtains the connection with auto-reconnect on staleness.
+   All database access goes through the seon.db API using the :seon.runtime
+   db-name keyword. No direct Datalevin access.
 
    ## Usage
 
@@ -41,9 +40,7 @@
    (runtime/unregister! {::namespace \"seon.web.server\"})
    ```"
   (:require [clojure.core.async.flow :as flow]
-            [datalevin.core :as d]
             [seon.db :as db]
-            [seon.db.datalevin.conn :as dl-conn]
             [seon.schema :as schema]
             [taoensso.timbre :as log])
   (:import [java.security SecureRandom]))
@@ -79,11 +76,6 @@
 
 (schema/register! ::stopped-at
                   [inst? {:description "When the instance was stopped"}])
-
-(schema/register! ::conn
-                  [:any {:description "Datalevin graph connection"
-                         :gen/fmap (fn [_] (throw (ex-info "Cannot generate Datalevin connection"
-                                                           {:type :malli.generator/no-generator})))}])
 
 (schema/register! ::prefix
                   [:string {:min 1 :max 10
@@ -255,7 +247,7 @@
    :seon.flow.snap/data
    {:db/valueType :db.type/string}})
 
-;; Memoized schema computation - avoids re-computing on every get-conn call
+;; Memoized schema computation - avoids re-computing on every connection call
 (def ^:private merged-schema-cache (atom nil))
 
 (defn runtime-merged-schema
@@ -325,38 +317,6 @@
           {::id full-id})))))
 
 ;;; ---------------------------------------------------------------------------
-;;; Connection Management
-;;; ---------------------------------------------------------------------------
-
-;; Test override -- set via set-test-conn! in test fixtures.
-;; Production code uses the connection manager from Integrant.
-(defonce ^:private *test-conn (atom nil))
-
-(defn set-test-conn!
-  "Set a test connection override. When set, all runtime functions use this
-   conn instead of the connection manager. Pass nil to clear."
-  [test-conn]
-  (reset! *test-conn test-conn))
-
-(defn- get-conn
-  "Get the runtime Datalevin connection.
-
-   Checks test override first, then goes through the connection manager
-   (which caches internally). Returns nil if unavailable."
-  []
-  (or @*test-conn
-      (when-let [mgr (some-> (try @(requiring-resolve 'integrant.repl.state/system)
-                                   (catch Exception _ nil))
-                              :seon.db.datalevin/connections)]
-        (try
-          (dl-conn/get-conn! {::dl-conn/manager mgr
-                              ::dl-conn/db :seon.runtime
-                              ::dl-conn/schema (runtime-merged-schema)})
-          (catch Exception e
-            (log/warn "Failed to get runtime conn from manager" {:error (.getMessage e)})
-            nil)))))
-
-;;; ---------------------------------------------------------------------------
 ;;; In-Memory Registry Cache
 ;;; ---------------------------------------------------------------------------
 
@@ -389,18 +349,17 @@
     (assoc :seon.runtime/component-key (::component-key instance))))
 
 (defn- persist-instance!
-  "Persist an instance to Datalevin. Synchronous when test-conn is set,
+  "Persist an instance to Datalevin. Synchronous in direct mode (tests),
    async (future) in production. Upserts via :db.unique/identity."
   [instance]
   (let [do-persist (fn []
-                     (when-let [c (get-conn)]
-                       (try
-                         (db/transact! c [(build-tx-map instance)])
-                         (catch Exception e
-                           (log/warn "Failed to persist runtime instance"
-                                     {:namespace (::namespace instance)
-                                      :error (.getMessage e)})))))]
-    (if @*test-conn
+                     (try
+                       (db/transact! :seon.runtime [(build-tx-map instance)])
+                       (catch Exception e
+                         (log/warn "Failed to persist runtime instance"
+                                   {:namespace (::namespace instance)
+                                    :error (.getMessage e)}))))]
+    (if db/*direct-mode*
       (do-persist)
       (future (do-persist)))))
 
@@ -532,22 +491,23 @@
      ::crashed-count - Number of instances marked as crashed"
   {:malli/schema [:=> [:cat ::mark-crashed-request] ::mark-crashed-response]}
   [_request]
-  (if-let [c (get-conn)]
-    (let [running (d/q '[:find ?ns ?e
-                         :where
-                         [?e :seon.runtime/namespace ?ns]
-                         [?e :seon.runtime/status :running]]
-                       @c)
+  (try
+    (let [running (db/query :seon.runtime
+                            '[:find ?ns ?e
+                              :where
+                              [?e :seon.runtime/namespace ?ns]
+                              [?e :seon.runtime/status :running]])
           now (java.util.Date.)]
       (doseq [[ns-str _eid] running]
         (log/info "Marking crashed instance" {:namespace ns-str})
-        ;; Just persist the status change
-        (db/transact! c [{:seon.runtime/namespace ns-str
-                          :seon.runtime/status :crashed
-                          :seon.runtime/stopped-at now}]))
+        (db/transact! :seon.runtime [{:seon.runtime/namespace ns-str
+                                      :seon.runtime/status :crashed
+                                      :seon.runtime/stopped-at now}]))
       (log/info "Marked crashed instances" {:count (count running)})
       {::crashed-count (count running)})
-    {::crashed-count 0}))
+    (catch Exception e
+      (log/warn "Failed to mark crashed instances" {:error (.getMessage e)})
+      {::crashed-count 0})))
 
 (defn- datalevin->cache
   "Convert a Datalevin entity map (`:seon.runtime/*` keys) to the
@@ -583,11 +543,11 @@
      ::hydrated-count - Number of instances loaded"
   {:malli/schema [:=> [:cat ::hydrate-cache-request] ::hydrate-cache-response]}
   [_request]
-  (if-let [c (get-conn)]
-    (let [results (d/q '[:find (pull ?e [*])
-                         :where
-                         [?e :seon.runtime/namespace _]]
-                       @c)
+  (try
+    (let [results (db/query :seon.runtime
+                            '[:find (pull ?e [*])
+                              :where
+                              [?e :seon.runtime/namespace _]])
           instances (map first results)
           cache-map (reduce (fn [m entity]
                               (let [inst (datalevin->cache entity)]
@@ -597,7 +557,9 @@
       (reset! registry-cache cache-map)
       (log/info "Hydrated runtime cache" {:count (count cache-map)})
       {::hydrated-count (count cache-map)})
-    {::hydrated-count 0}))
+    (catch Exception e
+      (log/warn "Failed to hydrate runtime cache" {:error (.getMessage e)})
+      {::hydrated-count 0})))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Agent Run Schemas
@@ -703,21 +665,25 @@
      ::status       - :running"
   {:malli/schema [:=> [:cat ::start-agent-run-request] ::start-agent-run-response]}
   [{::keys [agent-run-id namespace provider]}]
-  (when-let [c (get-conn)]
+  (try
     (let [now (java.util.Date.)
           ;; Look up runtime instance entity for ref linkage
           runtime-eid (ffirst
-                       (d/q '[:find ?e
-                              :in $ ?ns
-                              :where [?e :seon.runtime/namespace ?ns]]
-                            @c namespace))
+                       (db/query :seon.runtime
+                                 '[:find ?e
+                                   :in $ ?ns
+                                   :where [?e :seon.runtime/namespace ?ns]]
+                                 namespace))
           tx-map (cond-> {:seon.agent.run/id agent-run-id
                           :seon.agent.run/namespace namespace
                           :seon.agent.run/provider provider
                           :seon.agent.run/status :running
                           :seon.agent.run/started-at now}
                    runtime-eid (assoc :seon.agent.run/runtime runtime-eid))]
-      (db/transact! c [tx-map])))
+      (db/transact! :seon.runtime [tx-map]))
+    (catch Exception e
+      (log/warn "Failed to start agent run" {:agent-run-id agent-run-id
+                                              :error (.getMessage e)})))
   {::agent-run-id agent-run-id
    ::status :running})
 
@@ -738,7 +704,7 @@
      ::status       - The final status"
   {:malli/schema [:=> [:cat ::complete-agent-run-request] ::complete-agent-run-response]}
   [{::keys [agent-run-id status cost-usd num-turns duration-ms]}]
-  (when-let [c (get-conn)]
+  (try
     (let [now (java.util.Date.)
           tx-map (cond-> {:seon.agent.run/id agent-run-id
                           :seon.agent.run/status status
@@ -746,7 +712,10 @@
                    cost-usd (assoc :seon.agent.run/cost-usd (double cost-usd))
                    num-turns (assoc :seon.agent.run/num-turns (long num-turns))
                    duration-ms (assoc :seon.agent.run/duration-ms (long duration-ms)))]
-      (db/transact! c [tx-map])))
+      (db/transact! :seon.runtime [tx-map]))
+    (catch Exception e
+      (log/warn "Failed to complete agent run" {:agent-run-id agent-run-id
+                                                 :error (.getMessage e)})))
   {::agent-run-id agent-run-id
    ::status status})
 
@@ -762,35 +731,38 @@
      Vector of agent run entity maps."
   {:malli/schema [:=> [:cat ::agent-runs-request] ::agent-runs-response]}
   [{::keys [namespace]}]
-  (if-let [c (get-conn)]
+  (try
     (let [results (if namespace
-                    (d/q '[:find (pull ?e [:seon.agent.run/id
-                                          :seon.agent.run/namespace
-                                          :seon.agent.run/provider
-                                          :seon.agent.run/status
-                                          :seon.agent.run/started-at
-                                          :seon.agent.run/stopped-at
-                                          :seon.agent.run/cost-usd
-                                          :seon.agent.run/num-turns
-                                          :seon.agent.run/duration-ms])
-                            :in $ ?ns
-                            :where
-                            [?e :seon.agent.run/id _]
-                            [?e :seon.agent.run/namespace ?ns]]
-                          @c namespace)
-                    (d/q '[:find (pull ?e [:seon.agent.run/id
-                                          :seon.agent.run/namespace
-                                          :seon.agent.run/provider
-                                          :seon.agent.run/status
-                                          :seon.agent.run/started-at
-                                          :seon.agent.run/stopped-at
-                                          :seon.agent.run/cost-usd
-                                          :seon.agent.run/num-turns
-                                          :seon.agent.run/duration-ms])
-                            :where [?e :seon.agent.run/id _]]
-                          @c))]
+                    (db/query :seon.runtime
+                              '[:find (pull ?e [:seon.agent.run/id
+                                                :seon.agent.run/namespace
+                                                :seon.agent.run/provider
+                                                :seon.agent.run/status
+                                                :seon.agent.run/started-at
+                                                :seon.agent.run/stopped-at
+                                                :seon.agent.run/cost-usd
+                                                :seon.agent.run/num-turns
+                                                :seon.agent.run/duration-ms])
+                                :in $ ?ns
+                                :where
+                                [?e :seon.agent.run/id _]
+                                [?e :seon.agent.run/namespace ?ns]]
+                              namespace)
+                    (db/query :seon.runtime
+                              '[:find (pull ?e [:seon.agent.run/id
+                                                :seon.agent.run/namespace
+                                                :seon.agent.run/provider
+                                                :seon.agent.run/status
+                                                :seon.agent.run/started-at
+                                                :seon.agent.run/stopped-at
+                                                :seon.agent.run/cost-usd
+                                                :seon.agent.run/num-turns
+                                                :seon.agent.run/duration-ms])
+                                :where [?e :seon.agent.run/id _]]))]
       (mapv first results))
-    []))
+    (catch Exception e
+      (log/warn "Failed to query agent runs" {:error (.getMessage e)})
+      [])))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Flow Snapshot API
@@ -845,19 +817,22 @@
    Returns snapshot entity map or nil if ping fails or no connection."
   {:malli/schema [:=> [:cat ::snapshot-request] ::snapshot-response]}
   [{::keys [flow label reason]}]
-  (when-let [c (get-conn)]
+  (try
     (let [states (flow/ping flow :timeout-ms 5000)
           now (java.util.Date.)
           snap-id (str label "/" (.toInstant now))
           data-str (pr-str states)]
-      (db/transact! c [{:seon.flow.snap/id snap-id
-                        :seon.flow.snap/label label
-                        :seon.flow.snap/created-at now
-                        :seon.flow.snap/reason reason
-                        :seon.flow.snap/data data-str}])
+      (db/transact! :seon.runtime [{:seon.flow.snap/id snap-id
+                                    :seon.flow.snap/label label
+                                    :seon.flow.snap/created-at now
+                                    :seon.flow.snap/reason reason
+                                    :seon.flow.snap/data data-str}])
       {:seon.flow.snap/id snap-id
        :seon.flow.snap/label label
-       :seon.flow.snap/reason reason})))
+       :seon.flow.snap/reason reason})
+    (catch Exception e
+      (log/warn "Failed to snapshot topology" {:label label :error (.getMessage e)})
+      nil)))
 
 (defn latest-snapshot
   "Get the most recent snapshot for a flow label.
@@ -867,18 +842,22 @@
 
    Returns the snapshot entity map or nil if not found."
   [{::keys [label]}]
-  (when-let [c (get-conn)]
-    (let [results (d/q '[:find (pull ?e [*]) ?t
-                         :in $ ?label
-                         :where
-                         [?e :seon.flow.snap/label ?label]
-                         [?e :seon.flow.snap/created-at ?t]]
-                       @c label)]
+  (try
+    (let [results (db/query :seon.runtime
+                            '[:find (pull ?e [*]) ?t
+                              :in $ ?label
+                              :where
+                              [?e :seon.flow.snap/label ?label]
+                              [?e :seon.flow.snap/created-at ?t]]
+                            label)]
       (when (seq results)
         (->> results
              (sort-by second #(compare %2 %1))
              first
-             first)))))
+             first)))
+    (catch Exception e
+      (log/warn "Failed to get latest snapshot" {:label label :error (.getMessage e)})
+      nil)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Flow Handle Registry (In-Memory Only)

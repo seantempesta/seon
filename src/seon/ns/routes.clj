@@ -137,7 +137,7 @@
   "Check if namespace is dynamic via lifecycle module."
   [ns-sym]
   (when-let [conn (get-conn)]
-    (::lifecycle/dynamic? (lifecycle/dynamic-namespace? {::lifecycle/conn conn
+    (::lifecycle/dynamic? (lifecycle/dynamic-namespace? {::lifecycle/db-name :seon.runtime
                                                          ::lifecycle/ns-sym ns-sym}))))
 
 ;;; ---------------------------------------------------------------------------
@@ -300,7 +300,7 @@
   [ns-sym]
   (when-let [conn (get-conn)]
     (let [{::lifecycle/keys [render-fn]}
-          (lifecycle/find-page-render-fn {::lifecycle/conn conn
+          (lifecycle/find-page-render-fn {::lifecycle/db-name :seon.runtime
                                           ::lifecycle/ns-sym ns-sym})]
       (when render-fn
         (lifecycle/make-render-fn {::lifecycle/render-fn render-fn
@@ -759,7 +759,7 @@
           (and is-dynamic? (nil? instance-id) (not= view "introspect"))
           (let [{::lifecycle/keys [instance-id]}
                 (lifecycle/ensure-instance! (cond-> {::lifecycle/ns-sym ns-sym}
-                                              conn (assoc ::lifecycle/conn conn)))]
+                                              conn (assoc ::lifecycle/db-name :seon.runtime)))]
             (log/info "Ensured dynamic instance, redirecting" {:ns ns-sym :instance instance-id})
             {:status 302
              :headers {"Location" (str "/ns/" ns-sym "?instance=" instance-id)}})
@@ -770,7 +770,7 @@
             ;; Ensure instance exists (resume from Datalevin or create fresh)
             (lifecycle/ensure-instance! (cond-> {::lifecycle/ns-sym ns-sym
                                                   ::lifecycle/instance-id instance-id}
-                                          conn (assoc ::lifecycle/conn conn)))
+                                          conn (assoc ::lifecycle/db-name :seon.runtime)))
             {:status 200
              :headers {"Content-Type" "text/html; charset=utf-8"}
              :body (reactive-instance-page ns-sym instance-id)})
@@ -840,7 +840,7 @@
   (let [conn (get-conn)
         {::lifecycle/keys [instance-id]}
         (lifecycle/ensure-instance! (cond-> {::lifecycle/ns-sym ns-sym}
-                                      conn (assoc ::lifecycle/conn conn)))]
+                                      conn (assoc ::lifecycle/db-name :seon.runtime)))]
     (log/info "Created instance via action" {:ns ns-sym :instance instance-id})
     {:status 302
      :headers {"Location" (str "/ns/" ns-sym "?instance=" instance-id)}}))

@@ -9,18 +9,18 @@
    - Persisting and restoring ctx state across restarts
 
    Usage:
-     (lifecycle/ensure-instance! {::conn graph-conn
+     (lifecycle/ensure-instance! {::db-name :seon.runtime
                                   ::ns-sym 'seon.health.workout})
      ;; => {::instance-id \"abc123\" ::ctx-atom #<Atom@...>}
 
-     (lifecycle/backup-all-instances! {::conn graph-conn})
-     (lifecycle/restore-instances! {::conn graph-conn})"
+     (lifecycle/backup-all-instances! {::db-name :seon.runtime})
+     (lifecycle/restore-instances! {::db-name :seon.runtime})"
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
-            [datalevin.core :as d]
             [malli.core :as m]
             [malli.generator :as mg]
             [seon.ctx :as ctx]
+            [seon.db :as db]
             [seon.graph.query :as gq]
             [seon.runtime :as runtime]
             [seon.schema :as schema]
@@ -30,10 +30,8 @@
 ;;; Schema Registration
 ;;; ---------------------------------------------------------------------------
 
-(schema/register! ::conn
-                  [:any {:description "Datalevin connection for graph queries and ctx persistence"
-                         :gen/fmap (fn [_] (throw (ex-info "Cannot generate Datalevin connection"
-                                                           {:type :malli.generator/no-generator})))}])
+(schema/register! ::db-name
+                  [:keyword {:description "Database name keyword (e.g. :seon.runtime)"}])
 
 (schema/register! ::ns-sym
                   [:symbol {:description "Namespace symbol (e.g. 'seon.health.workout)"}])
@@ -73,7 +71,7 @@
 
 (schema/register! ::dynamic-namespace-request
                   [:map
-                   [::conn ::conn]
+                   [::db-name ::db-name]
                    [::ns-sym ::ns-sym]])
 
 (schema/register! ::dynamic-namespace-response
@@ -98,7 +96,7 @@
 
 (schema/register! ::find-page-render-fn-request
                   [:map
-                   [::conn ::conn]
+                   [::db-name ::db-name]
                    [::ns-sym ::ns-sym]])
 
 (schema/register! ::find-page-render-fn-response
@@ -114,11 +112,11 @@
                   [:map
                    [::ns-sym ::ns-sym]
                    [::ctx-atom ::ctx-atom]
-                   [::conn {:optional true} ::conn]])
+                   [::db-name {:optional true} ::db-name]])
 
 (schema/register! ::resolve-instance-request
                   [:map
-                   [::conn ::conn]
+                   [::db-name ::db-name]
                    [::ns-sym ::ns-sym]
                    [::instance-id {:optional true} [:maybe ::instance-id]]])
 
@@ -129,7 +127,7 @@
 
 (schema/register! ::ensure-instance-request
                   [:map
-                   [::conn {:optional true} ::conn]
+                   [::db-name {:optional true} ::db-name]
                    [::ns-sym ::ns-sym]
                    [::instance-id {:optional true} ::instance-id]])
 
@@ -140,7 +138,7 @@
 
 (schema/register! ::backup-all-instances-request
                   [:map
-                   [::conn ::conn]])
+                   [::db-name ::db-name]])
 
 (schema/register! ::backup-all-instances-response
                   [:map
@@ -149,7 +147,7 @@
 
 (schema/register! ::restore-instances-request
                   [:map
-                   [::conn ::conn]])
+                   [::db-name ::db-name]])
 
 (schema/register! ::restore-instances-response
                   [:map
@@ -165,20 +163,21 @@
    Queries Datalevin for :seon.ns/dynamic? set by the scanner.
 
    Request keys:
-     ::conn   - Required. Datalevin connection
-     ::ns-sym - Required. Namespace symbol
+     ::db-name - Required. Database name keyword
+     ::ns-sym  - Required. Namespace symbol
 
    Response keys:
      ::dynamic? - true if namespace has ::*ctx* spec"
   {:malli/schema [:=> [:cat ::dynamic-namespace-request] ::dynamic-namespace-response]}
-  [{::keys [conn ns-sym]}]
+  [{::keys [db-name ns-sym]}]
   (let [ns-str (str ns-sym)
-        results (d/q '[:find ?dyn
-                       :in $ ?ns
-                       :where
-                       [?e :seon.ns/name ?ns]
-                       [?e :seon.ns/dynamic? ?dyn]]
-                     @conn ns-str)]
+        results (db/query db-name
+                          '[:find ?dyn
+                            :in $ ?ns
+                            :where
+                            [?e :seon.ns/name ?ns]
+                            [?e :seon.ns/dynamic? ?dyn]]
+                          ns-str)]
     {::dynamic? (true? (ffirst results))}))
 
 (defn ctx-spec-key
@@ -226,16 +225,16 @@
    (e.g. seon.health.workout.render/page-render for seon.health.workout).
 
    Request keys:
-     ::conn   - Required. Datalevin connection
-     ::ns-sym - Required. Namespace symbol
+     ::db-name - Required. Database name keyword
+     ::ns-sym  - Required. Namespace symbol
 
    Response keys:
      ::render-fn - The resolved var, or nil"
   {:malli/schema [:=> [:cat ::find-page-render-fn-request] ::find-page-render-fn-response]}
-  [{::keys [conn ns-sym]}]
+  [{::keys [db-name ns-sym]}]
   (let [ctx-key (keyword (str ns-sym) "*ctx*")
         ;; Find all HTML renderers via ref join
-        candidates (gq/functions-with-output-key {::gq/conn conn ::gq/output-key :seon.render/html})
+        candidates (gq/functions-with-output-key {::gq/db-name db-name ::gq/output-key :seon.render/html})
         ;; Filter for renderers whose required-keys include the *ctx* key
         matching (->> candidates
                       (filter (fn [e]
@@ -279,14 +278,16 @@
    Request keys:
      ::ns-sym   - Required. Namespace symbol
      ::ctx-atom - Required. The ctx atom
-     ::conn     - Optional. Datalevin connection for *conn*"
+     ::db-name  - Optional. Database name for resolving *conn*"
   {:malli/schema [:=> [:cat ::inject-vars-request] :boolean]}
-  [{::keys [ns-sym ctx-atom conn]}]
+  [{::keys [ns-sym ctx-atom db-name]}]
   (when-let [ns-obj (find-ns ns-sym)]
     (let [v (intern ns-obj '*ctx* ctx-atom)]
       (.setDynamic v true))
-    (when conn
-      (let [v (intern ns-obj '*conn* conn)]
+    (when db-name
+      ;; Resolve raw conn for *conn* injection (namespace code may use it directly)
+      (let [conn (db/resolve-conn db-name)
+            v (intern ns-obj '*conn* conn)]
         (.setDynamic v true)))
     true))
 
@@ -300,36 +301,38 @@
    Without: find the most recent instance for this namespace.
 
    Request keys:
-     ::conn        - Required. Datalevin connection
+     ::db-name     - Required. Database name keyword
      ::ns-sym      - Required. Namespace symbol
      ::instance-id - Optional. Specific instance to look up
 
    Response: map with ::instance-id and ::data, or nil."
   {:malli/schema [:=> [:cat ::resolve-instance-request] ::resolve-instance-response]}
-  [{::keys [conn ns-sym instance-id]}]
+  [{::keys [db-name ns-sym instance-id]}]
   (let [ns-str (str ns-sym)]
     (if instance-id
       ;; Look up specific instance
-      (let [results (d/q '[:find ?data ?updated
-                           :in $ ?id
-                           :where
-                           [?e :seon.ctx/instance-id ?id]
-                           [?e :seon.ctx/data ?data]
-                           [?e :seon.ctx/updated-at ?updated]]
-                         @conn instance-id)]
+      (let [results (db/query db-name
+                              '[:find ?data ?updated
+                                :in $ ?id
+                                :where
+                                [?e :seon.ctx/instance-id ?id]
+                                [?e :seon.ctx/data ?data]
+                                [?e :seon.ctx/updated-at ?updated]]
+                              instance-id)]
         (when (seq results)
           (let [[data-str _] (first results)]
             {::instance-id instance-id
              ::data (edn/read-string data-str)})))
       ;; Find most recent for namespace
-      (let [results (d/q '[:find ?id ?data ?updated
-                           :in $ ?ns
-                           :where
-                           [?e :seon.ctx/namespace ?ns]
-                           [?e :seon.ctx/instance-id ?id]
-                           [?e :seon.ctx/data ?data]
-                           [?e :seon.ctx/updated-at ?updated]]
-                         @conn ns-str)]
+      (let [results (db/query db-name
+                              '[:find ?id ?data ?updated
+                                :in $ ?ns
+                                :where
+                                [?e :seon.ctx/namespace ?ns]
+                                [?e :seon.ctx/instance-id ?id]
+                                [?e :seon.ctx/data ?data]
+                                [?e :seon.ctx/updated-at ?updated]]
+                              ns-str)]
         (when (seq results)
           (let [[id data-str _] (->> results
                                      (sort-by #(nth % 2) #(compare %2 %1))
@@ -351,7 +354,7 @@
    If valid, restores from persistence. Otherwise creates fresh.
 
    Request keys:
-     ::conn        - Optional. Datalevin connection
+     ::db-name     - Optional. Database name keyword
      ::ns-sym      - Required. Namespace symbol
      ::instance-id - Optional. Specific instance to resume
 
@@ -359,7 +362,7 @@
      ::instance-id - The instance ID (existing or newly generated)
      ::ctx-atom    - The ctx atom"
   {:malli/schema [:=> [:cat ::ensure-instance-request] ::ensure-instance-response]}
-  [{::keys [conn ns-sym instance-id]}]
+  [{::keys [db-name ns-sym instance-id]}]
   ;; CRITICAL: Check in-memory registry FIRST to avoid creating duplicate atoms
   (if-let [existing-atom (when instance-id
                            (ctx/get-atom {::ctx/instance-id instance-id}))]
@@ -370,10 +373,10 @@
        ::ctx-atom existing-atom})
     ;; Not in memory - check persistence or create fresh
     (let [spec-key (::ctx-spec-key (ctx-spec-key {::ns-sym ns-sym}))
-          persisted (when conn
-                      (resolve-instance {::conn conn ::ns-sym ns-sym ::instance-id instance-id}))
-          page-render-var (when conn
-                            (::render-fn (find-page-render-fn {::conn conn ::ns-sym ns-sym})))
+          persisted (when db-name
+                      (resolve-instance {::db-name db-name ::ns-sym ns-sym ::instance-id instance-id}))
+          page-render-var (when db-name
+                            (::render-fn (find-page-render-fn {::db-name db-name ::ns-sym ns-sym})))
           render-fn (when page-render-var
                       (make-render-fn {::render-fn page-render-var ::ns-sym ns-sym}))
           ;; Check if persisted state is valid against current spec
@@ -389,7 +392,8 @@
                     (:seon.runtime/id (runtime/generate-id {}))))
           init-val (if use-persisted?
                      (::data persisted)
-                     (::data (initial-value {::ns-sym ns-sym})))]
+                     (::data (initial-value {::ns-sym ns-sym})))
+]
 
       (when (and persisted (not persisted-valid?))
         (log/warn "Persisted ctx state invalid against current spec, creating fresh"
@@ -399,15 +403,15 @@
                       (cond-> {::ctx/instance-id iid
                                ::ctx/namespace ns-sym
                                ::ctx/initial-value init-val
-                               ::ctx/persist? (some? conn)
+                               ::ctx/persist? (some? db-name)
                                ::ctx/sse-push? true
                                ::ctx/track-clients? true}
-                        conn (assoc ::ctx/conn conn)
+                        db-name (assoc ::ctx/db-name db-name)
                         render-fn (assoc ::ctx/render-fn render-fn)
                         (schema/registered? spec-key)
                         (assoc ::ctx/ctx-schema spec-key)))]
 
-        (inject-vars! {::ns-sym ns-sym ::ctx-atom ctx-atom ::conn conn})
+        (inject-vars! {::ns-sym ns-sym ::ctx-atom ctx-atom ::db-name db-name})
 
         {::instance-id iid
          ::ctx-atom ctx-atom}))))
@@ -420,18 +424,18 @@
   "Force-persist all ctx atoms to Datalevin. Called on shutdown.
 
    Request keys:
-     ::conn - Required. Datalevin connection
+     ::db-name - Required. Database name keyword
 
    Response keys:
      ::backed-up - Number successfully persisted
      ::total     - Total instances"
   {:malli/schema [:=> [:cat ::backup-all-instances-request] ::backup-all-instances-response]}
-  [{::keys [conn]}]
+  [{::keys [db-name]}]
   (let [instances (ctx/list-instances {})
         persisted (atom 0)]
     (doseq [{::ctx/keys [instance-id]} instances]
       (try
-        (ctx/persist! {::ctx/conn conn ::ctx/instance-id instance-id})
+        (ctx/persist! {::ctx/db-name db-name ::ctx/instance-id instance-id})
         (swap! persisted inc)
         (catch Exception e
           (log/warn "Failed to backup instance"
@@ -444,19 +448,19 @@
    Queries for all persisted ctx instances and recreates valid ones.
 
    Request keys:
-     ::conn - Required. Datalevin connection
+     ::db-name - Required. Database name keyword
 
    Response keys:
      ::restored - Number successfully restored
      ::total    - Total persisted instances found"
   {:malli/schema [:=> [:cat ::restore-instances-request] ::restore-instances-response]}
-  [{::keys [conn]}]
-  (let [results (d/q '[:find ?id ?ns ?data
-                       :where
-                       [?e :seon.ctx/instance-id ?id]
-                       [?e :seon.ctx/namespace ?ns]
-                       [?e :seon.ctx/data ?data]]
-                     @conn)
+  [{::keys [db-name]}]
+  (let [results (db/query db-name
+                          '[:find ?id ?ns ?data
+                            :where
+                            [?e :seon.ctx/instance-id ?id]
+                            [?e :seon.ctx/namespace ?ns]
+                            [?e :seon.ctx/data ?data]])
         restored (atom 0)]
     (doseq [[id ns-str data-str] results]
       (let [ns-sym (symbol ns-str)
@@ -466,7 +470,7 @@
             (if (and (schema/registered? spec-key)
                      (m/validate (schema/schema-definition spec-key) data))
               (do
-                (ensure-instance! {::conn conn
+                (ensure-instance! {::db-name db-name
                                    ::ns-sym ns-sym
                                    ::instance-id id})
                 (swap! restored inc))

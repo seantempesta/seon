@@ -23,13 +23,12 @@
      ;; Bulk ingest from project analysis
      (let [analysis (analyzer/analyze-project! {})
            entities (analyzer/extract-entities {::analyzer/raw-analysis (::analyzer/raw-analysis analysis)})]
-       (ingest/ingest-analysis! {::conn my-conn ::entities entities}))
+       (ingest/ingest-analysis! {::db-name :seon.runtime ::entities entities}))
 
      ;; Incremental ingest for a single namespace
-     (ingest/ingest-namespace! {::conn conn ::ns-name \"seon.foo\"
+     (ingest/ingest-namespace! {::db-name :seon.runtime ::ns-name \"seon.foo\"
                                 ::functions fns ::specs specs ::vars vars})"
-  (:require [datalevin.core :as d]
-            [seon.db :as db]
+  (:require [seon.db :as db]
             [seon.graph.analyzer :as analyzer]
             [seon.render :as render]
             [seon.schema :as schema]
@@ -146,8 +145,8 @@
 (schema/register! :seon.spec/references [:vector :keyword])
 (schema/register! :seon.spec/updated-at inst?)
 
-(schema/register! ::conn
-                  [:any {:description "Datalevin connection"}])
+(schema/register! ::db-name
+                  [:keyword {:description "Database name keyword (e.g. :seon.runtime)"}])
 
 (schema/register! ::entities
                   [:map {:description "Extracted entities from analyzer"}
@@ -198,70 +197,75 @@
 
 (defn- retract-stale-fns!
   "Retract functions in namespace not present in new scan."
-  [conn ns-str new-qualified-names]
-  (let [existing (d/q '[:find ?e ?qn
-                         :in $ ?ns
-                         :where
-                         [?e :seon.fn/namespace ?ns]
-                         [?e :seon.fn/qualified-name ?qn]]
-                       @conn ns-str)
+  [db-name ns-str new-qualified-names]
+  (let [existing (db/query db-name
+                           '[:find ?e ?qn
+                             :in $ ?ns
+                             :where
+                             [?e :seon.fn/namespace ?ns]
+                             [?e :seon.fn/qualified-name ?qn]]
+                           ns-str)
         new-set (set new-qualified-names)
         stale (remove (fn [[_ qn]] (new-set qn)) existing)]
     (when (seq stale)
-      (db/transact! conn (mapv (fn [[eid _]] [:db/retractEntity eid]) stale)))))
+      (db/transact! db-name (mapv (fn [[eid _]] [:db/retractEntity eid]) stale)))))
 
 (defn- retract-stale-specs!
   "Retract specs in namespace not present in new scan."
-  [conn ns-str new-spec-keys]
-  (let [existing (d/q '[:find ?e ?k
-                         :in $ ?ns
-                         :where
-                         [?e :seon.spec/namespace ?ns]
-                         [?e :seon.spec/key ?k]]
-                       @conn ns-str)
+  [db-name ns-str new-spec-keys]
+  (let [existing (db/query db-name
+                           '[:find ?e ?k
+                             :in $ ?ns
+                             :where
+                             [?e :seon.spec/namespace ?ns]
+                             [?e :seon.spec/key ?k]]
+                           ns-str)
         new-set (set new-spec-keys)
         stale (remove (fn [[_ k]] (new-set k)) existing)]
     (when (seq stale)
-      (db/transact! conn (mapv (fn [[eid _]] [:db/retractEntity eid]) stale)))))
+      (db/transact! db-name (mapv (fn [[eid _]] [:db/retractEntity eid]) stale)))))
 
 (defn- retract-stale-vars!
   "Retract vars in namespace not present in new scan."
-  [conn ns-str new-qualified-names]
-  (let [existing (d/q '[:find ?e ?qn
-                         :in $ ?ns
-                         :where
-                         [?e :seon.var/namespace ?ns]
-                         [?e :seon.var/qualified-name ?qn]]
-                       @conn ns-str)
+  [db-name ns-str new-qualified-names]
+  (let [existing (db/query db-name
+                           '[:find ?e ?qn
+                             :in $ ?ns
+                             :where
+                             [?e :seon.var/namespace ?ns]
+                             [?e :seon.var/qualified-name ?qn]]
+                           ns-str)
         new-set (set new-qualified-names)
         stale (remove (fn [[_ qn]] (new-set qn)) existing)]
     (when (seq stale)
-      (db/transact! conn (mapv (fn [[eid _]] [:db/retractEntity eid]) stale)))))
+      (db/transact! db-name (mapv (fn [[eid _]] [:db/retractEntity eid]) stale)))))
 
 (defn- retract-calls-from-ns!
   "Retract all call entities originating from functions in a specific namespace.
    Call edges lack identity attrs, so retract-then-insert is fine."
-  [conn ns-str]
-  (let [eids (d/q '[:find ?e
-                     :in $ ?ns
-                     :where
-                     [?fn :seon.fn/namespace ?ns]
-                     [?e :seon.call/from-fn ?fn]]
-                   @conn ns-str)]
+  [db-name ns-str]
+  (let [eids (db/query db-name
+                       '[:find ?e
+                         :in $ ?ns
+                         :where
+                         [?fn :seon.fn/namespace ?ns]
+                         [?e :seon.call/from-fn ?fn]]
+                       ns-str)]
     (when (seq eids)
-      (db/transact! conn (mapv (fn [[eid]] [:db/retractEntity eid]) eids)))))
+      (db/transact! db-name (mapv (fn [[eid]] [:db/retractEntity eid]) eids)))))
 
 (defn- retract-ns-deps-from-ns!
   "Retract all ns-dependency entities originating from a specific namespace.
    NS-dep edges lack identity attrs, so retract-then-insert is fine."
-  [conn ns-str]
-  (let [eids (d/q '[:find ?e
-                     :in $ ?ns
-                     :where
-                     [?e :seon.ns.dep/from-ns ?ns]]
-                   @conn ns-str)]
+  [db-name ns-str]
+  (let [eids (db/query db-name
+                       '[:find ?e
+                         :in $ ?ns
+                         :where
+                         [?e :seon.ns.dep/from-ns ?ns]]
+                       ns-str)]
     (when (seq eids)
-      (db/transact! conn (mapv (fn [[eid]] [:db/retractEntity eid]) eids)))))
+      (db/transact! db-name (mapv (fn [[eid]] [:db/retractEntity eid]) eids)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Private Implementation - Helpers
@@ -269,9 +273,9 @@
 
 (defn- transact-in-batches!
   "Transact entities in batches to avoid overwhelming Datalevin."
-  [conn entities batch-size]
+  [db-name entities batch-size]
   (doseq [batch (partition-all batch-size entities)]
-    (db/transact! conn (vec batch))))
+    (db/transact! db-name (vec batch))))
 
 (defn- qualified-call?
   "Returns true if both from-fn and to-fn are qualified (contain '/')."
@@ -327,7 +331,7 @@
    Call edges and ns-deps use retract-then-insert (they lack identity attrs).
 
    Request keys:
-     ::conn        - Required. Datalevin connection
+     ::db-name     - Required. Database name keyword (e.g. :seon.runtime)
      ::ns-name     - Required. Namespace name string
      ::functions   - Optional. Function entities with :seon.fn/* keys
      ::specs       - Optional. Spec entities with :seon.spec/* keys
@@ -337,16 +341,16 @@
      ::ns-entities - Optional. Namespace entity maps with :seon.ns/* keys
 
    Returns map with counts of ingested entities."
-  [{::keys [conn functions specs vars call-edges ns-deps ns-entities]
+  [{::keys [db-name functions specs vars call-edges ns-deps ns-entities]
     ns-str ::ns-name}]
   (when ns-str
     ;; 1. Upsert namespace entities
     (when (seq ns-entities)
-      (db/transact! conn (vec ns-entities)))
+      (db/transact! db-name (vec ns-entities)))
 
     ;; 2. Upsert specs BEFORE functions (functions reference specs via lookup refs)
     (when (seq specs)
-      (db/transact! conn (vec specs)))
+      (db/transact! db-name (vec specs)))
 
     ;; 3. Upsert functions + stubs for call graph targets
     (let [qualified-usages (filterv qualified-call? (or call-edges []))
@@ -354,26 +358,26 @@
           stubs (compute-stub-entities known-qnames qualified-usages)
           all-fns (into (vec (or functions [])) stubs)]
       (when (seq all-fns)
-        (db/transact! conn (vec all-fns)))
+        (db/transact! db-name (vec all-fns)))
 
       ;; 4. Upsert vars
       (when (seq vars)
-        (db/transact! conn (vec vars)))
+        (db/transact! db-name (vec vars)))
 
       ;; 5. Retract stale entities (in old scan but not in new)
-      (retract-stale-fns! conn ns-str (map :seon.fn/qualified-name all-fns))
-      (retract-stale-specs! conn ns-str (map :seon.spec/key specs))
-      (retract-stale-vars! conn ns-str (map :seon.var/qualified-name vars))
+      (retract-stale-fns! db-name ns-str (map :seon.fn/qualified-name all-fns))
+      (retract-stale-specs! db-name ns-str (map :seon.spec/key specs))
+      (retract-stale-vars! db-name ns-str (map :seon.var/qualified-name vars))
 
       ;; 6. Call edges + ns-deps: retract-then-insert (no identity attrs)
-      (retract-calls-from-ns! conn ns-str)
+      (retract-calls-from-ns! db-name ns-str)
       (when (seq qualified-usages)
         (let [ref-calls (mapv call-entity->lookup-refs qualified-usages)]
-          (transact-in-batches! conn ref-calls batch-size)))
+          (transact-in-batches! db-name ref-calls batch-size)))
 
-      (retract-ns-deps-from-ns! conn ns-str)
+      (retract-ns-deps-from-ns! db-name ns-str)
       (when (seq ns-deps)
-        (db/transact! conn (vec ns-deps)))
+        (db/transact! db-name (vec ns-deps)))
 
       (render/invalidate-render-cache!)
       {::namespace-count (count (or ns-entities []))
@@ -391,7 +395,7 @@
    analyzer finds are upserted (not deleted and re-created).
 
    Request keys:
-     ::conn     - Required. Datalevin connection (runtime object)
+     ::db-name  - Required. Database name keyword (e.g. :seon.runtime)
      ::entities - Required. Extracted entities from analyzer/extract-entities
      ::specs    - Optional. Spec entities from scanner/scan-directory
      ::vars     - Optional. Var entities from scanner
@@ -405,8 +409,8 @@
      ::var-count           - Number of vars ingested (0 if none provided)
 
    Example:
-     (ingest-analysis! {::conn conn ::entities entities ::specs specs})"
-  [{::keys [conn entities specs vars]}]
+     (ingest-analysis! {::db-name :seon.runtime ::entities entities ::specs specs})"
+  [{::keys [db-name entities specs vars]}]
   (let [namespaces (::analyzer/namespaces entities)
         functions (::analyzer/functions entities)
         var-usages (::analyzer/var-usages entities)
@@ -435,7 +439,7 @@
     (log/debug "Ingesting graph data for namespaces..." {:count (count all-ns-names)})
     (doseq [ns-str all-ns-names]
       (when-let [result (ingest-namespace!
-                          {::conn conn
+                          {::db-name db-name
                            ::ns-name ns-str
                            ::functions (get fns-by-ns ns-str)
                            ::specs (get specs-by-ns ns-str)
@@ -459,13 +463,13 @@
    Kept for backward compatibility with callers that pass ::entities.
 
    Request keys:
-     ::conn     - Required. Datalevin connection (runtime object)
+     ::db-name  - Required. Database name keyword (e.g. :seon.runtime)
      ::entities - Required. Extracted entities from analyzer/extract-entities
      ::specs    - Optional. Spec entities from scanner/scan-file
      ::vars     - Optional. Var entities from scanner
 
    Returns map with counts of ingested entities."
-  [{::keys [conn entities specs vars]}]
+  [{::keys [db-name entities specs vars]}]
   (let [namespaces (::analyzer/namespaces entities)
         functions (::analyzer/functions entities)
         var-usages (::analyzer/var-usages entities)
@@ -478,7 +482,7 @@
       {::namespace-count 0 ::function-count 0 ::var-usage-count 0
        ::ns-dependency-count 0 ::spec-count 0 ::var-count 0}
       (ingest-namespace!
-        {::conn conn
+        {::db-name db-name
          ::ns-name ns-str
          ::functions functions
          ::specs specs
@@ -494,11 +498,11 @@
    delegates to ingest-namespace! for transacting.
 
    Request keys:
-     ::conn      - Datalevin connection
+     ::db-name   - Database name keyword (e.g. :seon.runtime)
      ::file-path - Path to a Clojure source file
 
    Returns map with counts of ingested entities."
-  [{::keys [conn file-path]}]
+  [{::keys [db-name file-path]}]
   (require 'seon.graph.extract)
   (let [extract-fn (resolve 'seon.graph.extract/extract-graph-from-file)
         graph (extract-fn {:seon.graph.extract/file-path file-path})
@@ -506,7 +510,7 @@
     (if-not ns-str
       {::spec-count 0 ::function-count 0 ::var-count 0}
       (ingest-namespace!
-        {::conn conn
+        {::db-name db-name
          ::ns-name ns-str
          ::functions (:seon.graph.extract/functions graph)
          ::specs (:seon.graph.extract/specs graph)
@@ -520,21 +524,11 @@
 ;;; ---------------------------------------------------------------------------
 
 (comment
-  ;; Requires running system with Datalevin
-  (require '[integrant.repl.state :as state])
-  (require '[seon.db.datalevin.conn :as conn])
-
-  ;; Get connection
-  (def mgr (:seon.db.datalevin/connections state/system))
-  (def dl-conn (conn/get-conn!
-                {:seon.db.datalevin.conn/manager mgr
-                 :seon.db.datalevin.conn/db :seon.runtime}))
-
   ;; Full project analysis + ingest
   (def project (analyzer/analyze-project! {}))
   (def entities (analyzer/extract-entities
                  {::analyzer/raw-analysis (::analyzer/raw-analysis project)}))
-  (ingest-analysis! {::conn dl-conn ::entities entities})
+  (ingest-analysis! {::db-name :seon.runtime ::entities entities})
 
   ;; Incremental form analysis + ingest
   (def form-result
@@ -543,10 +537,9 @@
   (def form-entities
     (analyzer/extract-entities
      {::analyzer/raw-analysis (::analyzer/raw-analysis form-result)}))
-  (ingest-incremental! {::conn dl-conn ::entities form-entities})
+  (ingest-incremental! {::db-name :seon.runtime ::entities form-entities})
 
   ;; Check what's in the graph
-  (d/q '[:find ?name :where [?e :seon.ns/name ?name]]
-       @dl-conn)
+  (db/query :seon.runtime '[:find ?name :where [?e :seon.ns/name ?name]])
 
   nil)

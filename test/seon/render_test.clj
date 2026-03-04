@@ -4,7 +4,8 @@
             [clojure.test :refer [deftest is testing use-fixtures]]
             [datalevin.core :as d]
             [seon.graph.ingest :as ingest]
-            [seon.render :as render]))
+            [seon.render :as render]
+            [seon.test-utils]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Test Fixtures

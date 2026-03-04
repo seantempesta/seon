@@ -4,9 +4,11 @@
             [clojure.string :as str]
             [datalevin.core :as d]
             [seon.db :as db]
+            [seon.db.datalevin.conn :as dl-conn]
             [seon.graph.ingest :as ingest]
             [seon.repl :as super]
-            [seon.repl.graduate :as grad])
+            [seon.repl.graduate :as grad]
+            [seon.test-utils])
   (:import [java.io File]))
 
 ;;; ---------------------------------------------------------------------------
@@ -41,10 +43,12 @@
         schema (merge ingest/datalevin-schema super/datalevin-schema)
         conn (d/create-conn db-dir schema)]
     (try
-      (binding [*test-conn* conn
-                *test-dir* out-dir
-                db/*direct-write* true]
-        (f))
+      (let [fake-mgr {::dl-conn/connections (atom {:test-grad {::dl-conn/connection conn}})}]
+        (binding [*test-conn* conn
+                  *test-dir* out-dir
+                  db/*direct-mode* true
+                  db/*conn-manager* fake-mgr]
+          (f)))
       (finally
         (d/close conn)
         (delete-dir db-dir)
@@ -60,7 +64,7 @@
   (super/eval-form! {::super/source source
                      ::super/namespace "seon.trading.signals"
                      ::super/agent-id "test"
-                     ::super/conn *test-conn*}))
+                     ::super/db-name :test-grad}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; ns->file-path tests
@@ -101,7 +105,7 @@
     (store! "(ns seon.trading.signals (:require [clojure.string :as str]))")
 
     (let [{::grad/keys [file-content file-path form-count]}
-          (grad/preview {::grad/conn *test-conn*
+          (grad/preview {::grad/db-name :test-grad
                          ::grad/namespace "seon.trading.signals"
                          ::grad/base-path *test-dir*})]
       (is (= 3 form-count))
@@ -121,7 +125,7 @@
     (store! "(def x 1)")
 
     (let [{::grad/keys [file-content]}
-          (grad/preview {::grad/conn *test-conn*
+          (grad/preview {::grad/db-name :test-grad
                          ::grad/namespace "seon.trading.signals"
                          ::grad/base-path *test-dir*})]
       (is (str/starts-with? file-content "(ns seon.trading.signals)")))))
@@ -135,10 +139,10 @@
     (store! "(ns seon.trading.signals)")
     (store! "(defn ema [p d] (reduce + d))")
 
-    (let [preview-result (grad/preview {::grad/conn *test-conn*
+    (let [preview-result (grad/preview {::grad/db-name :test-grad
                                         ::grad/namespace "seon.trading.signals"
                                         ::grad/base-path *test-dir*})
-          result (grad/graduate! {::grad/conn *test-conn*
+          result (grad/graduate! {::grad/db-name :test-grad
                                   ::grad/namespace "seon.trading.signals"
                                   ::grad/base-path *test-dir*
                                   ::grad/git-commit? false})

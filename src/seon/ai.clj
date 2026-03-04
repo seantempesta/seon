@@ -92,6 +92,10 @@
                         :gen/schema :int}
                    inst?])
 
+;; Monotonic sequence number for message ordering within same-millisecond writes
+(schema/register! ::sequence
+                  [:int {:min 0 :description "Monotonic message sequence number"}])
+
 ;; Session ID reference
 (schema/register! ::session-id
                   [:string {:min 1

@@ -1,9 +1,12 @@
 (ns seon.render.code-test
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [datalevin.core :as d]
-            [seon.render.code :as rc]
+            [seon.db :as db]
+            [seon.db.datalevin.conn :as conn]
             [seon.graph.query :as gq]
-            [seon.schema :as schema]))
+            [seon.render.code :as rc]
+            [seon.schema :as schema]
+            [seon.test-utils]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Test Fixtures — In-memory Datalevin with graph data
@@ -119,9 +122,13 @@
 
 (use-fixtures :each
   (fn [f]
-    (let [[conn dir] (create-test-conn)]
+    (let [[conn dir] (create-test-conn)
+          fake-mgr {::conn/port 0
+                    ::conn/connections (atom {:seon.runtime {::conn/connection conn}})}]
       (try
-        (binding [*test-conn* conn]
+        (binding [*test-conn* conn
+                  db/*direct-mode* true
+                  db/*conn-manager* fake-mgr]
           (gq/invalidate-output-key-cache!)
           (f))
         (finally
@@ -135,7 +142,7 @@
 (deftest compatible-functions-basic-test
   (testing "finds functions whose required keys are subset of available keys"
     (let [results (rc/compatible-functions
-                   {::rc/conn *test-conn*
+                   {::rc/db-name :seon.runtime
                     ::rc/available-keys #{:seon.test.alpha/x :seon.test.alpha/y}})]
       ;; fn-a requires #{:seon.test.alpha/x}, optional #{:seon.test.alpha/y}
       ;; fn-b requires #{:seon.test.alpha/x :seon.test.alpha/z} — z not available
@@ -145,7 +152,7 @@
 (deftest compatible-functions-output-filter-test
   (testing "filters by output key when specified"
     (let [results (rc/compatible-functions
-                   {::rc/conn *test-conn*
+                   {::rc/db-name :seon.runtime
                     ::rc/available-keys #{:seon.test.alpha/x :seon.test.alpha/z}
                     ::rc/output-filter :seon.render/documentation})]
       ;; fn-b has required #{:seon.test.alpha/x :seon.test.alpha/z} and output :seon.render/documentation
@@ -155,14 +162,14 @@
 (deftest compatible-functions-empty-test
   (testing "returns empty when no functions match"
     (let [results (rc/compatible-functions
-                   {::rc/conn *test-conn*
+                   {::rc/db-name :seon.runtime
                     ::rc/available-keys #{:nonexistent/key}})]
       (is (empty? results)))))
 
 (deftest compatible-functions-superset-test
   (testing "functions match when available keys are a superset of required"
     (let [results (rc/compatible-functions
-                   {::rc/conn *test-conn*
+                   {::rc/db-name :seon.runtime
                     ::rc/available-keys #{:seon.test.alpha/x :seon.test.alpha/y
                                           :seon.test.alpha/z :extra/key}})]
       ;; Both fn-a and fn-b should match
@@ -177,7 +184,7 @@
 
 (deftest render-ns-docs-summary-test
   (testing "summary level renders function names only"
-    (let [result (rc/render-ns-docs {::rc/conn *test-conn*
+    (let [result (rc/render-ns-docs {::rc/db-name :seon.runtime
                                      ::rc/ns-name "seon.test.alpha"
                                      ::rc/detail :summary})
           doc (:seon.render/documentation result)]
@@ -190,7 +197,7 @@
 
 (deftest render-ns-docs-interface-test
   (testing "interface level includes arglists and key types"
-    (let [result (rc/render-ns-docs {::rc/conn *test-conn*
+    (let [result (rc/render-ns-docs {::rc/db-name :seon.runtime
                                      ::rc/ns-name "seon.test.alpha"})
           doc (:seon.render/documentation result)]
       (is (string? doc))
@@ -201,7 +208,7 @@
 
 (deftest render-ns-docs-deep-dive-test
   (testing "deep dive includes private functions and full docs"
-    (let [result (rc/render-ns-docs {::rc/conn *test-conn*
+    (let [result (rc/render-ns-docs {::rc/db-name :seon.runtime
                                      ::rc/ns-name "seon.test.alpha"
                                      ::rc/detail :deep-dive})
           doc (:seon.render/documentation result)]
@@ -213,7 +220,7 @@
 
 (deftest render-ns-docs-no-functions-test
   (testing "handles namespaces with no functions"
-    (let [result (rc/render-ns-docs {::rc/conn *test-conn*
+    (let [result (rc/render-ns-docs {::rc/db-name :seon.runtime
                                      ::rc/ns-name "seon.nonexistent"})
           doc (:seon.render/documentation result)]
       (is (string? doc))
@@ -221,7 +228,7 @@
 
 (deftest render-ns-docs-includes-ns-doc-test
   (testing "includes namespace docstring when present"
-    (let [result (rc/render-ns-docs {::rc/conn *test-conn*
+    (let [result (rc/render-ns-docs {::rc/db-name :seon.runtime
                                      ::rc/ns-name "seon.test.alpha"})
           doc (:seon.render/documentation result)]
       (is (re-find #"Test namespace alpha" doc)))))
@@ -233,14 +240,14 @@
 (deftest resolve-docs-fallback-test
   (testing "returns nil when no custom documentation renderer exists"
     ;; No functions produce :seon.render/documentation in beta namespace
-    (let [result (rc/resolve-docs {::rc/conn *test-conn*
+    (let [result (rc/resolve-docs {::rc/db-name :seon.runtime
                                    ::rc/ns-name "seon.test.beta"})]
       (is (nil? result)))))
 
 (deftest resolve-docs-finds-same-ns-test
   (testing "finds documentation renderer in same namespace"
     ;; fn-b produces :seon.render/documentation and is in seon.test.alpha
-    (let [result (rc/resolve-docs {::rc/conn *test-conn*
+    (let [result (rc/resolve-docs {::rc/db-name :seon.runtime
                                    ::rc/ns-name "seon.test.alpha"
                                    ::rc/available-keys #{:seon.test.alpha/x
                                                          :seon.test.alpha/z}})]
@@ -259,24 +266,24 @@
   (testing "returns var when a resolvable documentation renderer exists"
     ;; Transact a function entry pointing to our real test-doc-renderer
     (let [qname "seon.render.code-test/test-doc-renderer"]
-      (d/transact! *test-conn*
-                   [{:db/id -10
-                     :seon.spec/key :seon.render.code-test/doc-in
-                     :seon.spec/contains-keys [:seon.render.code-test/x]
-                     :seon.spec/base-type :map}
-                    {:db/id -11
-                     :seon.spec/key :seon.render.code-test/doc-out
-                     :seon.spec/contains-keys [:seon.render/documentation]
-                     :seon.spec/base-type :map}
-                    {:seon.fn/qualified-name qname
-                     :seon.fn/namespace "seon.render.code-test"
-                     :seon.fn/name "test-doc-renderer"
-                     :seon.fn/private false
-                     :seon.fn/row 1
-                     :seon.fn/input-spec -10
-                     :seon.fn/output-spec -11}])
+      (db/transact! :seon.runtime
+                    [{:db/id -10
+                      :seon.spec/key :seon.render.code-test/doc-in
+                      :seon.spec/contains-keys [:seon.render.code-test/x]
+                      :seon.spec/base-type :map}
+                     {:db/id -11
+                      :seon.spec/key :seon.render.code-test/doc-out
+                      :seon.spec/contains-keys [:seon.render/documentation]
+                      :seon.spec/base-type :map}
+                     {:seon.fn/qualified-name qname
+                      :seon.fn/namespace "seon.render.code-test"
+                      :seon.fn/name "test-doc-renderer"
+                      :seon.fn/private false
+                      :seon.fn/row 1
+                      :seon.fn/input-spec -10
+                      :seon.fn/output-spec -11}])
       (gq/invalidate-output-key-cache!)
-      (let [result (rc/resolve-docs {::rc/conn *test-conn*
+      (let [result (rc/resolve-docs {::rc/db-name :seon.runtime
                                      ::rc/ns-name "seon.render.code-test"
                                      ::rc/available-keys #{:seon.render.code-test/x}})]
         (is (some? result) "should resolve to a var")
@@ -288,7 +295,7 @@
 
 (deftest context-for-agent-test
   (testing "combines documentation and call graph context"
-    (let [result (rc/context-for-agent {::rc/conn *test-conn*
+    (let [result (rc/context-for-agent {::rc/db-name :seon.runtime
                                         ::rc/ns-name "seon.test.alpha"})
           doc (:seon.render/documentation result)]
       (is (string? doc))
@@ -304,12 +311,12 @@
 (deftest output-key-cache-test
   (testing "invalidate-output-key-cache! clears the cache"
     ;; First call populates cache
-    (gq/functions-with-output-key {::gq/conn *test-conn*
+    (gq/functions-with-output-key {::gq/db-name :seon.runtime
                                    ::gq/output-key :seon.render/html})
     ;; Invalidate
     (gq/invalidate-output-key-cache!)
     ;; Second call should still work (repopulates)
-    (let [results (gq/functions-with-output-key {::gq/conn *test-conn*
+    (let [results (gq/functions-with-output-key {::gq/db-name :seon.runtime
                                                  ::gq/output-key :seon.render/html})]
       (is (= 1 (count results)))
       (is (= "seon.test.alpha/fn-a" (:seon.fn/qualified-name (first results)))))))
