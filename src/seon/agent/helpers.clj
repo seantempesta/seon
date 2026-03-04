@@ -48,16 +48,16 @@
                   [:string {:min 1 :description "SQL statement (INSERT/UPDATE/DELETE)"}])
 
 (schema/register! ::params
-                  [:* :any {:description "Query parameters"}])
+                  [:* {:description "Query parameters"} :any])
 
 (schema/register! ::param-row
-                  [:vector :any {:description "Single row of parameters for batch insert"}])
+                  [:vector {:description "Single row of parameters for batch insert"} :any])
 
 (schema/register! ::result-row
                   [:map {:description "Single result row with keyword keys"}])
 
 (schema/register! ::query-result
-                  [:vector ::result-row {:description "Query results"}])
+                  [:vector {:description "Query results"} ::result-row])
 
 (schema/register! ::tx-result
                   [:map {:description "Transaction result"}])

@@ -32,6 +32,7 @@
             [malli.core :as m]
             [malli.generator :as mg]
             [malli.instrument :as mi]
+            [seon.schema :as schema]
             [taoensso.timbre :as log]))
 
 ;;; ---------------------------------------------------------------------------
@@ -358,3 +359,82 @@
   []
   (mi/unstrument!)
   (start! {}))
+
+;;; ---------------------------------------------------------------------------
+;;; Schema Registration
+;;; ---------------------------------------------------------------------------
+
+(schema/register! ::instrumented-count
+                  [:int {:min 0
+                         :description "Number of functions currently instrumented"}])
+
+(schema/register! ::registered-count
+                  [:int {:min 0
+                         :description "Number of functions with schemas registered"}])
+
+(schema/register! ::collection-error-count
+                  [:int {:min 0
+                         :description "Number of namespaces with schema collection errors"}])
+
+(schema/register! ::active?
+                  [:boolean {:description "Whether any functions are currently instrumented"}])
+
+(schema/register! ::status-response
+                  [:map
+                   [::active? ::active?]
+                   [::instrumented-count ::instrumented-count]
+                   [::registered-count ::registered-count]
+                   [::collection-error-count ::collection-error-count]])
+
+;;; ---------------------------------------------------------------------------
+;;; Introspection
+;;; ---------------------------------------------------------------------------
+
+(defn- count-instrumented
+  "Count vars that have ::mi/original metadata, indicating active instrumentation."
+  []
+  (reduce-kv
+   (fn [n _ns-sym fns]
+     (reduce-kv
+      (fn [n fn-sym _]
+        (if-let [v (find-var (symbol (str _ns-sym) (str fn-sym)))]
+          (if (::mi/original (meta (var-get v)))
+            (inc n)
+            n)
+          n))
+      n fns))
+   0 (m/function-schemas)))
+
+(defn- count-collection-errors
+  "Re-run schema collection and count namespaces that throw."
+  []
+  (reduce (fn [n ns]
+            (try
+              (mi/collect! {:ns ns})
+              n
+              (catch Throwable _ (inc n))))
+          0 (all-ns)))
+
+(defn status
+  "Query current instrumentation state from Malli's internal registries.
+
+   No arguments required — reads directly from Malli's global state.
+
+   Response keys:
+     ::active?               - Whether any functions are currently instrumented
+     ::instrumented-count    - Number of functions with active instrumentation
+     ::registered-count      - Number of functions with schemas in the registry
+     ::collection-error-count - Number of namespaces that fail schema collection
+
+   Example:
+     (status {})
+     ;; => {::active? true, ::instrumented-count 150, ...}"
+  {:malli/schema [:=> [:cat :map] ::status-response]}
+  [_opts]
+  (let [registered (reduce + (map count (vals (m/function-schemas))))
+        instrumented (count-instrumented)
+        errors (count-collection-errors)]
+    {::active? (pos? instrumented)
+     ::instrumented-count instrumented
+     ::registered-count registered
+     ::collection-error-count errors}))
