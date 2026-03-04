@@ -60,9 +60,9 @@ else
   KAOCHA_ARGS+=(unit)
 fi
 
-# Run kaocha, capture output and exit code
-TMPOUT=$(mktemp)
-trap "rm -f $TMPOUT" EXIT
+# Run kaocha, capture output to persistent log (concurrent-safe)
+mkdir -p tmp
+TMPOUT="tmp/test-$(date +%Y%m%d-%H%M%S)-$$.log"
 
 START=$(date +%s)
 
@@ -89,8 +89,10 @@ else
 fi
 echo "========================================"
 
+ln -sf "$(basename "$TMPOUT")" tmp/test-latest.log
+echo "Full output: $TMPOUT (or tmp/test-latest.log)"
+
 if [ $ELAPSED -gt 30 ]; then
-  echo ""
   echo "Took ${ELAPSED}s. REPL runs the same tests in seconds: (user/run-tests 'seon.foo-test)"
 fi
 
