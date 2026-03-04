@@ -183,6 +183,59 @@ See `CONVENTIONS.md` for full patterns.
 
 ---
 
+## Function Instrumentation (IMPORTANT)
+
+All public functions with `:malli/schema` metadata are **instrumented at runtime**. Every call is validated against its schema — inputs, outputs, and arity. This runs in dev, REPL, tests, and agent JVMs. There is no "off" mode.
+
+### What this means for you
+
+**Every public function you write or modify MUST have a correct `:malli/schema`.** The schema is a contract. If the schema doesn't match the function's actual behavior, instrumentation will throw at runtime and tests will fail. This is intentional — wrong schemas are bugs.
+
+### When you see an instrumentation error, STOP
+
+Instrumentation errors are `ExceptionInfo` with structured messages. They tell you exactly what went wrong, what the function expects, and how to call it correctly — including the expanded schema, a generated example call, and the docstring.
+
+**Do not ignore these.** Do not catch-and-swallow them. Do not work around them. They mean one of two things:
+
+1. **You called the function wrong.** Read the error, fix your call.
+2. **The schema is wrong.** Fix the schema to match reality — schemas describe what IS, not what you wish.
+
+### Public function contract
+
+Public functions follow **map in, map out** (see `CONVENTIONS.md`). One map argument, one map return. No multi-arity on public functions — that's for private `defn-` helpers.
+
+```clojure
+;; Register request/response schemas
+(schema/register! ::do-thing-request
+                  [:map
+                   [::id ::id]
+                   [::option {:optional true} ::option]])
+
+(schema/register! ::do-thing-response
+                  [:map
+                   [::result ::result]
+                   [::metadata {:optional true} [:maybe ::metadata]]])
+
+;; Public function: one map in, one map out, :malli/schema metadata
+(defn do-thing
+  "Does the thing."
+  {:malli/schema [:=> [:cat ::do-thing-request] ::do-thing-response]}
+  [{::keys [id option]}]
+  ...)
+```
+
+Rules:
+- **Register schemas** for request/response types via `seon.schema/register!`
+- **Nullable response fields** use `[:maybe ...]` on the value schema
+- **One argument, one return** — always `[:=> [:cat ::request] ::response]`
+- After adding or changing a schema, instrumentation picks it up automatically on reload
+
+### Lifecycle
+
+Managed by Integrant (`:seon.dev/instrumentation`). Survives `(user/reset)`. Agent JVMs self-instrument on startup. You don't need to manage it manually.
+
+---
+
 ## File Locations
 
 **Never use `/tmp` or system temp directories.** Use project-local directories:
