@@ -78,6 +78,12 @@
           (log/info "Auto-adding schema for attrs" {:attrs (keys schema-update)})
           (d/update-schema conn schema-update))))))
 
+(def ^:dynamic *direct-write*
+  "When true, write! bypasses the infrastructure flow and uses d/transact!
+   directly. For tests only — production must always route through flow.
+   Bind to true in test fixtures that don't have a running infrastructure flow."
+  false)
+
 ;;; --- Infrastructure Flow Access ---
 ;;;
 ;;; These functions access the infrastructure flow via requiring-resolve
@@ -101,48 +107,58 @@
 
 (defn- write!
   "Route a transaction through the infrastructure flow writer.
-   Falls back to direct d/transact! when the flow is not running
-   (e.g. during tests or early boot)."
+   Throws if the infrastructure flow is not running.
+   In tests, bind *direct-write* to true to bypass the flow."
   ([conn tx-data]
    (write! conn tx-data nil))
   ([conn tx-data opts]
-   (if-let [fl (get-infra-flow)]
-     ;; Flow is running — route through it
-     (let [pending (get-pending-promises)
-           timeout-ms (or (:timeout-ms opts) 10000)
-           request-id (random-uuid)
-           p (promise)
-           request {::msg/id request-id
-                    ::msg/version 1
-                    ::msg/type :request
-                    ::msg/from-ns "seon.db"
-                    ::msg/payload {:seon.db.datalevin.writer/tx-data tx-data
-                                   :seon.db.datalevin.writer/conn conn}
-                    ::msg/created-at (Instant/now)}]
-       ;; Register promise before injection
-       (swap! pending assoc request-id p)
-       (try
-         (flow/inject fl [:seon.flow/writer :seon.flow.in/request] [request])
-         (let [reply (deref p timeout-ms ::timed-out)]
-           (if (= reply ::timed-out)
-             (do
-               (swap! pending dissoc request-id)
-               (throw (ex-info "Write timed out"
-                               {::msg/status :timeout
-                                ::msg/id request-id
-                                :timeout-ms timeout-ms})))
-             (case (::msg/status reply)
-               :ok (::msg/value reply)
-               (throw (ex-info (or (::msg/error-message reply)
-                                   (str "Write failed: " (::msg/status reply)))
-                               (select-keys reply [::msg/status ::msg/error-type
-                                                   ::msg/error-class ::msg/error-message
-                                                   ::msg/id ::msg/duration-ms]))))))
-         (catch Exception e
-           (swap! pending dissoc request-id)
-           (throw e))))
-     ;; No flow — direct fallback (tests, early boot)
-     (d/transact! conn tx-data))))
+   (if *direct-write*
+     (d/transact! conn tx-data)
+     (let [fl (get-infra-flow)]
+       (when-not fl
+         (throw (ex-info "Infrastructure flow not running — cannot write"
+                         {:fn "seon.db/write!"})))
+       (let [pending (get-pending-promises)
+             timeout-ms (or (:timeout-ms opts) 10000)
+             request-id (random-uuid)
+             p (promise)
+             request {::msg/id request-id
+                      ::msg/version 1
+                      ::msg/type :request
+                      ::msg/from-ns "seon.db"
+                      ::msg/payload {:seon.db.datalevin.writer/tx-data tx-data
+                                     :seon.db.datalevin.writer/conn conn}
+                      ::msg/created-at (Instant/now)}]
+         ;; Register promise before injection
+         (swap! pending assoc request-id p)
+         (try
+           (flow/inject fl [:seon.flow/writer :seon.flow.in/request] [request])
+           (let [reply (deref p timeout-ms ::timed-out)]
+             (if (= reply ::timed-out)
+               (do
+                 (swap! pending dissoc request-id)
+                 (log/error "Write timed out" {:request-id request-id
+                                               :timeout-ms timeout-ms
+                                               :tx-count (count tx-data)})
+                 (throw (ex-info "Write timed out"
+                                 {::msg/status :timeout
+                                  ::msg/id request-id
+                                  :timeout-ms timeout-ms})))
+               (case (::msg/status reply)
+                 :ok (::msg/value reply)
+                 (do
+                   (log/error "Write failed via flow" {:request-id request-id
+                                                       :status (::msg/status reply)
+                                                       :error (::msg/error-message reply)
+                                                       :duration-ms (::msg/duration-ms reply)})
+                   (throw (ex-info (or (::msg/error-message reply)
+                                       (str "Write failed: " (::msg/status reply)))
+                                   (select-keys reply [::msg/status ::msg/error-type
+                                                       ::msg/error-class ::msg/error-message
+                                                       ::msg/id ::msg/duration-ms])))))))
+           (catch Exception e
+             (swap! pending dissoc request-id)
+             (throw e))))))))
 
 ;;; --- Public API (positional, mirrors datalevin.core) ---
 

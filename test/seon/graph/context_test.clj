@@ -3,6 +3,7 @@
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.string :as str]
             [datalevin.core :as d]
+            [seon.db :as db]
             [seon.graph.analyzer :as analyzer]
             [seon.graph.ingest :as ingest]
             [seon.graph.context :as ctx])
@@ -33,12 +34,13 @@
   (let [dir (temp-dir)
         conn (d/create-conn dir ingest/datalevin-schema)]
     (try
-      (let [project (analyzer/analyze-project! {::analyzer/paths ["src/seon/graph/"]})
-            entities (analyzer/extract-entities
-                      {::analyzer/raw-analysis (::analyzer/raw-analysis project)})]
-        (ingest/ingest-analysis! {::ingest/conn conn
-                                  ::ingest/entities entities}))
-      (binding [*test-conn* conn]
+      (binding [*test-conn* conn
+                db/*direct-write* true]
+        (let [project (analyzer/analyze-project! {::analyzer/paths ["src/seon/graph/"]})
+              entities (analyzer/extract-entities
+                        {::analyzer/raw-analysis (::analyzer/raw-analysis project)})]
+          (ingest/ingest-analysis! {::ingest/conn conn
+                                    ::ingest/entities entities}))
         (f))
       (finally
         (d/close conn)

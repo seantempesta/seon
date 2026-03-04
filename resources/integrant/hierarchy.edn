@@ -13,7 +13,8 @@
  :seon.web.server/http-server    [:seon/component]
  :seon.web/tailwind              [:seon/component]
  :seon.web/caddy                 [:seon/component]
+ :seon.flow/infrastructure        [:seon/component]
  :seon.flow/pool                 [:seon/component]
-:seon.orchestrator/sessions     [:seon/component]
+ :seon.orchestrator/sessions     [:seon/component]
  :seon.graph/scanner             [:seon/component]
  :seon.ai.claude/sdk             [:seon/component]}

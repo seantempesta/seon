@@ -10,10 +10,13 @@
   - :seon.orchestrator/namespace-nrepls - Per-namespace nREPL servers for agent isolation
 
   Datalevin is the sole database."
-  (:require [integrant.core :as ig]
+  (:require [clojure.core.async.flow :as flow]
+            [integrant.core :as ig]
             [taoensso.timbre :as log]
             [seon.schema :as schema]
             [seon.db.datalevin.conn :as dl-conn]
+            [seon.flow.msg :as msg]
+            [seon.flow.status :as status]
             [seon.flow.topology :as topology]
             [seon.runtime :as runtime]
             ;; Load component namespaces for their ig/init-key methods
@@ -115,8 +118,10 @@
 
 (defmethod ig/init-key :seon.orchestrator/sessions
   [_ {:keys [connection-manager pool]}]
+  (log/info "Initializing orchestrator sessions...")
   (require 'seon.orchestrator.session)
   ((resolve 'seon.orchestrator.session/init!) connection-manager :pool pool)
+  (log/info "Orchestrator sessions initialized")
   {:connection-manager connection-manager :pool pool})
 
 (defmethod ig/halt-key! :seon.orchestrator/sessions
@@ -236,8 +241,8 @@
                                     (extract-graph-from-file
                                      {:seon.graph.extract/file-path (.getAbsolutePath f)})
                                     (catch Throwable e
-                                      (log/debug "Code scanner: extract failed"
-                                                 {:file (.getName f) :error (.getMessage e)})
+                                      (log/warn "Code scanner: extract failed"
+                                                {:file (.getName f) :error (.getMessage e)})
                                       nil))))
                           (filter :seon.graph.extract/ns-name)
                           vec)]
@@ -255,9 +260,9 @@
                   :seon.graph.ingest/ns-deps (:seon.graph.extract/ns-deps graph)
                   :seon.graph.ingest/ns-entities (:seon.graph.extract/namespaces graph)}))
               (catch Exception e
-                (log/debug "Code scanner: ingest failed"
-                           {:ns (:seon.graph.extract/ns-name graph)
-                            :error (.getMessage e)}))))
+                (log/warn "Code scanner: ingest failed"
+                          {:ns (:seon.graph.extract/ns-name graph)
+                           :error (.getMessage e)}))))
           (log/info "Code scanner complete"
                     {:files-processed total :namespaces-ingested (count graphs)})))
       (catch Exception e
@@ -324,32 +329,39 @@
   [_ state]
   (when-let [fl (::topology/flow state)]
     (log/info "Stopping infrastructure flow...")
-    (try
-      (topology/stop-topology! {::topology/flow fl
-                                ::topology/flow-id (::topology/flow-id state)
-                                ::topology/label "infrastructure"})
-      (catch Throwable t
-        (log/warn "Error stopping infrastructure flow" {:error (.getMessage t)})))
+    (let [flow-id (::topology/flow-id state)]
+      (try
+        ;; Don't use stop-topology! here -- it tries to snapshot via db/transact!
+        ;; which routes through THIS flow. Circular. Just stop directly.
+        (flow/pause fl)
+        (flow/ping fl :timeout-ms 3000)
+        (catch Throwable t
+          (log/warn "Pause/ping failed during halt" {:error (.getMessage t)})))
+      (try
+        (flow/stop fl)
+        (catch Throwable t
+          (log/warn "Error stopping infrastructure flow" {:error (.getMessage t)})))
+      ;; Clean up pending promises
+      (doseq [[_id p] @topology/pending-promises]
+        (deliver p {::msg/status :error
+                    ::msg/error-type :timeout
+                    ::msg/error-message "Infrastructure flow stopped"}))
+      (reset! topology/pending-promises {})
+      ;; Unregister from runtime
+      (when flow-id
+        (status/stop-error-drain! {::status/id flow-id})
+        (runtime/unregister-flow! {::runtime/flow-id flow-id})))
     (log/info "Infrastructure flow stopped")))
 
-;; Suspend: keep flow alive across (reset)
+;; Always halt+init on resume. Flow objects are immutable — if code has been
+;; reloaded and build-infrastructure! now includes new processes (e.g. repl-step
+;; added after initial build), the old flow object won't have them.
 (defmethod ig/suspend-key! :seon.flow/infrastructure [_ state] state)
 
-;; Resume: only restart if connection-manager changed.
-;; Always re-register the flow handle — the in-memory atom may have been
-;; cleared by a namespace reload between suspend and resume.
 (defmethod ig/resume-key :seon.flow/infrastructure
-  [_ opts old-opts old-state]
-  (let [state (if (= (:connection-manager opts) (:connection-manager old-opts))
-                old-state
-                (do (ig/halt-key! :seon.flow/infrastructure old-state)
-                    (ig/init-key :seon.flow/infrastructure opts)))]
-    (when-let [fl (::topology/flow state)]
-      (runtime/register-flow! {::runtime/flow-id (::topology/flow-id state)
-                                ::runtime/flow fl
-                                ::runtime/chans (::topology/chans state)
-                                ::runtime/label "infrastructure"}))
-    state))
+  [_ opts _old-opts old-state]
+  (ig/halt-key! :seon.flow/infrastructure old-state)
+  (ig/init-key :seon.flow/infrastructure opts))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Claude Code SDK Configuration

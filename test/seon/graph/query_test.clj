@@ -4,6 +4,7 @@
    Uses a temporary local Datalevin database populated with project analysis."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [datalevin.core :as d]
+            [seon.db :as db]
             [seon.graph.analyzer :as analyzer]
             [seon.graph.ingest :as ingest]
             [seon.graph.query :as gq])
@@ -38,12 +39,13 @@
     (reset! test-conn conn)
     (try
       ;; Populate graph with project analysis (just graph/ namespace for speed)
-      (let [project (analyzer/analyze-project! {::analyzer/paths ["src/seon/graph/"]})
-            entities (analyzer/extract-entities
-                      {::analyzer/raw-analysis (::analyzer/raw-analysis project)})]
-        (ingest/ingest-analysis! {::ingest/conn conn
-                                  ::ingest/entities entities}))
-      (f)
+      (binding [db/*direct-write* true]
+        (let [project (analyzer/analyze-project! {::analyzer/paths ["src/seon/graph/"]})
+              entities (analyzer/extract-entities
+                        {::analyzer/raw-analysis (::analyzer/raw-analysis project)})]
+          (ingest/ingest-analysis! {::ingest/conn conn
+                                    ::ingest/entities entities}))
+        (f))
       (finally
         (reset! test-conn nil)
         (d/close conn)

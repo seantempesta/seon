@@ -2,6 +2,7 @@
   "Tests for dependency-aware test selection."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [datalevin.core :as d]
+            [seon.db :as db]
             [seon.dev.test-select :as ts]
             [seon.graph.analyzer :as analyzer]
             [seon.graph.ingest :as ingest]
@@ -33,14 +34,15 @@
   (let [dir (temp-dir)
         conn (d/create-conn dir ingest/datalevin-schema)]
     (try
-      ;; Analyze just graph/ namespace for speed - has known dependency chain:
-      ;; analyzer <- ingest, query (both depend on analyzer)
-      (let [project (analyzer/analyze-project! {::analyzer/paths ["src/seon/graph/"]})
-            entities (analyzer/extract-entities
-                      {::analyzer/raw-analysis (::analyzer/raw-analysis project)})]
-        (ingest/ingest-analysis! {::ingest/conn conn
-                                  ::ingest/entities entities}))
-      (binding [*test-conn* conn]
+      (binding [*test-conn* conn
+                db/*direct-write* true]
+        ;; Analyze just graph/ namespace for speed - has known dependency chain:
+        ;; analyzer <- ingest, query (both depend on analyzer)
+        (let [project (analyzer/analyze-project! {::analyzer/paths ["src/seon/graph/"]})
+              entities (analyzer/extract-entities
+                        {::analyzer/raw-analysis (::analyzer/raw-analysis project)})]
+          (ingest/ingest-analysis! {::ingest/conn conn
+                                    ::ingest/entities entities}))
         (f))
       (finally
         (d/close conn)

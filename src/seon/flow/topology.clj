@@ -440,6 +440,8 @@
         fl (flow/create-flow config)
         chans (flow/start fl)]
     (flow/resume fl)
+    ;; Sync barrier: ensure all processes are running before use
+    (flow/ping fl :timeout-ms 5000)
 
     ;; Start cross-ns relays for namespaces that have reverse channels
     (let [relays
@@ -630,6 +632,18 @@
         fl (flow/create-flow config)
         chans (flow/start fl)]
     (flow/resume fl)
+    ;; Sync barrier: wait for all processes to be running before using the flow.
+    ;; Without this, register-flow! -> persist-instance! -> db/transact! -> flow/inject
+    ;; can race with process threads that haven't started their loops yet.
+    (try
+      (flow/ping fl :timeout-ms 5000)
+      (catch Exception e
+        (flow/stop fl)
+        (throw (ex-info "Infrastructure flow failed to start: processes did not respond to ping within 5s. Check step-fn init arities."
+                        {:flow-id :seon.flow/infrastructure
+                         :processes [:seon.flow/writer :seon.flow/repl :seon.flow/reply-router
+                                     :seon.flow/event-sink :seon.flow/error-sink]}
+                        e))))
     ;; Register in runtime
     (runtime/register-flow! {::runtime/flow-id flow-id
                              ::runtime/flow fl

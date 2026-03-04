@@ -78,12 +78,12 @@
   ([state transition]
    (case transition
      :clojure.core.async.flow/pause
-     (do (log/debug "Infra writer paused" {:writes (::total-writes state)
-                                            :errors (::total-errors state)})
+     (do (log/info "Infra writer paused" {:writes (::total-writes state)
+                                           :errors (::total-errors state)})
          state)
      :clojure.core.async.flow/stop
-     (do (log/debug "Infra writer stopped" {:writes (::total-writes state)
-                                             :errors (::total-errors state)})
+     (do (log/info "Infra writer stopped" {:writes (::total-writes state)
+                                            :errors (::total-errors state)})
          state)
      :clojure.core.async.flow/resume state
      state))
@@ -99,39 +99,45 @@
            raw-conn   (::conn payload)
            cm         (::connection-manager state)
            t0         (System/nanoTime)]
-       (try
-         (let [conn (or raw-conn
-                        (dl-conn/get-conn! {::dl-conn/manager cm
-                                            ::dl-conn/db (keyword db-name)}))
-               _tx-report (d/transact! conn tx-data)
-               elapsed-ms (long (/ (- (System/nanoTime) t0) 1e6))
-               now (Instant/now)
-               reply {::msg/id request-id
-                      ::msg/version 1
-                      ::msg/type :reply
-                      ::msg/status :ok
-                      ::msg/value {:db-name (or db-name "direct-conn")}
-                      ::msg/from-ns "seon.db.writer"
-                      ::msg/duration-ms elapsed-ms}]
-           [(-> state
-                (update ::total-writes inc)
-                (assoc ::last-write-at now))
-            {:seon.flow.out/reply [reply]}])
-         (catch Exception e
-           (let [elapsed-ms (long (/ (- (System/nanoTime) t0) 1e6))
-                 error-reply {::msg/id request-id
-                              ::msg/version 1
-                              ::msg/type :reply
-                              ::msg/status :error
-                              ::msg/error-type :execution
-                              ::msg/error-class (.getName (class e))
-                              ::msg/error-message (.getMessage e)
-                              ::msg/from-ns "seon.db.writer"
-                              ::msg/duration-ms elapsed-ms}]
-             (log/warn e "Infra write failed" {:db-name (or db-name "direct-conn")})
-             [(update state ::total-errors inc)
-              {:seon.flow.out/reply [error-reply]
-               :seon.flow.out/error [error-reply]}]))))
+       (let [db-label (or db-name "direct-conn")
+             tx-count (count tx-data)]
+         (log/debug "Writer processing" {:db db-label :tx-count tx-count :request-id request-id})
+         (try
+           (let [conn (or raw-conn
+                          (dl-conn/get-conn! {::dl-conn/manager cm
+                                              ::dl-conn/db (keyword db-name)}))
+                 _tx-report (d/transact! conn tx-data)
+                 elapsed-ms (long (/ (- (System/nanoTime) t0) 1e6))
+                 now (Instant/now)
+                 reply {::msg/id request-id
+                        ::msg/version 1
+                        ::msg/type :reply
+                        ::msg/status :ok
+                        ::msg/value {:db-name db-label}
+                        ::msg/from-ns "seon.db.writer"
+                        ::msg/duration-ms elapsed-ms}]
+             (when (> elapsed-ms 1000)
+               (log/warn "Slow write" {:db db-label :elapsed-ms elapsed-ms :tx-count tx-count}))
+             [(-> state
+                  (update ::total-writes inc)
+                  (assoc ::last-write-at now))
+              {:seon.flow.out/reply [reply]}])
+           (catch Exception e
+             (let [elapsed-ms (long (/ (- (System/nanoTime) t0) 1e6))
+                   error-reply {::msg/id request-id
+                                ::msg/version 1
+                                ::msg/type :reply
+                                ::msg/status :error
+                                ::msg/error-type :execution
+                                ::msg/error-class (.getName (class e))
+                                ::msg/error-message (.getMessage e)
+                                ::msg/from-ns "seon.db.writer"
+                                ::msg/duration-ms elapsed-ms}]
+               (log/error e "Write failed" {:db db-label :tx-count tx-count
+                                            :elapsed-ms elapsed-ms :request-id request-id})
+               [(update state ::total-errors inc)
+                {:seon.flow.out/reply [error-reply]
+                 :seon.flow.out/error [error-reply]}])))))
 
      ;; unknown input
      [state nil])))

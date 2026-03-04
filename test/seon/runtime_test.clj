@@ -48,7 +48,10 @@
 (use-fixtures :each
   (fn [f]
     (setup-datalevin!)
-    (try (f) (finally (teardown-datalevin!)))))
+    (try
+      (binding [db/*direct-write* true]
+        (f))
+      (finally (teardown-datalevin!)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; ID Generation Tests
