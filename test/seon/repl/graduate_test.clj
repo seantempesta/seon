@@ -3,6 +3,7 @@
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.string :as str]
             [datalevin.core :as d]
+            [seon.db :as db]
             [seon.graph.ingest :as ingest]
             [seon.repl :as super]
             [seon.repl.graduate :as grad])
@@ -41,7 +42,8 @@
         conn (d/create-conn db-dir schema)]
     (try
       (binding [*test-conn* conn
-                *test-dir* out-dir]
+                *test-dir* out-dir
+                db/*direct-write* true]
         (f))
       (finally
         (d/close conn)

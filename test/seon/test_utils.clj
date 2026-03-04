@@ -5,7 +5,8 @@
   - Datalevin test helpers with safe connection management
   - Time helpers for test data"
   (:require [clojure.test :refer [is]]
-            [datalevin.core :as d])
+            [datalevin.core :as d]
+            [seon.db :as db])
   (:import [java.io File]
            [java.util UUID]))
 
@@ -70,7 +71,8 @@
         conn (d/create-conn dir {} {:kv-opts fast-kv-opts})
         test-conn-var (resolve 'seon.ai.datalevin/*test-conn*)]
     (try
-      (push-thread-bindings {test-conn-var conn})
+      (push-thread-bindings {test-conn-var conn
+                             #'db/*direct-write* true})
       (try
         (f)
         (finally

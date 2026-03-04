@@ -5,6 +5,7 @@
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [datalevin.core :as d]
             [seon.agent.env :as env]
+            [seon.db :as db]
             [seon.graph.ingest :as ingest])
   (:import [java.io File]))
 
@@ -37,7 +38,8 @@
   (let [dir (temp-dir)
         conn (d/create-conn dir combined-schema)]
     (try
-      (binding [*test-conn* conn]
+      (binding [*test-conn* conn
+                db/*direct-write* true]
         (f))
       (finally
         (d/close conn)

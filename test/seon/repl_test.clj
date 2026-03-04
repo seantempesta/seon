@@ -4,6 +4,7 @@
    Uses a temporary local Datalevin database (no server required)."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [datalevin.core :as d]
+            [seon.db :as db]
             [seon.graph.ingest :as ingest]
             [seon.repl :as super])
   (:import [java.io File]))
@@ -38,7 +39,8 @@
         schema (merge ingest/datalevin-schema super/datalevin-schema)
         conn (d/create-conn dir schema)]
     (try
-      (binding [*test-conn* conn]
+      (binding [*test-conn* conn
+                db/*direct-write* true]
         (f))
       (finally
         (d/close conn)

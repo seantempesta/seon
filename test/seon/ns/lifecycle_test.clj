@@ -46,7 +46,8 @@
   (fn [f]
     (setup-datalevin!)
     (try
-      (f)
+      (binding [db/*direct-write* true]
+        (f))
       (finally
         (cleanup-ctx-registry!)
         (teardown-datalevin!)))))

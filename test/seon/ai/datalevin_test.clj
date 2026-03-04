@@ -2,6 +2,7 @@
   "Tests for seon.ai.datalevin - Datalevin storage for AI sessions and messages."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [datalevin.core :as d]
+            [seon.db :as db]
             [seon.ai.datalevin :as dl]))
 
 ;;; ---------------------------------------------------------------------------
@@ -23,7 +24,8 @@
   (cleanup-test-db)
   (let [conn (create-test-conn)]
     (try
-      (binding [dl/*test-conn* conn]
+      (binding [dl/*test-conn* conn
+                db/*direct-write* true]
         (dl/reset-stats!)
         (f))
       (finally

@@ -25,6 +25,9 @@
  ;; - Runtime registry (namespace instance tracking)
  ;; - Render system (function resolution)
  ;; Initializes runtime registry and marks crashed instances on startup.
+ ;; :infrastructure ref is ordering-only — ensures the flow is running before
+ ;; runtime-db init, because register! -> persist-instance! -> db/transact!
+ ;; routes through the infrastructure flow.
  :seon/runtime-db
  {:connection-manager #ig/ref :seon.db.datalevin/connections
   :infrastructure #ig/ref :seon.flow/infrastructure}

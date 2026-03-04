@@ -208,9 +208,12 @@
 
 (defn- eval-via-flow!
   "Route an eval through the infrastructure flow's :seon.flow/repl process.
-   Falls back to direct pool/nrepl-eval! when the flow is not running."
+   Throws if the infrastructure flow is not running — no fallbacks."
   [port source]
-  (if-let [fl (get-infra-flow)]
+  (let [fl (get-infra-flow)]
+    (when-not fl
+      (throw (ex-info "Infrastructure flow not running — cannot eval"
+                      {:fn "seon.repl/eval-via-flow!"})))
     (let [pending (get-pending-promises)
           request-id (random-uuid)
           p (promise)
@@ -238,9 +241,7 @@
                                                   ::msg/error-message]))))))
         (catch Exception e
           (swap! pending dissoc request-id)
-          (throw e))))
-    ;; Fallback: flow not running (tests, early boot)
-    (pool/nrepl-eval! port source)))
+          (throw e))))))
 
 (defn eval-form!
   "Main entry point. Classify, eval, store, and index a form.

@@ -513,10 +513,11 @@
                      ;; Cancel pending persist
                      (when-let [^ScheduledFuture task @scheduled-task]
                        (.cancel task false))
-                     ;; Schedule new persist
+                     ;; Schedule new persist — use bound-fn to convey dynamic bindings
+                     ;; (e.g. db/*direct-write* in tests) to the scheduler thread
                      (reset! scheduled-task
                              (.schedule scheduler
-                                        ^Runnable (fn []
+                                        ^Runnable (bound-fn []
                                                     (do-persist! conn instance-id namespace new-val))
                                         (long debounce-ms)
                                         TimeUnit/MILLISECONDS))))))

@@ -2,6 +2,7 @@
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [datalevin.core :as d]
             [seon.ctx :as ctx]
+            [seon.db :as db]
             [seon.schema :as schema]))
 
 ;;; ---------------------------------------------------------------------------
@@ -35,7 +36,8 @@
 (use-fixtures :each
   (fn [f]
     (setup-datalevin!)
-    (try (f) (finally (teardown-datalevin!)))))
+    (binding [db/*direct-write* true]
+      (try (f) (finally (teardown-datalevin!))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Lifecycle Tests

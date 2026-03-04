@@ -135,7 +135,7 @@
 ;;; ---------------------------------------------------------------------------
 
 (deftest build-infrastructure-starts-test
-  (testing "build-infrastructure! creates a flow with all 4 processes running"
+  (testing "build-infrastructure! creates a flow with all 5 processes running"
     (tu/with-temp-conn test-schema
       (fn [conn]
         (let [cm (make-fake-manager :test-db conn)
@@ -147,8 +147,9 @@
             ;; Ping proves all processes are running
             (let [ping-result (flow/ping (::topology/flow infra) :timeout-ms 5000)]
               (is (some? ping-result))
-              ;; All 4 processes should show state
+              ;; All 5 processes should show state
               (is (contains? ping-result :seon.flow/writer))
+              (is (contains? ping-result :seon.flow/repl))
               (is (contains? ping-result :seon.flow/reply-router))
               (is (contains? ping-result :seon.flow/event-sink))
               (is (contains? ping-result :seon.flow/error-sink)))
@@ -163,7 +164,6 @@
               infra (topology/build-infrastructure!
                      {::topology/connection-manager cm})]
           (try
-            (Thread/sleep 100)
             (let [request-id (random-uuid)
                   p (promise)
                   _ (swap! topology/pending-promises assoc request-id p)
@@ -195,7 +195,6 @@
               infra (topology/build-infrastructure!
                      {::topology/connection-manager cm})]
           (try
-            (Thread/sleep 100)
             (let [request-id (random-uuid)
                   p (promise)
                   _ (swap! topology/pending-promises assoc request-id p)
@@ -250,7 +249,6 @@
               infra (topology/build-infrastructure!
                      {::topology/connection-manager cm})]
           (try
-            (Thread/sleep 100)
             ;; Send 3 writes
             (let [promises (mapv (fn [i]
                                    (let [rid (random-uuid)
