@@ -13,11 +13,8 @@
  ;; Manages client connections to the Datalevin server with:
  ;; - Connection caching per namespace
  ;; - Lazy database creation on first connection
- ;; - TTL-based cleanup of idle connections
  :seon.db.datalevin/connections
- {:server #ig/ref :seon.db.datalevin/server
-  :ttl-ms #or [#env DATALEVIN_CONN_TTL_MS 300000]           ; 5 minutes
-  :cleanup-interval-ms #or [#env DATALEVIN_CLEANUP_MS 60000]}
+ {:server #ig/ref :seon.db.datalevin/server}
 
  ;; Runtime Database (Code Graph + Runtime Registry)
  ;; Owns the seon.runtime Datalevin connection used by:
@@ -104,6 +101,11 @@
                       :prod false}
   :config-file "Caddyfile"
   :http-server #ig/ref :seon.web.server/http-server}
+
+ ;; Malli Function Instrumentation
+ ;; Instruments all functions with :malli/schema for runtime validation.
+ ;; Agent-friendly error messages on schema violations.
+ :seon.dev/instrumentation {}
 
  ;; Claude Code SDK Configuration
  :seon.ai.claude/sdk

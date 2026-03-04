@@ -113,7 +113,7 @@
                    [::id ::id]
                    [::namespace ::namespace]
                    [::status ::status]
-                   [::nrepl-port {:optional true} ::nrepl-port]
+                   [::nrepl-port {:optional true} [:maybe ::nrepl-port]]
                    [::started-at {:optional true} ::started-at]
                    [::db-name {:optional true} ::db-name]
                    [::error {:optional true} ::error]])
@@ -138,9 +138,11 @@
                    [::id {:optional true} ::id]
                    [::namespace {:optional true} ::namespace]
                    [::status {:optional true} ::status]
-                   [::nrepl-port {:optional true} ::nrepl-port]
+                   [::nrepl-port {:optional true} [:maybe ::nrepl-port]]
                    [::started-at {:optional true} ::started-at]
                    [::db-name {:optional true} ::db-name]
+                   ;; Persistent nREPL session (for *1/*2/*3 and interrupt)
+                   [::nrepl-session-id {:optional true} ::nrepl-session-id]
                    ;; Observability fields (Phase 4c)
                    [::last-activity-at {:optional true} ::last-activity-at]
                    [::eval-count {:optional true} ::eval-count]
@@ -158,8 +160,8 @@
 
 (schema/register! ::get-session-port-response
                   [:map
-                   [::nrepl-port {:optional true} ::nrepl-port]
-                   [::nrepl-session-id {:optional true} ::nrepl-session-id]])
+                   [::nrepl-port {:optional true} [:maybe ::nrepl-port]]
+                   [::nrepl-session-id {:optional true} [:maybe ::nrepl-session-id]]])
 
 (schema/register! ::recover-sessions-request
                   [:map])

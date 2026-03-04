@@ -40,6 +40,7 @@
     (let [cm {:fake "manager"}
           state (writer/infra-writer-step {::writer/connection-manager cm})]
       (is (= cm (::writer/connection-manager state)))
+      (is (= {} (::writer/owned-conns state)))
       (is (= 0 (::writer/total-writes state)))
       (is (= 0 (::writer/total-errors state)))
       (is (nil? (::writer/last-write-at state))))))
@@ -122,10 +123,13 @@
           state' (writer/infra-writer-step state :clojure.core.async.flow/pause)]
       (is (= state state'))))
 
-  (testing "stop returns state unchanged"
-    (let [state (writer/infra-writer-step {::writer/connection-manager {}})
-          state' (writer/infra-writer-step state :clojure.core.async.flow/stop)]
-      (is (= state state'))))
+  (testing "stop closes owned connections and empties map"
+    (with-temp-conn
+      (fn [conn]
+        (let [state (-> (writer/infra-writer-step {::writer/connection-manager {}})
+                        (assoc ::writer/owned-conns {:test-db conn}))
+              state' (writer/infra-writer-step state :clojure.core.async.flow/stop)]
+          (is (= {} (::writer/owned-conns state')))))))
 
   (testing "resume returns state unchanged"
     (let [state (writer/infra-writer-step {::writer/connection-manager {}})

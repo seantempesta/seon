@@ -19,6 +19,7 @@
             [seon.flow.status :as status]
             [seon.flow.topology :as topology]
             [seon.runtime :as runtime]
+            [seon.dev.instrumentation :as instrumentation]
             ;; Load component namespaces for their ig/init-key methods
             [seon.web.tailwind]
             [seon.web.caddy]
@@ -368,6 +369,28 @@
 ;;; ---------------------------------------------------------------------------
 ;;; Configuration for the Claude Code CLI. Currently just holds the CLI path.
 ;;; The actual CLI interaction is in seon.ai.claude.sdk.
+
+;;; ---------------------------------------------------------------------------
+;;; Malli Instrumentation Component
+;;; ---------------------------------------------------------------------------
+;;; Instruments all functions with :malli/schema metadata for runtime validation.
+;;; Agent-friendly error messages on schema violations.
+
+(defmethod ig/init-key :seon.dev/instrumentation
+  [_ opts]
+  (instrumentation/start! opts))
+
+(defmethod ig/halt-key! :seon.dev/instrumentation
+  [_ _]
+  (instrumentation/stop!))
+
+;; Survives reset — instrumentation persists across reloads
+(defmethod ig/suspend-key! :seon.dev/instrumentation [_ state] state)
+(defmethod ig/resume-key :seon.dev/instrumentation [_ _ _ old] old)
+
+;;; ---------------------------------------------------------------------------
+;;; Claude Code SDK Configuration
+;;; ---------------------------------------------------------------------------
 
 (defmethod ig/init-key :seon.ai.claude/sdk
   [_ config]

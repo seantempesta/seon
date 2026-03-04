@@ -10,7 +10,8 @@
   (:require [nrepl.server :as nrepl]
             [taoensso.timbre :as log]
             [clojure.core.async :as async]
-            [malli.core :as m])
+            [malli.core :as m]
+            [seon.dev.instrumentation :as instrumentation])
   (:gen-class))
 
 (def ^:dynamic *ctx*
@@ -96,6 +97,10 @@
                   " ns=" namespace
                   " startup_ms=" (long startup-ms)))
     (flush)
+
+    ;; Instrument functions with Malli schema validation
+    (let [result (instrumentation/start! {})]
+      (log/info "Malli instrumentation" result))
 
     ;; Prove core.async and malli loaded
     (log/debug "core.async version:" (async/<!! (async/go :ok)))

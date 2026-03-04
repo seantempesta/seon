@@ -19,9 +19,7 @@
    ;; Connection Manager — :server is a resolved #ig/ref
    :seon.db.datalevin/connections
    [:map
-    [:server :any]
-    [:ttl-ms [:int {:min 0}]]
-    [:cleanup-interval-ms [:int {:min 1000}]]]
+    [:server :any]]
 
    ;; Runtime Database — :connection-manager is a resolved #ig/ref
    :seon/runtime-db

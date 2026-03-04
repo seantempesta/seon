@@ -8,8 +8,7 @@
                                {:port 8898 :root "data/datalevin"
                                 :opts {:idle-timeout 300000}})))
     (is (nil? (config/validate :seon.db.datalevin/connections
-                               {:server :mock :ttl-ms 300000
-                                :cleanup-interval-ms 60000})))
+                               {:server :mock})))
     (is (nil? (config/validate :seon/runtime-db
                                {:connection-manager :mock})))
     (is (nil? (config/validate :seon.schema/registry {})))

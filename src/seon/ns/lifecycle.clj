@@ -120,7 +120,7 @@
                   [:map
                    [::conn ::conn]
                    [::ns-sym ::ns-sym]
-                   [::instance-id {:optional true} ::instance-id]])
+                   [::instance-id {:optional true} [:maybe ::instance-id]]])
 
 (schema/register! ::resolve-instance-response
                   [:maybe [:map

@@ -68,16 +68,16 @@
                   [:map
                    [::prompt ::prompt]
                    [::code ::code]
-                   [::conventions {:optional true} ::conventions]
-                   [::test-summary {:optional true} ::test-summary]
-                   [::new-functions {:optional true} ::new-functions]])
+                   [::conventions {:optional true} [:maybe ::conventions]]
+                   [::test-summary {:optional true} [:maybe ::test-summary]]
+                   [::new-functions {:optional true} [:maybe ::new-functions]]])
 
 ;; Build context request
 (schema/register! ::build-context-request
                   [:map
                    [::files ::files]
-                   [::test-results {:optional true} :map]
-                   [::new-functions {:optional true} ::new-functions]
+                   [::test-results {:optional true} [:maybe :map]]
+                   [::new-functions {:optional true} [:maybe ::new-functions]]
                    [::max-code-length {:optional true} [:int {:min 1}]]
                    [::max-conventions-length {:optional true} [:int {:min 1}]]])
 
@@ -85,8 +85,8 @@
 (schema/register! ::call-gemini-request
                   [:map
                    [::context ::review-context]
-                   [::timeout {:optional true} [:int {:min 1000}]]
-                   [::api-key {:optional true} :string]])
+                   [::timeout {:optional true} [:maybe [:int {:min 1}]]]
+                   [::api-key {:optional true} [:maybe :string]]])
 
 ;; Review result with full Gemini context for training data
 (schema/register! ::review-result
@@ -115,11 +115,11 @@
 (schema/register! ::review-edits-request
                   [:map
                    [::files ::files]
-                   [::test-results {:optional true} :map]
-                   [::new-functions {:optional true} ::new-functions]
-                   [::max-output-length {:optional true} [:int {:min 1}]]
-                   [::timeout {:optional true} [:int {:min 1000}]]
-                   [::api-key {:optional true} :string]])
+                   [::test-results {:optional true} [:maybe :map]]
+                   [::new-functions {:optional true} [:maybe ::new-functions]]
+                   [::max-output-length {:optional true} [:maybe [:int {:min 1}]]]
+                   [::timeout {:optional true} [:maybe [:int {:min 1}]]]
+                   [::api-key {:optional true} [:maybe :string]]])
 
 ;; review-edits response (includes full data for observability)
 (schema/register! ::review-edits-response
@@ -404,7 +404,7 @@
                              ::api-key api-key})]
     (if (::success result)
       {::formatted-text (format-output {::text (::text result)
-                                         ::max-length max-output-length})
+                                        ::max-length max-output-length})
        ::prompt (str prompt "\n\n" code)
        ::response (::text result)
        ::success true

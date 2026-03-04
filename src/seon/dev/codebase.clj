@@ -61,11 +61,11 @@
 ;; Request schemas
 (schema/register! ::clojure-file-request
                   [:map
-                   [::file-path {:optional true} [:maybe ::file-path]]])
+                   [::file-path {:optional true} [:maybe :string]]])
 
 (schema/register! ::file->namespace-request
                   [:map
-                   [::file-path {:optional true} [:maybe ::file-path]]])
+                   [::file-path {:optional true} [:maybe :string]]])
 
 (schema/register! ::file->test-namespace-request
                   [:map

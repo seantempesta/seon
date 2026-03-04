@@ -17,4 +17,5 @@
  :seon.flow/pool                 [:seon/component]
  :seon.orchestrator/sessions     [:seon/component]
  :seon.graph/scanner             [:seon/component]
+ :seon.dev/instrumentation        [:seon/component]
  :seon.ai.claude/sdk             [:seon/component]}

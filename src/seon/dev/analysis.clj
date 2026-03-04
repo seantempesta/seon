@@ -136,9 +136,17 @@
                    [::analysis ::analysis]
                    [::fn-name ::fn-name]])
 
+(schema/register! ::callee
+                  [:map
+                   [:to {:optional true} ::namespace]
+                   [:name {:optional true} ::fn-name]
+                   [:row {:optional true} :int]
+                   [:col {:optional true} :int]
+                   [:arity {:optional true} :int]])
+
 (schema/register! ::callees-response
                   [:map
-                   [::callees ::var-usages]])
+                   [::callees [:vector ::callee]]])
 
 (schema/register! ::callers-request
                   [:map
