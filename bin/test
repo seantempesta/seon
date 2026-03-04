@@ -1,20 +1,18 @@
 #!/usr/bin/env bash
-# bin/test — Fast, agent-friendly test runner
+# bin/test — CLI test runner (cold JVM, use REPL for fast iteration)
 #
 # Usage:
-#   bin/test                              # All unit tests (skip integration)
-#   bin/test --unit                       # Same as above
-#   bin/test --all                        # All tests including integration
 #   bin/test seon.graph.query-test        # Focused: one namespace
-#   bin/test seon.graph.query-test seon.db-test  # Focused: multiple namespaces
+#   bin/test seon.graph.query-test seon.db-test  # Focused: multiple
+#   bin/test --unit                       # All unit tests (~2min cold JVM)
+#   bin/test --all                        # All tests including integration
 #
 # Exit codes: 0 = pass, 1 = fail
-# Output: Clear PASS/FAIL summary. On failure, shows only failing tests + errors.
 
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-MODE="unit"
+MODE=""
 FOCUS_NS=()
 
 for arg in "$@"; do
@@ -24,14 +22,29 @@ for arg in "$@"; do
     --help|-h)
       echo "Usage: bin/test [--unit|--all] [namespace ...]"
       echo ""
-      echo "  bin/test                        Unit tests (default, <60s)"
+      echo "  bin/test seon.graph.query-test  Focused namespace(s)"
+      echo "  bin/test --unit                 All unit tests (~2min, cold JVM)"
       echo "  bin/test --all                  All tests including integration"
-      echo "  bin/test seon.graph.query-test  Focused namespace(s) (<10s)"
       exit 0
       ;;
     *) FOCUS_NS+=("$arg") ;;
   esac
 done
+
+# No args = guide to REPL instead of burning 2min on a cold JVM
+if [ -z "$MODE" ] && [ ${#FOCUS_NS[@]} -eq 0 ]; then
+  cat <<'EOF'
+bin/test launches a cold JVM (~2min). The REPL is already warm:
+
+  (user/run-tests 'seon.foo-test)   ; one namespace, seconds
+  (user/run-tests)                  ; full suite, warm JVM
+  (:failures *1)                    ; inspect without re-running
+
+Results auto-save. See AGENT.md § "Test via REPL".
+To run the full CLI suite anyway:  bin/test --unit
+EOF
+  exit 1
+fi
 
 # Build kaocha args
 KAOCHA_ARGS=()
@@ -70,12 +83,15 @@ else
   echo "FAIL (${ELAPSED}s)"
   echo ""
   echo "Failing tests:"
-  # Extract FAIL/ERROR lines from kaocha output
   grep -E "^(FAIL|ERROR) in" "$TMPOUT" || true
   echo ""
-  # Show the assertion messages (lines after FAIL/ERROR, up to next blank line)
   grep -A 5 -E "^(FAIL|ERROR) in" "$TMPOUT" | grep -v "^--$" || true
 fi
 echo "========================================"
+
+if [ $ELAPSED -gt 30 ]; then
+  echo ""
+  echo "Took ${ELAPSED}s. REPL runs the same tests in seconds: (user/run-tests 'seon.foo-test)"
+fi
 
 exit $EXIT_CODE
