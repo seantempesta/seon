@@ -27,9 +27,7 @@
    Maps ::master to the given conn."
   [conn]
   {::conn/port 0
-   ::conn/ttl-ms 300000
-   ::conn/connections (atom {:seon {::conn/connection conn
-                                    ::conn/last-accessed (java.time.Instant/now)}})})
+   ::conn/connections (atom {:seon {::conn/connection conn}})})
 
 (defn- with-named-db
   "Set up a local db, bind it as the :seon named database via *conn-manager*,

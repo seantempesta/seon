@@ -242,19 +242,29 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- do-persist!
-  "Persist ctx value to Datalevin. Strips non-serializable values."
+  "Persist ctx value to Datalevin. Strips non-serializable values.
+   Checks conn usability first to avoid watch exceptions on closed connections."
   [conn instance-id namespace-sym value]
-  (try
-    (let [filtered (filter-serializable value)
-          edn-str (pr-str filtered)]
-      ((requiring-resolve 'seon.db/transact!)
-       conn [(cond-> {:seon.ctx/instance-id instance-id
-                      :seon.ctx/data edn-str
-                      :seon.ctx/updated-at (java.util.Date.)}
-               namespace-sym (assoc :seon.ctx/namespace (str namespace-sym)))]))
-    (catch Exception e
-      (log/error "Failed to persist ctx" {:instance-id instance-id
-                                          :error (.getMessage e)}))))
+  (let [conn-usable? (when conn
+                       (try
+                         (require 'datalevin.conn)
+                         (if-let [closed? (resolve 'datalevin.conn/closed?)]
+                           (not (closed? conn))
+                           true)
+                         (catch Exception _ true)))]
+    (if-not conn-usable?
+      (log/warn "Skipping ctx persist — connection not usable" {:instance-id instance-id})
+      (try
+        (let [filtered (filter-serializable value)
+              edn-str (pr-str filtered)]
+          ((requiring-resolve 'seon.db/transact!)
+           conn [(cond-> {:seon.ctx/instance-id instance-id
+                          :seon.ctx/data edn-str
+                          :seon.ctx/updated-at (java.util.Date.)}
+                   namespace-sym (assoc :seon.ctx/namespace (str namespace-sym)))]))
+        (catch Exception e
+          (log/error "Failed to persist ctx" {:instance-id instance-id
+                                              :error (.getMessage e)}))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; SSE Push (broadcast)
@@ -307,8 +317,8 @@
           (let [open? (requiring-resolve 'org.httpkit.server/open?)]
             (swap! clients-atom #(set (filter open? %)))))
         (log/debug "Pushed SSE update" {:instance-id instance-id
-                                         :clients (count channels)
-                                         :failed failed})))))
+                                        :clients (count channels)
+                                        :failed failed})))))
 
 (defn- render-and-push!
   "Render current ctx state and push to all clients."
@@ -534,11 +544,11 @@
       (add-watch ctx-atom ::client-push (make-client-watch instance-id)))
 
     (log/info "Created ctx instance" {:instance-id instance-id
-                                       :namespace namespace
-                                       :persist? persist?
-                                       :sse-push? sse-push?
-                                       :track-clients? track-clients?
-                                       :validate? validate?})
+                                      :namespace namespace
+                                      :persist? persist?
+                                      :sse-push? sse-push?
+                                      :track-clients? track-clients?
+                                      :validate? validate?})
     ctx-atom))
 
 (defn get-atom

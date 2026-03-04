@@ -7,12 +7,16 @@
    and observability.
 
    Two API levels:
-   - Raw pass-through: `q`, `pull`, `pull-many`, `entity` — take a db value
-   - Named convenience: `query`, `pull-by-name`, `pull-many-by-name` — take
+   - Raw pass-through: `q`, `pull`, `pull-many`, `entity` -- take a db value
+   - Named convenience: `query`, `pull-by-name`, `pull-many-by-name` -- take
      a db-name keyword (`:seon`, `:seon.runtime`, or namespace string),
      resolve connection via conn manager, handle staleness with retry
 
-   Positional args are intentional for drop-in compatibility — this is
+   `transact!` accepts either a keyword db-name (preferred) or a raw
+   connection (deprecated). When given a keyword, the writer resolves
+   and owns the connection itself, enabling retry on failure.
+
+   Positional args are intentional for drop-in compatibility -- this is
    the one namespace where map-in/map-out does not apply."
   (:require [clojure.core.async.flow :as flow]
             [datalevin.core :as d]
@@ -80,7 +84,7 @@
 
 (def ^:dynamic *direct-write*
   "When true, write! bypasses the infrastructure flow and uses d/transact!
-   directly. For tests only — production must always route through flow.
+   directly. For tests only -- production must always route through flow.
    Bind to true in test fixtures that don't have a running infrastructure flow."
   false)
 
@@ -105,18 +109,77 @@
   []
   @(requiring-resolve 'seon.flow.topology/pending-promises))
 
+;;; --- Connection Resolution ---
+;;;
+;;; Used by both the Named Convenience API and write! when given a keyword.
+
+(def ^:dynamic *conn-manager*
+  "Dynamic var for overriding the connection manager in tests.
+   When nil (default), resolves from Integrant system."
+  nil)
+
+(defn- get-conn-manager
+  "Get the connection manager from *conn-manager* or the running Integrant system.
+   Throws if neither is available."
+  []
+  (or *conn-manager*
+      (if-let [sys-var (try @(requiring-resolve 'integrant.repl.state/system)
+                            (catch Exception _ nil))]
+        (or (:seon.db.datalevin/connections sys-var)
+            (throw (ex-info "Connection manager not available -- is the system running?"
+                            {:component :seon.db.datalevin/connections})))
+        (throw (ex-info "Integrant system not running" {})))))
+
+(defn- db-name->conn-args
+  "Convert a db-name keyword to [get-fn reconnect-db].
+   get-fn takes a conn manager and returns a connection atom."
+  [db-name]
+  [#(conn/get-conn! {::conn/manager % ::conn/db db-name})
+   db-name])
+
+(defn- resolve-conn
+  "Resolve a db-name keyword to a Datalevin connection via conn manager.
+   Used by ensure-schema! and *direct-write* when caller passes a keyword."
+  [db-name]
+  (let [mgr (get-conn-manager)
+        [get-fn _] (db-name->conn-args db-name)]
+    (get-fn mgr)))
+
+(defn- resolve-db
+  "Resolve a db-name keyword to a Datalevin db value.
+   Gets connection from conn manager and derefs it."
+  [db-name]
+  @(resolve-conn db-name))
+
+;;; --- Write Routing ---
+
+(defn- build-writer-payload
+  "Build the writer payload map. When db-name-or-conn is a keyword,
+   passes ::writer/db-name (string) so the writer resolves its own conn.
+   When it's a connection object, passes ::writer/conn (deprecated path)."
+  [db-name-or-conn tx-data]
+  (let [base {:seon.db.datalevin.writer/tx-data tx-data}]
+    (if (keyword? db-name-or-conn)
+      (assoc base :seon.db.datalevin.writer/db-name (name db-name-or-conn))
+      (assoc base :seon.db.datalevin.writer/conn db-name-or-conn))))
+
 (defn- write!
   "Route a transaction through the infrastructure flow writer.
+   db-name-or-conn is either a keyword (preferred, writer resolves conn)
+   or a raw connection object (deprecated).
    Throws if the infrastructure flow is not running.
    In tests, bind *direct-write* to true to bypass the flow."
-  ([conn tx-data]
-   (write! conn tx-data nil))
-  ([conn tx-data opts]
+  ([db-name-or-conn tx-data]
+   (write! db-name-or-conn tx-data nil))
+  ([db-name-or-conn tx-data opts]
    (if *direct-write*
-     (d/transact! conn tx-data)
+     (let [c (if (keyword? db-name-or-conn)
+               (resolve-conn db-name-or-conn)
+               db-name-or-conn)]
+       (d/transact! c tx-data))
      (let [fl (get-infra-flow)]
        (when-not fl
-         (throw (ex-info "Infrastructure flow not running — cannot write"
+         (throw (ex-info "Infrastructure flow not running -- cannot write"
                          {:fn "seon.db/write!"})))
        (let [pending (get-pending-promises)
              timeout-ms (or (:timeout-ms opts) 10000)
@@ -126,8 +189,7 @@
                       ::msg/version 1
                       ::msg/type :request
                       ::msg/from-ns "seon.db"
-                      ::msg/payload {:seon.db.datalevin.writer/tx-data tx-data
-                                     :seon.db.datalevin.writer/conn conn}
+                      ::msg/payload (build-writer-payload db-name-or-conn tx-data)
                       ::msg/created-at (Instant/now)}]
          ;; Register promise before injection
          (swap! pending assoc request-id p)
@@ -163,19 +225,31 @@
 ;;; --- Public API (positional, mirrors datalevin.core) ---
 
 (defn transact!
-  "Transact data into conn. Validates attributes, ensures schema, then
-   routes through the infrastructure flow writer for serialized access.
+  "Transact data into a database. First arg is either a db-name keyword
+   (e.g. :seon.runtime) or a raw Datalevin connection (deprecated).
+
+   When given a keyword, the writer resolves and owns the connection,
+   enabling automatic retry on connection failure. Schema is checked
+   via a temporary conn from the manager.
+
+   Validates attributes, ensures schema, then routes through the
+   infrastructure flow writer for serialized access.
    Throws if the infrastructure flow is not running."
-  {:malli/schema [:=> [:cat :any [:sequential :any]] :any]}
-  ([conn tx-data]
-   (transact! conn tx-data nil))
-  ([conn tx-data tx-meta]
-   (let [attrs (extract-tx-attrs tx-data)]
+  {:malli/schema [:function
+                  [:=> [:cat :any [:sequential :any]] :any]
+                  [:=> [:cat :any [:sequential :any] [:maybe :map]] :any]]}
+  ([db-name-or-conn tx-data]
+   (transact! db-name-or-conn tx-data nil))
+  ([db-name-or-conn tx-data tx-meta]
+   (let [attrs (extract-tx-attrs tx-data)
+         conn-for-schema (if (keyword? db-name-or-conn)
+                           (resolve-conn db-name-or-conn)
+                           db-name-or-conn)]
      (validate-attrs! attrs)
-     (ensure-schema! conn attrs))
+     (ensure-schema! conn-for-schema attrs))
    (when tx-meta
      (log/debug "tx-meta provided but not yet supported via flow writer" {:tx-meta tx-meta}))
-   (write! conn tx-data)))
+   (write! db-name-or-conn tx-data)))
 
 (defn q
   "Query the database. Pass-through to datalevin.core/q."
@@ -206,38 +280,6 @@
 ;;; These functions resolve a db-name keyword to a connection via the
 ;;; conn manager, deref it to get a db value, and delegate to datalevin.
 ;;; On connection error, they reconnect and retry once.
-
-(def ^:dynamic *conn-manager*
-  "Dynamic var for overriding the connection manager in tests.
-   When nil (default), resolves from Integrant system."
-  nil)
-
-(defn- get-conn-manager
-  "Get the connection manager from *conn-manager* or the running Integrant system.
-   Throws if neither is available."
-  []
-  (or *conn-manager*
-      (if-let [sys-var (try @(requiring-resolve 'integrant.repl.state/system)
-                            (catch Exception _ nil))]
-        (or (:seon.db.datalevin/connections sys-var)
-            (throw (ex-info "Connection manager not available — is the system running?"
-                            {:component :seon.db.datalevin/connections})))
-        (throw (ex-info "Integrant system not running" {})))))
-
-(defn- db-name->conn-args
-  "Convert a db-name keyword to [get-fn reconnect-db].
-   get-fn takes a conn manager and returns a connection atom."
-  [db-name]
-  [#(conn/get-conn! {::conn/manager % ::conn/db db-name})
-   db-name])
-
-(defn- resolve-db
-  "Resolve a db-name keyword to a Datalevin db value.
-   Gets connection from conn manager and derefs it."
-  [db-name]
-  (let [mgr (get-conn-manager)
-        [get-fn _] (db-name->conn-args db-name)]
-    @(get-fn mgr)))
 
 (defn- connection-error?
   "Check if an exception indicates a connection/server error."
@@ -273,9 +315,9 @@
 (defn query
   "Query a named database. Resolves connection by db-name, retries on staleness.
 
-   db-name — :seon, :seon.runtime, or a namespace keyword like :seon.trading
-   datalog-query — Datalog query (same as d/q first arg)
-   inputs — additional query inputs (sources, rules, etc.)
+   db-name -- :seon, :seon.runtime, or a namespace keyword like :seon.trading
+   datalog-query -- Datalog query (same as d/q first arg)
+   inputs -- additional query inputs (sources, rules, etc.)
 
    Example:
      (query :seon.runtime '[:find ?e ?n :where [?e :seon.fn/name ?n]])
@@ -288,9 +330,9 @@
 (defn pull-by-name
   "Pull an entity from a named database by selector and eid.
 
-   db-name — :seon, :seon.runtime, or a namespace keyword
-   selector — pull pattern (e.g., '[*] or '[:name :age])
-   eid — entity id or lookup ref
+   db-name -- :seon, :seon.runtime, or a namespace keyword
+   selector -- pull pattern (e.g., '[*] or '[:name :age])
+   eid -- entity id or lookup ref
 
    Example:
      (pull-by-name :seon.runtime '[*] 1)"
@@ -302,9 +344,9 @@
 (defn pull-many-by-name
   "Pull multiple entities from a named database.
 
-   db-name — :seon, :seon.runtime, or a namespace keyword
-   selector — pull pattern
-   eids — collection of entity ids or lookup refs
+   db-name -- :seon, :seon.runtime, or a namespace keyword
+   selector -- pull pattern
+   eids -- collection of entity ids or lookup refs
 
    Example:
      (pull-many-by-name :seon.runtime '[:seon.fn/name] [1 2 3])"

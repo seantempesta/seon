@@ -41,17 +41,18 @@
 
 ;; Hook event from Claude Code
 (schema/register! ::hook-event-name
-                  [:enum {:description "The type of hook event"}
-                   "PreToolUse" "PostToolUse"])
+                  [:string {:description "The type of hook event (e.g., PreToolUse, PostToolUse)"}])
 
 (schema/register! ::tool-name
-                  [:enum {:description "The tool that triggered the event"}
-                   "Edit" "Write" "TodoWrite"])
+                  [:string {:description "The tool that triggered the event (e.g., Edit, Write, TodoWrite)"}])
 
 (schema/register! ::tool-input
                   [:map {:description "Tool-specific input parameters"}
-                   [:file_path {:optional true} :string]
-                   [:filePath {:optional true} :string]
+                   [:file_path {:optional true} [:maybe :string]]
+                   [:filePath {:optional true} [:maybe :string]]
+                   [:content {:optional true} [:maybe :string]]
+                   [:old_string {:optional true} [:maybe :string]]
+                   [:new_string {:optional true} [:maybe :string]]
                    [:todos {:optional true}
                     [:vector [:map
                               [:content :string]

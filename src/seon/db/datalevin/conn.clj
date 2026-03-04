@@ -4,16 +4,13 @@
    Manages client connections to the Datalevin server, providing:
    - Connection caching per namespace
    - Lazy database creation on first connection
-   - TTL-based cleanup of idle connections
    - Schema application on connect
 
    ## Configuration
 
    ```clojure
    {:seon.db.datalevin/connections
-    {:server #ig/ref :seon.db.datalevin/server
-     :ttl-ms 300000  ; Connection TTL (5 minutes default)
-     :cleanup-interval-ms 60000}}  ; Cleanup check interval (1 minute)
+    {:server #ig/ref :seon.db.datalevin/server}}
    ```
 
    ## Usage
@@ -42,9 +39,7 @@
    Database names are converted to kebab-case by Datalevin server."
   (:require [integrant.core :as ig]
             [seon.schema :as schema]
-            [taoensso.timbre :as log])
-  (:import [java.time Instant]
-           [java.util.concurrent ScheduledExecutorService Executors TimeUnit]))
+            [taoensso.timbre :as log]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schema Registration
@@ -62,12 +57,6 @@
 (schema/register! ::password
                   [:string {:min 1 :description "Server password"}])
 
-(schema/register! ::ttl-ms
-                  [:int {:min 0 :description "Connection TTL in milliseconds"}])
-
-(schema/register! ::cleanup-interval-ms
-                  [:int {:min 1000 :description "Cleanup interval in milliseconds"}])
-
 (schema/register! ::connection
                   [:any {:description "Datalevin connection (atom wrapping DB)"}])
 
@@ -77,15 +66,12 @@
                    [::host {:optional true} ::host]
                    [::username {:optional true} ::username]
                    [::password {:optional true} ::password]
-                   [::ttl-ms ::ttl-ms]
-                   [::connections [:any {:description "Atom of namespace->connection-entry"}]]
-                   [::scheduler {:optional true} [:any {:description "ScheduledExecutorService"}]]])
+                   [::connections [:any {:description "Atom of namespace->connection-entry"}]]])
 
 ;; Connection entry stored in the cache
 (schema/register! ::connection-entry
                   [:map
-                   [::connection ::connection]
-                   [::last-accessed [:any {:description "Instant of last access"}]]])
+                   [::connection ::connection]])
 
 ;; Request/Response schemas for public API
 ;; Note: These functions involve runtime resources (connections, atoms) that
@@ -194,15 +180,7 @@
                    {:error (.getMessage e)})
         false))))
 
-(defn- touch-connection!
-  "Update the last-accessed time for a connection entry."
-  [connections ns-key]
-  (swap! connections update ns-key
-         (fn [entry]
-           (when entry
-             (assoc entry ::last-accessed (Instant/now))))))
-
-(defn- connection-error?
+(defn connection-error?
   "Check if an exception indicates a connection/server error."
   [^Throwable e]
   (let [msg (str (.getMessage e) " " (some-> (.getCause e) (.getMessage)))]
@@ -230,24 +208,20 @@
         (try
           (let [new-conn (get-datalevin-conn manager db-name schema)]
             (swap! connections assoc ns-key
-                   {::connection new-conn
-                    ::last-accessed (Instant/now)})
+                   {::connection new-conn})
             new-conn)
           (catch Exception e
             (when (connection-error? e)
               (log/warn "Server unreachable while reconnecting" {:db db-name :error (.getMessage e)})
               (swap! connections dissoc ns-key))
             (throw e)))
-        ;; Connection is still valid, touch and return it
-        (do
-          (touch-connection! connections ns-key)
-          (::connection entry)))
+        ;; Connection is still valid, return it
+        (::connection entry))
       ;; No existing connection, create new one
       (try
         (let [new-conn (get-datalevin-conn manager db-name schema)]
           (swap! connections assoc ns-key
-                 {::connection new-conn
-                  ::last-accessed (Instant/now)})
+                 {::connection new-conn})
           new-conn)
         (catch Exception e
           (when (connection-error? e)
@@ -255,63 +229,10 @@
           (throw e))))))
 
 ;;; ---------------------------------------------------------------------------
-;;; TTL Cleanup
-;;; ---------------------------------------------------------------------------
-
-(defn- expired?
-  "Check if a connection entry has expired based on TTL."
-  [entry ttl-ms]
-  (let [last-accessed (::last-accessed entry)
-        now (Instant/now)
-        age-ms (.toEpochMilli (.minusMillis now (.toEpochMilli last-accessed)))]
-    ;; Calculate age properly
-    (let [accessed-epoch (.toEpochMilli last-accessed)
-          now-epoch (.toEpochMilli now)
-          age (- now-epoch accessed-epoch)]
-      (> age ttl-ms))))
-
-(defn- cleanup-expired-connections!
-  "Close and remove connections that have exceeded their TTL.
-
-   Called periodically by the scheduler."
-  [{::keys [connections ttl-ms] :as _manager}]
-  (let [entries @connections
-        expired-keys (filter (fn [[_ entry]] (expired? entry ttl-ms)) entries)]
-    (doseq [[ns-key entry] expired-keys]
-      (log/debug "Closing expired connection" {:namespace ns-key})
-      (close-datalevin-conn (::connection entry))
-      (swap! connections dissoc ns-key))))
-
-(defn- start-cleanup-scheduler!
-  "Start the background cleanup scheduler."
-  [{::keys [cleanup-interval-ms] :as manager}]
-  (let [scheduler (Executors/newSingleThreadScheduledExecutor)
-        cleanup-task #(try
-                        (cleanup-expired-connections! manager)
-                        (catch Exception e
-                          (log/error "Error in connection cleanup" {:error (.getMessage e)})))]
-    (.scheduleAtFixedRate scheduler
-                          cleanup-task
-                          cleanup-interval-ms
-                          cleanup-interval-ms
-                          TimeUnit/MILLISECONDS)
-    scheduler))
-
-(defn- stop-cleanup-scheduler!
-  "Stop the cleanup scheduler."
-  [^ScheduledExecutorService scheduler]
-  (when scheduler
-    (.shutdown scheduler)
-    (try
-      (.awaitTermination scheduler 5 TimeUnit/SECONDS)
-      (catch InterruptedException _
-        (.shutdownNow scheduler)))))
-
-;;; ---------------------------------------------------------------------------
 ;;; Public API
 ;;;
 ;;; Note: These functions omit :malli/schema metadata intentionally.
-;;; The manager contains runtime objects (atoms, schedulers, connections)
+;;; The manager contains runtime objects (atoms, connections)
 ;;; that cannot be generated for property testing. See CONVENTIONS.md
 ;;; "When NOT to Use :malli/schema" section.
 ;;; ---------------------------------------------------------------------------
@@ -451,25 +372,19 @@
 ;;; ---------------------------------------------------------------------------
 
 (defmethod ig/init-key :seon.db.datalevin/connections
-  [_ {:keys [server ttl-ms cleanup-interval-ms]
-      :or {ttl-ms 300000           ; 5 minutes default
-           cleanup-interval-ms 60000}}]  ; 1 minute default
+  [_ {:keys [server]}]
   (let [{:keys [port]} server
         manager {::port port
                  ::host "127.0.0.1"
                  ::username "datalevin"
                  ::password "datalevin"
-                 ::ttl-ms ttl-ms
-                 ::cleanup-interval-ms cleanup-interval-ms
-                 ::connections (atom {})}
-        scheduler (start-cleanup-scheduler! manager)]
-    (log/info "Started connection manager" {:port port :ttl-ms ttl-ms})
-    (assoc manager ::scheduler scheduler)))
+                 ::connections (atom {})}]
+    (log/info "Started connection manager" {:port port})
+    manager))
 
 (defmethod ig/halt-key! :seon.db.datalevin/connections
   [_ manager]
   (log/info "Stopping connection manager...")
-  (stop-cleanup-scheduler! (::scheduler manager))
   (let [closed (close-all-connections! {::manager manager})]
     (log/info "Connection manager stopped" {:connections-closed closed})))
 
@@ -478,8 +393,7 @@
 
 (defmethod ig/resume-key :seon.db.datalevin/connections
   [key opts old-opts old-state]
-  (if (and (= (:ttl-ms opts) (:ttl-ms old-opts))
-           (= (get-in opts [:server :port]) (get-in old-opts [:server :port])))
+  (if (= (get-in opts [:server :port]) (get-in old-opts [:server :port]))
     old-state
     (do (ig/halt-key! key old-state)
         (ig/init-key key opts))))

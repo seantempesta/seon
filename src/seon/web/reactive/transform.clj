@@ -114,7 +114,7 @@
    instance-id - Optional instance ID to include in action URLs
 
    Returns transformed attribute map."
-  {:malli/schema [:=> [:cat NamespaceSymbol [:maybe AttrMap] [:? [:maybe :string]]] [:maybe AttrMap]]}
+  {:malli/schema [:=> [:cat NamespaceSymbol :any [:? [:maybe :string]]] :any]}
   ([ns-sym attrs]
    (transform-attrs ns-sym attrs nil))
   ([ns-sym attrs instance-id]
