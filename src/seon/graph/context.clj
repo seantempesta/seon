@@ -13,26 +13,26 @@
    Example:
      (require '[seon.graph.context :as ctx])
 
-     (ctx/build {::ctx/conn conn
+     (ctx/build {::ctx/db-name :seon.runtime
                  ::ctx/seed \"seon.health.workout/log-workout!\"
                  ::ctx/depth 2})
      ;; => {::ctx/context-text \"## seon.health.workout/log-workout!\\n...\"
      ;;     ::ctx/entity-count 5}
 
-     (ctx/build-for-namespace {::ctx/conn conn
+     (ctx/build-for-namespace {::ctx/db-name :seon.runtime
                                ::ctx/namespace \"seon.graph.query\"})
      ;; => {::ctx/context-text \"## Namespace: seon.graph.query\\n...\"
      ;;     ::ctx/entity-count 12}"
-  (:require [datalevin.core :as d]
-            [clojure.string :as str]
+  (:require [clojure.string :as str]
+            [seon.db :as db]
             [seon.schema :as schema]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schema Registration
 ;;; ---------------------------------------------------------------------------
 
-(schema/register! ::conn
-                  [:any {:description "Datalevin connection"}])
+(schema/register! ::db-name
+                  [:keyword {:description "Database name keyword, e.g. :seon.runtime"}])
 
 (schema/register! ::seed
                   [:string {:min 1
@@ -56,76 +56,81 @@
                   [:int {:min 0 :description "Number of entities in context"}])
 
 ;;; ---------------------------------------------------------------------------
-;;; Pull Subgraph
+;;; Pull Subgraph (private helpers take db-name, use db/query and db/pull-by-name)
 ;;; ---------------------------------------------------------------------------
 
 (defn- fn-entity
   "Pull a function entity by qualified name. Returns nil if not found."
-  [db qn]
-  (let [results (d/q '[:find ?e
-                        :in $ ?qn
-                        :where [?e :seon.fn/qualified-name ?qn]]
-                      db qn)]
+  [db-name qn]
+  (let [results (db/query db-name
+                          '[:find ?e
+                            :in $ ?qn
+                            :where [?e :seon.fn/qualified-name ?qn]]
+                          qn)]
     (when (seq results)
-      (d/pull db '[*] (ffirst results)))))
+      (db/pull-by-name db-name '[*] (ffirst results)))))
 
 (defn- calls-of
   "Get qualified names of functions called by the given function."
-  [db from-qn]
-  (->> (d/q '[:find ?to-qn
-              :in $ ?from-qn
-              :where
-              [?from :seon.fn/qualified-name ?from-qn]
-              [?call :seon.call/from-fn ?from]
-              [?call :seon.call/to-fn ?to]
-              [?to :seon.fn/qualified-name ?to-qn]]
-            db from-qn)
+  [db-name from-qn]
+  (->> (db/query db-name
+                 '[:find ?to-qn
+                   :in $ ?from-qn
+                   :where
+                   [?from :seon.fn/qualified-name ?from-qn]
+                   [?call :seon.call/from-fn ?from]
+                   [?call :seon.call/to-fn ?to]
+                   [?to :seon.fn/qualified-name ?to-qn]]
+                 from-qn)
        (map first)
        set))
 
 (defn- callers-of-fn
   "Get qualified names of functions that call the given function."
-  [db to-qn]
-  (->> (d/q '[:find ?from-qn
-              :in $ ?to-qn
-              :where
-              [?to :seon.fn/qualified-name ?to-qn]
-              [?call :seon.call/to-fn ?to]
-              [?call :seon.call/from-fn ?from]
-              [?from :seon.fn/qualified-name ?from-qn]]
-            db to-qn)
+  [db-name to-qn]
+  (->> (db/query db-name
+                 '[:find ?from-qn
+                   :in $ ?to-qn
+                   :where
+                   [?to :seon.fn/qualified-name ?to-qn]
+                   [?call :seon.call/to-fn ?to]
+                   [?call :seon.call/from-fn ?from]
+                   [?from :seon.fn/qualified-name ?from-qn]]
+                 to-qn)
        (map first)
        set))
 
 (defn- ns-dependencies
   "Get namespace names that the given namespace depends on."
-  [db ns-name]
-  (->> (d/q '[:find ?to-ns
-              :in $ ?from-ns
-              :where
-              [?e :seon.ns.dep/from-ns ?from-ns]
-              [?e :seon.ns.dep/to-ns ?to-ns]]
-            db ns-name)
+  [db-name ns-name]
+  (->> (db/query db-name
+                 '[:find ?to-ns
+                   :in $ ?from-ns
+                   :where
+                   [?e :seon.ns.dep/from-ns ?from-ns]
+                   [?e :seon.ns.dep/to-ns ?to-ns]]
+                 ns-name)
        (map first)
        set))
 
 (defn- ns-entity
   "Pull a namespace entity by name. Returns nil if not found."
-  [db ns-name]
-  (let [results (d/q '[:find ?e
-                        :in $ ?n
-                        :where [?e :seon.ns/name ?n]]
-                      db ns-name)]
+  [db-name ns-name]
+  (let [results (db/query db-name
+                          '[:find ?e
+                            :in $ ?n
+                            :where [?e :seon.ns/name ?n]]
+                          ns-name)]
     (when (seq results)
-      (d/pull db '[*] (ffirst results)))))
+      (db/pull-by-name db-name '[*] (ffirst results)))))
 
 (defn- spec-for-ref
   "Pull a spec entity from a ref value (entity id)."
-  [db ref-val]
+  [db-name ref-val]
   (when ref-val
     (let [eid (if (map? ref-val) (:db/id ref-val) ref-val)]
       (when eid
-        (d/pull db '[*] eid)))))
+        (db/pull-by-name db-name '[*] eid)))))
 
 (defn pull-subgraph
   "Given a seed qualified-name and depth, recursively pull related entities.
@@ -140,14 +145,14 @@
    Returns a set of entity maps, each tagged with :context/type (:fn, :ns, :spec).
 
    Request keys:
-     ::conn          - Required. Datalevin connection
+     ::db-name       - Optional. Database name keyword (default :seon.runtime)
      ::seed          - Required. Qualified function name (e.g. \"seon.graph.query/call-graph\")
      ::depth         - Optional. Hops to follow (default 2)
      ::max-entities  - Optional. Cap (default 50)"
-  [{::keys [conn seed depth max-entities]}]
+  [{::keys [db-name seed depth max-entities]}]
   (let [depth (or depth 2)
         max-entities (or max-entities 50)
-        db @conn
+        db-name (or db-name :seon.runtime)
         visited (atom #{})
         entities (atom [])
         add! (fn [ent type]
@@ -165,28 +170,28 @@
               (when (and (pos? remaining-depth)
                          (not (contains? @visited qn))
                          (< (count @entities) max-entities))
-                (when-let [ent (fn-entity db qn)]
+                (when-let [ent (fn-entity db-name qn)]
                   (add! ent :fn)
                   ;; Add input/output specs if present
-                  (when-let [in-spec (spec-for-ref db (:seon.fn/input-spec ent))]
+                  (when-let [in-spec (spec-for-ref db-name (:seon.fn/input-spec ent))]
                     (add! in-spec :spec))
-                  (when-let [out-spec (spec-for-ref db (:seon.fn/output-spec ent))]
+                  (when-let [out-spec (spec-for-ref db-name (:seon.fn/output-spec ent))]
                     (add! out-spec :spec))
                   ;; Add namespace entity
-                  (when-let [ns-ent (ns-entity db (:seon.fn/namespace ent))]
+                  (when-let [ns-ent (ns-entity db-name (:seon.fn/namespace ent))]
                     (add! ns-ent :ns))
                   ;; Walk callees
-                  (let [callees (calls-of db qn)]
+                  (let [callees (calls-of db-name qn)]
                     (doseq [callee callees]
                       (when (< (count @entities) max-entities)
                         (walk-fn callee (dec remaining-depth)))))
                   ;; Walk callers (only at depth 1 from seed, don't recurse into callers' callers)
                   (when (= remaining-depth depth)
-                    (let [callers (callers-of-fn db qn)]
+                    (let [callers (callers-of-fn db-name qn)]
                       (doseq [caller callers]
                         (when (and (not (contains? @visited caller))
                                    (< (count @entities) max-entities))
-                          (when-let [caller-ent (fn-entity db caller)]
+                          (when-let [caller-ent (fn-entity db-name caller)]
                             (add! caller-ent :fn)))))))))]
       (walk-fn seed depth))
     @entities))
@@ -200,8 +205,9 @@
    (no outgoing calls), then callers. Uses Kahn's algorithm on the call graph.
 
    Entities is a seq of maps with :context/type and function qualified names.
+   db-name is a keyword for database resolution.
    Returns entities in dependency order."
-  [entities db]
+  [entities db-name]
   (let [fns (filter #(= :fn (:context/type %)) entities)
         specs (filter #(= :spec (:context/type %)) entities)
         nses (filter #(= :ns (:context/type %)) entities)
@@ -211,7 +217,7 @@
         adj (into {}
                   (for [f fns
                         :let [qn (:seon.fn/qualified-name f)
-                              callees (calls-of db qn)
+                              callees (calls-of db-name qn)
                               in-graph (filter fn-qns callees)]]
                     [qn (set in-graph)]))
         ;; In-degree
@@ -220,7 +226,7 @@
                   t targets]
             (swap! in-degree update t (fnil inc 0)))
         ;; Kahn's
-        queue (atom (into (clojure.lang.PersistentQueue/EMPTY)
+        queue (atom (into clojure.lang.PersistentQueue/EMPTY
                           (filter #(zero? (get @in-degree % 0)) fn-qns)))
         sorted (atom [])]
     (while (seq @queue)
@@ -244,14 +250,14 @@
 
 (defn- render-fn-entity
   "Render a function entity to a compact text block."
-  [ent db]
+  [ent db-name]
   (let [qn (:seon.fn/qualified-name ent)
         args (:seon.fn/arglists ent)
         doc (:seon.fn/doc ent)
-        callees (sort (calls-of db qn))
-        callers (sort (callers-of-fn db qn))
-        in-spec (spec-for-ref db (:seon.fn/input-spec ent))
-        out-spec (spec-for-ref db (:seon.fn/output-spec ent))
+        callees (sort (calls-of db-name qn))
+        callers (sort (callers-of-fn db-name qn))
+        in-spec (spec-for-ref db-name (:seon.fn/input-spec ent))
+        out-spec (spec-for-ref db-name (:seon.fn/output-spec ent))
         private? (:seon.fn/private ent)]
     (str/join "\n"
               (cond-> [(str "### " (when private? "(private) ") qn
@@ -264,9 +270,9 @@
 
 (defn- render-ns-entity
   "Render a namespace entity to a compact text block."
-  [ent db]
+  [ent db-name]
   (let [ns-name (:seon.ns/name ent)
-        deps (sort (ns-dependencies db ns-name))
+        deps (sort (ns-dependencies db-name ns-name))
         doc (:seon.ns/doc ent)]
     (str/join "\n"
               (cond-> [(str "### Namespace: " ns-name)]
@@ -288,10 +294,10 @@
   "Render a single entity to a compact text block.
 
    Dispatches on :context/type - :fn, :ns, or :spec."
-  [ent db]
+  [ent db-name]
   (case (:context/type ent)
-    :fn (render-fn-entity ent db)
-    :ns (render-ns-entity ent db)
+    :fn (render-fn-entity ent db-name)
+    :ns (render-ns-entity ent db-name)
     :spec (render-spec-entity ent)
     (str "### Unknown: " (pr-str (select-keys ent [:context/type])))))
 
@@ -306,7 +312,7 @@
    and renders each entity to a compact text block.
 
    Request keys:
-     ::conn          - Required. Datalevin connection
+     ::db-name       - Optional. Database name keyword (default :seon.runtime)
      ::seed          - Required. Qualified function name or namespace name
      ::depth         - Optional. Hops to follow (default 2)
      ::max-entities  - Optional. Entity cap (default 50)
@@ -315,13 +321,14 @@
      {::context-text \"...\" ::entity-count N}
 
    Example:
-     (build {::conn conn ::seed \"seon.graph.query/call-graph\" ::depth 2})"
-  [{::keys [conn seed depth max-entities] :as opts}]
-  (let [db @conn
+     (build {::db-name :seon.runtime ::seed \"seon.graph.query/call-graph\" ::depth 2})"
+  [{::keys [db-name] :as opts}]
+  (let [db-name (or db-name :seon.runtime)
+        opts (assoc opts ::db-name db-name)
         entities (pull-subgraph opts)
-        sorted (toposort entities db)
+        sorted (toposort entities db-name)
         text (->> sorted
-                  (map #(render-entity % db))
+                  (map #(render-entity % db-name))
                   (str/join "\n\n"))]
     {::context-text text
      ::entity-count (count sorted)}))
@@ -333,7 +340,7 @@
    context with depth 1 for each.
 
    Request keys:
-     ::conn          - Required. Datalevin connection
+     ::db-name       - Optional. Database name keyword (default :seon.runtime)
      ::namespace     - Required. Namespace name (string)
      ::max-entities  - Optional. Entity cap (default 50)
 
@@ -341,17 +348,18 @@
      {::context-text \"...\" ::entity-count N}
 
    Example:
-     (build-for-namespace {::conn conn ::namespace \"seon.graph.query\"})"
-  [{::keys [conn namespace max-entities]}]
-  (let [db @conn
+     (build-for-namespace {::db-name :seon.runtime ::namespace \"seon.graph.query\"})"
+  [{::keys [db-name namespace max-entities]}]
+  (let [db-name (or db-name :seon.runtime)
         max-entities (or max-entities 50)
         ;; Find all functions in the namespace
-        fn-qns (->> (d/q '[:find ?qn
-                            :in $ ?ns
-                            :where
-                            [?e :seon.fn/namespace ?ns]
-                            [?e :seon.fn/qualified-name ?qn]]
-                          db namespace)
+        fn-qns (->> (db/query db-name
+                              '[:find ?qn
+                                :in $ ?ns
+                                :where
+                                [?e :seon.fn/namespace ?ns]
+                                [?e :seon.fn/qualified-name ?qn]]
+                              namespace)
                      (map first)
                      sort)
         ;; Pull entities for each function (depth 1) collecting into a single set
@@ -359,7 +367,7 @@
         seen (atom #{})
         _ (doseq [qn fn-qns
                   :when (< (count @all-entities) max-entities)]
-            (let [ents (pull-subgraph {::conn conn ::seed qn
+            (let [ents (pull-subgraph {::db-name db-name ::seed qn
                                        ::depth 1
                                        ::max-entities (- max-entities (count @all-entities))})]
               (doseq [e ents
@@ -371,14 +379,14 @@
                       :when (and key (not (contains? @seen key)))]
                 (swap! seen conj key)
                 (swap! all-entities conj e))))
-        sorted (toposort @all-entities db)
+        sorted (toposort @all-entities db-name)
         ;; Add namespace header
-        ns-ent (ns-entity db namespace)
+        ns-ent (ns-entity db-name namespace)
         header (str "## Namespace: " namespace
                     (when-let [doc (:seon.ns/doc ns-ent)]
                       (str "\n" doc)))
         body (->> sorted
-                  (map #(render-entity % db))
+                  (map #(render-entity % db-name))
                   (str/join "\n\n"))]
     {::context-text (str header "\n\n" body)
      ::entity-count (count sorted)}))

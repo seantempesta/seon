@@ -4,9 +4,11 @@
             [clojure.string :as str]
             [datalevin.core :as d]
             [seon.db :as db]
+            [seon.db.datalevin.conn :as dl-conn]
             [seon.graph.analyzer :as analyzer]
             [seon.graph.ingest :as ingest]
-            [seon.repl.context :as context])
+            [seon.repl.context :as context]
+            [seon.test-utils])
   (:import [java.io File]))
 
 ;;; ---------------------------------------------------------------------------
@@ -32,14 +34,16 @@
 
 (defn with-populated-graph [f]
   (let [dir (temp-dir)
-        conn (d/create-conn dir ingest/datalevin-schema)]
+        conn (d/create-conn dir ingest/datalevin-schema)
+        fake-mgr {::dl-conn/connections (atom {:seon.runtime {::dl-conn/connection conn}})}]
     (try
       (binding [*test-conn* conn
-                db/*direct-write* true]
+                db/*direct-mode* true
+                db/*conn-manager* fake-mgr]
         (let [project (analyzer/analyze-project! {::analyzer/paths ["src/seon/graph/"]})
               entities (analyzer/extract-entities
                         {::analyzer/raw-analysis (::analyzer/raw-analysis project)})]
-          (ingest/ingest-analysis! {::ingest/conn conn
+          (ingest/ingest-analysis! {::ingest/db-name :seon.runtime
                                     ::ingest/entities entities}))
         (f))
       (finally
@@ -54,14 +58,14 @@
 
 (deftest for-function-test
   (testing "returns non-empty context string for known function"
-    (let [result (context/for-function {::context/conn *test-conn*
+    (let [result (context/for-function {::context/db-name :seon.runtime
                                          ::context/qualified-name "seon.graph.query/call-graph"})]
       (is (string? result))
       (is (pos? (count result)))
       (is (str/includes? result "seon.graph.query/call-graph"))))
 
   (testing "returns empty-ish context for nonexistent function"
-    (let [result (context/for-function {::context/conn *test-conn*
+    (let [result (context/for-function {::context/db-name :seon.runtime
                                          ::context/qualified-name "nonexistent/fn"})]
       (is (string? result))
       ;; Empty context is just an empty string
@@ -73,7 +77,7 @@
 
 (deftest for-namespace-test
   (testing "returns context with namespace header"
-    (let [result (context/for-namespace {::context/conn *test-conn*
+    (let [result (context/for-namespace {::context/db-name :seon.runtime
                                           ::context/namespace "seon.graph.query"})]
       (is (string? result))
       (is (pos? (count result)))
@@ -82,7 +86,7 @@
       (is (str/includes? result "call-graph"))))
 
   (testing "returns header for nonexistent namespace"
-    (let [result (context/for-namespace {::context/conn *test-conn*
+    (let [result (context/for-namespace {::context/db-name :seon.runtime
                                           ::context/namespace "nonexistent.ns"})]
       (is (string? result))
       (is (str/includes? result "nonexistent.ns")))))
@@ -93,13 +97,13 @@
 
 (deftest for-data-test
   (testing "returns message when no renderers match"
-    (let [result (context/for-data {::context/conn *test-conn*
+    (let [result (context/for-data {::context/db-name :seon.runtime
                                      ::context/data {:some/random-key "value"}})]
       (is (string? result))
       (is (str/includes? result "No matching renderers"))))
 
   (testing "handles empty data map"
-    (let [result (context/for-data {::context/conn *test-conn*
+    (let [result (context/for-data {::context/db-name :seon.runtime
                                      ::context/data {}})]
       (is (string? result)))))
 

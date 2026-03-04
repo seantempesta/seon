@@ -3,7 +3,9 @@
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [datalevin.core :as d]
             [seon.db :as db]
-            [seon.ai.datalevin :as dl]))
+            [seon.db.datalevin.conn :as conn]
+            [seon.ai.datalevin :as dl]
+            [seon.test-utils]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Test Fixtures
@@ -22,10 +24,12 @@
 
 (defn with-test-conn [f]
   (cleanup-test-db)
-  (let [conn (create-test-conn)]
+  (let [conn (create-test-conn)
+        fake-mgr {::conn/port 0
+                  ::conn/connections (atom {:seon.ai {::conn/connection conn}})}]
     (try
-      (binding [dl/*test-conn* conn
-                db/*direct-write* true]
+      (binding [db/*direct-mode* true
+                db/*conn-manager* fake-mgr]
         (dl/reset-stats!)
         (f))
       (finally

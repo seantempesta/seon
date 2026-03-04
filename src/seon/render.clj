@@ -151,16 +151,16 @@
    3. Alphabetical qualified-name (deterministic tiebreaker)
 
    Arguments:
-     conn   - Datalevin connection
-     data   - Map of data to render
-     format - :html or :ai
+     db-name - Database name keyword (e.g. :seon.runtime)
+     data    - Map of data to render
+     format  - :html or :ai
 
    Returns the qualified-name string of the best renderer, or nil."
-  [conn data format]
+  [db-name data format]
   (let [data-keys (set (keys data))
         format-key (case format :html :seon.render/html :ai :seon.render/ai)
         ;; Use unified helper to find candidates via ref join
-        candidates (gq/functions-with-output-key {::gq/conn conn ::gq/output-key format-key})
+        candidates (gq/functions-with-output-key {::gq/db-name db-name ::gq/output-key format-key})
         ;; Filter: required keys must be subset of data keys
         matching (->> candidates
                       (filter (fn [e]
@@ -218,14 +218,14 @@
    4. Tiebreak: namespace proximity (same ns > .render child > sibling)
 
    Arguments:
-     conn           - Datalevin connection
+     db-name        - Database name keyword (e.g. :seon.runtime)
      available-keys - Set of available data keys
      target-ns      - Target namespace string (for proximity tiebreaking)
 
    Returns the resolved var, or nil."
-  [conn available-keys target-ns]
+  [db-name available-keys target-ns]
   (let [;; Use unified helper to find candidates via ref join
-        candidates (gq/functions-with-output-key {::gq/conn conn ::gq/output-key :seon.render/html})
+        candidates (gq/functions-with-output-key {::gq/db-name db-name ::gq/output-key :seon.render/html})
         ;; Filter: required keys must be subset of available-keys
         matching (->> candidates
                       (filter (fn [e]
@@ -267,11 +267,8 @@
     (if (not= cached ::miss)
       cached
       (try
-        (let [conn (get-conn)
-              result (if conn
-                       (if-let [qn (find-renderer conn data format)]
-                         (or (requiring-resolve (symbol qn)) ::no-renderer)
-                         ::no-renderer)
+        (let [result (if-let [qn (find-renderer :seon.runtime data format)]
+                       (or (requiring-resolve (symbol qn)) ::no-renderer)
                        ::no-renderer)]
           (swap! resolution-cache assoc cache-key result)
           result)
@@ -698,15 +695,15 @@
    The function with the MOST key overlap wins.
 
    Arguments:
-     conn    - Datalevin connection
+     db-name - Database name keyword (e.g. :seon.runtime)
      ns-data - Map of namespace data (keys to match against)
 
    Returns:
      The qualified-name string of the best page renderer, or nil."
-  [conn ns-data]
+  [db-name ns-data]
   (let [data-keys (set (keys ns-data))
         ;; Use unified helper to find HTML renderers via ref join
-        candidates (gq/functions-with-output-key {::gq/conn conn ::gq/output-key :seon.render/html})
+        candidates (gq/functions-with-output-key {::gq/db-name db-name ::gq/output-key :seon.render/html})
         ;; Filter: at least one required key must overlap with data keys
         matching (->> candidates
                       (filter (fn [e]
@@ -765,8 +762,7 @@
    Returns:
      Rendered output for the requested format."
   [{:keys [::ns-data ::format] :or {format :html}}]
-  (let [conn (get-conn)
-        page-renderer-name (when conn (find-page-renderer conn ns-data))]
+  (let [page-renderer-name (find-page-renderer :seon.runtime ns-data)]
     (if page-renderer-name
       (let [renderer-fn (requiring-resolve (symbol page-renderer-name))
             result (renderer-fn ns-data)

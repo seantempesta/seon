@@ -76,6 +76,10 @@ seon/
     └── reference/            ; Technical reference docs
 ```
 
+### Database Access
+
+`seon.db` is the **sole database API**. Only `src/seon/db/` and `src/seon/db/datalevin/` touch `datalevin.core` directly. Everything else uses `db/transact!`, `db/query`, `db/pull-by-name`, etc. with db-name keywords (`:seon`, `:seon.runtime`, or namespace keywords). Reader and writer flow processes serialize all access. Tests bind `db/*direct-mode*` to bypass the flow. See `CONVENTIONS.md` "Database Access" for patterns.
+
 ### Flow Topology (routing backbone)
 
 All cross-boundary calls — namespace function calls, database writes, REPL eval — route through `topology/request!` (core.async.flow). One pattern: register promise → inject → step-fn → reply-router → deliver promise. See `docs/prds/unified-flow/design.md`.

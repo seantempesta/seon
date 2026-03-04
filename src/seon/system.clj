@@ -220,7 +220,7 @@
 
 (defn- run-code-scan!
   "Execute the code scan in the current thread. Called from a future."
-  [conn paths]
+  [paths]
   (let [extract-graph-from-file (resolve 'seon.graph.extract/extract-graph-from-file)
         ingest-namespace! (resolve 'seon.graph.ingest/ingest-namespace!)]
     (try
@@ -252,7 +252,7 @@
             (try
               (let [ns-str (:seon.graph.extract/ns-name graph)]
                 (ingest-namespace!
-                 {:seon.graph.ingest/conn conn
+                 {:seon.graph.ingest/db-name :seon.runtime
                   :seon.graph.ingest/ns-name ns-str
                   :seon.graph.ingest/functions (:seon.graph.extract/functions graph)
                   :seon.graph.ingest/specs (:seon.graph.extract/specs graph)
@@ -272,21 +272,20 @@
 (defmethod ig/init-key :seon.graph/scanner
   [_ {:keys [graph-db paths enabled?]}]
   (when enabled?
-    (let [conn (runtime-db-conn graph-db)]
-      (when-not conn
-        (log/warn "Code scanner: no graph-db connection available")
-        (throw (ex-info "Code scanner requires graph-db connection" {})))
-      (require 'seon.graph.extract)
-      (require 'seon.graph.ingest)
-      ;; Register immediately so system sees the component
-      (runtime/register! {::runtime/namespace "seon.graph.scanner"
-                          ::runtime/status :running
-                          ::runtime/location :in-process
-                          ::runtime/component-key :seon.graph/scanner})
-      ;; Run scan in background so startup isn't blocked (~3s savings)
-      ;; Store graph-db (not raw conn) so consumers can get fresh connections
-      (let [scan-future (future (run-code-scan! conn paths))]
-        {:graph-db graph-db :paths paths :scan-future scan-future}))))
+    ;; Verify connectivity before starting scan
+    (when-not (runtime-db-conn graph-db)
+      (log/warn "Code scanner: no graph-db connection available")
+      (throw (ex-info "Code scanner requires graph-db connection" {})))
+    (require 'seon.graph.extract)
+    (require 'seon.graph.ingest)
+    ;; Register immediately so system sees the component
+    (runtime/register! {::runtime/namespace "seon.graph.scanner"
+                        ::runtime/status :running
+                        ::runtime/location :in-process
+                        ::runtime/component-key :seon.graph/scanner})
+    ;; Run scan in background so startup isn't blocked (~3s savings)
+    (let [scan-future (future (run-code-scan! paths))]
+      {:graph-db graph-db :paths paths :scan-future scan-future})))
 
 (defmethod ig/halt-key! :seon.graph/scanner
   [_ state]

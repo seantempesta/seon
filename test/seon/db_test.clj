@@ -35,7 +35,8 @@
   [f]
   (tu/with-temp-conn test-schema
     (fn [conn]
-      (binding [db/*conn-manager* (make-fake-manager conn)]
+      (binding [db/*conn-manager* (make-fake-manager conn)
+                db/*direct-mode* true]
         (f conn)))))
 
 (deftest query-test
@@ -91,18 +92,18 @@
 
 (deftest transact-rejects-unregistered-attrs-test
   (testing "transact! throws for unregistered attributes"
-    (tu/with-temp-conn test-schema
-      (fn [conn]
+    (with-named-db
+      (fn [_conn]
         (is (thrown-with-msg?
              clojure.lang.ExceptionInfo
              #"Unregistered attributes"
-             (db/transact! conn [{:bogus/unregistered "nope"}])))))))
+             (db/transact! :seon [{:bogus/unregistered "nope"}])))))))
 
 (deftest transact-rejects-unregistered-vector-tuple-test
   (testing "transact! throws for unregistered attrs in vector tuples"
-    (tu/with-temp-conn test-schema
-      (fn [conn]
+    (with-named-db
+      (fn [_conn]
         (is (thrown-with-msg?
              clojure.lang.ExceptionInfo
              #"Unregistered attributes"
-             (db/transact! conn [[:db/add 1 :bogus/field "val"]])))))))
+             (db/transact! :seon [[:db/add 1 :bogus/field "val"]])))))))

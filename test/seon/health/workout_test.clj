@@ -10,6 +10,7 @@
             [seon.graph.extract :as extract]
             [seon.graph.scanner :as scanner]
             [seon.health.workout :as workout]
+            [seon.test-utils]
             [seon.health.workout.render :as workout-render]
             [seon.render :as render]))
 

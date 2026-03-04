@@ -7,7 +7,8 @@
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [datalevin.core :as d]
-            [seon.db.datalevin.backup :as backup])
+            [seon.db.datalevin.backup :as backup]
+            [seon.test-utils])
   (:import [java.io File]))
 
 ;;; ---------------------------------------------------------------------------

@@ -250,14 +250,12 @@
                             (log/info "Shutdown signal received")
                             (log/info "Pausing infrastructure writer...")
                             (try (db/pause-writer!) (catch Exception _))
-                            (when-let [runtime-db (some-> state/system :seon/runtime-db)]
-                              (log/info "Backing up ctx instances...")
-                              (try
-                                (let [conn ((requiring-resolve 'seon.system/runtime-db-conn) runtime-db)]
-                                  (lifecycle/backup-all-instances! {::lifecycle/conn conn}))
-                                (catch Throwable t
-                                  (log/warn "Failed to backup ctx instances"
-                                            {:error (.getMessage t)}))))
+                            (log/info "Backing up ctx instances...")
+                            (try
+                              (lifecycle/backup-all-instances! {::lifecycle/db-name :seon.runtime})
+                              (catch Throwable t
+                                (log/warn "Failed to backup ctx instances"
+                                          {:error (.getMessage t)})))
                             (stop-app)
                             (shutdown-agents))))
 

@@ -5,8 +5,10 @@
   - Datalevin test helpers with safe connection management
   - Time helpers for test data"
   (:require [clojure.test :refer [is]]
+            [datalevin.constants :as dc]
             [datalevin.core :as d]
-            [seon.db :as db])
+            [seon.db :as db]
+            [seon.db.datalevin.conn :as conn])
   (:import [java.io File]
            [java.util UUID]))
 
@@ -31,6 +33,17 @@
   "KV options for fast test databases. :nosync skips fsync for speed."
   {:flags #{:nordahead :writemap :mapasync :nosync}})
 
+;; Reduce LMDB map size for all tests. Default is 1000 MiB per db; tests need only ~10 MiB.
+;; This prevents OutOfMemoryError on direct buffer memory when many test connections are created.
+(alter-var-root #'dc/*init-db-size* (constantly 10))
+
+(defn with-small-db-size
+  "Fixture that binds Datalevin init-db-size to 10 MiB for all tests in a namespace.
+   Use as: (use-fixtures :once tu/with-small-db-size)"
+  [f]
+  (binding [dc/*init-db-size* 10]
+    (f)))
+
 (defn- delete-dir!
   "Recursively delete a directory and all its contents."
   [^String path]
@@ -52,35 +65,34 @@
          (is (= 1 (count (d/q '[:find ?e :where [?e :name _]] @conn))))))"
   ([f] (with-temp-conn {} f))
   ([db-schema f]
-   (let [dir  (str "tmp/test-" (System/nanoTime))
-         conn (d/create-conn dir db-schema {:kv-opts fast-kv-opts})]
-     (try
-       (f conn)
-       (finally
-         (when-not (d/closed? conn)
-           (d/close conn))
-         (delete-dir! dir))))))
+   (binding [dc/*init-db-size* 10]
+     (let [dir  (str "tmp/test-" (System/nanoTime))
+           conn (d/create-conn dir db-schema {:kv-opts fast-kv-opts})]
+       (try
+         (f conn)
+         (finally
+           (when-not (d/closed? conn)
+             (d/close conn))
+           (delete-dir! dir)))))))
 
 (defn with-test-datalevin
   "Fixture that provides a temporary Datalevin connection for AI tests.
-   Sets seon.ai.datalevin/*test-conn* so AI functions use it instead
-   of the Integrant system connection."
+   Binds db/*conn-manager* with a fake manager mapping :seon.ai to a temp conn,
+   and db/*direct-mode* to true so reads/writes bypass the infrastructure flow."
   [f]
-  (require 'seon.ai.datalevin)
-  (let [dir (str "tmp/dl-test-" (UUID/randomUUID))
-        conn (d/create-conn dir {} {:kv-opts fast-kv-opts})
-        test-conn-var (resolve 'seon.ai.datalevin/*test-conn*)]
-    (try
-      (push-thread-bindings {test-conn-var conn
-                             #'db/*direct-write* true})
+  (binding [dc/*init-db-size* 10]
+    (let [dir (str "tmp/dl-test-" (UUID/randomUUID))
+          conn (d/create-conn dir {} {:kv-opts fast-kv-opts})
+          fake-mgr {::conn/port 0
+                    ::conn/connections (atom {:seon.ai {::conn/connection conn}})}]
       (try
-        (f)
+        (binding [db/*direct-mode* true
+                  db/*conn-manager* fake-mgr]
+          (f))
         (finally
-          (pop-thread-bindings)))
-      (finally
-        (when-not (d/closed? conn)
-          (d/close conn))
-        (delete-dir! dir)))))
+          (when-not (d/closed? conn)
+            (d/close conn))
+          (delete-dir! dir))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Helpers

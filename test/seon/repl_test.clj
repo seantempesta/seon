@@ -5,15 +5,15 @@
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [datalevin.core :as d]
             [seon.db :as db]
+            [seon.db.datalevin.conn :as dl-conn]
             [seon.graph.ingest :as ingest]
-            [seon.repl :as super])
+            [seon.repl :as super]
+            [seon.test-utils])
   (:import [java.io File]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Test Fixtures
 ;;; ---------------------------------------------------------------------------
-
-(def ^:dynamic *test-conn* nil)
 
 (defn- temp-dir
   "Create a temporary directory for Datalevin."
@@ -37,10 +37,11 @@
 (defn with-temp-conn [f]
   (let [dir (temp-dir)
         schema (merge ingest/datalevin-schema super/datalevin-schema)
-        conn (d/create-conn dir schema)]
+        conn (d/create-conn dir schema)
+        mock-manager {::dl-conn/connections (atom {:test-db {::dl-conn/connection conn}})}]
     (try
-      (binding [*test-conn* conn
-                db/*direct-write* true]
+      (binding [db/*direct-mode* true
+                db/*conn-manager* mock-manager]
         (f))
       (finally
         (d/close conn)
@@ -102,7 +103,7 @@
     (let [result (super/eval-form! {::super/source "(defn ema [period data] (reduce + data))"
                                     ::super/namespace "seon.trading.signals"
                                     ::super/agent-id "a13b"
-                                    ::super/conn *test-conn*})]
+                                    ::super/db-name :test-db})]
       (is (= :defn (::super/form-type result)))
       (is (= "ema" (::super/form-name result)))
       (is (= 1 (::super/version result)))
@@ -113,11 +114,11 @@
     (let [r1 (super/eval-form! {::super/source "(defn ema [period data] (reduce + data))"
                                  ::super/namespace "seon.trading.signals"
                                  ::super/agent-id "a13b"
-                                 ::super/conn *test-conn*})
+                                 ::super/db-name :test-db})
           r2 (super/eval-form! {::super/source "(defn ema [period data] (* 2 (reduce + data)))"
                                  ::super/namespace "seon.trading.signals"
                                  ::super/agent-id "a13b"
-                                 ::super/conn *test-conn*})]
+                                 ::super/db-name :test-db})]
       (is (= 2 (::super/version r1)))
       (is (= 3 (::super/version r2)))))
 
@@ -125,11 +126,11 @@
     (let [r1 (super/eval-form! {::super/source "(+ 1 2)"
                                  ::super/namespace "seon.trading.signals"
                                  ::super/agent-id "a13b"
-                                 ::super/conn *test-conn*})
+                                 ::super/db-name :test-db})
           r2 (super/eval-form! {::super/source "(+ 3 4)"
                                  ::super/namespace "seon.trading.signals"
                                  ::super/agent-id "a13b"
-                                 ::super/conn *test-conn*})]
+                                 ::super/db-name :test-db})]
       (is (= 1 (::super/version r1)))
       (is (= 1 (::super/version r2))))))
 
@@ -143,17 +144,17 @@
     (super/eval-form! {::super/source "(defn ema [p d] (reduce + d))"
                        ::super/namespace "seon.trading.signals"
                        ::super/agent-id "a13b"
-                       ::super/conn *test-conn*})
+                       ::super/db-name :test-db})
     (super/eval-form! {::super/source "(defn ema [p d] (* 2 (reduce + d)))"
                        ::super/namespace "seon.trading.signals"
                        ::super/agent-id "a13b"
-                       ::super/conn *test-conn*})
+                       ::super/db-name :test-db})
     (super/eval-form! {::super/source "(defn sma [period data] (/ (reduce + data) period))"
                        ::super/namespace "seon.trading.signals"
                        ::super/agent-id "a13b"
-                       ::super/conn *test-conn*})
+                       ::super/db-name :test-db})
 
-    (let [forms (super/current-forms {::super/conn *test-conn*
+    (let [forms (super/current-forms {::super/db-name :test-db
                                       ::super/namespace "seon.trading.signals"})
           by-name (into {} (map (fn [f] [(:form/name f) f]) forms))]
       (is (= 2 (count forms)))
@@ -169,17 +170,17 @@
     (super/eval-form! {::super/source "(defn ema [p d] v1)"
                        ::super/namespace "seon.trading.signals"
                        ::super/agent-id "a13b"
-                       ::super/conn *test-conn*})
+                       ::super/db-name :test-db})
     (super/eval-form! {::super/source "(defn ema [p d] v2)"
                        ::super/namespace "seon.trading.signals"
                        ::super/agent-id "a13b"
-                       ::super/conn *test-conn*})
+                       ::super/db-name :test-db})
     (super/eval-form! {::super/source "(defn ema [p d] v3)"
                        ::super/namespace "seon.trading.signals"
                        ::super/agent-id "a13b"
-                       ::super/conn *test-conn*})
+                       ::super/db-name :test-db})
 
-    (let [history (super/form-history {::super/conn *test-conn*
+    (let [history (super/form-history {::super/db-name :test-db
                                        ::super/namespace "seon.trading.signals"
                                        ::super/form-name "ema"})]
       (is (= 3 (count history)))
@@ -194,12 +195,12 @@
     (super/eval-form! {::super/source "(defn ema [period data] (reduce + data))"
                        ::super/namespace "seon.trading.signals"
                        ::super/agent-id "a13b"
-                       ::super/conn *test-conn*})
+                       ::super/db-name :test-db})
 
     ;; Check that the function was indexed in the knowledge graph
-    (let [results (d/q '[:find ?qn
-                         :where
-                         [?e :seon.fn/qualified-name ?qn]]
-                       @*test-conn*)]
+    (let [results (db/query :test-db
+                            '[:find ?qn
+                              :where
+                              [?e :seon.fn/qualified-name ?qn]])]
       ;; analyzer should have picked up the defn
       (is (seq results) "Knowledge graph should have function entities after eval"))))

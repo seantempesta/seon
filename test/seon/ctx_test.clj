@@ -3,7 +3,9 @@
             [datalevin.core :as d]
             [seon.ctx :as ctx]
             [seon.db :as db]
-            [seon.schema :as schema]))
+            [seon.db.datalevin.conn :as dl-conn]
+            [seon.schema :as schema]
+            [seon.test-utils]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Test Fixtures
@@ -36,8 +38,10 @@
 (use-fixtures :each
   (fn [f]
     (setup-datalevin!)
-    (binding [db/*direct-write* true]
-      (try (f) (finally (teardown-datalevin!))))))
+    (let [fake-mgr {::dl-conn/connections (atom {:test-ctx {::dl-conn/connection @test-conn}})}]
+      (binding [db/*direct-mode* true
+                db/*conn-manager* fake-mgr]
+        (try (f) (finally (teardown-datalevin!)))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Lifecycle Tests
@@ -81,8 +85,7 @@
 
 (deftest persistence-round-trip-test
   (testing "Create with persist?, update, then load! gets latest"
-    (let [conn @test-conn
-          a (ctx/create! {::ctx/conn conn
+    (let [a (ctx/create! {::ctx/db-name :test-ctx
                           ::ctx/instance-id "p001"
                           ::ctx/initial-value {:hello "world"}
                           ::ctx/persist? true
@@ -95,7 +98,7 @@
       (Thread/sleep 100)
 
       ;; Load from Datalevin
-      (let [loaded (ctx/load! {::ctx/conn conn
+      (let [loaded (ctx/load! {::ctx/db-name :test-ctx
                                ::ctx/instance-id "p001"})]
         (is (some? loaded) "loaded data is not nil")
         (is (= "value" (:key loaded)))
@@ -105,17 +108,16 @@
 
 (deftest manual-persist-test
   (testing "persist! manually saves current value"
-    (let [conn @test-conn
-          _a (ctx/create! {::ctx/conn conn
+    (let [_a (ctx/create! {::ctx/db-name :test-ctx
                            ::ctx/instance-id "p002"
                            ::ctx/initial-value {:manual true}
                            ::ctx/persist? false
                            ::ctx/sse-push? false})]
       ;; Manual persist
-      (ctx/persist! {::ctx/conn conn ::ctx/instance-id "p002"})
+      (ctx/persist! {::ctx/db-name :test-ctx ::ctx/instance-id "p002"})
 
       ;; Load
-      (let [loaded (ctx/load! {::ctx/conn conn ::ctx/instance-id "p002"})]
+      (let [loaded (ctx/load! {::ctx/db-name :test-ctx ::ctx/instance-id "p002"})]
         (is (= true (:manual loaded))))
 
       (ctx/destroy! {::ctx/instance-id "p002"}))))
@@ -126,8 +128,7 @@
 
 (deftest non-serializable-stripped-test
   (testing "Non-serializable values are stripped on persist"
-    (let [conn @test-conn
-          a (ctx/create! {::ctx/conn conn
+    (let [a (ctx/create! {::ctx/db-name :test-ctx
                           ::ctx/instance-id "ns01"
                           ::ctx/initial-value {:safe "data"}
                           ::ctx/persist? false
@@ -136,10 +137,10 @@
       (swap! a assoc :unsafe (atom :nope) :also-safe 42)
 
       ;; Manual persist
-      (ctx/persist! {::ctx/conn conn ::ctx/instance-id "ns01"})
+      (ctx/persist! {::ctx/db-name :test-ctx ::ctx/instance-id "ns01"})
 
       ;; Load - unsafe key should be gone
-      (let [loaded (ctx/load! {::ctx/conn conn ::ctx/instance-id "ns01"})]
+      (let [loaded (ctx/load! {::ctx/db-name :test-ctx ::ctx/instance-id "ns01"})]
         (is (= "data" (:safe loaded)))
         (is (= 42 (:also-safe loaded)))
         (is (nil? (:unsafe loaded)) "non-serializable value stripped"))
@@ -198,18 +199,18 @@
 
 (deftest load-without-instance-test
   (testing "load! works without an active instance"
-    (let [conn @test-conn]
+    (do
       ;; Create, persist, destroy
-      (ctx/create! {::ctx/conn conn
+      (ctx/create! {::ctx/db-name :test-ctx
                     ::ctx/instance-id "ld01"
                     ::ctx/initial-value {:persisted true}
                     ::ctx/persist? false
                     ::ctx/sse-push? false})
-      (ctx/persist! {::ctx/conn conn ::ctx/instance-id "ld01"})
+      (ctx/persist! {::ctx/db-name :test-ctx ::ctx/instance-id "ld01"})
       (ctx/destroy! {::ctx/instance-id "ld01"})
 
       ;; Load after destroy still works from Datalevin
-      (let [loaded (ctx/load! {::ctx/conn conn ::ctx/instance-id "ld01"})]
+      (let [loaded (ctx/load! {::ctx/db-name :test-ctx ::ctx/instance-id "ld01"})]
         (is (= true (:persisted loaded)))))))
 
 ;;; ---------------------------------------------------------------------------

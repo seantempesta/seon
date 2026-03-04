@@ -297,6 +297,42 @@ Use the global registry for schema introspection:
 (keys (get (m/function-schemas) 'seon.ai.gemini))
 ```
 
+## Database Access
+
+All database access goes through `seon.db`. No direct `datalevin.core` usage outside `src/seon/db/` infrastructure.
+
+### Write API
+
+```clojure
+(db/transact! :seon.runtime [{:seon.fn/name "my-fn" :seon.fn/namespace "seon.foo"}])
+```
+
+`transact!` takes a db-name keyword and tx-data. Validates attributes against the Malli registry, auto-adds missing Datalevin schema, then routes through the infrastructure flow writer.
+
+### Read API
+
+```clojure
+(db/query :seon.runtime '[:find ?e ?n :where [?e :seon.fn/name ?n]])
+(db/pull-by-name :seon.runtime '[*] eid)
+(db/pull-many-by-name :seon.runtime '[:seon.fn/name] eids)
+(db/entity-by-name :seon.runtime eid)
+```
+
+All take a db-name keyword (`:seon`, `:seon.runtime`, or a namespace keyword like `:seon.trading`). Route through the infrastructure flow reader in production; resolve directly with retry in `*direct-mode*`.
+
+### Test Fixtures
+
+```clojure
+(binding [db/*direct-mode* true
+          db/*conn-manager* fake-manager]
+  ;; db/transact!, db/query etc. work without the flow running
+  ...)
+```
+
+`*direct-mode*` bypasses the flow and hits Datalevin directly. `*conn-manager*` provides connection resolution in tests. See `test/seon/test_utils.clj` for the `with-temp-conn` helper.
+
+---
+
 ## Schema Composition Across Namespaces
 
 Provider namespaces extend base namespaces by referencing their schemas. This is the XTDB/Datomic pattern: entities are bags of namespaced attributes.

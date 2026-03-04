@@ -13,10 +13,17 @@ When invoked:
 4. **Test assumptions in the REPL** before writing code
 5. Implement, verifying each step
 
-CRITICAL - Automatic hook feedback:
+CRITICAL - Testing:
 - After every Edit/Write, a hook AUTOMATICALLY reloads code and runs tests
-- DO NOT manually run `clj -M:test` or `(user/reload)` - the hook handles this
+- The hook handles `(user/reload)` — do NOT call it manually
 - If tests fail, you will be blocked - fix the issue before continuing
+- **Always prefer REPL-based testing over Bash.** Use the REPL:
+  ```clojure
+  (user/run-tests 'seon.foo-test)           ;; run one test ns
+  (user/test-affected 'seon.foo)            ;; test ns + all dependents
+  ```
+  Results are structured maps with `:pass-count`, `:fail-count`, `:failures` — no grep needed.
+- Only fall back to `bin/test` via Bash if the REPL is unavailable.
 
 REPL session (for investigation and verification):
 - Create a session: `create_session(namespace="seon.{domain}")`

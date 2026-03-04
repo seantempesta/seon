@@ -666,10 +666,10 @@
   [namespace]
   (try
     (when-let [graph-db (some-> state/system :seon.graph/scanner :graph-db)]
-      (when-let [conn (sys/runtime-db-conn graph-db)]
+      (when graph-db
         (let [ns-str (str namespace)
               result (render-code/context-for-agent
-                      {::render-code/conn conn
+                      {::render-code/db-name :seon.runtime
                        ::render-code/ns-name ns-str})
               docs (:seon.render/documentation result)]
           (when-not (str/blank? docs)

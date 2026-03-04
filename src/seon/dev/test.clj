@@ -312,17 +312,14 @@
   [ns-sym & {:keys [depth] :or {depth :direct}}]
   (let [ns-str (str ns-sym)
         ;; Try to get graph conn from integrant system
-        conn (try
-               (require 'integrant.repl.state)
-               (when-let [sys @(resolve 'integrant.repl.state/system)]
-                 (let [mgr (:seon.db.datalevin/connections sys)
-                       get-conn (requiring-resolve 'seon.db.datalevin.conn/get-conn!)]
-                   (get-conn {:seon.db.datalevin.conn/manager mgr
-                              :seon.db.datalevin.conn/db :seon.runtime})))
-               (catch Exception _ nil))
-        test-nses (if conn
+        has-db? (try
+                  (require 'integrant.repl.state)
+                  (some? (some-> @(resolve 'integrant.repl.state/system)
+                                 :seon.db.datalevin/connections))
+                  (catch Exception _ false))
+        test-nses (if has-db?
                     (ts/affected-test-namespaces
-                     {::ts/conn conn ::ts/ns-name ns-str ::ts/depth depth})
+                     {::ts/db-name :seon.runtime ::ts/ns-name ns-str ::ts/depth depth})
                     ;; Fallback: just the ns's own test
                     (let [test-sym (symbol (str ns-str "-test"))]
                       (try

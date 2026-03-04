@@ -128,7 +128,6 @@
         password (or password "datalevin")]
     (format "dtlv://%s:%s@%s:%d/%s" username password host port db-name)))
 
-
 ;;; ---------------------------------------------------------------------------
 ;;; Connection Management (Internal)
 ;;; ---------------------------------------------------------------------------
@@ -337,6 +336,63 @@
     ;; Create fresh connection
     (get-or-create-connection! manager db (name db) schema)))
 
+(defn sweep-stale-connections!
+  "Close and remove connections that are dead or stale.
+
+   Checks each cached connection. If closed, removes it from the cache.
+   Optionally accepts a set of db keywords to preserve (skip closing).
+
+   Request keys:
+     ::manager  - Required. Connection manager instance
+     ::preserve - Optional. Set of db keywords to keep (e.g. #{:seon :seon.runtime})
+
+   Returns:
+     Map with ::swept (count removed) and ::kept (count preserved)."
+  [{::keys [manager preserve]}]
+  (let [preserve (or preserve #{})
+        connections (::connections manager)
+        entries @connections
+        swept (atom 0)]
+    (doseq [[db-key entry] entries
+            :when (not (contains? preserve db-key))]
+      (let [conn (::connection entry)
+            stale? (or (nil? conn) (connection-closed? conn))]
+        (when stale?
+          (log/info "Sweeping stale connection" {:db db-key})
+          (close-datalevin-conn conn)
+          (swap! connections dissoc db-key)
+          (swap! swept inc))))
+    (let [s @swept]
+      (log/info "Connection sweep complete" {:swept s :kept (- (count entries) s)})
+      {::swept s
+       ::kept (- (count entries) s)})))
+
+(defn close-non-core-connections!
+  "Close all connections except core databases (:seon, :seon.runtime, :seon.ai, :seon.flow).
+
+   Used during suspend to release agent namespace connections while keeping
+   essential connections alive.
+
+   Request keys:
+     ::manager - Required. Connection manager instance
+
+   Returns:
+     Number of connections closed."
+  [{::keys [manager]}]
+  (let [core-dbs #{:seon :seon.runtime :seon.ai :seon.flow}
+        connections (::connections manager)
+        entries @connections
+        closed (atom 0)]
+    (doseq [[db-key entry] entries
+            :when (not (contains? core-dbs db-key))]
+      (log/info "Closing non-core connection" {:db db-key})
+      (close-datalevin-conn (::connection entry))
+      (swap! connections dissoc db-key)
+      (swap! closed inc))
+    (let [c @closed]
+      (log/info "Closed non-core connections" {:closed c :kept (- (count entries) c)})
+      c)))
+
 (defn health
   "Get health status of the connection manager.
 
@@ -389,7 +445,11 @@
     (log/info "Connection manager stopped" {:connections-closed closed})))
 
 ;; Suspend/resume to survive (reset) without dropping connections
-(defmethod ig/suspend-key! :seon.db.datalevin/connections [_ state] state)
+(defmethod ig/suspend-key! :seon.db.datalevin/connections
+  [_ state]
+  (let [closed (close-non-core-connections! {::manager state})]
+    (log/info "Suspended connection manager" {:non-core-closed closed}))
+  state)
 
 (defmethod ig/resume-key :seon.db.datalevin/connections
   [key opts old-opts old-state]

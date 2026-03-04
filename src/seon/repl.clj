@@ -3,7 +3,6 @@
    Receives forms, classifies, stores in Datalevin, routes eval through
    the infrastructure flow topology, updates the code index after each eval."
   (:require [clojure.core.async.flow :as flow]
-            [datalevin.core :as d]
             [edamame.core :as edamame]
             [seon.db :as db]
             [seon.flow.msg :as msg]
@@ -44,8 +43,8 @@
 (schema/register! ::agent-id
                   [:string {:min 1 :description "Agent session ID"}])
 
-(schema/register! ::conn
-                  [:any {:description "Datalevin connection"}])
+(schema/register! ::db-name
+                  [:keyword {:description "Database name keyword (e.g. :seon.runtime)"}])
 
 (schema/register! ::nrepl-port
                   [:int {:min 7900 :max 7999
@@ -138,16 +137,17 @@
 (defn- next-version
   "Query Datalevin for the max version of a named form in a namespace.
    Returns max + 1, or 1 if no prior version exists."
-  [conn ns-str form-name]
+  [db-name ns-str form-name]
   (if (nil? form-name)
     1
-    (let [results (d/q '[:find ?v
-                         :in $ ?ns ?name
-                         :where
-                         [?e :form/namespace ?ns]
-                         [?e :form/name ?name]
-                         [?e :form/version ?v]]
-                       @conn ns-str form-name)]
+    (let [results (db/query db-name
+                            '[:find ?v
+                              :in $ ?ns ?name
+                              :where
+                              [?e :form/namespace ?ns]
+                              [?e :form/name ?name]
+                              [?e :form/version ?v]]
+                            ns-str form-name)]
       (if (seq results)
         (inc (apply max (map first results)))
         1))))
@@ -158,8 +158,8 @@
 
 (defn- store-form!
   "Store a form in Datalevin with versioning. Returns the entity map."
-  [conn ns-str form-type form-name source agent-id]
-  (let [version (next-version conn ns-str form-name)
+  [db-name ns-str form-type form-name source agent-id]
+  (let [version (next-version db-name ns-str form-name)
         entity (cond-> {:form/id (UUID/randomUUID)
                         :form/namespace ns-str
                         :form/type form-type
@@ -168,7 +168,7 @@
                         :form/version version
                         :form/created-at (Date.)}
                  form-name (assoc :form/name form-name))]
-    (db/transact! conn [entity])
+    (db/transact! db-name [entity])
     entity))
 
 ;;; ---------------------------------------------------------------------------
@@ -177,13 +177,13 @@
 
 (defn- update-code-index!
   "Run analyzer + incremental ingest to update the knowledge graph."
-  [conn source]
+  [db-name source]
   (try
     (let [analysis (analyzer/analyze-form {::analyzer/source source})]
       (when (::analyzer/success analysis)
         (let [entities (analyzer/extract-entities
                         {::analyzer/raw-analysis (::analyzer/raw-analysis analysis)})]
-          (ingest/ingest-incremental! {::ingest/conn conn ::ingest/entities entities}))))
+          (ingest/ingest-incremental! {::ingest/db-name db-name ::ingest/entities entities}))))
     (catch Exception e
       (log/warn "Code index update failed" {:error (.getMessage e)})
       nil)))
@@ -249,13 +249,13 @@
    Routes eval through the infrastructure flow's :seon.flow/repl process
    for observability. Falls back to direct nREPL when the flow is not running.
 
-   Note: No :malli/schema - conn and nrepl-port are runtime objects.
+   Note: No :malli/schema - db-name and nrepl-port are runtime objects.
 
    Request keys:
      ::source     - Required. Clojure source code string
      ::namespace  - Required. Target namespace (symbol or string)
      ::agent-id   - Required. Agent session ID
-     ::conn       - Required. Datalevin connection
+     ::db-name    - Required. Database name keyword (e.g. :seon.runtime)
      ::nrepl-port - Optional. Agent JVM nREPL port (skips eval if nil)
 
    Response keys:
@@ -268,18 +268,18 @@
      (eval-form! {::source \"(defn ema [p d] ...)\"
                   ::namespace 'seon.trading.signals
                   ::agent-id \"a13b\"
-                  ::conn my-conn
+                  ::db-name :seon.runtime
                   ::nrepl-port 7901})"
-  [{::keys [source namespace agent-id conn nrepl-port]}]
+  [{::keys [source namespace agent-id db-name nrepl-port]}]
   (let [ns-str (str namespace)
         {:keys [::form-type ::form-name]} (classify-form {::source source})
         ;; Eval on agent JVM via flow topology
         eval-result (when nrepl-port
                       (eval-via-flow! nrepl-port source))
         ;; Store in Datalevin
-        stored (store-form! conn ns-str form-type form-name source agent-id)
+        stored (store-form! db-name ns-str form-type form-name source agent-id)
         ;; Update code index
-        _ (update-code-index! conn source)]
+        _ (update-code-index! db-name source)]
     (log/debug "Form processed" {:type form-type :name form-name
                                  :version (:form/version stored)
                                  :namespace ns-str})
@@ -292,54 +292,56 @@
   "Query latest version of each named form in a namespace.
 
    Request keys:
-     ::conn      - Required. Datalevin connection
+     ::db-name   - Required. Database name keyword (e.g. :seon.runtime)
      ::namespace - Required. Namespace string or symbol
 
    Returns vector of form entity maps (latest version of each named form).
 
    Example:
-     (current-forms {::conn conn ::namespace \"seon.trading.signals\"})"
-  [{::keys [conn namespace]}]
+     (current-forms {::db-name :seon.runtime ::namespace \"seon.trading.signals\"})"
+  [{::keys [db-name namespace]}]
   (let [ns-str (str namespace)
         ;; Get all named forms with their entity ids, names, and versions
-        results (d/q '[:find ?e ?name ?v
-                       :in $ ?ns
-                       :where
-                       [?e :form/namespace ?ns]
-                       [?e :form/name ?name]
-                       [?e :form/version ?v]]
-                     @conn ns-str)
+        results (db/query db-name
+                          '[:find ?e ?name ?v
+                            :in $ ?ns
+                            :where
+                            [?e :form/namespace ?ns]
+                            [?e :form/name ?name]
+                            [?e :form/version ?v]]
+                          ns-str)
         ;; Group by name, pick max version
         by-name (group-by second results)
         latest (for [[_name entries] by-name
                      :let [[eid _ _] (apply max-key #(nth % 2) entries)]]
-                 (d/entity @conn eid))]
+                 (db/entity-by-name db-name eid))]
     (vec latest)))
 
 (defn form-history
   "All versions of a specific form.
 
    Request keys:
-     ::conn      - Required. Datalevin connection
+     ::db-name   - Required. Database name keyword (e.g. :seon.runtime)
      ::namespace - Required. Namespace string or symbol
      ::form-name - Required. Form name string
 
    Returns vector of form entity maps sorted by version ascending.
 
    Example:
-     (form-history {::conn conn ::namespace \"seon.trading.signals\" ::form-name \"ema\"})"
-  [{::keys [conn namespace form-name]}]
+     (form-history {::db-name :seon.runtime ::namespace \"seon.trading.signals\" ::form-name \"ema\"})"
+  [{::keys [db-name namespace form-name]}]
   (let [ns-str (str namespace)
-        results (d/q '[:find ?e ?v
-                       :in $ ?ns ?name
-                       :where
-                       [?e :form/namespace ?ns]
-                       [?e :form/name ?name]
-                       [?e :form/version ?v]]
-                     @conn ns-str form-name)]
+        results (db/query db-name
+                          '[:find ?e ?v
+                            :in $ ?ns ?name
+                            :where
+                            [?e :form/namespace ?ns]
+                            [?e :form/name ?name]
+                            [?e :form/version ?v]]
+                          ns-str form-name)]
     (->> results
          (sort-by second)
-         (mapv (fn [[eid _]] (d/entity @conn eid))))))
+         (mapv (fn [[eid _]] (db/entity-by-name db-name eid))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; REPL Exploration
