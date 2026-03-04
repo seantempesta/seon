@@ -203,19 +203,9 @@ Use `or` for defaults since destructuring `:or` doesn't work when key is present
 
 ### Development Setup
 
-Enable automatic validation during development:
+Instrumentation is **automatic**. The Integrant component `:seon.dev/instrumentation` collects all `:malli/schema` metadata and instruments every public function on startup. It uses a custom reporter (`agent-reporter`) that throws `ExceptionInfo` with rich, structured error messages. Agent JVMs self-instrument via `agent_runner.clj`.
 
-```clojure
-;; In user.clj or dev startup
-(require '[malli.dev :as dev])
-(require '[malli.instrument :as mi])
-
-;; Collect all function schemas
-(mi/collect!)
-
-;; Start instrumentation (validates inputs/outputs)
-(dev/start!)
-```
+You don't need to call `mi/collect!`, `dev/start!`, or `mi/instrument!` manually. Just add `:malli/schema` to your function, reload, and it's instrumented.
 
 ### Testing Strategy
 
@@ -302,9 +292,8 @@ Use the global registry for schema introspection:
 ;; Check if a schema is registered
 (schema/registered? ::gemini/prompt)
 
-;; Get function schemas after collection
-(require '[malli.instrument :as mi])
-(mi/collect! {:ns 'seon.ai.gemini})
+;; See which functions are instrumented (collected automatically on startup)
+(require '[malli.core :as m])
 (keys (get (m/function-schemas) 'seon.ai.gemini))
 ```
 
