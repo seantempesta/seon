@@ -188,18 +188,15 @@ Added Malli validation to `db/transact!`:
 - 21 tests, 57 assertions in `test/seon/db/validation_test.clj`
 - Fixed `:seon.ctx/namespace` Malli schema (was `:symbol`, should be `:string` per actual usage)
 
-### Phase 2: Generative Pipeline Test
+### Phase 2: Generative Pipeline Test (DONE)
 
-Build a test utility that:
-- Takes a Malli `:map` schema
-- Generates N entities from it
-- Derives the Datalevin schema via the bridge
-- Transacts each entity to a temp Datalevin DB
-- Pulls each entity back
-- Validates the pulled entity against the Malli schema
-- Reports any roundtrip failures
-
-This is the contract test AND the agent feedback loop.
+Built `assert-pipeline-roundtrip!` in `test/seon/db/pipeline_test.clj`:
+- Takes a Malli `:map` schema, generates N entities, derives Datalevin schema via bridge
+- Transacts each entity, pulls it back, validates against Malli, asserts value equality
+- Pre-flight validation: rejects `:any`, `[:maybe X]`, unnamespaced keys
+- Handles known Datalevin transformations: cardinality-many dedup/reorder (set comparison), empty collections (absent on pull), component ref `:db/id` stripping
+- 13 tests, 56 assertions covering: leaf types, optional keys, enums, cardinality-many (set + vector), component refs, non-component refs, complex mixed entities, constraint violations
+- Utility is reusable for Phase 3: each module's schema can be validated with one call
 
 ### Phase 3: Eliminate Hardcoded Schemas
 
