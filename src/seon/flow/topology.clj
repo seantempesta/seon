@@ -578,6 +578,19 @@
      [state nil])))
 
 ;;; ---------------------------------------------------------------------------
+;;; Lifecycle Hooks
+;;; ---------------------------------------------------------------------------
+
+(defn before-ns-unload
+  "Called by clj-reload before unloading. Delivers timeout to all pending promises."
+  []
+  (doseq [[_id p] @pending-promises]
+    (deliver p {::msg/status :error
+                ::msg/error-type :timeout
+                ::msg/error-message "Namespace unloading"}))
+  (reset! pending-promises {}))
+
+;;; ---------------------------------------------------------------------------
 ;;; build-infrastructure! — Infrastructure flow (writer + reply-router + sinks)
 ;;; ---------------------------------------------------------------------------
 

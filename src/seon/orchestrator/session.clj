@@ -210,6 +210,22 @@
   (log/info "Orchestrator sessions initialized" {:pool (some? pool)}))
 
 ;;; ---------------------------------------------------------------------------
+;;; Lifecycle Hooks
+;;; ---------------------------------------------------------------------------
+
+(defn after-ns-reload
+  "Called by clj-reload after reloading. Re-wires agent-pool from Integrant system."
+  []
+  (try
+    (require 'integrant.repl.state)
+    (when-let [sys @(resolve 'integrant.repl.state/system)]
+      (when-let [{:keys [pool]} (:seon.orchestrator/sessions sys)]
+        (when pool
+          (reset! agent-pool pool))))
+    (catch Exception e
+      (log/debug "Could not re-wire agent-pool from Integrant" {:error (.getMessage e)}))))
+
+;;; ---------------------------------------------------------------------------
 ;;; Public API
 ;;; ---------------------------------------------------------------------------
 

@@ -716,6 +716,55 @@ For handlers that need per-request state (e.g., agent-id from path params), cach
 
 Regular HTTP handlers (Ring functions) **don't need this pattern** - they're called directly through vars. This pattern is specifically for SSE handlers because `render-handler` captures the render function at creation time.
 
+## Reload Lifecycle Hooks for `defonce` State
+
+Seon is a runtime system where agents live-code and update namespaces. `defonce` atoms survive `user/reload` (clj-reload) but may hold stale references — old closures, dead channels, orphaned threads. Every `defonce` with mutable runtime state **must** have lifecycle hooks.
+
+### How It Works
+
+clj-reload calls two per-namespace hooks (0-arg functions) if they exist:
+
+| Hook | When | Use For |
+|------|------|---------|
+| `before-ns-unload` | Before ns is removed | Stop go-loops, drain promises, cancel schedulers, remove watches |
+| `after-ns-reload` | After ns is reloaded | Re-populate from Integrant system, restart background processes |
+
+### Pattern
+
+```clojure
+(defonce my-state (atom nil))
+
+(defn before-ns-unload
+  "Cleanup before clj-reload unloads this namespace."
+  []
+  (when-let [s @my-state]
+    (stop! s)
+    (reset! my-state nil)))
+
+(defn after-ns-reload
+  "Re-init after clj-reload reloads this namespace."
+  []
+  (when (nil? @my-state)
+    (reset! my-state (init-from-integrant-system))))
+```
+
+### Rules
+
+1. **Any `defonce` holding runtime state must have hooks.** Caches, registries, go-loops, channels, promises, schedulers — if it's mutable and not purely config, add hooks.
+2. **`before-ns-unload` must be idempotent.** It may be called when state is already nil.
+3. **`after-ns-reload` should re-derive from Integrant.** The system map is the source of truth: `@(requiring-resolve 'integrant.repl.state/system)`.
+4. **Don't add hooks for `defonce` holding immutable config.** Pure values, schema definitions, etc. are fine without hooks.
+5. **Exceptions in `before-ns-unload` are swallowed** by clj-reload. Keep it simple — don't do anything that can fail.
+
+### Existing Examples
+
+- **SSE handlers**: `seon.web.handlers/after-ns-reload` — recreates handler objects
+- **Route caches**: `seon.ns.routes/after-ns-reload` — clears stale handler cache
+- **Promise drains**: `seon.flow.topology/before-ns-unload` — delivers timeout to pending promises
+- **Flow re-wiring**: `seon.runtime/after-ns-reload` — re-registers flow handles from Integrant
+
+---
+
 ## SSE: Direct Response vs Background Push
 
 Two patterns for updating the UI. Pick the right one based on **who initiated the change**.
