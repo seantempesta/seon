@@ -151,6 +151,9 @@
    [:seon.ai.claude/cache-read-tokens {:optional true} :int]
    [:seon.ai.claude/cache-creation-tokens {:optional true} :int]])
 
+(dbs/register-entity-schema! "seon.ai.session" session-entity-schema)
+(dbs/register-entity-schema! "seon.ai.message" message-entity-schema)
+
 (def datalevin-schema
   "Datalevin attribute schema for AI entities.
    Derived from entity schemas via bridge, merged with tx metadata."

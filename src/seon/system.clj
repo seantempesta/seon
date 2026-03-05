@@ -69,6 +69,31 @@
         (ig/init-key :seon.schema/registry opts))))
 
 ;;; ---------------------------------------------------------------------------
+;;; Schema Consistency Check Component
+;;; ---------------------------------------------------------------------------
+;;; Validates all persisted entity schemas at boot. Catches :any, :some,
+;;; [:maybe X], mixed enums, and :nil before they reach Datalevin.
+;;; Depends on :seon.schema/registry to ensure all modules are loaded.
+
+(defmethod ig/init-key :seon.db.schema/consistency-check
+  [_ {:keys [registry]}]
+  (require 'seon.db.schema)
+  (log/info "Running schema consistency check...")
+  (let [result ((resolve 'seon.db.schema/validate-persisted-schemas!))]
+    (log/info "Schema consistency check complete"
+              {:schema-count (:schema-count result)})
+    result))
+
+;; Pure check result, survives reset.
+(defmethod ig/suspend-key! :seon.db.schema/consistency-check [_ state] state)
+
+(defmethod ig/resume-key :seon.db.schema/consistency-check
+  [_ opts old-opts old-state]
+  (if (= opts old-opts)
+    old-state
+    (ig/init-key :seon.db.schema/consistency-check opts)))
+
+;;; ---------------------------------------------------------------------------
 ;;; nREPL Server Component
 ;;; ---------------------------------------------------------------------------
 

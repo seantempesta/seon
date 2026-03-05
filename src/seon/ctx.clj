@@ -186,6 +186,8 @@
    [:seon.ctx/data :string]
    [:seon.ctx/updated-at :inst]])
 
+(db-schema/register-entity-schema! "seon.ctx" ctx-entity-schema)
+
 (def datalevin-schema
   "Datalevin schema for ctx persistence. Derived from Malli.
    Merge with other schemas when creating connections."

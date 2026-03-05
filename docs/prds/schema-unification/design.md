@@ -282,12 +282,73 @@ Replaced EDN serialization in `seon.flow.harness.channel` with Nippy:
 - Instant vs Date audit: all Datalevin-bound Instants pass through `coerce-instants` in `ai/datalevin.clj`, correctly converting to `java.util.Date`. No production bug found.
 - 734 tests, 3714 assertions, 0 failures
 
-### Phase 5: Startup Consistency Check
+### Phase 5: Startup Consistency Check (COMPLETE)
 
 At boot, verify all registered Malli schemas derive valid Datalevin types:
-- Error on `:any`, `:some`, mixed enums
+- Error on `:any`, `:some`, `:nil`, mixed enums
 - Error on `[:maybe X]` in persisted schema positions
-- Warn on types that need `:db/valueType` property but don't have it
+- Recurse into nested `:map` (component refs) and collections (`:vector`, `:set`)
+- **Only validates persisted schemas** -- wire protocol schemas (`seon.flow.msg`) are excluded because they flow through Nippy over TCP, not Datalevin.
+
+**Implementation:**
+- `seon.db.schema/register-entity-schema!` -- explicit registration for persisted entity schemas
+- `seon.db.schema/validate-persisted-schema` -- validate a single schema, returns violation vector
+- `seon.db.schema/validate-persisted-schemas!` -- validate all registered schemas, throws on violation
+- Each module (ctx, repl, trace, runtime, ingest, ai/datalevin, db/tx) calls `register-entity-schema!` at load time
+- Integrant component `:seon.db.schema/consistency-check` runs after `:seon.schema/registry`, before DB operations
+- 15 entity schemas registered across 7 modules, all passing validation
+- 13 new tests, 56 assertions in `test/seon/db/consistency_test.clj`
+- 727 tests, 3647 assertions, 0 failures across full test suite
+
+### Phase 5a: Wire Protocol Fixes (IN PROGRESS)
+
+Fix settled-decision violations in `seon.flow.msg`:
+- `::created-at` `[:fn inst?]` -> `:inst` (all timestamps use `:inst`)
+- `::error-data` `[:maybe :map]` -> `:map` with `{:optional true}` on entries
+- `bridge.clj` conditionally assoc `::error-data` only when `(ex-data e)` is non-nil
+
+### Phase 6: Wire Protocol Dynamic Validation (Eliminate `:any`)
+
+**Problem:** Wire protocol schemas use `:any` for `::args`, `::value`, `::payload` because the types aren't known at schema-definition time. But they ARE known at runtime.
+
+**Insight:** Every function called through the wire protocol has a `:malli/schema` that specifies its argument and return types. Every payload key is a namespaced keyword with a registered Malli schema. We can validate dynamically against the registry instead of statically declaring `:any`.
+
+**Approach:** At the message send/receive boundary, recursively validate content fields against the Malli registry:
+- `::args` -- resolve `::fn` var -> get `:malli/schema` -> validate args against input `:cat`
+- `::value` -- same function -> validate against return schema
+- `::payload` -- walk the map, validate each value against `(schema/resolve key)`
+- If a key or function has no registered schema, **throw** -- that's a bug, not an `:any`
+
+The envelope schema remains structural (correct keys, types for `::id`, `::type`, etc.). Content validation is dynamic at the boundary.
+
+**Files:** `src/seon/flow/msg.clj`, `src/seon/flow/harness/bridge.clj`, `src/seon/flow/harness/channel.clj`
+
+### Phase 7: render.clj `::html` Type
+
+Replace `::html :any` with a concrete type. HTML output is Hiccup -- vectors, strings, keywords, maps. Define a Hiccup schema or use the same registry-validation approach as Phase 6 (if the value is a map with namespaced keys, validate each against the registry).
+
+**File:** `src/seon/render.clj`
+
+### Phase 8: Rename `seon.ai.datalevin` -> `seon.ai.store` + Convention Audit
+
+**Problem:** `seon.ai.datalevin` names the implementation detail (Datalevin) instead of the responsibility (AI storage). The namespace doesn't touch `datalevin.core` -- it goes through `seon.db` exclusively. Additionally, ~15 `dl-*` functions violate conventions: positional args instead of map-in/map-out, missing `:malli/schema`, defensive nil-stripping instead of clean data.
+
+**Scope:**
+1. Rename namespace: `seon.ai.datalevin` -> `seon.ai.store`
+2. Rename all `dl-*` functions to drop the prefix (e.g., `dl-get-session` -> `get-session`)
+3. Add `:malli/schema` to all public functions
+4. Convert public functions to map-in/map-out pattern
+5. Fix entity schema violations: `inst?` -> `:inst` on lines 131-132, 148
+6. Remove `remove-nil-values` -- callers should pass clean data
+7. Remove `coerce-instants` -- callers should pass `java.util.Date` consistently
+8. Update all consumers: `seon.ai`, `seon.ai.claude`, `seon.web.agents`
+9. Rename test file: `seon.ai.datalevin-test` -> `seon.ai.store-test`
+
+**Consumers (4 files):**
+- `src/seon/ai.clj` -- uses `requiring-resolve` for lazy loading
+- `src/seon/ai/claude.clj` -- uses `requiring-resolve` for real-time persistence
+- `src/seon/web/agents.clj` -- direct require
+- `test/seon/ai/datalevin_test.clj` -- test file
 
 ---
 
@@ -320,6 +381,20 @@ Categories: leaf types (9), enums (3), schema derivation (4), maybe/nil (2), car
 |--------|------------|
 | `research/serialization-findings.md` | Nippy is the clear choice. Datalevin uses it on wire. EDN has 3 data corruption paths. 3.7x faster. |
 | `research/nil-semantics-findings.md` | Absence = no value. No `[:maybe X]` for persisted. `{:optional true}` only. Naive nil-stripping is lossy for updates. |
+
+### Datalevin Large Query Overflow (Research)
+
+**Symptom:** `NegativeArraySizeException` when doing unbounded `pull [*]` on 14K+ entities over Datalevin TCP.
+
+**Root cause (from previous agent):** Signed 32-bit int overflow in `protocol.clj:196` -- the message length field uses `.putInt`/`.getInt` (max ~2.14 GB). When serialized payload exceeds `Integer.MAX_VALUE`, the int wraps negative, and `getInt()` returns a negative number used as array size.
+
+**Not entity-count-related** -- it's about serialized payload size. 14K entities with `pull [*]` likely produces a large Nippy payload.
+
+**Open questions:**
+1. **Nippy compression** -- `fast-freeze` (what Datalevin uses) skips compression for speed. Standard `nippy/freeze` uses LZ4 compression by default. Can we configure Datalevin to use compressed serialization? Or does Datalevin's protocol use its own serialization layer independent of Nippy?
+2. **Batched pulls** -- workaround: split large pulls into batches (e.g., 1000 entities at a time). Does Datalevin support query pagination natively?
+3. **PR to Datalevin** -- change `.putInt`/`.getInt` to `.putLong`/`.getLong` in protocol.clj? Breaking wire protocol change -- would need Datalevin maintainer buy-in.
+4. **Impact assessment** -- does anything in Seon actually pull 14K+ entities in production? If only the code scanner does this, we can batch there specifically.
 
 ## Prior Art
 

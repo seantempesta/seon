@@ -9,6 +9,7 @@
  :seon.db.datalevin/connections  [:seon/component]
  :seon/runtime-db                [:seon/component]
  :seon.schema/registry           [:seon/component]
+ :seon.db.schema/consistency-check [:seon/component]
  :seon.dev/nrepl                 [:seon/component]
  :seon.web.server/http-server    [:seon/component]
  :seon.web/tailwind              [:seon/component]

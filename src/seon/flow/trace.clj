@@ -77,6 +77,8 @@
    [::error-message {:optional true} :string]
    [::entity-type :keyword]])
 
+(dbs/register-entity-schema! "seon.flow.trace" entity-schema)
+
 (def datalevin-schema
   "Datalevin schema for flow trace attributes.
    Derived from entity-schema via the bridge, merged with tx metadata."
