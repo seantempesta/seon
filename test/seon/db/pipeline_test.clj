@@ -632,6 +632,74 @@
       (is (= 20 (:pass-count result))))))
 
 ;;; ---------------------------------------------------------------------------
+;;; Tests: Runtime Entity Schemas (Phase 3c — runtime.clj unification)
+;;; ---------------------------------------------------------------------------
+
+(deftest runtime-entity-pipeline-test
+  (testing "seon.runtime/runtime-entity-schema survives the full pipeline"
+    (let [result (assert-pipeline-roundtrip!
+                   @(requiring-resolve 'seon.runtime/runtime-entity-schema)
+                   {:identity-key :seon.runtime/namespace :num-samples 20})]
+      (is (zero? (:fail-count result))
+          (str "Failures: " (pr-str (:failures result))))
+      (is (= 20 (:pass-count result))))))
+
+(deftest agent-run-entity-pipeline-test
+  (testing "seon.runtime/agent-run-entity-schema survives the full pipeline"
+    ;; The :seon.agent.run/runtime ref field is excluded from generative testing
+    ;; because refs require existing target entities. Tested manually below.
+    (let [schema-without-ref
+          (into [:map]
+                (remove (fn [[k]] (= k :seon.agent.run/runtime)))
+                (rest @(requiring-resolve 'seon.runtime/agent-run-entity-schema)))
+          result (assert-pipeline-roundtrip!
+                   schema-without-ref
+                   {:identity-key :seon.agent.run/id :num-samples 20})]
+      (is (zero? (:fail-count result))
+          (str "Failures: " (pr-str (:failures result))))
+      (is (= 20 (:pass-count result))))))
+
+(deftest agent-run-ref-pipeline-test
+  (testing ":seon.agent.run/runtime ref roundtrips correctly"
+    ;; Manual test: create a runtime entity, then an agent-run entity that
+    ;; refs it, and verify the ref survives pull.
+    (let [dl-schema (merge
+                      (db-schema/malli-map->datalevin-schema
+                        @(requiring-resolve 'seon.runtime/runtime-entity-schema))
+                      (db-schema/malli-map->datalevin-schema
+                        @(requiring-resolve 'seon.runtime/agent-run-entity-schema)))]
+      (tu/with-temp-conn dl-schema
+        (fn [conn]
+          ;; Create target runtime entity
+          (d/transact! conn [{:seon.runtime/namespace "seon.test.agent"
+                              :seon.runtime/status :running
+                              :seon.runtime/location :external}])
+          ;; Create agent-run with lookup ref to runtime
+          (d/transact! conn [{:seon.agent.run/id "run-ref-test"
+                              :seon.agent.run/status :running
+                              :seon.agent.run/namespace "seon.test.agent"
+                              :seon.agent.run/provider :claude
+                              :seon.agent.run/runtime
+                              [:seon.runtime/namespace "seon.test.agent"]}])
+          ;; Pull and verify the ref
+          (let [result (d/pull @conn '[*] [:seon.agent.run/id "run-ref-test"])]
+            (is (map? (:seon.agent.run/runtime result))
+                "non-component ref returns a map")
+            (is (contains? (:seon.agent.run/runtime result) :db/id)
+                "non-component ref map contains :db/id")
+            (is (= :running (:seon.agent.run/status result)))
+            (is (= "seon.test.agent" (:seon.agent.run/namespace result)))))))))
+
+(deftest flow-snap-entity-pipeline-test
+  (testing "seon.runtime/flow-snap-entity-schema survives the full pipeline"
+    (let [result (assert-pipeline-roundtrip!
+                   @(requiring-resolve 'seon.runtime/flow-snap-entity-schema)
+                   {:identity-key :seon.flow.snap/id :num-samples 20})]
+      (is (zero? (:fail-count result))
+          (str "Failures: " (pr-str (:failures result))))
+      (is (= 20 (:pass-count result))))))
+
+;;; ---------------------------------------------------------------------------
 ;;; Tests: Tx Entity Schema (Phase 3b — transaction metadata, no identity key)
 ;;; ---------------------------------------------------------------------------
 

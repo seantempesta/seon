@@ -230,7 +230,23 @@ For each module (runtime, ingest, ctx, trace, repl):
 - `::form-name` (`:seon.repl/form-name`) is `[:maybe :string]` -- acceptable for function return values (nil for expressions) but not for persisted data. The persisted attr `:form/name` correctly uses `{:optional true} :string`.
 - `::result` (`:seon.repl/result`) is `:any` -- acceptable for function return values (nREPL eval can return anything). Not persisted.
 
-#### Remaining (not started): runtime.clj (~20 attrs), ingest.clj (~30 attrs), trace.clj (~10 attrs)
+#### Phase 3c: runtime.clj (DONE)
+
+**runtime.clj** (23 attrs across 3 entity types):
+- Added `runtime-entity-schema` Malli :map schema (8 attrs, 5 optional)
+- Added `agent-run-entity-schema` Malli :map schema (10 attrs, 8 optional including ref)
+- Added `flow-snap-entity-schema` Malli :map schema (5 attrs, all required)
+- Replaced hardcoded `runtime-schema` with `(merge (db-schema/malli-map->datalevin-schema ...))` of all 3 schemas
+- Derived schema is identical to the previous hardcoded one (verified in REPL, 23 attrs, 0 diff)
+- Pipeline roundtrip tests: 60 entities generated and roundtripped across 3 entity types
+- First ref conversion: `:seon.agent.run/runtime` uses `{:db/valueType :db.type/ref}` on entity entry
+- Manual ref test verifies lookup-ref transact and pull roundtrip for agent-run -> runtime linkage
+- Key finding: `:db/*` properties must be on the :map entry, not the schema/register! call. The bridge reads entry-level properties via `(m/properties entry-schema)`, not schema-level properties.
+
+**Code smells found:**
+- None. All callers pass types consistent with the schemas. The `build-tx-map` function correctly uses `cond->` for optional fields, matching the `{:optional true}` annotations.
+
+#### Remaining (not started): ingest.clj (~30 attrs)
 
 ### Phase 4: Nippy Inter-JVM Channel
 
