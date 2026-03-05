@@ -53,6 +53,17 @@ The personal domains (trading, health, finance) are test cases, not the point. T
 
 **Honesty is paramount.** It is far worse to hide remaining work than to report it. Never mark a task as "done" if there are known issues. Report what's actually working, what's broken, and what's left.
 
+### Report Code Smells
+
+As you work, you will encounter inconsistencies, type mismatches, coercions that shouldn't exist, schemas that don't match reality, or patterns that violate our conventions. **Do not silently work around them.**
+
+- **If you fully understand the issue and the fix is within your task scope**, fix it and explain what you found and why you changed it.
+- **If you don't fully understand the issue**, or the fix touches code outside your task, **report it clearly** in your response. Include: the file and line, what looks wrong, what you think it should be, and why you're not sure. The orchestrator will launch a focused agent to investigate.
+- **Never assume a smell is intentional.** If a Datalevin schema says `:db.type/string` but callers pass symbols, that's a bug or a design smell — not "how it's supposed to work." Flag it.
+- **Never silently coerce types to work around a mismatch.** If you find yourself writing `(str some-symbol)` or `(keyword some-string)` to make data fit a schema, stop and report the mismatch instead.
+
+This is how we build a consistent system. Every agent that reports a smell makes the codebase better for the next agent.
+
 ---
 
 ## Architecture
