@@ -126,6 +126,17 @@
                    m)))))
 
 ;;; ---------------------------------------------------------------------------
+;;; Lifecycle Hooks
+;;; ---------------------------------------------------------------------------
+
+(defn before-ns-unload
+  "Called by clj-reload before unloading. Delivers timeout to all pending evals."
+  []
+  (doseq [[exec-id {:keys [promise]}] @pending-evals]
+    (deliver promise {:error "Namespace unloading" :errorType "Timeout"}))
+  (reset! pending-evals {}))
+
+;;; ---------------------------------------------------------------------------
 ;;; SSE Event Formatting
 ;;; ---------------------------------------------------------------------------
 

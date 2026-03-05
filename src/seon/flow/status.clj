@@ -104,6 +104,19 @@
   nil)
 
 ;;; ---------------------------------------------------------------------------
+;;; Lifecycle Hooks
+;;; ---------------------------------------------------------------------------
+
+(defn before-ns-unload
+  "Called by clj-reload before unloading. Stops all error drains and resets state."
+  []
+  (doseq [[_ ch] @*error-drains]
+    (async/close! ch))
+  (reset! *error-drains {})
+  (reset! *errors {})
+  (reset! *prev-counts {}))
+
+;;; ---------------------------------------------------------------------------
 ;;; Throughput Calculation
 ;;; ---------------------------------------------------------------------------
 
