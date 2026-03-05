@@ -66,6 +66,57 @@ This is how we build a consistent system. Every agent that reports a smell makes
 
 ---
 
+## Data Rules
+
+All data flowing through Seon must be safe at every boundary: Malli validation, core.async channels, Nippy serialization, Datalevin transact/pull. These rules ensure that.
+
+**Maps with namespaced keywords.** Every public function takes one map and returns one map. All keys are fully namespaced keywords (`:seon.runtime/status`, never `:status`). No exceptions.
+
+**One schema per entity.** What you write is what you read back. No separate input/output schemas. The Malli schema describes the stored shape.
+
+**Concrete types only.** No `:any`, no `:some`, no `[:maybe X]` on persisted data. Every field has a specific Datalevin-compatible type.
+
+**Optional = absent.** Use `{:optional true}` for fields that may not be present. If the key is present, it must have a valid value. If absent, it means "no value." Never store nil.
+
+**Retraction is explicit.** To clear a field, use `[:db/retract eid :attr]`. Omitting a key from a transact map means "leave unchanged."
+
+### Standard Types
+
+| Concept | Malli Type | Datalevin Type | Notes |
+|---------|-----------|---------------|-------|
+| Timestamps | `:inst` | `:db.type/instant` | Always `:inst`. Not `inst?`, not `[:fn inst?]`. |
+| Refs | `:int` with `{:db/valueType :db.type/ref}` | `:db.type/ref` | Entity ID (long). See refs section. |
+| Enums | `[:enum :a :b :c]` | `:db.type/keyword` | All values same type. Mixed-type enums are rejected. |
+| Collections | `[:set :keyword]` or `[:vector :string]` | cardinality-many | Pull returns vector. Compare as set. |
+| Nested entities | `[:map ...]` | `:db.type/ref` + `:db/isComponent true` | Auto-derived by bridge. |
+
+### Refs
+
+One pattern, used everywhere:
+
+```clojure
+;; In entity schema (what gets stored — entity ID)
+[:seon.agent.run/runtime {:optional true :db/valueType :db.type/ref} :int]
+
+;; Callers may pass lookup refs at transact time:
+(db/transact! :seon.runtime [{:seon.agent.run/id "run-1"
+                               :seon.agent.run/runtime [:seon.runtime/namespace "seon.foo"]}])
+;; Datalevin resolves the lookup ref to an entity ID automatically.
+```
+
+The schema describes the **stored** type (`:int` = entity ID). Datalevin accepts lookup refs `[identity-attr value]` at transact time and resolves them. Do not model lookup refs in the schema — that's a transact convenience, not a data type.
+
+### Where to Learn More
+
+| Topic | Document |
+|-------|----------|
+| Full type mapping table | `docs/prds/schema-unification/design.md` |
+| Serialization research (Nippy) | `docs/prds/schema-unification/research/serialization-findings.md` |
+| Nil semantics research | `docs/prds/schema-unification/research/nil-semantics-findings.md` |
+| API patterns, function contracts | `CONVENTIONS.md` |
+
+---
+
 ## Architecture
 
 ```
