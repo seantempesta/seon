@@ -268,12 +268,16 @@ For each module (runtime, ingest, ctx, trace, repl):
 
 **Phase 3 is now COMPLETE.** All 5 modules (ctx, repl, trace, runtime, ingest) have been unified.
 
-### Phase 4: Nippy Inter-JVM Channel
+### Phase 4: Nippy Inter-JVM Channel (COMPLETE)
 
-Replace EDN serialization in `seon.flow.harness.channel` with Nippy:
+Replaced EDN serialization in `seon.flow.harness.channel` with Nippy:
 - `nippy/fast-freeze` for write, `nippy/fast-thaw` for read
-- Same length-prefixed TCP protocol, just binary payload instead of UTF-8 EDN
-- Remove tagged literal machinery in `seon.flow.msg`
+- Same length-prefixed TCP protocol, binary payload instead of UTF-8 EDN
+- Removed tagged literal machinery from `seon.flow.msg` (print-method, edn-readers, read-edn)
+- Updated bridge.clj serialization roundtrip check from EDN to Nippy
+- Updated tests: msg_test.clj (EDN roundtrip -> Nippy roundtrip + type fidelity test), channel_test.clj (type fidelity test)
+- Instant vs Date audit: all Datalevin-bound Instants pass through `coerce-instants` in `ai/datalevin.clj`, correctly converting to `java.util.Date`. No production bug found.
+- 734 tests, 3714 assertions, 0 failures
 
 ### Phase 5: Startup Consistency Check
 

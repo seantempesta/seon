@@ -2,30 +2,11 @@
   "Message envelope schemas for flow wire protocol.
 
    Single source of truth for all messages between orchestrator and agent JVMs.
-   All keys fully namespaced under `seon.flow.msg`."
-  (:require [clojure.edn :as edn]
-            [seon.schema :as schema])
-  (:import [java.time Instant]))
+   All keys fully namespaced under `seon.flow.msg`.
 
-;;; ---------------------------------------------------------------------------
-;;; Tagged literal support for java.time.Instant
-;;; ---------------------------------------------------------------------------
-
-(defmethod print-method Instant
-  [^Instant inst ^java.io.Writer w]
-  (.write w "#time/instant \"")
-  (.write w (.toString inst))
-  (.write w "\""))
-
-(def edn-readers
-  "EDN readers for tagged literals used in flow messages."
-  {'time/instant #(Instant/parse %)
-   'inst         #(java.util.Date/from (Instant/parse %))})
-
-(defn read-edn
-  "Read EDN string with flow message tagged literal support."
-  [s]
-  (edn/read-string {:readers edn-readers} s))
+   Wire format: length-prefixed Nippy (fast-freeze/fast-thaw). Nippy handles
+   all JVM types natively — no tagged literals or custom print-methods needed."
+  (:require [seon.schema :as schema]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Envelope Keys
