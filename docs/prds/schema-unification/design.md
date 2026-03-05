@@ -198,13 +198,39 @@ Built `assert-pipeline-roundtrip!` in `test/seon/db/pipeline_test.clj`:
 - 13 tests, 56 assertions covering: leaf types, optional keys, enums, cardinality-many (set + vector), component refs, non-component refs, complex mixed entities, constraint violations
 - Utility is reusable for Phase 3: each module's schema can be validated with one call
 
-### Phase 3: Eliminate Hardcoded Schemas
+### Phase 3: Eliminate Hardcoded Schemas (IN PROGRESS)
 
 For each module (runtime, ingest, ctx, trace, repl):
 1. Ensure all attrs have Malli `schema/register!` with correct types
 2. Add `:db/unique`, `:db/cardinality`, `:db/isComponent`, `:db/valueType` as Malli properties where needed
 3. Replace hardcoded `datalevin-schema` with `(db-schema/malli-map->datalevin-schema ...)` call
 4. Run generative pipeline tests to verify
+
+#### Phase 3a: ctx.clj and repl.clj (DONE)
+
+**ctx.clj** (4 attrs):
+- Added `ctx-entity-schema` Malli :map schema with all 4 persisted attrs
+- Replaced hardcoded `datalevin-schema` with `(db-schema/malli-map->datalevin-schema ctx-entity-schema)`
+- Derived schema is identical to the previous hardcoded one (verified in REPL)
+- Pipeline roundtrip test: 20 entities generated and roundtripped successfully
+
+**repl.clj** (8 attrs):
+- Added `form-entity-schema` Malli :map schema with all 8 persisted attrs
+- `:form/name` is `{:optional true}` because expressions/requires have no name
+- Replaced hardcoded `datalevin-schema` with `(db-schema/malli-map->datalevin-schema form-entity-schema)`
+- Derived schema is identical to the previous hardcoded one (verified in REPL)
+- Pipeline roundtrip test: 20 entities generated and roundtripped successfully
+- Fixed smell: `:form/created-at` Malli registration was `:any`, now `:inst`
+
+**Pipeline test utility improvement:**
+- `roundtrip-one-entity!` now handles non-string identity keys (e.g., UUID)
+  by using the generated value instead of synthetic `"gen-N"` strings
+
+**Code smells flagged (not yet fixed):**
+- `::form-name` (`:seon.repl/form-name`) is `[:maybe :string]` -- acceptable for function return values (nil for expressions) but not for persisted data. The persisted attr `:form/name` correctly uses `{:optional true} :string`.
+- `::result` (`:seon.repl/result`) is `:any` -- acceptable for function return values (nREPL eval can return anything). Not persisted.
+
+#### Remaining (not started): runtime.clj (~20 attrs), ingest.clj (~30 attrs), trace.clj (~10 attrs)
 
 ### Phase 4: Nippy Inter-JVM Channel
 
