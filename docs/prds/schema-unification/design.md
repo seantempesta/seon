@@ -267,7 +267,7 @@ For each module (runtime, ingest, ctx, trace, repl):
 - Lookup refs resolved to entity IDs, Datalog joins across refs work
 - Nippy roundtrip verified on real entities, flow messages, and edge case types (byte[], Float, Instant, metadata)
 - TCP channel bidirectional roundtrip verified with 100-entity bulk payload
-- Note: Unbounded `pull [*]` on 14K+ entities overflows Datalevin's wire protocol (NegativeArraySizeException). Use bounded queries.
+- **Open research**: Unbounded `pull [*]` on 14K+ entities causes `NegativeArraySizeException` in Datalevin's TCP protocol. 14K entities is not large — investigate root cause in `reference-code/datalevin/src/datalevin/protocol.clj` and `server.clj`. May be a buffer sizing bug we can fix or work around.
 
 **Phase 3 is now COMPLETE.** All 5 modules (ctx, repl, trace, runtime, ingest) have been unified.
 
