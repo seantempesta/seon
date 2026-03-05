@@ -222,7 +222,10 @@
   "Roundtrip a single generated entity through Datalevin.
    Returns {:pass true} or {:pass false :failure {...}}."
   [conn entity identity-key set-keys many-keys dl-schema malli-schema i]
-  (let [id-val (str "gen-" i)
+  (let [id-type (get-in dl-schema [identity-key :db/valueType])
+        id-val (if (= :db.type/string id-type)
+                 (str "gen-" i)
+                 (get entity identity-key))
         entity (-> entity
                    (assoc identity-key id-val)
                    strip-empty-colls)
@@ -528,3 +531,25 @@
     (let [schema [:map [:test/id :string]]]
       (is (thrown? AssertionError
                    (assert-pipeline-roundtrip! schema {}))))))
+
+;;; ---------------------------------------------------------------------------
+;;; Tests: Module Entity Schemas (Phase 3 — schema unification)
+;;; ---------------------------------------------------------------------------
+
+(deftest ctx-entity-pipeline-test
+  (testing "seon.ctx/ctx-entity-schema survives the full pipeline"
+    (let [result (assert-pipeline-roundtrip!
+                  @(requiring-resolve 'seon.ctx/ctx-entity-schema)
+                  {:identity-key :seon.ctx/instance-id :num-samples 20})]
+      (is (zero? (:fail-count result))
+          (str "Failures: " (pr-str (:failures result))))
+      (is (= 20 (:pass-count result))))))
+
+(deftest repl-form-entity-pipeline-test
+  (testing "seon.repl/form-entity-schema survives the full pipeline"
+    (let [result (assert-pipeline-roundtrip!
+                  @(requiring-resolve 'seon.repl/form-entity-schema)
+                  {:identity-key :form/id :num-samples 20})]
+      (is (zero? (:fail-count result))
+          (str "Failures: " (pr-str (:failures result))))
+      (is (= 20 (:pass-count result))))))

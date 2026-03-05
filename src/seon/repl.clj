@@ -5,6 +5,7 @@
   (:require [clojure.core.async.flow :as flow]
             [edamame.core :as edamame]
             [seon.db :as db]
+            [seon.db.schema :as db-schema]
             [seon.flow.msg :as msg]
             [seon.flow.pool :as pool]
             [seon.graph.analyzer :as analyzer]
@@ -15,22 +16,7 @@
            [java.util Date UUID]))
 
 ;;; ---------------------------------------------------------------------------
-;;; Datalevin Schema (merged with ingest schema at conn creation)
-;;; ---------------------------------------------------------------------------
-
-(def datalevin-schema
-  "Schema for form storage in Datalevin."
-  {:form/id         {:db/valueType :db.type/uuid :db/unique :db.unique/identity}
-   :form/namespace  {:db/valueType :db.type/string}
-   :form/type       {:db/valueType :db.type/keyword}
-   :form/name       {:db/valueType :db.type/string}
-   :form/source     {:db/valueType :db.type/string}
-   :form/agent-id   {:db/valueType :db.type/string}
-   :form/version    {:db/valueType :db.type/long}
-   :form/created-at {:db/valueType :db.type/instant}})
-
-;;; ---------------------------------------------------------------------------
-;;; Schema Registration
+;;; Schema Registration (function params and response keys)
 ;;; ---------------------------------------------------------------------------
 
 (schema/register! ::source
@@ -63,7 +49,10 @@
 (schema/register! ::result
                   [:any {:description "nREPL eval result value"}])
 
+;;; ---------------------------------------------------------------------------
 ;;; Datalevin attribute registrations (enforcement layer requires these)
+;;; ---------------------------------------------------------------------------
+
 (schema/register! :form/id
                   [:uuid {:description "Unique form identifier"}])
 (schema/register! :form/namespace
@@ -79,7 +68,30 @@
 (schema/register! :form/version
                   [:int {:min 1 :description "Form version number"}])
 (schema/register! :form/created-at
-                  [:any {:description "Timestamp of form creation"}])
+                  [:inst {:description "Timestamp of form creation"}])
+
+;;; ---------------------------------------------------------------------------
+;;; Datalevin Entity Schema (Malli is the source of truth)
+;;; ---------------------------------------------------------------------------
+
+(def form-entity-schema
+  "Malli schema for a REPL form entity stored in Datalevin.
+   All persisted attrs have concrete types — no :any, no [:maybe X].
+   :form/name is optional because expressions and requires have no name."
+  [:map
+   [:form/id {:db/unique :db.unique/identity} :uuid]
+   [:form/namespace :string]
+   [:form/type :keyword]
+   [:form/name {:optional true} :string]
+   [:form/source :string]
+   [:form/agent-id :string]
+   [:form/version :int]
+   [:form/created-at :inst]])
+
+(def datalevin-schema
+  "Datalevin schema for form storage. Derived from Malli.
+   Merged with ingest schema at conn creation."
+  (db-schema/malli-map->datalevin-schema form-entity-schema))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Form Classification

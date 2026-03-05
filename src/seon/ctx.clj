@@ -40,6 +40,7 @@
             [clojure.string :as str]
             [malli.core :as m]
             [malli.error :as me]
+            [seon.db.schema :as db-schema]
             [seon.schema :as schema]
             [taoensso.timbre :as log])
   (:import [java.util.concurrent Executors ScheduledExecutorService ScheduledFuture TimeUnit]))
@@ -172,16 +173,23 @@
                             :description "Agent namespace as string (read-only in ctx)"}])
 
 ;;; ---------------------------------------------------------------------------
-;;; Datalevin Schema
+;;; Datalevin Entity Schema (Malli is the source of truth)
 ;;; ---------------------------------------------------------------------------
 
+(def ctx-entity-schema
+  "Malli schema for a ctx persistence entity.
+   Defines the shape of what gets stored in Datalevin.
+   All persisted attrs have concrete types — no :any, no [:maybe X]."
+  [:map
+   [:seon.ctx/instance-id {:db/unique :db.unique/identity} :string]
+   [:seon.ctx/namespace {:optional true} :symbol]
+   [:seon.ctx/data :string]
+   [:seon.ctx/updated-at :inst]])
+
 (def datalevin-schema
-  "Datalevin schema for ctx persistence.
+  "Datalevin schema for ctx persistence. Derived from Malli.
    Merge with other schemas when creating connections."
-  {:seon.ctx/instance-id {:db/valueType :db.type/string :db/unique :db.unique/identity}
-   :seon.ctx/namespace   {:db/valueType :db.type/symbol}
-   :seon.ctx/data        {:db/valueType :db.type/string}
-   :seon.ctx/updated-at  {:db/valueType :db.type/instant}})
+  (db-schema/malli-map->datalevin-schema ctx-entity-schema))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Instance ID Generation
