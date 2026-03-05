@@ -11,6 +11,7 @@
    orchestrator and blocks until a reply arrives."
   (:require [clojure.core.async :as async]
             [clojure.core.async.flow :as flow]
+            [taoensso.nippy :as nippy]
             [taoensso.timbre :as log]
             [seon.flow.msg :as msg]
             [seon.schema :as schema])
@@ -150,9 +151,9 @@
       (try
         (let [result   (apply the-var args)
               dur-ms   (quot (- (System/nanoTime) start-ns) 1000000)]
-          ;; Verify result is EDN-serializable via round-trip
+          ;; Verify result is Nippy-serializable via round-trip
           (try
-            (msg/read-edn (pr-str result))
+            (nippy/fast-thaw (nippy/fast-freeze result))
             (log/debug "Execute local ok" {:trace-id trace :fn fn :ns namespace :elapsed-ms dur-ms :event :end})
             (assoc base
                    ::msg/status :ok
@@ -165,7 +166,7 @@
                        ::msg/status :error
                        ::msg/error-type :serialization
                        ::msg/error-class (.getName (class e))
-                       ::msg/error-message (str "Result not EDN-serializable: " (.getMessage e))
+                       ::msg/error-message (str "Result not Nippy-serializable: " (.getMessage e))
                        ::msg/duration-ms dur-ms')))))
         (catch Exception e
           (let [dur-ms (quot (- (System/nanoTime) start-ns) 1000000)]

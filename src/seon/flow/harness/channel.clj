@@ -1,9 +1,9 @@
 (ns seon.flow.harness.channel
   "Bidirectional TCP <-> core.async channel adapter.
 
-   Length-prefixed EDN over TCP. Each message is:
+   Length-prefixed Nippy over TCP. Each message is:
    - 4-byte big-endian length prefix
-   - UTF-8 encoded EDN bytes
+   - Nippy-encoded bytes (fast-freeze/fast-thaw, no header)
 
    Two entry points:
    - `start-server!` - listen on a port, accept one client
@@ -11,8 +11,8 @@
 
    Both return {::in-ch ::out-ch ::close!} for bidirectional communication."
   (:require [clojure.core.async :as a]
-            [seon.flow.msg :as msg]
-            [seon.schema :as schema])
+            [seon.schema :as schema]
+            [taoensso.nippy :as nippy])
   (:import [java.io DataInputStream DataOutputStream EOFException]
            [java.net ServerSocket Socket InetAddress]))
 
@@ -25,18 +25,18 @@
 (schema/register! ::host [:string {:min 1 :description "Hostname to connect to"}])
 
 (defn- read-message!
-  "Read one length-prefixed EDN message from input stream.
-   Returns parsed EDN or nil on EOF/error."
+  "Read one length-prefixed Nippy message from input stream.
+   Returns deserialized value or nil on EOF/error."
   [^DataInputStream dis]
   (let [len (.readInt dis)
         buf (byte-array len)]
     (.readFully dis buf)
-    (msg/read-edn (String. buf "UTF-8"))))
+    (nippy/fast-thaw buf)))
 
 (defn- write-message!
-  "Write one length-prefixed EDN message to output stream."
+  "Write one length-prefixed Nippy message to output stream."
   [^DataOutputStream dos msg]
-  (let [^bytes bs (.getBytes (pr-str msg) "UTF-8")]
+  (let [^bytes bs (nippy/fast-freeze msg)]
     (.writeInt dos (alength bs))
     (.write dos bs)
     (.flush dos)))
