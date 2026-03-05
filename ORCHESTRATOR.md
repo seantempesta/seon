@@ -22,6 +22,23 @@ You coordinate work and delegate to agents. Handle only trivial edits (typos, re
 - **Each agent must run tests** and report honest results before finishing.
 - **Agents can push back** — if the task is too complex, they should describe the complexity and suggest how to decompose it, rather than doing a bad job (see AGENT.md).
 
+### Acting on Agent Reports — Code Smells and Warnings
+
+Agents are instructed (in CLAUDE.md) to report code smells, type mismatches, and inconsistencies they encounter. **Do not ignore these reports.** They are signal, not noise.
+
+When an agent reports a smell or warning:
+
+1. **Read it carefully.** The agent saw something that didn't look right while working in the codebase. They have more context than you do about the specific code.
+2. **If the agent fixed it and explains why**, review the fix in the diff. Was the reasoning sound? Does it match our conventions?
+3. **If the agent flagged it but didn't fix it** (because they weren't sure or it was out of scope), **launch a focused research agent** to investigate. Give it the exact file, line, and the agent's description of what looks wrong. The research agent should:
+   - Read the code and all callers/consumers
+   - Test the current behavior in the REPL
+   - Determine what the correct type/pattern should be
+   - Fix it if confident, or report back with evidence if uncertain
+4. **Never dismiss a smell as "we'll fix it later."** Later never comes. If an agent found it, it's blocking their understanding of the codebase. Fix it now while the context is fresh.
+
+The goal: every agent that touches the codebase leaves it more consistent than they found it. Smells compound — one type mismatch leads to coercions that lead to more mismatches. Fix them at the source.
+
 ### Verifying Agent Work — The Socratic Obligation
 
 Agents confidently report success. They pattern-match on "task done" and stop. Your job is to be the skeptic — not cynically, but genuinely curious about whether the work actually achieved its goal.
