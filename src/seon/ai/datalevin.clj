@@ -81,8 +81,7 @@
 (schema/register! ::error-count
                   [:int {:min 0 :description "Number of failed writes"}])
 
-(schema/register! ::last-write-at
-                  [:any {:description "Timestamp of last successful write"}])
+(schema/register! ::last-write-at :inst)
 
 (schema/register! ::session-count
                   [:int {:min 0 :description "Number of sessions stored"}])
@@ -100,7 +99,7 @@
                   [:map
                    [::write-count ::write-count]
                    [::error-count ::error-count]
-                   [::last-write-at [:maybe :any]]
+                   [::last-write-at {:optional true} ::last-write-at]
                    [::session-writes ::session-writes]
                    [::message-writes ::message-writes]])
 
