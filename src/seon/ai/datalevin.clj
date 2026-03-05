@@ -38,7 +38,8 @@
    - P3: stats function now has :malli/schema and uses namespaced keys
 
    Last audit: 2026-03-04 | Tests: 12 pass / 0 fail"
-  (:require [seon.ai :as ai]
+  (:require [clojure.edn :as edn]
+            [seon.ai :as ai]
             [seon.db :as db]
             [seon.db.schema :as dbs]
             [seon.db.tx :as tx]
@@ -244,10 +245,31 @@
         remove-nil-values
         coerce-instants)))
 
+(defn- serialize-content
+  "Serialize ::ai/content for Datalevin storage.
+   Strings pass through; maps are pr-str'd to EDN so they survive :db.type/string."
+  [entity]
+  (let [content (:seon.ai/content entity)]
+    (if (map? content)
+      (assoc entity :seon.ai/content (pr-str content))
+      entity)))
+
+(defn- deserialize-content
+  "Deserialize ::ai/content from Datalevin storage.
+   Attempts to read EDN for strings that look like maps; plain strings pass through."
+  [entity]
+  (let [content (:seon.ai/content entity)]
+    (if (and (string? content) (.startsWith ^String content "{"))
+      (try
+        (assoc entity :seon.ai/content (edn/read-string content))
+        (catch Exception _ entity))
+      entity)))
+
 (defn- entity->datalevin-message
   "Convert message entity to Datalevin format.
    Nil values are filtered out to prevent Datalevin NPE.
-   java.time.Instant coerced to java.util.Date for Datalevin."
+   java.time.Instant coerced to java.util.Date for Datalevin.
+   Map content is serialized to EDN string for :db.type/string storage."
   [entity]
   (let [message-id (:seon/id entity)]
     (-> entity
@@ -255,6 +277,7 @@
         (assoc :seon.ai.datalevin/entity-id message-id
                :seon.ai.datalevin/entity-type :message
                :seon.ai.datalevin/stored-at (java.util.Date.))
+        serialize-content
         remove-nil-values
         coerce-instants)))
 
@@ -484,12 +507,14 @@
         (dissoc :db/id ::entity-type ::stored-at ::entity-id))))
 
 (defn- dl-entity->message
-  "Convert a Datalevin message entity to the shape callers expect."
+  "Convert a Datalevin message entity to the shape callers expect.
+   Deserializes EDN-encoded map content back to maps."
   [entity]
   (when entity
     (-> entity
         (assoc :seon/id (::entity-id entity))
-        (dissoc :db/id ::entity-type ::stored-at ::entity-id))))
+        (dissoc :db/id ::entity-type ::stored-at ::entity-id)
+        deserialize-content)))
 
 (defn dl-get-session
   "Find session by session-id (logical ID) from Datalevin.

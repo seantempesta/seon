@@ -61,36 +61,22 @@
                   [:enum {:description "Message role"}
                    "user" "assistant" "system"])
 
-;; Message content - can be string or structured
+;; Message content - can be string or structured map.
+;; Datalevin stores as string; structured content is Nippy-serialized by Datalevin.
 (schema/register! ::content
-                  [:or {:description "Message content"}
+                  [:or {:description "Message content"
+                        :db/valueType :db.type/string}
                    :string
                    [:map]])
 
 ;; Timestamp for events
-;; Uses :gen/fmap to produce Instant values for generative testing
-(schema/register! ::timestamp
-                  [:fn {:description "Event timestamp"
-                        :error/message "Must be a java.time.Instant"
-                        :gen/fmap (fn [_] (Instant/now))
-                        :gen/schema :int}
-                   inst?])
+(schema/register! ::timestamp :inst)
 
 ;; Session start time
-(schema/register! ::started-at
-                  [:fn {:description "Session start timestamp"
-                        :error/message "Must be a java.time.Instant"
-                        :gen/fmap (fn [_] (Instant/now))
-                        :gen/schema :int}
-                   inst?])
+(schema/register! ::started-at :inst)
 
 ;; Session end time
-(schema/register! ::ended-at
-                  [:fn {:description "Session end timestamp"
-                        :error/message "Must be a java.time.Instant"
-                        :gen/fmap (fn [_] (Instant/now))
-                        :gen/schema :int}
-                   inst?])
+(schema/register! ::ended-at :inst)
 
 ;; Monotonic sequence number for message ordering within same-millisecond writes
 (schema/register! ::sequence

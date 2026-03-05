@@ -20,7 +20,7 @@
             [seon.db.schema :as dbs]
             [seon.db.tx :as tx]
             [seon.schema :as schema])
-  (:import [java.time Instant]))
+  (:import [java.util Date]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schema Registration
@@ -105,7 +105,7 @@
   (try
     (let [entity (cond-> {::trace-id trace-id
                           ::event event
-                          ::timestamp (Instant/now)
+                          ::timestamp (Date.)
                           ::entity-type :flow-event}
                    session-id (assoc ::session-id session-id)
                    fn (assoc ::fn fn)

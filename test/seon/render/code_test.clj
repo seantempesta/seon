@@ -264,24 +264,24 @@
 
 (deftest resolve-docs-positive-test
   (testing "returns var when a resolvable documentation renderer exists"
-    ;; Transact a function entry pointing to our real test-doc-renderer
+    ;; Transact a function entry pointing to our real test-doc-renderer.
+    ;; Specs first (functions reference them via lookup refs).
     (let [qname "seon.render.code-test/test-doc-renderer"]
       (db/transact! :seon.runtime
-                    [{:db/id -10
-                      :seon.spec/key :seon.render.code-test/doc-in
+                    [{:seon.spec/key :seon.render.code-test/doc-in
                       :seon.spec/contains-keys [:seon.render.code-test/x]
                       :seon.spec/base-type :map}
-                     {:db/id -11
-                      :seon.spec/key :seon.render.code-test/doc-out
+                     {:seon.spec/key :seon.render.code-test/doc-out
                       :seon.spec/contains-keys [:seon.render/documentation]
-                      :seon.spec/base-type :map}
-                     {:seon.fn/qualified-name qname
+                      :seon.spec/base-type :map}])
+      (db/transact! :seon.runtime
+                    [{:seon.fn/qualified-name qname
                       :seon.fn/namespace "seon.render.code-test"
                       :seon.fn/name "test-doc-renderer"
                       :seon.fn/private false
                       :seon.fn/row 1
-                      :seon.fn/input-spec -10
-                      :seon.fn/output-spec -11}])
+                      :seon.fn/input-spec [:seon.spec/key :seon.render.code-test/doc-in]
+                      :seon.fn/output-spec [:seon.spec/key :seon.render.code-test/doc-out]}])
       (gq/invalidate-output-key-cache!)
       (let [result (rc/resolve-docs {::rc/db-name :seon.runtime
                                      ::rc/ns-name "seon.render.code-test"
