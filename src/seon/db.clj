@@ -98,10 +98,25 @@
     (when (map? datum)
       (validate-entity-values! datum))))
 
+(defn- extract-db-props
+  "Extract :db/* properties from a Malli schema definition.
+   Handles both raw vectors ([:or {:db/valueType ...} ...]) and resolved schemas."
+  [malli-def]
+  (try
+    (let [s (m/schema malli-def)
+          props (m/properties s)]
+      (when props
+        (not-empty
+         (into {} (filter (fn [[pk _]] (and (keyword? pk) (= "db" (namespace pk))))) props))))
+    (catch Exception _ nil)))
+
 (defn- ensure-schema!
   "For each domain attr, check if it exists in the Datalevin schema for conn.
    If missing, derive the Datalevin type from the Malli definition and call
-   d/update-schema to add it."
+   d/update-schema to add it.
+   When the Malli definition carries :db/* properties (e.g. :db/valueType on
+   an :or schema), those are promoted to entry-level properties so the bridge
+   can find them."
   [conn attrs]
   (let [current-schema (d/schema conn)
         domain-attrs (remove system-attr? attrs)
@@ -111,8 +126,12 @@
             (reduce
              (fn [acc attr]
                (let [malli-def (schema/schema-definition attr)
+                     db-props (extract-db-props malli-def)
+                     entry (if db-props
+                             [attr db-props malli-def]
+                             [attr malli-def])
                      entry-schema (db-schema/malli-map->datalevin-schema
-                                   [:map [attr malli-def]])]
+                                   [:map entry])]
                  (when-not (contains? entry-schema attr)
                    (throw (ex-info (str "Cannot derive Datalevin type for attribute " attr
                                         " (Malli type: " (pr-str malli-def) ")."

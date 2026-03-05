@@ -3,7 +3,10 @@
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [datalevin.core :as d]
+            [seon.db :as db]
+            [seon.db.datalevin.conn :as conn]
             [seon.graph.ingest :as ingest]
+            [seon.graph.query :as gq]
             [seon.render :as render]
             [seon.test-utils]))
 
@@ -15,9 +18,14 @@
 
 (defn with-temp-datalevin [f]
   (let [dir (str "tmp/test-render-" (System/currentTimeMillis))
-        conn (d/create-conn dir ingest/datalevin-schema)]
+        conn (d/create-conn dir ingest/datalevin-schema)
+        fake-mgr {::conn/port 0
+                  ::conn/connections (atom {:seon.runtime {::conn/connection conn}})}]
     (try
-      (binding [*conn* conn]
+      (binding [*conn* conn
+                db/*direct-mode* true
+                db/*conn-manager* fake-mgr]
+        (gq/invalidate-output-key-cache!)
         (f))
       (finally
         ;; Clear the conn override to prevent polluting the running system.
@@ -25,6 +33,7 @@
         ;; cleanup, the dev hook's test run leaves a stale local conn that
         ;; shadows the real system connection.
         (render/set-conn! nil)
+        (gq/invalidate-output-key-cache!)
         (d/close conn)
         (let [d (io/file dir)]
           (doseq [file (reverse (file-seq d))]
@@ -63,18 +72,18 @@
                    :seon.fn/private false}])
 
     (is (= "test.render/widget"
-           (render/find-renderer *conn*
+           (render/find-renderer :seon.runtime
                                  {:test/name "Foo" :test/color "red"}
                                  :html)))
     (is (= "test.render/widget"
-           (render/find-renderer *conn*
+           (render/find-renderer :seon.runtime
                                  {:test/name "Foo" :test/color "red" :extra/key 42}
                                  :ai))
         "Extra keys in data should still match")))
 
 (deftest find-renderer-no-match-test
   (testing "returns nil when no renderer matches"
-    (is (nil? (render/find-renderer *conn* {:foo/bar 1} :html)))))
+    (is (nil? (render/find-renderer :seon.runtime {:foo/bar 1} :html)))))
 
 (deftest find-renderer-specificity-test
   (testing "picks the most specific renderer (most required keys)"
@@ -124,7 +133,7 @@
                    :seon.fn/private false}])
 
     (is (= "test.render/specific"
-           (render/find-renderer *conn*
+           (render/find-renderer :seon.runtime
                                  {:test/name "X" :test/color "blue"}
                                  :html))
         "Should pick the more specific (2-key) renderer")))
@@ -155,8 +164,8 @@
                    :seon.fn/private false}])
 
     (is (= "test.render/html-only"
-           (render/find-renderer *conn* {:test/x 1} :html)))
-    (is (nil? (render/find-renderer *conn* {:test/x 1} :ai))
+           (render/find-renderer :seon.runtime {:test/x 1} :html)))
+    (is (nil? (render/find-renderer :seon.runtime {:test/x 1} :ai))
         "Should not match :ai format when output only has :seon.render/html")))
 
 ;;; ---------------------------------------------------------------------------
@@ -301,13 +310,13 @@
                    :seon.fn/private false}])
 
     (is (= "test.page/wide"
-           (render/find-page-renderer *conn*
+           (render/find-page-renderer :seon.runtime
                                       {:test/alpha 1 :test/beta 2 :test/gamma 3}))
         "Should pick the renderer with the most overlapping keys")))
 
 (deftest find-page-renderer-no-overlap-test
   (testing "returns nil when no keys overlap"
-    (is (nil? (render/find-page-renderer *conn*
+    (is (nil? (render/find-page-renderer :seon.runtime
                                          {:unrelated/key 1})))))
 
 ;;; ---------------------------------------------------------------------------
@@ -429,7 +438,7 @@
     ;; Both keys available -> B wins (more specific)
     ;; Test via find-renderer which returns a string (resolve-renderer returns var which won't resolve)
     (is (= "test.resolve/renderer-b"
-           (render/find-renderer *conn*
+           (render/find-renderer :seon.runtime
                                  {:test/alpha 1 :test/beta 2}
                                  :html)))))
 
@@ -458,14 +467,14 @@
                    :seon.fn/updated-at (java.util.Date.)
                    :seon.fn/private false}])
 
-    (is (nil? (render/resolve-renderer *conn*
+    (is (nil? (render/resolve-renderer :seon.runtime
                                        #{:test/alpha}
                                        "test.excl"))
         "Should not resolve when required key :test/beta is missing")))
 
 (deftest resolve-renderer-no-candidates-test
   (testing "returns nil when no renderers in DB"
-    (is (nil? (render/resolve-renderer *conn*
+    (is (nil? (render/resolve-renderer :seon.runtime
                                        #{:foo/bar}
                                        "foo")))))
 

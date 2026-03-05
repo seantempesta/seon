@@ -6,8 +6,11 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [datalevin.core :as d]
+            [seon.db :as db]
+            [seon.db.datalevin.conn :as conn]
             [seon.graph.ingest :as ingest]
             [seon.graph.extract :as extract]
+            [seon.graph.query :as gq]
             [seon.graph.scanner :as scanner]
             [seon.health.workout :as workout]
             [seon.test-utils]
@@ -22,12 +25,18 @@
 
 (defn with-temp-datalevin [f]
   (let [dir (str "tmp/test-workout-" (System/currentTimeMillis))
-        conn (d/create-conn dir ingest/datalevin-schema)]
+        conn (d/create-conn dir ingest/datalevin-schema)
+        fake-mgr {::conn/port 0
+                  ::conn/connections (atom {:seon.runtime {::conn/connection conn}})}]
     (try
-      (binding [*conn* conn]
+      (binding [*conn* conn
+                db/*direct-mode* true
+                db/*conn-manager* fake-mgr]
+        (gq/invalidate-output-key-cache!)
         (f))
       (finally
         (render/set-conn! nil)
+        (gq/invalidate-output-key-cache!)
         (d/close conn)
         (let [d (io/file dir)]
           (doseq [file (reverse (file-seq d))]
@@ -187,14 +196,15 @@
       ;; Transact linked functions
       (d/transact! *conn* (vec (::extract/functions graph))))
 
+    (gq/invalidate-output-key-cache!)
     (let [workout-data {::workout/exercise "Squat"
                         ::workout/sets 3
                         ::workout/reps 8
                         ::workout/weight 100}]
       (is (= "seon.health.workout/workout-set-render"
-             (render/find-renderer *conn* workout-data :html)))
+             (render/find-renderer :seon.runtime workout-data :html)))
       (is (= "seon.health.workout/workout-set-render"
-             (render/find-renderer *conn* workout-data :ai))))))
+             (render/find-renderer :seon.runtime workout-data :ai))))))
 
 (deftest try-render-test
   (testing "try-render returns nil when no renderer is registered"
