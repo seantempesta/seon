@@ -16,8 +16,7 @@
      :seon.flow.trace/status     - Reply status (:ok, :error, etc.)
      :seon.flow.trace/error-message - Error message (when applicable)"
   (:require [taoensso.timbre :as log]
-            [integrant.repl.state :as state]
-            [seon.db.datalevin.conn :as conn]
+            [seon.db :as db]
             [seon.db.schema :as dbs]
             [seon.db.tx :as tx]
             [seon.schema :as schema])
@@ -87,22 +86,6 @@
          tx/datalevin-schema))
 
 ;;; ---------------------------------------------------------------------------
-;;; Connection
-;;; ---------------------------------------------------------------------------
-
-(defn- get-conn
-  "Get master Datalevin connection from Integrant system."
-  []
-  (when-let [mgr (:seon.db.datalevin/connections state/system)]
-    (try
-      (conn/get-conn! {::conn/manager mgr
-                       ::conn/db :seon.flow
-                       ::conn/schema datalevin-schema})
-      (catch Exception e
-        (log/warn "Failed to get Datalevin connection for flow trace" {:error (.getMessage e)})
-        nil))))
-
-;;; ---------------------------------------------------------------------------
 ;;; Persistence
 ;;; ---------------------------------------------------------------------------
 
@@ -122,22 +105,19 @@
    Returns true if persisted, false on error or no connection."
   [{::keys [trace-id session-id event fn ns elapsed-ms status error-message]}]
   (try
-    (when-let [conn (get-conn)]
-      (require 'seon.db)
-      (let [transact! (resolve 'seon.db/transact!)
-            entity (cond-> {::trace-id trace-id
-                            ::event event
-                            ::timestamp (Instant/now)
-                            :seon.flow.trace/entity-type :flow-event}
-                     session-id (assoc ::session-id session-id)
-                     fn (assoc ::fn fn)
-                     ns (assoc ::ns ns)
-                     elapsed-ms (assoc ::elapsed-ms elapsed-ms)
-                     status (assoc ::status status)
-                     error-message (assoc ::error-message error-message))]
-        (transact! conn [entity])
-        (log/trace "Persisted flow event" {:trace-id trace-id :event event :fn fn})
-        true))
+    (let [entity (cond-> {::trace-id trace-id
+                          ::event event
+                          ::timestamp (Instant/now)
+                          ::entity-type :flow-event}
+                   session-id (assoc ::session-id session-id)
+                   fn (assoc ::fn fn)
+                   ns (assoc ::ns ns)
+                   elapsed-ms (assoc ::elapsed-ms elapsed-ms)
+                   status (assoc ::status status)
+                   error-message (assoc ::error-message error-message))]
+      (db/transact! :seon.flow [entity])
+      (log/trace "Persisted flow event" {:trace-id trace-id :event event :fn fn})
+      true)
     (catch Exception e
       (log/warn "Failed to persist flow event" {:trace-id trace-id :event event :error (.getMessage e)})
       false)))
@@ -156,23 +136,20 @@
    Returns vector of flow event maps, newest first."
   [{::keys [session-id limit]}]
   (try
-    (when-let [conn (get-conn)]
-      (require 'datalevin.core)
-      (let [q-fn (resolve 'datalevin.core/q)
-            pull (resolve 'datalevin.core/pull)
-            lim (or limit 100)
-            eids (q-fn '[:find ?e ?ts
-                         :in $ ?sid
-                         :where
-                         [?e :seon.flow.trace/entity-type :flow-event]
-                         [?e :seon.flow.trace/session-id ?sid]
-                         [?e :seon.flow.trace/timestamp ?ts]]
-                       @conn session-id)
-            sorted (->> eids
-                        (sort-by second)
-                        reverse
-                        (take lim))]
-        (mapv (fn [[eid _]] (pull @conn '[*] eid)) sorted)))
+    (let [lim (or limit 100)
+          results (db/query :seon.flow
+                            '[:find (pull ?e [*]) ?ts
+                              :in $ ?sid
+                              :where
+                              [?e :seon.flow.trace/entity-type :flow-event]
+                              [?e :seon.flow.trace/session-id ?sid]
+                              [?e :seon.flow.trace/timestamp ?ts]]
+                            session-id)]
+      (->> results
+           (sort-by second)
+           reverse
+           (take lim)
+           (mapv first)))
     (catch Exception e
       (log/warn "Failed to query flow events" {:session-id session-id :error (.getMessage e)})
       [])))

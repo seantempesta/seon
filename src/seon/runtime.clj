@@ -258,7 +258,12 @@
   (or @merged-schema-cache
       (let [schema (do
                      (require 'seon.graph.ingest)
-                     (merge @(resolve 'seon.graph.ingest/datalevin-schema) runtime-schema))]
+                     (require 'seon.ctx)
+                     (require 'seon.flow.trace)
+                     (merge @(resolve 'seon.graph.ingest/datalevin-schema)
+                            @(resolve 'seon.ctx/datalevin-schema)
+                            @(resolve 'seon.flow.trace/datalevin-schema)
+                            runtime-schema))]
         (reset! merged-schema-cache schema)
         schema)))
 
@@ -923,6 +928,27 @@
   "Remove all flow handles. For testing only."
   []
   (reset! flow-handles {}))
+
+;;; ---------------------------------------------------------------------------
+;;; Lifecycle Hooks
+;;; ---------------------------------------------------------------------------
+
+(defn after-ns-reload
+  "Called by clj-reload after reloading. Resets generated-ids (negligible collision
+   risk for 6-char base62) and re-populates flow-handles from Integrant system."
+  []
+  (reset! generated-ids #{})
+  ;; Re-populate flow-handles from Integrant if system is running
+  (try
+    (require 'integrant.repl.state)
+    (when-let [sys @(resolve 'integrant.repl.state/system)]
+      (when-let [{:keys [flow chans]} (:seon.flow/infrastructure sys)]
+        (let [flow-id :seon.flow/infrastructure
+              handle {:flow flow :chans chans :label "infrastructure"
+                      :started-at (java.time.Instant/now)}]
+          (swap! flow-handles assoc flow-id handle))))
+    (catch Exception e
+      (log/debug "Could not re-populate flow-handles from Integrant" {:error (.getMessage e)}))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Testing Helpers
