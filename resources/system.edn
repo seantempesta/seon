@@ -33,6 +33,12 @@
  ;; Loads all domain schemas on startup
  :seon.schema/registry {}
 
+ ;; Schema Consistency Check
+ ;; Validates all persisted entity schemas at boot.
+ ;; Catches :any, :some, [:maybe X], mixed enums before they reach Datalevin.
+ :seon.db.schema/consistency-check
+ {:registry #ig/ref :seon.schema/registry}
+
  ;; nREPL Server - managed by Integrant
  ;; Dev: Enabled - connect to inspect/modify the running system
  ;; Test/Prod: Disabled (headless)

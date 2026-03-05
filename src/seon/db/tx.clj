@@ -43,6 +43,8 @@
    [::op {:optional true} [:enum :create :update :delete :sync :scan :import]]
    [::reason {:optional true} :string]])
 
+(dbs/register-entity-schema! "seon.db.tx" entity-schema)
+
 (def datalevin-schema
   "Datalevin schema for transaction metadata attributes.
    Derived from entity-schema via the bridge. Merge into every database's schema."

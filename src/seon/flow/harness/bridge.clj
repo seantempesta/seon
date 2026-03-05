@@ -171,13 +171,13 @@
         (catch Exception e
           (let [dur-ms (quot (- (System/nanoTime) start-ns) 1000000)]
             (log/warn "Execute local execution error" {:trace-id trace :fn fn :ns namespace :elapsed-ms dur-ms :event :error :error-type :execution :error-message (.getMessage e)})
-            (assoc base
-                   ::msg/status :error
-                   ::msg/error-type :execution
-                   ::msg/error-class (.getName (class e))
-                   ::msg/error-message (.getMessage e)
-                   ::msg/error-data (ex-data e)
-                   ::msg/duration-ms dur-ms))))
+            (cond-> (assoc base
+                           ::msg/status :error
+                           ::msg/error-type :execution
+                           ::msg/error-class (.getName (class e))
+                           ::msg/error-message (.getMessage e)
+                           ::msg/duration-ms dur-ms)
+              (ex-data e) (assoc ::msg/error-data (ex-data e))))))
       ;; Var not found
       (let [dur-ms (quot (- (System/nanoTime) start-ns) 1000000)]
         (log/warn "Execute local not found" {:trace-id trace :fn fn :ns namespace :elapsed-ms dur-ms :event :error :error-type :not-found})

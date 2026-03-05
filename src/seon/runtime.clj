@@ -214,6 +214,10 @@
    [:seon.flow.snap/reason [:enum :shutdown :backup :manual :error]]
    [:seon.flow.snap/data :string]])
 
+(db-schema/register-entity-schema! "seon.runtime" runtime-entity-schema)
+(db-schema/register-entity-schema! "seon.agent.run" agent-run-entity-schema)
+(db-schema/register-entity-schema! "seon.flow.snap" flow-snap-entity-schema)
+
 (def runtime-schema
   "Datalevin schema for all runtime entities. Derived from Malli.
    Merged with graph/ctx/trace schemas when creating the seon.runtime connection."

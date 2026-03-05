@@ -108,6 +108,13 @@
    [:seon.var/value-type {:optional true} :keyword]
    [:seon.var/updated-at {:optional true} :inst]])
 
+(db-schema/register-entity-schema! "seon.ns" ns-entity-schema)
+(db-schema/register-entity-schema! "seon.fn" fn-entity-schema)
+(db-schema/register-entity-schema! "seon.call" call-entity-schema)
+(db-schema/register-entity-schema! "seon.ns.dep" ns-dep-entity-schema)
+(db-schema/register-entity-schema! "seon.spec" spec-entity-schema)
+(db-schema/register-entity-schema! "seon.var" var-entity-schema)
+
 (def datalevin-schema
   "Schema for the knowledge graph in Datalevin. Derived from Malli entity schemas."
   (merge (db-schema/malli-map->datalevin-schema ns-entity-schema)

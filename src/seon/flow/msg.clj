@@ -22,10 +22,7 @@
 (schema/register! ::timeout-ms [:int {:min 1}])
 (schema/register! ::reply-required? :boolean)
 (schema/register! ::trace-id :uuid)
-(schema/register! ::created-at [:fn {:description "Timestamp"
-                                     :gen/fmap (fn [_] (java.time.Instant/now))
-                                     :gen/schema :int}
-                                inst?])
+(schema/register! ::created-at :inst)
 (schema/register! ::payload [:map-of :keyword :any])
 
 ;;; ---------------------------------------------------------------------------
@@ -33,19 +30,19 @@
 ;;; ---------------------------------------------------------------------------
 
 (schema/register! ::request
-  [:map
-   [::id ::id]
-   [::version ::version]
-   [::type [:= :request]]
-   [::from-ns ::from-ns]
-   [::to-ns ::to-ns]
-   [::fn ::fn]
-   [::args ::args]
-   [::reply-required? {:optional true} ::reply-required?]
-   [::timeout-ms {:optional true} ::timeout-ms]
-   [::trace-id {:optional true} ::trace-id]
-   [::created-at ::created-at]
-   [::payload {:optional true} ::payload]])
+                  [:map
+                   [::id ::id]
+                   [::version ::version]
+                   [::type [:= :request]]
+                   [::from-ns ::from-ns]
+                   [::to-ns ::to-ns]
+                   [::fn ::fn]
+                   [::args ::args]
+                   [::reply-required? {:optional true} ::reply-required?]
+                   [::timeout-ms {:optional true} ::timeout-ms]
+                   [::trace-id {:optional true} ::trace-id]
+                   [::created-at ::created-at]
+                   [::payload {:optional true} ::payload]])
 
 ;;; ---------------------------------------------------------------------------
 ;;; Reply
@@ -55,24 +52,24 @@
 (schema/register! ::error-type [:enum :execution :timeout :overload :serialization :not-found])
 (schema/register! ::error-class [:string {:description "Exception class name"}])
 (schema/register! ::error-message :string)
-(schema/register! ::error-data [:maybe :map])
+(schema/register! ::error-data :map)
 (schema/register! ::duration-ms [:int {:min 0}])
 (schema/register! ::value :any)
 
 (schema/register! ::reply
-  [:map
-   [::id ::id]
-   [::version ::version]
-   [::type [:= :reply]]
-   [::status ::status]
-   [::from-ns ::from-ns]
-   [::value {:optional true} ::value]
-   [::error-type {:optional true} ::error-type]
-   [::error-class {:optional true} ::error-class]
-   [::error-message {:optional true} ::error-message]
-   [::error-data {:optional true} ::error-data]
-   [::duration-ms ::duration-ms]
-   [::trace-id {:optional true} ::trace-id]])
+                  [:map
+                   [::id ::id]
+                   [::version ::version]
+                   [::type [:= :reply]]
+                   [::status ::status]
+                   [::from-ns ::from-ns]
+                   [::value {:optional true} ::value]
+                   [::error-type {:optional true} ::error-type]
+                   [::error-class {:optional true} ::error-class]
+                   [::error-message {:optional true} ::error-message]
+                   [::error-data {:optional true} ::error-data]
+                   [::duration-ms ::duration-ms]
+                   [::trace-id {:optional true} ::trace-id]])
 
 ;;; ---------------------------------------------------------------------------
 ;;; Observability Events
@@ -81,11 +78,11 @@
 (schema/register! ::event-kind [:enum :start :ok :error :overload :timeout :pause :resume :stop])
 
 (schema/register! ::event
-  [:map
-   [::id ::id]
-   [::version ::version]
-   [::type [:= :event]]
-   [::event-kind ::event-kind]
-   [::from-ns ::from-ns]
-   [::created-at ::created-at]
-   [::payload {:optional true} ::payload]])
+                  [:map
+                   [::id ::id]
+                   [::version ::version]
+                   [::type [:= :event]]
+                   [::event-kind ::event-kind]
+                   [::from-ns ::from-ns]
+                   [::created-at ::created-at]
+                   [::payload {:optional true} ::payload]])
