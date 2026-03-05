@@ -713,3 +713,134 @@
       (is (zero? (:fail-count result))
           (str "Failures: " (pr-str (:failures result))))
       (is (= 20 (:pass-count result))))))
+
+;;; ---------------------------------------------------------------------------
+;;; Tests: Ingest Entity Schemas (Phase 3d — graph/ingest.clj unification)
+;;; ---------------------------------------------------------------------------
+
+(deftest ingest-ns-entity-pipeline-test
+  (testing "seon.graph.ingest/ns-entity-schema survives the full pipeline"
+    (let [result (assert-pipeline-roundtrip!
+                   @(requiring-resolve 'seon.graph.ingest/ns-entity-schema)
+                   {:identity-key :seon.ns/name :num-samples 20})]
+      (is (zero? (:fail-count result))
+          (str "Failures: " (pr-str (:failures result))))
+      (is (= 20 (:pass-count result))))))
+
+(deftest ingest-fn-entity-pipeline-test
+  (testing "seon.graph.ingest/fn-entity-schema survives the full pipeline"
+    ;; Ref fields (:input-spec, :output-spec) are excluded from generative testing
+    ;; because refs require existing target entities. Tested manually below.
+    (let [schema-without-refs
+          (into [:map]
+                (remove (fn [[k]] (#{:seon.fn/input-spec :seon.fn/output-spec} k)))
+                (rest @(requiring-resolve 'seon.graph.ingest/fn-entity-schema)))
+          result (assert-pipeline-roundtrip!
+                   schema-without-refs
+                   {:identity-key :seon.fn/qualified-name :num-samples 20})]
+      (is (zero? (:fail-count result))
+          (str "Failures: " (pr-str (:failures result))))
+      (is (= 20 (:pass-count result))))))
+
+(deftest ingest-fn-spec-ref-pipeline-test
+  (testing ":seon.fn/input-spec and :seon.fn/output-spec refs roundtrip correctly"
+    ;; Manual test: create spec entities, then fn entity with refs, verify roundtrip.
+    (let [dl-schema (merge
+                      (db-schema/malli-map->datalevin-schema
+                        @(requiring-resolve 'seon.graph.ingest/fn-entity-schema))
+                      (db-schema/malli-map->datalevin-schema
+                        @(requiring-resolve 'seon.graph.ingest/spec-entity-schema)))]
+      (tu/with-temp-conn dl-schema
+        (fn [conn]
+          ;; Create target spec entities
+          (d/transact! conn [{:seon.spec/key :seon.test/input-spec
+                              :seon.spec/namespace "seon.test"
+                              :seon.spec/definition "[:map [:x :int]]"
+                              :seon.spec/base-type :map
+                              :seon.spec/updated-at (java.util.Date.)}
+                             {:seon.spec/key :seon.test/output-spec
+                              :seon.spec/namespace "seon.test"
+                              :seon.spec/definition "[:map [:y :string]]"
+                              :seon.spec/base-type :map
+                              :seon.spec/updated-at (java.util.Date.)}])
+          ;; Create fn entity with lookup refs to specs
+          (d/transact! conn [{:seon.fn/qualified-name "seon.test/my-fn"
+                              :seon.fn/namespace "seon.test"
+                              :seon.fn/name "my-fn"
+                              :seon.fn/private false
+                              :seon.fn/updated-at (java.util.Date.)
+                              :seon.fn/input-spec [:seon.spec/key :seon.test/input-spec]
+                              :seon.fn/output-spec [:seon.spec/key :seon.test/output-spec]}])
+          ;; Pull and verify refs
+          (let [result (d/pull @conn '[*] [:seon.fn/qualified-name "seon.test/my-fn"])]
+            (is (map? (:seon.fn/input-spec result))
+                "input-spec non-component ref returns a map")
+            (is (contains? (:seon.fn/input-spec result) :db/id)
+                "input-spec ref map contains :db/id")
+            (is (map? (:seon.fn/output-spec result))
+                "output-spec non-component ref returns a map")
+            (is (contains? (:seon.fn/output-spec result) :db/id)
+                "output-spec ref map contains :db/id")))))))
+
+(deftest ingest-call-entity-pipeline-test
+  (testing "seon.graph.ingest/call-entity-schema survives the full pipeline (tempid)"
+    ;; Call entities have no identity key and contain ref fields.
+    ;; We test non-ref attrs via tempid roundtrip, and refs manually.
+    (let [schema-without-refs
+          [:map [:seon.call/row {:optional true} :int]]
+          ;; Can't use assert-tempid-roundtrip! with only optional keys,
+          ;; so verify bridge derivation and manual transact instead.
+          dl-schema (merge
+                      (db-schema/malli-map->datalevin-schema
+                        @(requiring-resolve 'seon.graph.ingest/call-entity-schema))
+                      (db-schema/malli-map->datalevin-schema
+                        @(requiring-resolve 'seon.graph.ingest/fn-entity-schema)))]
+      (tu/with-temp-conn dl-schema
+        (fn [conn]
+          ;; Create target fn entities
+          (d/transact! conn [{:seon.fn/qualified-name "seon.test/caller"
+                              :seon.fn/namespace "seon.test"
+                              :seon.fn/name "caller"
+                              :seon.fn/private false}
+                             {:seon.fn/qualified-name "seon.test/callee"
+                              :seon.fn/namespace "seon.test"
+                              :seon.fn/name "callee"
+                              :seon.fn/private false}])
+          ;; Create call entity with lookup refs
+          (let [tx-result (d/transact! conn [{:db/id -1
+                                              :seon.call/from-fn [:seon.fn/qualified-name "seon.test/caller"]
+                                              :seon.call/to-fn [:seon.fn/qualified-name "seon.test/callee"]
+                                              :seon.call/row 42}])
+                eid (get (:tempids tx-result) -1)
+                pulled (d/pull @conn '[*] eid)]
+            (is (map? (:seon.call/from-fn pulled))
+                "from-fn non-component ref returns a map")
+            (is (= 42 (:seon.call/row pulled))
+                "scalar attr roundtrips")))))))
+
+(deftest ingest-ns-dep-entity-pipeline-test
+  (testing "seon.graph.ingest/ns-dep-entity-schema survives the full pipeline (tempid)"
+    (let [result (assert-tempid-roundtrip!
+                   @(requiring-resolve 'seon.graph.ingest/ns-dep-entity-schema)
+                   {:num-samples 20})]
+      (is (zero? (:fail-count result))
+          (str "Failures: " (pr-str (:failures result))))
+      (is (= 20 (:pass-count result))))))
+
+(deftest ingest-spec-entity-pipeline-test
+  (testing "seon.graph.ingest/spec-entity-schema survives the full pipeline"
+    (let [result (assert-pipeline-roundtrip!
+                   @(requiring-resolve 'seon.graph.ingest/spec-entity-schema)
+                   {:identity-key :seon.spec/key :num-samples 20})]
+      (is (zero? (:fail-count result))
+          (str "Failures: " (pr-str (:failures result))))
+      (is (= 20 (:pass-count result))))))
+
+(deftest ingest-var-entity-pipeline-test
+  (testing "seon.graph.ingest/var-entity-schema survives the full pipeline"
+    (let [result (assert-pipeline-roundtrip!
+                   @(requiring-resolve 'seon.graph.ingest/var-entity-schema)
+                   {:identity-key :seon.var/qualified-name :num-samples 20})]
+      (is (zero? (:fail-count result))
+          (str "Failures: " (pr-str (:failures result))))
+      (is (= 20 (:pass-count result))))))

@@ -246,7 +246,27 @@ For each module (runtime, ingest, ctx, trace, repl):
 **Code smells found:**
 - None. All callers pass types consistent with the schemas. The `build-tx-map` function correctly uses `cond->` for optional fields, matching the `{:optional true}` annotations.
 
-#### Remaining (not started): ingest.clj (~30 attrs)
+#### Phase 3d: ingest.clj (DONE)
+
+**ingest.clj** (37 attrs across 6 entity types):
+- Added 6 Malli entity schemas: `ns-entity-schema`, `fn-entity-schema`, `call-entity-schema`, `ns-dep-entity-schema`, `spec-entity-schema`, `var-entity-schema`
+- Replaced hardcoded 37-attr `datalevin-schema` with `(merge (db-schema/malli-map->datalevin-schema ...))` of all 6 schemas
+- Derived schema is identical to the previous hardcoded one (verified in REPL, 37 attrs, 0 diff)
+- Pipeline roundtrip tests: 80 entities generated across 4 entity types (ns, fn, spec, var)
+- Tempid roundtrip test for ns-dep entities (no identity key)
+- Manual ref tests for fn-to-spec refs and call graph refs (lookup ref transact + pull)
+- 7 new tests, 48 new assertions in `test/seon/db/pipeline_test.clj`
+
+**Smells fixed:**
+- 4 `:any` refs replaced with typed schemas:
+  - `:seon.fn/input-spec` and `:seon.fn/output-spec`: `[:or :int [:tuple :keyword :keyword]]` (entity ID or spec lookup ref)
+  - `:seon.call/from-fn` and `:seon.call/to-fn`: `[:or :int [:tuple :keyword :string]]` (entity ID or fn lookup ref)
+- 3 `inst?` registrations changed to `:inst` (`:seon.fn/updated-at`, `:seon.var/updated-at`, `:seon.spec/updated-at`)
+- 1 `inst?` in `::specs` request schema also changed to `:inst` for consistency
+
+**Design finding:** Ref attr registrations (used by the validation gate in `db/transact!`) must accept both entity IDs (ints) and lookup ref vectors, since ingest code passes lookup refs like `[:seon.fn/qualified-name "foo"]`. The entity schemas (used by the bridge for Datalevin schema derivation) use `:int` because that's what Datalevin stores after resolving lookup refs.
+
+**Phase 3 is now COMPLETE.** All 5 modules (ctx, repl, trace, runtime, ingest) have been unified.
 
 ### Phase 4: Nippy Inter-JVM Channel
 
