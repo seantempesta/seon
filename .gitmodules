@@ -64,3 +64,9 @@
 [submodule "reference-code/integrant"]
 	path = reference-code/integrant
 	url = https://github.com/weavejester/integrant.git
+[submodule "reference-code/nippy"]
+	path = reference-code/nippy
+	url = https://github.com/taoensso/nippy.git
+[submodule "reference-code/fressian"]
+	path = reference-code/fressian
+	url = https://github.com/Datomic/fressian.git
