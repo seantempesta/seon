@@ -78,6 +78,12 @@
                (let [malli-def (schema/schema-definition attr)
                      entry-schema (db-schema/malli-map->datalevin-schema
                                    [:map [attr malli-def]])]
+                 (when-not (contains? entry-schema attr)
+                   (throw (ex-info (str "Cannot derive Datalevin type for attribute " attr
+                                        " (Malli type: " (pr-str malli-def) ")."
+                                        " Either add :db/valueType to the Malli schema properties"
+                                        " or include " attr " in the module's hardcoded datalevin-schema.")
+                                   {:attr attr :malli-def malli-def})))
                  (merge acc entry-schema)))
              {}
              missing)]
