@@ -129,6 +129,124 @@ Now throws ex-info with clear message.
 ### Bug 3: trace/ctx datalevin-schema not in merged schema — FIXED
 Both added to `runtime-merged-schema`.
 
+## Data Pipeline & Serialization
+
+Data in Seon flows through multiple boundaries. A registered Seon spec must be valid at ALL of them:
+
+```
+Application code
+  → Malli validation
+  → Serialization (for flow channels / inter-JVM transfer)
+  → Datalevin transact (writer step-fn)
+  → LMDB storage
+  → Datalevin pull (reader step-fn)
+  → Deserialization
+  → Malli validation (must still pass)
+  → Application code (must get back equivalent data)
+```
+
+### Serialization Format: Research Needed
+
+The inter-JVM channel (`seon.flow.harness.channel`) currently uses EDN (`pr-str`/`read-string`). Intra-JVM flow uses native Clojure data through core.async channels (no serialization).
+
+**Candidate formats to evaluate:**
+
+| Format | Type | Key Properties |
+|--------|------|---------------|
+| EDN | Text | Clojure-native, human-readable, gaps: no `byte[]`, float→double coercion |
+| Nippy | Binary | 1:1 JVM state transfer, all Clojure types, metadata preserved, compression, **already used by Datalevin**, thaw transducer for data inspection/transformation |
+| Fressian | Binary | Datomic's format, extensible, comparable fidelity to Nippy |
+| Transit+JSON | Text+tags | Polyglot-oriented (designed for cross-platform, not JVM-to-JVM) |
+| Transit+MessagePack | Binary+tags | Same as above but binary transport |
+
+**Nippy is especially interesting** because:
+- Already a Datalevin dependency (used at scale by XTDB, Datalevin, Carmine, etc.)
+- Its thaw transducer maps naturally to flow step-fns for data inspection/transformation
+- Preserves exact Java types including Float vs Double, byte[], metadata
+- 12+ years mature, comprehensive type coverage
+- `extend-freeze`/`extend-thaw` for custom types
+
+**Research questions (don't assume answers — verify in REPL and source):**
+- What exactly does Datalevin use Nippy for? Read `reference-code/datalevin/` for nippy references.
+- What does Datalevin's own client-server protocol use? (port 8898 communication)
+- How does Nippy handle nil? (core.async rejects nil as channel VALUE, but maps containing nil like `{:foo/bar nil}` flow through channels fine)
+- What's the actual performance difference for our payload sizes?
+- Could we use Nippy's transducer as a flow step-fn for validation/coercion?
+
+### Reference code (READ THESE):
+- `reference-code/nippy/src/taoensso/nippy.clj` — type spec at line ~94 shows ALL supported types including nil, float, bigint, bigdec, byte arrays, metadata, records
+- `reference-code/nippy/src/taoensso/nippy/tools.clj` — integration patterns for 3rd-party libraries
+- `reference-code/fressian/` — Datomic's serialization format (Java, not Clojure)
+
+### Nil Semantics
+
+This is a design question, not a solved problem.
+
+**Facts:**
+- core.async rejects `nil` as a channel value, but `{:foo nil}` on a channel is fine
+- Datalevin throws "Cannot store nil as a value"
+- In EAV model, retracting a datom removes it — no "null datom" concept
+- Nippy type-id 3 is `:nil` — it serializes nil natively
+
+**The question:** How should Seon model "this field has no value"?
+- Absence (key not in map) — simplest, Datalevin-natural
+- `[:maybe X]` with nil-stripping before transact — Malli-idiomatic
+- Retraction as "set to nil" — preserves intent in transaction log
+- Something else?
+
+Research should explore what Datomic users do, what malli-datomic does, trade-offs.
+
+## Recursive/Nested Structures
+
+**Open question:** Can Malli specs describing nested data structures (maps within maps, vectors of maps) be recursively decomposed into separate Datalevin component entities?
+
+Current bridge already handles one level: nested `[:map ...]` → `{:db/valueType :db.type/ref :db/isComponent true}` + flattened child attrs. But research is needed on:
+
+- How deep can this go? Arbitrary nesting?
+- How does `d/pull [*]` reconstruct nested structures? Does it handle N levels?
+- Circular/recursive Malli schemas — possible? Useful?
+- Performance: many small entities vs serialized nested data (e.g., Nippy bytes in a single attr)
+- malli-datomic maps `:set`/`:map`/`:vector` all to `:db.type/ref` — is that always right?
+
+## Custom Registration Function
+
+**Goal:** A `seon.schema/register!` that validates specs are compatible with the full pipeline at registration time, not at transact time when it's too late.
+
+**Research areas:**
+- Walk the Malli schema tree, check every leaf is mappable to a Datalevin type
+- Reject `:any`, `:some`, mixed-type enums at registration
+- Verify EDN/Nippy/chosen-format roundtrip compatibility
+- Verify atom compatibility (specs must work as atom validators)
+- How do malli-datomic and spectomic handle validation? (see prior art below)
+
+## Prior Art (READ THESE)
+
+### malli-datomic (`reference-code/malli-datomic/`)
+Malli → Datomic schema generation. Key source files:
+- `src/blasterai/malli_datomic/datomic_schema_gen.cljc` — main conversion logic
+- `src/blasterai/malli_datomic/spec_utils.cljc` — type detection helpers
+
+Notable design choices:
+- Maps `:set`/`:map`/`:vector`/`:sequential` all to `:db.type/ref`
+- Keyword enums become `{:db/ident kw}` entities (Datomic pattern)
+- Non-keyword enums emit a warning, not an error
+- Copies `:db/*` properties from Malli entry options (like our bridge)
+- Has `derive-value-type` that throws on unsupported types (no silent skip)
+- Handles `:and` composites by extracting the atomic predicate
+- Supports `:db/tupleType` and `:db/tupleAttrs` (Datomic tuples — Datalevin may not have these)
+
+### spectomic (`reference-code/spectomic/`)
+Spec → Datomic schema. Different approach — generates samples and infers types:
+- `src/provisdom/spectomic/core.clj` — main logic
+- Uses `class->datomic-type` map (Java class → Datomic type) — simpler than walking schema tree
+- **Clever: generates 100 samples from the spec, checks all samples resolve to the same Datomic type.** If types are inconsistent, throws.
+- Handles `s/nilable` by filtering nil samples
+- Handles `s/coll-of` → cardinality-many
+- Has `custom-type-resolver` extension point
+- Maps are always `:db.type/ref`
+
+**Key insight from spectomic:** Generative testing of the schema itself (not just data) — generate samples, verify they all map to one Datalevin type. This is a powerful validation strategy we could adopt.
+
 ## Implementation Plan
 
 ### Phase 1: Value-type gate in transact! (NEXT)
