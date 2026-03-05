@@ -46,10 +46,7 @@
                   [:int {:min 0 :description "Duration in milliseconds"}])
 
 (schema/register! ::timestamp
-                  [:fn {:description "Event timestamp"
-                        :gen/fmap (fn [_] (Instant/now))
-                        :gen/schema :int}
-                   inst?])
+                  [:inst {:description "Event timestamp"}])
 
 (schema/register! ::status
                   [:enum :ok :error :timeout :overload
@@ -66,16 +63,17 @@
 ;;; ---------------------------------------------------------------------------
 
 (def entity-schema
-  "Malli schema for flow trace entities. Single source of truth."
+  "Malli schema for flow trace entities. Single source of truth.
+   Bridge derives all Datalevin types — no manual :db/valueType needed."
   [:map
    [::trace-id :uuid]
    [::session-id {:optional true} [:string {:min 1}]]
-   [::event {:db/valueType :db.type/keyword} [:enum :start :end :error :overload :forward :timeout]]
-   [::timestamp {:db/valueType :db.type/instant} inst?]
+   [::event [:enum :start :end :error :overload :forward :timeout]]
+   [::timestamp :inst]
    [::fn {:optional true} [:string {:min 1}]]
    [::ns {:optional true} [:string {:min 1}]]
    [::elapsed-ms {:optional true} [:int {:min 0}]]
-   [::status {:optional true :db/valueType :db.type/keyword} [:enum :ok :error :timeout :overload]]
+   [::status {:optional true} [:enum :ok :error :timeout :overload]]
    [::error-message {:optional true} :string]
    [::entity-type :keyword]])
 

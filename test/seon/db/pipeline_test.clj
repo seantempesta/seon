@@ -553,3 +553,95 @@
       (is (zero? (:fail-count result))
           (str "Failures: " (pr-str (:failures result))))
       (is (= 20 (:pass-count result))))))
+
+;;; ---------------------------------------------------------------------------
+;;; Tempid Roundtrip Helper (for entities without a unique identity key)
+;;; ---------------------------------------------------------------------------
+
+(defn- assert-tempid-roundtrip!
+  "Generative roundtrip test for entity schemas that lack a :db/unique identity key.
+
+   Some entities (flow trace events, transaction metadata) are identified by
+   :db/id at transact time, not by a lookup ref. This helper uses tempids
+   to transact and pull back entities, verifying:
+   1. Schema meets pipeline constraints (no :any, no [:maybe X], namespaced keys)
+   2. Bridge derives Datalevin types for all attributes
+   3. N generated entities roundtrip through transact -> pull with value equality
+   4. Pulled entities pass Malli validation
+
+   Returns {:pass-count N :fail-count M :failures [...]}."
+  [malli-schema {:keys [num-samples] :or {num-samples 20}}]
+  ;; Pre-flight: same constraints as assert-pipeline-roundtrip!
+  (validate-schema-constraints! malli-schema)
+
+  (let [dl-schema (db-schema/malli-map->datalevin-schema malli-schema)
+        parsed (if (m/schema? malli-schema) malli-schema (m/schema malli-schema))
+        results (atom {:pass-count 0 :fail-count 0 :failures []})]
+
+    ;; Verify bridge derived something for each entry
+    (doseq [[k _] (m/entries parsed)]
+      (is (contains? dl-schema k)
+          (str "Bridge failed to derive Datalevin schema for " k)))
+
+    ;; Roundtrip via tempids
+    (tu/with-temp-conn dl-schema
+      (fn [conn]
+        (doseq [i (range num-samples)]
+          (let [entity (mg/generate malli-schema)
+                tempid (- -1 i)
+                tx-result (d/transact! conn [(assoc entity :db/id tempid)])
+                eid (get (:tempids tx-result) tempid)
+                pulled-raw (d/pull @conn '[*] eid)
+                pulled (dissoc pulled-raw :db/id)
+                valid? (m/validate malli-schema pulled)
+                match? (= entity pulled)]
+            (if (and valid? match?)
+              (swap! results update :pass-count inc)
+              (do
+                (swap! results update :fail-count inc)
+                (swap! results update :failures conj
+                       {:entity-index i
+                        :original entity
+                        :pulled pulled
+                        :malli-valid? valid?
+                        :match? match?})
+                (is false
+                    (str "Tempid roundtrip failed for entity " i ":\n"
+                         (when-not valid?
+                           (str "  Malli validation: "
+                                (pr-str (m/explain malli-schema pulled)) "\n"))
+                         (when-not match?
+                           (str "  Value mismatch:\n"
+                                "    original: " (pr-str entity) "\n"
+                                "    pulled:   " (pr-str pulled) "\n"))))))))))
+    @results))
+
+;;; ---------------------------------------------------------------------------
+;;; Tests: Trace Entity Schema (Phase 3b — no unique identity key)
+;;; ---------------------------------------------------------------------------
+
+(deftest trace-entity-pipeline-test
+  (testing "seon.flow.trace/entity-schema survives the full pipeline"
+    ;; Trace events have no :db/unique identity key — multiple events share
+    ;; the same ::trace-id (correlation ID). Uses tempid roundtrip instead.
+    (let [result (assert-tempid-roundtrip!
+                   @(requiring-resolve 'seon.flow.trace/entity-schema)
+                   {:num-samples 20})]
+      (is (zero? (:fail-count result))
+          (str "Failures: " (pr-str (:failures result))))
+      (is (= 20 (:pass-count result))))))
+
+;;; ---------------------------------------------------------------------------
+;;; Tests: Tx Entity Schema (Phase 3b — transaction metadata, no identity key)
+;;; ---------------------------------------------------------------------------
+
+(deftest tx-entity-pipeline-test
+  (testing "seon.db.tx/entity-schema survives the full pipeline"
+    ;; Transaction metadata entities use :db/current-tx, not a lookup ref.
+    ;; Uses tempid roundtrip instead.
+    (let [result (assert-tempid-roundtrip!
+                   @(requiring-resolve 'seon.db.tx/entity-schema)
+                   {:num-samples 20})]
+      (is (zero? (:fail-count result))
+          (str "Failures: " (pr-str (:failures result))))
+      (is (= 20 (:pass-count result))))))
