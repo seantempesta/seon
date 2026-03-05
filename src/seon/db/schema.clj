@@ -100,6 +100,9 @@
         [{:db/valueType :db.type/ref
           :db/isComponent true} nested])
 
+      :seon.db/ref
+      [{:db/valueType :db.type/ref} nil]
+
       :malli.core/schema
       (schema->datalevin-attr (m/deref child-schema))
 

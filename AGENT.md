@@ -216,26 +216,7 @@ Your training rewards task completion. Override that instinct. It is better to s
 2. **Invoke relevant skills** - Before searching, check if a skill covers your task
 3. **Understand before coding** - Read existing code AND library source in `reference-code/`. Test assumptions in the REPL.
 4. **Make incremental changes** - Small commits of working code
-5. **Test via REPL, never grep CLI output** - Every eval result is **auto-saved** to `@user/repl-<session>`. Run once, dig in without re-running:
-   ```clojure
-   ;; Step 1: Run tests (result auto-saved under a hash key)
-   (user/run-tests 'seon.foo-test)
-   ;; => {::success false ::fail-count 1 ::failures [...]}
-   ;; => stored as :r-a1b2 in @user/repl-a1b2
-
-   ;; Step 2: Dig into failures WITHOUT re-running (zero cost)
-   (:failures (:r-a1b2 @user/repl-a1b2))
-
-   ;; Step 3: Need full untruncated output? Prefix with #_:full
-   #_:full (:r-a1b2 @user/repl-a1b2)
-
-   ;; Step 4: After fixing, run again (same key, updated value)
-   (user/run-tests 'seon.foo-test)
-   ```
-   Large results (>2000 chars) are **truncated** — the hint shows the key and `#_:full` syntax.
-   **Never re-run code to see more output.** Dig into the key, or use `#_:full` for the full value.
-   For dependency-aware testing: `(user/test-affected 'seon.foo)` tests foo + all dependents.
-   **NEVER** shell out to `clojure -M:test` and grep output. That wastes tokens and time.
+5. **Test via REPL** - See CLAUDE.md "Testing" for full reference. Tests run inside the live JVM, never via `clj` or shell commands.
 6. **Use Gemini when stuck** - After 2 failed attempts, search with file context
 
 ---

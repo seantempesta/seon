@@ -73,10 +73,10 @@
                   [:keyword {:description "Integrant component key"}])
 
 (schema/register! ::started-at
-                  [inst? {:description "When the instance was started"}])
+                  [:inst {:description "When the instance was started"}])
 
 (schema/register! ::stopped-at
-                  [inst? {:description "When the instance was stopped"}])
+                  [:inst {:description "When the instance was stopped"}])
 
 (schema/register! ::prefix
                   [:string {:min 1 :max 10
@@ -194,7 +194,7 @@
    complete adds stopped-at/cost-usd/num-turns/duration-ms."
   [:map
    [:seon.agent.run/id {:db/unique :db.unique/identity} :string]
-   [:seon.agent.run/runtime {:optional true :db/valueType :db.type/ref} :int]
+   [:seon.agent.run/runtime {:optional true} :seon.db/ref]
    [:seon.agent.run/provider {:optional true} :keyword]
    [:seon.agent.run/status :keyword]
    [:seon.agent.run/started-at {:optional true} :inst]
@@ -563,15 +563,15 @@
 (schema/register! :seon.agent.run/id
                   [:string {:min 1 :description "Agent run identifier"}])
 (schema/register! :seon.agent.run/runtime
-                  [:int {:description "Datalevin entity ref to runtime instance"}])
+                  :seon.db/ref)
 (schema/register! :seon.agent.run/provider
                   [:keyword {:description "AI provider keyword"}])
 (schema/register! :seon.agent.run/status
                   [:keyword {:description "Run status keyword"}])
 (schema/register! :seon.agent.run/started-at
-                  inst?)
+                  :inst)
 (schema/register! :seon.agent.run/stopped-at
-                  inst?)
+                  :inst)
 (schema/register! :seon.agent.run/cost-usd
                   [:double {:min 0.0}])
 (schema/register! :seon.agent.run/num-turns
@@ -615,8 +615,8 @@
                    [:seon.agent.run/status :keyword]
                    [:seon.agent.run/namespace {:optional true} :string]
                    [:seon.agent.run/provider {:optional true} :keyword]
-                   [:seon.agent.run/started-at {:optional true} inst?]
-                   [:seon.agent.run/stopped-at {:optional true} inst?]
+                   [:seon.agent.run/started-at {:optional true} :inst]
+                   [:seon.agent.run/stopped-at {:optional true} :inst]
                    [:seon.agent.run/cost-usd {:optional true} :double]
                    [:seon.agent.run/num-turns {:optional true} :int]
                    [:seon.agent.run/duration-ms {:optional true} :int]])
@@ -762,7 +762,7 @@
 (schema/register! :seon.flow.snap/label
                   [:string {:min 1 :description "Flow label this snapshot belongs to"}])
 (schema/register! :seon.flow.snap/created-at
-                  inst?)
+                  :inst)
 (schema/register! :seon.flow.snap/reason
                   [:enum :shutdown :backup :manual :error])
 (schema/register! :seon.flow.snap/data
