@@ -308,37 +308,36 @@
    Response: map with ::instance-id and ::data, or nil."
   {:malli/schema [:=> [:cat ::resolve-instance-request] ::resolve-instance-response]}
   [{::keys [db-name ns-sym instance-id]}]
-  (let [ns-str (str ns-sym)]
-    (if instance-id
-      ;; Look up specific instance
-      (let [results (db/query db-name
-                              '[:find ?data ?updated
-                                :in $ ?id
-                                :where
-                                [?e :seon.ctx/instance-id ?id]
-                                [?e :seon.ctx/data ?data]
-                                [?e :seon.ctx/updated-at ?updated]]
-                              instance-id)]
-        (when (seq results)
-          (let [[data-str _] (first results)]
-            {::instance-id instance-id
-             ::data (edn/read-string data-str)})))
-      ;; Find most recent for namespace
-      (let [results (db/query db-name
-                              '[:find ?id ?data ?updated
-                                :in $ ?ns
-                                :where
-                                [?e :seon.ctx/namespace ?ns]
-                                [?e :seon.ctx/instance-id ?id]
-                                [?e :seon.ctx/data ?data]
-                                [?e :seon.ctx/updated-at ?updated]]
-                              ns-str)]
-        (when (seq results)
-          (let [[id data-str _] (->> results
-                                     (sort-by #(nth % 2) #(compare %2 %1))
-                                     first)]
-            {::instance-id id
-             ::data (edn/read-string data-str)}))))))
+  (if instance-id
+    ;; Look up specific instance
+    (let [results (db/query db-name
+                            '[:find ?data ?updated
+                              :in $ ?id
+                              :where
+                              [?e :seon.ctx/instance-id ?id]
+                              [?e :seon.ctx/data ?data]
+                              [?e :seon.ctx/updated-at ?updated]]
+                            instance-id)]
+      (when (seq results)
+        (let [[data-str _] (first results)]
+          {::instance-id instance-id
+           ::data (edn/read-string data-str)})))
+    ;; Find most recent for namespace
+    (let [results (db/query db-name
+                            '[:find ?id ?data ?updated
+                              :in $ ?ns
+                              :where
+                              [?e :seon.ctx/namespace ?ns]
+                              [?e :seon.ctx/instance-id ?id]
+                              [?e :seon.ctx/data ?data]
+                              [?e :seon.ctx/updated-at ?updated]]
+                            ns-sym)]
+      (when (seq results)
+        (let [[id data-str _] (->> results
+                                   (sort-by #(nth % 2) #(compare %2 %1))
+                                   first)]
+          {::instance-id id
+           ::data (edn/read-string data-str)})))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Instance Lifecycle
@@ -462,9 +461,8 @@
                             [?e :seon.ctx/namespace ?ns]
                             [?e :seon.ctx/data ?data]])
         restored (atom 0)]
-    (doseq [[id ns-str data-str] results]
-      (let [ns-sym (symbol ns-str)
-            spec-key (::ctx-spec-key (ctx-spec-key {::ns-sym ns-sym}))]
+    (doseq [[id ns-sym data-str] results]
+      (let [spec-key (::ctx-spec-key (ctx-spec-key {::ns-sym ns-sym}))]
         (try
           (let [data (edn/read-string data-str)]
             (if (and (schema/registered? spec-key)
@@ -475,9 +473,9 @@
                                    ::instance-id id})
                 (swap! restored inc))
               (log/warn "Skipping invalid persisted instance"
-                        {:instance-id id :ns ns-str})))
+                        {:instance-id id :ns ns-sym})))
           (catch Exception e
             (log/warn "Failed to restore instance"
-                      {:instance-id id :ns ns-str :error (.getMessage e)})))))
+                      {:instance-id id :ns ns-sym :error (.getMessage e)})))))
     (log/info "Restored ctx instances" {:count @restored :total (count results)})
     {::restored @restored ::total (count results)}))

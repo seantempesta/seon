@@ -148,7 +148,7 @@
           data-str (pr-str data)]
       ;; Persist directly to Datalevin
       (db/transact! :seon.runtime [{:seon.ctx/instance-id "inst01"
-                                    :seon.ctx/namespace "seon.health.workout"
+                                    :seon.ctx/namespace 'seon.health.workout
                                     :seon.ctx/data data-str
                                     :seon.ctx/updated-at (java.util.Date.)}])
       (let [result (lifecycle/resolve-instance {::lifecycle/db-name :seon.runtime
@@ -171,11 +171,11 @@
                                                     :seon.health.workout/reps 5
                                                     :seon.health.workout/weight 100}]}]
       (db/transact! :seon.runtime [{:seon.ctx/instance-id "old01"
-                                    :seon.ctx/namespace "seon.health.workout"
+                                    :seon.ctx/namespace 'seon.health.workout
                                     :seon.ctx/data (pr-str old-data)
                                     :seon.ctx/updated-at #inst "2024-01-01T00:00:00Z"}])
       (db/transact! :seon.runtime [{:seon.ctx/instance-id "new01"
-                                    :seon.ctx/namespace "seon.health.workout"
+                                    :seon.ctx/namespace 'seon.health.workout
                                     :seon.ctx/data (pr-str new-data)
                                     :seon.ctx/updated-at #inst "2025-01-01T00:00:00Z"}])
       (let [result (lifecycle/resolve-instance {::lifecycle/db-name :seon.runtime

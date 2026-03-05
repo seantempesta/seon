@@ -92,12 +92,13 @@
   (testing "bridge output matches hand-written seon.ctx schema shape"
     (let [ctx-malli [:map
                      [:seon.ctx/instance-id {:db/unique :db.unique/identity} :string]
-                     [:seon.ctx/namespace :string]
+                     [:seon.ctx/namespace :symbol]
                      [:seon.ctx/data :string]
                      [:seon.ctx/updated-at inst?]]
           derived (dbs/malli-map->datalevin-schema ctx-malli)]
       (is (= :db.type/string (:db/valueType (:seon.ctx/instance-id derived))))
       (is (= :db.unique/identity (:db/unique (:seon.ctx/instance-id derived))))
+      (is (= :db.type/symbol (:db/valueType (:seon.ctx/namespace derived))))
       (is (= :db.type/string (:db/valueType (:seon.ctx/data derived))))
       (is (= :db.type/instant (:db/valueType (:seon.ctx/updated-at derived)))))))
 

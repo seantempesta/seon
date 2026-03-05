@@ -22,6 +22,7 @@
    the one namespace where map-in/map-out does not apply."
   (:require [clojure.core.async.flow :as flow]
             [datalevin.core :as d]
+            [malli.core :as m]
             [seon.db.datalevin.conn :as conn]
             [seon.db.datalevin.reader :as reader]
             [seon.db.schema :as db-schema]
@@ -62,6 +63,40 @@
       (throw (ex-info (str "Unregistered attributes in transaction: " (pr-str unregistered)
                            ". Register them with seon.schema/register! first.")
                       {:unregistered unregistered})))))
+
+(defn- truncate-value
+  "Truncate a value's string representation for error messages."
+  [v]
+  (let [s (pr-str v)]
+    (if (> (count s) 100)
+      (str (subs s 0 97) "...")
+      s)))
+
+(defn- validate-entity-values!
+  "Validate each attribute value in an entity map against its registered Malli schema.
+   Skips :db/* system attributes and unregistered attributes (caught by validate-attrs!).
+   Throws ex-info on the first validation failure with a clear error message."
+  [entity]
+  (doseq [[attr val] entity]
+    (when-not (system-attr? attr)
+      (when (schema/registered? attr)
+        (when-not (m/validate attr val)
+          (throw (ex-info (str "Malli validation failed for " attr
+                               ": expected " (pr-str (schema/schema-definition attr))
+                               ", got " (truncate-value val))
+                          {:attr attr
+                           :expected-schema (schema/schema-definition attr)
+                           :actual-value val
+                           :malli-explanation (m/explain attr val)})))))))
+
+(defn- validate-values!
+  "Validate all entity maps in tx-data against their Malli schemas.
+   Vector tuples ([:db/add ...], [:db/retract ...]) are skipped.
+   Uses m/validate (fast boolean) first, only calls m/explain on failure."
+  [tx-data]
+  (doseq [datum tx-data]
+    (when (map? datum)
+      (validate-entity-values! datum))))
 
 (defn- ensure-schema!
   "For each domain attr, check if it exists in the Datalevin schema for conn.
@@ -263,8 +298,9 @@
    The writer resolves and owns the connection, enabling automatic retry
    on connection failure.
 
-   Validates attributes against the Malli registry, auto-adds missing
-   Datalevin schema, then routes through the flow writer for serialized access.
+   Validates attributes against the Malli registry, validates values against
+   their Malli schemas, auto-adds missing Datalevin schema, then routes
+   through the flow writer for serialized access.
    In tests, bind *direct-mode* to bypass the flow."
   {:malli/schema [:function
                   [:=> [:cat :keyword [:sequential :any]] :any]
@@ -275,6 +311,7 @@
    (let [attrs (extract-tx-attrs tx-data)
          conn (resolve-conn db-name)]
      (validate-attrs! attrs)
+     (validate-values! tx-data)
      (ensure-schema! conn attrs))
    (when tx-meta
      (log/debug "tx-meta provided but not yet supported via flow writer" {:tx-meta tx-meta}))
