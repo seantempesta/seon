@@ -457,5 +457,6 @@ Seon uses **Timbre** for application logging and **logback** for library logs (S
 | `CONVENTIONS.md` | Malli schemas, API design patterns |
 | `ORCHESTRATOR.md` | Orchestrator-specific instructions (launching agents, system management) |
 | `AGENT.md` | Subagent-specific instructions (investigation workflow, reporting) |
+| `ISSUES.md` | Open problems — orchestrator reads every session, agents add to it |
 | `docs/reference/datastar-quick-reference.md` | Web UI attributes |
 | `docs/prds/namespace-ui/design-system.md` | UI colors, typography, spacing |

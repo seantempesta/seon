@@ -61,6 +61,167 @@ Malli schemas with fully namespaced keys create machine-readable contracts:
 
 ---
 
+## The Core Primitive
+
+One function. One map in, one map out. Both fully spec'd with Malli. Registered in the graph.
+
+Everything else is composition of this primitive.
+
+### Function Discovery
+
+The graph knows every public function's input and output schemas. Given a data shape, query for all functions that accept it. Given a desired output shape, query for all functions that produce it. Given both, find functions that transform one into the other.
+
+This is the **same operation regardless of intent**:
+
+| Intent | Input Shape | Output Shape |
+|--------|------------|--------------|
+| Render data as HTML | `::trading/position` | `::html/fragment` |
+| React to a data change | `::db/tx-report` | `::notification` |
+| Transform data | `::raw/csv-row` | `::trading/position` |
+| Handle user action | `::ui/click-event` | `::ui/response` |
+| Validate data | `::trading/position` | `::validation/result` |
+| Test a function | `::trading/position` | `::test/result` |
+
+No separate rendering system, subscription system, test runner, or event system. One discovery mechanism. Functions that match are functions that work.
+
+### Tests Are Functions Too
+
+Tests don't need their own schema metadata. A test calls functions. Those functions have schemas. The graph connects them transitively. So "which tests exercise `::trading/position`?" is a graph traversal: schema → functions that reference it → tests that call those functions. The test is just a test. The graph does the bookkeeping.
+
+This replaces file-based test selection ("this file changed, run its test file") with **schema-based test selection** ("this schema was touched, run every test that exercises it"). The blast radius is precise — not "run all 500 tests" and not "guess which files are related" but "these 12 tests touch the changed schemas."
+
+Immediate feedback: agent evals a function → graph knows the affected schemas → traverses to all tests for those schemas → runs exactly those tests → reports results. Seconds, not minutes.
+
+### The REPL as Sole Interface
+
+Agents don't edit files. They eval forms in the REPL. The REPL pipeline:
+
+1. Evaluate the form (compile + execute)
+2. Validate the function's Malli schema
+3. Transact function metadata into the graph (name, namespace, schemas, docstring, dependencies)
+4. Persist the source form to disk as a regular `.clj` file
+5. Run affected tests
+
+The file system is a persistence format, not the source of truth. The graph database is the system. The REPL is the only interface agents need.
+
+### Self-Referential
+
+The system uses itself. The functions that discover other functions, route messages, and manage the graph — they are themselves registered in the graph with spec'd inputs and outputs. An agent looking for "how do I query the graph?" discovers `seon.graph.query/functions-in-ns` through the same mechanism it would use to find a trading signal calculator.
+
+### Progressive Enhancement
+
+A namespace starts empty. When the system needs to render data from that namespace and no render function exists, a default renderer handles it. The agent is notified: "namespace X received a render request for schema Y but has no handler." The agent writes a compatible function. On eval, it enters the graph. Next request finds it automatically.
+
+This applies universally — rendering, event handling, data transformation, validation. Write a compatible function and it's discoverable immediately. No registration ceremony. The schema IS the registration.
+
+### Constraints That Simplify
+
+We control Seon. We can add constraints that make this tractable:
+
+- **All public functions**: one map in, one map out, fully spec'd — no exceptions
+- **All schemas**: registered in the global Malli registry with namespaced keys
+- **All evaluation**: through the REPL pipeline — validates, persists, tests
+- **All data**: namespaced keywords, concrete types, no `:any`
+- **All cross-boundary calls**: through the flow topology
+
+These constraints aren't limitations. They're what make universal function discovery possible. A system where every function has a known shape is a system that can compose itself.
+
+---
+
+## The Namespace
+
+The namespace is the unit of ownership. One agent (human or AI) stewards one namespace. Everything they need — context, tools, feedback — is scoped to that namespace.
+
+### What the Namespace Agent Sees
+
+When a namespace agent starts, the system provides:
+
+- **Their functions** — every `defn` in the namespace with its Malli schema, docstring, and current test status
+- **Their schemas** — every registered schema in the namespace
+- **Their dependencies** — functions required in from other namespaces, with schemas
+- **Their dependents** — who calls their functions, so they know the blast radius of changes
+- **Their tests** — every test that exercises their schemas, with last-run results
+- **Their notifications** — problems reported by other agents, upstream schema changes, failing tests
+
+All of this is derived from the graph. No special context-building code — it's the same function discovery mechanism applied to the question "what do I need to know about namespace X?"
+
+### What the Namespace Agent Does
+
+Three things: write schemas, write functions, write tests. All vanilla Clojure.
+
+```clojure
+;; Register a schema — standard Malli, namespaced keys
+(schema/register! ::position
+  [:map
+   [::ticker :string]
+   [::quantity :int]
+   [::entry-price :double]])
+
+;; Write a function — standard defn with :malli/schema metadata
+(defn value
+  "Calculate position value."
+  {:malli/schema [:=> [:cat ::value-request] ::value-response]}
+  [{::keys [position price]}]
+  {::value (* (::quantity position) price)})
+
+;; Write a test — standard deftest
+(deftest value-test
+  (testing "calculates position value"
+    (is (= {::value 1500.0}
+           (value {::position {::ticker "AAPL" ::quantity 10 ::entry-price 150.0}
+                   ::price 150.0})))))
+```
+
+Nothing exotic. The agent writes normal Clojure. The enforcement is in the eval pipeline, not in the syntax.
+
+### The Eval Pipeline
+
+When a form is eval'd through the REPL, the pipeline enforces constraints before accepting it:
+
+**For `defn`:**
+- Schema present? (`:malli/schema` metadata required for public functions)
+- Schema concrete? (no `:any`, no `[:maybe X]`, all types Datalevin-compatible)
+- Schema serializable? (roundtrips through Nippy and Datalevin without loss)
+- Map-in/map-out? (single map argument, map return, namespaced keys)
+- If any fail → reject with clear error. The function is not compiled, not registered, not persisted.
+
+**For `schema/register!`:**
+- All types concrete and Datalevin-compatible?
+- Namespaced keys throughout?
+- Generator works? (can produce valid samples)
+- If any fail → reject.
+
+**For `deftest`:**
+- Register in the graph. Schema association is inferred automatically — the graph knows which functions the test calls, which schemas those functions reference, and transitively which schemas the test exercises. No metadata needed on the test itself.
+
+**If all pass:**
+1. Compile and execute the form
+2. Transact metadata into the graph
+3. Persist source to disk
+4. Run affected tests (discovered by schema, not by file)
+5. Report results immediately
+
+### Constraint Enforcement Is Function Discovery
+
+The constraints above are not hard-coded in the pipeline. Each constraint is a function with a spec'd input and output:
+
+```
+Input shape: ::eval/form (the form being evaluated + its metadata)
+Output shape: ::constraint/result (pass/fail + explanation)
+```
+
+The eval pipeline discovers all functions matching this signature and runs them. To add a new constraint — say, "function names must not exceed 40 characters" — write a function that accepts `::eval/form` and returns `::constraint/result`. It's picked up automatically on next eval.
+
+This means the system's quality standards are extensible without changing the pipeline. The pipeline doesn't know what the constraints are. It just discovers functions that match and runs them. Turtles all the way down.
+
+### Notifications
+
+When something goes wrong — a test fails, an upstream schema changes, a dependent reports a type mismatch — the namespace agent is notified through the same message routing. A notification is a spec'd map. The namespace either has a handler function for that notification shape or the agent is asked to deal with it.
+
+This closes the feedback loop: agent writes code → pipeline validates → graph updates → tests run → if something breaks elsewhere → that namespace's agent is notified → they fix it → their pipeline validates → and so on.
+
+---
+
 ## The Architecture
 
 ### Layer 1: Contracts & Discovery
@@ -71,11 +232,11 @@ Malli schemas with fully namespaced keys create machine-readable contracts:
 - Function schemas via `:malli/schema` metadata
 
 **What's next:**
-- **Function index** - Query functions by input/output schemas
-- **Composition hints** - "These functions chain together"
-- **Usage examples** - Auto-generated from test cases
+- **Schema-driven function discovery** - Query the graph for functions by input/output schema shape. "What accepts `::trading/position`?" is a Datalog query against `seon.graph`, not a grep. The graph already indexes functions — adding schema-based lookup closes the loop.
+- **Composition hints** - Functions that chain (output schema of A matches input schema of B) are discoverable relationships in the graph
+- **Usage examples** - Auto-generated from test cases and REPL history
 
-**Success state:** Agent asks "how do I calculate a trading signal?" → system returns relevant functions with signatures, examples, and composition patterns.
+**Success state:** Agent asks "how do I calculate a trading signal?" → system returns relevant functions with signatures, examples, and composition patterns. No hallucination needed — the answer is in the graph.
 
 ### Layer 2: Agent Isolation
 
@@ -128,8 +289,9 @@ Malli schemas with fully namespaced keys create machine-readable contracts:
 - **Schema browser** - Navigate all registered schemas with cross-references
 - **Data viewer** - Expand/collapse nested structures
 - **Live atom updates** - REPL change → browser update in <100ms
+- **Reactive subscriptions** - Replace broadcast `refresh-all!` with targeted, schema-aware notifications. When `transact!` succeeds, fingerprint the tx-report by entity type and attributes. Namespaces register interest in specific schema shapes. A `subscription-router` flow process matches tx-reports against registrations and injects notifications only to interested namespace processes.
 
-**Success state:** You can see the entire system state at a glance. Agents can too.
+**Success state:** You can see the entire system state at a glance. Agents can too. UI updates are targeted — only the parts that care about the changed data re-render.
 
 ### Layer 5: Dynamic Context (The Cockpit)
 
@@ -142,8 +304,9 @@ Malli schemas with fully namespaced keys create machine-readable contracts:
 - **Function typeahead** - As agent types, show matching functions with docs
 - **Relevant context injection** - System surfaces what agent needs, not everything
 - **Sliding window** - Recent messages + live dashboard, not growing scroll
+- **Message-first namespace protocol** - Every namespace is an actor. Messages are Malli-spec'd maps. The topology routes messages to the most specific handler function in that namespace. When no handler exists, smart defaults apply and the namespace's agent is notified. See "The Reactive Loop" below.
 
-**Success state:** Agent context is a cockpit with instruments, not a growing scroll of text. Information flows in based on what's relevant now.
+**Success state:** Agent context is a cockpit with instruments, not a growing scroll of text. Information flows in based on what's relevant now. Namespaces respond to events automatically when handlers exist, and agents fill the gaps.
 
 ### Layer 6: Learning from History
 
@@ -171,8 +334,9 @@ Malli schemas with fully namespaced keys create machine-readable contracts:
 - **Ownership handoff** - Graceful transfer when agent context expires
 - **Evolution tracking** - "This namespace has been modified 47 times by 3 agents"
 - **Proactive maintenance** - Agents notice issues and fix them unprompted
+- **Progressive enhancement** - Namespaces start minimal with smart defaults. When the system sends `:minimize` to a namespace and there's no handler, the default behavior runs (e.g., icon in taskbar) and the agent is notified. The agent can then write a `minimize` handler at leisure. On next eval, the router picks it up automatically. Namespaces grow organically based on actual usage, not speculative feature lists.
 
-**Success state:** Namespaces have stewards. Code evolves based on usage. Agents maintain, not just build.
+**Success state:** Namespaces have stewards. Code evolves based on usage. Agents maintain, not just build. New functionality emerges from actual demand, not upfront design.
 
 ---
 
@@ -226,24 +390,39 @@ Malli schemas with fully namespaced keys create machine-readable contracts:
 
 ---
 
-## Validation Criteria
+## Milestones
 
-How do we know this works?
+Evergreen architectural goals. Agents should check current system state against these and propose work that moves closer.
 
-### Near-term (3 months)
-- [ ] Agent completes multi-phase PRD without human intervention
-- [ ] Function discovery: agent finds composable functions via schema query
-- [ ] Zero resource leaks over 24-hour agent marathon
+### M1: Graph-Complete Function Registry
 
-### Medium-term (6 months)
-- [ ] Agent maintains a namespace for 30+ days, evolving based on usage
-- [ ] Non-developer gives problem → agents build working solution
-- [ ] System suggests improvements based on usage patterns
+Every public function with `:malli/schema` has its input and output schemas indexed in the graph as queryable data. Not just the function name and arglists — the actual schema shapes, decomposed into their component types.
 
-### Long-term (12 months)
-- [ ] Multiple agents collaborate on cross-cutting feature
-- [ ] Agent notices regression and fixes it proactively
-- [ ] New domain added with minimal human guidance
+**How to check:** Query the graph for functions that accept a specific schema. If the results are complete and accurate, M1 is done.
+
+### M2: Schema-Based Function Discovery
+
+Given an input shape and a desired output shape, find compatible functions. Given just an input shape, find all possible transformations. Composition chains (A→B, B→C discoverable as A→C) are queryable as graph paths.
+
+**How to check:** Ask the system "what can I do with a `::trading/position`?" and get back a useful, complete list of functions — renderers, transformers, validators — without separate queries per concern.
+
+### M3: REPL-First Eval Pipeline
+
+Agent evals a form in the REPL. The pipeline validates the schema, transacts metadata into the graph, persists to disk, and runs affected tests — all as one atomic operation. No file editing. No post-edit hooks. The REPL IS the write interface.
+
+**How to check:** An agent evals `(defn ...)` → immediately queries the graph → finds the function with full schema metadata. The `.clj` file on disk reflects the change. Tests ran.
+
+### M4: Unified Dispatch
+
+One discovery mechanism serves all use cases. Rendering, change notification, data transformation, event handling — all are "find a function with compatible schemas." Expressing interest in data changes = having a function that accepts that change shape. The system finds and calls it.
+
+**How to check:** Write a function that accepts `::db/tx-report` with certain attributes → it gets called when matching transactions occur. No separate subscription API. Same mechanism that finds renderers finds subscribers.
+
+### M5: Self-Describing System
+
+The system's own infrastructure — graph queries, routing, discovery, REPL eval — is registered in the same graph and discoverable by the same mechanism it provides. An agent bootstraps by discovering the discovery functions.
+
+**How to check:** An agent with no prior knowledge queries the graph for "functions that accept a schema shape" and discovers the discovery API itself. Turtles all the way down.
 
 ---
 
