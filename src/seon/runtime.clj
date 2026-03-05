@@ -41,6 +41,7 @@
    ```"
   (:require [clojure.core.async.flow :as flow]
             [seon.db :as db]
+            [seon.db.schema :as db-schema]
             [seon.schema :as schema]
             [taoensso.timbre :as log])
   (:import [java.security SecureRandom]))
@@ -167,85 +168,58 @@
                    [::reset :boolean]])
 
 ;;; ---------------------------------------------------------------------------
-;;; Datalevin Schema
+;;; Datalevin Entity Schemas (Malli is the source of truth)
 ;;; ---------------------------------------------------------------------------
 
+(def runtime-entity-schema
+  "Malli schema for a runtime namespace instance entity.
+   Defines the shape of what gets stored in Datalevin.
+   All persisted attrs have concrete types -- no :any, no [:maybe X].
+   Optional fields are conditionally added via cond-> in build-tx-map."
+  [:map
+   [:seon.runtime/namespace {:db/unique :db.unique/identity} :string]
+   [:seon.runtime/status [:enum :running :stopped :crashed :paused]]
+   [:seon.runtime/location [:enum :in-process :external]]
+   [:seon.runtime/session-id {:optional true} :string]
+   [:seon.runtime/nrepl-port {:optional true} :int]
+   [:seon.runtime/started-at {:optional true} :inst]
+   [:seon.runtime/stopped-at {:optional true} :inst]
+   [:seon.runtime/component-key {:optional true} :keyword]])
+
+(def agent-run-entity-schema
+  "Malli schema for an agent run entity.
+   Created by start-agent-run!, updated by complete-agent-run!.
+   Most fields are optional because they're added across the lifecycle:
+   start creates id/status/namespace/provider/started-at,
+   complete adds stopped-at/cost-usd/num-turns/duration-ms."
+  [:map
+   [:seon.agent.run/id {:db/unique :db.unique/identity} :string]
+   [:seon.agent.run/runtime {:optional true :db/valueType :db.type/ref} :int]
+   [:seon.agent.run/provider {:optional true} :keyword]
+   [:seon.agent.run/status :keyword]
+   [:seon.agent.run/started-at {:optional true} :inst]
+   [:seon.agent.run/stopped-at {:optional true} :inst]
+   [:seon.agent.run/cost-usd {:optional true} :double]
+   [:seon.agent.run/num-turns {:optional true} :int]
+   [:seon.agent.run/duration-ms {:optional true} :int]
+   [:seon.agent.run/namespace {:optional true} :string]])
+
+(def flow-snap-entity-schema
+  "Malli schema for a flow snapshot entity.
+   All fields are required -- snapshot-topology! always provides all of them."
+  [:map
+   [:seon.flow.snap/id {:db/unique :db.unique/identity} :string]
+   [:seon.flow.snap/label :string]
+   [:seon.flow.snap/created-at :inst]
+   [:seon.flow.snap/reason [:enum :shutdown :backup :manual :error]]
+   [:seon.flow.snap/data :string]])
+
 (def runtime-schema
-  "Datalevin schema for runtime entities.
-   Merged with graph schema when creating the seon.runtime connection."
-  {:seon.runtime/namespace
-   {:db/valueType :db.type/string
-    :db/unique    :db.unique/identity}
-
-   :seon.runtime/status
-   {:db/valueType :db.type/keyword}
-
-   :seon.runtime/location
-   {:db/valueType :db.type/keyword}
-
-   :seon.runtime/session-id
-   {:db/valueType :db.type/string}
-
-   :seon.runtime/nrepl-port
-   {:db/valueType :db.type/long}
-
-   :seon.runtime/started-at
-   {:db/valueType :db.type/instant}
-
-   :seon.runtime/stopped-at
-   {:db/valueType :db.type/instant}
-
-   :seon.runtime/component-key
-   {:db/valueType :db.type/keyword}
-
-   ;; Agent run entities
-   :seon.agent.run/id
-   {:db/valueType :db.type/string
-    :db/unique    :db.unique/identity}
-
-   :seon.agent.run/runtime
-   {:db/valueType :db.type/ref}
-
-   :seon.agent.run/provider
-   {:db/valueType :db.type/keyword}
-
-   :seon.agent.run/status
-   {:db/valueType :db.type/keyword}
-
-   :seon.agent.run/started-at
-   {:db/valueType :db.type/instant}
-
-   :seon.agent.run/stopped-at
-   {:db/valueType :db.type/instant}
-
-   :seon.agent.run/cost-usd
-   {:db/valueType :db.type/double}
-
-   :seon.agent.run/num-turns
-   {:db/valueType :db.type/long}
-
-   :seon.agent.run/duration-ms
-   {:db/valueType :db.type/long}
-
-   :seon.agent.run/namespace
-   {:db/valueType :db.type/string}
-
-   ;; Flow snapshot entities
-   :seon.flow.snap/id
-   {:db/valueType :db.type/string
-    :db/unique    :db.unique/identity}
-
-   :seon.flow.snap/label
-   {:db/valueType :db.type/string}
-
-   :seon.flow.snap/created-at
-   {:db/valueType :db.type/instant}
-
-   :seon.flow.snap/reason
-   {:db/valueType :db.type/keyword}
-
-   :seon.flow.snap/data
-   {:db/valueType :db.type/string}})
+  "Datalevin schema for all runtime entities. Derived from Malli.
+   Merged with graph/ctx/trace schemas when creating the seon.runtime connection."
+  (merge (db-schema/malli-map->datalevin-schema runtime-entity-schema)
+         (db-schema/malli-map->datalevin-schema agent-run-entity-schema)
+         (db-schema/malli-map->datalevin-schema flow-snap-entity-schema)))
 
 ;; Memoized schema computation - avoids re-computing on every connection call
 (def ^:private merged-schema-cache (atom nil))
