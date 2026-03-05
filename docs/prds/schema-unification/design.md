@@ -258,13 +258,16 @@ For each module (runtime, ingest, ctx, trace, repl):
 - 7 new tests, 48 new assertions in `test/seon/db/pipeline_test.clj`
 
 **Smells fixed:**
-- 4 `:any` refs replaced with typed schemas:
-  - `:seon.fn/input-spec` and `:seon.fn/output-spec`: `[:or :int [:tuple :keyword :keyword]]` (entity ID or spec lookup ref)
-  - `:seon.call/from-fn` and `:seon.call/to-fn`: `[:or :int [:tuple :keyword :string]]` (entity ID or fn lookup ref)
-- 3 `inst?` registrations changed to `:inst` (`:seon.fn/updated-at`, `:seon.var/updated-at`, `:seon.spec/updated-at`)
-- 1 `inst?` in `::specs` request schema also changed to `:inst` for consistency
+- 4 `:any` refs replaced with `:seon.db/ref` — a custom Malli type defined in `seon.schema` that accepts `pos-int?` (entity IDs) and `[keyword value]` (lookup refs). All 5 ref attrs use it (1 in runtime, 4 in ingest).
+- All `inst?` registrations changed to `:inst` across ingest, runtime, ai, and trace.
+- Bridge (`db/schema.clj`) recognizes `:seon.db/ref` → `{:db/valueType :db.type/ref}`.
 
-**Design finding:** Ref attr registrations (used by the validation gate in `db/transact!`) must accept both entity IDs (ints) and lookup ref vectors, since ingest code passes lookup refs like `[:seon.fn/qualified-name "foo"]`. The entity schemas (used by the bridge for Datalevin schema derivation) use `:int` because that's what Datalevin stores after resolving lookup refs.
+**Stress test results (2026-03-05):**
+- 5179 functions + 14212 call edges ingested via real clj-kondo analysis
+- Lookup refs resolved to entity IDs, Datalog joins across refs work
+- Nippy roundtrip verified on real entities, flow messages, and edge case types (byte[], Float, Instant, metadata)
+- TCP channel bidirectional roundtrip verified with 100-entity bulk payload
+- Note: Unbounded `pull [*]` on 14K+ entities overflows Datalevin's wire protocol (NegativeArraySizeException). Use bounded queries.
 
 **Phase 3 is now COMPLETE.** All 5 modules (ctx, repl, trace, runtime, ingest) have been unified.
 
