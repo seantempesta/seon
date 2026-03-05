@@ -179,7 +179,7 @@
   "Datalevin schema for ctx persistence.
    Merge with other schemas when creating connections."
   {:seon.ctx/instance-id {:db/valueType :db.type/string :db/unique :db.unique/identity}
-   :seon.ctx/namespace   {:db/valueType :db.type/string}
+   :seon.ctx/namespace   {:db/valueType :db.type/symbol}
    :seon.ctx/data        {:db/valueType :db.type/string}
    :seon.ctx/updated-at  {:db/valueType :db.type/instant}})
 
@@ -262,7 +262,7 @@
            db-name [(cond-> {:seon.ctx/instance-id instance-id
                              :seon.ctx/data edn-str
                              :seon.ctx/updated-at (java.util.Date.)}
-                      namespace-sym (assoc :seon.ctx/namespace (str namespace-sym)))]))
+                      namespace-sym (assoc :seon.ctx/namespace namespace-sym))]))
         (catch Exception e
           (log/error "Failed to persist ctx" {:instance-id instance-id
                                               :error (.getMessage e)}))))))

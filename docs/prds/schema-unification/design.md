@@ -178,13 +178,15 @@ Both added to `runtime-merged-schema`.
 
 ## Implementation Plan
 
-### Phase 1: Validation Gate in transact! (NEXT)
+### Phase 1: Validation Gate in transact! (DONE)
 
-Add Malli validation to `db/transact!`:
-- For each entity map, look up the Malli schema for each attribute
-- Call `m/validate` on each value against its registered schema
-- On failure: `m/explain` produces clear error with expected type, actual value, attribute name
-- This catches bad data BEFORE it reaches Datalevin's C layer
+Added Malli validation to `db/transact!`:
+- For each entity map, validates each attribute's value against its registered Malli schema
+- Uses `m/validate` (fast boolean) first, only calls `m/explain` on failure
+- Throws `ex-info` with `:attr`, `:expected-schema`, `:actual-value`, `:malli-explanation`
+- Skips `:db/*` system attributes and vector tuples (`[:db/add ...]`, `[:db/retract ...]`)
+- 21 tests, 57 assertions in `test/seon/db/validation_test.clj`
+- Fixed `:seon.ctx/namespace` Malli schema (was `:symbol`, should be `:string` per actual usage)
 
 ### Phase 2: Generative Pipeline Test
 
