@@ -157,7 +157,7 @@ All cross-boundary calls — namespace function calls, database writes, REPL eva
 | `/datalevin` | Writing Datalog queries, transacting data, debugging empty results, working with `d/q` |
 | `/datastar-web-ui` | SSE handlers, `data-*` attributes, streaming responses |
 | `/browser-automation` | Testing UI in browser, debugging frontend issues |
-| `/clojure-testing` | **Running tests**, test failures, kaocha, mocking, generators |
+| `/clojure-testing` | Test patterns: mocking, generators, fixtures, debugging failures |
 
 ---
 
@@ -215,6 +215,61 @@ The dev hook handles reloading automatically. You rarely need to reload manually
 3. Try `(user/reload)` — often fixes code-level issues.
 4. Try `(user/reset)` — clean Integrant restart. Note: `resume-key` may preserve old state.
 5. **Last resort only:** `(user/restart-db!)` for Datalevin, `pkill -f seon.runner` for the Seon JVM. Document WHY. **Never** `pkill -9 -f java.*seon` — see Process Architecture below.
+
+---
+
+## Testing
+
+Seon is a live system. Tests run inside the running JVM via the REPL — never by spawning a separate process. This keeps tests fast, connected to the same database and state, and consistent with how you develop.
+
+### Running Tests (REPL)
+
+```clojure
+(user/run-tests 'seon.foo-test)                    ;; Single namespace
+(user/run-tests ['seon.foo-test 'seon.bar-test])   ;; Multiple namespaces
+(user/run-tests)                                    ;; All unit tests
+(user/test-affected 'seon.foo)                      ;; Namespace + its dependents
+(user/test-gen 'seon.foo)                           ;; Generative tests (Malli schemas)
+```
+
+### Working with Results
+
+Every test result is **auto-saved** to `@user/repl-<session>`. Large output is truncated — dig into the stored key instead of re-running:
+
+```clojure
+;; Run tests — result auto-saved under a hash key
+(user/run-tests 'seon.foo-test)
+;; => {:seon.dev.test/success false :seon.dev.test/fail-count 1 ...}
+;; => stored as :r-a1b2 in @user/repl-orchestrator
+
+;; Dig into failures (zero cost, no re-run)
+(:failures (:r-a1b2 @user/repl-orchestrator))
+
+;; Full untruncated output
+#_:full (:r-a1b2 @user/repl-orchestrator)
+```
+
+**Never re-run tests just to see more output.** The result is already stored.
+
+### If the REPL is Down
+
+If the JVM isn't running (crashed, not started yet), use the CLI as a fallback:
+
+```bash
+bin/test              # All unit tests
+bin/test --all        # Everything including integration
+```
+
+This starts a fresh JVM, runs kaocha, and exits. It's slow (~30s startup) — only use it when the REPL isn't available.
+
+**Never run `clj -M:test` directly.** Always use `bin/test` — it sets the correct JVM opts, classpath, and environment.
+
+### What to Test
+
+- **After editing code:** The dev hook runs affected tests automatically. Check its output.
+- **Before finishing a task:** Run `(user/run-tests)` and fix any failures. Report honest numbers.
+- **For schema changes:** Run `(user/test-gen 'seon.ns)` to exercise Malli generators.
+- **For cross-cutting changes:** Run `(user/test-affected 'seon.ns)` to find downstream breakage.
 
 ---
 

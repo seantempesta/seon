@@ -50,6 +50,24 @@
 (defonce ^:private _inst-type
   (swap! *schemas assoc :inst (m/-simple-schema {:type :inst :pred inst?})))
 
+;; Register :seon.db/ref — a Datalevin entity reference.
+;; Accepts positive integers (entity IDs) or lookup refs [keyword value].
+;; At transact time, Datalevin resolves lookup refs to entity IDs automatically.
+;; The stored form is always a long (entity ID).
+;; Generator produces both forms for testing; pipeline tests for ref attrs
+;; need manual handling (target entities must exist first).
+(defonce ^:private _ref-type
+  (swap! *schemas assoc :seon.db/ref
+         (m/-simple-schema
+          {:type :seon.db/ref
+           :pred (fn [x]
+                   (or (pos-int? x)
+                       (and (vector? x) (= 2 (count x)) (keyword? (first x)))))
+           :type-properties {:gen/schema [:or
+                                          [:int {:min 1}]
+                                          [:tuple :keyword :string]]
+                             :gen/fmap identity}})))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Registration API
 ;;; ---------------------------------------------------------------------------

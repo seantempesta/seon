@@ -215,25 +215,12 @@ tail -20 logs/datalevin.log
 
 ## Running Tests
 
-**REPL-first (preferred):**
+See **CLAUDE.md "Testing"** for full reference. Quick summary:
 
 ```clojure
-(user/run-tests 'seon.foo-test)                    ;; Single namespace
-(user/run-tests ['seon.foo-test 'seon.bar-test])   ;; Multiple
-(user/test-affected 'seon.foo)                      ;; Dependency-aware
-(user/test-gen 'seon.foo)                           ;; Generative tests
-```
-
-Results are auto-saved. Dig into stored results — never re-run just to see more:
-```clojure
-(:failures (:r-2108 @user/repl-orchestrator))
-#_:full (:r-2108 @user/repl-orchestrator)
-```
-
-**CLI (for full suite):**
-```bash
-bin/test                        # Unit tests
-bin/test --all                  # Everything including integration
+(user/run-tests 'seon.foo-test)   ;; Single namespace
+(user/run-tests)                   ;; All unit tests
+(user/test-affected 'seon.foo)     ;; Namespace + dependents
 ```
 
 ---

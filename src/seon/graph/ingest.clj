@@ -29,73 +29,99 @@
      (ingest/ingest-namespace! {::db-name :seon.runtime ::ns-name \"seon.foo\"
                                 ::functions fns ::specs specs ::vars vars})"
   (:require [seon.db :as db]
+            [seon.db.schema :as db-schema]
             [seon.graph.analyzer :as analyzer]
             [seon.render :as render]
             [seon.schema :as schema]
             [taoensso.timbre :as log]))
 
 ;;; ---------------------------------------------------------------------------
-;;; Datalevin Schema
+;;; Datalevin Entity Schemas (Malli is the source of truth)
 ;;; ---------------------------------------------------------------------------
 
+(def ns-entity-schema
+  "Malli schema for a namespace entity.
+   Identity: :seon.ns/name. All persisted attrs have concrete types."
+  [:map
+   [:seon.ns/name {:db/unique :db.unique/identity} :string]
+   [:seon.ns/doc {:optional true} :string]
+   [:seon.ns/file {:optional true} :string]
+   [:seon.ns/target {:optional true} :keyword]
+   [:seon.ns/dynamic? {:optional true} :boolean]])
+
+(def fn-entity-schema
+  "Malli schema for a function entity.
+   Identity: :seon.fn/qualified-name. Ref fields (:input-spec, :output-spec)
+   point at :seon.spec/key entities via lookup refs at transact time."
+  [:map
+   [:seon.fn/qualified-name {:db/unique :db.unique/identity} :string]
+   [:seon.fn/namespace :string]
+   [:seon.fn/name :string]
+   [:seon.fn/doc {:optional true} :string]
+   [:seon.fn/arglists {:optional true} :string]
+   [:seon.fn/row {:optional true} :int]
+   [:seon.fn/private :boolean]
+   [:seon.fn/updated-at {:optional true} :inst]
+   [:seon.fn/input-spec {:optional true} :seon.db/ref]
+   [:seon.fn/output-spec {:optional true} :seon.db/ref]])
+
+(def call-entity-schema
+  "Malli schema for a call graph edge entity.
+   No identity key (retract-then-insert). Ref fields point at
+   :seon.fn/qualified-name entities via lookup refs."
+  [:map
+   [:seon.call/from-fn :seon.db/ref]
+   [:seon.call/to-fn :seon.db/ref]
+   [:seon.call/row {:optional true} :int]])
+
+(def ns-dep-entity-schema
+  "Malli schema for a namespace dependency edge entity.
+   No identity key (retract-then-insert)."
+  [:map
+   [:seon.ns.dep/from-ns :string]
+   [:seon.ns.dep/to-ns :string]
+   [:seon.ns.dep/alias {:optional true} :string]])
+
+(def spec-entity-schema
+  "Malli schema for a spec/schema entity.
+   Identity: :seon.spec/key. Cardinality-many fields use [:vector :keyword]."
+  [:map
+   [:seon.spec/key {:db/unique :db.unique/identity} :keyword]
+   [:seon.spec/namespace :string]
+   [:seon.spec/definition :string]
+   [:seon.spec/base-type :keyword]
+   [:seon.spec/contains-keys {:optional true} [:vector :keyword]]
+   [:seon.spec/optional-keys {:optional true} [:vector :keyword]]
+   [:seon.spec/references {:optional true} [:vector :keyword]]
+   [:seon.spec/updated-at :inst]])
+
+(def var-entity-schema
+  "Malli schema for a var entity (def, not defn).
+   Identity: :seon.var/qualified-name."
+  [:map
+   [:seon.var/qualified-name {:db/unique :db.unique/identity} :string]
+   [:seon.var/namespace :string]
+   [:seon.var/name :string]
+   [:seon.var/doc {:optional true} :string]
+   [:seon.var/row {:optional true} :int]
+   [:seon.var/private :boolean]
+   [:seon.var/value-type {:optional true} :keyword]
+   [:seon.var/updated-at {:optional true} :inst]])
+
 (def datalevin-schema
-  "Schema for the knowledge graph in Datalevin."
-  {;; Namespace entities
-   :seon.ns/name       {:db/valueType :db.type/string :db/unique :db.unique/identity}
-   :seon.ns/doc        {:db/valueType :db.type/string}
-   :seon.ns/file       {:db/valueType :db.type/string}
-   :seon.ns/target     {:db/valueType :db.type/keyword}
-   :seon.ns/dynamic?   {:db/valueType :db.type/boolean}
-
-   ;; Function entities
-   :seon.fn/qualified-name {:db/valueType :db.type/string :db/unique :db.unique/identity}
-   :seon.fn/namespace      {:db/valueType :db.type/string}
-   :seon.fn/name           {:db/valueType :db.type/string}
-   :seon.fn/doc            {:db/valueType :db.type/string}
-   :seon.fn/arglists       {:db/valueType :db.type/string}
-   :seon.fn/row            {:db/valueType :db.type/long}
-   :seon.fn/private        {:db/valueType :db.type/boolean}
-   :seon.fn/updated-at     {:db/valueType :db.type/instant}
-
-   ;; Call graph (ref-based: points at :seon.fn/qualified-name entities)
-   :seon.call/from-fn  {:db/valueType :db.type/ref}
-   :seon.call/to-fn    {:db/valueType :db.type/ref}
-   :seon.call/row      {:db/valueType :db.type/long}
-
-   ;; NS dependencies
-   :seon.ns.dep/from-ns {:db/valueType :db.type/string}
-   :seon.ns.dep/to-ns   {:db/valueType :db.type/string}
-   :seon.ns.dep/alias   {:db/valueType :db.type/string}
-
-   ;; Spec/schema entities (from static source scanning)
-   :seon.spec/key           {:db/valueType :db.type/keyword :db/unique :db.unique/identity}
-   :seon.spec/namespace     {:db/valueType :db.type/string}
-   :seon.spec/definition    {:db/valueType :db.type/string}
-   :seon.spec/base-type     {:db/valueType :db.type/keyword}
-   :seon.spec/contains-keys {:db/valueType :db.type/keyword :db/cardinality :db.cardinality/many}
-   :seon.spec/optional-keys {:db/valueType :db.type/keyword :db/cardinality :db.cardinality/many}
-   :seon.spec/references    {:db/valueType :db.type/keyword :db/cardinality :db.cardinality/many}
-   :seon.spec/updated-at    {:db/valueType :db.type/instant}
-
-   ;; Function-to-spec links
-   :seon.fn/input-spec  {:db/valueType :db.type/ref}
-   :seon.fn/output-spec {:db/valueType :db.type/ref}
-
-   ;; Var entities (def, not defn)
-   :seon.var/qualified-name {:db/valueType :db.type/string :db/unique :db.unique/identity}
-   :seon.var/namespace      {:db/valueType :db.type/string}
-   :seon.var/name           {:db/valueType :db.type/string}
-   :seon.var/doc            {:db/valueType :db.type/string}
-   :seon.var/row            {:db/valueType :db.type/long}
-   :seon.var/private        {:db/valueType :db.type/boolean}
-   :seon.var/value-type     {:db/valueType :db.type/keyword}
-   :seon.var/updated-at     {:db/valueType :db.type/instant}})
+  "Schema for the knowledge graph in Datalevin. Derived from Malli entity schemas."
+  (merge (db-schema/malli-map->datalevin-schema ns-entity-schema)
+         (db-schema/malli-map->datalevin-schema fn-entity-schema)
+         (db-schema/malli-map->datalevin-schema call-entity-schema)
+         (db-schema/malli-map->datalevin-schema ns-dep-entity-schema)
+         (db-schema/malli-map->datalevin-schema spec-entity-schema)
+         (db-schema/malli-map->datalevin-schema var-entity-schema)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schema Registration
 ;;; ---------------------------------------------------------------------------
 
-;; Datalevin entity attributes (transacted by ingest functions)
+;; Datalevin entity attributes (registered so db/transact! enforcement passes)
 ;; Namespace entity attrs
 (schema/register! :seon.ns/name :string)
 (schema/register! :seon.ns/file :string)
@@ -111,9 +137,9 @@
 (schema/register! :seon.fn/arglists :string)
 (schema/register! :seon.fn/row :int)
 (schema/register! :seon.fn/private :boolean)
-(schema/register! :seon.fn/updated-at inst?)
-(schema/register! :seon.fn/input-spec [:any {:description "Ref to :seon.spec/key entity"}])
-(schema/register! :seon.fn/output-spec [:any {:description "Ref to :seon.spec/key entity"}])
+(schema/register! :seon.fn/updated-at :inst)
+(schema/register! :seon.fn/input-spec :seon.db/ref)
+(schema/register! :seon.fn/output-spec :seon.db/ref)
 
 ;; Var entity attrs
 (schema/register! :seon.var/qualified-name :string)
@@ -123,11 +149,11 @@
 (schema/register! :seon.var/row :int)
 (schema/register! :seon.var/private :boolean)
 (schema/register! :seon.var/value-type :keyword)
-(schema/register! :seon.var/updated-at inst?)
+(schema/register! :seon.var/updated-at :inst)
 
 ;; Call graph attrs
-(schema/register! :seon.call/from-fn [:any {:description "Ref to calling function entity"}])
-(schema/register! :seon.call/to-fn [:any {:description "Ref to called function entity"}])
+(schema/register! :seon.call/from-fn :seon.db/ref)
+(schema/register! :seon.call/to-fn :seon.db/ref)
 (schema/register! :seon.call/row :int)
 
 ;; NS dependency attrs
@@ -143,7 +169,7 @@
 (schema/register! :seon.spec/contains-keys [:vector :keyword])
 (schema/register! :seon.spec/optional-keys [:vector :keyword])
 (schema/register! :seon.spec/references [:vector :keyword])
-(schema/register! :seon.spec/updated-at inst?)
+(schema/register! :seon.spec/updated-at :inst)
 
 (schema/register! ::db-name
                   [:keyword {:description "Database name keyword (e.g. :seon.runtime)"}])
@@ -180,7 +206,7 @@
                     [:seon.spec/namespace :string]
                     [:seon.spec/definition :string]
                     [:seon.spec/base-type :keyword]
-                    [:seon.spec/updated-at inst?]]])
+                    [:seon.spec/updated-at :inst]]])
 
 (schema/register! ::ingest-result
                   [:map
