@@ -134,11 +134,11 @@
                          cheshire/cheshire {:mvn/version "5.13.0"}}
           :replace-paths ["src"]
           :main-opts ["-m" "seon.flow.agent-runner"]
-          :jvm-opts ["-Xms128m"
-                     "-Xmx256m"
-                     "-XX:+UseSerialGC"
-                     "-XX:MaxMetaspaceSize=64m"
-                     "-XX:TieredStopAtLevel=1"]}
+          :jvm-opts ["-Xms256m"
+                     "-Xmx512m"
+                     "-XX:+ExitOnOutOfMemoryError"
+                     "-XX:+HeapDumpOnOutOfMemoryError"
+                     "-Djava.awt.headless=true"]}
 
   :nrepl {:jvm-opts ["-Xms512m"
                      "-Xmx2g"

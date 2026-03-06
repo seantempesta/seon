@@ -130,14 +130,14 @@
 
 ;; Datalevin entity attributes (registered so db/transact! enforcement passes)
 ;; Namespace entity attrs
-(schema/register! :seon.ns/name :string)
+(schema/register! :seon.ns/name [:string {:db/unique :db.unique/identity}])
 (schema/register! :seon.ns/file :string)
 (schema/register! :seon.ns/doc :string)
 (schema/register! :seon.ns/target :keyword)
 (schema/register! :seon.ns/dynamic? :boolean)
 
 ;; Function entity attrs
-(schema/register! :seon.fn/qualified-name :string)
+(schema/register! :seon.fn/qualified-name [:string {:db/unique :db.unique/identity}])
 (schema/register! :seon.fn/namespace :string)
 (schema/register! :seon.fn/name :string)
 (schema/register! :seon.fn/doc :string)
@@ -149,7 +149,7 @@
 (schema/register! :seon.fn/output-spec :seon.db/ref)
 
 ;; Var entity attrs
-(schema/register! :seon.var/qualified-name :string)
+(schema/register! :seon.var/qualified-name [:string {:db/unique :db.unique/identity}])
 (schema/register! :seon.var/namespace :string)
 (schema/register! :seon.var/name :string)
 (schema/register! :seon.var/doc :string)
@@ -169,7 +169,7 @@
 (schema/register! :seon.ns.dep/alias :string)
 
 ;; Spec/schema attrs
-(schema/register! :seon.spec/key :keyword)
+(schema/register! :seon.spec/key [:keyword {:db/unique :db.unique/identity}])
 (schema/register! :seon.spec/namespace :string)
 (schema/register! :seon.spec/definition :string)
 (schema/register! :seon.spec/base-type :keyword)
@@ -305,10 +305,26 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- transact-in-batches!
-  "Transact entities in batches to avoid overwhelming Datalevin."
+  "Transact entities in batches to avoid overwhelming Datalevin.
+   Returns {:succeeded N :failed N :errors [...]} for error isolation.
+   Individual batch failures are logged and skipped, not propagated."
   [db-name entities batch-size]
-  (doseq [batch (partition-all batch-size entities)]
-    (db/transact! db-name (vec batch))))
+  (let [batches (partition-all batch-size entities)
+        results (atom {:succeeded 0 :failed 0 :errors []})]
+    (doseq [batch batches]
+      (try
+        (db/transact! db-name (vec batch))
+        (swap! results update :succeeded + (count batch))
+        (catch Exception e
+          (log/warn "Batch transact failed, isolating error"
+                    {:db-name db-name
+                     :batch-size (count batch)
+                     :error (.getMessage e)})
+          (swap! results (fn [r]
+                           (-> r
+                               (update :failed + (count batch))
+                               (update :errors conj (.getMessage e))))))))
+    @results))
 
 (defn- qualified-call?
   "Returns true if both from-fn and to-fn are qualified (contain '/')."
@@ -345,6 +361,19 @@
                  :seon.fn/private false})))
           missing)))
 
+(defn- safe-transact!
+  "Transact with error isolation. Logs and returns false on failure,
+   true on success. Does not propagate exceptions."
+  [db-name tx-data label]
+  (try
+    (db/transact! db-name tx-data)
+    true
+    (catch Exception e
+      (log/warn "Transact failed (isolated)" {:label label
+                                              :tx-count (count tx-data)
+                                              :error (.getMessage e)})
+      false)))
+
 (def ^:const batch-size
   "Entities per Datalevin transaction.
    Tuned for memory vs latency tradeoff on typical project analysis."
@@ -379,11 +408,11 @@
   (when ns-str
     ;; 1. Upsert namespace entities
     (when (seq ns-entities)
-      (db/transact! db-name (vec ns-entities)))
+      (safe-transact! db-name (vec ns-entities) (str ns-str "/ns-entities")))
 
     ;; 2. Upsert specs BEFORE functions (functions reference specs via lookup refs)
     (when (seq specs)
-      (db/transact! db-name (vec specs)))
+      (safe-transact! db-name (vec specs) (str ns-str "/specs")))
 
     ;; 3. Upsert functions + stubs for call graph targets
     (let [qualified-usages (filterv qualified-call? (or call-edges []))
@@ -391,11 +420,11 @@
           stubs (compute-stub-entities known-qnames qualified-usages)
           all-fns (into (vec (or functions [])) stubs)]
       (when (seq all-fns)
-        (db/transact! db-name (vec all-fns)))
+        (safe-transact! db-name (vec all-fns) (str ns-str "/functions")))
 
       ;; 4. Upsert vars
       (when (seq vars)
-        (db/transact! db-name (vec vars)))
+        (safe-transact! db-name (vec vars) (str ns-str "/vars")))
 
       ;; 5. Retract stale entities (in old scan but not in new)
       (retract-stale-fns! db-name ns-str (map :seon.fn/qualified-name all-fns))
@@ -410,7 +439,7 @@
 
       (retract-ns-deps-from-ns! db-name ns-str)
       (when (seq ns-deps)
-        (db/transact! db-name (vec ns-deps)))
+        (safe-transact! db-name (vec ns-deps) (str ns-str "/ns-deps")))
 
       (render/invalidate-render-cache!)
       {::namespace-count (count (or ns-entities []))
@@ -454,11 +483,11 @@
         vars-by-ns (group-by :seon.var/namespace vars)
         ns-deps-by-ns (group-by :seon.ns.dep/from-ns ns-deps)
         calls-by-ns (group-by (fn [vu]
-                                 (let [from (:seon.call/from-fn vu)]
-                                   (if (.contains ^String from "/")
-                                     (subs from 0 (.indexOf ^String from "/"))
-                                     from)))
-                               var-usages)
+                                (let [from (:seon.call/from-fn vu)]
+                                  (if (.contains ^String from "/")
+                                    (subs from 0 (.indexOf ^String from "/"))
+                                    from)))
+                              var-usages)
         ns-entities-by-ns (group-by :seon.ns/name namespaces)
         ;; All affected namespaces
         all-ns-names (into #{}
@@ -472,14 +501,14 @@
     (log/debug "Ingesting graph data for namespaces..." {:count (count all-ns-names)})
     (doseq [ns-str all-ns-names]
       (when-let [result (ingest-namespace!
-                          {::db-name db-name
-                           ::ns-name ns-str
-                           ::functions (get fns-by-ns ns-str)
-                           ::specs (get specs-by-ns ns-str)
-                           ::vars (get vars-by-ns ns-str)
-                           ::call-edges (get calls-by-ns ns-str)
-                           ::ns-deps (get ns-deps-by-ns ns-str)
-                           ::ns-entities (get ns-entities-by-ns ns-str)})]
+                         {::db-name db-name
+                          ::ns-name ns-str
+                          ::functions (get fns-by-ns ns-str)
+                          ::specs (get specs-by-ns ns-str)
+                          ::vars (get vars-by-ns ns-str)
+                          ::call-edges (get calls-by-ns ns-str)
+                          ::ns-deps (get ns-deps-by-ns ns-str)
+                          ::ns-entities (get ns-entities-by-ns ns-str)})]
         (swap! totals (fn [t]
                         (merge-with + t (select-keys result
                                                      [::namespace-count ::function-count
@@ -515,14 +544,14 @@
       {::namespace-count 0 ::function-count 0 ::var-usage-count 0
        ::ns-dependency-count 0 ::spec-count 0 ::var-count 0}
       (ingest-namespace!
-        {::db-name db-name
-         ::ns-name ns-str
-         ::functions functions
-         ::specs specs
-         ::vars vars
-         ::call-edges var-usages
-         ::ns-deps ns-deps
-         ::ns-entities namespaces}))))
+       {::db-name db-name
+        ::ns-name ns-str
+        ::functions functions
+        ::specs specs
+        ::vars vars
+        ::call-edges var-usages
+        ::ns-deps ns-deps
+        ::ns-entities namespaces}))))
 
 (defn ingest-file!
   "Extract graph from a source file and transact into Datalevin.
@@ -543,14 +572,14 @@
     (if-not ns-str
       {::spec-count 0 ::function-count 0 ::var-count 0}
       (ingest-namespace!
-        {::db-name db-name
-         ::ns-name ns-str
-         ::functions (:seon.graph.extract/functions graph)
-         ::specs (:seon.graph.extract/specs graph)
-         ::vars (:seon.graph.extract/vars graph)
-         ::call-edges (:seon.graph.extract/call-edges graph)
-         ::ns-deps (:seon.graph.extract/ns-deps graph)
-         ::ns-entities (:seon.graph.extract/namespaces graph)}))))
+       {::db-name db-name
+        ::ns-name ns-str
+        ::functions (:seon.graph.extract/functions graph)
+        ::specs (:seon.graph.extract/specs graph)
+        ::vars (:seon.graph.extract/vars graph)
+        ::call-edges (:seon.graph.extract/call-edges graph)
+        ::ns-deps (:seon.graph.extract/ns-deps graph)
+        ::ns-entities (:seon.graph.extract/namespaces graph)}))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; REPL Helpers

@@ -320,21 +320,22 @@
    Validates attributes against the Malli registry, validates values against
    their Malli schemas, auto-adds missing Datalevin schema, then routes
    through the flow writer for serialized access.
-   In tests, bind *direct-mode* to bypass the flow."
+   In tests, bind *direct-mode* to bypass the flow.
+
+   opts map (optional):
+     :timeout-ms - Flow request timeout in ms (default 10000)"
   {:malli/schema [:function
                   [:=> [:cat :keyword [:sequential :any]] :any]
                   [:=> [:cat :keyword [:sequential :any] [:maybe :map]] :any]]}
   ([db-name tx-data]
    (transact! db-name tx-data nil))
-  ([db-name tx-data tx-meta]
+  ([db-name tx-data opts]
    (let [attrs (extract-tx-attrs tx-data)
          conn (resolve-conn db-name)]
      (validate-attrs! attrs)
      (validate-values! tx-data)
      (ensure-schema! conn attrs))
-   (when tx-meta
-     (log/debug "tx-meta provided but not yet supported via flow writer" {:tx-meta tx-meta}))
-   (write! db-name tx-data)))
+   (write! db-name tx-data opts)))
 
 ;;; --- Named Convenience API ---
 ;;;
