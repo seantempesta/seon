@@ -403,6 +403,32 @@ Managed by Integrant (`:seon.dev/instrumentation`). Survives `(user/reset)`. Age
 
 ---
 
+## Multi-Agent Git Safety (CRITICAL)
+
+**Multiple agents and the orchestrator share the same working tree.** Assume other agents are actively working at all times. Your file edits are fine — git tracks those. But git operations that change shared state will destroy other agents' work.
+
+### NEVER do these (without explicit user confirmation):
+
+- **`git checkout -- <file>`** — discards uncommitted changes, including other agents' work
+- **`git stash`** / **`git stash pop`** — stashes are shared; popping someone else's stash causes chaos
+- **`git reset`** (any form) — resets staging area or HEAD, affects everyone
+- **`git checkout <branch>`** / **`git switch`** — changes the branch for ALL agents
+- **`git worktree add/remove`** — only the orchestrator manages worktrees
+- **`git clean`** — deletes untracked files that may be another agent's output
+- **`git rebase`** / **`git merge`** — rewrites history shared by all agents
+
+### What you CAN do freely:
+
+- **`git diff`** / **`git status`** / **`git log`** — read-only, always safe
+- **`git add <specific-files>`** — staging your own files (orchestrator will commit)
+- **Edit files** with Edit/Write/clojure_replace — these are your job
+
+### If you need something destructive:
+
+Ask the user. Explain what you need and why. Let them coordinate across agents. The cost of asking is near zero; the cost of nuking another agent's 30 minutes of work is high.
+
+---
+
 ## Process Architecture (IMPORTANT)
 
 Seon runs as **multiple separate JVM processes**. They are independent — killing one does NOT require killing others.
