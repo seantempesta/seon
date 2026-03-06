@@ -108,6 +108,7 @@
 
 (schema/register! ::entity-id
                   [:string {:min 1
+                            :seon.db/identity true
                             :description "Logical entity ID (e.g. ses-xxx, msg-xxx)"}])
 
 (schema/register! ::entity-type
@@ -122,14 +123,14 @@
   "Malli schema for AI session entities stored in Datalevin.
    Single source of truth -- Datalevin schema is derived from this."
   [:map
-   [::entity-id {:db/unique :db.unique/identity} :string]
+   [::entity-id ::entity-id]
    [::entity-type :keyword]
    [::stored-at :inst]
    [:seon.ai/session-id :string]
    [:seon.ai/namespace {:optional true} :string]
    [:seon.ai/agent-session-id {:optional true} :string]
-   [:seon.ai/started-at {:optional true :db/valueType :db.type/instant} inst?]
-   [:seon.ai/ended-at {:optional true :db/valueType :db.type/instant} inst?]
+   [:seon.ai/started-at {:optional true} :inst]
+   [:seon.ai/ended-at {:optional true} :inst]
    [:seon.ai/status {:optional true} :keyword]
    [:seon.ai/cost-usd {:optional true} :double]])
 
@@ -137,17 +138,17 @@
   "Malli schema for AI message entities stored in Datalevin.
    Single source of truth -- Datalevin schema is derived from this."
   [:map
-   [::entity-id {:db/unique :db.unique/identity} :string]
+   [::entity-id ::entity-id]
    [::entity-type :keyword]
    [::stored-at :inst]
    [:seon.ai/session-id :string]
    [:seon.ai/role {:optional true} :string]
-   [:seon.ai/content {:optional true :db/valueType :db.type/string} :string]
+   [:seon.ai/content {:optional true} :string]
    [:seon.ai/input-tokens {:optional true} :int]
    [:seon.ai/output-tokens {:optional true} :int]
-   [:seon.ai/timestamp {:optional true :db/valueType :db.type/instant} inst?]
+   [:seon.ai/timestamp {:optional true} :inst]
    [:seon.ai.claude/message-type {:optional true} :string]
-   [:seon.ai/sequence {:optional true :db/valueType :db.type/long} :int]
+   [:seon.ai/sequence {:optional true} :int]
    [:seon.ai.claude/cache-read-tokens {:optional true} :int]
    [:seon.ai.claude/cache-creation-tokens {:optional true} :int]])
 
@@ -555,7 +556,7 @@
   ([] (dl-list-sessions {}))
   ([{:keys [namespace status limit] :or {limit 20}}]
    (let [base-where '[[?e ::entity-type :session]
-                       [?e :seon.ai/started-at ?started]]
+                      [?e :seon.ai/started-at ?started]]
          ns-where (when namespace
                     [['?e :seon.ai/namespace (str namespace)]])
          status-where (when status
@@ -574,18 +575,18 @@
   "Aggregate stats: total cost, sessions, messages, token counts."
   []
   (let [sessions (db/query db-name
-                            '[:find ?e ?cost
-                              :where
-                              [?e ::entity-type :session]
-                              [(get-else $ ?e :seon.ai/cost-usd 0.0) ?cost]])
+                           '[:find ?e ?cost
+                             :where
+                             [?e ::entity-type :session]
+                             [(get-else $ ?e :seon.ai/cost-usd 0.0) ?cost]])
         messages (db/query db-name
-                            '[:find ?e ?in ?out ?cr ?cc
-                              :where
-                              [?e ::entity-type :message]
-                              [(get-else $ ?e :seon.ai/input-tokens 0) ?in]
-                              [(get-else $ ?e :seon.ai/output-tokens 0) ?out]
-                              [(get-else $ ?e :seon.ai.claude/cache-read-tokens 0) ?cr]
-                              [(get-else $ ?e :seon.ai.claude/cache-creation-tokens 0) ?cc]])
+                           '[:find ?e ?in ?out ?cr ?cc
+                             :where
+                             [?e ::entity-type :message]
+                             [(get-else $ ?e :seon.ai/input-tokens 0) ?in]
+                             [(get-else $ ?e :seon.ai/output-tokens 0) ?out]
+                             [(get-else $ ?e :seon.ai.claude/cache-read-tokens 0) ?cr]
+                             [(get-else $ ?e :seon.ai.claude/cache-creation-tokens 0) ?cc]])
         total-cost (reduce + 0.0 (map second sessions))
         total-sessions (count sessions)
         total-messages (count messages)

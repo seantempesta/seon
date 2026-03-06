@@ -43,11 +43,27 @@ The personal domains (trading, health, finance) are test cases, not the point. T
 2. **Define what failure looks like.** If you can't articulate how you'd know your change is broken, you don't understand the problem well enough to fix it.
 3. **Read the source.** Read the existing code you're modifying. Read library source in `reference-code/` (Datalevin, Malli, Integrant, core.async — they're all there). Agents that guess instead of reading produce confident, wrong answers.
 4. **Test assumptions in the REPL.** Before building a function that queries the graph, try the query manually. Before wrapping a library call, call it directly and see what it returns. A 30-second experiment prevents hours of debugging.
+5. **Ask Gemini when stuck.** Two functions, both in the `user` namespace:
+   - `(user/search "question" :files ["relevant/file.clj"])` — Gemini with **web access**. Include `:files` so it sees your actual code.
+   - `(user/ask "question")` — Gemini **model knowledge only** (no web search, no files). Use for conceptual questions.
+
+```clojure
+;; Web search with code context (preferred for debugging)
+(user/search "In this Malli registry setup, schema references in entity
+              schemas fail at load time because register! hasn't run yet.
+              What's the best pattern for forward references or lazy
+              resolution in Malli?"
+             :files ["src/seon/schema.clj"
+                     "src/seon/db/schema.clj"])
+
+;; Model knowledge only (quick conceptual questions)
+(user/ask "Explain Datalog pull patterns in Datalevin")
+```
 
 ### After writing code:
 
-5. **Verify in the REPL, not just with tests.** Tests passing is necessary but not sufficient. Query the live system and confirm the actual state matches your intent.
-6. **Falsify, don't confirm.** Don't ask "does my change work?" Ask "how would I know if my change is broken?" Then check for that.
+6. **Verify in the REPL, not just with tests.** Tests passing is necessary but not sufficient. Query the live system and confirm the actual state matches your intent.
+7. **Falsify, don't confirm.** Don't ask "does my change work?" Ask "how would I know if my change is broken?" Then check for that.
 
 **The REPL is the oracle.** Not the code, not the tests, not the docs. The running system tells you the truth. Every claim should be verifiable with a REPL expression.
 
@@ -59,8 +75,8 @@ As you work, you will encounter inconsistencies, type mismatches, coercions that
 
 - **If you fully understand the issue and the fix is within your task scope**, fix it and explain what you found and why you changed it.
 - **If you don't fully understand the issue**, or the fix touches code outside your task, **report it clearly** in your response. Include: the file and line, what looks wrong, what you think it should be, and why you're not sure. The orchestrator will launch a focused agent to investigate.
-- **Never assume a smell is intentional.** If a Datalevin schema says `:db.type/string` but callers pass symbols, that's a bug or a design smell — not "how it's supposed to work." Flag it.
-- **Never silently coerce types to work around a mismatch.** If you find yourself writing `(str some-symbol)` or `(keyword some-string)` to make data fit a schema, stop and report the mismatch instead.
+- **Assume every smell is a bug** until proven otherwise. If a schema says `:db.type/string` but callers pass symbols, flag it.
+- **Report type mismatches instead of coercing around them.** If data doesn't fit a schema, the schema or the caller is wrong — fix the root cause.
 
 This is how we build a consistent system. Every agent that reports a smell makes the codebase better for the next agent.
 
@@ -72,7 +88,7 @@ All data flowing through Seon must be safe at every boundary: Malli validation, 
 
 **Maps with namespaced keywords.** Every public function takes one map and returns one map. All keys are fully namespaced keywords (`:seon.runtime/status`, never `:status`). No exceptions.
 
-**Concrete types only.** No `:any`, no `:some`, no `[:maybe X]` on persisted data. Every field has a specific type.
+**Concrete types only.** Every persisted field has a specific type (`:string`, `:int`, `:keyword`, `:inst`, etc.).
 
 **Optional = absent.** Use `{:optional true}` for fields that may not be present. If the key is present, it must have a valid value. If absent, it means "no value." Never store nil.
 
@@ -138,7 +154,7 @@ Only two. Both use the `:seon.db/` namespace (never bare `:db/`):
 
 ### Banned types (rejected at registration)
 
-`:any`, `:some`, `:nil`, `[:maybe X]` on persisted data, mixed-type enums (e.g. `[:enum :a "b"]`).
+The following are rejected by `validate-persisted-schemas!` at startup: `:any`, `:some`, `:nil`, `[:maybe X]`, and mixed-type enums (e.g. `[:enum :a "b"]`). Use `{:optional true}` instead of `[:maybe X]`.
 
 ### Where to Learn More
 
@@ -241,14 +257,14 @@ The dev hook handles reloading automatically. You rarely need to reload manually
 (user/status)  ; Check system health
 ```
 
-**Avoid** `(require 'ns :reload)` — it bypasses proper cleanup.
+Use `(user/reload)` or `(user/reset)` for reloading — they handle cleanup properly.
 
 **If something breaks:**
 1. **Observe first.** `(user/status)`, check logs, query the REPL. Understand what's broken and WHY.
-2. **Diagnose the root cause.** Don't fix symptoms — find the disease.
+2. **Diagnose the root cause.** Fix the disease, not the symptoms.
 3. Try `(user/reload)` — often fixes code-level issues.
 4. Try `(user/reset)` — clean Integrant restart. Note: `resume-key` may preserve old state.
-5. **Last resort only:** `(user/restart-db!)` for Datalevin, `pkill -f seon.runner` for the Seon JVM. Document WHY. **Never** `pkill -9 -f java.*seon` — see Process Architecture below.
+5. **Last resort only:** `(user/restart-db!)` for Datalevin, `pkill -f seon.runner` for the Seon JVM. Document WHY.
 
 ---
 
@@ -283,20 +299,20 @@ Every test result is **auto-saved** to `@user/repl-<session>`. Large output is t
 #_:full (:r-a1b2 @user/repl-orchestrator)
 ```
 
-**Never re-run tests just to see more output.** The result is already stored.
+**Results are already stored** — dig into the stored key instead of re-running.
 
 ### If the REPL is Down
 
 If the JVM isn't running (crashed, not started yet), use the CLI as a fallback:
 
 ```bash
-bin/test              # All unit tests
-bin/test --all        # Everything including integration
+bin/test --unit                      # All unit tests
+bin/test seon.foo-test               # Single namespace
+bin/test seon.foo-test seon.bar-test # Multiple namespaces
+bin/test --all                       # Everything including integration
 ```
 
-This starts a fresh JVM, runs kaocha, and exits. It's slow (~30s startup) — only use it when the REPL isn't available.
-
-**Never run `clj -M:test` directly.** Always use `bin/test` — it sets the correct JVM opts, classpath, and environment.
+This starts a fresh JVM, runs kaocha, and exits. It's slow (~30s startup) — only use it when the REPL isn't available. Running `bin/test` with no arguments prints a help message and exits (it nudges you toward the REPL).
 
 ### What to Test
 
@@ -350,7 +366,7 @@ All public functions with `:malli/schema` metadata are **instrumented at runtime
 
 Instrumentation errors are `ExceptionInfo` with structured messages. They tell you exactly what went wrong, what the function expects, and how to call it correctly — including the expanded schema, a generated example call, and the docstring.
 
-**Do not ignore these.** Do not catch-and-swallow them. Do not work around them. They mean one of two things:
+**Read the error and fix the root cause.** It means one of two things:
 
 1. **You called the function wrong.** Read the error, fix your call.
 2. **The schema is wrong.** Fix the schema to match reality — schemas describe what IS, not what you wish.
@@ -369,7 +385,7 @@ Public functions follow **map in, map out** (see `CONVENTIONS.md`). One map argu
 (schema/register! ::do-thing-response
                   [:map
                    [::result ::result]
-                   [::metadata {:optional true} [:maybe ::metadata]]])
+                   [::metadata {:optional true} ::metadata]])
 
 ;; Public function: one map in, one map out, :malli/schema metadata
 (defn do-thing
@@ -381,7 +397,7 @@ Public functions follow **map in, map out** (see `CONVENTIONS.md`). One map argu
 
 Rules:
 - **Register schemas** for request/response types via `seon.schema/register!`
-- **Nullable response fields** use `[:maybe ...]` on the value schema
+- **Optional fields** use `{:optional true}` — if the key is present, the value must be valid; if absent, it means "no value"
 - **One argument, one return** — always `[:=> [:cat ::request] ::response]`
 - After adding or changing a schema, instrumentation picks it up automatically on reload
 
@@ -405,27 +421,17 @@ Managed by Integrant (`:seon.dev/instrumentation`). Survives `(user/reset)`. Age
 
 ## Multi-Agent Git Safety (CRITICAL)
 
-**Multiple agents and the orchestrator share the same working tree.** Assume other agents are actively working at all times. Your file edits are fine — git tracks those. But git operations that change shared state will destroy other agents' work.
+**Multiple agents and the orchestrator share the same working tree.** Assume other agents are actively working at all times.
 
-### NEVER do these (without explicit user confirmation):
+### Safe operations (use freely):
 
-- **`git checkout -- <file>`** — discards uncommitted changes, including other agents' work
-- **`git stash`** / **`git stash pop`** — stashes are shared; popping someone else's stash causes chaos
-- **`git reset`** (any form) — resets staging area or HEAD, affects everyone
-- **`git checkout <branch>`** / **`git switch`** — changes the branch for ALL agents
-- **`git worktree add/remove`** — only the orchestrator manages worktrees
-- **`git clean`** — deletes untracked files that may be another agent's output
-- **`git rebase`** / **`git merge`** — rewrites history shared by all agents
+- **Read-only git:** `git diff`, `git status`, `git log`
+- **Stage your files:** `git add <specific-files>` (orchestrator commits)
+- **Edit files** with Edit/Write/clojure_replace — this is your job
 
-### What you CAN do freely:
+### Everything else: ask the user first
 
-- **`git diff`** / **`git status`** / **`git log`** — read-only, always safe
-- **`git add <specific-files>`** — staging your own files (orchestrator will commit)
-- **Edit files** with Edit/Write/clojure_replace — these are your job
-
-### If you need something destructive:
-
-Ask the user. Explain what you need and why. Let them coordinate across agents. The cost of asking is near zero; the cost of nuking another agent's 30 minutes of work is high.
+Any git operation that changes branch, discards files, or modifies history affects all agents. Ask the user before running it — they'll coordinate across agents. The cost of asking is near zero; the cost of destroying another agent's work is high.
 
 ---
 
@@ -460,16 +466,16 @@ lsof -ti :7888   # Seon nREPL PID
 cat data/datalevin/server.pid  # Recorded Datalevin PID
 ```
 
-### DO NOT Blindly Kill Processes
+### Surgical Process Management
 
-**Never run `pkill -9 -f "java.*seon"` or `pkill -9 -f java`** — this kills Datalevin, agents, and everything else. If you must kill something, be surgical:
+Each process is independent — only target the specific one you need to restart.
 
-| Want to... | Do this | NOT this |
-|-----------|---------|----------|
-| Restart Seon only | `pkill -f seon.runner` | `pkill java` |
-| Restart Datalevin | `(user/restart-db!)` | `kill -9 $(lsof -ti :8898)` |
-| Full data wipe | `(user/db-reset!)` | `rm -rf data/datalevin` |
-| Clean restart of everything | `(halt)`, wait 3s, `(go)` | `pkill -9` anything |
+| Want to... | Do this |
+|-----------|---------|
+| Restart Seon only | `pkill -f seon.runner` |
+| Restart Datalevin | `(user/restart-db!)` |
+| Full data wipe | `(user/db-reset!)` |
+| Clean restart of everything | `(halt)`, wait 3s, `(go)` |
 
 After killing Seon: just `./bin/run` — it adopts the still-running Datalevin.
 
@@ -479,7 +485,7 @@ After killing Seon: just `./bin/run` — it adopts the still-running Datalevin.
 |---------|-----------|-----|
 | "Connection refused" on :8898 | Datalevin died | `(user/restart-db!)` or `(user/reset)` (auto-starts new one) |
 | Seon JVM died but Datalevin alive | Normal — Datalevin survives | `./bin/run` (adopts existing) |
-| LMDB lock errors on start | Stale locks from previous kill | Automatic — `clean-stale-locks!` runs on every fresh start |
+| LMDB lock errors on start | Stale locks from previous crash | `(user/restart-db!)` — Datalevin manages its own locks |
 | Everything dead | Both processes killed | `./bin/run` (starts both fresh) |
 | Data corrupted | Rare — only from `kill -9` on Datalevin mid-write | `(user/db-reset!)` for clean slate |
 

@@ -98,25 +98,11 @@
     (when (map? datum)
       (validate-entity-values! datum))))
 
-(defn- extract-db-props
-  "Extract :db/* properties from a Malli schema definition.
-   Handles both raw vectors ([:or {:db/valueType ...} ...]) and resolved schemas."
-  [malli-def]
-  (try
-    (let [s (m/schema malli-def)
-          props (m/properties s)]
-      (when props
-        (not-empty
-         (into {} (filter (fn [[pk _]] (and (keyword? pk) (= "db" (namespace pk))))) props))))
-    (catch Exception _ nil)))
-
 (defn- ensure-schema!
   "For each domain attr, check if it exists in the Datalevin schema for conn.
    If missing, derive the Datalevin type from the Malli definition and call
-   d/update-schema to add it.
-   When the Malli definition carries :db/* properties (e.g. :db/valueType on
-   an :or schema), those are promoted to entry-level properties so the bridge
-   can find them."
+   d/update-schema to add it. The bridge reads :seon.db/* properties directly
+   from the registered schema — no property extraction needed here."
   [conn attrs]
   (let [current-schema (d/schema conn)
         domain-attrs (remove system-attr? attrs)
@@ -126,17 +112,13 @@
             (reduce
              (fn [acc attr]
                (let [malli-def (schema/schema-definition attr)
-                     db-props (extract-db-props malli-def)
-                     entry (if db-props
-                             [attr db-props malli-def]
-                             [attr malli-def])
                      entry-schema (db-schema/malli-map->datalevin-schema
-                                   [:map entry])]
+                                   [:map [attr malli-def]])]
                  (when-not (contains? entry-schema attr)
                    (throw (ex-info (str "Cannot derive Datalevin type for attribute " attr
                                         " (Malli type: " (pr-str malli-def) ")."
-                                        " Either add :db/valueType to the Malli schema properties"
-                                        " or include " attr " in the module's hardcoded datalevin-schema.")
+                                        " Add :seon.db/identity or :seon.db/unique to the Malli schema properties,"
+                                        " or ensure the type is mappable to a Datalevin type.")
                                    {:attr attr :malli-def malli-def})))
                  (merge acc entry-schema)))
              {}
