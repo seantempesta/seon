@@ -502,3 +502,54 @@ EDN blobs (untyped attributes) can store arbitrary Clojure data, including large
 - Writes are serialized (one writer at a time)
 - Last write wins for concurrent writes to the same attribute
 - Read transactions see a consistent snapshot from when the read started
+
+## Schema Registration Details (Seon Bridge)
+
+`schema/register!` is the single source of truth. You register a Malli type, and the bridge auto-derives everything Datalevin needs. You never write Datalevin schema directly.
+
+### What the bridge auto-infers
+
+| You write | Bridge produces | You do |
+|-----------|----------------|--------|
+| `:string`, `:int`, `:keyword`, `:boolean`, `:double`, `:uuid`, `:symbol` | Correct Datalevin type | Nothing |
+| `:inst` | `:db.type/instant` | Nothing |
+| `[:enum :a :b]` | Type from enum values | Nothing |
+| `[:vector X]` / `[:set X]` | Cardinality-many | Nothing |
+| Nested `[:map ...]` | Ref + component entity | Nothing |
+| `:seon.db/ref` | `:db.type/ref` | Nothing |
+| `[:string {:seon.db/identity true}]` | `:db/unique :db.unique/identity` | Add property |
+| `[:string {:seon.db/unique true}]` | `:db/unique :db.unique/value` | Add property |
+
+### Persistence properties
+
+Only two. Both use the `:seon.db/` namespace (never bare `:db/`):
+
+| Property | Meaning | Example |
+|----------|---------|---------|
+| `:seon.db/identity` | This attr uniquely identifies entities (lookup refs work on it) | `[:string {:seon.db/identity true}]` |
+| `:seon.db/unique` | Values must be unique but this is not the identity attr | `[:string {:seon.db/unique true}]` |
+
+### Refs
+
+```clojure
+;; Register a ref attr — type is :seon.db/ref
+(schema/register! :seon.agent.run/runtime :seon.db/ref)
+
+;; Callers may pass lookup refs at transact time:
+(db/transact! :seon.runtime [{:seon.agent.run/id "run-1"
+                               :seon.agent.run/runtime [:seon.runtime/namespace "seon.foo"]}])
+;; Datalevin resolves the lookup ref to an entity ID automatically.
+```
+
+### Banned types (rejected at registration)
+
+The following are rejected by `validate-persisted-schemas!` at startup: `:any`, `:some`, `:nil`, `[:maybe X]`, and mixed-type enums (e.g. `[:enum :a "b"]`). Use `{:optional true}` instead of `[:maybe X]`.
+
+### Where to Learn More
+
+| Topic | Document |
+|-------|----------|
+| Full type mapping table | `docs/prds/schema-unification/design.md` |
+| Serialization research (Nippy) | `docs/prds/schema-unification/research/serialization-findings.md` |
+| Nil semantics research | `docs/prds/schema-unification/research/nil-semantics-findings.md` |
+| API patterns, function contracts | `CONVENTIONS.md` |

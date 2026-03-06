@@ -82,91 +82,6 @@ This is how we build a consistent system. Every agent that reports a smell makes
 
 ---
 
-## Data Rules
-
-All data flowing through Seon must be safe at every boundary: Malli validation, core.async channels, Nippy serialization, Datalevin transact/pull. These rules ensure that.
-
-**Maps with namespaced keywords.** Every public function takes one map and returns one map. All keys are fully namespaced keywords (`:seon.runtime/status`, never `:status`). No exceptions.
-
-**Concrete types only.** Every persisted field has a specific type (`:string`, `:int`, `:keyword`, `:inst`, etc.).
-
-**Optional = absent.** Use `{:optional true}` for fields that may not be present. If the key is present, it must have a valid value. If absent, it means "no value." Never store nil.
-
-**Retraction is explicit.** To clear a field, use `[:db/retract eid :attr]`. Omitting a key from a transact map means "leave unchanged."
-
-### Schema Registration (IMPORTANT)
-
-`schema/register!` is the **single source of truth** for all attribute schemas. Register the type, and the system auto-derives everything needed for database storage. You never write Datalevin schema directly.
-
-```clojure
-;; Most attrs — just the type. Everything else is auto-inferred.
-(schema/register! :seon.foo/name :string)
-(schema/register! :seon.foo/status [:enum :active :stopped])
-(schema/register! :seon.foo/tags [:vector :keyword])
-(schema/register! :seon.foo/created-at :inst)
-(schema/register! :seon.foo/parent :seon.db/ref)
-
-;; Identity attrs — add {:seon.db/identity true} as a Malli property
-(schema/register! :seon.foo/id [:string {:seon.db/identity true}])
-
-;; Unique (non-identity) — rare
-(schema/register! :seon.foo/email [:string {:seon.db/unique true}])
-
-;; Then just transact. Schema is handled automatically.
-(db/transact! :seon [{:seon.foo/id "abc" :seon.foo/name "hello"}])
-```
-
-**That's it.** No entity schemas, no `:db/*` properties, no Datalevin knowledge needed.
-
-### What the bridge auto-infers
-
-| You write | Bridge produces | You do |
-|-----------|----------------|--------|
-| `:string`, `:int`, `:keyword`, `:boolean`, `:double`, `:uuid`, `:symbol` | Correct Datalevin type | Nothing |
-| `:inst` | `:db.type/instant` | Nothing |
-| `[:enum :a :b]` | Type from enum values | Nothing |
-| `[:vector X]` / `[:set X]` | Cardinality-many | Nothing |
-| Nested `[:map ...]` | Ref + component entity | Nothing |
-| `:seon.db/ref` | `:db.type/ref` | Nothing |
-| `[:string {:seon.db/identity true}]` | `:db/unique :db.unique/identity` | Add property |
-| `[:string {:seon.db/unique true}]` | `:db/unique :db.unique/value` | Add property |
-
-### Persistence properties
-
-Only two. Both use the `:seon.db/` namespace (never bare `:db/`):
-
-| Property | Meaning | Example |
-|----------|---------|---------|
-| `:seon.db/identity` | This attr uniquely identifies entities (lookup refs work on it) | `[:string {:seon.db/identity true}]` |
-| `:seon.db/unique` | Values must be unique but this is not the identity attr | `[:string {:seon.db/unique true}]` |
-
-### Refs
-
-```clojure
-;; Register a ref attr — type is :seon.db/ref
-(schema/register! :seon.agent.run/runtime :seon.db/ref)
-
-;; Callers may pass lookup refs at transact time:
-(db/transact! :seon.runtime [{:seon.agent.run/id "run-1"
-                               :seon.agent.run/runtime [:seon.runtime/namespace "seon.foo"]}])
-;; Datalevin resolves the lookup ref to an entity ID automatically.
-```
-
-### Banned types (rejected at registration)
-
-The following are rejected by `validate-persisted-schemas!` at startup: `:any`, `:some`, `:nil`, `[:maybe X]`, and mixed-type enums (e.g. `[:enum :a "b"]`). Use `{:optional true}` instead of `[:maybe X]`.
-
-### Where to Learn More
-
-| Topic | Document |
-|-------|----------|
-| Full type mapping table | `docs/prds/schema-unification/design.md` |
-| Serialization research (Nippy) | `docs/prds/schema-unification/research/serialization-findings.md` |
-| Nil semantics research | `docs/prds/schema-unification/research/nil-semantics-findings.md` |
-| API patterns, function contracts | `CONVENTIONS.md` |
-
----
-
 ## Architecture
 
 ```
@@ -198,6 +113,51 @@ All cross-boundary calls — namespace function calls, database writes, REPL eva
 
 ---
 
+## Multi-Agent Git Safety (CRITICAL)
+
+**Multiple agents and the orchestrator share the same working tree.** Assume other agents are actively working at all times.
+
+### Safe operations (use freely):
+
+- **Read-only git:** `git diff`, `git status`, `git log`
+- **Stage your files:** `git add <specific-files>` (orchestrator commits)
+- **Edit files** with Edit/Write/clojure_replace — this is your job
+
+### Everything else: ask the user first
+
+Any git operation that changes branch, discards files, or modifies history affects all agents. Ask the user before running it — they'll coordinate across agents. The cost of asking is near zero; the cost of destroying another agent's work is high.
+
+---
+
+## Data Rules
+
+All data flowing through Seon must be safe at every boundary: Malli validation, core.async channels, Nippy serialization, Datalevin transact/pull.
+
+**Maps with namespaced keywords.** Every public function takes one map and returns one map. All keys are fully namespaced keywords (`:seon.runtime/status`, never `:status`). No exceptions.
+
+**Concrete types only.** Every persisted field has a specific type (`:string`, `:int`, `:keyword`, `:inst`, etc.).
+
+**Optional = absent.** Use `{:optional true}` for fields that may not be present. If the key is present, it must have a valid value. Never store nil.
+
+**Retraction is explicit.** To clear a field, use `[:db/retract eid :attr]`. Omitting a key from a transact map means "leave unchanged."
+
+### Schema Registration
+
+`schema/register!` is the **single source of truth** for all attribute schemas. Register the type, and the system auto-derives everything needed for database storage. You never write Datalevin schema directly.
+
+```clojure
+(schema/register! :seon.foo/name :string)
+(schema/register! :seon.foo/id [:string {:seon.db/identity true}])
+(schema/register! :seon.foo/tags [:vector :keyword])
+(schema/register! :seon.foo/parent :seon.db/ref)
+
+(db/transact! :seon [{:seon.foo/id "abc" :seon.foo/name "hello"}])
+```
+
+See `/datalevin` skill for bridge details, persistence properties, refs, and banned types.
+
+---
+
 ## Skills (IMPORTANT)
 
 **ALWAYS invoke the relevant skill FIRST** before searching, grepping, or trial-and-error. Skills encode project-specific knowledge that saves significant time.
@@ -213,37 +173,15 @@ All cross-boundary calls — namespace function calls, database writes, REPL eva
 
 ## Editing Tools
 
-| Tool | Best For | Validation |
-|------|----------|------------|
-| `Edit` | Small, exact string replacements | Syntax (non-seon) or full lint (seon) |
-| `Write` | New files, complete rewrites | Syntax (non-seon) or full lint (seon) |
-| `clojure_replace` (MCP) | Clojure code changes | Full clj-kondo + tests + review |
+**Prefer `clojure_replace` for Clojure** — whitespace-insensitive, structural matching, full lint before write. Use `Edit` for small exact replacements, `Write` for new files. The dev hook validates all edits automatically. Errors include "Did you mean?" suggestions — read them.
 
-**Prefer `clojure_replace` for Clojure** — whitespace-insensitive, structural matching, full lint before write.
-
-All Clojure edits are validated:
-- **PreToolUse:** Fast syntax check for non-seon files (~1ms), full clj-kondo for seon files (~50-100ms)
-- **PostToolUse:** Full pipeline for seon files (repair, reload, tests, review)
-
-Errors include "Did you mean?" suggestions for undefined symbols. If your edit is blocked, the error message tells you exactly what's wrong — read it.
-
-### Code Smell: Functions Too Complex to Edit
-
-If you repeatedly fail to edit a function, **the function is too complex**. Refactor it. Keep functions small and composable. If a function needs a comment explaining a section, that section should be its own function. **If an AI can't edit your code, it's too complex for humans too.**
+If you repeatedly fail to edit a function, **the function is too complex**. Refactor it.
 
 ---
 
 ## Dev Hook
 
-After every Edit/Write, the hook automatically:
-- Reloads code into the running server
-- Runs tests for affected namespaces
-- Validates schemas via generative testing
-- Provides Gemini AI review
-
-Config in `.claude/seon-hook.edn`. Hook blocks if tests fail.
-
-**Read hook feedback.** The hook provides convention violations, lint warnings, and AI review after every edit. This feedback is good — it catches real problems. Don't skip it to move faster. Fix warnings, use existing aliases, address review concerns before moving on. Ignoring feedback to "save time" creates debt that costs more later.
+After every Edit/Write, the hook automatically reloads code, runs affected tests, validates schemas, and provides Gemini AI review. Config in `.claude/seon-hook.edn`. Hook blocks if tests fail. **Read hook feedback** — it catches real problems. Fix warnings before moving on.
 
 ---
 
@@ -270,9 +208,7 @@ Use `(user/reload)` or `(user/reset)` for reloading — they handle cleanup prop
 
 ## Testing
 
-Seon is a live system. Tests run inside the running JVM via the REPL — never by spawning a separate process. This keeps tests fast, connected to the same database and state, and consistent with how you develop.
-
-### Running Tests (REPL)
+Tests run inside the running JVM via the REPL — never by spawning a separate process.
 
 ```clojure
 (user/run-tests 'seon.foo-test)                    ;; Single namespace
@@ -282,64 +218,15 @@ Seon is a live system. Tests run inside the running JVM via the REPL — never b
 (user/test-gen 'seon.foo)                           ;; Generative tests (Malli schemas)
 ```
 
-### Working with Results
-
-Every test result is **auto-saved** to `@user/repl-<session>`. Large output is truncated — dig into the stored key instead of re-running:
-
-```clojure
-;; Run tests — result auto-saved under a hash key
-(user/run-tests 'seon.foo-test)
-;; => {:seon.dev.test/success false :seon.dev.test/fail-count 1 ...}
-;; => stored as :r-a1b2 in @user/repl-orchestrator
-
-;; Dig into failures (zero cost, no re-run)
-(:failures (:r-a1b2 @user/repl-orchestrator))
-
-;; Full untruncated output
-#_:full (:r-a1b2 @user/repl-orchestrator)
-```
-
-**Results are already stored** — dig into the stored key instead of re-running.
-
-### If the REPL is Down
-
-If the JVM isn't running (crashed, not started yet), use the CLI as a fallback:
-
-```bash
-bin/test --unit                      # All unit tests
-bin/test seon.foo-test               # Single namespace
-bin/test seon.foo-test seon.bar-test # Multiple namespaces
-bin/test --all                       # Everything including integration
-```
-
-This starts a fresh JVM, runs kaocha, and exits. It's slow (~30s startup) — only use it when the REPL isn't available. Running `bin/test` with no arguments prints a help message and exits (it nudges you toward the REPL).
-
-### What to Test
-
-- **After editing code:** The dev hook runs affected tests automatically. Check its output.
-- **Before finishing a task:** Run `(user/run-tests)` and fix any failures. Report honest numbers.
-- **For schema changes:** Run `(user/test-gen 'seon.ns)` to exercise Malli generators.
-- **For cross-cutting changes:** Run `(user/test-affected 'seon.ns)` to find downstream breakage.
+Results are **auto-saved** to `@user/repl-<session>`. Dig into stored keys instead of re-running. If the REPL is down, use `bin/test` as a fallback (~30s startup). See `/clojure-testing` skill for fixtures, generators, and debugging patterns.
 
 ---
 
 ## UI Development
 
-Seon uses a **Phosphor Terminal** theme - warm blacks, cream text, amber accents. Think Lisp machine, not generic web app.
+Seon uses a **Phosphor Terminal** theme — warm blacks, cream text, amber accents. Read `docs/prds/namespace-ui/design-system.md` and use `src/seon/web/components.clj`. Invoke `/datastar-web-ui` for SSE patterns.
 
-### Before Writing UI Code
-
-1. **Read the design system:** `docs/prds/namespace-ui/design-system.md`
-2. **Use the component library:** `src/seon/web/components.clj`
-3. **Invoke skills:** `/datastar-web-ui` for SSE patterns, `/browser-automation` to test
-
-### Key Rules
-
-- **Density over whitespace** - `p-3` not `p-6`, `gap-4` not `gap-6`
-- **Small text** - `text-xs` (11px) primary, `text-lg` max for titles
-- **Warm colors** - `bg-base-*`, `text-text-*`, never `bg-white` or `text-zinc-*`
-- **Dot+text status** - `● running` not pill badges
-- **Monospace everywhere** - `font-mono` on body
+Key rules: density over whitespace (`p-3` not `p-6`), small text (`text-xs` primary), warm colors (`bg-base-*`, never `bg-white`), dot+text status (`● running`), monospace everywhere.
 
 ---
 
@@ -356,38 +243,18 @@ See `CONVENTIONS.md` for full patterns.
 
 ## Function Instrumentation (IMPORTANT)
 
-All public functions with `:malli/schema` metadata are **instrumented at runtime**. Every call is validated against its schema — inputs, outputs, and arity. This runs in dev, REPL, tests, and agent JVMs. There is no "off" mode.
+All public functions with `:malli/schema` metadata are **instrumented at runtime**. Every call is validated — inputs, outputs, and arity. There is no "off" mode.
 
-### What this means for you
+**Every public function you write or modify MUST have a correct `:malli/schema`.** Wrong schemas are bugs — instrumentation will throw at runtime. When you see an instrumentation error, **read it and fix the root cause**: either you called the function wrong, or the schema doesn't match reality.
 
-**Every public function you write or modify MUST have a correct `:malli/schema`.** The schema is a contract. If the schema doesn't match the function's actual behavior, instrumentation will throw at runtime and tests will fail. This is intentional — wrong schemas are bugs.
-
-### When you see an instrumentation error, STOP
-
-Instrumentation errors are `ExceptionInfo` with structured messages. They tell you exactly what went wrong, what the function expects, and how to call it correctly — including the expanded schema, a generated example call, and the docstring.
-
-**Read the error and fix the root cause.** It means one of two things:
-
-1. **You called the function wrong.** Read the error, fix your call.
-2. **The schema is wrong.** Fix the schema to match reality — schemas describe what IS, not what you wish.
-
-### Public function contract
-
-Public functions follow **map in, map out** (see `CONVENTIONS.md`). One map argument, one map return. No multi-arity on public functions — that's for private `defn-` helpers.
+Public functions follow **map in, map out**. One map argument, one map return. No multi-arity on public functions.
 
 ```clojure
-;; Register request/response schemas
 (schema/register! ::do-thing-request
-                  [:map
-                   [::id ::id]
-                   [::option {:optional true} ::option]])
-
+                  [:map [::id ::id] [::option {:optional true} ::option]])
 (schema/register! ::do-thing-response
-                  [:map
-                   [::result ::result]
-                   [::metadata {:optional true} ::metadata]])
+                  [:map [::result ::result]])
 
-;; Public function: one map in, one map out, :malli/schema metadata
 (defn do-thing
   "Does the thing."
   {:malli/schema [:=> [:cat ::do-thing-request] ::do-thing-response]}
@@ -395,15 +262,7 @@ Public functions follow **map in, map out** (see `CONVENTIONS.md`). One map argu
   ...)
 ```
 
-Rules:
-- **Register schemas** for request/response types via `seon.schema/register!`
-- **Optional fields** use `{:optional true}` — if the key is present, the value must be valid; if absent, it means "no value"
-- **One argument, one return** — always `[:=> [:cat ::request] ::response]`
-- After adding or changing a schema, instrumentation picks it up automatically on reload
-
-### Lifecycle
-
-Managed by Integrant (`:seon.dev/instrumentation`). Survives `(user/reset)`. Agent JVMs self-instrument on startup. You don't need to manage it manually.
+Instrumentation is managed by Integrant (`:seon.dev/instrumentation`), survives `(user/reset)`, and picks up schema changes automatically on reload.
 
 ---
 
@@ -416,22 +275,6 @@ Managed by Integrant (`:seon.dev/instrumentation`). Survives `(user/reset)`. Age
 | `logs/` | Debug logs, hook logs, agent activity | Ignored |
 | `tmp/` | Temporary test files, scratch data | Ignored |
 | `data/` | Datalevin database files | Ignored |
-
----
-
-## Multi-Agent Git Safety (CRITICAL)
-
-**Multiple agents and the orchestrator share the same working tree.** Assume other agents are actively working at all times.
-
-### Safe operations (use freely):
-
-- **Read-only git:** `git diff`, `git status`, `git log`
-- **Stage your files:** `git add <specific-files>` (orchestrator commits)
-- **Edit files** with Edit/Write/clojure_replace — this is your job
-
-### Everything else: ask the user first
-
-Any git operation that changes branch, discards files, or modifies history affects all agents. Ask the user before running it — they'll coordinate across agents. The cost of asking is near zero; the cost of destroying another agent's work is high.
 
 ---
 
@@ -502,16 +345,7 @@ cat data/datalevin/server.pid       # Current Datalevin PID
 
 ## Logging
 
-Seon uses **Timbre** for application logging and **logback** for library logs (SLF4J).
-
-| File | Contents |
-|------|----------|
-| `logs/app.log` | All application log lines (Timbre) |
-| `logs/startup.log` | Boot sequence only (wiped on startup) |
-| `logs/datalevin.log` | Datalevin JVM stdout/stderr (server messages, client connects) |
-| `logs/caddy.log` | Caddy reverse proxy output |
-| `logs/error.log` | Errors only (logback/library) |
-| `logs/lib.log` | Library logs (SLF4J) |
+Application: `logs/app.log` (Timbre). Database: `logs/datalevin.log`. Errors: `logs/error.log` (logback). Boot: `logs/startup.log`. Libraries: `logs/lib.log` (SLF4J).
 
 ---
 
