@@ -1,6 +1,7 @@
 (ns seon.db.datalevin.writer-test
   (:require [clojure.test :refer [deftest is testing]]
             [datalevin.core :as d]
+            [seon.db.datalevin.conn :as dl-conn]
             [seon.db.datalevin.writer :as writer]
             [seon.flow.msg :as msg]
             [seon.test-utils :as tu])
@@ -14,10 +15,15 @@
   {:name {:db/valueType :db.type/string}
    :age  {:db/valueType :db.type/long}})
 
-(defn- with-temp-conn
-  "Create a temp Datalevin connection using the shared helper."
-  [f]
-  (tu/with-temp-conn test-schema f))
+(defn- make-test-manager
+  "Create a fake connection manager pre-populated with a connection under db-kw."
+  [conn db-kw]
+  {::dl-conn/port 0
+   ::dl-conn/host "test"
+   ::dl-conn/connections (atom {db-kw {::dl-conn/connection conn}})})
+
+(def ^:private test-db-name "test-db")
+(def ^:private test-db-kw (keyword test-db-name))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Describe (0-arity)
@@ -46,21 +52,22 @@
       (is (nil? (::writer/last-write-at state))))))
 
 ;;; ---------------------------------------------------------------------------
-;;; Transform — successful write via raw conn
+;;; Transform — successful write via managed connection
 ;;; ---------------------------------------------------------------------------
 
 (deftest transform-write-test
-  (testing "writes tx-data via raw conn and emits reply on :seon.flow.out/reply"
-    (with-temp-conn
+  (testing "writes tx-data via managed connection and emits reply on :seon.flow.out/reply"
+    (tu/with-temp-conn test-schema
       (fn [conn]
-        (let [request-id (random-uuid)
-              state (writer/infra-writer-step {::writer/connection-manager {}})
+        (let [cm (make-test-manager conn test-db-kw)
+              request-id (random-uuid)
+              state (writer/infra-writer-step {::writer/connection-manager cm})
               request {::msg/id request-id
                        ::msg/version 1
                        ::msg/type :request
                        ::msg/from-ns "test"
                        ::msg/payload {::writer/tx-data [{:name "Alice" :age 30}]
-                                      ::writer/conn conn}
+                                      ::writer/db-name test-db-name}
                        ::msg/created-at (Instant/now)}
               [state' outputs] (writer/infra-writer-step state :seon.flow.in/request request)]
           ;; State updated
@@ -84,16 +91,17 @@
 
 (deftest transform-error-test
   (testing "handles invalid tx-data and emits error reply"
-    (with-temp-conn
+    (tu/with-temp-conn test-schema
       (fn [conn]
-        (let [request-id (random-uuid)
-              state (writer/infra-writer-step {::writer/connection-manager {}})
+        (let [cm (make-test-manager conn test-db-kw)
+              request-id (random-uuid)
+              state (writer/infra-writer-step {::writer/connection-manager cm})
               request {::msg/id request-id
                        ::msg/version 1
                        ::msg/type :request
                        ::msg/from-ns "test"
                        ::msg/payload {::writer/tx-data [:not-a-valid-transaction]
-                                      ::writer/conn conn}
+                                      ::writer/db-name test-db-name}
                        ::msg/created-at (Instant/now)}
               [state' outputs] (writer/infra-writer-step state :seon.flow.in/request request)]
           (is (= 1 (::writer/total-errors state')))
@@ -124,7 +132,7 @@
       (is (= state state'))))
 
   (testing "stop closes owned connections and empties map"
-    (with-temp-conn
+    (tu/with-temp-conn test-schema
       (fn [conn]
         (let [state (-> (writer/infra-writer-step {::writer/connection-manager {}})
                         (assoc ::writer/owned-conns {:test-db conn}))

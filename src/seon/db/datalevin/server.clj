@@ -168,26 +168,6 @@
          ::error (.getMessage e)}))))
 
 ;;; ---------------------------------------------------------------------------
-;;; Stale Lock Cleanup
-;;; ---------------------------------------------------------------------------
-
-(defn- clean-stale-locks!
-  "Delete stale LMDB lock files from previous kills.
-   LMDB recreates lock.mdb on open — stale ones from dead processes cause
-   'readers full' errors."
-  [root]
-  (let [root-dir (io/file root)]
-    (if-not (.exists root-dir)
-      (log/debug "No data directory yet, skipping lock cleanup" {:root root})
-      (let [locks (->> (file-seq root-dir)
-                       (filter #(= "lock.mdb" (.getName ^java.io.File %))))]
-        (if (empty? locks)
-          (log/debug "No stale locks found" {:root root})
-          (doseq [lock-file locks]
-            (log/info "Removing stale LMDB lock" {:path (.getPath ^java.io.File lock-file)})
-            (.delete ^java.io.File lock-file)))))))
-
-;;; ---------------------------------------------------------------------------
 ;;; Log File Management
 ;;; ---------------------------------------------------------------------------
 
@@ -305,10 +285,8 @@
       (log/info "Adopting existing Datalevin server"
                 {:port port :pid existing-pid})
       {:port port :root root :adopted? true :pid existing-pid})
-    ;; No server running — clean locks and start external process
-    (do
-      (clean-stale-locks! root)
-      (start-datalevin-process! {:port port :root root}))))
+    ;; No server running — start external process
+    (start-datalevin-process! {:port port :root root})))
 
 (defmethod ig/halt-key! :seon.db.datalevin/server
   [_ {:keys [process adopted? root port] :as state}]
