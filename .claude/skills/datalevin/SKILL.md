@@ -1,555 +1,272 @@
 ---
 name: datalevin
-description: "Datalevin database patterns. Use when writing Datalog queries, transacting data, debugging empty results, working with d/q or d/transact!, accessing database data, managing connections, or working with Datalevin schema. Use when you see datalevin.core, seon.db.datalevin namespace, or when queries return unexpected results."
+description: "Seon database patterns. Use when writing Datalog queries, transacting data, debugging empty results, working with schema/register!, db/transact!, db/query, or db/pull-by-name. Use when you see seon.db or seon.schema namespaces, or when queries return unexpected results or schema validation errors."
 ---
 
-# Datalevin -- Fast Embedded Datalog Database
+# Datalevin -- Seon Database Patterns
 
-Datalevin is a Datomic-compatible Datalog query engine built on LMDB. It stores EAV datoms (entity-attribute-value). Unlike Datomic, it has **no temporal dimension** -- when data is deleted, it is gone. ACID transactions via LMDB.
+## Architecture
 
-Seon runs Datalevin in **client/server mode**: a Datalevin server process runs inside the JVM, and connections use `dtlv://` URIs. Each agent namespace gets its own isolated database.
+Datalevin runs as a **separate JVM process** on port 8898. It survives Seon restarts. All database access goes through the `seon.db` API, routed via core.async flow for serialized reads and writes. Schema-first: call `schema/register!`, Malli validates at transact time, and the bridge auto-derives Datalevin types.
 
 ## Quick Start
 
 ```clojure
-(require '[datalevin.core :as d])
+(require '[seon.schema :as schema]
+         '[seon.db :as db])
 
-;; --- Local (embedded) ---
-(def conn (d/get-conn "/tmp/my-db" schema))
+;; 1. Register attribute schemas
+(schema/register! :myns/name [:string {:seon.db/identity true}])
+(schema/register! :myns/score :double)
 
-;; --- Remote (Seon's pattern) ---
-(def conn (d/get-conn "dtlv://datalevin:datalevin@127.0.0.1:8898/mydb" schema))
+;; 2. Transact data (db-name keyword, then tx-data vector)
+(db/transact! :myns [{:myns/name "alpha" :myns/score 42.0}])
 
-;; Transact entities (map form)
-(d/transact! conn [{:name "Alice" :age 30}
-                    {:name "Bob" :age 25}])
+;; 3. Query
+(db/query :myns '[:find ?e ?n :where [?e :myns/name ?n]])
+;; => #{[1 "alpha"]}
 
-;; Query (Datalog)
-(d/q '[:find ?name ?age
-        :where [?e :name ?name]
-               [?e :age ?age]
-               [(> ?age 26)]]
-     (d/db conn))
-;; => #{["Alice" 30]}
-
-;; Close
-(d/close conn)
+;; 4. Pull by entity id or lookup ref
+(db/pull-by-name :myns '[*] [:myns/name "alpha"])
+;; => {:db/id 1 :myns/name "alpha" :myns/score 42.0}
 ```
 
-## Data Model
+## Schema Registration
 
-### EAV Datoms
-
-Every fact is an `[entity-id attribute value]` triple. Entity IDs are auto-assigned positive longs. Use negative IDs or strings as tempids in transactions.
-
-### Schema
-
-Schema is **optional** (schema-on-write). Unschemaed attributes are stored as EDN blobs. Define schema when you need:
-
-- **Value types** for range queries and indexing
-- **Cardinality many** for multi-valued attributes
-- **Unique identity** for lookup refs and upserts
-- **Refs** for entity-to-entity relationships
+Register every attribute before transacting. `schema/register!` is the single source of truth.
 
 ```clojure
-(def schema
-  {:name {:db/valueType :db.type/string
-          :db/unique    :db.unique/identity}  ; enables [:name "Alice"] lookups
-   :age  {:db/valueType :db.type/long}        ; enables range queries
-   :tags {:db/cardinality :db.cardinality/many
-          :db/valueType :db.type/string}
-   :friend {:db/valueType :db.type/ref}})     ; references another entity
+(schema/register! :myns/id [:string {:seon.db/identity true}])
+(schema/register! :myns/label :string)
+(schema/register! :myns/count :int)
+(schema/register! :myns/active :boolean)
+(schema/register! :myns/ratio :double)
+(schema/register! :myns/uid :uuid)
+(schema/register! :myns/kind :keyword)
+(schema/register! :myns/sym :symbol)
+(schema/register! :myns/created :inst)
+(schema/register! :myns/parent :seon.db/ref)
+(schema/register! :myns/tags [:vector :keyword])
+(schema/register! :myns/status [:enum :active :inactive])
 ```
 
-### Value Types
+### Persistence Properties
 
-| Type | Keyword | Notes |
-|------|---------|-------|
-| String | `:db.type/string` | |
-| Long | `:db.type/long` | |
-| Double | `:db.type/double` | |
-| Boolean | `:db.type/boolean` | |
-| Instant | `:db.type/instant` | java.util.Date or java.time.Instant |
-| UUID | `:db.type/uuid` | |
-| Keyword | `:db.type/keyword` | |
-| Symbol | `:db.type/symbol` | |
-| Ref | `:db.type/ref` | Entity reference |
-| Bytes | `:db.type/bytes` | byte arrays |
-| (none) | EDN blob | Any Clojure data, not indexed for range queries |
+Annotate schemas with `:seon.db/` properties (never bare `:db/` properties):
 
-### Schema Properties
+| Property | Meaning | Example |
+|----------|---------|---------|
+| `:seon.db/identity` | Uniquely identifies entities. Enables lookup refs and upsert. | `[:string {:seon.db/identity true}]` |
+| `:seon.db/unique` | Values must be unique but this is not the identity attr. | `[:string {:seon.db/unique true}]` |
 
-| Property | Values | Purpose |
-|----------|--------|---------|
-| `:db/valueType` | See above | Type of the attribute value |
-| `:db/cardinality` | `:db.cardinality/one` (default), `:db.cardinality/many` | Single vs multi-valued |
-| `:db/unique` | `:db.unique/identity`, `:db.unique/value` | Uniqueness constraint |
-| `:db/isComponent` | `true` | Component entity (cascade delete) |
-| `:db/tupleAttrs` | `[:a :b :c]` | Composite tuple |
+### Bridge Auto-Inference
 
-**`:db.unique/identity`** -- enables upsert (transact with same unique value updates existing entity) and lookup refs `[:attr value]`.
+| You write | Bridge produces |
+|-----------|-----------------|
+| `:string`, `:int`, `:keyword`, `:boolean`, `:double`, `:uuid`, `:symbol` | Correct `:db.type/*` |
+| `:inst` | `:db.type/instant` |
+| `[:enum :a :b]` | Type inferred from enum values |
+| `[:vector X]` / `[:set X]` | `:db.cardinality/many` with inner type |
+| Nested `[:map ...]` | `:db.type/ref` + `:db/isComponent true` |
+| `:seon.db/ref` | `:db.type/ref` |
+| `{:seon.db/identity true}` | `:db/unique :db.unique/identity` |
+| `{:seon.db/unique true}` | `:db/unique :db.unique/value` |
 
-**`:db.unique/value`** -- uniqueness without upsert; rejects duplicates.
+### Refs
 
-### Differences from Datomic
+```clojure
+;; Register a ref attribute
+(schema/register! :myns/parent :seon.db/ref)
 
-- **No history/as-of** -- deletions are permanent
-- **No squuid** -- use `(java.util.UUID/randomUUID)` or your own ID scheme
-- **Schema is a map of maps** (not transacted, passed at connection time)
-- **Use `update-schema`** to evolve schema on an open connection
-- **Two indexes**: `:eav` and `:ave` (not `:avet`, `:vaet` like Datomic)
-- **No tx entity** -- no `:db/txInstant` by default (use `:auto-entity-time?` option for `:db/created-at` and `:db/updated-at`)
+;; Transact with a lookup ref (resolved by Datalevin automatically)
+(db/transact! :myns [{:myns/id "child-1" :myns/parent [:myns/id "parent-1"]}])
+```
 
-## Query Patterns
+### Banned Types
+
+Rejected by `validate-persisted-schemas!` at startup: `:any`, `:some`, `:nil`, `[:maybe X]`, mixed-type enums. Use `{:optional true}` instead of `[:maybe X]`.
+
+## Database Names
+
+Any namespace can have its own database. Pass a keyword as the first argument to all `db/` functions. Name reflects the namespace that owns the data.
+
+| Database | Contents |
+|----------|----------|
+| `:seon.runtime` | Code graph, instance registry |
+| `:seon.ai` | AI sessions and messages |
+| `:seon.flow` | Flow traces and snapshots |
+| `:seon.trading` | Trading domain data |
+| `:seon.health` | Health domain data |
+| `:seon.{ns}` | Any per-namespace agent context |
+
+## Public API
+
+All functions are in `seon.db`. Positional arguments (not map-in/map-out) -- this is the one namespace exempt from that convention.
+
+### Write
+
+```clojure
+(db/transact! db-name tx-data)
+(db/transact! db-name tx-data opts)
+```
+
+- `db-name` -- keyword (`:seon.runtime`, `:seon.ai`, etc.)
+- `tx-data` -- vector of entity maps or datom tuples
+- `opts` -- optional map with `:timeout-ms` (default 10000)
+
+Validates attributes against the Malli registry, validates values, auto-adds missing Datalevin schema, then routes through the flow writer.
+
+### Read
+
+```clojure
+(db/query db-name datalog-query & inputs)
+(db/pull-by-name db-name selector eid)
+(db/pull-many-by-name db-name selector eids)
+(db/entity-by-name db-name eid)
+```
+
+- `db/query` -- Datalog query. Additional inputs after the query are extra sources (`:in $` is implicit for the named db).
+- `db/pull-by-name` -- Pull entity by selector and eid (entity id or lookup ref).
+- `db/pull-many-by-name` -- Pull multiple entities by selector and eids collection.
+- `db/entity-by-name` -- Lazy map-like entity access.
+
+## Querying
 
 ### Datalog Basics
 
 ```clojure
-;; Find relation (returns set of tuples)
-(d/q '[:find ?name ?age
-        :where [?e :name ?name]
-               [?e :age ?age]]
-     (d/db conn))
+;; Relation (set of tuples, default)
+(db/query :myns '[:find ?name ?score
+                   :where [?e :myns/name ?name]
+                          [?e :myns/score ?score]])
+;; => #{["alpha" 42.0]}
 
-;; With input parameter
-(d/q '[:find ?name
-        :in $ ?min-age
-        :where [?e :name ?name]
-               [?e :age ?a]
-               [(>= ?a ?min-age)]]
-     (d/db conn) 30)
+;; Scalar (single value)
+(db/query :myns '[:find ?name .
+                   :where [?e :myns/name ?name]])
+;; => "alpha"
 
-;; Scalar result (single value)
-(d/q '[:find ?name .
-        :where [?e :name ?name]
-               [?e :age 30]]
-     (d/db conn))
-;; => "Alice"
-
-;; Collection result (single column)
-(d/q '[:find [?name ...]
-        :where [?e :name ?name]]
-     (d/db conn))
-;; => ["Alice" "Bob" "Carol"]
+;; Collection (single column)
+(db/query :myns '[:find [?name ...]
+                   :where [?e :myns/name ?name]])
+;; => ["alpha" "beta"]
 
 ;; Single tuple
-(d/q '[:find [?name ?age]
-        :where [?e :name ?name]
-               [?e :age ?age]
-               [(> ?age 30)]]
-     (d/db conn))
-;; => ["Carol" 35]
+(db/query :myns '[:find [?name ?score]
+                   :where [?e :myns/name ?name]
+                          [?e :myns/score ?score]])
+;; => ["alpha" 42.0]
 ```
 
-### Aggregates
+### Input Parameters
 
 ```clojure
-(d/q '[:find (count ?e) (avg ?age) (max ?age)
-        :where [?e :age ?age]]
-     (d/db conn))
-;; => [[3 30.0 35]]
-```
-
-### Order and Limit
-
-```clojure
-;; Datalevin extension (not in standard Datalog)
-(d/q '[:find ?name ?age
-        :where [?e :name ?name]
-               [?e :age ?age]
-        :order-by [?age :desc]
-        :limit 10]
-     (d/db conn))
+(db/query :myns '[:find ?name
+                   :in $ ?min-score
+                   :where [?e :myns/name ?name]
+                          [?e :myns/score ?s]
+                          [(>= ?s ?min-score)]]
+          30.0)
 ```
 
 ### Pull in Queries
 
 ```clojure
-(d/q '[:find (pull ?e [:name :age :tags])
-        :where [?e :age ?a]
-               [(> ?a 25)]]
-     (d/db conn))
-;; => [[{:name "Alice" :age 30 :tags ["dev" "clj"]}]
-;;     [{:name "Carol" :age 35 :tags ["dev" "py"]}]]
+(db/query :myns '[:find (pull ?e [:myns/name :myns/score])
+                   :where [?e :myns/score ?s]
+                          [(> ?s 10)]])
 ```
 
-### Pull API (Direct)
+### Direct Pull
 
 ```clojure
 ;; By entity ID
-(d/pull (d/db conn) '[:name :age :tags] 1)
+(db/pull-by-name :myns '[:myns/name :myns/score] 1)
 
-;; By lookup ref (requires :db.unique/identity)
-(d/pull (d/db conn) '[:name :age :tags] [:name "Alice"])
-
-;; Wildcard
-(d/pull (d/db conn) '[*] [:name "Alice"])
-
-;; Nested refs
-(d/pull (d/db conn) '[:name {:friend [:name :age]}] 1)
-
-;; Pull many
-(d/pull-many (d/db conn) '[:name :age] [1 2 3])
+;; By lookup ref (requires :seon.db/identity on the attr)
+(db/pull-by-name :myns '[*] [:myns/name "alpha"])
 ```
 
-### Entity API
+### Order, Limit, Aggregates, Rules
 
-```clojure
-;; Lazy map-like access
-(def alice (d/entity (d/db conn) [:name "Alice"]))
-(:age alice)  ;; => 30
-(:tags alice) ;; => #{"dev" "clj"}
+See `references/querying.md` for advanced patterns.
 
-;; Force all attributes
-(d/touch alice)
-;; => {:db/id 1 :name "Alice" :age 30 :tags ["dev" "clj"]}
+## Common Errors and Gotchas
 
-;; Reverse refs (who references this entity?)
-(:_friend alice) ;; => [{:db/id 2} ...]
-```
+### "Unregistered attributes in transaction"
 
-### Rules
+Register every non-system attribute with `schema/register!` before transacting.
 
-```clojure
-(def rules
-  '[[(older-than ?e ?age)
-     [?e :age ?a]
-     [(> ?a ?age)]]])
+### "Malli validation failed for :attr"
 
-(d/q '[:find ?name
-        :in $ % ?min
-        :where [?e :name ?name]
-               (older-than ?e ?min)]
-     (d/db conn) rules 30)
-```
-
-### Index Lookups (Low-Level)
-
-```clojure
-;; All datoms for entity 1
-(d/datoms (d/db conn) :eav 1)
-
-;; All entities with :name = "Alice"
-(d/datoms (d/db conn) :ave :name "Alice")
-
-;; Count datoms matching pattern (nil = wildcard)
-(d/count-datoms (d/db conn) nil :name nil)  ;; count of :name datoms
-
-;; Range query
-(d/index-range (d/db conn) :age 25 35)
-```
-
-## Transactions
-
-### Map Form (Preferred)
-
-```clojure
-;; Create (tempid auto-assigned)
-(d/transact! conn [{:name "Dave" :age 40}])
-
-;; Upsert (with :db.unique/identity on :name)
-(d/transact! conn [{:name "Alice" :age 31}])  ;; updates existing Alice
-
-;; Explicit tempid for cross-references
-(d/transact! conn [{:db/id -1 :name "Eve" :age 28}
-                    {:db/id -2 :name "Frank" :friend -1}])
-
-;; Nested refs
-(d/transact! conn [{:name "Grace"
-                     :friend {:db/id -1 :name "Heidi"}}])
-```
-
-### Datom Form
-
-```clojure
-;; Add single fact
-(d/transact! conn [[:db/add 1 :name "Updated"]])
-
-;; Retract single fact
-(d/transact! conn [[:db/retract 1 :name "Updated"]])
-
-;; Retract attribute (all values)
-(d/transact! conn [[:db.fn/retractAttribute 1 :name]])
-
-;; Retract entire entity
-(d/transact! conn [[:db.fn/retractEntity 1]])
-```
-
-### Transaction Report
-
-```clojure
-(let [report (d/transact! conn [{:name "Test" :age 99}])]
-  (:db-before report)  ;; DB value before tx
-  (:db-after report)   ;; DB value after tx
-  (:tx-data report)    ;; datoms added/retracted
-  (:tempids report))   ;; {-1 => 42} tempid resolution
-```
-
-### Async Transactions (High Throughput)
-
-```clojure
-;; Returns a future, batches automatically
-(d/transact-async conn [{:name "Fast" :age 1}])
-
-;; Block on the last one to ensure all committed
-(d/transact! conn [{:name "Last" :age 2}])
-```
-
-### With-Transaction (Multi-Step Atomic)
-
-```clojure
-(d/with-transaction [cn conn]
-  (let [result (d/q '[:find ?e . :where [?e :name "Alice"]] (d/db cn))]
-    (d/transact! cn [{:db/id result :age 32}])
-    ;; Can call (d/abort-transact (d/db cn)) to rollback
-    ))
-```
-
-## Connection Management (Seon)
-
-Seon uses a **client/server** architecture. The server runs in-process, agents connect as clients.
-
-### Key Files
-
-| File | Purpose |
-|------|---------|
-| `src/seon/db/datalevin/server.clj` | Datalevin server Integrant component |
-| `src/seon/db/datalevin/conn.clj` | Connection manager with TTL caching |
-| `src/seon/ai/datalevin.clj` | AI session/message persistence |
-| `src/seon/ctx.clj` | Unified context with Datalevin persistence |
-| `src/seon/render.clj` | Renderer resolution cache (Datalevin-backed) |
-| `src/seon/graph/ingest.clj` | Code index (scanner data into Datalevin) |
-| `src/seon/graph/query.clj` | Code index queries |
-
-### Getting Connections
-
-```clojure
-(require '[seon.db.datalevin.conn :as conn])
-
-;; From Integrant system
-(def mgr (:seon/connection-manager integrant.repl.state/system))
-
-;; Master database (orchestrator data)
-(def master-conn (conn/get-master-conn! {::conn/manager mgr}))
-
-;; Namespace database (agent-isolated)
-(def trading-conn (conn/get-namespace-conn! {::conn/manager mgr
-                                              ::conn/namespace 'seon.trading}))
-
-;; With schema
-(def typed-conn (conn/get-namespace-conn! {::conn/manager mgr
-                                            ::conn/namespace 'seon.trading
-                                            ::conn/schema my-schema}))
-
-;; Stats
-(conn/connection-stats {::conn/manager mgr})
-;; => {::conn/total-connections 3
-;;     ::conn/namespaces (:seon.trading :seon.health)
-;;     ::conn/master-connected? true}
-```
-
-### Database Naming
-
-- Master: `seon` (for cross-namespace data)
-- Per-namespace: `seon.{namespace}` (e.g., `seon.trading`, `seon.health`)
-- URIs: `dtlv://datalevin:datalevin@127.0.0.1:8898/seon.trading`
-
-### Connection Lifecycle
-
-- Connections are cached with TTL (default 5 min)
-- Expired connections are cleaned up by a background scheduler
-- On system shutdown, all connections are closed
-- Connections survive `(reset)` via Integrant suspend/resume
-
-## Seon Usage Patterns
-
-### Schemaless by Default
-
-Seon mostly uses Datalevin in schemaless mode. Attributes without schema definitions are stored as EDN blobs. This is fine for most use cases -- define schema only when you need unique identity, cardinality many, refs, or range queries.
-
-```clojure
-;; This works without schema -- :role stored as EDN blob
-(d/transact! conn [{:name "Alice" :role "admin" :metadata {:level 5}}])
-```
-
-### Namespaced Keys
-
-Seon uses fully-qualified namespaced keys throughout:
-
-```clojure
-(d/transact! conn [{:seon.ai/session-id "ses-abc"
-                     :seon.ai/status :running
-                     :seon.ai/created-at (java.time.Instant/now)}])
-
-(d/q '[:find ?id ?status
-        :where [?e :seon.ai/session-id ?id]
-               [?e :seon.ai/status ?status]]
-     (d/db conn))
-```
-
-### Logical IDs via Unique Identity
-
-When entities need stable lookup IDs (not integer entity IDs):
-
-```clojure
-(def schema {:seon.ai/session-id {:db/valueType :db.type/string
-                                    :db/unique :db.unique/identity}})
-
-;; Upsert by session-id
-(d/transact! conn [{:seon.ai/session-id "ses-abc"
-                     :seon.ai/status :completed}])
-
-;; Lookup by session-id
-(d/pull (d/db conn) '[*] [:seon.ai/session-id "ses-abc"])
-```
-
-## Performance Profile
-
-Based on LMDB characteristics and Datalevin benchmarks:
-
-### Write Throughput
-
-| Scale | Sync (default) | Async (`transact-async`) |
-|-------|----------------|--------------------------|
-| 1K entities | ~50-200ms | ~5-20ms |
-| 10K entities | ~500-2000ms | ~50-200ms |
-| 100K entities | ~5-20s | ~500ms-2s |
-
-Sync writes flush to disk on every transaction. Use `transact-async` for bulk loads. Manual batching compounds with auto-batching for even higher throughput.
-
-### Read Performance
-
-- **Point lookups** (entity/pull by ID): sub-millisecond
-- **Simple queries** (few clauses, small result): 1-5ms
-- **Scan queries** (age > X over 10K): 5-50ms
-- **Complex joins** over 100K: 50-500ms (cost-based optimizer helps)
-
-### Memory/Disk
-
-- LMDB memory-maps the database file -- read performance scales with OS page cache
-- Disk usage: ~2-5x raw data size (due to B+ tree overhead and indexes)
-- Two indexes by default: `:eav` and `:ave`
-
-### Optimization Tips
-
-- Batch inserts in single `transact!` call (not one entity per call)
-- Use `transact-async` for write-heavy workloads
-- Define schema with `:db/valueType` for attributes used in range queries
-- Use `d/count-datoms` instead of `(count (d/q ...))` when you only need counts
-- `(d/datalog-index-cache-limit db 0)` when bulk loading to save memory
-- Use `:nometasync` env flag for 5x write speedup (last tx may be lost on crash but DB stays intact)
-
-## Gotchas
-
-### Nil Values
-
-Datalevin does not store nil values. Transacting `{:name "Alice" :age nil}` silently drops the `:age` attribute. To "delete" an attribute, use `[:db/retract eid :attr value]`.
-
-### Schema Evolution
-
-- You can **add** new schema attributes any time via `d/update-schema`
-- You **cannot change** value types of existing attributes
-- Adding `:db/unique` to an existing attribute may fail if duplicates exist
-
-### Connection = Atom Wrapping DB
-
-A connection (`conn`) is an atom. To get the current database value, deref it: `@conn` or `(d/db conn)`. Queries take a **database value** (immutable snapshot), not a connection.
-
-```clojure
-;; CORRECT
-(d/q '[:find ?e :where [?e :name "Alice"]] (d/db conn))
-(d/q '[:find ?e :where [?e :name "Alice"]] @conn)
-
-;; WRONG -- passing connection directly
-(d/q '[:find ?e :where [?e :name "Alice"]] conn)
-```
-
-### Cardinality Many Behavior
-
-For `:db.cardinality/many` attributes, transacting a new value **adds** to the set (does not replace). To replace all values, retract first:
-
-```clojure
-;; Adds "rust" to existing tags, doesn't replace
-(d/transact! conn [{:db/id 1 :tags "rust"}])
-
-;; To replace: retract attribute then add
-(d/transact! conn [[:db.fn/retractAttribute 1 :tags]
-                    [:db/add 1 :tags "only-this"]])
-```
+The value does not match the registered schema. Check the type -- e.g., passing a string where `:int` is expected.
 
 ### Empty Query Results
 
 Common causes:
-1. **Wrong DB value** -- passing `conn` instead of `(d/db conn)` or `@conn`
-2. **Attribute typo** -- Datalevin is schemaless, so typos silently match nothing
-3. **Type mismatch** -- querying `:age 30` when it was stored as `30.0`
-4. **Stale snapshot** -- using a DB value from before the transaction
+1. **Wrong db-name** -- querying `:seon.runtime` but data is in `:seon.ai`
+2. **Attribute typo** -- Datalevin silently matches nothing on unknown attributes
+3. **Type mismatch** -- querying `:myns/count 30` when stored as `30.0`
+4. **Stale snapshot** -- reading before a transaction is flushed (rare in flow mode)
 
-### Server Mode Specifics
+### Nil Values
 
-- Default credentials: `datalevin:datalevin` (change in production)
-- Server port: 8898 (Seon default)
-- Database names are auto-kebab-cased by the server
-- Each client connection is lightweight but should be reused (connection manager handles this)
-
-### Large Values
-
-EDN blobs (untyped attributes) can store arbitrary Clojure data, including large maps and vectors. However, very large values (>1MB) may impact LMDB page usage. For large documents, consider splitting into multiple attributes or entities.
-
-### Concurrent Access
-
-- Multiple readers are fully concurrent (MVCC via LMDB)
-- Writes are serialized (one writer at a time)
-- Last write wins for concurrent writes to the same attribute
-- Read transactions see a consistent snapshot from when the read started
-
-## Schema Registration Details (Seon Bridge)
-
-`schema/register!` is the single source of truth. You register a Malli type, and the bridge auto-derives everything Datalevin needs. You never write Datalevin schema directly.
-
-### What the bridge auto-infers
-
-| You write | Bridge produces | You do |
-|-----------|----------------|--------|
-| `:string`, `:int`, `:keyword`, `:boolean`, `:double`, `:uuid`, `:symbol` | Correct Datalevin type | Nothing |
-| `:inst` | `:db.type/instant` | Nothing |
-| `[:enum :a :b]` | Type from enum values | Nothing |
-| `[:vector X]` / `[:set X]` | Cardinality-many | Nothing |
-| Nested `[:map ...]` | Ref + component entity | Nothing |
-| `:seon.db/ref` | `:db.type/ref` | Nothing |
-| `[:string {:seon.db/identity true}]` | `:db/unique :db.unique/identity` | Add property |
-| `[:string {:seon.db/unique true}]` | `:db/unique :db.unique/value` | Add property |
-
-### Persistence properties
-
-Only two. Both use the `:seon.db/` namespace (never bare `:db/`):
-
-| Property | Meaning | Example |
-|----------|---------|---------|
-| `:seon.db/identity` | This attr uniquely identifies entities (lookup refs work on it) | `[:string {:seon.db/identity true}]` |
-| `:seon.db/unique` | Values must be unique but this is not the identity attr | `[:string {:seon.db/unique true}]` |
-
-### Refs
+Datalevin drops nils silently. Transacting `{:myns/name nil}` does nothing. To remove an attribute, retract explicitly:
 
 ```clojure
-;; Register a ref attr — type is :seon.db/ref
-(schema/register! :seon.agent.run/runtime :seon.db/ref)
-
-;; Callers may pass lookup refs at transact time:
-(db/transact! :seon.runtime [{:seon.agent.run/id "run-1"
-                               :seon.agent.run/runtime [:seon.runtime/namespace "seon.foo"]}])
-;; Datalevin resolves the lookup ref to an entity ID automatically.
+(db/transact! :myns [[:db/retract eid :myns/name "old-value"]])
+;; Or retract all values for an attribute:
+(db/transact! :myns [[:db.fn/retractAttribute eid :myns/name]])
 ```
 
-### Banned types (rejected at registration)
+### Schema Evolution
 
-The following are rejected by `validate-persisted-schemas!` at startup: `:any`, `:some`, `:nil`, `[:maybe X]`, and mixed-type enums (e.g. `[:enum :a "b"]`). Use `{:optional true}` instead of `[:maybe X]`.
+- Add new attributes any time (auto-derived on first transact).
+- Cannot change value types of existing attributes.
+- Adding uniqueness to an existing attribute fails if duplicates exist.
 
-### Where to Learn More
+### Cardinality-Many
 
-| Topic | Document |
-|-------|----------|
-| Full type mapping table | `docs/prds/schema-unification/design.md` |
-| Serialization research (Nippy) | `docs/prds/schema-unification/research/serialization-findings.md` |
-| Nil semantics research | `docs/prds/schema-unification/research/nil-semantics-findings.md` |
-| API patterns, function contracts | `CONVENTIONS.md` |
+For `[:vector X]` / `[:set X]` attributes, transacting a new value **adds** to the set. To replace, retract first:
+
+```clojure
+(db/transact! :myns [[:db.fn/retractAttribute eid :myns/tags]
+                      {:db/id eid :myns/tags :new-tag}])
+```
+
+### Schema Load Ordering
+
+In a source file, `register!` calls must appear **before** entity schema defs that reference them. The bridge throws a clear error if a schema reference cannot be resolved.
+
+## Testing
+
+Bind `db/*direct-mode*` to bypass the infrastructure flow in tests:
+
+```clojure
+(binding [db/*direct-mode* true
+          db/*conn-manager* fake-manager]
+  (db/transact! :myns [{:myns/name "test"}])
+  (db/query :myns '[:find ?n . :where [_ :myns/name ?n]]))
+```
+
+See `test/seon/test_utils.clj` for `with-temp-conn` and `with-test-datalevin` helpers. See `/clojure-testing` skill for fixtures and patterns.
+
+## Key Files
+
+| File | Purpose |
+|------|---------|
+| `src/seon/db.clj` | Public database API (transact!, query, pull-by-name, etc.) |
+| `src/seon/schema.clj` | Schema registration (register!, registered?, schema-definition) |
+| `src/seon/db/schema.clj` | Malli-to-Datalevin bridge (malli-map->datalevin-schema) |
+| `src/seon/db/datalevin/writer.clj` | Flow writer process (serialized writes) |
+| `src/seon/db/datalevin/reader.clj` | Flow reader process (serialized reads) |
+| `src/seon/db/datalevin/server.clj` | Datalevin server Integrant component |
+| `src/seon/db/datalevin/conn.clj` | Connection manager (internal -- do not use directly) |
+| `src/seon/graph/ingest.clj` | Code graph ingestion into Datalevin |
+| `src/seon/graph/query.clj` | Code graph queries |
+| `test/seon/test_utils.clj` | Test helpers (with-temp-conn, with-test-datalevin) |
+
+## When to Read References
+
+- `references/querying.md` -- aggregates, order/limit, rules, index lookups, performance tips
+- `references/datalevin-internals.md` -- raw Datalevin API, EAV model, schema format, connection model, debugging
