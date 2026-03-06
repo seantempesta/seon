@@ -74,6 +74,9 @@
 (def ^:const max-respawns-per-minute
   "Rate limit: max respawns across all slots per minute.
    Prevents port exhaustion from crash loops." 6)
+(def ^:const max-spawn-retries
+  "Max port allocation retries per spawn attempt.
+   Each retry picks a fresh port when the previous one fails." 3)
 
 (declare port-bound?)
 
@@ -255,10 +258,18 @@
     (format "dtlv://datalevin:datalevin@127.0.0.1:%d/agent-%d"
             datalevin-port agent-port)))
 
+(defn- unreserve-port!
+  "Remove a port from the reserved-ports set in pool state.
+   Called after spawn completes (success or failure)."
+  [pool-state port]
+  (swap! pool-state update ::reserved-ports disj port))
+
 (defn- allocate-port!
   "Atomically allocate the next available port from the pool.
-   Skips ports that are already occupied. Uses swap-vals! to ensure
-   two concurrent callers never get the same port."
+   Skips ports that are already tracked in ::all-jvms (running),
+   in ::reserved-ports (in-flight spawn), or TCP-bound.
+   Adds the port to ::reserved-ports before returning.
+   Uses swap-vals! to ensure two concurrent callers never get the same port."
   [pool-state]
   (loop [attempts 0]
     (when (>= attempts 100)
@@ -268,48 +279,63 @@
                                     #(let [p (inc %)]
                                        (if (> p agent-port-max) agent-port-min p)))
           port (::next-port old-state)]
-      (if (not (port-bound? port))
-        port
-        (recur (inc attempts))))))
+      (if (or (contains? (::all-jvms old-state) port)
+              (contains? (::reserved-ports old-state) port)
+              (port-bound? port))
+        (recur (inc attempts))
+        (do
+          (swap! pool-state update ::reserved-ports conj port)
+          port)))))
+
+(defn- complete-warmup!
+  "Decrement remaining-warmup counter and finalize pool warming when it reaches zero."
+  [remaining-warmup pool-state ^LinkedBlockingQueue idle-queue]
+  (when remaining-warmup
+    (let [remaining (swap! remaining-warmup dec)]
+      (when (zero? remaining)
+        (swap! pool-state assoc ::warming? false)
+        (log/info "Pool ready" {:idle (.size idle-queue)
+                                 :total (count (::all-jvms @pool-state))})))))
 
 (defn- spawn-and-enqueue!
   "Spawn a new agent JVM and add it to the pool. Returns the JVM map on success,
-   nil on failure. Thread-safe -- called from background futures.
+   nil on failure. Retries up to max-spawn-retries times with a different port
+   on each attempt. Thread-safe -- called from background futures.
 
    When `remaining-warmup` atom is provided (during initial pool creation),
    decrements it after enqueuing. When it reaches zero, sets ::warming? false
    on the pool state and logs that the pool is ready."
   [pool-state ^LinkedBlockingQueue idle-queue datalevin-port
    & {:keys [remaining-warmup]}]
-  (let [port (allocate-port! pool-state)]
-    (try
-      (let [uri (build-datalevin-uri datalevin-port port)
-            jvm (spawn-agent-jvm! port :datalevin-uri uri)]
-        ;; Track in all-jvms map
-        (swap! pool-state assoc-in [::all-jvms port] jvm)
-        ;; Add to idle queue
-        (.put idle-queue jvm)
-        (log/debug "JVM spawned and enqueued" {:port port})
-        ;; Track warmup completion
-        (when remaining-warmup
-          (let [remaining (swap! remaining-warmup dec)]
-            (when (zero? remaining)
-              (swap! pool-state assoc ::warming? false)
-              (log/info "Pool ready" {:idle (.size idle-queue)
-                                       :total (count (::all-jvms @pool-state))}))))
-        jvm)
-      (catch Exception e
-        (log/error "Failed to spawn agent JVM"
-                   {:port port :error (.getMessage e)})
-        ;; Still decrement remaining on failure so warming eventually completes
-        (when remaining-warmup
-          (let [remaining (swap! remaining-warmup dec)]
-            (when (zero? remaining)
-              (swap! pool-state assoc ::warming? false)
-              (log/info "Pool ready (some JVMs failed to spawn)"
-                        {:idle (.size idle-queue)
-                         :total (count (::all-jvms @pool-state))}))))
-        nil))))
+  (loop [attempt 0]
+    (if (>= attempt max-spawn-retries)
+      (do
+        (log/error "All spawn retries exhausted" {:attempts max-spawn-retries})
+        (complete-warmup! remaining-warmup pool-state idle-queue)
+        nil)
+      (let [port (allocate-port! pool-state)]
+        (let [result (try
+                       (let [uri (build-datalevin-uri datalevin-port port)
+                             jvm (spawn-agent-jvm! port :datalevin-uri uri)]
+                         ;; Unreserve port now that it's tracked in all-jvms
+                         (unreserve-port! pool-state port)
+                         ;; Track in all-jvms map
+                         (swap! pool-state assoc-in [::all-jvms port] jvm)
+                         ;; Add to idle queue
+                         (.put idle-queue jvm)
+                         (log/debug "JVM spawned and enqueued" {:port port})
+                         ;; Track warmup completion
+                         (complete-warmup! remaining-warmup pool-state idle-queue)
+                         jvm)
+                       (catch Exception e
+                         (log/error "Failed to spawn agent JVM"
+                                    {:port port :attempt (inc attempt) :error (.getMessage e)})
+                         ;; Unreserve the failed port so it can be reused later
+                         (unreserve-port! pool-state port)
+                         ::retry))]
+          (if (= result ::retry)
+            (recur (inc attempt))
+            result))))))
 
 (defn- recent-spawn-count
   "Count spawns within the last 60 seconds from the spawn-timestamps deque."
@@ -495,9 +521,19 @@
                          (when (port-bound? port)
                            (log/warn "Port still bound after kill" {:port port :pid pid}))
                          (conj acc {:port port :pid pid}))
+                       ;; Retry lsof after 200ms — process may still be binding
                        (do
-                         (log/warn "Port bound but no PID found" {:port port})
-                         acc))
+                         (Thread/sleep 200)
+                         (if-let [pid-retry (find-pid-on-port port)]
+                           (do
+                             (kill-pid! pid-retry)
+                             (Thread/sleep 100)
+                             (when (port-bound? port)
+                               (log/warn "Port still bound after kill (retry)" {:port port :pid pid-retry}))
+                             (conj acc {:port port :pid pid-retry}))
+                           (do
+                             (log/info "Port bound but no PID found" {:port port})
+                             acc))))
                      acc))
                  []
                  ports)]
@@ -540,6 +576,7 @@
   (cleanup-stale-agents!)
   (let [idle-queue (LinkedBlockingQueue.)
         pool-state (atom {::all-jvms {}
+                          ::reserved-ports #{}
                           ::session->port {}
                           ::target-size size
                           ::next-port base-port
