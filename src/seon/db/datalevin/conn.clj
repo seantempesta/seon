@@ -39,7 +39,8 @@
    Database names are converted to kebab-case by Datalevin server."
   (:require [integrant.core :as ig]
             [seon.schema :as schema]
-            [taoensso.timbre :as log]))
+            [taoensso.timbre :as log])
+  (:import [java.util.concurrent ConcurrentHashMap]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schema Registration
@@ -132,6 +133,17 @@
 ;;; Connection Management (Internal)
 ;;; ---------------------------------------------------------------------------
 
+(defonce ^:private ^ConcurrentHashMap db-locks
+  (ConcurrentHashMap.))
+
+(defn- db-lock
+  "Get or create a lock object for a given db-name.
+   Uses ConcurrentHashMap to ensure exactly one lock per db-name."
+  ^Object [^String db-name]
+  (.computeIfAbsent db-locks db-name
+                    (reify java.util.function.Function
+                      (apply [_ _k] (Object.)))))
+
 (defn- get-datalevin-conn
   "Get a Datalevin connection, creating the database if needed.
 
@@ -196,36 +208,67 @@
 (defn- get-or-create-connection!
   "Get an existing connection or create a new one.
 
-   Thread-safe: uses swap! with compare-and-set semantics.
-   On connection error, marks entry as stale and throws."
+   Thread-safe: uses per-DB locking to ensure only one thread creates a
+   connection for a given database name. The lock is held during d/get-conn
+   (which triggers server-side open-kv on first access). Without this,
+   concurrent first-opens corrupt LMDB state on the server.
+
+   Fast path (no lock): returns cached connection if valid.
+   Slow path (locked): creates connection, caches it, returns it."
   [manager ns-key db-name schema]
   (let [connections (::connections manager)]
-    ;; First, try to get existing connection
+    ;; Fast path: check cache without locking
     (if-let [entry (get @connections ns-key)]
       (if (connection-closed? (::connection entry))
-        ;; Connection is closed, need to create new one
-        (try
-          (let [new-conn (get-datalevin-conn manager db-name schema)]
-            (swap! connections assoc ns-key
-                   {::connection new-conn})
-            new-conn)
-          (catch Exception e
-            (when (connection-error? e)
-              (log/warn "Server unreachable while reconnecting" {:db db-name :error (.getMessage e)})
-              (swap! connections dissoc ns-key))
-            (throw e)))
+        ;; Connection is closed, fall through to locked creation
+        (locking (db-lock db-name)
+          ;; Double-check after acquiring lock — another thread may have reconnected
+          (if-let [entry (get @connections ns-key)]
+            (if (connection-closed? (::connection entry))
+              (try
+                (let [new-conn (get-datalevin-conn manager db-name schema)]
+                  (swap! connections assoc ns-key {::connection new-conn})
+                  new-conn)
+                (catch Exception e
+                  (when (connection-error? e)
+                    (log/warn "Server unreachable while reconnecting" {:db db-name :error (.getMessage e)})
+                    (swap! connections dissoc ns-key))
+                  (throw e)))
+              (::connection entry))
+            ;; Entry was removed between checks, create fresh
+            (try
+              (let [new-conn (get-datalevin-conn manager db-name schema)]
+                (swap! connections assoc ns-key {::connection new-conn})
+                new-conn)
+              (catch Exception e
+                (when (connection-error? e)
+                  (log/warn "Server unreachable during reconnection" {:db db-name :error (.getMessage e)}))
+                (throw e)))))
         ;; Connection is still valid, return it
         (::connection entry))
-      ;; No existing connection, create new one
-      (try
-        (let [new-conn (get-datalevin-conn manager db-name schema)]
-          (swap! connections assoc ns-key
-                 {::connection new-conn})
-          new-conn)
-        (catch Exception e
-          (when (connection-error? e)
-            (log/warn "Server unreachable during initial connection" {:db db-name :error (.getMessage e)}))
-          (throw e))))))
+      ;; No existing connection — acquire per-DB lock and create
+      (locking (db-lock db-name)
+        ;; Double-check after acquiring lock — another thread may have created it
+        (if-let [entry (get @connections ns-key)]
+          (if (connection-closed? (::connection entry))
+            (try
+              (let [new-conn (get-datalevin-conn manager db-name schema)]
+                (swap! connections assoc ns-key {::connection new-conn})
+                new-conn)
+              (catch Exception e
+                (when (connection-error? e)
+                  (log/warn "Server unreachable while reconnecting" {:db db-name :error (.getMessage e)})
+                  (swap! connections dissoc ns-key))
+                (throw e)))
+            (::connection entry))
+          (try
+            (let [new-conn (get-datalevin-conn manager db-name schema)]
+              (swap! connections assoc ns-key {::connection new-conn})
+              new-conn)
+            (catch Exception e
+              (when (connection-error? e)
+                (log/warn "Server unreachable during initial connection" {:db db-name :error (.getMessage e)}))
+              (throw e))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Public API

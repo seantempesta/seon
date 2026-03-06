@@ -418,13 +418,11 @@
         (let [closed ((requiring-resolve 'seon.db.datalevin.conn/close-all-connections!)
                       {:seon.db.datalevin.conn/manager conn-mgr})]
           (println (str "  Closed " closed " connections"))))
-      ;; Step 2: Stop the server process
+      ;; Step 2: Stop the server process (synchronous — waits for process exit)
       (println (str "Stopping Datalevin server (port " old-port
                     ", adopted=" old-adopted? ")..."))
       (ig/halt-key! :seon.db.datalevin/server server-state)
-      ;; Step 3: Wait for LMDB to fully sync and release files
-      (Thread/sleep 2000)
-      ;; Step 4: Start fresh server
+      ;; Step 3: Start fresh server
       (println "Starting Datalevin server...")
       (let [cfg (config/system-config {:profile :dev})
             opts (:seon.db.datalevin/server cfg)
@@ -442,8 +440,6 @@
   []
   (println "Stopping system (including Datalevin server)...")
   (halt)
-  ;; Give Datalevin process time to fully shut down and release LMDB files
-  (Thread/sleep 2000)
   (println "Deleting data directories...")
   (doseq [dir-name ["data/datalevin"]]
     (let [data-dir (io/file dir-name)]

@@ -70,3 +70,9 @@
 [submodule "reference-code/fressian"]
 	path = reference-code/fressian
 	url = https://github.com/Datomic/fressian.git
+[submodule "reference-code/test.check"]
+	path = reference-code/test.check
+	url = https://github.com/clojure/test.check.git
+[submodule "reference-code/expectations"]
+	path = reference-code/expectations
+	url = https://github.com/clojure-expectations/expectations.git

@@ -17,9 +17,6 @@
 ;;; Schema Registration
 ;;; ---------------------------------------------------------------------------
 
-(schema/register! ::conn
-                  [:fn {:description "Datalevin connection"} some?])
-
 (schema/register! ::db-name
                   [:string {:min 1 :description "Database name for logging"}])
 
@@ -130,133 +127,95 @@
            payload    (::msg/payload request)
            tx-data    (::tx-data payload)
            db-name    (::db-name payload)
-           raw-conn   (::conn payload)
            cm         (::connection-manager state)
-           t0         (System/nanoTime)]
-       (let [db-label (or db-name "direct-conn")
-             tx-count (count tx-data)]
-         (log/debug "Writer processing" {:db db-label :tx-count tx-count :request-id request-id})
-         (if raw-conn
-           ;; Deprecated path: raw conn provided, no caching, no retry
-           (try
-             (let [_tx-report (transact-with-timeout! raw-conn tx-data db-label)
-                   elapsed-ms (long (/ (- (System/nanoTime) t0) 1e6))
-                   now (Instant/now)
-                   reply {::msg/id request-id
-                          ::msg/version 1
-                          ::msg/type :reply
-                          ::msg/status :ok
-                          ::msg/value {:db-name db-label}
-                          ::msg/from-ns "seon.db.writer"
-                          ::msg/duration-ms elapsed-ms}]
-               (when (> elapsed-ms 1000)
-                 (log/warn "Slow write" {:db db-label :elapsed-ms elapsed-ms :tx-count tx-count}))
-               [(-> state
-                    (update ::total-writes inc)
-                    (assoc ::last-write-at now))
-                {:seon.flow.out/reply [reply]}])
-             (catch Exception e
-               (let [elapsed-ms (long (/ (- (System/nanoTime) t0) 1e6))
-                     error-reply {::msg/id request-id
-                                  ::msg/version 1
-                                  ::msg/type :reply
-                                  ::msg/status :error
-                                  ::msg/error-type :execution
-                                  ::msg/error-class (.getName (class e))
-                                  ::msg/error-message (.getMessage e)
-                                  ::msg/from-ns "seon.db.writer"
-                                  ::msg/duration-ms elapsed-ms}]
-                 (log/error e "Write failed" {:db db-label :tx-count tx-count
-                                              :elapsed-ms elapsed-ms :request-id request-id})
-                 [(update state ::total-errors inc)
-                  {:seon.flow.out/reply [error-reply]
-                   :seon.flow.out/error [error-reply]}])))
-           ;; Managed path: owned connections with retry
-           (let [db-kw     (keyword db-name)
-                 owned     (::owned-conns state)
-                 [conn new?] (if-let [c (get owned db-kw)]
-                               [c false]
-                               (let [c (dl-conn/get-conn! {::dl-conn/manager cm
-                                                           ::dl-conn/db db-kw})]
-                                 (log/info "Writer acquired connection" {:db db-label})
-                                 [c true]))
-                 state     (if new?
-                             (assoc-in state [::owned-conns db-kw] conn)
-                             state)]
-             (try
-               (let [_tx-report (transact-with-timeout! conn tx-data db-label)
-                     elapsed-ms (long (/ (- (System/nanoTime) t0) 1e6))
-                     now (Instant/now)
-                     reply {::msg/id request-id
-                            ::msg/version 1
-                            ::msg/type :reply
-                            ::msg/status :ok
-                            ::msg/value {:db-name db-label}
-                            ::msg/from-ns "seon.db.writer"
-                            ::msg/duration-ms elapsed-ms}]
-                 (when (> elapsed-ms 1000)
-                   (log/warn "Slow write" {:db db-label :elapsed-ms elapsed-ms :tx-count tx-count}))
-                 [(-> state
-                      (update ::total-writes inc)
-                      (assoc ::last-write-at now))
-                  {:seon.flow.out/reply [reply]}])
-               (catch Exception e
-                 (if (dl-conn/connection-error? e)
-                   ;; Retry once with fresh connection
-                   (do
-                     (log/warn "Writer reconnecting" {:db db-label :error (.getMessage e)})
-                     (try (d/close conn) (catch Exception _))
-                     (let [state (update state ::owned-conns dissoc db-kw)]
-                       (try
-                         (let [fresh (dl-conn/get-conn! {::dl-conn/manager cm
-                                                         ::dl-conn/db db-kw})
-                               _tx-report (transact-with-timeout! fresh tx-data db-label)
-                               elapsed-ms (long (/ (- (System/nanoTime) t0) 1e6))
-                               now (Instant/now)
-                               reply {::msg/id request-id
-                                      ::msg/version 1
-                                      ::msg/type :reply
-                                      ::msg/status :ok
-                                      ::msg/value {:db-name db-label}
-                                      ::msg/from-ns "seon.db.writer"
-                                      ::msg/duration-ms elapsed-ms}]
-                           (log/info "Writer acquired connection" {:db db-label})
-                           [(-> state
-                                (assoc-in [::owned-conns db-kw] fresh)
-                                (update ::total-writes inc)
-                                (assoc ::last-write-at now))
-                            {:seon.flow.out/reply [reply]}])
-                         (catch Exception e2
-                           (let [elapsed-ms (long (/ (- (System/nanoTime) t0) 1e6))
-                                 error-reply {::msg/id request-id
-                                              ::msg/version 1
-                                              ::msg/type :reply
-                                              ::msg/status :error
-                                              ::msg/error-type :execution
-                                              ::msg/error-class (.getName (class e2))
-                                              ::msg/error-message (.getMessage e2)
-                                              ::msg/from-ns "seon.db.writer"
-                                              ::msg/duration-ms elapsed-ms}]
-                             (log/error e2 "Write failed after retry" {:db db-label :request-id request-id})
-                             [(update state ::total-errors inc)
-                              {:seon.flow.out/reply [error-reply]
-                               :seon.flow.out/error [error-reply]}])))))
-                   ;; Non-connection error, no retry
-                   (let [elapsed-ms (long (/ (- (System/nanoTime) t0) 1e6))
-                         error-reply {::msg/id request-id
-                                      ::msg/version 1
-                                      ::msg/type :reply
-                                      ::msg/status :error
-                                      ::msg/error-type :execution
-                                      ::msg/error-class (.getName (class e))
-                                      ::msg/error-message (.getMessage e)
-                                      ::msg/from-ns "seon.db.writer"
-                                      ::msg/duration-ms elapsed-ms}]
-                     (log/error e "Write failed" {:db db-label :tx-count tx-count
-                                                  :elapsed-ms elapsed-ms :request-id request-id})
-                     [(update state ::total-errors inc)
-                      {:seon.flow.out/reply [error-reply]
-                       :seon.flow.out/error [error-reply]}]))))))))
+           t0         (System/nanoTime)
+           tx-count   (count tx-data)
+           db-kw      (keyword db-name)
+           owned      (::owned-conns state)
+           [conn new?] (if-let [c (get owned db-kw)]
+                         [c false]
+                         (let [c (dl-conn/get-conn! {::dl-conn/manager cm
+                                                     ::dl-conn/db db-kw})]
+                           (log/info "Writer acquired connection" {:db db-name})
+                           [c true]))
+           state      (if new?
+                        (assoc-in state [::owned-conns db-kw] conn)
+                        state)]
+       (log/debug "Writer processing" {:db db-name :tx-count tx-count :request-id request-id})
+       (try
+         (let [_tx-report (transact-with-timeout! conn tx-data db-name)
+               elapsed-ms (long (/ (- (System/nanoTime) t0) 1e6))
+               now (Instant/now)
+               reply {::msg/id request-id
+                      ::msg/version 1
+                      ::msg/type :reply
+                      ::msg/status :ok
+                      ::msg/value {:db-name db-name}
+                      ::msg/from-ns "seon.db.writer"
+                      ::msg/duration-ms elapsed-ms}]
+           (when (> elapsed-ms 1000)
+             (log/warn "Slow write" {:db db-name :elapsed-ms elapsed-ms :tx-count tx-count}))
+           [(-> state
+                (update ::total-writes inc)
+                (assoc ::last-write-at now))
+            {:seon.flow.out/reply [reply]}])
+         (catch Exception e
+           (if (dl-conn/connection-error? e)
+             ;; Retry once with fresh connection
+             (do
+               (log/warn "Writer reconnecting" {:db db-name :error (.getMessage e)})
+               (try (d/close conn) (catch Exception _))
+               (let [state (update state ::owned-conns dissoc db-kw)]
+                 (try
+                   (let [fresh (dl-conn/get-conn! {::dl-conn/manager cm
+                                                   ::dl-conn/db db-kw})
+                         _tx-report (transact-with-timeout! fresh tx-data db-name)
+                         elapsed-ms (long (/ (- (System/nanoTime) t0) 1e6))
+                         now (Instant/now)
+                         reply {::msg/id request-id
+                                ::msg/version 1
+                                ::msg/type :reply
+                                ::msg/status :ok
+                                ::msg/value {:db-name db-name}
+                                ::msg/from-ns "seon.db.writer"
+                                ::msg/duration-ms elapsed-ms}]
+                     (log/info "Writer acquired connection" {:db db-name})
+                     [(-> state
+                          (assoc-in [::owned-conns db-kw] fresh)
+                          (update ::total-writes inc)
+                          (assoc ::last-write-at now))
+                      {:seon.flow.out/reply [reply]}])
+                   (catch Exception e2
+                     (let [elapsed-ms (long (/ (- (System/nanoTime) t0) 1e6))
+                           error-reply {::msg/id request-id
+                                        ::msg/version 1
+                                        ::msg/type :reply
+                                        ::msg/status :error
+                                        ::msg/error-type :execution
+                                        ::msg/error-class (.getName (class e2))
+                                        ::msg/error-message (.getMessage e2)
+                                        ::msg/from-ns "seon.db.writer"
+                                        ::msg/duration-ms elapsed-ms}]
+                       (log/error e2 "Write failed after retry" {:db db-name :request-id request-id})
+                       [(update state ::total-errors inc)
+                        {:seon.flow.out/reply [error-reply]
+                         :seon.flow.out/error [error-reply]}])))))
+             ;; Non-connection error, no retry
+             (let [elapsed-ms (long (/ (- (System/nanoTime) t0) 1e6))
+                   error-reply {::msg/id request-id
+                                ::msg/version 1
+                                ::msg/type :reply
+                                ::msg/status :error
+                                ::msg/error-type :execution
+                                ::msg/error-class (.getName (class e))
+                                ::msg/error-message (.getMessage e)
+                                ::msg/from-ns "seon.db.writer"
+                                ::msg/duration-ms elapsed-ms}]
+               (log/error e "Write failed" {:db db-name :tx-count tx-count
+                                            :elapsed-ms elapsed-ms :request-id request-id})
+               [(update state ::total-errors inc)
+                {:seon.flow.out/reply [error-reply]
+                 :seon.flow.out/error [error-reply]}])))))
 
      ;; unknown input
      [state nil])))
