@@ -171,7 +171,6 @@
 (defonce stats-atom
   (atom {::write-count 0
          ::error-count 0
-         ::last-write-at nil
          ::session-writes 0
          ::message-writes 0}))
 
@@ -197,7 +196,6 @@
   []
   (reset! stats-atom {::write-count 0
                       ::error-count 0
-                      ::last-write-at nil
                       ::session-writes 0
                       ::message-writes 0}))
 

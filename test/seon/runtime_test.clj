@@ -313,6 +313,54 @@
       (is (inst? (::runtime/stopped-at inst))))))
 
 ;;; ---------------------------------------------------------------------------
+;;; Cleanup Stale Tests
+;;; ---------------------------------------------------------------------------
+
+(deftest cleanup-stale-test
+  (testing "cleanup-stale! retracts entities missing required fields"
+    ;; Insert a stale entity directly (missing :location)
+    (db/transact! :seon.runtime [{:seon.runtime/namespace "stale.ns"
+                                  :seon.runtime/status :running}])
+    ;; Insert a valid entity
+    (db/transact! :seon.runtime [{:seon.runtime/namespace "valid.ns"
+                                  :seon.runtime/status :running
+                                  :seon.runtime/location :in-process}])
+
+    (let [{::runtime/keys [cleaned-count]} (runtime/cleanup-stale! {})]
+      (is (= 1 cleaned-count)))
+
+    ;; Stale entity should be gone
+    (let [results (db/query :seon.runtime
+                            '[:find ?ns
+                              :where [?e :seon.runtime/namespace ?ns]])]
+      (is (= #{["valid.ns"]} results))))
+
+  (testing "cleanup-stale! returns 0 when no stale entities"
+    (let [{::runtime/keys [cleaned-count]} (runtime/cleanup-stale! {})]
+      (is (= 0 cleaned-count)))))
+
+(deftest hydrate-cache-skips-stale-test
+  (testing "hydrate-cache! filters out stale entities even if cleanup fails"
+    ;; Register a valid instance
+    (runtime/register! {::runtime/namespace "good.ns"
+                        ::runtime/status :running
+                        ::runtime/location :in-process})
+
+    ;; Insert a stale entity directly (missing :location)
+    (db/transact! :seon.runtime [{:seon.runtime/namespace "bad.ns"
+                                  :seon.runtime/status :crashed}])
+
+    ;; Reset cache and hydrate
+    (runtime/reset-registry! {})
+    (let [{::runtime/keys [hydrated-count]} (runtime/hydrate-cache! {})]
+      ;; Should only hydrate the valid entity (stale one gets cleaned + filtered)
+      (is (= 1 hydrated-count)))
+
+    ;; Only valid entity in cache
+    (is (some? (runtime/instance {::runtime/namespace "good.ns"})))
+    (is (nil? (runtime/instance {::runtime/namespace "bad.ns"})))))
+
+;;; ---------------------------------------------------------------------------
 ;;; Reset Tests
 ;;; ---------------------------------------------------------------------------
 

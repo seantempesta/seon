@@ -91,8 +91,9 @@
   [schema]
   (let [props (m/properties schema)]
     (cond-> {}
-      (:seon.db/identity props) (assoc :db/unique :db.unique/identity)
-      (:seon.db/unique props)   (assoc :db/unique :db.unique/value))))
+      (:seon.db/identity props)   (assoc :db/unique :db.unique/identity)
+      (:seon.db/unique props)     (assoc :db/unique :db.unique/value)
+      (:seon.db/value-type props) (assoc :db/valueType (:seon.db/value-type props)))))
 
 (defn- schema->datalevin-attr
   "Convert a single Malli entry schema to [attr-map nested-schemas].
@@ -102,7 +103,7 @@
         seon-props (seon-db-props->db-props child-schema)]
     (case schema-type
       (:string :int :double :float :boolean :keyword :symbol :uuid :inst
-       string? int? double? float? boolean? keyword? symbol? uuid? inst?)
+               string? int? double? float? boolean? keyword? symbol? uuid? inst?)
       [(when-let [dt (malli-type->datalevin-type schema-type)]
          (merge {:db/valueType dt} seon-props)) nil]
 
@@ -128,6 +129,10 @@
 
       :seon.db/ref
       [(merge {:db/valueType :db.type/ref} seon-props) nil]
+
+      :or
+      (let [or-props (seon-db-props->db-props child-schema)]
+        [(not-empty or-props) nil])
 
       :malli.core/schema
       (let [[attr nested] (schema->datalevin-attr (m/deref child-schema))]
@@ -305,9 +310,9 @@
                            (count all-violations) " violation(s) in "
                            schema-count " persisted schemas.\n"
                            (str/join "\n"
-                             (map (fn [{:keys [schema-name attr violation message]}]
-                                    (str "  [" schema-name "] " attr " -- " violation ": " message))
-                                  all-violations)))
+                                     (map (fn [{:keys [schema-name attr violation message]}]
+                                            (str "  [" schema-name "] " attr " -- " violation ": " message))
+                                          all-violations)))
                       {:violations all-violations
                        :schema-count schema-count}))
       (do (log/info "Schema consistency check passed"
