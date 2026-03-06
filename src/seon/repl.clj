@@ -54,7 +54,8 @@
 ;;; ---------------------------------------------------------------------------
 
 (schema/register! :form/id
-                  [:uuid {:description "Unique form identifier"}])
+                  [:uuid {:description "Unique form identifier"
+                          :seon.db/identity true}])
 (schema/register! :form/namespace
                   [:string {:min 1 :description "Namespace the form belongs to"}])
 (schema/register! :form/type

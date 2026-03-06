@@ -93,6 +93,9 @@
 (schema/register! ::hydrated-count
                   [:int {:min 0 :description "Number of hydrated instances"}])
 
+(schema/register! ::cleaned-count
+                  [:int {:min 0 :description "Number of stale entities cleaned up"}])
+
 ;;; Request/Response Schemas
 
 (schema/register! ::generate-id-request
@@ -153,6 +156,13 @@
 (schema/register! ::mark-crashed-response
                   [:map
                    [::crashed-count ::crashed-count]])
+
+(schema/register! ::cleanup-stale-request
+                  [:map])
+
+(schema/register! ::cleanup-stale-response
+                  [:map
+                   [::cleaned-count ::cleaned-count]])
 
 (schema/register! ::hydrate-cache-request
                   [:map])
@@ -549,12 +559,46 @@
                {}
                entity)))
 
+(defn- stale-entity?
+  "Returns true if a runtime entity is missing required fields.
+   Stale entities are legacy data from before :seon.db/identity was added."
+  [entity]
+  (not (and (:seon.runtime/namespace entity)
+            (:seon.runtime/status entity)
+            (:seon.runtime/location entity))))
+
+(defn cleanup-stale!
+  "Retract runtime entities missing required fields (legacy data from before
+   :seon.db/identity was added). Called during hydration to prevent stale
+   entities from polluting the cache and failing schema validation.
+
+   Request keys:
+     (none - empty map for consistency)
+
+   Response keys:
+     ::cleaned-count - Number of stale entities retracted"
+  {:malli/schema [:=> [:cat ::cleanup-stale-request] ::cleanup-stale-response]}
+  [_request]
+  (try
+    (let [all-entities (db/query :seon.runtime
+                                 '[:find ?e (pull ?e [*])
+                                   :where [?e :seon.runtime/namespace _]])
+          stale (filter (fn [[_eid entity]] (stale-entity? entity)) all-entities)
+          retract-tx (mapv (fn [[eid _]] [:db/retractEntity eid]) stale)]
+      (when (seq retract-tx)
+        (db/transact! :seon.runtime retract-tx)
+        (log/info "Cleaned up stale runtime entities" {:count (count retract-tx)}))
+      {::cleaned-count (count retract-tx)})
+    (catch Exception e
+      (log/warn "Failed to clean up stale runtime entities" {:error (.getMessage e)})
+      {::cleaned-count 0})))
+
 (defn hydrate-cache!
   "Load all runtime instances from Datalevin into the in-memory cache.
 
-   Called after mark-crashed! to populate the cache with persisted state.
-   This ensures the cache reflects what Datalevin knows (e.g. crashed
-   instances from a previous run).
+   First cleans up stale entities missing required fields, then populates
+   the cache. Called after mark-crashed! to reflect persisted state (e.g.
+   crashed instances from a previous run).
 
    Request keys:
      (none - empty map for consistency)
@@ -564,16 +608,25 @@
   {:malli/schema [:=> [:cat ::hydrate-cache-request] ::hydrate-cache-response]}
   [_request]
   (try
+    ;; Clean up legacy entities missing required fields
+    (cleanup-stale! {})
     (let [results (db/query :seon.runtime
                             '[:find (pull ?e [*])
                               :where
                               [?e :seon.runtime/namespace _]])
-          instances (map first results)
+          all-entities (map first results)
+          ;; Defensive filter: skip any entity still missing required fields
+          ;; (e.g. if cleanup-stale! failed or a race produced new stale data)
+          valid-entities (filter (complement stale-entity?) all-entities)
+          skipped (- (count all-entities) (count valid-entities))
           cache-map (reduce (fn [m entity]
                               (let [inst (datalevin->cache entity)]
                                 (assoc m (::namespace inst) inst)))
                             {}
-                            instances)]
+                            valid-entities)]
+      (when (pos? skipped)
+        (log/warn "Skipped stale runtime entities missing required fields"
+                  {:skipped skipped}))
       (reset! registry-cache cache-map)
       (log/info "Hydrated runtime cache" {:count (count cache-map)})
       {::hydrated-count (count cache-map)})

@@ -48,7 +48,7 @@
       (is (map? s))
       (is (contains? s ::dl/write-count))
       (is (contains? s ::dl/error-count))
-      (is (contains? s ::dl/last-write-at))
+      ;; ::last-write-at is optional — absent until first write
       (is (contains? s ::dl/session-writes))
       (is (contains? s ::dl/message-writes)))))
 

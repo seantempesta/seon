@@ -65,7 +65,7 @@
 ;; Datalevin stores as string; structured content is Nippy-serialized by Datalevin.
 (schema/register! ::content
                   [:or {:description "Message content"
-                        :db/valueType :db.type/string}
+                        :seon.db/value-type :db.type/string}
                    :string
                    [:map]])
 
