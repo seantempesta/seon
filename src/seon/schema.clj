@@ -50,6 +50,21 @@
 (defonce ^:private _inst-type
   (swap! *schemas assoc :inst (m/-simple-schema {:type :inst :pred inst?})))
 
+;; Register :seon.flow/dynamic — a wire protocol field validated dynamically.
+;; Used for ::args, ::value, and ::payload in flow message envelopes.
+;; These fields carry data whose type depends on the target function or
+;; payload key, so static schema can only assert non-nil. Real validation
+;; happens at the message boundary via validate-fn-args!, validate-fn-value!,
+;; and validate-payload! in seon.flow.msg.
+(defonce ^:private _dynamic-type
+  (swap! *schemas assoc :seon.flow/dynamic
+         (m/-simple-schema
+          {:type :seon.flow/dynamic
+           :pred some?
+           :type-properties {:gen/schema [:or :int :string :keyword :boolean
+                                          [:vector :int] [:map-of :keyword :string]]
+                             :gen/fmap identity}})))
+
 ;; Register :seon.db/ref — a Datalevin entity reference.
 ;; Accepts positive integers (entity IDs) or lookup refs [keyword value].
 ;; At transact time, Datalevin resolves lookup refs to entity IDs automatically.

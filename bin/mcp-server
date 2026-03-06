@@ -48,6 +48,10 @@
 ;; Cloned at startup so we can interrupt stuck orchestrator evals.
 (def orchestrator-nrepl-session (atom nil))
 
+;; Whether the orchestrator init (nREPL connectivity + session clone) has completed.
+;; Tools that need the orchestrator session check this before proceeding.
+(def orchestrator-init-ready? (atom false))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Async Request Processing (Phase 1 - MCP Resilience)
 ;;; ---------------------------------------------------------------------------
@@ -587,6 +591,13 @@ You must then either:
                "(enforced:" enforced-session-id "provided:" session_id ")"
                "timeout:" timeout_ms)
 
+    ;; Guard: if orchestrator init hasn't completed yet, return a clear error
+    ;; rather than hanging on a potentially slow nREPL connection
+    (when (and (= effective-session "orchestrator")
+               (not @orchestrator-init-ready?))
+      (throw (ex-info "Seon server is still initializing, please retry in a few seconds"
+                      {:initializing true})))
+
     ;; For orchestrator: atomically check-and-set eval state to prevent race conditions
     (when (= effective-session "orchestrator")
       (let [new-state {:started-at (System/currentTimeMillis)
@@ -675,6 +686,11 @@ You must then either:
    and stores it in the session registry."
   [{:keys [namespace]}]
   (log-debug "execute-create-session namespace:" namespace)
+
+  ;; Guard: orchestrator must be initialized before we can create sessions
+  (when-not @orchestrator-init-ready?
+    (throw (ex-info "Seon server is still initializing, please retry in a few seconds"
+                    {:initializing true})))
 
   ;; First, create the session in Seon
   (let [code (format "(do (require 'seon.orchestrator.session)
@@ -1151,9 +1167,10 @@ You must then either:
 (defn- flush-response-queue!
   "Send all queued responses. Called from main loop."
   []
-  (let [responses @response-queue]
+  ;; Atomically drain the queue to avoid losing responses when a future
+  ;; enqueues between @response-queue and reset!.
+  (let [[responses _] (swap-vals! response-queue (constantly []))]
     (when (seq responses)
-      (reset! response-queue [])
       (doseq [{:keys [id result error]} responses]
         (if error
           (send-result id (mcp-error error))
@@ -1161,10 +1178,11 @@ You must then either:
 
 (defn- init-orchestrator-session!
   "Initialize connection to orchestrator and clone a persistent nREPL session.
-   Returns true if successful, false otherwise."
+   Returns true if successful, false otherwise.
+   Uses a 5s timeout for the connectivity check (not the default 30s)."
   []
   (try
-    (let [result (nrepl-eval orchestrator-port "(+ 1 1)")]
+    (let [result (nrepl-eval orchestrator-port "(+ 1 1)" 5000)]
       (if (= "2" (:value result))
         (do
           (log-debug "Orchestrator connection verified")
@@ -1172,10 +1190,14 @@ You must then either:
           (if-let [session-id (nrepl-clone-session orchestrator-port)]
             (do
               (reset! orchestrator-nrepl-session session-id)
+              (reset! orchestrator-init-ready? true)
               (log-debug "Cloned orchestrator nREPL session:" session-id)
               true)
             (do
               (log-error "Failed to clone orchestrator nREPL session - interrupts won't work")
+              ;; Still mark as ready - eval works without a cloned session,
+              ;; only interrupts are affected
+              (reset! orchestrator-init-ready? true)
               false)))
         (do
           (log-error "Orchestrator connection test failed:" result)
@@ -1195,7 +1217,15 @@ You must then either:
    brick the entire MCP server."
   []
   (log-info "MCP Server v0.5.0 starting (async mode)...")
-  (init-orchestrator-session!)
+
+  ;; Init orchestrator session in background — don't block the message loop.
+  ;; handle-initialize responds without needing nREPL. Tools that need it
+  ;; check orchestrator-init-ready? and return a clear error if not ready yet.
+  (future
+    (try
+      (init-orchestrator-session!)
+      (catch Exception e
+        (log-error "Background init failed:" (.getMessage e)))))
 
   ;; Main message loop - non-blocking to stay responsive
   (let [reader (java.io.BufferedReader. *in*)]

@@ -5,8 +5,17 @@
    All keys fully namespaced under `seon.flow.msg`.
 
    Wire format: length-prefixed Nippy (fast-freeze/fast-thaw). Nippy handles
-   all JVM types natively — no tagged literals or custom print-methods needed."
-  (:require [seon.schema :as schema]))
+   all JVM types natively — no tagged literals or custom print-methods needed.
+
+   Dynamic validation: Three fields (::args, ::value, ::payload) use the
+   :seon.flow/dynamic type instead of :any. Their content is validated
+   dynamically at message boundaries using:
+     - validate-fn-args!  — args validated against ::fn's :malli/schema input
+     - validate-fn-value! — value validated against ::fn's :malli/schema output
+     - validate-payload!  — each key validated against its registered schema"
+  (:require [malli.core :as m]
+            [seon.schema :as schema]
+            [taoensso.timbre :as log]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Envelope Keys
@@ -18,12 +27,12 @@
 (schema/register! ::from-ns [:string {:min 1}])
 (schema/register! ::to-ns [:string {:min 1}])
 (schema/register! ::fn [:string {:min 1 :description "Fully qualified function name"}])
-(schema/register! ::args [:vector :any])
+(schema/register! ::args [:vector :seon.flow/dynamic])
 (schema/register! ::timeout-ms [:int {:min 1}])
 (schema/register! ::reply-required? :boolean)
 (schema/register! ::trace-id :uuid)
 (schema/register! ::created-at :inst)
-(schema/register! ::payload [:map-of :keyword :any])
+(schema/register! ::payload [:map-of :keyword :seon.flow/dynamic])
 
 ;;; ---------------------------------------------------------------------------
 ;;; Request
@@ -54,7 +63,7 @@
 (schema/register! ::error-message :string)
 (schema/register! ::error-data :map)
 (schema/register! ::duration-ms [:int {:min 0}])
-(schema/register! ::value :any)
+(schema/register! ::value :seon.flow/dynamic)
 
 (schema/register! ::reply
                   [:map

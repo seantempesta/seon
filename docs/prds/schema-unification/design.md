@@ -300,6 +300,97 @@ At boot, verify all registered Malli schemas derive valid Datalevin types:
 - 13 new tests, 56 assertions in `test/seon/db/consistency_test.clj`
 - 727 tests, 3647 assertions, 0 failures across full test suite
 
+### Phase 5b: Unified Schema Registration (NOT STARTED)
+
+**Problem:** There are TWO paths from Malli to Datalevin schema, and they diverge:
+
+1. **Entity schema path** — `malli-map->datalevin-schema` on `[:map ...]` entity schemas. Reads `:db/*` properties from Malli entry options. Used at Integrant init when `d/get-conn` is called.
+2. **Auto-add path** — `ensure-schema!` in `db.clj` wraps individual `schema/register!` definitions as `[:map [attr defn]]` and runs through the bridge. Used when `db/transact!` encounters attrs not yet in Datalevin.
+
+These diverge because individual `schema/register!` calls can lose properties (identity, cardinality hints) that exist on entity schemas. This caused the fresh-DB bug where lookup refs failed because `:db/unique` was missing from the auto-add path.
+
+**Root cause:** Entity schemas carry `:db/unique :db.unique/identity` on entry properties, but individual `schema/register!` calls duplicated (or forgot) those annotations. Two sources of truth = divergence.
+
+**Fix: ONE system, ONE source of truth.**
+
+`schema/register!` becomes the sole carrier of ALL schema metadata — type AND persistence properties. Entity schemas become purely structural (required/optional grouping) and reference attrs from the registry.
+
+**Step 1: Extend `schema/register!` with persistence properties.**
+
+```clojure
+;; Today (type only):
+(schema/register! :seon.fn/qualified-name :string)
+
+;; After (type + persistence hints):
+(schema/register! :seon.fn/qualified-name :string {:seon.db/identity true})
+```
+
+The third arg is an optional properties map. Stored in the registry alongside the schema.
+
+**Step 2: Bridge reads from registry, not entity schemas.**
+
+`ensure-schema!` and `malli-map->datalevin-schema` both consult the registry for persistence properties. The bridge translates:
+
+| Agent writes (Seon keys) | Bridge produces (Datalevin keys) |
+|--------------------------|----------------------------------|
+| `{:seon.db/identity true}` | `{:db/unique :db.unique/identity}` |
+| `{:seon.db/unique true}` | `{:db/unique :db.unique/value}` |
+| (inferred from `[:vector X]`/`[:set X]`) | `{:db/cardinality :db.cardinality/many}` |
+| (inferred from nested `:map`) | `{:db/valueType :db.type/ref :db/isComponent true}` |
+| (inferred from `:seon.db/ref` type) | `{:db/valueType :db.type/ref}` |
+| (inferred from Malli type) | `{:db/valueType :db.type/*}` |
+
+**Step 3: Remove `:db/*` properties from entity schemas.**
+
+Entity schemas become clean Malli — no Datalevin internals:
+
+```clojure
+;; Before (leaks Datalevin):
+[:map
+ [:seon.fn/qualified-name {:db/unique :db.unique/identity} :string]
+ [:seon.fn/namespace :string]]
+
+;; After (clean Malli, identity comes from registry):
+[:map
+ [:seon.fn/qualified-name :string]
+ [:seon.fn/namespace :string]]
+```
+
+**Step 4: Remove duplicate `schema/register!` calls.**
+
+Modules that define entity schemas AND manually register individual attrs (e.g., `ingest.clj` lines 131-179) drop the manual registration. `register-entity-schema!` auto-registers each attr from the entity schema. OR the `schema/register!` calls stay (with properties) and entity schemas reference them.
+
+**What agents need to know (the ONLY schema guide):**
+
+| Concept | How to declare | Example |
+|---------|---------------|---------|
+| String field | `:string` | `(schema/register! :seon.foo/name :string)` |
+| Keyword field | `:keyword` | `(schema/register! :seon.foo/type :keyword)` |
+| Boolean field | `:boolean` | `(schema/register! :seon.foo/active :boolean)` |
+| Integer field | `:int` | `(schema/register! :seon.foo/count :int)` |
+| Float field | `:double` | `(schema/register! :seon.foo/score :double)` |
+| Timestamp | `:inst` | `(schema/register! :seon.foo/created-at :inst)` |
+| UUID | `:uuid` | `(schema/register! :seon.foo/id :uuid)` |
+| Symbol | `:symbol` | `(schema/register! :seon.foo/sym :symbol)` |
+| Enum | `[:enum :a :b :c]` | `(schema/register! :seon.foo/status [:enum :active :stopped])` |
+| Collection | `[:vector :keyword]` | `(schema/register! :seon.foo/tags [:vector :keyword])` |
+| Reference | `:seon.db/ref` | `(schema/register! :seon.foo/parent :seon.db/ref)` |
+| Identity attr | any + `{:seon.db/identity true}` | `(schema/register! :seon.foo/id :string {:seon.db/identity true})` |
+| Optional field | `{:optional true}` on entity schema entry | Entity schema only, not on register! |
+
+**Banned types (rejected at registration):** `:any`, `:some`, `:nil`, `[:maybe X]` on persisted data, mixed-type enums.
+
+**Files to change:**
+- `src/seon/schema.clj` — `register!` accepts optional 3rd arg, stores properties
+- `src/seon/db/schema.clj` — bridge reads properties from registry; `malli-map->datalevin-schema` merges registry properties onto derived attrs
+- `src/seon/graph/ingest.clj` — remove `:db/unique` from entity schemas, remove duplicate `schema/register!` calls
+- `src/seon/runtime.clj` — same pattern
+- `src/seon/ctx.clj` — same
+- `src/seon/flow/trace.clj` — same
+- `src/seon/repl.clj` — same
+- `src/seon/ai/datalevin.clj` — remove redundant `:db/valueType` hints
+- `src/seon/db/tx.clj` — same
+
 ### Phase 5a: Wire Protocol Fixes (IN PROGRESS)
 
 Fix settled-decision violations in `seon.flow.msg`:

@@ -296,3 +296,69 @@
           {:valid? true
            :violations []
            :schema-count schema-count}))))
+
+;;; ---------------------------------------------------------------------------
+;;; Live Schema Comparison
+;;; ---------------------------------------------------------------------------
+
+(defn- compare-attr-schema
+  "Compare a single Malli-derived attr schema against live Datalevin schema.
+   Returns a vector of mismatch maps, or empty vector if matching."
+  [attr malli-attr live-attr schema-name]
+  (let [mismatches (transient [])]
+    ;; Value type check
+    (when-let [expected-type (:db/valueType malli-attr)]
+      (let [actual-type (:db/valueType live-attr)]
+        (when (and actual-type (not= expected-type actual-type))
+          (conj! mismatches {:attr attr :schema-name schema-name
+                             :violation :value-type-mismatch
+                             :message (str "Expected " expected-type " but live has " actual-type)}))))
+    ;; Cardinality check
+    (let [expected-card (or (:db/cardinality malli-attr) :db.cardinality/one)
+          actual-card (or (:db/cardinality live-attr) :db.cardinality/one)]
+      (when (not= expected-card actual-card)
+        (conj! mismatches {:attr attr :schema-name schema-name
+                           :violation :cardinality-mismatch
+                           :message (str "Expected " expected-card " but live has " actual-card)})))
+    ;; Identity attr check
+    (when-let [expected-unique (:db/unique malli-attr)]
+      (let [actual-unique (:db/unique live-attr)]
+        (when (and actual-unique (not= expected-unique actual-unique))
+          (conj! mismatches {:attr attr :schema-name schema-name
+                             :violation :unique-mismatch
+                             :message (str "Expected " expected-unique " but live has " actual-unique)}))))
+    (persistent! mismatches)))
+
+(defn validate-against-live-schema
+  "Compare all registered persisted schemas against the live Datalevin schema.
+
+   live-schema is the result of (d/schema conn) -- a map of attr -> schema-map.
+
+   Checks for mismatches in:
+   - :db/valueType -- Malli says :db.type/keyword but live has :db.type/string
+   - :db/cardinality -- Malli says many but live has one (or vice versa)
+   - :db/unique -- identity vs value uniqueness
+
+   Returns {:valid? bool :mismatches [...] :checked-count N}."
+  [live-schema]
+  (let [schemas @*persisted-schemas
+        all-mismatches
+        (vec (mapcat
+              (fn [[schema-name malli-schema]]
+                (let [derived (malli-map->datalevin-schema malli-schema)]
+                  (mapcat
+                   (fn [[attr malli-attr]]
+                     (if-let [live-attr (get live-schema attr)]
+                       (compare-attr-schema attr malli-attr live-attr schema-name)
+                       ;; Attr not in live schema -- not a mismatch, just not yet added
+                       []))
+                   derived)))
+              schemas))
+        checked (reduce + (map (fn [[_ s]] (count (m/entries (m/schema s)))) schemas))]
+    (if (seq all-mismatches)
+      (do (log/warn "Live schema mismatches found"
+                    {:count (count all-mismatches)
+                     :mismatches all-mismatches})
+          {:valid? false :mismatches all-mismatches :checked-count checked})
+      (do (log/info "Live schema validation passed" {:checked-count checked})
+          {:valid? true :mismatches [] :checked-count checked}))))

@@ -42,6 +42,27 @@
                   [:map-of {:description "Writer-owned connections by db keyword"}
                    :keyword :any])
 
+(def ^:const write-timeout-ms
+  "Timeout for individual d/transact! calls in milliseconds.
+   Prevents a hung Datalevin remote from blocking the writer thread indefinitely."
+  30000)
+
+(defn- transact-with-timeout!
+  "Execute d/transact! with a future+deref timeout.
+   Returns the tx-report on success.
+   Throws on timeout (with a clear message) or if transact! itself throws."
+  [conn tx-data db-label]
+  (let [f (future (d/transact! conn tx-data))
+        result (deref f write-timeout-ms ::timed-out)]
+    (if (= result ::timed-out)
+      (do
+        (future-cancel f)
+        (throw (ex-info "d/transact! timed out"
+                        {:timeout-ms write-timeout-ms
+                         :db db-label
+                         :tx-count (count tx-data)})))
+      result)))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Infrastructure Writer Step (multi-database, msg envelope format)
 ;;; ---------------------------------------------------------------------------
@@ -118,7 +139,7 @@
          (if raw-conn
            ;; Deprecated path: raw conn provided, no caching, no retry
            (try
-             (let [_tx-report (d/transact! raw-conn tx-data)
+             (let [_tx-report (transact-with-timeout! raw-conn tx-data db-label)
                    elapsed-ms (long (/ (- (System/nanoTime) t0) 1e6))
                    now (Instant/now)
                    reply {::msg/id request-id
@@ -163,7 +184,7 @@
                              (assoc-in state [::owned-conns db-kw] conn)
                              state)]
              (try
-               (let [_tx-report (d/transact! conn tx-data)
+               (let [_tx-report (transact-with-timeout! conn tx-data db-label)
                      elapsed-ms (long (/ (- (System/nanoTime) t0) 1e6))
                      now (Instant/now)
                      reply {::msg/id request-id
@@ -189,7 +210,7 @@
                        (try
                          (let [fresh (dl-conn/get-conn! {::dl-conn/manager cm
                                                          ::dl-conn/db db-kw})
-                               _tx-report (d/transact! fresh tx-data)
+                               _tx-report (transact-with-timeout! fresh tx-data db-label)
                                elapsed-ms (long (/ (- (System/nanoTime) t0) 1e6))
                                now (Instant/now)
                                reply {::msg/id request-id

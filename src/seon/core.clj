@@ -200,16 +200,32 @@
                 ;; Phase 2 failed — keep Phase 1 running
                 [phase-1-system e]))]
 
-        ;; Update startup phase based on outcome
-        (health/set-startup-phase! (if phase-2-error :degraded :ready))
-
         ;; Store in integrant.repl.state so (reset) works
         (alter-var-root #'state/system (constantly final-system))
 
         ;; Set prep! so future (reset) calls do a full init
         (ig-repl/set-prep! cfg-fn)
 
+        ;; Determine startup phase: if Phase 2 failed, degraded.
+        ;; If Phase 2 succeeded, run readiness gate to verify operational health.
+        (if phase-2-error
+          (health/set-startup-phase! :degraded)
+          (let [{:keys [all-pass? failed]} (health/readiness-gate)]
+            (if all-pass?
+              (do
+                (health/set-startup-phase! :ready)
+                (log/info "Readiness gate: all operational checks passed"))
+              (do
+                (health/set-startup-phase! :degraded)
+                (log/warn "Readiness gate: some checks failed — system is degraded"
+                          {:failed-checks (keys failed)
+                           :details failed})))))
+
         (log-startup-summary final-system phase-2-error)
+
+        ;; Start post-startup observation (re-checks at 30s and 60s)
+        (when-not phase-2-error
+          (health/start-post-start-observation!))
 
         ;; Call start hook
         ((or (:start params) (:start defaults) (fn [])))

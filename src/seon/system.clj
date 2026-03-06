@@ -13,6 +13,7 @@
   (:require [clojure.core.async.flow :as flow]
             [integrant.core :as ig]
             [taoensso.timbre :as log]
+            [seon.db :as db]
             [seon.schema :as schema]
             [seon.db.datalevin.conn :as dl-conn]
             [seon.flow.msg :as msg]
@@ -192,29 +193,34 @@
 
 (defmethod ig/init-key :seon/runtime-db
   [_ {:keys [connection-manager]}]
-  ;; Get conn through the connection manager (handles staleness, auto-reconnect)
-  (let [conn (dl-conn/get-conn!
-              {::dl-conn/manager connection-manager
-               ::dl-conn/db :seon.runtime
-               ::dl-conn/schema (runtime/runtime-merged-schema)})]
-    (log/info "Runtime database connected via connection manager")
-    ;; Mark any instances from previous unclean shutdown as crashed
-    (let [{::runtime/keys [crashed-count]} (runtime/mark-crashed! {})]
-      (when (pos? crashed-count)
-        (log/warn "Found crashed instances from previous run" {:count crashed-count})))
-    ;; Hydrate in-memory cache from Datalevin (includes crashed instances)
-    (let [{::runtime/keys [hydrated-count]} (runtime/hydrate-cache! {})]
-      (when (pos? hydrated-count)
-        (log/info "Hydrated runtime cache from Datalevin" {:count hydrated-count})))
-    ;; Register this component
-    (runtime/register! {::runtime/namespace "seon.graph.db"
-                        ::runtime/status :running
-                        ::runtime/location :in-process
-                        ::runtime/component-key :seon/runtime-db})
-    ;; Only store connection-manager — consumers must call runtime-db-conn
-    ;; to get a fresh connection. Storing :conn here causes stale references
-    ;; after TTL cleanup or server restarts.
-    {:connection-manager connection-manager}))
+  ;; Bind direct-mode + conn-manager so persist-instance! (in a future)
+  ;; can resolve connections during init-key (Integrant system is nil).
+  ;; Clojure's future conveys dynamic bindings via binding-conveyor-fn.
+  (binding [db/*direct-mode* true
+            db/*conn-manager* connection-manager]
+    ;; Get conn through the connection manager (handles staleness, auto-reconnect)
+    (let [conn (dl-conn/get-conn!
+                {::dl-conn/manager connection-manager
+                 ::dl-conn/db :seon.runtime
+                 ::dl-conn/schema (runtime/runtime-merged-schema)})]
+      (log/info "Runtime database connected via connection manager")
+      ;; Mark any instances from previous unclean shutdown as crashed
+      (let [{::runtime/keys [crashed-count]} (runtime/mark-crashed! {})]
+        (when (pos? crashed-count)
+          (log/warn "Found crashed instances from previous run" {:count crashed-count})))
+      ;; Hydrate in-memory cache from Datalevin (includes crashed instances)
+      (let [{::runtime/keys [hydrated-count]} (runtime/hydrate-cache! {})]
+        (when (pos? hydrated-count)
+          (log/info "Hydrated runtime cache from Datalevin" {:count hydrated-count})))
+      ;; Register this component
+      (runtime/register! {::runtime/namespace "seon.graph.db"
+                          ::runtime/status :running
+                          ::runtime/location :in-process
+                          ::runtime/component-key :seon/runtime-db})
+      ;; Only store connection-manager — consumers must call runtime-db-conn
+      ;; to get a fresh connection. Storing :conn here causes stale references
+      ;; after TTL cleanup or server restarts.
+      {:connection-manager connection-manager})))
 
 (defmethod ig/halt-key! :seon/runtime-db
   [_ _state]
@@ -243,8 +249,14 @@
 ;;; Receives its connection from :seon/runtime-db component.
 ;;; Runs in a background future to avoid blocking startup (~3s savings).
 
+(def ^:const ^:private scanner-circuit-breaker-threshold
+  "After this many consecutive ingest failures, skip remaining namespaces."
+  3)
+
 (defn- run-code-scan!
-  "Execute the code scan in the current thread. Called from a future."
+  "Execute the code scan in the current thread. Called from a future.
+   Includes circuit breaker: after 3 consecutive DB failures, skips remaining
+   namespaces and signals :degraded to the health component."
   [paths]
   (let [extract-graph-from-file (resolve 'seon.graph.extract/extract-graph-from-file)
         ingest-namespace! (resolve 'seon.graph.ingest/ingest-namespace!)]
@@ -271,26 +283,54 @@
                                                 {:file (.getName f) :error (.getMessage e)})
                                       nil))))
                           (filter :seon.graph.extract/ns-name)
-                          vec)]
-          ;; Phase 2: Ingest sequentially (DB writes)
+                          vec)
+              ns-total (count graphs)
+              ingested (atom 0)
+              failed (atom 0)
+              skipped (atom 0)
+              consecutive-failures (atom 0)
+              circuit-open? (atom false)]
+          ;; Phase 2: Ingest sequentially (DB writes) with circuit breaker
           (doseq [graph graphs]
-            (try
-              (let [ns-str (:seon.graph.extract/ns-name graph)]
-                (ingest-namespace!
-                 {:seon.graph.ingest/db-name :seon.runtime
-                  :seon.graph.ingest/ns-name ns-str
-                  :seon.graph.ingest/functions (:seon.graph.extract/functions graph)
-                  :seon.graph.ingest/specs (:seon.graph.extract/specs graph)
-                  :seon.graph.ingest/vars (:seon.graph.extract/vars graph)
-                  :seon.graph.ingest/call-edges (:seon.graph.extract/call-edges graph)
-                  :seon.graph.ingest/ns-deps (:seon.graph.extract/ns-deps graph)
-                  :seon.graph.ingest/ns-entities (:seon.graph.extract/namespaces graph)}))
-              (catch Exception e
-                (log/warn "Code scanner: ingest failed"
-                          {:ns (:seon.graph.extract/ns-name graph)
-                           :error (.getMessage e)}))))
-          (log/info "Code scanner complete"
-                    {:files-processed total :namespaces-ingested (count graphs)})))
+            (if @circuit-open?
+              (swap! skipped inc)
+              (try
+                (let [ns-str (:seon.graph.extract/ns-name graph)]
+                  (ingest-namespace!
+                   {:seon.graph.ingest/db-name :seon.runtime
+                    :seon.graph.ingest/ns-name ns-str
+                    :seon.graph.ingest/functions (:seon.graph.extract/functions graph)
+                    :seon.graph.ingest/specs (:seon.graph.extract/specs graph)
+                    :seon.graph.ingest/vars (:seon.graph.extract/vars graph)
+                    :seon.graph.ingest/call-edges (:seon.graph.extract/call-edges graph)
+                    :seon.graph.ingest/ns-deps (:seon.graph.extract/ns-deps graph)
+                    :seon.graph.ingest/ns-entities (:seon.graph.extract/namespaces graph)})
+                  (swap! ingested inc)
+                  (reset! consecutive-failures 0))
+                (catch Exception e
+                  (swap! failed inc)
+                  (let [n (swap! consecutive-failures inc)]
+                    (log/warn "Code scanner: ingest failed"
+                              {:ns (:seon.graph.extract/ns-name graph)
+                               :error (.getMessage e)
+                               :consecutive-failures n})
+                    (when (>= n scanner-circuit-breaker-threshold)
+                      (log/error "Code scanner: circuit breaker tripped after consecutive failures"
+                                 {:consecutive-failures n
+                                  :threshold scanner-circuit-breaker-threshold})
+                      (reset! circuit-open? true)
+                      ;; Signal degraded to health component
+                      (try
+                        ((requiring-resolve 'seon.health/set-startup-phase!) :degraded)
+                        (catch Exception _))))))))
+          (let [summary {:files-processed total
+                         :namespaces-total ns-total
+                         :ingested @ingested
+                         :failed @failed
+                         :skipped @skipped}]
+            (if (pos? (+ @failed @skipped))
+              (log/warn "Code scanner complete with errors" summary)
+              (log/info "Code scanner complete" summary)))))
       (catch Exception e
         (log/error "Code scanner failed" {:error (.getMessage e)})))))
 
@@ -303,14 +343,20 @@
       (throw (ex-info "Code scanner requires graph-db connection" {})))
     (require 'seon.graph.extract)
     (require 'seon.graph.ingest)
-    ;; Register immediately so system sees the component
-    (runtime/register! {::runtime/namespace "seon.graph.scanner"
-                        ::runtime/status :running
-                        ::runtime/location :in-process
-                        ::runtime/component-key :seon.graph/scanner})
-    ;; Run scan in background so startup isn't blocked (~3s savings)
-    (let [scan-future (future (run-code-scan! paths))]
-      {:graph-db graph-db :paths paths :scan-future scan-future})))
+    ;; Bind direct-mode + conn-manager so register! persist and scan future
+    ;; can resolve connections during init-key (Integrant system may be nil).
+    (let [cm (:connection-manager graph-db)]
+      (binding [db/*direct-mode* true
+                db/*conn-manager* cm]
+        ;; Register immediately so system sees the component
+        (runtime/register! {::runtime/namespace "seon.graph.scanner"
+                            ::runtime/status :running
+                            ::runtime/location :in-process
+                            ::runtime/component-key :seon.graph/scanner})
+        ;; Run scan in background so startup isn't blocked (~3s savings)
+        ;; future conveys bindings via binding-conveyor-fn
+        (let [scan-future (future (run-code-scan! paths))]
+          {:graph-db graph-db :paths paths :scan-future scan-future})))))
 
 (defmethod ig/halt-key! :seon.graph/scanner
   [_ state]
@@ -344,11 +390,15 @@
 (defmethod ig/init-key :seon.flow/infrastructure
   [_ {:keys [connection-manager]}]
   (log/info "Starting infrastructure flow...")
-  (let [result (topology/build-infrastructure!
-                {::topology/connection-manager connection-manager})]
-    (log/info "Infrastructure flow started"
-              {:flow-id (::topology/flow-id result)})
-    result))
+  ;; Bind direct-mode + conn-manager so register-flow! -> persist-instance!
+  ;; can resolve connections during init-key (Integrant system may be nil).
+  (binding [db/*direct-mode* true
+            db/*conn-manager* connection-manager]
+    (let [result (topology/build-infrastructure!
+                  {::topology/connection-manager connection-manager})]
+      (log/info "Infrastructure flow started"
+                {:flow-id (::topology/flow-id result)})
+      result)))
 
 (defmethod ig/halt-key! :seon.flow/infrastructure
   [_ state]

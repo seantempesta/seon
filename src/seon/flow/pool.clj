@@ -68,6 +68,12 @@
    Short because we're connecting to localhost." 500)
 (def ^:const agent-port-min 7900)
 (def ^:const agent-port-max 7999)
+(def ^:const grace-period-ms
+  "Don't health-check a JVM within this many ms of AGENT_READY.
+   Allows post-ready setup (Datalevin connect, namespace loading) to complete." 60000)
+(def ^:const max-respawns-per-minute
+  "Rate limit: max respawns across all slots per minute.
+   Prevents port exhaustion from crash loops." 6)
 
 (declare port-bound?)
 
@@ -138,7 +144,10 @@
   "Spawn an agent JVM on the given port. Blocks until AGENT_READY signal
    or timeout. Returns {::port ::pid ::process ...} or throws.
 
-   When datalevin-uri is provided, passes it to the agent JVM via --datalevin-uri."
+   When datalevin-uri is provided, passes it to the agent JVM via --datalevin-uri.
+
+   Starts both stdout and stderr reader threads. Stderr is logged at WARN
+   level so crash reasons are visible."
   [port & {:keys [datalevin-uri]}]
   (let [args (cond-> ["clojure" "-M:agent"
                        "--port" (str port)
@@ -147,6 +156,7 @@
         _ (log/info "Spawning agent JVM" {:port port})
         ^Process proc (apply process/start {:dir "."} args)
         stdout (BufferedReader. (InputStreamReader. (process/stdout proc)))
+        stderr (BufferedReader. (InputStreamReader. (process/stderr proc)))
         ready? (promise)
         reader-thread (future
                         (try
@@ -158,7 +168,14 @@
                               (recur)))
                           (catch Exception e
                             (log/error "Agent JVM reader error"
-                                       {:port port :error (.getMessage e)}))))]
+                                       {:port port :error (.getMessage e)}))))
+        stderr-thread (future
+                        (try
+                          (loop []
+                            (when-let [line (.readLine stderr)]
+                              (log/warn "Agent JVM stderr" {:port port :line line})
+                              (recur)))
+                          (catch Exception _)))]
     (if (deref ready? ready-timeout-ms nil)
       (let [pid (.pid proc)]
         (log/info "Agent JVM ready" {:port port :pid pid})
@@ -166,7 +183,9 @@
          ::pid pid
          ::process proc
          ::reader reader-thread
+         ::stderr-reader stderr-thread
          ::status :idle
+         ::ready-at (System/currentTimeMillis)
          ::datalevin-uri datalevin-uri})
       (do
         (.destroy proc)
@@ -292,52 +311,99 @@
                          :total (count (::all-jvms @pool-state))}))))
         nil))))
 
+(defn- recent-spawn-count
+  "Count spawns within the last 60 seconds from the spawn-timestamps deque."
+  [pool-state]
+  (let [timestamps (::spawn-timestamps @pool-state)
+        cutoff (- (System/currentTimeMillis) 60000)]
+    (if timestamps
+      (count (filter #(> % cutoff) @timestamps))
+      0)))
+
+(defn- record-spawn!
+  "Record a spawn timestamp and prune entries older than 60s."
+  [pool-state]
+  (when-let [timestamps (::spawn-timestamps @pool-state)]
+    (let [cutoff (- (System/currentTimeMillis) 60000)]
+      (swap! timestamps (fn [ts] (conj (filterv #(> % cutoff) ts)
+                                       (System/currentTimeMillis)))))))
+
 (defn- replenish-pool!
   "Spawn replacement JVMs in the background to maintain target pool size.
-   Non-blocking -- spawns via future."
+   Non-blocking -- spawns via future. Rate-limited to max-respawns-per-minute."
   [pool-state ^LinkedBlockingQueue idle-queue]
   (let [{::keys [target-size datalevin-port shutdown?]} @pool-state
         current-idle (.size idle-queue)]
     (when (and (not shutdown?)
                (< current-idle target-size))
-      (let [deficit (- target-size current-idle)]
-        (log/debug "Replenishing pool" {:deficit deficit :current-idle current-idle})
-        (dotimes [_ deficit]
-          (future
-            (try
-              (spawn-and-enqueue! pool-state idle-queue datalevin-port)
-              (catch Exception e
-                (log/error "Replenishment failed" {:error (.getMessage e)})))))))))
+      (let [deficit (- target-size current-idle)
+            budget (- max-respawns-per-minute (recent-spawn-count pool-state))
+            to-spawn (min deficit (max 0 budget))]
+        (when (pos? to-spawn)
+          (log/debug "Replenishing pool" {:deficit deficit :budget budget
+                                           :spawning to-spawn})
+          (dotimes [_ to-spawn]
+            (record-spawn! pool-state)
+            (future
+              (try
+                (spawn-and-enqueue! pool-state idle-queue datalevin-port)
+                (catch Exception e
+                  (log/error "Replenishment failed" {:error (.getMessage e)}))))))
+        (when (and (pos? deficit) (zero? to-spawn))
+          (log/warn "Respawn rate limit reached, deferring"
+                    {:deficit deficit :recent-spawns (recent-spawn-count pool-state)}))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Health checks
 ;;; ---------------------------------------------------------------------------
 
 (defn- health-check-jvm!
-  "Ping a single idle JVM. Returns true if healthy, false otherwise."
-  [port]
-  (try
-    (let [result (nrepl-eval! port ":ok")]
-      (= result ":ok"))
-    (catch Exception _
-      false)))
+  "Check a single idle JVM. First checks if the process is alive,
+   then pings via nREPL. Returns :healthy, :dead, or :unhealthy."
+  [jvm]
+  (let [^Process proc (::process jvm)
+        port (::port jvm)]
+    (cond
+      ;; Process already exited
+      (and proc (not (.isAlive proc)))
+      (do (log/warn "Agent JVM process dead"
+                     {:port port :exit-code (.exitValue proc)})
+          :dead)
+
+      ;; nREPL ping succeeds
+      (try
+        (= ":ok" (nrepl-eval! port ":ok"))
+        (catch Exception _ false))
+      :healthy
+
+      :else :unhealthy)))
+
+(defn- in-grace-period?
+  "Returns true if the JVM was marked ready within the grace period."
+  [jvm]
+  (when-let [ready-at (::ready-at jvm)]
+    (< (- (System/currentTimeMillis) ready-at) grace-period-ms)))
 
 (defn- run-health-checks!
-  "Check health of all idle JVMs. Removes unhealthy ones and triggers replenishment."
+  "Check health of all idle JVMs. Removes unhealthy ones and triggers replenishment.
+   Skips JVMs within the grace period after AGENT_READY."
   [pool-state ^LinkedBlockingQueue idle-queue]
   (when-not (::shutdown? @pool-state)
     (let [idle-jvms (vec (.toArray idle-queue))]
       (doseq [jvm idle-jvms]
-        (when-not (health-check-jvm! (::port jvm))
-          (log/warn "Unhealthy JVM detected, removing" {:port (::port jvm)})
-          ;; Remove from idle queue
-          (.remove idle-queue jvm)
-          ;; Kill the process
-          (try
-            (kill-process! (::process jvm))
-            (catch Exception _))
-          ;; Remove from tracking
-          (swap! pool-state update ::all-jvms dissoc (::port jvm))))
+        (when-not (in-grace-period? jvm)
+          (let [status (health-check-jvm! jvm)]
+            (when (not= :healthy status)
+              (log/warn "Unhealthy JVM detected, removing"
+                        {:port (::port jvm) :status status})
+              ;; Remove from idle queue
+              (.remove idle-queue jvm)
+              ;; Kill the process
+              (try
+                (kill-process! (::process jvm))
+                (catch Exception _))
+              ;; Remove from tracking
+              (swap! pool-state update ::all-jvms dissoc (::port jvm))))))
       ;; Replenish if needed
       (replenish-pool! pool-state idle-queue))))
 
@@ -479,7 +545,8 @@
                           ::next-port base-port
                           ::datalevin-port datalevin-port
                           ::shutdown? false
-                          ::warming? true})
+                          ::warming? true
+                          ::spawn-timestamps (atom [])})
         ;; Track how many JVMs still need to finish spawning
         remaining-warmup (atom size)
         ;; Spawn all JVMs concurrently in background -- do NOT block
@@ -677,6 +744,12 @@
                           " (.setDynamic (resolve (symbol \"" ns-sym "\" \"*ctx*\")) true)"
                           " :ok)")]
             (nrepl-eval! port code)))
+        ;; Trigger deferred instrumentation now that namespace code is loaded
+        (try
+          (nrepl-eval! port "(seon.dev.instrumentation/start! {})")
+          (catch Exception e
+            (log/warn "Deferred instrumentation failed on agent"
+                      {:port port :session-id session-id :error (.getMessage e)})))
         (assoc handle ::session-id session-id)))))
 
 (defn get-jvm-by-session
