@@ -215,6 +215,8 @@ Tests serve two purposes:
 
 **Always write both.** Generative tests alone don't show real-world usage patterns.
 
+See `/clojure-testing` skill for full fixture patterns, generators, and debugging techniques.
+
 #### Example Tests (Documentation + Integration)
 
 Show the intended workflow. These serve as executable documentation:
@@ -222,33 +224,31 @@ Show the intended workflow. These serve as executable documentation:
 ```clojure
 (deftest session-lifecycle-test
   (testing "Complete workflow: start -> messages -> end -> retrieve"
-    ;; Start session
-    (let [{::ai/keys [session-id]} (ai/start-session!
-                                     {::ai/node *test-node*
-                                      ::ai/namespace 'seon.trading
-                                      ::ai/prompt "Analyze AAPL"})]
-      ;; Add conversation
-      (ai/add-message! {::ai/node *test-node*
-                        ::ai/session-id session-id
-                        ::ai/role "user"
-                        ::ai/content "What's the trend?"})
-      (ai/add-message! {::ai/node *test-node*
-                        ::ai/session-id session-id
-                        ::ai/role "assistant"
-                        ::ai/content "AAPL shows bullish momentum."
-                        ::ai/output-tokens 15})
+    ;; with-test-datalevin binds db/*direct-mode* and *conn-manager*
+    (tu/with-test-datalevin
+      (fn []
+        ;; Start session
+        (let [{::ai/keys [session-id]} (ai/start-session!
+                                         {::ai/namespace 'seon.trading
+                                          ::ai/prompt "Analyze AAPL"})]
+          ;; Add conversation
+          (ai/add-message! {::ai/session-id session-id
+                            ::ai/role "user"
+                            ::ai/content "What's the trend?"})
+          (ai/add-message! {::ai/session-id session-id
+                            ::ai/role "assistant"
+                            ::ai/content "AAPL shows bullish momentum."
+                            ::ai/output-tokens 15})
 
-      ;; End with stats
-      (ai/end-session! {::ai/node *test-node*
-                        ::ai/session-id session-id
-                        ::ai/status :completed
-                        ::ai/cost-usd 0.002})
+          ;; End with stats
+          (ai/end-session! {::ai/session-id session-id
+                            ::ai/status :completed
+                            ::ai/cost-usd 0.002})
 
-      ;; Verify round-trip
-      (let [messages (ai/get-messages {::ai/node *test-node*
-                                       ::ai/session-id session-id})]
-        (is (= 2 (count messages)))
-        (is (= ["user" "assistant"] (mapv ::ai/role messages)))))))
+          ;; Verify round-trip
+          (let [messages (ai/get-messages {::ai/session-id session-id})]
+            (is (= 2 (count messages)))
+            (is (= ["user" "assistant"] (mapv ::ai/role messages)))))))))
 ```
 
 #### Generative Tests (Contract Validation)
@@ -270,8 +270,7 @@ Document tricky scenarios explicitly:
 ```clojure
 (deftest edge-cases-test
   (testing "get-session returns nil for non-existent session"
-    (is (nil? (ai/get-session {::ai/node *test-node*
-                               ::ai/session-id "ses-nonexistent"}))))
+    (is (nil? (ai/get-session {::ai/session-id "ses-nonexistent"}))))
 
   (testing "handles structured content (maps, not just strings)"
     (let [content {:type "tool_result" :tool-use-id "abc" :data {...}}]
@@ -301,41 +300,15 @@ Use the global registry for schema introspection:
 
 All database access goes through `seon.db`. No direct `datalevin.core` usage outside `src/seon/db/` infrastructure.
 
-### Write API
+See `/datalevin` skill for the full API reference, schema registration patterns, and querying guide.
 
-```clojure
-(db/transact! :seon.runtime [{:seon.fn/name "my-fn" :seon.fn/namespace "seon.foo"}])
-```
-
-`transact!` takes a db-name keyword and tx-data. Validates attributes against the Malli registry, auto-adds missing Datalevin schema, then routes through the infrastructure flow writer.
-
-### Read API
-
-```clojure
-(db/query :seon.runtime '[:find ?e ?n :where [?e :seon.fn/name ?n]])
-(db/pull-by-name :seon.runtime '[*] eid)
-(db/pull-many-by-name :seon.runtime '[:seon.fn/name] eids)
-(db/entity-by-name :seon.runtime eid)
-```
-
-All take a db-name keyword (`:seon`, `:seon.runtime`, or a namespace keyword like `:seon.trading`). Route through the infrastructure flow reader in production; resolve directly with retry in `*direct-mode*`.
-
-### Test Fixtures
-
-```clojure
-(binding [db/*direct-mode* true
-          db/*conn-manager* fake-manager]
-  ;; db/transact!, db/query etc. work without the flow running
-  ...)
-```
-
-`*direct-mode*` bypasses the flow and hits Datalevin directly. `*conn-manager*` provides connection resolution in tests. See `test/seon/test_utils.clj` for the `with-temp-conn` helper.
+Key rule: `db/transact!` and `db/query` take a db-name keyword (`:seon.runtime`, `:seon.ai`, or namespace keywords like `:seon.trading`). All attributes must be registered with `schema/register!` before transacting.
 
 ---
 
 ## Schema Composition Across Namespaces
 
-Provider namespaces extend base namespaces by referencing their schemas. This is the XTDB/Datomic pattern: entities are bags of namespaced attributes.
+Provider namespaces extend base namespaces by referencing their schemas. This is the EAV pattern: entities are bags of namespaced attributes.
 
 ### Base + Provider Pattern
 
@@ -351,21 +324,21 @@ Provider namespaces extend base namespaces by referencing their schemas. This is
 ;; Reference base schemas in composite schemas
 (schema/register! ::message-entity
   [:map
-   [:xt/id ::ai/message-id]        ; Reference base!
-   [::ai/role ::ai/role]           ; Reference base!
-   [::ai/content ::ai/content]     ; Reference base!
+   [:seon/id ::ai/message-id]           ; Identity attribute
+   [::ai/role ::ai/role]                ; Reference base!
+   [::ai/content ::ai/content]          ; Reference base!
    ;; Claude-specific attributes
    [::message-type ::message-type]
    [::cache-tokens {:optional true} ::cache-tokens]])
 ```
 
-### Entity-Centric Thinking (XTDB/Datomic Pattern)
+### Entity-Centric Thinking (EAV Pattern)
 
-**Key insight:** In XTDB, an entity is a bag of namespaced attributes, not a row in a table. A single entity can have attributes from multiple namespaces:
+**Key insight:** In Datalevin's EAV model, an entity is a bag of namespaced attributes, not a row in a table. A single entity can have attributes from multiple namespaces:
 
 ```clojure
 ;; This is ONE entity, not separate "rows" in different "tables"
-{:xt/id "msg-abc123"
+{:seon/id "msg-abc123"
  ;; Base seon.ai attributes (generic to all providers)
  :seon.ai/type :message
  :seon.ai/role "assistant"
@@ -381,22 +354,21 @@ Provider namespaces extend base namespaces by referencing their schemas. This is
 - No schema migration needed when adding provider-specific fields
 - Queries can filter by any attribute from any namespace
 - Generic code works on `:seon.ai/*` attributes, provider code adds its own
-- The "table name" in XTDB is just a type tag for SQL queries, not a rigid schema
 
 ### When NOT to Use `:malli/schema`
 
 Some types cannot be generated for property testing. Omit `:malli/schema` metadata and document in docstrings instead:
 
 ```clojure
-;; XTDB nodes - opaque Java objects
+;; Connection managers, atoms, channels - opaque runtime objects
 (defn start-session!
   "Start a new AI session.
 
    Request keys:
-     ::node - Required. XTDB node instance (cannot be generated)
+     ::namespace - Optional. Clojure namespace context
      ..."
-  ;; NO :malli/schema here - node can't be generated
-  [{::keys [node namespace prompt]}]
+  ;; NO :malli/schema here - runtime objects can't be generated
+  [{::keys [namespace prompt]}]
   ...)
 
 ;; Process handles, channels, atoms - runtime objects
@@ -409,7 +381,7 @@ Some types cannot be generated for property testing. Omit `:malli/schema` metada
   ...)
 ```
 
-**Rule:** If a function takes XTDB nodes, spawns processes, or returns channels/atoms, skip `:malli/schema`. Document the expected types in docstrings.
+**Rule:** If a function takes connection managers, spawns processes, or returns channels/atoms, skip `:malli/schema`. Document the expected types in docstrings.
 
 ### Test Code Exemptions
 
@@ -437,11 +409,11 @@ When converting external data (like SDK messages) to internal entities, use the 
      ::sdk-message   - Required. Raw SDK message map
      ::ai/session-id - Optional. Parent session to attach
 
-   Returns entity map suitable for XTDB storage."
+   Returns entity map with :seon/id and namespaced attributes."
   [{::keys [sdk-message] ::ai/keys [session-id]}]
   (let [msg-type (:type sdk-message)
         content (extract-content sdk-message)]
-    (cond-> {:xt/id (generate-id "msg")
+    (cond-> {:seon/id (generate-id "msg")
              ::ai/type :message
              ::ai/content content}
       session-id (assoc ::ai/session-id session-id))))
@@ -457,48 +429,6 @@ When converting external data (like SDK messages) to internal entities, use the 
 ;; BAD: positional args limit extensibility
 (defn sdk-message->entity [sdk-message session-id]
   ...)
-```
-
-## XTDB Compatibility Notes
-
-### Namespace as String
-
-Clojure symbols don't round-trip through XTDB. Store namespaces as strings:
-
-```clojure
-;; Store
-(db/put! node :ai_sessions
-  {:xt/id session-id
-   ::namespace (str namespace)})  ; 'seon.trading -> "seon.trading"
-
-;; Query (compare as string)
-(db/q node "SELECT * FROM ai_sessions WHERE seon$ai$namespace = ?"
-      [(str namespace)])
-```
-
-### Timestamps: Instant vs ZonedDateTime
-
-XTDB returns `ZonedDateTime`, not `Instant`. Handle both in tests:
-
-```clojure
-(defn temporal? [v]
-  (or (instance? java.time.Instant v)
-      (instance? java.time.ZonedDateTime v)))
-
-;; In tests
-(is (temporal? (::ai/timestamp entity)))  ; Not (inst? ...)
-```
-
-### Custom Generators for Complex Types
-
-Use `:gen/fmap` for types that need custom generation:
-
-```clojure
-(schema/register! ::timestamp
-  [:fn {:description "Event timestamp"
-        :gen/fmap (fn [_] (Instant/now))
-        :gen/schema :int}  ; Dummy schema for generator input
-   inst?])
 ```
 
 ## Provider Multimethod Pattern
@@ -632,89 +562,9 @@ Don't split into core.clj, schema.clj, etc. prematurely. Tests go in `test/` mir
 
 Every namespace should have a comprehensive docstring written by its steward agent. The docstring is a living assessment covering purpose, architecture position, consumer analysis, convention compliance, issues, and recommendations. See `docs/agent-playbooks/namespace-stewardship.md` for the full format and process.
 
-## SSE Handler Hot Reload Pattern
+## SSE Patterns
 
-SSE handlers use `def` to create handler objects. By default, `clj-reload` doesn't re-evaluate `def` forms unless the actual code changes, causing stale handlers that don't pick up changes to render functions.
-
-### The Problem
-
-```clojure
-;; BAD: This closure is captured ONCE at def time
-(def my-sse-handler
-  (sse/render-handler
-   (fn [_request]
-     (render-my-page))))  ; Changes to render-my-page won't propagate!
-```
-
-### The Solution: Var References + after-ns-reload Hook
-
-1. **Define render function separately** - enables var indirection
-2. **Pass var reference** - `#'render-fn` derefs to current binding each call
-3. **Add `after-ns-reload` hook** - recreates handler objects after reload
-
-```clojure
-(ns seon.web.myhandlers
-  (:require [seon.web.sse :as sse]))
-
-;; 1. Define render function separately
-(defn- my-page-sse-render
-  "Render function for SSE. Defined separately for hot reload."
-  [_request]
-  (render-my-page))
-
-;; 2. Pass var reference to render-handler
-(def my-page-sse
-  "SSE handler for my page."
-  (sse/render-handler #'my-page-sse-render :poll-ms 2000))
-
-;; 3. Add after-ns-reload hook (called automatically by clj-reload)
-(defn after-ns-reload
-  "Called by clj-reload after namespace reload. Recreates SSE handlers."
-  []
-  (alter-var-root #'my-page-sse
-                  (constantly (sse/render-handler #'my-page-sse-render :poll-ms 2000))))
-```
-
-### Dynamic Handlers (per-request state)
-
-For handlers that need per-request state (e.g., agent-id from path params), cache handlers and clear on reload:
-
-```clojure
-;; Cache handlers per-key for connection reuse
-(defonce ^:private my-handlers (atom {}))
-
-(defn- get-my-handler
-  "Get or create SSE handler for a specific resource."
-  [resource-id]
-  (if-let [handler (get @my-handlers resource-id)]
-    handler
-    (let [render-fn (fn [_req] (render-content resource-id))
-          handler (sse/render-handler render-fn :poll-ms 1000)]
-      (swap! my-handlers assoc resource-id handler)
-      handler)))
-
-(defn my-resource-sse
-  "SSE handler for resource view."
-  [request]
-  (let [resource-id (get-in request [:path-params :id])
-        handler (get-my-handler resource-id)]
-    (handler request)))
-
-(defn after-ns-reload
-  "Clear handler cache on reload."
-  []
-  (reset! my-handlers {}))
-```
-
-### Why This Works
-
-1. **Var references are IFn** - `#'render-fn` derefs to current binding each call
-2. **`after-ns-reload` hook** - clj-reload calls this after namespace reload
-3. **Handler recreation** - new handler objects capture updated var references
-
-### Note on HTTP Handlers
-
-Regular HTTP handlers (Ring functions) **don't need this pattern** - they're called directly through vars. This pattern is specifically for SSE handlers because `render-handler` captures the render function at creation time.
+See `/datastar-web-ui` skill for SSE patterns (direct response vs background push, buffer design, refresh triggers, handler hot reload).
 
 ## Reload Lifecycle Hooks for `defonce` State
 
@@ -765,70 +615,6 @@ clj-reload calls two per-namespace hooks (0-arg functions) if they exist:
 
 ---
 
-## SSE: Direct Response vs Background Push
-
-Two patterns for updating the UI. Pick the right one based on **who initiated the change**.
-
-### Pattern A: Direct Response (user actions)
-
-User clicks a button or submits a form. The handler processes the action and returns HTML. Datastar morphs the DOM from the response. No SSE channel involved.
-
-```clojure
-;; Button in hiccup — @post returns HTML, Datastar morphs it in
-[:button {:data-on:click "@post('/api/agents/toggle-completed')"} "Toggle"]
-
-;; Handler — mutate state, return rendered HTML
-(defn toggle-completed-handler [_request]
-  (toggle-show-completed!)
-  {:status 200
-   :headers {"Content-Type" "text/html"}
-   :body (agents-content)})
-```
-
-**Use for:** toggles, form submissions, any user-initiated mutation.
-**Latency:** ~50-100ms (network + render). Feels instant.
-**Why:** SSE has a broadcast channel with a sliding buffer. Under load, events can be delayed or collapsed. Direct response bypasses all of that — the user gets their result in the HTTP response itself.
-
-### Pattern B: Background Push (system events)
-
-Something changed in the background (agent message, ctx mutation, timer). Call `refresh-all!` to notify all connected SSE clients. Each client re-renders and sends an update only if the view hash changed.
-
-```clojure
-;; After a Datalevin transaction
-(d/transact! conn tx-data)
-(maybe-refresh-sse!)  ; debounced, max once per 200ms
-
-;; Or via atom watch (ctx lifecycle does this automatically)
-(add-watch my-atom ::sse-refresh
-  (fn [_ _ old new]
-    (when (not= old new)
-      (sse/refresh-all!))))
-```
-
-**Use for:** agent progress, real-time data feeds, ctx mutations, any change not triggered by a user click.
-**Latency:** variable (throttle + render loop). Fine for background updates.
-
-### Rule of thumb
-
-**If a user clicked something, return HTML directly. If data changed in the background, use `refresh-all!`.**
-
-### SSE trigger sources (for background push)
-
-1. **ctx-atom pages** — Watches on the ctx atom fire automatically (built into the ctx lifecycle). No manual refresh needed.
-2. **Datalevin-backed pages** — Call `(maybe-refresh-sse!)` after successful `d/transact!` calls. See `seon.ai.datalevin` for the debounced pattern (max once per 200ms via CAS on an atom).
-3. **In-memory atom pages** — Use `add-watch` on the atom to call `refresh-all!` when relevant state changes. See `seon.web.agents/init!` for the agent-registry watch.
-
-`poll-ms` in `render-handler` is a **safety net only** (10+ seconds). Reactive triggers handle timely updates.
-
-### SSE buffer design
-
-The broadcast channel uses a **sliding buffer of size 1**. This means:
-- Under load, only the most recent event is kept (older ones are silently replaced)
-- Clients always converge to the latest state because `render-handler` re-renders from scratch
-- No events are silently dropped — the latest one always gets through
-
-This is why direct response matters for user actions: the SSE channel is optimized for "something changed, re-render" semantics, not for guaranteed delivery of every event.
-
 ## Numeric Limits and Defaults
 
 Avoid arbitrary "magic numbers" that cause bugs or confusion. Every limit should have a documented source.
@@ -874,12 +660,12 @@ Avoid arbitrary "magic numbers" that cause bugs or confusion. Every limit should
 
 ### When to Add `:max` Constraints
 
-✅ **Add `:max` when:**
+Add `:max` when:
 - External API/protocol enforces the limit
 - Mathematical/domain constraint exists (percentages, ratios)
 - Memory/performance safety requires it (document why)
 
-❌ **Don't add `:max` when:**
+Don't add `:max` when:
 - "Just to be safe" with no specific reason
 - The underlying system has no limit
 - To prevent hypothetical abuse (use rate limiting instead)
@@ -898,16 +684,4 @@ When a parameter can legitimately be "unlimited":
 (defn search [{::keys [max-results]}]
   (cond-> (base-query)
     max-results (add-limit max-results)))
-```
-
-### Batch Sizes and Tuning Parameters
-
-Document the rationale and how to override:
-
-```clojure
-(def ^:const xtdb-batch-size
-  "Documents per XTDB transaction.
-   Tuned for memory vs latency tradeoff.
-   Override for bulk loads or constrained envs."
-  1000)
 ```

@@ -7,6 +7,8 @@ description: "Multi-agent browser coordination for Seon. Use when debugging web 
 
 You have Chrome MCP tools (`mcp__claude-in-chrome__*`) for browser automation. This skill covers **multi-agent coordination** - how to share browser resources without conflicts.
 
+**Tool names:** This skill uses shorthand names (e.g., `navigate`, `computer screenshot`). The actual MCP tool names are prefixed with `mcp__claude-in-chrome__` (e.g., `mcp__claude-in-chrome__navigate`).
+
 ## Tab Ownership Protocol
 
 Agents share the browser. Follow these rules:
@@ -22,6 +24,23 @@ tabs_context_mcp → see what exists
 tabs_create_mcp → get YOUR tab (remember this ID)
 navigate to your URL
 ```
+
+## Seon URLs
+
+| Page | Path | Description |
+|------|------|-------------|
+| Dashboard | `/` | Main dashboard (root) |
+| Agent Observatory | `/agents` | Agent list and status |
+| Agent Detail | `/agents/{agent-id}` | Single agent view |
+| Flow Monitor | `/flows` | core.async flow status |
+| Log Viewer | `/logs` | Application logs |
+| Namespace Page | `/ns/{namespace}` | Per-namespace view (e.g., `/ns/seon.trading`) |
+| Function Call | `/ns/{namespace}/{function}` | POST to call, GET to read |
+| Health Check | `/api/health` | JSON health endpoint |
+
+**Base URLs:**
+- HTTP: `http://localhost:8080`
+- HTTPS (Caddy): `https://localhost:3030`
 
 ## Quick Workflow: Verify UI Change
 
@@ -64,3 +83,11 @@ typeof window.Datastar !== 'undefined' ? 'loaded' : 'NOT loaded'
 | Element ref stale | Refs invalidate on navigation - re-find |
 | No network captured | Call `read_network_requests` BEFORE the action |
 | Screenshot fails | Can't screenshot chrome:// URLs - navigate first |
+
+## Key Files
+
+| File | Purpose |
+|------|---------|
+| `src/seon/web/routes.clj` | Route definitions |
+| `src/seon/web/sse.clj` | SSE core |
+| `src/seon/web/components.clj` | UI components |

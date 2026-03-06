@@ -62,6 +62,8 @@ Data changed in the background. Call `refresh-all!` to notify SSE clients.
 
 This applies to all event handlers: `data-on:click`, `data-on:submit`, `data-on:keydown`, etc.
 
+**Known issue:** Some existing code in `html.clj` and `components.clj` incorrectly uses `data-on-click` (hyphen). Fix these when you encounter them — do not introduce new hyphen-style attributes.
+
 ## Key Datastar Attributes
 
 | Attribute | Purpose | Example |
@@ -72,6 +74,8 @@ This applies to all event handlers: `data-on:click`, `data-on:submit`, `data-on:
 | `data-on:submit` | Form submission | `"@post('/api/submit')"` |
 | `data-model` | Two-way binding | `"$inputValue"` |
 | `data-show` | Conditional display | `"$isVisible"` |
+| `data-init` | Run JS on element init | `"@get('/api/sse')"` |
+| `data-preserve-attr` | Preserve attr across SSE morphs | `"open"` (on `<details>`) |
 
 ## Hiccup with Datastar
 
