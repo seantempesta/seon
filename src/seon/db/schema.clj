@@ -9,8 +9,8 @@
    - `register-entity-schema!` -- register a persisted entity schema
    - `validate-persisted-schemas!` -- startup consistency check
 
-   Annotate entries with `:db/*` properties for database concerns:
-     [:map [:foo/id {:db/unique :db.unique/identity} :uuid]]"
+   Annotate entries with `:seon.db/*` properties for persistence:
+     [:map [:foo/id {:seon.db/identity true} :uuid]]"
   (:require [clojure.string :as str]
             [malli.core :as m]
             [taoensso.timbre :as log]))
@@ -86,15 +86,25 @@
 
 (declare malli-map->datalevin-schema)
 
+(defn- seon-db-props->db-props
+  "Translate :seon.db/* Malli properties to :db/* Datalevin properties."
+  [schema]
+  (let [props (m/properties schema)]
+    (cond-> {}
+      (:seon.db/identity props) (assoc :db/unique :db.unique/identity)
+      (:seon.db/unique props)   (assoc :db/unique :db.unique/value))))
+
 (defn- schema->datalevin-attr
-  "Convert a single Malli entry schema to [attr-map nested-schemas]."
+  "Convert a single Malli entry schema to [attr-map nested-schemas].
+   Reads :seon.db/* properties from leaf schema and translates to :db/*."
   [child-schema]
-  (let [schema-type (m/type child-schema)]
+  (let [schema-type (m/type child-schema)
+        seon-props (seon-db-props->db-props child-schema)]
     (case schema-type
       (:string :int :double :float :boolean :keyword :symbol :uuid :inst
        string? int? double? float? boolean? keyword? symbol? uuid? inst?)
       [(when-let [dt (malli-type->datalevin-type schema-type)]
-         {:db/valueType dt}) nil]
+         (merge {:db/valueType dt} seon-props)) nil]
 
       :maybe
       (let [inner (first (m/children child-schema))]
@@ -104,23 +114,24 @@
       (let [inner (first (m/children child-schema))
             [attr nested] (schema->datalevin-attr inner)]
         [(when attr
-           (assoc attr :db/cardinality :db.cardinality/many)) nested])
+           (merge (assoc attr :db/cardinality :db.cardinality/many) seon-props)) nested])
 
       :enum
       (let [values (m/children child-schema)
             dt (infer-enum-type values)]
-        [(when dt {:db/valueType dt}) nil])
+        [(when dt (merge {:db/valueType dt} seon-props)) nil])
 
       :map
       (let [nested (malli-map->datalevin-schema child-schema)]
-        [{:db/valueType :db.type/ref
-          :db/isComponent true} nested])
+        [(merge {:db/valueType :db.type/ref
+                 :db/isComponent true} seon-props) nested])
 
       :seon.db/ref
-      [{:db/valueType :db.type/ref} nil]
+      [(merge {:db/valueType :db.type/ref} seon-props) nil]
 
       :malli.core/schema
-      (schema->datalevin-attr (m/deref child-schema))
+      (let [[attr nested] (schema->datalevin-attr (m/deref child-schema))]
+        [(when attr (merge attr seon-props)) nested])
 
       [nil nil])))
 
@@ -141,7 +152,15 @@
    Returns `{attr {:db/valueType ... :db/cardinality ...}}` map."
   {:malli/schema [:=> [:cat :any] [:map-of :keyword [:map-of :keyword :any]]]}
   [malli-schema]
-  (let [schema (if (m/schema? malli-schema) malli-schema (m/schema malli-schema))
+  (let [schema (try
+                 (if (m/schema? malli-schema) malli-schema (m/schema malli-schema))
+                 (catch Exception e
+                   (throw (ex-info
+                           (str "Cannot resolve Malli schema in malli-map->datalevin-schema. "
+                                "If using a schema reference (e.g. :seon.foo/bar), ensure "
+                                "schema/register! is called BEFORE entity schema defs in the file. "
+                                "Original error: " (ex-message e))
+                           {:schema malli-schema :cause e}))))
         entries (m/entries schema)]
     (reduce
      (fn [acc [k entry-schema]]

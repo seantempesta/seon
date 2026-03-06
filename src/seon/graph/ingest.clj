@@ -36,6 +36,59 @@
             [taoensso.timbre :as log]))
 
 ;;; ---------------------------------------------------------------------------
+;;; Attribute Schema Registration (must come before entity schemas)
+;;; ---------------------------------------------------------------------------
+
+;; Namespace entity attrs
+(schema/register! :seon.ns/name [:string {:seon.db/identity true}])
+(schema/register! :seon.ns/file :string)
+(schema/register! :seon.ns/doc :string)
+(schema/register! :seon.ns/target :keyword)
+(schema/register! :seon.ns/dynamic? :boolean)
+
+;; Function entity attrs
+(schema/register! :seon.fn/qualified-name [:string {:seon.db/identity true}])
+(schema/register! :seon.fn/namespace :string)
+(schema/register! :seon.fn/name :string)
+(schema/register! :seon.fn/doc :string)
+(schema/register! :seon.fn/arglists :string)
+(schema/register! :seon.fn/row :int)
+(schema/register! :seon.fn/private :boolean)
+(schema/register! :seon.fn/updated-at :inst)
+(schema/register! :seon.fn/input-spec :seon.db/ref)
+(schema/register! :seon.fn/output-spec :seon.db/ref)
+
+;; Var entity attrs
+(schema/register! :seon.var/qualified-name [:string {:seon.db/identity true}])
+(schema/register! :seon.var/namespace :string)
+(schema/register! :seon.var/name :string)
+(schema/register! :seon.var/doc :string)
+(schema/register! :seon.var/row :int)
+(schema/register! :seon.var/private :boolean)
+(schema/register! :seon.var/value-type :keyword)
+(schema/register! :seon.var/updated-at :inst)
+
+;; Call graph attrs
+(schema/register! :seon.call/from-fn :seon.db/ref)
+(schema/register! :seon.call/to-fn :seon.db/ref)
+(schema/register! :seon.call/row :int)
+
+;; NS dependency attrs
+(schema/register! :seon.ns.dep/from-ns :string)
+(schema/register! :seon.ns.dep/to-ns :string)
+(schema/register! :seon.ns.dep/alias :string)
+
+;; Spec/schema attrs
+(schema/register! :seon.spec/key [:keyword {:seon.db/identity true}])
+(schema/register! :seon.spec/namespace :string)
+(schema/register! :seon.spec/definition :string)
+(schema/register! :seon.spec/base-type :keyword)
+(schema/register! :seon.spec/contains-keys [:vector :keyword])
+(schema/register! :seon.spec/optional-keys [:vector :keyword])
+(schema/register! :seon.spec/references [:vector :keyword])
+(schema/register! :seon.spec/updated-at :inst)
+
+;;; ---------------------------------------------------------------------------
 ;;; Datalevin Entity Schemas (Malli is the source of truth)
 ;;; ---------------------------------------------------------------------------
 
@@ -43,7 +96,7 @@
   "Malli schema for a namespace entity.
    Identity: :seon.ns/name. All persisted attrs have concrete types."
   [:map
-   [:seon.ns/name {:db/unique :db.unique/identity} :string]
+   [:seon.ns/name :seon.ns/name]
    [:seon.ns/doc {:optional true} :string]
    [:seon.ns/file {:optional true} :string]
    [:seon.ns/target {:optional true} :keyword]
@@ -54,7 +107,7 @@
    Identity: :seon.fn/qualified-name. Ref fields (:input-spec, :output-spec)
    point at :seon.spec/key entities via lookup refs at transact time."
   [:map
-   [:seon.fn/qualified-name {:db/unique :db.unique/identity} :string]
+   [:seon.fn/qualified-name :seon.fn/qualified-name]
    [:seon.fn/namespace :string]
    [:seon.fn/name :string]
    [:seon.fn/doc {:optional true} :string]
@@ -86,7 +139,7 @@
   "Malli schema for a spec/schema entity.
    Identity: :seon.spec/key. Cardinality-many fields use [:vector :keyword]."
   [:map
-   [:seon.spec/key {:db/unique :db.unique/identity} :keyword]
+   [:seon.spec/key :seon.spec/key]
    [:seon.spec/namespace :string]
    [:seon.spec/definition :string]
    [:seon.spec/base-type :keyword]
@@ -99,7 +152,7 @@
   "Malli schema for a var entity (def, not defn).
    Identity: :seon.var/qualified-name."
   [:map
-   [:seon.var/qualified-name {:db/unique :db.unique/identity} :string]
+   [:seon.var/qualified-name :seon.var/qualified-name]
    [:seon.var/namespace :string]
    [:seon.var/name :string]
    [:seon.var/doc {:optional true} :string]
@@ -123,60 +176,6 @@
          (db-schema/malli-map->datalevin-schema ns-dep-entity-schema)
          (db-schema/malli-map->datalevin-schema spec-entity-schema)
          (db-schema/malli-map->datalevin-schema var-entity-schema)))
-
-;;; ---------------------------------------------------------------------------
-;;; Schema Registration
-;;; ---------------------------------------------------------------------------
-
-;; Datalevin entity attributes (registered so db/transact! enforcement passes)
-;; Namespace entity attrs
-(schema/register! :seon.ns/name [:string {:db/unique :db.unique/identity}])
-(schema/register! :seon.ns/file :string)
-(schema/register! :seon.ns/doc :string)
-(schema/register! :seon.ns/target :keyword)
-(schema/register! :seon.ns/dynamic? :boolean)
-
-;; Function entity attrs
-(schema/register! :seon.fn/qualified-name [:string {:db/unique :db.unique/identity}])
-(schema/register! :seon.fn/namespace :string)
-(schema/register! :seon.fn/name :string)
-(schema/register! :seon.fn/doc :string)
-(schema/register! :seon.fn/arglists :string)
-(schema/register! :seon.fn/row :int)
-(schema/register! :seon.fn/private :boolean)
-(schema/register! :seon.fn/updated-at :inst)
-(schema/register! :seon.fn/input-spec :seon.db/ref)
-(schema/register! :seon.fn/output-spec :seon.db/ref)
-
-;; Var entity attrs
-(schema/register! :seon.var/qualified-name [:string {:db/unique :db.unique/identity}])
-(schema/register! :seon.var/namespace :string)
-(schema/register! :seon.var/name :string)
-(schema/register! :seon.var/doc :string)
-(schema/register! :seon.var/row :int)
-(schema/register! :seon.var/private :boolean)
-(schema/register! :seon.var/value-type :keyword)
-(schema/register! :seon.var/updated-at :inst)
-
-;; Call graph attrs
-(schema/register! :seon.call/from-fn :seon.db/ref)
-(schema/register! :seon.call/to-fn :seon.db/ref)
-(schema/register! :seon.call/row :int)
-
-;; NS dependency attrs
-(schema/register! :seon.ns.dep/from-ns :string)
-(schema/register! :seon.ns.dep/to-ns :string)
-(schema/register! :seon.ns.dep/alias :string)
-
-;; Spec/schema attrs
-(schema/register! :seon.spec/key [:keyword {:db/unique :db.unique/identity}])
-(schema/register! :seon.spec/namespace :string)
-(schema/register! :seon.spec/definition :string)
-(schema/register! :seon.spec/base-type :keyword)
-(schema/register! :seon.spec/contains-keys [:vector :keyword])
-(schema/register! :seon.spec/optional-keys [:vector :keyword])
-(schema/register! :seon.spec/references [:vector :keyword])
-(schema/register! :seon.spec/updated-at :inst)
 
 (schema/register! ::db-name
                   [:keyword {:description "Database name keyword (e.g. :seon.runtime)"}])

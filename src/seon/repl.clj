@@ -79,7 +79,7 @@
    All persisted attrs have concrete types — no :any, no [:maybe X].
    :form/name is optional because expressions and requires have no name."
   [:map
-   [:form/id {:db/unique :db.unique/identity} :uuid]
+   [:form/id :form/id]
    [:form/namespace :string]
    [:form/type :keyword]
    [:form/name {:optional true} :string]

@@ -54,6 +54,7 @@
 
 (schema/register! ::instance-id
                   [:string {:min 1
+                            :seon.db/identity true
                             :description "Unique instance identifier"}])
 
 (schema/register! ::namespace
@@ -181,7 +182,7 @@
    Defines the shape of what gets stored in Datalevin.
    All persisted attrs have concrete types — no :any, no [:maybe X]."
   [:map
-   [:seon.ctx/instance-id {:db/unique :db.unique/identity} :string]
+   [:seon.ctx/instance-id ::instance-id]
    [:seon.ctx/namespace {:optional true} :symbol]
    [:seon.ctx/data :string]
    [:seon.ctx/updated-at :inst]])

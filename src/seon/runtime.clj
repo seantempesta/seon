@@ -52,6 +52,7 @@
 
 (schema/register! ::namespace
                   [:string {:min 1
+                            :seon.db/identity true
                             :description "Namespace string identifier"}])
 
 (schema/register! ::status
@@ -167,6 +168,42 @@
                   [:map
                    [::reset :boolean]])
 
+;;; Attribute Schema Registration (must come before entity schemas)
+
+;; Agent run entity attributes — registered so db/transact! enforcement passes
+(schema/register! :seon.agent.run/id
+                  [:string {:min 1 :seon.db/identity true :description "Agent run identifier"}])
+(schema/register! :seon.agent.run/runtime
+                  :seon.db/ref)
+(schema/register! :seon.agent.run/provider
+                  [:keyword {:description "AI provider keyword"}])
+(schema/register! :seon.agent.run/status
+                  [:keyword {:description "Run status keyword"}])
+(schema/register! :seon.agent.run/started-at
+                  :inst)
+(schema/register! :seon.agent.run/stopped-at
+                  :inst)
+(schema/register! :seon.agent.run/cost-usd
+                  [:double {:min 0.0}])
+(schema/register! :seon.agent.run/num-turns
+                  [:int {:min 0}])
+(schema/register! :seon.agent.run/duration-ms
+                  [:int {:min 0}])
+(schema/register! :seon.agent.run/namespace
+                  [:string {:min 1}])
+
+;; Flow snapshot entity attributes — registered so db/transact! enforcement passes
+(schema/register! :seon.flow.snap/id
+                  [:string {:min 1 :seon.db/identity true :description "Unique snapshot ID: label/instant"}])
+(schema/register! :seon.flow.snap/label
+                  [:string {:min 1 :description "Flow label this snapshot belongs to"}])
+(schema/register! :seon.flow.snap/created-at
+                  :inst)
+(schema/register! :seon.flow.snap/reason
+                  [:enum :shutdown :backup :manual :error])
+(schema/register! :seon.flow.snap/data
+                  [:string {:description "pr-str of flow state map"}])
+
 ;;; ---------------------------------------------------------------------------
 ;;; Datalevin Entity Schemas (Malli is the source of truth)
 ;;; ---------------------------------------------------------------------------
@@ -177,7 +214,7 @@
    All persisted attrs have concrete types -- no :any, no [:maybe X].
    Optional fields are conditionally added via cond-> in build-tx-map."
   [:map
-   [:seon.runtime/namespace {:db/unique :db.unique/identity} :string]
+   [:seon.runtime/namespace ::namespace]
    [:seon.runtime/status [:enum :running :stopped :crashed :paused]]
    [:seon.runtime/location [:enum :in-process :external]]
    [:seon.runtime/session-id {:optional true} :string]
@@ -193,7 +230,7 @@
    start creates id/status/namespace/provider/started-at,
    complete adds stopped-at/cost-usd/num-turns/duration-ms."
   [:map
-   [:seon.agent.run/id {:db/unique :db.unique/identity} :string]
+   [:seon.agent.run/id :seon.agent.run/id]
    [:seon.agent.run/runtime {:optional true} :seon.db/ref]
    [:seon.agent.run/provider {:optional true} :keyword]
    [:seon.agent.run/status :keyword]
@@ -208,7 +245,7 @@
   "Malli schema for a flow snapshot entity.
    All fields are required -- snapshot-topology! always provides all of them."
   [:map
-   [:seon.flow.snap/id {:db/unique :db.unique/identity} :string]
+   [:seon.flow.snap/id :seon.flow.snap/id]
    [:seon.flow.snap/label :string]
    [:seon.flow.snap/created-at :inst]
    [:seon.flow.snap/reason [:enum :shutdown :backup :manual :error]]
@@ -563,28 +600,6 @@
 (schema/register! ::duration-ms
                   [:int {:min 0 :description "Duration in milliseconds"}])
 
-;; Agent run entity attributes — registered so db/transact! enforcement passes
-(schema/register! :seon.agent.run/id
-                  [:string {:min 1 :description "Agent run identifier"}])
-(schema/register! :seon.agent.run/runtime
-                  :seon.db/ref)
-(schema/register! :seon.agent.run/provider
-                  [:keyword {:description "AI provider keyword"}])
-(schema/register! :seon.agent.run/status
-                  [:keyword {:description "Run status keyword"}])
-(schema/register! :seon.agent.run/started-at
-                  :inst)
-(schema/register! :seon.agent.run/stopped-at
-                  :inst)
-(schema/register! :seon.agent.run/cost-usd
-                  [:double {:min 0.0}])
-(schema/register! :seon.agent.run/num-turns
-                  [:int {:min 0}])
-(schema/register! :seon.agent.run/duration-ms
-                  [:int {:min 0}])
-(schema/register! :seon.agent.run/namespace
-                  [:string {:min 1}])
-
 (schema/register! ::start-agent-run-request
                   [:map
                    [::agent-run-id ::agent-run-id]
@@ -759,18 +774,6 @@
 
 (schema/register! ::reason
                   [:enum :shutdown :backup :manual :error])
-
-;; Flow snapshot entity attributes — registered so db/transact! enforcement passes
-(schema/register! :seon.flow.snap/id
-                  [:string {:min 1 :description "Unique snapshot ID: label/instant"}])
-(schema/register! :seon.flow.snap/label
-                  [:string {:min 1 :description "Flow label this snapshot belongs to"}])
-(schema/register! :seon.flow.snap/created-at
-                  :inst)
-(schema/register! :seon.flow.snap/reason
-                  [:enum :shutdown :backup :manual :error])
-(schema/register! :seon.flow.snap/data
-                  [:string {:description "pr-str of flow state map"}])
 
 (schema/register! ::snapshot-request
                   [:map
