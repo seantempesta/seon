@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive, agent]
+---
+
 > **Status: ARCHIVED** — Complete — Phase 6 done
 
 > **Status: ARCHIVED** — Complete — Phase 6 done

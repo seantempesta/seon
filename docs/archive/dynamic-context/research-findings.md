@@ -1,3 +1,9 @@
+---
+type: prd
+status: abandoned
+tags: [prd, archive]
+---
+
 # Dynamic Context Injection: Research Findings
 
 **Date**: 2026-01-30

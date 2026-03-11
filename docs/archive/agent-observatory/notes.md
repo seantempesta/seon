@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive, agent]
+---
+
 # Agent Observatory - Implementation Notes
 
 ## Phase 1: Structured Agent Log

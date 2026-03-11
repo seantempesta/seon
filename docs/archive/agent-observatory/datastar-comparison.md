@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive, web, agent]
+---
+
 # Datastar Setup Comparison for Agent Observatory
 
 ## Summary
@@ -78,7 +84,7 @@ For the agent observatory streaming messages, we need:
 ## Question 4: Is there an official Clojure SDK now?
 
 **Yes.** The official Datastar Clojure SDK is at:
-- Repository: https://github.com/starfederation/datastar-clojure
+- Repository: [datastar-clojure](https://github.com/starfederation/datastar-clojure)
 - Status: Active, well-maintained
 - Features: Full SSE generation, Malli schemas, http-kit and Ring adapters, Brotli compression
 
@@ -173,6 +179,6 @@ Or use CSS on the container:
 
 ## References
 
-- Datastar SSE Events: https://data-star.dev/reference/sse_events
-- Official Clojure SDK: https://github.com/starfederation/datastar-clojure
-- Hyperlith: https://github.com/andersmurphy/hyperlith
+- Datastar SSE Events: [SSE events reference](https://data-star.dev/reference/sse_events)
+- Official Clojure SDK: [datastar-clojure](https://github.com/starfederation/datastar-clojure)
+- Hyperlith: [andersmurphy/hyperlith](https://github.com/andersmurphy/hyperlith)

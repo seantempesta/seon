@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive, agent]
+---
+
 # Agent Observatory Streaming Research
 
 Research findings for building a smooth, real-time agent message viewer using Datastar.

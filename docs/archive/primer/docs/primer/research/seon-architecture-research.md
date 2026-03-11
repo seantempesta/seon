@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # Seon Architecture Research for Primer Domain
 
 ## Key Findings

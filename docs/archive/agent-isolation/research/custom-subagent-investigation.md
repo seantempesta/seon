@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive, agent]
+---
+
 # Custom Subagent Investigation
 
 ## Problem Statement
@@ -110,7 +116,7 @@ This forces Claude Code to use the Max subscription instead of API billing. Must
 
 If custom subagents via `.claude/agents/` don't work reliably, investigate the **Claude Agent SDK** as an alternative:
 
-**Docs**: https://platform.claude.com/docs/en/agent-sdk/overview#subagents
+**Docs**: [Agent SDK subagents](https://platform.claude.com/docs/en/agent-sdk/overview#subagents)
 
 The Agent SDK allows building custom agents programmatically with full control over:
 - System prompts
@@ -245,7 +251,7 @@ async def main():
 ### Alternative: Report bug to Anthropic
 
 The markdown agent body not loading could be a bug. We could:
-1. File issue at https://github.com/anthropics/claude-code/issues
+1. File issue at [claude-code/issues](https://github.com/anthropics/claude-code/issues)
 2. Wait for fix
 3. Continue with workaround (description-only)
 

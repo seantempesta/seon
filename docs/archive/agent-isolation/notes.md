@@ -1,3 +1,9 @@
+---
+type: prd
+status: abandoned
+tags: [prd, archive, agent]
+---
+
 # Agent Isolation - Notes & Gotchas
 
 ## Persistent nREPL Sessions (2026-01-09)

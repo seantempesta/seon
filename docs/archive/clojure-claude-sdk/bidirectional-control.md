@@ -1,3 +1,9 @@
+---
+type: prd
+status: abandoned
+tags: [prd, archive]
+---
+
 # PRD: Bidirectional Agent Control
 
 **Status:** Phase 1 Complete, Phase 2 Paused (superseded by AI Namespace Refactor)
@@ -80,10 +86,10 @@ We're missing:
 
 | Resource | Purpose |
 |----------|---------|
-| https://github.com/hesreallyhim/awesome-claude-code | Community integrations, undocumented features |
-| https://platform.claude.com/docs/en/agent-sdk/hooks | Official hooks documentation |
-| https://platform.claude.com/docs/en/agent-sdk/typescript | TypeScript SDK reference |
-| https://github.com/anthropics/claude-code/issues | Bug reports may reveal internals |
+| [awesome-claude-code](https://github.com/hesreallyhim/awesome-claude-code) | Community integrations, undocumented features |
+| [Agent SDK hooks](https://platform.claude.com/docs/en/agent-sdk/hooks) | Official hooks documentation |
+| [TypeScript SDK](https://platform.claude.com/docs/en/agent-sdk/typescript) | TypeScript SDK reference |
+| [claude-code/issues](https://github.com/anthropics/claude-code/issues) | Bug reports may reveal internals |
 
 ---
 

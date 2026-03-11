@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # Flaky Property-Based Test Investigation
 
 ## Executive Summary

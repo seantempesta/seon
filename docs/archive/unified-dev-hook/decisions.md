@@ -1,3 +1,9 @@
+---
+type: decision
+status: completed
+tags: [decision, archive]
+---
+
 # Architectural Decisions: Unified Dev Hook
 
 **Last Updated:** 2024-12-28

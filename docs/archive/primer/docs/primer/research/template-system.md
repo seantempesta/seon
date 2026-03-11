@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # Primer Template System
 
 **Core Idea:** The AI doesn't generate HTML - it selects and parameterizes templates.

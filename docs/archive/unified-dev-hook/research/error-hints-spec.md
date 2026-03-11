@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # Error Hints Requirements Specification
 
 ## Purpose

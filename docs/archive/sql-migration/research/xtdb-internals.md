@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive, database]
+---
+
 # XTDB v2 Internals Analysis
 
 **Status**: Complete

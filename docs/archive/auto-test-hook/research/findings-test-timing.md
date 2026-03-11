@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # Test Timing and Storage Research Findings
 
 **Date:** 2025-12-05

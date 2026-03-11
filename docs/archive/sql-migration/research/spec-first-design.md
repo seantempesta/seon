@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive, database]
+---
+
 # Spec-First Query Interface Design
 
 **Date**: 2025-12-17

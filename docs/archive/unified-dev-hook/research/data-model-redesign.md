@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # Research: Edit/Review Tracking Data Model Redesign
 
 **Date:** 2025-12-29

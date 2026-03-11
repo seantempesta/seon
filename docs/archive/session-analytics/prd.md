@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 > **Status: ARCHIVED** — Used XTDB API, needs full rewrite
 
 > **Status: ARCHIVED** — Used XTDB API, needs full rewrite

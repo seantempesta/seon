@@ -73,7 +73,8 @@
                    :component :concept :issue :architecture :vision :reference
                    :database :schema :flow :web :agent :trading :health
                    :prd :decision :research
-                   :dashboard :index])
+                   :dashboard :index
+                   :capability :milestone :orchestrator :archive])
 
 (schema/register! ::frontmatter
                   [:map-of :keyword :string])
@@ -260,30 +261,32 @@
     (doseq [[idx line] (map-indexed vector lines)]
       (let [line-num (inc idx)]
         (when-not (contains? code-lines line-num)
-          ;; Wikilinks: [[target]] or [[target|text]]
-          (doseq [m (re-seq #"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]" line)]
-            (swap! results conj
-                   (cond-> {::type :wikilink
-                            ::target (nth m 1)
-                            ::line line-num}
-                     (nth m 2) (assoc ::text (nth m 2)))))
-          ;; Markdown links: [text](url) — but not images ![text](url)
-          (doseq [m (re-seq #"(?<!!)\[([^\]]*)\]\(([^)]+)\)" line)]
-            (swap! results conj
-                   {::type :markdown
-                    ::target (nth m 2)
-                    ::text (nth m 1)
-                    ::line line-num}))
-          ;; Bare URLs
-          (doseq [m (re-seq #"(?<!\(|\"|\[)https?://[^\s\)>\]\"']+" line)]
-            ;; Only if not already inside a markdown link or angle brackets
-            (let [before-url (subs line 0 (or (str/index-of line m) 0))]
-              (when-not (or (re-find #"\]\($" before-url)
-                            (str/ends-with? before-url "<"))
-                (swap! results conj
-                       {::type :bare-url
-                        ::target m
-                        ::line line-num})))))))
+          ;; Strip inline code spans to avoid false positives across all link types
+          (let [stripped (str/replace line #"`[^`]+`" (fn [m] (apply str (repeat (count m) " "))))]
+            ;; Wikilinks: [[target]] or [[target|text]]
+            (doseq [m (re-seq #"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]" stripped)]
+              (swap! results conj
+                     (cond-> {::type :wikilink
+                              ::target (nth m 1)
+                              ::line line-num}
+                       (nth m 2) (assoc ::text (nth m 2)))))
+            ;; Markdown links: [text](url) — but not images ![text](url)
+            (doseq [m (re-seq #"(?<!!)\[([^\]]*)\]\(([^)]+)\)" stripped)]
+              (swap! results conj
+                     {::type :markdown
+                      ::target (nth m 2)
+                      ::text (nth m 1)
+                      ::line line-num}))
+            ;; Bare URLs
+            (doseq [m (re-seq #"(?<!\(|\"|\[)https?://[^\s\)>\]\"']+" stripped)]
+              ;; Only if not already inside a markdown link or angle brackets
+              (let [before-url (subs stripped 0 (or (str/index-of stripped m) 0))]
+                (when-not (or (re-find #"\]\($" before-url)
+                              (str/ends-with? before-url "<"))
+                  (swap! results conj
+                         {::type :bare-url
+                          ::target m
+                          ::line line-num}))))))))
     @results))
 
 (defn- extract-sections
@@ -554,7 +557,8 @@
   #{:component :concept :issue :architecture :vision :reference
     :database :schema :flow :web :agent :trading :health
     :prd :decision :research
-    :dashboard :index})
+    :dashboard :index
+    :capability :milestone :orchestrator :archive})
 
 (defn- parse-tag-list
   "Parse a frontmatter tags value like '[database, schema]' into keywords."

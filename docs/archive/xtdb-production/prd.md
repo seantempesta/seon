@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive, database]
+---
+
 > **Status: ARCHIVED** — XTDB ops config, not core infra
 
 > **Status: ARCHIVED** — XTDB ops config, not core infra

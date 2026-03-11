@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive, database]
+---
+
 > **Status: ARCHIVED** — Superseded by Datalevin-backed observatory
 
 > **Status: ARCHIVED** — Superseded by Datalevin-backed observatory

@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # Recommendations for Unified Dev Hook Implementation
 
 Based on research into Clojure parsing, Malli schema resolution, XTDB storage patterns, and change detection strategies.

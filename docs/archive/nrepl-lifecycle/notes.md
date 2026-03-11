@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 # nREPL Lifecycle Notes
 
 ## Gotchas for Future Agents

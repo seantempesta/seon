@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 > **Status: ARCHIVED** — Complete — all 14 tool renderers done
 
 > **Status: ARCHIVED** — Complete — all 14 tool renderers done

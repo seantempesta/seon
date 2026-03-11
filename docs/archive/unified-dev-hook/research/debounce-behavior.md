@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # Research: Gemini Review Debounce Behavior
 
 **Date:** 2025-12-29

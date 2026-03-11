@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # The Ctx-as-OS Pattern
 
 **Core Insight:** The entire system is one data structure. UI is derived. Agent writes data. Specs constrain writes.

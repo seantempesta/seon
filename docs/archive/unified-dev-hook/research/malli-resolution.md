@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # Malli Schema Resolution
 
 Research on how to resolve Malli schema references recursively for building AI context.

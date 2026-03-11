@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # Stage 1: System Startup Verification
 
 **Date:** 2025-12-13

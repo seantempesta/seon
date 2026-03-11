@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive, agent]
+---
+
 # Complete Isolation Research: Separate JVM Per Agent
 
 Research conducted: 2026-01-04

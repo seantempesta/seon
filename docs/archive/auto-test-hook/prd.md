@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 # PRD: Automatic Test Running on Clojure File Edits
 
 **Status:** Implementation Complete - Testing in Progress

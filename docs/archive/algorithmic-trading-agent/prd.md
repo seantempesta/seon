@@ -1,3 +1,9 @@
+---
+type: prd
+status: abandoned
+tags: [prd, archive, trading, agent]
+---
+
 > **Status: ARCHIVED** — Superseded — old XTDB-first design
 
 > **Status: ARCHIVED** — Superseded — old XTDB-first design

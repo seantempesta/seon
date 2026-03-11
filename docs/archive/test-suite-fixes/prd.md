@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 # Test Suite Fixes PRD
 
 ## Problem Statement

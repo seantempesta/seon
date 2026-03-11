@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # Stable Document Ordering for Gemini Cache Optimization
 
 **Date**: 2025-12-29

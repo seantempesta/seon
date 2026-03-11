@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 # Seon: Personal Runtime OS
 
 Transform ml-options-trading into **Seon** - a personal "OS for life" with modular domains (trading, health, finance, tasks, knowledge).

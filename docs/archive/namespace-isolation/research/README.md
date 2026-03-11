@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 # Namespace Isolation Research
 
 This directory contains research findings from each phase.

@@ -1,3 +1,9 @@
+---
+type: decision
+status: completed
+tags: [decision, archive]
+---
+
 # Primer Decisions Log
 
 Record architectural decisions with rationale.

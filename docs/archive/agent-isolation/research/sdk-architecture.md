@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive, agent]
+---
+
 # Claude Agent SDK Architecture Research
 
 **Date**: 2026-01-09

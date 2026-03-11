@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive, database]
+---
+
 # XTDB Multi-Database Research
 
 **Date**: 2026-01-04

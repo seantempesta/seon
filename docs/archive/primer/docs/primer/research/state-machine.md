@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # The Primer Loop: State Machine & Checkpointing
 
 **The Simple Loop:**

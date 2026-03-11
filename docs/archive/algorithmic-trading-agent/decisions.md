@@ -1,3 +1,9 @@
+---
+type: decision
+status: abandoned
+tags: [decision, archive, trading, agent]
+---
+
 # Decisions Log: Algorithmic Trading Agent
 
 **Last Updated:** 2025-12-21

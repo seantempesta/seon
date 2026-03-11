@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 > **Status: ARCHIVED** — Complete — implemented in namespace-ui
 
 > **Status: ARCHIVED** — Complete — implemented in namespace-ui
