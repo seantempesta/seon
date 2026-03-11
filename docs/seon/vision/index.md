@@ -277,16 +277,16 @@ Persistent agents assigned to namespaces. Ownership handoff, evolution tracking,
 
 Milestones are thresholds, not capabilities. Each is crossed when its constituent capabilities are all at least partial. See individual milestone notes for verification criteria and blocking issues.
 
-| Milestone | Status | Description |
-|-----------|--------|-------------|
-| [[vision/m1-reliable-runtime\|M1: Reliable Runtime]] | partial | Isolated JVM agents, flow routing backbone, self-healing pool, crash-resilient database |
-| [[vision/m2-trustworthy-data\|M2: Trustworthy Data]] | partial | Malli as single schema source, validated writes, Nippy serialization, no `:any` |
-| [[vision/m3-convention-uniformity\|M3: Convention Uniformity]] | in-progress | Every public function: map-in/map-out, `:malli/schema`, namespaced keys, no dead code |
-| [[vision/m4-discoverable-codebase\|M4: Discoverable Codebase]] | partial | Given a data shape, find functions. One discovery mechanism for all use cases |
-| [[vision/m5-observable-system\|M5: Observable System]] | partial | Real-time visibility into agents, namespaces, schemas, data, and health |
-| [[vision/m6-eval-pipeline\|M6: The Eval Pipeline]] | not-started | REPL-first development with constraint validation, `*ctx*` as world, `persist!` to disk |
-| [[vision/m7-namespace-as-process\|M7: Namespace as Living Process]] | not-started | Custom step functions, subscriptions, feeds, reactive surface, smart defaults |
-| [[vision/m8-autonomous-agents\|M8: Autonomous Namespace Agents]] | not-started | Agents steward namespaces through typed messages, progressive enhancement, self-composition |
+| Milestone | Status | Bootstrap | Description |
+|-----------|--------|-----------|-------------|
+| [[vision/m1-reliable-runtime\|M1: Reliable Runtime]] | partial | Foundation | Isolated JVM agents, flow routing backbone, self-healing pool, crash-resilient database |
+| [[vision/m2-trustworthy-data\|M2: Trustworthy Data]] | partial | Foundation | Malli as single schema source, validated writes, Nippy serialization, no :any |
+| [[vision/m3-convention-uniformity\|M3: Convention Uniformity]] | in-progress | 1: Claude Code | Every public function: map-in/map-out, :malli/schema, namespaced keys |
+| [[vision/m4-discoverable-codebase\|M4: Discoverable Codebase]] | partial | 1: Claude Code | Given a data shape, find functions. One discovery mechanism for all use cases |
+| [[vision/m5-observable-system\|M5: Observable System]] | partial | 1: Claude Code | Live observatory, agent logs, health dashboard, SSE-based updates |
+| [[vision/m6-eval-pipeline\|M6: The Eval Pipeline]] | not-started | 2: REPL Agents | REPL eval with contract validation, schema-selected tests, graph transact |
+| [[vision/m7-namespace-as-process\|M7: Namespace as Living Process]] | not-started | 3: Autonomous | Every namespace is a flow process with typed messaging and smart defaults |
+| [[vision/m8-autonomous-agents\|M8: Autonomous Namespace Agents]] | not-started | 3: Autonomous | Namespace-scoped agents with progressive enhancement and long-term ownership |
 
 ---
 
