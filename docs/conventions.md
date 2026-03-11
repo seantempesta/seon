@@ -595,7 +595,7 @@ Don't split into core.clj, schema.clj, etc. prematurely. Tests go in `test/` mir
 
 ## Namespace Docstrings
 
-Every namespace should have a comprehensive docstring written by its steward agent. The docstring is a living assessment covering purpose, architecture position, consumer analysis, convention compliance, issues, and recommendations. See `docs/agent-playbooks/namespace-stewardship.md` for the full format and process.
+Every namespace should have a comprehensive docstring written by its steward agent. The docstring is a living assessment covering purpose, architecture position, consumer analysis, convention compliance, issues, and recommendations. See `docs/seon/concepts/namespace-stewardship.md` for the full format and process.
 
 ## SSE Patterns
 

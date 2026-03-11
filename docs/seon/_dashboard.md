@@ -74,15 +74,15 @@ status: active
 ## Architecture
 
 - [[architecture/overview]] — How the system works today
-- [[architecture/decisions/]] — Settled architectural decisions (001-006)
+- [[architecture/decisions/]] — Settled architectural decisions (001-007)
 
 ## Orchestrator
 
 - [[orchestrator/active]] — Current pipeline and session recovery
 - [[orchestrator/prds]] — PRD index with status
-- `orchestrator/issues/` — Individual issue notes (36 open issues)
+- `orchestrator/issues/` — Individual issue notes (38 open issues)
 
 ## Reference
 
-- [[namespaces]] — Full inventory (101 namespaces with file paths and layer groupings)
+- [[namespaces]] — Full inventory (102 namespaces with file paths and layer groupings)
 - [[reference/]] — Datastar, Hyperlith, Gemini, ThetaData reference docs
