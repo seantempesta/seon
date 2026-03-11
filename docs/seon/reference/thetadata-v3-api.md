@@ -632,14 +632,14 @@ curl "http://localhost:25503/v3/option/history/quote?symbol=AAPL&expiration=2024
 
 ---
 
-## Notes for ML Options Trading Project
+## Notes for Algorithmic Trading Domain
 
 ### Data Pipeline Integration
 
 1. **Primary Greeks Source**: Use EOD Greeks endpoint for historical backtesting
 2. **Chain Discovery**: Use list endpoints (expirations, strikes) to discover available contracts
 3. **Underlying Prices**: Fetch stock OHLC for base price data
-4. **Scaling**: Remember to apply vega/100 and rho/100 scaling when storing in XTDB
+4. **Scaling**: Remember to apply vega/100 and rho/100 scaling when storing in Datalevin
 
 ### Recommended Endpoints for MVP
 

@@ -19,8 +19,8 @@ Flow's design philosophy (separating topology from logic) is valuable and should
 
 1. **Seon agents ARE external processes** (Claude CLI), not Clojure functions
 2. **Flow can't serialize opaque state** - Claude's context window is inaccessible
-3. **Resource management isn't Flow's domain** - nREPL/XTDB per agent requires Integrant
-4. **We already have solutions** - XTDB for persistence, Malli for contracts
+3. **Resource management isn't Flow's domain** - nREPL/Datalevin per agent requires Integrant
+4. **We already have solutions** - Datalevin for persistence, Malli for contracts
 
 Flow SHOULD be adopted for internal orchestration (message routing, status aggregation, SSE streaming) where its strengths apply.
 
@@ -38,7 +38,7 @@ Flow has no concept of schemas or contracts. Seon's Malli registry remains the s
 ### Layer 2: Agent Isolation
 
 **Flow contribution:** Partial
-Flow processes are isolated (no shared state between step functions). But Seon needs **resource isolation** (nREPL, XTDB per agent), which Flow doesn't provide. Integrant remains the solution.
+Flow processes are isolated (no shared state between step functions). But Seon needs **resource isolation** (nREPL, Datalevin per agent), which Flow doesn't provide. Integrant remains the solution.
 
 ### Layer 3: Verification
 
@@ -58,7 +58,7 @@ Flow's `ping` returns live process state - useful for the cockpit. BUT: Claude's
 ### Layer 6: Learning from History
 
 **Flow contribution:** None
-Flow state is in-memory. XTDB remains the solution for temporal queries.
+Flow state is in-memory. Datalevin remains the solution for historical queries.
 
 ### Layer 7: Long-term Ownership
 
@@ -88,7 +88,7 @@ Orchestrator
     ├── nREPL Server (per agent, TCP connection)
     │       └── evaluates agent's Clojure code
     │
-    └── XTDB Database (per agent, persisted)
+    └── Datalevin Database (per agent, persisted)
             └── stores agent's context and history
 
 ```
@@ -169,7 +169,7 @@ Despite the mismatch at the agent level, Flow is excellent for **internal orches
 │  │ Adapter-A1B2│  │ Adapter-C3D4│  │ Adapter-E5F6│      │
 │  │ Claude CLI  │  │ Claude CLI  │  │ Claude CLI  │      │
 │  │ nREPL 7889  │  │ nREPL 7890  │  │ nREPL 7891  │      │
-│  │ XTDB agent1 │  │ XTDB agent2 │  │ XTDB agent3 │      │
+│  │ Datalevin   │  │ Datalevin   │  │ Datalevin   │      │
 │  └─────────────┘  └─────────────┘  └─────────────┘      │
 └──────────────────────────────────────────────────────────┘
 
@@ -286,7 +286,7 @@ Flow step functions return explicit state, enabling:
 
 Claude's "state" is:
 
-- The conversation history (we can serialize via XTDB)
+- The conversation history (we can serialize via Datalevin)
 - The parsed context window (we cannot access)
 - Internal reasoning state (completely opaque)
 
@@ -297,7 +297,7 @@ Claude's "state" is:
 | Orchestrator state | Yes | Flow ping → EDN |
 | Task queue | Yes | Flow process state |
 | Agent registry | Yes | Atom → EDN |
-| XTDB data | Yes | Already persisted |
+| Datalevin data | Yes | Already persisted |
 | nREPL session | No | JVM-level state |
 | Claude context | No | Opaque to us |
 
@@ -306,7 +306,7 @@ Claude's "state" is:
 **Option A: Soft Resume**
 
 1. Agent hits context limit
-2. Summarize progress to XTDB
+2. Summarize progress to Datalevin
 3. Kill Claude CLI
 4. Start new Claude CLI
 5. Replay message history + summary as context
@@ -418,8 +418,8 @@ Wrap external APIs (GitHub, Slack, etc.) in Flow adapters:
 | Gap | Current Solution | Notes |
 |-----|------------------|-------|
 | External process mgmt | JVM Process API | Flow is for threads |
-| Resource lifecycle | Integrant | nREPL, XTDB per agent |
-| Persistence | XTDB | Flow state is in-memory |
+| Resource lifecycle | Integrant | nREPL, Datalevin per agent |
+| Persistence | Datalevin | Flow state is in-memory |
 | Context management | MCP protocol | Claude's window is opaque |
 | Schema discovery | Malli registry | Flow has no contracts |
 | Generative testing | Kaocha + Malli | Flow doesn't test |
@@ -430,7 +430,7 @@ Even with Flow, we still need:
 
 - Claude CLI adapter (subprocess management)
 - nREPL session wrapper (per-agent REPLs)
-- XTDB integration (persistence)
+- Datalevin integration (persistence)
 - MCP protocol handler (tool calls)
 - Schema introspection (function discovery)
 
@@ -445,8 +445,8 @@ Flow handles internal message routing. Everything else remains custom.
 **No.** Claude's context window is the agent's "real" state, and it's opaque to us. We can only capture:
 
 - Our orchestration state (task queue, agent registry)
-- Conversation history (via XTDB)
-- Tool call history (via XTDB)
+- Conversation history (via Datalevin)
+- Tool call history (via Datalevin)
 
 ### Q2: Can we serialize a paused flow to disk and restore it later?
 
@@ -477,7 +477,7 @@ The subprocess itself is outside Flow's control.
 
 - Soft resume via message history replay
 - Task handoff via progress summaries
-- XTDB-based "memory" across agent lifetimes
+- Datalevin-based "memory" across agent lifetimes
 
 ### Q5: What's the performance overhead vs raw channels?
 
@@ -515,10 +515,10 @@ Use Flow for internal orchestration where it excels:
 
 Keep the current architecture for agent lifecycle:
 
-- Integrant for resource management (nREPL, XTDB)
+- Integrant for resource management (nREPL, Datalevin)
 - Direct subprocess management for Claude CLI
 - Atoms for agent registry (simple, debuggable)
-- XTDB for persistence (already works well)
+- Datalevin for persistence (already works well)
 
 ### Investigate: Flow Monitor for Observatory
 
@@ -548,6 +548,6 @@ The fundamental mismatch is that Flow is designed for Clojure threads processing
 - Use Flow for **internal orchestration** (routing, aggregation, SSE)
 - Keep current approach for **agent lifecycle** (subprocess, Integrant)
 - Adopt Flow **patterns** even where we don't use the library
-- Continue using **XTDB** for persistence, **Malli** for contracts
+- Continue using **Datalevin** for persistence, **Malli** for contracts
 
 The 7-layer vision doesn't require Flow. But Flow's philosophy of declarative dataflow aligns with Clojure's data-oriented design and should inform how we build the layers.

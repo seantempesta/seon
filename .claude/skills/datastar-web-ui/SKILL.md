@@ -7,7 +7,7 @@ description: "Patterns for Datastar SSE web UI with Tailwind CSS. Use when editi
 
 ## Two SSE Patterns (IMPORTANT)
 
-Seon has two patterns for updating the UI. **See `CONVENTIONS.md` section "SSE: Direct Response vs Background Push" for the full spec.** Summary below.
+Seon has two patterns for updating the UI. **See `docs/conventions.md` section "SSE: Direct Response vs Background Push" for the full spec.** Summary below.
 
 ### Pattern A: Direct Response (user actions)
 
@@ -110,7 +110,7 @@ The broadcast channel uses a **sliding buffer of size 1**. Under load, only the 
 | `src/seon/ns/routes.clj` | Namespace page handlers, SSE |
 | `resources/public/css/input.css` | Tailwind source with theme |
 | `resources/public/css/output.css` | Built CSS (don't edit directly) |
-| `CONVENTIONS.md` | Ground truth for SSE patterns |
+| `docs/conventions.md` | Ground truth for SSE patterns |
 
 ## Tailwind Build (Local, NOT CDN)
 
@@ -133,7 +133,7 @@ The theme is defined in `resources/public/css/input.css` using Tailwind v4 synta
 
 ## For More Details
 
-- **Full SSE pattern spec**: See `CONVENTIONS.md` section "SSE: Direct Response vs Background Push"
+- **Full SSE pattern spec**: See `docs/conventions.md` section "SSE: Direct Response vs Background Push"
 - **Design system**: See `docs/prds/namespace-ui/design-system.md` for Phosphor Terminal theme
-- **Datastar attributes**: See `docs/reference/datastar-quick-reference.md`
-- **Datastar deep dive**: See `docs/reference/datastar-deep-dive.md`
+- **Datastar attributes**: See `docs/seon/reference/datastar-quick-reference.md`
+- **Datastar deep dive**: See `docs/seon/reference/datastar-deep-dive.md`

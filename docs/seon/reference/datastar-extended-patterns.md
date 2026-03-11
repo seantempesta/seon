@@ -709,9 +709,9 @@ If session expires during SSE connection:
 ### Unit Tests: Pure Functions
 
 ```clojure
-(ns ml-options.web.html-test
+(ns seon.web.html-test
   (:require [clojure.test :refer [deftest is]]
-            [ml-options.web.html :as html]))
+            [seon.web.html :as html]))
 
 (deftest format-number-test
   (is (= "1,234" (html/format-number 1234)))
@@ -727,10 +727,10 @@ If session expires during SSE connection:
 ### Integration Tests: SSE Flow
 
 ```clojure
-(ns ml-options.web.sse-test
+(ns seon.web.sse-test
   (:require [clojure.test :refer [deftest is use-fixtures]]
             [clojure.core.async :as a]
-            [ml-options.web.sse :as sse]))
+            [seon.web.sse :as sse]))
 
 (deftest refresh-all-test
   (let [refresh-mult (sse/init-sse!)
@@ -762,7 +762,7 @@ test('dashboard loads and shows stats', async ({ page }) => {
 
   // Verify content
   const title = await page.textContent('h1');
-  expect(title).toBe('ML Options Import Dashboard');
+  expect(title).toBe('Seon Dashboard');
 
   // Check stats loaded
   const statValue = await page.textContent('.stat-value');
@@ -792,9 +792,9 @@ test('start import button works', async ({ page }) => {
 ### Performance Testing: SSE Load
 
 ```clojure
-(ns ml-options.web.load-test
+(ns seon.web.load-test
   (:require [clojure.core.async :as a]
-            [ml-options.web.sse :as sse]))
+            [seon.web.sse :as sse]))
 
 (defn simulate-clients [n]
   (let [refresh-mult (sse/init-sse!)
