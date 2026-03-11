@@ -28,13 +28,21 @@ status: active
 | 8 | Update active.md + commit | Final state | in-progress | — |
 <!-- Status: planned -> in-progress -> complete -> verified | failed -->
 
-## Next: Verification
+## Verification Log (2026-03-11)
 
-Launch verifiers per milestone to honestly assess status. The milestone docs describe what SHOULD exist. Verifiers check what ACTUALLY exists. The gap becomes the work plan.
+5 verifiers ran against M1-M5. All statuses confirmed accurate.
 
-## Verification Log
+| Milestone | Status | Passed | Partial | Failed | Key Finding |
+|-----------|--------|--------|---------|--------|-------------|
+| M1 | partial | 3 | 2 | 0 | Atom watches bypass flow; three state mechanisms don't sync |
+| M2 | partial | 2 | 4 | 1 | Wire protocol `:any` already fixed (issue was stale); `render.clj::html :any` remains; 14+27 duplicate registrations |
+| M3 | in-progress (early) | 0 | 2 | 4 | ~100+ public fns missing `:malli/schema`; ~100+ positional-arg violations; all 5 dead files exist |
+| M4 | partial | 2 | 2 | 3 | `gq/discover` doesn't exist; graph only indexes spec keyword refs; two rendering systems coexist |
+| M5 | partial | 5 | 2 | 5 | No schema browser/data explorer; three SSE paths; `/logs` route exists (capability doc was stale) |
 
-<!-- Record what verifiers checked and found -->
+**Docs updated from verification:**
+- `issues/any-in-wire-protocol.md` — status: open → resolved (`:seon.flow/dynamic` already in place)
+- `capabilities/agent-log-access.md` — status: not-started → partial (`/logs` route + UI exist)
 
 ## Session Notes
 
