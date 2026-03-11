@@ -204,7 +204,7 @@ Suggestions for improvement:
 
 ## Hook Pipeline Integration
 
-The linters can be integrated into the dev hook pipeline. See `docs/prds/unified-dev-hook/phase-10-linting.md` for the integration plan.
+The linters can be integrated into the dev hook pipeline. See `docs/archive/unified-dev-hook/phase-10-linting.md` for the integration plan.
 
 Design notes for hook integration:
 

@@ -19,7 +19,7 @@ Server owns all state. Client is a reactive view. Two update patterns:
 
 **Rule of thumb: If a user clicked something, return HTML directly. If data changed in the background, use `refresh-all!`.**
 
-See `CONVENTIONS.md` section "SSE: Direct Response vs Background Push" for the full spec.
+See `docs/conventions.md` section "SSE: Direct Response vs Background Push" for the full spec.
 
 **NOT like:** React/Vue/Angular (client-side state management)
 **IS like:** Traditional server-side rendering + SSE, but simpler
@@ -267,7 +267,7 @@ View transitions are **disabled by default** in `render-handler`. Opt in only fo
 | `src/seon/web/agents.clj` | Agent observatory | Both Pattern A and B |
 | `src/seon/web/components.clj` | Reusable UI | `card`, `status-dot`, `log-line` |
 | `src/seon/ns/routes.clj` | Namespace pages | SSE + function call handlers |
-| `CONVENTIONS.md` | SSE pattern ground truth | Pattern A/B spec |
+| `docs/conventions.md` | SSE pattern ground truth | Pattern A/B spec |
 
 ---
 
@@ -329,7 +329,7 @@ View transitions are **disabled by default** in `render-handler`. Opt in only fo
 
 ## Resources
 
-- **Ground truth:** `CONVENTIONS.md` (SSE patterns section)
+- **Ground truth:** `docs/conventions.md` (SSE patterns section)
 - **Datastar docs:** <https://data-star.dev/>
 - **Deep dive:** `docs/reference/datastar-deep-dive.md`
 - **Design system:** `docs/prds/namespace-ui/design-system.md`
