@@ -1,6 +1,6 @@
 ---
 type: research
-status: draft
+status: abandoned
 tags: [prd, research]
 ---
 # Test Coverage Audit - Findings

@@ -22,4 +22,4 @@ Some internal functions still use `:any` (flow writer args, render html output).
 ## Related
 
 - Components: [[components/schema-system]], [[components/database]]
-- PRDs: [[prds/schema-unification/prd]]
+- PRDs: [[prds/schema-unification/design]]

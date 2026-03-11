@@ -1,6 +1,6 @@
 ---
 type: prd
-status: draft
+status: completed
 tags: [prd, database, flow]
 ---
 # PRD: Flow-Based Datalevin Writer

@@ -11,7 +11,7 @@ Tests run against isolated database state so they cannot interfere with each oth
 
 - `with-temp-conn` and `with-test-datalevin` fixtures
 - 19 test files bind `db/*direct-mode*` for flow bypass
-- 70 test files with approximately 819 deftest forms
+- 71 test files with approximately 843 deftest forms
 
 ## Gaps
 
@@ -22,4 +22,4 @@ Tests run against isolated database state so they cannot interfere with each oth
 ## Related
 
 - Components: [[components/testing]]
-- PRDs: [[prds/test-infrastructure/prd]]
+- PRDs: [[prds/test-infrastructure/design]]

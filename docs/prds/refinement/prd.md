@@ -1,6 +1,6 @@
 ---
 type: prd
-status: completed
+status: active
 tags: [prd, database]
 ---
 # PRD: Refinement — One System, End to End
