@@ -1,11 +1,15 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 milestone: M3
 tags: [issue, web, schema, architecture]
 ---
 # Coupling: graph.ingest Depends on seon.render
+
+## Resolution
+
+**Resolved.** `src/seon/graph/ingest.clj` has no dependency on `seon.render`. Grepping the ns form and all requires in `graph/ingest.clj` shows no mention of `seon.render`. The coupling no longer exists. Verified by triage 2026-03-11.
 
 ## Problem
 

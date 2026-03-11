@@ -13,9 +13,9 @@ tags: [issue, database, architecture]
 
 ## Where
 
-- `src/seon/render.clj:56`
-- `src/seon/ns/routes.clj:122`
-- `src/seon/db.clj:167`
+- `src/seon/render.clj:56` — private `get-conn` for `:seon.runtime` (confirmed present)
+- `src/seon/ns/routes.clj:122` — private `get-conn` for `:seon.runtime` (confirmed present)
+- `src/seon/db.clj:167` — **stale reference** (2026-03-11): line 167 is now `get-conn-manager`, not a `:seon.runtime` get-conn. Two duplicates remain (render.clj and ns/routes.clj).
 
 ## Acceptance Criteria
 
