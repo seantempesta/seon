@@ -10,14 +10,22 @@
 
 ## System Documentation (Obsidian Vault)
 
-The system is documented in the Obsidian vault at path `seon/`. Read via `mcp__obsidian__obsidian_read_note`.
+All documentation lives in `docs/` — an Obsidian vault under version control. Read files directly with the Read tool, or browse in Obsidian.
 
-- **Start here**: `seon/_dashboard.md` — system map, component index, update rules
-- **What exists**: `seon/components/` — one note per component (what it does, namespaces, API, dependencies)
-- **Known problems**: `seon/architecture/cleanup.md` (duplication, dead code) and `seon/architecture/next-state.md` (architectural gaps)
-- **101 namespaces**: `seon/namespaces.md` — full inventory with file paths and layer groupings
+- **Start here:** `docs/seon/_dashboard.md` — system map, milestones, protocols
+- **What exists:** `docs/seon/components/` — one note per component (always current)
+- **Patterns:** `docs/seon/concepts/` — patterns spanning components
+- **What we're building:** `docs/seon/milestones/` — desired capabilities
+- **Active work:** `docs/seon/orchestrator/active.md` — pipeline and recovery
+- **Issues:** `docs/seon/orchestrator/issues/` — one note per problem
+- **PRD index:** `docs/seon/orchestrator/prds.md` — all PRDs with status
+- **How it works:** `docs/seon/architecture/overview.md` — narrative guide
+- **Decisions:** `docs/seon/architecture/decisions/` — settled ADRs
+- **All PRDs:** `docs/prds/` — feature specifications
+- **Conventions:** `docs/CONVENTIONS.md` — API design patterns
+- **Vision:** `docs/VISION.md` — project thesis
 
-**After making code changes**, update the relevant component note to reflect new reality. After fixing a problem, remove it from cleanup.md or next-state.md. See `_dashboard.md` "Rules for Updating Notes" for the full protocol.
+**After making code changes**, update the relevant component note to reflect new reality. See `docs/seon/_dashboard.md` for the full protocol.
 
 ---
 
@@ -118,7 +126,7 @@ seon/
 
 ### Database Access
 
-`seon.db` is the **sole database API**. Only `src/seon/db/` and `src/seon/db/datalevin/` touch `datalevin.core` directly. Everything else uses `db/transact!`, `db/query`, `db/pull-by-name`, etc. with db-name keywords (`:seon`, `:seon.runtime`, or namespace keywords). Reader and writer flow processes serialize all access. Tests bind `db/*direct-mode*` to bypass the flow. See `CONVENTIONS.md` "Database Access" for patterns.
+`seon.db` is the **sole database API**. Only `src/seon/db/` and `src/seon/db/datalevin/` touch `datalevin.core` directly. Everything else uses `db/transact!`, `db/query`, `db/pull-by-name`, etc. with db-name keywords (`:seon`, `:seon.runtime`, or namespace keywords). Reader and writer flow processes serialize all access. Tests bind `db/*direct-mode*` to bypass the flow. See `docs/CONVENTIONS.md` "Database Access" for patterns.
 
 ### Flow Topology (routing backbone)
 
@@ -250,7 +258,7 @@ Key rules: density over whitespace (`p-3` not `p-6`), small text (`text-xs` prim
 3. **Schema-first** - Define Malli schemas before implementation
 4. **Namespaced IDs** - `:trading/position`, `:health/workout`
 
-See `CONVENTIONS.md` for full patterns.
+See `docs/CONVENTIONS.md` for full patterns.
 
 ---
 
@@ -366,10 +374,10 @@ Application: `logs/app.log` (Timbre). Database: `logs/datalevin.log`. Errors: `l
 
 | Document | Purpose |
 |----------|---------|
-| `VISION.md` | Full thesis, architecture layers, progress tracking |
-| `CONVENTIONS.md` | Malli schemas, API design patterns |
+| `docs/VISION.md` | Full thesis, architecture layers, progress tracking |
+| `docs/CONVENTIONS.md` | Malli schemas, API design patterns |
 | `ORCHESTRATOR.md` | Orchestrator-specific instructions (launching agents, system management) |
 | `AGENT.md` | Subagent-specific instructions (investigation workflow, reporting) |
-| `ISSUES.md` | Open problems — orchestrator reads every session, agents add to it |
+| `docs/seon/orchestrator/issues/` | Open problems — one note per issue |
 | `docs/reference/datastar-quick-reference.md` | Web UI attributes |
 | `docs/prds/namespace-ui/design-system.md` | UI colors, typography, spacing |
