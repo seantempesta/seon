@@ -7,18 +7,22 @@ type: dashboard
 
 ## How to Use This Vault
 
-**Orchestrator**: Read this dashboard to understand the system. Direct agents to specific component notes for implementation context. Track problems in `architecture/cleanup.md` and `architecture/next-state.md`.
+**Orchestrator**: Start here. Read [[orchestrator/active]] for current pipeline. Issues are in [[orchestrator/issues/]]. PRD index at [[orchestrator/prds]].
 
-**Agents**: Read the component note for your area before writing code. After making changes, update the relevant component note to match new reality.
+**Agents**: Read the component note for your area before writing code. After making changes, update the relevant component note to match reality.
 
 ### Rules for Updating Notes
 1. **Component notes describe what IS** — no future state, no aspirational language
-2. **After changing code**, update the component note: namespaces table, API surface, dependencies, refactoring opportunities
-3. **After fixing a problem**, remove it from `cleanup.md` or `next-state.md`
-4. **After adding a namespace**, add it to `namespaces.md` in the correct layer
-5. **After adding/removing tests**, update `components/testing.md` coverage map
-6. **Use `[[components/X]]` link format** — always full path, never short names
+2. **After changing code**, update the component note: namespaces table, API surface, dependencies
+3. **After fixing an issue**, update its status in `orchestrator/issues/`
+4. **After adding a namespace**, add it to [[namespaces]] in the correct layer
+5. **After adding/removing tests**, update [[components/testing]] coverage map
+6. **Use `[[components/X]]` link format** — always full path from `seon/`, never short names
 7. **Status vocabulary**: production, stable, design, deprecated, experimental
+
+## Vision & Milestones
+
+- [[vision/index]] — Project thesis and aspirational capabilities
 
 ## Components (What Exists)
 
@@ -49,19 +53,21 @@ type: dashboard
 | [[concepts/namespace-as-process]] | design | Every namespace as a flow process |
 | [[concepts/subscriptions]] | design | Reactive push from data sources |
 | [[concepts/feeds]] | design | Broadcast signals between namespaces |
+| [[concepts/socratic-agents]] | experimental | Agents that think before acting |
+| [[concepts/namespace-stewardship]] | design | Agent-driven namespace auditing |
 
 ## Architecture
 
-- [[architecture/current-state]] — How the system works today
-- [[architecture/cleanup]] — Known problems: dead code, duplication, naming, coupling
-- [[architecture/next-state]] — Architectural gaps and missing capabilities
+- [[architecture/overview]] — How the system works today
+- [[architecture/decisions/]] — Settled architectural decisions (001-006)
 
-### Settled Decisions
-- [[architecture/decisions/001-nippy-serialization]]
-- [[architecture/decisions/002-absence-over-nil]]
-- [[architecture/decisions/003-ref-type]]
-- [[architecture/decisions/004-schema-unification]]
+## Orchestrator
+
+- [[orchestrator/active]] — Current pipeline and session recovery
+- [[orchestrator/prds]] — PRD index with status
+- [[orchestrator/issues/]] — Individual issue notes (~33 open issues)
 
 ## Reference
 
 - [[namespaces]] — Full inventory (101 namespaces with file paths and layer groupings)
+- [[reference/]] — Datastar, Hyperlith, Gemini, ThetaData reference docs

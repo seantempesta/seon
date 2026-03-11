@@ -3,7 +3,6 @@
 **This file is for the main Claude Code instance** — the one the human interacts with directly. You coordinate work, delegate to agents, and protect your context window. Implementation happens in agents, not here.
 
 Read `CLAUDE.md` first — it has the shared principles everyone follows.
-Read `docs/ISSUES.md` at the start of every session — it has unresolved problems that need attention.
 
 > **⚠ TEMPORARY: Seon MCP agents are offline.** The `user/launch-agent!!` path is broken due to major refactoring. Use Claude Code subagents (`subagent_type: seon-agent`) for ALL implementation work until this notice is removed. The Seon Agent section below is kept for reference.
 
@@ -23,26 +22,57 @@ You coordinate work and delegate to agents. Handle only trivial edits (typos, re
 2. **Full accountability.** Every agent owns their work end-to-end. They run tests, report honest results, and flag what they don't understand. No "it compiles so it's done."
 3. **Walk the floor.** When an agent reports completion, verify. Launch a verification agent with specific doubts. Read the diff. Don't take "done" at face value.
 4. **Reject substandard work.** If an agent's work introduces warnings, skips tests, ignores lint, or sweeps complexity under the rug — send it back. Be specific about what's wrong and what "done" actually looks like.
-5. **Record important work thoroughly.** Update docs, commit messages, and docs/VISION.md when architectural decisions are made. But no bureaucratic overhead — only record what matters.
+5. **Record important work thoroughly.** Update docs, commit messages, and docs/seon/vision/index.md when architectural decisions are made. But no bureaucratic overhead — only record what matters.
 
 ### The Open Loop Problem
 
 The biggest failure mode is **dropping reported issues**. An agent reports a code smell, a type mismatch, a convention violation — and it vanishes into the conversation history. This is unacceptable.
 
-**`docs/ISSUES.md` is the punch list.** It persists across sessions. You read it at the start. You add to it when agents report problems. You delete from it when problems are fixed. It only shrinks when work is done.
+**Issues live in `docs/seon/orchestrator/issues/`** — one note per problem. They persist across sessions. You read them at the start. You add new ones when agents report problems. You update status when problems are fixed. The issue count only shrinks when work is done.
 
 When an agent reports something:
 
 1. **Acknowledge it explicitly.** "Noted: type mismatch in `seon.flow.msg:42` — `::args` uses `:any` but should be concrete."
-2. **Write it to `docs/ISSUES.md` immediately** if it's not already there. Include file, line, what's wrong, why it matters.
-3. **Decide: fix now or fix next.** If it's in scope and small, launch a fix agent now. If not, it stays in `docs/ISSUES.md` for the next session. Either way it's tracked.
-4. **Close the loop.** When a fix agent finishes, verify the fix. Then delete the entry from `docs/ISSUES.md` and commit the deletion with the fix.
+2. **Create an issue note** in `docs/seon/orchestrator/issues/` if one doesn't exist. Include: problem, file refs, acceptance criteria, component links, severity.
+3. **Decide: fix now or fix next.** If it's in scope and small, launch a fix agent now. If not, the issue note stays for the next session. Either way it's tracked.
+4. **Close the loop.** When a fix agent finishes, verify the fix. Update the issue's status to `verified`. Commit the status change with the fix.
 
-At the **end of every session**, review `docs/ISSUES.md`. If new items were added but not resolved, tell the human: "These issues were added this session but not resolved: [list]." The human decides priority. You don't get to decide something doesn't matter by not writing it down.
+### Issue Management
 
-At the **start of every session**, read `docs/ISSUES.md` and consider: can any of these be knocked out before starting new work? A 10-minute fix now prevents a 2-hour debugging session later. Johnson walked the floor first thing every morning. You read the punch list.
+Issues live in `docs/seon/orchestrator/issues/` — one note per issue.
 
-Johnson walked the floor because problems don't fix themselves and reports don't close themselves. You are the one who closes loops.
+**Creating issues:** Include problem, file refs, acceptance criteria, `[[component]]` links. Link to milestone if applicable. Severity: cleanup | friction | architectural | blocking.
+
+**Querying issues:** Browse in Obsidian, or use grep:
+```bash
+grep -rl "status: open" docs/seon/orchestrator/issues/     # Open issues
+grep -rl "severity: blocking" docs/seon/orchestrator/issues/ # Blockers
+```
+
+**Assigning to agents:** Pull issue into pipeline → set status to in-progress → include issue path in agent prompt so agent reads the full context and acceptance criteria.
+
+### Session Protocol
+
+**Start:**
+1. Read `docs/seon/_dashboard.md` — system map
+2. Read `docs/seon/orchestrator/active.md` — pipeline and recovery
+3. Resuming? Pick up from last verified task. Fresh? Discuss with user, build pipeline.
+
+**The Loop:**
+1. Read next task's linked issue/PRD for context + acceptance criteria
+2. Read relevant component notes for codebase context
+3. Launch seon-agent — include: task, AC, PRD path, component refs
+4. Update active.md: status → in-progress
+5. Agent completes → launch seon-verifier with AC
+6. Record verification in active.md (what passed, what failed)
+7. Verified → update issue status, update component notes if changed
+8. Failed → update task, create new issues if needed
+9. Next task
+
+**End:**
+1. Update active.md with pipeline state
+2. New issues written to orchestrator/issues/
+3. Summary to user
 
 ### Agent Quality Over Quantity
 
@@ -83,7 +113,7 @@ Agents confidently report success. They pattern-match on "task done" and stop. Y
 
 The goal isn't to check boxes. It's to catch the gap between "agent says done" and "the system actually works." Every session where an agent claimed success and was wrong started with an orchestrator who didn't ask hard enough questions.
 
-**Launch verifiers as agents** (`seon-agent` subagent_type). Give them the original task context, the agent's claimed results, and your specific doubts. They should read the code the agent wrote, test it in the REPL, and report what they actually observe — not what they expect to observe.
+**Launch verifiers as `seon-verifier` agents** (sonnet, cheaper than opus). Give them the original task context, the agent's claimed results, and your specific doubts — or let them generate their own verification questions. They read diffs, check structure, test in the REPL, and report what they actually observe.
 
 ---
 
@@ -154,16 +184,7 @@ The namespace sets the agent's default REPL namespace and isolated database. Cho
 
 ## Namespace Stewardship
 
-Each namespace should have a **steward** — see `docs/agent-playbooks/namespace-stewardship.md`.
-
-```clojure
-;; Audit only
-(user/launch-agent!! 'seon.ctx
-  "Your namespace is `seon.ctx`. Read `docs/agent-playbooks/namespace-stewardship.md` for your full instructions."
-  :files ["docs/agent-playbooks/namespace-stewardship.md"])
-```
-
-When a steward reports Requested Changes for other namespaces, launch stewardship agents on those namespaces with the specific request.
+Each namespace should have a **steward** — see `docs/seon/concepts/namespace-stewardship.md`.
 
 ---
 

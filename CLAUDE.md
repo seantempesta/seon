@@ -15,15 +15,15 @@ All documentation lives in `docs/` — an Obsidian vault under version control. 
 - **Start here:** `docs/seon/_dashboard.md` — system map, milestones, protocols
 - **What exists:** `docs/seon/components/` — one note per component (always current)
 - **Patterns:** `docs/seon/concepts/` — patterns spanning components
-- **What we're building:** `docs/seon/milestones/` — desired capabilities
+- **What we're building:** `docs/seon/vision/` — thesis and desired capabilities
 - **Active work:** `docs/seon/orchestrator/active.md` — pipeline and recovery
 - **Issues:** `docs/seon/orchestrator/issues/` — one note per problem
 - **PRD index:** `docs/seon/orchestrator/prds.md` — all PRDs with status
 - **How it works:** `docs/seon/architecture/overview.md` — narrative guide
 - **Decisions:** `docs/seon/architecture/decisions/` — settled ADRs
 - **All PRDs:** `docs/prds/` — feature specifications
-- **Conventions:** `docs/CONVENTIONS.md` — API design patterns
-- **Vision:** `docs/VISION.md` — project thesis
+- **Conventions:** `docs/conventions.md` — API design patterns
+- **Vision:** `docs/seon/vision/index.md` — project thesis
 
 **After making code changes**, update the relevant component note to reflect new reality. See `docs/seon/_dashboard.md` for the full protocol.
 
@@ -126,7 +126,7 @@ seon/
 
 ### Database Access
 
-`seon.db` is the **sole database API**. Only `src/seon/db/` and `src/seon/db/datalevin/` touch `datalevin.core` directly. Everything else uses `db/transact!`, `db/query`, `db/pull-by-name`, etc. with db-name keywords (`:seon`, `:seon.runtime`, or namespace keywords). Reader and writer flow processes serialize all access. Tests bind `db/*direct-mode*` to bypass the flow. See `docs/CONVENTIONS.md` "Database Access" for patterns.
+`seon.db` is the **sole database API**. Only `src/seon/db/` and `src/seon/db/datalevin/` touch `datalevin.core` directly. Everything else uses `db/transact!`, `db/query`, `db/pull-by-name`, etc. with db-name keywords (`:seon`, `:seon.runtime`, or namespace keywords). Reader and writer flow processes serialize all access. Tests bind `db/*direct-mode*` to bypass the flow. See `docs/conventions.md` "Database Access" for patterns.
 
 ### Flow Topology (routing backbone)
 
@@ -258,7 +258,7 @@ Key rules: density over whitespace (`p-3` not `p-6`), small text (`text-xs` prim
 3. **Schema-first** - Define Malli schemas before implementation
 4. **Namespaced IDs** - `:trading/position`, `:health/workout`
 
-See `docs/CONVENTIONS.md` for full patterns.
+See `docs/conventions.md` for full patterns.
 
 ---
 
@@ -374,8 +374,8 @@ Application: `logs/app.log` (Timbre). Database: `logs/datalevin.log`. Errors: `l
 
 | Document | Purpose |
 |----------|---------|
-| `docs/VISION.md` | Full thesis, architecture layers, progress tracking |
-| `docs/CONVENTIONS.md` | Malli schemas, API design patterns |
+| `docs/seon/vision/index.md` | Project thesis and aspirational capabilities |
+| `docs/conventions.md` | Malli schemas, API design patterns |
 | `ORCHESTRATOR.md` | Orchestrator-specific instructions (launching agents, system management) |
 | `AGENT.md` | Subagent-specific instructions (investigation workflow, reporting) |
 | `docs/seon/orchestrator/issues/` | Open problems — one note per issue |
