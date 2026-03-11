@@ -8,6 +8,19 @@
 
 ---
 
+## System Documentation (Obsidian Vault)
+
+The system is documented in the Obsidian vault at path `seon/`. Read via `mcp__obsidian__obsidian_read_note`.
+
+- **Start here**: `seon/_dashboard.md` — system map, component index, update rules
+- **What exists**: `seon/components/` — one note per component (what it does, namespaces, API, dependencies)
+- **Known problems**: `seon/architecture/cleanup.md` (duplication, dead code) and `seon/architecture/next-state.md` (architectural gaps)
+- **101 namespaces**: `seon/namespaces.md` — full inventory with file paths and layer groupings
+
+**After making code changes**, update the relevant component note to reflect new reality. After fixing a problem, remove it from cleanup.md or next-state.md. See `_dashboard.md` "Rules for Updating Notes" for the full protocol.
+
+---
+
 ## What is Seon?
 
 **Seon** - from the archaic "to see", and inspired by the Seons of Brandon Sanderson's *Elantris*: sentient, luminous beings that serve and assist their bonded humans.

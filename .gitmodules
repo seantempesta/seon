@@ -76,3 +76,6 @@
 [submodule "reference-code/expectations"]
 	path = reference-code/expectations
 	url = https://github.com/clojure-expectations/expectations.git
+[submodule "reference-code/obsidian-linter"]
+	path = reference-code/obsidian-linter
+	url = https://github.com/platers/obsidian-linter.git
