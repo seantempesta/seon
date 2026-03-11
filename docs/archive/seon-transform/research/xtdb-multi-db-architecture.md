@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive, database]
+---
+
 # XTDB v2 Multi-Database Architecture Research
 
 **Date**: 2025-12-13

@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive, schema]
+---
+
 # AI Conversation Schema Research
 
 ## Summary

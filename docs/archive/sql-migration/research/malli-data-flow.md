@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive, database, flow]
+---
+
 # Malli Schema Integration & XTDB Data Flow Research
 
 **Date**: 2025-12-17

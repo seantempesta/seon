@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # Primer Architecture Vision
 
 **The Core Insight:** A Primer session is a **server-controlled state machine** where:

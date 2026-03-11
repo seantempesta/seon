@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive, trading, agent]
+---
+
 # Research: Normalization Approaches for Trading Data
 
 **Status:** Complete

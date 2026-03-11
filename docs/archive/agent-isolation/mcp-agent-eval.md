@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive, agent]
+---
+
 # MCP Agent Tools
 
 **Status**: Complete
@@ -312,5 +318,5 @@ Added `reference-code/clojure-mcp` (git submodule) - Bruce Hauman's comprehensiv
 
 - [Agent Isolation PRD](prd.md) - Parent feature
 - [notes.md](notes.md) - Shell escaping root cause analysis
-- MCP Protocol: https://modelcontextprotocol.io/
+- MCP Protocol: [modelcontextprotocol.io](https://modelcontextprotocol.io/)
 - `reference-code/clojure-mcp/` - Reference Clojure MCP implementation

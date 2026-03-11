@@ -1,3 +1,9 @@
+---
+type: prd
+status: abandoned
+tags: [prd, archive, agent]
+---
+
 # PRD: Agent Observatory
 
 ## Status: COMPLETE — Observatory UI at /agents with per-agent logging and live message streaming

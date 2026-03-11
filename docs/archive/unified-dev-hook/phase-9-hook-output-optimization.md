@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 # PRD: Phase 9 - Hook Output Optimization
 
 **Status:** Complete

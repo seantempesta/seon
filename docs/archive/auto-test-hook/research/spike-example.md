@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # Spike: Example Proof of Concept
 
 **Date:** 2025-12-05

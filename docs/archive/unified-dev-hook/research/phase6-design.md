@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # Phase 6 Design: Hook Refactor Architecture
 
 **Date:** 2025-12-29

@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive, database]
+---
+
 # Query Architecture - Working Notes
 
 Learnings, gotchas, and insights discovered during research and implementation.

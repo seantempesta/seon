@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 # PRD: Phase 11 - Unified Analysis Pipeline
 
 **Status:** Phase 11a COMPLETE

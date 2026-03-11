@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 # Primer Implementation Notes
 
 Gotchas, learnings, things that surprised us.

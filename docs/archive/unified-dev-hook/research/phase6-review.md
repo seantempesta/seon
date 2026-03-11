@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # Phase 6 Hook Refactor - Code Review
 
 **Date:** 2025-12-30

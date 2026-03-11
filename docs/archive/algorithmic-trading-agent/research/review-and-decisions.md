@@ -1,3 +1,9 @@
+---
+type: research
+status: abandoned
+tags: [research, archive, trading, agent]
+---
+
 # Critical Review: Algorithmic Trading Agent Design
 
 **Reviewer:** Claude Opus 4.5 (Senior Architect)

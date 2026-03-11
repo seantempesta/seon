@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 > **Status: ARCHIVED** — Trading-domain specific, not core infra
 
 > **Status: ARCHIVED** — Trading-domain specific, not core infra

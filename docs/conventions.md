@@ -1,3 +1,9 @@
+---
+type: reference
+status: active
+tags: [reference]
+---
+
 # Seon Code Conventions
 
 ## Why These Conventions Matter

@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive, database]
+---
+
 # Limits and Defaults Convention
 
 **Date:** 2026-01-29
@@ -215,5 +221,5 @@ Batch sizes are internal limits for performance. Document:
 
 ## References
 
-- Claude Code CLI reference: https://code.claude.com/docs/en/cli-reference.md
-- ClaudeLog FAQ on max-turns: https://claudelog.com/faqs/what-is-max-turns-in-claude-code/
+- Claude Code CLI reference: [cli-reference](https://code.claude.com/docs/en/cli-reference.md)
+- ClaudeLog FAQ on max-turns: [claudelog.com](https://claudelog.com/faqs/what-is-max-turns-in-claude-code/)

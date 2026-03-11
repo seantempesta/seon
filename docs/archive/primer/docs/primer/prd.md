@@ -1,3 +1,9 @@
+---
+type: prd
+status: abandoned
+tags: [prd, archive]
+---
+
 # PRD: Primer Domain
 
 **Status:** Paused (Stage 6 Complete, Stage 7 Partial)

@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 # Phase 10: Linting Integration
 
 ## Overview

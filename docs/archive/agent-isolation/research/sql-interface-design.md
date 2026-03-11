@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive, database, agent]
+---
+
 # Agent SQL Interface Design
 
 **Date**: 2026-01-06

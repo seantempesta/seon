@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive, database]
+---
+
 # Auto-Test Hook: Test Runner Architecture & SQLite Integration
 
 ## Research Summary

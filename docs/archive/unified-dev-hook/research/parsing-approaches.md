@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # Parsing Approaches for Clojure Source Code
 
 Research on extracting function definitions and Malli schemas from Clojure files.

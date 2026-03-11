@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 # PRD: Phase 7b - Observability with Fully Namespaced Keys
 
 **Status:** ✅ Complete (2024-12-31)

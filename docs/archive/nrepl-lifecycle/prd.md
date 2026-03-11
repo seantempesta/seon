@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 # PRD: nREPL Server Lifecycle Management
 
 ## Status: COMPLETE — Port allocation, orphan cleanup, and BindException retry logic implemented

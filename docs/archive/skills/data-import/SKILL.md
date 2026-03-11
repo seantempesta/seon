@@ -1,4 +1,7 @@
 ---
+type: reference
+status: completed
+tags: [reference, archive, database]
 name: data-import
 description: "Options data import and ThetaData API. Use when loading data, running bulk imports, editing ingest.clj or bulk_load.clj, working with ThetaData Terminal, or parsing OCC option symbols. Use when you see api/import endpoints, bulk-progress table, or need to check import status."
 ---

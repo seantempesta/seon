@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive, agent]
+---
+
 # Web UI Infrastructure Exploration
 
 **Date:** 2026-01-20

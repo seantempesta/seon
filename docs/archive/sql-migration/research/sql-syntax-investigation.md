@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive, database]
+---
+
 # XTDB SQL Syntax & Patterns Investigation
 
 **Status**: Not Started

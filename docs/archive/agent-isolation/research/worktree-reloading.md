@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive, agent]
+---
+
 # Research: Worktree Code Reloading in Shared JVM
 
 **Date**: 2026-01-04

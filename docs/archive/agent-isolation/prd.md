@@ -1,3 +1,9 @@
+---
+type: prd
+status: abandoned
+tags: [prd, archive, agent]
+---
+
 # Agent Isolation Architecture
 
 ## Status: COMPLETE — Isolated nREPL + DB per agent via flow harness and session API

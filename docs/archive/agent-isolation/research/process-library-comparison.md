@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive, agent]
+---
+
 # Process Library Comparison for Claude SDK
 
 **Date**: 2026-01-09
@@ -16,14 +22,14 @@ Clojure 1.12 introduced `clojure.java.process`, a built-in namespace for process
 - **Status**: Built-in, officially supported by Clojure team
 - **Dependencies**: None (part of clojure.core)
 - **Philosophy**: Minimal, functional wrapper around Java ProcessBuilder
-- **Documentation**: https://clojure.github.io/clojure/clojure.java.process-api.html
+- **Documentation**: [clojure.java.process API](https://clojure.github.io/clojure/clojure.java.process-api.html)
 
 ### babashka.process
 
 - **Status**: Third-party library, widely used
 - **Dependencies**: babashka/fs
 - **Philosophy**: Convenience-focused, shell scripting patterns
-- **Documentation**: https://github.com/babashka/process
+- **Documentation**: [babashka/process](https://github.com/babashka/process)
 
 ## 2. API Comparison
 

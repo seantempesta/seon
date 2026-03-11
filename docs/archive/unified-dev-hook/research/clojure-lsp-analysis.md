@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # Research: Unified Code Analysis with clj-kondo/clojure-lsp
 
 Date: 2026-01-04

@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive, agent]
+---
+
 # Persisted Context Research
 
 **Author**: Claude (research agent)

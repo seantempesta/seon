@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # Codebase Improvements Analysis
 
 **Date**: 2025-12-05 (Updated)

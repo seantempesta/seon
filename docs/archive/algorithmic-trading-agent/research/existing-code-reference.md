@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive, trading, agent]
+---
+
 # Existing Code Reference
 
 This document summarizes the existing trading code that the new `seon.algorithmic-trading` namespace will build upon.

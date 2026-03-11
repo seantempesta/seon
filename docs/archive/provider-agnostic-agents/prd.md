@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive, agent]
+---
+
 > **Status: ARCHIVED** — Complete — single provider suffices
 
 > **Status: ARCHIVED** — Complete — single provider suffices

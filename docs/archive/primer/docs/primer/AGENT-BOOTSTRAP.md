@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive, agent]
+---
+
 # Primer Agent Bootstrap
 
 **Status:** Stages 1-7 Complete, Browser Verified

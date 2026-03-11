@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 # Handoff: Complete Unified Dev Hook (Phases 3-5)
 
 ## Context

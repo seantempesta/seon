@@ -1,3 +1,9 @@
+---
+type: decision
+status: completed
+tags: [decision, archive, database]
+---
+
 # Query Architecture - Architectural Decisions
 
 This document records key architectural decisions for XTDB query patterns.

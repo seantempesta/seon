@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive, trading, agent]
+---
+
 # Session Template System - Prototype Notes
 
 **Status:** Prototype Complete

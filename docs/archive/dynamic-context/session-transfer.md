@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 # Session Transfer: Dynamic Context & Flow Architecture
 
 **Date**: 2025-01-30

@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 # Handoff: Fix Gemini Review in Dev Hook
 
 ## Context

@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive, schema]
+---
+
 # Schema Generator Test Failures - Research Findings
 
 ## Executive Summary

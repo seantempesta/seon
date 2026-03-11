@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # Handler Test Failures - Research Findings
 
 ## Executive Summary
