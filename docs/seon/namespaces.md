@@ -1,6 +1,6 @@
 ---
 type: reference
-status: current
+status: active
 updated: 2026-03-11
 tags: [reference, index]
 ---
@@ -175,6 +175,7 @@ Development tooling: hook, testing, linting, instrumentation.
 | `seon.dev.suggestions` | `src/seon/dev/suggestions.clj` | Symbol suggestion via Levenshtein distance ("Did you mean?") | stable |
 | `seon.dev.clojure-replace` | `src/seon/dev/clojure_replace.clj` | Comment-aware s-expression match/replace via rewrite-clj | mature |
 | `seon.dev.hook-test-ns` | `src/seon/dev/hook_test_ns.clj` | Test namespace for dev hook experimentation | experimental |
+| `seon.dev.markdown` | `src/seon/dev/markdown.clj` | Pure markdown analysis: parse, validate, auto-fix docs files (Seon-native linter) | stable |
 
 ## Domain Layer
 
@@ -207,6 +208,6 @@ Application-specific namespaces (test cases for the infrastructure).
 
 ## Summary
 
-- **Total namespaces**: 101
-- **Mature**: 30 | **Stable**: 41 | **Experimental**: 8 | **Deprecated**: 2
-- **Largest layers**: Web (18), Dev (15), Flow (10)
+- **Total namespaces**: 102
+- **Mature**: 30 | **Stable**: 42 | **Experimental**: 8 | **Deprecated**: 2
+- **Largest layers**: Web (18), Dev (16), Flow (10)

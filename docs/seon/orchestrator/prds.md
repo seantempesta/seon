@@ -23,7 +23,7 @@ All feature specifications live in `docs/prds/`. Each directory contains a `prd.
 
 | PRD | Status | Summary | Components |
 |-----|--------|---------|------------|
-| [[prds/schema-unification/design]] | active | Malli as single schema source: validation gate, pipeline tests, Nippy serialization, bridge | [[components/schema-system]], [[components/database]] |
+| [[prds/schema-unification/design]] | complete | Malli as single schema source: validation gate, pipeline tests, Nippy serialization, bridge | [[components/schema-system]], [[components/database]] |
 | [[prds/graph-cleanup/prd]] | complete | Remove derived attrs from graph, unify resolution via Datalog queries | [[components/code-graph]] |
 | [[prds/unified-flow/design]] | complete | core.async.flow as routing backbone: process isolation, inject/ping, topology | [[components/flow-topology]] |
 | [[prds/flow-datalevin-writer/prd]] | complete | Single-writer flow for Datalevin writes via topology, separate JVM isolation | [[components/flow-topology]], [[components/database]] |
@@ -41,4 +41,4 @@ All feature specifications live in `docs/prds/`. Each directory contains a `prd.
 | [[prds/data-viewer/prd]] | not started | Expand/collapse interaction for nested Clojure data in browser | [[components/web-layer]] |
 | [[prds/schema-viewer/prd]] | not started | Web-based Malli schema browser with navigation | [[components/web-layer]], [[components/schema-system]] |
 | [[prds/dashboard-polish/prd]] | not started | Information-dense terminal-style dashboard (Phosphor Terminal theme) | [[components/web-layer]] |
-| [[prds/test-coverage-audit/findings]] | complete | Audit findings: critical gaps in financial calculations, DSL executor | [[components/testing]] |
+| [[prds/test-coverage-audit/findings]] | superseded | Audit findings from ml-options era — references `dsl/primitives.clj` which no longer exists | [[components/testing]] |

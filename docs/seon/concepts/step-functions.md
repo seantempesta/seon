@@ -31,7 +31,7 @@ Several step functions are implemented and working:
 - `seon.flow.topology/reply-router-step` — delivers reply envelopes to waiting callers via promises. Receives on `:seon.flow.in/reply`, looks up promise by `::msg/id`, delivers. See `src/seon/flow/topology.clj`.
 - `seon.flow.topology/event-sink-step` — collects observability events in a bounded vector. Terminal sink, no outputs.
 - `seon.flow.topology/error-sink-step` — collects error replies in a bounded vector. Terminal sink, no outputs.
-- `seon.db.datalevin/writer` (partial) — handles database write requests.
+- `seon.db.datalevin.writer/infra-writer-step` — handles database write requests via the infrastructure flow. See `src/seon/db/datalevin/writer.clj`.
 
 The default `namespace-step` handles: request forwarding with queue cap, overload replies, JVM reply correlation, error reporting, and observability events. It dispatches on `input-id` to differentiate flow requests from TCP replies.
 
