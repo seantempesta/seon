@@ -64,13 +64,23 @@ review expands milestones and surfaces undocumented/untested work.
 
 | # | Agent | Scope | Status |
 |---|-------|-------|--------|
-| V14 | Reference rewrites | Fix 5 partially-stale reference docs (XTDB→Datalevin, dead paths) | in-progress |
-| V15 | Skills audit | Audit `.claude/skills/` — verify patterns match source, move duplicated knowledge into docs, add doc cross-refs so skills don't go stale | in-progress |
+| V14 | Reference rewrites | Fix 5 partially-stale reference docs (XTDB→Datalevin, dead paths) | complete | 5 docs fixed |
+| V15 | Skills audit | Audit `.claude/skills/` — verify patterns match source, add doc cross-refs | complete | 8 fixes |
+
+### Wave 7: Archive Review (3 agents)
+
+Goal: Surface undocumented capabilities, incomplete work, dependencies, and
+lessons from 143 archived docs to enrich milestones and issue tracking.
+
+| # | Agent | Scope | Status |
+|---|-------|-------|--------|
+| V16 | Infrastructure archives | agent-isolation, namespace-isolation, nrepl-lifecycle, dynamic-context, seon-transform, sql-migration, xtdb-browser, observatory-xtdb | complete | 2 issues, 1 capability fix |
+| V17 | Dev tooling archives | unified-dev-hook, auto-test-hook, test-suite-fixes, code-cleanup, truncated-log-view, namespace-render-toggle | complete | 3 issues, 1 doc update |
+| V18 | Feature archives | algorithmic-trading-agent, clojure-claude-sdk, primer, provider-agnostic-agents, reactive-ui, session-analytics, custom-renderers, live-updates, sse-live-reload, bulk-loader, agent-observatory, observatory-polish, ai-namespace-refactor, skills | complete | 1 doc update |
 
 ### Follow-up Passes
 
 - **Pass 2+**: Re-verify docs that had significant fixes, deepen accuracy
-- **Archive review**: Mine `docs/archive/` for undocumented capabilities, incomplete work, and lessons that should inform milestones and issue tracking
 
 <!-- Status: planned -> in-progress -> complete -> verified | failed -->
 
@@ -82,4 +92,6 @@ review expands milestones and surfaces undocumented/untested work.
 - 2026-03-11: Wave 1 complete. 25 fixes across 14 component docs. 3 new issues created.
 - 2026-03-11: Wave 2 complete. 20 fixes across architecture, concepts, conventions, indexes. 1 new issue.
 - 2026-03-11: Wave 3 complete. 1 issue resolved, 3 annotated, 34 confirmed open. 5 reference docs fixed, 1 issue created.
-- 2026-03-11: Waves 4+5 complete. 2 milestone fixes, 5 capability fixes, 10 PRD status corrections. 1 new issue (nippy-transitive-dep). Wave 6 launched.
+- 2026-03-11: Waves 4+5 complete. 2 milestone fixes, 5 capability fixes, 10 PRD status corrections. 1 new issue (nippy-transitive-dep).
+- 2026-03-11: Wave 6 complete. 5 reference docs fixed, 8 skill fixes + cross-refs. All active docs verified. Archive review launched.
+- 2026-03-11: Wave 7 complete. Archive review surfaced 5 new issues, 2 doc updates, 1 capability fix. Total: 46 issues tracked. All 7 waves done.
