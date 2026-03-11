@@ -1,9 +1,11 @@
 ---
 type: reference
-status: active
+status: completed
 tags: [reference, agent]
 ---
 # Native Gemini API Integration for Seon
+
+> **Note:** This was a research/proposal doc. `seon.ai.gemini` was implemented but with a different API design (namespaced keyword maps, not positional args). The proposed multi-namespace structure was not built. References to `seon.polymarket.api` and `xtdb-help` are stale.
 
 Research document for implementing native Gemini API integration in Clojure for Seon.
 

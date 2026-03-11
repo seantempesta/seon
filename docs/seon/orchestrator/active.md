@@ -36,16 +36,16 @@ review expands milestones and surfaces undocumented/untested work.
 
 | # | Agent | Scope | Status |
 |---|-------|-------|--------|
-| V6 | Architecture | `architecture/overview.md`, `decisions/001-007` | in-progress |
-| V7 | Concepts | `concepts/` (9 files) | in-progress |
-| V8 | Conventions+Indexes | `conventions.md`, `_dashboard.md`, `namespaces.md`, `prds.md` | in-progress |
+| V6 | Architecture | `architecture/overview.md`, `decisions/001-007` | complete | 6 fixes |
+| V7 | Concepts | `concepts/` (9 files) | complete | 7 fixes |
+| V8 | Conventions+Indexes | `conventions.md`, `_dashboard.md`, `namespaces.md`, `prds.md` | complete | 7 fixes |
 
 ### Wave 3: Issues + Reference (2 agents)
 
 | # | Agent | Scope | Status |
 |---|-------|-------|--------|
-| V9 | Issue triage | `orchestrator/issues/` (39 files) | planned |
-| V10 | Reference staleness | `reference/` (14 files) | planned |
+| V9 | Issue triage | `orchestrator/issues/` (39 files) | in-progress |
+| V10 | Reference staleness | `reference/` (14 files) | in-progress |
 
 ### Wave 4: Vision + Capabilities (2 agents)
 
@@ -59,6 +59,13 @@ review expands milestones and surfaces undocumented/untested work.
 | # | Agent | Scope | Status |
 |---|-------|-------|--------|
 | V13 | PRD audit | `prds/` (22 dirs, ~105 files) | planned |
+
+### Wave 6: Reference Cleanup + Skills Audit
+
+| # | Agent | Scope | Status |
+|---|-------|-------|--------|
+| V14 | Reference rewrites | Fix 5 partially-stale reference docs (XTDB→Datalevin, dead paths) | planned |
+| V15 | Skills audit | Audit `.claude/skills/` — verify patterns match source, move duplicated knowledge into docs, add doc cross-refs so skills don't go stale | planned |
 
 ### Follow-up Passes
 

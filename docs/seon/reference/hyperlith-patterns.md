@@ -1,6 +1,6 @@
 ---
 type: reference
-status: active
+status: abandoned
 tags: [reference, web]
 ---
 # Hyperlith Patterns: Deep Dive
