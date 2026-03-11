@@ -1,21 +1,22 @@
 ---
 type: capability
-status: not-started
+status: partial
 tags: [vision, agent]
 ---
 # Agent Log Access
 
-Agents can query and search their own logs through safe REPL functions and a web UI. Log parsing exists but the agent-facing API and web route are not wired.
+Agents can query and search their own logs through safe REPL functions and a web UI. Web UI exists; agent-facing REPL API not built.
 
 ## What Exists
 
-`web/logs.clj` exists with `parse-log-line` for structured log parsing. No further implementation.
+- `/logs` route registered in `web/routes.clj` (GET + POST SSE + POST filter)
+- Full log viewer UI with SSE updates, level filtering, and refresh
+- `web/logs.clj` with `parse-log-line` for structured log parsing
 
 ## Gaps
 
 - Four agent-safe REPL functions (tail, search, errors, context) not implemented
-- No `/logs` route registered
-- No web UI for log browsing
+- Log viewer is human-facing only — agents cannot access logs programmatically from the REPL
 
 ## Related
 

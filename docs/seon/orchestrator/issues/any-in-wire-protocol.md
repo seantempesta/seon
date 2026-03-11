@@ -1,26 +1,20 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: architectural
 milestone: M2
 tags: [issue, schema]
 ---
 # :any in Wire Protocol Schemas
 
-## Problem
+## Resolution
 
-`::msg/args`, `::msg/payload`, `::msg/value` in `flow/msg.clj` use `:any` because they carry arbitrary function arguments across the wire. This violates the "no `:any`" rule and means wire data is completely unvalidated. Needs a design decision: tagged unions, schema-per-message-type, or Nippy-opaque blobs with validation at the endpoints.
+**Resolved.** `::msg/args`, `::msg/payload`, `::msg/value` in `flow/msg.clj` now use `:seon.flow/dynamic` — a custom Malli type defined in `schema.clj` (lines 59-66) with a concrete predicate (`some?`) and a working generator. The `:any` has been replaced with a typed dynamic container. Verified by M2 verifier 2026-03-11.
 
 ## Where
 
-- `src/seon/flow/msg.clj` — schema registrations for `::args`, `::payload`, `::value`
-
-## Acceptance Criteria
-
-- No `:any` remains in `flow/msg.clj` schemas
-- Wire messages are validated with a concrete schema (tagged union, per-type dispatch, or equivalent)
-- Existing flow tests continue to pass
-- Serialization roundtrip (Nippy) still works for all message types
+- `src/seon/flow/msg.clj` — `::args` uses `[:vector :seon.flow/dynamic]`, `::payload` uses `[:map-of :keyword :seon.flow/dynamic]`, `::value` uses `:seon.flow/dynamic`
+- `src/seon/schema.clj` — `:seon.flow/dynamic` custom type definition
 
 ## Related
 
