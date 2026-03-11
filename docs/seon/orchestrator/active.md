@@ -10,11 +10,24 @@ status: active
 >
 > Read this after context loss. It tells you where we are.
 
-**Milestone:** Phase B — Discovery + Milestones
+**Milestone:** Phase C — M3 Convention Uniformity
 **Branch:** feature/refinement
 **Last updated:** 2026-03-11
 
-## Pipeline
+## Phase C Pipeline
+
+| # | Task | Scope | Status | Verified |
+|---|------|-------|--------|----------|
+| 1 | Dead code deletion | 5 files with zero callers | in-progress | — |
+| 2 | Schema deduplication | `::db-name` (14 sites), `::namespace` (27 sites) | planned | — |
+| 3 | Core layer schemas | `render.clj`, `graph/query.clj`, `db.clj` | planned | — |
+| 4 | Flow layer schemas | `flow/pool.clj`, `web/sse.clj`, `web/sse/flow.clj` | planned | — |
+| 5 | AI layer schemas | `ai/datalevin.clj` (24 fns) | planned | — |
+| 6 | Dev layer schemas | `dev/repair.clj`, `dev/lint.clj`, `dev/context.clj` | planned | — |
+| 7+ | Remaining namespaces | TBD based on progress | planned | — |
+<!-- Status: planned -> in-progress -> complete -> verified | failed -->
+
+## Phase B (Complete)
 
 | # | Task | Context | Status | Verified |
 |---|------|---------|--------|----------|
@@ -25,8 +38,7 @@ status: active
 | 5 | Write milestone notes in vision/ | M1-M8 comprehensive docs | complete | 8 milestones |
 | 6 | Link issues to milestones | Issue notes + milestones | complete | In milestone docs |
 | 7 | Update dashboard + vision index | Milestone tables | complete | — |
-| 8 | Update active.md + commit | Final state | in-progress | — |
-<!-- Status: planned -> in-progress -> complete -> verified | failed -->
+| 8 | Update active.md + commit | Final state | complete | — |
 
 ## Verification Log (2026-03-11)
 
