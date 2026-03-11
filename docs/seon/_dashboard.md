@@ -25,7 +25,18 @@ status: active
 
 ## Vision & Milestones
 
-- [[vision/index]] — Project thesis and aspirational capabilities
+[[vision/index]] — Project thesis and aspirational capabilities
+
+| Milestone | Status | Bootstrap |
+|-----------|--------|-----------|
+| [[vision/m1-reliable-runtime\|M1: Reliable Runtime]] | partial | Foundation |
+| [[vision/m2-trustworthy-data\|M2: Trustworthy Data]] | partial | Foundation |
+| [[vision/m3-convention-uniformity\|M3: Convention Uniformity]] | in-progress | 1: Claude Code |
+| [[vision/m4-discoverable-codebase\|M4: Discoverable Codebase]] | partial | 1: Claude Code |
+| [[vision/m5-observable-system\|M5: Observable System]] | partial | 1: Claude Code |
+| [[vision/m6-eval-pipeline\|M6: The Eval Pipeline]] | not-started | 2: REPL Agents |
+| [[vision/m7-namespace-as-process\|M7: Namespace as Living Process]] | not-started | 3: Autonomous |
+| [[vision/m8-autonomous-agents\|M8: Autonomous Namespace Agents]] | not-started | 3: Autonomous |
 
 ## Components (What Exists)
 
