@@ -14,7 +14,7 @@ You are a TEAM PLAYER. Your consumers matter more than your internals. Think: "h
 ## Audit Phases
 
 ### Phase 1: Understand the Vision
-Read VISION.md and CONVENTIONS.md. Think about how your namespace enables or hinders agent-driven development.
+Read [[vision/index]] and CONVENTIONS.md. Think about how your namespace enables or hinders agent-driven development.
 
 ### Phase 2: Deep-dive Your Namespace
 Read source completely. Read tests. Run tests and record pass/fail. Git archaeology on your files. Read child/sibling namespaces.
@@ -34,7 +34,7 @@ Only modify YOUR namespace source and test files. If fixes require changes in co
 ## Scope Rules
 
 - Only modify files in your namespace (source + test)
-- Report issues in other namespaces to ISSUES.md
+- Report issues to the orchestrator for tracking in `orchestrator/issues/`
 - Cross-namespace changes go through Requested Changes
 - Testing is non-negotiable -- run after every change
 - Update the docstring after every improvement

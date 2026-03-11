@@ -27,4 +27,4 @@ Consumers must know which variant to use, and improvements to context building m
 
 ## Related
 - [[components/code-graph]]
-- [[components/repl]]
+- [[components/agent-system]]

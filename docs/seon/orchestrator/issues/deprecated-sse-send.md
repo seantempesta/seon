@@ -18,4 +18,4 @@ severity: cleanup
 - No test failures after removal
 
 ## Related
-- [[components/sse]]
+- [[components/web-layer]]

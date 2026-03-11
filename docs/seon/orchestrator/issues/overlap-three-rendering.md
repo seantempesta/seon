@@ -26,4 +26,4 @@ Having two live systems with different dispatch (specificity vs multimethods) me
 
 ## Related
 - [[components/renderer]]
-- [[components/namespace-routes]]
+- [[components/namespace-lifecycle]]

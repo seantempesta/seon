@@ -65,7 +65,7 @@ type: dashboard
 
 - [[orchestrator/active]] — Current pipeline and session recovery
 - [[orchestrator/prds]] — PRD index with status
-- [[orchestrator/issues/]] — Individual issue notes (~33 open issues)
+- [[orchestrator/issues/]] — Individual issue notes (36 open issues)
 
 ## Reference
 

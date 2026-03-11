@@ -6,7 +6,7 @@ severity: blocking
 # Functions Missing :malli/schema Metadata
 
 ## Problem
-Many public functions -- especially in `ai/datalevin.clj` -- lack `:malli/schema` metadata and don't follow map-in/map-out. Until every public function is spec'd, the graph can't do schema-based discovery (VISION.md M1). This is the single biggest blocker to the core primitive: agents discovering and using functions by their contracts.
+Many public functions -- especially in `ai/datalevin.clj` -- lack `:malli/schema` metadata and don't follow map-in/map-out. Until every public function is spec'd, the graph can't do schema-based discovery ([[vision/index]] M1). This is the single biggest blocker to the core primitive: agents discovering and using functions by their contracts.
 
 ## Where
 - `src/seon/ai/datalevin.clj` — most functions lack schemas

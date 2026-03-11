@@ -18,4 +18,4 @@ severity: friction
 - All references updated consistently
 
 ## Related
-- [[components/health]]
+- [[components/system-lifecycle]]

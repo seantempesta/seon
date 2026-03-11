@@ -57,4 +57,4 @@ Malli is the **single source of truth**. `schema/register!` carries all metadata
 - `test/seon/db/schema_roundtrip_test.clj` -- bridge contract (36 tests, 411 assertions)
 - [[architecture/decisions/002-absence-over-nil]] for nil semantics
 - [[architecture/decisions/003-ref-type]] for the ref type
-- [[components/malli]] and [[components/datalevin]] for component details
+- [[components/schema-system]] and [[components/database]] for component details

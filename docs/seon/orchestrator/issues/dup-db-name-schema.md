@@ -19,4 +19,4 @@ severity: friction
 
 ## Related
 - [[components/database]]
-- [[components/schema]]
+- [[components/schema-system]]

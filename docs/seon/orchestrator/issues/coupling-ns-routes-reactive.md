@@ -18,5 +18,5 @@ Namespace views are tightly coupled to the reactive system implementation rather
 - Tests pass
 
 ## Related
-- [[components/namespace-routes]]
-- [[components/sse]]
+- [[components/namespace-lifecycle]]
+- [[components/web-layer]]

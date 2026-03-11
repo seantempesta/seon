@@ -36,4 +36,4 @@ Nippy is used for the **harness channel bridge** (inter-JVM TCP). Context persis
 
 - `docs/prds/schema-unification/research/serialization-findings.md` -- full research with REPL verification
 - `src/seon/flow/harness/channel.clj` -- implementation
-- [[components/datalevin]] for wire protocol details
+- [[components/database]] for wire protocol details

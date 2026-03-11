@@ -27,6 +27,6 @@ Different push semantics mean inconsistent update behavior, duplicated client tr
 - Tests pass
 
 ## Related
-- [[components/sse]]
+- [[components/web-layer]]
 - [[components/context]]
 - [[components/flow-topology]]
