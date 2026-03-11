@@ -17,7 +17,9 @@ Each agent operates in its own JVM with isolated nREPL and database connections.
 
 ## Gaps
 
-None.
+- **SSE scoping**: Agent log streams are broadcast globally — no per-agent SSE channel scoping for targeted observatory views
+- **Git worktree integration**: Archive research explored git worktrees for per-agent file isolation, but this was never built. Agents share the working tree with manual coordination.
+- **Stuck detection**: No distinction between "thinking" and "stuck" agents — see [[orchestrator/issues/no-agent-stuck-detection]]
 
 ## Related
 
