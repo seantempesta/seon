@@ -28,7 +28,7 @@ The graph also powers AI agent context building: given a seed function, `context
 
 ### `seon.graph.analyzer`
 
-- **`analyze-project!`** — Full clj-kondo run on `src/` directories. Returns `{::raw-analysis ...}`.
+- **`analyze-project!`** — Full clj-kondo run on `src/` directories. Returns `{::success ::raw-analysis ::duration-ms}` (or `{::success false ::error ::duration-ms}` on failure).
 - **`analyze-form`** — Incremental clj-kondo on a source string.
 - **`extract-entities`** — Transforms raw clj-kondo output into `{::namespaces ::functions ::var-usages ::namespace-usages}`.
 

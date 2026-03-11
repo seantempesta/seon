@@ -32,7 +32,7 @@ This is a single-file component — everything lives in `seon.runtime`. It is on
 | Function | Schema | Description |
 |----------|--------|-------------|
 | `register!` | `::register-request => ::instance-response` | Register a namespace instance (cache + Datalevin upsert) |
-| `unregister!` | `::unregister-request => ::unregister-response` | Set status to `:stopped` with timestamp |
+| `unregister!` | `::unregister-request => ::unregister-response` | Set status to `:stopped` with timestamp; returns nil if namespace not found (`::unregister-response` is `[:maybe ::instance-response]`) |
 | `instance` | `::instance-request => [:maybe ::instance-response]` | Look up one instance by namespace string |
 | `instances` | `::instances-request => ::instances-response` | List all registered instances |
 | `running-sessions` | `::running-sessions-request => ::running-sessions-response` | All external + running instances (agent sessions) |
@@ -73,7 +73,13 @@ Flow objects are opaque and not serializable, so this registry is purely in-memo
 | Function | Schema | Description |
 |----------|--------|-------------|
 | `snapshot-topology!` | `::snapshot-request => ::snapshot-response` | Capture paused flow state via `flow/ping`, persist as `pr-str` to Datalevin |
-| `latest-snapshot` | (no schema) | Get most recent snapshot for a flow label |
+| `latest-snapshot` | (no `:malli/schema` metadata; `::latest-snapshot-request` schema registered) | Get most recent snapshot for a flow label; takes `{::label ...}` map |
+
+### Testing Helpers
+
+| Function | Schema | Description |
+|----------|--------|-------------|
+| `reset-registry!` | `::reset-registry-request => ::reset-registry-response` | Reset in-memory registry cache, generated IDs, flow handles, and merged schema cache; for testing only |
 
 ### Schema: `runtime-merged-schema`
 

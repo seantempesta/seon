@@ -51,8 +51,8 @@ All read functions accept a db-name keyword (`:seon`, `:seon.runtime`, `:seon.ai
 
 ### Flow Coordination
 
-- **`pause-writer! []`** — Pause infrastructure flow writer (for backups).
-- **`resume-writer! []`** — Resume after backup.
+- **`pause-writer! []`** — Pause the entire infrastructure flow (for backups); calls `flow/pause` then `flow/ping` to confirm quiescence.
+- **`resume-writer! []`** — Resume the infrastructure flow after backup.
 
 ### Direct Mode
 
@@ -138,7 +138,7 @@ The connection manager solves a critical concurrency problem: when two threads s
 - `reconnect!` — Force close + fresh connection
 - `sweep-stale-connections!` — Remove dead connections from cache
 - `close-non-core-connections!` — Used during suspend
-- `health` — TCP probe + connection count
+- `health` — TCP probe against server port; returns `::status` (`:connected`/`:disconnected`/`:degraded`), `::total-connections`, `::server-reachable?`
 
 ## Design Decisions
 
