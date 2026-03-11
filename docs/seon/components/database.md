@@ -79,6 +79,7 @@ Caller
         -> d/transact! (with timeout, retry on connection error)
         -> reply envelope -> reply-router -> deliver promise
     -> caller receives result
+
 ```
 
 ### Write Path (Test / Direct Mode)
@@ -88,6 +89,7 @@ Caller
   -> db/transact! (validate attrs, validate values, ensure-schema!)
     -> resolve-conn (from connection manager)
     -> d/transact! (direct)
+
 ```
 
 ### Read Path (Production)
@@ -98,6 +100,7 @@ Caller
     -> flow-request! -> infrastructure flow reader step-fn
       -> execute-query (dispatches on :q/:pull/:pull-many/:entity)
       -> reply envelope -> reply-router -> deliver promise
+
 ```
 
 ### Read Path (Direct Mode)
@@ -106,6 +109,7 @@ Caller
 Caller
   -> db/query
     -> with-retry (resolve-db, execute, reconnect on error)
+
 ```
 
 ## Multi-Database Strategy

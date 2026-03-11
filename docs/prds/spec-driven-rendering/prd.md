@@ -50,6 +50,7 @@ Populated from clj-kondo var-definitions + Malli `:malli/schema` var metadata.
                              :seon.health.workout/reps        ; contains :seon.render/html or /ai
                              :seon.health.workout/weight]
  :seon.fn/updated-at      #inst "2026-02-19"}
+
 ```
 
 Notes:
@@ -72,6 +73,7 @@ Populated from static source analysis of `schema/register!` calls in source file
                            :seon.health.workout/reps
                            :seon.health.workout/weight]
  :seon.spec/updated-at    #inst "2026-02-19"}
+
 ```
 
 #### Namespace Entities (`:seon.ns/*`)
@@ -85,6 +87,7 @@ Populated from clj-kondo namespace-definitions + file extension analysis.
  :seon.ns/target     :clj                   ; extracted from file extension (.clj, .cljs, .cljc)
  :seon.ns/requires   ["seon.schema" "seon.db.datalevin"]
  :seon.ns/updated-at #inst "2026-02-19"}
+
 ```
 
 Notes:
@@ -101,6 +104,7 @@ Populated from clj-kondo var-usages. `:seon.call/from-fn` and `:seon.call/to-fn`
  :seon.call/to-fn     [:seon.fn/qualified-name "datalevin.core/transact!"]           ; ref via lookup ref
  :seon.call/row       45
  :seon.call/col       5}
+
 ```
 
 **External functions** (outside the project, e.g. `datalevin.core/transact!`) get minimal stub entities with only `:seon.fn/qualified-name`, `:seon.fn/namespace`, and `:seon.fn/name`. This ensures refs always resolve.
@@ -145,6 +149,7 @@ Populated from clj-kondo var-usages. `:seon.call/from-fn` and `:seon.call/to-fn`
  :seon.call/to-fn    {:db/valueType :db.type/ref}          ; ref to fn entity
  :seon.call/row      {:db/valueType :db.type/long}
  :seon.call/col      {:db/valueType :db.type/long}}
+
 ```
 
 ## Renderer Resolution Algorithm
@@ -186,6 +191,7 @@ Pre-computed `:seon.fn/render-input-keys` on function entities enables single-qu
                         (comp - #(.toEpochMilli %) :seon.fn/updated-at)
                         :seon.fn/qualified-name))
          first)))
+
 ```
 
 ### Practical Implementation Note
@@ -203,6 +209,7 @@ No special override mechanism. An agent that wants a custom renderer writes a fu
 ;; Agent debug override -- same input spec, newer timestamp
 (defn debug-workout-view ...)  ; updated-at T2 > T1, wins
 ;; Delete the function -> scanner removes it -> workout-set wins again
+
 ```
 
 **Cleanup:** Agent-defined temporary functions should be tracked by session. When an agent session ends, the orchestrator can optionally clean up functions defined during that session (by checking `:seon.fn/updated-at` range and namespace ownership). This is not required for correctness -- stale overrides just add candidates that may or may not win.
@@ -259,6 +266,7 @@ For `schema/register!` calls parsed from source files, extract contained keys fr
 ;; Example: parsing (schema/register! ::workout [:map [::exercise ...] [::sets ...]])
 ;; schema-form = [:map [::exercise ::exercise] [::sets ::sets]]
 ;; => [::exercise ::sets]
+
 ```
 
 ### Function Schema Extraction (Static — From Source)
@@ -274,6 +282,7 @@ For functions with `:malli/schema` metadata, extract input and output spec refer
     (let [[_ [_ input-spec] output-spec] schema-form]
       {:input-spec (when (keyword? input-spec) input-spec)
        :output-spec (when (keyword? output-spec) output-spec)})))
+
 ```
 
 ## Render Agent Pattern
@@ -285,6 +294,7 @@ Domain namespaces define specs and business logic. Companion `.render` namespace
 ```
 seon.health.workout          -- domain: specs, business logic
 seon.health.workout.render   -- rendering: HTML, AI output
+
 ```
 
 Benefits:
@@ -306,6 +316,7 @@ Render functions follow standard map-in/map-out convention:
   [{:seon.health.workout/keys [exercise sets reps weight]}]
   {:seon.render/html [:tr [:td exercise] [:td (str sets)] ...]
    :seon.render/ai   (str exercise " -- " sets "x" reps ...)})
+
 ```
 
 Combined render functions (returning both `:seon.render/html` and `:seon.render/ai`) are preferred over separate functions, reducing the number of entities and simplifying resolution.
@@ -325,6 +336,7 @@ seon.health.workout/log-workout!
   Records a workout set to the database.
   Input:  [:map [::exercise [:string {:min 1}]] [::sets pos-int?] ...]
   Output: [:map [::id uuid?] [::created-at inst?]]
+
 ```
 
 This is generated from `:seon.fn/doc`, `:seon.fn/input-spec`, `:seon.fn/output-spec` -- all in Datalevin. No source code needed for basic context.
@@ -350,6 +362,7 @@ With ref-based schema, spec navigation is a direct pull -- no string-based joins
    {:seon.fn/input-spec [:seon.spec/key :seon.spec/definition :seon.spec/contains-keys]}
    {:seon.fn/output-spec [:seon.spec/key :seon.spec/definition]}]
   [:seon.fn/qualified-name "seon.health.workout/log-workout!"])
+
 ```
 
 ## Context Building: Topological Ordering
@@ -394,6 +407,7 @@ seon.trading.signals/generate-signal!   ← TARGET
   Input: [:map [::bars [:vector :seon.trading/price-bar]] [::strategy keyword?]]
   Output: :seon.trading/signal
   Calls: seon.trading.indicators/sma, seon.trading.indicators/rsi
+
 ```
 
 Specs appear first because everything depends on them. Leaf functions (`sma`, `rsi`) appear before the target that calls them. An agent reading top-to-bottom encounters each concept before it is used.

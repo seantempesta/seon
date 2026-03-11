@@ -36,6 +36,7 @@ From `reference-code/datalevin/src/datalevin/constants.clj:92`:
   "Default LMDB env flag is `#{:nordahead}`. See
   [[datalevin.core/set-env-flags]] for a full list of flags."
   #{:nordahead})
+
 ```
 
 **Default is `#{:nordahead}` only.** This is `MDB_NORDAHEAD` which just disables OS read-ahead — it has NO impact on crash safety. The dangerous flags (`:nosync`, `:writemap`, `:mapasync`) are NOT set by default.
@@ -76,6 +77,7 @@ From `reference-code/datalevin/src/datalevin/db.clj:681-685`, Datalevin temporar
   (set-env-flags lmdb #{:nosync} true)
   ;; ... do work ...
   (when-not nosync? (set-env-flags lmdb #{:nosync} false)))
+
 ```
 
 **If SIGKILL arrives while `:nosync` is temporarily enabled**, the last committed transaction may not be fsynced. This is a real window of vulnerability.
@@ -107,6 +109,7 @@ The corruption could be in the top-level server DB or any of the per-database en
 
 ```bash
 find data/datalevin -name 'lock.mdb' -delete
+
 ```
 
 LMDB recreates `lock.mdb` on next open. If the corruption is only from stale locks (not actual data page corruption), this fixes it without data loss.
@@ -118,6 +121,7 @@ If LMDB tools are available:
 ```bash
 # mdb_copy compacts and rebuilds the B+ tree
 mdb_copy -c data/datalevin/73656F6E output_dir
+
 ```
 
 This reads valid committed data and writes a clean copy. Skips corrupted pages.
@@ -127,6 +131,7 @@ This reads valid committed data and writes a clean copy. Skips corrupted pages.
 ```clojure
 ;; From datalevin.interface/copy — calls mdb_env_copy2
 (datalevin.core/copy db "/path/to/backup" true)  ; compact=true
+
 ```
 
 This only works if the DB can be opened at all.
@@ -147,6 +152,7 @@ Replace `pkill -9` with graceful shutdown:
 pkill -15 -f "java.*seon"   # SIGTERM — triggers JVM shutdown hook
 sleep 3                       # Wait for graceful shutdown
 pkill -9 -f "java.*seon"    # Only if still alive
+
 ```
 
 Seon already has a JVM shutdown hook in `src/seon/core.clj:247-262` that:
@@ -167,6 +173,7 @@ Before opening any LMDB environment, delete `lock.mdb` if no process holds it:
   (doseq [lock-file (find-files root-dir "lock.mdb")]
     ;; LMDB auto-recreates lock.mdb
     (io/delete-file lock-file true)))
+
 ```
 
 This is safe because:
@@ -188,6 +195,7 @@ Change the kill command from:
 
 ```
 Kill JVMs: `pkill -9 -f "java.*seon"`
+
 ```
 
 To:
@@ -195,6 +203,7 @@ To:
 ```
 Kill JVMs: `pkill -15 -f "java.*seon" && sleep 3 && pkill -9 -f "java.*seon"`
 After forced kill: delete lock.mdb files, NOT data.mdb
+
 ```
 
 ## Is This a Datalevin Bug?

@@ -1,4 +1,5 @@
 # PRD: Agent Observatory
+
 ## Status: COMPLETE — Observatory UI at /agents with per-agent logging and live message streaming
 
 **Status:** Mostly Complete (Phase 2.3 Remaining)
@@ -71,6 +72,7 @@ The previous PRD noted these bugs:
 2. ~~**Toggle may not work**~~ **FIXED**: Toggle works correctly, triggers `sse/refresh-all!`
 
 ### Files Created
+
 - `src/seon/ai/agent/log.clj` - Per-agent logging (327 lines)
 - `src/seon/ai/agent/views.clj` - Tool-specific renderers (1491 lines)
 - `src/seon/web/agents.clj` - List and detail handlers (1274 lines)
@@ -114,6 +116,7 @@ Create a dedicated log file for agent activity that's easy to tail.
 2026-01-20T13:23:30Z | MESSAGE | assistant | "Found the schema..."
 2026-01-20T13:24:00Z | HOOK    | Write | tests=pass | gemini=pending
 2026-01-20T13:25:00Z | COMPLETE| cost=$0.45 | messages=84 | duration=100s
+
 ```
 
 **Implementation:**
@@ -123,10 +126,12 @@ Create a dedicated log file for agent activity that's easy to tail.
 - Use timbre with dedicated appender per agent
 
 **Usage:**
+
 ```bash
 tail -f logs/agents/f602.log           # watch specific agent
 ls -lt logs/agents/                     # see recent agents
 tail -f logs/agents/*.log              # watch all agents
+
 ```
 
 ---
@@ -149,6 +154,7 @@ Shows all agents (running + recent completed):
 │ f2cb │ seon.hook-test       │ ✓ complete│ 13       │ $0.08  │
 │ 3856 │ seon.e2e-test        │ ✓ complete│ 7        │ $0.07  │
 └─────────────────────────────────────────────────────────────┘
+
 ```
 
 Click row → drill into agent detail.
@@ -179,6 +185,7 @@ Live-updating view of single agent:
 │                                                             │
 │ ▼ [auto-scroll enabled]                                     │
 └─────────────────────────────────────────────────────────────┘
+
 ```
 
 **Implementation:**
@@ -205,6 +212,7 @@ Browse persisted entities at `/db`:
 │             │                                               │
 │             │ [View Messages] [View Raw JSON]               │
 └─────────────┴──────────────────────────────────────────────┘
+
 ```
 
 ---
@@ -214,12 +222,14 @@ Browse persisted entities at `/db`:
 Make it easy for orchestrator (me) to monitor without REPL polling.
 
 **Option A: Status command**
+
 ```clojure
 ;; Quick status check that returns summary
 (agent/status)
 ;; => {:running [{:id "f602" :ns "seon.session-analytics" :messages 84}]
 ;;     :completed-today 5
 ;;     :total-cost-today 2.34}
+
 ```
 
 **Option B: Notification on completion**
@@ -236,6 +246,7 @@ When implementing the web UI, agents should use the `datastar-web-ui` skill to u
 
 ```
 /datastar-web-ui
+
 ```
 
 This skill documents our Tailwind + Datastar + SSE patterns for building reactive UIs.
@@ -262,6 +273,7 @@ Our `patch-elements` only supports `outer` mode. Extend to support all modes:
   - :mode - :outer, :inner, :append, :prepend, :before, :after, :replace, :remove"
   [{:keys [selector mode event-id]} elements]
   ...)
+
 ```
 
 See `docs/prds/agent-observatory/datastar-comparison.md` for full implementation.
@@ -355,6 +367,7 @@ Beyond this PRD, the broader vision is that each namespace gets its own endpoint
 /ns/seon.trading       → same pattern
 /agents                → this PRD
 /db                    → entity browser
+
 ```
 
 Each namespace view would show:

@@ -126,6 +126,7 @@ No functions -- pure schema definitions. Registers schemas for `::request`, `::r
                     error channels -----> :seon.flow/   |
                                         |  error-sink   |
                                         +--------------+
+
 ```
 
 Built by `build-infrastructure!`. Six processes. Writer uses connection manager for multi-DB writes. Reader uses connection manager for multi-DB reads. REPL step calls `pool/nrepl-eval!`.
@@ -144,6 +145,7 @@ Built by `build-infrastructure!`. Six processes. Writer uses connection manager 
        | forwards via TCP to agent JVM
        v
   agent JVM on port 790X
+
 ```
 
 Built by `build-topology!`. One harness process per namespace, plus shared reply-router, event-sink, error-sink. Harness manages backpressure (queue capacity) and traces events.

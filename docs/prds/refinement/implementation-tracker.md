@@ -132,6 +132,7 @@ A single agent launch creates THREE IDs: 4-char hex (infra), AI session UUID, Cl
 ;; Example: data with {:seon.ai.agent/session-id "a1b2"} routes to:
 ;;   seon.ai.agent/get-agent (specificity 1)
 ;;   seon.ai.agent/tail (specificity 1)
+
 ```
 
 **Performance:** 2.3ms to validate data against 44 candidate Malli schemas. Datalog key-lookup is sub-millisecond.
@@ -272,6 +273,7 @@ send-command ::flow/ping with reply-chan
       -> process replies with {::flow/pid, ::flow/state, ::flow/status}
     -> replies collected within timeout-ms
   -> returns map of pid -> state
+
 ```
 
 The `::flow/state` in the ping response IS the step-fn's current state (the accumulator from init/transition/transform). This is the data we serialize for snapshots.
@@ -289,6 +291,7 @@ nrepl-server (no deps)
 http-server (no deps)
 tailwind-watcher (no deps)
 claude-code (no deps)
+
 ```
 
 The runtime registry component should depend on `connection-manager` (for Datalevin access) and be depended on by `orchestrator-sessions` and `code-scanner`.
@@ -302,6 +305,7 @@ The code scanner creates its own connection to the `seon-graph` database:
 (let [graph-uri (build-uri-fn connection-manager "seon-graph")
       conn (get-conn graph-uri datalevin-schema)]
   ...)
+
 ```
 
 The runtime registry needs to use this SAME connection (same DB). Options:

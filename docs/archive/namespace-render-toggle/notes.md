@@ -21,11 +21,13 @@ In a real feature, this would summarize what was actually built.
 Impact on future work
 
 **Example:**
+
 ```clojure
 ;; Code showing the learning
 (defn example []
   ;; Pattern that worked well
   )
+
 ```
 
 ---
@@ -53,6 +55,7 @@ How to test this feature:
 ;; REPL commands for manual testing
 (require '[example :as ex])
 (ex/test-scenario)
+
 ```
 
 ---

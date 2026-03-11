@@ -15,29 +15,38 @@ The handler tests fail due to **4 distinct issues**:
 ## Issue 1: Null Pointer - slurp() on nil body
 
 ### Location
+
 `src/ml_options/web/handlers.clj:56`
 
 ### Code
+
 ```clojure
 (let [body-str (slurp (:body request))  ;; FAILS if :body is nil
+
 ```
 
 ### Problem
+
 When `:body` is `nil`, `slurp` attempts to call `.length()` on null:
+
 ```
 Cannot invoke "java.lang.CharSequence.length()" because "this.text" is null
+
 ```
 
 ### When It Occurs
+
 - Test's `mock-request` defaults `:body` to `nil` (line 31)
 - If test doesn't override with `json-body`, handler gets nil
 - `slurp(nil)` throws NPE
 
 ### Fix
+
 ```clojure
 (let [body-str (if (:body request)
                  (slurp (:body request))
                  "{}")]  ;; Default to empty JSON
+
 ```
 
 ---
@@ -45,9 +54,11 @@ Cannot invoke "java.lang.CharSequence.length()" because "this.text" is null
 ## Issue 2: Missing Input Validation
 
 ### Location
+
 `src/ml_options/web/handlers.clj:62-71`
 
 ### Code
+
 ```clojure
 symbols-str (:symbols body)                    ;; Can be nil
 start-date-str (:startDate body)               ;; Can be nil
@@ -56,21 +67,26 @@ end-date-str (:endDate body)                   ;; Can be nil
 symbols (vec (map str/trim (str/split symbols-str #",")))  ;; FAILS if nil
 start-date (LocalDate/parse start-date-str)    ;; FAILS if nil
 end-date (LocalDate/parse end-date-str)        ;; FAILS if nil
+
 ```
 
 ### Problem
+
 No validation that required fields are present before parsing.
 
 ### When It Occurs
+
 Test line 260 sends `{:symbols "AAPL"}` (missing dates):
 1. JSON parses successfully
 2. `:startDate` lookup returns `nil`
 3. `LocalDate/parse nil` throws NPE
 
 ### What Tests Expect
+
 Line 254 expects error containing "could not be parsed" - but actual exception is NPE with different message.
 
 ### Fix
+
 ```clojure
 (when (or (str/blank? symbols-str)
           (str/blank? start-date-str)
@@ -80,6 +96,7 @@ Line 254 expects error containing "could not be parsed" - but actual exception i
                               (str/blank? symbols-str) (conj :symbols)
                               (str/blank? start-date-str) (conj :startDate)
                               (str/blank? end-date-str) (conj :endDate))})))
+
 ```
 
 ---
@@ -87,14 +104,17 @@ Line 254 expects error containing "could not be parsed" - but actual exception i
 ## Issue 3: API Mismatch - Test Mock vs Reality
 
 ### Test Pattern
+
 ```clojure
 (with-redefs [jobs/start-import! (fn [node symbols start end opts]
                                     (swap! jobs/job-state ...)
                                     {:ok "job-123"})]
   (handlers/start-import request))
+
 ```
 
 ### Handler Reality (line 74-76)
+
 ```clojure
 node (jobs/get-node)  ;; Gets node first
 result (jobs/start-import! node symbols start-date end-date {:parallelism 4})
@@ -102,22 +122,27 @@ result (jobs/start-import! node symbols start-date end-date {:parallelism 4})
 {:status 200
  :headers {"Content-Type" "application/json"}
  :body (json/write-value-as-string result)}
+
 ```
 
 ### The Mismatch
+
 1. Handler calls `jobs/get-node` before `jobs/start-import!`
 2. Tests mock `jobs/start-import!` but may not account for node retrieval
 3. If `jobs/get-node` fails or returns unexpected value, chain breaks
 
 ### Test That Works (line 182-188)
+
 ```clojure
 (with-redefs [jobs/start-import! (fn [node symbols start end opts]
                                     {:ok "job-123"})]
   ;; This works because we don't care about the node
   ...)
+
 ```
 
 ### Integration Test Issue (line 369-409)
+
 The test assumes job state is modified during `with-redefs`, but timing may be off.
 
 ---
@@ -125,24 +150,30 @@ The test assumes job state is modified during `with-redefs`, but timing may be o
 ## Issue 4: Job State Lifecycle
 
 ### Location
+
 `test/ml_options/web/handlers_test.clj:369-409`
 
 ### Test Sequence
+
 ```
 1. Get initial status (expects no current job)
 2. Start job with mocked jobs/start-import!
 3. Get status (expects job in :current)
 4. Stop job
 5. Get final status
+
 ```
 
 ### The Problem
+
 Test redefines `jobs/start-import!` to:
+
 ```clojure
 (fn [node symbols start end opts]
   (swap! jobs/job-state assoc :current
          {:id "job-123" :status :running :symbols symbols})
   {:ok "job-123"})
+
 ```
 
 This should work, but assertions fail because:
@@ -157,8 +188,10 @@ This should work, but assertions fail because:
 ### handlers/start-import
 
 **Input**: Ring request with JSON body
+
 ```json
 {"symbols": "AAPL,SPY", "startDate": "2024-01-01", "endDate": "2024-12-31"}
+
 ```
 
 **Processing**:
@@ -202,15 +235,18 @@ This should work, but assertions fail because:
 ## Recommended Fixes
 
 ### Fix 1: Handle nil body
+
 ```clojure
 (defn start-import [request]
   (try
     (let [body-str (if-let [body (:body request)]
                      (slurp body)
                      (throw (ex-info "Request body is required" {})))
+
 ```
 
 ### Fix 2: Validate required fields
+
 ```clojure
 (let [body (json/read-value body-str json/keyword-keys-object-mapper)
       symbols-str (:symbols body)
@@ -226,18 +262,23 @@ This should work, but assertions fail because:
 
   ;; Now safe to parse
   ...)
+
 ```
 
 ### Fix 3: Consistent error messages
+
 Ensure error messages in handler match what tests expect:
+
 ```clojure
 (catch DateTimeParseException e
   {:status 400
    :body (json/write-value-as-string
           {:error (str "Date could not be parsed: " (.getMessage e))})})
+
 ```
 
 ### Fix 4: Update tests OR fix job state management
+
 Either:
 - Update tests to match actual job state flow
 - Fix job state mutations to happen when expected
@@ -247,6 +288,7 @@ Either:
 ## Key Code Snippets
 
 ### Test mock-request helper (line 23-32)
+
 ```clojure
 (defn mock-request
   ([overrides]
@@ -255,9 +297,11 @@ Either:
            :headers {}
            :body nil}          ;; <-- Defaults to nil!
           overrides)))
+
 ```
 
 ### Handler start-import (line 52-86)
+
 ```clojure
 (defn start-import [request]
   (try
@@ -267,15 +311,18 @@ Either:
           start-date-str (:startDate body)     ;; <-- Can be nil
           ...
           start-date (LocalDate/parse start-date-str)  ;; <-- FAILS if nil
+
 ```
 
 ### Test with missing fields (line 259-264)
+
 ```clojure
 (testing "Returns 400 for missing required fields"
   (let [request (mock-request
                  {:body (json-body {:symbols "AAPL"})})  ;; Missing dates!
         response (handlers/start-import request)]
     (is (= 400 (:status response)))))
+
 ```
 
 ---

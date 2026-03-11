@@ -83,6 +83,7 @@ AGENT JVM (186MB, own mini-flow)
 ├── *ctx* atom (agent-facing, contains ::conn + agent data)
 │   └── Persisted on stop (serializable keys only, warn on non-serializable)
 └── Loaded namespace code
+
 ```
 
 ### `*ctx*` Model (Distinct from Flow State)
@@ -96,6 +97,7 @@ AGENT JVM (186MB, own mini-flow)
 ;; => {::conn <datalevin-connection>   ; auto-injected, namespace-local key
 ;;     ::my-counter 42                 ; agent's own data
 ;;     ::ui-state {...}}               ; whatever the agent wants
+
 ```
 
 Two storage tiers for agents:
@@ -107,6 +109,7 @@ Two storage tiers for agents:
 ;; Tier 2: Structured storage (Datalevin, cross-session, queryable)
 (d/transact! (::conn @*ctx*) [{:trading/signal {...}}])
 (d/q '[:find ?e :where [?e :trading/type :signal]] @(::conn @*ctx*))
+
 ```
 
 On persist: strip non-serializable keys, warn (don't fail), write rest to Datalevin.
@@ -135,6 +138,7 @@ From `flow/impl.clj:261-263`, after init returns state:
 ```clojure
 ins  (into (or ins {}) (::flow/in-ports state))   ; merge in-ports into inputs
 outs (into (or outs {}) (::flow/out-ports state))  ; merge out-ports into outputs
+
 ```
 
 - **In-ports**: external channels merged into process input set. `alts!!` reads them alongside normal flow inputs.
@@ -213,6 +217,7 @@ Single source-of-truth schema namespace. Version key from day one.
    [::from-ns ::from-ns]
    [::created-at ::created-at]
    [::payload {:optional true} ::payload]])
+
 ```
 
 ## Backpressure and Queue Policy
@@ -230,6 +235,7 @@ Per-namespace overrides in namespace code (not system.edn — per user preferenc
   :enqueue-wait-ms 75
   :call-timeout-ms 10000
   :overflow {:strategy :error}}}
+
 ```
 
 Per-namespace overrides specified in namespace code, not global config.
@@ -253,6 +259,7 @@ test/seon/flow/
 │   ├── channel_test.clj
 │   └── detect_test.clj
 └── topology_test.clj
+
 ```
 
 ## Implementation Steps (MVP, Each Testable)
@@ -291,6 +298,7 @@ Bidirectional TCP ↔ core.async adapter. Length-prefixed EDN. Keys under `seon.
 (defn connect!
   "Connect to TCP server. Returns {::in-ch ::out-ch ::close!}."
   [{::keys [host port]}] ...)
+
 ```
 
 **Test** (`test/seon/flow/harness/channel_test.clj`): Server on random port, client connects, send/receive EDN both directions. Test close cleanup. Test reconnect behavior.
@@ -329,6 +337,7 @@ Agent JVM's mini-flow process. Uses semantic channel names.
      (let [reply (execute-local state msg)]
        [state {:seon.flow.out/reply [reply]}])
      [state nil])))
+
 ```
 
 `execute-local`: look up fn var, call with args, catch exceptions, return `::msg/reply` envelope with error taxonomy (`:execution`, `:not-found`, etc).
@@ -410,6 +419,7 @@ Agent JVM's mini-flow process. Uses semantic channel names.
                                       ::msg/created-at (java.time.Instant/now)}]}])
 
      [state nil])))
+
 ```
 
 **Test**: Full round-trip with real pool JVM. Test overload path (send 33 requests with cap 32).
@@ -425,6 +435,7 @@ Reply router delivers promises. `request!` is the blocking call entry point.
   "Blocking cross-ns call through flow. Returns value or throws."
   [{::keys [flow request]}]
   ...)
+
 ```
 
 `build-topology!` wires namespace processes + reply router. Reads queue-cap from config.
@@ -443,6 +454,7 @@ In `seon.flow.harness`:
 (defn load-ctx!
   "Load *ctx* from Datalevin, re-inject runtime handles (::conn etc)."
   [{::keys [conn namespace]}] ...)
+
 ```
 
 **Test**: Set data in ctx, persist, reload, verify. Include a non-serializable value, verify warning + clean recovery.
@@ -471,6 +483,7 @@ In `seon.flow.harness`:
   {:malli/schema [:=> [:cat ::format-request] ::format-response]}
   [{::keys [raw-name]}]
   {::formatted (clojure.string/upper-case raw-name)})
+
 ```
 
 ## MVP Test Scenarios

@@ -37,6 +37,7 @@ Clojure 1.12 introduced `clojure.java.process`, a built-in namespace for process
 ;; babashka.process
 (require '[babashka.process :as bp])
 (def proc (bp/process {:dir "/tmp" :extra-env {"VAR" "value"}} "echo" "hello"))
+
 ```
 
 ### Stream Access
@@ -51,6 +52,7 @@ Clojure 1.12 introduced `clojure.java.process`, a built-in namespace for process
 (:in proc)       ; => OutputStream
 (:out proc)      ; => InputStream
 (:err proc)      ; => InputStream
+
 ```
 
 ### Waiting for Completion
@@ -63,6 +65,7 @@ Clojure 1.12 introduced `clojure.java.process`, a built-in namespace for process
 ;; babashka.process
 @proc                        ; deref blocks, returns process map with :exit
 (bp/check proc)              ; waits and throws on non-zero exit
+
 ```
 
 ### Capturing Output as String
@@ -79,6 +82,7 @@ Clojure 1.12 introduced `clojure.java.process`, a built-in namespace for process
 ;; babashka.process - built-in :string option
 @(bp/process {:out :string} "ls")  ; => {:out "file1\nfile2\n" :exit 0 ...}
 (bp/sh "ls" "-la")                  ; convenience function
+
 ```
 
 ### Piping Input
@@ -93,6 +97,7 @@ Clojure 1.12 introduced `clojure.java.process`, a built-in namespace for process
 
 ;; babashka.process - accepts string directly
 @(bp/process {:in "hello\n" :out :string} "cat")
+
 ```
 
 ### Environment Variables
@@ -108,6 +113,7 @@ Clojure 1.12 introduced `clojure.java.process`, a built-in namespace for process
 ;; :env replaces, :extra-env adds to existing
 (bp/process {:extra-env {"VAR" "val"}} "cmd")
 (bp/process {:env {"VAR" "val"}} "cmd")
+
 ```
 
 ## 3. Feature Comparison Matrix
@@ -153,6 +159,7 @@ Tested on 2026-01-09 in seon.claude.sdk REPL session.
 
 (process/exec "echo" "Hello from clojure.java.process!")
 ;; => "Hello from clojure.java.process!\n"
+
 ```
 
 ### Test 2: Environment and Directory
@@ -161,6 +168,7 @@ Tested on 2026-01-09 in seon.claude.sdk REPL session.
 (process/exec {:dir "/tmp" :env {"MY_VAR" "test-value"}}
               "sh" "-c" "echo $MY_VAR && pwd")
 ;; => "test-value\n/private/tmp\n"
+
 ```
 
 ### Test 3: Async Process with Stream Handling
@@ -174,6 +182,7 @@ Tested on 2026-01-09 in seon.claude.sdk REPL session.
   {:output (slurp stdout)
    :exit (.exitValue proc)})
 ;; => {:output "test input from Clojure\n", :exit 0}
+
 ```
 
 ### Test 4: Claude Code CLI Integration
@@ -196,6 +205,7 @@ Tested on 2026-01-09 in seon.claude.sdk REPL session.
      :stdin (process/stdin proc)
      :stdout (process/stdout proc)
      :exit-ref (process/exit-ref proc)}))
+
 ```
 
 ### Test 5: Multi-turn Conversation
@@ -206,6 +216,7 @@ Tested on 2026-01-09 in seon.claude.sdk REPL session.
 
 ;; Turn 2: Follow-up using context
 ;; => {:assistant-content "12", :num_turns 1}
+
 ```
 
 ### Test 6: Tool Use Flow
@@ -230,6 +241,7 @@ Tested on 2026-01-09 in seon.claude.sdk REPL session.
 {:result "The main topic is Malli schema patterns..."
  :num_turns 2
  :total_cost_usd 0.01143744}
+
 ```
 
 ## 6. Recommendation
@@ -266,6 +278,7 @@ The convenience features in babashka.process (`:in "string"`, `:out :string`, pi
 ;; "plan" - read-only, no tool execution
 ;; "bypassPermissions" - auto-approve all tools
 ;; "default" - prompt for dangerous operations
+
 ```
 
 ### Gotchas Discovered

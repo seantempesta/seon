@@ -45,6 +45,7 @@ For external process components, resume should check if the process is still ali
     old-state  ; process still running, keep it
     (do (ig/halt-key! ::my-process old-state)
         (ig/init-key ::my-process opts))))
+
 ```
 
 ---
@@ -62,6 +63,7 @@ External process components should kill stale processes on init to prevent port 
   ;; Use a specific match pattern -- NOT just the binary name
   (let [builder (ProcessBuilder. ["pkill" "-f" "caddy run"])]
     ...))
+
 ```
 
 Match the specific invocation (e.g., `"caddy run"`) rather than just the binary name (`"caddy"`) to avoid killing unrelated processes.
@@ -78,6 +80,7 @@ After starting an external process, verify the port is actually accepting connec
       (.close socket)
       true)
     (catch Exception _ false)))
+
 ```
 
 Log a warning if the port is not open yet but do not fail -- the process may need time for TLS setup or other initialization.
@@ -120,6 +123,7 @@ Example from Caddy:
  :pid (when process (.pid process))
  :url "https://localhost:3030"
  :upstream "http://localhost:8080"}
+
 ```
 
 This makes REPL introspection natural:
@@ -127,6 +131,7 @@ This makes REPL introspection natural:
 ```clojure
 (:url (:seon.web/caddy @integrant.repl.state/system))
 ;; => "https://localhost:3030"
+
 ```
 
 ---

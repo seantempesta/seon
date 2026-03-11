@@ -99,6 +99,7 @@ Caller namespace instance
         -> agent JVM executes function
       -> or direct call (if in-process)
         -> resolve and invoke function
+
 ```
 
 The key insight: **the harness already abstracts location**. The caller doesn't know whether the target is in-process or external. We just need to make in-process namespace instances available to the same routing, which is trivial -- the harness can resolve locally instead of routing over TCP.
@@ -129,6 +130,7 @@ For system components that run in the main JVM, the namespace step becomes trivi
                                        ::msg/status :ok
                                        ::msg/value result}]}])
      [state nil])))
+
 ```
 
 This means the orchestrator can route calls to any namespace instance -- in-process or external -- through the same flow topology. An agent calling `(seon.db/q ...)` routes through the flow to the in-process DB namespace instance. An agent calling `(seon.trading.signals/ema ...)` routes to an external JVM.
@@ -247,6 +249,7 @@ An agent connects to a namespace instance. The API:
 ;;      ::runtime/session-id "a1b2"
 ;;      ::runtime/status :running}
 ;;     ...]
+
 ```
 
 Whether the instance is in-process or external is transparent to the caller. The session-id is the key for external sessions. The namespace string is the universal key for any instance.
@@ -396,6 +399,7 @@ This extends the existing code graph schema with runtime state. All in the maste
    {:db/valueType :db.type/string}
    ;; EDN blob: {caller-ns-string count}
    })
+
 ```
 
 ### Design Decisions
@@ -438,6 +442,7 @@ Same reasoning as original PRD: the code graph must exist before runtime entitie
 ;; => #{["seon.db.datalevin.server" :running :in-process]
 ;;      ["seon.web.server" :running :in-process]
 ;;      ["seon.trading.signals" :running :external]}
+
 ```
 
 **"What was running before the crash?"**
@@ -450,6 +455,7 @@ Same reasoning as original PRD: the code graph must exist before runtime entitie
         [?e :seon.runtime/location ?location]
         [?e :seon.runtime/started-at ?started]]
       @conn)
+
 ```
 
 **"Navigate from function to its runtime context"**
@@ -474,6 +480,7 @@ Same reasoning as original PRD: the code graph must exist before runtime entitie
   {:function "seon.trading.signals/ema"
    :runtime runtime
    :ctx (when ctx-data (edn/read-string ctx-data))})
+
 ```
 
 **"Show agent runs for a namespace with costs"**
@@ -489,6 +496,7 @@ Same reasoning as original PRD: the code graph must exist before runtime entitie
         [?a :seon.agent.run/cost-usd ?cost]
         [?a :seon.agent.run/started-at ?started]]
       @conn "seon.trading.signals")
+
 ```
 
 ---
@@ -696,6 +704,7 @@ Incrementally. Each phase is independently buildable and testable. The existing 
    ;; => [{:seon.runtime/namespace "seon.db.datalevin.server"
    ;;      :seon.runtime/status :running
    ;;      :seon.runtime/location :in-process} ...]
+
    ```
 
 3. Navigate from function to runtime:
@@ -706,6 +715,7 @@ Incrementally. Each phase is independently buildable and testable. The existing 
    ;;     :ctx {:last-signal {...}},
    ;;     :agent-runs [{:id "a1b2" :status :completed :cost 0.23}],
    ;;     :fn-count 12, :spec-count 8}
+
    ```
 
 4. Only one ctx persistence schema exists (`seon.ctx/*`). The old `ctx/*` attributes are gone.
@@ -744,6 +754,7 @@ launch-agent!
        stores ::ai/agent-session-id "a1b2"  <-- links back
   -> agent-registry stores both IDs
   -> Claude SDK generates its own session UUID
+
 ```
 
 A single agent has **three IDs**: the 4-char hex (infrastructure), the AI session UUID (conversation persistence), and Claude's own session UUID (SDK internal).
@@ -781,6 +792,7 @@ Extend `seon.flow.msg` envelope with instance-ID addressing:
 ;; New fields (optional, alongside existing ::msg/from-ns / ::msg/to-ns)
 ::msg/from-id  ;; 4-char hex instance ID of sender
 ::msg/to-id    ;; 4-char hex instance ID of target
+
 ```
 
 This enables "send to instance a1b2" in addition to "send to namespace seon.trading".
@@ -799,6 +811,7 @@ Generalize the bridge's promise-based reply pattern:
 (runtime/send! {::msg/to-ns "seon.trading.signals"
                 ::msg/fn "seon.trading.signals/ema"
                 ::msg/args [[1.0 2.0 3.0]]})
+
 ```
 
 The router:
@@ -871,6 +884,7 @@ A namespace defines functions with Malli schemas. The system discovers them via 
   {:malli/schema [:=> [:cat ::analyze-request] :any]}
   [signal]
   ...)
+
 ```
 
 The scanner extracts `:seon.spec/contains-keys #{:seon.trading.signals/symbol :seon.trading.signals/price}` and links via `:seon.fn/input-spec`. The router finds this function when data contains those keys.
@@ -886,6 +900,7 @@ A namespace can define conventional functions to control routing behavior:
 
 ;; Optional: priority when multiple namespaces can handle the same data shape
 (defn route-priority [] 10)  ;; higher = preferred
+
 ```
 
 The router looks for these functions by name at discovery time. If absent, defaults apply (`:strategy :single`, priority 0).
@@ -898,6 +913,7 @@ A specific running instance can claim specific data patterns at runtime:
 ;; At startup, this instance claims AAPL signals specifically
 (defn on-start [ctx]
   (runtime/claim! ctx {:seon.trading.signals/symbol "AAPL"}))
+
 ```
 
 Claims are value-specific refinements stored in Datalevin. The router checks claims first (most specific), then falls back to schema matching (less specific).
@@ -933,6 +949,7 @@ route(data) -> destination
   6. Reply routing:
      - ::msg/from-id on the request ensures replies go back to sender
      - Reuses existing bridge promise-per-request-id pattern
+
 ```
 
 ### Datalog Queries the Router Uses
@@ -957,6 +974,7 @@ route(data) -> destination
      (filter (fn [[_ {:keys [required-keys]}]]
                (every? data-key-set required-keys)))
      (sort-by specificity descending))
+
 ```
 
 **Join to running instances:**
@@ -969,6 +987,7 @@ route(data) -> destination
         [?r :seon.runtime/namespace ?ns]
         [?r :seon.runtime/status :running]]
       @runtime-conn target-ns)
+
 ```
 
 **Check instance claims:**
@@ -982,6 +1001,7 @@ route(data) -> destination
         [?c :seon.route.claim/pattern ?pattern]]
       @runtime-conn)
 ;; Then match in Clojure: (every? (fn [[k v]] (= (get data k) v)) claim-pattern)
+
 ```
 
 ### How This Simplifies the Overall Design

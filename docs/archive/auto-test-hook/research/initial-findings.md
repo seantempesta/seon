@@ -22,6 +22,7 @@ The existing `clj-paren-repair-claude-hook` is installed globally and:
 ### Hook Input Data Available
 
 Every hook receives via stdin:
+
 ```json
 {
   "session_id": "string",
@@ -33,6 +34,7 @@ Every hook receives via stdin:
     "content": "..." or "old_string"/"new_string"
   }
 }
+
 ```
 
 This means a test hook can:
@@ -116,6 +118,7 @@ test/ml_options/
 └── web/
     ├── handlers_test.clj
     └── stats_test.clj
+
 ```
 
 Convention is clear: `src/ml_options/foo.clj` → `test/ml_options/foo_test.clj`

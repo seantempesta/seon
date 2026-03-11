@@ -62,4 +62,5 @@ For Datalevin-triggered subscriptions, the writer process (`:seon.flow/writer`) 
  [:changed-attrs [:set :keyword]]  ; attributes that changed
  [:entity-ids [:set :int]]         ; affected entity IDs
  [:tx-id :int]]                    ; transaction ID for ordering
+
 ```

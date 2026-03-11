@@ -68,6 +68,7 @@ Build a rock-solid database platform where:
      *ctx* contains:     *ctx* contains:     *ctx* contains:
      :seon.ns/conn →     :seon.ns/conn →     :seon.ns/conn →
        seon.trading        seon.trading        seon.health
+
 ```
 
 ---
@@ -99,6 +100,7 @@ One system replaces all three. Key properties:
    :ctx/namespace   "seon.trading"
    :ctx/data        "<EDN string>"
    :ctx/updated-at  #inst "2026-02-18T..."}
+
   ```
 
 - **Shared `::conn` per namespace** -- all instances in the same namespace share one Datalevin DB connection (from connection manager)
@@ -194,6 +196,7 @@ Agents receive a `*ctx*` atom with:
  :signals []
  :positions []
  :analysis nil}
+
 ```
 
 ### Two Storage Mechanisms
@@ -216,6 +219,7 @@ Agents receive a `*ctx*` atom with:
 (d/q '[:find ?ticker
        :where [?e :signal/type :buy] [?e :signal/ticker ?ticker]]
      @(:seon.ns/conn @*ctx*))
+
 ```
 
 ### Durable Atom: Duratom + Watchers
@@ -241,6 +245,7 @@ Agents receive a `*ctx*` atom with:
 (add-watch ctx ::versioning
   (fn [_ _ old new]
     (swap! versions conj {:timestamp (Instant/now) :state new})))
+
 ```
 
 See `research/durable-atoms.md` for full implementation.
@@ -271,6 +276,7 @@ See `research/durable-atoms.md` for full implementation.
    [::ticker]
    [::signal-type]
    [::recorded-at inst?]])
+
 ```
 
 ### Schema Compilation
@@ -285,6 +291,7 @@ See `research/durable-atoms.md` for full implementation.
 ;;    :seon.trading/ticker {:db/valueType :db.type/string
 ;;                          :db/index true}
 ;;    ...}
+
 ```
 
 ### Schema Loading
@@ -313,6 +320,7 @@ This means all DBs can store any registered entity type.
  {:port 8898
   :root "data/datalevin"
   :opts {:validate-data? true}}}
+
 ```
 
 - [ ] Create `src/seon/db/datalevin/server.clj`
@@ -328,6 +336,7 @@ This means all DBs can store any registered entity type.
 (conn/get-master-conn!)           ;; → /seon/ connection
 (conn/get-namespace-conn! 'seon.trading)  ;; → /seon.trading/ connection (lazy create)
 (conn/close-namespace-conn! 'seon.trading) ;; → close and remove from cache
+
 ```
 
 - [ ] Create `src/seon/db/datalevin/conn.clj`
@@ -473,6 +482,7 @@ The atom gets a single watcher that does two things on every state change:
           (persist-ctx! conn instance-id namespace new)
           (notify-sse-clients! instance-id new))))
     ctx-atom))
+
 ```
 
 #### 3.3 Migration from Existing Systems
@@ -566,6 +576,7 @@ src/seon/
 │
 └── orchestrator/
     └── ctx.clj              # Agent *ctx* factory (injects conn)
+
 ```
 
 ---
@@ -587,6 +598,7 @@ src/seon/
  ;; Feature flags for migration
  :db/dual-write? false
  :db/read-from :xtdb}  ;; :xtdb | :datalevin
+
 ```
 
 ---
@@ -747,6 +759,7 @@ XTDB uses SQL. Datalevin uses Datalog. All queries must be rewritten:
        :in $ ?status
        :where [?e :ai.session/status ?status]]
      @conn status)
+
 ```
 
 **Estimated queries to rewrite:** 40-50 across the codebase.
@@ -1004,6 +1017,7 @@ A parallel dual-write layer that writes AI sessions and messages to both XTDB an
 
 ;; Re-enable
 (dl/set-enabled! true)
+
 ```
 
 ### Monitoring
@@ -1032,6 +1046,7 @@ A parallel dual-write layer that writes AI sessions and messages to both XTDB an
 
 ;; Query messages for a session
 (dl/query-messages {:session-id "ses-abc123" :limit 20})
+
 ```
 
 ### What to Watch For

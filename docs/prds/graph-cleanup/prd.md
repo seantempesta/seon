@@ -25,6 +25,7 @@ The graph is polluted with render-specific derived attributes:
 :seon.fn/page-renderer?        — derived from whether input has *ctx*
 :seon.fn/needs-ctx?            — derived from whether input has *ctx*
 :seon.fn/needs-conn?           — derived from whether input has *conn*
+
 ```
 
 These attrs were added because `link-fns-to-specs` in `extract.clj` only links functions whose output spec contains `:seon.render/html`. Non-render functions are invisible to the graph even if they have perfectly good specs.
@@ -122,6 +123,7 @@ Goes in `seon.graph.query`:
   ;; STEP 3: required = (set/difference contains optional)
   ;; STEP 4: Return enriched maps
   )
+
 ```
 
 ### Required Keys: Computed, Not Stored
@@ -190,6 +192,7 @@ All research questions answered with live REPL evidence. See `notes.md` for full
 
 ;; Step 3: Compute required keys in Clojure
 ;; required = (set/difference (set contains-keys) (set optional-keys))
+
 ```
 
 ### Phase 1: Clean the Graph (Implementation — NEXT)
@@ -210,6 +213,7 @@ Delete these lines from `datalevin-schema`:
 :seon.fn/page-renderer?       {:db/valueType :db.type/boolean}
 :seon.fn/needs-ctx?           {:db/valueType :db.type/boolean}
 :seon.fn/needs-conn?          {:db/valueType :db.type/boolean}
+
 ```
 
 **2. `src/seon/graph/extract.clj` — Simplify `link-fns-to-specs`**
@@ -234,6 +238,7 @@ Remove the render gate (`is-render?` check). Remove all 5 derived attr computati
                 (spec-by-key output-key)
                 (assoc :seon.fn/output-spec [:seon.spec/key output-key]))))
           fns)))
+
 ```
 
 **3. `src/seon/graph/query.clj` — Add `functions-with-output-key`**
@@ -272,6 +277,7 @@ New shared helper using the proven query pattern from Phase 0:
                      :required-keys (clojure.set/difference contains optional)
                      :optional-keys optional)))
           eids)))
+
 ```
 
 **4. `src/seon/render.clj` — Rewrite 3 functions**
@@ -330,6 +336,7 @@ The Phase 1 agent MUST verify all of these before returning:
 
 ;; 5. No references to old attrs remain in source code
 ;; (grep should return only doc files)
+
 ```
 
 ### Phase 2: Documentation Rendering (New Feature)

@@ -33,9 +33,11 @@ Successful sessions complete with 90-99 messages, while stuck ones hit exactly 1
 ### Last Messages Before Stuck
 
 For session 1684:
+
 ```
 2026-01-29T08:54:34Z | MESSAGE  | assistant | "Now let me look at what Phase 2 involves..."
 2026-01-29T08:54:35Z | TOOL     | Read | "{:file_path \"/Users/sean/src/seon/src/seon/web/agents.clj\"}"
+
 ```
 
 The pattern is consistent: assistant makes a tool call, but the tool result never arrives. No `result` message is received from the CLI.
@@ -54,6 +56,7 @@ The SDK's `build-args` function does NOT pass `--max-turns` unless explicitly se
 ;; src/seon/ai/claude/sdk.clj:143
 max-turns
 (into ["--max-turns" (str max-turns)])
+
 ```
 
 Since `max-turns` is nil by default, no flag is passed. Claude Code CLI likely has an internal default of ~50 turns (each turn = request + response ≈ 2 messages, so 50 turns ≈ 100 messages).
@@ -65,6 +68,7 @@ The SDK captures stderr but never reads it:
 ```clojure
 ;; sdk.clj:247 - returned but never used
 :stderr (process/stderr proc)
+
 ```
 
 When the process dies due to hitting max-turns, any error message goes to stderr - which we ignore. This makes debugging impossible.
@@ -93,6 +97,7 @@ Modify `launch-agent!` to always set a high `max-turns`:
                         ::sdk/permission-mode (or permission-mode "bypassPermissions")
                         ::sdk/max-turns (or max-turns 500)  ; <-- ADD DEFAULT
                         ...})
+
 ```
 
 Or in sdk.clj:
@@ -106,6 +111,7 @@ Or in sdk.clj:
     max-t
     (into ["--max-turns" (str max-t)])
     ...))
+
 ```
 
 ### Fix 2: Add stderr Reader (HIGH)
@@ -124,6 +130,7 @@ Create a reader thread for stderr that logs any errors:
           (recur))))
     (catch Exception e
       (log/debug "Stderr reader closed" {:session-id id}))))
+
 ```
 
 ### Fix 3: Add Heartbeat/Diagnostic Persistence (MEDIUM)
@@ -137,6 +144,7 @@ Store periodic heartbeats to XTDB for post-mortem analysis:
    [:seon.ai/timestamp inst?]
    [:seon.ai/message-count :int]
    [:seon.ai/last-tool-call {:optional true} :string]])
+
 ```
 
 Update every N messages or every 30 seconds.
@@ -154,6 +162,7 @@ Monitor agents for lack of progress:
       (log/warn "Agent appears stuck" {:session-id (:session-id agent)})
       ;; Optionally interrupt and restart
       )))
+
 ```
 
 ## Immediate Action Items
@@ -173,6 +182,7 @@ After implementing Fix 1:
                        ::ai/namespace 'seon.test.long
                        ::ai/prompt "Count from 1 to 200, one message at a time"
                        ::sdk/max-turns 300})
+
 ```
 
 Should complete without getting stuck at 100 messages.
@@ -196,4 +206,5 @@ Should complete without getting stuck at 100 messages.
 
 ;; Check for result messages
 (filter #(= "result" (:seon.ai.claude/message-type %)) all-messages)
+
 ```

@@ -63,4 +63,5 @@ The [[vision/index|vision]] describes this as one of the system's key properties
  [:handler :string]        ; qualified function name
  [:match-type [:enum :specific :default]]  ; how it was found
  [:result :map]]           ; handler output
+
 ```

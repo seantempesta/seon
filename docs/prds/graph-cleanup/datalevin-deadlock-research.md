@@ -19,6 +19,7 @@ Our wrapper spawns a `future` that calls `d/transact!`, then `deref`s it with a 
                  (assert (conn? c))
                  (with @c tx-data tx-meta))]
     (assoc report :db-after @conn)))
+
 ```
 
 ### Step 3: `with-transaction` macro (reference-code/datalevin/src/datalevin/conn.clj:60-119)
@@ -38,6 +39,7 @@ This is the critical piece:
          ... body ...
          (r/close-transact s#)    ;; <--- Another blocking network call
          ))))
+
 ```
 
 Two nested `locking` calls (Java `synchronized` monitors), plus blocking network I/O inside.
@@ -51,6 +53,7 @@ Two nested `locking` calls (Java `synchronized` monitors), plus blocking network
     (.clear bf)
     (let [[resp bf'] (p/receive-ch ch bf)]  ;; <--- BLOCKING socket read
       ...)))
+
 ```
 
 ### The Full Lock Chain
@@ -103,6 +106,7 @@ If we can close the underlying `SocketChannel`, the blocked `receive-ch` call wi
         ;; This forces AsynchronousCloseException on blocked threads
         (doseq [c (.used pool)]
           (.close (.ch c)))))))
+
 ```
 
 ### Option 2: Thread.stop() (DANGEROUS — last resort only)
@@ -129,6 +133,7 @@ Instead of trying to unlock the old atom, create an entirely new conn atom via `
   (swap! connections dissoc ns-key)
   ;; Create fresh connection (new atom, new socket)
   (get-or-create-connection! manager ns-key db-name schema))
+
 ```
 
 **Downside:** Leaks a thread + socket. But the socket will eventually time out or be GC'd.
@@ -149,6 +154,7 @@ In `datalevin.conn/with-transaction`, replace:
 
 ```clojure
 (locking orig-conn ...)
+
 ```
 
 with:
@@ -158,6 +164,7 @@ with:
   (if (.tryLock lock 10 TimeUnit/SECONDS)
     (try ... (finally (.unlock lock)))
     (throw (ex-info "Transaction lock timeout" {}))))
+
 ```
 
 **Difficulty:** Moderate Datalevin patch. Would need to change conn creation to attach a lock, and update `with-transaction`.
@@ -168,6 +175,7 @@ Set `SO_TIMEOUT` on the `SocketChannel` in `datalevin.client/connect-socket`:
 
 ```java
 .setOption(StandardSocketOptions/SO_TIMEOUT, 30000)
+
 ```
 
 This would cause blocked reads to throw after 30s, releasing all monitors naturally.

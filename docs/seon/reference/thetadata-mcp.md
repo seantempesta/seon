@@ -46,12 +46,14 @@ ThetaData Terminal V3 includes an MCP (Model Context Protocol) server that enabl
 
 ```bash
 npm install -g @anthropic-ai/claude-code
+
 ```
 
 1. **Add ThetaData MCP Server**:
 
 ```bash
 claude mcp add --transport sse ThetaData http://localhost:25503/mcp/sse
+
 ```
 
 1. **Verify Connection**:
@@ -65,6 +67,7 @@ claude mcp add --transport sse ThetaData http://localhost:25503/mcp/sse
 
 ```bash
 npm install -g @google/gemini-cli
+
 ```
 
 1. **Configure MCP Server**:
@@ -79,6 +82,7 @@ Edit `~/.gemini/settings.json` and add:
     }
   }
 }
+
 ```
 
 1. **Verify Connection**:
@@ -144,12 +148,14 @@ The MCP server provides access to all ThetaData V3 API endpoints, including:
 
 ```
 Get the eod greek for last week for AAPL strike 200.00 CALL and expiration 2025-08-01
+
 ```
 
 **Equivalent REST API:**
 
 ```
 http://localhost:25503/v3/option/history/greeks/eod?symbol=AAPL&right=C&strike=200.0&expiration=2025-08-01&start_date=2025-07-28&end_date=2025-08-01
+
 ```
 
 ### Query with Formatting Instructions
@@ -158,6 +164,7 @@ http://localhost:25503/v3/option/history/greeks/eod?symbol=AAPL&right=C&strike=2
 
 ```
 Get the eod greek for last week for AAPL strike 200.00 CALL and expiration 2025-08-01. Put this in a table showing the delta change.
+
 ```
 
 The LLM will:
@@ -173,12 +180,14 @@ The LLM will:
 
 ```
 Get all Greeks for all AAPL options
+
 ```
 
 **Equivalent REST API:**
 
 ```
 http://localhost:25503/v3/option/snapshot/greeks/all?symbol=AAPL&expiration=*
+
 ```
 
 ### Stock Historical Data
@@ -187,6 +196,7 @@ http://localhost:25503/v3/option/snapshot/greeks/all?symbol=AAPL&expiration=*
 
 ```
 Get daily OHLC data for TSLA for the past month
+
 ```
 
 ### Multiple Queries
@@ -195,6 +205,7 @@ Get daily OHLC data for TSLA for the past month
 
 ```
 Compare the implied volatility for AAPL and MSFT 30-day ATM calls
+
 ```
 
 ## Query Optimization Tips
@@ -205,12 +216,14 @@ Compare the implied volatility for AAPL and MSFT 30-day ATM calls
 
 ```
 Get EOD Greeks for AAPL strike 150.00 CALL expiration 2025-12-19 from 2025-11-01 to 2025-11-28
+
 ```
 
 **Avoid:**
 
 ```
 Get some AAPL option data from last month
+
 ```
 
 ### Recommended Specifications
@@ -227,12 +240,14 @@ Get some AAPL option data from last month
 
 ```
 Get all options data for SPY  # Too broad!
+
 ```
 
 **Solution:** Narrow your request
 
 ```
 Get EOD Greeks for SPY strikes 550-560 CALL expiration 2025-12-20 for the past week
+
 ```
 
 ### Adding Context/Formatting

@@ -66,6 +66,7 @@ The recommended approach uses **explicit recording with atom-based storage**, co
 ;;                 :historical-ivs [0.15 0.18 0.22 ... (252 values)]
 ;;                 :current-iv 0.28
 ;;                 :metadata {:query-time-ms 38}}}
+
 ```
 
 ### Decision 2: Output Truncation Strategy
@@ -108,6 +109,7 @@ The recommended approach uses **explicit recording with atom-based storage**, co
             "\n... (truncated, see val-id for full value)")
        full-str)
      truncated?]))
+
 ```
 
 ### Decision 3: Content-Addressed Value IDs
@@ -147,6 +149,7 @@ The recommended approach uses **explicit recording with atom-based storage**, co
 
 (value-hash {:iv-rank 0.74})  ; Different value = different hash
 ;; => "v_e5f6a7b8"
+
 ```
 
 ### Decision 4: Explicit Recording (Not Auto-Capture)
@@ -198,6 +201,7 @@ The explicit approach wins because:
              :reasoning reasoning})
      (swap! ctx assoc-in [::repl-vals val-id] result)
      result)))
+
 ```
 
 **Convenience macro for natural syntax:**
@@ -232,6 +236,7 @@ The explicit approach wins because:
             :duration-ms duration-ms
             :reasoning reasoning})
     (swap! ctx assoc-in [::repl-vals val-id] result)))
+
 ```
 
 ### Decision 5: Annotation After the Fact
@@ -277,6 +282,7 @@ The explicit approach wins because:
 ;; Usage:
 (annotate! ctx -1 "This high IV rank was the key signal that led to the trade")
 (tag! ctx -1 :key-insight :volatility-signal)
+
 ```
 
 ### Decision 6: Session Format and Export
@@ -321,12 +327,14 @@ The explicit approach wins because:
   "v_e5f6a7b8" {:skew 0.048
                 :put-iv 0.30
                 :call-iv 0.252}}}
+
 ```
 
 **Training Data Export Format (JSONL):**
 
 ```jsonl
 {"messages":[{"role":"system","content":"You are a trading analyst..."},{"role":"user","content":"Analyze SPY for potential trades"},{"role":"assistant","content":"I'll analyze SPY's volatility conditions.\n\n```clojure\n(iv-rank ctx {:ticker \"SPY\"})\n```\n\nResult: IV Rank: 0.73 (73rd percentile)\n\nThe IV is elevated, sitting at the 73rd percentile. This suggests options are relatively expensive compared to the past year."}]}
+
 ```
 
 **Export Function:**
@@ -361,6 +369,7 @@ The explicit approach wins because:
                   {:role "user" :content user-prompt}
                   {:role "assistant" :content assistant-content}]]
     (json/write-str {:messages messages})))
+
 ```
 
 ---
@@ -681,6 +690,7 @@ The explicit approach wins because:
   [sessions output-path]
   (spit output-path
         (str/join "\n" (map export-session-jsonl sessions))))
+
 ```
 
 ---
@@ -708,6 +718,7 @@ Each line is a JSON object representing one training example:
     }
   ]
 }
+
 ```
 
 ### Metadata Schema
@@ -725,6 +736,7 @@ For richer training data, include metadata:
     "tags": ["volatility", "short_vol", "high_iv"]
   }
 }
+
 ```
 
 ### Conversation Format (Multi-Turn)
@@ -741,6 +753,7 @@ For interactive sessions with back-and-forth:
     {"role": "assistant", "content": "Good question, let me check skew..."}
   ]
 }
+
 ```
 
 ---
@@ -761,6 +774,7 @@ For interactive sessions with back-and-forth:
 ;; Apply to all functions
 (doseq [[name var] (ns-publics 'seon.trading.signals)]
   (alter-var-root var with-recording))
+
 ```
 
 **Rejected because:**
@@ -778,6 +792,7 @@ For interactive sessions with back-and-forth:
   (fn [_ _ old new]
     (let [diff (compute-diff old new)]
       (record-diff! diff))))
+
 ```
 
 **Rejected because:**
@@ -848,6 +863,7 @@ For interactive sessions with back-and-forth:
 ;; Access full value for any step
 (rec/get-full-value ctx "v_a1b2c3d4")
 ;; => {:iv-rank 0.73 :lookback 252 :historical-ivs [...]}
+
 ```
 
 ---
@@ -881,6 +897,7 @@ The recording system integrates with the ctx atom pattern:
    [:reasoning {:optional true} [:maybe :string]]
    [:annotation {:optional true} [:maybe :string]]
    [:tags {:optional true} [:set :keyword]]])
+
 ```
 
 ---
@@ -899,16 +916,19 @@ The recording system integrates with the ctx atom pattern:
 ## References
 
 ### LLM Training Data Formats
+
 - [LLM Dataset Formats 101 - HuggingFace](https://huggingface.co/blog/tegridydev/llm-dataset-formats-101-hugging-face)
 - [OpenAI Fine-tuning Data Format](https://platform.openai.com/docs/guides/fine-tuning)
 - [Anyscale Dataset Preparation](https://docs.anyscale.com/llm/fine-tuning/data-preparation)
 
 ### Clojure Pretty Printing
+
 - [Clojure REPL Data Visualization](https://clojure.org/guides/repl/data_visualization_at_the_repl)
 - [clojure.pprint Documentation](https://clojuredocs.org/clojure.pprint)
 - [Fipp - Fast Pretty Printer](https://github.com/brandonbloom/fipp)
 
 ### Content-Addressable Storage
+
 - Java MessageDigest for SHA-256
 - EDN serialization for consistent hashing
 

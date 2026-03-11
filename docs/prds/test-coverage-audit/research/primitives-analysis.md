@@ -73,6 +73,7 @@ This file contains **financial calculation primitives** for the trading agent. S
 (m/=> calculate-percentile
   [:=> [:cat [:sequential :double] [:int {:min 0 :max 100}]]
        [:maybe :double]])
+
 ```
 
 **Test cases:**
@@ -121,6 +122,7 @@ This file contains **financial calculation primitives** for the trading agent. S
 (m/=> calculate-percentile-rank
   [:=> [:cat [:sequential :double] [:maybe :double]]
        [:maybe [:double {:min 0.0 :max 1.0}]]])
+
 ```
 
 **Test cases:**
@@ -169,6 +171,7 @@ This file contains **financial calculation primitives** for the trading agent. S
 (m/=> iv-rank
   [:=> [:cat :some :string [:* :any]]
        [:maybe [:double {:min 0.0 :max 1.0}]]])
+
 ```
 
 **Test cases:**
@@ -215,6 +218,7 @@ This file contains **financial calculation primitives** for the trading agent. S
 (m/=> term-structure-slope
   [:=> [:cat :some :string [:* :any]]
        [:maybe :double]])
+
 ```
 
 **Test cases:**
@@ -261,6 +265,7 @@ This file contains **financial calculation primitives** for the trading agent. S
 (m/=> put-call-ratio
   [:=> [:cat :some :string [:* :any]]
        [:double {:min 0.0}]])
+
 ```
 
 **Test cases:**
@@ -306,6 +311,7 @@ This file contains **financial calculation primitives** for the trading agent. S
 (m/=> vanna
   [:=> [:cat :some :string [:* :any]]
        [:maybe :double]])
+
 ```
 
 **Test cases:**
@@ -399,4 +405,5 @@ Before comprehensive testing:
     (tu/insert-test-options! node [...])
     (testing "known distribution"
       (is (= 0.5 (p/iv-rank node "TEST"))))))
+
 ```

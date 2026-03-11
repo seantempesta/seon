@@ -37,6 +37,7 @@ tags: [prd, reference, database]
        [?e :seon.fn/qualified-name ?qname]]
      @test-conn)
 ;; => #{["seon.foo/bar"]}
+
 ```
 
 **Multiple candidates also work:**
@@ -50,6 +51,7 @@ tags: [prd, reference, database]
        [?e :seon.fn/qualified-name ?qname]]
      @test-conn)
 ;; => #{["seon.foo/bar"] ["seon.baz/qux"]}
+
 ```
 
 **Recommendation:** Use this exact query pattern in `functions-with-output-key`. It works cleanly with cardinality-many keyword attrs via ref joins.
@@ -70,6 +72,7 @@ tags: [prd, reference, database]
 ;;     :seon.fn/qualified-name "seon.foo/bar",
 ;;     :seon.fn/namespace "seon.foo",
 ;;     :seon.fn/input-spec #:db{:id 1}}
+
 ```
 
 **Key finding:** Lookup refs `[:seon.spec/key :seon.foo/bar-request]` are resolved at transact time and stored as entity IDs (1, 2). They are NOT stored as raw vectors. This means:
@@ -135,6 +138,7 @@ tags: [prd, reference, database]
 ;;                                      :optional-keys [:seon.foo/z]},
 ;;              :output-spec #:seon.spec{:key :seon.foo/bar-response,
 ;;                                       :contains-keys [:seon.render/html]}}
+
 ```
 
 **Key finding:** One `d/pull` gets the full fn+spec data. This means `functions-with-output-key` can:

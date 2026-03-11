@@ -16,6 +16,7 @@ Sci provides isolation through `sci/init` and `sci/fork`:
 
 ;; Fork creates a shallow copy - atoms are SHARED
 (def ctx2 (sci/fork ctx))
+
 ```
 
 **Important**: `fork` creates a shallow copy. Atoms and other mutable state are shared between parent and forked contexts. For true isolation, create fresh contexts with `init`.
@@ -27,6 +28,7 @@ Sci is written in `.cljc` with reader conditionals for JVM vs ClojureScript:
 ```clojure
 #?(:clj  (require '[sci.core :as sci])
    :cljs (require '[sci.core :as sci]))
+
 ```
 
 **Seon already uses Scittle** (Sci for browsers) in `src/seon/web/browser.clj` for client-side Clojure evaluation. This was discovered during the research.

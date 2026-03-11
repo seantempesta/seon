@@ -115,6 +115,7 @@ Note on the 10MB `*init-db-size*`: this is the LMDB **mmap reservation**, not ac
             (when-not (d/closed? c) (d/close c)))
           (when-let [d @test-dir]
             (delete-dir! d)))))))
+
 ```
 
 **Key properties:**
@@ -141,6 +142,7 @@ The implementing agent should verify this works with `conn/get-conn!`'s actual c
 
 ;; What tests will write:
 (use-fixtures :each tu/with-test-db)
+
 ```
 
 #### `merged-test-schema` (memoized)
@@ -158,6 +160,7 @@ Derives a single Datalevin schema map from all Malli entity schemas:
         (merge acc (db-schema/malli-map->datalevin-schema malli-schema)))
       {}
       entities)))
+
 ```
 
 Cache with `defonce` + atom. Invalidate when schema count changes (rare — only on code reload).
@@ -171,6 +174,7 @@ Cache with `defonce` + atom. Invalidate when schema count changes (rare — only
 
 ;; See "Lazy connection creation" section above for full with-test-db implementation.
 ;; Summary: lazy DB on first access, any db-name keyword, cleanup in finally.
+
 ```
 
 **Key properties:**
@@ -199,6 +203,7 @@ For tests needing a `*ctx*` atom (reactive namespace state):
     (binding [*test-ctx* a]
       (try (f)
            (finally (ctx/destroy! {::ctx/instance-id ctx-id}))))))
+
 ```
 
 ### 2. Generator-Friendly Schema Policy
@@ -222,6 +227,7 @@ For schemas that represent runtime objects (atoms, channels, connections, functi
   [:any {:seon/runtime-type true
          :description "Datalevin connection (atom wrapping DB)"
          :gen/fmap (fn [_] (atom {}))}])
+
 ```
 
 **Rules:**
@@ -269,6 +275,7 @@ Add to CONVENTIONS.md:
     (tu/with-temp-conn schema
       (fn [conn]
         (= (normalize entity) (normalize (roundtrip! conn entity)))))))
+
 ```
 
 **Benefits:**
@@ -301,6 +308,7 @@ Update `tests.edn`:
  :kaocha.plugin.randomize/randomize? true
  :kaocha.hooks/wrap-run
  [seon.test-utils/wrap-direct-mode]}
+
 ```
 
 New additions:
@@ -316,6 +324,7 @@ New additions:
   (fn [testable test-plan]
     (binding [db/*direct-mode* true]
       (run testable test-plan))))
+
 ```
 
 ### 5. Generative Test Blocking
@@ -331,6 +340,7 @@ Update hook config:
 :generative {:enabled true
              :num-tests 10
              :block-on-fail true}  ;; was false
+
 ```
 
 ---
@@ -496,6 +506,7 @@ calls `(swap! connections ...)` on the `::connections` value. `swap!` requires
                           (valAt [_ k nf] :value))))]
   (swap! fake assoc :foo :bar))
 ;; => ClassCastException: cannot be cast to class clojure.lang.IAtom
+
 ```
 
 **Fix:** Use a real `atom` wrapping a "defaulting map" that returns the test
@@ -532,6 +543,7 @@ path is ever reached.
                        (invoke [_ k] default-entry)
                        (invoke [_ k nf] default-entry))]
   (atom defaulting-map))
+
 ```
 
 This is more code than the original reify but it is proven to work with
@@ -588,6 +600,7 @@ Verified against `reference-code/kaocha/src/kaocha/plugin/hooks.clj:90-91`:
 ```clojure
 (wrap-run [run test-plan]
   (reduce #(%2 %1) run (:kaocha.hooks/wrap-run test-plan)))
+
 ```
 
 Each hook function receives `run` (1 argument) and must return a new `run` function.
@@ -599,6 +612,7 @@ exactly correct:
   (fn [testable test-plan]
     (binding [db/*direct-mode* true]
       (run testable test-plan))))
+
 ```
 
 ### `test.check` dependency

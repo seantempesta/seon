@@ -31,6 +31,7 @@ Hyperlith simplifies web applications to a single equation:
 
 ```clojure
 view = f(state)
+
 ```
 
 Instead of:
@@ -80,6 +81,7 @@ Hyperlith enforces strict separation:
     (swap! db update :messages conj [(new-uid) message])
     ;; Return signal update OR 204
     (patch-signals {:message ""})))
+
 ```
 
 #### Queries (Views)
@@ -93,6 +95,7 @@ Hyperlith enforces strict separation:
 (defview handler-home {:path "/"}
   [{:keys [db]}]
   (html [:main#morph ...render everything...]))
+
 ```
 
 **Key constraint:** Actions should NOT update views via `patch-elements`. Changes flow through the database, which triggers automatic re-renders.
@@ -109,6 +112,7 @@ Use atom watches to automatically trigger SSE updates:
     (add-watch db_ :refresh-on-change
       (fn [& _] (refresh-all!)))
     {:db db_}))
+
 ```
 
 **Our implementation:**
@@ -119,6 +123,7 @@ Use atom watches to automatically trigger SSE updates:
   (fn [_key _ref old-state new-state]
     (when (not= old-state new-state)
       (sse/refresh-all!))))
+
 ```
 
 ✅ **Status:** We already implement this pattern correctly!
@@ -158,6 +163,7 @@ Because events are homogeneous (full view state), you can safely throttle:
 
 ;; Usage
 {:max-refresh-ms 100}  ; Max 10 updates/second
+
 ```
 
 Even at 200ms throttle (5 FPS), real-time collaboration feels smooth because:
@@ -171,6 +177,7 @@ Even at 200ms throttle (5 FPS), real-time collaboration feels smooth because:
 ```clojure
 ;; ml-options.web.sse
 (init-sse! :max-refresh-ms 200)  ; 5 updates/second
+
 ```
 
 ✅ **Status:** We implement throttling correctly!
@@ -204,6 +211,7 @@ Even at 200ms throttle (5 FPS), real-time collaboration feels smooth because:
     (when-let [html (render-view)]
       (send! ch (compress-stream out br html))
       (recur))))
+
 ```
 
 **Window size tuning:**
@@ -222,6 +230,7 @@ Even at 200ms throttle (5 FPS), real-time collaboration feels smooth because:
        "\nid: " event-id
        "\ndata: elements " (str/replace elements "\n" "\ndata: elements ")
        "\n\n\n"))
+
 ```
 
 **Key details:**
@@ -246,6 +255,7 @@ Only send updates when view actually changes:
       (when (not= last-hash view-hash)
         (send! ch (compress view-str)))
       (recur view-hash))))
+
 ```
 
 **Why `Integer/toHexString(hash ...)`?**
@@ -282,6 +292,7 @@ Only send updates when view actually changes:
     <main id="morph"></main>
   </body>
 </html>
+
 ```
 
 **Benefits:**
@@ -309,6 +320,7 @@ SSE performs poorly over HTTP/1.1 because:
 localhost:3030 {
     reverse_proxy localhost:8080
 }
+
 ```
 
 Caddy automatically provides:
@@ -331,6 +343,7 @@ Caddy automatically provides:
   <input name="symbols" type="text" />
   <button type="submit">Start Import</button>
 </form>
+
 ```
 
 Datastar automatically:
@@ -346,6 +359,7 @@ Datastar automatically:
 <button data-on-click="@post('/api/import/stop')">
   Stop Import
 </button>
+
 ```
 
 ### 3. Optimistic UI Updates (Signals)
@@ -355,6 +369,7 @@ Datastar automatically:
 <button data-on-click="@post('/send', {message: $message})">
   Send
 </button>
+
 ```
 
 The action can return signal updates for immediate feedback:
@@ -365,6 +380,7 @@ The action can return signal updates for immediate feedback:
   (swap! db conj message)
   ;; Clear input immediately (optimistic)
   (patch-signals {:message ""}))
+
 ```
 
 **Signal naming conventions:**
@@ -381,6 +397,7 @@ Use `pointerdown` instead of `click` for lower latency:
 <button data-on:pointerdown="@post('/action')">
   Click Me
 </button>
+
 ```
 
 Why? Event order:
@@ -421,6 +438,7 @@ For long-running operations (like bulk imports):
         ;; 5. Mark failed in database
         (swap! job-state assoc-in
           [:current :status] :failed)))))
+
 ```
 
 **Key points:**
@@ -447,6 +465,7 @@ For long-running operations (like bulk imports):
 
   ;; SSE update happens automatically via atom watch!
   )
+
 ```
 
 ### Cancellation
@@ -462,6 +481,7 @@ For long-running operations (like bulk imports):
     (future-cancel f)
     (swap! job-state assoc-in [:current :status] :stopping))
   nil)  ; Return 204
+
 ```
 
 ---
@@ -477,6 +497,7 @@ For long-running operations (like bulk imports):
                    :settings {}})]
     (add-watch db_ :refresh (fn [& _] (refresh-all!)))
     {:db db_}))
+
 ```
 
 **Benefits:**
@@ -506,6 +527,7 @@ For independent sections that update at different rates:
 
     {:user-state   user-state_
      :import-state import-state_}))
+
 ```
 
 **Use case:** When different SSE endpoints serve different views (rare).
@@ -529,6 +551,7 @@ When N users view the same content, render once and broadcast:
     (fn handler [req]
       ;; All clients get same view
       @cached-view_)))
+
 ```
 
 **Hyperlith's batching:** Renders once per throttle window, broadcasts to all connections.
@@ -592,6 +615,7 @@ When N users view the same content, render once and broadcast:
         (when-let [event (a/<!! refresh-ch)]
           (render-and-send)
           (recur))))))
+
 ```
 
 **Scalability:** 10,000+ concurrent SSE connections per process (vs ~200 with platform threads).
@@ -632,6 +656,7 @@ Datastar is the client-side library (11.4KB brotli) that:
   <p>Count: $count</p>
   <button data-on-click="$$count++">Increment</button>
 </div>
+
 ```
 
 Signals are reactive variables accessible via `$signalName`.
@@ -640,6 +665,7 @@ Signals are reactive variables accessible via `$signalName`.
 
 ```clojure
 (patch-signals {:count 42})
+
 ```
 
 #### 2. Actions (Server Calls)
@@ -648,6 +674,7 @@ Signals are reactive variables accessible via `$signalName`.
 <button data-on-click="@post('/api/action', {foo: 'bar'})">
   Submit
 </button>
+
 ```
 
 The `@` prefix means "call server endpoint."
@@ -658,6 +685,7 @@ The `@` prefix means "call server endpoint."
 <div data-show="$count > 10">
   Count is high!
 </div>
+
 ```
 
 Datastar evaluates expressions client-side for immediate feedback.
@@ -744,6 +772,7 @@ caddy run
 ./bin/run            # Main app (port 8080)
 ./bin/thetadata      # ThetaData Terminal
 caddy run            # Reverse proxy (port 3030)
+
 ```
 
 **Update:** Access dashboard at `https://localhost:3030` instead of `http://localhost:8080`.
@@ -763,6 +792,7 @@ caddy run            # Reverse proxy (port 3030)
 
 (set-agent-send-off-executor!
   (java.util.concurrent.Executors/newVirtualThreadPerTaskExecutor))
+
 ```
 
 Requires Java 21+. Check project deps.edn.
@@ -776,6 +806,7 @@ Requires Java 21+. Check project deps.edn.
 ```clojure
 (render-handler render-fn
   :br-window-size 22)  ; 4MB dictionary (16x more)
+
 ```
 
 **Trade-off:** More memory per connection, better compression.
@@ -795,6 +826,7 @@ Requires Java 21+. Check project deps.edn.
     Start Import
   </button>
 </form>
+
 ```
 
 ```clojure
@@ -803,6 +835,7 @@ Requires Java 21+. Check project deps.edn.
     ;; Signal update for immediate feedback
     (patch-signals {:loading true})
     result))
+
 ```
 
 **Use case:** Show loading state before SSE update arrives.
@@ -834,6 +867,7 @@ Measure actual compression ratios in production:
                :compressed   compressed-size
                :ratio        ratio})
     (hk/send! ch compressed)))
+
 ```
 
 **Expected:** 20:1 to 100:1 ratio after warmup.
@@ -851,6 +885,7 @@ Benchmark render function:
       (when (> elapsed-ms 10)
         (log/warn "Slow render" {:ms elapsed-ms}))
       html)))
+
 ```
 
 **Target:** <10ms render time for dashboard.
@@ -876,6 +911,7 @@ Monitor throttle drops:
           (recur))))
     {:channel <out-ch
      :stats   drops_}))
+
 ```
 
 **Expected:** Some drops during rapid state changes (this is good - means throttling works).
@@ -897,6 +933,7 @@ Monitor SSE connection lifecycle:
                  (swap! connections_ dec)
                  (log/info "SSE closed"
                            {:total @connections_}))}))
+
 ```
 
 **Expected:** Stable connection count, reconnects after network changes.
@@ -927,6 +964,7 @@ Monitor SSE connection lifecycle:
        "Send"]
      (for [msg (:messages @db)]
        [:p msg])]))
+
 ```
 
 **Pattern:** State in atom → Auto-refresh → Full view render
@@ -950,6 +988,7 @@ Monitor SSE connection lifecycle:
     [:main#morph
      (for [cell (:cells @game-state)]
        [:div {:class (if (:alive cell) "alive" "dead")}])]))
+
 ```
 
 **Pattern:** Background computation → State updates → View re-render
@@ -976,6 +1015,7 @@ Monitor SSE connection lifecycle:
       ;; Draw all user cursors
       (for [[uid user] @users]
         [:div.cursor {:style (str "left: " (-> user :cursor :x) "px; top: " (-> user :cursor :y) "px")}])]]))
+
 ```
 
 **Pattern:** Frequent position updates → Throttled SSE → Smooth multiplayer
@@ -1002,6 +1042,7 @@ Monitor SSE connection lifecycle:
 (defaction toggle-checkbox [{:keys [checked] {:keys [id]} :body}]
   (swap! checked (fn [s] (if (contains? s id) (disj s id) (conj s id))))
   nil)
+
 ```
 
 **Pattern:** Sparse state + virtual scrolling + targeted updates = handles massive datasets
@@ -1017,6 +1058,7 @@ Monitor SSE connection lifecycle:
 (defn update-message [id new-text]
   (sse/send-update!
     [:div#message-{id} new-text]))  ; Partial update
+
 ```
 
 **Why not:** Complexity increases, compression decreases, missed events cause desyncs.
@@ -1027,6 +1069,7 @@ Monitor SSE connection lifecycle:
 (defn update-message [id new-text]
   (swap! db assoc-in [:messages id :text] new-text))
   ;; Auto-refresh sends full view
+
 ```
 
 ### 2. ❌ Client-Side State Sync
@@ -1039,6 +1082,7 @@ Monitor SSE connection lifecycle:
     ;; Try to reconcile with server...
     (when (not= client-count @server-count)
       (resolve-conflict))))
+
 ```
 
 **Why not:** Distributed state is hard. Let server be source of truth.
@@ -1049,6 +1093,7 @@ Monitor SSE connection lifecycle:
 (defaction increment-count [_]
   (swap! count inc))  ; Server state only
   ;; View shows server count
+
 ```
 
 ### 3. ❌ Manual Refresh Calls
@@ -1059,6 +1104,7 @@ Monitor SSE connection lifecycle:
   (reset! db new-data)
   (sse/refresh-all!)  ; Manual call
   (log/info "Updated"))
+
 ```
 
 **Why not:** Easy to forget, leads to inconsistent refresh behavior.
@@ -1072,6 +1118,7 @@ Monitor SSE connection lifecycle:
 ;; Then just update state
 (defn update-data [new-data]
   (reset! db new-data))  ; Refresh happens automatically
+
 ```
 
 ### 4. ❌ Stateful SSE Connections
@@ -1082,6 +1129,7 @@ Monitor SSE connection lifecycle:
 
 (defn on-connect [req]
   (swap! connection-state_ assoc (:id req) {...}))
+
 ```
 
 **Why not:** Connection state is lost on disconnect. Hard to debug.
@@ -1093,6 +1141,7 @@ Monitor SSE connection lifecycle:
 (defn on-connect [req]
   (swap! db assoc-in [:sessions (:session-id req)] {...}))
   ;; View reads from db, not connection state
+
 ```
 
 ### 5. ❌ Complex Signal Management
@@ -1100,6 +1149,7 @@ Monitor SSE connection lifecycle:
 ```clojure
 ;; DON'T DO THIS - Too much client state
 <div data-signals:formState="{errors: [], touched: [], pristine: true, ...}">
+
 ```
 
 **Why not:** Client state complexity defeats the purpose of server-driven UI.
@@ -1110,6 +1160,7 @@ Monitor SSE connection lifecycle:
 ;; Keep client state minimal
 <div data-signals:inputValue="">  ; Just the input value
   ;; Server validates and renders errors in next view
+
 ```
 
 ---

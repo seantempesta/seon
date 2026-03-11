@@ -86,6 +86,7 @@ dynamic? → ensure-instance!(ns, instance-id-or-nil)
            → if no ?instance in URL, redirect to include it (bookmarkable)
            → serve reactive page
 else → introspection view (reuse existing)
+
 ```
 
 ### Step 5: Workout as proof
@@ -146,6 +147,7 @@ Remove from `routes.clj`: `namespace-has-reactive-render?`, `get-initial-state`,
 ;; Instance resume after restart
 (reset)
 @seon.health.workout/*ctx* ;; → state survived restart
+
 ```
 
 **Note:** Pages not backed by `*ctx*` atoms (e.g., the agent observatory) use explicit `refresh-all!` calls from their data write functions. See `seon.ai.datalevin/maybe-refresh-sse!` and the `agent-registry` watch in `seon.web.agents/init!`.

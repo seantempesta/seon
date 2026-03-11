@@ -27,6 +27,7 @@ Define `:seon.db/ref` as a custom Malli type in `seon.schema` that accepts both 
 
 ;; Transact with entity ID
 (db/transact! :seon [{:seon.call/from-fn 42}])
+
 ```
 
 ## Rationale

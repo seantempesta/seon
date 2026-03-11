@@ -43,6 +43,7 @@ Use **REPL introspection** for extracting code metadata, **Malli's built-in regi
 │ :edit-event entities - Track edit history                           │
 │ :error entities - Track failures for pattern detection              │
 └─────────────────────────────────────────────────────────────────────┘
+
 ```
 
 ---
@@ -61,9 +62,11 @@ Use **REPL introspection** for extracting code metadata, **Malli's built-in regi
 - Works with macros, reader conditionals, and complex forms
 
 **Implementation**:
+
 ```clojure
 (defn namespace-schemas [ns-sym]
   (get-in (m/function-schemas) [:clj ns-sym]))
+
 ```
 
 ### 2. Use Malli's Registry for Schema Resolution
@@ -76,6 +79,7 @@ Use **REPL introspection** for extracting code metadata, **Malli's built-in regi
 - Works with custom registries defined in code
 
 **Implementation**:
+
 ```clojure
 (defn resolve-schema-refs [schema]
   (let [refs (atom #{})]
@@ -85,6 +89,7 @@ Use **REPL introspection** for extracting code metadata, **Malli's built-in regi
                 (swap! refs conj (m/type s)))
               (m/-set-children s children)))
     @refs))
+
 ```
 
 ### 3. Store Code Entities in XTDB
@@ -98,6 +103,7 @@ Use **REPL introspection** for extracting code metadata, **Malli's built-in regi
 - Already running in the system
 
 **Entity Model** (from PRD):
+
 ```clojure
 ;; Function entity
 {:xt/id :seon.foo/bar
@@ -109,6 +115,7 @@ Use **REPL introspection** for extracting code metadata, **Malli's built-in regi
  :fn/schema [:=> [:cat :user/id] :result]
  :fn/schema-refs #{:user/id :result}
  :fn/first-seen #inst "2024-12-28T..."}
+
 ```
 
 ### 4. Detect Changes via Source Hash
@@ -121,6 +128,7 @@ Use **REPL introspection** for extracting code metadata, **Malli's built-in regi
 - Simple to implement
 
 **Implementation**:
+
 ```clojure
 (defn source-hash [var]
   (let [source (slurp (io/resource (:file (meta var))))]
@@ -132,6 +140,7 @@ Use **REPL introspection** for extracting code metadata, **Malli's built-in regi
 (defn var-identity [var]
   {:file (:file (meta var))
    :line (:line (meta var))})
+
 ```
 
 ### 5. Detect New Functions via XTDB State
@@ -144,11 +153,13 @@ Use **REPL introspection** for extracting code metadata, **Malli's built-in regi
 - Simpler than tracking in-memory
 
 **Implementation**:
+
 ```clojure
 (defn new-functions [ns-sym]
   (let [current (set (keys (namespace-schemas ns-sym)))
         known (set (map :xt/id (query-functions-in-ns ns-sym)))]
     (clojure.set/difference current known)))
+
 ```
 
 ---
@@ -264,6 +275,7 @@ Create `src/seon/dev/feedback.clj`:
        :error/type error-type
        :error/function fn-sym
        :error/data data}]]))
+
 ```
 
 ### Phase 2: Hook Script
@@ -326,6 +338,7 @@ Create `bin/seon-hook` (Babashka):
           (println "All generative tests passed"))))))
 
 (main)
+
 ```
 
 ### Phase 3: Gemini Integration

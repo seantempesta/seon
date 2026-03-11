@@ -54,4 +54,5 @@ Custom step functions add domain-specific behavior: a trading namespace might re
 [new-state {:output-id [msg1 msg2]}]
 ;; or
 [new-state nil]  ; no output
+
 ```

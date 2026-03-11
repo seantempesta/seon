@@ -48,6 +48,7 @@ src/seon/primer/
 ├── handlers.clj       # 58 lines - HTTP handlers
 ├── actions.clj        # 100 lines - Action handlers + demo story
 └── debug.clj          # 136 lines - Debug UI and EDN export
+
 ```
 
 ### Integration Status
@@ -95,6 +96,7 @@ The ctx system tries to use XTDB but `primer-node` is nil at runtime:
 ;; checkpoint! fails because primer-node is nil
 (ctx/checkpoint! "test-session")
 ;; => No implementation of method: :get-connection... for class: nil
+
 ```
 
 **Root cause:** The initialization in `system.clj:87-93` only runs when `seon.primer` is in the namespace list, but the primer namespace isn't being auto-loaded. The XTDB connection setup works differently than the code expects (uses SQL connections now, not separate nodes).
@@ -132,19 +134,23 @@ Navigation: Enter → Choose shelf → Continue → Enter passage/Return → Beg
 ## Next Steps (If Continuing)
 
 ### Priority 1: Fix XTDB Persistence
+
 - Align `ctx.clj` with `seon.db.node` patterns
 - Use existing connection-manager instead of separate primer-node
 - Test checkpoint/load-at/history work
 
 ### Priority 2: Enforce Schema Validation
+
 - Wrap ctx mutations with Malli validation
 - Add clear error messages for invalid updates
 
 ### Priority 3: Add Second Template
+
 - Implement `narrative/choice` template (multiple buttons)
 - Update demo story to use it at branch points
 
 ### Priority 4: AI Integration
+
 - Connect Claude for dynamic responses
 - Implement the "planning phase" pattern from ctx-as-os.md
 - Add voice input (Gemini Live API?)
@@ -173,22 +179,26 @@ See `decisions.md` for architectural decisions:
 ## Stage History
 
 ### Stage 1-4: Completed
+
 - Namespace skeleton
 - Schema definitions
 - Ctx atom with session management
 - HTTP routes and handlers
 
 ### Stage 5: Completed
+
 - Action handling
 - Scene transitions
 - Demo story content
 
 ### Stage 6: Completed
+
 - SSE auto-refresh via ctx watch
 - Layered CSS rendering
 - Debug UI
 
 ### Stage 7: Partial
+
 - Multi-session ctx API ✅
 - Background auto-sync ✅
 - XTDB persistence ❌ (broken - node not initialized)

@@ -1,4 +1,5 @@
 # PRD: Custom Renderers
+
 ## Status: SUPERSEDED by spec-driven-rendering — renderers resolved via fn-spec linking
 
 **Status:** Ready for Implementation
@@ -47,6 +48,7 @@ Currently, `/ns/{namespace}` routes can render custom views if a namespace has a
   [ns-sym format id]
   (let [render-fn @(ns-resolve (find-ns ns-sym) 'render)]
     (render-fn {:format format :id id})))
+
 ```
 
 ### View Multimethod (`src/seon/ns/view.clj:106-119`)
@@ -55,6 +57,7 @@ Currently, `/ns/{namespace}` routes can render custom views if a namespace has a
 (defmulti render*
   "Internal multimethod for rendering. Dispatches on [format view-type]."
   (fn [value format] [format (extract-view-type value)]))
+
 ```
 
 ### Example: Agent Observatory (`src/seon/ai/agent.clj:586-646`)
@@ -75,6 +78,7 @@ Namespaces (or agents operating on namespaces) can register a custom render func
 ```clojure
 ;; In agent working on seon.trading namespace
 (swap! *ctx* assoc :seon.ui/render-fn 'seon.trading/render-dashboard)
+
 ```
 
 The render function receives a standardized request map:
@@ -96,6 +100,7 @@ The render function receives a standardized request map:
     :tile  (render-tile ctx)
     :half  (render-half-view ctx db)
     :full  (render-full-dashboard ctx db)))
+
 ```
 
 ### View Modes
@@ -115,6 +120,7 @@ The render function receives a standardized request map:
    ↓ (existing behavior, src/seon/ns/routes.clj:77-89)
 3. Use default introspection renderer
    ↓ (existing behavior, src/seon/ns/routes.clj:91-188)
+
 ```
 
 ---
@@ -158,6 +164,7 @@ Modify `render-namespace-content` to check ctx before namespace render:
       ;; 3. Default introspection (existing)
       :else
       (render-introspection ns-sym session-id))))
+
 ```
 
 ### Phase 2: View Mode Detection
@@ -176,6 +183,7 @@ Detect view mode from query params or request context:
       "tile" :tile
       "half" :half
       :full)))  ; default
+
 ```
 
 ### Phase 3: Schema Registration
@@ -196,6 +204,7 @@ Add schemas for render requests:
    [::id {:optional true} [:maybe ::id]]
    [::ctx {:optional true} :any]
    [::db {:optional true} :any]])
+
 ```
 
 ---
@@ -224,16 +233,20 @@ Add schemas for render requests:
 ## Success Criteria
 
 1. **Ctx registration works**
+
    ```clojure
    (swap! *ctx* assoc :seon.ui/render-fn 'seon.trading/custom-view)
    ;; Visit /ns/seon.trading -> custom view renders
+
    ```
 
 2. **View modes passed through**
+
    ```
    GET /ns/seon.trading?view=tile -> render-fn receives {:view-mode :tile ...}
    GET /ns/seon.trading?view=half -> render-fn receives {:view-mode :half ...}
    GET /ns/seon.trading          -> render-fn receives {:view-mode :full ...}
+
    ```
 
 3. **Fallback chain works**
@@ -278,6 +291,7 @@ Add schemas for render requests:
     (is (= :half (detect-view-mode {:query-string "view=half"})))
     (is (= :full (detect-view-mode {:query-string ""})))
     (is (= :full (detect-view-mode {})))))
+
 ```
 
 ---

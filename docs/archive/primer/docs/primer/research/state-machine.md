@@ -1,8 +1,10 @@
 # The Primer Loop: State Machine & Checkpointing
 
 **The Simple Loop:**
+
 ```
 render(state) → wait(input) → transition(input) → checkpoint(state) → render(state)
+
 ```
 
 That's it. Everything else is implementation detail.
@@ -50,6 +52,7 @@ A **Session State** contains everything needed to render the current moment:
  :session/started-at #inst "..."
  :session/last-activity-at #inst "..."
  :session/interaction-count 47}
+
 ```
 
 ---
@@ -64,6 +67,7 @@ Every user action produces a **Transition**:
  :transition/action :choice-selected
  :transition/payload {:choice-id :left-path}
  :transition/timestamp #inst "..."}
+
 ```
 
 The **Transition Function** produces next state:
@@ -76,6 +80,7 @@ The **Transition Function** produces next state:
       :timeout (handle-timeout current-state)
       :asset-ready (handle-asset-ready current-state payload)
       :ai-response (handle-ai-response current-state payload))))
+
 ```
 
 ---
@@ -90,6 +95,7 @@ Simple, predetermined transitions. Fast.
 (defn handle-tap-continue [state]
   (let [next-scene-id (get-in state [:scene/current :scene/next])]
     (assoc state :scene/current (load-scene next-scene-id))))
+
 ```
 
 **Examples:**
@@ -116,6 +122,7 @@ AI decides what happens next. Requires wait state.
   ;; AI has decided, apply it
   (let [next-scene (build-scene-from-decision decision)]
     (assoc state :scene/current next-scene)))
+
 ```
 
 **Examples:**
@@ -136,6 +143,7 @@ Start with deterministic guess, correct if AI disagrees.
     (request-ai-interpretation! state transcript)
     ;; 3. Return optimistic state
     optimistic-state))
+
 ```
 
 **Examples:**
@@ -153,6 +161,7 @@ Sometimes we need to "pause" a scene to do something else:
 Story Page (main)
   └── Dialogue with Owl (pushed)
        └── Puzzle: Answer Riddle (pushed)
+
 ```
 
 When riddle is solved, pop back to dialogue. When dialogue ends, pop back to story.
@@ -171,6 +180,7 @@ When riddle is solved, pop back to dialogue. When dialogue ends, pop back to sto
           (update :scene/stack pop)
           (assoc :scene/current previous))
       (assoc state :scene/current (load-scene :story-end)))))
+
 ```
 
 ---
@@ -189,6 +199,7 @@ Every state change is persisted to XTDB:
                     :checkpoint/transition transition
                     :checkpoint/sequence-num (next-seq-num state)}]
     (xt/submit-tx node [[:put-docs :primer/checkpoints checkpoint]])))
+
 ```
 
 **Why checkpoint everything?**
@@ -240,6 +251,7 @@ XTDB's temporal nature gives us superpowers:
       ;; Custom logic to detect struggle patterns
       :in [cid]}
     [child-id]))
+
 ```
 
 ---
@@ -260,6 +272,7 @@ When child returns:
       ;; Start fresh but remember context
       {:action :new-session
        :child-context (child-long-term-memory child-id)})))
+
 ```
 
 ---
@@ -274,6 +287,7 @@ Given state, produce HTML:
         template-fn (get-template (:scene/template scene))
         params (:scene/params scene)]
     (template-fn params state)))
+
 ```
 
 Render is **pure** - same state always produces same HTML.
@@ -302,6 +316,7 @@ Putting it all together:
         (checkpoint! next-state transition)
         ;; Update (triggers SSE via watch)
         (reset! state next-state)))))
+
 ```
 
 **Flow:**
@@ -338,6 +353,7 @@ For async operations, we use a **pending operations** pattern:
           {:transition/type :ai-response
            :transition/payload {:request-id request-id
                                 :decision result}})))))
+
 ```
 
 The session loop receives the `:ai-response` transition just like any other action.
@@ -358,6 +374,7 @@ When things go wrong:
     (-> state
         (assoc :scene/current fallback-scene)
         (update :session/errors conj error))))
+
 ```
 
 **Error handling philosophy:**
@@ -384,11 +401,14 @@ For debugging, we can generate a state graph:
                     :to (:scene/id (:checkpoint/state b))
                     :label (get-in b [:checkpoint/transition :transition/action])})
                  (partition 2 1 checkpoints))}))
+
 ```
 
 Renders as:
+
 ```
 [intro] --tap--> [forest-enter] --voice:"hello"--> [owl-greeting] --choice:help--> [owl-riddle]
+
 ```
 
 ---
@@ -419,6 +439,7 @@ The entire system reduces to:
   (let [input (wait-for-input)
         next (transition state input)]
     (recur next)))
+
 ```
 
 Everything else - AI, images, voice, games, puzzles - is just details inside `transition` and `render`.

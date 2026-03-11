@@ -31,6 +31,7 @@ ctx
 ;; You pass ctx explicitly - no hidden state
 
 @ctx  ; Dereference to see current state
+
 ```
 
 ### Why ctx?
@@ -57,6 +58,7 @@ All public functions:
 (iv-rank ctx {:ticker "SPY" :lookback 60})
 (options-chain ctx {:ticker "SPY" :dte 7})
 (options-chain ctx {:ticker "SPY" :dte 7 :strikes :atm-5})
+
 ```
 
 ### Source Code IS Documentation
@@ -85,6 +87,7 @@ Functions are simple enough to read directly:
      :iv-rank/current-iv current-iv
      :iv-rank/range [(apply min historical-ivs) (apply max historical-ivs)]
      :iv-rank/median (median historical-ivs)}))
+
 ```
 
 ---
@@ -107,6 +110,7 @@ Options use **DTE** (days to expiration) - the industry standard:
 
 ;; Get nearest monthly expiration
 (options-chain ctx {:ticker "SPY" :dte :nearest-monthly})
+
 ```
 
 The system finds the expiration closest to the requested DTE.
@@ -124,6 +128,7 @@ Historical analysis uses **lookback days**:
 
 ;; 30-day lookback (very short term)
 (iv-rank ctx {:ticker "SPY" :lookback 30})
+
 ```
 
 Standard lookbacks:
@@ -158,9 +163,11 @@ Every result is a namespaced map with `:seon.type/name` for identification.
 ;;       :skew 0.052
 ;;       :signal :short-vol}
 ;;      ...]}
+
 ```
 
 **Pretty-printed:**
+
 ```
 MARKET OVERVIEW
 
@@ -173,6 +180,7 @@ DIA     389.12   0.58 [▓▓▓▓▓░░░░░] 0.041   no-trade
 Legend: IV-RANK 0.0=low ──────── 1.0=high
 
 Use (analyze ctx {:ticker "SPY"}) for detailed analysis.
+
 ```
 
 ### IVRank
@@ -187,9 +195,11 @@ Use (analyze ctx {:ticker "SPY"}) for detailed analysis.
 ;;     :iv-rank/current-iv 0.285
 ;;     :iv-rank/range [0.142 0.385]
 ;;     :iv-rank/median 0.241}
+
 ```
 
 **Pretty-printed:**
+
 ```
 IV RANK: SPY
 
@@ -208,6 +218,7 @@ Median:     0.241
 
 Compare with different lookback:
   (iv-rank ctx {:ticker "SPY" :lookback 60})
+
 ```
 
 ### TickerAnalysis
@@ -227,9 +238,11 @@ Compare with different lookback:
 ;;      :put-call-ratio 1.12}
 ;;     :analysis/reasoning "IV rank at 73% suggests..."
 ;;     :analysis/strategies [:iron-condor :short-strangle]}
+
 ```
 
 **Pretty-printed:**
+
 ```
 ANALYSIS: SPY
 
@@ -252,6 +265,7 @@ STRATEGIES:
 Next steps:
   (options-chain ctx {:ticker "SPY" :dte 30})
   (iv-rank ctx {:ticker "SPY" :lookback 60})
+
 ```
 
 ### OptionsChain
@@ -270,9 +284,11 @@ Next steps:
 ;;       :call {:bid 5.45 :ask 5.55 :iv 0.30 :delta 0.58}
 ;;       :put {:bid 3.80 :ask 3.90 :iv 0.28 :delta -0.42}}
 ;;      ...]}
+
 ```
 
 **Pretty-printed:**
+
 ```
 OPTIONS CHAIN: SPY  (6 DTE)  Underlying: 543.21
 
@@ -287,6 +303,7 @@ Bid    Ask    IV    Delta               Delta   IV    Bid    Ask
 Showing 5 strikes around ATM (45 total available)
   (options-chain ctx {:ticker "SPY" :dte 6 :strikes :all})
   (options-chain ctx {:ticker "SPY" :dte 6 :strikes [530 560]})
+
 ```
 
 ### ErrorResult
@@ -298,15 +315,18 @@ Showing 5 strikes around ATM (45 total available)
 ;;     :error/message "No data for ticker INVALID"
 ;;     :error/suggestion "Try: SPY, QQQ, IWM, AAPL, MSFT, NVDA"
 ;;     :error/input {:ticker "INVALID"}}
+
 ```
 
 **Pretty-printed:**
+
 ```
 ERROR: No data for ticker INVALID
 
 Available tickers: SPY, QQQ, IWM, AAPL, MSFT, NVDA, GOOGL, AMZN, META
 
 Try: (iv-rank ctx {:ticker "SPY"})
+
 ```
 
 ---
@@ -325,6 +345,7 @@ Results carry metadata for drilling down:
 
 ;; Filter
 (where result {:delta-min 0.3 :delta-max 0.5})
+
 ```
 
 Implementation is simple - results are just maps with metadata:
@@ -338,6 +359,7 @@ Implementation is simple - results are just maps with metadata:
 
 (defn raw [result]
   @(:seon/raw-data (meta result)))
+
 ```
 
 ---
@@ -368,6 +390,7 @@ All functions return namespaced maps. Results pretty-print automatically.
 Use (raw result) for underlying data, (more result) for more detail.
 
 Start with (overview ctx) to see current market conditions.
+
 ```
 
 ---
@@ -473,6 +496,7 @@ Start with (overview ctx) to see current market conditions.
    [:error/message :string]
    [:error/suggestion {:optional true} :string]
    [:error/input {:optional true} :map]])
+
 ```
 
 ---
@@ -487,6 +511,7 @@ Each agent session gets an isolated namespace:
 ;; Creates namespace: seon.trading.agent.a3f2
 ;; Binds ctx atom in that namespace
 ;; Agent works in seon.trading.agent.a3f2
+
 ```
 
 The session ID is short (4 hex chars = 65536 possibilities). For a single user running parallel sessions, collisions are unlikely. If needed, can extend to 6 chars.

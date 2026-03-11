@@ -19,6 +19,7 @@ Added to `deps.edn` under `:dev` alias:
 ```clojure
 ;; Datalevin - local from git submodule (v0.10.3, 2026-01-27)
 datalevin/datalevin {:local/root "reference-code/datalevin"}
+
 ```
 
 ### Important Setup Notes
@@ -27,6 +28,7 @@ datalevin/datalevin {:local/root "reference-code/datalevin"}
 
    ```bash
    clj -X:deps prep
+
    ```
 
 2. **Server restart required**: After adding the dependency, restart the JVM to pick up the new classpath.
@@ -39,6 +41,7 @@ datalevin/datalevin {:local/root "reference-code/datalevin"}
 
 ```clojure
 (require '[datalevin.core :as d])
+
 ```
 
 ### Connection Management
@@ -52,6 +55,7 @@ datalevin/datalevin {:local/root "reference-code/datalevin"}
 
 ;; Close connection (IMPORTANT: always close for LMDB)
 (d/close conn)
+
 ```
 
 **Key difference from XTDB:** Datalevin uses persistent connections with mutable transaction semantics. The `conn` is an atom containing the current database state. `(d/db conn)` returns an immutable snapshot.
@@ -97,6 +101,7 @@ datalevin/datalevin {:local/root "reference-code/datalevin"}
    ;; Tuples
    :point/coords  {:db/valueType :db.type/tuple
                    :db/tupleTypes [:db.type/double :db.type/double]}})
+
 ```
 
 **Schema is optional** but recommended. Without schema, Datalevin infers types. With schema, you get validation and special features (refs, components, fulltext).
@@ -143,6 +148,7 @@ datalevin/datalevin {:local/root "reference-code/datalevin"}
 
 ;; Transaction result
 ;; => {:db-before ... :db-after ... :tx-data [...datoms...] :tempids {...}}
+
 ```
 
 **Transaction result keys:**
@@ -197,6 +203,7 @@ datalevin/datalevin {:local/root "reference-code/datalevin"}
        [?e :user/name ?name]
        (adult? ?e)]
      db rules)
+
 ```
 
 **Key difference from XTDB:** XTDB v2 uses SQL. Datalevin uses Datomic-style Datalog.
@@ -223,6 +230,7 @@ datalevin/datalevin {:local/root "reference-code/datalevin"}
 (d/pull-many db '[:user/name :user/age]
              [[:user/email "alice@example.com"]
               [:user/email "bob@example.com"]])
+
 ```
 
 ### Entity API
@@ -246,6 +254,7 @@ datalevin/datalevin {:local/root "reference-code/datalevin"}
 
 ;; Convert to plain map
 (into {} alice)
+
 ```
 
 ### Database as Value / Speculative Transactions
@@ -264,6 +273,7 @@ datalevin/datalevin {:local/root "reference-code/datalevin"}
                   [{:user/email "temp@example.com" :user/name "Temp"}]))
 
 ;; what-if-db has the new entity, conn's db does not
+
 ```
 
 ### History
@@ -279,6 +289,7 @@ datalevin/datalevin {:local/root "reference-code/datalevin"}
        [?e :user/age ?age ?tx]]
      history-db)
 ;; => #{[30 1] [31 2] [35 3]} - all ages Alice ever had
+
 ```
 
 **Key difference from XTDB:** XTDB has bitemporal history (valid-time + tx-time). Datalevin has single-dimension history (tx-time only).
@@ -302,6 +313,7 @@ datalevin/datalevin {:local/root "reference-code/datalevin"}
 ;; Reverse seek
 (d/rseek-datoms db :ave :user/name "C")
 ;; => datoms with name < "C" in reverse order
+
 ```
 
 ## Full-Text Search
@@ -335,6 +347,7 @@ datalevin/datalevin {:local/root "reference-code/datalevin"}
        [(fulltext $ :doc/content ?search {:top 5}) [[?e ?a ?v]]]
        [?e :doc/title ?title]]
      (d/db conn) "embedded")
+
 ```
 
 **Search expression syntax:**
@@ -372,6 +385,7 @@ datalevin/datalevin {:local/root "reference-code/datalevin"}
 
 ;; Close
 (d/close-kv lmdb)
+
 ```
 
 ## Transaction Listeners
@@ -387,6 +401,7 @@ datalevin/datalevin {:local/root "reference-code/datalevin"}
 ;; listener fires asynchronously
 
 (d/unlisten! conn :my-listener)
+
 ```
 
 ## Key Differences from XTDB v2
@@ -438,6 +453,7 @@ datalevin/datalevin {:local/root "reference-code/datalevin"}
 
 (defn close [conn]
   (d/close conn))
+
 ```
 
 ### With Integrant
@@ -448,6 +464,7 @@ datalevin/datalevin {:local/root "reference-code/datalevin"}
 
 (defmethod ig/halt-key! :seon/datalevin [_ conn]
   (d/close conn))
+
 ```
 
 ## Test Results

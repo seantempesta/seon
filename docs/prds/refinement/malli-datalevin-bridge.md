@@ -133,6 +133,7 @@ Datalevin is permissive with schema evolution — adding schema to a previously 
  [:seon.ai/session-id {:db/unique :db.unique/identity} :string]
  [:seon.fn/input-spec {:db/valueType :db.type/ref} :int]  ; explicit ref
  [:seon.spec/contains-keys [:vector :keyword]]]            ; cardinality-many inferred
+
 ```
 
 ### Entity schema pattern (from `seon.db.tx` — the model)
@@ -152,6 +153,7 @@ Datalevin is permissive with schema evolution — adding schema to a previously 
 ;; 3. Derive Datalevin schema
 (def datalevin-schema
   (dbs/malli-map->datalevin-schema entity-schema))
+
 ```
 
 ## Files

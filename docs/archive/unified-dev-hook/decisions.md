@@ -91,6 +91,7 @@ Store **all state in XTDB**. No `.edn` files for persistent state.
 :schema      ; resolved Malli schemas
 :edit-event  ; edit history
 :error       ; failure history
+
 ```
 
 ### Consequences
@@ -114,8 +115,10 @@ Store **all state in XTDB**. No `.edn` files for persistent state.
 ### Context
 
 Schemas can reference other schemas:
+
 ```clojure
 [:=> [:cat :user/id :order/cart] :order/result]
+
 ```
 
 Need to recursively resolve these to build full context for Gemini.
@@ -142,6 +145,7 @@ Use Malli's built-in `m/walk` to traverse schemas and collect refs, then resolve
           (swap! refs conj (m/type s)))
         (m/-set-children s children)))
     @refs))
+
 ```
 
 ---
@@ -198,6 +202,7 @@ Do NOT invoke on:
           :on-gen-fail true
           :on-syntax-fail false
           :on-unit-fail false}}
+
 ```
 
 ---

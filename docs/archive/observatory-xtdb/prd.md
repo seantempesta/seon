@@ -31,11 +31,13 @@ Current Observatory:
 - No syntax highlighting in results
 
 We already persist rich structured data to XTDB via `persist-message!`:
+
 ```clojure
 ::tool-calls      ; [{:name "Read" :input {:file_path "..."}}]
 ::tool-results    ; [{:tool_use_id "..." :content "..."}]
 ::ai/content      ; message text
 ::raw-message     ; full SDK message
+
 ```
 
 This data should drive the display.
@@ -64,6 +66,7 @@ This data should drive the display.
  ::tool-results    [{:tool_use_id "toolu_xxx"
                      :content "file contents..."}]
  ::raw-message     {...}}         ; full SDK message
+
 ```
 
 ---
@@ -73,14 +76,17 @@ This data should drive the display.
 ### 1. Message-Centric View (not log-line-centric)
 
 Instead of:
+
 ```
 14:23 | TOOL    | Read  | src/foo.clj
 14:23 | RESULT  | Read  | (ns foo...)
 14:24 | MESSAGE | asst  | Now I'll edit...
 14:24 | TOOL    | Edit  | src/foo.clj
+
 ```
 
 Show:
+
 ```
 ▶ 14:23 Read src/foo.clj ✓
     (ns foo
@@ -93,6 +99,7 @@ Show:
     @@ -12,3 +12,5 @@
     - (defn old ...)
     + (defn new ...)
+
 ```
 
 ### 2. Tool Call Components
@@ -105,10 +112,12 @@ Each tool call is a collapsible block:
 ### 3. Assistant Messages as Flow Text
 
 Don't put in rigid columns. Show as natural text between tool blocks:
+
 ```
 "I'll start by reading the file to understand the current implementation."
 
 ▶ Read src/seon/web/agents.clj ✓
+
 ```
 
 ### 4. Syntax Highlighting by Tool
@@ -128,6 +137,7 @@ Don't put in rigid columns. Show as natural text between tool blocks:
 ### Phase 1: Query XTDB for messages
 
 Replace log file parsing with XTDB query:
+
 ```clojure
 (defn- load-session-messages [session-id]
   (xt/q node
@@ -135,6 +145,7 @@ Replace log file parsing with XTDB query:
      WHERE session_id = ?
      ORDER BY timestamp"
     session-id))
+
 ```
 
 ### Phase 2: Message renderer
@@ -192,6 +203,7 @@ Agent analyzed 82 sessions and 3,517 messages. Key findings:
  ;; Tool results (on user messages)
  :seon.ai.claude/tool-results   [{:tool-use-id "toolu_xxx"
                                    :content "result..."}]}
+
 ```
 
 ### Key Insights
@@ -220,6 +232,7 @@ Agent analyzed 82 sessions and 3,517 messages. Key findings:
                     (mapv #(assoc % :result (get results-by-id (:id %))) calls))
              msg))
          messages)))
+
 ```
 
 ### Component Mapping
@@ -283,13 +296,16 @@ The query was correct; the issue was server caching.
 ### Tasks
 
 1. **Initialize npm project** (if not exists)
+
    ```bash
    npm init -y
    npm install -D tailwindcss @tailwindcss/typography
    npx tailwindcss init
+
    ```
 
 2. **Configure Tailwind** (`tailwind.config.js`)
+
    ```javascript
    module.exports = {
      content: ['./src/**/*.clj', './resources/**/*.html'],
@@ -311,30 +327,39 @@ The query was correct; the issue was server caching.
      },
      plugins: [require('@tailwindcss/typography')],
    }
+
    ```
 
 3. **Create input CSS** (`resources/public/css/input.css`)
+
    ```css
    @tailwind base;
    @tailwind components;
    @tailwind utilities;
+
    ```
 
 4. **Build script** (add to `package.json` or `bin/`)
+
    ```bash
    npx tailwindcss -i resources/public/css/input.css -o resources/public/css/output.css --watch
+
    ```
 
 5. **Update html.clj** - Replace CDN with local CSS file
+
    ```clojure
    ;; Remove: tailwind-cdn script
    ;; Add: [:link {:rel "stylesheet" :href "/css/output.css"}]
+
    ```
 
 6. **Add to .gitignore**
+
    ```
    node_modules/
    resources/public/css/output.css
+
    ```
 
 7. **Add build to startup** - Run Tailwind build before/during dev
@@ -361,16 +386,20 @@ Used Tailwind v4 CSS-based configuration (no `tailwind.config.js`):
 - `.gitignore` - Added node_modules/ and output.css
 
 **Build commands:**
+
 ```bash
 npm run css:build   # One-time build
 npm run css:watch   # Watch mode for development
+
 ```
 
 **Key difference from plan:** Tailwind v4 uses `@plugin` directive in CSS instead of JS config:
+
 ```css
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 @source "../../../src/**/*.clj";
+
 ```
 
 ---
@@ -388,6 +417,7 @@ npm run css:watch   # Watch mode for development
 ### Implementation
 
 1. **Create component** in `src/seon/web/tailwind.clj`:
+
    ```clojure
    (ns seon.web.tailwind
      "Tailwind CSS watcher component.
@@ -401,11 +431,14 @@ npm run css:watch   # Watch mode for development
    (defmethod ig/halt-key! :seon.web/tailwind-watcher [_ state]
      ;; Kill the process
      )
+
    ```
 
 2. **Add to system.clj**:
+
    ```clojure
    :seon.web/tailwind-watcher {:enabled? (not= profile :prod)}
+
    ```
 
 3. **Process management**:
@@ -535,6 +568,7 @@ npm run css:watch   # Watch mode for development
 ### Proposed Features
 
 #### 1. "Thinking" Indicator in UI
+
 Show distinct states:
 - `● running` - Normal, recent activity
 - `● thinking` - No activity but process alive with open TCP connections
@@ -542,18 +576,21 @@ Show distinct states:
 - `● completed` - Agent finished
 
 #### 2. Token Streaming (if possible)
+
 The Claude CLI may emit streaming events we're not capturing. Research:
 - What events does Claude CLI emit during streaming?
 - Can we get partial token counts?
 - Can we show a "tokens received" counter?
 
 #### 3. Process Monitoring from Clojure
+
 Replace shell-based monitoring with JVM APIs:
 - `ProcessHandle` for process info (Clojure 1.12)
 - Java NIO for network connections
 - Or use `clojure.java.process` utilities
 
 #### 4. Activity Heartbeat
+
 Add heartbeat from agent process:
 - Agent periodically writes timestamp to shared atom/file
 - UI checks heartbeat freshness

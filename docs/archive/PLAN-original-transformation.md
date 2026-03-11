@@ -72,6 +72,7 @@ Transform ml-options-trading into **Seon** - a personal "OS for life" with modul
 ├── dev/user.clj              # REPL helpers
 ├── env/{dev,prod,test}/      # Profile-specific configs
 └── data/xtdb/                # XTDB storage (73GB, NOT copied)
+
 ```
 
 ---
@@ -79,6 +80,7 @@ Transform ml-options-trading into **Seon** - a personal "OS for life" with modul
 ## KEY PATTERNS FROM SOURCE
 
 ### 1. XTDB Query Wrapper
+
 ```clojure
 ;; Use ml-options.db.node/query, NOT xt/q
 (node/query db '(from :option-greeks [ticker strike iv]))
@@ -86,31 +88,39 @@ Transform ml-options-trading into **Seon** - a personal "OS for life" with modul
 ;; Dynamic values with xt/template
 (node/query db (xt/template
   (from :option-greeks [{:ticker ~ticker} strike iv])))
+
 ```
 
 ### 2. Integrant Lifecycle
+
 ```clojure
 (go)      ; Start system
 (halt)    ; Stop system
 (reset)   ; Reload code + restart
 (status)  ; Show system status
+
 ```
 
 ### 3. Data Ingestion Pattern
+
 ```
 fetch (thetadata.clj) → transform → validate → batch ingest → checkpoint
+
 ```
 
 ### 4. DSL Primitives (→ signals.clj)
+
 - `iv-rank` - IV percentile vs historical
 - `skew-index` - Put/call IV spread
 - `term-structure-slope` - Near vs far term IV
 - `gamma-rent` - Gamma/theta ratio
 
 ### 5. Agent Analysis
+
 ```clojure
 (analyze-ticker node "SPY" {:as-of #inst "2025-07-15"})
 ;; Returns: {:signals {...} :recommendation :no-trade :reasoning "..."}
+
 ```
 
 ---
@@ -155,6 +165,7 @@ Current status: Stage 1 copy complete. Need to:
 
 Original project at ~/src/ml-options-trading for reference if needed.
 We're transforming it into "Seon" - a personal OS with domains (trading, health, etc).
+
 ```
 
 ## Vision
@@ -195,6 +206,7 @@ Copy ml-options-trading, get it running, then incrementally transform via git ch
 Files copied to `~/src/seon/` from `~/src/ml-options-trading`.
 
 **Original commands (for reference):**
+
 ```bash
 mkdir -p ~/src/seon
 cd ~/src/ml-options-trading
@@ -207,6 +219,7 @@ cp -R .claude .clj-kondo .lsp .calva ~/src/seon/ 2>/dev/null || true
 
 # Create empty data dirs
 mkdir -p ~/src/seon/data/xtdb
+
 ```
 
 **NOT copied**: `data/xtdb/` (73GB), `data/*.backup*`, `.cpcache/`, `classes/`, `logs/`, `.nrepl-port`
@@ -216,11 +229,13 @@ mkdir -p ~/src/seon/data/xtdb
 ```bash
 cd ~/src/seon
 clj -M:dev:nrepl
+
 ```
 
 ```clojure
 (go)      ; System starts
 (status)  ; XTDB node healthy
+
 ```
 
 ### 1.3 Git Init & Commit
@@ -229,6 +244,7 @@ clj -M:dev:nrepl
 git init
 git add .
 git commit -m "Initial copy of ml-options-trading (unchanged)"
+
 ```
 
 **Checkpoint**: Working system, can always `git reset --hard HEAD` to return here.
@@ -270,11 +286,13 @@ The trading code becomes `seon.trading.*`:
 ```clojure
 (reset)   ; Reload with new namespaces
 (status)  ; Still works
+
 ```
 
 ```bash
 git add .
 git commit -m "Rename ml-options → seon"
+
 ```
 
 ---
@@ -311,6 +329,7 @@ data/
   xtdb/                 ; Current XTDB storage (git-ignored)
   trading/              ; Trading domain XTDB (future, git-ignored)
   health/               ; Health domain XTDB (future, git-ignored)
+
 ```
 
 ### 3.2 Standard Files Per Domain
@@ -338,6 +357,7 @@ Domain functions don't manage their own database - they receive it:
 (defn iv-rank [db ticker opts]
   (let [historical (queries/historical-ivs db ticker (:lookback opts))]
     ...))
+
 ```
 
 Seon core is responsible for creating/managing DB nodes and passing them to domains.
@@ -347,6 +367,7 @@ Seon core is responsible for creating/managing DB nodes and passing them to doma
 ```bash
 git add .
 git commit -m "Refactor to standard module pattern (specs/core/signals/queries/tests)"
+
 ```
 
 ---
@@ -375,6 +396,7 @@ git commit -m "Refactor to standard module pattern (specs/core/signals/queries/t
     (xtn/start-node)
     (xtn/start-node {:log-dir (str (:path opts) "/log")
                      :storage-dir (str (:path opts) "/storage")})))
+
 ```
 
 ### 4.2 Domain Registry
@@ -392,6 +414,7 @@ git commit -m "Refactor to standard module pattern (specs/core/signals/queries/t
   "Get the DB node for a domain."
   [domain-id]
   (get-in @domains [domain-id :db]))
+
 ```
 
 ### 4.3 Update system.edn
@@ -400,6 +423,7 @@ git commit -m "Refactor to standard module pattern (specs/core/signals/queries/t
 ;; Each domain gets its own DB component
 :seon.trading/db {:path "data/trading"}
 ;; Future: :seon.health/db {:path "data/health"}
+
 ```
 
 ### 4.4 Verify & Commit
@@ -407,6 +431,7 @@ git commit -m "Refactor to standard module pattern (specs/core/signals/queries/t
 ```bash
 git add .
 git commit -m "Add seon.db.factory, domain registry, separate DBs per domain"
+
 ```
 
 ---
@@ -432,6 +457,7 @@ Enable function instrumentation for rapid REPL feedback:
 
 (defn unstrument! []
   (mi/unstrument!))
+
 ```
 
 ### 5.2 Agent Query Interface
@@ -445,6 +471,7 @@ Each domain's `core.clj` exposes:
    :signals (keys trading.signals/registry)
    :specs (keys trading.specs/registry)
    :examples "See seon.trading.tests namespace"})
+
 ```
 
 ### 5.3 Verify & Commit
@@ -452,6 +479,7 @@ Each domain's `core.clj` exposes:
 ```bash
 git add .
 git commit -m "Add Malli instrumentation, agent query interface"
+
 ```
 
 ---
@@ -461,6 +489,7 @@ git commit -m "Add Malli instrumentation, agent query interface"
 **Wait until Apple Health data research is complete.**
 
 When ready, create:
+
 ```
 seon/health/
   core.clj      ; Public API
@@ -469,6 +498,7 @@ seon/health/
   queries.clj   ; Health XTDB queries
   ingest.clj    ; Apple Health import
   analysis.clj  ; Health insights for agents
+
 ```
 
 Separate database: `data/health/`
@@ -517,4 +547,5 @@ clj -M:dev:nrepl
 
 # Run tests
 clj -M:test
+
 ```

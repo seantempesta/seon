@@ -56,4 +56,5 @@ Discovery happens at topology build time (static) or via `flow/ping` (dynamic). 
 {:seon.ns/feeds [{:signal-id :seon.health/workout-logged
                   :doc "Emitted when a workout is logged"
                   :payload-schema [:map [:workout-id :uuid]]}]}
+
 ```

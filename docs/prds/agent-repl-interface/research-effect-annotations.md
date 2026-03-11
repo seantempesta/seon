@@ -16,6 +16,7 @@ Malli schema properties are the second element in a schema vector, when it is a 
 ```clojure
 [:string {:min 1 :seon.db/identity true}]
 ;;        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ properties
+
 ```
 
 For `:=>` (function) schemas, properties go in the same position:
@@ -23,6 +24,7 @@ For `:=>` (function) schemas, properties go in the same position:
 ```clojure
 [:=> {:seon.fn/effects #{:db/read}} [:cat ::request] ::response]
 ;;   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ properties on the function schema
+
 ```
 
 ### Confirmed in Malli source
@@ -46,6 +48,7 @@ In `src/seon/db/schema.clj` line 89-96, `seon-db-props->db-props`:
       (:seon.db/identity props)   (assoc :db/unique :db.unique/identity)
       (:seon.db/unique props)     (assoc :db/unique :db.unique/value)
       (:seon.db/value-type props) (assoc :db/valueType (:seon.db/value-type props)))))
+
 ```
 
 This reads properties from the Malli leaf schema (on map entries, not the `:=>` schema). For effect annotations, we would read properties from the `:=>` schema instead — same mechanism, different schema type.
@@ -59,6 +62,7 @@ In `reference-code/malli/src/malli/instrument.clj` line 48-50:
   (let [{:keys [ns name] :as m} (meta v)]
     (when-let [s (-schema v)]
       (m/-register-function-schema! (-> ns str symbol) name s (m/-unlift-keys m "malli")))))
+
 ```
 
 And in `core.cljc` line 3086:
@@ -66,6 +70,7 @@ And in `core.cljc` line 3086:
 ```clojure
 (swap! -function-schemas* assoc-in [key ns name]
   (merge data {:schema (f ?schema), :ns ns, :name name}))
+
 ```
 
 The `:schema` key holds the compiled Malli schema object. So after instrumentation, we can read effects via:
@@ -78,6 +83,7 @@ The `:schema` key holds the compiled Malli schema object. So after instrumentati
         :when effects]
     {:fn (symbol (str ns-sym) (str fn-sym))
      :effects effects}))
+
 ```
 
 ---
@@ -150,6 +156,7 @@ Several categories of functions explicitly omit `:malli/schema`:
   {:malli/schema [:=> {:seon.fn/effects #{:db/write :io/network}}
                   [:cat ::request] ::response]}
   [{::keys [file-path]}] ...)
+
 ```
 
 ### Effect Vocabulary
@@ -191,6 +198,7 @@ Several categories of functions explicitly omit `:malli/schema`:
   (into [] (comp (filter (fn [[_ effects]] (empty? effects)))
                  (map first))
         (all-fn-effects)))
+
 ```
 
 ### Should We Annotate WHICH Database?
@@ -244,6 +252,7 @@ From `src/seon/graph/query.clj`:
       (if (empty? new-callers)
         (disj (into visited frontier) (str ns-name "/" fn-name))
         (recur new-callers (into visited frontier))))))
+
 ```
 
 ### Effect inference rules
@@ -306,6 +315,7 @@ Phase 2: Read-only tests (parallel, shared DB/ctx)
 Phase 3: Write tests (parallel with isolation — each gets own DB/ctx)
     |
 Phase 4: Lifecycle tests (sequential)
+
 ```
 
 ### What kaocha offers
@@ -347,6 +357,7 @@ Since Seon's test runner is already custom (`user/run-tests` calls kaocha progra
         lifecycle-results (mapv run-lifecycle-test (:lifecycle grouped))]
 
     (merge-results pure-results read-results write-results lifecycle-results)))
+
 ```
 
 ---
@@ -388,6 +399,7 @@ The existing flow topology has exactly the pattern we need:
  [[[:seon.test/pure-runner :out/result] [:seon.test/result-sink :in/result]]
   [[:seon.test/read-runner :out/result] [:seon.test/result-sink :in/result]]
   [[:seon.test/write-runner :out/result] [:seon.test/result-sink :in/result]]]}
+
 ```
 
 ### Is this worth it?
@@ -415,6 +427,7 @@ Flow-based test execution becomes valuable when:
    (defn fn-effects [fn-var] ...)
    (defn all-fn-effects [] ...)
    (defn pure-functions [] ...)
+
    ```
 
 3. Annotate the ~15 "leaf" effectful functions (db/transact!, db/query, ctx ops, gemini calls)

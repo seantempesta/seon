@@ -64,6 +64,7 @@ Provide two simple functions that use `*ctx*` implicitly:
 
 ;; Delete
 (sql! "DELETE FROM signals WHERE _id = ?" ["sig-1"])
+
 ```
 
 ## Implementation
@@ -98,6 +99,7 @@ Provide two simple functions that use `*ctx*` implicitly:
   [stmt & param-vectors]
   (let [db (:seon.agent/db @*ctx*)]
     (xt/execute-tx db [(into [:sql stmt] param-vectors)])))
+
 ```
 
 ## Reserved Keys in ctx
@@ -109,6 +111,7 @@ Updated reserved keys:
  :seon.agent/db          <xtdb-connection>   ; Direct XTDB access (escape hatch)
  :seon.agent/render      (fn [hiccup] ...)   ; Push UI updates (Phase 5)
  :seon.agent/worktree    "/path/to/worktree" ; Git worktree path (Phase 6)}
+
 ```
 
 **Note:** `sql` and `sql!` are functions in the `seon.agent.helpers` namespace,
@@ -124,6 +127,7 @@ Agents design their own tables. Conventions:
 4. **Or use namespaced columns** for domain clarity (e.g., `signal$symbol` → `:signal/symbol`)
 
 Example agent table:
+
 ```sql
 -- Simple flat table
 INSERT INTO signals (_id, symbol, direction, iv_rank, created_at)
@@ -131,6 +135,7 @@ VALUES ('sig-1', 'AAPL', 'long', 0.85, CURRENT_TIMESTAMP)
 
 -- Query returns:
 -- {:xt/id "sig-1" :symbol "AAPL" :direction "long" :iv_rank 0.85 :created_at #inst "..."}
+
 ```
 
 ## Example Agent Workflow
@@ -159,6 +164,7 @@ VALUES ('sig-1', 'AAPL', 'long', 0.85, CURRENT_TIMESTAMP)
    [:h2 "Active Signals"]
    (for [s active]
      [:div.signal (:symbol s) " - " (:direction s)])])
+
 ```
 
 ## Migration from PRD Examples

@@ -12,15 +12,18 @@ These failures prevent CI from passing and block development workflow.
 ## Background
 
 ### Java Version Fixed
+
 The original failure (`ClassNotFoundException: StructuredTaskScope$ShutdownOnFailure`) was caused by Java 25 incompatibility with XTDB 2.1.0-rc0. This was fixed by adding `.envrc` to enforce Java 21.
 
 ### Schema Generator Issue
+
 In `ml-options.db.schema-test/custom-generators-produce-valid-data`:
 - Generator produces `UUID` for `:xt/id` field
 - Schema expects `:string` type
 - Error: `{:path [:xt/id], :in [:xt/id], :schema :string, :value #uuid "..."}`
 
 ### Handler Test Failures
+
 In `ml-options.web.handlers-test`:
 - `start-import-handler-test` - Multiple assertion failures
 - `handler-integration-test` - Job lifecycle assertions failing
@@ -45,12 +48,14 @@ The handler tests were written for an earlier API but the handlers were updated 
 See `research/` directory for detailed findings. Summary:
 
 ### Schema Generator - Root Cause Found
+
 - **Problem**: Generator produces UUID, schema expects string
 - **Location**: `test/ml_options/generators.clj` - option-greeks generator
 - **Schema is correct** - generator needs to match production ID format
 - **Reference**: Check `src/ml_options/data/thetadata.clj` for how production IDs are created
 
 ### Handler Tests - Root Cause Found
+
 - **Problem**: Handlers throw NPE instead of returning 400 errors
 - **Root causes**:
   1. `slurp(nil)` when request body is nil
@@ -63,6 +68,7 @@ See `research/` directory for detailed findings. Summary:
 ## Implementation Goals
 
 ### Goal 1: Fix Schema Generator
+
 Make the option-greeks generator produce valid string IDs that match the production format.
 
 **Success criteria:**
@@ -71,6 +77,7 @@ Make the option-greeks generator produce valid string IDs that match the product
 - All schema validation tests pass
 
 ### Goal 2: Fix Handler Input Validation
+
 Add proper input validation to prevent NPEs when request body or fields are missing.
 
 **Success criteria:**
@@ -79,9 +86,11 @@ Add proper input validation to prevent NPEs when request body or fields are miss
 - Error messages are useful for debugging
 
 ### Goal 3: Verify All Tests Pass
+
 ```bash
 export JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home
 clj -M:test -m kaocha.runner
+
 ```
 
 Expected: 0 failures, 0 errors
@@ -106,10 +115,12 @@ Expected: 0 failures, 0 errors
 ## Success Criteria
 
 All tests pass:
+
 ```bash
 export JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home
 clj -M:test -m kaocha.runner
 # Expected: 0 failures, 0 errors
+
 ```
 
 ---
@@ -119,6 +130,7 @@ clj -M:test -m kaocha.runner
 All tests now pass: **135 tests, 660 assertions, 0 failures**.
 
 ### Files Changed
+
 | File | What Changed |
 |------|--------------|
 | `test/ml_options/generators.clj` | Fixed option-greeks generator to produce string IDs in production format (`"{OCC_SYMBOL}-{ISO_TIMESTAMP}"`) instead of UUIDs |

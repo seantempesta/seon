@@ -41,6 +41,7 @@ The hot reload problem **is solved**. The current `after-ns-reload` pattern work
                   (constantly (sse/render-handler #'dashboard-sse-render)))
   (alter-var-root #'log-viewer-sse
                   (constantly (sse/render-handler #'log-viewer-sse-render :poll-ms 2000))))
+
 ```
 
 ### 1.2 The Remaining Gaps
@@ -56,6 +57,7 @@ But examining `src/seon/web/sse.clj` reveals deeper architectural issues:
   [& _opts]
   (when-let [<refresh-ch @refresh-ch_]
     (a/>!! <refresh-ch :refresh-event)))
+
 ```
 
 This broadcasts to all clients regardless of whether the change affects them. A change to `seon.trading.signals` triggers refresh for clients viewing `seon.web.agents`.
@@ -70,6 +72,7 @@ This broadcasts to all clients regardless of whether the change affects them. A 
                (a/>!! <cancel :cancel)
                (a/untap (:seon.web.sse/refresh-mult req) <ch)
                (when on-close (on-close req)))})
+
 ```
 
 No registry of connected clients. Can't answer:
@@ -86,6 +89,7 @@ Most handlers use polling (`:poll-ms 2000`) rather than event-driven updates:
 ;; src/seon/web/agents.clj:676-677
 (def agents-sse
   (sse/render-handler #'agents-sse-render :poll-ms 2000))
+
 ```
 
 This means:
@@ -150,6 +154,7 @@ The prior research correctly identified that Flow is wrong for **agent message h
                                     │     HTTP-KIT CHANNELS   │
                                     │  (per-client SSE conn)  │
                                     └─────────────────────────┘
+
 ```
 
 ### 2.3 Flow Definition (Data)
@@ -374,6 +379,7 @@ The prior research correctly identified that Flow is wrong for **agent message h
   []
   (when-let [{:keys [flow]} @flow-state]
     (flow/ping-proc flow :registry)))
+
 ```
 
 ---
@@ -397,6 +403,7 @@ The dev hook already calls `clj-reload/reload`. We add Flow notification:
        {:seon.sse/event-type :namespace-reload
         :seon.sse/namespace ns-sym}))
     result))
+
 ```
 
 ### 3.2 Integrate with render-handler
@@ -432,6 +439,7 @@ Modify `render-handler` to register/unregister with Flow:
            (flow/unregister-client! client-id)
            (async/close! <updates)
            (when on-close (on-close req)))}))))
+
 ```
 
 ### 3.3 Keep after-ns-reload Pattern
@@ -445,6 +453,7 @@ The `after-ns-reload` hooks remain for handler recreation:
     (constantly (sse/render-handler #'agents-sse-render
                   :page :agents
                   :poll-ms 2000))))
+
 ```
 
 Flow handles **when** to trigger re-renders; `after-ns-reload` handles **what** gets re-rendered.
@@ -470,6 +479,7 @@ Flow handles **when** to trigger re-renders; `after-ns-reload` handles **what** 
 (seon.web.sse.flow/connected-clients)
 ;; => {:seon.sse.flow/state {:clients {...}}
 ;;     :seon.sse.flow/count 3}
+
 ```
 
 ### 4.2 Targeted Updates
@@ -484,6 +494,7 @@ Instead of broadcasting to all clients:
 (flow/emit-change! {:seon.sse/event-type :namespace-reload
                     :seon.sse/namespace 'seon.trading.signals})
 ;; Only clients viewing trading-related pages get updates
+
 ```
 
 ### 4.3 Debouncing Built-In
@@ -495,6 +506,7 @@ t=0ms:   Edit seon/trading/signals.clj   → aggregator accumulates
 t=10ms:  Edit seon/trading/execution.clj → aggregator accumulates
 t=20ms:  Edit seon/trading/risk.clj      → aggregator accumulates
 t=70ms:  (50ms quiet period passed)      → emit single aggregated update
+
 ```
 
 ### 4.4 Error Centralization
@@ -507,6 +519,7 @@ All SSE errors go to one place:
     (when-let [err (async/<! error-chan)]
       (log/error "SSE flow error" err)
       (recur))))
+
 ```
 
 ### 4.5 Clean Shutdown
@@ -519,6 +532,7 @@ Flow's `:transition` handles cleanup:
  (doseq [[_ client] (:clients state)]
    (hk/close (:seon.sse/http-channel client)))
  state)
+
 ```
 
 ---

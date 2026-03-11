@@ -13,9 +13,11 @@ The test `ml-options.db.schema-test/custom-generators-produce-valid-data` is fla
 ## Test Failure Details
 
 ### Error Symptoms
+
 ```
 Quote should be valid: {..., :quote/ask ##NaN, ...}
 :errors ({:path [:quote/ask], :in [:quote/ask], :schema [:double {:min 0.0, :max 1.0}], :value ##NaN})
+
 ```
 
 The schema correctly rejects NaN values because:
@@ -24,6 +26,7 @@ The schema correctly rejects NaN values because:
 3. Production code never produces NaN values
 
 ### Example Failing Values
+
 From test run failures:
 - `{:quote/bid 0.59375, :quote/ask ##NaN, ...}`
 - `{:quote/bid 1.125, :quote/ask ##NaN, ...}`
@@ -64,6 +67,7 @@ From test run failures:
      :greeks/vega (:vega greeks)
      :greeks/theta (:theta greeks)
      :market/volume volume}))
+
 ```
 
 ### Why It's Inconsistent (Flaky)
@@ -74,9 +78,11 @@ From test run failures:
 - `##-Inf` (Negative Infinity)
 
 The probability is low but non-zero. When any of these special values are used in arithmetic:
+
 ```clojure
 (+ bid (* bid ##NaN))  ;=> ##NaN
 (+ bid (* bid ##Inf))  ;=> ##Inf
+
 ```
 
 ### Why Other Generators Work
@@ -98,6 +104,7 @@ Compare to properly configured generators in the same file:
 
 ;; Line 132 - BROKEN (missing flags)
 spread (gen/double* {:min 0.01 :max 0.5})
+
 ```
 
 All the standalone generators properly exclude NaN/Inf, but the inline `spread` generator does not.
@@ -116,11 +123,13 @@ All the standalone generators properly exclude NaN/Inf, but the inline `spread` 
 ## Reproduction Steps
 
 Run the schema test suite multiple times:
+
 ```bash
 for i in {1..15}; do
   JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home \
   clj -M:test -m kaocha.runner --focus ml-options.db.schema-test
 done
+
 ```
 
 Expected: ~3 failures out of 15 runs showing `:quote/ask ##NaN`
@@ -135,13 +144,17 @@ Expected: ~3 failures out of 15 runs showing `:quote/ask ##NaN`
 **Line**: 132
 
 **Before**:
+
 ```clojure
 spread (gen/double* {:min 0.01 :max 0.5})
+
 ```
 
 **After**:
+
 ```clojure
 spread (gen/double* {:min 0.01 :max 0.5 :NaN? false :infinite? false})
+
 ```
 
 ### Why This Fix Is Correct
@@ -154,11 +167,13 @@ spread (gen/double* {:min 0.01 :max 0.5 :NaN? false :infinite? false})
 ### Testing the Fix
 
 After applying the fix, run:
+
 ```bash
 # Should pass consistently
 for i in {1..20}; do
   clj -M:test -m kaocha.runner --focus ml-options.db.schema-test/custom-generators-produce-valid-data
 done
+
 ```
 
 All 20 runs should pass with 0 failures.
@@ -173,6 +188,7 @@ Search for other inline `gen/double*` calls that might have the same issue:
 
 ```bash
 grep -n "gen/double\*" test/ml_options/generators.clj
+
 ```
 
 Found instances:

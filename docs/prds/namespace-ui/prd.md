@@ -115,6 +115,7 @@ There's no unified view that shows "what's in this namespace and what's its curr
 /agents                        -> Agent Observatory
 /agents/{id}                   -> Agent detail view
 /schemas                       -> Malli schema browser (future)
+
 ```
 
 The namespace IS the route. Session ID is optional query param.
@@ -131,6 +132,7 @@ Different skills are relevant for different work:
 /datastar-web-ui     -> SSE patterns, data-on:click, merge-fragment
 /frontend-design     -> Visual design, avoiding generic aesthetics
 /browser-automation  -> Test the result visually, debug in browser
+
 ```
 
 ### When Working with Data/Queries
@@ -138,6 +140,7 @@ Different skills are relevant for different work:
 ```
 /xtdb-queries        -> SQL/Datalog patterns, queries (migrating to Datalevin)
 /clojure-testing     -> Test patterns, generators, mocking
+
 ```
 
 ### Skill Combinations by Task
@@ -167,6 +170,7 @@ Browser → GET /ns/seon.trading?instance=a1b2
     → agent returns domain data map (e.g. {:seon.trading/positions [...], ...})
     → orchestrator resolves renderer via spec-driven resolution (code index)
     → rendered hiccup cached + SSE merge-fragment to browser
+
 ```
 
 The `topology/request!` function (in `seon.flow.topology`) is the blocking entry point for cross-namespace calls. It creates a promise, injects a request into the flow via `flow/inject`, and derefs the promise with a timeout. Replies are delivered by the `reply-router-step` which matches reply envelopes to waiting promises by request ID. For agent JVMs, cross-namespace relay go-loops forward requests from the agent's TCP bridge through the same `request!` mechanism.
@@ -194,6 +198,7 @@ Cached at orchestrator, invalidated on `*ctx*` change (via the watch-based push 
 ```clojure
 ;; In seon.ns.view
 (defmulti render* (fn [value format] [format (extract-view-type value)]))
+
 ```
 
 ### Key Files

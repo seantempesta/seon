@@ -37,6 +37,7 @@
  :after "modified"
  :sees-change? true
  :conclusion "REFERENCE: Instance sees changes to base"}
+
 ```
 
 **This is good** because:
@@ -60,6 +61,7 @@
 ;; Instance can use it:
 (instance-eval inst "(with-timing (Thread/sleep 10))")
 ;; => 541 (ms)
+
 ```
 
 The macro expands in the instance context but executes correctly.
@@ -72,6 +74,7 @@ The macro expands in the instance context but executes correctly.
 ;; In instance seon.experimental.ns-instance-base.0001:
 (read-string "::test")
 ;; => :seon.experimental.ns-instance-base.0001/test
+
 ```
 
 **Mitigation strategies:**
@@ -147,6 +150,7 @@ Functions that close over atoms/refs share that state across instances.
 (defn inc-counter [] (swap! counter inc))
 
 ;; Both instances share the same atom!
+
 ```
 
 **Mitigation:**
@@ -168,6 +172,7 @@ The registry pattern matches what we already have:
 ### Fits with MCP Sessions
 
 Each MCP session can get its own namespace instance:
+
 ```clojure
 ;; On session create:
 (create-instance-ns 'seon.web.reactive.demo {:instance-id session-id})
@@ -177,6 +182,7 @@ Each MCP session can get its own namespace instance:
 
 ;; On session end:
 (destroy-instance-ns inst)
+
 ```
 
 ### Fits with nREPL

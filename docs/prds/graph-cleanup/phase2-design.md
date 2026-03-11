@@ -35,6 +35,7 @@ tags: [prd, database]
        [?e :seon.fn/input-spec _]
        [?e :seon.fn/namespace ?ns]]
      @graph-conn)
+
 ```
 
 ---
@@ -62,6 +63,7 @@ A single file handling code/documentation rendering. Minimal scope.
 
 ```
 src/seon/render/code.clj
+
 ```
 
 ### Function Signatures
@@ -93,6 +95,7 @@ Find functions that can consume the given data keys. This is the inverse of `fun
      ;;      :optional-keys #{}} ...]"
   [{::keys [conn available-keys output-filter]}]
   ...)
+
 ```
 
 **Implementation approach:**
@@ -130,6 +133,7 @@ Default documentation renderer for any namespace. Queries the graph for function
      ;; => {:seon.render/documentation \"## seon.graph.query\\n...\"}"
   [{::keys [conn ns-name detail] :or {detail :interface}}]
   ...)
+
 ```
 
 **Implementation approach:**
@@ -163,6 +167,7 @@ Find the best documentation renderer for a namespace. Enables custom doc rendere
      The resolved var, or nil (use default)."
   [{::keys [conn ns-name available-keys]}]
   ...)
+
 ```
 
 **Implementation approach:**
@@ -200,6 +205,7 @@ Thin wrapper around `seon.graph.context/build-for-namespace` with documentation 
      (context-for-agent {::conn conn ::ns-name \"seon.health.workout\"})"
   [{::keys [conn ns-name depth max-entities]}]
   ...)
+
 ```
 
 **Implementation approach:**
@@ -234,6 +240,7 @@ If a namespace wants custom documentation, it can define:
   {:malli/schema [:=> [:cat ::ns-docs-request] ::ns-docs-response]}
   [{ns-ctx ::*ctx*}]
   {:seon.render/documentation (custom-doc-format ns-ctx)})
+
 ```
 
 The graph scanner will link this automatically, and `resolve-docs` will find it.
@@ -258,6 +265,7 @@ The current `find-renderer` uses `resolution-cache` invalidated on rescan. `func
       (let [result (...existing implementation...)]
         (swap! output-key-cache assoc cache-key result)
         result))))
+
 ```
 
 Call `invalidate-output-key-cache!` from `invalidate-render-cache!` so both are cleared on rescan.
@@ -282,6 +290,7 @@ Example output at each level:
 - dependencies-of
 - call-graph
 - functions-with-output-key
+
 ```
 
 **`:interface`** (default)
@@ -299,6 +308,7 @@ Find namespaces that the given namespace depends on.
 Find functions whose output spec contains a specific key.
   Input: ::conn, ::output-key
   Output: :seon.fn/qualified-name, :required-keys, :optional-keys
+
 ```
 
 **`:deep-dive`**
@@ -307,9 +317,11 @@ Find functions whose output spec contains a specific key.
 ## seon.graph.query
 
 ### dependents-of
+
 ```clojure
 (dependents-of {::conn conn ::ns-name "seon.ai.claude"})
 ;; => ["seon.ai.agent" "seon.web.agents" ...]
+
 ```
 
 Find namespaces that depend on (require) the given namespace.

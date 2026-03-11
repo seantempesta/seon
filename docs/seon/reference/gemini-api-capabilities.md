@@ -54,6 +54,7 @@ if (groundingMetadata) {
   console.log('Search queries:', groundingMetadata.webSearchQueries);
   console.log('Sources:', groundingMetadata.groundingChunks);
 }
+
 ```
 
 ### Response Metadata
@@ -94,6 +95,7 @@ export async function generateWithGoogleSearch(
     sources,
   };
 }
+
 ```
 
 ### Pricing & Limits
@@ -149,6 +151,7 @@ for (const part of parts) {
     console.log('Outcome:', part.codeExecutionResult.outcome);
   }
 }
+
 ```
 
 ### Available Libraries
@@ -200,6 +203,7 @@ export async function generateWithCodeExecution(
 
   return result;
 }
+
 ```
 
 ### Pricing & Limits
@@ -252,6 +256,7 @@ const urlMetadata = response.candidates?.[0]?.urlContextMetadata;
 if (urlMetadata) {
   console.log('Retrieved URLs:', urlMetadata);
 }
+
 ```
 
 ### Supported Content Types
@@ -288,6 +293,7 @@ export async function generateWithUrlContext(
     urlMetadata: response.candidates?.[0]?.urlContextMetadata,
   };
 }
+
 ```
 
 ### Pricing & Limits
@@ -364,6 +370,7 @@ if (response.functionCalls && response.functionCalls.length > 0) {
 
   // Execute the function and continue conversation...
 }
+
 ```
 
 ### Function Calling Modes
@@ -419,6 +426,7 @@ export async function generateWithFunctions(
     functionCalls: response.functionCalls,
   };
 }
+
 ```
 
 ---
@@ -456,6 +464,7 @@ const response = await ai.models.generateContent({
     },
   ],
 });
+
 ```
 
 ### API Parameters - File Upload
@@ -486,6 +495,7 @@ const response = await ai.models.generateContent({
     createPartFromUri(uploadedFile.uri, uploadedFile.mimeType),
   ],
 });
+
 ```
 
 ### Implementation for gemini-client.ts
@@ -544,6 +554,7 @@ export async function analyzeFile(
     return { text: response.text || '' };
   }
 }
+
 ```
 
 ### Pricing & Limits
@@ -579,6 +590,7 @@ const response = await ai.models.generateContent({
     ],
   },
 });
+
 ```
 
 ### Supported Combinations
@@ -622,6 +634,7 @@ The current gemini-mcp uses `@google/genai` version `^0.10.0`. Update to the lat
 
 ```bash
 npm install @google/genai@latest
+
 ```
 
 The newer SDK versions have better TypeScript types and support for all features documented here.

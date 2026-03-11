@@ -59,20 +59,25 @@ factor.rank(method='ordinal', ascending=True)
 
 # Mean-centering
 factor.demean(mask=None, groupby=None)
+
 ```
 
 **Best practice pattern** for combining factors:
+
 ```python
 # Winsorize extremes + z-score before combining
 factor1 = SomeFactor().zscore().winsorize(min_percentile=0.03, max_percentile=0.97)
 factor2 = AnotherFactor().zscore().winsorize(min_percentile=0.03, max_percentile=0.97)
 combined = factor1 + factor2
+
 ```
 
 **Key insight:** Z-score is sensitive to outliers. The recommended pattern is to exclude extremes (1st/99th percentile) when computing z-scores:
+
 ```python
 base = MyFactor()
 normalized = base.zscore(mask=base.percentile_between(1, 99))
+
 ```
 
 Sources: [Zipline API Reference](https://zipline.ml4trading.io/appendix.html), [Zipline Factor Source](https://github.com/quantopian/zipline/blob/master/zipline/pipeline/factors/factor.py)
@@ -99,8 +104,10 @@ Sources: [Backtrader Indicators Reference](https://www.backtrader.com/docu/indau
 This is the most relevant prior art for our use case.
 
 ### IV Rank
+
 ```
 IV Rank = (Current IV - 52-week Low) / (52-week High - 52-week Low)
+
 ```
 
 **Pros:**
@@ -114,8 +121,10 @@ IV Rank = (Current IV - 52-week Low) / (52-week High - 52-week Low)
 - Doesn't reflect typical conditions
 
 ### IV Percentile
+
 ```
 IV Percentile = (Days with IV below current) / 252
+
 ```
 
 **Pros:**
@@ -217,6 +226,7 @@ Use **percentile rank** as the default normalization for all metrics:
   (let [n (count historical-values)
         below (count (filter #(< % current-value) historical-values))]
     (/ below n)))
+
 ```
 
 **Rationale:**
@@ -240,6 +250,7 @@ Provide z-score as secondary metric for mean-reversion strategies:
     (if (zero? stddev)
       0.0
       (/ (- current-value mean) stddev))))
+
 ```
 
 **When to use:**
@@ -275,6 +286,7 @@ Provide z-score as secondary metric for mean-reversion strategies:
 
 ;; Agent can override
 (swap! ctx assoc ::lookback {:iv 126 :skew 30})
+
 ```
 
 ### Output Format for LLM
@@ -289,6 +301,7 @@ Present normalized metrics with context:
 
 ;; Bad - raw numbers without context
 {:iv 0.285}
+
 ```
 
 Consider ASCII visualization for complex data:
@@ -301,6 +314,7 @@ Consider ASCII visualization for complex data:
          (apply str (repeat (- 10 bars) "-")) "]")))
 
 ;; => "[#######---]" for 0.73
+
 ```
 
 ---
@@ -335,6 +349,7 @@ Consider ASCII visualization for complex data:
         current (get-current-value db ticker metric as-of)]
     (when (and current (seq historical))
       (percentile-rank current historical))))
+
 ```
 
 ### Z-Score Implementation
@@ -373,6 +388,7 @@ Consider ASCII visualization for complex data:
               (> v high-val) high-val
               :else v))
           values)))
+
 ```
 
 ### Labeled Output for LLM
@@ -416,6 +432,7 @@ Consider ASCII visualization for complex data:
 ;;  :label :above-average
 ;;  :context "iv is higher than 73% of the past 252 days"
 ;;  :visual "[#######---]"}
+
 ```
 
 ---
@@ -423,23 +440,27 @@ Consider ASCII visualization for complex data:
 ## References
 
 ### Professional Trading Systems
+
 - [QuantConnect Data Normalization](https://www.quantconnect.com/forum/discussion/2604/using-datanormalizationmode-raw-and-history/)
 - [Zipline API Reference - Factor Methods](https://zipline.ml4trading.io/appendix.html)
 - [Zipline Pipeline Factors Source](https://github.com/quantopian/zipline/blob/master/zipline/pipeline/factors/factor.py)
 - [Backtrader Indicators Reference](https://www.backtrader.com/docu/indautoref/)
 
 ### Options Trading Standards
+
 - [IV Rank vs IV Percentile - projectfinance](https://www.projectfinance.com/iv-rank-percentile/)
 - [IV Rank vs IV Percentile - Barchart](https://www.barchart.com/education/iv_rank_vs_iv_percentile)
 - [Options Trading IQ - IV Analysis](https://optionstradingiq.com/iv-rank-vs-iv-percentile/)
 
 ### Machine Learning / Academic
+
 - [Alpha Scientist - Feature Engineering](https://alphascientist.com/feature_engineering.html)
 - [Machine Learning Mastery - Time Series Normalization](https://machinelearningmastery.com/normalize-standardize-time-series-data-python/)
 - [Normalization vs Standardization Analysis](https://towardsdatascience.com/normalization-vs-standardization-quantitative-analysis-a91e8a79cebf)
 - [RL Framework for Quantitative Trading](https://arxiv.org/html/2411.07585v1)
 
 ### LLM + Trading Research
+
 - [Agent Trading Arena - LLM Numerical Understanding](https://arxiv.org/html/2502.17967v2)
 - [LLM Trading Agent Survey](https://arxiv.org/html/2408.06361v1)
 

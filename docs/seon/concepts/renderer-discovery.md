@@ -39,6 +39,7 @@ Example render function pattern:
                       [:map [:seon.render/html :any]]]}
   [{:seon.health.workout/keys [exercises date]}]
   {:seon.render/html [:div ...]})
+
 ```
 
 The scanner sees `:seon.render/html` in the output, indexes the function with its required input keys `#{:seon.health.workout/exercises :seon.health.workout/date}`. When rendering data with those keys, this function wins by specificity.
@@ -60,4 +61,5 @@ Renderer discovery extends naturally. As namespaces gain more render functions w
 {:seon.fn/qualified-name "seon.health.workout.render/workout-view"
  :required-keys #{:seon.health.workout/exercises :seon.health.workout/date}
  :seon.fn/updated-at #inst "..."}
+
 ```

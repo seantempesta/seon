@@ -21,12 +21,14 @@ The test `ml-options.db.schema-test/custom-generators-produce-valid-data` fails 
 ### Production ID Format
 
 In production, `:xt/id` values are deterministic strings:
+
 ```clojure
 ;; thetadata.clj:169-170
 xt-id (when (and occ-symbol quote-instant)
          (str occ-symbol "-" (.toString quote-instant)))
 
 ;; Example: "AAPL20250117C00230000-2024-11-27T15:56:58.017Z"
+
 ```
 
 Format: `"{OCC_SYMBOL}-{ISO_TIMESTAMP}"`
@@ -41,10 +43,12 @@ The schema is **correct** - `:xt/id` should be a string because:
 ### Why Generator Uses UUID
 
 The generator is **incorrect** - line 135 in `generators.clj`:
+
 ```clojure
 {:xt/id (java.util.UUID/randomUUID)  ;; BUG: Should be string
  :asset/ticker ticker
  ...}
+
 ```
 
 This was likely a shortcut during initial development that was never corrected.
@@ -54,6 +58,7 @@ This was likely a shortcut during initial development that was never corrected.
 ## Schema Definitions
 
 ### OptionQuote Schema (schema.clj:75)
+
 ```clojure
 (def OptionQuote
   [:map {:closed true}
@@ -61,12 +66,15 @@ This was likely a shortcut during initial development that was never corrected.
    [:asset/ticker [:string {:min 1 :max 5 ...}]]
    [:option/id :string]
    ...])
+
 ```
 
 ### IVSurface Schema (schema.clj:115)
+
 Same pattern - `:xt/id :string`
 
 ### TradingSignal Schema (schema.clj:129)
+
 Different - uses `:signal/id :uuid` intentionally (separate concern)
 
 ---
@@ -74,6 +82,7 @@ Different - uses `:signal/id :uuid` intentionally (separate concern)
 ## Transaction Builder Handling
 
 The `put-option-quote` function (transactions.clj:91-98) can handle both:
+
 ```clojure
 (defn put-option-quote
   [quote]
@@ -81,6 +90,7 @@ The `put-option-quote` function (transactions.clj:91-98) can handle both:
                (make-option-quote-id quote)       ;; Or generate deterministic
                (str (UUID/randomUUID)))]          ;; Fallback to UUID string
     ...))
+
 ```
 
 This explains why production works even though tests fail - the transaction builder converts UUIDs to strings as a fallback.
@@ -92,6 +102,7 @@ This explains why production works even though tests fail - the transaction buil
 **Fix the generator** in `test/ml_options/generators.clj`:
 
 ### Current Code (Broken)
+
 ```clojure
 (def gen-valid-option-quote
   (gen/let [ticker gen-ticker
@@ -100,9 +111,11 @@ This explains why production works even though tests fail - the transaction buil
     {:xt/id (java.util.UUID/randomUUID)  ;; BUG
      :asset/ticker ticker
      ...}))
+
 ```
 
 ### Fixed Code
+
 ```clojure
 (def gen-valid-option-quote
   (gen/let [ticker gen-ticker
@@ -112,6 +125,7 @@ This explains why production works even though tests fail - the transaction buil
     {:xt/id (str occ "-" (.toString quote-instant))  ;; Deterministic string
      :asset/ticker ticker
      ...}))
+
 ```
 
 ### Why This Fix Is Best
@@ -135,12 +149,15 @@ Consider extracting a dedicated `gen-option-quote-id` to avoid duplicating the I
   (gen/let [occ gen-occ-symbol
             timestamp gen-expiry-instant]
     (str occ "-" (.toString timestamp))))
+
 ```
 
 Then use in `gen-valid-option-quote`:
+
 ```clojure
 {:xt/id gen-option-quote-id
  ...}
+
 ```
 
 ### IVSurface Generator

@@ -74,6 +74,7 @@ Flow was designed for **concurrent data processing pipelines**:
 ```
 Source → Transform-A → Transform-B → Sink
               ↘ Aggregator ↗
+
 ```
 
 Seon's agents are **long-running external services**:
@@ -89,6 +90,7 @@ Orchestrator
     │
     └── XTDB Database (per agent, persisted)
             └── stores agent's context and history
+
 ```
 
 **The mismatch:**
@@ -136,6 +138,7 @@ Despite the mismatch at the agent level, Flow is excellent for **internal orches
    [[[:api-gateway :tasks] [:task-router :in]]
     [[:task-router :dispatched] [:agent-dispatcher :in]]
     [[:status-aggregator :updates] [:observatory-sse :in]]]})
+
 ```
 
 **Benefits:**
@@ -169,6 +172,7 @@ Despite the mismatch at the agent level, Flow is excellent for **internal orches
 │  │ XTDB agent1 │  │ XTDB agent2 │  │ XTDB agent3 │      │
 │  └─────────────┘  └─────────────┘  └─────────────┘      │
 └──────────────────────────────────────────────────────────┘
+
 ```
 
 Each adapter:
@@ -232,6 +236,7 @@ If we adopt Flow for orchestration, here's how agent lifecycle would work:
      [state {:events [{:type :status-response
                        :agents (keys (:agents state))
                        :pending (count (:pending state))}]}])))
+
 ```
 
 ### 4.2 Status Aggregator Step Function
@@ -260,6 +265,7 @@ If we adopt Flow for orchestration, here's how agent lifecycle would work:
      ;; Broadcast heartbeats arrive here
      [state {:updates [{:type :heartbeat
                         :active-agents (count (:last-status state))}]}])))
+
 ```
 
 ---
@@ -351,6 +357,7 @@ Flow could standardize how Seon integrates with external systems:
           {:responses [response]}])
        ;; Rate limited
        [state {:rate-limited [req]}]))))
+
 ```
 
 ### 6.2 Benefits of Flow for External APIs

@@ -59,6 +59,7 @@ Call (add-workout! {:seon.health/exercise "Pull-up" :seon.health/sets 3})
     |
     v
 SSE pushes re-rendered HTML fragment (Datastar morphs it in)
+
 ```
 
 ### Data Flow (Phase 2 — Scittle + Transit)
@@ -81,6 +82,7 @@ Transit-encode: {:seon.health/exercise "Pull-up" :seon.health/sets 3}
     |
     v
 Server: transit-decode -> exact Clojure map -> Malli validate -> call fn
+
 ```
 
 ## Key Research Findings
@@ -105,6 +107,7 @@ camelCase. The `name` attributes on form inputs ARE the keys. We control those n
 
 ```typescript
 payload = payload !== undefined ? payload : filtered({ include, exclude })
+
 ```
 
 If you pass `payload`, it skips signal collection entirely and uses your object as
@@ -118,6 +121,7 @@ function:
 
 ```html
 <button data-on-click="myGlobalFunction(el, $someSignal)">
+
 ```
 
 Built-in variables: `el` (current element), `evt` (browser event), `$signalName`
@@ -135,6 +139,7 @@ action({
   }
 })
 // Usage: data-on-click="@seonPost('/ns/seon.health.workout/add-workout!')"
+
 ```
 
 This lets us register `@seonPost` as a native Datastar action that uses our
@@ -158,6 +163,7 @@ UUIDs perfectly.
 (def w (t/writer :json))
 (t/write w {:seon.health/exercise "Pull-up" :tags #{:strength}})
 ;; => transit JSON string with keywords + sets preserved
+
 ```
 
 No build step. Include via `<script>` tags. ~400KB (acceptable for personal app).
@@ -208,6 +214,7 @@ The renderer outputs the qualified keyword as the input's `name`:
 [:input {:type "text"
          :name ":seon.health/exercise"
          :value current-value}]
+
 ```
 
 Server-side middleware:
@@ -220,6 +227,7 @@ Server-side middleware:
              [(keyword (subs k 1)) v]  ; ":seon.health/exercise" -> :seon.health/exercise
              [(keyword k) v]))
          params)))
+
 ```
 
 The `:field` hiccup marker in the render pipeline would produce:
@@ -233,6 +241,7 @@ The `:field` hiccup marker in the render pipeline would produce:
          :name ":seon.health/exercise"
          :placeholder "exercise"
          :id "seon-health--exercise"}]
+
 ```
 
 The `:on:click` hiccup marker would produce:
@@ -243,6 +252,7 @@ The `:on:click` hiccup marker would produce:
 
 ;; Output (Phase 1 - form submit):
 {:data-on-click "@post('/ns/seon.health.workout/add-workout!', {contentType:'form'})"}
+
 ```
 
 ### Phase 2: Scittle Collects and Transit-Encodes
@@ -251,6 +261,7 @@ With Scittle, the `:on:click` marker produces:
 
 ```clojure
 {:data-on-click "@seonPost('/ns/seon.health.workout/add-workout!')"}
+
 ```
 
 The `@seonPost` action (registered via Datastar's `action()` API):
@@ -277,6 +288,7 @@ The `@seonPost` action (registered via Datastar's `action()` API):
 ```clojure
 [:field :seon.health/exercise {:type "text"}]
 ;; Produces: data-bind="seon~health/exercise" data-signals with tilde keys
+
 ```
 
 ### New `:field` Marker (Phase 1)
@@ -285,6 +297,7 @@ The `@seonPost` action (registered via Datastar's `action()` API):
 [:field :seon.health/exercise {:type "text"}]
 ;; Produces: <input name=":seon.health/exercise" type="text" />
 ;; No data-bind, no data-signals, no encoding
+
 ```
 
 ### Current `:on:click` Marker
@@ -293,6 +306,7 @@ The `@seonPost` action (registered via Datastar's `action()` API):
 [:on:click :seon.health.workout/add-workout!]
 ;; Produces: data-on-click="@post('/ns/seon.health.workout/add-workout!')"
 ;; Sends JSON-encoded signals in POST body
+
 ```
 
 ### New `:on:click` Marker (Phase 1)
@@ -301,6 +315,7 @@ The `@seonPost` action (registered via Datastar's `action()` API):
 [:on:click :seon.health.workout/add-workout!]
 ;; Produces: data-on-click="@post('/ns/seon.health.workout/add-workout!', {contentType:'form'})"
 ;; Sends FormData from closest <form>, using name= attributes as keys
+
 ```
 
 ### SSE Push (Unchanged)
@@ -311,6 +326,7 @@ event: datastar-patch-elements
 data: elements <div id="workout-table">...updated HTML...</div>
 
 ;; Datastar morphs it into the DOM. No signal encoding anywhere.
+
 ```
 
 ## Implementation Phases
@@ -377,6 +393,7 @@ When `contentType: 'form'`:
 ```typescript
 payload = payload !== undefined ? payload : filtered({ include, exclude })
 const body = JSON.stringify(payload)
+
 ```
 
 If `payload` is provided, `filtered()` (signal collection) is never called.
@@ -389,6 +406,7 @@ code can build the payload object and pass it directly.
 export const action = <T>(plugin: ActionPlugin<T>): void => {
   actionPlugins.set(plugin.name, plugin)
 }
+
 ```
 
 Simple registration. The `apply` function receives `(ctx, ...args)` where
@@ -449,6 +467,7 @@ display-only elements while still using FormData for submission.
 ```clojure
 ;; deps.edn
 com.cognitect/transit-clj {:mvn/version "1.0.333"}
+
 ```
 
 Browser (download to `resources/public/js/`):
@@ -456,6 +475,7 @@ Browser (download to `resources/public/js/`):
 ```
 scittle.js          (~400KB)
 scittle.transit.js  (transit plugin)
+
 ```
 
 ## Trade-offs

@@ -135,6 +135,7 @@ The key insight (from Gemini search): intern the var in the target namespace so 
                    #'*ns* ns-obj
                    ctx-var ctx-atom)))  ;; Bind the TARGET ns var, not a central one
         (handler msg)))))
+
 ```
 
 **Key points:**
@@ -165,6 +166,7 @@ Key findings:
 - Agents must work on non-overlapping namespaces
 
 **Implementation approach**:
+
 ```clojure
 (defn activate-agent! [{:seon.agent/keys [worktree-path]}]
   (reload/init {:dirs [(str worktree-path "/src") "src" "env/dev/clj" "test"]
@@ -172,6 +174,7 @@ Key findings:
 
 (defn reload-agent-namespaces! [namespace-sym]
   (reload/reload {:only (re-pattern (str "^" namespace-sym "\\..*"))}))
+
 ```
 
 ---
@@ -184,6 +187,7 @@ The `!` character was being corrupted when passing code as shell arguments:
 
 ```bash
 ./bin/agent-eval c76a1e81 '(swap! *ctx* assoc :key 1)'  # Failed: \! corrupted the code
+
 ```
 
 ### Root Cause
@@ -192,6 +196,7 @@ The `!` character was being corrupted when passing code as shell arguments:
 
 ```bash
 echo '(def test! 42)'
+
 ```
 
 The shell outputs `(def test\! 42)` with a backslash before `!`. This is NOT Babashka's fault - it's the shell's behavior. The backslash then gets sent to nREPL, causing a syntax error because `test\!` is tokenized as two symbols.
@@ -205,6 +210,7 @@ The shell outputs `(def test\! 42)` with a backslash before `!`. This is NOT Bab
 cat << 'END' | ./bin/agent-eval c76a1e81
 (swap! *ctx* assoc :seon.trading/signals [...])
 END
+
 ```
 
 ### Final Solution: MCP Agent Eval Tool
@@ -217,8 +223,10 @@ The MCP server:
 3. Fast startup with Babashka (~50ms)
 
 **Usage:**
+
 ```
 agent_eval(session_id="abc12345", code="(swap! *ctx* assoc :key 1)")
+
 ```
 
 All special characters (`!`, `$`, backticks, quotes) work correctly.
@@ -256,6 +264,7 @@ The `sessions` atom in `nrepl.middleware.session` is JVM-global:
 
 ```clojure
 (def ^:private sessions (atom {}))  ; session.clj line 20
+
 ```
 
 This is **NOT a problem** because:
@@ -282,6 +291,7 @@ Critical for context injection:
 (set-descriptor! #'wrap-context
   {:requires #{"session"}   ; This refers to operation names, NOT middleware
    :expects #{"eval"}})     ; Won't work as intended!
+
 ```
 
 The nREPL middleware linearizer uses var metadata to build the execution order.
@@ -295,6 +305,7 @@ Use `:port 0` to let the OS assign an available port:
 ```clojure
 (let [server (nrepl/start-server :port 0)]
   (println "Server started on port" (:port server)))
+
 ```
 
 The actual port is available in `(:port server)` after startup.
@@ -307,6 +318,7 @@ All nREPL servers share these thread pools (defined in `util/threading.clj`):
 (def listen-executor ...)   ; Accepts connections
 (def handle-executor ...)   ; Handles messages
 (def transport-executor ...) ; Transport layer
+
 ```
 
 This is efficient (no per-server overhead) but means:
@@ -318,6 +330,7 @@ This is efficient (no per-server overhead) but means:
 ## XTDB Multi-Database
 
 **Attach syntax** (from reference-code):
+
 ```sql
 ATTACH DATABASE "seon.trading" WITH $$
   log: !Local
@@ -325,14 +338,17 @@ ATTACH DATABASE "seon.trading" WITH $$
   storage: !Local
     path: 'data/namespaces/seon.trading/storage'
 $$
+
 ```
 
 **Important**: ATTACH must be run from primary `xtdb` database connection.
 
 **Cross-database query**:
+
 ```sql
 SELECT * FROM "seon.trading".trades t
   JOIN "seon.health".users u ON t.user_id = u._id
+
 ```
 
 ---
@@ -348,6 +364,7 @@ git worktree list
 
 # Remove worktree
 git worktree remove ../seon-trading
+
 ```
 
 **Gotcha**: Branch can't be checked out elsewhere. Use unique branch per session.
@@ -406,4 +423,5 @@ Derive port from namespace registration order or hash.
    ├── Update session status
    ├── Optionally: keep DB, archive worktree
    └── Unlock namespace
+
 ```

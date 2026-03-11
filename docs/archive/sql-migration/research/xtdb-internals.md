@@ -31,6 +31,7 @@
 
 ;; In plan-q (line 107):
 (seq? query) (xtql->sql query)
+
 ```
 
 **Process**:
@@ -49,6 +50,7 @@
                               (xtql/parse-query env)
                               (xtql.plan/compile-query {:table-info (:table-info env)}))]
     (->QueryExpr ra-plan (mapv symbol (lp/relation-columns ra-plan)))))
+
 ```
 
 ### 1.2 SQL Execution Path
@@ -63,6 +65,7 @@
     ;; Execute via JDBC
     (jdbc/execute! conn (begin-ro-sql opts))
     (jdbc/plan conn (into [query] args))))
+
 ```
 
 **Process**:
@@ -79,6 +82,7 @@
     (vector? parsed-query) parsed-query  ; Already RA plan (from XTQL)
     (instance? Sql$DirectlyExecutableStatementContext parsed-query)
     (sql/plan parsed-query query-opts)))  ; SQL AST → RA plan
+
 ```
 
 ### 1.3 Convergence Point
@@ -102,6 +106,7 @@
 ;; Then both go through:
 (conform-plan plan)  ; Same validation
 (emit-query ...)     ; Same operator emission
+
 ```
 
 ### 1.4 SQL Parsing Overhead
@@ -111,18 +116,22 @@
 **Measurement**: Negligible for two reasons:
 
 1. **Plan caching**: `/core/src/main/clojure/xtdb/query.clj:281-306`
+
    ```clojure
    :plan-cache (-> (Caffeine/newBuilder)
                    (.maximumSize 4096)
                    (.build))
+
    ```
    Cache key: `[parsed-query query-opts]` - both SQL and XTQL-wrapped-as-SQL are cached identically.
 
 2. **Emit caching**: `/core/src/main/clojure/xtdb/query.clj:304-306`
+
    ```clojure
    :emit-cache (-> (Caffeine/newBuilder)
                    (.maximumSize 16)
                    (.build))
+
    ```
    Cache key includes scan fields and statistics - same for equivalent queries.
 
@@ -144,6 +153,7 @@
              ["CLOCK_TIME = ?" current-time]
              ...]]
     (format "BEGIN READ ONLY WITH (%s)" ...)))
+
 ```
 
 Options passed as SQL transaction parameters:
@@ -172,6 +182,7 @@ Options passed as SQL transaction parameters:
         (.setLower (.getSystemTime bounds) system-time)))
 
     bounds))
+
 ```
 
 **Key Insight**: The `snapshot-token` (derived from `:current-time` or transaction basis) **directly constrains the system-time dimension** of every scan.
@@ -185,6 +196,7 @@ Options passed as SQL transaction parameters:
 (update :for-valid-time
   (fn [fvt]
     (or fvt [:at [:now]])))
+
 ```
 
 **Without any temporal options**:
@@ -208,6 +220,7 @@ Options passed as SQL transaction parameters:
 ;; Then during merge/scan:
 (MergePlanner/planSync !segments (->path-pred iid-set)
                        #(trie/filter-pages % temporal-bounds))  ; ← Filter pages
+
 ```
 
 Temporal bounds:
@@ -233,6 +246,7 @@ This is **much more efficient** than a post-query filter.
                                  (time/->instant {:default-tz default-tz}))
                          (expr/current-time))]
     ;; Use current-time for this query...
+
 ```
 
 ### 3.2 Snapshot Tokens
@@ -245,6 +259,7 @@ This is **much more efficient** than a post-query filter.
 (snapshot-token [this]
   (basis/->time-basis-str (-> (xtp/latest-completed-txs this)
                               (update-vals #(mapv :system-time %)))))
+
 ```
 
 **Format**: `{"xtdb" [#inst "2025-01-15T10:30:00.000Z"]}` → Base64 string
@@ -282,6 +297,7 @@ This is **much more efficient** than a post-query filter.
 (defn iv-rank [db ticker lookback]
   ;; db is FrozenDB, queries automatically limited to frozen-time
   (node/query db '(from :option-greeks ...)))
+
 ```
 
 **Key Design Decision**: The wrapper should:
@@ -295,6 +311,7 @@ This is **much more efficient** than a post-query filter.
 
 ```clojure
 ;; BEGIN READ ONLY WITH (CLOCK_TIME = ?, SNAPSHOT_TOKEN = ?)
+
 ```
 
 **Problem**: Per the code, these are **per-transaction** settings, not per-connection. Each query needs them.
@@ -364,6 +381,7 @@ Performance is **not a factor** in the decision.
   (let [primary-db (.getPrimary db-cat)
         msg-id (xt-log/send-attach-db! primary-db db-name db-config)]
     (await-msg-result this primary-db msg-id)))
+
 ```
 
 **How it works**:
@@ -385,6 +403,7 @@ Performance is **not a factor** in the decision.
   ;; Gets schema for EVERY db in catalog
   (->> (.getDatabaseNames db-cat)
        (into {} (mapcat get-schema))))
+
 ```
 
 **Temporal Consistency**: Snapshot tokens are per-database:
@@ -395,6 +414,7 @@ expr/*snapshot-token* (some-> snapshot-token
                               (basis/<-time-basis-str)  ; Map: {"db1" [t1], "db2" [t2]}
                               (validate-basis-not-before snaps)
                               (basis/->time-basis-str))
+
 ```
 
 **Implication for Seon**:
@@ -403,9 +423,11 @@ expr/*snapshot-token* (some-> snapshot-token
 - **Frozen-time wrapper needs to set snapshot for ALL databases**
 
 **Example frozen snapshot**:
+
 ```clojure
 {:snapshot-token "ChAKBHRyZGUYARog..." ; {"trading" [t], "health" [t], "finance" [t]}
  :current-time #inst "2025-07-15T00:00:00.000Z"}
+
 ```
 
 ---
@@ -440,6 +462,7 @@ expr/*snapshot-token* (some-> snapshot-token
         options {:snapshot-token snapshot-token
                  :current-time as-of-time}]
     (->FrozenDB node as-of-time options)))
+
 ```
 
 **Usage in Agents**:
@@ -453,6 +476,7 @@ expr/*snapshot-token* (some-> snapshot-token
 (defn iv-rank [db ticker lookback]
   ;; db is FrozenDB, automatically queries at frozen-time
   (node/query db '(from :option-greeks [{:asset/ticker ticker} quote/iv])))
+
 ```
 
 ### 6.2 Query Language Choice
@@ -483,6 +507,7 @@ expr/*snapshot-token* (some-> snapshot-token
 ;; GOOD - temporal concerns handled by system layer
 (defn iv-rank [db ticker lookback]
   (node/query db query))  ; db is already frozen
+
 ```
 
 **System layer** handles all temporal control:
@@ -525,6 +550,7 @@ Not a post-query filter - happens during data access.
 ```clojure
 {:snapshot-token {"trading" [t], "health" [t], "finance" [t]}
  :current-time t}
+
 ```
 
 ---

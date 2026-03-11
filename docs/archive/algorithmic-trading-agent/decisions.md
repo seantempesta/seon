@@ -42,12 +42,14 @@ This document records key architectural and design decisions made during the res
 - Keeps trading code together under `seon.trading.*`
 
 **Structure:**
+
 ```
 src/seon/trading/agent/
 ├── session.clj      ; Session management, REPL recording
 ├── functions.clj    ; Agent-facing wrappers
 ├── printers.clj     ; Pretty-printers per data type
 └── template.clj     ; Session template generation
+
 ```
 
 **Note:** Original proposal was `seon.algorithmic-trading`, updated to `seon.trading.agent` for consistency.
@@ -137,10 +139,12 @@ See `research/strategy-dsl.md` for DSL design.
 **Decision:** All functions take `ctx` as first argument + single options map.
 
 **Pattern:**
+
 ```clojure
 (iv-rank ctx {:ticker "SPY"})
 (iv-rank ctx {:ticker "SPY" :lookback 60})
 (analyze ctx {:ticker "SPY"})
+
 ```
 
 **Rationale:**
@@ -182,11 +186,13 @@ See `research/strategy-dsl.md` for DSL design.
 **Decision:** Split on last `\n\n` - everything before is thinking, after is code. Each line in code section executes separately.
 
 **Example:**
+
 ```
 I'll check the IV rank for SPY.
 
 (iv-rank ctx {:ticker "SPY"})
 @ctx
+
 ```
 
 Parses to:
@@ -220,12 +226,14 @@ See `research/session-v2-notes.md` for full details.
 - Recording can be done via wrapper or explicit call
 
 **Original Proposal (Rejected):**
+
 ```clojure
 (defn! iv-rank!
   {:reads [[::ticker :string]]
    :writes [[::iv-rank :double]]}
   []
   ...)
+
 ```
 
 ---

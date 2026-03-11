@@ -12,6 +12,7 @@
 - All success criteria verified
 
 ### What's Working
+
 1. ✅ Button clicks → POST fires → ctx updates → browser refreshes via SSE
 2. ✅ REPL scene changes appear in browser immediately
 3. ✅ `ctx/checkpoint!` persists to XTDB
@@ -27,12 +28,16 @@
 **Root cause:** Datastar uses `data-on:click` (colon) not `data-on-click` (hyphen).
 
 **Fix:** Changed `src/seon/primer/render/scene.clj:7` from:
+
 ```clojure
 {:data-on-click ...}  ; WRONG
+
 ```
 to:
+
 ```clojure
 {:data-on:click ...}  ; CORRECT
+
 ```
 
 **Lesson learned:** Always invoke `datastar-web-ui` skill before debugging Datastar UI issues.
@@ -54,6 +59,7 @@ clj-nrepl-eval -p 7888 "(status)"
 # 5. Test REPL control
 clj-nrepl-eval -p 7888 "(seon.primer.ctx/assoc! \"default\" :primer/current-scene {:scene/id \"test\" :scene/template :narrative/page :scene/params {:text \"Hello from REPL\"} :scene/actions []})"
 # Browser should update automatically
+
 ```
 
 ---
@@ -63,20 +69,24 @@ clj-nrepl-eval -p 7888 "(seon.primer.ctx/assoc! \"default\" :primer/current-scen
 The Primer foundation is working. Possible next directions:
 
 ### Option A: Richer Scene Templates
+
 - Add more template types beyond `:narrative/page`
 - Image backgrounds, multiple choice layouts
 - Character portraits, speech bubbles
 
 ### Option B: Agent-Driven Content
+
 - Connect LLM to generate story content
 - Agent writes to ctx, UI renders automatically
 - Spec-constrained generation
 
 ### Option C: Voice Integration
+
 - Gemini Live API for voice interaction
 - Read story aloud, accept voice commands
 
 ### Option D: Child Profiles
+
 - Multi-user session management
 - Progress tracking per child
 - Adaptive difficulty
@@ -116,4 +126,5 @@ clj-nrepl-eval -p 7888 "(seon.primer.ctx/checkpoint! \"default\")"
 
 # View history
 clj-nrepl-eval -p 7888 "(seon.primer.ctx/history \"default\")"
+
 ```

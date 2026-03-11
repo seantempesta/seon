@@ -38,6 +38,7 @@ We built a bridge that derives Datalevin schemas from Malli schemas. One source 
 
 ;; 4. Merge tx metadata schema into every DB's schema
 (merge datalevin-schema tx/datalevin-schema)
+
 ```
 
 ### Key design decisions
