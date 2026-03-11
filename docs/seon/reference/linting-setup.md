@@ -1,3 +1,8 @@
+---
+type: reference
+status: active
+tags: [reference, agent]
+---
 # Linting Setup
 
 This project uses a layered linting approach with two complementary tools:

@@ -1,5 +1,7 @@
 ---
 type: orchestrator
+tags: [index, prd]
+status: active
 ---
 # PRD Index
 

@@ -1,6 +1,9 @@
+---
+type: reference
+status: draft
+tags: [prd, reference, database]
+---
 # Implementation Notes: Datalevin Migration
-
-**Last Updated:** 2026-02-19
 
 ---
 

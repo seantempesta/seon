@@ -2,6 +2,8 @@
 type: issue
 status: open
 severity: friction
+milestone: M3
+tags: [issue, web, schema, architecture]
 ---
 # Coupling: graph.ingest Depends on seon.render
 

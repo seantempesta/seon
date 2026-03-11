@@ -2,6 +2,8 @@
 type: issue
 status: open
 severity: friction
+milestone: M2
+tags: [issue, schema]
 ---
 # Map-In Map-Out Compliance
 

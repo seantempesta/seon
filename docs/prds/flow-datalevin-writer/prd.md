@@ -1,3 +1,8 @@
+---
+type: prd
+status: draft
+tags: [prd, database, flow]
+---
 # PRD: Flow-Based Datalevin Writer
 
 ## Vision

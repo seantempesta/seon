@@ -1,7 +1,9 @@
+---
+type: research
+status: draft
+tags: [prd, research, database]
+---
 # Datalevin Schema Design
-
-**Date:** 2026-01-28
-**Status:** Draft
 
 This document defines the Datalevin schema for all Seon entities, including attribute types, cardinality, uniqueness constraints, and indexes.
 

@@ -1,7 +1,9 @@
+---
+type: prd
+status: draft
+tags: [prd, web]
+---
 # Transition: Namespace UI - Interactive Views
-
-**Date:** 2025-01-22
-**Branch:** feature/namespace-ui
 
 ---
 

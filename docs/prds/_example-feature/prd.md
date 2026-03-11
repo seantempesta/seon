@@ -1,8 +1,9 @@
+---
+type: prd
+status: draft
+tags: [prd]
+---
 # PRD: Example Feature
-
-**Status:** Example Only
-**Priority:** N/A
-**Branch:** N/A
 
 ---
 

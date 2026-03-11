@@ -2,6 +2,8 @@
 type: issue
 status: open
 severity: architectural
+milestone: M3
+tags: [issue, web, schema]
 ---
 # :any in Render/HTML Schemas
 

@@ -1,7 +1,10 @@
+---
+type: research
+status: draft
+tags: [prd, research, web]
+---
 # Research PRD: Multi-Format Data Rendering
 
-**Status:** Research
-**Priority:** High
 **Type:** Exploratory - find the right approach, don't prescribe one
 
 ---

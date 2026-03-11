@@ -1,3 +1,8 @@
+---
+type: reference
+status: draft
+tags: [prd, reference, database, flow]
+---
 # Super REPL - Agent Notes
 
 ## Phase 1b: Production Hardening Gotchas

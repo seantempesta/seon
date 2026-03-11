@@ -1,7 +1,9 @@
+---
+type: research
+status: draft
+tags: [prd, research]
+---
 # DSL Primitives Bug Fixes
-
-**Date:** 2025-12-05
-**Branch:** feature/test-coverage-audit-phase2
 
 ---
 

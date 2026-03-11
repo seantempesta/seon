@@ -1,7 +1,9 @@
+---
+type: prd
+status: draft
+tags: [prd, database, web]
+---
 # Render Pipeline E2E Verification
-
-**Date:** 2026-02-22
-**Status:** Working (custom render path)
 
 ## What Works
 

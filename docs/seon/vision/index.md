@@ -1,5 +1,7 @@
 ---
 type: vision
+tags: [vision, index]
+status: active
 ---
 
 # Seon Vision
@@ -117,6 +119,12 @@ The system uses itself. The functions that discover other functions, route messa
 A namespace starts empty. When the system needs to render data from that namespace and no render function exists, a default renderer handles it. The agent is notified: "namespace X received a render request for schema Y but has no handler." The agent writes a compatible function. On eval, it enters the graph. Next request finds it automatically.
 
 This applies universally -- rendering, event handling, data transformation, validation. Write a compatible function and it's discoverable immediately. No registration ceremony. The schema IS the registration.
+
+### Smart Defaults and Message Routing
+
+Every message type has a default handler that produces a reasonable result. The system never blocks on missing functionality -- it degrades gracefully. When events occur (data changes, user actions, schema updates), the system constructs Malli-specced messages and routes them to namespaces. The router finds the most specific handler whose input schema matches. If none exists, the smart default fires. If the message requires acknowledgment, the namespace's agent is woken to decide.
+
+This inverts traditional development: ship the default, then build specificity. Agents progressively replace defaults with specific handlers as functionality is needed. Data changes in Datalevin trigger the same discovery -- fingerprint the change, find functions whose input spec matches, run them. The reactive surface grows organically as agents add functions, without explicit subscription wiring.
 
 ### Constraints That Simplify
 
@@ -264,25 +272,16 @@ Persistent agents assigned to namespaces. Ownership handoff, evolution tracking,
 
 ## Milestones
 
-### M1: Graph-Complete Function Registry
+Milestones are thresholds, not capabilities. Each is crossed when its constituent capabilities are all at least partial. See individual milestone notes for verification criteria and blocking issues.
 
-Every public function with `:malli/schema` has its input and output schemas indexed in the graph as queryable data.
-
-### M2: Schema-Based Function Discovery
-
-Given an input shape and a desired output shape, find compatible functions. Composition chains are queryable as graph paths.
-
-### M3: REPL-First Eval Pipeline
-
-Agent evals a form in the REPL. The pipeline validates, transacts metadata, persists to disk, and runs affected tests -- all as one atomic operation.
-
-### M4: Unified Dispatch
-
-One discovery mechanism serves all use cases. Rendering, change notification, data transformation, event handling -- all are "find a function with compatible schemas."
-
-### M5: Self-Describing System
-
-The system's own infrastructure is registered in the same graph and discoverable by the same mechanism it provides.
+| Milestone | Status | Description |
+|-----------|--------|-------------|
+| [[vision/m1-reliable-runtime\|M1: Reliable Agent Runtime]] | complete | Isolated JVM agents, typed flow channels, self-healing from crashes |
+| [[vision/m2-trustworthy-data\|M2: Trustworthy Data Layer]] | complete | Malli contracts on every attribute, validated writes, crash-resilient database |
+| [[vision/m3-discoverable-codebase\|M3: Discoverable Codebase]] | partial | Function contracts indexed and queryable by data shape |
+| [[vision/m4-observable-system\|M4: Observable System]] | partial | Real-time visibility into agents, namespaces, data, and system health |
+| [[vision/m5-agent-dev-pipeline\|M5: Agent Development Pipeline]] | partial | REPL eval with contract validation, live cockpit, schema-selected tests |
+| [[vision/m6-autonomous-agents\|M6: Autonomous Namespace Agents]] | not-started | Namespace-scoped agents with typed messaging and progressive enhancement |
 
 ---
 

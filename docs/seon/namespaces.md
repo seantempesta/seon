@@ -2,6 +2,7 @@
 type: reference
 status: current
 updated: 2026-03-11
+tags: [reference, index]
 ---
 # Namespace Inventory
 

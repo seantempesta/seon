@@ -2,6 +2,8 @@
 type: issue
 status: open
 severity: architectural
+milestone: M2
+tags: [issue, web, database, architecture]
 ---
 # Coupling: render.clj Reaches Into db.datalevin.conn Directly
 

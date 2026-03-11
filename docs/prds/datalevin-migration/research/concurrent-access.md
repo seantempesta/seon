@@ -1,3 +1,8 @@
+---
+type: research
+status: draft
+tags: [prd, research, database]
+---
 # Datalevin Concurrent Access Research
 
 ## Executive Summary

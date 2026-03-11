@@ -1,3 +1,8 @@
+---
+type: reference
+status: active
+tags: [reference, web]
+---
 # Hyperlith Patterns: Deep Dive
 
 **Date:** 2025-12-02

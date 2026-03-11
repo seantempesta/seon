@@ -1,6 +1,7 @@
 ---
 type: concept
 status: experimental
+tags: [concept, agent]
 ---
 
 # Socratic Agent Reasoning

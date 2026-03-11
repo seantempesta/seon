@@ -1,6 +1,7 @@
 ---
 type: concept
 status: design
+tags: [concept, flow]
 ---
 # Feeds
 
@@ -22,11 +23,25 @@ The cast/signal mechanism exists in core.async.flow (see `reference-code/core.as
 
 However, `:seon.ns/feeds` as a namespace-level declaration is not yet implemented. Today, namespace metadata contains `:seon.ns/dynamic?` (for ctx) and input/output specs (for [[concepts/renderer-discovery]]), but not feed declarations. The scanner (`seon.graph.extract`) would need to extract feed metadata, and the topology builder would need to wire `:signal-select` from feed declarations.
 
+## Malli-Specced Message Routing
+
+Feed payloads are fully Malli-specced maps. When a feed signal arrives at a namespace, the router finds the most specific handler function whose input schema matches the payload shape. If no handler exists, the [[concepts/progressive-enhancement]] pattern applies -- a smart default runs (typically: log the signal, update ctx with raw data, or silently discard).
+
+This means a namespace can participate in feeds at multiple levels of sophistication:
+
+1. **No handler** -- default behavior (log/ignore). The namespace still receives the signal; it just doesn't react.
+2. **Generic handler** -- a broad function that handles any feed signal (e.g., merge payload into ctx).
+3. **Specific handler** -- a function whose input schema exactly matches a particular feed's payload schema.
+
+The router prefers specificity, so a namespace that starts with a generic handler and later adds a specific one automatically upgrades its behavior. Agents can progressively build out feed reactions as functionality is needed.
+
+If the router finds no handler and the signal is marked as requiring acknowledgment, the system can escalate to the namespace's agent -- waking it to decide how to handle the message. This agent-fallback behavior bridges the gap between "no code exists yet" and "the agent will build it when needed."
+
 ## In the Unified Model
 
-Each [[concepts/namespace-as-process]] declares its feeds alongside its ctx spec and render functions. The topology builder reads feed declarations and automatically configures `:signal-select` for subscribing processes. Custom [[concepts/step-functions]] react to feed signals in their transform arity — the `input-id` will be the signal keyword from the cast.
+Each [[concepts/namespace-as-process]] declares its feeds alongside its ctx spec and render functions. The topology builder reads feed declarations and automatically configures `:signal-select` for subscribing processes. Custom [[concepts/step-functions]] react to feed signals in their transform arity -- the `input-id` will be the signal keyword from the cast.
 
-Discovery happens at topology build time (static) or via `flow/ping` (dynamic). A namespace can start listening to a new feed by updating its step function's describe — hot reload via vars means this takes effect immediately.
+Discovery happens at topology build time (static) or via `flow/ping` (dynamic). A namespace can start listening to a new feed by updating its step function's describe -- hot reload via vars means this takes effect immediately.
 
 ## Key Schemas
 

@@ -1,3 +1,8 @@
+---
+type: reference
+status: active
+tags: [reference, flow]
+---
 # Architectural Analysis: core.async.flow as Seon's Foundation
 
 **Date:** 2026-01-30

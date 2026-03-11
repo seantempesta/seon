@@ -1,6 +1,10 @@
+---
+type: research
+status: draft
+tags: [prd, research]
+---
 # Test Coverage Audit - Findings
 
-**Date:** 2024-12-05
 **Auditor:** Claude (via test-coverage-audit task)
 **Test Count:** ~183 tests across 13 test files
 

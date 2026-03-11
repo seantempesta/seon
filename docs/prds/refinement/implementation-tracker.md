@@ -1,8 +1,11 @@
+---
+type: prd
+status: draft
+tags: [prd, database, flow]
+---
 # Implementation Tracker: Unified Runtime Architecture
 
 **PRD:** `docs/prds/refinement/prd-flow-state.md`
-**Branch:** `feature/refinement`
-**Last updated:** 2026-02-22
 
 ---
 

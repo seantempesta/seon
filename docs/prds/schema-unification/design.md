@@ -1,6 +1,10 @@
+---
+type: prd
+status: active
+tags: [prd, database, schema]
+---
 # Schema Unification Design
 
-**Status:** Active (Updated 2026-03-05)
 **Goal:** Malli is the SINGLE source of truth. No hardcoded Datalevin schemas. The bridge derives everything.
 
 ## Problem

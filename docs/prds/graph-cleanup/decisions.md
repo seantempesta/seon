@@ -1,6 +1,9 @@
+---
+type: decision
+status: draft
+tags: [prd, decision]
+---
 # Architectural Decisions: Graph Cleanup
-
-**Last Updated:** 2026-02-27
 
 ---
 

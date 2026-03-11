@@ -2,6 +2,8 @@
 type: issue
 status: open
 severity: friction
+milestone: M4
+tags: [issue, flow, architecture]
 ---
 # Namespace Lifecycle Is a Coupling Bottleneck
 

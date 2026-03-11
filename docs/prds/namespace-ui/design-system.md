@@ -1,7 +1,11 @@
+---
+type: prd
+status: draft
+tags: [prd, web]
+---
 # Seon Design System: Phosphor Terminal
 
 **Version:** 1.0
-**Status:** Draft
 **Philosophy:** Industrial Lisp Machine meets warm phosphor CRT
 
 ---

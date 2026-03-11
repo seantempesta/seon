@@ -1,3 +1,8 @@
+---
+type: prd
+status: draft
+tags: [prd, database]
+---
 # System Lifecycle Patterns
 
 Reference for agents and humans writing Integrant components in Seon.

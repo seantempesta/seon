@@ -1,6 +1,9 @@
+---
+type: reference
+status: draft
+tags: [prd, reference, web]
+---
 # Implementation Notes: Example Feature
-
-**Last Updated:** 2025-12-05
 
 ---
 

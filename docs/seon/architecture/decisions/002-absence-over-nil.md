@@ -2,6 +2,7 @@
 type: decision
 status: implemented
 date: 2026-03-05
+tags: [decision, architecture, database, schema]
 ---
 
 # ADR-002: Absence Over Nil

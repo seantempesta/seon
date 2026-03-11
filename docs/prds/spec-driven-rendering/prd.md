@@ -1,6 +1,9 @@
+---
+type: prd
+status: active
+tags: [prd, database, flow, web]
+---
 # PRD: Spec-Driven Rendering + Code Index
-
-## Status: In Progress (Phase 1 ~95%, Phase 2 ~50%, Phase 3 ~80%)
 
 ## Summary
 

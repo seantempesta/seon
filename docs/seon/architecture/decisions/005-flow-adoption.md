@@ -2,6 +2,7 @@
 type: decision
 status: implemented
 date: 2026-01-15
+tags: [decision, architecture, database, flow]
 ---
 
 # ADR 005: Selective Adoption of core.async.flow

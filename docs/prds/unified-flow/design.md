@@ -1,3 +1,8 @@
+---
+type: prd
+status: draft
+tags: [prd, database, flow, architecture]
+---
 # Unified Flow System Design
 
 ## 1. Core Insight: Rich Hickey's Flow Is Already the Right Abstraction

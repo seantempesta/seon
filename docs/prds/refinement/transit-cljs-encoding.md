@@ -1,3 +1,8 @@
+---
+type: prd
+status: draft
+tags: [prd]
+---
 # Pure Clojure Data Transport — Bypass Datastar's Signal Encoding
 
 ## Status

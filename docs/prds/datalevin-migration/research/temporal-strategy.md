@@ -1,7 +1,9 @@
+---
+type: research
+status: completed
+tags: [prd, research, database]
+---
 # Temporal Strategy: Handling Time-Travel Without Bitemporality
-
-**Date:** 2026-01-28
-**Status:** Analysis Complete
 
 This document analyzes each temporal use case in Seon and proposes migration strategies for Datalevin, which lacks XTDB's built-in bitemporality.
 

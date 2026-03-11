@@ -2,6 +2,7 @@
 type: issue
 status: open
 severity: friction
+tags: [issue, architecture]
 ---
 # Naming Conflict: "health" Means 2 Different Things
 

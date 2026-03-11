@@ -1,3 +1,8 @@
+---
+type: reference
+status: draft
+tags: [prd, reference]
+---
 # Example Feature PRD Structure
 
 This is an example showing how the PRD system works. The `_example-feature` directory demonstrates the structure without cluttering the actual PRDs.

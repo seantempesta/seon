@@ -1,8 +1,10 @@
+---
+type: prd
+status: draft
+tags: [prd, database]
+---
 # PRD: Malli Schema Viewer
 
-**Status:** Phase 0 Pending
-**Priority:** Medium
-**Branch:** feature/namespace-ui
 **Parent:** Phase 3 of `docs/prds/namespace-ui/prd.md`
 
 ---

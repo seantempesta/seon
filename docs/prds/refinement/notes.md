@@ -1,3 +1,8 @@
+---
+type: reference
+status: draft
+tags: [prd, reference, database]
+---
 # Refinement Notes
 
 Agents: document your findings, decisions, and gotchas here as you work.

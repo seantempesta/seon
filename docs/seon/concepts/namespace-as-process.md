@@ -1,6 +1,7 @@
 ---
 type: concept
 status: design
+tags: [concept, flow]
 ---
 # Namespace as Process
 

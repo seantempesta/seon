@@ -1,8 +1,11 @@
+---
+type: research
+status: draft
+tags: [prd, research, web]
+---
 # Spike: Example Proof of Concept
 
-**Date:** 2025-12-05
 **Agent:** Claude
-**Status:** Example
 
 ---
 

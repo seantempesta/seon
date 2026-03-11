@@ -2,6 +2,8 @@
 type: issue
 status: open
 severity: friction
+milestone: M2
+tags: [issue, schema, database, architecture]
 ---
 # Duplication: ::db-name Schema Registered 14 Times
 

@@ -1,3 +1,8 @@
+---
+type: prd
+status: draft
+tags: [prd, database, flow]
+---
 # LMDB Corruption After SIGKILL — Research Findings
 
 ## Root Cause: NOT LMDB Corruption

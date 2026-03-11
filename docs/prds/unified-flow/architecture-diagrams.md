@@ -1,3 +1,8 @@
+---
+type: prd
+status: draft
+tags: [prd, database, flow, architecture]
+---
 # Seon Unified Flow Architecture
 
 This document explains how Seon's components fit together, from physical
@@ -187,7 +192,6 @@ Two kinds of flow, started independently:
                               |                |                |
                          flow/inject      flow/inject      flow/inject
                          (from namespace flows — crosses flow boundary)
-
 
  NAMESPACE FLOWS (created lazily when agents claim namespaces)
  =============================================================

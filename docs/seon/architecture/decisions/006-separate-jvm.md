@@ -2,6 +2,7 @@
 type: decision
 status: implemented
 date: 2026-02-14
+tags: [decision, architecture, database, flow]
 ---
 
 # ADR 006: Separate JVM Processes for Agent Isolation

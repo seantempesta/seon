@@ -1,3 +1,8 @@
+---
+type: prd
+status: draft
+tags: [prd, web]
+---
 # SSE Live Reload - Solution Implemented
 
 ## Problem

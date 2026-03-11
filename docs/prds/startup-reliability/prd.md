@@ -1,6 +1,9 @@
+---
+type: prd
+status: active
+tags: [prd, database, flow]
+---
 # PRD: Zero-Issue Startup Reliability
-
-## Status: Active (Implementation Phase)
 
 ## Context
 

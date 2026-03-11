@@ -2,6 +2,8 @@
 type: issue
 status: open
 severity: architectural
+milestone: M1
+tags: [issue, architecture]
 ---
 # No Way for Namespaces to Define Custom Behavior
 

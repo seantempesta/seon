@@ -2,6 +2,8 @@
 type: issue
 status: open
 severity: architectural
+milestone: M6
+tags: [issue, architecture]
 ---
 # No Unified Namespace Model
 

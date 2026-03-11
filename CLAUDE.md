@@ -8,9 +8,9 @@
 
 ---
 
-## System Documentation (Obsidian Vault)
+## System Documentation
 
-All documentation lives in `docs/` — an Obsidian vault under version control. Read files directly with the Read tool, or browse in Obsidian.
+All documentation lives in `docs/` — markdown files under version control. Use Read, Glob, and Grep to navigate.
 
 - **Start here:** `docs/seon/_dashboard.md` — system map, milestones, protocols
 - **What exists:** `docs/seon/components/` — one note per component (always current)

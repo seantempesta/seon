@@ -1,3 +1,8 @@
+---
+type: prd
+status: draft
+tags: [prd, database, flow, architecture]
+---
 # Unified Flow System — Implementation Plan
 
 ## Context

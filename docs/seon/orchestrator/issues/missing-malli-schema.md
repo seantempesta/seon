@@ -2,6 +2,8 @@
 type: issue
 status: open
 severity: blocking
+milestone: M3
+tags: [issue, schema]
 ---
 # Functions Missing :malli/schema Metadata
 

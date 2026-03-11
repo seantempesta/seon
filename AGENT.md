@@ -20,7 +20,7 @@ If you find issues in other files (code smells, missing schemas, convention viol
 
 ---
 
-## Obsidian Vault Protocol
+## Documentation Protocol
 
 ### Before Writing Code
 1. Read the component note for your area: `docs/seon/components/<name>.md`

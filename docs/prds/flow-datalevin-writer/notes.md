@@ -1,3 +1,8 @@
+---
+type: reference
+status: draft
+tags: [prd, reference, database, flow]
+---
 # Flow Datalevin Writer — Research Notes
 
 This file contains all REPL-verified research findings from the design phase.

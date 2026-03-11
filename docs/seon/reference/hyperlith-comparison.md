@@ -1,3 +1,8 @@
+---
+type: reference
+status: active
+tags: [reference, web]
+---
 # Hyperlith - What We Should Adopt
 
 **Reference:** `reference-code/hyperlith/` (git submodule)

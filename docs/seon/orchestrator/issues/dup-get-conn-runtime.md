@@ -2,6 +2,8 @@
 type: issue
 status: open
 severity: friction
+milestone: M2
+tags: [issue, database, architecture]
 ---
 # Duplication: get-conn for :seon.runtime in 3 Places
 

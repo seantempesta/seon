@@ -1,3 +1,8 @@
+---
+type: reference
+status: active
+tags: [reference, web]
+---
 # Datastar/SSE Quick Reference
 
 **Target Audience:** Claude Code agents needing to work on this codebase

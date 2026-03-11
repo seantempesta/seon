@@ -2,6 +2,7 @@
 type: decision
 status: implemented
 date: 2026-03-06
+tags: [decision, architecture, schema, database, flow]
 ---
 
 # ADR-004: Schema Unification (Malli as Single Source of Truth)

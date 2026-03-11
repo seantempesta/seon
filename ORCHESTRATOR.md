@@ -43,7 +43,7 @@ Issues live in `docs/seon/orchestrator/issues/` — one note per issue.
 
 **Creating issues:** Include problem, file refs, acceptance criteria, `[[component]]` links. Link to milestone if applicable. Severity: cleanup | friction | architectural | blocking.
 
-**Querying issues:** Browse in Obsidian, or use grep:
+**Querying issues:** Use grep:
 ```bash
 grep -rl "status: open" docs/seon/orchestrator/issues/     # Open issues
 grep -rl "severity: blocking" docs/seon/orchestrator/issues/ # Blockers

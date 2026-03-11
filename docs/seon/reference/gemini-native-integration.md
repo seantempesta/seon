@@ -1,3 +1,8 @@
+---
+type: reference
+status: active
+tags: [reference, agent]
+---
 # Native Gemini API Integration for Seon
 
 Research document for implementing native Gemini API integration in Clojure for Seon.

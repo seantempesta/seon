@@ -1,7 +1,9 @@
+---
+type: research
+status: draft
+tags: [prd, research, database]
+---
 # Datalevin Multi-Database Query Research
-
-**Date:** 2026-01-28
-**Status:** Verified - Works for our use case
 
 ## Summary
 

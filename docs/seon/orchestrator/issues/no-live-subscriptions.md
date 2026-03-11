@@ -2,6 +2,8 @@
 type: issue
 status: open
 severity: architectural
+milestone: M6
+tags: [issue, flow]
 ---
 # No Mechanism for Live Cross-Namespace Subscriptions
 

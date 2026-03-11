@@ -1,3 +1,8 @@
+---
+type: reference
+status: active
+tags: [reference, web]
+---
 # Datastar Deep Dive
 
 **Last Updated:** December 2, 2025

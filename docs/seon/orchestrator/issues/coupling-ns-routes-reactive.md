@@ -2,6 +2,8 @@
 type: issue
 status: open
 severity: friction
+milestone: M4
+tags: [issue, architecture]
 ---
 # Coupling: ns/routes.clj Uses web/reactive Directly
 

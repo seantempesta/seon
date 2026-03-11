@@ -1,6 +1,10 @@
+---
+type: research
+status: draft
+tags: [prd, research, web]
+---
 # Live Widgets Research
 
-**Date:** 2026-01-20
 **Agent:** ade549a (research agent)
 
 ---

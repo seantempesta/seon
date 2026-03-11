@@ -2,6 +2,8 @@
 type: issue
 status: open
 severity: cleanup
+milestone: M5
+tags: [issue, architecture]
 ---
 # Dead Code: repl/graduate.clj
 

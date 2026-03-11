@@ -1,3 +1,8 @@
+---
+type: reference
+status: draft
+tags: [prd, reference, database, web]
+---
 # Render Pipeline Notes
 
 ## Phase 1-2 (2026-02-19)

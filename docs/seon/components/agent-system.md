@@ -1,6 +1,7 @@
 ---
 type: component
 status: stable
+tags: [component, agent]
 ---
 # Agent System
 

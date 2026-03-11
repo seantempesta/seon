@@ -1,6 +1,7 @@
 ---
 type: component
 status: production
+tags: [component, flow]
 ---
 # Context System
 

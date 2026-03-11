@@ -1,8 +1,9 @@
+---
+type: research
+status: completed
+tags: [prd, research, database, schema]
+---
 # Nil Semantics Research Findings
-
-**Date:** 2026-03-05
-**Researcher:** Claude Opus 4.6 (research agent)
-**Status:** Complete
 
 ## Executive Summary
 

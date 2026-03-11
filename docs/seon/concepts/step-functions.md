@@ -1,6 +1,7 @@
 ---
 type: concept
 status: production
+tags: [concept, flow]
 ---
 # Step Functions
 

@@ -1,6 +1,9 @@
+---
+type: prd
+status: draft
+tags: [prd, database, agent]
+---
 # PRD: Agent REPL Interface — Composable Context & REPL-Only Development
-
-## Status: Design
 
 ## Summary
 

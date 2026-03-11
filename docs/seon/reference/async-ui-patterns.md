@@ -1,3 +1,8 @@
+---
+type: reference
+status: active
+tags: [reference, web]
+---
 # Async UI Patterns for SSE-Based Hypermedia Applications
 
 **Author:** Research conducted 2025-12-02

@@ -1,3 +1,8 @@
+---
+type: prd
+status: draft
+tags: [prd, database]
+---
 # E2E Agent Pool + Observatory Verification
 
 Date: 2026-02-22

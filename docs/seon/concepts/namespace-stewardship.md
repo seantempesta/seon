@@ -1,6 +1,7 @@
 ---
 type: concept
 status: active
+tags: [concept, agent]
 ---
 
 # Namespace Stewardship

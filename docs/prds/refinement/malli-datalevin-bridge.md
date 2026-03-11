@@ -1,8 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, database, schema]
+---
 # Malli → Datalevin Schema Bridge
-
-**Status:** Steps 1-2 complete, Step 3 next
-**Branch:** `feature/refinement`
-**Depends on:** None (can land before or alongside Phase 5)
 
 ---
 

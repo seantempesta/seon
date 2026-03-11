@@ -1,9 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, database]
+---
 # PRD: Graph Cleanup — Remove Derived Attrs, Unify Resolution
-
-**Status:** ALL PHASES COMPLETE (2026-02-28). Phases 0-4 done. Only remaining work is the parallel Flow-based Datalevin writer (separate PRD).
-**Priority:** High
-**Branch:** `feature/refinement`
-**Last updated:** 2026-02-27
 
 ---
 

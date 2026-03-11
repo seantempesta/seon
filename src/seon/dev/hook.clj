@@ -29,6 +29,7 @@
             [seon.dev.compliance :as compliance]
             [seon.dev.context :as context]
             [seon.dev.lint :as lint]
+            [seon.dev.markdown :as markdown]
             [seon.dev.repair :as repair]
             [seon.dev.review :as review]
             [seon.dev.verify :as verify]
@@ -501,11 +502,41 @@
           (log/debug "Skipping non-relevant event")
           (success-response @feedback))
 
-        ;; Skip non-Clojure files
+        ;; Skip non-Clojure files (but handle markdown)
         (if-not (codebase/clojure-file? {::codebase/file-path file-path})
-          (do
-            (log/debug "Skipping non-Clojure file" file-path)
-            (success-response @feedback))
+          (if (and (= event-name "PostToolUse")
+                   (codebase/markdown-file? {::codebase/file-path file-path}))
+            ;; Markdown file — validate and auto-fix
+            (let [md-result (markdown/validate-file
+                             {::markdown/file-path file-path
+                              ::markdown/vault-root "docs"})
+                  ;; Auto-fix if there are fixable violations
+                  _ (when-not (::markdown/valid? md-result)
+                      (try
+                        (let [content (slurp file-path)
+                              fixed (markdown/fix {::markdown/content content})]
+                          (when (pos? (::markdown/fixed-count fixed))
+                            (spit file-path (::markdown/content fixed))))
+                        (catch Exception e
+                          (log/debug "Markdown auto-fix failed" {:error (.getMessage e)}))))
+                  ;; Re-validate after fix
+                  final-result (if (::markdown/valid? md-result)
+                                 md-result
+                                 (markdown/validate-file
+                                  {::markdown/file-path file-path
+                                   ::markdown/vault-root "docs"}))
+                  formatted (when-not (::markdown/valid? final-result)
+                              (markdown/format-violations
+                               {::markdown/violations (::markdown/violations final-result)
+                                ::markdown/max-length 800}))]
+              (if formatted
+                {::continue true
+                 ::feedback [(::markdown/formatted formatted)]}
+                (success-response @feedback)))
+            ;; Other non-Clojure file — skip
+            (do
+              (log/debug "Skipping non-Clojure file" file-path)
+              (success-response @feedback)))
 
       ;; === PreToolUse: Validate code before tool runs ===
           ;; Uses unified validate-for-write for consistent error messages and suggestions.

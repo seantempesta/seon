@@ -1,6 +1,7 @@
 ---
 type: component
 status: production
+tags: [component, web]
 ---
 # Renderer
 
