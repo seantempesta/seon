@@ -78,9 +78,17 @@ lessons from 143 archived docs to enrich milestones and issue tracking.
 | V17 | Dev tooling archives | unified-dev-hook, auto-test-hook, test-suite-fixes, code-cleanup, truncated-log-view, namespace-render-toggle | complete | 3 issues, 1 doc update |
 | V18 | Feature archives | algorithmic-trading-agent, clojure-claude-sdk, primer, provider-agnostic-agents, reactive-ui, session-analytics, custom-renderers, live-updates, sse-live-reload, bulk-loader, agent-observatory, observatory-polish, ai-namespace-refactor, skills | complete | 1 doc update |
 
-### Follow-up Passes
+### Wave 7b: V16 Deep Processing (orchestrator)
 
-- **Pass 2+**: Re-verify docs that had significant fixes, deepen accuracy
+V16 infrastructure archive report identified 14 gaps. Processed all:
+
+- **Acted on**: agent-isolation gaps (3), launch-agent nREPL blocking (issue), stuck detection (issue), agent-system.md +5 design decisions, data-explorer prior art, agent-context turn continuation gap, conventions.md dynamic namespace hazards
+- **Deferred**: ADR "Namespace as unique identifier" (architecture, not urgent), frozen-time pattern (speculative)
+- **Already covered**: max-turns (in code), sliding buffer (deployed), ping introspection (subsumed by stuck-detection issue)
+
+### Status: COMPLETE
+
+All 7 waves + follow-up processing done. 10 commits, ~100 doc fixes, 7 new issues, 3 capability updates, 2 convention additions.
 
 <!-- Status: planned -> in-progress -> complete -> verified | failed -->
 
@@ -94,4 +102,5 @@ lessons from 143 archived docs to enrich milestones and issue tracking.
 - 2026-03-11: Wave 3 complete. 1 issue resolved, 3 annotated, 34 confirmed open. 5 reference docs fixed, 1 issue created.
 - 2026-03-11: Waves 4+5 complete. 2 milestone fixes, 5 capability fixes, 10 PRD status corrections. 1 new issue (nippy-transitive-dep).
 - 2026-03-11: Wave 6 complete. 5 reference docs fixed, 8 skill fixes + cross-refs. All active docs verified. Archive review launched.
-- 2026-03-11: Wave 7 complete. Archive review surfaced 5 new issues, 2 doc updates, 1 capability fix. Total: 46 issues tracked. All 7 waves done.
+- 2026-03-11: Wave 7 complete. Archive review surfaced 5 new issues, 2 doc updates, 1 capability fix.
+- 2026-03-11: V16 deep processing. Enriched agent-system.md (+5 decisions), data-explorer (prior art), agent-context (turn continuation), conventions.md (dynamic ns hazards). Doc audit COMPLETE.
