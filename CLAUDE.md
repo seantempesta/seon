@@ -180,6 +180,8 @@ All data flowing through Seon must be safe at every boundary: Malli validation, 
 
 **Maps with namespaced keywords.** Every public function takes one map and returns one map. All keys are fully namespaced keywords (`:seon.runtime/status`, never `:status`). No exceptions.
 
+**Keyword namespaces = real code namespaces.** Use `::subject` freely — it correctly expands to `:seon.email.message/subject` when you're in `seon.email.message`. This is the intended pattern: schemas live in the namespace that owns them. Never invent keyword namespace prefixes that don't correspond to actual code namespaces.
+
 **Concrete types only.** Every persisted field has a specific type (`:string`, `:int`, `:keyword`, `:inst`, etc.).
 
 **Optional = absent.** Use `{:optional true}` for fields that may not be present. If the key is present, it must have a valid value. Never store nil.
@@ -191,12 +193,13 @@ All data flowing through Seon must be safe at every boundary: Malli validation, 
 `schema/register!` is the **single source of truth** for all attribute schemas. Register the type, and the system auto-derives everything needed for database storage. You never write Datalevin schema directly.
 
 ```clojure
-(schema/register! :seon.foo/name :string)
-(schema/register! :seon.foo/id [:string {:seon.db/identity true}])
-(schema/register! :seon.foo/tags [:vector :keyword])
-(schema/register! :seon.foo/parent :seon.db/ref)
+;; Inside src/seon/foo.clj — use :: for namespace-local keywords
+(schema/register! ::name :string)
+(schema/register! ::id [:string {:seon.db/identity true}])
+(schema/register! ::tags [:vector :keyword])
+(schema/register! ::parent :seon.db/ref)
 
-(db/transact! :seon [{:seon.foo/id "abc" :seon.foo/name "hello"}])
+(db/transact! :seon [{::id "abc" ::name "hello"}])
 ```
 
 See `/datalevin` skill for bridge details, persistence properties, refs, and banned types.
@@ -280,7 +283,7 @@ Key rules: density over whitespace (`p-3` not `p-6`), small text (`text-xs` prim
 1. **One file per namespace** - Don't split prematurely
 2. **DB parameter** - Functions receive `db` as first parameter
 3. **Schema-first** - Define Malli schemas before implementation
-4. **Namespaced IDs** - `:trading/position`, `:health/workout`
+4. **Namespaced IDs** - `:seon.trading/position`, `:seon.health/workout`
 
 See `docs/conventions.md` for full patterns.
 
