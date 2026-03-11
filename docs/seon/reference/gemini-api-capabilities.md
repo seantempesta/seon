@@ -17,9 +17,11 @@ The current implementation only passes basic `model` and `contents` parameters t
 ## 1. Google Search Grounding
 
 ### Overview
+
 Enables the model to search the web in real-time to provide up-to-date information, grounding responses in current data rather than training knowledge.
 
 ### Supported Models
+
 - Gemini 2.5 Pro, Flash, Flash-Lite
 - Gemini 2.0 Flash
 - Gemini 1.5 Pro, Flash (uses legacy `google_search_retrieval` tool)
@@ -50,7 +52,9 @@ if (groundingMetadata) {
 ```
 
 ### Response Metadata
+
 When grounding is enabled, responses include `groundingMetadata`:
+
 - `webSearchQueries`: Array of search queries used
 - `groundingChunks`: Web sources with URIs and titles
 - `groundingSupports`: Links response text segments to source indices
@@ -88,12 +92,14 @@ export async function generateWithGoogleSearch(
 ```
 
 ### Pricing & Limits
+
 - **Gemini 3**: $14 per 1,000 search queries (billing starts Jan 5, 2026)
 - **Gemini 2.5 and older**: $35 per 1,000 prompts (flat rate)
 - Free tier includes 500-1,500 requests/day depending on tier
 - Can be combined with other tools (code execution, URL context)
 
 ### Limitations
+
 - Requires Google Search Suggestions to be enabled
 - Best results with temperature of 1.0
 - Dynamic retrieval only charges when grounding URLs are present in response
@@ -103,9 +109,11 @@ export async function generateWithGoogleSearch(
 ## 2. Code Execution
 
 ### Overview
+
 Allows the model to write and execute Python code in a secure sandbox, returning both the code and its output. Useful for calculations, data analysis, and generating visualizations.
 
 ### Supported Models
+
 - Gemini 2.0 and 2.5 Flash models
 - Gemini 3 Flash (with visual thinking for image analysis)
 - Gemini 2.5 Pro
@@ -139,7 +147,9 @@ for (const part of parts) {
 ```
 
 ### Available Libraries
+
 The sandbox includes 30+ Python libraries:
+
 - **Data**: numpy, pandas, scipy
 - **ML**: tensorflow, scikit-learn
 - **Visualization**: matplotlib
@@ -188,6 +198,7 @@ export async function generateWithCodeExecution(
 ```
 
 ### Pricing & Limits
+
 - **No additional charge** beyond standard token pricing
 - Maximum runtime: 30 seconds per execution
 - Up to 5 executions per request without re-prompting
@@ -195,6 +206,7 @@ export async function generateWithCodeExecution(
 - Maximum file input limited by token window (~2MB for text files)
 
 ### Limitations
+
 - Python only (though model can generate other languages)
 - Cannot return media files directly
 - May cause regressions in non-code tasks
@@ -206,9 +218,11 @@ export async function generateWithCodeExecution(
 ## 3. URL Context
 
 ### Overview
+
 Allows the model to fetch and analyze content from provided URLs automatically, reducing token usage and eliminating the need to manually fetch and paste content.
 
 ### Supported Models
+
 - gemini-2.5-pro
 - gemini-2.5-flash
 - gemini-2.5-flash-lite
@@ -236,6 +250,7 @@ if (urlMetadata) {
 ```
 
 ### Supported Content Types
+
 - **Text**: HTML, JSON, plain text, XML, CSS, JavaScript, CSV, RTF
 - **Images**: PNG, JPEG, BMP, WebP
 - **Documents**: PDF files
@@ -271,6 +286,7 @@ export async function generateWithUrlContext(
 ```
 
 ### Pricing & Limits
+
 - **Maximum URLs**: 20 per request
 - **Content size limit**: 34MB per URL
 - Retrieved content counts toward input token usage
@@ -278,6 +294,7 @@ export async function generateWithUrlContext(
 - **Token savings**: Up to 99.6% reduction compared to manual content inclusion
 
 ### Limitations
+
 - URLs must be directly accessible (no login/paywall)
 - YouTube videos not supported
 - Google Workspace files not supported
@@ -288,9 +305,11 @@ export async function generateWithUrlContext(
 ## 4. Function Calling
 
 ### Overview
+
 Enables the model to call custom functions you define, returning structured function call requests that your code can execute.
 
 ### Supported Models
+
 All Gemini 2.5 and 3 series models
 
 ### API Parameters
@@ -343,6 +362,7 @@ if (response.functionCalls && response.functionCalls.length > 0) {
 ```
 
 ### Function Calling Modes
+
 - **AUTO** (default): Model decides between text response or function call
 - **ANY**: Model must predict a function call; supports `allowedFunctionNames`
 - **NONE**: Function calling disabled
@@ -401,9 +421,11 @@ export async function generateWithFunctions(
 ## 5. Document/File Analysis
 
 ### Overview
+
 Process PDFs, images, and other documents using Gemini's native vision capabilities for text extraction, visual understanding, and structured data extraction.
 
 ### Supported Formats
+
 - **Documents**: PDF (up to 50MB, 1000 pages)
 - **Images**: PNG, JPEG, WEBP, HEIC, HEIF
 - **Text**: TXT, HTML, Markdown (no visual understanding)
@@ -520,6 +542,7 @@ export async function analyzeFile(
 ```
 
 ### Pricing & Limits
+
 - Native text in PDFs is extracted free of charge
 - Images count toward IMAGE modality in usage_metadata
 - Token cost: ~258 tokens per page
@@ -527,6 +550,7 @@ export async function analyzeFile(
 - File retention: 48 hours
 
 ### Limitations
+
 - Models may struggle with precise text/object location
 - Handwritten text interpretation may have hallucinations
 - Best with correctly oriented, non-blurry pages
@@ -536,6 +560,7 @@ export async function analyzeFile(
 ## 6. Multi-Tool Usage
 
 ### Overview
+
 Combine multiple tools in a single request for complex workflows.
 
 ```typescript
@@ -552,6 +577,7 @@ const response = await ai.models.generateContent({
 ```
 
 ### Supported Combinations
+
 - Google Search + Code Execution
 - Google Search + URL Context
 - Code Execution + URL Context
@@ -564,18 +590,23 @@ const response = await ai.models.generateContent({
 Based on this research, here are the recommended new tools for gemini-mcp:
 
 ### 1. `gemini-search`
+
 Real-time web search with grounded responses and source citations.
 
 ### 2. `gemini-execute-code`
+
 Execute Python code for calculations, data analysis, and visualization.
 
 ### 3. `gemini-analyze-url`
+
 Analyze web pages, PDFs, and documents from URLs.
 
 ### 4. `gemini-analyze-file`
+
 Process uploaded files (PDFs, images) for analysis.
 
 ### 5. `gemini-function-call`
+
 Define custom functions for structured data extraction.
 
 ---

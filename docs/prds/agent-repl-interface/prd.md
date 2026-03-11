@@ -7,6 +7,7 @@
 Agents develop Clojure code exclusively through REPL eval — no file editing, no line numbers, no `clojure_replace`. The `*ctx*` atom is the agent's entire world: schemas, functions, tests, history, validation issues. The agent's AI context is **rendered from `*ctx*` data** using composable, schema-discovered renderers — the same discovery mechanism used for everything else.
 
 This PRD supersedes:
+
 - `super-repl/prd.md` Phase 3 (graduation), Phase 5 (Dynamic Context + MCP Cockpit)
 - `spec-driven-rendering/prd.md` Phase 4 (Agent Context Cockpit)
 - `render-pipeline/prd.md` Phase 6 (Flow Channels for AI clients)
@@ -14,6 +15,7 @@ This PRD supersedes:
 ## Motivation
 
 Current agent development uses Claude Code's `Edit`/`Write` tools with line numbers and file paths. This is fragile:
+
 - Line numbers shift after edits, causing match failures
 - Agents must reason about file structure, not just code
 - The `clojure_replace` MCP tool does s-expression matching but still operates on files
@@ -84,6 +86,7 @@ Two states: **`:live`** and **`:persisted`**.
 - **`:persisted`** — validated, written to `.clj` file, registered in Datalevin graph. Discoverable by other agents.
 
 Status is **recomputed after every eval**, not manually set:
+
 - Schema with 0 consumers -> stays `:live` (orphaned)
 - Function without test coverage -> stays `:live` (cannot be persisted)
 - Function with passing tests + all schemas concrete -> eligible for `:persisted`
@@ -104,6 +107,7 @@ The `*ctx*` always reflects truth. `:seon.repl/issues` surfaces problems persist
 ### The Core Insight
 
 No monolithic `for-ai` function. Instead, normal Clojure functions that:
+
 1. Accept a map with specific namespaced keys
 2. Return `{:seon.render/ai "..."}` (a string)
 3. Are discovered by the existing specificity-based resolution in `seon.render/find-renderer`
@@ -348,6 +352,7 @@ The REPL interceptor adds the dependency check before allowing the unregister.
 ### Agent Test Environment
 
 Each agent gets:
+
 - **Isolated JVM** — from `seon.flow.pool` (already built)
 - **`*ctx*` atom** — injected via `intern` + `.setDynamic` (already built in `agent_runner.clj`, `ns/lifecycle.clj`)
 - **`*conn*`** — Datalevin connection for test data
@@ -356,6 +361,7 @@ Each agent gets:
 ### Test Discovery
 
 When `(deftest ...)` is eval'd, the interceptor:
+
 1. Runs the test immediately
 2. Records which instrumented functions were called (via Malli instrumentation hooks)
 3. Updates `*ctx*` :seon.repl/tests with results and `:seon.repl/tested-fns`
@@ -366,6 +372,7 @@ This is more reliable than static analysis of the test body — instrumentation 
 ### Validated Boundaries
 
 Both `*ctx*` and `*conn*` validate all inputs:
+
 - `*ctx*` already has validators (namespaced keys, registered schemas) — see `seon.ctx` lines 360-451
 - `db/transact!` already validates via Malli (Phase 1 validation gate) — see `seon.db`
 - Agents get helpful rejection messages, not cryptic errors
@@ -382,6 +389,7 @@ Both `*ctx*` and `*conn*` validate all inputs:
 ```
 
 The interceptor:
+
 1. Loads the namespace (normal Clojure `require`)
 2. Updates `*ctx*` :seon.repl/requires
 3. The required namespace's schemas and functions become available

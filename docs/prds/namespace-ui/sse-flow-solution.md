@@ -72,6 +72,7 @@ This broadcasts to all clients regardless of whether the change affects them. A 
 ```
 
 No registry of connected clients. Can't answer:
+
 - How many clients connected?
 - Which pages are they viewing?
 - When did they last receive an update?
@@ -87,6 +88,7 @@ Most handlers use polling (`:poll-ms 2000`) rather than event-driven updates:
 ```
 
 This means:
+
 - Latency: Up to 2 seconds for updates to appear
 - Wasted work: Re-renders every 2s even if nothing changed
 - No change-driven updates
@@ -94,6 +96,7 @@ This means:
 **Gap 4: No Debouncing for Rapid Changes**
 
 Code changes can come in bursts (e.g., agent writes multiple files quickly). Each change calls `refresh-all!`, potentially causing:
+
 - Render storms
 - Dropped updates (dropping-buffer)
 - Browser DOM thrashing
@@ -589,6 +592,7 @@ Flow's `:transition` handles cleanup:
 The SSE live reload issue is **already solved** by the `after-ns-reload` hooks. What remains is **architectural improvement**: better event routing, observability, and debouncing.
 
 `core.async.flow` is the right tool for this because:
+
 1. It's designed for internal event routing (not external I/O)
 2. Its introspection enables the observability we need
 3. Step functions are hot-reloadable (matching our pattern)

@@ -60,12 +60,14 @@ Two output formats flow through the system: `:seon.render/html` (hiccup) and `:s
 ## Dependencies
 
 **Uses:**
+
 - [[components/code-graph]] — `gq/functions-with-output-key` is the discovery query that powers all resolution
 - [[components/database]] — `seon.db.datalevin.conn` for direct Datalevin connection (render cache queries)
 - [[components/schema-system]] — `seon.schema` for schema registration
 - `seon.runtime` — merged schema
 
 **Used by:**
+
 - [[components/namespace-lifecycle]] — `lifecycle/find-page-render-fn` delegates to graph query, `make-render-fn` wraps result
 - `seon.ns.routes` — calls `resolve-renderer`, `find-page-renderer`, `for-html`, `namespace-web-params`
 - `seon.render.default-page` — uses `try-render`, `humanize`, `for-html` for fallback page
@@ -93,6 +95,7 @@ Two output formats flow through the system: `:seon.render/html` (hiccup) and `:s
 ### Resolution Cache
 
 The cache key is `[format (set (keys data))]` — format + key shape. Cached results include the resolved var or `::no-renderer` sentinel. Cache is invalidated when:
+
 - `invalidate-render-cache!` is called (triggered by code graph scanner after rescan)
 - This also calls `gq/invalidate-output-key-cache!` to clear the upstream query cache
 
@@ -111,6 +114,7 @@ The cache key is `[format (set (keys data))]` — format + key shape. Cached res
 ### for-ai / for-html (recursive renderers)
 
 Both recursively walk data structures. At each map, they attempt `call-datalevin-renderer` first. If no renderer exists:
+
 - `for-ai`: produces `{key1 val1, key2 val2}` string notation
 - `for-html`: renders maps as definition-list tables, vectors-of-maps as full tables with humanized headers, sequences as `<ul>` lists, Malli schema forms as field-spec tables via `render-schema`
 

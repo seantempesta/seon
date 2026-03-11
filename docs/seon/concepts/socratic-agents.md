@@ -30,14 +30,17 @@ Structural gates in AGENT.md that force investigation before implementation. Not
 ## Real Test Tasks
 
 ### Task A: Write tests for `functions-with-output-key`
+
 - Files: `src/seon/graph/query.clj`, `test/seon/graph/query_test.clj`
 - Nuance: Must exercise required-keys vs optional-keys split. Should check fixture data in REPL first.
 
 ### Task B: Fix dynamic require in `ingest-file!`
+
 - Files: `src/seon/graph/ingest.clj`
 - Nuance: Must verify no circular dep before changing. Early-return path returns 3 keys vs success path returns 6. No tests exist.
 
 ### Task C: Add `:malli/schema` to getting-started step functions
+
 - Files: `src/seon/getting_started.clj`, `test/seon/getting_started_test.clj`
 - Nuance: Task says "make them private too" but test file calls them directly. Agent should discover this before breaking the test.
 

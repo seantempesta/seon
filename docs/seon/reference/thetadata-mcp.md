@@ -7,6 +7,7 @@ This document provides setup and usage information for ThetaData's MCP server in
 ThetaData Terminal V3 includes an MCP (Model Context Protocol) server that enables natural language interaction with the ThetaData API. Instead of constructing complex REST API URLs, you can use natural language prompts to query market data.
 
 **Key Benefits:**
+
 - Natural language queries instead of manual API construction
 - Automatic parameter parsing and validation
 - Direct integration with LLM tools like Claude Code and Gemini CLI
@@ -17,6 +18,7 @@ ThetaData Terminal V3 includes an MCP (Model Context Protocol) server that enabl
 ## System Requirements
 
 ### Prerequisites
+
 - **Theta Terminal V3** - Latest version (requirement enforced)
 - **Active ThetaData subscription** - Standard tier includes:
   - Options: STANDARD tier
@@ -26,6 +28,7 @@ ThetaData Terminal V3 includes an MCP (Model Context Protocol) server that enabl
 - **Port 25503** - Must be accessible (check firewall/VPN settings)
 
 ### Important Notes
+
 - **Theta Terminal must be running** for MCP to work
 - The MCP server runs locally on your machine
 - Network connectivity requirements apply (firewall/VPN considerations)
@@ -35,16 +38,18 @@ ThetaData Terminal V3 includes an MCP (Model Context Protocol) server that enabl
 ### Claude Code Setup (Recommended)
 
 1. **Install Claude Code** (if not already installed):
+
 ```bash
 npm install -g @anthropic-ai/claude-code
 ```
 
-2. **Add ThetaData MCP Server**:
+1. **Add ThetaData MCP Server**:
+
 ```bash
 claude mcp add --transport sse ThetaData http://localhost:25503/mcp/sse
 ```
 
-3. **Verify Connection**:
+1. **Verify Connection**:
    - Start Theta Terminal V3
    - Open Claude Code CLI
    - Run `/mcp` command to verify ThetaData server is connected
@@ -52,12 +57,14 @@ claude mcp add --transport sse ThetaData http://localhost:25503/mcp/sse
 ### Gemini CLI Setup (Alternative)
 
 1. **Install Gemini CLI**:
+
 ```bash
 npm install -g @google/gemini-cli
 ```
 
-2. **Configure MCP Server**:
+1. **Configure MCP Server**:
 Edit `~/.gemini/settings.json` and add:
+
 ```json
 {
   "mcpServers": {
@@ -69,7 +76,7 @@ Edit `~/.gemini/settings.json` and add:
 }
 ```
 
-3. **Verify Connection**:
+1. **Verify Connection**:
    - Start Theta Terminal V3
    - Open Gemini CLI
    - Verify MCP connection is active
@@ -77,12 +84,14 @@ Edit `~/.gemini/settings.json` and add:
 ## Connection Details
 
 ### Endpoint Configuration
+
 - **Transport Method:** Server-Sent Events (SSE)
 - **URL:** `http://localhost:25503/mcp/sse`
 - **Default Timeout:** 30000ms (30 seconds)
 - **Protocol:** HTTP (local only)
 
 ### Connection Workflow
+
 1. Start Theta Terminal V3
 2. Terminal automatically starts MCP server on port 25503
 3. Open your LLM CLI tool
@@ -94,12 +103,14 @@ Edit `~/.gemini/settings.json` and add:
 The MCP server provides access to all ThetaData V3 API endpoints, including:
 
 ### Stock Data
+
 - Real-time snapshots
 - Historical OHLC/EOD data
 - Quote and trade history
 - At-time queries
 
 ### Option Data
+
 - **Greeks** (delta, gamma, theta, vega, rho)
   - Second-order Greeks
   - Historical Greeks (EOD, intraday)
@@ -110,10 +121,12 @@ The MCP server provides access to all ThetaData V3 API endpoints, including:
 - **Quote and trade data**
 
 ### Index Data
+
 - Major indices (SPX, NDX, etc.)
 - Index snapshots and history
 
 ### Calendar Data
+
 - Earnings dates
 - Ex-dividend dates
 - Corporate actions
@@ -123,11 +136,13 @@ The MCP server provides access to all ThetaData V3 API endpoints, including:
 ### Basic Option Greeks Query
 
 **Natural Language:**
+
 ```
 Get the eod greek for last week for AAPL strike 200.00 CALL and expiration 2025-08-01
 ```
 
 **Equivalent REST API:**
+
 ```
 http://localhost:25503/v3/option/history/greeks/eod?symbol=AAPL&right=C&strike=200.0&expiration=2025-08-01&start_date=2025-07-28&end_date=2025-08-01
 ```
@@ -135,11 +150,13 @@ http://localhost:25503/v3/option/history/greeks/eod?symbol=AAPL&right=C&strike=2
 ### Query with Formatting Instructions
 
 **Natural Language:**
+
 ```
 Get the eod greek for last week for AAPL strike 200.00 CALL and expiration 2025-08-01. Put this in a table showing the delta change.
 ```
 
 The LLM will:
+
 1. Execute the query
 2. Format results as requested
 3. Calculate delta changes between days
@@ -148,11 +165,13 @@ The LLM will:
 ### Option Snapshot (All Greeks)
 
 **Natural Language:**
+
 ```
 Get all Greeks for all AAPL options
 ```
 
 **Equivalent REST API:**
+
 ```
 http://localhost:25503/v3/option/snapshot/greeks/all?symbol=AAPL&expiration=*
 ```
@@ -160,6 +179,7 @@ http://localhost:25503/v3/option/snapshot/greeks/all?symbol=AAPL&expiration=*
 ### Stock Historical Data
 
 **Natural Language:**
+
 ```
 Get daily OHLC data for TSLA for the past month
 ```
@@ -167,6 +187,7 @@ Get daily OHLC data for TSLA for the past month
 ### Multiple Queries
 
 **Natural Language:**
+
 ```
 Compare the implied volatility for AAPL and MSFT 30-day ATM calls
 ```
@@ -176,11 +197,13 @@ Compare the implied volatility for AAPL and MSFT 30-day ATM calls
 ### Be Explicit with Parameters
 
 **Good:**
+
 ```
 Get EOD Greeks for AAPL strike 150.00 CALL expiration 2025-12-19 from 2025-11-01 to 2025-11-28
 ```
 
 **Avoid:**
+
 ```
 Get some AAPL option data from last month
 ```
@@ -196,11 +219,13 @@ Get some AAPL option data from last month
 ### Handling Large Result Sets
 
 **Problem:** Broad queries can return massive datasets
+
 ```
 Get all options data for SPY  # Too broad!
 ```
 
 **Solution:** Narrow your request
+
 ```
 Get EOD Greeks for SPY strikes 550-560 CALL expiration 2025-12-20 for the past week
 ```
@@ -208,6 +233,7 @@ Get EOD Greeks for SPY strikes 550-560 CALL expiration 2025-12-20 for the past w
 ### Adding Context/Formatting
 
 You can include formatting or analysis instructions:
+
 - "Put this in a table"
 - "Show the delta change over time"
 - "Calculate the average implied volatility"
@@ -219,6 +245,7 @@ You can include formatting or analysis instructions:
 ThetaData calculates Greeks with the following methodology:
 
 ### Calculation Method
+
 - **Frequency:** Greeks calculated for each tick of data
 - **Underlying Price:** Uses exact underlying price at time of option tick
 - **IV Calculation:** Fast bisection method for implied volatility
@@ -229,6 +256,7 @@ ThetaData calculates Greeks with the following methodology:
 ### Available Greeks
 
 **First-Order Greeks:**
+
 - Delta: Rate of change of option price with respect to underlying price
 - Gamma: Rate of change of delta with respect to underlying price
 - Theta: Rate of change of option price with respect to time
@@ -236,6 +264,7 @@ ThetaData calculates Greeks with the following methodology:
 - Rho: Rate of change of option price with respect to interest rate
 
 **Second-Order Greeks:**
+
 - Available through trade Greeks endpoints
 - More advanced sensitivity metrics
 
@@ -246,6 +275,7 @@ ThetaData calculates Greeks with the following methodology:
 **Problem:** MCP server not detected
 
 **Solutions:**
+
 1. Verify Theta Terminal V3 is running
 2. Check Terminal is latest version
 3. Confirm port 25503 is accessible
@@ -260,6 +290,7 @@ ThetaData calculates Greeks with the following methodology:
 **Problem:** Query returns no data or errors
 
 **Solutions:**
+
 1. Verify your subscription tier includes requested data type
 2. Check date ranges are valid (not future dates)
 3. Ensure symbol is valid and available
@@ -272,6 +303,7 @@ ThetaData calculates Greeks with the following methodology:
 **Problem:** Slow responses or timeouts
 
 **Solutions:**
+
 1. Reduce date range for historical queries
 2. Limit number of strikes/expirations requested
 3. Query specific contracts instead of broad searches
@@ -283,6 +315,7 @@ ThetaData calculates Greeks with the following methodology:
 Your ThetaData subscription tier determines available data:
 
 ### Standard Tier (Most Common)
+
 - **Options:** STANDARD access
   - All strikes and expirations
   - Greeks, IV, OI, quotes, trades
@@ -294,35 +327,45 @@ Your ThetaData subscription tier determines available data:
   - Major index data
 
 ### Verify Your Access
+
 Check your subscription tier in Theta Terminal settings to confirm available data types.
 
 ## Best Practices
 
 ### 1. Start Theta Terminal First
+
 Always launch Theta Terminal V3 before using the LLM CLI to ensure MCP server is available.
 
 ### 2. Use Precise Queries
+
 The more specific your query, the better the results:
+
 - Include exact dates
 - Specify strike prices with decimals
 - Use full ticker symbols
 - Specify option right (CALL/PUT)
 
 ### 3. Leverage Formatting Instructions
+
 Take advantage of LLM capabilities:
+
 - Request specific output formats
 - Ask for calculations or transformations
 - Request visualizations or comparisons
 
 ### 4. Iterate on Queries
+
 If initial query doesn't return desired results:
+
 - Refine parameters
 - Narrow date ranges
 - Add more specific criteria
 - Request different data fields
 
 ### 5. Monitor Resource Usage
+
 For large queries:
+
 - Start with smaller date ranges
 - Test with single symbols before bulk queries
 - Consider API rate limits
@@ -330,15 +373,16 @@ For large queries:
 
 ## Additional Resources
 
-- **ThetaData MCP Documentation:** https://docs.thetadata.us/Mcp/Getting-Started.html
-- **ThetaData API Reference:** https://docs.thetadata.us/
-- **Option Greeks Guide:** https://http-docs.thetadata.us/Articles/Data-And-Requests/Option-Greeks.html
-- **Model Context Protocol Specification:** https://modelcontextprotocol.io/
-- **ThetaData Blog (MCP Announcement):** https://www.thetadata.net/post/mcp-now-in-terminal-v3-beta
+- **ThetaData MCP Documentation:** <https://docs.thetadata.us/Mcp/Getting-Started.html>
+- **ThetaData API Reference:** <https://docs.thetadata.us/>
+- **Option Greeks Guide:** <https://http-docs.thetadata.us/Articles/Data-And-Requests/Option-Greeks.html>
+- **Model Context Protocol Specification:** <https://modelcontextprotocol.io/>
+- **ThetaData Blog (MCP Announcement):** <https://www.thetadata.net/post/mcp-now-in-terminal-v3-beta>
 
 ## Feedback and Support
 
 The MCP feature is currently in beta. ThetaData is actively collecting feedback on:
+
 - Use cases and workflows
 - Feature requests
 - Performance issues

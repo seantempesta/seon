@@ -5,6 +5,7 @@
 These aren't arbitrary style rules. They're the foundation for **AI agents to write reliable software**.
 
 When every function has:
+
 - **Namespaced keys** → Agents can query "what accepts `:seon.trading/position`?" instead of guessing
 - **Malli schemas** → Contracts are machine-readable. Property tests validate automatically.
 - **Map-in/map-out** → Extensible APIs. Adding a field doesn't break callers.
@@ -17,6 +18,7 @@ The result: agents can discover, compose, and validate code without hallucinatin
 ## Malli Schema Patterns
 
 All public APIs use Malli schemas for contract specification. This enables:
+
 - Automatic validation via `malli.dev/start!`
 - Generative testing via `mi/check`
 - Self-documenting APIs for agents
@@ -84,6 +86,7 @@ Define separate schemas for requests and responses with namespaced keys:
 ### Public Function Pattern
 
 Public functions are **map in, map out** with:
+
 - Single map argument using `::keys` destructuring
 - Namespaced keys in return value
 - `:malli/schema` metadata referencing request/response schemas
@@ -210,6 +213,7 @@ You don't need to call `mi/collect!`, `dev/start!`, or `mi/instrument!` manually
 ### Testing Strategy
 
 Tests serve two purposes:
+
 1. **Example tests** - Document intended usage, show how functions compose
 2. **Generative tests** - Find edge cases, validate schema contracts
 
@@ -351,6 +355,7 @@ Provider namespaces extend base namespaces by referencing their schemas. This is
 ```
 
 **Why this matters:**
+
 - No schema migration needed when adding provider-specific fields
 - Queries can filter by any attribute from any namespace
 - Generic code works on `:seon.ai/*` attributes, provider code adds its own
@@ -393,6 +398,7 @@ Test namespaces (`*_test.clj`) are exempt from most conventions:
 - **Non-namespaced keys are fine** in test data literals (e.g. `{:name "test"}`)
 
 Conventions that **do** apply in tests:
+
 - **Namespaced keys when calling production functions** — match the real API
 - **Both example and generative tests** — see Testing Strategy below
 - **Meaningful test names** — `session-lifecycle-test` not `test1`
@@ -420,11 +426,13 @@ When converting external data (like SDK messages) to internal entities, use the 
 ```
 
 **Why map-in?** Even converter functions benefit from the pattern:
+
 - Extensible: Add optional context (session-id, metadata) without changing signature
 - Consistent: Same API style as all other public functions
 - Traceable: Can add logging/debugging keys later
 
 **Anti-pattern:**
+
 ```clojure
 ;; BAD: positional args limit extensibility
 (defn sdk-message->entity [sdk-message session-id]
@@ -631,11 +639,13 @@ Avoid arbitrary "magic numbers" that cause bugs or confusion. Every limit should
 ### Rule: Don't Set Arbitrary Defaults for "No Limit"
 
 **Bad - arbitrary large number to mean "unlimited":**
+
 ```clojure
 ::max-turns (or max-turns 999999)  ; Magic number!
 ```
 
 **Good - don't pass the flag when unlimited:**
+
 ```clojure
 (cond-> base-args
   max-turns (into ["--max-turns" (str max-turns)]))
@@ -661,11 +671,13 @@ Avoid arbitrary "magic numbers" that cause bugs or confusion. Every limit should
 ### When to Add `:max` Constraints
 
 Add `:max` when:
+
 - External API/protocol enforces the limit
 - Mathematical/domain constraint exists (percentages, ratios)
 - Memory/performance safety requires it (document why)
 
 Don't add `:max` when:
+
 - "Just to be safe" with no specific reason
 - The underlying system has no limit
 - To prevent hypothetical abuse (use rate limiting instead)

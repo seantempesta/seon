@@ -77,6 +77,7 @@ Seon is a **live Lisp system** - a personal operating system where code, data, a
 ```
 
 **Why JetBrains Mono?**
+
 - Excellent readability at small sizes (11-12px)
 - Distinguishes similar characters (0/O, 1/l/I)
 - Optional ligatures for Clojure (->>, ->, =>)
@@ -161,6 +162,7 @@ Page margins:  px-4 py-3 (minimal chrome)
 ```
 
 **Structure:**
+
 - Fixed-width columns: time (8ch), type (7ch), content (flex)
 - Type column is the ONLY color per line
 - Content is cream (#faf9f7), timestamps are muted (#8c8578)
@@ -169,6 +171,7 @@ Page margins:  px-4 py-3 (minimal chrome)
 - `flex-col-reverse` for natural scroll-to-bottom
 
 **CSS:**
+
 ```css
 .log-line {
   font-size: 11px;
@@ -193,6 +196,7 @@ Page margins:  px-4 py-3 (minimal chrome)
 ```
 
 **Structure:**
+
 - Table, not cards (density over aesthetics)
 - ID is monospace, prominent
 - Right-align numeric columns
@@ -211,6 +215,7 @@ Page margins:  px-4 py-3 (minimal chrome)
 | pending | ○ | gray (#6b6459) | none |
 
 **Implementation:**
+
 ```html
 <span class="status">
   <span class="status-dot status-running"></span>
@@ -350,6 +355,7 @@ SSE morphing handles content updates. For explicit transitions:
 ## Anti-Patterns
 
 **Never do:**
+
 - `bg-white` or any pure white background
 - `text-gray-*` (use warm text-* scale)
 - `rounded-full` on anything except dots

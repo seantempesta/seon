@@ -25,6 +25,7 @@ Rather than completely removing XTDB writes, we kept them as a fallback:
 ```
 
 This means:
+
 - **Production** (Datalevin available): writes go to Datalevin only
 - **Tests** (no Datalevin): writes fall back to XTDB, tests pass unchanged
 - **Degraded mode**: if Datalevin crashes, XTDB catches writes

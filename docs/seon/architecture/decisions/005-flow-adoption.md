@@ -45,12 +45,14 @@ Flow was designed for concurrent data processing pipelines (Clojure threads proc
 ## Consequences
 
 **Benefits:**
+
 - Explicit topology -- process connections visible as data, not hidden in code
 - Centralized error handling via `:error-chan`
 - Introspection via `ping` for debugging live state
 - Hot reload of step functions
 
 **Costs:**
+
 - Learning curve for step function 4-arity protocol (describe/init/transition/transform)
 - Alpha status -- "Names and other details are in flux"
 - Debugging complexity requires flow-monitor and extensive logging
@@ -58,6 +60,7 @@ Flow was designed for concurrent data processing pipelines (Clojure threads proc
 ## Implementation
 
 Flow is used for:
+
 - `seon.db.datalevin.writer` -- serialized DB writes
 - `seon.db.datalevin.reader` -- serialized DB reads
 - `seon.flow.topology` -- unified request-reply backbone

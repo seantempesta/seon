@@ -3,6 +3,7 @@
 ## Problem
 
 We need a complete, linked code graph that works on two input types:
+
 1. **Files on disk** -- startup, after edits
 2. **In-memory forms** -- agent pipeline stages before persistence
 
@@ -27,6 +28,7 @@ All tests run against `seon.health.workout.render` -- a real namespace that refe
 ```
 
 **Results:**
+
 - **var-definitions** (2 found): Includes `:arglist-strs`, `:doc`, `:row`, `:end-row`, `:fixed-arities`, `:defined-by`. Example: `{:name page-render, :arglist-strs ["[{workout-ctx ::workout/*ctx*}]"], :doc "Page renderer for ..."}`. Complete function signatures with no runtime needed.
 - **var-usages** (22 total, 9 cross-ns): Fully resolves aliased calls. `schema/register!` becomes `{:name register!, :to seon.schema}`. `ui/section-header` becomes `{:name section-header, :to seon.web.components}`. Self-calls (`workout-set` from `page-render`) also captured.
 - **namespace-usages** (4): All requires with aliases. `{:alias workout, :to seon.health.workout}`, `{:alias ui, :to seon.web.components}`, etc.
@@ -86,6 +88,7 @@ clj-kondo keywords within a `register!` call's row range DO give us the resolved
 ### clj-kondo
 
 **Provides everything except schema data:**
+
 - Function signatures: arglists, docs, row numbers, private flags, arity sets
 - Call graph: var-usages with full cross-ns resolution (even without cache)
 - Namespace dependencies: aliases, requires
@@ -120,6 +123,7 @@ clj-kondo keywords within a `register!` call's row range DO give us the resolved
 ### Key Insight: clj-kondo Is Nearly Sufficient Alone
 
 The original architecture assumed clj-kondo needed cache for cross-ns resolution. **This is wrong.** clj-kondo reads the `ns` form and resolves all aliases internally. For a single file or in-memory string, you get:
+
 - All function definitions with full metadata
 - All cross-namespace calls fully resolved
 - All keywords fully resolved (including `::alias/name` forms)
@@ -165,6 +169,7 @@ Input: source string (file or in-memory forms)
 ### Merge Rules
 
 When both tools produce data for the same entity:
+
 1. **Functions:** clj-kondo is authoritative. edamame's `extract-defn` is a subset of what kondo provides. Use kondo's `var-definitions`.
 2. **Specs:** edamame is authoritative. kondo knows `register!` was called but not with what data.
 3. **Vars (defs):** edamame is authoritative for value types. kondo provides row/col but not value inspection.
@@ -206,6 +211,7 @@ After eval in an agent's nREPL:
 ```
 
 Adds:
+
 - `:seon.fn/malli-schema` from `(meta #'fn)` -> `:malli/schema`
 - `:seon.fn/loadable? true`
 - Override arglists/docs if runtime disagrees with static (rare)

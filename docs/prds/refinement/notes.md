@@ -8,25 +8,32 @@ You have domain expertise after doing the work — don't let it evaporate.
 ## Spec-Driven Renderer Discovery (2026-02-23)
 
 ### What Changed
+
 Removed explicit `ns-resolve` for `'render` symbol in `seon.ns.routes`. The old `namespace-has-render?` and `call-namespace-render` functions did runtime symbol lookup, bypassing the code graph entirely. Replaced with `find-graph-render-fn` which queries Datalevin for `:seon.fn/page-renderer? true` (set by scanner from spec shape).
 
 ### The Only Path
+
 A function becomes a page renderer iff:
+
 1. Its input spec contains a key ending in `*ctx*`
 2. Its output spec contains `:seon.render/html`
 
 This is detected by `link-fns-to-specs` in `seon.graph.extract`, stored in Datalevin, and queried by `lifecycle/find-page-render-fn`. No other path exists.
 
 ### Gotcha: render-fn lookup crosses namespace boundaries
+
 `find-page-render-fn` originally queried by `:seon.fn/namespace` matching the target namespace. But the page renderer for `seon.health.workout` lives in `seon.health.workout.render` (a child namespace). The fix: query by `:seon.fn/render-input-keys` matching the namespace's `*ctx*` key instead. The ctx key's namespace IS the parent namespace regardless of where the render function is defined.
 
 ### Gotcha: workout-set returns render map, not hiccup
+
 `page-render` calls `(map workout-set ws)` inside hiccup. `workout-set` returns `{:seon.render/html [...] :seon.render/ai "..."}`. Must extract `:seon.render/html` via `(map (comp :seon.render/html workout-set) ws)`.
 
 ### Gotcha: reactive page ID mismatch
+
 The reactive instance page originally used `[:main#reactive-content {:data-init ...}]` as the SSE target, but the render function produces `[:main#morph ...]`. Datastar's `patch-elements` matches by element ID, so the IDs must match. Fix: put `data-init` on a separate `<div>` and let the rendered `<main#morph>` be directly in the page.
 
 ### Gotcha: ctx registry caches render-fn
+
 `ctx/set-render-fn!` exists but is only used in tests. The only production path that sets render-fn on a ctx is `lifecycle/ensure-instance!` which calls `lifecycle/find-page-render-fn` (graph-driven). After code changes to the render function, instances must be destroyed and recreated to pick up the new function reference.
 
 ---
@@ -34,17 +41,21 @@ The reactive instance page originally used `[:main#reactive-content {:data-init 
 ## Track 0: MCP REPL Fix
 
 ### What Was Broken
+
 The MCP REPL (`mcp__seon__eval`) returned `nil` or "nREPL session expired" for ALL expressions.
 
 ### Root Cause (two compounding issues)
+
 1. **Server on wrong port**: nREPL bound to random port instead of 7888 because port was already in use from a previous unclean shutdown. Fix: kill all java seon processes with `pkill -9 -f "java.*seon"` before restarting.
 
 2. **Stale nREPL session**: The MCP server clones an nREPL session at startup for `*1/*2/*3` persistence. When the seon server restarts, this session becomes invalid. The MCP server detected "unknown-session" but returned an error instead of recovering.
 
 ### Fix Applied (`bin/mcp-server`)
+
 Added self-healing to `execute-eval`: when "unknown-session" is detected, automatically re-clone a new nREPL session and retry. This handles server restarts transparently.
 
 ### Gotchas
+
 - MCP server is a babashka process managed by Claude Code. Changes to `bin/mcp-server` require restarting the Claude Code session (or `/mcp` reset) to take effect.
 - Kill processes with `pkill -9 -f "java.*seon"` not `pkill -f "clojure.*seon"` (child JVMs).
 - Many orphaned caddy processes accumulate; clean up with `pkill -f caddy`.
@@ -79,6 +90,7 @@ Added self-healing to `execute-eval`: when "unknown-session" is detected, automa
 ### What Was Done (2026-02-20)
 
 **Source files cleaned (comments/paths):**
+
 - `src/seon/web/stats.clj` -- changed hardcoded `"data/xtdb"` path to `"data/datalevin"`, updated docstrings
 - `src/seon/web/agents.clj` -- updated ~10 comments from "XTDB" to "Datalevin" (`:xt/id` key kept for now, see below)
 - `src/seon/web/jobs.clj` -- updated "XTDB node" comment to "database node"
@@ -87,6 +99,7 @@ Added self-healing to `execute-eval`: when "unknown-session" is detected, automa
 - `tests.edn` -- updated comment
 
 **Test files cleaned:**
+
 - Deleted 7 orphaned test files that required XTDB on classpath:
   - `test/seon/agent/ctx_test.clj` (required `xtdb.api`)
   - `test/seon/agent/helpers_test.clj` (required `seon.db.multi` which is deleted)
@@ -97,9 +110,11 @@ Added self-healing to `execute-eval`: when "unknown-session" is detected, automa
 - Fixed `test/seon/orchestrator/session_test.clj` -- wrong db-name expectation (`"test_start"` -> `"test.start"`)
 
 **Completed separately:**
+
 - `:xt/id` renamed to `:seon/id` across the AI layer (`ai.clj`, `ai/claude.clj`, `ai/agent.clj`, `web/agents.clj`, and all AI tests). In `ai/datalevin.clj`, the internal field `::xtdb-id` renamed to `::entity-id`. Existing Datalevin data uses the old attribute name `:seon.ai.datalevin/xtdb-id` -- since Datalevin is schemaless, old entities will simply not match queries for `::entity-id`. This is acceptable because AI session data is ephemeral (no long-term history needed). If migration is ever needed, a one-time script can retract old and assert new attributes.
 
 ### Test Suite Results
+
 - **496 tests, 2476 assertions, 0 failures, 3 errors**
 - The 3 errors are from `seon.flow.pool-integration-test` -- nREPL infrastructure tests that fail when agent JVMs cannot spawn (environment-dependent, not a code bug)
 
@@ -108,16 +123,19 @@ Added self-healing to `execute-eval`: when "unknown-session" is detected, automa
 ### What Was Done (2026-02-20)
 
 **Deleted `orchestrator/nrepl.clj` and both test files:**
+
 - `src/seon/orchestrator/nrepl.clj` -- replaced by pool JVM lifecycle
 - `test/seon/orchestrator/nrepl_test.clj` -- 362 lines, tested dead code
 - `test/seon/orchestrator/mcp_test.clj` -- 48 lines, depended on orchestrator.nrepl
 
 **Removed references from 3 files:**
+
 - `src/seon/agent/helpers.clj` -- declared its own `*ctx*` dynamic var instead of importing from orchestrator.nrepl
 - `src/seon/ai/agent.clj` -- removed "safety net" nREPL cleanup in `shutdown-all-agents!` (pool handles JVM lifecycle)
 - `src/seon/system.clj` -- deleted dead `namespace-nrepls` Integrant component (not in system.edn), wired pool into orchestrator-sessions init
 
 **System wiring:**
+
 - `resources/system.edn` -- `:seon/orchestrator-sessions` now depends on `:seon/agent-pool` via `#ig/ref`
 - `src/seon/system.clj` -- `init-key :seon/orchestrator-sessions` passes pool to `session/init!`
 
@@ -131,12 +149,13 @@ Added self-healing to `execute-eval`: when "unknown-session" is detected, automa
 - `agent/helpers.clj` now declares its own `*ctx*` -- this means there are now two `*ctx*` vars: `seon.agent.helpers/*ctx*` and the one pool JVMs inject at claim time. The pool injects into the agent's namespace directly, so helpers needs to resolve from there, not from its own var. This may need attention.
 
 ### Test Results
+
 - 483 tests, 2417 assertions, 0 failures related to changes
 - 3 errors + 5 failures are pre-existing (flow pool-integration-test, flow trace-test)
 
 ## Track 3: Flow Logging
 
-_(to be filled by agent)_
+*(to be filled by agent)*
 
 ## Track 4: Render Pipeline E2E
 
@@ -164,6 +183,7 @@ The render pipeline is complete from a wiring perspective -- every component is 
 ### Test Renderer Exists
 
 `src/seon/health/workout/render.clj` is a working example following the convention:
+
 - Function: `workout-set` (qualified: `seon.health.workout.render/workout-set`)
 - Request spec: `::workout-set-request` with keys `[:seon.health.workout/exercise :seon.health.workout/sets :seon.health.workout/reps :seon.health.workout/weight]`
 - Response spec: `::workout-set-response` with keys `[:seon.render/html :seon.render/ai]`
@@ -183,6 +203,7 @@ These are complementary, not competing. The `/ns/` routes should NOT use `find-r
 ### No Changes Needed
 
 The pipeline is correctly wired end-to-end:
+
 - Scanner runs at startup and discovers `seon.health.workout.render/workout-set` as a render function
 - Graph DB is populated with `:seon.fn/render-input-keys` for the workout renderer
 - `render/set-conn!` connects the graph DB to the render system
@@ -230,22 +251,26 @@ The pipeline works. Future domains just need to follow the same convention as `s
 12 files still reference XTDB. Categorized:
 
 **Real dependencies (need code changes):**
+
 - `src/seon/web/stats.clj` (lines 32-33) - hardcoded `"data/xtdb"` path for disk usage stats. Needs update or removal.
 - `src/seon/web/agents.clj` (lines 482, 563, 663) - uses `:xt/id` as entity key for sessions/messages. This is from the Datalevin migration shim (`ai/datalevin.clj`) which maps `:seon.ai.datalevin/xtdb-id` back to `:xt/id`. Not a real XTDB dep but uses the `:xt/id` key name.
 - `src/seon/ai/datalevin.clj` (many lines) - the migration shim itself. Uses `::xtdb-id` field name extensively for the logical ID mapping. Functional but naming is legacy.
 - `src/seon/orchestrator/session.clj` - still requires `seon.agent.ctx` (old ctx system). Should use `seon.ctx` only.
 
 **Comments/docstrings only (cosmetic):**
+
 - `src/seon/dev/compliance.clj` (line 674) - comment showing example arglists mentioning `xtdb-node`. Cosmetic.
 - `src/seon/ai/gemini.clj` - no actual XTDB refs found in grep output (false positive from earlier, or already cleaned).
 
 **Indirect/not blocking:**
+
 - `src/seon/dev/hook.clj` - uses `seon.dev.context` namespace which internally may reference XTDB. The hook itself doesn't import XTDB.
 - `src/seon/flow/agent_runner.clj` - listed but no grep matches visible; may be cleaned already.
 - `src/seon/agent/helpers.clj` - listed but no grep matches visible.
 - `src/seon/ctx.clj` - listed but no grep matches visible.
 
 **Not yet done from PRD Track 1:**
+
 - Trading code not archived yet (`src/seon/trading/` still exists?)
 - `reference-code/` directory not removed
 - `.gitmodules` not cleaned
@@ -255,17 +280,20 @@ The pipeline works. Future domains just need to follow the same convention as `s
 ### 4. Track 2 Status (Unified Agent Runtime)
 
 **Pool layer: ~80% complete (uncommitted).**
+
 - `claim!` exists in `pool.clj` and looks complete: assigns session-id, sets up namespace, injects `*ctx*` via nREPL eval, tracks `::session->port` mapping
 - `release-session!` exists and works: clears session tracking, delegates to `release!`
 - `get-jvm-by-session` exists for lookup by session-id
 - `::session->port` map added to pool state atom
 
 **Session layer: partially updated.**
+
 - `orchestrator/session.clj` requires `seon.flow.pool` (good) but ALSO still requires `seon.agent.ctx` (old system)
 - `orchestrator/nrepl.clj` still exists -- PRD says to DELETE it
 - Session test file significantly simplified (removed nrepl-multi dependency)
 
 **What's missing:**
+
 - `orchestrator/nrepl.clj` not deleted yet
 - `session.clj` not fully migrated to use `pool/claim!` (still has old ctx references)
 - System wiring (`:seon/orchestrator-sessions` depends on `:seon/agent-pool`) -- unclear if done in uncommitted `system.edn` changes
@@ -277,12 +305,14 @@ The pipeline works. Future domains just need to follow the same convention as `s
 **~70% complete (uncommitted).**
 
 Done:
+
 - `src/seon/flow/trace.clj` created (new file): schema registration, `persist-event!` (fire-and-forget to Datalevin), `events-for-session` query
 - `src/seon/flow/harness.clj`: added trace logging on forward, overload, error, and ok events. Uses `(future (trace/persist-event! ...))` for non-blocking persistence.
 - `src/seon/flow/harness/bridge.clj`: added structured logging to `execute-local` (start/end/error events) and `remote-call!` (start/timeout/error/ok events)
 - `src/seon/flow/harness/proxy.clj`: added logging to `proxy-fn` (start/end events)
 
 Not done:
+
 - No Observatory UI integration (no surface of flow events in agent detail view)
 - No end-to-end verification (launch agent, verify trace visible)
 - No tests for `trace.clj`
@@ -324,12 +354,14 @@ Not done:
 ## Track 5: Ctx Unification
 
 ### What Changed
+
 - `seon.ctx/create!` now accepts `::validate?` (default false) and `::reserved-keys` (default {})
 - When `validate?` is true, atom gets a `:validator` fn that checks: map type, namespaced keys, registered schemas, value validation, reserved key immutability
 - `session.clj` uses `ctx/create!` with `validate?: true` and `reserved-keys` for agent isolation, then `ctx/destroy!` for cleanup
 - `seon.agent.ctx` deleted entirely -- all its TODO stubs (time-travel, persist-snapshot) were dead code
 
 ### Gotchas
+
 - The atom `:validator` function runs on every `swap!`/`reset!` -- if validation is expensive, set `::validate? false`
 - Reserved keys are tracked in an atom (`reserved-keys-snapshot`) inside the closure, not in the atom value itself
 - `session.clj` no longer stores `::flush!` / `::close!` in the session registry -- cleanup goes through `ctx/destroy!`
@@ -350,6 +382,7 @@ Server started clean with 12 components (11 + `:seon/graph-db`). `(user/agents)`
 Command: `(user/launch-agent!! 'seon.health "List files in src/seon/health/ ..." :files [".claude/AGENT.md"])`
 
 Result: **SUCCESS**
+
 - Status: `:completed`
 - Duration: 22.6s
 - Cost: $0.25
@@ -409,9 +442,11 @@ Result: **SUCCESS**
 ## Render Pipeline Step 5: Graph Ingestion Wiring
 
 ### What Was Broken
+
 The render pipeline returned generic output despite all the pieces being in place (scanner, linker, ingest, render resolution). Two bugs:
 
 ### Bug 1: Test pollution of `render/*conn-override`
+
 `render_test.clj` called `render/set-conn!` in tests to inject a temp local Datalevin conn, but the `:each` fixture never reset it to nil. When the dev hook ran tests as part of its PostToolUse pipeline, the override atom was left pointing at a closed/empty local Store. All subsequent `render/get-conn` calls returned the stale test conn instead of the system's remote conn.
 
 **Fix:** Added `(render/set-conn! nil)` to the `finally` block of both `render_test.clj` and `workout_test.clj` test fixtures.
@@ -419,11 +454,13 @@ The render pipeline returned generic output despite all the pieces being in plac
 **Gotcha for future agents:** Any test that calls `render/set-conn!` MUST clean it up. The dev hook runs tests in-process, so global atom mutations leak into the running system.
 
 ### Bug 2: Spec/function ordering in `ingest-incremental!`
+
 `ingest-incremental!` transacted specs AFTER functions, but `link-fns-to-specs` adds `:seon.fn/output-spec [:seon.spec/key ...]` lookup refs to function entities. When specs don't exist yet, Datalevin throws "Nothing found for entity id". `ingest-analysis!` already had the correct order (specs before functions).
 
 **Fix:** Moved spec transact before function transact in `ingest-incremental!`.
 
 ### Verification
+
 After fixes: `(seon.render/try-render {:seon.health.workout/exercise "Squat" ...} :ai)` returns `"Squat — 5x5 @ 100kg"`. The `for-ai` recursive renderer also discovers workout renderers when rendering ns-data vars.
 
 ---

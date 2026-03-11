@@ -27,6 +27,7 @@ Build two things:
 ### The Problem
 
 Current `(logs)` and `(log-summary)` in `env/dev/clj/user.clj` are dangerous:
+
 - Can return thousands of lines, blowing AI agent context
 - Print strings instead of returning data structures
 - No way to get context around a specific line number
@@ -34,6 +35,7 @@ Current `(logs)` and `(log-summary)` in `env/dev/clj/user.clj` are dangerous:
 ### Goals
 
 Create new log query functions that:
+
 - **Never return more than ~100 lines** (hard cap, silent truncation)
 - **Return data structures** (maps, vectors) not printed strings
 - **Prioritize errors** - quick way to see "what went wrong"
@@ -61,6 +63,7 @@ Create new log query functions that:
 ### Goals
 
 Create a `/logs` page that:
+
 - Shows live log updates (SSE streaming)
 - Lets user filter by log level
 - Has a terminal-style dark UI
@@ -75,6 +78,7 @@ Create a `/logs` page that:
 ### CSS Note
 
 We want Tailwind. Options to evaluate:
+
 - `reference-code/sail/` - Clojure-based approach (2 years old, may need updating)
 - Tailwind CLI with watch
 - CDN for quick prototyping

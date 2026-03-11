@@ -77,6 +77,7 @@ clj-kondo --lint src --config '{:output {:analysis true}}'
 ### Editor Integration
 
 clj-kondo powers clojure-lsp, which integrates with:
+
 - VS Code (Calva extension)
 - Emacs (lsp-mode)
 - Neovim (nvim-lspconfig)
@@ -154,6 +155,7 @@ Splint can automatically fix many style issues:
 The `--autocorrect` flag only applies "safe" fixes - transformations that are guaranteed to preserve behavior. Manual review is still recommended after auto-fixing.
 
 **Safe fixes include:**
+
 - `(= x 0)` -> `(zero? x)`
 - `(= nil x)` -> `(nil? x)`
 - `(not (= ...))` -> `(not= ...)`
@@ -161,6 +163,7 @@ The `--autocorrect` flag only applies "safe" fixes - transformations that are gu
 - `(- x 1)` -> `(dec x)`
 
 **NOT auto-fixed (require manual review):**
+
 - Function length violations
 - Parameter count violations
 - Some lint warnings
@@ -206,6 +209,7 @@ Design notes for hook integration:
 This happens when running Splint via `clj` instead of `bb`. Splint requires Babashka >= 1.12.205 or has compatibility issues with some Clojure versions.
 
 **Solution**: Always use Babashka:
+
 ```bash
 bb -Sdeps '{:deps {io.github.noahtheduke/splint {:mvn/version "1.22.0"}}}' -m noahtheduke.splint src
 ```
@@ -220,6 +224,7 @@ clj-kondo may not recognize macros from third-party libraries. Add hooks:
 ```
 
 Or import configs from libraries:
+
 ```bash
 clj-kondo --copy-configs --dependencies --lint "$(clj -Spath)"
 ```

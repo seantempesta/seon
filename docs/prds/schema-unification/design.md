@@ -6,6 +6,7 @@
 ## Problem
 
 Seon maintains two parallel schema systems that diverge, causing LMDB crashes:
+
 1. **Malli schemas** (`seon.schema/register!`) -- define types for validation
 2. **Datalevin schemas** (hardcoded maps in runtime.clj, ingest.clj, ctx.clj, repl.clj, trace.clj) -- define storage types
 
@@ -130,6 +131,7 @@ This becomes the contract test and the feedback loop for agents developing schem
 ## Key Behavioral Findings (from REPL testing)
 
 ### Absence Semantics in Datalevin
+
 - Absent key in transact map means "leave unchanged" (NOT retract)
 - `d/pull` omits absent attributes entirely (key not in map, not nil)
 - To remove a value: explicit `[:db/retract eid attr]` required
@@ -137,26 +139,31 @@ This becomes the contract test and the feedback loop for agents developing schem
 - Transacting nil throws "Cannot store nil as a value"
 
 ### Cardinality-Many
+
 - Datalevin stores as individual datoms (one per value)
 - `d/pull` returns a **vector** (not a set)
 - Both vector and set inputs work at transact time
 
 ### Refs
+
 - **Component refs** (`{:db/isComponent true}`): `d/pull [*]` returns full nested entity
 - **Non-component refs**: `d/pull [*]` returns `{:db/id N}` (just entity ID in map)
 - **Lookup refs**: `[:identity-attr value]` resolved to entity ID at transact time
 - **Target must exist**: lookup ref to nonexistent entity fails
 
 ### Keywords in Datalevin
+
 - Stored as-is (namespace + name bytes via `key-sym-bytes`)
 - `clojure.core/namespace` and `clojure.core/name` called on the value
 - **If value is not Named (String, Vector, etc.), LMDB crashes** -- this is our #1 bug source
 
 ### NaN
+
 - `Double/NaN` causes `AssertionError` in `datalevin.bits/encode-double`
 - Must reject before transact (Malli validation catches this)
 
 ### Float
+
 - Malli `:float` generator produces `Double`, not `Float`
 - Datalevin coerces via `(float v)` -- works but loses precision
 - Roundtrip: `Double` in -> `Float` out
@@ -166,12 +173,15 @@ This becomes the contract test and the feedback loop for agents developing schem
 ## Bugs Fixed (2026-03-05)
 
 ### Bug 1: trace.clj passes conn where keyword expected -- FIXED
+
 `persist-event!` now uses `(db/transact! :seon.flow [entity])`.
 
 ### Bug 2: ensure-schema! silently skips unmappable types -- FIXED
+
 Now throws ex-info with clear message.
 
 ### Bug 3: trace/ctx datalevin-schema not in merged schema -- FIXED
+
 Both added to `runtime-merged-schema`.
 
 ---
@@ -181,6 +191,7 @@ Both added to `runtime-merged-schema`.
 ### Phase 1: Validation Gate in transact! (DONE)
 
 Added Malli validation to `db/transact!`:
+
 - For each entity map, validates each attribute's value against its registered Malli schema
 - Uses `m/validate` (fast boolean) first, only calls `m/explain` on failure
 - Throws `ex-info` with `:attr`, `:expected-schema`, `:actual-value`, `:malli-explanation`
@@ -191,6 +202,7 @@ Added Malli validation to `db/transact!`:
 ### Phase 2: Generative Pipeline Test (DONE)
 
 Built `assert-pipeline-roundtrip!` in `test/seon/db/pipeline_test.clj`:
+
 - Takes a Malli `:map` schema, generates N entities, derives Datalevin schema via bridge
 - Transacts each entity, pulls it back, validates against Malli, asserts value equality
 - Pre-flight validation: rejects `:any`, `[:maybe X]`, unnamespaced keys
@@ -201,6 +213,7 @@ Built `assert-pipeline-roundtrip!` in `test/seon/db/pipeline_test.clj`:
 ### Phase 3: Eliminate Hardcoded Schemas (IN PROGRESS)
 
 For each module (runtime, ingest, ctx, trace, repl):
+
 1. Ensure all attrs have Malli `schema/register!` with correct types
 2. Add `:db/unique`, `:db/cardinality`, `:db/isComponent`, `:db/valueType` as Malli properties where needed
 3. Replace hardcoded `datalevin-schema` with `(db-schema/malli-map->datalevin-schema ...)` call
@@ -209,12 +222,14 @@ For each module (runtime, ingest, ctx, trace, repl):
 #### Phase 3a: ctx.clj and repl.clj (DONE)
 
 **ctx.clj** (4 attrs):
+
 - Added `ctx-entity-schema` Malli :map schema with all 4 persisted attrs
 - Replaced hardcoded `datalevin-schema` with `(db-schema/malli-map->datalevin-schema ctx-entity-schema)`
 - Derived schema is identical to the previous hardcoded one (verified in REPL)
 - Pipeline roundtrip test: 20 entities generated and roundtripped successfully
 
 **repl.clj** (8 attrs):
+
 - Added `form-entity-schema` Malli :map schema with all 8 persisted attrs
 - `:form/name` is `{:optional true}` because expressions/requires have no name
 - Replaced hardcoded `datalevin-schema` with `(db-schema/malli-map->datalevin-schema form-entity-schema)`
@@ -223,16 +238,19 @@ For each module (runtime, ingest, ctx, trace, repl):
 - Fixed smell: `:form/created-at` Malli registration was `:any`, now `:inst`
 
 **Pipeline test utility improvement:**
+
 - `roundtrip-one-entity!` now handles non-string identity keys (e.g., UUID)
   by using the generated value instead of synthetic `"gen-N"` strings
 
 **Code smells flagged (not yet fixed):**
+
 - `::form-name` (`:seon.repl/form-name`) is `[:maybe :string]` -- acceptable for function return values (nil for expressions) but not for persisted data. The persisted attr `:form/name` correctly uses `{:optional true} :string`.
 - `::result` (`:seon.repl/result`) is `:any` -- acceptable for function return values (nREPL eval can return anything). Not persisted.
 
 #### Phase 3c: runtime.clj (DONE)
 
 **runtime.clj** (23 attrs across 3 entity types):
+
 - Added `runtime-entity-schema` Malli :map schema (8 attrs, 5 optional)
 - Added `agent-run-entity-schema` Malli :map schema (10 attrs, 8 optional including ref)
 - Added `flow-snap-entity-schema` Malli :map schema (5 attrs, all required)
@@ -244,11 +262,13 @@ For each module (runtime, ingest, ctx, trace, repl):
 - Key finding: `:db/*` properties must be on the :map entry, not the schema/register! call. The bridge reads entry-level properties via `(m/properties entry-schema)`, not schema-level properties.
 
 **Code smells found:**
+
 - None. All callers pass types consistent with the schemas. The `build-tx-map` function correctly uses `cond->` for optional fields, matching the `{:optional true}` annotations.
 
 #### Phase 3d: ingest.clj (DONE)
 
 **ingest.clj** (37 attrs across 6 entity types):
+
 - Added 6 Malli entity schemas: `ns-entity-schema`, `fn-entity-schema`, `call-entity-schema`, `ns-dep-entity-schema`, `spec-entity-schema`, `var-entity-schema`
 - Replaced hardcoded 37-attr `datalevin-schema` with `(merge (db-schema/malli-map->datalevin-schema ...))` of all 6 schemas
 - Derived schema is identical to the previous hardcoded one (verified in REPL, 37 attrs, 0 diff)
@@ -258,11 +278,13 @@ For each module (runtime, ingest, ctx, trace, repl):
 - 7 new tests, 48 new assertions in `test/seon/db/pipeline_test.clj`
 
 **Smells fixed:**
+
 - 4 `:any` refs replaced with `:seon.db/ref` — a custom Malli type defined in `seon.schema` that accepts `pos-int?` (entity IDs) and `[keyword value]` (lookup refs). All 5 ref attrs use it (1 in runtime, 4 in ingest).
 - All `inst?` registrations changed to `:inst` across ingest, runtime, ai, and trace.
 - Bridge (`db/schema.clj`) recognizes `:seon.db/ref` → `{:db/valueType :db.type/ref}`.
 
 **Stress test results (2026-03-05):**
+
 - 5179 functions + 14212 call edges ingested via real clj-kondo analysis
 - Lookup refs resolved to entity IDs, Datalog joins across refs work
 - Nippy roundtrip verified on real entities, flow messages, and edge case types (byte[], Float, Instant, metadata)
@@ -274,6 +296,7 @@ For each module (runtime, ingest, ctx, trace, repl):
 ### Phase 4: Nippy Inter-JVM Channel (COMPLETE)
 
 Replaced EDN serialization in `seon.flow.harness.channel` with Nippy:
+
 - `nippy/fast-freeze` for write, `nippy/fast-thaw` for read
 - Same length-prefixed TCP protocol, binary payload instead of UTF-8 EDN
 - Removed tagged literal machinery from `seon.flow.msg` (print-method, edn-readers, read-edn)
@@ -285,12 +308,14 @@ Replaced EDN serialization in `seon.flow.harness.channel` with Nippy:
 ### Phase 5: Startup Consistency Check (COMPLETE)
 
 At boot, verify all registered Malli schemas derive valid Datalevin types:
+
 - Error on `:any`, `:some`, `:nil`, mixed enums
 - Error on `[:maybe X]` in persisted schema positions
 - Recurse into nested `:map` (component refs) and collections (`:vector`, `:set`)
 - **Only validates persisted schemas** -- wire protocol schemas (`seon.flow.msg`) are excluded because they flow through Nippy over TCP, not Datalevin.
 
 **Implementation:**
+
 - `seon.db.schema/register-entity-schema!` -- explicit registration for persisted entity schemas
 - `seon.db.schema/validate-persisted-schema` -- validate a single schema, returns violation vector
 - `seon.db.schema/validate-persisted-schemas!` -- validate all registered schemas, throws on violation
@@ -316,6 +341,7 @@ These diverge because individual `schema/register!` calls can lose properties (i
 `schema/register!` is the sole carrier of ALL schema metadata — type AND persistence properties — via Malli schema properties (the idiomatic Malli pattern, same as `:json-schema` and `:swagger` in Malli's own codebase). Entity schemas are removed from production code.
 
 **Design decision (2026-03-06):** Persistence properties live as Malli properties on the leaf schema, NOT as entry-level properties on `:map` entries (malli-datomic's approach), and NOT as a separate registry/atom. Rationale:
+
 - **One surface.** The Malli registry stores `{keyword schema-form}` with no metadata channel. Properties on the schema are the only way to attach info without a second store.
 - **Define once, inherit everywhere.** Identity/uniqueness belongs to the attribute, not to a particular usage in a particular entity schema.
 - **Idiomatic Malli.** Malli's own JSON Schema and Swagger modules read custom properties from `(m/properties schema)`. This is the blessed pattern.
@@ -378,6 +404,7 @@ Modules like `ingest.clj` that had BOTH entity schemas AND manual `schema/regist
 **Banned types (rejected at registration):** `:any`, `:some`, `:nil`, `[:maybe X]` on persisted data, mixed-type enums.
 
 **Files to change:**
+
 - `src/seon/db/schema.clj` — bridge reads `:seon.db/*` from resolved leaf properties; remove entry-level `:db/*` reading; simplify or remove `register-entity-schema!` / `validate-persisted-schemas!`
 - `src/seon/db.clj` — simplify `ensure-schema!` (remove `extract-db-props`, bridge reads from registry)
 - `src/seon/graph/ingest.clj` — remove entity schema vars, remove `:db/unique` from entry props, update `register!` calls to use `:seon.db/identity`
@@ -392,6 +419,7 @@ Modules like `ingest.clj` that had BOTH entity schemas AND manual `schema/regist
 ### Phase 5a: Wire Protocol Fixes (IN PROGRESS)
 
 Fix settled-decision violations in `seon.flow.msg`:
+
 - `::created-at` `[:fn inst?]` -> `:inst` (all timestamps use `:inst`)
 - `::error-data` `[:maybe :map]` -> `:map` with `{:optional true}` on entries
 - `bridge.clj` conditionally assoc `::error-data` only when `(ex-data e)` is non-nil
@@ -403,6 +431,7 @@ Fix settled-decision violations in `seon.flow.msg`:
 **Insight:** Every function called through the wire protocol has a `:malli/schema` that specifies its argument and return types. Every payload key is a namespaced keyword with a registered Malli schema. We can validate dynamically against the registry instead of statically declaring `:any`.
 
 **Approach:** At the message send/receive boundary, recursively validate content fields against the Malli registry:
+
 - `::args` -- resolve `::fn` var -> get `:malli/schema` -> validate args against input `:cat`
 - `::value` -- same function -> validate against return schema
 - `::payload` -- walk the map, validate each value against `(schema/resolve key)`
@@ -423,6 +452,7 @@ Replace `::html :any` with a concrete type. HTML output is Hiccup -- vectors, st
 **Problem:** `seon.ai.datalevin` names the implementation detail (Datalevin) instead of the responsibility (AI storage). The namespace doesn't touch `datalevin.core` -- it goes through `seon.db` exclusively. Additionally, ~15 `dl-*` functions violate conventions: positional args instead of map-in/map-out, missing `:malli/schema`, defensive nil-stripping instead of clean data.
 
 **Scope:**
+
 1. Rename namespace: `seon.ai.datalevin` -> `seon.ai.store`
 2. Rename all `dl-*` functions to drop the prefix (e.g., `dl-get-session` -> `get-session`)
 3. Add `:malli/schema` to all public functions
@@ -434,6 +464,7 @@ Replace `::html :any` with a concrete type. HTML output is Hiccup -- vectors, st
 9. Rename test file: `seon.ai.datalevin-test` -> `seon.ai.store-test`
 
 **Consumers (4 files):**
+
 - `src/seon/ai.clj` -- uses `requiring-resolve` for lazy loading
 - `src/seon/ai/claude.clj` -- uses `requiring-resolve` for real-time persistence
 - `src/seon/web/agents.clj` -- direct require
@@ -480,6 +511,7 @@ Categories: leaf types (9), enums (3), schema derivation (4), maybe/nil (2), car
 **Not entity-count-related** -- it's about serialized payload size. 14K entities with `pull [*]` likely produces a large Nippy payload.
 
 **Open questions:**
+
 1. **Nippy compression** -- `fast-freeze` (what Datalevin uses) skips compression for speed. Standard `nippy/freeze` uses LZ4 compression by default. Can we configure Datalevin to use compressed serialization? Or does Datalevin's protocol use its own serialization layer independent of Nippy?
 2. **Batched pulls** -- workaround: split large pulls into batches (e.g., 1000 entities at a time). Does Datalevin support query pagination natively?
 3. **PR to Datalevin** -- change `.putInt`/`.getInt` to `.putLong`/`.getLong` in protocol.clj? Breaking wire protocol change -- would need Datalevin maintainer buy-in.
@@ -488,6 +520,7 @@ Categories: leaf types (9), enums (3), schema derivation (4), maybe/nil (2), car
 ## Prior Art
 
 ### malli-datomic (`reference-code/malli-datomic/`)
+
 - Schema derivation only, no serialization opinions
 - Maps `:set`/`:map`/`:vector`/`:sequential` to `:db.type/ref`
 - Copies `:db/*` properties from Malli entry options (same as our bridge)
@@ -495,6 +528,7 @@ Categories: leaf types (9), enums (3), schema derivation (4), maybe/nil (2), car
 - Has zero `[:maybe]` support
 
 ### spectomic (`reference-code/spectomic/`)
+
 - Generates 100 samples, infers types from Java classes
 - Filters nil samples for `s/nilable` (same as our "strip nils" approach)
 - Key insight: **generative testing of the schema itself** -- verify all samples map to one Datalevin type

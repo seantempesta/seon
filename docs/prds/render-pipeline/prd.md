@@ -64,6 +64,7 @@ These are already built and working:
 **Goal**: One working render function discovered from Datalevin, producing output for both formats.
 
 1. **Create `seon.health.workout.render`** (or similar domain `.render` namespace):
+
    ```clojure
    (ns seon.health.workout.render
      (:require [seon.schema :as schema]))
@@ -93,6 +94,7 @@ These are already built and working:
 **Goal**: `seon.render/render` uses Datalevin discovery, old manual registry removed.
 
 1. **Add resolution cache** to `seon.render`:
+
    ```clojure
    (defonce ^:private resolution-cache (atom {}))
    ;; Key: [format (set (keys data))], Value: qualified-name string
@@ -181,6 +183,7 @@ This means a namespace step has typed out-ports for each render format. The SSE 
 ## Verification
 
 After each phase:
+
 1. Run focused tests for changed namespaces
 2. Run full suite: `clojure -M:test -m kaocha.runner` — 0 failures
 3. After Phase 1: verify render function appears in Datalevin, `find-renderer` discovers it

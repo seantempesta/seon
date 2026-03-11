@@ -15,6 +15,7 @@
          '[cheshire.core :as json]
          '[clojure.edn :as edn]
          '[clojure.java.io :as io]
+         '[clojure.java.shell :as shell]
          '[edamame.core :as edamame])
 
 ;;; ---------------------------------------------------------------------------
@@ -291,6 +292,37 @@
                 (log! "RESTORED" file-path "Error was:" (:error validation))))))))))
 
 ;;; ---------------------------------------------------------------------------
+;;; Markdown Linting
+;;; ---------------------------------------------------------------------------
+
+(defn- docs-markdown-file?
+  "Returns true if file-path is a .md file under docs/."
+  [file-path]
+  (when file-path
+    (let [lower-path (clojure.string/lower-case file-path)]
+      (and (clojure.string/ends-with? lower-path ".md")
+           (or (clojure.string/starts-with? lower-path "docs/")
+               (clojure.string/includes? lower-path "/docs/"))))))
+
+(defn- lint-markdown!
+  "Run markdownlint-cli2 --fix on a file. Returns feedback string or nil."
+  [file-path]
+  (try
+    (let [{:keys [exit out err]} (shell/sh "npx" "markdownlint-cli2" "--fix" file-path)]
+      (if (zero? exit)
+        (do (log! "MARKDOWN_LINT" "clean" file-path)
+            "markdown lint: clean")
+        (let [output (str (when (seq out) out) (when (seq err) err))
+              trimmed (if (> (count output) 800)
+                        (str (subs output 0 800) "\n... (truncated)")
+                        output)]
+          (log! "MARKDOWN_LINT" "violations" file-path)
+          (str "markdown lint: issues found (non-blocking)\n" trimmed))))
+    (catch Exception e
+      (log! "MARKDOWN_LINT" "error" (.getMessage e))
+      nil)))
+
+;;; ---------------------------------------------------------------------------
 ;;; Fast Path (skip nREPL for non-Clojure files)
 ;;; ---------------------------------------------------------------------------
 
@@ -377,9 +409,20 @@
 
       ;; Fast path: skip nREPL for non-Clojure files
       (if (should-skip-nrepl? event)
-        (do
-          (log! "SKIP_NON_CLJ" (or file-path "unknown"))
-          (continue!))
+        (if (and (= (:hook_event_name event) "PostToolUse")
+                 (docs-markdown-file? file-path))
+          ;; Markdown file under docs/ — run linter, report as feedback
+          (let [feedback (lint-markdown! file-path)]
+            (log! "MARKDOWN_LINT_RUN" (or file-path "unknown"))
+            (if feedback
+              (output! {:continue true
+                        :hookSpecificOutput {:hookEventName "PostToolUse"
+                                             :additionalContext feedback}})
+              (continue!)))
+          ;; Other non-Clojure file — skip silently
+          (do
+            (log! "SKIP_NON_CLJ" (or file-path "unknown"))
+            (continue!)))
 
         ;; Clojure file: validate syntax before allowing edit
         (if-let [block-response (or (validate-clojure-edit event)

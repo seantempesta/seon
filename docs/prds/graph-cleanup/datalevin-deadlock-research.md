@@ -76,6 +76,7 @@ Any thread calling `d/transact!` on the same `conn` will block at `(locking orig
 If we can close the underlying `SocketChannel`, the blocked `receive-ch` call will throw `AsynchronousCloseException`. This will unwind through the `locking` blocks, releasing all monitors.
 
 **How:** The Datalevin `ConnectionPool` holds `Connection` objects with a `SocketChannel`. We can:
+
 1. Detect the deadlock (e.g., try `locking conn` with a timeout via `ReentrantLock.tryLock`, or track which thread holds the lock)
 2. Access the connection's socket and `.close()` it
 3. The blocked thread gets `AsynchronousCloseException`, monitors release
@@ -84,6 +85,7 @@ If we can close the underlying `SocketChannel`, the blocked `receive-ch` call wi
 **Difficulty:** Medium. The `Connection` and `ConnectionPool` types are package-private (`^:no-doc`). We'd need reflection or to access the `DatalogStore`'s client to get at the pool and its connections.
 
 **Implementation sketch:**
+
 ```clojure
 (defn force-release-deadlock! [conn]
   ;; 1. Get the DatalogStore from the DB
@@ -139,10 +141,13 @@ Route all `d/transact!` calls through a single dedicated thread (e.g., a core.as
 ### Option A: Replace `locking` with `ReentrantLock.tryLock(timeout)`
 
 In `datalevin.conn/with-transaction`, replace:
+
 ```clojure
 (locking orig-conn ...)
 ```
+
 with:
+
 ```clojure
 (let [lock (.getLock orig-conn)]  ;; store a ReentrantLock in conn metadata
   (if (.tryLock lock 10 TimeUnit/SECONDS)
@@ -155,6 +160,7 @@ with:
 ### Option B: Add Socket Timeout
 
 Set `SO_TIMEOUT` on the `SocketChannel` in `datalevin.client/connect-socket`:
+
 ```java
 .setOption(StandardSocketOptions/SO_TIMEOUT, 30000)
 ```

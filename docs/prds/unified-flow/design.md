@@ -199,6 +199,7 @@ From an agent JVM, `seon.db/transact!` is a proxy function that sends this throu
 ### Killable/Restartable
 
 Because the writer is a process in the flow:
+
 - `flow/pause-proc` pauses it (for backups)
 - `flow/resume-proc` resumes it
 - `flow/stop` + `flow/start` restarts the whole flow (including writer)
@@ -207,6 +208,7 @@ Because the writer is a process in the flow:
 ### Internal Per-DB Parallelism (Optional)
 
 The writer step-fn receives requests serially (one at a time through transform). For Phase 1, this is fine -- writes are serialized. If throughput matters later, the writer could:
+
 1. Use `:workload :compute` so transform runs on a thread pool
 2. Internally dispatch to per-DB `d/transact!` calls that can run in parallel
 3. Or split into per-DB writer processes (more topology, but flow handles the wiring)

@@ -9,6 +9,7 @@
 ## Executive Summary
 
 This research explored three key questions:
+
 1. **Q5: Does datafy/nav help for schema-typed maps?** Yes, via metadata-based protocol extension
 2. **Q4: How does multi-format dispatch work?** Multimethod on `[format, render-type]` or separate multimethods per format
 3. **Q6: How to integrate with nREPL → MCP flow?** Wrapper function at MCP level or explicit `for-ai` calls
@@ -83,6 +84,7 @@ We can attach Malli schemas to values via metadata, then extract render hints fr
 ### Verdict on Datafy/Nav
 
 **Complementary, not alternative.** Datafy/nav is useful for:
+
 - Navigation into nested structures
 - Transforming objects to data representations
 - Carrying context through navigation
@@ -148,12 +150,14 @@ But for **rendering**, a simpler metadata-based multimethod dispatch is more app
 ```
 
 **Pros:**
+
 - Simple single dispatch
 - Easy to add new render types
 - Follows Reveal's proven pattern
 - Clear separation of concerns
 
 **Cons:**
+
 - Three defmethods per type
 
 ### REPL Registration Helper
@@ -184,6 +188,7 @@ Collections need to recursively render their children:
 ```
 
 This allows:
+
 ```clojure
 [Position: AAPL x100 @ $150.0, Position: GOOGL x50 @ $140.0]
 ```

@@ -34,10 +34,12 @@ Use EDN files in `data/polymarket/` for the research phase.
 ### Consequences
 
 **Benefits:**
+
 - Faster iteration during research
 - Easy to share data files
 
 **Costs:**
+
 - No temporal queries (acceptable for initial analysis)
 - Manual file management
 

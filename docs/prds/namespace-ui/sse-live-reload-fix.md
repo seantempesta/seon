@@ -9,6 +9,7 @@ Code changes to SSE-rendered views (like the Agent Observatory) weren't appearin
 ### Previous Agent (6302) Findings
 
 Agent 6302 investigated and found:
+
 1. **Var dereferencing works** - Clojure resolves function calls through vars, so redefining a function updates what callers see
 2. **`h/html` picks up dynamic content** - The Chassis HTML macro evaluates content at render time
 3. **Hash-based change detection is correct** - SSE only sends updates when `(not= last-view-hash new-view-hash)`
@@ -64,6 +65,7 @@ This tells clj-reload to call any `after-ns-reload` function defined in a namesp
 ## Why This Matters
 
 For code changes to appear in the browser:
+
 1. The render function must produce **different HTML** (otherwise hash is same)
 2. The var reference must resolve to the **new function** (var deref handles this)
 3. The reload hook ensures any **captured handler state** is refreshed
@@ -71,6 +73,7 @@ For code changes to appear in the browser:
 ## Testing
 
 Verified the fix works:
+
 1. Made a visible code change (added "[LIVE]" to heading)
 2. Called `(user/reload)`
 3. Hash changed from `7ba80be9` to `4b3286c3`

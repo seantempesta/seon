@@ -11,6 +11,7 @@ status: production
 **70 test files, ~819 `deftest` forms** across `test/seon/`.
 
 Test files mirror source files with a `-test` suffix:
+
 - `src/seon/ctx.clj` -> `test/seon/ctx_test.clj`
 - `src/seon/db/schema.clj` -> `test/seon/db/schema_test.clj`
 
@@ -23,6 +24,7 @@ Test files mirror source files with a `-test` suffix:
 | Generative / Pipeline | ~3 files | Malli generators, `assert-pipeline-roundtrip!`, schema->DB->pull verification |
 
 **Integration test files** (excluded from default runs):
+
 - `test/seon/flow/pool_integration_test.clj` — real JVM spawning
 - `test/seon/flow/domain_integration_test.clj` — cross-namespace on real JVMs
 - `test/seon/db/datalevin/backup_test.clj` — filesystem I/O
@@ -30,6 +32,7 @@ Test files mirror source files with a `-test` suffix:
 - Individual `^:integration` deftests in `flow/pool_test.clj`
 
 **Shared test utilities**: `test/seon/test_utils.clj`
+
 - `with-temp-conn` — temporary Datalevin connection with `:nosync` for speed, auto-cleanup
 - `with-test-datalevin` — fake conn-manager binding `db/*direct-mode*` + `db/*conn-manager*`
 - `with-small-db-size` — fixture binding `dc/*init-db-size*` to 10 MiB (also set globally via `alter-var-root`)
@@ -53,6 +56,7 @@ All tests run inside the running JVM via nREPL. Never spawn a separate `clj -M:t
 All functions return structured data maps (`::success`, `::test-count`, `::pass-count`, `::fail-count`, `::error-count`, `::failures`, `::duration-ms`). Results are stored in an atom — `(last-results)` and `(results-history n)` retrieve them.
 
 Key behaviors:
+
 - **Namespace isolation**: each ns is `remove-ns` + `require :reload` before running, preventing stale state
 - **Crash resilience**: `test-all` wraps each namespace in `safe-run-ns-tests` catching `Throwable` (prevents LMDB native crashes from killing the REPL)
 - **Integration exclusion**: `test-all` filters out namespaces with `^:integration` metadata
@@ -105,6 +109,7 @@ Shell script for when the REPL is down (~30s JVM startup). Runs via `clojure.tes
 ### Fixtures
 
 Most test namespaces use `clojure.test/use-fixtures` with either:
+
 - `:once` fixtures for expensive setup (temp DB connections)
 - `:each` fixtures for per-test isolation
 
@@ -130,6 +135,7 @@ Also provides `assert-tempid-roundtrip!` for entities without a `:db/unique` ide
 ### Malli Generative Testing
 
 8 test files use `malli.generator`:
+
 - `db/pipeline_test.clj` — entity roundtrips (main generative suite)
 - `db/schema_roundtrip_test.clj` — Malli->Datalevin type mapping roundtrips
 - `ai/claude_test.clj`, `ai/agent_test.clj`, `ai/gemini_test.clj`, `ai_test.clj` — AI function contract testing
@@ -208,6 +214,7 @@ Source namespaces with **no corresponding test file**:
 | `seon.getting_started.render` | Getting-started renderer — no tests |
 
 **Notable gaps**:
+
 - `seon.db.datalevin.conn` — the connection manager with per-DB locking is critical concurrency infrastructure with no dedicated tests
 - `seon.web.*` UI namespaces — the entire web view layer (components, logs, flows, agents, namespace views) has no unit tests
 - `seon.dev.instrumentation` — Malli instrumentation lifecycle is untested

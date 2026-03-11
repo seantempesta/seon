@@ -26,6 +26,7 @@ This document analyzes each temporal use case in Seon and proposes migration str
 ### 1. `seon.agent.ctx` - Agent Context Time-Travel
 
 **Current Usage:**
+
 ```clojure
 ;; Point-in-time query using SYSTEM_TIME
 (at {::db conn ::namespace 'seon.trading ::instant #inst "2026-01-04T10:00"})
@@ -37,6 +38,7 @@ This document analyzes each temporal use case in Seon and proposes migration str
 ```
 
 **Why It Needs Time Travel:**
+
 - Agents can "go back in time" to debug state changes
 - Recovery: restore to a known-good state
 - Auditing: see what the agent's context looked like at any point
@@ -47,6 +49,7 @@ This document analyzes each temporal use case in Seon and proposes migration str
 **Proposed Strategy: Option B (Append-only snapshots)**
 
 Instead of relying on XTDB's system-time:
+
 1. Every `swap!` persists a new row with explicit `:snapshot/recorded-at`
 2. Never update rows, only insert new ones
 3. `(at instant)` becomes `WHERE recorded-at <= ? ORDER BY recorded-at DESC LIMIT 1`
@@ -69,6 +72,7 @@ Instead of relying on XTDB's system-time:
 ```
 
 **Trade-offs:**
+
 - (+) Full history preserved
 - (+) Point-in-time queries work identically
 - (+) No magic - explicit timestamps
@@ -82,6 +86,7 @@ Instead of relying on XTDB's system-time:
 ### 2. `seon.db.queries` - Historical IV Time Series
 
 **Current Usage:**
+
 ```clojure
 (defn historical-ivs [node ticker lookback-days]
   (xt/q node
@@ -93,6 +98,7 @@ Instead of relying on XTDB's system-time:
 ```
 
 **Why It Needs Time Travel:**
+
 - Build IV percentile ranks from historical data
 - Compare current IV to 252-day rolling history
 - Calculate where current IV sits vs historical distribution
@@ -119,6 +125,7 @@ The bulk loader already sets `:xt/valid-from` explicitly. Rename to `:quote/reco
 ```
 
 **Trade-offs:**
+
 - (+) Simple, explicit, no magic
 - (+) Already have the data (just different column name)
 - (+) Composable with other predicates
@@ -132,6 +139,7 @@ The bulk loader already sets `:xt/valid-from` explicitly. Rename to `:quote/reco
 ### 3. `seon.trading.signals` - Backtesting Lockdown
 
 **Current Usage:**
+
 ```clojure
 (defn iv-rank [db ticker lookback {:keys [as-of]}]
   (xt/q db
@@ -142,6 +150,7 @@ The bulk loader already sets `:xt/valid-from` explicitly. Rename to `:quote/reco
 ```
 
 **Why It Needs Time Travel:**
+
 - Backtesting must only see data available at simulation time
 - `{:as-of #inst "2025-07-15"}` restricts to data with valid-time <= that instant
 - Prevents look-ahead bias in trading simulations
@@ -165,6 +174,7 @@ With explicit `:quote/recorded-at`, backtesting becomes explicit filtering:
 ```
 
 **Trade-offs:**
+
 - (+) Explicit is better than implicit
 - (+) No hidden temporal magic to understand
 - (+) Easier to debug ("why don't I see this data?")
@@ -178,6 +188,7 @@ With explicit `:quote/recorded-at`, backtesting becomes explicit filtering:
 ### 4. `seon.trading.bulk_load` - Historical Data Insertion
 
 **Current Usage:**
+
 ```clojure
 ;; Sets explicit valid-from for historical data
 {:xt/id "SPY..."
@@ -187,6 +198,7 @@ With explicit `:quote/recorded-at`, backtesting becomes explicit filtering:
 ```
 
 **Why It Needs Time Travel:**
+
 - Loading historical data (e.g., 6 months of options quotes)
 - Each quote has a "quote date" that's the business date
 - Backtesting needs to filter by this date
@@ -205,6 +217,7 @@ Simply use `:quote/recorded-at` instead of `:xt/valid-from`:
 ```
 
 **Trade-offs:**
+
 - (+) Trivial migration
 - (+) Makes timestamp purpose clearer
 - (-) None significant
@@ -216,6 +229,7 @@ Simply use `:quote/recorded-at` instead of `:xt/valid-from`:
 ### 5. `seon.primer.ctx` - Session History
 
 **Current Usage:**
+
 ```clojure
 ;; Point-in-time query
 (db/entity @primer-node :primer-sessions session-id
@@ -226,6 +240,7 @@ Simply use `:quote/recorded-at` instead of `:xt/valid-from`:
 ```
 
 **Why It Needs Time Travel:**
+
 - View session state at any checkpoint
 - Restore to previous state for recovery
 - Debug "what did this session look like an hour ago?"
@@ -244,6 +259,7 @@ Same approach as `agent/ctx.clj`:
 ```
 
 **Trade-offs:**
+
 - (+) Consistent with agent/ctx approach
 - (+) Full history preserved
 - (-) More storage
@@ -255,6 +271,7 @@ Same approach as `agent/ctx.clj`:
 ### 6. `seon.dev.context` - Hook Event Ordering
 
 **Current Usage:**
+
 ```clojure
 ;; Events ordered by XTDB's _valid_from
 "SELECT *, _valid_from FROM edit_event ORDER BY _valid_from"
@@ -265,6 +282,7 @@ Same approach as `agent/ctx.clj`:
 ```
 
 **Why It Needs Time Travel:**
+
 - Order events chronologically
 - Query events in time ranges
 - "Edits since last review" uses _valid_from comparison
@@ -291,6 +309,7 @@ XTDB sets `_valid_from` automatically on insert. We just need to set it ourselve
 ```
 
 **Trade-offs:**
+
 - (+) Trivial migration
 - (+) More explicit
 - (-) Must remember to set timestamp
@@ -302,12 +321,14 @@ XTDB sets `_valid_from` automatically on insert. We just need to set it ourselve
 ### 7. `seon.db.node` - Generic Entity History
 
 **Current Usage:**
+
 ```clojure
 (defn entity-history [node table id]
   "SELECT * FROM table FOR ALL VALID_TIME WHERE _id = ?")
 ```
 
 **Why It Needs Time Travel:**
+
 - Generic wrapper used by primer/ctx.clj
 - Returns all versions of an entity
 
@@ -316,6 +337,7 @@ XTDB sets `_valid_from` automatically on insert. We just need to set it ourselve
 **Proposed Strategy: Depends on caller**
 
 This is infrastructure. The migration strategy depends on what the callers need:
+
 - For append-only tables (ctx, sessions): query by entity-id, order by timestamp
 - For non-temporal tables: not applicable
 
@@ -337,6 +359,7 @@ This is infrastructure. The migration strategy depends on what the callers need:
 ## Summary of Strategies
 
 ### Option A: Explicit Timestamp Columns
+
 **Use for:** Trading data, dev events, any "facts about the world"
 
 - Add `:recorded-at`, `:created-at`, or `:quote/date` column
@@ -345,12 +368,14 @@ This is infrastructure. The migration strategy depends on what the callers need:
 - Similar to how relational DBs work
 
 **Affected files:**
+
 - `db/queries.clj` - `:quote/recorded-at`
 - `trading/signals.clj` - use `:quote/recorded-at` filter
 - `trading/bulk_load.clj` - rename `:xt/valid-from` → `:quote/recorded-at`
 - `dev/context.clj` - `:created-at` on events
 
 ### Option B: Append-Only with Explicit Snapshots
+
 **Use for:** Agent context, session state - anything needing "what was the state at time T?"
 
 - Never update, only insert new rows
@@ -359,18 +384,23 @@ This is infrastructure. The migration strategy depends on what the callers need:
 - History = all rows ordered by `recorded-at`
 
 **Affected files:**
+
 - `agent/ctx.clj` - ctx snapshots
 - `primer/ctx.clj` - session checkpoints
 
 ### Option C: Git Snapshots
+
 **Not needed for any current use case.** All temporal needs can be met with A or B.
 
 Git snapshots remain useful for:
+
 - Disaster recovery (backup the data directory)
 - Major version rollbacks
 
 ### Option D: Drop the Feature
+
 **Not applicable.** All temporal features are actively used:
+
 - Trading data: IV percentiles, backtesting
 - Agent context: debugging, recovery
 - Dev events: ordering, ranges
@@ -380,17 +410,20 @@ Git snapshots remain useful for:
 ## Migration Path
 
 ### Phase 1: Trading Domain
+
 1. Add `:quote/recorded-at` to schema
 2. Update bulk_load transformer to use new field name
 3. Update signals.clj to filter explicitly
 4. Update db/queries.clj IV time series
 
 ### Phase 2: Agent Context
+
 1. Implement append-only persistence in agent/ctx.clj
 2. Migrate `at`, `history`, `restore!` functions
 3. Apply same pattern to primer/ctx.clj
 
 ### Phase 3: Dev Events
+
 1. Add `:created-at` to edit_event, review_event, todo_event
 2. Update record-* functions to set timestamp
 3. Update query functions to use explicit column

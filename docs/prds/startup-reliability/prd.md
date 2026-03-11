@@ -19,6 +19,7 @@ Startup on March 6, 2026 reaches "started successfully," then degrades within ~9
 **A. Call-edge batch write failure during scanner ingest** — The `PersistentVector cannot be cast to Named` error occurs during `DatalogStore/fetch` in the Datalevin remote client. Live schema is correct (cardinality-many keyword, verified via REPL). The failing entity 45362 is a `seon.call` (not `seon.spec`), meaning the error is in the **call edges batch**, not the specs batch. Call edges use lookup ref vectors `[:seon.fn/qualified-name "..."]` — the remote client may misinterpret these as Named values during the `fetch` phase of a batch write. Manual transacts work; the error is specific to the batch written during scanner ingest of `seon.ctx` (tx-count 31). The writer sends the entire tx-data vector without splitting — one bad datom poisons the whole transaction.
 
 **Verified live schema (2026-03-06):**
+
 ```clojure
 (d/schema conn) =>
   :seon.spec/contains-keys  {:db/valueType :db.type/keyword :db/cardinality :db.cardinality/many}
@@ -83,6 +84,7 @@ Scanner builds spec entities with `:seon.spec/contains-keys` as vectors (valid).
 4. **Extend consistency check** (`db/schema.clj:validate-persisted-schemas!`) — currently only checks Malli types. Add: cardinality match, value type match, identity attr match against live Datalevin schema
 
 ### Deliverables
+
 - Scanner ingest completes without write errors
 - Consistency check covers cardinality + value type
 - Single entity failure doesn't fail entire batch
@@ -90,11 +92,13 @@ Scanner builds spec entities with `:seon.spec/contains-keys` as vectors (valid).
 ### Results (2026-03-06)
 
 **Investigation findings:**
+
 - Entity 45362 is a valid `seon.call` entity (from-fn: `seon.system/run-code-scan!`, to-fn: `clojure.core/->>`). No corrupt datoms found.
 - The `PersistentVector cannot be cast to Named` error is intermittent -- likely a Datalevin remote client serialization issue with lookup ref vectors in large batches, not a data corruption issue.
 - Live Datalevin schema matches all 104 Malli-derived attributes with zero mismatches.
 
 **Changes made:**
+
 1. `src/seon/graph/ingest.clj` -- Added `safe-transact!` helper for error isolation. All individual `db/transact!` calls in `ingest-namespace!` now use `safe-transact!` which catches and logs failures without propagating. `transact-in-batches!` now returns `{:succeeded N :failed N :errors [...]}` with per-batch error isolation.
 2. `src/seon/db/schema.clj` -- Added `validate-against-live-schema` function that compares all registered Malli-derived schemas against the live Datalevin schema, checking value type, cardinality, and uniqueness constraint matches. Verified in REPL: 104 attributes checked, zero mismatches.
 
@@ -126,11 +130,13 @@ Bind both `db/*direct-mode*` and `db/*conn-manager*` at each `init-key` call sit
 ```
 
 ### Affected Components
+
 1. `:seon/runtime-db` (system.clj:210) — `runtime/register!`
 2. `:seon.graph/scanner` (system.clj:307) — `runtime/register!`
 3. `:seon.flow/infrastructure` (system.clj:344 → topology.clj:674) — `runtime/register-flow!`
 
 ### Deliverables
+
 - Zero "Failed to persist runtime instance" warnings at startup
 - All runtime instances visible in Datalevin after boot
 
@@ -173,6 +179,7 @@ Writer does at most 1 reconnect retry for connection errors (writer.clj:183-207)
 4. **Per-request telemetry**: Stamp request with injection time, log queue-wait vs execution-time
 
 ### Deliverables
+
 - No scanner-induced timeout storms during startup
 - Clear degraded-mode behavior if DB is unhealthy
 - Flow metrics in logs
@@ -180,11 +187,13 @@ Writer does at most 1 reconnect retry for connection errors (writer.clj:183-207)
 ### Results (2026-03-06)
 
 **Changes made:**
+
 1. `src/seon/db.clj` -- `transact!` 3rd arg renamed from `tx-meta` (unused) to `opts`, now threaded through to `write!` which passes it to `flow-request!`. Callers can pass `{:timeout-ms 30000}` for longer-running background writes.
 2. `src/seon/system.clj` -- `run-code-scan!` now has a circuit breaker. Tracks `consecutive-failures`, `ingested`, `failed`, and `skipped` counts. After 3 consecutive ingest failures, sets `circuit-open?` and skips remaining namespaces. Signals `:degraded` to `seon.health/set-startup-phase!` when circuit breaker trips. Logs a clear summary: `{:files-processed N :namespaces-total N :ingested N :failed N :skipped N}`.
 3. `src/seon/db/datalevin/writer.clj` -- Added `transact-with-timeout!` helper that wraps `d/transact!` in a `future+deref` with 30s timeout. All three `d/transact!` call sites in `infra-writer-step` (raw-conn path, managed path, retry path) now use this wrapper. A hung Datalevin remote will timeout and throw after 30s instead of blocking the writer thread indefinitely.
 
 **Not implemented:**
+
 - Per-request telemetry (item 4) -- deferred as lower priority. The writer already logs slow writes (>1s) with elapsed time and tx-count.
 - Scanner ingest does not yet pass `{:timeout-ms 30000}` because `ingest-namespace!` uses `safe-transact!` which calls `db/transact!` without opts. The error isolation in `safe-transact!` plus the writer-level 30s timeout together provide adequate protection.
 
@@ -199,6 +208,7 @@ Writer does at most 1 reconnect retry for connection errors (writer.clj:183-207)
 Agent JVMs have 256MB heap + 64MB metaspace. After AGENT_READY, `instrumentation/start!` loads `malli.generator` + `test.check` for ALL namespaces. This likely causes OOM. Stderr is unhandled so crash reason is invisible.
 
 ### Agent Runner Post-Ready Code (agent_runner.clj:101-110)
+
 ```clojure
 (let [result (instrumentation/start! {})]     ;; <-- likely OOM here
   (log/info "Malli instrumentation" result))
@@ -208,19 +218,23 @@ Agent JVMs have 256MB heap + 64MB metaspace. After AGENT_READY, `instrumentation
 ```
 
 ### JVM Settings (deps.edn:137-141) — BEFORE
+
 ```
 -Xms128m -Xmx256m -XX:+UseSerialGC -XX:MaxMetaspaceSize=64m -XX:TieredStopAtLevel=1
 ```
 
 ### JVM Settings — AFTER (Gemini-reviewed)
+
 ```
 -Xms256m -Xmx512m -XX:+ExitOnOutOfMemoryError -XX:+HeapDumpOnOutOfMemoryError -Djava.awt.headless=true
 ```
+
 **Rationale (Gemini review):** Removed `MaxMetaspaceSize` (Clojure generates classes dynamically — capping metaspace kills it). Removed `SerialGC` (G1GC default is better for M1 + core.async threads). Removed `TieredStopAtLevel=1` (kills JIT for warm workers that stay alive). Added `ExitOnOutOfMemoryError` (prevents zombie JVMs — exactly the symptom we had). Expected RSS per agent: ~500-600MB. Total for 3 agents + Seon + Datalevin fits in 16GB.
 
 ### Investigation (FIRST)
 
 Run manually and watch stderr:
+
 ```bash
 clojure -M:agent --port 7900 --namespace seon.pool.warm \
   --datalevin-uri "dtlv://datalevin:datalevin@127.0.0.1:8898/agent-7900" 2>&1 | tee /tmp/agent-crash.log
@@ -236,6 +250,7 @@ clojure -M:agent --port 7900 --namespace seon.pool.warm \
 6. **`cleanup-stale-agents!`** only runs at pool creation — run it periodically too
 
 ### Deliverables
+
 - Agent JVMs survive past 30 seconds
 - Crash reason visible in logs at WARN/ERROR level
 - No port exhaustion from infinite respawn loop
@@ -258,6 +273,7 @@ clojure -M:agent --port 7900 --namespace seon.pool.warm \
    - **Deferred instrumentation at claim**: `claim!` triggers `instrumentation/start!` via nREPL eval after namespace code is loaded.
 
 **Not implemented:**
+
 - Periodic `cleanup-stale-agents!` (item 6) -- only runs at pool creation. Low priority since rate limiting prevents port exhaustion.
 
 **Test results:** 16 pool tests (52 assertions), 0 failures. 59 total tests across pool, core, topology, infrastructure, harness, and repl namespaces -- 222 assertions, 0 failures.
@@ -271,6 +287,7 @@ clojure -M:agent --port 7900 --namespace seon.pool.warm \
 `init-orchestrator-session!` (bin/mcp-server:1199) runs synchronously BEFORE message loop (line 1202). Two nREPL calls: connectivity test (30s timeout) + session clone (5s connect). Total blocking: up to 35s.
 
 ### MCP Architecture (verified)
+
 - Blocking tools (`eval`, `create_session`) run in `future`, queue results via `swap-vals!`
 - Quick tools (`interrupt_eval`, `list_sessions`) run synchronously
 - Main loop polls: flush response queue → check stdin → sleep 10ms
@@ -283,6 +300,7 @@ clojure -M:agent --port 7900 --namespace seon.pool.warm \
 3. **Graceful degradation**: If nREPL hung (reachable but slow), return "Seon server is starting up, please retry" instead of blocking 30s. Handle case where init future **never completes** — tools must still return a terminal response
 
 ### Deliverables
+
 - MCP server always responds to `initialize` within 2s
 - Every tool call returns a terminal response within timeout
 - No indefinite hanging behavior
@@ -292,6 +310,7 @@ clojure -M:agent --port 7900 --namespace seon.pool.warm \
 **Files changed:** `bin/mcp-server`
 
 **Approach:**
+
 1. Added `orchestrator-init-ready?` atom to track init completion state.
 2. Moved `init-orchestrator-session!` into a `future` in `-main` so the message loop starts immediately. `handle-initialize` responds without needing nREPL -- confirmed it only sends protocol version and capabilities.
 3. Added guards in `execute-eval` (orchestrator evals only) and `execute-create-session` that check `orchestrator-init-ready?` and throw a clear error ("Seon server is still initializing, please retry in a few seconds") if init hasn't completed.
@@ -311,6 +330,7 @@ clojure -M:agent --port 7900 --namespace seon.pool.warm \
 "System ready" fires when `ig/resume` returns. No post-init health checks. Health endpoint checks port connectivity only.
 
 ### Component Dependency Chain
+
 ```
 Phase 1: schema-registry, nrepl, http-server, tailwind, claude-sdk (no deps)
 Phase 2: datalevin-server → connections → infrastructure → runtime-db → scanner
@@ -337,6 +357,7 @@ Phase 2: datalevin-server → connections → infrastructure → runtime-db → 
 5. **Reclassify warnings**: "Failed to persist runtime instance" → ERROR. Scanner failure → WARN.
 
 ### Deliverables
+
 - "Started successfully" only when operational criteria met
 - Clear degraded-state signaling in logs and health endpoint
 
@@ -365,6 +386,7 @@ Phase 2: datalevin-server → connections → infrastructure → runtime-db → 
 **Test results:** 727 tests, 3643 assertions, 0 failures.
 
 **Remaining issues:**
+
 - Reclassifying "Failed to persist runtime instance" from WARN to ERROR is in Workstream B's scope (runtime.clj), not touched here.
 - Pre-existing convention violations in `health.clj` (several functions missing `:malli/schema` and not using map-in pattern) are out of scope for this task.
 

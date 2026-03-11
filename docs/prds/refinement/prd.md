@@ -19,10 +19,12 @@ An agent uses the Super REPL (via MCP) to execute code in a remote Clojure proce
 ## What's Been Done
 
 ### Track 0: Fix MCP REPL — DONE
+
 - Self-healing nREPL session re-clone in `bin/mcp-server`
 - MCP eval works: `(+ 1 2)` → `3`, `(user/status)` returns system info
 
 ### Track 1: Remove XTDB — DONE
+
 - Trading archived to `docs/archive/trading/`
 - XTDB deps removed from `deps.edn`
 - XTDB components removed from `system.clj` and `system.edn`
@@ -38,7 +40,9 @@ An agent uses the Super REPL (via MCP) to execute code in a remote Clojure proce
 - **494 tests, 0 failures** (down from 712 — deleted tests for removed code, added new tests)
 
 ### Track 2: Unified Agent Runtime — ~98% DONE
+
 **Done:**
+
 - Pool layer: `claim!`, `release-session!`, `get-jvm-by-session`, `::session->port` tracking (`src/seon/flow/pool.clj`)
 - `orchestrator/nrepl.clj` DELETED (536 lines) + tests
 - System wiring: `:seon/orchestrator-sessions` depends on `:seon/agent-pool`
@@ -49,21 +53,26 @@ An agent uses the Super REPL (via MCP) to execute code in a remote Clojure proce
 - Fixed `resume-key` bugs in `:seon/runtime-db` and `:seon.orchestrator/sessions` (defonce atoms not re-wired on resume)
 
 **Remaining:**
+
 - Auto-proxy injection not started
 
 ### Phase 1: DB Write Coordination — DONE
+
 - `seon.db` — agent-facing API (`transact!`, `q`, `pull`, `pause-writes!`, `resume-writes!`)
 - `seon.db.datalevin.writer` — flow step-fn for coordinated writes
 - All 23 `d/transact!` callsites identified for migration (Track 4)
 
 ### Track 3: Flow Logging + Tracing — ~90% DONE
+
 **Done:**
+
 - `src/seon/flow/trace.clj` — event persistence to Datalevin, `events-for-session` query
 - Structured logging in `bridge.clj`, `harness.clj`, `proxy.clj`
 - Observatory flow event timeline in agent detail view (`web/agents.clj`)
 - `test/seon/flow/trace_test.clj` — 5 tests (require running system)
 
 **Not done:**
+
 - E2e verification (launch agent, verify full trace visible)
 
 ---
@@ -73,6 +82,7 @@ An agent uses the Super REPL (via MCP) to execute code in a remote Clojure proce
 ### Track 5: Unify Context Systems -- DONE
 
 Unified `seon.agent.ctx` into `seon.ctx`. Changes:
+
 - Added `::validate?` and `::reserved-keys` options to `ctx/create!`
 - Ported Malli validation (namespaced keys, registered schemas, value validation)
 - Ported reserved key protection (`:seon.agent/*` and `:seon.ns/*` immutable after creation)
@@ -99,6 +109,7 @@ Unified `seon.agent.ctx` into `seon.ctx`. Changes:
 ### Track 6: E2E Verification + Health Cleanup — PARTIAL
 
 **Verified working:**
+
 1. ✅ Server restart — all 13 components start cleanly
 2. ✅ `user/launch-agent!!` — pool JVM claimed, agent runs, pool released (test: BMI calc, $0.25, 5 turns, 27s)
 3. ✅ Observatory — `/agents` page loads, SSE-driven, shows agent runs with metadata
@@ -107,6 +118,7 @@ Unified `seon.agent.ctx` into `seon.ctx`. Changes:
 6. ✅ Full test suite: 535 tests, 0 failures
 
 **Not working:**
+
 - Datalevin render pipeline: graph analyzer produces 0 function entities, so `find-renderer` always returns nil
 - Cross-ns call routing through flow not verified (depends on auto-proxy injection, Track 2 remaining)
 
@@ -117,21 +129,25 @@ Unified `seon.agent.ctx` into `seon.ctx`. Changes:
 **Goal:** System is resilient to crashes, restarts cleanly, components have proper lifecycles, config errors are caught early with actionable messages.
 
 **Phase 1: Upgrade + Naming** — DONE
+
 - Upgraded Integrant 0.10.0 → 1.0.1 in deps.edn
 - All component keys renamed to match their namespaces
 - `:seon/graph-db` → `:seon/runtime`
 
 **Phase 2: Lifecycle Fixes** — DONE
+
 - suspend/resume added to all 6 components that lacked it (HTTP server, code-scanner, tailwind-watcher, primer-ctx, orchestrator-sessions, agent-pool)
 - Dead code removed (`seon.web.jobs`, `seon.web.stats`)
 
 **Phase 3: Malli Config Validation** — DONE
+
 - Malli schemas for all 13 components
 - `ig/assert-key` validation before init
 - `seon.system/hierarchy` via `derive` for component grouping
 - Error messages that guide debugging: what's wrong, where to look, what to check
 
 **Phase 4: Component Control API** — DEFERRED
+
 - Lower priority; system is stable enough without runtime component control
 - API to start/stop/restart individual components or tiers at runtime
 - Resilience testing: every component in all lifecycle states
@@ -186,6 +202,7 @@ Unified `seon.agent.ctx` into `seon.ctx`. Changes:
 ## Agent Instructions
 
 **All agents MUST:**
+
 1. Use `user/search` with `:files` when hitting resistance or unsure how something works
 2. Test changes via the MCP REPL (`mcp__seon__eval` session_id="orchestrator")
 3. Run focused tests first, full suite before finishing — report exact counts

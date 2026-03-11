@@ -21,6 +21,7 @@
 | 9 | Observatory UI (two-level lookup) | **Done** | orchestrator | Running agents enriched with runtime data, runtime instances table added |
 
 **Deferred (future work, not blocking):**
+
 - Phase 2.5: Instance messaging router (`::msg/from-id`/`::msg/to-id`)
 - Phase 2.6: Schema-driven routing (`seon.runtime.router`)
 
@@ -29,10 +30,12 @@
 ## Phase 1 Implementation Summary (2026-02-21)
 
 ### Files Created
+
 - `src/seon/runtime.clj` — unified runtime registry with 6-char hex ID generation
 - `test/seon/runtime_test.clj` — 10 tests, 33 assertions
 
 ### Files Modified
+
 - `src/seon/system.clj` — added `:seon/graph-db` component, register/unregister calls
 - `resources/system.edn` — added `:seon/graph-db` with dependency wiring
 - `src/seon/ctx.clj` — `generate-id` now delegates to `seon.runtime/generate-id`
@@ -41,6 +44,7 @@
 - `test/seon/orchestrator/session_test.clj` — updated for 6-char IDs
 
 ### Key Changes
+
 1. **`:seon/graph-db` Integrant component** — owns the seon-graph Datalevin connection with merged schema (graph + runtime)
 2. **`seon.runtime/runtime-schema`** — Datalevin schema for `:seon.runtime/*` entities
 3. **`seon.runtime/generate-id`** — canonical 6-char hex generator with collision checking
@@ -49,6 +53,7 @@
 6. **Integrant components registered** — datalevin-server, http-server, nrepl-server, schema-registry, code-scanner, graph-db
 
 ### Test Results
+
 - 504 unit tests pass, 0 failures
 - Runtime tests: 10 tests, 33 assertions
 
@@ -59,6 +64,7 @@
 ### Finding: Four Duplicate ID Systems
 
 The codebase has four ID generators, but only two unique algorithms:
+
 1. `seon.ctx/generate-id` -- 4-char hex (2 random bytes)
 2. `seon.orchestrator.session/generate-session-id` -- identical code to #1
 3. `seon.ai/start-session!` -- `"ses-" + UUID` (separate AI conversation ID)
@@ -110,11 +116,13 @@ A single agent launch creates THREE IDs: 4-char hex (infra), AI session UUID, Cl
 ### REPL Findings
 
 **Graph data available:**
+
 - 660 specs indexed in the graph DB, 213 with `:seon.spec/contains-keys`
 - 66 functions have `:seon.fn/input-spec` refs linking to their input schema
 - Functions across 15 namespaces are linked (seon.ai.claude, seon.ai.agent, seon.dev.*, seon.health, etc.)
 
 **Key-based routing works:**
+
 ```clojure
 ;; Given data keys, find functions that accept data with those keys.
 ;; Two-phase: Datalog finds candidates by key overlap, Clojure filters for subset match.
@@ -294,11 +302,13 @@ The code scanner creates its own connection to the `seon-graph` database:
 ```
 
 The runtime registry needs to use this SAME connection (same DB). Options:
+
 1. Make runtime registry a dep of code-scanner, share the conn
 2. Make runtime registry create its own conn to `seon-graph` with merged schema
 3. Create a `seon-graph` component that both depend on
 
 Option 3 is cleanest. A new `:seon/graph-db` Integrant component that:
+
 - Creates the `seon-graph` connection with merged schema (code graph + runtime)
 - Is depended on by both code-scanner and runtime registry
 - Passes the conn to both

@@ -21,6 +21,7 @@ Steps 1-5 of the render pipeline are done. But the **dynamic namespace lifecycle
 **File:** `src/seon/ctx.clj`
 
 Add `::ctx-schema` option (Malli schema keyword). When provided:
+
 - Set atom `:validator` that validates entire state against the schema on every `swap!`
 - Invalid → throws `ex-info` with `:spec`, `:errors` (Malli humanized explanation)
 - Valid → state accepted, watches fire (persistence, SSE push)
@@ -47,6 +48,7 @@ Persistence stores: entity ID = instance ID, `:seon.ctx/data` = EDN of validated
 **File:** `src/seon/ns/routes.clj` (in `function-call-handler`)
 
 When the webserver calls a namespace function (e.g., `POST /ns/seon.health.workout/add-set!`):
+
 1. Check the function's input spec (from Datalevin: `:seon.fn/render-input-keys` or input spec's contains-keys)
 2. If any key ends in `*ctx*` → inject current `@*ctx*` atom value under that key
 3. If any key ends in `*conn*` → inject `*conn*` under that key
@@ -58,17 +60,20 @@ When the webserver calls a namespace function (e.g., `POST /ns/seon.health.worko
 **File:** `src/seon/ns/routes.clj`
 
 Replace old detection:
+
 - `namespace-has-reactive-render?` → `lifecycle/dynamic-namespace?`
 - `get-initial-state` → `lifecycle/initial-value`
 - `get-render-content-fn` → `lifecycle/find-page-render-fn`
 - Instance creation → `lifecycle/ensure-instance!`
 
 **Instance resolution** (in `ensure-instance!`):
+
 1. `?instance=abc123` → use that specific instance
 2. No `?instance=` → find the **most recent** instance for this namespace in Datalevin
 3. No instances exist → create one, persist it, redirect with `?instance=` in URL
 
 Handler flow:
+
 ```
 ?format=ai|raw → render-for-format (done)
 dynamic? → ensure-instance!(ns, instance-id-or-nil)

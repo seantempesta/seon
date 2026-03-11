@@ -11,6 +11,7 @@ status: production
 The flow topology is Seon's central nervous system. Every cross-boundary operation -- database writes, database reads, REPL eval on agent JVMs, and cross-namespace function calls -- routes through `topology/request!`. This gives a single observation point for all system activity: tracing, backpressure, error collection, and status monitoring.
 
 Two separate flows exist:
+
 1. **Infrastructure flow** -- shared services (DB writer, DB reader, REPL eval, reply router, sinks)
 2. **Namespace flow** -- per-agent routing via [[components/harness]] processes, one per namespace
 
@@ -78,6 +79,7 @@ No functions -- pure schema definitions. Registers schemas for `::request`, `::r
 ## Dependencies
 
 **Uses:**
+
 - `clojure.core.async.flow` -- flow creation, process definition, inject, ping, start/stop/pause/resume
 - `clojure.core.async` -- go-loops for cross-ns relay and error drains
 - [[components/database]] (`seon.db`, `seon.db.datalevin.writer`, `seon.db.datalevin.reader`) -- writer and reader step-fns
@@ -87,6 +89,7 @@ No functions -- pure schema definitions. Registers schemas for `::request`, `::r
 - `integrant.core` -- pool lifecycle component
 
 **Used by:**
+
 - `seon.system` -- Integrant wires `build-infrastructure!` and pool as components
 - `seon.ns.lifecycle` -- uses `build-topology!` to start namespace flows
 - `seon.orchestrator.session` -- uses pool `claim!`/`release-session!` for agent lifecycle
@@ -157,6 +160,7 @@ Built by `build-topology!`. One harness process per namespace, plus shared reply
 ### Cross-JVM Relay
 
 For agent JVMs that need to call functions in other namespaces, `start-cross-ns-relay!` creates a go-loop that:
+
 1. Reads requests from `reverse-request-ch` (sent by agent proxy functions)
 2. Calls `request!` to route through the flow (on a separate thread via `async/thread`)
 3. Sends the reply back on `reverse-reply-ch`

@@ -70,6 +70,7 @@
 ```
 
 **Key finding:** Lookup refs `[:seon.spec/key :seon.foo/bar-request]` are resolved at transact time and stored as entity IDs (1, 2). They are NOT stored as raw vectors. This means:
+
 - Ref joins work because `:seon.fn/output-spec` points to a real entity ID
 - The spec entity must exist BEFORE the fn entity is transacted (which `ingest-namespace!` already does -- specs transacted in step 2, fns in step 3)
 
@@ -134,6 +135,7 @@
 ```
 
 **Key finding:** One `d/pull` gets the full fn+spec data. This means `functions-with-output-key` can:
+
 1. Datalog query to find candidate entity IDs (ref join on output key)
 2. Single `d/pull` per candidate to get qualified-name + input spec contains/optional keys
 3. Compute `required-keys = contains-keys - optional-keys` in Clojure

@@ -63,12 +63,14 @@ For simple `d/transact!` calls (not `with-transaction` blocks), the call goes th
 **Answer: No cross-database serialization needed. Each database has its own memory-mapped files, its own semaphore, and its own LMDB environment.**
 
 Evidence:
+
 - Server stores databases in a `dbs` map keyed by `db-name` (line 598-604)
 - Each database entry has its own `:lock` (Semaphore), `:store`, `:kv-store`, `:dt-db`
 - The `get-lock` function creates a separate `Semaphore(1)` per database name
 - LMDB environments are per-directory — each database maps to a separate directory with its own memory-mapped file
 
 **This means:**
+
 - Writes to `seon` database and writes to `seon.runtime` database can happen concurrently with no interference
 - Each database's writer flow is fully independent
 - No global write lock needed
@@ -86,12 +88,14 @@ Evidence from Datalevin source:
 3. The conn is a Clojure atom wrapping a `DB` record. `with-transaction` does `(reset! orig-conn new-db)` after the write completes
 
 LMDB's MVCC model:
+
 - Read transactions see a consistent snapshot from the moment they start
 - The `MDB_RDONLY` flag creates a read-only transaction that does not conflict with writes
 - Datalevin's `binding/cpp.clj` line 1004 shows explicit read/write transaction handling via `mdb_txn_begin`
 - Read transactions can proceed concurrently with a write transaction
 
 **For remote (client/server) Datalevin:**
+
 - `@conn` returns the locally cached `DB` value (updated after each successful transact)
 - Queries go through the server which uses its own read transactions
 - Reads are never blocked by writes at the LMDB level
@@ -105,6 +109,7 @@ LMDB's MVCC model:
 **Answer: The timeout is appropriate but `future-cancel` is ineffective. The flow replaces this entirely.**
 
 Current code in `seon.db/transact!` (lines 88-114):
+
 ```clojure
 (let [fut (future (d/transact! conn tx-data))
       result (deref fut default-timeout-ms ::timeout)]
@@ -114,6 +119,7 @@ Current code in `seon.db/transact!` (lines 88-114):
 ```
 
 **What happens on timeout:**
+
 1. `deref` returns `::timeout` after 10s
 2. `future-cancel` calls `Thread.interrupt()` on the future's thread
 3. The thread is inside `(locking conn ...)` doing a blocking socket read
@@ -122,6 +128,7 @@ Current code in `seon.db/transact!` (lines 88-114):
 6. But this is unreliable — the thread might be in a non-interruptible section when the interrupt arrives
 
 **The flow replaces this mechanism entirely:**
+
 - Caller threads never touch `d/transact!` or hold monitors
 - The writer flow thread does the blocking I/O
 - If it hangs, the caller's promise times out cleanly
@@ -135,22 +142,26 @@ Current code in `seon.db/transact!` (lines 88-114):
 ## Q6: Datalevin's Three Locks — Why?
 
 **Lock 1: `(locking orig-conn ...)` — Connection-level mutex**
+
 - Protects the conn atom from concurrent mutation
 - Ensures only one thread can read-modify-write the DB value in the atom
 - The atom's `reset!` must happen inside this lock to prevent lost updates
 
 **Lock 2: `(locking (l/write-txn s#) ...)` — Store/LMDB write transaction mutex**
+
 - Protects the write transaction state on the store
 - For local LMDB: ensures only one write transaction is open at a time (LMDB requirement)
 - For remote DatalogStore: the `write-txn` is a volatile holding `:remote-dl-mutex` — used as a coordination point for the `open-transact`/`close-transact` lifecycle
 - Nested inside lock 1 because you need the conn locked before you can safely access its store's write-txn
 
 **Lock 3: `(locking bf ...)` in `client/send-n-receive` — ByteBuffer mutex**
+
 - Protects the shared ByteBuffer used for socket I/O
 - Each `Connection` has one buffer — concurrent sends would corrupt it
 - This is per-connection, not per-database
 
 **Why they can't be consolidated:**
+
 - Locks 1 and 2 protect different things (conn atom vs. LMDB write state). You could theoretically use one lock, but the `with-transaction` macro needs to support both local and remote stores — the remote case does network I/O under lock 2 that shouldn't hold lock 1 any longer than necessary.
 - Lock 3 is in a different module (`client.clj`) protecting a different resource (the wire buffer). Consolidating it with locks 1-2 would couple the connection layer to the transaction layer.
 
@@ -165,6 +176,7 @@ Current code in `seon.db/transact!` (lines 88-114):
 **Server-side disconnect handling:**
 
 From `server.clj` line 646-655:
+
 ```clojure
 (defn- disconnect-client* [^Server server client-id]
   (remove-client server client-id)
@@ -177,28 +189,33 @@ From `server.clj` line 646-655:
 ```
 
 The server removes the client from its tracking and closes the selection key. Additionally:
+
 - `remove-idle-sessions` (line 2574) periodically removes clients that haven't been active within the idle timeout
 - When a client socket closes unexpectedly (network error), the NIO selector detects it on the next select cycle and the server cleans up
 
 **Transaction atomicity:**
 
 LMDB guarantees that write transactions are atomic:
+
 - If a write transaction is committed (`mdb_txn_commit`), all changes are durable
 - If not committed (process dies, socket closes), the transaction is automatically rolled back
 - LMDB uses copy-on-write B+ trees — the old data pages remain valid until a new root is committed
 
 For Datalevin's `tx-data` handler (the normal transact path, line 1695-1722):
+
 - The server receives the transaction data, processes it in `transact*`, and writes the result back
 - If the client socket closes mid-transaction, the server-side write either completes (data committed) or the exception propagates and the server-side state is unchanged
 - The server does NOT hold a long-lived write transaction for regular `tx-data` — it opens and commits within a single handler call
 
 For `open-transact`/`close-transact` (explicit write transactions):
+
 - The server acquires a `Semaphore(1)` on `open-transact`
 - If the client dies without calling `close-transact`, the semaphore is NOT released
 - The `remove-idle-sessions` periodic cleanup eventually removes the dead client and the semaphore can be cleaned up
 - **Risk:** If the semaphore isn't released, no other client can open a write transaction on that database until the server detects the dead session via idle timeout
 
 **Implication for kill-recovery:**
+
 - Killing our writer process (closing the socket) will NOT corrupt the database
 - If we were mid-`d/transact!`, the transaction either committed fully or didn't happen
 - The Datalevin server may hold the semaphore briefly until it detects the dead connection, but regular `tx-data` calls don't use the semaphore — only explicit `open-transact` does
@@ -213,6 +230,7 @@ For `open-transact`/`close-transact` (explicit write transactions):
 Looking at `seon.flow.topology/reply-router-step` (line 121-164): it delivers to promises via side-effect in the transform function, returning `nil` for outputs. This is exactly the pattern the writer should use.
 
 The writer step-fn can:
+
 1. Call `d/transact!` in the transform
 2. Deliver the result to a promise (for imperative callers using `transact-via-flow!`)
 3. Return `nil` for outputs (no flow output channels needed)
@@ -220,6 +238,7 @@ The writer step-fn can:
 If we later want to add flow outputs (e.g., for downstream processing of write results), we can add `:out/result` to describe AND wire connections in the flow config. The promise delivery and the flow output would both happen in the same transform call — no conflict.
 
 **Migration path:**
+
 - Phase 1-3: Promise-only (no flow outputs, `nil` return from transform)
 - Future: Add flow outputs if we want event-driven downstream processing (e.g., write event -> SSE refresh)
 
@@ -253,6 +272,7 @@ Use a dedicated test database (`test-load`) to avoid interfering with production
 ```
 
 Ramp from 10 to 100 to 1000 concurrent writes. Measure:
+
 - **Throughput:** writes/second at each concurrency level
 - **Latency:** p50, p95, p99 per write
 - **Error rate:** what percentage fail?
@@ -273,6 +293,7 @@ Inject an artificial delay into the writer step-fn to simulate a hung `d/transac
 ```
 
 Verify:
+
 - Callers' promises time out after 10s
 - The flow is detectable as stuck (via `flow/ping` timeout)
 - Other callers are blocked at `flow/inject` (channel buffer full)
@@ -295,6 +316,7 @@ Verify:
 ### 4. Data Integrity Verification
 
 After each test:
+
 ```clojure
 (defn verify-integrity! [conn expected-count]
   (let [actual (d/q '[:find (count ?e) .
@@ -305,6 +327,7 @@ After each test:
 ```
 
 Also verify:
+
 - No duplicate entities (each `:test/counter` value appears exactly once)
 - No partial writes (each entity has all expected attributes)
 - Read consistency during writes (query while writes are flowing)
@@ -325,6 +348,7 @@ Also verify:
 ## Flow Error Behavior (REPL-Verified)
 
 **When a step-fn throws an exception:**
+
 ```clojure
 ;; REPL evidence:
 {:s1-count 1, :s1-status :running,     ;; before error
@@ -336,6 +360,7 @@ Also verify:
 ```
 
 **Key findings:**
+
 1. The flow catches `Throwable` (not just `Exception`) in the process loop
 2. The exception is put on `error-chan` with context: `{::flow/pid, ::flow/status, ::flow/state, ::flow/count, ::flow/cid, ::flow/msg, ::flow/op :step, ::flow/ex}`
 3. The process **continues running** after the error — it does NOT die
@@ -343,6 +368,7 @@ Also verify:
 5. The error-chan has a sliding-buffer of 100, so errors won't block the process
 
 **When a step-fn blocks indefinitely:**
+
 ```clojure
 ;; REPL evidence:
 {:s1 {:count 1, :status :running},
@@ -352,6 +378,7 @@ Also verify:
 ```
 
 **Key findings:**
+
 1. A blocked step-fn makes the entire process unresponsive
 2. `flow/ping` times out (returns nil for that process)
 3. `flow/inject` succeeds (returns Future) because it writes to the channel buffer
@@ -379,11 +406,13 @@ Reads go directly through the Datalevin client connection — they do NOT go thr
 **`seon.graph.query`**: All query functions take a `::conn` parameter and call `d/q` or `d/pull` on `@conn` (dereferenced snapshot).
 
 **Should reads go through a flow?** No. Direct client access is correct because:
+
 1. **LMDB MVCC**: Readers never block writers and writers never block readers.
 2. **No contention**: `deref` of the conn atom is lock-free.
 3. **No serialization overhead**: Reads return Clojure data structures directly.
 
 **Read consistency with separate-process writer:**
+
 - After `transact-via-flow!` returns success, the orchestrator's `@conn` may still show the old snapshot until the next query triggers a server round-trip
 - This is fine: most reads happen on subsequent requests where the snapshot is already fresh
 
@@ -415,6 +444,7 @@ Reads go directly through the Datalevin client connection — they do NOT go thr
 ### The Double-Writer Problem
 
 When killing a hung writer JVM and starting a new one:
+
 1. Old JVM may still be alive briefly (process kill is async)
 2. Both JVMs could have connections to the same Datalevin database
 3. Both could attempt `d/transact!` simultaneously
@@ -460,6 +490,7 @@ Clojure promises are JVM-local objects. The cross-JVM mapping uses correlation I
 ```
 
 ACK reader loop:
+
 ```clojure
 (defn start-ack-reader! [in-ch]
   (async/thread

@@ -150,6 +150,7 @@ This is used in tests but is **dangerous for production** - the caller becomes r
 ### Current Architecture
 
 Seon agents run as isolated nREPL processes, each with:
+
 - Separate JVM process
 - Own nREPL server on unique port
 - Own database namespace
@@ -166,11 +167,13 @@ data/datalevin/
 ```
 
 **Pros:**
+
 - Complete isolation
 - No coordination needed
 - Each agent owns its data
 
 **Cons:**
+
 - No shared state between agents
 - Data duplication if agents need same data
 - More disk usage
@@ -188,12 +191,14 @@ Run a Datalevin server, all agents connect as clients:
 ```
 
 **Pros:**
+
 - Shared data access
 - Single source of truth
 - Proper write serialization
 - RBAC for access control
 
 **Cons:**
+
 - Additional server process to manage
 - Network overhead (minimal on localhost)
 - Single point of failure (though LMDB is crash-safe)
@@ -212,10 +217,12 @@ Orchestrator owns the main database, agents get read-only access via snapshots o
 ```
 
 **Pros:**
+
 - Clear ownership
 - Agents can't corrupt main data
 
 **Cons:**
+
 - Snapshots become stale
 - Complex sync logic needed
 
@@ -243,6 +250,7 @@ Orchestrator owns the main database, agents get read-only access via snapshots o
 ### When to Upgrade to Client/Server
 
 Consider client/server mode when:
+
 - Agents need to query each other's data
 - Central audit log required
 - Access control between agents needed

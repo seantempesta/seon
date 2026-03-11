@@ -35,6 +35,7 @@ The original agent isolation plan proposed creating namespace clones (e.g., `seo
 | JVM flags | 4 basic | 10+ | Simpler |
 
 Pre-warmed JVM pool eliminates startup latency:
+
 - Cold start: 3,484ms
 - Pool acquire (first use): 158ms (22x faster)
 - Pool acquire (subsequent): 6ms (580x faster)
@@ -49,6 +50,7 @@ Pre-warmed JVM pool eliminates startup latency:
 ## Consequences
 
 **Benefits:**
+
 - True OS-level isolation between agents
 - 18x smaller memory footprint per agent (~57 concurrent agents possible on 16GB)
 - No namespace cloning complexity
@@ -56,6 +58,7 @@ Pre-warmed JVM pool eliminates startup latency:
 - Clean crash semantics -- agent dies, process dies, resources freed
 
 **Costs:**
+
 - ~570MB for 3-JVM warm pool
 - Cross-JVM communication adds nREPL latency (~11ms per eval)
 - Pool management complexity (replenishment, health checks, concurrency safety)

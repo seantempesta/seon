@@ -10,6 +10,7 @@
 ## Summary
 
 Build a web-based schema browser that displays all Malli schemas registered via `seon.schema/register!`. Users can:
+
 - View schemas grouped by namespace
 - Click schema references to navigate to their definitions
 - See schema definitions with syntax highlighting
@@ -66,6 +67,7 @@ The registry already provides introspection (`schema.clj:97-128`):
 ### Current Schema Distribution
 
 Grepping for `schema/register!` shows schemas in:
+
 - `src/seon/ai.clj` - 30+ schemas (sessions, messages, tool calls)
 - `src/seon/dev/hook.clj` - 10+ schemas (hook events, config)
 - `src/seon/dev/context.clj` - edit/review event schemas
@@ -297,6 +299,7 @@ Schema cards have `id` attributes matching the schema name. Links use `#name` fr
 #### 3.2 Detail Page Content
 
 Show:
+
 - Full schema definition
 - **Where Used** - other schemas that reference this one
 - **References** - schemas this one references
@@ -369,6 +372,7 @@ Show:
 ### Terminal Aesthetic
 
 Follow `docs/prds/namespace-ui/design-system.md`:
+
 - `bg-base-850` for cards
 - `text-signal` (#f0b429) for clickable links
 - `font-mono text-xs` for schema definitions

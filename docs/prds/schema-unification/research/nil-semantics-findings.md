@@ -17,6 +17,7 @@ The critical finding: **naive nil-stripping before transact is lossy for updates
 ### Findings (all verified in REPL on Datalevin 0.9.x)
 
 **A. Absence means "leave unchanged" on transact:**
+
 ```clojure
 ;; Transact entity with :test/foo and :test/bar
 (d/transact! conn [{:test/id 1 :test/foo "hello" :test/bar "world"}])
@@ -29,6 +30,7 @@ The critical finding: **naive nil-stripping before transact is lossy for updates
 ```
 
 **B. `d/pull` omits absent attributes entirely (no nil):**
+
 ```clojure
 (d/transact! conn [{:test/id 2 :test/bar "only-bar"}])
 (d/pull @conn '[*] [:test/id 2])
@@ -40,6 +42,7 @@ The critical finding: **naive nil-stripping before transact is lossy for updates
 ```
 
 Pull with explicit attribute selectors also omits absent attributes:
+
 ```clojure
 (d/pull @conn '[:test/id :test/foo :test/bar] [:test/id 2])
 ;; => #:test{:id 2, :bar "only-bar"}
@@ -47,6 +50,7 @@ Pull with explicit attribute selectors also omits absent attributes:
 ```
 
 **C. Explicit retraction removes a datom:**
+
 ```clojure
 ;; Retract with value specified
 (d/transact! conn [[:db/retract [:test/id 1] :test/foo "hello"]])
@@ -58,6 +62,7 @@ Pull with explicit attribute selectors also omits absent attributes:
 ```
 
 **D. Cardinality-many: empty vector is a no-op, not a retraction:**
+
 ```clojure
 (d/transact! conn [{:test/id 1 :test/tags [:a :b :c]}])
 (d/transact! conn [{:test/id 1 :test/tags []}])
@@ -69,6 +74,7 @@ Pull with explicit attribute selectors also omits absent attributes:
 ```
 
 **E. Transacting nil throws:**
+
 ```clojure
 (d/transact! conn [{:test/id 1 :test/bar nil}])
 ;; => Exception: "Cannot store nil as a value at {:test/id 1, :test/bar nil, ...}"
@@ -195,7 +201,7 @@ Only **two places** in production code strip nils before Datalevin:
 
 One place in **test code**:
 
-3. **`seon.db.schema-roundtrip-test/strip-nils`** (line 22): Helper for roundtrip tests. Used by `roundtrip!` helper and `full-entity-roundtrip-test`.
+1. **`seon.db.schema-roundtrip-test/strip-nils`** (line 22): Helper for roundtrip tests. Used by `roundtrip!` helper and `full-entity-roundtrip-test`.
 
 ### No Centralized Nil Handling
 
@@ -223,6 +229,7 @@ No code anywhere converts "nil value" to "retract attribute."
 ### Findings
 
 **Maps with nil values flow through channels without issue:**
+
 ```clojure
 (let [ch (async/chan 1)]
   (async/>!! ch {:foo nil :bar "hello"})
@@ -252,6 +259,7 @@ No code anywhere converts "nil value" to "retract attribute."
 **Rule:** Absent key means "no value." Before transact, strip all nil-valued keys. On pull, absent key naturally returns nil when destructured.
 
 **Malli contract:**
+
 ```clojure
 ;; Datalevin-persisted field that may have no value:
 [:foo {:optional true} :string]
@@ -272,21 +280,25 @@ No code anywhere converts "nil value" to "retract attribute."
 **Retraction problem:** To clear a field that currently has a value, the application must explicitly issue `[:db/retract eid :attr]`. Simple nil-stripping turns "clear field" into "leave unchanged."
 
 **Solutions to the retraction problem:**
+
 - Convention: callers use `(db/retract! :seon.runtime [:entity/id "x"] :entity/foo)` explicitly.
 - Sentinel: use a special value like `::db/retract` to signal "clear this field."
 
 **Pros:**
+
 - Simplest mental model. Absence is the only representation of "no value."
 - Matches what Datalevin actually does. No impedance mismatch.
 - No coercion layers on read. Pull output is directly usable.
 - `{:optional true}` is well-understood in Malli.
 
 **Cons:**
+
 - Cannot distinguish "I didn't mention this field" from "clear this field" in a transaction map.
 - Required `[:maybe X]` schemas (39 existing uses) would need to change to `{:optional true} X`.
 - Merge semantics differ: `(merge old-entity update-map)` preserves old values for absent keys, which is usually desired but means you can't "clear" via merge.
 
 **Where bugs can hide:**
+
 - Caller forgets to issue retraction when clearing a field. Old value persists silently.
 - Generative tests produce nil values; if nil-stripping is in the test helper but not in production `transact!`, tests pass but production crashes.
 
@@ -295,6 +307,7 @@ No code anywhere converts "nil value" to "retract attribute."
 **Rule:** `[:maybe X]` in schema means "X or nil." A nil-stripping layer before transact handles new entities. For updates, nil-valued keys on known entities become retractions.
 
 **Malli contract:**
+
 ```clojure
 ;; Datalevin-persisted field that may have no value:
 [:foo {:optional true} [:maybe :string]]
@@ -317,18 +330,21 @@ No code anywhere converts "nil value" to "retract attribute."
 | **Hydration layer** | Absent key -> `{:foo nil}` for `[:maybe]` fields | New: on read |
 
 **Roundtrip:**
+
 ```
 Write: {:foo nil} -> strip nil -> transact (no datom)
 Read:  pull (absent) -> hydrate -> {:foo nil}
 ```
 
 **Pros:**
+
 - Preserves Malli-idiomatic `[:maybe X]` semantics.
 - Nil as explicit "clear this field" intention.
 - Roundtrip preserves `{:foo nil}` through hydration layer.
 - More natural for application code that passes form data with nil fields.
 
 **Cons:**
+
 - Requires two new layers: nil-to-retraction on write, hydration on read.
 - The hydration layer needs the Malli schema to know which absent keys should become nil.
 - Two representations of "no value" in the system (`{:foo nil}` in app, absent key in DB).
@@ -336,6 +352,7 @@ Read:  pull (absent) -> hydrate -> {:foo nil}
 - Performance: hydration layer must process every pulled entity.
 
 **Where bugs can hide:**
+
 - Hydration applied inconsistently (some code paths get hydrated maps, others get raw pulls).
 - Schema and hydration out of sync (schema says `[:maybe X]` but hydration not updated).
 - The retraction layer must distinguish new entities (strip nils) from updates (retract), which requires knowing whether the entity already exists.
@@ -369,16 +386,19 @@ This is essentially Option B with a more explicit architectural framing. The "bo
 | Application | `{:foo nil}` restored |
 
 **Pros:**
+
 - Most flexible. Each layer uses its natural representation.
 - Clear architectural boundary.
 - Nippy serialization preserves nil natively (type-id 3).
 
 **Cons:**
+
 - Most complex. Three representations: explicit nil, absence, and the boundary functions.
 - Every DB interaction must go through boundaries (already true via `db/transact!` and `db/pull-by-name`).
 - Must maintain boundary functions as schemas evolve.
 
 **Where bugs can hide:**
+
 - All the same as Option B, plus: if anyone bypasses the boundary (direct `d/pull`), they get unhyrated maps.
 
 ---
@@ -400,6 +420,7 @@ Seon currently uses single schemas for both input validation (before transact) a
 ### 4. Generative test strategy
 
 Regardless of option chosen: generative tests for Datalevin-persisted schemas MUST handle nil values from `[:maybe X]` generators. Options:
+
 - Strip nils in test helper (current approach in `roundtrip-test`)
 - Use custom generators that never produce nil for persisted fields
 - Use `{:optional true}` instead of `[:maybe X]` for persisted fields (nil never generated for the value, only key absence)

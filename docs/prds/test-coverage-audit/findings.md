@@ -48,6 +48,7 @@ The test suite has **good coverage in critical areas** (validation, data ingesti
 ### Specific Concerns
 
 1. **`calculate-percentile`** (line 29-43):
+
 ```clojure
 (defn- calculate-percentile [values p]
   (when (seq values)
@@ -56,28 +57,33 @@ The test suite has **good coverage in critical areas** (validation, data ingesti
           idx (int (* (/ p 100.0) (dec n)))]  ;; Off-by-one risk!
       (nth sorted idx))))
 ```
+
 - `idx` calculation may give wrong results for edge percentiles (0, 100)
 - No interpolation between values (uses floor)
 - Empty sequence returns nil - callers must handle
 
-2. **`calculate-percentile-rank`** (line 45-57):
+1. **`calculate-percentile-rank`** (line 45-57):
+
 ```clojure
 (defn- calculate-percentile-rank [values current-value]
   (when (and (seq values) current-value)
     (let [below-count (count (filter #(<= % current-value) values))]
       (/ (double below-count) (count values)))))
 ```
+
 - Uses `<=` not `<` - may affect edge cases
 - `current-value` of nil returns nil - callers must handle
 
-3. **`put-call-ratio`** (line 200-228):
+1. **`put-call-ratio`** (line 200-228):
+
 ```clojure
 (if (pos? call-sum)
   (/ put-sum call-sum)
   0.0)  ;; Returns 0.0 when no calls - is this correct?
 ```
 
-4. **`vanna`** (line 298-316):
+1. **`vanna`** (line 298-316):
+
 ```clojure
 (let [days-to-expiry 30 ;; TODO: Calculate from expiry  ;; HARDCODED!
 ```
@@ -117,6 +123,7 @@ The test suite has **good coverage in critical areas** (validation, data ingesti
 ID generation is deterministic for deduplication. Bugs here cause duplicate or lost data.
 
 **Functions needing tests:**
+
 - `make-option-quote-id` - deterministic ID from OCC + timestamp
 - `make-iv-surface-id` - deterministic ID from ticker + timestamp
 - `put-option-quote` - transaction builder
@@ -129,6 +136,7 @@ ID generation is deterministic for deduplication. Bugs here cause duplicate or l
 This executes LLM-generated code. Security-critical.
 
 **Functions needing tests:**
+
 - `safe-symbol?` - symbol whitelist
 - `validate-expr` - expression validation (can bypass?)
 - `execute` - expression execution
@@ -141,6 +149,7 @@ This executes LLM-generated code. Security-critical.
 Trading recommendations. Wrong categorization = bad advice.
 
 **Functions needing tests:**
+
 - `label-iv-rank` - threshold categorization
 - `label-skew` - threshold categorization
 - `determine-recommendation` - decision logic
@@ -155,12 +164,14 @@ Trading recommendations. Wrong categorization = bad advice.
 ### 1. db/queries.clj (9 tests, but missing coverage)
 
 **Missing:**
+
 - `options-by-delta` - delta range filtering
 - `atm-options` - ATM option selection
 - `iv-term-structure` - term structure calculation
 - `option-by-occ` - single option lookup
 
 **Current tests only cover:**
+
 - `historical-ivs` - temporal queries (good)
 - `options-chain` - basic + expiry filter
 
@@ -169,6 +180,7 @@ Trading recommendations. Wrong categorization = bad advice.
 Job lifecycle management. Currently tested indirectly via handlers.
 
 **Functions needing tests:**
+
 - `start-import!` - job creation
 - `stop-job!` - job cancellation
 - `update-job-progress!` - progress tracking
@@ -179,6 +191,7 @@ Job lifecycle management. Currently tested indirectly via handlers.
 SSE streaming logic.
 
 **Functions to test:**
+
 - `streaming-response` - response creation
 - `refresh-all!` - client refresh mechanism
 - Client lifecycle (connect/disconnect)
@@ -208,12 +221,14 @@ These don't need tests (config, entry points, trivial code):
 ### Excellent Quality
 
 **validation_test.clj** (26 tests)
+
 - Property-based tests for all Greek ranges
 - Edge case coverage (deep ITM, positive theta)
 - Regression tests for boundaries
 - Real-world scenario tests
 
 **schema_test.clj** (11 tests)
+
 - Property-based tests for all schema types
 - Custom generator validation
 - Explanation error testing
@@ -221,11 +236,13 @@ These don't need tests (config, entry points, trivial code):
 ### Good Quality
 
 **handlers_test.clj** (7 tests)
+
 - Integration-style lifecycle testing
 - Error condition coverage
 - Input validation tests
 
 **thetadata_test.clj** (27 tests)
+
 - API transformation coverage
 - Circuit breaker testing
 - Error handling
@@ -233,10 +250,12 @@ These don't need tests (config, entry points, trivial code):
 ### Adequate Quality
 
 **queries_test.clj** (9 tests)
+
 - Temporal query coverage is good
 - Missing: many query functions untested
 
 **ingest_test.clj** (9 tests)
+
 - Transformation pipeline covered
 - Missing: execute-daily-work-item! (mocked only)
 
@@ -321,12 +340,14 @@ The generators in `generators.clj` are well-designed:
 After researching malli instrumentation patterns, we decided on **tests-first** for Phase 2:
 
 **Rationale:**
+
 1. Several **bugs need fixing first** (vanna hardcoded 30 DTE, term-structure-slope wrong calc)
 2. Tests catch **calculation correctness** issues that specs can't
 3. Specs alone don't verify "is the percentile formula correct?"
 4. We can add specs later for dev-time safety
 
 **Deferred:**
+
 - Malli function specs (`m/=>`) - add in Phase 3
 - `malli.dev/start!` in user.clj - add in Phase 3
 
@@ -394,6 +415,7 @@ Create `test/ml_options/dsl/primitives_test.clj`:
 ### Research Documents
 
 See `research/` directory:
+
 - `malli-instrumentation.md` - How m/=> and mi/instrument! work
 - `current-spec-patterns.md` - Existing patterns in codebase
 - `primitives-analysis.md` - Detailed function analysis with bugs

@@ -48,6 +48,7 @@ Drivers (Claude, human, automation) just need the session-id to interact.
 **File: `src/seon/flow/pool.clj`**
 
 Extend `setup-namespace!` or add to `claim!` flow — eval on pool JVM to intern `*ctx*`:
+
 ```clojure
 (nrepl-eval! port
   (pr-str `(do (intern '~ns-sym '~'*ctx*
@@ -81,6 +82,7 @@ This replaces the middleware approach. The existing `make-persisted-ctx` from `s
 **File: `src/seon/orchestrator/nrepl.clj`** — DELETE
 
 Everything it does is replaced:
+
 - Port allocation → pool handles
 - `*ctx*` middleware → eval-based injection on pool JVM
 - nREPL server lifecycle → pool JVM already has nREPL
@@ -109,6 +111,7 @@ Everything it does is replaced:
 ## State After Phase 1
 
 **Atoms: 5 → 3**
+
 - ~~`orchestrator.nrepl/servers`~~ — deleted
 - ~~`orchestrator.nrepl/port-registry`~~ — deleted
 - `flow.pool/pool-state` — enhanced with session-id tracking

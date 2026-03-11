@@ -39,13 +39,16 @@ This document catalogs all XTDB usage in the Seon codebase to inform the Datalev
 ### Core Database Layer (`src/seon/db/`)
 
 #### `src/seon/db/node.clj`
+
 **Purpose:** Core XTDB wrapper providing the primary database interface.
 
 **XTDB Operations:**
+
 - `xt/q` - SQL query execution (primary query function)
 - `xt/execute-tx` - Synchronous transaction execution
 
 **Functions:**
+
 - `q` - Execute SQL queries with parameter binding
 - `query` - Legacy query router (throws on XTQL, routes SQL)
 - `sql-query` - Direct SQL string execution
@@ -58,6 +61,7 @@ This document catalogs all XTDB usage in the Seon codebase to inform the Datalev
 **Entity Types:** Generic - works with any table
 
 **Temporal Queries:** **YES**
+
 - `entity` supports `{:current-time instant}` option for point-in-time queries
 - `entity-history` uses `FOR ALL VALID_TIME` to get all versions
 
@@ -69,11 +73,13 @@ This document catalogs all XTDB usage in the Seon codebase to inform the Datalev
 ---
 
 #### `src/seon/db/queries.clj`
+
 **Purpose:** Domain-specific query functions for trading data.
 
 **XTDB Operations:** Uses `node/q` for all queries
 
 **Functions:**
+
 - `get-all-quotes` - Get current quotes
 - `get-quotes-by-ticker` - Filter quotes by ticker
 - `iv-time-series` - Implied volatility history with temporal queries
@@ -82,6 +88,7 @@ This document catalogs all XTDB usage in the Seon codebase to inform the Datalev
 **Entity Types:** `option_greeks`, `ingestion_state`
 
 **Temporal Queries:** **YES**
+
 - `iv-time-series` uses `FOR ALL VALID_TIME` with `_valid_from` filtering
 
 ```clojure
@@ -97,15 +104,18 @@ This document catalogs all XTDB usage in the Seon codebase to inform the Datalev
 ---
 
 #### `src/seon/db/multi.clj`
+
 **Purpose:** Multi-database management for namespace isolation.
 
 **XTDB Operations:**
+
 - `xt/execute-tx` - Create databases
 - `xt/q` - List databases
 - `.submitTx` - Raw connection transaction submission
 - `.openConnection` - Create database connections
 
 **Functions:**
+
 - `ensure-namespace-db!` - Create/attach database for namespace
 - `attach-namespace-db!` - Attach existing database
 - `create-namespace-connection` - Get connection to namespace DB
@@ -118,12 +128,15 @@ This document catalogs all XTDB usage in the Seon codebase to inform the Datalev
 ---
 
 #### `src/seon/db/transactions.clj`
+
 **Purpose:** Transaction builders for batch operations.
 
 **XTDB Operations:**
+
 - Uses `node/execute-tx!` for transaction execution
 
 **Functions:**
+
 - `make-put-tx` - Build put transaction
 - `make-delete-tx` - Build delete transaction
 - `batch-put!` - Batch insert with chunking
@@ -138,15 +151,18 @@ This document catalogs all XTDB usage in the Seon codebase to inform the Datalev
 ### Trading Domain (`src/seon/trading/`)
 
 #### `src/seon/trading/bulk_load.clj`
+
 **Purpose:** Bulk loading historical options data.
 
 **XTDB Operations:**
+
 - `xt/execute-tx` (via node/execute-tx!)
 - Uses `:put-docs` transaction operations
 
 **Entity Types:** `option_greeks`, `bulk_load_status`
 
 **Temporal Queries:** **YES** - Sets `xt/valid-from` on bulk loaded data
+
 ```clojure
 ;; Sets explicit valid-from for temporal history
 :xt/valid-from valid-time
@@ -155,9 +171,11 @@ This document catalogs all XTDB usage in the Seon codebase to inform the Datalev
 ---
 
 #### `src/seon/trading/ingestion_state.clj`
+
 **Purpose:** Track data ingestion progress.
 
 **XTDB Operations:**
+
 - `node/q` - Query state
 - `node/execute-tx!` - Update state
 - `node/entity` - Get single entity
@@ -169,17 +187,21 @@ This document catalogs all XTDB usage in the Seon codebase to inform the Datalev
 ---
 
 #### `src/seon/trading/signals.clj`
+
 **Purpose:** Trading signal generation based on options data.
 
 **XTDB Operations:**
+
 - `node/q` - Query options data
 
 **Functions:**
+
 - `detect-volatility-anomalies` - Find IV anomalies with temporal range
 
 **Entity Types:** `option_greeks`
 
 **Temporal Queries:** **YES** - Filters by `_valid_from`
+
 ```clojure
 ["SELECT asset$ticker, quote$iv, greeks$delta, _valid_from
   FROM option_greeks
@@ -191,9 +213,11 @@ This document catalogs all XTDB usage in the Seon codebase to inform the Datalev
 ---
 
 #### `src/seon/trading/analysis.clj`
+
 **Purpose:** Market analysis functions.
 
 **XTDB Operations:**
+
 - `node/q` - Query for analysis
 
 **Entity Types:** `option_greeks`
@@ -203,9 +227,11 @@ This document catalogs all XTDB usage in the Seon codebase to inform the Datalev
 ---
 
 #### `src/seon/trading/ingest.clj`
+
 **Purpose:** Real-time data ingestion from CBOE.
 
 **XTDB Operations:**
+
 - `node/execute-tx!` - Insert new quotes
 - `node/q` - Check existing data
 
@@ -218,13 +244,16 @@ This document catalogs all XTDB usage in the Seon codebase to inform the Datalev
 ### AI/Agent System (`src/seon/ai/`, `src/seon/agent/`)
 
 #### `src/seon/ai.clj`
+
 **Purpose:** Core AI session and message persistence.
 
 **XTDB Operations:**
+
 - `xt/execute-tx` - Store sessions and messages
 - `xt/q` - List sessions, query messages
 
 **Functions:**
+
 - `save-session!` - Persist session to XTDB
 - `update-session!` - Update session status
 - `save-message!` - Store AI message
@@ -238,6 +267,7 @@ This document catalogs all XTDB usage in the Seon codebase to inform the Datalev
 ---
 
 #### `src/seon/ai/agent.clj`
+
 **Purpose:** Agent registry and lifecycle management.
 
 **XTDB Operations:** Delegates to `seon.ai` functions
@@ -249,9 +279,11 @@ This document catalogs all XTDB usage in the Seon codebase to inform the Datalev
 ---
 
 #### `src/seon/ai/agent/log.clj`
+
 **Purpose:** Agent log file management.
 
 **XTDB Operations:**
+
 - `xt/execute-tx` - Store log messages (optional persistence)
 
 **Entity Types:** `ai_messages`
@@ -261,6 +293,7 @@ This document catalogs all XTDB usage in the Seon codebase to inform the Datalev
 ---
 
 #### `src/seon/ai/claude.clj`
+
 **Purpose:** Claude provider implementation.
 
 **XTDB Operations:** Uses `seon.ai` functions for persistence
@@ -272,13 +305,16 @@ This document catalogs all XTDB usage in the Seon codebase to inform the Datalev
 ---
 
 #### `src/seon/agent/ctx.clj`
+
 **Purpose:** Persisted context atom with time-travel.
 
 **XTDB Operations:**
+
 - `xt/execute-tx` - Persist ctx snapshots
 - `xt/q` - Load snapshots, time-travel queries
 
 **Functions:**
+
 - `make-persisted-ctx` - Create auto-persisting atom
 - `at` - Time-travel query
 - `history` - Get all historical snapshots
@@ -288,6 +324,7 @@ This document catalogs all XTDB usage in the Seon codebase to inform the Datalev
 **Entity Types:** `ctx_snapshots`
 
 **Temporal Queries:** **YES** - Heavy use of temporal features
+
 ```clojure
 ;; Point-in-time query
 "SELECT state, _system_from FROM ctx_snapshots
@@ -305,9 +342,11 @@ This document catalogs all XTDB usage in the Seon codebase to inform the Datalev
 ---
 
 #### `src/seon/agent/helpers.clj`
+
 **Purpose:** Helper functions for agents.
 
 **XTDB Operations:**
+
 - `node/q` - Generic queries
 
 **Entity Types:** Various
@@ -319,13 +358,16 @@ This document catalogs all XTDB usage in the Seon codebase to inform the Datalev
 ### Orchestrator (`src/seon/orchestrator/`)
 
 #### `src/seon/orchestrator/session.clj`
+
 **Purpose:** Agent session lifecycle management.
 
 **XTDB Operations:**
+
 - `xt/execute-tx` - Store/update sessions
 - `xt/q` - List sessions, lookup
 
 **Functions:**
+
 - `start-agent-session!` - Create new session
 - `stop-agent-session!` - Stop and cleanup
 - `get-agent-session` - Lookup session
@@ -341,9 +383,11 @@ This document catalogs all XTDB usage in the Seon codebase to inform the Datalev
 ### Primer (`src/seon/primer/`)
 
 #### `src/seon/primer/ctx.clj`
+
 **Purpose:** Multi-session context management with XTDB persistence.
 
 **XTDB Operations:**
+
 - `node/execute-tx!` - Checkpoint sessions
 - `node/entity` - Load session
 - `node/entity-history` - Get session history
@@ -351,6 +395,7 @@ This document catalogs all XTDB usage in the Seon codebase to inform the Datalev
 **Entity Types:** `primer_sessions`
 
 **Temporal Queries:** **YES**
+
 - Uses `entity-history` for temporal queries
 - `load-at!` supports `{:current-time instant}` option
 
@@ -359,13 +404,16 @@ This document catalogs all XTDB usage in the Seon codebase to inform the Datalev
 ### Dev Hook System (`src/seon/dev/`)
 
 #### `src/seon/dev/context.clj`
+
 **Purpose:** Development hook context tracking.
 
 **XTDB Operations:**
+
 - `node/execute-tx!` - Record events
 - `node/sql-query` - Query events
 
 **Functions:**
+
 - `record-edit!` - Track file edits
 - `record-review!` - Track reviews
 - `record-todos!` - Track agent todos
@@ -375,6 +423,7 @@ This document catalogs all XTDB usage in the Seon codebase to inform the Datalev
 **Entity Types:** `edit_event`, `review_event`, `todo_event`
 
 **Temporal Queries:** **YES** - Uses `_valid_from` extensively
+
 ```clojure
 ;; Uses _valid_from for ordering and filtering
 "SELECT *, _valid_from FROM edit_event WHERE _valid_from > ? ORDER BY _valid_from"
@@ -386,12 +435,15 @@ This document catalogs all XTDB usage in the Seon codebase to inform the Datalev
 ### Web Layer (`src/seon/web/`)
 
 #### `src/seon/web/agents.clj`
+
 **Purpose:** Agent Observatory UI.
 
 **XTDB Operations:**
+
 - `db/q` - Query sessions and messages
 
 **Functions:**
+
 - `find-ai-session-id` - Lookup AI session
 - `load-session-messages` - Get messages for display
 - `completed-sessions` - List completed sessions
@@ -403,9 +455,11 @@ This document catalogs all XTDB usage in the Seon codebase to inform the Datalev
 ---
 
 #### `src/seon/web/stats.clj`
+
 **Purpose:** Trading statistics dashboard.
 
 **XTDB Operations:**
+
 - `node/q` - Query options data
 
 **Entity Types:** `option_greeks`
@@ -417,9 +471,11 @@ This document catalogs all XTDB usage in the Seon codebase to inform the Datalev
 ### System (`src/seon/`)
 
 #### `src/seon/health.clj`
+
 **Purpose:** Health checks and cleanup.
 
 **XTDB Operations:**
+
 - `xt/q` - Simple query for health check
 
 **Entity Types:** None specific (uses simple ping query)
@@ -429,9 +485,11 @@ This document catalogs all XTDB usage in the Seon codebase to inform the Datalev
 ---
 
 #### `src/seon/system.clj`
+
 **Purpose:** Integrant system configuration.
 
 **XTDB Operations:**
+
 - `xt/start-node` - Initialize XTDB node
 
 **Entity Types:** N/A (initialization only)
@@ -495,22 +553,27 @@ This document catalogs all XTDB usage in the Seon codebase to inform the Datalev
 ## Migration Considerations
 
 ### High-Impact Areas (Require Temporal Support)
+
 1. **agent/ctx.clj** - Core time-travel functionality
 2. **db/queries.clj** - IV time series analysis
 3. **trading/signals.clj** - Temporal anomaly detection
 4. **trading/bulk_load.clj** - Historical data with explicit valid-times
 
 ### Medium-Impact Areas (Use Timestamps)
+
 1. **dev/context.clj** - Event ordering by `_valid_from`
 2. **ai.clj** - Message ordering
 
 ### Low-Impact Areas (No Temporal)
+
 1. **orchestrator/session.clj** - Simple CRUD
 2. **trading/ingestion_state.clj** - Simple state tracking
 3. **web/agents.clj** - Display queries
 
 ### Abstraction Layer Opportunity
+
 All production code goes through `seon.db.node` wrapper. The migration can:
+
 1. Keep the `node/q`, `node/execute-tx!` interface
 2. Swap XTDB implementation for Datalevin underneath
 3. Handle temporal → explicit column mapping at this layer

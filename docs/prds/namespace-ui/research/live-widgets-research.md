@@ -90,6 +90,7 @@ Each SSE handler taps the mult and re-renders its view when notified. This is **
 **What does the hook receive when TodoWrite is called?**
 
 The hook receives a JSON payload on stdin with structure:
+
 ```json
 {
   "hook_event_name": "PostToolUse",
@@ -105,11 +106,13 @@ The hook receives a JSON payload on stdin with structure:
 ```
 
 **Verified from `logs/hook-debug.log`:**
+
 ```
 tool=TodoWrite | session=8d219ee9-ecce-4736-865c-93642c3a5617
 ```
 
 **And from agent log (e84d):**
+
 ```clojure
 {:todos [{:content "Research proper Clojure hot reload patterns..."
           :status "in_progress"
@@ -121,6 +124,7 @@ tool=TodoWrite | session=8d219ee9-ecce-4736-865c-93642c3a5617
 ```
 
 **Current limitation:** The hook only handles Edit and Write tools (see `hook.clj` line 47-49):
+
 ```clojure
 (schema/register! ::tool-name
                   [:enum {:description "The tool that triggered the event"}
@@ -128,6 +132,7 @@ tool=TodoWrite | session=8d219ee9-ecce-4736-865c-93642c3a5617
 ```
 
 **To capture TodoWrite:**
+
 1. Add "TodoWrite" to the `::tool-name` enum
 2. Extract `:todos` from `tool_input`
 3. Store to XTDB as `todo_event` table
@@ -191,6 +196,7 @@ From `bin/mcp-server` (lines 42, 117, 193-248):
 **Fix recommendation:**
 
 Add automatic interrupt after timeout:
+
 ```clojure
 ;; After timeout, also send interrupt
 (when (= (:ex result) "timeout")

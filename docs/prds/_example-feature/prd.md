@@ -16,6 +16,7 @@
 ## Problem Statement
 
 This is an example PRD showing the recommended structure. Real PRDs should describe:
+
 - What problem needs solving
 - Impact of the problem
 - Why it matters

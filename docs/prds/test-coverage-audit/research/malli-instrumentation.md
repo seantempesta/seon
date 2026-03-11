@@ -27,6 +27,7 @@ Malli function instrumentation provides **dev-time runtime validation** for func
 ```
 
 **Schema structure:**
+
 - `[:=> input-schema output-schema]` - function schema
 - `[:cat arg1-schema arg2-schema ...]` - sequential arguments
 - Return type comes last

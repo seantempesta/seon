@@ -70,6 +70,7 @@ Frontend reactively renders changes
 ```
 
 **Key Insight:** Datastar sends ALL signals (except those prefixed with underscore `_`) with every backend request:
+
 - **GET requests**: Signals sent as `datastar` query parameter
 - **Other methods**: Signals sent as JSON body
 
@@ -84,6 +85,7 @@ Datastar uses Server-Sent Events (SSE) with the `text/event-stream` content type
 Patches one or more HTML elements into the DOM.
 
 **Basic Format:**
+
 ```
 event: datastar-patch-elements
 data: elements <div id="foo">Hello world!</div>
@@ -91,6 +93,7 @@ data: elements <div id="foo">Hello world!</div>
 ```
 
 **Multi-line with Options:**
+
 ```
 event: datastar-patch-elements
 data: mode inner
@@ -125,6 +128,7 @@ data: elements </div>
 | `remove` | Deletes target from DOM |
 
 **Remove Example:**
+
 ```
 event: datastar-patch-elements
 data: mode remove
@@ -137,6 +141,7 @@ data: selector #loading-spinner
 Updates reactive signal values on the page.
 
 **Basic Format:**
+
 ```
 event: datastar-patch-signals
 data: signals {"count": 42, "message": "Hello"}
@@ -151,6 +156,7 @@ data: signals {"count": 42, "message": "Hello"}
 | `onlyIfMissing` | boolean | `false` | Only add signals not already present |
 
 **Nested Signals:**
+
 ```
 event: datastar-patch-signals
 data: signals {"user": {"name": "Alice", "email": "[email protected]"}}
@@ -158,6 +164,7 @@ data: signals {"user": {"name": "Alice", "email": "[email protected]"}}
 ```
 
 **Removing Signals:**
+
 ```
 event: datastar-patch-signals
 data: signals {"tempData": null}
@@ -179,6 +186,7 @@ All HTTP actions (`@get`, `@post`, etc.) trigger `datastar-fetch` events:
 | `retries-failed` | All retries exhausted |
 
 **Listening to Lifecycle:**
+
 ```html
 <div data-on:datastar-fetch="
   console.log('Fetch event:', evt.detail.type)
@@ -233,6 +241,7 @@ Two-way data binding between signals and form elements.
 ```
 
 **Type Modifiers:**
+
 - `.number` - coerces to number
 - `.trim` - trims whitespace
 
@@ -362,6 +371,7 @@ Attaches event listeners that execute expressions.
 ```
 
 **Custom Events:**
+
 ```html
 <div data-on:myevent="$data = evt.detail">
 <button data-on:click="el.dispatchEvent(new CustomEvent('myevent', {detail: 'data'}))">
@@ -561,6 +571,7 @@ All methods share the same signature: `@action(uri, options)`
 ### Content Type: `json` vs `form`
 
 **JSON Mode** (default):
+
 ```html
 <button data-on:click="@post('/save')">
   <!-- Sends: {"username": "alice", "email": "alice@example.com"} -->
@@ -568,6 +579,7 @@ All methods share the same signature: `@action(uri, options)`
 ```
 
 **Form Mode:**
+
 ```html
 <form data-on:submit.prevent="@post('/save', {contentType: 'form'})">
   <input name="username" />
@@ -622,6 +634,7 @@ Signals are reactive variables that automatically track and propagate changes. T
 ### Creating Signals
 
 **1. Via `data-signals`:**
+
 ```html
 <div data-signals:count="0"></div>
 <div data-signals:user.name="'Alice'"></div>
@@ -629,18 +642,21 @@ Signals are reactive variables that automatically track and propagate changes. T
 ```
 
 **2. Via `data-bind`:**
+
 ```html
 <input data-bind:email />
 <!-- Automatically creates $email signal -->
 ```
 
 **3. Via `data-computed`:**
+
 ```html
 <div data-computed:doubled="$count * 2"></div>
 <!-- Creates read-only $doubled signal -->
 ```
 
 **4. Via Backend:**
+
 ```
 event: datastar-patch-signals
 data: signals {"serverData": "value"}
@@ -664,6 +680,7 @@ data: signals {"serverData": "value"}
 ```
 
 **Backend receives:**
+
 ```json
 {
   "user": {
@@ -697,6 +714,7 @@ Signals preserve their types:
 ```
 
 **Type coercion in `data-bind`:**
+
 ```html
 <input type="number" data-bind.number:age />
 <input data-bind.trim:name />
@@ -713,6 +731,7 @@ DOM updates automatically
 ```
 
 **Example:**
+
 ```html
 <input data-bind.number:count />
 <div data-text="$count"></div>                  <!-- Updates -->
@@ -741,6 +760,7 @@ In all expressions, `el` refers to the current element:
 ### What is Morphing?
 
 Morphing is the process of transforming one DOM tree into another while preserving:
+
 - Element state (focus, scroll position)
 - Event listeners
 - CSS transitions/animations
@@ -751,6 +771,7 @@ Datastar uses **Idiomorph**, a sophisticated DOM-merging algorithm.
 ### How It Works
 
 **Default Behavior (mode: `outer`):**
+
 1. Server sends HTML with IDs: `<div id="foo">New content</div>`
 2. Datastar finds existing element with `id="foo"`
 3. Idiomorph morphs (merges) old → new
@@ -767,6 +788,7 @@ Idiomorph creates **ID sets** - mappings of elements to all IDs within them. Thi
 ### Morphing Best Practices
 
 **1. Add IDs to elements you want to preserve:**
+
 ```html
 <div id="container">
   <input id="email" type="email" />
@@ -775,12 +797,14 @@ Idiomorph creates **ID sets** - mappings of elements to all IDs within them. Thi
 ```
 
 **2. Prevent morphing with `data-ignore-morph`:**
+
 ```html
 <canvas id="chart" data-ignore-morph></canvas>
 <!-- Canvas state preserved, not re-rendered -->
 ```
 
 **3. Preserve specific attributes:**
+
 ```html
 <details open data-preserve-attr="open">
   <!-- 'open' attribute preserved through morphs -->
@@ -788,6 +812,7 @@ Idiomorph creates **ID sets** - mappings of elements to all IDs within them. Thi
 ```
 
 **4. Use appropriate patch modes:**
+
 ```html
 <!-- Append to list -->
 <div data-on:click="@post('/add-item', {selector: '#list', mode: 'append'})">
@@ -809,6 +834,7 @@ Send large chunks (even entire `<html>` tag) and let compression + morphing hand
 ```
 
 **Why this works:**
+
 - Brotli compression: 90-100x reduction on repeated HTML
 - Idiomorph: Efficiently morphs only changed parts
 - Simpler than managing fine-grained updates
@@ -822,6 +848,7 @@ This is the **Hyperlith approach**: "Compression beats diffing."
 ### Server-Sent Events for Streaming
 
 SSE allows the backend to stream multiple events in a single response, perfect for:
+
 - Long-running operations
 - Progress updates
 - Real-time dashboards
@@ -830,6 +857,7 @@ SSE allows the backend to stream multiple events in a single response, perfect f
 ### Pattern 1: Progress Tracking
 
 **Frontend:**
+
 ```html
 <div data-signals:progress="0"></div>
 <div data-signals:status="'idle'"></div>
@@ -847,6 +875,7 @@ SSE allows the backend to stream multiple events in a single response, perfect f
 ```
 
 **Backend (Python example):**
+
 ```python
 @app.post("/long-operation")
 async def long_operation():
@@ -871,6 +900,7 @@ async def long_operation():
 ```
 
 **Backend (Clojure example):**
+
 ```clojure
 (defn long-operation-handler [request]
   (hk/as-channel request
@@ -919,6 +949,7 @@ async def live_updates():
 ```
 
 **Frontend:**
+
 ```html
 <!-- Auto-connects on load -->
 <div data-init="@get('/live-updates')"
@@ -986,6 +1017,7 @@ Datastar follows a progressive enhancement approach:
 Instead, Datastar sends **all reactive state (as JSON)** to the server on each request.
 
 **Traditional Form (htmx):**
+
 ```html
 <form hx-post="/save">
   <input name="email" />
@@ -994,6 +1026,7 @@ Instead, Datastar sends **all reactive state (as JSON)** to the server on each r
 ```
 
 **Datastar Approach (Signals):**
+
 ```html
 <div data-signals:form.email="''"></div>
 <input data-bind:form.email />
@@ -1001,6 +1034,7 @@ Instead, Datastar sends **all reactive state (as JSON)** to the server on each r
 ```
 
 **Server receives:**
+
 ```json
 {
   "form": {
@@ -1012,6 +1046,7 @@ Instead, Datastar sends **all reactive state (as JSON)** to the server on each r
 ### When to Use Form Mode
 
 Use `contentType: 'form'` when you need:
+
 - Built-in HTML5 validation
 - File uploads
 - Legacy backend expecting FormData
@@ -1030,6 +1065,7 @@ Use `contentType: 'form'` when you need:
 ### Validation Pattern
 
 **Client-side:**
+
 ```html
 <input data-bind:email
        data-attr:class="$emailError ? 'error' : ''" />
@@ -1044,6 +1080,7 @@ Use `contentType: 'form'` when you need:
 ```
 
 **Server-side response:**
+
 ```
 event: datastar-patch-signals
 data: signals {"emailError": "Email already exists"}
@@ -1070,6 +1107,7 @@ data: signals {"emailError": "Email already exists"}
 ```
 
 **Backend sends:**
+
 ```
 event: datastar-patch-elements
 data: selector #content
@@ -1080,6 +1118,7 @@ data: elements </div>
 ```
 
 **Benefits:**
+
 - Fast initial load (shell is tiny, pre-compressed)
 - Content only rendered for actual users (not bots)
 - ETag caching for the shell
@@ -1122,6 +1161,7 @@ data: elements </div>
 ### Migration from htmx + Alpine.js
 
 **Before (htmx + Alpine):**
+
 ```html
 <div x-data="{count: 0}">
   <span x-text="count"></span>
@@ -1132,6 +1172,7 @@ data: elements </div>
 ```
 
 **After (Datastar):**
+
 ```html
 <div data-signals:count="0">
   <span data-text="$count"></span>
@@ -1142,6 +1183,7 @@ data: elements </div>
 ```
 
 **Backend automatically receives:**
+
 ```json
 {"count": 1}
 ```
@@ -1193,6 +1235,7 @@ data: elements </div>
 ```
 
 **Server validation response:**
+
 ```
 event: datastar-patch-signals
 data: signals {
@@ -1224,6 +1267,7 @@ data: signals }
 ```
 
 **Server response:**
+
 ```
 event: datastar-patch-elements
 data: selector #results-template
@@ -1242,6 +1286,7 @@ data: elements <li>Result 3</li>
 ```
 
 **Server (Python):**
+
 ```python
 @app.get("/dashboard-stream")
 async def dashboard_stream():
@@ -1285,6 +1330,7 @@ async def dashboard_stream():
 ### Example 6: Bulk Import with Progress
 
 **Frontend:**
+
 ```html
 <div data-signals:import.status="'idle'"
      data-signals:import.progress="0"
@@ -1312,6 +1358,7 @@ async def dashboard_stream():
 ```
 
 **Backend (Clojure):**
+
 ```clojure
 (defn start-import-handler [request]
   (hk/as-channel request

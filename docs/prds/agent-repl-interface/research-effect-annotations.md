@@ -392,6 +392,7 @@ The existing flow topology has exactly the pattern we need:
 **Not for the first iteration.** The flow infrastructure adds complexity (process lifecycle, message envelopes, error handling) that isn't needed for test scheduling. A simpler approach using `pmap` or `future` with thread pools would work and be easier to debug.
 
 Flow-based test execution becomes valuable when:
+
 - Tests run across multiple JVMs (like agent JVMs)
 - Test results need to stream to the UI in real-time via SSE
 - Resource contention is dynamic (not just static effect categories)
@@ -406,11 +407,13 @@ Flow-based test execution becomes valuable when:
 
 1. Define the `:seon.fn/effects` property convention in `CONVENTIONS.md`
 2. Add a helper function in `seon.schema` or a new `seon.fn.effects` namespace:
+
    ```clojure
    (defn fn-effects [fn-var] ...)
    (defn all-fn-effects [] ...)
    (defn pure-functions [] ...)
    ```
+
 3. Annotate the ~15 "leaf" effectful functions (db/transact!, db/query, ctx ops, gemini calls)
 4. Add a compliance check: "function with `:malli/schema` that calls db/transact! but doesn't declare `:db/write`"
 

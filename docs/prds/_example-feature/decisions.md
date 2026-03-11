@@ -20,6 +20,7 @@ What approach was chosen.
 ### Rationale
 
 Why this is the right choice:
+
 - **Reason 1:** Detail
 - **Reason 2:** Detail
 
@@ -33,13 +34,16 @@ Why this is the right choice:
 ### Consequences
 
 **Benefits:**
+
 - Benefit 1
 - Benefit 2
 
 **Costs:**
+
 - Cost 1 (accepted trade-off)
 
 **Risks:**
+
 - Risk 1 + how we'll mitigate it
 
 ---

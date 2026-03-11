@@ -33,6 +33,7 @@ data: elements </main>
 ```
 
 **Key details:**
+
 - `event:` - Always `datastar-patch-elements` for us
 - `id:` - Hash of HTML (for idempotency, change detection)
 - `data: elements` - HTML lines (multiline support via repeated `data:`)
@@ -51,6 +52,7 @@ data: elements </main>
 | `id="morph"` | Target for SSE updates | `<main id="morph">...</main>` |
 
 **Attributes we DON'T use (yet):**
+
 - `data-signals` - Client-side reactive state (server-side only for now)
 - `data-bind` - Two-way data binding
 - `data-show`/`data-text` - Reactive display
@@ -180,6 +182,7 @@ View transitions are **disabled by default** in `render-handler`. Opt in only fo
 ```
 
 **Routes:**
+
 - `GET /` -> Returns shim page
 - `POST /` -> SSE handler (streaming updates)
 
@@ -258,11 +261,13 @@ View transitions are **disabled by default** in `render-handler`. Opt in only fo
 ### Add a new button action (Pattern A)
 
 1. **HTML** (hiccup):
+
 ```clojure
 [:button {:data-on:click "@post('/api/my-action')"} "Do Thing"]
 ```
 
-2. **Handler**:
+1. **Handler**:
+
 ```clojure
 (defn my-action [_request]
   (do-the-thing!)
@@ -271,7 +276,8 @@ View transitions are **disabled by default** in `render-handler`. Opt in only fo
    :body (render-my-view)})
 ```
 
-3. **Route**:
+1. **Route**:
+
 ```clojure
 ["/api/my-action" {:post my-action}]
 ```
@@ -306,7 +312,7 @@ View transitions are **disabled by default** in `render-handler`. Opt in only fo
 ## Resources
 
 - **Ground truth:** `CONVENTIONS.md` (SSE patterns section)
-- **Datastar docs:** https://data-star.dev/
+- **Datastar docs:** <https://data-star.dev/>
 - **Deep dive:** `docs/reference/datastar-deep-dive.md`
 - **Design system:** `docs/prds/namespace-ui/design-system.md`
 - **Hyperlith examples:** `reference-code/hyperlith/examples/`

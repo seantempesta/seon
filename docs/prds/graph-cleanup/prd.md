@@ -30,6 +30,7 @@ The graph is polluted with render-specific derived attributes:
 These attrs were added because `link-fns-to-specs` in `extract.clj` only links functions whose output spec contains `:seon.render/html`. Non-render functions are invisible to the graph even if they have perfectly good specs.
 
 **Impact:**
+
 - Documentation system can't discover function interfaces (only renderers are linked)
 - Health checks can't use the same resolution pattern (no output key to query)
 - Adding any new "discoverable function" pattern requires adding more pre-computed attrs
@@ -94,6 +95,7 @@ All discoverable systems work identically:
 When you write `[?e :seon.spec/contains-keys ?k]`, Datalevin binds `?k` to ONE key at a time (one datom per value). You cannot bind the whole set and call `subset?`. The plan in the other tab had queries with `[(clojure.set/subset? ...)]` predicates — **these won't work.**
 
 The existing codebase correctly uses hybrid resolution:
+
 1. **Datalog** finds candidates (fns with matching output key via ref join)
 2. **Clojure** pulls input spec data and filters with `every?` / `subset?`
 3. **Clojure** ranks by specificity (key count → proximity → alphabetical)
@@ -165,10 +167,12 @@ All research questions answered with live REPL evidence. See `notes.md` for full
 | R5 | Performance comparison | Skipped (nice-to-have, no reason to expect problems). |
 
 **Gotchas discovered:**
+
 1. Spec entities must be transacted BEFORE fn entities for lookup refs to resolve. `ingest-namespace!` already does this correctly (specs in step 2, fns in step 3).
 2. Cardinality-many values come back as vectors from `d/pull`, not sets. Convert with `(set ...)` for subset operations.
 
 **Proven query pattern for `functions-with-output-key`:**
+
 ```clojure
 ;; Step 1: Find candidate entity IDs via ref join
 (d/q '[:find ?e
@@ -199,6 +203,7 @@ This phase is ONE agent task. The agent must complete ALL changes and run ALL te
 **1. `src/seon/graph/ingest.clj` — Remove 5 attrs from schema**
 
 Delete these lines from `datalevin-schema`:
+
 ```clojure
 :seon.fn/render-input-keys    {:db/valueType :db.type/keyword :db/cardinality :db.cardinality/many}
 :seon.fn/render-optional-keys {:db/valueType :db.type/keyword :db/cardinality :db.cardinality/many}
@@ -274,6 +279,7 @@ New shared helper using the proven query pattern from Phase 0:
 Replace `find-renderer`, `resolve-renderer`, `find-page-renderer`. All currently query `:seon.fn/render-input-keys` directly. Rewrite to call `functions-with-output-key` and use `:required-keys` from the result.
 
 The filtering/ranking logic stays the same:
+
 - Required keys must be subset of available data keys
 - Rank by key count (more specific wins)
 - Tiebreak by namespace proximity, then `updated-at`, then alphabetical
@@ -331,6 +337,7 @@ The Phase 1 agent MUST verify all of these before returning:
 **File:** `src/seon/render/code.clj` (NEW)
 
 Core functions:
+
 - `render-ns-docs` — default doc renderer, queries graph, needs no namespace cooperation
 - `compatible-functions` — given data keys, find functions that can consume them
 - `resolve-docs` — find best doc renderer using unified pattern

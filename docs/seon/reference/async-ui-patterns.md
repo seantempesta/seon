@@ -54,22 +54,26 @@ Modern web applications face a fundamental tension: backend operations (database
 **Description:** Display the structural layout of content before data arrives, using placeholder elements that mimic the final UI.
 
 **Pros:**
+
 - Reduces perceived load time by 20-30%
 - Gives users a preview of what's coming
 - No JavaScript required for basic implementation
 - Works well with progressive enhancement
 
 **Cons:**
+
 - Can be frustrating if data takes too long (> 3 seconds)
 - Requires maintaining UI structure in two places (skeleton + real content)
 - Layout shifts can break trust if skeleton doesn't match final content
 
 **When to Use:**
+
 - Data loads predictably within 1-3 seconds
 - UI structure is stable and known ahead of time
 - You want to show progress without blocking
 
 **Implementation Notes:**
+
 ```clojure
 ;; Initial render returns skeleton
 (defn dashboard-skeleton []
@@ -87,6 +91,7 @@ Modern web applications face a fundamental tension: backend operations (database
 ```
 
 **Best Practices:**
+
 - Use neutral colors (gray) to avoid distraction
 - Animate L-to-R to follow natural eye movement (fast motion, not slow)
 - Replace progressively as data arrives, not all at once
@@ -94,6 +99,7 @@ Modern web applications face a fundamental tension: backend operations (database
 - Include primary structural elements only (skip labels, buttons, form fields)
 
 **Sources:**
+
 - [Skeleton loading screen design - LogRocket](https://blog.logrocket.com/ux-design/skeleton-loading-screen-design/)
 - [How to Use Skeleton Screens to Improve Perceived Website Performance](https://www.freecodecamp.org/news/how-to-use-skeleton-screens-to-improve-perceived-website-performance/)
 - [Effective Skeleton Screens - TimKadlec.com](https://timkadlec.com/remembers/2020-11-02-skeleton-screens/)
@@ -105,28 +111,33 @@ Modern web applications face a fundamental tension: backend operations (database
 **Description:** Load content in stages, starting with critical elements and progressively adding details.
 
 **Pros:**
+
 - Users get immediate value from critical content
 - Reduces initial page load time
 - Allows prioritization of important data
 - Works naturally with SSE streaming
 
 **Cons:**
+
 - More complex to implement
 - Need to carefully design priority tiers
 - Can cause layout shifts if not designed properly
 
 **When to Use:**
+
 - Clear hierarchy of content importance (critical vs. nice-to-have)
 - Different data sources with varying load times
 - Large pages with multiple independent sections
 
 **Implementation Strategy:**
+
 1. **Tier 1 - Critical Shell:** Server-render immediately (header, navigation, primary content structure)
 2. **Tier 2 - Above-the-Fold:** Load via SSE within 1-2 seconds (main dashboard stats)
 3. **Tier 3 - Below-the-Fold:** Lazy load when scrolled into view (history tables, detailed logs)
 4. **Tier 4 - Optional:** Load on demand (admin panels, advanced features)
 
 **HTMX Pattern:**
+
 ```html
 <!-- Critical content: Server-rendered -->
 <h1>Dashboard</h1>
@@ -143,6 +154,7 @@ Modern web applications face a fundamental tension: backend operations (database
 ```
 
 **Sources:**
+
 - [Progressive Load Example - Data-Star](https://data-star.dev/examples/progressive_load)
 - [More Htmx Patterns](https://hypermedia.systems/more-htmx-patterns/)
 - [Progressive Loading - UX Patterns](https://uxpatterns.dev/glossary/progressive-loading)
@@ -154,6 +166,7 @@ Modern web applications face a fundamental tension: backend operations (database
 **Description:** Queue long-running operations as background jobs, notify clients via SSE when complete.
 
 **Pros:**
+
 - Handles truly long operations (minutes, hours)
 - Decouples HTTP request timeout from job duration
 - Scales well (workers independent of web servers)
@@ -161,12 +174,14 @@ Modern web applications face a fundamental tension: backend operations (database
 - Real-time progress updates via SSE
 
 **Cons:**
+
 - More infrastructure complexity (queue, workers)
 - Need to handle job failures, retries, cleanup
 - Users must keep connection open or poll later
 - State management complexity
 
 **When to Use:**
+
 - Operations take > 5 seconds
 - Operations can fail and need retry logic
 - Multiple users may request same expensive operation
@@ -200,18 +215,21 @@ Client (Browser)              Web Server                Worker Process
 4. **Worker Process:** Independent of web server, processes jobs
 
 **Scaling Considerations:**
+
 - Multiple web server pods: Use shared pub/sub (Redis, Kafka)
 - Each pod maintains its own SSE connections
 - Workers publish updates to shared pub/sub
 - All pods receive updates and forward to their clients
 
 **Real-World Example:**
+
 - Production system: 90,000 concurrent SSE connections
 - 15 pods handling the load
 - Redis pub/sub for coordination
 - BullMQ for job persistence and retries
 
 **Sources:**
+
 - [How to Build Real-Time Notification Service Using SSE](https://dzone.com/articles/how-to-build-real-time-notification-service-using)
 - [How We Used Server-Sent Events (SSE) to Deliver Real-Time Notifications - Trendyol Tech](https://medium.com/trendyol-tech/how-we-used-server-sent-events-sse-to-deliver-real-time-notifications-on-our-backend-ebae41d3b5cb)
 - [Job Queues & CQRS - The pattern that you need to scale](https://softwareontheroad.com/job-queues-cqrs-nodejs-mongodb-agenda)
@@ -224,18 +242,21 @@ Client (Browser)              Web Server                Worker Process
 **Description:** Stream HTML chunks as data becomes available, rather than waiting for all data before rendering.
 
 **Pros:**
+
 - Improves Time to First Byte (TTFB)
 - Users see content progressively, not all-or-nothing
 - Reduces perceived latency
 - Natural fit for SSE architecture
 
 **Cons:**
+
 - Requires framework support (React 18 Suspense, streaming templates)
 - More complex error handling
 - Browser buffering can delay chunks (typically 8KB before flush)
 - Not all hosting environments support streaming
 
 **When to Use:**
+
 - Data comes from multiple sources with different latencies
 - Page has independent sections that can render separately
 - Initial render is slow but you can show something quickly
@@ -265,12 +286,14 @@ Server                          Browser
 ```
 
 **SSE Variation:**
+
 - Initial request returns shell HTML with SSE connection opener
 - Shell includes skeletons for pending sections
 - Server sends SSE events with HTML fragments
 - Client JavaScript patches fragments into place
 
 **Sources:**
+
 - [Enabling Progressive Server-Side Rendering - MDPI](https://www.mdpi.com/2674-113X/4/3/20)
 - [Streaming Server-Side Rendering - Patterns.dev](https://www.patterns.dev/react/streaming-ssr/)
 - [Developing Real-Time Web Applications with Server-Sent Events - Auth0](https://auth0.com/blog/developing-real-time-web-applications-with-server-sent-events/)
@@ -282,24 +305,28 @@ Server                          Browser
 **Description:** Immediately update UI as if operation succeeded, then reconcile with server response.
 
 **Pros:**
+
 - Zero perceived latency for user actions
 - Great for high-success-rate operations (99%+ success)
 - Improves perceived performance dramatically
 - Works well with offline-first apps
 
 **Cons:**
+
 - Complex rollback logic needed for failures
 - Can mislead users about operation status
 - Requires careful cache management
 - Not suitable for critical operations (financial transactions)
 
 **When to Use:**
+
 - Operations have high success rates (likes, votes, simple updates)
 - Fast rollback is possible
 - Non-critical operations where temporary inconsistency is acceptable
 - User is performing the action (not system-generated)
 
 **When NOT to Use:**
+
 - Financial transactions
 - Operations requiring server validation
 - High failure rates
@@ -328,18 +355,21 @@ Server                          Browser
 ```
 
 **Cache Management:**
+
 - Update cache immediately on action
 - If server confirms: cache stays as-is
 - If server rejects: revert cache to previous state
 - Handle stale data from server that's newer than cache
 
 **SSE Integration:**
+
 - Optimistic update on client action
 - Server broadcasts actual result via SSE
 - All clients reconcile their state with server truth
 - Conflicts resolved by last-write-wins or CRDT patterns
 
 **Sources:**
+
 - [Building an Optimistic UI with RxDB](https://rxdb.info/articles/optimistic-ui.html)
 - [Optimistic UI - Apollo GraphQL Docs](https://www.apollographql.com/docs/react/v2/performance/optimistic-ui)
 - [Optimistic UI Patterns for Improved Perceived Performance](https://simonhearne.com/2021/optimistic-ui-patterns/)
@@ -352,17 +382,20 @@ Server                          Browser
 **Description:** Defer loading non-critical content until it scrolls into view.
 
 **Pros:**
+
 - Reduces initial page load
 - Saves bandwidth for content users don't see
 - Native browser API (Intersection Observer)
 - Works great with infinite scroll
 
 **Cons:**
+
 - Requires JavaScript
 - Can cause layout shifts if not careful
 - May delay content that user quickly scrolls to
 
 **When to Use:**
+
 - Long pages with lots of sections
 - Content below the fold
 - Image galleries, long lists
@@ -387,6 +420,7 @@ Server                          Browser
 ```
 
 **Sources:**
+
 - [htmx Examples - Lazy Loading](https://htmx.org/examples/lazy-load/)
 - [Htmx Patterns - Click to Load & Infinite Scroll](https://hypermedia.systems/htmx-patterns/)
 
@@ -397,17 +431,20 @@ Server                          Browser
 **Description:** Gracefully handle failures in async operations with automatic retries and user feedback.
 
 **Pros:**
+
 - Resilience against transient failures
 - Better user experience during network issues
 - Can handle token refresh, rate limits transparently
 - Reduces support burden
 
 **Cons:**
+
 - Complexity in determining when to retry
 - Risk of overwhelming failing servers
 - Need to distinguish transient vs. permanent errors
 
 **When to Use:**
+
 - Network operations (always should have retry)
 - Operations that may time out
 - Token expiration scenarios
@@ -480,6 +517,7 @@ function retryWithBackoff(element, maxRetries) {
 ```
 
 **Sources:**
+
 - [handle errors with HTMX - Stack Overflow](https://stackoverflow.com/questions/69364278/handle-errors-with-htmx)
 - [Retry on responseError? - HTMX Discussion](https://github.com/bigskysoftware/htmx/discussions/1746)
 - [Handling AJAX timeouts and retries in HTMX](https://app.studyraid.com/en/read/14118/478177/handling-ajax-timeouts-and-retries-in-htmx)
@@ -500,12 +538,14 @@ function retryWithBackoff(element, maxRetries) {
 ### SSE vs WebSockets
 
 **Use SSE when:**
+
 - You only need server → client updates
 - You want simplicity (HTTP-based, firewall-friendly)
 - You need automatic reconnection
 - You want to leverage HTTP/2 multiplexing
 
 **Use WebSockets when:**
+
 - You need bidirectional streaming
 - You need lower latency than SSE
 - You're building real-time collaborative tools
@@ -553,6 +593,7 @@ Streaming brotli compression is highly effective for SSE:
 ```
 
 **Benefits:**
+
 - Simpler code (no delta logic)
 - Can't get out of sync (always full state)
 - Compression handles redundancy
@@ -577,6 +618,7 @@ Streaming brotli compression is highly effective for SSE:
 ```
 
 **Why throttle:**
+
 - Rapidly changing state (like progress updates) can overwhelm clients
 - Browser rendering can't keep up with 60+ updates/sec
 - Network bandwidth is wasted on imperceptible changes
@@ -600,6 +642,7 @@ Streaming brotli compression is highly effective for SSE:
 ```
 
 **Benefits:**
+
 - No manual refresh calls scattered through code
 - Guaranteed UI consistency with state
 - Declarative (describe state, not updates)
@@ -614,6 +657,7 @@ Streaming brotli compression is highly effective for SSE:
 ### Concurrency Primitives
 
 **core.async Channels:**
+
 ```clojure
 ;; Broadcast to multiple clients
 (defonce <refresh-ch (a/chan (a/dropping-buffer 1)))
@@ -626,6 +670,7 @@ Streaming brotli compression is highly effective for SSE:
 ```
 
 **Agents for Sequential Updates:**
+
 ```clojure
 ;; Good for serial operations (logging, notifications)
 (def log-agent (agent []))
@@ -635,6 +680,7 @@ Streaming brotli compression is highly effective for SSE:
 ```
 
 **Atoms for Shared State:**
+
 ```clojure
 ;; Good for coordinated state (current job, dashboard data)
 (defonce job-state (atom {:current nil :history []}))
@@ -645,6 +691,7 @@ Streaming brotli compression is highly effective for SSE:
 ```
 
 **Futures for Background Work:**
+
 ```clojure
 ;; Simple background tasks
 (def job-future
@@ -661,6 +708,7 @@ Streaming brotli compression is highly effective for SSE:
 ```
 
 **Virtual Threads (Java 21+):**
+
 ```clojure
 ;; Excellent for SSE handlers (one per connection)
 (.start (Thread/ofVirtual)
@@ -706,11 +754,13 @@ Streaming brotli compression is highly effective for SSE:
 ```
 
 **Why http-kit:**
+
 - Efficient for many concurrent connections
 - Native async support
 - Works well with SSE keep-alive
 
 **Alternative: Ring async:**
+
 ```clojure
 (defn sse-handler [req respond raise]
   ;; respond and raise are callbacks
@@ -735,11 +785,13 @@ Streaming brotli compression is highly effective for SSE:
 ```
 
 **Benefits:**
+
 - Clean startup/shutdown
 - Dependency injection (XTDB node, config)
 - Hot-reload support with `suspend-key!` / `resume-key`
 
 **Component Pattern:**
+
 ```clojure
 (defrecord SSEBroadcast [refresh-mult config]
   component/Lifecycle
@@ -800,6 +852,7 @@ Is query < 500ms?
 ```
 
 **Flow:**
+
 1. Browser requests `/dashboard`
 2. Server returns shell HTML instantly (< 50ms)
 3. JavaScript opens SSE connection via POST
@@ -808,6 +861,7 @@ Is query < 500ms?
 6. Future state changes trigger re-renders automatically
 
 **Advantages:**
+
 - Fast initial response (shell loads instantly)
 - Query runs in SSE handler, not blocking HTTP request
 - Automatic reconnection if connection drops
@@ -857,6 +911,7 @@ POST /api/import/start
 ```
 
 **Flow:**
+
 1. User clicks "Start Import" button
 2. POST request queues job, returns immediately with job ID
 3. Job runs in background, updates state periodically
@@ -865,6 +920,7 @@ POST /api/import/start
 6. On completion/failure, final state pushed via SSE
 
 **Advantages:**
+
 - Handles arbitrarily long operations
 - Jobs survive server restarts (if persisted)
 - Real-time progress feedback
@@ -1208,6 +1264,7 @@ POST /dashboard/stream → SSE connection for details (slower)
 ## References
 
 ### Progressive Loading & Skeleton Screens
+
 - [Progressive Load Example - Data-Star](https://data-star.dev/examples/progressive_load)
 - [More Htmx Patterns](https://hypermedia.systems/more-htmx-patterns/)
 - [Htmx Patterns](https://hypermedia.systems/htmx-patterns/)
@@ -1216,6 +1273,7 @@ POST /dashboard/stream → SSE connection for details (slower)
 - [Effective Skeleton Screens - TimKadlec.com](https://timkadlec.com/remembers/2020-11-02-skeleton-screens/)
 
 ### HTMX & Hypermedia Patterns
+
 - [htmx ~ The loading-states Extension](https://v1.htmx.org/extensions/loading-states/)
 - [htmx ~ Events](https://htmx.org/events/)
 - [When to Load Data Right Away vs. When to Let HTMX Handle It Later](https://dev.to/sisproid/when-to-load-data-right-away-vs-when-to-let-htmx-handle-it-later-a-senior-devs-take-25nf)
@@ -1223,6 +1281,7 @@ POST /dashboard/stream → SSE connection for details (slower)
 - [Using Alpine.js In HTMX](https://www.bennadel.com/blog/4787-using-alpine-js-in-htmx.htm)
 
 ### Server-Sent Events (SSE)
+
 - [HTMX - Server Sent Events(SSE)](https://www.tutorialspoint.com/htmx/htmx_server_sent_events.htm)
 - [htmx ~ The htmx Server Sent Event (SSE) Extension](https://htmx.org/extensions/sse/)
 - [Real-Time UI Updates with SSE: Simpler Than WebSockets](https://www.codingwithmuhib.com/blogs/real-time-ui-updates-with-sse-simpler-than-websockets)
@@ -1230,23 +1289,27 @@ POST /dashboard/stream → SSE connection for details (slower)
 - [How to Build Real-Time Notification Service Using SSE](https://dzone.com/articles/how-to-build-real-time-notification-service-using)
 
 ### Progressive Server-Side Rendering
+
 - [Enabling Progressive Server-Side Rendering - MDPI](https://www.mdpi.com/2674-113X/4/3/20)
 - [Streaming Server-Side Rendering - Patterns.dev](https://www.patterns.dev/react/streaming-ssr/)
 - [Server-Side Rendering (SSR) with Progressive Hydration](https://www.metaltoad.com/blog/server-side-rendering-ssr-with-progressive-hydration)
 
 ### Optimistic UI
+
 - [Building an Optimistic UI with RxDB](https://rxdb.info/articles/optimistic-ui.html)
 - [Optimistic UI - Apollo GraphQL Docs](https://www.apollographql.com/docs/react/v2/performance/optimistic-ui)
 - [Optimistic UI Patterns for Improved Perceived Performance](https://simonhearne.com/2021/optimistic-ui-patterns/)
 - [What is Optimistic UI?](https://plainenglish.io/blog/what-is-optimistic-ui)
 
 ### Background Jobs & Queues
+
 - [How to queue background tasks in ASP.NET Web API - Stack Overflow](https://stackoverflow.com/questions/14710822/how-to-queue-background-tasks-in-asp-net-web-api)
 - [Job Queues & CQRS - The pattern that you need to scale](https://softwareontheroad.com/job-queues-cqrs-nodejs-mongodb-agenda)
 - [Web-Queue-Worker Architecture - Azure](https://learn.microsoft.com/en-us/azure/architecture/guide/architecture-styles/web-queue-worker)
 - [How We Used Server-Sent Events (SSE) - Trendyol Tech](https://medium.com/trendyol-tech/how-we-used-server-sent-events-sse-to-deliver-real-time-notifications-on-our-backend-ebae41d3b5cb)
 
 ### Error Handling & Retry Patterns
+
 - [handle errors with HTMX - Stack Overflow](https://stackoverflow.com/questions/69364278/handle-errors-with-htmx)
 - [Retry on responseError? - HTMX Discussion](https://github.com/bigskysoftware/htmx/discussions/1746)
 - [Handling AJAX timeouts and retries in HTMX](https://app.studyraid.com/en/read/14118/478177/handling-ajax-timeouts-and-retries-in-htmx)
@@ -1259,6 +1322,7 @@ POST /dashboard/stream → SSE connection for details (slower)
 ### For ml-options-trading Project
 
 **Current State (Good!):**
+
 - ✅ SSE with streaming brotli compression
 - ✅ View = f(state) pattern with hash-based change detection
 - ✅ Auto-refresh on state change (CQRS pattern)

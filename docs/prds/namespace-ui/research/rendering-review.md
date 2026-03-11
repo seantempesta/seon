@@ -17,6 +17,7 @@ The proposed architecture is **overengineered**. It creates a parallel rendering
 ### 1.1 Problem Identification is Correct
 
 The problems are real and worth solving:
+
 - Tool IDs like `toolu_014BHfdp9mzEGzddcQx6nJq5` are useless noise
 - UTC timestamps waste horizontal space
 - No syntax highlighting for code
@@ -57,6 +58,7 @@ The need for token-efficient AI representations is valid. The `:ai` format in `s
 ### 2.1 Duplicate Dispatch Infrastructure
 
 **The proposal creates four new multimethods:**
+
 ```clojure
 (defmulti render-inline schema-of)
 (defmulti render-hover schema-of)
@@ -65,6 +67,7 @@ The need for token-efficient AI representations is valid. The `:ai` format in `s
 ```
 
 **But `seon.ns.view` already has:**
+
 ```clojure
 (defmulti render* (fn [value format] [format (extract-view-type value)]))
 ```
@@ -93,6 +96,7 @@ From `malli-render-research.md`:
 The proposal introduces three HTML tiers: `:inline`, `:hover`, `:full`.
 
 Looking at Reveal and Portal - neither has this distinction. They have:
+
 - **Reveal:** One streaming format, client controls expansion
 - **Portal:** One presentation, navigation reveals more
 - **Clerk:** One viewer per type, `with-viewer` for customization
@@ -229,6 +233,7 @@ Render once with all tiers embedded:
 ```
 
 CSS handles visibility:
+
 ```css
 .hover-card { @apply hidden absolute z-10 ...; }
 .group:hover .hover-card { @apply block; }

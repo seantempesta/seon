@@ -179,6 +179,7 @@ Agent context with time-travel support via append-only snapshots.
 ```
 
 **Query pattern for point-in-time:**
+
 ```clojure
 (d/q '[:find (pull ?e [*]) .
        :in $ ?ns ?as-of
@@ -320,6 +321,7 @@ Options pricing data with historical tracking.
 ```
 
 **Query pattern for backtesting (data as of time T):**
+
 ```clojure
 (d/q '[:find ?iv ?recorded-at
        :in $ ?ticker ?as-of
@@ -633,6 +635,7 @@ Track agent todo lists for observability.
 ### AI Session
 
 **XTDB Document:**
+
 ```clojure
 {:xt/id "ses-abc123"
  :seon.ai/type :session
@@ -646,6 +649,7 @@ Track agent todo lists for observability.
 ```
 
 **Datalevin Entity:**
+
 ```clojure
 {:ai.session/id "ses-abc123"
  :ai.session/type :session
@@ -665,6 +669,7 @@ Track agent todo lists for observability.
 ### AI Message
 
 **XTDB Document:**
+
 ```clojure
 {:xt/id "msg-xyz789"
  :seon.ai/type :message
@@ -677,6 +682,7 @@ Track agent todo lists for observability.
 ```
 
 **Datalevin Entity:**
+
 ```clojure
 {:ai.message/id "msg-xyz789"
  :ai.message/type :message
@@ -693,6 +699,7 @@ Track agent todo lists for observability.
 ### Context Snapshot
 
 **XTDB Document:**
+
 ```clojure
 ;; In XTDB: stored with SQL INSERT, uses _system_from for history
 {:xt/id "ctx-uuid-here"
@@ -702,6 +709,7 @@ Track agent todo lists for observability.
 ```
 
 **Datalevin Entity:**
+
 ```clojure
 {:ctx/id #uuid "ctx-uuid-here"
  :ctx/namespace "seon.trading"
@@ -716,6 +724,7 @@ Track agent todo lists for observability.
 ### Option Greeks
 
 **XTDB Document:**
+
 ```clojure
 {:xt/id "AAPL231215C00185000-2024-11-01T14:00:00Z"
  :xt/valid-from #inst "2024-11-01T14:00:00Z"  ; Set for historical data
@@ -734,6 +743,7 @@ Track agent todo lists for observability.
 ```
 
 **Datalevin Entity:**
+
 ```clojure
 {:quote/id "AAPL231215C00185000-2024-11-01T14:00:00Z"
  :quote/recorded-at #inst "2024-11-01T14:00:00Z"  ; Explicit, was :xt/valid-from
@@ -752,6 +762,7 @@ Track agent todo lists for observability.
 ```
 
 **Key changes:**
+
 - `:xt/id` → `:quote/id`
 - `:xt/valid-from` → `:quote/recorded-at`
 
@@ -760,6 +771,7 @@ Track agent todo lists for observability.
 ### Edit Event
 
 **XTDB Document:**
+
 ```clojure
 {:xt/id #uuid "abc123..."
  :seon.dev.context/entity-type :edit-event
@@ -771,6 +783,7 @@ Track agent todo lists for observability.
 ```
 
 **Datalevin Entity:**
+
 ```clojure
 {:edit/id #uuid "abc123..."
  :edit/entity-type :edit-event
@@ -782,6 +795,7 @@ Track agent todo lists for observability.
 ```
 
 **Key changes:**
+
 - Namespace prefix simplified from `seon.dev.context/` to `edit/`
 - Complex values (maps, vectors) EDN-encoded as strings
 - Explicit `:edit/created-at` replaces implicit `_valid_from`
@@ -801,6 +815,7 @@ Track agent todo lists for observability.
 | `:xt/id` | `:<entity>/id` |
 
 **Rationale:**
+
 - Shorter attribute names improve query readability
 - Domain prefix (e.g., `ai.session/`) groups related attributes
 - Matches Datomic conventions
@@ -810,6 +825,7 @@ Track agent todo lists for observability.
 **Decision:** Store complex values (maps, vectors, sets) as EDN-encoded strings.
 
 **Affected attributes:**
+
 - `:ai.session/error`
 - `:ai.message/tool-calls`, `:ai.message/tool-results`
 - `:edit/unit-test-result`, `:edit/gen-test-result`, `:edit/feedback`
@@ -818,6 +834,7 @@ Track agent todo lists for observability.
 - `:ctx/state`, `:primer.session/state`
 
 **Rationale:**
+
 - Datalevin doesn't support arbitrary nested data like XTDB
 - EDN strings are human-readable and debuggable
 - Query predicates can still work via full-text search if needed
@@ -838,6 +855,7 @@ Track agent todo lists for observability.
 | Todo Event | `:todo/created-at` |
 
 **Rationale:**
+
 - Makes temporal behavior explicit and debuggable
 - Enables point-in-time queries via explicit filtering
 - Avoids dependency on database-specific temporal features
@@ -849,6 +867,7 @@ Track agent todo lists for observability.
 **Example:** `:ai.message/session-id` is `:db.type/string`, not `:db.type/ref`.
 
 **Rationale:**
+
 - Simpler migration path (no ref resolution needed)
 - Messages belong to sessions that may be in different databases (multi-db)
 - Can add refs later if join performance becomes an issue
@@ -858,12 +877,14 @@ Track agent todo lists for observability.
 **Decision:** Index attributes used in WHERE clauses and ORDER BY.
 
 **Indexed attributes:**
+
 - All `:*-at` timestamp fields (for time-range queries)
 - All `/status` fields (for filtering by state)
 - All `/id` and lookup fields (for joins)
 - `:asset/ticker`, `:option/id` (for trading queries)
 
 **Rationale:**
+
 - Datalevin uses B+ trees; indexes are cheap
 - Read performance matters for UI responsiveness
 - Write performance impact is minimal for our volume

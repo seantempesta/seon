@@ -100,6 +100,7 @@ Agent JVM (186MB each)
 **Cross-namespace discovery**: Agents can query the master knowledge graph to find code and data structures across the entire system. Example: an agent building `seon.health.calories` can search for existing functions that produce `:health/workout` data, find them in `seon.health.tracking`, and reuse them directly. The graph stores Malli schemas, function signatures, and dependency edges — agents should always search before building.
 
 **Agent environment**: Every agent JVM loads `seon.agent.env` at startup. This namespace provides:
+
 - `(env/search "calories")` — Search knowledge graph for matching functions/schemas
 - `(env/ctx-save!)` / `(env/ctx-load!)` — Persist/restore `*ctx*` to namespace DB
 - `(env/ns-conn)` — Get connection to the agent's namespace DB
@@ -112,6 +113,7 @@ This namespace is the agent's "toolkit" — updating it updates all future agent
 The web server is a thin proxy — namespace content rendering goes through the flow topology, not direct function calls.
 
 **How it works:**
+
 - HTTP request to `/ns/seon.trading` hits the main JVM's web server
 - Web server calls `topology/request!` targeting the `seon.trading` namespace step
 - The namespace step forwards to the agent JVM via TCP
@@ -119,6 +121,7 @@ The web server is a thin proxy — namespace content rendering goes through the 
 - Data travels back via TCP reply; orchestrator resolves the appropriate renderer via spec-driven resolution (see [`spec-driven-rendering` PRD](../spec-driven-rendering/prd.md))
 
 **What this enables:**
+
 - **Backpressure** — Queue cap (default 32) rejects overload with typed `:overload` errors
 - **Multi-instance load balancing** — Multiple agent JVMs can serve the same namespace (future)
 - **Crash isolation** — Agent JVM crash doesn't take down the web server
@@ -126,6 +129,7 @@ The web server is a thin proxy — namespace content rendering goes through the 
 - **No UI deps in agent JVMs** — Agent JVMs stay minimal; rendering lives in the orchestrator
 
 **What stays in the main JVM:**
+
 - Monitoring infrastructure pages (dashboard, agents, flow monitor)
 - Static pages that don't depend on namespace content
 - The flow topology itself and its wiring
@@ -138,6 +142,7 @@ The web server is a thin proxy — namespace content rendering goes through the 
 **Commit**: `297d6d7 feat: production-ready agent JVM pool with lifecycle management`
 
 Production-ready agent JVM pool with:
+
 - [x] `LinkedBlockingQueue` for thread-safe acquisition
 - [x] Parallel pool creation via futures
 - [x] Auto-replenishment when JVMs are acquired
@@ -149,6 +154,7 @@ Production-ready agent JVM pool with:
 - [x] 16 unit tests, 51 assertions, 0 failures
 
 **Key files**:
+
 - `src/seon/flow/pool.clj` — Pool implementation
 - `src/seon/flow/agent_runner.clj` — Agent JVM entry point
 - `bin/agent-runner` — Launch script
@@ -178,20 +184,24 @@ Production-ready agent JVM pool with:
 ### Existing Code to Reuse
 
 **`seon.dev.analysis` (`src/seon/dev/analysis.clj`)**:
+
 - `analyze-file` — Parses a file with clj-kondo, returns `{::var-definitions [...] ::var-usages [...] ::namespace-usages [...]}`. Call with `{::analysis/file-path "src/seon/foo.clj"}`.
 - `callees-of` — What does a function call? `{::analysis/analysis result ::analysis/fn-name 'my-fn}`
 - `callers-of` — Who calls a function? Same signature pattern.
 - Uses `clj-kondo/run!` with `:analysis true` for arglists, var-usages, var-definitions.
 
 **`seon.dev.lint` (`src/seon/dev/lint.clj`)**:
+
 - `lint-source` — Runs clj-kondo on a **string** via `with-in-str`. Call with `{::lint/content "(defn foo ...)" ::lint/file-path "optional.clj"}`. Returns `{::lint/valid? bool ::lint/findings [...]}`. Use this for incremental per-form analysis.
 - `syntax-error?` — Fast check via edamame. `{::lint/content "..."}` → boolean.
 
 **`seon.db.datalevin.conn` (`src/seon/db/datalevin/conn.clj`)**:
+
 - `get-master-conn!` — Get connection to master DB. Call with `{::conn/manager manager}`. The manager comes from `(:seon/connection-manager integrant.repl.state/system)`.
 - `get-namespace-conn!` — Get namespace-specific DB. `{::conn/manager manager ::conn/namespace 'seon.graph}`.
 
 **Datalevin transact/query patterns (from `seon.ai.datalevin`)**:
+
 ```clojure
 ;; Require datalevin
 (require '[datalevin.core :as d])
@@ -222,6 +232,7 @@ Production-ready agent JVM pool with:
 ```
 
 **`seon.ns.introspect` (`src/seon/ns/introspect.clj`)**:
+
 - `introspect` — Runtime namespace reflection. Returns `{:functions [...] :vars [...] :requires {...}}`.
 - `list-seon-namespaces` — All loaded `seon.*` namespaces.
 
@@ -293,19 +304,23 @@ feat: knowledge graph foundation with Datalevin storage
 ### Existing Code to Reuse
 
 **`seon.flow.pool` (`src/seon/flow/pool.clj`)**:
+
 - `acquire!` / `acquire!!` — Get a warm JVM from pool. `(pool/acquire! pool {::pool/namespace 'seon.trading.signals})`. Returns `{::pool/port 7901 ...}`.
 - `release!` — Return JVM to pool.
 - `nrepl-eval!` — Eval code on agent JVM. `(pool/nrepl-eval! port "(+ 1 2)")`.
 - `pool-status` — Check pool state.
 
 **`seon.graph.ingest` (from Phase 2)**:
+
 - `ingest-incremental!` — Update knowledge graph after each form eval.
 
 **`seon.graph.analyzer` (from Phase 2)**:
+
 - `analyze-form` — Get analysis for a single form string.
 
 **`bin/mcp-server` routing pattern**:
 The MCP server (`bin/mcp-server`) is a Babashka script. It routes `eval` calls by `session_id`:
+
 - `session_id = "orchestrator"` → eval on port 7888 (orchestrator nREPL)
 - `session_id = "a1b2"` (4-char hex) → looks up nREPL port via `seon.orchestrator.session/get-session-port` on the orchestrator, then evals on that port
 
@@ -318,6 +333,7 @@ The MCP server (`bin/mcp-server`) is a Babashka script. It routes `eval` calls b
     1. Classify form type (defn, def, ns, require, expression) by parsing with edamame
     2. Route to agent JVM via `pool/nrepl-eval!`
     3. Store form in Datalevin:
+
        ```clojure
        {:form/id (random-uuid)
         :form/namespace "seon.trading.signals"
@@ -328,6 +344,7 @@ The MCP server (`bin/mcp-server`) is a Babashka script. It routes `eval` calls b
         :form/version 3  ;; incremented per name+namespace
         :form/created-at (Instant/now)}
        ```
+
     4. Run `graph/analyze-form` on the source
     5. Run `graph/ingest-incremental!` with analysis results
     6. Return eval result + any analysis warnings

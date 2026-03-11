@@ -42,6 +42,7 @@ The harness also enforces backpressure: each instance tracks pending requests ag
 ## Dependencies
 
 ### Uses
+
 - [[components/flow-topology]] (pool) — `pool/acquire!`, `pool/release!`, `pool/nrepl-eval!` for JVM lifecycle
 - `seon.flow.msg` — `::msg/*` envelope keys for all request/reply/event messages
 - `seon.flow.trace` — `trace/persist-event!` for observability (forward, error, overload, ok events)
@@ -50,6 +51,7 @@ The harness also enforces backpressure: each instance tracks pending requests ag
 - `core.async` — channels for in-port/out-port wiring
 
 ### Used By
+
 - [[components/flow-topology]] — harness instances are registered as flow processes in the topology
 - Orchestrator — launches harnesses via `start-namespace-jvm!` when spinning up agents
 
@@ -95,26 +97,33 @@ When agent code needs to call a function in another namespace, `remote-call!` se
 ## Design Decisions
 
 ### 4-Arity Step Function Pattern
+
 All flow processes use the same 4-arity protocol:
+
 1. **Describe** (0-arity) — declares ins, outs, params, workload type
 2. **Init** (1-arity) — receives params, returns initial state. Supports external `::in-ports`/`::out-ports` injection for testing.
 3. **Transition** (2-arity) — handles `:stop`, `:pause`, `:resume` lifecycle events
 4. **Transform** (3-arity) — pure-ish state machine. `[state input-id msg] -> [new-state output-map]`
 
 ### Backpressure via Pending Count
+
 Rather than relying on channel buffer semantics, the harness tracks an explicit `::pending` counter against `::queue-cap` (default 32). This gives immediate, typed overload responses rather than blocking the caller.
 
 ### Length-Prefixed Nippy over TCP
+
 The channel adapter uses a simple wire protocol: 4-byte big-endian length prefix + Nippy bytes (`fast-freeze`/`fast-thaw`, no header). Channel buffers are 32 deep. Reader and writer run on daemon threads per socket.
 
 ### Bridge Code Injection via nREPL
+
 `start-namespace-jvm!` sends two nREPL evals to the agent JVM:
+
 1. Require the channel and bridge namespaces (they're on the classpath)
 2. Connect back to the orchestrator's TCP server and start a request loop in a `future`
 
 This avoids needing custom class loading — the agent JVM is a standard Clojure process with `src/` on its classpath.
 
 ### Nippy Round-Trip Validation
+
 `execute-local` does a `fast-thaw(fast-freeze(result))` check before returning. If the result isn't serializable, it returns a `:serialization` error rather than letting the TCP channel fail silently.
 
 ## Refactoring Opportunities

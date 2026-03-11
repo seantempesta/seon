@@ -21,6 +21,7 @@ The hook's `update-code-index!` calls `ingest-incremental!`, which retracts ever
 **Problem 2: Scanner misses functions in some cases.**
 
 The scanner's `find-defn-forms` only looks at **top-level** forms (line 181: `(filter defn-form?)` applied directly to the top-level forms list). This means:
+
 - Functions inside `(do ...)` blocks: missed
 - Functions inside `(when ...)` or conditional compilation: missed
 - Functions inside `(let [...] (defn ...))`: missed
@@ -248,6 +249,7 @@ Actually, looking more carefully: `link-fns-to-specs` takes `fns` and `specs`. I
 The real data loss happens in `ingest-incremental!`: it retracts ALL functions in the namespace, then inserts only what the analyzer found. If `analyze-form` (clj-kondo on a string via stdin) produces fewer var-definitions than the full file has, functions disappear.
 
 Possible causes:
+
 - `analyze-form` uses `{:lint ["-"] :filename file-path}` which reads from stdin, not the file. But the hook passes the file's source via `(slurp file-path)` wrapped in `with-in-str`. This should work.
 - clj-kondo's `{:var-definitions {:shallow true}}` might skip some definitions in certain contexts.
 - If the file has syntax issues that clj-kondo partially parses, some functions may not appear.

@@ -36,6 +36,7 @@ The web layer serves Seon's browser UI using a **shim + SSE** pattern: each page
 ## Public API Surface
 
 **SSE engine** (`seon.web.sse`):
+
 - `render-handler` — factory that creates SSE handlers from a render function. Options: `:poll-ms`, `:write-profile`, `:use-view-transition?`, `:auto-brotli?`
 - `refresh-all!` — trigger re-render for all connected SSE clients
 - `patch-elements` — build Datastar SSE event with selector, mode (outer/inner/append/prepend/before/after/replace/remove)
@@ -43,12 +44,14 @@ The web layer serves Seon's browser UI using a **shim + SSE** pattern: each page
 - `init-sse!` / `shutdown-sse!` — lifecycle for the broadcast mult with optional throttling
 
 **Browser bridge** (`seon.web.browser`):
+
 - `eval!` / `eval!!` — execute JavaScript in connected browser, structured/parsed result
 - `cljs!` / `cljs!!` — execute ClojureScript via Scittle
 - `errors` / `clear-errors!` — browser error tracking
 - `connected?` / `clients` — check browser connectivity
 
 **Route dispatch** (`seon.web.routes`):
+
 - Static routes map: `{[:method "/path"] #'handler}`
 - Dynamic routes with regex patterns and path params
 - Custom router (no library dependency), `requiring-resolve` for hot reload
@@ -56,6 +59,7 @@ The web layer serves Seon's browser UI using a **shim + SSE** pattern: each page
 ## Dependencies
 
 **Uses:**
+
 - http-kit — async HTTP server, `hk/as-channel` for SSE
 - Chassis (`dev.onionpancakes.chassis.core`) — compile-time Hiccup to HTML
 - Datastar — client-side: `@post()` for SSE init, `datastar-patch-elements` / `datastar-execute-script` events
@@ -69,6 +73,7 @@ The web layer serves Seon's browser UI using a **shim + SSE** pattern: each page
 - `seon.flow.status` — flow monitor data collection
 
 **Used by:**
+
 - `seon.ai.datalevin` — triggers `refresh-all!` on writes for observatory updates
 - `seon.ai.agent` — `init!` adds watch on agent-registry to trigger SSE refresh
 - Browser clients via Datastar

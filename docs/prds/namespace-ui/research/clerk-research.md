@@ -11,6 +11,7 @@
 Clerk has a sophisticated viewer system with predicate-based dispatch and rich rendering. However, the architecture splits between JVM (dispatch + transforms) and browser (React/Reagent rendering via SCI). The JVM side is entangled with notebook machinery; the browser side depends on React state management.
 
 **Three viable paths forward - decision deferred:**
+
 1. Pull Clerk as dependency (heavy, but get everything)
 2. Extract/adapt viewer.cljc (moderate effort, some deps)
 3. Build our own using Clerk's patterns (clean, but more work)
@@ -232,7 +233,7 @@ This would require rewriting the render functions but the logic is straightforwa
 
 ## Dependency Analysis
 
-### viewer.cljc requires:
+### viewer.cljc requires
 
 ```clojure
 (:require #?(:clj [babashka.http-client :as http])
@@ -255,7 +256,7 @@ This would require rewriting the render functions but the logic is straightforwa
 
 **Potentially extractable:** ordered-map, walk, basic viewer definitions
 
-### Full Clerk deps.edn:
+### Full Clerk deps.edn
 
 ```clojure
 {:deps {babashka/fs {:mvn/version "0.5.28"}
@@ -284,12 +285,14 @@ Pulling Clerk as a dep would bring all of these.
 ### Option A: Use Clerk as Dependency
 
 **What we'd get:**
+
 - All 35+ viewers
 - Predicate dispatch system
 - Transform pipeline
 - Pagination built-in
 
 **Challenges:**
+
 - ~15 dependencies (see deps.edn above)
 - Assumes notebook model (files, cells, caching)
 - WebSocket-based live updates - conflicts with our SSE/Datastar model
@@ -297,40 +300,47 @@ Pulling Clerk as a dep would bring all of these.
 - Would need adapter layer to bridge architectures
 
 **When this makes sense:**
+
 - If we wanted full Clerk notebooks embedded in Seon
 - If we needed Plotly/Vega/KaTeX charting immediately
 
 ### Option B: Extract/Adapt viewer.cljc
 
 **What we'd get:**
+
 - Viewer definitions with predicates
 - Transform functions
 - Wrapped-value pattern
 
 **Challenges:**
+
 - Entangled with nextjournal.clerk.{config, analyzer, parser, markdown}
 - Would need to stub or extract those deps
 - render-fns still assume browser-side SCI eval
 - Would need to rewrite render-fns for server-side Hiccup
 
 **When this makes sense:**
+
 - If we want Clerk's specific viewer logic but not the notebook system
 - If the effort to untangle is less than rewriting
 
 ### Option C: Build Our Own, Borrow Patterns
 
 **What we'd get:**
+
 - Clean Datastar/SSE integration from the start
 - No extra dependencies
 - Full control over rendering
 - Purpose-built for namespace introspection
 
 **Challenges:**
+
 - Need to implement ~15-20 viewers ourselves
 - Won't have Plotly/Vega/KaTeX initially
 - Ongoing maintenance
 
 **When this makes sense:**
+
 - If our viewer needs are modest (namespace introspection, not notebooks)
 - If clean architecture is more valuable than feature completeness
 
@@ -469,6 +479,7 @@ We could adopt these or define our own Tailwind equivalents.
 | **Math (KaTeX)** | Yes | If we need formula rendering |
 
 **Analysis:**
+
 - Our three core needs (functions, Malli, XTDB) require custom viewers regardless of approach
 - Clerk's strength is in primitives, collections, and rich media (charts, math)
 - The overlap is mainly basic type rendering which is straightforward to implement
@@ -579,6 +590,7 @@ For namespace introspection, this is massive overkill.
 Clerk provides excellent patterns for value rendering, but its architecture (SCI in browser, WebSocket updates, notebook-centric) doesn't align cleanly with our SSE/Datastar approach.
 
 **What's clearly reusable:**
+
 - Predicate-based viewer dispatch pattern (~10 lines to implement)
 - Wrapped-value pattern for carrying metadata
 - Simple inline render-fns (nil, boolean, keyword, symbol, number)
@@ -586,16 +598,19 @@ Clerk provides excellent patterns for value rendering, but its architecture (SCI
 - Pagination pattern for large collections
 
 **What would need rewriting regardless:**
+
 - Collection viewers (Reagent state → Datastar signals)
 - Table viewer (sorting/pagination state)
 - Expand/collapse interactions
 
 **What we'd gain from pulling Clerk as dep:**
+
 - 35+ viewers out of the box
 - Plotly, Vega-Lite, KaTeX rendering (if we need charts/math)
 - Maintained by Nextjournal
 
 **What we'd lose:**
+
 - Clean Datastar integration (would need adapter)
 - Lightweight dependency tree
 - Full control over rendering

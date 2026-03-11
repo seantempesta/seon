@@ -69,11 +69,13 @@ The original plan identified three hard problems with namespace cloning in a sha
 **Source:** `deps.edn` analysis + `complete-isolation.md` research doc
 
 With XTDB + Arrow + Netty:
+
 - 1.5-2GB per agent JVM
 - 6-8s startup
 - Requires `--add-opens` JVM flags for Java 21
 
 Without XTDB (Datalevin client only):
+
 - **186MB measured** (prototype agent JVM)
 - ~2-3s startup
 - No special JVM flags needed
@@ -82,9 +84,11 @@ Without XTDB (Datalevin client only):
 ### 5. Dynamic Dependency Loading Works
 
 Clojure 1.12 (which we're on) has `clojure.repl.deps/add-libs`:
+
 ```clojure
 (add-libs '{org.clojure/data.csv {:mvn/version "1.1.0"}})
 ```
+
 Loads Maven artifacts at runtime into the running JVM. Agent can request new deps without restart, isolated to that JVM.
 
 ---
@@ -108,6 +112,7 @@ Created and tested a minimal agent JVM. Files:
 | Heap limit | 256 MB | 8 GB | Constrained by design |
 
 **Agent deps (`:replace-deps`):**
+
 - `org.clojure/clojure` 1.12.0
 - `org.clojure/core.async` 1.9.829-alpha2
 - `metosin/malli` 0.17.0
@@ -117,6 +122,7 @@ Created and tested a minimal agent JVM. Files:
 - `cheshire/cheshire` 5.13.0
 
 **Agent JVM flags:**
+
 ```
 -Xms128m -Xmx256m -XX:+UseSerialGC -XX:MaxMetaspaceSize=64m -XX:TieredStopAtLevel=1
 ```
@@ -258,6 +264,7 @@ The 3.3s breaks down roughly as: JVM bootstrap (~300ms) + Clojure runtime init (
 **Realistic improvement:** ~30% reduction on top of AOT. Combined AOT+AppCDS: 3.5s down to ~0.8-1.2s.
 
 **Implementation:**
+
 ```bash
 # Training run (once, after building uberjar):
 java -XX:ArchiveClassesAtExit=agent.jsa -jar target/agent.jar --port 9999
@@ -338,18 +345,21 @@ Java 24+ has early-access "condensers" that pre-compute class initialization and
 ### Recommended Implementation Plan
 
 **Phase 1 (this week): Pre-warmed JVM pool**
+
 - Modify `seon.flow.launcher` to maintain a pool of 2-3 warm agent JVMs
 - Each warm JVM has Clojure + nREPL + core deps loaded, awaiting namespace assignment
 - Effective startup: ~50ms (just the namespace require)
 - Memory cost: ~558MB for 3 standby agents
 
 **Phase 2 (next week): AOT + AppCDS uberjar**
+
 - Add `build.clj` target for agent uberjar with AOT
 - Generate AppCDS archive as part of build
 - Update `bin/agent-runner` to use uberjar + CDS
 - Reduces cold start from 3.5s to ~1.0s (for when pool is exhausted)
 
 **Phase 3 (if needed): Deferred loading**
+
 - Move malli/core.async to lazy requires
 - Only worth doing if Phase 1+2 aren't sufficient
 

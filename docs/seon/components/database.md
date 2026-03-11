@@ -56,6 +56,7 @@ All read functions accept a db-name keyword (`:seon`, `:seon.runtime`, `:seon.ai
 ### Direct Mode
 
 `*direct-mode*` is a dynamic var (default `false`). When bound to `true`, reads and writes bypass the infrastructure flow and use Datalevin directly. Used in two contexts:
+
 - **Test fixtures** that don't have a running infrastructure flow.
 - **Integrant init** during bootstrap before the flow is started.
 
@@ -127,6 +128,7 @@ The connection manager solves a critical concurrency problem: when two threads s
 **Solution**: Per-DB locking via `ConcurrentHashMap`. Each database name gets its own lock object. The fast path (cached, valid connection) requires no locking. The slow path (first connection or reconnection) holds the per-DB lock during `d/get-conn`.
 
 **Key operations**:
+
 - `get-conn!` — Get or create connection (fast path: no lock; slow path: per-DB lock)
 - `reconnect!` — Force close + fresh connection
 - `sweep-stale-connections!` — Remove dead connections from cache
