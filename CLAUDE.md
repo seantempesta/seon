@@ -27,6 +27,30 @@ All documentation lives in `docs/` — markdown files under version control. Use
 
 **After making code changes**, update the relevant component note to reflect new reality. See `docs/seon/_dashboard.md` for the full protocol.
 
+### Markdown Standards
+
+All `docs/**/*.md` files are validated by `seon.dev.markdown` — a Seon-native linter that runs automatically on every edit via the dev hook. It auto-fixes formatting (blank lines, trailing whitespace) and reports structural issues.
+
+**Every markdown file must have YAML frontmatter:**
+
+```yaml
+---
+type: component
+status: active
+tags: [component, database]
+---
+```
+
+- **`type`** — what kind of doc: `component`, `concept`, `issue`, `architecture`, `vision`, `reference`, `prd`, `decision`, `research`
+- **`status`** — lifecycle: `active`, `draft`, `completed`, `abandoned`
+- **`tags`** — from the valid taxonomy (same values as type, plus domain tags: `database`, `schema`, `flow`, `web`, `agent`, `trading`, `health`, `dashboard`, `index`)
+
+**Formatting rules (auto-fixed):** blank lines around headings and code fences, no multiple blank lines, trailing newline, no trailing whitespace.
+
+**Structural rules (reported as feedback):** ATX headings only (`#` not underline), no heading level jumps, one h1 per doc, dash for lists (`-` not `*`), wikilink targets must exist, no bare URLs.
+
+**When creating a new doc:** always include frontmatter with `type`, `status`, and `tags`. The hook will tell you if something is wrong.
+
 ---
 
 ## What is Seon?
