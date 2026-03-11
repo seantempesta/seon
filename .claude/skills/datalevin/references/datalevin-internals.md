@@ -142,5 +142,5 @@ In Seon client/server mode, connections use `dtlv://` URIs. The connection manag
 | Full type mapping | `docs/prds/schema-unification/design.md` |
 | Serialization (Nippy) | `docs/prds/schema-unification/research/serialization-findings.md` |
 | Nil semantics | `docs/prds/schema-unification/research/nil-semantics-findings.md` |
-| API patterns | `CONVENTIONS.md` |
+| API patterns | `docs/conventions.md` |
 | Datalevin source | `reference-code/datalevin/` |

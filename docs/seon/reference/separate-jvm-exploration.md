@@ -195,8 +195,8 @@ Replace the old "Namespace Instances" phase with:
 
 ## Existing Research to Reference
 
-- `docs/prds/agent-isolation/research/complete-isolation.md` — Earlier research on JVM isolation. Assumed XTDB (expensive). Our Datalevin-only approach changes the numbers dramatically.
-- `src/seon/experimental/ns_instance.clj` — Namespace cloning prototype. Still useful for understanding var resolution, but the separate-JVM approach makes this unnecessary.
+- `docs/archive/agent-isolation/research/complete-isolation.md` — Earlier research on JVM isolation. Assumed XTDB (expensive). Our Datalevin-only approach changes the numbers dramatically.
+- `src/seon/experimental/ns_instance.clj` — Namespace cloning prototype (historical — file no longer exists). Still useful as reference for understanding var resolution, but the separate-JVM approach makes this unnecessary.
 - `src/seon/web/sse/flow.clj` — Proven core.async.flow pattern (aggregator → broadcaster). Use as template for agent proxy flow nodes.
 - `src/seon/ai/claude/sdk.clj` — Already spawns subprocesses (Claude Code CLI). Pattern for process lifecycle management.
 

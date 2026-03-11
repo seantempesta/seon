@@ -5,6 +5,8 @@ description: "Seon database patterns. Use when writing Datalog queries, transact
 
 # Datalevin -- Seon Database Patterns
 
+> See also: `docs/seon/components/database.md`, `docs/seon/components/schema-system.md`
+
 ## Architecture
 
 Datalevin runs as a **separate JVM process** on port 8898. It survives Seon restarts. All database access goes through the `seon.db` API, routed via core.async flow for serialized reads and writes. Schema-first: call `schema/register!`, Malli validates at transact time, and the bridge auto-derives Datalevin types.

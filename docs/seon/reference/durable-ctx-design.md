@@ -1,9 +1,11 @@
 ---
 type: reference
-status: active
+status: draft
 tags: [reference, flow]
 ---
 # Reactive UI Architecture
+
+> **Note:** This is a vision and research document, not a description of the current API. The patterns described here represent design goals and explorations. Refer to `docs/seon/reference/datastar-quick-reference.md` for current production patterns.
 
 **Status:** Vision / Research
 **Date:** 2026-01-30
@@ -348,6 +350,6 @@ Since server owns state, network latency is visible:
 
 - `reference-code/datastar-clojure/` - Datastar SDK
 - `reference-code/hyperlith/` - Hyperlith examples
-- `docs/reference/datastar-quick-reference.md` - Current patterns
+- `docs/seon/reference/datastar-quick-reference.md` - Current patterns
 - [cherry](https://github.com/squint-cljs/cherry) - CLJS without build step
 - [squint](https://github.com/squint-cljs/squint) - CLJS to JS compiler
