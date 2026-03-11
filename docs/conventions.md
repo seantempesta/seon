@@ -601,6 +601,24 @@ Every namespace should have a comprehensive docstring written by its steward age
 
 See `/datastar-web-ui` skill for SSE patterns (direct response vs background push, buffer design, refresh triggers, handler hot reload).
 
+## Dynamic Namespace Hazards
+
+When agents operate in dynamically-created namespaces (e.g., `seon.email.a1b2`), two Clojure behaviors cause subtle bugs:
+
+### `::keyword` auto-qualification
+
+In an instance namespace `seon.email.a1b2`, `::foo` expands to `:seon.email.a1b2/foo`, not `:seon.email/foo`. Schema validation fails silently because the keyword doesn't match the registered schema.
+
+**Mitigation**: Always use explicit keywords (`:seon.email/foo`), or set up a namespace alias (`::base/foo` where `base` aliases `seon.email`). Never rely on `::keyword` in code that may run in a derived namespace.
+
+### Closure state sharing
+
+If a base namespace function closes over a mutable atom (`def ^:private counter (atom 0)`), all dynamic namespace instances share that same atom. State mutations in one instance affect all others.
+
+**Mitigation**: Avoid mutable state in base namespace closures. Pass state explicitly via function arguments (already the Seon convention with `db` and `ctx` parameters).
+
+---
+
 ## Reload Lifecycle Hooks for `defonce` State
 
 Seon is a runtime system where agents live-code and update namespaces. `defonce` atoms survive `user/reload` (clj-reload) but may hold stale references — old closures, dead channels, orphaned threads. Every `defonce` with mutable runtime state **must** have lifecycle hooks.
