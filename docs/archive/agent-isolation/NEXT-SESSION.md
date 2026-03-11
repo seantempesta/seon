@@ -27,10 +27,12 @@ The session tests are failing. The implementation has a bug where it uses XTQL s
 ## Recent Changes (from another session)
 
 New SQL helpers added in `seon.agent.helpers`:
+
 ```clojure
 (sql "SELECT * FROM signals")           ; query
 (sql! "INSERT INTO signals ..." ...)    ; single write
 (sql-batch! "INSERT ..." [...] [...])   ; batch insert
+
 ```
 
 Breaking changes to be aware of:
@@ -43,9 +45,11 @@ Breaking changes to be aware of:
 1. **Fix `seon.orchestrator.session` tests** - Currently failing with port conflicts and SQL issues
 2. **Verify `bin/agent-eval` script works** - Should map session-id → port and eval code
 3. **Manual test the full flow**:
+
    ```clojure
    (def s (session/start-agent-session! {::session/node (xtdb-node) ::session/namespace 'test.agent}))
    ;; Then from CLI: bin/agent-eval <session-id> '(+ 1 1)'
+
    ```
 4. **Commit Phase 4** when tests pass
 
@@ -68,6 +72,7 @@ Breaking changes to be aware of:
 
 ```bash
 clj -M:test -m kaocha.runner --focus seon.orchestrator.session-test
+
 ```
 
 ## Critical Working Principles

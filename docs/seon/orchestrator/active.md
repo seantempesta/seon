@@ -6,6 +6,7 @@ status: active
 # Active Work
 
 ## Recovery
+
 >
 > Read this after context loss. It tells you where we are.
 
@@ -28,6 +29,7 @@ status: active
 <!-- Status: planned -> in-progress -> complete -> verified | failed -->
 
 ## Verification Log
+
 <!-- Record what verifiers checked and found -->
 
 ## Session Notes

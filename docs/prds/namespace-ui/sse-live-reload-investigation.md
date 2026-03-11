@@ -16,6 +16,7 @@ SSE handlers use `def` to create handler objects. clj-reload doesn't re-evaluate
 (def my-sse
   (sse/render-handler
    (fn [_request] (render-content))))  ; Changes won't propagate!
+
 ```
 
 ## Solution: Var References + after-ns-reload Hooks
@@ -44,6 +45,7 @@ clj-reload has built-in support for reload hooks (discovered in source at `refer
 (defn after-ns-reload []
   (alter-var-root #'my-sse
     (constantly (sse/render-handler #'my-sse-render :poll-ms 2000))))
+
 ```
 
 ## Files Updated

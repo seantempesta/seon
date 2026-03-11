@@ -9,9 +9,11 @@ Our current setup is **sufficient for the agent observatory** with one minor ext
 **Version: 1.0.0-RC.6** (via CDN)
 
 From `src/seon/web/html.clj`:
+
 ```clojure
 (def datastar-cdn
   "https://cdn.jsdelivr.net/gh/starfederation/datastar@1.0.0-RC.6/bundles/datastar.js")
+
 ```
 
 The latest available is **1.0.0-RC.7** (per the official Clojure SDK). This is a minor version behind but functionally equivalent for our needs.
@@ -21,6 +23,7 @@ The latest available is **1.0.0-RC.7** (per the official Clojure SDK). This is a
 **Yes.** Hyperlith has a dedicated `patch-append-body` function:
 
 From `reference-code/hyperlith/src/hyperlith/impl/datastar.clj`:
+
 ```clojure
 (defn patch-append-body [elements]
   (str "event: datastar-patch-elements"
@@ -28,6 +31,7 @@ From `reference-code/hyperlith/src/hyperlith/impl/datastar.clj`:
     "\ndata: mode append"
     "\ndata: elements " (str/replace elements "\n" "\ndata: elements ")
     "\n\n\n"))
+
 ```
 
 This is used in `action-handler` to append elements to the body for action responses.
@@ -47,6 +51,7 @@ Our `patch-elements` function only supports the default `outer` mode (morphing):
        "\nid: " event-id
        "\ndata: elements " (clojure.string/replace elements "\n" "\ndata: elements ")
        "\n\n\n"))
+
 ```
 
 ### Datastar Supports 8 Patch Modes
@@ -119,6 +124,7 @@ Extend `seon.web.sse` with a flexible `patch-elements` that supports options:
          (when (seq lines) (str "\n" (str/join "\n" lines)))
          "\ndata: elements " (str/replace elements "\n" "\ndata: elements ")
          "\n\n\n")))
+
 ```
 
 ## Question 6: `data-scroll-into-view`?
@@ -136,6 +142,7 @@ For the agent observatory, we can use:
 ```clojure
 ;; After appending a message, execute script to scroll
 (execute-script! "document.querySelector('#message-log').scrollTop = document.querySelector('#message-log').scrollHeight")
+
 ```
 
 Or use CSS on the container:
@@ -144,6 +151,7 @@ Or use CSS on the container:
 [:div#message-log {:style {:overflow-y "auto"
                            :flex-direction "column-reverse"}} ;; Auto-scroll to bottom
  messages]
+
 ```
 
 ## Files Examined

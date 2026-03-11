@@ -30,6 +30,7 @@ Caller thread                Orchestrator (topology)           Writer JVM (pool)
      |<-- deref (timeout) --------|                                 |
      |                                                              |
   (result or timeout)                                               |
+
 ```
 
 ### Design Decisions

@@ -41,4 +41,5 @@ Every namespace becomes a full citizen in the flow topology — not just a routi
 ;; Harness state
 ::harness/namespace, ::harness/queue-cap,
 ::harness/pending, ::harness/error-count
+
 ```

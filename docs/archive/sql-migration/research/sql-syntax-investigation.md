@@ -12,26 +12,31 @@ Domain code (trading, health, finance) will use SQL for LLM accessibility. This 
 ## Research Tasks
 
 ### 1. Column Naming
+
 - [ ] How are namespaced keywords stored? (`asset/ticker` → `asset_ticker`?)
 - [ ] Test: Insert with `{:asset/ticker "AAPL"}`, query with SQL
 - [ ] Document the exact mapping
 
 ### 2. Parameterized Queries
+
 - [ ] Positional parameters (`?`)
 - [ ] Vector syntax `["SELECT ... WHERE x = ?" value]`
 - [ ] Type handling for each Clojure type
 
 ### 3. Temporal Syntax (for reference - domains won't use this)
+
 - [ ] `FOR VALID_TIME`
 - [ ] `FOR SYSTEM_TIME`
 - [ ] `FOR ALL VALID_TIME`
 
 ### 4. Aggregations
+
 - [ ] `GROUP BY` syntax
 - [ ] Available functions: `COUNT`, `SUM`, `AVG`, `MIN`, `MAX`
 - [ ] `HAVING` clause
 
 ### 5. Type Handling
+
 - [ ] Keywords (`:call`, `:put`) - stored as strings?
 - [ ] Instants / timestamps
 - [ ] UUIDs
@@ -59,6 +64,7 @@ Domain code (trading, health, finance) will use SQL for LLM accessibility. This 
    FROM option_greeks
    GROUP BY asset_ticker
    ORDER BY cnt DESC")
+
 ```
 
 ---
@@ -89,6 +95,7 @@ Domain code (trading, health, finance) will use SQL for LLM accessibility. This 
 
 ;; Instants work for temporal filtering
 (xt/q node ["SELECT * FROM edit_event WHERE _valid_from > ?" cutoff-instant])
+
 ```
 
 ### Filtering on Namespaced Columns
@@ -99,9 +106,11 @@ Filtering on columns like `fn$namespace` in SQL is complex. Simpler approach:
 ;; Fetch all, filter in Clojure
 (->> (xt/q node "SELECT * FROM function")
      (filter #(= :seon.foo (:fn/namespace %))))
+
 ```
 
 ### Type Mapping
+
 | Clojure Type | SQL Type | Notes |
 |--------------|----------|-------|
 | String | VARCHAR | |
@@ -140,4 +149,5 @@ SELECT asset_ticker,
 FROM option_greeks
 GROUP BY asset_ticker
 HAVING COUNT(*) > 100;
+
 ```

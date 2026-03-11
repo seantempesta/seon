@@ -21,6 +21,7 @@
 (def gen-ticker
   [:string {:min 1 :max 5
             :gen/elements ["AAPL" "MSFT" "GOOGL" ...]}])
+
 ```
 
 **Key Patterns:**
@@ -32,6 +33,7 @@
 ### 2. Domain Organization
 
 **Structure:** `src/seon/trading/`
+
 ```
 ├── core.clj          # Public API + capabilities()
 ├── signals.clj       # Trading signal calculations
@@ -39,15 +41,18 @@
 ├── validation.clj    # Data validation
 ├── ingest.clj        # Data pipeline
 └── *_test.clj        # Colocated tests
+
 ```
 
 **The `capabilities` pattern:**
+
 ```clojure
 (defn capabilities []
   {:domain :trading
    :description "Options trading analysis"
    :signals [:iv-rank :skew-index ...]
    :temporal-support true})
+
 ```
 
 **Domain requirements:**
@@ -74,6 +79,7 @@
   (sse/render-handler
    (fn [_request]
      (html/dashboard-content @job-state))))
+
 ```
 
 **Key points:**
@@ -91,6 +97,7 @@
 
 ;; Temporal queries (as-of)
 (node/query node query-form {:current-time some-instant})
+
 ```
 
 **Key points:**
@@ -101,6 +108,7 @@
 ### 5. Registry & Dispatch
 
 **Domain registry:**
+
 ```clojure
 (defonce domains (atom {}))
 
@@ -109,12 +117,15 @@
 
 (defn domain-db [domain-id]
   (get-in @domains [domain-id :db]))
+
 ```
 
 **Integrant for lifecycle:**
+
 ```clojure
 (defmethod ig/init-key :seon/xtdb-node [_ config]
   (start-node config))
+
 ```
 
 ---

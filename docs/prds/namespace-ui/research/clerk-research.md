@@ -52,6 +52,7 @@ Clerk wraps all values in maps with the key `:nextjournal/value`:
 {:nextjournal/value 42
  :nextjournal/viewer {:name `number-viewer
                       :render-fn 'nextjournal.clerk.render/render-number}}
+
 ```
 
 This design allows carrying metadata alongside values through the transformation pipeline.
@@ -70,6 +71,7 @@ A viewer is a map with these keys:
  :closing-paren "]"
  :add-viewers   [...]                   ; Additional viewers for children
  }
+
 ```
 
 **Key insight:** `:render-fn` is a *quoted form* sent to the browser and evaluated via SCI (Small Clojure Interpreter). This enables Clerk to run Clojure in the browser without full ClojureScript compilation.
@@ -87,6 +89,7 @@ A viewer is a map with these keys:
     (find-viewer viewers
       (fn [{:keys [pred]}]
         (and (ifn? pred) (pred (->value x)))))))
+
 ```
 
 The `default-viewers` vector is searched in order. First match wins.
@@ -109,6 +112,7 @@ Clerk's `default-viewers` includes ~35 viewers:
 
 ```
 Value -> ensure-wrapped -> apply-viewers -> process-wrapped-value -> Browser
+
 ```
 
 1. **ensure-wrapped**: Wraps raw value in `{:nextjournal/value ...}`
@@ -172,6 +176,7 @@ These produce static Hiccup with no React state - **directly portable to JVM**:
 (defn render-number [num]
   [:span.cmt-number.inspected-value
    (if (js/Number.isNaN num) "NaN" (str num))])  ;; js/ -> JVM equivalent needed
+
 ```
 
 ### Stateful Viewers (React/Reagent)
@@ -190,6 +195,7 @@ These use Reagent atoms for expand/collapse state - **NOT directly portable**:
         [expand-button !expanded-at opening-paren path]  ;; <-- stateful component
         [:span opening-paren])
       ;; ...
+
 ```
 
 ```clojure
@@ -197,6 +203,7 @@ These use Reagent atoms for expand/collapse state - **NOT directly portable**:
 (defn render-map [xs {:as opts :keys [path viewer !expanded-at] :or {path []}}]
   (let [expanded? (get @!expanded-at path)
         ;; ...
+
 ```
 
 ### Viewer Complexity Breakdown
@@ -229,6 +236,7 @@ For viewers that need expand/collapse, we could replace Reagent atoms with Datas
 [:span {:data-show "$expanded"
         :data-signals "{expanded: false}"
         :data-on-click "$expanded = !$expanded"} ...]
+
 ```
 
 This would require rewriting the render functions but the logic is straightforward.
@@ -254,6 +262,7 @@ This would require rewriting the render functions but the logic is straightforwa
           [nextjournal.clerk.walk :as w]
           [nextjournal.markdown :as md]           ;; <-- markdown parsing
           [nextjournal.markdown.utils :as md.utils])
+
 ```
 
 **Entangled with notebook machinery:** config, analyzer, parser, markdown
@@ -278,6 +287,7 @@ This would require rewriting the render functions but the logic is straightforwa
         hiccup/hiccup {:mvn/version "2.0.0-RC3"}
         rewrite-clj/rewrite-clj {:mvn/version "1.1.45"}
         juji/editscript {:mvn/version "0.6.4"}}}
+
 ```
 
 Pulling Clerk as a dep would bring all of these.
@@ -376,6 +386,7 @@ Carry metadata alongside values:
 ;; Seon equivalent:
 {:seon.ui/value 42
  :seon.ui/viewer :number}
+
 ```
 
 ### 2. Predicate-Based Dispatch
@@ -395,6 +406,7 @@ First-match-wins viewer selection:
 
 (defn find-viewer [viewers value]
   (first (filter #((:pred %) value) viewers)))
+
 ```
 
 This is ~10 lines of code and gives us Clerk's dispatch semantics.
@@ -408,6 +420,7 @@ JVM transforms data, then renders to Hiccup:
   (-> value
       (cond-> transform transform)
       render))
+
 ```
 
 ### 4. Pagination for Large Collections
@@ -420,6 +433,7 @@ Clerk's approach - truncate and offer expansion:
  :pred vector?
  :render-fn 'nextjournal.clerk.render/render-coll
  :page-size 20}
+
 ```
 
 For Datastar, pagination could use SSE fetch:
@@ -433,6 +447,7 @@ For Datastar, pagination could use SSE fetch:
      (when (pos? remaining)
        [:button {:data-on-click "$$get('/api/expand?path=...')"}
         (str remaining " more...")])]))
+
 ```
 
 ### 5. Value-Declared Viewers
@@ -445,6 +460,7 @@ Allow values to specify how they should be rendered:
 
 ;; Usage:
 (with-viewer :code '(defn foo [x] (+ x 1)))
+
 ```
 
 ### 6. CSS Classes from Clerk
@@ -522,6 +538,7 @@ If we build our own viewer system, here's a sketch:
 (defn render [value]
   (let [{:keys [render]} (find-viewer default-viewers value)]
     (render value)))
+
 ```
 
 ### Namespace-Specific Viewers
@@ -531,6 +548,7 @@ If we build our own viewer system, here's a sketch:
 {:name :ns-functions :pred #(= :functions (:type %)) :render render-fn-table}
 {:name :ns-vars      :pred #(= :vars (:type %))      :render render-var-table}
 {:name :ns-atoms     :pred #(= :atoms (:type %))     :render render-atom-list}
+
 ```
 
 ### Malli Schema Viewer
@@ -541,6 +559,7 @@ If we build our own viewer system, here's a sketch:
  :render (fn [schema]
            [:div.font-mono.text-sm
             [:pre (with-out-str (pprint/pprint (malli.core/form schema)))]])}
+
 ```
 
 ### Collection Viewer with Datastar Expand/Collapse
@@ -559,6 +578,7 @@ If we build our own viewer system, here's a sketch:
      [:span {:data-show (str "$" id "_expanded")}
       (interpose " " (map render xs))]
      "]"]))
+
 ```
 
 **Estimated effort:** 2-3 days for basic viewers, 1-2 more days for polish.

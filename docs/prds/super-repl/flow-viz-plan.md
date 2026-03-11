@@ -22,6 +22,7 @@ Each status map contains (from `impl.clj` line 271-276):
  ::flow/count    42                 ; number of messages processed
  ::flow/ins      {:changes <chan>}  ; input channel map (datafied)
  ::flow/outs     {:updates <chan>}} ; output channel map (datafied)
+
 ```
 
 The `ins` and `outs` are `postwalk datafy`'d -- channels become their string representation, fns become symbols, vars become symbols.
@@ -42,6 +43,7 @@ Returns the flow config with `postwalk datafy` applied (from `impl.clj` line 87-
            :outs {[pid cid] -> chan-str}
            :error chan-str
            :report chan-str}}
+
 ```
 
 ### `report-chan` and `error-chan` -- Returned from `(flow/start g)`
@@ -88,6 +90,7 @@ Wrap `ping` polling to compute deltas:
  :count-at-t1 142
  :interval-ms 1000
  :msgs-per-sec 42.0}
+
 ```
 
 ### B. Error accumulation
@@ -101,6 +104,7 @@ Drain `error-chan` in a background thread, accumulate:
                   ::flow/count 99
                   :timestamp <instant>}]
  :error-rate-1m 0.05}   ;; errors per second over last minute
+
 ```
 
 ### C. Flow registry
@@ -110,6 +114,7 @@ Seon may have multiple flows (SSE flow, future domain flows). Need a registry:
 ```clojure
 {:seon.web.sse/flow  {:flow <obj> :started-at <instant> :label "SSE Pipeline"}
  :seon.trading/flow  {:flow <obj> :started-at <instant> :label "Trading Signals"}}
+
 ```
 
 Currently `seon.web.sse.flow/flow-state` is a private atom. We need a central registry or a way to discover all flows.
@@ -146,6 +151,7 @@ Currently `seon.web.sse.flow/flow-state` is a private atom. We need a central re
             :recent []}}}
 
  :alerts []}
+
 ```
 
 ### `(user/flow-status :sse-pipeline)` -- Single flow detail
@@ -193,6 +199,7 @@ SSE Pipeline                                   ● running
 -----------------------------------------------------------------
 Trading Signals                                ● stopped
   ...
+
 ```
 
 ### Components to build
@@ -210,6 +217,7 @@ Trading Signals                                ● stopped
 ```
 [poll timer] -> (flow/ping all-flows) -> atom -> watch -> refresh-all!
 [error-chan drain] -> atom -> watch -> refresh-all!
+
 ```
 
 The SSE handler (`POST /flows`) calls a render function that reads the status atom and produces the full page HTML. Polling interval: 1 second (configurable). The `render-handler` pattern (hash-based dedup) prevents sending unchanged HTML.

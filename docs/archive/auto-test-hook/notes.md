@@ -26,10 +26,12 @@ This feature adds automatic test running when Claude Code edits Clojure files, p
 ### Discovery 2: nREPL-Based Testing is Fast
 
 **What we found:**
+
 ```bash
 # Test via nREPL (instant, no JVM startup):
 clj-nrepl-eval -p 7888 "(require 'ml-options.log-parsing-test) (clojure.test/run-tests 'ml-options.log-parsing-test)"
 # Result: 3 tests, 26 assertions in <1 second
+
 ```
 
 **Caveat:** Need to `require` the namespace first, and need to handle namespace reloading for changed code.
@@ -38,9 +40,11 @@ clj-nrepl-eval -p 7888 "(require 'ml-options.log-parsing-test) (clojure.test/run
 
 **What we found:**
 The codebase follows a consistent pattern:
+
 ```
 src/ml_options/foo.clj       → test/ml_options/foo_test.clj
 src/ml_options/web/bar.clj   → test/ml_options/web/bar_test.clj
+
 ```
 
 Simple path transformation should work for direct mapping.
@@ -80,6 +84,7 @@ JVM keeps old bytecode loaded until explicitly reloaded.
     (clojure.string/replace #"^src/" "test/")
     (clojure.string/replace #"\.clj$" "_test.clj"))
 ;; => "test/ml_options/web/handlers_test.clj"
+
 ```
 
 ---

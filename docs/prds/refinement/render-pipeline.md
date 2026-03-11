@@ -52,6 +52,7 @@ Unify Seon's rendering into one spec-driven system. Namespaces declare data shap
    {::exercise "Deadlift"       ::sets 1 ::reps 5 ::weight 120}
    {::exercise "Overhead Press" ::sets 5 ::reps 5 ::weight 50}
    {::exercise "Barbell Row"    ::sets 5 ::reps 5 ::weight 70}])
+
 ```
 
 ### Render namespace: `seon.health.workout.render`
@@ -152,6 +153,7 @@ Unify Seon's rendering into one spec-driven system. Namespaces declare data shap
      (str "Workout: " (count workouts) " exercises. "
           (clojure.string/join ", "
             (map #(:seon.render/ai (workout-set-render %)) workouts)))}))
+
 ```
 
 ### What the system does when browser hits `/ns/seon.health.workout`
@@ -183,6 +185,7 @@ Unify Seon's rendering into one spec-driven system. Namespaces declare data shap
 6. Wrap in base-page, serve via SSE
    - Watch on *ctx* atom → re-render on change → patch browser
    - Dev hook reload → re-render → patch browser
+
 ```
 
 ### What curl gets
@@ -193,6 +196,7 @@ curl http://localhost:8080/ns/seon.health.workout?format=ai
 
 curl http://localhost:8080/ns/seon.health.workout?format=raw
 # → {:seon.health.workout/workouts [{:seon.health.workout/exercise "Squat" ...} ...]}
+
 ```
 
 ### What an AI agent gets (REPL)
@@ -200,6 +204,7 @@ curl http://localhost:8080/ns/seon.health.workout?format=raw
 ```clojure
 (seon.render/render-namespace {::render/ns-data (build-ns-data 'seon.health.workout :ai)})
 ;; → "Workout: 5 exercises. Squat — 5x5 @ 100kg, ..."
+
 ```
 
 ---
@@ -326,6 +331,7 @@ curl http://localhost:8080/ns/seon.schema?format=ai
 
 # Raw EDN
 curl http://localhost:8080/ns/seon.health.workout?format=raw
+
 ```
 
 ```clojure
@@ -339,4 +345,5 @@ curl http://localhost:8080/ns/seon.health.workout?format=raw
        update ::workout/workouts conj
        {::workout/exercise "Pull-up" ::workout/sets 3 ::workout/reps 10 ::workout/weight 0})
 ;; → SSE detects change → browser re-renders
+
 ```

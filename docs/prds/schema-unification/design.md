@@ -68,6 +68,7 @@ Non-component refs use explicit `:db/valueType :db.type/ref` in Malli schema pro
 (schema/register! :seon.call/from-fn
                   [:int {:db/valueType :db.type/ref
                          :description "Entity ref to :seon.fn entity"}])
+
 ```
 
 The bridge already copies `:db/*` properties from Malli entry options. This works today. Component refs (nested `:map`) are auto-derived by the bridge as before.
@@ -78,6 +79,7 @@ Adopt spectomic's insight: generate N samples from a Malli schema, verify ALL su
 
 ```
 Generate value -> Malli validate -> strip absent optionals -> transact -> pull -> Malli validate
+
 ```
 
 This becomes the contract test and the feedback loop for agents developing schemas.
@@ -362,6 +364,7 @@ These diverge because individual `schema/register!` calls can lose properties (i
 
 ;; Non-identity attrs stay unchanged:
 (schema/register! :seon.fn/namespace :string)
+
 ```
 
 No change to `register!` function signature — `v` is just a richer Malli schema.
@@ -403,6 +406,7 @@ Modules like `ingest.clj` that had BOTH entity schemas AND manual `schema/regist
 
 ;; Then just transact. Schema is handled automatically.
 (db/transact! :seon [{:seon.foo/id "abc" :seon.foo/name "hello"}])
+
 ```
 
 **Banned types (rejected at registration):** `:any`, `:some`, `:nil`, `[:maybe X]` on persisted data, mixed-type enums.

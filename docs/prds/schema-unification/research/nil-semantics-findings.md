@@ -28,6 +28,7 @@ The critical finding: **naive nil-stripping before transact is lossy for updates
 (d/transact! conn [{:test/id 1 :test/bar "updated"}])
 ;; => {:db/id 1, :test/id 1, :test/foo "hello", :test/bar "updated"}
 ;;    ^^ :test/foo PERSISTS. Absence does NOT retract.
+
 ```
 
 **B. `d/pull` omits absent attributes entirely (no nil):**
@@ -40,6 +41,7 @@ The critical finding: **naive nil-stripping before transact is lossy for updates
 
 (contains? result :test/foo) ;; => false
 (:test/foo result)           ;; => nil (Clojure's default for missing keys)
+
 ```
 
 Pull with explicit attribute selectors also omits absent attributes:
@@ -48,6 +50,7 @@ Pull with explicit attribute selectors also omits absent attributes:
 (d/pull @conn '[:test/id :test/foo :test/bar] [:test/id 2])
 ;; => #:test{:id 2, :bar "only-bar"}
 ;; :test/foo still absent, even though explicitly requested.
+
 ```
 
 **C. Explicit retraction removes a datom:**
@@ -60,6 +63,7 @@ Pull with explicit attribute selectors also omits absent attributes:
 ;; Retract WITHOUT value (retract all values for this attr on this entity)
 (d/transact! conn [[:db/retract [:test/id 1] :test/foo]])
 ;; Also works -- retracts whatever value :test/foo has
+
 ```
 
 **D. Cardinality-many: empty vector is a no-op, not a retraction:**
@@ -72,6 +76,7 @@ Pull with explicit attribute selectors also omits absent attributes:
 ;; To remove all values:
 (d/transact! conn [[:db/retract [:test/id 1] :test/tags]])
 ;; Now entity has no :test/tags attribute at all.
+
 ```
 
 **E. Transacting nil throws:**
@@ -79,6 +84,7 @@ Pull with explicit attribute selectors also omits absent attributes:
 ```clojure
 (d/transact! conn [{:test/id 1 :test/bar nil}])
 ;; => Exception: "Cannot store nil as a value at {:test/id 1, :test/bar nil, ...}"
+
 ```
 
 ### Implications
@@ -131,6 +137,7 @@ The Datomic/Datalevin community pattern is **"Absence is Nil"**:
 (m/validate [:maybe :string] nil)    ;; => true
 (m/validate [:maybe :string] "foo")  ;; => true
 (m/validate [:maybe :string] 42)     ;; => false
+
 ```
 
 `[:maybe X]` means "X or nil." It validates the **value**, not the key's presence.
@@ -141,6 +148,7 @@ The Datomic/Datalevin community pattern is **"Absence is Nil"**:
 (m/validate [:map [:foo {:optional true} :string]] {})           ;; => true  (absent)
 (m/validate [:map [:foo {:optional true} :string]] {:foo "x"})   ;; => true  (present)
 (m/validate [:map [:foo {:optional true} :string]] {:foo nil})   ;; => false (nil fails :string)
+
 ```
 
 `{:optional true}` means "key may be absent." If present, the value must match the schema. Nil is NOT a valid string.
@@ -153,6 +161,7 @@ The Datomic/Datalevin community pattern is **"Absence is Nil"**:
 (m/validate schema {:foo nil})     ;; => true  (key present, value nil)
 (m/validate schema {:foo "hello"}) ;; => true  (key present, value string)
 (m/validate schema {:foo 42})      ;; => false (wrong type)
+
 ```
 
 This is the **three-way optionality**: absent, nil, or value. It is the most permissive combination.
@@ -167,6 +176,7 @@ This is the **three-way optionality**: absent, nil, or value. It is the most per
 ;; Optional :string -- key can be absent, but if present must be string
 (m/validate [:map [:foo {:optional true} :string]] {})           ;; => true
 (m/validate [:map [:foo {:optional true} :string]] {:foo nil})   ;; => false
+
 ```
 
 **This matters for Datalevin roundtrip:** Required `[:maybe :string]` requires `{:foo nil}` to validate, but Datalevin pull returns `{}` (key absent). The pulled entity would FAIL Malli validation for required `[:maybe X]` schemas.
@@ -237,6 +247,7 @@ No code anywhere converts "nil value" to "retract attribute."
   (async/<!! ch))
 ;; => {:foo nil, :bar "hello"}
 ;; :foo key present, value nil, passes through channel intact.
+
 ```
 
 **Flow step-fn nil conventions:** Step-fns return `[new-state output-map-or-nil]`. The `nil` in this context means "no output messages" -- it is the output map itself being nil, completely unrelated to nil values inside entity data maps.
@@ -267,6 +278,7 @@ No code anywhere converts "nil value" to "retract attribute."
 
 ;; NOT this (would fail validation on pull result):
 [:foo [:maybe :string]]
+
 ```
 
 | Layer | Behavior | Notes |
@@ -318,6 +330,7 @@ No code anywhere converts "nil value" to "retract attribute."
 
 ;; Output schema (what pull returns + hydration):
 [:foo {:optional true} [:maybe :string]]
+
 ```
 
 | Layer | Behavior | Notes |
@@ -335,6 +348,7 @@ No code anywhere converts "nil value" to "retract attribute."
 ```
 Write: {:foo nil} -> strip nil -> transact (no datom)
 Read:  pull (absent) -> hydrate -> {:foo nil}
+
 ```
 
 **Pros:**
@@ -376,6 +390,7 @@ This is essentially Option B with a more explicit architectural framing. The "bo
 (defn hydrate-from-storage [malli-schema pulled-entity]
   ;; Add nil for absent [:maybe X] fields
   )
+
 ```
 
 | Layer | Behavior |

@@ -93,6 +93,7 @@ Modern web applications face a fundamental tension: backend operations (database
    [:div.stat-label "Total Records"]
    [:div.stat-value (format-number (:total data))]
    [:div.stat-meta "Records in database"]])
+
 ```
 
 **Best Practices:**
@@ -156,6 +157,7 @@ Modern web applications face a fundamental tension: backend operations (database
 <div hx-get="/api/history" hx-trigger="revealed">
   <div class="skeleton">History will load when visible...</div>
 </div>
+
 ```
 
 **Sources:**
@@ -210,6 +212,7 @@ Client (Browser)              Web Server                Worker Process
      |                            |<-- Job complete -----------|
      |<-- event: complete --------|                            |
      |    (final data)            |                            |
+
 ```
 
 **Implementation Components:**
@@ -288,6 +291,7 @@ Server                          Browser
   |                               |
   |--- Chunk 5: </body></html> -->| Parse complete
   |                               |
+
 ```
 
 **SSE Variation:**
@@ -357,6 +361,7 @@ Server                          Browser
       (do
         (swap! app-state update-in [:likes post-id] dec)
         (show-error "Failed to like post")))))
+
 ```
 
 **Cache Management:**
@@ -422,6 +427,7 @@ Server                          Browser
      hx-swap="afterend">
   <!-- Last item in list -->
 </div>
+
 ```
 
 **Sources:**
@@ -497,6 +503,7 @@ function retryWithBackoff(element, maxRetries) {
     showError('Operation failed after ' + maxRetries + ' retries');
   }
 }
+
 ```
 
 **Error States to Handle:**
@@ -519,6 +526,7 @@ function retryWithBackoff(element, maxRetries) {
         hx-target-5*="#server-errors">
   Save
 </button>
+
 ```
 
 **Sources:**
@@ -572,6 +580,7 @@ Streaming brotli compression is highly effective for SSE:
   (->> (patch-elements event-id html)
        (br/compress-stream out br)
        (send! channel)))
+
 ```
 
 **Why it works:** Dashboard HTML has repetitive structure (same classes, same tags). Brotli learns these patterns and references them instead of repeating.
@@ -595,6 +604,7 @@ Streaming brotli compression is highly effective for SSE:
       new-hash (hash new-view)]
   (when (not= last-hash new-hash)
     (send-sse-event new-view)))
+
 ```
 
 **Benefits:**
@@ -620,6 +630,7 @@ Streaming brotli compression is highly effective for SSE:
 ;; Usage
 (let [<refresh (throttle refresh-ch 100)]
   (a/mult <refresh))
+
 ```
 
 **Why throttle:**
@@ -644,6 +655,7 @@ Streaming brotli compression is highly effective for SSE:
 (swap! job-state assoc-in [:current :progress] {...})
 ;; → SSE refresh triggered automatically
 ;; → All connected clients re-render
+
 ```
 
 **Benefits:**
@@ -672,6 +684,7 @@ Streaming brotli compression is highly effective for SSE:
 (let [<client-ch (a/tap refresh-mult (a/chan (a/dropping-buffer 1)))]
   ;; Read from <client-ch for this connection
   )
+
 ```
 
 **Agents for Sequential Updates:**
@@ -682,6 +695,7 @@ Streaming brotli compression is highly effective for SSE:
 
 (send log-agent conj {:event "started" :timestamp (now)})
 ;; Updates happen serially, no race conditions
+
 ```
 
 **Atoms for Shared State:**
@@ -693,6 +707,7 @@ Streaming brotli compression is highly effective for SSE:
 ;; Watchers for side effects
 (add-watch job-state :sse (fn [_ _ old new]
   (when (not= old new) (trigger-sse-update!))))
+
 ```
 
 **Futures for Background Work:**
@@ -710,6 +725,7 @@ Streaming brotli compression is highly effective for SSE:
 
 ;; Cancel with
 (future-cancel job-future)
+
 ```
 
 **Virtual Threads (Java 21+):**
@@ -722,6 +738,7 @@ Streaming brotli compression is highly effective for SSE:
       (when-some [event (<!! event-ch)]
         (send-to-client event)
         (recur)))))
+
 ```
 
 **When to Use What:**
@@ -756,6 +773,7 @@ Streaming brotli compression is highly effective for SSE:
                         "Cache-Control" "no-store"}
               :body "event: message\ndata: hello\n\n"}
           false) ; false = don't close channel
+
 ```
 
 **Why http-kit:**
@@ -772,6 +790,7 @@ Streaming brotli compression is highly effective for SSE:
   (respond {:status 200
             :headers {"Content-Type" "text/event-stream"}
             :body (sse-body-stream req)}))
+
 ```
 
 ### State Management Patterns
@@ -787,6 +806,7 @@ Streaming brotli compression is highly effective for SSE:
 
 (defmethod ig/halt-key! :app/sse-broadcast [_ {:keys [refresh-ch]}]
   (a/close! refresh-ch))
+
 ```
 
 **Benefits:**
@@ -810,6 +830,7 @@ Streaming brotli compression is highly effective for SSE:
   (stop [this]
     (a/close! (:refresh-ch this))
     (dissoc this :refresh-ch :refresh-mult)))
+
 ```
 
 ---
@@ -824,6 +845,7 @@ Is query < 500ms?
 └─ NO → Is query < 3 seconds?
     ├─ YES → Skeleton loading + SSE update
     └─ NO → Background job + SSE notifications
+
 ```
 
 ### Strategy 1: Skeleton + Fast SSE (< 3 seconds)
@@ -854,6 +876,7 @@ Is query < 500ms?
   (fn [_ _ old new]
     (when (not= old new)
       (sse/refresh-all!))))
+
 ```
 
 **Flow:**
@@ -913,6 +936,7 @@ POST /api/import/start
 
 ;; 4. Client receives real-time updates via SSE
 ;; (Already connected via dashboard SSE handler)
+
 ```
 
 **Flow:**
@@ -951,6 +975,7 @@ POST /api/import/start
   node symbols start-date end-date
   {:on-progress (fn [progress]
                   (jobs/update-progress! progress))})
+
 ```
 
 ### Strategy 3: Hybrid (Critical + Lazy)
@@ -974,6 +999,7 @@ POST /api/import/start
 ;; Route structure
 GET  /dashboard        → Returns dashboard-initial (fast)
 POST /dashboard/stream → SSE connection for details (slower)
+
 ```
 
 **Multi-Section SSE:**
@@ -990,6 +1016,7 @@ POST /dashboard/stream → SSE connection for details (slower)
 
 ;; Client opens multiple SSE connections, one per section
 ;; Each can update independently
+
 ```
 
 ### Query Optimization Techniques
@@ -1010,6 +1037,7 @@ POST /dashboard/stream → SSE connection for details (slower)
         (reset! stats-cache {:data fresh-data
                              :expires-at (+ now 30000)})
         fresh-data))))
+
 ```
 
 **Incremental Updates:**
@@ -1022,6 +1050,7 @@ POST /dashboard/stream → SSE connection for details (slower)
       (from :option-greeks
             [asset/ticker quote/timestamp]
             (where (> quote/timestamp ~last-seen))))))
+
 ```
 
 **Parallel Queries:**
@@ -1035,6 +1064,7 @@ POST /dashboard/stream → SSE connection for details (slower)
     {:stats @stats-future
      :history @history-future
      :symbols @symbols-future}))
+
 ```
 
 ---
@@ -1085,6 +1115,7 @@ POST /dashboard/stream → SSE connection for details (slower)
 ;; Trigger refresh for all clients
 (defn refresh-all! []
   (a/>!! refresh-ch :refresh))
+
 ```
 
 ### Example 2: Dashboard with Auto-Refresh
@@ -1114,6 +1145,7 @@ POST /dashboard/stream → SSE connection for details (slower)
         (catch Exception e
           ;; And this one too
           (swap! job-state assoc-in [:current :status] :failed))))))
+
 ```
 
 ### Example 3: Skeleton Loading Pattern
@@ -1154,6 +1186,7 @@ POST /dashboard/stream → SSE connection for details (slower)
     100% { background-position: -200% 0; }
   }
   ")
+
 ```
 
 ### Example 4: Progressive Section Loading
@@ -1187,6 +1220,7 @@ POST /dashboard/stream → SSE connection for details (slower)
  ;; Initially empty or skeleton
  ;; Gets populated via SSE connection to /dashboard/stream?tier=secondary
  {:data-init "@post('/dashboard/stream?tier=secondary')"}]
+
 ```
 
 ### Example 5: Background Job with Progress
@@ -1220,6 +1254,7 @@ POST /dashboard/stream → SSE connection for details (slower)
       [:div.progress-fill {:style (str "width: " pct "%")}]]
      [:div.progress-text
       (str (:completed progress) " of " (:total progress) " days completed")]]))
+
 ```
 
 ### Example 6: Error Handling with Retry
@@ -1262,6 +1297,7 @@ POST /dashboard/stream → SSE connection for details (slower)
     (catch IllegalArgumentException e
       ;; Validation error - not retriable
       {:status 422 :body (validation-errors e)})))
+
 ```
 
 ---

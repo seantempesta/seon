@@ -31,6 +31,7 @@ We observed this repeatedly with multiple agents getting "stuck" at turn 101.
 ;; src/seon/ai/claude.clj
 ;; Override undocumented 100 turn default - real limits are API tokens and cost budgets
 effective-max-turns (or max-turns 10000)
+
 ```
 
 **TODO:** File bug report with Anthropic about undocumented default behavior.
@@ -80,16 +81,20 @@ effective-max-turns (or max-turns 10000)
 ### Rule 1: Don't Set Arbitrary Defaults for "No Limit" Scenarios
 
 **Bad:**
+
 ```clojure
 ;; Arbitrary large number to mean "unlimited"
 ::sdk/max-turns (or max-turns 999999)
+
 ```
 
 **Good:**
+
 ```clojure
 ;; Don't pass the flag at all when unlimited
 (when max-turns
   ["--max-turns" (str max-turns)])
+
 ```
 
 ### Rule 2: Document the Source of Every Limit
@@ -109,6 +114,7 @@ When adding a `:max` or `:min` constraint to a schema, document where the limit 
 ;; BAD - arbitrary, undocumented
 (schema/register! ::timeout
   [:int {:min 1000 :max 300000}])  ; Why 300000? Why 1000?
+
 ```
 
 ### Rule 3: External vs Internal Limits
@@ -138,6 +144,7 @@ When a parameter can legitimately be "unlimited":
   ;; Only pass to CLI if explicitly set
   (cond-> base-args
     max-turns (into ["--max-turns" (str max-turns)])))
+
 ```
 
 ### Rule 5: Batch Sizes and Performance Tuning
@@ -152,6 +159,7 @@ Batch sizes are internal limits for performance. Document:
    Tuned for memory usage vs transaction overhead.
    Increase for bulk loads, decrease for memory-constrained envs."
   1000)
+
 ```
 
 ---
@@ -190,6 +198,7 @@ Batch sizes are internal limits for performance. Document:
 (defn search [{::keys [max-results]}]
   (cond-> (base-query)
     max-results (add-limit max-results)))
+
 ```
 
 ---

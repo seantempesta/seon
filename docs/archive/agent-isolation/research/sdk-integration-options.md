@@ -40,6 +40,7 @@ The SDK (`@anthropic-ai/sdk`) is a **thin HTTP wrapper** around the Claude Messa
 │  │  Message, Tool, ContentBlock, ToolUseBlock, etc.        │   │
 │  └─────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────┘
+
 ```
 
 ### What the SDK Is NOT
@@ -68,6 +69,7 @@ const runner = anthropic.beta.messages.toolRunner({
 for await (const message of runner) {
   console.log(message);
 }
+
 ```
 
 This is ~360 lines of TypeScript (see `src/lib/tools/BetaToolRunner.ts`). The core loop:
@@ -95,6 +97,7 @@ anthropic.beta.messages.stream({
 }, {
   headers: { 'anthropic-beta': 'mcp-client-2025-04-04' }
 });
+
 ```
 
 This lets Claude directly call tools on MCP servers - the API handles the MCP protocol.
@@ -105,6 +108,7 @@ This lets Claude directly call tools on MCP servers - the API handles the MCP pr
 const stream = anthropic.messages.stream({...})
   .on('text', (delta) => console.log(delta))
   .on('message', (msg) => console.log('done', msg));
+
 ```
 
 ---
@@ -168,6 +172,7 @@ Use nbb to call the TypeScript SDK from ClojureScript.
                                    :tools (clj->js tools)})]
     ;; Consume the async iterator
     ...))
+
 ```
 
 **Pros:**
@@ -194,6 +199,7 @@ Babashka shells out to a Node.js script that uses the SDK.
                          "--session" session-id
                          "--prompt" prompt)]
     (json/parse-string (:out result) true)))
+
 ```
 
 ```javascript
@@ -216,6 +222,7 @@ const runner = client.beta.messages.toolRunner({
   }))
 });
 // ...
+
 ```
 
 **Pros:**
@@ -274,6 +281,7 @@ Skip the SDK entirely and call the Claude HTTP API directly.
     {:type "tool_result"
      :tool_use_id id
      :content (dispatch-tool name input)}))
+
 ```
 
 **Pros:**
@@ -313,6 +321,7 @@ TypeScript orchestrator that calls our Clojure MCP server.
 ├───────────────────────────────────────────────────────────────┤
 │                    Seon JVM (unchanged)                       │
 └───────────────────────────────────────────────────────────────┘
+
 ```
 
 **Pros:**
@@ -383,6 +392,7 @@ Rationale:
 ### Implementation Plan
 
 1. **Create `seon.agent.claude` namespace** (~200 lines):
+
    ```clojure
    (ns seon.agent.claude
      (:require [clj-http.client :as http]
@@ -391,9 +401,11 @@ Rationale:
    (defn messages-create [params] ...)
    (defn messages-stream [params on-event] ...)
    (defn tool-loop [params tools max-iterations] ...)
+
    ```
 
 2. **Define Seon-specific tools** as Clojure data:
+
    ```clojure
    (def seon-tools
      [{:name "eval"
@@ -401,9 +413,11 @@ Rationale:
        :input_schema {:type "object" :properties {...}}
        :handler (fn [{:keys [session_id code]}] ...)}
       ...])
+
    ```
 
 3. **Integrate with orchestrator session API**:
+
    ```clojure
    (defn run-agent-task
      "Run an agent task in an isolated session."
@@ -417,6 +431,7 @@ Rationale:
                     50)
          (finally
            (session/stop-agent-session! {...})))))
+
    ```
 
 ### What We Skip

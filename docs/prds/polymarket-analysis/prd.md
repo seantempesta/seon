@@ -38,6 +38,7 @@ tags: [prd, trading]
 ;; => {:total 171500, :by-type {"TRADE" 171480, "REDEEM" 20}, ...}
 (analysis/top-markets-by-volume data 5)
 ;; => NBA markets dominating (~$22M total volume)
+
 ```
 
 ### What's Remaining
@@ -130,6 +131,7 @@ data/polymarket/
 └── rn1/
     ├── activity.edn     ;; Complete activity history
     └── positions.edn    ;; Current positions snapshot
+
 ```
 
 ### Key Patterns
@@ -167,6 +169,7 @@ data/polymarket/
 (fetch-trades wallet opts)      ;; Single page of trades
 (fetch-positions wallet)        ;; Current positions
 (fetch-value wallet)            ;; Total position value
+
 ```
 
 **Verification:**
@@ -195,6 +198,7 @@ data/polymarket/
 (fetch-all-trades wallet)       ;; Lazy seq of all trades
 (save-activity! wallet path)    ;; Download and save to EDN
 (load-activity path)            ;; Load from EDN
+
 ```
 
 **Data files to create:**
@@ -228,6 +232,7 @@ data/polymarket/
 (group-by-market data)          ;; Group activity by market
 (group-by-type data)            ;; Group by activity type
 (calculate-totals data)         ;; Total volume, profit, etc.
+
 ```
 
 **Verification:**
@@ -255,6 +260,7 @@ data/polymarket/
 (detect-arbitrage-trades data)  ;; Trades that look like arbitrage
 (calculate-arbitrage-profit data) ;; Guaranteed profit from spreads
 (arbitrage-summary data)        ;; High-level arbitrage stats
+
 ```
 
 **Verification:**
@@ -281,6 +287,7 @@ data/polymarket/
 (biggest-wins data)             ;; Top N winning trades
 (biggest-losses data)           ;; Top N losing trades
 (roi-analysis data)             ;; Return on investment metrics
+
 ```
 
 **Verification:**
@@ -305,6 +312,7 @@ data/polymarket/
 (holding-periods data)          ;; How long positions are held
 (trade-velocity data)           ;; Speed of trading around events
 (activity-heatmap data)         ;; Time-based activity visualization
+
 ```
 
 **Verification:**
@@ -332,6 +340,7 @@ data/polymarket/
 (analyze-trader wallet)         ;; Full analysis for any trader
 (download-trader wallet path)   ;; Download trader data
 (load-trader path)              ;; Load saved data
+
 ```
 
 **Verification:**
@@ -403,6 +412,7 @@ The timing analysis functions are mostly there. Just add:
 ```clojure
 (defn trades-per-day [data] ...)  ;; Already have daily-trade-count
 (defn trades-by-hour [data] ...)  ;; Group by hour, similar to group-by-date
+
 ```
 
 ### 3. If Continuing with Arbitrage Analysis
@@ -416,6 +426,7 @@ Stage 4 functions to implement:
        (filter (fn [[_ records]]
                  (> (count (distinct (map :outcome records))) 1)))
        ...))
+
 ```
 
 ### 4. Test Commands
@@ -429,6 +440,7 @@ clojure -M:test -m kaocha.runner --focus seon.polymarket.analysis-test
 (require '[seon.polymarket.api :as api])
 (require '[seon.polymarket.analysis :as analysis])
 (def data (api/load-activity "data/polymarket/rn1/activity.edn"))
+
 ```
 
 ### 5. Decision Point

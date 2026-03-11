@@ -38,6 +38,7 @@ These tests exercise the harness itself. When you write a test that creates a ct
 ```
 Agent:  create-harness! → ctx/create! → inject-vars! → d/get-conn (TCP)   → flow routing
 Test:   create-harness! → ctx/create! → inject-vars! → d/create-conn (local) → *direct-mode*
+
 ```
 
 Same `create-harness!` function. Same ctx with validation. Same `*ctx*` and `*conn*` vars injected. Same schema enforcement. The only difference is the plumbing underneath.

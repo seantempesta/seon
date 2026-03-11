@@ -32,6 +32,7 @@ Scene Templates (organism)
 └── Puzzle Scene: challenge + success/fail states
 └── Exploration Scene: map + discoverable objects
 └── Reflection Scene: journal prompt + drawing canvas
+
 ```
 
 ---
@@ -54,6 +55,7 @@ Classic illustrated book page.
     :text-position :bottom   ; :top, :bottom, :overlay
     :interactions [{:type :tap-continue}
                    {:type :voice-question}]}}
+
 ```
 
 **Renders:**
@@ -74,6 +76,7 @@ Conversational back-and-forth with the Primer.
     :expect-response? true
     :response-type :voice   ; or :choice, :text-input
     :choices ["He wanted to help" "He was warning her" "I don't know"]}}
+
 ```
 
 **Renders:**
@@ -102,6 +105,7 @@ Branching decision point.
        {:id :ask
         :label "Ask the Primer for advice"
         :icon :book}]}}
+
 ```
 
 **Renders:**
@@ -127,6 +131,7 @@ Interactive manipulation puzzle.
     :hint-after 30   ; seconds before offering hint
     :on-success :continue-story
     :on-give-up :skip-with-learning}}
+
 ```
 
 **Renders:**
@@ -158,6 +163,7 @@ Spatial discovery interface.
         :on-tap :exit-room}]
     :discovered []   ; tracks what child has found
     :required-discoveries [:bookshelf :window]}}
+
 ```
 
 **Renders:**
@@ -181,6 +187,7 @@ Meeting a new character.
     :greeting "Good evening, young traveler. What brings you to these woods?"
     :personality :wise-helpful
     :knowledge [:forest-lore :patience :observation]}}
+
 ```
 
 **Renders:**
@@ -202,6 +209,7 @@ Journaling and self-expression.
     :share-with-primer? true   ; AI sees response
     :example nil         ; optional: show example response
     :on-complete :continue-story}}
+
 ```
 
 **Renders:**
@@ -222,6 +230,7 @@ Milestone acknowledgment.
     :message "You've learned something important today..."
     :badge {:icon :turtle :label "The Patient One"}
     :next-preview "Tomorrow, a new adventure awaits..."}}
+
 ```
 
 **Renders:**
@@ -244,6 +253,7 @@ Quick interactive game (not puzzle).
     :scoring {:star 10 :miss -5}
     :success-threshold 50
     :integration "The stars you caught light your path..."}}
+
 ```
 
 **Renders:**
@@ -264,6 +274,7 @@ When async operation is happening.
     :estimated-seconds 5
     :activity :shimmer    ; animation type
     :interruptible? false}}
+
 ```
 
 **Renders:**
@@ -292,6 +303,7 @@ Given the current scene and child's state, output a JSON decision:
   "params": { ... },
   "reasoning": "Child has been passive, time for agency"
 }
+
 ```
 
 **Benefits:**
@@ -316,6 +328,7 @@ Templates can embed other templates:
       {:template :dialogue/exchange
        :params {:speaker :owl
                 :text "Are you lost, little one?"}}}}
+
 ```
 
 **Render order:**
@@ -344,6 +357,7 @@ dialogue/exchange states:
   :listening → (waiting for response)
   :processing → (AI thinking)
   :responded → (child answered)
+
 ```
 
 State transitions happen via:
@@ -369,6 +383,7 @@ Templates support theming and personalization:
   [:div.story-page {:class (style-class child-prefs)}
    [:p.story-text {:style (text-style child-prefs)}
     (paced-text text (:reading-speed child-prefs))]])
+
 ```
 
 ---
@@ -382,12 +397,14 @@ When the AI needs something that doesn't exist:
 3. **Never:** Generate raw HTML
 
 Template requests go to a queue for human review:
+
 ```clojure
 {:template-request/id "req-123"
  :template-request/description "Need a template for playing music"
  :template-request/use-case "Child wants to play a simple melody"
  :template-request/similar-to [:game/simple :puzzle/grid]
  :template-request/requested-by :ai-session-456}
+
 ```
 
 ---
@@ -440,4 +457,5 @@ src/seon/domains/primer/templates/
     ├── text.clj
     ├── button.clj
     └── audio.clj
+
 ```

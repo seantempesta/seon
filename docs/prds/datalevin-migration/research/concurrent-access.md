@@ -39,6 +39,7 @@ From `datalevin.binding.cpp/get-rtx`:
  and managed like a stateful resource. Refer to the documentation of
  `datalevin.core/open-kv` for more details."
        {:cause (.getMessage e)})
+
 ```
 
 The test `lmdb_test.clj` confirms this behavior - opening multiple connections leads to lock corruption:
@@ -46,6 +47,7 @@ The test `lmdb_test.clj` confirms this behavior - opening multiple connections l
 ```clojure
 (is (thrown-with-msg? Exception #"multiple LMDB"
                       (if/get-value lmdb "a" :something)))
+
 ```
 
 ## Embedded Mode: Thread-Safe, Not Process-Safe
@@ -72,6 +74,7 @@ Datalevin is designed for multi-threaded access within a single process:
 
 ;; Thread 2 (concurrent)
 (d/q '[:find ?name :where [_ :name ?name]] @conn)
+
 ```
 
 The `transact-kv` function uses `locking write-txn` to serialize writes safely.
@@ -86,6 +89,7 @@ The `transact-kv` function uses `locking write-txn` to serialize writes safely.
 
 ;; Process 2 (nREPL on port 7889)
 (def conn (d/get-conn "/tmp/shared-db"))  ;; DANGER: lock corruption
+
 ```
 
 This will corrupt the lock file. Closing one connection removes locks for all.
@@ -114,6 +118,7 @@ From `doc/server.md`:
 (def conn (d/get-conn "dtlv://user:pass@localhost:8898/mydb"))
 
 ;; Both work safely!
+
 ```
 
 ### Consistency Model
@@ -130,6 +135,7 @@ dtlv serv -r /data/datalevin
 java --add-opens=java.base/java.nio=ALL-UNNAMED \
      --add-opens=java.base/sun.nio.ch=ALL-UNNAMED \
      -jar datalevin-0.9.10-standalone.jar serv -v -r /data/datalevin
+
 ```
 
 ## Environment Flags
@@ -169,6 +175,7 @@ data/datalevin/
   agent-a1b2/
   agent-c3d4/
   orchestrator/
+
 ```
 
 **Pros:**
@@ -193,6 +200,7 @@ Run a Datalevin server, all agents connect as clients:
 
 ;; Each agent connects
 (def conn (d/get-conn "dtlv://agent:pass@localhost:8898/seon"))
+
 ```
 
 **Pros:**
@@ -219,6 +227,7 @@ Orchestrator owns the main database, agents get read-only access via snapshots o
 ;; Agent gets a copy or read-only connection
 (d/copy main-db "data/datalevin/agent-snapshot")
 (def agent-db (d/open-kv "data/datalevin/agent-snapshot"))
+
 ```
 
 **Pros:**
@@ -250,6 +259,7 @@ Orchestrator owns the main database, agents get read-only access via snapshots o
   (let [db-path (str "data/datalevin/" session-id)]
     {:db (d/get-conn db-path schema)
      :session-id session-id}))
+
 ```
 
 ### When to Upgrade to Client/Server

@@ -112,6 +112,7 @@ The routes layer (`seon.ns.routes`) is the HTTP-facing surface; this component i
 6. Inject vars: intern *ctx* (atom) and *conn* (Datalevin conn) into namespace
 
 7. Return {::instance-id, ::ctx-atom}
+
 ```
 
 ### HTTP Request Flow (namespace-page)
@@ -135,6 +136,7 @@ Request: GET /ns/seon.health.workout
 4c. Non-dynamic:
     -> Serve skeleton page with SSE connection
     -> SSE polls render-namespace-content every 2s
+
 ```
 
 ### SSE Split
@@ -158,6 +160,7 @@ Two SSE modes based on namespace type:
 7. Auto-inject *ctx* value and *conn* from namespace vars
 8. Validate input against schema
 9. Call function
+
 ```
 
 ### Var Injection
@@ -180,6 +183,7 @@ Startup:
     -> validate each against current Malli spec
     -> ensure-instance! for valid ones (creates atom, injects vars)
     -> skip invalid ones with warning
+
 ```
 
 ## Design Decisions

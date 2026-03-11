@@ -15,6 +15,7 @@ Currently, domain functions accept temporal options and apply them internally:
   (let [query-opts {:current-time (:as-of opts)}  ; <-- knows about time
         results (node/query db query opts)]
     ...))
+
 ```
 
 We want domain functions to be temporally unaware:
@@ -24,6 +25,7 @@ We want domain functions to be temporally unaware:
 (defn iv-rank [db ticker lookback]
   (let [results (query db "SELECT ...")] ; <-- no temporal awareness
     ...))
+
 ```
 
 The system layer creates a "frozen" view and hands it to domain code.
@@ -52,6 +54,7 @@ Create a wrapper around the XTDB node that injects `:current-time` into every qu
 
 (defn create-frozen-db [node as-of-time]
   (->FrozenNode node as-of-time))
+
 ```
 
 **Pros**:
@@ -80,6 +83,7 @@ Instead of wrapping the node, wrap the query function:
 (defn iv-rank [query-fn ticker lookback]
   (let [results (query-fn "SELECT ...")]
     ...))
+
 ```
 
 **Pros**:
@@ -103,6 +107,7 @@ Use Clojure's dynamic vars to set default time:
 ;; Usage
 (binding [*default-time* #inst "2025-07-15"]
   (iv-rank db "SPY" 126))
+
 ```
 
 **Pros**:
@@ -124,6 +129,7 @@ SHOW SNAPSHOT_TOKEN;
 
 BEGIN READ ONLY WITH (SNAPSHOT_TOKEN = 'abc123...');
 -- All queries in this transaction see that snapshot
+
 ```
 
 **Pros**:
@@ -147,6 +153,7 @@ Check if XTDB supports setting default temporal bounds at connection level:
 (def frozen-node
   (xtn/start-node {...
                    :default-valid-time #inst "2025-07-15"}))
+
 ```
 
 **Research needed**:
@@ -203,6 +210,7 @@ Check if XTDB supports setting default temporal bounds at connection level:
    Agent cannot see future data even with explicit temporal queries."
   [node as-of-time]
   (->FrozenNode node as-of-time))
+
 ```
 
 ### Approach 4: Snapshot Tokens
@@ -229,6 +237,7 @@ Check if XTDB supports setting default temporal bounds at connection level:
   ;; Execute query
   ;; COMMIT
   )
+
 ```
 
 ---

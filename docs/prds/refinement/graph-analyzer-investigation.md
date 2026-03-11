@@ -22,6 +22,7 @@ The render pipeline was not resolving functions because the graph database conta
 ```clojure
 (analyzer/analyze-project! {})
 ;; => Success, 1146 functions, 102 namespaces, 15232 var-usages
+
 ```
 
 The analyzer correctly parses the codebase using clj-kondo.
@@ -31,6 +32,7 @@ The analyzer correctly parses the codebase using clj-kondo.
 ```clojure
 (scanner/scan-directory {:seon.graph.scanner/dir-path "src/"})
 ;; => 717 specs, 3 with :seon.render/* keys
+
 ```
 
 The scanner correctly finds specs including render-related specs.
@@ -40,6 +42,7 @@ The scanner correctly finds specs including render-related specs.
 ```clojure
 (scanner/link-fns-to-specs fns specs)
 ;; => 3 render functions with :seon.fn/render-input-keys
+
 ```
 
 The linking correctly identifies functions with matching `-request`/`-response` specs.
@@ -51,6 +54,7 @@ Checking the database showed only 1 render function:
 ```clojure
 (d/q '[:find ?e :where [?e :seon.fn/render-input-keys]] @conn)
 ;; => [[1324 "seon.render.example/position-render"]]
+
 ```
 
 The workout render functions were missing because:
@@ -72,6 +76,7 @@ Manual re-ingestion fixed the issue:
 (db/transact! c linked-fns)
 
 ;; Result: 3 render functions now in database
+
 ```
 
 After re-ingestion:
@@ -82,6 +87,7 @@ After re-ingestion:
 
 (render/try-render {:seon.health.workout/exercise "Squat" ...} :ai)
 ;; => "Squat — 5x5 @ 100kg"
+
 ```
 
 ## Issues Found
@@ -102,6 +108,7 @@ Full `ingest-analysis!` failed with:
 
 ```
 Value out of range for long: 1.8385472029033133E20
+
 ```
 
 This appears to be corruption or a bug in the call graph processing. The error occurs during bulk ingestion but NOT when ingesting specs and functions separately.
@@ -132,6 +139,7 @@ system.clj:init-key :seon.graph/scanner
 ├── scanner/scan-directory
 ├── scanner/link-fns-to-specs  ← Adds render-input-keys
 └── ingest/ingest-analysis!    ← Writes to Datalevin
+
 ```
 
 ### Missing: Incremental Flow
@@ -142,6 +150,7 @@ dev hook (file changed)
 ├── scanner/scan-file
 ├── scanner/link-fns-to-specs
 └── ingest/ingest-incremental!  ← NOT currently called
+
 ```
 
 ## Verification

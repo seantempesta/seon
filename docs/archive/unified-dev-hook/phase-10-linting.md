@@ -49,6 +49,7 @@ Create `seon.dev.lint` namespace:
     [:map
      [:fn-length-violations [:vector :string]]
      [:param-count-violations [:vector :string]]]]])
+
 ```
 
 Key functions:
@@ -77,6 +78,7 @@ New order:
 5. unit-tests
 6. gen-tests
 7. review
+
 ```
 
 ### Phase 10c: Configuration
@@ -94,6 +96,7 @@ Add to `default-config`:
                            :param-count-block 7
                            :param-count-warn 5}
                  :style {:enabled false}}}}  ; style suggestions off by default
+
 ```
 
 User can override in `.claude/seon-hook.edn`.

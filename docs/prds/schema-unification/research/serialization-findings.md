@@ -35,6 +35,7 @@ For the **fallback `:data` type** (used by KV store and for any value that doesn
 
 ;; bits.clj:231-237
 (defn- get-data [^ByteBuffer bb] (when-let [bs (get-bytes bb)] (deserialize bs)))
+
 ```
 
 **Key finding:** For Datalog (our use case), the individual value types (string, long, keyword, etc.) are NOT nippy-serialized. They have custom binary encoders optimized for LMDB's sorted key comparisons. Nippy is only the fallback for the `:data` KV type and for dump/restore operations.
@@ -60,6 +61,7 @@ The default is **Nippy**. The 2-arg `write-message-bf` always uses Nippy:
   ([bf msg]
    (write-message-bf bf msg c/message-format-nippy))  ;; <-- default
   ([^ByteBuffer bf msg fmt] ...))
+
 ```
 
 **File:** `reference-code/datalevin/src/datalevin/protocol.clj` lines 92-117
@@ -74,6 +76,7 @@ The reader dispatches on format byte:
   (case (short fmt)
     1 (read-transit-bytes bs)
     2 (nippy/fast-thaw bs)))
+
 ```
 
 ### Datom Serialization (datom.clj)
@@ -84,6 +87,7 @@ Datalevin extends Nippy to handle its own types:
 ;; datom.clj:207-222
 (nippy/extend-freeze Datom :datalevin/datom ...)
 (nippy/extend-thaw :datalevin/datom ...)
+
 ```
 
 Similarly for `Entity` (entity.clj:249-264) and `SpillableVector` (spill.clj:326-334).
@@ -133,6 +137,7 @@ Nippy has **first-class nil support**. Type ID 3 is `:nil` with zero-byte payloa
 
 ;; nippy.clj:1570 (thaw)
 id-nil nil
+
 ```
 
 **REPL verification:**
@@ -141,6 +146,7 @@ id-nil nil
 (nippy/thaw (nippy/freeze {:foo "bar" :baz nil}))
 ;; => {:foo "bar", :baz nil}
 ;; nil values in maps roundtrip perfectly
+
 ```
 
 ### Thaw Transducer (*thaw-xform*)
@@ -152,6 +158,7 @@ Nippy provides `*thaw-xform*`, a dynamic var that accepts a transducer applied d
   "Experimental, subject to change. Feedback welcome!
    Transducer to use when thawing standard Clojure collection types..."
   nil)
+
 ```
 
 **REPL verification** that the transducer works for data inspection/transformation:
@@ -164,6 +171,7 @@ Nippy provides `*thaw-xform*`, a dynamic var that accepts a transducer applied d
                    entry)))]
   (nippy/thaw (nippy/freeze {:secret "password123" :name "Alice"})))
 ;; => {:secret "***REDACTED***", :name "Alice"}
+
 ```
 
 The thaw transducer is applied via `read-into` (nippy.clj:1381-1391) and `read-kvs-into` (nippy.clj:1393-1406). It wraps the reducing function used to build collections during thaw.
@@ -178,6 +186,7 @@ The thaw transducer is applied via `read-into` (nippy.clj:1381-1391) and `read-k
 
 ;; nippy.clj:1969+
 (defmacro extend-thaw [id [in] & body] ...)
+
 ```
 
 Two ID modes:
@@ -259,6 +268,7 @@ The `:db/valueType` property in Malli options takes precedence over derivation (
 
 ```clojure
 value-type (or (:db/valueType spec-item-options) ...)
+
 ```
 
 This is the same pattern Seon's bridge already uses.
@@ -323,6 +333,7 @@ The channel uses **length-prefixed EDN over TCP**:
     (.writeInt dos (alength bs))
     (.write dos bs)
     (.flush dos)))
+
 ```
 
 EDN reader with tagged literal support is in `src/seon/flow/msg.clj`:
@@ -335,6 +346,7 @@ EDN reader with tagged literal support is in `src/seon/flow/msg.clj`:
 
 (defn read-edn [s]
   (edn/read-string {:readers edn-readers} s))
+
 ```
 
 A custom `print-method` for `Instant` is also defined (msg.clj:14-18) to emit `#time/instant "..."` tagged literals.
@@ -361,6 +373,7 @@ The bridge (bridge.clj:153-168) explicitly validates EDN roundtrip:
 (catch Exception e
   ;; Returns :serialization error if result can't roundtrip
   ...))
+
 ```
 
 ### Known Issues with Current EDN Approach
@@ -388,6 +401,7 @@ The bridge (bridge.clj:153-168) explicitly validates EDN roundtrip:
   (async/put! ch {:foo nil :bar/baz nil})
   (async/poll! ch))
 ;; => {:foo nil, :bar/baz nil}
+
 ```
 
 Maps containing nil values flow through channels without issue.
@@ -397,6 +411,7 @@ Maps containing nil values flow through channels without issue.
 ```clojure
 (nippy/thaw (nippy/freeze {:foo "bar" :baz nil :nested {:a 1 :b nil}}))
 ;; => {:foo "bar", :baz nil, :nested {:a 1, :b nil}}
+
 ```
 
 Nippy preserves nil values in all positions.
@@ -406,6 +421,7 @@ Nippy preserves nil values in all positions.
 ```clojure
 (let [data {:foo "bar" :baz nil :float-val (float 3.14) :bytes (byte-array [1 2 3])}]
   (nippy/fast-thaw (nippy/fast-freeze data)))
+
 ```
 
 - nil preserved
@@ -419,6 +435,7 @@ Nippy preserves nil values in all positions.
 (let [data (with-meta {:foo "bar"} {:my-meta true})]
   (meta (nippy/thaw (nippy/freeze data))))
 ;; => {:my-meta true}
+
 ```
 
 ### Nippy thaw transducer
@@ -431,6 +448,7 @@ Nippy preserves nil values in all positions.
                    entry)))]
   (nippy/thaw (nippy/freeze {:secret "password123" :name "Alice"})))
 ;; => {:secret "***REDACTED***", :name "Alice"}
+
 ```
 
 ### EDN failure modes confirmed

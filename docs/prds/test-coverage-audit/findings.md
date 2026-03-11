@@ -60,6 +60,7 @@ The test suite has **good coverage in critical areas** (validation, data ingesti
           n (count sorted)
           idx (int (* (/ p 100.0) (dec n)))]  ;; Off-by-one risk!
       (nth sorted idx))))
+
 ```
 
 - `idx` calculation may give wrong results for edge percentiles (0, 100)
@@ -73,6 +74,7 @@ The test suite has **good coverage in critical areas** (validation, data ingesti
   (when (and (seq values) current-value)
     (let [below-count (count (filter #(<= % current-value) values))]
       (/ (double below-count) (count values)))))
+
 ```
 
 - Uses `<=` not `<` - may affect edge cases
@@ -84,12 +86,14 @@ The test suite has **good coverage in critical areas** (validation, data ingesti
 (if (pos? call-sum)
   (/ put-sum call-sum)
   0.0)  ;; Returns 0.0 when no calls - is this correct?
+
 ```
 
 1. **`vanna`** (line 298-316):
 
 ```clojure
 (let [days-to-expiry 30 ;; TODO: Calculate from expiry  ;; HARDCODED!
+
 ```
 
 ### Required Tests
@@ -116,6 +120,7 @@ The test suite has **good coverage in critical areas** (validation, data ingesti
     (let [current (first values)
           rank (calculate-percentile-rank values current)]
       (and (>= rank 0.0) (<= rank 1.0)))))
+
 ```
 
 ---
@@ -285,6 +290,7 @@ The generators in `generators.clj` are well-designed:
             spread (gen/double* {:min 0.01 :max 0.5 ...})]
     {:quote/bid bid
      :quote/ask (+ bid (* bid spread))}))  ;; ask > bid always
+
 ```
 
 ### Weaknesses
@@ -379,6 +385,7 @@ Create `test/ml_options/dsl/primitives_test.clj`:
     (is (= 0.6 (#'p/calculate-percentile-rank [1 2 3 4 5] 3))))
   (testing "empty returns nil"
     (is (nil? (#'p/calculate-percentile-rank [] 5)))))
+
 ```
 
 #### Step 2: Property Tests for Invariants
@@ -389,6 +396,7 @@ Create `test/ml_options/dsl/primitives_test.clj`:
     (let [current (first values)
           rank (#'p/calculate-percentile-rank values current)]
       (and (>= rank 0.0) (<= rank 1.0)))))
+
 ```
 
 #### Step 3: Integration Tests with Test XTDB
@@ -399,6 +407,7 @@ Create `test/ml_options/dsl/primitives_test.clj`:
     (tu/insert-options! node test-data)
     (is (number? (p/iv-rank node "TEST")))
     (is (<= 0.0 (p/iv-rank node "TEST") 1.0))))
+
 ```
 
 ### Files to Create/Modify

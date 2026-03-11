@@ -39,6 +39,7 @@ The `::` creates **auto-resolved namespaced keywords**:
 
 ::prompt              ;; => :my-app.core/prompt  (WRONG namespace!)
 ::gemini/prompt       ;; => :seon.ai.gemini/prompt (correct)
+
 ```
 
 This means docstrings showing user-facing examples use `::alias/key` syntax.
@@ -61,6 +62,7 @@ Register schemas using `schema/register!` with `::` auto-namespaced keywords:
 
 (schema/register! ::confidence
                   [:double {:min 0.0 :max 1.0}])
+
 ```
 
 ### Request/Response Schema Pattern
@@ -81,6 +83,7 @@ Define separate schemas for requests and responses with namespaced keys:
                    [::signal-type ::signal-type]
                    [::confidence ::confidence]
                    [::reasoning {:optional true} :string]])
+
 ```
 
 ### Public Function Pattern
@@ -112,6 +115,7 @@ Public functions are **map in, map out** with:
   [{::keys [ticker model timeout]}]
   (let [model (or model default-model)]
     (analyze* ticker model timeout)))
+
 ```
 
 ### Private Helper Pattern
@@ -124,6 +128,7 @@ Private functions use positional args for internal convenience:
   {::signal-type :hold
    ::confidence 0.5
    ::reasoning "Neutral momentum"})
+
 ```
 
 ### Handling Optional Values
@@ -139,6 +144,7 @@ Use `or` for defaults since destructuring `:or` doesn't work when key is present
 (defn- impl [{:keys [model]}]
   (let [model (or model default-model)]
     ...))
+
 ```
 
 ### Complete Example (from gemini.clj)
@@ -202,6 +208,7 @@ Use `or` for defaults since destructuring `:or` doesn't work when key is present
   [{::keys [prompt model api-key]}]
   (let [key (resolve-api-key! api-key)]
     (generate* key prompt {:model model})))
+
 ```
 
 ### Development Setup
@@ -253,6 +260,7 @@ Show the intended workflow. These serve as executable documentation:
           (let [messages (ai/get-messages {::ai/session-id session-id})]
             (is (= 2 (count messages)))
             (is (= ["user" "assistant"] (mapv ::ai/role messages)))))))))
+
 ```
 
 #### Generative Tests (Contract Validation)
@@ -265,6 +273,7 @@ Find edge cases the schema allows but you didn't think of:
     (doseq [request (mg/sample ::signals/analyze-request {:size 20})]
       (let [response (signals/analyze request)]
         (is (m/validate ::signals/analyze-response response))))))
+
 ```
 
 #### Edge Case Tests
@@ -280,6 +289,7 @@ Document tricky scenarios explicitly:
     (let [content {:type "tool_result" :tool-use-id "abc" :data {...}}]
       ;; ... test that map content round-trips correctly
       )))
+
 ```
 
 ### Schema Introspection
@@ -298,6 +308,7 @@ Use the global registry for schema introspection:
 ;; See which functions are instrumented (collected automatically on startup)
 (require '[malli.core :as m])
 (keys (get (m/function-schemas) 'seon.ai.gemini))
+
 ```
 
 ## Database Access
@@ -334,6 +345,7 @@ Provider namespaces extend base namespaces by referencing their schemas. This is
    ;; Claude-specific attributes
    [::message-type ::message-type]
    [::cache-tokens {:optional true} ::cache-tokens]])
+
 ```
 
 ### Entity-Centric Thinking (EAV Pattern)
@@ -352,6 +364,7 @@ Provider namespaces extend base namespaces by referencing their schemas. This is
  :seon.ai.claude/message-type "assistant"
  :seon.ai.claude/cache-tokens 150
  :seon.ai.claude/uuid "sdk-msg-xyz"}
+
 ```
 
 **Why this matters:**
@@ -384,6 +397,7 @@ Some types cannot be generated for property testing. Omit `:malli/schema` metada
    runtime objects that cannot be property tested."
   [{...}]
   ...)
+
 ```
 
 **Rule:** If a function takes connection managers, spawns processes, or returns channels/atoms, skip `:malli/schema`. Document the expected types in docstrings.
@@ -423,6 +437,7 @@ When converting external data (like SDK messages) to internal entities, use the 
              ::ai/type :message
              ::ai/content content}
       session-id (assoc ::ai/session-id session-id))))
+
 ```
 
 **Why map-in?** Even converter functions benefit from the pattern:
@@ -437,6 +452,7 @@ When converting external data (like SDK messages) to internal entities, use the 
 ;; BAD: positional args limit extensibility
 (defn sdk-message->entity [sdk-message session-id]
   ...)
+
 ```
 
 ## Provider Multimethod Pattern
@@ -473,6 +489,7 @@ Define multimethods in a base namespace with sensible defaults:
   (throw (ex-info (str "Unknown provider: " provider
                        ". Did you require the provider namespace?")
                   {:provider provider})))
+
 ```
 
 ### Implementing Providers
@@ -502,6 +519,7 @@ Provider namespaces implement the multimethods:
    ::cost-usd (:total_cost_usd message)
    ;; ... other fields
    })
+
 ```
 
 ### Usage Pattern
@@ -516,6 +534,7 @@ Provider namespaces implement the multimethods:
 ;; 1. New namespace: seon.ai.gemini.agent
 ;; 2. Implement: (defmethod agent/normalize-message :gemini ...)
 ;; 3. No changes to base namespace or existing providers
+
 ```
 
 ### Why Multimethods Over Protocols
@@ -550,6 +569,7 @@ Provider namespaces implement the multimethods:
   (doseq [input (mg/sample ::input)]
     (is (m/validate ::output (foo input)))))
 ;; Missing: tests showing intended usage patterns!
+
 ```
 
 ## File Organization
@@ -562,6 +582,7 @@ src/seon/
 │   └── gemini.clj    ; seon.ai.gemini (schemas + API)
 └── trading/
     └── signals.clj   ; seon.trading.signals
+
 ```
 
 Don't split into core.clj, schema.clj, etc. prematurely. Tests go in `test/` mirroring the `src/` structure.
@@ -604,6 +625,7 @@ clj-reload calls two per-namespace hooks (0-arg functions) if they exist:
   []
   (when (nil? @my-state)
     (reset! my-state (init-from-integrant-system))))
+
 ```
 
 ### Rules
@@ -642,6 +664,7 @@ Avoid arbitrary "magic numbers" that cause bugs or confusion. Every limit should
 
 ```clojure
 ::max-turns (or max-turns 999999)  ; Magic number!
+
 ```
 
 **Good - don't pass the flag when unlimited:**
@@ -649,6 +672,7 @@ Avoid arbitrary "magic numbers" that cause bugs or confusion. Every limit should
 ```clojure
 (cond-> base-args
   max-turns (into ["--max-turns" (str max-turns)]))
+
 ```
 
 ### Rule: Document Limit Sources in Schemas
@@ -666,6 +690,7 @@ Avoid arbitrary "magic numbers" that cause bugs or confusion. Every limit should
 ;; BAD - arbitrary, undocumented
 (schema/register! ::timeout
   [:int {:min 1000 :max 300000}])  ; Why these numbers?
+
 ```
 
 ### When to Add `:max` Constraints
@@ -696,4 +721,5 @@ When a parameter can legitimately be "unlimited":
 (defn search [{::keys [max-results]}]
   (cond-> (base-query)
     max-results (add-limit max-results)))
+
 ```

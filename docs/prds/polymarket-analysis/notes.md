@@ -29,6 +29,7 @@ GET /activity?user=<wallet>&limit=500&offset=0
 GET /trades?user=<wallet>&limit=500&offset=0
 GET /positions?user=<wallet>
 GET /value?user=<wallet>
+
 ```
 
 ### RN1 Wallet Discovery
@@ -58,12 +59,14 @@ Found via browser network inspection on profile page:
 (require '[seon.polymarket.analysis :as analysis])
 (def data (api/load-activity "data/polymarket/rn1/activity.edn"))
 (analysis/summarize-activity data)
+
 ```
 
 ### Running Tests
 
 ```bash
 clj -M:test -m kaocha.runner --focus :polymarket
+
 ```
 
 ---

@@ -28,6 +28,7 @@ Location: `src/seon/ui/viewer.clj`
   (fn [v _opts]
     (or (::viewer (meta v))
         (type v))))
+
 ```
 
 Current collection rendering (lines 86-127):
@@ -43,6 +44,7 @@ Location: `src/seon/ns/view.clj`
 ;; Dispatch on [format view-type] (lines 106-119)
 (defmulti render*
   (fn [value format] [format (extract-view-type value)]))
+
 ```
 
 Default HTML renderer (lines 267-369):
@@ -67,6 +69,7 @@ Uses native `<details>` with `data-preserve-attr="open"` for SSE morph stability
   [:span {:class "text-info ml-1"} (str "+" (- (count content) preview-length) " more")]]
  [:div {:class "break-all mt-1 pl-2 border-l-2 border-base-700"}
   content]]
+
 ```
 
 **Component library** (`src/seon/web/components.clj:133-163`):
@@ -167,6 +170,7 @@ Consider Datastar signals later if we need:
          (render-value k opts)
          (render-value v opts)])
       [:span {:class "text-text-400"} "}"]]]))
+
 ```
 
 Key design elements:
@@ -203,6 +207,7 @@ Key design elements:
             (for [item (drop limit v)]
               [:div {:class "py-0.5"} (render-value item opts)])]])
         [:span {:class "text-text-400"} "]"]]])))
+
 ```
 
 #### Set Renderer
@@ -221,6 +226,7 @@ Key design elements:
       (for [item s]
         [:div {:class "py-0.5"} (render-value item opts)])
       [:span {:class "text-text-400"} "}"]]]))
+
 ```
 
 ### Phase 1: Update `seon.ns.view` Default Renderer
@@ -242,6 +248,7 @@ Add depth tracking to opts:
     [:span {:class "text-text-500 italic"} "[max depth]"]
     ;; Normal rendering with (assoc opts :depth (inc depth))
     ))
+
 ```
 
 ---
@@ -252,6 +259,7 @@ Add depth tracking to opts:
 
 ```
 {3 keys}    ← Click bracket to expand
+
 ```
 
 ### Expanded State (small)
@@ -262,6 +270,7 @@ Add depth tracking to opts:
 │ :b "hello"
 │ :c [:x :y :z]        ← Nested vector also expandable
 }
+
 ```
 
 ### Expanded State (large vector)
@@ -277,6 +286,7 @@ Add depth tracking to opts:
 │   21
 │   ...
 ]
+
 ```
 
 ### Color Scheme (per design-system.md)
@@ -306,6 +316,7 @@ Add depth tracking to opts:
 [ ] SSE update doesn't collapse expanded elements (data-preserve-attr works)
 [ ] Large vector (>20 items) shows "+N more" link
 [ ] Clicking "+N more" reveals remaining items without collapsing parent
+
 ```
 
 ### REPL Tests
@@ -330,6 +341,7 @@ Add depth tracking to opts:
 
 ;; Generate HTML and inspect
 (h/html (viewer/render-value {:x [1 2 3]} {}))
+
 ```
 
 ---

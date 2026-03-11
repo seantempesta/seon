@@ -62,6 +62,7 @@ The critical design decision: **agents never wire data sources themselves.** The
     sort-by     :seon.health.workout/sort-by}]  ;; ← optional web param
   {:seon.render/html [:main#morph ...]
    :seon.render/ai   "..."})
+
 ```
 
 The system sees the input spec and auto-injects:
@@ -83,6 +84,7 @@ GET /ns/seon.health.workout?sort-by=weight&page=2
 Available keys:
   :seon.health.workout/sort-by  →  "weight"
   :seon.health.workout/page     →  "2"
+
 ```
 
 **Rule:** `?<key>=<value>` on `/ns/<namespace>` produces `:<namespace>/<key>` in the available data.
@@ -98,6 +100,7 @@ Everything else belongs to the namespace. An agent that wants pagination just re
 ```clojure
 (schema/register! ::page [:int {:min 1 :description "Page number"}])
 (schema/register! ::per-page [:int {:min 1 :max 100 :description "Items per page"}])
+
 ```
 
 And adds them as optional keys to the input spec. Malli validates the values before the function sees them — `?page=garbage` is rejected automatically.
@@ -137,6 +140,7 @@ When the browser hits `/ns/seon.health.workout`:
 5. CALL winner with auto-injected data map
 
 6. SERVE result (HTML via SSE, or text/edn for other formats)
+
 ```
 
 **If zero candidates:** fall back to namespace introspection view (always available).
@@ -165,6 +169,7 @@ Within the introspection view, data matching this shape uses the custom renderer
   [{::workout/keys [exercise sets reps weight]}]
   {:seon.render/html [:tr ...]
    :seon.render/ai   (str exercise " — " sets "x" reps " @ " weight "kg")})
+
 ```
 
 Works with static `def` data. No instance, no atom, no runtime.
@@ -179,6 +184,7 @@ A function takes the whole `*ctx*` atom value. Takes over the full page view.
   {:malli/schema [:=> [:cat ::page-render-request] ::page-render-response]}
   [{workout-ctx ::workout/*ctx*}]
   {:seon.render/html [:main#morph ...] :seon.render/ai "..."})
+
 ```
 
 The system spins up an instance, creates the ctx atom, and auto-injects.
@@ -193,6 +199,7 @@ Same as Level 2, but the function also accepts query/POST params.
    [::workout/*ctx* ::workout/*ctx*]
    [::workout/sort-by {:optional true} ::workout/sort-by]
    [::workout/show-history? {:optional true} :boolean]])
+
 ```
 
 More input keys = more specific = wins over plain ctx renderer.
@@ -216,6 +223,7 @@ Any renderer can declare it renders data from ANY namespace:
    [:seon.calendar/*ctx* :seon.calendar/*ctx*]
    ;; This renderer can also show workout data:
    [:seon.health.workout/workouts {:optional true} :seon.health.workout/workouts]])
+
 ```
 
 When the calendar page has workout data available, this renderer matches.
@@ -252,6 +260,7 @@ A namespace with only `def` vars and no `*ctx*` still gets custom rendering:
 ```clojure
 (ns seon.health.workout)
 (def workouts [{::exercise "Squat" ::sets 5 ::reps 5 ::weight 100} ...])
+
 ```
 
 The introspection view iterates the namespace's public vars. For each var value:
@@ -279,6 +288,7 @@ For each namespace:
   :seon.ns/name               "seon.health.workout"
   :seon.ns/dynamic?           true  ;; has ::*ctx* spec
   :seon.ns/data-sources       #{:ctx :conn :def-vars}  ;; what's available
+
 ```
 
 The resolution query:
@@ -293,6 +303,7 @@ The resolution query:
  [?e :seon.fn/qualified-name ?qname]
  [(count ?required-keys) ?key-count]]
 ;; order by ?key-count DESC, pick first
+
 ```
 
 ---
@@ -367,6 +378,7 @@ The resolution query:
 
 3. http://localhost:8080/ns/seon.schema
    → No custom renderer → introspection view (Level 0)
+
 ```
 
 ### From AI/curl
@@ -377,6 +389,7 @@ curl http://localhost:8080/ns/seon.health.workout?format=ai
 
 curl http://localhost:8080/ns/seon.health.workout?format=raw
 # → {:seon.health.workout/workouts [{...} ...]}
+
 ```
 
 ### From REPL (reactive)
@@ -389,6 +402,7 @@ curl http://localhost:8080/ns/seon.health.workout?format=raw
         :seon.health.workout/sets 3
         :seon.health.workout/reps 10
         :seon.health.workout/weight 0})
+
 ```
 
 ### Static rendering
@@ -397,4 +411,5 @@ curl http://localhost:8080/ns/seon.health.workout?format=raw
 ;; A namespace with just def vars, no *ctx*:
 ;; The introspection view uses workout-set-render for each
 ;; var whose value matches the ::workout-set spec shape.
+
 ```

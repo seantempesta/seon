@@ -31,6 +31,7 @@ Impact on future work
 (defn example []
   ;; Pattern that worked well
   )
+
 ```
 
 ---
@@ -58,6 +59,7 @@ How to test this feature:
 ;; REPL commands for manual testing
 (require '[example :as ex])
 (ex/test-scenario)
+
 ```
 
 ---

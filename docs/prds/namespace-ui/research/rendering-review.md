@@ -33,6 +33,7 @@ The `typed` helper that attaches `:seon/view` metadata is clean:
 ```clojure
 (defn typed [{::keys [view-type value]}]
   (vary-meta value assoc :seon/view view-type))
+
 ```
 
 This is already implemented in `seon.ns.view` and working.
@@ -48,6 +49,7 @@ The `render-tool-html` multimethod in `views.clj` is the right pattern - a singl
 (defmethod render-tool-html "Edit" [_ parsed _]
   ;; edit-specific rendering
   )
+
 ```
 
 ### 1.4 For-AI Recognition
@@ -67,12 +69,14 @@ The need for token-efficient AI representations is valid. The `:ai` format in `s
 (defmulti render-hover schema-of)
 (defmulti render-full schema-of)
 (defmulti render-ai schema-of)
+
 ```
 
 **But `seon.ns.view` already has:**
 
 ```clojure
 (defmulti render* (fn [value format] [format (extract-view-type value)]))
+
 ```
 
 This is the same thing with a different shape. The existing system dispatches on `[format view-type]` which gives you `[:html :agent.log/tool]`, `[:ai :agent.log/tool]`, etc.
@@ -90,6 +94,7 @@ From `malli-render-research.md`:
 
 (defn register-renderer! [schema-key render-map & {:keys [inherit]}]
   ...)
+
 ```
 
 **Red flag:** Clojure already has a registry for dispatch - multimethods. The `defmethod` mechanism IS the registry. Creating an atom-based registry duplicates what `defmethod` provides with worse ergonomics (no hierarchies, no `prefer-method`, no `methods` introspection).
@@ -131,6 +136,7 @@ The log files currently contain parseable text. The proposal wants to change the
         (when (str/starts-with? stripped "{")
           (edn/read-string stripped)))
       (catch Exception _ nil))))
+
 ```
 
 **Red flag:** Changing the log format is high risk for low reward. The current format works. Derive structure at read time, not write time.
@@ -149,6 +155,7 @@ Reveal uses a single `defstream` macro that produces one representation:
     (raw-string "{" {:fill :object})
     (entries m)
     (raw-string "}" {:fill :object})))
+
 ```
 
 Then the **client** decides how to display it - collapsed, expanded, in a popup. The server doesn't need to know about "hover" vs "full".
@@ -162,6 +169,7 @@ Clerk viewers are maps with `:pred` for matching and `:render-fn` for display:
 ```clojure
 {:pred map?
  :render-fn '(fn [m] [:div.map ...])}
+
 ```
 
 Viewers compose via `with-viewer` and `with-viewers`. There's no "inline vs hover vs full" - there's ONE viewer per type.
@@ -176,6 +184,7 @@ The current code already uses `<details>` for expand/collapse:
 [:details {:class "..." :data-preserve-attr "open"}
  [:summary "preview"]
  [:div "full content"]]
+
 ```
 
 This is the right pattern. Hover cards are just CSS:
@@ -184,6 +193,7 @@ This is the right pattern. Hover cards are just CSS:
 .log-line { position: relative; }
 .log-line:hover .hover-card { display: block; }
 .hover-card { display: none; position: absolute; ... }
+
 ```
 
 No server-side "hover format" needed.
@@ -205,6 +215,7 @@ Instead of creating `seon.render`, extend `seon.ns.view`:
 (defmethod render* [:summary :agent.log/tool] [entry _format]
   ;; One-line summary for inline display
   )
+
 ```
 
 If you want a "summary" format distinct from `:html`, add it as another format key, not a separate multimethod.
@@ -233,6 +244,7 @@ Render once with all tiers embedded:
       [:summary {:class "sr-only"} "expand"]
       [:div.full-view
        (render-side-by-side-diff old-string new-string)]]]))
+
 ```
 
 CSS handles visibility:
@@ -240,6 +252,7 @@ CSS handles visibility:
 ```css
 .hover-card { @apply hidden absolute z-10 ...; }
 .group:hover .hover-card { @apply block; }
+
 ```
 
 **One render. Three visibility states. Zero server changes.**
@@ -259,6 +272,7 @@ Current RESULT lines show `toolu_014BHfdp9mzEGzddcQx6nJq5`. Fix it in `log-sdk-m
                      (= tool-use-id (:id %))))
        first
        :name))
+
 ```
 
 **Problem 2: UTC timestamps**
@@ -273,6 +287,7 @@ Fix in the view layer, not the logging layer:
     (str (.getHour local) ":"
          (format "%02d" (.getMinute local)) ":"
          (format "%02d" (.getSecond local)))))
+
 ```
 
 **Problem 3: No syntax highlighting**
@@ -281,6 +296,7 @@ Add highlight.js to the page (already recommended in PRD) and apply language cla
 
 ```clojure
 [:pre {:class "language-clojure"} code-content]
+
 ```
 
 **Problem 4: TOOL+RESULT pairing**
@@ -292,6 +308,7 @@ This is a view concern, not a data model change. When rendering the log, group c
   ;; Group TOOL line with following RESULT that shares the tool-use-id
   ;; Return seq of {:type :tool-with-result :tool ... :result ...}
   )
+
 ```
 
 ### 4.4 Keep It Data-Oriented
@@ -307,6 +324,7 @@ The log file is a human-readable artifact. Parsing happens at read time:
       "TOOL" (parse-tool-line timestamp rest)
       "RESULT" (parse-result-line timestamp rest)
       ...)))
+
 ```
 
 This is what `seon.ai.agent` already does. Keep the log format stable.

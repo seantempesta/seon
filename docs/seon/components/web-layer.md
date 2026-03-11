@@ -96,6 +96,7 @@ The web layer serves Seon's browser UI using a **shim + SSE** pattern: each page
                   ^
 [register] -> [registry] -> (client tracking)
 [unregister] -/
+
 ```
 
 The aggregator debounces rapid code changes (50ms default), groups by namespace, and emits aggregated updates. The registry tracks connected SSE clients by page type.

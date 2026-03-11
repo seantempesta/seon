@@ -106,6 +106,7 @@ Standard interval options across endpoints:
 
 ```
 http://localhost:25503/v3/option/history/greeks/all?symbol=AAPL&expiration=20241108&date=20241104&interval=10m
+
 ```
 
 **Notes**:
@@ -148,6 +149,7 @@ http://localhost:25503/v3/option/history/greeks/eod?symbol=AAPL&expiration=20241
 
 # All contracts
 http://localhost:25503/v3/option/history/greeks/eod?symbol=AAPL&expiration=*&start_date=20241104&end_date=20241104
+
 ```
 
 **Notes**:
@@ -190,6 +192,7 @@ http://localhost:25503/v3/option/history/greeks/eod?symbol=AAPL&expiration=*&sta
 
 ```
 http://localhost:25503/v3/option/history/quote?symbol=AAPL&expiration=20241108&strike=220.000&right=call&date=20241104&interval=1m
+
 ```
 
 ---
@@ -229,6 +232,7 @@ http://localhost:25503/v3/option/history/trade?symbol=AAPL&expiration=20241108&s
 
 # All contracts
 http://localhost:25503/v3/option/history/trade?symbol=AAPL&expiration=*&date=20241104
+
 ```
 
 **Notes**:
@@ -269,6 +273,7 @@ http://localhost:25503/v3/option/history/trade?symbol=AAPL&expiration=*&date=202
 
 ```
 http://localhost:25503/v3/option/history/ohlc?symbol=AAPL&expiration=20231103&strike=170.000&right=call&date=20231103&interval=1m
+
 ```
 
 **Notes**:
@@ -301,6 +306,7 @@ http://localhost:25503/v3/option/history/ohlc?symbol=AAPL&expiration=20231103&st
 
 ```
 http://localhost:25503/v3/option/list/expirations?symbol=AAPL
+
 ```
 
 **Notes**:
@@ -334,6 +340,7 @@ http://localhost:25503/v3/option/list/expirations?symbol=AAPL
 
 ```
 http://localhost:25503/v3/option/list/strikes?symbol=AAPL&expiration=20220930
+
 ```
 
 **Notes**:
@@ -373,6 +380,7 @@ http://localhost:25503/v3/option/list/strikes?symbol=AAPL&expiration=20220930
 
 ```
 http://localhost:25503/v3/stock/history/quote?symbol=AAPL&date=20240102&interval=1m
+
 ```
 
 **Notes**:
@@ -413,12 +421,14 @@ http://localhost:25503/v3/stock/history/quote?symbol=AAPL&date=20240102&interval
   "count": "integer",
   "vwap": "number"
 }
+
 ```
 
 **Example**:
 
 ```
 http://localhost:25503/v3/stock/history/ohlc?symbol=AAPL&date=20240102&interval=1m
+
 ```
 
 **Notes**:
@@ -553,6 +563,7 @@ reconnect_wait = 1000
 fpss_queue_depth = 1000000
 ws_port = 25520
 fpss_region = "fpss_nj_hosts"
+
 ```
 
 ---
@@ -580,6 +591,7 @@ fpss_region = "fpss_nj_hosts"
 ```bash
 # End-of-day Greeks for all AAPL options on a date range
 curl "http://localhost:25503/v3/option/history/greeks/eod?symbol=AAPL&expiration=*&start_date=20240101&end_date=20240131&format=json"
+
 ```
 
 ### 2. Get Current Option Chain
@@ -590,6 +602,7 @@ curl "http://localhost:25503/v3/option/list/expirations?symbol=AAPL&format=json"
 
 # List strikes for specific expiration
 curl "http://localhost:25503/v3/option/list/strikes?symbol=AAPL&expiration=20241220&format=json"
+
 ```
 
 ### 3. Fetch Underlying Stock Data
@@ -597,6 +610,7 @@ curl "http://localhost:25503/v3/option/list/strikes?symbol=AAPL&expiration=20241
 ```bash
 # 1-minute OHLC bars for a day
 curl "http://localhost:25503/v3/stock/history/ohlc?symbol=AAPL&date=20241104&interval=1m&format=json"
+
 ```
 
 ### 4. Get Intraday Option Quotes
@@ -604,6 +618,7 @@ curl "http://localhost:25503/v3/stock/history/ohlc?symbol=AAPL&date=20241104&int
 ```bash
 # 5-minute quote snapshots for a specific option
 curl "http://localhost:25503/v3/option/history/quote?symbol=AAPL&expiration=20241220&strike=180.00&right=call&date=20241104&interval=5m&format=json"
+
 ```
 
 ---

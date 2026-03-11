@@ -89,6 +89,7 @@ Namespace A (caller)
            |
            v :seon.flow.out/reply
     Reply router -> deliver promise to caller
+
 ```
 
 ### Reverse Channel (cross-namespace from agent side)

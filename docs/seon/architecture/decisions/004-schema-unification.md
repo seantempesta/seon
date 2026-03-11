@@ -38,6 +38,7 @@ Malli is the **single source of truth**. `schema/register!` carries all metadata
 ;; Bridge translates :seon.db/* -> :db/* automatically.
 ;; db/transact! validates via Malli before Datalevin.
 (db/transact! :seon [{:seon.foo/id "abc" :seon.foo/name "hello"}])
+
 ```
 
 ## Key Design Decisions Within

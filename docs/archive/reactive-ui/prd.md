@@ -1,4 +1,5 @@
 # PRD: Reactive UI Architecture
+
 ## Status: SUPERSEDED by render-pipeline — unified render pipeline replaces reactive instance architecture
 
 **Status:** Phase 4 Complete - Instance-Based Architecture ✅
@@ -13,6 +14,7 @@
 Build a Reagent-like experience for server-side Clojure. Agents write pure Clojure (atoms + render functions), the framework handles reactivity, persistence, and browser updates via Datastar/SSE.
 
 **The Goal:**
+
 ```clojure
 ;; Agent writes this - no framework concepts leak through
 (defn initial-state []
@@ -28,6 +30,7 @@ Build a Reagent-like experience for server-side Clojure. Agents write pure Cloju
     [:input {:field :name}]
     [:input {:field :price :type "number"}]
     [:button "Add"]]])
+
 ```
 
 ---
@@ -142,6 +145,7 @@ REPL-to-browser execution bridge. Execute JavaScript or ClojureScript in connect
 ;; Verify Scittle is loaded
 (browser/eval! 'seon.web.reactive.demo "typeof scittle")
 ;; => "object"
+
 ```
 
 ### Error Handling
@@ -158,6 +162,7 @@ REPL-to-browser execution bridge. Execute JavaScript or ClojureScript in connect
 ;; Throws on JavaScript error
 (browser/eval! 'seon.web.reactive.demo "nonexistent.property")
 ;; => ExceptionInfo: Browser eval error: nonexistent is not defined {:ns ... :code ... :error "..."}
+
 ```
 
 ### Client Tracking
@@ -177,6 +182,7 @@ Clients are tracked per-namespace in the ctx registry (`seon.web.reactive.ctx`):
 
 ;; Force push current state to all clients
 (ctx/force-push! 'seon.web.reactive.demo)
+
 ```
 
 ### Implementation Notes
@@ -194,11 +200,13 @@ Clients are tracked per-namespace in the ctx registry (`seon.web.reactive.ctx`):
 Each browser tab gets its own isolated instance with independent state.
 
 **URL Pattern:**
+
 ```
 GET  /ns/seon.web.reactive.demo              → Creates instance, redirects to ?instance=xxxx
 GET  /ns/seon.web.reactive.demo?instance=a1b2 → Serves page for instance a1b2
 POST /ns/seon.web.reactive.demo?instance=a1b2 → SSE connection for instance a1b2
 POST /ns/seon.web.reactive.demo/increment!?instance=a1b2 → Action call for instance
+
 ```
 
 **How It Works:**
@@ -235,6 +243,7 @@ POST /ns/seon.web.reactive.demo/increment!?instance=a1b2 → Action call for ins
 (defn add-signal! [{:seon.reactive/keys [ctx] :keys [symbol price]}]
   (when (and ctx symbol price)
     (swap! ctx update :signals conj {:symbol symbol :price (parse-double price)})))
+
 ```
 
 **Files:**
@@ -278,6 +287,7 @@ POST /ns/seon.web.reactive.demo/increment!?instance=a1b2 → Action call for ins
 
 ;; Cleanup
 (instance/destroy-instance! {::instance/id "a1b2"})
+
 ```
 
 ---
@@ -378,6 +388,7 @@ Browser Bridge Flow:
 │  on       │ <───────────────│ promise   │ <──────────── │ JS/CLJS   │
 │  promise  │   delivers      │ registry  │   POST result │ + Scittle │
 └───────────┘                 └───────────┘               └───────────┘
+
 ```
 
 ---
@@ -406,13 +417,17 @@ data: elements <div id="my-element">Updated content</div>
 ### Signal Binding (VALUE SYNTAX)
 
 Use value syntax to preserve names exactly:
+
 ```html
 <input data-bind="item-name">  <!-- signal: "item-name" -->
+
 ```
 
 Key syntax applies camelCase conversion (avoid):
+
 ```html
 <input data-bind:item-name>    <!-- signal: "itemName" - BAD -->
+
 ```
 
 ---

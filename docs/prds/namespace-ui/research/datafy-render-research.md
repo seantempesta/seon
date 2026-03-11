@@ -40,6 +40,7 @@ Both `Datafiable` and `Navigable` protocols have `:extend-via-metadata true`, me
 
 (d/datafy custom-map)
 ;; => {:summary "Map with 2 keys", :keys (:raw-data :count)}
+
 ```
 
 ### Metadata Flows Through Nav
@@ -58,6 +59,7 @@ When `nav` returns a value with metadata, that metadata controls subsequent data
 (let [ticker (d/nav position :ticker "AAPL")]
   (d/datafy ticker))
 ;; => {:symbol "AAPL", :name "Apple Inc.", :enriched? true}
+
 ```
 
 ### Integration with Malli Schemas
@@ -82,6 +84,7 @@ We can attach Malli schemas to values via metadata, then extract render hints fr
       props (m/properties schema)]
   (:seon.ui/render props))
 ;; => :position
+
 ```
 
 ### Verdict on Datafy/Nav
@@ -116,6 +119,7 @@ But for **rendering**, a simpler metadata-based multimethod dispatch is more app
 
 (defmethod render-value [:html :position] [v _ _]
   [:div.position-card [:span.ticker (:ticker v)]])
+
 ```
 
 **Pros:** Single dispatch point, explicit format in call
@@ -150,6 +154,7 @@ But for **rendering**, a simpler metadata-based multimethod dispatch is more app
     :ai (render-ai v)
     :html (render-html v)
     :raw (render-raw v)))
+
 ```
 
 **Pros:**
@@ -179,6 +184,7 @@ For agents to register renderers without editing files:
     :html (defmethod render-html render-type [v] (render-fn v))
     :raw (defmethod render-raw render-type [v] (render-fn v)))
   :registered)
+
 ```
 
 ### Collection Rendering
@@ -188,12 +194,14 @@ Collections need to recursively render their children:
 ```clojure
 (defmethod render-ai clojure.lang.IPersistentVector [v]
   (str "[" (clojure.string/join ", " (map render-ai v)) "]"))
+
 ```
 
 This allows:
 
 ```clojure
 [Position: AAPL x100 @ $150.0, Position: GOOGL x50 @ $140.0]
+
 ```
 
 Instead of verbose EDN.
@@ -206,6 +214,7 @@ Instead of verbose EDN.
 
 ```
 Claude → MCP Server → nREPL (eval) → pr-str result → MCP Server → Claude
+
 ```
 
 The result is always `pr-str` output, which can be verbose for large structures.
@@ -240,6 +249,7 @@ The simplest approach is a wrapper function that agents can use explicitly:
     (map? v) (str "{" (clojure.string/join ", "
                         (map (fn [[k val]] (str (pr-str k) " " (for-ai val))) v)) "}")
     :else (pr-str v)))
+
 ```
 
 ### Example Usage
@@ -250,6 +260,7 @@ The simplest approach is a wrapper function that agents can use explicitly:
 
 ;; Instead of verbose EDN, returns:
 "{:positions [Position: AAPL x100 @ $150.0], :total-value 15000.0}"
+
 ```
 
 ### Future Enhancement: Automatic Wrapping
@@ -260,6 +271,7 @@ The MCP server could optionally wrap code:
 ;; In bin/mcp-server, if agent wants AI rendering:
 (defn wrap-for-ai [code]
   (str "(seon.render/for-ai (do " code "))"))
+
 ```
 
 This would be controlled by a parameter to the `eval` tool or a session setting.
@@ -284,6 +296,7 @@ Malli's `mu/merge` preserves and can override properties:
 
 (m/properties AnalyzedPosition)
 ;; => {:seon.ui/render :analyzed-position}
+
 ```
 
 To inherit rendering while adding fields, omit the render property in the merge:
@@ -293,6 +306,7 @@ To inherit rendering while adding fields, omit the render property in the merge:
   (mu/merge BasePosition
             [:map  ;; No :seon.ui/render - inherits :position
              [:notes :string]]))
+
 ```
 
 ---
@@ -323,6 +337,7 @@ To inherit rendering while adding fields, omit the render property in the merge:
 │  • (for-ai v)          ; recursive, safe                     │
 │  • (register-renderer! type format fn)  ; REPL use           │
 └─────────────────────────────────────────────────────────────┘
+
 ```
 
 ---

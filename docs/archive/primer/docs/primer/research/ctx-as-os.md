@@ -23,6 +23,7 @@ Re-planning (only when needed):
   → Unexpected input
   → State invalidated
   → Player does something novel
+
 ```
 
 **The agent is in planning phase.** It doesn't generate responses in real-time - it sets up conditional logic ahead of time.
@@ -76,6 +77,7 @@ Re-planning (only when needed):
      :ui/screens
        {:home [:primer/summary :health/summary :trading/alerts]
         :primer [:primer/current-scene]}}))
+
 ```
 
 ---
@@ -102,6 +104,7 @@ Rendering is just **walking the data**:
 (defmethod render-key "health" [ctx k]
   (case k
     :health/summary (render-health-summary ctx (get ctx k))))
+
 ```
 
 **Adding a new "app":**
@@ -136,6 +139,7 @@ When user acts, we check pre-computed behaviors:
 (defn apply-transition [ctx fn-sym args]
   (let [f (resolve fn-sym)]
     (swap! ctx-atom #(f % args))))
+
 ```
 
 **The agent's job during "planning phase":**
@@ -156,6 +160,7 @@ When user acts, we check pre-computed behaviors:
      {:fn 'primer.ai/dialogue-response
       :args {:topic :path-choice :character :owl}
       :pre-computed? false}}}
+
 ```
 
 ---
@@ -184,6 +189,7 @@ When user acts, we check pre-computed behaviors:
    [:behaviors {:optional true} [:map-of :keyword Behavior]]
    [:scene {:optional true} SceneParams]
    ...])
+
 ```
 
 **Validation on every agent write:**
@@ -194,6 +200,7 @@ When user acts, we check pre-computed behaviors:
     (throw (ex-info "Invalid agent output"
                     {:errors (m/explain CtxUpdate update-data)})))
   (apply-update! ctx-atom update-data))
+
 ```
 
 **Benefits:**
@@ -242,6 +249,7 @@ When user acts, we check pre-computed behaviors:
 │                                                          │
 │  Agent plans next N interactions                         │
 └─────────────────────────────────────────────────────────┘
+
 ```
 
 ---
@@ -265,6 +273,7 @@ Each namespace is a self-contained "app":
           :health/today        ; "HRV: 45ms"
           :trading/alerts      ; "AAPL IV rank: 85%"
           :tasks/due-today]}}  ; "3 tasks due"
+
 ```
 
 ---

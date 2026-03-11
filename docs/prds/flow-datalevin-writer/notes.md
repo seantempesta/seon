@@ -43,6 +43,7 @@ Evidence from `reference-code/datalevin/src/datalevin/server.clj`:
           (let [lock (Semaphore. 1)]
             (update-db server db-name #(assoc % :lock lock))
             lock)))))
+
 ```
 
 The `open-transact` and `open-transact-kv` server handlers both acquire this semaphore before allowing writes (lines 1971, 2014). The semaphore is released on `close-transact`/`close-transact-kv` (lines 1994, 2048).
@@ -121,6 +122,7 @@ Current code in `seon.db/transact!` (lines 88-114):
   (when (= result ::timeout)
     (future-cancel fut)  ;; Sets interrupt flag only — monitors stay held
     ...))
+
 ```
 
 **What happens on timeout:**
@@ -191,6 +193,7 @@ From `server.clj` line 646-655:
               :when state]
         (when (= client-id (@state :client-id))
           (close-conn k))))))
+
 ```
 
 The server removes the client from its tracking and closes the selection key. Additionally:
@@ -274,6 +277,7 @@ Use a dedicated test database (`test-load`) to avoid interfering with production
             (catch Exception e
               (deliver p {:error (.getMessage e)}))))))
     @promises))
+
 ```
 
 Ramp from 10 to 100 to 1000 concurrent writes. Measure:
@@ -295,6 +299,7 @@ Inject an artificial delay into the writer step-fn to simulate a hung `d/transac
     (Thread/sleep 30000))  ;; Simulate hung server
   ;; ... normal write logic
   )
+
 ```
 
 Verify:
@@ -316,6 +321,7 @@ Verify:
   ;; 7. Verify all 10 writes are in the database
   ;; 8. Verify old flow thread count (should be 1 leaked)
   )
+
 ```
 
 ### 4. Data Integrity Verification
@@ -329,6 +335,7 @@ After each test:
                     (d/db conn))]
     (assert (= actual expected-count)
             (str "Expected " expected-count " got " actual))))
+
 ```
 
 Also verify:
@@ -362,6 +369,7 @@ Also verify:
  :error? true,
  :error-ex-msg "test error",
  :error-state {:count 1}}              ;; state at time of error
+
 ```
 
 **Key findings:**
@@ -380,6 +388,7 @@ Also verify:
  :s2-during-block nil,    ;; ping timed out (500ms)
  :s3-during-block nil}    ;; still blocked
 ;; inject returns a Future — non-blocking, buffers in channel (up to 10)
+
 ```
 
 **Key findings:**
@@ -492,6 +501,7 @@ Clojure promises are JVM-local objects. The cross-JVM mapping uses correlation I
         (if (= :ok (:status reply))
           (:result reply)
           (throw (ex-info (:error-message reply) reply)))))))
+
 ```
 
 ACK reader loop:
@@ -505,6 +515,7 @@ ACK reader loop:
           (swap! pending-writes dissoc (:correlation-id msg))
           (deliver promise msg))
         (recur)))))
+
 ```
 
 ---

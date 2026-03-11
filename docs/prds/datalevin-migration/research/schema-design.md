@@ -98,6 +98,7 @@ Tracks AI agent sessions from start to completion.
  ;; Error handling
  :ai.session/error         {:db/valueType   :db.type/string
                             :db/doc         "EDN-encoded error details"}}
+
 ```
 
 ### 1.2 AI Message
@@ -151,6 +152,7 @@ Individual messages within a session.
 
  :ai.message/provider      {:db/valueType   :db.type/keyword
                             :db/doc         "AI provider [:claude :gemini :openai]"}}
+
 ```
 
 ---
@@ -178,6 +180,7 @@ Agent context with time-travel support via append-only snapshots.
  ;; State
  :ctx/state                {:db/valueType   :db.type/string
                             :db/doc         "EDN-serialized context state"}}
+
 ```
 
 **Query pattern for point-in-time:**
@@ -191,6 +194,7 @@ Agent context with time-travel support via append-only snapshots.
        [(<= ?t ?as-of)]
        (max ?t)]
      db "seon.trading" #inst "2026-01-28T10:00:00Z")
+
 ```
 
 ### 2.2 Primer Sessions (Append-Only)
@@ -213,6 +217,7 @@ Multi-session context with checkpointing.
  ;; State - stored as EDN string for flexibility
  :primer.session/state     {:db/valueType   :db.type/string
                             :db/doc         "EDN-serialized session state"}}
+
 ```
 
 ---
@@ -251,6 +256,7 @@ Orchestrator session lifecycle tracking.
 
  :orch.session/stopped-at  {:db/valueType   :db.type/instant
                             :db/doc         "When session stopped"}}
+
 ```
 
 ---
@@ -320,6 +326,7 @@ Options pricing data with historical tracking.
 
  :market/aggressor         {:db/valueType   :db.type/keyword
                             :db/doc         "Trade aggressor [:buy :sell]"}}
+
 ```
 
 **Query pattern for backtesting (data as of time T):**
@@ -333,6 +340,7 @@ Options pricing data with historical tracking.
        [?e :quote/recorded-at ?t]
        [(<= ?t ?as-of)]]
      db "SPY" #inst "2025-07-15T00:00:00Z")
+
 ```
 
 ### 4.2 Ingestion State
@@ -368,6 +376,7 @@ Track data loading progress for resumable imports.
  :ingestion/updated-at     {:db/valueType   :db.type/instant
                             :db/index       true
                             :db/doc         "Last update timestamp"}}
+
 ```
 
 ### 4.3 Bulk Progress
@@ -393,6 +402,7 @@ Fine-grained progress tracking per trading day.
  :progress/completed-at    {:db/valueType   :db.type/instant
                             :db/index       true
                             :db/doc         "When this date was completed"}}
+
 ```
 
 ---
@@ -443,6 +453,7 @@ Track file edits with test results and decisions.
 
  :edit/feedback            {:db/valueType   :db.type/string
                             :db/doc         "EDN: vector of feedback messages"}}
+
 ```
 
 ### 5.2 Review Event
@@ -483,6 +494,7 @@ Track Gemini code reviews for training data.
 
  :review/gemini-tokens     {:db/valueType   :db.type/string
                             :db/doc         "EDN: {:prompt N :response N :cached N}"}}
+
 ```
 
 ### 5.3 Todo Event
@@ -508,6 +520,7 @@ Track agent todo lists for observability.
  :todo/created-at          {:db/valueType   :db.type/instant
                             :db/index       true
                             :db/doc         "When snapshot was taken (replaces _valid_from)"}}
+
 ```
 
 ---
@@ -628,6 +641,7 @@ Track agent todo lists for observability.
     :todo/session-id          {:db/valueType :db.type/string :db/index true}
     :todo/todos               {:db/valueType :db.type/string}
     :todo/created-at          {:db/valueType :db.type/instant :db/index true}}))
+
 ```
 
 ---
@@ -648,6 +662,7 @@ Track agent todo lists for observability.
  :seon.ai/input-tokens 1500
  :seon.ai/output-tokens 800
  :seon.ai/cost-usd 0.23}
+
 ```
 
 **Datalevin Entity:**
@@ -662,6 +677,7 @@ Track agent todo lists for observability.
  :ai.session/input-tokens 1500
  :ai.session/output-tokens 800
  :ai.session/cost-usd 0.23}
+
 ```
 
 **Key change:** Namespace prefix changes from `seon.ai/` to `ai.session/`.
@@ -681,6 +697,7 @@ Track agent todo lists for observability.
  :seon.ai/timestamp #inst "2026-01-28T10:01:00Z"
  :seon.ai/input-tokens 500
  :seon.ai/output-tokens 200}
+
 ```
 
 **Datalevin Entity:**
@@ -694,6 +711,7 @@ Track agent todo lists for observability.
  :ai.message/timestamp #inst "2026-01-28T10:01:00Z"
  :ai.message/input-tokens 500
  :ai.message/output-tokens 200}
+
 ```
 
 ---
@@ -708,6 +726,7 @@ Track agent todo lists for observability.
  :namespace "seon.trading"
  :state "{:seon.trading/signals [...]}"}
 ;; _system_from auto-set by XTDB
+
 ```
 
 **Datalevin Entity:**
@@ -717,6 +736,7 @@ Track agent todo lists for observability.
  :ctx/namespace "seon.trading"
  :ctx/recorded-at #inst "2026-01-28T10:00:00Z"  ; Explicit!
  :ctx/state "{:seon.trading/signals [...]}"}
+
 ```
 
 **Key change:** Explicit `:ctx/recorded-at` replaces implicit `_system_from`.
@@ -742,6 +762,7 @@ Track agent todo lists for observability.
  :greeks/gamma 0.03
  :greeks/vega 0.15
  :greeks/theta -0.08}
+
 ```
 
 **Datalevin Entity:**
@@ -761,6 +782,7 @@ Track agent todo lists for observability.
  :greeks/gamma 0.03
  :greeks/vega 0.15
  :greeks/theta -0.08}
+
 ```
 
 **Key changes:**
@@ -782,6 +804,7 @@ Track agent todo lists for observability.
  :seon.dev.context/decision :continue
  :seon.dev.context/unit-test-result {:success true :test-count 5}}
 ;; _valid_from auto-set by XTDB
+
 ```
 
 **Datalevin Entity:**
@@ -794,6 +817,7 @@ Track agent todo lists for observability.
  :edit/decision :continue
  :edit/unit-test-result "{:success true :test-count 5}"  ; EDN-encoded
  :edit/created-at #inst "2026-01-28T10:00:00Z"}  ; Explicit!
+
 ```
 
 **Key changes:**
@@ -921,6 +945,7 @@ Track agent todo lists for observability.
 
     ;; ... other entity types
     ))
+
 ```
 
 ### Batch Migration
@@ -933,6 +958,7 @@ Track agent todo lists for observability.
                        (format "SELECT * FROM %s" table-name))
         transformed (map #(xtdb->datalevin % entity-type) entities)]
     (d/transact! dl-conn transformed)))
+
 ```
 
 ---

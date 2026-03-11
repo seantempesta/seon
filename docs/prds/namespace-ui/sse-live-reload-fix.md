@@ -34,6 +34,7 @@ In `seon.web.agents`, there's an `after-ns-reload` function (lines 1011-1017) th
   (log/debug "Recreating agents-sse handler after namespace reload")
   (alter-var-root #'agents-sse
                   (constantly (sse/render-handler #'agents-sse-render :poll-ms 2000))))
+
 ```
 
 But `user.clj` initialized clj-reload **without** the `:reload-hook` option:
@@ -42,6 +43,7 @@ But `user.clj` initialized clj-reload **without** the `:reload-hook` option:
 ;; Before (broken):
 (reload/init {:dirs ["src" "env/dev/clj" "test"]
               :no-reload '#{user}})
+
 ```
 
 ## The Fix
@@ -53,6 +55,7 @@ Added `:reload-hook 'after-ns-reload` to the clj-reload initialization in `env/d
 (reload/init {:dirs ["src" "env/dev/clj" "test"]
               :no-reload '#{user}
               :reload-hook 'after-ns-reload})
+
 ```
 
 This tells clj-reload to call any `after-ns-reload` function defined in a namespace after that namespace is reloaded.

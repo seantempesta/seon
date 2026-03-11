@@ -16,6 +16,7 @@ messages-ch (chan 100)
 
 ;; FIX (never blocks):
 messages-ch (chan (async/sliding-buffer 1000))
+
 ```
 
 See `src/seon/ai/claude.clj:685`. The fix is deployed. Agents can now run indefinitely.
@@ -53,11 +54,13 @@ We believe Claude Code's `stream-json` input format supports:
 ### Research Questions
 
 #### Q1: Does `type: "system"` message injection work?
+
 - Can we send system messages mid-conversation?
 - When does Claude process them - immediately or queued?
 - Do they affect the next turn's context?
 
 **Test approach**:
+
 ```clojure
 ;; Send a system message with unique identifier
 (sdk/write-message! stdin {:type "system"
@@ -66,14 +69,17 @@ We believe Claude Code's `stream-json` input format supports:
 ;; Then send user message asking Claude to report the secret
 (sdk/write-message! stdin (sdk/make-user-message "What is the magic number?"))
 ;; If Claude knows SECRET_CODE_12345, injection works
+
 ```
 
 #### Q2: Does system injection REPLACE or APPEND?
+
 - If we send 10 system messages, does context grow by 10x?
 - Or does each new system message replace the previous?
 - How do we measure context size?
 
 **Test approach**:
+
 ```clojure
 ;; Send system message with MARKER_A
 ;; Send user message, get response
@@ -81,43 +87,53 @@ We believe Claude Code's `stream-json` input format supports:
 ;; Ask Claude: "Do you see MARKER_A? Do you see MARKER_B?"
 ;; If only MARKER_B visible, it's replacement
 ;; If both visible, it's append (context growing)
+
 ```
 
 #### Q3: What's the message schema?
+
 - Verify the exact JSON structure Claude Code expects
 - Check if `session_id` is required or can be empty
 - Test error handling for malformed messages
 
 **Test approach**:
+
 ```bash
 # Run Claude Code with verbose logging
 claude --verbose --input-format stream-json --output-format stream-json
 # Send various message formats, observe behavior
+
 ```
 
 #### Q4: How does `error_max_turns` actually work?
+
 - Is it a hard stop or a pause waiting for input?
 - Can we send a continuation message to resume?
 - Does the context persist across the "error"?
 
 **Test approach**:
+
 ```clojure
 ;; Launch agent with --max-turns 3
 ;; Let it hit the limit
 ;; Send: {:type "user" :message {...} :content "Continue"}
 ;; Observe: does it resume? Is context preserved?
+
 ```
 
 #### Q5: Can we monitor context size?
+
 - Does Claude Code expose token count in output?
 - Can we infer it from `usage` fields in messages?
 - What triggers compaction and can we detect it?
 
 **Test approach**:
+
 ```clojure
 ;; Parse output messages for token usage
 ;; Track cumulative tokens over turns
 ;; Look for compaction events in verbose output
+
 ```
 
 ### Research Deliverables
@@ -167,6 +183,7 @@ Instead of static AGENT.md, agents receive a live "cockpit" view refreshed each 
 │   ├─ Available schemas                                      │
 │   └─ Other running agents                                   │
 └─────────────────────────────────────────────────────────────┘
+
 ```
 
 ### Proposed Implementation
@@ -185,6 +202,7 @@ Instead of static AGENT.md, agents receive a live "cockpit" view refreshed each 
   "Create a user message to continue after turn limit."
   []
   (make-user-message "Continue with the task if work remains. Summarize if complete."))
+
 ```
 
 #### 2. Cockpit Generator (new namespace)
@@ -203,6 +221,7 @@ Instead of static AGENT.md, agents receive a live "cockpit" view refreshed each 
     (schemas-section namespace)    ;; Available schemas
     (agents-section)      ;; Other running agents
     (errors-section)))    ;; Recent errors
+
 ```
 
 #### 3. Agent Loop Modification (claude.clj)
@@ -226,6 +245,7 @@ Instead of static AGENT.md, agents receive a live "cockpit" view refreshed each 
     (do
       (log/warn "Max continuations reached, stopping" {:count @continuation-count})
       (reset! status-atom :completed))))
+
 ```
 
 ### Open Questions for Research
@@ -252,22 +272,26 @@ Instead of static AGENT.md, agents receive a live "cockpit" view refreshed each 
 ## Success Criteria
 
 ### Phase 0 (Research)
+
 - [ ] All 5 research questions answered with evidence
 - [ ] Findings document published
 - [ ] Prototype demonstrating working injection (if possible)
 - [ ] PRD updated with validated design
 
 ### Phase 1 (Turn Limit Fix)
+
 - [ ] `error_max_turns` triggers continuation, not failure
 - [ ] Agents can run >100 turns without manual intervention
 - [ ] Continuation count tracked and limited (prevent infinite loops)
 
 ### Phase 2 (Cockpit Injection)
+
 - [ ] System message injection working per-turn
 - [ ] Context does NOT grow unboundedly (replacement confirmed)
 - [ ] Agents can report live system state they wouldn't otherwise know
 
 ### Phase 3 (Orchestrator Namespace)
+
 - [ ] Orchestrator is itself an agent with namespace `seon.orchestrator`
 - [ ] Orchestrator cockpit shows all managed agents
 - [ ] Meta-level: orchestrator can observe its own context
@@ -277,6 +301,7 @@ Instead of static AGENT.md, agents receive a live "cockpit" view refreshed each 
 ## References
 
 ### Seon Documentation
+
 - [VISION.md](/VISION.md) - Layer 5: Dynamic Context (The Cockpit)
 - [CLAUDE.md](/CLAUDE.md) - Agent instructions and MCP usage
 
@@ -303,6 +328,7 @@ Instead of static AGENT.md, agents receive a live "cockpit" view refreshed each 
 - `.claude/AGENT.md` - Current static agent instructions
 
 ### External Resources
+
 - Claude Code documentation: https://docs.anthropic.com/en/docs/claude-code
 - MCP specification: https://modelcontextprotocol.io/
 

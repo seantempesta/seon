@@ -118,6 +118,7 @@ Claude CLI stdout -> parse-line (JSON) -> normalize-message (multimethod)
   -> log-sdk-message! (file log)
   -> messages-ch (core.async)
   -> result-message? -> if true: parse-result, end-session!, put result-ch
+
 ```
 
 ### Provider Dispatch

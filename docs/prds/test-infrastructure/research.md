@@ -95,6 +95,7 @@ The dev hook configuration:
           :kaocha.filter/focus-meta [:integration]}]
  :plugins [:kaocha.plugin/profiling
            :kaocha.plugin/capture-output]}
+
 ```
 
 Two test suites (unit, integration), profiling plugin, capture-output plugin. Used only by `bin/test` CLI fallback.
@@ -133,6 +134,7 @@ Tests that need a database each reinvent the wheel. Here is the boilerplate from
                   db/*conn-manager* (fake-conn-manager conn)]
           (f))
         (finally (teardown-datalevin!))))))
+
 ```
 
 **`ctx-test.clj`** (lines 16-44, ~37 lines):
@@ -152,6 +154,7 @@ Tests that need a database each reinvent the wheel. Here is the boilerplate from
       (binding [db/*direct-mode* true
                 db/*conn-manager* fake-mgr]
         (try (f) (finally (teardown-datalevin!)))))))
+
 ```
 
 **`graph/query-test.clj`** (lines 21-62, ~40 lines):
@@ -166,6 +169,7 @@ Tests that need a database each reinvent the wheel. Here is the boilerplate from
 (defn with-populated-graph [f] ...) ;; d/create-conn + ingest schema + populate
 
 (use-fixtures :once with-populated-graph)
+
 ```
 
 **`health/workout-test.clj`** (lines 26-43, ~30 lines):
@@ -186,6 +190,7 @@ Tests that need a database each reinvent the wheel. Here is the boilerplate from
       (finally ...))))
 
 (use-fixtures :each with-temp-datalevin)
+
 ```
 
 Every file manually creates temp dirs, connections, fake managers, bindings, and cleanup. The structure is identical -- only the schema and db-name mapping differ.
@@ -222,6 +227,7 @@ The hook has `block-on-fail: false` for generative tests (line 28-29 of `seon-ho
 :generative {:enabled true
              :num-tests 10
              :block-on-fail false}
+
 ```
 
 Comment says: "temporarily disabled due to pre-existing issue where `::xtdb-node` schema generates nil, causing all context.clj functions to fail."
@@ -240,6 +246,7 @@ Test files register schemas at load time. For example, `validation-test.clj` (li
 (schema/register! ::id [:int {:db/unique :db.unique/identity ...}])
 (schema/register! ::name [:string {:min 1 :max 200 ...}])
 ;; ... 7 more
+
 ```
 
 These persist in the global mutable registry (`seon.schema/*schemas` atom, which is a `defonce`) and survive namespace reloads. While unlikely to collide with production schemas (they use test-namespace-qualified keywords like `:seon.db.validation-test/id`), this is an implicit coupling.
@@ -258,6 +265,7 @@ From reading `reference-code/datalevin/src/datalevin/storage.clj` (line 1578):
    (let [dir  (or dir (u/tmp-dir (str "datalevin-" (UUID/randomUUID))))
          lmdb (lmdb/open-kv dir kv-opts)]
      ...)))
+
 ```
 
 When `dir` is `nil`, Datalevin creates a temp directory automatically using `u/tmp-dir`. When `dir` is a path, it opens or creates at that path. **There is no true in-memory mode** -- Datalevin always uses LMDB files on disk. However, with `:nosync` flag (which `test_utils.clj` already uses), writes are not fsynced to disk, making it nearly as fast as in-memory.
@@ -270,6 +278,7 @@ From `reference-code/datalevin/src/datalevin/conn.clj` (lines 42-46):
   ([dir] (conn-from-db (db/empty-db dir)))
   ([dir schema] (conn-from-db (db/empty-db dir schema)))
   ([dir schema opts] (conn-from-db (db/empty-db dir schema opts))))
+
 ```
 
 `d/create-conn` with no args creates a fully isolated database with an auto-generated temp directory. `d/create-conn` with a dir and schema creates a database at that path.
@@ -285,6 +294,7 @@ From `reference-code/datalevin/src/datalevin/db.clj` (lines 596-603):
    {:pre [(or (nil? schema) (map? schema))]}
    (validate-schema schema)
    (new-db (open-store dir schema opts))))
+
 ```
 
 Schema must be a map (not a Malli schema). The `open-store` function dispatches to either a remote store (for `dtlv://` URIs) or a local store.
@@ -419,6 +429,7 @@ A single fixture function in `test_utils.clj`:
                   db/*direct-mode* true
                   db/*conn-manager* fake-mgr]
           (f))))))
+
 ```
 
 The `merged-test-schema` function would:
@@ -434,6 +445,7 @@ Each migrated test file would go from ~30-45 lines of boilerplate to:
 
 ```clojure
 (use-fixtures :each tu/with-test-db)
+
 ```
 
 The following per-file artifacts would be deleted:
@@ -479,6 +491,7 @@ For tests that need a `*ctx*` atom (reactive namespace state), add a composable 
     (binding [*test-ctx* a]
       (try (f)
            (finally (ctx/destroy! {::ctx/instance-id ctx-id}))))))
+
 ```
 
 ### 3.6 Integrant Test System
@@ -512,6 +525,7 @@ Seon has **920 `schema/register!` calls across 68 source files**. This is extens
    {:gen/schema [:or :int :string :keyword :boolean
                  [:vector :int] [:map-of :keyword :string]]
     :gen/fmap identity}
+
    ```
 
    Generates a union of basic types. Reasonable for wire protocol testing.
@@ -521,6 +535,7 @@ Seon has **920 `schema/register!` calls across 68 source files**. This is extens
    ```clojure
    {:gen/schema [:or [:int {:min 1}] [:tuple :keyword :string]]
     :gen/fmap identity}
+
    ```
 
    Generates positive ints (entity IDs) or `[:keyword "string"]` lookup refs. Lookup refs require target entities to exist at transact time.
@@ -564,6 +579,7 @@ Based on reading `reference-code/malli/src/malli/generator.cljc` (particularly t
 [:string {:min 1 :max 200}]              ;; Not unbounded :string
 [:int {:min 0}]                           ;; Not bare :int
 [:double {:min 0.0 :max 1.0}]            ;; Not bare :double
+
 ```
 
 **DO: Use `:gen/min` and `:gen/max` to narrow generation without changing validation**
@@ -571,6 +587,7 @@ Based on reading `reference-code/malli/src/malli/generator.cljc` (particularly t
 ```clojure
 ;; Validates any non-negative int, generates 1-100 for fast tests
 [:int {:min 0 :gen/min 1 :gen/max 100}]
+
 ```
 
 From malli source (lines 78-84): `:gen/min` and `:gen/max` override `:min` and `:max` for generation only. Malli validates that gen bounds are within schema bounds.
@@ -580,6 +597,7 @@ From malli source (lines 78-84): `:gen/min` and `:gen/max` override `:min` and `
 ```clojure
 ;; Instead of unbounded :string
 [:string {:gen/elements ["seon.health" "seon.trading" "seon.graph"]}]
+
 ```
 
 **DO NOT: Use `:gen/fmap (fn [_] (throw ...))` on fields within entity schemas that will be generatively tested.** Instead, exclude the field from the schema used for generation (as `pipeline-test` already does).
@@ -591,6 +609,7 @@ From malli source (lines 78-84): `:gen/min` and `:gen/max` override `:min` and `
 ```clojure
 ;; Better than :keyword - generates from known values
 [:enum :running :stopped :crashed :paused]
+
 ```
 
 ### 4.4 How test.check Properties Should Integrate With Malli
@@ -605,6 +624,7 @@ From reading `reference-code/test.check/`:
 (defspec my-property 100
   (prop/for-all [x gen-x, y gen-y]
     (some-property x y)))
+
 ```
 
 **`prop/for-all`** (from `properties.cljc`, lines 68-95) is the macro that creates a property from bindings and a body:
@@ -613,6 +633,7 @@ From reading `reference-code/test.check/`:
 (prop/for-all [entity (mg/generator my-entity-schema)]
   (let [pulled (roundtrip! conn entity)]
     (= (normalize entity) (normalize pulled))))
+
 ```
 
 **Seon does NOT use `defspec` anywhere.** Instead, all generative tests use a manual loop:
@@ -620,6 +641,7 @@ From reading `reference-code/test.check/`:
 ```clojure
 (doseq [sample (mg/sample ::schema {:size 20})]
   (is (some-property sample)))
+
 ```
 
 **The manual loop lacks shrinking.** When a test fails, `doseq` + `mg/sample` gives you the raw failing input with no attempt to find a smaller reproducer. With `defspec` + `prop/for-all`, test.check automatically shrinks to the smallest failing case, which is invaluable for debugging.
@@ -636,6 +658,7 @@ From reading `reference-code/test.check/`:
            smallest (-> shrunk :smallest first)]
        ;; returns shrunk failure data
        ))))
+
 ```
 
 So schema-based generative tests (via `user/test-gen`) already get shrinking. Only the manual `doseq` pattern in test files misses it.
@@ -650,6 +673,7 @@ From `reference-code/malli/src/malli/generator.cljc` (lines 558-562):
    (let [schema (m/schema ?schema options)]
      (m/explain (m/-update-options schema
                   #(assoc % ::m/function-checker function-checker)) f))))
+
 ```
 
 `mg/check` validates that a function conforms to its `:malli/schema` by generating inputs and checking outputs. Returns an explanation on failure, nil on success. This is what `seon.dev.verify` uses under the hood.
@@ -680,6 +704,7 @@ This finds minimal failing cases efficiently. Without it (as in Seon's `doseq` p
                       :test `(fn []
                                (assert-check (assoc (~name) :test-var (str '~name)))))
       ...)))
+
 ```
 
 `defspec` creates a function that is also a `clojure.test` test (via `:test` metadata). It can be run standalone or via `clojure.test/run-tests`. The `*default-test-count*` is 100.
@@ -759,6 +784,7 @@ Key patterns from the source:
 
    ```clojure
    [:string {:gen/elements ["Alice" "Bob" "Carol"]}]
+
    ```
 
    Generates from a fixed set. Much faster than random string generation.
@@ -770,6 +796,7 @@ Key patterns from the source:
      ;; gen-min/gen-max override min/max for generation only
      {:min (or gen-min min)
       :max (or gen-max max)})
+
    ```
 
    Validates that gen bounds are within schema bounds. Use to generate small values for fast tests while validating a wider range.
@@ -778,6 +805,7 @@ Key patterns from the source:
 
    ```clojure
    (defn- gen-fmap [f gen] (or (-unreachable gen) (gen/fmap f gen)))
+
    ```
 
    Maps a function over generated values. Use for derived fields.
@@ -802,12 +830,14 @@ Key patterns from the source:
        (-unreachable-gen? g) (if (zero? (or min 0)) (gen/return []) g)
        (and min (= min max)) (gen/vector g min)
        :else (gen/vector g (or min 0) (or max (+ (or min 0) 40)))))
+
    ```
 
    Default max collection size is `min + 40`. For faster tests, use `:gen/max` on collections:
 
    ```clojure
    [:vector {:gen/max 5} :keyword]  ;; generates vectors of 0-5 keywords
+
    ```
 
 ---
@@ -876,6 +906,7 @@ Either detect the `:gen/fmap` throwing pattern or maintain an explicit skip-list
         (let [entity {:test/id 1 :test/val val}
               result (roundtrip! conn :test/id entity)]
           (= val (:test/val result)))))))
+
 ```
 
 **Impact**: New property tests get automatic shrinking, better failure reporting, and seed-based reproducibility.
@@ -907,6 +938,7 @@ Either detect the `:gen/fmap` throwing pattern or maintain an explicit skip-list
 
 ```clojure
 (use-fixtures :each tu/with-test-db tu/with-test-ctx)
+
 ```
 
 **Estimated effort**: ~30 minutes, part of Priority 1

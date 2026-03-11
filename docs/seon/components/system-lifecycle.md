@@ -121,6 +121,7 @@ All components derive from `:seon/component` via `resources/integrant/hierarchy.
               lifecycle/backup-all-instances!
               stop-app
               shutdown-agents
+
 ```
 
 ## How `(go)`, `(halt)`, `(reset)` Work

@@ -47,6 +47,7 @@ Currently:
   ;; 2. Add our own analysis-specific rendering for our return type?
   ;; 3. Have the AI see something concise vs the UI see something rich?
   ...)
+
 ```
 
 ---
@@ -87,6 +88,7 @@ If `:trading/position` has a renderer and I create `::analysis/position` that's 
    :render-fn 'analysis.ui/render-position})
 
 ;; Option C: Something else?
+
 ```
 
 ### Q4: How does multi-format work?
@@ -96,6 +98,7 @@ If `:trading/position` has a renderer and I create `::analysis/position` that's 
 (render position :ai)    ;; => "Position: AAPL x100 @ $150"
 (render position :html)  ;; => [:div.position-card ...]
 (render position :raw)   ;; => {:ticker "AAPL" :quantity 100 ...}
+
 ```
 
 Is this:

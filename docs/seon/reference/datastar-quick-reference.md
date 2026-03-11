@@ -79,6 +79,7 @@ data: elements </main>
 
 ;; Button — @post returns HTML, Datastar morphs it into the DOM
 [:button {:data-on:click "@post('/api/my-action')"} "Do Thing"]
+
 ```
 
 **Flow:** User clicks -> POST -> Handler returns HTML -> Datastar morphs DOM. Instant feedback.
@@ -105,6 +106,7 @@ data: elements </main>
   (fn [_ _ old new]
     (when (not= old new)
       (sse/refresh-all!))))
+
 ```
 
 **Key insight:** `render-handler` calls your function on every refresh, compares hash, only sends if changed.
@@ -115,6 +117,7 @@ View transitions are **disabled by default** in `render-handler`. Opt in only fo
 
 ```clojure
 (sse/render-handler #'my-render-fn :use-view-transition? true)
+
 ```
 
 ### Rendering HTML
@@ -130,6 +133,7 @@ View transitions are **disabled by default** in `render-handler`. Opt in only fo
      [:div.stat-card
       [:div.stat-value (format-number (:total state))]
       [:div.stat-label "Total Records"]]]))
+
 ```
 
 **Critical:** Always include `id="morph"` on root element for SSE targeting.
@@ -162,6 +166,7 @@ View transitions are **disabled by default** in `render-handler`. Opt in only fo
             {:status :failed :error (.getMessage e)}))))
 
     {:ok job-id}))
+
 ```
 
 **Pattern:** Every `swap!` triggers watch -> `refresh-all!` -> all clients see update
@@ -184,6 +189,7 @@ View transitions are **disabled by default** in `render-handler`. Opt in only fo
       [:noscript "JavaScript required"]
       [:main#morph
        [:h1 "Loading..."]]]]))
+
 ```
 
 **Routes:**
@@ -201,6 +207,7 @@ View transitions are **disabled by default** in `render-handler`. Opt in only fo
 ;; WRONG
 (defn update-progress [percent]
   (sse/send-update! [:div#progress (str percent "%")]))
+
 ```
 
 **Do instead:** Update state, let watch trigger full re-render.
@@ -212,6 +219,7 @@ View transitions are **disabled by default** in `render-handler`. Opt in only fo
 (defn toggle-handler [_request]
   (toggle!)
   {:status 200 :body "{\"ok\": true}"})
+
 ```
 
 **Do instead:** Return rendered HTML so Datastar morphs it immediately (Pattern A).
@@ -221,6 +229,7 @@ View transitions are **disabled by default** in `render-handler`. Opt in only fo
 ```clojure
 ;; WRONG
 (defonce connection-state (atom {}))
+
 ```
 
 **Do instead:** Store in database/atom indexed by session ID.
@@ -241,6 +250,7 @@ View transitions are **disabled by default** in `render-handler`. Opt in only fo
 <div id="stat-card-1" class="stat-card">
   <input id="input-symbol" type="text" />
 </div>
+
 ```
 
 **Why not:** Idiomorph can't track elements, lose focus/scroll state.
@@ -269,6 +279,7 @@ View transitions are **disabled by default** in `render-handler`. Opt in only fo
 
 ```clojure
 [:button {:data-on:click "@post('/api/my-action')"} "Do Thing"]
+
 ```
 
 1. **Handler**:
@@ -279,12 +290,14 @@ View transitions are **disabled by default** in `render-handler`. Opt in only fo
   {:status 200
    :headers {"Content-Type" "text/html"}
    :body (render-my-view)})
+
 ```
 
 1. **Route**:
 
 ```clojure
 ["/api/my-action" {:post my-action}]
+
 ```
 
 ### Debug why SSE isn't updating

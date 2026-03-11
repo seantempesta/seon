@@ -39,6 +39,7 @@ The canonical pattern for domain APIs:
 **4. `seon.primer.state` - Current Ctx Implementation**
 
 Current state:
+
 ```clojure
 (defonce ctx (atom {}))
 
@@ -50,6 +51,7 @@ Current state:
 
 ;; Watch triggers SSE on change
 (add-watch ctx :sse-auto-refresh ...)
+
 ```
 
 Strengths:
@@ -66,20 +68,24 @@ Weaknesses:
 **5. Integrant System Pattern**
 
 The primer XTDB node is already configured:
+
 ```clojure
 :seon.primer/xtdb-node
 {:storage #profile {:dev {:type :local :path "data/primer"}
                     :test :in-memory
                     :prod {:type :local :path "data/primer"}}}
+
 ```
 
 Access pattern from user.clj shows how to get components:
+
 ```clojure
 (defn current-system []
   (or system (deref (deref (resolve 'seon.runner/system)))))
 
 (defn xtdb-node []
   (:seon/xtdb-node (current-system)))
+
 ```
 
 ---
@@ -115,6 +121,7 @@ Access pattern from user.clj shows how to get components:
   :primer/story-facts #{:met-owl :has-lantern}}
 
  "session-789" {...}}
+
 ```
 
 ### Core Operations (Fast, Atom-Based)
@@ -141,7 +148,6 @@ Access pattern from user.clj shows how to get components:
 (ctx/list-sessions)
 ;; => ["session-123" "session-789"]
 
-
 ;; === Write Operations ===
 
 (ctx/update! "session-123" assoc :primer/current-scene {...})
@@ -152,6 +158,7 @@ Access pattern from user.clj shows how to get components:
 
 (ctx/merge! "session-123" {:primer/child-profile {...}})
 ;; => updated ctx
+
 ```
 
 ### Session Lifecycle
@@ -169,6 +176,7 @@ Access pattern from user.clj shows how to get components:
 ;; Destroy with XTDB cleanup (marks as ended in DB)
 (ctx/destroy! "session-123" {:persist? true})
 ;; => nil
+
 ```
 
 ### Persistence Operations (XTDB Sync)
@@ -185,6 +193,7 @@ Access pattern from user.clj shows how to get components:
 ;; Convenience: update and immediately checkpoint
 (ctx/update+checkpoint! "session-123" assoc :primer/current-scene {...})
 ;; => updated ctx (also writes to XTDB)
+
 ```
 
 ### Recovery Operations (XTDB -> Atom)
@@ -201,6 +210,7 @@ Access pattern from user.clj shows how to get components:
 ;; Load all active sessions on startup
 (ctx/load-active-sessions!)
 ;; => ["session-123" "session-789"]
+
 ```
 
 ### Temporal Queries (Read-Only, XTDB)
@@ -221,6 +231,7 @@ Access pattern from user.clj shows how to get components:
 ;; Diff between two points
 (ctx/diff "session-123" #inst "2024-12-24T08:00" #inst "2024-12-24T09:00")
 ;; => {:added {...} :removed {...} :changed {...}}
+
 ```
 
 ---
@@ -231,6 +242,7 @@ Access pattern from user.clj shows how to get components:
 
 ```
 src/seon/primer/ctx.clj    ; Main API
+
 ```
 
 ### Core State
@@ -251,6 +263,7 @@ src/seon/primer/ctx.clj    ; Main API
   (let [sys-var (resolve 'seon.runner/system)]
     (when sys-var
       (:seon.primer/xtdb-node @(deref sys-var)))))
+
 ```
 
 ### Read Operations
@@ -275,6 +288,7 @@ src/seon/primer/ctx.clj    ; Main API
   "List all session IDs currently in memory."
   []
   (keys @sessions))
+
 ```
 
 ### Write Operations
@@ -307,6 +321,7 @@ src/seon/primer/ctx.clj    ; Main API
   "Merge data into session ctx."
   [session-id data]
   (update! session-id merge data))
+
 ```
 
 ### Session Lifecycle
@@ -335,6 +350,7 @@ src/seon/primer/ctx.clj    ; Main API
               :session/ended-at (java.time.Instant/now))]]))))
   (swap! sessions dissoc session-id)
   nil)
+
 ```
 
 ### Persistence
@@ -365,6 +381,7 @@ src/seon/primer/ctx.clj    ; Main API
   (let [ctx (apply update! session-id f args)]
     (checkpoint! session-id)
     ctx))
+
 ```
 
 ### Recovery
@@ -406,6 +423,7 @@ src/seon/primer/ctx.clj    ; Main API
       (doseq [ctx sessions-data]
         (swap! sessions assoc (:xt/id ctx) ctx))
       (map :xt/id sessions-data))))
+
 ```
 
 ### Temporal Queries
@@ -431,6 +449,7 @@ src/seon/primer/ctx.clj    ; Main API
   "Get specific path at point in time."
   [session-id path inst]
   (get-in (at session-id inst) path))
+
 ```
 
 ### SSE Integration
@@ -443,6 +462,7 @@ src/seon/primer/ctx.clj    ; Main API
       (when (not= old-val new-val)
         (require 'seon.web.sse)
         ((resolve 'seon.web.sse/refresh-all!))))))
+
 ```
 
 ---
@@ -470,6 +490,7 @@ Extend `seon.primer.schema` with session-aware schemas:
    [:primer/child-profile {:optional true} ChildProfile]
    [:primer/story-facts {:optional true} [:set :keyword]]
    [:primer/behaviors {:optional true} [:map-of :keyword Behavior]]])
+
 ```
 
 ---
@@ -521,7 +542,6 @@ Agent can inspect and manipulate state easily:
 ;; Restore to earlier state
 (ctx/load-at! "session-123" #inst "2024-12-24T08:00:00Z")
 
-
 ;; === Session Lifecycle ===
 
 ;; Create new session
@@ -531,6 +551,7 @@ Agent can inspect and manipulate state easily:
 
 ;; End session (save to DB)
 (ctx/destroy! "new-session" {:persist? true})
+
 ```
 
 ---
@@ -556,6 +577,7 @@ For reliability without performance impact:
 
 ;; Option 3: Checkpoint-on-idle
 ;; After N seconds of no activity, checkpoint
+
 ```
 
 Recommendation: **Checkpoint on significant transitions** (scene changes, story progress). This captures meaningful states without overhead of every keystroke.

@@ -37,6 +37,7 @@ Seon uses a centralized mutable registry in `src/seon/schema.clj`:
    (mr/composite-registry
     (m/default-schemas)
     (mr/mutable-registry *schemas))))
+
 ```
 
 ### Registration Pattern
@@ -53,6 +54,7 @@ Namespaces register schemas using `::` auto-namespacing:
 (schema/register! ::hook-event-name
                   [:enum {:description "The type of hook event"}
                    "PreToolUse" "PostToolUse"])
+
 ```
 
 ### Introspection API
@@ -117,6 +119,7 @@ Add a `/schemas` route (or section within namespace views) that:
   "Return count of registered schemas."
   []
   (count @*schemas))
+
 ```
 
 #### 0.2 Schema API Handler
@@ -130,6 +133,7 @@ Add a `/schemas` route (or section within namespace views) that:
      :body {:namespaces (schema/all-namespaces)
             :schemas by-ns
             :total (schema/schema-count)}}))
+
 ```
 
 **Route:** `GET /api/schemas`
@@ -140,6 +144,7 @@ Add a `/schemas` route (or section within namespace views) that:
 1. (schema/all-namespaces) returns ["seon.ai" "seon.dev.hook" ...]
 2. (schema/schemas-in-namespace "seon.ai") returns 30+ schemas
 3. GET /api/schemas returns JSON with grouped schemas
+
 ```
 
 ---
@@ -157,6 +162,7 @@ Add a `/schemas` route (or section within namespace views) that:
 ```clojure
 ["/schemas" {:get #'handlers/schemas-page}]
 ["/schemas/:ns" {:get #'handlers/schemas-ns-page}]
+
 ```
 
 #### 1.2 Schema Page Handler
@@ -174,6 +180,7 @@ Add a `/schemas` route (or section within namespace views) that:
     (html/base-page
       {:title (str "Schemas: " ns-name)}
       (schema-views/namespace-schemas ns-name))))
+
 ```
 
 #### 1.3 Schema Views
@@ -206,6 +213,7 @@ Add a `/schemas` route (or section within namespace views) that:
      [:div.space-y-4
       (for [[k v] (sort-by key schemas)]
         (schema-card k v))]]))
+
 ```
 
 #### Test Criteria
@@ -214,6 +222,7 @@ Add a `/schemas` route (or section within namespace views) that:
 1. GET /schemas shows namespace list with counts
 2. Click namespace → shows all schemas in that namespace
 3. Schema definitions render with proper formatting
+
 ```
 
 ---
@@ -272,6 +281,7 @@ Add a `/schemas` route (or section within namespace views) that:
    [:div.font-mono.text-sm.text-signal (str schema-key)]
    [:pre.mt-2.text-xs.overflow-x-auto
     [:code (render-schema-form schema-def)]]])
+
 ```
 
 #### 2.2 Add Anchor Links
@@ -284,6 +294,7 @@ Schema cards have `id` attributes matching the schema name. Links use `#name` fr
 1. :seon.ai/session-id in a schema definition is a clickable link
 2. Clicking navigates to /schemas/seon.ai#session-id
 3. Browser scrolls to that schema card
+
 ```
 
 ---
@@ -345,6 +356,7 @@ Show:
             [:a {:href (str "/schemas/" (namespace ref) "/" (name ref))
                  :class "text-signal hover:underline text-sm"}
              (str ref)]])]])]))
+
 ```
 
 #### Test Criteria
@@ -353,6 +365,7 @@ Show:
 1. GET /schemas/seon.ai/session-id shows detail page
 2. "Used By" section lists schemas that reference :seon.ai/session-id
 3. Description from schema properties is displayed
+
 ```
 
 ---

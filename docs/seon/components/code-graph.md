@@ -115,6 +115,7 @@ Source files (.clj)
               +- Call edges + ns-deps: retract-then-insert (no identity attrs)
               +- Stub entities for external call targets
               +-> Datalevin (:seon.runtime database)
+
 ```
 
 ### Renderer Discovery Flow
@@ -132,6 +133,7 @@ gq/functions-with-output-key {::output-key :seon.render/html}
     v Return [{:seon.fn/qualified-name "seon.foo/render-bar"
                :required-keys #{:seon.foo/x :seon.foo/y}
                :optional-keys #{:seon.foo/z}} ...]
+
 ```
 
 The renderer then picks the best match by specificity: most required keys matched, with namespace proximity as tiebreaker.

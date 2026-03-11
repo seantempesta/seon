@@ -1,4 +1,5 @@
 # PRD: Unified Development Feedback Hook
+
 ## Status: COMPLETE — Dev hook runs reload + tests + AI review on every file edit
 
 **Status:** ✅ Core Infrastructure Complete - In Active Use
@@ -56,6 +57,7 @@ PreToolUse → Syntax validation (clj-kondo for seon files, edamame for others)
 PostToolUse → Repair → Reload → Compliance → Unit Tests → Gen Tests → Record → Review
      ↓
 Block on failures, feedback on success
+
 ```
 
 ### Performance
@@ -132,6 +134,7 @@ Currently we have **two separate hooks** firing on file edits:
 │     revert          block           gemini          display    │
 │                                    explain                     │
 └─────────────────────────────────────────────────────────────────┘
+
 ```
 
 ### When Each Stage Runs
@@ -180,6 +183,7 @@ Currently we have **two separate hooks** firing on file edits:
 ;; - Error history (for pattern detection)
 ;; - Function sources (for change detection)
 ;; - Schema definitions (for context building)
+
 ```
 
 ### Key Components (As Implemented)
@@ -347,6 +351,7 @@ echo '{"hook_event_name":"PostToolUse","tool_name":"Edit","tool_input":{"file_pa
 # Test Gemini search (web grounding)
 clj-nrepl-eval -p 7888 "(require '[seon.ai.gemini :as g])"
 clj-nrepl-eval -p 7888 "(g/search {::g/prompt \"Latest Clojure features\"})"
+
 ```
 
 ---
@@ -369,10 +374,12 @@ Each phase should be done by a separate agent. Read only the files listed for th
 - `test/seon/dev/feedback_test.clj` - Tests
 
 **Verify in REPL:**
+
 ```clojure
 (require '[seon.dev.feedback :as fb])
 (fb/namespace-schemas 'seon.some-ns)
 (fb/check-namespace 'seon.some-ns {:num-tests 10})
+
 ```
 
 ### Phase 2: XTDB Storage
@@ -390,9 +397,11 @@ Each phase should be done by a separate agent. Read only the files listed for th
 - `new-functions` - Detect new functions
 
 **Verify:**
+
 ```clojure
 (fb/record-function! (xtdb-node) 'seon.foo 'bar)
 (xt/entity (xtdb-node) :seon.foo/bar)
+
 ```
 
 ### Phase 3: Babashka Hook Script
@@ -408,8 +417,10 @@ Each phase should be done by a separate agent. Read only the files listed for th
 - `bin/seon-hook` - Babashka script
 
 **Test manually:**
+
 ```bash
 echo '{"hook_event_name":"PostToolUse","tool_name":"Edit","tool_input":{"file_path":"src/seon/foo.clj"}}' | ./bin/seon-hook
+
 ```
 
 ### Phase 4: Gemini Integration
@@ -425,9 +436,11 @@ echo '{"hook_event_name":"PostToolUse","tool_name":"Edit","tool_input":{"file_pa
 - `src/seon/ai/gemini/review.clj` - Code review prompts
 
 **Verify:**
+
 ```clojure
 (require '[seon.ai.gemini.client :as gemini])
 (gemini/generate "Explain this Clojure error: ...")
+
 ```
 
 ### Phase 5: Integration & Cleanup
@@ -517,6 +530,7 @@ echo '{"hook_event_name":"PostToolUse","tool_name":"Edit","tool_input":{"file_pa
  :error/message "..."
  :error/shrunk-input {:user/id nil}          ; for gen-test failures
  :error/stack-trace "..."}                   ; if available
+
 ```
 
 ### Key Queries
@@ -540,6 +554,7 @@ echo '{"hook_event_name":"PostToolUse","tool_name":"Edit","tool_input":{"file_pa
 
 ;; Time travel: what was the code when error happened?
 (xt/entity db :seon.foo/bar {:valid-time error-timestamp})
+
 ```
 
 ### Key Operations
@@ -561,6 +576,7 @@ echo '{"hook_event_name":"PostToolUse","tool_name":"Edit","tool_input":{"file_pa
     {:function (:fn/source fn-entity)
      :schema (:fn/schema fn-entity)
      :schema-definitions schemas}))
+
 ```
 
 ### Malli Registry Resolution
@@ -576,6 +592,7 @@ Malli schemas can reference other schemas. Need recursive resolution:
 
 ;; Which references :item/id, :item/qty...
 ;; Recursively resolve until all are primitives or closed maps
+
 ```
 
 ---
@@ -583,11 +600,13 @@ Malli schemas can reference other schemas. Need recursive resolution:
 ## Notes
 
 ### Related Work
+
 - clojure-mcp-light's hook system is well-designed - borrowed patterns (parinferish)
 - Malli 0.17.0 already in deps.edn with test.check
 - Gemini API research complete in `docs/research/gemini-native-integration.md`
 
 ### Open Questions (Resolved)
+
 - ~~Should we track function source hashes to detect logic changes vs just re-evals?~~ → **Decided: No.** Claude Code events only fire on actual content changes, so hash checking adds latency without benefit.
 - ~~Should Gemini review be blocking or just informational?~~ → **Decided: Informational.** Reviews are rate-limited and advisory, never block edits.
 - ~~How to handle multi-arity functions in generative testing?~~ → **Decided: No multi-arity.** Map accretion with optional keys handles extensibility per CONVENTIONS.md.
@@ -789,6 +808,7 @@ Current `feedback.clj` name is too vague. What it actually does:
 Better names might be: `state`, `events`, `history`, `session`, `tracking`
 
 **Proposed namespace structure** (pending design):
+
 ```
 src/seon/???/
 ├── hook.clj          ; Hook event processing (main entry point)
@@ -796,9 +816,11 @@ src/seon/???/
 ├── testing.clj       ; Unit + generative test orchestration
 ├── review.clj        ; Gemini review logic + context building
 └── introspection.clj ; File→namespace, source reading, etc.
+
 ```
 
 **Thin hook script (`bin/seon-hook`):**
+
 ```clojure
 ;; ~50 lines total - just parse JSON and delegate to Seon
 (defn -main []
@@ -807,6 +829,7 @@ src/seon/???/
           (format "(seon.???/process-hook-event! %s)" (pr-str input)))
         (json/generate-string)
         (println))))
+
 ```
 
 ### Design Principles
@@ -1017,11 +1040,14 @@ See `phase-7b-namespaced-keys.md` for detailed implementation record and `notes.
 ### Example Output
 
 **All passing (dense):**
+
 ```json
 {"continue": true, "feedback": ["✓ 5 tests, 3 gen-tests, compliant (0.2s)"]}
+
 ```
 
 **Compliance violation (actionable):**
+
 ```json
 {
   "continue": true,
@@ -1029,6 +1055,7 @@ See `phase-7b-namespaced-keys.md` for detailed implementation record and `notes.
     "process-data needs:\n\nSchema registrations:\n  (schema/register! ::process-data-request\n    [:map [::input :any] [::opts {:optional true} :map]])\n  (schema/register! ::process-data-response\n    [:map [::result :any]])\n\nFunction metadata:\n  {:malli/schema [:=> [:cat ::process-data-request] ::process-data-response]}\n  [{::keys [input opts]}]"
   ]
 }
+
 ```
 
 ---
@@ -1042,10 +1069,12 @@ These ideas require the current infrastructure to be stable first. Mark as resea
 ### 1. Error History Tracking
 
 Track edit errors across the session to identify patterns:
+
 ```clojure
 ;; .claude/error-history.edn
 [{:timestamp "..." :file "..." :error-type :syntax :message "..."}
  {:timestamp "..." :file "..." :error-type :gen-test :shrunk-input {...}}]
+
 ```
 
 Gemini can see "you've hit this same error 3 times" and escalate advice.
@@ -1064,6 +1093,7 @@ When a function fails, automatically pull in context:
    :calls (find-called-vars var)      ; static analysis or REPL introspection
    :called-by (find-callers var)      ; reverse lookup
    :atoms-touched (find-atom-refs var)})
+
 ```
 
 ### 3. REPL-Based Error Enrichment
@@ -1076,10 +1106,12 @@ Instead of just parsing syntax errors from the file, try `(eval (read-string cod
 ### 4. Iterative Gemini Conversation
 
 Don't start fresh each time - maintain conversation context:
+
 ```
 Edit 1: Gemini sees function, gives feedback
 Edit 2: "Same error - here's what I tried: [diff]. Still failing."
 Edit 3: "Different error now - here's the stack trace: [...]"
+
 ```
 
 Avoid repeating context already in conversation. Gemini sees the evolution of the approach.

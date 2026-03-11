@@ -27,6 +27,7 @@ The recommended approach:
 ## Benchmarks
 
 ### Test Environment
+
 - Apple M-series Mac
 - XTDB v2 with local storage
 - JVM with default settings
@@ -83,6 +84,7 @@ The recommended approach:
             (xt/execute-tx conn [[:sql "INSERT INTO bench (_id, value) VALUES (?, ?)"
                                   [(str "bench-" i) i]]])))))
 ;; => 354.93 ms total, 7.10 ms/op
+
 ```
 
 ---
@@ -117,6 +119,7 @@ The recommended approach:
         (fn [_]
           (persist-to-xtdb! new)
           nil)))))
+
 ```
 
 ### Option 2: core.async Channel + Sliding Buffer
@@ -148,6 +151,7 @@ The recommended approach:
     (a/<! (a/timeout 100)) ;; debounce
     (persist-to-xtdb! v)
     (recur)))
+
 ```
 
 ### Option 3: ScheduledThreadPoolExecutor + Debounce
@@ -184,6 +188,7 @@ The recommended approach:
            (persist-to-xtdb! v))
         100
         TimeUnit/MILLISECONDS))))
+
 ```
 
 ### Comparison Matrix
@@ -216,6 +221,7 @@ Combine agent simplicity with debounce efficiency:
              (send-off agent (fn [_] (persist-fn v) nil)))
           debounce-ms
           TimeUnit/MILLISECONDS)))))
+
 ```
 
 ---
@@ -290,41 +296,50 @@ CREATE TABLE ctx_snapshots (
 -- XTDB automatically adds:
 -- _system_from, _system_to (system time range)
 -- _valid_from, _valid_to (valid time range)
+
 ```
 
 ### Query Patterns
 
 **Get current ctx**:
+
 ```sql
 SELECT state FROM ctx_snapshots
 WHERE namespace = 'seon.trading'
 ORDER BY created_at DESC
 LIMIT 1
+
 ```
 
 **Get ctx at specific time** (time travel):
+
 ```sql
 SELECT state FROM ctx_snapshots
 FOR SYSTEM_TIME AS OF TIMESTAMP '2026-01-04 10:00:00'
 WHERE namespace = 'seon.trading'
 ORDER BY created_at DESC
 LIMIT 1
+
 ```
 
 **Get full history**:
+
 ```sql
 SELECT _system_from, state
 FROM ctx_snapshots
 FOR ALL SYSTEM_TIME
 WHERE namespace = 'seon.trading'
 ORDER BY _system_from
+
 ```
 
 **Get diff between two points** (application-level):
+
 ```clojure
 (let [old-state (ctx-at db ns #inst "2026-01-04T09:00")
       new-state (ctx-at db ns #inst "2026-01-04T10:00")]
   (clojure.data/diff old-state new-state))
+
 ```
 
 ### Alternative: Single Row Per Namespace
@@ -337,6 +352,7 @@ Instead of appending rows, update a single document:
   [[:sql "INSERT INTO ctx (_id, namespace, state) VALUES (?, ?, ?)
           ON CONFLICT (_id) DO UPDATE SET state = EXCLUDED.state"
     [namespace-sym (str namespace-sym) (pr-str ctx)]]])
+
 ```
 
 **Pros**: Simpler queries (no ORDER BY/LIMIT)
@@ -359,6 +375,7 @@ Validate before queuing persistence:
       (if (and validate-fn (not (validate-fn new)))
         (log/warn "ctx validation failed" {:new new})
         (send-off persist-agent persist-fn new)))))
+
 ```
 
 **Why synchronous**:
@@ -420,6 +437,7 @@ All are negligible compared to the 757ns atom+watch overhead.
                           │          XTDB                        │
                           │   (ctx_snapshots table)              │
                           └──────────────────────────────────────┘
+
 ```
 
 ### Implementation Sketch
@@ -530,6 +548,7 @@ All are negligible compared to the 757ns atom+watch overhead.
        (mapv (fn [{:keys [_system_from state]}]
                {:timestamp _system_from
                 :state (clojure.edn/read-string state)}))))
+
 ```
 
 ### Configuration
@@ -543,6 +562,7 @@ All are negligible compared to the 757ns atom+watch overhead.
 
 ;; For batch processing agents
 {:debounce-ms 500}   ;; Fewer persists during bulk ops
+
 ```
 
 ---
@@ -578,15 +598,18 @@ All are negligible compared to the 757ns atom+watch overhead.
 ## Files Examined
 
 ### XTDB Source Code
+
 - `/Users/sean/src/seon/reference-code/xtdb/api/src/main/clojure/xtdb/api.clj` - API surface
 - `/Users/sean/src/seon/reference-code/xtdb/src/test/clojure/xtdb/as_of_test.clj` - Temporal query patterns
 - `/Users/sean/src/seon/reference-code/xtdb/docs/src/content/docs/about/dbs-in-xtdb.md` - Multi-database architecture
 
 ### Seon Source Code
+
 - `/Users/sean/src/seon/src/seon/db/multi.clj` - Namespace database management
 - `/Users/sean/src/seon/docs/prds/agent-isolation/prd.md` - PRD with requirements
 
 ### External Resources (via gemini/search)
+
 - Clojure atom persistence patterns
 - duratom library internals
 - editscript library performance

@@ -91,6 +91,7 @@ Two output formats flow through the system: `:seon.render/html` (hiccup) and `:s
    c. Alphabetical qualified-name (deterministic final tiebreak)
 
 4. requiring-resolve the winner -> call it -> extract format key from result
+
 ```
 
 ### Resolution Cache
@@ -110,6 +111,7 @@ The cache key is `[format (set (keys data))]` — format + key shape. Cached res
    - :human -> pprint-clipped (500 chars)
    - :ai -> pprint-clipped (500 chars)
    - :html -> [:pre [:code (pprint-clipped value)]]
+
 ```
 
 ### for-ai / for-html (recursive renderers)
@@ -131,6 +133,7 @@ A function becomes discoverable by following the naming convention:
   [{::keys [ticker quantity price]}]
   {:seon.render/html [:div.position-card ...]
    :seon.render/ai (str ticker " x" quantity)})
+
 ```
 
 The scanner sees `:seon.render/html` in the output spec's contains-keys -> stores in graph -> `functions-with-output-key` finds it -> resolution matches by input keys.

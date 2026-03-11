@@ -19,6 +19,7 @@ Connection       Wire one output to another's input      :conns in config
 Flow             A graph of processes + connections       flow/create-flow
 Inject           Put data into any point from outside     flow/inject
 Ping             Observe any process's state from outside flow/ping
+
 ```
 
 That's it. Everything in Seon -- namespace isolation, database writes, error handling, observability -- is a composition of these five things.
@@ -43,6 +44,7 @@ Key detail from the impl: **a process reads from ALL its inputs simultaneously v
   [[:proc-a :out]  [:proc-b :in]]     ; 1:1 direct (no intermediate channel)
   [[:proc-a :out]  [:proc-c :in]]     ; now :out is mult'd to both b and c
 ]
+
 ```
 
 When an output connects to exactly one input, flow optimizes: no intermediate channel, the output channel IS the input channel. When an output connects to multiple inputs, flow creates a `core.async/mult` automatically.
@@ -57,6 +59,7 @@ There is ONE `error-chan` per flow, created by `start`. Every process gets it as
 {::flow/pid pid, ::flow/status status, ::flow/state state,
  ::flow/count count, ::flow/cid cid, ::flow/msg msg,
  ::flow/op :step, ::flow/ex ex}
+
 ```
 
 The process then **continues running**. Errors do not stop processes. This is critical -- a bad message does not take down the system.
@@ -89,6 +92,7 @@ INPUTS                          OUTPUTS
 
                                 :seon.flow.out/event
                                 (to event-sink)
+
 ```
 
 The step-fn dispatches on `input-id`:
@@ -135,6 +139,7 @@ Missing path: if `flow/inject` fails (flow not running), `request!` catches the 
                     │         ├──[if error]──> :seon.flow.out/error ───> error-sink
                     │         └──────────────> :seon.flow.out/event ───> event-sink
                     └─────────────────────────────────────┘
+
 ```
 
 ---
@@ -171,6 +176,7 @@ The writer is just another step-fn in the topology:
    ;;              ::msg/args [db-name tx-data tx-meta]
    ;; Dispatch to d/transact! on the right connection
    ...))
+
 ```
 
 It sits in the topology like any other process:
@@ -187,6 +193,7 @@ It sits in the topology like any other process:
   │                                                    │
   │  (event-sink, error-sink also wired)               │
   └────────────────────────────────────────────────────┘
+
 ```
 
 Callers use the same `topology/request!` to reach the writer as they use for any namespace call. The writer process ID is `:seon.flow/writer`. A write request looks like:
@@ -197,6 +204,7 @@ Callers use the same `topology/request!` to reach the writer as they use for any
    ::topology/target-ns "seon.flow/writer"  ; or use the pid directly
    ::topology/fn "seon.db/transact!"
    ::topology/args [:seon.health [{:workout/type :squat}]]})
+
 ```
 
 From an agent JVM, `seon.db/transact!` is a proxy function that sends this through the reverse channel.
@@ -251,6 +259,7 @@ Inject           request! injects into target process input
 Ping             REPL observability: (flow/ping topology)
                  Health checks: ping writer for pending count
                  Flow-monitor visualization
+
 ```
 
 ### The Composition Pattern
@@ -264,6 +273,7 @@ Every cross-boundary call follows one pattern:
 4. Reply flows to reply-router    (connection)
 5. Router delivers promise        (reply-router-step)
 6. Caller derefs promise          (request!)
+
 ```
 
 This is the ONLY pattern. Namespace calls, database writes, and (future) any other cross-process operation all use this exact sequence. The step-fn in step 3 is the only thing that varies.
@@ -276,6 +286,7 @@ Flow's `::flow/in-ports` and `::flow/out-ports` (returned from init) let a proce
 External world ──> in-port ──> process reads via alts!! ──> transform
                                                               │
 transform output ──> out-port ──> External world
+
 ```
 
 The namespace-step uses this for TCP to/from agent JVMs. The writer could use this for a future separate-JVM writer. The in-ports/out-ports are not visible to the flow's connection system -- they are private to the process. This is the "source/sink" pattern from the flow guide.
@@ -302,6 +313,7 @@ LAYER 2: Application Errors (in reply envelopes)
 LAYER 3: Timeout Errors
   - request! deref times out -> throws ex-info with :timeout
   - Caller decides what to do (retry, fail, log)
+
 ```
 
 Layer 1 errors go to the flow's error-chan. The error-sink collects them. They are operational alerts.
@@ -323,6 +335,7 @@ Layer 3 errors are caller-side. The promise is never delivered. `request!` clean
 ;; See writer stats
 (flow/ping-proc topology :seon.flow/writer)
 ;; => {::flow/state {:total-writes 142 :total-errors 3 :pending 0} ...}
+
 ```
 
 ---

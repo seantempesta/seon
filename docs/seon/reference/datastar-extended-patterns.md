@@ -48,12 +48,14 @@ tags: [reference, web]
          "/history" (render-history state)
          "/settings" (render-settings state)
          (render-404))])))
+
 ```
 
 **Navigation:** Use Datastar signals + @post
 
 ```html
 <a data-on:click="@post('/history')" href="/history">History</a>
+
 ```
 
 **Pros:**
@@ -89,12 +91,14 @@ tags: [reference, web]
         :post handlers/dashboard-sse}]
   ["/history" {:get handlers/history-shim
                :post handlers/history-sse}]]}
+
 ```
 
 **Navigation:** Standard links, browser handles it
 
 ```html
 <a href="/history">History</a>
+
 ```
 
 **Pros:**
@@ -123,6 +127,7 @@ Currently using MPA pattern (one dashboard page). If we add more pages:
   (sse/render-handler
     (fn [_request]
       (html/settings-content @settings-state))))
+
 ```
 
 ### Tabs Within a Page
@@ -148,6 +153,7 @@ For tabs on same page, use Datastar signals (client-side only):
       (render-history state)]
      [:div {:data-show "$tab === 'logs'"}
       (render-logs state)]]))
+
 ```
 
 **Note:** `__ifmissing` means "only set if signal doesn't exist" - survives re-renders.
@@ -174,6 +180,7 @@ For tabs on same page, use Datastar signals (client-side only):
          :cookie-attrs {:http-only true
                         :secure true  ; HTTPS only
                         :same-site :strict}})))
+
 ```
 
 ### Login Flow
@@ -194,6 +201,7 @@ For tabs on same page, use Datastar signals (client-side only):
       {:status 401
        :headers {"Content-Type" "application/json"}
        :body "{\"error\": \"Invalid credentials\"}"})))
+
 ```
 
 ### Protected Routes
@@ -215,6 +223,7 @@ For tabs on same page, use Datastar signals (client-side only):
         :post (require-auth handlers/dashboard-sse)}]
   ["/login" {:get handlers/login-page
              :post handlers/login-handler}]]}
+
 ```
 
 ### Per-User State
@@ -230,6 +239,7 @@ For tabs on same page, use Datastar signals (client-side only):
         ;; Render user-specific state
         (let [user-state (get @user-dashboards user-id)]
           (html/dashboard-content user-state))))))
+
 ```
 
 ### SSE with Authentication
@@ -239,6 +249,7 @@ SSE connections inherit session cookies automatically:
 ```javascript
 // Browser sends cookies with POST automatically
 @post('/')  // Includes session cookie
+
 ```
 
 If session expires during SSE connection:
@@ -255,6 +266,7 @@ If session expires during SSE connection:
         (h/html
           [:main#morph
            [:script "window.location.href = '/login'"]])))
+
 ```
 
 ---
@@ -275,6 +287,7 @@ If session expires during SSE connection:
                :width 30
                :height value
                :fill "#3b82f6"}])]))
+
 ```
 
 **Pros:** No JavaScript, works everywhere
@@ -296,6 +309,7 @@ If session expires during SSE connection:
            data: " data-json "
          });
        ")}]])))
+
 ```
 
 **Note:** `data-ignore-morph` prevents Idiomorph from touching canvas during updates.
@@ -329,6 +343,7 @@ If session expires during SSE connection:
        const el = document.getElementById('log-container');
        el.scrollTop = el.scrollHeight;
      "]]))
+
 ```
 
 **Alternative:** Append mode with SSE
@@ -344,6 +359,7 @@ If session expires during SSE connection:
                   [:span.timestamp (:timestamp entry)]
                   " "
                   [:span.message (:message entry)]])}))
+
 ```
 
 ### Drag & Drop
@@ -369,6 +385,7 @@ If session expires during SSE connection:
            {:draggable true
             :data-on:dragstart (str "$draggedItem = '" (:id item) "'")}
            (:title item)])])]))
+
 ```
 
 ### Modals & Dialogs
@@ -398,6 +415,7 @@ If session expires during SSE connection:
 
      ;; Main content
      content]))
+
 ```
 
 **CSS for modal:**
@@ -421,6 +439,7 @@ If session expires during SSE connection:
   max-width: 500px;
   box-shadow: 0 4px 12px rgba(0,0,0,0.2);
 }
+
 ```
 
 ### Multi-Step Forms
@@ -459,6 +478,7 @@ If session expires during SSE connection:
       [:p "Email: " [:span {:data-text "$form.email"}]]
       [:button {:data-on:click "$step = '2'"} "Back"]
       [:button {:data-on:click "@post('/submit-form')"} "Submit"]]]))
+
 ```
 
 ---
@@ -497,6 +517,7 @@ If session expires during SSE connection:
     (fn [s] (if (contains? s id)
               (disj s id)
               (conj s id)))))
+
 ```
 
 **Key insight:** Don't render all billion items, only visible window.
@@ -524,6 +545,7 @@ If session expires during SSE connection:
          (for [item visible-items]
            [:div.item {:style (str "height: " item-height "px")}
             (str "Item " item)])]]])))
+
 ```
 
 ### Pattern 3: Batched Updates (From Game of Life)
@@ -553,6 +575,7 @@ If session expires during SSE connection:
 
     ;; Cleanup
     (fn stop! [] (reset! running? false))))
+
 ```
 
 **Key insight:** Render at fixed rate (5 FPS), not on every state change.
@@ -580,6 +603,7 @@ If session expires during SSE connection:
     (sse/render-handler
       (fn [_request]
         @cached-view))))
+
 ```
 
 **Benefit:** 100 concurrent users = 1 render, not 100 renders.
@@ -617,6 +641,7 @@ If session expires during SSE connection:
 ;; Update on mousemove (debounced)
 [:div {:data-on:mousemove__debounce.100ms
        "@post('/update-position', {x: evt.clientX, y: evt.clientY})"}]
+
 ```
 
 ### Pattern 2: Collaborative Editing
@@ -646,6 +671,7 @@ If session expires during SSE connection:
        :data-on:input__debounce.500ms
        "@post('/edit', {text: evt.target.value, version: $version})"}]
      [:div.meta "Version: " (:version state)]]))
+
 ```
 
 **Note:** For production, use CRDT library (Automerge, Yjs) for conflict-free merging.
@@ -673,6 +699,7 @@ If session expires during SSE connection:
         [:span.time (format-time (:timestamp notif))]
         " "
         [:span.message (:message notif)]])]))
+
 ```
 
 ---
@@ -694,6 +721,7 @@ If session expires during SSE connection:
 (deftest format-percentage-test
   (is (= "50.0%" (html/format-percentage 50)))
   (is (= "33.3%" (html/format-percentage 33.333))))
+
 ```
 
 ### Integration Tests: SSE Flow
@@ -717,6 +745,7 @@ If session expires during SSE connection:
     ;; Cleanup
     (a/untap refresh-mult <client-ch)
     (a/close! <client-ch)))
+
 ```
 
 ### End-to-End: Browser Testing
@@ -757,6 +786,7 @@ test('start import button works', async ({ page }) => {
   const status = await page.textContent('.badge-running');
   expect(status).toBe('Running');
 });
+
 ```
 
 ### Performance Testing: SSE Load
@@ -787,6 +817,7 @@ test('start import button works', async ({ page }) => {
 (deftest load-test
   ;; Test with 1000 concurrent clients
   (time (simulate-clients 1000)))
+
 ```
 
 ---

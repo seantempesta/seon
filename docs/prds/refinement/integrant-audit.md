@@ -115,6 +115,7 @@ Define a Malli schema per component key, then use `assert-key` to validate:
                        {:key :seon.db.datalevin/server
                         :value value
                         :errors (m/explain schema value)})))))
+
 ```
 
 ### Centralized Config Registry
@@ -152,6 +153,7 @@ Better yet, a single registry that all components participate in:
   {:config-schema (get component-configs key)
    :current-value (get @integrant.repl.state/system key)
    :status (if (get @integrant.repl.state/system key) :running :stopped)})
+
 ```
 
 ### Priority: Medium-High
@@ -365,6 +367,7 @@ LMDB corruption. The init-key for datalevin-server (server.clj:196-205) has cras
     (log/warn e "LMDB corruption detected, attempting recovery from backup")
     (attempt-recovery! root)
     (start-fn)))
+
 ```
 
 This tries to restore from backup, or clears the data directory. Then `graph-db` init calls `runtime/mark-crashed!` to mark instances from the previous run. This is correct.
@@ -387,6 +390,7 @@ Agents interact with the system through `integrant.repl.state/system`:
 
 ```clojure
 (:seon/connection-manager state/system)  ;; get a component
+
 ```
 
 They cannot:
@@ -437,6 +441,7 @@ An agent with REPL access should be able to:
   "Check if a component is healthy."
   [key]
   ;; Component-specific health check -- delegates to the component's own check fn
+
 ```
 
 ### The Balance
@@ -463,6 +468,7 @@ This does not require new Integrant features. Integrant already supports partial
 ```clojure
 (ig/halt! system [:seon.web/server])  ;; halts just this key + dependents
 (ig/init config [:seon.web/server])   ;; re-inits just this key + dependencies
+
 ```
 
 The control API would wrap this with introspection and safety checks.
@@ -501,6 +507,7 @@ Integrant supports `derive` to create parent-child relationships between compone
 ;; Now agents can do:
 ;; (ig/halt! system [:seon/web])  ;; restart just web tier
 ;; (ig/halt! system [:seon/data]) ;; restart just data tier
+
 ```
 
 ### Where to Put derive Calls
@@ -517,6 +524,7 @@ Integrant provides `load-hierarchy` which reads `integrant/hierarchy.edn` from t
  :seon.web/tailwind            [:seon/component :seon/web]
  :seon.flow/pool               [:seon/component :seon/agents]
  :seon.ai.claude/sdk           [:seon/component :seon/agents]}
+
 ```
 
 Then in config loading: `(ig/load-hierarchy)` before `(ig/expand cfg)`.

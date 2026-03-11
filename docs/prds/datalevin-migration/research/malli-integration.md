@@ -76,6 +76,7 @@ No existing library solves this problem well enough to use as-is.
 (defmethod accept 'uuid? [_ _ _ _] {:type "string" :format "uuid"})
 (defmethod accept 'inst? [_ _ _ _] {:type "string" :format "date-time"})
 (defmethod accept :map [_ schema children _] ...)
+
 ```
 
 **Verdict:** This is the exact pattern to follow for Datalevin transformation.
@@ -127,6 +128,7 @@ Extend Malli schemas with `:datalevin/*` properties (following Malli's JSON Sche
   [:vector
    {:datalevin/cardinality :db.cardinality/many}
    :string])
+
 ```
 
 ---
@@ -177,6 +179,7 @@ Create a namespace `seon.schema.datalevin` that compiles Malli schemas to Datale
      Map of attribute definitions for Datalevin."
   [entity-name definition]
   ...)
+
 ```
 
 #### Type Multimethods
@@ -214,6 +217,7 @@ Create a namespace `seon.schema.datalevin` that compiles Malli schemas to Datale
 ;; References to other entities
 (defmethod -transform :ref [schema _]
   {:db/valueType :db.type/ref})
+
 ```
 
 #### Property Handling
@@ -229,6 +233,7 @@ Create a namespace `seon.schema.datalevin` that compiles Malli schemas to Datale
       (:datalevin/cardinality props) (assoc :db/cardinality (:datalevin/cardinality props))
       (:datalevin/doc props)         (assoc :db/doc (:datalevin/doc props))
       (:datalevin/isComponent props) (assoc :db/isComponent true))))
+
 ```
 
 ---
@@ -283,6 +288,7 @@ Create a namespace `seon.schema.datalevin` that compiles Malli schemas to Datale
 ;;     :ai.session/type {:db/valueType :db.type/keyword}
 ;;     :ai.session/status {:db/valueType :db.type/keyword :db/index true}
 ;;     ...}
+
 ```
 
 ### Property Testing with Generators
@@ -304,6 +310,7 @@ Create a namespace `seon.schema.datalevin` that compiles Malli schemas to Datale
       ;; Query should find it
       (= session
          (d/pull (d/db conn) '[*] [:ai.session/id (:ai.session/id session)])))))
+
 ```
 
 ---
@@ -373,12 +380,14 @@ Create a namespace `seon.schema.datalevin` that compiles Malli schemas to Datale
 
    ```bash
    git submodule add https://github.com/Blasterai/malli-datomic reference-code/malli-datomic
+
    ```
 
 2. **spectomic** - Good patterns for type inference
 
    ```bash
    git submodule add https://github.com/Provisdom/spectomic reference-code/spectomic
+
    ```
 
 ### Already Present

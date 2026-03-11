@@ -44,6 +44,7 @@ From `nrepl.server/start-server` (line 180-242):
       (log-exceptions
        (accept-connection-loop server consume-exception)))
     server))
+
 ```
 
 **Key insight**: Each call creates a new `Server` record with its own:
@@ -62,6 +63,7 @@ From `nrepl.server/start-server` (line 180-242):
     (with-open [^Server s2 (server/start-server :transport-fn *transport-fn*
                                                 :ack-port (:port s))]
       (is (= (:port s2) (ack/wait-for-ack 10000))))))
+
 ```
 
 This test explicitly starts two servers simultaneously.
@@ -84,6 +86,7 @@ From `session.clj` (line 183-193), sessions store dynamic vars in an atom:
                                   #'*ns* (create-ns 'user))  ; <-- Default is 'user
                            :meta {:id id ...})]
      ;; ...
+
 ```
 
 **To override this, create middleware:**
@@ -110,6 +113,7 @@ From `session.clj` (line 183-193), sessions store dynamic vars in an atom:
 (set-descriptor! #'wrap-agent-context
   {:requires #{"session"}  ; Run after session middleware
    :expects #{"eval"}})    ; Run before eval middleware
+
 ```
 
 **Usage:**
@@ -123,6 +127,7 @@ From `session.clj` (line 183-193), sessions store dynamic vars in an atom:
   :handler (nrepl/default-handler
              (with-meta #'wrap-agent-context
                {:target-ns 'seon.trading})))
+
 ```
 
 ### 3. What about shared global state?
@@ -132,6 +137,7 @@ From `session.clj` (line 183-193), sessions store dynamic vars in an atom:
 ```clojure
 ;; session.clj line 20
 (def ^:private sessions (atom {}))
+
 ```
 
 This atom maps session IDs (UUIDs) to session atoms. Since session IDs are globally unique UUIDs, there is **no conflict** between sessions on different servers.
@@ -159,6 +165,7 @@ From `socket.clj` line 30-40:
      (doto (ServerSocket.)
        (.setReuseAddress true)
        (.bind (addr bind port)))))  ; <-- Can throw BindException
+
 ```
 
 **Exception types:**
@@ -188,6 +195,7 @@ From `socket.clj` line 30-40:
     (catch Exception e
       {:status :error
        :error (.getMessage e)})))
+
 ```
 
 ### 5. How to cleanly stop a server?
@@ -207,6 +215,7 @@ From `socket.clj` line 30-40:
                s))
            % %))
   server)
+
 ```
 
 **Server implements `java.io.Closeable`:**
@@ -215,6 +224,7 @@ From `socket.clj` line 30-40:
 (defrecord Server [...]
   java.io.Closeable
   (close [this] (stop-server this)))
+
 ```
 
 **Idiomatic usage:**
@@ -231,6 +241,7 @@ From `socket.clj` line 30-40:
 (with-open [server (start-server :port 7889)]
   ;; ... server auto-closes when block exits
   )
+
 ```
 
 ---
@@ -400,6 +411,7 @@ From `socket.clj` line 30-40:
 (defmethod ig/halt-key! ::namespace-nrepl
   [_ {:keys [namespace]}]
   (stop-namespace-nrepl! namespace))
+
 ```
 
 ### Usage Example
@@ -429,6 +441,7 @@ From `socket.clj` line 30-40:
 ;; Agent uses context
 (let [{:seon.agent/keys [db render-fn]} @*ctx*]
   (render-fn [:div "Hello from trading agent!"]))
+
 ```
 
 ---

@@ -30,6 +30,7 @@ All tests run against `seon.health.workout.render` -- a real namespace that refe
                                                       :keywords true}
                                            :format :edn}}
                          :cache false}))
+
 ```
 
 **Results:**
@@ -52,6 +53,7 @@ Same 22 var-usages, same cross-ns resolution. Cache adds lint findings (arity er
   (:require [seon.health.workout :as workout]))
 (defn my-fn [{::keys [foo]}] (workout/some-call foo))"
   (clj-kondo.core/run! {:lint ["-"] :filename "<agent-forms>" ...}))
+
 ```
 
 **Results:** Cross-ns resolution works perfectly. `workout/some-call` resolves to `{:to seon.health.workout}`. Keywords resolve too. Filename `<agent-forms>` is fine -- kondo doesn't need the file to exist.
@@ -60,6 +62,7 @@ Same 22 var-usages, same cross-ns resolution. Cache adds lint findings (arity er
 
 ```clojure
 (meta #'seon.health.workout.render/page-render)
+
 ```
 
 **Results:** `:malli/schema` is present: `[:=> [:cat :seon.health.workout.render/page-render-request] :seon.health.workout.render/page-render-response]`. Also `:arglists`, `:doc`, `:line`, `:file`. `ns-aliases` gives the alias map.
@@ -70,6 +73,7 @@ Same 22 var-usages, same cross-ns resolution. Cache adds lint findings (arity er
 
 ```clojure
 (scanner/scan-file {:seon.graph.scanner/file-path "src/seon/health/workout/render.clj"})
+
 ```
 
 **Results:** 4 specs, 2 fns. Specs include `:seon.spec/definition` (the actual schema form as string: `"[:map [:seon.health.workout/exercise :string] ...]"`), `:seon.spec/base-type`, `:seon.spec/contains-keys`.
@@ -169,6 +173,7 @@ Input: source string (file or in-memory forms)
           +-> fn<->spec links via naming convention
           +-> spec<->spec refs via keyword walking
           +-> cross-ns keyword links via kondo keywords analysis
+
 ```
 
 ### Merge Rules
@@ -202,6 +207,7 @@ Both tools work on strings. The API accepts source strings:
 
 ;; From agent-produced forms
 (extract-graph {::source (forms->source forms)})
+
 ```
 
 clj-kondo accepts any `:filename` value -- it doesn't need the file to exist. Use `"<agent-forms>"` or the intended file path for better error messages.
@@ -213,6 +219,7 @@ After eval in an agent's nREPL:
 ```clojure
 (enrich-from-runtime {::graph static-graph
                       ::namespace 'seon.health.workout.render})
+
 ```
 
 Adds:
@@ -251,6 +258,7 @@ This is enrichment, not required. The static graph from clj-kondo + edamame is s
      ::errors     - any clj-kondo findings"
   [{::keys [source file-path]}]
   ...)
+
 ```
 
 ### Unchanged: ingest layer
@@ -278,6 +286,7 @@ This is enrichment, not required. The static graph from clj-kondo + edamame is s
 :seon.spec/references {:db/valueType :db.type/keyword :db/cardinality :db.cardinality/many}
 :seon.fn/loadable?    {:db/valueType :db.type/boolean}
 :seon.fn/malli-schema {:db/valueType :db.type/string}  ;; pr-str of compiled schema
+
 ```
 
 ## Open Questions (Revised)

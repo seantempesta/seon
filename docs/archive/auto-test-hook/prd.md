@@ -169,6 +169,7 @@ ml-options-trading/              # main - research committed here
 ml-options-trading-strategy-a/   # worktree: per-edit hook
 ml-options-trading-strategy-b/   # worktree: batched hook
 ml-options-trading-strategy-c/   # worktree: no hook (baseline)
+
 ```
 
 **Test Task** (covers all scenarios):

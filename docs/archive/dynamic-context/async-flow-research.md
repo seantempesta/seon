@@ -44,6 +44,7 @@ The key insight is **separation of concerns**:
 │  • Pause/resume/stop coordination                           │
 │  • Introspection via ping and datafy                        │
 └─────────────────────────────────────────────────────────────┘
+
 ```
 
 ### Step Functions (4 arities)
@@ -67,6 +68,7 @@ The key insight is **separation of concerns**:
    (let [new-count (inc (:count state))]
      [{:count new-count}                           ; new state
       {:out [(process-msg msg)]}])))               ; output map
+
 ```
 
 ### Flow Definition (data-driven topology)
@@ -81,6 +83,7 @@ The key insight is **separation of concerns**:
 
  :conns [[[:reader :out] [:parser :in]]
          [[:parser :out] [:writer :in]]]}
+
 ```
 
 ---
@@ -97,6 +100,7 @@ make-chan (fn [[[pid cid]{:keys [buf-or-n xform]}]]
             (if xform
               (async/chan buf-or-n xform ...)
               (async/chan (or buf-or-n 10))))  ; DEFAULT IS 10!
+
 ```
 
 **Flow's default buffer size is 10 messages**. You configure buffers per-channel via `chan-opts`:
@@ -104,6 +108,7 @@ make-chan (fn [[[pid cid]{:keys [buf-or-n xform]}]]
 ```clojure
 {:procs {:my-proc {:proc (process #'my-step)
                    :chan-opts {:in {:buf-or-n (sliding-buffer 1000)}}}}}
+
 ```
 
 ### Output Writing with Priority Control
@@ -114,6 +119,7 @@ make-chan (fn [[[pid cid]{:keys [buf-or-n xform]}]]
              [control [outc (first msgs)]]
              :priority true)]  ; <-- control channel takes priority
   ...)
+
 ```
 
 Flow uses `alts!!` with priority on the control channel. If output channels are full, the process **blocks** until either:
@@ -132,6 +138,7 @@ castees (reduce (fn [ret {:keys [pid signal-select]}]
                   (assoc ret pid {:select signal-select
                                   :chan (async/chan (async/sliding-buffer 100))}))
                 {} (vals pdescs))
+
 ```
 
 Broadcast signals (out-of-band messages) use `sliding-buffer 100` by default.
@@ -156,6 +163,7 @@ Broadcast signals (out-of-band messages) use `sliding-buffer 100` by default.
 
 ;; Ping single process
 (flow/ping-proc my-flow :parser)
+
 ```
 
 The ping response includes:
@@ -172,6 +180,7 @@ The ping response includes:
 ;;             :parser {...}}
 ;;     :conns [[[:reader :out] [:parser :in]] ...]
 ;;     :chans {:ins {...} :outs {...} :error #chan :report #chan}}
+
 ```
 
 ### Flow Monitor (UI Tool)
@@ -187,6 +196,7 @@ The [flow-monitor](https://github.com/clojure/core.async.flow-monitor) provides:
 (require '[clojure.core.async.flow-monitor :as monitor])
 (def server (monitor/start-server {:flow my-flow :port 9876}))
 ;; Visit http://localhost:9876/index.html
+
 ```
 
 ---
@@ -209,6 +219,7 @@ result-ch (chan 1)                               ;; Single result
       (when (= msg-type "result")
         (async/>!! result-ch msg))
       (recur))))
+
 ```
 
 ### Problem Analysis
@@ -248,6 +259,7 @@ Our pattern is fundamentally **point-to-point I/O** with a single external proce
 Claude CLI → stdout → Reader Thread → messages-ch → Consumers
                                     → result-ch → Blocking Caller
                                     → XTDB → Persistence
+
 ```
 
 Flow is designed for **complex internal topologies** where:
@@ -285,6 +297,7 @@ We should add `ping`-style introspection to our agent registry:
        ::status @status-atom
        ::messages-buffer-count (count (.-buf messages-ch))  ; reflect into channel
        ::last-activity-at @(::last-activity-at handle)})))
+
 ```
 
 ### 4. Consider Data-Driven Buffer Configuration
@@ -300,6 +313,7 @@ Instead of hardcoding `(sliding-buffer 1000)`, make it configurable:
 (let [buf-config (get config ::messages-buffer {:type :sliding :size 1000})
       messages-ch (chan (make-buffer buf-config))]
   ...)
+
 ```
 
 ### 5. Don't Adopt Flow for Simple Use Cases
@@ -326,6 +340,7 @@ The announcement mentioned time-travel debugging. After investigation, this is *
 3. **Pause/resume** - Freeze flow, inspect state, continue
 
 To replay history:
+
 ```clojure
 (flow/pause my-flow)
 (let [state (flow/ping-proc my-flow :my-proc)]
@@ -333,6 +348,7 @@ To replay history:
   ...)
 (flow/inject my-flow [:my-proc :in] [historical-msg-1 historical-msg-2])
 (flow/resume my-flow)
+
 ```
 
 This is more "replay capability" than true time-travel. For actual time-travel, you'd need to persist all messages (which we already do in XTDB!) and rebuild state.
@@ -356,6 +372,7 @@ If Seon grows to coordinate many agents as a dataflow system, Flow could model i
            [[:agent-spawner :spawned]   [:result-collector :agents]]
            [[:result-collector :done]   [:task-queue :completed]]
            [[:result-collector :report] [:reporter :in]]]})
+
 ```
 
 But this is premature optimization. Our current single-orchestrator model works.

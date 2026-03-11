@@ -29,6 +29,7 @@ start-session!(namespace, opts) →
   5. Auto-proxy: analyze namespace deps, create proxies for cross-ns calls
   6. Register: session-id → {port, namespace, flow-channels, status} in master DB
   7. Return {session-id, nrepl-port}
+
 ```
 
 MCP eval → look up session-id → Super REPL → nREPL eval on pool JVM.
@@ -62,6 +63,7 @@ Extend `setup-namespace!` or add to `claim!` flow — eval on pool JVM to intern
                         :seon.agent/started-at (java.util.Date.)}))
                (.setDynamic (resolve (symbol (str '~ns-sym) "*ctx*")) true)
                :ok)))
+
 ```
 
 This replaces the middleware approach. The existing `make-persisted-ctx` from `seon.ctx` should be used to build the initial ctx value — reuse, don't duplicate.

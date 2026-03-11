@@ -117,6 +117,7 @@ hydrate-cache!() ---> cleanup-stale!() ---> db/query :seon.runtime ---> reset! r
 
 register-flow!() --+---> flow-handles atom (in-memory only, flow objects not serializable)
                    +---> register!() (Datalevin persistence of flow-as-namespace-instance)
+
 ```
 
 ### Entity Schemas (3 Datalevin entity types)

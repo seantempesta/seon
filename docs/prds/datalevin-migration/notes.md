@@ -25,6 +25,7 @@ Rather than completely removing XTDB writes, we kept them as a fallback:
 ;; Pattern used in all write functions:
 (when-not (datalevin-dual-write! :save-session entity)
   (db/put! node :ai_sessions entity))
+
 ```
 
 This means:

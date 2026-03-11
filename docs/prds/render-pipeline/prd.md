@@ -28,6 +28,7 @@ Cache Invalidation
 Push Re-renders
     ├── :seon.render/html → flow out-port → SSE adapter → browser
     └── :seon.render/ai  → flow out-port → agent channel
+
 ```
 
 ### How Rendering Works
@@ -84,6 +85,7 @@ These are already built and working:
      [{:seon.health.workout/keys [exercise sets reps weight]}]
      {:seon.render/html [:tr [:td exercise] [:td (str sets "x" reps)] [:td (str weight "kg")]]
       :seon.render/ai   (str exercise " — " sets "x" reps " @ " weight "kg")})
+
    ```
 
 2. **Verify scanner picks it up**: After startup scan or dev hook, query Datalevin for the function entity — confirm `:seon.fn/render-input-keys` and `:seon.fn/output-spec` are populated.
@@ -102,6 +104,7 @@ These are already built and working:
    (defonce ^:private resolution-cache (atom {}))
    ;; Key: [format (set (keys data))], Value: qualified-name string
    ;; Invalidated by scanner via (invalidate-render-cache!)
+
    ```
 
 2. **Rewire `seon.render/render`**:
@@ -167,6 +170,7 @@ Currently SSE push goes directly to http-kit channels. The target architecture r
 ctx change → namespace step → render resolution →
   ├── :html out-port → SSE adapter step → http-kit channels
   └── :ai out-port → agent flow channel
+
 ```
 
 This means a namespace step has typed out-ports for each render format. The SSE adapter is a thin flow step that converts hiccup→HTML and writes to http-kit channels.

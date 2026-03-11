@@ -22,6 +22,7 @@ Comprehensive evaluation of test runner architectures, babashka SQLite integrati
 - All dependencies already loaded, system warm
 
 **Tested Commands:**
+
 ```bash
 # Reload namespace
 clj-nrepl-eval -p 7888 "(require 'ml-options.log-parsing-test :reload)"
@@ -31,6 +32,7 @@ clj-nrepl-eval -p 7888 "(require 'ml-options.log-parsing-test :reload)"
 clj-nrepl-eval -p 7888 "(clojure.test/run-tests 'ml-options.log-parsing-test)"
 # Timing: 0.084s total (69% cpu)
 # Output: {:test 3, :pass 26, :fail 0, :error 0, :type :summary}
+
 ```
 
 **Advantages:**
@@ -47,6 +49,7 @@ clj-nrepl-eval -p 7888 "(clojure.test/run-tests 'ml-options.log-parsing-test)"
 - Namespace errors are returned as strings, not structured data
 
 **Error Cases Tested:**
+
 ```bash
 # Connection failure (wrong port)
 clj-nrepl-eval -p 9999 "(+ 1 1)"
@@ -57,6 +60,7 @@ clj-nrepl-eval -p 9999 "(+ 1 1)"
 clj-nrepl-eval -p 7888 "(require 'does.not.exist :reload)"
 # Output: Execution error (FileNotFoundException) at user/eval67859 (REPL:1).
 # Could not locate does/not/exist__init.class...
+
 ```
 
 **Output Format:**
@@ -75,10 +79,12 @@ clj-nrepl-eval -p 7888 "(require 'does.not.exist :reload)"
 - Full test suite infrastructure
 
 **Tested Command:**
+
 ```bash
 time clj -M:test -m kaocha.runner --focus ml-options.log-parsing-test
 # Timing: 7.318s total (203% cpu)
 # Output: 3 tests, 26 assertions, 0 failures
+
 ```
 
 **Advantages:**
@@ -102,6 +108,7 @@ time clj -M:test -m kaocha.runner --focus ml-options.log-parsing-test
 Add a test-runner component to the Integrant system that stays warm and exposes an interface for running tests.
 
 **How it would work:**
+
 ```clojure
 ;; In system.edn
 :ml-options/test-runner {:db (ig/ref :ml-options/xtdb-node)}
@@ -110,6 +117,7 @@ Add a test-runner component to the Integrant system that stays warm and exposes 
 (defmethod ig/init-key :ml-options/test-runner [_ {:keys [db]}]
   {:db db
    :run-test (fn [namespace-symbol] ...)})
+
 ```
 
 **IPC Options for Hook Communication:**
@@ -148,12 +156,15 @@ Add a test-runner component to the Integrant system that stays warm and exposes 
 
 **Graceful Degradation:**
 When nREPL not available, fall back to informative message:
+
 ```
 ⚠️ Auto-test skipped: nREPL not running on port 7888
    Run './bin/run' to start the system with nREPL
+
 ```
 
 **Implementation Pattern:**
+
 ```bash
 #!/usr/bin/env bb
 
@@ -172,6 +183,7 @@ clj-nrepl-eval -p 7888 "(require '$TEST_NS :reload)" || {
 # Run tests
 result=$(clj-nrepl-eval -p 7888 "(clojure.test/run-tests '$TEST_NS)")
 # Parse result and report
+
 ```
 
 ---
@@ -183,10 +195,12 @@ result=$(clj-nrepl-eval -p 7888 "(clojure.test/run-tests '$TEST_NS)")
 **Pod:** `pod-babashka-go-sqlite3`
 
 **Loading in Script:**
+
 ```clojure
 (require '[babashka.pods :as pods])
 (pods/load-pod 'org.babashka/go-sqlite3 "0.1.0")
 (require '[pod.babashka.go-sqlite3 :as sqlite])
+
 ```
 
 **First run:** Pod downloads automatically (~2-3s download, cached thereafter)
@@ -206,6 +220,7 @@ result=$(clj-nrepl-eval -p 7888 "(clojure.test/run-tests '$TEST_NS)")
 **Test script:** `/Users/sean/src/ml-options-trading/test_bb_sqlite.clj`
 
 **Results:**
+
 ```
 ✓ Table created
 ✓ Insert result: {:rows-affected 1, :last-inserted-id 1}
@@ -213,6 +228,7 @@ result=$(clj-nrepl-eval -p 7888 "(clojure.test/run-tests '$TEST_NS)")
 ✓ Concurrent access test passed in 3 ms
   Total records: 2
 ✓ Debounce query: 0 recent events
+
 ```
 
 **Key Findings:**
@@ -233,6 +249,7 @@ result=$(clj-nrepl-eval -p 7888 "(clojure.test/run-tests '$TEST_NS)")
              :limit 1})
 
 (sqlite/query db-path (sql/format sqlmap))
+
 ```
 
 **Recommendation:** Start with raw SQL strings. HoneySQL adds complexity for minimal benefit in this use case.
@@ -278,6 +295,7 @@ CREATE TABLE IF NOT EXISTS hook_events (
 CREATE INDEX IF NOT EXISTS idx_timestamp ON hook_events(timestamp);
 CREATE INDEX IF NOT EXISTS idx_file_path ON hook_events(file_path, timestamp);
 CREATE INDEX IF NOT EXISTS idx_session_status ON hook_events(session_id, status);
+
 ```
 
 ### Rationale
@@ -305,6 +323,7 @@ CREATE INDEX IF NOT EXISTS idx_session_status ON hook_events(session_id, status)
 ### Usage Patterns
 
 **Debounce query (don't run if last run was < 100ms ago):**
+
 ```clojure
 (sqlite/query db-path
   ["SELECT COUNT(*) as cnt FROM hook_events
@@ -312,9 +331,11 @@ CREATE INDEX IF NOT EXISTS idx_session_status ON hook_events(session_id, status)
     AND event_type = 'test_complete'
     AND datetime(timestamp) > datetime('now', '-100 milliseconds')"
    file-path])
+
 ```
 
 **Get test history for file:**
+
 ```clojure
 (sqlite/query db-path
   ["SELECT timestamp, status, test_count, pass_count, duration_ms
@@ -324,14 +345,17 @@ CREATE INDEX IF NOT EXISTS idx_session_status ON hook_events(session_id, status)
     ORDER BY timestamp DESC
     LIMIT 10"
    file-path])
+
 ```
 
 **Find currently running tests:**
+
 ```clojure
 (sqlite/query db-path
   ["SELECT file_path, test_namespace, timestamp
     FROM hook_events
     WHERE status = 'running'"])
+
 ```
 
 ---
@@ -350,6 +374,7 @@ CREATE INDEX IF NOT EXISTS idx_session_status ON hook_events(session_id, status)
 - Project hooks: (to be added) auto-test hook on PostToolUse
 
 **Execution Order for Edit/Write:**
+
 ```
 1. PreToolUse: clj-paren-repair (runs BEFORE file is written)
    - Receives tool input (file content to be written)
@@ -361,6 +386,7 @@ CREATE INDEX IF NOT EXISTS idx_session_status ON hook_events(session_id, status)
 3. PostToolUse: BOTH hooks run IN PARALLEL
    - clj-paren-repair (PostToolUse phase - stats reporting)
    - auto-test hook (our new hook)
+
 ```
 
 ### Coordination Problem
@@ -373,6 +399,7 @@ CREATE INDEX IF NOT EXISTS idx_session_status ON hook_events(session_id, status)
 3. PostToolUse hooks can safely read the file
 
 **Verified in settings.json:**
+
 ```json
 {
   "PreToolUse": [
@@ -382,11 +409,13 @@ CREATE INDEX IF NOT EXISTS idx_session_status ON hook_events(session_id, status)
     {"matcher": "Edit|Write", "hooks": [{"command": "clj-paren-repair-claude-hook ..."}]}
   ]
 }
+
 ```
 
 ### SQLite for Coordination (Not Needed, But Possible)
 
 **If coordination were needed:**
+
 ```clojure
 ;; Hook 1: Write marker
 (sqlite/execute! db-path
@@ -407,6 +436,7 @@ CREATE INDEX IF NOT EXISTS idx_session_status ON hook_events(session_id, status)
       (if (< attempts 10)
         (do (Thread/sleep 50) (recur (inc attempts)))
         :timeout))))
+
 ```
 
 **Recommendation:** Don't implement this. It's unnecessary complexity. PostToolUse hooks can safely read files.
@@ -453,6 +483,7 @@ set +e  # Don't exit on error
 }
 
 exit 0
+
 ```
 
 ```clojure
@@ -467,6 +498,7 @@ exit 0
                  (with-out-str (clojure.stacktrace/print-stack-trace e)))
             :append true)
       nil)))
+
 ```
 
 ### User-Facing Messages
@@ -482,10 +514,12 @@ exit 0
 - Hook crashes (logged, but user can't fix)
 
 **Format:**
+
 ```
 ✓ 3 tests passed in ml-options.log-parsing-test (84ms)
 ❌ 2 tests failed in ml-options.data.ingest-test
 ⚠️ Auto-test skipped: nREPL not running on port 7888
+
 ```
 
 ---
@@ -507,6 +541,7 @@ PostToolUse Hook (auto-test)
 6. Parse results
 7. Record to SQLite
 8. Display summary
+
 ```
 
 ### Pseudocode
@@ -657,6 +692,7 @@ PostToolUse Hook (auto-test)
 
 ;; Run main
 (-main *command-line-args*)
+
 ```
 
 ### Configuration (Claude Code)
@@ -677,13 +713,16 @@ PostToolUse Hook (auto-test)
     }
   ]
 }
+
 ```
 
 **Installation:**
+
 ```bash
 # Copy hook to PATH
 sudo cp auto-test-hook /usr/local/bin/
 chmod +x /usr/local/bin/auto-test-hook
+
 ```
 
 ---
@@ -702,6 +741,7 @@ Test execution: ~80ms (measured, for typical test file)
 Parse results: ~5ms
 SQLite record: ~2ms
 Total: ~500ms
+
 ```
 
 **User perception:** Sub-second feedback for typical test files.
@@ -727,6 +767,7 @@ Auto-test with nREPL:
   2. Hook triggers          ~10ms
   3. Tests run              ~500ms
   Total: 0.5s (6-12x faster than manual)
+
 ```
 
 ---
@@ -734,18 +775,21 @@ Auto-test with nREPL:
 ## 8. Future Enhancements
 
 ### Phase 1 (MVP)
+
 - Single test namespace per file
 - nREPL-based execution
 - SQLite event log
 - Basic debouncing (100ms)
 
 ### Phase 2
+
 - Smart debouncing (run after pause in editing, not on every keystroke)
 - Test file watcher (run affected tests when src file changes)
 - Parallel test execution (multiple namespaces)
 - Web UI for test history (query SQLite from Datastar dashboard)
 
 ### Phase 3
+
 - Failed test pinning (run failed tests on every edit until fixed)
 - Coverage tracking (which lines are tested)
 - Performance regression detection (track duration_ms trends)

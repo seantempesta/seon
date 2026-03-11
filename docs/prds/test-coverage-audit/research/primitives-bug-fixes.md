@@ -35,6 +35,7 @@ Fixed 4 bugs in `src/ml_options/dsl/primitives.clj` using TDD approach. All bugs
       days-to-expiry (.between java.time.temporal.ChronoUnit/DAYS now-date expiry)
       sqrt-t (Math/sqrt (/ (max days-to-expiry 0) 365.0))]
   ...)
+
 ```
 
 **Test:** `vanna-uses-actual-expiry-test` - Verifies vanna differs for options with different expiries
@@ -67,6 +68,7 @@ Fixed 4 bugs in `src/ml_options/dsl/primitives.clj` using TDD approach. All bugs
   (if (pos? days-between)
     (/ (- far-iv near-iv) days-between)
     0.0))
+
 ```
 
 **Test:** `term-structure-slope-normalized-by-time-test` - Verifies slope is per-day, not per-expiration
@@ -120,6 +122,7 @@ This is non-trivial and not critical for MVP. Documented limitation for future w
   ;; Current implementation has hardcoded volatilities which makes it unusable.
   ;; Returning nil until properly implemented.
   nil)
+
 ```
 
 **Test:** `implied-correlation-unimplemented-test` - Verifies function returns nil
@@ -141,6 +144,7 @@ This is non-trivial and not critical for MVP. Documented limitation for future w
 ```
 All tests: 181 tests, 795 assertions, 0 failures
 primitives-test: 13 tests, 37 assertions, 0 failures
+
 ```
 
 ### TDD Workflow Followed

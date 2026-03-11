@@ -47,6 +47,7 @@ Added both libraries to `deps.edn` under `:dev` alias and tested in REPL.
 (reset! my-atom {:new "state"})   ; WORKS
 @my-atom                          ; WORKS
 (add-watch my-atom :key fn)       ; WORKS
+
 ```
 
 #### Key Findings
@@ -65,6 +66,7 @@ Added both libraries to `deps.edn` under `:dev` alias and tested in REPL.
 
 ;; Sync - slower, immediate durability
 (dur/duratom :local-file :file-path "f.edn" :commit-mode :sync :init {})
+
 ```
 
 #### Non-Serializable Value Handling
@@ -75,6 +77,7 @@ Added both libraries to `deps.edn` under `:dev` alias and tested in REPL.
 (swap! my-atom assoc :conn (Object.))
 ;; File contains: {:conn #object[java.lang.Object 0x1234 "..."]}
 ;; This breaks on read!
+
 ```
 
 **Solution:** Custom write function with filtering:
@@ -98,6 +101,7 @@ Added both libraries to `deps.edn` under `:dev` alias and tested in REPL.
                     :write (fn [path data]
                              (spit path (pr-str (filter-for-persistence data))))}
                :init {}))
+
 ```
 
 #### Nippy Backend (Binary, 25% smaller)
@@ -112,6 +116,7 @@ Added both libraries to `deps.edn` under `:dev` alias and tested in REPL.
                :rw {:read nippy/thaw-from-file
                     :write nippy/freeze-to-file}
                :init {}))
+
 ```
 
 File size comparison (1000-element vector):
@@ -140,6 +145,7 @@ File size comparison (1000-element vector):
 ;; Standard operations
 @my-atom                                  ; WORKS
 (add-watch my-atom :key fn)              ; WORKS
+
 ```
 
 #### Critical Issue
@@ -248,6 +254,7 @@ Neither library provides versioning, but duratom's drop-in API makes it easy to 
 
 ;; Get history
 ((:history ctx))
+
 ```
 
 ---
@@ -280,6 +287,7 @@ The duratom pattern is a good bridge - we can add persistence now without changi
 ```clojure
 ;; In :dev alias
 duratom/duratom {:mvn/version "0.5.9"}
+
 ```
 
 **Note:** Enduro was tested but removed - it doesn't implement IAtom so standard `swap!` fails.

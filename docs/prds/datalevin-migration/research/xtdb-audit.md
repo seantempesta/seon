@@ -72,6 +72,7 @@ This document catalogs all XTDB usage in the Seon codebase to inform the Datalev
 ```clojure
 ;; Example temporal query from entity-history
 (str "SELECT * FROM " table-name " FOR ALL VALID_TIME WHERE _id = ?")
+
 ```
 
 ---
@@ -103,6 +104,7 @@ This document catalogs all XTDB usage in the Seon codebase to inform the Datalev
     AND _valid_to IS NULL
     AND _valid_from >= ?"
  ticker start-instant]
+
 ```
 
 ---
@@ -170,6 +172,7 @@ This document catalogs all XTDB usage in the Seon codebase to inform the Datalev
 ```clojure
 ;; Sets explicit valid-from for temporal history
 :xt/valid-from valid-time
+
 ```
 
 ---
@@ -212,6 +215,7 @@ This document catalogs all XTDB usage in the Seon codebase to inform the Datalev
   WHERE _valid_from >= ?
   ORDER BY _valid_from DESC"
  since-instant]
+
 ```
 
 ---
@@ -341,6 +345,7 @@ This document catalogs all XTDB usage in the Seon codebase to inform the Datalev
  FOR ALL SYSTEM_TIME
  WHERE namespace = ?
  ORDER BY _system_from"
+
 ```
 
 ---
@@ -432,6 +437,7 @@ This document catalogs all XTDB usage in the Seon codebase to inform the Datalev
 ;; Uses _valid_from for ordering and filtering
 "SELECT *, _valid_from FROM edit_event WHERE _valid_from > ? ORDER BY _valid_from"
 "SELECT *, _valid_from FROM review_event WHERE _valid_from >= ? AND _valid_from <= ?"
+
 ```
 
 ---

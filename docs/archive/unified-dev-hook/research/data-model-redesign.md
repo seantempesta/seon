@@ -57,6 +57,7 @@ Key safety feature: Even if reviews stop happening, we only ever look at a bound
  :edit/new-functions #{:bar}}
 
 ;; valid-time = when the edit happened (set by XTDB)
+
 ```
 
 **Kept simple:**
@@ -70,6 +71,7 @@ Key safety feature: Even if reviews stop happening, we only ever look at a bound
 {:xt/id :seon.dev/review-state
  :entity/type :review-state
  :review/last-completed #inst "2025-12-29T10:00:00Z"}
+
 ```
 
 **Purpose:**
@@ -113,6 +115,7 @@ This is **doubly bounded**:
                  last-review
                  window-start)]
     (query-edits-after node cutoff)))
+
 ```
 
 ### Safety Scenarios
@@ -156,6 +159,7 @@ Query at T100 with 5-min window:
   - Last review: T3 (stale)
   - Cutoff: max(window-start, T3) = window-start (window wins)
   - Returns: only edits in last 5 minutes (bounded!)
+
 ```
 
 ---
@@ -168,6 +172,7 @@ Query at T100 with 5-min window:
           :debounce-seconds 5       ; Quiet period after last edit
           :cooldown-seconds 30      ; Minimum time between reviews
           :lookback-minutes 5}}     ; How far back to look for edits
+
 ```
 
 | Config | Purpose | Default |
@@ -213,6 +218,7 @@ Query at T100 with 5-min window:
       ;; 3. Not reviewing too frequently (cooldown)
       (or (nil? last-review-time)
           (> (seconds-since last-review-time now) cooldown-seconds)))))
+
 ```
 
 ---
@@ -248,6 +254,7 @@ Query at T100 with 5-min window:
     Transaction result"
   [node]
   ...)
+
 ```
 
 ### Querying State
@@ -285,6 +292,7 @@ Query at T100 with 5-min window:
      :edit-count N}"
   [node & [opts]]
   ...)
+
 ```
 
 ### Trigger Logic
@@ -303,6 +311,7 @@ Query at T100 with 5-min window:
     true if review should trigger"
   [node & [opts]]
   ...)
+
 ```
 
 ---
@@ -352,6 +361,7 @@ After confirming it works:
                            edit/new-functions xt/valid-from])
         (where (> xt/valid-from cutoff-instant))
         (order-by xt/valid-from))))
+
 ```
 
 **Note:** In practice, we'll use `{:for-valid-time (from cutoff)}` for efficiency.
@@ -366,6 +376,7 @@ After confirming it works:
                               [{:xt/id :seon.dev/review-state}
                                review/last-completed])))]
     (:review/last-completed result)))
+
 ```
 
 ### Get Last Edit Time
@@ -378,6 +389,7 @@ After confirming it works:
                             (order-by {:val xt/valid-from :dir :desc})
                             (limit 1))))]
     (:xt/valid-from result)))
+
 ```
 
 ---
