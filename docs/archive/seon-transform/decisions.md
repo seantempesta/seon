@@ -1,3 +1,9 @@
+---
+type: decision
+status: completed
+tags: [decision, archive]
+---
+
 # Seon Transform - Decisions
 
 Record architectural choices with rationale here.

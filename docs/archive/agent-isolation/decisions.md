@@ -1,3 +1,9 @@
+---
+type: decision
+status: completed
+tags: [decision, archive, agent]
+---
+
 # Agent Isolation - Architectural Decisions
 
 ## Decision 1: Namespace is the Unique Identifier

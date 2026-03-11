@@ -1,3 +1,9 @@
+---
+type: research
+status: abandoned
+tags: [research, archive, database]
+---
+
 # Stage 4: Seon Core & DB Management - Implementation Report
 
 **Date**: 2025-12-13

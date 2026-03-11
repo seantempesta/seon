@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 # Seon Transform - Notes
 
 Capture gotchas, learnings, and things that surprised you here.

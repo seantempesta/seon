@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 # Implementation Notes: Unified Dev Hook
 
 **Last Updated:** 2024-12-31

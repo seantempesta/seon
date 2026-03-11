@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive, agent]
+---
+
 # Session Handoff: AI Namespace Refactor
 
 **Date:** 2026-01-19

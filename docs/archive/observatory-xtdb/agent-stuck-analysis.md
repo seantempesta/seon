@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive, database, agent]
+---
+
 # Agent Stuck Analysis
 
 **Date:** 2026-01-29

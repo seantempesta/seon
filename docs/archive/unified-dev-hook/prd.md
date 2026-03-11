@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 # PRD: Unified Development Feedback Hook
 
 ## Status: COMPLETE — Dev hook runs reload + tests + AI review on every file edit

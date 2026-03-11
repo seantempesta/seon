@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive, trading, agent]
+---
+
 # Research: REPL Recording for Training Data
 
 **Status:** Complete

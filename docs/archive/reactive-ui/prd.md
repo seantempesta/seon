@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive, web]
+---
+
 # PRD: Reactive UI Architecture
 
 ## Status: SUPERSEDED by render-pipeline — unified render pipeline replaces reactive instance architecture

@@ -1,3 +1,9 @@
+---
+type: prd
+status: abandoned
+tags: [prd, archive, trading, agent]
+---
+
 # Notes: Algorithmic Trading Agent
 
 Capture gotchas, learnings, and things that surprised you during research and implementation.

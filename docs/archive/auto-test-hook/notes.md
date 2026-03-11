@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 # Implementation Notes: Auto-Test Hook
 
 **Last Updated:** 2025-12-05

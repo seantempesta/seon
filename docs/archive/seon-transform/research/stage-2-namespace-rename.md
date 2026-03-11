@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # Stage 2: Namespace Rename - ml-options to seon
 
 ## Execution Date

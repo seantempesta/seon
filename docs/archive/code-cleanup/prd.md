@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 # Code Cleanup: Duplicate Function Extraction
 
 ## Status: TODO

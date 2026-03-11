@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 # PRD: Phase 8 - Convention Compliance for seon.dev
 
 **Status:** ✅ COMPLETE

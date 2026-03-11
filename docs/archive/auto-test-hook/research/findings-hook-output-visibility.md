@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # Hook Output Visibility Research
 
 **Date:** 2025-12-05

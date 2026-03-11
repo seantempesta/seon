@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive, flow]
+---
+
 # Research: core.async.flow for Agent Message Architecture
 
 **Date:** 2026-01-30

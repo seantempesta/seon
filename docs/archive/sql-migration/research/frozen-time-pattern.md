@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive, database]
+---
+
 # Frozen-Time Database Pattern
 
 **Status**: Not Started

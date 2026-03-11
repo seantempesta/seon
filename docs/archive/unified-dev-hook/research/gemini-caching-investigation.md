@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # Gemini API Caching Investigation
 
 **Date**: 2025-12-29

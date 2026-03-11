@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # CPU Spike Investigation Report
 
 **Date:** 2026-02-01

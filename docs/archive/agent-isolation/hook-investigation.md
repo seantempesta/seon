@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive, agent]
+---
+
 # Investigation: Hooks in SDK Mode
 
 ## Status: RESOLVED - Hooks DO work in stream-json mode

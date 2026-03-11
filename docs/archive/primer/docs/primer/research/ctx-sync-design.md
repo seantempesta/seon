@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # Ctx Sync Primitives Design
 
 **Status:** Research Complete

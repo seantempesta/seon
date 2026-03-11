@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 > **Status: ARCHIVED** — Complete — SDK is live
 
 > **Status: ARCHIVED** — Complete — SDK is live

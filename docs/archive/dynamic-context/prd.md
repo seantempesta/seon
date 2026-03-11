@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 > **Status: ARCHIVED** — Superseded — channel bug fixed, rest speculative
 
 > **Status: ARCHIVED** — Superseded — channel bug fixed, rest speculative
@@ -329,8 +335,8 @@ Instead of static AGENT.md, agents receive a live "cockpit" view refreshed each 
 
 ### External Resources
 
-- Claude Code documentation: https://docs.anthropic.com/en/docs/claude-code
-- MCP specification: https://modelcontextprotocol.io/
+- Claude Code documentation: [docs.anthropic.com](https://docs.anthropic.com/en/docs/claude-code)
+- MCP specification: [modelcontextprotocol.io](https://modelcontextprotocol.io/)
 
 ---
 

@@ -1,3 +1,9 @@
+---
+type: research
+status: abandoned
+tags: [research, archive]
+---
+
 # Dynamic Namespace Isolation - Research Findings
 
 **Date:** 2026-02-01

@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 # PRD: Namespace Render Toggle
 
 ## Status: SUPERSEDED by render-pipeline — render toggle folded into unified render pipeline

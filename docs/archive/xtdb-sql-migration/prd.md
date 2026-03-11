@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive, database]
+---
+
 > **Status: ARCHIVED** — Complete — SQL migration done
 
 > **Status: ARCHIVED** — Complete — SQL migration done
@@ -96,8 +102,8 @@ The agent isolation PRD describes the full vision. This PRD focuses on the XTDB 
 ## Key Resources to Read
 
 1. **Agent Isolation PRD**: `docs/prds/agent-isolation/prd.md` (understand the vision)
-2. **XTDB v2.1.0 Release Notes**: https://github.com/xtdb/xtdb/releases/tag/v2.1.0
-3. **Multi-Database Docs**: https://docs.xtdb.com/about/dbs-in-xtdb.html
+2. **XTDB v2.1.0 Release Notes**: [v2.1.0](https://github.com/xtdb/xtdb/releases/tag/v2.1.0)
+3. **Multi-Database Docs**: [dbs-in-xtdb](https://docs.xtdb.com/about/dbs-in-xtdb.html)
 4. **Reference Code**: `reference-code/xtdb/` (at v2.1.0)
 5. **Current Implementation**: `src/seon/db/node.clj`
 6. **Multi-DB Research**: `docs/prds/xtdb-sql-migration/research/multi-database.md`

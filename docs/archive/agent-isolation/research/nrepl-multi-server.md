@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive, agent]
+---
+
 # nREPL Multi-Server Research
 
 **Date**: 2026-01-04

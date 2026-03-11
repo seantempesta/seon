@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 # PRD: Live Atom Updates
 
 ## Status: SUPERSEDED by render-pipeline — live updates handled by unified render pipeline

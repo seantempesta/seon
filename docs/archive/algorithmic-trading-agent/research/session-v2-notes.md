@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive, trading, agent]
+---
+
 # Session Template System V2 - Change Notes
 
 **Date:** 2025-12-21

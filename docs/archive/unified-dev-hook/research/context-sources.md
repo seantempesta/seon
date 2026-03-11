@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # Research Context Sources
 
 **Date:** 2024-12-28

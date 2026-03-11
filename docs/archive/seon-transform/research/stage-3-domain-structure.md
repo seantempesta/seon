@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # Stage 3: Domain Structure Refactoring - Findings
 
 **Date:** 2025-12-13

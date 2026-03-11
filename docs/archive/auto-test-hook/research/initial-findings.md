@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # Initial Research Findings: Auto-Test Hook
 
 ## Hook Architecture Discovery

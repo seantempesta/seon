@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # Phase 6 Hook Refactor - Gemini Code Review
 
 **Date:** 2025-12-30
@@ -12,18 +18,18 @@ The refactor significantly improves testability and structure but contains a cri
 
 ### CRITICAL
 
-*   **Broken Blocking Logic (`seon.dev.hook/process-hook-event!`):** The pipeline (Lines 381–424) uses a `do` block where intermediate results from `stage-repair`, `stage-reload`, and test failures are calculated but never returned. The function always falls through to the final `(success-response @feedback)`. Consequently, even if a syntax error is unfixable or tests fail, the hook will return `::continue true`, failing to block Claude from committing bad code.
-*   **Missing Instrumentation (`seon.dev.verify/run-gen-tests`):** Malli's `(m/function-schemas)` only returns schemas that have been explicitly registered or collected. The old implementation (Old Line 552) called `(mi/collect! {:ns ns-sym})`. The new code (New Line 227) lacks this call. Generative tests will likely find zero functions to test unless they are manually collected elsewhere in the REPL session.
+-   **Broken Blocking Logic (`seon.dev.hook/process-hook-event!`):** The pipeline (Lines 381–424) uses a `do` block where intermediate results from `stage-repair`, `stage-reload`, and test failures are calculated but never returned. The function always falls through to the final `(success-response @feedback)`. Consequently, even if a syntax error is unfixable or tests fail, the hook will return `::continue true`, failing to block Claude from committing bad code.
+-   **Missing Instrumentation (`seon.dev.verify/run-gen-tests`):** Malli's `(m/function-schemas)` only returns schemas that have been explicitly registered or collected. The old implementation (Old Line 552) called `(mi/collect! {:ns ns-sym})`. The new code (New Line 227) lacks this call. Generative tests will likely find zero functions to test unless they are manually collected elsewhere in the REPL session.
 
 ### MAJOR
 
-*   **Loss of Change Detection:** The old implementation (Old Line 486) checked a file hash to skip processing if the content hadn't changed. The new implementation has removed this. Every "Edit" or "Write" tool use will now trigger a full test suite and potentially a Gemini review, even if the file content is identical (e.g., a "no-op" save), increasing latency and token costs.
-*   **Namespace Derivation Fragility (`seon.dev.review/source->test-path`):** Line 139 hardcodes a regex replacement for `^src/`. If the project is in a subdirectory or uses a different structure (e.g., `src/clj/`), context building for reviews will fail to find associated test files.
+-   **Loss of Change Detection:** The old implementation (Old Line 486) checked a file hash to skip processing if the content hadn't changed. The new implementation has removed this. Every "Edit" or "Write" tool use will now trigger a full test suite and potentially a Gemini review, even if the file content is identical (e.g., a "no-op" save), increasing latency and token costs.
+-   **Namespace Derivation Fragility (`seon.dev.review/source->test-path`):** Line 139 hardcodes a regex replacement for `^src/`. If the project is in a subdirectory or uses a different structure (e.g., `src/clj/`), context building for reviews will fail to find associated test files.
 
 ### MINOR
 
-*   **Hardcoded Port in BB Wrapper:** `bin/seon-hook` (Line 20) hardcodes `nrepl-port 7888`. This should ideally be read from `.nrepl-port` or the provided config to avoid connection failures in environments with dynamic ports.
-*   **Truncation Marker Placement:** In `seon.dev.review/truncate` (Line 131), the `[truncated]` marker is appended to the end. If the string is highly structured (like code), this is fine, but for `format-output` (Line 310), it may cut off Gemini's most actionable feedback (usually at the end) without a clear visual break.
+-   **Hardcoded Port in BB Wrapper:** `bin/seon-hook` (Line 20) hardcodes `nrepl-port 7888`. This should ideally be read from `.nrepl-port` or the provided config to avoid connection failures in environments with dynamic ports.
+-   **Truncation Marker Placement:** In `seon.dev.review/truncate` (Line 131), the `[truncated]` marker is appended to the end. If the string is highly structured (like code), this is fine, but for `format-output` (Line 310), it may cut off Gemini's most actionable feedback (usually at the end) without a clear visual break.
 
 ### Summary of Key Questions
 
@@ -118,8 +124,8 @@ The tests focus heavily on "happy paths" and early-exit filtering. They do not s
 1.  **Blocking Behavior Unverified**: There are no tests in `hook_test.clj` that simulate a failure (e.g., a failing unit test or a rejected review) to verify that `::hook/continue` becomes `false`. Every test currently asserts that the hook *continues*.
 2.  **Instrumentation Gap**: `verify_test.clj` does not verify that `mi/collect!` (or any Malli instrumentation) is called before running generative tests. Since `mi/collect!` is a side effect, the tests should likely use a spy/mock to ensure it is triggered.
 3.  **Orchestration Logic Missing**: `hook_test.clj` does not test the pipeline flow. For example:
-    *   If `repair` fixes a file, does the `verify` stage receive the repaired content or the disk content?
-    *   If `unit-tests` fail, is the `review` stage skipped or does it receive the failure logs?
+    -   If `repair` fixes a file, does the `verify` stage receive the repaired content or the disk content?
+    -   If `unit-tests` fail, is the `review` stage skipped or does it receive the failure logs?
 4.  **Hardcoded Absolute Paths**: `review_test.clj` and `codebase_test.clj` contain hardcoded paths like `"/Users/sean/src/seon/..."`. These tests will fail in CI or on other developer machines. Use relative paths or temp files.
 5.  **Weak Generative Test Coverage**: In `verify_test.clj`, the generative test success is verified by running against a namespace with *no schemas*. This doesn't test if the runner can actually find and exercise Malli schemas or handle generative failures correctly.
 6.  **Context Integration is Mocked by Omission**: The `context-integration-test` in `hook_test.clj` catches all exceptions and returns `continue true`. This masks actual integration failures and doesn't verify that the edit was actually recorded in XTDB.

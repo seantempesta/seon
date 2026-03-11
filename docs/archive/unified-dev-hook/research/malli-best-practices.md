@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # Malli Function Schema Best Practices
 
 Research findings on defining Malli function schemas for AI-assisted development with automatic verification.

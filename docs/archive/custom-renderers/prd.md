@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 # PRD: Custom Renderers
 
 ## Status: SUPERSEDED by spec-driven-rendering — renderers resolved via fn-spec linking
