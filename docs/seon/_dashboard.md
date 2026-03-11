@@ -80,7 +80,7 @@ status: active
 
 - [[orchestrator/active]] — Current pipeline and session recovery
 - [[orchestrator/prds]] — PRD index with status
-- `orchestrator/issues/` — Individual issue notes (38 open issues)
+- `orchestrator/issues/` — Individual issue notes (46 open issues)
 
 ## Reference
 

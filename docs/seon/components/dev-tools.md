@@ -79,6 +79,8 @@ PostToolUse (after edit lands)
 
 ### Hook System (`hook.clj`)
 
+**Platform constraint:** Claude Code only shows hook output when the response has `decision: "block"`. Output from `decision: "continue"` is silently discarded. The hook always exits 0 — non-zero causes Claude Code to retry.
+
 The main entry point `process-hook-event!` accepts a Claude Code hook event JSON and a config map (merged with defaults). It classifies the event by tool name and event type, then dispatches:
 
 - **PreToolUse Edit/Write** on Seon source files: runs `lint/validate-for-write` which does syntax + clj-kondo analysis. Blocks with detailed error message including "did you mean?" suggestions if invalid.
