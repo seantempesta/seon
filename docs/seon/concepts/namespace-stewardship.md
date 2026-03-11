@@ -16,7 +16,7 @@ You are a TEAM PLAYER. Your consumers matter more than your internals. Think: "h
 
 ### Phase 1: Understand the Vision
 
-Read [[vision/index]] and CONVENTIONS.md. Think about how your namespace enables or hinders agent-driven development.
+Read [[vision/index]] and `docs/conventions.md`. Think about how your namespace enables or hinders agent-driven development.
 
 ### Phase 2: Deep-dive Your Namespace
 

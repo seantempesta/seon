@@ -19,7 +19,7 @@ Feeds are appropriate for system-wide events: "config changed", "database schema
 
 ## Current Implementation
 
-The cast/signal mechanism exists in core.async.flow (see `reference-code/core.async/`). The `signal-select` pattern appears in the flow architecture docs (`docs/architecture/flow-foundation.md`) where a `status-aggregator-step` subscribes to `::agent-heartbeat` signals.
+The cast/signal mechanism exists in core.async.flow (see `reference-code/core.async/`). The `signal-select` pattern appears in the flow architecture docs (`docs/seon/reference/flow-foundation.md`) where a `status-aggregator-step` subscribes to `::agent-heartbeat` signals.
 
 However, `:seon.ns/feeds` as a namespace-level declaration is not yet implemented. Today, namespace metadata contains `:seon.ns/dynamic?` (for ctx) and input/output specs (for [[concepts/renderer-discovery]]), but not feed declarations. The scanner (`seon.graph.extract`) would need to extract feed metadata, and the topology builder would need to wire `:signal-select` from feed declarations.
 

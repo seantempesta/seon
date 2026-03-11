@@ -16,7 +16,7 @@ The resolution algorithm:
 1. **Find candidates** — query Datalevin for functions whose output schema contains the target format key (e.g., `:seon.render/html`)
 2. **Filter** — candidate's required input keys must be a subset of the available data keys
 3. **Rank by specificity** — most required keys matched wins (more specific = better)
-4. **Tiebreak** — namespace proximity (same ns > `.render` child > sibling > distant), then recency, then alphabetical
+4. **Tiebreak** — depends on the function: `resolve-renderer` (used by the namespace page renderer) uses namespace proximity (same ns > `.render` child > sibling > distant), then alphabetical. `find-renderer` (used by the data-key renderer) uses recency (most recently updated), then alphabetical.
 
 No registration step. No dispatch maps. Just author the function with the right schema, and the system discovers it.
 

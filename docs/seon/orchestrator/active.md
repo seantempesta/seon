@@ -26,25 +26,25 @@ review expands milestones and surfaces undocumented/untested work.
 
 | # | Agent | Scope | Status | Verified |
 |---|-------|-------|--------|----------|
-| V1 | Data layer | `components/database.md`, `schema-system.md`, `runtime.md` | in-progress | — |
-| V2 | Flow layer | `components/flow-topology.md`, `harness.md`, `context.md` | in-progress | — |
-| V3 | Graph+Render | `components/code-graph.md`, `renderer.md`, `namespace-lifecycle.md` | in-progress | — |
-| V4 | Web+Agent | `components/web-layer.md`, `agent-system.md` | in-progress | — |
-| V5 | Dev+Testing | `components/dev-tools.md`, `testing.md`, `system-lifecycle.md` | in-progress | — |
+| V1 | Data layer | `components/database.md`, `schema-system.md`, `runtime.md` | complete | 5 fixes |
+| V2 | Flow layer | `components/flow-topology.md`, `harness.md`, `context.md` | complete | 5 fixes |
+| V3 | Graph+Render | `components/code-graph.md`, `renderer.md`, `namespace-lifecycle.md` | complete | 4 fixes |
+| V4 | Web+Agent | `components/web-layer.md`, `agent-system.md` | complete | 6 fixes |
+| V5 | Dev+Testing | `components/dev-tools.md`, `testing.md`, `system-lifecycle.md` | complete | 5 fixes |
 
 ### Wave 2: Architecture + Concepts + Conventions (3 agents)
 
 | # | Agent | Scope | Status |
 |---|-------|-------|--------|
-| V6 | Architecture | `architecture/overview.md`, `decisions/001-007` | planned |
-| V7 | Concepts | `concepts/` (9 files) | planned |
-| V8 | Conventions+Indexes | `conventions.md`, `_dashboard.md`, `namespaces.md`, `prds.md` | planned |
+| V6 | Architecture | `architecture/overview.md`, `decisions/001-007` | in-progress |
+| V7 | Concepts | `concepts/` (9 files) | in-progress |
+| V8 | Conventions+Indexes | `conventions.md`, `_dashboard.md`, `namespaces.md`, `prds.md` | in-progress |
 
 ### Wave 3: Issues + Reference (2 agents)
 
 | # | Agent | Scope | Status |
 |---|-------|-------|--------|
-| V9 | Issue triage | `orchestrator/issues/` (36 files) | planned |
+| V9 | Issue triage | `orchestrator/issues/` (39 files) | planned |
 | V10 | Reference staleness | `reference/` (14 files) | planned |
 
 ### Wave 4: Vision + Capabilities (2 agents)
@@ -72,3 +72,4 @@ review expands milestones and surfaces undocumented/untested work.
 - 2026-03-11: Vault reorganization. Moved from iCloud to docs/. Created orchestrator workspace, issue notes, PRD index.
 - 2026-03-11: Phase B complete. 8 milestone docs, 30 capability notes, 36 issues, 14 component notes. M1-M5 verified.
 - 2026-03-11: Doc audit started. Wave 1 launched — 5 verifier agents checking component notes against source code.
+- 2026-03-11: Wave 1 complete. 25 fixes across 14 component docs. 3 new issues created (maybe-in-session-schemas, routes-conn-vs-dbname, test-coverage-audit-stale). Wave 2 launched.

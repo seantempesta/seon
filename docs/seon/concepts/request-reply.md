@@ -42,9 +42,9 @@ The `request!` function accepts:
 
 ```
 
-Reply statuses: `:ok` (value returned), `:error` (function threw), `:overload` (queue full), `:timeout` (never replied), `:not-found` (function doesn't exist).
+Reply statuses: `:ok` (value returned), `:error` (function threw), `:overload` (queue full), `:timeout` (never replied). These are the four values in the `::msg/status` schema enum. A `:not-found` case would surface as `:error` with an appropriate error message.
 
-The REPL system (`seon.repl/eval-via-flow!`) uses the same pattern — injects into the `:seon.flow/repl` process, waits for promise delivery.
+The REPL system uses the same pattern — the private `eval-via-flow!` function in `seon.repl` injects into the `:seon.flow/repl` process and waits for promise delivery.
 
 ## In the Unified Model
 

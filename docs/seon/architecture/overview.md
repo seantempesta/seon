@@ -9,15 +9,15 @@ tags: [architecture, index]
 
 ## How a Namespace Comes Alive
 
-Everything starts with a name. When the system needs namespace `seon.trading.positions` to be alive, [[components/namespace-lifecycle]] calls `ensure-instance!`. This function orchestrates a careful sequence: it creates a [[components/context]] atom (the namespace's mutable state container), injects that atom into the namespace as `*ctx*` via `alter-var-root`, registers HTTP routes for the namespace's web views, and triggers [[components/renderer]] discovery to find any render functions the namespace defines.
+Everything starts with a name. When the system needs namespace `seon.trading.positions` to be alive, [[components/namespace-lifecycle]] calls `ensure-instance!`. This function orchestrates a careful sequence: it creates a [[components/context]] atom (the namespace's mutable state container), injects that atom into the namespace as `*ctx*` via `intern + .setDynamic`, and wires up the page render function discovered from the code graph. HTTP routes for namespace web views are registered separately by `seon.ns.routes`, which provides a `route-patterns` data var consumed by the web router.
 
 The result is a live namespace instance — it has state, it has routes, it can be reached by the web layer and by other namespaces. The [[components/runtime]] registry tracks that this instance exists, its status, and when it started.
 
 ## How State Changes Propagate
 
-Once alive, a namespace's state lives in its ctx atom. When an agent (or any code) calls `swap!` on that atom, a chain of side effects fires. Atom watches on the ctx detect the change. One watch debounces and persists the new state to Datalevin via the [[components/database]] layer. Another watch triggers an SSE broadcast — the [[components/web-layer]] pushes a refresh signal to any browser clients viewing that namespace.
+Once alive, a namespace's state lives in its ctx atom. When an agent (or any code) calls `swap!` on that atom, a chain of side effects fires. Atom watches on the ctx detect the change. One watch debounces and persists the new state to Datalevin via the [[components/database]] layer. Another watch triggers a global SSE broadcast via `seon.web.sse/refresh-all!`, signalling all connected browser clients to refresh.
 
-The SSE push is targeted: each client connection tracks which namespace it's viewing, so only relevant clients receive the update. The pushed content is rendered HTML — the server calls the namespace's render function with the new state and sends the fragment directly. The browser, using Datastar, swaps the fragment into the DOM without a full page reload.
+When a namespace instance is created with `::track-clients? true`, a third watch fires targeted per-client pushes: the server calls the namespace's render function with the new ctx value, converts the Hiccup output to HTML, and sends the fragment directly to each connected client via their http-kit channel. The browser, using Datastar, swaps the fragment into the DOM without a full page reload. This targeted path is used for namespace page views; the global broadcast path is used for system-wide refresh events.
 
 The watches, persistence scheduling, and SSE push are all wired up independently in ctx.clj, not through a unified pipeline.
 
@@ -33,13 +33,16 @@ This is the [[concepts/request-reply]] pattern — one unified mechanism for bot
 
 Seon is self-aware. The [[components/code-graph]] maintains a complete map of the codebase in Datalevin: every namespace, function, var, dependency edge, and schema registration. This graph is built by running clj-kondo analysis, extracting entities (functions, vars, deps), and ingesting them into the graph database.
 
-The scanner runs periodically and on code changes, keeping the graph fresh. Other components query it constantly: [[components/renderer]] uses it to discover render functions (functions whose `:malli/schema` output spec contains `:seon.render/html`). The namespace UI uses it to show dependency trees and caller chains. AI context builders use it to assemble relevant code for agent prompts.
+The scanner runs at startup (in a background future to avoid blocking boot) and is triggered by the dev hook on code changes, keeping the graph fresh. Other components query it constantly: [[components/renderer]] uses it to discover render functions (functions whose `:malli/schema` output spec contains `:seon.render/html`). The namespace UI uses it to show dependency trees and caller chains. AI context builders use it to assemble relevant code for agent prompts.
 
 The graph is read-heavy and write-infrequent — a new scan after code changes, then thousands of queries. The query API (`graph/query.clj`) provides high-level lookups: functions-in-namespace, callers-of, dependencies-of, functions-with-output-key.
 
 ## How Rendering Works
 
-Given a data map with namespaced keys, the [[components/renderer]] finds the best function to render it. The algorithm is specificity-based ([[concepts/renderer-discovery]]): it examines each candidate render function's input schema, counts how many required keys match the data map, and picks the function that matches the most keys. Namespace proximity breaks ties — a render function in the same namespace as the data wins over a generic one.
+Given a data map with namespaced keys, the [[components/renderer]] finds the best function to render it. The algorithm is specificity-based ([[concepts/renderer-discovery]]): it examines each candidate render function's input schema, counts how many required keys match the data map, and picks the function that matches the most keys. There are two resolution paths with different tiebreaking:
+
+- `resolve-renderer` (used by namespace page rendering) breaks ties by namespace proximity — a render function in the same namespace as the data wins over a generic one, then `.render` child namespace, then sibling, then distant.
+- `find-renderer` (used by the general `render` API) breaks ties by recency (newest `updated-at` wins), then alphabetical qualified-name for determinism.
 
 Render functions produce either `:seon.render/html` (Hiccup for browsers) or `:seon.render/ai` (structured text for agent consumption). The same data can be rendered both ways. Discovery is automatic — define a function with the right `:malli/schema` metadata, and the graph scanner finds it. No registration needed.
 
@@ -57,7 +60,7 @@ The two-phase design means a Datalevin crash during Phase 1 fails fast, while a 
 
 The system tracks namespace state in three mechanisms:
 
-1. **ctx registry** (atom in ctx.clj) — maps namespace names to their state atoms. This is the "live state" view.
+1. **ctx registry** (atom in ctx.clj) — maps instance-id to a registry entry containing the ctx atom, render fn, client set, and scheduler. This is the "live state" view.
 2. **runtime registry** (atom + Datalevin in runtime.clj) — tracks instance lifecycle: when started, current status, configuration. This is the "administrative" view.
 3. **flow/ping** — the flow topology knows which processes are running. This is the "infrastructure" view.
 

@@ -38,8 +38,9 @@ Every namespace becomes a full citizen in the flow topology — not just a routi
 ::msg/id, ::msg/type (:request/:reply/:event),
 ::msg/from-ns, ::msg/to-ns, ::msg/fn, ::msg/args
 
-;; Harness state
+;; Harness state (keys in seon.flow.harness namespace)
 ::harness/namespace, ::harness/queue-cap,
 ::harness/pending, ::harness/error-count
+;; (shorthand: ::harness/ = seon.flow.harness/)
 
 ```
