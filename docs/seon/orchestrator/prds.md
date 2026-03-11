@@ -12,12 +12,12 @@ All feature specifications live in `docs/prds/`. Each directory contains a `prd.
 | PRD | Status | Summary | Components |
 |-----|--------|---------|------------|
 | [[prds/agent-repl-interface/prd]] | design | Agent REPL-only development with composable `*ctx*` atom | [[components/agent-system]] |
-| [[prds/refinement/prd]] | active | Unified end-to-end system: flow topology, agent runtime, MCP REPL, Observatory | [[components/flow-topology]], [[components/agent-system]] |
+| [[prds/refinement/prd]] | active | Unified end-to-end system: flow topology, agent runtime, MCP REPL, Observatory (~98% done, auto-proxy pending) | [[components/flow-topology]], [[components/agent-system]] |
 | [[prds/startup-reliability/prd]] | active | Zero-issue startup: fix cascading failures, agent OOM, MCP blocking | [[components/flow-topology]], [[components/agent-system]], [[components/database]] |
 | [[prds/namespace-ui/prd]] | active | Namespace-as-app UI: introspection, renderers, Observatory, dashboard | [[components/web-layer]], [[components/renderer]] |
 | [[prds/render-pipeline/prd]] | active | Wire spec-driven rendering end-to-end, replace manual renderer registration | [[components/renderer]], [[components/code-graph]] |
 | [[prds/test-infrastructure/design]] | design | Unified test fixtures, data isolation, generative testing with shrinking | [[components/testing]] |
-| [[prds/mcp-resilience/prd]] | stalled | MCP server resilience: async request processing (Phase 1 done) | [[components/agent-system]] |
+| [[prds/mcp-resilience/prd]] | active | MCP server resilience: async request processing (Phase 1 done, remaining paused) | [[components/agent-system]] |
 
 ## Completed PRDs
 
@@ -35,8 +35,8 @@ All feature specifications live in `docs/prds/`. Each directory contains a `prd.
 
 | PRD | Status | Summary | Components |
 |-----|--------|---------|------------|
-| [[prds/spec-driven-rendering/prd]] | stalled | Datalevin-backed code index + automatic render function discovery (~Phase 1-3 partial) | [[components/code-graph]], [[components/renderer]] |
-| [[prds/polymarket-analysis/prd]] | stalled | Polymarket trader analysis tools (Stages 1-3 done, 4-7 remaining) | |
+| [[prds/spec-driven-rendering/prd]] | abandoned | Absorbed into render-pipeline and graph-cleanup PRDs | [[components/code-graph]], [[components/renderer]] |
+| [[prds/polymarket-analysis/prd]] | active | Polymarket trader analysis tools (Stages 1-3 done, 4-7 remaining) | |
 | [[prds/logging-system/prd]] | not started | Agent-safe log functions + web UI log viewer | [[components/web-layer]] |
 | [[prds/data-viewer/prd]] | not started | Expand/collapse interaction for nested Clojure data in browser | [[components/web-layer]] |
 | [[prds/schema-viewer/prd]] | not started | Web-based Malli schema browser with navigation | [[components/web-layer]], [[components/schema-system]] |

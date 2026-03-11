@@ -11,7 +11,7 @@ A domain test case: ingesting, aggregating, and analyzing prediction market data
 
 - Full HTTP client with pagination for Polymarket API
 - Basic aggregation: summarize, group, top-markets, daily volume
-- 25 tests passing, 142MB real data cached
+- 27 tests passing, 142MB real data cached
 
 ## Gaps
 

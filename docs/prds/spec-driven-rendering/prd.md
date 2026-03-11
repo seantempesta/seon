@@ -1,6 +1,6 @@
 ---
 type: prd
-status: active
+status: abandoned
 tags: [prd, database, flow, web]
 ---
 # PRD: Spec-Driven Rendering + Code Index

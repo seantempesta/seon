@@ -43,10 +43,10 @@ McCarthy designed Lisp for AI. Maybe the killer app was always agents writing Li
 
 ### The Right Database
 
-Datalevin is an embedded Datalog database on LMDB:
+Datalevin is a Datalog database on LMDB running as a separate JVM process:
 
 - **Datomic-compatible** - EAV datoms, pull API, Datalog queries
-- **Embedded** - No separate process, fast local storage
+- **Separate process** - Survives Seon restarts; TCP client connection on port 8898
 - **Agent isolation** - Each agent gets namespace-scoped database via connection manager
 - **ACID transactions** - Reliable writes with proper isolation
 

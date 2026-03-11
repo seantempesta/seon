@@ -44,21 +44,21 @@ review expands milestones and surfaces undocumented/untested work.
 
 | # | Agent | Scope | Status |
 |---|-------|-------|--------|
-| V9 | Issue triage | `orchestrator/issues/` (39 files) | in-progress |
-| V10 | Reference staleness | `reference/` (14 files) | in-progress |
+| V9 | Issue triage | `orchestrator/issues/` (39 files) | complete | 1 resolved, 3 annotated |
+| V10 | Reference staleness | `reference/` (14 files) | complete | 5 fixed, 1 issue created |
 
 ### Wave 4: Vision + Capabilities (2 agents)
 
 | # | Agent | Scope | Status |
 |---|-------|-------|--------|
-| V11 | Milestones | `vision/index.md`, `vision/m1-m8` | planned |
-| V12 | Capabilities | `vision/capabilities/` (30 files) | planned |
+| V11 | Milestones | `vision/index.md`, `vision/m1-m8` | in-progress |
+| V12 | Capabilities | `vision/capabilities/` (30 files) | in-progress |
 
 ### Wave 5: PRDs (1 agent)
 
 | # | Agent | Scope | Status |
 |---|-------|-------|--------|
-| V13 | PRD audit | `prds/` (22 dirs, ~105 files) | planned |
+| V13 | PRD audit | `prds/` (22 dirs, ~105 files) | in-progress |
 
 ### Wave 6: Reference Cleanup + Skills Audit
 
@@ -79,4 +79,6 @@ review expands milestones and surfaces undocumented/untested work.
 - 2026-03-11: Vault reorganization. Moved from iCloud to docs/. Created orchestrator workspace, issue notes, PRD index.
 - 2026-03-11: Phase B complete. 8 milestone docs, 30 capability notes, 36 issues, 14 component notes. M1-M5 verified.
 - 2026-03-11: Doc audit started. Wave 1 launched — 5 verifier agents checking component notes against source code.
-- 2026-03-11: Wave 1 complete. 25 fixes across 14 component docs. 3 new issues created (maybe-in-session-schemas, routes-conn-vs-dbname, test-coverage-audit-stale). Wave 2 launched.
+- 2026-03-11: Wave 1 complete. 25 fixes across 14 component docs. 3 new issues created.
+- 2026-03-11: Wave 2 complete. 20 fixes across architecture, concepts, conventions, indexes. 1 new issue.
+- 2026-03-11: Wave 3 complete. 1 issue resolved, 3 annotated, 34 confirmed open. 5 reference docs fixed, 1 issue created. Waves 4+5 launched.
