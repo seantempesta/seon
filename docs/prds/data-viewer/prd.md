@@ -1,6 +1,6 @@
 ---
 type: prd
-status: active
+status: draft
 tags: [prd]
 ---
 # PRD: Data Viewer - Expand/Collapse Interaction

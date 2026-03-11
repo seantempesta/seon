@@ -76,9 +76,9 @@ Throughout all of this, SSE pushes updates through a single flow-based mechanism
 
 ## Dependencies
 
-**Requires M3 (Discoverable Codebase)** to be at least partial -- the code graph must store function schemas for renderer discovery and schema browsing to work. M3 provides the queryable index; M5 makes it visible.
+**Requires M3 (Convention Uniformity)** to be at least partial -- the code graph must store function schemas for renderer discovery and schema browsing to work. M3's convention enforcement ensures functions have queryable shapes.
 
-**Requires M4 (not yet written)** for the rendering unification -- collapsing three rendering systems into one is a prerequisite for the schema browser and data explorer to use the same mechanism.
+**Requires M4 (Discoverable Codebase)** for the rendering unification -- collapsing three rendering systems into one is a prerequisite for the schema browser and data explorer to use the same mechanism. M4 provides the queryable index; M5 makes it visible.
 
 **Enables M6 (Eval Pipeline)** -- the observable system is the foundation for the agent cockpit. Agents need to see their namespace state rendered in real time. The composable AI renderers in M6 are the same discovery mechanism applied to agent context instead of browser views.
 

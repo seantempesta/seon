@@ -1,6 +1,6 @@
 ---
 type: prd
-status: completed
+status: active
 tags: [prd, agent]
 ---
 # MCP Server Resilience

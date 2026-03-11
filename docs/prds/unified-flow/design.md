@@ -1,6 +1,6 @@
 ---
 type: prd
-status: draft
+status: completed
 tags: [prd, database, flow, architecture]
 ---
 # Unified Flow System Design
