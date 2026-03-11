@@ -51,21 +51,21 @@ review expands milestones and surfaces undocumented/untested work.
 
 | # | Agent | Scope | Status |
 |---|-------|-------|--------|
-| V11 | Milestones | `vision/index.md`, `vision/m1-m8` | in-progress |
-| V12 | Capabilities | `vision/capabilities/` (30 files) | in-progress |
+| V11 | Milestones | `vision/index.md`, `vision/m1-m8` | complete | 2 fixes, 1 issue |
+| V12 | Capabilities | `vision/capabilities/` (30 files) | complete | 5 fixes |
 
 ### Wave 5: PRDs (1 agent)
 
 | # | Agent | Scope | Status |
 |---|-------|-------|--------|
-| V13 | PRD audit | `prds/` (22 dirs, ~105 files) | in-progress |
+| V13 | PRD audit | `prds/` (22 dirs, ~105 files) | complete | 10 status fixes |
 
 ### Wave 6: Reference Cleanup + Skills Audit
 
 | # | Agent | Scope | Status |
 |---|-------|-------|--------|
-| V14 | Reference rewrites | Fix 5 partially-stale reference docs (XTDB→Datalevin, dead paths) | planned |
-| V15 | Skills audit | Audit `.claude/skills/` — verify patterns match source, move duplicated knowledge into docs, add doc cross-refs so skills don't go stale | planned |
+| V14 | Reference rewrites | Fix 5 partially-stale reference docs (XTDB→Datalevin, dead paths) | in-progress |
+| V15 | Skills audit | Audit `.claude/skills/` — verify patterns match source, move duplicated knowledge into docs, add doc cross-refs so skills don't go stale | in-progress |
 
 ### Follow-up Passes
 
@@ -81,4 +81,5 @@ review expands milestones and surfaces undocumented/untested work.
 - 2026-03-11: Doc audit started. Wave 1 launched — 5 verifier agents checking component notes against source code.
 - 2026-03-11: Wave 1 complete. 25 fixes across 14 component docs. 3 new issues created.
 - 2026-03-11: Wave 2 complete. 20 fixes across architecture, concepts, conventions, indexes. 1 new issue.
-- 2026-03-11: Wave 3 complete. 1 issue resolved, 3 annotated, 34 confirmed open. 5 reference docs fixed, 1 issue created. Waves 4+5 launched.
+- 2026-03-11: Wave 3 complete. 1 issue resolved, 3 annotated, 34 confirmed open. 5 reference docs fixed, 1 issue created.
+- 2026-03-11: Waves 4+5 complete. 2 milestone fixes, 5 capability fixes, 10 PRD status corrections. 1 new issue (nippy-transitive-dep). Wave 6 launched.

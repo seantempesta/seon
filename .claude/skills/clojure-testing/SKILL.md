@@ -5,6 +5,8 @@ description: "Clojure test patterns for Seon. Use when writing tests, debugging 
 
 # Clojure Testing
 
+> See also: `docs/seon/components/testing.md`
+
 **How to run tests is documented in CLAUDE.md "Testing".** This skill covers patterns, fixtures, and debugging.
 
 ## Test Fixtures
