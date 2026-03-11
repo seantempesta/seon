@@ -33,7 +33,7 @@ The agent system manages the full lifecycle of AI agents: spawning isolated JVM 
 
 - `launch-agent!` — spawn Claude agent with isolated session, nREPL, MCP, file context. Returns handle with channels and close function
 - `launch-agent!!` — blocking variant, waits for completion and returns parsed result
-- Options: `::ai/namespace`, `::ai/prompt`, `::model`, `::files`, `::sdk/permission-mode`, `::sdk/max-turns`, `::sdk/max-budget-usd`, `::sdk/allowed-tools`, `::sdk/disallowed-tools`, `::sdk/chrome`
+- Options: `::ai/namespace`, `::ai/prompt`, `::model`, `::files`, `::sdk/permission-mode`, `::sdk/max-turns`, `::sdk/max-budget-usd`, `::sdk/allowed-tools`, `::sdk/disallowed-tools`, `::sdk/chrome`, `::ai/force?` (skip duplicate-namespace guard)
 
 **Observatory** (`seon.ai.agent`):
 
@@ -137,7 +137,7 @@ All multimethods dispatch on `:provider` key:
 
 **Fire-and-forget persistence**: `seon.ai.datalevin` writes are best-effort — errors are logged but never propagated. This prevents a Datalevin hiccup from killing a running agent. Stats are tracked via `stats-atom` for monitoring.
 
-**Dual ID system**: Each agent has both a 4-6 char hex "Seon session ID" (used for log files, MCP routing, display) and a longer "AI session ID" (ses-xxx, used for Datalevin entity references). The mapping is stored in the session entity.
+**Dual ID system**: Each agent has both a 6-char Base62 "Seon session ID" (used for log files, MCP routing, display) and a longer "AI session ID" (ses-xxx, used for Datalevin entity references). The mapping is stored in the session entity.
 
 **File context in prompt**: The `::files` option reads files at launch time and embeds their content directly in the agent's prompt. This is simpler than having agents discover files themselves and ensures they start with the right context.
 
@@ -153,6 +153,6 @@ All multimethods dispatch on `:provider` key:
 - **`seon.ai.datalevin` dl-* functions** use positional args (internal pattern) but are de-facto public API consumed by `seon.web.agents` and `seon.ai.claude`. Migrating to map-in would break consumers but improve consistency
 - **`seon.ai.datalevin` entity conversion** manually handles nil filtering and Instant-to-Date coercion — this could be unified with the schema bridge
 - **`:any` in tool schemas** — `::tool-call` and `::tool-result` have `:any` for `:input` and `:content` fields. The wire protocol carries arbitrary data, but this violates the "no `:any`" rule
-- **`seon.ai.claude`** is ~1200 lines — `launch-agent!` alone is 300+ lines. The prompt building, MCP config, and message processing loop could each be extracted
+- **`seon.ai.claude`** is ~1370 lines — `launch-agent!` alone is 300+ lines. The prompt building, MCP config, and message processing loop could each be extracted
 - **`seon.orchestrator.session`** uses `[:maybe ...]` in some schemas despite the project convention preferring `{:optional true}`
 - **Gemini model list** hardcodes `"gemini-3-flash-preview"` and `"gemini-3-pro-preview"` as enums — these will need updating as models change

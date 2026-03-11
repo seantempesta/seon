@@ -62,6 +62,7 @@ The routes layer (`seon.ns.routes`) is the HTTP-facing surface; this component i
 |----------|---------|
 | `render-value` | Map-in API: `{::value v ::format :html}` -> rendered output |
 | `typed` | Attach `:seon/view` metadata to value for dispatch |
+| `with-schema` | Attach `:seon/schema` metadata to a value (map-in: `{::schema-key k ::value v}`) |
 | `view-type` | Extract view type from value metadata |
 | `detail-url` / `list-url` | Build `/ns/` URLs from view-type keywords |
 | `render*` | Internal multimethod dispatching on `[format view-type]` |
@@ -202,7 +203,7 @@ Startup:
 
 ## Refactoring Opportunities
 
-- **routes.clj is ~940 lines** — the introspection view HTML (~250 lines of hiccup) should move to `seon.ns.introspect.view`. Function dispatch machinery (`parse-form-body`, `coerce-with-schema`, `resolve-and-call`) could become `seon.ns.dispatch`.
+- **routes.clj is ~1000 lines** — the introspection view HTML (~250 lines of hiccup) should move to `seon.ns.introspect.view`. Function dispatch machinery (`parse-form-body`, `coerce-with-schema`, `resolve-and-call`) could become `seon.ns.dispatch`.
 - **`namespace-handlers` atom uses plain symbol keys** — should be namespaced keywords per project conventions.
 - **`resolve-and-call` discards return value** in POST handler — only GET handler returns the function result to the client.
 - **Multiple `:any` schemas in lifecycle.clj** — `::ctx-atom`, `::render-fn`, `::data` are all registered as `:any`, which violates the no-`:any` convention. These are difficult to type precisely (atoms, function vars, arbitrary maps) but could use more specific shapes.

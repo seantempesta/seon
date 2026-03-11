@@ -26,16 +26,22 @@ PreToolUse (before edit lands)
        -> BLOCK if invalid (edit never happens)
 
 PostToolUse (after edit lands)
-  1. repair    — parinferish fixes unbalanced delimiters, cljfmt reformats
-  2. reload    — clj-reload reloads changed namespaces + dependents
-  3. index     — best-effort code graph update via graph/extract + graph/ingest
-  4. compliance — checks :malli/schema, map-in pattern, docstrings
-  5. unit tests — runs *-test namespace if it exists
-  6. gen tests  — Malli mg/check on schema-annotated functions
-  7. record     — stores edit event in memory (context tracking)
-  8. review     — Gemini AI review if rate limit allows (every 60s)
-  -> BLOCK if reload fails or tests fail (configurable)
-  -> FEEDBACK with dense summary line: "5 tests, gen-tests, compliant (0.3s)"
+  Markdown files (.md):
+    -> markdown/validate-file — checks frontmatter, structure, wikilinks
+    -> markdown/fix — auto-fixes formatting (blank lines, trailing whitespace)
+    -> re-validate, FEEDBACK if structural issues remain
+
+  Clojure source files (.clj):
+    1. repair     — parinferish fixes unbalanced delimiters, cljfmt reformats
+    2. reload     — clj-reload reloads changed namespaces + dependents
+                    (index update is inline: best-effort code graph update after reload)
+    3. compliance — checks :malli/schema, map-in pattern, docstrings
+    4. unit tests — runs *-test namespace if it exists
+    5. gen tests  — Malli mg/check on schema-annotated functions
+    6. record     — stores edit event in memory (context tracking)
+    7. review     — Gemini AI review if rate limit allows (every 60s)
+    -> BLOCK if reload fails or tests fail (configurable)
+    -> FEEDBACK with dense summary line: "5 tests, gen-tests, compliant (0.3s)"
 
 ```
 
@@ -61,6 +67,8 @@ PostToolUse (after edit lands)
 | `src/seon/dev/analysis.clj` | clj-kondo library integration for call graphs and var definitions |
 | `src/seon/dev/codebase.clj` | File-to-namespace mapping, source reading, test file detection |
 | `src/seon/dev/instrumentation.clj` | Malli runtime instrumentation with agent-friendly error messages |
+| `src/seon/dev/markdown.clj` | Markdown validation and auto-fixing — parses, validates frontmatter/structure, auto-fixes formatting |
+| `src/seon/dev/clojure_replace.clj` | Comment-aware s-expression match/replace editing using rewrite-clj (MCP `clojure_replace` tool backend) |
 | `src/seon/dev/test.clj` | REPL-first structured test runner (`test`, `test-all`, `test-affected`, `test-gen`) |
 | `src/seon/dev/test_select.clj` | Dependency-aware test selection via code graph |
 | `src/seon/repl.clj` | REPL form router — classify, eval via flow, store in Datalevin, index |
@@ -74,9 +82,10 @@ PostToolUse (after edit lands)
 The main entry point `process-hook-event!` accepts a Claude Code hook event JSON and a config map (merged with defaults). It classifies the event by tool name and event type, then dispatches:
 
 - **PreToolUse Edit/Write** on Seon source files: runs `lint/validate-for-write` which does syntax + clj-kondo analysis. Blocks with detailed error message including "did you mean?" suggestions if invalid.
-- **PostToolUse Edit/Write** on Seon source files: runs the full 8-stage pipeline. Each stage can short-circuit with a block response.
+- **PostToolUse Edit/Write** on Seon source files: runs the full 7-stage pipeline. Each stage can short-circuit with a block response.
+- **PostToolUse Edit/Write** on Markdown files: runs `markdown/validate-file` then `markdown/fix` (auto-fix formatting), re-validates, and returns feedback for remaining structural issues.
 - **PostToolUse TodoWrite**: records agent todo list snapshots to in-memory store for widget display.
-- **Non-Clojure files**: passed through with no processing.
+- **Non-Clojure, non-Markdown files**: passed through with no processing.
 
 Configuration is deeply merged with `default-config`:
 
@@ -138,6 +147,17 @@ Checks every public function in a namespace for:
 - Schema naming convention (`fn-name-request`/`fn-name-response`)
 
 `format-violations` produces brief summaries; with `::with-fixes true` it generates copy-pasteable fix code including schema registrations, metadata, and map-in signatures.
+
+### Markdown Validation (`markdown.clj`)
+
+Seon-native markdown linter that runs automatically on every `.md` file edit. Replaces the external `markdownlint-cli2` npm dependency.
+
+Two operations:
+
+- **`validate-file`** — parses the document and checks: YAML frontmatter present, ATX headings only (no setext), no heading level jumps, one h1 per doc, dash for lists, wikilink targets exist in the vault, no bare URLs.
+- **`fix`** — auto-fixes formatting violations: blank lines around headings and code fences, no multiple blank lines, trailing newline, no trailing whitespace. Returns `::fixed-count` so callers know if anything changed.
+
+After auto-fix, the hook re-validates and reports only the remaining structural violations (which require human judgment to fix).
 
 ### Schema Instrumentation (`instrumentation.clj`)
 

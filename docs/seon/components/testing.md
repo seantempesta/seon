@@ -161,7 +161,7 @@ Also provides `assert-tempid-roundtrip!` for entities without a `:db/unique` ide
 | [[components/namespace-lifecycle]] | `ns/lifecycle_test` (14), `ns/routes_test` (6) | **good** |
 | [[components/web-layer]] | `web/handlers_test` (5), `web/browser_test` (21), `web/sse/flow_test` (20), `web/reactive/actions_test` (2), `web/reactive/transform_test` (7) | **good** — handlers, browser, SSE, reactive |
 | [[components/agent-system]] | `ai/agent_test` (35), `ai/agent/log_test` (9), `ai/claude_test` (22), `ai/gemini_test` (14), `ai/datalevin_test` (14), `ai_test` (27), `agent/env_test` (14), `orchestrator/session_test` (15) | **good** — extensive |
-| [[components/dev-tools]] | `dev/hook_test` (19), `dev/verify_test` (7), `dev/test_select_test` (6), `dev/context_test` (10), `dev/clojure_replace_test` (27), `dev/lint_test` (8), `dev/suggestions_test` (4), `dev/analysis_test` (6), `dev/codebase_test` (9), `dev/review_test` (10), `dev/compliance_test` (8), `dev/repair_test` (5) | **good** — very thorough |
+| [[components/dev-tools]] | `dev/hook_test` (19), `dev/verify_test` (7), `dev/test_select_test` (6), `dev/context_test` (10), `dev/clojure_replace_test` (27), `dev/lint_test` (8), `dev/suggestions_test` (4), `dev/analysis_test` (6), `dev/codebase_test` (9), `dev/review_test` (10), `dev/compliance_test` (8), `dev/repair_test` (5), `dev/markdown_test` (24) | **good** — very thorough |
 
 ### Other Test Files (not mapped to components)
 

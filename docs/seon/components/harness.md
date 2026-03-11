@@ -20,6 +20,7 @@ The harness also enforces backpressure: each instance tracks pending requests ag
 | `seon.flow.harness` | `src/seon/flow/harness.clj` | Step function, JVM lifecycle, backpressure |
 | `seon.flow.harness.channel` | `src/seon/flow/harness/channel.clj` | Length-prefixed Nippy over TCP adapter |
 | `seon.flow.harness.bridge` | `src/seon/flow/harness/bridge.clj` | Agent-JVM-side execution and reverse channel |
+| `seon.flow.harness.proxy` | `src/seon/flow/harness/proxy.clj` | Proxy namespace generation for transparent cross-namespace calls |
 
 ## Public API Surface
 
@@ -31,7 +32,7 @@ The harness also enforces backpressure: each instance tracks pending requests ag
 
 ### `seon.flow.harness.channel`
 
-- **`start-server!`** — Opens a TCP `ServerSocket` on loopback, accepts one client. Returns `{::in-ch ::out-ch ::close!}`.
+- **`start-server!`** — Opens a TCP `ServerSocket` on loopback, accepts one client. Returns `{::server ::port ::in-ch ::out-ch ::close!}`.
 - **`connect!`** — Connects to a TCP server. Returns `{::in-ch ::out-ch ::close!}`.
 
 ### `seon.flow.harness.bridge`
@@ -95,6 +96,11 @@ Namespace A (caller)
 ### Reverse Channel (cross-namespace from agent side)
 
 When agent code needs to call a function in another namespace, `remote-call!` sends a request back through the TCP channel to the orchestrator, which routes it to the target harness. The reply flows back and is delivered to the waiting promise via `bridge-step`'s `:seon.flow.in/reply` handler.
+
+### `seon.flow.harness.proxy`
+
+- **`proxy-fn`** — Creates a single proxy function that routes calls through the reverse channel. Takes `{::request-ch ::from-ns ::target-ns ::fn-name ::fn-meta}`, returns a blocking function.
+- **Namespace generation** — Creates proxy namespaces in the agent JVM so agent code uses normal `(require '[seon.foo :as foo])` / `(foo/bar ...)` syntax. Calls are transparently routed via `bridge/remote-call!` to the orchestrator, which dispatches to the target namespace's harness.
 
 ## Design Decisions
 

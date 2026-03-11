@@ -34,7 +34,7 @@ The context system gives each namespace instance a managed stateful atom. When n
 | `clients` / `client-count` | Query connected clients |
 | `force-push!` | Manually trigger render + SSE push |
 | `set-render-fn!` | Update render function post-creation |
-| `instances-for-namespace` / `clients-for-namespace` | Namespace-level queries |
+| `instances-for-namespace` / `clients-for-namespace` / `client-count-for-namespace` | Namespace-level queries |
 | `persist!` / `load!` | Manual persistence to/from Datalevin |
 | `list-instances` | List all active instances |
 
@@ -79,10 +79,12 @@ The context system gives each namespace instance a managed stateful atom. When n
 
 ### Validation Modes
 
-Two mutually exclusive validation approaches, both using atom `:validator`:
+Two validation approaches, both using atom `:validator`:
 
 - **Per-key validation** (`::validate? true`): Every key must be namespaced, have a registered Malli schema, and pass validation. Reserved keys (`seon.agent/*`, `seon.ns/*`) cannot be added, modified, or removed.
-- **Whole-state validation** (`::ctx-schema`): A single Malli schema validates the entire state map on every `swap!`. Takes precedence over per-key when both specified.
+- **Whole-state validation** (`::ctx-schema`): A single Malli schema validates the entire state map on every `swap!`.
+
+When both are specified, both run: the validator calls `validate-state` (per-key) AND the schema validator. They are not mutually exclusive despite the intent — `::ctx-schema` takes precedence in ordering but doesn't suppress per-key checks.
 
 ### Registry
 

@@ -29,6 +29,8 @@ Both flows use the same reply-router pattern: caller registers a promise, inject
 | `seon.flow.pool` | `src/seon/flow/pool.clj` | Pre-warmed JVM pool -- spawn, acquire, release, health check agent JVMs |
 | `seon.flow.harness` | `src/seon/flow/harness.clj` | Per-namespace step-fn that routes requests to agent JVMs via TCP |
 | `seon.flow.harness.channel` | `src/seon/flow/harness/channel.clj` | TCP channel management for harness-to-agent communication |
+| `seon.flow.harness.proxy` | `src/seon/flow/harness/proxy.clj` | Proxy namespace generation for transparent cross-namespace calls on agent JVMs |
+| `seon.flow.agent-runner` | `src/seon/flow/agent_runner.clj` | Agent JVM entry point — starts nREPL server, optionally connects to Datalevin |
 
 ## Public API Surface
 

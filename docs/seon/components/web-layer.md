@@ -25,7 +25,7 @@ The web layer serves Seon's browser UI using a **shim + SSE** pattern: each page
 | `seon.web.flows` | `src/seon/web/flows.clj` | Flow monitor page — topology diagrams, process tables, error feeds |
 | `seon.web.agents` | `src/seon/web/agents.clj` | Agent Observatory — running + completed agents, detail view with conversation logs |
 | `seon.web.logs` | `src/seon/web/logs.clj` | Log viewer state: tail `logs/app.log`, parse logback format, level filtering |
-| `seon.web.namespace` | `src/seon/web/namespace.clj` | `/ns/{namespace}` pages — introspection of any loaded seon.* namespace |
+| `seon.web.namespace` | `src/seon/web/namespace.clj` | Namespace introspection handlers (`namespace-page`, `namespace-sse`) — not currently wired into routes (superseded by `seon.ns.routes`) |
 | `seon.web.reactive.transform` | `src/seon/web/reactive/transform.clj` | Hiccup transform: `:on:click` to `data-on:click @post(...)`, `:field` to HTML `name` |
 | `seon.web.reactive.actions` | `src/seon/web/reactive/actions.clj` | Action resolution: resolve `seon.*` function symbols, security gate |
 | `seon.web.reactive.demo` | `src/seon/web/reactive/demo.clj` | Instance-based reactive demo: counter, item list, live input |
@@ -38,7 +38,7 @@ The web layer serves Seon's browser UI using a **shim + SSE** pattern: each page
 
 **SSE engine** (`seon.web.sse`):
 
-- `render-handler` — factory that creates SSE handlers from a render function. Options: `:poll-ms`, `:write-profile`, `:use-view-transition?`, `:auto-brotli?`
+- `render-handler` — factory that creates SSE handlers from a render function. Options: `:poll-ms`, `:write-profile`, `:use-view-transition?`, `:auto-brotli?` (default `false`), `:on-open`, `:on-close`, `:render-on-connect` (default `true`)
 - `refresh-all!` — trigger re-render for all connected SSE clients
 - `patch-elements` — build Datastar SSE event with selector, mode (outer/inner/append/prepend/before/after/replace/remove)
 - `execute-script` — build Datastar SSE event for JS execution
@@ -119,7 +119,7 @@ The aggregator debounces rapid code changes (50ms default), groups by namespace,
 
 ## Refactoring Opportunities
 
-- **`seon.web.agents`** is the largest file (~700 lines) — the observatory rendering could be split into a dedicated view namespace, similar to how `seon.ai.agent.views` works
+- **`seon.web.agents`** is the largest file (~1150 lines) — the observatory rendering could be split into a dedicated view namespace, similar to how `seon.ai.agent.views` works
 - **`seon.web.html`** mixes base template with dashboard-specific content; dashboard content could move to its own namespace
 - **Log viewer title** still says "ML Options Trading" (`log-viewer-shim`) — stale from before the rename to Seon
 - **`seon.agent.helpers`** SQL functions all throw "not yet migrated to Datalevin" — dead code that should be removed or migrated
