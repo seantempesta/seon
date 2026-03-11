@@ -37,5 +37,5 @@ Model "no value" as **key absence**, never as nil. For persisted schemas: `{:opt
 ## Details
 
 - `docs/prds/schema-unification/research/nil-semantics-findings.md` -- full research with REPL verification
-- [[components/malli]] for schema patterns
-- [[components/datalevin]] for EAV semantics
+- [[components/schema-system]] for schema patterns
+- [[components/database]] for EAV semantics

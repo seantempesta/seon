@@ -23,7 +23,7 @@ Flow SHOULD be adopted for internal orchestration (message routing, status aggre
 
 ## 1. Vision Alignment
 
-How does Flow relate to Seon's 7-layer architecture from VISION.md?
+How does Flow relate to Seon's 7-layer architecture from [[vision/index]]?
 
 ### Layer 1: Contracts & Discovery
 **Flow contribution:** None

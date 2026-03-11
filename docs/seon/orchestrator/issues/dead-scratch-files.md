@@ -18,4 +18,4 @@ severity: cleanup
 - If any test value exists, move to `tmp/` or `test/` instead
 
 ## Related
-- [[components/dev-tooling]]
+- [[components/dev-tools]]

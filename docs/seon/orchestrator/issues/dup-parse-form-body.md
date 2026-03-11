@@ -18,4 +18,4 @@ severity: cleanup
 - Tests pass
 
 ## Related
-- [[components/web-server]]
+- [[components/web-layer]]

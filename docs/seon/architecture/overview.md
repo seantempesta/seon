@@ -4,7 +4,7 @@ status: reference
 ---
 # Current State: How Seon Works Today
 
-> A narrative of how data flows through the system. For component details, follow the [[components/X]] links.
+> A narrative of how data flows through the system. For component details, follow the component links below.
 
 ## How a Namespace Comes Alive
 

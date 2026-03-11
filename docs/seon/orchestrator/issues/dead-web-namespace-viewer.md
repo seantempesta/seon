@@ -18,4 +18,4 @@ severity: cleanup
 - No test failures after removal
 
 ## Related
-- [[components/namespace-routes]]
+- [[components/namespace-lifecycle]]

@@ -26,4 +26,4 @@ All use the bare word "status," making code and data ambiguous.
 
 ## Related
 - [[components/flow-topology]]
-- [[components/health]]
+- [[components/system-lifecycle]]

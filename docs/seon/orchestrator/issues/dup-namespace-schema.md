@@ -18,4 +18,4 @@ severity: friction
 - Tests pass
 
 ## Related
-- [[components/schema]]
+- [[components/schema-system]]

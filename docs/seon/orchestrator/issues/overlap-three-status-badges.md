@@ -24,4 +24,4 @@ The same visual element (status badge) is implemented three times with slightly 
 - Agent-specific styling handled via parameters, not a separate implementation
 
 ## Related
-- [[components/web-server]]
+- [[components/web-layer]]

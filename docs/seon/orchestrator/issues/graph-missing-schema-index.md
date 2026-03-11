@@ -6,7 +6,7 @@ severity: blocking
 # Graph Doesn't Index Function Schemas
 
 ## Problem
-The code graph indexes function names, arglists, docstrings, and dependencies -- but not input/output Malli schemas. Without this, schema-based discovery (VISION.md M2) is impossible. The schema data is available at runtime via `malli.core/function-schemas` but the ingest pipeline doesn't capture it.
+The code graph indexes function names, arglists, docstrings, and dependencies -- but not input/output Malli schemas. Without this, schema-based discovery ([[vision/index]] M2) is impossible. The schema data is available at runtime via `malli.core/function-schemas` but the ingest pipeline doesn't capture it.
 
 ## Where
 - `src/seon/graph/ingest.clj` — ingest pipeline lacks schema extraction

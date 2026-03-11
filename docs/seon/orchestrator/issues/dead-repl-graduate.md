@@ -17,4 +17,4 @@ severity: cleanup
 - No test failures after removal
 
 ## Related
-- [[components/repl]]
+- [[components/agent-system]]

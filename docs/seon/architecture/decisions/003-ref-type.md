@@ -45,4 +45,4 @@ Define `:seon.db/ref` as a custom Malli type in `seon.schema` that accepts both 
 
 - `src/seon/schema.clj` -- type definition
 - `src/seon/db/schema.clj` -- bridge recognition
-- [[components/datalevin]] for ref semantics (component vs non-component)
+- [[components/database]] for ref semantics (component vs non-component)
