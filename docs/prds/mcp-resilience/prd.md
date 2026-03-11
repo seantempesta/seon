@@ -15,6 +15,7 @@ This is a critical infrastructure issue because the orchestrator is the primary 
 ### Scenario 1: Cancelled Blocking Eval
 
 **Steps to reproduce:**
+
 1. Launch a blocking agent: `(user/launch-agent!! 'ns "prompt")` with long timeout
 2. User cancels the MCP eval (Ctrl+C or UI cancel)
 3. Attempt any new eval: `(user/agents)`
@@ -26,6 +27,7 @@ This is a critical infrastructure issue because the orchestrator is the primary 
 ### Scenario 2: Interrupt Tool Fails When Needed
 
 **Steps to reproduce:**
+
 1. Get into the stuck state from Scenario 1
 2. Call `interrupt_eval(session_id="orchestrator")`
 
@@ -86,6 +88,7 @@ From [nREPL documentation](https://nrepl.org/nrepl/ops.html):
 Each session has a dedicated execution thread. Evaluations queue up and execute one at a time.
 
 **Interrupt mechanism:**
+
 - Interrupt CAN use a separate TCP connection - sessions are "persistent, cross-connection REPL sessions"
 - Interrupt sends a signal, waits 100ms, then 5000ms, then forcibly stops the thread
 - A new execution thread is spawned with preserved dynamic bindings
@@ -99,6 +102,7 @@ From [Babashka documentation](https://book.babashka.org/):
 > "Babashka supports real JVM threads and like Clojure, supports futures and dynamic thread-locally bound vars."
 
 Available primitives:
+
 - `future` - for async computation ✓
 - `promise` - for coordination ✓
 - `clojure.core.async` - full support ✓
@@ -116,12 +120,14 @@ The MCP server main loop (lines 718-728) is **synchronous**:
 ```
 
 When `handle-request` → `execute-eval` → `nrepl-eval` is called:
+
 1. It opens a TCP socket to nREPL
 2. Sends the eval request
 3. **Blocks reading responses** until "done" status received
 4. The main loop cannot read new stdin until this returns
 
 When user cancels:
+
 1. Claude Code stops waiting for the MCP response
 2. MCP server process continues running, still blocked in socket read
 3. New requests from Claude Code arrive on stdin
@@ -182,11 +188,13 @@ Proposed (fixed):
 **Changes to `bin/mcp-server`:**
 
 1. **Add response queue/atom:**
+
    ```clojure
    (def response-queue (atom []))
    ```
 
 2. **Wrap blocking operations in `future`:**
+
    ```clojure
    (defn handle-tools-call-async [id {:keys [name arguments]}]
      (future
@@ -199,6 +207,7 @@ Proposed (fixed):
    ```
 
 3. **Non-blocking main loop:**
+
    ```clojure
    (loop []
      ;; Flush any pending responses first
@@ -218,11 +227,13 @@ Proposed (fixed):
    ```
 
 4. **Track running eval for interrupt:**
+
    ```clojure
    (def running-eval (atom nil))  ; {:future f :session-id sid}
    ```
 
 **Why this works:**
+
 - Main loop can always read new requests (including interrupts)
 - Interrupt can cancel the `future` and send nREPL interrupt
 - Concurrent detection works because we can read the new request
@@ -281,6 +292,7 @@ Keep the old synchronous code path as a fallback (env var toggle) in case async 
 6. **Enhanced interrupt** - Cancels running future AND sends nREPL interrupt
 
 **Key functions added:**
+
 - `queue-response!`, `queue-error!` - Queue responses from futures
 - `execute-tool-sync` - Synchronous tool execution
 - `blocking-tool?` - Identifies tools that need async handling
@@ -288,6 +300,7 @@ Keep the old synchronous code path as a fallback (env var toggle) in case async 
 - `log-info` - Info-level logging for startup messages
 
 **Behavior change:**
+
 - Main loop now polls stdin with 10ms sleep (100 checks/sec)
 - Blocking evals run in background threads
 - Interrupt requests are processed immediately, even during long-running evals
@@ -297,17 +310,20 @@ Keep the old synchronous code path as a fallback (env var toggle) in case async 
 ## Related Work
 
 ### Recently Completed (This PR)
+
 - **Phase 0:** Research confirmed root cause (single-threaded blocking main loop)
 - **Phase 1:** Implemented async request processing with futures
 - MCP Server version bumped to 0.3.0
 
 ### Previously Completed
+
 - Added persistent orchestrator nREPL session for interrupt support
 - Added `interrupt_eval(session_id="orchestrator")` tool
 - Added concurrent eval detection (now works with async processing)
 - Improved "busy" error message with guidance
 
 ### In Progress (Paused)
+
 - Agent stuck detection improvements (task #5)
   - Expose result subtype ("error_max_turns")
   - Add last-activity-at tracking
@@ -315,6 +331,7 @@ Keep the old synchronous code path as a fallback (env var toggle) in case async 
   - Agent health helper function
 
 ### Related But Separate
+
 - 10000 max-turns fix (needs verification)
 - Observatory XTDB view consolidation
 

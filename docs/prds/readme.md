@@ -10,6 +10,7 @@ rm docs/prds/your-feature-name/README.md
 ```
 
 Or manually:
+
 ```bash
 mkdir -p docs/prds/your-feature-name/research
 touch docs/prds/your-feature-name/{prd,decisions,notes}.md
@@ -76,6 +77,7 @@ This is guidance, not prescription -- pivot if a better approach emerges.
 4. **Validate** -- Run tests, verify success criteria, update docs
 
 **Key principles:**
+
 - PRDs are guidance, not gospel -- pivot and document why
 - Verify everything in the REPL -- `(user/run-tests 'ns)` not `clj -M:test`
 - Document decisions and learnings as you go
@@ -84,6 +86,7 @@ This is guidance, not prescription -- pivot if a better approach emerges.
 ## Research Documents
 
 Use `research/` for spikes, evaluations, and findings. Prefix files descriptively:
+
 - `spike-*.md` -- proof-of-concept experiments
 - `findings-*.md` -- research summaries
 - `eval-*.md` -- technology comparisons
@@ -91,6 +94,7 @@ Use `research/` for spikes, evaluations, and findings. Prefix files descriptivel
 ## Decision Log Format
 
 Each decision in `decisions.md` should answer:
+
 - **What** was decided
 - **Why** this approach
 - **Alternatives** considered

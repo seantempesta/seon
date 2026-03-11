@@ -95,6 +95,7 @@ Find functions that can consume the given data keys. This is the inverse of `fun
 ```
 
 **Implementation approach:**
+
 1. Query all functions with input-spec links
 2. For each, pull input-spec contains-keys and optional-keys
 3. Compute required-keys = contains - optional
@@ -131,6 +132,7 @@ Default documentation renderer for any namespace. Queries the graph for function
 ```
 
 **Implementation approach:**
+
 1. Use `gq/functions-in-ns` to get all functions
 2. For each function with input/output spec, pull spec data
 3. Filter to public functions only (unless detail is :deep-dive)
@@ -163,6 +165,7 @@ Find the best documentation renderer for a namespace. Enables custom doc rendere
 ```
 
 **Implementation approach:**
+
 1. Call `functions-with-output-key` with `:seon.render/documentation`
 2. Filter candidates by namespace proximity (prefer same ns or .render child)
 3. If available-keys provided, filter by required-keys subset
@@ -199,6 +202,7 @@ Thin wrapper around `seon.graph.context/build-for-namespace` with documentation 
 ```
 
 **Implementation approach:**
+
 1. Try `resolve-docs` for custom documentation
 2. If nil, use `render-ns-docs` with `:interface` detail
 3. Call `seon.graph.context/build-for-namespace` for call graph context
@@ -213,12 +217,14 @@ Thin wrapper around `seon.graph.context/build-for-namespace` with documentation 
 **Recommendation: Runtime `resolve` is simpler and sufficient.**
 
 Rationale:
+
 - Namespace docstrings already exist in the graph (`:seon.ns/doc`)
 - Function schemas/docs already exist in the graph
 - The unified pattern (output key = `:seon.render/documentation`) handles custom renderers
 - No new machinery needed - just register a `-response` spec with the right output key
 
 If a namespace wants custom documentation, it can define:
+
 ```clojure
 (schema/register! ::ns-docs-request [:map [::*ctx* ::*ctx*]])
 (schema/register! ::ns-docs-response [:map [:seon.render/documentation :string]])
@@ -260,6 +266,7 @@ Call `invalidate-output-key-cache!` from `invalidate-render-cache!` so both are 
 **Recommendation: `:interface` (arglists + key types)**
 
 Rationale:
+
 - `:summary` is too sparse for most use cases
 - `:deep-dive` may be too verbose, especially for large namespaces
 - `:interface` gives enough to understand how to call functions without overwhelming
@@ -267,6 +274,7 @@ Rationale:
 Example output at each level:
 
 **`:summary`**
+
 ```
 ## seon.graph.query
 - dependents-of
@@ -276,6 +284,7 @@ Example output at each level:
 ```
 
 **`:interface`** (default)
+
 ```
 ## seon.graph.query
 
@@ -292,6 +301,7 @@ Find functions whose output spec contains a specific key.
 ```
 
 **`:deep-dive`**
+
 ```
 ## seon.graph.query
 
@@ -311,6 +321,7 @@ Input spec (::dependents-of-request):
 Output spec (::dependents-of-response):
   [:vector :string]
 [...etc...]
+
 ```
 
 ---

@@ -26,30 +26,37 @@ Flow SHOULD be adopted for internal orchestration (message routing, status aggre
 How does Flow relate to Seon's 7-layer architecture from [[vision/index]]?
 
 ### Layer 1: Contracts & Discovery
+
 **Flow contribution:** None
 Flow has no concept of schemas or contracts. Seon's Malli registry remains the solution.
 
 ### Layer 2: Agent Isolation
+
 **Flow contribution:** Partial
 Flow processes are isolated (no shared state between step functions). But Seon needs **resource isolation** (nREPL, XTDB per agent), which Flow doesn't provide. Integrant remains the solution.
 
 ### Layer 3: Verification
+
 **Flow contribution:** None
 Flow doesn't do testing. Dev hooks + Kaocha + generative testing remain.
 
 ### Layer 4: Observability
+
 **Flow contribution:** Strong
 Flow's introspection (`ping`, `datafy`) and flow-monitor UI are excellent. These patterns should inform Seon's Observatory, even if we don't use Flow directly.
 
 ### Layer 5: Dynamic Context (The Cockpit)
+
 **Flow contribution:** Partial
 Flow's `ping` returns live process state - useful for the cockpit. BUT: Claude's context window is opaque. Flow can't help with context window management.
 
 ### Layer 6: Learning from History
+
 **Flow contribution:** None
 Flow state is in-memory. XTDB remains the solution for temporal queries.
 
 ### Layer 7: Long-term Ownership
+
 **Flow contribution:** None
 Flow processes don't "own" code. Agents as persistent namespace stewards requires custom design.
 
@@ -127,6 +134,7 @@ Despite the mismatch at the agent level, Flow is excellent for **internal orches
 ```
 
 **Benefits:**
+
 - Explicit topology (visible in data, not hidden in code)
 - Centralized error handling via `:error-chan`
 - Introspection via `ping` for debugging
@@ -159,6 +167,7 @@ Despite the mismatch at the agent level, Flow is excellent for **internal orches
 ```
 
 Each adapter:
+
 - Owns a Claude CLI subprocess
 - Has a reader thread bridging stdout → channel
 - Registers with the agent registry
@@ -257,6 +266,7 @@ If we adopt Flow for orchestration, here's how agent lifecycle would work:
 **Short answer: No, because Claude's state is opaque.**
 
 Flow step functions return explicit state, enabling:
+
 1. `(ping flow)` → capture all process states
 2. Serialize to disk (EDN/Transit)
 3. On restart: restore state in init
@@ -264,6 +274,7 @@ Flow step functions return explicit state, enabling:
 **BUT:** This only serializes OUR state, not Claude's.
 
 Claude's "state" is:
+
 - The conversation history (we can serialize via XTDB)
 - The parsed context window (we cannot access)
 - Internal reasoning state (completely opaque)
@@ -282,6 +293,7 @@ Claude's "state" is:
 ### Hibernation Workarounds
 
 **Option A: Soft Resume**
+
 1. Agent hits context limit
 2. Summarize progress to XTDB
 3. Kill Claude CLI
@@ -290,6 +302,7 @@ Claude's "state" is:
 6. Agent continues with "memory" of what happened
 
 **Option B: Task Handoff**
+
 1. Agent completes subtask
 2. Writes progress summary
 3. New agent picks up next subtask
@@ -349,22 +362,30 @@ Flow could standardize how Seon integrates with external systems:
 If we adopt Flow selectively, here's an incremental approach:
 
 ### Phase 1: Observatory SSE (Low Risk)
+
 Replace current SSE implementation with Flow-based streaming:
+
 - Single process: SSE sender
 - Benefits: cleaner shutdown, better error handling
 
 ### Phase 2: Status Aggregation (Medium Risk)
+
 Add Flow layer between agent registry and Observatory:
+
 - Processes: status-aggregator, sse-sender
 - Benefits: decoupled UI updates, ping for debugging
 
 ### Phase 3: Task Routing (Higher Risk)
+
 Route incoming tasks through Flow:
+
 - Processes: api-gateway, task-router, agent-dispatcher
 - Benefits: explicit topology, rate limiting, priority queues
 
 ### Phase 4: External Adapters (Optional)
+
 Wrap external APIs (GitHub, Slack, etc.) in Flow adapters:
+
 - Benefits: standardized rate limiting, caching, error handling
 
 ---
@@ -394,6 +415,7 @@ Wrap external APIs (GitHub, Slack, etc.) in Flow adapters:
 ### 8.3 What We'd Build Anyway
 
 Even with Flow, we still need:
+
 - Claude CLI adapter (subprocess management)
 - nREPL session wrapper (per-agent REPLs)
 - XTDB integration (persistence)
@@ -409,6 +431,7 @@ Flow handles internal message routing. Everything else remains custom.
 ### Q1: Can an agent's ENTIRE state be captured by a step function's state map?
 
 **No.** Claude's context window is the agent's "real" state, and it's opaque to us. We can only capture:
+
 - Our orchestration state (task queue, agent registry)
 - Conversation history (via XTDB)
 - Tool call history (via XTDB)
@@ -416,6 +439,7 @@ Flow handles internal message routing. Everything else remains custom.
 ### Q2: Can we serialize a paused flow to disk and restore it later?
 
 **Partially.** Flow process state from `ping` can be serialized. But:
+
 - Channels can't be serialized
 - Running threads can't be frozen
 - External processes (Claude CLI) can't be checkpointed
@@ -425,6 +449,7 @@ We'd need to rebuild the flow and restore only the data state.
 ### Q3: How would Claude CLI processes fit into flow topology?
 
 **As external adapters.** Each Claude CLI gets a wrapper that:
+
 - Manages the subprocess lifecycle
 - Bridges stdout/stdin to channels
 - Registers with Flow via in-ports/out-ports
@@ -437,6 +462,7 @@ The subprocess itself is outside Flow's control.
 **Not true hibernation.** Claude's context is lost when the process dies.
 
 **Best we can do:**
+
 - Soft resume via message history replay
 - Task handoff via progress summaries
 - XTDB-based "memory" across agent lifetimes
@@ -444,6 +470,7 @@ The subprocess itself is outside Flow's control.
 ### Q5: What's the performance overhead vs raw channels?
 
 **Minimal for Seon's use case.** Flow adds:
+
 - Control channel checking per message (alts!! priority)
 - State management in loop
 - ping response handling
@@ -457,6 +484,7 @@ For microsecond message processing, this matters. For agents that run for minute
 ### Adopt: Flow Patterns
 
 Even if we don't use Flow directly, adopt its patterns:
+
 - **Explicit topology** - Define process connections as data
 - **Step function separation** - describe/init/transition/transform
 - **Introspection** - ping-style live state queries
@@ -465,6 +493,7 @@ Even if we don't use Flow directly, adopt its patterns:
 ### Adopt Selectively: Flow Library
 
 Use Flow for internal orchestration where it excels:
+
 - Status aggregation
 - SSE streaming
 - External API adapters (rate limiting, caching)
@@ -473,6 +502,7 @@ Use Flow for internal orchestration where it excels:
 ### Don't Use: Flow for Agent Core
 
 Keep the current architecture for agent lifecycle:
+
 - Integrant for resource management (nREPL, XTDB)
 - Direct subprocess management for Claude CLI
 - Atoms for agent registry (simple, debuggable)
@@ -481,6 +511,7 @@ Keep the current architecture for agent lifecycle:
 ### Investigate: Flow Monitor for Observatory
 
 The flow-monitor UI could inspire Observatory improvements:
+
 - Real-time flow visualization
 - Process state inspection
 - Pause/resume controls

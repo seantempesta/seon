@@ -3,6 +3,7 @@
 ## Phase 1-2 (2026-02-19)
 
 ### What was done
+
 - Created `seon.health.workout.render` as first `.render` companion namespace
 - Added resolution cache (`resolution-cache` atom) keyed by `[format (set (keys data))]`
 - Added `*conn` atom + `set-conn!` for Datalevin connection (needs to be wired in system.clj startup)
@@ -14,6 +15,7 @@
 - Fallback rendering now uses `pprint-clipped` (500 char limit) instead of `pr-str`
 
 ### Gotchas
+
 - `render/set-conn!` needs to be called at system startup with the master Datalevin conn. Without it, all Datalevin resolution returns `::no-renderer` and falls back to pprint-clipped. This is safe but means no custom renderers fire.
 - The `render` function signature changed from 2/3 arity to just 2 arity. No callers used the 3-arg form so this was clean.
 - The pre-existing test error in `session-resume-ctx-state-test` ("cached plan must not change result type") is a Datalevin issue, not related to render changes.

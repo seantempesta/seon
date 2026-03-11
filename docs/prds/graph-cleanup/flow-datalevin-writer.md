@@ -43,6 +43,7 @@ This is exactly the pattern needed for a synchronous `transact!` that routes thr
 ### seon.flow.harness — The Full Architecture
 
 The harness system shows a complete single-writer architecture:
+
 - Orchestrator-side `namespace-step` receives requests, forwards to agent JVM
 - Agent JVM `bridge-step` executes locally, returns reply
 - Cross-namespace calls go through `remote-call!` (promise + inject)
@@ -182,7 +183,7 @@ This is the hard part. When `d/transact!` hangs inside the writer flow:
 
 **What gets recovered**: A completely fresh connection + writer flow. New transactions proceed immediately.
 
-### Integration with seon.db/transact!
+### Integration with seon.db/transact
 
 ```clojure
 (defn transact!
@@ -202,6 +203,7 @@ This is the hard part. When `d/transact!` hangs inside the writer flow:
 ## What Needs to Be Built vs. What Exists
 
 ### Already Exists
+
 - `seon.db.datalevin.writer/db-writer-step` — writer flow step-fn (needs enhancement)
 - `seon.db.datalevin.writer/create-writer-flow` — creates single-process writer flow
 - `seon.db.datalevin.writer/inject-tx!` — injects into flow (fire-and-forget)
@@ -211,6 +213,7 @@ This is the hard part. When `d/transact!` hangs inside the writer flow:
 - Writer flow registry in `seon.db/writers` atom
 
 ### Needs to Be Built
+
 1. **Promise delivery in `db-writer-step` transform** — add request-id + deliver pattern
 2. **`transact-via-flow!`** — blocking call that registers promise, injects, derefs with timeout
 3. **Deadlock recovery** — on timeout, abandon old writer+conn, create fresh ones
@@ -218,6 +221,7 @@ This is the hard part. When `d/transact!` hangs inside the writer flow:
 5. **Cleanup of old `seon.db/transact!`** — remove future-based wrapper, route through flow
 
 ### Scope Estimate
+
 - Enhance writer step-fn: ~30 min
 - `transact-via-flow!` with promise pattern: ~1 hour
 - Deadlock recovery + conn manager integration: ~2 hours
@@ -228,6 +232,7 @@ This is the hard part. When `d/transact!` hangs inside the writer flow:
 ## Honest Assessment: Does Flow Solve the Problem?
 
 ### What flow solves
+
 1. **Serialized writes** — single `:io` thread per connection. No concurrent monitor acquisition.
 2. **Caller isolation** — calling threads never hold Datalevin monitors. Timeout is clean (just abandon the promise).
 3. **Backpressure** — flow channel buffers provide natural backpressure.
@@ -235,19 +240,23 @@ This is the hard part. When `d/transact!` hangs inside the writer flow:
 5. **Backup coordination** — pause/resume already works via writer flow.
 
 ### What flow does NOT solve
+
 1. **Killing a stuck thread** — if `d/transact!` blocks forever, the writer flow thread is permanently dead. Flow has no mechanism to kill or restart a blocked transform. This is a fundamental Java limitation (monitors cannot be interrupted).
 2. **Automatic restart** — flow reports errors but does NOT restart processes. A stuck transform means the process loop never iterates again.
 3. **The leaked thread** — recovery creates a new conn + flow, but the old thread + conn are leaked. In theory this could accumulate over many deadlocks.
 
 ### The gap
+
 Flow makes deadlock recovery **manageable** (replace conn + flow, leak old thread) instead of **catastrophic** (whole system deadlocked, need `pkill -9`). But it does not eliminate the underlying problem — a hung `d/transact!` still kills its thread.
 
 The real fix would be either:
+
 - Datalevin using `ReentrantLock.tryLock(timeout)` instead of `synchronized`
 - Socket-level timeout on the Datalevin client connection
 - Or: the socket-close approach from Option 1 in the deadlock research (close the socket to force `AsynchronousCloseException`, unwinding the monitors)
 
 ### Verdict
+
 Flow is the right architecture. It reduces the blast radius from "entire system deadlocked" to "one leaked thread, auto-recovered." That's a massive improvement. The leaked thread is an acceptable tradeoff — in practice, Datalevin server hangs are rare, and each leak is one thread + one socket that will eventually be GC'd.
 
 The socket-close approach (Option 1 from deadlock research) could be added later as an optimization to actually recover the thread instead of leaking it. But the flow-based writer is the prerequisite architecture for both approaches.

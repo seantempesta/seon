@@ -28,12 +28,14 @@ Maximally separated. Each tier has independent LMDB locks — a deadlocked write
 | `:seon.{ns}` | `seon-{ns}` | Per-namespace agent context | Per-agent |
 
 **Why split AI + flow from runtime?**
+
 - Zero cross-entity joins between AI sessions and flow traces (confirmed by audit)
 - Zero cross-entity joins between AI/flow and the code graph
 - Separate LMDB locks = independent deadlock domains
 - Agent runs reference runtime instances via Datalevin ref → must stay in `:seon.runtime`
 
 **Why not merge everything?**
+
 - Different schemas, different write patterns, different volatility
 - Fault isolation: scanner bulk-writes shouldn't risk blocking AI session persistence
 - The deadlock history (documented in MEMORY.md) makes lock isolation valuable
@@ -125,6 +127,7 @@ Components receive `:db` keyword from Integrant config.
 ## Migration Note
 
 Old `seon` database directory (hex-encoded `73656F6E`) becomes stale after rename. Users should:
+
 ```bash
 # After verifying new DBs work:
 # rm -rf data/datalevin/73656F6E/  (old "seon" master)

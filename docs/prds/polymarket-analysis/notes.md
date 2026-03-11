@@ -31,6 +31,7 @@ GET /value?user=<wallet>
 ### RN1 Wallet Discovery
 
 Found via browser network inspection on profile page:
+
 - Username: RN1
 - Wallet: `0x2005d16a84ceefa912d4e380cd32e7ff827875ea`
 

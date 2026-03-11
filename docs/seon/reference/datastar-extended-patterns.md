@@ -52,11 +52,13 @@
 ```
 
 **Pros:**
+
 - Single SSE connection (efficient)
 - Instant navigation (no page reload)
 - Shared state across "pages"
 
 **Cons:**
+
 - All routes in one render function
 - URL changes need custom handling
 - Back button requires history API
@@ -91,11 +93,13 @@
 ```
 
 **Pros:**
+
 - Simple mental model (traditional pages)
 - Browser back button works
 - Each page isolated
 
 **Cons:**
+
 - New SSE connection per navigation
 - Page reload flash (mitigated by shim pattern)
 

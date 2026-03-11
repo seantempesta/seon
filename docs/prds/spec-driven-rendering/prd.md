@@ -50,6 +50,7 @@ Populated from clj-kondo var-definitions + Malli `:malli/schema` var metadata.
 ```
 
 Notes:
+
 - `:seon.fn/qualified-name` is a string (not symbol) for consistent serialization
 - `:seon.fn/render-input-keys` is pre-computed during scan for render functions only, enabling single-query resolution
 - Source code is NOT stored -- retrieve via `clojure.repl/source-fn` on demand
@@ -84,6 +85,7 @@ Populated from clj-kondo namespace-definitions + file extension analysis.
 ```
 
 Notes:
+
 - `:seon.ns/target` indicates the runtime target: `:clj` (JVM), `:cljs` (ClojureScript), `:cljc` (both). Domain code should prefer `:cljc` when possible — no JVM-specific deps, plain data in/out. Seon infrastructure (`seon.web.*`, `seon.db.*`, `seon.flow.*`) is `:clj`-only.
 - Target is critical for graduation (writing code back to disk in the right format) and for knowing which sessions can load the code (JVM vs ClojureScript).
 
@@ -283,6 +285,7 @@ seon.health.workout.render   -- rendering: HTML, AI output
 ```
 
 Benefits:
+
 - Domain namespaces stay free of UI dependencies (Hiccup, Datastar)
 - Render namespaces can be worked on by a separate "render agent"
 - Clear separation of concerns
@@ -417,6 +420,7 @@ No special configuration system. Agents write functions, the system discovers th
 ### Phase 1: Data Model + Scanner — ~95% COMPLETE
 
 **What's done:**
+
 - [x] Datalevin schema with all entity types (`seon.fn/*`, `seon.spec/*`, `seon.ns/*`, `seon.call/*`) — `src/seon/graph/ingest.clj` lines 39-78
 - [x] Migrated from `:graph/*` to `:seon.fn/*` etc.
 - [x] `:seon.ns/target` on namespace entities (`:clj`, `:cljs`, `:cljc`)
@@ -428,6 +432,7 @@ No special configuration system. Agents write functions, the system discovers th
 - [x] Ingestion order enforced: specs → fns → calls
 
 **What's missing:**
+
 - [ ] Static `:malli/schema` metadata extraction from source (edamame parse of `(defn ^{:malli/schema [...]} ...)` forms). Currently `link-fns-to-specs` uses naming convention (`fn-name-request`/`fn-name-response`) as the only matching strategy. This works but doesn't scale to functions that don't follow the convention.
 
 **Key files:** `src/seon/graph/analyzer.clj`, `src/seon/graph/scanner.clj`, `src/seon/graph/ingest.clj`, `src/seon/graph/query.clj`
@@ -435,11 +440,13 @@ No special configuration system. Agents write functions, the system discovers th
 ### Phase 2: Renderer Resolution — ~50% COMPLETE
 
 **What's done:**
+
 - [x] `find-renderer` algorithm implemented — `src/seon/render.clj` lines 244-293
 - [x] Resolution order correct: specificity (key-count DESC), recency (updated-at DESC), name (ASC)
 - [x] Queries Datalevin for functions with `:seon.fn/render-input-keys`
 
 **What's missing:**
+
 - [ ] Resolution cache keyed by `[format (set (keys data))]` with scanner-triggered invalidation
 - [ ] Wire `find-renderer` into SSE rendering pipeline — currently NOT called by any rendering code
 - [ ] Remove old manual registry (`*renderers` atom, `register-renderer!`, `get-renderer`, `clear-renderers!`) — superseded by Datalevin discovery
@@ -449,6 +456,7 @@ No special configuration system. Agents write functions, the system discovers th
 ### Phase 3: Topological Context Builder — ~80% COMPLETE
 
 **What's done:**
+
 - [x] Recursive pull from seed function — `src/seon/graph/context.clj:pull-subgraph`
 - [x] Topological sort via Kahn's algorithm — `src/seon/graph/context.clj:toposort`
 - [x] Cycle detection (appends remaining if cycle exists)
@@ -456,16 +464,19 @@ No special configuration system. Agents write functions, the system discovers th
 - [x] Public API: `build` (from seed fn) and `build-for-namespace` (all fns in ns)
 
 **What's missing:**
+
 - [ ] Wire into agent launch — `seon.graph.context/build-for-namespace` should be called during agent startup to provide topological context
 - [ ] Use `:seon.render/ai` resolution for entity rendering (currently uses hardcoded text format)
 
 ### Phase 4: Agent Context Cockpit — NOT STARTED
+
 - [ ] Context cockpit = render pipeline with `:seon.render/ai` output format
 - [ ] Different context levels as different render functions (dev detail, review compact, onboarding)
 - [ ] Agent runtime override: agent defines more specific render fn, scanner picks it up, next refresh uses it
 - [ ] Session cleanup: agent session ends, custom renderers gone, defaults win
 
 ### Phase 5: Render Agent Pattern — NOT STARTED
+
 - [ ] Create first `.render` companion namespace with real render functions
 - [ ] Document the convention
 - [ ] Verify scanner picks up render functions automatically

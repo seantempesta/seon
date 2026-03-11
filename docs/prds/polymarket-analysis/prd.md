@@ -18,6 +18,7 @@
 | 3 | Basic Analysis Functions | ✅ Complete | Summary, grouping, totals |
 
 **Working Code:**
+
 - `src/seon/polymarket/api.clj` - Full HTTP client with pagination
 - `src/seon/polymarket/analysis.clj` - Basic aggregation functions
 - `test/seon/polymarket/api_test.clj` - 13 tests passing
@@ -26,6 +27,7 @@
 - `data/polymarket/rn1/positions.edn` - 88KB positions snapshot
 
 **Verified REPL Usage:**
+
 ```clojure
 (require '[seon.polymarket.api :as api])
 (require '[seon.polymarket.analysis :as analysis])
@@ -46,6 +48,7 @@
 | 7 | Public API & Documentation | ❌ Not started | Low |
 
 **Stage 6 Partial Work:** The following timing functions exist:
+
 - `group-by-date`, `daily-volume`, `daily-trade-count`
 
 Still needed: `trades-per-day`, `trades-by-hour`, `holding-periods`, `trade-velocity`
@@ -53,6 +56,7 @@ Still needed: `trades-per-day`, `trades-by-hour`, `holding-periods`, `trade-velo
 ### Key Insight from Data
 
 The downloaded data shows RN1 is primarily doing **high-frequency sports betting** on NBA markets, not traditional arbitrage. The data shows:
+
 - 171,480 trades, only 20 redemptions
 - 100% BUY side (no SELL trades visible in activity)
 - All trades from a single day (2025-12-27)
@@ -73,6 +77,7 @@ This suggests the original "arbitrage" hypothesis may need revisiting - the stra
 ## Problem Statement
 
 A Polymarket trader (RN1) has made ~$2M in one year through apparent arbitrage strategies on sports betting markets. We want to:
+
 - Download their complete trading history (13,338+ predictions)
 - Analyze their strategy to understand how arbitrage works on prediction markets
 - Build reusable tools for analyzing any Polymarket trader
@@ -126,6 +131,7 @@ data/polymarket/
 ```
 
 ### Key Patterns
+
 - Follow `seon.trading.thetadata` HTTP client pattern (hato + cheshire)
 - EDN files for research phase (simple, inspectable)
 - REPL-driven development - all analysis verified interactively first
@@ -149,9 +155,11 @@ data/polymarket/
 **Goal:** Fetch data from Polymarket API with pagination support.
 
 **Files to create:**
+
 - `src/seon/polymarket/api.clj`
 
 **Functions:**
+
 ```clojure
 (fetch-activity wallet opts)    ;; Single page of activity
 (fetch-trades wallet opts)      ;; Single page of trades
@@ -160,6 +168,7 @@ data/polymarket/
 ```
 
 **Verification:**
+
 1. REPL test: `(fetch-activity "0x2005d16a84ceefa912d4e380cd32e7ff827875ea" {:limit 5})` returns data
 2. REPL test: `(fetch-positions "0x2005d16a84ceefa912d4e380cd32e7ff827875ea")` returns positions
 3. Unit test: Mock HTTP responses, verify parsing
@@ -174,9 +183,11 @@ data/polymarket/
 **Goal:** Download RN1's complete history (13k+ records) with pagination.
 
 **Files to modify:**
+
 - `src/seon/polymarket/api.clj` - add pagination functions
 
 **Functions:**
+
 ```clojure
 (fetch-all-activity wallet)     ;; Lazy seq, handles pagination
 (fetch-all-trades wallet)       ;; Lazy seq of all trades
@@ -185,10 +196,12 @@ data/polymarket/
 ```
 
 **Data files to create:**
+
 - `data/polymarket/rn1/activity.edn`
 - `data/polymarket/rn1/positions.edn`
 
 **Verification:**
+
 1. REPL test: `(count (fetch-all-activity wallet))` returns 13k+ records
 2. REPL test: Data saved to EDN file, can be loaded back
 3. Unit test: Pagination logic with mock responses
@@ -203,9 +216,11 @@ data/polymarket/
 **Goal:** Aggregate and summarize trading data.
 
 **Files to create:**
+
 - `src/seon/polymarket/analysis.clj`
 
 **Functions:**
+
 ```clojure
 (summarize-activity data)       ;; {:total-trades N :total-redeems N ...}
 (group-by-market data)          ;; Group activity by market
@@ -214,6 +229,7 @@ data/polymarket/
 ```
 
 **Verification:**
+
 1. REPL test: Summary stats match Polymarket profile page (~$700k profit)
 2. Unit test: Known input produces expected output
 3. Test: `(summarize-activity (load-activity path))` returns valid map
@@ -227,9 +243,11 @@ data/polymarket/
 **Goal:** Identify arbitrage patterns - betting both sides of same market.
 
 **Files to modify:**
+
 - `src/seon/polymarket/analysis.clj`
 
 **Functions:**
+
 ```clojure
 (find-opposing-positions data)  ;; Markets where user holds both YES and NO
 (detect-arbitrage-trades data)  ;; Trades that look like arbitrage
@@ -238,6 +256,7 @@ data/polymarket/
 ```
 
 **Verification:**
+
 1. REPL test: Find markets with opposing bets
 2. REPL test: Calculate spread between opposing positions
 3. Unit test: Mock data with known arbitrage, verify detection
@@ -252,6 +271,7 @@ data/polymarket/
 **Goal:** Understand which markets and strategies are most profitable.
 
 **Functions:**
+
 ```clojure
 (profit-by-market data)         ;; Profit breakdown by market
 (profit-by-category data)       ;; Profit by category (sports, politics, etc.)
@@ -262,6 +282,7 @@ data/polymarket/
 ```
 
 **Verification:**
+
 1. REPL test: Top markets match visual inspection of profile
 2. Unit test: ROI calculation correctness
 3. Report: Generate profitability report
@@ -275,6 +296,7 @@ data/polymarket/
 **Goal:** Understand when and how frequently RN1 trades.
 
 **Functions:**
+
 ```clojure
 (trades-per-day data)           ;; Daily trade frequency
 (trades-by-hour data)           ;; Hourly distribution
@@ -284,6 +306,7 @@ data/polymarket/
 ```
 
 **Verification:**
+
 1. REPL test: Daily frequency makes sense (~50+ trades/day for 13k in ~8 months)
 2. Unit test: Time parsing and grouping
 3. Report: Trading patterns summary
@@ -297,9 +320,11 @@ data/polymarket/
 **Goal:** Clean public API and REPL helpers.
 
 **Files to create:**
+
 - `src/seon/polymarket/core.clj`
 
 **Functions:**
+
 ```clojure
 (capabilities)                  ;; What this domain can do
 (analyze-trader wallet)         ;; Full analysis for any trader
@@ -308,6 +333,7 @@ data/polymarket/
 ```
 
 **Verification:**
+
 1. All tests pass: `clj -M:test -m kaocha.runner --focus :polymarket`
 2. REPL demo: Full workflow works end-to-end
 3. Documentation: Update CLAUDE.md with polymarket info
@@ -357,11 +383,13 @@ If resuming this work, here's what to do:
 ### 1. Re-evaluate the Hypothesis
 
 The original PRD assumed RN1 was doing **cross-market arbitrage**. The data suggests something different:
+
 - All 171k trades are BUYs (no SELLs in activity)
 - Only 20 redemptions
 - Concentrated on NBA markets
 
 **Action:** Before implementing Stage 4 (arbitrage detection), analyze the data more carefully. Possibilities:
+
 - The `/activity` endpoint may not show all trade types
 - RN1 may be using a different strategy (market making, liquidity provision)
 - May need to fetch `/trades` separately to see SELL activity
@@ -369,6 +397,7 @@ The original PRD assumed RN1 was doing **cross-market arbitrage**. The data sugg
 ### 2. Quick Wins (Stage 6 Completion)
 
 The timing analysis functions are mostly there. Just add:
+
 ```clojure
 (defn trades-per-day [data] ...)  ;; Already have daily-trade-count
 (defn trades-by-hour [data] ...)  ;; Group by hour, similar to group-by-date
@@ -377,6 +406,7 @@ The timing analysis functions are mostly there. Just add:
 ### 3. If Continuing with Arbitrage Analysis
 
 Stage 4 functions to implement:
+
 ```clojure
 (defn find-opposing-positions [data]
   "Find markets where trader holds both YES and NO outcomes."
@@ -402,9 +432,11 @@ clojure -M:test -m kaocha.runner --focus seon.polymarket.analysis-test
 ### 5. Decision Point
 
 This PRD may be **better archived** if:
+
 - The arbitrage hypothesis is wrong and further analysis isn't valuable
 - RN1's strategy isn't replicable or interesting
 
 Or **continue** if:
+
 - Want to understand high-frequency sports betting on Polymarket
 - Want to build general-purpose trader analysis tools

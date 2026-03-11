@@ -10,6 +10,7 @@ Datalevin v0.10.3 loaded successfully from `reference-code/datalevin` git submod
 ### Dependencies
 
 Added to `deps.edn` under `:dev` alias:
+
 ```clojure
 ;; Datalevin - local from git submodule (v0.10.3, 2026-01-27)
 datalevin/datalevin {:local/root "reference-code/datalevin"}
@@ -18,6 +19,7 @@ datalevin/datalevin {:local/root "reference-code/datalevin"}
 ### Important Setup Notes
 
 1. **Dependency prep required**: Datalevin has Java code that needs compilation. Run:
+
    ```bash
    clj -X:deps prep
    ```
@@ -139,6 +141,7 @@ datalevin/datalevin {:local/root "reference-code/datalevin"}
 ```
 
 **Transaction result keys:**
+
 - `:db-before` - Database value before transaction
 - `:db-after` - Database value after transaction
 - `:tx-data` - Vector of datoms created
@@ -330,6 +333,7 @@ datalevin/datalevin {:local/root "reference-code/datalevin"}
 ```
 
 **Search expression syntax:**
+
 - Simple: `"word1 word2"` (AND by default)
 - Boolean: `[:or "foo" [:and "bar" [:not "baz"]]]`
 - Phrase: `{:phrase "exact phrase"}`
@@ -444,6 +448,7 @@ datalevin/datalevin {:local/root "reference-code/datalevin"}
 ## Test Results
 
 All core API tests passed:
+
 - Connection creation and closing ✓
 - Schema with all value types ✓
 - Transactions (add, update, retract) ✓
@@ -462,6 +467,7 @@ All core API tests passed:
 ## Test Files
 
 Test scripts created during research (in `tmp/`):
+
 - `datalevin-test.clj` - Basic CRUD operations
 - `datalevin-fixed.clj` - Full-text search, refs, components
 - `datalevin-final.clj` - Comprehensive API coverage

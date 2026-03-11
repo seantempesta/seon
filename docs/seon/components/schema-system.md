@@ -32,6 +32,7 @@ Seon needs every data boundary (function calls, database writes, channel message
 ### Built-in Types
 
 Three custom types are registered at load time:
+
 - **`:inst`** — Timestamp type (Malli only provides `inst?` predicate; this provides a keyword type consistent with `:string`, `:int`, etc.)
 - **`:seon.flow/dynamic`** — Wire protocol field validated dynamically at message boundaries, not statically. Used for `::args`, `::value`, `::payload` in flow messages.
 - **`:seon.db/ref`** — Datalevin entity reference. Accepts positive integers (entity IDs) or lookup refs `[keyword value]`.

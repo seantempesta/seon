@@ -9,6 +9,7 @@
 ## Requirements
 
 Seon needs a durable atom for agent context with:
+
 1. **Versioned state with time-travel** - Access previous states
 2. **Persistence to disk** - Survive restarts
 3. **Structural sharing** - Nice to have, not required
@@ -111,6 +112,7 @@ Added both libraries to `deps.edn` under `:dev` alias and tested in REPL.
 ```
 
 File size comparison (1000-element vector):
+
 - EDN: 3906 bytes
 - Nippy: 2901 bytes (25.7% smaller)
 
@@ -142,6 +144,7 @@ File size comparison (1000-element vector):
 **Does NOT implement IAtom** - Cannot use standard `clojure.core/swap!`
 
 This is a dealbreaker because:
+
 - Existing code won't work
 - Libraries expecting atoms won't work
 - Easy to forget and use wrong function
@@ -251,6 +254,7 @@ Neither library provides versioning, but duratom's drop-in API makes it easy to 
 **Use Duratom for current agent `*ctx*` persistence.**
 
 Rationale:
+
 1. **Drop-in atom API** - No code changes needed for existing `swap!`/`@` usage
 2. **Custom serializers** - Can filter non-serializable values
 3. **Sync mode** - Immediate durability when needed
@@ -258,6 +262,7 @@ Rationale:
 5. **Versioning via watchers** - Easy to add in-memory history
 
 **Later, for full persistence:** Migrate to Datalevin append-only pattern (already planned) which provides:
+
 - Database-level versioning
 - Query capabilities
 - Compaction

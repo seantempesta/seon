@@ -12,6 +12,7 @@ type: dashboard
 **Agents**: Read the component note for your area before writing code. After making changes, update the relevant component note to match reality.
 
 ### Rules for Updating Notes
+
 1. **Component notes describe what IS** — no future state, no aspirational language
 2. **After changing code**, update the component note: namespaces table, API surface, dependencies
 3. **After fixing an issue**, update its status in `orchestrator/issues/`

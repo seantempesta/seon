@@ -9,6 +9,7 @@ This plan makes flow the backbone of the running system — started early, alway
 **The one pattern**: `register promise → inject → step-fn → reply-router → deliver promise`. Everything crosses boundaries this way.
 
 **Two-tier flow architecture** (from research — see `architecture-diagrams.md` sections 6 and 13):
+
 - **Infrastructure flow** (boot once, rarely rebuilt): writer + reply-router + event-sink + error-sink
 - **Per-namespace flows** (created lazily, independently): one flow per namespace, sends replies to infrastructure via `flow/inject`
 - **Code updates** to existing namespaces: hot-swap via var indirection (`#'step-fn`). Zero disruption.
@@ -25,7 +26,8 @@ This plan makes flow the backbone of the running system — started early, alway
 
 **Socratic questions**: After updates, does any doc contradict unified-flow/design.md? Are there references to "Super REPL" that should say "seon.repl"?
 
-### Files to update:
+### Files to update
+
 1. **`docs/prds/super-repl/prd.md`** — Header noting evolution. Rename "Super REPL" → "seon.repl".
 2. **`docs/prds/super-repl/flow-buildout.md`** — Header: executed and completed.
 3. **`docs/prds/super-repl/flow-viz-plan.md`** — Header: see unified-flow/design.md.
@@ -39,12 +41,15 @@ This plan makes flow the backbone of the running system — started early, alway
 
 **Goal**: The infrastructure flow (writer + reply-router + sinks) starts at boot as an Integrant component. Namespace flows are NOT part of this — they're created lazily later.
 
-### Changes:
+### Changes
+
 1. **`resources/system.edn`** — Add `:seon.flow/infrastructure` component:
+
    ```edn
    :seon.flow/infrastructure
    {:connection-manager #ig/ref :seon.db.datalevin/connections}
    ```
+
 2. **`src/seon/system.clj`** — `init-key` for `:seon.flow/infrastructure`:
    - Creates flow with: writer-step + reply-router + event-sink + error-sink
    - Starts + resumes it
@@ -53,11 +58,13 @@ This plan makes flow the backbone of the running system — started early, alway
 3. **`src/seon/flow/topology.clj`** — New fn `build-infrastructure!` (just the stable processes). Separate from `build-topology!` which wires namespace processes.
 
 **Socratic questions before launching**:
+
 - Can the infrastructure flow run with ZERO namespace flows? (Yes — writer + sinks are self-contained)
 - Does `flow/ping-proc :seon.flow/writer` work after boot?
 - What happens on `(user/reset)` — suspend/resume or halt/init?
 
 **Socratic questions for verification**:
+
 - `(flow/ping infra-flow)` shows writer + router + sinks all `:running`?
 - Writer accepts a `flow/inject`'d write request and delivers via reply-router?
 
@@ -69,7 +76,8 @@ This plan makes flow the backbone of the running system — started early, alway
 
 **Depends on**: Phase 1 (topology component exists)
 
-### Redundant systems to remove:
+### Redundant systems to remove
+
 | Current | Replacement |
 |---------|-------------|
 | `writer/create-writer-flow` | Writer process in main topology |
@@ -80,18 +88,21 @@ This plan makes flow the backbone of the running system — started early, alway
 | `seon.db/transact!` future+timeout | `topology/request!` → `:seon.flow/writer` |
 | `pause-writes!`, `resume-writes!`, etc. | `flow/pause-proc`, `flow/resume-proc` |
 
-### Changes:
+### Changes
+
 1. **`seon.db.datalevin.writer/db-writer-step`** — Rewrite: handles ALL databases (keyed by db-name in request). Port IDs use unified `:seon.flow.in/request` / `:seon.flow.out/reply` convention. Delete `write-reply-step`, `create-writer-flow`, `inject-tx!`.
 2. **`seon.flow.topology/build-topology!`** — Wire writer process. Its reply output → reply-router.
 3. **`seon.db/transact!`** — Route through `topology/request!`. If topology not running, throw (not fallback).
 4. **`seon.db`** — Delete: `writers` atom, `write-stats` atom, `all-conns`, `pause-writes!`, `resume-writes!`, `shutdown-writers!`, `remove-writer!`, `writer-status`, `stats`.
 
 **Socratic questions before launching**:
+
 - Does the scanner's background `ingest-namespace!` call `transact!`? If so, does it run after topology starts?
 - Does `runtime/mark-crashed!` in `:seon/runtime-db` init call `transact!`? (Yes — need boot order fix)
 - What about `runtime/register!` → `persist-instance!`?
 
 **Socratic questions for verification**:
+
 - `(flow/ping-proc topology :seon.flow/writer)` returns meaningful state?
 - `seon.ctx/persist!` still works? (calls `transact!` via requiring-resolve)
 - `seon.flow.trace` still writes? (writes trace events)
@@ -105,18 +116,21 @@ This plan makes flow the backbone of the running system — started early, alway
 
 **Depends on**: Phase 2 (transact! goes through topology)
 
-### Analysis from explore:
+### Analysis from explore
+
 - `:seon/runtime-db` init calls `mark-crashed!` → `transact!`. Needs topology.
 - `:seon.graph/scanner` background future calls `ingest-namespace!` → `transact!`. Needs topology.
 - `:seon.orchestrator/sessions` doesn't write during init.
 
-### Changes:
+### Changes
+
 1. **`resources/system.edn`** — `:seon/runtime-db` depends on `:seon.flow/topology`. `:seon.graph/scanner` depends on `:seon.flow/topology`.
 2. **`src/seon/system.clj`** — Adjust init-key for `:seon/runtime-db` to accept topology ref (even if it doesn't use it directly — the dependency ensures ordering).
 
 **Socratic questions**: Does this create a circular dependency? (topology needs runtime-db for snapshots, runtime-db needs topology for writes). If yes, split: topology init doesn't snapshot, just builds. Snapshot is a separate operation.
 
 **Socratic questions for verification**:
+
 - Clean `(user/reset)` from scratch — does everything boot?
 - `./bin/run` cold start — no errors in logs?
 
@@ -126,13 +140,15 @@ This plan makes flow the backbone of the running system — started early, alway
 
 **Goal**: Every data key in flow/db/ctx is fully namespaced.
 
-### Targets:
+### Targets
+
 | File | Bare Keywords | New Namespace |
 |------|--------------|---------------|
 | `seon.ctx` | 13 internal registry keys | `::ctx/` |
 | `seon.flow.topology` | `:cycle-detected`, `:cycles`, `:cycle-descriptions` | `::topology/` |
 
-### Bug fix:
+### Bug fix
+
 - **`seon.flow.harness.bridge`** lines 227-233: Transition signals auto-namespace wrong. Fix to full literal `:clojure.core.async.flow/*` keywords.
 
 **Socratic questions**: Are there callers outside these files that destructure old bare keys? Grep before renaming.

@@ -11,6 +11,7 @@ status: production
 Renderer discovery is a zero-registration pattern for connecting data to visualization. A render function declares what data it needs (input keys) and what it produces (`:seon.render/html` or `:seon.render/ai` in the output schema) via standard `:malli/schema` metadata. The [[components/code-graph]] scanner extracts this metadata and indexes it in Datalevin. At render time, a specificity algorithm finds the best match.
 
 The resolution algorithm:
+
 1. **Find candidates** — query Datalevin for functions whose output schema contains the target format key (e.g., `:seon.render/html`)
 2. **Filter** — candidate's required input keys must be a subset of the available data keys
 3. **Rank by specificity** — most required keys matched wins (more specific = better)

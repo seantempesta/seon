@@ -13,6 +13,7 @@ Current approaches are broken: agents bolt onto codebases designed for humans, h
 **Seon is infrastructure for AI agents to write reliable software.**
 
 Not a framework. Not a library. A complete codebase architecture where agents can:
+
 - Discover functions by their contracts (not hallucinate them)
 - Learn from history (not repeat mistakes)
 - Own code long-term (not just complete tasks)
@@ -41,6 +42,7 @@ McCarthy designed Lisp for AI. Maybe the killer app was always agents writing Li
 ### The Right Database
 
 Datalevin is an embedded Datalog database on LMDB:
+
 - **Datomic-compatible** - EAV datoms, pull API, Datalog queries
 - **Embedded** - No separate process, fast local storage
 - **Agent isolation** - Each agent gets namespace-scoped database via connection manager
@@ -181,6 +183,7 @@ Nothing exotic. The agent writes normal Clojure. The enforcement is in the eval 
 When a form is eval'd through the REPL, the pipeline enforces constraints before accepting it:
 
 **For `defn`:**
+
 - Schema present? (`:malli/schema` metadata required for public functions)
 - Schema concrete? (no `:any`, no `[:maybe X]`, all types Datalevin-compatible)
 - Schema serializable? (roundtrips through Nippy and Datalevin without loss)
@@ -188,15 +191,18 @@ When a form is eval'd through the REPL, the pipeline enforces constraints before
 - If any fail -> reject with clear error. The function is not compiled, not registered, not persisted.
 
 **For `schema/register!`:**
+
 - All types concrete and Datalevin-compatible?
 - Namespaced keys throughout?
 - Generator works? (can produce valid samples)
 - If any fail -> reject.
 
 **For `deftest`:**
+
 - Register in the graph. Schema association is inferred automatically -- the graph knows which functions the test calls, which schemas those functions reference, and transitively which schemas the test exercises. No metadata needed on the test itself.
 
 **If all pass:**
+
 1. Compile and execute the form
 2. Transact metadata into the graph
 3. Persist source to disk

@@ -30,6 +30,7 @@ Seon already uses `hato` for HTTP requests (see `seon.polymarket.api`):
 ### Recommendation: Use Hato
 
 **Hato** is already a dependency (`hato/hato {:mvn/version "1.0.0"}`) and works well for:
+
 - Simple synchronous requests
 - JSON body handling
 - Timeout configuration
@@ -58,17 +59,21 @@ HTTP-Kit (already a dependency for the server) has a client that supports async 
 ## 2. Gemini REST API Reference
 
 ### Base URL
+
 ```
 https://generativelanguage.googleapis.com/v1beta/models/{model}:{method}
 ```
 
 ### Authentication
+
 All requests require the `x-goog-api-key` header:
+
 ```bash
 -H "x-goog-api-key: $GEMINI_API_KEY"
 ```
 
 ### Available Models (December 2025)
+
 - `gemini-3-flash` - Best value, fast, cheap ($0.50/1M input, $3/1M output)
 - `gemini-3-pro-preview` - Most capable, more expensive
 - `gemini-2.5-flash` - Previous generation, stable
@@ -98,6 +103,7 @@ curl "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash:str
 ```
 
 **Important**: The `?alt=sse` query parameter enables SSE streaming. Each chunk arrives as:
+
 ```
 data: {"candidates": [{"content": {"parts": [{"text": "..."}]}}]}
 ```
@@ -115,6 +121,7 @@ curl "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash:gen
 ```
 
 Response includes `groundingMetadata`:
+
 ```json
 {
   "candidates": [...],
@@ -140,6 +147,7 @@ curl "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash:gen
 ```
 
 Response includes executable code and results:
+
 ```json
 {
   "candidates": [{
@@ -157,6 +165,7 @@ Response includes executable code and results:
 ### Multi-Tool Requests
 
 Combine multiple tools in a single request:
+
 ```json
 {
   "contents": [{"parts": [{"text": "Search for Python 3.12 release date and calculate days since"}]}],
@@ -754,6 +763,7 @@ For long responses, streaming provides better UX:
 ## 8. Cost Analysis
 
 ### Gemini 3 Flash Pricing (December 2025)
+
 - **Input**: $0.50 per 1M tokens (~750,000 words)
 - **Output**: $3.00 per 1M tokens
 - **Google Search**: $14 per 1,000 search queries (billing starts Jan 5, 2026)
@@ -809,23 +819,27 @@ For Seon's use case (REPL-driven development, tight integration), native Clojure
 ## 10. Implementation Plan
 
 ### Phase 1: Core Client (1-2 hours)
+
 1. Create `seon.ai.gemini.client` namespace
 2. Implement basic `generate` function
 3. Add convenience wrappers for search and code execution
 4. Write basic tests
 
 ### Phase 2: REPL Helpers (1-2 hours)
+
 1. Create `seon.ai.repl` namespace
 2. Implement `explain-error`, `analyze-code`, `doc-search`
 3. Add to `user.clj` for easy access
 4. Test in live REPL
 
 ### Phase 3: Integrant Integration (30 min)
+
 1. Add config to `system.edn`
 2. Implement init/halt methods
 3. Wire up `*api-key*` dynamic var
 
 ### Phase 4: Streaming (optional, 1 hour)
+
 1. Implement SSE parsing
 2. Add `ask-stream` for REPL
 3. Consider async/future-based approach

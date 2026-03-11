@@ -97,6 +97,7 @@ $ grep -r "m/=>" src/
 ### DSL Primitives
 
 Functions like `iv-rank`, `put-call-ratio`, `vanna` have:
+
 - No input validation
 - No output validation
 - No pre/post conditions
@@ -157,28 +158,33 @@ Add function specs and enable dev-time instrumentation.
 **Implementation:**
 
 1. Add to `db/schema.clj`:
+
 ```clojure
 (def PercentileRank [:double {:min 0.0 :max 1.0}])
 (def Percentile [:int {:min 0 :max 100}])
 ```
 
-2. Add to `dsl/primitives.clj`:
+1. Add to `dsl/primitives.clj`:
+
 ```clojure
 (m/=> iv-rank [:=> [:cat :some :string [:* :any]] [:maybe PercentileRank]])
 ```
 
-3. Add to `env/dev/clj/user.clj`:
+1. Add to `env/dev/clj/user.clj`:
+
 ```clojure
 (require '[malli.dev :as mdev])
 (mdev/start!)
 ```
 
 **Pros:**
+
 - Catches errors in REPL
 - Self-documenting
 - Zero prod overhead
 
 **Cons:**
+
 - New pattern to learn
 - Still need tests for correctness
 
@@ -187,6 +193,7 @@ Add function specs and enable dev-time instrumentation.
 Add specs for type/range validation, write tests for calculation correctness.
 
 **Priority:**
+
 1. Specs for input validation (catches nil, wrong types)
 2. Property tests for invariants (result in [0,1])
 3. Unit tests for known values (percentile of [1,2,3,4,5] at 50 = 3)

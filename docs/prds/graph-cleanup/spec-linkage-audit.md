@@ -107,6 +107,7 @@ The kondo config already requests `{:var-definitions {:meta true}}`. Each var-de
 ### Does this block Phase 2?
 
 **No.** The current approach works for most functions because the naming convention is widely followed. But it should be fixed in parallel because:
+
 - Functions using `-result` instead of `-response` are silently missed
 - The graph claims to show function-spec relationships but lies about ~10-20% of them
 - Any future schema naming that deviates from convention will silently break

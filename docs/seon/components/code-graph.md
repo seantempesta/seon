@@ -26,25 +26,30 @@ The graph also powers AI agent context building: given a seed function, `context
 ## Public API Surface
 
 ### `seon.graph.analyzer`
+
 - **`analyze-project!`** — Full clj-kondo run on `src/` directories. Returns `{::raw-analysis ...}`.
 - **`analyze-form`** — Incremental clj-kondo on a source string.
 - **`extract-entities`** — Transforms raw clj-kondo output into `{::namespaces ::functions ::var-usages ::namespace-usages}`.
 
 ### `seon.graph.extract`
+
 - **`extract-graph`** — Single entry point that runs both edamame (schemas/defs) and clj-kondo (fns/calls/deps), merges results, enriches specs with cross-references, and links functions to their input/output specs.
 - **`extract-graph-from-file`** — Convenience wrapper that slurps a file path.
 
 ### `seon.graph.scanner`
+
 - **`scan-source`** / **`scan-file`** / **`scan-directory`** — Edamame-based extraction of `schema/register!` calls and `def` forms. Produces `:seon.spec/*` and `:seon.var/*` entities.
 - **`scan-fn-schemas`** — Extracts `:malli/schema` metadata from `defn` forms. Returns `{qualified-name -> schema-form}`.
 
 ### `seon.graph.ingest`
+
 - **`ingest-analysis!`** — Bulk ingest from analyzer output. Groups by namespace, delegates to `ingest-namespace!`.
 - **`ingest-namespace!`** — Per-namespace upsert + retract-stale. The core transact function.
 - **`ingest-incremental!`** — Single-namespace incremental ingest (backward compat wrapper).
 - **`ingest-file!`** — Extract + ingest for one file (uses `extract-graph-from-file`).
 
 ### `seon.graph.query`
+
 - **`dependents-of`** / **`dependencies-of`** — Namespace-level dependency queries.
 - **`transitive-dependents-of`** — Full transitive closure walk (iterative BFS).
 - **`call-graph`** — Outgoing call edges for a function.
@@ -55,6 +60,7 @@ The graph also powers AI agent context building: given a seed function, `context
 - **`invalidate-output-key-cache!`** — Clears the output-key query cache.
 
 ### `seon.graph.context`
+
 - **`build`** — Recursive subgraph pull + topological sort + render to text. Starts from a seed function.
 - **`build-for-namespace`** — Context for all functions in a namespace.
 - **`pull-subgraph`** — Raw subgraph pull (entities tagged with `:context/type`).
@@ -63,6 +69,7 @@ The graph also powers AI agent context building: given a seed function, `context
 ## Dependencies
 
 ### Uses
+
 - [[components/database]] — All storage and queries go through `seon.db` (`db/transact!`, `db/query`, `db/pull-by-name`)
 - `seon.db.schema` — `db-schema/register-entity-schema!` and `db-schema/malli-map->datalevin-schema` for entity schema registration
 - [[components/schema-system]] — `schema/register!` for attribute type registration
@@ -71,6 +78,7 @@ The graph also powers AI agent context building: given a seed function, `context
 - edamame — Clojure parser for `schema/register!` calls and `def` forms (clj-kondo doesn't see these)
 
 ### Used By
+
 - [[components/renderer]] — `gq/functions-with-output-key` is how render functions are discovered at runtime
 - [[components/context]] — AI agents get code context via `context/build`
 - Integrant scanner — Background scanning triggers `ingest-file!` on file changes
@@ -145,23 +153,29 @@ Function-to-spec links use Datalevin refs (`:seon.fn/input-spec` and `:seon.fn/o
 ## Design Decisions
 
 ### Two-Parser Strategy
+
 clj-kondo is authoritative for functions, calls, and namespace dependencies (it understands macros, aliases, and multi-arity). But it doesn't see `schema/register!` calls or `:malli/schema` metadata values. Edamame fills that gap by parsing source as data. `extract.clj` merges both outputs.
 
 ### Upsert + Retract-Stale Pattern
+
 Entities with identity attrs (functions, specs, vars, namespaces) use Datalevin's upsert semantics — transacting an entity with the same identity key updates it. After upserting the new scan, `retract-stale-*` queries for entities in the namespace that weren't in the new scan and retracts them. This is safe for incomplete scans (only explicitly absent entities get removed).
 
 Call edges and ns-deps lack identity attrs, so they use retract-then-insert: delete all existing edges from the namespace, then insert the new ones.
 
 ### Output-Key Cache
+
 `functions-with-output-key` is called on every page render, so results are cached in an atom (`output-key-cache`). The cache is invalidated by `invalidate-output-key-cache!`, which is called from `ingest-namespace!` -> `render/invalidate-render-cache!` whenever the graph updates.
 
 ### Spec Cross-References
+
 `extract.clj` walks each spec's definition string (parsed back to EDN) and collects all qualified keywords as `:seon.spec/references`. This enables queries like "find all specs that reference this spec."
 
 ### Stub Entities for External Calls
+
 When function A calls function B but B hasn't been analyzed yet (external dep, or not yet scanned), `compute-stub-entities` creates a minimal `:seon.fn/*` entity for B so the call edge ref can resolve. The stub gets overwritten when B is properly ingested later.
 
 ### Batch Transacting
+
 `transact-in-batches!` processes entities in batches of 500 with error isolation — a single bad entity in a batch fails only that batch, not the entire ingest.
 
 ## Refactoring Opportunities

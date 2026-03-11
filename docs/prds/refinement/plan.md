@@ -42,6 +42,7 @@ Success = we can do this demo and watch the full trace in logs + Observatory.
 **Goal:** One ctx system. Super REPL automatically rewrites cross-ns calls to route through flow.
 
 **Unify ctx (merge 3 → 1):**
+
 1. Port validation logic (namespaced keys, Malli schemas, reserved key protection) from `seon.agent.ctx` into `seon.ctx`
 2. Update `seon.orchestrator.session` to use `seon.ctx/create!` instead of `agent.ctx/make-persisted-ctx`
 3. Keep nREPL middleware (`seon.orchestrator.nrepl`) — it just injects the unified atom as `*ctx*`
@@ -49,6 +50,7 @@ Success = we can do this demo and watch the full trace in logs + Observatory.
 5. Update `seon.flow.agent_runner` to use `seon.ctx`
 
 **Auto-proxy injection (build `seon.flow.harness/inject.clj`):**
+
 - The Super REPL is the rewrite point — when code is sent to a remote JVM via MCP eval, the Super REPL should:
   1. Analyze the namespace's `require` forms to find cross-ns deps
   2. For each seon.* dependency, check if it needs a flow session (via graph DB metadata or arglists)
@@ -57,6 +59,7 @@ Success = we can do this demo and watch the full trace in logs + Observatory.
 - For fns needing `*ctx*` or datalevin conn: the flow relay on orchestrator side lazy-starts a flow session, injects those args before executing
 
 **Key files:**
+
 - `src/seon/ctx.clj` (extend with validation from agent.ctx)
 - `src/seon/agent/ctx.clj` (archive after merge)
 - `src/seon/orchestrator/session.clj` (switch to unified ctx)
@@ -81,6 +84,7 @@ Success = we can do this demo and watch the full trace in logs + Observatory.
 6. Test: launch agent, verify full trace visible in logs
 
 **Key files:**
+
 - `src/seon/flow/harness/bridge.clj` (add logging)
 - `src/seon/flow/harness.clj` (add logging)
 - `src/seon/flow/harness/proxy.clj` (add logging)
@@ -101,6 +105,7 @@ Success = we can do this demo and watch the full trace in logs + Observatory.
 7. Full test suite, report count
 
 **Key files:**
+
 - `src/seon/graph/scanner.clj` (extend — ctx/conn detection)
 - `src/seon/render.clj` (verify find-renderer)
 - `src/seon/ns/routes.clj` (wire flow for stateful renders)
@@ -120,6 +125,7 @@ Success = we can do this demo and watch the full trace in logs + Observatory.
 ## PRD Updates
 
 Before launching agents, update `docs/prds/refinement/prd.md` to include:
+
 - The goal statement from this plan
 - Tracks 2-4 (currently only has Phase 1/XTDB removal)
 - Success criteria for each track

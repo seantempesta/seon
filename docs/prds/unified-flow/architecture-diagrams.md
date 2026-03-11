@@ -60,6 +60,7 @@ Arrows show network connections with their protocols.
 ```
 
 **Key facts:**
+
 - Datalevin survives orchestrator restarts. Killing Seon does NOT kill the DB.
 - Each agent JVM has its own Datalevin client connection (direct to :8898).
 - The TCP bridge between orchestrator and agent is for flow messages only (function calls/replies).
@@ -217,6 +218,7 @@ Two kinds of flow, started independently:
 ```
 
 **Why separate flows?**
+
 - Adding a namespace = create a new flow. No disruption to existing.
 - Updating code = redefine the var. No flow restart at all.
 - Full rebuild only needed for infrastructure changes (rare).
@@ -404,7 +406,7 @@ Flow graphs are static after `create-flow` — you can't add processes to a
 running flow. But we don't need to. The architecture uses SEPARATE flows:
 one stable infrastructure flow + one flow per namespace.
 
-### Three operations, from cheapest to most expensive:
+### Three operations, from cheapest to most expensive
 
 ### 6a. Update existing namespace code (FREE — no flow changes)
 
@@ -527,6 +529,7 @@ Components start in dependency order. Arrows mean "depends on" (started after).
 ```
 
 **Startup timeline (approximate):**
+
 ```
  t=0s    Schema registry loads
  t=0.1s  Datalevin server adopted (or started fresh)
@@ -549,6 +552,7 @@ Every message crossing the flow graph uses the same envelope format.
 Defined in `seon.flow.msg`.
 
 ### Request
+
 ```clojure
 {::msg/id         #uuid "..."        ; Correlation ID
  ::msg/version    1                   ; Protocol version
@@ -564,6 +568,7 @@ Defined in `seon.flow.msg`.
 ```
 
 ### Reply (success)
+
 ```clojure
 {::msg/id         #uuid "..."        ; Echoes request ID
  ::msg/version    1
@@ -575,6 +580,7 @@ Defined in `seon.flow.msg`.
 ```
 
 ### Reply (error)
+
 ```clojure
 {::msg/id            #uuid "..."
  ::msg/version       1
@@ -759,7 +765,7 @@ into production as the single routing backbone.
 Can core.async.flow graphs be updated live? Can we add/remove processes
 or change connections on a running flow?
 
-### Answer: No. Flow graphs are structurally immutable after `create-flow`.
+### Answer: No. Flow graphs are structurally immutable after `create-flow`
 
 The flow object is a `reify` that closes over its process descriptions (`pdescs`),
 connection map (`conn-map`), channel option maps (`inopts`, `outopts`), and a
@@ -852,6 +858,7 @@ as initial state instead of the default. This way, step 7 becomes: pass the
 pinged state as `:restore` in the proc-def `:args`.
 
 **Alternative: separate flow per concern.** Instead of one mega-flow, run:
+
 - Flow A: infrastructure (writer, reply-router, error-sink, event-sink) -- rarely changes
 - Flow B: namespace processes -- rebuilt when namespaces change
 

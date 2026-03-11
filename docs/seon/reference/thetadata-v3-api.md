@@ -3,6 +3,7 @@
 ## API Overview
 
 ### Base Configuration
+
 - **Base URL**: `http://localhost:25503/v3/`
 - **Protocol**: HTTP REST API (local Theta Terminal v3)
 - **Default Port**: 25503
@@ -10,19 +11,24 @@
 - **Authentication**: Credentials stored in `thetadata/creds.txt`
 
 ### Requirements
+
 - Theta Terminal v3 must be running locally
 - Standard tier includes: Options STANDARD, Stock FREE, Index FREE
 - Some endpoints require Pro subscription tier
 
 ### Supported Formats
+
 All endpoints support multiple response formats via the `format` parameter:
+
 - `csv` (default)
 - `json`
 - `ndjson`
 - `html`
 
 ### Time Intervals
+
 Standard interval options across endpoints:
+
 - Tick-level: `tick`
 - Sub-second: `10ms`, `100ms`, `500ms`
 - Seconds: `1s`, `5s`, `10s`, `15s`, `30s`
@@ -30,6 +36,7 @@ Standard interval options across endpoints:
 - Hours: `1h`
 
 ### Default Trading Hours
+
 - **start_time**: `09:30:00` (market open)
 - **end_time**: `16:00:00` (market close)
 - Format: `HH:mm:ss`
@@ -47,12 +54,14 @@ Standard interval options across endpoints:
 **Description**: Returns comprehensive Greeks calculations for option contracts with intraday granularity.
 
 **Required Parameters**:
+
 - `symbol` (string): Stock/index symbol or underlying
 - `date` (string): Target date for data retrieval
 - `expiration` (string): Contract expiration (YYYY-MM-DD or YYYYMMDD)
 - `interval` (string): Time interval (highly recommended)
 
 **Optional Parameters**:
+
 - `strike` (string): Dollar amount (e.g., 100.00) or `*` for all (default: `*`)
 - `right` (string): `call`, `put`, or `both` (default: `both`)
 - `start_time` (string): HH:mm:ss format (default: `09:30:00`)
@@ -65,29 +74,37 @@ Standard interval options across endpoints:
 **Response Fields**:
 
 *Identifiers*:
+
 - `symbol`, `expiration`, `strike`, `right`, `timestamp`
 
 *Market Data*:
+
 - `bid`, `ask`, `underlying_price`, `underlying_timestamp`
 
 *First-Order Greeks*:
+
 - `delta`, `theta`, `vega`, `rho`, `epsilon`, `lambda`, `gamma`
 
 *Second-Order Greeks*:
+
 - `vanna`, `charm`, `vomma`, `veta`
 
 *Third-Order Greeks*:
+
 - `vera`, `speed`, `zomma`, `color`, `ultima`
 
 *Volatility Metrics*:
+
 - `implied_vol`, `iv_error`, `d1`, `d2`, `dual_delta`, `dual_gamma`
 
 **Example**:
+
 ```
 http://localhost:25503/v3/option/history/greeks/all?symbol=AAPL&expiration=20241108&date=20241104&interval=10m
 ```
 
 **Notes**:
+
 - Greeks calculated using option and underlying midpoint price
 - When interval is specified, quote data follows same rules as quote endpoint
 - Underlying price represents the last underlying price at the timestamp field
@@ -101,12 +118,14 @@ http://localhost:25503/v3/option/history/greeks/all?symbol=AAPL&expiration=20241
 **Description**: Returns end-of-day Greeks calculations using closing prices.
 
 **Required Parameters**:
+
 - `symbol` (string): Stock or index symbol
 - `expiration` (string): Contract expiration (YYYY-MM-DD/YYYYMMDD) or `*` for all
 - `start_date` (string): Inclusive start date
 - `end_date` (string): Inclusive end date
 
 **Optional Parameters**:
+
 - `strike` (string): Strike price in dollars or `*` for all (default: `*`)
 - `right` (string): `call`, `put`, or `both` (default: `both`)
 - `annual_dividend` (number): Annualized expected dividend
@@ -117,6 +136,7 @@ http://localhost:25503/v3/option/history/greeks/all?symbol=AAPL&expiration=20241
 **Response Fields**: Same as Option History Greeks (All) plus OHLC data
 
 **Example**:
+
 ```
 # Single contract
 http://localhost:25503/v3/option/history/greeks/eod?symbol=AAPL&expiration=20241108&strike=220.000&right=call&start_date=20241104&end_date=20241104
@@ -126,6 +146,7 @@ http://localhost:25503/v3/option/history/greeks/eod?symbol=AAPL&expiration=*&sta
 ```
 
 **Notes**:
+
 - Uses daily EOD reports generated at 17:15 ET
 - Quote fields (bid/ask) may lack data prior to December 1, 2023
 - Set `expiration=*` to retrieve data for every option with the same symbol
@@ -139,12 +160,14 @@ http://localhost:25503/v3/option/history/greeks/eod?symbol=AAPL&expiration=*&sta
 **Description**: Returns every NBBO quote reported by OPRA.
 
 **Required Parameters**:
+
 - `symbol` (string): Stock/index symbol or underlying
 - `expiration` (string): Contract expiration (YYYY-MM-DD/YYYYMMDD) or `*`
 - `date` (string): Date to fetch data
 - `interval` (string): Time interval size
 
 **Optional Parameters**:
+
 - `strike` (string): Strike price or `*` (default: `*`)
 - `right` (string): `call`, `put`, or `both` (default: `both`)
 - `start_time` (string): Default `09:30:00`
@@ -152,12 +175,14 @@ http://localhost:25503/v3/option/history/greeks/eod?symbol=AAPL&expiration=*&sta
 - `format` (string): csv, json, ndjson, html (default: `csv`)
 
 **Response Fields**:
+
 - `symbol`, `expiration`, `strike`, `right`
 - `timestamp` (YYYY-MM-DDTHH:mm:ss.SSS)
 - `bid_size`, `bid_exchange`, `bid`, `bid_condition`
 - `ask_size`, `ask_exchange`, `ask`, `ask_condition`
 
 **Example**:
+
 ```
 http://localhost:25503/v3/option/history/quote?symbol=AAPL&expiration=20241108&strike=220.000&right=call&date=20241104&interval=1m
 ```
@@ -171,11 +196,13 @@ http://localhost:25503/v3/option/history/quote?symbol=AAPL&expiration=20241108&s
 **Description**: Returns every trade reported by OPRA.
 
 **Required Parameters**:
+
 - `symbol` (string): Stock/index symbol or underlying
 - `expiration` (string): Contract expiration or `*`
 - `date` (string): Date to fetch data
 
 **Optional Parameters**:
+
 - `strike` (string): Strike price or `*` (default: `*`)
 - `right` (string): `call`, `put`, or `both` (default: `both`)
 - `start_time` (string): Default `09:30:00`
@@ -183,12 +210,14 @@ http://localhost:25503/v3/option/history/quote?symbol=AAPL&expiration=20241108&s
 - `format` (string): csv, json, ndjson, html (default: `csv`)
 
 **Response Fields**:
+
 - `symbol`, `expiration`, `strike`, `right`
 - `timestamp` (date-time), `sequence` (integer)
 - `condition`, `ext_condition1-4` (trade conditions)
 - `size` (contracts traded), `exchange`, `price`
 
 **Example**:
+
 ```
 # Single contract
 http://localhost:25503/v3/option/history/trade?symbol=AAPL&expiration=20241108&strike=220.000&right=call&date=20241104
@@ -198,6 +227,7 @@ http://localhost:25503/v3/option/history/trade?symbol=AAPL&expiration=*&date=202
 ```
 
 **Notes**:
+
 - Extended trade conditions can be ignored for options
 
 ---
@@ -209,12 +239,14 @@ http://localhost:25503/v3/option/history/trade?symbol=AAPL&expiration=*&date=202
 **Description**: Returns aggregated OHLC bars for option contracts.
 
 **Required Parameters**:
+
 - `symbol` (string): Stock/index symbol or underlying
 - `expiration` (string): Contract expiration
 - `date` (string): Date to fetch data
 - `interval` (string): Time interval (default: `1s`)
 
 **Optional Parameters**:
+
 - `strike` (string): Strike price or `*` (default: `*`)
 - `right` (string): `call`, `put`, or `both` (default: `both`)
 - `start_time` (string): Default `09:30:00`
@@ -222,17 +254,20 @@ http://localhost:25503/v3/option/history/trade?symbol=AAPL&expiration=*&date=202
 - `format` (string): csv, json, ndjson, html (default: `csv`)
 
 **Response Fields**:
+
 - `symbol`, `expiration`, `strike`, `right`, `timestamp`
 - `open`, `high`, `low`, `close`
 - `volume`, `count`
 - `vwap` (volume weighted average price)
 
 **Example**:
+
 ```
 http://localhost:25503/v3/option/history/ohlc?symbol=AAPL&expiration=20231103&strike=170.000&right=call&date=20231103&interval=1m
 ```
 
 **Notes**:
+
 - Timestamp represents the opening time of the bar
 - Trades qualify for inclusion based on this timing rule
 
@@ -245,21 +280,26 @@ http://localhost:25503/v3/option/history/ohlc?symbol=AAPL&expiration=20231103&st
 **Description**: Lists all available expiration dates for an option symbol.
 
 **Required Parameters**:
+
 - `symbol` (string): Underlying symbol, `*` for all, or comma-separated list
 
 **Optional Parameters**:
+
 - `format` (string): csv, json, ndjson, html (default: `csv`)
 
 **Response Fields**:
+
 - `symbol` (string): Option contract or underlying symbol
 - `expiration` (string): Expiration date (YYYY-MM-DD)
 
 **Example**:
+
 ```
 http://localhost:25503/v3/option/list/expirations?symbol=AAPL
 ```
 
 **Notes**:
+
 - Updated overnight
 - Available on Free, Value, Standard, and Pro plans
 
@@ -272,22 +312,27 @@ http://localhost:25503/v3/option/list/expirations?symbol=AAPL
 **Description**: Lists all available strike prices for a symbol/expiration.
 
 **Required Parameters**:
+
 - `symbol` (array): Stock/index symbol, `*`, or comma-separated list
 - `expiration` (string): Contract expiration (YYYY-MM-DD or YYYYMMDD)
 
 **Optional Parameters**:
+
 - `format` (string): csv, json, ndjson, html (default: `csv`)
 
 **Response Fields**:
+
 - `symbol` (string): Contract symbol
 - `strike` (number): Strike price in dollars (e.g., 180.00)
 
 **Example**:
+
 ```
 http://localhost:25503/v3/option/list/strikes?symbol=AAPL&expiration=20220930
 ```
 
 **Notes**:
+
 - Updated overnight
 
 ---
@@ -301,27 +346,32 @@ http://localhost:25503/v3/option/list/strikes?symbol=AAPL&expiration=20220930
 **Description**: Returns every NBBO quote reported by UTP and CTA.
 
 **Required Parameters**:
+
 - `symbol` (string): Stock or index symbol
 - `date` (string): Date to fetch data
 - `interval` (string): Time interval (default: `1s`)
 
 **Optional Parameters**:
+
 - `start_time` (string): Default `09:30:00`
 - `end_time` (string): Default `16:00:00`
 - `venue` (string): `nqb` or `utp_cta` (default: `nqb`)
 - `format` (string): csv, json, ndjson, html (default: `csv`)
 
 **Response Fields**:
+
 - `timestamp` (YYYY-MM-DDTHH:mm:ss.SSS)
 - `bid_size`, `bid_exchange`, `bid`, `bid_condition`
 - `ask_size`, `ask_exchange`, `ask`, `ask_condition`
 
 **Example**:
+
 ```
 http://localhost:25503/v3/stock/history/quote?symbol=AAPL&date=20240102&interval=1m
 ```
 
 **Notes**:
+
 - When interval specified, quote represents last quote prior to interval's timestamp
 
 ---
@@ -333,17 +383,20 @@ http://localhost:25503/v3/stock/history/quote?symbol=AAPL&date=20240102&interval
 **Description**: Returns aggregated OHLC bars using SIP rules.
 
 **Required Parameters**:
+
 - `symbol` (string): Stock or index symbol
 - `date` (string): Date to fetch data
 - `interval` (string): Bar size
 
 **Optional Parameters**:
+
 - `start_time` (string): Default `09:30:00`
 - `end_time` (string): Default `16:00:00`
 - `venue` (string): `nqb` or `utp_cta` (default: `nqb`)
 - `format` (string): csv, json, ndjson, html (default: `csv`)
 
 **Response Fields**:
+
 ```json
 {
   "timestamp": "string (date-time)",
@@ -358,11 +411,13 @@ http://localhost:25503/v3/stock/history/quote?symbol=AAPL&date=20240102&interval
 ```
 
 **Example**:
+
 ```
 http://localhost:25503/v3/stock/history/ohlc?symbol=AAPL&date=20240102&interval=1m
 ```
 
 **Notes**:
+
 - Timestamp represents opening time of each bar
 
 ---
@@ -388,6 +443,7 @@ http://localhost:25503/v3/stock/history/ohlc?symbol=AAPL&date=20240102&interval=
 5. **Theta**: No scaling needed (daily decay)
 
 **Calculation Methodology**:
+
 - Greeks are calculated using option and underlying midpoint prices
 - Underlying price is the last available price at the timestamp
 - Uses Black-Scholes model with specified interest rate and dividend inputs
@@ -395,24 +451,28 @@ http://localhost:25503/v3/stock/history/ohlc?symbol=AAPL&date=20240102&interval=
 ### Interest Rate Options
 
 The `rate_type` parameter supports:
+
 - `sofr` (default): Secured Overnight Financing Rate
 - Treasury rates: `m1`, `m2`, `m3`, `m6`, `y1`, `y2`, `y3`, `y5`, `y7`, `y10`, `y20`, `y30`
 
 ### Date Formats
 
 Dates can be provided in two formats:
+
 - ISO format: `YYYY-MM-DD` (e.g., `2024-11-08`)
 - Compact format: `YYYYMMDD` (e.g., `20241108`)
 
 ### Timestamp Format
 
 All timestamps are returned in ISO 8601 format with millisecond precision:
+
 - Format: `YYYY-MM-DDTHH:mm:ss.SSS`
 - Example: `2024-11-04T10:30:00.000`
 
 ### Wildcard Support
 
 Many endpoints support wildcards for bulk data retrieval:
+
 - `expiration=*`: All expirations for a symbol
 - `strike=*`: All strikes for an expiration
 - `symbol=*`: All symbols (list endpoints only)
@@ -458,6 +518,7 @@ Many endpoints support wildcards for bulk data retrieval:
 **Note**: Specific rate limit values are not publicly documented in the API reference.
 
 **Best Practices**:
+
 - Implement exponential backoff for bulk requests
 - Use bulk endpoints (`expiration=*`, `strike=*`) when possible
 - Cache overnight-updated data (list endpoints)
@@ -494,11 +555,13 @@ fpss_region = "fpss_nj_hosts"
 ## Subscription Tiers
 
 ### Standard Tier (Current)
+
 - **Options**: STANDARD access
 - **Stock**: FREE access
 - **Index**: FREE access
 
 ### Pro Tier (Upgrade Required)
+
 - Required for: Option History Greeks (All) intraday endpoint
 - Includes all Standard tier access
 - Additional real-time features
@@ -542,7 +605,7 @@ curl "http://localhost:25503/v3/option/history/quote?symbol=AAPL&expiration=2024
 
 ## Additional Resources
 
-- **ThetaData Documentation**: https://docs.thetadata.us/
+- **ThetaData Documentation**: <https://docs.thetadata.us/>
 - **Support**: Check ThetaData support channels
 - **Python SDK**: Available but this document focuses on REST API
 - **WebSocket Streaming**: Port 25520 (FPSS) for real-time data

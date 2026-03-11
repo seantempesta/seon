@@ -49,6 +49,7 @@ The context system gives each namespace instance a managed stateful atom. When n
 ## Dependencies
 
 **Uses:**
+
 - [[components/schema-system]] (`seon.schema`) -- schema registration, validation
 - [[components/database]] (`seon.db`) -- persistence via `transact!` and `query`
 - `seon.db.schema` -- entity schema registration and Malli-to-Datalevin bridge
@@ -59,6 +60,7 @@ The context system gives each namespace instance a managed stateful atom. When n
 - `dev.onionpancakes.chassis.core` -- hiccup to HTML string
 
 **Used by:**
+
 - `seon.ns.lifecycle` -- creates instances, resolves by namespace
 - `seon.ns.routes` -- reads `::render-fn` and `::atom` from registry entries for page rendering
 - `seon.orchestrator.session` -- creates ctx with reserved-keys for agent isolation

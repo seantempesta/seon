@@ -68,6 +68,7 @@ The routes layer (`seon.ns.routes`) is the HTTP-facing surface; this component i
 ## Dependencies
 
 **Uses:**
+
 - [[components/context]] — `seon.ctx` for atom creation, persistence, SSE client management, instance registry
 - [[components/renderer]] — `seon.render` for `resolve-renderer`, `namespace-web-params`, `for-html`, `humanize`
 - [[components/code-graph]] — `seon.graph.query/functions-with-output-key` for renderer discovery
@@ -76,6 +77,7 @@ The routes layer (`seon.ns.routes`) is the HTTP-facing surface; this component i
 - `seon.runtime` — ID generation, merged schema
 
 **Used by:**
+
 - `seon.web.routes` — sole consumer of `route-patterns` data var
 - `seon.web.reactive.actions` — function resolution for Datastar actions
 - `seon.web.reactive.transform` — hiccup transformation for Datastar attributes
@@ -160,6 +162,7 @@ Two SSE modes based on namespace type:
 ### Var Injection
 
 `inject-vars!` uses `intern` + `.setDynamic` to create proper dynamic vars:
+
 - `*ctx*` — the ctx atom (deref to get state, swap! to update)
 - `*conn*` — raw Datalevin connection (for namespace code that queries directly)
 

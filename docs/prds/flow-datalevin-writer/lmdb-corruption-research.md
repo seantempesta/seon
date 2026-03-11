@@ -7,6 +7,7 @@
 ## What LMDB Guarantees
 
 LMDB uses a copy-on-write B+ tree with two alternating meta pages. On commit:
+
 1. New pages are written to free space (never overwriting live pages)
 2. `fdatasync()` flushes data pages to disk
 3. The meta page is updated atomically (single page write)
@@ -15,6 +16,7 @@ LMDB uses a copy-on-write B+ tree with two alternating meta pages. On commit:
 After SIGKILL, LMDB recovers by reading whichever meta page has the last valid committed transaction. Uncommitted writes are simply lost — the old pages are still intact.
 
 **This guarantee holds ONLY when these flags are NOT set:**
+
 - `MDB_NOSYNC` — skips `fdatasync()`, so data pages may not be on disk when meta page is written
 - `MDB_WRITEMAP` — maps the file read/write; partial page writes during crash can corrupt
 - `MDB_MAPASYNC` — async msync with writemap; crashes can lose recent commits
@@ -76,6 +78,7 @@ From `reference-code/datalevin/src/datalevin/db.clj:681-685`, Datalevin temporar
 ### 3. The `lock.mdb` Stale Reader Table
 
 LMDB's `lock.mdb` contains a shared reader table. Each reader slot records a PID and a transaction ID. When a process dies:
+
 - Its reader slots become stale
 - LMDB's `mdb_reader_check()` can clean these up
 - But if the reader was mid-transaction at death, the cleanup may not happen correctly on the next open
@@ -85,6 +88,7 @@ LMDB's `lock.mdb` contains a shared reader table. Each reader slot records a PID
 ## Current State of data/datalevin/
 
 The directory exists and has data:
+
 - `data.mdb` — 245,760 bytes (server-level, small — just metadata)
 - `lock.mdb` — 65,664 bytes (reader table)
 - Multiple hex-named subdirectories (per-database LMDB environments)
@@ -105,6 +109,7 @@ LMDB recreates `lock.mdb` on next open. If the corruption is only from stale loc
 ### Option 2: Use mdb_copy for Recovery
 
 If LMDB tools are available:
+
 ```bash
 # mdb_copy compacts and rebuilds the B+ tree
 mdb_copy -c data/datalevin/73656F6E output_dir
@@ -140,6 +145,7 @@ pkill -9 -f "java.*seon"    # Only if still alive
 ```
 
 Seon already has a JVM shutdown hook in `src/seon/core.clj:247-262` that:
+
 1. Calls `db/shutdown-writers!` (flushes async write flows)
 2. Backs up ctx instances
 3. Calls `stop-app` (Integrant halt)
@@ -159,6 +165,7 @@ Before opening any LMDB environment, delete `lock.mdb` if no process holds it:
 ```
 
 This is safe because:
+
 - If no Datalevin process is running, the lock is stale by definition
 - LMDB recreates `lock.mdb` fresh on `mdb_env_open()`
 - Our startup already checks that no Seon is running (port checks)
@@ -166,16 +173,20 @@ This is safe because:
 ### Fix 3: Sync Before Close (Belt and Suspenders)
 
 Add explicit `(datalevin.core/sync db)` calls:
+
 - In the shutdown hook before `stop-app`
 - In the Integrant `:halt-key!` for the Datalevin server component
 
 ### Fix 4: Update MEMORY.md / Operational Notes
 
 Change the kill command from:
+
 ```
 Kill JVMs: `pkill -9 -f "java.*seon"`
 ```
+
 To:
+
 ```
 Kill JVMs: `pkill -15 -f "java.*seon" && sleep 3 && pkill -9 -f "java.*seon"`
 After forced kill: delete lock.mdb files, NOT data.mdb
@@ -184,6 +195,7 @@ After forced kill: delete lock.mdb files, NOT data.mdb
 ## Is This a Datalevin Bug?
 
 **Partially.** The temporary `:nosync` flag in `datalevin.db` (lines 681-685) creates a vulnerability window. If SIGKILL arrives during that window, crash safety is lost. This is arguably a Datalevin design issue — it should either:
+
 1. Not temporarily disable sync
 2. Do an explicit `fdatasync` before re-enabling sync
 

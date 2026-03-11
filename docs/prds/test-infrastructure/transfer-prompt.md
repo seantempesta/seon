@@ -13,6 +13,7 @@ There are two kinds of tests in Seon:
 ### 1. Pure Function Tests (auto-generated)
 
 Every public function with a `:malli/schema` that takes and returns data (no side effects, no DB, no ctx) should have a **generative test generated automatically** from its schema. No human writes these tests. The system:
+
 - Discovers all pure functions via the code graph
 - Generates inputs from the Malli schema
 - Calls the function
@@ -65,11 +66,13 @@ When a function changes, find all tests that exercise it (directly or transitive
 ### Research needed (for the implementing agent)
 
 Read these files to understand the existing graph:
+
 - `src/seon/graph/ingest.clj` — how the code graph is built (functions, calls, specs, dependencies)
 - `src/seon/graph/query.clj` — how to query the graph (functions with output key, callers, callees)
 - `src/seon/dev/test.clj` — how `test-affected` works today (namespace-level)
 
 Questions to answer:
+
 - Does the graph already track which test functions call which production functions?
 - Can we extend `test-affected` to work at function granularity instead of namespace granularity?
 - How do we map a `deftest` to the production functions it exercises? Static analysis (the graph) or runtime tracing?
@@ -95,6 +98,7 @@ This is a leveled-up version of `user/test-gen`. The difference: `test-gen` uses
 ### For stateful functions
 
 Stateful functions (those that touch DB, ctx, or other resources) need human-written integration tests using the harness. These tests:
+
 - Create a harness with `with-test-harness`
 - Set up state (transact data, populate ctx)
 - Call the function
@@ -110,52 +114,62 @@ Stateful functions (those that touch DB, ctx, or other resources) need human-wri
 ## Key Source Files to Understand
 
 ### The Agent Harness (what tests mirror)
+
 - `src/seon/ctx.clj` — ctx atom: `create!` (line 458), `destroy!` (line 615), reserved keys, validation, persistence
 - `src/seon/ns/lifecycle.clj` — `inject-vars!` (line 274) creates `*ctx*` and `*conn*` in namespaces
 - `src/seon/orchestrator/session.clj` — `start-agent-session!` (line 253) — the full agent environment setup
 - `src/seon/flow/agent_runner.clj` — how agent JVMs get their environment
 
 ### The Database Layer
+
 - `src/seon/db.clj` — `*direct-mode*` (line 130), `*conn-manager*` (line 162), `resolve-conn`, `transact!`, `ensure-schema!`
 - `src/seon/db/datalevin/conn.clj` — `get-or-create-connection!` (line 208) — the code path the fake conn-manager must satisfy
 - `src/seon/db/schema.clj` — `persisted-schemas`, `malli-map->datalevin-schema` — for deriving merged test schemas
 
 ### The Code Graph
+
 - `src/seon/graph/ingest.clj` — how the graph is built
 - `src/seon/graph/query.clj` — querying functions, callers, callees
 - `src/seon/dev/test.clj` — `test-affected` (namespace-level dependency-aware testing)
 
 ### Current Test Infrastructure (what you're replacing)
+
 - `test/seon/test_utils.clj` — `with-temp-conn`, `with-test-datalevin`, current helpers
 - `test/seon/runtime_test.clj` — worst boilerplate example (~45 lines of fixture setup)
 - `test/seon/ctx_test.clj` — another heavy boilerplate example
 - `test/seon/db/pipeline_test.clj` — best generative test patterns (keep these)
 
 ### Reference Code (read the source, not just docs)
+
 - `reference-code/test.check/src/main/clojure/clojure/test/check/` — `defspec`, `prop/for-all`, shrinking
 - `reference-code/malli/src/malli/generator.cljc` — generator internals, `:gen/min`, `:gen/max`, `:gen/elements`
 
 ## Architecture Decisions (Already Made)
 
 ### 1. Lazy Local Datalevin (not eager, not TCP)
+
 - Test harness creates a temp `d/create-conn` **on first DB access**, not at fixture setup
 - Pure function tests pay zero LMDB cost
 - Uses `:nosync` flags for speed, 10MB map size to prevent OOM
 - Unique temp directory per test invocation — concurrent-safe
 
 ### 2. Any-db-name conn-manager (not fixed list)
+
 - Every namespace can have its own DB — the fake conn-manager handles arbitrary keywords
 - Use `atom` wrapping a "defaulting map" (reify `ILookup` + `IPersistentMap`) — see Verified Claims in PRD
 - **WARNING:** A plain `reify IDeref` WILL CRASH — `get-or-create-connection!` calls `swap!` which needs `IAtom`. Use a real atom.
 
 ### 3. `transact!` calls `resolve-conn` BEFORE `*direct-mode*`
+
 - `ensure-schema!` needs a real Datalevin connection, not a stub
 - The lazy temp conn handles this correctly
 
 ### 4. Merged schema from all registered entity schemas
+
 - `persisted-schemas` + `malli-map->datalevin-schema` → merge. Verified: 17 schemas, 110 attrs, no conflicts. Memoize.
 
 ### 5. ctx works in tests already
+
 - `ctx/create!` with `{::persist? false, ::sse-push? false, ::validate? true}` is test-ready
 - `ctx/destroy!` handles all cleanup. No changes needed to ctx.clj.
 
@@ -166,6 +180,7 @@ This is a long refactor. Each phase should be a separate task with its own commi
 ### Phase 0: Understand the system (research only)
 
 Before writing any code:
+
 - Read `start-agent-session!` end-to-end. Trace every function call.
 - Read `ctx/create!` and understand every option.
 - Read `inject-vars!` and understand how `*ctx*` and `*conn*` get into namespaces.
@@ -182,6 +197,7 @@ Verify by: creating a harness in the REPL, transacting data, querying it back, t
 ### Phase 2: Auto-generated generative tests
 
 Build the machinery to automatically generate `defspec` tests for all pure functions:
+
 - Discover functions via the schema registry and code graph
 - Classify as pure vs stateful (does the schema reference runtime types?)
 - Generate property tests: generate inputs → call function → validate output
@@ -191,6 +207,7 @@ Build the machinery to automatically generate `defspec` tests for all pure funct
 ### Phase 3: Harness-based integration test for one namespace
 
 Pick a real namespace (e.g., `seon.health.workout` or `seon.ctx`) and write integration tests that use the full harness:
+
 - Create harness → transact test data → call functions → assert on DB state and ctx
 - The test should feel like "being an agent" — same environment, same capabilities
 - Verify render functions work by populating ctx and calling them directly
@@ -198,6 +215,7 @@ Pick a real namespace (e.g., `seon.health.workout` or `seon.ctx`) and write inte
 ### Phase 4: Code graph → test dependency mapping
 
 Extend `test-affected` to function-level granularity:
+
 - Map each test function to the production functions it exercises
 - On code change, find affected tests via graph traversal
 - Build `user/test-for` that takes a function var and returns relevant tests
@@ -205,6 +223,7 @@ Extend `test-affected` to function-level granularity:
 ### Phase 5: Migrate existing tests
 
 One file at a time. For each test file, decide:
+
 - Is this testing a pure function? → Should be auto-generated, delete the manual test
 - Is this testing stateful behavior? → Rewrite using the harness
 - Commit after each file. Report what you learned.
@@ -233,6 +252,7 @@ JVM restart required to pick up new versions.
 ## What to Report
 
 After each phase, report:
+
 - What you learned about the system (this is as important as the code changes)
 - What worked, what didn't, what surprised you
 - Any code smells or inconsistencies found (fix if understood, flag if uncertain)

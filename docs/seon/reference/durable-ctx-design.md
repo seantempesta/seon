@@ -254,6 +254,7 @@ The Datastar Clojure SDK establishes these patterns:
 **This is the key to hiding Datastar complexity.**
 
 Agent writes clean Clojure:
+
 ```clojure
 [:button {:on:click :increment} "Add"]
 [:input {:field :user-name}]
@@ -264,6 +265,7 @@ Agent writes clean Clojure:
 ```
 
 Framework transforms via `clojure.walk/postwalk`:
+
 ```clojure
 [:button {:data-on:click "@post('/action/ns/increment')"} "Add"]
 [:input {:name "user-name" :data-bind:user-name true}]
@@ -274,6 +276,7 @@ Framework transforms via `clojure.walk/postwalk`:
 ```
 
 Implementation sketch:
+
 ```clojure
 (defn transform-attrs [attrs instance-id]
   (reduce-kv

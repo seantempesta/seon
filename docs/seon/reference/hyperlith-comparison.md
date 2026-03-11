@@ -36,6 +36,7 @@ Single render function per page. Push the full view, not deltas.
 > "Intuitively you would think the diffing approach would be more performant so you wouldn't even consider this approach."
 
 But with:
+
 - Brotli streaming compression (90-100x reduction)
 - Idiomorph on client (handles DOM diffing)
 - Throttled renders (max rate limiting)
@@ -115,6 +116,7 @@ com.aayushatharva.brotli4j/native-osx-aarch64 {:mvn/version "1.18.0"}  ; for M1/
 ```
 
 Key elements:
+
 1. `hk/as-channel` - http-kit async channel API
 2. Streaming brotli with reusable output stream
 3. Hash-based change detection (fast `Integer/toHexString(hash ...)`)
@@ -132,6 +134,7 @@ Key elements:
 ```
 
 Benefits:
+
 - Only renders dynamic content for actual users (not bots)
 - Shell can be pre-compressed with high quality
 - Etag caching for the shell
@@ -151,6 +154,7 @@ No manual `trigger-refresh!` calls - state changes automatically trigger renders
 ### Option A: Port Hyperlith's Implementation
 
 Copy/adapt these files from hyperlith:
+
 - `impl/brotli.clj` - Brotli compression
 - `impl/datastar.clj` - SSE handling (adapt to our needs)
 - Update `web/sse.clj` to use this approach
@@ -158,12 +162,14 @@ Copy/adapt these files from hyperlith:
 ### Option B: Use Hyperlith as a Library
 
 Add hyperlith as a dependency and use their primitives:
+
 ```clojure
 andersmurphy/hyperlith {:git/url "https://github.com/andersmurphy/hyperlith"
                         :git/sha "..."}
 ```
 
 Then use:
+
 - `hyperlith.core/defview`
 - `hyperlith.core/defaction`
 - `hyperlith.core/refresh-all!`
@@ -199,6 +205,7 @@ Then use:
 ## Summary
 
 The hyperlith approach is:
+
 1. **Simpler** - No diffing, no partial updates, just render everything
 2. **More Efficient** - Brotli streaming compression is that good
 3. **More Robust** - No missed events, no state sync issues

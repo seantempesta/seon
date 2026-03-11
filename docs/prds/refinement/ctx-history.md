@@ -40,6 +40,7 @@ Store deltas as EDN strings, matching current ctx persistence pattern. One entit
 ### 4. History metadata in ctx
 
 A reserved key `::seon.ctx/history` in the ctx atom contains:
+
 ```clojure
 {:cursor 5     ;; current position (0 = base)
  :total 5      ;; total deltas available
@@ -71,12 +72,14 @@ Decision: Build our own delta history layer on top of Datalevin's simple key-val
 ### Phase 1: Pure diff utilities ✅ DONE
 
 **Files:**
+
 - `src/seon/ctx/history.clj` -- `map-diff`, `apply-delta`, `reverse-delta`, `empty-delta?`
 - `test/seon/ctx/history_test.clj` -- unit tests including round-trip verification
 
 **Status:** Complete and tested. All functions are pure, map-in/map-out, with Malli schemas. Tests verify round-trip (apply-delta of map-diff reconstructs original), empty-delta detection, and key addition/removal/change.
 
 **Verification:**
+
 ```clojure
 (require '[seon.ctx.history :as h])
 (h/map-diff {::h/before {:a 1 :b 2} ::h/after {:a 1 :b 3 :c 4}})
@@ -90,10 +93,12 @@ Decision: Build our own delta history layer on top of Datalevin's simple key-val
 **Goal:** Extend `ctx/create!` to optionally track history in a companion atom. Watches on the ctx atom compute and store deltas automatically. Provide `go-back!`, `go-forward!`, and `history-reset!` functions.
 
 **Files to modify:**
+
 - `src/seon/ctx.clj` -- add `::history?` option to `create!`, history watch
 - `src/seon/ctx/history.clj` -- add stateful history management functions
 
 **New schemas:**
+
 ```clojure
 ::history?          ;; boolean, opt-in to history tracking
 ::max-deltas        ;; int, default 100
@@ -103,6 +108,7 @@ Decision: Build our own delta history layer on top of Datalevin's simple key-val
 ```
 
 **New functions in `seon.ctx.history`:**
+
 ```clojure
 (create-history!  {::instance-id "abc" ::base-state {:a 1}})
 ;; => atom holding {::base ... ::deltas [] ::cursor 0}
@@ -121,6 +127,7 @@ Decision: Build our own delta history layer on top of Datalevin's simple key-val
 ```
 
 **Integration with `ctx/create!`:**
+
 - When `::history? true` is passed, create a history sidecar atom
 - Add a watch that calls `map-diff` on old/new values and `record-delta!`
 - Store sidecar ref in the registry entry
@@ -130,6 +137,7 @@ Decision: Build our own delta history layer on top of Datalevin's simple key-val
 **Key detail:** When `go-back!`/`go-forward!` modify the ctx atom, the history watch must NOT record that change as a new delta. Use a flag (e.g., `::navigating?` atom) to suppress recording during navigation.
 
 **Verification:**
+
 ```clojure
 (def *ctx* (ctx/create! {::ctx/instance-id "test"
                           ::ctx/history? true
@@ -156,6 +164,7 @@ Decision: Build our own delta history layer on top of Datalevin's simple key-val
 **Goal:** Persist delta history to Datalevin so it survives server restarts. Debounced like current ctx persistence.
 
 **Datalevin schema additions (merge into ctx's schema):**
+
 ```clojure
 {:seon.ctx.history/instance-id {:db/valueType :db.type/string}
  :seon.ctx.history/seq         {:db/valueType :db.type/long}
@@ -169,6 +178,7 @@ Decision: Build our own delta history layer on top of Datalevin's simple key-val
 Each delta becomes one entity: `entry-id = "{instance-id}-{seq}"`.
 
 **New functions:**
+
 ```clojure
 (persist-delta!   {::conn conn ::instance-id "abc" ::seq 3 ::delta {...}})
 (persist-base!    {::conn conn ::instance-id "abc" ::base-state {...}})
@@ -179,11 +189,13 @@ Each delta becomes one entity: `entry-id = "{instance-id}-{seq}"`.
 ```
 
 **Integration:**
+
 - On `ctx/create!` with `::history? true` and `::conn`, load history from Datalevin
 - On each delta, debounce-persist to Datalevin (separate debounce from state persistence)
 - On compaction trigger (> max-deltas), compact and clean up old entities
 
 **Verification:**
+
 ```clojure
 ;; Make changes, restart server
 ;; History should survive:
@@ -198,10 +210,12 @@ Each delta becomes one entity: `entry-id = "{instance-id}-{seq}"`.
 **Goal:** A timeline/breadcrumb component showing history state, clickable to jump to any point.
 
 **Files:**
+
 - `src/seon/render/history.clj` -- history timeline component
 - `src/seon/render/default_page.clj` -- integrate history component
 
 **Component design:**
+
 - Horizontal breadcrumb bar below the page header
 - Shows dots or small markers for each history point
 - Current position highlighted
@@ -212,6 +226,7 @@ Each delta becomes one entity: `entry-id = "{instance-id}-{seq}"`.
 **Data source:** The `::seon.ctx/history` key injected into ctx by Phase 2.
 
 **Verification:**
+
 - Navigate to any namespace page with history enabled
 - Make changes, see breadcrumb update
 - Click back/forward, see state change
@@ -226,16 +241,19 @@ Each delta becomes one entity: `entry-id = "{instance-id}-{seq}"`.
 **URL format:** `/ns/seon.health.workout?t=3` -- view state at history position 3.
 
 **Implementation:**
+
 - Route handler reads `?t=N` query param
 - If present, reconstruct state at position N (apply base + deltas 1..N)
 - Render with that reconstructed state (read-only view, not modifying ctx)
 - Browser back/forward via `pushState` when clicking timeline
 
 **Files:**
+
 - `src/seon/ns/routes.clj` -- read `?t=` param, pass to renderer
 - `src/seon/render/history.clj` -- timeline links use `?t=N` hrefs
 
 **Verification:**
+
 - `curl http://localhost:8080/ns/seon.health.workout?t=2` shows state at T2
 - Clicking timeline dot navigates browser to `?t=N`
 - Browser back button returns to previous `?t=` view

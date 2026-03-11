@@ -32,6 +32,7 @@
 ### ig/expand vs ig/prep -- CORRECT
 
 We correctly use `ig/expand` everywhere:
+
 - `seon.core/start-app` (core.clj:63): `(ig/expand cfg)`
 - `user/dev-prep!` (user.clj:38): `(ig/expand cfg)`
 - `user/test-prep!` (user.clj:46): `(ig/expand cfg)`
@@ -179,6 +180,7 @@ The current naming is inconsistent. Some keys use the `:seon/` namespace with a 
 ### The `:seon/graph-db` Name Problem
 
 This is the most misleading name. It is NOT a graph database. It is a Datalevin connection that stores:
+
 - Runtime registry data (what namespaces are running)
 - Code graph entities (from the code scanner)
 - Render system lookups
@@ -192,12 +194,14 @@ The DB name on disk is `seon.runtime`. The component initializes `seon.runtime/i
 The current pattern has a split where some components define their `init-key` in their own namespace (good: `seon.web.server`, `seon.web.tailwind`, `seon.web.caddy`, `seon.flow.pool`, `seon.db.datalevin.server`, `seon.db.datalevin.conn`) but others are defined inline in `seon.system` (bad: graph-db, schema-registry, nrepl-server, primer-ctx, orchestrator-sessions, code-scanner, claude-code).
 
 The inline ones should either:
+
 1. Move to their own namespaces (if complex enough), or
 2. Keep the key consistent with what they delegate to
 
 ### Impact of Renaming
 
 This is a mechanical refactor but it touches:
+
 - `resources/system.edn` -- all key names and `#ig/ref` values
 - `defmethod ig/init-key` / `halt-key!` / etc in each component ns
 - Every `(:seon/foo state/system)` access in production code (grep found ~15 occurrences)
@@ -210,6 +214,7 @@ It is safe to do as a single coordinated change. Integrant does not care about k
 ## 5. Component Lifecycle Audit
 
 ### Legend
+
 - **init**: Has `ig/init-key` method
 - **halt**: Has `ig/halt-key!` method
 - **suspend**: Has `ig/suspend-key!` method (survives reset)
@@ -374,11 +379,13 @@ You asked about the case where an agent wants to restart a component but gets to
 ### Current State
 
 Agents interact with the system through `integrant.repl.state/system`:
+
 ```clojure
 (:seon/connection-manager state/system)  ;; get a component
 ```
 
 They cannot:
+
 - Restart individual components
 - See component health
 - Know what config a component was started with
@@ -432,12 +439,14 @@ An agent with REPL access should be able to:
 The question is: should agents restart individual components, or always go through `(reset)`?
 
 **Individual component restart is better** because:
+
 - `(reset)` restarts everything that does not have suspend/resume
 - An agent working on trading signals should not restart the HTTP server
 - Failed components should be individually recoverable
 - It matches how agents think: "this thing is broken, fix this thing"
 
 **But it needs guardrails:**
+
 - Restarting a component must also restart its dependents (Integrant's dependency graph handles this)
 - The agent should see what will be affected before confirming
 - Some components (datalevin-server) should require elevated confirmation since restarting them cascades to everything
@@ -510,6 +519,7 @@ Then in config loading: `(ig/load-hierarchy)` before `(ig/expand cfg)`.
 ### Value for Agents
 
 With hierarchies, an agent can:
+
 - `(ig/halt! system [:seon/web])` -- restart the web tier without touching databases
 - Ask "what components are in the :seon/data group?" via `(filter #(isa? % :seon/data) (keys system))`
 - Have a single `assert-key` for `:seon/component` that validates all component configs
@@ -527,23 +537,23 @@ With hierarchies, an agent can:
 
 ### Phase 2: Lifecycle Fixes (1 agent, straightforward)
 
-5. **Add suspend/resume to HTTP server** -- prevent SSE drops on reset
-6. **Add suspend/resume to code-scanner** -- prevent wasteful re-analysis
-7. **Add suspend/resume to tailwind-watcher** -- minor
-8. **Add halt methods to primer-ctx and orchestrator-sessions**
-9. **Fix caddy-proxy resume-key signature**
+1. **Add suspend/resume to HTTP server** -- prevent SSE drops on reset
+2. **Add suspend/resume to code-scanner** -- prevent wasteful re-analysis
+3. **Add suspend/resume to tailwind-watcher** -- minor
+4. **Add halt methods to primer-ctx and orchestrator-sessions**
+5. **Fix caddy-proxy resume-key signature**
 
 ### Phase 3: Config Validation (1 agent, new infrastructure) -- DONE
 
-10. **Create Malli config schemas** per component -- DONE (`src/seon/system/config.clj`)
-11. **Implement assert-key** validation using registered schemas -- DONE (`:seon/component` hierarchy + generic assert-key)
-12. **Create component introspection API** -- DONE (`seon.system.config/describe`)
+1. **Create Malli config schemas** per component -- DONE (`src/seon/system/config.clj`)
+2. **Implement assert-key** validation using registered schemas -- DONE (`:seon/component` hierarchy + generic assert-key)
+3. **Create component introspection API** -- DONE (`seon.system.config/describe`)
 
 ### Phase 4: Agent Control (1 agent, significant)
 
-13. **Add component hierarchy** via `integrant/hierarchy.edn` -- DONE (`resources/integrant/hierarchy.edn`)
-14. **Create `seon.system.control`** namespace with `restart!`, `healthy?`, `components`
-15. **Wire into agent REPL** so agents can discover and control components programmatically
+1. **Add component hierarchy** via `integrant/hierarchy.edn` -- DONE (`resources/integrant/hierarchy.edn`)
+2. **Create `seon.system.control`** namespace with `restart!`, `healthy?`, `components`
+3. **Wire into agent REPL** so agents can discover and control components programmatically
 
 ---
 

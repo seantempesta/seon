@@ -20,6 +20,7 @@ Fixed 4 bugs in `src/ml_options/dsl/primitives.clj` using TDD approach. All bugs
 **Fix:** Calculate actual days from `option/expiry` field using `java.time.temporal.ChronoUnit/DAYS`
 
 **Code change:**
+
 ```clojure
 ;; Before:
 (let [days-to-expiry 30 ;; TODO: Calculate from expiry
@@ -45,6 +46,7 @@ Fixed 4 bugs in `src/ml_options/dsl/primitives.clj` using TDD approach. All bugs
 **Fix:** Divide by days between near and far expiry
 
 **Code change:**
+
 ```clojure
 ;; Before:
 (let [sorted (sort-by :expiry term-struct)
@@ -76,10 +78,12 @@ Fixed 4 bugs in `src/ml_options/dsl/primitives.clj` using TDD approach. All bugs
 **Fix:** Documented as known limitation (requires complex XTDB v2 temporal queries)
 
 **Code change:**
+
 - Updated docstrings to clearly state "CURRENTLY IGNORED - queries all history"
 - Added TODO to implement temporal filtering using XTDB v2 system-time ranges
 
 **Decision:** Implementing proper temporal filtering with `lookback` requires:
+
 1. System-time range queries in XTDB v2
 2. Converting lookback days to system-time bounds
 3. Filtering historical data within that window
@@ -97,6 +101,7 @@ This is non-trivial and not critical for MVP. Documented limitation for future w
 **Fix:** Return `nil` with clear TODO until properly implemented
 
 **Code change:**
+
 ```clojure
 ;; Before:
 (defn implied-correlation [db index-ticker component-tickers weights]
@@ -139,6 +144,7 @@ primitives-test: 13 tests, 37 assertions, 0 failures
 ### TDD Workflow Followed
 
 For each bug:
+
 1. ✅ Wrote failing test first
 2. ✅ Confirmed test failed (auto-test hook showed failures)
 3. ✅ Fixed the code
@@ -158,6 +164,7 @@ For each bug:
 ### Why skip iv-rank/iv-percentile lookback fix?
 
 Implementing proper temporal filtering requires:
+
 - XTDB v2 system-time range queries
 - Converting lookback days to Instant bounds
 - Filtering results by system-time window
@@ -167,6 +174,7 @@ This is complex and not critical for MVP. The functions work correctly (use all 
 ### Why return nil for implied-correlation?
 
 Returning hardcoded values (0.20, 0.25) would silently give incorrect results. Better to return `nil` which:
+
 - Clearly signals "not implemented"
 - Won't be mistaken for real data
 - Forces callers to handle the unimplemented case
@@ -182,8 +190,8 @@ Returning hardcoded values (0.20, 0.25) would silently give incorrect results. B
 
 ### Documented Limitations (Low Impact)
 
-3. **iv-rank/iv-percentile lookback** - Functions work, just use all history
-4. **implied-correlation** - Now returns nil instead of nonsense values
+1. **iv-rank/iv-percentile lookback** - Functions work, just use all history
+2. **implied-correlation** - Now returns nil instead of nonsense values
 
 ---
 

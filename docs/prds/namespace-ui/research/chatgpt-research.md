@@ -1,5 +1,4 @@
 
-
 UI/UX Inspiration for Seon’s Namespace UI
 
 In building Seon’s dynamic UI, we can draw on patterns from several open-source Clojure tools and even classic Lisp/Smalltalk systems. Below we explore relevant projects – their features, code locations, and design approaches – to inform Seon’s namespace browser. (Note: Seon uses XTDB v2, so references to XTDB v1 tools are for concept inspiration only.)

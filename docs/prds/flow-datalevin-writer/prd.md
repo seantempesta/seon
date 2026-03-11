@@ -92,6 +92,7 @@ No new external dependencies needed.
 **Input:** Running Seon system, REPL connected.
 
 **Steps:**
+
 1. Create a minimal flow with a step-fn that does `d/transact!` and returns nil (no outputs). Verify: inject works, state updates, no "can't resolve channel" error.
 2. Test promise delivery as side-effect in transform: create an atom of promises, deliver from transform, verify caller can deref.
 3. Test `seon.flow.harness.channel`: send an EDN map over TCP, receive it on the other end. Verify round-trip for tx-data shapes (maps with `:db/id`, keywords, vectors).
@@ -117,6 +118,7 @@ All 5 assumptions verified in REPL (original agent + verification agent):
 5. **Topology request! pattern** - CONFIRMED (end-to-end). The previous agent only tested reply-router in isolation and reported `build-topology!` was blocked by a harness compile error. **Verification found this is no longer true.** `seon.flow.harness` compiles cleanly, and the full path works: `build-topology!` creates flow with namespace-step + reply-router, `request!` injects a request, namespace-step forwards it to the external out-port channel, a simulated agent echoes back, reply-router delivers the promise. Result: `{:echo [1 2 3]}`. No blockers for Phase 3.
 
 **Surprises/Notes:**
+
 - The harness compile error (`runtime/get-flow` not found) reported by the original agent appears to have been fixed. `(require 'seon.flow.harness :reload)` succeeds.
 - Agent JVMs (from `create_session`) don't have native Datalevin on their classpath. All Datalevin testing must happen in the orchestrator REPL.
 - Existing writer tests all pass: 7 tests, 31 assertions, 0 failures.
@@ -128,10 +130,12 @@ All 5 assumptions verified in REPL (original agent + verification agent):
 **Goal:** Make `db-writer-step` work correctly: no output wiring errors, promise delivery for synchronous callers, clean state separation.
 
 **Input:**
+
 - `src/seon/db/datalevin/writer.clj`
 - `test/seon/db/datalevin/writer_test.clj`
 
 **Steps:**
+
 1. Remove `:out/result` and `:out/error` from `db-writer-step`'s `describe` return. Transform returns `nil` (no flow outputs).
 2. Add `pending-promises` atom as init arg (not in step-fn state — it's runtime, not serializable).
 3. Add `::correlation-id` to the tx message format. Transform looks up promise by correlation-id, delivers result or error.
@@ -141,6 +145,7 @@ All 5 assumptions verified in REPL (original agent + verification agent):
 **Output:** Modified `writer.clj` and `writer_test.clj`.
 
 **Verification:**
+
 - `(user/run-tests 'seon.db.datalevin.writer-test)` — all pass
 - No "can't resolve channel" errors in REPL when injecting messages
 
@@ -153,10 +158,12 @@ All 5 assumptions verified in REPL (original agent + verification agent):
 **Goal:** Add `seon.db/query` and `seon.db/pull` that hide connection details from callers.
 
 **Input:**
+
 - `src/seon/db.clj`
 - `src/seon/db/datalevin/conn.clj`
 
 **Steps:**
+
 1. Add `seon.db/query` — takes db-name keyword (`:seon`, `:seon.runtime`, or a namespace string) + Datalog query + inputs. Resolves connection via conn manager, calls `d/q` on `@conn`.
 2. Add `seon.db/pull` — same pattern, calls `d/pull`.
 3. Add `seon.db/pull-many` — same pattern.
@@ -167,6 +174,7 @@ All 5 assumptions verified in REPL (original agent + verification agent):
 **Output:** Modified `src/seon/db.clj`, new or modified test file.
 
 **Verification:**
+
 - Tests pass for happy path and connection-error-retry path
 - `(user/run-tests 'seon.db-test)` — all pass
 
@@ -179,10 +187,12 @@ All 5 assumptions verified in REPL (original agent + verification agent):
 **Goal:** Implement `transact-via-flow!` using topology's correlation-ID pattern. This is the in-process version — callers get a blocking write with promise-based timeout.
 
 **Input:**
+
 - `src/seon/db/datalevin/writer.clj` (from Phase 1)
 - `src/seon/flow/topology.clj` (reference for request! pattern)
 
 **Steps:**
+
 1. Implement `transact-via-flow!` — register promise in `pending-promises`, inject tx message with correlation-id into writer flow, deref promise with timeout.
 2. Handle inject failure (channel full or closed) — throw immediately, don't wait for timeout.
 3. Handle timeout — clean up promise from `pending-promises`, throw with descriptive error including tx-data count and timeout duration.
@@ -192,6 +202,7 @@ All 5 assumptions verified in REPL (original agent + verification agent):
 **Output:** Updated `writer.clj` with `transact-via-flow!`, updated tests.
 
 **Verification:**
+
 - Unit tests cover: successful write, timeout, inject failure, Datalevin error propagation
 - `(user/run-tests 'seon.db.datalevin.writer-test)` — all pass
 
@@ -204,10 +215,12 @@ All 5 assumptions verified in REPL (original agent + verification agent):
 **Goal:** Replace the `future` + `d/transact!` internals of `seon.db/transact!` with the flow-based writer from Phase 3.
 
 **Input:**
+
 - `src/seon/db.clj`
 - `src/seon/db/datalevin/writer.clj` (from Phase 3)
 
 **Steps:**
+
 1. Modify `seon.db/transact!` to route through `transact-via-flow!` instead of `future` + `d/transact!`.
 2. Keep `ensure-writer!` but have it create the new promise-aware writer flow.
 3. Keep `pause-writes!` / `resume-writes!` unchanged (they use `flow/pause` / `flow/resume` which still work).
@@ -218,6 +231,7 @@ All 5 assumptions verified in REPL (original agent + verification agent):
 **Output:** Modified `src/seon/db.clj`, integration test.
 
 **Verification:**
+
 - `(user/run-tests 'seon.db-test)` — all pass
 - REPL: `(seon.db/transact! conn [{:db/id -1 :test/x 1}])` returns tx-report
 - Existing callers (`seon.ctx`, `seon.flow.trace`) still work end-to-end
@@ -231,11 +245,13 @@ All 5 assumptions verified in REPL (original agent + verification agent):
 **Goal:** Move the writer flow into a pool JVM. Communication over TCP via `seon.flow.harness.channel`. This is the key isolation improvement — deadlocked writes can be killed.
 
 **Input:**
+
 - `src/seon/db/datalevin/writer.clj` (from Phase 4)
 - `src/seon/flow/pool.clj`
 - `src/seon/flow/harness/channel.clj`
 
 **Steps:**
+
 1. Create `src/seon/db/datalevin/writer_remote.clj` — orchestrator-side client that sends tx-data over TCP and reads ACKs.
 2. Writer JVM side: receives tx-data from TCP, calls `d/transact!`, sends result/error back with correlation-id.
 3. Pending write buffer on orchestrator: `{correlation-id -> {:tx-data [...] :promise p :sent-at Instant}}`.
@@ -246,6 +262,7 @@ All 5 assumptions verified in REPL (original agent + verification agent):
 **Output:** New `writer_remote.clj`, modified `db.clj`, tests.
 
 **Verification:**
+
 - Integration test: 10 writes through remote writer, all data present
 - `(user/run-tests 'seon.db.datalevin.writer-remote-test)` — all pass
 
@@ -258,10 +275,12 @@ All 5 assumptions verified in REPL (original agent + verification agent):
 **Goal:** When the writer JVM deadlocks, detect it, kill the process, start a new one, replay unacknowledged writes.
 
 **Input:**
+
 - `src/seon/db/datalevin/writer_remote.clj` (from Phase 5)
 - `src/seon/flow/pool.clj`
 
 **Steps:**
+
 1. Detect deadlock: promise timeout means writer is stuck. Also detect TCP `in-ch` close (writer process died).
 2. Kill: `Process.destroyForcibly()` on the pool JVM process.
 3. Acquire new pool JVM, establish fresh TCP connection, start new ACK reader.
@@ -273,6 +292,7 @@ All 5 assumptions verified in REPL (original agent + verification agent):
 **Output:** Updated `writer_remote.clj`, integration tests.
 
 **Verification:**
+
 - Test: writer hangs -> detected in <12s -> new writer -> replayed write succeeds -> original caller's promise delivered
 - Test: kill recovery with 5 pending writes, all 5 eventually succeed
 - `(user/run-tests 'seon.db.datalevin.writer-remote-test)` — all pass
@@ -286,11 +306,13 @@ All 5 assumptions verified in REPL (original agent + verification agent):
 **Goal:** Writer flows are visible in health checks, status endpoints, and the observatory.
 
 **Input:**
+
 - `src/seon/db/datalevin/writer_remote.clj` (from Phase 6)
 - `src/seon/flow/status.clj`
 - `src/seon/runtime.clj`
 
 **Steps:**
+
 1. Register writer flows in runtime flow registry (`runtime/register-flow!`).
 2. Status collection: TCP ping to writer JVM returns write count, error count, last-write-at.
 3. Log recovery events: "Writer JVM killed, acquiring new one", "Replaying N pending writes".
@@ -300,6 +322,7 @@ All 5 assumptions verified in REPL (original agent + verification agent):
 **Output:** Updated files, health check shows writer status.
 
 **Verification:**
+
 - `curl http://localhost:8080/api/health` includes writer status
 - Writer metrics visible after a few test writes
 
@@ -314,6 +337,7 @@ All 5 assumptions verified in REPL (original agent + verification agent):
 **Input:** Working writer from Phase 7, load test plan from Notes Q9.
 
 **Steps:**
+
 1. Implement load test harness (see Notes Q9 for code sketches).
 2. Run: 10, 100, 1000 concurrent writes. Measure throughput, latency p50/p95/p99, error rate.
 3. Run: stuck writer simulation. Verify timeout detection, recovery, replay.

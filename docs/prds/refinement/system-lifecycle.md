@@ -108,6 +108,7 @@ Always return a **map** from `init-key`, not the raw resource. Include:
 | `:config-file` | File-configured processes | Path to config used (enables resume comparison) |
 
 Example from Caddy:
+
 ```clojure
 {:process process
  :config-file config-file
@@ -117,6 +118,7 @@ Example from Caddy:
 ```
 
 This makes REPL introspection natural:
+
 ```clojure
 (:url (:seon.web/caddy @integrant.repl.state/system))
 ;; => "https://localhost:3030"

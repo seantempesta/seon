@@ -135,6 +135,7 @@ id-nil nil
 ```
 
 **REPL verification:**
+
 ```clojure
 (nippy/thaw (nippy/freeze {:foo "bar" :baz nil}))
 ;; => {:foo "bar", :baz nil}
@@ -153,6 +154,7 @@ Nippy provides `*thaw-xform*`, a dynamic var that accepts a transducer applied d
 ```
 
 **REPL verification** that the transducer works for data inspection/transformation:
+
 ```clojure
 (binding [nippy/*thaw-xform*
           (map (fn [entry]
@@ -178,6 +180,7 @@ The thaw transducer is applied via `read-into` (nippy.clj:1381-1391) and `read-k
 ```
 
 Two ID modes:
+
 - **Byte ID** (1-128): Zero overhead, but caller manages uniqueness
 - **Keyword ID** (namespaced): 2-byte overhead, hashed to 16-bit int automatically
 
@@ -211,6 +214,7 @@ Fressian is a binary serialization format created by Rich Hickey for Datomic. It
 **Datalevin does not use Fressian.** Zero references to fressian in the Datalevin source. The grep for "fressian" across all Datalevin source files returned no matches.
 
 Fressian is comparable to Nippy in type coverage but:
+
 - Pure Java (no Clojure-native experience)
 - No thaw transducer
 - No metadata preservation
@@ -240,6 +244,7 @@ Fressian is comparable to Nippy in type coverage but:
 7. Throws on unsupported types via `derive-value-type` (line 83-84)
 
 **It does NOT handle:**
+
 - Value coercion before transact
 - Nil stripping
 - Serialization format selection
@@ -250,6 +255,7 @@ Fressian is comparable to Nippy in type coverage but:
 ### Notable Design Choice
 
 The `:db/valueType` property in Malli options takes precedence over derivation (line 177):
+
 ```clojure
 value-type (or (:db/valueType spec-item-options) ...)
 ```
@@ -319,6 +325,7 @@ The channel uses **length-prefixed EDN over TCP**:
 ```
 
 EDN reader with tagged literal support is in `src/seon/flow/msg.clj`:
+
 ```clojure
 ;; msg.clj:20-28
 (def edn-readers
@@ -334,6 +341,7 @@ A custom `print-method` for `Instant` is also defined (msg.clj:14-18) to emit `#
 ### What Data Flows Through
 
 The channel carries **flow message envelopes** (defined in `msg.clj`):
+
 - `:request` -- function call requests from orchestrator to agent
 - `:reply` -- execution results from agent back to orchestrator
 - `:event` -- observability events
@@ -343,6 +351,7 @@ The `::msg/args` field is `[:vector :any]` and `::msg/value` is `:any` (msg.clj:
 ### EDN Serialization Verification in Bridge
 
 The bridge (bridge.clj:153-168) explicitly validates EDN roundtrip:
+
 ```clojure
 ;; After executing a function, verify result is serializable
 (try
@@ -372,32 +381,39 @@ The bridge (bridge.clj:153-168) explicitly validates EDN roundtrip:
 ## 7. REPL Verification Results
 
 ### nil on core.async channels
+
 ```clojure
 (let [ch (async/chan 1)]
   (async/put! ch {:foo nil :bar/baz nil})
   (async/poll! ch))
 ;; => {:foo nil, :bar/baz nil}
 ```
+
 Maps containing nil values flow through channels without issue.
 
 ### Nippy nil roundtrip
+
 ```clojure
 (nippy/thaw (nippy/freeze {:foo "bar" :baz nil :nested {:a 1 :b nil}}))
 ;; => {:foo "bar", :baz nil, :nested {:a 1, :b nil}}
 ```
+
 Nippy preserves nil values in all positions.
 
 ### Nippy fast-freeze/fast-thaw (Datalevin's functions)
+
 ```clojure
 (let [data {:foo "bar" :baz nil :float-val (float 3.14) :bytes (byte-array [1 2 3])}]
   (nippy/fast-thaw (nippy/fast-freeze data)))
 ```
+
 - nil preserved
 - Float type preserved (not coerced to Double)
 - byte[] preserved with exact content
 - frozen size: 53 bytes for this payload
 
 ### Nippy metadata preservation
+
 ```clojure
 (let [data (with-meta {:foo "bar"} {:my-meta true})]
   (meta (nippy/thaw (nippy/freeze data))))
@@ -405,6 +421,7 @@ Nippy preserves nil values in all positions.
 ```
 
 ### Nippy thaw transducer
+
 ```clojure
 (binding [nippy/*thaw-xform*
           (map (fn [entry]
@@ -416,11 +433,13 @@ Nippy preserves nil values in all positions.
 ```
 
 ### EDN failure modes confirmed
+
 - `(pr-str (byte-array [1 2 3]))` -> `#object[...]` (not valid EDN)
 - `(edn/read-string (pr-str (float 3.14)))` -> `java.lang.Double` (type lost)
 - `(edn/read-string (pr-str (with-meta {:a 1} {:m true})))` -> no metadata
 
 ### Performance comparison (10,000 iterations, warmed)
+
 | Operation | EDN (pr-str + read-string) | Nippy (fast-freeze + fast-thaw) |
 |---|---|---|
 | Per-op latency | ~57.5 us | ~15.7 us |

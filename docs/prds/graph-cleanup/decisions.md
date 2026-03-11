@@ -70,10 +70,12 @@ Remove pre-computed attrs. Use ref joins: `fn → output-spec → contains-keys`
 ### Consequences
 
 **Benefits:**
+
 - Graph stores only facts — no render-specific pollution
 - ALL functions with specs are linked, not just renderers
 - New discoverable patterns (docs, health) need zero schema changes
 
 **Costs:**
+
 - Query is slightly more expensive (ref join + pull vs direct attr read)
 - Tests need rewriting to transact spec entities instead of pre-computed attrs

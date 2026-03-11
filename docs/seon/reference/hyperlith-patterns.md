@@ -3,6 +3,7 @@
 **Date:** 2025-12-02
 **Author:** Research based on Hyperlith framework by Anders Murphy
 **References:**
+
 - [GitHub: andersmurphy/hyperlith](https://github.com/andersmurphy/hyperlith)
 - [Blog: Realtime collaborative web apps without ClojureScript](https://andersmurphy.com/2025/04/07/clojure-realtime-collaborative-web-apps-without-clojurescript.html)
 - [Datastar Documentation](https://data-star.dev/)
@@ -28,12 +29,14 @@ view = f(state)
 ```
 
 Instead of:
+
 - Tracking which parts of the UI need updates
 - Calculating deltas between view states
 - Managing client-side state synchronization
 - Handling missed events during disconnects
 
 You just:
+
 1. Maintain state on the server
 2. Render the full view whenever state changes
 3. Stream it to all connected clients
@@ -59,6 +62,7 @@ Anders Murphy's quote:
 Hyperlith enforces strict separation:
 
 #### Commands (Actions)
+
 - Modify the database
 - Return `204 No Content` (or `200` with signal patches)
 - **Never** directly update the view
@@ -74,6 +78,7 @@ Hyperlith enforces strict separation:
 ```
 
 #### Queries (Views)
+
 - Read from database
 - Render the full view
 - Pushed via SSE when database changes
@@ -102,6 +107,7 @@ Use atom watches to automatically trigger SSE updates:
 ```
 
 **Our implementation:**
+
 ```clojure
 ;; ml-options.web.jobs
 (add-watch job-state :sse-auto-refresh
@@ -117,12 +123,14 @@ Use atom watches to automatically trigger SSE updates:
 All SSE events are the same: "here's the current view state."
 
 **Traditional approach (error-prone):**
+
 - Event A: "User joined"
 - Event B: "Message sent"
 - Event C: "User left"
 - Problem: Miss event B → UI desync
 
 **Hyperlith approach (robust):**
+
 - Every event: "Here's the current state of the chat room"
 - Problem: Miss any event → next event fixes it
 - Benefit: Can throttle without losing data
@@ -148,11 +156,13 @@ Because events are homogeneous (full view state), you can safely throttle:
 ```
 
 Even at 200ms throttle (5 FPS), real-time collaboration feels smooth because:
+
 - Idiomorph efficiently diffs DOM on client
 - Brotli compression keeps bandwidth low
 - Users don't perceive sub-200ms latency
 
 **Our implementation:**
+
 ```clojure
 ;; ml-options.web.sse
 (init-sse! :max-refresh-ms 200)  ; 5 updates/second
@@ -192,6 +202,7 @@ Even at 200ms throttle (5 FPS), real-time collaboration feels smooth because:
 ```
 
 **Window size tuning:**
+
 - `window-size 18` = 262KB dictionary (good default)
 - `window-size 24` = 16MB dictionary (maximum, better compression, more memory)
 - Larger windows = better compression for highly repetitive data (like dashboard HTML)
@@ -209,6 +220,7 @@ Even at 200ms throttle (5 FPS), real-time collaboration feels smooth because:
 ```
 
 **Key details:**
+
 - `event:` line specifies Datastar event type
 - `id:` enables idempotency (browser can detect duplicates)
 - `data:` lines contain the payload (multi-line supported)
@@ -232,6 +244,7 @@ Only send updates when view actually changes:
 ```
 
 **Why `Integer/toHexString(hash ...)`?**
+
 - Fast: JVM hash is O(n) but very fast for strings
 - Compact: Hex string is small for event IDs
 - Good enough: Hash collisions are acceptable (worst case = extra send)
@@ -267,6 +280,7 @@ Only send updates when view actually changes:
 ```
 
 **Benefits:**
+
 1. **Bot filtering** - Bots don't execute JS, so they don't open SSE connections
 2. **Pre-compression** - Shell is static, compress once with quality 11
 3. **ETag caching** - Shell only re-downloaded if it changes
@@ -277,6 +291,7 @@ Only send updates when view actually changes:
 ### 5. HTTP/2 or HTTP/3 Required
 
 SSE performs poorly over HTTP/1.1 because:
+
 - HTTP/1.1: One request per connection
 - SSE holds a connection open indefinitely
 - HTTP/1.1 browsers limit to ~6 connections per domain
@@ -292,6 +307,7 @@ localhost:3030 {
 ```
 
 Caddy automatically provides:
+
 - HTTP/2 support (multiplexing)
 - TLS certificate (required for HTTP/2)
 - Compression negotiation
@@ -313,6 +329,7 @@ Caddy automatically provides:
 ```
 
 Datastar automatically:
+
 - Prevents default form submission
 - Serializes form data
 - POSTs to action endpoint
@@ -346,6 +363,7 @@ The action can return signal updates for immediate feedback:
 ```
 
 **Signal naming conventions:**
+
 - `message` - Client-controlled, needs `__ifmissing` to survive re-renders
 - `_internalState` - Server-only (leading underscore), not sent to client
 
@@ -361,6 +379,7 @@ Use `pointerdown` instead of `click` for lower latency:
 ```
 
 Why? Event order:
+
 1. `pointerdown` (finger touches screen)
 2. `pointerup` (finger lifts)
 3. `click` (after both pointer events)
@@ -400,6 +419,7 @@ For long-running operations (like bulk imports):
 ```
 
 **Key points:**
+
 1. Database is source of truth
 2. Atom watch triggers SSE on every update
 3. View function renders current state
@@ -455,6 +475,7 @@ For long-running operations (like bulk imports):
 ```
 
 **Benefits:**
+
 - Simple: One source of truth
 - Automatic: Any change triggers refresh
 - Transactional: `swap!` is atomic
@@ -516,12 +537,14 @@ When N users view the same content, render once and broadcast:
 ### Bandwidth
 
 **Typical dashboard:**
+
 - Uncompressed HTML: 50-150KB
 - First render (cold): ~5-10KB (brotli, cold dictionary)
 - Subsequent renders: ~500 bytes to 2KB (hot dictionary)
 - **Effective compression:** 50:1 to 100:1 after warmup
 
 **Real-world example** from Hyperlith docs:
+
 - Game of Life with 10,000 cells
 - 200ms refresh rate (5 FPS)
 - ~1KB per update after compression warmup
@@ -530,6 +553,7 @@ When N users view the same content, render once and broadcast:
 ### Latency
 
 **Components:**
+
 1. Database update: <1ms (in-memory atom)
 2. Atom watch triggers: <1ms
 3. Render function: 1-10ms (depends on complexity)
@@ -543,6 +567,7 @@ When N users view the same content, render once and broadcast:
 ### CPU Usage
 
 **Per render cycle:**
+
 - Hiccup → HTML: O(n) where n = DOM size
 - Brotli compression: O(n) but highly optimized
 - Hash calculation: O(n) but very fast
@@ -569,6 +594,7 @@ When N users view the same content, render once and broadcast:
 ### Memory Usage
 
 **Per SSE connection:**
+
 - Brotli encoder: ~(2^window-size) bytes dictionary
 - Window size 18: 262KB per connection
 - Virtual thread: ~1KB stack
@@ -585,6 +611,7 @@ When N users view the same content, render once and broadcast:
 ### What is Datastar?
 
 Datastar is the client-side library (11.4KB brotli) that:
+
 1. Establishes SSE connection on `@post()` calls
 2. Receives `datastar-patch-elements` events
 3. Uses Idiomorph to efficiently merge HTML into DOM
@@ -605,6 +632,7 @@ Datastar is the client-side library (11.4KB brotli) that:
 Signals are reactive variables accessible via `$signalName`.
 
 **Server can update signals:**
+
 ```clojure
 (patch-signals {:count 42})
 ```
@@ -652,11 +680,13 @@ Datastar uses [Idiomorph](https://github.com/bigskysoftware/idiomorph) for DOM d
 5. Focus, scroll position, and form state preserved
 
 **Why it's fast:**
+
 - Operates on DOM directly (no VDOM overhead)
 - Only touches changed nodes
 - Preserves live state (input focus, scroll position)
 
 **Example:** Dashboard with 1000 table rows:
+
 - Only changed rows are updated in DOM
 - Unchanged rows: Zero DOM manipulation
 - Result: 60 FPS updates even with large tables
@@ -683,6 +713,7 @@ Datastar uses [Idiomorph](https://github.com/bigskysoftware/idiomorph) for DOM d
 **Why:** HTTP/2 multiplexing required for SSE to not block other requests.
 
 **Action:**
+
 ```bash
 # Create Caddyfile
 cat > Caddyfile <<EOF
@@ -986,6 +1017,7 @@ Monitor SSE connection lifecycle:
 **Why not:** Complexity increases, compression decreases, missed events cause desyncs.
 
 **Do this instead:**
+
 ```clojure
 (defn update-message [id new-text]
   (swap! db assoc-in [:messages id :text] new-text))
@@ -1007,6 +1039,7 @@ Monitor SSE connection lifecycle:
 **Why not:** Distributed state is hard. Let server be source of truth.
 
 **Do this instead:**
+
 ```clojure
 (defaction increment-count [_]
   (swap! count inc))  ; Server state only
@@ -1026,6 +1059,7 @@ Monitor SSE connection lifecycle:
 **Why not:** Easy to forget, leads to inconsistent refresh behavior.
 
 **Do this instead:**
+
 ```clojure
 ;; Set up once at startup
 (add-watch db :auto-refresh (fn [& _] (sse/refresh-all!)))
@@ -1048,6 +1082,7 @@ Monitor SSE connection lifecycle:
 **Why not:** Connection state is lost on disconnect. Hard to debug.
 
 **Do this instead:**
+
 ```clojure
 ;; Store all state in database, indexed by session ID
 (defn on-connect [req]
@@ -1065,6 +1100,7 @@ Monitor SSE connection lifecycle:
 **Why not:** Client state complexity defeats the purpose of server-driven UI.
 
 **Do this instead:**
+
 ```clojure
 ;; Keep client state minimal
 <div data-signals:inputValue="">  ; Just the input value
@@ -1078,18 +1114,21 @@ Monitor SSE connection lifecycle:
 Hyperlith represents a paradigm shift in web application architecture:
 
 **Traditional approach:**
+
 - Fine-grained updates (WebSockets or fetch)
 - Client-side state management
 - Complex synchronization logic
 - Missed events are catastrophic
 
 **Hyperlith approach:**
+
 - Full view updates (SSE)
 - Server-side state management
 - Simple: view = f(state)
 - Missed events are harmless (next update fixes it)
 
 **The ml-options-trading codebase has successfully adopted these patterns.** Our implementation of:
+
 - Streaming brotli compression
 - SSE with hash-based change detection
 - Auto-refresh via atom watches
@@ -1098,6 +1137,7 @@ Hyperlith represents a paradigm shift in web application architecture:
 ...is architecturally sound and follows Hyperlith best practices.
 
 **Next steps:**
+
 1. Add Caddy reverse proxy for HTTP/2
 2. Consider virtual thread executor configuration
 3. Profile compression ratios in production
@@ -1120,6 +1160,7 @@ Hyperlith represents a paradigm shift in web application architecture:
 **Local reference code:** `/Users/sean/src/ml-options-trading/reference-code/hyperlith/`
 
 **Key files to study:**
+
 - `src/hyperlith/core.clj` - defview/defaction macros
 - `src/hyperlith/impl/datastar.clj` - SSE implementation
 - `src/hyperlith/impl/brotli.clj` - Compression utilities

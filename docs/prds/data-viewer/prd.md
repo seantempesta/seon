@@ -30,6 +30,7 @@ Location: `src/seon/ui/viewer.clj`
 ```
 
 Current collection rendering (lines 86-127):
+
 - Maps, vectors, sets, seqs all render **fully expanded** by default
 - Uses `border-l border-base-700` for visual nesting
 - No interactive collapse - purely static HTML
@@ -44,6 +45,7 @@ Location: `src/seon/ns/view.clj`
 ```
 
 Default HTML renderer (lines 267-369):
+
 - Also renders collections fully expanded
 - Uses `pl-3 border-l border-base-700` for nesting
 - Truncates after 20 items with "... N more" indicator
@@ -81,6 +83,7 @@ From `docs/reference/datastar-quick-reference.md`:
 
 The guide notes (line 47-49):
 > **Attributes we DON'T use (yet):**
+>
 > - `data-signals` - Client-side reactive state (server-side only for now)
 
 This is the opportunity - Phase 2 introduces client-side signals for expand/collapse.
@@ -92,6 +95,7 @@ This is the opportunity - Phase 2 introduces client-side signals for expand/coll
 ### Option A: Native `<details>` (Recommended)
 
 **Pros:**
+
 - Already used successfully in log viewer
 - Works without JavaScript
 - SSE-stable with `data-preserve-attr="open"`
@@ -99,17 +103,20 @@ This is the opportunity - Phase 2 introduces client-side signals for expand/coll
 - No state management complexity
 
 **Cons:**
+
 - Limited styling control (browser default triangle)
 - Can't coordinate multiple elements (e.g., "expand all")
 
 ### Option B: Datastar Signals
 
 **Pros:**
+
 - Full control over UI/animation
 - Can build "expand all" / "collapse all"
 - Matches Datastar philosophy
 
 **Cons:**
+
 - Adds client-side state
 - More complex SSE morph handling
 - Need unique signal names per element
@@ -117,11 +124,13 @@ This is the opportunity - Phase 2 introduces client-side signals for expand/coll
 ### Recommendation
 
 **Start with `<details>` (Option A)** because:
+
 1. Already proven in the codebase
 2. Simpler implementation
 3. Matches design principle: "can we solve this with CSS? If yes, do that."
 
 Consider Datastar signals later if we need:
+
 - Expand all / collapse all buttons
 - Synchronized expansion state
 - Custom animations
@@ -160,6 +169,7 @@ Consider Datastar signals later if we need:
 ```
 
 Key design elements:
+
 - **`<details>` wrapper** - native expand/collapse
 - **Summary is the opening bracket** - click `{` to toggle
 - **Count hint** - "3 keys" next to bracket when collapsed
@@ -223,6 +233,7 @@ Apply the same `<details>` pattern to keep both renderers consistent.
 **Goal:** Prevent infinite nesting from breaking the UI.
 
 Add depth tracking to opts:
+
 ```clojure
 (let [depth (get opts :depth 0)
       max-depth 10]

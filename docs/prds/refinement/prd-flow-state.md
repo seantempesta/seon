@@ -13,6 +13,7 @@ Every namespace is a namespace instance. The main system is just another set of 
 **Turtles all the way down.**
 
 This is not a new abstraction to add on top of what exists. The pieces already exist:
+
 - `seon.ctx` creates per-namespace atoms backed by Datalevin
 - `seon.flow.pool` manages external JVM processes with nREPL
 - `seon.flow.topology` wires namespace step-fns into data-processing flows
@@ -81,6 +82,7 @@ The system components are namespace instances that happen to run in the main JVM
 ## How Flows Map to Namespace Instances
 
 A flow is data moving through namespace instances. The topology is defined by:
+
 1. **The function call graph** (static, from `seon.graph.ingest`) -- which namespaces depend on which
 2. **Runtime connections** (dynamic, from `seon.flow.topology`) -- which namespace steps are wired together
 
@@ -137,6 +139,7 @@ This means the orchestrator can route calls to any namespace instance -- in-proc
 ### Two Modes
 
 **Fresh start** (empty or new Datalevin):
+
 1. Load Integrant config from `system.edn`
 2. Start components in dependency order (Integrant handles this)
 3. Each component registers as namespace instance in runtime registry
@@ -144,6 +147,7 @@ This means the orchestrator can route calls to any namespace instance -- in-proc
 5. System is live
 
 **Resume** (existing Datalevin with state):
+
 1. Load Integrant config from `system.edn`
 2. Start components in dependency order
 3. Each component registers as namespace instance
@@ -183,12 +187,14 @@ This is not needed for Phase 1 (Integrant already handles dependency order for c
 ### The Serialization Boundary
 
 **Can be serialized to Datalevin** (and round-trips through EDN):
+
 - Ctx atom values (maps of keyword -> primitive/collection)
 - Status keywords, timestamps, counts
 - Namespace strings, session IDs
 - Flow process names and message counts
 
 **Cannot be serialized** (reconstructed on startup):
+
 - `flow` objects (core.async.flow handles)
 - core.async channels
 - `java.lang.Process` handles
@@ -396,6 +402,7 @@ This extends the existing code graph schema with runtime state. All in the maste
 **Why `:seon.runtime/namespace` as identity instead of a separate `:seon.runtime/id`?**
 
 The namespace string IS the identity. There's exactly one runtime instance per namespace. Using the namespace as identity means:
+
 - Upsert is natural (re-registering same namespace updates it)
 - Joins to code graph are direct (same string)
 - No need for a synthetic ID
@@ -512,6 +519,7 @@ All other atoms stay as-is. They're caches, buffers, or runtime handles.
 ### `seon.flow.registry` -- absorbed into runtime registry
 
 The flow registry maps flow-id to `{flow, chans, label, started-at}`. The runtime registry captures the same info:
+
 - `label` -> on each namespace instance in the topology
 - `started-at` -> `:seon.runtime/started-at`
 - `flow` and `chans` -> stay in-memory (opaque handles, not serializable)
@@ -681,6 +689,7 @@ Incrementally. Each phase is independently buildable and testable. The existing 
 1. After `pkill -9`, restart. Datalevin shows which namespace instances were running (marked `:crashed`), which agent sessions were active, and the last snapshot of flow state.
 
 2. From the REPL:
+
    ```clojure
    (runtime/instances)
    ;; => [{:seon.runtime/namespace "seon.db.datalevin.server"
@@ -689,6 +698,7 @@ Incrementally. Each phase is independently buildable and testable. The existing 
    ```
 
 3. Navigate from function to runtime:
+
    ```clojure
    (runtime/instance {::runtime/namespace "seon.trading.signals"})
    ;; => {:status :running, :location :external, :nrepl-port 7901,
@@ -757,6 +767,7 @@ A single agent has **three IDs**: the 4-char hex (infrastructure), the AI sessio
 The 4-char hex works well. It's human-readable, compact, and already used consistently across ctx, sessions, pool, and agent registry.
 
 Changes:
+
 - **Single generator** in `seon.runtime/generate-id` (delete duplicates in `seon.ctx` and `seon.orchestrator.session`)
 - **Collision check** against runtime registry before assignment
 - **Drop AI session UUID prefix** -- use the same 4-char hex as AI session primary key (current 1:1 mapping makes the separate UUID unnecessary)
@@ -790,6 +801,7 @@ Generalize the bridge's promise-based reply pattern:
 ```
 
 The router:
+
 1. Looks up target in runtime registry (by ID or namespace)
 2. In-process target: resolve and call directly
 3. External target: route via TCP bridge (existing infrastructure)
@@ -824,6 +836,7 @@ So routing becomes: "I have data shaped like X, find me a running instance that 
 The building blocks were tested in the REPL. Key findings:
 
 **What works today:**
+
 - The graph stores 660 specs with `:seon.spec/contains-keys` indexed (213 map specs)
 - 66 functions have `:seon.fn/input-spec` refs linking them to their input schemas
 - Key-based Datalog routing works: query `contains-keys` to find candidate specs, join to functions via `input-spec`
@@ -831,6 +844,7 @@ The building blocks were tested in the REPL. Key findings:
 - The `find-routes` function (below) correctly finds and ranks matches by specificity
 
 **Limitations discovered:**
+
 - Only functions with `:malli/schema` metadata get `input-spec` links (66 of ~800+ functions). Coverage grows as more functions get schemas.
 - Malli map schemas are **open by default** -- naive `m/validate` produces false positives. Key-based routing (contains-keys subset check) is more precise and should be the primary mechanism.
 - Schema definitions stored as strings reference other registered schemas by keyword. Parsing requires the live registry, which is fine at runtime but means the routing table can't be built from Datalevin alone -- it needs the running JVM's schema registry.
@@ -976,11 +990,13 @@ route(data) -> destination
 **After:** Data-driven discovery. A namespace defines functions with schemas. The system discovers them. Data flows to where it fits. Adding a new consumer means writing a function with the right input schema -- zero configuration.
 
 The router replaces:
+
 - Manual topology wiring for function dispatch
 - Hardcoded namespace-to-namespace connections
 - The harness's static routing table
 
 It does NOT replace:
+
 - The flow infrastructure (core.async.flow channels still move data)
 - The TCP bridge (still needed for external JVMs)
 - The harness lifecycle management (start/stop/pause)

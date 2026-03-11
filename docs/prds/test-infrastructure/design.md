@@ -52,6 +52,7 @@ Tests are unreliable, boilerplate-heavy, and dangerous:
 | **Concurrent safety** | Single writer flow serializes | Each test run gets unique temp dir |
 
 **How it's enforced:**
+
 - `with-test-db` binds `*direct-mode*` + `*conn-manager*` — all `db/transact!` and `db/query` calls route to the temp connection, never the server
 - Kaocha `wrap-direct-mode` hook ensures `bin/test` CLI runs also bind `*direct-mode*` globally
 - No code path from test code can reach port 8898
@@ -113,6 +114,7 @@ Note on the 10MB `*init-db-size*`: this is the LMDB **mmap reservation**, not ac
 ```
 
 **Key properties:**
+
 - **Lazy:** No LMDB created until a test actually reads/writes. Pure-function tests pay zero cost.
 - **Any db-name:** The `ILookup` reify returns the test connection for any keyword. No fixed list.
 - **One connection:** All db-names share a single LMDB — namespaced keys prevent collisions.
@@ -168,6 +170,7 @@ Cache with `defonce` + atom. Invalidate when schema count changes (rare — only
 ```
 
 **Key properties:**
+
 - ~~Uses existing `with-temp-conn`~~ *(Verification note: the lazy design above does NOT use `with-temp-conn`. It implements its own lazy creation. This is correct -- lazy is better than eager. Ignore this bullet.)*
 - Maps all known db-names to same connection (no collisions due to namespaced keys)
 - Dynamic db-names (like `:seon.trading`) work via the conn manager's `get-or-create-connection!` — but in tests, code should use the standard names
@@ -218,6 +221,7 @@ For schemas that represent runtime objects (atoms, channels, connections, functi
 ```
 
 **Rules:**
+
 - `:seon/runtime-type true` marks a schema as a runtime object
 - Runtime types MUST provide a `:gen/fmap` that returns a **stub** (not throw)
 - Stubs: `(atom {})` for atoms, `(a/chan 1)` for channels, `(fn [& _])` for fns
@@ -264,6 +268,7 @@ Add to CONVENTIONS.md:
 ```
 
 **Benefits:**
+
 - Automatic shrinking to minimal failing case
 - Seed-based reproducibility (`:seed` in failure output)
 - Integrates with `clojure.test/run-tests` and kaocha
@@ -295,6 +300,7 @@ Update `tests.edn`:
 ```
 
 New additions:
+
 - **`randomize`** — shuffles test order to detect hidden dependencies
 - **`hooks/wrap-run`** — binds `*direct-mode*` globally for CLI runs, preventing accidental production DB access from `bin/test`
 
@@ -311,10 +317,12 @@ New additions:
 ### 5. Generative Test Blocking
 
 Re-enable `block-on-fail: true` in `.claude/seon-hook.edn` after:
+
 1. All throwing generators replaced with stubs
 2. `seon.dev.verify` filters functions with `:seon/runtime-type` schemas
 
 Update hook config:
+
 ```clojure
 :generative {:enabled true
              :num-tests 10
@@ -330,11 +338,13 @@ Update hook config:
 **Files:** `deps.edn` (3 occurrences of Malli, 1 of test.check)
 
 Upgraded:
+
 - **Malli** 0.17.0 → 0.20.0 (all 3 aliases: main, test, agent)
 - **test.check** 1.1.1 → 1.1.3
 - **Kaocha** already at latest (1.91.1392)
 
 Relevant new capabilities:
+
 - `:gen/min`/`:gen/max` now work on `:+` and `:*` sequence schemas (Malli 0.19.0)
 - Primitive type hint instrumentation emits warning instead of throwing (Malli 0.18.0)
 - Reduced allocation churn in `shrink-int` (test.check 1.1.2)
@@ -359,6 +369,7 @@ Requires JVM restart to pick up new jar versions.
 **Files:** ~10 test files (see Appendix A)
 
 For each file:
+
 1. Replace manual fixture boilerplate with `(use-fixtures :each tu/with-test-db)`
 2. Replace `@test-conn` / `*conn*` with `tu/*test-conn*`
 3. Delete all setup/teardown functions, temp-dir atoms, fake-manager builders
@@ -473,6 +484,7 @@ calls `(swap! connections ...)` on the `::connections` value. `swap!` requires
 `clojure.lang.IAtom`, which a bare `reify` does not implement.
 
 **REPL proof:**
+
 ```clojure
 (let [fake (reify clojure.lang.IDeref
              (deref [_] (reify clojure.lang.ILookup
@@ -546,6 +558,7 @@ work here.
 **Status: VERIFIED -- works correctly.**
 
 REPL test with all 17 persisted schemas:
+
 - `persisted-schemas` returns 17 schemas
 - `malli-map->datalevin-schema` merges to 110 attributes with no conflicts
 - `d/create-conn` with the merged schema succeeds
@@ -567,6 +580,7 @@ lazy approach from lines 67-112, not `with-temp-conn`.
 **Status: VERIFIED -- correct.**
 
 Verified against `reference-code/kaocha/src/kaocha/plugin/hooks.clj:90-91`:
+
 ```clojure
 (wrap-run [run test-plan]
   (reduce #(%2 %1) run (:kaocha.hooks/wrap-run test-plan)))
@@ -575,6 +589,7 @@ Verified against `reference-code/kaocha/src/kaocha/plugin/hooks.clj:90-91`:
 Each hook function receives `run` (1 argument) and must return a new `run` function.
 The returned function takes `(testable test-plan)`. The PRD's proposed signature is
 exactly correct:
+
 ```clojure
 (defn wrap-direct-mode [run]
   (fn [testable test-plan]
@@ -602,6 +617,7 @@ exception type. So `run-gen-tests` already gracefully skips un-generable functio
 The remaining issue is whether the hook (`.claude/seon-hook.edn:29`) should have
 `block-on-fail: true`. Given the skip logic works, it should be safe to re-enable.
 The implementing agent should:
+
 1. Verify in the REPL that `(run-gen-tests ...)` for a namespace with throwing
    generators returns `{::success true}` (skips, no failures)
 2. If confirmed, flip `block-on-fail` to `true`

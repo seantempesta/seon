@@ -45,12 +45,14 @@ The linking correctly identifies functions with matching `-request`/`-response` 
 ### 4. Found Root Cause
 
 Checking the database showed only 1 render function:
+
 ```clojure
 (d/q '[:find ?e :where [?e :seon.fn/render-input-keys]] @conn)
 ;; => [[1324 "seon.render.example/position-render"]]
 ```
 
 The workout render functions were missing because:
+
 1. **Graph is only populated at startup** (`:seon.graph/scanner` component)
 2. **Server was running for ~2 hours**
 3. **workout.clj was modified during that time**
@@ -59,6 +61,7 @@ The workout render functions were missing because:
 ### 5. Resolution
 
 Manual re-ingestion fixed the issue:
+
 ```clojure
 ;; Specs first (for lookup ref resolution)
 (db/transact! c specs)
@@ -70,6 +73,7 @@ Manual re-ingestion fixed the issue:
 ```
 
 After re-ingestion:
+
 ```clojure
 (render/has-renderer? {:seon.health.workout/exercise "Squat" ...} :ai)
 ;; => true
@@ -83,6 +87,7 @@ After re-ingestion:
 ### Issue 1: No Incremental Graph Updates
 
 The scanner only runs at startup. When code is modified via the dev hook, the graph is not updated. This means:
+
 - New render functions aren't discovered
 - Modified specs aren't reflected
 - The graph becomes stale over time
@@ -92,6 +97,7 @@ The scanner only runs at startup. When code is modified via the dev hook, the gr
 ### Issue 2: Datalevin Errors During Bulk Re-ingestion
 
 Full `ingest-analysis!` failed with:
+
 ```
 Value out of range for long: 1.8385472029033133E20
 ```
@@ -103,6 +109,7 @@ This appears to be corruption or a bug in the call graph processing. The error o
 ### Issue 3: Lookup Ref Resolution Order
 
 The `ingest-incremental!` function can fail if:
+
 1. A function references a spec via lookup ref `[:seon.spec/key :foo]`
 2. The spec `:foo` doesn't exist in the database
 
@@ -115,6 +122,7 @@ Error: "Nothing found for entity id [:seon.spec/key ...]"
 ## Architecture Notes
 
 ### Current Flow (Startup Only)
+
 ```
 system.clj:init-key :seon.graph/scanner
 ├── analyzer/analyze-project!
@@ -125,6 +133,7 @@ system.clj:init-key :seon.graph/scanner
 ```
 
 ### Missing: Incremental Flow
+
 ```
 dev hook (file changed)
 ├── analyzer/analyze-form

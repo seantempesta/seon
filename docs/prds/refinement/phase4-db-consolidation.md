@@ -36,6 +36,7 @@ Eliminate redundant databases and dual-writes.
 ### AI session migration (`seon.ai.datalevin`)
 
 Moving AI sessions/messages from master `seon` DB to per-namespace DBs was deferred. Rationale:
+
 - It's a separate subsystem (message history for replay/learning)
 - Not blocking any current work
 - Would touch `seon.ai`, `seon.ai.claude`, and their tests
@@ -50,6 +51,7 @@ The master `seon` DB still exists for AI data. The `seon.orchestrator` DB is no 
 ## Migration Note
 
 Users should clean old data:
+
 ```bash
 rm -rf data/datalevin/seon-graph/
 ```

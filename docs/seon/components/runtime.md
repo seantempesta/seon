@@ -9,6 +9,7 @@ status: production
 ## Purpose
 
 The runtime registry answers three questions for the entire system:
+
 1. **What's running?** — In-memory cache of all namespace instances with status, location, and identity.
 2. **What was running before a crash?** — Datalevin persistence allows `mark-crashed!` on startup to detect unclean shutdowns.
 3. **Where is a namespace instance located?** — Tracks whether an instance is `:in-process` or `:external` (agent JVM), with session IDs and nREPL ports.
@@ -76,6 +77,7 @@ Flow objects are opaque and not serializable, so this registry is purely in-memo
 ### Schema: `runtime-merged-schema`
 
 The function `runtime-merged-schema` lazily merges four Datalevin schemas into one:
+
 - `runtime-schema` (runtime instances + agent runs + flow snapshots)
 - `seon.graph.ingest/datalevin-schema` (code graph)
 - `seon.ctx/datalevin-schema` (context instances)
@@ -86,12 +88,14 @@ This merged schema is what the `:seon.runtime` database connection uses. It is c
 ## Dependencies
 
 ### Uses
+
 - [[components/database]] — `db/transact!`, `db/query` against `:seon.runtime`
 - [[components/schema-system]] — `schema/register!` for all attribute and request/response schemas
 - `seon.db.schema` — `register-entity-schema!`, `malli-map->datalevin-schema`
 - `clojure.core.async.flow` — `flow/ping` for topology snapshots
 
 ### Used By (almost everything)
+
 - [[components/system-lifecycle]] — `seon.system` calls `register!`, `unregister!`, `mark-crashed!`, `hydrate-cache!`, `register-flow!`, `unregister-flow!` during Integrant init/halt
 - [[components/flow-topology]] — Registers infrastructure flow via `register-flow!`
 - [[components/code-graph]] — Scanner registers itself as runtime instance

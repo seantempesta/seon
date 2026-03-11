@@ -135,6 +135,7 @@ The key insight: `seon.core/start-app` stores the system in `integrant.repl.stat
 ## Suspend/Resume Semantics
 
 Components that **survive `(reset)`** (return old state from `suspend-key!`):
+
 - `:seon.dev/nrepl` — Critical: losing REPL connection during reset breaks workflow
 - `:seon.schema/registry` — Pure value, no side effects to clean up
 - `:seon.db.schema/consistency-check` — Pure check result
@@ -143,6 +144,7 @@ Components that **survive `(reset)`** (return old state from `suspend-key!`):
 - `:seon.dev/instrumentation` — Persists across reloads
 
 Components that **always re-init on resume**:
+
 - `:seon.flow/infrastructure` — Flow objects are immutable; new code means new processes
 - `:seon.graph/scanner` — Cheap (~3s background), ensures fresh connections
 
@@ -151,6 +153,7 @@ Components that **always re-init on resume**:
 The health system has three tiers:
 
 ### 1. Port Connectivity (always checked)
+
 | Service | Port | Notes |
 |---------|------|-------|
 | Datalevin | 8898 | Reports mode (adopted/started), PID, connection manager health |
@@ -160,6 +163,7 @@ The health system has three tiers:
 | Tailwind | — | Process alive check |
 
 ### 2. Operational Checks (only after Phase 2)
+
 | Check | What It Does |
 |-------|-------------|
 | `:datalevin-query` | Execute a real Datalevin query |
@@ -167,9 +171,11 @@ The health system has three tiers:
 | `:runtime-persisted` | Verify runtime instances exist in memory |
 
 ### 3. Resource Counts
+
 Agents running, pool JVMs, active sessions.
 
 ### Status Determination
+
 - **`:healthy`** — All checks pass, phase is `:ready`
 - **`:degraded`** — Non-critical failures, or startup phase is `:degraded`
 - **`:unhealthy`** — Critical checks fail (datalevin, datalevin-query, flow-responsive)
@@ -177,6 +183,7 @@ Agents running, pool JVMs, active sessions.
 ## Configuration Loading (Aero)
 
 `seon.config/system-config` loads `resources/system.edn` via Aero:
+
 - **Profiles**: `:dev`, `:test`, `:prod` — controls which services are enabled
 - **Aero readers**: `#or` (env var with fallback), `#env` (env var), `#profile` (profile-conditional)
 - **Integrant readers**: `#ig/ref` and `#ig/refset` registered as custom Aero readers
@@ -187,6 +194,7 @@ Component config validation uses Malli schemas in `seon.system.config/schemas`, 
 ## Dependencies
 
 ### Uses
+
 - [[components/runtime]] — `mark-crashed!`, `hydrate-cache!`, `register!`, `unregister!`, `register-flow!`, `unregister-flow!`, `runtime-merged-schema`
 - [[components/database]] — `db/transact!`, `db/query`, `db/*direct-mode*`, `db/*conn-manager*`, `db/pause-writer!`
 - [[components/schema-system]] — `schema/registered-schemas`, schema validation at boot
@@ -196,6 +204,7 @@ Component config validation uses Malli schemas in `seon.system.config/schemas`, 
 - [[components/agent-system]] — Agent and pool health checks
 
 ### Used By
+
 - Everything — this is the boot sequence. All components are initialized here.
 - [[components/dev-tools]] — `(user/reset)` delegates to `integrant.repl/reset` which uses the system stored here.
 

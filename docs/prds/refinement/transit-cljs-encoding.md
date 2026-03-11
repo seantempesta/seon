@@ -15,6 +15,7 @@ is simple: **agents write Clojure functions, the UI calls those functions with a
 results render as HTML.** This is a remote function call, not a reactive SPA.
 
 **Split the concerns:**
+
 - **Datastar handles:** SSE connection, fragment morphing, DOM reactivity
 - **Plain HTML + optional CLJS handles:** Form data collection, POST to server
 
@@ -84,6 +85,7 @@ Server: transit-decode -> exact Clojure map -> Malli validate -> call fn
 **Source: `reference-code/datastar/library/src/plugins/actions/fetch.ts` lines 131-183**
 
 When `contentType: 'form'`, Datastar:
+
 1. Finds the closest `<form>` element (or uses `selector` option)
 2. Calls `new FormData(formEl)` -- standard browser API
 3. Validates the form (`checkValidity()`)
@@ -204,6 +206,7 @@ The renderer outputs the qualified keyword as the input's `name`:
 ```
 
 Server-side middleware:
+
 ```clojure
 (defn keywordize-form-params [params]
   (into {}
@@ -215,6 +218,7 @@ Server-side middleware:
 ```
 
 The `:field` hiccup marker in the render pipeline would produce:
+
 ```clojure
 ;; Input:
 [:field :seon.health/exercise {:type "text"}]
@@ -227,6 +231,7 @@ The `:field` hiccup marker in the render pipeline would produce:
 ```
 
 The `:on:click` hiccup marker would produce:
+
 ```clojure
 ;; Input:
 [:on:click :seon.health.workout/add-workout!]
@@ -238,11 +243,13 @@ The `:on:click` hiccup marker would produce:
 ### Phase 2: Scittle Collects and Transit-Encodes
 
 With Scittle, the `:on:click` marker produces:
+
 ```clojure
 {:data-on-click "@seonPost('/ns/seon.health.workout/add-workout!')"}
 ```
 
 The `@seonPost` action (registered via Datastar's `action()` API):
+
 1. Finds the closest `<form>`
 2. Reads all `name` attributes and values
 3. Builds a Clojure map: `{:seon.health/exercise "Pull-up" :seon.health/sets "3"}`
@@ -306,6 +313,7 @@ data: elements <div id="workout-table">...updated HTML...</div>
 ### Phase 1: FormData + Keyword Names (Zero JS, Minimum Viable) — DONE
 
 **What was built:**
+
 - Form fields use qualified keywords as `name` attrs (e.g. `name=":seon.health/exercise"`)
 - POST: `@post(url, {contentType:'form'})` sends FormData, server parses keyword names
 - GET: `GET /ns/:namespace/:function?key=value` returns EDN
@@ -320,17 +328,20 @@ data: elements <div id="workout-table">...updated HTML...</div>
 ### Phase 2: Scittle + Transit Client (Rich Data)
 
 **Browser-side:**
+
 - Include `scittle.js` + `scittle.transit.js` in base page
 - Create `seon.browser` namespace with `call-fn` helper
 - Register `@seonPost` custom Datastar action via `action()` API
 - `@seonPost` collects FormData, builds keyword map, transit-encodes, POSTs
 
 **Server-side:**
+
 - Add `com.cognitect/transit-clj` dependency
 - Ring middleware: detect `application/transit+json`, decode with transit-clj
 - Response encoding: support `Accept: application/transit+json`
 
 **Benefits over Phase 1:**
+
 - Preserves types (sets, dates, UUIDs) without string coercion
 - Enables rich data in both directions (not just form fields)
 - Unlocks Phase 3 (browser eval)
@@ -349,6 +360,7 @@ All findings from `reference-code/datastar/library/src/`:
 ### @post with contentType: 'form' (fetch.ts:131-183)
 
 When `contentType: 'form'`:
+
 1. `el.closest('form')` finds the form element
 2. `new FormData(formEl)` collects all named fields
 3. `formEl.checkValidity()` validates HTML5 constraints
@@ -395,6 +407,7 @@ original string. Ring's `wrap-params` middleware handles this automatically.
 ### Malli string coercion
 
 HTML forms always send strings. Server must coerce:
+
 - `"3"` -> `3` (if schema says `:int`)
 - `"true"` -> `true` (if schema says `:boolean`)
 - `"2024-01-15"` -> `#inst "2024-01-15"` (if schema says `:time/local-date`)
@@ -422,16 +435,19 @@ display-only elements while still using FormData for submission.
 ## Dependencies
 
 ### Phase 1 (None -- Uses Existing Stack)
+
 - Ring `wrap-params` (already present)
 - Malli string transformer (already in deps)
 
 ### Phase 2
+
 ```clojure
 ;; deps.edn
 com.cognitect/transit-clj {:mvn/version "1.0.333"}
 ```
 
 Browser (download to `resources/public/js/`):
+
 ```
 scittle.js          (~400KB)
 scittle.transit.js  (transit plugin)
@@ -440,6 +456,7 @@ scittle.transit.js  (transit plugin)
 ## Trade-offs
 
 ### What We Gain
+
 - **Zero encoding hacks** -- qualified keywords travel as `name` attributes (Phase 1) or transit (Phase 2)
 - **Delete ~180 lines** of encoding/decoding code
 - **Standard HTML forms** -- works without JS, progressive enhancement
@@ -449,11 +466,13 @@ scittle.transit.js  (transit plugin)
 - **Path to rich data** -- Phase 2 adds transit without changing the architecture
 
 ### What We Lose
+
 - **Reactive form previews** (Phase 1) -- no data-bind means no live preview as you type
 - **Signal-driven UI** -- can't use `$fieldName` in Datastar expressions for form values
 - **Two content types** -- server must handle both `form-urlencoded` (Phase 1) and `transit+json` (Phase 2)
 
 ### What We Keep
+
 - Datastar for SSE, HTML morphing, event handling, display reactivity
 - Server-rendered HTML as primary UI pattern
 - Current URL structure (`/ns/:ns`, `/ns/:ns/:fn`)

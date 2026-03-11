@@ -143,10 +143,12 @@ Render functions stored directly in schema properties.
 ```
 
 **Pros:**
+
 - Single source of truth
 - Schema carries complete definition
 
 **Cons:**
+
 - Functions in schema registry (serialization issues)
 - Need `m/deref` dance for registered schemas
 - Inheritance requires custom merge logic
@@ -179,12 +181,14 @@ Render functions in parallel registry.
 ```
 
 **Pros:**
+
 - Clean separation of concerns
 - Easy explicit inheritance
 - No serialization issues
 - Simple implementation
 
 **Cons:**
+
 - Two places to maintain
 - Schema and renderer can get out of sync
 
@@ -217,11 +221,13 @@ Schema declares renderer *key*, registry holds functions.
 ```
 
 **Pros:**
+
 - Schemas remain serializable (just keyword reference)
 - Can share renderers across schemas
 - Schema declares rendering intent
 
 **Cons:**
+
 - Still two places to maintain
 - Extra indirection
 

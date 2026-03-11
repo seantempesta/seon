@@ -40,6 +40,7 @@ Every Clojure namespace in Seon becomes a viewable, introspectable "app". The sy
 4. **Session model** - View namespaces read-only, or launch sessions for live interaction
 
 Think of Seon as an OS where namespaces are apps:
+
 - Browse available namespaces from the dashboard
 - Open namespace views (read-only introspection)
 - Launch sessions for live REPL + DB access
@@ -72,6 +73,7 @@ Seon's UI is rooted in McCarthy's vision of Lisp and the golden age of computing
 ### Design System
 
 See [`design-system.md`](design-system.md) for:
+
 - Color palette (Phosphor theme)
 - Typography scale (JetBrains Mono, 11px primary)
 - Spacing system (4px base unit)
@@ -92,6 +94,7 @@ See [`design-system.md`](design-system.md) for:
 ## Problem Statement
 
 Currently, understanding a namespace requires:
+
 - Reading source code directly
 - Using REPL to inspect vars/atoms
 - Querying the database manually for related data
@@ -179,6 +182,7 @@ Rendering is spec-driven, not per-namespace. There is no explicit `render` funct
 4. **Fallback** -- if no renderer matches, `pprint-clipped` provides a default view
 
 **URL mapping:**
+
 - `/ns/seon.trading` (no `?instance=` param) → static namespace view from introspection (functions, vars, schemas)
 - `/ns/seon.trading?instance=a1b2` → `topology/request!` to agent JVM → domain data → spec-driven render → cached hiccup
 
@@ -266,6 +270,7 @@ The capstone phase where `/ns/` routes go through the flow topology to agent JVM
 **Goal:** When an agent JVM owns a namespace, `GET /ns/seon.trading` fetches domain data from the agent JVM via `topology/request!`, then the orchestrator resolves the renderer via the code index and caches the result. Agent JVMs never produce hiccup -- they return plain data maps.
 
 **Key work:**
+
 - Wire `/ns/` route handler to detect flow-owned namespaces and route through `topology/request!`
 - Agent JVM returns domain data map (namespaced keys, no UI dependencies)
 - Orchestrator resolves renderer via spec-driven resolution (`find-renderer` from code index)

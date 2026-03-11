@@ -9,6 +9,7 @@ Seon agents own namespaces and write well-spec'd functions. We need process isol
 **This plan is the source of truth** and supersedes prior flow plans in the PRD.
 
 Key principles:
+
 - **`::flow/in-ports` and `::flow/out-ports`** bridge flow to the outside world (`flow/impl.clj:261-263`)
 - **Flow state ≠ `*ctx*`** — flow process state is runtime state managed by the harness. `*ctx*` is a separate agent-facing atom injected into the namespace. They are distinct.
 - **`::conn` is namespace-local** — Datalevin connection lives in `*ctx*` as `::conn` (auto-resolved to agent's namespace). Connection manager patterns used, no ad-hoc connections.
@@ -24,6 +25,7 @@ Key principles:
 Build the smallest testable slice first:
 
 **In scope:**
+
 1. TCP channel adapter + message envelope schemas
 2. One orchestrator namespace-step + one agent bridge-step
 3. Blocking request/reply only (no fire-and-forget yet)
@@ -33,6 +35,7 @@ Build the smallest testable slice first:
 7. End-to-end tests: happy path + overload + timeout
 
 **Deferred:**
+
 - Pure-function local execution optimization
 - Hierarchical escalation / investigation agents
 - Dynamic proxy/wrapper generation
@@ -40,6 +43,7 @@ Build the smallest testable slice first:
 - Batching, advanced queue strategies, retries/idempotency
 
 **Locked in now (to avoid churn):**
+
 - Single source-of-truth schema namespace for wire messages (`seon.flow.msg`)
 - Version key in envelope (`:seon.flow.msg/version`) from day one
 - Strict: no unnamespaced keys in channels/messages
@@ -81,6 +85,7 @@ AGENT JVM (186MB, own mini-flow)
 **Flow process state**: managed by harness, contains runtime bookkeeping (JVM handle, error counts, channel refs). Not visible to agents.
 
 **`*ctx*` atom**: agent-facing, injected into the namespace. Contains:
+
 ```clojure
 @*ctx*
 ;; => {::conn <datalevin-connection>   ; auto-injected, namespace-local key
@@ -89,6 +94,7 @@ AGENT JVM (186MB, own mini-flow)
 ```
 
 Two storage tiers for agents:
+
 ```clojure
 ;; Tier 1: Simple state (atom, auto-persisted across restarts)
 (swap! *ctx* assoc ::my-counter 42)
@@ -104,10 +110,12 @@ On resume: load persisted data, re-inject `::conn` and other runtime handles.
 ### Channel and Port Naming Contract
 
 **Input channel IDs** (flow `:ins`):
+
 - `:seon.flow.in/request` — incoming cross-ns function call requests
 - `:seon.flow.in/control` — lifecycle commands
 
 **Output channel IDs** (flow `:outs`):
+
 - `:seon.flow.out/reply` — responses to callers
 - `:seon.flow.out/error` — error reports
 - `:seon.flow.out/health` — health pings
@@ -118,6 +126,7 @@ On resume: load persisted data, re-inject `::conn` and other runtime handles.
 ### How `::flow/in-ports` and `::flow/out-ports` Work
 
 From `flow/impl.clj:261-263`, after init returns state:
+
 ```clojure
 ins  (into (or ins {}) (::flow/in-ports state))   ; merge in-ports into inputs
 outs (into (or outs {}) (::flow/out-ports state))  ; merge out-ports into outputs

@@ -29,11 +29,13 @@ The agent system manages the full lifecycle of AI agents: spawning isolated JVM 
 ## Public API Surface
 
 **Agent lifecycle** (`seon.ai.claude`):
+
 - `launch-agent!` — spawn Claude agent with isolated session, nREPL, MCP, file context. Returns handle with channels and close function
 - `launch-agent!!` — blocking variant, waits for completion and returns parsed result
 - Options: `::ai/namespace`, `::ai/prompt`, `::model`, `::files`, `::sdk/permission-mode`, `::sdk/max-turns`, `::sdk/max-budget-usd`, `::sdk/allowed-tools`, `::sdk/disallowed-tools`, `::sdk/chrome`
 
 **Observatory** (`seon.ai.agent`):
+
 - `agents` — list all running agents across providers (session-id, namespace, provider, status, port, cost)
 - `get-agent` — get full agent handle by session ID
 - `tail` — get core.async messages channel for real-time observation
@@ -41,11 +43,13 @@ The agent system manages the full lifecycle of AI agents: spawning isolated JVM 
 - `shutdown-all!` — stop all agents (called before Integrant reset)
 
 **Session management** (`seon.ai`):
+
 - `start-session!` / `end-session!` — AI conversation session lifecycle in Datalevin
 - `add-message!` — persist a message to a session
 - `get-session` / `get-messages` / `list-sessions` / `session-stats` — query stored data
 
 **Orchestrator sessions** (`seon.orchestrator.session`):
+
 - `start-agent-session!` — creates persisted ctx atom, claims pool JVM, starts nREPL
 - `stop-agent-session!` — flushes ctx, releases pool JVM
 - `get-agent-session` / `list-agent-sessions` / `get-session-port`
@@ -53,6 +57,7 @@ The agent system manages the full lifecycle of AI agents: spawning isolated JVM 
 - `recover-sessions!` — marks orphaned sessions as stopped after restart
 
 **Gemini** (`seon.ai.gemini`):
+
 - `ask` — simple text generation (model knowledge only)
 - `search` — web-grounded answers with optional file context
 - `calculate` — Python code execution via Gemini
@@ -61,6 +66,7 @@ The agent system manages the full lifecycle of AI agents: spawning isolated JVM 
 ## Dependencies
 
 **Uses:**
+
 - Claude Code CLI — spawned as child process via `clojure.java.process`, stream-json I/O
 - core.async — message channels, mult for broadcasting, result channels
 - Integrant — session initialization wired through system map
@@ -74,6 +80,7 @@ The agent system manages the full lifecycle of AI agents: spawning isolated JVM 
 - Cheshire — JSON parsing for SDK messages and Gemini responses
 
 **Used by:**
+
 - [[components/web-layer]] — Observatory pages (`seon.web.agents`), dashboard agent count
 - Orchestrator — launches agents via `claude/launch-agent!`
 - [[components/dev-tools]] — calls `gemini/review-code` for AI code review
@@ -115,6 +122,7 @@ Claude CLI stdout -> parse-line (JSON) -> normalize-message (multimethod)
 ### Provider Dispatch
 
 All multimethods dispatch on `:provider` key:
+
 - `normalize-message` — converts SDK message format to `::ai/message-entity` with Claude-specific fields (cache tokens, tool calls, message type)
 - `result-message?` — checks `{:type "result"}` in SDK message
 - `parse-result` — extracts status, cost, tokens, turns, duration, result text from completion message

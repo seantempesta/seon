@@ -39,6 +39,7 @@ No existing library solves this problem well enough to use as-is.
 **Status:** Mature library for clojure.spec -> Datomic/Datascript
 
 **Key Pattern:** Uses test.check generators to *infer* types rather than parsing spec forms:
+
 - Sample each spec 100 times
 - Detect what types are generated
 - Map those to Datomic types
@@ -51,6 +52,7 @@ No existing library solves this problem well enough to use as-is.
 **Blog Post:** [DataScript as a Lingua Franca for Domain Modeling](https://vvvvalvalval.github.io/posts/2018-07-23-datascript-as-a-lingua-franca-for-domain-modeling.html)
 
 **Pattern:** Store domain model in DataScript, derive everything else:
+
 - Datomic schema transactions
 - GraphQL schemas
 - Validation rules
@@ -65,6 +67,7 @@ No existing library solves this problem well enough to use as-is.
 **In reference-code/malli:** `src/malli/json_schema.cljc`
 
 **Key Pattern:** Multimethod-based transformation:
+
 ```clojure
 (defmulti accept (fn [name _schema _children _options] name) :default ::default)
 
@@ -308,22 +311,26 @@ Create a namespace `seon.schema.datalevin` that compiles Malli schemas to Datale
 ### Approach A: Malli -> Datalevin Compiler (Recommended)
 
 **Pros:**
+
 - Malli is the source of truth (familiar, well-documented)
 - Generators "just work" for property testing
 - Validation happens before DB transactions
 - Type properties are explicit and visible
 
 **Cons:**
+
 - Must maintain transformation code
 - Some Malli features don't map to Datalevin (e.g., regex patterns)
 
 ### Approach B: Datalevin -> Malli Generator
 
 **Pros:**
+
 - Datalevin schema is the source of truth
 - Database semantics are primary
 
 **Cons:**
+
 - Datalevin schema is less expressive than Malli
 - Generators require additional work
 - Validation needs custom implementation
@@ -331,10 +338,12 @@ Create a namespace `seon.schema.datalevin` that compiles Malli schemas to Datale
 ### Approach C: Single DSL Generating Both
 
 **Pros:**
+
 - Truly unified definition
 - Could be more concise
 
 **Cons:**
+
 - Another DSL to learn
 - More abstraction = more complexity
 - Loses Malli ecosystem benefits
@@ -342,10 +351,12 @@ Create a namespace `seon.schema.datalevin` that compiles Malli schemas to Datale
 ### Approach D: Convention-Based (Same Keywords, Different Registries)
 
 **Pros:**
+
 - Minimal abstraction
 - Both schemas exist independently
 
 **Cons:**
+
 - Easy for them to drift out of sync
 - Manual maintenance burden
 - No automatic property testing
@@ -357,11 +368,13 @@ Create a namespace `seon.schema.datalevin` that compiles Malli schemas to Datale
 ### Recommended Additions
 
 1. **malli-datomic** - Even though sparse, useful as reference
+
    ```bash
    git submodule add https://github.com/Blasterai/malli-datomic reference-code/malli-datomic
    ```
 
 2. **spectomic** - Good patterns for type inference
+
    ```bash
    git submodule add https://github.com/Provisdom/spectomic reference-code/spectomic
    ```

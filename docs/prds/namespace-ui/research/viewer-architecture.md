@@ -24,6 +24,7 @@ After analyzing Portal, Reveal, and XTDB Inspector source code, the following pa
 ### Recommended Approach
 
 **Build our own** viewer system using patterns from all three projects, purpose-built for SSE/Datastar. This provides:
+
 - Clean integration with our stack
 - No heavy dependencies
 - Full control over rendering
@@ -53,6 +54,7 @@ Portal uses `clojure.datafy` and `clojure.core.protocols/nav` for interactive da
 ```
 
 **Navigation Flow:**
+
 1. User selects a value and presses Enter
 2. Portal calls `(nav coll k v)` where:
    - `coll` = the parent collection
@@ -821,6 +823,7 @@ No licensing concerns for adopting patterns or copying code snippets.
 **Goal:** Render any Clojure value as styled Hiccup.
 
 **Tasks:**
+
 1. Create `seon.ui.viewer` namespace with multimethod dispatch
 2. Implement viewers for primitives: nil, boolean, number, string, keyword, symbol
 3. Implement viewers for collections: map, vector, set, list
@@ -840,6 +843,7 @@ No licensing concerns for adopting patterns or copying code snippets.
 **Goal:** Collections can be expanded/collapsed client-side.
 
 **Tasks:**
+
 1. Add `data-signals` for expand state
 2. Add `data-show` for conditional rendering
 3. Implement truncation with "show more" for large collections
@@ -861,6 +865,7 @@ No licensing concerns for adopting patterns or copying code snippets.
 **Goal:** View XTDB entities with forward references as clickable links.
 
 **Tasks:**
+
 1. Detect entity IDs (convention: keywords ending in `-id` or strings starting with known prefixes)
 2. Render entity IDs as links to entity view
 3. Add entity history view (using XTDB temporal queries)
@@ -879,6 +884,7 @@ No licensing concerns for adopting patterns or copying code snippets.
 **Goal:** Show "what references this entity" in addition to forward refs.
 
 **Tasks:**
+
 1. Implement `references-to` query function
 2. Add "Referenced by" section to entity viewer
 3. Cache known reference columns for performance
@@ -901,6 +907,7 @@ No licensing concerns for adopting patterns or copying code snippets.
 **Goal:** Atoms update in real-time via SSE.
 
 **Tasks:**
+
 1. Implement watch registry with debouncing
 2. Create SSE endpoint for atom watching
 3. Add Datastar integration for live updates
@@ -922,6 +929,7 @@ No licensing concerns for adopting patterns or copying code snippets.
 **Goal:** Namespaces can provide custom rendering.
 
 **Tasks:**
+
 1. Define render-fn protocol/convention
 2. Look up `:seon.ui/render-fn` in namespace ctx
 3. Support view modes: `:tile`, `:half`, `:full`
@@ -940,6 +948,7 @@ No licensing concerns for adopting patterns or copying code snippets.
 **Goal:** Render Malli schemas with clickable references.
 
 **Tasks:**
+
 1. Create schema-specific viewer
 2. Link referenced schemas (click to navigate)
 3. Show schema properties and constraints
@@ -967,6 +976,7 @@ The research reveals clear patterns for each concern:
 | **Extensibility** | Metadata-based viewer override | Portal/Clerk |
 
 Building our own viewer system is the right choice because:
+
 1. Our stack (SSE/Datastar/Hiccup) differs from all three projects
 2. Our needs (namespace introspection) are specific
 3. The patterns are straightforward to implement

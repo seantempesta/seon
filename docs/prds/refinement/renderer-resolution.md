@@ -62,6 +62,7 @@ The critical design decision: **agents never wire data sources themselves.** The
 ```
 
 The system sees the input spec and auto-injects:
+
 - `:seon.health.workout/*ctx*` → deref the ctx atom
 - `:seon.health.workout/sort-by` → extract from `?sort-by=` query param
 
@@ -84,6 +85,7 @@ Available keys:
 **Rule:** `?<key>=<value>` on `/ns/<namespace>` produces `:<namespace>/<key>` in the available data.
 
 **System-reserved params** (never injected as namespace data):
+
 - `?instance=` → routing to specific ctx instance
 - `?format=` → content negotiation (html/ai/raw)
 - `?view=` → display mode (introspect)
@@ -144,10 +146,12 @@ When the browser hits `/ns/seon.health.workout`:
 These levels emerge naturally from the algorithm. No special code per level.
 
 ### Level 0: Namespace Introspection (always available)
+
 No custom renderer needed. Shows vars, functions, schemas, atoms.
 Every namespace gets this for free.
 
 ### Level 1: Data Shape Renderers
+
 A function renders specific data shapes (e.g., a single workout set).
 Within the introspection view, data matching this shape uses the custom renderer instead of raw EDN.
 
@@ -163,6 +167,7 @@ Within the introspection view, data matching this shape uses the custom renderer
 Works with static `def` data. No instance, no atom, no runtime.
 
 ### Level 2: Ctx Page Renderer
+
 A function takes the whole `*ctx*` atom value. Takes over the full page view.
 
 ```clojure
@@ -176,6 +181,7 @@ A function takes the whole `*ctx*` atom value. Takes over the full page view.
 The system spins up an instance, creates the ctx atom, and auto-injects.
 
 ### Level 3: Ctx + Web Params
+
 Same as Level 2, but the function also accepts query/POST params.
 
 ```clojure
@@ -189,6 +195,7 @@ Same as Level 2, but the function also accepts query/POST params.
 More input keys = more specific = wins over plain ctx renderer.
 
 ### Level 4: Conn-Backed Renderer (future)
+
 Function takes `*conn*` for database queries. Same injection pattern.
 When `*conn*` becomes reactive (watches on Datalevin), this enables
 database-driven reactive rendering.
@@ -245,6 +252,7 @@ A namespace with only `def` vars and no `*ctx*` still gets custom rendering:
 ```
 
 The introspection view iterates the namespace's public vars. For each var value:
+
 1. Check if the value is a map with namespaced keys (or a collection of such maps)
 2. Find the best-matching renderer for that shape
 3. Use it instead of raw EDN display
@@ -271,6 +279,7 @@ For each namespace:
 ```
 
 The resolution query:
+
 ```datalog
 [:find ?qname ?key-count
  :in $ ?available-keys
@@ -295,6 +304,7 @@ The resolution query:
 | `src/seon/render.clj` | `resolve-renderer` — the specificity algorithm. Used for both page and component rendering. |
 
 ### What stays the same
+
 - `ctx.clj` — ctx atom creation, watches, persistence (unchanged)
 - `transform.clj` — hiccup transformation (updated: uses keyword `name` attrs, no encoding layer)
 - `sse.clj` — SSE infrastructure (unchanged)
@@ -305,6 +315,7 @@ The resolution query:
 ## What's Built
 
 ### Core Resolution (`src/seon/render.clj`)
+
 - **`resolve-renderer`** — Full specificity algorithm: finds functions with `:seon.render/html` in output spec, filters by available keys subset, ranks by key count, tiebreaks by namespace proximity.
 - **`find-renderer`** — Datalevin-based renderer lookup with caching (`resolution-cache`). Cache invalidated on scanner rescan.
 - **`find-page-renderer`** — Page-level resolution: finds renderer with most key overlap against ns-data.
@@ -312,11 +323,13 @@ The resolution query:
 - **`render-namespace`** — Main entry point: finds best page renderer via Datalevin, calls it, extracts format key from result. Falls back to `default-namespace-render`.
 
 ### Humanization & Schema Rendering (`src/seon/render.clj`)
+
 - **`humanize`** — Transforms keywords/strings to human-readable labels. Strips namespace, converts kebab-case to Title Case, handles special abbreviations (ID, URL, SSE, API, etc.), strips asterisks from `*ctx*`-style names.
 - **`render-schema`** — Renders Malli `:map` schemas as HTML tables with Field/Type/Required columns. Non-map schemas render as type badges. Resolves Malli types to human labels (`:string` -> "Text", `:int` -> "Number", `:enum` -> "One of: ...").
 - **`for-html`** — Recursive HTML rendering: detects Malli schema forms and uses `render-schema`; vectors-of-maps become proper HTML tables with humanized headers; maps become definition-list tables; primitives get type-appropriate styling.
 
 ### Default Page Template (`src/seon/render/default_page.clj`)
+
 - **`render-default-page`** — Two-panel layout for any namespace with `*ctx*` but no custom renderer:
   - LEFT panel: Markdown narrative (`:seon.render.default/narrative` key, rendered via `markdown.core`)
   - RIGHT panel: Auto-rendered data keys from ctx, using `render/try-render` for custom renderers and type-specific fallbacks:
@@ -329,6 +342,7 @@ The resolution query:
 - Schema registrations for chat-related keys: `::ctx/messages`, `::ctx/uploads`, `::ctx/user-input`
 
 ### What's NOT Built Yet
+
 - **Level 1 (data shape renderers)** — Introspection view doesn't yet use shape-matched renderers for individual var values
 - **Cross-namespace rendering** — Design exists but no implementation
 - **`?format=ai` end-to-end** — `render-namespace` supports it but route handler doesn't fully wire it
@@ -337,7 +351,8 @@ The resolution query:
 
 ## Verification Plan
 
-### From browser:
+### From browser
+
 ```
 1. http://localhost:8080/ns/seon.health.workout
    → Redirects to ?instance=xxxx
@@ -351,7 +366,8 @@ The resolution query:
    → No custom renderer → introspection view (Level 0)
 ```
 
-### From AI/curl:
+### From AI/curl
+
 ```bash
 curl http://localhost:8080/ns/seon.health.workout?format=ai
 # → "Workout: 5 exercises. Squat — 5x5 @ 100kg, ..."
@@ -360,7 +376,8 @@ curl http://localhost:8080/ns/seon.health.workout?format=raw
 # → {:seon.health.workout/workouts [{...} ...]}
 ```
 
-### From REPL (reactive):
+### From REPL (reactive)
+
 ```clojure
 ;; Mutate ctx → browser updates without refresh
 (swap! seon.health.workout/*ctx*
@@ -371,7 +388,8 @@ curl http://localhost:8080/ns/seon.health.workout?format=raw
         :seon.health.workout/weight 0})
 ```
 
-### Static rendering:
+### Static rendering
+
 ```clojure
 ;; A namespace with just def vars, no *ctx*:
 ;; The introspection view uses workout-set-render for each
