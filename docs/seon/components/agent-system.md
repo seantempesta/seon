@@ -143,9 +143,19 @@ All multimethods dispatch on `:provider` key:
 
 **Structured per-agent logs**: Each agent gets `logs/agents/{id}.log` with pipe-delimited structured lines. These are both human-readable (`tail -f`) and machine-parseable (the Observatory parses them for the detail view). Tool ID-to-name tracking across messages ensures RESULT lines show actual tool names.
 
+**Max-turns default**: Claude Code has an undocumented ~100 turn default even without `--max-turns`. Agents stuck at exactly 101 messages are hitting this. Fix: always pass a high value (`effective-max-turns (or max-turns 10000)`) in `launch-agent!`.
+
+**Sliding buffer for message channels**: Agent message channels use `(sliding-buffer 1000)`, not fixed buffers. A fixed `(chan 100)` caused deadlocks when the reader loop blocked on `>!!` — the "100 message limit" bug. Sliding buffers drop oldest messages under backpressure, which is correct for observability (recent data matters more).
+
+**System message injection doesn't work**: Claude Code's stream-json parser rejects `type: "system"` — only `user` and `control` types are accepted. Per-turn context injection via system messages is not feasible. The current approach is to embed all context in the initial prompt.
+
+**Turn limit continuation**: After `error_max_turns`, sending a user message `"Continue."` resumes the session with full context preserved and the turn counter resets. This is a viable mechanism for long-running agents.
+
 **Gemini as utility, not agent**: `seon.ai.gemini` provides synchronous HTTP calls for code review, web search, and calculations. It does not implement the agent multimethods — it's a tool, not an autonomous agent.
 
 **Monotonic sequence numbers**: Messages within the same millisecond are ordered by a global `msg-sequence` atom, ensuring deterministic ordering in Datalevin queries.
+
+**nREPL middleware ordering**: Must use var references (`#'nrepl.middleware.session/session`) not strings in `:requires`/`:expects`. String references refer to operation names, not middleware vars. Using strings produces silent incorrect behavior, not an error.
 
 ## Refactoring Opportunities
 

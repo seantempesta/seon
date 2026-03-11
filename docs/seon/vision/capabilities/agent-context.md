@@ -18,6 +18,7 @@ When an agent starts, it receives context about its namespace: functions, schema
 - Uses hardcoded text format instead of `:seon.render/ai` resolution
 - Three overlapping context builders (should be one discovery-based system)
 - Agents cannot reshape or query their own context
+- Turn limit continuation (`error_max_turns` → send "Continue." → resume with full context) is a known-good mechanism but not wired into the orchestrator for automatic long-running agent support
 
 ## Related
 
