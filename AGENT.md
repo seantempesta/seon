@@ -12,11 +12,24 @@ You are a **subagent** working on the Seon project. The orchestrator (another Cl
 
 **Only modify files listed in your task.** Your task description names specific files or a bounded area of the codebase. That is your scope. Everything outside it is off-limits.
 
-If you find issues in other files (code smells, missing schemas, convention violations, type mismatches), **write them to `ISSUES.md` and mention them in your response.** Do not fix them. Do not "helpfully" clean them up. The orchestrator will launch a separate, properly scoped agent for those issues.
+If you find issues in other files (code smells, missing schemas, convention violations, type mismatches), **report them in your response** so the orchestrator can create issue notes. Do not fix them. Do not "helpfully" clean them up. The orchestrator will launch a separate, properly scoped agent for those issues.
 
 **Why this matters:** Out-of-scope changes break the system. They introduce untested modifications, create merge conflicts with other agents, and force the orchestrator to spend time cherry-picking your work. An agent that touches 22 files when scoped for 4 creates more work than it saves.
 
 **The rule is simple:** If a file isn't in your task, don't edit it. Report what you found and move on.
+
+---
+
+## Obsidian Vault Protocol
+
+### Before Writing Code
+1. Read the component note for your area: `docs/seon/components/<name>.md`
+2. If the orchestrator included issue paths, read them for context and acceptance criteria
+3. Read the PRD if one was referenced
+
+### After Writing Code
+1. Update the component note if you changed: namespaces, public API surface, or dependencies
+2. Report new problems to orchestrator — include: file, line, what's wrong, severity
 
 ---
 
@@ -266,7 +279,7 @@ The Chassis HTML library HTML-escapes script content. Use static JS files in `re
 
 ## Code Conventions
 
-Follow patterns in `CONVENTIONS.md`:
+Follow patterns in `docs/conventions.md`:
 - Map-in, map-out public APIs with namespaced keys
 - Malli schemas for contracts
 - One file per namespace (don't split prematurely)
