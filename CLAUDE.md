@@ -379,5 +379,5 @@ Application: `logs/app.log` (Timbre). Database: `logs/datalevin.log`. Errors: `l
 | `ORCHESTRATOR.md` | Orchestrator-specific instructions (launching agents, system management) |
 | `AGENT.md` | Subagent-specific instructions (investigation workflow, reporting) |
 | `docs/seon/orchestrator/issues/` | Open problems — one note per issue |
-| `docs/reference/datastar-quick-reference.md` | Web UI attributes |
+| `docs/seon/reference/datastar-quick-reference.md` | Web UI attributes |
 | `docs/prds/namespace-ui/design-system.md` | UI colors, typography, spacing |
