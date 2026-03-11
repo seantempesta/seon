@@ -232,4 +232,4 @@ Component config validation uses Malli schemas in `seon.system.config/schemas`, 
 
 3. **Phase 1 keys are hardcoded**: The `phase-1-keys` vector in `seon.core` duplicates knowledge about which components are DB-independent. Could be derived from the dependency graph.
 
-4. **Missing env.clj**: The `seon.env` namespace with `:init`, `:start`, `:stop` hooks is referenced but the file wasn't found at the expected location. Profile hooks may be vestigial.
+4. **`seon.env` is profile-specific**: `seon.env` lives at `env/dev/clj/seon/env.clj` (dev) and `env/prod/clj/seon/env.clj` (prod) — not under `src/`. It provides `:init`, `:start`, `:stop`, `:middleware`, and `:opts` hooks. `seon.core` requires `[seon.env :refer [defaults]]` and calls these hooks at startup and shutdown. The hooks are active, not vestigial.

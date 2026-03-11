@@ -105,6 +105,7 @@ The cache key is `[format (set (keys data))]` — format + key shape. Cached res
 
 ```
 1. If value is a map and format is :html or :ai -> try Datalevin resolution
+   (internally: call-datalevin-renderer, which uses resolve-renderer-from-datalevin)
 2. If Datalevin renderer found -> return its output
 3. Fallbacks:
    - :raw -> return value as-is
@@ -113,6 +114,8 @@ The cache key is `[format (set (keys data))]` — format + key shape. Cached res
    - :html -> [:pre [:code (pprint-clipped value)]]
 
 ```
+
+Note: `for-ai` and `for-html` also use `call-datalevin-renderer` when recursing into maps, so they share the same resolution path but with additional recursive fallback rendering for non-domain data.
 
 ### for-ai / for-html (recursive renderers)
 
@@ -156,6 +159,6 @@ Namespace proximity tiebreaking ensures that `seon.health.workout.render/workout
 
 - **`::html` registered as `:any`** — `(schema/register! ::html :any)` is a code smell per project conventions. The html output should have a more specific type (hiccup vector or string).
 - **`seon.render` and `seon.ns.view` overlap** — both provide multi-format rendering with different dispatch mechanisms. The view system (`render*` multimethod) handles generic Clojure values; the render system (Datalevin resolution) handles domain data. These could be unified under one resolution path.
-- **`resolve-renderer` takes a raw Datalevin conn** while `find-renderer` takes a `db-name` keyword — inconsistent API surface. `resolve-renderer` is the only function that receives a conn directly (from `routes.clj`).
+- **`routes.clj` passes a raw Datalevin conn to `resolve-renderer`** but `resolve-renderer`'s signature expects a `db-name` keyword (same as `find-renderer`). The function signatures are consistent — `db-name` for both — but the caller in `routes.clj` (line 486) passes a conn object. This is an API contract violation at the call site, not a signature difference.
 - **`default-page/render-default-page` has no `:malli/schema`** and no test file.
 - **`render.clj` routes.clj coupling** — routes.clj does string manipulation (`str/replace` on HTML) to inject toggle buttons into rendered output. This should be part of the rendering pipeline.
