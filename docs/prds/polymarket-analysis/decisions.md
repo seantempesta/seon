@@ -1,6 +1,9 @@
+---
+type: decision
+status: draft
+tags: [prd, decision, trading]
+---
 # Architectural Decisions: Polymarket Analysis
-
-**Last Updated:** 2025-12-27
 
 ---
 

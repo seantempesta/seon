@@ -2,6 +2,8 @@
 type: issue
 status: open
 severity: cleanup
+milestone: M2
+tags: [issue, database, architecture]
 ---
 # Duplication: connection-error? in db.clj and conn.clj
 

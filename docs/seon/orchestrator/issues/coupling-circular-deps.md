@@ -2,6 +2,8 @@
 type: issue
 status: open
 severity: architectural
+milestone: M1
+tags: [issue, architecture]
 ---
 # Coupling: 3 Circular Dependencies Broken by requiring-resolve
 

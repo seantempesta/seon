@@ -2,6 +2,8 @@
 type: issue
 status: open
 severity: architectural
+milestone: M2
+tags: [issue, flow]
 ---
 # State Managed in Three Separate Mechanisms That Don't Sync
 

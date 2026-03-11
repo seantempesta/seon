@@ -2,6 +2,8 @@
 type: issue
 status: open
 severity: architectural
+milestone: M2
+tags: [issue, schema]
 ---
 # :any in Wire Protocol Schemas
 

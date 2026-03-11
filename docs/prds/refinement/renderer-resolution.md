@@ -1,7 +1,10 @@
+---
+type: prd
+status: draft
+tags: [prd, database, web]
+---
 # Design: Renderer Resolution
 
-**Status:** Implemented (core algorithm + web param namespacing + default page template + type-aware rendering + tests)
-**Date:** 2026-02-23, updated 2026-02-24
 **Context:** Replaces the heuristic in `render-pipeline.md` section 4 ("Page renderer detection")
 
 ---

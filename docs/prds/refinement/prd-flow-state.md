@@ -1,8 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, database, flow]
+---
 # PRD: Unified Runtime Architecture
-
-**Status:** Draft (research complete, ready for implementation)
-**Priority:** High (next major architecture evolution)
-**Author:** Deep research -- no code changes
 
 ---
 

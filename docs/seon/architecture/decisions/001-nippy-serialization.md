@@ -2,6 +2,7 @@
 type: decision
 status: implemented
 date: 2026-03-05
+tags: [decision, architecture, schema, database, flow]
 ---
 
 # ADR-001: Nippy for Inter-JVM Serialization

@@ -1,7 +1,9 @@
+---
+type: prd
+status: draft
+tags: [prd, database]
+---
 # Graph Analyzer Investigation
-
-**Date:** 2026-02-22
-**Status:** Root cause identified, workaround applied
 
 ## Summary
 

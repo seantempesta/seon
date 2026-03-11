@@ -1,6 +1,10 @@
+---
+type: research
+status: draft
+tags: [prd, research, web]
+---
 # Viewer Architecture Research
 
-**Date:** 2026-01-20
 **Purpose:** Deep dive into Portal, Reveal, and XTDB Inspector to inform Seon's namespace UI design.
 
 ---

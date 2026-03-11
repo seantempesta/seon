@@ -1,6 +1,10 @@
+---
+type: research
+status: draft
+tags: [prd, research]
+---
 # DSL Primitives Analysis
 
-**Date:** 2024-12-05
 **File:** src/ml_options/dsl/primitives.clj
 
 ---

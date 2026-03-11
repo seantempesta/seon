@@ -1,3 +1,8 @@
+---
+type: reference
+status: active
+tags: [reference, agent]
+---
 # Gemini API Capabilities Research
 
 This document details advanced Gemini API features that could be added to the gemini-mcp server to enhance its capabilities beyond basic query, brainstorm, code analysis, and text analysis.

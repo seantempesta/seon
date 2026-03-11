@@ -1,3 +1,8 @@
+---
+type: reference
+status: draft
+tags: [prd, reference, database]
+---
 # PRD System
 
 Feature specifications for agent-based development. Each feature gets its own directory.

@@ -1,8 +1,10 @@
+---
+type: prd
+status: completed
+tags: [prd, database]
+---
 # Phase 4: DB Consolidation
 
-**Status:** Done (partial — steps 1, 2, 4 complete; step 3 deferred)
-**Depends on:** Phases 1-3 (done)
-**Branch:** `feature/refinement`
 **Commit:** `94cbfc9`
 
 ---

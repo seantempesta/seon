@@ -1,6 +1,10 @@
+---
+type: research
+status: draft
+tags: [prd, research, schema]
+---
 # Malli Function Instrumentation Research
 
-**Date:** 2024-12-05
 **Sources:** Context7 (metosin/malli), Gemini Pro, malli docs
 
 ---

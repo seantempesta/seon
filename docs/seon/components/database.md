@@ -1,6 +1,7 @@
 ---
 type: component
 status: production
+tags: [component, database]
 ---
 # Database
 

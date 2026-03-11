@@ -1,8 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, database]
+---
 # PRD: Datalevin Database Platform
-
-**Status:** Phases 0-3 Mostly Complete (on `feature/super-repl` branch)
-**Priority:** High
-**Branch:** feature/super-repl (merged with datalevin-migration work)
 
 ---
 

@@ -1,3 +1,8 @@
+---
+type: prd
+status: draft
+tags: [prd, database, flow]
+---
 # Flow-Based Datalevin Writer: Research and Design
 
 ## What We Already Have

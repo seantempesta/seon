@@ -1,3 +1,8 @@
+---
+type: reference
+status: active
+tags: [reference, trading]
+---
 # ThetaData MCP (Model Context Protocol) Reference
 
 This document provides setup and usage information for ThetaData's MCP server integration with Claude Code and other LLM CLI tools.

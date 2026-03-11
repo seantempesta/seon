@@ -1,6 +1,7 @@
 ---
 type: component
 status: stable
+tags: [component, web]
 ---
 # Web Layer
 

@@ -1,9 +1,9 @@
+---
+type: prd
+status: draft
+tags: [prd, web]
+---
 # PRD: Dashboard Polish
-
-**Status:** Not Started
-**Priority:** Medium
-**Parent PRD:** `docs/prds/namespace-ui/prd.md` (Phase 6)
-**Branch:** feature/namespace-ui
 
 ---
 

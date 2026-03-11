@@ -1,3 +1,8 @@
+---
+type: reference
+status: active
+tags: [reference, database]
+---
 # Separate JVM Agent Isolation — Exploration Results
 
 **Date:** 2025-02-14

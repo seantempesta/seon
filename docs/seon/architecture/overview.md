@@ -1,6 +1,7 @@
 ---
 type: architecture
 status: reference
+tags: [architecture, index]
 ---
 # Current State: How Seon Works Today
 

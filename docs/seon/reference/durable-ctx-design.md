@@ -1,3 +1,8 @@
+---
+type: reference
+status: active
+tags: [reference, flow]
+---
 # Reactive UI Architecture
 
 **Status:** Vision / Research

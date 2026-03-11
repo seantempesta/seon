@@ -1,3 +1,8 @@
+---
+type: reference
+status: active
+tags: [reference, web]
+---
 # Datastar Extended Patterns
 
 **Purpose:** Advanced patterns for complex UI work

@@ -1,7 +1,10 @@
+---
+type: research
+status: completed
+tags: [prd, research, web]
+---
 # Research: Datafy/Nav and Multi-Format Rendering
 
-**Date:** 2026-01-22
-**Status:** Complete
 **Questions Addressed:** Q4, Q5, Q6 from multi-format-rendering-prd.md
 
 ---

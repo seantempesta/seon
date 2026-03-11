@@ -1,3 +1,8 @@
+---
+type: prd
+status: draft
+tags: [prd, database, flow]
+---
 # Unified Agent Runtime: Session-ID as Universal Key
 
 ## Context

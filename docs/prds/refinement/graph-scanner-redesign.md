@@ -1,3 +1,8 @@
+---
+type: prd
+status: draft
+tags: [prd, database]
+---
 # Graph Scanner Redesign
 
 ## 1. Current State Analysis

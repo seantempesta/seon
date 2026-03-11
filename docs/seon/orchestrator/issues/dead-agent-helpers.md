@@ -2,6 +2,8 @@
 type: issue
 status: open
 severity: cleanup
+milestone: M1
+tags: [issue, agent, architecture]
 ---
 # Dead Code: agent/helpers.clj
 

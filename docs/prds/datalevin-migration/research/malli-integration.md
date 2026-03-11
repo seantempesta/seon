@@ -1,7 +1,9 @@
+---
+type: research
+status: completed
+tags: [prd, research, database, schema]
+---
 # Malli-Datalevin Schema Integration Research
-
-**Date:** 2026-01-28
-**Status:** Complete
 
 This document explores approaches for unifying Malli schemas with Datalevin database schemas, enabling a single source of truth for data definitions that can drive both validation and database storage.
 

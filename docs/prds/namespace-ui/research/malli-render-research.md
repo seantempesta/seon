@@ -1,7 +1,10 @@
+---
+type: research
+status: completed
+tags: [prd, research, schema, web]
+---
 # Research: Malli Schema Properties for Render Definitions
 
-**Date:** 2026-01-22
-**Status:** Complete
 **Questions Addressed:** Q1 (Where do render definitions live?), Q2 (Inheritance), Q3 (Local overrides)
 
 ---

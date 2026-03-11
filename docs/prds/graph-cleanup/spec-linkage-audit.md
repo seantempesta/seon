@@ -1,3 +1,8 @@
+---
+type: prd
+status: draft
+tags: [prd, database]
+---
 # Spec-to-Function Linkage Audit
 
 ## How Linkage Works Today

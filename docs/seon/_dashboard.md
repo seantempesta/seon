@@ -1,5 +1,7 @@
 ---
 type: dashboard
+tags: [dashboard, index]
+status: active
 ---
 # Seon System Map
 
@@ -54,6 +56,7 @@ type: dashboard
 | [[concepts/namespace-as-process]] | design | Every namespace as a flow process |
 | [[concepts/subscriptions]] | design | Reactive push from data sources |
 | [[concepts/feeds]] | design | Broadcast signals between namespaces |
+| [[concepts/progressive-enhancement]] | design | Smart defaults, agents add specificity over time |
 | [[concepts/socratic-agents]] | experimental | Agents that think before acting |
 | [[concepts/namespace-stewardship]] | design | Agent-driven namespace auditing |
 

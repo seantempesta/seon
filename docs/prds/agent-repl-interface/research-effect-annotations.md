@@ -1,6 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, database, flow, agent]
+---
 # Research: Effect Annotations on Malli Schemas for Parallel Test Execution
-
-## Status: Research Complete (2026-03-08)
 
 ---
 

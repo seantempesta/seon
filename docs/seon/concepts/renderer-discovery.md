@@ -1,6 +1,7 @@
 ---
 type: concept
 status: production
+tags: [concept, web]
 ---
 # Renderer Discovery
 

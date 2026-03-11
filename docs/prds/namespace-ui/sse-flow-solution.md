@@ -1,8 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, flow, web]
+---
 # SSE Live Reload: Analysis and core.async.flow Solution
-
-**Date:** 2026-01-30
-**Status:** Complete
-**Author:** Research Agent (f810)
 
 ## Executive Summary
 

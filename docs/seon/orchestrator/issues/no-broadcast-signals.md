@@ -2,6 +2,8 @@
 type: issue
 status: open
 severity: architectural
+milestone: M1
+tags: [issue, flow]
 ---
 # No Mechanism for Namespaces to Broadcast Signals
 

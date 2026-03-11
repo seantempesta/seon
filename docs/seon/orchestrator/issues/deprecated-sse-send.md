@@ -2,6 +2,8 @@
 type: issue
 status: open
 severity: cleanup
+milestone: M4
+tags: [issue, web, architecture]
 ---
 # Deprecated: web/sse.clj send! Still Has Callers
 

@@ -1,3 +1,8 @@
+---
+type: prd
+status: draft
+tags: [prd, database]
+---
 # Refinement Reference: Agent System Architecture
 
 ## Agent Launch Call Chain

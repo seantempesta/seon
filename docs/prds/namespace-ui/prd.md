@@ -1,8 +1,9 @@
+---
+type: prd
+status: active
+tags: [prd, database, flow, web]
+---
 # PRD: Namespace UI - Vision Document
-
-**Status:** Active Development
-**Priority:** High
-**Branch:** feature/namespace-ui
 
 ---
 

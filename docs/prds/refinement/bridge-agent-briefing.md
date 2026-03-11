@@ -1,3 +1,8 @@
+---
+type: prd
+status: draft
+tags: [prd, database, agent]
+---
 # Agent Briefing: Malli→Datalevin Schema Bridge — Convert `:seon.ai` Database
 
 ## Context

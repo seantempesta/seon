@@ -2,6 +2,8 @@
 type: issue
 status: open
 severity: blocking
+milestone: M3
+tags: [issue, schema]
 ---
 # Graph Doesn't Index Function Schemas
 

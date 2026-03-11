@@ -1,6 +1,7 @@
 ---
 type: concept
 status: design
+tags: [concept, flow]
 ---
 # Subscriptions
 
@@ -22,11 +23,29 @@ Subscriptions are not yet implemented as a first-class feature. The pattern exis
 
 The building blocks are in place: flow processes can have arbitrary named inputs (`:subscription-update` would be one), `flow/inject` can target any process input, and the [[concepts/request-reply]] pattern provides the messaging envelope.
 
+## Reactive Datalevin Subscriptions
+
+Beyond namespace-to-namespace subscriptions, the same pattern extends to **database change reactions**. When a Datalevin transaction commits, the system can fingerprint the changed attributes and entity shapes, then find functions whose input schema matches that change shape. Those functions run automatically.
+
+This is [[concepts/renderer-discovery]] applied to data mutations instead of rendering:
+
+1. A transaction changes `:seon.health.workout/exercises` on an entity.
+2. The system extracts the changed attribute set as a fingerprint.
+3. It queries the graph for functions whose input schema requires those attributes.
+4. Matching functions execute with the changed data.
+5. Their outputs route through the normal flow -- updating ctx, emitting feeds, or triggering further subscriptions.
+
+The specificity algorithm determines which functions run: a function requiring `#{:seon.health.workout/exercises :seon.health.workout/date}` is preferred over one requiring only `#{:seon.health.workout/exercises}` when both attributes changed. This prevents overly broad reactions while ensuring specific handlers fire when their full input is available.
+
+This makes any namespace reactive to data changes without explicit wiring. An agent writes a function with the right input schema, and it automatically participates in the reactive chain. The same [[concepts/progressive-enhancement]] philosophy applies -- if no function matches a change, nothing happens (the default is silence). As agents add functions, the system becomes progressively more reactive.
+
 ## In the Unified Model
 
-Each [[concepts/namespace-as-process]] would gain a `:subscription-update` input. The default [[concepts/step-functions|step function]] would handle subscription updates by merging new data into the namespace's ctx. Custom step functions could react to specific subscription changes — e.g., recalculating derived state when an upstream value changes.
+Each [[concepts/namespace-as-process]] would gain a `:subscription-update` input. The default [[concepts/step-functions|step function]] would handle subscription updates by merging new data into the namespace's ctx. Custom step functions could react to specific subscription changes -- e.g., recalculating derived state when an upstream value changes.
 
 Source namespaces would maintain a subscriber registry in their process state and use a standard protocol for change detection (likely comparing serialized results, since Clojure values have structural equality).
+
+For Datalevin-triggered subscriptions, the writer process (`:seon.flow/writer`) would emit change fingerprints after each successful transaction. A subscription router process would match fingerprints against registered function schemas and inject results into the appropriate namespace processes.
 
 ## Key Schemas
 
@@ -37,4 +56,10 @@ Source namespaces would maintain a subscriber registry in their process state an
  [:fn :string]            ; function qualified name
  [:args [:vector :any]]   ; arguments for the function
  [:current {:optional true} :any]]  ; last known value for diffing
+
+;; Change fingerprint from Datalevin transaction (design)
+[:map
+ [:changed-attrs [:set :keyword]]  ; attributes that changed
+ [:entity-ids [:set :int]]         ; affected entity IDs
+ [:tx-id :int]]                    ; transaction ID for ordering
 ```

@@ -1,7 +1,11 @@
+---
+type: research
+status: draft
+tags: [prd, research, database]
+---
 # XTDB Usage Audit
 
 **Phase 1: Internal Code Audit**
-**Date:** 2026-01-28
 
 This document catalogs all XTDB usage in the Seon codebase to inform the Datalevin migration strategy.
 

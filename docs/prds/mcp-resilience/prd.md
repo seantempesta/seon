@@ -1,6 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, agent]
+---
 # MCP Server Resilience
-
-## Status: Phase 1 Complete - Async Request Processing Implemented
 
 ## Problem Statement
 

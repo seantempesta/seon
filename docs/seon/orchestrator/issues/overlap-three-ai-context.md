@@ -2,6 +2,8 @@
 type: issue
 status: open
 severity: friction
+milestone: M3
+tags: [issue, architecture]
 ---
 # Overlap: Three AI Context Builders
 

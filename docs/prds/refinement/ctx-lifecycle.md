@@ -1,3 +1,8 @@
+---
+type: prd
+status: draft
+tags: [prd, database]
+---
 # Spec-Driven *ctx* Atom Lifecycle
 
 ## Context

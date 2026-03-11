@@ -1,3 +1,8 @@
+---
+type: prd
+status: draft
+tags: [prd]
+---
 # Stability Improvements - Health Checks, Error Boundaries, Automated Cleanup
 
 ## Problem Summary

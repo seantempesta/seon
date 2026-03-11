@@ -2,6 +2,7 @@
 type: decision
 status: implemented
 date: 2026-02-20
+tags: [decision, architecture, schema]
 ---
 
 # ADR 007: Always-On Runtime Instrumentation

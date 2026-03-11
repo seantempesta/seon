@@ -1,6 +1,9 @@
+---
+type: decision
+status: draft
+tags: [prd, decision, web]
+---
 # Architectural Decisions: Example Feature
-
-**Last Updated:** 2025-12-05
 
 ---
 

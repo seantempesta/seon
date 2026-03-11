@@ -1,3 +1,8 @@
+---
+type: prd
+status: draft
+tags: [prd, database]
+---
 # PRD: Delta-Based Ctx History (Undo/Redo)
 
 ## Overview

@@ -1,3 +1,8 @@
+---
+type: prd
+status: draft
+tags: [prd, database, web]
+---
 # Plan: Unified Recursive Render Pipeline
 
 ## Context

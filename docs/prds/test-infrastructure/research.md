@@ -1,6 +1,10 @@
+---
+type: prd
+status: draft
+tags: [prd, database, flow]
+---
 # Test Infrastructure Research Report
 
-**Date**: 2026-03-06
 **Author**: Claude Opus 4.6 (research agent)
 **Status**: Research complete, ready for PRD
 

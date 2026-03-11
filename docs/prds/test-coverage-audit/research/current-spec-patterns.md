@@ -1,6 +1,10 @@
+---
+type: research
+status: draft
+tags: [prd, research]
+---
 # Current Spec and Validation Patterns
 
-**Date:** 2024-12-05
 **Analyzed:** db/schema.clj, data/validation.clj, dev/user.clj
 
 ---

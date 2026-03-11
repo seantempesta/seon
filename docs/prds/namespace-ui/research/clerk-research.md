@@ -1,6 +1,10 @@
+---
+type: research
+status: draft
+tags: [prd, research, web]
+---
 # Clerk Research for Namespace UI
 
-**Date:** 2025-01-20
 **Updated:** 2025-01-20 (deeper source analysis)
 **Purpose:** Evaluate Clerk's viewer architecture for potential integration with Seon's namespace UI.
 

@@ -1,6 +1,9 @@
+---
+type: reference
+status: draft
+tags: [prd, reference, database]
+---
 # Graph Cleanup — Research Notes
-
-**Last Updated:** 2026-02-27
 
 ---
 

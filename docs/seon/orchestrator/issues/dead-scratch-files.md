@@ -2,6 +2,7 @@
 type: issue
 status: open
 severity: cleanup
+tags: [issue, architecture]
 ---
 # Dead Code: Scratch Files in src/
 

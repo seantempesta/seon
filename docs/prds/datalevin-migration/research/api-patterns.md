@@ -1,3 +1,8 @@
+---
+type: research
+status: draft
+tags: [prd, research, database]
+---
 # Datalevin API Patterns - Research Notes
 
 Date: 2026-01-28

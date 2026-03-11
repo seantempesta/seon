@@ -1,3 +1,8 @@
+---
+type: prd
+status: draft
+tags: [prd]
+---
 # PRD: Logging System - Agent-Optimized Functions + Web UI
 
 ## Goals

@@ -2,6 +2,7 @@
 type: issue
 status: open
 severity: cleanup
+tags: [issue, web, architecture]
 ---
 # Dead Code: render/example.clj
 

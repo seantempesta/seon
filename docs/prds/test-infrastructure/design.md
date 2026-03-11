@@ -1,6 +1,10 @@
+---
+type: prd
+status: draft
+tags: [prd, database, flow]
+---
 # PRD: Test Infrastructure Unification
 
-**Date**: 2026-03-06
 **Status**: Draft
 **Depends on**: Schema unification (mostly complete)
 **Research**: `docs/prds/test-infrastructure/research.md`

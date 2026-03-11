@@ -1,3 +1,8 @@
+---
+type: prd
+status: draft
+tags: [prd, database, flow]
+---
 # PRD: Super REPL — Federated Agent Runtime
 
 > **Evolution note:** The "Super REPL" concept has been realized and evolved into `seon.repl` (namespace rename pending). The flow-based agent isolation described here is now part of the **Unified Flow System** — see [`docs/prds/unified-flow/design.md`](../unified-flow/design.md) for the current architecture. This PRD is retained for historical context.

@@ -1,3 +1,8 @@
+---
+type: reference
+status: active
+tags: [reference, trading]
+---
 # ThetaData v3 REST API Reference
 
 ## API Overview

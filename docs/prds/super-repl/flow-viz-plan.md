@@ -1,3 +1,8 @@
+---
+type: prd
+status: draft
+tags: [prd, flow]
+---
 # Flow Visualizer: Research & Plan
 
 > **See also:** The unified flow architecture in [`docs/prds/unified-flow/design.md`](../unified-flow/design.md) describes how flow ping/datafy are used for observability across the full topology.

@@ -1,6 +1,9 @@
+---
+type: prd
+status: active
+tags: [prd, database, flow, web]
+---
 # PRD: Unified Render Pipeline
-
-## Status: Ready to Implement
 
 ## Summary
 

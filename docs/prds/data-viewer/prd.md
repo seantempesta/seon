@@ -1,8 +1,9 @@
+---
+type: prd
+status: active
+tags: [prd]
+---
 # PRD: Data Viewer - Expand/Collapse Interaction
-
-**Status:** Phase 0 Ready
-**Priority:** High (Phase 2 of namespace-ui)
-**Branch:** feature/namespace-ui
 
 ---
 

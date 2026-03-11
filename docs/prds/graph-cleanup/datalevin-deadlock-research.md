@@ -1,3 +1,8 @@
+---
+type: prd
+status: draft
+tags: [prd, database]
+---
 # Datalevin Connection Deadlock Research
 
 ## The Deadlock Code Path

@@ -1,3 +1,8 @@
+---
+type: prd
+status: draft
+tags: [prd, database]
+---
 # Plan: Refinement — One System, End to End
 
 ## Goal

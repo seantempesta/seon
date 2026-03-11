@@ -1,3 +1,8 @@
+---
+type: prd
+status: draft
+tags: [prd, database]
+---
 # Transfer Prompt: Test Infrastructure Overhaul
 
 ## Your Mission
