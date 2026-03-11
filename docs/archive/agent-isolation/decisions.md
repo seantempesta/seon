@@ -58,17 +58,21 @@
 **Decision**: When an agent is assigned a namespace, inject a `*ctx*` atom via custom nREPL middleware.
 
 **Final ctx structure** (`:seon.agent/` reserved keys):
+
 ```clojure
 {:seon.agent/namespace   'seon.trading      ; Read-only identity
  :seon.agent/db          <xtdb-connection>  ; Direct SQL access (Level 3)
  :seon.agent/render      (fn [hiccup] ...)  ; Push UI updates (Phase 5)
  :seon.agent/worktree    "/path/to/worktree"} ; Git worktree (Phase 6)
+
 ```
 
 Agent state uses namespaced keys:
+
 ```clojure
 {:seon.trading/signals [{:symbol "AAPL" ...}]
  :seon.trading/notes "analysis in progress"}
+
 ```
 
 **RESOLVED**: Use custom nREPL middleware that injects `*ctx*` dynamic var into sessions:
@@ -84,13 +88,16 @@ Agent state uses namespaced keys:
                #'*ns* (find-ns target-ns)
                #'*ctx* ctx-atom))
       (handler msg))))
+
 ```
 
 Middleware descriptor uses **var references** (not strings):
+
 ```clojure
 (set-descriptor! #'wrap-context
   {:requires #{#'nrepl.middleware.session/session}
    :expects #{#'nrepl.middleware.interruptible-eval/interruptible-eval}})
+
 ```
 
 See `src/seon/orchestrator/nrepl.clj` for implementation.
@@ -105,6 +112,7 @@ See `src/seon/orchestrator/nrepl.clj` for implementation.
 **Decision**: Agents provide Hiccup EDN, orchestrator handles rendering and SSE delivery.
 
 **Example**:
+
 ```clojure
 (let [{:seon.agent/keys [db render]} @*ctx*]
   (let [trades (xt/q db "SELECT * FROM trades")]
@@ -112,6 +120,7 @@ See `src/seon/orchestrator/nrepl.clj` for implementation.
       [:div#trades-list
        (for [t trades]
          [:div.trade (:symbol t)])])))
+
 ```
 
 **RESEARCH NEEDED**: Does this work with Datastar SSE? Need to scope SSE sessions per namespace.

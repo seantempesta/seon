@@ -89,14 +89,18 @@ Phase 1b of the namespace-ui PRD brought significant improvements to Observatory
 **Goal:** Display TOOL and its corresponding RESULT as a grouped visual unit.
 
 **Problem:** Currently each log line renders independently:
+
 ```
 14:23 | TOOL    | Read | src/foo.clj
 14:23 | RESULT  | Read | (file contents...)
+
 ```
 
 **Desired:** Visual grouping shows tool call and its outcome together:
+
 ```
 14:23 | TOOL    | Read | src/foo.clj ✓
+
 ```
 
 **Implementation approach** (view-layer grouping, not log format change):
@@ -144,6 +148,7 @@ Phase 1b of the namespace-ui PRD brought significant improvements to Observatory
                nil))
       ;; Done - emit any pending tool
       (if pending-tool (conj result pending-tool) result))))
+
 ```
 
 **Rendering grouped lines:**
@@ -161,6 +166,7 @@ Phase 1b of the namespace-ui PRD brought significant improvements to Observatory
         (if success? "✓" "✗")]])
     ;; Regular line
     (existing-log-line-component item idx)))
+
 ```
 
 **Files to modify:**
@@ -177,23 +183,27 @@ Phase 1b of the namespace-ui PRD brought significant improvements to Observatory
 **Problem:** Hover cards are clipped by parent `overflow-y-auto` container.
 
 **Current structure** (`agents.clj:604`):
+
 ```html
 <div class="p-3 max-h-[70vh] overflow-y-auto flex flex-col-reverse">
   <div>
     <!-- log lines with position:relative, hover cards with position:absolute -->
   </div>
 </div>
+
 ```
 
 The `overflow-y-auto` clips `position: absolute` children that extend beyond container bounds.
 
 **Current hover-card** (`views.clj:205-215`):
+
 ```clojure
 (defn- hover-card [content]
   [:div {:class (str "hover-card hidden group-hover:block absolute left-0 top-full z-20 "
                      "bg-base-850 border border-base-700 rounded shadow-lg "
                      "mt-1 p-2 max-w-xl min-w-64 text-xs font-mono")}
    content])
+
 ```
 
 **Options:**
@@ -228,9 +238,11 @@ document.addEventListener('mouseover', (e) => {
     card.style.bottom = `${window.innerHeight - rect.top + 4}px`;
   }
 });
+
 ```
 
 **Updated hover-card:**
+
 ```clojure
 (defn- hover-card [content]
   [:div {:class (str "hover-card hidden group-hover:block z-50 "
@@ -238,6 +250,7 @@ document.addEventListener('mouseover', (e) => {
                      "p-2 max-w-xl min-w-64 text-xs font-mono")}
    ;; position set by JS
    content])
+
 ```
 
 **Files to modify:**
@@ -307,6 +320,7 @@ Follow Phosphor Terminal patterns from `docs/prds/namespace-ui/design-system.md`
 1b.6 [x] Grouped line shows ✓ for success, ✗ for error
 1b.7 [x] Hover card visible when hovering line at top of scroll container
 1b.7 [x] Hover card visible when hovering line at bottom of scroll container
+
 ```
 
 ---

@@ -39,6 +39,7 @@ The `request!` function accepts:
  ::timeout-ms 10000
  ::from-ns    "orchestrator"
  ::trace-id   #uuid "..."}
+
 ```
 
 Reply statuses: `:ok` (value returned), `:error` (function threw), `:overload` (queue full), `:timeout` (never replied), `:not-found` (function doesn't exist).
@@ -69,4 +70,5 @@ Request-reply remains the backbone. [[concepts/subscriptions]] build on top of i
  ::msg/value      result        ; on :ok
  ::msg/error-message "..."      ; on :error
  ::msg/duration-ms 42}
+
 ```

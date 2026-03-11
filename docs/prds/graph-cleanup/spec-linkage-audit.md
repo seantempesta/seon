@@ -20,6 +20,7 @@ In `src/seon/graph/extract.clj`, lines 191-214, the function `link-fns-to-specs`
                 (spec-by-key input-key)  (assoc :seon.fn/input-spec ...)
                 (spec-by-key output-key) (assoc :seon.fn/output-spec ...))))
           fns)))
+
 ```
 
 It constructs `:<ns>/<fn-name>-request` and `:<ns>/<fn-name>-response` keywords, then looks them up in the set of specs found by edamame scanning of `schema/register!` calls. That is the **only** linkage mechanism. There is no runtime introspection, no `:malli/schema` metadata parsing, no `m/=>` detection.
@@ -35,6 +36,7 @@ Per `CONVENTIONS.md`, the canonical way to attach schemas to functions is:
   {:malli/schema [:=> [:cat ::analyze-request] ::analyze-response]}
   [{::keys [ticker]}]
   ...)
+
 ```
 
 The schema references `::analyze-request` and `::analyze-response` as registered schema keys. The `-request`/`-response` naming convention IS widely used for these registered schemas, so the string-based approach happens to work **when the naming convention is followed**.
@@ -73,6 +75,7 @@ Malli's own `instrument.clj` shows exactly how this works (lines 43-46):
   (let [{:keys [malli/schema arglists]} (meta v)]
     (or schema (as-> (seq (keep (comp :malli/schema meta) arglists)) $
                  (when (= (count arglists) (count $)) (cond->> $ (next $) (into [:function])))))))
+
 ```
 
 For our graph, we have two sub-options:

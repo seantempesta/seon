@@ -12,6 +12,7 @@ Feature specifications for agent-based development. Each feature gets its own di
 ```bash
 cp -r docs/prds/_example-feature docs/prds/your-feature-name
 rm docs/prds/your-feature-name/README.md
+
 ```
 
 Or manually:
@@ -19,6 +20,7 @@ Or manually:
 ```bash
 mkdir -p docs/prds/your-feature-name/research
 touch docs/prds/your-feature-name/{prd,decisions,notes}.md
+
 ```
 
 ## Directory Structure
@@ -31,6 +33,7 @@ docs/prds/{feature-name}/
 +-- research/       # Exploration findings (optional)
     +-- spike-*.md
     +-- findings-*.md
+
 ```
 
 ## PRD Template
@@ -72,6 +75,7 @@ This is guidance, not prescription -- pivot if a better approach emerges.
 1. Tests pass
 2. REPL verification works
 3. Documented in decisions.md
+
 ```
 
 ## Agent Workflow
@@ -114,4 +118,5 @@ docs/prds/schema-unification/
 +-- research/
     +-- serialization-findings.md
     +-- nil-semantics-findings.md
+
 ```

@@ -78,6 +78,7 @@ Caller thread                   Writer flow (single :io thread)
      |<--- deliver promise --------------|
      |
      v (deref with timeout)
+
 ```
 
 The key insight: calling threads never touch `d/transact!` or hold Datalevin monitors. Only the single writer thread does.
@@ -107,6 +108,7 @@ Modify the existing `seon.db.datalevin.writer/db-writer-step` to support request
          {reply-to [{::request-id request-id
                      ::status :error
                      ::error (.getMessage e)}]}]))))
+
 ```
 
 **Problem**: flow outputs must be declared in `describe`. The `reply-to` coord pattern doesn't work because outputs are static. Instead, use the promise pattern from topology.clj.
@@ -137,6 +139,7 @@ Modify the existing `seon.db.datalevin.writer/db-writer-step` to support request
       (catch Exception e
         (swap! *pending dissoc request-id)
         (throw e)))))
+
 ```
 
 The writer step delivers to promises directly (side-effect in transform):
@@ -155,6 +158,7 @@ The writer step delivers to promises directly (side-effect in transform):
        (= :ok (::status result)) (update ::total-writes inc)
        (= :error (::status result)) (update ::total-errors inc))
      nil]))
+
 ```
 
 ### Deadlock Recovery
@@ -182,6 +186,7 @@ This is the hard part. When `d/transact!` hangs inside the writer flow:
         new-flow (create-writer-flow {::conn new-conn ::db-name ...})]
     (swap! writers assoc (conn-id new-conn) {:flow new-flow :conn new-conn})
     new-conn))
+
 ```
 
 **What gets leaked**: The old thread (blocked in `d/transact!`), the old conn atom (monitor held), the old socket. The socket will eventually timeout or be GC'd. The thread will die when the socket closes.
@@ -203,6 +208,7 @@ This is the hard part. When `d/transact!` hangs inside the writer flow:
           (log/error "Writer flow deadlocked, recovering" {...})
           (recover-deadlocked-writer! ...))
         (throw e)))))
+
 ```
 
 ## What Needs to Be Built vs. What Exists

@@ -7,6 +7,7 @@ This document records key architectural decisions for XTDB query patterns.
 ## Decision Log
 
 ### ADR-001: Separate Query Languages for System vs Domain Code
+
 **Date**: 2025-12-17
 **Status**: Accepted
 
@@ -26,6 +27,7 @@ We need multi-database support (ATTACH DATABASE requires SQL) and LLM-accessible
 ---
 
 ### ADR-002: Frozen-Time Database Pattern
+
 **Date**: 2025-12-17
 **Status**: Accepted (implementation pending research)
 
@@ -47,6 +49,7 @@ Domain functions currently accept `:as-of` options and apply temporal filtering 
 ---
 
 ### ADR-003: Query Language for Domain Code
+
 **Date**: 2025-12-17
 **Status**: Accepted
 
@@ -80,6 +83,7 @@ Domain code will use SQL because:
 These decisions require research findings:
 
 ### Query Builder Approach
+
 **Options**:
 1. Raw SQL strings
 2. HoneySQL (Clojure data → SQL)
@@ -88,6 +92,7 @@ These decisions require research findings:
 **Will decide after**: Testing LLM's ability to work with each
 
 ### System Code Query Language
+
 **Options**:
 1. Keep XTQL (if faster)
 2. Convert to SQL (if comparable or for consistency)

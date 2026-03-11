@@ -34,6 +34,7 @@ Single render function per page. Push the full view, not deltas.
 (defview handler-home {:path "/"}
   [{:keys [db]}]
   (html [:main#morph ...render everything...]))
+
 ```
 
 ### 2. No Diffing Needed
@@ -75,6 +76,7 @@ Hyperlith builds SSE events manually - it's simpler and gives full control:
     "\nid: " event-id
     "\ndata: elements " (str/replace elements "\n" "\ndata: elements ")
     "\n\n\n"))
+
 ```
 
 ### Add: Brotli Streaming Compression
@@ -85,6 +87,7 @@ This is THE key. Not gzip, not per-message compression - **streaming brotli over
 ;; deps.edn
 com.aayushatharva.brotli4j/brotli4j {:mvn/version "1.18.0"}
 com.aayushatharva.brotli4j/native-osx-aarch64 {:mvn/version "1.18.0"}  ; for M1/M2 Macs
+
 ```
 
 ### Adopt: Their SSE Pattern
@@ -118,6 +121,7 @@ com.aayushatharva.brotli4j/native-osx-aarch64 {:mvn/version "1.18.0"}  ; for M1/
            :on-close
            (fn [_ _]
              (a/>!! <cancel :cancel))})))))
+
 ```
 
 Key elements:
@@ -136,6 +140,7 @@ Key elements:
         :data-on:online__window "@post('/')"}]
  [:noscript "Your browser does not support JavaScript!"]
  [:main {:id "morph"}]]
+
 ```
 
 Benefits:
@@ -148,6 +153,7 @@ Benefits:
 
 ```clojure
 (add-watch db_ :refresh-on-change (fn [& _] (refresh-all!)))
+
 ```
 
 No manual `trigger-refresh!` calls - state changes automatically trigger renders.
@@ -171,6 +177,7 @@ Add hyperlith as a dependency and use their primitives:
 ```clojure
 andersmurphy/hyperlith {:git/url "https://github.com/andersmurphy/hyperlith"
                         :git/sha "..."}
+
 ```
 
 Then use:

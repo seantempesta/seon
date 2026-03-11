@@ -57,6 +57,7 @@ File saved
     -> scanner/link-fns-to-specs (adds input-spec, output-spec refs to fns)
     -> Merges: analyzer's functions get replaced with scanner-linked functions
     -> ingest/ingest-incremental! (retract all for ns, insert new)
+
 ```
 
 The merge at line 294 of hook.clj is critical: `(assoc entities :seon.graph.analyzer/functions linked-fns)`. This REPLACES the analyzer's function list with the scanner's linked version. But the scanner only finds top-level `defn` forms, so any functions the analyzer found that the scanner didn't are LOST.
@@ -119,6 +120,7 @@ This is the root cause of the disappearing functions bug.
  :seon.spec/base-type     {:db/valueType :db.type/keyword}
  :seon.spec/contains-keys {:db/valueType :db.type/keyword :db/cardinality :db.cardinality/many}
  :seon.spec/updated-at    {:db/valueType :db.type/instant}}
+
 ```
 
 Key change: `seon.var/*` is a separate entity type from `seon.fn/*`. Functions have arglists; vars have value-types. Both have qualified-name identity attrs, so they upsert cleanly.
@@ -162,6 +164,7 @@ Add `def-form?` and `extract-def` alongside the existing `defn-form?` and `extra
                :seon.var/value-type (infer-value-type value-form)
                :seon.var/updated-at now}
         doc-str (assoc :seon.var/doc doc-str)))))
+
 ```
 
 ### 3b. Use `walk/postwalk` for defn extraction too
@@ -179,6 +182,7 @@ Change `find-defn-forms` from top-level-only to walking all forms, so functions 
        form)
      forms)
     @results))
+
 ```
 
 This matches how `find-register-calls` already works (uses `postwalk`).
@@ -214,6 +218,7 @@ Since `:seon.fn/qualified-name`, `:seon.spec/key`, and `:seon.var/qualified-name
         stale (remove (fn [[_ qn]] (new-set qn)) existing)]
     (when (seq stale)
       (db/transact! conn (mapv (fn [[eid _]] [:db/retractEntity eid]) stale)))))
+
 ```
 
 Same pattern for specs and vars. Call graph edges (`:seon.call/*`) and ns-deps still need retract-then-insert since they lack identity attrs.
@@ -231,6 +236,7 @@ ingest-namespace! [conn ns-name entities specs vars]
   7. Retract stale vars (in ns but not in new data)
   8. Retract call edges from ns, insert new ones
   9. Retract ns-deps from ns, insert new ones
+
 ```
 
 Steps 1-4 are safe (upsert). Steps 5-7 only retract what's confirmed missing. Steps 8-9 are retract-then-insert but for non-identity edges, which is fine -- a missing call edge is harmless compared to a missing function.
@@ -245,6 +251,7 @@ Steps 1-4 are safe (upsert). Steps 5-7 only retract what's confirmed missing. St
                    (:seon.graph.analyzer/functions entities) specs)
       entities (assoc entities :seon.graph.analyzer/functions linked-fns)]
   ...)
+
 ```
 
 Wait -- re-reading this, `link-fns-to-specs` is called with the ANALYZER's functions, not the scanner's. So the replacement shouldn't lose analyzer functions. The bug is elsewhere.
@@ -291,6 +298,7 @@ Replace the hook's `update-code-index!` with:
            ::ingest/ns-deps (::analyzer/namespace-usages entities)
            ::ingest/ns-entities (into (::analyzer/namespaces entities)
                                       ns-markers)})))))
+
 ```
 
 Key difference: `ingest-namespace!` upserts functions and only retracts stale ones, so if the analyzer misses a function, it stays in the graph (stale > missing).

@@ -70,6 +70,7 @@ Key behaviors:
 (user/run-tests)                              ;; delegates to test/test-all
 (user/test-affected 'seon.foo)                ;; dependency-aware
 (user/test-gen 'seon.foo)                     ;; generative
+
 ```
 
 ### Selective Execution (`seon.dev.test-select`)
@@ -105,6 +106,7 @@ Shell script for when the REPL is down (~30s JVM startup). Runs via `clojure.tes
 (binding [db/*direct-mode* true
           db/*conn-manager* fake-mgr]
   (f))
+
 ```
 
 ### Fixtures

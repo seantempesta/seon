@@ -60,6 +60,7 @@ bin/mcp-server (Babashka process)
 Seon nREPL Server (port 7888)
     ↓ (Clojure evaluation)
 seon.ai.claude (agent management)
+
 ```
 
 ### Key Files
@@ -120,6 +121,7 @@ The MCP server main loop (lines 718-728) is **synchronous**:
   (when-let [line (.readLine reader)]  ; 1. Read request
     (handle-request request)            ; 2. BLOCKS here during eval
     (recur)))                           ; 3. Can't reach until step 2 completes
+
 ```
 
 When `handle-request` → `execute-eval` → `nrepl-eval` is called:
@@ -182,6 +184,7 @@ Proposed (fixed):
               handle-request
                       ↓
               respond (via atom + flush)
+
 ```
 
 ### Phase 1: Async Eval Processing (Minimal Fix)
@@ -194,6 +197,7 @@ Proposed (fixed):
 
    ```clojure
    (def response-queue (atom []))
+
    ```
 
 2. **Wrap blocking operations in `future`:**
@@ -207,6 +211,7 @@ Proposed (fixed):
            (swap! response-queue conj [:result id result]))
          (catch Exception e
            (swap! response-queue conj [:error id e])))))
+
    ```
 
 3. **Non-blocking main loop:**
@@ -227,12 +232,14 @@ Proposed (fixed):
 
      (Thread/sleep 10)  ; prevent busy loop
      (recur))
+
    ```
 
 4. **Track running eval for interrupt:**
 
    ```clojure
    (def running-eval (atom nil))  ; {:future f :session-id sid}
+
    ```
 
 **Why this works:**

@@ -21,6 +21,7 @@ event: datastar-patch-elements
 data: selector #message-log
 data: mode append
 data: elements <div class="message">New message here</div>
+
 ```
 
 This appends new content to the container without touching existing DOM elements.
@@ -43,6 +44,7 @@ Datastar provides `data-scroll-into-view` for auto-scrolling:
 ```html
 <!-- Auto-scroll new messages into view -->
 <div data-scroll-into-view.smooth.vend>New message</div>
+
 ```
 
 Modifiers available:
@@ -62,6 +64,7 @@ The trick is to ONLY add `data-scroll-into-view` when auto-scroll is enabled AND
     <!-- messages here -->
   </div>
 </div>
+
 ```
 
 Then conditionally render the scroll attribute:
@@ -71,6 +74,7 @@ Then conditionally render the scroll attribute:
 [:div {:id (str "msg-" idx)
        :data-scroll-into-view (when auto-scroll "__smooth.__vend")}
   message-content]
+
 ```
 
 ### 3. Infinite Scroll / Intersection Observer
@@ -81,6 +85,7 @@ From `data-on-intersect`:
 <div data-on-intersect="@get('/more-messages')">
   Loading older messages...
 </div>
+
 ```
 
 Options:
@@ -98,6 +103,7 @@ If using full re-render approach, protect scroll position:
 <div id="message-log" data-ignore-morph>
   <!-- Content that shouldn't be morphed -->
 </div>
+
 ```
 
 But for our use case, append mode is cleaner.
@@ -114,6 +120,7 @@ messages-ch (chan 100)  <-- claude/launch-agent! puts messages here
     |
     v
 tail function returns channel  <-- observatory calls this
+
 ```
 
 ### Recommended Bridging Pattern
@@ -143,6 +150,7 @@ tail function returns channel  <-- observatory calls this
          (fn [ch status]
            ;; Cleanup: close tap
            (a/close! batch-ch))}))))
+
 ```
 
 ### Buffering Considerations
@@ -177,6 +185,7 @@ tail function returns channel  <-- observatory calls this
               (a/>! out-ch batch))
             (a/close! out-ch)))))
     out-ch))
+
 ```
 
 ### Reconnection Strategy
@@ -195,6 +204,7 @@ SSE spec supports `id:` field and `Last-Event-ID` header:
                 "data: selector #message-log\n"
                 "data: mode append\n"
                 "data: elements " content "\n\n")}))
+
 ```
 
 On reconnect, browser sends `Last-Event-ID` header. Server can replay from that point.
@@ -214,6 +224,7 @@ Keep last N messages in memory or XTDB:
     (ai/get-messages {::ai/node node
                       ::ai/session-id session-id
                       ::ai/limit 100})))
+
 ```
 
 On connect, send backlog then switch to live stream.
@@ -232,6 +243,7 @@ Track auto-scroll state on server, send scroll directive with each batch:
    (when auto-scroll?
      [:script "document.querySelector('#message-log').scrollTop =
                document.querySelector('#message-log').scrollHeight"])])
+
 ```
 
 Pros: Simple, no client state
@@ -256,6 +268,7 @@ Use Datastar signals for scroll state:
     Jump to bottom
   </button>
 </div>
+
 ```
 
 Server sends new messages with conditional scroll:
@@ -265,6 +278,7 @@ Server sends new messages with conditional scroll:
 [:div#new-msg
  {:data-scroll-into-view (when (:auto-scroll signals) "__smooth.__vend")}
  content]
+
 ```
 
 ### Option C: Pure Append (Simplest, Recommended for MVP)
@@ -276,6 +290,7 @@ event: datastar-patch-elements
 data: selector #message-log
 data: mode append
 data: elements <div class="message">Content here</div>
+
 ```
 
 If user is at bottom, browser keeps them there.
@@ -306,6 +321,7 @@ This is the "it just works" approach for most cases.
           (when-let [msg (a/<!! messages-ch)]
             (send! (append-event "#log" (render-message msg)))
             (recur)))))))
+
 ```
 
 ### Phase 2: Smart Scroll
@@ -380,6 +396,7 @@ When agent completes, channel closes. Handle gracefully:
        "data: selector " selector "\n"
        "data: mode append\n"
        "data: elements " (str/replace html-content "\n" "\ndata: elements ") "\n\n"))
+
 ```
 
 ### Message Rendering
@@ -401,6 +418,7 @@ When agent completes, channel closes. Handle gracefully:
        type]]
      [:div.text-sm.text-zinc-300.mt-1
       (extract-display-content msg)]]))
+
 ```
 
 ### Streaming Handler Pattern
@@ -421,4 +439,5 @@ When agent completes, channel closes. Handle gracefully:
                  (log/error e "Streaming error"))
                (finally
                  (hk/close ch))))))})))
+
 ```

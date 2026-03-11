@@ -53,6 +53,7 @@ Create new log query functions that:
 (log-errors)     ; Recent errors with surrounding context
 (log-context n)  ; Lines around line number n
 (log-tail)       ; Safe tail with hard caps
+
 ```
 
 ### Constraints

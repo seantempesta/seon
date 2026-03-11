@@ -46,6 +46,7 @@ Datastar is a lightweight (10.23 KiB) hypermedia framework for building everythi
 <script type="module"
   src="https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.0-RC.6/bundles/datastar.js">
 </script>
+
 ```
 
 No npm packages, no build step required (though TypeScript is recommended for production).
@@ -72,6 +73,7 @@ Server responds with SSE events (text/event-stream)
 Multiple events patch DOM elements and/or signals
     ↓
 Frontend reactively renders changes
+
 ```
 
 **Key Insight:** Datastar sends ALL signals (except those prefixed with underscore `_`) with every backend request:
@@ -196,6 +198,7 @@ All HTTP actions (`@get`, `@post`, etc.) trigger `datastar-fetch` events:
 <div data-on:datastar-fetch="
   console.log('Fetch event:', evt.detail.type)
 "></div>
+
 ```
 
 ### Alternative Response Content Types
@@ -231,6 +234,7 @@ Defines reactive signals (state variables).
 
 <!-- Multiple signals -->
 <div data-signals="{foo: 1, bar: 'hello'}"></div>
+
 ```
 
 **Key conversion:** Signals are converted to camelCase. `data-signals:my-signal` becomes `$mySignal`.
@@ -243,6 +247,7 @@ Two-way data binding between signals and form elements.
 <input data-bind:username />
 <input data-bind.number:age />
 <input type="checkbox" data-bind:isActive />
+
 ```
 
 **Type Modifiers:**
@@ -260,6 +265,7 @@ Creates read-only derived signals that update automatically.
 
 <!-- Object syntax -->
 <div data-computed="{sum: () => $a + $b}"></div>
+
 ```
 
 ### Display & Visibility
@@ -272,6 +278,7 @@ Binds text content to expressions.
 <div data-text="$username"></div>
 <div data-text="`Count: ${$count}`"></div>
 <div data-text="$count > 10 ? 'High' : 'Low'"></div>
+
 ```
 
 #### `data-show`
@@ -281,6 +288,7 @@ Conditionally shows/hides elements via `display` CSS property.
 ```html
 <div data-show="$isLoading" style="display: none">Loading...</div>
 <div data-show="!$isLoading">Content loaded</div>
+
 ```
 
 **Best Practice:** Set initial `style="display: none"` to prevent flash of unwanted content (FOUC).
@@ -298,6 +306,7 @@ Conditionally adds/removes CSS classes.
   'text-red': $hasError,
   'font-bold': $isImportant
 }"></div>
+
 ```
 
 #### `data-style`
@@ -310,6 +319,7 @@ Sets inline CSS styles reactively.
   display: $hidden ? 'none' : 'block',
   opacity: $loading ? 0.5 : 1
 }"></div>
+
 ```
 
 #### `data-attr`
@@ -325,6 +335,7 @@ Sets HTML attribute values.
   title: $tooltip,
   'aria-label': $label
 }"></div>
+
 ```
 
 ### Event Handling
@@ -342,6 +353,7 @@ Attaches event listeners that execute expressions.
 
 <!-- Multiple statements -->
 <button data-on:click="$saving = true; @post('/save')">Save</button>
+
 ```
 
 **Event Modifiers:**
@@ -373,6 +385,7 @@ Attaches event listeners that execute expressions.
 
 <!-- View transition -->
 <button data-on:click__viewtransition="@post('/next')">Next Page</button>
+
 ```
 
 **Custom Events:**
@@ -380,6 +393,7 @@ Attaches event listeners that execute expressions.
 ```html
 <div data-on:myevent="$data = evt.detail">
 <button data-on:click="el.dispatchEvent(new CustomEvent('myevent', {detail: 'data'}))">
+
 ```
 
 #### `data-on-intersect`
@@ -395,6 +409,7 @@ Triggers when element enters viewport (Intersection Observer).
 
 <!-- Threshold modifier -->
 <div data-on-intersect__threshold.0.5="$halfVisible = true">
+
 ```
 
 #### `data-on-interval`
@@ -407,6 +422,7 @@ Executes expressions at regular intervals.
 
 <!-- Custom duration -->
 <div data-on-interval__duration.500ms="@get('/poll')">
+
 ```
 
 #### `data-on-signal-patch`
@@ -419,6 +435,7 @@ Runs expressions whenever signals change.
 <!-- With filter -->
 <div data-on-signal-patch="@post('/sync')"
      data-on-signal-patch-filter="{include: /^user/}">
+
 ```
 
 ### Loading States
@@ -433,6 +450,7 @@ Creates a boolean signal tracking fetch request status.
   <span data-show="!$saving">Save</span>
   <span data-show="$saving">Saving...</span>
 </button>
+
 ```
 
 **Critical:** Place `data-indicator` **before** the action in DOM order for proper processing.
@@ -451,6 +469,7 @@ Runs expressions when elements load or patch into DOM.
 
 <!-- With view transition -->
 <div data-init__viewtransition="@post('/')">
+
 ```
 
 #### `data-effect`
@@ -460,6 +479,7 @@ Executes expressions on page load and whenever dependent signals change.
 ```html
 <div data-effect="$total = $price * $quantity">
 <div data-effect="console.log('Count changed:', $count)">
+
 ```
 
 ### DOM References
@@ -471,6 +491,7 @@ Creates signals referencing DOM elements.
 ```html
 <div data-ref:myDiv></div>
 <button data-on:click="$myDiv.scrollIntoView()">Scroll to div</button>
+
 ```
 
 ### Advanced Control
@@ -483,6 +504,7 @@ Prevents Datastar from processing element and descendants.
 <div data-ignore data-show-thirdpartylib="">
   <!-- Third-party library attributes ignored by Datastar -->
 </div>
+
 ```
 
 #### `data-ignore-morph`
@@ -494,6 +516,7 @@ Skips element during DOM morphing while still processing other attributes.
   <!-- Content preserved during updates -->
   <canvas id="chart"></canvas>
 </div>
+
 ```
 
 #### `data-preserve-attr`
@@ -504,6 +527,7 @@ Preserves attribute values during morphing.
 <details open data-preserve-attr="open">
   <!-- 'open' state preserved through morphs -->
 </details>
+
 ```
 
 ### Debugging
@@ -518,6 +542,7 @@ Displays reactive JSON representation of signals.
 
 <!-- Filtered -->
 <pre data-json-signals="{include: /user/, exclude: /private/}"></pre>
+
 ```
 
 ---
@@ -536,6 +561,7 @@ All methods share the same signature: `@action(uri, options)`
 <button data-on:click="@put('/update')">Update</button>
 <button data-on:click="@patch('/modify')">Patch</button>
 <button data-on:click="@delete('/remove')">Delete</button>
+
 ```
 
 ### Action Options
@@ -571,6 +597,7 @@ All methods share the same signature: `@action(uri, options)`
   // Request cancellation
   requestCancellation: 'auto' // 'auto', 'disabled', or AbortController
 })
+
 ```
 
 ### Content Type: `json` vs `form`
@@ -581,6 +608,7 @@ All methods share the same signature: `@action(uri, options)`
 <button data-on:click="@post('/save')">
   <!-- Sends: {"username": "alice", "email": "alice@example.com"} -->
 </button>
+
 ```
 
 **Form Mode:**
@@ -592,6 +620,7 @@ All methods share the same signature: `@action(uri, options)`
   <button type="submit">Save</button>
 </form>
 <!-- Sends: FormData with validation -->
+
 ```
 
 ### Utility Actions
@@ -604,6 +633,7 @@ Accesses signal value without subscribing to changes.
 <button data-on:click="console.log(@peek($count))">
   <!-- Doesn't re-evaluate when $count changes -->
 </button>
+
 ```
 
 #### `@setAll(value, filter?)`
@@ -614,6 +644,7 @@ Sets all matching signals to a value.
 <button data-on:click="@setAll('', {include: /^form/})">
   Clear Form
 </button>
+
 ```
 
 #### `@toggleAll(filter?)`
@@ -624,6 +655,7 @@ Toggles all matching boolean signals.
 <button data-on:click="@toggleAll({include: /^is/})">
   Toggle All Flags
 </button>
+
 ```
 
 ---
@@ -644,6 +676,7 @@ Signals are reactive variables that automatically track and propagate changes. T
 <div data-signals:count="0"></div>
 <div data-signals:user.name="'Alice'"></div>
 <div data-signals="{a: 1, b: 2}"></div>
+
 ```
 
 **2. Via `data-bind`:**
@@ -651,6 +684,7 @@ Signals are reactive variables that automatically track and propagate changes. T
 ```html
 <input data-bind:email />
 <!-- Automatically creates $email signal -->
+
 ```
 
 **3. Via `data-computed`:**
@@ -658,6 +692,7 @@ Signals are reactive variables that automatically track and propagate changes. T
 ```html
 <div data-computed:doubled="$count * 2"></div>
 <!-- Creates read-only $doubled signal -->
+
 ```
 
 **4. Via Backend:**
@@ -665,6 +700,7 @@ Signals are reactive variables that automatically track and propagate changes. T
 ```
 event: datastar-patch-signals
 data: signals {"serverData": "value"}
+
 ```
 
 ### Signal Naming
@@ -682,6 +718,7 @@ data: signals {"serverData": "value"}
 <!-- Access in expressions -->
 <div data-text="$user.name"></div>
 <div data-text="$user.email"></div>
+
 ```
 
 **Backend receives:**
@@ -693,6 +730,7 @@ data: signals {"serverData": "value"}
     "email": "alice@example.com"
   }
 }
+
 ```
 
 ### Computed Signals
@@ -704,6 +742,7 @@ Read-only signals derived from other signals, updated automatically.
 <input data-bind.number:quantity />
 <div data-computed:total="$price * $quantity"></div>
 <div data-text="`Total: $${$total}`"></div>
+
 ```
 
 ### Signal Types
@@ -716,6 +755,7 @@ Signals preserve their types:
 <div data-signals:isActive="true"></div>     <!-- Boolean -->
 <div data-signals:items="[1,2,3]"></div>     <!-- Array -->
 <div data-signals:user="{}"></div>           <!-- Object -->
+
 ```
 
 **Type coercion in `data-bind`:**
@@ -723,6 +763,7 @@ Signals preserve their types:
 ```html
 <input type="number" data-bind.number:age />
 <input data-bind.trim:name />
+
 ```
 
 ### Reactivity Flow
@@ -733,6 +774,7 @@ Signal Change ($count = 5)
 All dependent expressions re-evaluate
     ↓
 DOM updates automatically
+
 ```
 
 **Example:**
@@ -743,6 +785,7 @@ DOM updates automatically
 <div data-text="`Double: ${$count * 2}`"></div> <!-- Updates -->
 <div data-show="$count > 10"></div>             <!-- Updates -->
 <div data-class:high="$count > 10"></div>       <!-- Updates -->
+
 ```
 
 ### Special Variable: `el`
@@ -756,6 +799,7 @@ In all expressions, `el` refers to the current element:
 <button data-on:click="el.disabled = true">
   Disable Self
 </button>
+
 ```
 
 ---
@@ -799,6 +843,7 @@ Idiomorph creates **ID sets** - mappings of elements to all IDs within them. Thi
   <input id="email" type="email" />
   <div id="status"></div>
 </div>
+
 ```
 
 **2. Prevent morphing with `data-ignore-morph`:**
@@ -806,6 +851,7 @@ Idiomorph creates **ID sets** - mappings of elements to all IDs within them. Thi
 ```html
 <canvas id="chart" data-ignore-morph></canvas>
 <!-- Canvas state preserved, not re-rendered -->
+
 ```
 
 **3. Preserve specific attributes:**
@@ -814,6 +860,7 @@ Idiomorph creates **ID sets** - mappings of elements to all IDs within them. Thi
 <details open data-preserve-attr="open">
   <!-- 'open' attribute preserved through morphs -->
 </details>
+
 ```
 
 **4. Use appropriate patch modes:**
@@ -821,6 +868,7 @@ Idiomorph creates **ID sets** - mappings of elements to all IDs within them. Thi
 ```html
 <!-- Append to list -->
 <div data-on:click="@post('/add-item', {selector: '#list', mode: 'append'})">
+
 ```
 
 ### Fat Morph Pattern
@@ -836,6 +884,7 @@ Send large chunks (even entire `<html>` tag) and let compression + morphing hand
      [:body
       [:main#app
        (render-content state)]]]))
+
 ```
 
 **Why this works:**
@@ -877,6 +926,7 @@ SSE allows the backend to stream multiple events in a single response, perfect f
   <div>Progress: <span data-text="$progress"></span>%</div>
   <div data-text="$status"></div>
 </div>
+
 ```
 
 **Backend (Python example):**
@@ -902,6 +952,7 @@ async def long_operation():
         })
 
     return DatastarResponse(stream())
+
 ```
 
 **Backend (Clojure example):**
@@ -928,6 +979,7 @@ async def long_operation():
            {:signals (json/write-str {:progress 100
                                       :status "Complete!"})})
          (hk/close ch)))}))
+
 ```
 
 ### Pattern 2: Infinite Stream
@@ -951,6 +1003,7 @@ async def live_updates():
             await asyncio.sleep(1)
 
     return DatastarResponse(stream())
+
 ```
 
 **Frontend:**
@@ -961,6 +1014,7 @@ async def live_updates():
      data-on:online__window="@get('/live-updates')">
   <div id="updates">Loading...</div>
 </div>
+
 ```
 
 ### Pattern 3: Broadcast to Multiple Clients
@@ -990,6 +1044,7 @@ async def live_updates():
 (add-watch data-atom :broadcast
   (fn [_ _ _ new-state]
     (broadcast! (render-state new-state))))
+
 ```
 
 ### Browser Behavior with SSE
@@ -1028,6 +1083,7 @@ Instead, Datastar sends **all reactive state (as JSON)** to the server on each r
   <input name="email" />
   <button type="submit">Save</button>
 </form>
+
 ```
 
 **Datastar Approach (Signals):**
@@ -1036,6 +1092,7 @@ Instead, Datastar sends **all reactive state (as JSON)** to the server on each r
 <div data-signals:form.email="''"></div>
 <input data-bind:form.email />
 <button data-on:click="@post('/save')">Save</button>
+
 ```
 
 **Server receives:**
@@ -1046,6 +1103,7 @@ Instead, Datastar sends **all reactive state (as JSON)** to the server on each r
     "email": "user@example.com"
   }
 }
+
 ```
 
 ### When to Use Form Mode
@@ -1063,6 +1121,7 @@ Use `contentType: 'form'` when you need:
   <input type="file" name="avatar" />
   <button type="submit">Save</button>
 </form>
+
 ```
 
 **Key:** Signals are NOT sent with `contentType: 'form'` - only form data.
@@ -1082,6 +1141,7 @@ Use `contentType: 'form'` when you need:
   $emailError = $email.includes('@') ? '' : 'Invalid email';
   if (!$emailError) @post('/save')
 ">Save</button>
+
 ```
 
 **Server-side response:**
@@ -1089,6 +1149,7 @@ Use `contentType: 'form'` when you need:
 ```
 event: datastar-patch-signals
 data: signals {"emailError": "Email already exists"}
+
 ```
 
 ### Progressive Load Example
@@ -1109,6 +1170,7 @@ data: signals {"emailError": "Email already exists"}
   <noscript>JavaScript required</noscript>
 </body>
 </html>
+
 ```
 
 **Backend sends:**
@@ -1120,6 +1182,7 @@ data: elements <div id="content">
 data: elements   <h1>Welcome</h1>
 data: elements   <p>Loaded via SSE</p>
 data: elements </div>
+
 ```
 
 **Benefits:**
@@ -1174,6 +1237,7 @@ data: elements </div>
     Save
   </button>
 </div>
+
 ```
 
 **After (Datastar):**
@@ -1185,12 +1249,14 @@ data: elements </div>
     Save
   </button>
 </div>
+
 ```
 
 **Backend automatically receives:**
 
 ```json
 {"count": 1}
+
 ```
 
 ---
@@ -1206,6 +1272,7 @@ data: elements </div>
   <button data-on:click="$count--">-</button>
   <button data-on:click="$count = 0">Reset</button>
 </div>
+
 ```
 
 ### Example 2: Form with Validation
@@ -1237,6 +1304,7 @@ data: elements </div>
     <span data-show="$loggingIn">Logging in...</span>
   </button>
 </div>
+
 ```
 
 **Server validation response:**
@@ -1249,6 +1317,7 @@ data: signals     "email": "Invalid email format",
 data: signals     "password": "Password too short"
 data: signals   }
 data: signals }
+
 ```
 
 ### Example 3: Search with Debounce
@@ -1269,6 +1338,7 @@ data: signals }
     </ul>
   </div>
 </div>
+
 ```
 
 **Server response:**
@@ -1280,6 +1350,7 @@ data: mode replace
 data: elements <li>Result 1</li>
 data: elements <li>Result 2</li>
 data: elements <li>Result 3</li>
+
 ```
 
 ### Example 4: Live Dashboard
@@ -1288,6 +1359,7 @@ data: elements <li>Result 3</li>
 <div data-init="@get('/dashboard-stream')">
   <div id="stats">Loading...</div>
 </div>
+
 ```
 
 **Server (Python):**
@@ -1310,6 +1382,7 @@ async def dashboard_stream():
             await asyncio.sleep(5)
 
     return DatastarResponse(stream())
+
 ```
 
 ### Example 5: Modal Dialog
@@ -1330,6 +1403,7 @@ async def dashboard_stream():
     </div>
   </div>
 </div>
+
 ```
 
 ### Example 6: Bulk Import with Progress
@@ -1360,6 +1434,7 @@ async def dashboard_stream():
     </div>
   </div>
 </div>
+
 ```
 
 **Backend (Clojure):**
@@ -1397,6 +1472,7 @@ async def dashboard_stream():
                      {:import {:status "Complete!"
                               :progress 100}})})
          (hk/close ch)))}))
+
 ```
 
 ---

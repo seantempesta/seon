@@ -28,6 +28,7 @@ Startup on March 6, 2026 reaches "started successfully," then degrades within ~9
   :seon.spec/contains-keys  {:db/valueType :db.type/keyword :db/cardinality :db.cardinality/many}
   :seon.spec/optional-keys  {:db/valueType :db.type/keyword :db/cardinality :db.cardinality/many}
   :seon.spec/references     {:db/valueType :db.type/keyword :db/cardinality :db.cardinality/many}
+
 ```
 
 **B. `persist-instance!` resolves conn via nil Integrant system during init-key** — `persist-instance!` wraps `db/transact!` in a `future`. The transact path: `resolve-conn` → `get-conn-manager` → `integrant.repl.state/system` → nil → throws. Three components affected: `:seon/runtime-db`, `:seon.graph/scanner`, `:seon.flow/infrastructure`. Fix is straightforward: bind both `db/*direct-mode*` and `db/*conn-manager*` at each `init-key` site — connection manager is already available as a parameter, and Clojure `future` conveys dynamic bindings.
@@ -69,6 +70,7 @@ run-code-scan! (system.clj:276)
   → ingest-namespace! (ingest.clj:357) — separate transacts for specs, fns, vars, call edges
     → db/transact! (db.clj:313) → flow-request! → infra-writer-step
       → d/transact! (writer.clj:166) — sends full batch to Datalevin remote
+
 ```
 
 Scanner builds spec entities with `:seon.spec/contains-keys` as vectors (valid). Call entities use lookup ref vectors for `:db.type/ref` attrs. These are separate transactions. The error is in the call edges tx.
@@ -130,6 +132,7 @@ Bind both `db/*direct-mode*` and `db/*conn-manager*` at each `init-key` call sit
 (binding [db/*direct-mode* true
           db/*conn-manager* connection-manager]
   (runtime/register! ...))
+
 ```
 
 ### Affected Components
@@ -218,18 +221,21 @@ Agent JVMs have 256MB heap + 64MB metaspace. After AGENT_READY, `instrumentation
 (log/debug "core.async version:" (async/<!! (async/go :ok)))
 (log/debug "malli loaded:" (m/validate :string "hello"))
 @(promise)  ;; block forever
+
 ```
 
 ### JVM Settings (deps.edn:137-141) — BEFORE
 
 ```
 -Xms128m -Xmx256m -XX:+UseSerialGC -XX:MaxMetaspaceSize=64m -XX:TieredStopAtLevel=1
+
 ```
 
 ### JVM Settings — AFTER (Gemini-reviewed)
 
 ```
 -Xms256m -Xmx512m -XX:+ExitOnOutOfMemoryError -XX:+HeapDumpOnOutOfMemoryError -Djava.awt.headless=true
+
 ```
 
 **Rationale (Gemini review):** Removed `MaxMetaspaceSize` (Clojure generates classes dynamically — capping metaspace kills it). Removed `SerialGC` (G1GC default is better for M1 + core.async threads). Removed `TieredStopAtLevel=1` (kills JIT for warm workers that stay alive). Added `ExitOnOutOfMemoryError` (prevents zombie JVMs — exactly the symptom we had). Expected RSS per agent: ~500-600MB. Total for 3 agents + Seon + Datalevin fits in 16GB.
@@ -241,6 +247,7 @@ Run manually and watch stderr:
 ```bash
 clojure -M:agent --port 7900 --namespace seon.pool.warm \
   --datalevin-uri "dtlv://datalevin:datalevin@127.0.0.1:8898/agent-7900" 2>&1 | tee /tmp/agent-crash.log
+
 ```
 
 ### Fix Tasks
@@ -338,6 +345,7 @@ clojure -M:agent --port 7900 --namespace seon.pool.warm \
 Phase 1: schema-registry, nrepl, http-server, tailwind, claude-sdk (no deps)
 Phase 2: datalevin-server → connections → infrastructure → runtime-db → scanner
                                                         → pool (parallel branch)
+
 ```
 
 ### Fix Tasks

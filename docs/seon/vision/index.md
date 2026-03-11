@@ -63,6 +63,7 @@ Malli schemas with fully namespaced keys create machine-readable contracts:
 ;; Every key is globally unique and queryable
 :seon.trading/position  ; Not just :position
 :seon.health/metric     ; No ambiguity
+
 ```
 
 "What functions accept `:seon.trading/position`?" becomes a database query, not a hallucination.
@@ -182,6 +183,7 @@ Three things: write schemas, write functions, write tests. All vanilla Clojure.
     (is (= {::value 1500.0}
            (value {::position {::ticker "AAPL" ::quantity 10 ::entry-price 150.0}
                    ::price 150.0})))))
+
 ```
 
 Nothing exotic. The agent writes normal Clojure. The enforcement is in the eval pipeline, not in the syntax.
@@ -224,6 +226,7 @@ The constraints above are not hard-coded in the pipeline. Each constraint is a f
 ```
 Input shape: ::eval/form (the form being evaluated + its metadata)
 Output shape: ::constraint/result (pass/fail + explanation)
+
 ```
 
 The eval pipeline discovers all functions matching this signature and runs them. To add a new constraint -- say, "function names must not exceed 40 characters" -- write a function that accepts `::eval/form` and returns `::constraint/result`. It's picked up automatically on next eval.
@@ -276,12 +279,14 @@ Milestones are thresholds, not capabilities. Each is crossed when its constituen
 
 | Milestone | Status | Description |
 |-----------|--------|-------------|
-| [[vision/m1-reliable-runtime\|M1: Reliable Agent Runtime]] | complete | Isolated JVM agents, typed flow channels, self-healing from crashes |
-| [[vision/m2-trustworthy-data\|M2: Trustworthy Data Layer]] | complete | Malli contracts on every attribute, validated writes, crash-resilient database |
-| [[vision/m3-discoverable-codebase\|M3: Discoverable Codebase]] | partial | Function contracts indexed and queryable by data shape |
-| [[vision/m4-observable-system\|M4: Observable System]] | partial | Real-time visibility into agents, namespaces, data, and system health |
-| [[vision/m5-agent-dev-pipeline\|M5: Agent Development Pipeline]] | partial | REPL eval with contract validation, live cockpit, schema-selected tests |
-| [[vision/m6-autonomous-agents\|M6: Autonomous Namespace Agents]] | not-started | Namespace-scoped agents with typed messaging and progressive enhancement |
+| [[vision/m1-reliable-runtime\|M1: Reliable Runtime]] | partial | Isolated JVM agents, flow routing backbone, self-healing pool, crash-resilient database |
+| [[vision/m2-trustworthy-data\|M2: Trustworthy Data]] | partial | Malli as single schema source, validated writes, Nippy serialization, no `:any` |
+| [[vision/m3-convention-uniformity\|M3: Convention Uniformity]] | in-progress | Every public function: map-in/map-out, `:malli/schema`, namespaced keys, no dead code |
+| [[vision/m4-discoverable-codebase\|M4: Discoverable Codebase]] | partial | Given a data shape, find functions. One discovery mechanism for all use cases |
+| [[vision/m5-observable-system\|M5: Observable System]] | partial | Real-time visibility into agents, namespaces, schemas, data, and health |
+| [[vision/m6-eval-pipeline\|M6: The Eval Pipeline]] | not-started | REPL-first development with constraint validation, `*ctx*` as world, `persist!` to disk |
+| [[vision/m7-namespace-as-process\|M7: Namespace as Living Process]] | not-started | Custom step functions, subscriptions, feeds, reactive surface, smart defaults |
+| [[vision/m8-autonomous-agents\|M8: Autonomous Namespace Agents]] | not-started | Agents steward namespaces through typed messages, progressive enhancement, self-composition |
 
 ---
 

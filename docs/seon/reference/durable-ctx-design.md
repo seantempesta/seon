@@ -27,6 +27,7 @@ The browser is a thin terminal to a Clojure server. Agents write pure Clojure - 
    [:form {:on:submit (add-signal!)}
     [:input {:field :name}]
     [:button "Add"]]])
+
 ```
 
 That's it. No signals, no Datastar attributes, no client-side state management. The system translates to whatever the underlying tech requires.
@@ -54,6 +55,7 @@ Every namespace instance has a durable atom. Agents read/write it like any atom:
 @*ctx*                                    ; read
 (swap! *ctx* assoc :count 0)              ; write
 (swap! *ctx* update :items conj item)     ; update
+
 ```
 
 Changes to `*ctx*` automatically trigger re-render and push to connected clients.
@@ -71,6 +73,7 @@ A render function takes format and returns hiccup:
   (case format
     :html [:main [:h1 "Hello"]]
     :edn  {:greeting "Hello"}))
+
 ```
 
 If no render function defined, system provides default introspection view.
@@ -82,6 +85,7 @@ User interactions trigger Clojure function calls:
 ```clojure
 [:button {:on:click (increment!)} "+1"]
 [:form {:on:submit (create-order!)} ...]
+
 ```
 
 The system collects form data and passes it as the function's argument.
@@ -93,6 +97,7 @@ Same code, different data:
 ```
 seon.email:work     → *ctx* with work data
 seon.email:personal → *ctx* with personal data
+
 ```
 
 Each instance is isolated. Clients subscribe to specific instances.
@@ -139,6 +144,7 @@ How do we translate clean Clojure hiccup to Datastar?
 [:form {:data-on:submit "@post('/action', {form: 'add-signal!'})"}
  [:input {:name "name" :data-model "name"}]
  [:button "Add"]]
+
 ```
 
 - What's the minimal transformation?
@@ -160,6 +166,7 @@ How do we call JavaScript when needed?
 ```clojure
 ;; Agent wants to use a charting library
 [:div {:ref (fn [el] (js/Chart. el config))}]
+
 ```
 
 - Do we need a ClojureScript interpreter (cherry/squint)?
@@ -267,6 +274,7 @@ Agent writes clean Clojure:
  [:input {:field :symbol}]
  [:input {:field :quantity :type "number"}]
  [:button "Create"]]
+
 ```
 
 Framework transforms via `clojure.walk/postwalk`:
@@ -278,6 +286,7 @@ Framework transforms via `clojure.walk/postwalk`:
  [:input {:name "symbol" :data-bind:symbol true}]
  [:input {:name "quantity" :data-bind:quantity true :type "number"}]
  [:button "Create"]]
+
 ```
 
 Implementation sketch:
@@ -302,6 +311,7 @@ Implementation sketch:
         :else (assoc m k v)))
     {}
     attrs))
+
 ```
 
 ### Signal → Clojure Data Flow

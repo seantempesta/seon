@@ -64,6 +64,7 @@ Currently, Seon agents are invoked via Claude Code calling our MCP server. This 
                     +--------v--------+
                     |  MCP Servers    |  <- seon, context7, etc.
                     +-----------------+
+
 ```
 
 ### Key Components
@@ -124,6 +125,7 @@ Currently, Seon agents are invoked via Claude Code calling our MCP server. This 
    [::result-ch :any]    ; core.async channel
    [::send! fn?]
    [::close! fn?]])
+
 ```
 
 ### Public API
@@ -165,6 +167,7 @@ Currently, Seon agents are invoked via Claude Code calling our MCP server. This 
   {:malli/schema [:=> [:cat ::query-request] ::result-message]}
   [{::keys [prompt options]}]
   ...)
+
 ```
 
 ---

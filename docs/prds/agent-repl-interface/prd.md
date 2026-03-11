@@ -79,6 +79,7 @@ Every key is a namespaced keyword with a registered Malli schema. The shape of t
  ;; === Domain Data (agent's own workspace) ===
  :seon.trading.signals/market-data   {:AAPL 150.0 :GOOGL 140.0}
 }
+
 ```
 
 ### Status Model
@@ -136,6 +137,7 @@ Level 0: Type-based fallbacks (any map, any vector, any scalar)
 Level 1: Key-specific renderers (renders {:seon.repl/schemas [...]} specifically)
 Level 2: Multi-key renderers (renders {:seon.repl/schemas [...] :seon.repl/functions [...]} together)
 Level 3: Full ctx renderer (renders the entire *ctx* map as one unit)
+
 ```
 
 Higher levels win via specificity (more matching required keys). All levels are normal functions with `:malli/schema` metadata, discovered by the same `seon.render/find-renderer` algorithm described in `spec-driven-rendering/prd.md`.
@@ -173,6 +175,7 @@ Higher levels win via specificity (more matching required keys). All levels are 
                       definition))
                schemas))
         "\n</schemas>")})
+
 ```
 
 ### Example: Functions Section Renderer
@@ -191,6 +194,7 @@ Higher levels win via specificity (more matching required keys). All levels are 
                       "\n    " schema))
                functions))
         "\n</functions>")})
+
 ```
 
 ### Example: Generic Fallbacks
@@ -220,6 +224,7 @@ Higher levels win via specificity (more matching required keys). All levels are 
                   rows)]
     {:seon.render/ai
      (str header "\n" sep "\n" (str/join "\n" body))}))
+
 ```
 
 ### Composition: The Ctx Walk
@@ -241,6 +246,7 @@ The full ctx render is **not a special function**. It's a generic map renderer t
                                rendered)))
                       (str/join "\n\n"))]
     (str header sections "\n</agent>")))
+
 ```
 
 This renderer itself can be overridden — if an agent writes a more specific function that takes the full ctx shape, it wins. Turtles all the way down.
@@ -281,6 +287,7 @@ This renderer itself can be overridden — if an agent writes a more specific fu
 </history>
 
 </agent>
+
 ```
 
 ---
@@ -319,6 +326,7 @@ This renderer itself can be overridden — if an agent writes a more specific fu
    -> Updates Datalevin graph (seon.graph.ingest)
    -> Status transitions :live -> :persisted
    -> Other agents can now discover these functions via graph queries
+
 ```
 
 ### Removing Things
@@ -344,6 +352,7 @@ New function needed in `seon.schema`:
   [k]
   (swap! *schemas dissoc k)
   k)
+
 ```
 
 The REPL interceptor adds the dependency check before allowing the unregister.
@@ -389,6 +398,7 @@ Both `*ctx*` and `*conn*` validate all inputs:
 ```clojure
 ;; Agent evals this
 (require '[seon.health.workout :as workout])
+
 ```
 
 The interceptor:
@@ -410,6 +420,7 @@ The `(ns ...)` form is **generated from `*ctx*` state**, never edited by the age
                        (:seon.repl/requires ctx-value))]
     `(~'ns ~ns-sym
        (:require ~@requires))))
+
 ```
 
 ### External Dependencies
@@ -450,6 +461,7 @@ An agent that wants different context rendering writes a function:
   [{:seon.repl/keys [schemas]}]
   {:seon.render/ai
    (str "<schemas>" (str/join ", " (map :seon.repl/key schemas)) "</schemas>")})
+
 ```
 
 Scanner picks it up. Newest + most specific wins. Session ends, function gone, default wins again. No configuration. No cleanup. This is the "Agent Context Cockpit" from `spec-driven-rendering/prd.md` Phase 4 — realized through the same mechanism as everything else.

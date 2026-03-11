@@ -22,6 +22,7 @@ From the [Gemini implicit caching docs](https://developers.googleblog.com/en/gem
 > "When you send a request to one of the Gemini 2.5 models, if the request shares a common prefix as one of previous requests, then it's eligible for a cache hit."
 
 The request structure is:
+
 ```json
 {
   "systemInstruction": {"parts": [{"text": "..."}]},
@@ -30,6 +31,7 @@ The request structure is:
     {"role": "user", "parts": [{"text": "message 2"}]}
   ]
 }
+
 ```
 
 **Caching works on the entire serialized request prefix**, including:
@@ -48,6 +50,7 @@ Instead of concatenating all files into one string, use the **contents array** w
    {:role "user" :parts [{:text "=== src/seon/ai/gemini.clj ===\n(defn foo...)"}]}
    {:role "user" :parts [{:text "Review these code changes against project conventions."}]}
  ]}
+
 ```
 
 **Benefits:**
@@ -69,6 +72,7 @@ We already track `:edit-event` entities with `:edit/file` and `:edit/timestamp`.
 ;; Get most recent edit per file
 (-> (from :edit-event [edit/file edit/timestamp])
     (aggregate {:last-edit (max edit/timestamp)} edit/file))
+
 ```
 
 ### Optional: Add Denormalized Attributes
@@ -82,6 +86,7 @@ For performance, we could add stability attributes to a **`:file` entity** (new 
  :file/edit-count 12
  :file/last-edit  #inst "2025-12-29T10:30:00Z"
  :file/first-seen #inst "2025-12-20T08:00:00Z"}
+
 ```
 
 But this may be premature optimization. Start with querying `:edit-event` history.
@@ -107,6 +112,7 @@ Output: Vector of file paths in cache-optimized order
    - Contents[0..n-1]: regular files in stability order
    - Contents[n..m]: just-edited files
    - Contents[last]: the review prompt
+
 ```
 
 ### Stability Score
@@ -128,6 +134,7 @@ Output: Vector of file paths in cache-optimized order
     (if (pos? edit-count)
       (/ age-days edit-count)
       Double/MAX_VALUE)))  ; Never edited = maximally stable
+
 ```
 
 ## Code Sketch
@@ -155,6 +162,7 @@ Output: Vector of file paths in cache-optimized order
                    :first-seen (:first-seen row)
                    :last-edit (:last-edit row)}])
                results))))
+
 ```
 
 ### Order Files
@@ -197,6 +205,7 @@ Output: Vector of file paths in cache-optimized order
                                 pending)]
 
     (vec (concat regular-sorted pending-sorted))))
+
 ```
 
 ### Build Multi-Message Request
@@ -220,6 +229,7 @@ Output: Vector of file paths in cache-optimized order
         prompt-message {:role "user"
                         :parts [{:text review-prompt}]}]
     (conj file-messages prompt-message)))
+
 ```
 
 ### Extend generate* for Multi-Message
@@ -239,6 +249,7 @@ The current `build-request-body` only supports a single prompt string. We need t
                        prompt-or-contents)}
     ;; ... rest unchanged
     ))
+
 ```
 
 ## Integration Point
@@ -270,6 +281,7 @@ In `stage-batch-review`, replace the current file concatenation with:
                            :seon.ai.gemini/conventions (slurp \"CONVENTIONS.md\")})"
                         (pr-str contents)))]
     ...))
+
 ```
 
 ### New Function: review-code-multi
@@ -295,11 +307,13 @@ In `stage-batch-review`, replace the current file concatenation with:
                {:model (or model default-model)
                 :timeout (or timeout default-timeout-ms)
                 :system-instruction system-instruction})))
+
 ```
 
 ## Cache Behavior Example
 
 Given these files with stability scores:
+
 ```
 CONVENTIONS.md   -> (in system instruction, always cached)
 src/seon/core.clj       -> score 10.0 (rarely edited)
@@ -307,9 +321,11 @@ src/seon/config.clj     -> score 8.0
 src/seon/db/node.clj    -> score 5.0
 src/seon/ai/gemini.clj  -> score 2.0 (just edited)
 src/seon/web/handlers.clj -> score 0.5 (just edited)
+
 ```
 
 Request structure:
+
 ```
 systemInstruction: "...CONVENTIONS.md..."    <- CACHED (static)
 contents[0]: src/seon/core.clj               <- CACHED (stable)
@@ -319,6 +335,7 @@ contents[3]: src/seon/ai/gemini.clj          <- NOT CACHED (just edited)
 contents[4]: src/seon/web/handlers.clj       <- NOT CACHED (just edited)
 contents[5]: test/seon/ai/gemini_test.clj    <- NOT CACHED
 contents[6]: "Review these changes..."       <- NOT CACHED (prompt)
+
 ```
 
 The prefix (system instruction + first 3 files) remains stable across requests, so Gemini caches ~70% of the input tokens.
@@ -326,17 +343,20 @@ The prefix (system instruction + first 3 files) remains stable across requests, 
 ## Implementation Phases
 
 ### Phase 1: Query-based stability (minimal changes)
+
 1. Add `file-stability-data` to `seon.dev.feedback`
 2. Add `order-by-stability` function
 3. Modify `stage-batch-review` to use ordering
 4. Keep single-message structure for now
 
 ### Phase 2: Multi-message structure
+
 1. Extend `build-request-body` for contents array
 2. Add `review-code-multi` function
 3. Update `stage-batch-review` to build contents array
 
 ### Phase 3: Optimization (if needed)
+
 1. Add denormalized `:file` entity for faster queries
 2. Cache stability scores in memory (refresh on edit)
 

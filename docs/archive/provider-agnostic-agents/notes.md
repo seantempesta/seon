@@ -17,6 +17,7 @@
 ### Key Patterns Discovered
 
 **1. Agent Loop Pattern (from `seon.ai.claude/launch-agent!`):**
+
 ```clojure
 ;; Generic pattern that all providers share:
 1. Create Seon session via session/start-agent-session!
@@ -33,9 +34,11 @@
 7. Register in agent-registry
 8. Send initial prompt
 9. Return handle
+
 ```
 
 **2. Message Normalization Pattern (from `sdk-message->entity`):**
+
 ```clojure
 ;; Input: Provider-specific wire format
 {:type "assistant"
@@ -53,6 +56,7 @@
  :seon.ai.claude/message-type "assistant"
  :seon.ai.claude/uuid "msg-123"
  :seon.ai.claude/tool-calls [{:id "tu-1" :name "Read" :input {...}}]}
+
 ```
 
 **3. Provider Detection Pattern:**
@@ -79,10 +83,12 @@ Claude has specific permission modes ("bypassPermissions", "acceptEdits", etc.).
 
 **6. Message Persistence Filtering**
 Not all messages should be persisted:
+
 ```clojure
 (defn- persistable-message-type? [msg-type]
   (#{"user" "assistant" "system" "result"} msg-type))
   ;; Skip: keep_alive, parse_error
+
 ```
 This filter logic is provider-specific.
 

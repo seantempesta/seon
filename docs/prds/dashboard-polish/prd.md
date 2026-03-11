@@ -63,6 +63,7 @@ seon
    ├─ agents
    ├─ handlers
    └─ html
+
 ```
 
 ### 3. No Liveness Indicators
@@ -129,6 +130,7 @@ Fix Design Review P0/P1 issues.
 
 ;; Cards - reduce padding throughout
 ;; p-3 not p-4, mb-2 not mb-4
+
 ```
 
 **Test:**
@@ -177,6 +179,7 @@ Add function near line 264:
           [:div {:class "text-xs text-text-400 pt-1"}
            (str "+" (- count 5) " more")])]
        [:div {:class "text-xs text-text-500"} "no agents running"])]))
+
 ```
 
 **Test:**
@@ -235,6 +238,7 @@ Add tree functions:
       [:div {:class "border-l border-base-700 ml-2"}
        (for [[name children] (sort-by first seon-tree)]
          (render-tree-node ["seon" name] children 1))]]]))
+
 ```
 
 **Test:**
@@ -269,6 +273,7 @@ Add recency indicator to header.
                       (< age-s 60) (str age-s "s ago")
                       (< age-s 3600) (str (quot age-s 60) "m ago")
                       :else (str (quot age-s 3600) "h ago"))})))))
+
 ```
 
 Add to header section:
@@ -282,6 +287,7 @@ Add to header section:
       [:span {:class "w-1.5 h-1.5 rounded-full bg-signal animate-pulse"}]
       [:span {:class "text-text-400"}
        (str "active " (:age-str activity))]]))]
+
 ```
 
 **Test:**
@@ -302,6 +308,7 @@ Reorganize into 3-column grid for better density.
  (namespace-tree namespaces)
  ;; Column 3: System/Meta (takes 1 col on lg, spans both on md)
  (system-status-section)]
+
 ```
 
 Add system status section:
@@ -323,6 +330,7 @@ Add system status section:
     [:div {:class "flex justify-between"}
      [:span {:class "text-text-400"} "http 8080"]
      [:span {:class "text-success"} "●"]]]])
+
 ```
 
 **Test:**
@@ -405,6 +413,7 @@ From `docs/prds/namespace-ui/design-system.md`:
 6. [ ] Active agents have pulsing dot in header
 7. [ ] Works at 50% screen width (no broken layout)
 8. [ ] Looks like terminal, not marketing page
+
 ```
 
 ### Functional Tests
@@ -421,6 +430,7 @@ From `docs/prds/namespace-ui/design-system.md`:
 ;; 3. Kill agent, verify dashboard updates
 ;; - Status dot should disappear
 ;; - Count should decrease
+
 ```
 
 ---

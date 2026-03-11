@@ -32,9 +32,11 @@ See `docs/research/cleanup-code-changes.md` for:
 ## Verification
 
 After changes:
+
 ```bash
 clj -M:test -m kaocha.runner
 clj-nrepl-eval -p 7888 "(integrant.repl/reset)"
+
 ```
 
 ## Priority

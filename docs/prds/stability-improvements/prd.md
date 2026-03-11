@@ -56,6 +56,7 @@ The system has stability concerns due to:
 
 ;; Aggregate health
 (defn system-health [system] ...)  ; Returns {:status :healthy/:degraded/:unhealthy, :checks {...}}
+
 ```
 
 **Enhance `/api/health` endpoint**:
@@ -110,6 +111,7 @@ The system has stability concerns due to:
   ;; 3. Kill orphaned processes
   ;; 4. Release orphaned ports
   ;; 5. Return cleanup report)
+
 ```
 
 **Call during system startup** (system.clj):
@@ -152,6 +154,7 @@ curl http://localhost:8080/api/health
 
 # Deep health (full breakdown)
 curl http://localhost:8080/api/health/deep
+
 ```
 
 ### Error Boundary Tests
@@ -161,6 +164,7 @@ curl http://localhost:8080/api/health/deep
 ;; (Simulate by temporarily breaking XTDB connection)
 
 ;; Test: nREPL port exhaustion returns error, doesn't throw
+
 ```
 
 ### Cleanup Tests
@@ -171,6 +175,7 @@ curl http://localhost:8080/api/health/deep
 # 3. Restart server
 # 4. Check logs for cleanup report
 # 5. Verify no orphaned ports: lsof -i :7889-7999
+
 ```
 
 ---
@@ -209,6 +214,7 @@ This order ensures we can see problems before we try to fix them.
   (agent-log/log-sdk-message! agent-logger msg)
   (catch Exception e
     (log/warn e "Failed to log SDK message" {:session-id id :msg-type msg-type})))
+
 ```
 
 #### 5.2 Fix Hook Matcher
@@ -223,6 +229,7 @@ This order ensures we can see problems before we try to fix them.
 
 // After - use anchors for exact match:
 "matcher": "^(Edit|Write)$"
+
 ```
 
 #### 5.3 Process Death Detection
@@ -248,6 +255,7 @@ This order ensures we can see problems before we try to fix them.
 ;; After timeout, also send interrupt
 (when (= (:ex result) "timeout")
   (nrepl-interrupt port nrepl-session-id))
+
 ```
 
 ### Phase 7: Hook Self-Edit Protection

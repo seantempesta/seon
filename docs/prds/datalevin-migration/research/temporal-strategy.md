@@ -37,6 +37,7 @@ This document analyzes each temporal use case in Seon and proposes migration str
 ;; Full history
 (history {::db conn ::namespace 'seon.trading})
 ;; Returns all snapshots with ::system-time
+
 ```
 
 **Why It Needs Time Travel:**
@@ -71,6 +72,7 @@ Instead of relying on XTDB's system-time:
        [?e :ctx/recorded-at ?t]
        [(<= ?t ?as-of)]]
      db namespace instant)
+
 ```
 
 **Trade-offs:**
@@ -97,6 +99,7 @@ Instead of relying on XTDB's system-time:
       WHERE asset$ticker = ?
         AND _valid_from >= ?"
      ticker start-date]))
+
 ```
 
 **Why It Needs Time Travel:**
@@ -124,6 +127,7 @@ The bulk loader already sets `:xt/valid-from` explicitly. Rename to `:quote/reco
        [?e :quote/recorded-at ?t]
        [(>= ?t ?since)]]
      db ticker start-date)
+
 ```
 
 **Trade-offs:**
@@ -149,6 +153,7 @@ The bulk loader already sets `:xt/valid-from` explicitly. Rename to `:quote/reco
       WHERE asset$ticker = ? ..."
      ticker]
     {:current-time as-of}))  ; <-- XTDB temporal lockdown
+
 ```
 
 **Why It Needs Time Travel:**
@@ -173,6 +178,7 @@ With explicit `:quote/recorded-at`, backtesting becomes explicit filtering:
          [?e :quote/recorded-at ?t]
          [(<= ?t ?as-of)]]  ; <-- Explicit temporal filter
        (d/db conn) ticker as-of))
+
 ```
 
 **Trade-offs:**
@@ -197,6 +203,7 @@ With explicit `:quote/recorded-at`, backtesting becomes explicit filtering:
  :xt/valid-from #inst "2024-11-25T22:00:00Z"  ; Quote date
  :quote/iv 0.15
  ...}
+
 ```
 
 **Why It Needs Time Travel:**
@@ -216,6 +223,7 @@ Simply use `:quote/recorded-at` instead of `:xt/valid-from`:
  :quote/recorded-at #inst "2024-11-25T22:00:00Z"
  :quote/iv 0.15
  ...}
+
 ```
 
 **Trade-offs:**
@@ -239,6 +247,7 @@ Simply use `:quote/recorded-at` instead of `:xt/valid-from`:
 
 ;; Full history
 (db/entity-history @primer-node :primer-sessions session-id)
+
 ```
 
 **Why It Needs Time Travel:**
@@ -258,6 +267,7 @@ Same approach as `agent/ctx.clj`:
 {:session/id "abc"
  :session/checkpointed-at #inst "2026-01-28T10:00:00Z"
  :session/state "{:foo 1 :bar 2}"}  ; EDN
+
 ```
 
 **Trade-offs:**
@@ -281,6 +291,7 @@ Same approach as `agent/ctx.clj`:
 ;; Time range filtering
 "SELECT * FROM review_event
  WHERE _valid_from >= ? AND _valid_from <= ?"
+
 ```
 
 **Why It Needs Time Travel:**
@@ -308,6 +319,7 @@ XTDB sets `_valid_from` automatically on insert. We just need to set it ourselve
        [?e :edit/created-at ?t]
        [(> ?t ?since)]]
      db last-review-time)
+
 ```
 
 **Trade-offs:**
@@ -327,6 +339,7 @@ XTDB sets `_valid_from` automatically on insert. We just need to set it ourselve
 ```clojure
 (defn entity-history [node table id]
   "SELECT * FROM table FOR ALL VALID_TIME WHERE _id = ?")
+
 ```
 
 **Why It Needs Time Travel:**
@@ -352,6 +365,7 @@ This is infrastructure. The migration strategy depends on what the callers need:
          [?e :entity/type ?type]
          [?e :entity/id ?id]]
        (d/db conn) entity-type entity-id))
+
 ```
 
 **Migration Effort:** Low - callers define the pattern
@@ -448,6 +462,7 @@ Git snapshots remain useful for:
 ;; Dev events (Option A)
 {:edit/file {:db/valueType :db.type/string}
  :edit/created-at {:db/valueType :db.type/instant :db/index true}}
+
 ```
 
 ---

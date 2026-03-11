@@ -30,6 +30,7 @@ This project uses a layered linting approach with two complementary tools:
 
 # Run only Splint (style)
 ./bin/lint --splint
+
 ```
 
 ## Tool Comparison
@@ -64,6 +65,7 @@ Located at `.clj-kondo/config.edn`. Key settings:
   :invalid-arity {:level :error}        ; Wrong number of args
   :unused-binding {:level :warning}     ; Probably a mistake
   :redundant-do {:level :warning}}}     ; Code smell
+
 ```
 
 ### Running Directly
@@ -77,6 +79,7 @@ clj-kondo --lint src --config '{:output {:format :edn}}'
 
 # Get analysis data
 clj-kondo --lint src --config '{:output {:analysis true}}'
+
 ```
 
 ### Editor Integration
@@ -127,6 +130,7 @@ Located at `.splint.edn`. Key settings:
 
  ;; Global exclusions
  global {:excludes ["target/" "reference-code/"]}}
+
 ```
 
 ### Running Directly
@@ -147,6 +151,7 @@ bb -Sdeps '{:deps {io.github.noahtheduke/splint {:mvn/version "1.22.0"}}}' \
 # Output as clj-kondo compatible format
 bb -Sdeps '{:deps {io.github.noahtheduke/splint {:mvn/version "1.22.0"}}}' \
    -m noahtheduke.splint -o clj-kondo src
+
 ```
 
 ### Auto-fix Capabilities
@@ -155,6 +160,7 @@ Splint can automatically fix many style issues:
 
 ```bash
 ./bin/lint --fix src
+
 ```
 
 The `--autocorrect` flag only applies "safe" fixes - transformations that are guaranteed to preserve behavior. Manual review is still recommended after auto-fixing.
@@ -217,6 +223,7 @@ This happens when running Splint via `clj` instead of `bb`. Splint requires Baba
 
 ```bash
 bb -Sdeps '{:deps {io.github.noahtheduke/splint {:mvn/version "1.22.0"}}}' -m noahtheduke.splint src
+
 ```
 
 ### "clj-kondo shows unresolved symbol for valid code"
@@ -226,12 +233,14 @@ clj-kondo may not recognize macros from third-party libraries. Add hooks:
 ```clojure
 ;; .clj-kondo/config.edn
 {:hooks {:analyze-call {my-lib/my-macro my-hooks/my-macro}}}
+
 ```
 
 Or import configs from libraries:
 
 ```bash
 clj-kondo --copy-configs --dependencies --lint "$(clj -Spath)"
+
 ```
 
 ### "Too many style warnings"
@@ -241,6 +250,7 @@ Disable noisy rules in `.splint.edn`:
 ```clojure
 {lint/prefer-method-values {:enabled false}  ; Clojure 1.12+ only
  style/prefer-clj-math {:enabled false}}     ; If using Java Math
+
 ```
 
 ## Reference

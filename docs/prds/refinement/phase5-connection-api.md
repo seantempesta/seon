@@ -53,6 +53,7 @@ Maximally separated. Each tier has independent LMDB locks — a deadlocked write
 ;; For namespace DBs — namespace symbol → keyword:
 (conn/get-conn! {::conn/manager mgr
                  ::conn/db (keyword (str 'seon.trading))})
+
 ```
 
 Internally: `(name :seon.runtime)` → `"seon.runtime"` → Datalevin normalizes to `"seon-runtime"`. Cache key = the keyword itself.
@@ -63,6 +64,7 @@ Internally: `(name :seon.runtime)` → `"seon.runtime"` → Datalevin normalizes
 (conn/close-conn!  {::conn/manager mgr ::conn/db :seon.ai})
 (conn/reconnect!   {::conn/manager mgr ::conn/db :seon.runtime ::conn/schema ...})
 (conn/connection-stats {::conn/manager mgr})  ; returns keyword keys
+
 ```
 
 ### Config in system.edn
@@ -71,6 +73,7 @@ Internally: `(name :seon.runtime)` → `"seon.runtime"` → Datalevin normalizes
 :seon/runtime-db
 {:connection-manager #ig/ref :seon.db.datalevin/connections
  :db :seon.runtime}
+
 ```
 
 Components receive `:db` keyword from Integrant config.
@@ -132,6 +135,7 @@ Old `seon` database directory (hex-encoded `73656F6E`) becomes stale after renam
 ```bash
 # After verifying new DBs work:
 # rm -rf data/datalevin/73656F6E/  (old "seon" master)
+
 ```
 
 ## Open Question

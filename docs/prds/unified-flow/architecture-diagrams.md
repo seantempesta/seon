@@ -62,6 +62,7 @@ Arrows show network connections with their protocols.
  |  Proxy namespaces         |          |  Proxy namespaces         |
  |  Own Datalevin client     |          |  Own Datalevin client     |
  +---------------------------+          +---------------------------+
+
 ```
 
 **Key facts:**
@@ -130,6 +131,7 @@ Four distinct layers, each with a clear contract at its boundary.
  |  Interface:  Datalevin wire protocol over TCP                           |
  |              d/transact!, d/q, d/pull on client side                    |
  +=========================================================================+
+
 ```
 
 ---
@@ -169,6 +171,7 @@ process outputs and inputs).
  +----------+    +--------------+    +--------------+
 
  (Repeated for each namespace: :ns/seon.trading.signals, etc.)
+
 ```
 
 ### Proposed State: Infrastructure Flow + Per-Namespace Flows
@@ -219,6 +222,7 @@ Two kinds of flow, started independently:
    +------------------------------+
    |  (same pattern)              +---> same infrastructure sinks
    +------------------------------+
+
 ```
 
 **Why separate flows?**
@@ -321,6 +325,7 @@ a function in namespace `seon.health.nutrition` (running in JVM2).
          v
  16. proxy-fn returns 1850
      to calling code
+
 ```
 
 **Total hops: 16 steps, 4 TCP boundary crossings (2 each way).**
@@ -362,6 +367,7 @@ a function in namespace `seon.health.nutrition` (running in JVM2).
  - resume-writes! -> flow/resume
  - writer-status -> flow/ping (observe state)
  Actual writes DO NOT go through the flow channel.
+
 ```
 
 ### Proposed: Writer Process in Main Topology
@@ -400,6 +406,7 @@ a function in namespace `seon.health.nutrition` (running in JVM2).
  - Writer state visible via flow/ping (metrics, health)
  - Topology snapshot captures writer state
  - No separate standalone flow, no separate promise atoms
+
 ```
 
 ---
@@ -427,6 +434,7 @@ development works.
     v
  DONE. Next call to calculate-1rm uses the new code.
  No flow restart. No disruption. Zero cost.
+
 ```
 
 ### 6b. Add a new namespace (CHEAP — new flow, no disruption to existing)
@@ -469,6 +477,7 @@ Each namespace gets its own mini-flow. Adding one doesn't touch others.
  | error-sink       |       | :ns/gamma flow |  (running)
  | writer           |       | :ns/delta flow |  (NEW!)
  =====================      ==============================
+
 ```
 
 Namespace flows send replies to the infrastructure flow's reply-router
@@ -488,6 +497,7 @@ Tested but rarely executed in production.
  5. create-flow with new config
  6. Start + restore state (procs support :restore param)
  7. Resume
+
 ```
 
 During rebuild, in-flight requests to the infrastructure flow get
@@ -530,6 +540,7 @@ Components start in dependency order. Arrows mean "depends on" (started after).
        |
        v
  :seon.ai.claude/sdk            (Claude CLI path config)
+
 ```
 
 **Startup timeline (approximate):**
@@ -546,6 +557,7 @@ Components start in dependency order. Arrows mean "depends on" (started after).
  t=1.5s  Caddy proxy ready on :3030
  t=3.0s  Pool JVMs warm (background)
  t=4.0s  Code scan complete (background)
+
 ```
 
 ---
@@ -569,6 +581,7 @@ Defined in `seon.flow.msg`.
  ;; optional:
  ::msg/trace-id   #uuid "..."        ; Distributed trace
  ::msg/timeout-ms 10000}
+
 ```
 
 ### Reply (success)
@@ -581,6 +594,7 @@ Defined in `seon.flow.msg`.
  ::msg/value      1850                ; Return value (must be EDN-serializable)
  ::msg/from-ns    "seon.health.nutrition"
  ::msg/duration-ms 42}
+
 ```
 
 ### Reply (error)
@@ -595,6 +609,7 @@ Defined in `seon.flow.msg`.
  ::msg/error-message "Division by zero"
  ::msg/from-ns       "seon.health.nutrition"
  ::msg/duration-ms   1}
+
 ```
 
 ---
@@ -618,6 +633,7 @@ over a TCP socket. Implemented in `seon.flow.harness.channel`.
 
  Each direction has its own reader thread and writer thread.
  Channels buffer up to 32 messages (core.async chan size).
+
 ```
 
 ### Connection Setup Sequence
@@ -649,6 +665,7 @@ over a TCP socket. Implemented in `seon.flow.harness.channel`.
     {::in-ch  (from agent)            {::in-ch  (from orch)
      ::out-ch (to agent)               ::out-ch (to orch)
      ::close! fn}                      ::close! fn}
+
 ```
 
 ---
@@ -681,6 +698,7 @@ system makes this transparent.
  ;;   bridge/remote-call! -> reverse channel -> orchestrator
  ;;   -> flow/inject -> namespace-step -> TCP -> target JVM
  ;;   -> execute-local -> reply back through the same path
+
 ```
 
 ---
@@ -706,6 +724,7 @@ system makes this transparent.
                          |
                     (on reply)
                     pending--
+
 ```
 
 Default `queue-cap` is 32 per namespace. Overload replies are instant
@@ -740,6 +759,7 @@ Default `queue-cap` is 32 per namespace. Overload replies are instant
                                         request! checks status
                                         throws ex-info with
                                         error details from reply
+
 ```
 
 ---
@@ -783,6 +803,7 @@ Verified in the REPL -- the `Graph` interface has exactly these methods:
 ```
 start, stop, pause, resume, ping, inject,
 pause_proc, resume_proc, command_proc, ping_proc
+
 ```
 
 No `add-proc`, `remove-proc`, `update-conns`, or anything similar.
@@ -829,6 +850,7 @@ No `add-proc`, `remove-proc`, `update-conns`, or anything similar.
 (clojure.datafy/datafy f)
 ;; => {:procs {:p1 {:proc {...}}}, :conns [], :execs {...},
 ;;     :chans {:ins {[:p1 :in] {:buffer {...}}}, :outs {[:p1 :out] nil}, ...}}
+
 ```
 
 ### Cleanest workaround for dynamic topology
@@ -853,6 +875,7 @@ a new config map. The old flow object is dead.
 7. Restore state via inject      (inject saved state into procs that support it)
 8. flow/resume new-flow          (all procs running)
 9. Swap atom: reset! topology-atom new-flow
+
 ```
 
 **State restoration detail:** Since `init` is called fresh on `start`, processes

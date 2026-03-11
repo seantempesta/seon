@@ -30,6 +30,7 @@ This is critical for training data. We want to see exactly what the agent wrote,
  :raw-input "I'll check the IV rank for SPY.\n\n(iv-rank ctx {:ticker \"SPY\"})"
  :output "{:iv-rank/value 0.73 ...}"
  ...}
+
 ```
 
 The session also tracks all raw inputs in `:raw-inputs` vector for complete history.
@@ -48,6 +49,7 @@ Split on the LAST `\n\n` (double newline).
 - Everything BEFORE = thinking
 - Everything AFTER = code
 - Each non-empty line in code = one REPL input
+
 ```
 
 Why this is better:
@@ -90,6 +92,7 @@ Let me check a few things.
 (iv-rank ctx {:ticker "SPY"})
 (skew ctx {:ticker "SPY"})
 @ctx
+
 ```
 
 This becomes three separate REPL interactions, each with:
@@ -106,11 +109,13 @@ The template now explicitly teaches the new format with three examples:
 3. **Quick inspection** - Just `@ctx` with no thinking
 
 The INSPECT section was added to show non-paren expressions:
+
 ```
 INSPECT:
   @ctx      ; Dereference ctx to see current session state
   *1        ; Last REPL result
   ctx       ; The ctx atom itself
+
 ```
 
 ---
@@ -142,16 +147,20 @@ These were exploratory alternatives that were documented but never used. CVCV is
 ### `parse-agent-response`
 
 **Before:** Returned vector of segments:
+
 ```clojure
 [{:type :thinking :content "..."}
  {:type :code :content "..."}]
+
 ```
 
 **After:** Returns a single map:
+
 ```clojure
 {:raw "..."       ; Original input preserved
  :thinking "..."  ; Thinking text (or nil)
  :code ["..." ...]}  ; Vector of code strings to execute
+
 ```
 
 ### `process-agent-response!`
@@ -159,11 +168,13 @@ These were exploratory alternatives that were documented but never used. CVCV is
 **Before:** Returned vector of results from code execution.
 
 **After:** Returns a map with complete context:
+
 ```clojure
 {:raw "..."       ; Original response
  :thinking "..."  ; Extracted thinking
  :results [{:input "..." :output ... :error? false}
            ...]}
+
 ```
 
 Also now:
@@ -203,6 +214,7 @@ The comment block includes comprehensive examples for REPL testing:
 (parse-agent-response "*1")
 (parse-agent-response "42")
 (parse-agent-response "This is just thinking.")
+
 ```
 
 All examples show the expected output format.
@@ -247,6 +259,7 @@ Current limitation: Each line is one expression. This means multi-line expressio
 ;; This doesn't work (yet):
 {:key "value"
  :other "thing"}
+
 ```
 
 For V3, could detect incomplete expressions and join with following lines until balanced. But the simple rule is good enough for most cases.
@@ -282,4 +295,5 @@ To verify the changes work:
 ;; Test non-paren expressions
 (sess/parse-agent-response "*1")
 ;; => {:raw "*1" :thinking nil :code ["*1"]}
+
 ```

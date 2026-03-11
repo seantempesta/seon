@@ -54,6 +54,7 @@ The AI doesn't "generate HTML" - it generates **state transitions**. The templat
 │  │  etc.   │    - touch/gesture                            │
 │  └─────────┘                                                │
 └─────────────────────────────────────────────────────────────┘
+
 ```
 
 ---
@@ -100,6 +101,7 @@ A scene is a **pure data structure** describing the current moment:
                        :engagement 0.9
                        :recent-struggle :sharing}
  :context/session-history ["intro" "forest-enter" "meet-owl"]}
+
 ```
 
 **Key properties:**
@@ -138,6 +140,7 @@ Templates are **pure functions**: `(scene, context) → hiccup`
    [:div.interaction-layer
     (for [{:keys [trigger description transition]} available]
       (interact/hotspot trigger description transition))]])
+
 ```
 
 **Template categories:**
@@ -180,6 +183,7 @@ When user acts (tap, voice, gesture), we:
 
       ;; Update state (triggers SSE refresh)
       (swap! session-state assoc :current-scene next-scene))))
+
 ```
 
 ---
@@ -215,6 +219,7 @@ Because scenes are data, we get debugging superpowers for free:
               [scene :xt/id scene-id]]
       :order-by [[timestamp :asc]]}
     {:session-id session-id}))
+
 ```
 
 **Use cases:**
@@ -239,9 +244,11 @@ The AI doesn't generate HTML. It reasons about:
     (-> (claude/complete prompt)
         (parse-scene-decision)
         (merge-with-defaults current-scene))))
+
 ```
 
 **AI outputs are structured:**
+
 ```clojure
 {:decision/next-scene-type :dialogue
  :decision/story-beat :introduce-helper
@@ -249,6 +256,7 @@ The AI doesn't generate HTML. It reasons about:
  :decision/narration "The owl tilted its head..."
  :decision/image-prompt "A wise owl perched on a branch, Victorian engraving style"
  :decision/suggested-interactions [:ask-owl :continue :look-around]}
+
 ```
 
 Templates then render this structured output. The AI never touches HTML.
@@ -277,6 +285,7 @@ signals: {
 if (gesture === 'swipe-left') {
   @post('/api/action', { action: 'swipe-left' })
 }
+
 ```
 
 The server remains source of truth. Client just handles real-time smoothness.
@@ -298,11 +307,14 @@ For richer scenes (puzzles, games, explorations):
                        {:id :key1 :model "key.glb" :position [-1 0 0]}
                        {:id :key2 :model "key.glb" :position [0 0 0]}
                        {:id :key3 :model "key.glb" :position [1 0 0]}]}}}
+
 ```
 
 Template renders:
+
 ```clojure
 [:div#threejs-container {:data-config (json/encode canvas-config)}]
+
 ```
 
 Client-side JS initializes Three.js with server-provided config. Interactions POST back.
@@ -326,6 +338,7 @@ src/seon/domains/primer/
 ├── images.clj         ; Image generation, caching, consistency
 ├── child.clj          ; Child profile, emotional tracking
 └── tests.clj          ; Colocated tests, example scenes
+
 ```
 
 ---

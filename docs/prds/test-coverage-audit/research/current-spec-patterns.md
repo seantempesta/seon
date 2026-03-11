@@ -35,6 +35,7 @@ The schema file includes **custom generators** for property-based testing:
 ;; Example from schema.clj
 (def gen-iv (gen/double* {:min 0.05 :max 2.0 :NaN? false :infinite? false}))
 (def gen-delta (gen/double* {:min -1.0 :max 1.0 :NaN? false :infinite? false}))
+
 ```
 
 These generators are used in `test/ml_options/db/schema_test.clj`.
@@ -48,6 +49,7 @@ These generators are used in `test/ml_options/db/schema_test.clj`.
    {:option-quote OptionQuote
     :greeks Greeks
     ...}))
+
 ```
 
 ---
@@ -62,6 +64,7 @@ ThetaData API → validation.clj → XTDB
               filter-valid-records
                      ↓
               (only valid data stored)
+
 ```
 
 ### Key Functions
@@ -83,6 +86,7 @@ ThetaData API → validation.clj → XTDB
     (when (seq invalid)
       (log/warn "Filtered" (count invalid) "invalid records"))
     valid))
+
 ```
 
 ---
@@ -96,6 +100,7 @@ ThetaData API → validation.clj → XTDB
 ```bash
 $ grep -r "m/=>" src/
 (no results)
+
 ```
 
 ### DSL Primitives
@@ -115,6 +120,7 @@ HTTP handlers parse JSON but don't validate against schemas:
 ;; Current pattern in handlers.clj
 (let [body (parse-json request)]
   (start-import! body))  ;; No validation!
+
 ```
 
 ---
@@ -129,6 +135,7 @@ $ grep -r "instrument!" src/
 
 $ grep -r "malli.dev" src/ dev/
 (no results)
+
 ```
 
 **No instrumentation is set up.**
@@ -142,6 +149,7 @@ The user namespace has Integrant lifecycle but no malli.dev:
   (:require [integrant.repl :refer [go halt reset]]
             ...))
 ;; No malli.dev/start! anywhere
+
 ```
 
 ---
@@ -166,12 +174,14 @@ Add function specs and enable dev-time instrumentation.
 ```clojure
 (def PercentileRank [:double {:min 0.0 :max 1.0}])
 (def Percentile [:int {:min 0 :max 100}])
+
 ```
 
 1. Add to `dsl/primitives.clj`:
 
 ```clojure
 (m/=> iv-rank [:=> [:cat :some :string [:* :any]] [:maybe PercentileRank]])
+
 ```
 
 1. Add to `env/dev/clj/user.clj`:
@@ -179,6 +189,7 @@ Add function specs and enable dev-time instrumentation.
 ```clojure
 (require '[malli.dev :as mdev])
 (mdev/start!)
+
 ```
 
 **Pros:**

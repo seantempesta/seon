@@ -38,22 +38,28 @@ This prevents orphans even if individual `close!` functions throw.
 ### 5. Testing nREPL Lifecycle
 
 To verify no orphans after reset:
+
 ```bash
 # Check for listening ports in agent range (excluding main nREPL on 7888)
 lsof -i :7889-7999 -sTCP:LISTEN
+
 ```
 
 To manually clean up orphans:
+
 ```clojure
 (require '[seon.health :as health])
 (health/cleanup-orphaned-resources! {::health/node node})
+
 ```
 
 ### 6. The Port Range is Configurable
 
 Tests use a different port range (17889-17999) to avoid conflicts:
+
 ```clojure
 (nrepl/set-port-range! 17889 17999)
 ;; ... run tests ...
 (nrepl/reset-port-range!)
+
 ```

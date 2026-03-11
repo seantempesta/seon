@@ -74,6 +74,7 @@ Agent JVM (186MB each)
     ├── All defns live here
     ├── ::keywords resolve correctly
     └── Specs register in this JVM's Malli registry
+
 ```
 
 ### Core Concepts
@@ -234,6 +235,7 @@ Production-ready agent JVM pool with:
 
 ;; Pull full entity
 (d/pull @conn '[*] entity-id)
+
 ```
 
 **`seon.ns.introspect` (`src/seon/ns/introspect.clj`)**:
@@ -283,6 +285,7 @@ feat: knowledge graph foundation with Datalevin storage
 - seon.graph.ingest: clj-kondo analysis → Datalevin entities
 - seon.graph.query: dependency, call graph, and function search queries
 - Tests for all three namespaces
+
 ```
 
 ---
@@ -348,6 +351,7 @@ The MCP server (`bin/mcp-server`) is a Babashka script. It routes `eval` calls b
         :form/agent-id "a13b"
         :form/version 3  ;; incremented per name+namespace
         :form/created-at (Instant/now)}
+
        ```
 
     4. Run `graph/analyze-form` on the source
@@ -418,6 +422,7 @@ feat: Super REPL core with form routing, agent environment, and graduation
 - agent_runner: namespace-scoped Datalevin DB, auto-load seon.agent.env
 - MCP server routing for pool-assigned sessions
 - Tests for form lifecycle, graduation, and agent environment
+
 ```
 
 ---
@@ -543,6 +548,7 @@ feat: dynamic context engine + MCP cockpit tools
 - seon.repl.context: proactive context computation from knowledge graph + flow events
 - query_graph, namespace_health, agent_status MCP tools
 - Updated AGENT.md with context and tool documentation
+
 ```
 
 ---
@@ -580,6 +586,7 @@ feat: inter-agent messaging with schema-validated mailboxes
 - seon.flow.mailbox: Datalevin-backed per-namespace message queues
 - MCP tools for check_mailbox and send_message
 - Message schemas for feature requests, bug reports, status updates
+
 ```
 
 ---

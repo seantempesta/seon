@@ -56,4 +56,5 @@ Users should clean old data:
 
 ```bash
 rm -rf data/datalevin/seon-graph/
+
 ```

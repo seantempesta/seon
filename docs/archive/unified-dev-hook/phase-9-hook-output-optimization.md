@@ -36,14 +36,18 @@ The unified development hook (`bin/seon-hook`) provides feedback to Claude agent
 **Keep it brief but useful.** Agents should know we're checking their work.
 
 **Current (verbose):**
+
 ```
 "5 tests passed (seon.dev.hook-test)"
 "Generative tests passed (seon.dev.hook)"
+
 ```
 
 **Better (dense):**
+
 ```
 "✓ 5 tests, 3 gen-tests (0.2s)"
+
 ```
 
 One line with all the signal: tests passed, gen-tests passed, it was fast.
@@ -55,11 +59,14 @@ One line with all the signal: tests passed, gen-tests passed, it was fast.
 **Show the fix, not just the problem.** Every violation message should be copy-pasteable.
 
 **Current (not actionable):**
+
 ```
 "- process-data: missing :malli/schema, not using map-in"
+
 ```
 
 **Better (actionable):**
+
 ```
 process-data needs:
 
@@ -72,6 +79,7 @@ Register schemas:
     [:map [::input :any] [::opts {:optional true} :map]])
   (schema/register! ::process-data-response
     [:map [::result :any]])
+
 ```
 
 Note: We show just the pieces needed, not the entire function definition.
@@ -89,6 +97,7 @@ When generating fix suggestions, docstrings should include:
 5. **Gotchas** - Important edge cases not obvious from the schema
 
 **Example docstring template:**
+
 ```clojure
 "Process input data with optional configuration.
 
@@ -105,6 +114,7 @@ When generating fix suggestions, docstrings should include:
    ;; => {::result {...} ::elapsed 42}
 
  Note: Large inputs (>1MB) may timeout. Use ::opts {::async true} for streaming."
+
 ```
 
 ---
@@ -112,11 +122,13 @@ When generating fix suggestions, docstrings should include:
 ## Deep Compliance Checks
 
 ### What We Check Now (Shallow)
+
 - ✅ Has `:malli/schema` metadata key
 - ✅ Uses map-in pattern `[{::keys [...]}]`
 - ✅ Has docstring
 
 ### What We Need to Add (Deep)
+
 - ❌ Schema refs in metadata actually exist in registry
 - ❌ Naming convention: `fn-name-request` / `fn-name-response`
 - ❌ Generate skeleton fix from function signature
@@ -130,6 +142,7 @@ When generating fix suggestions, docstrings should include:
 
 ;; Verify they exist
 (schema/registered? :seon.ai.gemini/ask-request)  ;; => true or false
+
 ```
 
 ### Fix Generation
@@ -151,6 +164,7 @@ Parse the function's current signature to generate the fix:
 
 ;; 3. New signature
 [{::keys [input opts]}]
+
 ```
 
 ---
@@ -158,22 +172,27 @@ Parse the function's current signature to generate the fix:
 ## Example Output
 
 ### All Passing (brief confirmation)
+
 ```json
 {
   "continue": true,
   "feedback": ["✓ 5 tests, 3 gen-tests, compliant (0.2s)"]
 }
+
 ```
 
 ### Test Failure (blocking)
+
 ```json
 {
   "decision": "block",
   "reason": "Test failed: expected (= result 42), got 41\n  in calculate-total-test (line 23)"
 }
+
 ```
 
 ### Compliance Violation (actionable fix)
+
 ```json
 {
   "continue": true,
@@ -181,9 +200,11 @@ Parse the function's current signature to generate the fix:
     "process-data needs:\n\nSchema registrations:\n  (schema/register! ::process-data-request\n    [:map [::input :any] [::opts {:optional true} :map]])\n  (schema/register! ::process-data-response\n    [:map [::result :any]])\n\nFunction metadata:\n  {:malli/schema [:=> [:cat ::process-data-request] ::process-data-response]}\n  [{::keys [input opts]}]"
   ]
 }
+
 ```
 
 ### Unregistered Schema Refs
+
 ```json
 {
   "continue": true,
@@ -191,6 +212,7 @@ Parse the function's current signature to generate the fix:
     "process-data references unregistered schemas:\n  Missing: ::process-data-request, ::process-data-response\n\nRegister them:\n  (schema/register! ::process-data-request [:map ...])\n  (schema/register! ::process-data-response [:map ...])"
   ]
 }
+
 ```
 
 ---
@@ -198,6 +220,7 @@ Parse the function's current signature to generate the fix:
 ## Implementation Phases
 
 ### Phase 9a: Add Compliance Stage to Hook
+
 **Goal:** Wire compliance checking into the hook pipeline.
 
 Changes:
@@ -207,6 +230,7 @@ Changes:
 4. Add violations to feedback (non-blocking)
 
 ### Phase 9b: Deep Schema Verification
+
 **Goal:** Verify schema refs exist, not just metadata presence.
 
 Changes to `compliance.clj`:
@@ -215,6 +239,7 @@ Changes to `compliance.clj`:
 3. Update `check-var` to include these checks
 
 ### Phase 9c: Actionable Fix Generation
+
 **Goal:** Generate copy-pasteable fix code from function signature.
 
 Changes to `compliance.clj`:
@@ -224,6 +249,7 @@ Changes to `compliance.clj`:
 4. Update `format-violations` to use fix generation
 
 ### Phase 9d: Dense Success Feedback
+
 **Goal:** Compress success feedback to one useful line.
 
 Changes to `hook.clj`:
@@ -241,6 +267,7 @@ Changes to `hook.clj`:
               :block false}        ;; Future: block on violations
  :feedback {:dense true            ;; Use dense success format
             :max-length 1000}}     ;; Max chars per feedback item
+
 ```
 
 ---
@@ -274,6 +301,7 @@ Changes to `hook.clj`:
 ## Implementation Summary
 
 ### Phase 9a: Compliance Stage in Hook Pipeline
+
 - Added `stage-compliance` function to `hook.clj` that runs after reload, before tests
 - Added `:compliance {:enabled true :block false}` config section
 - Added `:feedback {:dense true :max-length 1000}` config section
@@ -281,12 +309,14 @@ Changes to `hook.clj`:
 - Config option exists to make blocking (`{:compliance {:block true}}`)
 
 ### Phase 9b: Deep Schema Verification
+
 - Added `extract-schema-refs` - walks `:malli/schema` form to find qualified keywords
 - Added `check-schema-refs-registered` - verifies all refs exist in `schema/registered?`
 - Added `check-naming-convention` - checks fn-name-request/response pattern
 - Naming convention is lenient: `clojure-file?` matches `::clojure-file-request`
 
 ### Phase 9c: Fix Code Generation
+
 - Added `generate-request-schema` - generates `schema/register!` call with params
 - Added `generate-response-schema` - generates response schema stub
 - Added `generate-metadata-form` - generates `:malli/schema` metadata
@@ -295,19 +325,23 @@ Changes to `hook.clj`:
 - `format-violations` now supports `::with-fixes true` for detailed output
 
 ### Phase 9d: Dense Success Format
+
 - Added `format-dense-success` - formats one-line success message with timing
 - Example output: `"[checkmark] 5 tests, gen-tests, compliant (0.2s)"`
 - Dense mode controlled by `{:feedback {:dense true}}`
 - Verbose mode (dense: false) shows individual stage feedback
 
 ### Configuration Added
+
 ```clojure
 ;; .claude/seon-hook.edn
 {:compliance {:enabled true :block false}
  :feedback {:dense true :max-length 1000}}
+
 ```
 
 ### Tests Added
+
 - `deep-schema-verification-test` - tests schema ref extraction and naming
 - `generate-fix-test` - tests fix code generation
 - `compliance-stage-test` - tests config defaults

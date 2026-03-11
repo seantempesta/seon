@@ -47,6 +47,7 @@ ATTACH DATABASE namespace_db WITH $$
   storage: !Local
     path: 'data/namespaces/namespace_db/storage'
 $$
+
 ```
 
 ### For Agent Isolation (Clojure Example)
@@ -70,6 +71,7 @@ $$
 ;; Usage
 (attach-namespace-db! node 'seon.trading)
 ;; Creates database "seon_trading" with storage at data/namespaces/seon.trading/
+
 ```
 
 ### Key Constraints
@@ -113,6 +115,7 @@ $$
 (xt/execute-tx node
   [[:put-docs :signals {:xt/id "sig1" :symbol "AAPL"}]]
   {:database :seon_trading})
+
 ```
 
 ### Creating Agent Context
@@ -134,6 +137,7 @@ For agent isolation, we create a dedicated connection:
   (atom
     {:seon.agent/namespace 'seon.trading
      :seon.agent/db (create-agent-db-connection node 'seon.trading)}))
+
 ```
 
 ---
@@ -167,6 +171,7 @@ SELECT * FROM seon_trading.public.signals
 SELECT symbol FROM signals
 UNION ALL
 SELECT symbol FROM seon_health.watchlist
+
 ```
 
 ### Gotcha: Ambiguous References
@@ -185,6 +190,7 @@ XTDB will raise: "Ambiguous table reference: public.table"
 
 ```sql
 DETACH DATABASE seon_trading
+
 ```
 
 ### Constraints
@@ -241,6 +247,7 @@ FOR ALL VALID_TIME
 SELECT s.*, u.name
 FROM seon_trading.signals FOR ALL VALID_TIME s
 JOIN xtdb.users u ON s.user_id = u._id
+
 ```
 
 **Important**: Each database has its own transaction log, so:
@@ -264,22 +271,27 @@ Use underscores instead of dots for SQL compatibility:
 The orchestrator (connected to primary `xtdb` database) should:
 
 1. **Register namespace databases** in `xtdb` database:
+
    ```clojure
    {:xt/id :namespace/seon.trading
     :namespace/name 'seon.trading
     :namespace/db-name "seon_trading"
     :namespace/status :active}
+
    ```
 
 2. **Attach on first use**:
+
    ```clojure
    (defn ensure-namespace-db! [node namespace-sym]
      (let [db-name (namespace->db-name namespace-sym)]
        (when-not (db-attached? node db-name)
          (attach-namespace-db! node namespace-sym))))
+
    ```
 
 3. **Create agent connections**:
+
    ```clojure
    (defn start-namespace-agent! [node namespace-sym]
      (ensure-namespace-db! node namespace-sym)
@@ -287,6 +299,7 @@ The orchestrator (connected to primary `xtdb` database) should:
        {:seon.agent/db conn
         :seon.agent/namespace namespace-sym
         ...}))
+
    ```
 
 ### 3. Connection Lifecycle
@@ -299,6 +312,7 @@ The orchestrator (connected to primary `xtdb` database) should:
 
 ;; On agent completion, close the connection
 (.close (:seon.agent/db @agent-ctx))
+
 ```
 
 ### 4. Cross-Namespace Data Access
@@ -312,6 +326,7 @@ For read-only access to other namespaces:
   [user-id])
 
 ;; But cannot write to other databases (connection is to their namespace)
+
 ```
 
 ---

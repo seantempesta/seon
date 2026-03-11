@@ -30,6 +30,7 @@ Seon already uses `hato` for HTTP requests (see `seon.polymarket.api`):
            :timeout default-timeout-ms
            :as :text
            :http-client {:redirect-policy :normal}})
+
 ```
 
 ### Recommendation: Use Hato
@@ -57,6 +58,7 @@ HTTP-Kit (already a dependency for the server) has a client that supports async 
   (fn [{:keys [status body error]}]
     ;; Async callback
     ))
+
 ```
 
 ---
@@ -67,6 +69,7 @@ HTTP-Kit (already a dependency for the server) has a client that supports async 
 
 ```
 https://generativelanguage.googleapis.com/v1beta/models/{model}:{method}
+
 ```
 
 ### Authentication
@@ -75,6 +78,7 @@ All requests require the `x-goog-api-key` header:
 
 ```bash
 -H "x-goog-api-key: $GEMINI_API_KEY"
+
 ```
 
 ### Available Models (December 2025)
@@ -93,6 +97,7 @@ curl "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash:gen
   -d '{
     "contents": [{"parts": [{"text": "Explain quantum computing"}]}]
   }'
+
 ```
 
 ### Streaming Generation (SSE)
@@ -105,12 +110,14 @@ curl "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash:str
   -d '{
     "contents": [{"parts": [{"text": "Write a story"}]}]
   }'
+
 ```
 
 **Important**: The `?alt=sse` query parameter enables SSE streaming. Each chunk arrives as:
 
 ```
 data: {"candidates": [{"content": {"parts": [{"text": "..."}]}}]}
+
 ```
 
 ### Google Search Grounding
@@ -123,6 +130,7 @@ curl "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash:gen
     "contents": [{"parts": [{"text": "What are the latest XTDB v2 features?"}]}],
     "tools": [{"google_search": {}}]
   }'
+
 ```
 
 Response includes `groundingMetadata`:
@@ -137,6 +145,7 @@ Response includes `groundingMetadata`:
     ]
   }
 }
+
 ```
 
 ### Code Execution
@@ -149,6 +158,7 @@ curl "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash:gen
     "contents": [{"parts": [{"text": "Calculate the first 50 prime numbers"}]}],
     "tools": [{"code_execution": {}}]
   }'
+
 ```
 
 Response includes executable code and results:
@@ -165,6 +175,7 @@ Response includes executable code and results:
     }
   }]
 }
+
 ```
 
 ### Multi-Tool Requests
@@ -179,6 +190,7 @@ Combine multiple tools in a single request:
     {"code_execution": {}}
   ]
 }
+
 ```
 
 ### Thinking Mode (Gemini 3)
@@ -192,6 +204,7 @@ Combine multiple tools in a single request:
     }
   }
 }
+
 ```
 
 ---
@@ -209,6 +222,7 @@ src/seon/
       streaming.clj   ; SSE streaming support
       cache.clj       ; Response caching (optional)
     repl.clj          ; REPL helper functions
+
 ```
 
 ### Why `seon.ai.gemini` not `seon.domains.gemini`?
@@ -336,6 +350,7 @@ Gemini is not a "domain" in Seon's architecture (like trading, health, finance).
     (generate-with-code api-key \"Calculate factorial of 100\")"
   [api-key prompt & [opts]]
   (generate api-key prompt (assoc opts :tools [{:code_execution {}}])))
+
 ```
 
 ### `seon.ai.gemini.core`
@@ -403,6 +418,7 @@ Gemini is not a "domain" in Seon's architecture (like trading, health, finance).
     (when-not key
       (throw (ex-info "No Gemini API key available" {})))
     (client/generate-with-code key prompt (dissoc opts :api-key))))
+
 ```
 
 ### `seon.ai.repl`
@@ -609,6 +625,7 @@ Gemini is not a "domain" in Seon's architecture (like trading, health, finance).
                     text)]
     (-> (gemini/ask prompt {:model "gemini-3-flash"})
         :text)))
+
 ```
 
 ---
@@ -625,6 +642,7 @@ Add to `resources/system.edn`:
  {:api-key #or [#env GEMINI_API_KEY nil]
   :default-model "gemini-3-flash"
   :timeout-ms 60000}}
+
 ```
 
 Add to `src/seon/system.clj`:
@@ -647,6 +665,7 @@ Add to `src/seon/system.clj`:
 (defmethod ig/halt-key! :seon.ai/gemini
   [_ _]
   (alter-var-root #'seon.ai.gemini.core/*api-key* (constantly nil)))
+
 ```
 
 ---
@@ -667,6 +686,7 @@ Add to `src/seon/system.clj`:
 (def doc-search ai/doc-search)
 (def xtdb-help ai/xtdb-help)
 (def how-to ai/how-to)
+
 ```
 
 ### Usage Examples
@@ -694,6 +714,7 @@ Add to `src/seon/system.clj`:
 
 ;; Get coding help
 (how-to "implement a retry with exponential backoff")
+
 ```
 
 ---
@@ -761,6 +782,7 @@ For long responses, streaming provides better UX:
    prompt
    (fn [chunk] (print chunk) (flush)))
   (println))
+
 ```
 
 ---

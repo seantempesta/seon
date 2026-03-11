@@ -24,6 +24,7 @@ T2: changed weight      -> delta: {::retracted {::weight 100}, ::added {::weight
 
 Reconstruct T2 = apply(base, delta-T1, delta-T2)
 Go back to T1 = apply(base, delta-T1)
+
 ```
 
 The current ctx atom value is always the "present". Deltas are stored in Datalevin for persistence. A cursor tracks where we are in the timeline. Back/forward navigation applies/reverses deltas.
@@ -51,6 +52,7 @@ A reserved key `::seon.ctx/history` in the ctx atom contains:
  :total 5      ;; total deltas available
  :can-undo true
  :can-redo false}
+
 ```
 
 This is enough for a breadcrumb/timeline renderer. The actual delta data stays in the history sidecar atom, not in ctx.
@@ -89,6 +91,7 @@ Decision: Build our own delta history layer on top of Datalevin's simple key-val
 (require '[seon.ctx.history :as h])
 (h/map-diff {::h/before {:a 1 :b 2} ::h/after {:a 1 :b 3 :c 4}})
 ;; => {::h/added {:b 3 :c 4} ::h/retracted {:b 2}}
+
 ```
 
 ---
@@ -110,6 +113,7 @@ Decision: Build our own delta history layer on top of Datalevin's simple key-val
 ::cursor            ;; int, current position in timeline
 ::history-entry     ;; {:delta ::delta, :timestamp inst?}
 ::history-state     ;; {:base map, :deltas vec, :cursor int}
+
 ```
 
 **New functions in `seon.ctx.history`:**
@@ -129,6 +133,7 @@ Decision: Build our own delta history layer on top of Datalevin's simple key-val
 
 (history-info     {::instance-id "abc"})
 ;; => {::cursor 3 ::total 5 ::can-undo true ::can-redo true}
+
 ```
 
 **Integration with `ctx/create!`:**
@@ -160,6 +165,7 @@ Decision: Build our own delta history layer on top of Datalevin's simple key-val
 (ctx.history/go-forward! {::ctx/instance-id "test"})
 ;; ctx now has :foo/bar 2, :foo/baz 3
 ;; cursor at 3, can-redo false
+
 ```
 
 ---
@@ -178,6 +184,7 @@ Decision: Build our own delta history layer on top of Datalevin's simple key-val
  :seon.ctx.history/timestamp   {:db/valueType :db.type/instant}
  :seon.ctx.history/entry-id    {:db/valueType :db.type/string
                                 :db/unique :db.unique/identity}}
+
 ```
 
 Each delta becomes one entity: `entry-id = "{instance-id}-{seq}"`.
@@ -191,6 +198,7 @@ Each delta becomes one entity: `entry-id = "{instance-id}-{seq}"`.
 ;; => {::base-state {...} ::deltas [...] ::cursor N}
 (compact-history! {::conn conn ::instance-id "abc"})
 ;; Compacts oldest deltas into new base checkpoint
+
 ```
 
 **Integration:**
@@ -206,6 +214,7 @@ Each delta becomes one entity: `entry-id = "{instance-id}-{seq}"`.
 ;; History should survive:
 (ctx.history/history-info {::ctx/instance-id "test"})
 ;; => {::cursor 3 ::total 3 ::can-undo true ::can-redo false}
+
 ```
 
 ---

@@ -23,6 +23,7 @@ Code review tokens {:prompt 2188, :response 290, :cached 2022}
 
 ;; Different code but same conventions - still cached!
 Code review tokens {:prompt 2187, :response 286, :cached 2022}
+
 ```
 
 The system instruction (containing CONVENTIONS.md at ~2150 tokens) is automatically cached after the first request.
@@ -54,6 +55,7 @@ The API returns caching information in `usageMetadata`:
   "cacheTokensDetails": [{"modality": "TEXT", "tokenCount": 2021}],
   "thoughtsTokenCount": 414
 }
+
 ```
 
 - **`cachedContentTokenCount`**: Tokens served from cache (discounted 90%)
@@ -73,6 +75,7 @@ Per Gemini documentation:
 ```bash
 $ wc -c CONVENTIONS.md
     7830 CONVENTIONS.md  # ~7.8KB
+
 ```
 
 After tokenization: ~2,150 tokens - well above the 1,024 minimum for Flash models.
@@ -90,6 +93,7 @@ After tokenization: ~2,150 tokens - well above the 1,024 minimum for Flash model
         ;; Dynamic content -> user prompt
         user-prompt (str prompt "\n\n" code)]
     ...))
+
 ```
 
 This pattern:
@@ -110,6 +114,7 @@ For caching multiple documents:
 (str "=== DOCUMENT 1 ===\n" doc1 "\n\n"
      "=== DOCUMENT 2 ===\n" doc2 "\n\n"
      "=== DOCUMENT 3 ===\n" doc3)
+
 ```
 
 ### Alternative: Explicit Caching API
@@ -118,6 +123,7 @@ For guaranteed long-term caching (1-24 hours), use the `cachedContents` endpoint
 
 ```
 POST https://generativelanguage.googleapis.com/v1beta/cachedContents
+
 ```
 
 **Trade-offs:**
@@ -137,6 +143,7 @@ We already log this in `review-code`:
 (log/debug "Code review tokens" {:prompt (:promptTokenCount usage)
                                  :response (:candidatesTokenCount usage)
                                  :cached (:cachedContentTokenCount usage 0)})
+
 ```
 
 ### Option 2: Enhanced Logging (Recommended Enhancement)
@@ -154,6 +161,7 @@ Add cache hit rate tracking:
                               :cached-tokens cached
                               :cache-hit-rate (format "%.1f%%" hit-rate)
                               :estimated-savings (format "$%.4f" (* cached 0.0000005 0.9))})))
+
 ```
 
 ### Option 3: Metrics Dashboard (Future)
@@ -188,14 +196,17 @@ To cache additional documents (e.g., CLAUDE.md + CONVENTIONS.md):
          (for [[name content] docs-map]
            (str "=== " name " ===\n" content)))
        "\n\nFormat: Start with a brief summary, then list any concerns."))
+
 ```
 
 Usage:
+
 ```clojure
 (review-code {::prompt "Review this"
               ::code "(defn foo ...)"
               ::conventions {"CONVENTIONS.md" (slurp "CONVENTIONS.md")
                             "CLAUDE.md" (slurp "CLAUDE.md")}})
+
 ```
 
 ## Cost Analysis

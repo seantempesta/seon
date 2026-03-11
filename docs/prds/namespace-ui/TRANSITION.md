@@ -55,6 +55,7 @@ Added `parse-query-params` helper in `seon.ns.routes` that parses the query stri
   (or (:query-params req)
       (when-let [qs (:query-string req)]
         (codec/form-decode qs))))
+
 ```
 
 Updated `get-namespace-handler` to use this helper.
@@ -133,6 +134,7 @@ Log format wraps EDN in quotes: `"{:file_path \"...\"}"`. Fixed `parse-tool-inpu
 ;; Test Edit rendering from REPL (defined in user ns after setup)
 (test-edit-rendering "e077")  ;; Shows parse results
 (test-edit-html "e077")       ;; Shows actual HTML hiccup
+
 ```
 
 ---
@@ -229,4 +231,5 @@ Start with:
 4. Test with: (test-edit-html "e077") in REPL
 
 Design: Follow docs/prds/namespace-ui/design-system.md
+
 ```

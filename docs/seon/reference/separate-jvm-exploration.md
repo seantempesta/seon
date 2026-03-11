@@ -92,6 +92,7 @@ Clojure 1.12 (which we're on) has `clojure.repl.deps/add-libs`:
 
 ```clojure
 (add-libs '{org.clojure/data.csv {:mvn/version "1.1.0"}})
+
 ```
 
 Loads Maven artifacts at runtime into the running JVM. Agent can request new deps without restart, isolated to that JVM.
@@ -130,6 +131,7 @@ Created and tested a minimal agent JVM. Files:
 
 ```
 -Xms128m -Xmx256m -XX:+UseSerialGC -XX:MaxMetaspaceSize=64m -XX:TieredStopAtLevel=1
+
 ```
 
 ### Capacity Estimate (16GB dev machine)
@@ -275,6 +277,7 @@ The 3.3s breaks down roughly as: JVM bootstrap (~300ms) + Clojure runtime init (
 java -XX:ArchiveClassesAtExit=agent.jsa -jar target/agent.jar --port 9999
 # Production runs:
 java -XX:SharedArchiveFile=agent.jsa -jar target/agent.jar --port $PORT
+
 ```
 
 **Implementation complexity:** LOW. Two extra JVM flags. The `.jsa` file is ~30-50MB and can be shared across all agent JVMs.
@@ -427,6 +430,7 @@ Java 24+ has early-access "condensers" that pre-compute class initialization and
 (pool/dispose! p agent)   ; kill + respawn
 (pool/pool-status p)      ; {::pool/idle 2 ::pool/active 1 ...}
 (pool/shutdown! p)        ; kill all
+
 ```
 
 ### Open Items for Production

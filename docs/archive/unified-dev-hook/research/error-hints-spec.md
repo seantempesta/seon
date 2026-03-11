@@ -38,6 +38,7 @@ The dev hook (`bin/seon-hook`) provides feedback to Claude Code agents via `addi
 ### Good Examples (Already Actionable)
 
 **Unit test failures (lines 657-666):**
+
 ```
 Unit tests failed: 2 failures, 0 errors in seon.foo-test
 
@@ -45,6 +46,7 @@ Fix the failing tests before continuing. Run tests with:
   clj -M:test -m kaocha.runner --focus seon.foo-test
 
 Or update the test expectations if the behavior change is intentional.
+
 ```
 - Specific counts
 - Includes the test namespace
@@ -52,6 +54,7 @@ Or update the test expectations if the behavior change is intentional.
 - Suggests alternative action if intentional
 
 **Generative test failures (lines 697-708):**
+
 ```
 Generative tests failed for: process-order, validate-input
 
@@ -63,6 +66,7 @@ The function schemas don't match the implementation. Fix by:
 Run generative tests manually:
   (require '[seon.dev.feedback :as fb])
   (fb/check-namespace 'seon.trading {:num-tests 10})
+
 ```
 - Lists specific failing functions
 - Explains what the problem means
@@ -72,38 +76,48 @@ Run generative tests manually:
 ### Bad Examples (Need Improvement)
 
 **nREPL unavailable (line 803):**
+
 ```
 BAD:  "⚠ nREPL not available (port 7888) - skipping tests"
+
 ```
 - States the problem but not the fix
 - "skipping tests" is passive
 - Agent doesn't know how to resolve
 
 **Unit tests error (line 651):**
+
 ```
 BAD:  "⚠ Unit tests failed to run: %s"
+
 ```
 - Just echoes the error
 - No guidance on what to do
 - Missing namespace context
 
 **Generative tests error (line 691):**
+
 ```
 BAD:  "⚠ Generative tests failed to run: %s"
+
 ```
 - Same issue - just echoes error
 - No actionable next step
 
 **Unit tests timeout (line 648):**
+
 ```
 MEDIOCRE: "⚠ Unit tests timed out - check for slow tests or infinite loops"
+
 ```
 - Vague "check" instruction
 - No specific command or location
 
 **Generative tests timeout (line 688):**
+
 ```
 MEDIOCRE: "⚠ Generative tests timed out - check for slow generators"
+
 ```
 - Same vague guidance
 
@@ -169,6 +183,7 @@ MEDIOCRE: "⚠ Generative tests timed out - check for slow generators"
 ## Message Format Guidelines
 
 ### Warning Messages (non-blocking)
+
 ```
 Format: "⚠ [Problem description] ([context]) - [action to take]"
 
@@ -176,18 +191,22 @@ Examples:
 - "⚠ nREPL unavailable - restart server: ./bin/run"
 - "⚠ Unit tests timed out (seon.foo-test) - run: clj -M:test --focus seon.foo-test"
 - "⚠ Gen tests error in seon.bar: Schema not found - check :malli/schema on functions"
+
 ```
 
 ### Success Messages
+
 ```
 Format: "✓ [What passed] ([context])"
 
 Examples:
 - "✓ 5 tests passed (seon.foo-test)"
 - "✓ Generative tests passed (seon.bar)"
+
 ```
 
 ### Blocking Messages
+
 ```
 Format:
 [Problem statement with specific counts/details]
@@ -196,6 +215,7 @@ Format:
 [Fix instructions - numbered if multiple steps]
 [Blank line]
 [Exact command to run]
+
 ```
 
 ## Implementation Checklist

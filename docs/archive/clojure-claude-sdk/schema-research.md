@@ -22,6 +22,7 @@ Store the entire conversation as one document with messages as a vector attribut
  :seon.ai/messages [{:role "user" :content "Hello" :timestamp #inst "..."}
                     {:role "assistant" :content "Hi there!" :timestamp #inst "..."}
                     {:role "user" :content "Help me code" :timestamp #inst "..."}]}
+
 ```
 
 **Pros:**
@@ -66,6 +67,7 @@ Store sessions and messages as separate entities, with messages referencing thei
  :seon.ai/timestamp #inst "2025-01-19T10:00:05Z"
  :seon.ai/input-tokens 15
  :seon.ai/output-tokens 8}
+
 ```
 
 **Pros:**
@@ -97,6 +99,7 @@ Combine approaches: session entity holds metadata and summary, messages stored s
  :seon.ai/total-cost-usd 0.23}
 
 ;; Messages stored separately (same as Option B)
+
 ```
 
 **Pros:**
@@ -158,6 +161,7 @@ Claude-specific attributes that extend the generic schema.
 ### Example Entities
 
 **Session Entity:**
+
 ```clojure
 {:xt/id "abc123"
  :seon.ai/type :session
@@ -169,9 +173,11 @@ Claude-specific attributes that extend the generic schema.
  ;; Provider-specific
  :seon.ai.claude/model "claude-opus-4-5-20251101"
  :seon.ai.claude/session-id "claude-internal-xyz"}
+
 ```
 
 **Message Entity:**
+
 ```clojure
 {:xt/id "abc123/msg-001"
  :seon.ai/session-id "abc123"
@@ -187,9 +193,11 @@ Claude-specific attributes that extend the generic schema.
  :seon.ai.claude/uuid "msg-uuid-123"
  :seon.ai.claude/tool-calls [{:name "mcp__seon__eval"
                               :input {:code "(analyze-options \"AAPL\")"}}]}
+
 ```
 
 **Tool Call Entity (optional, for detailed tool tracking):**
+
 ```clojure
 {:xt/id "abc123/tool-001"
  :seon.ai/session-id "abc123"
@@ -200,35 +208,43 @@ Claude-specific attributes that extend the generic schema.
  :seon.ai.claude/tool-output {:result {:ticker "AAPL" :iv 0.25}}
  :seon.ai.claude/latency-ms 1250
  :seon.ai.claude/status "success"}
+
 ```
 
 ### Query Examples
 
 **Fetch a session with all messages:**
+
 ```sql
 SELECT s.*, m.*
 FROM ai_sessions s
 LEFT JOIN ai_messages m ON s._id = m.seon$ai$session_id
 WHERE s._id = 'abc123'
 ORDER BY m.seon$ai$timestamp
+
 ```
 
 Or with XTQL pull pattern:
+
 ```clojure
 (-> (from :ai_sessions [{:xt/id session-id} *])
     (with {:messages (pull* (-> (from :ai_messages [{:seon.ai/session-id session-id} *])
                                 (order-by timestamp)))}))
+
 ```
 
 **Find sessions by namespace:**
+
 ```sql
 SELECT * FROM ai_sessions
 WHERE seon$ai$namespace = 'seon.trading'
 ORDER BY seon$ai$started_at DESC
 LIMIT 20
+
 ```
 
 **Count tokens by model over time:**
+
 ```sql
 SELECT seon$ai$claude$model as model,
        SUM(seon$ai$input_tokens) as total_input,
@@ -236,22 +252,27 @@ SELECT seon$ai$claude$model as model,
 FROM ai_messages
 WHERE seon$ai$timestamp > TIMESTAMP '2025-01-01'
 GROUP BY seon$ai$claude$model
+
 ```
 
 **Find sessions containing specific tool calls:**
+
 ```sql
 SELECT DISTINCT s.*
 FROM ai_sessions s
 JOIN ai_messages m ON s._id = m.seon$ai$session_id
 WHERE m.seon$ai$claude$tool_calls IS NOT NULL
   AND m.seon$ai$claude$tool_calls LIKE '%mcp__seon__eval%'
+
 ```
 
 **Get session at a point in time (temporal query):**
+
 ```sql
 SELECT * FROM ai_sessions
 FOR VALID_TIME AS OF TIMESTAMP '2025-01-15T12:00:00Z'
 WHERE _id = 'abc123'
+
 ```
 
 ## Temporal Considerations
@@ -263,11 +284,13 @@ XTDB's bitemporality provides powerful capabilities for conversation storage:
 Each message naturally gets its own valid-time when inserted. This means:
 
 1. **Reconstructing conversation state at any point:**
+
    ```sql
    SELECT * FROM ai_messages
    FOR VALID_TIME AS OF TIMESTAMP '2025-01-19T10:30:00Z'
    WHERE seon$ai$session_id = 'abc123'
    ORDER BY seon$ai$timestamp
+
    ```
    This shows exactly what messages existed at 10:30 AM.
 
@@ -279,19 +302,23 @@ Each message naturally gets its own valid-time when inserted. This means:
 System time tracks when XTDB actually recorded the data:
 
 1. **"What did the agent know at time T?"**
+
    ```sql
    SELECT * FROM ai_messages
    FOR SYSTEM_TIME AS OF TIMESTAMP '2025-01-19T10:05:00Z'
    WHERE seon$ai$session_id = 'abc123'
+
    ```
    Shows the conversation state as recorded at 10:05 AM, even if later corrections were made.
 
 2. **Audit trail:**
+
    ```sql
    SELECT *, _system_from, _system_to
    FROM ai_messages
    FOR ALL SYSTEM_TIME
    WHERE _id = 'abc123/msg-001'
+
    ```
    Shows all versions of a message as they were recorded.
 
@@ -306,16 +333,19 @@ For streaming message persistence during active conversations:
 ## References
 
 ### Primary Sources
+
 - [XTDB Key Concepts](https://docs.xtdb.com/concepts/key-concepts) - Schemaless design, temporal columns
 - [XTDB Time Documentation](https://docs.xtdb.com/about/time-in-xtdb) - Bitemporality explained
 - [XTDB FAQ](https://v1-docs.xtdb.com/resources/faq/) - Document model comparison with Datomic
 
 ### Datomic Patterns (applicable concepts)
+
 - [Datomic Data Modeling](https://docs.datomic.com/schema/schema-modeling.html) - Entity relationships
 - [Datomic Component Entities](https://blog.datomic.com/2013/06/component-entities.html) - Parent-child lifecycle
 - [Datomic Schema Reference](https://docs.datomic.com/schema/schema-reference.html) - Cardinality, refs
 
 ### LLM Conversation Design
+
 - [Schema Design for Agent Memory and LLM History](https://medium.com/@pranavprakash4777/schema-design-for-agent-memory-and-llm-history-38f5cbc126fb) - Tables for conversations, messages, tool calls
 - [AI SDK Chatbot Message Persistence](https://ai-sdk.dev/docs/ai-sdk-ui/chatbot-message-persistence) - Streaming patterns
 - [Building Stateful Conversations with Postgres and LLMs](https://medium.com/@levi_stringer/building-stateful-conversations-with-postgres-and-llms-e6bb2a5ff73e) - Practical schema design

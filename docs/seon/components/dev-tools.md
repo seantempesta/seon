@@ -36,6 +36,7 @@ PostToolUse (after edit lands)
   8. review     — Gemini AI review if rate limit allows (every 60s)
   -> BLOCK if reload fails or tests fail (configurable)
   -> FEEDBACK with dense summary line: "5 tests, gen-tests, compliant (0.3s)"
+
 ```
 
 ### Key Design Decisions
@@ -88,6 +89,7 @@ Configuration is deeply merged with `default-config`:
  :review {:enabled true :interval-seconds 60 :max-code-length 12000}
  :compliance {:enabled true :block false}
  :feedback {:dense true :max-length 1000}}
+
 ```
 
 ### Lint & Validation (`lint.clj`)

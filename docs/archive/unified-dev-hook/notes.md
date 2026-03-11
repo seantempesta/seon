@@ -42,48 +42,60 @@ The pattern is:
 #### Querying Namespaced Columns
 
 **Writing data:**
+
 ```clojure
 (node/execute-tx! node [[:put-docs :test-table
                          {:xt/id :test-1
                           :seon.dev.context/file "/tmp/test.clj"
                           :seon.dev.verify/success true}]])
+
 ```
 
 **SELECT * returns original keywords:**
+
 ```clojure
 (node/sql-query node "SELECT * FROM test_table")
 ;; => [{:xt/id :test-1,
 ;;      :seon.dev.context/file "/tmp/test.clj",
 ;;      :seon.dev.verify/success true}]
+
 ```
 
 **Selecting specific columns (use $ syntax):**
+
 ```clojure
 (node/sql-query node "SELECT seon$dev$context$file FROM test_table")
 ;; => [#:seon.dev.context{:file "/tmp/test.clj"}]
+
 ```
 
 **Filtering on namespaced columns:**
+
 ```clojure
 (node/sql-query node
   ["SELECT * FROM test_table WHERE seon$dev$context$file = ?" "/tmp/test.clj"])
 ;; Works! Returns rows with matching file path.
+
 ```
 
 **Aliasing columns:**
+
 ```clojure
 (node/sql-query node "SELECT seon$dev$context$file AS file_path FROM test_table")
 ;; => [{:file-path "/tmp/test.clj"}]
 ;; Note: SQL snake_case becomes Clojure kebab-case
+
 ```
 
 **Finding column names via information_schema:**
+
 ```clojure
 (node/sql-query node
   "SELECT column_name FROM information_schema.columns WHERE table_name = 'test_table'")
 ;; => [{:column-name _id}
 ;;     {:column-name seon$dev$context$file}
 ;;     {:column-name seon$dev$verify$success}]
+
 ```
 
 #### Key Implications for Phase 7b
@@ -147,6 +159,7 @@ Functions must be registered with `m/=>` for the hook to see them:
 ;; This does NOT register (schema defined but not linked):
 (def MySchema [:=> [:cat :int] :int])
 (defn my-fn [x] (* x x))
+
 ```
 
 ### REPL Must Be Running
@@ -167,6 +180,7 @@ The hook queries `(m/function-schemas)` via nREPL. If REPL is down:
 The hook now records full observability data with each edit event:
 
 1. **`extract-unit-summary`** - Converts `::verify/*` keys to simple keys for storage:
+
    ```clojure
    (defn- extract-unit-summary [unit-result]
      (when unit-result
@@ -175,14 +189,17 @@ The hook now records full observability data with each edit event:
         :pass-count (::verify/pass-count unit-result)
         :fail-count (::verify/fail-count unit-result)
         :error-count (::verify/error-count unit-result)}))
+
    ```
 
 2. **`extract-gen-summary`** - Extracts gen test summary:
+
    ```clojure
    (defn- extract-gen-summary [gen-result]
      (when gen-result
        {:success (::verify/success gen-result)
         :error (::verify/error gen-result)}))
+
    ```
 
 3. **Blocked edits are now recorded** - Before returning a block response, the edit event is recorded with:
@@ -197,6 +214,7 @@ The hook now records full observability data with each edit event:
    - `:feedback` - The feedback messages
 
 Example recorded edit event:
+
 ```clojure
 {:xt/id #uuid "..."
  :seon.dev.context/entity-type :edit-event
@@ -206,6 +224,7 @@ Example recorded edit event:
  :seon.dev.context/unit-test-result {:success true :test-count 5 :pass-count 5}
  :seon.dev.context/gen-test-result {:success true}
  :seon.dev.context/feedback ["5 tests passed (seon.foo-test)" "Generative tests passed (seon.foo)"]}
+
 ```
 
 ---
@@ -228,6 +247,7 @@ Example recorded edit event:
 ;; Extract schema refs
 (require '[seon.dev.feedback :as fb])
 (fb/extract-schema-refs [:=> [:cat :user/id] :order/result])
+
 ```
 
 ---
@@ -245,9 +265,11 @@ All success criteria verified:
    - SQL columns use `$` syntax: `seon$dev$context$file`
 
 2. **Edit events contain test results** ✅
+
    ```clojure
    :seon.dev.context/unit-test-result {:success true, :test-count 5, :pass-count 5}
    :seon.dev.context/gen-test-result {:success true}
+
    ```
 
 3. **Edit events contain decision** ✅
@@ -257,12 +279,14 @@ All success criteria verified:
    - Blocked edits stored with `:decision :block` and `:reason`
 
 5. **Query helpers work** ✅
+
    ```clojure
    (ctx/failure-rate node)
    ;; => {:total 2, :blocked 1, :rate 0.5}
 
    (ctx/recent-activity node)
    ;; => {:period-hours 1, :edit-count 2, :review-count 1, :blocked-count 1, ...}
+
    ```
 
 6. **Separate dev database** ✅
@@ -300,6 +324,7 @@ All success criteria verified:
    (mr/composite-registry
     (m/default-schemas)
     (mr/mutable-registry @#'schema/*schemas))))
+
 ```
 
 Called in `run-gen-tests` before `mi/clj-collect!`.

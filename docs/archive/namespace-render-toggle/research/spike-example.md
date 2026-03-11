@@ -39,6 +39,7 @@ Benchmark results show...
 ;; Minimal working example
 (defn spike-test []
   (println "This is a proof of concept"))
+
 ```
 
 ---

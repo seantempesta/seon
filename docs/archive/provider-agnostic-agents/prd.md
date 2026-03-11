@@ -129,6 +129,7 @@ seon.ai.claude             ; Claude provider: schemas + impl (refactor)
 seon.ai.claude.sdk         ; Claude SDK process management (extract from claude.clj)
 seon.ai.gemini             ; Gemini API client (existing - keep)
 seon.ai.gemini.agent       ; Gemini agent provider (FUTURE - when SDK available)
+
 ```
 
 ### 1. Base Schemas to Add to `seon.ai`
@@ -156,6 +157,7 @@ seon.ai.gemini.agent       ; Gemini agent provider (FUTURE - when SDK available)
 ;; Provider identifier
 (schema/register! ::provider
   [:enum :claude :gemini :openai :local])
+
 ```
 
 ### 2. Agent Protocol in `seon.ai.agent`
@@ -221,6 +223,7 @@ seon.ai.gemini.agent       ; Gemini agent provider (FUTURE - when SDK available)
 (defn tail [...] ...)     ; Stream messages
 (defn interrupt! [...] ...) ; Stop agent
 (defn get-agent [...] ...) ; Get handle by ID
+
 ```
 
 ### 3. Claude Provider in `seon.ai.claude`
@@ -261,6 +264,7 @@ After extraction, this file contains only Claude-specific concerns:
 
 ;; Keep sdk-message->entity for conversion
 (defn sdk-message->entity [...] ...)
+
 ```
 
 ### 4. SDK Process Management in `seon.ai.claude.sdk`
@@ -288,6 +292,7 @@ Pure process spawning, no agent lifecycle:
 ;; Message I/O
 (defn write-message! [...] ...)
 (defn parse-line [...] ...)
+
 ```
 
 ### 5. Message Flow Diagram
@@ -306,6 +311,7 @@ Provider Process                 seon.ai.agent                    XTDB
      |                    (checks if done)                          |
      |                                |                             |
      |                                |---ai/end-session!---------->|
+
 ```
 
 ---
@@ -414,6 +420,7 @@ Provider Process                 seon.ai.agent                    XTDB
    Returns {:status :completed/:failed, :cost-usd, :input-tokens, ...}
    Dispatch: (fn [{:keys [provider]}] provider)"
   :provider)
+
 ```
 
 **Implement for Claude in `seon.ai.claude`:**
@@ -429,6 +436,7 @@ Provider Process                 seon.ai.agent                    XTDB
   {:status (if (= "success" (:subtype message)) :completed :failed)
    :cost-usd (:total_cost_usd message)
    ...})
+
 ```
 
 **Keep `launch-agent!` in `seon.ai.claude` for now.** It calls the multimethods internally but the function stays where it is. We're not moving it to `seon.ai.agent` until we have a second provider that needs it.
