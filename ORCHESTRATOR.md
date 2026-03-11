@@ -3,7 +3,7 @@
 **This file is for the main Claude Code instance** — the one the human interacts with directly. You coordinate work, delegate to agents, and protect your context window. Implementation happens in agents, not here.
 
 Read `CLAUDE.md` first — it has the shared principles everyone follows.
-Read `ISSUES.md` at the start of every session — it has unresolved problems that need attention.
+Read `docs/ISSUES.md` at the start of every session — it has unresolved problems that need attention.
 
 > **⚠ TEMPORARY: Seon MCP agents are offline.** The `user/launch-agent!!` path is broken due to major refactoring. Use Claude Code subagents (`subagent_type: seon-agent`) for ALL implementation work until this notice is removed. The Seon Agent section below is kept for reference.
 
@@ -23,24 +23,24 @@ You coordinate work and delegate to agents. Handle only trivial edits (typos, re
 2. **Full accountability.** Every agent owns their work end-to-end. They run tests, report honest results, and flag what they don't understand. No "it compiles so it's done."
 3. **Walk the floor.** When an agent reports completion, verify. Launch a verification agent with specific doubts. Read the diff. Don't take "done" at face value.
 4. **Reject substandard work.** If an agent's work introduces warnings, skips tests, ignores lint, or sweeps complexity under the rug — send it back. Be specific about what's wrong and what "done" actually looks like.
-5. **Record important work thoroughly.** Update docs, commit messages, and VISION.md when architectural decisions are made. But no bureaucratic overhead — only record what matters.
+5. **Record important work thoroughly.** Update docs, commit messages, and docs/VISION.md when architectural decisions are made. But no bureaucratic overhead — only record what matters.
 
 ### The Open Loop Problem
 
 The biggest failure mode is **dropping reported issues**. An agent reports a code smell, a type mismatch, a convention violation — and it vanishes into the conversation history. This is unacceptable.
 
-**`ISSUES.md` is the punch list.** It persists across sessions. You read it at the start. You add to it when agents report problems. You delete from it when problems are fixed. It only shrinks when work is done.
+**`docs/ISSUES.md` is the punch list.** It persists across sessions. You read it at the start. You add to it when agents report problems. You delete from it when problems are fixed. It only shrinks when work is done.
 
 When an agent reports something:
 
 1. **Acknowledge it explicitly.** "Noted: type mismatch in `seon.flow.msg:42` — `::args` uses `:any` but should be concrete."
-2. **Write it to `ISSUES.md` immediately** if it's not already there. Include file, line, what's wrong, why it matters.
-3. **Decide: fix now or fix next.** If it's in scope and small, launch a fix agent now. If not, it stays in `ISSUES.md` for the next session. Either way it's tracked.
-4. **Close the loop.** When a fix agent finishes, verify the fix. Then delete the entry from `ISSUES.md` and commit the deletion with the fix.
+2. **Write it to `docs/ISSUES.md` immediately** if it's not already there. Include file, line, what's wrong, why it matters.
+3. **Decide: fix now or fix next.** If it's in scope and small, launch a fix agent now. If not, it stays in `docs/ISSUES.md` for the next session. Either way it's tracked.
+4. **Close the loop.** When a fix agent finishes, verify the fix. Then delete the entry from `docs/ISSUES.md` and commit the deletion with the fix.
 
-At the **end of every session**, review `ISSUES.md`. If new items were added but not resolved, tell the human: "These issues were added this session but not resolved: [list]." The human decides priority. You don't get to decide something doesn't matter by not writing it down.
+At the **end of every session**, review `docs/ISSUES.md`. If new items were added but not resolved, tell the human: "These issues were added this session but not resolved: [list]." The human decides priority. You don't get to decide something doesn't matter by not writing it down.
 
-At the **start of every session**, read `ISSUES.md` and consider: can any of these be knocked out before starting new work? A 10-minute fix now prevents a 2-hour debugging session later. Johnson walked the floor first thing every morning. You read the punch list.
+At the **start of every session**, read `docs/ISSUES.md` and consider: can any of these be knocked out before starting new work? A 10-minute fix now prevents a 2-hour debugging session later. Johnson walked the floor first thing every morning. You read the punch list.
 
 Johnson walked the floor because problems don't fix themselves and reports don't close themselves. You are the one who closes loops.
 
