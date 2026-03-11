@@ -594,21 +594,35 @@
           ::message (format "Invalid type: %s" type-val)
           ::fix (format "Use one of: %s" (str/join ", " (sort (map name valid-tags))))}]))))
 
+(defn- find-in-vault
+  "Search vault for a file matching target (Obsidian-style shortest path).
+   Tries: vault-root/target.md, then recursive search for any file named target.md."
+  [vault-root target]
+  (let [file-target (str/replace target #"\.md$" "")
+        direct-candidates [(io/file vault-root (str file-target ".md"))
+                           (io/file vault-root file-target)]
+        direct-hit (some #(when (.exists %) %) direct-candidates)]
+    (if direct-hit
+      true
+      ;; Vault-wide search: find any file matching the basename
+      (let [basename (last (str/split file-target #"/"))
+            target-name (str basename ".md")]
+        (boolean
+         (some #(and (.isFile %)
+                     (= (.getName %) target-name))
+               (file-seq (io/file vault-root))))))))
+
 (defn- rule-wikilink-target-exists
-  "Wikilink targets must resolve to existing files."
+  "Wikilink targets must resolve to existing files.
+   Uses Obsidian-style resolution: direct path first, then vault-wide basename search."
   [links vault-root]
   (when vault-root
     (into []
           (keep (fn [link]
                   (when (= :wikilink (::type link))
                     (let [target (::target link)
-                          ;; Handle [[path/to/file]] and [[path/to/file|display]]
-                          ;; Strip any heading anchor (## part)
                           file-target (first (str/split target #"#"))
-                          ;; Try with and without .md extension
-                          candidates [(io/file vault-root (str file-target ".md"))
-                                      (io/file vault-root file-target)]
-                          exists? (some #(.exists %) candidates)]
+                          exists? (find-in-vault vault-root file-target)]
                       (when-not exists?
                         {::rule :wikilink-target-exists
                          ::severity :warning

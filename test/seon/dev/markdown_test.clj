@@ -248,6 +248,28 @@
 ;;; Integration Tests
 ;;; ---------------------------------------------------------------------------
 
+(deftest frontmatter-not-flagged-as-setext-test
+  (testing "closing --- of frontmatter is not flagged as setext heading"
+    (let [content "---\ntype: component\nstatus: active\ntags: [database]\n---\n\n# Title\n\nBody\n"
+          result (md/validate {::md/content content
+                               ::md/rules #{:heading-style}})]
+      (is (::md/valid? result)
+          (str "False positive: " (pr-str (::md/violations result))))))
+
+  (testing "real setext heading IS flagged"
+    (let [content "---\ntype: component\nstatus: active\n---\n\nTitle\n===\n\nBody\n"
+          result (md/validate {::md/content content
+                               ::md/rules #{:heading-style}})]
+      (is (not (::md/valid? result)))
+      (is (= :heading-style (::md/rule (first (::md/violations result)))))))
+
+  (testing "blanks-around-headings not flagged for heading right after frontmatter"
+    (let [content "---\ntype: component\nstatus: active\n---\n\n# Title\n\nBody\n"
+          result (md/validate {::md/content content
+                               ::md/rules #{:blanks-around-headings}})]
+      (is (::md/valid? result)
+          (str "False positive: " (pr-str (::md/violations result)))))))
+
 (deftest full-document-test
   (testing "good document validates cleanly"
     (let [content (str "---\n"
@@ -266,7 +288,9 @@
                        "- item two\n")
           result (md/validate {::md/content content
                                ::md/rules #{:has-frontmatter :required-fields
-                                            :heading-increment :single-h1
+                                            :heading-style :heading-increment
+                                            :single-h1 :blanks-around-headings
+                                            :blanks-around-fences
                                             :trailing-whitespace :no-multiple-blanks
                                             :list-style :fenced-code-style}})]
       (is (::md/valid? result)
