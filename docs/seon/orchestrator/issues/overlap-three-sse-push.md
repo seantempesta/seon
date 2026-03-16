@@ -31,8 +31,22 @@ Different push semantics mean inconsistent update behavior, duplicated client tr
 - Client tracking unified
 - Tests pass
 
+## Solution Direction
+
+[[prds/unified-namespace-flow/design]] Phase 6b unifies all three into one flow-based path:
+
+- Namespace flow step emits `:render` events to an out-port channel
+- `async/mult` fans render events to per-connection channel taps
+- Browser connect = `async/tap` with `sliding-buffer 1` (latest state, Datastar patches DOM)
+- Browser disconnect = `async/untap` (channel closed)
+- Content-hash deduplication preserved in the per-connection rendering loop
+- No atom watches for SSE — flow is the single push path
+
+Buffer choice per connection type: `sliding-buffer 1` for browsers (latest state wins), `blocking-buffer 64` for developer REPLs (want every result). See [[prds/unified-namespace-flow/research/ctx-flow-sync]].
+
 ## Related
 
 - [[components/web-layer]]
 - [[components/context]]
 - [[components/flow-topology]]
+- [[prds/unified-namespace-flow/design]]

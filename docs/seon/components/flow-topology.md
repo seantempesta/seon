@@ -196,6 +196,17 @@ Wire format is length-prefixed Nippy (`fast-freeze`/`fast-thaw`) for inter-JVM T
 - **Grace period for health checks**: New JVMs get 60s before health checks start, allowing post-ready setup (Datalevin connect, namespace loading) to complete.
 - **Stale process cleanup on pool creation**: Scans full port range 7900-7999, kills any bound processes via `lsof` + `kill -9`. Prevents port conflicts from previous crashes.
 
+## Channel Buffer Configuration
+
+Flow connections support `chan-opts` with `:buf-or-n` and `:xform` per input/output. Default is `{:buf-or-n 10}`. Key patterns:
+
+- **`sliding-buffer N`** — drop oldest when full. Use for "latest state wins" (ctx persistence, UI updates). Natural backpressure debouncing: fast producer + slow consumer = automatic batching.
+- **`dropping-buffer N`** — drop newest when full. Use for observability (keep recent history for reconnection replay).
+- **Unbuffered (size 1)** — synchronous handoff. Use for critical updates where delivery confirmation matters.
+- **`sliding-buffer 1`** on persist channels — proven pattern for debouncing writes. Writer I/O provides natural backpressure; rapid changes coalesce to latest state. See [[prds/unified-namespace-flow/research/ctx-flow-sync]].
+
+Buffer decisions are topology-level configuration, not code-level. See `flow/create-flow` `:chan-opts` parameter. Currently not exposed in `build-topology!` signature — see refactoring opportunities below.
+
 ## Refactoring Opportunities
 
 - **`pending-promises` is global mutable state**: Works but makes testing harder and prevents running multiple independent topologies. Could be scoped to the flow instance.
@@ -204,3 +215,4 @@ Wire format is length-prefixed Nippy (`fast-freeze`/`fast-thaw`) for inter-JVM T
 - **`status.clj` uses `:any` in `::recent` errors schema**: `[:vector :any]` in `::flow-status` errors. Should be typed to the error envelope shape.
 - **No `:malli/schema` on status functions**: Noted in source -- opaque flow objects and channels resist generation. Could use `:any` with description at minimum, or factor out the queryable parts.
 - **Pool health check polls via nREPL eval**: Each health check opens an nREPL connection and evals `:ok`. With many JVMs this creates connection churn. A lightweight TCP ping would be cheaper.
+- **Channel buffer configuration not exposed**: `build-topology!` and `build-infrastructure!` hardcode default buffers. Exposing `chan-opts` in the topology config would enable performance tuning without code changes.
