@@ -1218,12 +1218,21 @@ You must then either:
   []
   (log-info "MCP Server v0.5.0 starting (async mode)...")
 
-  ;; Init orchestrator session in background — don't block the message loop.
+  ;; Init orchestrator session in background with retry — don't block the message loop.
   ;; handle-initialize responds without needing nREPL. Tools that need it
   ;; check orchestrator-init-ready? and return a clear error if not ready yet.
+  ;; Retries with backoff because the MCP server may start before Seon's nREPL is ready.
   (future
     (try
-      (init-orchestrator-session!)
+      (loop [attempt 1
+             delay-ms 1000]
+        (when-not (init-orchestrator-session!)
+          (if (<= attempt 30)
+            (do
+              (log-info "Orchestrator not ready, retry" attempt "in" delay-ms "ms...")
+              (Thread/sleep delay-ms)
+              (recur (inc attempt) (min 5000 (* delay-ms 2))))
+            (log-error "Orchestrator init failed after 30 attempts — eval will not work"))))
       (catch Exception e
         (log-error "Background init failed:" (.getMessage e)))))
 
