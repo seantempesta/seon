@@ -52,13 +52,13 @@ Every key is namespaced. Every type is concrete. The agent knows exactly what to
 
 **No overlapping implementations.** One way to build AI context (not three). One way to wrap clj-kondo analysis (not three). One way to render status badges (not three). One way to push SSE updates (not three). When two implementations exist for the same purpose, one is chosen and the other is deleted.
 
-**Graph indexes function schemas.** The code graph ingest pipeline must extract full `:malli/schema` metadata from functions and store it structurally in Datalevin. Currently the graph stores function names, arglists, and docstrings but not input/output schemas. Without this index, convention uniformity exists in the code but is invisible to discovery.
+**Graph indexes function schemas.** The code graph ingest pipeline already extracts `:malli/schema` metadata and stores input/output specs as Datalevin refs (`:seon.fn/input-spec`, `:seon.fn/output-spec` pointing to `:seon.spec/*` entities with `:seon.spec/contains-keys`). Output-key discovery works via `gq/functions-with-output-key`. What is missing is the generalized discovery API: `functions-with-input-key` and the unified `gq/discover` that accepts arbitrary input/output key combinations.
 
 ## What Already Exists
 
 - [[vision/capabilities/code-quality-pipeline]] -- complete. Dev hook validates syntax, runs affected tests, checks conventions, provides AI review. Blocks on failure.
 - [[vision/capabilities/data-contracts]] -- complete. `schema/register!`, runtime instrumentation, startup consistency check.
-- [[vision/capabilities/code-graph]] -- partial. Graph stores functions, call edges, namespace dependencies. Does not store input/output Malli schemas structurally.
+- [[vision/capabilities/code-graph]] -- partial. Graph stores functions, call edges, namespace dependencies, and input/output specs as refs to spec entities. Output-key discovery works. Missing: input-key discovery, generalized `gq/discover` API.
 - [[vision/capabilities/test-isolation]] -- partial. Direct-mode bypass and temp connection fixtures exist. Unified fixture not built. No `defspec` adoption.
 
 ## What Remains Honest

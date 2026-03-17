@@ -63,7 +63,7 @@ The keyword `:buy` came back as a keyword, not a string. The double `0.85` came 
 
 - [[vision/capabilities/validated-writes]] -- complete. `db/transact!` validates via Malli before Datalevin. Per-DB locking. Nippy wire protocol.
 - [[vision/capabilities/data-contracts]] -- complete. `schema/register!` as sole registration. Three custom types (`:inst`, `:seon.db/ref`, `:seon.flow/dynamic`). Runtime instrumentation. Startup consistency check. Generative roundtrip tests.
-- [[vision/capabilities/resilient-writes]] -- complete. Per-batch error isolation, timeouts, circuit breaker.
+- [[vision/capabilities/resilient-writes]] -- partial. Per-batch error isolation in graph ingest, timeouts, retry. DB writer step-fn lacks circuit breaker.
 - [[vision/capabilities/database-platform]] -- complete. Datalevin as separate process, connection manager, multiple logical databases.
 
 ## What Remains Honest

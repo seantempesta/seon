@@ -1,8 +1,9 @@
 ---
 type: concept
-status: design
+status: active
 tags: [concept, flow]
 ---
+
 # Namespace as Process
 
 > Every namespace is a core.async.flow process with its own state, step function, and message routing.
@@ -15,7 +16,7 @@ The process has a step function (`seon.flow.harness/namespace-step`) that handle
 
 State is the namespace's **ctx** — a validated atom managed by `seon.ctx`. Dynamic namespaces declare a `::*ctx*` spec (a Malli schema), and `seon.ns.lifecycle` creates the atom with schema enforcement, persistence, and SSE push. The ctx is injected into the namespace as a dynamic var.
 
-The key insight is that callers never call namespace functions directly across boundaries. They call `topology/request!`, which injects into the flow, and the flow handles routing, backpressure (queue cap with overload replies), error handling, and observability. From outside, all namespaces look identical — same request/reply pattern, same message envelope format.
+For cross-JVM isolation, callers use `topology/request!`, which injects into the flow. The flow handles routing, backpressure (queue cap with overload replies), error handling, and observability. Within the main Seon JVM, functions can also be called directly. From outside (agent JVMs), all namespaces look identical — same request/reply pattern, same message envelope format.
 
 Hot reload works because flow processes use **vars** as step functions (`flow/process #'namespace-step`). Redefining the var updates the behavior mid-stream without stopping the flow.
 
@@ -25,11 +26,7 @@ The harness is implemented in `src/seon/flow/harness.clj`. Each namespace gets a
 
 What works today: cross-namespace calls via `request!`, TCP bridging to agent JVMs, overload protection (queue cap of 32), observability via `flow/ping`. The writer process (`:seon.flow/writer`) follows the same pattern for database writes.
 
-What's missing: custom step functions per namespace (all namespaces currently use the generic `namespace-step`). The vision is that a namespace can override behavior by authoring a var with `{:seon.flow/step true}` metadata — the topology builder would discover and use it instead of the default. This would let namespaces define custom signal reactions, subscription management, and output routing.
-
-## In the Unified Model
-
-Every namespace becomes a full citizen in the flow topology — not just a routing target but an active participant. Custom [[concepts/step-functions]] replace the generic harness. [[concepts/subscriptions]] and [[concepts/feeds]] become standard inputs. The namespace's ctx is the process state, and the step function is its behavior.
+All namespaces currently use the generic `namespace-step`. See [[concepts/planned-namespace-as-process]] for the vision of custom step functions and the unified model.
 
 ## Key Schemas
 

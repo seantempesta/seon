@@ -9,7 +9,7 @@ tags: [component, schema]
 
 ## Test Organization
 
-**70 test files, ~819 `deftest` forms** across `test/seon/`.
+**73 test files, ~862 `deftest` forms** across `test/seon/`.
 
 Test files mirror source files with a `-test` suffix:
 

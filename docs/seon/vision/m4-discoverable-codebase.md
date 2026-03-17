@@ -52,7 +52,7 @@ Same query mechanism. Different intent. The discovery API does not care whether 
 
 ## What This Requires
 
-**Graph indexes full function schemas.** The ingest pipeline must extract `:malli/schema` metadata from every public function and store the input keys and output keys as indexed attributes in Datalevin. Currently the graph stores function names, arglists, docstrings, and call edges -- but not the Malli schema structure. This is the [[orchestrator/issues/graph-missing-schema-index]] blocker.
+**Graph indexes full function schemas.** The ingest pipeline already extracts `:malli/schema` metadata and stores input/output specs as Datalevin refs (`:seon.fn/input-spec`, `:seon.fn/output-spec`) pointing to spec entities with `contains-keys` and `optional-keys`. Output-key discovery works via `gq/functions-with-output-key`. What is missing is the generalized discovery API (`gq/discover` or similar) that accepts arbitrary input/output key combinations. See [[orchestrator/issues/graph-missing-schema-index]].
 
 **One discovery API.** A single query function (`gq/discover` or similar) that accepts input keys, output keys, or both, and returns ranked matches. The ranking algorithm is the same one renderer discovery already uses: count of matched required keys for specificity, namespace proximity for tiebreaking. This generalizes [[concepts/renderer-discovery]] from "find render functions" to "find any function."
 
@@ -67,7 +67,7 @@ Same query mechanism. Different intent. The discovery API does not care whether 
 ## What Already Exists
 
 - [[vision/capabilities/renderer-discovery]] -- complete. The proof of concept. `resolve-renderer` delegates to `gq/functions-with-output-key`, specificity algorithm ranks by matched keys, namespace proximity tiebreaks. Cache invalidated on code changes. This is M4's core algorithm, working in production for one use case.
-- [[vision/capabilities/code-graph]] -- partial. Graph stores functions, specs, call edges, namespace dependencies. Spec linking works for registered spec keywords. Missing: full Malli schema form storage, input key indexing, arbitrary output key queries beyond `:seon.render/html`.
+- [[vision/capabilities/code-graph]] -- partial. Graph stores functions, specs (with contains-keys/optional-keys), call edges, namespace dependencies. Function-to-spec refs work. Output-key discovery works for any key via `gq/functions-with-output-key`. Missing: input-key discovery API, generalized `gq/discover` accepting arbitrary input/output combinations.
 - [[vision/capabilities/code-documentation]] -- complete. `render/code.clj` generates docs from graph data. `compatible-functions` already finds functions by schema compatibility -- a limited form of discovery.
 - [[vision/capabilities/namespace-introspection]] -- partial. Runtime introspection discovers functions, vars, atoms. Content negotiation serves HTML and AI formats. Missing: interactive data exploration, dead code cleanup.
 

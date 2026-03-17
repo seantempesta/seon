@@ -49,7 +49,9 @@ Malli is the **single source of truth**. `schema/register!` carries all metadata
 
 ## Still Open
 
-- **`:any` sweep** -- remaining violations in `render.clj::html` and `flow/msg.clj::args/payload/value`. Wire protocol `:any` is the hardest case because types aren't known at schema-definition time (planned: dynamic validation against Malli registry at runtime, Phase 6).
+- **`:any` sweep** -- `flow/msg.clj` was resolved (now uses `:seon.flow/dynamic` with runtime validation). Remaining violation: `render.clj::html` is still `:any` (Hiccup output has no single Malli type).
+
+> **Note (2026-03):** `flow/msg.clj` fields `::args`, `::value`, and `::payload` now use `:seon.flow/dynamic` instead of `:any`, with runtime validation against the Malli registry. The wire protocol `:any` issue described in the original ADR is resolved for flow messages.
 
 ## Details
 
