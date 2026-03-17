@@ -77,7 +77,7 @@ The context system gives each namespace instance a managed stateful atom. When n
 3. **Loading**: On instance creation, `load!` can restore persisted state from Datalevin via Datalog query.
 4. **Destruction**: `destroy!` closes client channels, cancels pending persists, shuts down the scheduler, removes watches, and removes from registry.
 
-**Planned: Flow-first model** ([[prds/unified-namespace-flow/design]]). All three watches above will be replaced by flow outputs. The atom becomes a read cache; flow step state is source of truth. Persistence debouncing uses `sliding-buffer 1` on the channel to the writer step — writer I/O provides natural backpressure. SSE push uses `async/mult` on a flow out-port. Only one watch remains: `::flow-sync` injects into flow when external code changes the atom. See [[prds/unified-namespace-flow/research/ctx-flow-sync]].
+See [[components/planned-ctx-flow-first]] for the planned flow-first model that would replace these watches with flow outputs.
 
 ### Validation Modes
 
