@@ -32,14 +32,12 @@ Several step functions are implemented and working:
 - `seon.flow.topology/event-sink-step` — collects observability events in a bounded vector. Terminal sink, no outputs.
 - `seon.flow.topology/error-sink-step` — collects error replies in a bounded vector. Terminal sink, no outputs.
 - `seon.db.datalevin.writer/infra-writer-step` — handles database write requests via the infrastructure flow. See `src/seon/db/datalevin/writer.clj`.
+- `seon.db.datalevin.reader/infra-reader-step` — handles database read queries via the infrastructure flow. See `src/seon/db/datalevin/reader.clj`.
+- `seon.flow.topology/repl-step` — handles REPL eval requests in the infrastructure flow. See `src/seon/flow/topology.clj`.
 
 The default `namespace-step` handles: request forwarding with queue cap, overload replies, JVM reply correlation, error reporting, and observability events. It dispatches on `input-id` to differentiate flow requests from TCP replies.
 
-## In the Unified Model
-
-The default step function expands to handle [[concepts/subscriptions]] (`:subscription-update` input), [[concepts/feeds]] (signal IDs via `:signal-select`), and standard request/reply. A namespace can override the default by authoring a var with `{:seon.flow/step true}` metadata — the topology builder discovers it via the [[components/code-graph]] and uses it instead.
-
-Custom step functions add domain-specific behavior: a trading namespace might react to price feed signals, a health namespace might recalculate aggregates on subscription updates. The override only replaces the transform arity — describe/init/transition can be inherited or customized.
+See [[concepts/planned-step-functions]] for the vision of custom per-namespace step overrides with subscription and feed inputs.
 
 ## Key Schemas
 

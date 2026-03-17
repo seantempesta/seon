@@ -53,7 +53,7 @@ The crash was contained. No data was lost. No other process was affected.
 - [[vision/capabilities/pool-self-healing]] -- complete. Health checks, auto-replenishment, rate limiting, correct JVM opts.
 - [[vision/capabilities/mcp-resilience]] -- complete. Async dispatch, cancellation, non-blocking init.
 - [[vision/capabilities/self-monitoring]] -- complete. Readiness gates, post-start observation, circuit breakers.
-- [[vision/capabilities/resilient-writes]] -- complete. Per-batch error isolation, timeouts, circuit breaker.
+- [[vision/capabilities/resilient-writes]] -- partial. Per-batch error isolation in graph ingest, timeouts, retry. DB writer step-fn lacks circuit breaker.
 
 ## What Remains Honest
 

@@ -1,8 +1,9 @@
 ---
 type: architecture
-status: reference
+status: active
 tags: [architecture, index]
 ---
+
 # Current State: How Seon Works Today
 
 > A narrative of how data flows through the system. For component details, follow the component links below.
@@ -52,9 +53,9 @@ Startup is orchestrated by Integrant, configured via Aero. [[components/system-l
 
 **Phase 1** brings up foundational services: Datalevin connections (adopting the already-running external DB server), schema registration, the runtime registry, and the connection manager. These have no dependencies on the flow topology.
 
-**Phase 2** builds on Phase 1: the flow topology starts (with a sync barrier — `flow/ping` must succeed within 5 seconds), the web server binds ports, the code graph scanner runs its first pass, and function instrumentation activates. Health checks validate each component, and a readiness gate signals that the system is fully operational.
+**Phase 2** builds on Phase 1: the infrastructure flow starts (with a sync barrier — `flow/ping` must succeed within 5 seconds), the runtime database initializes, the web server binds ports, the code graph scanner runs its first pass in a background future, and function instrumentation activates.
 
-The two-phase design means a Datalevin crash during Phase 1 fails fast, while a flow timeout in Phase 2 gives clear diagnostics about what's stuck.
+Integrant's dependency graph enforces the phasing — components declare `#ig/ref` dependencies that determine init order. There is no explicit readiness gate; the dependency chain IS the gate. A Datalevin crash during Phase 1 fails fast, while a flow timeout in Phase 2 gives clear diagnostics about what's stuck.
 
 ## Three State Tracking Mechanisms
 
