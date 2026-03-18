@@ -21,7 +21,9 @@
    The reactive chain is: transact -> listener fires -> discover downstream
    functions (cached) -> prune by active consumers -> dispatch each ->
    their transacts trigger more listener calls -> cycle prevention stops it."
-  (:require [clojure.edn :as edn]
+  (:require [clojure.core.async :as async]
+            [clojure.core.async.flow :as flow]
+            [clojure.edn :as edn]
             [clojure.set :as set]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
@@ -1429,3 +1431,423 @@
           (is (string? rendered))
           (is (str/includes? rendered "Squat")
               "Should fall through to :seon.render/ai"))))))
+
+;; ---------------------------------------------------------------------------
+;; Part 16: REPL Session — Flow-Based
+;; ---------------------------------------------------------------------------
+;;
+;; A REPL session wraps the reactive dispatch system (init!, call!, render-tree)
+;; in a core.async.flow step function. Users interact via start-repl! / repl-eval!
+;; from their nREPL.
+;;
+;; Architecture:
+;;   in-port :eval  -->  [repl-step]  -->  out-port :result
+;;                          |
+;;                          v
+;;                  (call! + render-tree internally)
+;;
+;; The step function owns the Datalevin lifecycle (init!/shutdown!) and
+;; maintains conversation history as flow state.
+
+(schema/register! ::repl-source :string)
+(schema/register! ::repl-rendered :string)
+(schema/register! ::repl-chain [:vector [:tuple :string :map]])
+(schema/register! ::repl-timestamp :inst)
+(schema/register! ::repl-eval-count [:int {:min 0}])
+
+(schema/register! ::repl-entry
+                  [:map
+                   [::repl-source ::repl-source]
+                   [::repl-rendered ::repl-rendered]
+                   [::repl-chain ::repl-chain]
+                   [::repl-timestamp ::repl-timestamp]])
+
+(defn repl-step
+  "Flow step function for a REPL session.
+
+   Manages a reactive dispatch session (init!/call!/shutdown!) as flow state.
+   Receives eval requests on the :eval in-port, dispatches them through the
+   reactive chain, renders the entity tree, and delivers results via promise.
+
+   State: conversation history, eval count, domain+graph conns, render keys,
+          reactive system handle (listener-key, results-acc).
+
+   The step function handles its own lifecycle:
+   - init: sets up Datalevin connections and reactive listener
+   - transform: dispatches function calls, renders results
+   - transition/stop: shuts down reactive listener"
+  ;; describe
+  ([]
+   {:ins {}
+    :outs {}
+    :params {::conn "Domain Datalevin connection"
+             ::graph-conn "Graph index connection"
+             ::render-keys "Vector of render output keys to try"}
+    :workload :io})
+
+  ;; init — receives params + ::flow/pid, returns initial state
+  ([params]
+   (let [conn (::conn params)
+         graph-conn (::graph-conn params)
+         render-keys (or (::render-keys params) [:seon.render/ai])
+         in-ch (::in-ch params)
+         out-ch (::out-ch params)
+         ;; Initialize the reactive dispatch system
+         {::keys [results-acc]} (init! {::conn conn ::graph-conn graph-conn})]
+     {::history []
+      ::repl-eval-count 0
+      ::conn conn
+      ::graph-conn graph-conn
+      ::render-keys render-keys
+      ::results-acc results-acc
+      ::flow/in-ports {:eval in-ch}
+      ::flow/out-ports {:result out-ch}}))
+
+  ;; transition
+  ([state transition]
+   (case transition
+     :clojure.core.async.flow/stop
+     (do
+       (when-let [conn (::conn state)]
+         (try
+           (shutdown! {::conn conn})
+           (catch Exception _)))
+       state)
+     state))
+
+  ;; transform — receives eval requests, dispatches, renders, delivers
+  ([state input-id msg]
+   (case input-id
+     :eval
+     (let [{:keys [promise-ref fn-var args]} msg
+           {::keys [conn graph-conn render-keys results-acc]} state
+           ;; Dispatch the function through the reactive chain
+           {:keys [result chain]}
+           (call! {::conn conn
+                   ::graph-conn graph-conn
+                   ::fn-var fn-var
+                   ::args args
+                   ::results-acc results-acc})
+           ;; Pull the updated entity tree
+           entity (pull-namespace-entity conn "seon.test.bootstrap-v2")
+           ;; Render the entity tree
+           rendered (if entity
+                      (render-tree {::graph-conn graph-conn
+                                    ::entity entity
+                                    ::render-keys render-keys})
+                      (pr-str result))
+           ;; Build history entry
+           entry {::repl-source (str fn-var)
+                  ::repl-rendered rendered
+                  ::repl-chain (vec chain)
+                  ::repl-timestamp (java.util.Date.)}
+           new-state (-> state
+                         (update ::history conj entry)
+                         (update ::repl-eval-count inc))]
+       ;; Deliver result to the waiting caller
+       (deliver promise-ref {::repl-rendered rendered
+                             ::repl-chain chain
+                             ::repl-entry entry})
+       ;; Output the entry on the :result out-port
+       [new-state {:result [entry]}])
+
+     ;; Unknown input — pass through
+     [state nil])))
+
+(defn start-repl!
+  "Start a flow-based REPL session. Returns a session map.
+
+   Creates an embedded Datalevin (domain + graph), indexes this namespace,
+   builds a core.async.flow with repl-step, and starts it.
+
+   Use (repl-eval! session fn-var args) to evaluate.
+   Use (repl-history session) to see conversation.
+   Use (stop-repl! session) to clean up.
+
+   Request keys:
+     ::render-keys - Optional. Vector of render keys (default [:seon.render/ai])"
+  [{::keys [render-keys]}]
+  (let [ts (System/currentTimeMillis)
+        domain-dir (str "tmp/repl-session-domain-" ts)
+        graph-dir (str "tmp/repl-session-graph-" ts)
+        domain-conn (d/get-conn domain-dir datalevin-schema)
+        graph-conn (d/get-conn graph-dir graph-schema)
+        ;; Index this namespace into the graph DB
+        _ (index-this-namespace! graph-conn)
+        ;; Create in/out ports for the flow
+        in-ch (async/chan 32)
+        out-ch (async/chan 32)
+        ;; Build the flow
+        fl (flow/create-flow
+             {:procs {:repl {:proc (flow/process #'repl-step)
+                             :args {::conn domain-conn
+                                    ::graph-conn graph-conn
+                                    ::render-keys (or render-keys [:seon.render/ai])
+                                    ::in-ch in-ch
+                                    ::out-ch out-ch}}}
+              :conns []})
+        {:keys [error-chan]} (flow/start fl)]
+    (flow/resume fl)
+    {::flow fl
+     ::in-ch in-ch
+     ::out-ch out-ch
+     ::error-chan error-chan
+     ::domain-conn domain-conn
+     ::graph-conn graph-conn
+     ::domain-dir domain-dir
+     ::graph-dir graph-dir}))
+
+(defn repl-eval!
+  "Evaluate a function call in a REPL session.
+   Dispatches the function through the reactive chain, renders the entity
+   tree, and returns the rendered string.
+
+   Usage from nREPL:
+     (def s (start-repl! {}))
+     (repl-eval! s #'add-workout! {::exercise \"Squat\" ::weight 100.0 ::reps 5})
+     ;; => \"workouts:\\n  Squat - 100.0kg x 5 reps\\nweekly-sets: 1\\n...\"
+     (stop-repl! s)"
+  [session fn-var args]
+  (let [p (promise)
+        msg {:promise-ref p :fn-var fn-var :args args}]
+    (async/>!! (::in-ch session) msg)
+    (let [result (deref p 30000 ::timeout)]
+      (if (= result ::timeout)
+        (throw (ex-info "REPL eval timed out after 30s"
+                        {:fn-var fn-var :args args}))
+        result))))
+
+(defn repl-history
+  "Get the conversation history from a REPL session.
+   Returns the history vector from the flow step's state via ping."
+  [session]
+  (let [status (flow/ping (::flow session) :timeout-ms 5000)
+        repl-state (get-in status [:repl ::flow/state])]
+    (::history repl-state)))
+
+(defn stop-repl!
+  "Stop a REPL session and clean up all resources.
+   Stops the flow (which triggers shutdown! on the reactive system),
+   closes channels, and closes Datalevin connections."
+  [session]
+  (flow/stop (::flow session))
+  (async/close! (::in-ch session))
+  (async/close! (::out-ch session))
+  (d/close (::domain-conn session))
+  (d/close (::graph-conn session))
+  nil)
+
+;; ---------------------------------------------------------------------------
+;; Part 16b: REPL Session — Direct Mode (atom-based, no flow)
+;; ---------------------------------------------------------------------------
+
+(defn start-repl-direct!
+  "Start a REPL session without flow (simpler, for quick testing).
+   Same eval/history/stop interface but uses atoms instead of flow.
+
+   Request keys:
+     ::render-keys - Optional. Vector of render keys (default [:seon.render/ai])"
+  [{::keys [render-keys]}]
+  (let [ts (System/currentTimeMillis)
+        domain-dir (str "tmp/repl-direct-domain-" ts)
+        graph-dir (str "tmp/repl-direct-graph-" ts)
+        domain-conn (d/get-conn domain-dir datalevin-schema)
+        graph-conn (d/get-conn graph-dir graph-schema)
+        _ (index-this-namespace! graph-conn)
+        system (init! {::conn domain-conn ::graph-conn graph-conn})]
+    {::mode :direct
+     ::domain-conn domain-conn
+     ::graph-conn graph-conn
+     ::domain-dir domain-dir
+     ::graph-dir graph-dir
+     ::results-acc (::results-acc system)
+     ::render-keys (or render-keys [:seon.render/ai])
+     ::direct-history (atom [])
+     ::direct-eval-count (atom 0)}))
+
+(defn- repl-eval-direct!
+  "Evaluate in a direct-mode session."
+  [session fn-var args]
+  (let [{::keys [domain-conn graph-conn results-acc render-keys
+                 direct-history direct-eval-count]} session
+        {:keys [result chain]}
+        (call! {::conn domain-conn
+                ::graph-conn graph-conn
+                ::fn-var fn-var
+                ::args args
+                ::results-acc results-acc})
+        entity (pull-namespace-entity domain-conn "seon.test.bootstrap-v2")
+        rendered (if entity
+                   (render-tree {::graph-conn graph-conn
+                                  ::entity entity
+                                  ::render-keys render-keys})
+                   (pr-str result))
+        entry {::repl-source (str fn-var)
+               ::repl-rendered rendered
+               ::repl-chain (vec chain)
+               ::repl-timestamp (java.util.Date.)}]
+    (swap! direct-history conj entry)
+    (swap! direct-eval-count inc)
+    {::repl-rendered rendered
+     ::repl-chain chain
+     ::repl-entry entry}))
+
+(defn- repl-history-direct
+  "Get history from a direct-mode session."
+  [session]
+  @(::direct-history session))
+
+(defn- stop-repl-direct!
+  "Stop a direct-mode session."
+  [session]
+  (shutdown! {::conn (::domain-conn session)})
+  (d/close (::domain-conn session))
+  (d/close (::graph-conn session))
+  nil)
+
+;; ---------------------------------------------------------------------------
+;; Part 16c: Unified REPL API (dispatches on mode)
+;; ---------------------------------------------------------------------------
+
+(defn repl-eval
+  "Evaluate a function call in any REPL session (flow or direct).
+   Returns map with ::repl-rendered, ::repl-chain, ::repl-entry.
+
+   Usage:
+     (def s (start-repl! {}))        ;; or (start-repl-direct! {})
+     (repl-eval s #'add-workout! {::exercise \"Squat\" ::weight 100.0 ::reps 5})
+     (stop-repl s)"
+  [session fn-var args]
+  (if (= :direct (::mode session))
+    (repl-eval-direct! session fn-var args)
+    (repl-eval! session fn-var args)))
+
+(defn repl-hist
+  "Get conversation history from any REPL session."
+  [session]
+  (if (= :direct (::mode session))
+    (repl-history-direct session)
+    (repl-history session)))
+
+(defn stop-repl
+  "Stop any REPL session and clean up."
+  [session]
+  (if (= :direct (::mode session))
+    (stop-repl-direct! session)
+    (stop-repl! session)))
+
+;; ---------------------------------------------------------------------------
+;; Part 17: REPL Session Tests
+;; ---------------------------------------------------------------------------
+
+(deftest repl-session-direct-test
+  (testing "Direct-mode REPL session lifecycle"
+    (let [session (start-repl-direct! {})]
+      (try
+        (testing "eval add-workout! returns rendered output"
+          (let [result (repl-eval session #'add-workout!
+                                  {::exercise "Squat" ::weight 100.0 ::reps 5})]
+            (is (string? (::repl-rendered result))
+                "Should return rendered string")
+            (is (str/includes? (::repl-rendered result) "Squat")
+                "Rendered should mention exercise")
+            (is (seq (::repl-chain result))
+                "Should have reactive chain")))
+
+        (testing "second eval accumulates history"
+          (repl-eval session #'add-workout!
+                     {::exercise "Bench" ::weight 60.0 ::reps 8})
+          (let [history (repl-hist session)]
+            (is (= 2 (count history))
+                "History should have 2 entries")
+            (is (every? #(contains? % ::repl-source) history)
+                "Each entry should have source")
+            (is (every? #(contains? % ::repl-rendered) history)
+                "Each entry should have rendered")
+            (is (every? #(contains? % ::repl-timestamp) history)
+                "Each entry should have timestamp")))
+
+        (testing "record-bodyweight! renders differently"
+          (let [result (repl-eval session #'record-bodyweight!
+                                  {::bodyweight 85.0})]
+            (is (string? (::repl-rendered result)))
+            (is (str/includes? (::repl-rendered result) "85.0")
+                "Should show bodyweight")))
+
+        (finally
+          (stop-repl session))))))
+
+(deftest repl-session-flow-test
+  (testing "Flow-based REPL session lifecycle"
+    (let [session (start-repl! {})]
+      (try
+        (testing "eval add-workout! returns rendered output"
+          (let [result (repl-eval session #'add-workout!
+                                  {::exercise "Squat" ::weight 100.0 ::reps 5})]
+            (is (string? (::repl-rendered result))
+                "Should return rendered string")
+            (is (str/includes? (::repl-rendered result) "Squat")
+                "Rendered should mention exercise")
+            (is (seq (::repl-chain result))
+                "Should have reactive chain")))
+
+        (testing "second eval accumulates"
+          (let [result (repl-eval session #'add-workout!
+                                  {::exercise "Bench" ::weight 60.0 ::reps 8})]
+            (is (string? (::repl-rendered result)))
+            (is (str/includes? (::repl-rendered result) "Bench")
+                "Second workout should appear in render")))
+
+        (testing "history via ping shows 2 entries"
+          (let [history (repl-hist session)]
+            (is (= 2 (count history))
+                "Flow state should track 2 history entries")))
+
+        (finally
+          (stop-repl session))))))
+
+(deftest repl-render-accumulation-test
+  (testing "Rendered output accumulates entity state across evals"
+    (let [session (start-repl-direct! {})]
+      (try
+        ;; First workout
+        (repl-eval session #'add-workout!
+                   {::exercise "Squat" ::weight 100.0 ::reps 5})
+        ;; Second workout
+        (repl-eval session #'add-workout!
+                   {::exercise "Bench" ::weight 60.0 ::reps 8})
+        ;; Record bodyweight
+        (repl-eval session #'record-bodyweight! {::bodyweight 85.0})
+
+        ;; The rendered output should show the full accumulated state
+        (let [entity (pull-namespace-entity (::domain-conn session)
+                                            "seon.test.bootstrap-v2")]
+          (is (= 2 (count (::workouts entity)))
+              "Should have 2 workouts")
+          (is (= 85.0 (::bodyweight entity))
+              "Should have bodyweight")
+          ;; Weekly volume should be reactively computed
+          (is (some? (::weekly-volume entity))
+              "Weekly volume should be computed"))
+
+        ;; Last render should show everything
+        (let [last-entry (last (repl-hist session))]
+          (is (str/includes? (::repl-rendered last-entry) "85.0")
+              "Last render should include bodyweight"))
+
+        (finally
+          (stop-repl session))))))
+
+(deftest repl-chain-visibility-test
+  (testing "Chain results are visible in eval response"
+    (let [session (start-repl-direct! {})]
+      (try
+        (let [result (repl-eval session #'add-workout!
+                                {::exercise "Squat" ::weight 100.0 ::reps 5})
+              chain-fns (set (map first (::repl-chain result)))]
+          (is (chain-fns "seon.test.bootstrap-v2/add-workout!")
+              "Chain should include the direct call")
+          (is (chain-fns "seon.test.bootstrap-v2/update-weekly-volume")
+              "Chain should include reactive downstream"))
+        (finally
+          (stop-repl session))))))
