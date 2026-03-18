@@ -88,6 +88,25 @@
 (schema/register! :seon.spec/references [:vector :keyword])
 (schema/register! :seon.spec/updated-at :inst)
 
+;; Shape entities (recursive schema index)
+(schema/register! :seon.shape/id [:string {:seon.db/identity true}])
+(schema/register! :seon.shape/spec-key [:keyword {:optional true}])
+(schema/register! :seon.shape/namespace :string)
+(schema/register! :seon.shape/entries [:vector :seon.db/ref])
+
+;; Entry entities (one per key in a shape)
+(schema/register! :seon.entry/id [:string {:seon.db/identity true}])
+(schema/register! :seon.entry/key :keyword)
+(schema/register! :seon.entry/optional :boolean)
+(schema/register! :seon.entry/injectable :boolean)
+(schema/register! :seon.entry/value-type :keyword)
+(schema/register! :seon.entry/value-shape [:seon.db/ref {:optional true}])
+(schema/register! :seon.entry/collection [:keyword {:optional true}])
+
+;; Function shape refs (alongside existing input-spec/output-spec)
+(schema/register! :seon.fn/input-shape :seon.db/ref)
+(schema/register! :seon.fn/output-shape :seon.db/ref)
+
 ;;; ---------------------------------------------------------------------------
 ;;; Datalevin Entity Schemas (Malli is the source of truth)
 ;;; ---------------------------------------------------------------------------
@@ -116,7 +135,9 @@
    [:seon.fn/private :boolean]
    [:seon.fn/updated-at {:optional true} :inst]
    [:seon.fn/input-spec {:optional true} :seon.db/ref]
-   [:seon.fn/output-spec {:optional true} :seon.db/ref]])
+   [:seon.fn/output-spec {:optional true} :seon.db/ref]
+   [:seon.fn/input-shape {:optional true} :seon.db/ref]
+   [:seon.fn/output-shape {:optional true} :seon.db/ref]])
 
 (def call-entity-schema
   "Malli schema for a call graph edge entity.
@@ -161,12 +182,35 @@
    [:seon.var/value-type {:optional true} :keyword]
    [:seon.var/updated-at {:optional true} :inst]])
 
+(def shape-entity-schema
+  "Malli schema for a shape entity (recursive schema index).
+   Identity: :seon.shape/id. Entries are refs to entry entities (shared, not components)."
+  [:map
+   [:seon.shape/id :seon.shape/id]
+   [:seon.shape/spec-key {:optional true} :keyword]
+   [:seon.shape/namespace :string]
+   [:seon.shape/entries [:vector :seon.db/ref]]])
+
+(def entry-entity-schema
+  "Malli schema for an entry entity (one key in a shape).
+   Identity: :seon.entry/id. Shared across shapes for dedup."
+  [:map
+   [:seon.entry/id :seon.entry/id]
+   [:seon.entry/key :keyword]
+   [:seon.entry/optional :boolean]
+   [:seon.entry/injectable :boolean]
+   [:seon.entry/value-type :keyword]
+   [:seon.entry/value-shape {:optional true} :seon.db/ref]
+   [:seon.entry/collection {:optional true} :keyword]])
+
 (db-schema/register-entity-schema! "seon.ns" ns-entity-schema)
 (db-schema/register-entity-schema! "seon.fn" fn-entity-schema)
 (db-schema/register-entity-schema! "seon.call" call-entity-schema)
 (db-schema/register-entity-schema! "seon.ns.dep" ns-dep-entity-schema)
 (db-schema/register-entity-schema! "seon.spec" spec-entity-schema)
 (db-schema/register-entity-schema! "seon.var" var-entity-schema)
+(db-schema/register-entity-schema! "seon.shape" shape-entity-schema)
+(db-schema/register-entity-schema! "seon.entry" entry-entity-schema)
 
 (def datalevin-schema
   "Schema for the knowledge graph in Datalevin. Derived from Malli entity schemas."
@@ -175,7 +219,9 @@
          (db-schema/malli-map->datalevin-schema call-entity-schema)
          (db-schema/malli-map->datalevin-schema ns-dep-entity-schema)
          (db-schema/malli-map->datalevin-schema spec-entity-schema)
-         (db-schema/malli-map->datalevin-schema var-entity-schema)))
+         (db-schema/malli-map->datalevin-schema var-entity-schema)
+         (db-schema/malli-map->datalevin-schema shape-entity-schema)
+         (db-schema/malli-map->datalevin-schema entry-entity-schema)))
 
 (schema/register! ::db-name
                   [:keyword {:description "Database name keyword (e.g. :seon.runtime)"}])
@@ -400,9 +446,11 @@
      ::call-edges  - Optional. Call graph edges with :seon.call/* keys
      ::ns-deps     - Optional. Namespace dependencies with :seon.ns.dep/* keys
      ::ns-entities - Optional. Namespace entity maps with :seon.ns/* keys
+     ::shapes      - Optional. Shape entities with :seon.shape/* keys
+     ::entries     - Optional. Entry entities with :seon.entry/* keys
 
    Returns map with counts of ingested entities."
-  [{::keys [db-name functions specs vars call-edges ns-deps ns-entities]
+  [{::keys [db-name functions specs vars call-edges ns-deps ns-entities shapes entries]
     ns-str ::ns-name}]
   (when ns-str
     ;; 1. Upsert namespace entities
@@ -413,7 +461,30 @@
     (when (seq specs)
       (safe-transact! db-name (vec specs) (str ns-str "/specs")))
 
-    ;; 3. Upsert functions + stubs for call graph targets
+    ;; 3. Upsert entries BEFORE shapes.
+    ;;    Entries may reference shapes via :seon.entry/value-shape (nested maps).
+    ;;    Shapes reference entries via :seon.shape/entries.
+    ;;    To avoid circular ref issues: transact entries without value-shape first,
+    ;;    then shapes, then add value-shape refs to entries that have them.
+    (when (seq entries)
+      (let [entries-base (mapv #(dissoc % :seon.entry/value-shape) entries)
+            entries-with-vs (filterv :seon.entry/value-shape entries)]
+        (safe-transact! db-name entries-base (str ns-str "/entries-base"))
+        ;; 4. Upsert shapes (now entries exist for shape refs)
+        (when (seq shapes)
+          (safe-transact! db-name (vec shapes) (str ns-str "/shapes")))
+        ;; 5. Add value-shape refs to entries (now shapes exist)
+        (when (seq entries-with-vs)
+          (let [vs-updates (mapv (fn [e]
+                                   {:seon.entry/id (:seon.entry/id e)
+                                    :seon.entry/value-shape (:seon.entry/value-shape e)})
+                                 entries-with-vs)]
+            (safe-transact! db-name vs-updates (str ns-str "/entry-value-shapes"))))))
+    ;; If no entries but shapes exist, still transact shapes
+    (when (and (empty? entries) (seq shapes))
+      (safe-transact! db-name (vec shapes) (str ns-str "/shapes")))
+
+    ;; 5. Upsert functions + stubs for call graph targets
     (let [qualified-usages (filterv qualified-call? (or call-edges []))
           known-qnames (into #{} (map :seon.fn/qualified-name) (or functions []))
           stubs (compute-stub-entities known-qnames qualified-usages)
@@ -421,16 +492,16 @@
       (when (seq all-fns)
         (safe-transact! db-name (vec all-fns) (str ns-str "/functions")))
 
-      ;; 4. Upsert vars
+      ;; 6. Upsert vars
       (when (seq vars)
         (safe-transact! db-name (vec vars) (str ns-str "/vars")))
 
-      ;; 5. Retract stale entities (in old scan but not in new)
+      ;; 7. Retract stale entities (in old scan but not in new)
       (retract-stale-fns! db-name ns-str (map :seon.fn/qualified-name all-fns))
       (retract-stale-specs! db-name ns-str (map :seon.spec/key specs))
       (retract-stale-vars! db-name ns-str (map :seon.var/qualified-name vars))
 
-      ;; 6. Call edges + ns-deps: retract-then-insert (no identity attrs)
+      ;; 8. Call edges + ns-deps: retract-then-insert (no identity attrs)
       (retract-calls-from-ns! db-name ns-str)
       (when (seq qualified-usages)
         (let [ref-calls (mapv call-entity->lookup-refs qualified-usages)]
@@ -446,7 +517,9 @@
        ::var-usage-count (count qualified-usages)
        ::ns-dependency-count (count (or ns-deps []))
        ::spec-count (count (or specs []))
-       ::var-count (count (or vars []))})))
+       ::var-count (count (or vars []))
+       ::shape-count (count (or shapes []))
+       ::entry-count (count (or entries []))})))
 
 (defn ingest-analysis!
   "Bulk ingest extracted entities into Datalevin.
@@ -578,7 +651,9 @@
         ::vars (:seon.graph.extract/vars graph)
         ::call-edges (:seon.graph.extract/call-edges graph)
         ::ns-deps (:seon.graph.extract/ns-deps graph)
-        ::ns-entities (:seon.graph.extract/namespaces graph)}))))
+        ::ns-entities (:seon.graph.extract/namespaces graph)
+        ::shapes (:seon.graph.extract/shapes graph)
+        ::entries (:seon.graph.extract/entries graph)}))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; REPL Helpers
