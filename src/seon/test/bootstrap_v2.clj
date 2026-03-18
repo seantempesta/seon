@@ -23,6 +23,7 @@
    their transacts trigger more listener calls -> cycle prevention stops it."
   (:require [clojure.edn :as edn]
             [clojure.set :as set]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datalevin.core :as d]
             [malli.core :as m]
@@ -66,10 +67,10 @@
       (fn [schema _]
         (let [entries (m/children schema)
               default-fns (into []
-                            (keep (fn [[k props v]]
-                                    (when-let [[kind val] (resolve-default-props props v)]
-                                      [k kind val])))
-                            entries)]
+                                (keep (fn [[k props v]]
+                                        (when-let [[kind val] (resolve-default-props props v)]
+                                          [k kind val])))
+                                entries)]
           (when (seq default-fns)
             (fn [x]
               (if (map? x)
@@ -88,12 +89,12 @@
 
 ;; Identity — namespace entity
 (schema/register! ::ns-id
-  [:string {:seon.db/identity true
-            :default/fn '(fn [_] "seon.test.bootstrap-v2")}])
+                  [:string {:seon.db/identity true
+                            :default/fn '(fn [_] "seon.test.bootstrap-v2")}])
 
 ;; Identity — workout entity (separate from namespace entity)
 (schema/register! ::workout-id
-  [:string {:seon.db/identity true}])
+                  [:string {:seon.db/identity true}])
 
 ;; Domain (workout tracker)
 (schema/register! ::exercise :string)
@@ -104,19 +105,19 @@
 ;; Workouts is now a ref collection — the default is an empty vector for
 ;; Malli decode, but in Datalevin it's a :db.cardinality/many ref attr
 (schema/register! ::workouts
-  [:vector {:default/fn '(fn [_] [])}
-   [:map
-    [::workout-id {:optional true} ::workout-id]
-    [::exercise ::exercise]
-    [::weight ::weight]
-    [::reps ::reps]
-    [:db/id {:optional true} :int]]])
+                  [:vector {:default/fn '(fn [_] [])}
+                   [:map
+                    [::workout-id {:optional true} ::workout-id]
+                    [::exercise ::exercise]
+                    [::weight ::weight]
+                    [::reps ::reps]
+                    [:db/id {:optional true} :int]]])
 
 (schema/register! ::bodyweight :double)
 
 (schema/register! ::suggestion :string)
 (schema/register! ::exercise-suggestion
-  [:map [::exercise ::exercise] [::suggestion ::suggestion]])
+                  [:map [::exercise ::exercise] [::suggestion ::suggestion]])
 (schema/register! ::suggestions [:vector ::exercise-suggestion])
 
 (schema/register! ::weekly-volume :double)
@@ -128,11 +129,11 @@
 (schema/register! ::render-key [:enum :seon.render/ai :seon.render/html :seon.render/edn])
 (schema/register! ::consuming-keys [:set :keyword])
 (schema/register! ::connection
-  [:map
-   [::conn-id ::conn-id]
-   [::conn-type ::conn-type]
-   [::render-key ::render-key]
-   [::consuming-keys ::consuming-keys]])
+                  [:map
+                   [::conn-id ::conn-id]
+                   [::conn-type ::conn-type]
+                   [::render-key ::render-key]
+                   [::consuming-keys ::consuming-keys]])
 
 ;; ---------------------------------------------------------------------------
 ;; Part 3: Pure Functions (no identity key = no entity interaction)
@@ -141,7 +142,7 @@
 (defn calculate-volume
   "Calculate volume for a single set. Pure — no identity key."
   {:malli/schema [:=> [:cat [:map [::weight ::weight] [::reps ::reps]]]
-                      [:map [::volume ::volume]]]}
+                  [:map [::volume ::volume]]]}
   [{::keys [weight reps]}]
   {::volume (* weight (double reps))})
 
@@ -153,14 +154,14 @@
   "Add a workout. Returns a new workout entity map. The system creates
    the workout entity and adds a ref from the namespace entity's ::workouts."
   {:malli/schema [:=> [:cat [:map [::ns-id ::ns-id]
-                                  [::exercise ::exercise]
-                                  [::weight ::weight]
-                                  [::reps ::reps]]]
-                      [:map [::ns-id ::ns-id]
-                            [::workout-id ::workout-id]
-                            [::exercise ::exercise]
-                            [::weight ::weight]
-                            [::reps ::reps]]]}
+                             [::exercise ::exercise]
+                             [::weight ::weight]
+                             [::reps ::reps]]]
+                  [:map [::ns-id ::ns-id]
+                   [::workout-id ::workout-id]
+                   [::exercise ::exercise]
+                   [::weight ::weight]
+                   [::reps ::reps]]]}
   [{::keys [ns-id exercise weight reps]}]
   {::ns-id ns-id
    ::workout-id (str (random-uuid))
@@ -171,9 +172,9 @@
 (defn record-bodyweight!
   "Record a bodyweight measurement."
   {:malli/schema [:=> [:cat [:map [::ns-id ::ns-id]
-                                  [::bodyweight ::bodyweight]]]
-                      [:map [::ns-id ::ns-id]
-                            [::bodyweight ::bodyweight]]]}
+                             [::bodyweight ::bodyweight]]]
+                  [:map [::ns-id ::ns-id]
+                   [::bodyweight ::bodyweight]]]}
   [{::keys [ns-id bodyweight]}]
   {::ns-id ns-id
    ::bodyweight bodyweight})
@@ -182,10 +183,10 @@
   "Compute weekly volume summary from workouts. Reactive downstream.
    Workouts are now proper entity maps from recursive pull."
   {:malli/schema [:=> [:cat [:map [::ns-id ::ns-id]
-                                  [::workouts ::workouts]]]
-                      [:map [::ns-id ::ns-id]
-                            [::weekly-volume ::weekly-volume]
-                            [::weekly-sets ::weekly-sets]]]}
+                             [::workouts ::workouts]]]
+                  [:map [::ns-id ::ns-id]
+                   [::weekly-volume ::weekly-volume]
+                   [::weekly-sets ::weekly-sets]]]}
   [{::keys [ns-id workouts]}]
   {::ns-id ns-id
    ::weekly-volume (->> workouts
@@ -197,10 +198,10 @@
    If an exercise has 3+ sets at the same weight with 5+ reps, suggest increase.
    Requires both ::workouts and ::bodyweight."
   {:malli/schema [:=> [:cat [:map [::ns-id ::ns-id]
-                                  [::workouts ::workouts]
-                                  [::bodyweight ::bodyweight]]]
-                      [:map [::ns-id ::ns-id]
-                            [::suggestions ::suggestions]]]}
+                             [::workouts ::workouts]
+                             [::bodyweight ::bodyweight]]]
+                  [:map [::ns-id ::ns-id]
+                   [::suggestions ::suggestions]]]}
   [{::keys [ns-id workouts bodyweight]}]
   (let [suggestions
         (->> workouts
@@ -241,7 +242,204 @@
    ;; Proper ref: namespace entity -> workout entities
    ::workouts {:db/valueType :db.type/ref :db/cardinality :db.cardinality/many}
    ;; Suggestions remain as EDN (purely derived, no identity)
-   ::suggestions {:db/valueType :db.type/string}})
+   ::suggestions {:db/valueType :db.type/string}
+   ;; Screen state for namespace summary rendering
+   ::screen {:db/valueType :db.type/keyword}})
+
+;; ---------------------------------------------------------------------------
+;; Part 5b: Render Functions (discovered by shape graph)
+;; ---------------------------------------------------------------------------
+
+(schema/register! ::screen [:keyword {:default :home}])
+
+(defn render-workout-ai
+  "Render a single workout for AI context."
+  {:malli/schema [:=> [:cat [:map [::exercise ::exercise]
+                             [::weight ::weight]
+                             [::reps ::reps]]]
+                  [:map [:seon.render/ai :string]]]}
+  [{::keys [exercise weight reps]}]
+  {:seon.render/ai (str exercise " — " weight "kg × " reps " reps")})
+
+(defn render-namespace-summary-ai
+  "Render namespace state summary for AI context."
+  {:malli/schema [:=> [:cat [:map [::screen ::screen]
+                             [::weekly-volume ::weekly-volume]
+                             [::weekly-sets ::weekly-sets]]]
+                  [:map [:seon.render/ai :string]]]}
+  [{::keys [screen weekly-volume weekly-sets]}]
+  {:seon.render/ai (str "Screen: " (name screen)
+                        " | Volume: " weekly-volume
+                        " | Sets: " weekly-sets)})
+
+;; ---------------------------------------------------------------------------
+;; Part 5c: Recursive Render Walk
+;; ---------------------------------------------------------------------------
+
+(defn- find-renderer-in-graph
+  "Find a render function from the graph DB whose required input keys are
+   a subset of the entity's keys AND whose output contains the target
+   render key. Returns the qualified-name string of the best match, or nil.
+
+   Uses shape-based graph (seon.fn/input-shape, seon.fn/output-shape)
+   which is what extract produces. Not spec-based (output-spec/contains-keys)
+   which is the runtime system's parallel indexing mechanism.
+
+   Resolution order:
+   1. Most required keys matched (specificity)
+   2. Alphabetical qualified-name (deterministic tiebreaker)"
+  [graph-conn entity-keys render-key]
+  (let [db (d/db graph-conn)
+        ;; Find functions whose output shape contains the render key
+        candidates (d/q '[:find ?fn-name
+                          :in $ ?output-key
+                          :where
+                          [?f :seon.fn/output-shape ?os]
+                          [?os :seon.shape/entries ?oe]
+                          [?oe :seon.entry/key ?output-key]
+                          [?f :seon.fn/qualified-name ?fn-name]]
+                        db render-key)
+        fn-names (mapv first candidates)]
+    (when (seq fn-names)
+      (let [fn-details
+            (mapv (fn [fn-name]
+                    (let [input-keys
+                          (set (map first
+                                    (d/q '[:find ?key
+                                           :in $ ?fn-name
+                                           :where
+                                           [?f :seon.fn/qualified-name ?fn-name]
+                                           [?f :seon.fn/input-shape ?is]
+                                           [?is :seon.shape/entries ?ie]
+                                           [?ie :seon.entry/key ?key]]
+                                         db fn-name)))
+                          optional-keys
+                          (set (map first
+                                    (d/q '[:find ?key
+                                           :in $ ?fn-name
+                                           :where
+                                           [?f :seon.fn/qualified-name ?fn-name]
+                                           [?f :seon.fn/input-shape ?is]
+                                           [?is :seon.shape/entries ?ie]
+                                           [?ie :seon.entry/key ?key]
+                                           [?ie :seon.entry/optional true]]
+                                         db fn-name)))
+                          required (set/difference input-keys optional-keys)]
+                      {:fn-name fn-name
+                       :required-keys required}))
+                  fn-names)
+            matching (filter (fn [{:keys [required-keys]}]
+                               (every? entity-keys required-keys))
+                             fn-details)]
+        (when (seq matching)
+          (->> matching
+               (sort-by (juxt (comp - count :required-keys)
+                              :fn-name))
+               first
+               :fn-name))))))
+
+(defonce ^:private *render-cache (atom {}))
+
+(defn invalidate-render-cache!
+  "Clear the render walk cache. Call when namespace is re-indexed."
+  []
+  (reset! *render-cache {}))
+
+(defn- find-renderer-cached
+  "Cached version of find-renderer-in-graph.
+   Cache key is [render-key (set entity-keys)]."
+  [graph-conn entity-keys render-key]
+  (let [cache-key [render-key entity-keys]
+        cached (get @*render-cache cache-key ::miss)]
+    (if (not= cached ::miss)
+      cached
+      (let [result (find-renderer-in-graph graph-conn entity-keys render-key)]
+        (swap! *render-cache assoc cache-key result)
+        result))))
+
+(defn- try-render-with-keys
+  "Try to render an entity map using discovered renderers for the given keys.
+   Returns the rendered string or nil if no renderer matched."
+  [graph-conn entity-keys entity-data render-keys]
+  (some (fn [rk]
+          (when-let [fn-name (find-renderer-cached graph-conn entity-keys rk)]
+            (try
+              (let [f (requiring-resolve (symbol fn-name))
+                    result (f entity-data)]
+                (get result rk))
+              (catch Exception _ nil))))
+        render-keys))
+
+(defn- render-node
+  "Render a single node in the entity tree. Internal recursive helper.
+
+   At each map node:
+   - Query shape graph for a function whose input keys match AND output
+     has target render key
+   - If found: call renderer, use its output
+   - If not found: walk into children recursively, collecting results
+
+   Returns a string representation."
+  [graph-conn entity render-keys depth max-depth]
+  (cond
+    (>= depth max-depth)
+    "<max-depth>"
+
+    (and (map? entity) (:db/id entity))
+    (let [data (dissoc entity :db/id)
+          entity-keys (set (keys data))
+          rendered (try-render-with-keys graph-conn entity-keys data render-keys)]
+      (if rendered
+        rendered
+        (let [child-entries
+              (->> data
+                   (keep (fn [[k v]]
+                           (cond
+                             (and (vector? v) (seq v) (every? map? v))
+                             (let [children (mapv #(render-node graph-conn % render-keys
+                                                                (inc depth) max-depth) v)]
+                               (str (name k) ":\n"
+                                    (str/join "\n" (map #(str "  " %) children))))
+
+                             (and (map? v) (:db/id v))
+                             (str (name k) ": "
+                                  (render-node graph-conn v render-keys (inc depth) max-depth))
+
+                             :else
+                             (str (name k) ": " (pr-str v))))))]
+          (str/join "\n" child-entries))))
+
+    (map? entity)
+    (let [entity-keys (set (keys entity))
+          rendered (try-render-with-keys graph-conn entity-keys entity render-keys)]
+      (or rendered (pr-str entity)))
+
+    (and (vector? entity) (seq entity) (every? map? entity))
+    (str/join "\n" (mapv #(render-node graph-conn % render-keys (inc depth) max-depth) entity))
+
+    :else
+    (pr-str entity)))
+
+(defn render-tree
+  "Recursively walk an entity tree, discovering renderers at each level.
+
+   At each map node:
+   - Query shape graph for a function whose input keys match AND output
+     has target render key
+   - If found: call renderer, use its output
+   - If not found: walk into children recursively
+
+   render-keys is a vector of keys to try in priority order.
+   e.g. [:seon.render/ai] for REPL, [:seon.render/html] for browser.
+
+   Request keys:
+     ::graph-conn  - Required. Graph index Datalevin connection
+     ::entity      - Required. Entity tree from recursive pull
+     ::render-keys - Optional. Vector of render keys (default [:seon.render/ai])
+     ::max-depth   - Optional. Maximum recursion depth (default 10)"
+  [{::keys [graph-conn entity render-keys max-depth]
+    :or {max-depth 10 render-keys [:seon.render/ai]}}]
+  (render-node graph-conn entity render-keys 0 max-depth))
 
 ;; ---------------------------------------------------------------------------
 ;; Part 6: Shape Graph Cache
@@ -261,13 +459,13 @@
    contains any of those attrs. Returns vector of qualified name strings."
   [graph-conn changed-keys]
   (let [results (d/q '[:find ?fn-name
-                        :in $ [?key ...]
-                        :where
-                        [?e :seon.entry/key ?key]
-                        [?s :seon.shape/entries ?e]
-                        [?f :seon.fn/input-shape ?s]
-                        [?f :seon.fn/qualified-name ?fn-name]]
-                      (d/db graph-conn) (vec changed-keys))]
+                       :in $ [?key ...]
+                       :where
+                       [?e :seon.entry/key ?key]
+                       [?s :seon.shape/entries ?e]
+                       [?f :seon.fn/input-shape ?s]
+                       [?f :seon.fn/qualified-name ?fn-name]]
+                     (d/db graph-conn) (vec changed-keys))]
     (mapv first results)))
 
 (defn- find-reactive-functions
@@ -324,8 +522,8 @@
       (into #{}
             (keep (fn [[k _props child-schema]]
                     (let [derefed (if (m/-ref-schema? child-schema)
-                                   (m/deref child-schema)
-                                   child-schema)
+                                    (m/deref child-schema)
+                                    child-schema)
                           props (m/properties derefed)]
                       (when (:seon.db/identity props)
                         k))))
@@ -432,7 +630,7 @@
             ;; Minimal decode to resolve identity key default
             id-value (or (get args id-key)
                          (let [decoded (m/decode input-schema args
-                                                (dependent-default-transformer))]
+                                                 (dependent-default-transformer))]
                            (get decoded id-key)))
             entity (when id-value (pull-entity conn id-key id-value))]
         ;; Merge: entity provides state, caller args provide new data
@@ -498,13 +696,13 @@
     true
     (let [;; Get output shape entries for this function
           output-results (d/q '[:find ?key
-                                 :in $ ?fn-name
-                                 :where
-                                 [?f :seon.fn/qualified-name ?fn-name]
-                                 [?f :seon.fn/output-shape ?s]
-                                 [?s :seon.shape/entries ?e]
-                                 [?e :seon.entry/key ?key]]
-                               (d/db graph-conn) fn-name)
+                                :in $ ?fn-name
+                                :where
+                                [?f :seon.fn/qualified-name ?fn-name]
+                                [?f :seon.fn/output-shape ?s]
+                                [?s :seon.shape/entries ?e]
+                                [?e :seon.entry/key ?key]]
+                              (d/db graph-conn) fn-name)
           output-keys (set (map first output-results))
           ;; Only check non-identity output keys against consumers
           data-output-keys (remove identity-key? output-keys)]
@@ -628,17 +826,17 @@
   [{::keys [conn]}]
   (remove-watch *ctx ::sync-to-datalevin)
   (add-watch *ctx ::sync-to-datalevin
-    (fn [_ _ old-state new-state]
-      (when (and @*ctx-watch-enabled old-state new-state (not= old-state new-state))
-        (let [tx (diff-to-tx old-state new-state)]
-          (when (seq tx)
+             (fn [_ _ old-state new-state]
+               (when (and @*ctx-watch-enabled old-state new-state (not= old-state new-state))
+                 (let [tx (diff-to-tx old-state new-state)]
+                   (when (seq tx)
             ;; Disable watch during transact to avoid infinite loop
             ;; (listener will re-pull if needed)
-            (reset! *ctx-watch-enabled false)
-            (try
-              (d/transact! conn tx)
-              (finally
-                (reset! *ctx-watch-enabled true)))))))))
+                     (reset! *ctx-watch-enabled false)
+                     (try
+                       (d/transact! conn tx)
+                       (finally
+                         (reset! *ctx-watch-enabled true)))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Part 11: Graph Indexing Helpers
@@ -654,7 +852,7 @@
   (let [file-path "src/seon/test/bootstrap_v2.clj"
         source (slurp file-path)
         graph (extract/extract-graph {::extract/source source
-                                       ::extract/file-path file-path})
+                                      ::extract/file-path file-path})
         entries (::extract/entries graph)
         entries-base (mapv #(dissoc % :seon.entry/value-shape) entries)
         shapes (::extract/shapes graph)
@@ -680,8 +878,9 @@
     ;; Functions (with shape links)
     (when (seq functions)
       (d/transact! graph-conn functions))
-    ;; Invalidate cache since graph changed
+    ;; Invalidate caches since graph changed
     (invalidate-cache!)
+    (invalidate-render-cache!)
     {:function-count (count functions)
      :shape-count (count shapes)
      :entry-count (count entries)
@@ -745,6 +944,7 @@
   [{::keys [conn]}]
   (d/unlisten! conn :reactive-dispatch)
   (invalidate-cache!)
+  (invalidate-render-cache!)
   (reset! *connections {})
   (remove-watch *ctx ::sync-to-datalevin)
   (reset! *ctx nil)
@@ -980,7 +1180,7 @@
           reports (atom [])]
       (try
         (d/listen! conn :test-listener
-          (fn [report] (swap! reports conj report)))
+                   (fn [report] (swap! reports conj report)))
         ;; Direct transact — listener should fire
         (d/transact! conn [{::ns-id "test-entity"}])
         (is (= 1 (count @reports))
@@ -1059,7 +1259,7 @@
 
         ;; Init
         (let [{::keys [results-acc]} (init! {::conn domain-conn
-                                              ::graph-conn graph-conn})]
+                                             ::graph-conn graph-conn})]
           ;; Call
           (let [{:keys [result chain]}
                 (call! {::conn domain-conn
@@ -1117,3 +1317,115 @@
                           "  Workouts stored: " (count (::workouts entity)) "\n"
                           "  Weekly volume: " (::weekly-volume entity) "\n"
                           "  Weekly sets: " (::weekly-sets entity)))))))))
+
+;; ---------------------------------------------------------------------------
+;; Part 15: Render Tree Tests
+;; ---------------------------------------------------------------------------
+
+(deftest render-tree-workout-test
+  (with-embedded-datalevin
+    (fn [conn graph-conn {::keys [results-acc]}]
+      (testing "Workout entity renders via discovered function"
+        (call! {::conn conn ::graph-conn graph-conn ::fn-var #'add-workout!
+                ::args {::exercise "Squat" ::weight 100.0 ::reps 5}
+                ::results-acc results-acc})
+        (let [entity (pull-namespace-entity conn "seon.test.bootstrap-v2")
+              workout (first (::workouts entity))
+              rendered (render-tree {::graph-conn graph-conn
+                                     ::entity workout
+                                     ::render-keys [:seon.render/ai]})]
+          (is (string? rendered) "Should produce a string")
+          (is (str/includes? rendered "Squat") "Should mention exercise")
+          (is (str/includes? rendered "100.0") "Should mention weight")
+          (is (str/includes? rendered "5") "Should mention reps"))))))
+
+(deftest render-tree-namespace-with-nested-test
+  (with-embedded-datalevin
+    (fn [conn graph-conn {::keys [results-acc]}]
+      (testing "Namespace summary renderer matches when ::screen present"
+        (call! {::conn conn ::graph-conn graph-conn ::fn-var #'add-workout!
+                ::args {::exercise "Squat" ::weight 100.0 ::reps 5}
+                ::results-acc results-acc})
+        (call! {::conn conn ::graph-conn graph-conn ::fn-var #'add-workout!
+                ::args {::exercise "Bench" ::weight 60.0 ::reps 8}
+                ::results-acc results-acc})
+        ;; Add ::screen so namespace summary renderer matches
+        (d/transact! conn [{::ns-id "seon.test.bootstrap-v2" ::screen :home}])
+        (let [entity (pull-namespace-entity conn "seon.test.bootstrap-v2")
+              rendered (render-tree {::graph-conn graph-conn
+                                     ::entity entity
+                                     ::render-keys [:seon.render/ai]})]
+          (is (string? rendered) "Should produce a string")
+          ;; Summary renderer wins at root: it matches ::screen + ::weekly-volume + ::weekly-sets
+          (is (str/includes? rendered "Screen: home") "Should render screen")
+          (is (str/includes? rendered "Volume:") "Should render volume")
+          (is (str/includes? rendered "Sets:") "Should render sets")))
+
+      (testing "Without ::screen, no summary renderer — walks children"
+        ;; New DB has workouts but no ::screen, so summary renderer won't match
+        (let [entity (d/pull (d/db conn) '[* {::workouts [*]}]
+                             [::ns-id "seon.test.bootstrap-v2"])
+              ;; Remove ::screen to prevent summary renderer from matching
+              no-screen (-> entity (dissoc ::screen) (assoc :db/id (:db/id entity)))
+              rendered (render-tree {::graph-conn graph-conn
+                                     ::entity no-screen
+                                     ::render-keys [:seon.render/ai]})]
+          (is (string? rendered))
+          ;; Without summary renderer, it walks into children
+          ;; Workout renderer should match each workout in ::workouts
+          (is (str/includes? rendered "Squat") "Should contain workout exercise")
+          (is (str/includes? rendered "Bench") "Should contain second workout"))))))
+
+(deftest render-tree-fallback-test
+  (with-embedded-datalevin
+    (fn [conn graph-conn {::keys [_results-acc]}]
+      (testing "Missing renderer falls back to default format"
+        (d/transact! conn [{::ns-id "seon.test.bootstrap-v2" ::bodyweight 85.0}])
+        (let [entity (pull-namespace-entity conn "seon.test.bootstrap-v2")
+              rendered (render-tree {::graph-conn graph-conn
+                                     ::entity entity
+                                     ::render-keys [:seon.render/ai]})]
+          (is (string? rendered) "Should produce a string even without renderer")
+          (is (str/includes? rendered "85.0") "Should contain bodyweight value"))))))
+
+(deftest render-tree-max-depth-test
+  (with-embedded-datalevin
+    (fn [conn graph-conn {::keys [results-acc]}]
+      (testing "Max depth prevents infinite recursion"
+        (call! {::conn conn ::graph-conn graph-conn ::fn-var #'add-workout!
+                ::args {::exercise "Squat" ::weight 100.0 ::reps 5}
+                ::results-acc results-acc})
+        (let [entity (pull-namespace-entity conn "seon.test.bootstrap-v2")]
+          ;; Depth 0 should immediately cap
+          (is (= "<max-depth>"
+                 (render-tree {::graph-conn graph-conn
+                               ::entity entity
+                               ::render-keys [:seon.render/ai]
+                               ::max-depth 0}))
+              "Depth 0 should immediately cap")
+          ;; Depth 1 should render root but cap children
+          (let [rendered (render-tree {::graph-conn graph-conn
+                                       ::entity entity
+                                       ::render-keys [:seon.render/ai]
+                                       ::max-depth 1})]
+            (is (string? rendered))
+            (is (str/includes? rendered "<max-depth>")
+                "Children at depth 1 should be capped")))))))
+
+(deftest render-tree-priority-test
+  (with-embedded-datalevin
+    (fn [conn graph-conn {::keys [results-acc]}]
+      (testing "Render priority — tries keys in order"
+        (call! {::conn conn ::graph-conn graph-conn ::fn-var #'add-workout!
+                ::args {::exercise "Squat" ::weight 100.0 ::reps 5}
+                ::results-acc results-acc})
+        (let [entity (pull-namespace-entity conn "seon.test.bootstrap-v2")
+              workout (first (::workouts entity))
+              ;; Try :seon.render/html first (no HTML renderers defined),
+              ;; then :seon.render/ai (should match render-workout-ai)
+              rendered (render-tree {::graph-conn graph-conn
+                                     ::entity workout
+                                     ::render-keys [:seon.render/html :seon.render/ai]})]
+          (is (string? rendered))
+          (is (str/includes? rendered "Squat")
+              "Should fall through to :seon.render/ai"))))))
