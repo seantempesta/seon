@@ -79,8 +79,26 @@
   [:map [::exercise ::exercise] [::weight ::weight] [::reps ::reps]])
 (schema/register! ::workouts [:vector ::workout-set])
 (schema/register! ::screen [:enum :home :active :history])
+(schema/register! ::bodyweight :double)
+(schema/register! ::ratio :double)
+(schema/register! ::exercise-ratio
+  [:map [::exercise ::exercise] [::ratio ::ratio]])
+(schema/register! ::strength-ratios [:vector ::exercise-ratio])
+(schema/register! ::suggestion :string)
+(schema/register! ::exercise-suggestion
+  [:map [::exercise ::exercise] [::suggestion ::suggestion]])
+(schema/register! ::suggestions [:vector ::exercise-suggestion])
+(schema/register! ::weekly-volume :double)
+(schema/register! ::weekly-sets :int)
 (schema/register! ::ctx
-  [:map [::screen ::screen] [::workouts ::workouts]])
+  [:map
+   [::screen ::screen]
+   [::workouts ::workouts]
+   [::bodyweight {:optional true} ::bodyweight]
+   [::strength-ratios {:optional true} ::strength-ratios]
+   [::suggestions {:optional true} ::suggestions]
+   [::weekly-volume {:optional true} ::weekly-volume]
+   [::weekly-sets {:optional true} ::weekly-sets]])
 
 ;; ---------------------------------------------------------------------------
 ;; Part 3: Infrastructure Functions — map-in/map-out, fully specced
@@ -181,6 +199,71 @@
   {::ctx (update ctx ::workouts conj
                  {::exercise exercise ::weight weight ::reps reps})})
 
+(defn record-bodyweight!
+  "Record a bodyweight measurement. Updates ctx with ::bodyweight."
+  {:malli/schema [:=> [:cat [:map [::ctx ::ctx] [::bodyweight ::bodyweight]]]
+                      [:map [::ctx ::ctx]]]}
+  [{::keys [ctx bodyweight]}]
+  {::ctx (assoc ctx ::bodyweight bodyweight)})
+
+(defn calculate-relative-strength
+  "Calculate strength-to-bodyweight ratio for each exercise.
+   Requires ::bodyweight in ctx. Returns ratios per exercise (best set)."
+  {:malli/schema [:=> [:cat [:map [::ctx ::ctx]]]
+                      [:map [::strength-ratios ::strength-ratios]]]}
+  [{::keys [ctx]}]
+  (let [bw (::bodyweight ctx)
+        workouts (::workouts ctx)]
+    (if (and bw (pos? bw) (seq workouts))
+      (let [best-by-exercise
+            (->> workouts
+                 (group-by ::exercise)
+                 (map (fn [[ex sets]]
+                        (let [best-weight (apply max (map ::weight sets))]
+                          {::exercise ex
+                           ::ratio (/ best-weight bw)})))
+                 vec)]
+        {::strength-ratios best-by-exercise})
+      {::strength-ratios []})))
+
+(defn suggest-next-weight
+  "Suggest weight increases based on workout history.
+   If an exercise has 3+ sets at the same weight with 5+ reps, suggest increase."
+  {:malli/schema [:=> [:cat [:map [::ctx ::ctx]]]
+                      [:map [::suggestions ::suggestions]]]}
+  [{::keys [ctx]}]
+  (let [workouts (::workouts ctx)]
+    (if (seq workouts)
+      (let [suggestions
+            (->> workouts
+                 (group-by ::exercise)
+                 (keep (fn [[ex sets]]
+                         (let [at-weight (group-by ::weight sets)
+                               ready (->> at-weight
+                                          (filter (fn [[_ s]]
+                                                    (and (>= (count s) 3)
+                                                         (every? #(>= (::reps %) 5) s))))
+                                          (map first))]
+                           (when (seq ready)
+                             (let [top (apply max ready)]
+                               {::exercise ex
+                                ::suggestion (str "Ready to increase from "
+                                                  top " — try " (* top 1.05))})))))
+                 vec)]
+        {::suggestions suggestions})
+      {::suggestions []})))
+
+(defn update-weekly-volume
+  "Compute weekly volume summary from ctx workouts. Pure derived data."
+  {:malli/schema [:=> [:cat [:map [::ctx ::ctx]]]
+                      [:map [::weekly-volume ::weekly-volume]
+                            [::weekly-sets ::weekly-sets]]]}
+  [{::keys [ctx]}]
+  (let [workouts (::workouts ctx)]
+    {::weekly-volume (->> workouts
+                          (reduce (fn [acc w] (+ acc (* (::weight w) (::reps w)))) 0.0))
+     ::weekly-sets (count workouts)}))
+
 ;; ---------------------------------------------------------------------------
 ;; Part 6: Atom workspace — defonce survives reload, watch persists
 ;; ---------------------------------------------------------------------------
@@ -277,6 +360,56 @@
       (is (= 1 (:a result)))
       (is (= 2 (:b result)))
       (is (= 3 (:c result))))))
+
+(deftest domain-functions-test
+  (let [system (bootstrap! {})]
+    (try
+      (testing "record-bodyweight! adds bodyweight to ctx"
+        (let [r (record-bodyweight! {::ctx (::ctx system) ::bodyweight 85.0})]
+          (is (= 85.0 (-> r ::ctx ::bodyweight)))))
+
+      (testing "calculate-relative-strength with no bodyweight returns empty"
+        (let [r (calculate-relative-strength {::ctx (::ctx system)})]
+          (is (= [] (::strength-ratios r)))))
+
+      (testing "calculate-relative-strength with data"
+        (let [ctx-with-data (-> (::ctx system)
+                                (assoc ::bodyweight 80.0)
+                                (assoc ::workouts [{::exercise "Squat"
+                                                    ::weight 120.0
+                                                    ::reps 5}
+                                                   {::exercise "Bench"
+                                                    ::weight 80.0
+                                                    ::reps 8}]))
+              r (calculate-relative-strength {::ctx ctx-with-data})]
+          (is (= 2 (count (::strength-ratios r))))
+          (is (some #(= 1.5 (::ratio %))
+                    (::strength-ratios r)))
+          (is (some #(= 1.0 (::ratio %))
+                    (::strength-ratios r)))))
+
+      (testing "suggest-next-weight with insufficient data"
+        (let [r (suggest-next-weight {::ctx (::ctx system)})]
+          (is (= [] (::suggestions r)))))
+
+      (testing "suggest-next-weight with ready exercise"
+        (let [ctx-ready (assoc (::ctx system) ::workouts
+                               (vec (repeat 3 {::exercise "Squat"
+                                               ::weight 100.0
+                                               ::reps 5})))
+              r (suggest-next-weight {::ctx ctx-ready})]
+          (is (= 1 (count (::suggestions r))))
+          (is (= "Squat" (-> r ::suggestions first ::exercise)))))
+
+      (testing "update-weekly-volume"
+        (let [ctx-with-workouts (assoc (::ctx system) ::workouts
+                                       [{::exercise "Squat" ::weight 100.0 ::reps 5}
+                                        {::exercise "Bench" ::weight 60.0 ::reps 8}])
+              r (update-weekly-volume {::ctx ctx-with-workouts})]
+          (is (= 980.0 (::weekly-volume r)))
+          (is (= 2 (::weekly-sets r)))))
+
+      (finally (close-conn! system)))))
 
 (deftest transparent-injection-test
   (let [system (bootstrap! {})]
