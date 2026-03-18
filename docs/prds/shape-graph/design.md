@@ -262,38 +262,59 @@ If no browser is connected and no downstream function is subscribed, data that o
 
 **Files:** `src/seon/graph/extract.clj`
 
-### Phase 3: Shape-Based Discovery Queries
+### Phase 3: Shape-Based Discovery Queries + Data Routing -- DONE
 
-- `functions-matching-shape` — given a data map's keys, find functions whose input shape is satisfiable
-- `functions-producing-key` — given an output key, find functions (replaces `functions-with-output-key`)
-- Recursive matching for nested maps
+- Fixed injectable detection: walker now checks both entry props AND value schema properties for `:default/fn` and `:default`
+- `functions-matching-data` — given available data keys, find functions whose input shape is satisfiable (all required non-injectable keys present). Sorted by specificity.
+- `function-output-keys` — get all output keys for a function (pull-based to work around output-shape Datalog query limitation on older DBs)
+- Updated `::ctx` schema with `:default/fn` so shape graph marks it injectable
+- `build-execution-graph` — finds matching functions, cascades outputs to downstream via Datalog entry-key joins, prunes functions with no consumers
+- `execute-graph!` — runs functions in topological order, updates `*state` on `::ctx` output, accumulates data for downstream
+- `route-data!` — end-to-end: data arrives -> build graph -> execute -> return results
 
-**Files:** `src/seon/graph/query.clj`
+**Files:** `src/seon/graph/extract.clj`, `src/seon/graph/query.clj`, `src/seon/test/bootstrap.clj`, `test/seon/graph/shape_test.clj`
 
-### Phase 4: Wire into Bootstrap POC
-
-- Use shape queries in `seon.test.bootstrap` for data-driven routing
-- Test: data arrives → shape match → function called → output shape feeds back → cascading matches
-
-**Files:** `src/seon/test/bootstrap.clj`
-
-## Verification
+## Verification — All Confirmed in REPL (2026-03-18)
 
 ```clojure
-;; After Phase 1-2: verify shapes are indexed
-(seon.db/query :seon.runtime
-  '[:find ?fn ?key
-    :where
-    [?f :seon.fn/qualified-name ?fn]
-    [?f :seon.fn/input-shape ?s]
-    [?s :seon.shape/entries ?e]
-    [?e :seon.entry/key ?key]]
-;; Should show add-workout! → #{::ctx ::exercise ::weight ::reps}
+;; Shapes indexed: 138 shapes, 333 entries across codebase
+(count (seon.db/query :seon.runtime '[:find ?id :where [?e :seon.shape/id ?id]]))
+;; => 138
 
-;; After Phase 3: verify discovery
-(discover-functions {:available-keys #{::exercise ::weight ::reps}})
-;; Should find add-workout! (::ctx is injectable via default/fn)
+;; All bootstrap functions discoverable by input keys (24 fn→key pairs)
+(seon.db/query :seon.runtime
+  '[:find ?fn ?key :in $ ?ns :where
+    [?f :seon.fn/namespace ?ns] [?f :seon.fn/qualified-name ?fn]
+    [?f :seon.fn/input-shape ?s] [?s :seon.shape/entries ?e]
+    [?e :seon.entry/key ?key]]
+  "seon.test.bootstrap")
+
+;; End-to-end routing: data → discover → cascade → execute
+(route-data! {:seon.test.bootstrap/data {::exercise "Squat" ::weight 100.0 ::reps 5}
+              :seon.test.bootstrap/consumers #{::volume ::weekly-volume}
+              :seon.test.bootstrap/db-name :seon.runtime})
+;; => {:results [["add-workout!" ...] ["total-volume" {::volume 500.0}]
+;;               ["update-weekly-volume" {::weekly-volume 500.0}]]
+;;     :state {::workouts [{...}]}}
 ```
+
+## Next Steps
+
+### Phase 4: Cross-Namespace Routing
+
+Data from one namespace routes to functions in another. The shape graph spans all namespaces. A function in `seon.health.nutrition` can match data produced by `seon.test.bootstrap`.
+
+### Phase 5: Datalevin Transaction Subscribers
+
+After a Datalevin transaction (ctx persist), discover subscriber functions whose input shapes match the transacted attributes. Same shape matching, triggered by transaction.
+
+### Phase 6: REPL Protocol
+
+Browser SSE, agent REPL, nREPL as connection types. Each registers as a consumer of specific data shapes. The routing/pruning system only executes computation that has consumers.
+
+### Phase 7: Agent Context Rendering
+
+`:seon.render/ai` renders namespace code + state as the agent's REPL context, sourced from Datalevin code graph. The agent sees their namespace as normal Clojure code.
 
 ## Validated Findings (from Malli + Datalevin source review)
 
