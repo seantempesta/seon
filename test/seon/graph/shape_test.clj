@@ -6,6 +6,7 @@
             [seon.db.datalevin.conn :as dl-conn]
             [seon.graph.extract :as extract]
             [seon.graph.ingest :as ingest]
+            [seon.graph.query :as gq]
             [seon.schema :as schema])
   (:import [java.io File]))
 
@@ -298,6 +299,320 @@
         ;; conn IS injectable
         (is (true? (:seon.entry/injectable
                     (get entry-by-key :seon.shape.test6/conn))))))))
+
+;;; ---------------------------------------------------------------------------
+;;; Walker: Injectable Detection — Value Schema Defaults
+;;; ---------------------------------------------------------------------------
+
+(deftest walker-injectable-value-schema-default-fn-test
+  (testing ":default/fn on the VALUE SCHEMA (via register!) marks entry injectable"
+    ;; Register a value schema with :default/fn in its own properties
+    (schema/register! :seon.shape.test6b/name :string)
+    (schema/register! :seon.shape.test6b/ctx
+      [:map {:default/fn '(fn [] {:screen :home})}
+       [:seon.shape.test6b/name :seon.shape.test6b/name]])
+
+    (schema/register! :seon.shape.test6b/data :string)
+    (schema/register! :seon.shape.test6b/my-request
+      [:map
+       [:seon.shape.test6b/data :seon.shape.test6b/data]
+       ;; No :default/fn on the ENTRY props — it's on ::ctx's own schema
+       [:seon.shape.test6b/ctx :seon.shape.test6b/ctx]])
+
+    (let [source "(ns seon.shape.test6b
+  (:require [seon.schema :as schema]))
+
+(schema/register! ::name :string)
+(schema/register! ::ctx
+  [:map {:default/fn '(fn [] {:screen :home})}
+   [::name ::name]])
+(schema/register! ::data :string)
+(schema/register! ::my-request
+  [:map [::data ::data] [::ctx ::ctx]])"
+          graph (extract/extract-graph {::extract/source source
+                                        ::extract/file-path "<test>"})]
+      (let [entries (::extract/entries graph)
+            entry-by-key (into {} (map (juxt :seon.entry/key identity)) entries)]
+        ;; data is NOT injectable
+        (is (false? (:seon.entry/injectable
+                     (get entry-by-key :seon.shape.test6b/data))))
+        ;; ctx IS injectable — :default/fn is on the value schema
+        (is (true? (:seon.entry/injectable
+                    (get entry-by-key :seon.shape.test6b/ctx)))
+            ":default/fn on value schema should make entry injectable")))))
+
+(deftest walker-injectable-static-default-entry-test
+  (testing "static :default on entry props marks entry injectable"
+    (schema/register! :seon.shape.test6c/name :string)
+    (schema/register! :seon.shape.test6c/mode [:enum :fast :slow])
+    (schema/register! :seon.shape.test6c/my-request
+      [:map
+       [:seon.shape.test6c/name :seon.shape.test6c/name]
+       [:seon.shape.test6c/mode {:default :fast} :seon.shape.test6c/mode]])
+
+    (let [source "(ns seon.shape.test6c
+  (:require [seon.schema :as schema]))
+
+(schema/register! ::name :string)
+(schema/register! ::mode [:enum :fast :slow])
+(schema/register! ::my-request [:map [::name ::name] [::mode {:default :fast} ::mode]])"
+          graph (extract/extract-graph {::extract/source source
+                                        ::extract/file-path "<test>"})]
+      (let [entries (::extract/entries graph)
+            entry-by-key (into {} (map (juxt :seon.entry/key identity)) entries)]
+        (is (false? (:seon.entry/injectable
+                     (get entry-by-key :seon.shape.test6c/name))))
+        (is (true? (:seon.entry/injectable
+                    (get entry-by-key :seon.shape.test6c/mode)))
+            "static :default on entry props should make entry injectable")))))
+
+(deftest walker-injectable-static-default-value-schema-test
+  (testing "static :default on the VALUE SCHEMA marks entry injectable"
+    (schema/register! :seon.shape.test6d/name :string)
+    (schema/register! :seon.shape.test6d/level
+      [:int {:default 1}])
+    (schema/register! :seon.shape.test6d/my-request
+      [:map
+       [:seon.shape.test6d/name :seon.shape.test6d/name]
+       [:seon.shape.test6d/level :seon.shape.test6d/level]])
+
+    (let [source "(ns seon.shape.test6d
+  (:require [seon.schema :as schema]))
+
+(schema/register! ::name :string)
+(schema/register! ::level [:int {:default 1}])
+(schema/register! ::my-request [:map [::name ::name] [::level ::level]])"
+          graph (extract/extract-graph {::extract/source source
+                                        ::extract/file-path "<test>"})]
+      (let [entries (::extract/entries graph)
+            entry-by-key (into {} (map (juxt :seon.entry/key identity)) entries)]
+        (is (false? (:seon.entry/injectable
+                     (get entry-by-key :seon.shape.test6d/name))))
+        (is (true? (:seon.entry/injectable
+                    (get entry-by-key :seon.shape.test6d/level)))
+            "static :default on value schema should make entry injectable")))))
+
+(deftest walker-injectable-no-default-test
+  (testing "entry with no default anywhere is NOT injectable"
+    (schema/register! :seon.shape.test6e/x :int)
+    (schema/register! :seon.shape.test6e/y :int)
+    (schema/register! :seon.shape.test6e/req
+      [:map
+       [:seon.shape.test6e/x :seon.shape.test6e/x]
+       [:seon.shape.test6e/y :seon.shape.test6e/y]])
+
+    (let [source "(ns seon.shape.test6e
+  (:require [seon.schema :as schema]))
+
+(schema/register! ::x :int)
+(schema/register! ::y :int)
+(schema/register! ::req [:map [::x ::x] [::y ::y]])"
+          graph (extract/extract-graph {::extract/source source
+                                        ::extract/file-path "<test>"})]
+      (let [entries (::extract/entries graph)
+            entry-by-key (into {} (map (juxt :seon.entry/key identity)) entries)]
+        (is (false? (:seon.entry/injectable
+                     (get entry-by-key :seon.shape.test6e/x))))
+        (is (false? (:seon.entry/injectable
+                     (get entry-by-key :seon.shape.test6e/y))))))))
+
+;;; ---------------------------------------------------------------------------
+;;; Discovery Queries
+;;; ---------------------------------------------------------------------------
+
+(deftest functions-matching-data-test
+  (testing "finds functions whose required non-injectable entries match available keys"
+    ;; Register schemas for a mini domain
+    (schema/register! :seon.shape.disc/exercise :string)
+    (schema/register! :seon.shape.disc/weight :double)
+    (schema/register! :seon.shape.disc/reps :int)
+    (schema/register! :seon.shape.disc/bodyweight :double)
+    (schema/register! :seon.shape.disc/volume :double)
+    (schema/register! :seon.shape.disc/sets :int)
+    ;; ctx with :default/fn on value schema — injectable
+    (schema/register! :seon.shape.disc/ctx
+      [:map {:default/fn '(fn [] {})}])
+    ;; strength-ratios output
+    (schema/register! :seon.shape.disc/strength-ratios [:vector :keyword])
+
+    ;; Function input/output schemas
+    (schema/register! :seon.shape.disc/add-workout-input
+      [:map
+       [:seon.shape.disc/ctx :seon.shape.disc/ctx]
+       [:seon.shape.disc/exercise :seon.shape.disc/exercise]
+       [:seon.shape.disc/weight :seon.shape.disc/weight]
+       [:seon.shape.disc/reps :seon.shape.disc/reps]])
+    (schema/register! :seon.shape.disc/add-workout-output
+      [:map [:seon.shape.disc/ctx :seon.shape.disc/ctx]])
+
+    (schema/register! :seon.shape.disc/record-bw-input
+      [:map
+       [:seon.shape.disc/ctx :seon.shape.disc/ctx]
+       [:seon.shape.disc/bodyweight :seon.shape.disc/bodyweight]])
+    (schema/register! :seon.shape.disc/record-bw-output
+      [:map [:seon.shape.disc/ctx :seon.shape.disc/ctx]])
+
+    (schema/register! :seon.shape.disc/volume-input
+      [:map [:seon.shape.disc/ctx :seon.shape.disc/ctx]])
+    (schema/register! :seon.shape.disc/volume-output
+      [:map
+       [:seon.shape.disc/volume :seon.shape.disc/volume]
+       [:seon.shape.disc/sets :seon.shape.disc/sets]])
+
+    (let [source "(ns seon.shape.disc
+  (:require [seon.schema :as schema]))
+
+(schema/register! ::exercise :string)
+(schema/register! ::weight :double)
+(schema/register! ::reps :int)
+(schema/register! ::bodyweight :double)
+(schema/register! ::volume :double)
+(schema/register! ::sets :int)
+(schema/register! ::ctx [:map {:default/fn '(fn [] {})}])
+(schema/register! ::strength-ratios [:vector :keyword])
+
+(schema/register! ::add-workout-input
+  [:map [::ctx ::ctx] [::exercise ::exercise] [::weight ::weight] [::reps ::reps]])
+(schema/register! ::add-workout-output [:map [::ctx ::ctx]])
+
+(schema/register! ::record-bw-input
+  [:map [::ctx ::ctx] [::bodyweight ::bodyweight]])
+(schema/register! ::record-bw-output [:map [::ctx ::ctx]])
+
+(schema/register! ::volume-input [:map [::ctx ::ctx]])
+(schema/register! ::volume-output [:map [::volume ::volume] [::sets ::sets]])
+
+(defn add-workout!
+  {:malli/schema [:=> [:cat ::add-workout-input] ::add-workout-output]}
+  [{::keys [ctx exercise weight reps]}]
+  {::ctx ctx})
+
+(defn record-bodyweight!
+  {:malli/schema [:=> [:cat ::record-bw-input] ::record-bw-output]}
+  [{::keys [ctx bodyweight]}]
+  {::ctx ctx})
+
+(defn total-volume
+  {:malli/schema [:=> [:cat ::volume-input] ::volume-output]}
+  [{::keys [ctx]}]
+  {::volume 0.0 ::sets 0})"
+          graph (extract/extract-graph {::extract/source source
+                                        ::extract/file-path "<test>"})]
+      ;; Ingest into test DB
+      (ingest/ingest-namespace!
+       {::ingest/db-name :test-db
+        ::ingest/ns-name "seon.shape.disc"
+        ::ingest/functions (::extract/functions graph)
+        ::ingest/specs (::extract/specs graph)
+        ::ingest/entries (::extract/entries graph)
+        ::ingest/shapes (::extract/shapes graph)})
+
+      (testing "workout data keys find add-workout! (ctx is injectable)"
+        (let [results (gq/functions-matching-data
+                       {::gq/db-name :test-db
+                        ::gq/available-keys #{:seon.shape.disc/exercise
+                                              :seon.shape.disc/weight
+                                              :seon.shape.disc/reps}})]
+          (is (some #(= "seon.shape.disc/add-workout!"
+                        (:seon.fn/qualified-name %))
+                    results)
+              "add-workout! should match — ctx is injectable, other 3 keys provided")
+          (is (not (some #(= "seon.shape.disc/record-bodyweight!"
+                             (:seon.fn/qualified-name %))
+                         results))
+              "record-bodyweight! should NOT match — bodyweight not provided")))
+
+      (testing "empty keys find functions that only need injectable keys"
+        (let [results (gq/functions-matching-data
+                       {::gq/db-name :test-db
+                        ::gq/available-keys #{}})]
+          (is (some #(= "seon.shape.disc/total-volume"
+                        (:seon.fn/qualified-name %))
+                    results)
+              "total-volume should match — its only input (ctx) is injectable")))
+
+      (testing "bodyweight key finds record-bodyweight! but not add-workout!"
+        (let [results (gq/functions-matching-data
+                       {::gq/db-name :test-db
+                        ::gq/available-keys #{:seon.shape.disc/bodyweight}})]
+          (is (some #(= "seon.shape.disc/record-bodyweight!"
+                        (:seon.fn/qualified-name %))
+                    results)
+              "record-bodyweight! should match")
+          (is (not (some #(= "seon.shape.disc/add-workout!"
+                             (:seon.fn/qualified-name %))
+                         results))
+              "add-workout! should NOT match — missing exercise/weight/reps")))
+
+      (testing "results sorted by specificity (most matched non-injectable keys first)"
+        (let [results (gq/functions-matching-data
+                       {::gq/db-name :test-db
+                        ::gq/available-keys #{:seon.shape.disc/exercise
+                                              :seon.shape.disc/weight
+                                              :seon.shape.disc/reps
+                                              :seon.shape.disc/bodyweight}})]
+          ;; add-workout! matches 3 non-injectable keys, record-bodyweight! matches 1
+          (is (>= (count results) 2) "Should find at least 2 matching functions")
+          (let [positions (into {} (map-indexed (fn [i r] [(:seon.fn/qualified-name r) i]))
+                                results)]
+            (when (and (positions "seon.shape.disc/add-workout!")
+                       (positions "seon.shape.disc/record-bodyweight!"))
+              (is (< (positions "seon.shape.disc/add-workout!")
+                     (positions "seon.shape.disc/record-bodyweight!"))
+                  "add-workout! (3 keys) should rank before record-bodyweight! (1 key)")))))
+
+      (testing "functions with no input shape are excluded"
+        ;; All results should have an input shape
+        (let [results (gq/functions-matching-data
+                       {::gq/db-name :test-db
+                        ::gq/available-keys #{:seon.shape.disc/exercise
+                                              :seon.shape.disc/weight
+                                              :seon.shape.disc/reps
+                                              :seon.shape.disc/bodyweight}})]
+          (is (every? :seon.fn/qualified-name results)
+              "All results should be functions"))))))
+
+(deftest function-output-keys-test
+  (testing "returns correct output keys for a function"
+    ;; Uses the same DB populated in functions-matching-data-test
+    ;; but we need our own fixture run, so re-register + re-ingest
+    (schema/register! :seon.shape.out/x :int)
+    (schema/register! :seon.shape.out/y :int)
+    (schema/register! :seon.shape.out/z :int)
+    (schema/register! :seon.shape.out/input [:map [:seon.shape.out/x :seon.shape.out/x]])
+    (schema/register! :seon.shape.out/output
+      [:map
+       [:seon.shape.out/y :seon.shape.out/y]
+       [:seon.shape.out/z :seon.shape.out/z]])
+
+    (let [source "(ns seon.shape.out
+  (:require [seon.schema :as schema]))
+
+(schema/register! ::x :int)
+(schema/register! ::y :int)
+(schema/register! ::z :int)
+(schema/register! ::input [:map [::x ::x]])
+(schema/register! ::output [:map [::y ::y] [::z ::z]])
+
+(defn compute
+  {:malli/schema [:=> [:cat ::input] ::output]}
+  [{::keys [x]}]
+  {::y (inc x) ::z (* x 2)})"
+          graph (extract/extract-graph {::extract/source source
+                                        ::extract/file-path "<test>"})]
+      (ingest/ingest-namespace!
+       {::ingest/db-name :test-db
+        ::ingest/ns-name "seon.shape.out"
+        ::ingest/functions (::extract/functions graph)
+        ::ingest/specs (::extract/specs graph)
+        ::ingest/entries (::extract/entries graph)
+        ::ingest/shapes (::extract/shapes graph)})
+
+      (let [keys (gq/function-output-keys
+                  {::gq/db-name :test-db
+                   ::gq/qualified-name "seon.shape.out/compute"})]
+        (is (= #{:seon.shape.out/y :seon.shape.out/z} (set keys))
+            "Should return both output keys")))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Deduplication

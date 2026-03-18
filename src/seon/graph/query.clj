@@ -364,6 +364,96 @@
         result))))
 
 ;;; ---------------------------------------------------------------------------
+;;; Shape-Based Discovery Queries
+;;; ---------------------------------------------------------------------------
+
+(schema/register! ::available-keys
+                  [:set :keyword {:description "Set of data keys available for matching"}])
+
+(schema/register! ::qualified-name
+                  [:string {:min 1 :description "Fully qualified function name e.g. seon.foo/bar"}])
+
+(defn functions-matching-data
+  "Find functions whose input shape is satisfiable by the given data keys.
+   A function matches if ALL its required, non-injectable input entries
+   have keys present in available-keys.
+
+   Returns vector sorted by specificity (most matched non-injectable keys first).
+
+   Request keys:
+     ::db-name       - Optional. Database name keyword (default :seon.runtime)
+     ::available-keys - Required. Set of keyword keys available in the data
+
+   Returns:
+     Vector of maps with :seon.fn/qualified-name and :matched-key-count"
+  {:malli/schema [:=> [:cat [:map
+                              [::db-name {:optional true} ::db-name]
+                              [::available-keys ::available-keys]]]
+                      [:vector [:map
+                                [:seon.fn/qualified-name :string]
+                                [:matched-key-count :int]]]]}
+  [{::keys [db-name available-keys]}]
+  (let [db-name (or db-name :seon.runtime)
+        ;; Find all functions with input shapes and their entries
+        fn-entries (db/query db-name
+                             '[:find ?fn-name ?key ?optional ?injectable
+                               :where
+                               [?f :seon.fn/qualified-name ?fn-name]
+                               [?f :seon.fn/input-shape ?s]
+                               [?s :seon.shape/entries ?e]
+                               [?e :seon.entry/key ?key]
+                               [?e :seon.entry/optional ?optional]
+                               [?e :seon.entry/injectable ?injectable]])
+        ;; Group by function name
+        by-fn (group-by first fn-entries)]
+    (->> by-fn
+         (keep (fn [[fn-name entries]]
+                 (let [required-non-injectable
+                       (filter (fn [[_ _ optional injectable]]
+                                 (and (not optional) (not injectable)))
+                               entries)
+                       ;; All required non-injectable keys must be in available-keys
+                       all-satisfiable (every? (fn [[_ key _ _]]
+                                                 (contains? available-keys key))
+                                               required-non-injectable)
+                       ;; Count matched non-injectable keys (for sorting)
+                       matched-count (count (filter (fn [[_ key _ _]]
+                                                      (contains? available-keys key))
+                                                    required-non-injectable))]
+                   (when all-satisfiable
+                     {:seon.fn/qualified-name fn-name
+                      :matched-key-count matched-count}))))
+         (sort-by :matched-key-count >)
+         vec)))
+
+(defn function-output-keys
+  "Get all output keys for a function (from its output shape entries).
+
+   Request keys:
+     ::db-name        - Optional. Database name keyword (default :seon.runtime)
+     ::qualified-name - Required. Fully qualified function name
+
+   Returns:
+     Vector of keyword keys from the function's output shape"
+  {:malli/schema [:=> [:cat [:map
+                              [::db-name {:optional true} ::db-name]
+                              [::qualified-name ::qualified-name]]]
+                      [:vector :keyword]]}
+  [{::keys [db-name qualified-name]}]
+  (let [db-name (or db-name :seon.runtime)]
+    (->> (db/query db-name
+                   '[:find ?key
+                     :in $ ?fn-name
+                     :where
+                     [?f :seon.fn/qualified-name ?fn-name]
+                     [?f :seon.fn/output-shape ?s]
+                     [?s :seon.shape/entries ?e]
+                     [?e :seon.entry/key ?key]]
+                   qualified-name)
+         (map first)
+         vec)))
+
+;;; ---------------------------------------------------------------------------
 ;;; REPL Helpers
 ;;; ---------------------------------------------------------------------------
 

@@ -276,8 +276,13 @@
               inner-ref-key (:ref-key inner)
               ;; Classify the actual value type
               vtype (if inner-schema (classify-value-type inner-schema) :unknown)
-              ;; Detect injectable (:default/fn on entry props)
-              injectable (boolean (:default/fn props))
+              ;; Detect injectable: check entry props AND resolved value schema props
+              resolved-props (when resolved (try (m/properties resolved) (catch Exception _ nil)))
+              injectable (boolean
+                          (or (:default/fn props)
+                              (contains? props :default)
+                              (:default/fn resolved-props)
+                              (contains? resolved-props :default)))
               optional (boolean (:optional props))
               ;; Build entry descriptor for ID computation
               descriptor {:key k :optional optional :value-type vtype}]
