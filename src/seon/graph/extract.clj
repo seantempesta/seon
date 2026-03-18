@@ -16,8 +16,10 @@
   (:require [clj-kondo.core :as clj-kondo]
             [clojure.edn :as edn]
             [clojure.walk :as walk]
+            [malli.core :as m]
             [seon.graph.scanner :as scanner]
-            [seon.schema :as schema]))
+            [seon.schema :as schema]
+            [taoensso.timbre :as log]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schema Registration
@@ -185,6 +187,299 @@
         specs))
 
 ;;; ---------------------------------------------------------------------------
+;;; Shape Walker — Recursive Schema to Shape+Entry Entities
+;;; ---------------------------------------------------------------------------
+
+(defn- resolve-schema
+  "Resolve a Malli schema, derefing through keyword refs.
+   Returns [resolved-schema ref-key] where ref-key is the keyword if it was a ref.
+   Returns nil if resolution fails."
+  [s]
+  (try
+    (if (m/-ref-schema? s)
+      (let [form (m/form s)
+            ref-key (when (keyword? form) form)]
+        [(m/deref s) ref-key])
+      [s nil])
+    (catch Exception _
+      nil)
+    (catch StackOverflowError _
+      nil)))
+
+(defn- classify-value-type
+  "Classify a resolved Malli schema into a value-type keyword.
+   Returns the type keyword (:string, :int, :map, :vector, :enum, etc.)."
+  [s]
+  (let [t (m/type s)]
+    (case t
+      (:string :int :double :float :boolean :keyword :symbol :uuid :inst) t
+      :enum :enum
+      :fn :fn
+      :or :or
+      :and :and
+      :map :map
+      :vector :vector
+      :set :set
+      :seon.db/ref :seon.db/ref
+      :seon.flow/dynamic :seon.flow/dynamic
+      ;; For ref schemas that resolved to a known type
+      :malli.core/schema (let [resolved (resolve-schema s)]
+                           (if resolved
+                             (classify-value-type (first resolved))
+                             :unknown))
+      ;; Default: use the type keyword
+      (if (keyword? t) t :unknown))))
+
+(defn- shape-id-for-spec
+  "Generate a shape ID from a spec keyword."
+  [spec-key]
+  (str "shape:" (namespace spec-key) "/" (name spec-key)))
+
+(defn- shape-id-for-entries
+  "Generate a stable shape ID from a set of entry descriptors.
+   Used for inline schemas that don't have a spec-key."
+  [entry-descriptors]
+  (let [normalized (->> entry-descriptors
+                        (sort-by :key)
+                        (mapv (fn [{:keys [key optional value-type]}]
+                                (str key ":" value-type ":" optional))))]
+    (str "shape:inline/" (hash normalized))))
+
+(defn- walk-schema
+  "Recursively walk a Malli schema, producing shape + entry entities.
+   Returns {:shapes [...] :entries [...]} with all entities for this tree.
+
+   Arguments:
+   - schema-obj: resolved Malli Schema object (must be :map type)
+   - spec-key: keyword if from register!, nil if inline
+   - namespace-str: owning namespace
+   - visited: set of already-visited spec keys (cycle prevention)"
+  [schema-obj spec-key namespace-str visited]
+  (let [children (m/children schema-obj)
+        acc (atom {:shapes [] :entries []})
+        entry-descriptors (atom [])
+        entry-refs (atom [])]
+    (doseq [[k props child-schema] children]
+      (when (and (keyword? k) (namespace k))
+        (let [;; Resolve through refs
+              [resolved ref-key] (or (resolve-schema child-schema) [child-schema nil])
+              ;; Check for collection wrapping
+              resolved-type (when resolved (m/type resolved))
+              collection (when (#{:vector :set} resolved-type) resolved-type)
+              ;; If collection, get inner type
+              inner (if collection
+                      (let [[inner-resolved inner-ref] (or (resolve-schema (first (m/children resolved)))
+                                                           [(first (m/children resolved)) nil])]
+                        {:schema inner-resolved :ref-key inner-ref})
+                      {:schema resolved :ref-key ref-key})
+              inner-schema (:schema inner)
+              inner-ref-key (:ref-key inner)
+              ;; Classify the actual value type
+              vtype (if inner-schema (classify-value-type inner-schema) :unknown)
+              ;; Detect injectable (:default/fn on entry props)
+              injectable (boolean (:default/fn props))
+              optional (boolean (:optional props))
+              ;; Build entry descriptor for ID computation
+              descriptor {:key k :optional optional :value-type vtype}]
+          (swap! entry-descriptors conj descriptor)
+          ;; If the value is a :map, recursively create shape
+          (let [nested-shape-ref
+                (when (= :map vtype)
+                  (let [;; Determine the nested spec-key (if inner was a ref)
+                        nested-spec-key (or inner-ref-key
+                                            (when (and inner-schema (m/-ref-schema? child-schema))
+                                              (let [f (m/form child-schema)]
+                                                (when (keyword? f) f))))
+                        ;; Cycle check: skip if we've already visited this spec
+                        cycle? (and nested-spec-key (contains? visited nested-spec-key))]
+                    (when-not cycle?
+                      (let [nested-visited (if nested-spec-key
+                                             (conj visited nested-spec-key)
+                                             visited)
+                            nested-result (walk-schema inner-schema nested-spec-key
+                                                       namespace-str nested-visited)
+                            nested-shape (first (:shapes nested-result))]
+                        ;; Accumulate nested shapes and entries
+                        (swap! acc update :shapes into (:shapes nested-result))
+                        (swap! acc update :entries into (:entries nested-result))
+                        ;; Return the shape ID for ref linking
+                        (when nested-shape
+                          (:seon.shape/id nested-shape))))))]
+            ;; Compute entry ID based on parent shape + key
+            ;; We'll fix the ID once we know the shape ID
+            (swap! entry-refs conj
+                   (cond-> {:seon.entry/key k
+                            :seon.entry/optional optional
+                            :seon.entry/injectable injectable
+                            :seon.entry/value-type vtype}
+                     nested-shape-ref (assoc :seon.entry/value-shape
+                                             [:seon.shape/id nested-shape-ref])
+                     collection (assoc :seon.entry/collection collection)))))))
+    ;; Compute shape ID
+    (let [shape-id (if spec-key
+                     (shape-id-for-spec spec-key)
+                     (shape-id-for-entries @entry-descriptors))
+          ;; Finalize entry IDs
+          entries (mapv (fn [entry]
+                          (assoc entry :seon.entry/id
+                                 (str shape-id "|" (namespace (:seon.entry/key entry))
+                                      "/" (name (:seon.entry/key entry)))))
+                        @entry-refs)
+          ;; Build shape entity
+          shape (cond-> {:seon.shape/id shape-id
+                         :seon.shape/namespace namespace-str
+                         :seon.shape/entries (mapv (fn [e]
+                                                     [:seon.entry/id (:seon.entry/id e)])
+                                                   entries)}
+                  spec-key (assoc :seon.shape/spec-key spec-key))]
+      ;; Add this shape + its entries to accumulator
+      (swap! acc update :shapes #(into [shape] %))
+      (swap! acc update :entries into entries)
+      @acc)))
+
+(defn- walk-registered-schema
+  "Walk a single registered schema by keyword.
+   Returns {:shapes [...] :entries [...]} or nil on failure."
+  [spec-key namespace-str visited]
+  (try
+    (let [s (m/schema spec-key)
+          [resolved _] (or (resolve-schema s) [s nil])]
+      (when (= :map (m/type resolved))
+        (walk-schema resolved spec-key namespace-str (conj visited spec-key))))
+    (catch Exception e
+      (log/debug "Skipping unresolvable schema" {:key spec-key :error (.getMessage e)})
+      nil)
+    (catch StackOverflowError _
+      (log/debug "Skipping self-referential schema" {:key spec-key})
+      nil)))
+
+(defn- walk-inline-schema
+  "Walk an inline :malli/schema form to extract input and output shapes.
+   Returns {:input-shape-id str-or-nil :output-shape-id str-or-nil
+            :shapes [...] :entries [...]}"
+  [schema-form namespace-str visited]
+  (let [;; Parse [:=> [:cat input-spec ...] output-spec]
+        arrow-form (cond
+                     (and (vector? schema-form)
+                          (= :=> (first schema-form)))
+                     schema-form
+
+                     (and (vector? schema-form)
+                          (= :function (first schema-form)))
+                     (some #(when (and (vector? %) (= :=> (first %))) %)
+                           (rest schema-form))
+
+                     :else nil)
+        acc {:shapes [] :entries [] :input-shape-id nil :output-shape-id nil}]
+    (if-not arrow-form
+      acc
+      (let [input-form (second arrow-form)
+            output-form (nth arrow-form 2 nil)
+            ;; Process input: [:cat input-schema ...]
+            input-schema (when (and (vector? input-form)
+                                    (= :cat (first input-form)))
+                           (second input-form))
+            ;; Walk input
+            input-result (when input-schema
+                           (try
+                             (let [s (m/schema input-schema)
+                                   [resolved ref-key] (or (resolve-schema s) [s nil])]
+                               (when (= :map (m/type resolved))
+                                 (let [spec-key (or ref-key
+                                                    (when (keyword? input-schema) input-schema))]
+                                   (when-not (contains? visited spec-key)
+                                     (walk-schema resolved spec-key namespace-str
+                                                  (if spec-key (conj visited spec-key) visited))))))
+                             (catch Exception e
+                               (log/debug "Failed to walk input schema" {:form input-schema :error (.getMessage e)})
+                               nil)))
+            ;; Walk output
+            output-result (when output-form
+                            (try
+                              (let [s (m/schema output-form)
+                                    [resolved ref-key] (or (resolve-schema s) [s nil])]
+                                (when (= :map (m/type resolved))
+                                  (let [spec-key (or ref-key
+                                                     (when (keyword? output-form) output-form))]
+                                    (when-not (contains? visited spec-key)
+                                      (walk-schema resolved spec-key namespace-str
+                                                   (if spec-key (conj visited spec-key) visited))))))
+                              (catch Exception e
+                                (log/debug "Failed to walk output schema" {:form output-form :error (.getMessage e)})
+                                nil)))]
+        {:shapes (into (or (:shapes input-result) [])
+                       (or (:shapes output-result) []))
+         :entries (into (or (:entries input-result) [])
+                        (or (:entries output-result) []))
+         :input-shape-id (when input-result
+                           (:seon.shape/id (first (:shapes input-result))))
+         :output-shape-id (when output-result
+                            (:seon.shape/id (first (:shapes output-result))))}))))
+
+(defn- extract-shapes
+  "Walk all registered specs and fn-schemas to produce shape + entry entities.
+   Returns {:shapes [...] :entries [...] :fn-shape-links {qn {:input id :output id}}}."
+  [specs fn-schemas namespace-str]
+  (let [all-shapes (atom [])
+        all-entries (atom [])
+        seen-shape-ids (atom #{})
+        fn-shape-links (atom {})
+        visited #{}
+        ;; 1. Walk named specs (from register! calls)
+        _ (doseq [spec specs]
+            (let [spec-key (:seon.spec/key spec)
+                  base-type (:seon.spec/base-type spec)]
+              (when (= :map base-type)
+                (when-let [result (walk-registered-schema spec-key namespace-str visited)]
+                  (doseq [shape (:shapes result)]
+                    (when-not (@seen-shape-ids (:seon.shape/id shape))
+                      (swap! seen-shape-ids conj (:seon.shape/id shape))
+                      (swap! all-shapes conj shape)))
+                  (doseq [entry (:entries result)]
+                    (when-not (@seen-shape-ids (:seon.entry/id entry))
+                      (swap! seen-shape-ids conj (:seon.entry/id entry))
+                      (swap! all-entries conj entry)))))))
+        ;; 2. Walk fn-schemas (inline :malli/schema metadata)
+        _ (doseq [[qn schema-form] fn-schemas]
+            (let [result (walk-inline-schema schema-form namespace-str visited)]
+              ;; Add shapes and entries (dedup by ID)
+              (doseq [shape (:shapes result)]
+                (when-not (@seen-shape-ids (:seon.shape/id shape))
+                  (swap! seen-shape-ids conj (:seon.shape/id shape))
+                  (swap! all-shapes conj shape)))
+              (doseq [entry (:entries result)]
+                (when-not (@seen-shape-ids (:seon.entry/id entry))
+                  (swap! seen-shape-ids conj (:seon.entry/id entry))
+                  (swap! all-entries conj entry)))
+              ;; Record fn -> shape links
+              (when (or (:input-shape-id result) (:output-shape-id result))
+                (swap! fn-shape-links assoc qn
+                       (cond-> {}
+                         (:input-shape-id result)
+                         (assoc :input (:input-shape-id result))
+                         (:output-shape-id result)
+                         (assoc :output (:output-shape-id result)))))))]
+    {:shapes @all-shapes
+     :entries @all-entries
+     :fn-shape-links @fn-shape-links}))
+
+(defn- link-fns-to-shapes
+  "Add :seon.fn/input-shape and :seon.fn/output-shape refs to function entities."
+  [fns fn-shape-links]
+  (let [now (java.util.Date.)]
+    (mapv (fn [fn-entity]
+            (let [qn (:seon.fn/qualified-name fn-entity)
+                  links (get fn-shape-links qn)]
+              (cond-> fn-entity
+                (:input links)
+                (assoc :seon.fn/input-shape [:seon.shape/id (:input links)])
+                (:output links)
+                (assoc :seon.fn/output-shape [:seon.shape/id (:output links)])
+                links
+                (assoc :seon.fn/updated-at now))))
+          fns)))
+
+;;; ---------------------------------------------------------------------------
 ;;; Function-to-Spec Linking (moved from scanner.clj)
 ;;; ---------------------------------------------------------------------------
 
@@ -284,11 +579,13 @@
    Response keys:
      ::ns-name    - Primary namespace name
      ::namespaces - Namespace entities
-     ::functions  - Function entities (with spec links)
+     ::functions  - Function entities (with spec + shape links)
      ::specs      - Spec entities (with cross-refs)
      ::vars       - Var entities
      ::call-edges - Call graph edges
-     ::ns-deps    - Namespace dependency edges"
+     ::ns-deps    - Namespace dependency edges
+     ::shapes     - Shape entities (recursive schema index)
+     ::entries    - Entry entities (keys within shapes)"
   [{::keys [source file-path]}]
   (let [now (java.util.Date.)
         ;; 1. Run edamame scanner → specs + vars + ns markers
@@ -326,14 +623,25 @@
         ;; Determine primary ns name
         ns-str (or (:seon.ns/name (first ns-entities))
                    (:seon.fn/namespace (first linked-fns))
-                   (:seon.spec/namespace (first specs)))]
+                   (:seon.spec/namespace (first specs)))
+
+        ;; 5. Extract shapes from registered specs + fn-schemas
+        shape-data (when ns-str
+                     (extract-shapes specs fn-schemas ns-str))
+
+        ;; 6. Link fns to shapes
+        shape-linked-fns (if shape-data
+                           (link-fns-to-shapes linked-fns (:fn-shape-links shape-data))
+                           linked-fns)]
     {::ns-name ns-str
      ::namespaces ns-entities
-     ::functions linked-fns
+     ::functions shape-linked-fns
      ::specs specs
      ::vars vars
      ::call-edges call-edges
-     ::ns-deps ns-deps}))
+     ::ns-deps ns-deps
+     ::shapes (or (:shapes shape-data) [])
+     ::entries (or (:entries shape-data) [])}))
 
 (defn extract-graph-from-file
   "Convenience: extract graph from a file path.
