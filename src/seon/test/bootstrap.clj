@@ -6,13 +6,21 @@
 
   Phase 2: Transparent injection via decode-based instrumentation,
   interesting domain functions with emergent data flow, data-driven
-  function routing with feedback loops."
+  function routing with feedback loops.
+
+  Phase 3: Shape-based discovery queries and data routing.
+  Given data keys, build an execution graph of matching functions,
+  cascade outputs, prune unneeded nodes, and execute in order."
   (:require [clojure.edn :as edn]
             [clojure.set :as set]
             [clojure.test :refer [deftest is testing]]
             [datalevin.core :as d]
             [malli.core :as m]
             [malli.transform :as mt]
+            [seon.db :as db]
+            [seon.graph.extract :as extract]
+            [seon.graph.ingest :as ingest]
+            [seon.graph.query :as gq]
             [seon.schema :as schema]))
 
 ;; ---------------------------------------------------------------------------
@@ -91,7 +99,8 @@
 (schema/register! ::weekly-volume :double)
 (schema/register! ::weekly-sets :int)
 (schema/register! ::ctx
-  [:map
+  [:map {:default/fn '(fn [_] {:seon.test.bootstrap/screen :home
+                                :seon.test.bootstrap/workouts []})}
    [::screen ::screen]
    [::workouts ::workouts]
    [::bodyweight {:optional true} ::bodyweight]
@@ -99,6 +108,23 @@
    [::suggestions {:optional true} ::suggestions]
    [::weekly-volume {:optional true} ::weekly-volume]
    [::weekly-sets {:optional true} ::weekly-sets]])
+
+;; Execution graph schemas
+(schema/register! ::data-keys [:set :keyword])
+(schema/register! ::system-keys [:set :keyword])
+(schema/register! ::consumers [:set :keyword])
+(schema/register! ::db-name :keyword)
+(schema/register! ::matched-key-count :int)
+(schema/register! ::graph-node [:map
+                                 [:seon.fn/qualified-name :string]
+                                 [::matched-key-count ::matched-key-count]])
+(schema/register! ::nodes [:vector ::graph-node])
+(schema/register! ::edges [:vector [:tuple :string :string]])
+(schema/register! ::graph [:map [::nodes ::nodes] [::edges ::edges]])
+(schema/register! ::data [:map-of :keyword :seon.flow/dynamic])
+(schema/register! ::result-pair [:tuple :string [:map-of :keyword :seon.flow/dynamic]])
+(schema/register! ::results [:vector ::result-pair])
+(schema/register! ::state [:map-of :keyword :seon.flow/dynamic])
 
 ;; ---------------------------------------------------------------------------
 ;; Part 3: Infrastructure Functions — map-in/map-out, fully specced
@@ -347,7 +373,223 @@
   (reset! *originals {}))
 
 ;; ---------------------------------------------------------------------------
-;; Part 8: Tests
+;; Part 8: Execution Graph — Shape-Based Data Routing
+;;
+;; Given data keys, build an execution graph:
+;; 1. Find matching functions via shape queries
+;; 2. For each, find output keys and cascade to downstream functions
+;; 3. Prune functions with no downstream consumers
+;; 4. Detect cycles (visited set)
+;; 5. Execute in topological order
+;; ---------------------------------------------------------------------------
+
+(defn- index-bootstrap-namespace!
+  "Extract and ingest the bootstrap namespace into a Datalevin test DB.
+   Returns the db-name used."
+  [db-name]
+  (let [source (slurp "src/seon/test/bootstrap.clj")
+        graph (extract/extract-graph {::extract/source source
+                                       ::extract/file-path "src/seon/test/bootstrap.clj"})]
+    (ingest/ingest-namespace!
+     {::ingest/db-name db-name
+      ::ingest/ns-name "seon.test.bootstrap"
+      ::ingest/functions (::extract/functions graph)
+      ::ingest/specs (::extract/specs graph)
+      ::ingest/entries (::extract/entries graph)
+      ::ingest/shapes (::extract/shapes graph)})
+    db-name))
+
+(defn build-execution-graph
+  "Given data keys, build the full execution graph.
+
+   Finds matching functions, cascades outputs to downstream functions,
+   detects cycles, and prunes functions with no downstream consumers.
+
+   Request keys:
+     ::data-keys  - Set of keyword keys available in the incoming data
+     ::system-keys - Set of keys always available (injectable via system state)
+     ::consumers  - Set of keys that someone wants (browser, REPL, etc.)
+     ::db-name    - Database name for shape queries
+
+   Returns:
+     Map with ::nodes (vec of function maps in execution order) and
+     ::edges (vec of [from-fn to-fn] pairs)."
+  {:malli/schema [:=> [:cat [:map
+                              [::data-keys [:set :keyword]]
+                              [::system-keys {:optional true} [:set :keyword]]
+                              [::consumers [:set :keyword]]
+                              [::db-name :keyword]]]
+                      [:map
+                       [::nodes [:vector [:map
+                                          [:seon.fn/qualified-name :string]
+                                          [::matched-key-count :int]]]]
+                       [::edges [:vector [:tuple :string :string]]]]]}
+  [{::keys [data-keys system-keys consumers db-name]}]
+  (let [all-available (into (or data-keys #{}) (or system-keys #{}))
+        ;; Phase 1: Find initial matching functions
+        ;; Only include functions that actually consume data keys (matched-key-count > 0).
+        ;; Functions with 0 matched keys (all-injectable inputs) are only included
+        ;; if they appear as downstream of a matched function.
+        initial-matches (filterv #(pos? (:matched-key-count %))
+                                 (gq/functions-matching-data
+                                  {::gq/db-name db-name
+                                   ::gq/available-keys all-available}))
+        ;; Phase 2: Cascade — for each match, find output keys and check
+        ;; if they feed into other functions. Track visited to detect cycles.
+        nodes (atom (vec initial-matches))
+        edges (atom [])
+        visited-fns (atom (set (map :seon.fn/qualified-name initial-matches)))
+        frontier (atom initial-matches)]
+    ;; BFS cascade: for each function, find downstream functions whose input
+    ;; keys (injectable or not) overlap with the upstream's output keys.
+    ;; This discovers functions that CONSUME upstream outputs, even if the
+    ;; overlapping key is injectable (like ::ctx).
+    (loop [current @frontier
+           depth 0]
+      (when (and (seq current) (< depth 10))  ;; safety cap on cascade depth
+        (let [next-frontier (atom [])]
+          (doseq [fn-match current]
+            (let [fn-name (:seon.fn/qualified-name fn-match)
+                  output-keys (set (gq/function-output-keys
+                                    {::gq/db-name db-name
+                                     ::gq/qualified-name fn-name}))
+                  ;; Find functions that consume any of the output keys
+                  ;; (even injectable ones — they still receive the data)
+                  consumers-of-output
+                  (when (seq output-keys)
+                    (db/query db-name
+                              '[:find ?ds-fn
+                                :in $ [?ok ...]
+                                :where
+                                [?e :seon.entry/key ?ok]
+                                [?s :seon.shape/entries ?e]
+                                [?f :seon.fn/input-shape ?s]
+                                [?f :seon.fn/qualified-name ?ds-fn]]
+                              (vec output-keys)))]
+              (doseq [[ds-name] consumers-of-output]
+                (when-not (@visited-fns ds-name)
+                  ;; Verify the downstream function is satisfiable
+                  ;; (all required non-injectable keys met)
+                  (let [expanded (into all-available output-keys)
+                        matches (gq/functions-matching-data
+                                 {::gq/db-name db-name
+                                  ::gq/available-keys expanded})
+                        ds-match (first (filter #(= ds-name (:seon.fn/qualified-name %))
+                                                matches))]
+                    (when ds-match
+                      (swap! visited-fns conj ds-name)
+                      (swap! nodes conj ds-match)
+                      (swap! next-frontier conj ds-match)
+                      (swap! edges conj [fn-name ds-name])))))))
+          (recur @next-frontier (inc depth)))))
+    ;; Phase 3: Prune — remove nodes whose output keys have no consumers
+    ;; and no downstream edges
+    (let [all-nodes @nodes
+          all-edges @edges
+          ;; Build adjacency: which functions feed which
+          downstream-of (group-by first all-edges)
+          ;; A function is "consumed" if:
+          ;; 1. Its output keys overlap with consumer keys, OR
+          ;; 2. It has downstream edges to consumed functions
+          consumed? (fn consumed? [fn-name visited]
+                      (if (visited fn-name) false  ;; cycle
+                          (let [output-keys (set (gq/function-output-keys
+                                                  {::gq/db-name db-name
+                                                   ::gq/qualified-name fn-name}))
+                                ;; Direct consumer interest
+                                direct (seq (set/intersection output-keys consumers))
+                                ;; Downstream edges
+                                ds-edges (get downstream-of fn-name)
+                                ;; Produces ctx (state update) — always consumed
+                                produces-ctx (contains? output-keys ::ctx)]
+                            (or direct
+                                produces-ctx
+                                (some #(consumed? (second %) (conj visited fn-name))
+                                      ds-edges)))))
+          pruned (filterv #(consumed? (:seon.fn/qualified-name %) #{}) all-nodes)
+          pruned-names (set (map :seon.fn/qualified-name pruned))
+          pruned-edges (filterv (fn [[from to]]
+                                  (and (pruned-names from) (pruned-names to)))
+                                all-edges)]
+      {::nodes pruned
+       ::edges pruned-edges})))
+
+(defn execute-graph!
+  "Execute a pre-built execution graph in topological order.
+
+   For each function:
+   1. Resolve the function var
+   2. Decode input (fills defaults from system state via dependent-default-transformer)
+   3. Call function with merged data + state
+   4. If result has ::ctx, update *state atom
+   5. Collect non-ctx output for downstream
+
+   Request keys:
+     ::graph - The graph from build-execution-graph
+     ::data  - The input data map
+
+   Returns:
+     Map of ::results (vec of [fn-name result] pairs) and ::state (final *state)."
+  {:malli/schema [:=> [:cat [:map
+                              [::graph [:map
+                                         [::nodes [:vector [:map [:seon.fn/qualified-name :string]]]]
+                                         [::edges [:vector [:tuple :string :string]]]]]
+                              [::data [:map-of :keyword :seon.flow/dynamic]]]]
+                      [:map
+                       [::results [:vector [:tuple :string [:map-of :keyword :seon.flow/dynamic]]]]
+                       [::state [:map-of :keyword :seon.flow/dynamic]]]]}
+  [{::keys [graph data]}]
+  (let [nodes (::nodes graph)
+        results (atom [])
+        accumulated-data (atom (merge data (when @*state {::ctx @*state})))]
+    (doseq [node nodes]
+      (let [fn-name (:seon.fn/qualified-name node)
+            fn-sym (symbol fn-name)
+            fn-var (try (requiring-resolve fn-sym) (catch Exception _ nil))]
+        (when fn-var
+          (let [;; Build input: merge accumulated data
+                input @accumulated-data
+                ;; Call the function
+                result (try (@fn-var input) (catch Exception _ nil))]
+            (when result
+              ;; If result has ::ctx, update state
+              (when-let [new-ctx (::ctx result)]
+                (reset! *state new-ctx)
+                (swap! accumulated-data assoc ::ctx new-ctx))
+              ;; Accumulate non-ctx outputs for downstream
+              (let [non-ctx (dissoc result ::ctx)]
+                (when (seq non-ctx)
+                  (swap! accumulated-data merge non-ctx)
+                  (swap! results conj [fn-name non-ctx]))))))))
+    {::results @results
+     ::state @*state}))
+
+(defn route-data!
+  "End-to-end: data arrives -> build graph -> execute -> return results.
+
+   Request keys:
+     ::data      - The input data map
+     ::consumers - Set of keys that consumers want
+     ::db-name   - Database name for shape queries
+
+   Returns:
+     Map with ::results and ::state from execute-graph!."
+  {:malli/schema [:=> [:cat [:map
+                              [::data [:map-of :keyword :seon.flow/dynamic]]
+                              [::consumers [:set :keyword]]
+                              [::db-name :keyword]]]
+                      [:map
+                       [::results [:vector [:tuple :string [:map-of :keyword :seon.flow/dynamic]]]]
+                       [::state [:map-of :keyword :seon.flow/dynamic]]]]}
+  [{::keys [data consumers db-name]}]
+  (let [data-keys (set (keys data))
+        graph (build-execution-graph {::data-keys data-keys
+                                       ::consumers consumers
+                                       ::db-name db-name})]
+    (execute-graph! {::graph graph ::data data})))
+
+;; ---------------------------------------------------------------------------
+;; Part 9: Tests
 ;; ---------------------------------------------------------------------------
 
 (deftest dependent-default-transformer-test
