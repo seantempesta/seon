@@ -5,17 +5,24 @@
    pulls entity data for inputs, transacts outputs back, and d/listen! fires
    downstream functions automatically from tx-reports.
 
+   v2 uses proper Datalevin refs instead of EDN serialization. Workouts are
+   separate entities linked via :db.type/ref :db.cardinality/many. The atom
+   holds a cached recursive pull and a watch diffs changes to transact.
+
    Public API:
      (init! {::conn conn})                  — register listener, build cache
      (call! {::conn conn ::fn-var #'f ::args {}}) — dispatch + reactive chain
      (shutdown! {::conn conn})              — unregister listener, cleanup
      (register-connection! {...})           — register a data consumer
      (unregister-connection! {...})         — remove a consumer
+     (refresh-atom! {...})                  — re-pull namespace entity into atom
+     (diff-to-tx old new)                   — compute tx data from state diff
 
    The reactive chain is: transact -> listener fires -> discover downstream
    functions (cached) -> prune by active consumers -> dispatch each ->
    their transacts trigger more listener calls -> cycle prevention stops it."
   (:require [clojure.edn :as edn]
+            [clojure.set :as set]
             [clojure.test :refer [deftest is testing]]
             [datalevin.core :as d]
             [malli.core :as m]
@@ -84,17 +91,26 @@
   [:string {:seon.db/identity true
             :default/fn '(fn [_] "seon.test.bootstrap-v2")}])
 
+;; Identity — workout entity (separate from namespace entity)
+(schema/register! ::workout-id
+  [:string {:seon.db/identity true}])
+
 ;; Domain (workout tracker)
 (schema/register! ::exercise :string)
 (schema/register! ::weight :double)
 (schema/register! ::reps :int)
 (schema/register! ::volume :double)
 
-;; Composite types stored as EDN strings in Datalevin
-(schema/register! ::workout-set
-  [:map [::exercise ::exercise] [::weight ::weight] [::reps ::reps]])
+;; Workouts is now a ref collection — the default is an empty vector for
+;; Malli decode, but in Datalevin it's a :db.cardinality/many ref attr
 (schema/register! ::workouts
-  [:vector {:default/fn '(fn [_] [])} ::workout-set])
+  [:vector {:default/fn '(fn [_] [])}
+   [:map
+    [::workout-id {:optional true} ::workout-id]
+    [::exercise ::exercise]
+    [::weight ::weight]
+    [::reps ::reps]
+    [:db/id {:optional true} :int]]])
 
 (schema/register! ::bodyweight :double)
 
@@ -105,10 +121,6 @@
 
 (schema/register! ::weekly-volume :double)
 (schema/register! ::weekly-sets :int)
-
-;; Second identity key — for multi-entity test
-(schema/register! ::workout-id
-  [:string {:seon.db/identity true}])
 
 ;; Connection registry schemas
 (schema/register! ::conn-id :string)
@@ -138,19 +150,23 @@
 ;; ---------------------------------------------------------------------------
 
 (defn add-workout!
-  "Add a workout set. Takes existing ::workouts from entity, returns updated."
+  "Add a workout. Returns a new workout entity map. The system creates
+   the workout entity and adds a ref from the namespace entity's ::workouts."
   {:malli/schema [:=> [:cat [:map [::ns-id ::ns-id]
-                                  [::workouts ::workouts]
                                   [::exercise ::exercise]
                                   [::weight ::weight]
                                   [::reps ::reps]]]
                       [:map [::ns-id ::ns-id]
-                            [::workouts ::workouts]]]}
-  [{::keys [ns-id workouts exercise weight reps]}]
+                            [::workout-id ::workout-id]
+                            [::exercise ::exercise]
+                            [::weight ::weight]
+                            [::reps ::reps]]]}
+  [{::keys [ns-id exercise weight reps]}]
   {::ns-id ns-id
-   ::workouts (conj workouts {::exercise exercise
-                              ::weight weight
-                              ::reps reps})})
+   ::workout-id (str (random-uuid))
+   ::exercise exercise
+   ::weight weight
+   ::reps reps})
 
 (defn record-bodyweight!
   "Record a bodyweight measurement."
@@ -163,7 +179,8 @@
    ::bodyweight bodyweight})
 
 (defn update-weekly-volume
-  "Compute weekly volume summary from workouts. Reactive downstream."
+  "Compute weekly volume summary from workouts. Reactive downstream.
+   Workouts are now proper entity maps from recursive pull."
   {:malli/schema [:=> [:cat [:map [::ns-id ::ns-id]
                                   [::workouts ::workouts]]]
                       [:map [::ns-id ::ns-id]
@@ -209,9 +226,11 @@
 ;; ---------------------------------------------------------------------------
 
 (def ^:private datalevin-schema
-  "Schema for the v2 embedded Datalevin. Workouts and suggestions are stored
-   as EDN strings since Datalevin doesn't support nested collections."
+  "Schema for the v2 embedded Datalevin. Workouts are proper entities
+   linked via :db.type/ref :db.cardinality/many. Suggestions remain
+   as EDN strings (no identity, purely derived)."
   {::ns-id {:db/valueType :db.type/string :db/unique :db.unique/identity}
+   ::workout-id {:db/valueType :db.type/string :db/unique :db.unique/identity}
    ::exercise {:db/valueType :db.type/string}
    ::weight {:db/valueType :db.type/double}
    ::reps {:db/valueType :db.type/long}
@@ -219,11 +238,10 @@
    ::bodyweight {:db/valueType :db.type/double}
    ::weekly-volume {:db/valueType :db.type/double}
    ::weekly-sets {:db/valueType :db.type/long}
-   ;; Complex types stored as EDN strings
-   ::workouts {:db/valueType :db.type/string}
-   ::suggestions {:db/valueType :db.type/string}
-   ;; Second identity for multi-entity
-   ::workout-id {:db/valueType :db.type/string :db/unique :db.unique/identity}})
+   ;; Proper ref: namespace entity -> workout entities
+   ::workouts {:db/valueType :db.type/ref :db/cardinality :db.cardinality/many}
+   ;; Suggestions remain as EDN (purely derived, no identity)
+   ::suggestions {:db/valueType :db.type/string}})
 
 ;; ---------------------------------------------------------------------------
 ;; Part 6: Shape Graph Cache
@@ -293,7 +311,7 @@
           (vals @*connections)))
 
 ;; ---------------------------------------------------------------------------
-;; Part 8: Entity-Aware Dispatch
+;; Part 8: Entity-Aware Dispatch (with ref support)
 ;; ---------------------------------------------------------------------------
 
 (defn- find-identity-keys
@@ -324,46 +342,76 @@
       (when (and (vector? cat-form) (= :cat (first cat-form)))
         [(second cat-form) output-form]))))
 
-(defn- serialize-for-datalevin
-  "Serialize complex values (vectors of maps) to EDN strings for Datalevin storage."
-  [k v]
-  (if (#{::workouts ::suggestions} k)
-    (pr-str v)
-    v))
+(def ^:private this-ns "seon.test.bootstrap-v2")
 
-(defn- deserialize-from-datalevin
-  "Deserialize EDN strings back to Clojure data."
-  [k v]
-  (if (and (#{::workouts ::suggestions} k) (string? v))
-    (edn/read-string v)
-    v))
+(defn- this-ns-key?
+  "Check if a keyword belongs to this namespace."
+  [k]
+  (and (keyword? k) (= this-ns (namespace k))))
+
+(defn pull-namespace-entity
+  "Pull the full namespace entity tree from Datalevin.
+   Uses recursive pull to expand refs into nested maps."
+  [conn ns-id]
+  (let [result (d/pull (d/db conn) '[* {::workouts [*]}] [::ns-id ns-id])]
+    (when (:db/id result)
+      ;; Deserialize suggestions from EDN
+      (cond-> result
+        (string? (::suggestions result))
+        (update ::suggestions edn/read-string)))))
 
 (defn- pull-entity
   "Pull an entity from the embedded Datalevin by identity key value.
-   Returns the entity map with deserialized values, or nil."
+   Returns the entity map with :db/id and all attrs. For namespace
+   entities, recursively pulls ::workouts refs."
   [conn id-key id-value]
-  (let [result (d/q [:find '?e '.
-                      :in '$ '?id-val
-                      :where ['?e id-key '?id-val]]
-                     (d/db conn) id-value)]
-    (when result
-      (let [entity (d/pull (d/db conn) '[*] result)]
-        (into {}
-              (keep (fn [[k v]]
-                      (when (and (keyword? k)
-                                 (= "seon.test.bootstrap-v2" (namespace k)))
-                        [k (deserialize-from-datalevin k v)])))
-              entity)))))
+  (if (= id-key ::ns-id)
+    (pull-namespace-entity conn id-value)
+    ;; Non-namespace entity (e.g. workout by ::workout-id)
+    (let [result (d/pull (d/db conn) '[*] [id-key id-value])]
+      (when (:db/id result)
+        result))))
+
+(defn- serialize-suggestions
+  "Serialize suggestions to EDN string for Datalevin storage."
+  [v]
+  (if (vector? v)
+    (pr-str v)
+    v))
+
+(defn- ensure-namespace-entity!
+  "Ensure the namespace entity exists. Creates it if missing."
+  [conn ns-id]
+  (let [existing (d/pull (d/db conn) '[:db/id] [::ns-id ns-id])]
+    (when-not (:db/id existing)
+      (d/transact! conn [{::ns-id ns-id}]))))
 
 (defn- transact-result!
   "Transact a function result back to the entity in Datalevin.
-   Serializes complex values. Returns the tx-report."
+   Handles two cases:
+   1. Same entity update — output has same identity key as a known entity
+   2. New entity + ref — output has a DIFFERENT identity key (::workout-id)
+      plus ::ns-id pointing to the parent entity. Creates the new entity
+      and adds a ref from parent."
   [conn result]
-  (let [tx-data (into {}
-                      (map (fn [[k v]]
-                             [k (serialize-for-datalevin k v)]))
-                      result)]
-    (d/transact! conn [tx-data])))
+  (let [has-workout-id (contains? result ::workout-id)
+        has-ns-id (contains? result ::ns-id)]
+    (if (and has-workout-id has-ns-id)
+      ;; New entity + ref case: create workout entity, add ref from namespace
+      (let [workout-data (dissoc result ::ns-id)
+            ns-id (::ns-id result)
+            workout-id (::workout-id result)]
+        ;; Ensure namespace entity exists (first workout creates it)
+        (ensure-namespace-entity! conn ns-id)
+        ;; Transact the new workout entity
+        (d/transact! conn [workout-data])
+        ;; Add ref from namespace entity to new workout
+        (d/transact! conn [[:db/add [::ns-id ns-id] ::workouts [::workout-id workout-id]]]))
+      ;; Same entity update: serialize suggestions if present
+      (let [tx-data (cond-> result
+                      (contains? result ::suggestions)
+                      (update ::suggestions serialize-suggestions))]
+        (d/transact! conn [tx-data])))))
 
 (defn- resolve-inputs
   "Given a function's input spec and caller args, resolve all inputs:
@@ -424,8 +472,7 @@
   (into #{}
         (keep (fn [datom]
                 (let [a (.-a datom)]
-                  (when (and (keyword? a)
-                             (= "seon.test.bootstrap-v2" (namespace a)))
+                  (when (this-ns-key? a)
                     a))))
         (:tx-data tx-report)))
 
@@ -488,7 +535,113 @@
                   nil)))))))))
 
 ;; ---------------------------------------------------------------------------
-;; Part 10: Graph Indexing Helpers
+;; Part 10: Diff-to-Transact (atom watch)
+;; ---------------------------------------------------------------------------
+
+(defn- diff-top-level
+  "Compare top-level scalar attrs (non-ref) between old and new state.
+   Returns tx data for changed attrs using :db/id from old state."
+  [old-state new-state]
+  (let [db-id (:db/id old-state)
+        ;; Compare only scalar attrs (not ::workouts which is a ref collection)
+        scalar-keys (disj (into #{} (concat (keys (dissoc old-state :db/id))
+                                            (keys (dissoc new-state :db/id))))
+                          ::workouts)]
+    (reduce (fn [tx k]
+              (let [old-v (get old-state k)
+                    new-v (get new-state k)]
+                (if (= old-v new-v)
+                  tx
+                  (conj tx {:db/id db-id k new-v}))))
+            []
+            scalar-keys)))
+
+(defn- diff-ref-collection
+  "Compare ::workouts ref collections between old and new state.
+   Matches by :db/id. Returns tx data for:
+   - Same :db/id, different attrs -> update datoms
+   - New entity (no :db/id) -> new entity + ref add
+   - Missing :db/id -> retract ref"
+  [old-state new-state]
+  (let [parent-id (:db/id old-state)
+        old-workouts (or (::workouts old-state) [])
+        new-workouts (or (::workouts new-state) [])
+        old-by-id (into {} (map (fn [w] [(:db/id w) w])) old-workouts)
+        new-by-id (into {} (keep (fn [w] (when (:db/id w) [(:db/id w) w]))) new-workouts)
+        new-without-id (filterv (complement :db/id) new-workouts)
+        old-ids (set (keys old-by-id))
+        new-ids (set (keys new-by-id))]
+    (concat
+     ;; Updates: same :db/id, different attrs
+     (mapcat (fn [id]
+               (let [old-w (old-by-id id)
+                     new-w (new-by-id id)
+                     changed-keys (filter #(and (not= % :db/id)
+                                                (not= (get old-w %) (get new-w %)))
+                                          (into #{} (concat (keys old-w) (keys new-w))))]
+                 (when (seq changed-keys)
+                   [(reduce (fn [m k] (assoc m k (get new-w k)))
+                            {:db/id id}
+                            changed-keys)])))
+             (set/intersection old-ids new-ids))
+     ;; Retractions: in old but not in new
+     (mapv (fn [id]
+             [:db/retract parent-id ::workouts id])
+           (set/difference old-ids new-ids))
+     ;; New entities without :db/id (need new workout-id + ref add)
+     (mapcat (fn [w]
+               (let [wid (or (::workout-id w) (str (random-uuid)))
+                     entity (assoc (dissoc w :db/id) ::workout-id wid)]
+                 [entity
+                  [:db/add [::ns-id (::ns-id new-state)] ::workouts [::workout-id wid]]]))
+             new-without-id))))
+
+(defn diff-to-tx
+  "Diff old and new atom states, produce Datalevin transaction data.
+   Compares entities by :db/id at each level."
+  [old-state new-state]
+  (when (and old-state new-state (not= old-state new-state))
+    (let [top-level (diff-top-level old-state new-state)
+          ref-changes (diff-ref-collection old-state new-state)]
+      (vec (concat top-level ref-changes)))))
+
+;; ---------------------------------------------------------------------------
+;; Part 10b: Atom as Cached Recursive Pull
+;; ---------------------------------------------------------------------------
+
+(defonce ^:private *ctx (atom nil))
+(defonce ^:private *ctx-conn (atom nil))
+(defonce ^:private *ctx-watch-enabled (atom true))
+
+(defn refresh-atom!
+  "Re-pull the namespace entity and reset the atom (without triggering watch)."
+  [{::keys [conn ns-id]}]
+  (reset! *ctx-watch-enabled false)
+  (try
+    (reset! *ctx (pull-namespace-entity conn ns-id))
+    (reset! *ctx-conn conn)
+    (finally
+      (reset! *ctx-watch-enabled true))))
+
+(defn setup-atom-watch!
+  "Wire the atom watch: on swap!, diff and transact changes."
+  [{::keys [conn]}]
+  (remove-watch *ctx ::sync-to-datalevin)
+  (add-watch *ctx ::sync-to-datalevin
+    (fn [_ _ old-state new-state]
+      (when (and @*ctx-watch-enabled old-state new-state (not= old-state new-state))
+        (let [tx (diff-to-tx old-state new-state)]
+          (when (seq tx)
+            ;; Disable watch during transact to avoid infinite loop
+            ;; (listener will re-pull if needed)
+            (reset! *ctx-watch-enabled false)
+            (try
+              (d/transact! conn tx)
+              (finally
+                (reset! *ctx-watch-enabled true)))))))))
+
+;; ---------------------------------------------------------------------------
+;; Part 11: Graph Indexing Helpers
 ;; ---------------------------------------------------------------------------
 
 (def ^:private graph-schema
@@ -535,7 +688,7 @@
      :spec-count (count specs)}))
 
 ;; ---------------------------------------------------------------------------
-;; Part 11: Public API — init!, call!, shutdown!
+;; Part 12: Public API — init!, call!, shutdown!
 ;; ---------------------------------------------------------------------------
 
 (defn init!
@@ -593,10 +746,13 @@
   (d/unlisten! conn :reactive-dispatch)
   (invalidate-cache!)
   (reset! *connections {})
+  (remove-watch *ctx ::sync-to-datalevin)
+  (reset! *ctx nil)
+  (reset! *ctx-conn nil)
   nil)
 
 ;; ---------------------------------------------------------------------------
-;; Part 12: Test Fixture
+;; Part 13: Test Fixture
 ;; ---------------------------------------------------------------------------
 
 (defn- with-embedded-datalevin
@@ -622,13 +778,13 @@
         (d/close graph-conn)))))
 
 ;; ---------------------------------------------------------------------------
-;; Part 13: Tests
+;; Part 14: Tests
 ;; ---------------------------------------------------------------------------
 
 (deftest entity-dispatch-test
   (with-embedded-datalevin
     (fn [conn graph-conn {::keys [results-acc]}]
-      (testing "add-workout! creates entity in Datalevin"
+      (testing "add-workout! creates workout entity in Datalevin"
         (let [{:keys [result]} (call! {::conn conn
                                        ::graph-conn graph-conn
                                        ::fn-var #'add-workout!
@@ -638,22 +794,115 @@
                                        ::results-acc results-acc})]
           (is (= "seon.test.bootstrap-v2" (::ns-id result))
               "ns-id should be defaulted")
-          (is (= 1 (count (::workouts result)))
-              "Should have one workout")))
+          (is (some? (::workout-id result))
+              "Should return a workout-id")))
 
-      (testing "Entity persisted in Datalevin"
-        (let [entity (pull-entity conn ::ns-id "seon.test.bootstrap-v2")]
-          (is (some? entity) "Entity should exist")
+      (testing "Workout is a separate entity with its own :db/id"
+        (let [entity (pull-namespace-entity conn "seon.test.bootstrap-v2")]
+          (is (some? entity) "Namespace entity should exist")
           (is (= 1 (count (::workouts entity)))
-              "Workouts should be persisted")
+              "Should have one workout ref")
+          (is (some? (:db/id (first (::workouts entity))))
+              "Workout should have its own :db/id")
           (is (= "Squat" (-> entity ::workouts first ::exercise)))))
 
-      (testing "Second workout accumulates"
+      (testing "Second workout accumulates as separate entity"
         (call! {::conn conn ::graph-conn graph-conn ::fn-var #'add-workout!
                 ::args {::exercise "Bench" ::weight 60.0 ::reps 8}
                 ::results-acc results-acc})
-        (let [entity (pull-entity conn ::ns-id "seon.test.bootstrap-v2")]
-          (is (= 2 (count (::workouts entity)))))))))
+        (let [entity (pull-namespace-entity conn "seon.test.bootstrap-v2")]
+          (is (= 2 (count (::workouts entity)))
+              "Should have two workout refs"))))))
+
+(deftest ref-entity-test
+  (with-embedded-datalevin
+    (fn [conn graph-conn {::keys [results-acc]}]
+      (testing "Each workout is a separate entity with its own :db/id"
+        (call! {::conn conn ::graph-conn graph-conn ::fn-var #'add-workout!
+                ::args {::exercise "Squat" ::weight 100.0 ::reps 5}
+                ::results-acc results-acc})
+        (call! {::conn conn ::graph-conn graph-conn ::fn-var #'add-workout!
+                ::args {::exercise "Bench" ::weight 80.0 ::reps 8}
+                ::results-acc results-acc})
+        (let [entity (pull-namespace-entity conn "seon.test.bootstrap-v2")
+              workouts (::workouts entity)
+              workout-ids (set (map :db/id workouts))]
+          (is (= 2 (count workouts)))
+          (is (= 2 (count workout-ids))
+              "Each workout should have a unique :db/id")
+          (is (not (contains? workout-ids (:db/id entity)))
+              "Workout :db/id should differ from namespace entity :db/id"))))))
+
+(deftest pull-recursive-test
+  (with-embedded-datalevin
+    (fn [conn graph-conn {::keys [results-acc]}]
+      (testing "Pull namespace entity with recursive workout expansion"
+        (call! {::conn conn ::graph-conn graph-conn ::fn-var #'add-workout!
+                ::args {::exercise "Squat" ::weight 100.0 ::reps 5}
+                ::results-acc results-acc})
+        (call! {::conn conn ::graph-conn graph-conn ::fn-var #'add-workout!
+                ::args {::exercise "Bench" ::weight 80.0 ::reps 8}
+                ::results-acc results-acc})
+        (let [entity (pull-namespace-entity conn "seon.test.bootstrap-v2")]
+          (is (some? (:db/id entity))
+              "Root entity should have :db/id")
+          (is (= "seon.test.bootstrap-v2" (::ns-id entity)))
+          (is (= 2 (count (::workouts entity))))
+          ;; Workouts should be full maps, not just refs
+          (let [w (first (::workouts entity))]
+            (is (some? (:db/id w)) "Workout should have :db/id")
+            (is (some? (::workout-id w)) "Workout should have ::workout-id")
+            (is (some? (::exercise w)) "Workout should have ::exercise")
+            (is (some? (::weight w)) "Workout should have ::weight")
+            (is (some? (::reps w)) "Workout should have ::reps")))))))
+
+(deftest atom-as-pull-test
+  (with-embedded-datalevin
+    (fn [conn graph-conn {::keys [results-acc]}]
+      (testing "Atom value matches recursive pull result"
+        (call! {::conn conn ::graph-conn graph-conn ::fn-var #'add-workout!
+                ::args {::exercise "Squat" ::weight 100.0 ::reps 5}
+                ::results-acc results-acc})
+        (refresh-atom! {::conn conn ::ns-id "seon.test.bootstrap-v2"})
+        (let [atom-val @*ctx
+              pull-val (pull-namespace-entity conn "seon.test.bootstrap-v2")]
+          (is (= atom-val pull-val)
+              "Atom should hold exact recursive pull result")
+          (is (some? (:db/id atom-val))
+              "Atom value should include :db/id")
+          (is (= 1 (count (::workouts atom-val)))))))))
+
+(deftest diff-to-transact-test
+  (with-embedded-datalevin
+    (fn [conn _graph-conn {::keys [_results-acc]}]
+      (testing "swap! atom top-level attr triggers diff-to-tx"
+        ;; Setup: create entity with bodyweight
+        (d/transact! conn [{::ns-id "seon.test.bootstrap-v2" ::bodyweight 85.0}])
+        (refresh-atom! {::conn conn ::ns-id "seon.test.bootstrap-v2"})
+        (setup-atom-watch! {::conn conn})
+        ;; Swap bodyweight
+        (swap! *ctx assoc ::bodyweight 90.0)
+        ;; Verify Datalevin was updated
+        (let [entity (pull-namespace-entity conn "seon.test.bootstrap-v2")]
+          (is (= 90.0 (::bodyweight entity))
+              "Datalevin should reflect the swap!")))
+
+      (testing "swap! atom workout weight triggers diff-to-tx"
+        ;; Add a workout via direct transact
+        (d/transact! conn [{::workout-id "w-test" ::exercise "Squat" ::weight 100.0 ::reps 5}])
+        (d/transact! conn [[:db/add [::ns-id "seon.test.bootstrap-v2"]
+                            ::workouts [::workout-id "w-test"]]])
+        (refresh-atom! {::conn conn ::ns-id "seon.test.bootstrap-v2"})
+        ;; Find the workout and update its weight
+        (swap! *ctx assoc-in [::workouts 0 ::weight] 120.0)
+        ;; Verify Datalevin was updated
+        (let [entity (pull-namespace-entity conn "seon.test.bootstrap-v2")
+              w (first (filter #(= "w-test" (::workout-id %)) (::workouts entity)))]
+          (is (= 120.0 (::weight w))
+              "Workout weight should be updated via diff-to-tx")))
+
+      ;; Clean up watch
+      (remove-watch *ctx ::sync-to-datalevin))))
 
 (deftest reactive-chain-test
   (with-embedded-datalevin
@@ -674,7 +923,7 @@
               "update-weekly-volume should fire reactively")
 
           ;; Entity should have reactively-computed weekly stats
-          (let [entity (pull-entity conn ::ns-id "seon.test.bootstrap-v2")]
+          (let [entity (pull-namespace-entity conn "seon.test.bootstrap-v2")]
             (is (= 1 (count (::workouts entity))))
             (is (= 500.0 (::weekly-volume entity))
                 "Weekly volume should be reactively computed")
@@ -696,7 +945,7 @@
               chain-fns (set (map first chain))]
           (is (chain-fns "seon.test.bootstrap-v2/suggest-next-weight")
               "suggest-next-weight should fire when bodyweight + workouts both exist")
-          (let [entity (pull-entity conn ::ns-id "seon.test.bootstrap-v2")]
+          (let [entity (pull-namespace-entity conn "seon.test.bootstrap-v2")]
             (is (= 85.0 (::bodyweight entity)))
             (is (vector? (::suggestions entity))
                 "Suggestions should be populated")
@@ -733,8 +982,7 @@
         (d/listen! conn :test-listener
           (fn [report] (swap! reports conj report)))
         ;; Direct transact — listener should fire
-        (d/transact! conn [{::ns-id "test-entity"
-                            ::workouts (pr-str [])}])
+        (d/transact! conn [{::ns-id "test-entity"}])
         (is (= 1 (count @reports))
             "Listener should have fired once")
         (is (seq (:tx-data (first @reports)))
@@ -819,11 +1067,12 @@
                         ::fn-var #'add-workout!
                         ::args {::exercise "Squat" ::weight 100.0 ::reps 5}
                         ::results-acc results-acc})]
-            (is (= 1 (count (::workouts result))))
+            (is (some? (::workout-id result))
+                "Should return workout-id for new entity")
             (is (>= (count chain) 2) "Chain should fire downstream"))
 
           ;; Verify entity state
-          (let [entity (pull-entity domain-conn ::ns-id "seon.test.bootstrap-v2")]
+          (let [entity (pull-namespace-entity domain-conn "seon.test.bootstrap-v2")]
             (is (= 500.0 (::weekly-volume entity))
                 "Downstream should have computed weekly volume"))
 
@@ -853,7 +1102,7 @@
                             ::reps (+ 3 (mod i 8))}
                     ::results-acc results-acc}))
           (let [elapsed-ms (/ (- (System/nanoTime) start) 1e6)
-                entity (pull-entity conn ::ns-id "seon.test.bootstrap-v2")
+                entity (pull-namespace-entity conn "seon.test.bootstrap-v2")
                 chains-per-sec (/ 100.0 (/ elapsed-ms 1000.0))]
             (is (= 100 (count (::workouts entity)))
                 "All 100 workouts should be persisted")
@@ -861,7 +1110,7 @@
               (is (pos? (::weekly-volume entity))
                   "Weekly volume should be computed"))
             ;; Report throughput
-            (println (str "\n=== Stress Test Results (v2 with cache + d/listen!) ===\n"
+            (println (str "\n=== Stress Test Results (v2 with refs + d/listen!) ===\n"
                           "  Total time: " (format "%.1f" elapsed-ms) " ms\n"
                           "  Chains/second: " (format "%.0f" chains-per-sec) "\n"
                           "  Cache size: " (count @*shape-cache) " entries\n"
