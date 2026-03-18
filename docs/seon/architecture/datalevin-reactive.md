@@ -174,17 +174,55 @@ Tracks active consumers (REPL sessions, browser tabs, agent connections):
 
 `active-consumers` returns the union of all `::consuming-keys` across connections. The reactive chain uses this for pruning.
 
+## Entity Refs + Atom as Cached Pull
+
+Entities reference each other via Datalevin refs — not EDN-serialized collections. Each workout is its own entity with `:db/id`. The namespace entity has `::workouts` as a cardinality-many ref.
+
+The atom holds the result of a recursive pull:
+
+```clojure
+;; The atom IS a Datalevin pull result — :db/id at every level
+{:db/id 3
+ ::ns-id "seon.test.bootstrap-v2"
+ ::screen :home
+ ::bodyweight 85.0
+ ::workouts [{:db/id 1 ::workout-id "w-001" ::exercise "Squat" ::weight 100.0 ::reps 5}
+             {:db/id 2 ::workout-id "w-002" ::exercise "Bench" ::weight 80.0 ::reps 8}]}
+```
+
+When the agent does `(swap! *ctx* assoc-in [::workouts 0 ::weight] 120.0)`:
+1. Watch fires with old + new atom states
+2. `diff-to-tx` compares by `:db/id` at each level
+3. Produces minimal transact: `[{:db/id 1 ::weight 120.0}]`
+4. `d/transact!` updates just that workout entity
+5. Listener fires → reactive chain
+
+The agent uses normal Clojure data manipulation (`swap!`, `assoc-in`, `update`). The system handles persistence automatically.
+
+### Creating New Entities via Functions
+
+`add-workout!` returns a new workout entity (with `::workout-id`, without `:db/id`). The system:
+1. Transacts the new workout entity → Datalevin assigns `:db/id`
+2. Adds a ref from the namespace entity's `::workouts` to the new workout
+3. Transaction listener fires → downstream reactions
+
 ## Performance
 
 | Metric | Value | Notes |
 |--------|-------|-------|
-| Chains/second | ~49 | Each chain = 3 LMDB writes + 3 pulls + 3 cached lookups |
+| Chains/second | ~36 | Each chain = 4+ LMDB writes (separate entities) |
 | Shape cache speedup | 9x | Eliminates Datalog join overhead |
 | LMDB write latency | ~5ms | Sync write is the throughput floor |
 | Shape entities indexed | 138 | Across full codebase |
 | Entry entities indexed | 333 | Across full codebase |
 
-The bottleneck is LMDB sync writes (~200 tx/sec). For higher throughput, batch multiple downstream writes into one transaction or use `d/transact-async`.
+Slightly slower than the EDN approach (~49/sec) because each workout is a separate transact. Batchable for higher throughput.
+
+### Design Consideration: Ref Traversal for Reactivity
+
+When a workout entity's `::weight` changes, the transaction report shows `::weight` changed on the workout entity — NOT `::workouts` on the namespace entity. Functions that react to `::workouts` (like `update-weekly-volume`) won't fire from individual workout edits.
+
+This is correct for add/remove operations (which DO change the `::workouts` ref). For attribute edits on referenced entities to cascade, the shape graph would need to understand ref traversal: "a change to any entity reachable via `::workouts` should trigger functions that read `::workouts`." This is a future enhancement.
 
 ## Public API
 
