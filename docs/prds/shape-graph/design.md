@@ -6,7 +6,7 @@ tags: [prd, architecture, flow]
 
 # Shape Graph: Recursive Schema Indexing for Function Discovery
 
-## Status: Design
+## Status: Phase 1+2 Complete
 
 ## Problem
 
@@ -242,20 +242,23 @@ If no browser is connected and no downstream function is subscribed, data that o
 
 ## Implementation Plan
 
-### Phase 1: Shape Entity Schema + Ingestion
+### Phase 1: Shape Entity Schema + Ingestion -- DONE
 
 - Register shape/entry attributes in Datalevin
-- Write `schema-form->shape-entities` that recursively walks a Malli form and produces shape + entry entities
+- Write `walk-schema` that recursively walks a Malli Schema object and produces shape + entry entities
 - Handle: `:map`, `:vector`, `:set`, leaf types, refs to named specs
-- Handle deduplication by structural identity
+- Handle deduplication by structural identity (shape ID = spec key or hash of entries)
 - Add to extract pipeline: create shapes for both named and inline schemas
+- Graceful degradation for self-referential schemas (caught StackOverflowError)
+- Two-phase entry ingestion to handle circular refs (entries -> shapes -> value-shape updates)
 
-**Files:** `src/seon/graph/extract.clj`, `src/seon/graph/ingest.clj`
+**Files:** `src/seon/graph/extract.clj`, `src/seon/graph/ingest.clj`, `test/seon/graph/shape_test.clj`
 
-### Phase 2: Link Functions to Shapes
+### Phase 2: Link Functions to Shapes -- DONE
 
-- Replace `link-fns-to-specs` with `link-fns-to-shapes`
+- Added `link-fns-to-shapes` alongside existing `link-fns-to-specs` (backward compatible)
 - For each function with `:malli/schema`, parse input/output, find or create the shape entity, set `:seon.fn/input-shape` and `:seon.fn/output-shape` refs
+- Functions linked via lookup refs `[:seon.shape/id "shape:..."]`
 
 **Files:** `src/seon/graph/extract.clj`
 
