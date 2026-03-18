@@ -6,7 +6,34 @@ tags: [prd, architecture, flow]
 
 # Datalevin-Reactive: Entity-Driven Function Dispatch
 
-## Status: Experimental
+## Status: v2 POC Complete
+
+### v2 Implementation (2026-03-18)
+
+All phases implemented in `src/seon/test/bootstrap_v2.clj`:
+
+- **Schemas + embedded Datalevin** -- identity key with `:seon.db/identity true` and `:default/fn`, domain schemas, EDN serialization for nested types
+- **Pure functions** -- `calculate-volume` (no identity key, no entity interaction)
+- **Stateful functions** -- `add-workout!`, `record-bodyweight!`, `update-weekly-volume`, `suggest-next-weight` (identity key in input AND output)
+- **Entity-aware dispatch** -- `resolve-entity` pulls entity by identity key, merges with args; `dispatch!` calls function and transacts result
+- **Transaction listener** -- `on-transaction!` reads tx-report changed attrs, queries shape graph for matching functions, dispatches with cycle prevention
+- **Graph indexing** -- embedded Datalevin for graph index, `index-this-namespace!` extracts and ingests shapes/entries/functions
+- **Top-level `call!`** -- public API that triggers the full reactive chain
+
+### Test Results (19 pass, 0 fail)
+
+- `entity-dispatch-test` -- entity creation, persistence, accumulation
+- `reactive-chain-test` -- `add-workout!` triggers `update-weekly-volume`; `record-bodyweight!` triggers `suggest-next-weight`
+- `pure-function-test` -- no entity interaction for identity-free functions
+- `cycle-prevention-test` -- chain terminates (visited set)
+- `stress-test` -- 100 rapid calls, ~42-54 chains/second, all workouts accumulated
+
+### Key Findings
+
+- Embedded LMDB throughput: ~42-54 chains/second (each chain = initial dispatch + 2 reactive downstream functions + 3 Datalevin writes)
+- Reactive chain works: `add-workout!` -> `update-weekly-volume` + `suggest-next-weight` fire automatically
+- EDN serialization needed for nested collections (Datalevin doesn't support nested maps)
+- Enhanced `dependent-default-transformer` needed to deref through Malli ref schemas for defaults
 
 ## Problem
 
@@ -269,6 +296,82 @@ Functions with identity keys in input AND output specs:
 | Reaction trigger | Function return values | Datalevin transactions |
 | Identity | Implicit (namespace) | Explicit (identity key in spec) |
 
-## Key Question
+## Performance: Caching + Throughput
 
-**Performance:** Each step in the chain is a Datalevin write + read. For embedded LMDB this should be sub-millisecond. The stress test will measure actual throughput.
+### Current: ~50 chains/second
+
+Each chain = 1 initial dispatch + 2 downstream functions = 3 writes + 3 pulls + 3 shape graph queries. The bottleneck is the shape graph queries (Datalog joins across fn→shape→entry entities), not LMDB writes.
+
+### Shape Graph Cache
+
+Shape graph lookups are **code-time data** — they only change when code is reloaded/scanned. Cache aggressively, invalidate on graph rescan.
+
+```clojure
+;; Cache: attr-set → vector of matching function names
+;; Invalidated by: graph/ingest (already calls invalidate-render-cache!)
+(defonce shape-match-cache (atom {}))
+
+(defn functions-matching-data-cached [{::keys [available-keys]}]
+  (let [key (set available-keys)]
+    (or (@shape-match-cache key)
+        (let [result (functions-matching-data {...})]
+          (swap! shape-match-cache assoc key result)
+          result))))
+```
+
+**Invalidation:** `graph/ingest/ingest-namespace!` already calls `render/invalidate-render-cache!`. Add `invalidate-shape-match-cache!` alongside it. Same trigger, same lifecycle.
+
+### Async Transactions
+
+Datalevin supports `d/transact-async` — returns a future, batches writes, 100k+ tx/sec vs 10k sync. For reactive chains where we don't need to read back between steps, use async:
+
+```clojure
+;; Fast path: fire-and-forget downstream reactions
+(d/transact-async conn tx-data)
+;; Only use sync d/transact! when the next step needs to read the result
+```
+
+### Transaction Listeners
+
+`d/listen!` registers callbacks on a connection — called after every transact. Cleaner than wrapping `d/transact!`:
+
+```clojure
+(d/listen! conn :reactive-dispatch
+  (fn [tx-report]
+    (on-transaction! {:conn conn :tx-report tx-report})))
+```
+
+This replaces the manual "transact then check" pattern. The listener fires automatically.
+
+### Target: >1000 chains/second
+
+With cached shape lookups + async transactions for downstream reactions:
+- Shape match: ~0 ms (cache hit)
+- Entity pull: <1ms (LMDB)
+- Async transact: <0.1ms (returns immediately)
+- Sync transact (initial only): ~1ms
+
+Estimated: ~1ms per chain = 1000 chains/sec.
+
+## Transaction Operations
+
+### What Schema-Driven Specs Can Express
+
+| Operation | Spec form | How |
+|-----------|-----------|-----|
+| Entity create/update | Map output with identity key | `{::ns-id "..." ::workouts [...]}` → upsert |
+| Field update | Key in output | Output key → write to entity |
+| Ref creation | `:seon.db/ref` typed output | Lookup ref or entity ID |
+| Component nesting | Nested `:map` in schema | `:db/isComponent true` via bridge |
+| Cardinality many | `[:vector ...]` in schema | Multiple `:db/add` datoms |
+
+### What Needs Explicit Convention
+
+| Operation | Convention | Why |
+|-----------|-----------|-----|
+| Entity deletion | `{:seon.db/retract-entity <id>}` in output | No map form for retractEntity |
+| Field retraction | Absent key + `{:optional true}` in output spec | Distinguish "unchanged" from "remove" |
+| CAS (optimistic locking) | Defer — use `d/with-transaction` when needed | Needs old-value comparison |
+| Partial set removal | `{:seon.db/retract-from <key> <values>}` | Can't express via map output |
+
+For v2 POC, the 95% case (map upsert) is sufficient. Entity deletion and CAS are future extensions.
