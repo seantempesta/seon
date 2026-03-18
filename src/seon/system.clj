@@ -304,7 +304,9 @@
                     :seon.graph.ingest/vars (:seon.graph.extract/vars graph)
                     :seon.graph.ingest/call-edges (:seon.graph.extract/call-edges graph)
                     :seon.graph.ingest/ns-deps (:seon.graph.extract/ns-deps graph)
-                    :seon.graph.ingest/ns-entities (:seon.graph.extract/namespaces graph)})
+                    :seon.graph.ingest/ns-entities (:seon.graph.extract/namespaces graph)
+                    :seon.graph.ingest/shapes (:seon.graph.extract/shapes graph)
+                    :seon.graph.ingest/entries (:seon.graph.extract/entries graph)})
                   (swap! ingested inc)
                   (reset! consecutive-failures 0))
                 (catch Exception e
