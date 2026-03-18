@@ -429,6 +429,10 @@
 (defn function-output-keys
   "Get all output keys for a function (from its output shape entries).
 
+   Uses pull-based approach because :seon.fn/output-shape may not be
+   indexed for Datalog queries on older databases (schema added after
+   DB creation). Pull always works regardless.
+
    Request keys:
      ::db-name        - Optional. Database name keyword (default :seon.runtime)
      ::qualified-name - Required. Fully qualified function name
@@ -440,18 +444,24 @@
                               [::qualified-name ::qualified-name]]]
                       [:vector :keyword]]}
   [{::keys [db-name qualified-name]}]
-  (let [db-name (or db-name :seon.runtime)]
-    (->> (db/query db-name
-                   '[:find ?key
-                     :in $ ?fn-name
-                     :where
-                     [?f :seon.fn/qualified-name ?fn-name]
-                     [?f :seon.fn/output-shape ?s]
-                     [?s :seon.shape/entries ?e]
-                     [?e :seon.entry/key ?key]]
-                   qualified-name)
-         (map first)
-         vec)))
+  (let [db-name (or db-name :seon.runtime)
+        ;; Find the function entity
+        fn-eids (db/query db-name
+                          '[:find ?e
+                            :in $ ?fn-name
+                            :where
+                            [?e :seon.fn/qualified-name ?fn-name]]
+                          qualified-name)]
+    (if-let [fn-eid (ffirst fn-eids)]
+      ;; Pull output shape with nested entries
+      (let [pulled (db/pull-by-name db-name
+                                    '[{:seon.fn/output-shape
+                                       [{:seon.shape/entries
+                                         [:seon.entry/key]}]}]
+                                    fn-eid)
+            entries (get-in pulled [:seon.fn/output-shape :seon.shape/entries])]
+        (mapv :seon.entry/key entries))
+      [])))
 
 ;;; ---------------------------------------------------------------------------
 ;;; REPL Helpers
