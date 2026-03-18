@@ -710,6 +710,16 @@
           data-output-keys (remove identity-key? output-keys)]
       (boolean (some consumers data-output-keys)))))
 
+(defn- has-output-identity-keys?
+  "Check if a function var has identity keys in its output schema.
+   Functions without identity keys in output (renderers, pure fns)
+   should not fire reactively — they don't write back to entities."
+  [fn-var]
+  (when-let [schema-meta (-> fn-var meta :malli/schema)]
+    (let [[_ output-form] (extract-input-output-schemas schema-meta)]
+      (when output-form
+        (seq (find-identity-keys output-form))))))
+
 (defn- make-listener
   "Create the d/listen! callback for reactive dispatch.
    Closes over conn, graph-conn, and results-acc."
@@ -727,9 +737,13 @@
             (when (should-run-function? graph-conn fn-name consumers)
               (try
                 (let [fn-var (requiring-resolve (symbol fn-name))]
-                  (binding [*processing-chain* (conj *processing-chain* fn-name)]
-                    (let [{:keys [result]} (dispatch! conn fn-var {})]
-                      (swap! results-acc conj [fn-name result]))))
+                  ;; Only fire functions that write back to entities
+                  ;; (have identity keys in output). Render functions and
+                  ;; pure functions don't participate in the reactive chain.
+                  (when (has-output-identity-keys? fn-var)
+                    (binding [*processing-chain* (conj *processing-chain* fn-name)]
+                      (let [{:keys [result]} (dispatch! conn fn-var {})]
+                        (swap! results-acc conj [fn-name result])))))
                 (catch Exception _e
                   ;; Function might not be satisfiable (missing required attrs)
                   nil)))))))))
@@ -1544,10 +1558,9 @@
            new-state (-> state
                          (update ::history conj entry)
                          (update ::repl-eval-count inc))]
-       ;; Deliver result to the waiting caller
-       (deliver promise-ref {::repl-rendered rendered
-                             ::repl-chain chain
-                             ::repl-entry entry})
+       ;; Deliver rendered string to the waiting caller
+
+       (deliver promise-ref rendered)
        ;; Output the entry on the :result out-port
        [new-state {:result [entry]}])
 
@@ -1579,13 +1592,13 @@
         out-ch (async/chan 32)
         ;; Build the flow
         fl (flow/create-flow
-             {:procs {:repl {:proc (flow/process #'repl-step)
-                             :args {::conn domain-conn
-                                    ::graph-conn graph-conn
-                                    ::render-keys (or render-keys [:seon.render/ai])
-                                    ::in-ch in-ch
-                                    ::out-ch out-ch}}}
-              :conns []})
+            {:procs {:repl {:proc (flow/process #'repl-step)
+                            :args {::conn domain-conn
+                                   ::graph-conn graph-conn
+                                   ::render-keys (or render-keys [:seon.render/ai])
+                                   ::in-ch in-ch
+                                   ::out-ch out-ch}}}
+             :conns []})
         {:keys [error-chan]} (flow/start fl)]
     (flow/resume fl)
     {::flow fl
@@ -1598,9 +1611,9 @@
      ::graph-dir graph-dir}))
 
 (defn repl-eval!
-  "Evaluate a function call in a REPL session.
-   Dispatches the function through the reactive chain, renders the entity
-   tree, and returns the rendered string.
+  "Evaluate a function call in a flow-based REPL session.
+   Returns the rendered string. Full history entry is stored internally
+   and accessible via (repl-hist session).
 
    Usage from nREPL:
      (def s (start-repl! {}))
@@ -1666,7 +1679,8 @@
      ::direct-eval-count (atom 0)}))
 
 (defn- repl-eval-direct!
-  "Evaluate in a direct-mode session."
+  "Evaluate in a direct-mode session. Returns the rendered string.
+   Full history entry (with chain, source, timestamp) is stored internally."
   [session fn-var args]
   (let [{::keys [domain-conn graph-conn results-acc render-keys
                  direct-history direct-eval-count]} session
@@ -1679,8 +1693,8 @@
         entity (pull-namespace-entity domain-conn "seon.test.bootstrap-v2")
         rendered (if entity
                    (render-tree {::graph-conn graph-conn
-                                  ::entity entity
-                                  ::render-keys render-keys})
+                                 ::entity entity
+                                 ::render-keys render-keys})
                    (pr-str result))
         entry {::repl-source (str fn-var)
                ::repl-rendered rendered
@@ -1688,9 +1702,7 @@
                ::repl-timestamp (java.util.Date.)}]
     (swap! direct-history conj entry)
     (swap! direct-eval-count inc)
-    {::repl-rendered rendered
-     ::repl-chain chain
-     ::repl-entry entry}))
+    rendered))
 
 (defn- repl-history-direct
   "Get history from a direct-mode session."
@@ -1711,11 +1723,12 @@
 
 (defn repl-eval
   "Evaluate a function call in any REPL session (flow or direct).
-   Returns map with ::repl-rendered, ::repl-chain, ::repl-entry.
+   Returns the rendered string. Full history is accessible via (repl-hist session).
 
    Usage:
      (def s (start-repl! {}))        ;; or (start-repl-direct! {})
      (repl-eval s #'add-workout! {::exercise \"Squat\" ::weight 100.0 ::reps 5})
+     ;; => \"weekly-sets: 1\\nweekly-volume: 500.0\\nworkouts:\\n  Squat...\"
      (stop-repl s)"
   [session fn-var args]
   (if (= :direct (::mode session))
@@ -1744,15 +1757,13 @@
   (testing "Direct-mode REPL session lifecycle"
     (let [session (start-repl-direct! {})]
       (try
-        (testing "eval add-workout! returns rendered output"
-          (let [result (repl-eval session #'add-workout!
-                                  {::exercise "Squat" ::weight 100.0 ::reps 5})]
-            (is (string? (::repl-rendered result))
+        (testing "eval add-workout! returns rendered string"
+          (let [rendered (repl-eval session #'add-workout!
+                                    {::exercise "Squat" ::weight 100.0 ::reps 5})]
+            (is (string? rendered)
                 "Should return rendered string")
-            (is (str/includes? (::repl-rendered result) "Squat")
-                "Rendered should mention exercise")
-            (is (seq (::repl-chain result))
-                "Should have reactive chain")))
+            (is (str/includes? rendered "Squat")
+                "Rendered should mention exercise")))
 
         (testing "second eval accumulates history"
           (repl-eval session #'add-workout!
@@ -1768,10 +1779,10 @@
                 "Each entry should have timestamp")))
 
         (testing "record-bodyweight! renders differently"
-          (let [result (repl-eval session #'record-bodyweight!
-                                  {::bodyweight 85.0})]
-            (is (string? (::repl-rendered result)))
-            (is (str/includes? (::repl-rendered result) "85.0")
+          (let [rendered (repl-eval session #'record-bodyweight!
+                                    {::bodyweight 85.0})]
+            (is (string? rendered))
+            (is (str/includes? rendered "85.0")
                 "Should show bodyweight")))
 
         (finally
@@ -1781,21 +1792,19 @@
   (testing "Flow-based REPL session lifecycle"
     (let [session (start-repl! {})]
       (try
-        (testing "eval add-workout! returns rendered output"
-          (let [result (repl-eval session #'add-workout!
-                                  {::exercise "Squat" ::weight 100.0 ::reps 5})]
-            (is (string? (::repl-rendered result))
+        (testing "eval add-workout! returns rendered string"
+          (let [rendered (repl-eval session #'add-workout!
+                                    {::exercise "Squat" ::weight 100.0 ::reps 5})]
+            (is (string? rendered)
                 "Should return rendered string")
-            (is (str/includes? (::repl-rendered result) "Squat")
-                "Rendered should mention exercise")
-            (is (seq (::repl-chain result))
-                "Should have reactive chain")))
+            (is (str/includes? rendered "Squat")
+                "Rendered should mention exercise")))
 
         (testing "second eval accumulates"
-          (let [result (repl-eval session #'add-workout!
-                                  {::exercise "Bench" ::weight 60.0 ::reps 8})]
-            (is (string? (::repl-rendered result)))
-            (is (str/includes? (::repl-rendered result) "Bench")
+          (let [rendered (repl-eval session #'add-workout!
+                                    {::exercise "Bench" ::weight 60.0 ::reps 8})]
+            (is (string? rendered))
+            (is (str/includes? rendered "Bench")
                 "Second workout should appear in render")))
 
         (testing "history via ping shows 2 entries"
@@ -1839,12 +1848,13 @@
           (stop-repl session))))))
 
 (deftest repl-chain-visibility-test
-  (testing "Chain results are visible in eval response"
+  (testing "Chain results are visible in history"
     (let [session (start-repl-direct! {})]
       (try
-        (let [result (repl-eval session #'add-workout!
-                                {::exercise "Squat" ::weight 100.0 ::reps 5})
-              chain-fns (set (map first (::repl-chain result)))]
+        (repl-eval session #'add-workout!
+                   {::exercise "Squat" ::weight 100.0 ::reps 5})
+        (let [entry (last (repl-hist session))
+              chain-fns (set (map first (::repl-chain entry)))]
           (is (chain-fns "seon.test.bootstrap-v2/add-workout!")
               "Chain should include the direct call")
           (is (chain-fns "seon.test.bootstrap-v2/update-weekly-volume")
