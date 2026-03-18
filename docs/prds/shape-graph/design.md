@@ -298,6 +298,20 @@ If no browser is connected and no downstream function is subscribed, data that o
 ;;     :state {::workouts [{...}]}}
 ```
 
+### Phase 3b: Generative Tests -- DONE
+
+- Property-based tests using `clojure.test.check` for shape graph invariants
+- **Walker determinism:** same schema always produces same shape ID, entry keys match original
+- **Injectable detection:** `:default/fn`/`:default` in props correctly sets injectable flag
+- **Matching soundness:** `functions-matching-data` returns exactly the functions whose required non-injectable keys are satisfied
+- **Execution graph acyclicity:** no duplicate functions in execution order
+- **Cascade completeness:** every node in pruned graph is justified (has consumers, produces ctx, or feeds downstream)
+- **Deduplication:** same source always produces same shapes; named specs deduplicated across fn-schema and spec list
+- **Stress test:** 50 schemas, 30 functions, 100 random matching queries verified for soundness
+- **Optional entry handling:** optional-only missing keys do not block matching
+
+**Files:** `test/seon/graph/shape_generative_test.clj`
+
 ## Next Steps
 
 ### Phase 4: Cross-Namespace Routing
