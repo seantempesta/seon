@@ -6,34 +6,39 @@ tags: [prd, architecture, flow]
 
 # Datalevin-Reactive: Entity-Driven Function Dispatch
 
-## Status: v2 POC Complete
+## Status: v2 Foundation Complete
 
-### v2 Implementation (2026-03-18)
+### v2 Foundation (2026-03-18)
 
-All phases implemented in `src/seon/test/bootstrap_v2.clj`:
+All phases implemented in `src/seon/test/bootstrap_v2.clj` (29 tests, 8 test vars):
 
-- **Schemas + embedded Datalevin** -- identity key with `:seon.db/identity true` and `:default/fn`, domain schemas, EDN serialization for nested types
-- **Pure functions** -- `calculate-volume` (no identity key, no entity interaction)
-- **Stateful functions** -- `add-workout!`, `record-bodyweight!`, `update-weekly-volume`, `suggest-next-weight` (identity key in input AND output)
-- **Entity-aware dispatch** -- `resolve-entity` pulls entity by identity key, merges with args; `dispatch!` calls function and transacts result
-- **Transaction listener** -- `on-transaction!` reads tx-report changed attrs, queries shape graph for matching functions, dispatches with cycle prevention
-- **Graph indexing** -- embedded Datalevin for graph index, `index-this-namespace!` extracts and ingests shapes/entries/functions
-- **Top-level `call!`** -- public API that triggers the full reactive chain
+- **Clean public API** -- `init!`, `call!`, `shutdown!` lifecycle; `register-connection!`, `unregister-connection!` for consumers
+- **d/listen! reactive dispatch** -- transaction listener fires automatically after every `d/transact!`, discovers downstream functions, dispatches them recursively
+- **Shape graph cache** -- `defonce` atom caches attr-set to matching function names; 9x faster lookups; invalidated on re-index
+- **Consumer pruning** -- functions only fire if their non-identity output keys have active consumers; no consumers = no pruning (run everything)
+- **Generalized `resolve-inputs`** -- works for any entity type with identity key, not just namespace state
+- **Connection registry** -- `*connections` atom tracks REPL/browser/agent consumers with consuming-keys sets
+- **Cycle prevention** -- `*processing-chain*` dynamic var (set of visited fn names) bound during listener dispatch
 
-### Test Results (19 pass, 0 fail)
+### Test Results (29 pass, 0 fail)
 
 - `entity-dispatch-test` -- entity creation, persistence, accumulation
 - `reactive-chain-test` -- `add-workout!` triggers `update-weekly-volume`; `record-bodyweight!` triggers `suggest-next-weight`
 - `pure-function-test` -- no entity interaction for identity-free functions
 - `cycle-prevention-test` -- chain terminates (visited set)
-- `stress-test` -- 100 rapid calls, ~42-54 chains/second, all workouts accumulated
+- `listener-test` -- verifies `d/listen!` fires automatically on every `d/transact!`
+- `consumer-pruning-test` -- registered consumer enables function; unregistered prunes it; no consumers = no pruning
+- `clean-api-test` -- full `init!` -> `call!` -> verify -> `shutdown!` lifecycle
+- `stress-test` -- 100 rapid calls, ~49 chains/second with caching, all workouts accumulated
 
 ### Key Findings
 
-- Embedded LMDB throughput: ~42-54 chains/second (each chain = initial dispatch + 2 reactive downstream functions + 3 Datalevin writes)
-- Reactive chain works: `add-workout!` -> `update-weekly-volume` + `suggest-next-weight` fire automatically
+- **LMDB sync writes are the throughput floor**: ~200 tx/sec for upserts, giving ~50 chains/sec (3 tx per chain). Shape cache eliminates query overhead (9x faster) but transact dominates.
+- **d/listen! works with embedded Datalevin**: listeners fire synchronously inside `d/transact!`, enabling recursive reactive chains without manual wiring
+- **Consumer pruning is effective**: identity keys in output are correctly treated as routing keys (not data), so pruning checks only non-identity output keys
 - EDN serialization needed for nested collections (Datalevin doesn't support nested maps)
 - Enhanced `dependent-default-transformer` needed to deref through Malli ref schemas for defaults
+- **>1000 chains/sec would require write batching** -- async transact doesn't help (still LMDB sync under the hood); batching multiple downstream writes into one tx would
 
 ## Problem
 
