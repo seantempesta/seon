@@ -11,6 +11,12 @@
    | logs/datalevin.log | Datalevin JVM stdout/stderr (server messages, client connects) |
    | logs/app.log | Seon-side lifecycle events (start, stop, adopt, health checks) |
 
+   ## Log Rotation
+
+   Datalevin process output is piped through a daemon thread that writes each
+   line through a rotating writer (50MB max, 3 backlog files). This prevents
+   unbounded log growth during long-running sessions.
+
    ## Configuration
 
    ```clojure
@@ -38,8 +44,9 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [integrant.core :as ig]
+            [seon.logging :as seon-log]
             [taoensso.timbre :as log])
-  (:import [java.lang ProcessBuilder ProcessBuilder$Redirect]
+  (:import [java.io BufferedReader InputStreamReader]
            [java.net Socket InetSocketAddress]))
 
 ;;; ---------------------------------------------------------------------------
@@ -168,19 +175,38 @@
          ::error (.getMessage e)}))))
 
 ;;; ---------------------------------------------------------------------------
-;;; Log File Management
+;;; Process Output Piping
 ;;; ---------------------------------------------------------------------------
 
-(defn- rotate-log-if-large!
-  "If datalevin.log exceeds max-bytes, rename to datalevin.log.1
-   (overwriting any existing .1). Simple single-file rotation — enough
-   for a dev process log."
-  [log-path max-bytes]
-  (let [f (io/file log-path)]
-    (when (and (.exists f) (> (.length f) max-bytes))
-      (let [rotated (io/file (str log-path ".1"))]
-        (log/info "Rotating Datalevin log" {:size (.length f) :to (.getName rotated)})
-        (.renameTo f rotated)))))
+(defn- start-log-pipe!
+  "Start a daemon thread that reads lines from a process's stdout/stderr
+   and writes them through a rotating log writer.
+
+   Returns the Thread (for joining on shutdown)."
+  [^Process process log-path]
+  (let [writer (seon-log/create-rotating-writer
+                 {:path log-path
+                  :max-size (* 50 1024 1024)    ; 50MB
+                  :max-backlog 3})
+        thread (Thread.
+                 (fn []
+                   (try
+                     (with-open [reader (BufferedReader.
+                                          (InputStreamReader.
+                                            (.getInputStream process)))]
+                       (loop []
+                         (when-let [line (.readLine reader)]
+                           (seon-log/write-line! writer line)
+                           (recur))))
+                     (catch java.io.IOException _
+                       ;; Process ended, stream closed — normal shutdown
+                       nil)
+                     (catch Exception e
+                       (log/warn "Datalevin log pipe error" {:error (.getMessage e)}))))
+                 "datalevin-log-pipe")]
+    (.setDaemon thread true)
+    (.start thread)
+    thread))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Process Management
@@ -188,10 +214,10 @@
 
 (defn- start-datalevin-process!
   "Start the Datalevin server as an external JVM process.
-   Returns state map with :process, :port, :root, :adopted? false.
+   Returns state map with :process, :port, :root, :adopted? false, :log-pipe.
 
    Polls port every 500ms for up to 15s waiting for the JVM to start.
-   Logs are written to logs/datalevin.log (append mode).
+   Process output is piped through a rotating writer to logs/datalevin.log.
 
    Throws on:
    - Process dies during startup (check logs/datalevin.log)
@@ -199,12 +225,9 @@
   [{:keys [port root]}]
   (.mkdirs (io/file "logs"))
   (.mkdirs (io/file root))
-  ;; Rotate before starting so new session gets a clean(ish) log
-  (rotate-log-if-large! "logs/datalevin.log" (* 10 1024 1024)) ; 10MB
   (let [command ["bin/run-datalevin"]
-        log-file (io/file "logs/datalevin.log")
+        log-path "logs/datalevin.log"
         builder (doto (ProcessBuilder. ^java.util.List command)
-                  (.redirectOutput (ProcessBuilder$Redirect/appendTo log-file))
                   (.redirectErrorStream true)
                   (.directory (io/file ".")))
         env (.environment builder)]
@@ -212,9 +235,10 @@
     (.put env "DATALEVIN_ROOT" (str root))
     (log/info "Starting Datalevin process"
               {:command command :port port :root root
-               :log-file (.getPath log-file)})
+               :log-file log-path})
     (let [process (.start builder)
-          pid (.pid process)]
+          pid (.pid process)
+          log-pipe (start-log-pipe! process log-path)]
       (write-pid! root pid)
       (log/info "Datalevin process spawned, waiting for port" {:pid pid :port port})
       ;; Poll for port to become available (JVM startup is slow)
@@ -224,23 +248,24 @@
           (let [exit-code (.exitValue process)]
             (log/error "Datalevin process died during startup"
                        {:exit-code exit-code :pid pid
-                        :log-file (.getPath log-file)})
+                        :log-file log-path})
             (clean-pid! root)
             (throw (ex-info (str "Datalevin process died (exit " exit-code
                                  "). Check logs/datalevin.log")
                             {:exit-code exit-code
-                             :log-file (.getPath log-file)})))
+                             :log-file log-path})))
 
           (port-open? port 500)
           (do (log/info "Datalevin server ready"
                         {:pid pid :port port
                          :startup-ms (* attempts 500)})
-              {:process process :port port :root root :adopted? false})
+              {:process process :port port :root root
+               :adopted? false :log-pipe log-pipe})
 
           (>= attempts 30)
           (do (log/error "Datalevin server startup timeout"
                          {:pid pid :port port :waited-ms (* attempts 500)
-                          :log-file (.getPath log-file)})
+                          :log-file log-path})
               (.destroy process)
               (.waitFor process 3 java.util.concurrent.TimeUnit/SECONDS)
               (clean-pid! root)
