@@ -1,9 +1,8 @@
 (ns seon.flow.status-test
-  (:require [clojure.core.async :as async]
-            [clojure.core.async.flow :as flow]
+  (:require [clojure.core.async.flow :as flow]
             [clojure.test :refer [deftest is testing use-fixtures]]
-            [seon.flow.registry :as registry]
-            [seon.flow.status :as status]))
+            [seon.flow.status :as status]
+            [seon.runtime :as runtime]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Helpers
@@ -27,10 +26,10 @@
         fl (flow/create-flow config)
         chans (flow/start fl)]
     (flow/resume fl)
-    (registry/register! {::registry/id flow-id
-                         ::registry/flow fl
-                         ::registry/chans chans
-                         ::registry/label label})
+    (runtime/register-flow! {::runtime/flow-id flow-id
+                             ::runtime/flow fl
+                             ::runtime/chans chans
+                             ::runtime/label label})
     (status/start-error-drain! {::status/id flow-id
                                 ::status/error-chan (:error-chan chans)})
     {:flow fl :chans chans}))
@@ -39,15 +38,15 @@
   [flow-id fl]
   (flow/stop fl)
   (status/stop-error-drain! {::status/id flow-id})
-  (registry/unregister! {::registry/id flow-id}))
+  (runtime/unregister-flow! {::runtime/flow-id flow-id}))
 
 (use-fixtures :each (fn [f]
-                      (registry/clear!)
+                      (runtime/clear-flows!)
                       (f)
                       ;; Clean up any remaining flows
-                      (doseq [[id entry] (registry/list-flows)]
-                        (try (flow/stop (::registry/flow entry)) (catch Exception _)))
-                      (registry/clear!)))
+                      (doseq [[id handle] (runtime/list-flows {})]
+                        (try (flow/stop (:flow handle)) (catch Exception _)))
+                      (runtime/clear-flows!)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Tests

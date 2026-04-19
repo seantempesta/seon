@@ -32,8 +32,8 @@
                   [:string {:description "The unknown symbol to find suggestions for"}])
 
 (schema/register! ::candidates
-                  [:vector [:or :string :symbol :keyword]
-                   {:description "Available symbols to search through"}])
+                  [:vector {:description "Available symbols to search through"}
+                   [:or :string :symbol :keyword]])
 
 (schema/register! ::suggestion
                   [:maybe {:description "The suggested symbol, or nil if none found"} :string])

@@ -1,3 +1,9 @@
+---
+type: prd
+status: abandoned
+tags: [prd, archive]
+---
+
 # PRD: Bidirectional Agent Control
 
 **Status:** Phase 1 Complete, Phase 2 Paused (superseded by AI Namespace Refactor)
@@ -80,10 +86,10 @@ We're missing:
 
 | Resource | Purpose |
 |----------|---------|
-| https://github.com/hesreallyhim/awesome-claude-code | Community integrations, undocumented features |
-| https://platform.claude.com/docs/en/agent-sdk/hooks | Official hooks documentation |
-| https://platform.claude.com/docs/en/agent-sdk/typescript | TypeScript SDK reference |
-| https://github.com/anthropics/claude-code/issues | Bug reports may reveal internals |
+| [awesome-claude-code](https://github.com/hesreallyhim/awesome-claude-code) | Community integrations, undocumented features |
+| [Agent SDK hooks](https://platform.claude.com/docs/en/agent-sdk/hooks) | Official hooks documentation |
+| [TypeScript SDK](https://platform.claude.com/docs/en/agent-sdk/typescript) | TypeScript SDK reference |
+| [claude-code/issues](https://github.com/anthropics/claude-code/issues) | Bug reports may reveal internals |
 
 ---
 
@@ -106,6 +112,7 @@ We're missing:
     ;; Wrap stdout to log all messages
     ;; Wrap stdin to log all commands we send
     ...))
+
 ```
 
 **Questions to answer:**
@@ -126,6 +133,7 @@ We're missing:
 ```bash
 # Search for control protocol implementation
 grep -r "can_use_tool\|canUseTool\|interrupt\|setPermissionMode" reference-code/
+
 ```
 
 ### Task 3: Test Control Messages from Clojure
@@ -151,6 +159,7 @@ grep -r "can_use_tool\|canUseTool\|interrupt\|setPermissionMode" reference-code/
     ;; Read messages until we see tool_use
     ;; Then try sending a control message...
     ))
+
 ```
 
 ### Task 4: Improve core.async Architecture
@@ -179,6 +188,7 @@ grep -r "can_use_tool\|canUseTool\|interrupt\|setPermissionMode" reference-code/
     ;; Reader updates status-atom based on messages
     ;; Control-ch can send interrupt signal
     ...))
+
 ```
 
 ### Task 5: Investigate Community Integrations
@@ -194,6 +204,7 @@ grep -r "can_use_tool\|canUseTool\|interrupt\|setPermissionMode" reference-code/
 ```bash
 cd reference-code
 git clone https://github.com/hesreallyhim/awesome-claude-code
+
 ```
 
 **Look for:**
@@ -218,6 +229,7 @@ git clone https://github.com/hesreallyhim/awesome-claude-code
 (defn tail [session-id] (sdk/tail-messages session-id))
 (defn pending [] (sdk/list-pending-approvals))
 (defn interrupt! [session-id] (sdk/interrupt-agent! session-id))
+
 ```
 
 ---
@@ -281,19 +293,23 @@ Are there hidden flags?
 ## Implementation Phases (After Research)
 
 ### Phase 1: Protocol Documentation
+
 - Capture and document all message types
 - Understand control flow for tool execution
 
 ### Phase 2: Core.async Refactor
+
 - Mult for multiple consumers
 - Control channel for interrupts
 - Status tracking
 
 ### Phase 3: Clojure Hooks
+
 - In-process callbacks via bidirectional protocol
 - Or optimized shell hooks via nREPL
 
 ### Phase 4: Agent Observatory
+
 - REPL helpers for orchestrator
 - Live visibility into all agents
 
@@ -326,6 +342,7 @@ as the `prompt` parameter instead of a string. This enables:
 ### Message Types (from SDK demos)
 
 #### SDKUserMessage (stdin to CLI)
+
 ```typescript
 {
   type: "user",
@@ -334,15 +351,18 @@ as the `prompt` parameter instead of a string. This enables:
     content: string | ContentBlock[]
   }
 }
+
 ```
 
 #### SDKMessage (stdout from CLI) - Union type:
+
 - **SDKSystemMessage** - Init message with session info, tools, skills
 - **SDKAssistantMessage** - Claude's responses with text/tool_use blocks
 - **SDKUserMessage** - Echoed user messages (when `--replay-user-messages`)
 - **SDKResultMessage** - Final completion with cost, duration, status
 
 ### SDKSystemMessage (type: "system")
+
 ```typescript
 {
   type: "system",
@@ -352,9 +372,11 @@ as the `prompt` parameter instead of a string. This enables:
   skills: SkillInfo[],     // Available skills
   mcp_servers: ServerInfo[] // Connected MCP servers
 }
+
 ```
 
 ### SDKAssistantMessage (type: "assistant")
+
 ```typescript
 {
   type: "assistant",
@@ -365,9 +387,11 @@ as the `prompt` parameter instead of a string. This enables:
   session_id: string,
   uuid: string
 }
+
 ```
 
 ### SDKResultMessage (type: "result")
+
 ```typescript
 {
   type: "result",
@@ -379,11 +403,13 @@ as the `prompt` parameter instead of a string. This enables:
   duration_ms: number,
   session_id: string
 }
+
 ```
 
 ### V2 Session API (from hello-world-v2)
 
 The SDK provides higher-level session APIs:
+
 ```typescript
 // Create session
 await using session = unstable_v2_createSession({ model: 'sonnet' });
@@ -396,6 +422,7 @@ for await (const msg of session.stream()) { ... }
 
 // Resume session
 await using session = unstable_v2_resumeSession(sessionId, options);
+
 ```
 
 ### Multi-Turn Pattern (from simple-chatapp)
@@ -423,11 +450,13 @@ const query = query({
 
 // Send messages anytime
 messageQueue.push("Follow-up question");
+
 ```
 
 ### CLI Flags Discovered
 
 Key flags for programmatic control:
+
 ```
 --output-format stream-json    # Required for message streaming
 --input-format stream-json     # Required for sending messages
@@ -437,9 +466,11 @@ Key flags for programmatic control:
 --fork-session                 # Create new session from resume point
 --session-id <uuid>            # Use specific session ID
 --include-partial-messages     # Stream partial chunks
+
 ```
 
 Complete flag list (from `claude --help`, v2.1.12):
+
 ```
 --add-dir <dirs>               # Additional directories for tool access
 --agent <agent>                # Agent for session (overrides setting)
@@ -477,6 +508,7 @@ Complete flag list (from `claude --help`, v2.1.12):
 --system-prompt <prompt>       # System prompt for session
 --tools <tools>                # Available tools ("", "default", or list)
 --verbose                      # Override verbose mode setting
+
 ```
 
 ### Session Resume Pattern
@@ -489,6 +521,7 @@ Complete flag list (from `claude --help`, v2.1.12):
 ### Hook Integration via SDK
 
 The SDK supports inline hooks (no shell commands):
+
 ```typescript
 query({
   prompt: "...",
@@ -504,6 +537,7 @@ query({
     }
   }
 });
+
 ```
 
 ### Control Methods (V2 API)
@@ -518,7 +552,9 @@ These likely send control messages on stdin (needs verification).
 ### Actual Captured Protocol (from logs/protocol-capture-*.jsonl)
 
 #### System Init Message (stdout)
+
 First message received after spawn. Contains all available tools, MCP servers, session ID:
+
 ```json
 {
   "type": "system",
@@ -538,10 +574,13 @@ First message received after spawn. Contains all available tools, MCP servers, s
   "apiKeySource": "none",
   "uuid": "f424bf18-1d96-4703-9b00-8015b3d0970a"
 }
+
 ```
 
 #### User Message (stdin)
+
 Send prompts or follow-ups:
+
 ```json
 {
   "type": "user",
@@ -552,10 +591,13 @@ Send prompts or follow-ups:
   },
   "parent_tool_use_id": null
 }
+
 ```
 
 #### Assistant Message (stdout)
+
 Claude's responses, may include tool_use blocks:
+
 ```json
 {
   "type": "assistant",
@@ -581,10 +623,13 @@ Claude's responses, may include tool_use blocks:
     }
   }
 }
+
 ```
 
 #### Result Message (stdout)
+
 Final completion with cost and stats:
+
 ```json
 {
   "type": "result",
@@ -616,6 +661,7 @@ Final completion with cost and stats:
     }
   }
 }
+
 ```
 
 ### What We Still Need to Discover
@@ -635,9 +681,11 @@ Final completion with cost and stats:
 **Critical Finding**: The Claude CLI does NOT support control messages over stdin.
 
 When attempting to send messages with types like `interrupt` or `control`, the CLI returns:
+
 ```
 Error: Expected message type 'user' or 'control', got 'interrupt'
 Error: Expected message type 'user' or 'control', got 'control'
+
 ```
 
 This contradictory error suggests the CLI may have partial control support but it's not functional.
@@ -704,6 +752,7 @@ Added orchestrator visibility functions:
 ;; Get agent cost (if completed)
 (sdk/agent-cost {::sdk/session-id "a1b2"})
 ;; => {::sdk/session-id "a1b2" ::sdk/cost-usd 0.05 ::sdk/turns 3}
+
 ```
 
 #### Conversation Persistence (`src/seon/claude/conversation.clj`)
@@ -716,6 +765,7 @@ XTDB schemas and functions for storing conversations:
 - `conversation/turn` - Complete turns (prompt + response)
 
 **Functions:**
+
 ```clojure
 ;; Start session
 (conv/start-session! {::conv/node node
@@ -742,6 +792,7 @@ XTDB schemas and functions for storing conversations:
     (when-let [msg (<! messages-ch)]
       (persist! msg)
       (recur))))
+
 ```
 
 #### Exploration Code (`src/seon/claude/exploration.clj`)

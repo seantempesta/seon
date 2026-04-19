@@ -1,30 +1,99 @@
 (ns seon.ns.routes
-  "HTTP routes for namespace introspection and function calls.
+  "Namespace HTTP routes: page rendering, introspection, and function calls.
 
-   Provides:
-   - /ns/{namespace} - Custom render (if namespace has `render` fn)
-                       or static introspection view (vars, functions, schemas)
-   - /ns/{namespace}?id={id} - Instance view (passed to render)
-   - /ns/{namespace}/{function} - Function call (POST only, for reactive UI actions)
+   ## Purpose
+   Bridge between HTTP and the namespace system. Every namespace in Seon is
+   browsable at /ns/{namespace}. This namespace handles the routing, content
+   negotiation, renderer resolution, reactive instance lifecycle, and SSE
+   streaming for those URLs. It is the web-facing surface of the namespace
+   system -- lifecycle.clj, introspect.clj, and render.clj do the real work.
 
-   Convention: If a namespace has a public `render` function, it will be called
-   with {:format :html/:ai/:raw :id optional-id}. This allows namespaces to
-   provide custom views of their data in multiple formats.
+   ## Architecture Position
+   - seon.web.routes: sole consumer. Registers route-patterns for dynamic dispatch.
+   - seon.ns.lifecycle: we delegate instance creation, renderer discovery.
+   - seon.ns.introspect: we delegate namespace var/fn enumeration.
+   - seon.render: we delegate renderer resolution (resolve-renderer) and format rendering.
+   - seon.ctx: we read instances, register/unregister SSE clients, get atoms.
+   - seon.web.reactive.actions: resolves function symbols to callable vars.
+   - seon.web.reactive.transform: transforms hiccup for Datastar (data-on:click etc).
 
-   Note: Functions here are Ring handlers using positional args, following
-   the pattern of other web handlers in seon.web.*"
-  (:require [clojure.string :as str]
+   ## Consumer Analysis
+   seon.web.routes is the only direct consumer. It uses route-patterns (a data var)
+   to register regex-based dynamic routes. No other namespace calls our handlers
+   directly. The consumer experience is clean -- just a data var.
+
+   ## Public API Assessment
+   | Function               | Status    | Notes                                    |
+   |------------------------|-----------|------------------------------------------|
+   | namespace-page         | OK        | Ring handler, map-in via request          |
+   | namespace-sse          | OK        | Ring handler, map-in via request          |
+   | function-call-handler  | OK        | Ring handler, map-in via request          |
+   | function-get-handler   | OK        | Ring handler, map-in via request          |
+   | after-ns-reload        | OK        | Lifecycle hook, zero-arg by convention    |
+   | route-patterns         | OK        | Data var, consumed by seon.web.routes     |
+
+   ## Convention Compliance
+   - Malli schemas: N/A -- Ring handlers take opaque request maps, not domain maps.
+     Internal helpers (parse-form-body, coerce-with-schema) use Malli for coercion.
+   - Map-in/map-out: PASS -- Ring request IS the input map. Responses are Ring maps.
+   - Namespaced keys: PARTIAL -- ctx/lifecycle calls use namespaced keys correctly.
+     Internal state (namespace-handlers atom) uses plain symbols as keys.
+   - Docstrings: PASS -- all public fns have docstrings.
+   - Tests: PASS -- 5 tests, 13 assertions covering form parsing, function calls,
+     render+transform round trip, GET calls, and validation.
+
+   ## Strategic Assessment
+   This namespace does too much: ~940 lines covering page rendering, introspection
+   view HTML, SSE handlers, form parsing, function dispatch, instance lifecycle
+   wiring, and content negotiation. The introspection view rendering (render-*-row,
+   render-instances-section, render-introspection-view) is ~250 lines of Hiccup that
+   should move to seon.ns.view or a dedicated seon.ns.introspect.view namespace.
+   The function call machinery (parse-form-body, coerce-with-schema, resolve-and-call)
+   could be its own namespace (seon.ns.dispatch). But splitting is a medium-scope
+   refactor best done as a dedicated task.
+
+   ## Issues (Prioritized)
+   - P2 - Namespace too large (~940 lines). Introspection view HTML and function
+     dispatch logic should be extracted to dedicated namespaces.
+   - P3 - namespace-handlers atom uses plain symbol keys (not namespaced).
+   - P3 - resolve-and-call discards the return value of the called function
+     in POST handler (line ~869). Only GET handler returns the result.
+
+   ## What's Good
+   - Clean delegation: lifecycle, introspect, render, ctx each own their domain.
+   - Spec-driven renderer resolution via render/resolve-renderer.
+   - Form parsing correctly handles URL-encoded qualified keywords.
+   - Content negotiation supports html/ai/raw formats.
+   - SSE properly splits between push (instances) and polling (introspection).
+   - Route patterns are pure data -- easy to test and compose.
+   - Tests cover the important integration paths end-to-end.
+
+   ## Audit Metadata
+   Audited: 2026-02-26
+   Auditor: claude-opus-4-6
+   Commit: 45a03c3
+   Tests: 5 tests, 13 pass / 0 fail (13 assertions)"
+  (:require [clojure.edn :as edn]
+            [clojure.string :as str]
             [dev.onionpancakes.chassis.core :as h]
+            [integrant.repl.state :as state]
             [org.httpkit.server :as hk]
-            [ring.util.codec :as codec]
+            [seon.db.datalevin.conn :as dl-conn]
             [seon.ctx :as ctx]
             [seon.ns.introspect :as introspect]
+            [seon.ns.lifecycle :as lifecycle]
             [seon.ns.view :as view]
+            [seon.render :as render]
+            [seon.runtime :as runtime]
             [seon.web.html :as html]
             [seon.web.sse :as sse]
             [seon.web.components :as ui]
+            [seon.render.default-page :as default-page]
             [seon.web.reactive.actions :as actions]
             [seon.web.reactive.transform :as transform]
+            [malli.core :as m]
+            [malli.error :as me]
+            [malli.transform :as mt]
             [taoensso.timbre :as log]))
 
 ;;; ---------------------------------------------------------------------------
@@ -47,13 +116,66 @@
       :else (str diff-days (if (= diff-days 1) " day ago" " days ago")))))
 
 ;;; ---------------------------------------------------------------------------
+;;; Graph Connection Helper
+;;; ---------------------------------------------------------------------------
+
+(defn- get-conn
+  "Get Datalevin runtime connection via connection manager."
+  []
+  (when-let [mgr (:seon.db.datalevin/connections state/system)]
+    (try
+      (dl-conn/get-conn! {::dl-conn/manager mgr
+                          ::dl-conn/db :seon.runtime
+                          ::dl-conn/schema (runtime/runtime-merged-schema)})
+      (catch Exception _ nil))))
+
+;;; ---------------------------------------------------------------------------
+;;; Lifecycle Wrappers
+;;; ---------------------------------------------------------------------------
+
+(defn- dynamic-namespace?
+  "Check if namespace is dynamic via lifecycle module."
+  [ns-sym]
+  (when-let [conn (get-conn)]
+    (::lifecycle/dynamic? (lifecycle/dynamic-namespace? {::lifecycle/db-name :seon.runtime
+                                                         ::lifecycle/ns-sym ns-sym}))))
+
+;;; ---------------------------------------------------------------------------
 ;;; Instance Helpers
 ;;; ---------------------------------------------------------------------------
 
 (defn- instances-for-namespace
   "Get all instances for a specific namespace, sorted newest first."
   [ns-sym]
-  (ctx/instances-for-namespace ns-sym))
+  (ctx/instances-for-namespace {::ctx/namespace ns-sym}))
+
+;;; ---------------------------------------------------------------------------
+;;; Content Negotiation
+;;; ---------------------------------------------------------------------------
+
+(defn- negotiate-format
+  "Determine output format from request.
+   Priority: ?format= query param > Accept header > default :html."
+  [params request]
+  (if-let [fmt (get params "format")]
+    (case fmt
+      "html" :html
+      "ai" :ai
+      "raw" :raw
+      :html)
+    (let [accept (get-in request [:headers "accept"] "")]
+      (cond
+        (str/includes? accept "text/plain") :ai
+        (str/includes? accept "application/edn") :raw
+        :else :html))))
+
+(defn- build-ns-data
+  "Build namespace data map for render-namespace.
+   Uses introspect to gather namespace info and puts it under ::render/ns-vars."
+  [ns-sym]
+  (let [introspection (introspect/introspect ns-sym)]
+    (cond-> {}
+      introspection (assoc ::render/ns-vars introspection))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Namespace View Rendering
@@ -170,60 +292,52 @@
         [:p {:class "text-text-500 text-sm"} "No active instances"]
         [:p {:class "text-text-400 text-xs mt-1"} "Create one to get started"]])]))
 
-(defn- namespace-has-render?
-  "Check if namespace has a public render function for page rendering.
-   The render function must accept a single map argument with :format and :id keys.
-   This distinguishes page render functions from other render functions like seon.ns.view/render."
+(defn- find-graph-render-fn
+  "Find the page renderer for a namespace from the code graph.
+   Returns a wrapped function (ctx-value) -> hiccup, or nil.
+   Discovery is 100% spec-driven: finds functions with :seon.render/html in output spec
+   whose required input keys include *ctx*."
   [ns-sym]
-  (when-let [ns-obj (find-ns ns-sym)]
-    (when-let [render-var (ns-resolve ns-obj 'render)]
-      (and (var? render-var)
-           (fn? @render-var)
-           ;; Check that it accepts a single argument (the options map)
-           (let [arglists (:arglists (meta render-var))]
-             (some #(= 1 (count %)) arglists))))))
+  (when-let [conn (get-conn)]
+    (let [{::lifecycle/keys [render-fn]}
+          (lifecycle/find-page-render-fn {::lifecycle/db-name :seon.runtime
+                                          ::lifecycle/ns-sym ns-sym})]
+      (when render-fn
+        (lifecycle/make-render-fn {::lifecycle/render-fn render-fn
+                                   ::lifecycle/ns-sym ns-sym})))))
 
-(defn- namespace-has-reactive-render?
-  "Check if namespace has a reactive render-content function.
-   A reactive namespace has:
-   - A public render-content function that takes 1 arg (ctx value map)
-   This is distinct from render which takes {:format :id} options map."
-  [ns-sym]
-  (when-let [ns-obj (find-ns ns-sym)]
-    (when-let [render-var (ns-resolve ns-obj 'render-content)]
-      (and (var? render-var)
-           (fn? @render-var)
-           (let [arglists (:arglists (meta render-var))]
-             (some #(= 1 (count %)) arglists))))))
+(defn- build-available-keys
+  "Build the set of available data keys for renderer resolution.
+   Combines ctx key, conn key, web params, and def var keys."
+  [ns-sym params]
+  (let [ns-str (str ns-sym)
+        ctx-key (keyword ns-str "*ctx*")
+        conn-key (keyword ns-str "*conn*")
+        web-params (render/namespace-web-params params ns-str)
+        ;; Start with ctx + conn (always available for dynamic ns)
+        base-keys #{ctx-key conn-key}]
+    (into base-keys (keys web-params))))
 
-(defn- get-initial-state
-  "Get initial state for a reactive namespace.
-   Calls the namespace's initial-state function if it exists,
-   otherwise returns an empty map."
-  [ns-sym]
-  (if-let [ns-obj (find-ns ns-sym)]
-    (if-let [init-var (ns-resolve ns-obj 'initial-state)]
-      (when (and (var? init-var) (fn? @init-var))
-        (@init-var))
-      {})
-    {}))
-
-(defn- get-render-content-fn
-  "Get the render-content function from a namespace."
-  [ns-sym]
-  (when-let [ns-obj (find-ns ns-sym)]
-    (when-let [render-var (ns-resolve ns-obj 'render-content)]
-      @render-var)))
-
-(defn- call-namespace-render
-  "Call the namespace's render function with format and id."
-  [ns-sym format id]
-  (let [render-fn @(ns-resolve (find-ns ns-sym) 'render)]
-    (render-fn {:format format :id id})))
+(defn- build-renderer-input
+  "Build the full input map for a resolved renderer.
+   Assembles data from all sources: ctx, conn, web params."
+  [ns-sym instance-id params]
+  (let [ns-str (str ns-sym)
+        ctx-key (keyword ns-str "*ctx*")
+        conn-key (keyword ns-str "*conn*")
+        web-params (render/namespace-web-params params ns-str)
+        ctx-atom (when instance-id
+                   (ctx/get-atom {::ctx/instance-id instance-id}))
+        ctx-val (when ctx-atom @ctx-atom)
+        conn (get-conn)]
+    (cond-> {}
+      ctx-val (assoc ctx-key ctx-val)
+      conn (assoc conn-key conn)
+      web-params (merge web-params))))
 
 (defn- view-toggle-button
   "Toggle button to switch between custom render and introspection view.
-   Only shown when namespace has a render function."
+   Only shown when namespace has a graph-discovered page renderer."
   [ns-sym current-view session-id]
   (let [introspect? (= current-view "introspect")
         ;; Build toggle URL preserving id param
@@ -246,7 +360,7 @@
   [ns-sym session-id show-toggle?]
   (if-let [data (introspect/introspect ns-sym)]
     (let [{:keys [ns-name doc functions vars atoms multimethods requires]} data
-          is-reactive? (namespace-has-reactive-render? ns-sym)]
+          is-dynamic? (dynamic-namespace? ns-sym)]
       (h/html
        [:main#morph
         ;; Header with optional toggle
@@ -261,8 +375,8 @@
          (when doc
            [:p {:class "text-text-400 text-sm mt-2 whitespace-pre-wrap max-w-3xl"} doc])]
 
-        ;; Instances section (only for reactive namespaces)
-        (when is-reactive?
+        ;; Instances section (only for dynamic namespaces)
+        (when is-dynamic?
           (render-instances-section ns-sym))
 
         ;; Functions section
@@ -340,42 +454,85 @@
             :class "inline-block mt-4 text-signal hover:text-warning text-sm"}
         "Back to Dashboard"]]])))
 
-(defn- render-custom-view
-  "Render namespace with its custom render function, including toggle button.
-   The custom render function returns an HTML string (already rendered).
-   We prepend a toggle button by injecting it after the opening main tag."
-  [ns-sym session-id]
-  (let [custom-html (call-namespace-render ns-sym :html session-id)
-        toggle-html (h/html
-                     [:div {:class "mb-4 flex justify-end"}
-                      (view-toggle-button ns-sym nil session-id)])]
-    ;; Inject toggle after <main id="morph"> opening tag
-    (str/replace custom-html
-                 #"(<main[^>]*>)"
-                 (str "$1" toggle-html))))
+(defn- render-for-format
+  "Render namespace content for non-HTML formats (:ai, :raw).
+   Uses the render pipeline: page renderer > default renderer."
+  [ns-sym fmt]
+  (let [ns-data (build-ns-data ns-sym)
+        result (render/render-namespace {::render/ns-data ns-data
+                                         ::render/format fmt})]
+    (case fmt
+      :ai {:status 200
+           :headers {"Content-Type" "text/plain; charset=utf-8"}
+           :body (str result)}
+      :raw {:status 200
+            :headers {"Content-Type" "application/edn; charset=utf-8"}
+            :body (pr-str result)})))
 
 (defn- render-namespace-content
-  "Render full namespace view content.
-   If namespace has a `render` function, calls it with {:format :html :id id}.
-   Otherwise falls back to introspection view.
+  "Render full namespace view content for HTML format (SSE polling).
+   Uses resolve-renderer with available keys for specificity-based resolution.
+   Non-HTML formats are handled separately by render-for-format.
 
    Params:
    - ns-sym: The namespace symbol
    - session-id: Optional session/instance ID
-   - view: Optional view mode - \"introspect\" forces introspection view"
-  [ns-sym session-id view]
-  (let [has-render? (namespace-has-render? ns-sym)
+   - view: Optional view mode - \"introspect\" forces introspection view
+   - params: Parsed query params map (string keys)"
+  [ns-sym session-id view params]
+  (let [conn (get-conn)
+        available-keys (build-available-keys ns-sym params)
+        resolved (when conn
+                   (render/resolve-renderer conn available-keys (str ns-sym)))
+        graph-render (when-not resolved (find-graph-render-fn ns-sym))
+        has-renderer? (or (some? resolved) (some? graph-render))
         force-introspect? (= view "introspect")]
     (cond
       ;; Force introspection view if requested
       force-introspect?
-      (render-introspection-view ns-sym session-id has-render?)
+      (render-introspection-view ns-sym session-id has-renderer?)
 
-      ;; Use custom render if available
-      has-render?
-      (render-custom-view ns-sym session-id)
+      ;; Resolved renderer via specificity algorithm
+      resolved
+      (let [input (build-renderer-input ns-sym session-id params)
+            result (resolved input)
+            hiccup (:seon.render/html result)
+            toggle-html (h/html
+                         [:div {:class "mb-4 flex justify-end"}
+                          (view-toggle-button ns-sym nil session-id)])
+            custom-html (h/html [:main#morph hiccup])]
+        (str/replace custom-html
+                     #"(<main[^>]*>)"
+                     (str "$1" toggle-html)))
 
-      ;; Default to introspection (no toggle since no custom render exists)
+      ;; Legacy graph-discovered page renderer
+      graph-render
+      (let [ctx-key (::lifecycle/ctx-spec-key
+                     (lifecycle/ctx-spec-key {::lifecycle/ns-sym ns-sym}))
+            hiccup (graph-render {ctx-key {}})
+            toggle-html (h/html
+                         [:div {:class "mb-4 flex justify-end"}
+                          (view-toggle-button ns-sym nil session-id)])
+            custom-html (h/html [:main#morph hiccup])]
+        (str/replace custom-html
+                     #"(<main[^>]*>)"
+                     (str "$1" toggle-html)))
+
+      ;; Default page template for dynamic namespaces without custom renderer
+      (dynamic-namespace? ns-sym)
+      (let [ctx-key (keyword (str ns-sym) "*ctx*")
+            input {ctx-key {}}
+            result (default-page/render-default-page input)
+            hiccup (:seon.render/html result)
+            toggle-html (h/html
+                         [:div {:class "mb-4 flex justify-end"}
+                          (view-toggle-button ns-sym nil session-id)])
+            custom-html (h/html [:main#morph hiccup])]
+        (str/replace custom-html
+                     #"(<main[^>]*>)"
+                     (str "$1" toggle-html)))
+
+      ;; Default: introspection view
       :else
       (render-introspection-view ns-sym session-id false))))
 
@@ -385,57 +542,52 @@
 
 (defn- reactive-instance-page
   "Render full HTML page for a reactive instance.
-   Similar to demo.clj's full-page but using the instance's render-content."
+   Uses base-page for consistent theming (dark bg, nav, highlight.js).
+   The render-fn comes from the ctx registry (set by lifecycle/ensure-instance!)."
   [ns-sym instance-id]
   (let [ctx-atom (ctx/get-atom {::ctx/instance-id instance-id})]
     (if ctx-atom
-      (let [render-fn (get-render-content-fn ns-sym)
+      (let [entry (ctx/get-entry {::ctx/instance-id instance-id})
+            render-fn (::ctx/render-fn entry)
             ctx-val @ctx-atom
             content-hiccup (when render-fn (render-fn ctx-val))
             transformed (when content-hiccup
-                          (transform/transform-hiccup ns-sym content-hiccup instance-id))]
-        (str
-         "<!DOCTYPE html>"
-         (h/html
-          [:html {:lang "en"}
-           [:head
-            [:meta {:charset "UTF-8"}]
-            [:meta {:name "viewport" :content "width=device-width, initial-scale=1.0"}]
-            [:title (str ns-sym " - Seon")]
-            [:link {:rel "stylesheet" :href "/css/output.css"}]
-            [:script {:type "module" :src html/datastar-js}]
-            [:script {:src "/js/scittle.js"}]
-            [:script {:src "/js/seon-debug.js"}]]
-           [:body.bg-base-bg.text-text-primary.font-mono.min-h-screen
-            [:div.container.mx-auto.p-6.max-w-4xl
-             [:header.mb-6
-              [:div.flex.items-center.justify-between
-               [:h1.text-xl.font-bold.text-accent-primary (str ns-sym)]
-               [:a {:href (str "/ns/" ns-sym "?view=introspect&instance=" instance-id)
-                    :class "px-2 py-1 text-xs font-mono rounded border text-text-500 border-base-700 hover:border-base-600 hover:text-text-200"}
-                "Introspect ->"]]
-              [:p.text-text-secondary.text-sm.mt-1
-               "Instance: " [:code.text-signal instance-id]]]
-             ;; Main content - SSE connects via data-init
-             [:main#reactive-content
-              {:data-init (str "@post('/ns/" ns-sym "?instance=" instance-id "')")}
-              (or transformed [:div.text-text-muted "Loading..."])]
-             [:footer.mt-8.pt-4.border-t.border-surface-2.text-text-muted.text-sm
-              [:a.text-accent-primary.hover:underline {:href "/"} "<- Back to dashboard"]]]]])))
+                          (transform/transform-hiccup ns-sym content-hiccup instance-id))
+            ;; The renderer produces [:main#morph ...] but base-page already wraps
+            ;; skeleton in [:main#morph skeleton]. Extract inner content to avoid
+            ;; nested #morph elements (which breaks Datastar's getElementById lookup).
+            morph-children (if (and transformed
+                                    (vector? transformed)
+                                    (= :main#morph (first transformed)))
+                             (if (map? (second transformed))
+                               (let [[_ attrs & children] transformed]
+                                 (into [:div attrs] children))
+                               (into [:div] (rest transformed)))
+                             (or transformed [:div.text-text-500 "Loading..."]))]
+        (html/base-page
+         {:title (str ns-sym " - Seon")
+          :active-page nil
+          :header
+          [:header.mb-6
+           [:div.flex.items-center.justify-between
+            [:h1.text-xl.font-bold.text-amber-400 (str ns-sym)]
+            [:a {:href (str "/ns/" ns-sym "?view=introspect&instance=" instance-id)
+                 :class "px-2 py-1 text-xs font-mono rounded border text-text-500 border-base-700 hover:border-base-600 hover:text-text-200"}
+             "Introspect ->"]]
+           [:p.text-text-400.text-sm.mt-1
+            "Instance: " [:code.text-amber-300 instance-id]]]
+          :skeleton morph-children}))
       ;; Instance not found
-      (str
-       "<!DOCTYPE html>"
-       (h/html
-        [:html {:lang "en"}
-         [:head
-          [:meta {:charset "UTF-8"}]
-          [:title "Instance Not Found"]]
-         [:body.bg-base-bg.text-text-primary.font-mono.min-h-screen.flex.items-center.justify-center
-          [:div.text-center
-           [:h1.text-xl.font-bold.text-error "Instance Not Found"]
-           [:p.text-text-muted.mt-2 "The instance " [:code instance-id] " does not exist."]
-           [:a.text-accent-primary.hover:underline.mt-4.inline-block
-            {:href (str "/ns/" ns-sym)} "Create new instance"]]]])))))
+      (html/base-page
+       {:title "Instance Not Found"
+        :active-page nil
+        :skeleton
+        [:div.flex.items-center.justify-center.min-h-96
+         [:div.text-center
+          [:h1.text-xl.font-bold.text-red-400 "Instance Not Found"]
+          [:p.text-text-400.mt-2 "The instance " [:code instance-id] " does not exist."]
+          [:a.text-amber-400.hover:underline.mt-4.inline-block
+           {:href (str "/ns/" ns-sym)} "Create new instance"]]]}))))
 
 (defn- instance-sse-handler
   "SSE handler for reactive instance updates.
@@ -485,7 +637,97 @@
   [req]
   (or (:query-params req)
       (when-let [qs (:query-string req)]
-        (codec/form-decode qs))))
+        (into {} (for [pair (.split ^String qs "&")
+                       :let [[k v] (.split ^String pair "=" 2)]]
+                   [(java.net.URLDecoder/decode k "UTF-8")
+                    (when v (java.net.URLDecoder/decode v "UTF-8"))])))))
+
+;;; ---------------------------------------------------------------------------
+;;; Form Data Parsing
+;;; ---------------------------------------------------------------------------
+
+(defn- parse-form-body
+  "Parse a form-encoded body (string or map) into a map with keyword keys.
+
+   Form data arrives as URL-encoded key=value pairs where keys are printed
+   Clojure keywords (e.g., ':seon.getting-started/exercise=Pull-up').
+
+   Handles three body formats:
+   - String: URL-encoded form body from Datastar's @post with contentType:'form'
+   - Map with string keys: Already parsed by Ring middleware
+   - nil/empty: Returns empty map"
+  [body]
+  (cond
+    ;; String body: parse URL-encoded form data or JSON signals
+    (string? body)
+    (if (str/blank? body)
+      {}
+      (if (str/starts-with? (str/triml body) "{")
+        ;; JSON body from Datastar's default contentType:'json' — signals payload.
+        ;; We don't use signal values as function args, so return empty map.
+        ;; The ctx atom is injected separately via instance-id.
+        {}
+        ;; URL-encoded form data from contentType:'form'
+        (into {}
+              (for [pair (str/split body #"&")
+                    :let [[k v] (str/split pair #"=" 2)
+                          k-decoded (java.net.URLDecoder/decode k "UTF-8")
+                          v-decoded (when v (java.net.URLDecoder/decode v "UTF-8"))]]
+                (if (str/starts-with? k-decoded ":")
+                  [(edn/read-string k-decoded) (or v-decoded "")]
+                  [(keyword k-decoded) (or v-decoded "")])))))
+
+    ;; Map body: convert string keys starting with ":" to keywords
+    (map? body)
+    (into {}
+          (map (fn [[k v]]
+                 (let [k-str (if (string? k) k (str k))]
+                   (if (str/starts-with? k-str ":")
+                     [(edn/read-string k-str) v]
+                     [(keyword k-str) v])))
+               body))
+
+    :else {}))
+
+(defn- coerce-with-schema
+  "Coerce string values to correct types using a Malli schema.
+   HTML forms always send strings; this uses Malli's string transformer
+   to convert '3' -> 3 when the schema says :int, etc.
+
+   Only coerces keys that appear in the schema. Extra keys pass through as-is."
+  [input-map schema]
+  (if schema
+    (m/decode schema input-map (mt/string-transformer))
+    input-map))
+
+;;; ---------------------------------------------------------------------------
+;;; Auto-Injection Helpers
+;;; ---------------------------------------------------------------------------
+
+(defn- inject-ctx-conn
+  "Auto-inject *ctx* and *conn* values into a signal map for a function call.
+   Resolves the namespace's injected dynamic vars and adds their values
+   under the appropriate keys (ending in *ctx* and *conn*)."
+  [ns-sym signals]
+  (let [ctx-var (find-var (symbol (str ns-sym) "*ctx*"))
+        conn-var (find-var (symbol (str ns-sym) "*conn*"))
+        ctx-key (keyword (str ns-sym) "*ctx*")
+        conn-key (keyword (str ns-sym) "*conn*")]
+    (cond-> signals
+      (and ctx-var (bound? ctx-var))
+      (assoc ctx-key @@ctx-var)
+      (and conn-var (bound? conn-var))
+      (assoc conn-key @conn-var))))
+
+(defn- extract-fn-input-schema
+  "Extract the input map schema from a function's Malli schema.
+   Schema is [:=> [:cat [:map ...]] ...]. Returns the [:map ...] or nil."
+  [action-fn]
+  (when-let [schema (:malli/schema (meta action-fn))]
+    (let [cat-schema (second schema)
+          map-schema (second cat-schema)]
+      (when (and (vector? map-schema) (= :map (first map-schema)))
+        map-schema))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; HTTP Handlers
@@ -494,50 +736,53 @@
 (defn namespace-page
   "Serve the namespace view HTML page.
 
-   For reactive namespaces (those with render-content fn):
-   - Without ?instance param: Create new instance and redirect
+   For dynamic namespaces (detected via lifecycle/dynamic-namespace?):
+   - Without ?instance param: Use lifecycle/ensure-instance! and redirect
    - With ?instance param: Serve reactive page for that instance
 
-   For non-reactive namespaces:
+   For non-dynamic namespaces:
    - Serve introspection view as before"
   [request]
   (let [ns-str (get-in request [:path-params :namespace])
         ns-sym (symbol ns-str)
         params (parse-query-params request)
-        instance-id (get params "instance")
-        view (get params "view")
-        is-reactive? (namespace-has-reactive-render? ns-sym)]
-    (cond
-      ;; Reactive namespace without instance -> create and redirect
-      (and is-reactive? (nil? instance-id) (not= view "introspect"))
-      (let [initial-val (get-initial-state ns-sym)
-            new-id (ctx/generate-id)
-            render-fn (get-render-content-fn ns-sym)]
-        (ctx/create! {::ctx/instance-id new-id
-                      ::ctx/namespace ns-sym
-                      ::ctx/initial-value initial-val
-                      ::ctx/persist? false
-                      ::ctx/sse-push? false
-                      ::ctx/track-clients? true
-                      ::ctx/render-fn render-fn})
-        (log/info "Created reactive instance, redirecting" {:ns ns-sym :instance new-id})
-        {:status 302
-         :headers {"Location" (str "/ns/" ns-sym "?instance=" new-id)}})
+        fmt (negotiate-format params request)]
+    ;; Fast path: non-HTML formats return immediately, no reactive/SSE machinery
+    (if (#{:ai :raw} fmt)
+      (render-for-format ns-sym fmt)
+      (let [instance-id (get params "instance")
+            view (get params "view")
+            conn (get-conn)
+            is-dynamic? (dynamic-namespace? ns-sym)]
+        (cond
+          ;; Dynamic namespace without instance -> ensure-instance! and redirect
+          (and is-dynamic? (nil? instance-id) (not= view "introspect"))
+          (let [{::lifecycle/keys [instance-id]}
+                (lifecycle/ensure-instance! (cond-> {::lifecycle/ns-sym ns-sym}
+                                              conn (assoc ::lifecycle/db-name :seon.runtime)))]
+            (log/info "Ensured dynamic instance, redirecting" {:ns ns-sym :instance instance-id})
+            {:status 302
+             :headers {"Location" (str "/ns/" ns-sym "?instance=" instance-id)}})
 
-      ;; Reactive with instance -> serve instance page
-      (and is-reactive? instance-id (not= view "introspect"))
-      {:status 200
-       :headers {"Content-Type" "text/html; charset=utf-8"}
-       :body (reactive-instance-page ns-sym instance-id)}
+          ;; Dynamic with instance -> serve instance page
+          (and is-dynamic? instance-id (not= view "introspect"))
+          (do
+            ;; Ensure instance exists (resume from Datalevin or create fresh)
+            (lifecycle/ensure-instance! (cond-> {::lifecycle/ns-sym ns-sym
+                                                  ::lifecycle/instance-id instance-id}
+                                          conn (assoc ::lifecycle/db-name :seon.runtime)))
+            {:status 200
+             :headers {"Content-Type" "text/html; charset=utf-8"}
+             :body (reactive-instance-page ns-sym instance-id)})
 
-      ;; Not reactive or explicit introspect view -> existing behavior
-      :else
-      {:status 200
-       :headers {"Content-Type" "text/html; charset=utf-8"}
-       :body (html/base-page
-              {:title (str ns-str " - Seon")
-               :active-page nil
-               :skeleton (namespace-skeleton ns-sym)})})))
+          ;; HTML: existing behavior (SSE page with skeleton)
+          :else
+          {:status 200
+           :headers {"Content-Type" "text/html; charset=utf-8"}
+           :body (html/base-page
+                  {:title (str ns-str " - Seon")
+                   :active-page nil
+                   :skeleton (namespace-skeleton ns-sym)})})))))
 
 ;; Dynamic handler cache - keyed by namespace only
 (defonce ^:private namespace-handlers (atom {}))
@@ -551,7 +796,7 @@
                       (let [params (parse-query-params req)
                             session-id (get params "id")
                             view (get params "view")]
-                        (render-namespace-content ns-sym session-id view)))
+                        (render-namespace-content ns-sym session-id view params)))
           handler (sse/render-handler render-fn :poll-ms 2000)]
       (swap! namespace-handlers assoc ns-sym handler)
       handler)))
@@ -590,21 +835,15 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- handle-create-instance!
-  "Handle POST /ns/:namespace/create-instance! - creates new instance and redirects."
+  "Handle POST /ns/:namespace/create-instance! - uses lifecycle to create instance."
   [ns-sym]
-  (let [initial-val (get-initial-state ns-sym)
-        new-id (ctx/generate-id)
-        render-fn (get-render-content-fn ns-sym)]
-    (ctx/create! {::ctx/instance-id new-id
-                  ::ctx/namespace ns-sym
-                  ::ctx/initial-value initial-val
-                  ::ctx/persist? false
-                  ::ctx/sse-push? false
-                  ::ctx/track-clients? true
-                  ::ctx/render-fn render-fn})
-    (log/info "Created instance via action" {:ns ns-sym :instance new-id})
+  (let [conn (get-conn)
+        {::lifecycle/keys [instance-id]}
+        (lifecycle/ensure-instance! (cond-> {::lifecycle/ns-sym ns-sym}
+                                      conn (assoc ::lifecycle/db-name :seon.runtime)))]
+    (log/info "Created instance via action" {:ns ns-sym :instance instance-id})
     {:status 302
-     :headers {"Location" (str "/ns/" ns-sym "?instance=" new-id)}}))
+     :headers {"Location" (str "/ns/" ns-sym "?instance=" instance-id)}}))
 
 (defn- handle-destroy-instance!
   "Handle POST /ns/:namespace/destroy-instance!?id=xxxx - destroys instance and redirects."
@@ -619,14 +858,54 @@
      :headers {"Content-Type" "application/json"}
      :body "{\"success\":false,\"error\":\"Missing id parameter\"}"}))
 
+(defn- parse-keyword-params
+  "Parse query params into qualified keyword map.
+   Params like ':seon.getting-started/sort-by=date' become
+   {:seon.getting-started/sort-by \"date\"}. Non-keyword params pass through."
+  [query-string]
+  (if (str/blank? query-string)
+    {}
+    (into {}
+          (for [pair (str/split query-string #"&")
+                :let [[k v] (str/split pair #"=" 2)
+                      k-decoded (java.net.URLDecoder/decode k "UTF-8")
+                      v-decoded (when v (java.net.URLDecoder/decode v "UTF-8"))]
+                ;; Skip system params (instance, id, view, format)
+                :when (str/starts-with? k-decoded ":")]
+            [(edn/read-string k-decoded) (or v-decoded "")]))))
+
+(defn- resolve-and-call
+  "Resolve a function, build its input map, validate, and call it.
+   Shared by both GET (query params) and POST (form body) handlers.
+   Returns the function's result or throws on validation failure."
+  [ns-sym fn-sym raw-input instance-id]
+  (if-let [action-fn (actions/resolve-action ns-sym fn-sym)]
+    (let [input-schema (extract-fn-input-schema action-fn)
+          coerced (coerce-with-schema raw-input input-schema)
+          injected (inject-ctx-conn ns-sym coerced)
+          input (if instance-id
+                  (let [ctx-atom (ctx/get-atom {::ctx/instance-id instance-id})]
+                    (if ctx-atom
+                      (assoc injected :seon.reactive/ctx ctx-atom)
+                      injected))
+                  injected)]
+      (when (and input-schema (seq input))
+        (when-not (m/validate input-schema input)
+          (throw (ex-info "Invalid input"
+                          {:errors (me/humanize (m/explain input-schema input))}))))
+      (log/info "Executing function" {:ns ns-sym :fn fn-sym :input (dissoc input :seon.reactive/ctx)})
+      ;; Zero-arg functions (no schema, empty arglists like ([])) get called with no args
+      (let [zero-arg? (and (nil? input-schema)
+                           (some #(empty? %) (:arglists (meta action-fn))))]
+        {:result (if zero-arg? (action-fn) (action-fn input)) :action-fn action-fn}))
+    (throw (ex-info "Function not found" {:ns ns-sym :fn fn-sym :status 404}))))
+
 (defn function-call-handler
   "Handle POST /ns/:namespace/:function requests.
 
-   This is the new URL pattern for reactive UI actions.
-   Reuses signal extraction and function resolution from actions.clj.
-
-   For instance-based calls (?instance=xxxx):
-   - Adds :seon.reactive/ctx atom to signals for action to use
+   Form data arrives with qualified keyword names from HTML form fields.
+   Malli string coercion converts string values to correct types per schema.
+   Auto-injects *ctx* and *conn* from namespace vars.
 
    Function names are URL-decoded to handle %21 -> ! etc."
   [request]
@@ -635,47 +914,61 @@
         params (parse-query-params request)
         instance-id (get params "instance")
         id-param (get params "id")
-        ;; URL-decode function name to handle %21 -> ! etc.
-        fn-decoded (codec/url-decode fn-str)
+        fn-decoded (java.net.URLDecoder/decode fn-str "UTF-8")
         ns-sym (symbol ns-str)
         fn-sym (symbol fn-decoded)
         body (:body request)]
-    (log/info "Function call" {:ns ns-sym :fn fn-sym :instance instance-id :body body})
+    (log/info "Function call POST" {:ns ns-sym :fn fn-sym :instance instance-id})
     (cond
-      ;; Instance management actions
       (= fn-sym 'create-instance!)
       (handle-create-instance! ns-sym)
 
       (= fn-sym 'destroy-instance!)
       (handle-destroy-instance! ns-sym id-param)
 
-      ;; Regular function call
       :else
-      (if-let [action-fn (actions/resolve-action ns-sym fn-sym)]
-        (try
-        (let [base-signals (actions/extract-signals body)
-              ;; Add instance ctx if present
-              signals (if instance-id
-                        (let [ctx-atom (ctx/get-atom {::ctx/instance-id instance-id})]
-                          (if ctx-atom
-                            (assoc base-signals :seon.reactive/ctx ctx-atom)
-                            base-signals))
-                        base-signals)]
-          (log/info "Executing function" {:ns ns-sym :fn fn-sym :signals (dissoc signals :seon.reactive/ctx)})
-          (action-fn signals)
-          {:status 200
-           :headers {"Content-Type" "application/json"}
-           :body "{\"success\":true}"})
+      (try
+        (resolve-and-call ns-sym fn-sym (parse-form-body body) instance-id)
+        {:status 200
+         :headers {"Content-Type" "application/json"}
+         :body "{\"success\":true}"}
         (catch Exception e
-          (log/error e "Function execution failed" {:ns ns-sym :fn fn-sym})
-          {:status 500
-           :headers {"Content-Type" "application/json"}
-           :body (str "{\"success\":false,\"error\":\"" (.getMessage e) "\"}")}))
-        (do
-          (log/warn "Function not found" {:ns ns-sym :fn fn-sym})
-          {:status 404
-           :headers {"Content-Type" "application/json"}
-           :body "{\"success\":false,\"error\":\"Function not found\"}"})))))
+          (let [data (ex-data e)
+                status (or (:status data) (if (:errors data) 400 500))]
+            (log/error e "Function call failed" {:ns ns-sym :fn fn-sym})
+            {:status status
+             :headers {"Content-Type" "application/json"}
+             :body (str "{\"success\":false,\"error\":\"" (.getMessage e) "\"}")}))))))
+
+(defn function-get-handler
+  "Handle GET /ns/:namespace/:function?:qualified/key=value requests.
+
+   Query params with qualified keyword names are parsed, coerced via Malli,
+   and passed to the function. Auto-injects *ctx* and *conn*.
+   Returns the function's result as EDN (or JSON for non-Clojure clients)."
+  [request]
+  (let [ns-str (get-in request [:path-params :namespace])
+        fn-str (get-in request [:path-params :function])
+        params (parse-query-params request)
+        instance-id (get params "instance")
+        fn-decoded (java.net.URLDecoder/decode fn-str "UTF-8")
+        ns-sym (symbol ns-str)
+        fn-sym (symbol fn-decoded)
+        kw-params (parse-keyword-params (:query-string request))]
+    (log/info "Function call GET" {:ns ns-sym :fn fn-sym :params kw-params})
+    (try
+      (let [{:keys [result]} (resolve-and-call ns-sym fn-sym kw-params instance-id)]
+        {:status 200
+         :headers {"Content-Type" "application/edn; charset=utf-8"}
+         :body (pr-str result)})
+      (catch Exception e
+        (let [data (ex-data e)
+              status (or (:status data) (if (:errors data) 400 500))]
+          (log/error e "Function GET failed" {:ns ns-sym :fn fn-sym})
+          {:status status
+           :headers {"Content-Type" "application/edn; charset=utf-8"}
+           :body (pr-str {:error (.getMessage e)
+                          :errors (:errors data)})})))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Route Registration Helper
@@ -687,12 +980,16 @@
 
    Order matters: function call pattern must come BEFORE namespace pattern
    because the function pattern is more specific."
-  [;; Function call: POST /ns/:namespace/:function
-   ;; Function names can contain ! ? - _ etc.
+  [;; Function call: POST /ns/:namespace/:function (mutations)
    {:method :post
     :pattern #"/ns/([a-z][a-z0-9._-]*)/([a-zA-Z][a-zA-Z0-9_!?*-]*)"
     :params [:namespace :function]
     :handler #'function-call-handler}
+   ;; Function call: GET /ns/:namespace/:function (reads)
+   {:method :get
+    :pattern #"/ns/([a-z][a-z0-9._-]*)/([a-zA-Z][a-zA-Z0-9_!?*-]*)"
+    :params [:namespace :function]
+    :handler #'function-get-handler}
    ;; Namespace view: GET /ns/:namespace
    {:method :get
     :pattern #"/ns/([a-z][a-z0-9._-]*)"

@@ -1,7 +1,9 @@
+---
+type: research
+status: draft
+tags: [prd, research, database]
+---
 # Datalevin Schema Design
-
-**Date:** 2026-01-28
-**Status:** Draft
 
 This document defines the Datalevin schema for all Seon entities, including attribute types, cardinality, uniqueness constraints, and indexes.
 
@@ -96,6 +98,7 @@ Tracks AI agent sessions from start to completion.
  ;; Error handling
  :ai.session/error         {:db/valueType   :db.type/string
                             :db/doc         "EDN-encoded error details"}}
+
 ```
 
 ### 1.2 AI Message
@@ -149,6 +152,7 @@ Individual messages within a session.
 
  :ai.message/provider      {:db/valueType   :db.type/keyword
                             :db/doc         "AI provider [:claude :gemini :openai]"}}
+
 ```
 
 ---
@@ -176,9 +180,11 @@ Agent context with time-travel support via append-only snapshots.
  ;; State
  :ctx/state                {:db/valueType   :db.type/string
                             :db/doc         "EDN-serialized context state"}}
+
 ```
 
 **Query pattern for point-in-time:**
+
 ```clojure
 (d/q '[:find (pull ?e [*]) .
        :in $ ?ns ?as-of
@@ -188,6 +194,7 @@ Agent context with time-travel support via append-only snapshots.
        [(<= ?t ?as-of)]
        (max ?t)]
      db "seon.trading" #inst "2026-01-28T10:00:00Z")
+
 ```
 
 ### 2.2 Primer Sessions (Append-Only)
@@ -210,6 +217,7 @@ Multi-session context with checkpointing.
  ;; State - stored as EDN string for flexibility
  :primer.session/state     {:db/valueType   :db.type/string
                             :db/doc         "EDN-serialized session state"}}
+
 ```
 
 ---
@@ -248,6 +256,7 @@ Orchestrator session lifecycle tracking.
 
  :orch.session/stopped-at  {:db/valueType   :db.type/instant
                             :db/doc         "When session stopped"}}
+
 ```
 
 ---
@@ -317,9 +326,11 @@ Options pricing data with historical tracking.
 
  :market/aggressor         {:db/valueType   :db.type/keyword
                             :db/doc         "Trade aggressor [:buy :sell]"}}
+
 ```
 
 **Query pattern for backtesting (data as of time T):**
+
 ```clojure
 (d/q '[:find ?iv ?recorded-at
        :in $ ?ticker ?as-of
@@ -329,6 +340,7 @@ Options pricing data with historical tracking.
        [?e :quote/recorded-at ?t]
        [(<= ?t ?as-of)]]
      db "SPY" #inst "2025-07-15T00:00:00Z")
+
 ```
 
 ### 4.2 Ingestion State
@@ -364,6 +376,7 @@ Track data loading progress for resumable imports.
  :ingestion/updated-at     {:db/valueType   :db.type/instant
                             :db/index       true
                             :db/doc         "Last update timestamp"}}
+
 ```
 
 ### 4.3 Bulk Progress
@@ -389,6 +402,7 @@ Fine-grained progress tracking per trading day.
  :progress/completed-at    {:db/valueType   :db.type/instant
                             :db/index       true
                             :db/doc         "When this date was completed"}}
+
 ```
 
 ---
@@ -439,6 +453,7 @@ Track file edits with test results and decisions.
 
  :edit/feedback            {:db/valueType   :db.type/string
                             :db/doc         "EDN: vector of feedback messages"}}
+
 ```
 
 ### 5.2 Review Event
@@ -479,6 +494,7 @@ Track Gemini code reviews for training data.
 
  :review/gemini-tokens     {:db/valueType   :db.type/string
                             :db/doc         "EDN: {:prompt N :response N :cached N}"}}
+
 ```
 
 ### 5.3 Todo Event
@@ -504,6 +520,7 @@ Track agent todo lists for observability.
  :todo/created-at          {:db/valueType   :db.type/instant
                             :db/index       true
                             :db/doc         "When snapshot was taken (replaces _valid_from)"}}
+
 ```
 
 ---
@@ -624,6 +641,7 @@ Track agent todo lists for observability.
     :todo/session-id          {:db/valueType :db.type/string :db/index true}
     :todo/todos               {:db/valueType :db.type/string}
     :todo/created-at          {:db/valueType :db.type/instant :db/index true}}))
+
 ```
 
 ---
@@ -633,6 +651,7 @@ Track agent todo lists for observability.
 ### AI Session
 
 **XTDB Document:**
+
 ```clojure
 {:xt/id "ses-abc123"
  :seon.ai/type :session
@@ -643,9 +662,11 @@ Track agent todo lists for observability.
  :seon.ai/input-tokens 1500
  :seon.ai/output-tokens 800
  :seon.ai/cost-usd 0.23}
+
 ```
 
 **Datalevin Entity:**
+
 ```clojure
 {:ai.session/id "ses-abc123"
  :ai.session/type :session
@@ -656,6 +677,7 @@ Track agent todo lists for observability.
  :ai.session/input-tokens 1500
  :ai.session/output-tokens 800
  :ai.session/cost-usd 0.23}
+
 ```
 
 **Key change:** Namespace prefix changes from `seon.ai/` to `ai.session/`.
@@ -665,6 +687,7 @@ Track agent todo lists for observability.
 ### AI Message
 
 **XTDB Document:**
+
 ```clojure
 {:xt/id "msg-xyz789"
  :seon.ai/type :message
@@ -674,9 +697,11 @@ Track agent todo lists for observability.
  :seon.ai/timestamp #inst "2026-01-28T10:01:00Z"
  :seon.ai/input-tokens 500
  :seon.ai/output-tokens 200}
+
 ```
 
 **Datalevin Entity:**
+
 ```clojure
 {:ai.message/id "msg-xyz789"
  :ai.message/type :message
@@ -686,6 +711,7 @@ Track agent todo lists for observability.
  :ai.message/timestamp #inst "2026-01-28T10:01:00Z"
  :ai.message/input-tokens 500
  :ai.message/output-tokens 200}
+
 ```
 
 ---
@@ -693,20 +719,24 @@ Track agent todo lists for observability.
 ### Context Snapshot
 
 **XTDB Document:**
+
 ```clojure
 ;; In XTDB: stored with SQL INSERT, uses _system_from for history
 {:xt/id "ctx-uuid-here"
  :namespace "seon.trading"
  :state "{:seon.trading/signals [...]}"}
 ;; _system_from auto-set by XTDB
+
 ```
 
 **Datalevin Entity:**
+
 ```clojure
 {:ctx/id #uuid "ctx-uuid-here"
  :ctx/namespace "seon.trading"
  :ctx/recorded-at #inst "2026-01-28T10:00:00Z"  ; Explicit!
  :ctx/state "{:seon.trading/signals [...]}"}
+
 ```
 
 **Key change:** Explicit `:ctx/recorded-at` replaces implicit `_system_from`.
@@ -716,6 +746,7 @@ Track agent todo lists for observability.
 ### Option Greeks
 
 **XTDB Document:**
+
 ```clojure
 {:xt/id "AAPL231215C00185000-2024-11-01T14:00:00Z"
  :xt/valid-from #inst "2024-11-01T14:00:00Z"  ; Set for historical data
@@ -731,9 +762,11 @@ Track agent todo lists for observability.
  :greeks/gamma 0.03
  :greeks/vega 0.15
  :greeks/theta -0.08}
+
 ```
 
 **Datalevin Entity:**
+
 ```clojure
 {:quote/id "AAPL231215C00185000-2024-11-01T14:00:00Z"
  :quote/recorded-at #inst "2024-11-01T14:00:00Z"  ; Explicit, was :xt/valid-from
@@ -749,9 +782,11 @@ Track agent todo lists for observability.
  :greeks/gamma 0.03
  :greeks/vega 0.15
  :greeks/theta -0.08}
+
 ```
 
 **Key changes:**
+
 - `:xt/id` → `:quote/id`
 - `:xt/valid-from` → `:quote/recorded-at`
 
@@ -760,6 +795,7 @@ Track agent todo lists for observability.
 ### Edit Event
 
 **XTDB Document:**
+
 ```clojure
 {:xt/id #uuid "abc123..."
  :seon.dev.context/entity-type :edit-event
@@ -768,9 +804,11 @@ Track agent todo lists for observability.
  :seon.dev.context/decision :continue
  :seon.dev.context/unit-test-result {:success true :test-count 5}}
 ;; _valid_from auto-set by XTDB
+
 ```
 
 **Datalevin Entity:**
+
 ```clojure
 {:edit/id #uuid "abc123..."
  :edit/entity-type :edit-event
@@ -779,9 +817,11 @@ Track agent todo lists for observability.
  :edit/decision :continue
  :edit/unit-test-result "{:success true :test-count 5}"  ; EDN-encoded
  :edit/created-at #inst "2026-01-28T10:00:00Z"}  ; Explicit!
+
 ```
 
 **Key changes:**
+
 - Namespace prefix simplified from `seon.dev.context/` to `edit/`
 - Complex values (maps, vectors) EDN-encoded as strings
 - Explicit `:edit/created-at` replaces implicit `_valid_from`
@@ -801,6 +841,7 @@ Track agent todo lists for observability.
 | `:xt/id` | `:<entity>/id` |
 
 **Rationale:**
+
 - Shorter attribute names improve query readability
 - Domain prefix (e.g., `ai.session/`) groups related attributes
 - Matches Datomic conventions
@@ -810,6 +851,7 @@ Track agent todo lists for observability.
 **Decision:** Store complex values (maps, vectors, sets) as EDN-encoded strings.
 
 **Affected attributes:**
+
 - `:ai.session/error`
 - `:ai.message/tool-calls`, `:ai.message/tool-results`
 - `:edit/unit-test-result`, `:edit/gen-test-result`, `:edit/feedback`
@@ -818,6 +860,7 @@ Track agent todo lists for observability.
 - `:ctx/state`, `:primer.session/state`
 
 **Rationale:**
+
 - Datalevin doesn't support arbitrary nested data like XTDB
 - EDN strings are human-readable and debuggable
 - Query predicates can still work via full-text search if needed
@@ -838,6 +881,7 @@ Track agent todo lists for observability.
 | Todo Event | `:todo/created-at` |
 
 **Rationale:**
+
 - Makes temporal behavior explicit and debuggable
 - Enables point-in-time queries via explicit filtering
 - Avoids dependency on database-specific temporal features
@@ -849,6 +893,7 @@ Track agent todo lists for observability.
 **Example:** `:ai.message/session-id` is `:db.type/string`, not `:db.type/ref`.
 
 **Rationale:**
+
 - Simpler migration path (no ref resolution needed)
 - Messages belong to sessions that may be in different databases (multi-db)
 - Can add refs later if join performance becomes an issue
@@ -858,12 +903,14 @@ Track agent todo lists for observability.
 **Decision:** Index attributes used in WHERE clauses and ORDER BY.
 
 **Indexed attributes:**
+
 - All `:*-at` timestamp fields (for time-range queries)
 - All `/status` fields (for filtering by state)
 - All `/id` and lookup fields (for joins)
 - `:asset/ticker`, `:option/id` (for trading queries)
 
 **Rationale:**
+
 - Datalevin uses B+ trees; indexes are cheap
 - Read performance matters for UI responsiveness
 - Write performance impact is minimal for our volume
@@ -898,6 +945,7 @@ Track agent todo lists for observability.
 
     ;; ... other entity types
     ))
+
 ```
 
 ### Batch Migration
@@ -910,6 +958,7 @@ Track agent todo lists for observability.
                        (format "SELECT * FROM %s" table-name))
         transformed (map #(xtdb->datalevin % entity-type) entities)]
     (d/transact! dl-conn transformed)))
+
 ```
 
 ---

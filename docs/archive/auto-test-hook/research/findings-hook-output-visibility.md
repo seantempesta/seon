@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # Hook Output Visibility Research
 
 **Date:** 2025-12-05
@@ -35,18 +41,21 @@ Our auto-test hook runs correctly but Claude never sees the output. Tests pass/f
 ## Implications for Auto-Test Hook
 
 ### Option A: Non-Blocking (Current)
+
 - Passing tests: exit 0, stdout → User sees, Claude doesn't
 - Failing tests: exit 0, stdout → User sees, Claude doesn't
 
 **Problem:** Claude continues editing blindly when tests fail.
 
 ### Option B: Block on Failure
+
 - Passing tests: exit 0, stdout → User sees, Claude doesn't ✓
 - Failing tests: exit 2, stderr → Both see, execution blocked
 
 **Tradeoff:** Blocks multi-file edits. If Claude is editing 5 files to fix a bug, first file's test failure stops everything.
 
 ### Option C: JSON Block on Failure (Recommended)
+
 - Passing tests: exit 0, JSON `{"continue": true}` → User sees summary, Claude doesn't
 - Failing tests: exit 0, JSON `{"decision": "block", "reason": "❌ 2 tests failed in ns"}` → Both see
 
@@ -75,6 +84,7 @@ Our auto-test hook runs correctly but Claude never sees the output. Tests pass/f
                                fail-count test-ns
                                (failure-summary))}))
     (System/exit 0)))
+
 ```
 
 ---
@@ -94,6 +104,7 @@ Our auto-test hook runs correctly but Claude never sees the output. Tests pass/f
 Tested both `decision: "continue"` and `decision: "block"` in live Claude Code session.
 
 ### Test Setup
+
 1. Made intentional breaking change to `date_utils.clj` (17 → 18 for hour)
 2. Tests correctly failed with 2 failures
 3. Tested both JSON decision values
@@ -108,6 +119,7 @@ Tested both `decision: "continue"` and `decision: "block"` in live Claude Code s
 **Conclusion:** Only `decision: "block"` makes Claude see hook output. The `decision: "continue"` value does not work for informing without blocking - it's equivalent to silent.
 
 ### Important Bug Fixed
+
 The hook must reload the SOURCE namespace before the test namespace. Original bug only reloaded test namespace, so tests ran against stale cached code in nREPL.
 
 ## Sources

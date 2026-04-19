@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive, database]
+---
+
 # Spec-First Query Interface Design
 
 **Date**: 2025-12-17
@@ -41,6 +47,7 @@ This document designs a **spec-first query interface** for Seon where:
 ;; Storage structure
 @#'m/-function-schemas*
 ;; => {:clj {seon.trading.signals {iv-rank {:schema [:=> ...] :ns ... :name ...}}}}
+
 ```
 
 **Schema structure** for function schemas:
@@ -51,6 +58,7 @@ This document designs a **spec-first query interface** for Seon where:
 [:function
  [:=> [:cat :int] :int]           ;; 1-arity
  [:=> [:cat :int :int] :int]]     ;; 2-arity
+
 ```
 
 ### How Instrumentation Works
@@ -79,6 +87,7 @@ This document designs a **spec-first query interface** for Seon where:
 ;; Now add is wrapped
 (add "bad" 10)
 ;; => ExceptionInfo: :malli.core/invalid-input
+
 ```
 
 **How wrapping works** (from malli.core.cljc:2203):
@@ -104,6 +113,7 @@ This document designs a **spec-first query interface** for Seon where:
           (when (and wrap-guard (not (validate-guard [args value])))
             (report ::invalid-guard {:guard guard ...}))
           value)))))
+
 ```
 
 **Key insight**: The wrapper:
@@ -137,6 +147,7 @@ This document designs a **spec-first query interface** for Seon where:
 
 ;; Stop instrumentation
 (mdev/stop!)
+
 ```
 
 **How it works** (from malli.dev.clj:39):
@@ -162,6 +173,7 @@ This document designs a **spec-first query interface** for Seon where:
      (add-watch @#'m/-function-schemas* ::watch watch))
    (mi/instrument! options)                    ;; Initial instrumentation
    (-log! "dev-mode started")))
+
 ```
 
 **Key features**:
@@ -194,6 +206,7 @@ This document designs a **spec-first query interface** for Seon where:
 
 (add-strict "bad" 10)
 ;; => ExceptionInfo: :malli.core/invalid-input (caught BEFORE ClassCastException)
+
 ```
 
 **How it works** (from malli.experimental.cljc:38):
@@ -213,6 +226,7 @@ This document designs a **spec-first query interface** for Seon where:
                     `(c/defn ~name ~@(some-> doc vector) ~enriched-meta ~@bodies))]
        (m/=> ~name ~schema)  ;; Always register schema
        defn#)))
+
 ```
 
 **Key insight**: `mx/defn`:
@@ -237,6 +251,7 @@ This document designs a **spec-first query interface** for Seon where:
 ```clojure
 ;; .clj-kondo/config.edn
 {:linters {:missing-malli-schema {:level :error}}}
+
 ```
 
 **Pros**:
@@ -282,6 +297,7 @@ This document designs a **spec-first query interface** for Seon where:
 
 ;; Validate at load time
 (spec/validate-namespace-schemas! *ns*)
+
 ```
 
 **Pros**:
@@ -325,6 +341,7 @@ This document designs a **spec-first query interface** for Seon where:
   {:schema [:=> [:cat QueryFn :string :int] [:maybe PercentileRank]]}
   [query ticker lookback]
   ...)
+
 ```
 
 **Pros**:
@@ -359,6 +376,7 @@ This document designs a **spec-first query interface** for Seon where:
    ticker :- :string
    lookback :- :int]
   ...)
+
 ```
 
 **Pros**:
@@ -396,6 +414,7 @@ This document designs a **spec-first query interface** for Seon where:
 
 ;; Validate at load time
 (spec/validate-namespace-schemas! *ns*)
+
 ```
 
 **For utility namespaces** (seon.db.node, seon.config, etc.):
@@ -430,6 +449,7 @@ We want query results to be "obviously correct" - if a query returns malformed d
 ;; Join
 (query "SELECT a.*, b.signal FROM option_greeks a JOIN trading_signals b ON a.\"asset$ticker\" = b.ticker")
 ;; => [{:xt/id "..." :asset/ticker "AAPL" :quote/iv 0.25 :signal :buy}]
+
 ```
 
 **How do we validate these?**
@@ -450,6 +470,7 @@ We want query results to be "obviously correct" - if a query returns malformed d
         [k v] row]
     (when-let [schema (get column-schemas k)]
       (m/validate schema v))))
+
 ```
 
 **Problems**:
@@ -477,6 +498,7 @@ We want query results to be "obviously correct" - if a query returns malformed d
         (when-not (m/validate schema row)
           (throw (ex-info "Invalid query result" {:row row :schema schema})))))
     result))
+
 ```
 
 **Problems**:
@@ -523,6 +545,7 @@ We want query results to be "obviously correct" - if a query returns malformed d
         ivs (map :quote/iv results)]  ;; Extract IVs
     (when (seq ivs)
       (calculate-percentile-rank ivs (last ivs)))))
+
 ```
 
 **With instrumentation enabled**:
@@ -549,6 +572,7 @@ We want query results to be "obviously correct" - if a query returns malformed d
 ;; => ExceptionInfo: :malli.core/invalid-output
 ;;    {:output [:maybe PercentileRank]
 ;;     :value :high}
+
 ```
 
 **Why this works**:
@@ -584,6 +608,7 @@ We want query results to be "obviously correct" - if a query returns malformed d
 
 ;; 4. Enable instrumentation in dev
 (mdev/start!)
+
 ```
 
 ---
@@ -669,6 +694,7 @@ We want query results to be "obviously correct" - if a query returns malformed d
 ;;               :ns seon.trading.signals
 ;;               :name iv-rank}
 ;;      term-structure-slope {:schema ...}}}
+
 ```
 
 #### 2. Schema-Driven Test Generation
@@ -696,6 +722,7 @@ We want query results to be "obviously correct" - if a query returns malformed d
 ;; Example
 (generate-function-args 'seon.trading.signals 'iv-rank)
 ;; => [#<function> "AAPL" 252]
+
 ```
 
 #### 3. Markdown Documentation Generation
@@ -743,6 +770,7 @@ We want query results to be "obviously correct" - if a query returns malformed d
       (str/join "\n\n"
         (for [[fn-sym _] (get (m/function-schemas :clj) 'seon.trading.signals)]
           (schema->markdown 'seon.trading.signals fn-sym))))
+
 ```
 
 #### 4. Agent Query Interface
@@ -785,6 +813,7 @@ We want query results to be "obviously correct" - if a query returns malformed d
         :let [[_=> _input output] schema]
         :when (= type-schema (m/type output))]
     [ns-sym fn-sym]))
+
 ```
 
 ### Agent Usage Example
@@ -807,6 +836,7 @@ We want query results to be "obviously correct" - if a query returns malformed d
 
 (gen/generate-function-args 'seon.trading.signals 'iv-rank)
 ;; => [#<function> "MSFT" 126]
+
 ```
 
 ---
@@ -841,6 +871,7 @@ We want query results to be "obviously correct" - if a query returns malformed d
 ;; - Takes :as-of in opts (temporal concern leaks)
 ;; - No validation - "bad" inputs cause runtime errors
 ;; - Uses XTQL (harder for LLMs than SQL)
+
 ```
 
 ### After: Spec-First Pattern
@@ -946,6 +977,7 @@ We want query results to be "obviously correct" - if a query returns malformed d
 
 ;; Validate all functions have schemas at load time
 (spec/validate-namespace-schemas! *ns*)
+
 ```
 
 ### Benefits
@@ -986,6 +1018,7 @@ We want query results to be "obviously correct" - if a query returns malformed d
   []
   (mdev/stop!)
   (ig-repl/halt))
+
 ```
 
 #### 2. Create Schema Validator Utility
@@ -1020,6 +1053,7 @@ We want query results to be "obviously correct" - if a query returns malformed d
                       {:namespace ns-sym
                        :missing-functions (mapv (comp symbol name) missing)
                        :hint "Add schemas using mx/defn or m/=>"})))))
+
 ```
 
 #### 3. Create Domain Namespace Template
@@ -1078,6 +1112,7 @@ We want query results to be "obviously correct" - if a query returns malformed d
 
 ;; Validate all public functions have schemas
 (spec/validate-namespace-schemas! *ns*)
+
 ```
 
 #### 4. Update Existing Trading Namespace
@@ -1108,6 +1143,7 @@ We want query results to be "obviously correct" - if a query returns malformed d
                  seon.health.*
                  seon.finance.*
                  seon.tasks.*]}}}
+
 ```
 
 ### Testing Pattern
@@ -1146,6 +1182,7 @@ We want query results to be "obviously correct" - if a query returns malformed d
               ;; Replace generated query fn with mock
               result (sig/iv-rank mock-query ticker lookback)]
           (is (or (nil? result) (<= 0.0 result 1.0))))))))
+
 ```
 
 ---
@@ -1239,6 +1276,7 @@ While we don't validate query results automatically, we CAN provide a column reg
     Malli schema or nil"
   [col-keyword]
   (get columns col-keyword))
+
 ```
 
 **Usage**:
@@ -1257,6 +1295,7 @@ While we don't validate query results automatically, we CAN provide a column reg
 ;; Get schema for specific column
 (column-schema :quote/iv)
 ;; => [:double {:min 0.01 :max 5.0}]
+
 ```
 
 ---
@@ -1390,6 +1429,7 @@ See next section for full before/after comparison of `seon.trading.signals` name
             avg-call-iv (/ (reduce + (map :quote/iv calls)) (count calls))]
         (- avg-put-iv avg-call-iv))
       0.0)))
+
 ```
 
 ### After
@@ -1572,6 +1612,7 @@ See next section for full before/after comparison of `seon.trading.signals` name
 
 ;; Validate that all public functions have schemas
 (spec/validate-namespace-schemas! *ns*)
+
 ```
 
 ### Key Improvements

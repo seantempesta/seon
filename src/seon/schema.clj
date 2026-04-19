@@ -45,6 +45,44 @@
     (m/default-schemas)
     (mr/mutable-registry *schemas))))
 
+;; Register :inst as a keyword type (Malli only provides inst? predicate).
+;; This lets schemas use :inst instead of inst? for consistency with :string, :int, etc.
+(defonce ^:private _inst-type
+  (swap! *schemas assoc :inst (m/-simple-schema {:type :inst :pred inst?})))
+
+;; Register :seon.flow/dynamic — a wire protocol field validated dynamically.
+;; Used for ::args, ::value, and ::payload in flow message envelopes.
+;; These fields carry data whose type depends on the target function or
+;; payload key, so static schema can only assert non-nil. Real validation
+;; happens at the message boundary via validate-fn-args!, validate-fn-value!,
+;; and validate-payload! in seon.flow.msg.
+(defonce ^:private _dynamic-type
+  (swap! *schemas assoc :seon.flow/dynamic
+         (m/-simple-schema
+          {:type :seon.flow/dynamic
+           :pred some?
+           :type-properties {:gen/schema [:or :int :string :keyword :boolean
+                                          [:vector :int] [:map-of :keyword :string]]
+                             :gen/fmap identity}})))
+
+;; Register :seon.db/ref — a Datalevin entity reference.
+;; Accepts positive integers (entity IDs) or lookup refs [keyword value].
+;; At transact time, Datalevin resolves lookup refs to entity IDs automatically.
+;; The stored form is always a long (entity ID).
+;; Generator produces both forms for testing; pipeline tests for ref attrs
+;; need manual handling (target entities must exist first).
+(defonce ^:private _ref-type
+  (swap! *schemas assoc :seon.db/ref
+         (m/-simple-schema
+          {:type :seon.db/ref
+           :pred (fn [x]
+                   (or (pos-int? x)
+                       (and (vector? x) (= 2 (count x)) (keyword? (first x)))))
+           :type-properties {:gen/schema [:or
+                                          [:int {:min 1}]
+                                          [:tuple :keyword :string]]
+                             :gen/fmap identity}})))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Registration API
 ;;; ---------------------------------------------------------------------------

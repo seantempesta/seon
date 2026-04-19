@@ -1,6 +1,7 @@
 (ns seon.dev.repair-test
   "Tests for the repair namespace - delimiter detection and repair."
-  (:require [clojure.test :refer :all]
+  (:require [clojure.string :as str]
+            [clojure.test :refer :all]
             [seon.dev.repair :as repair]))
 
 ;;; ---------------------------------------------------------------------------
@@ -98,9 +99,9 @@
       (is (true? (::repair/success result)))
       (is (string? repaired))
       ;; Should preserve the basic structure
-      (is (clojure.string/includes? repaired "defn add"))
-      (is (clojure.string/includes? repaired "[a b]"))
-      (is (clojure.string/includes? repaired "(+ a b")))))
+      (is (str/includes? repaired "defn add"))
+      (is (str/includes? repaired "[a b]"))
+      (is (str/includes? repaired "(+ a b")))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; repair-and-format Tests
@@ -113,7 +114,7 @@
                    ::repair/format? false})]
       (is (true? (::repair/success result)))
       (is (string? (::repair/content result)))
-      (is (not (repair/delimiter-error? (::repair/content result))))))
+      (is (not (repair/delimiter-error? {::repair/content (::repair/content result)})))))
 
   (testing "Returns success for already valid code"
     (let [result (repair/repair-and-format
@@ -181,8 +182,8 @@
       (is (string? repaired))
       (is (false? (repair/delimiter-error? {::repair/content repaired})))
       ;; Should preserve the docstring and structure
-      (is (clojure.string/includes? repaired "Calculate the total price"))
-      (is (clojure.string/includes? repaired "tax-rate")))))
+      (is (str/includes? repaired "Calculate the total price"))
+      (is (str/includes? repaired "tax-rate")))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Edge Cases and Robustness

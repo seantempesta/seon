@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive, agent]
+---
+
 # Complete Isolation Research: Separate JVM Per Agent
 
 Research conducted: 2026-01-04
@@ -18,9 +24,11 @@ Complete isolation (Option B) is **feasible but expensive**. Running separate JV
 ### Current Production Configuration
 
 The running Seon server with full stack:
+
 ```
 JVM Flags: -Xms4g -Xmx8g -XX:MaxDirectMemorySize=4g
 RSS (Resident Set Size): ~3.7GB
+
 ```
 
 This is for a fully loaded XTDB with data, all namespaces, and the HTTP/nREPL servers.
@@ -68,6 +76,7 @@ java -XX:+UseSerialGC \
      -Dio.netty.tryReflectionSetAccessible=true \
      --enable-native-access=ALL-UNNAMED \
      -jar seon.jar
+
 ```
 
 **Flag explanations:**
@@ -99,6 +108,7 @@ XTDB v2 memory usage consists of:
 {:storage [:local {:path "data/agent-ns"}]
  :memory-cache {:max-size-bytes 134217728}  ; 128MB
  :compactor {:threads 1}}
+
 ```
 
 ### XTDB In-Memory Mode
@@ -126,8 +136,10 @@ The `MemoryCache` class in XTDB accepts:
 - `maxSizeRatio`: Ratio of MaxDirectMemorySize (default 0.5)
 
 For agents, set explicit bytes rather than ratio:
+
 ```clojure
 :memory-cache {:max-size-bytes 134217728}  ; 128MB explicit
+
 ```
 
 ---
@@ -155,6 +167,7 @@ java -Xshare:dump -XX:SharedClassListFile=classlist.txt -XX:SharedArchiveFile=ap
 
 # Use CDS archive
 java -Xshare:on -XX:SharedArchiveFile=app.jsa -jar app.jar
+
 ```
 
 Expected improvement: 6-8s -> 4-5s
@@ -238,6 +251,7 @@ Agent Ports:
   Agent 2 (finance):    HTTP 8102, nREPL 7902
   ...
   Agent N:              HTTP 8100+N, nREPL 7900+N
+
 ```
 
 ### nREPL: Unix Sockets vs TCP
@@ -262,6 +276,7 @@ Use Unix sockets if using CIDER, TCP ports otherwise:
 ;; TCP approach
 :nrepl-server {:port (+ 7900 agent-number)
                :bind "127.0.0.1"}
+
 ```
 
 ### HTTP Port Strategy
@@ -306,6 +321,7 @@ For Seon agent management, **Overmind** is the best fit:
 orchestrator: ./bin/run --profile dev
 trading: ./bin/run-agent --namespace trading --http-port 8100 --nrepl-port 7900
 health: ./bin/run-agent --namespace health --http-port 8101 --nrepl-port 7901
+
 ```
 
 ### Alternative: Process Compose
@@ -318,17 +334,21 @@ For more complex deployments (10+ agents), **Process Compose** offers:
 ### Log Aggregation
 
 Each agent should log to a separate file:
+
 ```
 logs/
   orchestrator.log
   agents/
     trading-abc123.log
     health-def456.log
+
 ```
 
 Use `tee` or logging configuration to split stdout:
+
 ```bash
 ./bin/run-agent --namespace trading 2>&1 | tee logs/agents/trading.log
+
 ```
 
 ---
@@ -373,6 +393,7 @@ services:
       resources:
         limits:
           memory: 1G
+
 ```
 
 ### When to Use Containers
@@ -453,6 +474,7 @@ Consider a hybrid where:
  :agent/isolation-mode :complete  ; <- Only this agent is isolated
  :agent/port 8100
  :agent/nrepl-port 7900}
+
 ```
 
 The orchestrator tracks which agents are shared vs isolated and routes accordingly.
@@ -494,16 +516,22 @@ This is significantly more complex than shared infrastructure.
 ## Appendix: Test Commands
 
 ### Check Current Seon Memory
+
 ```bash
 ps -o pid,rss,vsz,comm -p $(pgrep -f "seon.runner")
+
 ```
 
 ### Start Minimal Seon (untested)
+
 ```bash
 JVM_OPTS="-Xms256m -Xmx512m -XX:MaxDirectMemorySize=128m -XX:+UseSerialGC" ./bin/run
+
 ```
 
 ### Monitor Multiple Processes
+
 ```bash
 watch -n 1 "ps aux | grep java | grep -v grep | awk '{print \$11, \$6/1024\"MB\"}'"
+
 ```

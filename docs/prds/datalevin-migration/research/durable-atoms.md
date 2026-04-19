@@ -1,7 +1,10 @@
+---
+type: research
+status: completed
+tags: [prd, research, database]
+---
 # Durable Atoms Research: Clojure Libraries and Patterns
 
-**Date:** 2026-01-28
-**Status:** Research Complete (Hands-On Testing Done)
 **Purpose:** Find existing durable atom implementations for Seon's agent context persistence
 
 ---
@@ -9,6 +12,7 @@
 ## Requirements
 
 Seon needs a durable atom for agent context with:
+
 1. **Versioned state with time-travel** - Access previous states
 2. **Persistence to disk** - Survive restarts
 3. **Structural sharing** - Nice to have, not required
@@ -43,6 +47,7 @@ Added both libraries to `deps.edn` under `:dev` alias and tested in REPL.
 (reset! my-atom {:new "state"})   ; WORKS
 @my-atom                          ; WORKS
 (add-watch my-atom :key fn)       ; WORKS
+
 ```
 
 #### Key Findings
@@ -61,6 +66,7 @@ Added both libraries to `deps.edn` under `:dev` alias and tested in REPL.
 
 ;; Sync - slower, immediate durability
 (dur/duratom :local-file :file-path "f.edn" :commit-mode :sync :init {})
+
 ```
 
 #### Non-Serializable Value Handling
@@ -71,6 +77,7 @@ Added both libraries to `deps.edn` under `:dev` alias and tested in REPL.
 (swap! my-atom assoc :conn (Object.))
 ;; File contains: {:conn #object[java.lang.Object 0x1234 "..."]}
 ;; This breaks on read!
+
 ```
 
 **Solution:** Custom write function with filtering:
@@ -94,6 +101,7 @@ Added both libraries to `deps.edn` under `:dev` alias and tested in REPL.
                     :write (fn [path data]
                              (spit path (pr-str (filter-for-persistence data))))}
                :init {}))
+
 ```
 
 #### Nippy Backend (Binary, 25% smaller)
@@ -108,9 +116,11 @@ Added both libraries to `deps.edn` under `:dev` alias and tested in REPL.
                :rw {:read nippy/thaw-from-file
                     :write nippy/freeze-to-file}
                :init {}))
+
 ```
 
 File size comparison (1000-element vector):
+
 - EDN: 3906 bytes
 - Nippy: 2901 bytes (25.7% smaller)
 
@@ -135,6 +145,7 @@ File size comparison (1000-element vector):
 ;; Standard operations
 @my-atom                                  ; WORKS
 (add-watch my-atom :key fn)              ; WORKS
+
 ```
 
 #### Critical Issue
@@ -142,6 +153,7 @@ File size comparison (1000-element vector):
 **Does NOT implement IAtom** - Cannot use standard `clojure.core/swap!`
 
 This is a dealbreaker because:
+
 - Existing code won't work
 - Libraries expecting atoms won't work
 - Easy to forget and use wrong function
@@ -242,6 +254,7 @@ Neither library provides versioning, but duratom's drop-in API makes it easy to 
 
 ;; Get history
 ((:history ctx))
+
 ```
 
 ---
@@ -251,6 +264,7 @@ Neither library provides versioning, but duratom's drop-in API makes it easy to 
 **Use Duratom for current agent `*ctx*` persistence.**
 
 Rationale:
+
 1. **Drop-in atom API** - No code changes needed for existing `swap!`/`@` usage
 2. **Custom serializers** - Can filter non-serializable values
 3. **Sync mode** - Immediate durability when needed
@@ -258,6 +272,7 @@ Rationale:
 5. **Versioning via watchers** - Easy to add in-memory history
 
 **Later, for full persistence:** Migrate to Datalevin append-only pattern (already planned) which provides:
+
 - Database-level versioning
 - Query capabilities
 - Compaction
@@ -272,6 +287,7 @@ The duratom pattern is a good bridge - we can add persistence now without changi
 ```clojure
 ;; In :dev alias
 duratom/duratom {:mvn/version "0.5.9"}
+
 ```
 
 **Note:** Enduro was tested but removed - it doesn't implement IAtom so standard `swap!` fails.

@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive, database]
+---
+
 > **Status: ARCHIVED** — Complete — SQL migration done
 
 > **Status: ARCHIVED** — Complete — SQL migration done
@@ -53,6 +59,7 @@ Verify with: `clj-nrepl-eval -p 7888 "(status)"`
 
 ;; List attached databases
 (multi/list-attached-databases node)  ; => #{"xtdb" "seon_primer" "seon_dev"}
+
 ```
 
 ### Critical Gotchas
@@ -95,8 +102,8 @@ The agent isolation PRD describes the full vision. This PRD focuses on the XTDB 
 ## Key Resources to Read
 
 1. **Agent Isolation PRD**: `docs/prds/agent-isolation/prd.md` (understand the vision)
-2. **XTDB v2.1.0 Release Notes**: https://github.com/xtdb/xtdb/releases/tag/v2.1.0
-3. **Multi-Database Docs**: https://docs.xtdb.com/about/dbs-in-xtdb.html
+2. **XTDB v2.1.0 Release Notes**: [v2.1.0](https://github.com/xtdb/xtdb/releases/tag/v2.1.0)
+3. **Multi-Database Docs**: [dbs-in-xtdb](https://docs.xtdb.com/about/dbs-in-xtdb.html)
 4. **Reference Code**: `reference-code/xtdb/` (at v2.1.0)
 5. **Current Implementation**: `src/seon/db/node.clj`
 6. **Multi-DB Research**: `docs/prds/xtdb-sql-migration/research/multi-database.md`
@@ -104,13 +111,16 @@ The agent isolation PRD describes the full vision. This PRD focuses on the XTDB 
 ## Architecture Requirements
 
 ### Current State (Single Database)
+
 ```
 Seon JVM
 └── XTDB Node
     └── "xtdb" database (primary)
+
 ```
 
 ### Target State (Multi-Database for Agent Isolation)
+
 ```
 Seon JVM
 └── XTDB Node (shared)
@@ -118,6 +128,7 @@ Seon JVM
     ├── "seon_trading" database (attached on demand)
     ├── "seon_health" database (attached on demand)
     └── ... (per namespace)
+
 ```
 
 From the agent isolation PRD, agents receive a `*ctx*` atom with system-provided keys:
@@ -126,6 +137,7 @@ From the agent isolation PRD, agents receive a `*ctx*` atom with system-provided
 {:seon.agent/namespace  'seon.trading
  :seon.agent/db         <xtdb-connection>  ; For escape hatch to SQL
  ...agent's own state...}
+
 ```
 
 **Primary interface**: Agents just `swap!` and `deref` - persistence is automatic.
@@ -197,6 +209,7 @@ Test files updated:
 - `test/seon/trading/bulk_load_test.clj` - Updated mock redefs for `node/q`
 
 **SQL Patterns Established:**
+
 ```clojure
 ;; Simple query
 (node/q node "SELECT * FROM users")
@@ -212,6 +225,7 @@ Test files updated:
 
 ;; Column naming: use $ for nested fields
 ;; asset/ticker -> asset$ticker in SQL, returns :asset/ticker with :kebab-case-keyword
+
 ```
 
 **Deprecation Notes:**
@@ -226,6 +240,7 @@ All 296 tests pass with 0 failures.
 **Completed**: 2026-01-04
 
 #### Summary
+
 Fixed the critical ATTACH DATABASE API bug and completed multi-database support.
 
 #### Changes Made
@@ -296,18 +311,23 @@ Fixed the critical ATTACH DATABASE API bug and completed multi-database support.
 ## Open Questions (Resolved)
 
 ### Q: Does ATTACH DATABASE require the database to already exist?
+
 **A**: No. ATTACH DATABASE creates the database with the specified log/storage paths. If paths exist, it reuses them; if not, it creates them.
 
 ### Q: What's the memory overhead per attached database?
+
 **A**: Estimated 100-200MB per database. Much more efficient than separate JVMs (~1.5GB each). Shared JVM, shared query engine, separate log consumers and index state.
 
 ### Q: Can we have different storage configs per attached database?
+
 **A**: Yes. Each ATTACH DATABASE specifies its own log and storage configuration independently.
 
 ### Q: How does temporal querying work across databases?
+
 **A**: Same SQL syntax works. Each database has its own transaction timeline (`xt.txs` table). Cross-database queries may see slightly different "now" per database since they have independent logs.
 
 ### Q: Database naming with dots?
+
 **A**: Use underscores in database names for SQL compatibility. Namespace `seon.trading` becomes database `seon_trading`. Storage paths can use the original dotted form.
 
 ## Related

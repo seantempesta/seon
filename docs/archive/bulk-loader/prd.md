@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 > **Status: ARCHIVED** — Trading-domain specific, not core infra
 
 > **Status: ARCHIVED** — Trading-domain specific, not core infra
@@ -40,6 +46,7 @@ AAPL:  200K | 2025-05-28 → 2025-11-26 only
 NVDA:  351K | 2025-05-28 → 2025-11-26 only
 MSFT:  294K | 2025-05-28 → 2025-11-26 only
 GOOGL: 195K | 2025-05-28 → 2025-11-26 only
+
 ```
 
 ---
@@ -54,6 +61,7 @@ Replace tightly-coupled side-effectful code with a **work queue model**:
 [Plan] → [Work Items] → [Fetch] → [Transform] → [Persist] → [Checkpoint]
   ↑                                                              |
   └──────────────── Resume from checkpoint ──────────────────────┘
+
 ```
 
 Each stage produces **data** that can be inspected, serialized, and retried.
@@ -86,6 +94,7 @@ Each stage produces **data** that can be inspected, serialized, and retried.
   "Circuit opens after 3 consecutive failures"
   []
   (>= (:consecutive-failures @circuit-state) 3))
+
 ```
 
 #### 2. Fine-Grained Progress Tracking (`ingestion-state.clj`)
@@ -104,6 +113,7 @@ New table: `:bulk-progress` tracks per-expiration completion.
 (defn get-completed-expirations [node symbol])
 (defn mark-expiration-done! [node symbol expiration records])
 (defn get-resume-work [node symbol start-date end-date])
+
 ```
 
 #### 3. Work Queue Model (`bulk-load.clj`)
@@ -133,6 +143,7 @@ New table: `:bulk-progress` tracks per-expiration completion.
         (assoc item :status :fetched :data data :records (count data)))
       (catch Exception e
         (assoc item :status :failed :error (ex-message e))))))
+
 ```
 
 #### 4. Parallel Processing with Bounded Concurrency
@@ -157,6 +168,7 @@ New table: `:bulk-progress` tracks per-expiration completion.
               (mark-expiration-done! node symbol expiration (count valid))))
           (swap! results conj (dissoc result :data)))))
     @results))
+
 ```
 
 ---
@@ -202,6 +214,7 @@ src/ml_options/data/ingest.clj       # Current pipeline (lines 333-379 for proce
 src/ml_options/data/ingestion_state.clj  # State tracking (lines 92-138 for updates)
 src/ml_options/data/bulk_load.clj    # CLI entry point
 docs/thetadata-v3-api.md             # API reference
+
 ```
 
 ---

@@ -1,3 +1,9 @@
+---
+type: decision
+status: completed
+tags: [decision, archive]
+---
+
 # Architectural Decisions: Example Feature
 
 **Last Updated:** 2025-12-05

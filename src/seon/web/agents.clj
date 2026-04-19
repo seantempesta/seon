@@ -1,7 +1,7 @@
 (ns seon.web.agents
   "Agent observatory state and handlers for /agents route.
 
-   Combines running agents from the registry with completed sessions from XTDB
+   Combines running agents from the registry with completed sessions from Datalevin
    to provide a unified view of all agent activity.
 
    Note: HTTP handlers follow Ring conventions (request -> response maps),
@@ -17,6 +17,8 @@
             [seon.ai.agent.views :as agent-views]
             [seon.ai.claude :as claude]
             [seon.ai.datalevin :as dl]
+            [seon.runtime :as runtime]
+            [seon.flow.trace :as trace]
             [seon.web.sse :as sse]
             [seon.web.html :as html]
             [dev.onionpancakes.chassis.core :as h])
@@ -29,16 +31,18 @@
 (defonce ui-state (atom {:show-completed false}))
 
 (defn init!
-  "Initialize the agents module. Called by the server component at startup.
-   Node parameter kept for API compatibility but is no longer used."
-  [_node]
+  "Initialize the agents module. Called by the server component at startup."
+  []
+  (add-watch agent/agent-registry ::sse-refresh
+             (fn [_ _ old new]
+               (when (not= (set (keys old)) (set (keys new)))
+                 (sse/refresh-all!))))
   (log/info "Agents module initialized"))
 
 (defn toggle-show-completed!
   "Toggle the show-completed filter."
   []
   (swap! ui-state update :show-completed not))
-
 
 ;;; ---------------------------------------------------------------------------
 ;;; Datalevin Queries (Phase E3 - Datalevin only)
@@ -135,6 +139,7 @@
       (let [instant (cond
                       (instance? Instant timestamp) timestamp
                       (instance? ZonedDateTime timestamp) (.toInstant timestamp)
+                      (instance? java.util.Date timestamp) (.toInstant timestamp)
                       (string? timestamp) (Instant/parse timestamp)
                       :else nil)
             _ (when-not instant (throw (ex-info "Unknown timestamp type" {})))
@@ -479,7 +484,7 @@
                  expand-tools? (or is-first? is-last?)
                  rendered (render-message msg expand-tools?)]
            :when rendered]
-       ^{:key (:xt/id msg)}
+       ^{:key (:seon/id msg)}
        rendered)]))
 
 ;;; ---------------------------------------------------------------------------
@@ -487,15 +492,29 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- running-agents
-  "Get all currently running agents from the registry."
+  "Get all currently running agents from the registry, enriched with runtime data.
+   Merges agent-run metadata (cost, turns, duration) from Datalevin when available."
   []
-  (agent/agents {}))
+  (let [agents (agent/agents {})
+        runs (runtime/agent-runs {})
+        ;; Index runs by their ID for fast lookup
+        runs-by-id (into {} (map (juxt :seon.agent.run/id identity)) runs)]
+    (mapv (fn [agent]
+            (let [sid (::agent/session-id agent)
+                  run (get runs-by-id sid)]
+              (cond-> agent
+                (:seon.agent.run/cost-usd run)
+                (assoc ::agent/cost-usd (:seon.agent.run/cost-usd run))
+                (:seon.agent.run/num-turns run)
+                (assoc ::agent/num-turns (:seon.agent.run/num-turns run))
+                (:seon.agent.run/duration-ms run)
+                (assoc ::agent/duration-ms (:seon.agent.run/duration-ms run)))))
+          agents)))
 
 (defn- completed-sessions
   "Get recent completed/failed sessions from Datalevin."
   [limit]
-  (ai/list-sessions {::ai/node nil
-                     ::ai/limit limit}))
+  (ai/list-sessions {::ai/limit limit}))
 
 (defn- message-stats-by-session
   "Get message counts and latest timestamps for all sessions in one query.
@@ -509,21 +528,22 @@
   [session-id message-stats]
   (when-let [stats (get message-stats session-id)]
     (when-let [ts (:latest-ts stats)]
-      (.toEpochMilli (.toInstant ts)))))
+      (let [instant (if (instance? Instant ts) ts (.toInstant ts))]
+        (.toEpochMilli instant)))))
 
 (def ^:private stuck-threshold-ms
   "Milliseconds without activity before considering an agent stuck (2 minutes)."
   (* 120 1000))
 
 (defn- compute-effective-status
-  "Compute effective status for an agent, detecting stuck state from XTDB message timestamps.
+  "Compute effective status for an agent, detecting stuck state from Datalevin message timestamps.
 
    This is the SINGLE source of truth for agent status computation.
    Both the list view and detail view use this function.
 
    Arguments:
      session-id    - Full AI session ID (ses-xxx)
-     base-status   - Status from registry or XTDB (:running, :completed, :failed, etc.)
+     base-status   - Status from registry or Datalevin (:running, :completed, :failed, etc.)
      message-stats - Map of session-id -> {:count n :latest-ts ZonedDateTime}
 
    Returns:
@@ -532,7 +552,7 @@
 
    Logic:
    - Terminal statuses (:completed, :failed, :interrupted) pass through unchanged
-   - Running agents are checked against latest message timestamp from XTDB
+   - Running agents are checked against latest message timestamp from Datalevin
    - If last message is stale (> 2 min), returns :stuck
    - If no messages found, returns base-status as-is"
   [session-id base-status message-stats]
@@ -561,7 +581,7 @@
         completed (completed-sessions 50)
         ;; Filter out sessions that are currently running or don't have agent-session-id
         completed-not-running (->> completed
-                                   (remove #(running-ids (:xt/id %)))
+                                   (remove #(running-ids (:seon/id %)))
                                    (filter ::ai/agent-session-id))
         ;; Batch fetch message stats (counts + timestamps) to avoid N+1
         msg-stats (or (message-stats-by-session) {})
@@ -576,13 +596,6 @@
 ;;; ---------------------------------------------------------------------------
 ;;; HTML Components (private)
 ;;; ---------------------------------------------------------------------------
-
-(defn- format-cost
-  "Format cost as USD string."
-  [cost]
-  (if cost
-    (format "$%.2f" (double cost))
-    "-"))
 
 (defn- format-tokens
   "Format token count with K suffix for thousands."
@@ -644,7 +657,7 @@
   "Render the agents table with Phosphor terminal styling.
    Design: table over cards, monospace, dense rows, warm colors."
   [{:keys [running completed message-stats context-tokens show-completed]}]
-  (let [;; Build running agent rows using XTDB timestamps for sorting
+  (let [;; Build running agent rows using Datalevin timestamps for sorting
         running-rows (for [agent running
                            :let [id (::agent/session-id agent)
                                  session-id (::agent/ai-session-id agent)
@@ -656,12 +669,12 @@
                         :session-id session-id
                         :provider (::agent/provider agent)
                         :type :running
-                        ;; Use XTDB message timestamp for sorting, fallback to max long (newest first)
+                        ;; Use Datalevin message timestamp for sorting, fallback to max long (newest first)
                         :sort-time (or latest-ms Long/MAX_VALUE)})
-        ;; Build completed rows using XTDB timestamps
+        ;; Build completed rows using Datalevin timestamps
         completed-rows (for [session completed
                              :let [agent-sid (::ai/agent-session-id session)
-                                   session-id (:xt/id session)
+                                   session-id (:seon/id session)
                                    started-at (::ai/started-at session)
                                    latest-ms (latest-activity-ms session-id message-stats)]]
                          {:id agent-sid
@@ -670,7 +683,7 @@
                           :session-id session-id
                           :started-at started-at
                           :type :completed
-                          ;; Use XTDB message timestamp, then started-at, then 0
+                          ;; Use Datalevin message timestamp, then started-at, then 0
                           :sort-time (or latest-ms
                                          (when started-at (.toEpochMilli (.toInstant started-at)))
                                          0)})
@@ -741,7 +754,34 @@
         (if show-completed "Hide Completed" "Show Completed")]]
 
       ;; Agents table
-      (agents-table data)])))
+      (agents-table data)
+
+      ;; Runtime instances summary — only show external (agent) instances
+      (let [external-instances (->> (runtime/instances {})
+                                    (filter #(= :external (::runtime/location %))))
+            running-instances (filter #(= :running (::runtime/status %)) external-instances)]
+        (when (seq external-instances)
+          [:div {:class "mt-4"}
+           [:div {:class "flex items-center gap-2 mb-2"}
+            [:span {:class "text-xs font-semibold text-text-400 uppercase tracking-wider"} "Runtime Instances"]
+            [:span {:class "text-text-500 text-xs"}
+             (str (count running-instances) " running / " (count external-instances) " total")]]
+           [:div {:class "bg-base-850 rounded overflow-hidden"}
+            [:table {:class "w-full"}
+             [:thead
+              [:tr {:class "border-b border-base-700"}
+               [:th {:class "text-left py-1.5 px-4 text-xs font-medium text-text-400 uppercase tracking-wider"} "Namespace"]
+               [:th {:class "text-left py-1.5 px-4 text-xs font-medium text-text-400 uppercase tracking-wider"} "Status"]
+               [:th {:class "text-left py-1.5 px-4 text-xs font-medium text-text-400 uppercase tracking-wider"} "Location"]
+               [:th {:class "text-left py-1.5 px-4 text-xs font-medium text-text-400 uppercase tracking-wider"} "Since"]]]
+             [:tbody
+              (for [inst (sort-by ::runtime/namespace external-instances)]
+                [:tr {:class "border-b border-base-700 last:border-0"}
+                 [:td {:class "py-2 px-4 font-mono text-sm text-text-200"} (::runtime/namespace inst)]
+                 [:td {:class "py-2 px-4"} (agent-status-badge (::runtime/status inst))]
+                 [:td {:class "py-2 px-4 font-mono text-sm text-text-400"} (name (::runtime/location inst))]
+                 [:td {:class "py-2 px-4 font-mono text-sm text-text-400"}
+                  (format-local-time (::runtime/started-at inst))]])]]]]))])))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Handlers
@@ -765,21 +805,21 @@
 
 ;; Handler uses var reference for hot reload support
 (def agents-sse
-  (sse/render-handler #'agents-sse-render :poll-ms 2000))
+  (sse/render-handler #'agents-sse-render :poll-ms 10000))
 
 (defn toggle-completed-handler
-  "Toggle show/hide completed agents and trigger SSE refresh."
+  "Toggle show/hide completed agents and return updated HTML directly.
+   Using text/html response lets Datastar's @post morph the DOM immediately,
+   bypassing the SSE refresh channel (which can drop events or add throttle delay)."
   [_request]
   (toggle-show-completed!)
-  (sse/refresh-all!)
   {:status 200
-   :headers {"Content-Type" "application/json"}
-   :body "{\"ok\": true}"})
+   :headers {"Content-Type" "text/html"}
+   :body (agents-content)})
 
 ;;; ---------------------------------------------------------------------------
 ;;; Agent Detail View
 ;;; ---------------------------------------------------------------------------
-
 
 (defn- get-registry-status
   "Get agent status from registry. Returns :running, :completed, or nil."
@@ -787,7 +827,6 @@
   (let [running-agents (agent/agents {})]
     (when-let [a (first (filter #(= agent-id (:seon.ai.agent/session-id %)) running-agents))]
       (:seon.ai.agent/agent-status a))))
-
 
 (defn- extract-current-activity
   "Extract the current activity summary from the most recent messages.
@@ -864,66 +903,6 @@
        [:span {:class "text-signal animate-pulse"} icon]
        [:span {:class "text-text-300"} "Working on:"]
        [:span {:class "text-text-100 truncate"} text]])))
-
-(def ^:private context-window-tokens
-  "Approximate context window size for Claude Opus 4.5 (200K tokens)."
-  200000)
-
-(defn- context-bar
-  "Render a context window usage bar.
-   Shows approximate usage based on cache-creation-tokens."
-  [context-tokens]
-  (when (and context-tokens (pos? context-tokens))
-    (let [percent (min 100 (* 100 (/ context-tokens context-window-tokens)))
-          bar-color (cond
-                      (>= percent 90) "bg-error"
-                      (>= percent 70) "bg-warning"
-                      :else "bg-signal")]
-      [:div {:class "flex items-center gap-2"
-             :title (str "Context: " (format-tokens context-tokens) " / " (format-tokens context-window-tokens) " tokens")}
-       [:div {:class "w-24 h-1.5 bg-base-700 rounded-full overflow-hidden"}
-        [:div {:class (str bar-color " h-full rounded-full transition-all")
-               :style (str "width: " percent "%")}]]
-       [:span {:class "text-text-500 text-2xs"} (str (format-tokens context-tokens))]])))
-
-(defn- metrics-display
-  "Render metrics row for agent detail header.
-   Shows context usage, turns, and duration in a compact format."
-  [{:keys [num-turns duration-ms context-tokens]}]
-  [:div {:class "flex items-center gap-4 text-xs font-mono"}
-   ;; Context window usage bar
-   (context-bar context-tokens)
-   ;; Turns
-   (when num-turns
-     [:span {:class "text-text-400" :title "Conversation turns"}
-      (str "Turn " num-turns)])
-   ;; Duration
-   (when duration-ms
-     [:span {:class "text-text-400" :title "Duration"}
-      (format-duration duration-ms)])])
-
-(defn- status-badge
-  "Render a status badge with Phosphor pattern for agent detail header.
-   Uses dot + word style with pulse for active states."
-  [{:keys [status time-ago seconds-ago]}]
-  (let [;; Phosphor status design: [dot-color text-color label pulse?]
-        [dot-class text-class label pulse?]
-        (case status
-          :running ["bg-signal" "text-signal" "running" true]
-          :completed ["bg-success" "text-success" "done" false]
-          :stuck ["bg-warning" "text-warning" "stuck" false]
-          :error ["bg-error" "text-error" "error" false]
-          ["bg-text-500" "text-text-500" (name (or status :unknown)) false])]
-    [:div {:class "flex items-center gap-3"}
-     [:span {:class "inline-flex items-center gap-1.5"}
-      [:span {:class (str "w-1.5 h-1.5 rounded-full " dot-class
-                          (when pulse? " animate-pulse"))}]
-      [:span {:class (str "text-xs font-medium " text-class)} label]]
-     (when time-ago
-       [:span {:class (str "text-xs " (if (and seconds-ago (> seconds-ago (quot stuck-threshold-ms 1000)))
-                                         "text-warning font-medium"
-                                         "text-text-400"))}
-        (str "Last activity: " time-ago)])]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Initial Context Components
@@ -1069,12 +1048,59 @@
    ;; Auto-scroll script - runs once on page load, sets up MutationObserver
    [:script (h/raw auto-scroll-script)]])
 
+(defn- render-flow-events
+  "Render flow event timeline for an agent session.
+   Shows trace events (start/end/error/forward) with timestamps and durations.
+   Returns nil when no events exist."
+  [agent-id]
+  (let [events (trace/events-for-session {::trace/session-id agent-id})]
+    (when (seq events)
+      [:div {:class "mt-4"}
+       [:div {:class "flex items-center gap-2 mb-2"}
+        [:span {:class "text-xs font-semibold text-text-400 uppercase tracking-wider"} "Flow Events"]
+        [:span {:class "text-text-500 text-2xs"} (str "(" (count events) ")")]]
+       [:div {:class "bg-base-850 rounded overflow-hidden"}
+        [:table {:class "w-full"}
+         [:thead
+          [:tr {:class "border-b border-base-700"}
+           [:th {:class "text-left py-1 px-3 text-2xs font-medium text-text-500 uppercase"} "Time"]
+           [:th {:class "text-left py-1 px-3 text-2xs font-medium text-text-500 uppercase"} "Event"]
+           [:th {:class "text-left py-1 px-3 text-2xs font-medium text-text-500 uppercase"} "Function"]
+           [:th {:class "text-right py-1 px-3 text-2xs font-medium text-text-500 uppercase"} "Elapsed"]
+           [:th {:class "text-left py-1 px-3 text-2xs font-medium text-text-500 uppercase"} "Trace"]]]
+         [:tbody
+          (for [evt events
+                :let [event-type (::trace/event evt)
+                      [dot-class label] (case event-type
+                                          :start ["bg-info" "start"]
+                                          :end ["bg-success" "end"]
+                                          :error ["bg-error" "error"]
+                                          :forward ["bg-signal" "fwd"]
+                                          :timeout ["bg-warning" "timeout"]
+                                          :overload ["bg-warning" "overload"]
+                                          ["bg-text-500" (name event-type)])]]
+            [:tr {:class "border-b border-base-700 last:border-0"}
+             [:td {:class "py-1 px-3 text-2xs font-mono text-text-400"}
+              (format-local-time (::trace/timestamp evt))]
+             [:td {:class "py-1 px-3"}
+              [:span {:class "inline-flex items-center gap-1"}
+               [:span {:class (str "w-1.5 h-1.5 rounded-full " dot-class)}]
+               [:span {:class "text-2xs font-mono"} label]]]
+             [:td {:class "py-1 px-3 text-2xs font-mono text-text-200 truncate max-w-xs"}
+              (or (::trace/fn evt) "-")]
+             [:td {:class "py-1 px-3 text-2xs font-mono text-text-400 text-right"}
+              (if-let [ms (::trace/elapsed-ms evt)]
+                (str ms "ms")
+                "-")]
+             [:td {:class "py-1 px-3 text-2xs font-mono text-text-500 truncate max-w-[6rem]"}
+              (when-let [tid (::trace/trace-id evt)]
+                (subs (str tid) 0 (min 8 (count (str tid)))))]])]]]])))
 
 (defn- agent-detail-content
   "Render the agent detail page content with Phosphor terminal styling.
-   Uses XTDB exclusively for message data."
+   Uses Datalevin exclusively for message data."
   [agent-id]
-  (let [;; Load data from XTDB
+  (let [;; Load data from Datalevin
         ai-session-id (find-ai-session-id agent-id)
         messages (when ai-session-id (load-session-messages ai-session-id))
         session-info (when ai-session-id (load-session-info ai-session-id))
@@ -1085,7 +1111,7 @@
         agg-stats (when (seq messages) (aggregate-message-stats messages))
         ;; Compute status
         base-status (or (get-registry-status agent-id)  ; Running agent in registry
-                        (::ai/status session-info)      ; Status from XTDB session
+                        (::ai/status session-info)      ; Status from Datalevin session
                         :unknown)
         effective-status (compute-effective-status ai-session-id base-status message-stats)
         status-info {:status effective-status
@@ -1146,7 +1172,9 @@
                 :class "p-3 max-h-[calc(100vh-180px)] overflow-y-auto"}
           ;; Initial context as first item (scrolls with messages)
           (render-initial-context initial-context)
-          (render-messages-view messages)]
+          (render-messages-view messages)
+          ;; Flow event timeline (if any events exist for this session)
+          (render-flow-events agent-id)]
 
          ;; Session exists but no messages yet (agent just started)
          ai-session-id
@@ -1184,7 +1212,7 @@
   [request]
   (let [agent-id (get-in request [:path-params :agent-id])
         render-fn (fn [_req] (agent-detail-content agent-id))
-        handler (sse/render-handler render-fn :poll-ms 1000)]
+        handler (sse/render-handler render-fn :poll-ms 10000)]
     (handler request)))
 
 ;;; ---------------------------------------------------------------------------
@@ -1223,4 +1251,4 @@
   (log/debug "Recreating agents-sse handler after namespace reload")
   ;; Recreate agents-sse with current var reference
   (alter-var-root #'agents-sse
-                  (constantly (sse/render-handler #'agents-sse-render :poll-ms 2000))))
+                  (constantly (sse/render-handler #'agents-sse-render :poll-ms 10000))))

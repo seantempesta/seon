@@ -1,14 +1,16 @@
+---
+type: prd
+status: completed
+tags: [prd, database]
+---
 # PRD: Datalevin Database Platform
-
-**Status:** Phases 0-3 Mostly Complete (on `feature/super-repl` branch)
-**Priority:** High
-**Branch:** feature/super-repl (merged with datalevin-migration work)
 
 ---
 
 ## Vision
 
 Build a rock-solid database platform where:
+
 - **Orchestrator manages all database connections** - single point of control
 - **Each namespace gets its own isolated database** - performance isolation
 - **Agents receive connections via `*ctx*`** - simple, consistent interface
@@ -66,6 +68,7 @@ Build a rock-solid database platform where:
      *ctx* contains:     *ctx* contains:     *ctx* contains:
      :seon.ns/conn →     :seon.ns/conn →     :seon.ns/conn →
        seon.trading        seon.trading        seon.health
+
 ```
 
 ---
@@ -91,12 +94,15 @@ One system replaces all three. Key properties:
 - **Per-instance, not per-namespace** -- multiple agents/UIs in the same namespace each get their own ctx
 - **Keyed by instance ID** (4-char hex, same format as agent sessions)
 - **Datalevin entity per instance:**
+
   ```clojure
   {:ctx/instance-id "a1b2"
    :ctx/namespace   "seon.trading"
    :ctx/data        "<EDN string>"
    :ctx/updated-at  #inst "2026-02-18T..."}
+
   ```
+
 - **Shared `::conn` per namespace** -- all instances in the same namespace share one Datalevin DB connection (from connection manager)
 - **Atom with composite watcher** that does both:
   1. Persist filtered EDN to Datalevin (proven pattern from `flow.harness/persist-ctx!`)
@@ -190,6 +196,7 @@ Agents receive a `*ctx*` atom with:
  :signals []
  :positions []
  :analysis nil}
+
 ```
 
 ### Two Storage Mechanisms
@@ -212,6 +219,7 @@ Agents receive a `*ctx*` atom with:
 (d/q '[:find ?ticker
        :where [?e :signal/type :buy] [?e :signal/ticker ?ticker]]
      @(:seon.ns/conn @*ctx*))
+
 ```
 
 ### Durable Atom: Duratom + Watchers
@@ -219,12 +227,14 @@ Agents receive a `*ctx*` atom with:
 **Decision:** Use [duratom](https://github.com/jimpil/duratom) for persistence, add versioning via watchers.
 
 **Why duratom:**
+
 - Drop-in atom replacement (`swap!`, `reset!`, `@` all work)
 - Custom serializers filter non-EDN keys (`:seon.ns/conn`)
 - Sync or async commit modes
 - Active maintenance
 
 **Pattern:**
+
 ```clojure
 (def ctx (dur/duratom :local-file
            :file-path "data/ctx/session-id.edn"
@@ -235,6 +245,7 @@ Agents receive a `*ctx*` atom with:
 (add-watch ctx ::versioning
   (fn [_ _ old new]
     (swap! versions conj {:timestamp (Instant/now) :state new})))
+
 ```
 
 See `research/durable-atoms.md` for full implementation.
@@ -265,6 +276,7 @@ See `research/durable-atoms.md` for full implementation.
    [::ticker]
    [::signal-type]
    [::recorded-at inst?]])
+
 ```
 
 ### Schema Compilation
@@ -279,11 +291,13 @@ See `research/durable-atoms.md` for full implementation.
 ;;    :seon.trading/ticker {:db/valueType :db.type/string
 ;;                          :db/index true}
 ;;    ...}
+
 ```
 
 ### Schema Loading
 
 When a namespace connection is created:
+
 1. Load all registered Malli schemas
 2. Compile to Datalevin format
 3. Apply via `d/update-schema`
@@ -299,12 +313,14 @@ This means all DBs can store any registered entity type.
 **Goal:** Rock-solid database infrastructure, no breaking changes.
 
 #### 0.1 Datalevin Server Component
+
 ```clojure
 ;; resources/config.edn
 {:seon/datalevin-server
  {:port 8898
   :root "data/datalevin"
   :opts {:validate-data? true}}}
+
 ```
 
 - [ ] Create `src/seon/db/datalevin/server.clj`
@@ -314,11 +330,13 @@ This means all DBs can store any registered entity type.
 - [ ] Health check integration
 
 #### 0.2 Connection Manager
+
 ```clojure
 ;; API
 (conn/get-master-conn!)           ;; → /seon/ connection
 (conn/get-namespace-conn! 'seon.trading)  ;; → /seon.trading/ connection (lazy create)
 (conn/close-namespace-conn! 'seon.trading) ;; → close and remove from cache
+
 ```
 
 - [ ] Create `src/seon/db/datalevin/conn.clj`
@@ -329,17 +347,20 @@ This means all DBs can store any registered entity type.
 - [ ] Schema application on connect
 
 #### 0.3 Schema Compiler
+
 - [ ] Create `src/seon/schema/datalevin.clj`
 - [ ] Multimethod for type transformation
 - [ ] Handle `:datalevin/*` properties
 - [ ] `compile-schemas` → full Datalevin schema map
 
 #### 0.4 Health & Diagnostics
+
 - [ ] `/api/health` includes Datalevin server status
 - [ ] `/api/health/datalevin` detailed DB stats
 - [ ] Connection count, DB sizes, query latency
 
 **Success Criteria:**
+
 - [ ] Server starts with system, stops cleanly
 - [ ] `get-namespace-conn!` creates DB on first call
 - [ ] Schema compiler produces valid Datalevin schemas
@@ -355,16 +376,19 @@ This means all DBs can store any registered entity type.
 **Status:** COMPLETE. See "Stress Testing" section below for implementation details.
 
 #### 1.1 Dual-Write Layer
+
 - [x] Created `src/seon/ai/datalevin.clj` - parallel writes to Datalevin
 - [x] Runtime toggle via `seon.ai.datalevin/enabled?` atom
 - [x] Errors logged but non-fatal (fire-and-forget)
 
 #### 1.2 AI Session/Message Dual-Write
+
 - [x] Updated `seon.ai/start-session!`, `end-session!`, `add-message!`
 - [x] Updated `seon.ai.claude/persist-message!`
 - [x] Verification via `(dl/verify-sync)` and `(dl/stats)`
 
 **Success Criteria:**
+
 - [x] All AI data written to both XTDB and Datalevin
 - [x] Existing tests still pass (read from XTDB)
 - [x] Zero errors after extended use
@@ -380,6 +404,7 @@ This means all DBs can store any registered entity type.
 SQL queries to port to Datalevin Datalog (~25 queries). All are SELECTs with no temporal features -- straightforward translation.
 
 **`seon.ai` (5 queries):**
+
 1. `get-session` -- `SELECT * FROM ai_sessions WHERE _id = ?`
 2. `get-messages` -- `SELECT * FROM ai_messages WHERE session_id = ? ORDER BY timestamp`
 3. `list-sessions` -- `SELECT * FROM ai_sessions [WHERE ns/status] ORDER BY started_at DESC LIMIT ?`
@@ -407,16 +432,19 @@ SQL queries to port to Datalevin Datalog (~25 queries). All are SELECTs with no 
 - [ ] A/B query comparison logging
 
 #### 2.2 Code Index Entities in Master DB
+
 - [ ] Master DB schema includes `seon.fn/*`, `seon.spec/*`, `seon.ns/*`, `seon.call/*` entities
 - [ ] Existing `seon.graph.*` entities (`:graph/*` keys) migrated to new key prefixes
 - [ ] Scanner writes code index to master DB (see spec-driven-rendering PRD Phase 1)
 
 #### 2.3 Switch Reads -- COMPLETE (Phase B2)
+
 - [x] `seon.ai` reads from Datalevin (read-from atom flipped to :datalevin)
 - [ ] Observatory reads from Datalevin (web/agents.clj still queries XTDB directly -- separate task)
 - [x] Stop XTDB writes for AI domain (Datalevin primary, XTDB fallback when no DL connection)
 
 **Success Criteria:**
+
 - [x] AI domain fully on Datalevin (with XTDB fallback for tests/environments without DL)
 - [ ] Code index entities stored in master DB
 - [x] All tests pass (679 tests, 3130 assertions, 0 AI-related failures)
@@ -429,6 +457,7 @@ SQL queries to port to Datalevin Datalog (~25 queries). All are SELECTs with no 
 **Goal:** Replace all three ctx systems with unified per-instance ctx backed by Datalevin.
 
 #### 3.1 Unified Ctx Module — COMPLETE
+
 - [x] Created `src/seon/ctx.clj` (top-level, shared by all consumers)
 - [x] Per-instance atom keyed by instance ID
 - [x] Datalevin persistence with debounced writes
@@ -453,14 +482,17 @@ The atom gets a single watcher that does two things on every state change:
           (persist-ctx! conn instance-id namespace new)
           (notify-sse-clients! instance-id new))))
     ctx-atom))
+
 ```
 
 #### 3.3 Migration from Existing Systems
+
 - [ ] Replace `seon.web.reactive.instance` usage with unified ctx (blocked on spec-driven render pipeline — see below)
 - [x] `seon.primer.ctx` wraps `seon.ctx` with lazy connection manager
 - [x] `seon.orchestrator.session` uses connection manager with lazy `get-namespace-conn!`
 
 **Key Design Points:**
+
 - Multiple agents/UIs in the same namespace each get their own ctx (per-instance, not per-namespace)
 - All instances in the same namespace share one Datalevin connection (`::conn`)
 - Instance ID is the primary key in Datalevin, not namespace
@@ -470,6 +502,7 @@ The atom gets a single watcher that does two things on every state change:
 The old `seon.web.reactive.instance` has render-fn + client-tracking that the unified `seon.ctx` doesn't yet have. Rather than adding render-fn storage to `seon.ctx` (which would duplicate the old pattern), the plan is to resolve renderers from Datalevin via `seon.render/find-renderer` — turtles all the way down. See `docs/prds/spec-driven-rendering/prd.md` for the render resolution algorithm. Once the render pipeline is wired, `seon.ctx` gets client tracking only (not render-fn storage), and rendering is push-based from scanner invalidation.
 
 **Success Criteria:**
+
 - [x] Agents get `*ctx*` with Datalevin persistence
 - [x] State changes trigger debounced persist + optional SSE push
 - [x] Session resume loads previous context from Datalevin
@@ -484,17 +517,21 @@ The old `seon.web.reactive.instance` has render-fn + client-tracking that the un
 **Goal:** Move remaining domains to Datalevin.
 
 #### 4.1 Trading Domain
+
 - [ ] Migrate `option_greeks` (millions of records)
 - [ ] Performance verification
 - [ ] Bulk loader updates
 
 #### 4.2 Dev Hook Domain
+
 - [ ] Migrate edit/review/todo events
 
 #### 4.3 Orchestrator Domain
+
 - [ ] Session registry to master DB
 
 **Success Criteria:**
+
 - [ ] All domains on Datalevin
 - [ ] Performance equal or better than XTDB
 
@@ -513,6 +550,7 @@ The old `seon.web.reactive.instance` has render-fn + client-tracking that the un
 - [ ] Delete XTDB data (after backup)
 
 **Success Criteria:**
+
 - [ ] XTDB completely removed
 - [ ] All tests pass
 - [ ] Documentation updated
@@ -538,6 +576,7 @@ src/seon/
 │
 └── orchestrator/
     └── ctx.clj              # Agent *ctx* factory (injects conn)
+
 ```
 
 ---
@@ -559,6 +598,7 @@ src/seon/
  ;; Feature flags for migration
  :db/dual-write? false
  :db/read-from :xtdb}  ;; :xtdb | :datalevin
+
 ```
 
 ---
@@ -614,6 +654,7 @@ Both server and connection manager are fully implemented:
 | Integrant Components | `src/seon/system.clj` | ✅ Integrated |
 
 Features implemented:
+
 - ✅ Server starts/stops with Integrant lifecycle
 - ✅ TCP health check (`healthy?` function)
 - ✅ Connection caching with TTL-based cleanup
@@ -718,6 +759,7 @@ XTDB uses SQL. Datalevin uses Datalog. All queries must be rewritten:
        :in $ ?status
        :where [?e :ai.session/status ?status]]
      @conn status)
+
 ```
 
 **Estimated queries to rewrite:** 40-50 across the codebase.
@@ -731,12 +773,14 @@ XTDB uses SQL. Datalevin uses Datalog. All queries must be rewritten:
 **Issue:** SQL → Datalog translation is error-prone. Different semantics can cause subtle bugs.
 
 **Specific Concerns:**
+
 1. JOIN semantics differ (Datalevin is inner-join only)
 2. NULL handling differs between SQL and Datalog
 3. Aggregate functions have different syntax
 4. ORDER BY behavior with ties
 
 **Mitigation:**
+
 - Create comprehensive query test suite BEFORE migration
 - Add parallel query execution during dual-write (compare results)
 - Log all query result differences for manual review
@@ -746,11 +790,13 @@ XTDB uses SQL. Datalevin uses Datalog. All queries must be rewritten:
 **Issue:** XTDB has built-in bitemporality. Datalevin has single-timeline history.
 
 **Files at Risk:**
+
 - `agent/ctx.clj` - Uses SYSTEM_TIME for debugging time-travel
 - `primer/ctx.clj` - Uses `{:current-time instant}` for point-in-time
 - `trading/bulk_load.clj` - Uses `:xt/valid-from` for historical data
 
 **Mitigation:**
+
 - Implement append-only snapshot pattern (already documented in temporal-strategy.md)
 - Add explicit `:recorded-at` columns to all temporal entities
 - Test time-travel queries extensively before switching
@@ -762,6 +808,7 @@ XTDB uses SQL. Datalevin uses Datalog. All queries must be rewritten:
 **Example:** Observatory needs to query all agent messages across namespaces.
 
 **Mitigation:**
+
 - Research verified: Multi-DB queries work (`research/multi-db-queries.md`)
 - Performance tested: 13ms for 1003 results across DBs
 - Pattern: Use `:in $db1 $db2 $db3` syntax
@@ -771,6 +818,7 @@ XTDB uses SQL. Datalevin uses Datalog. All queries must be rewritten:
 **Issue:** Malli schemas and Datalevin schemas could diverge.
 
 **Mitigation:**
+
 - Build schema compiler (Phase 0.3) FIRST
 - Generate Datalevin schema from Malli at connection time
 - Add schema validation tests
@@ -780,6 +828,7 @@ XTDB uses SQL. Datalevin uses Datalog. All queries must be rewritten:
 **Issue:** Agent JVMs connecting/disconnecting could stress connection manager.
 
 **Mitigation:**
+
 - Already implemented: TTL-based cleanup (5-minute default)
 - Connection caching prevents thrashing
 - Health checks detect stale connections
@@ -791,6 +840,7 @@ XTDB uses SQL. Datalevin uses Datalog. All queries must be rewritten:
 ### Gap 1: No Schema Compiler Implementation Path
 
 **Problem:** Phase 0.3 says "Create `src/seon/schema/datalevin.clj`" but doesn't specify:
+
 - Which Malli types map to which Datalevin types
 - How to handle nested maps (EDN-encode vs flatten)
 - How to handle optionality
@@ -800,6 +850,7 @@ XTDB uses SQL. Datalevin uses Datalog. All queries must be rewritten:
 ### Gap 2: No Query Migration Guide
 
 **Problem:** Plan says "Rewrite SQL queries as Datalog" but doesn't provide:
+
 - Mapping from XTDB SQL patterns to Datalog patterns
 - Common pitfalls to avoid
 - Testing strategy for query equivalence
@@ -811,6 +862,7 @@ XTDB uses SQL. Datalevin uses Datalog. All queries must be rewritten:
 **Problem:** Observatory needs to query ALL agent messages, but agents use separate DBs.
 
 **Resolution:**
+
 - Option A: Keep all messages in master DB (simpler)
 - Option B: Aggregate queries across namespace DBs (already tested, works)
 
@@ -821,6 +873,7 @@ XTDB uses SQL. Datalevin uses Datalog. All queries must be rewritten:
 **Problem:** Existing tests use XTDB. No plan for migrating test fixtures.
 
 **Resolution:**
+
 - Add `seon.db.test-utils` that abstracts DB setup
 - Tests should work against either XTDB or Datalevin
 - Feature flag `:test/db-backend` determines which to use
@@ -830,6 +883,7 @@ XTDB uses SQL. Datalevin uses Datalog. All queries must be rewritten:
 **Problem:** No scripts defined for migrating existing XTDB data to Datalevin.
 
 **Resolution:** Add to Phase 4:
+
 - Create `src/seon/db/migration.clj`
 - One-time migration functions per entity type
 - Verification queries after migration
@@ -907,6 +961,7 @@ Based on the audit, here's the recommended priority:
 8. **Phase 5: XTDB Removal** - Only after everything verified
 
 **Estimated Timeline:**
+
 - Phases 0-2: Can be done incrementally with minimal disruption
 - Phase 3: Requires careful orchestrator changes
 - Phase 4: Bulk of the work, needs dedicated focus
@@ -937,6 +992,7 @@ The render contract is no longer per-namespace `render` functions with `::format
 A parallel dual-write layer that writes AI sessions and messages to both XTDB and Datalevin simultaneously. This allows stress testing Datalevin under real production load without risking data loss.
 
 **Files:**
+
 - `src/seon/ai/datalevin.clj` - Parallel storage namespace
 - `src/seon/ai.clj` - Modified to call dual-write after XTDB writes
 - `src/seon/ai/claude.clj` - Modified to dual-write Claude messages
@@ -961,6 +1017,7 @@ A parallel dual-write layer that writes AI sessions and messages to both XTDB an
 
 ;; Re-enable
 (dl/set-enabled! true)
+
 ```
 
 ### Monitoring
@@ -989,6 +1046,7 @@ A parallel dual-write layer that writes AI sessions and messages to both XTDB an
 
 ;; Query messages for a session
 (dl/query-messages {:session-id "ses-abc123" :limit 20})
+
 ```
 
 ### What to Watch For
@@ -1002,18 +1060,21 @@ A parallel dual-write layer that writes AI sessions and messages to both XTDB an
 ### Stress Test Procedures
 
 **Light stress test (recommended first):**
+
 1. Launch 2-3 agents simultaneously
 2. Monitor `(dl/stats)` for error count
 3. Run for 30+ minutes
 4. Verify no crashes or hangs
 
 **Heavy stress test:**
+
 1. Launch 5+ agents simultaneously
 2. Include agents that generate many messages (complex multi-file edits)
 3. Run for several hours
 4. Compare final counts: `(dl/verify-sync)`
 
 **Crash recovery test:**
+
 1. While agents are running, stop the server abruptly (`pkill -9`)
 2. Restart with `./bin/run`
 3. Verify Datalevin recovers without data loss

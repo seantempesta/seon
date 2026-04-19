@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 # Example Feature PRD Structure
 
 This is an example showing how the PRD system works. The `_example-feature` directory demonstrates the structure without cluttering the actual PRDs.

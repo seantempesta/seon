@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 > **Status: ARCHIVED** — Dead — depended on deleted reactive.instance
 
 > **Status: ARCHIVED** — Dead — depended on deleted reactive.instance
@@ -100,9 +106,11 @@ This informs how we might communicate with isolated instances - we can't dynamic
 ## Phase 1: Sci Deep Dive
 
 ### Objective
+
 Understand Sci's isolation model, Java interop capabilities, and performance characteristics.
 
 ### Tasks
+
 1. Add Sci as git submodule: `reference-code/sci`
 2. Read key source files to understand architecture
 3. Create `src/seon/experimental/sci_exploration.clj`
@@ -112,21 +120,25 @@ Understand Sci's isolation model, Java interop capabilities, and performance cha
 7. Document findings in `research/sci-findings.md`
 
 ### Key Questions
+
 - How does `sci/fork` work? Is it copy-on-write?
 - Can we register arbitrary Java classes per-context?
 - Can we add capabilities to an existing context dynamically?
 - What's the performance overhead vs native Clojure eval?
 
 ### Key Files to Study
+
 ```
 reference-code/sci/src/sci/
 ├── core.cljc          ; Public API (init, fork, eval-string*)
 ├── impl/vars.cljc     ; How Sci vars work (different from Clojure)
 ├── impl/interop.cljc  ; Java interop implementation
 └── impl/namespaces.cljc ; Namespace handling
+
 ```
 
 ### Experiment Code
+
 ```clojure
 (ns seon.experimental.sci-exploration
   (:require [sci.core :as sci]))
@@ -153,9 +165,11 @@ reference-code/sci/src/sci/
 ;; 4. Test Java interop limits
 (sci/eval-string* ctx-1 "(java.util.Date.)") ; works if in :classes
 (sci/eval-string* ctx-1 "(System/exit 0)") ; should fail
+
 ```
 
 ### Deliverables
+
 - [ ] `reference-code/sci` submodule added
 - [ ] `src/seon/experimental/sci_exploration.clj` with working experiments
 - [ ] `docs/prds/namespace-isolation/research/sci-findings.md`
@@ -165,9 +179,11 @@ reference-code/sci/src/sci/
 ## Phase 2: Dynamic Namespace Instances
 
 ### Objective
+
 Test Clojure's native namespace machinery for instance isolation.
 
 ### Tasks
+
 1. Create `src/seon/experimental/ns_instance.clj`
 2. Implement `create-instance-ns` with inheritance
 3. Test var isolation between instances
@@ -186,6 +202,7 @@ But schemas expect `:seon.email/foo` (the canonical namespace).
 3. Code rewriting - transform `::foo` before eval (complex, last resort)
 
 ### Core Functions
+
 ```clojure
 (defn create-instance-ns
   "Create an instance namespace that inherits from base."
@@ -210,9 +227,11 @@ But schemas expect `:seon.email/foo` (the canonical namespace).
   "Remove an instance namespace."
   [instance-ns]
   (remove-ns (ns-name instance-ns)))
+
 ```
 
 ### Verification Tests
+
 1. **Isolation test:** Two instances, define same var differently, verify no cross-pollution
 2. **Inheritance test:** Base functions available in both instances
 3. **Override test:** Override in one instance, other keeps original
@@ -221,6 +240,7 @@ But schemas expect `:seon.email/foo` (the canonical namespace).
 6. **Macro test:** Inherited macros expand correctly
 
 ### Deliverables
+
 - [ ] `src/seon/experimental/ns_instance.clj`
 - [ ] `test/seon/experimental/ns_instance_test.clj`
 - [ ] `docs/prds/namespace-isolation/research/dynamic-ns-findings.md`
@@ -230,9 +250,11 @@ But schemas expect `:seon.email/foo` (the canonical namespace).
 ## Phase 3: Lightweight JVM Measurement
 
 ### Objective
+
 Measure actual memory footprint for minimal Seon instances.
 
 ### Tasks
+
 1. Create minimal deps.edn for seon-lite
 2. Measure memory: bare Clojure, +Datalevin, +http-kit, +Malli
 3. Test startup time with various JVM flags
@@ -250,24 +272,29 @@ Measure actual memory footprint for minimal Seon instances.
 | **Total** | **~150-200MB** | Before data |
 
 ### JVM Tuning Flags
+
 ```bash
 java -Xms64m -Xmx256m \
      -XX:+UseSerialGC \
      -XX:MaxMetaspaceSize=128m \
      -Dclojure.spec.skip-macros=true \
      -jar seon-lite.jar
+
 ```
 
 ### Measurement Script
+
 ```bash
 # Start minimal Clojure REPL, measure RSS
 clojure -J-Xms64m -J-Xmx256m -M -e "(println \"started\")" &
 PID=$!
 sleep 5
 ps -o rss= -p $PID  # RSS in KB
+
 ```
 
 ### Deliverables
+
 - [ ] `src/seon/experimental/jvm_footprint.clj` - measurement code
 - [ ] `docs/prds/namespace-isolation/research/jvm-footprint-findings.md`
 
@@ -276,6 +303,7 @@ ps -o rss= -p $PID  # RSS in KB
 ## Phase 4: Integration Design
 
 ### Objective
+
 Design how instance isolation integrates with existing systems.
 
 ### Integration Points
@@ -286,12 +314,14 @@ Design how instance isolation integrates with existing systems.
 4. **Graduation** - Criteria and mechanism for promoting code
 
 ### Graduation Criteria (Draft)
+
 - All tests pass for N consecutive runs
 - No security violations detected
 - Code review approved (human or AI)
 - Performance within acceptable bounds
 
 ### Deliverables
+
 - [ ] `docs/prds/namespace-isolation/research/integration-design.md`
 
 ---
@@ -301,6 +331,7 @@ Design how instance isolation integrates with existing systems.
 ```clojure
 ;; Add to deps.edn for Sci experiments:
 org.babashka/sci {:mvn/version "0.8.43"}
+
 ```
 
 No other new dependencies - uses Clojure core functions.

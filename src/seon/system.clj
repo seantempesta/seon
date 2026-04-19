@@ -2,144 +2,103 @@
   "Integrant system configuration and component definitions.
 
   Defines init-key and halt-key! methods for all system components:
-  - :seon/xtdb-node - XTDB v2 database node (single node with attached databases)
-  - :seon/namespace-dbs - Manages attached databases for namespaces
-  - :seon/datalevin-server - Datalevin server for agent namespace isolation
-  - :seon/schema-registry - Malli schema registry
+  - :seon.db.datalevin/server - Datalevin server for all data storage
+  - :seon/runtime-db - Runtime database connection (code graph + runtime registry)
+  - :seon.schema/registry - Malli schema registry
   - :seon.web.server/http-server - HTTP server for web UI
-  - :seon/nrepl-server - nREPL for REPL-driven development
+  - :seon.dev/nrepl - nREPL for REPL-driven development
   - :seon.orchestrator/namespace-nrepls - Per-namespace nREPL servers for agent isolation
 
-  ## Multi-Database Architecture
-
-  Instead of running 3 separate XTDB nodes (~4.5GB memory), we now run a single
-  node with attached databases for each namespace:
-
-  - Primary 'xtdb' database: orchestrator data (data/xtdb)
-  - 'seon_primer' database: primer sessions (data/namespaces/seon.primer)
-  - 'seon_dev' database: dev hook events (data/namespaces/seon.dev)
-
-  This reduces memory usage significantly while maintaining isolation.
-
-  ## Datalevin Migration (Phase 0)
-
-  A Datalevin server component (:seon/datalevin-server) is being added for
-  eventual migration from XTDB. See docs/prds/datalevin-migration/prd.md."
-  (:require [integrant.core :as ig]
-            [clojure.java.io :as io]
+  Datalevin is the sole database."
+  (:require [clojure.core.async.flow :as flow]
+            [integrant.core :as ig]
             [taoensso.timbre :as log]
-            [seon.db.schema :as schema]
+            [seon.db :as db]
+            [seon.schema :as schema]
+            [seon.db.datalevin.conn :as dl-conn]
+            [seon.flow.msg :as msg]
+            [seon.flow.status :as status]
+            [seon.flow.topology :as topology]
+            [seon.runtime :as runtime]
+            [seon.dev.instrumentation :as instrumentation]
             ;; Load component namespaces for their ig/init-key methods
             [seon.web.tailwind]
+            [seon.web.caddy]
             [seon.db.datalevin.server]
-            [seon.db.datalevin.conn]
             [seon.flow.pool]))
 
 ;;; ---------------------------------------------------------------------------
-;;; XTDB Node Component
+;;; Config Validation (assert-key)
 ;;; ---------------------------------------------------------------------------
+;;; Validates all :seon/component configs against Malli schemas before init.
+;;; The hierarchy in resources/integrant/hierarchy.edn derives all component
+;;; keys from :seon/component, so this single method catches everything.
 
-(defmethod ig/init-key :seon/xtdb-node
-  [_ {:keys [storage memory-cache disk-cache compactor]}]
-  (log/info "Starting XTDB node..." {:storage storage :compactor compactor})
-  (require '[xtdb.node :as xtn])
-  (require '[xtdb.api :as xt])
-  ;; Ensure XTQL protocol namespaces are loaded to prevent classloader mismatches
-  ;; after (reset). This guarantees the PlanQuery protocol extensions are in place.
-  (require '[xtdb.xtql.plan])
-  (let [start-node (resolve 'xtn/start-node)
-        node (if (= storage :in-memory)
-               (start-node)
-               ;; XTDB v2 API: [:local {:path ...}] format
-               (let [base-path (if (map? storage) (:path storage) (str storage))
-                     config (cond-> {:log [:local {:path (io/file base-path "log")}]
-                                     :storage [:local {:path (io/file base-path "objects")}]}
-                              memory-cache (assoc :memory-cache memory-cache)
-                              disk-cache (assoc :disk-cache disk-cache)
-                              compactor (assoc :compactor compactor))]
-                 (start-node config)))]
-    (log/info "XTDB node started" {:compactor compactor})
-    node))
-
-(defmethod ig/halt-key! :seon/xtdb-node
-  [_ node]
-  (log/info "Stopping XTDB node...")
-  (when node
-    (.close node))
-  (log/info "XTDB node stopped"))
-
-;;; ---------------------------------------------------------------------------
-;;; Namespace Databases Component
-;;; ---------------------------------------------------------------------------
-;;; Attaches secondary databases for namespace isolation after the primary
-;;; node starts. This replaces the previous separate node components.
-
-(defmethod ig/init-key :seon/namespace-dbs
-  [_ {:keys [node namespaces]}]
-  (log/info "Attaching namespace databases..." {:namespaces namespaces})
-  (require 'seon.db.multi)
-  (let [attach-all! (resolve 'seon.db.multi/attach-all-namespace-dbs!)
-        results (attach-all! node namespaces)]
-    (log/info "Namespace databases attached" {:results results})
-    {:node node
-     :namespaces namespaces}))
-
-(defmethod ig/halt-key! :seon/namespace-dbs
-  [_ _]
-  (log/info "Namespace database connections cleaned up"))
-
-;;; ---------------------------------------------------------------------------
-;;; Legacy Node Components (REMOVED)
-;;; ---------------------------------------------------------------------------
-;;; The separate :seon.primer/xtdb-node and :seon.dev/xtdb-node components
-;;; have been replaced by :seon/namespace-dbs which attaches databases to
-;;; the single :seon/xtdb-node. This reduces memory usage from ~4.5GB to ~1.5GB.
-
-;;; ---------------------------------------------------------------------------
-;;; Python Bridge Component - DISABLED
-;;; ---------------------------------------------------------------------------
-;;; Python code moved to src/ml_options/_python_disabled
-;;; To re-enable, restore the python directory and uncomment this section
-
-;; (defmethod ig/init-key :seon/python-bridge
-;;   [_ {:keys [conda-env auto-initialize?]}]
-;;   (log/info "Initializing Python bridge..." {:conda-env conda-env})
-;;   (when auto-initialize?
-;;     (require '[libpython-clj2.python :as py])
-;;     (let [initialize! (resolve 'py/initialize!)]
-;;       ;; libpython-clj will read python.edn for configuration
-;;       (initialize!)))
-;;   (log/info "Python bridge initialized")
-;;   {:conda-env conda-env
-;;    :initialized? auto-initialize?})
-
-;; (defmethod ig/halt-key! :seon/python-bridge
-;;   [_ bridge]
-;;   (log/info "Python bridge shutdown")
-;;   ;; libpython-clj manages its own cleanup
-;;   nil)
+(defmethod ig/assert-key :seon/component
+  [component-key value]
+  (require 'seon.system.config)
+  (when-let [errors ((resolve 'seon.system.config/validate) component-key value)]
+    (throw (ex-info (str "Invalid config for " component-key ":\n"
+                         (pr-str errors)
+                         "\n\nCheck resources/system.edn")
+                    {:key component-key :value value :errors errors}))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schema Registry Component
 ;;; ---------------------------------------------------------------------------
 
-(defmethod ig/init-key :seon/schema-registry
+(defmethod ig/init-key :seon.schema/registry
   [_ _]
   (log/info "Initializing Malli schema registry...")
-  (let [registry-value @schema/registry]
-    (log/info "Schema registry initialized" {:schema-count (count registry-value)})
-    registry-value))
+  (let [schemas (schema/registered-schemas)]
+    (log/info "Schema registry initialized" {:schema-count (count schemas)})
+    schemas))
 
-(defmethod ig/halt-key! :seon/schema-registry
+(defmethod ig/halt-key! :seon.schema/registry
   [_ _]
   (log/info "Schema registry shutdown")
   nil)
+
+;; Pure value, survives reset. Only re-init if config changes.
+(defmethod ig/suspend-key! :seon.schema/registry [_ state] state)
+
+(defmethod ig/resume-key :seon.schema/registry
+  [_ opts old-opts old-state]
+  (if (= opts old-opts)
+    old-state
+    (do (ig/halt-key! :seon.schema/registry old-state)
+        (ig/init-key :seon.schema/registry opts))))
+
+;;; ---------------------------------------------------------------------------
+;;; Schema Consistency Check Component
+;;; ---------------------------------------------------------------------------
+;;; Validates all persisted entity schemas at boot. Catches :any, :some,
+;;; [:maybe X], mixed enums, and :nil before they reach Datalevin.
+;;; Depends on :seon.schema/registry to ensure all modules are loaded.
+
+(defmethod ig/init-key :seon.db.schema/consistency-check
+  [_ {:keys [registry]}]
+  (require 'seon.db.schema)
+  (log/info "Running schema consistency check...")
+  (let [result ((resolve 'seon.db.schema/validate-persisted-schemas!))]
+    (log/info "Schema consistency check complete"
+              {:schema-count (:schema-count result)})
+    result))
+
+;; Pure check result, survives reset.
+(defmethod ig/suspend-key! :seon.db.schema/consistency-check [_ state] state)
+
+(defmethod ig/resume-key :seon.db.schema/consistency-check
+  [_ opts old-opts old-state]
+  (if (= opts old-opts)
+    old-state
+    (ig/init-key :seon.db.schema/consistency-check opts)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; nREPL Server Component
 ;;; ---------------------------------------------------------------------------
 
-(defmethod ig/init-key :seon/nrepl-server
+(defmethod ig/init-key :seon.dev/nrepl
   [_ {:keys [enabled? port bind]}]
   (if enabled?
     (do
@@ -157,7 +116,7 @@
       (log/info "nREPL server disabled for this profile")
       nil)))
 
-(defmethod ig/halt-key! :seon/nrepl-server
+(defmethod ig/halt-key! :seon.dev/nrepl
   [_ server]
   (when server
     (log/info "Stopping nREPL server...")
@@ -169,172 +128,317 @@
     (log/info "nREPL server stopped")))
 
 ;; Keep nREPL alive during (reset) - critical for REPL-driven development
-(defmethod ig/suspend-key! :seon/nrepl-server [_ server] server)
+(defmethod ig/suspend-key! :seon.dev/nrepl [_ server] server)
 
-(defmethod ig/resume-key :seon/nrepl-server
-  [key opts old-opts old-server]
+(defmethod ig/resume-key :seon.dev/nrepl
+  [_ opts old-opts old-server]
   (if (= opts old-opts)
     old-server
-    (do (ig/halt-key! key old-server)
-        (ig/init-key key opts))))
+    (do (ig/halt-key! :seon.dev/nrepl old-server)
+        (ig/init-key :seon.dev/nrepl opts))))
 
 ;;; ---------------------------------------------------------------------------
-;;; Namespace nREPL Servers Component
-;;; ---------------------------------------------------------------------------
-;;; Manages per-namespace nREPL servers for agent isolation.
-;;; Each namespace gets its own nREPL on a unique port with injected *ctx*.
-
-(defmethod ig/init-key :seon.orchestrator/namespace-nrepls
-  [_ {:keys [namespaces node]}]
-  (log/info "Starting namespace nREPL servers..." {:namespaces namespaces})
-  (require 'seon.orchestrator.nrepl)
-  (require 'seon.db.multi)
-  (let [start! (resolve 'seon.orchestrator.nrepl/start-namespace-nrepl!)
-        create-conn (resolve 'seon.db.multi/create-namespace-connection)
-        ;; Generate a deterministic session-id from namespace (for Integrant-managed nREPLs)
-        ns->session-id (fn [ns-sym] (str "ig-" (hash ns-sym)))
-        ;; Start an nREPL for each namespace
-        results (into {}
-                      (for [ns-sym namespaces]
-                        (let [session-id (ns->session-id ns-sym)
-                              ;; Create a db connection for this namespace if node is provided
-                              db (when node
-                                   (try
-                                     (create-conn node ns-sym)
-                                     (catch Exception e
-                                       (log/warn "Could not create db connection"
-                                                 {:namespace ns-sym :error (.getMessage e)})
-                                       nil)))
-                              result (start! {:session-id session-id
-                                              :namespace ns-sym
-                                              :db db})]
-                          [ns-sym (assoc result :session-id session-id)])))]
-    (log/info "Namespace nREPL servers started"
-              {:servers (into {} (for [[ns {:keys [port status]}] results]
-                                   [ns {:port port :status status}]))})
-    {:namespaces namespaces
-     :servers results}))
-
-(defmethod ig/halt-key! :seon.orchestrator/namespace-nrepls
-  [_ {:keys [servers]}]
-  (log/info "Stopping namespace nREPL servers...")
-  (require 'seon.orchestrator.nrepl)
-  (let [stop! (resolve 'seon.orchestrator.nrepl/stop-namespace-nrepl!)]
-    (doseq [[ns-sym {:keys [ctx session-id]}] servers]
-      (try
-        ;; Close any db connection we created
-        (when-let [db (:seon.agent/db @ctx)]
-          (when (instance? java.io.Closeable db)
-            (.close ^java.io.Closeable db)))
-        ;; Stop the nREPL server (keyed by session-id, not namespace)
-        (stop! session-id)
-        (catch Exception e
-          (log/warn "Error stopping namespace nREPL"
-                    {:namespace ns-sym :session-id session-id :error (.getMessage e)})))))
-  (log/info "Namespace nREPL servers stopped"))
-
-;; Keep namespace nREPLs alive during (reset) like the main nREPL
-(defmethod ig/suspend-key! :seon.orchestrator/namespace-nrepls [_ state] state)
-
-(defmethod ig/resume-key :seon.orchestrator/namespace-nrepls
-  [key opts old-opts old-state]
-  (if (= (:namespaces opts) (:namespaces old-opts))
-    old-state
-    (do (ig/halt-key! key old-state)
-        (ig/init-key key opts))))
-
-;;; ---------------------------------------------------------------------------
-;;; Primer Ctx Component
-;;; ---------------------------------------------------------------------------
-;;; Initializes the primer ctx system with the Datalevin connection manager.
-
-(defmethod ig/init-key :seon/primer-ctx
-  [_ {:keys [connection-manager]}]
-  (require 'seon.primer.ctx)
-  ((resolve 'seon.primer.ctx/init!) connection-manager)
-  {:connection-manager connection-manager})
-
 ;;; ---------------------------------------------------------------------------
 ;;; Orchestrator Sessions Component
 ;;; ---------------------------------------------------------------------------
 ;;; Initializes the orchestrator session system with the Datalevin connection manager.
 
-(defmethod ig/init-key :seon/orchestrator-sessions
-  [_ {:keys [connection-manager]}]
+(defmethod ig/init-key :seon.orchestrator/sessions
+  [_ {:keys [connection-manager pool]}]
+  (log/info "Initializing orchestrator sessions...")
   (require 'seon.orchestrator.session)
-  ((resolve 'seon.orchestrator.session/init!) connection-manager)
-  {:connection-manager connection-manager})
+  ((resolve 'seon.orchestrator.session/init!) connection-manager :pool pool)
+  (log/info "Orchestrator sessions initialized")
+  {:connection-manager connection-manager :pool pool})
+
+(defmethod ig/halt-key! :seon.orchestrator/sessions
+  [_ _]
+  (log/info "Orchestrator sessions shutdown"))
+
+(defmethod ig/suspend-key! :seon.orchestrator/sessions [_ state] state)
+
+(defmethod ig/resume-key :seon.orchestrator/sessions
+  [_ opts old-opts old-state]
+  (if (= opts old-opts)
+    (do
+      ;; Re-wire pool atom — defonce atoms survive reload but init! may not
+      ;; have been called if resume short-circuited on a previous cycle
+      (require 'seon.orchestrator.session)
+      ((resolve 'seon.orchestrator.session/init!)
+       (:connection-manager opts) :pool (:pool opts))
+      old-state)
+    (do (ig/halt-key! :seon.orchestrator/sessions old-state)
+        (ig/init-key :seon.orchestrator/sessions opts))))
+
+;;; ---------------------------------------------------------------------------
+;;; Graph Database Component
+;;; ---------------------------------------------------------------------------
+;;; Owns the seon.runtime Datalevin connection used by:
+;;; - Code scanner (code graph entities)
+;;; - Runtime registry (namespace instance tracking)
+;;; - Render system (function resolution)
+
+(defn runtime-db-conn
+  "Get a fresh runtime database connection from the runtime-db component.
+   Always goes through the connection manager, so handles reconnection
+   after connection pool recycling or server restarts.
+
+   Usage:
+     (runtime-db-conn (:seon/runtime-db state/system))"
+  [{:keys [connection-manager]}]
+  (dl-conn/get-conn!
+   {::dl-conn/manager connection-manager
+    ::dl-conn/db :seon.runtime
+    ::dl-conn/schema (runtime/runtime-merged-schema)}))
+
+(defmethod ig/init-key :seon/runtime-db
+  [_ {:keys [connection-manager]}]
+  ;; Bind direct-mode + conn-manager so persist-instance! (in a future)
+  ;; can resolve connections during init-key (Integrant system is nil).
+  ;; Clojure's future conveys dynamic bindings via binding-conveyor-fn.
+  (binding [db/*direct-mode* true
+            db/*conn-manager* connection-manager]
+    ;; Get conn through the connection manager (handles staleness, auto-reconnect)
+    (let [conn (dl-conn/get-conn!
+                {::dl-conn/manager connection-manager
+                 ::dl-conn/db :seon.runtime
+                 ::dl-conn/schema (runtime/runtime-merged-schema)})]
+      (log/info "Runtime database connected via connection manager")
+      ;; Mark any instances from previous unclean shutdown as crashed
+      (let [{::runtime/keys [crashed-count]} (runtime/mark-crashed! {})]
+        (when (pos? crashed-count)
+          (log/warn "Found crashed instances from previous run" {:count crashed-count})))
+      ;; Hydrate in-memory cache from Datalevin (includes crashed instances)
+      (let [{::runtime/keys [hydrated-count]} (runtime/hydrate-cache! {})]
+        (when (pos? hydrated-count)
+          (log/info "Hydrated runtime cache from Datalevin" {:count hydrated-count})))
+      ;; Register this component
+      (runtime/register! {::runtime/namespace "seon.graph.db"
+                          ::runtime/status :running
+                          ::runtime/location :in-process
+                          ::runtime/component-key :seon/runtime-db})
+      ;; Only store connection-manager — consumers must call runtime-db-conn
+      ;; to get a fresh connection. Storing :conn here causes stale references
+      ;; after TTL cleanup or server restarts.
+      {:connection-manager connection-manager})))
+
+(defmethod ig/halt-key! :seon/runtime-db
+  [_ _state]
+  (log/info "Stopping runtime-db component...")
+  ;; Unregister this component
+  (runtime/unregister! {::runtime/namespace "seon.graph.db"})
+  ;; Don't close conn directly — connection manager owns it
+  (log/info "Runtime-db component stopped"))
+
+;; Suspend/resume to survive (reset) like nREPL
+(defmethod ig/suspend-key! :seon/runtime-db [_ state] state)
+
+(defmethod ig/resume-key :seon/runtime-db
+  [_ opts old-opts old-state]
+  (if (= (:connection-manager opts) (:connection-manager old-opts))
+    ;; Connection manager unchanged — conn is still valid (manager handles staleness)
+    old-state
+    (do (ig/halt-key! :seon/runtime-db old-state)
+        (ig/init-key :seon/runtime-db opts))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Code Scanner Component
 ;;; ---------------------------------------------------------------------------
 ;;; Populates the Datalevin knowledge graph at startup by analyzing the
 ;;; codebase with clj-kondo and scanning for schema/register! calls.
+;;; Receives its connection from :seon/runtime-db component.
+;;; Runs in a background future to avoid blocking startup (~3s savings).
 
-(defmethod ig/init-key :seon/code-scanner
-  [_ {:keys [connection-manager paths enabled?]}]
+(def ^:const ^:private scanner-circuit-breaker-threshold
+  "After this many consecutive ingest failures, skip remaining namespaces."
+  3)
+
+(defn- run-code-scan!
+  "Execute the code scan in the current thread. Called from a future.
+   Includes circuit breaker: after 3 consecutive DB failures, skips remaining
+   namespaces and signals :degraded to the health component."
+  [paths]
+  (let [extract-graph-from-file (resolve 'seon.graph.extract/extract-graph-from-file)
+        ingest-namespace! (resolve 'seon.graph.ingest/ingest-namespace!)]
+    (try
+      (log/info "Code scanner: extracting graph for project..." {:paths paths})
+      (let [clj-files (->> (mapcat #(file-seq (java.io.File. %)) paths)
+                           (filter (fn [^java.io.File f]
+                                     (and (.isFile f)
+                                          (let [n (.getName f)]
+                                            (or (.endsWith n ".clj")
+                                                (.endsWith n ".cljs")
+                                                (.endsWith n ".cljc"))))))
+                           vec)
+            total (count clj-files)]
+        (log/info "Code scanner: found files to process" {:count total})
+        ;; Phase 1: Extract graphs in parallel (CPU-bound, no DB)
+        (let [graphs (->> clj-files
+                          (pmap (fn [^java.io.File f]
+                                  (try
+                                    (extract-graph-from-file
+                                     {:seon.graph.extract/file-path (.getAbsolutePath f)})
+                                    (catch Throwable e
+                                      (log/warn "Code scanner: extract failed"
+                                                {:file (.getName f) :error (.getMessage e)})
+                                      nil))))
+                          (filter :seon.graph.extract/ns-name)
+                          vec)
+              ns-total (count graphs)
+              ingested (atom 0)
+              failed (atom 0)
+              skipped (atom 0)
+              consecutive-failures (atom 0)
+              circuit-open? (atom false)]
+          ;; Phase 2: Ingest sequentially (DB writes) with circuit breaker
+          (doseq [graph graphs]
+            (if @circuit-open?
+              (swap! skipped inc)
+              (try
+                (let [ns-str (:seon.graph.extract/ns-name graph)]
+                  (ingest-namespace!
+                   {:seon.graph.ingest/db-name :seon.runtime
+                    :seon.graph.ingest/ns-name ns-str
+                    :seon.graph.ingest/functions (:seon.graph.extract/functions graph)
+                    :seon.graph.ingest/specs (:seon.graph.extract/specs graph)
+                    :seon.graph.ingest/vars (:seon.graph.extract/vars graph)
+                    :seon.graph.ingest/call-edges (:seon.graph.extract/call-edges graph)
+                    :seon.graph.ingest/ns-deps (:seon.graph.extract/ns-deps graph)
+                    :seon.graph.ingest/ns-entities (:seon.graph.extract/namespaces graph)
+                    :seon.graph.ingest/shapes (:seon.graph.extract/shapes graph)
+                    :seon.graph.ingest/entries (:seon.graph.extract/entries graph)})
+                  (swap! ingested inc)
+                  (reset! consecutive-failures 0))
+                (catch Exception e
+                  (swap! failed inc)
+                  (let [n (swap! consecutive-failures inc)]
+                    (log/warn "Code scanner: ingest failed"
+                              {:ns (:seon.graph.extract/ns-name graph)
+                               :error (.getMessage e)
+                               :consecutive-failures n})
+                    (when (>= n scanner-circuit-breaker-threshold)
+                      (log/error "Code scanner: circuit breaker tripped after consecutive failures"
+                                 {:consecutive-failures n
+                                  :threshold scanner-circuit-breaker-threshold})
+                      (reset! circuit-open? true)
+                      ;; Signal degraded to health component
+                      (try
+                        ((requiring-resolve 'seon.health/set-startup-phase!) :degraded)
+                        (catch Exception _))))))))
+          (let [summary {:files-processed total
+                         :namespaces-total ns-total
+                         :ingested @ingested
+                         :failed @failed
+                         :skipped @skipped}]
+            (if (pos? (+ @failed @skipped))
+              (log/warn "Code scanner complete with errors" summary)
+              (log/info "Code scanner complete" summary)))))
+      (catch Exception e
+        (log/error "Code scanner failed" {:error (.getMessage e)})))))
+
+(defmethod ig/init-key :seon.graph/scanner
+  [_ {:keys [graph-db paths enabled?]}]
   (when enabled?
-    (require 'seon.graph.analyzer)
-    (require 'seon.graph.scanner)
+    ;; Verify connectivity before starting scan
+    (when-not (runtime-db-conn graph-db)
+      (log/warn "Code scanner: no graph-db connection available")
+      (throw (ex-info "Code scanner requires graph-db connection" {})))
+    (require 'seon.graph.extract)
     (require 'seon.graph.ingest)
-    (require 'datalevin.core)
-    (require 'seon.db.datalevin.conn)
-    (let [;; Resolve functions
-          analyze-project! (resolve 'seon.graph.analyzer/analyze-project!)
-          extract-entities (resolve 'seon.graph.analyzer/extract-entities)
-          scan-directory (resolve 'seon.graph.scanner/scan-directory)
-          link-fns-to-specs (resolve 'seon.graph.scanner/link-fns-to-specs)
-          ingest-analysis! (resolve 'seon.graph.ingest/ingest-analysis!)
-          datalevin-schema (deref (resolve 'seon.graph.ingest/datalevin-schema))
-          ;; Get a graph connection with schema via the connection manager internals
-          get-conn (resolve 'datalevin.core/get-conn)
-          build-uri-fn (fn [mgr db-name]
-                         (format "dtlv://%s:%s@%s:%d/%s"
-                                 (or (:seon.db.datalevin.conn/username mgr) "datalevin")
-                                 (or (:seon.db.datalevin.conn/password mgr) "datalevin")
-                                 (or (:seon.db.datalevin.conn/host mgr) "127.0.0.1")
-                                 (:seon.db.datalevin.conn/port mgr)
-                                 db-name))
-          graph-uri (build-uri-fn connection-manager "seon-graph")
-          conn (get-conn graph-uri datalevin-schema)]
-      (try
-        ;; Full project analysis
-        (log/info "Code scanner: analyzing project..." {:paths paths})
-        (let [project (analyze-project! {:seon.graph.analyzer/paths paths})]
-          (if-not (:seon.graph.analyzer/success project)
-            (log/warn "Code scanner: analysis failed" {:error (:seon.graph.analyzer/error project)})
-            (let [entities (extract-entities {:seon.graph.analyzer/raw-analysis
-                                             (:seon.graph.analyzer/raw-analysis project)})
-                  ;; Scan for specs
-                  specs (into [] (mapcat #(scan-directory {:seon.graph.scanner/dir-path %})) paths)
-                  ;; Link functions to specs
-                  linked-fns (link-fns-to-specs (:seon.graph.analyzer/functions entities) specs)
-                  entities (assoc entities :seon.graph.analyzer/functions linked-fns)
-                  ;; Ingest everything
-                  result (ingest-analysis! {:seon.graph.ingest/conn conn
-                                            :seon.graph.ingest/entities entities
-                                            :seon.graph.ingest/specs specs})]
-              (log/info "Code scanner initialized" result))))
-        ;; Wire the graph connection into the render system for Datalevin resolution
-        (require 'seon.render)
-        ((resolve 'seon.render/set-conn!) conn)
-        (log/info "Render system connected to graph database")
-        {:conn conn :paths paths}
-        (catch Exception e
-          (log/error "Code scanner failed" {:error (.getMessage e)})
-          ;; Still return conn so halt can close it
-          {:conn conn :paths paths})))))
+    ;; Bind direct-mode + conn-manager so register! persist and scan future
+    ;; can resolve connections during init-key (Integrant system may be nil).
+    (let [cm (:connection-manager graph-db)]
+      (binding [db/*direct-mode* true
+                db/*conn-manager* cm]
+        ;; Register immediately so system sees the component
+        (runtime/register! {::runtime/namespace "seon.graph.scanner"
+                            ::runtime/status :running
+                            ::runtime/location :in-process
+                            ::runtime/component-key :seon.graph/scanner})
+        ;; Run scan in background so startup isn't blocked (~3s savings)
+        ;; future conveys bindings via binding-conveyor-fn
+        (let [scan-future (future (run-code-scan! paths))]
+          {:graph-db graph-db :paths paths :scan-future scan-future})))))
 
-(defmethod ig/halt-key! :seon/code-scanner
+(defmethod ig/halt-key! :seon.graph/scanner
   [_ state]
-  (when-let [conn (:conn state)]
+  (when (:graph-db state)
     (log/info "Stopping code scanner...")
-    ;; Disconnect render system before closing the graph connection
-    (require 'seon.render)
-    ((resolve 'seon.render/set-conn!) nil)
-    (require 'datalevin.core)
-    ((resolve 'datalevin.core/close) conn)
+    ;; Cancel scan if still running
+    (when-let [f (:scan-future state)]
+      (future-cancel f))
+    ;; Unregister from runtime (connection owned by graph-db, not closed here)
+    (runtime/unregister! {::runtime/namespace "seon.graph.scanner"})
     (log/info "Code scanner stopped")))
+
+;; Always halt+init on resume. The scanner holds a Datalevin connection
+;; captured at init time (passed to run-code-scan! future). After reset,
+;; that connection may be closed by TTL cleanup or server restart.
+;; Re-scanning is cheap (~3s in background) and ensures fresh connections.
+(defmethod ig/suspend-key! :seon.graph/scanner [_ state] state)
+
+(defmethod ig/resume-key :seon.graph/scanner
+  [_ opts _old-opts old-state]
+  (ig/halt-key! :seon.graph/scanner old-state)
+  (ig/init-key :seon.graph/scanner opts))
+
+;;; ---------------------------------------------------------------------------
+;;; Infrastructure Flow Component
+;;; ---------------------------------------------------------------------------
+;;; Starts the infrastructure flow (writer + reply-router + sinks) at boot.
+;;; The writer handles ALL database writes via the connection manager.
+;;; Namespace flows are NOT part of this — they're created lazily later.
+
+(defmethod ig/init-key :seon.flow/infrastructure
+  [_ {:keys [connection-manager]}]
+  (log/info "Starting infrastructure flow...")
+  ;; Bind direct-mode + conn-manager so register-flow! -> persist-instance!
+  ;; can resolve connections during init-key (Integrant system may be nil).
+  (binding [db/*direct-mode* true
+            db/*conn-manager* connection-manager]
+    (let [result (topology/build-infrastructure!
+                  {::topology/connection-manager connection-manager})]
+      (log/info "Infrastructure flow started"
+                {:flow-id (::topology/flow-id result)})
+      result)))
+
+(defmethod ig/halt-key! :seon.flow/infrastructure
+  [_ state]
+  (when-let [fl (::topology/flow state)]
+    (log/info "Stopping infrastructure flow...")
+    (let [flow-id (::topology/flow-id state)]
+      (try
+        ;; Don't use stop-topology! here -- it tries to snapshot via db/transact!
+        ;; which routes through THIS flow. Circular. Just stop directly.
+        (flow/pause fl)
+        (flow/ping fl :timeout-ms 3000)
+        (catch Throwable t
+          (log/warn "Pause/ping failed during halt" {:error (.getMessage t)})))
+      (try
+        (flow/stop fl)
+        (catch Throwable t
+          (log/warn "Error stopping infrastructure flow" {:error (.getMessage t)})))
+      ;; Clean up pending promises
+      (doseq [[_id p] @topology/pending-promises]
+        (deliver p {::msg/status :error
+                    ::msg/error-type :timeout
+                    ::msg/error-message "Infrastructure flow stopped"}))
+      (reset! topology/pending-promises {})
+      ;; Unregister from runtime
+      (when flow-id
+        (status/stop-error-drain! {::status/id flow-id})
+        (runtime/unregister-flow! {::runtime/flow-id flow-id})))
+    (log/info "Infrastructure flow stopped")))
+
+;; Always halt+init on resume. Flow objects are immutable — if code has been
+;; reloaded and build-infrastructure! now includes new processes (e.g. repl-step
+;; added after initial build), the old flow object won't have them.
+(defmethod ig/suspend-key! :seon.flow/infrastructure [_ state] state)
+
+(defmethod ig/resume-key :seon.flow/infrastructure
+  [_ opts _old-opts old-state]
+  (ig/halt-key! :seon.flow/infrastructure old-state)
+  (ig/init-key :seon.flow/infrastructure opts))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Claude Code SDK Configuration
@@ -342,7 +446,29 @@
 ;;; Configuration for the Claude Code CLI. Currently just holds the CLI path.
 ;;; The actual CLI interaction is in seon.ai.claude.sdk.
 
-(defmethod ig/init-key :seon/claude-code
+;;; ---------------------------------------------------------------------------
+;;; Malli Instrumentation Component
+;;; ---------------------------------------------------------------------------
+;;; Instruments all functions with :malli/schema metadata for runtime validation.
+;;; Agent-friendly error messages on schema violations.
+
+(defmethod ig/init-key :seon.dev/instrumentation
+  [_ opts]
+  (instrumentation/start! opts))
+
+(defmethod ig/halt-key! :seon.dev/instrumentation
+  [_ _]
+  (instrumentation/stop!))
+
+;; Survives reset — instrumentation persists across reloads
+(defmethod ig/suspend-key! :seon.dev/instrumentation [_ state] state)
+(defmethod ig/resume-key :seon.dev/instrumentation [_ _ _ old] old)
+
+;;; ---------------------------------------------------------------------------
+;;; Claude Code SDK Configuration
+;;; ---------------------------------------------------------------------------
+
+(defmethod ig/init-key :seon.ai.claude/sdk
   [_ config]
   (log/info "Claude Code SDK configured" {:cli-path (:cli-path config)})
   config)

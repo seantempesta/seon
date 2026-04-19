@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive, agent]
+---
+
 > **Status: ARCHIVED** — Complete — Phase 6 done
 
 > **Status: ARCHIVED** — Complete — Phase 6 done
@@ -29,6 +35,7 @@ The key insight: in XTDB/Datomic, an entity is just a bag of namespaced attribut
 seon.ai                 ; Base schemas + entity persistence
 ├── seon.ai.claude      ; Claude SDK integration
 └── seon.ai.gemini      ; Gemini integration (future refactor)
+
 ```
 
 ### seon.ai (base namespace)
@@ -84,6 +91,7 @@ Think Datomic-style: everything is an entity with attributes. The "table name" i
  :seon.ai/started-at #inst "..."
  :seon.ai/status :active
  :seon.ai.claude/model "opus"}    ; Provider-specific on same entity
+
 ```
 
 ### Use Existing seon.db.node
@@ -110,6 +118,7 @@ The `seon.ai` namespace uses these directly - no new abstractions needed:
                 }]
     (db/put! node :ai_sessions entity)
     {::session-id session-id}))
+
 ```
 
 ---
@@ -158,6 +167,7 @@ The `seon.ai` namespace uses these directly - no new abstractions needed:
   - `agents`, `interrupt!`, `tail` (moved from sdk.clj)
 
 **Key Pattern:** Claude schemas reference base schemas:
+
 ```clojure
 (ns seon.ai.claude
   (:require [seon.ai :as ai]
@@ -169,6 +179,7 @@ The `seon.ai` namespace uses these directly - no new abstractions needed:
    [::ai/session-id ::ai/session-id]  ; Reference base!
    [::model ::model]                   ; Claude-specific
    [::nrepl-port :int]])
+
 ```
 
 **Tests:**

@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 # PRD: Phase 11 - Unified Analysis Pipeline
 
 **Status:** Phase 11a COMPLETE
@@ -59,6 +65,7 @@ clj-kondo CLI → parse EDN output
 Splint CLI → parse output
 cljfmt CLI → shell out
 clojure.test → separate process
+
 ```
 
 ### Target State (Unified)
@@ -69,6 +76,7 @@ Single JVM process:
   cljfmt.core/reformat-string → formatted code
   clojure.test programmatic → test results
   seon.dev.compliance → uses analysis data
+
 ```
 
 ---
@@ -108,6 +116,7 @@ Single JVM process:
                                               :var-definitions true
                                               :arglists true}}}})
 ;; Returns: {:findings [...] :analysis {...} :summary {...} :config {...}}
+
 ```
 
 **Answers:**
@@ -124,6 +133,7 @@ Single JVM process:
 
 (cljfmt/reformat-string "(defn foo[x](+ x 1))")
 ;; => "(defn foo [x] (+ x 1))"
+
 ```
 
 **Questions:**
@@ -196,6 +206,7 @@ Current approach captures output via binding. Consider:
 +------------------+
 | Gemini Review    |  Rich context with related functions
 +------------------+
+
 ```
 
 ---
@@ -242,6 +253,7 @@ Current approach captures output via binding. Consider:
 ;; deps.edn
 {:deps {clj-kondo/clj-kondo {:mvn/version "2024.09.27"}
         cljfmt/cljfmt {:mvn/version "0.12.0"}}}
+
 ```
 
 ---

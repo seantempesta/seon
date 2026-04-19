@@ -1,19 +1,28 @@
+---
+type: prd
+status: draft
+tags: [prd, web]
+---
 # SSE Live Reload - Solution Implemented
 
 ## Problem
+
 SSE handlers use `def` to create handler objects. clj-reload doesn't re-evaluate `def` forms unless the code changes, causing stale handlers that don't pick up changes to render functions.
 
 ## Root Cause
+
 ```clojure
 ;; This closure is captured ONCE at def time
 (def my-sse
   (sse/render-handler
    (fn [_request] (render-content))))  ; Changes won't propagate!
+
 ```
 
 ## Solution: Var References + after-ns-reload Hooks
 
 clj-reload has built-in support for reload hooks (discovered in source at `reference-code/clj-reload/src/clj_reload/core.clj:15-19`):
+
 - `:reload-hook` - function called AFTER reload (default: `after-ns-reload`)
 - `:unload-hook` - function called BEFORE unload (default: `before-ns-unload`)
 
@@ -36,6 +45,7 @@ clj-reload has built-in support for reload hooks (discovered in source at `refer
 (defn after-ns-reload []
   (alter-var-root #'my-sse
     (constantly (sse/render-handler #'my-sse-render :poll-ms 2000))))
+
 ```
 
 ## Files Updated
@@ -58,6 +68,7 @@ clj-reload has built-in support for reload hooks (discovered in source at `refer
 ## Testing
 
 After server restart:
+
 1. Edit any render function (e.g., change title text)
 2. Dev hook reloads namespace + calls `after-ns-reload`
 3. Browser shows updated content within 2s (poll interval)

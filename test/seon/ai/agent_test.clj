@@ -71,8 +71,8 @@
                              :content [{:type "text" :text "Hello, world!"}]}}
           entity (agent/normalize-message {:provider :claude
                                            :message sdk-msg})]
-      (is (string? (:xt/id entity)))
-      (is (clojure.string/starts-with? (:xt/id entity) "msg-"))
+      (is (string? (:seon/id entity)))
+      (is (clojure.string/starts-with? (:seon/id entity) "msg-"))
       (is (= :message (::ai/type entity)))
       (is (= "assistant" (::ai/role entity)))
       (is (= "Hello, world!" (::ai/content entity)))

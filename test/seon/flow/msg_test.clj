@@ -1,9 +1,9 @@
 (ns seon.flow.msg-test
-  (:require [clojure.edn :as edn]
-            [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is testing]]
             [malli.core :as m]
             [malli.generator :as mg]
-            [seon.flow.msg :as msg]))
+            [seon.flow.msg :as msg]
+            [taoensso.nippy :as nippy]))
 
 (deftest schema-generation-test
   (testing "request schema generates valid samples"
@@ -18,8 +18,8 @@
     (doseq [sample (mg/sample ::msg/event {:size 10})]
       (is (m/validate ::msg/event sample)))))
 
-(deftest edn-round-trip-test
-  (testing "request survives EDN round-trip"
+(deftest nippy-round-trip-test
+  (testing "request survives Nippy round-trip"
     (let [request {::msg/id (random-uuid)
                    ::msg/version 1
                    ::msg/type :request
@@ -28,13 +28,11 @@
                    ::msg/fn "seon.test.beta/format-name"
                    ::msg/args [{:name "sean"}]
                    ::msg/created-at (java.time.Instant/now)}
-          serialized (pr-str request)
-          deserialized (edn/read-string {:readers {'time/instant #(java.time.Instant/parse %)}}
-                                        serialized)]
+          deserialized (nippy/fast-thaw (nippy/fast-freeze request))]
       (is (= request deserialized))
       (is (m/validate ::msg/request deserialized))))
 
-  (testing "reply survives EDN round-trip"
+  (testing "reply survives Nippy round-trip"
     (let [reply {::msg/id (random-uuid)
                  ::msg/version 1
                  ::msg/type :reply
@@ -42,23 +40,40 @@
                  ::msg/from-ns "seon.test.beta"
                  ::msg/value {:result 42}
                  ::msg/duration-ms 5}
-          serialized (pr-str reply)
-          deserialized (edn/read-string serialized)]
+          deserialized (nippy/fast-thaw (nippy/fast-freeze reply))]
       (is (= reply deserialized))
       (is (m/validate ::msg/reply deserialized))))
 
-  (testing "event survives EDN round-trip"
+  (testing "event survives Nippy round-trip"
     (let [event {::msg/id (random-uuid)
                  ::msg/version 1
                  ::msg/type :event
                  ::msg/event-kind :start
                  ::msg/from-ns "seon.test.alpha"
                  ::msg/created-at (java.time.Instant/now)}
-          serialized (pr-str event)
-          deserialized (edn/read-string {:readers {'time/instant #(java.time.Instant/parse %)}}
-                                        serialized)]
+          deserialized (nippy/fast-thaw (nippy/fast-freeze event))]
       (is (= event deserialized))
-      (is (m/validate ::msg/event deserialized)))))
+      (is (m/validate ::msg/event deserialized))))
+
+  (testing "Nippy preserves types EDN could not"
+    (let [data {::msg/id (random-uuid)
+                ::msg/version 1
+                ::msg/type :reply
+                ::msg/status :ok
+                ::msg/from-ns "seon.test"
+                ::msg/value {:bytes (byte-array [1 2 3])
+                             :float-val (float 3.14)
+                             :instant (java.time.Instant/now)}
+                ::msg/duration-ms 0}
+          deserialized (nippy/fast-thaw (nippy/fast-freeze data))
+          val (::msg/value deserialized)]
+      (is (instance? Float (:float-val val))
+          "Float type preserved (EDN coerced to Double)")
+      (is (java.util.Arrays/equals ^bytes (get-in data [::msg/value :bytes])
+                                    ^bytes (:bytes val))
+          "byte[] preserved (EDN could not serialize)")
+      (is (instance? java.time.Instant (:instant val))
+          "Instant type preserved natively"))))
 
 (deftest negative-validation-test
   (testing "request missing required keys fails"

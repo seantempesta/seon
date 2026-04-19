@@ -1,14 +1,23 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # Stage 2: Namespace Rename - ml-options to seon
 
 ## Execution Date
+
 2025-12-13
 
 ## Summary
+
 Successfully renamed all `ml-options` namespaces to `seon` throughout the codebase. This was a mechanical rename with no functional changes. The system starts correctly, all components function properly, and all 181 tests pass.
 
 ## Changes Made
 
 ### 1. Directory Renames
+
 Renamed all source directories from `ml_options` to `seon`:
 
 ```bash
@@ -16,12 +25,16 @@ src/ml_options/      → src/seon/
 test/ml_options/     → test/seon/
 env/dev/clj/ml_options/  → env/dev/clj/seon/
 env/prod/clj/ml_options/ → env/prod/clj/seon/
+
 ```
 
 ### 2. Namespace Updates in .clj Files
+
 Updated all Clojure source files using:
+
 ```bash
 find /Users/sean/src/seon -name "*.clj" -not -path "*/.clj-kondo/*" -type f | xargs sed -i '' 's/ml-options/seon/g'
+
 ```
 
 This updated:
@@ -35,9 +48,11 @@ Total files affected: 49 .clj files
 ### 3. Configuration Files Updated
 
 #### deps.edn
+
 - Updated `:run` alias: `"-m" "ml-options.runner"` → `"-m" "seon.runner"`
 
 #### resources/system.edn
+
 Updated all Integrant component keys:
 - `:ml-options/xtdb-node` → `:seon/xtdb-node`
 - `:ml-options/schema-registry` → `:seon/schema-registry`
@@ -49,23 +64,28 @@ Updated all Integrant component keys:
 - Updated environment variable name: `ML_OPTIONS_CONDA_ENV` → `SEON_CONDA_ENV`
 
 #### tests.edn
+
 No changes needed - already uses generic paths
 
 ### 4. Shell Scripts Updated
 
 #### bin/auto-test-hook
+
 Updated namespace mapping functions:
 - Regex pattern: `ml_options/` → `seon/`
 - Function documentation updated to reflect new namespace
 - Affects functions: `file->test-ns` and `file->source-ns`
 
 #### bin/run
+
 No changes needed - uses generic clj command
 
 ## Verification
 
 ### System Startup
+
 The system starts successfully with all components:
+
 ```
 -=[seon starting using the development profile]=-
 XTDB node started
@@ -73,9 +93,11 @@ HTTP server started {:port 8080, :bind "0.0.0.0"}
 Schema registry initialized {:schema-count 154}
 DSL executor initialized
 nREPL server started {:port 7888}
+
 ```
 
 ### Status Check
+
 Verified via `clj-nrepl-eval -p 7888 "(user/status)"`:
 - All 5 components running:
   - `:seon/xtdb-node`
@@ -87,9 +109,12 @@ Verified via `clj-nrepl-eval -p 7888 "(user/status)"`:
 - No errors in logs
 
 ### Test Results
+
 Full test suite run via `clj -M:test -m kaocha.runner`:
+
 ```
 181 tests, 795 assertions, 0 failures
+
 ```
 
 All test namespaces successfully renamed and running:
@@ -112,7 +137,9 @@ Test execution time: 9.3 seconds
 No failures or errors
 
 ### Reset Functionality
+
 The system successfully reloaded all changed namespaces:
+
 ```
 :reloading (seon.config seon.db.schema seon.system seon.core seon.runner
             seon.db.node seon.db.queries seon.dsl.primitives seon.dsl.executor
@@ -121,6 +148,7 @@ The system successfully reloaded all changed namespaces:
             seon.data.bulk-load seon.web.stats seon.web.jobs seon.web.html
             seon.web.logs seon.web.handlers seon.web.routes seon.db.transactions
             seon.web.server seon.agent.analysis)
+
 ```
 
 ## Remaining ml-options References
@@ -135,6 +163,7 @@ These are intentional as they document the original implementation and provide h
 ## Issues Encountered
 
 ### Server Restart Required
+
 During the initial reload attempt, the server needed to be fully restarted because:
 1. The directory renames caused namespace resolution issues
 2. The nREPL connection was interrupted during the namespace changes
@@ -146,6 +175,7 @@ This is expected behavior when renaming directories and doesn't indicate a probl
 ## Files Changed
 
 ### Source Code (49 files)
+
 All files in:
 - `/Users/sean/src/seon/src/seon/**/*.clj`
 - `/Users/sean/src/seon/test/seon/**/*.clj`
@@ -155,11 +185,13 @@ All files in:
 - `/Users/sean/src/seon/dev/user.clj`
 
 ### Configuration Files (3 files)
+
 - `/Users/sean/src/seon/deps.edn`
 - `/Users/sean/src/seon/resources/system.edn`
 - `/Users/sean/src/seon/bin/auto-test-hook`
 
 ### Build Files (1 file)
+
 - `/Users/sean/src/seon/build.clj` - Already had seon references from Stage 1
 
 ## Success Criteria Met

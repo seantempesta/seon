@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Start Datalevin as a standalone server process.
+# Survives Seon JVM restarts. Managed by Integrant (seon.db.datalevin/server).
+#
+# Usage: ./bin/run-datalevin
+#        DATALEVIN_PORT=8899 ./bin/run-datalevin
+
+set -euo pipefail
+
+export JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home
+export PATH="$JAVA_HOME/bin:$PATH"
+
+PORT=${DATALEVIN_PORT:-8898}
+ROOT=${DATALEVIN_ROOT:-data/datalevin}
+
+# Ensure root directory exists
+mkdir -p "$ROOT"
+
+echo "Starting Datalevin server on port $PORT (root: $ROOT)"
+exec clj -M:dev -m datalevin.main -p "$PORT" -r "$ROOT" serv

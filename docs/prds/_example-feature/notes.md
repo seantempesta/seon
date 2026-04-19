@@ -1,6 +1,9 @@
+---
+type: reference
+status: draft
+tags: [prd, reference]
+---
 # Implementation Notes: Example Feature
-
-**Last Updated:** 2025-12-05
 
 ---
 
@@ -15,17 +18,20 @@ In a real feature, this would summarize what was actually built.
 ### Learning 1: Example Learning
 
 **What we discovered:**
+
 - Finding from implementation
 
 **Why it matters:**
 Impact on future work
 
 **Example:**
+
 ```clojure
 ;; Code showing the learning
 (defn example []
   ;; Pattern that worked well
   )
+
 ```
 
 ---
@@ -53,6 +59,7 @@ How to test this feature:
 ;; REPL commands for manual testing
 (require '[example :as ex])
 (ex/test-scenario)
+
 ```
 
 ---

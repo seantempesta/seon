@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 # Handoff: Fix Gemini Review in Dev Hook
 
 ## Context
@@ -10,6 +16,7 @@ We refactored `seon.ai.gemini` to use a map-based API with namespaced keys:
 
 ;; NEW (map-based with namespaced keys):
 (gemini/ask {::gemini/prompt "prompt"})
+
 ```
 
 The dev hook (`bin/seon-hook`) still uses the old API, so Gemini reviews are broken.
@@ -31,6 +38,7 @@ Someone started adding structured code reviews to `gemini.clj`:
  :location "line 42"
  :description "..."
  :suggestion "..."}
+
 ```
 
 Uses Gemini's structured output (JSON mode) via `code-review-json-schema`.
@@ -45,6 +53,7 @@ In `bin/seon-hook`, the `stage-gemini-review` function calls:
 (nrepl-eval
   (format "(seon.ai.gemini/ask \"%s\" {})"
           (str/replace prompt "\"" "\\\"")))
+
 ```
 
 This needs to use the new structured review API (once it exists):
@@ -53,6 +62,7 @@ This needs to use the new structured review API (once it exists):
 (nrepl-eval
   (format "(seon.ai.gemini/review-code {:seon.ai.gemini/prompt \"...\" :seon.ai.gemini/code \"%s\"})"
           escaped-code))
+
 ```
 
 ## Additional Issues
@@ -108,6 +118,7 @@ When you add a new function to a Clojure file:
 - Requesting code review for new function: foo
 - Code Review: APPROVE (high confidence)
   Summary: Function follows conventions and handles edge cases.
+
 ```
 
 When review finds issues:
@@ -122,6 +133,7 @@ When review finds issues:
       Suggestion: Add (when input ...) guard
     [suggestion]: Consider using ::keys destructuring
 - [WARN] Review requested changes - please address issues
+
 ```
 
 When review blocks:
@@ -134,6 +146,7 @@ When review blocks:
     [critical]: SQL injection vulnerability in query construction
       Suggestion: Use parameterized queries
 - [BLOCKED] Code review blocked this change
+
 ```
 
 ## Verification Commands
@@ -149,6 +162,7 @@ tail -f .claude/seon-hook.log
 # Test function tracking (in REPL)
 (require '[seon.dev.feedback :as fb])
 (fb/file-changed? (xtdb-node) "src/seon/ai/gemini.clj")
+
 ```
 
 ## Success Criteria
@@ -167,6 +181,7 @@ The term "pending edit" is misleading - edits are already applied, they're just 
 ### Files to update:
 
 **`src/seon/dev/feedback.clj`** (lines 418-511):
+
 ```
 record-pending-edit!     → queue-for-review!
 pending-edits            → review-queue
@@ -174,13 +189,16 @@ oldest-pending-edit-age  → oldest-queued-age
 clear-pending-edits!     → clear-review-queue!
 pending-edits-summary    → review-queue-summary
 :pending-edit (entity)   → :queued-edit
+
 ```
 
 **`bin/seon-hook`** (lines 403-690):
+
 ```
 stage-record-pending-edit  → stage-queue-for-review
 stage-get-pending-summary  → stage-get-review-queue
 stage-clear-pending        → stage-clear-review-queue
+
 ```
 
 **XTDB table**: `:pending-edit` → `:queued-edit`

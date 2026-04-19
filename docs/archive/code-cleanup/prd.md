@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 # Code Cleanup: Duplicate Function Extraction
 
 ## Status: TODO
@@ -32,9 +38,11 @@ See `docs/research/cleanup-code-changes.md` for:
 ## Verification
 
 After changes:
+
 ```bash
 clj -M:test -m kaocha.runner
 clj-nrepl-eval -p 7888 "(integrant.repl/reset)"
+
 ```
 
 ## Priority

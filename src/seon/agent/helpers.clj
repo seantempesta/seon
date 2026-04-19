@@ -30,9 +30,12 @@
 
    - Use `snake_case` for simple columns: `iv_rank`, `created_at`
    - Namespaced keywords use `$` separator: `:signal/symbol` -> `signal$symbol`"
-  (:require [seon.orchestrator.nrepl :refer [*ctx*]]
-            [seon.schema :as schema]
-            [xtdb.api :as xt]))
+  (:require [seon.schema :as schema]))
+
+(def ^:dynamic *ctx*
+  "Agent context atom. Bound by the pool JVM setup at session claim time.
+   Contains :seon.agent/* keys (namespace, db, etc.) plus agent-managed keys."
+  nil)
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schema Registration
@@ -45,19 +48,19 @@
                   [:string {:min 1 :description "SQL statement (INSERT/UPDATE/DELETE)"}])
 
 (schema/register! ::params
-                  [:* :any {:description "Query parameters"}])
+                  [:* {:description "Query parameters"} :any])
 
 (schema/register! ::param-row
-                  [:vector :any {:description "Single row of parameters for batch insert"}])
+                  [:vector {:description "Single row of parameters for batch insert"} :any])
 
 (schema/register! ::result-row
                   [:map {:description "Single result row with keyword keys"}])
 
 (schema/register! ::query-result
-                  [:vector ::result-row {:description "Query results"}])
+                  [:vector {:description "Query results"} ::result-row])
 
 (schema/register! ::tx-result
-                  [:map {:description "Transaction result from XTDB"}])
+                  [:map {:description "Transaction result"}])
 
 ;;; ---------------------------------------------------------------------------
 ;;; Private Helpers
@@ -86,11 +89,9 @@
      (sql \"SELECT * FROM signals WHERE symbol = ?\" \"AAPL\")
      (sql \"SELECT * FROM signals WHERE symbol = ? AND score > ?\" \"AAPL\" 0.8)"
   {:malli/schema [:=> [:cat ::query [:* :any]] ::query-result]}
-  [query & params]
-  (let [db (get-db)]
-    (if (seq params)
-      (xt/q db (into [query] params))
-      (xt/q db query))))
+  [query & _params]
+  (throw (ex-info "SQL helpers not yet migrated to Datalevin"
+                  {:query query})))
 
 (defn sql!
   "Execute a SQL write statement (INSERT/UPDATE/DELETE).
@@ -103,11 +104,9 @@
      (sql! \"UPDATE signals SET direction = ? WHERE _id = ?\" \"short\" \"sig-1\")
      (sql! \"DELETE FROM signals WHERE _id = ?\" \"sig-1\")"
   {:malli/schema [:=> [:cat ::statement [:* :any]] ::tx-result]}
-  [stmt & params]
-  (let [db (get-db)]
-    (if (seq params)
-      (xt/execute-tx db [[:sql stmt (vec params)]])
-      (xt/execute-tx db [[:sql stmt]]))))
+  [stmt & _params]
+  (throw (ex-info "SQL helpers not yet migrated to Datalevin"
+                  {:statement stmt})))
 
 (defn sql-batch!
   "Execute a batch INSERT with multiple rows in one transaction.
@@ -120,9 +119,9 @@
                  [\"sig-2\" \"TSLA\" \"short\"]
                  [\"sig-3\" \"GOOG\" \"long\"])"
   {:malli/schema [:=> [:cat ::statement [:* ::param-row]] ::tx-result]}
-  [stmt & param-rows]
-  (let [db (get-db)]
-    (xt/execute-tx db [(into [:sql stmt] param-rows)])))
+  [stmt & _param-rows]
+  (throw (ex-info "SQL helpers not yet migrated to Datalevin"
+                  {:statement stmt})))
 
 (comment
   ;; REPL testing (requires running agent session with *ctx* bound)

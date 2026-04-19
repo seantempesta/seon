@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # Stage 3: Domain Structure Refactoring - Findings
 
 **Date:** 2025-12-13
@@ -12,9 +18,11 @@ Refactor trading-specific code into `src/seon/trading/` while keeping core infra
 ### 1. Directory Structure
 
 Created new trading domain directory:
+
 ```
 src/seon/trading/          # NEW - Trading domain module
 test/seon/trading/         # NEW - Trading domain tests
+
 ```
 
 ### 2. Files Moved and Renamed
@@ -52,6 +60,7 @@ seon.data.bulk-load → seon.trading.bulk-load
 seon.data.validation → seon.trading.validation
 seon.data.date-utils → seon.trading.date-utils
 seon.data.ingestion-state → seon.trading.ingestion-state
+
 ```
 
 ### 4. Test Files Updated
@@ -66,6 +75,7 @@ test/seon/data/bulk_load_test.clj → test/seon/trading/bulk_load_test.clj
 test/seon/data/validation_test.clj → test/seon/trading/validation_test.clj
 test/seon/data/date_utils_test.clj → test/seon/trading/date_utils_test.clj
 test/seon/data/ingestion_state_test.clj → test/seon/trading/ingestion_state_test.clj
+
 ```
 
 ### 5. Dependencies Updated
@@ -77,12 +87,14 @@ Updated require statements in consuming namespaces:
 ### 6. Directories Cleaned Up
 
 Deleted empty directories after move:
+
 ```bash
 src/seon/agent/      # DELETED
 src/seon/data/       # DELETED
 src/seon/dsl/        # DELETED
 test/seon/data/      # DELETED
 test/seon/dsl/       # DELETED
+
 ```
 
 ### 7. Files KEPT at Top Level
@@ -112,6 +124,7 @@ src/seon/
     jobs.clj
     logs.clj
     brotli.clj
+
 ```
 
 ## Final Structure
@@ -169,12 +182,15 @@ test/seon/
       ├── validation_test.clj
       ├── date_utils_test.clj
       └── ingestion_state_test.clj
+
 ```
 
 ## Verification Results
 
 ### System Reset
+
 ✅ Successfully reloaded with `(reset)`:
+
 ```
 :reloading (seon.db.node seon.db.queries seon.trading.signals seon.trading.executor
            seon.config seon.db.schema seon.system seon.core seon.runner
@@ -184,9 +200,11 @@ test/seon/
            seon.web.logs seon.web.handlers seon.web.routes seon.trading.analysis
            seon.db.transactions seon.web.server)
 => :resumed
+
 ```
 
 ### System Status
+
 ✅ All 5 components running:
 - `:seon/dsl-executor`
 - `:seon/nrepl-server`
@@ -195,6 +213,7 @@ test/seon/
 - `:seon.web.server/http-server`
 
 ### Test Results
+
 ✅ **All 181 tests passing, 795 assertions, 0 failures**
 
 Test execution time: 9.70 seconds
@@ -205,30 +224,35 @@ Test execution time: 9.70 seconds
 ## Key Insights
 
 ### 1. The "Signals" Rename
+
 The most significant conceptual change was renaming `primitives.clj` → `signals.clj`:
 - More domain-appropriate name
 - Better reflects what the code does (IV rank, skew, term structure)
 - Aligns with trading terminology
 
 ### 2. Domain Isolation Achieved
+
 Trading code is now cleanly isolated in `seon.trading.*`:
 - Self-contained module with all trading-specific logic
 - Clear separation from shared infrastructure (db, web)
 - Pattern established for future domains (health, finance, etc.)
 
 ### 3. No Breaking Changes to Component Keys
+
 System component keys remained unchanged:
 - `:seon/dsl-executor` - Still valid (component identity doesn't need to match namespace)
 - All Integrant configuration in `resources/system.edn` works as-is
 - No changes needed to component initialization
 
 ### 4. Minimal Ripple Effects
+
 Only one file outside the moved code needed updates:
 - `src/seon/web/jobs.clj` - Updated to use `seon.trading.bulk-load`
 - All other web handlers work unchanged
 - DB layer completely unchanged
 
 ### 5. Test Organization Mirrors Source
+
 Tests follow the same domain structure:
 - `test/seon/trading/` mirrors `src/seon/trading/`
 - Test namespaces updated to match source namespaces

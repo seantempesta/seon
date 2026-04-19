@@ -2,40 +2,25 @@
   "HTTP request handlers."
   (:require [jsonista.core :as json]
             [clojure.string :as str]
+            [seon.health :as health]
             [seon.web.html :as html]
             [seon.web.sse :as sse]
             [seon.web.logs :as logs]
-            [seon.ai.agent :as agent]
-            [seon.health :as health]))
+            [seon.ai.agent :as agent]))
 
-(defn health
-  "Health check endpoint with full component breakdown.
-   Returns 200 if healthy/degraded, 503 if unhealthy."
-  [request]
-  (let [node (get-in request [:system :seon/xtdb-node])
-        now (java.time.Instant/now)]
-    (if node
-      (let [result (health/deep-check {::health/node node})
-            status-code (case (::health/status result)
-                          :healthy 200
-                          :degraded 200
-                          :unhealthy 503
-                          503)]
-        {:status status-code
-         :headers {"Content-Type" "application/json"}
-         :body (json/write-value-as-string
-                {:status (name (::health/status result))
-                 :timestamp (str now)
-                 :checks (into {} (for [[k v] (::health/checks result)]
-                                    [(name k) v]))
-                 :resources (::health/resources result)})})
-      {:status 200
-       :headers {"Content-Type" "application/json"}
-       :body (json/write-value-as-string
-              {:status "ok"
-               :timestamp (str now)
-               :checks {}
-               :resources {:agents 0 :ports 0 :sessions 0 :nrepl-servers 0}})})))
+(defn health-check
+  "Health check endpoint. Returns deep system health including pool status."
+  [_request]
+  (let [result (health/check {})
+        status-code (if (= :healthy (::health/status result)) 200 503)]
+    {:status status-code
+     :headers {"Content-Type" "application/json"}
+     :body (json/write-value-as-string
+            {:status (name (::health/status result))
+             :timestamp (str (::health/timestamp result))
+             :startup-phase (name (::health/startup-phase result))
+             :checks (::health/checks result)
+             :resources (::health/resources result)})}))
 
 (defn dashboard [_request]
   {:status 200
@@ -73,8 +58,9 @@
 ;; Log Viewer Handlers
 ;; ========================================
 
-(defn log-viewer [_request]
+(defn log-viewer
   "Serve the log viewer HTML shim page."
+  [_request]
   {:status 200
    :headers {"Content-Type" "text/html; charset=utf-8"}
    :body (html/log-viewer-shim)})

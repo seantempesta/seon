@@ -1,3 +1,9 @@
+---
+type: prd
+status: abandoned
+tags: [prd, archive]
+---
+
 # Dynamic Context Injection: Research Findings
 
 **Date**: 2026-01-30
@@ -19,29 +25,36 @@ The original "cockpit" vision of per-turn context injection is **not feasible** 
 ## Research Question 1: System Message Injection
 
 ### Question
+
 Can we inject system messages via stdin to update agent context?
 
 ### Test Methodology
+
 ```clojure
 ;; Attempted to send system message via stdin
 (sdk/write-message! stdin {:type "system"
                            :session_id ""
                            :content "The secret code is: MARKER_123"})
+
 ```
 
 ### Result: **DOES NOT WORK**
 
 **Error received:**
+
 ```
 Error: Expected message type 'user' or 'control', got 'system'
+
 ```
 
 ### Evidence
+
 Claude Code's stream-json input parser explicitly rejects `type: "system"` messages. The only valid input types are:
 - `type: "user"` - User messages (works)
 - `type: "control"` - Control messages (accepted but purpose unclear)
 
 ### Conclusion
+
 The hypothesis that we could inject system messages mid-conversation is **invalid**. The `type: "system"` in the protocol is OUTPUT-only (used by Claude Code to emit initialization data).
 
 ---
@@ -49,9 +62,11 @@ The hypothesis that we could inject system messages mid-conversation is **invali
 ## Research Question 2: Alternative Message Types
 
 ### Question
+
 Can `tool_result` or `control` messages be used for context injection?
 
 ### Test Methodology
+
 ```clojure
 ;; Attempted tool_result injection
 (sdk/write-message! stdin {:type "tool_result"
@@ -60,6 +75,7 @@ Can `tool_result` or `control` messages be used for context injection?
 
 ;; Attempted various control message formats
 (sdk/write-message! stdin {:type "control" :action "inject_context"})
+
 ```
 
 ### Result: **DOES NOT WORK**
@@ -69,6 +85,7 @@ Can `tool_result` or `control` messages be used for context injection?
 - Only `user` messages produce a response from Claude
 
 ### Conclusion
+
 There is no mechanism to inject arbitrary context outside of user messages.
 
 ---
@@ -76,9 +93,11 @@ There is no mechanism to inject arbitrary context outside of user messages.
 ## Research Question 3: User Message Context Injection
 
 ### Question
+
 Can we embed context in user messages and have Claude recognize it?
 
 ### Test Methodology
+
 ```clojure
 (sdk/write-message! stdin
   (sdk/make-user-message
@@ -86,15 +105,18 @@ Can we embed context in user messages and have Claude recognize it?
          "The secret code is: " marker "\n"
          "</system-context>\n\n"
          "What is the secret code?")))
+
 ```
 
 ### Result: **WORKS (but with caveats)**
 
 Claude correctly parsed and responded to the embedded context:
+
 ```clojure
 {:marker "SEON_MARKER_999111"
  :response "Ready"
  :acknowledged? true}
+
 ```
 
 ### Critical Caveat: Context is APPEND, not REPLACE
@@ -110,9 +132,11 @@ When testing replacement behavior:
 {:final-response "Codes found: ALPHA_555666, BETA_777888"
  :sees-both? true
  :context-behavior :append-history-preserved}
+
 ```
 
 ### Conclusion
+
 User message context injection works, but:
 1. Context accumulates in conversation history
 2. Cannot "replace" previous context
@@ -123,9 +147,11 @@ User message context injection works, but:
 ## Research Question 4: Turn Limit Handling
 
 ### Question
+
 Can agents continue after hitting `error_max_turns`?
 
 ### Test Methodology
+
 ```clojure
 ;; Launch with very low turn limit
 (sdk/spawn-claude-code {::sdk/max-turns 1})
@@ -137,19 +163,24 @@ Can agents continue after hitting `error_max_turns`?
 ;; After error_max_turns, send continuation
 (sdk/write-message! stdin
   (sdk/make-user-message "Continue."))
+
 ```
 
 ### Result: **WORKS PERFECTLY**
 
 Phase 1: Hit turn limit
+
 ```clojure
 {:subtype "error_max_turns" :num_turns 2}
+
 ```
 
 Phase 2: Continuation succeeded
+
 ```clojure
 {:subtype "success"
  :continuation-worked? true}
+
 ```
 
 ### Context Preservation Test
@@ -160,13 +191,16 @@ To verify context was preserved across the turn limit:
 3. Asked about the marker in continuation
 
 **Result:** Claude correctly recalled the marker:
+
 ```clojure
 {:marker "UNIQUE_MARKER_ABC123XYZ"
  :context-preserved? true
  :response "UNIQUE_MARKER_ABC123XYZ"}
+
 ```
 
 ### Conclusion
+
 Turn limit handling is fully viable:
 - `error_max_turns` is not a hard stop
 - A simple user message continues the conversation
@@ -193,6 +227,7 @@ Turn limit handling is fully viable:
     (do
       (log/warn "Max continuations reached")
       (reset! status-atom :completed))))
+
 ```
 
 ### Deferred: Dynamic Context Injection
@@ -217,8 +252,10 @@ If Anthropic added support for `type: "system"` messages as INPUT, the cockpit v
 ## Appendix: Test Code
 
 The experimental code used for this research is in:
+
 ```
 src/seon/experimental/context_injection.clj
+
 ```
 
 This code is research-quality (not production conventions) and can be deleted after the findings are reviewed.

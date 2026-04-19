@@ -1,4 +1,11 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 # PRD: Live Atom Updates
+
 ## Status: SUPERSEDED by render-pipeline — live updates handled by unified render pipeline
 
 **Status:** Pending
@@ -30,6 +37,7 @@ The broadcast SSE system is fully operational:
 | `wrap-refresh-mult` | `src/seon/web/sse.clj:229-235` | Middleware adds mult to request map |
 
 **Current flow:**
+
 ```
 State change → (swap! atom ...)
             → add-watch triggers
@@ -37,6 +45,7 @@ State change → (swap! atom ...)
             → All SSE handlers re-render
             → Hash comparison
             → Send if changed
+
 ```
 
 ### Watch Pattern (Existing)
@@ -44,17 +53,21 @@ State change → (swap! atom ...)
 Two existing implementations show the pattern:
 
 **1. Job state auto-refresh** (`src/seon/web/jobs.clj:25-29`):
+
 ```clojure
 (defonce _state-watch
   (add-watch job-state :sse-auto-refresh
              (fn [_key _ref old-state new-state]
                (when (not= old-state new-state)
                  (sse/refresh-all!)))))
+
 ```
 
 **2. Primer session auto-refresh** (`src/seon/primer/ctx.clj:182`):
+
 ```clojure
 (add-watch sessions :sse-auto-refresh ...)
+
 ```
 
 ### Persisted Ctx (Existing)
@@ -102,6 +115,7 @@ A central registry tracks which atoms are being watched for SSE updates:
   (atom {}))  ; {atom-ref -> {:watch-key keyword, :debounce-atom atom}}
 
 (def ^:private debounce-ms 50)  ; Sub-100ms target with margin
+
 ```
 
 **Why 50ms debounce?**
@@ -150,6 +164,7 @@ A central registry tracks which atoms are being watched for SSE updates:
             :debounce-atom debounce-future})
 
     {::watch-key watch-key}))
+
 ```
 
 #### `unwatch-atom!` - Remove Watch
@@ -170,6 +185,7 @@ A central registry tracks which atoms are being watched for SSE updates:
     ;; Cleanup registry
     (swap! watch-registry dissoc atom)
     {::removed true}))
+
 ```
 
 #### `watching?` - Check Status
@@ -182,6 +198,7 @@ A central registry tracks which atoms are being watched for SSE updates:
      ::atom - Required. The atom to check"
   [{::keys [atom]}]
   (contains? @watch-registry atom))
+
 ```
 
 #### `watched-atoms` - List All
@@ -191,6 +208,7 @@ A central registry tracks which atoms are being watched for SSE updates:
   "Return list of all atoms currently watched for SSE updates."
   []
   (keys @watch-registry))
+
 ```
 
 ### Integration with Persisted Ctx
@@ -204,6 +222,7 @@ Modify `make-persisted-ctx` to optionally auto-register for SSE:
 ;; In make-persisted-ctx:
 (when watch-sse
   (live/watch-atom! {::live/atom ctx-atom}))
+
 ```
 
 ### Namespace View Integration
@@ -219,6 +238,7 @@ When rendering a namespace view that contains atoms, automatically watch them:
       (live/watch-atom! {::live/atom a}))
     ;; Render the view
     (render-atoms atoms)))
+
 ```
 
 **Cleanup consideration:** When do we unwatch? Options:
@@ -245,6 +265,7 @@ Recommendation: Start with option 1 (never), add cleanup if memory becomes issue
 5. Add tests
 
 **Test criteria:**
+
 ```clojure
 ;; Create test atom
 (def *test* (atom {:value 0}))
@@ -262,6 +283,7 @@ Recommendation: Start with option 1 (never), add cleanup if memory becomes issue
 ;; Unwatch
 (live/unwatch-atom! {::live/atom *test*})
 (live/watching? {::live/atom *test*}) ; => false
+
 ```
 
 ### Phase 1: Visual Indicator
@@ -282,6 +304,7 @@ Recommendation: Start with option 1 (never), add cleanup if memory becomes issue
                       (if active? "text-green-500" "text-text-400"))}
    [:span {:class (when active? "animate-pulse")} "●"]
    "live"])
+
 ```
 
 **Test criteria:**
@@ -302,11 +325,13 @@ Recommendation: Start with option 1 (never), add cleanup if memory becomes issue
 4. Render atom value with expand/collapse
 
 **Test criteria:**
+
 ```
 1. Navigate to /ns/seon.some-namespace
 2. See atoms listed with "● live" indicator
 3. In REPL: (swap! *atom* assoc :new-key "value")
 4. Browser updates within 100ms
+
 ```
 
 ### Phase 3: Targeted Updates (Optional Enhancement)
@@ -318,6 +343,7 @@ Instead of refreshing ALL clients, target specific watchers.
 - `src/seon/ui/live.clj` - Add selector-based targeting
 
 **Pattern from Datastar SDK:**
+
 ```clojure
 ;; Store per-atom connections
 (defonce atom-connections (atom {}))  ; {atom-ref -> #{sse-gen ...}}
@@ -328,6 +354,7 @@ Instead of refreshing ALL clients, target specific watchers.
         html (render-atom-value new-val)]
     (doseq [sse (get @atom-connections atom-ref)]
       (d*/patch-elements! sse html {d*/selector selector}))))
+
 ```
 
 **Test criteria:**
@@ -349,6 +376,7 @@ Rapid atom updates (e.g., looping `swap!`) would flood SSE without debounce:
   (swap! *ctx* assoc :counter i))
 
 ;; With 50ms debounce: 1 SSE event after final update
+
 ```
 
 ### Debounce Implementation
@@ -364,6 +392,7 @@ Use `future` + `future-cancel` for simple debounce:
       (future
         (Thread/sleep 50)
         (sse/refresh-all!)))))
+
 ```
 
 ### Alternative: core.async debounce
@@ -385,6 +414,7 @@ For more sophisticated use cases:
           (= port timeout-ch) (do (a/>! out-ch :emit)
                                    (recur nil)))))
     out-ch))
+
 ```
 
 **Recommendation:** Start with `future`-based approach. Switch to core.async if needed.
@@ -441,6 +471,7 @@ For more sophisticated use cases:
       (swap! *test* assoc :value 999)
       (Thread/sleep 60)
       (is (= 2 @refresh-called)))))
+
 ```
 
 ### Integration Test (Manual)
@@ -452,6 +483,7 @@ For more sophisticated use cases:
 4. In REPL: (swap! seon.web.jobs/job-state assoc :test 123)
 5. Browser should update within 100ms
 6. Verify update appears without page refresh
+
 ```
 
 ### Latency Benchmark
@@ -472,6 +504,7 @@ For more sophisticated use cases:
       (/ latency-ns 1e6))))  ; Return milliseconds
 
 ;; Target: < 100ms
+
 ```
 
 ---

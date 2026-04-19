@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # Stage 1: System Startup Verification
 
 **Date:** 2025-12-13
@@ -13,6 +19,7 @@ The Seon system (copied from ml-options-trading) starts correctly using `./bin/r
 
 ```bash
 ./bin/run    # Starts everything: XTDB, HTTP (8080), nREPL (7888)
+
 ```
 
 This is the canonical way to run the system. It:
@@ -29,12 +36,15 @@ Connect your editor to the running nREPL on port 7888, then use:
 ```clojure
 (reset)   ; Reload all changed code and restart components
 (status)  ; Check system health
+
 ```
 
 Or from command line:
+
 ```bash
 clj-nrepl-eval -p 7888 "(integrant.repl/reset)"
 clj-nrepl-eval -p 7888 "(user/status)"
+
 ```
 
 ### Key Insight
@@ -62,6 +72,7 @@ INFO [ml-options.system:77] - Schema registry initialized {:schema-count 154}
 INFO [ml-options.system:134] - Initializing DSL executor...
 INFO [ml-options.system:95] - Starting nREPL server {:port 7888, :bind "127.0.0.1"}
 INFO [ml-options.system:101] - nREPL server started {:port 7888}
+
 ```
 
 ### System Status

@@ -1,7 +1,10 @@
+---
+type: research
+status: completed
+tags: [prd, research, schema, web]
+---
 # Research: Malli Schema Properties for Render Definitions
 
-**Date:** 2026-01-22
-**Status:** Complete
 **Questions Addressed:** Q1 (Where do render definitions live?), Q2 (Inheritance), Q3 (Local overrides)
 
 ---
@@ -34,6 +37,7 @@ Malli supports arbitrary properties on schemas:
 ;; Access properties
 (m/properties position-schema)
 ;; => {:seon.ui/render {...}, :seon.ui/summary-keys [...]}
+
 ```
 
 **Caveat:** When schema is registered and accessed by keyword, you must dereference:
@@ -47,6 +51,7 @@ Malli supports arbitrary properties on schemas:
 ;; Must dereference first:
 (m/properties (m/deref (m/schema :trading/position)))
 ;; => {:seon.ui/render {...}, ...}
+
 ```
 
 ### 2. Schema Inheritance via mu/merge
@@ -67,6 +72,7 @@ Malli supports arbitrary properties on schemas:
 ;; => [:map {:seon.ui/render {:ai :child-ai},      ;; LOST :html!
 ;;          :seon.ui/label "Position"}
 ;;     [:ticker :string] [:analysis :string]]
+
 ```
 
 **Problem:** Child's `:seon.ui/render` completely replaces parent's—no deep merge.
@@ -85,6 +91,7 @@ Malli supports arbitrary properties on schemas:
 
 (merge-render-schemas parent child)
 ;; => [:map {:seon.ui/render {:ai :child-ai, :html :parent-html}, ...} ...]
+
 ```
 
 ### 3. Value Metadata for Type Propagation
@@ -101,6 +108,7 @@ Portal's approach: attach viewer hints as metadata on values. We can do the same
 ;; Usage
 (def pos (typed-value :trading/position {:ticker "AAPL" :quantity 100}))
 (value-schema pos) ;; => :trading/position
+
 ```
 
 **Metadata preservation:** Most operations preserve metadata:
@@ -140,13 +148,16 @@ Render functions stored directly in schema properties.
                       :seon.ui/render
                       (get format))]
     (if render-fn (render-fn value) (pr-str value))))
+
 ```
 
 **Pros:**
+
 - Single source of truth
 - Schema carries complete definition
 
 **Cons:**
+
 - Functions in schema registry (serialization issues)
 - Need `m/deref` dance for registered schemas
 - Inheritance requires custom merge logic
@@ -176,15 +187,18 @@ Render functions in parallel registry.
   (let [schema-key (value-schema value)
         render-fn (get-in @*render-registry [schema-key format])]
     (if render-fn (render-fn value) (pr-str value))))
+
 ```
 
 **Pros:**
+
 - Clean separation of concerns
 - Easy explicit inheritance
 - No serialization issues
 - Simple implementation
 
 **Cons:**
+
 - Two places to maintain
 - Schema and renderer can get out of sync
 
@@ -214,14 +228,17 @@ Schema declares renderer *key*, registry holds functions.
         renderer-key (-> (m/schema schema-key) m/deref m/properties :seon.ui/renderer)
         render-fn (get-in @*renderers [renderer-key format])]
     (if render-fn (render-fn value) (pr-str value))))
+
 ```
 
 **Pros:**
+
 - Schemas remain serializable (just keyword reference)
 - Can share renderers across schemas
 - Schema declares rendering intent
 
 **Cons:**
+
 - Still two places to maintain
 - Extra indirection
 
@@ -301,6 +318,7 @@ If tighter schema coupling is desired later:
   "Render a sequence of typed values."
   [values format]
   (mapv #(render % format) values))
+
 ```
 
 ---

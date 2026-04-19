@@ -1,4 +1,8 @@
-
+---
+type: research
+status: draft
+tags: [prd, research, web]
+---
 
 UI/UX Inspiration for Seon’s Namespace UI
 

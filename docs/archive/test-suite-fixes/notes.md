@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 # Test Suite Fixes - Notes
 
 ## Investigation Notes
@@ -13,15 +19,19 @@ With Java 21:
 ### Failure Categories
 
 #### 1. Schema Generator (ml-options.db.schema-test)
+
 - `custom-generators-produce-valid-data` - 20 failures
 - Issue: Generator produces UUID for `:xt/id`, schema expects string
 - Example error:
+
   ```
   {:path [:xt/id], :in [:xt/id], :schema :string,
    :value #uuid "eee93375-e09c-4207-9419-eef61704bd09"}
+
   ```
 
 #### 2. Handler Tests (ml-options.web.handlers-test)
+
 - `start-import-handler-test` - Multiple failures
 - `handler-integration-test` - Job lifecycle failures
 - Common error: `"Cannot invoke \"java.lang.CharSequence.length()\" because \"this.text\" is null"`

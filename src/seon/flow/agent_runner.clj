@@ -2,8 +2,11 @@
   "Minimal agent JVM entry point for isolated process execution.
 
   Starts a lightweight nREPL server and optionally connects to a Datalevin
-  server. Designed to run in a separate JVM with minimal memory footprint
-  (256MB max heap, no XTDB/Arrow dependencies).
+  server. Designed to run in a separate JVM with moderate memory footprint
+  (512MB max heap).
+
+  Malli instrumentation is NOT started here -- it is deferred to claim time
+  when the pool assigns the JVM to a session (see pool.clj:claim!).
 
   Usage:
     clj -M:agent -m seon.flow.agent-runner --port 7890 --namespace seon.test.hello"
@@ -97,7 +100,7 @@
                   " startup_ms=" (long startup-ms)))
     (flush)
 
-    ;; Prove core.async and malli loaded
+    ;; Prove core.async and malli loaded (no instrumentation yet -- deferred to claim time)
     (log/debug "core.async version:" (async/<!! (async/go :ok)))
     (log/debug "malli loaded:" (m/validate :string "hello"))
 

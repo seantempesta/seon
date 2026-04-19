@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 > **Status: ARCHIVED** — Complete — rename done long ago
 
 > **Status: ARCHIVED** — Complete — rename done long ago
@@ -72,6 +78,7 @@ The existing ml-options-trading codebase is a well-structured Clojure/XTDB appli
 ├── dev/user.clj              # REPL helpers
 ├── env/{dev,prod,test}/      # Profile-specific configs
 └── data/xtdb/                # XTDB storage (73GB, NOT copied)
+
 ```
 
 ---
@@ -79,6 +86,7 @@ The existing ml-options-trading codebase is a well-structured Clojure/XTDB appli
 ## Key Patterns From Source
 
 ### 1. XTDB Query Wrapper
+
 ```clojure
 ;; Use ml-options.db.node/query, NOT xt/q
 (node/query db '(from :option-greeks [ticker strike iv]))
@@ -86,31 +94,39 @@ The existing ml-options-trading codebase is a well-structured Clojure/XTDB appli
 ;; Dynamic values with xt/template
 (node/query db (xt/template
   (from :option-greeks [{:ticker ~ticker} strike iv])))
+
 ```
 
 ### 2. Integrant Lifecycle
+
 ```clojure
 (go)      ; Start system
 (halt)    ; Stop system
 (reset)   ; Reload code + restart
 (status)  ; Show system status
+
 ```
 
 ### 3. Data Ingestion Pattern
+
 ```
 fetch (thetadata.clj) → transform → validate → batch ingest → checkpoint
+
 ```
 
 ### 4. DSL Primitives (→ signals.clj)
+
 - `iv-rank` - IV percentile vs historical
 - `skew-index` - Put/call IV spread
 - `term-structure-slope` - Near vs far term IV
 - `gamma-rent` - Gamma/theta ratio
 
 ### 5. Agent Analysis
+
 ```clojure
 (analyze-ticker node "SPY" {:as-of #inst "2025-07-15"})
 ;; Returns: {:signals {...} :recommendation :no-trade :reasoning "..."}
+
 ```
 
 ---
@@ -148,6 +164,7 @@ fetch (thetadata.clj) → transform → validate → batch ingest → checkpoint
 | `:ml-options/*` (integrant) | `:seon/*` |
 
 #### Files to Change
+
 - `src/ml_options/` → `src/seon/`
 - All `.clj` files: namespace declarations, requires
 - `deps.edn`: paths, main-opts
@@ -156,6 +173,7 @@ fetch (thetadata.clj) → transform → validate → batch ingest → checkpoint
 - `tests.edn`: test paths
 
 #### Keep Trading as seon.trading (Stage 3 prep)
+
 During rename, also rename trading-specific modules:
 - `seon.dsl.primitives` → keep as is (will become `seon.trading.signals` in Stage 3)
 - `seon.agent.analysis` → keep as is (will become `seon.trading.analysis` in Stage 3)
@@ -195,6 +213,7 @@ data/
   xtdb/                 ; Current XTDB storage (git-ignored)
   trading/              ; Trading domain XTDB (future, git-ignored)
   health/               ; Health domain XTDB (future, git-ignored)
+
 ```
 
 #### Standard Files Per Domain
@@ -222,6 +241,7 @@ Domain functions don't manage their own database - they receive it:
 (defn iv-rank [db ticker opts]
   (let [historical (queries/historical-ivs db ticker (:lookback opts))]
     ...))
+
 ```
 
 Seon core is responsible for creating/managing DB nodes and passing them to domains.
@@ -252,6 +272,7 @@ Seon core is responsible for creating/managing DB nodes and passing them to doma
     (xtn/start-node)
     (xtn/start-node {:log-dir (str (:path opts) "/log")
                      :storage-dir (str (:path opts) "/storage")})))
+
 ```
 
 #### Domain Registry
@@ -269,6 +290,7 @@ Seon core is responsible for creating/managing DB nodes and passing them to doma
   "Get the DB node for a domain."
   [domain-id]
   (get-in @domains [domain-id :db]))
+
 ```
 
 #### Update system.edn
@@ -277,6 +299,7 @@ Seon core is responsible for creating/managing DB nodes and passing them to doma
 ;; Each domain gets its own DB component
 :seon.trading/db {:path "data/trading"}
 ;; Future: :seon.health/db {:path "data/health"}
+
 ```
 
 ---
@@ -300,6 +323,7 @@ Seon core is responsible for creating/managing DB nodes and passing them to doma
 
 (defn unstrument! []
   (mi/unstrument!))
+
 ```
 
 #### Agent Query Interface
@@ -313,6 +337,7 @@ Each domain's `core.clj` exposes:
    :signals (keys trading.signals/registry)
    :specs (keys trading.specs/registry)
    :examples "See seon.trading.tests namespace"})
+
 ```
 
 ---
@@ -347,6 +372,7 @@ clj -M:dev:nrepl
 
 # Run tests
 clj -M:test
+
 ```
 
 ---

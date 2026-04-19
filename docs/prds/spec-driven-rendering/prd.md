@@ -1,6 +1,9 @@
+---
+type: prd
+status: abandoned
+tags: [prd, database, flow, web]
+---
 # PRD: Spec-Driven Rendering + Code Index
-
-## Status: In Progress (Phase 1 ~95%, Phase 2 ~50%, Phase 3 ~80%)
 
 ## Summary
 
@@ -47,9 +50,11 @@ Populated from clj-kondo var-definitions + Malli `:malli/schema` var metadata.
                              :seon.health.workout/reps        ; contains :seon.render/html or /ai
                              :seon.health.workout/weight]
  :seon.fn/updated-at      #inst "2026-02-19"}
+
 ```
 
 Notes:
+
 - `:seon.fn/qualified-name` is a string (not symbol) for consistent serialization
 - `:seon.fn/render-input-keys` is pre-computed during scan for render functions only, enabling single-query resolution
 - Source code is NOT stored -- retrieve via `clojure.repl/source-fn` on demand
@@ -68,6 +73,7 @@ Populated from static source analysis of `schema/register!` calls in source file
                            :seon.health.workout/reps
                            :seon.health.workout/weight]
  :seon.spec/updated-at    #inst "2026-02-19"}
+
 ```
 
 #### Namespace Entities (`:seon.ns/*`)
@@ -81,9 +87,11 @@ Populated from clj-kondo namespace-definitions + file extension analysis.
  :seon.ns/target     :clj                   ; extracted from file extension (.clj, .cljs, .cljc)
  :seon.ns/requires   ["seon.schema" "seon.db.datalevin"]
  :seon.ns/updated-at #inst "2026-02-19"}
+
 ```
 
 Notes:
+
 - `:seon.ns/target` indicates the runtime target: `:clj` (JVM), `:cljs` (ClojureScript), `:cljc` (both). Domain code should prefer `:cljc` when possible — no JVM-specific deps, plain data in/out. Seon infrastructure (`seon.web.*`, `seon.db.*`, `seon.flow.*`) is `:clj`-only.
 - Target is critical for graduation (writing code back to disk in the right format) and for knowing which sessions can load the code (JVM vs ClojureScript).
 
@@ -96,6 +104,7 @@ Populated from clj-kondo var-usages. `:seon.call/from-fn` and `:seon.call/to-fn`
  :seon.call/to-fn     [:seon.fn/qualified-name "datalevin.core/transact!"]           ; ref via lookup ref
  :seon.call/row       45
  :seon.call/col       5}
+
 ```
 
 **External functions** (outside the project, e.g. `datalevin.core/transact!`) get minimal stub entities with only `:seon.fn/qualified-name`, `:seon.fn/namespace`, and `:seon.fn/name`. This ensures refs always resolve.
@@ -140,6 +149,7 @@ Populated from clj-kondo var-usages. `:seon.call/from-fn` and `:seon.call/to-fn`
  :seon.call/to-fn    {:db/valueType :db.type/ref}          ; ref to fn entity
  :seon.call/row      {:db/valueType :db.type/long}
  :seon.call/col      {:db/valueType :db.type/long}}
+
 ```
 
 ## Renderer Resolution Algorithm
@@ -181,6 +191,7 @@ Pre-computed `:seon.fn/render-input-keys` on function entities enables single-qu
                         (comp - #(.toEpochMilli %) :seon.fn/updated-at)
                         :seon.fn/qualified-name))
          first)))
+
 ```
 
 ### Practical Implementation Note
@@ -198,6 +209,7 @@ No special override mechanism. An agent that wants a custom renderer writes a fu
 ;; Agent debug override -- same input spec, newer timestamp
 (defn debug-workout-view ...)  ; updated-at T2 > T1, wins
 ;; Delete the function -> scanner removes it -> workout-set wins again
+
 ```
 
 **Cleanup:** Agent-defined temporary functions should be tracked by session. When an agent session ends, the orchestrator can optionally clean up functions defined during that session (by checking `:seon.fn/updated-at` range and namespace ownership). This is not required for correctness -- stale overrides just add candidates that may or may not win.
@@ -254,6 +266,7 @@ For `schema/register!` calls parsed from source files, extract contained keys fr
 ;; Example: parsing (schema/register! ::workout [:map [::exercise ...] [::sets ...]])
 ;; schema-form = [:map [::exercise ::exercise] [::sets ::sets]]
 ;; => [::exercise ::sets]
+
 ```
 
 ### Function Schema Extraction (Static — From Source)
@@ -269,6 +282,7 @@ For functions with `:malli/schema` metadata, extract input and output spec refer
     (let [[_ [_ input-spec] output-spec] schema-form]
       {:input-spec (when (keyword? input-spec) input-spec)
        :output-spec (when (keyword? output-spec) output-spec)})))
+
 ```
 
 ## Render Agent Pattern
@@ -280,9 +294,11 @@ Domain namespaces define specs and business logic. Companion `.render` namespace
 ```
 seon.health.workout          -- domain: specs, business logic
 seon.health.workout.render   -- rendering: HTML, AI output
+
 ```
 
 Benefits:
+
 - Domain namespaces stay free of UI dependencies (Hiccup, Datastar)
 - Render namespaces can be worked on by a separate "render agent"
 - Clear separation of concerns
@@ -300,6 +316,7 @@ Render functions follow standard map-in/map-out convention:
   [{:seon.health.workout/keys [exercise sets reps weight]}]
   {:seon.render/html [:tr [:td exercise] [:td (str sets)] ...]
    :seon.render/ai   (str exercise " -- " sets "x" reps ...)})
+
 ```
 
 Combined render functions (returning both `:seon.render/html` and `:seon.render/ai`) are preferred over separate functions, reducing the number of entities and simplifying resolution.
@@ -319,6 +336,7 @@ seon.health.workout/log-workout!
   Records a workout set to the database.
   Input:  [:map [::exercise [:string {:min 1}]] [::sets pos-int?] ...]
   Output: [:map [::id uuid?] [::created-at inst?]]
+
 ```
 
 This is generated from `:seon.fn/doc`, `:seon.fn/input-spec`, `:seon.fn/output-spec` -- all in Datalevin. No source code needed for basic context.
@@ -344,6 +362,7 @@ With ref-based schema, spec navigation is a direct pull -- no string-based joins
    {:seon.fn/input-spec [:seon.spec/key :seon.spec/definition :seon.spec/contains-keys]}
    {:seon.fn/output-spec [:seon.spec/key :seon.spec/definition]}]
   [:seon.fn/qualified-name "seon.health.workout/log-workout!"])
+
 ```
 
 ## Context Building: Topological Ordering
@@ -388,6 +407,7 @@ seon.trading.signals/generate-signal!   ← TARGET
   Input: [:map [::bars [:vector :seon.trading/price-bar]] [::strategy keyword?]]
   Output: :seon.trading/signal
   Calls: seon.trading.indicators/sma, seon.trading.indicators/rsi
+
 ```
 
 Specs appear first because everything depends on them. Leaf functions (`sma`, `rsi`) appear before the target that calls them. An agent reading top-to-bottom encounters each concept before it is used.
@@ -417,6 +437,7 @@ No special configuration system. Agents write functions, the system discovers th
 ### Phase 1: Data Model + Scanner — ~95% COMPLETE
 
 **What's done:**
+
 - [x] Datalevin schema with all entity types (`seon.fn/*`, `seon.spec/*`, `seon.ns/*`, `seon.call/*`) — `src/seon/graph/ingest.clj` lines 39-78
 - [x] Migrated from `:graph/*` to `:seon.fn/*` etc.
 - [x] `:seon.ns/target` on namespace entities (`:clj`, `:cljs`, `:cljc`)
@@ -428,6 +449,7 @@ No special configuration system. Agents write functions, the system discovers th
 - [x] Ingestion order enforced: specs → fns → calls
 
 **What's missing:**
+
 - [ ] Static `:malli/schema` metadata extraction from source (edamame parse of `(defn ^{:malli/schema [...]} ...)` forms). Currently `link-fns-to-specs` uses naming convention (`fn-name-request`/`fn-name-response`) as the only matching strategy. This works but doesn't scale to functions that don't follow the convention.
 
 **Key files:** `src/seon/graph/analyzer.clj`, `src/seon/graph/scanner.clj`, `src/seon/graph/ingest.clj`, `src/seon/graph/query.clj`
@@ -435,11 +457,13 @@ No special configuration system. Agents write functions, the system discovers th
 ### Phase 2: Renderer Resolution — ~50% COMPLETE
 
 **What's done:**
+
 - [x] `find-renderer` algorithm implemented — `src/seon/render.clj` lines 244-293
 - [x] Resolution order correct: specificity (key-count DESC), recency (updated-at DESC), name (ASC)
 - [x] Queries Datalevin for functions with `:seon.fn/render-input-keys`
 
 **What's missing:**
+
 - [ ] Resolution cache keyed by `[format (set (keys data))]` with scanner-triggered invalidation
 - [ ] Wire `find-renderer` into SSE rendering pipeline — currently NOT called by any rendering code
 - [ ] Remove old manual registry (`*renderers` atom, `register-renderer!`, `get-renderer`, `clear-renderers!`) — superseded by Datalevin discovery
@@ -449,6 +473,7 @@ No special configuration system. Agents write functions, the system discovers th
 ### Phase 3: Topological Context Builder — ~80% COMPLETE
 
 **What's done:**
+
 - [x] Recursive pull from seed function — `src/seon/graph/context.clj:pull-subgraph`
 - [x] Topological sort via Kahn's algorithm — `src/seon/graph/context.clj:toposort`
 - [x] Cycle detection (appends remaining if cycle exists)
@@ -456,16 +481,19 @@ No special configuration system. Agents write functions, the system discovers th
 - [x] Public API: `build` (from seed fn) and `build-for-namespace` (all fns in ns)
 
 **What's missing:**
+
 - [ ] Wire into agent launch — `seon.graph.context/build-for-namespace` should be called during agent startup to provide topological context
 - [ ] Use `:seon.render/ai` resolution for entity rendering (currently uses hardcoded text format)
 
 ### Phase 4: Agent Context Cockpit — NOT STARTED
+
 - [ ] Context cockpit = render pipeline with `:seon.render/ai` output format
 - [ ] Different context levels as different render functions (dev detail, review compact, onboarding)
 - [ ] Agent runtime override: agent defines more specific render fn, scanner picks it up, next refresh uses it
 - [ ] Session cleanup: agent session ends, custom renderers gone, defaults win
 
 ### Phase 5: Render Agent Pattern — NOT STARTED
+
 - [ ] Create first `.render` companion namespace with real render functions
 - [ ] Document the convention
 - [ ] Verify scanner picks up render functions automatically

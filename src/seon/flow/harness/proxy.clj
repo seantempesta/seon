@@ -10,7 +10,8 @@
    The proxy functions use `bridge/remote-call!` to send requests through
    the reverse channel to the orchestrator, which routes them to the
    target namespace."
-  (:require [seon.flow.harness.bridge :as bridge]
+  (:require [taoensso.timbre :as log]
+            [seon.flow.harness.bridge :as bridge]
             [seon.flow.msg :as msg]
             [seon.schema :as schema]))
 
@@ -60,13 +61,18 @@
   (let [from-ns (or from-ns "unknown")
         fq-fn   (or (::remote-fn fn-meta) (str target-ns "/" fn-name))]
     (fn proxy-call [& args]
-      (bridge/remote-call!
-       {::bridge/request-ch request-ch
-        ::bridge/remote-call-timeout-ms 10000
-        ::msg/to-ns   target-ns
-        ::msg/fn      fq-fn
-        ::msg/args    (vec args)
-        ::msg/from-ns from-ns}))))
+      (log/debug "Proxy call" {:fn fq-fn :from-ns from-ns :to-ns target-ns :args-count (count args) :event :start})
+      (let [start-ms (System/currentTimeMillis)
+            result (bridge/remote-call!
+                    {::bridge/request-ch request-ch
+                     ::bridge/remote-call-timeout-ms 10000
+                     ::msg/to-ns   target-ns
+                     ::msg/fn      fq-fn
+                     ::msg/args    (vec args)
+                     ::msg/from-ns from-ns})
+            elapsed (- (System/currentTimeMillis) start-ms)]
+        (log/debug "Proxy call ok" {:fn fq-fn :from-ns from-ns :to-ns target-ns :elapsed-ms elapsed :event :end})
+        result))))
 
 (defn proxy-ns!
   "Create a proxy namespace in this JVM with proxy functions for all listed fns.
@@ -82,6 +88,7 @@
 
    Returns the created namespace object."
   [{::keys [target-ns functions request-ch from-ns]}]
+  (log/info "Creating proxy namespace" {:target-ns target-ns :from-ns from-ns :fn-count (count functions)})
   (let [ns-sym  (symbol target-ns)
         the-ns  (create-ns ns-sym)]
     (doseq [[fn-name-str fn-meta] functions]

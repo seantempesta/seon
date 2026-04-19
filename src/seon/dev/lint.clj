@@ -78,17 +78,17 @@
 ;; Request schemas
 (schema/register! ::syntax-error-request
                   [:map
-                   [::content ::content]])
+                   [::content [:maybe ::content]]])
 
 (schema/register! ::lint-request
                   [:map
                    [::content ::content]
-                   [::file-path {:optional true} ::file-path]])
+                   [::file-path {:optional true} [:maybe ::file-path]]])
 
 (schema/register! ::validate-request
                   [:map
-                   [::content ::content]
-                   [::file-path {:optional true} ::file-path]])
+                   [::content [:maybe ::content]]
+                   [::file-path {:optional true} [:maybe ::file-path]]])
 
 ;; Response schemas - named to match function names per CONVENTIONS.md
 (schema/register! ::lint-source-response
@@ -110,7 +110,7 @@
 
 (schema/register! ::format-findings-request
                   [:map
-                   [::findings ::findings]
+                   [::findings [:sequential ::finding]]
                    [::max-length {:optional true} [:int {:min 1}]]])
 
 ;; Response schema for syntax-check
@@ -135,8 +135,8 @@
 
 (schema/register! ::validate-for-write-request
                   [:map
-                   [::content ::content]
-                   [::file-path {:optional true} ::file-path]
+                   [::content [:maybe ::content]]
+                   [::file-path {:optional true} [:maybe ::file-path]]
                    [::full-lint? {:optional true :default true} ::full-lint?]])
 
 (schema/register! ::validate-for-write-response
