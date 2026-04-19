@@ -65,6 +65,15 @@
                                           [:vector :int] [:map-of :keyword :string]]
                              :gen/fmap identity}})))
 
+;; Register :seon.db/namespace — the entity-namespace stamp attached by
+;; `seon.db/transact!` when routing through the datahike flow (Decision 7 of
+;; the datahike-migration PRD). Values are db-name keywords (:seon.weather,
+;; :seon.phase2.demo, etc). Registered here so the validation gate in
+;; seon.db/transact! treats it as a known attr without domain code needing
+;; to register it explicitly.
+(defonce ^:private _db-namespace-type
+  (swap! *schemas assoc :seon.db/namespace :keyword))
+
 ;; Register :seon.db/ref — a Datalevin entity reference.
 ;; Accepts positive integers (entity IDs) or lookup refs [keyword value].
 ;; At transact time, Datalevin resolves lookup refs to entity IDs automatically.
