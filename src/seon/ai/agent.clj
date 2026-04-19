@@ -64,8 +64,8 @@
             [clojure.java.shell :as shell]
             [clojure.string :as str]
             [seon.ai :as ai]
-            [seon.db.node :as db]
             [seon.ns.view :as view]
+            [seon.runtime :as runtime]
             [seon.schema :as schema]
             [taoensso.timbre :as log]))
 
@@ -160,8 +160,8 @@
      :message    - Provider-specific message map
      :session-id - Optional. AI session ID to attach to the entity
 
-   Returns a map suitable for XTDB storage with:
-     :xt/id            - Generated message ID
+   Returns a map suitable for Datalevin storage with:
+     :seon/id            - Generated message ID
      :seon.ai/type     - :message
      :seon.ai/role     - \"user\", \"assistant\", or \"system\"
      :seon.ai/content  - Text content
@@ -427,35 +427,17 @@
     ;; Clear registry in case close! didn't remove entries
     (reset! agent-registry {})
 
-    ;; Step 2: Safety net - stop any remaining nREPL servers
-    ;; This catches servers that survived if close! threw an exception
-    ;; or if there's a race condition during shutdown
-    (let [nrepl-results (try
-                          (require 'seon.orchestrator.nrepl)
-                          (let [stop-all! (resolve 'seon.orchestrator.nrepl/stop-all-namespace-nrepls!)]
-                            (stop-all!))
-                          (catch Exception e
-                            (log/warn e "Error stopping remaining nREPL servers")
-                            (swap! errors conj {:type :nrepl-cleanup :error (.getMessage e)})
-                            []))]
-      {::shutdown-count (count agents)
-       ::nrepl-count (count nrepl-results)
-       ::errors @errors})))
+    {::shutdown-count (count agents)
+     ::errors @errors}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Render Support
 ;;; ---------------------------------------------------------------------------
 
-(defn- valid-agent-id?
-  "Validate agent-id is a safe hex string (4 chars)."
-  [agent-id]
-  (and (string? agent-id)
-       (re-matches #"[a-f0-9]{4}" agent-id)))
-
 (defn- read-agent-log
   "Read the last N lines from an agent's log file."
   [agent-id max-lines]
-  (if-not (valid-agent-id? agent-id)
+  (if-not (runtime/session-id? agent-id)
     []
     (let [log-path (str "logs/agents/" agent-id ".log")
           f (io/file log-path)]
@@ -556,8 +538,7 @@
 (defn- completed-sessions
   "Get recent completed/failed sessions from Datalevin."
   [limit]
-  (ai/list-sessions {::ai/node nil
-                     ::ai/limit limit}))
+  (ai/list-sessions {::ai/limit limit}))
 
 (defn- running-agent-ids
   "Get set of AI session IDs for running agents."
@@ -570,7 +551,7 @@
   (let [running (agents {})
         running-ids (running-agent-ids)
         completed (->> (completed-sessions 50)
-                       (remove #(running-ids (:xt/id %)))
+                       (remove #(running-ids (:seon/id %)))
                        (filter ::ai/agent-session-id))]
     {:running running
      :completed completed}))

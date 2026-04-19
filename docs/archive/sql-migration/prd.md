@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive, database]
+---
+
 > **Status: ARCHIVED** — Superseded by Datalevin migration
 
 > **Status: ARCHIVED** — Superseded by Datalevin migration
@@ -51,6 +57,7 @@ Seon needs a well-understood, high-performance query architecture that supports:
 ;; Agent session setup
 (let [query (create-query-fn node #inst "2025-07-15")]
   (iv-rank query "SPY" 126))
+
 ```
 
 **Why**: Simpler than defrecord, domain code just sees a function, easy to test with mocks.
@@ -73,6 +80,7 @@ All domain functions have Malli schemas:
   {:malli/schema [:=> IVRankArgs IVRankResult]}
   [query ticker lookback]
   ...)
+
 ```
 
 With instrumentation enabled, invalid inputs/outputs throw immediately in REPL.

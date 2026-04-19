@@ -15,6 +15,7 @@
          '[cheshire.core :as json]
          '[clojure.edn :as edn]
          '[clojure.java.io :as io]
+
          '[edamame.core :as edamame])
 
 ;;; ---------------------------------------------------------------------------
@@ -45,7 +46,7 @@
 (defn- log-agent!
   "Write to agent-specific log file if this is an agent session."
   [seon-session-id tool-name file-path decision feedback]
-  (when (and seon-session-id (re-matches #"[a-f0-9]{4}" seon-session-id))
+  (when (and seon-session-id (re-matches #"[A-Za-z0-9]{4,6}" seon-session-id))
     (let [agent-log-file (io/file "logs" "agents" (str seon-session-id ".log"))
           timestamp (.format (java.time.format.DateTimeFormatter/ofPattern "yyyy-MM-dd'T'HH:mm:ss'Z'")
                              (.atOffset (java.time.Instant/now) java.time.ZoneOffset/UTC))
@@ -291,18 +292,33 @@
                 (log! "RESTORED" file-path "Error was:" (:error validation))))))))))
 
 ;;; ---------------------------------------------------------------------------
+;;; Markdown File Detection
+;;; ---------------------------------------------------------------------------
+
+(defn- docs-markdown-file?
+  "Returns true if file-path is a .md file under docs/."
+  [file-path]
+  (when file-path
+    (let [lower-path (clojure.string/lower-case file-path)]
+      (and (clojure.string/ends-with? lower-path ".md")
+           (or (clojure.string/starts-with? lower-path "docs/")
+               (clojure.string/includes? lower-path "/docs/"))))))
+
+
+;;; ---------------------------------------------------------------------------
 ;;; Fast Path (skip nREPL for non-Clojure files)
 ;;; ---------------------------------------------------------------------------
 
 (defn- should-skip-nrepl?
-  "Returns true if we can skip nREPL entirely (non-Clojure file edits)."
+  "Returns true if we can skip nREPL entirely (non-Clojure, non-docs-markdown edits)."
   [event]
   (let [hook-event (:hook_event_name event)
         tool-name (:tool_name event)
         file-path (get-file-path event)]
     (and (or (= hook-event "PreToolUse") (= hook-event "PostToolUse"))
          (or (= tool-name "Edit") (= tool-name "Write"))
-         (not (clojure-file? file-path)))))
+         (not (clojure-file? file-path))
+         (not (docs-markdown-file? file-path)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; nREPL Processing
@@ -375,7 +391,7 @@
             (str "session=" (or (:session_id event) "orchestrator"))
             (str "file=" (or file-path "unknown")))
 
-      ;; Fast path: skip nREPL for non-Clojure files
+      ;; Fast path: skip nREPL for non-Clojure, non-docs-markdown files
       (if (should-skip-nrepl? event)
         (do
           (log! "SKIP_NON_CLJ" (or file-path "unknown"))

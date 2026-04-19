@@ -1,3 +1,8 @@
+---
+type: research
+status: draft
+tags: [prd, research, database]
+---
 # Datalevin Concurrent Access Research
 
 ## Executive Summary
@@ -34,6 +39,7 @@ From `datalevin.binding.cpp/get-rtx`:
  and managed like a stateful resource. Refer to the documentation of
  `datalevin.core/open-kv` for more details."
        {:cause (.getMessage e)})
+
 ```
 
 The test `lmdb_test.clj` confirms this behavior - opening multiple connections leads to lock corruption:
@@ -41,6 +47,7 @@ The test `lmdb_test.clj` confirms this behavior - opening multiple connections l
 ```clojure
 (is (thrown-with-msg? Exception #"multiple LMDB"
                       (if/get-value lmdb "a" :something)))
+
 ```
 
 ## Embedded Mode: Thread-Safe, Not Process-Safe
@@ -67,6 +74,7 @@ Datalevin is designed for multi-threaded access within a single process:
 
 ;; Thread 2 (concurrent)
 (d/q '[:find ?name :where [_ :name ?name]] @conn)
+
 ```
 
 The `transact-kv` function uses `locking write-txn` to serialize writes safely.
@@ -81,6 +89,7 @@ The `transact-kv` function uses `locking write-txn` to serialize writes safely.
 
 ;; Process 2 (nREPL on port 7889)
 (def conn (d/get-conn "/tmp/shared-db"))  ;; DANGER: lock corruption
+
 ```
 
 This will corrupt the lock file. Closing one connection removes locks for all.
@@ -109,6 +118,7 @@ From `doc/server.md`:
 (def conn (d/get-conn "dtlv://user:pass@localhost:8898/mydb"))
 
 ;; Both work safely!
+
 ```
 
 ### Consistency Model
@@ -125,6 +135,7 @@ dtlv serv -r /data/datalevin
 java --add-opens=java.base/java.nio=ALL-UNNAMED \
      --add-opens=java.base/sun.nio.ch=ALL-UNNAMED \
      -jar datalevin-0.9.10-standalone.jar serv -v -r /data/datalevin
+
 ```
 
 ## Environment Flags
@@ -150,6 +161,7 @@ This is used in tests but is **dangerous for production** - the caller becomes r
 ### Current Architecture
 
 Seon agents run as isolated nREPL processes, each with:
+
 - Separate JVM process
 - Own nREPL server on unique port
 - Own database namespace
@@ -163,14 +175,17 @@ data/datalevin/
   agent-a1b2/
   agent-c3d4/
   orchestrator/
+
 ```
 
 **Pros:**
+
 - Complete isolation
 - No coordination needed
 - Each agent owns its data
 
 **Cons:**
+
 - No shared state between agents
 - Data duplication if agents need same data
 - More disk usage
@@ -185,15 +200,18 @@ Run a Datalevin server, all agents connect as clients:
 
 ;; Each agent connects
 (def conn (d/get-conn "dtlv://agent:pass@localhost:8898/seon"))
+
 ```
 
 **Pros:**
+
 - Shared data access
 - Single source of truth
 - Proper write serialization
 - RBAC for access control
 
 **Cons:**
+
 - Additional server process to manage
 - Network overhead (minimal on localhost)
 - Single point of failure (though LMDB is crash-safe)
@@ -209,13 +227,16 @@ Orchestrator owns the main database, agents get read-only access via snapshots o
 ;; Agent gets a copy or read-only connection
 (d/copy main-db "data/datalevin/agent-snapshot")
 (def agent-db (d/open-kv "data/datalevin/agent-snapshot"))
+
 ```
 
 **Pros:**
+
 - Clear ownership
 - Agents can't corrupt main data
 
 **Cons:**
+
 - Snapshots become stale
 - Complex sync logic needed
 
@@ -238,11 +259,13 @@ Orchestrator owns the main database, agents get read-only access via snapshots o
   (let [db-path (str "data/datalevin/" session-id)]
     {:db (d/get-conn db-path schema)
      :session-id session-id}))
+
 ```
 
 ### When to Upgrade to Client/Server
 
 Consider client/server mode when:
+
 - Agents need to query each other's data
 - Central audit log required
 - Access control between agents needed

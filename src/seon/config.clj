@@ -19,6 +19,11 @@
 
 (def ^:const system-filename "system.edn")
 
+;; Load component hierarchy once at namespace load time.
+;; This derives all :seon/* component keys from :seon/component,
+;; enabling a single assert-key multimethod for config validation.
+(ig/load-hierarchy)
+
 (defn system-config
   "Load system configuration from system.edn.
 

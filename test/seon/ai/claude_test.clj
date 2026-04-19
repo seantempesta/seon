@@ -8,6 +8,7 @@
    4. sdk-message->entity conversion - SDK messages convert to entities correctly
    5. Persistence integration - persist-message! stores entities correctly"
   (:require
+   [clojure.string :as str]
    [clojure.test :refer [deftest is testing use-fixtures compose-fixtures]]
    [malli.core :as m]
    [malli.generator :as mg]
@@ -29,11 +30,13 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn temporal?
-  "Check if value is a temporal type (Instant or ZonedDateTime).
-   XTDB returns ZonedDateTime for timestamps, not Instant."
+  "Check if value is a temporal type (Instant, ZonedDateTime, or Date).
+   Datalevin returns ZonedDateTime for timestamps, not Instant.
+   Malli generators may produce java.util.Date."
   [v]
   (or (instance? Instant v)
-      (instance? ZonedDateTime v)))
+      (instance? ZonedDateTime v)
+      (instance? java.util.Date v)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schema Registration Tests
@@ -129,10 +132,10 @@
       ;; Check the schema definition in our registry references base schemas
       (let [schema-def (schema/schema-definition ::claude/message-entity)
             schema-str (pr-str schema-def)]
-        (is (clojure.string/includes? schema-str ":seon.ai/type"))
-        (is (clojure.string/includes? schema-str ":seon.ai/role"))
-        (is (clojure.string/includes? schema-str ":seon.ai/content"))
-        (is (clojure.string/includes? schema-str ":seon.ai/timestamp")))))
+        (is (str/includes? schema-str ":seon.ai/type"))
+        (is (str/includes? schema-str ":seon.ai/role"))
+        (is (str/includes? schema-str ":seon.ai/content"))
+        (is (str/includes? schema-str ":seon.ai/timestamp")))))
 
   (testing "agent-summary references base seon.ai session-id"
     (let [summary-schema (m/schema ::claude/agent-summary)]
@@ -141,8 +144,8 @@
       ;; Check the schema definition in our registry
       (let [schema-def (schema/schema-definition ::claude/agent-summary)
             schema-str (pr-str schema-def)]
-        (is (clojure.string/includes? schema-str ":seon.ai/session-id"))
-        (is (clojure.string/includes? schema-str ":seon.ai/namespace"))))))
+        (is (str/includes? schema-str ":seon.ai/session-id"))
+        (is (str/includes? schema-str ":seon.ai/namespace"))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; sdk-message->entity Conversion Tests
@@ -155,8 +158,8 @@
                    :message {:role "assistant"
                              :content [{:type "text" :text "Hello, world!"}]}}
           entity (claude/sdk-message->entity {::claude/sdk-message sdk-msg})]
-      (is (string? (:xt/id entity)))
-      (is (clojure.string/starts-with? (:xt/id entity) "msg-"))
+      (is (string? (:seon/id entity)))
+      (is (str/starts-with? (:seon/id entity) "msg-"))
       (is (= :message (::ai/type entity)))
       (is (= "assistant" (::ai/role entity)))
       (is (= "Hello, world!" (::ai/content entity)))
@@ -252,6 +255,40 @@
           entity (claude/sdk-message->entity {::claude/sdk-message sdk-msg})]
       (is (nil? (::claude/uuid entity))))))
 
+(deftest sdk-message-nil-handling-test
+  (testing "Missing :type field omits ::message-type key (not nil value)"
+    ;; Malformed SDK message without :type - should NOT include ::message-type nil
+    ;; which would cause Datalevin NPE
+    (let [sdk-msg {:message {:role "assistant"
+                             :content [{:type "text" :text "No type field"}]}}
+          entity (claude/sdk-message->entity {::claude/sdk-message sdk-msg})]
+      ;; Key should not exist at all, rather than being nil
+      (is (not (contains? entity ::claude/message-type))
+          "::message-type should not be present when :type is nil")))
+
+  (testing "Tool result without content omits :content key"
+    ;; Tool result with no :content should not have :content nil
+    (let [sdk-msg {:type "user"
+                   :message {:role "user"
+                             :content [{:type "tool_result"
+                                        :tool_use_id "tool-xyz"}]}}
+          entity (claude/sdk-message->entity {::claude/sdk-message sdk-msg})]
+      (is (= 1 (count (::claude/tool-results entity))))
+      (let [tool-result (first (::claude/tool-results entity))]
+        (is (= "tool-xyz" (:tool_use_id tool-result)))
+        ;; :content key should not exist when original content was nil
+        (is (not (contains? tool-result :content))
+            ":content should not be present when nil"))))
+
+  (testing "Entity has no nil values at top level"
+    ;; Verify no top-level keys have nil values (defensive check)
+    (let [sdk-msg {:type "assistant"
+                   :message {:role "assistant"
+                             :content [{:type "text" :text "Test"}]}}
+          entity (claude/sdk-message->entity {::claude/sdk-message sdk-msg})]
+      (doseq [[k v] entity]
+        (is (some? v) (str "Key " k " should not have nil value"))))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Constants Tests
 ;;; ---------------------------------------------------------------------------
@@ -260,7 +297,7 @@
   (testing "Default CLI command is a non-empty path"
     (is (string? sdk/default-cli-command))
     (is (pos? (count sdk/default-cli-command)))
-    (is (clojure.string/ends-with? sdk/default-cli-command "claude")))
+    (is (str/ends-with? sdk/default-cli-command "claude")))
 
   (testing "Default model is valid"
     (is (m/validate ::claude/model sdk/default-model)))
@@ -275,7 +312,7 @@
 (deftest agents-empty-test
   (testing "agents returns empty vector when no agents running"
     ;; This tests the agents function without any active agents
-    ;; (actual agent launching requires XTDB and process spawning)
+    ;; (actual agent launching requires Datalevin and process spawning)
     (let [result (claude/agents {})]
       (is (vector? result)))))
 
@@ -290,7 +327,7 @@
                    :message {:role "assistant"
                              :content [{:type "text" :text "Hello!"}]}}
           entity (claude/sdk-message->entity {::claude/sdk-message sdk-msg
-                                               ::ai/session-id "ses-test123"})]
+                                              ::ai/session-id "ses-test123"})]
       (is (= "ses-test123" (::ai/session-id entity)))
       (is (= :message (::ai/type entity)))
       (is (= "assistant" (::ai/role entity)))))
@@ -303,7 +340,7 @@
       (is (nil? (::ai/session-id entity))))))
 
 (deftest persist-message-test
-  (testing "persist-message! stores SDK message in XTDB"
+  (testing "persist-message! stores SDK message in Datalevin"
     ;; Create an AI session first
     (let [{session-id ::ai/session-id}
           (ai/start-session! {::ai/node *test-node*
@@ -320,10 +357,10 @@
                                     ::claude/sdk-message sdk-msg})]
       ;; Verify the message was stored
       (is (string? message-id))
-      (is (clojure.string/starts-with? message-id "msg-"))
+      (is (str/starts-with? message-id "msg-"))
       ;; Retrieve messages for the session
       (let [messages (ai/get-messages {::ai/node *test-node*
-                                        ::ai/session-id session-id})]
+                                       ::ai/session-id session-id})]
         (is (= 1 (count messages)))
         (let [msg (first messages)]
           (is (= :message (::ai/type msg)))
@@ -389,25 +426,25 @@
       (claude/persist-message! {::ai/node *test-node*
                                 ::ai/session-id session-id
                                 ::claude/sdk-message {:type "user"
-                                                       :message {:role "user"
-                                                                 :content [{:type "text"
-                                                                            :text "What is 2+2?"}]}}})
+                                                      :message {:role "user"
+                                                                :content [{:type "text"
+                                                                           :text "What is 2+2?"}]}}})
       ;; Persist an assistant response
       (claude/persist-message! {::ai/node *test-node*
                                 ::ai/session-id session-id
                                 ::claude/sdk-message {:type "assistant"
-                                                       :uuid "msg-resp"
-                                                       :message {:role "assistant"
-                                                                 :content [{:type "text"
-                                                                            :text "2+2 equals 4."}]}}})
+                                                      :uuid "msg-resp"
+                                                      :message {:role "assistant"
+                                                                :content [{:type "text"
+                                                                           :text "2+2 equals 4."}]}}})
       ;; Persist a result message
       (claude/persist-message! {::ai/node *test-node*
                                 ::ai/session-id session-id
                                 ::claude/sdk-message {:type "result"
-                                                       :result "Success"
-                                                       :subtype "success"
-                                                       :num_turns 2
-                                                       :total_cost_usd 0.01}})
+                                                      :result "Success"
+                                                      :subtype "success"
+                                                      :num_turns 2
+                                                      :total_cost_usd 0.01}})
       ;; End session with stats
       (ai/end-session! {::ai/node *test-node*
                         ::ai/session-id session-id

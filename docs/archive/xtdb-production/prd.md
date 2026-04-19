@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive, database]
+---
+
 > **Status: ARCHIVED** — XTDB ops config, not core infra
 
 > **Status: ARCHIVED** — XTDB ops config, not core infra
@@ -23,6 +29,7 @@ Before proceeding, note these **breaking changes** from v2.0.0:
 | CLI structure | Flags | **Git-style subcommands**: `node`, `playground`, `compactor` |
 
 ### New CLI Commands (v2.1.0-rc0)
+
 ```bash
 # Start node (was: java -jar xtdb.jar)
 xtdb node -f config.yaml
@@ -38,6 +45,7 @@ xtdb reset-compactor <db-name>
 
 # Export snapshot for DR (NEW)
 xtdb export-snapshot <db-name> -f config.yaml
+
 ```
 
 ---
@@ -56,6 +64,7 @@ java.util.NoSuchElementException
   at java.base/java.util.ArrayList.removeFirst(ArrayList.java:569)
   at xtdb.arrow.FixedWidthVector.loadPage$xtdb_core(FixedWidthVector.kt:132)
   at xtdb.compactor.SegmentMerge.merge(SegmentMerge.kt:149)
+
 ```
 
 **Error Location**: `FixedWidthVector.kt:132` calling `ArrayList.removeFirst()` with empty list  
@@ -76,9 +85,10 @@ final override fun loadPage(nodes: MutableList<ArrowFieldNode>, buffers: Mutable
     val node = nodes.removeFirst() ?: throw IllegalStateException("missing node")
     validityBuffer.loadBuffer(buffers.removeFirst() ?: throw IllegalStateException("missing validity buffer"))
     dataBuffer.loadBuffer(buffers.removeFirst() ?: throw IllegalStateException("missing data buffer"))
-    
+
     valueCount = node.length
 }
+
 ```
 
 **Root Cause**: The `nodes` or `buffers` list is being exhausted during segment merge operations. This occurs when:
@@ -139,6 +149,7 @@ For your workload (7.6M records ≈ 1-2GB raw data):
 
 # For 100M+ records
 -Xms64g -Xmx128g
+
 ```
 
 **Rationale**:
@@ -153,6 +164,7 @@ Arrow allocates off-heap memory for columnar data. Configure via:
 
 ```bash
 -XX:MaxDirectMemorySize=16g
+
 ```
 
 **Formula**: `MaxDirectMemorySize >= heap_size / 2`
@@ -173,6 +185,7 @@ Use G1GC (default in JDK 21+) with tuning for compaction:
 -XX:+UseG1GC
 -XX:+ParallelRefProcEnabled
 -XX:MaxGCPauseMillis=200
+
 ```
 
 #### Full JVM Example
@@ -192,6 +205,7 @@ java \
   --enable-native-access=ALL-UNNAMED \
   -cp "..." \
   clojure.main -m nrepl.cmdline
+
 ```
 
 ### B. XTDB Configuration (v2.1.0-rc0)
@@ -216,6 +230,7 @@ Update `src/ml_options/system.clj` to handle new v2.1.0-rc0 config structure:
         node (start-node config)]
     (log/info "XTDB node started" {:compactor compactor})
     node))
+
 ```
 
 Update `resources/system.edn` with v2.1.0-rc0 structure:
@@ -239,6 +254,7 @@ Update `resources/system.edn` with v2.1.0-rc0 structure:
   :compactor #profile {:dev  {:threads 2}
                        :test {:threads 1}
                        :prod {:threads #or [#env XTDB_COMPACTOR_THREADS 8]}}}}
+
 ```
 
 ### C. Compactor Configuration Details
@@ -258,6 +274,7 @@ threads: 8
 
 # For dedicated compaction nodes
 threads: 12
+
 ```
 
 **Guideline**: `threads = available_processors / 2` (leave headroom for query/ingest threads)
@@ -273,6 +290,7 @@ Control L0→L1 compaction thresholds (defaults to 128MB):
 {:storage [:local {:path ...}]
  :compactor {:threads 8
              :file-size-target 268435456}} ;; 256MB
+
 ```
 
 **Rationale for larger file sizes during ingestion**:
@@ -302,6 +320,7 @@ Disable or limit compaction during bulk ingestion:
    :storage [:local {:path "data/xtdb/objects"}]
    :compactor {:threads 4
                :file-size-target 536870912}})) ;; 512MB files
+
 ```
 
 ### E. Monitoring Configuration
@@ -313,6 +332,7 @@ Enable detailed logging for compaction visibility:
 export XTDB_LOGGING_LEVEL=DEBUG
 export XTDB_LOGGING_LEVEL_COMPACTOR=DEBUG
 export XTDB_LOGGING_LEVEL_INDEXER=INFO
+
 ```
 
 Configure `logback.xml` for file output:
@@ -339,6 +359,7 @@ Configure `logback.xml` for file output:
     <appender-ref ref="FILE"/>
   </root>
 </configuration>
+
 ```
 
 ---
@@ -374,6 +395,7 @@ com.xtdb/xtdb-core {:mvn/version "2.0.0"}
 ;; New (v2.1.0-rc0)
 com.xtdb/xtdb-api {:mvn/version "2.1.0-rc0"}
 com.xtdb/xtdb-core {:mvn/version "2.1.0-rc0"}
+
 ```
 
 ### Migration Steps
@@ -394,6 +416,7 @@ com.xtdb/xtdb-core {:mvn/version "2.1.0-rc0"}
 **Goal**: Stabilize v2.0.0 with configuration fixes
 
 1. **Update JVM options** in `deps.edn` (`:xtdb` alias):
+
    ```clojure
    :jvm-opts ["-Xms16g" "-Xmx32g"
               "-XX:MaxDirectMemorySize=16g"
@@ -401,6 +424,7 @@ com.xtdb/xtdb-core {:mvn/version "2.1.0-rc0"}
               "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
               "-Dio.netty.tryReflectionSetAccessible=true"
               "--enable-native-access=ALL-UNNAMED"]
+
    ```
 
 2. **Update system configuration**:
@@ -473,13 +497,14 @@ com.xtdb/xtdb-core {:mvn/version "2.1.0-rc0"}
 
 ;; Time a bulk load of 7.6M option_greeks
 (time
-  (ingest/bulk-load-option-greeks 
+  (ingest/bulk-load-option-greeks
     {:limit 7600000
      :batch-size 10000
      :start-date #inst "2024-01-01"}))
 
 ;; Expected: ~15-45 minutes depending on hardware
 ;; Should see no exceptions in logs
+
 ```
 
 ### Test 2: Memory Monitoring
@@ -493,6 +518,7 @@ watch -n 2 'free -h'
 
 # Monitor compaction in logs
 tail -f logs/xtdb.log | grep compaction
+
 ```
 
 ### Test 3: Compaction Completion
@@ -508,6 +534,7 @@ Verify all data is compacted after ingestion:
 ;; Then in logs, should see:
 ;; "compacted 'option_greeks' -> 'l1-rc-*'"
 ;; "compacted 'option_greeks' -> 'l2-rc-*'"
+
 ```
 
 ### Test 4: Query Performance Post-Compaction
@@ -521,6 +548,7 @@ Verify all data is compacted after ingestion:
            (where (> iv 0.25))))))
 
 ;; Should be < 5 seconds for 7.6M records
+
 ```
 
 ---
@@ -558,6 +586,7 @@ grep "OutOfMemoryError\|MaxDirectMemorySize" logs/xtdb.log
 grep -E "compacted.*\(" logs/xtdb.log | \
   awk '{print $NF}' | \
   awk -F'[ms]' '$1 > 60000 {print}' # > 1 minute
+
 ```
 
 ---
@@ -567,9 +596,11 @@ grep -E "compacted.*\(" logs/xtdb.log | \
 ### Issue: `NoSuchElementException` During Compaction
 
 **Symptoms**:
+
 ```
 ERROR: error running compaction job: public/option_greeks/l01-rc-b12c
 java.util.NoSuchElementException
+
 ```
 
 **Causes & Solutions**:
@@ -585,6 +616,7 @@ java.util.NoSuchElementException
 ### Issue: GC Pause Time Exceeds 500ms
 
 **Solution**:
+
 ```bash
 # Check current JVM
 jstat -gc -h20 <pid> 1000  # Every 1 second
@@ -596,6 +628,7 @@ jstat -gc -h20 <pid> 1000  # Every 1 second
 -XX:+ParallelRefProcEnabled
 -XX:+UnlockDiagnosticVMOptions
 -XX:G1SummarizeRSetStatsPeriod=1  # Reduce summary overhead
+
 ```
 
 ### Issue: Data Verification After Error
@@ -617,6 +650,7 @@ jstat -gc -h20 <pid> 1000  # Every 1 second
 ;; Verify schema integrity
 (let [schema-query '(from :option-greeks {:limit 100} [*])]
   (node/query db schema-query))
+
 ```
 
 ---
@@ -640,20 +674,24 @@ jstat -gc -h20 <pid> 1000  # Every 1 second
 ## References
 
 ### XTDB Documentation
+
 - [XTDB v2 Configuration](https://docs.xtdb.com/ops/config.html)
 - [XTDB Troubleshooting](https://docs.xtdb.com/ops/troubleshooting.html)
 - [XTDB GitHub - Issues](https://github.com/xtdb/xtdb/issues)
 - [XTDB GitHub - Releases](https://github.com/xtdb/xtdb/releases)
 
 ### Apache Arrow Memory Management
+
 - [Arrow Memory Management](https://arrow.apache.org/docs/java/memory.html)
 - [jemalloc Performance](https://arrow.apache.org/blog/2018/07/20/jemalloc/)
 
 ### JVM Tuning
+
 - [Oracle JVM Memory Configuration](https://docs.oracle.com/cd/E15289_01/JRPTG/memman.htm)
 - [G1GC Tuning Guide](https://www.oracle.com/technical-resources/articles/java/g1gc.html)
 
 ### XTDB Development
+
 - [Development Diary #10 - v2 Primary Index](https://xtdb.com/blog/dev-diary-feb-24)
 - [Development Diary #13 - Beta Release](https://xtdb.com/blog/dev-diary-sep-24)
 
@@ -677,6 +715,7 @@ jstat -gc -h20 <pid> 1000  # Every 1 second
               "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
               "-Dio.netty.tryReflectionSetAccessible=true"
               "--enable-native-access=ALL-UNNAMED"]}}}
+
 ```
 
 ### resources/system.edn (updated)
@@ -689,6 +728,7 @@ jstat -gc -h20 <pid> 1000  # Every 1 second
   :compactor #profile {:dev {:threads 2}
                        :test {:threads 1}
                        :prod {:threads #or [#env XTDB_COMPACTOR_THREADS 8]}}}}
+
 ```
 
 ### Dockerfile (if containerized)
@@ -713,6 +753,7 @@ ENTRYPOINT ["java", \
   "-Dio.netty.tryReflectionSetAccessible=true", \
   "--enable-native-access=ALL-UNNAMED", \
   "-jar", "/app/app.jar"]
+
 ```
 
 ---
@@ -747,6 +788,7 @@ xtdb compactor -f config.yaml
 
 # Export snapshot for disaster recovery
 xtdb export-snapshot my-database -f config.yaml -o s3://bucket/snapshots/
+
 ```
 
 ---

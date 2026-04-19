@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # Spike: Example Proof of Concept
 
 **Date:** 2025-12-05
@@ -39,6 +45,7 @@ Benchmark results show...
 ;; Minimal working example
 (defn spike-test []
   (println "This is a proof of concept"))
+
 ```
 
 ---

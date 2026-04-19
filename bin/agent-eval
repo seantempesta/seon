@@ -209,10 +209,10 @@
       (System/exit 1))
 
     ;; Validate session ID format (8 hex chars)
-    (when-not (re-matches #"[a-f0-9]{8}" session-id)
+    (when-not (re-matches #"[A-Za-z0-9]{4,6}" session-id)
       (binding [*out* *err*]
         (println (str "Error: Invalid session ID: " session-id))
-        (println "Session ID must be 8 lowercase hex characters"))
+        (println "Session ID must be 4-6 base62 characters"))
       (System/exit 1))
 
     ;; Look up session port

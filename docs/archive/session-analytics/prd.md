@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 > **Status: ARCHIVED** — Used XTDB API, needs full rewrite
 
 > **Status: ARCHIVED** — Used XTDB API, needs full rewrite
@@ -36,6 +42,7 @@ Implement `seon.ai/session-stats` that returns aggregate statistics.
 ;;                  :cache-read 120000
 ;;                  :cache-creation 35000}
 ;;     ::ai/cache-hit-rate 0.21}  ; cache-read / (cache-read + input)
+
 ```
 
 ### Approach
@@ -98,8 +105,6 @@ Implement `seon.ai/session-stats` that returns aggregate statistics.
 
 [>] Decision: Aggregate tokens from ai_messages, cost from ai_sessions
 
-
-
 ### Phase 2: Implementation
 
 [x] Added schemas to `seon.ai`:
@@ -121,11 +126,10 @@ Implement `seon.ai/session-stats` that returns aggregate statistics.
 
 [x] Hook ran gen-tests successfully (1.5s)
 
-
-
 ### Phase 3: Verification
 
 **REPL Verification:**
+
 ```clojure
 (ai/session-stats {::ai/node node})
 ;; => #:seon.ai{:total-cost-usd 0.1730855,
@@ -134,6 +138,7 @@ Implement `seon.ai/session-stats` that returns aggregate statistics.
 ;;              :tokens {:input 14, :output 1064,
 ;;                       :cache-read 126181, :cache-creation 13332},
 ;;              :cache-hit-rate 0.9998890605808471}
+
 ```
 
 [x] Results match raw SQL queries:
@@ -149,13 +154,12 @@ Implement `seon.ai/session-stats` that returns aggregate statistics.
 
 ```
 22 tests, 211 assertions, 0 failures.
+
 ```
 
 [>] Observation: The cache hit rate formula `cache-read / (cache-read + input)`
 measures what fraction of context tokens came from cache vs fresh input.
 High values (~99%) indicate effective prompt caching.
-
-
 
 ---
 

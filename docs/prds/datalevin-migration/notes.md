@@ -1,6 +1,9 @@
+---
+type: reference
+status: draft
+tags: [prd, reference, database]
+---
 # Implementation Notes: Datalevin Migration
-
-**Last Updated:** 2026-02-19
 
 ---
 
@@ -22,9 +25,11 @@ Rather than completely removing XTDB writes, we kept them as a fallback:
 ;; Pattern used in all write functions:
 (when-not (datalevin-dual-write! :save-session entity)
   (db/put! node :ai_sessions entity))
+
 ```
 
 This means:
+
 - **Production** (Datalevin available): writes go to Datalevin only
 - **Tests** (no Datalevin): writes fall back to XTDB, tests pass unchanged
 - **Degraded mode**: if Datalevin crashes, XTDB catches writes

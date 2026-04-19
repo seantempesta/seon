@@ -89,7 +89,7 @@ SPLINT_EXIT=0
 # Run clj-kondo
 if [[ "$SPLINT_ONLY" != "true" ]] && [[ "$METRICS_ONLY" != "true" ]]; then
     echo -e "${YELLOW}[clj-kondo]${NC} Checking for bugs and unused code..."
-    if clj-kondo --lint "${PATHS[@]}" 2>&1; then
+    if clj-kondo --cache false --lint "${PATHS[@]}" 2>&1; then
         echo -e "${GREEN}clj-kondo: OK${NC}"
     else
         KONDO_EXIT=$?

@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive, trading, agent]
+---
+
 # Existing Code Reference
 
 This document summarizes the existing trading code that the new `seon.algorithmic-trading` namespace will build upon.
@@ -45,6 +51,7 @@ Signal primitives for options analysis. All primitives accept temporal options.
 ;; Gamma Rent - cost of gamma
 (gamma-rent db ticker strike spot opts)
 ;; => 0.05 (gamma/|theta| ratio)
+
 ```
 
 ### Temporal Support
@@ -54,6 +61,7 @@ All primitives accept `opts` map with `:as-of`:
 ```clojure
 (iv-rank node "SPY" 126 {:as-of #inst "2024-06-15T21:00:00Z"})
 ;; Only sees data with valid-time <= 2024-06-15
+
 ```
 
 This is the "frozen present" model - queries are locked to a point in time.
@@ -68,6 +76,7 @@ Primitives are registered in `signals/primitives` map with metadata:
            :returns :percentile
            :description "IV percentile rank vs history"}
  ...}
+
 ```
 
 ---
@@ -96,6 +105,7 @@ Higher-level analysis that combines signals into recommendations.
 ;;     :reasoning "IV Rank at 35% is neutral..."
 ;;     :strategies []
 ;;     :strategy-details []}
+
 ```
 
 ### Signal Labels
@@ -118,6 +128,7 @@ Hardcoded thresholds for labeling:
  :skew {:low 0.02 :high 0.08}
  :term-slope {:backwardation -0.0005 :contango 0.0005}
  :gamma-rent {:cheap 0.06 :expensive 0.02}}
+
 ```
 
 ### Recommendation Logic
@@ -172,6 +183,7 @@ The existing code uses this pattern:
                (> greeks/delta 0.4)
                (< greeks/delta 0.6))))
   {:current-time as-of})
+
 ```
 
 Key points:

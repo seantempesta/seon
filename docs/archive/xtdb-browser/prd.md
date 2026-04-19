@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive, web, database]
+---
+
 > **Status: ARCHIVED** — Superseded by Datalevin migration
 
 > **Status: ARCHIVED** — Superseded by Datalevin migration
@@ -32,6 +38,7 @@ A web-based entity browser for navigating XTDB data as a graph. Enables browsing
 ### Existing Patterns
 
 **Query execution** (`node.clj:38-78`):
+
 ```clojure
 (defn q
   "Execute a SQL query against XTDB."
@@ -46,9 +53,11 @@ A web-based entity browser for navigating XTDB data as a graph. Enables browsing
                       (:current-time opts) (assoc :current-time (:current-time opts))
                       ...)]
      (vec (xt/q node query-vec query-opts)))))
+
 ```
 
 **Entity lookup** (`node.clj:84-106`):
+
 ```clojure
 (defn entity
   "Get a single entity by ID from a table."
@@ -58,6 +67,7 @@ A web-based entity browser for navigating XTDB data as a graph. Enables browsing
      (first (xt/q node
                   [(str "SELECT * FROM " table-name " WHERE _id = ?") id]
                   query-opts)))))
+
 ```
 
 ### Web Routes
@@ -131,9 +141,11 @@ Browse XTDB entities with graph-like navigation:
    :row-count (table-row-count node table-name)
    :sample-ids (mapv :xt/id
                      (node/q node [(str "SELECT _id FROM " table-name " LIMIT 5")]))})
+
 ```
 
 **Test criteria:**
+
 ```clojure
 ;; In REPL:
 (require '[seon.db.browser :as browser])
@@ -142,6 +154,7 @@ Browse XTDB entities with graph-like navigation:
 
 (browser/table-columns (user/xtdb-node) "ai_messages")
 ;; => [{:column-name "_id"} {:column-name "session_id"} ...]
+
 ```
 
 ---
@@ -188,6 +201,7 @@ Browse XTDB entities with graph-like navigation:
               (when (seq result)
                 {:table table-name :id entity-id})))
           tables)))
+
 ```
 
 **UI Component** (`src/seon/web/browser.clj`):
@@ -212,12 +226,15 @@ Browse XTDB entities with graph-like navigation:
             (str v)]
            ;; Regular value
            (render-value v))]])]]])
+
 ```
 
 **Test criteria:**
+
 ```clojure
 ;; Click on session-id value → navigates to that session entity
 ;; Click on parent-id value → navigates to parent entity
+
 ```
 
 ---
@@ -269,6 +286,7 @@ Browse XTDB entities with graph-like navigation:
   (node/q node
     [(str "SELECT _id FROM " table " WHERE " column " = ? LIMIT ?")
      target-id limit]))
+
 ```
 
 **UI Component:**
@@ -291,13 +309,16 @@ Browse XTDB entities with graph-like navigation:
             table]]
           [:td.py-1.pr-4.text-text-400 column]
           [:td.py-1.text-right count]])]]]))
+
 ```
 
 **Test criteria:**
+
 ```clojure
 ;; View an agent session
 ;; See "Referenced by: ai_messages.session_id (47 entities)"
 ;; Click → shows filtered table view
+
 ```
 
 ---
@@ -317,6 +338,7 @@ Browse XTDB entities with graph-like navigation:
 [:get "/db/:table/:id"]   #'browser/entity-page      ; Single entity
 [:post "/db/:table/:id"]  #'browser/entity-sse
 [:get "/db/_/:id"]        #'browser/resolve-entity   ; Resolve ID to table
+
 ```
 
 **Table List Page:**
@@ -342,6 +364,7 @@ Browse XTDB entities with graph-like navigation:
                              :class "text-signal hover:underline"}
                          table-name]]
               [:td.py-2.text-right.text-text-400 cnt]]))]]])))
+
 ```
 
 **Entity Page with References:**
@@ -368,6 +391,7 @@ Browse XTDB entities with graph-like navigation:
 
        ;; Reverse references
        (render-reverse-refs refs)])))
+
 ```
 
 ---
@@ -391,6 +415,7 @@ Per the XTDB v2 reference (`docs/reference/xtdb-v2-reference.md:125-176`), each 
   {:list-tables (fn [] (list-tables-in-db node database-name))
    :entity (fn [table id] (entity-in-db node database-name table id))
    :references-to (fn [id] (references-to-in-db node database-name id))})
+
 ```
 
 **Routes:**
@@ -399,6 +424,7 @@ Per the XTDB v2 reference (`docs/reference/xtdb-v2-reference.md:125-176`), each 
 ;; Database-scoped routes
 [:get "/db/:database/:table"]       #'browser/db-table-page
 [:get "/db/:database/:table/:id"]   #'browser/db-entity-page
+
 ```
 
 ---
@@ -415,6 +441,7 @@ Per the XTDB v2 reference (`docs/reference/xtdb-v2-reference.md:125-176`), each 
   [node target-id]
   ;; Cache column types to avoid repeated introspection
   ...)
+
 ```
 
 ### 2. Index Support
@@ -434,6 +461,7 @@ Cache `information_schema` results per-request or with short TTL:
     (let [cols (table-columns node table-name)]
       (swap! schema-cache assoc table-name cols)
       cols)))
+
 ```
 
 ---
@@ -441,38 +469,48 @@ Cache `information_schema` results per-request or with short TTL:
 ## Test Criteria
 
 ### Phase 0: Table Discovery
+
 ```
 1. (browser/list-tables node) returns all tables
 2. (browser/table-columns node "ai_messages") returns columns
 3. No hardcoded table names in browser.clj
+
 ```
 
 ### Phase 1: Entity Viewer
+
 ```
 1. GET /db/ai_messages/{id} shows entity
 2. Session ID values are clickable links
 3. Click link → navigates to referenced entity
+
 ```
 
 ### Phase 2: Reverse References
+
 ```
 1. Entity page shows "Referenced by" section
 2. Shows table/column/count for each reference
 3. Click reference → shows filtered table view
+
 ```
 
 ### Phase 3: Table Browser UI
+
 ```
 1. GET /db shows all tables with row counts
 2. Click table → shows paginated rows
 3. Click row → shows entity detail with forward/reverse refs
+
 ```
 
 ### Phase 4: Multi-Database
+
 ```
 1. GET /db shows database selector (if multiple attached)
 2. GET /db/seon_trading/signals works
 3. Cross-database references resolve correctly
+
 ```
 
 ---

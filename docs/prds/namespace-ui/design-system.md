@@ -1,7 +1,11 @@
+---
+type: prd
+status: draft
+tags: [prd, web]
+---
 # Seon Design System: Phosphor Terminal
 
 **Version:** 1.0
-**Status:** Draft
 **Philosophy:** Industrial Lisp Machine meets warm phosphor CRT
 
 ---
@@ -32,6 +36,7 @@ Seon is a **live Lisp system** - a personal operating system where code, data, a
 --seon-base-850: #252422;  /* Card/panel background */
 --seon-base-800: #302e2b;  /* Hover state */
 --seon-base-700: #3d3a36;  /* Active/selected, borders */
+
 ```
 
 ### Text (Cream, Not White)
@@ -41,6 +46,7 @@ Seon is a **live Lisp system** - a personal operating system where code, data, a
 --seon-text-200: #d4d0c8;  /* Secondary text */
 --seon-text-400: #8c8578;  /* Muted (timestamps) */
 --seon-text-500: #6b6459;  /* Disabled */
+
 ```
 
 ### Semantic Colors
@@ -52,6 +58,7 @@ Seon is a **live Lisp system** - a personal operating system where code, data, a
 --seon-warning: #fbbf24;  /* Stuck, timeouts */
 --seon-info:    #60a5fa;  /* Messages, activity */
 --seon-eval:    #c084fc;  /* REPL evaluation, Lisp forms */
+
 ```
 
 ### Log Type Colors
@@ -64,6 +71,7 @@ Seon is a **live Lisp system** - a personal operating system where code, data, a
 --seon-log-hook:    #22d3ee;  /* HOOK - cyan */
 --seon-log-done:    #4ade80;  /* COMPLETE - green */
 --seon-log-error:   #f87171;  /* ERROR - red */
+
 ```
 
 ---
@@ -74,9 +82,11 @@ Seon is a **live Lisp system** - a personal operating system where code, data, a
 
 ```css
 --font-mono: 'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, Monaco, 'Cascadia Mono', monospace;
+
 ```
 
 **Why JetBrains Mono?**
+
 - Excellent readability at small sizes (11-12px)
 - Distinguishes similar characters (0/O, 1/l/I)
 - Optional ligatures for Clojure (->>, ->, =>)
@@ -102,6 +112,7 @@ All sizes optimized for information density:
 --leading-none:  1.0;    /* Single-line items */
 --leading-tight: 1.25;   /* Log lines, lists (PRIMARY) */
 --leading-snug:  1.375;  /* Paragraphs (rare) */
+
 ```
 
 ### Weight
@@ -110,6 +121,7 @@ All sizes optimized for information density:
 --font-normal:   400;  /* Body text */
 --font-medium:   500;  /* Labels, emphasis */
 --font-semibold: 600;  /* Headers, status */
+
 ```
 
 ---
@@ -136,6 +148,7 @@ Table rows:    py-1.5 (6px vertical)
 Cards:         p-3 (12px all sides)
 Sections:      gap-6 between major blocks
 Page margins:  px-4 py-3 (minimal chrome)
+
 ```
 
 ### Borders
@@ -158,9 +171,11 @@ Page margins:  px-4 py-3 (minimal chrome)
 │ 14:23:47 MSG    Analyzing namespace structure...              │
 │ 14:23:48 HOOK   ✓ tests passed (12 assertions)                │
 └───────────────────────────────────────────────────────────────┘
+
 ```
 
 **Structure:**
+
 - Fixed-width columns: time (8ch), type (7ch), content (flex)
 - Type column is the ONLY color per line
 - Content is cream (#faf9f7), timestamps are muted (#8c8578)
@@ -169,6 +184,7 @@ Page margins:  px-4 py-3 (minimal chrome)
 - `flex-col-reverse` for natural scroll-to-bottom
 
 **CSS:**
+
 ```css
 .log-line {
   font-size: 11px;
@@ -178,6 +194,7 @@ Page margins:  px-4 py-3 (minimal chrome)
 .log-line:hover {
   background: var(--seon-base-800);
 }
+
 ```
 
 ### Agent Table
@@ -190,9 +207,11 @@ Page margins:  px-4 py-3 (minimal chrome)
 │ c3d4  seon.ai.claude         ✓ done       123   $0.45          │
 │ e5f6  seon.trading           ⚠ stuck       89   $0.28          │
 └─────────────────────────────────────────────────────────────────┘
+
 ```
 
 **Structure:**
+
 - Table, not cards (density over aesthetics)
 - ID is monospace, prominent
 - Right-align numeric columns
@@ -211,11 +230,13 @@ Page margins:  px-4 py-3 (minimal chrome)
 | pending | ○ | gray (#6b6459) | none |
 
 **Implementation:**
+
 ```html
 <span class="status">
   <span class="status-dot status-running"></span>
   <span class="status-text">running</span>
 </span>
+
 ```
 
 ```css
@@ -228,6 +249,7 @@ Page margins:  px-4 py-3 (minimal chrome)
   background: var(--seon-signal);
   animation: pulse 2s infinite;
 }
+
 ```
 
 ### Navigation
@@ -236,6 +258,7 @@ Minimal tab bar, not sidebar:
 
 ```
 [dashboard]  [agents]  [logs]                    session: orch
+
 ```
 
 - Active: text-50 + 2px amber underline
@@ -258,6 +281,7 @@ seon.ai.claude
 ├─ schemas ────────────────────────────────────────────────
 │  ::ai/node       [:fn {:min 1} xt/node?]
 │  ::ai/namespace  [:qualified-symbol]
+
 ```
 
 - Collapsible sections via `<details>`
@@ -304,6 +328,7 @@ seon.ai.claude
   --color-log-done: #4ade80;
   --color-log-error: #f87171;
 }
+
 ```
 
 ---
@@ -320,6 +345,7 @@ seon.ai.claude
 .animate-seon-pulse {
   animation: seon-pulse 2s ease-in-out infinite;
 }
+
 ```
 
 ### Skeleton Loading
@@ -333,6 +359,7 @@ seon.ai.claude
   animation: seon-skeleton 1.5s ease-in-out infinite;
   background: var(--color-base-700);
 }
+
 ```
 
 ### Page Transitions
@@ -343,6 +370,7 @@ SSE morphing handles content updates. For explicit transitions:
 .transition-colors {
   transition: color 150ms, background-color 150ms;
 }
+
 ```
 
 ---
@@ -350,6 +378,7 @@ SSE morphing handles content updates. For explicit transitions:
 ## Anti-Patterns
 
 **Never do:**
+
 - `bg-white` or any pure white background
 - `text-gray-*` (use warm text-* scale)
 - `rounded-full` on anything except dots

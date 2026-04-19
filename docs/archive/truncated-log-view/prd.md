@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 > **Status: ARCHIVED** — Complete — implemented in namespace-ui
 
 > **Status: ARCHIVED** — Complete — implemented in namespace-ui
@@ -27,6 +33,7 @@ Current Observatory log view shows full content for every log line, making it:
 - Unlike Claude Code's terminal UI which truncates by default
 
 **Desired behavior (like Claude Code):**
+
 ```
 14:23 | TOOL   | Read | src/seon/web/agents.clj
        (ns seon.web.agents
@@ -34,6 +41,7 @@ Current Observatory log view shows full content for every log line, making it:
        ... 750 more lines
 
 14:23 | RESULT | Read | ✓
+
 ```
 
 ---
@@ -66,15 +74,18 @@ Update log line renderers to show max 4 lines of content inline:
        :hidden-lines (- (count lines) max-inline-lines)}
       {:truncated? false
        :preview content})))
+
 ```
 
 Display with truncation indicator:
+
 ```clojure
 [:div {:class "text-xs font-mono"}
  [:pre preview]
  (when truncated?
    [:span {:class "text-text-500"}
     (str "... " hidden-lines " more lines")])]
+
 ```
 
 ### Phase 2: Hover shows full content (already works)

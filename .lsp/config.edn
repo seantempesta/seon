@@ -15,4 +15,8 @@
  :lint-project-files-after-startup? false
 
  ;; Cache location
- :cache-path ".lsp/.cache"}
+ :cache-path ".lsp/.cache"
+
+ ;; Disable clj-kondo diagnostics (we run kondo ourselves via dev hook)
+ ;; This also prevents stale .clj-kondo/.cache/ from causing phantom errors
+ :linters {:clj-kondo {:level :off}}}

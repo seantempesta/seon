@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive, trading, agent]
+---
+
 # Session Template System - Prototype Notes
 
 **Status:** Prototype Complete
@@ -77,6 +83,7 @@ Every agent interaction becomes training data. We need to capture:
  :thinking "I'll check if options are expensive..."
  :truncated? false
  :full-chars 156}
+
 ```
 
 ### Key Insights
@@ -107,24 +114,29 @@ LLM responses mix prose reasoning with executable code. We need to:
 ### Approaches Explored
 
 #### A. Delimiter-Based (Markdown)
+
 ```
 Let me analyze this.
 
 ```clojure
 (iv-rank ctx {:ticker "SPY"})
+
 ```
+
 ```
 
 **Pros:** Standard, LLMs know this format
 **Cons:** Extra typing in REPL context, verbose
 
 #### B. Heuristic-Based (Balanced Forms)
+
 Look for `(...)`, `{...}`, `[...]` patterns. Everything else is thinking.
 
 **Pros:** Natural, no special syntax
 **Cons:** Edge cases (strings with parens, partial forms)
 
 #### C. First-Line Convention
+
 First line determines mode:
 - Starts with prose -> thinking mode
 - Starts with `(` -> code mode
@@ -154,10 +166,12 @@ The `parse-agent-response` function uses a layered strategy:
 ### What Worked
 
 The `find-balanced-form` function handles most cases:
+
 ```clojure
 (defn- find-balanced-form [s pos]
   ;; State machine tracking depth, in-string?, escaped?
   ...)
+
 ```
 
 Key insight: Track `in-string?` state to ignore parens inside strings.
@@ -202,6 +216,7 @@ I'll check the current IV rank for SPY to see if options are expensive.
 (iv-rank ctx {:ticker "SPY"})
 
 Results will appear after each command.
+
 ```
 
 ### Key Insight
@@ -230,6 +245,7 @@ Using OpenAI/Anthropic chat format for JSONL export:
   ],
   "metadata": {...}
 }
+
 ```
 
 ### Why This Format
@@ -305,6 +321,7 @@ Key functions:
 ;; Export for training
 (sess/session->training-example s)
 ;; => {:messages [...], :metadata {...}}
+
 ```
 
 ---

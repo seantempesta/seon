@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # Parsing Approaches for Clojure Source Code
 
 Research on extracting function definitions and Malli schemas from Clojure files.
@@ -9,6 +15,7 @@ Research on extracting function definitions and Malli schemas from Clojure files
 **Approach**: After namespace reload, query the running REPL for var metadata and Malli function schemas.
 
 **How it works**:
+
 ```clojure
 ;; Get all functions with Malli schemas in a namespace
 (require '[malli.core :as m])
@@ -34,6 +41,7 @@ Research on extracting function definitions and Malli schemas from Clojure files
    :schema (-> v meta :malli/schema)
    :file (-> v meta :file)
    :line (-> v meta :line)})
+
 ```
 
 **Pros**:
@@ -53,6 +61,7 @@ Research on extracting function definitions and Malli schemas from Clojure files
 **Approach**: Parse `.clj` files as zipper data structures, navigate to find `defn` and `m/=>` forms.
 
 **How it works**:
+
 ```clojure
 (require '[rewrite-clj.zip :as z])
 
@@ -85,6 +94,7 @@ Research on extracting function definitions and Malli schemas from Clojure files
                  (let [[_ fn-sym schema] (z/sexpr loc)]
                    (assoc schemas fn-sym schema))
                  schemas))))))
+
 ```
 
 **Pros**:
@@ -104,6 +114,7 @@ Research on extracting function definitions and Malli schemas from Clojure files
 **Approach**: Use `clojure.tools.reader` to read forms without evaluation.
 
 **How it works**:
+
 ```clojure
 (require '[clojure.tools.reader :as reader]
          '[clojure.tools.reader.reader-types :as rt])
@@ -127,6 +138,7 @@ Research on extracting function definitions and Malli schemas from Clojure files
        (filter #(and (list? %) (= 'm/=> (first %))))
        (map (fn [[_ sym schema]] [sym schema]))
        (into {})))
+
 ```
 
 **Pros**:
@@ -150,6 +162,7 @@ Research on extracting function definitions and Malli schemas from Clojure files
 
 ;; Find m/=> declarations
 (re-seq #"\(m/=>\s+(\S+)\s+(.+?)\)" source)
+
 ```
 
 **Pros**:
@@ -173,9 +186,11 @@ For the unified dev hook, **REPL introspection is the best approach** because:
 3. **Validated schemas** - Malli validates schemas on registration, so we know they're syntactically correct.
 
 4. **Simple implementation** - No file parsing needed:
+
    ```clojure
    (defn get-function-schemas [ns-sym]
      (get-in (m/function-schemas) [:clj ns-sym]))
+
    ```
 
 5. **Works with the existing hook flow** - The hook already reloads namespaces via nREPL, so introspection fits naturally.
@@ -235,6 +250,7 @@ For the future, consider a hybrid:
     (into {}
           (for [[fn-sym _] schemas]
             [fn-sym (check-function ns-sym fn-sym opts)]))))
+
 ```
 
 ## Code Examples to Test in REPL
@@ -258,6 +274,7 @@ For the future, consider a hybrid:
 (let [schema [:=> [:cat :int] :int]
       f (fn [x] (inc x))]
   (mg/check schema f {:num-tests 10}))
+
 ```
 
 ## Files to Read

@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive, agent]
+---
+
 # Clojure Interface to Claude Code CLI
 
 **Date**: 2026-01-09
@@ -29,6 +35,7 @@ node cli.js \
   --mcp-config '{"mcpServers":{...}}' \  # MCP server config as JSON
   --max-turns 50 \               # Max conversation turns
   --max-budget-usd 1.00          # Cost limit
+
 ```
 
 ### Message Types
@@ -45,6 +52,7 @@ node cli.js \
   },
   "parent_tool_use_id": null
 }
+
 ```
 
 #### Assistant Message (CLI -> SDK)
@@ -68,6 +76,7 @@ node cli.js \
   "uuid": "uuid-string",
   "session_id": "session-id"
 }
+
 ```
 
 #### System Init Message (CLI -> SDK)
@@ -90,6 +99,7 @@ First message after startup:
   "uuid": "uuid-string",
   "session_id": "session-id"
 }
+
 ```
 
 #### Result Message (CLI -> SDK)
@@ -116,6 +126,7 @@ Final message indicating completion:
   "uuid": "uuid-string",
   "session_id": "session-id"
 }
+
 ```
 
 #### Control Request (Bidirectional)
@@ -131,6 +142,7 @@ Final message indicating completion:
     "agents": {}
   }
 }
+
 ```
 
 Control subtypes:
@@ -157,12 +169,14 @@ Control subtypes:
     "response": {}  // Response data
   }
 }
+
 ```
 
 #### Keep-Alive
 
 ```json
 {"type": "keep_alive"}
+
 ```
 
 ### Initialization Sequence
@@ -291,6 +305,7 @@ See [process-library-comparison.md](process-library-comparison.md) for full anal
                (.destroy process)
                (async/close! messages-ch)
                (async/close! result-ch))}))
+
 ```
 
 ### Usage Example
@@ -322,6 +337,7 @@ See [process-library-comparison.md](process-library-comparison.md) for full anal
        {:model "claude-sonnet-4"
         :mcp-servers {"seon" {:command "./bin/mcp-server"}}
         :allowed-tools ["Read" "mcp__seon__eval" "mcp__seon__list_sessions"]})
+
 ```
 
 ## 3. Libraries Required
@@ -371,26 +387,31 @@ All required functionality is available:
 ## 5. Recommended Next Steps
 
 ### Phase 1: Basic Query (2-3 hours)
+
 - Implement `spawn-claude-code` and `query` functions
 - Handle user/assistant/result message types
 - Test with simple prompts
 
 ### Phase 2: MCP Integration (1-2 hours)
+
 - Add MCP server configuration
 - Test with existing `bin/mcp-server`
 - Verify tool calls work correctly
 
 ### Phase 3: Control Requests (2-3 hours)
+
 - Implement bidirectional control protocol
 - Add `initialize` with agents/hooks
 - Handle permission callbacks
 
 ### Phase 4: Agent Sessions (2-3 hours)
+
 - Integrate with existing session API
 - Map sessions to Claude Code instances
 - Handle session lifecycle
 
 ### Phase 5: Production Hardening (3-4 hours)
+
 - Error handling and recovery
 - Timeout management
 - Resource cleanup
@@ -417,13 +438,16 @@ All tests performed using `clojure.java.process` (Clojure 1.12) on 2026-01-09.
 ;; Using clojure.java.process to spawn Claude Code
 (def cc (spawn-claude-code {:model "claude-3-5-haiku-20241022" :max-turns 3}))
 ;; Sent: "What is 2+2? Just reply with the number, nothing else."
+
 ```
 
 **Result:**
+
 ```clojure
 {:message-types ["system" "assistant" "result"]
  :assistant-content "4"
  :result {:subtype "success" :result "4" :total_cost_usd 0.0246206 :num_turns 1}}
+
 ```
 
 ### Test 2: Multi-Turn Conversation
@@ -434,13 +458,16 @@ All tests performed using `clojure.java.process` (Clojure 1.12) on 2026-01-09.
 
 ;; Turn 2: "Now multiply that by 3. Just the number."
 ;; => "12"
+
 ```
 
 **Message Flow:**
+
 ```clojure
 {:message-types ["system" "assistant" "result" "system" "assistant" "result"]
  :turn1-response "4"
  :turn2-response "12"}
+
 ```
 
 This confirms multi-turn conversations work - each user message triggers a new turn with context preserved.
@@ -451,9 +478,11 @@ This confirms multi-turn conversations work - each user message triggers a new t
 ;; Task: "Read the first 10 lines of CONVENTIONS.md and tell me what the main topic is."
 ;; Permission mode: bypassPermissions
 ;; Allowed tools: ["Read" "Glob"]
+
 ```
 
 **Message Flow:**
+
 ```clojure
 {:message-types ["system" "assistant" "assistant" "user" "assistant" "result"]}
 
@@ -464,21 +493,26 @@ This confirms multi-turn conversations work - each user message triggers a new t
 ;; 4. user (tool_result) - File contents
 ;; 5. assistant (text) - Final answer
 ;; 6. result (success) - Completion
+
 ```
 
 **Tool Call Captured:**
+
 ```clojure
 {:type "tool_use"
  :id "toolu_01S8Ka9uKG3C29CmY7SEAGvi"
  :name "Read"
  :input {:file_path "/Users/sean/src/seon/CONVENTIONS.md" :limit 10}}
+
 ```
 
 **Final Result:**
+
 ```clojure
 {:result "The main topic is Malli schema patterns for contract specification and validation in the Seon project."
  :num_turns 2
  :total_cost_usd 0.01143744}
+
 ```
 
 ### Test 4: System Init Message Structure
@@ -502,6 +536,7 @@ Actual system init message received from CLI:
  :agents ["Bash" "general-purpose" "Explore" "Plan" "seon-agent"]
  :claude_code_version "2.1.2"
  :model "claude-3-5-haiku-20241022"}
+
 ```
 
 ### Key Findings

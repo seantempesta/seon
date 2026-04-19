@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # Phase 6 Design: Hook Refactor Architecture
 
 **Date:** 2025-12-29
@@ -32,6 +38,7 @@ src/seon/dev/
 ├── verify.clj        ; Test orchestration
 ├── review.clj        ; AI review + context building
 └── repair.clj        ; Delimiter repair (ported)
+
 ```
 
 ### Responsibilities
@@ -83,6 +90,7 @@ The LLM agent makes many rapid edits. We want to batch them into periodic review
       ;; Have edits since last review
       (or (nil? last-review)
           (> (seconds-between last-review last-edit) 0)))))
+
 ```
 
 ### Timeline Example
@@ -98,6 +106,7 @@ T+5s:   Edit B   -> should-review? false (reviewed 5s ago, need 60s)
 T+30s:  Edit C   -> should-review? false (reviewed 30s ago)
 T+65s:  Edit D   -> should-review? true (reviewed 65s ago) -> REVIEW
 T+70s:  Edit E   -> should-review? false (reviewed 5s ago)
+
 ```
 
 ### XTDB Events
@@ -118,6 +127,7 @@ Just two event types:
  :review/files #{"/path/to/a.clj" "/path/to/b.clj"}
  :review/edit-count 5}
 ;; _valid_from = when review completed
+
 ```
 
 ### Queries (SQL)
@@ -139,6 +149,7 @@ Just two event types:
       (xt/q db ["SELECT * FROM edit_event WHERE _valid_from > ? ORDER BY _valid_from"
                 last-review])
       (xt/q db "SELECT * FROM edit_event ORDER BY _valid_from"))))
+
 ```
 
 ---
@@ -170,6 +181,7 @@ Babashka has `bencode.core`. Use it to talk nREPL directly:
             (when-let [v (:value result)]
               (edn/read-string v))
             (recur (merge result msg))))))))
+
 ```
 
 Benefits:
@@ -197,6 +209,7 @@ Benefits:
  :review {:enabled true
           :interval-seconds 60   ; At most one review per minute
           :max-code-length 12000}}
+
 ```
 
 BB hook reads this once, passes to Clojure. No defaults scattered around.
@@ -245,6 +258,7 @@ From `clojure-mcp-light`:
         formatted (if format? (cljfmt/reformat-string fixed) fixed)]
     {:success (not (delimiter-error? formatted))
      :content formatted}))
+
 ```
 
 ### Dependency to Add
@@ -252,6 +266,7 @@ From `clojure-mcp-light`:
 ```clojure
 ;; deps.edn
 parinferish/parinferish {:mvn/version "0.8.0"}
+
 ```
 
 ### No More PreToolUse
@@ -275,6 +290,7 @@ With repair in Seon, we only need PostToolUse:
  :edit/file "/abs/path/to/file.clj"
  :edit/namespace :seon.foo}
 ;; _valid_from = timestamp
+
 ```
 
 ### `review_event`
@@ -285,6 +301,7 @@ With repair in Seon, we only need PostToolUse:
  :review/files #{...}
  :review/edit-count N}
 ;; _valid_from = when review completed
+
 ```
 
 ### `function` (existing, unchanged)
@@ -296,6 +313,7 @@ With repair in Seon, we only need PostToolUse:
  :fn/name :bar
  :fn/schema [...]
  :fn/first-seen #inst "..."}
+
 ```
 
 ---
@@ -325,6 +343,7 @@ Following CONVENTIONS.md exactly.
    [::decision {:optional true} [:enum "block"]]
    [::reason {:optional true} :string]
    [::feedback {:optional true} [:vector :string]]])
+
 ```
 
 ### `seon.dev.context`
@@ -333,6 +352,7 @@ Following CONVENTIONS.md exactly.
 (schema/register! ::review-options
   [:map
    [::interval-seconds {:optional true} [:int {:min 1}]]])
+
 ```
 
 ---
@@ -359,6 +379,7 @@ The only public entry point:
   {:malli/schema [:=> [:cat ::process-request] ::process-response]}
   [{::keys [event config]}]
   ...)
+
 ```
 
 ### `seon.dev.context`
@@ -375,6 +396,7 @@ The only public entry point:
 
 (defn edits-since-last-review [db]
   "Get all edits since the last review.")
+
 ```
 
 ---
@@ -423,6 +445,7 @@ The only public entry point:
       nil)))
 
 (-main)
+
 ```
 
 ---
@@ -442,6 +465,7 @@ The only public entry point:
 
 ```clojure
 parinferish/parinferish {:mvn/version "0.8.0"}
+
 ```
 
 ### Phase 6c: Replace BB Hook

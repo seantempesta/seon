@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive, agent]
+---
+
 # Agent Observatory - Implementation Notes
 
 ## Phase 1: Structured Agent Log
@@ -37,6 +43,7 @@ Created `seon.ai.agent.log` namespace with per-agent log files at `logs/agents/{
 2026-01-20T13:23:25Z | TOOL     | eval | "(xt/q node ...)"
 2026-01-20T13:23:26Z | RESULT   | eval | "[{:_id ...}]"
 2026-01-20T13:25:00Z | COMPLETE | subtype=success | cost=$0.45 | messages=84 | duration=100s
+
 ```
 
 - ISO 8601 timestamps in UTC
@@ -68,6 +75,7 @@ ls -lt logs/agents/
 
 # Watch all agents at once
 tail -f logs/agents/*.log
+
 ```
 
 ### Future Improvements (Phase 2+)

@@ -94,44 +94,22 @@
   (integrant.repl/reset))
 
 ;; Convenience accessors - now always use state/system
-(defn xtdb-node
-  "Get the XTDB node from the running system."
-  []
-  (when state/system
-    (:seon/xtdb-node state/system)))
-
-(defn dev-xtdb-node
-  "Get the Dev Hook XTDB node from the running system.
-  This is a separate database for dev hook data (edit events, review events)."
-  []
-  (when state/system
-    (:seon.dev/xtdb-node state/system)))
-
 (defn schema-registry
   "Get the Malli schema registry from the running system."
   []
   (when state/system
-    (:seon/schema-registry state/system)))
+    (:seon.schema/registry state/system)))
 
 (defn status
-  "Show system status."
+  "Deep system health check. Returns health map from seon.health/check."
   []
-  (if state/system
-    (do
-      (println "System running with" (count state/system) "components:")
-      (doseq [k (sort (keys state/system))]
-        (println "  " k))
-      (when-let [node (xtdb-node)]
-        (println "")
-        (println "XTDB status:")
-        (require 'seon.db.node)
-        (clojure.pprint/pprint ((resolve 'seon.db.node/status) node))))
-    (println "System not running. Start with: (go) or ./bin/run")))
+  (require 'seon.health)
+  ((resolve 'seon.health/check) {}))
 
 ;; ========================================
 ;; Agent Management (convenience wrappers)
 ;; ========================================
-;; These mirror seon.ai.claude functions but auto-fill the XTDB node.
+;; These mirror seon.ai.claude functions for convenience.
 ;; Use from any namespace via user/launch-agent!! etc.
 
 (defn launch-agent!!
@@ -150,7 +128,7 @@
                                  \"docs/prds/feature/plan.md\"])"
   [namespace prompt & {:keys [files]}]
   ((requiring-resolve 'seon.ai.claude/launch-agent!!)
-   (cond-> #:seon.ai{:node (xtdb-node) :namespace namespace :prompt prompt}
+   (cond-> #:seon.ai{:namespace namespace :prompt prompt}
      files (assoc :seon.ai.claude/files files))))
 
 (defn launch-agent!
@@ -168,7 +146,7 @@
                         :files [\"docs/prds/feature/prd.md\"])"
   [namespace prompt & {:keys [files]}]
   ((requiring-resolve 'seon.ai.claude/launch-agent!)
-   (cond-> #:seon.ai{:node (xtdb-node) :namespace namespace :prompt prompt}
+   (cond-> #:seon.ai{:namespace namespace :prompt prompt}
      files (assoc :seon.ai.claude/files files))))
 
 (defn agents
@@ -296,6 +274,76 @@
         (assoc :num-turns (:seon.ai.claude/num-turns result))))))
 
 ;; ========================================
+;; REPL-First Test System
+;; ========================================
+
+(defn run-tests
+  "Run tests. Returns structured data.
+   (run-tests)                                        ; ALL unit tests
+   (run-tests 'seon.graph.query-test)                 ; single ns
+   (run-tests 'seon.graph.query-test/some-test)       ; single var
+   (run-tests ['seon.db-test 'seon.graph.query-test]) ; multiple"
+  ([]
+   ((requiring-resolve 'seon.dev.test/test-all)))
+  ([target]
+   ((requiring-resolve 'seon.dev.test/test) target)))
+
+(defn test-affected
+  "Run tests for ns + all dependents. Returns structured data.
+   (test-affected 'seon.graph.query)
+   (test-affected 'seon.graph.query :depth :transitive)"
+  [ns-sym & opts]
+  (apply (requiring-resolve 'seon.dev.test/test-affected) ns-sym opts))
+
+(defn test-gen
+  "Run generative tests. Returns structured data.
+   (test-gen 'seon.graph.query)
+   (test-gen 'seon.graph.query/dependents-of :num-tests 50)"
+  [target & opts]
+  (apply (requiring-resolve 'seon.dev.test/test-gen) target opts))
+
+(defn last-test-results
+  "Most recent test run result."
+  []
+  ((requiring-resolve 'seon.dev.test/last-results)))
+
+(defn test-history
+  "Last n test run results (default 10)."
+  ([] ((requiring-resolve 'seon.dev.test/results-history)))
+  ([n] ((requiring-resolve 'seon.dev.test/results-history) n)))
+
+;; ========================================
+;; Dependency-Aware Test Selection
+;; ========================================
+
+(defn test-affected!
+  "Run tests for a namespace and all its dependents in the code graph.
+
+  Uses the knowledge graph to find what depends on the given namespace,
+  then runs their test suites. Falls back to just the namespace's own
+  test if the graph is not populated.
+
+  Options:
+    :depth - :direct (default) or :transitive
+
+  Examples:
+    (test-affected! \"seon.schema\")
+    (test-affected! \"seon.trading.signals\" :depth :transitive)"
+  [ns-name & {:keys [depth] :or {depth :direct}}]
+  (let [ts (requiring-resolve 'seon.dev.test-select/run-affected-tests!)
+        ;; Try to get graph conn from running system
+        conn (try
+               (when state/system
+                 (let [mgr (:seon.db.datalevin/connections state/system)
+                       get-conn (requiring-resolve 'seon.db.datalevin.conn/get-conn!)]
+                   (get-conn {:seon.db.datalevin.conn/manager mgr
+                              :seon.db.datalevin.conn/db :seon.runtime})))
+               (catch Exception _ nil))]
+    (ts {:seon.dev.test-select/conn conn
+         :seon.dev.test-select/ns-name ns-name
+         :seon.dev.test-select/depth depth})))
+
+;; ========================================
 ;; AI Research (use when stuck!)
 ;; ========================================
 
@@ -319,7 +367,7 @@
 
   Examples:
     ;; Simple search (use sparingly)
-    (search \"XTDB v2 SQL syntax for temporal queries\")
+    (search \"Datalevin Datalog query syntax\")
 
     ;; WITH CODE CONTEXT - do this! (preferred)
     (search \"Why doesn't hot reload work?\"
@@ -330,44 +378,79 @@
     (search \"Getting nil from query, what's wrong?\"
             :files [\"src/seon/db/queries.clj\"])"
   [query & {:keys [files]}]
-  (gemini/search (cond-> {:seon.ai.gemini/prompt query}
-                   files (assoc :seon.ai.gemini/files files))))
+  (:seon.ai.gemini/text
+   (gemini/search (cond-> {:seon.ai.gemini/prompt query}
+                    files (assoc :seon.ai.gemini/files files)))))
 
 (defn ask
   "Ask Gemini a question (no web search, uses model knowledge).
 
   Examples:
-    (ask \"Explain the difference between XTQL and SQL in XTDB\")"
+    (ask \"Explain Datalog pull patterns in Datalevin\")"
   [query]
-  (gemini/ask {:seon.ai.gemini/prompt query}))
+  (:seon.ai.gemini/text
+   (gemini/ask {:seon.ai.gemini/prompt query})))
 
 ;; ========================================
 ;; Database Management
 ;; ========================================
 
-(defn db-reset!
-  "Delete all XTDB data and restart with fresh database.
-  WARNING: This deletes all data!"
+(defn restart-db!
+  "Stop and restart the Datalevin server process.
+  Closes all client connections first (prevents LMDB SIGSEGV during shutdown),
+  then stops the server, starts fresh, connections auto-reconnect on next use.
+
+  Use when:
+  - Datalevin is misbehaving and you want a clean restart
+  - After changing Datalevin server config
+  - After killing the external Datalevin process manually"
   []
-  (println "Stopping system...")
+  (let [sys state/system
+        server-state (:seon.db.datalevin/server sys)
+        conn-mgr (:seon.db.datalevin/connections sys)]
+    (when-not server-state
+      (throw (ex-info "No Datalevin server in running system" {})))
+    (let [old-port (:port server-state)
+          old-adopted? (:adopted? server-state)]
+      ;; Step 1: Close all client connections so no active LMDB transactions
+      (when conn-mgr
+        (println "Closing all Datalevin connections...")
+        (let [closed ((requiring-resolve 'seon.db.datalevin.conn/close-all-connections!)
+                      {:seon.db.datalevin.conn/manager conn-mgr})]
+          (println (str "  Closed " closed " connections"))))
+      ;; Step 2: Stop the server process (synchronous — waits for process exit)
+      (println (str "Stopping Datalevin server (port " old-port
+                    ", adopted=" old-adopted? ")..."))
+      (ig/halt-key! :seon.db.datalevin/server server-state)
+      ;; Step 3: Start fresh server
+      (println "Starting Datalevin server...")
+      (let [cfg (config/system-config {:profile :dev})
+            opts (:seon.db.datalevin/server cfg)
+            new-state (ig/init-key :seon.db.datalevin/server opts)]
+        (alter-var-root #'state/system assoc :seon.db.datalevin/server new-state)
+        (println (str "Datalevin server ready (port " (:port new-state)
+                      ", pid=" (or (some-> (:process new-state) (.pid)) (:pid new-state))
+                      ")"))
+        new-state))))
+
+(defn db-reset!
+  "Delete all data and restart with fresh database.
+  WARNING: This deletes all data!
+  Stops the entire system, wipes data/datalevin/, restarts everything."
+  []
+  (println "Stopping system (including Datalevin server)...")
   (halt)
-  (println "Deleting XTDB data directory...")
-  (let [data-dir (io/file "data/xtdb")]
-    (when (.exists data-dir)
-      (doseq [f (reverse (file-seq data-dir))]
-        (.delete f))))
+  (println "Deleting data directories...")
+  (doseq [dir-name ["data/datalevin"]]
+    (let [data-dir (io/file dir-name)]
+      (when (.exists data-dir)
+        (let [files (reverse (file-seq data-dir))
+              count (count files)]
+          (doseq [f files] (.delete f))
+          (println (str "  Deleted " count " files from " dir-name))))))
   (println "Starting fresh system...")
   (go)
   (println "Database reset complete."))
-
-(defn list-backups
-  "List available XTDB backups."
-  []
-  (let [backup-dir (io/file "data/backups")]
-    (if (.exists backup-dir)
-      (doseq [f (sort (.listFiles backup-dir))]
-        (println (.getName f)))
-      (println "No backups directory found at data/backups"))))
 
 ;; ========================================
 ;; Log Parsing and Analysis Functions
@@ -468,7 +551,6 @@
         log-file (case file
                    :app   "logs/app.log"
                    :error "logs/error.log"
-                   :xtdb  "logs/xtdb.log"
                    (str "logs/" (name file) ".log"))
         entries (read-log-file log-file max-lines)
         filtered (cond->> entries
@@ -490,7 +572,7 @@
   NOW RETURNS STRUCTURED DATA instead of printing.
 
   Options:
-    :file    - Which log file to read (:app, :error, :xtdb). Default: :app
+    :file    - Which log file to read (:app, :error). Default: :app
     :lines   - Number of lines to show. Default: 50, max: 100
     :level   - Filter by log level (:error, :warn, :info, :debug). Default: all
     :grep    - Filter lines containing string. Default: nil
@@ -500,7 +582,7 @@
     (logs :lines 100)               ; Last 100 lines (hard-capped)
     (logs :file :error)             ; Last 50 lines from error.log
     (logs :level :error)            ; Only ERROR level entries
-    (logs :grep \"XTDB\")             ; Lines containing 'XTDB'
+    (logs :grep \"datalevin\")         ; Lines containing 'datalevin'
     (logs :file :error :lines 20)   ; Last 20 errors"
   [& {:keys [file lines level grep]
       :or {file :app lines 50}}]
@@ -512,7 +594,7 @@
   NOW RETURNS STRUCTURED DATA instead of printing."
   []
   (let [health (log-health)
-        file-stats (for [log-file ["logs/app.log" "logs/error.log" "logs/xtdb.log"]]
+        file-stats (for [log-file ["logs/app.log" "logs/error.log"]]
                      (try
                        (let [result (clojure.java.shell/sh "sh" "-c"
                                                            (str "wc -l " log-file " 2>/dev/null | awk '{print $1}'"))]

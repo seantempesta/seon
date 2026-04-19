@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # Phase 6 Hook Refactor - Code Review
 
 **Date:** 2025-12-30
@@ -28,6 +34,7 @@
 **Problem:** The PostToolUse pipeline uses a `do` block where `block-response` calls are evaluated but their return values are discarded. The function always returns `(success-response @feedback)` regardless of failures.
 
 **Code:**
+
 ```clojure
 ;; Full pipeline
 (do
@@ -45,6 +52,7 @@
 
   ;; Success
   (success-response @feedback))  ;; <- ALWAYS RETURNS THIS
+
 ```
 
 **Impact:**
@@ -55,6 +63,7 @@
 - The hook is essentially non-functional for quality control
 
 **Fix Required:** Use conditional early returns, e.g.:
+
 ```clojure
 (or
   (when (and repair-result (not (:success repair-result)))
@@ -63,6 +72,7 @@
     (block-response (:error reload-result)))
   ;; ... etc ...
   (success-response @feedback))
+
 ```
 
 Or refactor to use a threading macro with early exit like `some->`.
@@ -84,6 +94,7 @@ The old hook delegated to `clj-paren-repair-claude-hook` which handled backups. 
 **Impact:** Agent writes broken code -> Repair fails -> File remains broken -> Next edit compounds the problem
 
 **Fix Required:** Add backup/restore logic to `stage-repair` or `repair.clj`:
+
 ```clojure
 (defn- stage-repair [file-path config]
   (when (and (get-in config [:repair :enabled]) ...)
@@ -93,6 +104,7 @@ The old hook delegated to `clj-paren-repair-claude-hook` which handled backups. 
           (spit file-path backup)  ;; Restore
           {:success false :error "..."})
         {:success true}))))
+
 ```
 
 ### 3. MAJOR: Convention Violation - Positional Args in Public Functions
@@ -109,15 +121,18 @@ The old hook delegated to `clj-paren-repair-claude-hook` which handled backups. 
 (defn record-review!
   [xtdb-node files]  ;; <- Positional args
   ...)
+
 ```
 
 **Impact:** Inconsistent API style, prevents uniform Malli instrumentation
 
 **Fix Required:** Refactor to use map-based API:
+
 ```clojure
 (defn record-edit!
   [{::keys [xtdb-node file-path ns-sym]}]
   ...)
+
 ```
 
 ### 4. MAJOR: Incomplete Exception Handling in Repair
@@ -125,15 +140,18 @@ The old hook delegated to `clj-paren-repair-claude-hook` which handled backups. 
 **Location:** `src/seon/dev/repair.clj` lines 52-66
 
 **Problem:** Only catches `clojure.lang.ExceptionInfo`:
+
 ```clojure
 (catch clojure.lang.ExceptionInfo ex
   (let [data (ex-data ex)]
     ...))
+
 ```
 
 Edamame can throw standard `RuntimeException` for some parse errors (EOF, reader errors) that are not `ExceptionInfo`. These will escape and crash the hook.
 
 **Fix Required:** Catch broader exception types:
+
 ```clojure
 (catch Exception ex
   (if-let [data (ex-data ex)]
@@ -141,6 +159,7 @@ Edamame can throw standard `RuntimeException` for some parse errors (EOF, reader
     ...
     ;; Handle other exceptions conservatively
     false))
+
 ```
 
 ---
@@ -152,10 +171,12 @@ Edamame can throw standard `RuntimeException` for some parse errors (EOF, reader
 **Location:** `bin/seon-hook` lines 77-81, 164-166
 
 **Problem:** Connection failures return `nil`, which becomes `{:continue true}`:
+
 ```clojure
 (catch java.net.ConnectException _
   ;; nREPL not running - return nil (will result in continue response)
   nil)
+
 ```
 
 The agent receives no feedback that the hook failed.
@@ -163,10 +184,12 @@ The agent receives no feedback that the hook failed.
 **Impact:** Developers may not realize the hook isn't running
 
 **Fix Suggestion:** Log a visible warning or include feedback:
+
 ```clojure
 (catch java.net.ConnectException _
   {:seon.dev.hook/continue true
    :seon.dev.hook/feedback ["Warning: nREPL unavailable, hook skipped"]})
+
 ```
 
 ### 6. MINOR: Race Condition in Rate Limiting
@@ -186,11 +209,13 @@ Timeline:
 **Impact:** Wasted API calls, possible duplicate review feedback
 
 **Fix Suggestion:** Use optimistic locking or atomic "claim" on review:
+
 ```clojure
 (defn claim-review-slot! [xtdb-node]
   "Atomically check and claim review slot. Returns true if claimed."
   ;; Use XTDB transaction with precondition
   ...)
+
 ```
 
 ---
@@ -270,4 +295,5 @@ echo '{"hook_event_name":"PostToolUse","tool_name":"Edit","tool_input":{"file_pa
 # 1. Stop server
 # 2. Run hook
 # 3. Verify feedback message
+
 ```

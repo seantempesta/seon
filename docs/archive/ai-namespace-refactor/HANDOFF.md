@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive, agent]
+---
+
 # Session Handoff: AI Namespace Refactor
 
 **Date:** 2026-01-19
@@ -37,9 +43,11 @@ We explored the bidirectional-control PRD and ended up designing a new schema ar
 **Problem:** `seon.claude.*` namespaces have Claude-specific schemas that should be generic.
 
 **Solution:** New namespace hierarchy:
+
 ```
 seon.ai              ; Generic schemas (role, content, tokens, cost)
 seon.ai.claude       ; Claude-specific (model, cache-tokens, tool-calls)
+
 ```
 
 Entities can have attributes from both namespaces on the same entity - that's the XTDB/Datomic way.

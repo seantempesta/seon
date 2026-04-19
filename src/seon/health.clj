@@ -2,31 +2,39 @@
   "System health checks and monitoring.
 
    Provides comprehensive health checking for all system components:
-   - XTDB database connectivity and responsiveness
    - nREPL server availability
    - Agent registry status
-   - Resource utilization (ports, sessions, channels)
+   - Pool JVM status
+   - Resource utilization
 
    ## Usage
 
    ```clojure
-   ;; Quick health check (for load balancers)
-   (quick-check {:seon.health/node xtdb-node})
-   ;; => {:seon.health/status :healthy, :seon.health/timestamp #inst \"...\"}
-
-   ;; Deep health check (for debugging)
-   (deep-check {:seon.health/node xtdb-node})
+   ;; Health check
+   (check {})
    ;; => {:seon.health/status :healthy
-   ;;     :seon.health/checks {:xtdb {:ok true}, :nrepl {:ok true}, ...}
-   ;;     :seon.health/resources {:agents 2, :ports 3, :sessions 2}}
+   ;;     :seon.health/checks {:nrepl {:ok true}, ...}
+   ;;     :seon.health/resources {:agents 2, :pool-jvms 3, :sessions 2}}
    ```"
-  (:require [clojure.java.shell :as shell]
-            [clojure.string :as str]
-            [seon.db.node :as db]
+  (:require [clojure.string :as str]
             [seon.ai.agent :as agent]
             [seon.schema :as schema]
             [taoensso.timbre :as log])
-  (:import [java.net Socket InetSocketAddress]))
+  (:import [java.net Socket InetSocketAddress]
+           [java.util.concurrent Executors TimeUnit]))
+
+;;; ---------------------------------------------------------------------------
+;;; Startup Phase Tracking
+;;; ---------------------------------------------------------------------------
+;;; An atom that core.clj updates during two-phase startup.
+;;; Possible values: :phase-1, :phase-2, :ready, :degraded
+
+(defonce startup-phase (atom :phase-1))
+
+(defn set-startup-phase!
+  "Set the current startup phase. Called by seon.core during init."
+  [phase]
+  (reset! startup-phase phase))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schema Registration
@@ -41,6 +49,8 @@
                    [:ok :boolean]
                    [:latency-ms {:optional true} [:int {:min 0}]]
                    [:error {:optional true} :string]
+                   [:mode {:optional true} [:enum :adopted :started :not-running]]
+                   [:port {:optional true} [:int {:min 1 :max 65535}]]
                    [:details {:optional true} [:map-of :keyword :any]]])
 
 (schema/register! ::checks
@@ -49,52 +59,27 @@
 (schema/register! ::resources
                   [:map {:description "Resource counts"}
                    [:agents :int]
-                   [:ports :int]
-                   [:sessions :int]
-                   [:nrepl-servers :int]])
+                   [:pool-jvms :int]
+                   [:sessions :int]])
 
-(schema/register! ::node
-                  [:any {:description "XTDB node reference"}])
+(schema/register! ::check-request
+                  [:map])
 
-(schema/register! ::quick-check-request
-                  [:map
-                   [::node ::node]])
+(schema/register! ::startup-phase
+                  [:enum {:description "Current startup phase"}
+                   :phase-1 :phase-2 :ready :degraded])
 
-(schema/register! ::quick-check-response
-                  [:map
-                   [::status ::status]
-                   [::timestamp inst?]
-                   [::checks {:optional true} ::checks]])
-
-(schema/register! ::deep-check-request
-                  [:map
-                   [::node ::node]])
-
-(schema/register! ::deep-check-response
+(schema/register! ::check-response
                   [:map
                    [::status ::status]
                    [::timestamp inst?]
                    [::checks ::checks]
-                   [::resources ::resources]])
+                   [::resources ::resources]
+                   [::startup-phase {:optional true} ::startup-phase]])
 
 ;;; ---------------------------------------------------------------------------
 ;;; Component Health Checks (Internal)
 ;;; ---------------------------------------------------------------------------
-
-(defn- check-xtdb
-  "Check XTDB node health by executing a simple query."
-  [node]
-  (let [start (System/currentTimeMillis)]
-    (try
-      (let [status (db/status node)
-            latency (- (System/currentTimeMillis) start)]
-        {:ok true
-         :latency-ms latency
-         :details {:latest-completed-tx (:latest-completed-tx status)}})
-      (catch Exception e
-        {:ok false
-         :latency-ms (- (System/currentTimeMillis) start)
-         :error (.getMessage e)}))))
 
 (defn- check-port
   "Check if a port is accepting connections."
@@ -125,29 +110,110 @@
       {:ok false
        :error ".nrepl-port file not found"})))
 
+(defn- get-system
+  "Get the current Integrant system, or nil."
+  []
+  (try
+    (require 'integrant.repl.state)
+    @(resolve 'integrant.repl.state/system)
+    (catch Exception _ nil)))
+
+(defn- component-mode
+  "Determine the mode of a component: :adopted, :started, or :not-running."
+  [component]
+  (cond
+    (nil? component) :not-running
+    (:adopted? component) :adopted
+    :else :started))
+
+(defn- datalevin-process-info
+  "Get PID and alive status of the external Datalevin process."
+  [server-component]
+  (let [process (:process server-component)
+        pid (or (when process (.pid ^Process process))
+                (:pid server-component))]
+    (cond-> {}
+      pid (assoc :pid (str pid))
+      process (assoc :process-alive? (.isAlive ^Process process)))))
+
+(defn- check-datalevin
+  "Check Datalevin server health (port 8898).
+   Datalevin runs as a separate JVM process — survives Seon restarts.
+   Reports process PID, connection manager status, and mode."
+  []
+  (let [tcp-check (check-port 8898 1000)
+        system (get-system)
+        server-component (:seon.db.datalevin/server system)
+        mode (component-mode server-component)
+        proc-info (datalevin-process-info server-component)]
+    (try
+      (require 'seon.db.datalevin.conn)
+      (if-let [manager (:seon.db.datalevin/connections system)]
+        (let [conn-health ((resolve 'seon.db.datalevin.conn/health)
+                           {:seon.db.datalevin.conn/manager manager})]
+          (merge tcp-check proc-info
+                 {:mode mode
+                  :port (or (:port server-component) 8898)
+                  :details {:conn-status (:seon.db.datalevin.conn/status conn-health)
+                            :cached-connections (:seon.db.datalevin.conn/total-connections conn-health)
+                            :server-reachable? (:seon.db.datalevin.conn/server-reachable? conn-health)}}))
+        (merge tcp-check proc-info {:mode mode :port 8898}))
+      (catch Exception _ (merge tcp-check proc-info {:mode mode :port 8898})))))
+
 (defn- check-resources
   "Get current resource utilization."
   []
   (try
-    (require 'seon.orchestrator.nrepl)
     (require 'seon.orchestrator.session)
-    (let [nrepl-ns (find-ns 'seon.orchestrator.nrepl)
-          session-ns (find-ns 'seon.orchestrator.session)
-          ;; Access the atoms via resolve
-          port-registry @(ns-resolve nrepl-ns 'port-registry)
-          servers @(ns-resolve nrepl-ns 'servers)
+    (let [session-ns (find-ns 'seon.orchestrator.session)
           session-registry @(ns-resolve session-ns 'session-registry)
-          running-agents (agent/agents {})]
+          running-agents (agent/agents {})
+          ;; Pool status via dynamic require
+          pool-jvms (try
+                      (require 'seon.flow.pool)
+                      (let [pool-ns (find-ns 'seon.flow.pool)]
+                        ;; agent-pool is a defonce atom; ns-resolve returns the var
+                        ;; so we need var->atom->pool-map (double deref)
+                        (if-let [pool-var (ns-resolve session-ns 'agent-pool)]
+                          (if-let [pool @@pool-var]
+                            (let [status ((ns-resolve pool-ns 'pool-status) pool)]
+                              (:seon.flow.pool/total status))
+                            0)
+                          0))
+                      (catch Exception _ 0))]
       {:agents (count running-agents)
-       :ports (count @port-registry)
-       :sessions (count @session-registry)
-       :nrepl-servers (count @servers)})
+       :pool-jvms pool-jvms
+       :sessions (count @session-registry)})
     (catch Exception e
       (log/warn e "Failed to check resources")
       {:agents 0
-       :ports 0
-       :sessions 0
-       :nrepl-servers 0})))
+       :pool-jvms 0
+       :sessions 0})))
+
+(defn- check-http
+  "Check HTTP server health (port 8080)."
+  []
+  (assoc (check-port 8080 1000) :port 8080 :mode :started))
+
+(defn- check-caddy
+  "Check Caddy reverse proxy health (port 3030)."
+  []
+  (let [system (get-system)
+        caddy-component (:seon.web/caddy system)
+        mode (component-mode caddy-component)
+        tcp-check (check-port 3030 500)]
+    (assoc tcp-check :port 3030 :mode mode)))
+
+(defn- check-tailwind
+  "Check Tailwind watcher status."
+  []
+  (let [system (get-system)
+        tw-component (:seon.web/tailwind system)
+        mode (component-mode tw-component)
+        alive? (or (:adopted? tw-component)
+                   (and (:process tw-component)
+                        (.isAlive ^Process (:process tw-component))))]
+    {:ok (boolean alive?) :mode mode}))
 
 (defn- check-agents
   "Check agent subsystem health."
@@ -161,289 +227,307 @@
       {:ok false
        :error (.getMessage e)})))
 
+(defn- check-pool
+  "Check agent pool health."
+  []
+  (try
+    (require 'seon.flow.pool)
+    (require 'seon.orchestrator.session)
+    (let [session-ns (find-ns 'seon.orchestrator.session)
+          pool-ns (find-ns 'seon.flow.pool)]
+      (if-let [pool-var (ns-resolve session-ns 'agent-pool)]
+        (if-let [pool @@pool-var]
+          (let [status ((ns-resolve pool-ns 'pool-status) pool)]
+            {:ok true
+             :details {:total (:seon.flow.pool/total status)
+                       :idle (:seon.flow.pool/idle status)
+                       :active (:seon.flow.pool/active status)
+                       :warming? (:seon.flow.pool/warming? status)}})
+          {:ok true :details {:total 0 :note "pool not initialized"}})
+        {:ok true :details {:total 0 :note "pool atom not found"}}))
+    (catch Exception e
+      {:ok false :error (.getMessage e)})))
+
+;;; ---------------------------------------------------------------------------
+;;; Operational Health Checks (beyond port connectivity)
+;;; ---------------------------------------------------------------------------
+
+(defn- check-datalevin-query
+  "Check that Datalevin can actually execute a query, not just accept TCP."
+  []
+  (let [start (System/currentTimeMillis)]
+    (try
+      (require 'seon.db)
+      (let [query-fn (resolve 'seon.db/query)
+            result (query-fn :seon.runtime
+                             '[:find ?e . :where [?e :db/ident _]])]
+        {:ok true
+         :latency-ms (- (System/currentTimeMillis) start)
+         :details {:result-type (type result)}})
+      (catch Exception e
+        {:ok false
+         :latency-ms (- (System/currentTimeMillis) start)
+         :error (.getMessage e)}))))
+
+(defn- check-flow-responsive
+  "Check that the infrastructure flow can process a request within 5s.
+   Sends a no-op read (query for a non-existent entity) through the flow."
+  []
+  (let [start (System/currentTimeMillis)]
+    (try
+      (require 'seon.db)
+      (let [query-fn (resolve 'seon.db/query)
+            ;; Simple query that exercises the flow reader path
+            result (query-fn :seon.runtime
+                             '[:find ?e :where [?e :seon.runtime/namespace "___readiness-probe___"]])]
+        {:ok true
+         :latency-ms (- (System/currentTimeMillis) start)
+         :details {:probe-result (count result)}})
+      (catch Exception e
+        {:ok false
+         :latency-ms (- (System/currentTimeMillis) start)
+         :error (.getMessage e)}))))
+
+(defn- check-runtime-persisted
+  "Check that runtime instances are registered in memory."
+  []
+  (try
+    (require 'seon.runtime)
+    (let [instances-fn (resolve 'seon.runtime/instances)
+          instances (instances-fn {})
+          count-instances (count instances)]
+      {:ok (pos? count-instances)
+       :details {:instance-count count-instances}})
+    (catch Exception e
+      {:ok false
+       :error (.getMessage e)})))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Aggregate Health Status
 ;;; ---------------------------------------------------------------------------
 
 (defn- determine-status
-  "Determine overall health status from individual checks.
+  "Determine overall health status from individual checks and startup phase.
 
-   - :healthy - All checks pass
-   - :degraded - Some non-critical checks fail
-   - :unhealthy - Critical checks fail (XTDB)"
+   - :healthy - All checks pass and system is ready
+   - :degraded - Some non-critical checks fail, or startup phase is degraded
+   - :unhealthy - Critical checks fail (datalevin or flow down)"
   [checks]
-  (let [xtdb-ok? (get-in checks [:xtdb :ok] false)
+  (let [phase @startup-phase
+        critical-keys [:datalevin :datalevin-query :flow-responsive]
+        critical-checks (select-keys checks critical-keys)
+        critical-down? (and (seq critical-checks)
+                            (some (fn [[_k v]] (and (map? v) (not (:ok v))))
+                                  critical-checks))
         all-ok? (every? :ok (vals checks))]
     (cond
-      (not xtdb-ok?) :unhealthy
-      (not all-ok?) :degraded
-      :else :healthy)))
+      critical-down? :unhealthy
+      (= phase :degraded) :degraded
+      all-ok? :healthy
+      :else :degraded)))
 
-(defn quick-check
-  "Quick health check suitable for load balancers and monitoring.
-
-   Only checks critical components (XTDB) for speed.
-
-   Request keys:
-     ::node - Required. XTDB node to check
-
-   Response keys:
-     ::status - :healthy, :degraded, or :unhealthy
-     ::timestamp - When the check was performed
-     ::checks - Map of component -> result (only if not healthy)
-
-   Example:
-     (quick-check {::node xtdb-node})"
-  {:malli/schema [:=> [:cat ::quick-check-request] ::quick-check-response]}
-  [{::keys [node]}]
-  (let [xtdb-check (check-xtdb node)
-        status (if (:ok xtdb-check) :healthy :unhealthy)]
-    (cond-> {::status status
-             ::timestamp (java.util.Date.)}
-      (not= status :healthy)
-      (assoc ::checks {:xtdb xtdb-check}))))
-
-(defn deep-check
+(defn check
   "Comprehensive health check for debugging and monitoring.
 
-   Checks all components:
-   - XTDB database
-   - Main nREPL server
+   Checks all services with mode reporting:
+   - Datalevin server (adopted/started)
+   - nREPL server (started)
+   - HTTP server (started)
+   - Caddy reverse proxy (adopted/started)
+   - Tailwind watcher (adopted/started)
    - Agent subsystem
-   - All namespace nREPL servers
+   - Pool JVM status
 
-   Request keys:
-     ::node - Required. XTDB node to check
+   Request keys: (none)
 
    Response keys:
      ::status - :healthy, :degraded, or :unhealthy
      ::timestamp - When the check was performed
-     ::checks - Map of component -> check-result
+     ::checks - Map of service -> check-result (includes :mode and :port)
      ::resources - Current resource utilization
+     ::startup-phase - Current startup phase
 
    Example:
-     (deep-check {::node xtdb-node})"
-  {:malli/schema [:=> [:cat ::deep-check-request] ::deep-check-response]}
-  [{::keys [node]}]
-  (let [xtdb-check (check-xtdb node)
-        nrepl-check (check-nrepl)
+     (check {})"
+  {:malli/schema [:=> [:cat ::check-request] ::check-response]}
+  [{}]
+  (let [nrepl-check (check-nrepl)
+        datalevin-check (check-datalevin)
+        http-check (check-http)
+        caddy-check (check-caddy)
+        tailwind-check (check-tailwind)
         agents-check (check-agents)
+        pool-check (check-pool)
         resources (check-resources)
-        ;; Check all namespace nREPL servers
-        nrepl-servers-check (try
-                              (require 'seon.orchestrator.nrepl)
-                              (let [list-servers (resolve 'seon.orchestrator.nrepl/list-namespace-servers)
-                                    servers (list-servers)]
-                                (if (empty? servers)
-                                  {:ok true :details {:count 0}}
-                                  (let [port-checks (for [{:keys [port session-id]} servers]
-                                                      [session-id (check-port port 500)])
-                                        failed (filter (fn [[_ r]] (not (:ok r))) port-checks)]
-                                    (if (empty? failed)
-                                      {:ok true :details {:count (count servers)}}
-                                      {:ok false
-                                       :error (str (count failed) " of " (count servers) " servers unreachable")
-                                       :details {:failed (into {} failed)}}))))
-                              (catch Exception e
-                                {:ok false :error (.getMessage e)}))
-        checks {:xtdb xtdb-check
-                :nrepl nrepl-check
-                :agents agents-check
-                :nrepl-servers nrepl-servers-check}
+        ;; Operational checks only after Phase 2 (DB and flow are up)
+        phase @startup-phase
+        operational? (contains? #{:ready :degraded} phase)
+        checks (cond-> {:datalevin datalevin-check
+                         :nrepl nrepl-check
+                         :http http-check
+                         :caddy caddy-check
+                         :tailwind tailwind-check
+                         :agents agents-check
+                         :pool pool-check}
+                 operational? (assoc :datalevin-query (check-datalevin-query)
+                                     :flow-responsive (check-flow-responsive)
+                                     :runtime-persisted (check-runtime-persisted)))
         status (determine-status checks)]
     {::status status
      ::timestamp (java.util.Date.)
      ::checks checks
-     ::resources resources}))
+     ::resources resources
+     ::startup-phase @startup-phase}))
 
 ;;; ---------------------------------------------------------------------------
-;;; Cleanup Functions (for Phase 3)
+;;; Readiness Gate (called at startup)
 ;;; ---------------------------------------------------------------------------
 
-(defn- find-orphaned-ports
-  "Find ports in the registry that are no longer listening."
-  []
-  (try
-    (require 'seon.orchestrator.nrepl)
-    (let [port-registry @(ns-resolve (find-ns 'seon.orchestrator.nrepl) 'port-registry)]
-      (for [[session-id port] @port-registry
-            :let [result (check-port port 200)]
-            :when (not (:ok result))]
-        {:session-id session-id
-         :port port
-         :error (:error result)}))
-    (catch Exception e
-      (log/warn e "Failed to find orphaned ports")
-      [])))
+(defn readiness-gate
+  "Run post-init readiness checks. Returns a map of check results.
+   Called by core.clj between Phase 2 completion and 'System ready' log.
 
-(defn- find-listening-orphans
-  "Find ports in the agent range (7889-7999) that are listening but NOT in registry.
-  These are truly orphaned nREPL servers that survived a reset."
-  []
-  (try
-    (require 'seon.orchestrator.nrepl)
-    (let [nrepl-ns (find-ns 'seon.orchestrator.nrepl)
-          ;; port-range is an atom, need double deref
-          {:keys [base max]} @@(ns-resolve nrepl-ns 'port-range)
-          port-registry @(ns-resolve nrepl-ns 'port-registry)
-          servers @(ns-resolve nrepl-ns 'servers)
-          registered-ports (set (concat (vals @port-registry)
-                                        (map :port (vals @servers))))]
-      (for [port (range base (inc max))
-            :let [result (check-port port 100)]
-            :when (and (:ok result)
-                       (not (contains? registered-ports port)))]
-        {:port port
-         :status :listening-but-unregistered}))
-    (catch Exception e
-      (log/warn e "Failed to find listening orphans")
-      [])))
+   Checks:
+     :datalevin-query   - Can we execute a Datalevin query?
+     :flow-responsive   - Can we route a request through the flow?
+     :runtime-persisted - Are runtime instances registered?
 
-(defn- find-orphaned-servers
-  "Find nREPL servers in the registry but not accepting connections."
+   Scanner and pool are NOT required for readiness (background work)."
   []
+  (let [checks {:datalevin-query (check-datalevin-query)
+                :flow-responsive (check-flow-responsive)
+                :runtime-persisted (check-runtime-persisted)}
+        all-pass? (every? :ok (vals checks))
+        failed (into {} (filter (fn [[_k v]] (not (:ok v))) checks))]
+    {:all-pass? all-pass?
+     :checks checks
+     :failed failed}))
+
+;;; ---------------------------------------------------------------------------
+;;; Post-Start Observation
+;;; ---------------------------------------------------------------------------
+
+(defonce ^:private post-start-scheduler (atom nil))
+
+(defn- run-post-start-check!
+  "Re-run readiness checks and log any degradation at WARN."
+  [label]
   (try
-    (require 'seon.orchestrator.nrepl)
-    (let [servers @(ns-resolve (find-ns 'seon.orchestrator.nrepl) 'servers)]
-      (for [[session-id {:keys [port]}] @servers
-            :let [result (check-port port 200)]
-            :when (not (:ok result))]
-        {:session-id session-id
-         :port port
-         :error (:error result)}))
+    (let [{:keys [all-pass? failed]} (readiness-gate)]
+      (if all-pass?
+        (log/info (str "Post-start check (" label "): all operational checks pass"))
+        (log/warn (str "Post-start check (" label "): degradation detected")
+                  {:failed-checks (keys failed)
+                   :details failed})))
     (catch Exception e
-      (log/warn e "Failed to find orphaned servers")
-      [])))
+      (log/warn e (str "Post-start check (" label ") failed with exception")))))
+
+(defn start-post-start-observation!
+  "Schedule background re-checks at 30s and 60s after startup.
+   Logs WARN if any operational check degrades."
+  []
+  (let [scheduler (Executors/newSingleThreadScheduledExecutor)]
+    (reset! post-start-scheduler scheduler)
+    (.schedule scheduler
+              ^Runnable (fn [] (run-post-start-check! "30s"))
+              30 TimeUnit/SECONDS)
+    (.schedule scheduler
+              ^Runnable (fn [] (run-post-start-check! "60s")
+                          ;; Shut down the scheduler after the last check
+                          (.shutdown scheduler)
+                          (reset! post-start-scheduler nil))
+              60 TimeUnit/SECONDS)))
+
+;;; ---------------------------------------------------------------------------
+;;; Startup Summary
+;;; ---------------------------------------------------------------------------
+
+(defn log-startup-summary!
+  "Log a clean summary of all services after startup completes."
+  []
+  (let [system (get-system)
+        dtlv (:seon.db.datalevin/server system)
+        caddy (:seon.web/caddy system)
+        tw (:seon.web/tailwind system)
+        pool-check (check-pool)
+        pool-detail (:details pool-check)
+        mode-str (fn [component] (if (:adopted? component) "adopted" "started"))
+        lines (cond-> [(str "  Datalevin  :" (or (:port dtlv) 8898) "  (" (mode-str dtlv) ")")
+                        "  nREPL      :7888  (started)"
+                        "  HTTP       :8080  (started)"]
+                caddy
+                (conj (str "  Caddy      :3030  (" (mode-str caddy) ")"))
+                tw
+                (conj (str "  Tailwind           (" (mode-str tw) ")"))
+                pool-detail
+                (conj (str "  Pool        "
+                           (:idle pool-detail 0) "/" (:total pool-detail 0)
+                           "   (started)")))]
+    (log/info (str "System ready:\n" (str/join "\n" lines)))))
+
+;;; ---------------------------------------------------------------------------
+;;; Cleanup Functions
+;;; ---------------------------------------------------------------------------
 
 ;; Request/response schemas for cleanup
 (schema/register! ::cleanup-orphaned-resources-request
-                  [:map
-                   [::node ::node]])
+                  [:map])
 
-(schema/register! ::ports-released
-                  [:int {:min 0 :description "Number of stale port registry entries released"}])
-
-(schema/register! ::servers-removed
-                  [:int {:min 0 :description "Number of stale server registry entries removed"}])
-
-(schema/register! ::orphans-killed
-                  [:int {:min 0 :description "Number of orphaned nREPL servers killed by port"}])
-
-(schema/register! ::cleanup-error
-                  [:map
-                   [:type [:enum :port :server :orphan]]
-                   [:port {:optional true} :int]
-                   [:session-id {:optional true} :string]
-                   [:error :string]])
+(schema/register! ::stale-agents-cleaned
+                  [:int {:min 0 :description "Number of stale pool JVM processes killed"}])
 
 (schema/register! ::cleanup-errors
-                  [:vector ::cleanup-error])
+                  [:vector [:map
+                            [:type [:enum :pool :session]]
+                            [:port {:optional true} :int]
+                            [:error :string]]])
 
 (schema/register! ::cleanup-orphaned-resources-response
                   [:map
-                   [::ports-released ::ports-released]
-                   [::servers-removed ::servers-removed]
-                   [::orphans-killed ::orphans-killed]
+                   [::stale-agents-cleaned ::stale-agents-cleaned]
                    [::cleanup-errors ::cleanup-errors]])
-
-(defn- kill-port!
-  "Kill any process listening on a port. Returns true if successful."
-  [port]
-  (try
-    (let [result (shell/sh "lsof" "-ti" (str ":" port))]
-      (when (zero? (:exit result))
-        (let [pids (str/split-lines (str/trim (:out result)))]
-          (doseq [pid pids]
-            (when-not (str/blank? pid)
-              (log/info "Killing orphaned nREPL process" {:port port :pid pid})
-              (shell/sh "kill" "-9" pid)))
-          true)))
-    (catch Exception e
-      (log/warn e "Failed to kill process on port" {:port port})
-      false)))
 
 (defn cleanup-orphaned-resources!
   "Clean up orphaned resources from previous crashes or resets.
 
-   This function handles three types of orphans:
-   1. Registry entries pointing to dead ports (stale entries)
-   2. nREPL servers listening but not in registry (survived reset)
-   3. Both types are cleaned up to restore a consistent state
+   Delegates to pool/cleanup-stale-agents! which kills JVM processes
+   that are bound to ports in the agent range but not tracked by the pool.
 
-   Request keys:
-     ::node - Required. XTDB node
+   Request keys: (none)
 
    Response keys:
-     ::ports-released - Number of stale port registry entries released
-     ::servers-removed - Number of stale server registry entries removed
-     ::orphans-killed - Number of orphaned nREPL servers killed by port
+     ::stale-agents-cleaned - Number of stale pool JVM processes killed
      ::cleanup-errors - Vector of error maps
 
    Example:
-     (cleanup-orphaned-resources! {::node xtdb-node})"
+     (cleanup-orphaned-resources! {})"
   {:malli/schema [:=> [:cat ::cleanup-orphaned-resources-request] ::cleanup-orphaned-resources-response]}
-  [{::keys [node]}]
+  [{}]
   (log/info "Cleaning up orphaned resources")
-  (let [_ node ; unused but required for consistency
-        errors (atom [])
-
-        ;; 1. Clean up stale registry entries (registered but not listening)
-        orphaned-ports (find-orphaned-ports)
-        _ (doseq [{:keys [session-id port]} orphaned-ports]
-            (try
-              (log/info "Releasing stale port registry entry" {:session-id session-id :port port})
-              ((resolve 'seon.orchestrator.nrepl/release-port!) session-id)
-              (catch Exception e
-                (swap! errors conj {:type :port :session-id session-id :port port :error (.getMessage e)}))))
-
-        ;; 2. Clean up stale server entries
-        orphaned-servers (find-orphaned-servers)
-        _ (doseq [{:keys [session-id port]} orphaned-servers]
-            (try
-              (log/info "Removing stale server registry entry" {:session-id session-id :port port})
-              (let [servers-atom (ns-resolve (find-ns 'seon.orchestrator.nrepl) 'servers)]
-                (swap! @servers-atom dissoc session-id))
-              (catch Exception e
-                (swap! errors conj {:type :server :session-id session-id :port port :error (.getMessage e)}))))
-
-        ;; 3. Kill truly orphaned servers (listening but not in registry)
-        listening-orphans (find-listening-orphans)
-        killed-count (atom 0)
-        _ (doseq [{:keys [port]} listening-orphans]
-            (try
-              (when (kill-port! port)
-                (swap! killed-count inc))
-              (catch Exception e
-                (swap! errors conj {:type :orphan :port port :error (.getMessage e)}))))]
-
-    {::ports-released (count orphaned-ports)
-     ::servers-removed (count orphaned-servers)
-     ::orphans-killed @killed-count
+  (let [errors (atom [])
+        cleaned (try
+                  (require 'seon.flow.pool)
+                  (let [cleanup! (resolve 'seon.flow.pool/cleanup-stale-agents!)]
+                    (cleanup!))
+                  (catch Exception e
+                    (swap! errors conj {:type :pool :error (.getMessage e)})
+                    0))]
+    {::stale-agents-cleaned cleaned
      ::cleanup-errors @errors}))
 
 (comment
   ;; REPL exploration
 
-  (require '[integrant.repl.state :as state])
-  (def node (:seon/xtdb-node state/system))
-
-  ;; Quick check
-  (quick-check {::node node})
-
-  ;; Deep check
-  (deep-check {::node node})
+  ;; Health check
+  (check {})
 
   ;; Check individual components
-  (check-xtdb node)
   (check-nrepl)
   (check-agents)
+  (check-pool)
   (check-resources)
 
-  ;; Find orphans
-  (find-orphaned-ports)
-  (find-orphaned-servers)
-
   ;; Clean up
-  (cleanup-orphaned-resources! {::node node})
+  (cleanup-orphaned-resources! {})
 
   nil)

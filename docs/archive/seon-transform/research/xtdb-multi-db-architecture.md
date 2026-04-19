@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive, database]
+---
+
 # XTDB v2 Multi-Database Architecture Research
 
 **Date**: 2025-12-13
@@ -46,6 +52,7 @@ ATTACH DATABASE health_data WITH $$
     bucket: 'health-bucket'
     path: 'data'
 $$
+
 ```
 
 ### Cross-Database Joins
@@ -65,6 +72,7 @@ JOIN health_data.metrics h
   ON DATE(t.timestamp) = DATE(h.timestamp)
 WHERE t.timestamp > CURRENT_DATE - INTERVAL 'P7D'
 ORDER BY t.timestamp DESC
+
 ```
 
 ### Consistency Guarantees
@@ -82,6 +90,7 @@ SHOW SNAPSHOT_TOKEN;
 
 -- Use token in another transaction
 BEGIN READ ONLY WITH (SNAPSHOT_TOKEN = 'abc123...');
+
 ```
 
 ---
@@ -128,6 +137,7 @@ BEGIN READ ONLY WITH (SNAPSHOT_TOKEN = 'abc123...');
          "JOIN health_data.metrics h ON DATE(t.timestamp) = DATE(h.timestamp) "
          "WHERE t.timestamp > CURRENT_DATE - INTERVAL 'P" days "D' "
          "ORDER BY t.timestamp DESC")))
+
 ```
 
 **Domain Registry Pattern** (already implemented in `seon.core`):
@@ -145,6 +155,7 @@ BEGIN READ ONLY WITH (SNAPSHOT_TOKEN = 'abc123...');
 ;; Caller determines which domain
 (analyze-trade (domain-db :trading) "TRADE-123")  ; Trading domain
 (analyze-trade (domain-db :health) "METRIC-456")  ; Health domain
+
 ```
 
 ### Option 2: Single Node with Multiple Tables
@@ -187,6 +198,7 @@ Searched entire codebase for references to `:seon/dsl-executor`:
 # - resources/system.edn (component config)
 # - docs/*.md (historical documentation)
 # - ZERO usage in actual application code
+
 ```
 
 ### Decision: KEEP BUT UPDATE
@@ -279,6 +291,7 @@ Here's a test demonstrating cross-database queries (conceptual - requires ATTACH
      WHERE t.timestamp > CURRENT_DATE - INTERVAL 'P7D'
      ORDER BY t.timestamp DESC")
   )
+
 ```
 
 ### Single-Domain Query Pattern (Current)
@@ -298,6 +311,7 @@ Here's a test demonstrating cross-database queries (conceptual - requires ATTACH
 ;; Functions take db argument - caller provides domain context
 (let [trading-db (domain-db :trading)]
   (get-high-iv-options trading-db "AAPL" 0.3))
+
 ```
 
 ---
@@ -316,6 +330,7 @@ Here's a test demonstrating cross-database queries (conceptual - requires ATTACH
 When cross-domain analytics are needed:
 
 1. **Update system.edn**: Add ATTACH DATABASE configuration
+
    ```edn
    :seon/xtdb-node
    {:storage {:path "data/xtdb/trading"}
@@ -323,9 +338,11 @@ When cross-domain analytics are needed:
     [{:name "health_data"
       :log {:kafka {:cluster "..." :topic "..."}}
       :storage {:s3 {:bucket "..." :path "..."}}}]}
+
    ```
 
 2. **Add ATTACH on startup**: Execute ATTACH DATABASE during node initialization
+
    ```clojure
    (defmethod ig/init-key :seon/xtdb-node [_ config]
      (let [node (xtn/start-node ...)
@@ -333,15 +350,18 @@ When cross-domain analytics are needed:
        (doseq [{:keys [name log storage]} attached]
          (attach-database! node name log storage))
        node))
+
    ```
 
 3. **Create cross-domain query namespace**: `seon.db.cross-domain`
+
    ```clojure
    (ns seon.db.cross-domain
      "Cross-domain analytical queries using SQL ATTACH DATABASE.")
 
    (defn trades-with-health-metrics [trading-db days]
      (node/sql-query trading-db ...))
+
    ```
 
 ### Phase 3: Production Deployment (FUTURE)

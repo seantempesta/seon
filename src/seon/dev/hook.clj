@@ -29,6 +29,7 @@
             [seon.dev.compliance :as compliance]
             [seon.dev.context :as context]
             [seon.dev.lint :as lint]
+            [seon.dev.markdown :as markdown]
             [seon.dev.repair :as repair]
             [seon.dev.review :as review]
             [seon.dev.verify :as verify]
@@ -41,17 +42,18 @@
 
 ;; Hook event from Claude Code
 (schema/register! ::hook-event-name
-                  [:enum {:description "The type of hook event"}
-                   "PreToolUse" "PostToolUse"])
+                  [:string {:description "The type of hook event (e.g., PreToolUse, PostToolUse)"}])
 
 (schema/register! ::tool-name
-                  [:enum {:description "The tool that triggered the event"}
-                   "Edit" "Write" "TodoWrite"])
+                  [:string {:description "The tool that triggered the event (e.g., Edit, Write, TodoWrite)"}])
 
 (schema/register! ::tool-input
                   [:map {:description "Tool-specific input parameters"}
-                   [:file_path {:optional true} :string]
-                   [:filePath {:optional true} :string]
+                   [:file_path {:optional true} [:maybe :string]]
+                   [:filePath {:optional true} [:maybe :string]]
+                   [:content {:optional true} [:maybe :string]]
+                   [:old_string {:optional true} [:maybe :string]]
+                   [:new_string {:optional true} [:maybe :string]]
                    [:todos {:optional true}
                     [:vector [:map
                               [:content :string]
@@ -266,34 +268,32 @@
 
 (defn- update-code-index!
   "Update the Datalevin code index after a file change.
+   Uses the unified extract pipeline + ingest-namespace! for upsert + retract-stale.
    Best-effort: logs warnings on failure, never blocks the hook."
   [file-path]
   (try
     (require 'integrant.repl.state)
-    (when-let [scanner (get @(resolve 'integrant.repl.state/system) :seon/code-scanner)]
-      (when-let [conn (:conn scanner)]
-        (require 'seon.graph.analyzer)
-        (require 'seon.graph.scanner)
+    (when-let [scanner (get @(resolve 'integrant.repl.state/system) :seon.graph/scanner)]
+      (when-let [graph-db (:graph-db scanner)]
+        (require 'seon.graph.extract)
         (require 'seon.graph.ingest)
-        (let [analyze-form (resolve 'seon.graph.analyzer/analyze-form)
-              extract-entities (resolve 'seon.graph.analyzer/extract-entities)
-              scan-file (resolve 'seon.graph.scanner/scan-file)
-              link-fns-to-specs (resolve 'seon.graph.scanner/link-fns-to-specs)
-              ingest-incremental! (resolve 'seon.graph.ingest/ingest-incremental!)
-              ;; Analyze the changed file
-              source (slurp file-path)
-              analysis (analyze-form {:seon.graph.analyzer/source source
-                                      :seon.graph.analyzer/file-path file-path})]
-          (when (:seon.graph.analyzer/success analysis)
-            (let [entities (extract-entities {:seon.graph.analyzer/raw-analysis
-                                             (:seon.graph.analyzer/raw-analysis analysis)})
-                  ;; Scan file for specs
-                  specs (scan-file {:seon.graph.scanner/file-path file-path})
-                  ;; Link functions to specs
-                  linked-fns (link-fns-to-specs (:seon.graph.analyzer/functions entities) specs)
-                  entities (assoc entities :seon.graph.analyzer/functions linked-fns)]
-              (ingest-incremental! {:seon.graph.ingest/conn conn
-                                    :seon.graph.ingest/entities entities}))))))
+        (require 'seon.system)
+        (let [extract-fn (resolve 'seon.graph.extract/extract-graph-from-file)
+              ingest-ns! (resolve 'seon.graph.ingest/ingest-namespace!)
+              graph (extract-fn {:seon.graph.extract/file-path file-path})
+              ns-str (:seon.graph.extract/ns-name graph)]
+          (when ns-str
+            (ingest-ns!
+             {:seon.graph.ingest/db-name :seon.runtime
+              :seon.graph.ingest/ns-name ns-str
+              :seon.graph.ingest/functions (:seon.graph.extract/functions graph)
+              :seon.graph.ingest/specs (:seon.graph.extract/specs graph)
+              :seon.graph.ingest/vars (:seon.graph.extract/vars graph)
+              :seon.graph.ingest/call-edges (:seon.graph.extract/call-edges graph)
+              :seon.graph.ingest/ns-deps (:seon.graph.extract/ns-deps graph)
+              :seon.graph.ingest/ns-entities (:seon.graph.extract/namespaces graph)
+              :seon.graph.ingest/shapes (:seon.graph.extract/shapes graph)
+              :seon.graph.ingest/entries (:seon.graph.extract/entries graph)})))))
     (catch Exception e
       (log/debug "Code index update failed (non-blocking)" {:error (.getMessage e)}))))
 
@@ -454,7 +454,7 @@
    2. Reload - Check for compile errors
    3. Unit Tests - Run if test namespace exists
    4. Gen Tests - Run generative tests on schema'd functions
-   5. Record - Store edit event in XTDB
+   5. Record - Store edit event
    6. Review - Trigger AI review if rate limit allows
 
    Request keys:
@@ -486,7 +486,7 @@
                                         :tool tool-name
                                         :file file-path})
 
-    ;; Handle TodoWrite events specially - just record to XTDB, no other processing
+    ;; Handle TodoWrite events specially - just record to Datalevin, no other processing
     (if (and (= event-name "PostToolUse") (= tool-name "TodoWrite"))
       (let [session-id (:session_id event)
             todos (get-in event [:tool_input :todos])]
@@ -504,11 +504,41 @@
           (log/debug "Skipping non-relevant event")
           (success-response @feedback))
 
-        ;; Skip non-Clojure files
+        ;; Skip non-Clojure files (but handle markdown)
         (if-not (codebase/clojure-file? {::codebase/file-path file-path})
-          (do
-            (log/debug "Skipping non-Clojure file" file-path)
-            (success-response @feedback))
+          (if (and (= event-name "PostToolUse")
+                   (codebase/markdown-file? {::codebase/file-path file-path}))
+            ;; Markdown file — validate and auto-fix
+            (let [md-result (markdown/validate-file
+                             {::markdown/file-path file-path
+                              ::markdown/vault-root "docs"})
+                  ;; Auto-fix if there are fixable violations
+                  _ (when-not (::markdown/valid? md-result)
+                      (try
+                        (let [content (slurp file-path)
+                              fixed (markdown/fix {::markdown/content content})]
+                          (when (pos? (::markdown/fixed-count fixed))
+                            (spit file-path (::markdown/content fixed))))
+                        (catch Exception e
+                          (log/debug "Markdown auto-fix failed" {:error (.getMessage e)}))))
+                  ;; Re-validate after fix
+                  final-result (if (::markdown/valid? md-result)
+                                 md-result
+                                 (markdown/validate-file
+                                  {::markdown/file-path file-path
+                                   ::markdown/vault-root "docs"}))
+                  formatted (when-not (::markdown/valid? final-result)
+                              (markdown/format-violations
+                               {::markdown/violations (::markdown/violations final-result)
+                                ::markdown/max-length 800}))]
+              (if formatted
+                {::continue true
+                 ::feedback [(::markdown/formatted formatted)]}
+                (success-response @feedback)))
+            ;; Other non-Clojure file — skip
+            (do
+              (log/debug "Skipping non-Clojure file" file-path)
+              (success-response @feedback)))
 
       ;; === PreToolUse: Validate code before tool runs ===
           ;; Uses unified validate-for-write for consistent error messages and suggestions.
@@ -535,8 +565,7 @@
                   (let [result (lint/validate-for-write
                                 {::lint/content content-to-validate
                                  ::lint/file-path file-path
-                                 ::lint/full-lint? full-lint?})
-                        prefix (str tool-name " would create invalid Clojure")]
+                                 ::lint/full-lint? full-lint?})]
                     (if (::lint/valid? result)
                       (success-response @feedback)
                       (block-response (::lint/error-msg result))))
@@ -753,7 +782,7 @@
    2. Unit Tests - Run if test namespace exists
    3. Gen Tests - Run generative tests on schema'd functions
    4. Compliance - Check convention compliance
-   5. Record - Store edit event in XTDB
+   5. Record - Store edit event
    6. Review - Trigger AI review if rate limit allows
 
    Called by bin/mcp-server after successful clojure_replace.
@@ -809,7 +838,7 @@
 
   (require '[seon.dev.hook :as hook])
 
-  ;; Test event processing (requires running XTDB node)
+  ;; Test event processing
   (def test-event
     {:hook_event_name "PostToolUse"
      :tool_name "Edit"

@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # Research Context Sources
 
 **Date:** 2024-12-28
@@ -18,6 +24,7 @@
 ## External Research
 
 ### Gemini Native Integration
+
 **Location:** `docs/research/gemini-native-integration.md`
 
 Contains:
@@ -32,6 +39,7 @@ Contains:
 ## Existing Code to Study
 
 ### clojure-mcp-light Hook System
+
 **Location:** `~/.gitlibs/libs/org.babashka.bbin/script--693757147.../src/clojure_mcp_light/`
 
 Key files:
@@ -46,6 +54,7 @@ Key files:
 - Session persistence across invocations
 
 ### Current auto-test-hook
+
 **Location:** `bin/auto-test-hook`
 
 Key patterns:
@@ -58,6 +67,7 @@ Key patterns:
 ## Malli Reference
 
 ### Context7 Documentation
+
 Use Context7 tool with `/metosin/malli` for:
 - `function-checker` - Generative testing for functions
 - `instrumentation` - Runtime schema enforcement
@@ -79,6 +89,7 @@ Use Context7 tool with `/metosin/malli` for:
 
 ;; Run generative tests
 (mg/check fn-schema fn-impl {:num-tests 10})
+
 ```
 
 ---

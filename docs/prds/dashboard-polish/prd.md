@@ -1,9 +1,9 @@
+---
+type: prd
+status: draft
+tags: [prd, web]
+---
 # PRD: Dashboard Polish
-
-**Status:** Not Started
-**Priority:** Medium
-**Parent PRD:** `docs/prds/namespace-ui/prd.md` (Phase 6)
-**Branch:** feature/namespace-ui
 
 ---
 
@@ -22,6 +22,7 @@ The dashboard (`/`) currently shows:
 3. **Namespaces card** - Count of loaded `seon.*` namespaces with grouped list
 
 **Code locations:**
+
 - Dashboard page handler: `src/seon/web/handlers.clj:40-43`
 - Dashboard SSE render: `src/seon/web/handlers.clj:52-60`
 - Dashboard content: `src/seon/web/html.clj:264-297`
@@ -34,6 +35,7 @@ The dashboard (`/`) currently shows:
 The Design Review in namespace-ui PRD identified these issues:
 
 ### 1. Excessive Spacing
+
 | Element | Current | Should Be |
 |---------|---------|-----------|
 | Cards | `p-6` | `p-3` |
@@ -44,8 +46,10 @@ The Design Review in namespace-ui PRD identified these issues:
 **Evidence:** Cards are ~60% empty space. Agent count displayed in `text-4xl` (36px) is absurd for a terminal UI.
 
 ### 2. No Namespace Tree
+
 Current: Flat list of namespaces grouped by second-level prefix.
 Should be: Expandable tree structure like:
+
 ```
 seon
 ├─ ai
@@ -59,23 +63,29 @@ seon
    ├─ agents
    ├─ handlers
    └─ html
+
 ```
 
 ### 3. No Liveness Indicators
+
 Current: Static agent count "0 agents" or "N running".
 Should be:
+
 - Pulsing dot when agents are running
 - Most recent agent activity (e.g., "Last: seon.trading 2m ago")
 - Quick status of active agents inline
 
 ### 4. No Agent Details on Dashboard
+
 Observatory requires navigation away. Dashboard should show running agents inline with:
+
 - Session ID
 - Namespace
 - Status dot
 - Brief activity indicator
 
 ### 5. Typography Too Large
+
 | Element | Current | Should Be |
 |---------|---------|-----------|
 | Title "Seon" | `text-4xl` (36px) | `text-lg` (14px) |
@@ -120,9 +130,11 @@ Fix Design Review P0/P1 issues.
 
 ;; Cards - reduce padding throughout
 ;; p-3 not p-4, mb-2 not mb-4
+
 ```
 
 **Test:**
+
 - [ ] Page title is 13-14px, not 36px
 - [ ] Cards have 12px padding
 - [ ] Grid gap is 12px
@@ -135,6 +147,7 @@ Replace the sparse "Agents" card with inline agent table.
 **File:** `src/seon/web/html.clj`
 
 Add function near line 264:
+
 ```clojure
 (defn- running-agent-row
   "Render a single running agent as a compact row."
@@ -166,9 +179,11 @@ Add function near line 264:
           [:div {:class "text-xs text-text-400 pt-1"}
            (str "+" (- count 5) " more")])]
        [:div {:class "text-xs text-text-500"} "no agents running"])]))
+
 ```
 
 **Test:**
+
 - [ ] Running agents appear inline on dashboard
 - [ ] Status dots pulse for running agents
 - [ ] Clicking arrow navigates to Observatory
@@ -181,6 +196,7 @@ Replace flat list with expandable tree.
 **File:** `src/seon/web/html.clj`
 
 Add tree functions:
+
 ```clojure
 (defn- build-namespace-tree
   "Build tree structure from flat namespace list.
@@ -222,9 +238,11 @@ Add tree functions:
       [:div {:class "border-l border-base-700 ml-2"}
        (for [[name children] (sort-by first seon-tree)]
          (render-tree-node ["seon" name] children 1))]]]))
+
 ```
 
 **Test:**
+
 - [ ] Namespaces render as tree with └─ ├─ style lines
 - [ ] Clicking expands/collapses branches
 - [ ] State survives SSE updates (data-preserve-attr)
@@ -255,9 +273,11 @@ Add recency indicator to header.
                       (< age-s 60) (str age-s "s ago")
                       (< age-s 3600) (str (quot age-s 60) "m ago")
                       :else (str (quot age-s 3600) "h ago"))})))))
+
 ```
 
 Add to header section:
+
 ```clojure
 [:div {:class "flex items-center gap-3"}
  [:h1 {:class "text-base font-semibold"} "seon"]
@@ -267,9 +287,11 @@ Add to header section:
       [:span {:class "w-1.5 h-1.5 rounded-full bg-signal animate-pulse"}]
       [:span {:class "text-text-400"}
        (str "active " (:age-str activity))]]))]
+
 ```
 
 **Test:**
+
 - [ ] Pulsing dot appears when agents running
 - [ ] Shows "active Xs ago" or "active Nm ago"
 - [ ] Disappears when no agents
@@ -286,9 +308,11 @@ Reorganize into 3-column grid for better density.
  (namespace-tree namespaces)
  ;; Column 3: System/Meta (takes 1 col on lg, spans both on md)
  (system-status-section)]
+
 ```
 
 Add system status section:
+
 ```clojure
 (defn- system-status-section
   "System status indicators."
@@ -306,9 +330,11 @@ Add system status section:
     [:div {:class "flex justify-between"}
      [:span {:class "text-text-400"} "http 8080"]
      [:span {:class "text-success"} "●"]]]])
+
 ```
 
 **Test:**
+
 - [ ] 3 columns on large screens
 - [ ] 2 columns on medium screens
 - [ ] 1 column on mobile
@@ -321,18 +347,21 @@ Add system status section:
 From `docs/prds/namespace-ui/design-system.md`:
 
 ### Typography
+
 - [ ] Primary text: `text-xs` (11px)
 - [ ] Page title: `text-base` (13px) max
 - [ ] Section headers: `text-xs uppercase tracking-wider`
 - [ ] Font: `font-mono` everywhere
 
 ### Spacing
+
 - [ ] Card padding: `p-3` (12px)
 - [ ] Grid gap: `gap-3` (12px)
 - [ ] Page margins: `px-4 py-3`
 - [ ] Section spacing: `mb-4` max
 
 ### Colors
+
 - [ ] Background: `bg-base-950` (body)
 - [ ] Card surface: `bg-base-850`
 - [ ] Primary text: `text-text-50`
@@ -340,12 +369,14 @@ From `docs/prds/namespace-ui/design-system.md`:
 - [ ] Accent: `text-signal` (amber)
 
 ### Components
+
 - [ ] Status dots: 6px, no pill backgrounds
 - [ ] Links: `text-signal hover:underline`
 - [ ] Tables over cards where appropriate
 - [ ] `<details>` for expand/collapse
 
 ### Anti-patterns to Avoid
+
 - [ ] No `text-4xl`, `text-3xl`, `text-2xl`
 - [ ] No `p-6`, `gap-6`, `mb-8` (too much spacing)
 - [ ] No `bg-white`, `text-gray-*`
@@ -372,6 +403,7 @@ From `docs/prds/namespace-ui/design-system.md`:
 ## Test Criteria
 
 ### Visual Tests (Browser)
+
 ```
 1. [ ] Navigate to http://localhost:8080/
 2. [ ] Title is small (13-14px), not giant
@@ -381,9 +413,11 @@ From `docs/prds/namespace-ui/design-system.md`:
 6. [ ] Active agents have pulsing dot in header
 7. [ ] Works at 50% screen width (no broken layout)
 8. [ ] Looks like terminal, not marketing page
+
 ```
 
 ### Functional Tests
+
 ```clojure
 ;; In REPL:
 ;; 1. Launch an agent
@@ -396,6 +430,7 @@ From `docs/prds/namespace-ui/design-system.md`:
 ;; 3. Kill agent, verify dashboard updates
 ;; - Status dot should disappear
 ;; - Count should decrease
+
 ```
 
 ---

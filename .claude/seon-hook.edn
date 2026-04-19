@@ -38,7 +38,7 @@
           ;; Max code length to include in review
           :max-code-length 12000
           ;; Max output length for review response
-          :max-output-length 500}
+          :max-output-length 100000}
 
  ;; Convention compliance checking
  ;; - Runs after reload, before tests

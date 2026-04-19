@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # Malli Schema Resolution
 
 Research on how to resolve Malli schema references recursively for building AI context.
@@ -5,8 +11,10 @@ Research on how to resolve Malli schema references recursively for building AI c
 ## The Problem
 
 Given a function schema like:
+
 ```clojure
 (m/=> process-order [:=> [:cat :user/id :order/cart] :order/result])
+
 ```
 
 We need to:
@@ -34,6 +42,7 @@ Malli uses a layered registry system:
 ;; 2. Mutable (mutable-registry) - spec-like, can add at runtime
 ;; 3. Composite - combines multiple registries
 ;; 4. Var registry - resolves #'var references
+
 ```
 
 ### Key Functions for Schema Resolution
@@ -61,6 +70,7 @@ Malli uses a layered registry system:
 ;; 6. m/deref-recursive - Dereference ALL refs at ALL levels
 (m/deref-recursive (m/schema [:map [:id :uuid]]))
 ;; => Fully expanded schema with no refs
+
 ```
 
 ### Walking Schemas
@@ -86,6 +96,7 @@ The `m/walk` function is the key to traversing schemas:
     {:type (m/type schema)
      :children (when (seq children) children)
      :properties (m/properties schema)}))
+
 ```
 
 ### Detecting Schema References
@@ -107,6 +118,7 @@ Schema references are keywords that aren't built-in types:
 ;; Check: :user/id is a ref, :string is not
 (schema-ref? :user/id)  ;; => true
 (schema-ref? :string)   ;; => false
+
 ```
 
 ## Implementation: Recursive Schema Resolution
@@ -175,6 +187,7 @@ Schema references are keywords that aren't built-in types:
   (let [resolved (resolve-all-refs fn-schema opts)]
     {:function-schema (m/form (m/schema fn-schema opts))
      :schema-definitions resolved}))
+
 ```
 
 ## Example Usage
@@ -209,6 +222,7 @@ Schema references are keywords that aren't built-in types:
 ;; =>
 ;; {:function-schema [:=> [:cat :user/id :order/cart] :order/result]
 ;;  :schema-definitions {...all resolved refs...}}
+
 ```
 
 ## Handling the Global Registry
@@ -227,6 +241,7 @@ When using Malli's global registry (via `m/=>` macro):
     (let [schema (:schema schema-data)]
       {:function-schema (m/form schema)
        :schema-definitions (resolve-all-refs schema)})))
+
 ```
 
 ## Primitive Detection
@@ -251,6 +266,7 @@ For the PRD's entity model, we need to know if a schema is primitive:
     (or (contains? primitive-schemas t)
         (fn? t)  ; predicate functions
         (= :enum t))))
+
 ```
 
 ## For XTDB Storage
@@ -280,6 +296,7 @@ When storing resolved schemas in XTDB:
                      (clojure.set/difference (:schema/refs entity #{})
                                              (set (keys resolved))))
                (assoc resolved ref (:schema/definition entity)))))))
+
 ```
 
 ## Key Insights
@@ -319,4 +336,5 @@ When storing resolved schemas in XTDB:
 (def opts {:registry {:my/type [:map [:x :int]]}})
 (m/form (m/schema :my/type opts))
 ;; => [:map [:x :int]]
+
 ```

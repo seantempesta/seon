@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 # Session Transfer: Dynamic Context & Flow Architecture
 
 **Date**: 2025-01-30
@@ -11,24 +17,19 @@
 **Root Cause**: NOT Claude Code's turn limit. It was our `(chan 100)` buffer filling up and blocking the reader loop with `>!!`.
 
 **Fix Applied** (`src/seon/ai/claude.clj:685`):
+
 ```clojure
 ;; Before (blocked at 100 messages):
 messages-ch (chan 100)
 
 ;; After (never blocks, drops oldest if full):
 messages-ch (chan (async/sliding-buffer 1000))
+
 ```
 
 **Status**: DEPLOYED. Tested. Agents can run indefinitely now.
 
-### 2. Eliza Analysis
-
-Added `reference-code/eliza` (git clone, not submodule due to gitignore).
-Analysis written to `docs/research/eliza-analysis.md`.
-
-**Key Finding**: Eliza solves conversational agents (chatbots), not code-writing agents. Worth borrowing: plugin dependency resolution, typed events, service lifecycle. Not applicable: character systems, memory embeddings.
-
-### 3. core.async.flow Research
+### 2. core.async.flow Research
 
 Rich Hickey's new dataflow system (April 2025). Three research documents created:
 
@@ -62,8 +63,10 @@ Full design with Malli schemas in `docs/prds/namespace-ui/sse-flow-solution.md`.
 ### 5. Dynamic Context Injection (NOT YET TESTED)
 
 Research found Claude Code supports `type: "system"` messages via stdin:
+
 ```json
 {"type": "system", "content": "...", "session_id": ""}
+
 ```
 
 This could enable per-turn context injection ("cockpit" model). BUT:
@@ -74,46 +77,54 @@ This could enable per-turn context injection ("cockpit" model). BUT:
 ## Files Changed/Created This Session
 
 ### Changed
+
 - `src/seon/ai/claude.clj` - Channel buffer fix (line 685)
 - `.gitignore` - Removed `reference-code/` ignore (allows submodules)
 - `docs/prds/dynamic-context/prd.md` - Updated with findings
 
 ### Created
-- `docs/research/eliza-analysis.md`
+
 - `docs/prds/dynamic-context/async-flow-research.md`
 - `docs/prds/dynamic-context/research-findings.md` (if agent wrote it)
 - `docs/architecture/flow-foundation.md`
 - `docs/prds/namespace-ui/sse-flow-solution.md`
-- `reference-code/eliza/` (cloned repo)
 
 ## Immediate Next Steps
 
 ### Priority 1: Implement SSE Flow Solution
+
 The design is complete. Implementation phases:
 1. Create `src/seon/web/sse/flow.clj` with schemas
 2. Hook into clj-reload
 3. Replace `refresh-all!` with `emit-change!`
 
 Launch agent:
+
 ```clojure
 (user/launch-agent!! 'seon.web.sse.flow
   "Read docs/prds/namespace-ui/sse-flow-solution.md and implement Phase 1.
    Create src/seon/web/sse/flow.clj with the Malli schemas and step functions.
    Write tests. Do NOT modify existing SSE code yet.")
+
 ```
 
 ### Priority 2: Test Context Injection
+
 Test if `type: "system"` messages work:
+
 ```clojure
 (user/launch-agent!! 'seon.research.context-injection
   "Read docs/prds/dynamic-context/prd.md Phase 0.
    Test system message injection with unique markers.
    Verify replacement vs append behavior.
    Write findings to docs/prds/dynamic-context/research-findings.md")
+
 ```
 
 ### Priority 3: Commit Changes
+
 The channel fix should be committed:
+
 ```bash
 git add src/seon/ai/claude.clj
 git commit -m "fix(claude): use sliding-buffer to prevent channel deadlock
@@ -122,6 +133,7 @@ The 100 message 'limit' was our channel buffer filling up.
 Changed from (chan 100) to (chan (sliding-buffer 1000)).
 
 Co-Authored-By: Claude <noreply@anthropic.com>"
+
 ```
 
 ## Key Architectural Decisions
@@ -153,6 +165,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 
 ;; Search with Gemini
 (user/search "query")
+
 ```
 
 ## Transfer Prompt for New Session

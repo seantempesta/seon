@@ -4,15 +4,17 @@
    Transforms clj-kondo analysis output (via seon.graph.analyzer/extract-entities)
    into Datalevin entities and transacts them into the master database.
 
-   Two ingestion modes:
-   - Bulk: ingest-analysis! for full project analysis at startup
-   - Incremental: ingest-incremental! for single-form updates during agent work
+   Uses upsert + retract-stale pattern: identity attrs handle create-or-update,
+   then entities present in the old scan but absent from the new scan are retracted.
+   This prevents data loss when a scan is incomplete.
 
    Entity types stored (discriminated by unique identity attrs, no :graph/type):
    - :seon.ns/*       - Namespace definitions (identity: :seon.ns/name)
    - :seon.fn/*       - Function definitions (identity: :seon.fn/qualified-name)
+   - :seon.var/*      - Var definitions (identity: :seon.var/qualified-name)
    - :seon.call/*     - Function call edges
    - :seon.ns.dep/*   - Namespace dependency edges
+   - :seon.spec/*     - Schema/spec entities (identity: :seon.spec/key)
 
    Example:
      (require '[seon.graph.ingest :as ingest])
@@ -21,69 +23,209 @@
      ;; Bulk ingest from project analysis
      (let [analysis (analyzer/analyze-project! {})
            entities (analyzer/extract-entities {::analyzer/raw-analysis (::analyzer/raw-analysis analysis)})]
-       (ingest/ingest-analysis! {::conn my-conn ::entities entities}))
+       (ingest/ingest-analysis! {::db-name :seon.runtime ::entities entities}))
 
-     ;; Incremental ingest from a single form
-     (let [analysis (analyzer/analyze-form {::analyzer/source \"(defn foo [x] x)\"})
-           entities (analyzer/extract-entities {::analyzer/raw-analysis (::analyzer/raw-analysis analysis)})]
-       (ingest/ingest-incremental! {::conn my-conn ::entities entities}))"
-  (:require [datalevin.core :as d]
+     ;; Incremental ingest for a single namespace
+     (ingest/ingest-namespace! {::db-name :seon.runtime ::ns-name \"seon.foo\"
+                                ::functions fns ::specs specs ::vars vars})"
+  (:require [seon.db :as db]
+            [seon.db.datalevin.conn :as dl-conn]
+            [seon.db.schema :as db-schema]
             [seon.graph.analyzer :as analyzer]
             [seon.render :as render]
             [seon.schema :as schema]
             [taoensso.timbre :as log]))
 
 ;;; ---------------------------------------------------------------------------
-;;; Datalevin Schema
+;;; Attribute Schema Registration (must come before entity schemas)
 ;;; ---------------------------------------------------------------------------
+
+;; Namespace entity attrs
+(schema/register! :seon.ns/name [:string {:seon.db/identity true}])
+(schema/register! :seon.ns/file :string)
+(schema/register! :seon.ns/doc :string)
+(schema/register! :seon.ns/target :keyword)
+(schema/register! :seon.ns/dynamic? :boolean)
+
+;; Function entity attrs
+(schema/register! :seon.fn/qualified-name [:string {:seon.db/identity true}])
+(schema/register! :seon.fn/namespace :string)
+(schema/register! :seon.fn/name :string)
+(schema/register! :seon.fn/doc :string)
+(schema/register! :seon.fn/arglists :string)
+(schema/register! :seon.fn/row :int)
+(schema/register! :seon.fn/private :boolean)
+(schema/register! :seon.fn/updated-at :inst)
+(schema/register! :seon.fn/input-spec :seon.db/ref)
+(schema/register! :seon.fn/output-spec :seon.db/ref)
+
+;; Var entity attrs
+(schema/register! :seon.var/qualified-name [:string {:seon.db/identity true}])
+(schema/register! :seon.var/namespace :string)
+(schema/register! :seon.var/name :string)
+(schema/register! :seon.var/doc :string)
+(schema/register! :seon.var/row :int)
+(schema/register! :seon.var/private :boolean)
+(schema/register! :seon.var/value-type :keyword)
+(schema/register! :seon.var/updated-at :inst)
+
+;; Call graph attrs
+(schema/register! :seon.call/from-fn :seon.db/ref)
+(schema/register! :seon.call/to-fn :seon.db/ref)
+(schema/register! :seon.call/row :int)
+
+;; NS dependency attrs
+(schema/register! :seon.ns.dep/from-ns :string)
+(schema/register! :seon.ns.dep/to-ns :string)
+(schema/register! :seon.ns.dep/alias :string)
+
+;; Spec/schema attrs
+(schema/register! :seon.spec/key [:keyword {:seon.db/identity true}])
+(schema/register! :seon.spec/namespace :string)
+(schema/register! :seon.spec/definition :string)
+(schema/register! :seon.spec/base-type :keyword)
+(schema/register! :seon.spec/contains-keys [:vector :keyword])
+(schema/register! :seon.spec/optional-keys [:vector :keyword])
+(schema/register! :seon.spec/references [:vector :keyword])
+(schema/register! :seon.spec/updated-at :inst)
+
+;; Shape entities (recursive schema index)
+(schema/register! :seon.shape/id [:string {:seon.db/identity true}])
+(schema/register! :seon.shape/spec-key [:keyword {:optional true}])
+(schema/register! :seon.shape/namespace :string)
+(schema/register! :seon.shape/entries [:vector :seon.db/ref])
+
+;; Entry entities (one per key in a shape)
+(schema/register! :seon.entry/id [:string {:seon.db/identity true}])
+(schema/register! :seon.entry/key :keyword)
+(schema/register! :seon.entry/optional :boolean)
+(schema/register! :seon.entry/injectable :boolean)
+(schema/register! :seon.entry/value-type :keyword)
+(schema/register! :seon.entry/value-shape [:seon.db/ref {:optional true}])
+(schema/register! :seon.entry/collection [:keyword {:optional true}])
+
+;; Function shape refs (alongside existing input-spec/output-spec)
+(schema/register! :seon.fn/input-shape :seon.db/ref)
+(schema/register! :seon.fn/output-shape :seon.db/ref)
+
+;;; ---------------------------------------------------------------------------
+;;; Datalevin Entity Schemas (Malli is the source of truth)
+;;; ---------------------------------------------------------------------------
+
+(def ns-entity-schema
+  "Malli schema for a namespace entity.
+   Identity: :seon.ns/name. All persisted attrs have concrete types."
+  [:map
+   [:seon.ns/name :seon.ns/name]
+   [:seon.ns/doc {:optional true} :string]
+   [:seon.ns/file {:optional true} :string]
+   [:seon.ns/target {:optional true} :keyword]
+   [:seon.ns/dynamic? {:optional true} :boolean]])
+
+(def fn-entity-schema
+  "Malli schema for a function entity.
+   Identity: :seon.fn/qualified-name. Ref fields (:input-spec, :output-spec)
+   point at :seon.spec/key entities via lookup refs at transact time."
+  [:map
+   [:seon.fn/qualified-name :seon.fn/qualified-name]
+   [:seon.fn/namespace :string]
+   [:seon.fn/name :string]
+   [:seon.fn/doc {:optional true} :string]
+   [:seon.fn/arglists {:optional true} :string]
+   [:seon.fn/row {:optional true} :int]
+   [:seon.fn/private :boolean]
+   [:seon.fn/updated-at {:optional true} :inst]
+   [:seon.fn/input-spec {:optional true} :seon.db/ref]
+   [:seon.fn/output-spec {:optional true} :seon.db/ref]
+   [:seon.fn/input-shape {:optional true} :seon.db/ref]
+   [:seon.fn/output-shape {:optional true} :seon.db/ref]])
+
+(def call-entity-schema
+  "Malli schema for a call graph edge entity.
+   No identity key (retract-then-insert). Ref fields point at
+   :seon.fn/qualified-name entities via lookup refs."
+  [:map
+   [:seon.call/from-fn :seon.db/ref]
+   [:seon.call/to-fn :seon.db/ref]
+   [:seon.call/row {:optional true} :int]])
+
+(def ns-dep-entity-schema
+  "Malli schema for a namespace dependency edge entity.
+   No identity key (retract-then-insert)."
+  [:map
+   [:seon.ns.dep/from-ns :string]
+   [:seon.ns.dep/to-ns :string]
+   [:seon.ns.dep/alias {:optional true} :string]])
+
+(def spec-entity-schema
+  "Malli schema for a spec/schema entity.
+   Identity: :seon.spec/key. Cardinality-many fields use [:vector :keyword]."
+  [:map
+   [:seon.spec/key :seon.spec/key]
+   [:seon.spec/namespace :string]
+   [:seon.spec/definition :string]
+   [:seon.spec/base-type :keyword]
+   [:seon.spec/contains-keys {:optional true} [:vector :keyword]]
+   [:seon.spec/optional-keys {:optional true} [:vector :keyword]]
+   [:seon.spec/references {:optional true} [:vector :keyword]]
+   [:seon.spec/updated-at :inst]])
+
+(def var-entity-schema
+  "Malli schema for a var entity (def, not defn).
+   Identity: :seon.var/qualified-name."
+  [:map
+   [:seon.var/qualified-name :seon.var/qualified-name]
+   [:seon.var/namespace :string]
+   [:seon.var/name :string]
+   [:seon.var/doc {:optional true} :string]
+   [:seon.var/row {:optional true} :int]
+   [:seon.var/private :boolean]
+   [:seon.var/value-type {:optional true} :keyword]
+   [:seon.var/updated-at {:optional true} :inst]])
+
+(def shape-entity-schema
+  "Malli schema for a shape entity (recursive schema index).
+   Identity: :seon.shape/id. Entries are refs to entry entities (shared, not components)."
+  [:map
+   [:seon.shape/id :seon.shape/id]
+   [:seon.shape/spec-key {:optional true} :keyword]
+   [:seon.shape/namespace :string]
+   [:seon.shape/entries [:vector :seon.db/ref]]])
+
+(def entry-entity-schema
+  "Malli schema for an entry entity (one key in a shape).
+   Identity: :seon.entry/id. Shared across shapes for dedup."
+  [:map
+   [:seon.entry/id :seon.entry/id]
+   [:seon.entry/key :keyword]
+   [:seon.entry/optional :boolean]
+   [:seon.entry/injectable :boolean]
+   [:seon.entry/value-type :keyword]
+   [:seon.entry/value-shape {:optional true} :seon.db/ref]
+   [:seon.entry/collection {:optional true} :keyword]])
+
+(db-schema/register-entity-schema! "seon.ns" ns-entity-schema)
+(db-schema/register-entity-schema! "seon.fn" fn-entity-schema)
+(db-schema/register-entity-schema! "seon.call" call-entity-schema)
+(db-schema/register-entity-schema! "seon.ns.dep" ns-dep-entity-schema)
+(db-schema/register-entity-schema! "seon.spec" spec-entity-schema)
+(db-schema/register-entity-schema! "seon.var" var-entity-schema)
+(db-schema/register-entity-schema! "seon.shape" shape-entity-schema)
+(db-schema/register-entity-schema! "seon.entry" entry-entity-schema)
 
 (def datalevin-schema
-  "Schema for the knowledge graph in Datalevin."
-  {;; Namespace entities
-   :seon.ns/name       {:db/valueType :db.type/string :db/unique :db.unique/identity}
-   :seon.ns/doc        {:db/valueType :db.type/string}
-   :seon.ns/file       {:db/valueType :db.type/string}
-   :seon.ns/target     {:db/valueType :db.type/keyword}
+  "Schema for the knowledge graph in Datalevin. Derived from Malli entity schemas."
+  (merge (db-schema/malli-map->datalevin-schema ns-entity-schema)
+         (db-schema/malli-map->datalevin-schema fn-entity-schema)
+         (db-schema/malli-map->datalevin-schema call-entity-schema)
+         (db-schema/malli-map->datalevin-schema ns-dep-entity-schema)
+         (db-schema/malli-map->datalevin-schema spec-entity-schema)
+         (db-schema/malli-map->datalevin-schema var-entity-schema)
+         (db-schema/malli-map->datalevin-schema shape-entity-schema)
+         (db-schema/malli-map->datalevin-schema entry-entity-schema)))
 
-   ;; Function entities
-   :seon.fn/qualified-name {:db/valueType :db.type/string :db/unique :db.unique/identity}
-   :seon.fn/namespace      {:db/valueType :db.type/string}
-   :seon.fn/name           {:db/valueType :db.type/string}
-   :seon.fn/doc            {:db/valueType :db.type/string}
-   :seon.fn/arglists       {:db/valueType :db.type/string}
-   :seon.fn/row            {:db/valueType :db.type/long}
-   :seon.fn/private        {:db/valueType :db.type/boolean}
-   :seon.fn/render-input-keys {:db/valueType :db.type/keyword :db/cardinality :db.cardinality/many}
-   :seon.fn/updated-at     {:db/valueType :db.type/instant}
-
-   ;; Call graph (ref-based: points at :seon.fn/qualified-name entities)
-   :seon.call/from-fn  {:db/valueType :db.type/ref}
-   :seon.call/to-fn    {:db/valueType :db.type/ref}
-   :seon.call/row      {:db/valueType :db.type/long}
-
-   ;; NS dependencies
-   :seon.ns.dep/from-ns {:db/valueType :db.type/string}
-   :seon.ns.dep/to-ns   {:db/valueType :db.type/string}
-   :seon.ns.dep/alias   {:db/valueType :db.type/string}
-
-   ;; Spec/schema entities (from static source scanning)
-   :seon.spec/key           {:db/valueType :db.type/keyword :db/unique :db.unique/identity}
-   :seon.spec/namespace     {:db/valueType :db.type/string}
-   :seon.spec/definition    {:db/valueType :db.type/string}
-   :seon.spec/base-type     {:db/valueType :db.type/keyword}
-   :seon.spec/contains-keys {:db/valueType :db.type/keyword :db/cardinality :db.cardinality/many}
-   :seon.spec/updated-at    {:db/valueType :db.type/instant}
-
-   ;; Function-to-spec links (populated by future phases)
-   :seon.fn/input-spec  {:db/valueType :db.type/ref}
-   :seon.fn/output-spec {:db/valueType :db.type/ref}})
-
-;;; ---------------------------------------------------------------------------
-;;; Schema Registration
-;;; ---------------------------------------------------------------------------
-
-(schema/register! ::conn
-                  [:any {:description "Datalevin connection"}])
+(schema/register! ::db-name
+                  [:keyword {:description "Database name keyword (e.g. :seon.runtime)"}])
 
 (schema/register! ::entities
                   [:map {:description "Extracted entities from analyzer"}
@@ -101,6 +243,9 @@
 (schema/register! ::var-usage-count
                   [:int {:min 0 :description "Number of var-usages ingested"}])
 
+(schema/register! ::var-count
+                  [:int {:min 0 :description "Number of vars ingested"}])
+
 (schema/register! ::ns-dependency-count
                   [:int {:min 0 :description "Number of ns-dependencies ingested"}])
 
@@ -114,7 +259,7 @@
                     [:seon.spec/namespace :string]
                     [:seon.spec/definition :string]
                     [:seon.spec/base-type :keyword]
-                    [:seon.spec/updated-at inst?]]])
+                    [:seon.spec/updated-at :inst]]])
 
 (schema/register! ::ingest-result
                   [:map
@@ -122,63 +267,111 @@
                    [::function-count ::function-count]
                    [::var-usage-count ::var-usage-count]
                    [::ns-dependency-count ::ns-dependency-count]
-                   [::spec-count {:optional true} ::spec-count]])
+                   [::spec-count {:optional true} ::spec-count]
+                   [::var-count {:optional true} ::var-count]])
 
 ;;; ---------------------------------------------------------------------------
-;;; Private Implementation
+;;; Private Implementation - Retract Stale
 ;;; ---------------------------------------------------------------------------
 
-(defn- retract-all-with-attr!
-  "Retract all entities that have the given attribute.
-   Used before bulk re-ingestion to avoid stale data."
-  [conn attr]
-  (let [eids (d/q (list :find '?e
-                        :where ['?e attr])
-                  @conn)]
-    (when (seq eids)
-      (d/transact! conn (mapv (fn [[eid]] [:db/retractEntity eid]) eids)))))
+(defn- retract-stale-fns!
+  "Retract functions in namespace not present in new scan."
+  [db-name ns-str new-qualified-names]
+  (let [existing (db/query db-name
+                           '[:find ?e ?qn
+                             :in $ ?ns
+                             :where
+                             [?e :seon.fn/namespace ?ns]
+                             [?e :seon.fn/qualified-name ?qn]]
+                           ns-str)
+        new-set (set new-qualified-names)
+        stale (remove (fn [[_ qn]] (new-set qn)) existing)]
+    (when (seq stale)
+      (db/transact! db-name (mapv (fn [[eid _]] [:db/retractEntity eid]) stale)))))
 
-(defn- retract-functions-in-ns!
-  "Retract all function entities for a specific namespace.
-   Used during incremental updates to replace stale definitions."
-  [conn ns-name]
-  (let [eids (d/q '[:find ?e
-                     :in $ ?ns
-                     :where
-                     [?e :seon.fn/namespace ?ns]]
-                   @conn ns-name)]
-    (when (seq eids)
-      (d/transact! conn (mapv (fn [[eid]] [:db/retractEntity eid]) eids)))))
+(defn- retract-stale-specs!
+  "Retract specs in namespace not present in new scan."
+  [db-name ns-str new-spec-keys]
+  (let [existing (db/query db-name
+                           '[:find ?e ?k
+                             :in $ ?ns
+                             :where
+                             [?e :seon.spec/namespace ?ns]
+                             [?e :seon.spec/key ?k]]
+                           ns-str)
+        new-set (set new-spec-keys)
+        stale (remove (fn [[_ k]] (new-set k)) existing)]
+    (when (seq stale)
+      (db/transact! db-name (mapv (fn [[eid _]] [:db/retractEntity eid]) stale)))))
+
+(defn- retract-stale-vars!
+  "Retract vars in namespace not present in new scan."
+  [db-name ns-str new-qualified-names]
+  (let [existing (db/query db-name
+                           '[:find ?e ?qn
+                             :in $ ?ns
+                             :where
+                             [?e :seon.var/namespace ?ns]
+                             [?e :seon.var/qualified-name ?qn]]
+                           ns-str)
+        new-set (set new-qualified-names)
+        stale (remove (fn [[_ qn]] (new-set qn)) existing)]
+    (when (seq stale)
+      (db/transact! db-name (mapv (fn [[eid _]] [:db/retractEntity eid]) stale)))))
 
 (defn- retract-calls-from-ns!
   "Retract all call entities originating from functions in a specific namespace.
-   Uses ref join: finds calls where from-fn points to a fn entity in the given ns."
-  [conn ns-name]
-  (let [eids (d/q '[:find ?e
-                     :in $ ?ns
-                     :where
-                     [?fn :seon.fn/namespace ?ns]
-                     [?e :seon.call/from-fn ?fn]]
-                   @conn ns-name)]
+   Call edges lack identity attrs, so retract-then-insert is fine."
+  [db-name ns-str]
+  (let [eids (db/query db-name
+                       '[:find ?e
+                         :in $ ?ns
+                         :where
+                         [?fn :seon.fn/namespace ?ns]
+                         [?e :seon.call/from-fn ?fn]]
+                       ns-str)]
     (when (seq eids)
-      (d/transact! conn (mapv (fn [[eid]] [:db/retractEntity eid]) eids)))))
+      (db/transact! db-name (mapv (fn [[eid]] [:db/retractEntity eid]) eids)))))
 
 (defn- retract-ns-deps-from-ns!
-  "Retract all ns-dependency entities originating from a specific namespace."
-  [conn ns-name]
-  (let [eids (d/q '[:find ?e
-                     :in $ ?ns
-                     :where
-                     [?e :seon.ns.dep/from-ns ?ns]]
-                   @conn ns-name)]
+  "Retract all ns-dependency entities originating from a specific namespace.
+   NS-dep edges lack identity attrs, so retract-then-insert is fine."
+  [db-name ns-str]
+  (let [eids (db/query db-name
+                       '[:find ?e
+                         :in $ ?ns
+                         :where
+                         [?e :seon.ns.dep/from-ns ?ns]]
+                       ns-str)]
     (when (seq eids)
-      (d/transact! conn (mapv (fn [[eid]] [:db/retractEntity eid]) eids)))))
+      (db/transact! db-name (mapv (fn [[eid]] [:db/retractEntity eid]) eids)))))
+
+;;; ---------------------------------------------------------------------------
+;;; Private Implementation - Helpers
+;;; ---------------------------------------------------------------------------
 
 (defn- transact-in-batches!
-  "Transact entities in batches to avoid overwhelming Datalevin."
-  [conn entities batch-size]
-  (doseq [batch (partition-all batch-size entities)]
-    (d/transact! conn (vec batch))))
+  "Transact entities in batches to avoid overwhelming Datalevin.
+   Returns {:succeeded N :failed N :errors [...]} for error isolation.
+   Individual batch failures are logged and skipped, not propagated."
+  [db-name entities batch-size]
+  (let [batches (partition-all batch-size entities)
+        results (atom {:succeeded 0 :failed 0 :errors []})]
+    (doseq [batch batches]
+      (try
+        (db/transact! db-name (vec batch))
+        (swap! results update :succeeded + (count batch))
+        (catch Exception e
+          (if (dl-conn/connection-error? e)
+            (log/debug "Batch transact failed (connection)" {:db-name db-name :error (.getMessage e)})
+            (log/warn e "Batch transact failed, isolating error"
+                      {:db-name db-name
+                       :batch-size (count batch)}))
+          (swap! results (fn [r]
+                           (-> r
+                               (update :failed + (count batch))
+                               (update :errors conj (.getMessage e))))))))
+    @results))
 
 (defn- qualified-call?
   "Returns true if both from-fn and to-fn are qualified (contain '/')."
@@ -215,6 +408,22 @@
                  :seon.fn/private false})))
           missing)))
 
+(defn- safe-transact!
+  "Transact with error isolation. Logs and returns false on failure,
+   true on success. Does not propagate exceptions.
+   Connection errors log at DEBUG (message only) since they are handled
+   by the reader/writer backoff. Other errors log at WARN with full trace."
+  [db-name tx-data label]
+  (try
+    (db/transact! db-name tx-data)
+    true
+    (catch Exception e
+      (if (dl-conn/connection-error? e)
+        (log/debug "Transact failed (connection)" {:label label :error (.getMessage e)})
+        (log/warn e "Transact failed (isolated)" {:label label
+                                                  :tx-count (count tx-data)}))
+      false)))
+
 (def ^:const batch-size
   "Entities per Datalevin transaction.
    Tuned for memory vs latency tradeoff on typical project analysis."
@@ -224,18 +433,111 @@
 ;;; Public API
 ;;; ---------------------------------------------------------------------------
 
+(defn ingest-namespace!
+  "Ingest entities for a single namespace using upsert + retract-stale.
+
+   Identity attrs (:seon.fn/qualified-name, :seon.spec/key, :seon.var/qualified-name)
+   handle create-or-update automatically. Only entities in the old scan but absent
+   from the new scan are retracted, preventing data loss from incomplete scans.
+
+   Call edges and ns-deps use retract-then-insert (they lack identity attrs).
+
+   Request keys:
+     ::db-name     - Required. Database name keyword (e.g. :seon.runtime)
+     ::ns-name     - Required. Namespace name string
+     ::functions   - Optional. Function entities with :seon.fn/* keys
+     ::specs       - Optional. Spec entities with :seon.spec/* keys
+     ::vars        - Optional. Var entities with :seon.var/* keys
+     ::call-edges  - Optional. Call graph edges with :seon.call/* keys
+     ::ns-deps     - Optional. Namespace dependencies with :seon.ns.dep/* keys
+     ::ns-entities - Optional. Namespace entity maps with :seon.ns/* keys
+     ::shapes      - Optional. Shape entities with :seon.shape/* keys
+     ::entries     - Optional. Entry entities with :seon.entry/* keys
+
+   Returns map with counts of ingested entities."
+  [{::keys [db-name functions specs vars call-edges ns-deps ns-entities shapes entries]
+    ns-str ::ns-name}]
+  (when ns-str
+    ;; 1. Upsert namespace entities
+    (when (seq ns-entities)
+      (safe-transact! db-name (vec ns-entities) (str ns-str "/ns-entities")))
+
+    ;; 2. Upsert specs BEFORE functions (functions reference specs via lookup refs)
+    (when (seq specs)
+      (safe-transact! db-name (vec specs) (str ns-str "/specs")))
+
+    ;; 3. Upsert entries BEFORE shapes.
+    ;;    Entries may reference shapes via :seon.entry/value-shape (nested maps).
+    ;;    Shapes reference entries via :seon.shape/entries.
+    ;;    To avoid circular ref issues: transact entries without value-shape first,
+    ;;    then shapes, then add value-shape refs to entries that have them.
+    (when (seq entries)
+      (let [entries-base (mapv #(dissoc % :seon.entry/value-shape) entries)
+            entries-with-vs (filterv :seon.entry/value-shape entries)]
+        (safe-transact! db-name entries-base (str ns-str "/entries-base"))
+        ;; 4. Upsert shapes (now entries exist for shape refs)
+        (when (seq shapes)
+          (safe-transact! db-name (vec shapes) (str ns-str "/shapes")))
+        ;; 5. Add value-shape refs to entries (now shapes exist)
+        (when (seq entries-with-vs)
+          (let [vs-updates (mapv (fn [e]
+                                   {:seon.entry/id (:seon.entry/id e)
+                                    :seon.entry/value-shape (:seon.entry/value-shape e)})
+                                 entries-with-vs)]
+            (safe-transact! db-name vs-updates (str ns-str "/entry-value-shapes"))))))
+    ;; If no entries but shapes exist, still transact shapes
+    (when (and (empty? entries) (seq shapes))
+      (safe-transact! db-name (vec shapes) (str ns-str "/shapes")))
+
+    ;; 5. Upsert functions + stubs for call graph targets
+    (let [qualified-usages (filterv qualified-call? (or call-edges []))
+          known-qnames (into #{} (map :seon.fn/qualified-name) (or functions []))
+          stubs (compute-stub-entities known-qnames qualified-usages)
+          all-fns (into (vec (or functions [])) stubs)]
+      (when (seq all-fns)
+        (safe-transact! db-name (vec all-fns) (str ns-str "/functions")))
+
+      ;; 6. Upsert vars
+      (when (seq vars)
+        (safe-transact! db-name (vec vars) (str ns-str "/vars")))
+
+      ;; 7. Retract stale entities (in old scan but not in new)
+      (retract-stale-fns! db-name ns-str (map :seon.fn/qualified-name all-fns))
+      (retract-stale-specs! db-name ns-str (map :seon.spec/key specs))
+      (retract-stale-vars! db-name ns-str (map :seon.var/qualified-name vars))
+
+      ;; 8. Call edges + ns-deps: retract-then-insert (no identity attrs)
+      (retract-calls-from-ns! db-name ns-str)
+      (when (seq qualified-usages)
+        (let [ref-calls (mapv call-entity->lookup-refs qualified-usages)]
+          (transact-in-batches! db-name ref-calls batch-size)))
+
+      (retract-ns-deps-from-ns! db-name ns-str)
+      (when (seq ns-deps)
+        (safe-transact! db-name (vec ns-deps) (str ns-str "/ns-deps")))
+
+      (render/invalidate-render-cache!)
+      {::namespace-count (count (or ns-entities []))
+       ::function-count (count all-fns)
+       ::var-usage-count (count qualified-usages)
+       ::ns-dependency-count (count (or ns-deps []))
+       ::spec-count (count (or specs []))
+       ::var-count (count (or vars []))
+       ::shape-count (count (or shapes []))
+       ::entry-count (count (or entries []))})))
+
 (defn ingest-analysis!
   "Bulk ingest extracted entities into Datalevin.
 
-   Clears existing graph data and replaces with fresh analysis.
-   Use this for initial graph population at startup.
-
-   Note: No :malli/schema - conn is a runtime object that cannot be generated.
+   Uses upsert + retract-stale per namespace. Safe for initial graph population
+   at startup -- entities not in the new scan are retracted, but entities the
+   analyzer finds are upserted (not deleted and re-created).
 
    Request keys:
-     ::conn     - Required. Datalevin connection (runtime object)
+     ::db-name  - Required. Database name keyword (e.g. :seon.runtime)
      ::entities - Required. Extracted entities from analyzer/extract-entities
      ::specs    - Optional. Spec entities from scanner/scan-directory
+     ::vars     - Optional. Var entities from scanner
 
    Response keys:
      ::namespace-count     - Number of namespaces ingested
@@ -243,148 +545,131 @@
      ::var-usage-count     - Number of var-usages ingested
      ::ns-dependency-count - Number of namespace dependencies ingested
      ::spec-count          - Number of specs ingested (0 if none provided)
+     ::var-count           - Number of vars ingested (0 if none provided)
 
    Example:
-     (ingest-analysis! {::conn conn ::entities entities ::specs specs})"
-  [{::keys [conn entities specs]}]
-  (let [namespaces (::analyzer/namespaces entities)
-        functions (::analyzer/functions entities)
-        var-usages (::analyzer/var-usages entities)
-        ns-deps (::analyzer/namespace-usages entities)]
-    ;; Clear existing graph data (calls before fns since calls hold refs to fns)
-    (log/debug "Clearing existing graph data...")
-    (retract-all-with-attr! conn :seon.call/from-fn)
-    (retract-all-with-attr! conn :seon.ns.dep/from-ns)
-    (retract-all-with-attr! conn :seon.fn/qualified-name)
-    (retract-all-with-attr! conn :seon.ns/name)
-    (retract-all-with-attr! conn :seon.spec/key)
-
-    ;; Ingest new data in order: namespaces, functions+stubs, calls (with lookup refs)
-    (log/debug "Ingesting namespaces..." {:count (count namespaces)})
-    (transact-in-batches! conn namespaces batch-size)
-
-    ;; Filter to qualified calls only, create stubs, convert to lookup refs
-    (let [qualified-usages (filterv qualified-call? var-usages)
-          known-qnames (into #{} (map :seon.fn/qualified-name) functions)
-          stubs (compute-stub-entities known-qnames qualified-usages)
-          all-fns (into (vec functions) stubs)]
-      (log/debug "Ingesting functions..." {:count (count all-fns) :stubs (count stubs)})
-      (transact-in-batches! conn all-fns batch-size)
-
-      ;; Convert calls to use lookup refs
-      (let [ref-calls (mapv call-entity->lookup-refs qualified-usages)]
-        (log/debug "Ingesting var-usages..." {:count (count ref-calls)})
-        (transact-in-batches! conn ref-calls batch-size))
-
-      (log/debug "Ingesting ns-dependencies..." {:count (count ns-deps)})
-      (transact-in-batches! conn ns-deps batch-size)
-
-      ;; Ingest specs if provided
-      (when (seq specs)
-        (log/debug "Ingesting specs..." {:count (count specs)})
-        (transact-in-batches! conn specs batch-size))
-
-      (let [result {::namespace-count (count namespaces)
-                    ::function-count (count all-fns)
-                    ::var-usage-count (count qualified-usages)
-                    ::ns-dependency-count (count ns-deps)
-                    ::spec-count (count (or specs []))}]
-        (log/info "Knowledge graph ingestion complete" result)
-        (render/invalidate-render-cache!)
-        result))))
-
-(defn ingest-incremental!
-  "Incrementally ingest entities for a single form/namespace change.
-
-   Replaces existing entities for the affected namespace(s) and adds
-   new ones. This is used after each agent eval to keep the graph current.
-
-   For namespaces and functions, retract-then-insert ensures no stale data.
-   Call entities and ns-dependencies from the affected namespace are also replaced.
-
-   Note: No :malli/schema - conn is a runtime object that cannot be generated.
-
-   Request keys:
-     ::conn     - Required. Datalevin connection (runtime object)
-     ::entities - Required. Extracted entities from analyzer/extract-entities
-
-   Response keys:
-     ::namespace-count     - Number of namespaces ingested
-     ::function-count      - Number of functions ingested
-     ::var-usage-count     - Number of var-usages ingested
-     ::ns-dependency-count - Number of namespace dependencies ingested
-
-   Example:
-     (ingest-incremental! {::conn conn ::entities entities})"
-  [{::keys [conn entities]}]
+     (ingest-analysis! {::db-name :seon.runtime ::entities entities ::specs specs})"
+  [{::keys [db-name entities specs vars]}]
   (let [namespaces (::analyzer/namespaces entities)
         functions (::analyzer/functions entities)
         var-usages (::analyzer/var-usages entities)
         ns-deps (::analyzer/namespace-usages entities)
-        ;; Determine affected namespaces for targeted retraction
-        affected-ns-names (into #{}
-                                (concat
-                                 (map :seon.ns/name namespaces)
-                                 (map :seon.fn/namespace functions)
-                                 (keep (fn [vu]
-                                         (let [from (:seon.call/from-fn vu)]
-                                           ;; Extract ns from "ns/fn" or just "ns"
-                                           (if (.contains ^String from "/")
-                                             (subs from 0 (.indexOf ^String from "/"))
-                                             from)))
-                                       var-usages)
-                                 (map :seon.ns.dep/from-ns ns-deps)))]
-    ;; Retract existing data for affected namespaces only
-    ;; Retract calls BEFORE functions (calls use ref joins on fn entities)
-    (doseq [ns-name affected-ns-names]
-      (retract-calls-from-ns! conn ns-name)
-      (retract-functions-in-ns! conn ns-name)
-      (retract-ns-deps-from-ns! conn ns-name))
+        ;; Group entities by namespace for per-ns upsert
+        fns-by-ns (group-by :seon.fn/namespace functions)
+        specs-by-ns (group-by :seon.spec/namespace specs)
+        vars-by-ns (group-by :seon.var/namespace vars)
+        ns-deps-by-ns (group-by :seon.ns.dep/from-ns ns-deps)
+        calls-by-ns (group-by (fn [vu]
+                                (let [from (:seon.call/from-fn vu)]
+                                  (if (.contains ^String from "/")
+                                    (subs from 0 (.indexOf ^String from "/"))
+                                    from)))
+                              var-usages)
+        ns-entities-by-ns (group-by :seon.ns/name namespaces)
+        ;; All affected namespaces
+        all-ns-names (into #{}
+                           (concat (keys fns-by-ns) (keys specs-by-ns)
+                                   (keys vars-by-ns) (keys ns-deps-by-ns)
+                                   (keys calls-by-ns) (keys ns-entities-by-ns)))
+        ;; Accumulate counts
+        totals (atom {::namespace-count 0 ::function-count 0
+                      ::var-usage-count 0 ::ns-dependency-count 0
+                      ::spec-count 0 ::var-count 0})]
+    (log/debug "Ingesting graph data for namespaces..." {:count (count all-ns-names)})
+    (doseq [ns-str all-ns-names]
+      (when-let [result (ingest-namespace!
+                         {::db-name db-name
+                          ::ns-name ns-str
+                          ::functions (get fns-by-ns ns-str)
+                          ::specs (get specs-by-ns ns-str)
+                          ::vars (get vars-by-ns ns-str)
+                          ::call-edges (get calls-by-ns ns-str)
+                          ::ns-deps (get ns-deps-by-ns ns-str)
+                          ::ns-entities (get ns-entities-by-ns ns-str)})]
+        (swap! totals (fn [t]
+                        (merge-with + t (select-keys result
+                                                     [::namespace-count ::function-count
+                                                      ::var-usage-count ::ns-dependency-count
+                                                      ::spec-count ::var-count]))))))
+    (let [result @totals]
+      (log/info "Knowledge graph ingestion complete" result)
+      result)))
 
-    ;; Upsert namespace entities (identity attr :seon.ns/name handles upsert)
-    (when (seq namespaces)
-      (d/transact! conn (vec namespaces)))
+(defn ingest-incremental!
+  "Incrementally ingest entities for a single namespace change.
 
-    ;; Insert new functions + stubs (identity attr handles upsert)
-    (let [qualified-usages (filterv qualified-call? var-usages)
-          known-qnames (into #{} (map :seon.fn/qualified-name) functions)
-          stubs (compute-stub-entities known-qnames qualified-usages)
-          all-fns (into (vec functions) stubs)]
-      (when (seq all-fns)
-        (d/transact! conn (vec all-fns)))
+   Delegates to ingest-namespace! which uses upsert + retract-stale.
+   Kept for backward compatibility with callers that pass ::entities.
 
-      ;; Convert calls to lookup refs and transact
-      (when (seq qualified-usages)
-        (let [ref-calls (mapv call-entity->lookup-refs qualified-usages)]
-          (transact-in-batches! conn ref-calls batch-size)))
-      (when (seq ns-deps)
-        (d/transact! conn (vec ns-deps)))
+   Request keys:
+     ::db-name  - Required. Database name keyword (e.g. :seon.runtime)
+     ::entities - Required. Extracted entities from analyzer/extract-entities
+     ::specs    - Optional. Spec entities from scanner/scan-file
+     ::vars     - Optional. Var entities from scanner
 
-      (render/invalidate-render-cache!)
-      {::namespace-count (count namespaces)
-       ::function-count (count all-fns)
-       ::var-usage-count (count qualified-usages)
-       ::ns-dependency-count (count ns-deps)})))
+   Returns map with counts of ingested entities."
+  [{::keys [db-name entities specs vars]}]
+  (let [namespaces (::analyzer/namespaces entities)
+        functions (::analyzer/functions entities)
+        var-usages (::analyzer/var-usages entities)
+        ns-deps (::analyzer/namespace-usages entities)
+        ;; Determine the single namespace being updated
+        ns-str (or (:seon.ns/name (first namespaces))
+                   (:seon.fn/namespace (first functions))
+                   (:seon.spec/namespace (first specs)))]
+    (if-not ns-str
+      {::namespace-count 0 ::function-count 0 ::var-usage-count 0
+       ::ns-dependency-count 0 ::spec-count 0 ::var-count 0}
+      (ingest-namespace!
+       {::db-name db-name
+        ::ns-name ns-str
+        ::functions functions
+        ::specs specs
+        ::vars vars
+        ::call-edges var-usages
+        ::ns-deps ns-deps
+        ::ns-entities namespaces}))))
+
+(defn ingest-file!
+  "Extract graph from a source file and transact into Datalevin.
+
+   Uses seon.graph.extract for unified extraction pipeline, then
+   delegates to ingest-namespace! for transacting.
+
+   Request keys:
+     ::db-name   - Database name keyword (e.g. :seon.runtime)
+     ::file-path - Path to a Clojure source file
+
+   Returns map with counts of ingested entities."
+  [{::keys [db-name file-path]}]
+  (require 'seon.graph.extract)
+  (let [extract-fn (resolve 'seon.graph.extract/extract-graph-from-file)
+        graph (extract-fn {:seon.graph.extract/file-path file-path})
+        ns-str (:seon.graph.extract/ns-name graph)]
+    (if-not ns-str
+      {::spec-count 0 ::function-count 0 ::var-count 0}
+      (ingest-namespace!
+       {::db-name db-name
+        ::ns-name ns-str
+        ::functions (:seon.graph.extract/functions graph)
+        ::specs (:seon.graph.extract/specs graph)
+        ::vars (:seon.graph.extract/vars graph)
+        ::call-edges (:seon.graph.extract/call-edges graph)
+        ::ns-deps (:seon.graph.extract/ns-deps graph)
+        ::ns-entities (:seon.graph.extract/namespaces graph)
+        ::shapes (:seon.graph.extract/shapes graph)
+        ::entries (:seon.graph.extract/entries graph)}))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; REPL Helpers
 ;;; ---------------------------------------------------------------------------
 
 (comment
-  ;; Requires running system with Datalevin
-  (require '[integrant.repl.state :as state])
-  (require '[seon.db.datalevin.conn :as conn])
-
-  ;; Get connection
-  (def mgr (:seon/connection-manager state/system))
-  (def dl-conn (conn/get-master-conn!
-                {:seon.db.datalevin.conn/manager mgr}))
-
   ;; Full project analysis + ingest
   (def project (analyzer/analyze-project! {}))
   (def entities (analyzer/extract-entities
                  {::analyzer/raw-analysis (::analyzer/raw-analysis project)}))
-  (ingest-analysis! {::conn dl-conn ::entities entities})
+  (ingest-analysis! {::db-name :seon.runtime ::entities entities})
 
   ;; Incremental form analysis + ingest
   (def form-result
@@ -393,10 +678,9 @@
   (def form-entities
     (analyzer/extract-entities
      {::analyzer/raw-analysis (::analyzer/raw-analysis form-result)}))
-  (ingest-incremental! {::conn dl-conn ::entities form-entities})
+  (ingest-incremental! {::db-name :seon.runtime ::entities form-entities})
 
   ;; Check what's in the graph
-  (d/q '[:find ?name :where [?e :seon.ns/name ?name]]
-       @dl-conn)
+  (db/query :seon.runtime '[:find ?name :where [?e :seon.ns/name ?name]])
 
   nil)

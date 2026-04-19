@@ -1,4 +1,11 @@
+---
+type: prd
+status: abandoned
+tags: [prd, archive, agent]
+---
+
 # Agent Isolation Architecture
+
 ## Status: COMPLETE — Isolated nREPL + DB per agent via flow harness and session API
 
 **Status**: Phase 7 Complete
@@ -87,6 +94,7 @@ seon/                              # Main repo (orchestrator view)
 │
 ../seon-trading/                   # Git worktree for seon.trading
 └── src/seon/trading/              # Agent works here
+
 ```
 
 ### Why This Architecture
@@ -118,6 +126,7 @@ seon/                              # Main repo (orchestrator view)
 
 ;; Read state
 (:seon.trading/signals @*ctx*)
+
 ```
 
 **Behind the scenes, the system automatically:**
@@ -137,6 +146,7 @@ seon/                              # Main repo (orchestrator view)
 ;;     :seon.trading/notes "investigating volatility spike"
 ;;     :seon.agent/namespace seon.trading   ; reserved, read-only
 ;;     :seon.agent/db <xtdb-connection>}    ; reserved, read-only
+
 ```
 
 The system also provides some reserved keys (prefixed with `:seon.agent/`):
@@ -146,6 +156,7 @@ The system also provides some reserved keys (prefixed with `:seon.agent/`):
  :seon.agent/db          <xtdb-connection>  ; Direct SQL access (Level 3)
  :seon.agent/render      (fn [hiccup] ...)  ; Push UI updates (Phase 5)
  :seon.agent/worktree    "/path/to/worktree"} ; Git worktree (Phase 6)
+
 ```
 
 Most agents ignore `:seon.agent/db`. It's there for when they need SQL performance (see Progressive Complexity below).
@@ -171,6 +182,7 @@ Most agents ignore `:seon.agent/db`. It's there for when they need SQL performan
 (ctx/at {::ctx/db (:seon.agent/db @*ctx*)
          ::ctx/namespace 'seon.trading
          ::ctx/instant #inst "2026-01-04T10:00:00"})
+
 ```
 
 ### Progressive Complexity: The Escape Hatch
@@ -207,6 +219,7 @@ Agents start with just the ctx atom. When they need more power, they can learn:
 ;; Update and delete
 (sql! "UPDATE signals SET direction = ? WHERE _id = ?" "short" "sig-1")
 (sql! "DELETE FROM signals WHERE _id = ?" "sig-1")
+
 ```
 
 **SQL column naming**: Use `snake_case` for columns. Namespaced keywords use `$` separator:
@@ -261,6 +274,7 @@ Agents start with just the ctx atom. When they need more power, they can learn:
   [db namespace-sym]
   ;; Query all valid-time versions - implementation TBD
   ...)
+
 ```
 
 ### Open Design Questions
@@ -291,6 +305,7 @@ See `docs/prds/agent-isolation/research/nrepl-multi-server.md` for full details.
                #'*ns* (find-ns target-ns)
                #'*ctx* ctx-atom))
       (handler msg))))
+
 ```
 
 The middleware runs after `session` (to access the session atom) and before `eval` (to set context).
@@ -321,6 +336,7 @@ The global `sessions` atom is keyed by UUID, so sessions across servers don't co
 
 ```clojure
 (swap! session assoc #'*ns* (find-ns 'seon.trading))
+
 ```
 
 ### REMAINING RESEARCH NEEDED
@@ -352,6 +368,7 @@ The primary `xtdb` database tracks namespaces and agents:
  :agent/branch "agent/trading/20260104-abc123"
  :agent/started-at #inst "2026-01-04T..."
  :agent/status :running}             ; :running, :completed, :failed
+
 ```
 
 ---
@@ -403,6 +420,7 @@ The ctx injection tests were flaky because the middleware descriptor used `"sess
 **Tests:** 17 tests, 54 assertions in `test/seon/orchestrator/nrepl_test.clj`
 
 ### Phase 3: Persisted Context (ctx atom)
+
 > **This is the key innovation.** Agent just uses an atom; we handle persistence.
 
 #### Phase 3a: Research - COMPLETE
@@ -438,9 +456,11 @@ The ctx injection tests were flaky because the middleware descriptor used `"sess
    - XTDB temporal query: 1.0 ms/op
 
 **Recommended Architecture**:
+
 ```
 swap! → add-watch → validate (sync) → debounce timer → agent → XTDB
                     (~1.6 us)        (50-100ms)      (async)  (~7ms)
+
 ```
 
 #### Phase 3b: Implementation
@@ -559,6 +579,7 @@ Created `src/seon/agent/ctx.clj` with full persisted context implementation:
 (swap! *ctx* assoc :seon.agent/namespace 'something-else)
 ;; => ExceptionInfo: Cannot modify reserved key :seon.agent/namespace
 ;;    Reserved :seon.agent/* keys are set by the system and immutable.
+
 ```
 
 **API Surface** (following CONVENTIONS.md - map in, map out):
@@ -741,6 +762,7 @@ Created `src/seon/agent/ctx.clj` with full persisted context implementation:
   {:malli/schema [:=> [:cat ::load-latest-request] ::load-latest-response]}
   [{::keys [db namespace]}]
   ...)
+
 ```
 
 **Test Cases** (all passing - 17 tests, 25 assertions):
@@ -813,10 +835,12 @@ Created `src/seon/orchestrator/session.clj` with the full session API:
 **CLI Tool**: `bin/agent-eval`
 
 Babashka script that provides opaque session-based evaluation:
+
 ```bash
 # Usage: agent-eval <session-id> '<clojure-code>'
 agent-eval acdb234f '(+ 1 2)'
 agent-eval acdb234f '(swap! *ctx* assoc :seon.trading/signals [...])'
+
 ```
 
 The script:
@@ -846,6 +870,7 @@ Modified `start-namespace-nrepl!` to accept optional `:ctx-atom` parameter:
 #### API Examples
 
 **Orchestrator's view** (Clojure API):
+
 ```clojure
 ;; Start a fresh session
 (start-agent-session! {::session/node xtdb-node ::session/namespace 'seon.trading})
@@ -867,9 +892,11 @@ Modified `start-namespace-nrepl!` to accept optional `:ctx-atom` parameter:
 
 ;; Stop session (flushes ctx, stops nREPL)
 (stop-agent-session! {::session/node xtdb-node ::session/id "acdb234f"})
+
 ```
 
 **Agent's view** (CLI tool):
+
 ```bash
 # Agent receives session-id from orchestrator, uses it for all evals
 agent-eval acdb234f '(swap! *ctx* assoc :seon.trading/signals [...])'
@@ -881,6 +908,7 @@ agent-eval acdb234f '(search "XTDB temporal queries")'
 # - XTDB databases
 # - Persistence mechanics
 # - Connection management
+
 ```
 
 #### What's Hidden from Agent
@@ -925,6 +953,7 @@ Helper functions from user namespace (qualify with user/):
 
 All state is automatically persisted. You don't need to save anything manually.
 Each eval response includes the current namespace (;; ns: seon.trading).
+
 ```
 
 ### Phase 4b: MCP Agent Eval Tool - COMPLETE
@@ -962,15 +991,18 @@ During testing of the Clojure Claude SDK, agent evals started hanging indefinite
 Subprocess stdout/stderr → blocking read (slurp) → nREPL thread blocked
                                                      ↓
                                            All evals to that session hang
+
 ```
 
 The JVM thread dump showed:
+
 ```
 "nREPL-ephemeral-session-6" - elapsed=783.55s
    java.lang.Thread.State: RUNNABLE
    at java.io.FileInputStream.readBytes(Native Method)
    - locked <...> (a java.lang.ProcessImpl$ProcessPipeInputStream)
    at clojure.core$slurp.invokeStatic(core.clj:7098)
+
 ```
 
 **Immediate Fix** (completed):
@@ -1047,6 +1079,7 @@ When listing sessions via `list_sessions` MCP tool, now exposes:
 ;; New interrupt_eval tool
 (mcp__seon__interrupt_eval {:session_id "a3a4"})
 ;; => "Interrupt sent. Status: [\"done\" \"interrupted\"]"
+
 ```
 
 **Verified Working**:
@@ -1056,11 +1089,13 @@ When listing sessions via `list_sessions` MCP tool, now exposes:
 - [x] `nrepl_session_id` in create/list responses
 
 ### Phase 5: Web Routing
+
 - [ ] Route by `X-Namespace` header
 - [ ] Scope SSE sessions per namespace
 - [ ] Agent render-fn delivers to correct session
 
 ### Phase 6: Git Worktree Integration
+
 - [ ] Create worktree when namespace agent starts
 - [ ] Branch naming: `agent/{namespace}/{date}`
 - [ ] Worktree cleanup/archival
@@ -1118,6 +1153,7 @@ The SDK enables Seon to programmatically spawn and control Claude Code agents fr
 ;; Terminate
 (sdk/terminate-agent! {::sdk/agent-handle handle
                        ::sdk/node xtdb-node})
+
 ```
 
 **How it works**:
@@ -1133,6 +1169,7 @@ The SDK enables Seon to programmatically spawn and control Claude Code agents fr
 ## Open Questions
 
 ### Resolved
+
 1. ~~**ctx injection mechanism**~~ - Dynamic var `*ctx*` via custom middleware
 2. ~~**nREPL multi-server**~~ - Fully supported, see research doc
 3. ~~**Worktree sync**~~ - clj-reload can load from worktree dirs, one agent at a time
@@ -1140,6 +1177,7 @@ The SDK enables Seon to programmatically spawn and control Claude Code agents fr
 5. ~~**Session ID format**~~ - 8-char lowercase hex via `SecureRandom` (e.g., "acdb234f")
 
 ### Open
+
 6. **Datastar SSE scoping** - How to isolate SSE per namespace?
 7. **Agent POST handling** - How does agent handle form submissions?
 8. **Schema for agent state** - Open schema? Per-namespace? Evolvable?

@@ -1,32 +1,24 @@
 (ns seon.web.routes
   "Simple map-based router for HTTP endpoints.
-   Includes static file serving for /css/* from resources/public/."
+   Includes static file serving for /css/* from resources/public."
   (:require [clojure.string :as str]
             [clojure.java.io :as io]
             [seon.web.handlers :as handlers]
             [seon.web.agents :as agents]
-            [seon.web.namespace :as namespace]
             [seon.web.flows :as flows]
             [seon.web.browser :as browser]
-            [seon.ns.routes :as ns-routes]
-            [seon.primer.handlers :as primer-handlers]))
+            [seon.ns.routes :as ns-routes]))
 
 ;; Use var references (#') so handlers resolve to current fn after reload
 (def routes
   {[:get "/"]                  #'handlers/dashboard
    [:post "/"]                 #'handlers/dashboard-sse
-   [:get "/api/health"]        #'handlers/health
+   [:get "/api/health"]        #'handlers/health-check
    ;; Log viewer routes
    [:get "/logs"]              #'handlers/log-viewer
    [:post "/logs"]             #'handlers/log-viewer-sse
    [:post "/api/logs/filter"]  #'handlers/log-filter
    [:post "/api/logs/refresh"] #'handlers/log-refresh
-   ;; Primer routes
-   [:get "/primer"]                #'primer-handlers/primer-page
-   [:post "/primer"]               #'primer-handlers/primer-sse
-   ;; Primer debug routes
-   [:get "/primer/ctx"]            #'primer-handlers/ctx-handler
-   [:get "/primer/debug"]          #'primer-handlers/debug-page-handler
    ;; Flow monitor routes
    [:get "/flows"]                 #'flows/flows-page
    [:post "/flows"]                #'flows/flows-sse
@@ -47,22 +39,23 @@
     :pattern #"/ns/([a-z][a-z0-9._-]*)/([a-zA-Z][a-zA-Z0-9_!?*%.-]*)"
     :params [:namespace :function]
     :handler #'ns-routes/function-call-handler}
-   ;; Primer action route: /primer/action/:action-id
-   {:method :post
-    :pattern #"/primer/action/(.+)"
-    :params [:action-id]
-    :handler #'primer-handlers/action-handler}
+   ;; Function read: GET /ns/:namespace/:function?:qualified/key=value
+   {:method :get
+    :pattern #"/ns/([a-z][a-z0-9._-]*)/([a-zA-Z][a-zA-Z0-9_!?*%.-]*)"
+    :params [:namespace :function]
+    :handler #'ns-routes/function-get-handler}
    ;; Agent detail routes: /agents/:agent-id
    {:method :get
-    :pattern #"/agents/([a-f0-9]+)"
+    :pattern #"/agents/([A-Za-z0-9]+)"
     :params [:agent-id]
     :handler #'agents/agent-detail-page}
    {:method :post
-    :pattern #"/agents/([a-f0-9]+)"
+    :pattern #"/agents/([A-Za-z0-9]+)"
     :params [:agent-id]
     :handler #'agents/agent-detail-sse}
    ;; Namespace view routes: /ns/{namespace}?id=session_id
    ;; Uses seon.ns.view multimethod rendering system
+   ;; Also handles legacy /{dotted.namespace} URLs via redirect below
    {:method :get
     :pattern #"/ns/([a-z][a-z0-9._-]*)"
     :params [:namespace]
@@ -71,17 +64,15 @@
     :pattern #"/ns/([a-z][a-z0-9._-]*)"
     :params [:namespace]
     :handler #'ns-routes/namespace-sse}
-   ;; Legacy namespace introspection routes: /{namespace} where namespace contains dots
-   ;; e.g., /seon.ai.claude, /seon.web.handlers
-   ;; Must be last since it's a catch-all for dotted paths
+   ;; Legacy redirect: /seon.foo.bar -> /ns/seon.foo.bar
+   ;; Keeps old bookmarks working while unifying on /ns/ pattern
    {:method :get
     :pattern #"/([a-z][a-z0-9._-]*\.[a-z][a-z0-9._-]*)"
     :params [:namespace]
-    :handler #'namespace/namespace-page}
-   {:method :post
-    :pattern #"/([a-z][a-z0-9._-]*\.[a-z][a-z0-9._-]*)"
-    :params [:namespace]
-    :handler #'namespace/namespace-sse}])
+    :handler (fn [req]
+               {:status 301
+                :headers {"Location" (str "/ns/" (get-in req [:path-params :namespace]))}
+                :body ""})}])
 
 (defn match-dynamic-route [method path]
   (some (fn [{route-method :method :keys [pattern params handler]}]
@@ -107,13 +98,15 @@
 
 (defn handler [request]
   (let [method (:request-method request)
-        path   (:uri request)
+        ;; http-kit backslash-escapes ! ? * in URIs — strip backslashes
+        path   (str/replace (:uri request) "\\" "")
         route-handler (routes [method path])]
     (if route-handler
       (route-handler request)
       ;; Try dynamic routes
       (if-let [{:keys [handler path-params]} (match-dynamic-route method path)]
-        (handler (assoc request :path-params path-params))
+        (handler (assoc request :path-params
+                        (update-vals path-params #(str/replace % "\\" ""))))
         ;; Try static files
         (or (when (= method :get) (serve-static path))
             {:status 404

@@ -8,8 +8,11 @@
      [:input {:field :user-name}]
 
    Framework transforms to:
-     [:button {:data-on:click \"@post('/ns/seon.example/increment')\"} \"Add\"]
-     [:input {:name \"user-name\" :data-bind:user-name true}]
+     [:button {:data-on:click \"@post('/ns/seon.example/increment', {contentType:'form'})\"} \"Add\"]
+     [:input {:name \":user-name\" :type \"text\"}]
+
+   Forms POST data as application/x-www-form-urlencoded with qualified keyword
+   names. The server parses keyword keys and Malli-coerces string values.
 
    This is a pure transformation layer - no side effects, no state.
 
@@ -60,40 +63,48 @@
   (subs (name k) 3))
 
 (defn- transform-event-attr
-  "Transform {:on:click :fn-name} to Datastar format.
+  "Transform {:on:click :fn-name} or {:on:click:form :fn-name} to Datastar @post.
 
    Returns [new-key new-value] pair.
    Uses /ns/:namespace/:function URL pattern.
-   If instance-id is provided, appends ?instance=id to URL."
+   If instance-id is provided, appends ?instance=id to URL.
+
+   Two modes:
+   - :on:click (plain) → @post(url) — sends signals as JSON, no form needed
+   - :on:click:form    → @post(url, {contentType:'form'}) — collects FormData
+     from nearest <form> ancestor. Use when button submits form fields."
   [ns-sym instance-id k v]
-  (let [event (extract-event-name k)
+  (let [full-name (name k)
+        form? (str/ends-with? full-name ":form")
+        ;; Strip :form suffix to get the actual event name
+        event (if form?
+                (extract-event-name (keyword (subs full-name 0 (- (count full-name) 5))))
+                (extract-event-name k))
         fn-name (if (keyword? v) (name v) (str v))
         base-url (str "/ns/" ns-sym "/" fn-name)
         url (if instance-id
               (str base-url "?instance=" instance-id)
               base-url)
         datastar-key (keyword (str "data-on:" event))]
-    [datastar-key (str "@post('" url "')")]))
+    [datastar-key (if form?
+                    (str "@post('" url "', {contentType:'form'})")
+                    (str "@post('" url "')"))]))
 
 (defn- transform-field-attr
-  "Transform {:field :name} to Datastar bind format.
+  "Transform {:field :qualified/keyword} to plain HTML name attribute.
 
-   Uses VALUE SYNTAX (data-bind=\"name\") instead of KEY SYNTAX (data-bind:name)
-   because Datastar's key syntax applies camelCase conversion (item-name → itemName)
-   but value syntax preserves the name exactly.
+   The keyword is printed as a string for the name attribute.
+   Server-side middleware reads it back via clojure.edn/read-string.
+
+   Example:
+     :seon.getting-started/exercise -> name=\":seon.getting-started/exercise\"
+     :exercise -> name=\":exercise\"
 
    Returns map of attributes to merge."
   [field-name other-attrs]
-  (let [field-str (if (qualified-keyword? field-name)
-                    ;; Preserve namespace: :seon.trading/symbol → \"seon.trading/symbol\"
-                    (str (namespace field-name) "/" (name field-name))
-                    ;; Simple keyword: :item-name → \"item-name\"
-                    (name field-name))]
-    (merge
-     {:name field-str
-      :data-bind field-str}  ; Value syntax - no camelCase conversion
-     ;; Preserve other attributes like :type, :placeholder, etc.
-     (dissoc other-attrs :field))))
+  (merge
+   {:name (pr-str field-name)}
+   (dissoc other-attrs :field)))
 
 (defn transform-attrs
   "Transform a single attribute map.
@@ -103,7 +114,7 @@
    instance-id - Optional instance ID to include in action URLs
 
    Returns transformed attribute map."
-  {:malli/schema [:=> [:cat NamespaceSymbol [:maybe AttrMap] [:? [:maybe :string]]] [:maybe AttrMap]]}
+  {:malli/schema [:=> [:cat NamespaceSymbol :any [:? [:maybe :string]]] :any]}
   ([ns-sym attrs]
    (transform-attrs ns-sym attrs nil))
   ([ns-sym attrs instance-id]
@@ -177,21 +188,16 @@
   ;; Example usage:
 
   (transform-hiccup 'seon.trading
-    [:div
-     [:h1 "Trading Signals"]
-     [:ul (for [s ["AAPL" "GOOG"]] [:li s])]
-     [:form {:on:submit :add-signal!}
-      [:input {:field :symbol :placeholder "Symbol"}]
-      [:input {:field :price :type "number"}]
-      [:button {:on:click :add-signal!} "Add"]]])
+                    [:form
+                     [:h1 "Trading Signals"]
+                     [:input {:field :seon.trading/symbol :placeholder "Symbol"}]
+                     [:input {:field :seon.trading/price :type "number"}]
+                     [:button {:on:click :add-signal!} "Add"]])
 
   ;; =>
-  ;; [:div
+  ;; [:form
   ;;  [:h1 "Trading Signals"]
-  ;;  [:ul ([:li "AAPL"] [:li "GOOG"])]
-  ;;  [:form {:data-on:submit "@post('/ns/seon.trading/add-signal!')"}
-  ;;   [:input {:name "symbol" :data-bind:symbol true :placeholder "Symbol"}]
-  ;;   [:input {:name "price" :data-bind:price true :type "number"}]
-  ;;   [:button {:data-on:click "@post('/ns/seon.trading/add-signal!')"} "Add"]]]
-
+  ;;  [:input {:name ":seon.trading/symbol" :placeholder "Symbol"}]
+  ;;  [:input {:name ":seon.trading/price" :type "number"}]
+  ;;  [:button {:data-on:click "@post('/ns/seon.trading/add-signal!', {contentType:'form'})"} "Add"]]
   )

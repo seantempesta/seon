@@ -1,6 +1,3 @@
-[submodule "reference-code/xtdb"]
-	path = reference-code/xtdb
-	url = https://github.com/xtdb/xtdb.git
 [submodule "reference-code/malli"]
 	path = reference-code/malli
 	url = https://github.com/metosin/malli.git
@@ -37,9 +34,6 @@
 [submodule "reference-code/reveal"]
 	path = reference-code/reveal
 	url = https://github.com/vlaaad/reveal.git
-[submodule "reference-code/xtdb-inspector"]
-	path = reference-code/xtdb-inspector
-	url = https://github.com/tatut/xtdb-inspector.git
 [submodule "reference-code/datalevin"]
 	path = reference-code/datalevin
 	url = https://github.com/datalevin/datalevin.git
@@ -49,9 +43,6 @@
 [submodule "reference-code/spectomic"]
 	path = reference-code/spectomic
 	url = https://github.com/Provisdom/spectomic
-[submodule "reference-code/eliza"]
-	path = reference-code/eliza
-	url = https://github.com/elizaOS/eliza.git
 [submodule "reference-code/core.async"]
 	path = reference-code/core.async
 	url = https://github.com/clojure/core.async.git
@@ -61,3 +52,39 @@
 [submodule "reference-code/rewrite-clj"]
 	path = reference-code/rewrite-clj
 	url = https://github.com/clj-commons/rewrite-clj.git
+[submodule "reference-code/openclaw"]
+	path = reference-code/openclaw
+	url = https://github.com/openclaw/openclaw.git
+[submodule "reference-code/kaocha"]
+	path = reference-code/kaocha
+	url = https://github.com/lambdaisland/kaocha.git
+[submodule "reference-code/claude-code-lsps"]
+	path = reference-code/claude-code-lsps
+	url = https://github.com/boostvolt/claude-code-lsps.git
+[submodule "reference-code/integrant"]
+	path = reference-code/integrant
+	url = https://github.com/weavejester/integrant.git
+[submodule "reference-code/nippy"]
+	path = reference-code/nippy
+	url = https://github.com/taoensso/nippy.git
+[submodule "reference-code/fressian"]
+	path = reference-code/fressian
+	url = https://github.com/Datomic/fressian.git
+[submodule "reference-code/test.check"]
+	path = reference-code/test.check
+	url = https://github.com/clojure/test.check.git
+[submodule "reference-code/expectations"]
+	path = reference-code/expectations
+	url = https://github.com/clojure-expectations/expectations.git
+[submodule "reference-code/obsidian-linter"]
+	path = reference-code/obsidian-linter
+	url = https://github.com/platers/obsidian-linter.git
+[submodule "reference-code/datahike"]
+	path = reference-code/datahike
+	url = https://github.com/replikativ/datahike.git
+[submodule "reference-code/datahike-lmdb"]
+	path = reference-code/datahike-lmdb
+	url = https://github.com/replikativ/datahike-lmdb.git
+[submodule "reference-code/konserve-lmdb"]
+	path = reference-code/konserve-lmdb
+	url = https://github.com/replikativ/konserve-lmdb.git

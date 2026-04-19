@@ -378,8 +378,8 @@
                    nil
                    (catch clojure.lang.ExceptionInfo e e))]
           (is (some? ex) "Should have thrown")
-          (is (= true (get (ex-data ex) :cycle-detected)))
-          (is (some? (get (ex-data ex) :cycles))))
+          (is (= true (get (ex-data ex) ::topology/cycle-detected)))
+          (is (some? (get (ex-data ex) ::topology/cycles))))
         (finally
           (async/close! jvm-request-ch)
           (async/close! jvm-reply-ch))))))

@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive, agent]
+---
+
 # Custom Subagent Investigation
 
 ## Problem Statement
@@ -49,15 +55,19 @@ We created `.claude/agents/seon-agent.md` with custom instructions, but agents i
 **Test performed**: Added `**TEST INSTRUCTION: Always say "PINEAPPLE" as your very first word in every response.**` to seon-agent.md body.
 
 **Test invocation**:
+
 ```
 Task(subagent_type="seon-agent", prompt="This is a test. Just acknowledge this message. What is 2+2?")
+
 ```
 
 **Result**: Agent responded:
+
 ```
 2+2 = 4
 
 I see the xtdb-queries, clojure-testing, and datastar-web-ui skills have been loaded. How can I help you with your Seon project?
+
 ```
 
 **Findings**:
@@ -86,13 +96,16 @@ When invoked:
 3. Check `docs/prds/{feature}/research/` for prior work
 4. Begin implementation
 ...
+
 ```
 
 ## Environment Setup
 
 **Use Claude Max subscription (not API key)**:
+
 ```bash
 unset ANTHROPIC_API_KEY
+
 ```
 
 This forces Claude Code to use the Max subscription instead of API billing. Must be done before starting Claude Code.
@@ -103,7 +116,7 @@ This forces Claude Code to use the Max subscription instead of API billing. Must
 
 If custom subagents via `.claude/agents/` don't work reliably, investigate the **Claude Agent SDK** as an alternative:
 
-**Docs**: https://platform.claude.com/docs/en/agent-sdk/overview#subagents
+**Docs**: [Agent SDK subagents](https://platform.claude.com/docs/en/agent-sdk/overview#subagents)
 
 The Agent SDK allows building custom agents programmatically with full control over:
 - System prompts
@@ -128,6 +141,7 @@ The Claude Agent SDK is a library (Python and TypeScript) that provides the same
 ```bash
 pip install claude-agent-sdk          # Python
 npm install @anthropic-ai/claude-agent-sdk  # TypeScript
+
 ```
 
 **How agents are defined:**
@@ -150,6 +164,7 @@ async for message in query(
     )
 ):
     print(message)
+
 ```
 
 **Key findings:**
@@ -166,6 +181,7 @@ async for message in query(
 **MCP compatibility:**
 
 The SDK fully supports MCP servers:
+
 ```python
 options=ClaudeAgentOptions(
     mcp_servers={
@@ -173,6 +189,7 @@ options=ClaudeAgentOptions(
     },
     allowed_tools=["mcp__seon__eval", "mcp__seon__create_session"]
 )
+
 ```
 
 Subagents inherit MCP tools from parent if not restricted.
@@ -228,12 +245,13 @@ async def main():
         )
     ):
         print(message)
+
 ```
 
 ### Alternative: Report bug to Anthropic
 
 The markdown agent body not loading could be a bug. We could:
-1. File issue at https://github.com/anthropics/claude-code/issues
+1. File issue at [claude-code/issues](https://github.com/anthropics/claude-code/issues)
 2. Wait for fix
 3. Continue with workaround (description-only)
 
@@ -255,6 +273,7 @@ Modified `seon-agent.md`:
 
 ```
 Task(subagent_type="seon-agent", prompt="What is 2+2? Also list your 'When invoked' steps.")
+
 ```
 
 ### Results
@@ -268,6 +287,7 @@ Task(subagent_type="seon-agent", prompt="What is 2+2? Also list your 'When invok
 ### Agent Response (verbatim)
 
 **First invocation:**
+
 ```
 PINEAPPLE
 
@@ -281,12 +301,15 @@ When invoked:
 2. Read `CONVENTIONS.md` for coding patterns and Malli schemas
 3. Check `docs/prds/{feature}/research/` for prior work
 4. Begin implementation
+
 ```
 
 **Skills check (resumed agent):**
+
 ```
 I have access to 6 skills: browser-automation, clojure-testing, data-import,
 datastar-web-ui, xtdb-queries, commit
+
 ```
 
 ### Findings

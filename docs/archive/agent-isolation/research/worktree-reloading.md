@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive, agent]
+---
+
 # Research: Worktree Code Reloading in Shared JVM
 
 **Date**: 2026-01-04
@@ -29,6 +35,7 @@
 ;; Reload detects and loads files from worktree
 (reload/reload {:only :all})
 ;; => {:loaded [... seon.test.worktree-namespace ...]}
+
 ```
 
 **Key Mechanism**: clj-reload uses `Compiler/load` with file content (`slurp`), bypassing the classpath entirely:
@@ -39,6 +46,7 @@
   (let [[_ ext] (re-matches #".*\.([^.]+)" (.getName file))
         path    (-> ns str (str/replace #"\-" "_") (str/replace #"\." "/") (str "." ext))]
     (Compiler/load (StringReader. content) path (.getName file))))
+
 ```
 
 ### 2. Can we call reload/init with different dirs per agent?
@@ -52,6 +60,7 @@
 ;; And line 54
 (def ^:private *state
   (atom {}))
+
 ```
 
 Each call to `(reload/init ...)` **replaces** the global config. This means:
@@ -77,6 +86,7 @@ Clojure's namespace registry is a **static global map**:
 ```java
 // From Clojure source: clojure.lang.Namespace
 static ConcurrentHashMap<Symbol, Namespace> namespaces = new ConcurrentHashMap<>();
+
 ```
 
 When you load a namespace, it replaces any previous definition. There is no per-thread or per-classloader isolation without loading a completely separate Clojure runtime.
@@ -98,6 +108,7 @@ When you load a namespace, it replaces any previous definition. There is no per-
 ```clojure
 seon.dev.hook {:ns-files #{"/tmp/test-worktree/src/seon/dev/hook.clj"
                           "src/seon/dev/hook.clj"}}
+
 ```
 
 On reload, the behavior depends on modification timestamps. This is a potential source of confusion.
@@ -113,6 +124,7 @@ On reload, the behavior depends on modification timestamps. This is a potential 
 mkdir -p /tmp/test-worktree/src/seon/test
 echo "(ns seon.test.worktree-reload) (def test-value :from-worktree)" > \
      /tmp/test-worktree/src/seon/test/worktree_reload.clj
+
 ```
 
 ```clojure
@@ -126,6 +138,7 @@ echo "(ns seon.test.worktree-reload) (def test-value :from-worktree)" > \
 ;; Verify it loaded
 seon.test.worktree-reload/test-value
 ;; => :from-worktree
+
 ```
 
 ### Test 2: Modifying and Reloading
@@ -134,6 +147,7 @@ seon.test.worktree-reload/test-value
 # Update the file
 echo "(ns seon.test.worktree-reload) (def test-value :updated) (def new-var 42)" > \
      /tmp/test-worktree/src/seon/test/worktree_reload.clj
+
 ```
 
 ```clojure
@@ -142,6 +156,7 @@ echo "(ns seon.test.worktree-reload) (def test-value :updated) (def new-var 42)"
 
 [seon.test.worktree-reload/test-value seon.test.worktree-reload/new-var]
 ;; => [:updated 42]
+
 ```
 
 ### Test 3: Direct require FAILS (Classpath Not Modified)
@@ -150,6 +165,7 @@ echo "(ns seon.test.worktree-reload) (def test-value :updated) (def new-var 42)"
 ;; After reinitializing clj-reload but BEFORE running reload
 (require 'seon.test.worktree-reload)
 ;; => FileNotFoundException: Could not locate seon/test/worktree_reload...
+
 ```
 
 **Conclusion**: clj-reload must explicitly load the namespace; `require` cannot find it.
@@ -163,6 +179,7 @@ echo "(ns seon.test.worktree-reload) (def test-value :updated) (def new-var 42)"
 **Description**: Each agent gets its own clj-reload config pointing to its worktree.
 
 **Implementation**:
+
 ```clojure
 (defn activate-agent-worktree! [agent-worktree-path]
   (reload/init {:dirs [(str agent-worktree-path "/src")
@@ -173,6 +190,7 @@ echo "(ns seon.test.worktree-reload) (def test-value :updated) (def new-var 42)"
 
 (defn reload-agent-code! []
   (reload/reload))
+
 ```
 
 **Pros**:
@@ -194,6 +212,7 @@ echo "(ns seon.test.worktree-reload) (def test-value :updated) (def new-var 42)"
 3. Switch requires explicit handoff
 
 **Implementation**:
+
 ```clojure
 (defn switch-agent-context! [namespace-sym worktree-path]
   ;; 1. Unload any namespaces the previous agent was working on
@@ -205,6 +224,7 @@ echo "(ns seon.test.worktree-reload) (def test-value :updated) (def new-var 42)"
 
   ;; 3. Force reload the agent's namespaces
   (reload/reload {:only (re-pattern (str "^" namespace-sym "\\..*"))}))
+
 ```
 
 **Pros**:
@@ -222,6 +242,7 @@ echo "(ns seon.test.worktree-reload) (def test-value :updated) (def new-var 42)"
 **Description**: Agents cannot use the shared JVM for testing. They run tests via shell commands in their worktree.
 
 **Implementation**:
+
 ```clojure
 ;; Agent's test workflow
 (defn run-tests-in-worktree [worktree-path ns-pattern]
@@ -229,6 +250,7 @@ echo "(ns seon.test.worktree-reload) (def test-value :updated) (def new-var 42)"
     "clj" "-M:test" "-m" "kaocha.runner"
     "--focus" ns-pattern
     :dir worktree-path))
+
 ```
 
 **Pros**:
@@ -282,6 +304,7 @@ Add to **Phase 5: Git Worktree Integration**:
   "Reload namespaces for the currently active agent."
   [namespace-sym]
   (reload/reload {:only (re-pattern (str "^" (str namespace-sym) "(\\..*)?$"))}))
+
 ```
 
 ### Constraints to Document

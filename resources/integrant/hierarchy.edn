@@ -1,0 +1,22 @@
+;; Integrant component hierarchy for Seon.
+;; All components derive from :seon/component, enabling a single assert-key
+;; multimethod for Malli config validation.
+;;
+;; Format: {child-key [parent-key ...]}
+;; Loaded automatically by (ig/load-hierarchy).
+
+{:seon.db.datalevin/server      [:seon/component]
+ :seon.db.datalevin/connections  [:seon/component]
+ :seon/runtime-db                [:seon/component]
+ :seon.schema/registry           [:seon/component]
+ :seon.db.schema/consistency-check [:seon/component]
+ :seon.dev/nrepl                 [:seon/component]
+ :seon.web.server/http-server    [:seon/component]
+ :seon.web/tailwind              [:seon/component]
+ :seon.web/caddy                 [:seon/component]
+ :seon.flow/infrastructure        [:seon/component]
+ :seon.flow/pool                 [:seon/component]
+ :seon.orchestrator/sessions     [:seon/component]
+ :seon.graph/scanner             [:seon/component]
+ :seon.dev/instrumentation        [:seon/component]
+ :seon.ai.claude/sdk             [:seon/component]}

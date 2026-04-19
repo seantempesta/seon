@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # CPU Spike Investigation Report
 
 **Date:** 2026-02-01
@@ -30,10 +36,12 @@ The system experienced a severe CPU spike (load 154, JVM at 698% CPU, XTDB laten
 ### 1. Agent 5ac0 Log (logs/agents/5ac0.log)
 
 The agent log shows 20 lines, ending abruptly:
+
 ```
 2026-02-01T09:02:47Z | TOOL     | Read | sci/core.cljc
 2026-02-01T09:02:59Z | TOOL     | Read | sci/impl/vars.cljc
 2026-02-01T09:03:15Z | TOOL     | Read | sci/impl/interop.cljc
+
 ```
 
 No results were logged for these Read operations. The agent appears to have gotten stuck during/after initiating these reads.
@@ -41,10 +49,12 @@ No results were logged for these Read operations. The agent appears to have gott
 ### 2. XTDB Logs (logs/xtdb.2026-01-31.0.log.gz)
 
 Evidence of previous XTDB stress from Jan 31:
+
 ```
 2026-01-31 14:40:26,971 - 14:40:29,483
 ~30+ XTDB node creations in ~3 seconds
 Each: node creation -> pgwire start -> pgwire stop
+
 ```
 
 This rapid node creation (likely from tests) may have left the XTDB data directory in a stressed state.
@@ -66,6 +76,7 @@ The message persistence path in `seon.ai.claude/launch-agent!`:
 4. No timeout or circuit breaker on persistence
 
 From `seon.ai.claude.clj:389-410`:
+
 ```clojure
 (when (persistable-message-type? msg-type)
   (try
@@ -73,6 +84,7 @@ From `seon.ai.claude.clj:389-410`:
     (catch Exception e
       (Thread/sleep 100)  ; Simple retry after 100ms
       (persist-message! {...}))))  ; No limit on retries
+
 ```
 
 ## Root Cause Analysis
@@ -104,50 +116,62 @@ The agent process (Claude Code CLI) was killed, but:
 ### Immediate (Before Next Agent Launch)
 
 1. **Clear stale data**: Delete old agent databases and compact XTDB
+
 ```bash
 rm -rf data/namespaces/seon.experimental.*
+
 ```
 
 2. **Add XTDB health monitoring**: Check latency before allowing new agent launches
+
 ```clojure
 (defn xtdb-healthy? [node]
   (let [start (System/currentTimeMillis)]
     (db/q node "SELECT 1" [])
     (< (- (System/currentTimeMillis) start) 1000)))
+
 ```
 
 ### Short-Term (This Week)
 
 3. **Add message persistence circuit breaker**:
+
 ```clojure
 ;; Skip persistence if XTDB is slow
 (when (and (persistable-message-type? msg-type)
            (< (xtdb-latency node) 500))
   (persist-message! ...))
+
 ```
 
 4. **Limit persisted content size**:
+
 ```clojure
 ;; Truncate large content in messages
 (defn truncate-content [msg max-size]
   (update msg ::ai/content #(if (> (count %) max-size)
                               (str (subs % 0 max-size) "...[truncated]")
                               %)))
+
 ```
 
 5. **Add agent launch health check**:
+
 ```clojure
 (defn pre-launch-health-check [node]
   (let [health (health/deep-check {::health/node node})]
     (when (= :unhealthy (::health/status health))
       (throw (ex-info "System unhealthy, cannot launch agent" health)))))
+
 ```
 
 ### Medium-Term (This Month)
 
 6. **Async message persistence**: Don't block agent execution on XTDB writes
+
 ```clojure
 (future (persist-message! ...))  ; Non-blocking
+
 ```
 
 7. **XTDB compaction schedule**: Run compaction during idle periods
@@ -158,10 +182,12 @@ rm -rf data/namespaces/seon.experimental.*
    - Max messages per minute
 
 9. **Auto-kill stuck agents**: If no activity for N minutes, terminate
+
 ```clojure
 ;; In health check
 (when (> (minutes-since-activity agent) 5)
   (interrupt! agent))
+
 ```
 
 ### Long-Term

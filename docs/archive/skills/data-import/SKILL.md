@@ -1,4 +1,7 @@
 ---
+type: reference
+status: completed
+tags: [reference, archive, database]
 name: data-import
 description: "Options data import and ThetaData API. Use when loading data, running bulk imports, editing ingest.clj or bulk_load.clj, working with ThetaData Terminal, or parsing OCC option symbols. Use when you see api/import endpoints, bulk-progress table, or need to check import status."
 ---
@@ -24,6 +27,7 @@ curl http://localhost:8080/api/import/status | jq '.current.status'
 
 # 5. Stop if needed
 curl -X POST http://localhost:8080/api/import/stop
+
 ```
 
 ## OCC Symbol Format
@@ -35,6 +39,7 @@ AAPL  240119C00150000
 │     │     └───── Call (C) or Put (P)
 │     └─────────── Expiration YYMMDD
 └───────────────── Ticker (padded to 6 chars)
+
 ```
 
 ## Key Behaviors
@@ -57,6 +62,7 @@ AAPL  240119C00150000
 (ml-options.db.node/query (user/xtdb-node)
   '(-> (from :option-greeks [asset/ticker xt/id])
        (aggregate {:cnt (count xt/id)} asset/ticker)))
+
 ```
 
 ## Key Files

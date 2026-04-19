@@ -1,3 +1,9 @@
+---
+type: prd
+status: abandoned
+tags: [prd, archive, trading, agent]
+---
+
 > **Status: ARCHIVED** — Superseded — old XTDB-first design
 
 > **Status: ARCHIVED** — Superseded — old XTDB-first design
@@ -54,6 +60,7 @@ The agent works with a `ctx` atom that holds session state. All functions take `
 ;;     :session/id "bako"
 ;;     :session/frozen-time #inst "2025-07-15T21:00:00Z"
 ;;     :config/default-lookback 252}
+
 ```
 
 ### Function Signature Convention
@@ -66,6 +73,7 @@ All agent-facing functions follow a consistent pattern:
 (iv-rank ctx {:ticker "SPY" :lookback 60})
 (analyze ctx {:ticker "SPY"})
 (options-chain ctx {:ticker "SPY" :dte 30})
+
 ```
 
 This is explicit, self-documenting, and matches Rails-style conventions.
@@ -86,6 +94,7 @@ src/seon/trading/agent/
 ├── functions.clj    ; Agent-facing trading functions (to be implemented)
 ├── printers.clj     ; Pretty-printers per data type (to be implemented)
 └── template.clj     ; Session template generation
+
 ```
 
 ### Agent-Facing Functions
@@ -117,6 +126,7 @@ All public functions:
      :iv-rank/value 0.73
      :iv-rank/label :elevated
      ...}))
+
 ```
 
 ### Function List (V1)
@@ -153,6 +163,7 @@ All public functions:
 
 ;; Session namespace for isolation
 (:session/namespace @ctx)  ;; => "seon.agent.bako"
+
 ```
 
 ### 2. REPL Recording (V1)
@@ -167,6 +178,7 @@ All public functions:
 ;;                {:role "user" :content "..."}
 ;;                {:role "assistant" :content "..."}]
 ;;     :metadata {...}}
+
 ```
 
 ### 3. Function Discovery (V1)
@@ -178,6 +190,7 @@ All public functions:
 ;;      :doc "IV percentile rank..."
 ;;      :args [:ticker :lookback]}
 ;;     ...]
+
 ```
 
 ### 4. Validated ctx Atom (V2 - Deferred)
@@ -192,6 +205,7 @@ All public functions:
           (throw (ex-info "Invalid ctx update"
                    {:errors (format-errors errors)})))))
     a))
+
 ```
 
 ### 5. Strategy Validation (V2 - Deferred)
@@ -204,6 +218,7 @@ All public functions:
 ;; => {:valid? false
 ;;     :errors [{:path [:entry-conditions 0 :value]
 ;;               :message "Threshold must be between 0 and 1"}]}
+
 ```
 
 ---
@@ -235,6 +250,7 @@ All public functions:
 ## Success Criteria
 
 ### V1 (Analysis Only)
+
 1. **Agent can analyze a ticker** in under 5 function calls
 2. **Session captures all interactions** for training data export
 3. **Errors are agent-friendly** - clear messages, not stack traces
@@ -242,6 +258,7 @@ All public functions:
 5. **Functions are discoverable** - agent can list available functions
 
 ### V2 (Strategy & Backtest)
+
 1. **Agent can define a valid strategy** using the spec as guide
 2. **Invalid strategies are rejected** with clear fix instructions
 3. **Backtests run correctly** with no future data leakage
@@ -252,6 +269,7 @@ All public functions:
 ## Testing Checklist
 
 ### V1
+
 - [ ] Session creation works with pronounceable IDs
 - [ ] All public functions take ctx + opts map
 - [ ] Query function respects temporal bounds (`:as-of`)
@@ -260,6 +278,7 @@ All public functions:
 - [ ] Training data export produces valid format
 
 ### V2 (Deferred)
+
 - [ ] ctx atom rejects unknown keys
 - [ ] ctx atom rejects wrong types
 - [ ] Strategy validation catches all constraint violations
@@ -270,6 +289,7 @@ All public functions:
 ## Implementation Phases
 
 ### V1 Phase 1: Session Infrastructure ✓
+
 - [x] Create `seon.trading.agent.session` namespace
 - [x] Session ID generation (CVCV pattern)
 - [x] REPL input parsing (thinking/code separation)
@@ -277,22 +297,26 @@ All public functions:
 - [x] Training data export
 
 ### V1 Phase 2: Agent Functions (Current)
+
 - [ ] Implement agent-facing wrappers in `seon.trading.agent.functions`
 - [ ] `overview`, `analyze`, `iv-rank`, `skew`, `term-structure`, `options-chain`
 - [ ] Wire up to existing `seon.trading.signals` and `seon.trading.analysis`
 - [ ] Pretty-printers per data type
 
 ### V1 Phase 3: Integration
+
 - [ ] Update `template.clj` to use real functions
 - [ ] Test with real agent sessions
 - [ ] Document learnings
 
 ### V2 Phase 1: Strategies (Deferred)
+
 - Define Strategy spec
 - Implement `define-strategy!` with validation
 - Implement strategy storage
 
 ### V2 Phase 2: Backtesting (Deferred)
+
 - Implement `backtest!` function
 - Generate trade log and performance metrics
 - Handle multi-ticker strategies
@@ -355,6 +379,7 @@ See `research/session-v2-notes.md` for implementation details.
 ;; Full values stored separately
 (:values @ctx)
 ;; => {"abc123" {:iv-rank 0.73 :lookback 252 :raw-data [...]}}
+
 ```
 
 Training data use cases:
@@ -387,6 +412,7 @@ See `research/agent-experience-design.md` for full UX design.
 ## Deliverables
 
 ### V1 (Current)
+
 - [x] `src/seon/trading/agent/session.clj` - Session management, REPL recording
 - [ ] `src/seon/trading/agent/functions.clj` - Agent-facing wrappers
 - [ ] `src/seon/trading/agent/printers.clj` - Pretty-printers
@@ -395,5 +421,6 @@ See `research/agent-experience-design.md` for full UX design.
 - [x] `docs/prds/algorithmic-trading-agent/` - This PRD and research
 
 ### V2 (Deferred)
+
 - [ ] `src/seon/trading/agent/strategy.clj` - Strategy specs and validation
 - [ ] `src/seon/trading/agent/backtest.clj` - Backtesting engine

@@ -1,6 +1,10 @@
+---
+type: research
+status: draft
+tags: [prd, research]
+---
 # Current Spec and Validation Patterns
 
-**Date:** 2024-12-05
 **Analyzed:** db/schema.clj, data/validation.clj, dev/user.clj
 
 ---
@@ -31,6 +35,7 @@ The schema file includes **custom generators** for property-based testing:
 ;; Example from schema.clj
 (def gen-iv (gen/double* {:min 0.05 :max 2.0 :NaN? false :infinite? false}))
 (def gen-delta (gen/double* {:min -1.0 :max 1.0 :NaN? false :infinite? false}))
+
 ```
 
 These generators are used in `test/ml_options/db/schema_test.clj`.
@@ -44,6 +49,7 @@ These generators are used in `test/ml_options/db/schema_test.clj`.
    {:option-quote OptionQuote
     :greeks Greeks
     ...}))
+
 ```
 
 ---
@@ -58,6 +64,7 @@ ThetaData API → validation.clj → XTDB
               filter-valid-records
                      ↓
               (only valid data stored)
+
 ```
 
 ### Key Functions
@@ -79,6 +86,7 @@ ThetaData API → validation.clj → XTDB
     (when (seq invalid)
       (log/warn "Filtered" (count invalid) "invalid records"))
     valid))
+
 ```
 
 ---
@@ -92,11 +100,13 @@ ThetaData API → validation.clj → XTDB
 ```bash
 $ grep -r "m/=>" src/
 (no results)
+
 ```
 
 ### DSL Primitives
 
 Functions like `iv-rank`, `put-call-ratio`, `vanna` have:
+
 - No input validation
 - No output validation
 - No pre/post conditions
@@ -110,6 +120,7 @@ HTTP handlers parse JSON but don't validate against schemas:
 ;; Current pattern in handlers.clj
 (let [body (parse-json request)]
   (start-import! body))  ;; No validation!
+
 ```
 
 ---
@@ -124,6 +135,7 @@ $ grep -r "instrument!" src/
 
 $ grep -r "malli.dev" src/ dev/
 (no results)
+
 ```
 
 **No instrumentation is set up.**
@@ -137,6 +149,7 @@ The user namespace has Integrant lifecycle but no malli.dev:
   (:require [integrant.repl :refer [go halt reset]]
             ...))
 ;; No malli.dev/start! anywhere
+
 ```
 
 ---
@@ -157,28 +170,36 @@ Add function specs and enable dev-time instrumentation.
 **Implementation:**
 
 1. Add to `db/schema.clj`:
+
 ```clojure
 (def PercentileRank [:double {:min 0.0 :max 1.0}])
 (def Percentile [:int {:min 0 :max 100}])
+
 ```
 
-2. Add to `dsl/primitives.clj`:
+1. Add to `dsl/primitives.clj`:
+
 ```clojure
 (m/=> iv-rank [:=> [:cat :some :string [:* :any]] [:maybe PercentileRank]])
+
 ```
 
-3. Add to `env/dev/clj/user.clj`:
+1. Add to `env/dev/clj/user.clj`:
+
 ```clojure
 (require '[malli.dev :as mdev])
 (mdev/start!)
+
 ```
 
 **Pros:**
+
 - Catches errors in REPL
 - Self-documenting
 - Zero prod overhead
 
 **Cons:**
+
 - New pattern to learn
 - Still need tests for correctness
 
@@ -187,6 +208,7 @@ Add function specs and enable dev-time instrumentation.
 Add specs for type/range validation, write tests for calculation correctness.
 
 **Priority:**
+
 1. Specs for input validation (catches nil, wrong types)
 2. Property tests for invariants (result in [0,1])
 3. Unit tests for known values (percentile of [1,2,3,4,5] at 50 = 3)

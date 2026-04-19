@@ -1,6 +1,10 @@
+---
+type: research
+status: draft
+tags: [prd, research, web]
+---
 # Live Widgets Research
 
-**Date:** 2026-01-20
 **Agent:** ade549a (research agent)
 
 ---
@@ -38,6 +42,7 @@ From `reference-code/datastar-clojure/src/dev/examples/broadcast_http_kit.clj`:
       (d*/console-log! conn (str "n: " n))  ; <-- Push to each client
       (catch Exception e
         (println "Error: " e)))))
+
 ```
 
 **Available push methods (from SDK api.clj):**
@@ -52,6 +57,7 @@ From `reference-code/datastar-clojure/src/dev/examples/broadcast_http_kit.clj`:
 ```clojure
 {d*/selector "#target-element"    ; CSS selector
  d*/patch-mode d*/pm-outer}       ; :outer, :inner, :append, :prepend, :before, :after, :replace, :remove
+
 ```
 
 **How Seon currently does it (`src/seon/web/sse.clj`):**
@@ -63,6 +69,7 @@ Seon uses a **broadcast-all pattern** via `core.async/mult`:
 (defn refresh-all! [& _opts]
   (when-let [<refresh-ch @refresh-ch_]
     (a/>!! <refresh-ch :refresh-event)))  ; <-- Notifies all tapped channels
+
 ```
 
 Each SSE handler taps the mult and re-renders its view when notified. This is **polling-style semantics** (signal to re-render) rather than **targeted push** (send specific content to specific clients).
@@ -81,6 +88,7 @@ Each SSE handler taps the mult and re-renders its view when notified. This is **
 (defn push-to-agent! [agent-id html]
   (when-let [sse (get @agent-connections agent-id)]
     (d*/patch-elements! sse html {d*/selector "#agent-status"})))
+
 ```
 
 ---
@@ -90,6 +98,7 @@ Each SSE handler taps the mult and re-renders its view when notified. This is **
 **What does the hook receive when TodoWrite is called?**
 
 The hook receives a JSON payload on stdin with structure:
+
 ```json
 {
   "hook_event_name": "PostToolUse",
@@ -102,14 +111,18 @@ The hook receives a JSON payload on stdin with structure:
   },
   "session_id": "..."
 }
+
 ```
 
 **Verified from `logs/hook-debug.log`:**
+
 ```
 tool=TodoWrite | session=8d219ee9-ecce-4736-865c-93642c3a5617
+
 ```
 
 **And from agent log (e84d):**
+
 ```clojure
 {:todos [{:content "Research proper Clojure hot reload patterns..."
           :status "in_progress"
@@ -118,16 +131,20 @@ tool=TodoWrite | session=8d219ee9-ecce-4736-865c-93642c3a5617
           :status "pending"
           :activeForm "Fixing Datastar expand/collapse"}
          ...]}
+
 ```
 
 **Current limitation:** The hook only handles Edit and Write tools (see `hook.clj` line 47-49):
+
 ```clojure
 (schema/register! ::tool-name
                   [:enum {:description "The tool that triggered the event"}
                    "Edit" "Write"])
+
 ```
 
 **To capture TodoWrite:**
+
 1. Add "TodoWrite" to the `::tool-name` enum
 2. Extract `:todos` from `tool_input`
 3. Store to XTDB as `todo_event` table
@@ -145,6 +162,7 @@ From `bin/mcp-server` (lines 42, 117, 193-248):
 ```clojure
 (def default-timeout-ms 30000)  ;; 30 second default
 (def connect-timeout-ms 5000)   ;; 5 second connection timeout
+
 ```
 
 **The timeout implementation:**
@@ -165,6 +183,7 @@ From `bin/mcp-server` (lines 42, 117, 193-248):
               (do
                 (.setSoTimeout sock (int (min remaining 5000)))
                 ;; ... read response ...)))))
+
 ```
 
 **What happens if eval hangs?**
@@ -186,15 +205,18 @@ From `bin/mcp-server` (lines 42, 117, 193-248):
         (let [result (nrepl-interrupt port nrepl-session-id)]
           ;; ... return result ...)
         {:content [...] :text "Session has no persistent nREPL session ID..."}))))
+
 ```
 
 **Fix recommendation:**
 
 Add automatic interrupt after timeout:
+
 ```clojure
 ;; After timeout, also send interrupt
 (when (= (:ex result) "timeout")
   (nrepl-interrupt port nrepl-session-id))
+
 ```
 
 ---

@@ -1,6 +1,10 @@
+---
+type: research
+status: draft
+tags: [prd, research, web]
+---
 # Viewer Architecture Research
 
-**Date:** 2026-01-20
 **Purpose:** Deep dive into Portal, Reveal, and XTDB Inspector to inform Seon's namespace UI design.
 
 ---
@@ -24,6 +28,7 @@ After analyzing Portal, Reveal, and XTDB Inspector source code, the following pa
 ### Recommended Approach
 
 **Build our own** viewer system using patterns from all three projects, purpose-built for SSE/Datastar. This provides:
+
 - Clean integration with our stack
 - No heavy dependencies
 - Full control over rendering
@@ -50,9 +55,11 @@ Portal uses `clojure.datafy` and `clojure.core.protocols/nav` for interactive da
                     #'datafy {:name 'clojure.datafy/datafy
                               :shortcuts [#{"shift" "enter"}]}}]
   (register! var opts))
+
 ```
 
 **Navigation Flow:**
+
 1. User selects a value and presses Enter
 2. Portal calls `(nav coll k v)` where:
    - `coll` = the parent collection
@@ -76,6 +83,7 @@ Portal uses `clojure.datafy` and `clojure.core.protocols/nav` for interactive da
     {:a 1 :b 2 :c 3}
     {`nav #'nav-dep-anno-tree
      :deps-map {:c #{:b :a}}}))
+
 ```
 
 ### How Reveal Uses Datafy/Nav
@@ -98,6 +106,7 @@ Reveal implements datafy/nav as "actions" that can be invoked on any value.
       (cond
         (not= key ::not-found) #(d/nav datafied-coll key x)
         (not= val ::not-found) #(d/nav datafied-coll x val)))))
+
 ```
 
 **Key Insight:** Reveal threads navigation context via "annotations" alongside values:
@@ -117,6 +126,7 @@ Reveal implements datafy/nav as "actions" that can be invoked on any value.
                (stream v (assoc ann :vlaaad.reveal.nav/key k
                                     :vlaaad.reveal.nav/coll m)))))
       m)))
+
 ```
 
 ### How We Could Use Datafy for Seon
@@ -136,6 +146,7 @@ Reveal implements datafy/nav as "actions" that can be invoked on any value.
                             (ns-publics ns)))
      :refers (ns-refers ns)
      :imports (ns-imports ns)}))
+
 ```
 
 **XTDB Entity Navigation:**
@@ -150,6 +161,7 @@ Reveal implements datafy/nav as "actions" that can be invoked on any value.
               (if (entity-id? db v)
                 (entity-datafy db v)
                 v))})))
+
 ```
 
 **Malli Schema Navigation:**
@@ -172,6 +184,7 @@ Reveal implements datafy/nav as "actions" that can be invoked on any value.
                 (when-let [s (m/deref (m/schema v))]
                   (schema-datafy s))
                 :else v))})))
+
 ```
 
 ---
@@ -201,6 +214,7 @@ Reveal implements datafy/nav as "actions" that can be invoked on any value.
                                :in ['id]} id)]
                  [attr from])))
             attrs))))
+
 ```
 
 **Rendered as:**
@@ -218,6 +232,7 @@ Reveal implements datafy/nav as "actions" that can be invoked on any value.
       [::h/for [[attr from] links]
        (attr-val-row (pr-str attr)
                      #(format-value (constantly true) from))]]]]))
+
 ```
 
 ### XTDB v2 Approach for Seon
@@ -272,6 +287,7 @@ XTDB v2 uses SQL. Here's how we'd implement bidirectional traversal:
                       cols)))
        (filter #(seq (:entities %)))
        (into [])))
+
 ```
 
 ### Performance Considerations
@@ -331,6 +347,7 @@ XTDB v2 uses SQL. Here's how we'd implement bidirectional traversal:
                                 (:portal.viewer/default (meta value))
                                 (:portal.viewer/default context)))]
     (filter #(when-let [pred (:predicate %)] (pred value)) viewers)))
+
 ```
 
 ### Reveal's Approach
@@ -367,6 +384,7 @@ XTDB v2 uses SQL. Here's how we'd implement bidirectional traversal:
     separator
     (stream @*ref)
     (raw-string ")" {:fill :util})))
+
 ```
 
 ### XTDB Inspector's Approach
@@ -399,6 +417,7 @@ XTDB v2 uses SQL. Here's how we'd implement bidirectional traversal:
          [:td (render ctx key)]
          [:td (render ctx val)]]]]
       "}"])))
+
 ```
 
 ### Recommended Approach for Seon
@@ -466,6 +485,7 @@ Use Reveal's multimethod pattern - it's the most Clojure-idiomatic and works ser
 
 (defmethod render-value ::schema [value opts]
   (render-malli-schema value opts))
+
 ```
 
 ---
@@ -505,6 +525,7 @@ Use Reveal's multimethod pattern - it's the most Clojure-idiomatic and works ser
            (do
              (add-watch a session-id #'invalidate)
              (conj atoms a))))))))
+
 ```
 
 ### Reveal's Watch Mechanism
@@ -541,6 +562,7 @@ Use Reveal's multimethod pattern - it's the most Clojure-idiomatic and works ser
        (vreset! *running false)
        (future-cancel f)
        (handler {::event/type ::dispose-state :id id}))))
+
 ```
 
 ### SSE/Datastar Pattern for Seon
@@ -587,6 +609,7 @@ Use Reveal's multimethod pattern - it's the most Clojure-idiomatic and works ser
   (doseq [[atom-ref watch-key] (get @watch-registry session-id)]
     (remove-watch atom-ref watch-key))
   (swap! watch-registry dissoc session-id))
+
 ```
 
 **Datastar Integration:**
@@ -609,6 +632,7 @@ Use Reveal's multimethod pattern - it's the most Clojure-idiomatic and works ser
         session-id (-> request :session :id)]
     (sse/streaming-response request
       (watch-atom! session-id atom-ref (str "#atom-" (hash atom-ref) "-value")))))
+
 ```
 
 ---
@@ -652,6 +676,7 @@ Use Reveal's multimethod pattern - it's the most Clojure-idiomatic and works ser
          (when (seq tail)
            [visible-sensor
             (fn [] (swap! n (fnil + default-take) step))])]))))
+
 ```
 
 ### Reveal's Collection Rendering
@@ -678,6 +703,7 @@ Reveal uses a simpler approach - render with preference for horizontal layout un
   (if (horizontal-coll? coll)
     (horizontally coll ann)
     (vertically coll ann)))
+
 ```
 
 ### Server-Side Pagination for Seon
@@ -743,6 +769,7 @@ Since we render server-side, we use HTTP pagination rather than JS virtualizatio
        [:button.text-blue-500.text-sm
         {:data-on-click (str "$$get('" path "')")}
         (str "Show all " total " items...")])]))
+
 ```
 
 ### Datastar Infinite Scroll Pattern
@@ -767,6 +794,7 @@ Since we render server-side, we use HTTP pagination rather than JS virtualizatio
               :data-show (str "$" id "_loaded < " (count coll))}
         [:div.h-8.flex.items-center.justify-center
          [:span.text-gray-400 "Loading..."]]])]))
+
 ```
 
 ---
@@ -821,6 +849,7 @@ No licensing concerns for adopting patterns or copying code snippets.
 **Goal:** Render any Clojure value as styled Hiccup.
 
 **Tasks:**
+
 1. Create `seon.ui.viewer` namespace with multimethod dispatch
 2. Implement viewers for primitives: nil, boolean, number, string, keyword, symbol
 3. Implement viewers for collections: map, vector, set, list
@@ -833,6 +862,7 @@ No licensing concerns for adopting patterns or copying code snippets.
 ;; Phase 1 deliverable
 (render-value {:name "test" :count 42 :tags [:a :b]})
 ;; => [:div ...]  ;; styled Hiccup
+
 ```
 
 ### Phase 2: Expand/Collapse with Datastar (2 days)
@@ -840,6 +870,7 @@ No licensing concerns for adopting patterns or copying code snippets.
 **Goal:** Collections can be expanded/collapsed client-side.
 
 **Tasks:**
+
 1. Add `data-signals` for expand state
 2. Add `data-show` for conditional rendering
 3. Implement truncation with "show more" for large collections
@@ -854,6 +885,7 @@ No licensing concerns for adopting patterns or copying code snippets.
  [:span {:data-show "!$map_1_expanded"} "3 entries"]
  [:div {:data-show "$map_1_expanded"} ...]
  "}"]
+
 ```
 
 ### Phase 3: XTDB Entity Viewer (2-3 days)
@@ -861,6 +893,7 @@ No licensing concerns for adopting patterns or copying code snippets.
 **Goal:** View XTDB entities with forward references as clickable links.
 
 **Tasks:**
+
 1. Detect entity IDs (convention: keywords ending in `-id` or strings starting with known prefixes)
 2. Render entity IDs as links to entity view
 3. Add entity history view (using XTDB temporal queries)
@@ -872,6 +905,7 @@ No licensing concerns for adopting patterns or copying code snippets.
                    :seon.ai/namespace "seon.trading"
                    :seon.ai/status :active})
 ;; => entity card with clickable session-id link
+
 ```
 
 ### Phase 4: Bidirectional References (2 days)
@@ -879,6 +913,7 @@ No licensing concerns for adopting patterns or copying code snippets.
 **Goal:** Show "what references this entity" in addition to forward refs.
 
 **Tasks:**
+
 1. Implement `references-to` query function
 2. Add "Referenced by" section to entity viewer
 3. Cache known reference columns for performance
@@ -894,6 +929,7 @@ No licensing concerns for adopting patterns or copying code snippets.
   [:ul
    [:li "47 messages in ai_messages"]
    [:li "3 tool uses in ai_tool_uses"]]]]
+
 ```
 
 ### Phase 5: Live Atom Updates (2-3 days)
@@ -901,6 +937,7 @@ No licensing concerns for adopting patterns or copying code snippets.
 **Goal:** Atoms update in real-time via SSE.
 
 **Tasks:**
+
 1. Implement watch registry with debouncing
 2. Create SSE endpoint for atom watching
 3. Add Datastar integration for live updates
@@ -915,6 +952,7 @@ No licensing concerns for adopting patterns or copying code snippets.
  [:div#atom-value
   ;; Updated via SSE when atom changes
   ]]
+
 ```
 
 ### Phase 6: Custom Namespace Renderers (2-3 days)
@@ -922,6 +960,7 @@ No licensing concerns for adopting patterns or copying code snippets.
 **Goal:** Namespaces can provide custom rendering.
 
 **Tasks:**
+
 1. Define render-fn protocol/convention
 2. Look up `:seon.ui/render-fn` in namespace ctx
 3. Support view modes: `:tile`, `:half`, `:full`
@@ -933,6 +972,7 @@ No licensing concerns for adopting patterns or copying code snippets.
   (if-let [render-fn (get-custom-renderer ns-sym)]
     (render-fn {:view-mode :full :session-id session-id})
     (default-namespace-view ns-sym)))
+
 ```
 
 ### Phase 7: Malli Schema Viewer (1-2 days)
@@ -940,6 +980,7 @@ No licensing concerns for adopting patterns or copying code snippets.
 **Goal:** Render Malli schemas with clickable references.
 
 **Tasks:**
+
 1. Create schema-specific viewer
 2. Link referenced schemas (click to navigate)
 3. Show schema properties and constraints
@@ -949,6 +990,7 @@ No licensing concerns for adopting patterns or copying code snippets.
 ;; Phase 7 deliverable
 (render-schema ::ai/message-entity)
 ;; => schema card with tree view, clickable refs
+
 ```
 
 ---
@@ -967,6 +1009,7 @@ The research reveals clear patterns for each concern:
 | **Extensibility** | Metadata-based viewer override | Portal/Clerk |
 
 Building our own viewer system is the right choice because:
+
 1. Our stack (SSE/Datastar/Hiccup) differs from all three projects
 2. Our needs (namespace introspection) are specific
 3. The patterns are straightforward to implement

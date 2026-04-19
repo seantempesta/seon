@@ -1,3 +1,9 @@
+---
+type: decision
+status: completed
+tags: [decision, archive]
+---
+
 # Test Suite Fixes - Decisions
 
 ## Decision Log

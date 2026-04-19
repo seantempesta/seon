@@ -1,7 +1,9 @@
+---
+type: research
+status: draft
+tags: [prd, research, database]
+---
 # Datalevin Multi-Database Query Research
-
-**Date:** 2026-01-28
-**Status:** Verified - Works for our use case
 
 ## Summary
 
@@ -27,6 +29,7 @@ Query entities from DB1, join with entities in DB2 via a shared key:
      @conn1 @conn2)
 
 ;; => #{["Alice" 100.0] ["Alice" 250.0] ["Charlie" 300.0] ["Bob" 75.0]}
+
 ```
 
 ### String-Key Joins - Our Use Case (PASS)
@@ -47,6 +50,7 @@ Sessions in one DB, messages in another, joined by session-id string:
 ;; => #{["seon.health" "user" "Start health check"]
 ;;      ["seon.trading" "assistant" "Hi there"]
 ;;      ["seon.trading" "user" "Hello"]}
+
 ```
 
 ### Three-Database Queries (PASS)
@@ -69,6 +73,7 @@ Can query across 3+ databases in a single query:
 ;; => #{["seon.trading" "assistant" "Hi there" 0.15]
 ;;      ["seon.health" "user" "Start health check" 0.08]
 ;;      ["seon.trading" "user" "Hello" 0.15]}
+
 ```
 
 ### Aggregations Across Databases (PASS)
@@ -83,6 +88,7 @@ Can query across 3+ databases in a single query:
      @conn-sessions @conn-messages)
 
 ;; => (["seon.trading" 2] ["seon.health" 1])
+
 ```
 
 ### Different Schemas (PASS)
@@ -97,6 +103,7 @@ Each database can have completely different schemas. They are truly independent:
 ;; DB2 schema
 {:order/amount {:db/valueType :db.type/double}
  :order/user-id {:db/valueType :db.type/long}}
+
 ```
 
 ### Join Behavior (Inner Join)
@@ -116,6 +123,7 @@ Cross-database queries behave as inner joins. Entities without matches in the ot
      @conn-sessions @conn-messages)
 
 ;; => Only returns sessions that HAVE messages
+
 ```
 
 ### or-join Across Databases (PASS with caveats)
@@ -132,6 +140,7 @@ Can use `or-join` but must ensure same free vars in all branches:
   [$msgs ?m :message/session-id ?sid]
   (and [$sessions ?s2 :session/id ?sid]
        [$sessions ?s2 :session/namespace "seon.orphan"]))
+
 ```
 
 ## Performance
@@ -155,6 +164,7 @@ Performance is excellent for our use case. The query optimizer handles cross-dat
 
 ;; Can use descriptive names
 :in $sessions $messages $metadata
+
 ```
 
 ### Referencing Databases in Patterns
@@ -166,6 +176,7 @@ Performance is excellent for our use case. The query optimizer handles cross-dat
 
 ;; $ is default (first database)
 [?e :attr ?v]  ;; equivalent to [$ ?e :attr ?v]
+
 ```
 
 ### Cross-Database Predicates
@@ -179,6 +190,7 @@ Performance is excellent for our use case. The query optimizer handles cross-dat
 [$db1 ?e1 :id ?id1]
 [$db2 ?e2 :ref ?id2]
 [(= ?id1 ?id2)]
+
 ```
 
 ## Limitations Discovered
@@ -227,6 +239,7 @@ Multi-database queries work well for our use case:
          [$agent1 ?m :message/session-id ?sid]
          [$agent2 ?m :message/session-id ?sid])]
      @orchestrator-db @agent1-db @agent2-db)
+
 ```
 
 ## Test Code Location
@@ -253,4 +266,5 @@ Full test code available in REPL history. Key patterns:
 ;; Always close when done
 (d/close conn1)
 (d/close conn2)
+
 ```

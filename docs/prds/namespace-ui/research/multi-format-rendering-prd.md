@@ -1,7 +1,10 @@
+---
+type: research
+status: draft
+tags: [prd, research, web]
+---
 # Research PRD: Multi-Format Data Rendering
 
-**Status:** Research
-**Priority:** High
 **Type:** Exploratory - find the right approach, don't prescribe one
 
 ---
@@ -9,11 +12,13 @@
 ## Vision
 
 Data in Seon should render appropriately for its consumer:
+
 - **AI agents** see concise, schema-aware output (not 15k tokens of raw EDN)
 - **Web UI** shows rich, interactive views with expand/collapse
 - **Raw** returns EDN for serialization
 
 The rendering definition should:
+
 1. **Live with the data definition** - if you define `:trading/position`, its rendering is part of that definition
 2. **Be inherited** - when processing data from another namespace, you get its rendering automatically
 3. **Support local overrides** - create `::my-ns/position` that's compatible with `:trading/position` but renders differently
@@ -24,6 +29,7 @@ The rendering definition should:
 ## Problem Statement
 
 Currently:
+
 - nREPL returns `pr-str` output directly - no consumer-aware formatting
 - Large data structures blow up AI context windows
 - UI rendering (`seon.ui.viewer`) is separate from data definitions
@@ -41,6 +47,7 @@ Currently:
   ;; 2. Add our own analysis-specific rendering for our return type?
   ;; 3. Have the AI see something concise vs the UI see something rich?
   ...)
+
 ```
 
 ---
@@ -50,6 +57,7 @@ Currently:
 ### Q1: Where do render definitions live?
 
 Options to explore:
+
 - **Malli schema properties** - `[:map {:seon.ui/render ...} ...]`
 - **Separate render registry** - keyed by schema keyword
 - **Protocol extension** - extend Datafiable for schema types
@@ -58,6 +66,7 @@ Options to explore:
 ### Q2: How does inheritance work?
 
 If `:trading/position` has a renderer and I create `::analysis/position` that's schema-compatible, does it:
+
 - Automatically inherit the renderer?
 - Require explicit inheritance declaration?
 - Use Malli's schema subtyping?
@@ -79,6 +88,7 @@ If `:trading/position` has a renderer and I create `::analysis/position` that's 
    :render-fn 'analysis.ui/render-position})
 
 ;; Option C: Something else?
+
 ```
 
 ### Q4: How does multi-format work?
@@ -88,9 +98,11 @@ If `:trading/position` has a renderer and I create `::analysis/position` that's 
 (render position :ai)    ;; => "Position: AAPL x100 @ $150"
 (render position :html)  ;; => [:div.position-card ...]
 (render position :raw)   ;; => {:ticker "AAPL" :quantity 100 ...}
+
 ```
 
 Is this:
+
 - One render function with format parameter?
 - Separate render functions per format?
 - Multimethod dispatch on format?
@@ -98,6 +110,7 @@ Is this:
 ### Q5: Does datafy/nav help here?
 
 Clojure's `datafy` and `nav` protocols allow values to carry navigation behavior. Questions:
+
 - Can we extend these for schema-typed maps?
 - Does metadata flow through nav operations?
 - Is this complementary or alternative to Malli approach?
@@ -105,6 +118,7 @@ Clojure's `datafy` and `nav` protocols allow values to carry navigation behavior
 ### Q6: How does this integrate with nREPL?
 
 When an agent evals `(analyze-positions data)`, the result needs to be formatted before becoming a string. Options:
+
 - Custom nREPL middleware
 - Override print-method per type
 - Wrapper at MCP level
@@ -153,6 +167,7 @@ Write findings to `docs/prds/namespace-ui/research/` with concrete code examples
 ## Success Criteria
 
 Research is successful if we can answer:
+
 1. Where should render definitions live?
 2. How does inheritance work (or should it)?
 3. How do local overrides work without breaking compatibility?

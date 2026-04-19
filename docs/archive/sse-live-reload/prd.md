@@ -1,4 +1,11 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 # SSE Live Reload Investigation
+
 ## Status: COMPLETE — SSE live reload working via Datastar fragment merging
 
 **Status:** In Progress
@@ -76,6 +83,7 @@ Code changes to view renderers are not reflected in the browser without hard ref
 ```
 SyntaxError: Unexpected token ')' (line 1, position 55)
 SyntaxError: Unexpected token '&' (line 6, position 52)
+
 ```
 
 These errors repeat every ~6 seconds (matching SSE poll intervals).
@@ -83,8 +91,10 @@ These errors repeat every ~6 seconds (matching SSE poll intervals).
 **Possible cause:** The `on-load-js` string in `html.clj` contains `&` characters that get HTML-escaped to `&amp;` in attributes. When Datastar tries to evaluate this, it may be parsing the escaped version incorrectly.
 
 The rendered HTML shows:
+
 ```html
 data-init="@post(window.location.pathname + (window.location.search + &apos;&amp;u=&apos;).replace(/^&amp;/,&apos;?&apos;), {retryMaxCount: Infinity})"
+
 ```
 
 **Unclear:** Whether these JS errors are the root cause or a symptom.
@@ -126,17 +136,19 @@ Key components:
 ### Tasks
 
 1. **Check what Datastar code we have**
+
    ```bash
    # Look for datastar in reference-code
    ls -la reference-code/ | grep -i datastar
 
    # Check git submodules
    git submodule status
+
    ```
 
 2. **Find Datastar's native Clojure implementation**
    - Search for official Datastar Clojure examples
-   - Look at https://github.com/starfederation/datastar
+   - Look at [starfederation/datastar](https://github.com/starfederation/datastar)
    - Find their recommended SSE patterns
 
 3. **Compare our implementation to canonical**
@@ -202,7 +214,7 @@ These changes were made during investigation but may or may not be correct:
 
 ## Reference Links
 
-- Datastar GitHub: https://github.com/starfederation/datastar
+- Datastar GitHub: [starfederation/datastar](https://github.com/starfederation/datastar)
 - Our SSE impl: `src/seon/web/sse.clj`
 - Our HTML template: `src/seon/web/html.clj`
 - Previous investigation notes: `docs/prds/namespace-ui/sse-live-reload-investigation.md`

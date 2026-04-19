@@ -1,3 +1,9 @@
+---
+type: decision
+status: completed
+tags: [decision, archive]
+---
+
 # Architectural Decisions: Auto-Test Hook
 
 **Last Updated:** 2025-12-05

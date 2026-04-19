@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # Test Timing and Storage Research Findings
 
 **Date:** 2025-12-05
@@ -18,6 +24,7 @@ After researching test timing strategies across multiple ecosystems and Clojure 
 ### Tools Researched
 
 #### Watchexec (Rust-based file watcher)
+
 - **Default debounce:** 50ms (trailing edge)
 - **Historical evolution:** Started at 500ms → 300ms → 150ms → 100ms → 50ms
 - **Trailing edge behavior:** Collects all events during the debounce window, triggers action only after quiet period
@@ -30,6 +37,7 @@ After researching test timing strategies across multiple ecosystems and Clojure 
 - [TIL: Watchexec blog post](https://tech.stonecharioteer.com/posts/2025/til-watchexec/)
 
 #### Kaocha Watch Mode
+
 - **Mechanism:** Uses Beholder (previously Hawk) for filesystem watching
 - **Debounce:** No explicit debounce in documentation, but handles rapid changes via tools.namespace dependency tracking
 - **Smart reloading:** Unloads dependent namespaces first, then reloads from scratch
@@ -42,6 +50,7 @@ After researching test timing strategies across multiple ecosystems and Clojure 
 - [Kaocha Issue #277 - Watch mode with neovim](https://github.com/lambdaisland/kaocha/issues/277)
 
 #### Node.js Watch Mode
+
 - **Problem:** Originally no debounce - restarted on every file change during build
 - **Example:** TypeScript compiling 50 files → 50 restarts
 - **Solution:** PR #51992 (May 2024) added batch file restarts
@@ -56,6 +65,7 @@ After researching test timing strategies across multiple ecosystems and Clojure 
 - [thisDaveJ - File watching in Node.js](https://thisdavej.com/how-to-watch-for-file-changes-in-node-js/)
 
 #### Shadow-cljs Hot Reload
+
 - **Lifecycle hooks:** `^:dev/before-load` and `^:dev/after-load` metadata on functions
 - **Process:** Watch filesystem → compile changed namespaces → call before-load hooks → load new code → call after-load hooks
 - **Smart compilation:** Only recompiles direct dependents (not transitive) by default
@@ -67,6 +77,7 @@ After researching test timing strategies across multiple ecosystems and Clojure 
 - [Hot Reload in ClojureScript blog post](https://code.thheller.com/blog/shadow-cljs/2019/08/25/hot-reload-in-clojurescript.html)
 
 #### Guard (Ruby file watcher)
+
 - **No native debounce:** Guard doesn't have built-in debounce
 - **Manual workaround:** Track last rebuild timestamp, compare with current time
 - **Typical interval:** 2 seconds in user examples
@@ -76,6 +87,7 @@ After researching test timing strategies across multiple ecosystems and Clojure 
 - [Stack Overflow - Guard batch watch notifications](https://stackoverflow.com/questions/15721402/guard-batch-watch-notifications)
 
 #### Jest (JavaScript test runner)
+
 - **Watch mode:** Not much documentation on internal debouncing
 - **Testing debounced functions:** Jest provides timer mocks (`jest.useFakeTimers()`, `jest.advanceTimersByTime()`)
 - **Note:** Search results focused on testing debounced code, not Jest's internal watch debouncing
@@ -118,6 +130,7 @@ After researching test timing strategies across multiple ecosystems and Clojure 
         (let [files @pending-edits]
           (reset! pending-edits #{})
           (run-tests files))))))
+
 ```
 
 **Why NOT 50ms:**
@@ -140,6 +153,7 @@ Kaocha has an official plugin for JUnit XML output:
 **Plugin:** `lambdaisland/kaocha-junit-xml` (latest: 1.17.101)
 
 **Configuration in `tests.edn`:**
+
 ```clojure
 #kaocha/v1
 {:plugins [:kaocha.plugin/junit-xml
@@ -149,11 +163,14 @@ Kaocha has an official plugin for JUnit XML output:
  :kaocha.plugin.junit-xml/target-file "target/test-results/junit.xml"
  :kaocha.plugin.junit-xml/omit-system-out? false
  :kaocha.plugin.junit-xml/add-location-metadata? true}  ;; GitHub Actions annotations
+
 ```
 
 **Command line:**
+
 ```bash
 clj -M:test -m kaocha.runner --plugin kaocha.plugin/junit-xml --junit-xml-file target/test-results/junit.xml
+
 ```
 
 **Features:**
@@ -191,11 +208,13 @@ clj -M:test -m kaocha.runner --plugin kaocha.plugin/junit-xml --junit-xml-file t
 **Default output:** Prints to `*test-out*` (normally same as `*out*`)
 
 **Customization:** Can rebind `*test-out*` to any PrintWriter:
+
 ```clojure
 (require '[clojure.java.io :as io])
 
 (binding [clojure.test/*test-out* (io/writer "target/test-results/output.txt")]
   (clojure.test/run-tests))
+
 ```
 
 **Custom reporters:** Override `clojure.test/report` multimethod for custom formats (TAP, JUnit, etc.)
@@ -210,7 +229,9 @@ clj -M:test -m kaocha.runner --plugin kaocha.plugin/junit-xml --junit-xml-file t
 ### Two-Tier Approach
 
 #### Tier 1: Summary in Agent Context (Immediate Feedback)
+
 Store concise summary for agent to see:
+
 ```
 ✓ 45 tests passed
 ✗ 3 tests failed:
@@ -219,6 +240,7 @@ Store concise summary for agent to see:
   - ml-options.data.ingest-test/test-invalid-symbol
 
 Full output: target/test-results/2025-12-05T14-23-15.txt
+
 ```
 
 **Benefits:**
@@ -227,12 +249,14 @@ Full output: target/test-results/2025-12-05T14-23-15.txt
 - Keeps context window manageable
 
 #### Tier 2: Full Output on Disk (Debugging)
+
 Store complete test output with:
 - Timestamped filename: `target/test-results/2025-12-05T14-23-15.txt`
 - All test output (stdout, stderr, stack traces)
 - Metadata header (files edited, test command run, duration)
 
 **Format:**
+
 ```
 === Auto-Test Run ===
 Timestamp: 2025-12-05T14:23:15Z
@@ -244,9 +268,11 @@ Command: clj -M:test -m kaocha.runner
 Duration: 2.3s
 
 [Full test output follows...]
+
 ```
 
 ### Directory Structure
+
 ```
 target/
 ├── test-results/
@@ -255,9 +281,11 @@ target/
 │   ├── 2025-12-05T14-21-02.txt
 │   ├── junit.xml  # Optional, for CI
 │   └── summary.edn  # Optional, machine-readable
+
 ```
 
 ### File Retention
+
 - Keep last 10 test runs (auto-delete older)
 - OR Keep last 24 hours of test runs
 - Always keep `latest.txt` symlink
@@ -269,8 +297,10 @@ target/
 ### Debounce Interval Configuration
 
 Make debounce interval configurable via environment variable:
+
 ```bash
 export AUTOTEST_DEBOUNCE_MS=150
+
 ```
 
 Default to 100ms if not set.
@@ -305,6 +335,7 @@ Default to 100ms if not set.
           (when @run-queued?
             (reset! run-queued? false)
             (recur files)))))))  ;; Run queued test
+
 ```
 
 ### Test Command to Run
@@ -317,9 +348,11 @@ Default to 100ms if not set.
 - Fallback to full suite if mapping unclear
 
 **Example:**
+
 ```clojure
 ;; Edit: src/ml_options/web/handlers.clj
 ;; Run:  clj -M:test -m kaocha.runner --focus ml-options.web.handlers-test
+
 ```
 
 ### Integration with clj-paren-repair
@@ -337,11 +370,14 @@ Default to 100ms if not set.
 ### Test Output Capture
 
 **Simple approach:** Shell redirection
+
 ```bash
 clj -M:test -m kaocha.runner 2>&1 | tee target/test-results/$(date +%Y-%m-%dT%H-%M-%S).txt
+
 ```
 
 **Better approach:** Programmatic capture
+
 ```clojure
 (require '[clojure.java.io :as io])
 
@@ -354,13 +390,16 @@ clj -M:test -m kaocha.runner 2>&1 | tee target/test-results/$(date +%Y-%m-%dT%H-
         (kaocha.runner/-main)
         (finally
           (spit output-file (.toString baos)))))))
+
 ```
 
 ### Summary Extraction
 
 Parse Kaocha output for summary line:
+
 ```
 45 tests, 127 assertions, 3 failures.
+
 ```
 
 Extract:
@@ -370,9 +409,11 @@ Extract:
 - Failed test names (from output)
 
 **Regex patterns:**
+
 ```clojure
 (def summary-pattern #"(\d+) tests?, (\d+) assertions?, (\d+) failures?")
 (def fail-pattern #"FAIL in ([\w\.\-/]+)")
+
 ```
 
 ---
@@ -380,22 +421,26 @@ Extract:
 ## 6. Alternatives Considered
 
 ### Alternative 1: No Debounce (Run Immediately)
+
 - **Pro:** Fastest feedback
 - **Con:** Agent edits 5 files → 5 test runs → overwhelming output
 - **Verdict:** Rejected
 
 ### Alternative 2: Manual Trigger Only
+
 - **Pro:** Agent has full control
 - **Con:** Requires explicit command, slows workflow
 - **Verdict:** Could be fallback mode
 
 ### Alternative 3: Run on Integrant Reset
+
 - **Pro:** Natural hook point after code reload
 - **Con:** Tests might run too often (every code change)
 - **Con:** Doesn't help when agent edits tests without reset
 - **Verdict:** Complementary, not replacement
 
 ### Alternative 4: Long Debounce (1-2 seconds)
+
 - **Pro:** Definitely captures all edits in batch
 - **Con:** Feels sluggish, users notice delay
 - **Verdict:** Too conservative
@@ -418,12 +463,14 @@ Extract:
 ## 8. Final Recommendations
 
 ### Test Timing
+
 1. **Debounce interval:** 100ms (configurable via env var)
 2. **Debounce type:** Trailing edge (collect all events, trigger after quiet)
 3. **Queue strategy:** Queue next run if tests already running
 4. **Smart targeting:** Run affected test namespaces when possible
 
 ### Test Storage
+
 1. **Primary location:** `target/test-results/`
 2. **File naming:** Timestamped `YYYY-MM-DDTHH-MM-SS.txt`
 3. **Symlink:** `target/test-results/latest.txt` → most recent
@@ -431,11 +478,13 @@ Extract:
 5. **Summary format:** Extract and show in agent context (concise)
 
 ### Optional Enhancements
+
 1. **JUnit XML:** Add `kaocha-junit-xml` plugin for CI integration
 2. **EDN output:** Store machine-readable summary in `summary.edn`
 3. **Web UI integration:** Show recent test runs in dashboard (future)
 
 ### Configuration
+
 ```clojure
 ;; .env or config.edn
 {:autotest {:debounce-ms 100
@@ -443,6 +492,7 @@ Extract:
             :retention-count 10
             :queue-runs? true
             :smart-targeting? true}}
+
 ```
 
 ---
@@ -450,6 +500,7 @@ Extract:
 ## References
 
 ### Documentation
+
 - [Watchexec Documentation](https://github.com/watchexec/watchexec)
 - [Kaocha Watch Mode](https://cljdoc.org/d/lambdaisland/kaocha/1.88.1376/doc/7-watch-mode)
 - [Kaocha JUnit XML Plugin](https://github.com/lambdaisland/kaocha-junit-xml)
@@ -457,11 +508,13 @@ Extract:
 - [Node.js File Watching](https://thisdavej.com/how-to-watch-for-file-changes-in-node-js/)
 
 ### GitHub Issues/PRs
+
 - [Watchexec Issue #168 - Debounce delay](https://github.com/watchexec/watchexec/issues/168)
 - [Kaocha Issue #277 - Neovim watch](https://github.com/lambdaisland/kaocha/issues/277)
 - [Node.js PR #51992 - Batch restarts](https://github.com/nodejs/node/pull/51992)
 
 ### Package Repositories
+
 - [Kaocha JUnit XML on Clojars](https://clojars.org/lambdaisland/kaocha-junit-xml)
 - [CircleCI.test GitHub](https://github.com/circleci/circleci.test)
 

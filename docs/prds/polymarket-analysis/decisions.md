@@ -1,6 +1,9 @@
+---
+type: decision
+status: draft
+tags: [prd, decision, trading]
+---
 # Architectural Decisions: Polymarket Analysis
-
-**Last Updated:** 2025-12-27
 
 ---
 
@@ -34,10 +37,12 @@ Use EDN files in `data/polymarket/` for the research phase.
 ### Consequences
 
 **Benefits:**
+
 - Faster iteration during research
 - Easy to share data files
 
 **Costs:**
+
 - No temporal queries (acceptable for initial analysis)
 - Manual file management
 
