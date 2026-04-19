@@ -47,3 +47,6 @@ docs/.obsidian/plugins/*/data.json
 
 # Claude Code runtime state
 .claude/scheduled_tasks.lock
+
+# Stray konserve stores (if datahike :file backend ever runs without absolute :data-root)
+*.ksv
