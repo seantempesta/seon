@@ -79,6 +79,9 @@
                      ;; Datalevin - local from git submodule (v0.10.3, 2026-01-27)
                      ;; Embedded LMDB, Datalog queries
                      datalevin/datalevin {:local/root "reference-code/datalevin"}
+                     ;; Datahike - replacing Datalevin (see docs/prds/datahike-migration/)
+                     ;; Embedded Datalog on konserve; file backend for git time-travel.
+                     org.replikativ/datahike {:mvn/version "0.8.1671"}
                      ;; Durable atom for agent *ctx* persistence
                      duratom/duratom {:mvn/version "0.5.9"}
                      ;; Small Clojure Interpreter (sandbox evaluation)
@@ -96,7 +99,9 @@
                       ;; nREPL for orchestrator tests
                       nrepl/nrepl {:mvn/version "1.3.0"}
                       ;; Datalevin for knowledge graph tests
-                      datalevin/datalevin {:local/root "reference-code/datalevin"}}
+                      datalevin/datalevin {:local/root "reference-code/datalevin"}
+                      ;; Datahike (migration in progress)
+                      org.replikativ/datahike {:mvn/version "0.8.1671"}}
          :jvm-opts []}
 
 
