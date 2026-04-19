@@ -115,4 +115,22 @@
 
  ;; Claude Code SDK Configuration
  :seon.ai.claude/sdk
- {:cli-path #or [#env CLAUDE_CLI_PATH "/Users/sean/.local/bin/claude"]}}
+ {:cli-path #or [#env CLAUDE_CLI_PATH "/Users/sean/.local/bin/claude"]}
+
+ ;; Datahike Flow (Phase 2 of datahike-migration)
+ ;; Single Integrant key that owns every per-namespace datahike conn-process
+ ;; and the tx-bus. `seon.db` routes ops for registered namespaces through
+ ;; this flow via `seon.db.datahike.flow/request!`; unregistered db-names
+ ;; continue to fall through to the legacy datalevin path.
+ ;;
+ ;; Phase 2 carries a single fixture namespace (:seon.phase2.demo) so the
+ ;; dispatch layer has something real to route to. New domain namespaces
+ ;; are added here as they migrate.
+ :seon.db/flow
+ {:namespaces [:seon.phase2.demo]
+  :backend #profile {:dev :memory
+                     :test :memory
+                     :prod :memory}
+  :namespace-schemas {:seon.phase2.demo [:map
+                                         [:seon.phase2.demo/id :seon.phase2.demo/id]
+                                         [:seon.phase2.demo/name :seon.phase2.demo/name]]}}}

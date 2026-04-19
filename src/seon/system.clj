@@ -25,6 +25,7 @@
             [seon.web.tailwind]
             [seon.web.caddy]
             [seon.db.datalevin.server]
+            [seon.db.datahike.system]
             [seon.flow.pool]))
 
 ;;; ---------------------------------------------------------------------------
