@@ -18,6 +18,7 @@ All feature specifications live in `docs/prds/`. Each directory contains a `prd.
 | [[prds/render-pipeline/prd]] | active | Wire spec-driven rendering end-to-end, replace manual renderer registration | [[components/renderer]], [[components/code-graph]] |
 | [[prds/test-infrastructure/design]] | design | Unified test fixtures, data isolation, generative testing with shrinking | [[components/testing]] |
 | [[prds/mcp-resilience/prd]] | active | MCP server resilience: async request processing (Phase 1 done, remaining paused) | [[components/agent-system]] |
+| [[prds/datahike-migration/prd]] | draft | Replace Datalevin with embedded Datahike: per-namespace DBs, file backend default, single in-process writer, git-friendly time-travel | [[components/database]], [[components/schema-system]] |
 
 ## Completed PRDs
 

@@ -29,6 +29,7 @@
      (ingest/ingest-namespace! {::db-name :seon.runtime ::ns-name \"seon.foo\"
                                 ::functions fns ::specs specs ::vars vars})"
   (:require [seon.db :as db]
+            [seon.db.datalevin.conn :as dl-conn]
             [seon.db.schema :as db-schema]
             [seon.graph.analyzer :as analyzer]
             [seon.render :as render]
@@ -361,10 +362,11 @@
         (db/transact! db-name (vec batch))
         (swap! results update :succeeded + (count batch))
         (catch Exception e
-          (log/warn "Batch transact failed, isolating error"
-                    {:db-name db-name
-                     :batch-size (count batch)
-                     :error (.getMessage e)})
+          (if (dl-conn/connection-error? e)
+            (log/debug "Batch transact failed (connection)" {:db-name db-name :error (.getMessage e)})
+            (log/warn e "Batch transact failed, isolating error"
+                      {:db-name db-name
+                       :batch-size (count batch)}))
           (swap! results (fn [r]
                            (-> r
                                (update :failed + (count batch))
@@ -408,15 +410,18 @@
 
 (defn- safe-transact!
   "Transact with error isolation. Logs and returns false on failure,
-   true on success. Does not propagate exceptions."
+   true on success. Does not propagate exceptions.
+   Connection errors log at DEBUG (message only) since they are handled
+   by the reader/writer backoff. Other errors log at WARN with full trace."
   [db-name tx-data label]
   (try
     (db/transact! db-name tx-data)
     true
     (catch Exception e
-      (log/warn "Transact failed (isolated)" {:label label
-                                              :tx-count (count tx-data)
-                                              :error (.getMessage e)})
+      (if (dl-conn/connection-error? e)
+        (log/debug "Transact failed (connection)" {:label label :error (.getMessage e)})
+        (log/warn e "Transact failed (isolated)" {:label label
+                                                  :tx-count (count tx-data)}))
       false)))
 
 (def ^:const batch-size
