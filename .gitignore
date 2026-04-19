@@ -41,3 +41,9 @@ hs_err_pid*.log
 docs/.obsidian/workspace.json
 docs/.obsidian/workspace-mobile.json
 docs/.obsidian/plugins/*/data.json
+# Root-level .obsidian/ appears if someone opens the seon/ dir as a vault;
+# the canonical vault is docs/ — anything here is per-user workspace state.
+/.obsidian/
+
+# Claude Code runtime state
+.claude/scheduled_tasks.lock
