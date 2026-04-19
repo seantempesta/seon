@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 # PRD: Phase 7b - Observability with Fully Namespaced Keys
 
 **Status:** ✅ Complete (2024-12-31)
@@ -31,14 +37,17 @@ This enables:
 - **No transformation** - Data flows through the system with its original keys intact
 
 **Example - Before (wrong):**
+
 ```clojure
 {:xt/id #uuid "..."
  :entity/type :edit-event           ; pseudo-namespace - where is this defined?
  :edit/file "/path/to/file.clj"     ; can't trace to source
  :edit/unit-test-result {:success true}}  ; plain keys, no schema reference
+
 ```
 
 **Example - After (correct):**
+
 ```clojure
 {:xt/id #uuid "..."
  :seon.dev.context/entity-type :edit-event
@@ -46,6 +55,7 @@ This enables:
  :seon.dev.context/unit-test-result
    {:seon.dev.verify/success true            ; verify's keys preserved!
     :seon.dev.verify/test-count 5}}
+
 ```
 
 Notice that nested data (test results from verify.clj) keeps its original `::verify/*` keys. No transformation between namespaces - data is traceable all the way down.
@@ -84,6 +94,7 @@ The wiring gap is in `hook.clj` around line 404 - test results are computed but 
 **Critical:** Before writing code, verify your understanding using these resources:
 
 ### 1. XTDB Source Code
+
 The full XTDB v2 source is at `reference-code/xtdb/`. When you need to understand XTDB behavior (like how it handles namespaced keys in SQL), read the source - don't guess.
 
 Key questions to answer:
@@ -92,14 +103,19 @@ Key questions to answer:
 - Are there any limitations with deeply nested namespaced maps?
 
 ### 2. Gemini Search
+
 Use `(search "query")` in the REPL when you need current information:
+
 ```clojure
 (search "XTDB v2 namespaced keywords SQL column names")
 (search "Clojure fully qualified keywords in databases")
+
 ```
 
 ### 3. REPL Verification
+
 Test ideas before implementing. The server should be running (`./bin/run`):
+
 ```bash
 # Test XTDB behavior with namespaced keys
 clj-nrepl-eval -p 7888 "
@@ -109,6 +125,7 @@ clj-nrepl-eval -p 7888 "
                           {:xt/id :test-1
                            :seon.dev.context/file \"/tmp/test.clj\"}]])
     (node/sql-query n \"SELECT * FROM test_table\"))"
+
 ```
 
 See what column names XTDB actually uses. Don't assume.
@@ -192,9 +209,11 @@ This is not a prescriptive step-by-step guide. You'll discover better patterns a
 ### 1. No Key Transformation
 
 When `verify.clj` produces:
+
 ```clojure
 {:seon.dev.verify/success true
  :seon.dev.verify/test-count 5}
+
 ```
 
 Store it exactly like that in XTDB. Don't convert to `:success` or `:test-count`. The namespace tells you where the data came from.

@@ -7,15 +7,11 @@
         org.clojure/clojure {:mvn/version "1.12.0"}
         org.clojure/core.async {:mvn/version "1.9.829-alpha2"}
 
-        ;; XTDB v2.1.0 (stable release with multi-database support)
-        com.xtdb/xtdb-api {:mvn/version "2.1.0"}
-        com.xtdb/xtdb-core {:mvn/version "2.1.0"}
-
         ;; Schema & Validation
-        metosin/malli {:mvn/version "0.17.0"}
+        metosin/malli {:mvn/version "0.20.0"}
 
         ;; State Management
-        integrant/integrant {:mvn/version "0.10.0"}
+        integrant/integrant {:mvn/version "1.0.1"}
 
         ;; Python Bridge
         clj-python/libpython-clj {:mvn/version "2.025"}
@@ -27,7 +23,7 @@
         ;; Utilities
         aero/aero {:mvn/version "1.1.6"}           ; Config
         com.taoensso/timbre {:mvn/version "6.5.0"} ; Logging (app code)
-        ch.qos.logback/logback-classic {:mvn/version "1.5.6"} ; SLF4J provider for XTDB
+        ch.qos.logback/logback-classic {:mvn/version "1.5.6"} ; SLF4J provider for Datalevin
         tick/tick {:mvn/version "0.7.5"}           ; Time handling
 
         ;; HTTP & JSON
@@ -81,7 +77,7 @@
                      com.aayushatharva.brotli4j/native-osx-aarch64 {:mvn/version "1.18.0"}
                      com.aayushatharva.brotli4j/native-linux-aarch64 {:mvn/version "1.18.0"}
                      ;; Datalevin - local from git submodule (v0.10.3, 2026-01-27)
-                     ;; Uses embedded LMDB, Datalog queries, lower memory than XTDB
+                     ;; Embedded LMDB, Datalog queries
                      datalevin/datalevin {:local/root "reference-code/datalevin"}
                      ;; Durable atom for agent *ctx* persistence
                      duratom/duratom {:mvn/version "0.5.9"}
@@ -91,7 +87,7 @@
   :prod {:extra-paths ["env/prod/clj" "env/prod/resources"]}
 
   :test {:extra-paths ["env/dev/clj" "env/dev/resources" "test"]
-         :extra-deps {org.clojure/test.check {:mvn/version "1.1.1"}
+         :extra-deps {org.clojure/test.check {:mvn/version "1.1.3"}
                       lambdaisland/kaocha {:mvn/version "1.91.1392"}
                       com.gfredericks/test.chuck {:mvn/version "0.2.14"}
                       integrant/repl {:mvn/version "0.4.0"}
@@ -101,45 +97,18 @@
                       nrepl/nrepl {:mvn/version "1.3.0"}
                       ;; Datalevin for knowledge graph tests
                       datalevin/datalevin {:local/root "reference-code/datalevin"}}
-         :jvm-opts [;; XTDB/Arrow/Netty required flags for Java 21+
-                    "--add-opens=java.base/java.nio=ALL-UNNAMED"
-                    "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
-                    "--add-opens=java.base/java.lang=ALL-UNNAMED"
-                    "-Dio.netty.tryReflectionSetAccessible=true"
-                    "--enable-native-access=ALL-UNNAMED"]}
+         :jvm-opts []}
 
-  :xtdb {:jvm-opts [;; Memory configuration for large workloads (7.6M+ records)
-                    "-Xms8g"
-                    "-Xmx16g"
-                    "-XX:MaxDirectMemorySize=8g"
-                    ;; G1GC tuning
-                    "-XX:+UseG1GC"
-                    "-XX:MaxGCPauseMillis=200"
-                    "-XX:InitiatingHeapOccupancyPercent=35"
-                    "-XX:+ParallelRefProcEnabled"
-                    ;; XTDB/Arrow/Netty required flags for Java 21+
-                    "--add-opens=java.base/java.nio=ALL-UNNAMED"
-                    "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
-                    "--add-opens=java.base/java.lang=ALL-UNNAMED"
-                    "-Dio.netty.tryReflectionSetAccessible=true"
-                    "-XX:+IgnoreUnrecognizedVMOptions"
-                    "--enable-native-access=ALL-UNNAMED"]}
 
   ;; Standalone runner (no nREPL, just Integrant system with console logging)
   ;; Usage: clj -M:dev:run       (dev profile)
   ;;        clj -M:dev:run prod  (prod profile)
   :run {:main-opts ["-m" "seon.runner"]
-        :jvm-opts ["-Xms4g"
-                   "-Xmx8g"
-                   "-XX:MaxDirectMemorySize=4g"
+        :jvm-opts ["-Xms512m"
+                   "-Xmx2g"
                    "-XX:+UseG1GC"
                    "-XX:MaxGCPauseMillis=200"
-                   ;; XTDB/Arrow/Netty required flags for Java 21+
-                   "--add-opens=java.base/java.nio=ALL-UNNAMED"
-                   "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
-                   "--add-opens=java.base/java.lang=ALL-UNNAMED"
-                   "-Dio.netty.tryReflectionSetAccessible=true"
-                   "--enable-native-access=ALL-UNNAMED"]}
+                   "-XX:TieredStopAtLevel=1"]}
 
   :build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.5"}}
           :ns-default build}
@@ -154,32 +123,25 @@
   ;; Development nREPL - starts nREPL on port 7888 with user namespace loaded
   ;; Usage: clj -M:dev:nrepl
   ;; Then connect and use (go) to start the Integrant system
-  ;; Isolated agent JVM - minimal deps, no XTDB/Arrow
+  ;; Isolated agent JVM - minimal deps
   ;; Usage: clj -M:agent -m seon.flow.agent-runner --port 7890 --namespace seon.test.hello
   :agent {:replace-deps {org.clojure/clojure {:mvn/version "1.12.0"}
                          org.clojure/core.async {:mvn/version "1.9.829-alpha2"}
-                         metosin/malli {:mvn/version "0.17.0"}
+                         metosin/malli {:mvn/version "0.20.0"}
                          datalevin/datalevin {:local/root "reference-code/datalevin"}
                          nrepl/nrepl {:mvn/version "1.3.0"}
                          com.taoensso/timbre {:mvn/version "6.5.0"}
                          cheshire/cheshire {:mvn/version "5.13.0"}}
           :replace-paths ["src"]
           :main-opts ["-m" "seon.flow.agent-runner"]
-          :jvm-opts ["-Xms128m"
-                     "-Xmx256m"
-                     "-XX:+UseSerialGC"
-                     "-XX:MaxMetaspaceSize=64m"
-                     "-XX:TieredStopAtLevel=1"]}
+          :jvm-opts ["-Xms256m"
+                     "-Xmx512m"
+                     "-XX:+ExitOnOutOfMemoryError"
+                     "-XX:+HeapDumpOnOutOfMemoryError"
+                     "-Djava.awt.headless=true"]}
 
-  :nrepl {:jvm-opts ["-Xms4g"
-                     "-Xmx8g"
-                     "-XX:MaxDirectMemorySize=4g"
+  :nrepl {:jvm-opts ["-Xms512m"
+                     "-Xmx2g"
                      "-XX:+UseG1GC"
-                     "-XX:MaxGCPauseMillis=200"
-                     ;; XTDB/Arrow/Netty required flags for Java 21+
-                     "--add-opens=java.base/java.nio=ALL-UNNAMED"
-                     "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
-                     "--add-opens=java.base/java.lang=ALL-UNNAMED"
-                     "-Dio.netty.tryReflectionSetAccessible=true"
-                     "--enable-native-access=ALL-UNNAMED"]
+                     "-XX:MaxGCPauseMillis=200"]
           :main-opts ["-m" "nrepl"]}}}

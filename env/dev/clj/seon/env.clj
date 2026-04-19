@@ -1,6 +1,6 @@
 (ns seon.env
   (:require
-   [clojure.tools.logging :as log]))
+   [taoensso.timbre :as log]))
 
 (def defaults
   {:init       (fn []

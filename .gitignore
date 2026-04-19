@@ -35,3 +35,9 @@ credentials.json
 # Node.js / Tailwind build
 node_modules/
 resources/public/css/output.css
+hs_err_pid*.log
+
+# Obsidian vault state (per-user)
+docs/.obsidian/workspace.json
+docs/.obsidian/workspace-mobile.json
+docs/.obsidian/plugins/*/data.json

@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive, agent]
+---
+
 # Claude Agent SDK Architecture Research
 
 **Date**: 2026-01-09
@@ -36,6 +42,7 @@ const stream = query({
 for await (const message of stream) {
   // message: SDKMessage (assistant, user, result, system, etc.)
 }
+
 ```
 
 #### V2 API (Unstable): Sessions
@@ -53,6 +60,7 @@ for await (const msg of session.stream()) { ... }
 await session.send("Follow-up");
 for await (const msg of session.stream()) { ... }
 session.close();
+
 ```
 
 ### Architecture Diagram
@@ -87,6 +95,7 @@ session.close();
 │                      │  - SDK servers (in-process via transport)   │   │
 │                      └─────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────┘
+
 ```
 
 ### Key Types
@@ -115,6 +124,7 @@ agents: {
     mcpServers: [{ command: './bin/mcp-server' }] // Additional MCP
   }
 }
+
 ```
 
 **Key advantage over `.claude/agents/*.md`**: The `prompt` field is guaranteed to load as system prompt. Markdown agent bodies sometimes don't load (caching issue).
@@ -122,17 +132,22 @@ agents: {
 ### MCP Server Types
 
 1. **Stdio** (external process):
+
    ```typescript
    { command: './bin/mcp-server', args: [], env: {} }
+
    ```
 
 2. **SSE/HTTP** (network):
+
    ```typescript
    { type: 'sse', url: 'http://localhost:8080/sse' }
    { type: 'http', url: 'http://localhost:8080/mcp' }
+
    ```
 
 3. **SDK** (in-process, zero startup):
+
    ```typescript
    import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
 
@@ -146,6 +161,7 @@ agents: {
 
    // Use in query
    query({ prompt: '...', options: { mcpServers: { email: server } } });
+
    ```
 
 ### Lifecycle Hooks
@@ -165,6 +181,7 @@ hooks: {
   SubagentStart: [...],
   PostToolUse: [...]
 }
+
 ```
 
 **Available hooks**: PreToolUse, PostToolUse, PostToolUseFailure, Notification, UserPromptSubmit, SessionStart, SessionEnd, Stop, SubagentStart, SubagentStop, PreCompact, PermissionRequest
@@ -174,6 +191,7 @@ hooks: {
 ### Option A: Node.js Wrapper
 
 **Architecture:**
+
 ```
 ┌─────────────────┐       ┌──────────────────┐       ┌─────────────────┐
 │  Orchestrator   │  MCP  │  Node.js SDK     │ spawn │  Claude Code    │
@@ -187,9 +205,11 @@ hooks: {
                           │  Seon JVM        │
                           │  (XTDB, nREPLs)  │
                           └──────────────────┘
+
 ```
 
 **Implementation:**
+
 ```typescript
 // bin/seon-orchestrator.ts
 import { query } from '@anthropic-ai/claude-agent-sdk';
@@ -225,6 +245,7 @@ for await (const msg of query({
 })) {
   console.log(msg);
 }
+
 ```
 
 **Pros:**
@@ -241,6 +262,7 @@ for await (const msg of query({
 ### Option B: Direct CLI Spawn (Current Approach)
 
 **Architecture:**
+
 ```
 ┌─────────────────┐       ┌──────────────────┐
 │  Orchestrator   │ Task  │  Claude Code     │
@@ -258,6 +280,7 @@ for await (const msg of query({
                           │       ▼          │
                           │  Seon JVM        │
                           └──────────────────┘
+
 ```
 
 **Current implementation:**
@@ -346,6 +369,7 @@ EOF
 
 # Run
 bun bin/sdk-orchestrator.ts "Implement feature X"
+
 ```
 
 ## 4. File Organization
@@ -409,6 +433,7 @@ type SDKMessage =
   | SDKStatusMessage      // Compacting, etc.
   | SDKToolProgressMessage // Tool execution progress
   | ...;
+
 ```
 
 ## 5. Next Steps

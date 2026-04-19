@@ -12,11 +12,15 @@
   (:require [clojure.core.async :as async]
             [clojure.core.async.flow :as flow]
             [clojure.string :as str]
+            [seon.db.datalevin.reader :as reader]
+            [seon.db.datalevin.writer :as writer]
             [seon.flow.harness :as harness]
             [seon.flow.msg :as msg]
-            [seon.flow.registry :as registry]
+            [seon.flow.pool :as pool]
             [seon.flow.status :as status]
-            [seon.schema :as schema])
+            [seon.runtime :as runtime]
+            [seon.schema :as schema]
+            [taoensso.timbre :as log])
   (:import [java.time Instant]))
 
 ;;; ---------------------------------------------------------------------------
@@ -24,10 +28,13 @@
 ;;; ---------------------------------------------------------------------------
 
 (schema/register! ::timeout-ms
-  [:int {:min 1 :description "Request timeout in milliseconds"}])
+                  [:int {:min 1 :description "Request timeout in milliseconds"}])
 
 (schema/register! ::target-ns
-  [:string {:min 1 :description "Target namespace for the request"}])
+                  [:string {:min 1 :description "Target namespace for the request"}])
+
+(schema/register! ::pid
+                  [:keyword {:description "Direct process ID for flow injection (e.g. :seon.flow/writer)"}])
 
 ;;; ---------------------------------------------------------------------------
 ;;; Sink Step Functions
@@ -375,12 +382,12 @@
   ;; Detect cycles at build time
   (when-let [cycles (detect-cycles namespaces)]
     (let [cycle-strs (map (fn [cycle]
-                            (str/join " → " cycle))
+                            (str/join " \u2192 " cycle))
                           cycles)]
       (throw (ex-info "Circular dependency detected in namespace proxies"
-                      {:cycle-detected true
-                       :cycles cycles
-                       :cycle-descriptions cycle-strs}))))
+                      {::cycle-detected true
+                       ::cycles cycles
+                       ::cycle-descriptions cycle-strs}))))
 
   (let [;; Build process definitions
         ns-procs
@@ -411,29 +418,31 @@
         (into []
               (concat
                 ;; Each namespace's reply output -> reply router
-                (mapv (fn [[ns-str _]]
-                        (let [pid (keyword "ns" ns-str)]
-                          [[pid :seon.flow.out/reply]
-                           [:seon.flow/reply-router :seon.flow.in/reply]]))
-                      namespaces)
+               (mapv (fn [[ns-str _]]
+                       (let [pid (keyword "ns" ns-str)]
+                         [[pid :seon.flow.out/reply]
+                          [:seon.flow/reply-router :seon.flow.in/reply]]))
+                     namespaces)
                 ;; Each namespace's event output -> event sink
-                (mapv (fn [[ns-str _]]
-                        (let [pid (keyword "ns" ns-str)]
-                          [[pid :seon.flow.out/event]
-                           [:seon.flow/event-sink :seon.flow.out/event]]))
-                      namespaces)
+               (mapv (fn [[ns-str _]]
+                       (let [pid (keyword "ns" ns-str)]
+                         [[pid :seon.flow.out/event]
+                          [:seon.flow/event-sink :seon.flow.out/event]]))
+                     namespaces)
                 ;; Each namespace's error output -> error sink
-                (mapv (fn [[ns-str _]]
-                        (let [pid (keyword "ns" ns-str)]
-                          [[pid :seon.flow.out/error]
-                           [:seon.flow/error-sink :seon.flow.out/error]]))
-                      namespaces)))
+               (mapv (fn [[ns-str _]]
+                       (let [pid (keyword "ns" ns-str)]
+                         [[pid :seon.flow.out/error]
+                          [:seon.flow/error-sink :seon.flow.out/error]]))
+                     namespaces)))
 
         config {:procs (merge ns-procs router-proc sink-procs)
                 :conns conns}
         fl (flow/create-flow config)
         chans (flow/start fl)]
     (flow/resume fl)
+    ;; Sync barrier: ensure all processes are running before use
+    (flow/ping fl :timeout-ms 5000)
 
     ;; Start cross-ns relays for namespaces that have reverse channels
     (let [relays
@@ -451,11 +460,11 @@
                   ::chans chans
                   ::relays relays
                   ::flow-id flow-id}]
-      ;; Register in flow registry
-      (registry/register! {::registry/id flow-id
-                           ::registry/flow fl
-                           ::registry/chans chans
-                           ::registry/label label})
+      ;; Register in runtime flow registry
+      (runtime/register-flow! {::runtime/flow-id flow-id
+                               ::runtime/flow fl
+                               ::runtime/chans chans
+                               ::runtime/label label})
       ;; Start error drain for status collection
       (when-let [error-chan (:error-chan chans)]
         (status/start-error-drain! {::status/id flow-id
@@ -463,9 +472,20 @@
       result)))
 
 (defn stop-topology!
-  "Stop a running topology. Returns nil."
-  [{::keys [flow flow-id]}]
+  "Stop a running topology. Snapshots state before stopping. Returns nil."
+  [{::keys [flow flow-id label]}]
   (when flow
+    ;; Snapshot state before stopping: pause -> snapshot -> stop
+    (try
+      (flow/pause flow)
+      (flow/ping flow :timeout-ms 5000)
+      (let [snap-label (or label (when flow-id (name flow-id)))]
+        (when snap-label
+          (runtime/snapshot-topology! {::runtime/flow flow
+                                       ::runtime/label snap-label
+                                       ::runtime/reason :shutdown})))
+      (catch Throwable t
+        (log/warn "Failed to snapshot topology before stop" {:error (.getMessage t)})))
     (flow/stop flow)
     ;; Clean up any lingering promises
     (doseq [[_id p] @pending-promises]
@@ -473,8 +493,192 @@
                   ::msg/error-type :timeout
                   ::msg/error-message "Topology stopped"}))
     (reset! pending-promises {}))
-  ;; Unregister from flow registry and stop error drain
+  ;; Unregister from runtime flow registry and stop error drain
   (when flow-id
     (status/stop-error-drain! {::status/id flow-id})
-    (registry/unregister! {::registry/id flow-id}))
+    (runtime/unregister-flow! {::runtime/flow-id flow-id}))
   nil)
+
+;;; ---------------------------------------------------------------------------
+;;; REPL Step Function
+;;; ---------------------------------------------------------------------------
+
+(defn repl-step
+  "Flow step-fn for REPL eval in the infrastructure flow.
+
+   Receives eval requests on :seon.flow.in/request, calls pool/nrepl-eval!
+   on the target port, and returns the result as a reply envelope.
+
+   Inputs:
+     :seon.flow.in/request - Message envelope with ::msg/payload containing:
+       :form/source    - Clojure source string to eval
+       :form/port      - nREPL port (int)
+
+   Outputs:
+     :seon.flow.out/reply - Reply envelope for reply-router
+     :seon.flow.out/error - Error envelope for error-sink"
+  ;; describe
+  ([]
+   {:ins {:seon.flow.in/request "REPL eval request envelopes"}
+    :outs {:seon.flow.out/reply "Reply envelopes for reply-router"
+           :seon.flow.out/error "Error envelopes for error-sink"}
+    :workload :io})
+
+  ;; init
+  ([_args]
+   {::total-evals 0
+    ::total-errors 0})
+
+  ;; transition
+  ([state transition]
+   (case transition
+     :clojure.core.async.flow/pause state
+     :clojure.core.async.flow/stop state
+     :clojure.core.async.flow/resume state
+     state))
+
+  ;; transform
+  ([state input-id request]
+   (case input-id
+     :seon.flow.in/request
+     (let [request-id (::msg/id request)
+           payload    (::msg/payload request)
+           source     (:form/source payload)
+           port       (:form/port payload)
+           t0         (System/nanoTime)]
+       (try
+         (let [result     (pool/nrepl-eval! port source)
+               elapsed-ms (long (/ (- (System/nanoTime) t0) 1e6))
+               reply      {::msg/id request-id
+                           ::msg/version 1
+                           ::msg/type :reply
+                           ::msg/status :ok
+                           ::msg/value result
+                           ::msg/from-ns "seon.repl"
+                           ::msg/duration-ms elapsed-ms}]
+           [(update state ::total-evals inc)
+            {:seon.flow.out/reply [reply]}])
+         (catch Exception e
+           (let [elapsed-ms (long (/ (- (System/nanoTime) t0) 1e6))
+                 error-reply {::msg/id request-id
+                              ::msg/version 1
+                              ::msg/type :reply
+                              ::msg/status :error
+                              ::msg/error-type :execution
+                              ::msg/error-class (.getName (class e))
+                              ::msg/error-message (.getMessage e)
+                              ::msg/from-ns "seon.repl"
+                              ::msg/duration-ms elapsed-ms}]
+             (log/warn e "REPL eval failed" {:port port})
+             [(update state ::total-errors inc)
+              {:seon.flow.out/reply [error-reply]
+               :seon.flow.out/error [error-reply]}]))))
+
+     ;; unknown input
+     [state nil])))
+
+;;; ---------------------------------------------------------------------------
+;;; Lifecycle Hooks
+;;; ---------------------------------------------------------------------------
+
+(defn before-ns-unload
+  "Called by clj-reload before unloading. Delivers timeout to all pending promises."
+  []
+  (doseq [[_id p] @pending-promises]
+    (deliver p {::msg/status :error
+                ::msg/error-type :timeout
+                ::msg/error-message "Namespace unloading"}))
+  (reset! pending-promises {}))
+
+;;; ---------------------------------------------------------------------------
+;;; build-infrastructure! — Infrastructure flow (writer + reply-router + sinks)
+;;; ---------------------------------------------------------------------------
+
+(defn build-infrastructure!
+  "Build and start the infrastructure flow.
+
+   The infrastructure flow handles cross-cutting concerns that are shared
+   across all namespace flows: database writes, REPL eval, and reply routing.
+
+   Processes:
+     :seon.flow/writer       - infra-writer-step (multi-DB via connection manager)
+     :seon.flow/reader       - infra-reader-step (multi-DB reads via connection manager)
+     :seon.flow/repl          - repl-step (nREPL eval via pool)
+     :seon.flow/reply-router - reply-router-step (delivers promises)
+     :seon.flow/event-sink   - event-sink-step (observability)
+     :seon.flow/error-sink   - error-sink-step (error accumulation)
+
+   Connections:
+     writer reply  -> reply-router
+     writer error  -> error-sink
+     reader reply  -> reply-router
+     reader error  -> error-sink
+     repl reply    -> reply-router
+     repl error    -> error-sink
+
+   Request keys:
+     ::connection-manager - Datalevin connection manager (Integrant component)
+
+   Returns:
+     {::flow fl ::flow-id :seon.flow/infrastructure}"
+  [{::keys [connection-manager]}]
+  (let [flow-id :seon.flow/infrastructure
+        config {:procs {:seon.flow/writer
+                        {:proc (flow/process #'writer/infra-writer-step)
+                         :args {::writer/connection-manager connection-manager}}
+                        :seon.flow/reader
+                        {:proc (flow/process #'reader/infra-reader-step)
+                         :args {::reader/connection-manager connection-manager}}
+                        :seon.flow/repl
+                        {:proc (flow/process #'repl-step)}
+                        :seon.flow/reply-router
+                        {:proc (flow/process #'reply-router-step)}
+                        :seon.flow/event-sink
+                        {:proc (flow/process #'event-sink-step)}
+                        :seon.flow/error-sink
+                        {:proc (flow/process #'error-sink-step)}}
+                :conns [;; writer reply -> reply-router
+                        [[:seon.flow/writer :seon.flow.out/reply]
+                         [:seon.flow/reply-router :seon.flow.in/reply]]
+                        ;; writer error -> error-sink
+                        [[:seon.flow/writer :seon.flow.out/error]
+                         [:seon.flow/error-sink :seon.flow.out/error]]
+                        ;; reader reply -> reply-router
+                        [[:seon.flow/reader :seon.flow.out/reply]
+                         [:seon.flow/reply-router :seon.flow.in/reply]]
+                        ;; reader error -> error-sink
+                        [[:seon.flow/reader :seon.flow.out/error]
+                         [:seon.flow/error-sink :seon.flow.out/error]]
+                        ;; repl reply -> reply-router
+                        [[:seon.flow/repl :seon.flow.out/reply]
+                         [:seon.flow/reply-router :seon.flow.in/reply]]
+                        ;; repl error -> error-sink
+                        [[:seon.flow/repl :seon.flow.out/error]
+                         [:seon.flow/error-sink :seon.flow.out/error]]]}
+        fl (flow/create-flow config)
+        chans (flow/start fl)]
+    (flow/resume fl)
+    ;; Sync barrier: wait for all processes to be running before using the flow.
+    ;; Without this, register-flow! -> persist-instance! -> db/transact! -> flow/inject
+    ;; can race with process threads that haven't started their loops yet.
+    (try
+      (flow/ping fl :timeout-ms 5000)
+      (catch Exception e
+        (flow/stop fl)
+        (throw (ex-info "Infrastructure flow failed to start: processes did not respond to ping within 5s. Check step-fn init arities."
+                        {:flow-id :seon.flow/infrastructure
+                         :processes [:seon.flow/writer :seon.flow/reader :seon.flow/repl
+                                     :seon.flow/reply-router :seon.flow/event-sink :seon.flow/error-sink]}
+                        e))))
+    ;; Register in runtime
+    (runtime/register-flow! {::runtime/flow-id flow-id
+                             ::runtime/flow fl
+                             ::runtime/chans chans
+                             ::runtime/label "infrastructure"})
+    ;; Start error drain
+    (when-let [error-chan (:error-chan chans)]
+      (status/start-error-drain! {::status/id flow-id
+                                  ::status/error-chan error-chan}))
+    {::flow fl
+     ::flow-id flow-id
+     ::chans chans}))

@@ -1,9 +1,13 @@
 (ns seon.graph.scanner
-  "Static source scanner for spec/schema extraction.
-   Parses schema/register! calls from Clojure source using edamame.
+  "Static source scanner for spec/schema and var extraction.
+   Parses schema/register! calls and def forms from Clojure source using edamame.
 
    Walks parsed forms looking for `(schema/register! <key> <schema>)` patterns
-   and produces `:seon.spec/*` entities for Datalevin ingestion.
+   and produces `:seon.spec/*` entities for Datalevin ingestion. Also extracts
+   `(def ...)` forms as `:seon.var/*` entities with value-type inference.
+
+   Function extraction (defn) and fn-to-spec linking are handled by
+   seon.graph.extract, which uses clj-kondo for authoritative function data.
 
    Usage:
      (require '[seon.graph.scanner :as scanner])
@@ -18,7 +22,7 @@
 
      ;; Scan entire directory
      (scanner/scan-directory {::dir-path \"src/\"})
-     ;; => vector of all spec entities"
+     ;; => vector of all spec + var entities"
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.walk :as walk]
@@ -32,6 +36,9 @@
 
 (schema/register! ::file-path
                   [:string {:min 1 :description "Path to a Clojure source file"}])
+
+(schema/register! ::source
+                  [:string {:min 1 :description "Clojure source code string to scan"}])
 
 (schema/register! ::dir-path
                   [:string {:min 1 :description "Directory path to scan recursively"}])
@@ -134,6 +141,29 @@
              (filter namespace))
             entries))))
 
+(defn extract-optional-keys
+  "For :map schemas, extract qualified keyword keys marked {:optional true}.
+   [:map [::a ::a] [::b {:optional true} ::b]] -> [:ns/b]
+   Only includes qualified keywords with :optional true in props."
+  [schema-form]
+  (when (and (vector? schema-form)
+             (= :map (first schema-form)))
+    (let [entries (rest schema-form)
+          entries (if (and (seq entries) (map? (first entries)))
+                    (rest entries)
+                    entries)]
+      (into []
+            (comp
+             (filter vector?)
+             (filter (fn [entry]
+                       (and (>= (count entry) 3)
+                            (map? (second entry))
+                            (:optional (second entry)))))
+             (map first)
+             (filter keyword?)
+             (filter namespace))
+            entries))))
+
 (defn- find-register-calls
   "Walk all parsed forms and collect register! call data.
    Returns vector of [key schema-form] pairs."
@@ -146,6 +176,100 @@
            (when (and (>= (count args) 2)
                       (keyword? (first args)))
              (swap! results conj [(first args) (second args)]))))
+       form)
+     forms)
+    @results))
+
+(defn- def-form?
+  "Returns true if form is a (def ...) form but NOT a (defn ...) or (defn- ...) form."
+  [form]
+  (and (list? form)
+       (symbol? (first form))
+       (= 'def (first form))))
+
+(defn- infer-value-type
+  "Infer the type of a def's value form.
+   Returns a keyword classifying the value."
+  [value-form]
+  (cond
+    (vector? value-form)  :vector
+    (map? value-form)     :map
+    (set? value-form)     :set
+    (string? value-form)  :string
+    (number? value-form)  :number
+    (keyword? value-form) :keyword
+    (boolean? value-form) :boolean
+    (list? value-form)    :expr
+    :else                 :unknown))
+
+(defn- extract-def
+  "Extract var entity from a (def ...) form.
+   Returns map with :seon.var/* keys, or nil if form is malformed."
+  [form ns-str now]
+  (let [sym (second form)
+        rest-forms (drop 2 form)
+        [doc-str value-form] (if (and (string? (first rest-forms))
+                                      (> (count rest-forms) 1))
+                               [(first rest-forms) (second rest-forms)]
+                               [nil (first rest-forms)])]
+    (when (symbol? sym)
+      (cond-> {:seon.var/qualified-name (str ns-str "/" sym)
+               :seon.var/namespace ns-str
+               :seon.var/name (str sym)
+               :seon.var/private (boolean (:private (meta sym)))
+               :seon.var/value-type (infer-value-type value-form)
+               :seon.var/updated-at now}
+        doc-str (assoc :seon.var/doc doc-str)))))
+
+(defn- find-def-forms
+  "Walk all parsed forms and collect (def ...) var entities.
+   Excludes defn/defn- forms (those are handled by clj-kondo in extract.clj)."
+  [forms ns-str now]
+  (let [results (atom [])]
+    (walk/postwalk
+     (fn [form]
+       (when (def-form? form)
+         (when-let [entity (extract-def form ns-str now)]
+           (swap! results conj entity)))
+       form)
+     forms)
+    @results))
+
+(defn- defn-form?
+  "Returns true if form is a (defn ...) or (defn- ...) form."
+  [form]
+  (and (list? form)
+       (symbol? (first form))
+       (#{'defn 'defn-} (first form))))
+
+(defn- extract-defn-malli-schema
+  "Extract :malli/schema metadata from a defn form.
+   Returns [qualified-name schema-form] or nil.
+
+   Handles the defn attr-map position:
+     (defn name docstring? attr-map? [args] body)"
+  [form ns-str]
+  (when (defn-form? form)
+    (let [parts (rest form)
+          sym (first parts)
+          parts (rest parts)
+          ;; Skip docstring if present
+          parts (if (string? (first parts)) (rest parts) parts)
+          ;; Check for attr-map
+          attr-map (when (map? (first parts)) (first parts))
+          schema (get attr-map :malli/schema)]
+      (when schema
+        [(str ns-str "/" sym) schema]))))
+
+(defn- find-fn-schemas
+  "Walk all parsed forms and collect :malli/schema metadata from defn forms.
+   Returns map of qualified-name -> schema-form."
+  [forms ns-str]
+  (let [results (atom {})]
+    (walk/postwalk
+     (fn [form]
+       (when-let [[qn schema] (extract-defn-malli-schema form ns-str)]
+         (swap! results assoc qn schema))
        form)
      forms)
     @results))
@@ -166,36 +290,93 @@
         first-pass (try (e/parse-string-all source-str default-opts)
                         (catch Exception _ nil))]
     (when first-pass
-      (let [ns-name (extract-ns-name first-pass)
+      (let [ns-str (extract-ns-name first-pass)
             aliases (extract-aliases first-pass)]
-        (when ns-name
-          (let [auto-resolve (build-auto-resolve ns-name (or aliases {}))
+        (when ns-str
+          (let [auto-resolve (build-auto-resolve ns-str (or aliases {}))
                 opts {:all true
                       :auto-resolve auto-resolve
                       :readers (fn [_tag] identity)
                       :regex #(re-pattern (str %))}]
             (try
-              {:ns-name ns-name
+              {:ns-str ns-str
                :forms (e/parse-string-all source-str opts)}
               (catch Exception _
                 ;; If second pass fails, use first pass results
-                {:ns-name ns-name
+                {:ns-str ns-str
                  :forms first-pass}))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Public API
 ;;; ---------------------------------------------------------------------------
 
+(defn scan-source
+  "Scan a Clojure source string for schema/register! calls and def forms.
+   Returns specs, vars, and ns markers. Function extraction is handled by
+   seon.graph.extract using clj-kondo.
+
+   Request keys:
+     ::source - Clojure source code string
+
+   Returns vector of spec entity maps, var entity maps, and ns marker maps.
+
+   Example:
+     (scan-source {::source (slurp \"src/seon/flow/pool.clj\")})"
+  [{::keys [source]}]
+  (let [parsed (parse-source source)]
+    (if-not parsed
+      []
+      (let [{:keys [ns-str forms]} parsed
+            register-calls (find-register-calls forms)
+            now (java.util.Date.)
+            has-ctx-spec? (some (fn [[spec-key _]]
+                                  (str/ends-with? (name spec-key) "*ctx*"))
+                                register-calls)
+            spec-entities (mapv (fn [[spec-key schema-form]]
+                                  (let [contains-keys (extract-contains-keys schema-form)
+                                        opt-keys (extract-optional-keys schema-form)]
+                                    (cond-> {:seon.spec/key spec-key
+                                             :seon.spec/namespace ns-str
+                                             :seon.spec/definition (pr-str schema-form)
+                                             :seon.spec/base-type (extract-base-type schema-form)
+                                             :seon.spec/updated-at now}
+                                      (seq contains-keys)
+                                      (assoc :seon.spec/contains-keys contains-keys)
+                                      (seq opt-keys)
+                                      (assoc :seon.spec/optional-keys opt-keys))))
+                                register-calls)
+            var-entities (find-def-forms forms ns-str now)]
+        (cond-> (into spec-entities var-entities)
+          has-ctx-spec?
+          (conj {:seon.ns/name ns-str
+                 :seon.ns/dynamic? true}))))))
+
+(defn scan-fn-schemas
+  "Scan source for :malli/schema metadata on defn forms.
+   Returns map of qualified-fn-name -> schema-form.
+
+   Request keys:
+     ::source - Clojure source code string
+
+   Example:
+     (scan-fn-schemas {::source (slurp \"src/seon/ctx.clj\")})
+     ;; => {\"seon.ctx/get-ctx\" [:=> [:cat :seon.ctx/get-ctx-request] :seon.ctx/get-ctx-response] ...}"
+  [{::keys [source]}]
+  (let [parsed (parse-source source)]
+    (if-not parsed
+      {}
+      (find-fn-schemas (:forms parsed) (:ns-str parsed)))))
+
 (defn scan-file
-  "Scan a Clojure source file for schema/register! calls.
+  "Scan a Clojure source file for schema/register! calls and def forms.
 
    Parses the file with edamame, resolves auto-namespaced keywords using
-   the file's ns declaration, and extracts spec entities.
+   the file's ns declaration, and extracts spec and var entities.
 
    Request keys:
      ::file-path - Path to a .clj, .cljs, or .cljc file
 
-   Returns vector of spec entity maps.
+   Returns vector of spec and var entity maps.
 
    Example:
      (scan-file {::file-path \"src/seon/flow/pool.clj\"})"
@@ -203,34 +384,18 @@
   (let [file (io/file file-path)]
     (if-not (.exists file)
       []
-      (let [source (slurp file)
-            parsed (parse-source source)]
-        (if-not parsed
-          []
-          (let [{:keys [ns-name forms]} parsed
-                register-calls (find-register-calls forms)
-                now (java.util.Date.)]
-            (mapv (fn [[spec-key schema-form]]
-                    (let [contains-keys (extract-contains-keys schema-form)]
-                      (cond-> {:seon.spec/key spec-key
-                               :seon.spec/namespace ns-name
-                               :seon.spec/definition (pr-str schema-form)
-                               :seon.spec/base-type (extract-base-type schema-form)
-                               :seon.spec/updated-at now}
-                        (seq contains-keys)
-                        (assoc :seon.spec/contains-keys contains-keys))))
-                  register-calls)))))))
+      (scan-source {::source (slurp file)}))))
 
 (defn scan-directory
   "Scan all Clojure source files in a directory for schema/register! calls.
 
-   Recursively finds .clj, .cljs, .cljc files and extracts spec entities
-   from each.
+   Recursively finds .clj, .cljs, .cljc files and extracts spec and var
+   entities from each.
 
    Request keys:
      ::dir-path - Directory to scan recursively
 
-   Returns vector of all spec entities found.
+   Returns vector of all spec and var entities found.
 
    Example:
      (scan-directory {::dir-path \"src/\"})"
@@ -241,67 +406,16 @@
       (->> (file-seq dir)
            (filter (fn [^File f]
                      (and (.isFile f)
-                          (let [name (.getName f)]
-                            (or (str/ends-with? name ".clj")
-                                (str/ends-with? name ".cljs")
-                                (str/ends-with? name ".cljc"))))))
+                          (let [fn-name (.getName f)]
+                            (or (str/ends-with? fn-name ".clj")
+                                (str/ends-with? fn-name ".cljs")
+                                (str/ends-with? fn-name ".cljc"))))))
            (mapcat (fn [^File f]
                      (try
                        (scan-file {::file-path (.getAbsolutePath f)})
                        (catch Exception _
                          []))))
            vec))))
-
-;;; ---------------------------------------------------------------------------
-;;; Function-to-Spec Linking
-;;; ---------------------------------------------------------------------------
-
-(defn link-fns-to-specs
-  "Link function entities to their input/output spec entities by naming convention.
-
-   For a function `seon.foo/bar`, looks for:
-   - Input spec:  `:seon.foo/bar-request`
-   - Output spec: `:seon.foo/bar-response`
-
-   If the output spec contains `:seon.render/html` or `:seon.render/ai` in its
-   `:seon.spec/contains-keys`, the function is a render function and gets
-   `:seon.fn/render-input-keys` populated from the input spec's contains-keys.
-
-   Arguments:
-     fns   - Vector of fn entity maps (with :seon.fn/qualified-name)
-     specs - Vector of spec entity maps (with :seon.spec/key)
-
-   Returns vector of fn entity maps with added keys:
-     :seon.fn/input-spec        - Lookup ref [:seon.spec/key ...] when matched
-     :seon.fn/output-spec       - Lookup ref [:seon.spec/key ...] when matched
-     :seon.fn/render-input-keys - Vector of keywords from input spec (render fns only)
-     :seon.fn/updated-at        - Current timestamp"
-  [fns specs]
-  (let [spec-by-key (into {} (map (juxt :seon.spec/key identity)) specs)
-        now (java.util.Date.)
-        render-keys #{:seon.render/html :seon.render/ai}]
-    (mapv (fn [fn-entity]
-            (let [qn (:seon.fn/qualified-name fn-entity)
-                  ;; Derive expected spec keys from qualified name
-                  input-key (keyword (str qn "-request"))
-                  output-key (keyword (str qn "-response"))
-                  input-spec (get spec-by-key input-key)
-                  output-spec (get spec-by-key output-key)
-                  ;; Check if output spec contains render keys
-                  output-contains (set (:seon.spec/contains-keys output-spec))
-                  is-render? (and output-spec
-                                  (some render-keys output-contains))
-                  input-contains (:seon.spec/contains-keys input-spec)]
-              (cond-> (assoc fn-entity :seon.fn/updated-at now)
-                input-spec
-                (assoc :seon.fn/input-spec [:seon.spec/key input-key])
-
-                output-spec
-                (assoc :seon.fn/output-spec [:seon.spec/key output-key])
-
-                (and is-render? (seq input-contains))
-                (assoc :seon.fn/render-input-keys (vec input-contains)))))
-          fns)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; REPL Helpers

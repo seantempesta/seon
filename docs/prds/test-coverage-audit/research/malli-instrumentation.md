@@ -1,6 +1,10 @@
+---
+type: research
+status: draft
+tags: [prd, research, schema]
+---
 # Malli Function Instrumentation Research
 
-**Date:** 2024-12-05
 **Sources:** Context7 (metosin/malli), Gemini Pro, malli docs
 
 ---
@@ -24,9 +28,11 @@ Malli function instrumentation provides **dev-time runtime validation** for func
 
 ;; Register schema separately
 (m/=> pow [:=> [:cat :int :int] :double])
+
 ```
 
 **Schema structure:**
+
 - `[:=> input-schema output-schema]` - function schema
 - `[:cat arg1-schema arg2-schema ...]` - sequential arguments
 - Return type comes last
@@ -38,6 +44,7 @@ Malli function instrumentation provides **dev-time runtime validation** for func
   [:function
    [:=> [:cat :int] :int]           ;; 1-arity
    [:=> [:cat :int :int] :int]])    ;; 2-arity
+
 ```
 
 ### Inline Schema (Alternative)
@@ -49,6 +56,7 @@ Malli function instrumentation provides **dev-time runtime validation** for func
   "x times y"
   [x :- :int, y :- :int]
   (* x y))
+
 ```
 
 ---
@@ -61,6 +69,7 @@ Malli function instrumentation provides **dev-time runtime validation** for func
 (require '[malli.instrument :as mi])
 
 (mi/instrument!)  ;; Instruments ALL functions with m/=> schemas
+
 ```
 
 ### What Happens Under the Hood
@@ -78,6 +87,7 @@ Malli function instrumentation provides **dev-time runtime validation** for func
 
 ;; Unstrument when done
 (mi/unstrument!)
+
 ```
 
 ---
@@ -93,6 +103,7 @@ Malli function instrumentation provides **dev-time runtime validation** for func
 
 ;; Start with pretty error reporting
 (dev/start! {:report (pretty/reporter)})
+
 ```
 
 ### What It Does
@@ -106,6 +117,7 @@ Malli function instrumentation provides **dev-time runtime validation** for func
 
 ```clojure
 (dev/stop!)
+
 ```
 
 ---
@@ -120,6 +132,7 @@ Malli function instrumentation provides **dev-time runtime validation** for func
 (def Percentile [:int {:min 0 :max 100}])
 (def Ticker [:string {:min 1 :max 10}])
 (def PositiveDouble [:double {:min 0.0}])
+
 ```
 
 ### 2. Add Function Specs (dsl/primitives.clj)
@@ -140,6 +153,7 @@ Malli function instrumentation provides **dev-time runtime validation** for func
 (m/=> iv-rank
   [:=> [:cat :some :string [:* :any]]  ;; node, ticker, opts
        [:maybe PercentileRank]])
+
 ```
 
 ### 3. Enable in Dev (env/dev/clj/user.clj)
@@ -150,6 +164,7 @@ Malli function instrumentation provides **dev-time runtime validation** for func
   ;; After system starts, enable instrumentation
   (require '[malli.dev :as mdev])
   (mdev/start!))
+
 ```
 
 ---

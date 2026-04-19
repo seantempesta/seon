@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive, trading, agent]
+---
+
 # Research: Strategy DSL Design
 
 **Status:** Complete
@@ -64,6 +70,7 @@ How should trading strategies be represented as data (not code)?
 - Factors can reference other factors, creating a dependency graph
 
 **Example Factor Structure:**
+
 ```python
 class Returns(CustomFactor):
     inputs = [USEquityPricing.close]
@@ -71,6 +78,7 @@ class Returns(CustomFactor):
 
     def compute(self, today, assets, out, closes):
         out[:] = (closes[-1] - closes[0]) / closes[-1]
+
 ```
 
 **Relevant to Seon:**
@@ -96,10 +104,12 @@ class Returns(CustomFactor):
 - Exit can specify stop-loss, profit target, trailing stop as parameters
 
 **Pine Script Condition Example:**
+
 ```pine
 long_condition = ta.crossover(ta.sma(close, 14), ta.sma(close, 28))
 if (long_condition)
     strategy.entry("Long", strategy.long)
+
 ```
 
 **Relevant to Seon:**
@@ -120,6 +130,7 @@ if (long_condition)
 - Indicators have explicit `lines` and `params` declarations
 
 **Signal Indicator Example:**
+
 ```python
 class MySignal(bt.Indicator):
     lines = ('signal',)
@@ -127,11 +138,14 @@ class MySignal(bt.Indicator):
 
     def __init__(self):
         self.lines.signal = self.data - bt.indicators.SMA(period=self.p.period)
+
 ```
 
 **Combining Signals:**
+
 ```python
 buy_sig = bt.And(close_over_sma, close_over_ema, sma_ema_diff > 0)
+
 ```
 
 **Relevant to Seon:**
@@ -152,12 +166,14 @@ buy_sig = bt.And(close_over_sma, close_over_ema, sma_ema_diff > 0)
 - Risk controls embedded: `with_stop_loss()`
 
 **Example:**
+
 ```python
 # AND operations
 (condition_1) & (condition_2) & (condition_3)
 
 # Entry with fluent API
 SMA(20).crosses_above(SMA(50))
+
 ```
 
 **Relevant to Seon:**
@@ -192,8 +208,10 @@ All systems handle condition combination differently:
 | SDL | `&` operator | Supported | Via parens |
 
 **Recommendation:** Use nested prefix notation (like Clojure) for clarity:
+
 ```clojure
 [:and condition-1 condition-2 [:or condition-3 condition-4]]
+
 ```
 
 This is:
@@ -224,6 +242,7 @@ Drawing inspiration from **Lisp/Clojure's homoiconicity**, represent conditions 
  [:or
   [:metric/skew-index :> 0.04]
   [:metric/term-slope :< 0.0]]]
+
 ```
 
 ### Condition Structure
@@ -239,6 +258,7 @@ A condition is a 3-tuple: `[metric operator value]`
  :op :>
  :value 0.80
  :lookback 126}  ; 6 months instead of default 252
+
 ```
 
 **V1 simplification:** Use 3-tuple form only, lookback at strategy level.
@@ -429,6 +449,7 @@ Based on existing `seon.trading.signals` primitives:
    [:strategy/exit-conditions [:vector SimpleCondition]]   ; Implicit AND
    [:strategy/position-size PositionSize]
    [:strategy/risk-limits {:optional true} RiskLimits]])
+
 ```
 
 ---
@@ -495,6 +516,7 @@ The validator must ensure:
     (position-exceeds-limit? strategy)
     (conj {:path [:position-size :risk-limits]
            :message "Position size exceeds risk limit"})))
+
 ```
 
 ---
@@ -521,6 +543,7 @@ The validator must ensure:
  :strategy/risk-limits
  {:max-position-size 0.10
   :max-drawdown 0.15}}
+
 ```
 
 ### 2. Low IV Long Volatility
@@ -544,6 +567,7 @@ The validator must ensure:
  :strategy/risk-limits
  {:max-position-size 0.08
   :max-drawdown 0.10}}
+
 ```
 
 ### 3. Contango Calendar Spread
@@ -566,6 +590,7 @@ The validator must ensure:
  :strategy/risk-limits
  {:max-position-size 0.05
   :min-days-between-trades 5}}
+
 ```
 
 ### 4. Bearish Sentiment Fade
@@ -587,6 +612,7 @@ The validator must ensure:
   :value 0.03}
  :strategy/risk-limits
  {:max-drawdown 0.12}}
+
 ```
 
 ---
@@ -605,6 +631,7 @@ The validator must ensure:
   [:metric/iv-rank :secondary :< 0.40]
   [:metric/spread [:- [:iv-rank :primary] [:iv-rank :secondary]] :> 0.30]]
  ...}
+
 ```
 
 ### Cross Operators
@@ -613,6 +640,7 @@ The validator must ensure:
 ;; V2: With state tracking
 {:strategy/entry-conditions
  [[:metric/iv-rank :crosses-above 0.80]]}  ; Enter on breakout, not on already high
+
 ```
 
 ### Explicit AND/OR
@@ -625,6 +653,7 @@ The validator must ensure:
   [:or
    [:metric/skew-index :> 0.05]
    [:metric/term-slope :< -0.0003]]]}
+
 ```
 
 ---
@@ -638,6 +667,7 @@ The validator must ensure:
 ```clojure
 [[:metric/iv-rank :> 0.80]
  [:metric/skew-index :> 0.04]]
+
 ```
 
 ### Rationale

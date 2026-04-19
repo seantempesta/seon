@@ -275,6 +275,7 @@
 (defonce ^:private flow-state (atom nil))
 
 (declare stop!)
+(declare start!)
 
 (defn start!
   "Start the SSE flow.
@@ -391,3 +392,17 @@
   []
   (when-let [{:keys [chans]} @flow-state]
     chans))
+
+;;; ---------------------------------------------------------------------------
+;;; Lifecycle Hooks
+;;; ---------------------------------------------------------------------------
+
+(defn before-ns-unload
+  "Called by clj-reload before unloading. Stops the SSE flow if running."
+  []
+  (stop!))
+
+(defn after-ns-reload
+  "Called by clj-reload after reloading. Restarts the SSE flow."
+  []
+  (start!))

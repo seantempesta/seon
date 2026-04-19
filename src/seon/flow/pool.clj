@@ -22,7 +22,7 @@
 
    ## Integrant Component
 
-   Register as `:seon/agent-pool` in system.edn. Depends on `:seon/datalevin-server`
+   Register as `:seon.flow/pool` in system.edn. Depends on `:seon.db.datalevin/server`
    so the server is available when agents start. Supports `suspend-key!`/`resume-key`
    to keep pool alive during `(reset)`.
 
@@ -40,7 +40,8 @@
 
      ;; Shut down entire pool
      (shutdown! pool)"
-  (:require [clojure.java.process :as process]
+  (:require [clojure.edn :as edn]
+            [clojure.java.process :as process]
             [clojure.java.shell :as shell]
             [clojure.string :as str]
             [integrant.core :as ig]
@@ -67,6 +68,17 @@
    Short because we're connecting to localhost." 500)
 (def ^:const agent-port-min 7900)
 (def ^:const agent-port-max 7999)
+(def ^:const grace-period-ms
+  "Don't health-check a JVM within this many ms of AGENT_READY.
+   Allows post-ready setup (Datalevin connect, namespace loading) to complete." 60000)
+(def ^:const max-respawns-per-minute
+  "Rate limit: max respawns across all slots per minute.
+   Prevents port exhaustion from crash loops." 6)
+(def ^:const max-spawn-retries
+  "Max port allocation retries per spawn attempt.
+   Each retry picks a fresh port when the previous one fails." 3)
+
+(declare port-bound?)
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schema Registration
@@ -78,6 +90,11 @@
 
 (schema/register! ::pid
                   [:int {:min 0 :description "OS process ID of agent JVM"}])
+
+(schema/register! ::session-id
+                  [:string {:min 4 :max 6
+                            :pattern "^[A-Za-z0-9]{4,6}$"
+                            :description "Base62 session ID assigned to a claimed JVM"}])
 
 (schema/register! ::status
                   [:enum :idle :active :spawning
@@ -130,14 +147,19 @@
   "Spawn an agent JVM on the given port. Blocks until AGENT_READY signal
    or timeout. Returns {::port ::pid ::process ...} or throws.
 
-   When datalevin-uri is provided, passes it to the agent JVM via --datalevin-uri."
+   When datalevin-uri is provided, passes it to the agent JVM via --datalevin-uri.
+
+   Starts both stdout and stderr reader threads. Stderr is logged at WARN
+   level so crash reasons are visible."
   [port & {:keys [datalevin-uri]}]
   (let [args (cond-> ["clojure" "-M:agent"
                        "--port" (str port)
                        "--namespace" "seon.pool.warm"]
                datalevin-uri (into ["--datalevin-uri" datalevin-uri]))
+        _ (log/info "Spawning agent JVM" {:port port})
         ^Process proc (apply process/start {:dir "."} args)
         stdout (BufferedReader. (InputStreamReader. (process/stdout proc)))
+        stderr (BufferedReader. (InputStreamReader. (process/stderr proc)))
         ready? (promise)
         reader-thread (future
                         (try
@@ -149,7 +171,14 @@
                               (recur)))
                           (catch Exception e
                             (log/error "Agent JVM reader error"
-                                       {:port port :error (.getMessage e)}))))]
+                                       {:port port :error (.getMessage e)}))))
+        stderr-thread (future
+                        (try
+                          (loop []
+                            (when-let [line (.readLine stderr)]
+                              (log/warn "Agent JVM stderr" {:port port :line line})
+                              (recur)))
+                          (catch Exception _)))]
     (if (deref ready? ready-timeout-ms nil)
       (let [pid (.pid proc)]
         (log/info "Agent JVM ready" {:port port :pid pid})
@@ -157,12 +186,16 @@
          ::pid pid
          ::process proc
          ::reader reader-thread
+         ::stderr-reader stderr-thread
          ::status :idle
+         ::ready-at (System/currentTimeMillis)
          ::datalevin-uri datalevin-uri})
       (do
         (.destroy proc)
         (throw (ex-info "Agent JVM failed to start within timeout"
-                        {:port port :timeout-ms ready-timeout-ms}))))))
+                        {:port port
+                         :timeout-ms ready-timeout-ms
+                         :port-occupied (port-bound? port)}))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; nREPL communication
@@ -225,98 +258,178 @@
     (format "dtlv://datalevin:datalevin@127.0.0.1:%d/agent-%d"
             datalevin-port agent-port)))
 
+(defn- unreserve-port!
+  "Remove a port from the reserved-ports set in pool state.
+   Called after spawn completes (success or failure)."
+  [pool-state port]
+  (swap! pool-state update ::reserved-ports disj port))
+
 (defn- allocate-port!
   "Atomically allocate the next available port from the pool.
+   Skips ports that are already tracked in ::all-jvms (running),
+   in ::reserved-ports (in-flight spawn), or TCP-bound.
+   Adds the port to ::reserved-ports before returning.
    Uses swap-vals! to ensure two concurrent callers never get the same port."
   [pool-state]
-  (let [[old-state _] (swap-vals! pool-state update ::next-port inc)]
-    (::next-port old-state)))
+  (loop [attempts 0]
+    (when (>= attempts 100)
+      (throw (ex-info "No available ports in agent range" {:attempts attempts})))
+    (let [[old-state _] (swap-vals! pool-state
+                                    update ::next-port
+                                    #(let [p (inc %)]
+                                       (if (> p agent-port-max) agent-port-min p)))
+          port (::next-port old-state)]
+      (if (or (contains? (::all-jvms old-state) port)
+              (contains? (::reserved-ports old-state) port)
+              (port-bound? port))
+        (recur (inc attempts))
+        (do
+          (swap! pool-state update ::reserved-ports conj port)
+          port)))))
+
+(defn- complete-warmup!
+  "Decrement remaining-warmup counter and finalize pool warming when it reaches zero."
+  [remaining-warmup pool-state ^LinkedBlockingQueue idle-queue]
+  (when remaining-warmup
+    (let [remaining (swap! remaining-warmup dec)]
+      (when (zero? remaining)
+        (swap! pool-state assoc ::warming? false)
+        (log/info "Pool ready" {:idle (.size idle-queue)
+                                 :total (count (::all-jvms @pool-state))})))))
 
 (defn- spawn-and-enqueue!
   "Spawn a new agent JVM and add it to the pool. Returns the JVM map on success,
-   nil on failure. Thread-safe -- called from background futures.
+   nil on failure. Retries up to max-spawn-retries times with a different port
+   on each attempt. Thread-safe -- called from background futures.
 
    When `remaining-warmup` atom is provided (during initial pool creation),
    decrements it after enqueuing. When it reaches zero, sets ::warming? false
    on the pool state and logs that the pool is ready."
   [pool-state ^LinkedBlockingQueue idle-queue datalevin-port
    & {:keys [remaining-warmup]}]
-  (let [port (allocate-port! pool-state)]
-    (try
-      (let [uri (build-datalevin-uri datalevin-port port)
-            jvm (spawn-agent-jvm! port :datalevin-uri uri)]
-        ;; Track in all-jvms map
-        (swap! pool-state assoc-in [::all-jvms port] jvm)
-        ;; Add to idle queue
-        (.put idle-queue jvm)
-        (log/debug "JVM spawned and enqueued" {:port port})
-        ;; Track warmup completion
-        (when remaining-warmup
-          (let [remaining (swap! remaining-warmup dec)]
-            (when (zero? remaining)
-              (swap! pool-state assoc ::warming? false)
-              (log/info "Pool ready" {:idle (.size idle-queue)
-                                       :total (count (::all-jvms @pool-state))}))))
-        jvm)
-      (catch Exception e
-        (log/error "Failed to spawn agent JVM"
-                   {:port port :error (.getMessage e)})
-        ;; Still decrement remaining on failure so warming eventually completes
-        (when remaining-warmup
-          (let [remaining (swap! remaining-warmup dec)]
-            (when (zero? remaining)
-              (swap! pool-state assoc ::warming? false)
-              (log/info "Pool ready (some JVMs failed to spawn)"
-                        {:idle (.size idle-queue)
-                         :total (count (::all-jvms @pool-state))}))))
-        nil))))
+  (loop [attempt 0]
+    (if (>= attempt max-spawn-retries)
+      (do
+        (log/error "All spawn retries exhausted" {:attempts max-spawn-retries})
+        (complete-warmup! remaining-warmup pool-state idle-queue)
+        nil)
+      (let [port (allocate-port! pool-state)]
+        (let [result (try
+                       (let [uri (build-datalevin-uri datalevin-port port)
+                             jvm (spawn-agent-jvm! port :datalevin-uri uri)]
+                         ;; Unreserve port now that it's tracked in all-jvms
+                         (unreserve-port! pool-state port)
+                         ;; Track in all-jvms map
+                         (swap! pool-state assoc-in [::all-jvms port] jvm)
+                         ;; Add to idle queue
+                         (.put idle-queue jvm)
+                         (log/debug "JVM spawned and enqueued" {:port port})
+                         ;; Track warmup completion
+                         (complete-warmup! remaining-warmup pool-state idle-queue)
+                         jvm)
+                       (catch Exception e
+                         (log/error "Failed to spawn agent JVM"
+                                    {:port port :attempt (inc attempt) :error (.getMessage e)})
+                         ;; Unreserve the failed port so it can be reused later
+                         (unreserve-port! pool-state port)
+                         ::retry))]
+          (if (= result ::retry)
+            (recur (inc attempt))
+            result))))))
+
+(defn- recent-spawn-count
+  "Count spawns within the last 60 seconds from the spawn-timestamps deque."
+  [pool-state]
+  (let [timestamps (::spawn-timestamps @pool-state)
+        cutoff (- (System/currentTimeMillis) 60000)]
+    (if timestamps
+      (count (filter #(> % cutoff) @timestamps))
+      0)))
+
+(defn- record-spawn!
+  "Record a spawn timestamp and prune entries older than 60s."
+  [pool-state]
+  (when-let [timestamps (::spawn-timestamps @pool-state)]
+    (let [cutoff (- (System/currentTimeMillis) 60000)]
+      (swap! timestamps (fn [ts] (conj (filterv #(> % cutoff) ts)
+                                       (System/currentTimeMillis)))))))
 
 (defn- replenish-pool!
   "Spawn replacement JVMs in the background to maintain target pool size.
-   Non-blocking -- spawns via future."
+   Non-blocking -- spawns via future. Rate-limited to max-respawns-per-minute."
   [pool-state ^LinkedBlockingQueue idle-queue]
   (let [{::keys [target-size datalevin-port shutdown?]} @pool-state
         current-idle (.size idle-queue)]
     (when (and (not shutdown?)
                (< current-idle target-size))
-      (let [deficit (- target-size current-idle)]
-        (log/debug "Replenishing pool" {:deficit deficit :current-idle current-idle})
-        (dotimes [_ deficit]
-          (future
-            (try
-              (spawn-and-enqueue! pool-state idle-queue datalevin-port)
-              (catch Exception e
-                (log/error "Replenishment failed" {:error (.getMessage e)})))))))))
+      (let [deficit (- target-size current-idle)
+            budget (- max-respawns-per-minute (recent-spawn-count pool-state))
+            to-spawn (min deficit (max 0 budget))]
+        (when (pos? to-spawn)
+          (log/debug "Replenishing pool" {:deficit deficit :budget budget
+                                           :spawning to-spawn})
+          (dotimes [_ to-spawn]
+            (record-spawn! pool-state)
+            (future
+              (try
+                (spawn-and-enqueue! pool-state idle-queue datalevin-port)
+                (catch Exception e
+                  (log/error "Replenishment failed" {:error (.getMessage e)}))))))
+        (when (and (pos? deficit) (zero? to-spawn))
+          (log/warn "Respawn rate limit reached, deferring"
+                    {:deficit deficit :recent-spawns (recent-spawn-count pool-state)}))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Health checks
 ;;; ---------------------------------------------------------------------------
 
 (defn- health-check-jvm!
-  "Ping a single idle JVM. Returns true if healthy, false otherwise."
-  [port]
-  (try
-    (let [result (nrepl-eval! port ":ok")]
-      (= result ":ok"))
-    (catch Exception _
-      false)))
+  "Check a single idle JVM. First checks if the process is alive,
+   then pings via nREPL. Returns :healthy, :dead, or :unhealthy."
+  [jvm]
+  (let [^Process proc (::process jvm)
+        port (::port jvm)]
+    (cond
+      ;; Process already exited
+      (and proc (not (.isAlive proc)))
+      (do (log/warn "Agent JVM process dead"
+                     {:port port :exit-code (.exitValue proc)})
+          :dead)
+
+      ;; nREPL ping succeeds
+      (try
+        (= ":ok" (nrepl-eval! port ":ok"))
+        (catch Exception _ false))
+      :healthy
+
+      :else :unhealthy)))
+
+(defn- in-grace-period?
+  "Returns true if the JVM was marked ready within the grace period."
+  [jvm]
+  (when-let [ready-at (::ready-at jvm)]
+    (< (- (System/currentTimeMillis) ready-at) grace-period-ms)))
 
 (defn- run-health-checks!
-  "Check health of all idle JVMs. Removes unhealthy ones and triggers replenishment."
+  "Check health of all idle JVMs. Removes unhealthy ones and triggers replenishment.
+   Skips JVMs within the grace period after AGENT_READY."
   [pool-state ^LinkedBlockingQueue idle-queue]
   (when-not (::shutdown? @pool-state)
     (let [idle-jvms (vec (.toArray idle-queue))]
       (doseq [jvm idle-jvms]
-        (when-not (health-check-jvm! (::port jvm))
-          (log/warn "Unhealthy JVM detected, removing" {:port (::port jvm)})
-          ;; Remove from idle queue
-          (.remove idle-queue jvm)
-          ;; Kill the process
-          (try
-            (kill-process! (::process jvm))
-            (catch Exception _))
-          ;; Remove from tracking
-          (swap! pool-state update ::all-jvms dissoc (::port jvm))))
+        (when-not (in-grace-period? jvm)
+          (let [status (health-check-jvm! jvm)]
+            (when (not= :healthy status)
+              (log/warn "Unhealthy JVM detected, removing"
+                        {:port (::port jvm) :status status})
+              ;; Remove from idle queue
+              (.remove idle-queue jvm)
+              ;; Kill the process
+              (try
+                (kill-process! (::process jvm))
+                (catch Exception _))
+              ;; Remove from tracking
+              (swap! pool-state update ::all-jvms dissoc (::port jvm))))))
       ;; Replenish if needed
       (replenish-pool! pool-state idle-queue))))
 
@@ -378,10 +491,10 @@
       nil)))
 
 (defn- kill-pid!
-  "Kill a process by PID. Returns true if kill succeeded."
+  "Kill a process by PID with SIGKILL. Returns true if kill succeeded."
   [pid-str]
   (try
-    (let [{:keys [exit]} (shell/sh "kill" pid-str)]
+    (let [{:keys [exit]} (shell/sh "kill" "-9" pid-str)]
       (zero? exit))
     (catch Exception e
       (log/debug "kill failed" {:pid pid-str :error (.getMessage e)})
@@ -390,36 +503,45 @@
 (defn cleanup-stale-agents!
   "Clean up stale agent JVM processes from a previous Seon session.
 
-   Checks each port in the agent range (base-port to base-port + size - 1)
-   for bound sockets. If a port is bound, finds and kills the process.
-   Only checks ports in the 7900-7999 safety range.
+   Scans the full agent port range (7900-7999) for bound sockets.
+   If a port is bound, finds and kills the process with SIGKILL,
+   then verifies the port is free.
 
    Returns the count of stale processes cleaned up."
-  [base-port size]
-  (let [ports (range base-port (+ base-port size))
-        ;; Safety: only kill processes on ports in agent range
-        safe-ports (filter #(and (>= % agent-port-min)
-                                 (<= % agent-port-max))
-                           ports)]
-    (when (< (count safe-ports) (count ports))
-      (log/warn "Some ports outside agent range, skipping"
-                {:requested (count ports) :safe (count safe-ports)}))
-    (reduce
-     (fn [cleaned port]
-       (if (port-bound? port)
-         (if-let [pid (find-pid-on-port port)]
-           (do
-             (log/warn "Killed stale agent JVM"
-                       {:port port :pid pid})
-             (kill-pid! pid)
-             (inc cleaned))
-           (do
-             (log/warn "Port bound but could not find PID"
-                       {:port port})
-             cleaned))
-         cleaned))
-     0
-     safe-ports)))
+  []
+  (let [ports (range agent-port-min (inc agent-port-max))
+        cleaned (reduce
+                 (fn [acc port]
+                   (if (port-bound? port)
+                     (if-let [pid (find-pid-on-port port)]
+                       (do
+                         (kill-pid! pid)
+                         ;; Brief pause then verify port is free
+                         (Thread/sleep 100)
+                         (when (port-bound? port)
+                           (log/warn "Port still bound after kill" {:port port :pid pid}))
+                         (conj acc {:port port :pid pid}))
+                       ;; Retry lsof after 200ms — process may still be binding
+                       (do
+                         (Thread/sleep 200)
+                         (if-let [pid-retry (find-pid-on-port port)]
+                           (do
+                             (kill-pid! pid-retry)
+                             (Thread/sleep 100)
+                             (when (port-bound? port)
+                               (log/warn "Port still bound after kill (retry)" {:port port :pid pid-retry}))
+                             (conj acc {:port port :pid pid-retry}))
+                           (do
+                             (log/info "Port bound but no PID found" {:port port})
+                             acc))))
+                     acc))
+                 []
+                 ports)]
+    (when (seq cleaned)
+      (log/info "Cleaned stale agent JVMs"
+                {:count (count cleaned)
+                 :ports (mapv :port cleaned)}))
+    (count cleaned)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Pool management (public API)
@@ -448,19 +570,20 @@
   [{::keys [size base-port datalevin-port]
     :or {size default-pool-size
          base-port default-base-port}}]
-  (log/info "Creating agent pool" {:size size :base-port base-port
-                                    :datalevin-port datalevin-port})
-  ;; Clean up stale agent JVMs from previous crash
-  (let [cleaned (cleanup-stale-agents! base-port size)]
-    (when (pos? cleaned)
-      (log/info "Cleaned up stale agent JVMs" {:count cleaned})))
+  (log/debug "Creating agent pool" {:size size :base-port base-port
+                                     :datalevin-port datalevin-port})
+  ;; Clean up stale agent JVMs from previous crash (scans full 7900-7999 range)
+  (cleanup-stale-agents!)
   (let [idle-queue (LinkedBlockingQueue.)
         pool-state (atom {::all-jvms {}
+                          ::reserved-ports #{}
+                          ::session->port {}
                           ::target-size size
                           ::next-port base-port
                           ::datalevin-port datalevin-port
                           ::shutdown? false
-                          ::warming? true})
+                          ::warming? true
+                          ::spawn-timestamps (atom [])})
         ;; Track how many JVMs still need to finish spawning
         remaining-warmup (atom size)
         ;; Spawn all JVMs concurrently in background -- do NOT block
@@ -605,6 +728,94 @@
       ;; Spawn replacement in background
       (replenish-pool! state idle-queue))))
 
+;;; ---------------------------------------------------------------------------
+;;; Session-based claiming (Track 2: Unified Agent Runtime)
+;;; ---------------------------------------------------------------------------
+
+(defn claim!
+  "Claim an idle JVM for a session. Assigns session-id, sets up namespace,
+   and injects *ctx* via nREPL eval. Returns JVM handle with session-id,
+   or nil if no JVM available within timeout.
+
+   Options:
+     ::session-id  - Required. 4-char hex session ID
+     ::namespace   - Required. Namespace symbol to create
+     ::forms       - Optional. Vector of forms to eval
+     ::timeout-ms  - Optional. Ms to wait for idle JVM (default: 30000)
+     ::ctx-value   - Optional. Map to inject as *ctx* value
+
+   Returns agent handle map with ::session-id, ::port, etc. or nil."
+  [pool {::keys [session-id namespace forms timeout-ms ctx-value]}]
+  (let [timeout-ms (or timeout-ms 30000)
+        handle (acquire! pool {::namespace namespace
+                               ::forms forms
+                               ::timeout-ms timeout-ms})]
+    (when handle
+      (let [port (::port handle)]
+        ;; Track session-id on the JVM
+        (swap! (::state pool) (fn [s]
+                                (-> s
+                                    (assoc-in [::all-jvms port ::session-id] session-id)
+                                    (assoc-in [::session->port session-id] port))))
+        ;; Inject *ctx* via nREPL eval if ctx-value provided
+        ;; Filter out non-serializable values (live connections, atoms, etc.)
+        ;; The agent JVM creates its own connections during setup.
+        ;; We serialize ctx as EDN string and read it on the agent side
+        ;; to avoid syntax-quote issues with symbols/special values.
+        (when ctx-value
+          (let [ns-sym namespace
+                serializable-ctx (reduce-kv
+                                  (fn [acc k v]
+                                    (try
+                                      (let [s (pr-str v)]
+                                        (edn/read-string s)
+                                        (assoc acc k v))
+                                      (catch Exception _
+                                        (log/debug "Stripping non-serializable ctx key for nREPL transfer" {:key k :type (type v)})
+                                        acc)))
+                                  {}
+                                  ctx-value)
+                ctx-edn (pr-str serializable-ctx)
+                code (str "(do (intern '" ns-sym " '*ctx*"
+                          " (atom (clojure.edn/read-string " (pr-str ctx-edn) ")))"
+                          " (.setDynamic (resolve (symbol \"" ns-sym "\" \"*ctx*\")) true)"
+                          " :ok)")]
+            (nrepl-eval! port code)))
+        ;; Trigger deferred instrumentation now that namespace code is loaded
+        (try
+          (nrepl-eval! port "(seon.dev.instrumentation/start! {})")
+          (catch Exception e
+            (log/warn "Deferred instrumentation failed on agent"
+                      {:port port :session-id session-id :error (.getMessage e)})))
+        (assoc handle ::session-id session-id)))))
+
+(defn get-jvm-by-session
+  "Look up a JVM by session-id. Returns JVM map or nil."
+  [pool session-id]
+  (let [state @(::state pool)]
+    (when-let [port (get-in state [::session->port session-id])]
+      (get-in state [::all-jvms port]))))
+
+(defn release-session!
+  "Release a claimed JVM back to the pool by session-id.
+   Clears session tracking, resets namespace, returns JVM to idle."
+  [pool session-id]
+  (if-let [jvm (get-jvm-by-session pool session-id)]
+    (let [port (::port jvm)
+          ns-sym (::namespace jvm)]
+      ;; Clear session tracking
+      (swap! (::state pool) (fn [s]
+                              (-> s
+                                  (update-in [::all-jvms port] dissoc ::session-id)
+                                  (update ::session->port dissoc session-id))))
+      ;; Delegate to existing release!
+      (release! pool {::port port ::namespace ns-sym})
+      (log/info "Released session from pool" {:session-id session-id :port port})
+      true)
+    (do
+      (log/warn "No JVM found for session" {:session-id session-id})
+      false)))
+
 (defn pool-status
   "Return current pool status.
 
@@ -649,7 +860,7 @@
 ;;; Integrant Component
 ;;; ---------------------------------------------------------------------------
 
-(defmethod ig/init-key :seon/agent-pool
+(defmethod ig/init-key :seon.flow/pool
   [_ {:keys [size base-port datalevin-server enabled?]
       :or {size default-pool-size
            base-port default-base-port
@@ -665,16 +876,16 @@
       (log/info "Agent pool disabled for this profile")
       nil)))
 
-(defmethod ig/halt-key! :seon/agent-pool
+(defmethod ig/halt-key! :seon.flow/pool
   [_ pool]
   (when pool
     (log/info "Stopping agent pool component")
     (shutdown! pool)))
 
 ;; Keep pool alive during (reset) -- JVMs are expensive to spawn
-(defmethod ig/suspend-key! :seon/agent-pool [_ pool] pool)
+(defmethod ig/suspend-key! :seon.flow/pool [_ pool] pool)
 
-(defmethod ig/resume-key :seon/agent-pool
+(defmethod ig/resume-key :seon.flow/pool
   [key opts old-opts old-pool]
   (if (and (= (:size opts) (:size old-opts))
            (= (:base-port opts) (:base-port old-opts)))

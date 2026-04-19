@@ -4,7 +4,7 @@
   (:require [clojure.java.io :as io]
             [clojure.java.shell :as shell]
             [clojure.string :as str]
-            [seon.repl.super :as super]
+            [seon.repl :as super]
             [seon.schema :as schema]
             [taoensso.timbre :as log]))
 
@@ -12,8 +12,8 @@
 ;;; Schema Registration
 ;;; ---------------------------------------------------------------------------
 
-(schema/register! ::conn
-                  [:any {:description "Datalevin connection"}])
+(schema/register! ::db-name
+                  [:keyword {:description "Database name keyword"}])
 
 (schema/register! ::namespace
                   [:string {:min 1 :description "Namespace to graduate"}])
@@ -98,7 +98,7 @@
   "Generate file content without writing to disk.
 
    Request keys:
-     ::conn      - Required. Datalevin connection
+     ::db-name   - Required. Database name keyword
      ::namespace - Required. Namespace string to graduate
      ::target    - Optional. :clj, :cljs, :cljc (default :clj)
      ::base-path - Optional. Base directory (default \"src\")
@@ -109,9 +109,9 @@
      ::form-count   - Number of forms
 
    Example:
-     (preview {::conn conn ::namespace \"seon.trading.signals\"})"
-  [{::keys [conn namespace target base-path] :as req}]
-  (let [forms (super/current-forms {::super/conn conn ::super/namespace namespace})
+     (preview {::db-name :seon.runtime ::namespace \"seon.trading.signals\"})"
+  [{::keys [db-name namespace target base-path] :as req}]
+  (let [forms (super/current-forms {::super/db-name db-name ::super/namespace namespace})
         content (assemble-content namespace forms)
         path (ns->file-path {::namespace namespace
                              ::target (or target :clj)
@@ -124,7 +124,7 @@
   "Write graduated namespace to disk.
 
    Request keys:
-     ::conn        - Required. Datalevin connection
+     ::db-name     - Required. Database name keyword
      ::namespace   - Required. Namespace string to graduate
      ::git-commit? - Optional. Create git commit (default true)
      ::target      - Optional. :clj, :cljs, :cljc (default :clj)
@@ -136,8 +136,8 @@
      ::git-committed? - Whether git commit was created
 
    Example:
-     (graduate! {::conn conn ::namespace \"seon.trading.signals\"})"
-  [{::keys [conn namespace git-commit? target base-path] :as req}]
+     (graduate! {::db-name :seon.runtime ::namespace \"seon.trading.signals\"})"
+  [{::keys [db-name namespace git-commit? target base-path] :as req}]
   (let [git? (if (some? git-commit?) git-commit? true)
         {::keys [file-content file-path form-count]} (preview req)
         file (io/file file-path)]

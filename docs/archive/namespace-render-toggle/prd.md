@@ -1,4 +1,11 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 # PRD: Namespace Render Toggle
+
 ## Status: SUPERSEDED by render-pipeline — render toggle folded into unified render pipeline
 
 **Status:** Complete (Phase 1-2 done, Phase 3 future)
@@ -59,6 +66,7 @@ Move agent detail rendering to a public `render` function:
     :html (agent-detail-content id)
     :ai   (agent-detail-ai id)    ; future: structured for AI
     nil   (agent-detail-content id)))
+
 ```
 
 After this: `/ns/seon.web.agents?id=6958` shows the same view as `/agents/6958`.
@@ -70,6 +78,7 @@ Add query param `?view=introspect` to force introspection view:
 ```
 /ns/seon.web.agents?id=6958           → custom render (agent detail)
 /ns/seon.web.agents?id=6958&view=introspect → introspection view
+
 ```
 
 Toggle button in header to switch views.

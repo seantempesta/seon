@@ -1,7 +1,9 @@
+---
+type: research
+status: completed
+tags: [prd, research, database, schema]
+---
 # Malli-Datalevin Schema Integration Research
-
-**Date:** 2026-01-28
-**Status:** Complete
 
 This document explores approaches for unifying Malli schemas with Datalevin database schemas, enabling a single source of truth for data definitions that can drive both validation and database storage.
 
@@ -39,6 +41,7 @@ No existing library solves this problem well enough to use as-is.
 **Status:** Mature library for clojure.spec -> Datomic/Datascript
 
 **Key Pattern:** Uses test.check generators to *infer* types rather than parsing spec forms:
+
 - Sample each spec 100 times
 - Detect what types are generated
 - Map those to Datomic types
@@ -51,6 +54,7 @@ No existing library solves this problem well enough to use as-is.
 **Blog Post:** [DataScript as a Lingua Franca for Domain Modeling](https://vvvvalvalval.github.io/posts/2018-07-23-datascript-as-a-lingua-franca-for-domain-modeling.html)
 
 **Pattern:** Store domain model in DataScript, derive everything else:
+
 - Datomic schema transactions
 - GraphQL schemas
 - Validation rules
@@ -65,12 +69,14 @@ No existing library solves this problem well enough to use as-is.
 **In reference-code/malli:** `src/malli/json_schema.cljc`
 
 **Key Pattern:** Multimethod-based transformation:
+
 ```clojure
 (defmulti accept (fn [name _schema _children _options] name) :default ::default)
 
 (defmethod accept 'uuid? [_ _ _ _] {:type "string" :format "uuid"})
 (defmethod accept 'inst? [_ _ _ _] {:type "string" :format "date-time"})
 (defmethod accept :map [_ schema children _] ...)
+
 ```
 
 **Verdict:** This is the exact pattern to follow for Datalevin transformation.
@@ -122,6 +128,7 @@ Extend Malli schemas with `:datalevin/*` properties (following Malli's JSON Sche
   [:vector
    {:datalevin/cardinality :db.cardinality/many}
    :string])
+
 ```
 
 ---
@@ -172,6 +179,7 @@ Create a namespace `seon.schema.datalevin` that compiles Malli schemas to Datale
      Map of attribute definitions for Datalevin."
   [entity-name definition]
   ...)
+
 ```
 
 #### Type Multimethods
@@ -209,6 +217,7 @@ Create a namespace `seon.schema.datalevin` that compiles Malli schemas to Datale
 ;; References to other entities
 (defmethod -transform :ref [schema _]
   {:db/valueType :db.type/ref})
+
 ```
 
 #### Property Handling
@@ -224,6 +233,7 @@ Create a namespace `seon.schema.datalevin` that compiles Malli schemas to Datale
       (:datalevin/cardinality props) (assoc :db/cardinality (:datalevin/cardinality props))
       (:datalevin/doc props)         (assoc :db/doc (:datalevin/doc props))
       (:datalevin/isComponent props) (assoc :db/isComponent true))))
+
 ```
 
 ---
@@ -278,6 +288,7 @@ Create a namespace `seon.schema.datalevin` that compiles Malli schemas to Datale
 ;;     :ai.session/type {:db/valueType :db.type/keyword}
 ;;     :ai.session/status {:db/valueType :db.type/keyword :db/index true}
 ;;     ...}
+
 ```
 
 ### Property Testing with Generators
@@ -299,6 +310,7 @@ Create a namespace `seon.schema.datalevin` that compiles Malli schemas to Datale
       ;; Query should find it
       (= session
          (d/pull (d/db conn) '[*] [:ai.session/id (:ai.session/id session)])))))
+
 ```
 
 ---
@@ -308,22 +320,26 @@ Create a namespace `seon.schema.datalevin` that compiles Malli schemas to Datale
 ### Approach A: Malli -> Datalevin Compiler (Recommended)
 
 **Pros:**
+
 - Malli is the source of truth (familiar, well-documented)
 - Generators "just work" for property testing
 - Validation happens before DB transactions
 - Type properties are explicit and visible
 
 **Cons:**
+
 - Must maintain transformation code
 - Some Malli features don't map to Datalevin (e.g., regex patterns)
 
 ### Approach B: Datalevin -> Malli Generator
 
 **Pros:**
+
 - Datalevin schema is the source of truth
 - Database semantics are primary
 
 **Cons:**
+
 - Datalevin schema is less expressive than Malli
 - Generators require additional work
 - Validation needs custom implementation
@@ -331,10 +347,12 @@ Create a namespace `seon.schema.datalevin` that compiles Malli schemas to Datale
 ### Approach C: Single DSL Generating Both
 
 **Pros:**
+
 - Truly unified definition
 - Could be more concise
 
 **Cons:**
+
 - Another DSL to learn
 - More abstraction = more complexity
 - Loses Malli ecosystem benefits
@@ -342,10 +360,12 @@ Create a namespace `seon.schema.datalevin` that compiles Malli schemas to Datale
 ### Approach D: Convention-Based (Same Keywords, Different Registries)
 
 **Pros:**
+
 - Minimal abstraction
 - Both schemas exist independently
 
 **Cons:**
+
 - Easy for them to drift out of sync
 - Manual maintenance burden
 - No automatic property testing
@@ -357,13 +377,17 @@ Create a namespace `seon.schema.datalevin` that compiles Malli schemas to Datale
 ### Recommended Additions
 
 1. **malli-datomic** - Even though sparse, useful as reference
+
    ```bash
    git submodule add https://github.com/Blasterai/malli-datomic reference-code/malli-datomic
+
    ```
 
 2. **spectomic** - Good patterns for type inference
+
    ```bash
    git submodule add https://github.com/Provisdom/spectomic reference-code/spectomic
+
    ```
 
 ### Already Present

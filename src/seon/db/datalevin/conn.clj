@@ -4,16 +4,13 @@
    Manages client connections to the Datalevin server, providing:
    - Connection caching per namespace
    - Lazy database creation on first connection
-   - TTL-based cleanup of idle connections
    - Schema application on connect
 
    ## Configuration
 
    ```clojure
-   {:seon/connection-manager
-    {:server #ig/ref :seon/datalevin-server
-     :ttl-ms 300000  ; Connection TTL (5 minutes default)
-     :cleanup-interval-ms 60000}}  ; Cleanup check interval (1 minute)
+   {:seon.db.datalevin/connections
+    {:server #ig/ref :seon.db.datalevin/server}}
    ```
 
    ## Usage
@@ -21,29 +18,29 @@
    ```clojure
    (require '[seon.db.datalevin.conn :as conn])
 
-   ;; Get master database connection (always exists)
-   (conn/get-master-conn! {::conn/manager manager})
+   ;; Get any database connection by keyword identity
+   (conn/get-conn! {::conn/manager mgr ::conn/db :seon.ai})
+   (conn/get-conn! {::conn/manager mgr ::conn/db :seon.runtime ::conn/schema merged-schema})
+   (conn/get-conn! {::conn/manager mgr ::conn/db :seon.trading})
 
-   ;; Get namespace connection (creates DB if needed)
-   (conn/get-namespace-conn! {::conn/manager manager
-                              ::conn/namespace 'seon.trading})
-
-   ;; Explicitly close a namespace connection
-   (conn/close-namespace-conn! {::conn/manager manager
-                                ::conn/namespace 'seon.trading})
+   ;; Close a connection
+   (conn/close-conn! {::conn/manager mgr ::conn/db :seon.trading})
    ```
 
-   ## Database Naming
+   ## Database Tiers
 
-   - Master database: `seon` (for orchestrator data)
-   - Namespace databases: `seon.{namespace}` (e.g., `seon.trading`)
+   | Keyword       | Contents                        |
+   |---------------|---------------------------------|
+   | :seon.ai      | AI sessions + messages          |
+   | :seon.flow    | Flow traces + snapshots         |
+   | :seon.runtime | Code graph + instance registry  |
+   | :seon.{ns}    | Per-namespace agent context      |
 
    Database names are converted to kebab-case by Datalevin server."
   (:require [integrant.core :as ig]
             [seon.schema :as schema]
             [taoensso.timbre :as log])
-  (:import [java.time Instant]
-           [java.util.concurrent ScheduledExecutorService Executors TimeUnit]))
+  (:import [java.util.concurrent ConcurrentHashMap]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schema Registration
@@ -61,15 +58,6 @@
 (schema/register! ::password
                   [:string {:min 1 :description "Server password"}])
 
-(schema/register! ::ttl-ms
-                  [:int {:min 0 :description "Connection TTL in milliseconds"}])
-
-(schema/register! ::cleanup-interval-ms
-                  [:int {:min 1000 :description "Cleanup interval in milliseconds"}])
-
-(schema/register! ::namespace
-                  [:or :symbol :string])
-
 (schema/register! ::connection
                   [:any {:description "Datalevin connection (atom wrapping DB)"}])
 
@@ -79,38 +67,34 @@
                    [::host {:optional true} ::host]
                    [::username {:optional true} ::username]
                    [::password {:optional true} ::password]
-                   [::ttl-ms ::ttl-ms]
-                   [::connections [:any {:description "Atom of namespace->connection-entry"}]]
-                   [::scheduler {:optional true} [:any {:description "ScheduledExecutorService"}]]])
+                   [::connections [:any {:description "Atom of namespace->connection-entry"}]]])
 
 ;; Connection entry stored in the cache
 (schema/register! ::connection-entry
                   [:map
-                   [::connection ::connection]
-                   [::last-accessed [:any {:description "Instant of last access"}]]])
+                   [::connection ::connection]])
 
 ;; Request/Response schemas for public API
 ;; Note: These functions involve runtime resources (connections, atoms) that
 ;; cannot be generated for property testing. We define schemas for documentation
 ;; but omit :malli/schema metadata since the manager contains non-generatable atoms.
 
-(schema/register! ::get-master-conn-request
-                  [:map
-                   [::manager ::manager]])
+(schema/register! ::db
+                  [:keyword {:description "Database identity keyword, e.g. :seon.ai, :seon.runtime"}])
 
 (schema/register! ::schema
                   [:any {:description "Optional Datalevin schema to apply on connection"}])
 
-(schema/register! ::get-namespace-conn-request
+(schema/register! ::get-conn-request
                   [:map
                    [::manager ::manager]
-                   [::namespace ::namespace]
+                   [::db ::db]
                    [::schema {:optional true} ::schema]])
 
-(schema/register! ::close-namespace-conn-request
+(schema/register! ::close-conn-request
                   [:map
                    [::manager ::manager]
-                   [::namespace ::namespace]])
+                   [::db ::db]])
 
 (schema/register! ::close-all-connections-request
                   [:map
@@ -123,17 +107,13 @@
 (schema/register! ::total-connections
                   [:int {:min 0 :description "Number of cached connections"}])
 
-(schema/register! ::namespaces
+(schema/register! ::databases
                   [:vector :keyword])
-
-(schema/register! ::master-connected?
-                  [:boolean {:description "Whether master DB is connected"}])
 
 (schema/register! ::connection-stats-response
                   [:map
                    [::total-connections ::total-connections]
-                   [::namespaces ::namespaces]
-                   [::master-connected? ::master-connected?]])
+                   [::databases ::databases]])
 
 ;;; ---------------------------------------------------------------------------
 ;;; URI Construction
@@ -149,19 +129,20 @@
         password (or password "datalevin")]
     (format "dtlv://%s:%s@%s:%d/%s" username password host port db-name)))
 
-(defn- namespace->db-name
-  "Convert a namespace to a database name.
-
-   'seon.trading -> \"seon.trading\"
-   \"seon.trading\" -> \"seon.trading\""
-  [ns]
-  (if (symbol? ns)
-    (str ns)
-    ns))
-
 ;;; ---------------------------------------------------------------------------
 ;;; Connection Management (Internal)
 ;;; ---------------------------------------------------------------------------
+
+(defonce ^:private ^ConcurrentHashMap db-locks
+  (ConcurrentHashMap.))
+
+(defn- db-lock
+  "Get or create a lock object for a given db-name.
+   Uses ConcurrentHashMap to ensure exactly one lock per db-name."
+  ^Object [^String db-name]
+  (.computeIfAbsent db-locks db-name
+                    (reify java.util.function.Function
+                      (apply [_ _k] (Object.)))))
 
 (defn- get-datalevin-conn
   "Get a Datalevin connection, creating the database if needed.
@@ -189,184 +170,155 @@
           (log/warn "Error closing Datalevin connection" {:error (.getMessage e)}))))))
 
 (defn- connection-closed?
-  "Check if a Datalevin connection is closed."
+  "Check if a Datalevin connection is closed.
+   Conservative approach: only return true if we're certain the conn is closed.
+   Returns false if we can't determine status (assumes conn is usable)."
   [conn]
   (when conn
-    (require 'datalevin.core)
-    (let [closed? (resolve 'datalevin.conn/closed?)]
-      (try
-        (closed? conn)
-        (catch Exception _
-          true)))))
+    (try
+      ;; Require the correct namespace (datalevin.conn, not datalevin.core)
+      (require 'datalevin.conn)
+      (if-let [closed-fn (resolve 'datalevin.conn/closed?)]
+        (closed-fn conn)
+        ;; Can't resolve the function - assume conn is usable
+        false)
+      (catch ClassNotFoundException _
+        ;; Namespace not loaded yet - assume conn is usable
+        false)
+      (catch Exception e
+        ;; Log but don't assume closed - let actual transact fail if conn is bad
+        (log/debug "Error checking connection status, assuming usable"
+                   {:error (.getMessage e)})
+        false))))
 
-(defn- touch-connection!
-  "Update the last-accessed time for a connection entry."
-  [connections ns-key]
-  (swap! connections update ns-key
-         (fn [entry]
-           (when entry
-             (assoc entry ::last-accessed (Instant/now))))))
+(defn connection-error?
+  "Check if an exception indicates a connection/server error."
+  [^Throwable e]
+  (let [msg (str (.getMessage e) " " (some-> (.getCause e) (.getMessage)))]
+    (boolean
+     (or (re-find #"(?i)connection refused" msg)
+         (re-find #"(?i)connection reset" msg)
+         (re-find #"(?i)broken pipe" msg)
+         (re-find #"(?i)closed" msg)
+         (re-find #"(?i)not connected" msg)
+         (re-find #"(?i)timeout" msg)
+         (instance? java.net.ConnectException e)
+         (instance? java.net.ConnectException (.getCause e))))))
 
 (defn- get-or-create-connection!
   "Get an existing connection or create a new one.
 
-   Thread-safe: uses swap! with compare-and-set semantics."
+   Thread-safe: uses per-DB locking to ensure only one thread creates a
+   connection for a given database name. The lock is held during d/get-conn
+   (which triggers server-side open-kv on first access). Without this,
+   concurrent first-opens corrupt LMDB state on the server.
+
+   Fast path (no lock): returns cached connection if valid.
+   Slow path (locked): creates connection, caches it, returns it."
   [manager ns-key db-name schema]
   (let [connections (::connections manager)]
-    ;; First, try to get existing connection
+    ;; Fast path: check cache without locking
     (if-let [entry (get @connections ns-key)]
       (if (connection-closed? (::connection entry))
-        ;; Connection is closed, need to create new one
-        (let [new-conn (get-datalevin-conn manager db-name schema)]
-          (swap! connections assoc ns-key
-                 {::connection new-conn
-                  ::last-accessed (Instant/now)})
-          new-conn)
-        ;; Connection is still valid, touch and return it
-        (do
-          (touch-connection! connections ns-key)
-          (::connection entry)))
-      ;; No existing connection, create new one
-      (let [new-conn (get-datalevin-conn manager db-name schema)]
-        (swap! connections assoc ns-key
-               {::connection new-conn
-                ::last-accessed (Instant/now)})
-        new-conn))))
-
-;;; ---------------------------------------------------------------------------
-;;; TTL Cleanup
-;;; ---------------------------------------------------------------------------
-
-(defn- expired?
-  "Check if a connection entry has expired based on TTL."
-  [entry ttl-ms]
-  (let [last-accessed (::last-accessed entry)
-        now (Instant/now)
-        age-ms (.toEpochMilli (.minusMillis now (.toEpochMilli last-accessed)))]
-    ;; Calculate age properly
-    (let [accessed-epoch (.toEpochMilli last-accessed)
-          now-epoch (.toEpochMilli now)
-          age (- now-epoch accessed-epoch)]
-      (> age ttl-ms))))
-
-(defn- cleanup-expired-connections!
-  "Close and remove connections that have exceeded their TTL.
-
-   Called periodically by the scheduler."
-  [{::keys [connections ttl-ms] :as _manager}]
-  (let [entries @connections
-        expired-keys (filter (fn [[_ entry]] (expired? entry ttl-ms)) entries)]
-    (doseq [[ns-key entry] expired-keys]
-      (log/debug "Closing expired connection" {:namespace ns-key})
-      (close-datalevin-conn (::connection entry))
-      (swap! connections dissoc ns-key))))
-
-(defn- start-cleanup-scheduler!
-  "Start the background cleanup scheduler."
-  [{::keys [cleanup-interval-ms] :as manager}]
-  (let [scheduler (Executors/newSingleThreadScheduledExecutor)
-        cleanup-task #(try
-                        (cleanup-expired-connections! manager)
-                        (catch Exception e
-                          (log/error "Error in connection cleanup" {:error (.getMessage e)})))]
-    (.scheduleAtFixedRate scheduler
-                          cleanup-task
-                          cleanup-interval-ms
-                          cleanup-interval-ms
-                          TimeUnit/MILLISECONDS)
-    scheduler))
-
-(defn- stop-cleanup-scheduler!
-  "Stop the cleanup scheduler."
-  [^ScheduledExecutorService scheduler]
-  (when scheduler
-    (.shutdown scheduler)
-    (try
-      (.awaitTermination scheduler 5 TimeUnit/SECONDS)
-      (catch InterruptedException _
-        (.shutdownNow scheduler)))))
+        ;; Connection is closed, fall through to locked creation
+        (locking (db-lock db-name)
+          ;; Double-check after acquiring lock — another thread may have reconnected
+          (if-let [entry (get @connections ns-key)]
+            (if (connection-closed? (::connection entry))
+              (try
+                (let [new-conn (get-datalevin-conn manager db-name schema)]
+                  (swap! connections assoc ns-key {::connection new-conn})
+                  new-conn)
+                (catch Exception e
+                  (when (connection-error? e)
+                    (log/warn "Server unreachable while reconnecting" {:db db-name :error (.getMessage e)})
+                    (swap! connections dissoc ns-key))
+                  (throw e)))
+              (::connection entry))
+            ;; Entry was removed between checks, create fresh
+            (try
+              (let [new-conn (get-datalevin-conn manager db-name schema)]
+                (swap! connections assoc ns-key {::connection new-conn})
+                new-conn)
+              (catch Exception e
+                (when (connection-error? e)
+                  (log/warn "Server unreachable during reconnection" {:db db-name :error (.getMessage e)}))
+                (throw e)))))
+        ;; Connection is still valid, return it
+        (::connection entry))
+      ;; No existing connection — acquire per-DB lock and create
+      (locking (db-lock db-name)
+        ;; Double-check after acquiring lock — another thread may have created it
+        (if-let [entry (get @connections ns-key)]
+          (if (connection-closed? (::connection entry))
+            (try
+              (let [new-conn (get-datalevin-conn manager db-name schema)]
+                (swap! connections assoc ns-key {::connection new-conn})
+                new-conn)
+              (catch Exception e
+                (when (connection-error? e)
+                  (log/warn "Server unreachable while reconnecting" {:db db-name :error (.getMessage e)})
+                  (swap! connections dissoc ns-key))
+                (throw e)))
+            (::connection entry))
+          (try
+            (let [new-conn (get-datalevin-conn manager db-name schema)]
+              (swap! connections assoc ns-key {::connection new-conn})
+              new-conn)
+            (catch Exception e
+              (when (connection-error? e)
+                (log/warn "Server unreachable during initial connection" {:db db-name :error (.getMessage e)}))
+              (throw e))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Public API
 ;;;
 ;;; Note: These functions omit :malli/schema metadata intentionally.
-;;; The manager contains runtime objects (atoms, schedulers, connections)
+;;; The manager contains runtime objects (atoms, connections)
 ;;; that cannot be generated for property testing. See CONVENTIONS.md
 ;;; "When NOT to Use :malli/schema" section.
 ;;; ---------------------------------------------------------------------------
 
-(def ^:private master-db-name "seon")
+(defn get-conn!
+  "Get connection to any Datalevin database by keyword identity.
 
-(defn get-master-conn!
-  "Get connection to the master control database.
-
-   The master database (`seon`) stores orchestrator data:
-   - Session registry
-   - AI messages (Observatory)
-   - Cross-namespace queries
+   Uses ::db keyword to identify the database. The keyword's name becomes
+   the Datalevin db-name (dots normalized to hyphens by Datalevin server).
 
    Request keys:
      ::manager - Required. Connection manager instance (runtime object)
+     ::db      - Required. Database keyword, e.g. :seon.ai, :seon.runtime
+     ::schema  - Optional. Datalevin schema map for attribute definitions
 
    Returns:
-     Datalevin connection to the master database.
+     Datalevin connection to the specified database.
 
    Note: No :malli/schema - manager contains non-generatable runtime objects.
 
-   Example:
-     (get-master-conn! {::conn/manager manager})"
-  [{::keys [manager]}]
-  (get-or-create-connection! manager ::master master-db-name nil))
+   Examples:
+     (get-conn! {::conn/manager mgr ::conn/db :seon.ai})
+     (get-conn! {::conn/manager mgr ::conn/db :seon.runtime ::conn/schema merged-schema})
+     (get-conn! {::conn/manager mgr ::conn/db :seon.trading})"
+  [{::keys [manager db schema]}]
+  (get-or-create-connection! manager db (name db) schema))
 
-(defn get-namespace-conn!
-  "Get connection to a namespace-specific database.
-
-   Creates the database lazily on first connection. Each namespace
-   gets its own isolated database for domain-specific data.
-
-   Request keys:
-     ::manager   - Required. Connection manager instance
-     ::namespace - Required. Namespace symbol or string
-     ::schema    - Optional. Datalevin schema to apply on connection
-
-   Returns:
-     Datalevin connection to the namespace database.
-
-   Example:
-     (get-namespace-conn! {::manager manager
-                           ::namespace 'seon.trading})
-     (get-namespace-conn! {::manager manager
-                           ::namespace 'seon.trading
-                           ::schema my-schema})"
-  [{::keys [manager namespace schema]}]
-  (let [ns-str (namespace->db-name namespace)
-        ns-key (keyword ns-str)]
-    (get-or-create-connection! manager ns-key ns-str schema)))
-
-(defn close-namespace-conn!
-  "Explicitly close a namespace connection.
+(defn close-conn!
+  "Explicitly close a connection by database keyword.
 
    Removes the connection from the cache and closes it.
-   Use when you know a namespace won't be accessed for a while.
 
    Request keys:
-     ::manager   - Required. Connection manager instance
-     ::namespace - Required. Namespace symbol or string
+     ::manager - Required. Connection manager instance
+     ::db      - Required. Database keyword
 
    Returns:
-     true if connection was closed, false if not found.
-
-   Example:
-     (close-namespace-conn! {::manager manager
-                             ::namespace 'seon.trading})"
-  [{::keys [manager namespace]}]
-  (let [ns-str (namespace->db-name namespace)
-        ns-key (keyword ns-str)
-        connections (::connections manager)]
-    (if-let [entry (get @connections ns-key)]
+     true if connection was closed, false if not found."
+  [{::keys [manager db]}]
+  (let [connections (::connections manager)]
+    (if-let [entry (get @connections db)]
       (do
         (close-datalevin-conn (::connection entry))
-        (swap! connections dissoc ns-key)
+        (swap! connections dissoc db)
         true)
       false)))
 
@@ -399,49 +351,152 @@
    Returns:
      Map with connection statistics:
        ::total-connections - Number of cached connections
-       ::namespaces        - List of connected namespaces
-       ::master-connected? - Whether master DB is connected"
+       ::databases         - List of connected database keywords"
+  [{::keys [manager]}]
+  (let [connections @(::connections manager)]
+    {::total-connections (count connections)
+     ::databases (vec (keys connections))}))
+
+(defn reconnect!
+  "Force reconnection for a database.
+
+   Closes the cached connection if any, then creates a fresh one.
+   Use when a connection is known to be stale or broken.
+
+   Request keys:
+     ::manager - Required. Connection manager instance
+     ::db      - Required. Database keyword
+     ::schema  - Optional. Datalevin schema to apply
+
+   Returns:
+     New Datalevin connection."
+  [{::keys [manager db schema]}]
+  (let [connections (::connections manager)]
+    ;; Close existing connection if cached
+    (when-let [entry (get @connections db)]
+      (close-datalevin-conn (::connection entry))
+      (swap! connections dissoc db))
+    ;; Create fresh connection
+    (get-or-create-connection! manager db (name db) schema)))
+
+(defn sweep-stale-connections!
+  "Close and remove connections that are dead or stale.
+
+   Checks each cached connection. If closed, removes it from the cache.
+   Optionally accepts a set of db keywords to preserve (skip closing).
+
+   Request keys:
+     ::manager  - Required. Connection manager instance
+     ::preserve - Optional. Set of db keywords to keep (e.g. #{:seon :seon.runtime})
+
+   Returns:
+     Map with ::swept (count removed) and ::kept (count preserved)."
+  [{::keys [manager preserve]}]
+  (let [preserve (or preserve #{})
+        connections (::connections manager)
+        entries @connections
+        swept (atom 0)]
+    (doseq [[db-key entry] entries
+            :when (not (contains? preserve db-key))]
+      (let [conn (::connection entry)
+            stale? (or (nil? conn) (connection-closed? conn))]
+        (when stale?
+          (log/info "Sweeping stale connection" {:db db-key})
+          (close-datalevin-conn conn)
+          (swap! connections dissoc db-key)
+          (swap! swept inc))))
+    (let [s @swept]
+      (log/info "Connection sweep complete" {:swept s :kept (- (count entries) s)})
+      {::swept s
+       ::kept (- (count entries) s)})))
+
+(defn close-non-core-connections!
+  "Close all connections except core databases (:seon, :seon.runtime, :seon.ai, :seon.flow).
+
+   Used during suspend to release agent namespace connections while keeping
+   essential connections alive.
+
+   Request keys:
+     ::manager - Required. Connection manager instance
+
+   Returns:
+     Number of connections closed."
+  [{::keys [manager]}]
+  (let [core-dbs #{:seon :seon.runtime :seon.ai :seon.flow}
+        connections (::connections manager)
+        entries @connections
+        closed (atom 0)]
+    (doseq [[db-key entry] entries
+            :when (not (contains? core-dbs db-key))]
+      (log/info "Closing non-core connection" {:db db-key})
+      (close-datalevin-conn (::connection entry))
+      (swap! connections dissoc db-key)
+      (swap! closed inc))
+    (let [c @closed]
+      (log/info "Closed non-core connections" {:closed c :kept (- (count entries) c)})
+      c)))
+
+(defn health
+  "Get health status of the connection manager.
+
+   Returns a map describing the connection state:
+     ::status - :connected, :disconnected, or :degraded
+     ::total-connections - Number of cached connections
+     ::server-reachable? - Whether the server port accepts TCP connections
+
+   Request keys:
+     ::manager - Required. Connection manager instance"
   [{::keys [manager]}]
   (let [connections @(::connections manager)
-        ns-keys (keys connections)]
-    {::total-connections (count connections)
-     ::namespaces (remove #{::master} ns-keys)
-     ::master-connected? (contains? connections ::master)}))
+        port (::port manager)
+        reachable? (try
+                     (with-open [socket (java.net.Socket.)]
+                       (.connect socket
+                                 (java.net.InetSocketAddress. "127.0.0.1" (int port))
+                                 1000)
+                       true)
+                     (catch Exception _ false))
+        total (count connections)
+        status (cond
+                 (and reachable? (pos? total)) :connected
+                 reachable? :connected
+                 (pos? total) :degraded
+                 :else :disconnected)]
+    {::status status
+     ::total-connections total
+     ::server-reachable? reachable?}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Integrant Component
 ;;; ---------------------------------------------------------------------------
 
-(defmethod ig/init-key :seon/connection-manager
-  [_ {:keys [server ttl-ms cleanup-interval-ms]
-      :or {ttl-ms 300000           ; 5 minutes default
-           cleanup-interval-ms 60000}}]  ; 1 minute default
+(defmethod ig/init-key :seon.db.datalevin/connections
+  [_ {:keys [server]}]
   (let [{:keys [port]} server
         manager {::port port
                  ::host "127.0.0.1"
                  ::username "datalevin"
                  ::password "datalevin"
-                 ::ttl-ms ttl-ms
-                 ::cleanup-interval-ms cleanup-interval-ms
-                 ::connections (atom {})}
-        scheduler (start-cleanup-scheduler! manager)]
-    (log/info "Started connection manager" {:port port :ttl-ms ttl-ms})
-    (assoc manager ::scheduler scheduler)))
+                 ::connections (atom {})}]
+    (log/info "Started connection manager" {:port port})
+    manager))
 
-(defmethod ig/halt-key! :seon/connection-manager
+(defmethod ig/halt-key! :seon.db.datalevin/connections
   [_ manager]
   (log/info "Stopping connection manager...")
-  (stop-cleanup-scheduler! (::scheduler manager))
   (let [closed (close-all-connections! {::manager manager})]
     (log/info "Connection manager stopped" {:connections-closed closed})))
 
 ;; Suspend/resume to survive (reset) without dropping connections
-(defmethod ig/suspend-key! :seon/connection-manager [_ state] state)
+(defmethod ig/suspend-key! :seon.db.datalevin/connections
+  [_ state]
+  (let [closed (close-non-core-connections! {::manager state})]
+    (log/info "Suspended connection manager" {:non-core-closed closed}))
+  state)
 
-(defmethod ig/resume-key :seon/connection-manager
+(defmethod ig/resume-key :seon.db.datalevin/connections
   [key opts old-opts old-state]
-  (if (and (= (:ttl-ms opts) (:ttl-ms old-opts))
-           (= (get-in opts [:server :port]) (get-in old-opts [:server :port])))
+  (if (= (get-in opts [:server :port]) (get-in old-opts [:server :port]))
     old-state
     (do (ig/halt-key! key old-state)
         (ig/init-key key opts))))
@@ -455,15 +510,18 @@
   (require '[integrant.repl.state :as state])
 
   ;; Get connection manager from system
-  (def mgr (:seon/connection-manager state/system))
+  (def mgr (:seon.db.datalevin/connections state/system))
 
-  ;; Get master connection
-  (def master-conn (get-master-conn! {::manager mgr}))
-  master-conn
+  ;; Get AI connection
+  (def ai-conn (get-conn! {::manager mgr ::db :seon.ai}))
+  ai-conn
+
+  ;; Get runtime connection
+  (def rt-conn (get-conn! {::manager mgr ::db :seon.runtime}))
+  rt-conn
 
   ;; Get namespace connection
-  (def trading-conn (get-namespace-conn! {::manager mgr
-                                           ::namespace 'seon.trading}))
+  (def trading-conn (get-conn! {::manager mgr ::db :seon.trading}))
   trading-conn
 
   ;; Check stats
@@ -471,11 +529,11 @@
 
   ;; Test transact
   (require '[datalevin.core :as d])
-  (d/transact! master-conn [{:test/name "hello"}])
-  (d/q '[:find ?name :where [?e :test/name ?name]] @master-conn)
+  (d/transact! ai-conn [{:test/name "hello"}])
+  (d/q '[:find ?name :where [?e :test/name ?name]] @ai-conn)
 
-  ;; Close namespace connection
-  (close-namespace-conn! {::manager mgr ::namespace 'seon.trading})
+  ;; Close a connection
+  (close-conn! {::manager mgr ::db :seon.trading})
 
   ;; Close all
   (close-all-connections! {::manager mgr})

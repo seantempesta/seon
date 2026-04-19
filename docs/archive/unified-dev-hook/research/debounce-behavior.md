@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # Research: Gemini Review Debounce Behavior
 
 **Date:** 2025-12-29
@@ -29,6 +35,7 @@
  :edit/timestamp #xt/zdt "2025-12-29T..."
  :edit/code-diff nil  ;; Not currently used
  :edit/new-functions #{}}
+
 ```
 
 Each edit creates a new `:pending-edit` entity. When a review triggers, ALL pending edits are cleared.
@@ -64,6 +71,7 @@ Each edit creates a new `:pending-edit` entity. When a review triggers, ALL pend
    b. Read current code from disk (fresh, not stale)
    c. Send to Gemini
    d. Clear all pending edits
+
 ```
 
 **The debounce checks "oldest pending edit age"** - NOT "time since last review".
@@ -81,6 +89,7 @@ Each edit creates a new `:pending-edit` entity. When a review triggers, ALL pend
 ;; Check if review should trigger
 (should-trigger-review? (user/xtdb-node) 5)
 ;; => nil (not true, not false - nil because no age to compare)
+
 ```
 
 **Finding:** When there are no pending edits, `should-trigger-review?` returns `nil` (falsy), so no review triggers. This is correct - nothing to review.
@@ -100,6 +109,7 @@ After a review clears pending edits:
 
 (should-trigger-review? node 30)
 ;; => false (0.123 < 30)
+
 ```
 
 **Finding:** New edits after review must wait the full debounce period again.
@@ -113,6 +123,7 @@ After a review clears pending edits:
 
 (should-trigger-review? node 30)
 ;; => true
+
 ```
 
 **Finding:** Very old pending edits will always trigger review, which is correct.
@@ -160,6 +171,7 @@ Add a singleton entity to XTDB tracking when the last review completed:
 {:xt/id :seon.dev/review-state
  :entity/type :review-state
  :review/last-completed #inst "2025-12-29T..."}
+
 ```
 
 ### 2. New Function: `time-since-last-review`
@@ -178,6 +190,7 @@ Add a singleton entity to XTDB tracking when the last review completed:
                    (.toEpochMilli (.toInstant ts)))
             now (.toEpochMilli (Instant/now))]
         (/ (- now then) 1000.0)))))
+
 ```
 
 ### 3. New Function: `record-review-completed!`
@@ -191,6 +204,7 @@ Add a singleton entity to XTDB tracking when the last review completed:
       {:xt/id :seon.dev/review-state
        :entity/type :review-state
        :review/last-completed (Instant/now)}]]))
+
 ```
 
 ### 4. Update `should-trigger-review?`
@@ -211,6 +225,7 @@ Add a singleton entity to XTDB tracking when the last review completed:
      (when has-pending
        (or (nil? time-since)           ;; Never reviewed -> immediate
            (> time-since debounce-secs)))))) ;; Enough time passed
+
 ```
 
 ### 5. Update `bin/seon-hook` to Record Completion
@@ -223,6 +238,7 @@ After `stage-batch-review` and `stage-clear-pending`, add:
   (stage-clear-pending)
   (stage-record-review-completed)  ;; NEW: track completion time
   (add-feedback! (str "Gemini: " (truncate review-text max-summary-length))))
+
 ```
 
 Add the new stage function:
@@ -232,6 +248,7 @@ Add the new stage function:
   "Record that review just completed."
   []
   (nrepl-eval "(seon.dev.feedback/record-review-completed! (user/xtdb-node))"))
+
 ```
 
 ---

@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # Research: Unified Code Analysis with clj-kondo/clojure-lsp
 
 Date: 2026-01-04
@@ -22,6 +28,7 @@ Running clj-kondo with analysis enabled:
 ```bash
 clj-kondo --lint src/seon/dev/hook.clj \
   --config '{:output {:analysis {:arglists true :var-usages true} :format :edn}}'
+
 ```
 
 Returns a map with these top-level keys:
@@ -30,6 +37,7 @@ Returns a map with these top-level keys:
 {:findings []           ; Lint issues (empty = clean)
  :summary {...}         ; Timing, file count, error counts
  :analysis {...}}       ; The rich analysis data
+
 ```
 
 ### Analysis Data Structure
@@ -55,6 +63,7 @@ The `:analysis` key contains:
  :alias codebase
  :row 28
  :col 14}
+
 ```
 
 ### Example: Var Definition
@@ -67,6 +76,7 @@ The `:analysis` key contains:
  :name process-hook-event!
  :arglist-strs ["[{::keys [xtdb-node event config]}]"]
  :doc "Process a Claude Code hook event..."}
+
 ```
 
 ### Example: Var Usage (for call graphs)
@@ -80,6 +90,7 @@ The `:analysis` key contains:
  :name stage-repair          ; Function being called
  :from-var process-hook-event! ; **Caller context!**
  :arity 2}
+
 ```
 
 The `:from-var` field is the key to building call graphs.
@@ -98,6 +109,7 @@ To build a call graph for `process-hook-event!`:
 (->> var-usages
      (filter #(= (:from-var %) 'process-hook-event!))
      (map #(select-keys % [:to :name :row])))
+
 ```
 
 This gives all functions called by `process-hook-event!`.
@@ -141,6 +153,7 @@ To find what calls a specific function:
      (map :from-var)
      distinct)
 ;; => (process-hook-event!)
+
 ```
 
 ---
@@ -155,6 +168,7 @@ clojure-lsp provides `clojure-lsp.api` namespace for programmatic use without ru
 
 ```clojure
 {:deps {com.github.clojure-lsp/clojure-lsp {:mvn/version "2025.11.28-12.47.43"}}}
+
 ```
 
 ### Key Functions
@@ -176,6 +190,7 @@ clojure-lsp provides `clojure-lsp.api` namespace for programmatic use without ru
   ;; Access enriched clj-kondo analysis
   (let [kondo-analysis (get-in result [:result :analysis])]
     (:var-definitions kondo-analysis)))
+
 ```
 
 ### Pros/Cons
@@ -225,6 +240,7 @@ For our use case (auto-format before agent sees code), **cljfmt** is the best ch
 (require '[cljfmt.core :as cljfmt])
 (defn format-string [s]
   (cljfmt/reformat-string s))
+
 ```
 
 For the hook, shell out is simplest and fastest - no JVM startup inside Babashka.
@@ -280,6 +296,7 @@ Edit event arrives
 +-------------------+
 | Gemini Review     | <- Rich context includes call graph
 +-------------------+
+
 ```
 
 ### Key Changes from Current Architecture
@@ -304,6 +321,7 @@ From Clojure (not Babashka):
   (clj-kondo/run! {:lint [file-path]
                    :config {:output {:analysis {:arglists true
                                                 :var-usages true}}}}))
+
 ```
 
 From Babashka (shell out):
@@ -318,6 +336,7 @@ From Babashka (shell out):
       :out
       edn/read-string
       :analysis))
+
 ```
 
 ### Performance Considerations
@@ -359,4 +378,5 @@ clj-kondo has built-in caching. For project-wide analysis, use:
                                        :meta [:added :deprecated]}
                      :context true}        ; Include surrounding context
           :format :edn}}                   ; Output format
+
 ```

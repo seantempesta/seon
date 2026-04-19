@@ -5,7 +5,7 @@
    Follows the same GET shim + POST SSE pattern as seon.web.agents."
   (:require [clojure.core.protocols :as protocols]
             [seon.flow.status :as status]
-            [seon.flow.registry :as registry]
+            [seon.runtime :as runtime]
             [seon.web.sse :as sse]
             [seon.web.html :as html]
             [seon.web.components :as ui]
@@ -43,8 +43,8 @@
   "Get topology data (procs + conns) from a flow via datafy.
    Returns nil if flow not available."
   [flow-id]
-  (when-let [entry (registry/get-flow {::registry/id flow-id})]
-    (let [fl (::registry/flow entry)]
+  (when-let [handle (runtime/get-flow {::runtime/flow-id flow-id})]
+    (let [fl (:flow handle)]
       (try
         (let [d (protocols/datafy fl)]
           {:procs (:procs d)

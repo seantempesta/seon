@@ -4,18 +4,18 @@
 #   ./bin/run        # dev profile (default) - includes nREPL on port 7888
 #   ./bin/run prod   # production profile
 #
-# Starts XTDB, nREPL, HTTP server, and Tailwind watcher (via Integrant).
-# If Caddy is installed, starts HTTP/2 reverse proxy on https://localhost:3030.
+# Starts Datalevin, nREPL, HTTP server, Tailwind watcher, and Caddy proxy (via Integrant).
 # Ctrl+C to stop cleanly.
 
 export JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home
 export PATH="$JAVA_HOME/bin:$PATH"
 
-# Start Caddy reverse proxy for HTTP/2 (if installed)
-if command -v caddy &>/dev/null; then
-    caddy start --config Caddyfile 2>>logs/caddy.log
-    trap "caddy stop 2>/dev/null" EXIT
-    echo "Caddy running on https://localhost:3030 (HTTP/2)"
+# Ensure classpath is fresh (stale .cpcache causes missing-dep errors)
+if [ -f .cpcache/*/classpath ]; then
+    if [ deps.edn -nt .cpcache/*/classpath ]; then
+        echo "deps.edn changed — refreshing classpath..."
+        rm -rf .cpcache
+    fi
 fi
 
-exec clj -J-Xmx4g -M:dev:run "$@"
+exec clj -M:dev:run "$@"

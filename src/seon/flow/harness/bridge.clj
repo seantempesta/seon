@@ -11,7 +11,8 @@
    orchestrator and blocks until a reply arrives."
   (:require [clojure.core.async :as async]
             [clojure.core.async.flow :as flow]
-            [clojure.edn :as edn]
+            [taoensso.nippy :as nippy]
+            [taoensso.timbre :as log]
             [seon.flow.msg :as msg]
             [seon.schema :as schema])
   (:import [java.time Instant]))
@@ -21,13 +22,13 @@
 ;;; ---------------------------------------------------------------------------
 
 (schema/register! ::namespace
-  [:string {:min 1 :description "Namespace this bridge serves"}])
+                  [:string {:min 1 :description "Namespace this bridge serves"}])
 
 (schema/register! ::bridge-port
-  [:int {:min 1 :max 65535 :description "TCP port for orchestrator connection"}])
+                  [:int {:min 1 :max 65535 :description "TCP port for orchestrator connection"}])
 
 (schema/register! ::remote-call-timeout-ms
-  [:int {:min 1 :description "Timeout for remote cross-namespace calls (default 10000ms)"}])
+                  [:int {:min 1 :description "Timeout for remote cross-namespace calls (default 10000ms)"}])
 
 ;;; ---------------------------------------------------------------------------
 ;;; Reverse Channel — Cross-Namespace Remote Calls
@@ -72,36 +73,42 @@
                     ::msg/created-at (Instant/now)}]
     ;; Register promise BEFORE sending
     (swap! pending-remote-promises assoc request-id p)
-    (try
-      ;; Send request to orchestrator via reverse channel
-      (when-not (async/>!! request-ch request)
-        (throw (ex-info "Reverse channel closed"
-                        {::msg/status :error
-                         ::msg/error-type :execution
-                         ::msg/id request-id})))
-      ;; Wait for reply
-      (let [reply (deref p timeout-ms ::timed-out)]
-        (if (= reply ::timed-out)
-          (do
-            (swap! pending-remote-promises dissoc request-id)
-            (throw (ex-info "Remote call timed out"
-                            {::msg/status :timeout
-                             ::msg/error-type :timeout
-                             ::msg/id request-id
-                             ::msg/to-ns to-ns
-                             ::msg/fn fn-name})))
-          ;; Got a reply
-          (case (::msg/status reply)
-            :ok (::msg/value reply)
-            (throw (ex-info (or (::msg/error-message reply)
-                                (str "Remote call failed: " (::msg/status reply)))
-                            (select-keys reply [::msg/status ::msg/error-type
-                                                ::msg/error-class ::msg/error-message
-                                                ::msg/error-data ::msg/id
-                                                ::msg/duration-ms]))))))
-      (catch Exception e
-        (swap! pending-remote-promises dissoc request-id)
-        (throw e)))))
+    (log/debug "Remote call start" {:trace-id request-id :fn fn-name :to-ns to-ns :from-ns from-ns :event :start})
+    (let [start-ms (System/currentTimeMillis)]
+      (try
+        ;; Send request to orchestrator via reverse channel
+        (when-not (async/>!! request-ch request)
+          (throw (ex-info "Reverse channel closed"
+                          {::msg/status :error
+                           ::msg/error-type :execution
+                           ::msg/id request-id})))
+        ;; Wait for reply
+        (let [reply (deref p timeout-ms ::timed-out)]
+          (if (= reply ::timed-out)
+            (do
+              (swap! pending-remote-promises dissoc request-id)
+              (log/warn "Remote call timeout" {:trace-id request-id :fn fn-name :to-ns to-ns :elapsed-ms (- (System/currentTimeMillis) start-ms) :event :timeout})
+              (throw (ex-info "Remote call timed out"
+                              {::msg/status :timeout
+                               ::msg/error-type :timeout
+                               ::msg/id request-id
+                               ::msg/to-ns to-ns
+                               ::msg/fn fn-name})))
+            ;; Got a reply
+            (let [elapsed (- (System/currentTimeMillis) start-ms)]
+              (case (::msg/status reply)
+                :ok (do (log/debug "Remote call ok" {:trace-id request-id :fn fn-name :to-ns to-ns :elapsed-ms elapsed :event :end})
+                        (::msg/value reply))
+                (do (log/warn "Remote call error" {:trace-id request-id :fn fn-name :to-ns to-ns :elapsed-ms elapsed :event :error :status (::msg/status reply) :error-message (::msg/error-message reply)})
+                    (throw (ex-info (or (::msg/error-message reply)
+                                        (str "Remote call failed: " (::msg/status reply)))
+                                    (select-keys reply [::msg/status ::msg/error-type
+                                                        ::msg/error-class ::msg/error-message
+                                                        ::msg/error-data ::msg/id
+                                                        ::msg/duration-ms]))))))))
+        (catch Exception e
+          (swap! pending-remote-promises dissoc request-id)
+          (throw e))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Function Execution
@@ -133,44 +140,52 @@
   [{::msg/keys [id fn args from-ns trace-id]}
    {::keys [namespace]}]
   (let [start-ns (System/nanoTime)
+        trace    (or trace-id id)
         base     {::msg/id       id
                   ::msg/version  1
                   ::msg/type     :reply
                   ::msg/from-ns  (or namespace "")}
         base     (cond-> base trace-id (assoc ::msg/trace-id trace-id))]
+    (log/debug "Execute local start" {:trace-id trace :fn fn :ns namespace :from-ns from-ns :args-count (count args) :event :start})
     (if-let [the-var (resolve-fn fn)]
       (try
         (let [result   (apply the-var args)
               dur-ms   (quot (- (System/nanoTime) start-ns) 1000000)]
-          ;; Verify result is EDN-serializable via round-trip
+          ;; Verify result is Nippy-serializable via round-trip
           (try
-            (edn/read-string (pr-str result))
+            (nippy/fast-thaw (nippy/fast-freeze result))
+            (log/debug "Execute local ok" {:trace-id trace :fn fn :ns namespace :elapsed-ms dur-ms :event :end})
             (assoc base
                    ::msg/status :ok
                    ::msg/value result
                    ::msg/duration-ms dur-ms)
             (catch Exception e
-              (assoc base
-                     ::msg/status :error
-                     ::msg/error-type :serialization
-                     ::msg/error-class (.getName (class e))
-                     ::msg/error-message (str "Result not EDN-serializable: " (.getMessage e))
-                     ::msg/duration-ms (quot (- (System/nanoTime) start-ns) 1000000)))))
+              (let [dur-ms' (quot (- (System/nanoTime) start-ns) 1000000)]
+                (log/warn "Execute local serialization error" {:trace-id trace :fn fn :ns namespace :elapsed-ms dur-ms' :event :error :error-type :serialization})
+                (assoc base
+                       ::msg/status :error
+                       ::msg/error-type :serialization
+                       ::msg/error-class (.getName (class e))
+                       ::msg/error-message (str "Result not Nippy-serializable: " (.getMessage e))
+                       ::msg/duration-ms dur-ms')))))
         (catch Exception e
           (let [dur-ms (quot (- (System/nanoTime) start-ns) 1000000)]
-            (assoc base
-                   ::msg/status :error
-                   ::msg/error-type :execution
-                   ::msg/error-class (.getName (class e))
-                   ::msg/error-message (.getMessage e)
-                   ::msg/error-data (ex-data e)
-                   ::msg/duration-ms dur-ms))))
+            (log/warn "Execute local execution error" {:trace-id trace :fn fn :ns namespace :elapsed-ms dur-ms :event :error :error-type :execution :error-message (.getMessage e)})
+            (cond-> (assoc base
+                           ::msg/status :error
+                           ::msg/error-type :execution
+                           ::msg/error-class (.getName (class e))
+                           ::msg/error-message (.getMessage e)
+                           ::msg/duration-ms dur-ms)
+              (ex-data e) (assoc ::msg/error-data (ex-data e))))))
       ;; Var not found
-      (assoc base
-             ::msg/status :error
-             ::msg/error-type :not-found
-             ::msg/error-message (str "Function not found: " fn)
-             ::msg/duration-ms (quot (- (System/nanoTime) start-ns) 1000000)))))
+      (let [dur-ms (quot (- (System/nanoTime) start-ns) 1000000)]
+        (log/warn "Execute local not found" {:trace-id trace :fn fn :ns namespace :elapsed-ms dur-ms :event :error :error-type :not-found})
+        (assoc base
+               ::msg/status :error
+               ::msg/error-type :not-found
+               ::msg/error-message (str "Function not found: " fn)
+               ::msg/duration-ms dur-ms)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Step Function
@@ -224,12 +239,14 @@
   ([state input-id msg]
    (case input-id
      :seon.flow.in/request
-     (let [reply (execute-local msg state)]
-       [state {:seon.flow.out/reply [reply]}])
+     (do (log/debug "Bridge received request" {:trace-id (or (::msg/trace-id msg) (::msg/id msg)) :fn (::msg/fn msg) :from-ns (::msg/from-ns msg)})
+         (let [reply (execute-local msg state)]
+           [state {:seon.flow.out/reply [reply]}]))
 
      ;; Reverse channel: deliver reply to waiting remote-call! promise
      :seon.flow.in/reply
      (let [request-id (::msg/id msg)]
+       (log/debug "Bridge received reverse reply" {:trace-id (or (::msg/trace-id msg) request-id) :status (::msg/status msg)})
        (when-let [p (get @pending-remote-promises request-id)]
          (swap! pending-remote-promises dissoc request-id)
          (deliver p msg))

@@ -1,8 +1,9 @@
+---
+type: prd
+status: draft
+tags: [prd]
+---
 # PRD: Data Viewer - Expand/Collapse Interaction
-
-**Status:** Phase 0 Ready
-**Priority:** High (Phase 2 of namespace-ui)
-**Branch:** feature/namespace-ui
 
 ---
 
@@ -27,9 +28,11 @@ Location: `src/seon/ui/viewer.clj`
   (fn [v _opts]
     (or (::viewer (meta v))
         (type v))))
+
 ```
 
 Current collection rendering (lines 86-127):
+
 - Maps, vectors, sets, seqs all render **fully expanded** by default
 - Uses `border-l border-base-700` for visual nesting
 - No interactive collapse - purely static HTML
@@ -41,9 +44,11 @@ Location: `src/seon/ns/view.clj`
 ;; Dispatch on [format view-type] (lines 106-119)
 (defmulti render*
   (fn [value format] [format (extract-view-type value)]))
+
 ```
 
 Default HTML renderer (lines 267-369):
+
 - Also renders collections fully expanded
 - Uses `pl-3 border-l border-base-700` for nesting
 - Truncates after 20 items with "... N more" indicator
@@ -64,6 +69,7 @@ Uses native `<details>` with `data-preserve-attr="open"` for SSE morph stability
   [:span {:class "text-info ml-1"} (str "+" (- (count content) preview-length) " more")]]
  [:div {:class "break-all mt-1 pl-2 border-l-2 border-base-700"}
   content]]
+
 ```
 
 **Component library** (`src/seon/web/components.clj:133-163`):
@@ -81,6 +87,7 @@ From `docs/reference/datastar-quick-reference.md`:
 
 The guide notes (line 47-49):
 > **Attributes we DON'T use (yet):**
+>
 > - `data-signals` - Client-side reactive state (server-side only for now)
 
 This is the opportunity - Phase 2 introduces client-side signals for expand/collapse.
@@ -92,6 +99,7 @@ This is the opportunity - Phase 2 introduces client-side signals for expand/coll
 ### Option A: Native `<details>` (Recommended)
 
 **Pros:**
+
 - Already used successfully in log viewer
 - Works without JavaScript
 - SSE-stable with `data-preserve-attr="open"`
@@ -99,17 +107,20 @@ This is the opportunity - Phase 2 introduces client-side signals for expand/coll
 - No state management complexity
 
 **Cons:**
+
 - Limited styling control (browser default triangle)
 - Can't coordinate multiple elements (e.g., "expand all")
 
 ### Option B: Datastar Signals
 
 **Pros:**
+
 - Full control over UI/animation
 - Can build "expand all" / "collapse all"
 - Matches Datastar philosophy
 
 **Cons:**
+
 - Adds client-side state
 - More complex SSE morph handling
 - Need unique signal names per element
@@ -117,11 +128,13 @@ This is the opportunity - Phase 2 introduces client-side signals for expand/coll
 ### Recommendation
 
 **Start with `<details>` (Option A)** because:
+
 1. Already proven in the codebase
 2. Simpler implementation
 3. Matches design principle: "can we solve this with CSS? If yes, do that."
 
 Consider Datastar signals later if we need:
+
 - Expand all / collapse all buttons
 - Synchronized expansion state
 - Custom animations
@@ -157,9 +170,11 @@ Consider Datastar signals later if we need:
          (render-value k opts)
          (render-value v opts)])
       [:span {:class "text-text-400"} "}"]]]))
+
 ```
 
 Key design elements:
+
 - **`<details>` wrapper** - native expand/collapse
 - **Summary is the opening bracket** - click `{` to toggle
 - **Count hint** - "3 keys" next to bracket when collapsed
@@ -192,6 +207,7 @@ Key design elements:
             (for [item (drop limit v)]
               [:div {:class "py-0.5"} (render-value item opts)])]])
         [:span {:class "text-text-400"} "]"]]])))
+
 ```
 
 #### Set Renderer
@@ -210,6 +226,7 @@ Key design elements:
       (for [item s]
         [:div {:class "py-0.5"} (render-value item opts)])
       [:span {:class "text-text-400"} "}"]]]))
+
 ```
 
 ### Phase 1: Update `seon.ns.view` Default Renderer
@@ -223,6 +240,7 @@ Apply the same `<details>` pattern to keep both renderers consistent.
 **Goal:** Prevent infinite nesting from breaking the UI.
 
 Add depth tracking to opts:
+
 ```clojure
 (let [depth (get opts :depth 0)
       max-depth 10]
@@ -230,6 +248,7 @@ Add depth tracking to opts:
     [:span {:class "text-text-500 italic"} "[max depth]"]
     ;; Normal rendering with (assoc opts :depth (inc depth))
     ))
+
 ```
 
 ---
@@ -240,6 +259,7 @@ Add depth tracking to opts:
 
 ```
 {3 keys}    ← Click bracket to expand
+
 ```
 
 ### Expanded State (small)
@@ -250,6 +270,7 @@ Add depth tracking to opts:
 │ :b "hello"
 │ :c [:x :y :z]        ← Nested vector also expandable
 }
+
 ```
 
 ### Expanded State (large vector)
@@ -265,6 +286,7 @@ Add depth tracking to opts:
 │   21
 │   ...
 ]
+
 ```
 
 ### Color Scheme (per design-system.md)
@@ -294,6 +316,7 @@ Add depth tracking to opts:
 [ ] SSE update doesn't collapse expanded elements (data-preserve-attr works)
 [ ] Large vector (>20 items) shows "+N more" link
 [ ] Clicking "+N more" reveals remaining items without collapsing parent
+
 ```
 
 ### REPL Tests
@@ -318,6 +341,7 @@ Add depth tracking to opts:
 
 ;; Generate HTML and inspect
 (h/html (viewer/render-value {:x [1 2 3]} {}))
+
 ```
 
 ---

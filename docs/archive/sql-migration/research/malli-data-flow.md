@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive, database, flow]
+---
+
 # Malli Schema Integration & XTDB Data Flow Research
 
 **Date**: 2025-12-17
@@ -52,6 +58,7 @@ This research examined Malli schema integration patterns and XTDB's data handlin
 
 ;; Generation for testing
 (schema/generate schema/OptionQuote)
+
 ```
 
 ---
@@ -63,19 +70,23 @@ This research examined Malli schema integration patterns and XTDB's data handlin
 XTDB internally uses **`NormalForm`** to convert Clojure keywords to SQL-compatible column names:
 
 **Normalization** (Clojure → SQL):
+
 ```
 :asset/ticker   → asset$ticker    (namespace/name → namespace$name)
 :quote/iv       → quote$iv
 :greeks/delta   → greeks$delta
 :xt/id          → _id             (special case: xt/ → _)
+
 ```
 
 **Denormalization** (SQL → Clojure):
+
 ```
 asset$ticker    → :asset/ticker   (via IKeyFn.KEBAB_CASE_KEYWORD)
 quote$iv        → :quote/iv
 greeks$delta    → :greeks/delta
 _id             → :xt/id
+
 ```
 
 ### The `key-fn` Mechanism
@@ -98,6 +109,7 @@ XTDB provides 4 key transformation modes via `IKeyFn`:
 ### Experimental Results
 
 **Test Setup**:
+
 ```clojure
 ;; Insert document with namespaced keywords
 (xt/execute-tx node [[:put-docs :test-table
@@ -105,21 +117,27 @@ XTDB provides 4 key transformation modes via `IKeyFn`:
                        :asset/ticker "AAPL"
                        :quote/iv 0.25
                        :greeks/delta 0.5}]])
+
 ```
 
 **XTQL Query** (native Clojure):
+
 ```clojure
 (node/query node '(from :test-table [xt/id asset/ticker quote/iv greeks/delta]))
 ;; => [{:xt/id "test-1", :asset/ticker "AAPL", :quote/iv 0.25, :greeks/delta 0.5}]
+
 ```
 
 **SQL Query** (with explicit columns):
+
 ```clojure
 (node/sql-query node "SELECT * FROM test_table")
 ;; => [{:xt/id "test-1", :asset/ticker "AAPL", :quote/iv 0.25, :greeks/delta 0.5}]
+
 ```
 
 **SQL Column Names** (actual schema):
+
 ```sql
 SELECT column_name FROM information_schema.columns WHERE table_name = 'test_table'
 -- Results:
@@ -128,12 +146,15 @@ SELECT column_name FROM information_schema.columns WHERE table_name = 'test_tabl
 -- asset$ticker
 -- greeks$delta
 -- quote$iv
+
 ```
 
 **SQL with Explicit Column Names** (requires quoting):
+
 ```clojure
 (node/sql-query node "SELECT _id, \"asset$ticker\", \"quote$iv\", \"greeks$delta\" FROM test_table")
 ;; => [{:xt/id "test-1", :asset/ticker "AAPL", :quote/iv 0.25, :greeks/delta 0.5}]
+
 ```
 
 ### Key Findings
@@ -159,40 +180,49 @@ internal fun normalForm0(s: String): String = s
     .split('.', '/', '$')        // Split on namespace/name separators
     .joinToString(separator = "$") // Rejoin with $
     .lowercase()                 // Lowercase everything
+
 ```
 
 **Examples**:
+
 ```
 :asset/ticker   → asset$ticker
 :quote/iv       → quote$iv
 :greeks/delta   → greeks$delta
 :xt/id          → _id
 :valid-from     → valid_from  (note: this is wrong in my examples above)
+
 ```
 
 ### Writing SQL Queries
 
 **Best practice: Use `SELECT *`**:
+
 ```clojure
 (node/sql-query node "SELECT * FROM option_greeks WHERE \"asset$ticker\" = ?" ["AAPL"])
+
 ```
 
 **If you must list columns**:
+
 ```clojure
 ;; CORRECT - Quoted identifiers
 (node/sql-query node "SELECT _id, \"asset$ticker\", \"quote$iv\" FROM option_greeks")
 
 ;; WRONG - Unquoted with $ will fail or return NULL
 (node/sql-query node "SELECT _id, asset$ticker, quote$iv FROM option_greeks")
+
 ```
 
 **WHERE clauses** also need quoting:
+
 ```clojure
 ;; CORRECT
 "SELECT * FROM option_greeks WHERE \"asset$ticker\" = 'AAPL'"
 
 ;; WRONG
 "SELECT * FROM option_greeks WHERE asset$ticker = 'AAPL'"
+
 ```
 
 ### Recommendation
@@ -203,6 +233,7 @@ internal fun normalForm0(s: String): String = s
 ;; Simple and correct
 (defn get-ticker-ivs [query ticker]
   (query "SELECT * FROM option_greeks WHERE \"asset$ticker\" = ?" [ticker]))
+
 ```
 
 Alternatively, use XTQL which doesn't require quoting:
@@ -213,6 +244,7 @@ Alternatively, use XTQL which doesn't require quoting:
     (xt/template
       (from :option-greeks [asset/ticker quote/iv greeks/delta]
         (where (= asset/ticker ~ticker))))))
+
 ```
 
 ---
@@ -239,6 +271,7 @@ Alternatively, use XTQL which doesn't require quoting:
 **Idea**: Register a schema per table, validate results against it.
 
 **Example**:
+
 ```clojure
 (def table-schemas
   {:option-greeks schema/OptionQuote
@@ -248,6 +281,7 @@ Alternatively, use XTQL which doesn't require quoting:
 (defn validate-query-result [table result]
   (when-let [schema (get table-schemas table)]
     (schema/validate schema result)))
+
 ```
 
 **Pros**:
@@ -267,6 +301,7 @@ Alternatively, use XTQL which doesn't require quoting:
 **Idea**: Let queries return whatever shape they return. Validate at domain boundaries.
 
 **Example**:
+
 ```clojure
 ;; Query returns arbitrary shape
 (defn get-recent-ivs [query ticker]
@@ -283,6 +318,7 @@ Alternatively, use XTQL which doesn't require quoting:
   (let [ivs (get-recent-ivs query ticker)]
     ;; Compute result
     ))
+
 ```
 
 **Pros**:
@@ -314,6 +350,7 @@ Based on prior research in `/Users/sean/src/seon/docs/prds/test-coverage-audit/r
 #### Step 1: Add Function Schemas
 
 **Add to `seon.trading.signals`**:
+
 ```clojure
 (require '[malli.core :as m])
 
@@ -328,11 +365,13 @@ Based on prior research in `/Users/sean/src/seon/docs/prds/test-coverage-audit/r
 
 (defn iv-rank [query ticker lookback & [opts]]
   ...)
+
 ```
 
 #### Step 2: Enable in Dev
 
 **Add to `dev/user.clj` `go` function**:
+
 ```clojure
 (defn go
   "Start the Integrant system with instrumentation."
@@ -349,6 +388,7 @@ Based on prior research in `/Users/sean/src/seon/docs/prds/test-coverage-audit/r
   (require '[malli.dev :as mdev])
   ((resolve 'mdev/stop!))
   (ig-repl/halt))
+
 ```
 
 #### Step 3: Test in REPL
@@ -362,6 +402,7 @@ user> (sig/iv-rank (xtdb-node) "AAPL" "not-a-number")  ;; Should throw!
 ;; Execution error - ExceptionInfo
 ;; Invalid input:
 ;;   [:cat [:=> ...] :string :int] - failed: (= :int (type "not-a-number"))
+
 ```
 
 ### Instrumentation Scope
@@ -386,9 +427,11 @@ user> (sig/iv-rank (xtdb-node) "AAPL" "not-a-number")  ;; Should throw!
 - Validation overhead is microseconds for simple schemas
 
 **Measurement** (hypothetical):
+
 ```
 Without instrumentation: 1.2ms per iv-rank call
 With instrumentation:    1.25ms per iv-rank call (+4% overhead)
+
 ```
 
 For a REPL-driven workflow, this is unnoticeable.
@@ -435,6 +478,7 @@ For a REPL-driven workflow, this is unnoticeable.
         ivs (map :quote/iv results)]
     (when (seq ivs)
       (calculate-percentile-rank ivs (last ivs)))))
+
 ```
 
 **Benefits**:
@@ -466,6 +510,7 @@ For a REPL-driven workflow, this is unnoticeable.
 ;; Usage in agent session
 (let [query (create-query-fn node #inst "2025-07-15T21:00:00Z")]
   (iv-rank query "SPY" 126))
+
 ```
 
 **Benefits**:
@@ -487,6 +532,7 @@ For a REPL-driven workflow, this is unnoticeable.
     {:iv-rank iv
      :ts-slope slope
      :skew skew}))
+
 ```
 
 **Don't validate**:
@@ -519,6 +565,7 @@ For a REPL-driven workflow, this is unnoticeable.
 
 ;; Result shape (automatically handled by key-fn):
 ;; [{:xt/id "...", :asset/ticker "AAPL", :quote/iv 0.25, :greeks/delta 0.5, ...}]
+
 ```
 
 ### Example 2: XTQL Alternative
@@ -536,6 +583,7 @@ For a REPL-driven workflow, this is unnoticeable.
         (order-by [[xt/valid-from :desc]])))))
 
 ;; Result shape: same as SQL version
+
 ```
 
 ### Example 3: Temporal Query with Frozen Time
@@ -555,6 +603,7 @@ For a REPL-driven workflow, this is unnoticeable.
 (let [query (create-query-fn node #inst "2025-07-15")]
   (get-iv-history query "SPY"))
 ;; Only returns data with valid-time <= 2025-07-15
+
 ```
 
 ### Example 4: Transaction Validation
@@ -570,6 +619,7 @@ For a REPL-driven workflow, this is unnoticeable.
     (throw (ex-info "Invalid option quote" {:errors errors})))
 
   (xt/execute-tx node [[:put-docs :option-greeks quote]]))
+
 ```
 
 ---
@@ -579,6 +629,7 @@ For a REPL-driven workflow, this is unnoticeable.
 ### Current State (`seon.trading.signals`)
 
 **Current pattern**:
+
 ```clojure
 (defn iv-rank [db ticker lookback & [opts]]
   (let [ticker-str (name ticker)
@@ -592,6 +643,7 @@ For a REPL-driven workflow, this is unnoticeable.
                   query-opts)
         ivs (map :quote/iv results)]
     ...))
+
 ```
 
 **Issues**:
@@ -616,6 +668,7 @@ For a REPL-driven workflow, this is unnoticeable.
         ivs (map :quote/iv results)]
     (when (seq ivs)
       (calculate-percentile-rank ivs (last ivs)))))
+
 ```
 
 **Improvements**:
@@ -697,6 +750,7 @@ For a REPL-driven workflow, this is unnoticeable.
 ### Experiment: Namespaced Keyword Handling
 
 **Setup**:
+
 ```clojure
 ;; Insert test document
 (xt/execute-tx (user/xtdb-node)
@@ -705,32 +759,40 @@ For a REPL-driven workflow, this is unnoticeable.
      :asset/ticker "AAPL"
      :quote/iv 0.25
      :greeks/delta 0.5}]])
+
 ```
 
 **Test 1: XTQL with namespaced keywords**:
+
 ```clojure
 (node/query (user/xtdb-node)
   '(from :test-table [xt/id asset/ticker quote/iv greeks/delta]))
 ;; => [{:xt/id "test-1", :asset/ticker "AAPL", :quote/iv 0.25, :greeks/delta 0.5}]
+
 ```
 ✅ **Result**: Namespaced keywords preserved
 
 **Test 2: SQL with SELECT ***:
+
 ```clojure
 (node/sql-query (user/xtdb-node) "SELECT * FROM test_table")
 ;; => [{:xt/id "test-1", :asset/ticker "AAPL", :quote/iv 0.25, :greeks/delta 0.5}]
+
 ```
 ✅ **Result**: Identical to XTQL
 
 **Test 3: SQL with explicit columns**:
+
 ```clojure
 (node/sql-query (user/xtdb-node)
   "SELECT _id, \"asset$ticker\", \"quote$iv\", \"greeks$delta\" FROM test_table")
 ;; => [{:xt/id "test-1", :asset/ticker "AAPL", :quote/iv 0.25, :greeks/delta 0.5}]
+
 ```
 ✅ **Result**: Works with quoted identifiers
 
 **Test 4: Schema inspection**:
+
 ```clojure
 (node/sql-query (user/xtdb-node)
   "SELECT column_name FROM information_schema.columns WHERE table_name = 'test_table'")
@@ -742,10 +804,12 @@ For a REPL-driven workflow, this is unnoticeable.
 ;;     {:column-name "asset$ticker"}    ; NOTE: $ separator
 ;;     {:column-name "greeks$delta"}
 ;;     {:column-name "quote$iv"}]
+
 ```
 ✅ **Result**: Columns use `$` separator
 
 **Test 5: Different key-fn modes**:
+
 ```clojure
 ;; kebab-case-keyword (default)
 (node/sql-query node "SELECT * FROM test_table" {:key-fn :kebab-case-keyword})
@@ -754,6 +818,7 @@ For a REPL-driven workflow, this is unnoticeable.
 ;; snake-case-string
 (node/sql-query node "SELECT * FROM test_table" {:key-fn :snake-case-string})
 ;; => [{"_id" "test-1", "asset$ticker" "AAPL", ...}]
+
 ```
 ✅ **Result**: `key-fn` controls output format
 

@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 # Handoff: Complete Unified Dev Hook (Phases 3-5)
 
 ## Context
@@ -11,6 +17,7 @@ The unified dev hook (`bin/seon-hook`) is mostly complete. Phases 1-2 are done:
 ## What's Remaining
 
 ### Phase 3: Optimize Caching Structure
+
 **Goal:** Reduce Gemini API costs by 70-80% using implicit caching
 
 **Files:** `src/seon/ai/gemini.clj`, `bin/seon-hook`
@@ -22,24 +29,30 @@ The unified dev hook (`bin/seon-hook`) is mostly complete. Phases 1-2 are done:
 4. Verify cache hits in `.claude/seon-hook.log`
 
 **Research:** Use `gemini/search` to verify Gemini implicit caching behavior:
+
 ```clojure
 (gemini/search {::gemini/prompt "Gemini 2.5 implicit caching requirements"})
+
 ```
 
 ### Phase 4: Helpful Error Context
+
 **Goal:** All warnings include actionable fix hints
 
 **Files:** `bin/seon-hook`
 
 **Current warnings are informational but not actionable. Improve to:**
+
 ```
 ⚠ nREPL unavailable - restart server with ./bin/run
 ⚠ Namespace reload timed out - check for infinite loops at load time
 ⚠ Tests failed to parse - check test output format
 ⚠ Gemini timed out - will retry on next edit
+
 ```
 
 ### Phase 5: Configuration Cleanup
+
 **Goal:** Make settings configurable
 
 **Files:** `src/seon/dev/feedback.clj`, `.claude/seon-hook.edn`
@@ -69,6 +82,7 @@ echo '{"hook_event_name":"PostToolUse","tool_name":"Edit","tool_input":{"file_pa
 # Test Gemini search (web grounding for research)
 clj-nrepl-eval -p 7888 "(require '[seon.ai.gemini :as g])"
 clj-nrepl-eval -p 7888 "(g/search {::g/prompt \"Your query here\"})"
+
 ```
 
 ## Process

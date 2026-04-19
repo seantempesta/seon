@@ -77,11 +77,33 @@ Always use components from `src/seon/web/components.clj`:
 ```clojure
 (require '[seon.web.components :as ui])
 
-(ui/page-header "Title" :subtitle "optional")
-(ui/section-header "SECTION NAME")
-(ui/card (ui/section-header "Card") content...)
-(ui/status-dot :running :label "running")
-(ui/log-line {:timestamp ts :type "TOOL" :content "..."})
+;; Layout
+(ui/page-header "Title" "optional subtitle")     ; [title subtitle]
+(ui/section-header "SECTION NAME")                ; [text]
+(ui/card (ui/section-header "Card") [:p "body"])  ; [& children]
+
+;; Status
+(ui/status-dot :running)                          ; [status] or [status label]
+(ui/status-dot :error "connection lost")
+
+;; Tables
+(ui/table-header "Name")                          ; [text] or [text right-align?]
+(ui/table-header "Price" true)
+(ui/table-cell "abc")                             ; [content] or [content opts]
+(ui/table-cell 42 {:right-align? true :muted? true})
+
+;; Logs
+(ui/log-line {:timestamp ts :type "TOOL" :details "ran query"})  ; [{:keys [timestamp type details raw]}]
+(ui/log-container lines)                          ; [lines] or [lines max-height]
+(ui/log-container lines "50vh")
+
+;; Buttons
+(ui/filter-button "Active" true "@post('/api/filter')")  ; [label active? on-click]
+(ui/action-button "Save" "@post('/api/save')")           ; [label on-click] or [label on-click variant]
+(ui/action-button "Go" "@post('/api/go')" :primary)
+
+;; Empty states
+(ui/empty-state "No results" "Try a different query")    ; [message] or [message subtitle]
 ```
 
 ## Prose/Markdown Styling

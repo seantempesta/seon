@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # Malli Function Schema Best Practices
 
 Research findings on defining Malli function schemas for AI-assisted development with automatic verification.
@@ -19,11 +25,13 @@ This provides:
 ### 1. `m/=>` Macro (Recommended)
 
 **Declaration:**
+
 ```clojure
 (defn process-order [user-id cart]
   ;; implementation
   )
 (m/=> process-order [:=> [:cat :user/id :order/cart] :order/result])
+
 ```
 
 **Pros:**
@@ -38,14 +46,17 @@ This provides:
 - Requires `[malli.core :as m]` dependency
 
 **REPL Verification:**
+
 ```clojure
 (get-in (m/function-schemas) ['my.ns 'process-order])
 ;; => {:schema #malli.core/Schema, :ns my.ns, :name process-order}
+
 ```
 
 ### 2. `:malli/schema` Metadata on defn
 
 **Declaration:**
+
 ```clojure
 (defn process-order
   "Processes an order"
@@ -53,6 +64,7 @@ This provides:
   [user-id cart]
   ;; implementation
   )
+
 ```
 
 **Pros:**
@@ -66,6 +78,7 @@ This provides:
 - Less discoverable (hidden in metadata)
 
 **REPL Verification:**
+
 ```clojure
 (:malli/schema (meta #'process-order))
 ;; => [:=> [:cat :user/id :order/cart] :order/result]
@@ -73,11 +86,13 @@ This provides:
 ;; MUST call collect! first:
 (mi/collect!)
 (get-in (m/function-schemas) ['my.ns 'process-order])
+
 ```
 
 ### 3. `mx/defn` Inline Schema (malli.experimental)
 
 **Declaration:**
+
 ```clojure
 (require '[malli.experimental :as mx])
 
@@ -86,6 +101,7 @@ This provides:
   [user-id :- :user/id, cart :- :order/cart]
   ;; implementation
   )
+
 ```
 
 **Pros:**
@@ -100,14 +116,17 @@ This provides:
 - Uses `:schema` key in metadata instead of `:malli/schema`
 
 **REPL Verification:**
+
 ```clojure
 (:schema (meta #'process-order))
 ;; => [:=> [:cat :user/id :order/cart] :order/result]
+
 ```
 
 ### 4. `:pre`/`:post` with Malli Validators
 
 **Declaration:**
+
 ```clojure
 (defn process-order [user-id cart]
   {:pre [(m/validate :user/id user-id)
@@ -115,6 +134,7 @@ This provides:
    :post [(m/validate :order/result %)]}
   ;; implementation
   )
+
 ```
 
 **Pros:**
@@ -134,6 +154,7 @@ This provides:
 ### 5. Per-Arity Metadata
 
 **Declaration:**
+
 ```clojure
 (defn process-order
   (^{:malli/schema [:=> [:cat :user/id] :order/result]}
@@ -144,6 +165,7 @@ This provides:
    [user-id cart]
    ;; two-arity implementation
    ))
+
 ```
 
 **Pros:**
@@ -168,6 +190,7 @@ This provides:
     {:order-id (random-uuid)
      :total total}))
 (m/=> process-order [:=> [:cat :user/id :order/cart] :order/result])
+
 ```
 
 **Why this is best:**
@@ -186,6 +209,7 @@ This provides:
 ;; In core.clj
 (defn process-order [user-id cart] ...)
 (m/=> process-order :order/process-order)  ;; DOES NOT WORK
+
 ```
 
 **Verdict:** `m/=>` does not accept a keyword reference. You must pass the full schema form.
@@ -196,6 +220,7 @@ However, you CAN reference registered schemas WITHIN the schema:
 (m/=> process-order [:=> [:cat :user/id :order/cart] :order/result])
 ;;                        ^^^^^^^^^^ ^^^^^^^^^^ ^^^^^^^^^^^^
 ;;                        These are looked up in the registry
+
 ```
 
 ### Option C: All Schemas in Schema Namespace
@@ -217,6 +242,7 @@ However, you CAN reference registered schemas WITHIN the schema:
 
 (defn process-order [user-id cart] ...)
 (m/=> process-order [:=> [:cat :user/id :order/cart] :order/result])
+
 ```
 
 **Pros:**
@@ -250,6 +276,7 @@ However, you CAN reference registered schemas WITHIN the schema:
 (defn register! [& schemas]
   (doseq [[k v] (partition 2 schemas)]
     (swap! *schemas assoc k v)))
+
 ```
 
 ### Domain Schema Registration
@@ -272,6 +299,7 @@ However, you CAN reference registered schemas WITHIN the schema:
                  [:order-id :uuid]
                  [:total :double]
                  [:status [:enum :pending :confirmed :shipped]]])
+
 ```
 
 ### Benefits for AI
@@ -284,6 +312,7 @@ However, you CAN reference registered schemas WITHIN the schema:
 ;;   :user/id -> :uuid (a UUID value)
 ;;   :order/cart -> [:vector :order/item] (vector of order items)
 ;;   :order/result -> [:map ...] (result map with order-id, total, status)
+
 ```
 
 ---
@@ -323,6 +352,7 @@ Private functions (`defn-`) can be:
   ;; complex calculation
   )
 (m/=> calculate-order-total [:=> [:cat :order/cart :discount/code] :order/total])
+
 ```
 
 ---
@@ -339,6 +369,7 @@ Private functions (`defn-`) can be:
            :num-tests 100})
 ;; => {#'seon.trading.core/process-order nil   ;; nil = passed
 ;;     #'seon.trading.core/broken-fn {...}}   ;; map = failed
+
 ```
 
 ### For Individual Functions: `mg/check`
@@ -349,6 +380,7 @@ Private functions (`defn-`) can be:
 (let [schema (:schema (get-in (m/function-schemas) ['my.ns 'my-fn]))]
   (mg/check schema my-fn {:num-tests 100}))
 ;; => nil if passed, {:shrunk {:smallest [args]}} if failed
+
 ```
 
 ### Error Message Quality
@@ -362,6 +394,7 @@ Private functions (`defn-`) can be:
 ;;    {:input [:cat :user/id :order/cart]
 ;;     :args ["not-a-uuid" []]
 ;;     :schema [:=> [:cat :user/id :order/cart] :order/result]}
+
 ```
 
 ### Generative Test Failure Output
@@ -375,6 +408,7 @@ Private functions (`defn-`) can be:
 ;;   :errors ({:path []
 ;;             :check {:smallest [(0 0)]    ;; <-- Shrunk counter-example
 ;;                     :pass? false}})}}
+
 ```
 
 ---
@@ -391,6 +425,7 @@ Private functions (`defn-`) can be:
   [cart]
   (reduce + (map :price cart)))
 (m/=> calculate-total [:=> [:cat :order/cart] :double])
+
 ```
 
 ### 2. Registry Setup
@@ -435,6 +470,7 @@ Use `:function` with multiple `:=>` schemas:
            [:=> [:cat :int] :int]
            [:=> [:cat :int :int] :int]
            [:=> [:cat :int :int :int] :int]])
+
 ```
 
 ---
@@ -464,6 +500,7 @@ Add this to the "Domain Design Guidelines" section:
   ;; implementation
   )
 (m/=> process-signal [:=> [:cat :trading/signal :market/data] :trading/action])
+
 ```
 
 #### Verification
@@ -475,12 +512,14 @@ Add this to the "Domain Design Guidelines" section:
 ;; Run generative tests on a namespace:
 (require '[malli.instrument :as mi])
 (mi/check {:filters [(mi/-filter-ns 'seon.trading.core)]})
+
 ```
 
 #### Don't Use
 - `:pre`/`:post` with Malli - No registry integration
 - `mx/defn` inline - Harder for AI to parse, experimental namespace
 - Metadata without `mi/collect!` - Easy to forget the collection step
+
 ```
 
 ---
@@ -531,6 +570,7 @@ Instead of using a global mutable registry (which can cause conflicts), define s
                   GeminiResponse]}
   [api-key prompt opts]
   ...)
+
 ```
 
 **Why this works well:**
@@ -551,22 +591,26 @@ The var-reference approach avoids this entirely.
 ### Gotcha: `mg/sample` Signature
 
 `mg/sample` takes an options map, not a count:
+
 ```clojure
 ;; WRONG - causes ClassCastException
 (mg/sample schema 10)
 
 ;; CORRECT
 (mg/sample schema {:size 10})
+
 ```
 
 ### Gotcha: `[:maybe ...]` for Nullable Optional Fields
 
 When a response field can be either present-with-value OR present-as-nil, use `[:maybe ...]`:
+
 ```clojure
 (def GeminiResponse
   [:map
    [:text :string]
    [:grounding-metadata {:optional true} [:maybe GeminiGroundingMetadata]]])
+
 ```
 
 This allows `{:text "hi" :grounding-metadata nil}` to validate.
@@ -582,6 +626,7 @@ Always verify that `mi/collect!` properly registers your functions:
     (let [fn-schemas (get (m/function-schemas) 'seon.ai.gemini)]
       (is (some? fn-schemas))
       (is (contains? fn-schemas 'generate)))))
+
 ```
 
 ### Test Pattern: Generative Input Testing
@@ -595,6 +640,7 @@ Since functions with side effects (HTTP calls) can't be generatively tested, ver
     (doseq [[fn-sym schema-data] fn-schemas]
       (let [input-schema (second (m/form (:schema schema-data)))]
         (is (some? (mg/generate input-schema)))))))
+
 ```
 
 ### Files Created

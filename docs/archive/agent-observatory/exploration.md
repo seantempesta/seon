@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive, agent]
+---
+
 # Web UI Infrastructure Exploration
 
 **Date:** 2026-01-20
@@ -52,6 +58,7 @@ $ curl http://localhost:8080/api/stats
 {"empty?":true,"symbols-count":0,"by-symbol":[],...}
 
 # All HTML pages render correctly (/, /logs, /primer)
+
 ```
 
 ---
@@ -71,6 +78,7 @@ src/seon/web/
 ├── jobs.clj      ; Import job state management
 ├── logs.clj      ; Log viewer state
 └── stats.clj     ; Cached database statistics
+
 ```
 
 ### Key Components
@@ -118,6 +126,7 @@ Handler updates state → Watch triggers refresh-all!
     │
     ▼
 All connected clients receive update
+
 ```
 
 ---
@@ -141,7 +150,6 @@ event: datastar-patch-elements
 id: 7f8a3c2d
 data: elements <main id="morph">...
 data: elements </main>
-
 
 ```
 
@@ -171,6 +179,7 @@ The `seon.ai.agent` namespace provides everything needed for the observatory:
 
 ;; Interrupt agent
 (agent/interrupt! {::agent/session-id "f602"})
+
 ```
 
 ### Live Data (as of exploration)
@@ -182,6 +191,7 @@ The `seon.ai.agent` namespace provides everything needed for the observatory:
 ;; - f2cb (seon.hook-test) - completed
 ;; - f602 (seon.session-analytics) - running
 ;; - d641 (seon.ui-exploration) - running (me!)
+
 ```
 
 ---
@@ -211,6 +221,7 @@ The `seon.ai.agent` namespace provides everything needed for the observatory:
 [:get "/agents/:id"]          handlers/agent-detail
 [:post "/agents/:id"]         handlers/agent-detail-sse
 [:post "/agents/:id/interrupt"] handlers/agent-interrupt
+
 ```
 
 ### Handlers Needed
@@ -236,6 +247,7 @@ Need to wire up `agent/agents` and `agent/tail` to SSE handlers:
   (sse/render-handler
     (fn [_request]
       (html/agent-list-content (agent/agents {})))))
+
 ```
 
 For agent detail view, need to tap into `agent/tail` channel and stream messages via SSE.
@@ -265,6 +277,7 @@ For agent detail view, need to tap into `agent/tail` channel and stream messages
 3. New multimethod that returns accumulated messages
 
 **Recommended approach:**
+
 ```clojure
 ;; Store recent messages per agent
 (defonce agent-message-buffers (atom {}))
@@ -276,6 +289,7 @@ For agent detail view, need to tap into `agent/tail` channel and stream messages
            (fn [buf] (conj (or buf []) msg)))
     (sse/refresh-all!)  ; Trigger UI update
     (recur)))
+
 ```
 
 ### Phase 2.3: XTDB Browser

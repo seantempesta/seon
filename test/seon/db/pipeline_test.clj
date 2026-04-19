@@ -1,0 +1,846 @@
+(ns seon.db.pipeline-test
+  "Generative pipeline tests: Malli schema -> derive Datalevin schema -> generate
+   entities -> transact -> pull -> validate roundtrip.
+
+   The core utility `assert-pipeline-roundtrip!` takes a Malli :map schema and
+   verifies that N generated entities survive the full pipeline. This is the
+   contract test and agent feedback loop for schema development.
+
+   Design constraints (from schema-unification design.md):
+   - No :any, no :some -- every field has a concrete type
+   - No [:maybe X] on persisted schemas -- use {:optional true} X
+   - All keys are namespaced keywords
+   - Datalevin schema derived from Malli, never hardcoded"
+  (:require [clojure.test :refer [deftest is testing]]
+            [datalevin.core :as d]
+            [malli.core :as m]
+            [malli.generator :as mg]
+            [seon.db.schema :as db-schema]
+            [seon.test-utils :as tu]))
+
+;;; ---------------------------------------------------------------------------
+;;; Schema Analysis Helpers
+;;; ---------------------------------------------------------------------------
+
+(defn- resolve-entry-child
+  "Unwrap :malli.core/val wrapper to get the actual child schema from an entry."
+  [entry-schema]
+  (if (= :malli.core/val (m/type entry-schema))
+    (first (m/children entry-schema))
+    entry-schema))
+
+(defn- entry-schema-type
+  "Get the Malli type of a map entry's value schema, unwrapping :malli.core/val."
+  [entry-schema]
+  (m/type (resolve-entry-child entry-schema)))
+
+(defn- find-many-keys
+  "Find all keys in a :map schema whose value type is :set or :vector.
+   Both map to cardinality-many in Datalevin, which returns vectors,
+   deduplicates values, and does not preserve order."
+  [malli-schema]
+  (let [parsed (if (m/schema? malli-schema) malli-schema (m/schema malli-schema))]
+    (into #{}
+          (comp (filter (fn [[_k entry-schema]]
+                          (#{:set :vector} (entry-schema-type entry-schema))))
+                (map first))
+          (m/entries parsed))))
+
+(defn- find-set-keys
+  "Find keys whose value type is :set (subset of many-keys).
+   These need vector->set coercion for Malli validation after pull."
+  [malli-schema]
+  (let [parsed (if (m/schema? malli-schema) malli-schema (m/schema malli-schema))]
+    (into #{}
+          (comp (filter (fn [[_k entry-schema]]
+                          (= :set (entry-schema-type entry-schema))))
+                (map first))
+          (m/entries parsed))))
+
+(defn- find-component-keys
+  "Find all keys in a :map schema whose value type is :map (component refs).
+   These will have :db/id added by Datalevin pull."
+  [malli-schema]
+  (let [parsed (if (m/schema? malli-schema) malli-schema (m/schema malli-schema))]
+    (into #{}
+          (comp (filter (fn [[_k entry-schema]]
+                          (= :map (entry-schema-type entry-schema))))
+                (map first))
+          (m/entries parsed))))
+
+(defn- find-maybe-keys
+  "Find all keys whose value type is :maybe. These are banned in persisted schemas."
+  [malli-schema]
+  (let [parsed (if (m/schema? malli-schema) malli-schema (m/schema malli-schema))]
+    (into #{}
+          (comp (filter (fn [[_k entry-schema]]
+                          (= :maybe (entry-schema-type entry-schema))))
+                (map first))
+          (m/entries parsed))))
+
+(defn- find-any-keys
+  "Find all keys whose value type is :any. These are banned entirely."
+  [malli-schema]
+  (let [parsed (if (m/schema? malli-schema) malli-schema (m/schema malli-schema))]
+    (into #{}
+          (comp (filter (fn [[_k entry-schema]]
+                          (= :any (entry-schema-type entry-schema))))
+                (map first))
+          (m/entries parsed))))
+
+(defn- all-keys-namespaced?
+  "Check that all keys in a :map schema are namespaced keywords."
+  [malli-schema]
+  (let [parsed (if (m/schema? malli-schema) malli-schema (m/schema malli-schema))]
+    (every? (fn [[k _]] (and (keyword? k) (namespace k)))
+            (m/entries parsed))))
+
+;;; ---------------------------------------------------------------------------
+;;; Entity Transformation Helpers
+;;; ---------------------------------------------------------------------------
+
+(defn- strip-db-id
+  "Recursively remove :db/id from a pulled entity and nested component entities."
+  [entity]
+  (let [without (dissoc entity :db/id)]
+    (into {}
+          (map (fn [[k v]]
+                 (if (map? v)
+                   [k (strip-db-id v)]
+                   [k v])))
+          without)))
+
+(defn- strip-empty-colls
+  "Remove keys with empty collections from entity. Empty sets/vectors produce
+   no datoms in Datalevin and thus are absent on pull."
+  [entity]
+  (into {}
+        (remove (fn [[_k v]]
+                  (and (coll? v) (not (map? v)) (empty? v))))
+        entity))
+
+(defn- coerce-pulled-entity
+  "Apply known Datalevin pull transformations to make pulled entity comparable.
+   - Convert vectors to sets for :set-typed keys (Datalevin returns vectors)
+   - Recursively strip :db/id from component refs"
+  [pulled set-keys]
+  (let [stripped (strip-db-id pulled)]
+    (reduce (fn [acc k]
+              (if-let [v (get acc k)]
+                (assoc acc k (set v))
+                acc))
+            stripped
+            set-keys)))
+
+;;; ---------------------------------------------------------------------------
+;;; Schema Validation (Pre-flight Checks)
+;;; ---------------------------------------------------------------------------
+
+(defn- validate-schema-constraints!
+  "Validate that a Malli :map schema meets pipeline constraints.
+   Throws ex-info with details on any violations found."
+  [malli-schema]
+  (let [maybe-keys (find-maybe-keys malli-schema)
+        any-keys (find-any-keys malli-schema)]
+    (when (seq maybe-keys)
+      (throw (ex-info (str "Schema contains [:maybe X] keys which are banned in persisted schemas. "
+                           "Use {:optional true} X instead. Keys: " (pr-str maybe-keys))
+                      {:violation :maybe-in-persisted
+                       :keys maybe-keys})))
+    (when (seq any-keys)
+      (throw (ex-info (str "Schema contains :any keys which are banned. "
+                           "Every field must have a concrete Datalevin-compatible type. Keys: "
+                           (pr-str any-keys))
+                      {:violation :any-type
+                       :keys any-keys})))
+    (when-not (all-keys-namespaced? malli-schema)
+      (throw (ex-info "All keys in persisted schemas must be namespaced keywords."
+                      {:violation :unnamespaced-keys})))))
+
+;;; ---------------------------------------------------------------------------
+;;; Core Pipeline Roundtrip
+;;; ---------------------------------------------------------------------------
+
+(defn- format-failure
+  "Format a single attribute failure for error reporting."
+  [attr expected actual dl-schema]
+  {:attr attr
+   :expected expected
+   :actual actual
+   :datalevin-schema (pr-str (get dl-schema attr))})
+
+(defn- compare-entities
+  "Compare original and pulled entities, returning a list of failures.
+   Accounts for known Datalevin transformations:
+   - Empty colls in original become absent in pulled (no datoms)
+   - Cardinality-many values are deduplicated and unordered (compare as sets)
+   - Optional keys absent in original are absent in pulled"
+  [original pulled many-keys dl-schema]
+  (let [original-clean (strip-empty-colls original)]
+    (reduce-kv
+     (fn [failures k expected]
+       (let [actual (get pulled k ::missing)]
+         (cond
+           ;; Key missing from pulled
+           (= actual ::missing)
+           (conj failures (format-failure k expected ::missing dl-schema))
+
+           ;; Cardinality-many: compare as sets (order not preserved, dedup)
+           (contains? many-keys k)
+           (if (= (set expected) (set actual))
+             failures
+             (conj failures (format-failure k expected actual dl-schema)))
+
+           ;; Direct equality (covers maps, scalars)
+           :else
+           (if (= expected actual)
+             failures
+             (conj failures (format-failure k expected actual dl-schema))))))
+     []
+     original-clean)))
+
+(defn- validate-pulled-with-malli
+  "Validate a pulled entity against the Malli schema, accounting for Datalevin
+   pull behavior: cardinality-many keys with empty collections are absent in
+   pull results (no datoms = no key), so we treat them as optional for validation."
+  [malli-schema pulled many-keys set-keys]
+  (if (empty? many-keys)
+    ;; No cardinality-many keys -- validate directly
+    (m/validate malli-schema pulled)
+    ;; Add absent many-keys as empty collections so Malli doesn't complain
+    ;; about missing required keys when the original had an empty set/vector.
+    ;; Use the correct empty collection type per the schema.
+    (let [with-defaults (reduce (fn [acc k]
+                                  (if (contains? acc k)
+                                    acc
+                                    (assoc acc k (if (contains? set-keys k) #{} []))))
+                                pulled
+                                many-keys)]
+      (m/validate malli-schema with-defaults))))
+
+(defn- roundtrip-one-entity!
+  "Roundtrip a single generated entity through Datalevin.
+   Returns {:pass true} or {:pass false :failure {...}}."
+  [conn entity identity-key set-keys many-keys dl-schema malli-schema i]
+  (let [id-type (get-in dl-schema [identity-key :db/valueType])
+        id-val (if (= :db.type/string id-type)
+                 (str "gen-" i)
+                 (get entity identity-key))
+        entity (-> entity
+                   (assoc identity-key id-val)
+                   strip-empty-colls)
+        lookup-ref [identity-key id-val]]
+    ;; Transact
+    (d/transact! conn [entity])
+    ;; Pull back
+    (let [pulled-raw (d/pull @conn '[*] lookup-ref)]
+      (if (nil? pulled-raw)
+        {:pass false
+         :failure {:entity-index i
+                   :original entity
+                   :pulled nil
+                   :malli-valid? false
+                   :attr-failures [{:attr :db/pull
+                                    :expected "non-nil entity"
+                                    :actual nil
+                                    :datalevin-schema "N/A"}]}}
+        (let [pulled (coerce-pulled-entity pulled-raw set-keys)
+              valid? (validate-pulled-with-malli malli-schema pulled many-keys set-keys)
+              attr-failures (compare-entities entity pulled many-keys dl-schema)]
+          (if (and valid? (empty? attr-failures))
+            {:pass true}
+            {:pass false
+             :failure {:entity-index i
+                       :original entity
+                       :pulled pulled
+                       :malli-valid? valid?
+                       :attr-failures attr-failures}}))))))
+
+(defn assert-pipeline-roundtrip!
+  "Generatively test that a Malli :map schema survives the full pipeline.
+
+   For N generated entities:
+   1. Validate schema meets pipeline constraints (no :any, no [:maybe X], namespaced keys)
+   2. Derive Datalevin schema via bridge (malli-map->datalevin-schema)
+   3. Generate entity from Malli schema
+   4. Strip empty collections (Datalevin ignores them)
+   5. Transact to temp Datalevin DB
+   6. Pull entity back
+   7. Coerce pulled entity (vector->set for :set keys, strip :db/id)
+   8. Validate pulled entity against Malli schema
+   9. Assert value equality (sets for cardinality-many, direct for scalars)
+
+   Options:
+     :num-samples  - number of entities to generate (default 20)
+     :identity-key - which key is the identity attr (required)
+
+   Returns {:pass-count N :fail-count 0 :failures []} on success.
+   Each failure includes :entity-index, :original, :pulled,
+   :malli-valid?, and :attr-failures for debugging."
+  [malli-schema {:keys [num-samples identity-key]
+                 :or {num-samples 20}}]
+  (assert identity-key ":identity-key option is required")
+
+  ;; Pre-flight: validate schema constraints
+  (validate-schema-constraints! malli-schema)
+
+  ;; Derive Datalevin schema from Malli (the core proposition)
+  (let [dl-schema (db-schema/malli-map->datalevin-schema malli-schema)
+        set-keys (find-set-keys malli-schema)
+        many-keys (find-many-keys malli-schema)
+        component-keys (find-component-keys malli-schema)
+        parsed (if (m/schema? malli-schema) malli-schema (m/schema malli-schema))
+        results (atom {:pass-count 0 :fail-count 0 :failures []})]
+
+    ;; Verify bridge derived something for each entry
+    (doseq [[k _] (m/entries parsed)]
+      (when-not (contains? component-keys k)
+        (is (contains? dl-schema k)
+            (str "Bridge failed to derive Datalevin schema for " k))))
+
+    ;; Run roundtrips in a temp Datalevin connection
+    (tu/with-temp-conn dl-schema
+      (fn [conn]
+        (doseq [i (range num-samples)]
+          (let [entity (mg/generate malli-schema)
+                result (roundtrip-one-entity! conn entity identity-key
+                                              set-keys many-keys
+                                              dl-schema parsed i)]
+            (if (:pass result)
+              (swap! results update :pass-count inc)
+              (do
+                (swap! results update :fail-count inc)
+                (swap! results update :failures conj (:failure result))
+                (let [f (:failure result)]
+                  (is false
+                      (str "Pipeline roundtrip failed for entity " (:entity-index f) ":\n"
+                           (when-not (:malli-valid? f)
+                             (str "  Malli validation: "
+                                  (pr-str (m/explain malli-schema (:pulled f))) "\n"))
+                           (when (seq (:attr-failures f))
+                             (str "  Attribute mismatches:\n"
+                                  (apply str
+                                         (for [af (:attr-failures f)]
+                                           (str "    " (:attr af) ": expected "
+                                                (pr-str (:expected af))
+                                                ", got " (pr-str (:actual af))
+                                                "\n"))))))))))))))
+    @results))
+
+;;; ---------------------------------------------------------------------------
+;;; Tests: Simple Leaf Types
+;;; ---------------------------------------------------------------------------
+
+(deftest simple-leaf-types-pipeline-test
+  (testing "all leaf types survive the pipeline generatively"
+    (let [schema [:map
+                  [:leaf/id {:db/unique :db.unique/identity} :string]
+                  [:leaf/str :string]
+                  [:leaf/int :int]
+                  [:leaf/double :double]
+                  [:leaf/bool :boolean]
+                  [:leaf/kw :keyword]
+                  [:leaf/sym :symbol]
+                  [:leaf/uuid :uuid]
+                  [:leaf/inst :inst]]
+          result (assert-pipeline-roundtrip! schema
+                   {:identity-key :leaf/id :num-samples 20})]
+      (is (zero? (:fail-count result))
+          (str "Failures: " (pr-str (:failures result))))
+      (is (= 20 (:pass-count result))))))
+
+;;; ---------------------------------------------------------------------------
+;;; Tests: Optional Keys
+;;; ---------------------------------------------------------------------------
+
+(deftest optional-keys-pipeline-test
+  (testing "entities with optional keys roundtrip correctly"
+    (let [schema [:map
+                  [:opt/id {:db/unique :db.unique/identity} :string]
+                  [:opt/required :string]
+                  [:opt/maybe-str {:optional true} :string]
+                  [:opt/maybe-int {:optional true} :int]
+                  [:opt/maybe-kw {:optional true} :keyword]]
+          result (assert-pipeline-roundtrip! schema
+                   {:identity-key :opt/id :num-samples 20})]
+      (is (zero? (:fail-count result))
+          (str "Failures: " (pr-str (:failures result))))
+      (is (= 20 (:pass-count result))))))
+
+;;; ---------------------------------------------------------------------------
+;;; Tests: Enums
+;;; ---------------------------------------------------------------------------
+
+(deftest keyword-enum-pipeline-test
+  (testing "keyword enum roundtrips generatively"
+    (let [schema [:map
+                  [:enumk/id {:db/unique :db.unique/identity} :string]
+                  [:enumk/status [:enum :active :inactive :pending :archived]]]
+          result (assert-pipeline-roundtrip! schema
+                   {:identity-key :enumk/id :num-samples 20})]
+      (is (zero? (:fail-count result))
+          (str "Failures: " (pr-str (:failures result))))
+      (is (= 20 (:pass-count result))))))
+
+(deftest string-enum-pipeline-test
+  (testing "string enum roundtrips generatively"
+    (let [schema [:map
+                  [:enums/id {:db/unique :db.unique/identity} :string]
+                  [:enums/role [:enum "admin" "user" "guest" "moderator"]]]
+          result (assert-pipeline-roundtrip! schema
+                   {:identity-key :enums/id :num-samples 20})]
+      (is (zero? (:fail-count result))
+          (str "Failures: " (pr-str (:failures result))))
+      (is (= 20 (:pass-count result))))))
+
+;;; ---------------------------------------------------------------------------
+;;; Tests: Cardinality-Many
+;;; ---------------------------------------------------------------------------
+
+(deftest set-of-keywords-pipeline-test
+  (testing "[:set :keyword] roundtrips via cardinality-many"
+    (let [schema [:map
+                  [:setk/id {:db/unique :db.unique/identity} :string]
+                  [:setk/tags [:set :keyword]]]
+          result (assert-pipeline-roundtrip! schema
+                   {:identity-key :setk/id :num-samples 20})]
+      (is (zero? (:fail-count result))
+          (str "Failures: " (pr-str (:failures result))))
+      (is (= 20 (:pass-count result))))))
+
+(deftest vector-of-strings-pipeline-test
+  (testing "[:vector :string] roundtrips via cardinality-many (dedup, no order)"
+    (let [schema [:map
+                  [:vecs/id {:db/unique :db.unique/identity} :string]
+                  [:vecs/names [:vector :string]]]
+          result (assert-pipeline-roundtrip! schema
+                   {:identity-key :vecs/id :num-samples 20})]
+      (is (zero? (:fail-count result))
+          (str "Failures: " (pr-str (:failures result))))
+      (is (= 20 (:pass-count result))))))
+
+;;; ---------------------------------------------------------------------------
+;;; Tests: Component Refs (Nested Maps)
+;;; ---------------------------------------------------------------------------
+
+(deftest component-ref-pipeline-test
+  (testing "nested :map roundtrips as component entity"
+    (let [schema [:map
+                  [:parent/id {:db/unique :db.unique/identity} :string]
+                  [:parent/name :string]
+                  [:parent/child [:map
+                                  [:child/name :string]
+                                  [:child/score :int]]]]
+          result (assert-pipeline-roundtrip! schema
+                   {:identity-key :parent/id :num-samples 20})]
+      (is (zero? (:fail-count result))
+          (str "Failures: " (pr-str (:failures result))))
+      (is (= 20 (:pass-count result))))))
+
+;;; ---------------------------------------------------------------------------
+;;; Tests: Non-Component Refs
+;;; ---------------------------------------------------------------------------
+
+(deftest non-component-ref-pipeline-test
+  (testing "non-component ref with :db/valueType :db.type/ref"
+    ;; Non-component refs return {:db/id N} on pull, not the full entity.
+    ;; This test manually verifies that behavior since lookup refs require
+    ;; the target entity to exist first -- not generatively testable.
+    (let [dl-schema {:ref/id {:db/valueType :db.type/string
+                              :db/unique :db.unique/identity}
+                     :ref/target {:db/valueType :db.type/ref}}]
+      (tu/with-temp-conn dl-schema
+        (fn [conn]
+          ;; Create target entity
+          (d/transact! conn [{:ref/id "target-1"}])
+          ;; Create source with lookup ref
+          (d/transact! conn [{:ref/id "source-1"
+                              :ref/target [:ref/id "target-1"]}])
+          (let [result (d/pull @conn '[*] [:ref/id "source-1"])]
+            (is (map? (:ref/target result))
+                "non-component ref returns a map")
+            (is (contains? (:ref/target result) :db/id)
+                "non-component ref map contains :db/id")))))))
+
+;;; ---------------------------------------------------------------------------
+;;; Tests: Complex Entity (Mix of All Types)
+;;; ---------------------------------------------------------------------------
+
+(deftest complex-entity-pipeline-test
+  (testing "complex entity with mix of leaf types, enums, sets, optional, nested"
+    (let [schema [:map
+                  [:complex/id {:db/unique :db.unique/identity} :string]
+                  [:complex/name :string]
+                  [:complex/count :int]
+                  [:complex/score :double]
+                  [:complex/active :boolean]
+                  [:complex/kind [:enum :alpha :beta :gamma]]
+                  [:complex/uuid :uuid]
+                  [:complex/tags [:set :keyword]]
+                  [:complex/note {:optional true} :string]
+                  [:complex/priority {:optional true} :int]
+                  [:complex/child [:map
+                                   [:detail/label :string]
+                                   [:detail/value :int]]]]
+          result (assert-pipeline-roundtrip! schema
+                   {:identity-key :complex/id :num-samples 20})]
+      (is (zero? (:fail-count result))
+          (str "Failures: " (pr-str (:failures result))))
+      (is (= 20 (:pass-count result))))))
+
+;;; ---------------------------------------------------------------------------
+;;; Tests: Constraint Violations (Utility Catches Bad Schemas)
+;;; ---------------------------------------------------------------------------
+
+(deftest maybe-schema-rejected-test
+  (testing "schema with [:maybe X] is rejected by the utility"
+    (let [schema [:map
+                  [:bad/id {:db/unique :db.unique/identity} :string]
+                  [:bad/name [:maybe :string]]]]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"maybe.*banned"
+                            (assert-pipeline-roundtrip! schema
+                              {:identity-key :bad/id}))))))
+
+(deftest any-schema-rejected-test
+  (testing "schema with :any is rejected by the utility"
+    (let [schema [:map
+                  [:bad/id {:db/unique :db.unique/identity} :string]
+                  [:bad/val :any]]]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"any.*banned"
+                            (assert-pipeline-roundtrip! schema
+                              {:identity-key :bad/id}))))))
+
+(deftest unnamespaced-keys-rejected-test
+  (testing "schema with unnamespaced keys is rejected"
+    (let [schema [:map
+                  [:id {:db/unique :db.unique/identity} :string]
+                  [:name :string]]]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"namespaced"
+                            (assert-pipeline-roundtrip! schema
+                              {:identity-key :id}))))))
+
+;;; ---------------------------------------------------------------------------
+;;; Tests: Identity Key Required
+;;; ---------------------------------------------------------------------------
+
+(deftest identity-key-required-test
+  (testing "assert-pipeline-roundtrip! requires :identity-key option"
+    (let [schema [:map [:test/id :string]]]
+      (is (thrown? AssertionError
+                   (assert-pipeline-roundtrip! schema {}))))))
+
+;;; ---------------------------------------------------------------------------
+;;; Tests: Module Entity Schemas (Phase 3 — schema unification)
+;;; ---------------------------------------------------------------------------
+
+(deftest ctx-entity-pipeline-test
+  (testing "seon.ctx/ctx-entity-schema survives the full pipeline"
+    (let [result (assert-pipeline-roundtrip!
+                  @(requiring-resolve 'seon.ctx/ctx-entity-schema)
+                  {:identity-key :seon.ctx/instance-id :num-samples 20})]
+      (is (zero? (:fail-count result))
+          (str "Failures: " (pr-str (:failures result))))
+      (is (= 20 (:pass-count result))))))
+
+(deftest repl-form-entity-pipeline-test
+  (testing "seon.repl/form-entity-schema survives the full pipeline"
+    (let [result (assert-pipeline-roundtrip!
+                  @(requiring-resolve 'seon.repl/form-entity-schema)
+                  {:identity-key :form/id :num-samples 20})]
+      (is (zero? (:fail-count result))
+          (str "Failures: " (pr-str (:failures result))))
+      (is (= 20 (:pass-count result))))))
+
+;;; ---------------------------------------------------------------------------
+;;; Tempid Roundtrip Helper (for entities without a unique identity key)
+;;; ---------------------------------------------------------------------------
+
+(defn- assert-tempid-roundtrip!
+  "Generative roundtrip test for entity schemas that lack a :db/unique identity key.
+
+   Some entities (flow trace events, transaction metadata) are identified by
+   :db/id at transact time, not by a lookup ref. This helper uses tempids
+   to transact and pull back entities, verifying:
+   1. Schema meets pipeline constraints (no :any, no [:maybe X], namespaced keys)
+   2. Bridge derives Datalevin types for all attributes
+   3. N generated entities roundtrip through transact -> pull with value equality
+   4. Pulled entities pass Malli validation
+
+   Returns {:pass-count N :fail-count M :failures [...]}."
+  [malli-schema {:keys [num-samples] :or {num-samples 20}}]
+  ;; Pre-flight: same constraints as assert-pipeline-roundtrip!
+  (validate-schema-constraints! malli-schema)
+
+  (let [dl-schema (db-schema/malli-map->datalevin-schema malli-schema)
+        parsed (if (m/schema? malli-schema) malli-schema (m/schema malli-schema))
+        results (atom {:pass-count 0 :fail-count 0 :failures []})]
+
+    ;; Verify bridge derived something for each entry
+    (doseq [[k _] (m/entries parsed)]
+      (is (contains? dl-schema k)
+          (str "Bridge failed to derive Datalevin schema for " k)))
+
+    ;; Roundtrip via tempids
+    (tu/with-temp-conn dl-schema
+      (fn [conn]
+        (doseq [i (range num-samples)]
+          (let [entity (mg/generate malli-schema)
+                tempid (- -1 i)
+                tx-result (d/transact! conn [(assoc entity :db/id tempid)])
+                eid (get (:tempids tx-result) tempid)
+                pulled-raw (d/pull @conn '[*] eid)
+                pulled (dissoc pulled-raw :db/id)
+                valid? (m/validate malli-schema pulled)
+                match? (= entity pulled)]
+            (if (and valid? match?)
+              (swap! results update :pass-count inc)
+              (do
+                (swap! results update :fail-count inc)
+                (swap! results update :failures conj
+                       {:entity-index i
+                        :original entity
+                        :pulled pulled
+                        :malli-valid? valid?
+                        :match? match?})
+                (is false
+                    (str "Tempid roundtrip failed for entity " i ":\n"
+                         (when-not valid?
+                           (str "  Malli validation: "
+                                (pr-str (m/explain malli-schema pulled)) "\n"))
+                         (when-not match?
+                           (str "  Value mismatch:\n"
+                                "    original: " (pr-str entity) "\n"
+                                "    pulled:   " (pr-str pulled) "\n"))))))))))
+    @results))
+
+;;; ---------------------------------------------------------------------------
+;;; Tests: Trace Entity Schema (Phase 3b — no unique identity key)
+;;; ---------------------------------------------------------------------------
+
+(deftest trace-entity-pipeline-test
+  (testing "seon.flow.trace/entity-schema survives the full pipeline"
+    ;; Trace events have no :db/unique identity key — multiple events share
+    ;; the same ::trace-id (correlation ID). Uses tempid roundtrip instead.
+    (let [result (assert-tempid-roundtrip!
+                   @(requiring-resolve 'seon.flow.trace/entity-schema)
+                   {:num-samples 20})]
+      (is (zero? (:fail-count result))
+          (str "Failures: " (pr-str (:failures result))))
+      (is (= 20 (:pass-count result))))))
+
+;;; ---------------------------------------------------------------------------
+;;; Tests: Runtime Entity Schemas (Phase 3c — runtime.clj unification)
+;;; ---------------------------------------------------------------------------
+
+(deftest runtime-entity-pipeline-test
+  (testing "seon.runtime/runtime-entity-schema survives the full pipeline"
+    (let [result (assert-pipeline-roundtrip!
+                   @(requiring-resolve 'seon.runtime/runtime-entity-schema)
+                   {:identity-key :seon.runtime/namespace :num-samples 20})]
+      (is (zero? (:fail-count result))
+          (str "Failures: " (pr-str (:failures result))))
+      (is (= 20 (:pass-count result))))))
+
+(deftest agent-run-entity-pipeline-test
+  (testing "seon.runtime/agent-run-entity-schema survives the full pipeline"
+    ;; The :seon.agent.run/runtime ref field is excluded from generative testing
+    ;; because refs require existing target entities. Tested manually below.
+    (let [schema-without-ref
+          (into [:map]
+                (remove (fn [[k]] (= k :seon.agent.run/runtime)))
+                (rest @(requiring-resolve 'seon.runtime/agent-run-entity-schema)))
+          result (assert-pipeline-roundtrip!
+                   schema-without-ref
+                   {:identity-key :seon.agent.run/id :num-samples 20})]
+      (is (zero? (:fail-count result))
+          (str "Failures: " (pr-str (:failures result))))
+      (is (= 20 (:pass-count result))))))
+
+(deftest agent-run-ref-pipeline-test
+  (testing ":seon.agent.run/runtime ref roundtrips correctly"
+    ;; Manual test: create a runtime entity, then an agent-run entity that
+    ;; refs it, and verify the ref survives pull.
+    (let [dl-schema (merge
+                      (db-schema/malli-map->datalevin-schema
+                        @(requiring-resolve 'seon.runtime/runtime-entity-schema))
+                      (db-schema/malli-map->datalevin-schema
+                        @(requiring-resolve 'seon.runtime/agent-run-entity-schema)))]
+      (tu/with-temp-conn dl-schema
+        (fn [conn]
+          ;; Create target runtime entity
+          (d/transact! conn [{:seon.runtime/namespace "seon.test.agent"
+                              :seon.runtime/status :running
+                              :seon.runtime/location :external}])
+          ;; Create agent-run with lookup ref to runtime
+          (d/transact! conn [{:seon.agent.run/id "run-ref-test"
+                              :seon.agent.run/status :running
+                              :seon.agent.run/namespace "seon.test.agent"
+                              :seon.agent.run/provider :claude
+                              :seon.agent.run/runtime
+                              [:seon.runtime/namespace "seon.test.agent"]}])
+          ;; Pull and verify the ref
+          (let [result (d/pull @conn '[*] [:seon.agent.run/id "run-ref-test"])]
+            (is (map? (:seon.agent.run/runtime result))
+                "non-component ref returns a map")
+            (is (contains? (:seon.agent.run/runtime result) :db/id)
+                "non-component ref map contains :db/id")
+            (is (= :running (:seon.agent.run/status result)))
+            (is (= "seon.test.agent" (:seon.agent.run/namespace result)))))))))
+
+(deftest flow-snap-entity-pipeline-test
+  (testing "seon.runtime/flow-snap-entity-schema survives the full pipeline"
+    (let [result (assert-pipeline-roundtrip!
+                   @(requiring-resolve 'seon.runtime/flow-snap-entity-schema)
+                   {:identity-key :seon.flow.snap/id :num-samples 20})]
+      (is (zero? (:fail-count result))
+          (str "Failures: " (pr-str (:failures result))))
+      (is (= 20 (:pass-count result))))))
+
+;;; ---------------------------------------------------------------------------
+;;; Tests: Tx Entity Schema (Phase 3b — transaction metadata, no identity key)
+;;; ---------------------------------------------------------------------------
+
+(deftest tx-entity-pipeline-test
+  (testing "seon.db.tx/entity-schema survives the full pipeline"
+    ;; Transaction metadata entities use :db/current-tx, not a lookup ref.
+    ;; Uses tempid roundtrip instead.
+    (let [result (assert-tempid-roundtrip!
+                   @(requiring-resolve 'seon.db.tx/entity-schema)
+                   {:num-samples 20})]
+      (is (zero? (:fail-count result))
+          (str "Failures: " (pr-str (:failures result))))
+      (is (= 20 (:pass-count result))))))
+
+;;; ---------------------------------------------------------------------------
+;;; Tests: Ingest Entity Schemas (Phase 3d — graph/ingest.clj unification)
+;;; ---------------------------------------------------------------------------
+
+(deftest ingest-ns-entity-pipeline-test
+  (testing "seon.graph.ingest/ns-entity-schema survives the full pipeline"
+    (let [result (assert-pipeline-roundtrip!
+                   @(requiring-resolve 'seon.graph.ingest/ns-entity-schema)
+                   {:identity-key :seon.ns/name :num-samples 20})]
+      (is (zero? (:fail-count result))
+          (str "Failures: " (pr-str (:failures result))))
+      (is (= 20 (:pass-count result))))))
+
+(deftest ingest-fn-entity-pipeline-test
+  (testing "seon.graph.ingest/fn-entity-schema survives the full pipeline"
+    ;; Ref fields (:input-spec, :output-spec) are excluded from generative testing
+    ;; because refs require existing target entities. Tested manually below.
+    (let [schema-without-refs
+          (into [:map]
+                (remove (fn [[k]] (#{:seon.fn/input-spec :seon.fn/output-spec} k)))
+                (rest @(requiring-resolve 'seon.graph.ingest/fn-entity-schema)))
+          result (assert-pipeline-roundtrip!
+                   schema-without-refs
+                   {:identity-key :seon.fn/qualified-name :num-samples 20})]
+      (is (zero? (:fail-count result))
+          (str "Failures: " (pr-str (:failures result))))
+      (is (= 20 (:pass-count result))))))
+
+(deftest ingest-fn-spec-ref-pipeline-test
+  (testing ":seon.fn/input-spec and :seon.fn/output-spec refs roundtrip correctly"
+    ;; Manual test: create spec entities, then fn entity with refs, verify roundtrip.
+    (let [dl-schema (merge
+                      (db-schema/malli-map->datalevin-schema
+                        @(requiring-resolve 'seon.graph.ingest/fn-entity-schema))
+                      (db-schema/malli-map->datalevin-schema
+                        @(requiring-resolve 'seon.graph.ingest/spec-entity-schema)))]
+      (tu/with-temp-conn dl-schema
+        (fn [conn]
+          ;; Create target spec entities
+          (d/transact! conn [{:seon.spec/key :seon.test/input-spec
+                              :seon.spec/namespace "seon.test"
+                              :seon.spec/definition "[:map [:x :int]]"
+                              :seon.spec/base-type :map
+                              :seon.spec/updated-at (java.util.Date.)}
+                             {:seon.spec/key :seon.test/output-spec
+                              :seon.spec/namespace "seon.test"
+                              :seon.spec/definition "[:map [:y :string]]"
+                              :seon.spec/base-type :map
+                              :seon.spec/updated-at (java.util.Date.)}])
+          ;; Create fn entity with lookup refs to specs
+          (d/transact! conn [{:seon.fn/qualified-name "seon.test/my-fn"
+                              :seon.fn/namespace "seon.test"
+                              :seon.fn/name "my-fn"
+                              :seon.fn/private false
+                              :seon.fn/updated-at (java.util.Date.)
+                              :seon.fn/input-spec [:seon.spec/key :seon.test/input-spec]
+                              :seon.fn/output-spec [:seon.spec/key :seon.test/output-spec]}])
+          ;; Pull and verify refs
+          (let [result (d/pull @conn '[*] [:seon.fn/qualified-name "seon.test/my-fn"])]
+            (is (map? (:seon.fn/input-spec result))
+                "input-spec non-component ref returns a map")
+            (is (contains? (:seon.fn/input-spec result) :db/id)
+                "input-spec ref map contains :db/id")
+            (is (map? (:seon.fn/output-spec result))
+                "output-spec non-component ref returns a map")
+            (is (contains? (:seon.fn/output-spec result) :db/id)
+                "output-spec ref map contains :db/id")))))))
+
+(deftest ingest-call-entity-pipeline-test
+  (testing "seon.graph.ingest/call-entity-schema survives the full pipeline (tempid)"
+    ;; Call entities have no identity key and contain ref fields.
+    ;; We test non-ref attrs via tempid roundtrip, and refs manually.
+    (let [schema-without-refs
+          [:map [:seon.call/row {:optional true} :int]]
+          ;; Can't use assert-tempid-roundtrip! with only optional keys,
+          ;; so verify bridge derivation and manual transact instead.
+          dl-schema (merge
+                      (db-schema/malli-map->datalevin-schema
+                        @(requiring-resolve 'seon.graph.ingest/call-entity-schema))
+                      (db-schema/malli-map->datalevin-schema
+                        @(requiring-resolve 'seon.graph.ingest/fn-entity-schema)))]
+      (tu/with-temp-conn dl-schema
+        (fn [conn]
+          ;; Create target fn entities
+          (d/transact! conn [{:seon.fn/qualified-name "seon.test/caller"
+                              :seon.fn/namespace "seon.test"
+                              :seon.fn/name "caller"
+                              :seon.fn/private false}
+                             {:seon.fn/qualified-name "seon.test/callee"
+                              :seon.fn/namespace "seon.test"
+                              :seon.fn/name "callee"
+                              :seon.fn/private false}])
+          ;; Create call entity with lookup refs
+          (let [tx-result (d/transact! conn [{:db/id -1
+                                              :seon.call/from-fn [:seon.fn/qualified-name "seon.test/caller"]
+                                              :seon.call/to-fn [:seon.fn/qualified-name "seon.test/callee"]
+                                              :seon.call/row 42}])
+                eid (get (:tempids tx-result) -1)
+                pulled (d/pull @conn '[*] eid)]
+            (is (map? (:seon.call/from-fn pulled))
+                "from-fn non-component ref returns a map")
+            (is (= 42 (:seon.call/row pulled))
+                "scalar attr roundtrips")))))))
+
+(deftest ingest-ns-dep-entity-pipeline-test
+  (testing "seon.graph.ingest/ns-dep-entity-schema survives the full pipeline (tempid)"
+    (let [result (assert-tempid-roundtrip!
+                   @(requiring-resolve 'seon.graph.ingest/ns-dep-entity-schema)
+                   {:num-samples 20})]
+      (is (zero? (:fail-count result))
+          (str "Failures: " (pr-str (:failures result))))
+      (is (= 20 (:pass-count result))))))
+
+(deftest ingest-spec-entity-pipeline-test
+  (testing "seon.graph.ingest/spec-entity-schema survives the full pipeline"
+    (let [result (assert-pipeline-roundtrip!
+                   @(requiring-resolve 'seon.graph.ingest/spec-entity-schema)
+                   {:identity-key :seon.spec/key :num-samples 20})]
+      (is (zero? (:fail-count result))
+          (str "Failures: " (pr-str (:failures result))))
+      (is (= 20 (:pass-count result))))))
+
+(deftest ingest-var-entity-pipeline-test
+  (testing "seon.graph.ingest/var-entity-schema survives the full pipeline"
+    (let [result (assert-pipeline-roundtrip!
+                   @(requiring-resolve 'seon.graph.ingest/var-entity-schema)
+                   {:identity-key :seon.var/qualified-name :num-samples 20})]
+      (is (zero? (:fail-count result))
+          (str "Failures: " (pr-str (:failures result))))
+      (is (= 20 (:pass-count result))))))

@@ -1,6 +1,14 @@
 # Caddy reverse proxy for HTTP/2 + TLS
 # Eliminates Chrome's 6-connection limit on HTTP/1.1
 # which blocks SSE-heavy pages (Datastar) when multiple tabs are open.
+#
+# Note: We do NOT add `encode` directive here because:
+# 1. SSE streams handle their own Brotli compression (Content-Encoding: br)
+# 2. Static files can be pre-compressed if needed
+# Caddy passes through our Content-Encoding headers correctly.
+#
+# Access via: https://localhost:3030
+# First visit: accept the self-signed certificate warning in your browser.
 
 https://localhost:3030 {
 	reverse_proxy localhost:8080

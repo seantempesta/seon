@@ -1,8 +1,9 @@
+---
+type: prd
+status: active
+tags: [prd, database, flow, web]
+---
 # PRD: Namespace UI - Vision Document
-
-**Status:** Active Development
-**Priority:** High
-**Branch:** feature/namespace-ui
 
 ---
 
@@ -40,6 +41,7 @@ Every Clojure namespace in Seon becomes a viewable, introspectable "app". The sy
 4. **Session model** - View namespaces read-only, or launch sessions for live interaction
 
 Think of Seon as an OS where namespaces are apps:
+
 - Browse available namespaces from the dashboard
 - Open namespace views (read-only introspection)
 - Launch sessions for live REPL + DB access
@@ -72,6 +74,7 @@ Seon's UI is rooted in McCarthy's vision of Lisp and the golden age of computing
 ### Design System
 
 See [`design-system.md`](design-system.md) for:
+
 - Color palette (Phosphor theme)
 - Typography scale (JetBrains Mono, 11px primary)
 - Spacing system (4px base unit)
@@ -92,6 +95,7 @@ See [`design-system.md`](design-system.md) for:
 ## Problem Statement
 
 Currently, understanding a namespace requires:
+
 - Reading source code directly
 - Using REPL to inspect vars/atoms
 - Querying the database manually for related data
@@ -111,6 +115,7 @@ There's no unified view that shows "what's in this namespace and what's its curr
 /agents                        -> Agent Observatory
 /agents/{id}                   -> Agent detail view
 /schemas                       -> Malli schema browser (future)
+
 ```
 
 The namespace IS the route. Session ID is optional query param.
@@ -127,6 +132,7 @@ Different skills are relevant for different work:
 /datastar-web-ui     -> SSE patterns, data-on:click, merge-fragment
 /frontend-design     -> Visual design, avoiding generic aesthetics
 /browser-automation  -> Test the result visually, debug in browser
+
 ```
 
 ### When Working with Data/Queries
@@ -134,6 +140,7 @@ Different skills are relevant for different work:
 ```
 /xtdb-queries        -> SQL/Datalog patterns, queries (migrating to Datalevin)
 /clojure-testing     -> Test patterns, generators, mocking
+
 ```
 
 ### Skill Combinations by Task
@@ -163,6 +170,7 @@ Browser → GET /ns/seon.trading?instance=a1b2
     → agent returns domain data map (e.g. {:seon.trading/positions [...], ...})
     → orchestrator resolves renderer via spec-driven resolution (code index)
     → rendered hiccup cached + SSE merge-fragment to browser
+
 ```
 
 The `topology/request!` function (in `seon.flow.topology`) is the blocking entry point for cross-namespace calls. It creates a promise, injects a request into the flow via `flow/inject`, and derefs the promise with a timeout. Replies are delivered by the `reply-router-step` which matches reply envelopes to waiting promises by request ID. For agent JVMs, cross-namespace relay go-loops forward requests from the agent's TCP bridge through the same `request!` mechanism.
@@ -179,6 +187,7 @@ Rendering is spec-driven, not per-namespace. There is no explicit `render` funct
 4. **Fallback** -- if no renderer matches, `pprint-clipped` provides a default view
 
 **URL mapping:**
+
 - `/ns/seon.trading` (no `?instance=` param) → static namespace view from introspection (functions, vars, schemas)
 - `/ns/seon.trading?instance=a1b2` → `topology/request!` to agent JVM → domain data → spec-driven render → cached hiccup
 
@@ -189,6 +198,7 @@ Cached at orchestrator, invalidated on `*ctx*` change (via the watch-based push 
 ```clojure
 ;; In seon.ns.view
 (defmulti render* (fn [value format] [format (extract-view-type value)]))
+
 ```
 
 ### Key Files
@@ -266,6 +276,7 @@ The capstone phase where `/ns/` routes go through the flow topology to agent JVM
 **Goal:** When an agent JVM owns a namespace, `GET /ns/seon.trading` fetches domain data from the agent JVM via `topology/request!`, then the orchestrator resolves the renderer via the code index and caches the result. Agent JVMs never produce hiccup -- they return plain data maps.
 
 **Key work:**
+
 - Wire `/ns/` route handler to detect flow-owned namespaces and route through `topology/request!`
 - Agent JVM returns domain data map (namespaced keys, no UI dependencies)
 - Orchestrator resolves renderer via spec-driven resolution (`find-renderer` from code index)

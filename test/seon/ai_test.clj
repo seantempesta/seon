@@ -7,6 +7,7 @@
    3. Session lifecycle - start, add messages, end, retrieve
    4. Query functions - get-session, get-messages, list-sessions"
   (:require
+   [clojure.string :as str]
    [clojure.test :refer [deftest is testing use-fixtures compose-fixtures]]
    [malli.core :as m]
    [malli.generator :as mg]
@@ -26,11 +27,12 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn temporal?
-  "Check if value is a temporal type (Instant or ZonedDateTime).
-   XTDB returns ZonedDateTime for timestamps, not Instant."
+  "Check if value is a temporal type (Instant, ZonedDateTime, or java.util.Date).
+   Datalevin returns java.util.Date for :db.type/instant attrs."
   [v]
   (or (instance? Instant v)
-      (instance? ZonedDateTime v)))
+      (instance? ZonedDateTime v)
+      (instance? java.util.Date v)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schema Registration Tests
@@ -186,7 +188,7 @@
 
 (deftest message-entity-with-tools-test
   (testing "message-entity validates with tool-calls"
-    (let [msg {:xt/id "msg-123"
+    (let [msg {:seon/id "msg-123"
                ::ai/type :message
                ::ai/session-id "ses-456"
                ::ai/role "assistant"
@@ -197,7 +199,7 @@
       (is (m/validate ::ai/message-entity msg))))
 
   (testing "message-entity validates with tool-results"
-    (let [msg {:xt/id "msg-789"
+    (let [msg {:seon/id "msg-789"
                ::ai/type :message
                ::ai/session-id "ses-456"
                ::ai/role "user"
@@ -208,7 +210,7 @@
       (is (m/validate ::ai/message-entity msg))))
 
   (testing "message-entity validates without tool fields (backwards compatible)"
-    (let [msg {:xt/id "msg-simple"
+    (let [msg {:seon/id "msg-simple"
                ::ai/type :message
                ::ai/session-id "ses-123"
                ::ai/role "user"
@@ -226,7 +228,7 @@
       (is (map? result))
       (is (contains? result ::ai/session-id))
       (is (string? (::ai/session-id result)))
-      (is (clojure.string/starts-with? (::ai/session-id result) "ses-"))))
+      (is (str/starts-with? (::ai/session-id result) "ses-"))))
 
   (testing "start-session! with namespace and prompt"
     (let [result (ai/start-session! {::ai/node *test-node*
@@ -317,19 +319,19 @@
     (let [start-result (ai/start-session! {::ai/node *test-node*})
           session-id (::ai/session-id start-result)
           _ (ai/add-message! {::ai/node *test-node*
-                             ::ai/session-id session-id
-                             ::ai/role "user"
-                             ::ai/content "First message"})
+                              ::ai/session-id session-id
+                              ::ai/role "user"
+                              ::ai/content "First message"})
           _ (Thread/sleep 10) ; Ensure different timestamps
           _ (ai/add-message! {::ai/node *test-node*
-                             ::ai/session-id session-id
-                             ::ai/role "assistant"
-                             ::ai/content "Second message"})
+                              ::ai/session-id session-id
+                              ::ai/role "assistant"
+                              ::ai/content "Second message"})
           _ (Thread/sleep 10)
           _ (ai/add-message! {::ai/node *test-node*
-                             ::ai/session-id session-id
-                             ::ai/role "user"
-                             ::ai/content "Third message"})
+                              ::ai/session-id session-id
+                              ::ai/role "user"
+                              ::ai/content "Third message"})
           messages (ai/get-messages {::ai/node *test-node*
                                      ::ai/session-id session-id})]
       (is (= 3 (count messages)))
@@ -366,7 +368,7 @@
     ;; End one session
     (let [active-sessions (ai/list-sessions {::ai/node *test-node*
                                              ::ai/status :active})
-          first-session-id (:xt/id (first active-sessions))]
+          first-session-id (:seon/id (first active-sessions))]
       (ai/end-session! {::ai/node *test-node*
                         ::ai/session-id first-session-id
                         ::ai/status :completed})
@@ -515,10 +517,10 @@
   (testing "add-message! handles structured content (map)"
     (let [start-result (ai/start-session! {::ai/node *test-node*})
           session-id (::ai/session-id start-result)
-          ;; Use kebab-case keys since XTDB normalizes keys
+          ;; Use kebab-case keys since Datalevin normalizes keys
           structured-content {:type "tool_result"
-                             :tool-use-id "tool-123"
-                             :content "Result data"}
+                              :tool-use-id "tool-123"
+                              :content "Result data"}
           _ (ai/add-message! {::ai/node *test-node*
                               ::ai/session-id session-id
                               ::ai/role "user"
@@ -580,7 +582,7 @@
                                     ::ai/byte-count 5
                                     ::ai/read-success true}]
                ::ai/agent-instructions "You are a helpful agent..."
-               ::ai/agent-instructions-path ".claude/AGENT.md"}]
+               ::ai/agent-instructions-path "AGENT.md"}]
       (is (m/validate ::ai/initial-context ctx))))
 
   (testing "::ai/initial-context validates with only required field"
@@ -603,19 +605,25 @@
                                             ::ai/byte-count 30
                                             ::ai/read-success true}]
                        ::ai/agent-instructions "You are a test agent."
-                       ::ai/agent-instructions-path ".claude/AGENT.md"}
+                       ::ai/agent-instructions-path "AGENT.md"}
           {sid ::ai/session-id} (ai/start-session! {::ai/node *test-node*
-                                                     ::ai/namespace 'seon.test
-                                                     ::ai/prompt "Test prompt"
-                                                     ::ai/initial-context initial-ctx})
+                                                    ::ai/namespace 'seon.test
+                                                    ::ai/prompt "Test prompt"
+                                                    ::ai/initial-context initial-ctx})
           session (ai/get-session {::ai/node *test-node* ::ai/session-id sid})]
       (is (some? session))
-      (is (= initial-ctx (::ai/initial-context session)))))
+      ;; Datalevin adds :db/id to stored entities — compare only expected keys
+
+      (let [stored (::ai/initial-context session)
+            strip-db-id (fn [m] (dissoc m :db/id))
+            stored-clean (-> (strip-db-id stored)
+                             (update ::ai/files-context #(mapv strip-db-id %)))]
+        (is (= initial-ctx stored-clean)))))
 
   (testing "start-session! works without initial context (backwards compatible)"
     (let [{sid ::ai/session-id} (ai/start-session! {::ai/node *test-node*
-                                                     ::ai/namespace 'seon.test
-                                                     ::ai/prompt "Test prompt"})
+                                                    ::ai/namespace 'seon.test
+                                                    ::ai/prompt "Test prompt"})
           session (ai/get-session {::ai/node *test-node* ::ai/session-id sid})]
       (is (some? session))
       (is (nil? (::ai/initial-context session))))))

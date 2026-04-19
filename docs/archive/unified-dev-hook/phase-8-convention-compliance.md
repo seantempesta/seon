@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 # PRD: Phase 8 - Convention Compliance for seon.dev
 
 **Status:** ✅ COMPLETE
@@ -91,6 +97,7 @@ The `seon.dev.*` namespaces implement the unified development hook system. While
 ### Example: Current vs Target
 
 **Before (positional, non-compliant):**
+
 ```clojure
 (defn record-edit!
   "Record an edit event."
@@ -99,9 +106,11 @@ The `seon.dev.*` namespaces implement the unified development hook system. While
 
 ;; Usage
 (record-edit! node "/path/to/file.clj" 'seon.foo {:decision :continue})
+
 ```
 
 **After (map-in/map-out, compliant):**
+
 ```clojure
 (schema/register! ::record-edit-request
   [:map
@@ -138,6 +147,7 @@ The `seon.dev.*` namespaces implement the unified development hook system. While
                ::file-path "/path/to/file.clj"
                ::namespace 'seon.foo
                ::decision :continue})
+
 ```
 
 ---
@@ -285,11 +295,13 @@ Build tooling that the hook can use to detect convention violations in real-time
      ::formatted - Formatted string for display"
   [{::keys [violations max-length]}]
   ...)
+
 ```
 
 **Implementation Approach:**
 
 Use Clojure's reflection capabilities:
+
 ```clojure
 ;; Get all public vars in a namespace
 (ns-publics 'seon.dev.context)
@@ -307,6 +319,7 @@ Use Clojure's reflection capabilities:
           (and (= 1 (count arglist))
                (map? (first arglist))))
         arglists))
+
 ```
 
 **Hook Integration:**
@@ -321,6 +334,7 @@ After compliance tooling is built, update `hook.clj` to optionally check edited 
       (swap! feedback conj
              (compliance/format-violations
                {::compliance/violations (::compliance/violations result)})))))
+
 ```
 
 **Callers:**
@@ -334,22 +348,27 @@ After compliance tooling is built, update `hook.clj` to optionally check edited 
 For each function, follow this pattern:
 
 ### 1. Register Input Schema
+
 ```clojure
 (schema/register! ::my-function-request
   [:map
    [::required-key SomeType]
    [::optional-key {:optional true} SomeType]])
+
 ```
 
 ### 2. Register Output Schema
+
 ```clojure
 (schema/register! ::my-function-response
   [:map
    [::success :boolean]
    [::result-key SomeType]])
+
 ```
 
 ### 3. Update Function Signature
+
 ```clojure
 (defn my-function
   "Docstring with Request keys: and Response keys: sections."
@@ -358,12 +377,15 @@ For each function, follow this pattern:
   ;; Implementation
   {::success true
    ::result-key value})
+
 ```
 
 ### 4. Update All Callers
+
 Find all usages and convert from positional to map style.
 
 ### 5. Update Tests
+
 Tests should use the new map signatures.
 
 ---
@@ -375,13 +397,17 @@ Tests should use the new map signatures.
 Many functions take `xtdb-node` as first argument. Options:
 
 **Option A: Include in map (consistent)**
+
 ```clojure
 (record-edit! {::xtdb-node node ::file-path "/path"})
+
 ```
 
 **Option B: Keep as first positional arg (ergonomic)**
+
 ```clojure
 (record-edit! node {::file-path "/path"})
+
 ```
 
 **Recommendation:** Option A for full consistency. The slight verbosity is worth the uniformity.
@@ -391,15 +417,19 @@ Many functions take `xtdb-node` as first argument. Options:
 Some functions return simple values (boolean, string, number). Options:
 
 **Option A: Wrap in map (consistent)**
+
 ```clojure
 (clojure-file? {::file-path "/path"})
 ;; => {::clojure-file true}
+
 ```
 
 **Option B: Return simple value (pragmatic)**
+
 ```clojure
 (clojure-file? {::file-path "/path"})
 ;; => true
+
 ```
 
 **Recommendation:** Option B for predicate functions (`*?`). Option A for functions that could fail or return multiple values.
@@ -407,18 +437,22 @@ Some functions return simple values (boolean, string, number). Options:
 ### Multi-Arity Functions
 
 Some functions have multiple arities for convenience:
+
 ```clojure
 (defn should-review?
   ([xtdb-node] (should-review? xtdb-node {}))
   ([xtdb-node opts] ...))
+
 ```
 
 **Recommendation:** Convert to single-arity with optional keys:
+
 ```clojure
 (defn should-review?
   [{::keys [xtdb-node interval-seconds]}]
   (let [interval (or interval-seconds 60)]
     ...))
+
 ```
 
 ---

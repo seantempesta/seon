@@ -103,12 +103,12 @@
 (schema/register! ::format-unit-result-request
                   [:map
                    [::result ::unit-test-result]
-                   [::test-ns {:optional true} ::namespace-symbol]])
+                   [::test-ns {:optional true} [:maybe ::namespace-symbol]]])
 
 (schema/register! ::format-gen-result-request
                   [:map
                    [::result ::gen-test-result]
-                   [::namespace {:optional true} ::namespace-symbol]])
+                   [::namespace {:optional true} [:maybe ::namespace-symbol]]])
 
 ;;; ---------------------------------------------------------------------------
 ;;; Unit Test Running

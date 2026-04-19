@@ -7,15 +7,15 @@
    Example:
      (require '[seon.repl.context :as context])
 
-     (context/for-function {::context/conn conn
+     (context/for-function {::context/db-name :seon.runtime
                             ::context/qualified-name \"seon.health/log-workout!\"})
      ;; => \"## seon.health/log-workout! ...\"
 
-     (context/for-namespace {::context/conn conn
+     (context/for-namespace {::context/db-name :seon.runtime
                              ::context/namespace \"seon.health\"})
      ;; => \"# seon.health\\n## Functions\\n...\"
 
-     (context/for-data {::context/conn conn
+     (context/for-data {::context/db-name :seon.runtime
                         ::context/data {:seon.health/workout {...}}})
      ;; => \"Matching renderers: seon.health.render/workout-view\\n...\""
   (:require [seon.graph.context :as ctx]
@@ -28,8 +28,8 @@
 ;;; Schema Registration
 ;;; ---------------------------------------------------------------------------
 
-(schema/register! ::conn
-                  [:any {:description "Datalevin connection"}])
+(schema/register! ::db-name
+                  [:keyword {:description "Database name keyword (e.g. :seon.runtime)"}])
 
 (schema/register! ::qualified-name
                   [:string {:min 1
@@ -53,16 +53,16 @@
    given function, including its call graph, specs, and related functions.
 
    Request keys:
-     ::conn           - Required. Datalevin connection
+     ::db-name        - Required. Database name keyword
      ::qualified-name - Required. Fully qualified function name (e.g. \"seon.health/log-workout!\")
 
    Returns:
      Context string suitable for AI agent consumption.
 
    Example:
-     (for-function {::conn conn ::qualified-name \"seon.health/log-workout!\"})"
-  [{::keys [conn qualified-name]}]
-  (let [result (ctx/build {::ctx/conn conn
+     (for-function {::db-name :seon.runtime ::qualified-name \"seon.health/log-workout!\"})"
+  [{::keys [db-name qualified-name]}]
+  (let [result (ctx/build {::ctx/db-name db-name
                            ::ctx/seed qualified-name
                            ::ctx/depth 2})]
     (::ctx/context-text result)))
@@ -74,16 +74,16 @@
    their immediate dependencies.
 
    Request keys:
-     ::conn      - Required. Datalevin connection
+     ::db-name   - Required. Database name keyword
      ::namespace - Required. Namespace name (string)
 
    Returns:
      Context string suitable for AI agent consumption.
 
    Example:
-     (for-namespace {::conn conn ::namespace \"seon.health\"})"
-  [{::keys [conn namespace]}]
-  (let [result (ctx/build-for-namespace {::ctx/conn conn
+     (for-namespace {::db-name :seon.runtime ::namespace \"seon.health\"})"
+  [{::keys [db-name namespace]}]
+  (let [result (ctx/build-for-namespace {::ctx/db-name db-name
                                           ::ctx/namespace namespace})]
     (::ctx/context-text result)))
 
@@ -94,17 +94,17 @@
    the data shape, and returns information about the matching renderers.
 
    Request keys:
-     ::conn - Required. Datalevin connection
-     ::data - Required. Data map to find renderers for
+     ::db-name - Required. Database name keyword
+     ::data    - Required. Data map to find renderers for
 
    Returns:
      Context string describing matching renderers, or a message if none found.
 
    Example:
-     (for-data {::conn conn ::data {:seon.health/workout {...}}})"
-  [{::keys [conn data]}]
-  (let [ai-renderer (render/find-renderer conn data :ai)
-        html-renderer (render/find-renderer conn data :html)
+     (for-data {::db-name :seon.runtime ::data {:seon.health/workout {...}}})"
+  [{::keys [db-name data]}]
+  (let [ai-renderer (render/find-renderer db-name data :ai)
+        html-renderer (render/find-renderer db-name data :html)
         renderers (remove nil? [ai-renderer html-renderer])]
     (if (seq renderers)
       (str "Matching renderers for data with keys " (pr-str (keys data)) ":\n"
@@ -113,7 +113,7 @@
            ;; Build context for each renderer function
            (str/join "\n\n"
                      (map (fn [qn]
-                            (let [result (ctx/build {::ctx/conn conn
+                            (let [result (ctx/build {::ctx/db-name db-name
                                                      ::ctx/seed qn
                                                      ::ctx/depth 1})]
                               (::ctx/context-text result)))

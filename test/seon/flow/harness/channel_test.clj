@@ -2,7 +2,8 @@
   (:require [clojure.core.async :as a]
             [clojure.test :refer [deftest is testing]]
             [seon.flow.harness.channel :as channel]
-            [seon.flow.msg :as msg]))
+            [seon.flow.msg :as msg]
+            [taoensso.nippy :as nippy]))
 
 (defn- with-timeout
   "Take from channel with timeout. Returns value or :timeout."
@@ -12,7 +13,7 @@
      (or v :timeout))))
 
 (deftest roundtrip-test
-  (testing "Server and client can exchange EDN maps bidirectionally"
+  (testing "Server and client can exchange Nippy-encoded maps bidirectionally"
     (let [srv    (channel/start-server! {::channel/port 0})
           client (channel/connect! {::channel/host "localhost"
                                     ::channel/port (::channel/port srv)})]
@@ -71,6 +72,35 @@
       (Thread/sleep 200)
       (is (nil? (a/poll! (::channel/in-ch srv))))
       (is (nil? (a/poll! (::channel/in-ch client)))))))
+
+(deftest type-fidelity-test
+  (testing "Nippy channel preserves types EDN could not"
+    (let [srv    (channel/start-server! {::channel/port 0})
+          client (channel/connect! {::channel/host "localhost"
+                                    ::channel/port (::channel/port srv)})
+          msg    {:bytes (byte-array [1 2 3 4 5])
+                  :float-val (float 3.14)
+                  :instant (java.time.Instant/now)
+                  :uuid (random-uuid)
+                  :nested {:a [1 2] :b #{:x :y}}}]
+      (try
+        (a/>!! (::channel/out-ch client) msg)
+        (let [received (with-timeout (::channel/in-ch srv))]
+          (is (map? received) "Should receive a map")
+          (is (java.util.Arrays/equals ^bytes (:bytes msg) ^bytes (:bytes received))
+              "byte[] content preserved")
+          (is (instance? Float (:float-val received))
+              "Float type preserved (not coerced to Double)")
+          (is (= (:float-val msg) (:float-val received)))
+          (is (= (:instant msg) (:instant received))
+              "java.time.Instant preserved")
+          (is (= (:uuid msg) (:uuid received))
+              "UUID preserved")
+          (is (= (:nested msg) (:nested received))
+              "Nested collections preserved"))
+        (finally
+          ((::channel/close! client))
+          ((::channel/close! srv)))))))
 
 (deftest ordering-test
   (testing "Multiple messages preserve ordering"

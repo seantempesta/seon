@@ -1,4 +1,11 @@
+---
+type: prd
+status: draft
+tags: [prd, flow]
+---
 # Flow Visualizer: Research & Plan
+
+> **See also:** The unified flow architecture in [`docs/prds/unified-flow/design.md`](../unified-flow/design.md) describes how flow ping/datafy are used for observability across the full topology.
 
 ## 1. What Data the Flow API Exposes
 
@@ -15,6 +22,7 @@ Each status map contains (from `impl.clj` line 271-276):
  ::flow/count    42                 ; number of messages processed
  ::flow/ins      {:changes <chan>}  ; input channel map (datafied)
  ::flow/outs     {:updates <chan>}} ; output channel map (datafied)
+
 ```
 
 The `ins` and `outs` are `postwalk datafy`'d -- channels become their string representation, fns become symbols, vars become symbols.
@@ -35,6 +43,7 @@ Returns the flow config with `postwalk datafy` applied (from `impl.clj` line 87-
            :outs {[pid cid] -> chan-str}
            :error chan-str
            :report chan-str}}
+
 ```
 
 ### `report-chan` and `error-chan` -- Returned from `(flow/start g)`
@@ -42,7 +51,7 @@ Returns the flow config with `postwalk datafy` applied (from `impl.clj` line 87-
 - **report-chan**: Receives `::flow/report` outputs from any process transform, plus ping responses. Sliding buffer of 100.
 - **error-chan**: All exceptions from any thread inside a flow. Maps with at least `::flow/ex`, plus context keys like `::flow/pid`, `::flow/state`, `::flow/status`, `::flow/count`, `::flow/cid`, `::flow/msg`.
 
-### What we CAN extract from a running flow:
+### What we CAN extract from a running flow
 
 | Data | Source | Real-time? |
 |------|--------|-----------|
@@ -54,7 +63,7 @@ Returns the flow config with `postwalk datafy` applied (from `impl.clj` line 87-
 | Errors with full context | `error-chan` | Streaming |
 | Report messages | `report-chan` | Streaming |
 
-### What we CANNOT extract (need to collect ourselves):
+### What we CANNOT extract (need to collect ourselves)
 
 | Data | How to collect |
 |------|----------------|
@@ -73,6 +82,7 @@ The flow guide references [core.async.flow-monitor](https://github.com/clojure/c
 ### A. Throughput tracking (per-process)
 
 Wrap `ping` polling to compute deltas:
+
 ```clojure
 ;; Store previous counts, compute rate
 {:pid :aggregator
@@ -80,11 +90,13 @@ Wrap `ping` polling to compute deltas:
  :count-at-t1 142
  :interval-ms 1000
  :msgs-per-sec 42.0}
+
 ```
 
 ### B. Error accumulation
 
 Drain `error-chan` in a background thread, accumulate:
+
 ```clojure
 {:total-errors 3
  :recent-errors [{::flow/pid :broadcaster
@@ -92,14 +104,17 @@ Drain `error-chan` in a background thread, accumulate:
                   ::flow/count 99
                   :timestamp <instant>}]
  :error-rate-1m 0.05}   ;; errors per second over last minute
+
 ```
 
 ### C. Flow registry
 
 Seon may have multiple flows (SSE flow, future domain flows). Need a registry:
+
 ```clojure
 {:seon.web.sse/flow  {:flow <obj> :started-at <instant> :label "SSE Pipeline"}
  :seon.trading/flow  {:flow <obj> :started-at <instant> :label "Trading Signals"}}
+
 ```
 
 Currently `seon.web.sse.flow/flow-state` is a private atom. We need a central registry or a way to discover all flows.
@@ -136,11 +151,13 @@ Currently `seon.web.sse.flow/flow-state` is a private atom. We need a central re
             :recent []}}}
 
  :alerts []}
+
 ```
 
 ### `(user/flow-status :sse-pipeline)` -- Single flow detail
 
 Same as above but for one flow, with additional detail:
+
 - Recent errors with stack traces
 - Per-process `::flow/state` dump
 - Channel list from `datafy`
@@ -148,6 +165,7 @@ Same as above but for one flow, with additional detail:
 ### Implementation approach
 
 New namespace `seon.flow.status` that:
+
 1. Maintains a flow registry (atom of flow-id -> flow-obj + metadata)
 2. Polls `ping` on demand (not continuously -- only when `flow-status` called)
 3. Computes throughput from count deltas (keeps last-seen counts in atom)
@@ -181,6 +199,7 @@ SSE Pipeline                                   ● running
 -----------------------------------------------------------------
 Trading Signals                                ● stopped
   ...
+
 ```
 
 ### Components to build
@@ -198,6 +217,7 @@ Trading Signals                                ● stopped
 ```
 [poll timer] -> (flow/ping all-flows) -> atom -> watch -> refresh-all!
 [error-chan drain] -> atom -> watch -> refresh-all!
+
 ```
 
 The SSE handler (`POST /flows`) calls a render function that reads the status atom and produces the full page HTML. Polling interval: 1 second (configurable). The `render-handler` pattern (hash-based dedup) prevents sending unchanged HTML.
@@ -211,29 +231,34 @@ The SSE handler (`POST /flows`) calls a render function that reads the status at
 ## 5. Implementation Steps
 
 ### Step 1: Flow Registry (`seon.flow.registry`)
+
 - Central atom mapping flow-id -> {:flow, :started-at, :label, :config}
 - `register!`, `unregister!`, `list-flows`, `get-flow` functions
 - Modify `seon.web.sse.flow/start!` to register itself
 - **Test:** Register/unregister/list round-trip
 
 ### Step 2: Flow Status Collector (`seon.flow.status`)
+
 - `collect-status` -- pings all registered flows, returns structured map
 - Throughput calculation from count deltas (keeps previous counts in atom)
 - Error accumulator -- background go-loop draining error-chans
 - **Test:** Mock flow, verify status map shape with Malli schema
 
 ### Step 3: REPL Helper (`user/flow-status`)
+
 - Wire `seon.flow.status/collect-status` into user namespace
 - Pretty-print with aligned columns for REPL readability
 - **Test:** Call it, verify no exceptions, verify shape
 
 ### Step 4: Web UI -- Route + Shim Page
+
 - Add `/flows` GET/POST routes to `seon.web.routes`
 - Add "flows" to nav-bar in `seon.web.html`
 - Create `seon.web.flows` namespace with shim page + skeleton
 - **Test:** `curl localhost:8080/flows` returns HTML
 
 ### Step 5: Web UI -- SSE Handler + Render
+
 - Polling loop that calls `flow.status/collect-status` every 1s into atom
 - Watch on atom triggers `sse/refresh-all!`
 - Render function produces Hiccup from status data
@@ -241,6 +266,7 @@ The SSE handler (`POST /flows`) calls a render function that reads the status at
 - **Test:** Start SSE flow, verify page shows process states
 
 ### Step 6: Web UI -- Topology Visualization
+
 - Simple box+arrow layout using flex/grid CSS
 - Parse `:conns` from `datafy` to build adjacency
 - Processes as cards, connections as styled borders/arrows
@@ -248,6 +274,7 @@ The SSE handler (`POST /flows`) calls a render function that reads the status at
 - **Test:** Visual inspection in browser
 
 ### Step 7: Flow Controls (stretch)
+
 - Pause/resume individual processes via POST endpoints
 - Pause/resume entire flow
 - Wire buttons in UI with datastar click handlers

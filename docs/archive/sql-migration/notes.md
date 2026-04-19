@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive, database]
+---
+
 # Query Architecture - Working Notes
 
 Learnings, gotchas, and insights discovered during research and implementation.
@@ -42,6 +48,7 @@ Both support temporal options: `:current-time`, `:snapshot-time`
   ;; Implement protocols to intercept queries
   ;; Inject :current-time into all query opts
   )
+
 ```
 
 ### Option 2: Closure over query function
@@ -50,12 +57,14 @@ Both support temporal options: `:current-time`, `:snapshot-time`
 (defn make-query-fn [node as-of-time]
   (fn [q & [opts]]
     (node/query node q (assoc opts :current-time as-of-time))))
+
 ```
 
 ### Option 3: Dynamic binding (not recommended)
 
 ```clojure
 (def ^:dynamic *session-time* nil)
+
 ```
 
 ---
@@ -99,6 +108,7 @@ Both support temporal options: `:current-time`, `:snapshot-time`
 ;; Compare
 (bench "XTQL" 10 #(node/query db '(from :option-greeks [xt/id] (limit 100))))
 (bench "SQL" 10 #(node/sql-query db "SELECT _id FROM option_greeks LIMIT 100"))
+
 ```
 
 ---
@@ -118,6 +128,7 @@ src/main/clojure/xtdb/
 ├── operator/            # Query operators
 ├── temporal.clj         # Temporal logic
 └── indexer/             # Storage layer
+
 ```
 
 ---

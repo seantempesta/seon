@@ -671,6 +671,6 @@
   ;; => {...:arglists ([{::keys [prompt model timeout thinking-level system-instruction api-key]}])...}
 
   (meta #'seon.dev.context/record-edit!)
-  ;; => {...:arglists ([xtdb-node file-path ns-sym] [xtdb-node file-path ns-sym opts])...}
+  ;; => {...:arglists ([db file-path ns-sym] [db file-path ns-sym opts])...}
 
   nil)

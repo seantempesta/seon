@@ -1,8 +1,14 @@
+---
+type: prd
+status: completed
+tags: [prd]
+---
 # Stability Improvements - Health Checks, Error Boundaries, Automated Cleanup
 
 ## Problem Summary
 
 The system has stability concerns due to:
+
 1. **No real health checks** - `/api/health` just returns static "ok"
 2. **Error boundaries are incomplete** - Database failures propagate and crash the system
 3. **Orphaned resources** - Processes/ports/channels can leak on crashes
@@ -10,6 +16,7 @@ The system has stability concerns due to:
 ## Current State (from exploration)
 
 ### Registries Tracking Resources
+
 | Registry | Location | Tracks |
 |----------|----------|--------|
 | `session-registry` | session.clj:190 | Active agent sessions |
@@ -18,11 +25,13 @@ The system has stability concerns due to:
 | `agent-registry` | agent.clj:257 | Active agent handles |
 
 ### Existing Recovery
+
 - `recover-sessions!` marks XTDB sessions as 'stopped' on startup
 - `shutdown-all!` in agent.clj can terminate all agents
 - Process exit watcher unblocks reader on Claude crash
 
 ### Key Gaps
+
 1. **Health**: No XTDB, nREPL, or process liveness checks
 2. **Errors**: Database failures propagate; no retry logic
 3. **Cleanup**: Port registry not synced with actual ports; channels may leak
@@ -47,13 +56,16 @@ The system has stability concerns due to:
 
 ;; Aggregate health
 (defn system-health [system] ...)  ; Returns {:status :healthy/:degraded/:unhealthy, :checks {...}}
+
 ```
 
 **Enhance `/api/health` endpoint**:
+
 - Quick check: XTDB ping, agent count
 - Return proper HTTP status (200/503)
 
 **Add `/api/health/deep` endpoint**:
+
 - Full component-by-component breakdown
 - Resource counts and utilization
 - Recent error summary
@@ -85,11 +97,13 @@ The system has stability concerns due to:
 ### Phase 3: Automated Cleanup on Startup
 
 **Enhance `recover-sessions!`** to also:
+
 1. Kill orphaned Claude processes (by checking session-map.edn)
 2. Release leaked nREPL ports (scan port-registry vs actual listeners)
 3. Clear stale agent-registry entries
 
 **Add `cleanup-orphaned-resources!`** function:
+
 ```clojure
 (defn cleanup-orphaned-resources! [{::keys [node]}]
   ;; 1. Find processes that claim to be Seon agents
@@ -97,15 +111,18 @@ The system has stability concerns due to:
   ;; 3. Kill orphaned processes
   ;; 4. Release orphaned ports
   ;; 5. Return cleanup report)
+
 ```
 
 **Call during system startup** (system.clj):
+
 - After XTDB starts, before accepting connections
 - Log what was cleaned up
 
 ### Phase 4: Health Monitoring in Observatory
 
 **Add health indicator to Observatory UI**:
+
 - Status dot in header: green/yellow/red
 - Click to expand component details
 - Auto-refresh via SSE
@@ -130,29 +147,35 @@ The system has stability concerns due to:
 ## Verification
 
 ### Health Check Tests
+
 ```bash
 # Quick health (should return 200 with component status)
 curl http://localhost:8080/api/health
 
 # Deep health (full breakdown)
 curl http://localhost:8080/api/health/deep
+
 ```
 
 ### Error Boundary Tests
+
 ```clojure
 ;; Test: Message persistence failure doesn't crash agent
 ;; (Simulate by temporarily breaking XTDB connection)
 
 ;; Test: nREPL port exhaustion returns error, doesn't throw
+
 ```
 
 ### Cleanup Tests
+
 ```bash
 # 1. Start server, launch agent
 # 2. Kill server ungracefully (kill -9)
 # 3. Restart server
 # 4. Check logs for cleanup report
 # 5. Verify no orphaned ports: lsof -i :7889-7999
+
 ```
 
 ---
@@ -171,6 +194,7 @@ This order ensures we can see problems before we try to fix them.
 **Goal:** Make agents resilient to errors so they don't exit unexpectedly.
 
 **Background:** Investigation found agents getting `:interrupted` status (exiting without sending result message) when users did not interrupt them. Agent d35d died silently mid-task without the system detecting it:
+
 - Claude process terminated but `agent-status` remained `:running`
 - nREPL server orphaned (still listening on port)
 - No COMPLETE marker in log file
@@ -190,6 +214,7 @@ This order ensures we can see problems before we try to fix them.
   (agent-log/log-sdk-message! agent-logger msg)
   (catch Exception e
     (log/warn e "Failed to log SDK message" {:session-id id :msg-type msg-type})))
+
 ```
 
 #### 5.2 Fix Hook Matcher
@@ -204,6 +229,7 @@ This order ensures we can see problems before we try to fix them.
 
 // After - use anchors for exact match:
 "matcher": "^(Edit|Write)$"
+
 ```
 
 #### 5.3 Process Death Detection
@@ -211,6 +237,7 @@ This order ensures we can see problems before we try to fix them.
 **Problem:** Reader loop in `src/seon/ai/claude.clj:619-696` should detect process death via `readLine` returning `nil`, then set status to `:terminated` in the `finally` block. This isn't always happening.
 
 **Fixes needed:**
+
 1. Add process health check / watchdog
 2. Monitor `exit-ref` from process
 3. Timeout-based stuck detection
@@ -223,10 +250,12 @@ This order ensures we can see problems before we try to fix them.
 **File:** `bin/mcp-server`
 
 **Fix:** Add auto-interrupt after timeout:
+
 ```clojure
 ;; After timeout, also send interrupt
 (when (= (:ex result) "timeout")
   (nrepl-interrupt port nrepl-session-id))
+
 ```
 
 ### Phase 7: Hook Self-Edit Protection
@@ -234,6 +263,7 @@ This order ensures we can see problems before we try to fix them.
 **Problem:** When an agent edits `hook.clj` itself and breaks its syntax, the nREPL eval to call the repair code fails because the broken code can't compile. This creates a chicken-and-egg problem.
 
 **Potential fixes:**
+
 1. Move syntax repair to `bin/seon-hook` (Babashka) so it runs before Clojure load
 2. Special-case `hook.clj` edits with pre-edit syntax validation
 3. Keep a backup of last-known-good `hook.clj` and restore on compile failure

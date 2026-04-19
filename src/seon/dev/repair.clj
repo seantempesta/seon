@@ -53,12 +53,12 @@
 ;; Request/Response schemas for delimiter-error?
 (schema/register! ::delimiter-error-request
                   [:map
-                   [::content ::content]])
+                   [::content [:maybe ::content]]])
 
 ;; Request/Response schemas for repair
 (schema/register! ::repair-request
                   [:map
-                   [::content ::content]])
+                   [::content [:maybe ::content]]])
 
 (schema/register! ::repair-response
                   [:map

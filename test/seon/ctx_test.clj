@@ -1,7 +1,11 @@
 (ns seon.ctx-test
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [datalevin.core :as d]
-            [seon.ctx :as ctx]))
+            [seon.ctx :as ctx]
+            [seon.db :as db]
+            [seon.db.datalevin.conn :as dl-conn]
+            [seon.schema :as schema]
+            [seon.test-utils]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Test Fixtures
@@ -15,7 +19,7 @@
 
 (defn- setup-datalevin! []
   (let [dir (temp-dir)
-        conn (d/get-conn dir ctx/datalevin-schema)]
+        conn (d/create-conn dir ctx/datalevin-schema)]
     (reset! test-dir dir)
     (reset! test-conn conn)
     conn))
@@ -34,7 +38,10 @@
 (use-fixtures :each
   (fn [f]
     (setup-datalevin!)
-    (try (f) (finally (teardown-datalevin!)))))
+    (let [fake-mgr {::dl-conn/connections (atom {:test-ctx {::dl-conn/connection @test-conn}})}]
+      (binding [db/*direct-mode* true
+                db/*conn-manager* fake-mgr]
+        (try (f) (finally (teardown-datalevin!)))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Lifecycle Tests
@@ -78,8 +85,7 @@
 
 (deftest persistence-round-trip-test
   (testing "Create with persist?, update, then load! gets latest"
-    (let [conn @test-conn
-          a (ctx/create! {::ctx/conn conn
+    (let [a (ctx/create! {::ctx/db-name :test-ctx
                           ::ctx/instance-id "p001"
                           ::ctx/initial-value {:hello "world"}
                           ::ctx/persist? true
@@ -92,7 +98,7 @@
       (Thread/sleep 100)
 
       ;; Load from Datalevin
-      (let [loaded (ctx/load! {::ctx/conn conn
+      (let [loaded (ctx/load! {::ctx/db-name :test-ctx
                                ::ctx/instance-id "p001"})]
         (is (some? loaded) "loaded data is not nil")
         (is (= "value" (:key loaded)))
@@ -102,17 +108,16 @@
 
 (deftest manual-persist-test
   (testing "persist! manually saves current value"
-    (let [conn @test-conn
-          _a (ctx/create! {::ctx/conn conn
+    (let [_a (ctx/create! {::ctx/db-name :test-ctx
                            ::ctx/instance-id "p002"
                            ::ctx/initial-value {:manual true}
                            ::ctx/persist? false
                            ::ctx/sse-push? false})]
       ;; Manual persist
-      (ctx/persist! {::ctx/conn conn ::ctx/instance-id "p002"})
+      (ctx/persist! {::ctx/db-name :test-ctx ::ctx/instance-id "p002"})
 
       ;; Load
-      (let [loaded (ctx/load! {::ctx/conn conn ::ctx/instance-id "p002"})]
+      (let [loaded (ctx/load! {::ctx/db-name :test-ctx ::ctx/instance-id "p002"})]
         (is (= true (:manual loaded))))
 
       (ctx/destroy! {::ctx/instance-id "p002"}))))
@@ -123,8 +128,7 @@
 
 (deftest non-serializable-stripped-test
   (testing "Non-serializable values are stripped on persist"
-    (let [conn @test-conn
-          a (ctx/create! {::ctx/conn conn
+    (let [a (ctx/create! {::ctx/db-name :test-ctx
                           ::ctx/instance-id "ns01"
                           ::ctx/initial-value {:safe "data"}
                           ::ctx/persist? false
@@ -133,10 +137,10 @@
       (swap! a assoc :unsafe (atom :nope) :also-safe 42)
 
       ;; Manual persist
-      (ctx/persist! {::ctx/conn conn ::ctx/instance-id "ns01"})
+      (ctx/persist! {::ctx/db-name :test-ctx ::ctx/instance-id "ns01"})
 
       ;; Load - unsafe key should be gone
-      (let [loaded (ctx/load! {::ctx/conn conn ::ctx/instance-id "ns01"})]
+      (let [loaded (ctx/load! {::ctx/db-name :test-ctx ::ctx/instance-id "ns01"})]
         (is (= "data" (:safe loaded)))
         (is (= 42 (:also-safe loaded)))
         (is (nil? (:unsafe loaded)) "non-serializable value stripped"))
@@ -195,18 +199,18 @@
 
 (deftest load-without-instance-test
   (testing "load! works without an active instance"
-    (let [conn @test-conn]
+    (do
       ;; Create, persist, destroy
-      (ctx/create! {::ctx/conn conn
+      (ctx/create! {::ctx/db-name :test-ctx
                     ::ctx/instance-id "ld01"
                     ::ctx/initial-value {:persisted true}
                     ::ctx/persist? false
                     ::ctx/sse-push? false})
-      (ctx/persist! {::ctx/conn conn ::ctx/instance-id "ld01"})
+      (ctx/persist! {::ctx/db-name :test-ctx ::ctx/instance-id "ld01"})
       (ctx/destroy! {::ctx/instance-id "ld01"})
 
       ;; Load after destroy still works from Datalevin
-      (let [loaded (ctx/load! {::ctx/conn conn ::ctx/instance-id "ld01"})]
+      (let [loaded (ctx/load! {::ctx/db-name :test-ctx ::ctx/instance-id "ld01"})]
         (is (= true (:persisted loaded)))))))
 
 ;;; ---------------------------------------------------------------------------
@@ -214,15 +218,15 @@
 ;;; ---------------------------------------------------------------------------
 
 (deftest generate-id-test
-  (testing "generate-id produces 4-char hex strings"
+  (testing "generate-id produces 6-char hex strings"
     (let [id (ctx/generate-id)]
       (is (string? id))
-      (is (= 4 (count id)))
-      (is (re-matches #"[a-f0-9]{4}" id))))
+      (is (= 6 (count id)))
+      (is (re-matches #"[a-zA-Z0-9]{6}" id))))
 
   (testing "generate-id produces unique values"
     (let [ids (set (repeatedly 100 ctx/generate-id))]
-      (is (> (count ids) 90) "should produce mostly unique IDs"))))
+      (is (= 100 (count ids)) "all IDs should be unique (collision checked)"))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Client Tracking
@@ -289,7 +293,7 @@
 
     (let [my-fn (fn [_] [:div "hello"])]
       (is (true? (ctx/set-render-fn! {::ctx/instance-id "r001" ::ctx/render-fn my-fn})))
-      (is (= my-fn (:render-fn (ctx/get-entry {::ctx/instance-id "r001"})))))
+      (is (= my-fn (::ctx/render-fn (ctx/get-entry {::ctx/instance-id "r001"})))))
 
     (is (false? (ctx/set-render-fn! {::ctx/instance-id "nope" ::ctx/render-fn identity})))
 
@@ -321,23 +325,200 @@
                   ::ctx/sse-push? false
                   ::ctx/track-clients? true})
 
-    (let [health-instances (ctx/instances-for-namespace 'seon.health)
+    (let [health-instances (ctx/instances-for-namespace {::ctx/namespace 'seon.health})
           ids (set (map ::ctx/instance-id health-instances))]
       (is (= 2 (count health-instances)))
       (is (contains? ids "n001"))
       (is (contains? ids "n002"))
       (is (not (contains? ids "n003"))))
 
-    (is (= 1 (count (ctx/instances-for-namespace 'seon.trading))))
-    (is (= 0 (count (ctx/instances-for-namespace 'seon.nonexistent))))
+    (is (= 1 (count (ctx/instances-for-namespace {::ctx/namespace 'seon.trading}))))
+    (is (= 0 (count (ctx/instances-for-namespace {::ctx/namespace 'seon.nonexistent}))))
 
     ;; Test namespace client aggregation
     (ctx/register-client! {::ctx/instance-id "n001" ::ctx/channel :ch1})
     (ctx/register-client! {::ctx/instance-id "n002" ::ctx/channel :ch2})
-    (is (= #{:ch1 :ch2} (ctx/clients-for-namespace 'seon.health)))
-    (is (= 2 (ctx/client-count-for-namespace 'seon.health)))
-    (is (= 0 (ctx/client-count-for-namespace 'seon.trading)))
+    (is (= #{:ch1 :ch2} (ctx/clients-for-namespace {::ctx/namespace 'seon.health})))
+    (is (= 2 (ctx/client-count-for-namespace {::ctx/namespace 'seon.health})))
+    (is (= 0 (ctx/client-count-for-namespace {::ctx/namespace 'seon.trading})))
 
     (ctx/destroy! {::ctx/instance-id "n001"})
     (ctx/destroy! {::ctx/instance-id "n002"})
     (ctx/destroy! {::ctx/instance-id "n003"})))
+
+;;; ---------------------------------------------------------------------------
+;;; Validation Tests
+;;; ---------------------------------------------------------------------------
+
+(deftest validate-rejects-non-namespaced-keys-test
+  (testing "Validation rejects non-namespaced keys"
+    (schema/register! :test.ctx/value [:int {:min 0}])
+    (let [a (ctx/create! {::ctx/instance-id "v001"
+                          ::ctx/persist? false
+                          ::ctx/sse-push? false
+                          ::ctx/validate? true})]
+      ;; Valid namespaced key works
+      (swap! a assoc :test.ctx/value 42)
+      (is (= 42 (:test.ctx/value @a)))
+
+      ;; Non-namespaced key throws
+      (is (thrown-with-msg? Exception #"must be fully namespaced"
+                           (swap! a assoc :bad 1)))
+
+      (ctx/destroy! {::ctx/instance-id "v001"}))))
+
+(deftest validate-rejects-invalid-values-test
+  (testing "Validation rejects values that fail schema"
+    (schema/register! :test.ctx/count [:int {:min 0}])
+    (let [a (ctx/create! {::ctx/instance-id "v002"
+                          ::ctx/persist? false
+                          ::ctx/sse-push? false
+                          ::ctx/validate? true})]
+      (swap! a assoc :test.ctx/count 5)
+      (is (= 5 (:test.ctx/count @a)))
+
+      ;; String where int expected
+      (is (thrown-with-msg? Exception #"failed validation"
+                           (swap! a assoc :test.ctx/count "nope")))
+
+      (ctx/destroy! {::ctx/instance-id "v002"}))))
+
+(deftest validate-rejects-unregistered-keys-test
+  (testing "Validation rejects keys without registered schemas"
+    (let [a (ctx/create! {::ctx/instance-id "v003"
+                          ::ctx/persist? false
+                          ::ctx/sse-push? false
+                          ::ctx/validate? true})]
+      (is (thrown-with-msg? Exception #"No spec registered"
+                           (swap! a assoc :test.ctx/unknown-key-xyz 1)))
+
+      (ctx/destroy! {::ctx/instance-id "v003"}))))
+
+;;; ---------------------------------------------------------------------------
+;;; Reserved Keys Tests
+;;; ---------------------------------------------------------------------------
+
+(deftest reserved-keys-injected-test
+  (testing "Reserved keys are injected into initial value"
+    (let [a (ctx/create! {::ctx/instance-id "rk01"
+                          ::ctx/persist? false
+                          ::ctx/sse-push? false
+                          ::ctx/validate? true
+                          ::ctx/reserved-keys {:seon.agent/namespace 'test.ns}})]
+      (is (= 'test.ns (:seon.agent/namespace @a)))
+      (ctx/destroy! {::ctx/instance-id "rk01"}))))
+
+(deftest reserved-keys-immutable-test
+  (testing "Reserved keys cannot be modified"
+    (let [a (ctx/create! {::ctx/instance-id "rk02"
+                          ::ctx/persist? false
+                          ::ctx/sse-push? false
+                          ::ctx/validate? true
+                          ::ctx/reserved-keys {:seon.agent/namespace 'test.ns}})]
+      (is (thrown-with-msg? Exception #"Cannot modify reserved key"
+                           (swap! a assoc :seon.agent/namespace 'other.ns)))
+      (ctx/destroy! {::ctx/instance-id "rk02"}))))
+
+(deftest reserved-keys-cannot-be-removed-test
+  (testing "Reserved keys cannot be removed"
+    (let [a (ctx/create! {::ctx/instance-id "rk03"
+                          ::ctx/persist? false
+                          ::ctx/sse-push? false
+                          ::ctx/validate? true
+                          ::ctx/reserved-keys {:seon.agent/namespace 'test.ns}})]
+      (is (thrown-with-msg? Exception #"Cannot remove reserved key"
+                           (swap! a dissoc :seon.agent/namespace)))
+      (ctx/destroy! {::ctx/instance-id "rk03"}))))
+
+(deftest reserved-keys-no-new-additions-test
+  (testing "Cannot add new reserved-namespace keys"
+    (let [a (ctx/create! {::ctx/instance-id "rk04"
+                          ::ctx/persist? false
+                          ::ctx/sse-push? false
+                          ::ctx/validate? true
+                          ::ctx/reserved-keys {:seon.agent/namespace 'test.ns}})]
+      (is (thrown-with-msg? Exception #"Cannot add reserved key"
+                           (swap! a assoc :seon.agent/sneaky "haha")))
+      (ctx/destroy! {::ctx/instance-id "rk04"}))))
+
+;;; ---------------------------------------------------------------------------
+;;; Ctx-Schema Tests
+;;; ---------------------------------------------------------------------------
+
+(deftest ctx-schema-valid-swap-test
+  (testing "ctx-schema allows valid state"
+    (schema/register! :test.schema/name [:string])
+    (schema/register! :test.schema/age [:int {:min 0}])
+    (let [test-schema [:map
+                       [:test.schema/name :test.schema/name]
+                       [:test.schema/age :test.schema/age]]
+          a (ctx/create! {::ctx/instance-id "cs01"
+                          ::ctx/persist? false
+                          ::ctx/sse-push? false
+                          ::ctx/ctx-schema test-schema
+                          ::ctx/initial-value {:test.schema/name "Alice"
+                                               :test.schema/age 30}})]
+      (is (= "Alice" (:test.schema/name @a)))
+      ;; Valid swap
+      (swap! a assoc :test.schema/name "Bob")
+      (is (= "Bob" (:test.schema/name @a)))
+      (ctx/destroy! {::ctx/instance-id "cs01"}))))
+
+(deftest ctx-schema-rejects-invalid-swap-test
+  (testing "ctx-schema rejects invalid state with Malli explanation"
+    (schema/register! :test.schema2/count [:int {:min 0}])
+    (let [test-schema [:map [:test.schema2/count :test.schema2/count]]
+          a (ctx/create! {::ctx/instance-id "cs02"
+                          ::ctx/persist? false
+                          ::ctx/sse-push? false
+                          ::ctx/ctx-schema test-schema
+                          ::ctx/initial-value {:test.schema2/count 5}})]
+      ;; Invalid: string where int expected
+      (let [ex (try (swap! a assoc :test.schema2/count "nope") nil
+                    (catch clojure.lang.ExceptionInfo e e)
+                    (catch IllegalStateException e
+                      (let [cause (.getCause e)]
+                        (when (instance? clojure.lang.ExceptionInfo cause) cause))))]
+        (is (some? ex) "should throw on invalid swap")
+        (when ex
+          (is (= "ctx state does not conform to ::ctx-schema" (.getMessage ex)))
+          (is (contains? (ex-data ex) :errors))
+          (is (contains? (ex-data ex) :spec))))
+      ;; State unchanged
+      (is (= 5 (:test.schema2/count @a)))
+      (ctx/destroy! {::ctx/instance-id "cs02"}))))
+
+(deftest ctx-schema-rejects-invalid-initial-value-test
+  (testing "ctx-schema rejects invalid initial value at creation"
+    (let [test-schema [:map [:test.schema3/x [:int]]]]
+      (is (thrown? Exception
+                   (ctx/create! {::ctx/instance-id "cs03"
+                                 ::ctx/persist? false
+                                 ::ctx/sse-push? false
+                                 ::ctx/ctx-schema test-schema
+                                 ::ctx/initial-value {:test.schema3/x "bad"}}))))))
+
+(deftest ctx-schema-with-registry-keyword-test
+  (testing "ctx-schema works with a registry keyword"
+    (schema/register! :test.schema4/items [:vector [:string]])
+    (schema/register! :test.schema4/*ctx* [:map [:test.schema4/items :test.schema4/items]])
+    (let [a (ctx/create! {::ctx/instance-id "cs04"
+                          ::ctx/persist? false
+                          ::ctx/sse-push? false
+                          ::ctx/ctx-schema :test.schema4/*ctx*
+                          ::ctx/initial-value {:test.schema4/items ["a" "b"]}})]
+      (swap! a assoc :test.schema4/items ["a" "b" "c"])
+      (is (= ["a" "b" "c"] (:test.schema4/items @a)))
+      ;; Invalid
+      (is (thrown? Exception (swap! a assoc :test.schema4/items "not-a-vector")))
+      (ctx/destroy! {::ctx/instance-id "cs04"}))))
+
+(deftest no-validation-by-default-test
+  (testing "Without validate?, any keys are allowed"
+    (let [a (ctx/create! {::ctx/instance-id "nv01"
+                          ::ctx/persist? false
+                          ::ctx/sse-push? false})]
+      ;; Non-namespaced key works fine without validation
+      (swap! a assoc :anything "goes")
+      (is (= "goes" (:anything @a)))
+      (ctx/destroy! {::ctx/instance-id "nv01"}))))

@@ -61,11 +61,11 @@
 ;; Request schemas
 (schema/register! ::clojure-file-request
                   [:map
-                   [::file-path {:optional true} [:maybe ::file-path]]])
+                   [::file-path {:optional true} [:maybe :string]]])
 
 (schema/register! ::file->namespace-request
                   [:map
-                   [::file-path {:optional true} [:maybe ::file-path]]])
+                   [::file-path {:optional true} [:maybe :string]]])
 
 (schema/register! ::file->test-namespace-request
                   [:map
@@ -94,6 +94,33 @@
 ;;; ---------------------------------------------------------------------------
 ;;; File Classification
 ;;; ---------------------------------------------------------------------------
+
+(schema/register! ::markdown-file-request
+                  [:map
+                   [::file-path {:optional true} [:maybe :string]]])
+
+(defn markdown-file?
+  "Check if a file path represents a Markdown file under docs/.
+
+   Request keys:
+     ::file-path - Path to check (string, optional/nullable)
+
+   Returns:
+     Boolean - true if file is a .md file under docs/, false otherwise
+
+   Example:
+     (markdown-file? {::file-path \"docs/seon/components/database.md\"})
+     ;; => true
+     (markdown-file? {::file-path \"README.md\"})
+     ;; => false"
+  {:malli/schema [:=> [:cat ::markdown-file-request] :boolean]}
+  [{::keys [file-path]}]
+  (if (nil? file-path)
+    false
+    (let [lower-path (str/lower-case file-path)]
+      (and (str/ends-with? lower-path ".md")
+           (or (str/starts-with? lower-path "docs/")
+               (str/includes? lower-path "/docs/"))))))
 
 (def ^:private clojure-extensions
   "Set of file extensions considered Clojure files."

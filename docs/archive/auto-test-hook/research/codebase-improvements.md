@@ -1,3 +1,9 @@
+---
+type: research
+status: completed
+tags: [research, archive]
+---
+
 # Codebase Improvements Analysis
 
 **Date**: 2025-12-05 (Updated)
@@ -89,6 +95,7 @@ The codebase is in **good health overall** with:
 1. local-date->eod-instant [date]     ; Line 8  - Convert to 5pm ET
 2. instant->local-date [inst]         ; Line 25 - Convert to LocalDate
 3. weekend? [date]                    ; Line 38 - Check Sat/Sun
+
 ```
 
 **Expected test failure scenarios:**
@@ -146,6 +153,7 @@ query [node query-form opts]              ; Line 82 - Routes to xtql/sql
 entity [node table id opts]               ; Line 120
 entity-history [node table id opts]       ; Line 140
 execute-tx! [node tx-ops]                 ; Line 171
+
 ```
 
 **Expected test failure scenarios:**
@@ -205,6 +213,7 @@ execute-tx! [node tx-ops]                 ; Line 171
                                         (< greeks/delta 0.6))))
                             {})]
     (map :quote/iv results)))
+
 ```
 
 **Why this is excellent for testing the hook:**
@@ -273,6 +282,7 @@ execute-tx! [node tx-ops]                 ; Line 171
 - Current code looks correct but edge cases untested
 
 **Suggested improvements:**
+
 ```clojure
 ;; Edge case: empty sequence
 (is (nil? (calculate-percentile [] 50)))
@@ -288,6 +298,7 @@ execute-tx! [node tx-ops]                 ; Line 171
         (for [i (range (dec (count sorted)))]
           (<= (calculate-percentile-rank values (nth sorted i))
               (calculate-percentile-rank values (nth sorted (inc i)))))))))
+
 ```
 
 ---
@@ -309,6 +320,7 @@ execute-tx! [node tx-ops]                 ; Line 171
 - Auto-test hook ensures no regressions in security
 
 **Suggested tests:**
+
 ```clojure
 (testing "Allowed symbols pass validation"
   (is (validate-expr '(if (< (iv-rank db "AAPL") 0.1) :buy :hold))))
@@ -320,6 +332,7 @@ execute-tx! [node tx-ops]                 ; Line 171
 (testing "Nested expressions are validated recursively"
   (is (thrown? ExceptionInfo
         (validate-expr '(if true (eval "bad") :safe)))))
+
 ```
 
 ---
@@ -346,6 +359,7 @@ execute-tx! [node tx-ops]                 ; Line 171
 - Auto-test hook tracks progress on incomplete features
 
 **Suggested approach:**
+
 ```clojure
 ;; Write tests FIRST (TDD style)
 (deftest vanna-calculates-days-to-expiry
@@ -361,6 +375,7 @@ execute-tx! [node tx-ops]                 ; Line 171
           (is (pos? result))
           (is (not= result (calculate-vanna-with-hardcoded-30-days opt)))
           "Should use actual days-to-expiry, not hardcoded 30")))))
+
 ```
 
 ---
@@ -376,14 +391,17 @@ execute-tx! [node tx-ops]                 ; Line 171
 **Priority**: 🟢 **LOW** (working code, but duplication)
 
 **Pattern:**
+
 ```clojure
 (catch Exception e
   {:status 500
    :headers {"Content-Type" "application/json"}
    :body (json/write-value-as-string {:error (.getMessage e)})})
+
 ```
 
 **Refactoring opportunity:**
+
 ```clojure
 (defn- error-response
   ([status message]
@@ -394,6 +412,7 @@ execute-tx! [node tx-ops]                 ; Line 171
 
 ;; Then replace all catch blocks:
 (catch Exception e (error-response e))
+
 ```
 
 **Why this is a good test case:**
@@ -411,6 +430,7 @@ execute-tx! [node tx-ops]                 ; Line 171
 **Priority**: 🟡 **MEDIUM**
 
 **Current state:**
+
 ```clojure
 (def ^:private circuit-state
   (atom {:healthy true
@@ -422,6 +442,7 @@ execute-tx! [node tx-ops]                 ; Line 171
 (defn reset-circuit! [] ...)
 (defn record-failure! [] ...)
 (defn circuit-status [] ...)
+
 ```
 
 **Refactoring opportunity:**
@@ -447,6 +468,7 @@ execute-tx! [node tx-ops]                 ; Line 171
 (def ^:private max-delay-ms 10000)
 (def ^:private rate-limit-backoff-ms 30000)
 (def ^:private cooldown-ms 60000)  ; Line 404
+
 ```
 
 **Refactor**: Extract to config map
@@ -480,6 +502,7 @@ execute-tx! [node tx-ops]                 ; Line 171
 
 ```clojure
 (re-matches #"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}) \[([^\]]+)\] (\w+)\s+([^\s]+) - (.*)" line)
+
 ```
 
 **Issue**: Complex regex with no tests (actually there ARE tests in `log_parsing_test.clj`)
@@ -497,6 +520,7 @@ execute-tx! [node tx-ops]                 ; Line 171
 ```clojure
 (defn delete-option-quote [id]
   [:delete-docs :option-quotes id])
+
 ```
 
 **Evidence**: Not called anywhere in codebase (need to verify with grep)
@@ -519,6 +543,7 @@ execute-tx! [node tx-ops]                 ; Line 171
 | **Dead Code** | 1-2 candidates | Very clean |
 
 ### Priority Summary:
+
 - 🔥 **P0 (High)**: 3 items (date_utils, db/node, db/queries TODO)
 - 🟡 **P1 (Medium)**: 5 items (dsl tests, ingestion-state, thetadata refactor)
 - 🟢 **P2 (Low)**: 7 items (config, jobs, sse, brotli, handlers refactor)

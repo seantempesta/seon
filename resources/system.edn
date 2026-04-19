@@ -1,66 +1,48 @@
-{;; XTDB v2 Node (Single node with multi-database support)
- ;; Primary database: orchestrator data
- ;; Attached databases: namespace-isolated data (primer, dev)
- :seon/xtdb-node
- {:storage #profile {:dev   {:type :local
-                             :path "data/xtdb"}
-                     :test  :in-memory
-                     :prod  {:type :local
-                             :path #or [#env XTDB_DATA_PATH "data/xtdb"]}}
-  :memory-cache #profile {:dev {}
-                          :test {}
-                          :prod {:max-size-ratio 0.5}}
-  :disk-cache nil
-  :compactor #profile {:dev {:threads 2}
-                       :test {:threads 1}
-                       :prod {:threads #or [#env XTDB_COMPACTOR_THREADS 4]}}}
-
- ;; Namespace Databases
- ;; Attaches secondary databases for domain isolation.
- ;; Each namespace gets its own isolated database within the single XTDB node.
- ;; Storage paths: data/namespaces/{namespace}/log and storage
- :seon/namespace-dbs
- {:node #ig/ref :seon/xtdb-node
-  :namespaces [seon.dev]}
-
- ;; Datalevin Server (Phase 0 of migration from XTDB)
- ;; Runs in-process, agents connect as clients to namespace-isolated databases.
+{;; Datalevin Server (primary and only database)
+ ;; Runs as external JVM process (bin/run-datalevin) — survives Seon restarts.
  ;; Each namespace gets its own database under root/{namespace}/
  ;; Default credentials: datalevin:datalevin (change in production!)
- :seon/datalevin-server
+ :seon.db.datalevin/server
  {:port #or [#env DATALEVIN_PORT 8898]
   :root #profile {:dev "data/datalevin"
                   :test "tmp/datalevin-test"
                   :prod #or [#env DATALEVIN_ROOT "data/datalevin"]}
   :opts {:idle-timeout 300000}}
 
- ;; Datalevin Connection Manager (Phase 0.2)
+ ;; Datalevin Connection Manager
  ;; Manages client connections to the Datalevin server with:
  ;; - Connection caching per namespace
  ;; - Lazy database creation on first connection
- ;; - TTL-based cleanup of idle connections
- :seon/connection-manager
- {:server #ig/ref :seon/datalevin-server
-  :ttl-ms #or [#env DATALEVIN_CONN_TTL_MS 300000]           ; 5 minutes
-  :cleanup-interval-ms #or [#env DATALEVIN_CLEANUP_MS 60000]}
+ :seon.db.datalevin/connections
+ {:server #ig/ref :seon.db.datalevin/server}
 
- ;; Python Bridge (libpython-clj) - DISABLED
- ;; NOTE: Python code moved to src/seon/_python_disabled
- ;; To re-enable, restore the python directory and uncomment this section
- ;; :seon/python-bridge
- ;; {:conda-env #or [#env SEON_CONDA_ENV "seon"]
- ;;  :auto-initialize? #profile {:dev false
- ;;                              :test false
- ;;                              :prod false}}
+ ;; Runtime Database (Code Graph + Runtime Registry)
+ ;; Owns the seon.runtime Datalevin connection used by:
+ ;; - Code scanner (code graph entities)
+ ;; - Runtime registry (namespace instance tracking)
+ ;; - Render system (function resolution)
+ ;; Initializes runtime registry and marks crashed instances on startup.
+ ;; :infrastructure ref is ordering-only — ensures the flow is running before
+ ;; runtime-db init, because register! -> persist-instance! -> db/transact!
+ ;; routes through the infrastructure flow.
+ :seon/runtime-db
+ {:connection-manager #ig/ref :seon.db.datalevin/connections
+  :infrastructure #ig/ref :seon.flow/infrastructure}
 
  ;; Malli Schema Registry
  ;; Loads all domain schemas on startup
- :seon/schema-registry {}
+ :seon.schema/registry {}
+
+ ;; Schema Consistency Check
+ ;; Validates all persisted entity schemas at boot.
+ ;; Catches :any, :some, [:maybe X], mixed enums before they reach Datalevin.
+ :seon.db.schema/consistency-check
+ {:registry #ig/ref :seon.schema/registry}
 
  ;; nREPL Server - managed by Integrant
  ;; Dev: Enabled - connect to inspect/modify the running system
  ;; Test/Prod: Disabled (headless)
- :seon/nrepl-server
+ :seon.dev/nrepl
  {:enabled? #profile {:dev true     ; nREPL for REPL-driven development
                       :test false   ; Tests don't need nREPL
                       :prod false}  ; Production is headless
@@ -70,51 +52,67 @@
  ;; HTTP Server for Web UI
  :seon.web.server/http-server
  {:port #or [#env HTTP_PORT 8080]
-  :bind "0.0.0.0"
-  :node #ig/ref :seon/xtdb-node}
+  :bind "0.0.0.0"}
 
  ;; Tailwind CSS Watcher
  ;; Dev: Enabled - auto-rebuild CSS on file changes
  ;; Prod: Disabled - CSS pre-built during deployment
- :seon.web/tailwind-watcher
+ :seon.web/tailwind
  {:enabled? #profile {:dev true
                       :test false
                       :prod false}
   :input "resources/public/css/input.css"
   :output "resources/public/css/output.css"}
 
+ ;; Infrastructure Flow (writer + reply-router + sinks)
+ ;; Starts at boot. Handles all DB writes via connection manager.
+ ;; Namespace flows are created lazily later (Phase 2+).
+ :seon.flow/infrastructure
+ {:connection-manager #ig/ref :seon.db.datalevin/connections}
+
  ;; Agent JVM Pool
  ;; Pre-warmed JVM pool for instant agent startup.
  ;; Each agent gets an isolated JVM with its own nREPL, Malli registry, and
  ;; Datalevin client connection. Depends on Datalevin server for agent DB access.
- :seon/agent-pool
+ :seon.flow/pool
  {:size #or [#env AGENT_POOL_SIZE 3]
   :base-port #or [#env AGENT_BASE_PORT 7900]
-  :datalevin-server #ig/ref :seon/datalevin-server
+  :datalevin-server #ig/ref :seon.db.datalevin/server
   :enabled? #profile {:dev true
                       :test false   ; Unit tests mock pool structure
                       :prod true}}
 
- ;; Primer Ctx System
- ;; Initializes primer session management with lazy Datalevin connections.
- :seon/primer-ctx
- {:connection-manager #ig/ref :seon/connection-manager}
-
  ;; Orchestrator Sessions
  ;; Initializes orchestrator session storage with lazy Datalevin connections.
- :seon/orchestrator-sessions
- {:connection-manager #ig/ref :seon/connection-manager}
+ :seon.orchestrator/sessions
+ {:connection-manager #ig/ref :seon.db.datalevin/connections
+  :pool #ig/ref :seon.flow/pool}
 
  ;; Code Scanner (Knowledge Graph)
  ;; Analyzes codebase at startup and populates Datalevin with the knowledge graph.
- ;; Depends on connection-manager for Datalevin access.
- :seon/code-scanner
- {:connection-manager #ig/ref :seon/connection-manager
+ ;; Receives graph connection from :seon/runtime-db component.
+ :seon.graph/scanner
+ {:graph-db #ig/ref :seon/runtime-db
   :paths ["src/"]
   :enabled? #profile {:dev true
                       :test false
                       :prod true}}
 
+ ;; Caddy Reverse Proxy (HTTP/2 + TLS)
+ ;; Dev: Enabled - serves https://localhost:3030 -> http://localhost:8080
+ ;; Depends on HTTP server so Caddy starts after upstream is ready.
+ :seon.web/caddy
+ {:enabled? #profile {:dev true
+                      :test false
+                      :prod false}
+  :config-file "Caddyfile"
+  :http-server #ig/ref :seon.web.server/http-server}
+
+ ;; Malli Function Instrumentation
+ ;; Instruments all functions with :malli/schema for runtime validation.
+ ;; Agent-friendly error messages on schema violations.
+ :seon.dev/instrumentation {}
+
  ;; Claude Code SDK Configuration
- :seon/claude-code
+ :seon.ai.claude/sdk
  {:cli-path #or [#env CLAUDE_CLI_PATH "/Users/sean/.local/bin/claude"]}}

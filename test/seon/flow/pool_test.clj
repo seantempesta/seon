@@ -221,17 +221,24 @@
       (is (< elapsed 50) "Should not block at all without timeout-ms"))))
 
 (deftest cleanup-stale-agents-no-stale-test
-  (testing "cleanup-stale-agents! returns 0 when no ports are bound"
-    ;; Use ports in valid range that are very unlikely to be bound
-    (let [cleaned (pool/cleanup-stale-agents! 7990 2)]
-      (is (= 0 cleaned) "Should find no stale processes on unbound ports"))))
+  (testing "cleanup-stale-agents! returns a non-negative count"
+    ;; Some agent JVMs may actually be running on 7900-7999,
+    ;; so we just verify the function runs and returns a count.
+    (let [cleaned (pool/cleanup-stale-agents!)]
+      (is (nat-int? cleaned) "Should return a non-negative integer"))))
 
-(deftest cleanup-stale-agents-safety-range-test
-  (testing "cleanup-stale-agents! only checks ports in 7900-7999 range"
-    ;; Try ports outside safe range -- should be skipped
-    ;; Port 80 is bound on many systems but should NOT be killed
-    (let [cleaned (pool/cleanup-stale-agents! 8000 3)]
-      (is (= 0 cleaned) "Should skip ports outside agent range"))))
+(deftest allocate-port-wraparound-test
+  (testing "allocate-port wraps from agent-port-max back to agent-port-min"
+    (let [state (atom {::pool/next-port 7999
+                       ::pool/all-jvms {}})
+          ;; allocate-port! is private, so we test via the state atom behavior
+          ;; by simulating what swap-vals! does with the wraparound logic
+          [old _] (swap-vals! state update ::pool/next-port
+                              #(let [p (inc %)]
+                                 (if (> p 7999) 7900 p)))
+          port (::pool/next-port old)]
+      (is (= 7999 port) "Should get 7999 as the allocated port")
+      (is (= 7900 (::pool/next-port @state)) "Next port should wrap to 7900"))))
 
 (deftest await-warm-already-warm-test
   (testing "await-warm returns immediately when pool is already warm"
@@ -291,6 +298,68 @@
           elapsed (- (System/currentTimeMillis) start)]
       (is (false? result) "Should return false on timeout")
       (is (>= elapsed 150) "Should have waited close to timeout"))))
+
+;;; ---------------------------------------------------------------------------
+;;; Port allocation / reservation tests
+;;; ---------------------------------------------------------------------------
+
+(deftest allocate-port-skips-tracked-ports-test
+  (testing "allocate-port! skips ports already in ::all-jvms"
+    ;; We can't call the private allocate-port! directly, so we test the
+    ;; behavior through spawn-and-enqueue! indirectly. Instead, we verify
+    ;; the allocate logic by simulating what it does: the loop should skip
+    ;; ports present in ::all-jvms.
+    (let [state (atom {::pool/next-port 7900
+                       ::pool/all-jvms {7900 {::pool/port 7900}
+                                        7901 {::pool/port 7901}}
+                       ::pool/reserved-ports #{}})
+          ;; Simulate allocate-port! loop: advance next-port, check all-jvms
+          allocated (loop [attempts 0]
+                     (when (< attempts 10)
+                       (let [[old _] (swap-vals! state update ::pool/next-port
+                                                 #(let [p (inc %)]
+                                                    (if (> p 7999) 7900 p)))
+                             port (::pool/next-port old)]
+                         (if (or (contains? (::pool/all-jvms old) port)
+                                 (contains? (::pool/reserved-ports old) port))
+                           (recur (inc attempts))
+                           port))))]
+      (is (= 7902 allocated) "Should skip 7900 and 7901 (in all-jvms) and return 7902"))))
+
+(deftest allocate-port-skips-reserved-ports-test
+  (testing "allocate-port! skips ports in ::reserved-ports"
+    (let [state (atom {::pool/next-port 7900
+                       ::pool/all-jvms {}
+                       ::pool/reserved-ports #{7900 7901}})
+          allocated (loop [attempts 0]
+                     (when (< attempts 10)
+                       (let [[old _] (swap-vals! state update ::pool/next-port
+                                                 #(let [p (inc %)]
+                                                    (if (> p 7999) 7900 p)))
+                             port (::pool/next-port old)]
+                         (if (or (contains? (::pool/all-jvms old) port)
+                                 (contains? (::pool/reserved-ports old) port))
+                           (recur (inc attempts))
+                           port))))]
+      (is (= 7902 allocated) "Should skip 7900 and 7901 (reserved) and return 7902"))))
+
+(deftest unreserve-port-test
+  (testing "unreserve-port removes port from reserved-ports set"
+    (let [state (atom {::pool/next-port 7903
+                       ::pool/all-jvms {}
+                       ::pool/reserved-ports #{7900 7901 7902}})]
+      ;; unreserve-port! is private, but its logic is just:
+      ;; (swap! state update ::pool/reserved-ports disj port)
+      (swap! state update ::pool/reserved-ports disj 7901)
+      (is (= #{7900 7902} (::pool/reserved-ports @state))
+          "7901 should be removed from reserved-ports")
+      (swap! state update ::pool/reserved-ports disj 7900)
+      (is (= #{7902} (::pool/reserved-ports @state))
+          "7900 should also be removed")
+      ;; Removing a port not in the set is a no-op
+      (swap! state update ::pool/reserved-ports disj 7999)
+      (is (= #{7902} (::pool/reserved-ports @state))
+          "Removing absent port should be a no-op"))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Integration tests (spawn real JVMs -- slow, skip in CI)

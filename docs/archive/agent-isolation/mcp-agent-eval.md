@@ -1,3 +1,9 @@
+---
+type: prd
+status: completed
+tags: [prd, archive, agent]
+---
+
 # MCP Agent Tools
 
 **Status**: Complete
@@ -17,6 +23,7 @@
 cat << 'END' | ./bin/agent-eval abc123
 (swap! *ctx* assoc :key 1)
 END
+
 ```
 
 The root cause: Claude Code's Bash tool always passes commands through a shell, which interprets special characters (`!`, `$`, backticks) before our script sees them.
@@ -37,6 +44,7 @@ Claude: agent_eval(session_id="abc123", code="(swap! *ctx* assoc :key 1)")
     Evaluates on agent's nREPL
            |
     Returns result to Claude
+
 ```
 
 ## Implementation
@@ -69,6 +77,7 @@ agent nREPL (port 7889, 7890, etc.)
        |
        v
 Result returned to Claude
+
 ```
 
 ### Key Files
@@ -133,6 +142,7 @@ The MCP server provides four tools:
   "description": "List all active agent sessions with their IDs, namespaces, and ports.",
   "inputSchema": {"type": "object", "properties": {}}
 }
+
 ```
 
 ### MCP Protocol Implementation
@@ -156,6 +166,7 @@ The MCP server queries the orchestrator nREPL to look up session -> port:
   {:seon.orchestrator.session/node (user/xtdb-node)
    :seon.orchestrator.session/id "abc12345"})
 ;; => {:seon.orchestrator.session/nrepl-port 7889}
+
 ```
 
 ### Configuration
@@ -173,6 +184,7 @@ Added to `.mcp.json` in project root:
     }
   }
 }
+
 ```
 
 ## Usage
@@ -199,6 +211,7 @@ Added to `.mcp.json` in project root:
 5. Orchestrator stops session:
    stop_session(session_id="a1b2")
    → {:session_id "a1b2", :status "stopped"}
+
 ```
 
 **No heredocs. No shell escaping. No clj-nrepl-eval. Just works.**
@@ -255,6 +268,7 @@ Helper functions from user namespace (qualify with user/):
 
 All state is automatically persisted. You don't need to save anything manually.
 Each eval response includes the current namespace (;; ns: seon.trading).
+
 ```
 
 ## Decisions Log
@@ -304,5 +318,5 @@ Added `reference-code/clojure-mcp` (git submodule) - Bruce Hauman's comprehensiv
 
 - [Agent Isolation PRD](prd.md) - Parent feature
 - [notes.md](notes.md) - Shell escaping root cause analysis
-- MCP Protocol: https://modelcontextprotocol.io/
+- MCP Protocol: [modelcontextprotocol.io](https://modelcontextprotocol.io/)
 - `reference-code/clojure-mcp/` - Reference Clojure MCP implementation

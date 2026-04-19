@@ -345,29 +345,32 @@
 ;;; EvalResult Schema Tests
 ;;; ---------------------------------------------------------------------------
 
-;; Define an EvalResult schema for test validation
-;; This matches what browser/eval! returns: a string result
-
-(def EvalResult
-  "Schema for browser eval result - a string representation of the JS result."
-  [:string {:min 0}])
-
 (deftest eval-result-schema-test
-  (testing "EvalResult schema exists and is valid"
-    (is (m/schema? (m/schema EvalResult))))
+  (testing "EvalResult schema is registered and resolves"
+    (is (m/schema? (m/schema browser/EvalResult))))
 
-  (testing "EvalResult validates string results"
-    (is (m/validate EvalResult "42"))
-    (is (m/validate EvalResult "undefined"))
-    (is (m/validate EvalResult "null"))
-    (is (m/validate EvalResult "{\"key\":\"value\"}"))
-    (is (m/validate EvalResult "")))
+  (testing "EvalResult validates success result maps"
+    (is (m/validate browser/EvalResult
+                    {::browser/success true
+                     ::browser/exec-id "bex-abc123"
+                     ::browser/duration-ms 5
+                     ::browser/timestamp (java.util.Date.)
+                     ::browser/value "42"
+                     ::browser/value-type :string})))
 
-  (testing "EvalResult rejects non-strings"
-    (is (not (m/validate EvalResult 42)))
-    (is (not (m/validate EvalResult nil)))
-    (is (not (m/validate EvalResult {:result "value"})))
-    (is (not (m/validate EvalResult ["array"])))))
+  (testing "EvalResult validates error result maps"
+    (is (m/validate browser/EvalResult
+                    {::browser/success false
+                     ::browser/exec-id "bex-abc123"
+                     ::browser/duration-ms 0
+                     ::browser/timestamp (java.util.Date.)
+                     ::browser/error "x is not defined"
+                     ::browser/error-type "ReferenceError"})))
+
+  (testing "EvalResult rejects invalid maps"
+    (is (not (m/validate browser/EvalResult {})))
+    (is (not (m/validate browser/EvalResult "not a map")))
+    (is (not (m/validate browser/EvalResult 42)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; cleanup-stale-evals! Tests

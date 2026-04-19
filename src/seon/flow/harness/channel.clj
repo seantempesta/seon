@@ -1,9 +1,9 @@
 (ns seon.flow.harness.channel
   "Bidirectional TCP <-> core.async channel adapter.
 
-   Length-prefixed EDN over TCP. Each message is:
+   Length-prefixed Nippy over TCP. Each message is:
    - 4-byte big-endian length prefix
-   - UTF-8 encoded EDN bytes
+   - Nippy-encoded bytes (fast-freeze/fast-thaw, no header)
 
    Two entry points:
    - `start-server!` - listen on a port, accept one client
@@ -11,20 +11,10 @@
 
    Both return {::in-ch ::out-ch ::close!} for bidirectional communication."
   (:require [clojure.core.async :as a]
-            [clojure.edn :as edn]
-            [seon.schema :as schema])
+            [seon.schema :as schema]
+            [taoensso.nippy :as nippy])
   (:import [java.io DataInputStream DataOutputStream EOFException]
-           [java.net ServerSocket Socket InetAddress]
-           [java.time Instant]))
-
-;;; ---------------------------------------------------------------------------
-;;; EDN tagged literal support for java.time.Instant
-;;; ---------------------------------------------------------------------------
-
-(def ^:private edn-readers
-  "EDN readers for tagged literals used in flow messages."
-  {'time/instant #(Instant/parse %)
-   'inst         #(java.util.Date/from (Instant/parse %))})
+           [java.net ServerSocket Socket InetAddress]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schema Registration
@@ -35,18 +25,18 @@
 (schema/register! ::host [:string {:min 1 :description "Hostname to connect to"}])
 
 (defn- read-message!
-  "Read one length-prefixed EDN message from input stream.
-   Returns parsed EDN or nil on EOF/error."
+  "Read one length-prefixed Nippy message from input stream.
+   Returns deserialized value or nil on EOF/error."
   [^DataInputStream dis]
   (let [len (.readInt dis)
         buf (byte-array len)]
     (.readFully dis buf)
-    (edn/read-string {:readers edn-readers} (String. buf "UTF-8"))))
+    (nippy/fast-thaw buf)))
 
 (defn- write-message!
-  "Write one length-prefixed EDN message to output stream."
+  "Write one length-prefixed Nippy message to output stream."
   [^DataOutputStream dos msg]
-  (let [^bytes bs (.getBytes (pr-str msg) "UTF-8")]
+  (let [^bytes bs (nippy/fast-freeze msg)]
     (.writeInt dos (alength bs))
     (.write dos bs)
     (.flush dos)))

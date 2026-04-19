@@ -1,4 +1,11 @@
+---
+type: prd
+status: completed
+tags: [prd, database, flow]
+---
 # PRD: Super REPL — Federated Agent Runtime
+
+> **Evolution note:** The "Super REPL" concept has been realized and evolved into `seon.repl` (namespace rename pending). The flow-based agent isolation described here is now part of the **Unified Flow System** — see [`docs/prds/unified-flow/design.md`](../unified-flow/design.md) for the current architecture. This PRD is retained for historical context.
 
 ## Context
 
@@ -67,6 +74,7 @@ Agent JVM (186MB each)
     ├── All defns live here
     ├── ::keywords resolve correctly
     └── Specs register in this JVM's Malli registry
+
 ```
 
 ### Core Concepts
@@ -98,6 +106,7 @@ Agent JVM (186MB each)
 **Cross-namespace discovery**: Agents can query the master knowledge graph to find code and data structures across the entire system. Example: an agent building `seon.health.calories` can search for existing functions that produce `:health/workout` data, find them in `seon.health.tracking`, and reuse them directly. The graph stores Malli schemas, function signatures, and dependency edges — agents should always search before building.
 
 **Agent environment**: Every agent JVM loads `seon.agent.env` at startup. This namespace provides:
+
 - `(env/search "calories")` — Search knowledge graph for matching functions/schemas
 - `(env/ctx-save!)` / `(env/ctx-load!)` — Persist/restore `*ctx*` to namespace DB
 - `(env/ns-conn)` — Get connection to the agent's namespace DB
@@ -110,6 +119,7 @@ This namespace is the agent's "toolkit" — updating it updates all future agent
 The web server is a thin proxy — namespace content rendering goes through the flow topology, not direct function calls.
 
 **How it works:**
+
 - HTTP request to `/ns/seon.trading` hits the main JVM's web server
 - Web server calls `topology/request!` targeting the `seon.trading` namespace step
 - The namespace step forwards to the agent JVM via TCP
@@ -117,6 +127,7 @@ The web server is a thin proxy — namespace content rendering goes through the 
 - Data travels back via TCP reply; orchestrator resolves the appropriate renderer via spec-driven resolution (see [`spec-driven-rendering` PRD](../spec-driven-rendering/prd.md))
 
 **What this enables:**
+
 - **Backpressure** — Queue cap (default 32) rejects overload with typed `:overload` errors
 - **Multi-instance load balancing** — Multiple agent JVMs can serve the same namespace (future)
 - **Crash isolation** — Agent JVM crash doesn't take down the web server
@@ -124,6 +135,7 @@ The web server is a thin proxy — namespace content rendering goes through the 
 - **No UI deps in agent JVMs** — Agent JVMs stay minimal; rendering lives in the orchestrator
 
 **What stays in the main JVM:**
+
 - Monitoring infrastructure pages (dashboard, agents, flow monitor)
 - Static pages that don't depend on namespace content
 - The flow topology itself and its wiring
@@ -136,6 +148,7 @@ The web server is a thin proxy — namespace content rendering goes through the 
 **Commit**: `297d6d7 feat: production-ready agent JVM pool with lifecycle management`
 
 Production-ready agent JVM pool with:
+
 - [x] `LinkedBlockingQueue` for thread-safe acquisition
 - [x] Parallel pool creation via futures
 - [x] Auto-replenishment when JVMs are acquired
@@ -147,6 +160,7 @@ Production-ready agent JVM pool with:
 - [x] 16 unit tests, 51 assertions, 0 failures
 
 **Key files**:
+
 - `src/seon/flow/pool.clj` — Pool implementation
 - `src/seon/flow/agent_runner.clj` — Agent JVM entry point
 - `bin/agent-runner` — Launch script
@@ -176,20 +190,24 @@ Production-ready agent JVM pool with:
 ### Existing Code to Reuse
 
 **`seon.dev.analysis` (`src/seon/dev/analysis.clj`)**:
+
 - `analyze-file` — Parses a file with clj-kondo, returns `{::var-definitions [...] ::var-usages [...] ::namespace-usages [...]}`. Call with `{::analysis/file-path "src/seon/foo.clj"}`.
 - `callees-of` — What does a function call? `{::analysis/analysis result ::analysis/fn-name 'my-fn}`
 - `callers-of` — Who calls a function? Same signature pattern.
 - Uses `clj-kondo/run!` with `:analysis true` for arglists, var-usages, var-definitions.
 
 **`seon.dev.lint` (`src/seon/dev/lint.clj`)**:
+
 - `lint-source` — Runs clj-kondo on a **string** via `with-in-str`. Call with `{::lint/content "(defn foo ...)" ::lint/file-path "optional.clj"}`. Returns `{::lint/valid? bool ::lint/findings [...]}`. Use this for incremental per-form analysis.
 - `syntax-error?` — Fast check via edamame. `{::lint/content "..."}` → boolean.
 
 **`seon.db.datalevin.conn` (`src/seon/db/datalevin/conn.clj`)**:
+
 - `get-master-conn!` — Get connection to master DB. Call with `{::conn/manager manager}`. The manager comes from `(:seon/connection-manager integrant.repl.state/system)`.
 - `get-namespace-conn!` — Get namespace-specific DB. `{::conn/manager manager ::conn/namespace 'seon.graph}`.
 
 **Datalevin transact/query patterns (from `seon.ai.datalevin`)**:
+
 ```clojure
 ;; Require datalevin
 (require '[datalevin.core :as d])
@@ -217,9 +235,11 @@ Production-ready agent JVM pool with:
 
 ;; Pull full entity
 (d/pull @conn '[*] entity-id)
+
 ```
 
 **`seon.ns.introspect` (`src/seon/ns/introspect.clj`)**:
+
 - `introspect` — Runtime namespace reflection. Returns `{:functions [...] :vars [...] :requires {...}}`.
 - `list-seon-namespaces` — All loaded `seon.*` namespaces.
 
@@ -265,6 +285,7 @@ feat: knowledge graph foundation with Datalevin storage
 - seon.graph.ingest: clj-kondo analysis → Datalevin entities
 - seon.graph.query: dependency, call graph, and function search queries
 - Tests for all three namespaces
+
 ```
 
 ---
@@ -273,7 +294,7 @@ feat: knowledge graph foundation with Datalevin storage
 
 **Goal**: Agents eval forms through the Super REPL. Forms are stored in Datalevin with versioning. Analysis runs automatically. Agent JVMs get namespace-scoped databases and a shared environment namespace.
 
-**Current state**: The Super REPL form router (`seon.repl.super`) is built — form classification, routing, Datalevin storage, and versioning all work. Agent environment (`seon.agent.env`) is built with graph queries, ctx persistence, schema discovery. What's NOT done: graduation to disk, MCP routing, dynamic context suggestions, and agent_runner modifications.
+**Current state**: The Super REPL form router (`seon.repl`) is built — form classification, routing, Datalevin storage, and versioning all work. Agent environment (`seon.agent.env`) is built with graph queries, ctx persistence, schema discovery. What's NOT done: graduation to disk, MCP routing, dynamic context suggestions, and agent_runner modifications.
 
 ### Files to Create/Modify
 
@@ -291,19 +312,23 @@ feat: knowledge graph foundation with Datalevin storage
 ### Existing Code to Reuse
 
 **`seon.flow.pool` (`src/seon/flow/pool.clj`)**:
+
 - `acquire!` / `acquire!!` — Get a warm JVM from pool. `(pool/acquire! pool {::pool/namespace 'seon.trading.signals})`. Returns `{::pool/port 7901 ...}`.
 - `release!` — Return JVM to pool.
 - `nrepl-eval!` — Eval code on agent JVM. `(pool/nrepl-eval! port "(+ 1 2)")`.
 - `pool-status` — Check pool state.
 
 **`seon.graph.ingest` (from Phase 2)**:
+
 - `ingest-incremental!` — Update knowledge graph after each form eval.
 
 **`seon.graph.analyzer` (from Phase 2)**:
+
 - `analyze-form` — Get analysis for a single form string.
 
 **`bin/mcp-server` routing pattern**:
 The MCP server (`bin/mcp-server`) is a Babashka script. It routes `eval` calls by `session_id`:
+
 - `session_id = "orchestrator"` → eval on port 7888 (orchestrator nREPL)
 - `session_id = "a1b2"` (4-char hex) → looks up nREPL port via `seon.orchestrator.session/get-session-port` on the orchestrator, then evals on that port
 
@@ -311,11 +336,12 @@ The MCP server (`bin/mcp-server`) is a Babashka script. It routes `eval` calls b
 
 ### Build Checklist
 
-- [x] **`seon.repl.super`** — Form routing:
+- [x] **`seon.repl`** — Form routing:
   - [x] `eval-form!` — Main entry point. Receives `{:form/source "(defn ema ...)" :form/namespace 'seon.trading.signals :form/agent-id "a13b"}`. Steps:
     1. Classify form type (defn, def, ns, require, expression) by parsing with edamame
     2. Route to agent JVM via `pool/nrepl-eval!`
     3. Store form in Datalevin:
+
        ```clojure
        {:form/id (random-uuid)
         :form/namespace "seon.trading.signals"
@@ -325,7 +351,9 @@ The MCP server (`bin/mcp-server`) is a Babashka script. It routes `eval` calls b
         :form/agent-id "a13b"
         :form/version 3  ;; incremented per name+namespace
         :form/created-at (Instant/now)}
+
        ```
+
     4. Run `graph/analyze-form` on the source
     5. Run `graph/ingest-incremental!` with analysis results
     6. Return eval result + any analysis warnings
@@ -361,12 +389,12 @@ The MCP server (`bin/mcp-server`) is a Babashka script. It routes `eval` calls b
 
 - [ ] **Domain functions with `:malli/schema` metadata** — Agent JVM functions should have Malli schema annotations so the spec-driven scanner can discover them. Rendering is handled by the orchestrator, not the agent JVM. See [`spec-driven-rendering` PRD](../spec-driven-rendering/prd.md) for the render function convention (`.render` companion namespaces in the orchestrator).
 
-- [ ] **`seon.repl.super` dynamic context**:
+- [ ] **`seon.repl` dynamic context**:
   - [ ] After `eval-form!` stores and analyzes a form, compute **relevant context** to return alongside the eval result. If the agent just defined a function that takes `:health/workout`, search the graph for other functions that produce or consume that shape. Return these suggestions in the eval response so the agent sees them without having to ask.
   - [ ] `suggest-context` — Given a form's analysis, query the graph for related functions, schemas, and namespace dependencies. Return a compact summary suitable for injecting into the agent's context.
 
 - [ ] **`bin/mcp-server` modification**:
-  - [ ] In `execute-eval`, add a branch: if session is a pool session (check via orchestrator query), route through `seon.repl.super/eval-form!` instead of raw nREPL eval
+  - [ ] In `execute-eval`, add a branch: if session is a pool session (check via orchestrator query), route through `seon.repl/eval-form!` instead of raw nREPL eval
   - [ ] The routing check: eval code on orchestrator that checks if this session_id has a pool-assigned JVM. If yes, return port + super-repl flag.
 
 ### Test Checklist
@@ -388,12 +416,13 @@ The MCP server (`bin/mcp-server`) is a Babashka script. It routes `eval` calls b
 ```
 feat: Super REPL core with form routing, agent environment, and graduation
 
-- seon.repl.super: form classification, routing, Datalevin storage, versioning, dynamic context
+- seon.repl: form classification, routing, Datalevin storage, versioning, dynamic context
 - seon.repl.graduate: namespace assembly and graduation to disk
 - seon.agent.env: agent toolkit with graph queries, ctx persistence, cross-ns discovery
 - agent_runner: namespace-scoped Datalevin DB, auto-load seon.agent.env
 - MCP server routing for pool-assigned sessions
 - Tests for form lifecycle, graduation, and agent environment
+
 ```
 
 ---
@@ -486,7 +515,7 @@ Dual-flow model: orchestrator flow topology + agent JVM mini-flow, connected by 
 ### Existing Code to Reuse
 
 - `seon.graph.query` (Phase 2) — Datalog query API
-- `seon.repl.super` (Phase 3) — `suggest-context` hook point after each eval
+- `seon.repl` (Phase 3) — `suggest-context` hook point after each eval
 - `seon.agent.env` (Phase 3) — Agent-side search and discovery
 - `seon.flow.msg` (Phase 4) — `::msg/event` schema for observability events
 - `seon.flow.topology` (Phase 4) — Flow topology provides event streams per namespace
@@ -519,6 +548,7 @@ feat: dynamic context engine + MCP cockpit tools
 - seon.repl.context: proactive context computation from knowledge graph + flow events
 - query_graph, namespace_health, agent_status MCP tools
 - Updated AGENT.md with context and tool documentation
+
 ```
 
 ---
@@ -556,6 +586,7 @@ feat: inter-agent messaging with schema-validated mailboxes
 - seon.flow.mailbox: Datalevin-backed per-namespace message queues
 - MCP tools for check_mailbox and send_message
 - Message schemas for feature requests, bug reports, status updates
+
 ```
 
 ---

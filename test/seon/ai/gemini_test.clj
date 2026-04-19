@@ -274,7 +274,7 @@
       (is (m/validate ::ai/prompt prompt))))
 
   (testing "Base schemas exist for common AI concepts"
-    ;; These base schemas can be used when persisting Gemini data to XTDB
+    ;; These base schemas can be used when persisting Gemini data to Datalevin
     (is (schema/registered? ::ai/input-tokens))
     (is (schema/registered? ::ai/output-tokens))
     (is (schema/registered? ::ai/cost-usd))

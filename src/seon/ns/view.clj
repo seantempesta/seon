@@ -267,7 +267,7 @@
 (defn- safe-map?
   "Check if v is safe to recursively render as a map.
    Returns false for Java objects that implement map interfaces but aren't true Clojure maps.
-   This prevents stack overflow when rendering complex Java objects like XTDB nodes."
+   This prevents stack overflow when rendering complex Java objects."
   [v]
   (and (map? v)
        (let [class-name (.getName (class v))]
@@ -276,7 +276,6 @@
              (and (str/includes? class-name ".")
                   (not (str/starts-with? class-name "java."))
                   (not (str/starts-with? class-name "javax."))
-                  (not (str/starts-with? class-name "xtdb."))
                   (not (str/starts-with? class-name "io."))
                   (not (str/starts-with? class-name "org.")))))))
 

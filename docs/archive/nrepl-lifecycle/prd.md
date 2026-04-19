@@ -1,4 +1,11 @@
+---
+type: prd
+status: completed
+tags: [prd, archive]
+---
+
 # PRD: nREPL Server Lifecycle Management
+
 ## Status: COMPLETE — Port allocation, orphan cleanup, and BindException retry logic implemented
 
 **Status:** Fixed
@@ -21,6 +28,7 @@ curl http://localhost:8080/api/health
 # But ports are actually in use
 lsof -i :7889-7899
 # => 10 servers listening on ports 7889-7898
+
 ```
 
 ### Impact
@@ -65,6 +73,7 @@ Added `find-listening-orphans` function that scans port range 7889-7999 for port
 ;;     ::servers-removed 0
 ;;     ::orphans-killed 3
 ;;     ::cleanup-errors []}
+
 ```
 
 ### 2. Root Cause Fix: `shutdown-all!` (seon.ai.agent)
@@ -75,6 +84,7 @@ Added a safety net that calls `nrepl/stop-all-namespace-nrepls!` after individua
 ;; shutdown-all! now has two steps:
 ;; 1. Call each agent's close! function
 ;; 2. Safety net: call stop-all-namespace-nrepls! to catch survivors
+
 ```
 
 ---
@@ -103,6 +113,7 @@ lsof -i :7889-7999 | grep -v 7888
 # => {::health/orphans-killed N ...}
 
 # 5. Launch new agent - should work
+
 ```
 
 ---
