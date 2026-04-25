@@ -85,6 +85,57 @@
           (when-let [sid @launched]
             (safe-stop! sid)))))))
 
+(deftest agent-jvm-relays-seon-db-to-orchestrator
+  (testing "agent JVM -> relay -> orchestrator -> datahike round-trip"
+    (let [launched (atom nil)
+          test-id "rly001"]
+      (try
+        (let [{::session/keys [session-id nrepl-port]}
+              (session/launch! {::session/namespace 'seon.session-test.relay})]
+          (reset! launched session-id)
+
+          ;; 1. Agent transacts a row into :seon.orchestrator via the relay.
+          (let [tx-result-str
+                (pool/nrepl-eval!
+                 nrepl-port
+                 (str "(seon.db/transact! :seon.orchestrator "
+                      "[{:seon.orchestrator.session/id \"" test-id "\""
+                      " :seon.orchestrator.session/namespace \"relay-test\""
+                      " :seon.orchestrator.session/status :running}])"))]
+            (is (re-find #":tx-data" (str tx-result-str))
+                "agent-side transact! returned a tx report (not an error)"))
+
+          ;; 2. Orchestrator-side query sees the row the agent wrote.
+          (let [q '[:find ?ns ?status
+                    :in $ ?id
+                    :where
+                    [?e :seon.orchestrator.session/id ?id]
+                    [?e :seon.orchestrator.session/namespace ?ns]
+                    [?e :seon.orchestrator.session/status ?status]]
+                rows (db/query :seon.orchestrator q test-id)]
+            (is (= #{["relay-test" :running]} rows)
+                "orchestrator sees the agent's write through datahike"))
+
+          ;; 3. Agent reads the same row back via pull-by-name (also through
+          ;; the relay), proving the read path round-trips.
+          (let [pulled-str
+                (pool/nrepl-eval!
+                 nrepl-port
+                 (str "(seon.db/pull-by-name :seon.orchestrator '[*] "
+                      "[:seon.orchestrator.session/id \"" test-id "\"])"))]
+            (is (re-find #"relay-test" pulled-str))
+            (is (re-find #":running" pulled-str)
+                "agent's read sees its own earlier write")))
+        (finally
+          (when-let [sid @launched]
+            (safe-stop! sid))
+          ;; Clean the row regardless of outcome.
+          (try
+            (db/transact! :seon.orchestrator
+                          [[:db/retractEntity
+                            [:seon.orchestrator.session/id test-id]]])
+            (catch Exception _)))))))
+
 (deftest auto-checkpoint-on-ctx-change
   (testing "launch! schedules a watcher that auto-checkpoints on *ctx* change"
     (let [launched (atom nil)]

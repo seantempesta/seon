@@ -54,6 +54,32 @@
   [req]
   ((requiring-resolve 'seon.db.datahike.flow/request!) req))
 
+;;; --- Cross-JVM Relay (agent JVMs) ---
+;;;
+;;; When this JVM is an agent (no local datahike flow) and `seon.db.relay`
+;;; has connected back to the orchestrator, route ops through the relay
+;;; instead of throwing. Resolution is lazy so loading `seon.db` does not
+;;; pull `seon.db.relay` (and its core.async + nippy deps) on the
+;;; orchestrator boot path. The orchestrator never sets `*relay-active?*`,
+;;; so it never reaches the relay branch.
+
+(defn- relay-active?
+  "True if this JVM has a live `seon.db.relay` connection back to an
+   orchestrator. Lazily resolves the var; returns false if the ns hasn't
+   been loaded."
+  []
+  (when-let [v (resolve 'seon.db.relay/*relay-active?*)]
+    (boolean @v)))
+
+(defn- relay-request!
+  "Route through `seon.db.relay/request!`. Caller has already ensured
+   `relay-active?` is true."
+  [op db-name args]
+  ((requiring-resolve 'seon.db.relay/request!)
+   {:seon.db.relay/op op
+    :seon.db.relay/db-name db-name
+    :seon.db.relay/args (vec args)}))
+
 ;;; --- Internal ---
 
 (defn- system-attr?
@@ -384,7 +410,8 @@
   ([db-name tx-data]
    (transact! db-name tx-data nil))
   ([db-name tx-data opts]
-   (if (datahike-owned? db-name)
+   (cond
+     (datahike-owned? db-name)
      ;; Datahike route: auto-stamp :seon.db/namespace on each entity map,
      ;; validate attrs + values against Malli, and dispatch to the flow's
      ;; conn-process. Schema is installed on the datahike side at :init, so
@@ -399,6 +426,13 @@
                   ::dh-flow/op :transact!
                   ::dh-flow/args [stamped]}
            (:timeout-ms opts) (assoc ::dh-flow/timeout-ms (:timeout-ms opts)))))
+
+     (relay-active?)
+     ;; Agent JVM: route to the orchestrator over TCP. The orchestrator runs
+     ;; the same `transact!` (which validates and dispatches to datahike).
+     (relay-request! :transact! db-name [tx-data])
+
+     :else
      ;; Legacy datalevin route
      (let [attrs (extract-tx-attrs tx-data)
            conn (resolve-conn db-name)]
@@ -464,6 +498,9 @@
                        ::dh-flow/op :q
                        ::dh-flow/args (into [datalog-query] inputs)})
 
+    (relay-active?)
+    (relay-request! :query db-name (into [datalog-query] inputs))
+
     *direct-mode*
     (with-retry db-name
       (fn [db] (apply d/q datalog-query db inputs)))
@@ -490,6 +527,9 @@
                        ::dh-flow/op :pull
                        ::dh-flow/args [selector eid]})
 
+    (relay-active?)
+    (relay-request! :pull-by-name db-name [selector eid])
+
     *direct-mode*
     (with-retry db-name
       (fn [db] (d/pull db selector eid)))
@@ -515,6 +555,9 @@
                        ::dh-flow/db-name db-name
                        ::dh-flow/op :pull-many
                        ::dh-flow/args [selector eids]})
+
+    (relay-active?)
+    (relay-request! :pull-many-by-name db-name [selector eids])
 
     *direct-mode*
     (with-retry db-name
