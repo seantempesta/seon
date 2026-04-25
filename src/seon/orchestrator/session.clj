@@ -296,6 +296,7 @@
 
    Response keys: ::id ::namespace ::status ::nrepl-port ::started-at ::db-name
    (or ::error on failure)."
+  {:malli/schema [:=> [:cat ::start-agent-session-request] ::start-agent-session-response]}
   [{::keys [namespace resume? datalevin-manager pool] :as request}]
   (let [resume? (if (nil? resume?) true resume?)
         pool (if (contains? request ::pool) pool @agent-pool)
@@ -380,6 +381,7 @@
    Request keys: ::id
 
    Response keys: ::id ::status ::stopped-at (or ::error)."
+  {:malli/schema [:=> [:cat ::stop-agent-session-request] ::stop-agent-session-response]}
   [{::keys [id]}]
   (let [row (pull-row id)
         live-entry (live id)]
@@ -435,7 +437,7 @@
 (defn list-agent-sessions
   "List all running agent sessions."
   {:malli/schema [:=> [:cat ::list-agent-sessions-request] ::list-agent-sessions-response]}
-  [_request]
+  [{}]
   (vec (for [row (running-rows)]
          (select-keys (public-view row) public-session-keys))))
 
@@ -598,7 +600,7 @@
    Example:
      (recover-sessions! {})"
   {:malli/schema [:=> [:cat ::recover-sessions-request] ::recover-sessions-response]}
-  [_request]
+  [{}]
   (log/info "Recovering sessions from previous run")
   (let [all-instances (runtime/instances {})
         orphaned (->> all-instances

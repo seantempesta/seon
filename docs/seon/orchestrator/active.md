@@ -53,7 +53,7 @@ Test baseline: **4054 pass / 0 fail / 2 errors**. The 2 errors are pre-existing 
 | 9. `seon.db` agent-JVM dispatch (cross-JVM relay) | ✅ done — per-agent Nippy/TCP relay in `seon.db.relay`; agents call `seon.db/transact!`/`query`/`pull-by-name`/`pull-many-by-name` and they route through the orchestrator |
 | 10. `seon.flow.harness` `:seon.harness/needs` DI | ❌ not started |
 | 11. `orchestrator/launch.clj` API + integration test | ✅ done (lives in `seon.session`, not `seon.orchestrator.launch`) |
-| 12. Convention meta-test + docs | ❌ not started |
+| 12. Convention meta-test + docs | ✅ done — `test/seon/dev/conventions_check_test.clj` asserts touched namespaces follow `:malli/schema`+map-in, schemas are namespaced, no new defonce atoms |
 
 ## File Touchpoints (next agent's planning)
 
