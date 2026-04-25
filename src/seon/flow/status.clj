@@ -409,5 +409,5 @@
      {::flows  {flow-id -> flow-status}
       ::alerts [alert ...]}"
   {:malli/schema [:=> [:cat [:map]] ::collect-status-result]}
-  [_]
+  [{}]
   (request-via-collector! ::collect-status {} default-timeout-ms))
