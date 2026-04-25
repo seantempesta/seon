@@ -45,11 +45,11 @@ Test baseline: **4054 pass / 0 fail / 2 errors**. The 2 errors are pre-existing 
 | 1. Schemas + system.edn wiring | ✅ done |
 | 2. `seon.flow.trace` migrated | ✅ implicit (free from step 1) |
 | 3. `seon.session` ns + registry plumbing | ✅ done |
-| 4. `seon.orchestrator.session` migrated | ⚠️ partial — entity schema in, registry atom not yet flow-state |
+| 4. `seon.orchestrator.session` migrated | ✅ done — registry atom replaced by `:seon.orchestrator` rows + small live-state map |
 | 5. `seon.flow.pool` atoms → flow state | ❌ not started; pool currently disabled |
 | 6. `seon.flow.status` atoms → flow state | ❌ not started |
 | 7. `seon.ns.routes` + `seon.render` atoms → flow state | ❌ not started |
-| 8. `seon.ctx` checkpoint path | ⚠️ partial — explicit `checkpoint!` works, no auto-debounce watcher |
+| 8. `seon.ctx` checkpoint path | ✅ done — auto-debounce `*ctx*` watcher in `seon.session/launch!` |
 | 9. `seon.db` agent-JVM dispatch (cross-JVM relay) | ❌ not started — agents currently can't `db/transact!` from inside their JVM |
 | 10. `seon.flow.harness` `:seon.harness/needs` DI | ❌ not started |
 | 11. `orchestrator/launch.clj` API + integration test | ✅ done (lives in `seon.session`, not `seon.orchestrator.launch`) |

@@ -16,6 +16,20 @@
   (try (session/stop! {::session/session-id session-id})
        (catch Exception _)))
 
+(defn- poll-row
+  "Poll `:seon.session` for `session-id` until `pred` matches or `timeout-ms`
+   elapses. Returns the matching row, or the last-seen row if it timed out."
+  [session-id pred timeout-ms]
+  (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
+    (loop [row (db/pull-by-name :seon.session '[*]
+                                [:seon.session/agent session-id])]
+      (cond
+        (pred row) row
+        (>= (System/currentTimeMillis) deadline) row
+        :else (do (Thread/sleep 50)
+                  (recur (db/pull-by-name :seon.session '[*]
+                                          [:seon.session/agent session-id])))))))
+
 (deftest launch-eval-checkpoint-stop-roundtrip
   (testing "end-to-end agent JVM lifecycle"
     (let [launched (atom nil)]
@@ -67,6 +81,45 @@
                                      [:seon.session/agent session-id])]
             (is (= :stopped (:seon.session/status row)))
             (is (inst? (:seon.session/stopped-at row)))))
+        (finally
+          (when-let [sid @launched]
+            (safe-stop! sid)))))))
+
+(deftest auto-checkpoint-on-ctx-change
+  (testing "launch! schedules a watcher that auto-checkpoints on *ctx* change"
+    (let [launched (atom nil)]
+      (try
+        (let [{::session/keys [session-id nrepl-port]}
+              (session/launch! {::session/namespace 'seon.session-test.autockpt
+                                ::session/checkpoint-interval-ms 200})]
+          (reset! launched session-id)
+          ;; Sanity: pre-swap, no ctx is persisted yet.
+          (let [row (db/pull-by-name :seon.session '[*]
+                                     [:seon.session/agent session-id])]
+            (is (nil? (:seon.session/ctx row))))
+          ;; Swap *ctx* in the agent JVM. The :seon.session/version watcher
+          ;; should bump *ctx-version*; within ~200ms the scheduler should
+          ;; observe the bump and persist the blob.
+          (pool/nrepl-eval! nrepl-port "(swap! *ctx* assoc :hello :world)")
+          (let [row (poll-row session-id
+                              #(= "{:hello :world}" (:seon.session/ctx %))
+                              2000)]
+            (is (= "{:hello :world}" (:seon.session/ctx row))
+                "auto-checkpoint persisted the ctx within 2s of the swap!"))
+          ;; A second swap! triggers a second checkpoint with new contents.
+          (pool/nrepl-eval! nrepl-port "(swap! *ctx* assoc :phase 3)")
+          (let [row (poll-row session-id
+                              #(re-find #":phase 3" (or (:seon.session/ctx %) ""))
+                              2000)]
+            (is (re-find #":hello :world" (:seon.session/ctx row)))
+            (is (re-find #":phase 3" (:seon.session/ctx row))
+                "second swap! triggered another auto-checkpoint"))
+          ;; stop! cancels the scheduled task and clears the live-sessions slot.
+          (session/stop! {::session/session-id session-id})
+          (reset! launched nil)
+          (let [live @@(resolve 'seon.session/live-sessions)]
+            (is (not (contains? live session-id))
+                "stop! removed the live-sessions entry (and cancelled future)")))
         (finally
           (when-let [sid @launched]
             (safe-stop! sid)))))))
