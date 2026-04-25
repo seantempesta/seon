@@ -629,10 +629,11 @@
         ;; reply-router, and sinks always run — the rest of the system depends
         ;; on the reply-router for promise delivery.
         dl?  (some? connection-manager)
-        procs (cond-> {:seon.flow/repl         {:proc (flow/process #'repl-step)}
-                       :seon.flow/reply-router {:proc (flow/process #'reply-router-step)}
-                       :seon.flow/event-sink   {:proc (flow/process #'event-sink-step)}
-                       :seon.flow/error-sink   {:proc (flow/process #'error-sink-step)}}
+        procs (cond-> {:seon.flow/repl             {:proc (flow/process #'repl-step)}
+                       :seon.flow/reply-router     {:proc (flow/process #'reply-router-step)}
+                       :seon.flow/event-sink       {:proc (flow/process #'event-sink-step)}
+                       :seon.flow/error-sink       {:proc (flow/process #'error-sink-step)}
+                       :seon.flow/status-collector {:proc (flow/process #'status/collector-step)}}
                 dl? (assoc :seon.flow/writer
                            {:proc (flow/process #'writer/infra-writer-step)
                             :args {::writer/connection-manager connection-manager}}
@@ -644,7 +645,10 @@
                         [:seon.flow/reply-router :seon.flow.in/reply]]
                        ;; repl error -> error-sink
                        [[:seon.flow/repl :seon.flow.out/error]
-                        [:seon.flow/error-sink :seon.flow.out/error]]]
+                        [:seon.flow/error-sink :seon.flow.out/error]]
+                       ;; status-collector reply -> reply-router
+                       [[:seon.flow/status-collector :seon.flow.out/reply]
+                        [:seon.flow/reply-router :seon.flow.in/reply]]]
                 dl? (into [;; writer reply -> reply-router
                            [[:seon.flow/writer :seon.flow.out/reply]
                             [:seon.flow/reply-router :seon.flow.in/reply]]
