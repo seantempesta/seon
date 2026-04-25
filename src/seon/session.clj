@@ -54,6 +54,10 @@
 (schema/register! ::ctx
                   [:string {:description "Serialized ctx checkpoint blob (Nippy/pr-str)"}])
 
+(schema/register! ::checkpoint-interval-ms
+                  [:int {:min 0
+                         :description "Auto-checkpoint poll interval in ms. 0 disables. Default 1000."}])
+
 ;;; ---------------------------------------------------------------------------
 ;;; Entity Schema
 ;;; ---------------------------------------------------------------------------
@@ -87,7 +91,8 @@
                    {:gen/fmap (fn [_]
                                 (throw (ex-info "launch-request not generatable: spawns a JVM"
                                                 {:type :malli.generator/no-generator})))}
-                   [::namespace ::namespace]])
+                   [::namespace ::namespace]
+                   [::checkpoint-interval-ms {:optional true} ::checkpoint-interval-ms]])
 
 (schema/register! ::launch-response
                   [:map
@@ -125,6 +130,66 @@
 
 (defn- live-session [session-id]
   (get @live-sessions session-id))
+
+;;; ---------------------------------------------------------------------------
+;;; Auto-checkpoint scheduler
+;;; ---------------------------------------------------------------------------
+;;;
+;;; One shared ScheduledExecutorService (daemon) runs all per-session
+;;; checkpoint pollers. Each tick reads `@*ctx-version*` from the agent JVM;
+;;; if it advanced past the last-checkpointed version, we call `checkpoint!`
+;;; and update the marker. Failed ticks are logged but never propagate, so
+;;; the scheduler thread stays alive and the session keeps polling.
+
+(def ^:private default-checkpoint-interval-ms 1000)
+
+(defonce ^:private checkpoint-scheduler
+  (java.util.concurrent.Executors/newSingleThreadScheduledExecutor
+   (reify java.util.concurrent.ThreadFactory
+     (newThread [_ r]
+       (doto (Thread. ^Runnable r "seon-session-checkpoint")
+         (.setDaemon true))))))
+
+(declare checkpoint!)
+
+(defn- run-checkpoint-tick!
+  "One scheduler tick for `session-id`. Reads `@*ctx-version*` from the
+   agent JVM and calls `checkpoint!` if it has advanced. Swallows any
+   exception (logged) so the scheduled task never aborts."
+  [session-id]
+  (try
+    (when-let [entry (live-session session-id)]
+      (let [{::keys [port last-checkpoint-version]} entry
+            printed (pool/nrepl-eval! port "@*ctx-version*")
+            version (Long/parseLong printed)]
+        (when (> version (or last-checkpoint-version 0))
+          (checkpoint! {::session-id session-id})
+          (swap! live-sessions
+                 (fn [m]
+                   (if (contains? m session-id)
+                     (assoc-in m [session-id ::last-checkpoint-version] version)
+                     m))))))
+    (catch Exception e
+      (log/warn "Auto-checkpoint tick failed"
+                {:session-id session-id :error (.getMessage e)}))))
+
+(defn- schedule-checkpoint-task!
+  "Schedule a periodic auto-checkpoint task for `session-id`. Returns the
+   ScheduledFuture, which the caller stores in `live-sessions`."
+  [session-id interval-ms]
+  (when (and interval-ms (pos? interval-ms))
+    (.scheduleAtFixedRate
+     ^java.util.concurrent.ScheduledExecutorService checkpoint-scheduler
+     ^Runnable (fn [] (run-checkpoint-tick! session-id))
+     (long interval-ms)
+     (long interval-ms)
+     java.util.concurrent.TimeUnit/MILLISECONDS)))
+
+(defn- cancel-checkpoint-task!
+  "Cancel the scheduled checkpoint task on a live-sessions entry, if any."
+  [entry]
+  (when-let [^java.util.concurrent.ScheduledFuture fut (::checkpoint-future entry)]
+    (try (.cancel fut false) (catch Exception _))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Bridge to the orchestrator's session registry (mcp__seon__eval lookup)
@@ -197,16 +262,25 @@
 
    We `intern` + `setDynamic` instead of `(def ^:dynamic *ctx* ...)` because
    `nrepl-eval!` treats stderr warnings (\"name suggests dynamic\") as errors."
-  [ns-sym]
+  [ns-sym & [watch?]]
   (str "(do "
        "(create-ns '" ns-sym ") "
        "(in-ns '" ns-sym ") "
        "(clojure.core/refer-clojure) "
-       "(let [a (atom {})] "
+       "(let [a (atom {}) "
+       "      v (atom 0)] "
        "  (intern '" ns-sym " '*ctx* a) "
-       "  (intern 'user '*ctx* a)) "
+       "  (intern 'user '*ctx* a) "
+       "  (intern '" ns-sym " '*ctx-version* v) "
+       "  (intern 'user '*ctx-version* v) "
+       (when watch?
+         (str "  (add-watch a :seon.session/version "
+              "    (fn [_k# _r# _o# _n#] (swap! v inc))) "))
+       "  nil) "
        "(.setDynamic (resolve (symbol \"" ns-sym "\" \"*ctx*\")) true) "
        "(.setDynamic (resolve (symbol \"user\" \"*ctx*\")) true) "
+       "(.setDynamic (resolve (symbol \"" ns-sym "\" \"*ctx-version*\")) true) "
+       "(.setDynamic (resolve (symbol \"user\" \"*ctx-version*\")) true) "
        ":ok)"))
 
 (defn- bind-namespace!
@@ -232,10 +306,15 @@
      ::nrepl-port - Port the agent JVM's nREPL is listening on.
      ::pid        - OS pid of the agent JVM."
   {:malli/schema [:=> [:cat ::launch-request] ::launch-response]}
-  [{::keys [namespace]}]
+  [{::keys [namespace checkpoint-interval-ms]}]
   (let [session-id (::runtime/id (runtime/generate-id {}))
         started-at (java.util.Date.)
-        port (find-free-port!)]
+        port (find-free-port!)
+        interval-ms (if (nil? checkpoint-interval-ms)
+                      default-checkpoint-interval-ms
+                      checkpoint-interval-ms)
+        watch? (pos? interval-ms)
+        scheduled-fut (atom nil)]
     ;; Persist :starting before the (slow) spawn so the row is visible.
     (db/transact! :seon.session
                   [{::agent session-id
@@ -254,13 +333,14 @@
       ;; JVM is bound to the port; reservation no longer needed.
       (release-reserved-port! port)
       (try
-        (pool/nrepl-eval! port (agent-bootstrap-code namespace))
+        (pool/nrepl-eval! port (agent-bootstrap-code namespace watch?))
         (bind-namespace! port namespace)
         (swap! live-sessions assoc session-id
                {::session-id session-id
                 ::namespace namespace
                 ::port port
                 ::pid pid
+                ::last-checkpoint-version 0
                 :process proc})
         (register-with-orchestrator! session-id namespace port started-at)
         (db/transact! :seon.session
@@ -268,9 +348,15 @@
                         ::port port
                         ::pid pid
                         ::status :running}])
+        (when watch?
+          (let [fut (schedule-checkpoint-task! session-id interval-ms)]
+            (reset! scheduled-fut fut)
+            (swap! live-sessions assoc-in
+                   [session-id ::checkpoint-future] fut)))
         (log/info "Launched agent session"
                   {:session-id session-id :namespace namespace
-                   :port port :pid pid})
+                   :port port :pid pid
+                   :checkpoint-interval-ms (when watch? interval-ms)})
         {::session-id session-id
          ::nrepl-port port
          ::pid pid}
@@ -278,6 +364,8 @@
           (log/error "Failed to set up agent session, killing JVM"
                      {:session-id session-id :namespace namespace
                       :error (.getMessage setup-err)})
+          (when-let [^java.util.concurrent.ScheduledFuture fut @scheduled-fut]
+            (try (.cancel fut false) (catch Exception _)))
           (try (.destroy proc) (catch Exception _))
           (swap! live-sessions dissoc session-id)
           (unregister-from-orchestrator! session-id)
@@ -329,6 +417,8 @@
                   (throw (ex-info "Unknown session id"
                                   {:session-id session-id})))
         ^Process proc (:process entry)]
+    ;; Cancel auto-checkpoint scheduler first so it can't race with shutdown.
+    (cancel-checkpoint-task! entry)
     ;; Best-effort checkpoint before halting so postmortem inspection works.
     (try (checkpoint! {::session-id session-id})
          (catch Exception e
