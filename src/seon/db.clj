@@ -33,7 +33,6 @@
   (:require [clojure.core.async.flow :as flow]
             [datalevin.core :as d]
             [malli.core :as m]
-            [seon.db.datahike.flow :as dh-flow]
             [seon.db.datalevin.conn :as conn]
             [seon.db.datalevin.reader :as reader]
             [seon.db.schema :as db-schema]
@@ -41,6 +40,19 @@
             [seon.schema :as schema]
             [taoensso.timbre :as log])
   (:import [java.time Instant]))
+
+;; Lazy alias for `seon.db.datahike.flow` — keywords like ::dh-flow/pids resolve
+;; at read time, but the namespace is loaded only when first used (via
+;; requiring-resolve below). This breaks a load cycle:
+;;   seon.db → seon.db.datahike.flow → seon.flow.topology → seon.flow.harness
+;;     → seon.flow.trace → seon.db
+(create-ns 'seon.db.datahike.flow)
+(alias 'dh-flow 'seon.db.datahike.flow)
+
+(defn- dh-request!
+  "Resolve and call seon.db.datahike.flow/request! lazily to avoid the load cycle."
+  [req]
+  ((requiring-resolve 'seon.db.datahike.flow/request!) req))
 
 ;;; --- Internal ---
 
@@ -381,7 +393,7 @@
            attrs (extract-tx-attrs stamped)]
        (validate-attrs! attrs)
        (validate-values! stamped)
-       (dh-flow/request!
+       (dh-request!
          (cond-> {::dh-flow/flow (get-datahike-flow)
                   ::dh-flow/db-name db-name
                   ::dh-flow/op :transact!
@@ -447,7 +459,7 @@
   [db-name datalog-query & inputs]
   (cond
     (datahike-owned? db-name)
-    (dh-flow/request! {::dh-flow/flow (get-datahike-flow)
+    (dh-request! {::dh-flow/flow (get-datahike-flow)
                        ::dh-flow/db-name db-name
                        ::dh-flow/op :q
                        ::dh-flow/args (into [datalog-query] inputs)})
@@ -473,7 +485,7 @@
   [db-name selector eid]
   (cond
     (datahike-owned? db-name)
-    (dh-flow/request! {::dh-flow/flow (get-datahike-flow)
+    (dh-request! {::dh-flow/flow (get-datahike-flow)
                        ::dh-flow/db-name db-name
                        ::dh-flow/op :pull
                        ::dh-flow/args [selector eid]})
@@ -499,7 +511,7 @@
   [db-name selector eids]
   (cond
     (datahike-owned? db-name)
-    (dh-flow/request! {::dh-flow/flow (get-datahike-flow)
+    (dh-request! {::dh-flow/flow (get-datahike-flow)
                        ::dh-flow/db-name db-name
                        ::dh-flow/op :pull-many
                        ::dh-flow/args [selector eids]})
@@ -524,7 +536,7 @@
   [db-name eid]
   (cond
     (datahike-owned? db-name)
-    (dh-flow/request! {::dh-flow/flow (get-datahike-flow)
+    (dh-request! {::dh-flow/flow (get-datahike-flow)
                        ::dh-flow/db-name db-name
                        ::dh-flow/op :entity
                        ::dh-flow/args [eid]})
