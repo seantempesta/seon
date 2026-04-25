@@ -1,33 +1,17 @@
-{;; Datalevin Server (primary and only database)
- ;; Runs as external JVM process (bin/run-datalevin) — survives Seon restarts.
- ;; Each namespace gets its own database under root/{namespace}/
- ;; Default credentials: datalevin:datalevin (change in production!)
- :seon.db.datalevin/server
- {:port #or [#env DATALEVIN_PORT 8898]
-  :root #profile {:dev "data/datalevin"
-                  :test "tmp/datalevin-test"
-                  :prod #or [#env DATALEVIN_ROOT "data/datalevin"]}
-  :opts {:idle-timeout 300000}}
-
- ;; Datalevin Connection Manager
- ;; Manages client connections to the Datalevin server with:
- ;; - Connection caching per namespace
- ;; - Lazy database creation on first connection
- :seon.db.datalevin/connections
- {:server #ig/ref :seon.db.datalevin/server}
-
- ;; Runtime Database (Code Graph + Runtime Registry)
- ;; Owns the seon.runtime Datalevin connection used by:
- ;; - Code scanner (code graph entities)
- ;; - Runtime registry (namespace instance tracking)
- ;; - Render system (function resolution)
- ;; Initializes runtime registry and marks crashed instances on startup.
- ;; :infrastructure ref is ordering-only — ensures the flow is running before
- ;; runtime-db init, because register! -> persist-instance! -> db/transact!
- ;; routes through the infrastructure flow.
- :seon/runtime-db
- {:connection-manager #ig/ref :seon.db.datalevin/connections
-  :infrastructure #ig/ref :seon.flow/infrastructure}
+{;; -----------------------------------------------------------------------
+ ;; Datalevin: DISABLED (datahike-migration Phase 3+).
+ ;; The legacy Datalevin server crash-loops on startup (event-loop swallows
+ ;; exceptions, restarts in a tight loop, hangs the infrastructure flow boot).
+ ;; We're migrating to datahike. Until Phase 5 deletes the source code, the
+ ;; Integrant keys are simply absent from this config:
+ ;;   :seon.db.datalevin/server
+ ;;   :seon.db.datalevin/connections
+ ;;   :seon/runtime-db
+ ;;   :seon.graph/scanner    (depends on runtime-db)
+ ;; Code that calls seon.db with a datalevin-only db-name will fail with a
+ ;; "Infrastructure flow not running" error rather than time out — the data-
+ ;; hike path still works for namespaces declared under :seon.db/flow below.
+ ;; -----------------------------------------------------------------------
 
  ;; Malli Schema Registry
  ;; Loads all domain schemas on startup
@@ -64,39 +48,32 @@
   :input "resources/public/css/input.css"
   :output "resources/public/css/output.css"}
 
- ;; Infrastructure Flow (writer + reply-router + sinks)
- ;; Starts at boot. Handles all DB writes via connection manager.
- ;; Namespace flows are created lazily later (Phase 2+).
+ ;; Infrastructure Flow (reply-router + REPL eval + sinks)
+ ;; Datalevin writer/reader are skipped when no connection-manager is provided
+ ;; (datalevin is disabled). The flow still hosts the REPL eval process and
+ ;; reply-router, which other flows depend on.
  :seon.flow/infrastructure
- {:connection-manager #ig/ref :seon.db.datalevin/connections}
+ {}
 
  ;; Agent JVM Pool
  ;; Pre-warmed JVM pool for instant agent startup.
- ;; Each agent gets an isolated JVM with its own nREPL, Malli registry, and
- ;; Datalevin client connection. Depends on Datalevin server for agent DB access.
+ ;; Each agent gets an isolated JVM with its own nREPL and Malli registry.
+ ;; Datalevin reference removed; agents no longer auto-connect to a
+ ;; Datalevin server. Cross-JVM data access goes through the flow harness
+ ;; (Phase 3 work).
  :seon.flow/pool
  {:size #or [#env AGENT_POOL_SIZE 3]
   :base-port #or [#env AGENT_BASE_PORT 7900]
-  :datalevin-server #ig/ref :seon.db.datalevin/server
   :enabled? #profile {:dev true
                       :test false   ; Unit tests mock pool structure
                       :prod true}}
 
  ;; Orchestrator Sessions
- ;; Initializes orchestrator session storage with lazy Datalevin connections.
+ ;; Initializes orchestrator session storage. Datalevin connection-manager
+ ;; reference removed; the init! fn already ignores it (was kept for
+ ;; backward compatibility).
  :seon.orchestrator/sessions
- {:connection-manager #ig/ref :seon.db.datalevin/connections
-  :pool #ig/ref :seon.flow/pool}
-
- ;; Code Scanner (Knowledge Graph)
- ;; Analyzes codebase at startup and populates Datalevin with the knowledge graph.
- ;; Receives graph connection from :seon/runtime-db component.
- :seon.graph/scanner
- {:graph-db #ig/ref :seon/runtime-db
-  :paths ["src/"]
-  :enabled? #profile {:dev true
-                      :test false
-                      :prod true}}
+ {:pool #ig/ref :seon.flow/pool}
 
  ;; Caddy Reverse Proxy (HTTP/2 + TLS)
  ;; Dev: Enabled - serves https://localhost:3030 -> http://localhost:8080
@@ -120,8 +97,7 @@
  ;; Datahike Flow (Phase 2 of datahike-migration)
  ;; Single Integrant key that owns every per-namespace datahike conn-process
  ;; and the tx-bus. `seon.db` routes ops for registered namespaces through
- ;; this flow via `seon.db.datahike.flow/request!`; unregistered db-names
- ;; continue to fall through to the legacy datalevin path.
+ ;; this flow via `seon.db.datahike.flow/request!`.
  ;;
  ;; Phase 2 carries a single fixture namespace (:seon.phase2.demo) so the
  ;; dispatch layer has something real to route to. New domain namespaces

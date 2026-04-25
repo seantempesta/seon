@@ -69,7 +69,7 @@
    ;; Orchestrator Sessions
    :seon.orchestrator/sessions
    [:map
-    [:connection-manager :any]
+    [:connection-manager {:optional true} :any]
     [:pool :any]]
 
    ;; Code Scanner
