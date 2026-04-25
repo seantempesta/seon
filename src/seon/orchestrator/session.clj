@@ -34,6 +34,7 @@
   ```"
   (:require [seon.ctx :as ctx]
             [seon.db.datalevin.conn :as conn]
+            [seon.db.schema :as db-schema]
             [seon.flow.pool :as pool]
             [seon.runtime :as runtime]
             [seon.schema :as schema]
@@ -46,6 +47,7 @@
 (schema/register! ::id
                   [:string {:min 4 :max 6
                             :pattern "^[A-Za-z0-9]{4,6}$"
+                            :seon.db/identity true
                             :description "Base62 session ID, 4-6 chars"}])
 
 (schema/register! ::namespace
@@ -169,6 +171,25 @@
 (schema/register! ::recover-sessions-response
                   [:map
                    [::recovered-count :int]])
+
+;;; ---------------------------------------------------------------------------
+;;; Persisted Entity Schema (datahike)
+;;; ---------------------------------------------------------------------------
+
+(def session-entity-schema
+  "Malli :map schema for an orchestrator session row, installed on the
+   `:seon.orchestrator` datahike DB via `:seon.db/flow`'s `:namespace-schemas`.
+   Phase 3 step 1 declaration only — writes land in later steps."
+  [:map
+   [::id ::id]
+   [::namespace :string]
+   [::status [:enum :running :stopped :error]]
+   [::nrepl-port {:optional true} :int]
+   [::started-at {:optional true} :inst]
+   [::stopped-at {:optional true} :inst]
+   [::db-name {:optional true} :string]])
+
+(db-schema/register-entity-schema! "seon.orchestrator/session" session-entity-schema)
 
 ;;; ---------------------------------------------------------------------------
 ;;; Session ID Generation

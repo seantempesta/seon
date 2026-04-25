@@ -30,6 +30,10 @@
             ;; The :seon.db/flow Integrant key reads :namespace-schemas at init
             ;; and resolves keyword schema refs through the Malli registry —
             ;; the registry must be populated by then.
+            [seon.session]
+            [seon.repl]
+            [seon.flow.trace]
+            [seon.orchestrator.session]
             [seon.phase2.demo]))
 
 ;;; ---------------------------------------------------------------------------
