@@ -143,6 +143,7 @@
                        [:seon.session/port {:optional true} :seon.session/port]
                        [:seon.session/pid {:optional true} :seon.session/pid]
                        [:seon.session/started-at :seon.session/started-at]
+                       [:seon.session/stopped-at {:optional true} :seon.session/stopped-at]
                        [:seon.session/status :seon.session/status]
                        [:seon.session/ctx {:optional true} :seon.session/ctx]]
    :seon.repl         [:map

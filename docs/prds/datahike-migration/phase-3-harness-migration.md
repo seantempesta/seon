@@ -80,6 +80,7 @@ Four namespaces additionally migrate atoms → flow state because we're touching
 9. (orchestrator/resume-agent! "a5ba3e")
      - claim fresh JVM, rebind ctx atom from checkpoint blob
      - status → :running, port/pid updated
+
 ```
 
 ### Schemas
@@ -121,6 +122,7 @@ Concrete:
    [::fn {:optional true} :string]
    [::duration-ms {:optional true} :int]
    [::status {:optional true} :keyword]])
+
 ```
 
 Schemas for `:seon.runtime`, `:seon.repl`, `:seon.orchestrator` are similar; full list lives in the per-namespace files.
@@ -159,6 +161,7 @@ The harness already routes incoming requests to a namespace's public fns. Phase 
    :seon.harness/needs [:seon.runtime]}
   [{::keys [query] :seon.runtime/keys [db]}]
   (d/q '[:find ... :where ...] db ...))
+
 ```
 
 The harness reads `:seon.harness/needs`, pre-resolves each db-name via the running flow's conn-process, merges into the request map under reserved keys (`:seon.runtime/db`, etc.) before invoking the fn. The fn's signature shows the dependency directly. Test code can pass an explicit `:seon.runtime/db` value to bypass.
@@ -211,6 +214,7 @@ End-to-end script that runs in the live system:
 (orchestrator/resume-agent! "a5ba3e")
 ;; => claims fresh JVM, restores @*ctx* from blob
 @*ctx* ;; => {:seon.apps.demo/scratch 42}
+
 ```
 
 If this runs end-to-end against a fresh JVM, Phase 3 is done.
@@ -282,9 +286,15 @@ If this runs end-to-end against a fresh JVM, Phase 3 is done.
 
 Single feature branch (`feature/datahike-migration`). One commit per logical step:
 
-1. Schemas + `system.edn` wiring (no behavior change)
+1. Schemas + `system.edn` wiring (no behavior change) — DONE (`0bb16ac`)
 2. `seon.flow.trace` migrated
-3. `seon.session` ns + `:seon.session` registry plumbing
+3. `seon.session` ns + `:seon.session` registry plumbing — DONE: `seon.session/launch!`,
+   `checkpoint!`, `stop!` ship the demo target end-to-end. Bypasses the disabled
+   `seon.flow/pool` (which SIGKILLs idle JVMs) by reusing `pool/spawn-agent-jvm!`
+   + `pool/nrepl-eval!` directly. Bridges to `seon.orchestrator.session/session-registry`
+   so `mcp__seon__eval :session_id <id>` finds new sessions. Schema additions:
+   `:seon.session/stopped-at` added to entity schema in `system.edn`. Integration
+   test `test/seon/session_test.clj` exercises the full lifecycle (14 assertions).
 4. `seon.orchestrator.session` migrated
 5. `seon.flow.pool` atoms → flow state
 6. `seon.flow.status` atoms → flow state
