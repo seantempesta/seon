@@ -64,9 +64,13 @@
  :seon.flow/pool
  {:size #or [#env AGENT_POOL_SIZE 3]
   :base-port #or [#env AGENT_BASE_PORT 7900]
-  :enabled? #profile {:dev true
-                      :test false   ; Unit tests mock pool structure
-                      :prod true}}
+  ;; Disabled during the datahike migration. The pool's health-check kills
+  ;; idle JVMs every ~90s because the agent classpath / startup path no
+  ;; longer matches what the health check expects. Phase 3's launch-agent!
+  ;; revisits agent JVM lifecycle holistically — re-enable then.
+  :enabled? #profile {:dev false
+                      :test false
+                      :prod false}}
 
  ;; Orchestrator Sessions
  ;; Initializes orchestrator session storage. Datalevin connection-manager
@@ -103,10 +107,72 @@
  ;; dispatch layer has something real to route to. New domain namespaces
  ;; are added here as they migrate.
  :seon.db/flow
- {:namespaces [:seon.phase2.demo]
+ ;; Phase 3 step 1: only the new DBs (session, repl, flow, orchestrator) are
+ ;; in the flow alongside the phase-2 demo fixture. `:seon.runtime` belongs
+ ;; in this list per the PRD's per-namespace DB table, but adding it here
+ ;; without also rerouting the graph/runtime data writes (later Phase 3
+ ;; steps) regresses ~111 tests that depend on the populated datalevin
+ ;; runtime DB. The :namespace-schemas entry stays so the schema is ready
+ ;; to install the moment :seon.runtime is added to :namespaces.
+ {:namespaces [:seon.session
+               :seon.repl
+               :seon.flow
+               :seon.orchestrator
+               :seon.phase2.demo]
   :backend #profile {:dev :memory
                      :test :memory
                      :prod :memory}
-  :namespace-schemas {:seon.phase2.demo [:map
-                                         [:seon.phase2.demo/id :seon.phase2.demo/id]
-                                         [:seon.phase2.demo/name :seon.phase2.demo/name]]}}}
+  ;; Each value is the entity :map schema that the conn-process installs at
+  ;; init via the Malli -> datahike bridge. Attribute keys reference Malli
+  ;; schemas that must be registered before the flow boots; the namespaces
+  ;; below are required from `seon.system` so their `schema/register!` calls
+  ;; have run by then.
+  :namespace-schemas
+  {:seon.runtime      [:map
+                       [:seon.runtime/namespace :seon.runtime/namespace]
+                       [:seon.runtime/status [:enum :running :stopped :crashed :paused]]
+                       [:seon.runtime/location [:enum :in-process :external]]
+                       [:seon.runtime/session-id {:optional true} :string]
+                       [:seon.runtime/nrepl-port {:optional true} :int]
+                       [:seon.runtime/started-at {:optional true} :inst]
+                       [:seon.runtime/stopped-at {:optional true} :inst]
+                       [:seon.runtime/component-key {:optional true} :keyword]]
+   :seon.session      [:map
+                       [:seon.session/agent :seon.session/agent]
+                       [:seon.session/namespace :seon.session/namespace]
+                       [:seon.session/port {:optional true} :seon.session/port]
+                       [:seon.session/pid {:optional true} :seon.session/pid]
+                       [:seon.session/started-at :seon.session/started-at]
+                       [:seon.session/status :seon.session/status]
+                       [:seon.session/ctx {:optional true} :seon.session/ctx]]
+   :seon.repl         [:map
+                       [:form/id :form/id]
+                       [:form/namespace :string]
+                       [:form/type :keyword]
+                       [:form/name {:optional true} :string]
+                       [:form/source :string]
+                       [:form/agent-id :string]
+                       [:form/version :int]
+                       [:form/created-at :inst]]
+   :seon.flow         [:map
+                       [:seon.flow.trace/trace-id :uuid]
+                       [:seon.flow.trace/session-id {:optional true} [:string {:min 1}]]
+                       [:seon.flow.trace/event [:enum :start :end :error :overload :forward :timeout]]
+                       [:seon.flow.trace/timestamp :inst]
+                       [:seon.flow.trace/fn {:optional true} [:string {:min 1}]]
+                       [:seon.flow.trace/ns {:optional true} [:string {:min 1}]]
+                       [:seon.flow.trace/elapsed-ms {:optional true} [:int {:min 0}]]
+                       [:seon.flow.trace/status {:optional true} [:enum :ok :error :timeout :overload]]
+                       [:seon.flow.trace/error-message {:optional true} :string]
+                       [:seon.flow.trace/entity-type :keyword]]
+   :seon.orchestrator [:map
+                       [:seon.orchestrator.session/id :seon.orchestrator.session/id]
+                       [:seon.orchestrator.session/namespace :string]
+                       [:seon.orchestrator.session/status [:enum :running :stopped :error]]
+                       [:seon.orchestrator.session/nrepl-port {:optional true} :int]
+                       [:seon.orchestrator.session/started-at {:optional true} :inst]
+                       [:seon.orchestrator.session/stopped-at {:optional true} :inst]
+                       [:seon.orchestrator.session/db-name {:optional true} :string]]
+   :seon.phase2.demo  [:map
+                       [:seon.phase2.demo/id :seon.phase2.demo/id]
+                       [:seon.phase2.demo/name :seon.phase2.demo/name]]}}}

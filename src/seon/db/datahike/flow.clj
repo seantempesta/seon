@@ -203,9 +203,9 @@
   (let [configs
         (mapv (fn [db-name]
                 {::db-name db-name
-                 ::config (namespace-config {::db-name db-name
-                                             ::backend backend
-                                             ::data-root data-root})
+                 ::config (namespace-config
+                           (cond-> {::db-name db-name ::backend backend}
+                             data-root (assoc ::data-root data-root)))
                  ::malli-schema (get namespace-schemas db-name)})
               namespaces)
 
