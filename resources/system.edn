@@ -64,13 +64,10 @@
  :seon.flow/pool
  {:size #or [#env AGENT_POOL_SIZE 3]
   :base-port #or [#env AGENT_BASE_PORT 7900]
-  ;; Disabled during the datahike migration. The pool's health-check kills
-  ;; idle JVMs every ~90s because the agent classpath / startup path no
-  ;; longer matches what the health check expects. Phase 3's launch-agent!
-  ;; revisits agent JVM lifecycle holistically — re-enable then.
-  :enabled? #profile {:dev false
+  ;; Unit tests build their own pool fixtures; live pool stays out of :test.
+  :enabled? #profile {:dev true
                       :test false
-                      :prod false}}
+                      :prod true}}
 
  ;; Orchestrator Sessions
  ;; Initializes orchestrator session storage. Datalevin connection-manager

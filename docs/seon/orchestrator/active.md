@@ -36,7 +36,7 @@ Test baseline: **4054 pass / 0 fail / 2 errors**. The 2 errors are pre-existing 
 - Phase 1 complete (nREPL :7888, HTTP :8080)
 - Phase 2 reports "failed" — **expected**. `:seon/runtime-db` is intentionally absent. Don't try to "fix" this until Phase 5.
 - Datahike flow up with 5 conn-processes
-- Agent pool intentionally **disabled** (its health-checker SIGKILLs idle JVMs every ~90s for unrelated reasons)
+- Agent pool re-enabled in `:dev`/`:prod` (size 3). Idle JVMs survive health-check cycles. The previously-feared SIGKILL bug did not reproduce in the live REPL (likely fixed by intervening commits since the disable note was written).
 
 ## Phase 3 Step Status (from `phase-3-harness-migration.md` §Phasing)
 
@@ -46,7 +46,7 @@ Test baseline: **4054 pass / 0 fail / 2 errors**. The 2 errors are pre-existing 
 | 2. `seon.flow.trace` migrated | ✅ implicit (free from step 1) |
 | 3. `seon.session` ns + registry plumbing | ✅ done |
 | 4. `seon.orchestrator.session` migrated | ✅ done — registry atom replaced by `:seon.orchestrator` rows + small live-state map |
-| 5. `seon.flow.pool` atoms → flow state | ❌ not started; pool currently disabled |
+| 5. `seon.flow.pool` atoms → flow state | ⚠️ partial — pool re-enabled (5a), atoms→flow migration deferred (5b) |
 | 6. `seon.flow.status` atoms → flow state | ✅ done — `:seon.flow/status-collector` process owns prev-counts, errors, drains |
 | 7. `seon.ns.routes` + `seon.render` atoms → flow state | ❌ not started |
 | 8. `seon.ctx` checkpoint path | ✅ done — auto-debounce `*ctx*` watcher in `seon.session/launch!` |
