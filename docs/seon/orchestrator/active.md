@@ -50,7 +50,7 @@ Test baseline: **4054 pass / 0 fail / 2 errors**. The 2 errors are pre-existing 
 | 6. `seon.flow.status` atoms → flow state | ✅ done — `:seon.flow/status-collector` process owns prev-counts, errors, drains |
 | 7. `seon.ns.routes` + `seon.render` atoms → flow state | ❌ not started |
 | 8. `seon.ctx` checkpoint path | ✅ done — auto-debounce `*ctx*` watcher in `seon.session/launch!` |
-| 9. `seon.db` agent-JVM dispatch (cross-JVM relay) | ❌ not started — agents currently can't `db/transact!` from inside their JVM |
+| 9. `seon.db` agent-JVM dispatch (cross-JVM relay) | ✅ done — per-agent Nippy/TCP relay in `seon.db.relay`; agents call `seon.db/transact!`/`query`/`pull-by-name`/`pull-many-by-name` and they route through the orchestrator |
 | 10. `seon.flow.harness` `:seon.harness/needs` DI | ❌ not started |
 | 11. `orchestrator/launch.clj` API + integration test | ✅ done (lives in `seon.session`, not `seon.orchestrator.launch`) |
 | 12. Convention meta-test + docs | ❌ not started |

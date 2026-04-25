@@ -13,6 +13,7 @@
    pool's spawn + nrepl-eval primitives but own the session lifecycle here."
   (:require [clojure.edn :as edn]
             [seon.db :as db]
+            [seon.db.relay :as relay]
             [seon.db.schema :as db-schema]
             [seon.flow.pool :as pool]
             [seon.orchestrator.session :as orch]
@@ -260,10 +261,20 @@
    `(in-ns ...)` form because nREPL's :ns header is per-message) can refer
    to `*ctx*` without qualification.
 
+   When `relay-port` is non-nil, also requires `seon.db.relay` and connects
+   it back to the orchestrator, so agent-side `seon.db/transact!`,
+   `seon.db/query`, `seon.db/pull-by-name`, `seon.db/pull-many-by-name`
+   transparently route through the relay (Phase 3 step 9).
+
    We `intern` + `setDynamic` instead of `(def ^:dynamic *ctx* ...)` because
    `nrepl-eval!` treats stderr warnings (\"name suggests dynamic\") as errors."
-  [ns-sym & [watch?]]
+  [ns-sym & {:keys [watch? relay-port]}]
   (str "(do "
+       (when relay-port
+         (str "(require '[seon.db.relay :as seon.db.relay]) "
+              "(seon.db.relay/connect! "
+              "  {:seon.db.relay/host \"127.0.0.1\" "
+              "   :seon.db.relay/port " relay-port "}) "))
        "(create-ns '" ns-sym ") "
        "(in-ns '" ns-sym ") "
        "(clojure.core/refer-clojure) "
@@ -314,7 +325,11 @@
                       default-checkpoint-interval-ms
                       checkpoint-interval-ms)
         watch? (pos? interval-ms)
-        scheduled-fut (atom nil)]
+        scheduled-fut (atom nil)
+        ;; One TCP relay server per agent. Created before the spawn so the
+        ;; bootstrap code can hand the agent a valid port to connect back to.
+        relay-handle (relay/start-server! {})
+        relay-port (:seon.db.relay/port relay-handle)]
     ;; Persist :starting before the (slow) spawn so the row is visible.
     (db/transact! :seon.session
                   [{::agent session-id
@@ -324,6 +339,7 @@
     (let [jvm (try (#'pool/spawn-agent-jvm! port)
                    (catch Exception spawn-err
                      (release-reserved-port! port)
+                     (relay/stop-server! relay-handle)
                      (try (db/transact! :seon.session
                                         [{::agent session-id ::status :crashed}])
                           (catch Exception _))
@@ -333,7 +349,9 @@
       ;; JVM is bound to the port; reservation no longer needed.
       (release-reserved-port! port)
       (try
-        (pool/nrepl-eval! port (agent-bootstrap-code namespace watch?))
+        (pool/nrepl-eval! port (agent-bootstrap-code namespace
+                                                     :watch? watch?
+                                                     :relay-port relay-port))
         (bind-namespace! port namespace)
         (swap! live-sessions assoc session-id
                {::session-id session-id
@@ -341,6 +359,7 @@
                 ::port port
                 ::pid pid
                 ::last-checkpoint-version 0
+                ::relay-handle relay-handle
                 :process proc})
         (register-with-orchestrator! session-id namespace port started-at)
         (db/transact! :seon.session
@@ -367,6 +386,7 @@
           (when-let [^java.util.concurrent.ScheduledFuture fut @scheduled-fut]
             (try (.cancel fut false) (catch Exception _)))
           (try (.destroy proc) (catch Exception _))
+          (try (relay/stop-server! relay-handle) (catch Exception _))
           (swap! live-sessions dissoc session-id)
           (unregister-from-orchestrator! session-id)
           (try (db/transact! :seon.session
@@ -430,6 +450,9 @@
       (catch Exception e
         (log/warn "Agent JVM did not exit cleanly"
                   {:session-id session-id :error (.getMessage e)})))
+    ;; Tear down the per-agent relay server now that the JVM is gone.
+    (when-let [rh (::relay-handle entry)]
+      (try (relay/stop-server! rh) (catch Exception _)))
     (swap! live-sessions dissoc session-id)
     (unregister-from-orchestrator! session-id)
     (db/transact! :seon.session
