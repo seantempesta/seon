@@ -1,106 +1,116 @@
 ---
 type: orchestrator
-tags: [index, issue]
+tags: [index, database]
 status: active
 ---
 # Active Work
 
 ## Recovery
 
->
 > Read this after context loss. It tells you where we are.
 
-**Work:** Documentation Audit & Repair
-**Branch:** feature/refinement
-**Last updated:** 2026-03-11
+**Work:** Datahike Migration — Phase 3 (Agent Playground & Harness)
+**Branch:** `feature/datahike-migration`
+**Last updated:** 2026-04-25
 
-## Doc Audit Pipeline
+## What's Going On
 
-Systematic verification of ~230 active docs against source code and REPL.
-Agents fix docs in place, orchestrator reviews and commits per wave.
-Multiple verification passes expected — first pass catches structural issues,
-subsequent passes deepen accuracy. After active docs are solid, archive
-review expands milestones and surfaces undocumented/untested work.
+We're replacing Datalevin (external JVM, broken event-loop, crash-loops at boot) with embedded Datahike. PRD set: `docs/prds/datahike-migration/{prd,decisions,notes,phase-3-harness-migration}.md`.
 
-### Wave 1: Component Notes vs Code (5 agents)
+Phases shipped:
 
-| # | Agent | Scope | Status | Verified |
-|---|-------|-------|--------|----------|
-| V1 | Data layer | `components/database.md`, `schema-system.md`, `runtime.md` | complete | 5 fixes |
-| V2 | Flow layer | `components/flow-topology.md`, `harness.md`, `context.md` | complete | 5 fixes |
-| V3 | Graph+Render | `components/code-graph.md`, `renderer.md`, `namespace-lifecycle.md` | complete | 4 fixes |
-| V4 | Web+Agent | `components/web-layer.md`, `agent-system.md` | complete | 6 fixes |
-| V5 | Dev+Testing | `components/dev-tools.md`, `testing.md`, `system-lifecycle.md` | complete | 5 fixes |
+| Phase | Commit | What |
+|---|---|---|
+| 1 | `db40ce2` | Schema bridge + flow topology (`conn-process`, `tx-bus`, `:seon.db/flow` Integrant key) |
+| 2 | `9455f3f` | `seon.db` dispatches per-namespace to datahike flow + auto-stamp `:seon.db/namespace` |
+| Disable | `d453ae5` | Datalevin removed from `system.edn`; load-cycle fix in `seon.db` |
+| 3 step 1 | `0bb16ac` | Five DBs in `:seon.db/flow` (`:seon.session :seon.repl :seon.flow :seon.orchestrator :seon.phase2.demo`) |
+| 3 demo | `baa2b41` | `seon.session/launch!` / `checkpoint!` / `stop!` end-to-end |
 
-### Wave 2: Architecture + Concepts + Conventions (3 agents)
+Test baseline: **4054 pass / 0 fail / 2 errors**. The 2 errors are pre-existing (`seon.db.pipeline-test`, `seon.health.workout-test`); both depend on the disabled datalevin runtime DB and disappear in Phase 4.
 
-| # | Agent | Scope | Status |
-|---|-------|-------|--------|
-| V6 | Architecture | `architecture/overview.md`, `decisions/001-007` | complete | 6 fixes |
-| V7 | Concepts | `concepts/` (9 files) | complete | 7 fixes |
-| V8 | Conventions+Indexes | `conventions.md`, `_dashboard.md`, `namespaces.md`, `prds.md` | complete | 7 fixes |
+## Boot Reality
 
-### Wave 3: Issues + Reference (2 agents)
+`./bin/run` produces a clean degraded boot in ~3s:
 
-| # | Agent | Scope | Status |
-|---|-------|-------|--------|
-| V9 | Issue triage | `orchestrator/issues/` (39 files) | complete | 1 resolved, 3 annotated |
-| V10 | Reference staleness | `reference/` (14 files) | complete | 5 fixed, 1 issue created |
+- Phase 1 complete (nREPL :7888, HTTP :8080)
+- Phase 2 reports "failed" — **expected**. `:seon/runtime-db` is intentionally absent. Don't try to "fix" this until Phase 5.
+- Datahike flow up with 5 conn-processes
+- Agent pool intentionally **disabled** (its health-checker SIGKILLs idle JVMs every ~90s for unrelated reasons)
 
-### Wave 4: Vision + Capabilities (2 agents)
+## Phase 3 Step Status (from `phase-3-harness-migration.md` §Phasing)
 
-| # | Agent | Scope | Status |
-|---|-------|-------|--------|
-| V11 | Milestones | `vision/index.md`, `vision/m1-m8` | complete | 2 fixes, 1 issue |
-| V12 | Capabilities | `vision/capabilities/` (30 files) | complete | 5 fixes |
+| Step | Status |
+|------|--------|
+| 1. Schemas + system.edn wiring | ✅ done |
+| 2. `seon.flow.trace` migrated | ✅ implicit (free from step 1) |
+| 3. `seon.session` ns + registry plumbing | ✅ done |
+| 4. `seon.orchestrator.session` migrated | ⚠️ partial — entity schema in, registry atom not yet flow-state |
+| 5. `seon.flow.pool` atoms → flow state | ❌ not started; pool currently disabled |
+| 6. `seon.flow.status` atoms → flow state | ❌ not started |
+| 7. `seon.ns.routes` + `seon.render` atoms → flow state | ❌ not started |
+| 8. `seon.ctx` checkpoint path | ⚠️ partial — explicit `checkpoint!` works, no auto-debounce watcher |
+| 9. `seon.db` agent-JVM dispatch (cross-JVM relay) | ❌ not started — agents currently can't `db/transact!` from inside their JVM |
+| 10. `seon.flow.harness` `:seon.harness/needs` DI | ❌ not started |
+| 11. `orchestrator/launch.clj` API + integration test | ✅ done (lives in `seon.session`, not `seon.orchestrator.launch`) |
+| 12. Convention meta-test + docs | ❌ not started |
 
-### Wave 5: PRDs (1 agent)
+## File Touchpoints (next agent's planning)
 
-| # | Agent | Scope | Status |
-|---|-------|-------|--------|
-| V13 | PRD audit | `prds/` (22 dirs, ~105 files) | complete | 10 status fixes |
+- Step 4: `src/seon/orchestrator/session.clj` (`session-registry` defonce → flow state)
+- Step 5: `src/seon/flow/pool.clj` (~930 LOC, big refactor; also fix the SIGKILL-cycle bug)
+- Step 6: `src/seon/flow/status.clj`
+- Step 7: `src/seon/ns/routes.clj`, `src/seon/render.clj`
+- Step 8: extend `seon.session/launch!` with a `*ctx*` watcher calling `checkpoint!`
+- Step 9: extend `src/seon/db.clj` agent-JVM branch — when no local datahike flow, route via `topology.clj/start-cross-ns-relay!`
+- Step 10: `src/seon/flow/harness.clj` — read `:seon.harness/needs`, pre-resolve, merge into request map
+- Step 12: new `test/seon/dev/conventions_check_test.clj`
 
-### Wave 6: Reference Cleanup + Skills Audit
+## Verified Demo (`baa2b41`)
 
-| # | Agent | Scope | Status |
-|---|-------|-------|--------|
-| V14 | Reference rewrites | Fix 5 partially-stale reference docs (XTDB→Datalevin, dead paths) | complete | 5 docs fixed |
-| V15 | Skills audit | Audit `.claude/skills/` — verify patterns match source, add doc cross-refs | complete | 8 fixes |
+```clojure
+(require '[seon.session :as ses] '[seon.db :as db])
+(def res (ses/launch! {:seon.session/namespace 'seon.apps.demo}))
+;; => {::ses/session-id "a5ba3e", ::ses/nrepl-port 7980, ::ses/pid 30739}
 
-### Wave 7: Archive Review (3 agents)
+;; via mcp__seon__eval :session_id "a5ba3e":
+;;   (swap! *ctx* assoc :scratch 42)
+;;   (defn double-scratch [] (* 2 (:scratch @*ctx*)))
+;;   (double-scratch)  ;; => 84
 
-Goal: Surface undocumented capabilities, incomplete work, dependencies, and
-lessons from 143 archived docs to enrich milestones and issue tracking.
+(ses/checkpoint! {::ses/session-id (::ses/session-id res)})
+;; row at [:seon.session/agent "a5ba3e"] now has :seon.session/ctx "{:scratch 42}"
 
-| # | Agent | Scope | Status |
-|---|-------|-------|--------|
-| V16 | Infrastructure archives | agent-isolation, namespace-isolation, nrepl-lifecycle, dynamic-context, seon-transform, sql-migration, xtdb-browser, observatory-xtdb | complete | 2 issues, 1 capability fix |
-| V17 | Dev tooling archives | unified-dev-hook, auto-test-hook, test-suite-fixes, code-cleanup, truncated-log-view, namespace-render-toggle | complete | 3 issues, 1 doc update |
-| V18 | Feature archives | algorithmic-trading-agent, clojure-claude-sdk, primer, provider-agnostic-agents, reactive-ui, session-analytics, custom-renderers, live-updates, sse-live-reload, bulk-loader, agent-observatory, observatory-polish, ai-namespace-refactor, skills | complete | 1 doc update |
+(ses/stop! {::ses/session-id (::ses/session-id res)})
+;; status :stopped, :stopped-at populated
+```
 
-### Wave 7b: V16 Deep Processing (orchestrator)
+## Operational Gotchas
 
-V16 infrastructure archive report identified 14 gaps. Processed all:
+- **Aliased keywords don't work in `mcp__seon__eval`** — the eval'd form is read in a fresh ns context. Use literal `:seon.db.datahike.flow/pids` instead of `::f/pids`.
+- **`integrant.repl.state/system` is a dynamic var.** Idiom: `(deref (resolve 'integrant.repl.state/system))`.
+- **`s` alias collides** with `clojure.spec.alpha` in the orchestrator REPL. Use `:as ses` or `(ns-unalias *ns* 's)` first.
+- **Inspect the running flow:** `(let [sys (deref (resolve 'integrant.repl.state/system))] (sort (keys (:seon.db.datahike.flow/pids (:seon.db/flow sys)))))` → `(:seon.flow :seon.orchestrator :seon.phase2.demo :seon.repl :seon.session)`.
+- **Restart cleanly:** `lsof -ti :7888 :8080 2>/dev/null | xargs -r kill ; ps aux | grep -E "seon\.runner|agent-runner" | grep -v grep | awk '{print $2}' | xargs -r kill -9 ; ./bin/run`.
 
-- **Acted on**: agent-isolation gaps (3), launch-agent nREPL blocking (issue), stuck detection (issue), agent-system.md +5 design decisions, data-explorer prior art, agent-context turn continuation gap, conventions.md dynamic namespace hazards
-- **Deferred**: ADR "Namespace as unique identifier" (architecture, not urgent), frozen-time pattern (speculative)
-- **Already covered**: max-turns (in code), sliding buffer (deployed), ping introspection (subsumed by stuck-detection issue)
+## Smells Flagged Across Phases
 
-### Status: COMPLETE
+- `seon.repl/eval-form!` `::result [:any ...]` — wire-protocol; should be `:seon.flow/dynamic`.
+- `seon.runtime/agent-run-entity-schema` uses `:seon.db/ref` but actual writes pass entity ids — will fail when `:seon.runtime` joins the flow.
+- `seon.flow.pool/spawn-agent-jvm!` and `port-bound?` are private (`defn-`) but natural callers are outside the pool — should be public for Phase 3 work.
+- `:seon.session/agent` (1+ chars) and `:seon.orchestrator.session/id` (4–6 chars) both represent session ids but with different validation — unify in Phase 3 cleanup.
+- `mcp__seon__eval` evaluates in the cloned nREPL session's `user` ns, not the agent's intended ns. Workaround in `seon.session/launch!` interns `*ctx*` in both. Real fix: pass `:ns` per-message in the nREPL bridge.
 
-All 7 waves + follow-up processing done. 10 commits, ~100 doc fixes, 7 new issues, 3 capability updates, 2 convention additions.
+## Out of Scope (Phase 4+)
 
-<!-- Status: planned -> in-progress -> complete -> verified | failed -->
+- Domain namespace migration (`seon.health.*`, `seon.trading.*`, `seon.ai.*`)
+- Datalevin source deletion (Phase 5)
+- Datahike named branches for clone-and-merge
+- Cross-process security filters (`d/filter` grants)
+- Token-aware truncation in AI render output
+- Full coverage of `:seon.render/ai` renderers
 
-## Session Notes
+## Issue Notes
 
-- 2026-03-11: Vault reorganization. Moved from iCloud to docs/. Created orchestrator workspace, issue notes, PRD index.
-- 2026-03-11: Phase B complete. 8 milestone docs, 30 capability notes, 36 issues, 14 component notes. M1-M5 verified.
-- 2026-03-11: Doc audit started. Wave 1 launched — 5 verifier agents checking component notes against source code.
-- 2026-03-11: Wave 1 complete. 25 fixes across 14 component docs. 3 new issues created.
-- 2026-03-11: Wave 2 complete. 20 fixes across architecture, concepts, conventions, indexes. 1 new issue.
-- 2026-03-11: Wave 3 complete. 1 issue resolved, 3 annotated, 34 confirmed open. 5 reference docs fixed, 1 issue created.
-- 2026-03-11: Waves 4+5 complete. 2 milestone fixes, 5 capability fixes, 10 PRD status corrections. 1 new issue (nippy-transitive-dep).
-- 2026-03-11: Wave 6 complete. 5 reference docs fixed, 8 skill fixes + cross-refs. All active docs verified. Archive review launched.
-- 2026-03-11: Wave 7 complete. Archive review surfaced 5 new issues, 2 doc updates, 1 capability fix.
-- 2026-03-11: V16 deep processing. Enriched agent-system.md (+5 decisions), data-explorer (prior art), agent-context (turn continuation), conventions.md (dynamic ns hazards). Doc audit COMPLETE.
+- [[orchestrator/issues/datalevin-disabled]] — Datalevin's broken event-loop and the disable workaround
+- [[orchestrator/issues/agent-pool-sigkill-cycle]] — pool's health-check SIGKILLs idle JVMs (deferred to Phase 3 step 5)
