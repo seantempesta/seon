@@ -252,42 +252,6 @@
 ;;; Operational Health Checks (beyond port connectivity)
 ;;; ---------------------------------------------------------------------------
 
-(defn- check-datalevin-query
-  "Check that Datalevin can actually execute a query, not just accept TCP."
-  []
-  (let [start (System/currentTimeMillis)]
-    (try
-      (require 'seon.db)
-      (let [query-fn (resolve 'seon.db/query)
-            result (query-fn :seon.runtime
-                             '[:find ?e . :where [?e :db/ident _]])]
-        {:ok true
-         :latency-ms (- (System/currentTimeMillis) start)
-         :details {:result-type (type result)}})
-      (catch Exception e
-        {:ok false
-         :latency-ms (- (System/currentTimeMillis) start)
-         :error (.getMessage e)}))))
-
-(defn- check-flow-responsive
-  "Check that the infrastructure flow can process a request within 5s.
-   Sends a no-op read (query for a non-existent entity) through the flow."
-  []
-  (let [start (System/currentTimeMillis)]
-    (try
-      (require 'seon.db)
-      (let [query-fn (resolve 'seon.db/query)
-            ;; Simple query that exercises the flow reader path
-            result (query-fn :seon.runtime
-                             '[:find ?e :where [?e :seon.runtime/namespace "___readiness-probe___"]])]
-        {:ok true
-         :latency-ms (- (System/currentTimeMillis) start)
-         :details {:probe-result (count result)}})
-      (catch Exception e
-        {:ok false
-         :latency-ms (- (System/currentTimeMillis) start)
-         :error (.getMessage e)}))))
-
 (defn- check-runtime-persisted
   "Check that runtime instances are registered in memory."
   []
@@ -314,7 +278,7 @@
    - :unhealthy - Critical checks fail (datalevin or flow down)"
   [checks]
   (let [phase @startup-phase
-        critical-keys [:datalevin :datalevin-query :flow-responsive]
+        critical-keys [:datalevin]
         critical-checks (select-keys checks critical-keys)
         critical-down? (and (seq critical-checks)
                             (some (fn [[_k v]] (and (map? v) (not (:ok v))))
@@ -369,9 +333,7 @@
                          :tailwind tailwind-check
                          :agents agents-check
                          :pool pool-check}
-                 operational? (assoc :datalevin-query (check-datalevin-query)
-                                     :flow-responsive (check-flow-responsive)
-                                     :runtime-persisted (check-runtime-persisted)))
+                 operational? (assoc :runtime-persisted (check-runtime-persisted)))
         status (determine-status checks)]
     {::status status
      ::timestamp (java.util.Date.)
@@ -388,15 +350,11 @@
    Called by core.clj between Phase 2 completion and 'System ready' log.
 
    Checks:
-     :datalevin-query   - Can we execute a Datalevin query?
-     :flow-responsive   - Can we route a request through the flow?
      :runtime-persisted - Are runtime instances registered?
 
    Scanner and pool are NOT required for readiness (background work)."
   []
-  (let [checks {:datalevin-query (check-datalevin-query)
-                :flow-responsive (check-flow-responsive)
-                :runtime-persisted (check-runtime-persisted)}
+  (let [checks {:runtime-persisted (check-runtime-persisted)}
         all-pass? (every? :ok (vals checks))
         failed (into {} (filter (fn [[_k v]] (not (:ok v))) checks))]
     {:all-pass? all-pass?
@@ -446,14 +404,12 @@
   "Log a clean summary of all services after startup completes."
   []
   (let [system (get-system)
-        dtlv (:seon.db.datalevin/server system)
         caddy (:seon.web/caddy system)
         tw (:seon.web/tailwind system)
         pool-check (check-pool)
         pool-detail (:details pool-check)
         mode-str (fn [component] (if (:adopted? component) "adopted" "started"))
-        lines (cond-> [(str "  Datalevin  :" (or (:port dtlv) 8898) "  (" (mode-str dtlv) ")")
-                        "  nREPL      :7888  (started)"
+        lines (cond-> ["  nREPL      :7888  (started)"
                         "  HTTP       :8080  (started)"]
                 caddy
                 (conj (str "  Caddy      :3030  (" (mode-str caddy) ")"))

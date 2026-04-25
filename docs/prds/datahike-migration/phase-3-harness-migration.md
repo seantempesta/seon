@@ -290,8 +290,8 @@ Single feature branch (`feature/datahike-migration`). One commit per logical ste
 2. `seon.flow.trace` migrated
 3. `seon.session` ns + `:seon.session` registry plumbing — DONE: `seon.session/launch!`,
    `checkpoint!`, `stop!` ship the demo target end-to-end. Bypasses the disabled
-   `seon.flow/pool` (which SIGKILLs idle JVMs) by reusing `pool/spawn-agent-jvm!`
-   + `pool/nrepl-eval!` directly. Bridges to `seon.orchestrator.session/session-registry`
+   `seon.flow/pool` (which SIGKILLs idle JVMs) by reusing
+   `pool/spawn-agent-jvm!` and `pool/nrepl-eval!` directly. Bridges to `seon.orchestrator.session/session-registry`
    so `mcp__seon__eval :session_id <id>` finds new sessions. Schema additions:
    `:seon.session/stopped-at` added to entity schema in `system.edn`. Integration
    test `test/seon/session_test.clj` exercises the full lifecycle (14 assertions).
