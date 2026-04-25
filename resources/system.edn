@@ -168,12 +168,15 @@
                        [:seon.flow.trace/entity-type :keyword]]
    :seon.orchestrator [:map
                        [:seon.orchestrator.session/id :seon.orchestrator.session/id]
-                       [:seon.orchestrator.session/namespace :string]
-                       [:seon.orchestrator.session/status [:enum :running :stopped :error]]
-                       [:seon.orchestrator.session/nrepl-port {:optional true} :int]
-                       [:seon.orchestrator.session/started-at {:optional true} :inst]
-                       [:seon.orchestrator.session/stopped-at {:optional true} :inst]
-                       [:seon.orchestrator.session/db-name {:optional true} :string]]
+                       [:seon.orchestrator.session/namespace :seon.orchestrator.session/namespace]
+                       [:seon.orchestrator.session/status :seon.orchestrator.session/status]
+                       [:seon.orchestrator.session/nrepl-port {:optional true} :seon.orchestrator.session/nrepl-port]
+                       [:seon.orchestrator.session/started-at {:optional true} :seon.orchestrator.session/started-at]
+                       [:seon.orchestrator.session/stopped-at {:optional true} :seon.orchestrator.session/stopped-at]
+                       [:seon.orchestrator.session/db-name {:optional true} :seon.orchestrator.session/db-name]
+                       [:seon.orchestrator.session/nrepl-session-id {:optional true} :seon.orchestrator.session/nrepl-session-id]
+                       [:seon.orchestrator.session/last-activity-at {:optional true} :seon.orchestrator.session/last-activity-at]
+                       [:seon.orchestrator.session/eval-count {:optional true} :seon.orchestrator.session/eval-count]]
    :seon.phase2.demo  [:map
                        [:seon.phase2.demo/id :seon.phase2.demo/id]
                        [:seon.phase2.demo/name :seon.phase2.demo/name]]}}}
