@@ -15,6 +15,7 @@
             [seon.db :as db]
             [seon.db.schema :as db-schema]
             [seon.flow.pool :as pool]
+            [seon.orchestrator.session :as orch]
             [seon.runtime :as runtime]
             [seon.schema :as schema]
             [taoensso.timbre :as log]))
@@ -131,31 +132,22 @@
 ;;;
 ;;; mcp__seon__eval routes by session-id via
 ;;;   (seon.orchestrator.session/get-session-port {::id <id>})
-;;; which reads from `seon.orchestrator.session/session-registry`. Until that
-;;; atom migrates to flow state (Phase 3 cleanup), we write into it directly
-;;; so MCP can find sessions launched here. We avoid taking a hard require
-;;; cycle by resolving the var lazily.
+;;; which reads from the `:seon.orchestrator` datahike DB. We persist the row
+;;; via orch/register-external-session! / unregister-external-session! so MCP
+;;; eval routing finds sessions launched here.
 
-(defn- orch-registry-atom
-  "Resolve the orchestrator's session-registry atom. Returns the atom or nil
-   if the var is unbound / unresolvable."
-  []
-  (when-let [v (resolve 'seon.orchestrator.session/session-registry)]
-    (let [a (var-get v)]
-      (when (instance? clojure.lang.IAtom a) a))))
-
-(defn- orch-registry []
-  (some-> (orch-registry-atom) deref))
-
-(defn- register-with-orchestrator! [session-id entry]
-  ;; TODO Phase 3 cleanup: migrate seon.orchestrator.session/session-registry
-  ;; to flow state and stop reaching across namespaces here.
-  (when-let [a (orch-registry-atom)]
-    (swap! a assoc session-id entry)))
+(defn- register-with-orchestrator!
+  [session-id namespace port started-at]
+  (orch/register-external-session!
+   {:seon.orchestrator.session/id session-id
+    :seon.orchestrator.session/namespace (str namespace)
+    :seon.orchestrator.session/nrepl-port port
+    :seon.orchestrator.session/started-at started-at
+    :seon.orchestrator.session/db-name (str namespace)}))
 
 (defn- unregister-from-orchestrator! [session-id]
-  (when-let [a (orch-registry-atom)]
-    (swap! a dissoc session-id)))
+  (orch/unregister-external-session!
+   {:seon.orchestrator.session/id session-id}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Port allocation
@@ -270,16 +262,7 @@
                 ::port port
                 ::pid pid
                 :process proc})
-        (register-with-orchestrator! session-id
-                                     {:seon.orchestrator.session/id session-id
-                                      :seon.orchestrator.session/namespace namespace
-                                      :seon.orchestrator.session/status :running
-                                      :seon.orchestrator.session/nrepl-port port
-                                      :seon.orchestrator.session/started-at started-at
-                                      :seon.orchestrator.session/db-name (str namespace)
-                                      :seon.orchestrator.session/last-activity-at started-at
-                                      :seon.orchestrator.session/eval-count 0
-                                      :seon.orchestrator.session/current-eval nil})
+        (register-with-orchestrator! session-id namespace port started-at)
         (db/transact! :seon.session
                       [{::agent session-id
                         ::port port

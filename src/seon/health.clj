@@ -164,16 +164,12 @@
   "Get current resource utilization."
   []
   (try
-    (require 'seon.orchestrator.session)
-    (let [session-ns (find-ns 'seon.orchestrator.session)
-          session-registry @(ns-resolve session-ns 'session-registry)
+    (let [list-fn (requiring-resolve 'seon.orchestrator.session/list-agent-sessions)
+          session-ns (find-ns 'seon.orchestrator.session)
           running-agents (agent/agents {})
-          ;; Pool status via dynamic require
           pool-jvms (try
                       (require 'seon.flow.pool)
                       (let [pool-ns (find-ns 'seon.flow.pool)]
-                        ;; agent-pool is a defonce atom; ns-resolve returns the var
-                        ;; so we need var->atom->pool-map (double deref)
                         (if-let [pool-var (ns-resolve session-ns 'agent-pool)]
                           (if-let [pool @@pool-var]
                             (let [status ((ns-resolve pool-ns 'pool-status) pool)]
@@ -183,7 +179,7 @@
                       (catch Exception _ 0))]
       {:agents (count running-agents)
        :pool-jvms pool-jvms
-       :sessions (count @session-registry)})
+       :sessions (count (list-fn {}))})
     (catch Exception e
       (log/warn e "Failed to check resources")
       {:agents 0
