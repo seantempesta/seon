@@ -3,7 +3,9 @@
 **Date:** 2026-05-07
 **Thread origin:** Open questions Q1 + Q3 from the agent's CLAUDE.md
 **Method:** Two Gemini-3-Flash agentic web-research passes (May 2026 corpus). Synthesis here, not transcripts.
-**Posture:** Honest, not eager. The pitch leans Datomic-style fact graph + agent-evolves-over-time. Both ideas have prior art that complicates them. Recording the complications.
+**Posture:** Honest, not eager — but also honest about what the pitch is actually claiming. The Datomic-style fact graph is doing real load-bearing work in Sean's vision (sovereign, retractable, user-controllable memory) that conventional transcript+RAG cannot replicate. The "agent evolves" framing is sloppier and needs correction. Both threads below: steelman first, then complications.
+
+**Calibration note (2026-05-07):** an earlier pass of this doc framed the fact graph as "overrated" and recommended falling back to transcript + vector + small overlay. That framing pattern-matched to nearby industry critiques and quietly traded away the part of Sean's vision that is *most* differentiated — the user-sovereign retractable graph. Revised below to steelman the fact-graph-as-sovereign-layer position before listing the genuine engineering challenges (which remain real).
 
 ---
 
@@ -18,7 +20,17 @@ This thread interrogates both halves. The conclusion in advance: the fact graph 
 
 ---
 
-## Fact graph vs transcript + RAG (Q1)
+## The fact graph as the source of sovereign truth (Q1)
+
+### Retractability as a trust primitive — the load-bearing argument
+
+Before listing technical tradeoffs, the political/structural argument the earlier draft buried: **a Datomic-style EAVT graph is the only memory model that fulfills the privacy-first promise the agent makes to the user.** Forgetting is a hard database operation — `retract :user/employer "AcmeCo"` at transaction T and the assertion is gone from current state, queryable as historical only if explicitly asked, and removable from the log entirely on a user-issued purge. The user can audit *exactly* what the system believes about them at this instant: it's a finite, enumerable set of asserted datoms.
+
+A vector store cannot guarantee this. Embeddings are lossy, distributed, and orphaned: deleting a chunk leaves residual influence in any downstream summary, fine-tune, or cached retrieval. "Tombstones" mark intent to forget but cannot prove the chunk's content didn't bleed into a summary written six weeks ago. For a personal AI that promises *your mental state is yours*, this is not a small detail — it is the structural difference between a product whose privacy promise is enforceable and one whose privacy promise is a marketing claim.
+
+Sean's vision treats the fact graph as the **sovereign layer** under everything else. The transcript and any vector index are *derived* artifacts the user can ask the agent to rebuild from the graph. The graph is the source of truth the user owns; everything else is cache. This inverts the conventional "transcript is primary, graph is overlay" framing that most current systems (Letta, Mem0, Zep, Cognee) ship — and that inversion is the architectural commitment, not a research finding to argue against.
+
+If we abandon the graph-as-primary frame, we abandon the user-sovereignty frame with it. Worth being explicit about that before reaching for the convenient "transcript+RAG with small overlay" compromise.
 
 ### What a Datomic-style temporal fact graph buys you
 
@@ -29,8 +41,8 @@ This thread interrogates both halves. The conclusion in advance: the fact graph 
 
 ### What it loses
 
-- **Semantic flattening.** "I'm a bit anxious about the wedding, maybe we should scale back the guest list" → `(user, feels, anxious, T)` and `(user, prefers, smaller_wedding, T)` strips the *contingency* ("maybe we should…"), the *tonal hedging*, and the implicit relationship dynamic. The fact graph is structurally lossy on exactly the kind of nuance that makes the agent not feel generic.
-- **Entity resolution hell at scale.** Over months, "the project," "the launch," "Project X," and "the Q3 push" co-refer. Extraction pipelines fail this routinely. The graph fragments — the agent "knows" 12 things but can't see they're about the same thing. This is the dominant failure mode reported in Zep / Graphiti deployments.
+- **Semantic flattening — if naively schemed.** "I'm a bit anxious about the wedding, maybe we should scale back the guest list" reduced to `(user, feels, anxious, T)` and `(user, prefers, smaller_wedding, T)` strips the *contingency* ("maybe we should…"), the *tonal hedging*, and the relationship dynamic. **But this is a schema-design failure, not an inherent property of the graph.** The schema can include attributes for tonal contingency (`:utterance/hedging-level`, `:utterance/raw-text`, `:assertion/confidence`), and the graph can co-store the original utterance alongside extracted facts. The flattening is a choice about what gets stored, not a structural limit. Worth noting because the conventional critique treats lossiness as inherent — it isn't.
+- **Entity resolution as the core engineering challenge.** Over months, "the project," "the launch," "Project X," and "the Q3 push" co-refer. Extraction pipelines fail this routinely. This is the *primary* engineering problem the agent-as-DB-manager has to solve — and it's solvable. Approaches: (a) confirm-with-user when extraction confidence is low ("Is this the same project we discussed in March?"), (b) embed entity nodes alongside facts and merge on cosine + structural agreement, (c) periodic LLM-driven graph hygiene passes that surface candidate merges to the user. Zep / Graphiti deployments report this as the dominant failure mode because they ship it without a human-in-the-loop merge surface; the agent's user-visible memory audit (sub-question Q9 below) directly addresses it. **Reframe: entity resolution is what the agent is paid to do, not a reason to abandon the architecture.**
 - **Write amplification.** Every turn becomes: extract candidate facts (LLM call) → resolve entities (lookups + maybe LLM call) → dedup against existing → commit. 5–10× the cost of `embed and append`.
 - **Schema drift.** A multi-month personal graph with evolving attributes is a data-engineering migration problem. Re-indexing a vector store is `embed --batch`.
 - **Hidden assumption: facts compose.** The pitch assumes a projection function `fn(@db, situation)` can reconstruct relevant context. For factual recall (allergies, names, addresses), yes. For *vibe* — how this user talks, what makes them feel seen — the projection is reconstructing a transcript from atoms, badly.
@@ -61,9 +73,16 @@ Nobody serious is running pure-A or pure-B. The convergent design:
 
 ### Implication for the agent's pitch
 
-The "context window is a projection of a fact DB" framing is intellectually clean and feels load-bearing. It probably isn't. The correct framing is closer to: **transcript + vector store is the substrate; a small Datomic-style overlay holds canonical mutable facts and gets used to override retrieval when the two disagree.** The fact graph is a *correctness layer*, not a memory replacement.
+The "context window is a projection of a fact DB" framing is intellectually clean *and* load-bearing — but for a reason the conventional critique misses. The graph is doing two jobs: (1) **technical** — multi-hop, temporal, retractable recall, and (2) **structural** — being the user-sovereign artifact that makes the privacy promise enforceable. A transcript+vector substrate handles (1) better in some respects (tonal fidelity, cheap writes, no premature schema) but cannot deliver (2) at all.
 
-That's a smaller, more defensible claim than the pitch currently makes. Worth saying out loud before Sean stakes the demo on the strong form.
+The honest design therefore is **graph-primary with derived caches**, not "graph-overlay on transcript." Specifically:
+- The Datomic-style graph stores asserted facts *plus* the raw utterances that produced them (as `:source/utterance` attributes), so tonal/contingency content is preserved in the sovereign layer rather than thrown away on the way to a separate transcript.
+- A vector index over the utterance attributes provides cheap semantic retrieval — but it is a *cache*, rebuildable from the graph at any time, with no independent authority.
+- The cognitive-layering moves from production systems (working memory, GraphRAG community summaries, long-context reranker) all live above the graph, not parallel to it.
+
+This is a *more* ambitious claim than the conventional "transcript+RAG with small overlay" compromise — and it's the claim Sean's pitch is actually making. The earlier draft of this doc softened it into the conventional position; that softening traded away the privacy-first promise and should not be what we ship to the client lead.
+
+What's still honest pushback: the engineering bill is real. Schema design for tonal/contingency preservation, entity-resolution agent loops, write-amplification under sustained use, and migration paths as the schema evolves are all real costs. They are *engineering challenges the agent pays for as the price of the sovereign-memory promise* — not arguments to abandon the architecture.
 
 ---
 
@@ -104,12 +123,12 @@ After ~6 months of daily interaction (~5M tokens of history), every system revie
 
 ## What carries over to the agent
 
-1. **Don't lead with pure fact-graph.** Lead with transcript + vector + a small, opinionated temporal-graph overlay for canonical mutable facts (identity, relationships, employer, active goals, explicit preferences). Bi-temporal edges. Steal Zep's design here.
-2. **Reject Mem0-style atomic fact extraction.** It's a recall regression in disguise — freezes stale beliefs and presents them with false authority.
-3. **The agent doesn't "manage its own memory" as a soft behavior.** Letta's failure mode (agent forgets to write) is a hard lesson. If memory writes are agent-driven, they need to be *forced* by the framework on specific signals (turn end, contradiction detected, explicit user assertion), not left to LLM judgment.
-4. **Plan for the user-visible memory audit from day one.** It's the only known mitigation for 6-month interference. It's also a product-differentiating *trust* feature for a personal sidecar that promises mental-state privacy.
-5. **Drop "self-evolving agent" from the pitch.** It's vapor in everyone's hands today. The honest version is "the agent's prompt + skill set + memory schema improve over time via offline trajectory scoring" — same idea, accurate framing, doesn't borrow Nous's pitch deck.
-6. **the agent's wedge isn't memory-architecture novelty — it's the personal-vs-work boundary plus cultural fluency.** The memory layer is table stakes; treat it as solved-enough by combining the best parts of Zep + transcript-RAG.
+1. **Lead with the graph as the sovereign layer.** Datomic-style EAVT with bi-temporal edges (steal Zep's design *here*), storing both extracted facts and source utterances. The transcript and vector index are derived caches, not independent stores. This inversion of the conventional "transcript+overlay" frame is the architectural commitment that makes the privacy promise enforceable.
+2. **Reject Mem0-style atomic fact extraction *that discards source*.** Mem0's failure mode (frozen stale beliefs without retraction surface) is a regression. The fix isn't "no extraction" — it's "extraction with retractability and source preservation." That's exactly what an EAVT graph with `:source/utterance` attributes provides.
+3. **Forced writes on hard signals, not soft LLM judgment.** Letta's lesson stands: writes triggered by explicit framework signals (turn end, contradiction detected, explicit user assertion). Sub-question Q11 below — contradiction-driven writes as the primary signal — is worth prototyping early.
+4. **User-visible memory audit is structural, not optional.** It's the only known mitigation for 6-month interference, the entity-resolution merge surface, *and* the visible expression of the user-sovereignty promise. First-class product surface.
+5. **The agent evolves its projection logic and fact-extraction heuristics, not its weights.** This is the honest reframe of the "self-evolving" pitch. The agent improves over time by: (a) refining how it picks which datoms to project into context for a given situation, (b) refining its fact-extraction prompts and schemas as the user's life produces new attribute kinds, (c) accumulating a richer DB. None of this requires weight updates — it's optimization of the agent's *programs* against the *user's* trajectory. GEPA-style trajectory-scored prompt evolution (sub-question Q13) is the technique, not Nous's pitch-deck framing of it.
+6. **the agent's wedge is the integrated stack: sovereign user-controlled memory + personal-vs-work boundary + cultural fluency.** Memory architecture is *not* table stakes — the sovereign-graph design is one of the three things that makes the agent different from a chat product with memory bolted on. Treat it as a load-bearing differentiator and engineer accordingly.
 
 ---
 
