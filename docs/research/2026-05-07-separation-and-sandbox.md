@@ -3,7 +3,9 @@
 **Date:** 2026-05-07
 **Threads:** CLAUDE.md open questions Q4 (separation pattern) and Q7 (sandboxed runtimes). Adjacent: MCP as the interposition seam.
 **Method:** Gemini CLI agentic web survey (gemini-3-flash-preview), cross-checked against what I know is actually shipping vs press-release.
-**Bottom line up front:** Nobody is shipping the *full* personal-AI-fronts-corporate-AI pattern in production with paying enterprise customers as of early 2026. The pieces exist — MCP gateways, prompt-rewriter proxies, browser sidebars, microVM sandboxes — but they are sold one piece at a time, mostly to developers building agents, not to end users protecting personal context from their employer. the agent's wedge is integration, not invention. The architectural seam to bet on is **MCP-proxy + Firecracker microVM sandbox per user**, not V8 isolates and not browser extensions.
+**Bottom line up front:** Nobody is shipping the *full* personal-AI-fronts-corporate-AI pattern in production with paying enterprise customers as of early 2026. The pieces exist — MCP gateways, prompt-rewriter proxies, browser sidebars, microVM sandboxes — but they are sold one piece at a time, mostly to developers building agents, not to end users protecting personal context from their employer. the agent's wedge is integration, not invention. The architectural seam to bet on is **MCP-proxy + Firecracker microVM sandbox per user** — the agent as the *interposed* layer that steers the work AI on the user's behalf, not just an adjacent sidecar.
+
+**Calibration note (2026-05-07):** an earlier draft of this doc concluded with "the agent-as-sidecar that *uses* the corporate AI as a tool — i.e., does not interpose" because IT politics looked too fraught for V1. That conclusion preserved the technical recommendation (Firecracker, sidecar topology) but quietly traded away the part of Sean's vision that distinguishes the agent from any other personal-AI product: **interposition**. the agent *steers* the work AI; it doesn't just sit beside it. Revised below to keep the V1 starting point pragmatic while making the MCP-gateway interposition path the explicit destination, not a deferred maybe.
 
 ---
 
@@ -105,6 +107,23 @@ Numbers are order-of-magnitude — pricing pages move and real workloads vary 5x
 
 ---
 
+## MCP-Gateway as the steerage layer — the deeper dive
+
+The interposition promise — the agent *steers* the work AI rather than running parallel to it — is what makes the agent a sidecar in the literal sense (rides alongside *and* on top of) instead of just another chat product. The MCP gateway pattern is the technical mechanism that makes this real. Worth being explicit about how.
+
+**The steerage operations the agent performs as gateway:**
+
+1. **Prompt augmentation.** Before a user's message reaches the work AI, the agent prepends or rewrites context the work AI needs but the user doesn't want to type. "Reply to this in the way I'd phrase it to my Saudi manager" becomes a structured prompt the work AI receives, with the agent's persona/cultural context attached out-of-band — without the work AI ever seeing the underlying personal facts.
+2. **Tool-call mediation.** When the work AI calls a corporate tool (Slack, Jira, calendar), the call routes through the agent. the agent can: (a) **mask** results — hide messages from the recruiter, redact a colleague's PII before it reaches the model context, (b) **augment** results — inject "the user already replied to this on their phone, don't surface it as urgent," (c) **substitute** — route a calendar query to a personal calendar source the employer doesn't see, (d) **refuse** — the work AI never learns about the call's existence.
+3. **Output filtering and reframing.** Responses from the work AI flow back through the agent, which can rewrite them in the user's voice, soften or sharpen tone for the user's cultural register, or flag the response as not-yet-trustworthy ("the work AI suggested X; your past pattern suggests you'd reject it for reason Y — confirm before sending?").
+4. **Memory bifurcation.** What the work AI remembers about the conversation (its own context window, its server-side logs) is a strict subset of what the agent remembers. The work AI's view of the user is permanently mediated; the user's view of themselves through the agent is complete.
+
+**Why this is hard for V1:** the gateway pattern requires the user's MCP traffic to flow through the agent. In a BYOD environment the user can configure their own MCP client to route this way, but in MDM-controlled enterprise deployments the corporate AI's MCP routing is policy-controlled by IT. Three things have to be true: (1) the work AI must speak MCP at all (Claude.ai yes, Copilot uncertain, Gemini for Workspace probably no), (2) the user or IT must permit the agent as an in-path gateway, (3) the user must trust the agent as the interposing layer (which the user-visible memory audit + sovereign graph design directly support).
+
+**V1 doesn't have to ship the full gateway** — it has to *prove the architecture is real and demonstrate one steerage move*. A single demo cell where the agent rewrites a prompt before it reaches a vanilla-Claude API and the response is visibly more on-target than the un-rewritten version is enough to anchor the steerage promise. The full gateway pattern (MDM compatibility, mTLS-routed MCP federation, IBM ContextForge "Virtual Servers" for context-mode switching) is V2/V3 work. But the V1 demo *should* include the gesture toward interposition — without it, the agent looks like another chat product with memory.
+
+**The destination is interposition, not adjacency.** The earlier draft's recommendation ("the agent-as-client, sidesteps the political fight") is fine as the V1 *starting point* — just don't lose sight that the V2+ path is the gateway. The 12-month roadmap ends with the agent steering the work AI, not just adjacent to it.
+
 ## MCP as the interposition seam
 
 The MCP (Model Context Protocol) spec defines tool servers reachable over stdio or HTTP/SSE that expose `list_tools` / `call_tool` JSON-RPC. The proxy/gateway pattern is well within spec — a proxy is just an MCP server that, when called, forwards to other MCP servers and returns synthesized results.
@@ -123,9 +142,16 @@ Reference implementations worth digging into next: Smithery's federation model, 
 
 ## Recommendation for the agent V1
 
-**Architecture:** Sidecar agent (option 3 above) using corporate APIs/MCP as tools. Don't try to interpose between the user and an existing work AI at V1. the agent is its own loop; the user talks to the agent; the agent optionally uses ChatGPT / Claude / Gemini / corporate Copilot as a *tool* when work tasks demand it.
+**Architecture (V1 starting point, not endpoint):** Sidecar agent using corporate APIs/MCP as tools — i.e., the agent is its own loop, the user talks to the agent, the agent optionally uses ChatGPT / Claude / Gemini / corporate Copilot as a *tool* when work tasks demand it. **Plus one interposition demo cell** where the agent rewrites a prompt before it hits the work AI, to anchor the steerage promise visually.
 
-Why: it's the only architecture where the privacy claim is true by construction. Anything that proxies the work AI either depends on the employer cooperating (won't happen at V1) or fights MDM and DLP all the way down. The sidecar-agent pattern is also the easiest demo — Sean shows the client lead a thing the user talks to that knows them well and gets work done, with nothing the employer can subpoena.
+Why this *as the starting point*: it's the architecture where the privacy claim is true by construction at V1, with no IT-cooperation dependency. The full gateway pattern (the agent interposing on the work AI's MCP traffic) is the V2/V3 destination, not the V1 deliverable.
+
+**On BYOD-only as a constraint:** the earlier framing treated BYOD-only as a likely strategic dead-end ("the agent is unsellable to enterprises"). That's too pessimistic. Three viable paths to enterprise revenue without abandoning the privacy promise:
+1. **Sidecar-as-tool-server (Option 1).** the agent is installed by the user, exposes itself as an MCP server, and the corporate AI calls into it for personal-context-aware help. The employer chose to permit the agent; the privacy promise weakens slightly (the employer can subpoena the agent) but the user's data stays on the user's device or in the user-chosen the agent backend, not in the corporate AI's logs. This is sellable as a productivity layer with a defensible privacy posture (better than nothing-by-default, even if not absolute).
+2. **User-pays consumer with employer-allowed integration.** the agent is a consumer subscription; the employer's policy explicitly permits its use as a "personal productivity assistant" with explicit data-flow boundaries documented. Like 1Password's enterprise-friendly consumer model.
+3. **Sidecar-uses-corporate-AI-as-tool (Option 3, the V1 recommendation here).** Even when the agent is the user's primary interface and treats the corporate AI as just one tool among many, this still delivers the steerage vision — the agent is what the user *talks to*, and it decides when, how, and with what context to involve the corporate AI. The user's primary AI relationship is the agent; the work AI is incidental. That's interposition by topology even if not by MCP-routing.
+
+The strategic framing: **BYOD-first, with explicit on-ramps to MDM-compatible deployments.** Not BYOD-only.
 
 **Sandbox:** Firecracker microVMs with snapshot/thaw, hosted on E2B, Modal, or Fly.io Machines for V1. Pick whichever has the cleanest JS-runtime + persistent-volume story when we actually start building. Don't build V8-isolate plumbing — the statefulness fight isn't worth the cost saving at the scales we'll see for the first 18 months.
 
