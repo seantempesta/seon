@@ -22,17 +22,37 @@ on tasks like SWE-Bench.
 ## Mapping to the "hundreds of thousands of simulations" framing
 
 Sean's note recalled the team claiming "hundreds of thousands of simulations."
-The cleanly sourced number is **20,000 parallel environments**. A single
-training run across many policy updates ⇒ rollouts/simulations easily reach
-hundreds of thousands or millions; the blog does not state a total rollout
-count, only the parallel concurrency.
+There are TWO numbers in the public record that match this shape:
 
-**Honest framing**: the "20,000 environments in parallel" is the only
-quantitative agent-RL infrastructure number Alibaba has published. Any larger
-"hundreds of thousands" total is downstream arithmetic, not a directly quoted
-figure. **Primary-source for a literal "hundreds of thousands of simulations"
-quote: NOT FOUND.** The closest cleanly attributable Alibaba claim is the
-20K-parallel-envs sentence above.
+### A. Parallel-environment concurrency (Qwen3-Coder, July 2025)
+
+**"20,000 independent environments in parallel"** — Alibaba Cloud
+infrastructure for SWE-Bench-style RL.
+
+### B. Verifiable-task corpus (Qwen3-Coder-Next tech report, late-2025/2026)
+
+**"~800K verifiable software engineering tasks"** synthesized across nine
+programming languages, sourced from real GitHub PRs + SWE-Smith + SWE-Flow +
+SWE-Rebench + Multi-SWE-RL.
+(Source: arxiv 2603.00729 / qwen.ai/blog Qwen3-Coder-Next.)
+
+**This 800K number is the most likely match for "hundreds of thousands of
+simulations".** Each "verifiable task" pairs a problem with an executable
+environment + reward (unit tests). The 20K-parallel-environments figure is
+the *infrastructure throughput* for working through this corpus; the 800K
+*tasks* are the substrate.
+
+### C. Production deployment (RollArt paper, late-2025)
+
+For the **Qoder** product, Alibaba ran a hundreds-of-billions-parameter MoE
+model on **>3,000 GPUs for one week** continuous agentic-RL training, using
+the RollArt disaggregated infrastructure (arxiv 2512.22560). Speedup
+1.35–2.05× over monolithic baselines.
+
+**Honest framing**: the "20,000 environments in parallel" + "800K verifiable
+SWE tasks" pair is the cleanly attributable Alibaba claim. A literal "hundreds
+of thousands of simulations" quote was NOT found verbatim, but 800K tasks (×
+many epochs of RL) reaches that scale by any reasonable arithmetic.
 
 ## Surrounding context (from the same blog)
 
