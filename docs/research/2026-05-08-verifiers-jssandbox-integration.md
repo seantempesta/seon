@@ -1,4 +1,4 @@
-# Verifiers ↔ JS sandbox integration — Path A (Node + `@sebastianwessel/quickjs`) vs Path B (Deno subprocess)
+ # Verifiers ↔ JS sandbox integration — Path A (Node + `@sebastianwessel/quickjs`) vs Path B (Deno subprocess)
 
 **Date:** 2026-05-08 (Friday afternoon, Bangkok)
 **Author:** research agent under Sean's direction
