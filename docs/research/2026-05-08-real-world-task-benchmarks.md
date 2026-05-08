@@ -8,21 +8,21 @@
 
 ---
 
-## 1. TL;DR — top 5 benchmarks with liftable tasks
+## 1. TL;DR — top 5 benchmarks as references
 
-If we want concrete *tasks* (not just methodology) for V1's curriculum, in priority order:
+These are reference-only. **2026-05-08 design constraint (Sean):** the agent does not adopt others' Python codebases or pre-built memory systems — the agent learns its own storage idiom from primitives + curriculum. We borrow design ideas (task shapes, scoring patterns, populated-world structure), not source trees or memory APIs. In priority order by what each contributes:
 
-1. **AppWorld** (Stony Brook, ACL 2024 best resource, MIT). 9 daily-life apps populated by ~100 fictitious people with cross-app state (Gmail, Venmo, Spotify, Splitwise, Todoist, etc.). **Lift directly:** the entity-resolution + cross-app coordination tasks ("look up Splitwise debt → send Venmo with correct memo") map cleanly onto the agent's *multi-turn entity tracking* (scenario 2) and *work-product / tool-calling* family (scenarios 11, 14). Sandbox is reusable as a personas world.
+1. **AppWorld** (Stony Brook, ACL 2024 best resource, MIT). 9 daily-life apps populated by ~100 fictitious people with cross-app state (Gmail, Venmo, Spotify, Splitwise, Todoist, etc.). **What to learn:** how a populated-world is structured for cross-app coordination tasks; their *collateral-damage* check is the rare design that punishes side effects, not just final state — relevant pattern for our self-cleanup family. **Don't:** import their Python harness; rebuild the populated-world idea on top of the agent's own substrate.
 
-2. **PersonalWAB** (WWW 2025 oral, MIT). 1,000 user profiles + 40K real web behaviors + 9K personalized instructions. **Lift directly:** profile-sensitive tasks where the agent must filter against persistent preferences ("vacuum cleaner under $200, but you only buy from eco-friendly bagless brands"). Maps to *backstory recall* (scenario 1), *surface stated value* (curriculum item from brainstorm-decisions). Closest existing analog to what the agent is trying to evaluate.
+2. **PersonalWAB** (WWW 2025 oral, MIT). 1,000 user profiles + 40K real web behaviors + 9K personalized instructions. **What to learn:** the *personalization gap* metric (perf with profile vs. without) is a clean way to detect whether the agent is actually using user history. Their preference-as-persistent-state pattern is closest to what the agent's brainstorm calls "surface stated value." **Don't:** lift profiles wholesale — they're shopping/web-behavior anchored, not cultural; bias risk is real.
 
-3. **LongMemEval** (ICLR 2025, MIT, last release Sept 2025). 500 questions over multi-session chat with 5 ability categories: extraction, multi-session reasoning, temporal reasoning, knowledge updates, **abstention**. **Lift directly:** every category. *Knowledge updates* is the contradiction-handling scenario (3); *abstention* is a working-memory-pressure check ("did you say 'I don't know' when the fact wasn't in context?"). 115K and 1.5M token configs both available.
+3. **LongMemEval** (ICLR 2025, MIT, last release Sept 2025). 500 questions over multi-session chat with 5 ability categories: extraction, multi-session reasoning, temporal reasoning, knowledge updates, **abstention**. **What to learn:** the five-category taxonomy is the cleanest decomposition of "agent memory" we've seen; abstention is the only category in any benchmark that scores "did the agent say I don't know when it should have?" 115K and 1.5M token configs both available. **External scoreboard candidate** for the memory dimension once V1 is working.
 
-4. **τ²-bench** (Sierra Research, MIT, active 2025). Dual-control conversational agents in airline / retail / telecom / banking / mock domains, with a stubborn user-simulator LLM and `pass^k` reliability metric. **Lift directly:** the *user-simulator pattern itself* validates the agent's persona-reactor architecture, and the policy-following customer-service tasks transplant well to the agent's *work-product* family (e.g., "follow the company travel policy when booking the trip"). Also relevant for *boundary refusal* (scenario 16) — task definitions explicitly include cases where the agent *must refuse* per policy.
+4. **τ²-bench** (Sierra Research, MIT, active 2025). Dual-control conversational agents in airline / retail / telecom / banking / mock domains, with a stubborn user-simulator LLM and `pass^k` reliability metric. **What to learn:** (a) the user-simulator-LLM-with-attitude pattern *validates the agent's persona-reactor architecture* — what the agent proposes is τ²-bench × MCTS × cultural-native grader. (b) `pass^k` is the right shape for measuring trajectory reliability across stochastic re-runs; candidate gate metric for our curriculum-survival rule.
 
-5. **TheAgentCompany** (CMU, MIT, Dec 2024). Dockerized simulated software company with persistent NPCs, GitLab, Plane, ownCloud, Rocket.Chat. Best models hit ~24% — meaningful headroom. **Lift directly:** the *cross-tool* tasks ("ask HR-bot for onboarding PDF → extract policy → update wiki") map to multi-tool work-product (scenario 14) and to the personal-vs-work boundary (the NPC-colleague structure forces explicit who-can-see-what reasoning). The simulated-colleagues design is also the best public analog to the agent's persona-reactor as a *grading* counterparty.
+5. **TheAgentCompany** (CMU, MIT, Dec 2024). Dockerized simulated software company with persistent NPCs, GitLab, Plane, ownCloud, Rocket.Chat. Best models hit ~24% — meaningful headroom. **What to learn:** how to wire simulated-colleague NPCs into a work environment so the agent has to reason about who-can-see-what — best public precedent for the agent's *company corpora as work-product encoding* idea. **Don't:** depend on their Docker stack; the lesson is the design pattern (NPCs + persistent corporate state), not the implementation.
 
-The other ~25 benchmarks below are useful as a vocabulary check (what's the SOTA, what's the saturation level, what's gameable), but tasks are not as directly liftable.
+The other ~25 benchmarks below are useful as a vocabulary check (what's the SOTA, what's saturated, what's gameable). Treat all of them as references, not adoption candidates.
 
 ---
 
@@ -420,8 +420,11 @@ One-liners so we don't relitigate. (More-or-less ordered.)
 
 ## 9. Suggested follow-ups (for the next pass)
 
-1. **Stand up LongMemEval + AlpsBench + PersonalWAB locally** as the agent's external scoreboard. They cover the memory + personalization axes our own curriculum measures.
-2. **Fork or instrument AppWorld's environment** to host the agent's persona-reactor instead of scripted users. Cheaper than building the populated-world from scratch.
-3. **Check TheAgentCompany's NPC-colleague design** for ideas on how to layer the agent's persona-reactor into a *work* environment (gives us scenario 15 — personal-context-shaping-work-action — concretely).
-4. **Decide whether the V1 persona has a spreadsheet job** — if so, SpreadsheetBench is liftable; if not, defer.
-5. **Build the boundary-leakage decidable check** ourselves — survey confirms no precedent. This becomes part of V1's defensible novelty (and was already flagged as such in §"Sovereign memory" interposition story).
+Reframed 2026-05-08 to respect the *agent-learns-itself / no-inherited-Python-or-memory-APIs* constraint.
+
+1. **Use LongMemEval + AlpsBench as the external scoreboard for the agent's memory dimension** — score the agent's V1 LoRA against them post-training to position progress in the public benchmark space. We don't adopt their harness — we expose the agent as a chat-completion endpoint they call.
+2. **Study, don't fork, AppWorld + TheAgentCompany.** Borrow the populated-world design (entities + persistent state + collateral-damage check) and the simulated-colleague pattern as design references; rebuild the substrate on top of the agent's own primitives. Reading their data structures for ~2h to understand the modeling is the right move; depending on their Python is not.
+3. **Pull the `pass^k` metric from τ²-bench** as a candidate trajectory-survival gate. Metric only — no code dependency.
+4. **Build the boundary-leakage decidable check ourselves** — survey confirms no precedent. Defensible-novelty cell.
+5. **Build the cultural-register decidable check ourselves** — Falcon-Ar / Mistral / etc. as native-language graders, plus held-out native-reader veto. No external benchmark covers this; that's the moat.
+6. **Defer SpreadsheetBench until persona job is decided** — only relevant if V1 personas have spreadsheet work.
