@@ -1,15 +1,31 @@
 ---
 type: component
-status: production
+status: active
 tags: [component, database]
 ---
 # Database
 
-> Sole database API for Seon — all reads and writes route through `seon.db`, serialized by core.async flow processes.
+> Sole database API for Seon — all reads and writes route through `seon.db`. Migration in progress: Datalevin → embedded Datahike, per-namespace stores owned by a `core.async.flow`.
+
+## Migration Status (2026-04-25)
+
+Datalevin is being replaced by embedded Datahike. See [[orchestrator/active]] for current phase status, [[orchestrator/issues/datalevin-disabled]] for the boot disable, and `docs/prds/datahike-migration/` for the design.
+
+- **`seon.db` public API is unchanged at the call site** — `(transact! :seon.weather ...)`, `(query :seon.weather ...)`, etc.
+- **Internally**: `seon.db` dispatches per db-name. Namespaces declared under `:seon.db/flow` in `resources/system.edn` route through the new datahike flow (one conn-process per db-name); other db-names fall through to the legacy datalevin path (currently disabled in dev).
+- **Auto-stamp**: every datahike-routed `transact!` adds `{:seon.db/namespace <db-name>}` to entity maps (Decision 7).
+- **Live in datahike today**: `:seon.session :seon.repl :seon.flow :seon.orchestrator :seon.phase2.demo`. Domain namespaces migrate in Phase 4.
+
+The sections below describe the **new datahike path**. Datalevin source still ships in `src/seon/db/datalevin/**` until Phase 5 deletes it.
 
 ## Purpose
 
-Seon uses Datalevin (embedded Datalog on LMDB) as its only database, running as a separate JVM process. The database component exists to provide a single API surface (`seon.db`) that enforces Malli validation on every write, auto-derives Datalevin schemas from the Malli registry, and serializes all access through infrastructure flow processes (see [[components/flow-topology]]). This prevents concurrent LMDB corruption, provides observability (every request is a traceable flow message), and allows transparent retry on connection failure.
+Single database API surface (`seon.db`) that:
+- Enforces Malli validation on every write
+- Auto-derives datahike schemas from the Malli registry (`seon.db.datahike.schema`)
+- Routes per db-name through dedicated flow processes (`seon.db.datahike.conn-process`), one per database
+- Auto-stamps `:seon.db/namespace` so pulled entities are self-describing without consulting a schema (Decision 7)
+- Provides a single inspection point for future security filters and policy gates (Decision 9: state lives in flow state, not atoms)
 
 ## Namespaces
 

@@ -69,7 +69,7 @@
    ;; Orchestrator Sessions
    :seon.orchestrator/sessions
    [:map
-    [:connection-manager :any]
+    [:connection-manager {:optional true} :any]
     [:pool :any]]
 
    ;; Code Scanner
@@ -82,7 +82,15 @@
    ;; Claude Code SDK
    :seon.ai.claude/sdk
    [:map
-    [:cli-path :string]]})
+    [:cli-path :string]]
+
+   ;; Datahike flow (Phase 2 of datahike-migration)
+   :seon.db/flow
+   [:map
+    [:namespaces [:sequential :keyword]]
+    [:backend :keyword]
+    [:data-root {:optional true} :string]
+    [:namespace-schemas {:optional true} [:map-of :keyword :any]]]})
 
 (defn validate
   "Validate a component's config against its registered schema.

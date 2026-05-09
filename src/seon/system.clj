@@ -24,8 +24,17 @@
             ;; Load component namespaces for their ig/init-key methods
             [seon.web.tailwind]
             [seon.web.caddy]
-            [seon.db.datalevin.server]
-            [seon.flow.pool]))
+            [seon.db.datahike.system]
+            [seon.flow.pool]
+            ;; Load namespaces whose schemas the datahike flow refers to.
+            ;; The :seon.db/flow Integrant key reads :namespace-schemas at init
+            ;; and resolves keyword schema refs through the Malli registry —
+            ;; the registry must be populated by then.
+            [seon.session]
+            [seon.repl]
+            [seon.flow.trace]
+            [seon.orchestrator.session]
+            [seon.phase2.demo]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Config Validation (assert-key)

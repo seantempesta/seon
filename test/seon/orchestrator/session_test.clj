@@ -5,6 +5,7 @@
   Note: nREPL integration tests that require a live pool are in pool_test.clj.
   These tests verify the session layer works correctly without a pool (port=nil)."
   (:require [clojure.test :refer [deftest testing is use-fixtures]]
+            [seon.db :as db]
             [seon.orchestrator.session :as session]
             [seon.runtime :as runtime]
             [seon.schema :as schema]
@@ -14,25 +15,31 @@
 ;;; Test Fixtures
 ;;; ---------------------------------------------------------------------------
 
+(defn- retract-all-sessions!
+  "Wipe all rows from `:seon.orchestrator` plus the in-process live-state.
+   Used in test fixtures to give each test a clean slate."
+  []
+  (try
+    (let [eids (->> (db/query :seon.orchestrator
+                              '[:find ?e :where
+                                [?e :seon.orchestrator.session/id _]])
+                    (map first))]
+      (when (seq eids)
+        (db/transact! :seon.orchestrator
+                      (vec (for [e eids] [:db/retractEntity e])))))
+    (catch Exception _))
+  (reset! @#'seon.orchestrator.session/live-state {}))
+
 (defn cleanup-sessions
   "Fixture that cleans up sessions after each test."
   [f]
-  ;; Clear any existing sessions
-  (doseq [[id _] @(deref #'seon.orchestrator.session/session-registry)]
-    (try
-      (session/stop-agent-session! {::session/node *test-node* ::session/id id})
-      (catch Exception _)))
-  (reset! @#'seon.orchestrator.session/session-registry {})
+  (retract-all-sessions!)
   (runtime/reset-registry! {})
   (try
     (f)
     (finally
-      (doseq [[id _] @(deref #'seon.orchestrator.session/session-registry)]
-        (try
-          (session/stop-agent-session! {::session/node *test-node* ::session/id id})
-          (catch Exception _)))
+      (retract-all-sessions!)
       (Thread/sleep 50)
-      (reset! @#'seon.orchestrator.session/session-registry {})
       (runtime/reset-registry! {}))))
 
 (use-fixtures :each (fn [f]
@@ -77,7 +84,7 @@
                     ::session/pool nil})]
       (is (= :running (::session/status result)))
       (is (some? (::session/id result)))
-      (is (= 'test.start (::session/namespace result)))
+      (is (= "test.start" (::session/namespace result)))
       ;; No pool in tests, so port is nil
       (is (nil? (::session/nrepl-port result)))
       (is (inst? (::session/started-at result)))
@@ -121,7 +128,7 @@
                       {::session/node *test-node*
                        ::session/id session-id})]
       (is (= session-id (::session/id retrieved)))
-      (is (= 'test.get (::session/namespace retrieved)))
+      (is (= "test.get" (::session/namespace retrieved)))
       (is (= :running (::session/status retrieved)))))
 
   (testing "returns empty map for non-existent session"
