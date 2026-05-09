@@ -38,7 +38,6 @@ All feature specifications live in `docs/prds/`. Each directory contains a `prd.
 | PRD | Status | Summary | Components |
 |-----|--------|---------|------------|
 | [[prds/spec-driven-rendering/prd]] | abandoned | Absorbed into render-pipeline and graph-cleanup PRDs | [[components/code-graph]], [[components/renderer]] |
-| [[prds/polymarket-analysis/prd]] | active | Polymarket trader analysis tools (Stages 1-3 done, 4-7 remaining) | |
 | [[prds/logging-system/prd]] | not started | Agent-safe log functions + web UI log viewer | [[components/web-layer]] |
 | [[prds/data-viewer/prd]] | not started | Expand/collapse interaction for nested Clojure data in browser | [[components/web-layer]] |
 | [[prds/schema-viewer/prd]] | not started | Web-based Malli schema browser with navigation | [[components/web-layer]], [[components/schema-system]] |

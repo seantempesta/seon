@@ -770,7 +770,6 @@ caddy run
 
 # Update CLAUDE.md
 ./bin/run            # Main app (port 8080)
-./bin/thetadata      # ThetaData Terminal
 caddy run            # Reverse proxy (port 3030)
 
 ```

@@ -59,7 +59,7 @@ These generators are used in `test/ml_options/db/schema_test.clj`.
 ### Where Validation Happens
 
 ```
-ThetaData API → validation.clj → XTDB
+External API → validation.clj → XTDB
                      ↓
               filter-valid-records
                      ↓

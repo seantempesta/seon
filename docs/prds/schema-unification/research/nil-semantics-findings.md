@@ -204,11 +204,9 @@ Generators produce nil values for `[:maybe X]` schemas. Without nil-stripping, g
 
 ### Nil-stripping Locations
 
-Only **two places** in production code strip nils before Datalevin:
+Only **one place** in production code strips nils before Datalevin:
 
 1. **`seon.ai.datalevin/remove-nil-values`** (lines 212-217): Private helper used by `entity->datalevin-session` and `entity->datalevin-message`. Comment: "Datalevin throws NPE when trying to transact nil values. This is defensive -- source should avoid nils, but belt-and-suspenders."
-
-2. **`seon.polymarket.api`** (line 54): `(into {} (remove (comp nil? val) params))` for API query params (not Datalevin-related).
 
 One place in **test code**:
 

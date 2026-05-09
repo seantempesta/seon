@@ -186,8 +186,6 @@ Application-specific namespaces (test cases for the infrastructure).
 | `seon.health.metrics` | `src/seon/health/metrics.clj` | Body composition metrics (BMI computation, categorization) | stable |
 | `seon.health.workout` | `src/seon/health/workout.clj` | Workout tracking schemas and sample data | stable |
 | `seon.health.workout.render` | `src/seon/health/workout/render.clj` | Render companion for workout tracking (page + item renderers) | stable |
-| `seon.polymarket.api` | `src/seon/polymarket/api.clj` | Polymarket Data API client (activity, trades, positions) | stable |
-| `seon.polymarket.analysis` | `src/seon/polymarket/analysis.clj` | Analysis functions for Polymarket trading data | stable |
 | `seon.getting-started` | `src/seon/getting_started.clj` | Interactive 4-step walkthrough demonstrating living document UX | stable |
 | `seon.getting-started.render` | `src/seon/getting_started/render.clj` | Page renderer for getting-started walkthrough | stable |
 
