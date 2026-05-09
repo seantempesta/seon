@@ -5,7 +5,7 @@ tags: [reference, agent]
 ---
 # Native Gemini API Integration for Seon
 
-> **Note:** This was a research/proposal doc. `seon.ai.gemini` was implemented but with a different API design (namespaced keyword maps, not positional args). The proposed multi-namespace structure was not built. References to `seon.polymarket.api` and `xtdb-help` are stale.
+> **Note:** This was a research/proposal doc. `seon.ai.gemini` was implemented but with a different API design (namespaced keyword maps, not positional args). The proposed multi-namespace structure was not built. Some examples in this doc reference older code paths that have since been removed.
 
 Research document for implementing native Gemini API integration in Clojure for Seon.
 
@@ -21,7 +21,7 @@ This document outlines how to integrate the Gemini API natively into Seon using 
 
 ### Current Pattern in Seon
 
-Seon already uses `hato` for HTTP requests (see `seon.polymarket.api`):
+Seon already uses `hato` for HTTP requests:
 
 ```clojure
 (:require [hato.client :as http]

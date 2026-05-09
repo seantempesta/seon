@@ -29,7 +29,6 @@ Test files mirror source files with a `-test` suffix:
 - `test/seon/flow/pool_integration_test.clj` — real JVM spawning
 - `test/seon/flow/domain_integration_test.clj` — cross-namespace on real JVMs
 - `test/seon/db/datalevin/backup_test.clj` — filesystem I/O
-- `test/seon/polymarket/api_test.clj` — external API calls
 - Individual `^:integration` deftests in `flow/pool_test.clj`
 
 **Shared test utilities**: `test/seon/test_utils.clj`
@@ -173,8 +172,6 @@ Also provides `assert-tempid-roundtrip!` for entities without a `:db/unique` ide
 | `getting_started_test` | 8 | Getting-started tutorial namespace |
 | `health/workout_test` | 14 | Health domain workout tracking |
 | `health/metrics_test` | 5 | Health domain metrics |
-| `polymarket/api_test` | 14 | Polymarket API (mostly `^:integration`) |
-| `polymarket/analysis_test` | 13 | Polymarket analysis |
 | `log_parsing_test` | 4 | Log parsing utilities |
 | `hook_test_scratch_test` | 2 | Hook test scratch |
 

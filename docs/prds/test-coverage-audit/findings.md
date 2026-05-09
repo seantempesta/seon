@@ -250,12 +250,6 @@ These don't need tests (config, entry points, trivial code):
 - Error condition coverage
 - Input validation tests
 
-**thetadata_test.clj** (27 tests)
-
-- API transformation coverage
-- Circuit breaker testing
-- Error handling
-
 ### Adequate Quality
 
 **queries_test.clj** (9 tests)

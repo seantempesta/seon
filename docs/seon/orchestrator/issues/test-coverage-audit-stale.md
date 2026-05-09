@@ -16,7 +16,7 @@ The PRD status says "complete" (the audit was done) but its findings are obsolet
 1. Mark the PRD as `superseded` in `orchestrator/prds.md`
 2. Run a fresh test coverage audit against current Seon namespaces
 3. Identify which `src/seon/**/*.clj` files lack corresponding test files
-4. Identify critical untested functions (especially `polymarket/`, `health/`, domain code)
+4. Identify critical untested functions (especially `health/` and other domain code)
 
 ## File Refs
 

@@ -85,4 +85,4 @@ status: active
 ## Reference
 
 - [[namespaces]] — Full inventory (102 namespaces with file paths and layer groupings)
-- [[reference/]] — Datastar, Hyperlith, Gemini, ThetaData reference docs
+- [[reference/]] — Datastar, Hyperlith, Gemini reference docs

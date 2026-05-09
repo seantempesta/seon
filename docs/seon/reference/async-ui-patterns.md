@@ -1383,7 +1383,7 @@ POST /dashboard/stream → SSE connection for details (slower)
 
 3. **Error Handling & Retry (Priority: Medium)**
    - Add retry logic for transient API failures
-   - Exponential backoff for ThetaData rate limits
+   - Exponential backoff for upstream rate limits
    - Better error messages in UI
 
 4. **Query Optimization (Priority: High)**
