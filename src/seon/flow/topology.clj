@@ -623,38 +623,45 @@
      {::flow fl ::flow-id :seon.flow/infrastructure}"
   [{::keys [connection-manager]}]
   (let [flow-id :seon.flow/infrastructure
-        config {:procs {:seon.flow/writer
-                        {:proc (flow/process #'writer/infra-writer-step)
-                         :args {::writer/connection-manager connection-manager}}
-                        :seon.flow/reader
-                        {:proc (flow/process #'reader/infra-reader-step)
-                         :args {::reader/connection-manager connection-manager}}
-                        :seon.flow/repl
-                        {:proc (flow/process #'repl-step)}
-                        :seon.flow/reply-router
-                        {:proc (flow/process #'reply-router-step)}
-                        :seon.flow/event-sink
-                        {:proc (flow/process #'event-sink-step)}
-                        :seon.flow/error-sink
-                        {:proc (flow/process #'error-sink-step)}}
-                :conns [;; writer reply -> reply-router
-                        [[:seon.flow/writer :seon.flow.out/reply]
-                         [:seon.flow/reply-router :seon.flow.in/reply]]
-                        ;; writer error -> error-sink
-                        [[:seon.flow/writer :seon.flow.out/error]
-                         [:seon.flow/error-sink :seon.flow.out/error]]
-                        ;; reader reply -> reply-router
-                        [[:seon.flow/reader :seon.flow.out/reply]
-                         [:seon.flow/reply-router :seon.flow.in/reply]]
-                        ;; reader error -> error-sink
-                        [[:seon.flow/reader :seon.flow.out/error]
-                         [:seon.flow/error-sink :seon.flow.out/error]]
-                        ;; repl reply -> reply-router
-                        [[:seon.flow/repl :seon.flow.out/reply]
-                         [:seon.flow/reply-router :seon.flow.in/reply]]
-                        ;; repl error -> error-sink
-                        [[:seon.flow/repl :seon.flow.out/error]
-                         [:seon.flow/error-sink :seon.flow.out/error]]]}
+        ;; Datalevin writer/reader are only built when a connection-manager is
+        ;; supplied. Datalevin is disabled in the migration; the writer/reader
+        ;; processes are dead code without it. The REPL eval process,
+        ;; reply-router, and sinks always run — the rest of the system depends
+        ;; on the reply-router for promise delivery.
+        dl?  (some? connection-manager)
+        procs (cond-> {:seon.flow/repl             {:proc (flow/process #'repl-step)}
+                       :seon.flow/reply-router     {:proc (flow/process #'reply-router-step)}
+                       :seon.flow/event-sink       {:proc (flow/process #'event-sink-step)}
+                       :seon.flow/error-sink       {:proc (flow/process #'error-sink-step)}
+                       :seon.flow/status-collector {:proc (flow/process #'status/collector-step)}}
+                dl? (assoc :seon.flow/writer
+                           {:proc (flow/process #'writer/infra-writer-step)
+                            :args {::writer/connection-manager connection-manager}}
+                           :seon.flow/reader
+                           {:proc (flow/process #'reader/infra-reader-step)
+                            :args {::reader/connection-manager connection-manager}}))
+        conns (cond-> [;; repl reply -> reply-router
+                       [[:seon.flow/repl :seon.flow.out/reply]
+                        [:seon.flow/reply-router :seon.flow.in/reply]]
+                       ;; repl error -> error-sink
+                       [[:seon.flow/repl :seon.flow.out/error]
+                        [:seon.flow/error-sink :seon.flow.out/error]]
+                       ;; status-collector reply -> reply-router
+                       [[:seon.flow/status-collector :seon.flow.out/reply]
+                        [:seon.flow/reply-router :seon.flow.in/reply]]]
+                dl? (into [;; writer reply -> reply-router
+                           [[:seon.flow/writer :seon.flow.out/reply]
+                            [:seon.flow/reply-router :seon.flow.in/reply]]
+                           ;; writer error -> error-sink
+                           [[:seon.flow/writer :seon.flow.out/error]
+                            [:seon.flow/error-sink :seon.flow.out/error]]
+                           ;; reader reply -> reply-router
+                           [[:seon.flow/reader :seon.flow.out/reply]
+                            [:seon.flow/reply-router :seon.flow.in/reply]]
+                           ;; reader error -> error-sink
+                           [[:seon.flow/reader :seon.flow.out/error]
+                            [:seon.flow/error-sink :seon.flow.out/error]]]))
+        config {:procs procs :conns conns}
         fl (flow/create-flow config)
         chans (flow/start fl)]
     (flow/resume fl)

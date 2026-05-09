@@ -371,6 +371,7 @@ Pulled entities should be self-describing — an agent receiving `{:id X :name "
 **Costs:**
 - Small storage overhead (one keyword datom per entity)
 - Entities transacted through `datahike.api` directly (bypassing `seon.db`) won't be stamped — enforce via code review / lint
+
 ---
 
 ## Decision 8: Integrant + flow lifecycle guarantees

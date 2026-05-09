@@ -41,3 +41,19 @@ hs_err_pid*.log
 docs/.obsidian/workspace.json
 docs/.obsidian/workspace-mobile.json
 docs/.obsidian/plugins/*/data.json
+# Third-party plugin code — pulled in by Obsidian per user, not part of seon's source.
+# Plugins ship under their own licenses (typically MIT) and inflate the repo.
+docs/.obsidian/plugins/
+# Root-level .obsidian/ appears if someone opens the seon/ dir as a vault;
+# the canonical vault is docs/ — anything here is per-user workspace state.
+/.obsidian/
+
+# Claude Code runtime state
+.claude/scheduled_tasks.lock
+.claude/test-hook.db
+.claude/test-hook.db-journal
+.claude/test-hook.db-wal
+.claude/test-hook.db-shm
+
+# Stray konserve stores (if datahike :file backend ever runs without absolute :data-root)
+*.ksv

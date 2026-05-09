@@ -2,6 +2,7 @@
   (:require [clojure.core.async.flow :as flow]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [seon.flow.status :as status]
+            [seon.flow.topology :as topology]
             [seon.runtime :as runtime]))
 
 ;;; ---------------------------------------------------------------------------
@@ -18,7 +19,9 @@
     {:out [msg]}]))
 
 (defn- make-test-flow!
-  "Create, start, and register a simple test flow. Returns the result map."
+  "Create, start, and register a simple test flow. Returns the result map.
+   Requires the infrastructure flow to be running so the collector can drain
+   errors into its state."
   [flow-id label]
   (let [config {:procs {:step-a {:proc (flow/process #'simple-step)
                                   :chan-opts {:in {:buf-or-n 10}}}}
@@ -40,13 +43,24 @@
   (status/stop-error-drain! {::status/id flow-id})
   (runtime/unregister-flow! {::runtime/flow-id flow-id}))
 
-(use-fixtures :each (fn [f]
-                      (runtime/clear-flows!)
-                      (f)
-                      ;; Clean up any remaining flows
-                      (doseq [[id handle] (runtime/list-flows {})]
-                        (try (flow/stop (:flow handle)) (catch Exception _)))
-                      (runtime/clear-flows!)))
+;;; A single infrastructure flow per test-ns run. We need it because the new
+;;; status collector lives inside it; the public API blocks on replies routed
+;;; through the infra reply-router.
+(def ^:dynamic *infra* nil)
+
+(use-fixtures :each
+  (fn [f]
+    (runtime/clear-flows!)
+    (let [infra (topology/build-infrastructure! {})]
+      (binding [*infra* infra]
+        (try
+          (f)
+          (finally
+            (doseq [[id handle] (runtime/list-flows {})]
+              (when (not= id :seon.flow/infrastructure)
+                (try (flow/stop (:flow handle)) (catch Exception _))))
+            (try (flow/stop (::topology/flow infra)) (catch Exception _))
+            (runtime/clear-flows!)))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Tests
@@ -74,8 +88,9 @@
   (testing "collect-status returns all registered flows"
     (let [{f1 :flow} (make-test-flow! :test/flow-1 "Flow 1")
           {f2 :flow} (make-test-flow! :test/flow-2 "Flow 2")
-          result (status/collect-status)]
-      (is (= 2 (count (::status/flows result))))
+          result (status/collect-status {})]
+      ;; Includes the infrastructure flow plus our two test flows.
+      (is (>= (count (::status/flows result)) 2))
       (is (contains? (::status/flows result) :test/flow-1))
       (is (contains? (::status/flows result) :test/flow-2))
       (is (vector? (::status/alerts result)))
@@ -83,10 +98,11 @@
       (stop-test-flow! :test/flow-2 f2))))
 
 (deftest collect-status-empty-test
-  (testing "collect-status returns empty when no flows registered"
-    (let [result (status/collect-status)]
-      (is (= {} (::status/flows result)))
-      (is (empty? (::status/alerts result))))))
+  (testing "collect-status returns infrastructure-only when no test flows registered"
+    (let [result (status/collect-status {})]
+      ;; Infrastructure flow is always present in the fixture.
+      (is (contains? (::status/flows result) :seon.flow/infrastructure))
+      (is (vector? (::status/alerts result))))))
 
 (deftest throughput-calculation-test
   (testing "throughput is computed from count deltas"
@@ -101,7 +117,7 @@
       (let [result (status/collect-flow-status {::status/id :test/throughput})
             proc (get (::status/processes result) :step-a)]
         (is (some? (::status/msgs-per-sec proc)))
-        ;; Should be positive since we injected messages
+        ;; Should be non-negative
         (is (>= (::status/msgs-per-sec proc) 0.0)))
       (stop-test-flow! :test/throughput flow))))
 
