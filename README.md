@@ -12,6 +12,26 @@ Research project by [Sean Tempesta](https://github.com/seantempesta). Public for
 
 For the project thesis and capability set, start at [`docs/seon/vision/index.md`](docs/seon/vision/index.md).
 
+## Lineage
+
+This project consolidated ~18 months of experiments documented in predecessor
+repositories. Each is private and RFC 3161 timestamped via FreeTSA on
+2026-04-21, anchoring the project's lineage for prior-art purposes.
+
+**Chronological predecessors:**
+
+| Repo | Period | Significance |
+|---|---|---|
+| `seon-2024-10-xtdb-biff` | Oct 2024 | First XTDB+Biff exploration; introduced the `seon.repl` namespace pattern. |
+| `seon-2024-10-kit-migration` | Oct 2024 – Jan 2025 | Concurrent Kit framework experiment; 45 commits exploring agentic-runtime ideas with CLJS/Reagent. |
+| `seon-2025-02-architecture` | Feb – Mar 2025 | Primary architectural realization; ~72 KB README documents namespace-as-process, code-graph, schema-discovery, REPL-pipeline, and multi-agent isolation appearing together for the first time. |
+| `seon-2025-11-trading-domain` | Nov – Dec 2025 | Immediate git ancestor; became this repo via `git mv` on 2025-12-13. |
+
+This repo's first commit (2025-12-13) was a copy of `ml-options-trading`,
+since published as `seon-2025-11-trading-domain`. The architectural patterns
+it implements trace back through `seon-2025-02-architecture` to the October
+2024 XTDB+Biff and Kit migration experiments.
+
 ## License
 
 Released under [AGPL-3.0](LICENSE). Mere unmodified use as a dependency does not trigger AGPL §13's network-copyleft provision; modification + network deployment does.
