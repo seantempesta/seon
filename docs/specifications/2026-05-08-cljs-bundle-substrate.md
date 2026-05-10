@@ -140,9 +140,9 @@ If any are 10× worse, that's a red flag we discuss before extending.
 
 ### 3.1 In scope (MVP)
 
-- `harness/cljs-bundle/` — shadow-cljs project producing `dist/agent-bundle.js`.
+- `harness/runtime/` — shadow-cljs project producing `dist/agent-bundle.js`.
 - Replacement of scittle in `harness/sidecar/sidecar.mjs`. Bundle loads in place; host bridge (`globalThis.__agent__`) keeps the same shape; `__agent_eval` rewritten to call into the CLJS-side `agent.eval/eval-source!`.
-- New CLJS namespaces under `harness/cljs-bundle/src/agent/`:
+- New CLJS namespaces under `harness/runtime/src/agent/`:
   - `agent.bootstrap` — initializes compile state and the `ctx` atom.
   - `agent.eval` — edamame split → per-form eval against shared compile-state atom.
   - `agent.classify` — return-value classification (Var? tagged-map? plain value?).
