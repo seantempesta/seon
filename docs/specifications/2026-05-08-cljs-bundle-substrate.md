@@ -1,9 +1,20 @@
 # PRD — Self-hosted ClojureScript runtime for the agent
 
-**Status**: draft, awaiting Sean review
+> **2026-05-10 banner**: This spec is the canonical detail for **the bundle / substrate that lives inside one pod**. For **system-level architecture** (orchestrator, JVM service, capability primitives, agent identity, MVP scope, debug surfaces, deployment) see [`2026-05-10-agent-runtime-architecture.md`](2026-05-10-agent-runtime-architecture.md). The system-level spec **supersedes** these sections of this doc:
+> - §3.1 (Datascript-in-bundle → Datahike-as-capability-primitive)
+> - §4.1 (layers — missing the orchestrator + JVM + capability layer)
+> - §4.7 (reactor model — deferred to Phase 3; MVP uses linear messages + tool-call loop)
+> - §6.11 (DB persistence — Datahike answers it)
+> - §9 (Python driver out-of-scope → Clojure orchestrator in-scope)
+>
+> **Hurdles 1+2 are completed** (per `harness/runtime/REPORT.md`, Carve-out 1.5 commit `98b290a`, 24/24 smoke green).
+>
+> Everything else in this spec — the bundle internals, eval flow, classification, persistence shape, schema design, library gate semantics — remains the canonical detail for those layers.
+
+**Status**: draft (substrate sections); superseded for system-level concerns (see banner above)
 **Author**: Claude (with Sean)
 **Created**: 2026-05-08
-**Last meaningful update**: 2026-05-08 (session lifecycle + two-channel state model)
+**Last meaningful update**: 2026-05-10 (banner added pointing at the system-level spec)
 **Supersedes**: the scittle-based runtime in `harness/sidecar/sidecar.mjs` + `harness/cljs/bootstrap.cljs`
 **Related research**: [`docs/research/2026-05-08-cljs-bundle-bootstrap.md`](../research/2026-05-08-cljs-bundle-bootstrap.md), [`docs/research/2026-05-08-seon-borrow-list.md`](../research/2026-05-08-seon-borrow-list.md), [`docs/research/2026-05-08-qwen-cljs-eval.md`](../research/2026-05-08-qwen-cljs-eval.md)
 
