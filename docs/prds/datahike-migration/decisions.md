@@ -391,6 +391,7 @@ The old Datalevin stack had tricky lifecycle edge cases (PID file stale, lock cl
 {:seon.db/flow {:namespaces #ref [:seon.db/namespaces]  ;; list of db-names
                 :backend    #ref [:seon.db/backend]
                 :data-root  #ref [:seon.db/data-root]}}
+
 ```
 
 `:seon.db/flow` builds a `core.async.flow` topology from the config:
@@ -479,3 +480,59 @@ The phase-1 code shouldn't prevent any of these; it should stay permissive and l
 **Context:** Datahike supports storing attribute idents as entity IDs (`:attribute-refs? true`). Benefits: Datomic compatibility, faster integer comparisons. Cost: schema-write only, schema-migration cost.
 
 **Why deferred:** Default is `false` (schema-read compatible). Switching is a phase-3 perf decision once we have real workload data.
+
+---
+
+## Decision 10: `:seon.db/ref` is intra-DB `:db.type/ref` (final meaning)
+
+**Date:** 2026-05-14
+**Status:** Committed — supersedes Decision 6's framing for `:seon.db/ref`.
+
+### Context
+
+`:seon.db/ref` has carried three meanings across the migration. The current state is the final one.
+
+| Era | Meaning | Bridge output | Notes |
+|---|---|---|---|
+| Datalevin | Entity reference; values were pos-int eids or `[unique-attr value]` lookup-refs | `:db.type/ref` | Native Datomic-style ref |
+| Datahike phase 1 (Decision 6) | Cross-DB handle | `:db.type/uuid` | The bridge produced a plain scalar — NOT a datahike ref. Caller-side `pull-deep` walked it via Malli `:seon.db/ref-to` metadata |
+| Datahike phase 2 (this decision) | Intra-DB ref | `:db.type/ref` | Cross-DB handles use `:uuid` + `:seon.db/ref-to`, NEVER labeled `:seon.db/ref` |
+
+The phase-1 framing was load-bearing for cross-DB UUIDs but lied about what datahike does internally: `:db.type/uuid` is a plain value type with no ref semantics (see `ref-model-research.md` Probe 4). Calling that "a ref" confused readers. Phase 2 separates the two cases:
+
+- `:seon.db/ref` ALWAYS means intra-DB `:db.type/ref`. Values are tempids (string or neg-int), pos-int eids, or `[unique-attr value]` lookup-refs. Datahike resolves them inside the transaction.
+- Cross-DB handles are declared at the Malli level as `:uuid` with `:seon.db/ref-to <namespace>` metadata. The bridge produces `:db.type/uuid`. The `pull-deep` walker reads the metadata to route follows. These are never labeled `:seon.db/ref`.
+
+### Decision
+
+`:seon.db/ref` maps to `:db.type/ref` in the datahike bridge. The Malli registration accepts:
+
+```clojure
+(register! :seon.db/lookup-ref-value [:or :string :uuid :keyword :int])
+(register! :seon.db/ref
+  [:or
+   :int                                            ; pos-int eid OR neg-int tempid
+   :string                                         ; string tempid
+   [:tuple :keyword :seon.db/lookup-ref-value]])   ; lookup-ref [attr value]
+
+```
+
+The bridge dispatch detects the `:seon.db/ref` registry keyword before derefing (the underlying schema is now `:or` rather than a `m/-simple-schema` of type `:seon.db/ref`).
+
+### Why no separate `:seon.db/local-ref`
+
+Earlier proposals (smell #10) suggested adding `:seon.db/local-ref` for the intra-DB case so `:seon.db/ref` could keep meaning "cross-DB UUID." That framing assumed `:seon.db/ref → :db.type/uuid` was producing "a ref of some kind." It wasn't — it was producing a scalar. There is only one ref concept worth naming; one Malli marker maps to it. Cross-DB UUIDs are just UUIDs with routing metadata, and need no special marker.
+
+### Consequences
+
+- The intra-DB ref roundtrip tests dropped in commit 09d01e2 are restored.
+- The `[:or {:seon.db/value-type :db.type/ref} :seon.db/ref]` workaround in test fixtures (smell #10) is unnecessary and was reverted.
+- The `:or` escape hatch in the bridge stays for genuinely polymorphic-valued attrs unrelated to refs.
+- Future cross-DB handle attrs declare as `:uuid` + `:seon.db/ref-to`. Never `:seon.db/ref`.
+
+### Reference
+
+- `docs/prds/datahike-migration/ref-model-research.md` — REPL-verified findings on datahike tempid resolution, lookup-ref order-dependence, and `:db.type/uuid` plain-scalar behavior.
+- `src/seon/schema.clj` — `:seon.db/ref` registration.
+- `src/seon/db/datahike/schema.clj` — bridge mapping.
+- `test/seon/db/pipeline_test.clj` — restored ref-roundtrip generative tests.

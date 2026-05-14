@@ -24,9 +24,11 @@ The intra-tx resolution loop sits at `reference-code/datahike/src/datahike/db/tr
 - Line 932–935: when an attribute is a ref and its value is a tempid, datahike substitutes from `tempids` if known; otherwise it allocates `(next-eid db)` forward and prepends the tempid to the work queue. **This is the order-independence mechanism.**
 
 The `tempid?` predicate at line 65–68:
+
 ```
 (defn- tempid? [x]
   (or (and (number? x) (neg? x)) (string? x)))
+
 ```
 
 Lookup-ref resolution sits in `reference-code/datahike/src/datahike/db/utils.cljc:105–135` (`entid`). It looks up `[attr value]` against the live `:avet` index — which only sees datoms already committed to db-after. So same-tx lookup-refs work only if the target was processed earlier in this tx's reduction loop.
@@ -34,79 +36,99 @@ Lookup-ref resolution sits in `reference-code/datahike/src/datahike/db/utils.clj
 ## Probe results (verified live)
 
 ### Probe 1 — tempid forward refs and cycles
+
 Schema: `:my/id` (`:db.unique/identity`, `:db.type/string`), `:my/refs` (`:db.type/ref`, cardinality-many).
 
 **1a (string tempids, cycle a↔b):**
+
 ```
 (d/transact c1 [{:db/id "a" :my/id "a" :my/refs ["b"]}
                 {:db/id "b" :my/id "b" :my/refs ["a"]}])
 => {:tempids {"a" 3, "b" 4, :db/current-tx 536870914},
     :datoms [[3 :my/id "a"] [3 :my/refs 4] [4 :my/id "b"] [4 :my/refs 3]]}
+
 ```
 **1b (negative-int tempids):** identical result with `:db/id -1`/`-2`. Datahike supports both forms.
 
 ### Probe 2 — lookup-refs same-tx
 
 **2a (target appears first in tx):**
+
 ```
 (d/transact c2 [{:my/id "a"}
                 {:my/id "b" :my/refs [[:my/id "a"]]}])
 => :datoms [[3 :my/id "a"] [4 :my/id "b"] [4 :my/refs 3]]   ;; OK
+
 ```
 
 **2b (target appears second — forward lookup-ref):**
+
 ```
 (d/transact c2b [{:my/id "b" :my/refs [[:my/id "a"]]}
                  {:my/id "a"}])
 => ExceptionInfo "Nothing found for entity id [:my/id \"a\"]"
    :error :entity-id/missing
+
 ```
 
 **2c (same as 2b but with string tempid instead of lookup-ref):**
+
 ```
 (d/transact c2c [{:db/id "b" :my/id "b" :my/refs ["a"]}
                  {:db/id "a" :my/id "a"}])
 => :tempids {"b" 3, "a" 4}   ;; OK — order-independent
+
 ```
 
 This is the central finding. Lookup-refs are order-dependent; tempids are not.
 
 ### Probe 3 — UUID identity attr, lookup-ref vs raw UUID
+
 Schema: `:my/uuid` (`:db.unique/identity`, `:db.type/uuid`), `:my/ref` (`:db.type/ref`).
 
 **3a (explicit lookup-ref form):**
+
 ```
 (d/transact c3 [{:my/name "bob-lookup" :my/ref [:my/uuid u]}])
 => :datoms [[5 :my/name "bob-lookup"] [5 :my/ref 4]]   ;; resolved to eid 4
+
 ```
 
 **3b (raw UUID as ref value):**
+
 ```
 (d/transact c3 [{:my/name "bob-raw" :my/ref u}])
 => ExceptionInfo "Expected number or lookup ref for entity id, got #uuid \"…\""
    :error :entity-id/syntax
+
 ```
 
 Datahike does NOT auto-resolve a UUID against an identity attr at ref-write time. You must use the explicit `[:my/uuid u]` form.
 
 ### Probe 4 — `:db.type/uuid` as plain value
+
 Schema: `:my/external-uuid` (`:db.type/uuid` only, NO `:db.type/ref`).
+
 ```
 (d/transact c4 [{:my/name "bob" :my/external-uuid u4}])
 (d/pull @c4 '[*] bob-eid)
 => {:db/id 3, :my/external-uuid #uuid "…", :my/name "bob"}
+
 ```
 UUID stored as-is, returned as-is. No ref semantics. This is what seon's `:seon.db/ref → :db.type/uuid` bridge actually produces today.
 
 ### Probe 6 — pull return shape
+
 ```
 (d/pull @c6 [:my/refs] peid)         => #:my{:refs [#:db{:id 4} #:db{:id 5}]}
 (d/pull @c6 '[*] peid)               => {:db/id 3, :my/id "p", :my/refs [#:db{:id 4} #:db{:id 5}]}
 (d/pull @c6 '[:my/id {:my/refs [:my/id]}] peid)
    => #:my{:id "p", :refs [#:my{:id "x"} #:my{:id "y"}]}
+
 ```
 
 ### Probe 7 — `:db.unique/identity` vs `:db.unique/value`
+
 - Identity: second tx with same value upserts; `:my/name` flips from `"first"` to `"second"`.
 - Value: second tx with same value throws `unique constraint: :transact/unique`.
 
@@ -156,6 +178,7 @@ Mixing forms in one entity map is fine. The recommended **default** for code tha
  {:db/id "entry:e1" :seon.entry/key :k :seon.entry/value-shape "shape:s2"}
  {:db/id "shape:s2" :seon.shape/id "s2" :seon.shape/entries [...]}
  ...]
+
 ```
 
 Today's helper uses lookup-refs (the values inside `::extract/shapes` are `[:seon.shape/id "s1"]` tuples). To remove the stub-fill pattern, the helper needs to:
@@ -176,6 +199,7 @@ Given (A), the bridge maps `:seon.db/ref → :db.type/ref`. The predicate guards
    [:int]                                ;; pos-int eid OR neg-int tempid
    :string                               ;; string tempid
    [:tuple :keyword :any]])              ;; lookup-ref [attr value]
+
 ```
 
 Notes:
