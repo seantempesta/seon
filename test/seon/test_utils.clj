@@ -7,6 +7,11 @@
     exercise the live `seon.db` API. Stands up an isolated datahike
     flow per test, binds `seon.db/*datahike-flow*`, and tears down on
     exit. Never touches the running orchestrator's `:seon.db/flow`.
+  - `transact-full-graph!` — canonical helper for transacting a
+    fully-extracted `seon.graph.extract/extract-graph-from-file` map
+    into a fixture db. Handles the shape↔entry cycle via stub-then-fill
+    and Integer→Long coercion of row attributes. Use this rather than
+    re-deriving the dependency order inline in each test.
   - Legacy datalevin test helpers (`with-temp-conn`, `with-test-datalevin`)
     — retained until the apply-everywhere migration completes. New
     tests use the datahike fixture above.
@@ -19,6 +24,7 @@
             [seon.db :as db]
             [seon.db.datahike.flow :as dh-flow]
             [seon.db.datalevin.conn :as conn]
+            [seon.graph.extract :as extract]
             [seon.schema :as schema])
   (:import [java.io File]
            [java.util UUID]))
@@ -236,6 +242,148 @@
                  {:requested logical-db-name
                   :known (set (keys aliases))})))
     logical-db-name))
+
+;;; ---------------------------------------------------------------------------
+;;; Full-Graph Transact Helper
+;;; ---------------------------------------------------------------------------
+;;;
+;;; `transact-full-graph!` encapsulates the dependency-order trap of
+;;; transacting a fully-extracted `seon.graph.extract/extract-graph-from-file`
+;;; map into a datahike-backed db.
+;;;
+;;; Two issues need handling, both surfaced during the workout-test
+;;; migration (smells #11 and #13 in
+;;; `docs/prds/datahike-migration/remaining.md`):
+;;;
+;;;   1. Shapes and entries form a cycle — shapes carry
+;;;      `:seon.shape/entries` lookup-refs to entries; some entries
+;;;      carry `:seon.entry/value-shape` lookup-refs back to shapes.
+;;;      Datahike resolves lookup-refs only against pre-existing
+;;;      entities, not same-tx tempids — so we must transact shape
+;;;      stubs (id-only) before entries, then fill shapes afterwards.
+;;;
+;;;   2. `seon.graph.extract` emits `:seon.fn/row`, `:seon.var/row`,
+;;;      and `:seon.call/row` as `java.lang.Integer`. The datahike
+;;;      bridge maps Malli `:int` to `:db.type/long` and strictly
+;;;      rejects Integer. We Long-coerce those attrs at transact time.
+;;;
+;;; Canonical dependency order:
+;;;
+;;;     namespaces → specs → shape stubs (id-only) → entries
+;;;       → full shapes → functions → vars → call-edges → ns-deps
+
+(def ^:private graph-long-attrs
+  "Attrs the datahike bridge stores as `:db.type/long` but
+   `seon.graph.extract` emits as `java.lang.Integer`. Long-coerced
+   at transact time inside `transact-full-graph!`."
+  #{:seon.fn/row :seon.var/row :seon.call/row})
+
+(defn- coerce-ints->longs
+  "Coerce any `Integer` values on long-typed datahike attrs to `Long`
+   so the datahike bridge accepts the entity map. See smell #11."
+  [coll]
+  (mapv (fn [m]
+          (reduce-kv (fn [acc k v]
+                       (assoc acc k (if (and (graph-long-attrs k) (integer? v))
+                                      (long v)
+                                      v)))
+                     {} m))
+        coll))
+
+(def graph-categories
+  "Ordered list of graph categories the helper transacts. Each entry is
+   `[category-key extract-key]`. The order is the canonical dependency
+   order — specs feed function refs; shape stubs precede entries to
+   break the shape↔entry cycle; full shapes follow entries; functions /
+   vars / call-edges / ns-deps consume everything above. `:shape-stubs`
+   is synthetic (derived from shapes); the rest map 1:1 to
+   `seon.graph.extract` keys."
+  [[:namespaces  ::extract/namespaces]
+   [:specs       ::extract/specs]
+   [:shape-stubs ::extract/shapes]  ;; transacted id-only
+   [:entries     ::extract/entries]
+   [:shapes      ::extract/shapes]
+   [:functions   ::extract/functions]
+   [:vars        ::extract/vars]
+   [:call-edges  ::extract/call-edges]
+   [:ns-deps     ::extract/ns-deps]])
+
+(def default-include
+  "Default category set for `transact-full-graph!`. Mirrors what
+   workout-test transacted pre-helper (specs, the shape↔entry pair,
+   functions). Callers that want to populate vars / call-edges /
+   ns-deps must pass `::include` explicitly AND widen their fixture
+   schema to cover the corresponding attrs."
+  #{:specs :shape-stubs :entries :shapes :functions})
+
+(schema/register! ::db-name :keyword)
+(schema/register! ::graph :any)
+(schema/register! ::include
+                  [:set [:enum :namespaces :specs :shape-stubs :entries
+                         :shapes :functions :vars :call-edges :ns-deps]])
+(schema/register! ::counts [:map-of :keyword :int])
+
+(schema/register! ::transact-full-graph-request
+                  [:map
+                   [::db-name ::db-name]
+                   [::graph ::graph]
+                   [::include {:optional true} ::include]])
+
+(schema/register! ::transact-full-graph-response
+                  [:map
+                   [::counts ::counts]])
+
+(defn- ^:no-doc payload-for
+  "Build the entity coll for a single graph category, applying
+   stub-projection for `:shape-stubs` and Long-coercion for the
+   Integer-row categories."
+  [category graph]
+  (case category
+    :shape-stubs (mapv #(select-keys % [:seon.shape/id])
+                       (::extract/shapes graph))
+    :functions   (coerce-ints->longs (::extract/functions graph))
+    :vars        (coerce-ints->longs (::extract/vars graph))
+    :call-edges  (coerce-ints->longs (::extract/call-edges graph))
+    (vec (get graph (second (first (filter #(= category (first %))
+                                           graph-categories)))))))
+
+(defn transact-full-graph!
+  "Transact a fully-extracted `seon.graph.extract/extract-graph-from-file`
+   map into `db-name` in the canonical dependency order. Handles the
+   shape↔entry lookup-ref cycle via stub-then-fill (datahike resolves
+   lookup-refs only against pre-existing entities) and Long-coerces
+   `:seon.fn/row` / `:seon.var/row` / `:seon.call/row` Integers to
+   match the datahike `:db.type/long` bridge.
+
+   Order: namespaces → specs → shape stubs → entries → full shapes →
+   functions → vars → call-edges → ns-deps.
+
+   `::include` (optional) — set of category keywords to transact.
+   Defaults to `default-include` (specs / shape-stubs / entries /
+   shapes / functions), matching workout-test's pre-helper behavior.
+   Callers that opt in to `:namespaces` / `:vars` / `:call-edges` /
+   `:ns-deps` must widen their fixture schema to cover the
+   corresponding attrs, or datahike rejects the transact at
+   schema-check time.
+
+   Returns `{::counts {<category> <n>}}` — counts of entities actually
+   transacted per included category."
+  {:malli/schema [:=> [:cat ::transact-full-graph-request]
+                  ::transact-full-graph-response]}
+  [{::keys [db-name graph include]
+    :or {include default-include}}]
+  (let [counts (reduce
+                (fn [acc [category _]]
+                  (if (contains? include category)
+                    (let [payload (payload-for category graph)]
+                      (if (seq payload)
+                        (do (db/transact! db-name payload)
+                            (assoc acc category (count payload)))
+                        (assoc acc category 0)))
+                    acc))
+                {}
+                graph-categories)]
+    {::counts counts}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Legacy Test Node Fixture (stub)

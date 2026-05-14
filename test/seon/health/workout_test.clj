@@ -4,7 +4,6 @@
    and page renderer identification."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
-            [seon.db :as db]
             [seon.graph.extract :as extract]
             [seon.graph.ingest :as ingest]
             [seon.graph.query :as gq]
@@ -214,46 +213,16 @@
 ;;; Integration Tests
 ;;; ---------------------------------------------------------------------------
 
-(defn- coerce-ints->longs
-  "Walk a graph entity coll and coerce any Integer values on long-typed
-   datahike attrs to Long. Workaround for a `seon.graph.extract` smell:
-   :seon.fn/row, :seon.var/row, :seon.call/row are produced as Integer
-   but the datahike schema bridge maps Malli `:int` to `:db.type/long`,
-   which requires `java.lang.Long`. Datalevin tolerated the Integer.
-
-   This belongs in `seon.graph.extract` (or the datahike bridge), not in
-   the test — flagged in the migration report as a follow-up."
-  [coll]
-  (let [long-attrs #{:seon.fn/row :seon.var/row :seon.call/row}]
-    (mapv (fn [m]
-            (reduce-kv (fn [acc k v]
-                         (assoc acc k (if (and (long-attrs k) (integer? v))
-                                        (long v)
-                                        v)))
-                       {} m))
-          coll)))
-
 (deftest find-renderer-integration-test
   (testing "find-renderer discovers workout-set-render after ingestion"
     (let [graph (extract/extract-graph-from-file
                  {::extract/file-path "src/seon/health/workout.clj"})]
-      ;; Dependency order with a cycle break:
-      ;;   - specs first (functions ref them via [:seon.spec/key ...]).
-      ;;   - shapes and entries form a cycle (shapes hold
-      ;;     :seon.shape/entries refs to entries; some entries hold
-      ;;     :seon.entry/value-shape refs back to shapes). Datahike
-      ;;     resolves lookup-refs against pre-existing entities only — not
-      ;;     against same-tx tempids — so we transact shape stubs first
-      ;;     (id-only), then entries (which can now look up shape ids),
-      ;;     then full shapes (which can now look up entry ids).
-      ;;   - functions last (ref specs and shapes via lookup-refs).
-      (db/transact! :seon.runtime (vec (::extract/specs graph)))
-      (db/transact! :seon.runtime
-                    (mapv (fn [s] (select-keys s [:seon.shape/id]))
-                          (::extract/shapes graph)))
-      (db/transact! :seon.runtime (vec (::extract/entries graph)))
-      (db/transact! :seon.runtime (vec (::extract/shapes graph)))
-      (db/transact! :seon.runtime (coerce-ints->longs (::extract/functions graph))))
+      ;; Transact in dependency order (specs → shape stubs → entries →
+      ;; full shapes → functions → vars/edges/deps), handling the
+      ;; shape↔entry cycle and Integer→Long coercion of row attrs.
+      ;; See `seon.test-utils/transact-full-graph!` for details.
+      (tu/transact-full-graph! {::tu/db-name :seon.runtime
+                                ::tu/graph graph}))
 
     (gq/invalidate-output-key-cache!)
     (let [workout-data {::workout/exercise "Squat"
