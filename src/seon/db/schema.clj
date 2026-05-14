@@ -135,8 +135,13 @@
         [(not-empty or-props) nil])
 
       :malli.core/schema
-      (let [[attr nested] (schema->datalevin-attr (m/deref child-schema))]
-        [(when attr (merge attr seon-props)) nested])
+      ;; A registered-keyword reference. `:seon.db/ref` is now an `[:or ...]`
+      ;; schema in the registry (Decision 10) — without this short-circuit,
+      ;; the legacy bridge would deref to `:or` and lose the ref intent.
+      (if (= :seon.db/ref (m/form child-schema))
+        [(merge {:db/valueType :db.type/ref} seon-props) nil]
+        (let [[attr nested] (schema->datalevin-attr (m/deref child-schema))]
+          [(when attr (merge attr seon-props)) nested]))
 
       [nil nil])))
 

@@ -196,11 +196,11 @@
 ;;; ---------------------------------------------------------------------------
 
 (deftest bridge-seon-db-ref-test
-  (testing ":seon.db/ref -> :db.type/uuid (Decision 6)"
+  (testing ":seon.db/ref -> :db.type/ref (Decision 10 — intra-DB ref)"
     (let [result (dhs/malli-map->datahike-schema
                   [:map [:foo/parent :seon.db/ref]])
           attr (find-attr result :foo/parent)]
-      (is (= :db.type/uuid (:db/valueType attr)))
+      (is (= :db.type/ref (:db/valueType attr)))
       (is (= :db.cardinality/one (:db/cardinality attr))))))
 
 ;;; ---------------------------------------------------------------------------

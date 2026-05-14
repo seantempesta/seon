@@ -101,7 +101,7 @@
 (schema/register! :seon.entry/optional :boolean)
 (schema/register! :seon.entry/injectable :boolean)
 (schema/register! :seon.entry/value-type :keyword)
-(schema/register! :seon.entry/value-shape [:seon.db/ref {:optional true}])
+(schema/register! :seon.entry/value-shape :seon.db/ref)
 (schema/register! :seon.entry/collection [:keyword {:optional true}])
 
 ;; Function shape refs (alongside existing input-spec/output-spec)

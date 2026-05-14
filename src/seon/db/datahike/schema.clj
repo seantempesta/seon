@@ -174,9 +174,12 @@
                combined-seon-props))
 
       :seon.db/ref
-      ;; Decision 6: cross-DB refs are plain UUIDs, target namespace carried
-      ;; in Malli metadata (not in the datahike schema itself).
-      (merge {:db/valueType :db.type/uuid
+      ;; :seon.db/ref means intra-DB :db.type/ref. Values are tempids,
+      ;; pos-int eids, or [unique-attr value] lookup-refs; datahike resolves
+      ;; them inside the transaction. Cross-DB handles are :uuid attrs with
+      ;; :seon.db/ref-to metadata and are NEVER labeled :seon.db/ref.
+      ;; See docs/prds/datahike-migration/ref-model-research.md.
+      (merge {:db/valueType :db.type/ref
               :db/cardinality :db.cardinality/one}
              combined-seon-props)
 
@@ -195,7 +198,18 @@
                   {:attr attr-key :schema child-schema}))))
 
       :malli.core/schema
-      (schema->attr-partial attr-key entry-props (m/deref child-schema))
+      ;; A registered-keyword reference (e.g. :seon.db/ref). Pre-deref, we
+      ;; can see the registry keyword via (m/form). The keyword identifies
+      ;; the bridge case for refs without needing the underlying schema's
+      ;; type to be `:seon.db/ref` itself — important because the new
+      ;; :seon.db/ref registration uses an `:or` form rather than a
+      ;; `m/-simple-schema` of type `:seon.db/ref`.
+      (let [form (m/form child-schema)]
+        (if (= :seon.db/ref form)
+          (merge {:db/valueType :db.type/ref
+                  :db/cardinality :db.cardinality/one}
+                 combined-seon-props)
+          (schema->attr-partial attr-key entry-props (m/deref child-schema))))
 
       :map
       (throw (ex-info
@@ -235,8 +249,10 @@
    - `:enum` infers the type from homogeneous values; throws on mixed types.
    - `:seon.db/identity true` sets `:db/unique :db.unique/identity`.
    - `:seon.db/unique true` sets `:db/unique :db.unique/value`.
-   - `:seon.db/ref` becomes `:db.type/uuid` (cross-DB refs carry target
-     namespace in Malli metadata, not in the datahike schema).
+   - `:seon.db/ref` becomes `:db.type/ref` (intra-DB ref; values are
+     tempids, pos-int eids, or [unique-attr value] lookup-refs). Cross-DB
+     handles use plain `:uuid` with `:seon.db/ref-to` metadata and are
+     never labeled as `:seon.db/ref`.
    - `:or` requires `:seon.db/value-type` in properties to be persistable.
    - Nested `:map` as component ref is not supported in phase 1.
 
