@@ -218,7 +218,14 @@
    When nil (default), resolves via `get-datahike-flow`, which reads
    `:seon.db/flow` from the running Integrant system. Bind in a test fixture
    to a flow-state map returned by
-   `seon.db.datahike.flow/build-datahike-flow!`."
+   `seon.db.datahike.flow/build-datahike-flow!`.
+
+   A bound flow-state may carry an optional
+   `:seon.db.datahike.flow/aliases` map (logical db-name -> internal db-name)
+   so test fixtures can route a logical name like `:seon.runtime` through an
+   isolated, gensym-suffixed conn-process. `datahike-owned?` and the four
+   public fns resolve through the alias map before dispatch; entities are
+   still stamped with the caller's logical db-name (Decision 7)."
   nil)
 
 (defn- get-datahike-flow
@@ -236,15 +243,26 @@
           (get sys :seon.db/flow))
         (catch Exception _ nil))))
 
+(defn- resolve-db-name
+  "Resolve a caller-supplied `db-name` through the running datahike flow's
+   `::aliases` map (if any). Test fixtures populate `::aliases` so a logical
+   name like `:seon.runtime` maps to a gensym-suffixed internal name. Outside
+   a fixture, `::aliases` is absent and the input is returned unchanged."
+  [db-name]
+  (let [fs (get-datahike-flow)
+        aliases (::dh-flow/aliases fs)]
+    (or (get aliases db-name) db-name)))
+
 (defn- datahike-owned?
   "Return true if the running datahike flow owns a conn-process for `db-name`.
    Returns false if there is no flow, or the flow's `::pids` map doesn't
-   contain the db-name. Callers use this to decide between the datahike
-   route and the legacy datalevin route."
+   contain the db-name. Honors the flow's `::aliases` map so logical db-names
+   bound by a test fixture resolve to their internal conn-process. Callers use
+   this to decide between the datahike route and the legacy datalevin route."
   [db-name]
   (boolean
     (when-let [fs (get-datahike-flow)]
-      (contains? (::dh-flow/pids fs) db-name))))
+      (contains? (::dh-flow/pids fs) (resolve-db-name db-name)))))
 
 (defn- stamp-namespace
   "Decision 7: walk tx-data and stamp `:seon.db/namespace <db-name>` on each
@@ -415,14 +433,16 @@
      ;; Datahike route: auto-stamp :seon.db/namespace on each entity map,
      ;; validate attrs + values against Malli, and dispatch to the flow's
      ;; conn-process. Schema is installed on the datahike side at :init, so
-     ;; no ensure-schema! here.
+     ;; no ensure-schema! here. The stamp uses the caller's logical db-name
+     ;; (semantic identity), while dispatch uses the resolved internal name
+     ;; so test fixtures can alias logical -> gensym'd db-names.
      (let [stamped (stamp-namespace db-name tx-data)
            attrs (extract-tx-attrs stamped)]
        (validate-attrs! attrs)
        (validate-values! stamped)
        (dh-request!
          (cond-> {::dh-flow/flow (get-datahike-flow)
-                  ::dh-flow/db-name db-name
+                  ::dh-flow/db-name (resolve-db-name db-name)
                   ::dh-flow/op :transact!
                   ::dh-flow/args [stamped]}
            (:timeout-ms opts) (assoc ::dh-flow/timeout-ms (:timeout-ms opts)))))
@@ -494,7 +514,7 @@
   (cond
     (datahike-owned? db-name)
     (dh-request! {::dh-flow/flow (get-datahike-flow)
-                       ::dh-flow/db-name db-name
+                       ::dh-flow/db-name (resolve-db-name db-name)
                        ::dh-flow/op :q
                        ::dh-flow/args (into [datalog-query] inputs)})
 
@@ -523,7 +543,7 @@
   (cond
     (datahike-owned? db-name)
     (dh-request! {::dh-flow/flow (get-datahike-flow)
-                       ::dh-flow/db-name db-name
+                       ::dh-flow/db-name (resolve-db-name db-name)
                        ::dh-flow/op :pull
                        ::dh-flow/args [selector eid]})
 
@@ -552,7 +572,7 @@
   (cond
     (datahike-owned? db-name)
     (dh-request! {::dh-flow/flow (get-datahike-flow)
-                       ::dh-flow/db-name db-name
+                       ::dh-flow/db-name (resolve-db-name db-name)
                        ::dh-flow/op :pull-many
                        ::dh-flow/args [selector eids]})
 
@@ -580,7 +600,7 @@
   (cond
     (datahike-owned? db-name)
     (dh-request! {::dh-flow/flow (get-datahike-flow)
-                       ::dh-flow/db-name db-name
+                       ::dh-flow/db-name (resolve-db-name db-name)
                        ::dh-flow/op :entity
                        ::dh-flow/args [eid]})
 
