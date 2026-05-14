@@ -1,7 +1,7 @@
 ---
 type: prd
 status: draft
-tags: [prd, database, test]
+tags: [prd, database]
 ---
 
 # Datahike test fixture — design
@@ -257,10 +257,10 @@ additional setup), we add ~2% to wall-clock. The fixture is not the
 wall-clock bottleneck and won't become one.
 
 Comparison to the datalevin-era `with-temp-conn`: that one creates an
-LMDB store on disk + applies `tmp/test-<nanotime>` directory + closes
-+ rm -rf. Disk-bound; somewhere in the 20–50 ms range typically.
-Datahike `:memory` is faster (about 4–5× on steady state) and has no
-`tmp/` to clean up.
+LMDB store on disk under a `tmp/test-<nanotime>` directory, closes the
+connection on exit, and `rm -rf`s the directory. Disk-bound; somewhere
+in the 20–50 ms range typically. Datahike `:memory` is faster (about
+4–5× on steady state) and has no `tmp/` to clean up.
 
 ## Migration sketch for the existing callers
 

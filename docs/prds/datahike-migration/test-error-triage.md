@@ -1,7 +1,7 @@
 ---
 type: prd
 status: active
-tags: [prd, database, test]
+tags: [prd, database]
 ---
 
 # Test-suite error triage — datahike migration cleanup
