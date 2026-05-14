@@ -1,7 +1,7 @@
 ---
 type: prd
 status: active
-tags: [prd, database, test]
+tags: [prd, database]
 ---
 
 # Test-suite baseline — datahike migration cleanup
@@ -62,6 +62,7 @@ Every error frame is `instrumentation.clj:320` (the guard, not the test). The ac
 - `list-sessions-includes-observability-test`
 
 **Sample error (truncated):**
+
 ```
 == INVALID INPUT ==
 x (seon.orchestrator.session/start-agent-session! #:seon.orchestrator.session{:node nil, :namespace test.nrepl.sid, :pool nil})
