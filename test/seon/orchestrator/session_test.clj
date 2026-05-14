@@ -3,49 +3,39 @@
 
   Tests session lifecycle, ctx persistence, and recovery functionality.
   Note: nREPL integration tests that require a live pool are in pool_test.clj.
-  These tests verify the session layer works correctly without a pool (port=nil)."
+  These tests verify the session layer works correctly without a pool (port=nil).
+
+  Uses `tu/with-test-db-fixture` to route `:seon.orchestrator` writes/queries
+  through an isolated datahike `:memory` flow per test — keeps the live
+  orchestrator DB clean. See `docs/prds/datahike-migration/test-fixture-design.md`."
   (:require [clojure.test :refer [deftest testing is use-fixtures]]
-            [seon.db :as db]
             [seon.orchestrator.session :as session]
             [seon.runtime :as runtime]
             [seon.schema :as schema]
-            [seon.test-utils :refer [with-test-node *test-node*]]))
+            [seon.test-utils :as tu]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Test Fixtures
 ;;; ---------------------------------------------------------------------------
 
-(defn- retract-all-sessions!
-  "Wipe all rows from `:seon.orchestrator` plus the in-process live-state.
-   Used in test fixtures to give each test a clean slate."
-  []
-  (try
-    (let [eids (->> (db/query :seon.orchestrator
-                              '[:find ?e :where
-                                [?e :seon.orchestrator.session/id _]])
-                    (map first))]
-      (when (seq eids)
-        (db/transact! :seon.orchestrator
-                      (vec (for [e eids] [:db/retractEntity e])))))
-    (catch Exception _))
-  (reset! @#'seon.orchestrator.session/live-state {}))
-
-(defn cleanup-sessions
-  "Fixture that cleans up sessions after each test."
+(defn- reset-process-state
+  "Reset live-state + runtime registry between tests. Per-test DB isolation
+   is handled by `with-test-db-fixture`; this resets the JVM-process state
+   that lives outside the datahike DB."
   [f]
-  (retract-all-sessions!)
   (runtime/reset-registry! {})
+  (reset! @#'seon.orchestrator.session/live-state {})
   (try
     (f)
     (finally
-      (retract-all-sessions!)
-      (Thread/sleep 50)
+      (reset! @#'seon.orchestrator.session/live-state {})
       (runtime/reset-registry! {}))))
 
-(use-fixtures :each (fn [f]
-                      (with-test-node
-                        (fn []
-                          (cleanup-sessions f)))))
+(use-fixtures :each
+  (tu/with-test-db-fixture
+    {::tu/namespaces [:seon.orchestrator]
+     ::tu/schemas    {:seon.orchestrator session/session-entity-schema}})
+  reset-process-state)
 
 ;;; ---------------------------------------------------------------------------
 ;;; Test Schema Registration (for agent-side validation)
@@ -64,8 +54,7 @@
 (deftest session-id-format-test
   (testing "session IDs are 6 hex characters"
     (let [result (session/start-agent-session!
-                   {::session/node *test-node*
-                    ::session/namespace 'test.id.format
+                   {::session/namespace 'test.id.format
                     ::session/pool nil})]
       (is (= :running (::session/status result)))
       (is (string? (::session/id result)))
@@ -79,8 +68,7 @@
 (deftest start-agent-session-test
   (testing "starts a session (no pool = nil port)"
     (let [result (session/start-agent-session!
-                   {::session/node *test-node*
-                    ::session/namespace 'test.start
+                   {::session/namespace 'test.start
                     ::session/pool nil})]
       (is (= :running (::session/status result)))
       (is (some? (::session/id result)))
@@ -93,23 +81,20 @@
 (deftest stop-agent-session-test
   (testing "stops a running session"
     (let [started (session/start-agent-session!
-                    {::session/node *test-node*
-                     ::session/namespace 'test.stop
+                    {::session/namespace 'test.stop
                      ::session/pool nil})
           session-id (::session/id started)]
       (is (= :running (::session/status started)))
 
       (let [stopped (session/stop-agent-session!
-                      {::session/node *test-node*
-                       ::session/id session-id})]
+                      {::session/id session-id})]
         (is (= :stopped (::session/status stopped)))
         (is (= session-id (::session/id stopped)))
         (is (inst? (::session/stopped-at stopped))))))
 
   (testing "returns error for non-existent session"
     (let [result (session/stop-agent-session!
-                   {::session/node *test-node*
-                    ::session/id "dead00"})]
+                   {::session/id "dead00"})]
       (is (= :error (::session/status result)))
       (is (= "Session not found" (::session/error result))))))
 
@@ -120,40 +105,33 @@
 (deftest get-agent-session-test
   (testing "returns session info for running session"
     (let [started (session/start-agent-session!
-                    {::session/node *test-node*
-                     ::session/namespace 'test.get
+                    {::session/namespace 'test.get
                      ::session/pool nil})
           session-id (::session/id started)
           retrieved (session/get-agent-session
-                      {::session/node *test-node*
-                       ::session/id session-id})]
+                      {::session/id session-id})]
       (is (= session-id (::session/id retrieved)))
       (is (= "test.get" (::session/namespace retrieved)))
       (is (= :running (::session/status retrieved)))))
 
   (testing "returns empty map for non-existent session"
     (let [result (session/get-agent-session
-                   {::session/node *test-node*
-                    ::session/id "dead00"})]
+                   {::session/id "dead00"})]
       (is (= {} result)))))
 
 (deftest list-agent-sessions-test
   (testing "returns empty list when no sessions"
-    (is (empty? (session/list-agent-sessions
-                  {::session/node *test-node*}))))
+    (is (empty? (session/list-agent-sessions {}))))
 
   (testing "lists all active sessions"
     (session/start-agent-session!
-      {::session/node *test-node*
-       ::session/namespace 'test.list1
+      {::session/namespace 'test.list1
        ::session/pool nil})
     (session/start-agent-session!
-      {::session/node *test-node*
-       ::session/namespace 'test.list2
+      {::session/namespace 'test.list2
        ::session/pool nil})
 
-    (let [sessions (session/list-agent-sessions
-                     {::session/node *test-node*})]
+    (let [sessions (session/list-agent-sessions {})]
       (is (= 2 (count sessions)))
       (is (every? #(contains? % ::session/id) sessions))
       (is (every? #(contains? % ::session/namespace) sessions))
@@ -162,19 +140,16 @@
 (deftest get-session-port-test
   (testing "returns nil port when no pool (no pool in tests)"
     (let [started (session/start-agent-session!
-                    {::session/node *test-node*
-                     ::session/namespace 'test.port
+                    {::session/namespace 'test.port
                      ::session/pool nil})
           session-id (::session/id started)
           result (session/get-session-port
-                   {::session/node *test-node*
-                    ::session/id session-id})]
+                   {::session/id session-id})]
       (is (nil? (::session/nrepl-port result)))))
 
   (testing "returns nil port for non-existent session"
     (let [result (session/get-session-port
-                   {::session/node *test-node*
-                    ::session/id "dead00"})]
+                   {::session/id "dead00"})]
       (is (nil? (::session/nrepl-port result))))))
 
 ;;; ---------------------------------------------------------------------------
@@ -204,15 +179,13 @@
 (deftest activity-tracking-test
   (testing "sessions track eval activity"
     (let [started (session/start-agent-session!
-                    {::session/node *test-node*
-                     ::session/namespace 'test.activity
+                    {::session/namespace 'test.activity
                      ::session/pool nil})
           session-id (::session/id started)]
 
       ;; Initial state: 0 evals, no current eval
       (let [info (session/get-agent-session
-                   {::session/node *test-node*
-                    ::session/id session-id})]
+                   {::session/id session-id})]
         (is (= 0 (::session/eval-count info)))
         (is (nil? (::session/current-eval info))))
 
@@ -223,8 +196,7 @@
 
       ;; Should have current-eval set
       (let [info (session/get-agent-session
-                   {::session/node *test-node*
-                    ::session/id session-id})]
+                   {::session/id session-id})]
         (is (some? (::session/current-eval info)))
         (is (= "(+ 1 2)" (::session/code (::session/current-eval info)))))
 
@@ -234,8 +206,7 @@
 
       ;; Should have incremented count and cleared current-eval
       (let [info (session/get-agent-session
-                   {::session/node *test-node*
-                    ::session/id session-id})]
+                   {::session/id session-id})]
         (is (= 1 (::session/eval-count info)))
         (is (nil? (::session/current-eval info)))
         (is (some? (::session/last-activity-at info)))))))
@@ -253,8 +224,7 @@
 (deftest list-sessions-includes-observability-test
   (testing "list-agent-sessions includes observability fields"
     (let [started (session/start-agent-session!
-                    {::session/node *test-node*
-                     ::session/namespace 'test.obs
+                    {::session/namespace 'test.obs
                      ::session/pool nil})
           session-id (::session/id started)]
 
@@ -262,8 +232,7 @@
       (session/record-eval-start! {::session/id session-id ::session/code "(+ 1 2)"})
       (session/record-eval-complete! {::session/id session-id})
 
-      (let [sessions (session/list-agent-sessions
-                       {::session/node *test-node*})
+      (let [sessions (session/list-agent-sessions {})
             session (first (filter #(= session-id (::session/id %)) sessions))]
         (is (some? session))
         (is (= 1 (::session/eval-count session)))
@@ -277,8 +246,7 @@
 (deftest set-nrepl-session-id-test
   (testing "can set nREPL session ID for existing session"
     (let [started (session/start-agent-session!
-                    {::session/node *test-node*
-                     ::session/namespace 'test.nrepl.sid
+                    {::session/namespace 'test.nrepl.sid
                      ::session/pool nil})
           session-id (::session/id started)
           nrepl-sid "test-nrepl-session-123"]
@@ -291,8 +259,7 @@
 
       ;; Verify it's stored
       (let [info (session/get-session-port
-                   {::session/node *test-node*
-                    ::session/id session-id})]
+                   {::session/id session-id})]
         (is (= nrepl-sid (::session/nrepl-session-id info))))))
 
   (testing "returns false for non-existent session"
@@ -304,16 +271,14 @@
 (deftest get-session-port-includes-nrepl-session-id-test
   (testing "get-session-port returns nrepl-session-id when set"
     (let [started (session/start-agent-session!
-                    {::session/node *test-node*
-                     ::session/namespace 'test.port.sid
+                    {::session/namespace 'test.port.sid
                      ::session/pool nil})
           session-id (::session/id started)
           nrepl-sid "my-nrepl-session-456"]
 
       ;; Initially nil
       (let [info (session/get-session-port
-                   {::session/node *test-node*
-                    ::session/id session-id})]
+                   {::session/id session-id})]
         (is (nil? (::session/nrepl-session-id info))))
 
       ;; Set it
@@ -323,8 +288,7 @@
 
       ;; Now returned
       (let [info (session/get-session-port
-                   {::session/node *test-node*
-                    ::session/id session-id})]
+                   {::session/id session-id})]
         (is (= nrepl-sid (::session/nrepl-session-id info)))))))
 
 ;;; ---------------------------------------------------------------------------
@@ -334,8 +298,7 @@
 (deftest start-session-registers-in-runtime-test
   (testing "start-agent-session! registers instance in runtime registry"
     (let [result (session/start-agent-session!
-                   {::session/node *test-node*
-                    ::session/namespace 'test.runtime.start
+                   {::session/namespace 'test.runtime.start
                     ::session/pool nil})
           session-id (::session/id result)
           instances (runtime/instances {})]
@@ -352,8 +315,7 @@
 (deftest stop-session-unregisters-from-runtime-test
   (testing "stop-agent-session! sets runtime status to :stopped"
     (let [started (session/start-agent-session!
-                    {::session/node *test-node*
-                     ::session/namespace 'test.runtime.stop
+                    {::session/namespace 'test.runtime.stop
                      ::session/pool nil})
           session-id (::session/id started)]
       ;; Verify running first

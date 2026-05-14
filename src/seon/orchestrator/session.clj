@@ -21,7 +21,6 @@
   ```"
   (:require [seon.ctx :as ctx]
             [seon.db :as db]
-            [seon.db.datalevin.conn :as conn]
             [seon.db.schema :as db-schema]
             [seon.flow.pool :as pool]
             [seon.runtime :as runtime]
@@ -39,7 +38,10 @@
                             :description "Base62 session ID, 4-6 chars"}])
 
 (schema/register! ::namespace
-                  [:string {:min 1 :description "Agent namespace symbol, stored as string"}])
+                  [:or {:seon.db/value-type :db.type/string
+                        :description "Agent namespace — accepts symbol or string at the API boundary; coerced to string for persistence via `->ns-string`."}
+                   [:string {:min 1}]
+                   :symbol])
 
 (schema/register! ::status
                   [:enum :running :stopped :error])
@@ -81,11 +83,6 @@
 
 ;;; Request/Response Schemas
 
-(schema/register! ::datalevin-manager
-                  [:any {:description "Datalevin connection manager (optional)"
-                         :gen/fmap (fn [_] (throw (ex-info "Cannot generate connection manager"
-                                                           {:type :malli.generator/no-generator})))}])
-
 (schema/register! ::pool
                   [:any {:description "Agent JVM pool (optional)"
                          :gen/fmap (fn [_] (throw (ex-info "Cannot generate pool"
@@ -95,7 +92,6 @@
                   [:map
                    [::namespace ::namespace]
                    [::resume? {:optional true} ::resume?]
-                   [::datalevin-manager {:optional true} ::datalevin-manager]
                    [::pool {:optional true} ::pool]])
 
 (schema/register! ::start-agent-session-response
@@ -297,7 +293,7 @@
    Response keys: ::id ::namespace ::status ::nrepl-port ::started-at ::db-name
    (or ::error on failure)."
   {:malli/schema [:=> [:cat ::start-agent-session-request] ::start-agent-session-response]}
-  [{::keys [namespace resume? datalevin-manager pool] :as request}]
+  [{::keys [namespace resume? pool] :as request}]
   (let [resume? (if (nil? resume?) true resume?)
         pool (if (contains? request ::pool) pool @agent-pool)
         ns-string (->ns-string namespace)
@@ -305,30 +301,16 @@
         db-name ns-string
         started-at (java.util.Date.)]
     (try
-      (let [dl-conn (when datalevin-manager
-                      (try
-                        (conn/get-conn!
-                         {::conn/manager datalevin-manager
-                          ::conn/db (keyword ns-string)})
-                        (catch Exception e
-                          (log/warn "Failed to get Datalevin namespace conn"
-                                    {:namespace ns-string :error (.getMessage e)})
-                          nil)))
-            ns-db-name (when dl-conn (keyword ns-string))
-            ctx-atom (ctx/create!
+      (let [ctx-atom (ctx/create!
                       {::ctx/instance-id session-id
                        ::ctx/namespace namespace
-                       ::ctx/db-name ns-db-name
-                       ::ctx/persist? (some? dl-conn)
+                       ::ctx/db-name nil
+                       ::ctx/persist? false
                        ::ctx/sse-push? false
                        ::ctx/validate? true
                        ::ctx/debounce-ms 1000
-                       ::ctx/reserved-keys
-                       (cond-> {:seon.agent/namespace namespace
-                                :seon.agent/db nil}
-                         ns-db-name (merge {:seon.ns/db-name ns-db-name
-                                            :seon.ns/session-id session-id
-                                            :seon.ns/namespace ns-string}))})
+                       ::ctx/reserved-keys {:seon.agent/namespace namespace
+                                            :seon.agent/db nil}})
             ctx-value @ctx-atom
             jvm-handle (when pool
                          (pool/claim! pool
@@ -349,8 +331,7 @@
                         nrepl-port (assoc ::nrepl-port nrepl-port))]
         (db/transact! :seon.orchestrator [persisted])
         (swap! live-state assoc session-id
-               {::ns-db-name ns-db-name
-                ::ctx-atom ctx-atom
+               {::ctx-atom ctx-atom
                 ::pool pool})
         (runtime/register! (cond-> {::runtime/namespace ns-string
                                     ::runtime/status :running
@@ -392,15 +373,6 @@
         (when-let [p (::pool live-entry)]
           (log/debug "Releasing pool JVM" {:session-id id})
           (pool/release-session! p id))
-        (when-let [ns-db-name (::ns-db-name live-entry)]
-          (log/debug "Closing namespace connection" {:session-id id :db ns-db-name})
-          (try
-            (when-let [mgr (:seon.db.datalevin/connections
-                            @(requiring-resolve 'integrant.repl.state/system))]
-              (conn/close-conn! {::conn/manager mgr ::conn/db ns-db-name}))
-            (catch Exception e
-              (log/warn "Failed to close namespace connection"
-                        {:session-id id :error (.getMessage e)}))))
         (log/debug "Destroying ctx" {:session-id id})
         (ctx/destroy! {::ctx/instance-id id})
         (let [stopped-at (java.util.Date.)]
