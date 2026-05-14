@@ -2,47 +2,74 @@
   "Tests for seon.health.workout and seon.health.workout.render.
    Verifies render functions, scanner detection of *ctx* specs,
    and page renderer identification."
-  (:require [clojure.java.io :as io]
-            [clojure.string :as str]
+  (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
-            [datalevin.core :as d]
             [seon.db :as db]
-            [seon.db.datalevin.conn :as conn]
-            [seon.graph.ingest :as ingest]
             [seon.graph.extract :as extract]
+            [seon.graph.ingest :as ingest]
             [seon.graph.query :as gq]
             [seon.graph.scanner :as scanner]
             [seon.health.workout :as workout]
-            [seon.test-utils]
             [seon.health.workout.render :as workout-render]
-            [seon.render :as render]))
+            [seon.render :as render]
+            [seon.test-utils :as tu]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Fixtures
 ;;; ---------------------------------------------------------------------------
 
-(def ^:dynamic *conn* nil)
+(def runtime-graph-malli-schema
+  "Aggregated Malli :map schema covering the graph-entity attrs this test
+   transacts into the test `:seon.runtime` db (specs, entries, shapes,
+   functions). Built by merging the entries of `seon.graph.ingest`'s
+   per-entity Malli schemas — those are the source of truth for the
+   `:seon.fn/*`, `:seon.spec/*`, `:seon.shape/*`, `:seon.entry/*`, and
+   `:seon.ns/*` attributes, each individually registered via
+   `seon.schema/register!`.
 
-(defn with-temp-datalevin [f]
-  (let [dir (str "tmp/test-workout-" (System/currentTimeMillis))
-        conn (d/create-conn dir ingest/datalevin-schema)
-        fake-mgr {::conn/port 0
-                  ::conn/connections (atom {:seon.runtime {::conn/connection conn}})}]
-    (try
-      (binding [*conn* conn
-                db/*direct-mode* true
-                db/*conn-manager* fake-mgr]
-        (gq/invalidate-output-key-cache!)
-        (f))
-      (finally
-        (render/set-conn! nil)
-        (gq/invalidate-output-key-cache!)
-        (d/close conn)
-        (let [d (io/file dir)]
-          (doseq [file (reverse (file-seq d))]
-            (.delete file)))))))
+   The flow's conn-process passes this through
+   `seon.db.datahike.schema/malli-map->datahike-schema` at :init, which
+   installs one datahike ident per entry.
 
-(use-fixtures :each with-temp-datalevin)
+   The graph entities use intra-DB lookup-refs (`[:seon.shape/id ...]`,
+   `[:seon.fn/qualified-name ...]`, etc.) — that's a same-DB `:db.type/ref`.
+   The Malli-to-datahike bridge maps bare `:seon.db/ref` to `:db.type/uuid`
+   (cross-DB convention, Decision 6 of the migration PRD). To get a same-DB
+   `:db.type/ref`, we override those ref-valued entries with an `:or`
+   schema carrying `:seon.db/value-type :db.type/ref` in properties, which
+   the bridge respects."
+  (let [base-entries (mapcat rest
+                             [ingest/ns-entity-schema
+                              ingest/fn-entity-schema
+                              ingest/spec-entity-schema
+                              ingest/shape-entity-schema
+                              ingest/entry-entity-schema])
+        ;; Attribute keys that need to be same-DB refs, not cross-DB UUIDs.
+        ;; Cardinality follows from the leaf shape ([:vector :seon.db/ref]
+        ;; stays cardinality-many).
+        ref-one      #{:seon.fn/input-spec :seon.fn/output-spec
+                       :seon.fn/input-shape :seon.fn/output-shape
+                       :seon.entry/value-shape}
+        ref-many     #{:seon.shape/entries}
+        override (fn [entry]
+                   (let [k (first entry)
+                         opts (when (map? (second entry)) (second entry))
+                         tail (cond
+                                (ref-one k)
+                                [[:or {:seon.db/value-type :db.type/ref} :seon.db/ref]]
+                                (ref-many k)
+                                [[:vector [:or {:seon.db/value-type :db.type/ref}
+                                           :seon.db/ref]]]
+                                :else nil)]
+                     (if tail
+                       (vec (concat [k] (when opts [opts]) tail))
+                       entry)))]
+    (into [:map] (map override base-entries))))
+
+(use-fixtures :each
+  (tu/with-test-db-fixture
+    {::tu/namespaces [:seon.runtime]
+     ::tu/schemas    {:seon.runtime runtime-graph-malli-schema}}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; workout-set-render Tests
@@ -187,14 +214,46 @@
 ;;; Integration Tests
 ;;; ---------------------------------------------------------------------------
 
+(defn- coerce-ints->longs
+  "Walk a graph entity coll and coerce any Integer values on long-typed
+   datahike attrs to Long. Workaround for a `seon.graph.extract` smell:
+   :seon.fn/row, :seon.var/row, :seon.call/row are produced as Integer
+   but the datahike schema bridge maps Malli `:int` to `:db.type/long`,
+   which requires `java.lang.Long`. Datalevin tolerated the Integer.
+
+   This belongs in `seon.graph.extract` (or the datahike bridge), not in
+   the test — flagged in the migration report as a follow-up."
+  [coll]
+  (let [long-attrs #{:seon.fn/row :seon.var/row :seon.call/row}]
+    (mapv (fn [m]
+            (reduce-kv (fn [acc k v]
+                         (assoc acc k (if (and (long-attrs k) (integer? v))
+                                        (long v)
+                                        v)))
+                       {} m))
+          coll)))
+
 (deftest find-renderer-integration-test
   (testing "find-renderer discovers workout-set-render after ingestion"
     (let [graph (extract/extract-graph-from-file
                  {::extract/file-path "src/seon/health/workout.clj"})]
-      ;; Transact specs first (functions reference them via lookup refs)
-      (d/transact! *conn* (vec (::extract/specs graph)))
-      ;; Transact linked functions
-      (d/transact! *conn* (vec (::extract/functions graph))))
+      ;; Dependency order with a cycle break:
+      ;;   - specs first (functions ref them via [:seon.spec/key ...]).
+      ;;   - shapes and entries form a cycle (shapes hold
+      ;;     :seon.shape/entries refs to entries; some entries hold
+      ;;     :seon.entry/value-shape refs back to shapes). Datahike
+      ;;     resolves lookup-refs against pre-existing entities only — not
+      ;;     against same-tx tempids — so we transact shape stubs first
+      ;;     (id-only), then entries (which can now look up shape ids),
+      ;;     then full shapes (which can now look up entry ids).
+      ;;   - functions last (ref specs and shapes via lookup-refs).
+      (db/transact! :seon.runtime (vec (::extract/specs graph)))
+      (db/transact! :seon.runtime
+                    (mapv (fn [s] (select-keys s [:seon.shape/id]))
+                          (::extract/shapes graph)))
+      (db/transact! :seon.runtime (vec (::extract/entries graph)))
+      (db/transact! :seon.runtime (vec (::extract/shapes graph)))
+      (db/transact! :seon.runtime (coerce-ints->longs (::extract/functions graph))))
 
     (gq/invalidate-output-key-cache!)
     (let [workout-data {::workout/exercise "Squat"
@@ -212,19 +271,15 @@
                 ::workout/sets 5
                 ::workout/reps 5
                 ::workout/weight 100}]
-      (render/set-conn! *conn*)
-      (is (nil? (render/try-render data :ai)))
-      (render/set-conn! nil))))
+      (is (nil? (render/try-render data :ai))))))
 
 (deftest has-renderer-test
   (testing "has-renderer? returns false when no renderer registered"
-    (render/set-conn! *conn*)
     (let [data {::workout/exercise "Squat"
                 ::workout/sets 5
                 ::workout/reps 5
                 ::workout/weight 100}]
-      (is (not (render/has-renderer? data :ai))))
-    (render/set-conn! nil)))
+      (is (not (render/has-renderer? data :ai))))))
 
 (deftest initial-state-test
   (testing "initial-state returns map with ::workouts"
