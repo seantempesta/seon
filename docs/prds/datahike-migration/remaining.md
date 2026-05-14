@@ -1,0 +1,377 @@
+---
+type: prd
+status: active
+tags: [prd, database, schema]
+---
+
+# Datahike Migration — Remaining Cleanup Punch-List
+
+Operational follow-up to `prd.md` / `decisions.md` / `phase-3-harness-migration.md`. The migration to datahike landed on `main` (boot uses `:seon.db/flow` with 5 namespaces — `:seon.session`, `:seon.repl`, `:seon.flow`, `:seon.orchestrator`, `:seon.phase2.demo` — per `resources/system.edn`). `seon.db` keeps a legacy datalevin fall-through for db-names not in the flow, but the Integrant keys that wire datalevin up (`:seon.db.datalevin/server`, `:seon.db.datalevin/connections`, `:seon/runtime-db`) are commented out of `system.edn`. So the legacy datalevin path exists at the source-code level but is never actually invoked at boot.
+
+This punch-list enumerates the 32 source files in `seon/src/` that still reference `datalevin`, classifies every reference, and groups the work into clusters that can be migrated by focused agents. The cluster recommendations track the steps in `prd.md` §"Deliverables → Deletions" and the deferred work in `phase-3-harness-migration.md` §"Out of scope for Phase 3".
+
+## Classification scheme
+
+Each reference is one of:
+
+- **`:live`** — invoked on the current boot path. Boot succeeded 2026-05-14 so by definition these don't block boot, but they are reachable from MCP tools, HTTP handlers, the agent loop, or test entry points.
+- **`:dead-require`** — a `(:require [seon.db.datalevin.x])` whose alias is either unused, or used only in code branches that the current Integrant config can never reach (because `:seon.db.datalevin/connections` is absent from `system.edn`).
+- **`:doc-only`** — string mentions in docstrings, comments, error messages. No runtime coupling.
+- **`:bridge-rename`** — call to `seon.db.schema/malli-map->datalevin-schema`. The datahike-side replacement `seon.db.datahike.schema/malli-map->datahike-schema` exists at `seon/db/datahike/schema.clj:217`. Bridge callers need to switch namespace alias + fn name. The `def datalevin-schema` bindings that aggregate these calls go away with the callers.
+- **`:dead-ns`** — the entire namespace file is dead code on the current boot path (no requirer reaches it from the boot tree). Listed here so a single agent can rm the file rather than walk hits inside.
+- **`:other`** — anything else (described inline).
+
+## Summary
+
+| Class | File count | Hit count (approx) | Disposition |
+|---|---|---|---|
+| `:live` | 4 | ~40 | Migrate to datahike fall-through or delete the feature |
+| `:dead-require` | 11 | ~25 | Delete `(:require ...)` + any unreachable branch |
+| `:doc-only` | 5 | ~20 | Batch fix (low priority) |
+| `:bridge-rename` | 7 | 17 callsites | One bridge-rename pass + delete derived `datalevin-schema` defs |
+| `:dead-ns` | 6 | ~140 (most of the count) | Delete whole files (`src/seon/db/datalevin/`, `src/seon/ai/datalevin.clj`) once callers are gone |
+| `:other` | ~4 | small | Schema-key rename / config-shape cleanup |
+
+Total ~302 hits, but only ~50 are runtime-coupled — the rest are doc strings, dead-require alias declarations, and code inside dead-ns files. Most of the volume goes away when `src/seon/db/datalevin/**` and `src/seon/ai/datalevin.clj` are deleted; the actual migration work is on a few dozen call sites.
+
+## Recommended cluster order (highest leverage first)
+
+1. **Bridge-rename cluster** (7 callers, 17 callsites). All call `db-schema/malli-map->datalevin-schema`; the datahike-side replacement exists and has matching shape. Renames + alias swap. Mostly mechanical; one self-contained agent. Unblocks file deletions in cluster 4.
+2. **Dead-require + dead-branch cleanup in the active-on-boot files** (`seon.system`, `seon.render`, `seon.ns.routes`, `seon.orchestrator.session`, `seon.flow.topology`, `seon.flow.pool`, `seon.health`, `seon.dev.test`, `seon.system.config`). These namespaces load at boot, so dead requires here represent the largest concentration of "lies in our load graph." Deleting them lets `seon/db/datalevin/` itself be ripped out without ripple.
+3. **`seon.db.clj` legacy fall-through removal**. The `transact!` / `read!` / `write!` paths still route through `seon.flow/writer` + `seon.flow/reader` (datalevin) when a db-name isn't in `:seon.db/flow`. Today this fires only if a caller passes an unregistered db-name, in which case the flow raises "Infrastructure flow not running." Once cluster 2 lands, this can collapse to just the datahike + relay branches.
+4. **Delete dead namespaces**: `src/seon/db/datalevin/` (5 files), `src/seon/ai/datalevin.clj`, `src/seon/web/agents.clj` (depends on `seon.ai.datalevin`), the three `test/bootstrap*.clj` POCs. Drop `datalevin/datalevin` from `deps.edn`. Drop the `reference-code/datalevin` submodule entry once nothing pins it.
+5. **Doc-only sweep**: rewrite remaining strings in CLAUDE.md, docs/, and surviving namespace docstrings. Easiest batch; do last so the prose matches the new reality.
+
+## File-by-file detail
+
+### Live on the current boot path
+
+#### `src/seon/db.clj`
+
+`seon.db` is the central API. Loads at boot (required from `seon.system`). Currently keeps both datahike and datalevin paths; datalevin is reachable only via the `:else` branch.
+
+| Line | Reference | Class | Action |
+|------|-----------|-------|--------|
+| 13, 20, 243, 255, 391, 436 | docstring / comment mentions "legacy datalevin path" | `:doc-only` | Delete prose after the datalevin branches are removed. |
+| 34 | `[datalevin.core :as d]` | `:live` | Used at line 156 (`d/schema`), 177 (`d/update-schema`), 371 (`d/transact!`) inside `:else` legacy branch. Remove alias and the wrapping `ensure-schema!` + direct-mode datalevin call when cluster 3 collapses the `:else` branch. |
+| 36 | `[seon.db.datalevin.conn :as conn]` | `:live` | Used by `db-name->conn-args`, `resolve-conn`, `*direct-mode*` legacy path. Goes away with cluster 3. |
+| 37 | `[seon.db.datalevin.reader :as reader]` | `:dead-require` | Alias `reader` only appears in `read!` building a flow message; `seon.flow/reader` isn't even built without a connection-manager (`flow/topology.clj:631`). Delete with cluster 3. |
+| 164 | `db-schema/malli-map->datalevin-schema` | `:bridge-rename` | Inside legacy `ensure-schema!` path. Goes away with cluster 3, no separate rename needed if cluster 3 lands first. |
+| 272, 274 | `:seon.db.datalevin/connections` lookup | `:live` (but unreachable) | `get-conn-manager` will always throw "Connection manager not available" on current boot because the Integrant key isn't in the system. Delete with cluster 3. |
+| 359-360 | `:seon.db.datalevin.writer/tx-data` `:seon.db.datalevin.writer/db-name` keys in writer payload | `:live` (but routes to disabled writer) | `flow.in/request` to `:seon.flow/writer` which isn't built. Will fail with `flow-request!` timeout once it ever fires. Delete with cluster 3. |
+
+Cluster: **complex / cross-file**. Touched by cluster 3.
+
+#### `src/seon/render.clj`
+
+Required transitively from `seon.web.handlers`, `seon.system`, etc. Loads at boot.
+
+| Line | Reference | Class | Action |
+|------|-----------|-------|--------|
+| 31 | `[seon.db.datalevin.conn :as dl-conn]` | `:live` | Used by `get-conn` to fetch a `:seon.runtime` conn for renderer-lookup. With `:seon.db.datalevin/connections` absent, `get-conn` returns `nil`, so `resolve-renderer-from-datalevin` always returns `::no-renderer` and `try-render` always returns `nil`. **Renderer auto-resolution is silently disabled on current boot.** Migrate to query `:seon.runtime` via `seon.graph.query/functions-with-output-key`, which already takes a db-name keyword (line 163) — make `find-renderer` use that directly instead of stashing a conn. |
+| 61 | `(:seon.db.datalevin/connections integrant.repl.state/system)` | `:live` (returns nil) | Delete with the dl-conn require. |
+| 63-65 | `(dl-conn/get-conn! {::dl-conn/manager mgr ::dl-conn/db :seon.runtime ::dl-conn/schema (runtime/runtime-merged-schema)})` | `:live` (unreachable) | Delete. The `:seon.runtime/runtime-merged-schema` call is part of cluster 4 cleanup. |
+| 261-313, 330, 359-364, 585, 641 | `resolve-renderer-from-datalevin`, `call-datalevin-renderer` fn names + bodies | `:live` (silently no-op) | Rename to `resolve-renderer` / `call-renderer`; switch the underlying query to db-name-based `seon.graph.query` (no conn). The cache stays. |
+
+Cluster: **one-file medium**. Touch with cluster 2; renderer dispatch is real product surface and the silent-disable is a code smell (next section).
+
+#### `src/seon/orchestrator/session.clj`
+
+Required at boot (in `seon.system`'s `(:require [seon.orchestrator.session])`).
+
+| Line | Reference | Class | Action |
+|------|-----------|-------|--------|
+| 24 | `[seon.db.datalevin.conn :as conn]` | `:live` (dead branch) | Used at line 310-312 only when `datalevin-manager` is non-nil in the request. The `:seon.orchestrator/sessions` Integrant init no longer passes a connection-manager (`system.edn:73-77`), so all callers see `datalevin-manager = nil`. Delete the require and the surrounding `(when datalevin-manager ...)` block. |
+| 84-87 | `::datalevin-manager` Malli schema | `:other` | Schema reg + an `:optional true` field in `::start-agent-session-request`. Delete the schema reg + the optional field + the destructure at line 300. |
+| 98 | `[::datalevin-manager {:optional true} ::datalevin-manager]` | `:other` | Same as above. |
+| 300 | `datalevin-manager` destructure | `:other` | Delete. |
+| 308-316 | `(when datalevin-manager (try (conn/get-conn! ...)))` | `:dead-require` (unreachable branch) | Delete the entire `(let [dl-conn ...] ...)` block. |
+| 317, 395-400 | `ns-db-name` and the `(when-let [mgr (:seon.db.datalevin/connections ...)])` in stop-agent | `:dead-require` (unreachable) | Delete; `ns-db-name` is always nil now. |
+
+Cluster: **one-file medium**.
+
+#### `src/seon/flow/topology.clj`
+
+Required at boot. Builds the infrastructure flow.
+
+| Line | Reference | Class | Action |
+|------|-----------|-------|--------|
+| 15-16 | `[seon.db.datalevin.reader :as reader]` + `[seon.db.datalevin.writer :as writer]` | `:live` (gated dead branch) | Aliases used at lines 638, 641 inside the `(when dl? ...)` branch that only fires if a connection-manager is supplied. With the Integrant key absent, `dl?` is always false, but the requires resolve at namespace load. Delete the requires + the entire `(cond-> ... dl? (assoc :seon.flow/writer ...))` and `(cond-> ... dl? (into ...))` blocks. |
+| 620, 624 | `::connection-manager` docstring + destructure | `:dead-require` (unreachable arg) | Drop from the schema + the input map. Callers (the `:seon.flow/infrastructure` Integrant key in `system.clj`) need a matching cleanup. |
+| 626-628 | comment about disabled datalevin writer | `:doc-only` | Delete with the branch. |
+
+Cluster: **one-file medium**. Cleanly separable.
+
+#### `src/seon/flow/pool.clj`
+
+Required at boot (built by `:seon.flow/pool` Integrant key). Today, no `:datalevin-port` is passed (`system.edn:62-69`).
+
+| Line | Reference | Class | Action |
+|------|-----------|-------|--------|
+| 25 | docstring "Depends on `:seon.db.datalevin/server`" | `:doc-only` | Already stale — the dep is gone. Rewrite. |
+| 115 | `(schema/register! ::datalevin-uri ...)` | `:other` | Plumbed into agent JVM args via `spawn-agent-jvm!`. With no datalevin server, `:datalevin-uri` is always nil. Drop the schema + `& {:keys [datalevin-uri]}` arg + the conditional `["--datalevin-uri" uri]` arg construction (line 158). |
+| 150, 154, 158, 192 | `datalevin-uri` parameter + entry shape | `:other` | Delete with above. The `::datalevin-uri` key drops out of the pool entry shape — check `flow.status` and tests for downstream readers. |
+| 252-259 | `build-datalevin-uri` fn | `:dead-require` | Used only on line 318 inside `spawn-and-enqueue!` when `datalevin-port` is non-nil. Always nil now. Delete fn + caller. |
+| 308, 318-319, 361, 375 | `datalevin-port` / `(build-datalevin-uri ...)` plumbing | `:dead-require` | Delete branch. |
+| 560, 570, 574, 583, 594 | `::datalevin-port` config option | `:other` | Public option of `create-pool!`. Delete. |
+| 837 | `::datalevin-uri` in `:pool-status` projection | `:other` | Drop from the select-keys. |
+| 864, 869, 871, 874 | `:datalevin-server` arg + `(when datalevin-server (:port datalevin-server))` | `:dead-require` | Init-key body — `system.edn` no longer passes it. Delete. |
+| 927 | comment example `::datalevin-port 8898` | `:doc-only` | Update. |
+
+Cluster: **one-file medium / cross-file** (callers in tests + status may consume `::datalevin-uri`).
+
+#### `src/seon/ai/claude.clj`
+
+Loaded by `:seon.ai.claude/sdk` Integrant key + HTTP handlers.
+
+| Line | Reference | Class | Action |
+|------|-----------|-------|--------|
+| 546-548 | `(require 'seon.ai.datalevin) ... (resolve 'seon.ai.datalevin/save-message!)` | `:live` (writes to dead store) | These actually fire when a message is processed. `seon.ai.datalevin/save-message!` reads a private datalevin connection via `seon.ai.datalevin/conn`, which uses the disabled connection-manager. Either (a) port `seon.ai.datalevin/*` storage to datahike (cluster 4 work), or (b) drop the call. Current state: silently no-ops if connection isn't available, but the connection lookup throws. Verify whether claude HTTP path actually completes today. |
+| 812-814 | `(:seon.db.datalevin/connections state/system)` lookup for ctx-association | `:live` (returns nil) | Conditionally attaches `::session/datalevin-manager` to the start-session request. Always nil now → the `(when datalevin-manager ...)` branch in `orchestrator.session/start-agent-session!` never fires. Delete with cluster 2. |
+| 1364, 1377-78, 1408, 1414-15 | `(requiring-resolve 'seon.ai.datalevin/dl-*)` lookups for session/message reads | `:live` | These run on `/agents` and other status endpoints. They read message history. Port to datahike (`:seon.ai` namespace would migrate into `:seon.db/flow`) or drop the feature. Same disposition as cluster 4 `seon.web.agents`. |
+
+Cluster: **complex / cross-file** — couples to `seon.ai.datalevin` deletion.
+
+#### `src/seon/ai.clj`
+
+Loaded by `seon.ai.claude` and `seon.web.agents`.
+
+| Line | Reference | Class | Action |
+|------|-----------|-------|--------|
+| 38-48 | `datalevin-write!` fn — dispatches to `seon.ai.datalevin/save-session!` etc. | `:live` | Fires whenever the `seon.ai` API is exercised. Port the writes to a `:seon.ai` datahike conn-process, or drop the persistence path. Pair with cluster 4. |
+| 369, 396, 404, 437, 452, 466, 484, 502 | per-op `(datalevin-write! :save-session …)` / `(requiring-resolve 'seon.ai.datalevin/dl-*)` | `:live` | Same disposition. |
+
+Cluster: **complex / cross-file**.
+
+#### `src/seon/dev/test.clj`
+
+Loaded by `(user/test-affected ...)` and test infra.
+
+| Line | Reference | Class | Action |
+|------|-----------|-------|--------|
+| 318 | `(some? (some-> @... :seon.db.datalevin/connections))` to gate `test-affected` behavior | `:live` (returns false on current boot) | Without datalevin, `has-db?` is false and `test-affected` falls back to just running the ns's own test. Replace with a check against `:seon.db/flow` running. |
+
+Cluster: **one-line trivial**.
+
+#### `src/seon/system/config.clj`
+
+Loaded by `seon.system`'s `assert-key` for `:seon/component`.
+
+| Line | Reference | Class | Action |
+|------|-----------|-------|--------|
+| 12-22 | `:seon.db.datalevin/server` + `:seon.db.datalevin/connections` Malli config schemas | `:doc-only` (Integrant keys removed from system.edn) | Schemas describe Integrant keys not present in `system.edn`. Delete the entries. |
+| 25-27 | `:seon/runtime-db` config schema | `:doc-only` | Same — key not in `system.edn`. Delete. |
+| 66 | `[:datalevin-server {:optional true} :any]` in pool config | `:doc-only` | Drop with cluster 2 `flow/pool` cleanup. |
+
+Cluster: **one-file trivial**.
+
+### Dead requires / dead branches in otherwise-live namespaces
+
+#### `src/seon/system.clj`
+
+Required by every boot entry point.
+
+| Line | Reference | Class | Action |
+|------|-----------|-------|--------|
+| 5 | `:seon.db.datalevin/server - Datalevin server for all data storage` in docstring | `:doc-only` | Stale. |
+| 12 | `Datalevin is the sole database.` in docstring | `:doc-only` | Outright wrong now. Rewrite to describe datahike flow + namespace conn-processes. |
+| 18 | `[seon.db.datalevin.conn :as dl-conn]` | `:dead-require` | Only used in `runtime-db-conn` + `ig/init-key :seon/runtime-db` (lines 198-214). Those `defmethod`s register for a key that's no longer in `system.edn`, so they never run on boot. Delete the require + the entire `:seon/runtime-db` init/halt/suspend/resume cluster (lines 184-252). |
+
+Cluster: **one-file medium**. The `:seon/runtime-db` deletion takes `runtime-db-conn` with it.
+
+#### `src/seon/ns/routes.clj`
+
+Required by HTTP handlers.
+
+| Line | Reference | Class | Action |
+|------|-----------|-------|--------|
+| 81 | `[seon.db.datalevin.conn :as dl-conn]` | `:dead-require` (unreachable branch) | Only used at line 127-129 inside `(when-let [mgr (:seon.db.datalevin/connections state/system)] ...)`. Always nil on current boot. Delete the require + the `(when-let [mgr ...] ...)` block. |
+| 125 | `(:seon.db.datalevin/connections state/system)` | `:dead-require` | Delete. |
+
+Cluster: **one-file trivial**.
+
+#### `src/seon/graph/ingest.clj`
+
+Required by the graph-scan path. `seon.graph/scanner` Integrant key is also absent from `system.edn` (per the top-of-file comment), so this whole namespace's live invocation is gated.
+
+| Line | Reference | Class | Action |
+|------|-----------|-------|--------|
+| 32 | `[seon.db.datalevin.conn :as dl-conn]` | `:dead-require` | Used at lines 365 and 421 inside `connection-error?` checks for retry logic. Replace with a non-datalevin error-class check, or drop the retry entirely (the datahike conn-process handles its own errors). |
+| 218-225 | `(merge (db-schema/malli-map->datalevin-schema ns-entity-schema) ...)` (8 calls) building `datalevin-schema` | `:bridge-rename` | The 8 `malli-map->datalevin-schema` calls compose the seon.graph schema bundle. Same `:bridge-rename` disposition — convert to `dh-schema/malli-map->datahike-schema` OR delete the `def datalevin-schema` once `runtime.clj`'s `runtime-merged-schema` aggregator goes away (it's the only consumer). |
+
+Cluster: **one-file medium**. Hits part of cluster 1 (bridge-rename) and part of cluster 2.
+
+#### `src/seon/runtime.clj`
+
+Loaded at boot.
+
+| Line | Reference | Class | Action |
+|------|-----------|-------|--------|
+| 271-273 | 3x `(db-schema/malli-map->datalevin-schema ...)` building `runtime-schema` | `:bridge-rename` | Aggregated into `runtime-merged-schema`, used only by `runtime-db-conn` / `:seon/runtime-db` init-key — both dead per system.clj cleanup. Either delete the `def runtime-schema` + `runtime-merged-schema` entirely, or convert to the datahike bridge if anyone still wants it for introspection. **Strongly recommend deletion** — schema-installation for datahike is owned by `seon.db.datahike.conn-process` via Malli registry, no manual schema merge needed. |
+| 280, 288-290 | `runtime-merged-schema`'s lazy-resolution of `seon.graph.ingest/datalevin-schema`, `seon.ctx/datalevin-schema`, `seon.flow.trace/datalevin-schema` | `:dead-require` (chain dies with #1 above) | Delete `runtime-merged-schema`. |
+| 542 | `(defn- datalevin->cache ...)` | `:doc-only` (name) | Function converts `:seon.runtime/*` Datalog entity keys to `::namespace`-prefixed cache keys. Logic is db-agnostic. Rename to `entity->cache` or `runtime-entity->cache`. |
+| 623 | `(datalevin->cache entity)` call | `:doc-only` | Updates with the rename. |
+
+Cluster: **one-file medium**. Has bridge-rename hits (cluster 1) + dead-code (cluster 2 / 4).
+
+#### `src/seon/ctx.clj`
+
+Loaded by orchestrator/session etc.
+
+| Line | Reference | Class | Action |
+|------|-----------|-------|--------|
+| 7, 11 | docstring | `:doc-only` | Rewrite "Soft deps: datalevin.core..." once persistence is on datahike. |
+| 192-195 | `def datalevin-schema (db-schema/malli-map->datalevin-schema ctx-entity-schema)` | `:bridge-rename` | Same disposition as `runtime.clj`'s schemas — `runtime-merged-schema` was the only consumer, both go away together. |
+| 262-263 | `(require 'datalevin.conn) (resolve 'datalevin.conn/closed?)` in `do-persist!` | `:live` (dead branch) | Soft-require to test conn liveness before persist. With `resolve-conn` throwing in the absence of `:seon.db.datalevin/connections`, `conn-usable?` will be false on every call → persistence silently no-ops. **Code smell:** ctx persistence is silently broken on current boot. Either port `do-persist!` to call `(seon.db/transact! :seon.ctx [...])` against a registered datahike namespace, or strip the persistence layer entirely and persist via the orchestrator-session ctx blob (per `phase-3-harness-migration.md` Decision 27 / Open Q1). |
+
+Cluster: **complex** — touches the in-pod state-projection design from spec-01 Decision 27.
+
+#### `src/seon/agent/env.clj`
+
+| Line | Reference | Class | Action |
+|------|-----------|-------|--------|
+| 61-62 | `(def datalevin-schema "Alias for seon.ctx/datalevin-schema" ctx/datalevin-schema)` | `:bridge-rename` | Re-export of `seon.ctx/datalevin-schema`. Goes away with `seon.ctx`'s cleanup. Verify no agent-side code reaches for this; if so, those references migrate too. |
+
+Cluster: **one-line trivial**, but depends on `seon.ctx` cleanup.
+
+#### `src/seon/flow/trace.clj`
+
+| Line | Reference | Class | Action |
+|------|-----------|-------|--------|
+| 82-86 | `(def datalevin-schema (merge (dbs/malli-map->datalevin-schema entity-schema) tx/datalevin-schema))` | `:bridge-rename` | `seon.flow.trace` IS in `:seon.db/flow` (`system.edn:115`), so writes go through the datahike conn-process which derives its own schema from Malli. **The `def datalevin-schema` is dead** — nobody on the boot path reads it. Delete. Knock-on: `seon.runtime/runtime-merged-schema` references this — also dead per `seon.runtime` cleanup. |
+
+Cluster: **one-line trivial**.
+
+#### `src/seon/db/tx.clj`
+
+| Line | Reference | Class | Action |
+|------|-----------|-------|--------|
+| 48-51 | `(def datalevin-schema (dbs/malli-map->datalevin-schema entity-schema))` | `:bridge-rename` | Tx-metadata schema. Consumers: `seon.flow.trace/datalevin-schema` (dead per above), `seon.ai.datalevin/datalevin-schema` (dead-ns per below). After those go, this def has no callers and can be deleted. |
+
+Cluster: **one-line trivial**.
+
+#### `src/seon/db/schema.clj`
+
+Owns the bridge fn itself.
+
+| Line | Reference | Class | Action |
+|------|-----------|-------|--------|
+| 7-8 | docstring | `:doc-only` | Rewrite to point at the datahike bridge in `seon.db.datahike.schema`. |
+| 57 | `malli-type->datalevin-type` fn | `:dead-require` (after cluster 1) | After all bridge-callers migrate, this whole file's purpose is gone — `seon.db.datahike.schema` is the new home. Decide: delete the file outright, or keep as a shim that re-exports the datahike fns under the legacy names for a deprecation window. Recommend delete. |
+| 87, 98, 107, 112, 116, 126, 138, 147, 164, 175, 372 | various private helpers + the public `malli-map->datalevin-schema` | `:dead-require` (after cluster 1) | All go with the file. |
+
+Cluster: **one-file medium**. Don't delete until cluster 1 is done.
+
+#### `src/seon/db/datahike/schema.clj`
+
+The datahike-side bridge. Already in active use by `seon.db.datahike.conn-process/install-schema!` (line 106).
+
+| Line | Reference | Class | Action |
+|------|-----------|-------|--------|
+| 25 | docstring | n/a | Healthy. |
+| 61 | docstring reference `seon.db.schema/malli-type->datalevin-type` | `:doc-only` | Rewrite once `seon.db.schema` is deleted. |
+| 244 | docstring `the shape of seon.db.schema/malli-map->datalevin-schema` | `:doc-only` | Rewrite once `seon.db.schema` is deleted. |
+
+Cluster: **one-line trivial doc fix**.
+
+### Dead namespaces (delete after cluster 2 lands)
+
+#### `src/seon/db/datalevin/` directory (5 files)
+
+`backup.clj`, `conn.clj`, `reader.clj`, `server.clj`, `writer.clj`. Every reference inside is `:dead-ns`. Reachable today only from:
+
+- `seon.db` `(:require [seon.db.datalevin.conn] [seon.db.datalevin.reader])` — cluster 3.
+- `seon.flow.topology` `(:require [seon.db.datalevin.reader] [seon.db.datalevin.writer])` — cluster 2.
+- `seon.system` `(:require [seon.db.datalevin.conn :as dl-conn])` — cluster 2.
+- `seon.render`, `seon.ns.routes`, `seon.graph.ingest`, `seon.orchestrator.session` — cluster 2.
+- `seon.health` — cluster 2 (see below).
+
+Once all those requires are deleted, `rm -r src/seon/db/datalevin/`. Knock-on: drop `[datalevin/datalevin {:local/root "reference-code/datalevin"}]` from `deps.edn` `:dev` / `:test` / `:agent` aliases (per spec-01 §"Direction shift" item 6 — this is the wart that requires `git submodule update --init reference-code/datalevin` + `clojure -T:build compile-java` on a fresh clone).
+
+Cluster: **cross-file complex** but each individual deletion is a single `rm` once references are clear.
+
+#### `src/seon/ai/datalevin.clj`
+
+| Class | Action |
+|-------|--------|
+| `:dead-ns` (when callers migrate) | The file is the AI message/session storage layer. ~25 datalevin hits inside the file describing entity types, queries, transformation. Currently exercised through `seon.ai.clj` `datalevin-write!` and `seon.ai.claude.clj` `requiring-resolve` calls — both currently route to it. **Delete the file after porting the AI session/message storage to a `:seon.ai` datahike namespace (or dropping it from the boot path).** Cluster 4. |
+
+Cluster: **cross-file complex**.
+
+#### `src/seon/web/agents.clj`
+
+| Class | Action |
+|-------|--------|
+| `:dead-ns` (depends on `seon.ai.datalevin`) | Whole file consumes `seon.ai.datalevin/dl-*` queries to render an agent observatory. Goes with cluster 4. Verify the `/agents` HTTP route is registered before deciding: if it's already broken (404), delete; if it's wired into `seon.web.handlers`, migrate the data source. |
+
+Cluster: **complex / cross-file**.
+
+#### `src/seon/health.clj`
+
+| Line | Reference | Class | Action |
+|------|-----------|-------|--------|
+| 129, 139, 146, 148, 150-160 | `datalevin-process-info` + `check-datalevin` fns | `:live` (dead store probed) | These health checks probe `:seon.db.datalevin/server` + `:seon.db.datalevin/connections`. Both absent on current boot, so `check-datalevin` will hit the fallthrough returning some unhealthy status. The `(user/status)` summary still includes a `:datalevin` key. Either (a) delete both fns + remove `:datalevin` from the health checks map (line 325), or (b) repurpose as `check-datahike` reading from the running `:seon.db/flow` component. |
+| 274 | docstring `datalevin or flow down` | `:doc-only` | Rewrite. |
+| 277, 315, 325 | `critical-keys [:datalevin]` + `:datalevin datalevin-check` | `:live` | Critical-key listing — currently flags the system as unhealthy. **Code smell: anyone running `(user/status)` today gets a misleading unhealthy reading.** Delete `:datalevin` from `critical-keys` + the `:datalevin datalevin-check` entry, or replace with the datahike-flow check. |
+
+Cluster: **one-file medium**. Move to cluster 2.
+
+#### `src/seon/test/bootstrap.clj` + `bootstrap_v1_inmemory.clj`
+
+| Class | Action |
+|-------|--------|
+| `:dead-ns` (POC) | Both declare `(ns seon.test.bootstrap)` — they shadow each other. `_v1_inmemory.clj` is the canonical name now; `bootstrap.clj` is an older draft. Both directly use `datalevin.core :as d` (line 17). Neither is required from any production code path; they're standalone POCs documented as Phase 2/3 exploration in their own docstrings. Delete `bootstrap.clj`. Decide whether `bootstrap_v1_inmemory.clj` and `bootstrap_v2.clj` serve as live test fixtures (run via `(user/run-tests ...)`) before deciding. |
+
+Cluster: **one-file trivial**.
+
+#### `src/seon/test/bootstrap_v2.clj` (27 datalevin hits)
+
+| Class | Action |
+|-------|--------|
+| `:dead-ns` (POC) | Standalone POC of "embedded datalevin per test." Body declares `defn- with-embedded-datalevin` and ~17 fixture-style call sites. Not part of any reachable test entry. Same disposition as `bootstrap.clj` — confirm no caller, then delete or port to datahike `:memory`. The latter is more useful long-term (datahike `:memory` is the documented test backend per `prd.md` §"Configuration"). |
+
+Cluster: **one-file medium** (if porting), **one-file trivial** (if deleting).
+
+#### `src/seon/flow/agent_runner.clj`
+
+| Line | Reference | Class | Action |
+|------|-----------|-------|--------|
+| 24, 34, 39, 44, 67, 71, 95 | `--datalevin-uri` CLI arg + `try-connect-datalevin` + connection result | `:dead-require` (unreachable) | Agent JVMs receive `--datalevin-uri` only when `flow/pool` constructs one (line 318) — guarded by `datalevin-port`, always nil on current boot. With cluster 2 cleanup of `flow/pool`, this code path is unreachable. Delete the option-parsing + the `try-connect-datalevin` fn + the `:datalevin (if db-conn :connected :unavailable)` field in the status map. |
+
+Cluster: **one-file medium**, pair with `flow/pool` cleanup.
+
+### Doc-only sweep
+
+Once the code clusters land, scrub remaining strings:
+
+- `src/seon/db.clj` lines 13, 20, 243, 255, 391, 436 — narrative about "legacy datalevin path."
+- `src/seon/db/datahike/schema.clj` lines 61, 244 — docstring back-refs to the datalevin bridge.
+- `src/seon/system.clj` line 5 — Integrant key listing.
+- `src/seon/system.clj` line 12 — "Datalevin is the sole database."
+- `src/seon/flow/pool.clj` line 25, 927 — depends-on comment + example pool config.
+- `src/seon/ctx.clj` lines 7, 11 — soft-dep description.
+- `src/seon/health.clj` line 274 — `datalevin or flow down`.
+
+Plus `seon/CLAUDE.md` and `docs/` prose, which is out of scope for this audit but should be batched at the same time.
+
+## Code smells observed
+
+Per the seon CLAUDE.md "Report Code Smells" rule. None of these are blocking boot; they're inconsistencies surfaced by walking the codebase.
+
+1. **`seon.render`'s `call-datalevin-renderer` silently returns nil on every call.** With `:seon.db.datalevin/connections` absent from `system.edn`, `get-conn` returns nil → `resolve-renderer-from-datalevin` short-circuits to `::no-renderer`. Any HTTP handler that calls `seon.render/try-render` gets nil and falls back to default rendering. This means the "render functions discovered via `:seon.render/html` / `:seon.render/ai` schema annotations" feature documented in `phase-3-harness-migration.md` §"Rendered dynamic context" is **non-functional on the current boot**. Anyone testing rendering today would see fallback output and not know auto-discovery was broken. **Likely-correct fix:** route `find-renderer` through `seon.db/query` against `:seon.runtime` (db-name, not conn), but `:seon.runtime` itself isn't in `:seon.db/flow` yet (per `system.edn:111` — adding it regresses ~111 tests). So this is blocked behind `:seon.runtime` migration.
+
+2. **`seon.health/check-datalevin` flags the system as unhealthy.** `:datalevin` is in `critical-keys` (line 277). Without the Integrant components, the check fails. So `(user/status)` reports the system as unhealthy on every boot, while boot is in fact succeeding cleanly per spec-01's 2026-05-14 audit. This is misleading to operators (and to the spec, which calls out "post-start health check passed at 30s" — it likely passed because the check is misconfigured to be soft, or because the spec captured a moment before health was wired into the boot path; either way, the truth and the reading don't match).
+
+3. **`seon.ctx/do-persist!` silently no-ops ctx persistence.** Same root cause as #1 — `resolve-conn` throws "Connection manager not available," `conn-usable?` is false, persistence skips. The agent-orchestrator-session flow depends on ctx-checkpointing for resume semantics (per `phase-3-harness-migration.md` Demo Target step 4). Until the ctx blob is checkpointed to `:seon.session/ctx` via the datahike route, resume returns an empty `*ctx*` atom. Verify whether the demo target (which the PRD says is shipped, `9455f3f`) actually exercises the persistence-resume cycle or just the in-memory portion.
+
+4. **`seon.test.bootstrap` namespace double-declared.** Both `src/seon/test/bootstrap.clj` and `src/seon/test/bootstrap_v1_inmemory.clj` start with `(ns seon.test.bootstrap)`. Whichever Clojure compiler hits second wins; the other is silently shadowed. The naming convention `_v1_inmemory` suggests the second is canonical; `bootstrap.clj` was probably forgotten. Pick one.
+
+5. **`seon.db.tx/datalevin-schema` only consumers are themselves dead.** `seon.flow.trace/datalevin-schema` (dead — see cluster 1 disposition), `seon.ai.datalevin/datalevin-schema` (dead-ns). The `def datalevin-schema` in `seon.db.tx` is an orphan once those go.
+
+6. **`seon.runtime/runtime-merged-schema` is consumed only by dead code.** Callers: `system.clj` `runtime-db-conn` + `:seon/runtime-db` init-key (Integrant key removed from system.edn), `render.clj` `get-conn` (returns nil), `ns/routes.clj` `(when-let [mgr ...] ...)` (mgr always nil). Three callers all on a dead branch — the schema-merge code that aggregates `graph.ingest/datalevin-schema`, `ctx/datalevin-schema`, `flow.trace/datalevin-schema`, and `runtime-schema` is unreachable.
+
+7. **`orchestrator/session.clj` registers `::datalevin-manager` as a Malli schema with `:gen/fmap` throwing.** This was a hack to mark the field as non-generative for property tests. The field is now never populated. Schema reg + optional-field declaration + destructure all reference a dead concept; cleaning them up makes the API surface honest.
+
+8. **`seon.db/transact!` legacy branch (`:else`) throws on every call to an unregistered db-name.** With cluster 3 deletions, the `:else` branch can be replaced with an explicit `(throw (ex-info "No conn-process for db-name; not registered in :seon.db/flow" {...}))` — better operator UX than the current "Connection manager not available -- is the system running?" message that misleads about root cause.
+
+9. **`seon.flow.pool` carries datalevin-uri plumbing in its public API surface (`::datalevin-port`, `::datalevin-uri` in pool status, `:datalevin-server` Integrant arg).** External callers building pools could conceivably pass these. Verify nothing in `test/`, `repos/aria/harness/`, or `bin/` constructs a pool with these keys before deletion; otherwise the API break needs a deprecation note.
