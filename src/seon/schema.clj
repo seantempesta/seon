@@ -74,23 +74,27 @@
 (defonce ^:private _db-namespace-type
   (swap! *schemas assoc :seon.db/namespace :keyword))
 
-;; Register :seon.db/ref — a Datalevin entity reference.
-;; Accepts positive integers (entity IDs) or lookup refs [keyword value].
-;; At transact time, Datalevin resolves lookup refs to entity IDs automatically.
-;; The stored form is always a long (entity ID).
-;; Generator produces both forms for testing; pipeline tests for ref attrs
-;; need manual handling (target entities must exist first).
+;; Register :seon.db/lookup-ref-value — the value position in a lookup-ref.
+;; Datahike accepts strings, uuids, keywords, and ints as unique-attr values.
+(defonce ^:private _lookup-ref-value-type
+  (swap! *schemas assoc :seon.db/lookup-ref-value
+         [:or :string :uuid :keyword :int]))
+
+;; Register :seon.db/ref — an intra-DB :db.type/ref.
+;; At transact time, datahike resolves any of the supported forms to an eid:
+;;   - pos-int  : an existing entity-id
+;;   - neg-int  : a numeric tempid
+;;   - string   : a string tempid
+;;   - [k v]    : a lookup-ref against unique attribute k with value v
+;; Cross-DB handles are :uuid attrs with :seon.db/ref-to metadata; they are
+;; NEVER labeled :seon.db/ref.
+;; Reference: docs/prds/datahike-migration/ref-model-research.md.
 (defonce ^:private _ref-type
   (swap! *schemas assoc :seon.db/ref
-         (m/-simple-schema
-          {:type :seon.db/ref
-           :pred (fn [x]
-                   (or (pos-int? x)
-                       (and (vector? x) (= 2 (count x)) (keyword? (first x)))))
-           :type-properties {:gen/schema [:or
-                                          [:int {:min 1}]
-                                          [:tuple :keyword :string]]
-                             :gen/fmap identity}})))
+         [:or
+          :int
+          :string
+          [:tuple :keyword :seon.db/lookup-ref-value]]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Registration API
