@@ -33,8 +33,8 @@
                   [:string {:min 1 :description "Agent session ID (4-char hex)"}])
 
 (schema/register! ::event
-                  [:enum :start :end :error :overload :forward :timeout
-                   {:description "Flow event kind"}])
+                  [:enum {:description "Flow event kind"}
+                   :start :end :error :overload :forward :timeout])
 
 (schema/register! ::fn
                   [:string {:min 1 :description "Fully qualified function name"}])
@@ -49,8 +49,8 @@
                   [:inst {:description "Event timestamp"}])
 
 (schema/register! ::status
-                  [:enum :ok :error :timeout :overload
-                   {:description "Reply status"}])
+                  [:enum {:description "Reply status"}
+                   :ok :error :timeout :overload])
 
 (schema/register! ::error-message
                   [:string {:description "Error description"}])
