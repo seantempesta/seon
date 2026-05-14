@@ -60,12 +60,16 @@
 (schema/register! ::namespace-schemas
                   [:map-of :keyword :any])
 
+(schema/register! ::aliases
+                  [:map-of :keyword :keyword])
+
 (schema/register! ::flow-state
                   [:map
                    [::flow ::flow]
                    [::flow-id ::flow-id]
                    [::pids ::pids]
-                   [::chans ::chans]])
+                   [::chans ::chans]
+                   [::aliases {:optional true} ::aliases]])
 
 (schema/register! ::build-datahike-flow!-request
                   [:map
