@@ -28,42 +28,15 @@
 
    The flow's conn-process passes this through
    `seon.db.datahike.schema/malli-map->datahike-schema` at :init, which
-   installs one datahike ident per entry.
-
-   The graph entities use intra-DB lookup-refs (`[:seon.shape/id ...]`,
-   `[:seon.fn/qualified-name ...]`, etc.) — that's a same-DB `:db.type/ref`.
-   The Malli-to-datahike bridge maps bare `:seon.db/ref` to `:db.type/uuid`
-   (cross-DB convention, Decision 6 of the migration PRD). To get a same-DB
-   `:db.type/ref`, we override those ref-valued entries with an `:or`
-   schema carrying `:seon.db/value-type :db.type/ref` in properties, which
-   the bridge respects."
+   installs one datahike ident per entry. `:seon.db/ref` now maps to
+   `:db.type/ref` directly — no `:or` override needed."
   (let [base-entries (mapcat rest
                              [ingest/ns-entity-schema
                               ingest/fn-entity-schema
                               ingest/spec-entity-schema
                               ingest/shape-entity-schema
-                              ingest/entry-entity-schema])
-        ;; Attribute keys that need to be same-DB refs, not cross-DB UUIDs.
-        ;; Cardinality follows from the leaf shape ([:vector :seon.db/ref]
-        ;; stays cardinality-many).
-        ref-one      #{:seon.fn/input-spec :seon.fn/output-spec
-                       :seon.fn/input-shape :seon.fn/output-shape
-                       :seon.entry/value-shape}
-        ref-many     #{:seon.shape/entries}
-        override (fn [entry]
-                   (let [k (first entry)
-                         opts (when (map? (second entry)) (second entry))
-                         tail (cond
-                                (ref-one k)
-                                [[:or {:seon.db/value-type :db.type/ref} :seon.db/ref]]
-                                (ref-many k)
-                                [[:vector [:or {:seon.db/value-type :db.type/ref}
-                                           :seon.db/ref]]]
-                                :else nil)]
-                     (if tail
-                       (vec (concat [k] (when opts [opts]) tail))
-                       entry)))]
-    (into [:map] (map override base-entries))))
+                              ingest/entry-entity-schema])]
+    (into [:map] base-entries)))
 
 (use-fixtures :each
   (tu/with-test-db-fixture
