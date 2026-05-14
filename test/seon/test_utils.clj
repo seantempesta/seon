@@ -247,30 +247,22 @@
 ;;; Full-Graph Transact Helper
 ;;; ---------------------------------------------------------------------------
 ;;;
-;;; `transact-full-graph!` encapsulates the dependency-order trap of
-;;; transacting a fully-extracted `seon.graph.extract/extract-graph-from-file`
-;;; map into a datahike-backed db.
+;;; `transact-full-graph!` lands an extracted graph
+;;; (`seon.graph.extract/extract-graph-from-file`) into a datahike-backed
+;;; db in a single transaction.
 ;;;
-;;; Two issues need handling, both surfaced during the workout-test
-;;; migration (smells #11 and #13 in
-;;; `docs/prds/datahike-migration/remaining.md`):
+;;; Datahike resolves same-tx tempids order-independently — including
+;;; cycles — so the shape↔entry cycle and any other intra-graph reference
+;;; can be transacted together once each entity carries a stable
+;;; `:db/id` tempid string and its lookup-ref values are rewritten to
+;;; the matching tempid. See `docs/prds/datahike-migration/ref-model-research.md`
+;;; Probes 1a/1b for the cycle proof.
 ;;;
-;;;   1. Shapes and entries form a cycle — shapes carry
-;;;      `:seon.shape/entries` lookup-refs to entries; some entries
-;;;      carry `:seon.entry/value-shape` lookup-refs back to shapes.
-;;;      Datahike resolves lookup-refs only against pre-existing
-;;;      entities, not same-tx tempids — so we must transact shape
-;;;      stubs (id-only) before entries, then fill shapes afterwards.
-;;;
-;;;   2. `seon.graph.extract` emits `:seon.fn/row`, `:seon.var/row`,
-;;;      and `:seon.call/row` as `java.lang.Integer`. The datahike
-;;;      bridge maps Malli `:int` to `:db.type/long` and strictly
-;;;      rejects Integer. We Long-coerce those attrs at transact time.
-;;;
-;;; Canonical dependency order:
-;;;
-;;;     namespaces → specs → shape stubs (id-only) → entries
-;;;       → full shapes → functions → vars → call-edges → ns-deps
+;;; `seon.graph.extract` emits `:seon.fn/row`, `:seon.var/row`, and
+;;; `:seon.call/row` as `java.lang.Integer`. The datahike bridge maps
+;;; Malli `:int` to `:db.type/long` and rejects Integer. We Long-coerce
+;;; those attrs here (smell #11 — coercion belongs in extract, not in
+;;; test infra, and is tracked separately).
 
 (def ^:private graph-long-attrs
   "Attrs the datahike bridge stores as `:db.type/long` but
@@ -292,15 +284,11 @@
 
 (def graph-categories
   "Ordered list of graph categories the helper transacts. Each entry is
-   `[category-key extract-key]`. The order is the canonical dependency
-   order — specs feed function refs; shape stubs precede entries to
-   break the shape↔entry cycle; full shapes follow entries; functions /
-   vars / call-edges / ns-deps consume everything above. `:shape-stubs`
-   is synthetic (derived from shapes); the rest map 1:1 to
-   `seon.graph.extract` keys."
+   `[category-key extract-key]`. The order is now informational only
+   (datahike resolves same-tx tempids order-independently); kept so
+   `::include` and `::counts` keep their stable category vocabulary."
   [[:namespaces  ::extract/namespaces]
    [:specs       ::extract/specs]
-   [:shape-stubs ::extract/shapes]  ;; transacted id-only
    [:entries     ::extract/entries]
    [:shapes      ::extract/shapes]
    [:functions   ::extract/functions]
@@ -314,12 +302,12 @@
    functions). Callers that want to populate vars / call-edges /
    ns-deps must pass `::include` explicitly AND widen their fixture
    schema to cover the corresponding attrs."
-  #{:specs :shape-stubs :entries :shapes :functions})
+  #{:specs :entries :shapes :functions})
 
 (schema/register! ::db-name :keyword)
 (schema/register! ::graph :any)
 (schema/register! ::include
-                  [:set [:enum :namespaces :specs :shape-stubs :entries
+                  [:set [:enum :namespaces :specs :entries
                          :shapes :functions :vars :call-edges :ns-deps]])
 (schema/register! ::counts [:map-of :keyword :int])
 
@@ -333,56 +321,124 @@
                   [:map
                    [::counts ::counts]])
 
-(defn- ^:no-doc payload-for
-  "Build the entity coll for a single graph category, applying
-   stub-projection for `:shape-stubs` and Long-coercion for the
-   Integer-row categories."
+(def ^:private category->identity-attr
+  "Each category whose entities should get a `:db/id` tempid, paired
+   with the natural-key attribute the tempid is derived from. Used to
+   rewrite intra-graph lookup-refs `[<identity-attr> <value>]` into the
+   matching tempid string `\"<category>:<value>\"`."
+  {:namespaces :seon.ns/name
+   :specs      :seon.spec/key
+   :entries    :seon.entry/id
+   :shapes     :seon.shape/id
+   :functions  :seon.fn/qualified-name
+   :vars       :seon.var/qualified-name})
+
+(defn- ^:no-doc tempid-for
+  "Build a tempid string from a category key and the natural-key value."
+  [category natural-key]
+  (str (name category) ":" natural-key))
+
+(defn- ^:no-doc raw-payload-for
+  "Build the unrewritten entity coll for a single graph category."
   [category graph]
   (case category
-    :shape-stubs (mapv #(select-keys % [:seon.shape/id])
-                       (::extract/shapes graph))
     :functions   (coerce-ints->longs (::extract/functions graph))
     :vars        (coerce-ints->longs (::extract/vars graph))
     :call-edges  (coerce-ints->longs (::extract/call-edges graph))
     (vec (get graph (second (first (filter #(= category (first %))
                                            graph-categories)))))))
 
+(defn- ^:no-doc build-lookup-ref->tempid
+  "Walk all included entity collections; for each entity that has a
+   recognised natural-key attribute, register the mapping
+   `[<identity-attr> <value>] → \"<category>:<value>\"`."
+  [collections-by-category]
+  (reduce-kv
+   (fn [acc category entities]
+     (if-let [id-attr (category->identity-attr category)]
+       (reduce (fn [a e]
+                 (if-let [nk (get e id-attr)]
+                   (assoc a [id-attr nk] (tempid-for category nk))
+                   a))
+               acc entities)
+       acc))
+   {}
+   collections-by-category))
+
+(defn- ^:no-doc rewrite-value
+  "If `v` is a lookup-ref tuple matching a known intra-graph identity,
+   replace it with the matching tempid string. Otherwise return as-is.
+   Vectors of refs are walked element-by-element."
+  [lookup->tempid v]
+  (cond
+    (and (vector? v) (= 2 (count v)) (keyword? (first v))
+         (contains? lookup->tempid v))
+    (get lookup->tempid v)
+
+    (and (vector? v) (seq v) (vector? (first v)))
+    (mapv #(rewrite-value lookup->tempid %) v)
+
+    :else v))
+
+(defn- ^:no-doc rewrite-entity
+  "Apply `rewrite-value` across all values, and stamp a `:db/id` tempid
+   string from the entity's natural-key (when the category has one)."
+  [category lookup->tempid entity]
+  (let [rewritten (reduce-kv
+                   (fn [acc k v]
+                     (assoc acc k (rewrite-value lookup->tempid v)))
+                   {} entity)
+        id-attr (category->identity-attr category)
+        nk (when id-attr (get entity id-attr))]
+    (if nk
+      (assoc rewritten :db/id (tempid-for category nk))
+      rewritten)))
+
 (defn transact-full-graph!
   "Transact a fully-extracted `seon.graph.extract/extract-graph-from-file`
-   map into `db-name` in the canonical dependency order. Handles the
-   shape↔entry lookup-ref cycle via stub-then-fill (datahike resolves
-   lookup-refs only against pre-existing entities) and Long-coerces
-   `:seon.fn/row` / `:seon.var/row` / `:seon.call/row` Integers to
-   match the datahike `:db.type/long` bridge.
+   map into `db-name` in a single transaction. Each included entity
+   that carries a natural-key attribute is stamped with a stable
+   `:db/id` tempid string (e.g. `\"shape:abc\"`), and intra-graph
+   lookup-ref values are rewritten to those tempids. Datahike resolves
+   same-tx tempids order-independently, so the shape↔entry cycle and
+   any other intra-graph reference resolve in one tx (Probe 1 in
+   `docs/prds/datahike-migration/ref-model-research.md`).
 
-   Order: namespaces → specs → shape stubs → entries → full shapes →
-   functions → vars → call-edges → ns-deps.
+   Long-coerces `:seon.fn/row` / `:seon.var/row` / `:seon.call/row`
+   Integers to match the `:db.type/long` bridge (smell #11).
 
    `::include` (optional) — set of category keywords to transact.
-   Defaults to `default-include` (specs / shape-stubs / entries /
-   shapes / functions), matching workout-test's pre-helper behavior.
-   Callers that opt in to `:namespaces` / `:vars` / `:call-edges` /
-   `:ns-deps` must widen their fixture schema to cover the
-   corresponding attrs, or datahike rejects the transact at
-   schema-check time.
+   Defaults to `default-include` (specs / entries / shapes / functions),
+   matching workout-test's pre-helper behavior. Lookup-refs into
+   categories absent from `::include` are left as lookup-refs; if the
+   target entity is not already in the db, datahike will throw at
+   transact time.
 
-   Returns `{::counts {<category> <n>}}` — counts of entities actually
-   transacted per included category."
+   Returns `{::counts {<category> <n>}}` — counts of entities included
+   in the single transaction per category."
   {:malli/schema [:=> [:cat ::transact-full-graph-request]
                   ::transact-full-graph-response]}
   [{::keys [db-name graph include]
     :or {include default-include}}]
-  (let [counts (reduce
-                (fn [acc [category _]]
-                  (if (contains? include category)
-                    (let [payload (payload-for category graph)]
-                      (if (seq payload)
-                        (do (db/transact! db-name payload)
-                            (assoc acc category (count payload)))
-                        (assoc acc category 0)))
-                    acc))
-                {}
-                graph-categories)]
+  (let [collections (into {}
+                          (keep (fn [[category _]]
+                                  (when (contains? include category)
+                                    (let [coll (raw-payload-for category graph)]
+                                      (when (seq coll)
+                                        [category coll])))))
+                          graph-categories)
+        lookup->tempid (build-lookup-ref->tempid collections)
+        all-entities (into []
+                           (mapcat (fn [[category entities]]
+                                     (mapv #(rewrite-entity category lookup->tempid %)
+                                           entities)))
+                           collections)
+        counts (reduce-kv (fn [acc category entities]
+                            (assoc acc category (count entities)))
+                          {}
+                          collections)]
+    (when (seq all-entities)
+      (db/transact! db-name all-entities))
     {::counts counts}))
 
 ;;; ---------------------------------------------------------------------------
