@@ -404,6 +404,40 @@ Surfaced by the focused agents that migrated `seon.orchestrator.session-test`, `
 
 20. **Entity schemas declare attrs with plain leaf types while the corresponding registered schemas are stricter.** E.g. an entity schema has `[:seon.fn/row :int]` but `(schema/register! ::row [:int {:min 0}])`. The Malli generator runs against the entity schema's loose form and produces values (negative ints, empty strings) that `seon.db/transact!`'s `validate-values!` then rejects against the registered stricter form. `pipeline-test` works around this in test with an `align-with-registered-schemas` helper that rewrites map entries to the registered attr keyword. **Real fix:** entity schemas should reference registered attr keywords directly (`[:seon.fn/row :seon.fn/row]` or just `[:seon.fn/row]` if Malli's map-entry-shorthand allows). The result: one source of truth per attr, no generator drift, no helper needed. Cross-cuts every entity schema in the codebase.
 
+## Forward decisions (recorded 2026-05-14)
+
+Direction captured from Sean before cluster 2 dispatch — recorded here so the guidance survives the conversation and informs the agents doing the work.
+
+### Renderer auto-resolution: deferred
+
+`seon.render`'s `find-renderer` / `try-render` / `has-renderer?` are silently broken on the current boot (smell #1) because they depend on a datalevin connection-manager that's not in `system.edn`. Sean's call: **defer the fix.** For the aria project (and anything else consuming this), use **explicit rendering** until further notice — callers pass the render fn directly rather than relying on auto-discovery via `:seon.render/html` / `:seon.render/ai` schema annotations.
+
+Cluster 2 implication: don't try to rewire `find-renderer` through `seon.db/query` as part of cluster 2 cleanup. **Just delete the silently-dead datalevin-connection-manager paths and the `set-conn!` API (smell #16); leave the rest of `seon.render` alone for now.** A future pass restores auto-resolution if/when the registry surface gets redesigned. Aria works around it via explicit render fns.
+
+### `:seon.runtime` and `:seon.ai` migration to datahike: in scope, separate clusters
+
+Both namespaces currently write to dead datalevin stores (smells #3, #17 and the `seon.ai.claude` `requiring-resolve` calls in remaining.md). The fix is to register each as a datahike-flow namespace and convert callers to `seon.db/transact!` / `seon.db/query`.
+
+Sean's note on `seon.ai`: the LLM code paths (`seon.ai.claude.clj`, `seon.ai.clj`, related) predate the litellm abstraction — they're hand-rolled provider-specific calls. When migrating storage, **flag** the call sites that would benefit from routing through a litellm-style "one API, many providers" abstraction. **Don't** fix the abstraction itself in the same pass; just leave breadcrumbs (e.g. `;; FIXME(litellm): provider-specific Claude SDK call — abstract through litellm post-migration`). The litellm refactor is its own focused work.
+
+These are **separate clusters from cluster 2/3/4** (which are about killing datalevin substrate). Schedule after cluster 4 lands.
+
+### `*ctx*` redesign: atom semantics + auto-persist with warn-on-unserializable
+
+Sean's design for `seon.ctx/*ctx*` (replaces the current `do-persist!` silent no-op, smell #3):
+
+> "I want the `*ctx*` atom to be an easy to use atom that works like atoms work and then directly writes updates to the datahike entity when changes occur and if parts can't make the write transition because they are any objects or just aren't serializable then those just return warnings."
+
+Contract:
+- **In-memory atom is the source of truth.** Use stock `clojure.core` atom semantics — `swap!`, `reset!`, `deref`, `add-watch`. Callers see no difference from a normal atom.
+- **Writes flow through to a datahike entity automatically.** On change (likely via `add-watch` internally), the new value is transacted into `:seon.session/ctx` (or wherever Sean's session-scoped entity model lands).
+- **Unserializable values warn, don't fail.** If part of the atom holds something datahike can't store (raw Java objects, channels, function values, connections), the persist attempt logs a warning naming the unserializable key+path; the in-memory atom keeps working with that value. The persisted form simply omits or marks-as-skipped those keys.
+- **Resume reads from datahike on session restart.** The agent's previous ctx state rematerializes when the session is recovered.
+
+Implementation lands AFTER cluster 4 (so the datahike flow is the only persistence surface) and AFTER `:seon.runtime` / `:seon.ai` migrations land (so the patterns for "register a namespace with the flow + read schema from registry + bind a per-session entity" are settled).
+
+This is the load-bearing piece for session-resume semantics in spec-01 (Decision 27 / "Demo Target step 4"). Worth getting right.
+
 ## Resolved during Stage 2.1 test migration (2026-05-14)
 
 Tracked here so the history of what's been fixed stays visible alongside what remains. Each "Resolved" entry quotes the original smell text and links to its fix commit.
