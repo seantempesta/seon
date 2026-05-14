@@ -47,12 +47,19 @@
    AND chasing through `:malli.core/schema` registered-schema references so we
    see the underlying leaf/ref/coll type. Registered schema refs are how the
    production entity schemas express `:seon.fn/input-spec` and similar — the
-   raw entry type is `:malli.core/schema`, not `:seon.db/ref`."
+   raw entry type is `:malli.core/schema`, not `:seon.db/ref`.
+
+   `:seon.db/ref` is identified by its registry keyword form, not by the
+   underlying `:or` shape — chasing through the deref would return `:or`,
+   which is not how callers (e.g. `find-ref-keys`, `strip-ref-keys`) want
+   to recognize ref attrs."
   [entry-schema]
   (let [unwrapped (resolve-entry-child entry-schema)]
     (loop [s unwrapped]
       (if (= :malli.core/schema (m/type s))
-        (recur (m/deref s))
+        (if (= :seon.db/ref (m/form s))
+          :seon.db/ref
+          (recur (m/deref s)))
         (m/type s)))))
 
 (defn- find-many-keys
@@ -457,6 +464,12 @@
 (schema/register! :complex/note :string)
 (schema/register! :complex/priority :int)
 
+;; Attrs used by intra-DB ref roundtrip tests.
+(schema/register! :owner/id [:string {:seon.db/identity true}])
+(schema/register! :owner/name :string)
+(schema/register! :item/id [:string {:seon.db/identity true}])
+(schema/register! :item/owner :seon.db/ref)
+
 ;;; ---------------------------------------------------------------------------
 ;;; Tests: Simple Leaf Types
 ;;; ---------------------------------------------------------------------------
@@ -556,33 +569,180 @@
       (is (= 20 (:pass-count result))))))
 
 ;;; ---------------------------------------------------------------------------
-;;; Tests: Cross-Namespace Refs (UUID — Decision 6)
+;;; Tests: Intra-DB Refs (`:db.type/ref`)
 ;;; ---------------------------------------------------------------------------
 ;;;
-;;; In the datahike model, `:seon.db/ref` keys are stored as plain UUIDs. The
-;;; target's namespace is carried in Malli metadata, not in the datahike schema
-;;; itself. So a ref roundtrip is just a UUID roundtrip — no lookup-ref dance.
+;;; `:seon.db/ref` maps to `:db.type/ref` (intra-DB ref). Values are pos-int
+;;; eids, neg-int / string tempids, or `[unique-attr value]` lookup-refs.
+;;; See `docs/prds/datahike-migration/ref-model-research.md`.
+;;;
+;;; The roundtrip pattern for ref attrs: create the target entity in the same
+;;; db, then transact a referencing entity using either a lookup-ref tuple
+;;; (against the target's `:db.unique/identity` attr) or a same-tx tempid.
+;;; Pulling the ref back returns `{:db/id N}` — the allocated eid.
 
-;; -----------------------------------------------------------------------------
-;; SMELL: `:seon.db/ref` Malli definition is datalevin-shaped, not datahike-shaped
-;; -----------------------------------------------------------------------------
-;; The datahike bridge (`seon.db.datahike.schema`) maps `:seon.db/ref` to
-;; `:db.type/uuid` per Decision 6 of the datahike migration PRD ("cross-DB refs
-;; are plain UUIDs, target namespace in Malli metadata"). But the Malli
-;; registration of `:seon.db/ref` in `seon.schema` accepts only positive ints or
-;; `[keyword value]` lookup-refs — neither of which are UUIDs. Result:
-;; `seon.db/transact!` validates each ref value against the Malli schema BEFORE
-;; the datahike bridge sees it, and rejects every UUID we'd legitimately want
-;; to store.
-;;
-;; This blocks any honest ref roundtrip test through `seon.db/transact!`. The
-;; fix lives in `src/seon/schema.clj` (extend or replace the `:seon.db/ref`
-;; predicate to accept UUIDs), not in this file. Until that lands, the ref
-;; tests below are dropped from the suite rather than coerced into passing.
-;;
-;; Cross-namespace, agent-run, fn-spec-ref, fn-shape-ref, call-entity ref
-;; roundtrips are all blocked by the same issue. The non-ref attrs in those
-;; entities are still exercised via the `strip-ref-keys` path above.
+(deftest cross-namespace-ref-roundtrip-test
+  (testing "intra-DB :seon.db/ref roundtrips via lookup-ref"
+    (let [schema [:map
+                  [:owner/id [:string {:seon.db/identity true}]]
+                  [:owner/name :string]
+                  [:item/id [:string {:seon.db/identity true}]]
+                  [:item/owner :seon.db/ref]]]
+      (tu/with-test-db
+        {::tu/namespaces [:ref-roundtrip]
+         ::tu/schemas {:ref-roundtrip schema}}
+        (fn [_]
+          (db/transact! :ref-roundtrip [{:owner/id "o1" :owner/name "Alice"}])
+          (db/transact! :ref-roundtrip
+                        [{:item/id "i1" :item/owner [:owner/id "o1"]}])
+          (let [owner-eid (:db/id (db/pull-by-name :ref-roundtrip '[*]
+                                                   [:owner/id "o1"]))
+                pulled (db/pull-by-name :ref-roundtrip '[*] [:item/id "i1"])]
+            (is (some? owner-eid))
+            (is (= "i1" (:item/id pulled)))
+            (is (= {:db/id owner-eid} (:item/owner pulled)))))))))
+
+(deftest agent-run-ref-pipeline-test
+  (testing "seon.agent.run/runtime ref roundtrips against a :seon.runtime entity"
+    (let [schema [:map
+                  [:seon.runtime/namespace :seon.runtime/namespace]
+                  [:seon.runtime/status :keyword]
+                  [:seon.agent.run/id [:string {:seon.db/identity true}]]
+                  [:seon.agent.run/status :keyword]
+                  [:seon.agent.run/runtime :seon.db/ref]]]
+      (tu/with-test-db
+        {::tu/namespaces [:agent-run-ref]
+         ::tu/schemas {:agent-run-ref schema}}
+        (fn [_]
+          (db/transact! :agent-run-ref
+                        [{:seon.runtime/namespace "my.ns"
+                          :seon.runtime/status :running}])
+          (db/transact! :agent-run-ref
+                        [{:seon.agent.run/id "run-1"
+                          :seon.agent.run/status :running
+                          :seon.agent.run/runtime [:seon.runtime/namespace "my.ns"]}])
+          (let [rt-eid (:db/id (db/pull-by-name :agent-run-ref '[*]
+                                                [:seon.runtime/namespace "my.ns"]))
+                pulled (db/pull-by-name :agent-run-ref '[*]
+                                        [:seon.agent.run/id "run-1"])]
+            (is (some? rt-eid))
+            (is (= {:db/id rt-eid} (:seon.agent.run/runtime pulled)))))))))
+
+(deftest ingest-fn-spec-ref-pipeline-test
+  (testing ":seon.fn/input-spec and :seon.fn/output-spec roundtrip via [:seon.spec/key ...]"
+    (tu/with-test-db
+        {::tu/namespaces [:fn-spec-ref]
+         ::tu/schemas {:fn-spec-ref [:map
+                                     [:seon.spec/key :seon.spec/key]
+                                     [:seon.spec/namespace :string]
+                                     [:seon.spec/definition :string]
+                                     [:seon.spec/base-type :keyword]
+                                     [:seon.spec/updated-at :inst]
+                                     [:seon.fn/qualified-name :seon.fn/qualified-name]
+                                     [:seon.fn/namespace :string]
+                                     [:seon.fn/name :string]
+                                     [:seon.fn/private :boolean]
+                                     [:seon.fn/input-spec :seon.db/ref]
+                                     [:seon.fn/output-spec :seon.db/ref]]}}
+        (fn [_]
+          (let [in-key :my.ns/in
+                out-key :my.ns/out]
+            (db/transact! :fn-spec-ref
+                          [{:seon.spec/key in-key
+                            :seon.spec/namespace "my.ns"
+                            :seon.spec/definition ":int"
+                            :seon.spec/base-type :int
+                            :seon.spec/updated-at (java.util.Date.)}
+                           {:seon.spec/key out-key
+                            :seon.spec/namespace "my.ns"
+                            :seon.spec/definition ":string"
+                            :seon.spec/base-type :string
+                            :seon.spec/updated-at (java.util.Date.)}])
+            (db/transact! :fn-spec-ref
+                          [{:seon.fn/qualified-name "my.ns/do-thing"
+                            :seon.fn/namespace "my.ns"
+                            :seon.fn/name "do-thing"
+                            :seon.fn/private false
+                            :seon.fn/input-spec [:seon.spec/key in-key]
+                            :seon.fn/output-spec [:seon.spec/key out-key]}])
+            (let [in-eid (:db/id (db/pull-by-name :fn-spec-ref '[*]
+                                                  [:seon.spec/key in-key]))
+                  out-eid (:db/id (db/pull-by-name :fn-spec-ref '[*]
+                                                   [:seon.spec/key out-key]))
+                  pulled (db/pull-by-name :fn-spec-ref '[*]
+                                          [:seon.fn/qualified-name "my.ns/do-thing"])]
+              (is (= {:db/id in-eid} (:seon.fn/input-spec pulled)))
+              (is (= {:db/id out-eid} (:seon.fn/output-spec pulled)))))))))
+
+(deftest ingest-fn-shape-ref-pipeline-test
+  (testing ":seon.fn/input-shape and :seon.fn/output-shape roundtrip via [:seon.shape/id ...]"
+    (tu/with-test-db
+      {::tu/namespaces [:fn-shape-ref]
+       ::tu/schemas {:fn-shape-ref [:map
+                                    [:seon.shape/id :seon.shape/id]
+                                    [:seon.shape/namespace :string]
+                                    [:seon.fn/qualified-name :seon.fn/qualified-name]
+                                    [:seon.fn/namespace :string]
+                                    [:seon.fn/name :string]
+                                    [:seon.fn/private :boolean]
+                                    [:seon.fn/input-shape :seon.db/ref]
+                                    [:seon.fn/output-shape :seon.db/ref]]}}
+      (fn [_]
+        (db/transact! :fn-shape-ref
+                      [{:seon.shape/id "shape-in" :seon.shape/namespace "my.ns"}
+                       {:seon.shape/id "shape-out" :seon.shape/namespace "my.ns"}])
+        (db/transact! :fn-shape-ref
+                      [{:seon.fn/qualified-name "my.ns/do-thing"
+                        :seon.fn/namespace "my.ns"
+                        :seon.fn/name "do-thing"
+                        :seon.fn/private false
+                        :seon.fn/input-shape [:seon.shape/id "shape-in"]
+                        :seon.fn/output-shape [:seon.shape/id "shape-out"]}])
+        (let [in-eid (:db/id (db/pull-by-name :fn-shape-ref '[*]
+                                              [:seon.shape/id "shape-in"]))
+              out-eid (:db/id (db/pull-by-name :fn-shape-ref '[*]
+                                               [:seon.shape/id "shape-out"]))
+              pulled (db/pull-by-name :fn-shape-ref '[*]
+                                      [:seon.fn/qualified-name "my.ns/do-thing"])]
+          (is (= {:db/id in-eid} (:seon.fn/input-shape pulled)))
+          (is (= {:db/id out-eid} (:seon.fn/output-shape pulled))))))))
+
+(deftest ingest-call-entity-pipeline-test
+  (testing ":seon.call/from-fn and :seon.call/to-fn roundtrip via [:seon.fn/qualified-name ...]"
+    (tu/with-test-db
+      {::tu/namespaces [:call-ref]
+       ::tu/schemas {:call-ref [:map
+                                [:seon.fn/qualified-name :seon.fn/qualified-name]
+                                [:seon.fn/namespace :string]
+                                [:seon.fn/name :string]
+                                [:seon.fn/private :boolean]
+                                [:seon.call/from-fn :seon.db/ref]
+                                [:seon.call/to-fn :seon.db/ref]
+                                [:seon.call/row {:optional true} :int]]}}
+      (fn [_]
+        (db/transact! :call-ref
+                      [{:seon.fn/qualified-name "my.ns/caller"
+                        :seon.fn/namespace "my.ns"
+                        :seon.fn/name "caller"
+                        :seon.fn/private false}
+                       {:seon.fn/qualified-name "my.ns/callee"
+                        :seon.fn/namespace "my.ns"
+                        :seon.fn/name "callee"
+                        :seon.fn/private false}])
+        (let [from-eid (:db/id (db/pull-by-name :call-ref '[*]
+                                                [:seon.fn/qualified-name "my.ns/caller"]))
+              to-eid (:db/id (db/pull-by-name :call-ref '[*]
+                                              [:seon.fn/qualified-name "my.ns/callee"]))
+              {:keys [tempids]} (db/transact!
+                                 :call-ref
+                                 [{:db/id "call-1"
+                                   :seon.call/from-fn [:seon.fn/qualified-name "my.ns/caller"]
+                                   :seon.call/to-fn [:seon.fn/qualified-name "my.ns/callee"]}])
+              call-eid (get tempids "call-1")
+              pulled (db/pull-by-name :call-ref '[*] call-eid)]
+          (is (some? call-eid))
+          (is (= {:db/id from-eid} (:seon.call/from-fn pulled)))
+          (is (= {:db/id to-eid} (:seon.call/to-fn pulled))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Tests: Complex Entity (Mix of All Supported Types)
@@ -772,26 +932,15 @@
 ;;; Tests: Trace Entity Schema (no unique identity key)
 ;;; ---------------------------------------------------------------------------
 
-;; -----------------------------------------------------------------------------
-;; SMELL: `:seon.flow.trace/event` enum has its props map mis-positioned
-;; -----------------------------------------------------------------------------
-;; `src/seon/flow/trace.clj:35-37` registers
-;;
-;;   [:enum :start :end :error :overload :forward :timeout
-;;          {:description "Flow event kind"}]
-;;
-;; The `{:description ...}` belongs AFTER `:enum`, not after the values. Malli
-;; accepts the malformed form and treats the props map as an enum VALUE, which
-;; (a) lets the generator emit a map where a keyword is expected and (b) makes
-;; the datahike bridge's `infer-enum-type` throw a mixed-type-enum error. The
-;; legacy datalevin bridge silently returned nil for the same input, masking
-;; the bug. This is the kind of pre-existing schema rot that the new generative
-;; tests are meant to catch.
-;;
-;; Fix is one line in `src/seon/flow/trace.clj`; out of scope for this test
-;; rewrite. Trace test is dropped from the suite until the source is fixed.
-;;
-;; (deftest trace-entity-pipeline-test ...) deliberately omitted.
+(deftest trace-entity-pipeline-test
+  (testing "seon.flow.trace/entity-schema survives the full pipeline (tempid)"
+    (let [result (assert-tempid-roundtrip!
+                  (align-with-registered-schemas
+                   @(requiring-resolve 'seon.flow.trace/entity-schema))
+                  {:num-samples 20 :db-name :seon.flow.trace})]
+      (is (zero? (:fail-count result))
+          (str "Failures: " (pr-str (:failures result))))
+      (is (= 20 (:pass-count result))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Tests: Runtime Entity Schemas
@@ -823,8 +972,7 @@
           (str "Failures: " (pr-str (:failures result))))
       (is (= 20 (:pass-count result))))))
 
-;; agent-run-ref-pipeline-test — see SMELL block above. Blocked on `:seon.db/ref`
-;; Malli definition not accepting UUIDs.
+;; agent-run-ref-pipeline-test moved to the intra-DB refs section above.
 
 (deftest flow-snap-entity-pipeline-test
   (testing "seon.runtime/flow-snap-entity-schema survives the full pipeline"
@@ -886,11 +1034,8 @@
           (str "Failures: " (pr-str (:failures result))))
       (is (= 20 (:pass-count result))))))
 
-;; ingest-fn-spec-ref-pipeline-test — see SMELL block above. Blocked.
-;; ingest-fn-shape-ref-pipeline-test — see SMELL block above. Blocked.
-;; ingest-call-entity-pipeline-test — see SMELL block above. The non-ref attrs
-;; (:seon.call/row only) round-trip fine, but every meaningful exercise of the
-;; call entity is on ref attrs.
+;; ingest-fn-spec-ref / ingest-fn-shape-ref / ingest-call-entity
+;; pipeline tests moved to the intra-DB refs section above.
 
 (deftest ingest-ns-dep-entity-pipeline-test
   (testing "seon.graph.ingest/ns-dep-entity-schema survives the full pipeline (tempid)"
