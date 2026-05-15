@@ -1,7 +1,7 @@
 ---
 type: research
 status: draft
-tags: [research, database, schema, render]
+tags: [research, database, schema]
 ---
 
 # Malli defaults — native support and the renderer use case
@@ -108,9 +108,11 @@ Three options ranked by build cost:
 2. **Thin custom transformer (~20 lines)** — copy the shape of
    `add-defaults` (transform.cljc:497-515) but invoke `f` with the
    in-flight entity `x` instead of zero-arity:
+
    ```clojure
    [k (fn [x] (f x))]   ;; instead of (fn [] (f))
    ```
+
    Declare via a seon-side property key (e.g. `:seon.render/default-fn`)
    so we don't collide with Malli's `:default/fn` semantics. Boundary
    call: `(m/decode schema entity (seon.schema/compute-defaults-transformer))`.

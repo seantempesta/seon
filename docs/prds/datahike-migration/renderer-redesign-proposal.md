@@ -1,7 +1,7 @@
 ---
 type: prd
 status: draft
-tags: [prd, render, agent]
+tags: [prd, agent]
 ---
 
 # Renderer Redesign Proposal — Explicit, Schema-Anchored, REPL-Bounded
@@ -80,6 +80,7 @@ Tracked overlaps: `seon.ns.view` (multimethod-based, parallel system per `overla
 The `:seon.render/ai` value is **either** a literal string (pre-rendered) **or** a symbol pointing at a render fn. Same for `:seon.render/html` — hiccup-or-symbol. The schema's `:default` is a literal symbol (the most common shape; agents who want a custom literal pre-populate the key).
 
 `my.ns/render-user-message-ai`:
+
 ```clojure
 (defn render-user-message-ai
   "Renders a user-message entity for AI consumption."
@@ -93,6 +94,7 @@ Takes the entity, returns the rendered string. Standard map-in/map-out fn.
 ### Why stock Malli is enough
 
 At the boundary:
+
 ```
 1. (m/decode schema entity (mt/default-value-transformer))
    — Malli's stock transformer fills any missing :seon.render/* keys
