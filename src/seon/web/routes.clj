@@ -4,7 +4,6 @@
   (:require [clojure.string :as str]
             [clojure.java.io :as io]
             [seon.web.handlers :as handlers]
-            [seon.web.agents :as agents]
             [seon.web.flows :as flows]
             [seon.web.browser :as browser]
             [seon.ns.routes :as ns-routes]))
@@ -22,10 +21,10 @@
    ;; Flow monitor routes
    [:get "/flows"]                 #'flows/flows-page
    [:post "/flows"]                #'flows/flows-sse
-   ;; Agent observatory routes
-   [:get "/agents"]                #'agents/agents-page
-   [:post "/agents"]               #'agents/agents-sse
-   [:post "/api/agents/toggle-completed"] #'agents/toggle-completed-handler
+   ;; Agent observatory routes — handlers removed in M-2 along with
+   ;; `seon.web.agents` (which read from the deleted `seon.ai.datalevin`).
+   ;; M-3 will restore the observatory against the new :seon.ai datahike
+   ;; namespace.
    ;; Browser execution bridge result callback
    [:post "/api/browser/result"]   #'browser/result-handler})
 
@@ -44,15 +43,7 @@
     :pattern #"/ns/([a-z][a-z0-9._-]*)/([a-zA-Z][a-zA-Z0-9_!?*%.-]*)"
     :params [:namespace :function]
     :handler #'ns-routes/function-get-handler}
-   ;; Agent detail routes: /agents/:agent-id
-   {:method :get
-    :pattern #"/agents/([A-Za-z0-9]+)"
-    :params [:agent-id]
-    :handler #'agents/agent-detail-page}
-   {:method :post
-    :pattern #"/agents/([A-Za-z0-9]+)"
-    :params [:agent-id]
-    :handler #'agents/agent-detail-sse}
+   ;; Agent detail routes removed in M-2 (see comment in static routes above).
    ;; Namespace view routes: /ns/{namespace}?id=session_id
    ;; Uses seon.ns.view multimethod rendering system
    ;; Also handles legacy /{dotted.namespace} URLs via redirect below

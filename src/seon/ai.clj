@@ -32,20 +32,17 @@
   (:import [java.time Instant]))
 
 ;;; ---------------------------------------------------------------------------
-;;; Datalevin Write Support (Primary and Only Store)
+;;; AI persistence — disabled in M-2; M-3 ports to a :seon.ai datahike namespace
 ;;; ---------------------------------------------------------------------------
 
 (defn- datalevin-write!
-  "Write to Datalevin (the only AI data store).
-   Requires and calls seon.ai.datalevin lazily to avoid circular deps."
-  [op entity]
-  (require 'seon.ai.datalevin)
-  (let [enabled? @(resolve 'seon.ai.datalevin/enabled?)]
-    (when @enabled?
-      (case op
-        :save-session ((resolve 'seon.ai.datalevin/save-session!) entity)
-        :update-session ((resolve 'seon.ai.datalevin/update-session!) entity)
-        :save-message ((resolve 'seon.ai.datalevin/save-message!) entity)))))
+  "No-op since chunk M-2. The legacy datalevin persistence
+   (`seon.ai.datalevin/save-session!` etc.) was deleted. M-3 will register
+   `:seon.ai` as a datahike-flow namespace and route this through
+   `seon.db/transact!`."
+  [_op _entity]
+  ;; FIXME(M-3): port to :seon.ai datahike namespace via seon.db/transact!
+  nil)
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schema Registration
@@ -392,11 +389,11 @@
                     ::input-tokens 1500
                     ::output-tokens 800})"
   [{::keys [session-id status input-tokens output-tokens cost-usd error]}]
+  ;; FIXME(M-3): port to :seon.ai datahike namespace via seon.db/transact!
   (let [final-status (or status :completed)
-        existing ((requiring-resolve 'seon.ai.datalevin/dl-get-session) session-id)
-        updated (cond-> (or existing {:seon/id session-id ::type :session})
-                  true (assoc ::status final-status
-                              ::ended-at (Instant/now))
+        updated (cond-> {:seon/id session-id ::type :session
+                         ::status final-status
+                         ::ended-at (Instant/now)}
                   input-tokens (assoc ::input-tokens input-tokens)
                   output-tokens (assoc ::output-tokens output-tokens)
                   cost-usd (assoc ::cost-usd cost-usd)
@@ -448,8 +445,9 @@
 
    Example:
      (get-session {::session-id \"ses-abc123\"})"
-  [{::keys [session-id]}]
-  ((requiring-resolve 'seon.ai.datalevin/dl-get-session) session-id))
+  [{::keys [_session-id]}]
+  ;; FIXME(M-3): port to :seon.ai datahike namespace via seon.db/query.
+  nil)
 
 (defn get-messages
   "Get all messages for a session.
@@ -462,8 +460,9 @@
 
    Example:
      (get-messages {::session-id \"ses-abc123\"})"
-  [{::keys [session-id]}]
-  ((requiring-resolve 'seon.ai.datalevin/dl-get-messages) session-id))
+  [{::keys [_session-id]}]
+  ;; FIXME(M-3): port to :seon.ai datahike namespace via seon.db/query.
+  [])
 
 (defn list-sessions
   "List recent sessions.
@@ -479,12 +478,9 @@
    Example:
      (list-sessions {::limit 10})
      (list-sessions {::namespace 'seon.trading ::status :active})"
-  [{::keys [limit namespace status]}]
-  (let [limit (or limit 20)]
-    ((requiring-resolve 'seon.ai.datalevin/dl-list-sessions)
-     (cond-> {:limit limit}
-       namespace (assoc :namespace (str namespace))
-       status (assoc :status status)))))
+  [{::keys [_limit _namespace _status]}]
+  ;; FIXME(M-3): port to :seon.ai datahike namespace via seon.db/query.
+  [])
 
 (defn session-stats
   "Get aggregate statistics across all AI sessions.
@@ -499,7 +495,12 @@
    Example:
      (session-stats {})"
   [_request]
-  ((requiring-resolve 'seon.ai.datalevin/dl-session-stats)))
+  ;; FIXME(M-3): port to :seon.ai datahike namespace via seon.db/query.
+  {::total-cost-usd 0
+   ::total-sessions 0
+   ::total-messages 0
+   ::tokens {:input 0 :output 0 :cache-read 0 :cache-creation 0}
+   ::cache-hit-rate 0.0})
 
 (comment
   ;; REPL exploration

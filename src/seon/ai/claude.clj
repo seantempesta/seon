@@ -542,12 +542,9 @@
   (let [entity (sdk-message->entity {::sdk-message sdk-message
                                      ::ai/session-id session-id})
         message-id (:seon/id entity)]
-    (try
-      (require 'seon.ai.datalevin)
-      (when @(resolve 'seon.ai.datalevin/enabled?)
-        ((resolve 'seon.ai.datalevin/save-message!) entity))
-      (catch Exception e
-        (log/warn "Failed to persist message to Datalevin" {:error (.getMessage e)})))
+    ;; FIXME(M-3): port to :seon.ai datahike namespace via seon.db/transact!
+    ;; The legacy datalevin persistence was deleted in M-2; M-3 registers
+    ;; `:seon.ai` in `:seon.db/flow` and rewires this to `seon.db/transact!`.
     {::ai/message-id message-id}))
 
 ;;; ---------------------------------------------------------------------------
@@ -807,11 +804,10 @@
                          :existing-session (:seon.ai.agent/session-id existing)})))))
 
   ;; 1. Create Seon session (nREPL, ctx, db)
+  ;; FIXME(M-3): the legacy ::session/datalevin-manager attachment was
+  ;; deleted in M-2 along with the dead :seon.db.datalevin/connections lookup.
   (let [{::session/keys [id nrepl-port] :as session-result}
-        (session/start-agent-session!
-         (let [dl-mgr (:seon.db.datalevin/connections state/system)]
-           (cond-> {::session/namespace namespace}
-             dl-mgr (assoc ::session/datalevin-manager dl-mgr))))]
+        (session/start-agent-session! {::session/namespace namespace})]
 
     (when (= :error (::session/status session-result))
       (throw (ex-info "Failed to create agent session"
@@ -1361,27 +1357,12 @@
    Note: This function queries the database, so it works for both running
    and completed agents. For running agents, ::result-text will be nil."
   [{::ai/keys [session-id]}]
-  (let [session ((requiring-resolve 'seon.ai.datalevin/dl-find-by-agent-session-id) session-id)]
-    (if-not session
-      {::agent-status :failed ::error (str "Agent session not found: " session-id)}
-      (let [ai-sid (:seon/id session)
-            status (::ai/status session)
-            agent-status (case status :active :running :completed :completed :failed :failed :interrupted :interrupted :terminated)
-            started (::ai/started-at session)
-            ended (::ai/ended-at session)
-            dur (when (and started ended)
-                  (let [s (if (instance? java.time.Instant started) started (.toInstant started))
-                        e (if (instance? java.time.Instant ended) ended (.toInstant ended))]
-                    (- (.toEpochMilli e) (.toEpochMilli s))))
-            result-msg (when (#{:completed :failed} status)
-                         ((requiring-resolve 'seon.ai.datalevin/dl-get-result-message) ai-sid))
-            turns ((requiring-resolve 'seon.ai.datalevin/dl-count-assistant-turns) ai-sid)]
-        (cond-> {::agent-status agent-status}
-          (::ai/cost-usd session) (assoc ::cost-usd (::ai/cost-usd session))
-          dur (assoc ::duration-ms (int dur))
-          (pos? turns) (assoc ::num-turns turns)
-          (::ai/content result-msg) (assoc ::result-text (::ai/content result-msg))
-          (::result-subtype result-msg) (assoc ::result-subtype (::result-subtype result-msg)))))))
+  ;; FIXME(M-3): port to :seon.ai datahike namespace via seon.db/transact!
+  ;; The legacy datalevin reads (dl-find-by-agent-session-id, etc.) were
+  ;; deleted in M-2. Until M-3 wires `:seon.ai` into `:seon.db/flow`,
+  ;; agent-result returns a stub indicating the persistence layer is down.
+  {::agent-status :failed
+   ::error (str "Agent session lookup unavailable (M-3 pending): " session-id)})
 (defn agent-messages
   "Get recent messages from an agent session.
 
@@ -1404,31 +1385,12 @@
      ;;                 {:role \"assistant\" :content \"[tool: Read]\"}]
      ;;     ::agent-status :running
      ;;     ::message-count 5}"
-  [{::ai/keys [session-id] ::keys [limit] :or {limit 20}}]
-  (let [session ((requiring-resolve 'seon.ai.datalevin/dl-find-by-agent-session-id) session-id)]
-    (if-not session
-      {::agent-status :not-found ::error (str "Agent session not found: " session-id)}
-      (let [ai-sid (:seon/id session)
-            status (::ai/status session)
-            agent-status (case status :active :running :completed :completed :failed :failed :interrupted :interrupted :terminated)
-            msg-count ((requiring-resolve 'seon.ai.datalevin/dl-message-count) ai-sid)
-            raw-msgs ((requiring-resolve 'seon.ai.datalevin/dl-recent-messages) ai-sid limit)
-            messages (->> (or raw-msgs [])
-                          (mapv (fn [m]
-                                  (let [content (::ai/content m)
-                                        tools (::tool-calls m)
-                                        summary (cond
-                                                  (and content (not (str/blank? content)))
-                                                  (if (> (count content) 150)
-                                                    (str (subs content 0 150) "...") content)
-                                                  (seq tools)
-                                                  (str "[" (str/join ", " (map :name tools)) "]")
-                                                  :else nil)]
-                                    (cond-> {:role (::ai/role m)}
-                                      (::message-type m) (assoc :type (::message-type m))
-                                      summary (assoc :summary summary)))))
-                          (filterv :summary))]
-        {::messages messages ::agent-status agent-status ::message-count msg-count}))))
+  [{::ai/keys [session-id] ::keys [_limit] :or {_limit 20}}]
+  ;; FIXME(M-3): port to :seon.ai datahike namespace via seon.db/query.
+  {::messages []
+   ::agent-status :not-found
+   ::message-count 0
+   ::error (str "Agent message history unavailable (M-3 pending): " session-id)})
 (defn wait-for-agent!!
   "Block until a running agent completes and return its result.
 

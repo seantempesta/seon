@@ -5,7 +5,6 @@
             [taoensso.timbre :as log]
             [jsonista.core :as json]
             [seon.web.routes :as routes]
-            [seon.web.agents :as agents]
             [seon.web.sse :as sse])
   (:import [java.io InputStream]))
 
@@ -66,8 +65,9 @@
 
 (defmethod ig/init-key ::http-server
   [_ {:keys [port bind handler]}]
-  ;; Initialize modules
-  (agents/init!)
+  ;; Agent observatory module (`seon.web.agents/init!`) was removed in M-2
+  ;; together with the dead `seon.ai.datalevin` reads it depended on. M-3
+  ;; will restore it against the new `:seon.ai` datahike namespace.
 
   ;; Initialize SSE broadcast infrastructure with 100ms throttle
   (let [refresh-mult (sse/init-sse! :max-refresh-ms 100)
