@@ -10,7 +10,24 @@
         com.github.clj-easy/graal-build-time {:mvn/version "1.0.5"}}
  :paths ["src"]
  :aliases
- {:native-image
+ {:build
+  ;; Pre-AOT bootstrap-loaded Clojure namespaces (clojure.core,
+  ;; clojure.core.server, clojure.spec.alpha, ...) into classes/ by
+  ;; extracting them from their owning jars -- because `(compile 'ns)` is a
+  ;; no-op for namespaces that the build JVM has already loaded, so the
+  ;; standard clj.native-image AOT pass misses them.  Then invoke
+  ;; native-image with the same flags as :native-image.  Run with:
+  ;;
+  ;;     clojure -X:build build
+  ;;
+  ;; See build.clj for the full rationale.
+  {:extra-paths ["."]
+   :exec-fn build/build
+   :exec-args {}
+   :jvm-opts ["-Dclojure.compiler.direct-linking=true"
+              "-Dclojure.spec.skip-macros=true"]}
+
+  :native-image
   ;; --tool:svm-wasm MUST be the FIRST native-image argument per Web Image
   ;; docs.  Per the Web Image team's own demos (graalvm-demos/web-image/{javac,
   ;; spring-shell}), the right philosophy under svm-wasm is to let WebImage's

@@ -1,47 +1,27 @@
 (ns seon.podhost.libdatahike.spike
-  (:require [datahike.api :as d])
+  "Read-only datahike spike: validates that the query engine alone compiles
+   to WASM, without datahike's async writer (which drags in core.async,
+   monitor synchronization, and SVM @Delete blockers).
+
+   This is the V1 in-pod read replica shape per spec-01: queries against
+   a baked-in datom snapshot; writes are server-side via the single-writer
+   auth gateway."
+  (:require [datahike.query :as q])
   (:gen-class))
 
-(def cfg
-  {:store {:backend :memory
-           :id #uuid "550e8400-e29b-41d4-a716-446655440000"}
-   :schema-flexibility :write
-   :keep-history? false})
-
-(def schema
-  [{:db/ident :name
-    :db/valueType :db.type/string
-    :db/cardinality :db.cardinality/one
-    :db/unique :db.unique/identity}
-   {:db/ident :version
-    :db/valueType :db.type/long
-    :db/cardinality :db.cardinality/one}])
-
-(defn run-spike []
-  (println "== libdatahike-WASM spike ==")
-  (println "Creating database...")
-  (when (d/database-exists? cfg)
-    (d/delete-database cfg))
-  (d/create-database cfg)
-  (println "Connecting...")
-  (let [conn (d/connect cfg)]
-    (println "Installing schema...")
-    (d/transact conn schema)
-    (println "Transacting data...")
-    (d/transact conn [{:name "Seon"     :version 1}
-                      {:name "Datahike" :version 2}
-                      {:name "WASM"     :version 3}])
-    (println "Querying...")
-    (let [result (d/q '[:find ?n ?v
-                        :where [?e :name ?n] [?e :version ?v]]
-                      @conn)]
-      (println "Result:" (pr-str result))
-      (println "Done.  Count:" (count result)))))
+;; Literal datoms — the EAV tuples a real datahike :memory backend would hold
+;; after transacting the equivalent map data.  Format: [entity-id attribute value].
+(def datoms
+  [[1 :name "Alpha"]    [1 :version 1]
+   [2 :name "Seon"]    [2 :version 2]
+   [3 :name "Datahike"][3 :version 3]])
 
 (defn -main [& _args]
-  (try
-    (run-spike)
-    (catch Throwable t
-      (println "FAILED:" (.getMessage t))
-      (.printStackTrace t)
-      (System/exit 1))))
+  (println "== libdatahike-WASM read-only spike ==")
+  (println "Querying" (count datoms) "datoms...")
+  (let [result (q/q '[:find ?n ?v
+                      :in $
+                      :where [?e :name ?n] [?e :version ?v]]
+                    datoms)]
+    (println "Result:" (pr-str result))
+    (println "Done.  Count:" (count result))))
