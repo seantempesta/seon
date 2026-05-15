@@ -311,12 +311,14 @@
      (test-affected 'seon.graph.query :depth :transitive)"
   [ns-sym & {:keys [depth] :or {depth :direct}}]
   (let [ns-str (str ns-sym)
-        ;; Try to get graph conn from integrant system
-        has-db? (try
-                  (require 'integrant.repl.state)
-                  (some? (some-> @(resolve 'integrant.repl.state/system)
-                                 :seon.db.datalevin/connections))
-                  (catch Exception _ false))
+        ;; M-1 (2026-05-15): the previous probe looked at
+        ;; :seon.db.datalevin/connections (removed from system.edn). The
+        ;; graph backing affected-test-namespaces queries `:seon.runtime`,
+        ;; which is not yet in :seon.db/flow (Cluster 4 — :seon.runtime
+        ;; migration). Until that lands, this stays `false` and
+        ;; `test-affected` falls back to running only the ns's own test —
+        ;; identical behaviour to the live system before M-1.
+        has-db? false
         test-nses (if has-db?
                     (ts/affected-test-namespaces
                      {::ts/db-name :seon.runtime ::ts/ns-name ns-str ::ts/depth depth})

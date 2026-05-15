@@ -126,39 +126,11 @@
     (:adopted? component) :adopted
     :else :started))
 
-(defn- datalevin-process-info
-  "Get PID and alive status of the external Datalevin process."
-  [server-component]
-  (let [process (:process server-component)
-        pid (or (when process (.pid ^Process process))
-                (:pid server-component))]
-    (cond-> {}
-      pid (assoc :pid (str pid))
-      process (assoc :process-alive? (.isAlive ^Process process)))))
-
-(defn- check-datalevin
-  "Check Datalevin server health (port 8898).
-   Datalevin runs as a separate JVM process — survives Seon restarts.
-   Reports process PID, connection manager status, and mode."
-  []
-  (let [tcp-check (check-port 8898 1000)
-        system (get-system)
-        server-component (:seon.db.datalevin/server system)
-        mode (component-mode server-component)
-        proc-info (datalevin-process-info server-component)]
-    (try
-      (require 'seon.db.datalevin.conn)
-      (if-let [manager (:seon.db.datalevin/connections system)]
-        (let [conn-health ((resolve 'seon.db.datalevin.conn/health)
-                           {:seon.db.datalevin.conn/manager manager})]
-          (merge tcp-check proc-info
-                 {:mode mode
-                  :port (or (:port server-component) 8898)
-                  :details {:conn-status (:seon.db.datalevin.conn/status conn-health)
-                            :cached-connections (:seon.db.datalevin.conn/total-connections conn-health)
-                            :server-reachable? (:seon.db.datalevin.conn/server-reachable? conn-health)}}))
-        (merge tcp-check proc-info {:mode mode :port 8898}))
-      (catch Exception _ (merge tcp-check proc-info {:mode mode :port 8898})))))
+;; datalevin-process-info + check-datalevin deleted in chunk M-1 (2026-05-15).
+;; The :seon.db.datalevin/server Integrant key was removed from system.edn,
+;; so check-datalevin always reported :not-running and flipped the system
+;; to :unhealthy on every boot. Datahike runs in-process per namespace and
+;; reports its health via :seon.db/flow; no separate datalevin probe needed.
 
 (defn- check-resources
   "Get current resource utilization."
@@ -271,10 +243,18 @@
 
    - :healthy - All checks pass and system is ready
    - :degraded - Some non-critical checks fail, or startup phase is degraded
-   - :unhealthy - Critical checks fail (datalevin or flow down)"
+   - :unhealthy - Critical checks fail
+
+   M-1 (2026-05-15): the :datalevin critical-key check was deleted along with
+   `check-datalevin`. The datahike flow runs in-process per namespace, so the
+   health story now derives entirely from :seon.db/flow + the other component
+   checks below. No critical-key check currently produces `:unhealthy`; the
+   gradient is `:healthy → :degraded` only. A future commit reinstates a
+   critical-key check (likely `:flow` reading the :seon.db/flow component
+   status) once the runtime/AI migrations expose a probe surface."
   [checks]
   (let [phase @startup-phase
-        critical-keys [:datalevin]
+        critical-keys []
         critical-checks (select-keys checks critical-keys)
         critical-down? (and (seq critical-checks)
                             (some (fn [[_k v]] (and (map? v) (not (:ok v))))
@@ -290,13 +270,16 @@
   "Comprehensive health check for debugging and monitoring.
 
    Checks all services with mode reporting:
-   - Datalevin server (adopted/started)
    - nREPL server (started)
    - HTTP server (started)
    - Caddy reverse proxy (adopted/started)
    - Tailwind watcher (adopted/started)
    - Agent subsystem
    - Pool JVM status
+
+   M-1 (2026-05-15): the :datalevin check was deleted along with the legacy
+   external-process probe. Datahike runs in-process per namespace and reports
+   via :seon.db/flow.
 
    Request keys: (none)
 
@@ -312,7 +295,6 @@
   {:malli/schema [:=> [:cat ::check-request] ::check-response]}
   [{}]
   (let [nrepl-check (check-nrepl)
-        datalevin-check (check-datalevin)
         http-check (check-http)
         caddy-check (check-caddy)
         tailwind-check (check-tailwind)
@@ -322,8 +304,7 @@
         ;; Operational checks only after Phase 2 (DB and flow are up)
         phase @startup-phase
         operational? (contains? #{:ready :degraded} phase)
-        checks (cond-> {:datalevin datalevin-check
-                         :nrepl nrepl-check
+        checks (cond-> {:nrepl nrepl-check
                          :http http-check
                          :caddy caddy-check
                          :tailwind tailwind-check

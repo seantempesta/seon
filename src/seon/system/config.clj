@@ -7,26 +7,14 @@
             [malli.error :as me]))
 
 (def schemas
-  "Component key -> Malli config schema."
-  {;; Datalevin Server
-   :seon.db.datalevin/server
-   [:map
-    [:port [:int {:min 1 :max 65535}]]
-    [:root :string]
-    [:opts {:optional true} [:map {:closed false}
-                             [:idle-timeout {:optional true} [:int {:min 0}]]]]]
-
-   ;; Connection Manager — :server is a resolved #ig/ref
-   :seon.db.datalevin/connections
-   [:map
-    [:server :any]]
-
-   ;; Runtime Database — :connection-manager is a resolved #ig/ref
-   :seon/runtime-db
-   [:map
-    [:connection-manager :any]]
-
-   ;; Schema Registry — empty map, no required keys
+  "Component key -> Malli config schema.
+   M-1 (2026-05-15): the legacy `:seon.db.datalevin/server`,
+   `:seon.db.datalevin/connections`, and `:seon/runtime-db` schemas were
+   removed — their Integrant keys are absent from system.edn. The
+   `:seon.flow/pool` schema dropped its `:datalevin-server` field; the
+   `:seon.graph/scanner` schema was removed entirely (defmethods deleted
+   in `seon.system`)."
+  {;; Schema Registry — empty map, no required keys
    :seon.schema/registry
    [:map]
 
@@ -63,7 +51,6 @@
    [:map
     [:size {:optional true} [:int {:min 0}]]
     [:base-port {:optional true} [:int {:min 1 :max 65535}]]
-    [:datalevin-server {:optional true} :any]
     [:enabled? {:optional true} :boolean]]
 
    ;; Orchestrator Sessions
@@ -71,13 +58,6 @@
    [:map
     [:connection-manager {:optional true} :any]
     [:pool :any]]
-
-   ;; Code Scanner
-   :seon.graph/scanner
-   [:map
-    [:graph-db {:optional true} :any]
-    [:paths [:vector :string]]
-    [:enabled? {:optional true} :boolean]]
 
    ;; Claude Code SDK
    :seon.ai.claude/sdk
