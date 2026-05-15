@@ -442,16 +442,20 @@ This is the load-bearing piece for session-resume semantics in spec-01 (Decision
 
 A deeper architecture direction than the cluster-cleanup forward decisions above. Captured because the renderer redesign turned out to be one piece of a larger agent-runtime model.
 
-### Renderer redesign — revised (supersedes parts of `renderer-redesign-proposal.md`)
+### Renderer redesign — Path D resolved (full details in `renderer-redesign-proposal.md`)
 
-After the initial proposal landed (commit f80cd6e), Sean revised:
+After the initial proposal (commit f80cd6e), Sean's follow-up direction and the Malli-defaults research (`malli-defaults-research.md`, commit 0bb5936) converged on a clean answer. Full details + revised phasing in commit 1cece5a of the proposal. Headline decisions:
 
-- **Drop `:seon.render/default` kwarg entirely.** Unclear what it's the default *for*.
-- **`:seon.render/ai` and `:seon.render/html` are map keys**, not metadata. Maps survive datahike serialization; metadata does not. Map-in/map-out is the rule across seon — these keys obey it.
-- **Spec the values.** `:seon.render/ai` → `:string` (the rendered text the agent sees). `:seon.render/html` → a `:seon.render/hiccup` schema that passes html safety checks (Malli schema TBD). The values are the RENDERED OUTPUTS, not function pointers — what flows through the system is the post-render representation.
-- **Defaults via Malli's native default mechanism** (research in flight: `docs/prds/datahike-migration/malli-defaults-research.md`). The entity schema declares: "if `:seon.render/ai` is absent, call this fn on the data and use its output." The default-fn pointer lives in Malli map-entry properties, not as a `register!` kwarg.
-- **Don't auto-render eval results by default.** Save them, let the agent query, render explicitly when the agent asks. Always-on rendering is noisy; the agent's REPL history is already auto-saved (`:r-NNNN` in `user/repl-orchestrator`) — that's the queryable substrate.
-- **Surface "fns that can process this shape"** remains a goal, but as lightweight metadata next to results, not auto-rendered content. The default behavior is to save the result + hint at applicable processors; the agent calls them explicitly.
+- **`schema/register!` stays single-arity.** No new API.
+- **Path D: polymorphic value-types** for the render keys. `:seon.render/ai` is `[:or :string :symbol]`; `:seon.render/html` is `[:or :seon.render/hiccup :symbol]`. Map-key surface only (no metadata path). Schema's stock Malli `:default` is a symbol pointing at the render fn.
+- **Boundary algorithm** (stock Malli, no seon-side transformer): `(m/decode schema entity (mt/default-value-transformer))` fills missing keys with the default symbol; the boundary inspects the value — string/hiccup → use directly; symbol → `requiring-resolve` + call with the entity.
+- **Inline shorthand for agent → user messages**: agent transacts a message map with a symbol at `:seon.render/html` pointing at the renderer of their choice. The transaction listener (event-sourcing model below) picks it up, the boundary resolves, the user sees the HTML fragment.
+- **`:seon.render/hiccup` is a global registration** of the existing schema at `seon.web.reactive.transform:33-40`. Local def becomes a re-export. One source of truth for Datastar-safe hiccup.
+- **HUD = single `:seon.session/hud-renderer` symbol** + `:seon.session/widgets` vector. Default ships; agent overrides via `(seon.session/set-hud-renderer!)`. Same machinery serves the agent's REPL AND the user's browser view.
+- **Suggest-on-nil always-on with per-session toggle** to silence. Matches "default harness should be surfacing relevant fns."
+- **Resolver**: `requiring-resolve` (CLJ); CLJS substrate will bundle the CLJS compiler into the agent pool (precompiled into the pool image to amortize startup). No sci.
+- **R0 cluster-2 scope shrunk dramatically.** Only delete actively-broken datalevin-dependent paths in `seon.render` (~40–80 lines). Auto-discovery / specificity-sort / namespace-proximity stay dormant. Sean: "let's prune at the end once we have a working system." Original 250-line deletion deferred to a post-MVP prune pass.
+- **REPL eval auto-persist** (proposal §K): every result transacted to datahike with warn-on-unserializable. Enables time-travel debug, session resume from any timestamp, long-lived specialized agents (archival, maintenance). Rides on the event-sourcing architecture below; lands after cluster 4 + `:seon.runtime`/`:seon.ai` migrations.
 
 ### Everything-through-the-database + transaction-listener-driven reactions
 
