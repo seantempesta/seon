@@ -5,10 +5,7 @@
 ;; Format: {child-key [parent-key ...]}
 ;; Loaded automatically by (ig/load-hierarchy).
 
-{:seon.db.datalevin/server      [:seon/component]
- :seon.db.datalevin/connections  [:seon/component]
- :seon/runtime-db                [:seon/component]
- :seon.schema/registry           [:seon/component]
+{:seon.schema/registry           [:seon/component]
  :seon.db.schema/consistency-check [:seon/component]
  :seon.dev/nrepl                 [:seon/component]
  :seon.web.server/http-server    [:seon/component]

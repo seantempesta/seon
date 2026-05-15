@@ -193,22 +193,19 @@
 ;;; ---------------------------------------------------------------------------
 ;;; Infrastructure Flow Component
 ;;; ---------------------------------------------------------------------------
-;;; Starts the infrastructure flow (writer + reply-router + sinks) at boot.
-;;; The writer handles ALL database writes via the connection manager.
-;;; Namespace flows are NOT part of this — they're created lazily later.
+;;; Starts the infrastructure flow (reply-router + sinks + REPL eval + status)
+;;; at boot. Namespace flows are NOT part of this — they're created lazily
+;;; later. Database writes are owned by per-namespace conn-processes in
+;;; `:seon.db/flow`; the legacy datalevin writer/reader path was removed in
+;;; chunk M-2.
 
 (defmethod ig/init-key :seon.flow/infrastructure
-  [_ {:keys [connection-manager]}]
+  [_ _opts]
   (log/info "Starting infrastructure flow...")
-  ;; Bind direct-mode + conn-manager so register-flow! -> persist-instance!
-  ;; can resolve connections during init-key (Integrant system may be nil).
-  (binding [db/*direct-mode* true
-            db/*conn-manager* connection-manager]
-    (let [result (topology/build-infrastructure!
-                  {::topology/connection-manager connection-manager})]
-      (log/info "Infrastructure flow started"
-                {:flow-id (::topology/flow-id result)})
-      result)))
+  (let [result (topology/build-infrastructure! {})]
+    (log/info "Infrastructure flow started"
+              {:flow-id (::topology/flow-id result)})
+    result))
 
 (defmethod ig/halt-key! :seon.flow/infrastructure
   [_ state]

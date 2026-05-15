@@ -12,14 +12,6 @@
   (:require [clojure.core.async :as async]
             [clojure.core.async.flow :as flow]
             [clojure.string :as str]
-            ;; Legacy datalevin writer/reader retained behind the dl? branch
-            ;; below so seon.flow.infrastructure-test (which tests the writer
-            ;; pipeline directly) stays green. Boot-time configuration in
-            ;; system.edn supplies a nil connection-manager so the dl? branch
-            ;; never fires on the current boot. M-2 deletes both the writer
-            ;; namespaces and the test file together.
-            [seon.db.datalevin.reader :as reader]
-            [seon.db.datalevin.writer :as writer]
             [seon.flow.harness :as harness]
             [seon.flow.msg :as msg]
             [seon.flow.pool :as pool]
@@ -604,69 +596,40 @@
   "Build and start the infrastructure flow.
 
    The infrastructure flow handles cross-cutting concerns that are shared
-   across all namespace flows: database writes, REPL eval, and reply routing.
+   across all namespace flows: REPL eval, status collection, and reply
+   routing. Database writes are owned by the per-namespace conn-processes
+   in `:seon.db/flow` since the datalevin substrate was removed in M-2.
 
    Processes:
-     :seon.flow/writer       - infra-writer-step (multi-DB; legacy datalevin,
-                               only built when a connection-manager is supplied)
-     :seon.flow/reader       - infra-reader-step (legacy datalevin; gated on
-                               connection-manager presence)
      :seon.flow/repl          - repl-step (nREPL eval via pool)
-     :seon.flow/reply-router - reply-router-step (delivers promises)
-     :seon.flow/event-sink   - event-sink-step (observability)
-     :seon.flow/error-sink   - error-sink-step (error accumulation)
+     :seon.flow/reply-router  - reply-router-step (delivers promises)
+     :seon.flow/event-sink    - event-sink-step (observability)
+     :seon.flow/error-sink    - error-sink-step (error accumulation)
      :seon.flow/status-collector - status/collector-step
 
    Connections:
      repl reply    -> reply-router
      repl error    -> error-sink
      status-collector reply -> reply-router
-     (writer/reader reply+error wired the same way when dl? is true)
-
-   Request keys:
-     ::connection-manager - Optional legacy datalevin connection manager.
-       When nil (the current boot configuration), :seon.flow/writer and
-       :seon.flow/reader are not built and their connections are skipped.
-       Retained for seon.flow.infrastructure-test until chunk M-2 deletes the
-       writer/reader namespaces and the matching test file.
 
    Returns:
      {::flow fl ::flow-id :seon.flow/infrastructure}"
-  [{::keys [connection-manager]}]
+  [_]
   (let [flow-id :seon.flow/infrastructure
-        dl?  (some? connection-manager)
-        procs (cond-> {:seon.flow/repl             {:proc (flow/process #'repl-step)}
-                       :seon.flow/reply-router     {:proc (flow/process #'reply-router-step)}
-                       :seon.flow/event-sink       {:proc (flow/process #'event-sink-step)}
-                       :seon.flow/error-sink       {:proc (flow/process #'error-sink-step)}
-                       :seon.flow/status-collector {:proc (flow/process #'status/collector-step)}}
-                dl? (assoc :seon.flow/writer
-                           {:proc (flow/process #'writer/infra-writer-step)
-                            :args {::writer/connection-manager connection-manager}}
-                           :seon.flow/reader
-                           {:proc (flow/process #'reader/infra-reader-step)
-                            :args {::reader/connection-manager connection-manager}}))
-        conns (cond-> [;; repl reply -> reply-router
-                       [[:seon.flow/repl :seon.flow.out/reply]
-                        [:seon.flow/reply-router :seon.flow.in/reply]]
-                       ;; repl error -> error-sink
-                       [[:seon.flow/repl :seon.flow.out/error]
-                        [:seon.flow/error-sink :seon.flow.out/error]]
-                       ;; status-collector reply -> reply-router
-                       [[:seon.flow/status-collector :seon.flow.out/reply]
-                        [:seon.flow/reply-router :seon.flow.in/reply]]]
-                dl? (into [;; writer reply -> reply-router
-                           [[:seon.flow/writer :seon.flow.out/reply]
-                            [:seon.flow/reply-router :seon.flow.in/reply]]
-                           ;; writer error -> error-sink
-                           [[:seon.flow/writer :seon.flow.out/error]
-                            [:seon.flow/error-sink :seon.flow.out/error]]
-                           ;; reader reply -> reply-router
-                           [[:seon.flow/reader :seon.flow.out/reply]
-                            [:seon.flow/reply-router :seon.flow.in/reply]]
-                           ;; reader error -> error-sink
-                           [[:seon.flow/reader :seon.flow.out/error]
-                            [:seon.flow/error-sink :seon.flow.out/error]]]))
+        procs {:seon.flow/repl             {:proc (flow/process #'repl-step)}
+               :seon.flow/reply-router     {:proc (flow/process #'reply-router-step)}
+               :seon.flow/event-sink       {:proc (flow/process #'event-sink-step)}
+               :seon.flow/error-sink       {:proc (flow/process #'error-sink-step)}
+               :seon.flow/status-collector {:proc (flow/process #'status/collector-step)}}
+        conns [;; repl reply -> reply-router
+               [[:seon.flow/repl :seon.flow.out/reply]
+                [:seon.flow/reply-router :seon.flow.in/reply]]
+               ;; repl error -> error-sink
+               [[:seon.flow/repl :seon.flow.out/error]
+                [:seon.flow/error-sink :seon.flow.out/error]]
+               ;; status-collector reply -> reply-router
+               [[:seon.flow/status-collector :seon.flow.out/reply]
+                [:seon.flow/reply-router :seon.flow.in/reply]]]
         config {:procs procs :conns conns}
         fl (flow/create-flow config)
         chans (flow/start fl)]
