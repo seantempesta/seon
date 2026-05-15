@@ -438,6 +438,85 @@ Implementation lands AFTER cluster 4 (so the datahike flow is the only persisten
 
 This is the load-bearing piece for session-resume semantics in spec-01 (Decision 27 / "Demo Target step 4"). Worth getting right.
 
+## Forward decisions (recorded 2026-05-15)
+
+A deeper architecture direction than the cluster-cleanup forward decisions above. Captured because the renderer redesign turned out to be one piece of a larger agent-runtime model.
+
+### Renderer redesign — revised (supersedes parts of `renderer-redesign-proposal.md`)
+
+After the initial proposal landed (commit f80cd6e), Sean revised:
+
+- **Drop `:seon.render/default` kwarg entirely.** Unclear what it's the default *for*.
+- **`:seon.render/ai` and `:seon.render/html` are map keys**, not metadata. Maps survive datahike serialization; metadata does not. Map-in/map-out is the rule across seon — these keys obey it.
+- **Spec the values.** `:seon.render/ai` → `:string` (the rendered text the agent sees). `:seon.render/html` → a `:seon.render/hiccup` schema that passes html safety checks (Malli schema TBD). The values are the RENDERED OUTPUTS, not function pointers — what flows through the system is the post-render representation.
+- **Defaults via Malli's native default mechanism** (research in flight: `docs/prds/datahike-migration/malli-defaults-research.md`). The entity schema declares: "if `:seon.render/ai` is absent, call this fn on the data and use its output." The default-fn pointer lives in Malli map-entry properties, not as a `register!` kwarg.
+- **Don't auto-render eval results by default.** Save them, let the agent query, render explicitly when the agent asks. Always-on rendering is noisy; the agent's REPL history is already auto-saved (`:r-NNNN` in `user/repl-orchestrator`) — that's the queryable substrate.
+- **Surface "fns that can process this shape"** remains a goal, but as lightweight metadata next to results, not auto-rendered content. The default behavior is to save the result + hint at applicable processors; the agent calls them explicitly.
+
+### Everything-through-the-database + transaction-listener-driven reactions
+
+> "I want everything that affects the system to be committed to the database and for transaction listeners to explicitly show the reactions. So an ai agent receiving a message from the user it's going to be committed as a message that's spec'ed as a user message and we want to have an efficient listener to the transaction log that's looking for that and then engaging the agent loop to respond to it. Everything should be built around adding/updating/deleting data from the database and the reactions that follow for emergent behaviors."
+
+This is an event-sourcing model with datahike as the event log:
+
+- **User input → datahike entity** (`:seon.user-message` or similar, conforming to a registered schema).
+- **Transaction listener detects new entity** → fires the agent loop.
+- **Agent emits response → datahike entity** (`:seon.agent-message` or similar).
+- **Another listener detects → emits update to user** (SSE, MCP, whatever the surface is).
+- **All reactions are explicit listeners**, registered by name. The agent can read the listener fn definitions and understand what's happening in their flow.
+
+`seon.db.datahike.flow/tx-bus` (already exists per `prd.md` §Topology) is the substrate. The new work is the convention layer: which entity schemas trigger which agent-loop behavior, and how listeners register declaratively.
+
+Implication: the renderer's job extends — when an agent-message hits the boundary heading *to the user*, the same render mechanism (`:seon.render/html` fragments via SSE) is how the user sees the agent's output. Same machinery, two surfaces (agent's REPL, user's browser).
+
+Implementation phasing: lands AFTER the datalevin removal (cluster 2/3/4) and the `:seon.runtime` / `:seon.ai` migrations, because it depends on every relevant namespace being on the datahike flow.
+
+### Auto-saved REPL results — the queryable agent log
+
+> "I like how every value that comes back is auto saved and the agent can query it. I think that's a feature of a real repl... One example is when you run tests the test report is huge and if you grep for something and it's not there you end up running it again and again which is wasteful. I want to save everything for the agent to easily reference and they can modify the render functions for the data and recall it and it'll be rendered exactly as they want."
+
+The existing `:r-NNNN` keys in `user/repl-orchestrator` (auto-saved every eval) are the seed of this feature. Direction for extension:
+
+- **Persist across sessions** — saved results live in the agent's `:seon.session` (or `:seon.session.repl`) entity, not just an in-memory atom that dies on JVM restart.
+- **Indexed for query** — agent can ask "find me the result from test-run that mentioned X" without re-running.
+- **Renderable on recall** — the agent can attach a render fn to a saved result; subsequent `(deref :r-NNNN)` displays it that way.
+- **Lifecycle controls** — agent decides what to keep, what to GC. (Default: ring buffer of last N? Compress on write? Open question.)
+
+This is part of the broader "ctx is the agent's customizable workspace" model. Auto-saved results aren't separate from ctx; they're ctx entries the agent can elevate to widgets.
+
+### HUD = render fn over the database
+
+> "The hud is just a render function on the database that the agent can customize by overwriting the default one we setup for it."
+
+Per-agent HUD model (replaces the prior `:seon.session/render-overrides` map proposal):
+
+- Each agent has a `:seon.session/hud-renderer` attr: a qualified-symbol pointer to a render fn.
+- Default ships with seon; agent overrides by `(seon.session/set-hud-renderer! 'my.ns/my-hud)`.
+- The HUD renderer takes the agent's session/ctx + the world DB and produces whatever the agent wants to see — typically a hiccup structure that becomes the HTML fragment the user sees AND/OR an `:ai`-rendered string the agent's own REPL displays.
+- "Attaching widgets to the HUD" = the agent stores fn pointers in their ctx; the HUD render fn pulls them and includes their output. Fns with declared args (per seon's existing schema reg) become first-class data tools the agent can call from anywhere.
+
+### Agent context = datahike entity; specialized agents; multi-agent
+
+> "Different agent sessions would just be different entity's with different kv pairs of attributes and values — therefore different views into the system. You can have specialized agents for anything and we want a way for the agents to launch other agents and to get data back in terms of listening to the transaction log for their updates."
+
+The substrate model from spec-01 sharpened:
+
+- An "agent" is a `:seon.session` (or `:seon.agent`) entity. Identity is the entity-id; behavior is determined by which attrs/values are populated.
+- Specialized agents are just session entities with specialized ctx attrs (e.g., `:seon.session/role :test-runner` or whatever the convention becomes).
+- Parent-child agent spawning: a parent agent transacts a new `:seon.session` entity → a "session-spawned" transaction-listener boots that agent's runtime. The parent listens to the child's transaction log entries (the child's writes are all in the same database; the parent's listener filters by session-id).
+- Data flows from child to parent via the transaction log, not via direct return values. Every "result" is a transacted entity the parent can listen for.
+
+This is the agent fleet model. The renderer + ctx + transaction-listener pieces all serve it.
+
+### Open architecture questions (next round)
+
+- **Listener registration convention.** Where does "this listener handles `:seon.user-message`" live? In a registry? As metadata on the entity schema? Per-session subscriptions? Need to design before transaction-listener-driven reactions can be implemented.
+- **Result auto-save semantics.** Every result, or opt-in (some are huge)? Compression? GC? Cross-session-id retention?
+- **HUD rendering frequency.** On every change, on agent-explicit refresh, on a debounce? Wire to SSE for browser updates.
+- **Agent-spawning API.** Datahike transact creates the entity; what bootstraps the child's runtime? Integrant component-per-session? A pool?
+
+These are all post-cluster-4 work but worth recording now so the design space stays visible.
+
 ## Resolved during Stage 2.1 test migration (2026-05-14)
 
 Tracked here so the history of what's been fixed stays visible alongside what remains. Each "Resolved" entry quotes the original smell text and links to its fix commit.
