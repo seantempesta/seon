@@ -1,69 +1,52 @@
 {:deps {clj.native-image/clj.native-image
           {:git/url "https://github.com/taylorwood/clj.native-image.git"
            :sha "4604ae76855e09cdabc0a2ecc5a7de2cc5b775d6"}
-        ;; Published datahike via maven — avoids dragging in dev deps that
-        ;; the :local/root path brings (maven-core, jgit, closure-compiler,
-        ;; rhino, aws/s3, jackson, jsch — ~80 jars not needed at runtime).
-        io.replikativ/datahike {:mvn/version "0.7.1624"}}
+        ;; Published datahike from clojars; avoids :local/root dev-only deps.
+        io.replikativ/datahike {:mvn/version "0.7.1624"}
+        ;; Scans target/classes/ for AOT'd Clojure classes and registers them
+        ;; for --initialize-at-build-time via SVM Feature API.  Replaces blanket
+        ;; --initialize-at-build-time=clojure (which under svm-wasm trips on
+        ;; @Delete-method validation due to broader analysis).
+        com.github.clj-easy/graal-build-time {:mvn/version "1.0.5"}}
  :paths ["src"]
  :aliases
  {:native-image
-  ;; --tool:svm-wasm MUST be first.  Narrow init covers Clojure-ecosystem
-  ;; packages so analysis doesn't drag in @Delete'd SVM internals (blanket
-  ;; init trips on `@Delete methods should have a single callee` validation).
-  {:main-opts ["-m" "clj.native-image" "seon.podhost.libdatahike.spike"
+  ;; --tool:svm-wasm MUST be the FIRST native-image argument per Web Image
+  ;; docs.  Per the Web Image team's own demos (graalvm-demos/web-image/{javac,
+  ;; spring-shell}), the right philosophy under svm-wasm is to let WebImage's
+  ;; automatic feature registration handle initialization — NO blanket
+  ;; --initialize-at-build-time.  Past attempts at narrow-init whack-a-mole
+  ;; either trip on @Delete-method-callee assertions during universe building
+  ;; OR run cleanly but fail at runtime if -H:IncludeResources doesn't include
+  ;; .class files (Clojure's RT.load looks for clojure/core__init.class at
+  ;; runtime; without it, FileNotFoundException).
+  ;;
+  ;; The Guava stubs + jdk.unsupported reads patch the three GraalVM 25
+  ;; svm-wasm-guava.jar packaging defects we've found.
+  {:main-opts ["-m" "clj.native-image" "seon.podhost.libdatahike.wasm-shim"
                "--tool:svm-wasm"
+               "--features=clj_easy.graal_build_time.InitClojureClasses"
                "--no-fallback"
                "--emit" "build-report" "-Os"
                "-H:IncludeLocales=en"
-               "-H:IncludeResources='.*\\.properties$'"
+               ;; Include BOTH .properties (default Roman pattern) AND .class
+               ;; files so AOT-compiled Clojure namespaces are accessible to
+               ;; RT.load at runtime.
+               ;; Drop .clj/.cljc from resources — including them tempts the
+               ;; Clojure runtime to compile source at WASM runtime which SVM
+               ;; forbids (dynamic class definition).  Only .class and .properties.
+               "-H:IncludeResources=.*\\.(properties|class)$"
                "-H:Name=core"
                "-H:+AllowDeprecatedBuilderClassesOnImageClasspath"
-               ;; Build-time init for all Clojure ecosystem code
-               "--initialize-at-build-time=clojure"
-               "--initialize-at-build-time=datahike"
-               "--initialize-at-build-time=konserve"
-               "--initialize-at-build-time=hasch"
-               "--initialize-at-build-time=incognito"
-               "--initialize-at-build-time=datalog"
-               "--initialize-at-build-time=alphabase"
-               "--initialize-at-build-time=replikativ"
-               "--initialize-at-build-time=org.replikativ"
-               "--initialize-at-build-time=me.tonsky"
-               "--initialize-at-build-time=superv"
-               "--initialize-at-build-time=geheimnis"
-               "--initialize-at-build-time=malli"
-               "--initialize-at-build-time=jsonista"
-               "--initialize-at-build-time=spec_tools"
-               "--initialize-at-build-time=mvxcvi"
-               "--initialize-at-build-time=clj_cbor"
-               "--initialize-at-build-time=arrangement"
-               "--initialize-at-build-time=fipp"
-               "--initialize-at-build-time=cognitect"
-               "--initialize-at-build-time=borkdude"
-               "--initialize-at-build-time=dynaload"
-               "--initialize-at-build-time=edamame"
-               "--initialize-at-build-time=environ"
-               "--initialize-at-build-time=medley"
-               "--initialize-at-build-time=nrepl"
-               "--initialize-at-build-time=bencode"
-               "--initialize-at-build-time=babashka"
-               "--initialize-at-build-time=taoensso"
-               "--initialize-at-build-time=trove"
-               "--initialize-at-build-time=tigris"
-               "--initialize-at-build-time=fress"
-               "--initialize-at-build-time=simm"
-               "--initialize-at-build-time=partial_cps"
-               "--initialize-at-build-time=clj_commons"
-               "--initialize-at-build-time=clojure.tools"
-               "--initialize-at-build-time=seon"
-               ;; Patch the shadowed-Guava module — multiple packaging defects:
-               ;; (1) missing InternalFutureFailureAccess + InternalFutures classes
-               ;;     (stub-classes/ provides them via --patch-module)
-               ;; (2) module-info doesn't `requires jdk.unsupported` despite
-               ;;     using sun.misc.Unsafe internally (AbstractFutureState$UnsafeAtomicHelper)
+               ;; (Replaced by graal-build-time Feature above which scans
+               ;; target/classes/ and registers actual AOT'd Clojure classes
+               ;; for build-time init.  Blanket --initialize-at-build-time=clojure
+               ;; trips @Delete-method validation under svm-wasm.)
+               ;; Patch the shadowed-Guava module packaging defects:
+               ;; (1) Inject InternalFutureFailureAccess + InternalFutures
+               ;;     classes that are missing from svm-wasm-guava.jar.
+               ;; (2) Add jdk.unsupported reads for AbstractFutureState$UnsafeAtomicHelper.
                "-J--patch-module=org.graalvm.wrapped.google.guava=stub-classes"
-               "-J--add-reads=org.graalvm.wrapped.google.guava=jdk.unsupported"
-               "-march=native"]
+               "-J--add-reads=org.graalvm.wrapped.google.guava=jdk.unsupported"]
    :jvm-opts ["-Dclojure.compiler.direct-linking=true"
               "-Dclojure.spec.skip-macros=true"]}}}
