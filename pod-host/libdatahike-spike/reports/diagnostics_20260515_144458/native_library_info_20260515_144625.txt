@@ -1,3 +1,0 @@
-Static libraries:
-   ../../../../../reference/graalvm-25e1-ea/Contents/Home/lib/svm/clibraries/darwin-aarch64/liblibchelper.a
-Other libraries: 

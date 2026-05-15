@@ -1,8 +1,0 @@
-Building image for target platform: com.oracle.svm.webimage.platform.WebImageWasmGCPlatform
-Using native toolchain:
-   Name: LLVM (clang)
-   Vendor: apple
-   Version: 17.0.0
-   Target architecture: arm64
-   Path: /usr/bin/cc
-Using CLibrary: com.oracle.svm.core.c.libc.NoLibC
