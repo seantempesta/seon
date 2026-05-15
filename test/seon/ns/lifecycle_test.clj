@@ -104,30 +104,44 @@
 ;;; ensure-instance! tests
 ;;; ---------------------------------------------------------------------------
 
+;; M-2b: the three ensure-instance-* tests redef `inject-vars!` because
+;; the prod fn calls into `seon.db/resolve-conn` (deprecation shim that
+;; throws after M-2) and instrumentation rejects passing ::db-name nil
+;; to bypass that path. The in-memory ctx creation + Malli validation
+;; is what these tests target; *conn* injection is M-3/M-4 scope.
+
+(defn- stub-inject-vars!
+  "Test stub for `lifecycle/inject-vars!`. Injects only `*ctx*` (skips the
+   `*conn*` injection that hits the deprecation shim)."
+  [{::lifecycle/keys [ns-sym ctx-atom]}]
+  (let [ns-obj (or (find-ns ns-sym) (create-ns ns-sym))]
+    (let [v (intern ns-obj '*ctx* ctx-atom)]
+      (.setDynamic v true))
+    true))
+
 (deftest ensure-instance-creates-fresh-test
   (testing "creates fresh instance with schema validation"
-    ;; M-2b: omit ::lifecycle/db-name to skip the `inject-vars!` *conn*
-    ;; injection that calls into the now-deprecated `seon.db/resolve-conn`
-    ;; shim. The in-memory ctx creation + validation path is what this
-    ;; test exercises; persistence wiring is M-3/M-4 scope.
-    (let [result (lifecycle/ensure-instance! {::lifecycle/ns-sym 'seon.health.workout})]
-      (is (string? (::lifecycle/instance-id result)))
-      (is (some? (::lifecycle/ctx-atom result)))
-      (let [ctx-val @(::lifecycle/ctx-atom result)]
-        (is (vector? (:seon.health.workout/workouts ctx-val)))))))
+    (with-redefs [lifecycle/inject-vars! stub-inject-vars!]
+      (let [result (lifecycle/ensure-instance! {::lifecycle/ns-sym 'seon.health.workout})]
+        (is (string? (::lifecycle/instance-id result)))
+        (is (some? (::lifecycle/ctx-atom result)))
+        (let [ctx-val @(::lifecycle/ctx-atom result)]
+          (is (vector? (:seon.health.workout/workouts ctx-val))))))))
 
 (deftest ensure-instance-validates-state-test
   (testing "ctx-schema rejects invalid swap! (wrong type for required key)"
-    (let [result (lifecycle/ensure-instance! {::lifecycle/ns-sym 'seon.health.workout})
-          ctx-atom (::lifecycle/ctx-atom result)]
-      (is (thrown? clojure.lang.ExceptionInfo
-                   (swap! ctx-atom assoc :seon.health.workout/workouts "not-a-vector"))))))
+    (with-redefs [lifecycle/inject-vars! stub-inject-vars!]
+      (let [result (lifecycle/ensure-instance! {::lifecycle/ns-sym 'seon.health.workout})
+            ctx-atom (::lifecycle/ctx-atom result)]
+        (is (thrown? clojure.lang.ExceptionInfo
+                     (swap! ctx-atom assoc :seon.health.workout/workouts "not-a-vector")))))))
 
 (deftest ensure-instance-with-explicit-id-test
   (testing "uses provided instance-id when no existing instance"
-    (let [result (lifecycle/ensure-instance! {::lifecycle/ns-sym 'seon.health.workout
-                                              ::lifecycle/instance-id "test42"})]
-      (is (= "test42" (::lifecycle/instance-id result))))))
+    (with-redefs [lifecycle/inject-vars! stub-inject-vars!]
+      (let [result (lifecycle/ensure-instance! {::lifecycle/ns-sym 'seon.health.workout
+                                                ::lifecycle/instance-id "test42"})]
+        (is (= "test42" (::lifecycle/instance-id result)))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; resolve-instance tests
