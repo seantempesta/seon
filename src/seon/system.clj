@@ -79,7 +79,7 @@
 ;;; Schema Consistency Check Component
 ;;; ---------------------------------------------------------------------------
 ;;; Validates all persisted entity schemas at boot. Catches :any, :some,
-;;; [:maybe X], mixed enums, and :nil before they reach Datalevin.
+;;; [:maybe X], mixed enums, and :nil before they reach the storage layer.
 ;;; Depends on :seon.schema/registry to ensure all modules are loaded.
 
 (defmethod ig/init-key :seon.db.schema/consistency-check
@@ -147,7 +147,9 @@
 ;;; ---------------------------------------------------------------------------
 ;;; Orchestrator Sessions Component
 ;;; ---------------------------------------------------------------------------
-;;; Initializes the orchestrator session system with the Datalevin connection manager.
+;;; Initializes the orchestrator session system. The legacy connection-manager
+;;; arg is retained on the init key for backwards compatibility; system.edn no
+;;; longer supplies it, and `init!` already ignored it.
 
 (defmethod ig/init-key :seon.orchestrator/sessions
   [_ {:keys [connection-manager pool]}]

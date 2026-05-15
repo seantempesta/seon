@@ -116,13 +116,14 @@
 ;;; Graph Connection Helper
 ;;; ---------------------------------------------------------------------------
 ;;;
-;;; The legacy `get-conn` helper returned a Datalevin runtime connection via
-;;; the dead `:seon.db.datalevin/connections` Integrant key. M-1 (2026-05-15)
-;;; deleted the fn + dl-conn require. Every previous callsite has been replaced
-;;; with `nil` so route handlers preserve their existing silently-degraded
-;;; behavior (the wrapped `(when-let [conn (get-conn)] ...)` branches were
-;;; already dead on the current boot). Restoring the affected routes is part
-;;; of the post-M-4 `:seon.runtime → datahike` migration.
+;;; The legacy `get-conn` helper returned a runtime DB connection via a
+;;; connection-manager Integrant key that no longer exists in system.edn.
+;;; M-1 (2026-05-15) deleted the fn + the legacy-conn require. Every previous
+;;; callsite has been replaced with `nil` so route handlers preserve their
+;;; existing silently-degraded behaviour (the wrapped
+;;; `(when-let [conn (get-conn)] ...)` branches were already dead on the
+;;; current boot). Restoring the affected routes is part of the post-M-4
+;;; `:seon.runtime → datahike` migration.
 
 ;;; ---------------------------------------------------------------------------
 ;;; Lifecycle Wrappers
@@ -767,7 +768,7 @@
           ;; Dynamic with instance -> serve instance page
           (and is-dynamic? instance-id (not= view "introspect"))
           (do
-            ;; Ensure instance exists (resume from Datalevin or create fresh)
+            ;; Ensure instance exists (resume from storage or create fresh)
             (lifecycle/ensure-instance! (cond-> {::lifecycle/ns-sym ns-sym
                                                   ::lifecycle/instance-id instance-id}
                                           conn (assoc ::lifecycle/db-name :seon.runtime)))

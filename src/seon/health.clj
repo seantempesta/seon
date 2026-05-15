@@ -126,11 +126,11 @@
     (:adopted? component) :adopted
     :else :started))
 
-;; datalevin-process-info + check-datalevin deleted in chunk M-1 (2026-05-15).
-;; The :seon.db.datalevin/server Integrant key was removed from system.edn,
-;; so check-datalevin always reported :not-running and flipped the system
-;; to :unhealthy on every boot. Datahike runs in-process per namespace and
-;; reports its health via :seon.db/flow; no separate datalevin probe needed.
+;; Legacy external-DB-process probes deleted in chunk M-1 (2026-05-15).
+;; The Integrant keys those probes targeted were removed from system.edn,
+;; so the check always reported :not-running and flipped the system to
+;; :unhealthy on every boot. Datahike runs in-process per namespace and
+;; reports its health via :seon.db/flow; no separate external probe needed.
 
 (defn- check-resources
   "Get current resource utilization."
@@ -245,13 +245,13 @@
    - :degraded - Some non-critical checks fail, or startup phase is degraded
    - :unhealthy - Critical checks fail
 
-   M-1 (2026-05-15): the :datalevin critical-key check was deleted along with
-   `check-datalevin`. The datahike flow runs in-process per namespace, so the
-   health story now derives entirely from :seon.db/flow + the other component
-   checks below. No critical-key check currently produces `:unhealthy`; the
-   gradient is `:healthy → :degraded` only. A future commit reinstates a
-   critical-key check (likely `:flow` reading the :seon.db/flow component
-   status) once the runtime/AI migrations expose a probe surface."
+   M-1 (2026-05-15): the legacy external-DB critical-key check was deleted.
+   The datahike flow runs in-process per namespace, so the health story now
+   derives entirely from :seon.db/flow + the other component checks below.
+   No critical-key check currently produces `:unhealthy`; the gradient is
+   `:healthy → :degraded` only. A future commit reinstates a critical-key
+   check (likely `:flow` reading the :seon.db/flow component status) once
+   the runtime/AI migrations expose a probe surface."
   [checks]
   (let [phase @startup-phase
         critical-keys []
@@ -277,9 +277,8 @@
    - Agent subsystem
    - Pool JVM status
 
-   M-1 (2026-05-15): the :datalevin check was deleted along with the legacy
-   external-process probe. Datahike runs in-process per namespace and reports
-   via :seon.db/flow.
+   M-1 (2026-05-15): the legacy external-DB check was deleted; datahike now
+   runs in-process per namespace and reports via :seon.db/flow.
 
    Request keys: (none)
 

@@ -49,15 +49,15 @@
 ;;; Resolution Cache
 ;;; ---------------------------------------------------------------------------
 ;;;
-;;; The renderer-lookup path went through a Datalevin conn-override under the
-;;; legacy storage substrate. That path was silently broken on the current boot
-;;; (no :seon.db.datalevin/connections in system.edn), so M-1 (2026-05-15)
-;;; deleted the `get-conn` / `*conn-override` aliases plus the dl-conn require.
-;;; `set-conn!` and `invalidate-render-cache!` survive as harmless no-ops to
-;;; keep legacy datalevin-coupled tests loadable until they migrate in M-2.
-;;; The lookup itself routes through `seon.db/query` via
-;;; `seon.graph.query/functions-with-output-key`, which is db-name-keyed and
-;;; doesn't need a conn argument.
+;;; The renderer-lookup path used to require a runtime-DB conn-override under
+;;; the legacy storage substrate. That path was silently broken on the current
+;;; boot (the connection-manager Integrant key is gone from system.edn), so
+;;; M-1 (2026-05-15) deleted the `get-conn` / `*conn-override` aliases plus the
+;;; legacy storage require. `set-conn!` and `invalidate-render-cache!` survive
+;;; as harmless no-ops so legacy tests that still call them stay loadable until
+;;; the larger M-2 cleanup. The lookup itself routes through `seon.db/query`
+;;; via `seon.graph.query/functions-with-output-key`, which is db-name-keyed
+;;; and doesn't need a conn argument.
 
 (defonce ^:private resolution-cache (atom {}))
 
@@ -69,9 +69,9 @@
   (gq/invalidate-output-key-cache!))
 
 (defn set-conn!
-  "Deprecated no-op kept for legacy datalevin-coupled tests.
+  "Deprecated no-op kept for legacy tests that still pass a conn override.
    The renderer lookup is db-name-keyed via `seon.graph.query` and no longer
-   takes a conn override. Will be removed alongside the datalevin test suite
+   takes a conn argument. Will be removed alongside the legacy test suite
    in chunk M-2."
   [_conn]
   (invalidate-render-cache!))
@@ -106,7 +106,7 @@
     (:seon/schema (meta value))))
 
 ;;; ---------------------------------------------------------------------------
-;;; Datalevin-Based Renderer Resolution
+;;; Code-Graph-Based Renderer Resolution
 ;;; ---------------------------------------------------------------------------
 
 (defn namespace-proximity
@@ -249,8 +249,8 @@
        (str (subs s 0 max-chars) "...")
        s))))
 
-(defn- resolve-renderer-from-datalevin
-  "Look up a render function from Datalevin, using cache.
+(defn- resolve-renderer-cached
+  "Look up a render function from the code graph, using cache.
    Returns the resolved var or ::no-renderer."
   [data format]
   (let [cache-key [format (set (keys data))]
@@ -268,11 +268,11 @@
           ;; Don't cache — let next call retry with a fresh conn.
           ::no-renderer)))))
 
-(defn- call-datalevin-renderer
-  "Try to render data via Datalevin-discovered render function.
+(defn- call-cached-renderer
+  "Try to render data via a code-graph-discovered render function.
    Returns rendered value for the format, or nil if no renderer found."
   [data format]
-  (let [resolved (resolve-renderer-from-datalevin data format)]
+  (let [resolved (resolve-renderer-cached data format)]
     (when (not= resolved ::no-renderer)
       (let [result (resolved data)
             format-key (case format :html :seon.render/html :ai :seon.render/ai)]
@@ -283,7 +283,7 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn try-render
-  "Try to render data using a registered Datalevin renderer.
+  "Try to render data using a registered code-graph renderer.
 
    Unlike `render`, this returns nil if no renderer is found instead of
    falling back to pprint. Use this when you want to know if a specific
@@ -301,7 +301,7 @@
      ;; => \"Squat 5x5 @ 100kg\" or nil"
   [data format]
   (when (and (map? data) (#{:html :ai} format))
-    (call-datalevin-renderer data format)))
+    (call-cached-renderer data format)))
 
 (defn has-renderer?
   "Check if a registered renderer exists for the given data and format.
@@ -318,7 +318,7 @@
      ;; => true"
   [data format]
   (when (and (map? data) (#{:html :ai} format))
-    (let [resolved (resolve-renderer-from-datalevin data format)]
+    (let [resolved (resolve-renderer-cached data format)]
       (not= resolved ::no-renderer))))
 
 ;;; ---------------------------------------------------------------------------
@@ -329,8 +329,8 @@
   "Render a value for a specific format.
 
    Dispatch:
-   1. If value has `:seon/schema` metadata, try Datalevin resolution for that schema
-   2. If value is a plain map, try Datalevin resolution by data keys
+   1. If value has `:seon/schema` metadata, try code-graph resolution for that schema
+   2. If value is a plain map, try code-graph resolution by data keys
    3. Fall back to format-appropriate default
 
    Arguments:
@@ -346,13 +346,13 @@
      (render pos :raw)        ; => {:ticker \"AAPL\" ...}
      (render pos :human)      ; => pretty-printed string"
   [value format]
-  (let [;; Try Datalevin resolution for maps
-        datalevin-result (when (and (map? value)
-                                    (#{:html :ai} format))
-                           (call-datalevin-renderer value format))]
+  (let [;; Try cached code-graph renderer resolution for maps
+        cached-result (when (and (map? value)
+                                 (#{:html :ai} format))
+                        (call-cached-renderer value format))]
     (cond
-      ;; Datalevin renderer found
-      datalevin-result datalevin-result
+      ;; Cached renderer found
+      cached-result cached-result
 
       ;; Raw format always returns the value
       (= format :raw) value
@@ -549,7 +549,7 @@
    Recursively renders nested structures, producing concise text output
    suitable for AI agents in nREPL sessions.
 
-   Typed values use Datalevin-resolved :ai renderers.
+   Typed values use code-graph-resolved :ai renderers.
    Collections are rendered with their contents.
    Primitives are converted to strings.
 
@@ -571,9 +571,9 @@
     (boolean? v) (str v)
     (symbol? v) (str v)
 
-    ;; Map - try Datalevin renderer first, then recurse
+    ;; Map - try code-graph renderer first, then recurse
     (map? v)
-    (let [ai-result (call-datalevin-renderer v :ai)]
+    (let [ai-result (call-cached-renderer v :ai)]
       (if ai-result
         ai-result
         (str "{"
@@ -607,7 +607,7 @@
    Maps render as definition-list tables.
    Vectors/seqs render as ordered lists.
    Primitives render as text spans.
-   If a map value has a Datalevin renderer, uses it.
+   If a map value has a code-graph renderer, uses it.
 
    Arguments:
      v - Any value
@@ -627,9 +627,9 @@
     (malli-schema? v)
     (render-schema v)
 
-    ;; Map - try Datalevin renderer first, then recurse as table
+    ;; Map - try code-graph renderer first, then recurse as table
     (map? v)
-    (let [html-result (call-datalevin-renderer v :html)]
+    (let [html-result (call-cached-renderer v :html)]
       (if html-result
         html-result
         [:table {:class "w-full text-sm"}
@@ -742,7 +742,7 @@
   "Main entry point for rendering a namespace.
 
    Takes a map with ::ns-data and ::format. Finds the best page renderer
-   via Datalevin. If found, calls it and extracts the format key from the
+   via the code graph. If found, calls it and extracts the format key from the
    result. If not found, uses default-namespace-render.
 
    Arguments:
