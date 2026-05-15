@@ -272,25 +272,11 @@
          (db-schema/malli-map->datalevin-schema agent-run-entity-schema)
          (db-schema/malli-map->datalevin-schema flow-snap-entity-schema)))
 
-;; Memoized schema computation - avoids re-computing on every connection call
-(def ^:private merged-schema-cache (atom nil))
-
-(defn runtime-merged-schema
-  "Merge the graph ingest schema with runtime schema.
-   Lazily resolves seon.graph.ingest/datalevin-schema to avoid circular deps.
-   Caches the result since the schema doesn't change at runtime."
-  []
-  (or @merged-schema-cache
-      (let [schema (do
-                     (require 'seon.graph.ingest)
-                     (require 'seon.ctx)
-                     (require 'seon.flow.trace)
-                     (merge @(resolve 'seon.graph.ingest/datalevin-schema)
-                            @(resolve 'seon.ctx/datalevin-schema)
-                            @(resolve 'seon.flow.trace/datalevin-schema)
-                            runtime-schema))]
-        (reset! merged-schema-cache schema)
-        schema)))
+;; runtime-merged-schema + merged-schema-cache deleted (chunk M-1, 2026-05-15).
+;; The aggregator was only consumed by :seon/runtime-db (Integrant key absent
+;; from system.edn — defmethods deleted), seon.render/get-conn (deleted), and
+;; seon.ns.routes/get-conn (deleted). Datahike-flow namespaces install schema
+;; from the Malli registry; no manual schema merge needed.
 
 ;;; ---------------------------------------------------------------------------
 ;;; Session ID Validation
@@ -1001,7 +987,6 @@
   (reset! registry-cache {})
   (reset! generated-ids #{})
   (reset! flow-handles {})
-  (reset! merged-schema-cache nil)
   {::reset true})
 
 ;;; ---------------------------------------------------------------------------

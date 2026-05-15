@@ -1,9 +1,9 @@
 (ns seon.render
-  "Multi-format rendering with Datalevin-based renderer resolution.
+  "Multi-format rendering with code-graph-based renderer resolution.
 
    Two dispatch paths:
    1. Metadata-based: Values with `:seon/schema` metadata use the typed dispatch
-   2. Datalevin-based: Plain data maps are matched to render functions by key shape
+   2. Code-graph-based: Plain data maps are matched to render functions by key shape
 
    Core concepts:
    - Values carry `:seon/schema` metadata identifying their type
@@ -28,9 +28,7 @@
             [clojure.set :as cset]
             [clojure.string :as str]
             [integrant.repl.state]
-            [seon.db.datalevin.conn :as dl-conn]
             [seon.graph.query :as gq]
-            [seon.runtime :as runtime]
             [seon.schema :as schema]
             [taoensso.timbre :as log])
   (:refer-clojure :exclude [format]))
@@ -48,26 +46,18 @@
                              [::format {:optional true} ::format]])
 
 ;;; ---------------------------------------------------------------------------
-;;; Datalevin Connection
-;;; ---------------------------------------------------------------------------
-
-(defonce ^:private *conn-override (atom nil))
-
-(defn- get-conn
-  "Get Datalevin connection. Checks override first (for tests),
-   then gets from connection manager (handles staleness/auto-reconnect)."
-  []
-  (or @*conn-override
-      (when-let [mgr (:seon.db.datalevin/connections integrant.repl.state/system)]
-        (try
-          (dl-conn/get-conn! {::dl-conn/manager mgr
-                             ::dl-conn/db :seon.runtime
-                             ::dl-conn/schema (runtime/runtime-merged-schema)})
-          (catch Exception _ nil)))))
-
-;;; ---------------------------------------------------------------------------
 ;;; Resolution Cache
 ;;; ---------------------------------------------------------------------------
+;;;
+;;; The renderer-lookup path went through a Datalevin conn-override under the
+;;; legacy storage substrate. That path was silently broken on the current boot
+;;; (no :seon.db.datalevin/connections in system.edn), so M-1 (2026-05-15)
+;;; deleted the `get-conn` / `*conn-override` aliases plus the dl-conn require.
+;;; `set-conn!` and `invalidate-render-cache!` survive as harmless no-ops to
+;;; keep legacy datalevin-coupled tests loadable until they migrate in M-2.
+;;; The lookup itself routes through `seon.db/query` via
+;;; `seon.graph.query/functions-with-output-key`, which is db-name-keyed and
+;;; doesn't need a conn argument.
 
 (defonce ^:private resolution-cache (atom {}))
 
@@ -79,10 +69,11 @@
   (gq/invalidate-output-key-cache!))
 
 (defn set-conn!
-  "Override the Datalevin connection for renderer resolution.
-   Invalidates the render cache. Use only in tests."
-  [conn]
-  (reset! *conn-override conn)
+  "Deprecated no-op kept for legacy datalevin-coupled tests.
+   The renderer lookup is db-name-keyed via `seon.graph.query` and no longer
+   takes a conn override. Will be removed alongside the datalevin test suite
+   in chunk M-2."
+  [_conn]
   (invalidate-render-cache!))
 
 ;;; ---------------------------------------------------------------------------
