@@ -1,0 +1,28 @@
+{:deps {org.graalvm.polyglot/polyglot {:mvn/version "24.2.1"}
+        clj.native-image/clj.native-image
+          {:git/url "https://github.com/taylorwood/clj.native-image.git"
+           :sha "4604ae76855e09cdabc0a2ecc5a7de2cc5b775d6"}
+        ;; Datahike from local clone (the wasm-spike branch with bb ni-wasm)
+        org.replikativ/datahike {:local/root "/Users/you/src/your-project/reference/datahike"}}
+ :paths ["src"]
+ :aliases
+ {:native-image
+  ;; --tool:svm-wasm MUST be first per Web Image docs.
+  ;; Narrow --initialize-at-build-time to Clojure runtime essentials only —
+  ;; blanket init causes analysis to touch all class paths, tripping on
+  ;; SVM-internal monitor code (JavaMonitorQueuedSynchronizer.parkAndCheckInterrupt)
+  ;; that datahike's core.async writer reaches indirectly.
+  {:main-opts ["-m" "clj.native-image" "core"
+               "--tool:svm-wasm"
+               "--no-fallback"
+               "--emit" "build-report" "-Os"
+               "-H:IncludeLocales=en"
+               "-H:IncludeResources='.*\\.properties$'"
+               "-H:Name=core"
+               "-H:+AllowDeprecatedBuilderClassesOnImageClasspath"
+               ;; Patch the shadowed-Guava module with the missing
+               ;; InternalFutureFailureAccess class (GraalVM 25 svm-wasm packaging bug)
+               "-J--patch-module=org.graalvm.wrapped.google.guava=stub-classes"
+               "-march=native"]
+   :jvm-opts ["-Dclojure.compiler.direct-linking=true"
+              "-Dclojure.spec.skip-macros=true"]}}}
