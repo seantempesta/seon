@@ -49,9 +49,14 @@
   :output "resources/public/css/output.css"}
 
  ;; Infrastructure Flow (reply-router + REPL eval + sinks)
- ;; Datalevin writer/reader are skipped when no connection-manager is provided
- ;; (datalevin is disabled). The flow still hosts the REPL eval process and
- ;; reply-router, which other flows depend on.
+ ;; M-3a note (2026-05-15): `seon.flow/infrastructure`'s init body calls
+ ;; `runtime/register!` which writes to `:seon.runtime` via `seon.db`.
+ ;; Adding `:db-flow #ig/ref :seon.db/flow` here would enforce ordering
+ ;; but broke `(user/reset)`'s halt-then-resume cycle (the halt fired
+ ;; while the new flow was being built). Single one-shot race warn
+ ;; during reset only — not the per-test warn-spam smell #17. Defer
+ ;; the proper dep-ordering refactor (likely a fixup in halt-key!) to
+ ;; M-3b or its own cleanup chunk.
  :seon.flow/infrastructure
  {}
 
@@ -104,17 +109,27 @@
  ;; dispatch layer has something real to route to. New domain namespaces
  ;; are added here as they migrate.
  :seon.db/flow
- ;; Phase 3 step 1: only the new DBs (session, repl, flow, orchestrator) are
- ;; in the flow alongside the phase-2 demo fixture. `:seon.runtime` belongs
- ;; in this list per the PRD's per-namespace DB table, but adding it here
- ;; without also rerouting the graph/runtime data writes (later Phase 3
- ;; steps) regresses ~111 tests that depend on the populated datalevin
- ;; runtime DB. The :namespace-schemas entry stays so the schema is ready
- ;; to install the moment :seon.runtime is added to :namespaces.
+ ;; M-3a (2026-05-15): `:seon.runtime` joins the flow. Source already routes
+ ;; `seon.runtime/register!` + `start-agent-run!` + `snapshot-topology!`
+ ;; through `seon.db/transact! :seon.runtime`; this entry registers the
+ ;; namespace + its schema with the conn-process. Eliminates remaining.md
+ ;; smell #17 (the "Connection manager not available" warn-spam from
+ ;; `seon.runtime/register!`). The legacy datalevin runtime DB the prior
+ ;; comment referenced was deleted in M-2 — no test regressions.
+ ;;
+ ;; The schema below unions `:seon.runtime/*` (instance registry),
+ ;; `:seon.agent.run/*` (agent run lifecycle), and `:seon.flow.snap/*`
+ ;; (topology snapshots) — all three sets of attrs currently write to
+ ;; this db-name in production (see runtime.clj l.366, 512, 568, 713,
+ ;; 745, 843).
+ ;;
+ ;; `:seon.ai` is the M-3b deliverable; see deferred.md §"seon.ai.claude
+ ;; + seon.ai requiring-resolve stubs".
  {:namespaces [:seon.session
                :seon.repl
                :seon.flow
                :seon.orchestrator
+               :seon.runtime
                :seon.phase2.demo]
   :backend #profile {:dev :memory
                      :test :memory
@@ -126,6 +141,7 @@
   ;; have run by then.
   :namespace-schemas
   {:seon.runtime      [:map
+                       ;; Runtime instance registry (seon.runtime/register!, unregister!)
                        [:seon.runtime/namespace :seon.runtime/namespace]
                        [:seon.runtime/status [:enum :running :stopped :crashed :paused]]
                        [:seon.runtime/location [:enum :in-process :external]]
@@ -133,7 +149,25 @@
                        [:seon.runtime/nrepl-port {:optional true} :int]
                        [:seon.runtime/started-at {:optional true} :inst]
                        [:seon.runtime/stopped-at {:optional true} :inst]
-                       [:seon.runtime/component-key {:optional true} :keyword]]
+                       [:seon.runtime/component-key {:optional true} :keyword]
+                       ;; Agent run lifecycle (seon.runtime/start-agent-run!,
+                       ;; complete-agent-run!)
+                       [:seon.agent.run/id :seon.agent.run/id]
+                       [:seon.agent.run/runtime {:optional true} :seon.db/ref]
+                       [:seon.agent.run/provider {:optional true} :keyword]
+                       [:seon.agent.run/status {:optional true} :keyword]
+                       [:seon.agent.run/started-at {:optional true} :inst]
+                       [:seon.agent.run/stopped-at {:optional true} :inst]
+                       [:seon.agent.run/cost-usd {:optional true} :double]
+                       [:seon.agent.run/num-turns {:optional true} :int]
+                       [:seon.agent.run/duration-ms {:optional true} :int]
+                       [:seon.agent.run/namespace {:optional true} :string]
+                       ;; Topology snapshots (seon.runtime/snapshot-topology!)
+                       [:seon.flow.snap/id :seon.flow.snap/id]
+                       [:seon.flow.snap/label {:optional true} :string]
+                       [:seon.flow.snap/created-at {:optional true} :inst]
+                       [:seon.flow.snap/reason {:optional true} :keyword]
+                       [:seon.flow.snap/data {:optional true} :string]]
    :seon.session      [:map
                        [:seon.session/agent :seon.session/agent]
                        [:seon.session/namespace :seon.session/namespace]
