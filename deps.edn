@@ -23,7 +23,7 @@
         ;; Utilities
         aero/aero {:mvn/version "1.1.6"}           ; Config
         com.taoensso/timbre {:mvn/version "6.5.0"} ; Logging (app code)
-        ch.qos.logback/logback-classic {:mvn/version "1.5.6"} ; SLF4J provider for Datalevin
+        ch.qos.logback/logback-classic {:mvn/version "1.5.6"} ; SLF4J provider
         tick/tick {:mvn/version "0.7.5"}           ; Time handling
 
         ;; HTTP & JSON
@@ -32,6 +32,9 @@
 
         ;; HTTP Server (2.9.0-beta2+ required for SSE)
         http-kit/http-kit {:mvn/version "2.9.0-beta2"}
+
+        ;; Fast serialization (used by seon.db.relay + seon.flow.harness)
+        com.taoensso/nippy {:mvn/version "3.4.2"}
 
         ;; HTML templating (compile-time Hiccup)
         dev.onionpancakes/chassis {:mvn/version "1.0.365"}
@@ -76,11 +79,8 @@
                      com.aayushatharva.brotli4j/native-osx-x86_64 {:mvn/version "1.18.0"}
                      com.aayushatharva.brotli4j/native-osx-aarch64 {:mvn/version "1.18.0"}
                      com.aayushatharva.brotli4j/native-linux-aarch64 {:mvn/version "1.18.0"}
-                     ;; Datalevin - local from git submodule (v0.10.3, 2026-01-27)
-                     ;; Embedded LMDB, Datalog queries
-                     datalevin/datalevin {:local/root "reference-code/datalevin"}
-                     ;; Datahike - replacing Datalevin (see docs/prds/datahike-migration/)
-                     ;; Embedded Datalog on konserve; file backend for git time-travel.
+                     ;; Datahike — Embedded Datalog on konserve; file backend
+                     ;; for git time-travel. Sole database since chunk M-2.
                      org.replikativ/datahike {:mvn/version "0.8.1671"}
                      ;; Durable atom for agent *ctx* persistence
                      duratom/duratom {:mvn/version "0.5.9"}
@@ -98,9 +98,7 @@
                       expound/expound {:mvn/version "0.9.0"}
                       ;; nREPL for orchestrator tests
                       nrepl/nrepl {:mvn/version "1.3.0"}
-                      ;; Datalevin for knowledge graph tests
-                      datalevin/datalevin {:local/root "reference-code/datalevin"}
-                      ;; Datahike (migration in progress)
+                      ;; Datahike (sole database since chunk M-2)
                       org.replikativ/datahike {:mvn/version "0.8.1671"}}
          :jvm-opts []}
 
@@ -133,9 +131,9 @@
   :agent {:replace-deps {org.clojure/clojure {:mvn/version "1.12.0"}
                          org.clojure/core.async {:mvn/version "1.9.829-alpha2"}
                          metosin/malli {:mvn/version "0.20.0"}
-                         datalevin/datalevin {:local/root "reference-code/datalevin"}
                          nrepl/nrepl {:mvn/version "1.3.0"}
                          com.taoensso/timbre {:mvn/version "6.5.0"}
+                         com.taoensso/nippy {:mvn/version "3.4.2"}
                          cheshire/cheshire {:mvn/version "5.13.0"}}
           :replace-paths ["src"]
           :main-opts ["-m" "seon.flow.agent-runner"]

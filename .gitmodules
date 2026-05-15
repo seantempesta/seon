@@ -34,9 +34,6 @@
 [submodule "reference-code/reveal"]
 	path = reference-code/reveal
 	url = https://github.com/vlaaad/reveal.git
-[submodule "reference-code/datalevin"]
-	path = reference-code/datalevin
-	url = https://github.com/datalevin/datalevin.git
 [submodule "reference-code/malli-datomic"]
 	path = reference-code/malli-datomic
 	url = https://github.com/Blasterai/malli-datomic
