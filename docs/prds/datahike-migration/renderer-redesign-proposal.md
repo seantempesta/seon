@@ -8,6 +8,22 @@ tags: [prd, render, agent]
 
 Living design proposal for restoring rendering after the datahike migration. Captures Sean's 2026-05-14 direction ("simpler, explicit; no magicy auto-discovery"), inventories what already works, and proposes concrete API options for the decisions that need Sean's call before implementation.
 
+## Resolved decisions 2026-05-15
+
+After Malli-defaults research (`malli-defaults-research.md`) and Sean's follow-up direction:
+
+1. **`schema/register!` stays single-arity. No new kwargs.** All render affordances live in map-entry properties on the entity schema. (§C revised.)
+2. **Stock Malli `:default` with polymorphic value-types.** `:seon.render/ai` is `[:or :string :symbol]`; `:seon.render/html` is `[:or :seon.render/hiccup :symbol]`. The schema's `:default` is the symbol pointing at the render fn. Boundary resolves+calls symbols on the in-flight entity at render time. No custom seon transformer — stock Malli `default-value-transformer` does the work. The symbol form doubles as a shorthand the agent can use inline when transacting to-user messages. (§C revised.)
+3. **Data attachment via map keys only.** `:seon.render/ai` and `:seon.render/html` are real map entries; specced values are the polymorphic disjunctions above. Metadata path dropped. (§D revised.)
+4. **`:seon.render/hiccup` is a global registration of the existing schema** at `seon.web.reactive.transform:33-40`. One source of truth. (§E revised.)
+5. **Boundary stays at `bin/mcp-server`** as the live wiring; rewire to call the new transformer. (§E confirmed.)
+6. **HUD = single qualified-symbol pointer on `:seon.session/hud-renderer`.** Default ships; agent overrides via `(seon.session/set-hud-renderer!)`. (§F revised.)
+7. **Suggest-on-nil is on by default, with a per-session toggle to silence.** Matches Sean's "default harness env should always be surfacing relevant fns." (§G revised.)
+8. **CLJS resolution will use the included compiler, not sci.** Server-side still uses `requiring-resolve`; CLJS substrate will bundle the cljs compiler into the agent pool. (§J revised.)
+9. **No pruning of unused render machinery in R0.** Sean: "this repo was my experimental playground… let's prune at the end once we have a working system." R0 only deletes what's actively broken (datalevin-conn paths). Auto-discovery / specificity-sort / namespace-proximity stay dormant — possibly useful for future approaches. (§H revised.)
+10. **REPL eval auto-persist** — every evaluated result is committed to datahike (subject to serializability) so the agent can re-query and so a snapshot at any timestamp restores the session for debug/resume. Unserializable values produce warnings. (New §K below.)
+11. **User watches agent via `:seon.render/html` stream** — same machinery serves agent's own REPL AND user's browser view. Agent's HUD doubles as the user's view of what the agent is doing. (Captured in §F.)
+
 ## §A. Current state inventory
 
 `src/seon/render.clj` is 798 lines. Mechanically it has four sub-systems; the first is broken on current boot, the others work.
@@ -44,111 +60,195 @@ Tracked overlaps: `seon.ns.view` (multimethod-based, parallel system per `overla
 
 **Net**: schema-level affordance is net-new; data-level annotation is new convention with simple metadata-or-key lookup; boundary is in place; HUD storage is new; "surface fns" is mostly new query; explicit-pick replaces the specificity sort.
 
-## §C. `schema/register!` extension — API options
+## §C. `schema/register!` — no API change; polymorphic value-types + stock Malli `:default`
 
-Today: `(register! [k v])` — `k` is a keyword, `v` is a Malli schema, atom is `{k v ...}`.
+**Resolved**: `schema/register!` stays single-arity. The Malli defaults research (`malli-defaults-research.md`) found that Malli's stock `:default/fn` is 0-arity and can't see the surrounding entity. Sean's reframe — "it's either the value or a function that returns the value that conforms" — points at a cleaner solution: make the value-type polymorphic.
 
-Three options for adding optional default renderer + example:
-
-**Option 1 — positional**
 ```clojure
-(register! ::position [:map ...] #'my.ns/render-position example-data)
+(schema/register! :seon.user-message/message
+  [:map
+   [:seon.user-message/text :string]
+   [:seon.user-message/from :string]
+   [:seon.render/ai
+    {:default 'my.ns/render-user-message-ai}
+    [:or :string :symbol]]
+   [:seon.render/html
+    {:default 'my.ns/render-user-message-html}
+    [:or :seon.render/hiccup :symbol]]])
 ```
-Cheap but every existing call site keeps working only because the new args are optional. Becomes brittle if we later want more affordances (e.g. doc, html-renderer + ai-renderer as a pair). Reject.
 
-**Option 2 — keyword-args**
+The `:seon.render/ai` value is **either** a literal string (pre-rendered) **or** a symbol pointing at a render fn. Same for `:seon.render/html` — hiccup-or-symbol. The schema's `:default` is a literal symbol (the most common shape; agents who want a custom literal pre-populate the key).
+
+`my.ns/render-user-message-ai`:
 ```clojure
-(register! ::position [:map ...]
-  :seon.render/default #'my.ns/render-position
-  :seon.render/example {::ticker "AAPL" ::quantity 100 ::price 150.0})
+(defn render-user-message-ai
+  "Renders a user-message entity for AI consumption."
+  {:malli/schema [:=> [:cat :seon.user-message/message] :string]}
+  [{:keys [:seon.user-message/from :seon.user-message/text]}]
+  (str from ": " text))
 ```
-Backwards-compatible (no kwargs = today's behavior). Easy to grow (`:seon.doc/example`, `:seon.health/check`, …). Storage shape: each registered key becomes `{::schema <malli> ::affordances {kw val ...}}` rather than the bare schema. Introspection: a new `affordances-for` fn returns the map.
 
-**Option 3 — metadata on the schema itself**
+Takes the entity, returns the rendered string. Standard map-in/map-out fn.
+
+### Why stock Malli is enough
+
+At the boundary:
+```
+1. (m/decode schema entity (mt/default-value-transformer))
+   — Malli's stock transformer fills any missing :seon.render/* keys
+     with the symbol from the schema's :default property.
+2. Check (:seon.render/ai entity):
+   - string?  → use directly.
+   - symbol?  → (requiring-resolve sym) → call with entity → string.
+3. Same for :seon.render/html (hiccup or symbol).
+```
+
+No custom seon transformer. No semantic hijack of `:default/fn`. The polymorphism — declared, typed, finite — lives in the schema's value-type. The boundary handles the disjunction in a few lines.
+
+### Inline shorthand for agent → user messages
+
+Sean's framing: "a nice shorthand for the agent to transact messages to the user inline." A user-facing message becomes a single transact with the agent picking a renderer from a catalog:
+
 ```clojure
-(register! ::position
-  [:map {:seon.render/default 'my.ns/render-position
-         :seon.render/example {::ticker "AAPL" ...}}
-   [::ticker ::ticker] ...])
+(seon.db/transact!
+  :seon.session
+  [{:seon.message/from :assistant
+    :seon.message/text "Here's the result of your query."
+    :seon.render/html  'my.ns/format-as-card    ;; agent chose this renderer
+    :seon.render/ai    'my.ns/format-as-line}]) ;; and this AI representation
 ```
-Stays inside Malli's existing properties slot. Zero changes to `register!`. Reachable by anyone with the schema definition (including the static scanner). **But:** Malli treats `:gen/*` etc. as live properties — symbol values in properties may confuse generators. And properties don't survive `m/schema` normalization cleanly.
 
-**Recommendation: Option 2.** Backwards compat is trivial (varargs after `[k v]`). The storage shape stays uniform. Forward-extensible to non-render affordances. Symbol-or-var values stay out of Malli's properties (which it treats as live data for generation).
+The transaction listener detects the new message → emits to user's browser (via the `:seon.render/html` resolved+called). Agent can override default render per-message without committing to a particular pre-rendered form at write time. If the renderer fn evolves later, prior messages re-render with the new logic.
 
-On the "test(s) / ideally one great example" ambiguity in Sean's direction: support **two slots**.
+### Why no `:seon.render/example` slot
 
-- `:seon.render/example` — a literal value of the data shape. Used in two places: (1) the "surface relevant fns" agent helper renders this verbatim so the agent sees what the renderer is for, (2) the renderer is invoked on this value as a smoke-test (boot-time and `(user/reload)`-time) and warned if it throws. Single value, not a fn.
-- `:seon.render/example-fn` — optional, zero-arg fn returning the example. Use when generation is parameterized / random / depends on time.
+Original proposal had `:seon.render/example` as a separate map-entry slot for agent-facing demos. Sean's revised direction doesn't include it as a primary feature. Retire from R1; if "give the agent example data for shape X" surfaces as a real need later (e.g. as part of §G suggest), it lands as a separate concern. Smoke-testing each renderer at boot/reload hooks the existing test suite — no new schema slot needed.
 
-Mostly callers register an `:seon.render/example`. The fn slot is for rare cases. Skipping both is allowed — renderer registers without demo, but loses the smoke-test and the agent-facing "here's what it looks like" affordance.
+## §D. Data-level renderer attachment — map keys, value-or-symbol
 
-## §D. Data-level renderer attachment
+**Resolved**: map keys are the only surface. Metadata path dropped. Value is either the pre-rendered output OR a symbol pointing at a render fn (typed disjunction per §C).
 
-When a caller wants to override at the value (not the schema): two surfaces.
-
-**Surface 1 — metadata** (preserves the existing `typed` convention from `render.clj:92`):
 ```clojure
-(with-meta value {:seon.render/ai #'my.ns/custom-ai
-                  :seon.render/html #'my.ns/custom-html})
+;; agent emits a message with a pre-rendered AI string and a symbol for HTML
+{:seon.user-message/text "hi"
+ :seon.user-message/from "seon"
+ :seon.render/ai   "alice (custom): hi"            ;; literal string
+ :seon.render/html 'my.ns/render-as-callout-card}  ;; symbol → resolved + called
 ```
-Works for any `IMeta` value (maps, vectors, lists, records). Same shape as the existing `:seon/schema` metadata. **Recommended primary path.**
 
-**Surface 2 — map key** (for maps that need to survive serialization through wire/SSE):
-```clojure
-{::data ... :seon.render/ai 'my.ns/custom-ai :seon.render/html 'my.ns/custom-html}
-```
-Lookup precedence at the boundary: metadata first, then map key.
+Boundary algorithm at the dispatch step (§E):
+- Hiccup/string value → use directly.
+- Symbol value → `requiring-resolve` → call with the entity → produced value.
 
-**Fn pointer format**: support all three of `#'my.ns/f`, `'my.ns/f`, `"my.ns/f"`. Resolve via `requiring-resolve` of the qualified symbol; vars resolve to their value. String form is what serializes cleanly through SSE / nippy / datahike, so the **canonical storage form is the qualified symbol** — vars are unwrapped to symbols at write time.
+**Override mechanics**:
+- Agent pre-populates the key with a literal → boundary uses it verbatim.
+- Agent pre-populates the key with a symbol → boundary resolves + calls with entity.
+- Agent omits the key → Malli's stock `default-value-transformer` fills in the schema's `:default` (a symbol) → boundary resolves + calls.
+- Agent wants a per-session override for multiple entities of the same shape → use the HUD path (§F).
+
+**Symbols are intentional fn pointers**, not content. The schema's `[:or :string :symbol]` documents the convention. An agent who legitimately wants a symbol as content wraps it (e.g. `[:span "page-title"]` hiccup), making the intent explicit.
+
+**Resolver**: `requiring-resolve` for the JVM (CLJ) side. CLJS substrate (WebAssembly-hosted agents per spec-01) will bundle the CLJS compiler into the agent pool — real CLJS resolution rather than sci-interpreted. Precompile into the pool image so startup cost is amortized. Same property semantics across both runtimes.
 
 ## §E. Agent-REPL boundary — where rendering fires
 
-Three options as posed:
+**Resolved**: boundary stays at `bin/mcp-server:492-573` (already wired). Rewire to call the new transformer + look at data-attached keys first. Same boundary serves both the agent's REPL (AI text via `;; AI: ...` comment) and the user's browser view (HTML fragments via SSE — R5).
 
-1. **MCP eval return path** (`bin/mcp-server:492–573`). Already wired. Calls `try-render` post-eval on the value's string form. AI text comes back in a `;; AI: ...` comment.
-2. **`seon.repl`'s eval-print loop**. Closer to the value (no string round-trip); fires for any nREPL caller including non-MCP. But MCP is currently the only agent path.
-3. **Explicit `(render x)` in agent code**. Pure-explicit. Loses HUD-feel — the agent has to remember.
+### The `:seon.render/hiccup` schema
 
-**Recommendation: keep MCP boundary (Option 1) as primary**, with a tightening: pass the live value (not its string form) through the nREPL call. Today the MCP server reads `:value` from nREPL (a string), edn-reads it, then sends *another* nREPL call with the value re-serialized inline (`(seon.render/try-render <val-str> :ai)`). Cleaner: have `seon.render` expose a `render-eval-result` that the eval-print hook can call directly with the live var-1 value. Two trips becomes one. (This is the upgrade path; the existing two-trip flow keeps working in the meantime.)
-
-Boundary algorithm (single dispatch order, no specificity sort):
-
-```
-1. metadata :seon.render/ai on the value → resolve symbol, call, return string
-2. map key :seon.render/ai on the value → same
-3. value has :seon/schema meta → look up that schema's
-   `:seon.render/default` affordance → call → extract :seon.render/ai
-4. nothing → return nil → mcp-server prints the "No AI renderer" hint
-   listing the top-level keys
-```
-
-No graph query. No specificity sort. No namespace proximity. Explicit caller-attaches-or-schema-registers-or-no.
-
-## §F. Per-agent HUD configuration
-
-Sean's framing: "the agent can override defaults to configure their live interface." Implies persistence across sessions.
-
-Per `phase-3-harness-migration.md`, `:seon.session` is the datahike DB that already holds one row per agent session (id, namespace, port, status, ctx checkpoint). The HUD overrides ride along:
+Existing local def at `src/seon/web/reactive/transform.clj:33-40` already shapes Datastar-safe hiccup recursively:
 
 ```clojure
-(schema/register! :seon.session/render-overrides
-  [:map-of :seon.schema/key       ; e.g. :seon.health.workout/log-workout-request
-           [:map [:seon.render/ai {:optional true} :symbol]
-                 [:seon.render/html {:optional true} :symbol]]])
+[:schema {:registry {::hiccup [:or
+                               :keyword
+                               :string
+                               :int
+                               :nil
+                               [:sequential [:ref ::hiccup]]
+                               [:vector [:cat :keyword [:? :map] [:* [:ref ::hiccup]]]]]}}
+ [:ref ::hiccup]]
 ```
 
-A row update on the session entity is how the agent customizes. New helper:
+R1 promotes this to a global registration:
 
 ```clojure
-(seon.render/set-override! {::session-id "a5ba3e"
-                             ::schema-key :seon.health.workout/log-workout-request
-                             ::format :ai
-                             ::renderer 'my.ns/my-ai-renderer})
+(schema/register! :seon.render/hiccup
+  [:schema {:registry {::node [:or :keyword :string :int :nil
+                               [:sequential [:ref ::node]]
+                               [:vector [:cat :keyword [:? :map] [:* [:ref ::node]]]]]}}
+   [:ref ::node]])
 ```
 
-At the boundary (§E), step 3 becomes: "value has `:seon/schema` meta → first check `:seon.session/render-overrides` for the current session, then the schema's default affordance." **Session lookup uses the same dispatch the eval boundary already does** — the MCP server knows the session-id; pass it through.
+`seon.web.reactive.transform`'s local def becomes a re-export of the registered name. One source of truth. Future Datastar-safety refinements (forbid `:script` tags? require `data-*` attrs? etc.) live in the registered schema.
 
-Atoms-per-session is the wrong layer (loses across restart, doesn't survive resume — spec-01 wants resume to be a full rehydration). Per `Forward decisions` §"`*ctx*` redesign," ctx persistence is being rebuilt anyway; overrides naturally live alongside the session row.
+### Boundary algorithm (single dispatch order, no specificity sort)
+
+```
+At every MCP eval result that's a map:
+1. (m/decode schema result (mt/default-value-transformer))
+   — Malli's stock transformer fills any missing :seon.render/* keys
+     with the schema's :default symbol (no-op if value already present).
+2. Look up (:seon.render/ai decoded):
+   - string?   → use directly.
+   - symbol?   → (requiring-resolve sym) → call on `decoded` → string.
+   - nil?      → fall to step 4.
+3. Per-session HUD override active (see §F) → consult agent's hud-renderer.
+4. Nothing renderable → return nil → mcp-server prints the "No AI renderer"
+   hint AND (if suggest-on-nil enabled, see §G) inlines a short
+   "functions that accept these keys" list.
+```
+
+Schema detection: the result needs a `:seon/schema` reference to know which schema to decode against. Two mechanisms:
+- The value carries `:seon/schema` metadata (existing `typed` convention from `render.clj:92`) — works for IMeta values.
+- For map values, look up by key-set: scan top-level keys against the schema registry and pick the entity schema whose registered map-entries best match. (This is a tiny lookup, not the auto-discovery sort. If multiple match, defer to explicit metadata.)
+
+No graph query at this step. No specificity sort. No namespace proximity. The auto-discovery machinery in `seon.render` (`find-renderer`, `resolve-renderer`, `namespace-proximity`) stays dormant in the codebase — Sean's call to not prune until later, since it might inform other approaches.
+
+### Implementation note — single-trip eval
+
+Today the MCP server reads `:value` from nREPL (a string), edn-reads it, then sends a *second* nREPL call with the value re-serialized inline (`(seon.render/try-render <val-str> :ai)`). Cleaner: have `seon.render` expose `render-eval-result` that the eval-print hook calls directly with the live var-1 value. Two trips becomes one. R2 work; not blocking R1.
+
+## §F. Per-agent HUD — single render fn over the database
+
+**Resolved**: per Sean, "the hud is just a render function on the database that the agent can customize by overwriting the default one we setup for it." Simpler than the prior per-shape override map.
+
+```clojure
+(schema/register! :seon.session/hud-renderer
+  :symbol)   ; fully-qualified symbol pointing at the agent's HUD fn
+
+(defn default-hud
+  "Default HUD renderer. Reads the agent's session + ctx + recent tx-log,
+   returns a hiccup structure summarizing what the agent is doing.
+   Agent overrides by transacting a new :seon.session/hud-renderer value
+   on their session entity."
+  {:malli/schema [:=> [:cat :seon.session/id] :seon.render/hiccup]}
+  [session-id]
+  [:div.hud ...])
+```
+
+A HUD render fn signature is `(fn [session-id] -> hiccup)` — takes the agent's session id, reads whatever it needs from datahike, returns the rendered view. The agent customizes:
+
+```clojure
+(seon.session/set-hud-renderer!
+  {:seon.session/id "a5ba3e"
+   :seon.session/hud-renderer 'my.ns/my-custom-hud})
+```
+
+Same render machinery powers both surfaces:
+- **Agent's REPL**: the HUD's `:seon.render/ai` (or a `:ai`-projection of the hiccup) renders into the agent's `;; AI: ...` line, periodically or on demand.
+- **User's browser**: the HUD's `:seon.render/html` (the hiccup) is streamed to the user via SSE. The user sees the agent's customized view of itself. Doubles as a debugging surface AND as the agent's way of customizing UX for the user.
+
+### Widgets — fns attached to the HUD
+
+Sean: "If they attach it to their context it's like attaching a widget to their dashboard that will stick around and it can be functions where their args are spelled out then they can be called for querying and processing data."
+
+Widgets are entries the HUD renderer pulls in. Mechanism: agent transacts `:seon.session/widgets` (vector of qualified-symbol fn pointers, or richer widget structs); HUD renderer's default behavior is to iterate, call each with the session-id, and stitch their hiccup outputs into the dashboard. Agents customize by ordering, filtering, or replacing the HUD renderer altogether.
+
+Schema reg + per-fn arg specs (already present via seon's `:malli/schema` metadata) means widgets are introspectable — the agent knows what each widget consumes/produces.
+
+### Storage on `:seon.session`
+
+Per `phase-3-harness-migration.md`, `:seon.session` already holds one row per agent session. The HUD renderer pointer + widget list ride along. Resume reads them back automatically.
 
 ## §G. "Surface fns that can process this data"
 
@@ -177,55 +277,93 @@ Surface format at the REPL boundary (when the agent calls `(suggest x)` or types
 ;; - seon.health.workout/total-volume    — Sum total kg lifted across sets
 ```
 
-Heuristic for "surface always or surface on opt-in": ship as opt-in (`(seon.harness/suggest x)` or `*suggest-on-nil*` toggle) — the existing "no renderer" hint already does part of this job; promoting it to always-on for every result is noisy.
+**Resolved**: ship as always-on with a per-session toggle to silence. Sean's stated direction ("default harness env should always be surfacing relevant fns") wins over the noise concern. The toggle lives on `:seon.session/suggest-on-nil?` (boolean, defaults to true). Agents that find the surface noisy disable it for their session.
 
-## §H. Cluster 2 implication — revising `remaining.md`
+The "no renderer" hint at the boundary becomes the suggest output when enabled — instead of just `;; No AI renderer for keys [...]`, the agent sees the keys PLUS a short list of fns that accept them, with their docs. The agent always has the introspection affordance unless they explicitly opt out.
 
-`remaining.md` Forward decisions §"Renderer auto-resolution: deferred" said: "Just delete the silently-dead datalevin-connection-manager paths and the `set-conn!` API (smell #16); leave the rest of `seon.render` alone for now."
+## §H. Cluster 2 implication — minimal cleanup, no pruning
 
-This redesign keeps that direction but reframes scope-positive. Concrete cluster-2 disposition for `seon.render`:
+**Resolved**: Sean's call ("let's hold off on removing unused features as of yet as they may be useful other approaches") shrinks R0 dramatically. Only delete what's actively broken and dependent on datalevin. The auto-discovery machinery stays dormant.
 
-**Delete outright:**
-- `*conn-override` atom (l.54), `get-conn` (l.56), `set-conn!` (l.81) — gone.
-- `[seon.db.datalevin.conn :as dl-conn]` require (l.31) — gone.
-- `resolve-renderer-from-datalevin` (l.261), `call-datalevin-renderer` (l.280) — gone.
-- `find-renderer` (l.142), `resolve-renderer` (l.211), `find-page-renderer` (l.691) — specificity-sort + namespace-proximity-tiebreak machinery. **This is the auto-discovery Sean is removing.**
-- `resolution-cache` (l.72), `invalidate-render-cache!` (l.74) — also gone (no more graph lookup to cache).
-- `namespace-proximity` (l.121) — only used inside `resolve-renderer`. Gone.
+**Delete (broken, datalevin-dependent — must come out for cluster 4):**
+- `[seon.db.datalevin.conn :as dl-conn]` require (l.31).
+- `get-conn` (l.56) — references `:seon.db.datalevin/connections` which is gone.
+- `set-conn!` (l.81) — only relevant when a datalevin conn-manager is active.
+- `*conn-override*` atom (l.54) — sole consumer is `get-conn`.
+- `resolve-renderer-from-datalevin` (l.261) — explicit datalevin caller.
+- `call-datalevin-renderer` (l.280) — explicit datalevin caller.
+
+**Stay dormant (Sean's experimental playground; may inform future approaches):**
+- `find-renderer` (l.142), `resolve-renderer` (l.211), `find-page-renderer` (l.691) — auto-discovery / specificity-sort. Will return nil today; harmless.
+- `resolution-cache` (l.72), `invalidate-render-cache!` (l.74) — caches nothing useful; harmless.
+- `namespace-proximity` (l.121) — pure helper, no datalevin dep; keep.
+- `seon.ns.view` multimethod system — separate render path; leave alone.
+- `seon.ui.viewer` — dead but kept for future inspection.
+- `seon.render.example` — example renderer file; kept.
 
 **Keep + reuse (foundation):**
-- `typed` / `schema-of` (l.92–115) — value tagging convention stays.
-- `render` (l.337) — rewire dispatch through new boundary (§E), keep fallback paths.
+- `typed` / `schema-of` (l.92–115) — value tagging convention.
+- `render` (l.337) — rewire dispatch through the new transformer boundary (§E).
 - `for-ai` (l.555), `for-html` (l.610) — recursive fallback renderers, healthy.
-- `humanize` (l.391), `render-schema` (l.505), `render-seq` (l.539), `namespace-web-params` (l.187) — pure helpers, unaffected.
-- `render-namespace` (l.750) — keep but rewire away from `find-page-renderer`.
+- `humanize` (l.391), `render-schema` (l.505), `render-seq` (l.539), `namespace-web-params` (l.187) — pure helpers.
+- `render-namespace` (l.750) — kept; rewire away from `find-page-renderer` if needed at the moment we actually call it, otherwise leave.
 
-Net: about 250 lines deleted from `render.clj`, the surviving ~550 lines is foundation for §I.
+Net for R0: probably 40–80 lines of pure deletion (datalevin requires + datalevin-specific fns). The 250-line cleanup from the original proposal becomes a "later prune pass" once the new system is working. Sean: "let's prune at the end once we have a working system."
 
 ## §I. Implementation phases
 
 | Phase | Goal | Files changed | Net-new vs reuse | Rough size |
 |---|---|---|---|---|
-| **R0** | Cluster-2 deletion above. Leaves `seon.render` as a clean foundation (no datalevin, no specificity sort). `bin/mcp-server`'s `try-render` call still works (returns `nil` always until R1). | `src/seon/render.clj` (-250 lines); also touches `seon.ns.routes`, `seon.render.code`, `seon.ns.lifecycle` (callers of `resolve-renderer` / `find-page-renderer`) | Pure deletion + caller-fixup | medium |
-| **R1** | `schema/register!` extension (Option 2 kwargs). Storage shape changes from `{k v}` to `{k {::schema v ::affordances {…}}}` with back-compat (single-arity registers no affordances). Introspection helpers (`affordances-for`, `default-renderer`, `example-for`). | `src/seon/schema.clj` (extend), `src/seon/render.clj` (boundary uses affordances) | New API on existing data structure | small |
-| **R2** | Boundary dispatch + data-level annotation. New `render/render-eval-result` (single-trip). Metadata/map-key/schema-affordance lookup order. Update `bin/mcp-server` to call the new entry point. Smoke-test each registered renderer against its example at boot/reload. | `src/seon/render.clj`, `bin/mcp-server`, `src/seon/repl.clj` | New entry point + boundary changes | medium |
-| **R3** | Per-agent HUD overrides on `:seon.session`. New schema attr `:seon.session/render-overrides`. `set-override!` / `clear-override!`. Boundary reads override before schema default. Resume rehydrates overrides automatically. | `src/seon/session.clj` (new attr), `src/seon/render.clj` (boundary uses session-id) | All net-new, but rides on Phase 3 work | small |
-| **R4** | `functions-accepting-keys` inverse query in `seon.graph.query`. `seon.harness/suggest` REPL helper that formats output for agent consumption (pulls examples from affordances). Optional `*suggest-on-nil*` toggle in the MCP boundary. Requires `:seon.runtime` to be in `:seon.db/flow` (which is the gate from `remaining.md` Forward decisions). | `src/seon/graph/query.clj`, new `src/seon/harness.clj`, `bin/mcp-server` (opt-in hook) | New query + agent-facing helper | medium |
-| **R5 (post-MVP)** | HTML fragments to user. Boundary additionally streams `:seon.render/html` output through SSE to the user-facing UI. Per-agent HUD UI control. | `src/seon/web/handlers.clj`, `src/seon/web/sse.clj`, browser side | Plumbing on top of R2 | deferred |
+| **R0** | Minimal cleanup (§H). Delete datalevin-conn paths in `seon.render`; leave auto-discovery machinery dormant. `bin/mcp-server`'s `try-render` call still works (returns `nil` until R2). | `src/seon/render.clj` (40-80 line deletion); callers of removed fns (none on current boot — they were silently dead). | Pure deletion | small |
+| **R1** | Register `:seon.render/hiccup` globally (promoting the existing schema at `seon.web.reactive.transform:33-40`). Have `seon.web.reactive.transform`'s local def reference the registered name. No `schema/register!` API changes — single-arity stays. Smoke test: declare a sample entity schema with `:seon.render/ai` / `:seon.render/html` map entries (typed disjunction + `:default` symbol) and verify Malli's `default-value-transformer` fills it in. | `src/seon/schema.clj` (register the hiccup schema), `src/seon/web/reactive/transform.clj` (re-export), new test file | Registration + verification, no new code paths | small |
+| **R2** | Boundary dispatch using stock Malli + symbol-resolve. New `seon.render/render-eval-result` (single-trip). Schema lookup via `:seon/schema` metadata or top-level-key matching. Rewire `bin/mcp-server` post-eval call. | `src/seon/render.clj`, `bin/mcp-server`, `src/seon/repl.clj` | New entry point; reuses Malli + existing `for-ai`/`for-html` fallbacks | medium |
+| **R3** | HUD on `:seon.session/hud-renderer` (single qualified-symbol pointer). Default HUD ships; `(seon.session/set-hud-renderer! …)` writes the override; resume rehydrates. Widget convention via `:seon.session/widgets`. | `src/seon/session.clj` (new attrs), `src/seon/render.clj` (boundary uses session-id to read), default HUD impl | All net-new; rides on `:seon.session` already being a datahike namespace | small |
+| **R4** | `functions-accepting-keys` inverse query in `seon.graph.query`. `seon.harness/suggest` REPL helper that formats output for agent consumption. Always-on at the boundary (suggest-on-nil); per-session toggle `:seon.session/suggest-on-nil?` to silence. Gated on `:seon.runtime` joining `:seon.db/flow`. | `src/seon/graph/query.clj`, new `src/seon/harness.clj`, `bin/mcp-server` | New query + agent-facing helper | medium |
+| **R5 (post-MVP)** | HTML fragments to user. Boundary additionally streams `:seon.render/html` output through SSE. The agent's `:seon.session/hud-renderer` doubles as the user's view of what the agent is doing. Per-agent HUD UI control. | `src/seon/web/handlers.clj`, `src/seon/web/sse.clj`, browser side | Plumbing on top of R2 + R3 | deferred |
 
-Hard ordering: **R0 → R1 → R2 → R3 → R4 → R5**. R0 can land cleanly today (nothing references the silently-dead paths productively). R4 is the only one blocked on outside work (`:seon.runtime` migration to datahike, smell #1 of `remaining.md`).
+Hard ordering: **R0 → R1 → R2 → R3 → R4 → R5**. R0 can land cleanly today. R1 is small (registration + smoke test). R2 is the main implementation. R4 is the only one blocked on outside work (`:seon.runtime` migration to datahike, smell #1 of `remaining.md`).
 
 ## §J. Open questions for Sean
 
-1. **Option 2 (kwargs) confirmed for `schema/register!`?** Or do you want Option 3 (Malli properties) for static-scanner reachability? Tradeoff: kwargs are easier for callers; properties are reachable by anything that has the schema vector (including the disk-scanning scanner with no live system).
-2. **Example shape — literal value vs. zero-arg fn vs. both?** Recommendation above is both (`:seon.render/example` for the literal, `:seon.render/example-fn` for the rare parameterized case). Confirm.
-3. **HUD storage on `:seon.session/render-overrides`?** Confirms it's per-session (rehydrates on resume), not per-namespace-globally. If you want a separate "user-wide defaults" layer it's a third tier.
-4. **Boundary location — keep at `bin/mcp-server` (MCP-only) or push down into `seon.repl` (all-nREPL-callers)?** MCP-only is simpler and matches current agent topology. Push-down catches future nREPL clients but adds a layer.
-5. **`suggest`-on-nil opt-in vs. always-on?** Recommendation: opt-in via `(seon.harness/suggest x)` plus a session-level toggle; defaults off. Always-on at the boundary is noisy.
-6. **Fn-pointer canonical form — qualified symbol?** That's the recommendation (survives wire/DB). Vars/strings accepted at call sites and normalized.
-7. **Cleanup of `seon.ns.view` / `seon.ui.viewer` / `seon.render.example`** — fold into this work (R0) or leave to `overlap-three-rendering.md`'s own pass? The `seon.ns.view` multimethod system overlaps with §E's boundary dispatch; resolving the overlap in this PRD avoids a second redesign.
-8. **`:seon.render/example` data — also a candidate for property-based tests?** Sean said "test(s)" — if the example doubles as a test fixture (validate against the input schema, run the renderer, assert non-nil output), that's an easy win that doesn't need a separate `:seon.render/test` slot.
+All eight original questions are settled in the §"Resolved decisions 2026-05-15" callout at the top of this doc:
+
+- §C API shape → no change to `register!`; polymorphic value-type + stock Malli `:default`.
+- Example slot → retired (smoke-test via the existing test suite instead).
+- HUD storage → single `:seon.session/hud-renderer` symbol pointer + widget list.
+- Boundary location → `bin/mcp-server` (stays).
+- Suggest-on-nil → always-on, per-session toggle to silence.
+- Fn-pointer form → qualified symbol; resolved with `requiring-resolve` (CLJ) or bundled CLJS compiler (substrate future).
+- Cleanup of overlapping render systems → deferred; nothing pruned in R0.
+- Example as property-based test → not needed; eliminated with the example slot.
+
+Remaining open work (not blocking R0/R1):
+
+1. **Schema detection at the boundary** (§E step 1) — for map values without `:seon/schema` metadata, the lookup matches top-level keys against registered entity schemas. If multiple match, defer to explicit metadata; if no exact match, fall back to the existing `for-ai`/`for-html` recursive renderers. Concrete algorithm to refine in R2.
+2. **HUD render frequency** — on every change (debounced)? On agent-explicit refresh? Resolve when R3 implementation starts.
+3. **Suggest-output formatting** — markdown-block, short list, hiccup widget? Resolve when R4 begins. Lower-stakes; the agent can iterate.
+4. **CLJS compiler bundling for the agent pool** — when the WebAssembly-hosted CLJS substrate work starts. Out of scope for R0–R5.
+
+## §K. REPL eval auto-persist — the session-snapshot mechanism
+
+Sean's direction:
+
+> "Yeah we could make any repl evals stick around unless they can't be persisted (objects or something not data). Restoring a session for debugging would make this amazing. Grab the right time snapshot from datahike and render that and you've got the session mostly restored (we can show warnings for values that weren't restored). Yeah that's also the resume feature so an agent can have a longer lifetime and can specialize maybe in a set of functionality or archival or maintenance, etc."
+
+The existing `:r-NNNN` keys in `user/repl-orchestrator` (auto-saved every eval) are the seed. Extension:
+
+- **Every eval result is committed to datahike**, attributed to the agent's session. Schema: `:seon.session.repl/result` with `:seon.session.repl.result/id` (the `:r-NNNN` key), `:seon.session.repl.result/value` (the value, serialized via nippy or similar), `:seon.session.repl.result/timestamp`, `:seon.session.repl.result/code` (the form that was evaluated).
+- **Unserializable values** (raw Java objects, channels, fn values, connections, etc.) are detected at the persist step and produce a warning. The persisted form notes the type and the failure reason; in-memory `*1`/`*2`/`*3` and `user/repl-orchestrator` continue to hold the live value.
+- **Session resume**: on session restart, the agent's `:r-NNNN` history rehydrates from datahike. Values that didn't persist are absent with a warning surfaced in the agent's first interaction.
+- **Time-travel debug**: any datahike-as-of timestamp can render the agent's state at that moment. Useful for debugging emergent behavior in agent loops ("show me what the agent saw at the point it made decision X").
+- **Long-lived specialized agents**: the persistence enables agents that outlive their JVM — archival agents that maintain long indices, maintenance agents that run periodic sweeps, etc. State survives crashes and intentional restarts.
+
+Lifecycle: open questions for the R5+ implementation:
+- Compression / GC policy: ring buffer of last N? Compress all? Agent-controlled?
+- Index format for query ("find me the result from the test-run that mentioned X")?
+- Storage scope: per-session vs. per-agent (across sessions of the same agent)?
+
+This phase rides on the broader event-sourcing model (every reaction transacts an entity; listeners drive emergent behavior) — see `remaining.md` §"Forward decisions 2026-05-15" §"Everything-through-the-database + transaction-listener-driven reactions". Implementation lands after cluster 4 + the `:seon.runtime` / `:seon.ai` migrations.
 
 ---
 
-Loadbearing in this proposal: §C (the `register!` API shape), §F (HUD storage), §E (boundary location), §J Q2 (example shape). Everything else follows once those four are settled.
+Loadbearing in this proposal: §C (API shape — settled), §E (boundary algorithm — settled), §F (HUD storage — settled), §H (cluster 2 minimal scope — settled), §K (REPL auto-persist — design captured for later phase). R0 and R1 are dispatch-ready.
