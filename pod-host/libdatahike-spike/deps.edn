@@ -8,7 +8,7 @@
         ;; --initialize-at-build-time=clojure (which under svm-wasm trips on
         ;; @Delete-method validation due to broader analysis).
         com.github.clj-easy/graal-build-time {:mvn/version "1.0.5"}}
- :paths ["src"]
+ :paths ["src" "subs-classes"]
  :aliases
  {:build
   ;; Pre-AOT bootstrap-loaded Clojure namespaces (clojure.core,

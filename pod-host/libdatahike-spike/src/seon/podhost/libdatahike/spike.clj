@@ -1,27 +1,50 @@
 (ns seon.podhost.libdatahike.spike
-  "Read-only datahike spike: validates that the query engine alone compiles
-   to WASM, without datahike's async writer (which drags in core.async,
-   monitor synchronization, and SVM @Delete blockers).
+  "Step 4 of libdatahike-WASM: real datahike :memory conn at AOT time.
 
-   This is the V1 in-pod read replica shape per spec-01: queries against
-   a baked-in datom snapshot; writes are server-side via the single-writer
-   auth gateway."
-  (:require [datahike.query :as q])
+   With the core.async/dispatch substitution in subs-classes/, the writer's
+   thread-pool dispatch becomes synchronous under WASM, removing the analyzer
+   reachability into JavaMonitorQueuedSynchronizer.parkAndCheckInterrupt and
+   array-instantiation reflection paths that blocked the previous attempt.
+
+   At build/AOT time: d/create-database + d/transact populate the conn.
+   At WASM runtime: only (d/q ... db) runs; the writer machinery has executed
+   at build time and the resulting snapshot is in the image heap."
+  (:require [datahike.api :as d])
   (:gen-class))
 
-;; Literal datoms — the EAV tuples a real datahike :memory backend would hold
-;; after transacting the equivalent map data.  Format: [entity-id attribute value].
-(def datoms
-  [[1 :name "Alpha"]    [1 :version 1]
-   [2 :name "Seon"]    [2 :version 2]
-   [3 :name "Datahike"][3 :version 3]])
+(def cfg
+  {:store {:backend :memory
+           :id #uuid "550e8400-e29b-41d4-a716-446655440000"}
+   :schema-flexibility :write
+   :keep-history? false})
+
+(def schema
+  [{:db/ident :name
+    :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one
+    :db/unique :db.unique/identity}
+   {:db/ident :version
+    :db/valueType :db.type/long
+    :db/cardinality :db.cardinality/one}])
+
+(defonce db
+  (do
+    (when (d/database-exists? cfg)
+      (d/delete-database cfg))
+    (d/create-database cfg)
+    (let [conn (d/connect cfg)]
+      (d/transact conn schema)
+      (d/transact conn [{:name "Alpha"     :version 1}
+                        {:name "Seon"     :version 2}
+                        {:name "Datahike" :version 3}])
+      @conn)))
 
 (defn -main [& _args]
-  (println "== libdatahike-WASM read-only spike ==")
-  (println "Querying" (count datoms) "datoms...")
-  (let [result (q/q '[:find ?n ?v
+  (println "== libdatahike-WASM :memory-backend spike ==")
+  (println "Querying baked-in db...")
+  (let [result (d/q '[:find ?n ?v
                       :in $
                       :where [?e :name ?n] [?e :version ?v]]
-                    datoms)]
+                    db)]
     (println "Result:" (pr-str result))
     (println "Done.  Count:" (count result))))
