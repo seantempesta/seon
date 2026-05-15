@@ -1,4 +1,4 @@
-(ns core
+(ns seon.podhost.libdatahike.spike
   (:require [datahike.api :as d])
   (:gen-class))
 
@@ -28,9 +28,9 @@
     (println "Installing schema...")
     (d/transact conn schema)
     (println "Transacting data...")
-    (d/transact conn [{:name "Aria"     :version 1}
-                      {:name "Seon"     :version 2}
-                      {:name "Datahike" :version 3}])
+    (d/transact conn [{:name "Seon"     :version 1}
+                      {:name "Datahike" :version 2}
+                      {:name "WASM"     :version 3}])
     (println "Querying...")
     (let [result (d/q '[:find ?n ?v
                         :where [?e :name ?n] [?e :version ?v]]
