@@ -12,7 +12,7 @@
   ;; blanket init causes analysis to touch all class paths, tripping on
   ;; SVM-internal monitor code (JavaMonitorQueuedSynchronizer.parkAndCheckInterrupt)
   ;; that datahike's core.async writer reaches indirectly.
-  {:main-opts ["-m" "clj.native-image" "core"
+  {:main-opts ["-m" "clj.native-image" "seon.podhost.libdatahike.spike"
                "--tool:svm-wasm"
                "--no-fallback"
                "--emit" "build-report" "-Os"
@@ -20,6 +20,18 @@
                "-H:IncludeResources='.*\\.properties$'"
                "-H:Name=core"
                "-H:+AllowDeprecatedBuilderClassesOnImageClasspath"
+               ;; Narrow init: Clojure runtime + datahike/konserve/replikativ stacks
+               ;; must be initialized at build time (their AOT-generated classes
+               ;; need RT to exist).  Excluded: SVM/JDK internals that drag in
+               ;; threading paths under WASM.
+               "--initialize-at-build-time=clojure"
+               "--initialize-at-build-time=datahike"
+               "--initialize-at-build-time=konserve"
+               "--initialize-at-build-time=replikativ"
+               "--initialize-at-build-time=hasch"
+               "--initialize-at-build-time=superv"
+               "--initialize-at-build-time=taoensso"
+               "--initialize-at-build-time=seon"
                ;; Patch the shadowed-Guava module with the missing
                ;; InternalFutureFailureAccess class (GraalVM 25 svm-wasm packaging bug)
                "-J--patch-module=org.graalvm.wrapped.google.guava=stub-classes"
