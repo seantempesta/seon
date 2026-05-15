@@ -12,6 +12,12 @@
   (:require [clojure.core.async :as async]
             [clojure.core.async.flow :as flow]
             [clojure.string :as str]
+            ;; Legacy datalevin writer/reader retained behind the dl? branch
+            ;; below so seon.flow.infrastructure-test (which tests the writer
+            ;; pipeline directly) stays green. Boot-time configuration in
+            ;; system.edn supplies a nil connection-manager so the dl? branch
+            ;; never fires on the current boot. M-2 deletes both the writer
+            ;; namespaces and the test file together.
             [seon.db.datalevin.reader :as reader]
             [seon.db.datalevin.writer :as writer]
             [seon.flow.harness :as harness]
@@ -601,33 +607,33 @@
    across all namespace flows: database writes, REPL eval, and reply routing.
 
    Processes:
-     :seon.flow/writer       - infra-writer-step (multi-DB via connection manager)
-     :seon.flow/reader       - infra-reader-step (multi-DB reads via connection manager)
+     :seon.flow/writer       - infra-writer-step (multi-DB; legacy datalevin,
+                               only built when a connection-manager is supplied)
+     :seon.flow/reader       - infra-reader-step (legacy datalevin; gated on
+                               connection-manager presence)
      :seon.flow/repl          - repl-step (nREPL eval via pool)
      :seon.flow/reply-router - reply-router-step (delivers promises)
      :seon.flow/event-sink   - event-sink-step (observability)
      :seon.flow/error-sink   - error-sink-step (error accumulation)
+     :seon.flow/status-collector - status/collector-step
 
    Connections:
-     writer reply  -> reply-router
-     writer error  -> error-sink
-     reader reply  -> reply-router
-     reader error  -> error-sink
      repl reply    -> reply-router
      repl error    -> error-sink
+     status-collector reply -> reply-router
+     (writer/reader reply+error wired the same way when dl? is true)
 
    Request keys:
-     ::connection-manager - Datalevin connection manager (Integrant component)
+     ::connection-manager - Optional legacy datalevin connection manager.
+       When nil (the current boot configuration), :seon.flow/writer and
+       :seon.flow/reader are not built and their connections are skipped.
+       Retained for seon.flow.infrastructure-test until chunk M-2 deletes the
+       writer/reader namespaces and the matching test file.
 
    Returns:
      {::flow fl ::flow-id :seon.flow/infrastructure}"
   [{::keys [connection-manager]}]
   (let [flow-id :seon.flow/infrastructure
-        ;; Datalevin writer/reader are only built when a connection-manager is
-        ;; supplied. Datalevin is disabled in the migration; the writer/reader
-        ;; processes are dead code without it. The REPL eval process,
-        ;; reply-router, and sinks always run — the rest of the system depends
-        ;; on the reply-router for promise delivery.
         dl?  (some? connection-manager)
         procs (cond-> {:seon.flow/repl             {:proc (flow/process #'repl-step)}
                        :seon.flow/reply-router     {:proc (flow/process #'reply-router-step)}
@@ -675,7 +681,8 @@
         (throw (ex-info "Infrastructure flow failed to start: processes did not respond to ping within 5s. Check step-fn init arities."
                         {:flow-id :seon.flow/infrastructure
                          :processes [:seon.flow/writer :seon.flow/reader :seon.flow/repl
-                                     :seon.flow/reply-router :seon.flow/event-sink :seon.flow/error-sink]}
+                                     :seon.flow/reply-router :seon.flow/event-sink :seon.flow/error-sink
+                                     :seon.flow/status-collector]}
                         e))))
     ;; Register in runtime
     (runtime/register-flow! {::runtime/flow-id flow-id

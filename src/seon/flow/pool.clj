@@ -22,9 +22,10 @@
 
    ## Integrant Component
 
-   Register as `:seon.flow/pool` in system.edn. Depends on `:seon.db.datalevin/server`
-   so the server is available when agents start. Supports `suspend-key!`/`resume-key`
-   to keep pool alive during `(reset)`.
+   Register as `:seon.flow/pool` in system.edn. Pool agents no longer
+   auto-connect to a Datalevin server (chunk M-1, 2026-05-15: --datalevin-uri
+   plumbing removed). Cross-JVM data access goes through the flow harness.
+   Supports `suspend-key!`/`resume-key` to keep pool alive during `(reset)`.
 
    Usage:
      (def pool (create-pool! {::size 3 ::base-port 7900}))
@@ -112,9 +113,6 @@
                   [:int {:min 7900 :max 7999
                          :description "Starting port for agent JVM range"}])
 
-(schema/register! ::datalevin-uri
-                  [:string {:description "Datalevin connection URI for agent JVM"}])
-
 (schema/register! ::setup-ms
                   [:int {:min 0 :description "Milliseconds to set up namespace"}])
 
@@ -147,15 +145,17 @@
   "Spawn an agent JVM on the given port. Blocks until AGENT_READY signal
    or timeout. Returns {::port ::pid ::process ...} or throws.
 
-   When datalevin-uri is provided, passes it to the agent JVM via --datalevin-uri.
+   Chunk M-1 (2026-05-15) removed the optional `:datalevin-uri` kwarg and the
+   `--datalevin-uri` CLI flag passed to the agent process — agent JVMs no
+   longer auto-connect to a Datalevin server. Cross-JVM data access goes
+   through the flow harness.
 
    Starts both stdout and stderr reader threads. Stderr is logged at WARN
    level so crash reasons are visible."
-  [port & {:keys [datalevin-uri]}]
-  (let [args (cond-> ["clojure" "-M:agent"
-                       "--port" (str port)
-                       "--namespace" "seon.pool.warm"]
-               datalevin-uri (into ["--datalevin-uri" datalevin-uri]))
+  [port]
+  (let [args ["clojure" "-M:agent"
+              "--port" (str port)
+              "--namespace" "seon.pool.warm"]
         _ (log/info "Spawning agent JVM" {:port port})
         ^Process proc (apply process/start {:dir "."} args)
         stdout (BufferedReader. (InputStreamReader. (process/stdout proc)))
@@ -188,8 +188,7 @@
          ::reader reader-thread
          ::stderr-reader stderr-thread
          ::status :idle
-         ::ready-at (System/currentTimeMillis)
-         ::datalevin-uri datalevin-uri})
+         ::ready-at (System/currentTimeMillis)})
       (do
         (.destroy proc)
         (throw (ex-info "Agent JVM failed to start within timeout"
@@ -249,15 +248,6 @@
 ;;; Pool internals
 ;;; ---------------------------------------------------------------------------
 
-(defn- build-datalevin-uri
-  "Build a Datalevin URI for an agent JVM.
-
-   Format: dtlv://datalevin:datalevin@127.0.0.1:8898/agent-{port}"
-  [datalevin-port agent-port]
-  (when datalevin-port
-    (format "dtlv://datalevin:datalevin@127.0.0.1:%d/agent-%d"
-            datalevin-port agent-port)))
-
 (defn- unreserve-port!
   "Remove a port from the reserved-ports set in pool state.
    Called after spawn completes (success or failure)."
@@ -305,7 +295,7 @@
    When `remaining-warmup` atom is provided (during initial pool creation),
    decrements it after enqueuing. When it reaches zero, sets ::warming? false
    on the pool state and logs that the pool is ready."
-  [pool-state ^LinkedBlockingQueue idle-queue datalevin-port
+  [pool-state ^LinkedBlockingQueue idle-queue
    & {:keys [remaining-warmup]}]
   (loop [attempt 0]
     (if (>= attempt max-spawn-retries)
@@ -315,8 +305,7 @@
         nil)
       (let [port (allocate-port! pool-state)]
         (let [result (try
-                       (let [uri (build-datalevin-uri datalevin-port port)
-                             jvm (spawn-agent-jvm! port :datalevin-uri uri)]
+                       (let [jvm (spawn-agent-jvm! port)]
                          ;; Unreserve port now that it's tracked in all-jvms
                          (unreserve-port! pool-state port)
                          ;; Track in all-jvms map
@@ -358,7 +347,7 @@
   "Spawn replacement JVMs in the background to maintain target pool size.
    Non-blocking -- spawns via future. Rate-limited to max-respawns-per-minute."
   [pool-state ^LinkedBlockingQueue idle-queue]
-  (let [{::keys [target-size datalevin-port shutdown?]} @pool-state
+  (let [{::keys [target-size shutdown?]} @pool-state
         current-idle (.size idle-queue)]
     (when (and (not shutdown?)
                (< current-idle target-size))
@@ -372,7 +361,7 @@
             (record-spawn! pool-state)
             (future
               (try
-                (spawn-and-enqueue! pool-state idle-queue datalevin-port)
+                (spawn-and-enqueue! pool-state idle-queue)
                 (catch Exception e
                   (log/error "Replenishment failed" {:error (.getMessage e)}))))))
         (when (and (pos? deficit) (zero? to-spawn))
@@ -557,7 +546,6 @@
    Options:
      ::size           - Number of warm JVMs (default 3)
      ::base-port      - Starting port number (default 7900)
-     ::datalevin-port - Datalevin server port for agent connections (optional)
 
    Returns pool map containing:
      ::state       - Atom with pool bookkeeping (includes ::warming? flag)
@@ -567,11 +555,10 @@
    The pool is usable immediately but may have no idle JVMs until warming
    completes (~2-3s). Check (::warming? @(::state pool)) to see if the
    pool is still starting up."
-  [{::keys [size base-port datalevin-port]
+  [{::keys [size base-port]
     :or {size default-pool-size
          base-port default-base-port}}]
-  (log/debug "Creating agent pool" {:size size :base-port base-port
-                                     :datalevin-port datalevin-port})
+  (log/debug "Creating agent pool" {:size size :base-port base-port})
   ;; Clean up stale agent JVMs from previous crash (scans full 7900-7999 range)
   (cleanup-stale-agents!)
   (let [idle-queue (LinkedBlockingQueue.)
@@ -580,7 +567,6 @@
                           ::session->port {}
                           ::target-size size
                           ::next-port base-port
-                          ::datalevin-port datalevin-port
                           ::shutdown? false
                           ::warming? true
                           ::spawn-timestamps (atom [])})
@@ -591,7 +577,7 @@
             (for [_ (range size)]
               (future
                 (try
-                  (spawn-and-enqueue! pool-state idle-queue datalevin-port
+                  (spawn-and-enqueue! pool-state idle-queue
                                       :remaining-warmup remaining-warmup)
                   (catch Exception e
                     (log/error "Spawn failed during warmup"
@@ -834,7 +820,7 @@
      ::idle idle-count
      ::active (- (count all-jvms) idle-count)
      ::warming? (boolean (::warming? state-val))
-     ::jvms (mapv #(select-keys % [::port ::pid ::status ::namespace ::datalevin-uri])
+     ::jvms (mapv #(select-keys % [::port ::pid ::status ::namespace])
                   all-jvms)}))
 
 (defn shutdown!
@@ -861,17 +847,15 @@
 ;;; ---------------------------------------------------------------------------
 
 (defmethod ig/init-key :seon.flow/pool
-  [_ {:keys [size base-port datalevin-server enabled?]
+  [_ {:keys [size base-port enabled?]
       :or {size default-pool-size
            base-port default-base-port
            enabled? true}}]
   (if enabled?
-    (let [datalevin-port (when datalevin-server (:port datalevin-server))]
-      (log/info "Starting agent pool component" {:size size :base-port base-port
-                                                  :datalevin-port datalevin-port})
+    (do
+      (log/info "Starting agent pool component" {:size size :base-port base-port})
       (create-pool! {::size size
-                     ::base-port base-port
-                     ::datalevin-port datalevin-port}))
+                     ::base-port base-port}))
     (do
       (log/info "Agent pool disabled for this profile")
       nil)))
@@ -900,6 +884,7 @@
 (comment
   ;; Create a pool of 2 warm JVMs
   (def pool (create-pool! {::size 2 ::base-port 7900}))
+  ;; ::datalevin-port option deleted in chunk M-1 (2026-05-15).
 
   ;; Check status
   (pool-status pool)
@@ -922,9 +907,6 @@
 
   ;; Release back to pool
   (release! pool agent1)
-
-  ;; Create pool with Datalevin support
-  (def pool (create-pool! {::size 2 ::base-port 7900 ::datalevin-port 8898}))
 
   ;; Shut down
   (shutdown! pool)

@@ -1,9 +1,14 @@
 (ns seon.flow.agent-runner
   "Minimal agent JVM entry point for isolated process execution.
 
-  Starts a lightweight nREPL server and optionally connects to a Datalevin
-  server. Designed to run in a separate JVM with moderate memory footprint
-  (512MB max heap).
+  Starts a lightweight nREPL server. Designed to run in a separate JVM with
+  moderate memory footprint (512MB max heap).
+
+  Cross-JVM data access goes through the flow harness (relay request/reply);
+  agents no longer auto-connect to a Datalevin server. Chunk M-1 (2026-05-15)
+  removed the --datalevin-uri CLI flag and the try-connect-datalevin helper
+  that conn'd to a Datalevin server at boot — both were always-nil dead paths
+  in the current pool config.
 
   Malli instrumentation is NOT started here -- it is deferred to claim time
   when the pool assigns the JVM to a session (see pool.clj:claim!).
@@ -21,7 +26,7 @@
   nil)
 
 (defn- parse-args
-  "Parse CLI args into a map. Supports --port, --datalevin-uri, --namespace."
+  "Parse CLI args into a map. Supports --port, --namespace."
   [args]
   (loop [args (seq args)
          result {:port 7890
@@ -31,23 +36,9 @@
       (let [[flag val & rest] args]
         (case flag
           "--port" (recur rest (assoc result :port (parse-long val)))
-          "--datalevin-uri" (recur rest (assoc result :datalevin-uri val))
           "--namespace" (recur rest (assoc result :namespace (symbol val)))
           (do (log/warn "Unknown arg" {:arg flag})
               (recur (next args) result)))))))
-
-(defn- try-connect-datalevin
-  "Attempt to connect to a Datalevin server. Returns connection or nil."
-  [uri]
-  (when uri
-    (try
-      (let [d (requiring-resolve 'datalevin.core/get-conn)]
-        (log/info "Connecting to Datalevin" {:uri uri})
-        (d uri))
-      (catch Exception e
-        (log/warn "Datalevin connection failed (continuing without DB)"
-                  {:uri uri :error (.getMessage e)})
-        nil))))
 
 (defn- ensure-namespace
   "Ensure target namespace exists, require if on classpath."
@@ -64,18 +55,14 @@
 (defn -main [& args]
   (let [start-time (System/nanoTime)
         opts (parse-args args)
-        {:keys [port namespace datalevin-uri]} opts
+        {:keys [port namespace]} opts
         _ (log/info "Starting agent JVM" opts)
-
-        ;; Connect to Datalevin (optional)
-        db-conn (try-connect-datalevin datalevin-uri)
 
         ;; Ensure target namespace
         target-ns (ensure-namespace namespace)
 
         ;; Create context
         ctx-atom (atom {:seon.agent/namespace namespace
-                        :seon.agent/db db-conn
                         :seon.agent/nrepl-port port
                         :seon.agent/started-at (java.util.Date.)
                         :seon.agent/jvm-isolated? true})
@@ -91,8 +78,7 @@
     (log/info "Agent JVM ready"
               {:port (:port server)
                :namespace namespace
-               :startup-ms (long startup-ms)
-               :datalevin (if db-conn :connected :unavailable)})
+               :startup-ms (long startup-ms)})
 
     ;; Ready signal for parent process to detect
     (println (str "AGENT_READY port=" (:port server)
