@@ -261,6 +261,26 @@
       (:integration (meta ns-obj)))
     (catch Exception _ false)))
 
+(defn- deferred-ns?
+  "Check if a test namespace has ^:deferred metadata. Deferred
+   namespaces are placeholders for tests whose subject is parked
+   pending some architectural trigger — see
+   `seon/docs/prds/datahike-migration/deferred.md` for the index +
+   each entry's revisit condition. Default test runs skip them."
+  [ns-sym]
+  (try
+    (require ns-sym)
+    (when-let [ns-obj (find-ns ns-sym)]
+      (:deferred (meta ns-obj)))
+    (catch Exception _ false)))
+
+(defn- excluded-ns?
+  "Predicate combining ^:integration and ^:deferred — both skip
+   default `test-all` runs."
+  [ns-sym]
+  (or (integration-ns? ns-sym)
+      (deferred-ns? ns-sym)))
+
 (defn- safe-run-ns-tests
   "Run tests for a single namespace, catching Throwable to prevent
    LMDB native crashes from killing the REPL session."
@@ -283,12 +303,12 @@
        ::timestamp (java.util.Date.)})))
 
 (defn test-all
-  "Run all unit test namespaces. Excludes ^:integration tagged namespaces.
-   Each namespace runs in isolation — a crash in one does not kill the rest.
-   Returns aggregated structured results."
+  "Run all unit test namespaces. Excludes ^:integration and ^:deferred
+   tagged namespaces. Each namespace runs in isolation — a crash in
+   one does not kill the rest. Returns aggregated structured results."
   []
   (let [all-nses (find-test-namespaces)
-        unit-nses (remove integration-ns? all-nses)]
+        unit-nses (remove excluded-ns? all-nses)]
     (if (empty? unit-nses)
       (let [r {::success true ::test-count 0 ::pass-count 0 ::fail-count 0
                ::error-count 0 ::failures [] ::duration-ms 0

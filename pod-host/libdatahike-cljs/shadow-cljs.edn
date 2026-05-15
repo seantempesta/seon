@@ -28,7 +28,9 @@
    :output-to "out/spike-idb.js"
    :main seon.podhost.libdatahike.cljs-spike-idb/main
    ;; fake-indexeddb global polyfill must run before any IDB code touches globalThis.indexedDB
-   :prepend-js "require('fake-indexeddb/auto');"
+   ;; konserve.indexeddb uses `js/window.indexedDB`, not `js/globalThis.indexedDB`,
+   ;; so we need to alias window -> globalThis in addition to loading the polyfill.
+   :prepend-js "require('fake-indexeddb/auto'); globalThis.window = globalThis;"
    :compiler-options {:warnings-as-errors false
                       :warnings {:fn-deprecated false
                                  :protocol-multiple-impls false}}}
@@ -37,7 +39,9 @@
   {:target :node-script
    :output-to "out/bench.js"
    :main seon.podhost.libdatahike.bench/main
-   :prepend-js "require('fake-indexeddb/auto');"
+   ;; konserve.indexeddb uses `js/window.indexedDB`, not `js/globalThis.indexedDB`,
+   ;; so we need to alias window -> globalThis in addition to loading the polyfill.
+   :prepend-js "require('fake-indexeddb/auto'); globalThis.window = globalThis;"
    :compiler-options {:warnings-as-errors false
                       :warnings {:fn-deprecated false
                                  :protocol-multiple-impls false}}}}}
