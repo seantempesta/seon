@@ -521,6 +521,60 @@ This is the agent fleet model. The renderer + ctx + transaction-listener pieces 
 
 These are all post-cluster-4 work but worth recording now so the design space stays visible.
 
+## M-2b test ports — deferred to M-3 (2026-05-15)
+
+M-2 deleted 26 test files in `b26fcc9`. M-2b restored 13 of them as
+ports to the canonical `tu/with-test-db-fixture` against datahike
+`:memory`. The 13 ported across 6 commits: `fce007f` (db_test +
+validation_test), `69ccadb` (runtime + ctx + agent.env tests),
+`f5428b4` (repl trio), `1d50b78` (render pair), `90a9a70` (ns.lifecycle),
+`279d832` (flow.trace), `61070cd` (ns.lifecycle with-redefs fix for
+ensure-instance Malli instrumentation under full-suite).
+
+Suite at end of M-2b: **655 tests / 2803 pass / 0 fail / 0 err /
+`:success true`** (was 501 / 2388 at end of M-2; +154 tests / +415
+assertions from the ports).
+
+### Stays deleted permanently (5 files)
+
+Their subject is gone with the substrate; the test's premise no
+longer exists.
+
+- `test/seon/ai/datalevin_test.clj` — `seon.ai.datalevin` namespace removed in M-2.
+- `test/seon/db/datalevin/backup_test.clj` — subject removed.
+- `test/seon/db/datalevin/writer_test.clj` — subject removed.
+- `test/seon/db/schema_test.clj` — tested the deleted Malli→datalevin bridge fn.
+- `test/seon/db/schema_roundtrip_test.clj` — same.
+- `test/seon/flow/infrastructure_test.clj` — tested `seon.db.datalevin.writer/infra-writer-step` which was deleted in M-2's `3285546`.
+
+### Deferred to M-3 — 6 files (need working `seon.graph.ingest`)
+
+All six rely on `seon.graph.ingest/ingest-analysis!` or
+`ingest-incremental!` to populate the fixture's graph. Both ingest
+fns assume `[:seon.fn/qualified-name "..."]`-style lookup-refs
+resolve against entities transacted earlier in the same call.
+Datalevin tolerated forward references; datahike throws
+`:entity-id/missing`. The fix lives in `seon.graph.ingest` (either
+upsert-first then ref, or rewrite same-batch refs to datahike tempid
+strings via the same pattern `tu/transact-full-graph!` uses for the
+shape↔entry cycle). M-3 owns this.
+
+Once ingest works:
+
+- `test/seon/graph/context_test.clj` — analyzer + ingest of `src/seon/graph/`, then exercises `seon.graph.context/build` + `build-for-namespace`.
+- `test/seon/graph/ingest_test.clj` — tests `ingest-analysis!` itself end-to-end.
+- `test/seon/graph/query_test.clj` — populated-graph queries: call-graph, functions-with-output-key, transitive-dependents-of.
+- `test/seon/graph/shape_test.clj` — uses `seon.test.bootstrap` (deleted in M-2) — port needs a `with-test-bootstrap` replacement; the shape-walker + ingest + discovery surface.
+- `test/seon/graph/shape_generative_test.clj` — property-based; also uses `seon.test.bootstrap`.
+- `test/seon/dev/test_select_test.clj` — `affected-namespaces` + `run-affected-tests!` against a populated graph.
+
+### Partial ports flagging M-3 / M-4 work
+
+- `seon.repl-test/code-index-updated-test` — dropped pending M-3 (`eval-form!`'s `update-code-index!` calls `ingest-incremental!`; same lookup-ref bug as above).
+- `seon.ctx-test` persist-load round-trip tests — dropped pending M-4 (`ctx/persist!` calls into the deprecated `seon.db/resolve-conn` shim; M-4 redesigns *ctx* with atom-semantics + auto-persist).
+- `seon.ns.lifecycle-test/instance-resume-round-trip-test` + `backup-all-instances-test` — same M-4 disposition; both exercise `ctx/persist!`.
+- `seon.ns.lifecycle-test` ensure-instance-* tests — `with-redefs inject-vars!` because the prod fn assoc's `::db-name nil` into the downstream call and Malli instrumentation rejects it. M-3/M-4 cleanup of the *conn* injection path should let the stub go away.
+
 ## Resolved during Stage 2.1 test migration (2026-05-14)
 
 Tracked here so the history of what's been fixed stays visible alongside what remains. Each "Resolved" entry quotes the original smell text and links to its fix commit.
