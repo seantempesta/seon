@@ -1,17 +1,16 @@
-{:deps {org.graalvm.polyglot/polyglot {:mvn/version "24.2.1"}
-        clj.native-image/clj.native-image
+{:deps {clj.native-image/clj.native-image
           {:git/url "https://github.com/taylorwood/clj.native-image.git"
            :sha "4604ae76855e09cdabc0a2ecc5a7de2cc5b775d6"}
-        ;; Datahike from local clone (the wasm-spike branch with bb ni-wasm)
-        org.replikativ/datahike {:local/root "/Users/you/src/your-project/reference/datahike"}}
+        ;; Published datahike via maven — avoids dragging in dev deps that
+        ;; the :local/root path brings (maven-core, jgit, closure-compiler,
+        ;; rhino, aws/s3, jackson, jsch — ~80 jars not needed at runtime).
+        io.replikativ/datahike {:mvn/version "0.7.1624"}}
  :paths ["src"]
  :aliases
  {:native-image
-  ;; --tool:svm-wasm MUST be first per Web Image docs.
-  ;; Narrow --initialize-at-build-time to Clojure runtime essentials only —
-  ;; blanket init causes analysis to touch all class paths, tripping on
-  ;; SVM-internal monitor code (JavaMonitorQueuedSynchronizer.parkAndCheckInterrupt)
-  ;; that datahike's core.async writer reaches indirectly.
+  ;; --tool:svm-wasm MUST be first.  Narrow init covers Clojure-ecosystem
+  ;; packages so analysis doesn't drag in @Delete'd SVM internals (blanket
+  ;; init trips on `@Delete methods should have a single callee` validation).
   {:main-opts ["-m" "clj.native-image" "seon.podhost.libdatahike.spike"
                "--tool:svm-wasm"
                "--no-fallback"
@@ -20,21 +19,51 @@
                "-H:IncludeResources='.*\\.properties$'"
                "-H:Name=core"
                "-H:+AllowDeprecatedBuilderClassesOnImageClasspath"
-               ;; Narrow init: Clojure runtime + datahike/konserve/replikativ stacks
-               ;; must be initialized at build time (their AOT-generated classes
-               ;; need RT to exist).  Excluded: SVM/JDK internals that drag in
-               ;; threading paths under WASM.
+               ;; Build-time init for all Clojure ecosystem code
                "--initialize-at-build-time=clojure"
                "--initialize-at-build-time=datahike"
                "--initialize-at-build-time=konserve"
-               "--initialize-at-build-time=replikativ"
                "--initialize-at-build-time=hasch"
+               "--initialize-at-build-time=incognito"
+               "--initialize-at-build-time=datalog"
+               "--initialize-at-build-time=alphabase"
+               "--initialize-at-build-time=replikativ"
+               "--initialize-at-build-time=org.replikativ"
+               "--initialize-at-build-time=me.tonsky"
                "--initialize-at-build-time=superv"
+               "--initialize-at-build-time=geheimnis"
+               "--initialize-at-build-time=malli"
+               "--initialize-at-build-time=jsonista"
+               "--initialize-at-build-time=spec_tools"
+               "--initialize-at-build-time=mvxcvi"
+               "--initialize-at-build-time=clj_cbor"
+               "--initialize-at-build-time=arrangement"
+               "--initialize-at-build-time=fipp"
+               "--initialize-at-build-time=cognitect"
+               "--initialize-at-build-time=borkdude"
+               "--initialize-at-build-time=dynaload"
+               "--initialize-at-build-time=edamame"
+               "--initialize-at-build-time=environ"
+               "--initialize-at-build-time=medley"
+               "--initialize-at-build-time=nrepl"
+               "--initialize-at-build-time=bencode"
+               "--initialize-at-build-time=babashka"
                "--initialize-at-build-time=taoensso"
+               "--initialize-at-build-time=trove"
+               "--initialize-at-build-time=tigris"
+               "--initialize-at-build-time=fress"
+               "--initialize-at-build-time=simm"
+               "--initialize-at-build-time=partial_cps"
+               "--initialize-at-build-time=clj_commons"
+               "--initialize-at-build-time=clojure.tools"
                "--initialize-at-build-time=seon"
-               ;; Patch the shadowed-Guava module with the missing
-               ;; InternalFutureFailureAccess class (GraalVM 25 svm-wasm packaging bug)
+               ;; Patch the shadowed-Guava module — multiple packaging defects:
+               ;; (1) missing InternalFutureFailureAccess + InternalFutures classes
+               ;;     (stub-classes/ provides them via --patch-module)
+               ;; (2) module-info doesn't `requires jdk.unsupported` despite
+               ;;     using sun.misc.Unsafe internally (AbstractFutureState$UnsafeAtomicHelper)
                "-J--patch-module=org.graalvm.wrapped.google.guava=stub-classes"
+               "-J--add-reads=org.graalvm.wrapped.google.guava=jdk.unsupported"
                "-march=native"]
    :jvm-opts ["-Dclojure.compiler.direct-linking=true"
               "-Dclojure.spec.skip-macros=true"]}}}
