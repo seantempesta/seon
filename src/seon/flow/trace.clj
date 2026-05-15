@@ -18,7 +18,6 @@
   (:require [taoensso.timbre :as log]
             [seon.db :as db]
             [seon.db.schema :as dbs]
-            [seon.db.tx :as tx]
             [seon.schema :as schema])
   (:import [java.util Date]))
 
@@ -78,12 +77,6 @@
    [::entity-type :keyword]])
 
 (dbs/register-entity-schema! "seon.flow.trace" entity-schema)
-
-(def datalevin-schema
-  "Datalevin schema for flow trace attributes.
-   Derived from entity-schema via the bridge, merged with tx metadata."
-  (merge (dbs/malli-map->datalevin-schema entity-schema)
-         tx/datalevin-schema))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Persistence

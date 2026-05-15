@@ -29,7 +29,6 @@
      (ingest/ingest-namespace! {::db-name :seon.runtime ::ns-name \"seon.foo\"
                                 ::functions fns ::specs specs ::vars vars})"
   (:require [seon.db :as db]
-            [seon.db.datalevin.conn :as dl-conn]
             [seon.db.schema :as db-schema]
             [seon.graph.analyzer :as analyzer]
             [seon.render :as render]
@@ -213,17 +212,6 @@
 (db-schema/register-entity-schema! "seon.shape" shape-entity-schema)
 (db-schema/register-entity-schema! "seon.entry" entry-entity-schema)
 
-(def datalevin-schema
-  "Schema for the knowledge graph in Datalevin. Derived from Malli entity schemas."
-  (merge (db-schema/malli-map->datalevin-schema ns-entity-schema)
-         (db-schema/malli-map->datalevin-schema fn-entity-schema)
-         (db-schema/malli-map->datalevin-schema call-entity-schema)
-         (db-schema/malli-map->datalevin-schema ns-dep-entity-schema)
-         (db-schema/malli-map->datalevin-schema spec-entity-schema)
-         (db-schema/malli-map->datalevin-schema var-entity-schema)
-         (db-schema/malli-map->datalevin-schema shape-entity-schema)
-         (db-schema/malli-map->datalevin-schema entry-entity-schema)))
-
 (schema/register! ::db-name
                   [:keyword {:description "Database name keyword (e.g. :seon.runtime)"}])
 
@@ -350,6 +338,22 @@
 ;;; Private Implementation - Helpers
 ;;; ---------------------------------------------------------------------------
 
+(defn- connection-error?
+  "Return true if an exception's message looks like a transient connection
+   failure. Inlined here from the deleted `seon.db.datalevin.conn/connection-error?`
+   so the same retry/log heuristic survives the substrate cleanup."
+  [^Throwable e]
+  (let [msg (str (.getMessage e) " " (some-> (.getCause e) (.getMessage)))]
+    (boolean
+      (or (re-find #"(?i)connection refused" msg)
+          (re-find #"(?i)connection reset" msg)
+          (re-find #"(?i)broken pipe" msg)
+          (re-find #"(?i)closed" msg)
+          (re-find #"(?i)not connected" msg)
+          (re-find #"(?i)timeout" msg)
+          (instance? java.net.ConnectException e)
+          (instance? java.net.ConnectException (.getCause e))))))
+
 (defn- transact-in-batches!
   "Transact entities in batches to avoid overwhelming Datalevin.
    Returns {:succeeded N :failed N :errors [...]} for error isolation.
@@ -362,7 +366,7 @@
         (db/transact! db-name (vec batch))
         (swap! results update :succeeded + (count batch))
         (catch Exception e
-          (if (dl-conn/connection-error? e)
+          (if (connection-error? e)
             (log/debug "Batch transact failed (connection)" {:db-name db-name :error (.getMessage e)})
             (log/warn e "Batch transact failed, isolating error"
                       {:db-name db-name
@@ -418,7 +422,7 @@
     (db/transact! db-name tx-data)
     true
     (catch Exception e
-      (if (dl-conn/connection-error? e)
+      (if (connection-error? e)
         (log/debug "Transact failed (connection)" {:label label :error (.getMessage e)})
         (log/warn e "Transact failed (isolated)" {:label label
                                                   :tx-count (count tx-data)}))

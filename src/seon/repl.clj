@@ -91,11 +91,6 @@
 
 (db-schema/register-entity-schema! "seon.repl" form-entity-schema)
 
-(def datalevin-schema
-  "Datalevin schema for form storage. Derived from Malli.
-   Merged with ingest schema at conn creation."
-  (db-schema/malli-map->datalevin-schema form-entity-schema))
-
 ;;; ---------------------------------------------------------------------------
 ;;; Form Classification
 ;;; ---------------------------------------------------------------------------

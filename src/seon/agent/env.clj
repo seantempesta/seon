@@ -54,14 +54,6 @@
                   [:any {:description "Serializable data to persist"}])
 
 ;;; ---------------------------------------------------------------------------
-;;; Datalevin Schema Extension (for ctx persistence)
-;;; ---------------------------------------------------------------------------
-
-(def ctx-schema
-  "Alias for seon.ctx/datalevin-schema. Use the canonical schema from seon.ctx."
-  ctx/datalevin-schema)
-
-;;; ---------------------------------------------------------------------------
 ;;; Graph Query Wrappers
 ;;; ---------------------------------------------------------------------------
 

@@ -265,13 +265,6 @@
 (db-schema/register-entity-schema! "seon.agent.run" agent-run-entity-schema)
 (db-schema/register-entity-schema! "seon.flow.snap" flow-snap-entity-schema)
 
-(def runtime-schema
-  "Datalevin schema for all runtime entities. Derived from Malli.
-   Merged with graph/ctx/trace schemas when creating the seon.runtime connection."
-  (merge (db-schema/malli-map->datalevin-schema runtime-entity-schema)
-         (db-schema/malli-map->datalevin-schema agent-run-entity-schema)
-         (db-schema/malli-map->datalevin-schema flow-snap-entity-schema)))
-
 ;; runtime-merged-schema + merged-schema-cache deleted (chunk M-1, 2026-05-15).
 ;; The aggregator was only consumed by :seon/runtime-db (Integrant key absent
 ;; from system.edn — defmethods deleted), seon.render/get-conn (deleted), and

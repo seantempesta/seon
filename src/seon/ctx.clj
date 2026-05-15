@@ -189,11 +189,6 @@
 
 (db-schema/register-entity-schema! "seon.ctx" ctx-entity-schema)
 
-(def datalevin-schema
-  "Datalevin schema for ctx persistence. Derived from Malli.
-   Merge with other schemas when creating connections."
-  (db-schema/malli-map->datalevin-schema ctx-entity-schema))
-
 ;;; ---------------------------------------------------------------------------
 ;;; Instance ID Generation
 ;;; ---------------------------------------------------------------------------

@@ -45,11 +45,6 @@
 
 (dbs/register-entity-schema! "seon.db.tx" entity-schema)
 
-(def datalevin-schema
-  "Datalevin schema for transaction metadata attributes.
-   Derived from entity-schema via the bridge. Merge into every database's schema."
-  (dbs/malli-map->datalevin-schema entity-schema))
-
 ;;; ---------------------------------------------------------------------------
 ;;; Builder
 ;;; ---------------------------------------------------------------------------
