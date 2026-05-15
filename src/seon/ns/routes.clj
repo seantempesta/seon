@@ -76,15 +76,12 @@
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
             [dev.onionpancakes.chassis.core :as h]
-            [integrant.repl.state :as state]
             [org.httpkit.server :as hk]
-            [seon.db.datalevin.conn :as dl-conn]
             [seon.ctx :as ctx]
             [seon.ns.introspect :as introspect]
             [seon.ns.lifecycle :as lifecycle]
             [seon.ns.view :as view]
             [seon.render :as render]
-            [seon.runtime :as runtime]
             [seon.web.html :as html]
             [seon.web.sse :as sse]
             [seon.web.components :as ui]
@@ -118,27 +115,27 @@
 ;;; ---------------------------------------------------------------------------
 ;;; Graph Connection Helper
 ;;; ---------------------------------------------------------------------------
-
-(defn- get-conn
-  "Get Datalevin runtime connection via connection manager."
-  []
-  (when-let [mgr (:seon.db.datalevin/connections state/system)]
-    (try
-      (dl-conn/get-conn! {::dl-conn/manager mgr
-                          ::dl-conn/db :seon.runtime
-                          ::dl-conn/schema (runtime/runtime-merged-schema)})
-      (catch Exception _ nil))))
+;;;
+;;; The legacy `get-conn` helper returned a Datalevin runtime connection via
+;;; the dead `:seon.db.datalevin/connections` Integrant key. M-1 (2026-05-15)
+;;; deleted the fn + dl-conn require. Every previous callsite has been replaced
+;;; with `nil` so route handlers preserve their existing silently-degraded
+;;; behavior (the wrapped `(when-let [conn (get-conn)] ...)` branches were
+;;; already dead on the current boot). Restoring the affected routes is part
+;;; of the post-M-4 `:seon.runtime → datahike` migration.
 
 ;;; ---------------------------------------------------------------------------
 ;;; Lifecycle Wrappers
 ;;; ---------------------------------------------------------------------------
 
 (defn- dynamic-namespace?
-  "Check if namespace is dynamic via lifecycle module."
-  [ns-sym]
-  (when-let [conn (get-conn)]
-    (::lifecycle/dynamic? (lifecycle/dynamic-namespace? {::lifecycle/db-name :seon.runtime
-                                                         ::lifecycle/ns-sym ns-sym}))))
+  "Check if namespace is dynamic via lifecycle module.
+   M-1 (2026-05-15): the legacy `(when-let [conn (get-conn)] ...)` gate has been
+   removed (`get-conn` always returned nil on the current boot, so this fn was
+   silently always nil). Returns nil for now to preserve behavior until the
+   :seon.runtime → datahike migration restores the lookup."
+  [_ns-sym]
+  nil)
 
 ;;; ---------------------------------------------------------------------------
 ;;; Instance Helpers
@@ -296,15 +293,14 @@
   "Find the page renderer for a namespace from the code graph.
    Returns a wrapped function (ctx-value) -> hiccup, or nil.
    Discovery is 100% spec-driven: finds functions with :seon.render/html in output spec
-   whose required input keys include *ctx*."
-  [ns-sym]
-  (when-let [conn (get-conn)]
-    (let [{::lifecycle/keys [render-fn]}
-          (lifecycle/find-page-render-fn {::lifecycle/db-name :seon.runtime
-                                          ::lifecycle/ns-sym ns-sym})]
-      (when render-fn
-        (lifecycle/make-render-fn {::lifecycle/render-fn render-fn
-                                   ::lifecycle/ns-sym ns-sym})))))
+   whose required input keys include *ctx*.
+
+   M-1 (2026-05-15): the legacy `(when-let [conn (get-conn)] ...)` gate has been
+   removed; on the current boot `get-conn` always returned nil, so this fn was
+   silently always nil. Returns nil for now to preserve behavior until the
+   :seon.runtime → datahike migration restores the lookup."
+  [_ns-sym]
+  nil)
 
 (defn- build-available-keys
   "Build the set of available data keys for renderer resolution.
@@ -329,7 +325,9 @@
         ctx-atom (when instance-id
                    (ctx/get-atom {::ctx/instance-id instance-id}))
         ctx-val (when ctx-atom @ctx-atom)
-        conn (get-conn)]
+        ;; M-1: get-conn always returned nil on the current boot; conn-key
+        ;; was never assoc'd. Preserving that behavior until :seon.runtime → datahike lands.
+        conn nil]
     (cond-> {}
       ctx-val (assoc ctx-key ctx-val)
       conn (assoc conn-key conn)
@@ -480,7 +478,8 @@
    - view: Optional view mode - \"introspect\" forces introspection view
    - params: Parsed query params map (string keys)"
   [ns-sym session-id view params]
-  (let [conn (get-conn)
+  (let [;; M-1: get-conn deleted; resolved is always nil on the current boot.
+        conn nil
         available-keys (build-available-keys ns-sym params)
         resolved (when conn
                    (render/resolve-renderer conn available-keys (str ns-sym)))
@@ -752,7 +751,8 @@
       (render-for-format ns-sym fmt)
       (let [instance-id (get params "instance")
             view (get params "view")
-            conn (get-conn)
+            ;; M-1: get-conn deleted; always nil on the current boot.
+            conn nil
             is-dynamic? (dynamic-namespace? ns-sym)]
         (cond
           ;; Dynamic namespace without instance -> ensure-instance! and redirect
@@ -837,7 +837,8 @@
 (defn- handle-create-instance!
   "Handle POST /ns/:namespace/create-instance! - uses lifecycle to create instance."
   [ns-sym]
-  (let [conn (get-conn)
+  (let [;; M-1: get-conn deleted; always nil on the current boot.
+        conn nil
         {::lifecycle/keys [instance-id]}
         (lifecycle/ensure-instance! (cond-> {::lifecycle/ns-sym ns-sym}
                                       conn (assoc ::lifecycle/db-name :seon.runtime)))]

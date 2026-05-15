@@ -2,20 +2,17 @@
   "Integrant system configuration and component definitions.
 
   Defines init-key and halt-key! methods for all system components:
-  - :seon.db.datalevin/server - Datalevin server for all data storage
-  - :seon/runtime-db - Runtime database connection (code graph + runtime registry)
+  - :seon.db/flow - Datahike per-namespace conn-process flow (sole database)
   - :seon.schema/registry - Malli schema registry
   - :seon.web.server/http-server - HTTP server for web UI
   - :seon.dev/nrepl - nREPL for REPL-driven development
-  - :seon.orchestrator/namespace-nrepls - Per-namespace nREPL servers for agent isolation
-
-  Datalevin is the sole database."
+  - :seon.flow/infrastructure - Reply-router + REPL eval + sinks
+  - :seon.flow/pool - Pre-warmed agent JVM pool"
   (:require [clojure.core.async.flow :as flow]
             [integrant.core :as ig]
             [taoensso.timbre :as log]
             [seon.db :as db]
             [seon.schema :as schema]
-            [seon.db.datalevin.conn :as dl-conn]
             [seon.flow.msg :as msg]
             [seon.flow.status :as status]
             [seon.flow.topology :as topology]
@@ -180,216 +177,16 @@
         (ig/init-key :seon.orchestrator/sessions opts))))
 
 ;;; ---------------------------------------------------------------------------
-;;; Graph Database Component
-;;; ---------------------------------------------------------------------------
-;;; Owns the seon.runtime Datalevin connection used by:
-;;; - Code scanner (code graph entities)
-;;; - Runtime registry (namespace instance tracking)
-;;; - Render system (function resolution)
-
-(defn runtime-db-conn
-  "Get a fresh runtime database connection from the runtime-db component.
-   Always goes through the connection manager, so handles reconnection
-   after connection pool recycling or server restarts.
-
-   Usage:
-     (runtime-db-conn (:seon/runtime-db state/system))"
-  [{:keys [connection-manager]}]
-  (dl-conn/get-conn!
-   {::dl-conn/manager connection-manager
-    ::dl-conn/db :seon.runtime
-    ::dl-conn/schema (runtime/runtime-merged-schema)}))
-
-(defmethod ig/init-key :seon/runtime-db
-  [_ {:keys [connection-manager]}]
-  ;; Bind direct-mode + conn-manager so persist-instance! (in a future)
-  ;; can resolve connections during init-key (Integrant system is nil).
-  ;; Clojure's future conveys dynamic bindings via binding-conveyor-fn.
-  (binding [db/*direct-mode* true
-            db/*conn-manager* connection-manager]
-    ;; Get conn through the connection manager (handles staleness, auto-reconnect)
-    (let [conn (dl-conn/get-conn!
-                {::dl-conn/manager connection-manager
-                 ::dl-conn/db :seon.runtime
-                 ::dl-conn/schema (runtime/runtime-merged-schema)})]
-      (log/info "Runtime database connected via connection manager")
-      ;; Mark any instances from previous unclean shutdown as crashed
-      (let [{::runtime/keys [crashed-count]} (runtime/mark-crashed! {})]
-        (when (pos? crashed-count)
-          (log/warn "Found crashed instances from previous run" {:count crashed-count})))
-      ;; Hydrate in-memory cache from Datalevin (includes crashed instances)
-      (let [{::runtime/keys [hydrated-count]} (runtime/hydrate-cache! {})]
-        (when (pos? hydrated-count)
-          (log/info "Hydrated runtime cache from Datalevin" {:count hydrated-count})))
-      ;; Register this component
-      (runtime/register! {::runtime/namespace "seon.graph.db"
-                          ::runtime/status :running
-                          ::runtime/location :in-process
-                          ::runtime/component-key :seon/runtime-db})
-      ;; Only store connection-manager — consumers must call runtime-db-conn
-      ;; to get a fresh connection. Storing :conn here causes stale references
-      ;; after TTL cleanup or server restarts.
-      {:connection-manager connection-manager})))
-
-(defmethod ig/halt-key! :seon/runtime-db
-  [_ _state]
-  (log/info "Stopping runtime-db component...")
-  ;; Unregister this component
-  (runtime/unregister! {::runtime/namespace "seon.graph.db"})
-  ;; Don't close conn directly — connection manager owns it
-  (log/info "Runtime-db component stopped"))
-
-;; Suspend/resume to survive (reset) like nREPL
-(defmethod ig/suspend-key! :seon/runtime-db [_ state] state)
-
-(defmethod ig/resume-key :seon/runtime-db
-  [_ opts old-opts old-state]
-  (if (= (:connection-manager opts) (:connection-manager old-opts))
-    ;; Connection manager unchanged — conn is still valid (manager handles staleness)
-    old-state
-    (do (ig/halt-key! :seon/runtime-db old-state)
-        (ig/init-key :seon/runtime-db opts))))
-
-;;; ---------------------------------------------------------------------------
 ;;; Code Scanner Component
 ;;; ---------------------------------------------------------------------------
-;;; Populates the Datalevin knowledge graph at startup by analyzing the
-;;; codebase with clj-kondo and scanning for schema/register! calls.
-;;; Receives its connection from :seon/runtime-db component.
-;;; Runs in a background future to avoid blocking startup (~3s savings).
-
-(def ^:const ^:private scanner-circuit-breaker-threshold
-  "After this many consecutive ingest failures, skip remaining namespaces."
-  3)
-
-(defn- run-code-scan!
-  "Execute the code scan in the current thread. Called from a future.
-   Includes circuit breaker: after 3 consecutive DB failures, skips remaining
-   namespaces and signals :degraded to the health component."
-  [paths]
-  (let [extract-graph-from-file (resolve 'seon.graph.extract/extract-graph-from-file)
-        ingest-namespace! (resolve 'seon.graph.ingest/ingest-namespace!)]
-    (try
-      (log/info "Code scanner: extracting graph for project..." {:paths paths})
-      (let [clj-files (->> (mapcat #(file-seq (java.io.File. %)) paths)
-                           (filter (fn [^java.io.File f]
-                                     (and (.isFile f)
-                                          (let [n (.getName f)]
-                                            (or (.endsWith n ".clj")
-                                                (.endsWith n ".cljs")
-                                                (.endsWith n ".cljc"))))))
-                           vec)
-            total (count clj-files)]
-        (log/info "Code scanner: found files to process" {:count total})
-        ;; Phase 1: Extract graphs in parallel (CPU-bound, no DB)
-        (let [graphs (->> clj-files
-                          (pmap (fn [^java.io.File f]
-                                  (try
-                                    (extract-graph-from-file
-                                     {:seon.graph.extract/file-path (.getAbsolutePath f)})
-                                    (catch Throwable e
-                                      (log/warn "Code scanner: extract failed"
-                                                {:file (.getName f) :error (.getMessage e)})
-                                      nil))))
-                          (filter :seon.graph.extract/ns-name)
-                          vec)
-              ns-total (count graphs)
-              ingested (atom 0)
-              failed (atom 0)
-              skipped (atom 0)
-              consecutive-failures (atom 0)
-              circuit-open? (atom false)]
-          ;; Phase 2: Ingest sequentially (DB writes) with circuit breaker
-          (doseq [graph graphs]
-            (if @circuit-open?
-              (swap! skipped inc)
-              (try
-                (let [ns-str (:seon.graph.extract/ns-name graph)]
-                  (ingest-namespace!
-                   {:seon.graph.ingest/db-name :seon.runtime
-                    :seon.graph.ingest/ns-name ns-str
-                    :seon.graph.ingest/functions (:seon.graph.extract/functions graph)
-                    :seon.graph.ingest/specs (:seon.graph.extract/specs graph)
-                    :seon.graph.ingest/vars (:seon.graph.extract/vars graph)
-                    :seon.graph.ingest/call-edges (:seon.graph.extract/call-edges graph)
-                    :seon.graph.ingest/ns-deps (:seon.graph.extract/ns-deps graph)
-                    :seon.graph.ingest/ns-entities (:seon.graph.extract/namespaces graph)
-                    :seon.graph.ingest/shapes (:seon.graph.extract/shapes graph)
-                    :seon.graph.ingest/entries (:seon.graph.extract/entries graph)})
-                  (swap! ingested inc)
-                  (reset! consecutive-failures 0))
-                (catch Exception e
-                  (swap! failed inc)
-                  (let [n (swap! consecutive-failures inc)]
-                    (log/warn "Code scanner: ingest failed"
-                              {:ns (:seon.graph.extract/ns-name graph)
-                               :error (.getMessage e)
-                               :consecutive-failures n})
-                    (when (>= n scanner-circuit-breaker-threshold)
-                      (log/error "Code scanner: circuit breaker tripped after consecutive failures"
-                                 {:consecutive-failures n
-                                  :threshold scanner-circuit-breaker-threshold})
-                      (reset! circuit-open? true)
-                      ;; Signal degraded to health component
-                      (try
-                        ((requiring-resolve 'seon.health/set-startup-phase!) :degraded)
-                        (catch Exception _))))))))
-          (let [summary {:files-processed total
-                         :namespaces-total ns-total
-                         :ingested @ingested
-                         :failed @failed
-                         :skipped @skipped}]
-            (if (pos? (+ @failed @skipped))
-              (log/warn "Code scanner complete with errors" summary)
-              (log/info "Code scanner complete" summary)))))
-      (catch Exception e
-        (log/error "Code scanner failed" {:error (.getMessage e)})))))
-
-(defmethod ig/init-key :seon.graph/scanner
-  [_ {:keys [graph-db paths enabled?]}]
-  (when enabled?
-    ;; Verify connectivity before starting scan
-    (when-not (runtime-db-conn graph-db)
-      (log/warn "Code scanner: no graph-db connection available")
-      (throw (ex-info "Code scanner requires graph-db connection" {})))
-    (require 'seon.graph.extract)
-    (require 'seon.graph.ingest)
-    ;; Bind direct-mode + conn-manager so register! persist and scan future
-    ;; can resolve connections during init-key (Integrant system may be nil).
-    (let [cm (:connection-manager graph-db)]
-      (binding [db/*direct-mode* true
-                db/*conn-manager* cm]
-        ;; Register immediately so system sees the component
-        (runtime/register! {::runtime/namespace "seon.graph.scanner"
-                            ::runtime/status :running
-                            ::runtime/location :in-process
-                            ::runtime/component-key :seon.graph/scanner})
-        ;; Run scan in background so startup isn't blocked (~3s savings)
-        ;; future conveys bindings via binding-conveyor-fn
-        (let [scan-future (future (run-code-scan! paths))]
-          {:graph-db graph-db :paths paths :scan-future scan-future})))))
-
-(defmethod ig/halt-key! :seon.graph/scanner
-  [_ state]
-  (when (:graph-db state)
-    (log/info "Stopping code scanner...")
-    ;; Cancel scan if still running
-    (when-let [f (:scan-future state)]
-      (future-cancel f))
-    ;; Unregister from runtime (connection owned by graph-db, not closed here)
-    (runtime/unregister! {::runtime/namespace "seon.graph.scanner"})
-    (log/info "Code scanner stopped")))
-
-;; Always halt+init on resume. The scanner holds a Datalevin connection
-;; captured at init time (passed to run-code-scan! future). After reset,
-;; that connection may be closed by TTL cleanup or server restart.
-;; Re-scanning is cheap (~3s in background) and ensures fresh connections.
-(defmethod ig/suspend-key! :seon.graph/scanner [_ state] state)
-
-(defmethod ig/resume-key :seon.graph/scanner
-  [_ opts _old-opts old-state]
-  (ig/halt-key! :seon.graph/scanner old-state)
-  (ig/init-key :seon.graph/scanner opts))
+;;; Populates the runtime knowledge graph at startup by analyzing the codebase
+;;; with clj-kondo and scanning for schema/register! calls.
+;;; Currently absent from resources/system.edn — the :seon/runtime-db Integrant
+;;; key it depended on was removed during the datahike migration. The defmethods
+;;; below (and runtime-db-conn) were deleted in chunk M-1 (2026-05-15) along
+;;; with the dead :seon/runtime-db wiring. The scanner defmethod was also
+;;; deleted because its body referenced runtime-db-conn. Re-introducing the
+;;; scanner is post-M-4 work (the :seon.runtime → datahike migration).
 
 ;;; ---------------------------------------------------------------------------
 ;;; Infrastructure Flow Component
