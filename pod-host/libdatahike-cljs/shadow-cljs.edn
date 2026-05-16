@@ -44,4 +44,16 @@
    :prepend-js "require('fake-indexeddb/auto'); globalThis.window = globalThis;"
    :compiler-options {:warnings-as-errors false
                       :warnings {:fn-deprecated false
+                                 :protocol-multiple-impls false}}}
+
+  ;; Long-lived REPL target — boot + idle via setInterval so shadow's
+  ;; dev runtime stays attached. Drive evals via nREPL piggieback.
+  :repl
+  {:target :node-script
+   :output-to "out/repl.js"
+   :main seon.podhost.libdatahike.repl/main
+   :prepend-js "require('fake-indexeddb/auto'); globalThis.window = globalThis;"
+   :devtools {:enabled true}
+   :compiler-options {:warnings-as-errors false
+                      :warnings {:fn-deprecated false
                                  :protocol-multiple-impls false}}}}}
