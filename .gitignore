@@ -37,6 +37,10 @@ node_modules/
 resources/public/css/output.css
 hs_err_pid*.log
 
+# shadow-cljs build outputs + per-build state
+.shadow-cljs/
+out/
+
 # Obsidian vault state (per-user)
 docs/.obsidian/workspace.json
 docs/.obsidian/workspace-mobile.json

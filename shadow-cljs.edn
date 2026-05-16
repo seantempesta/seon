@@ -1,0 +1,21 @@
+;; CLJS build config — lives at seon root.
+;; Builds pull from the :cljs alias in deps.edn for CLJS deps.
+;;
+;; nREPL pinned to :7889 so editor + bin/mcp-server-cljs can find it
+;; without port discovery. JVM nREPL stays on :7888 (separate process,
+;; seon.runner).
+{:deps  {:aliases [:cljs]}
+
+ :nrepl {:port 7889}
+
+ :builds
+ {;; The V0 pod entry. One long-running Node process; stays alive via
+  ;; the agent loop's pending operations (or, in this skeleton, a
+  ;; heartbeat setInterval). `:devtools {:enabled true}` is the default
+  ;; for :node-script — listed here for visibility.
+  :client
+  {:target           :node-script
+   :output-to        "out/client/main.js"
+   :main             seon.client/-main
+   :devtools         {:enabled true}
+   :compiler-options {:warnings-as-errors false}}}}

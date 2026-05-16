@@ -172,6 +172,17 @@ All cross-boundary calls — namespace function calls, database writes, REPL eva
 
 Any git operation that changes branch, discards files, or modifies history affects all agents. Ask the user before running it — they'll coordinate across agents. The cost of asking is near zero; the cost of destroying another agent's work is high.
 
+### Lane discipline: `.clj` (JVM) vs `.cljs` (CLJS pod) siblings
+
+As of 2026-05-16, for spec-01 `seon.*` API surfaces the V0 substrate uses **`.cljs` files alongside the existing `.clj` files**, not `.cljc` (yet). Both compilers cleanly pick their own — CLJS reads `.cljs`, CLJ reads `.clj`, neither sees the other's. Two lanes:
+
+- **JVM seat** (Phase M / R / T datahike-migration work) — owns all existing `.clj` files under `src/seon/`. Don't author `.cljc` for namespaces that have a `.clj` sibling; the `.cljc` migration is a deliberate Stage 2/3 step in the convergence plan.
+- **V0 CLJS pod seat** — owns the new `.cljs` siblings (`seon.client.cljs`, the pending `seon.db.cljs`, `seon.trigger.cljs`, etc.) and the genuinely-shared `.cljc` files under `src/seon/agent/`. Doesn't touch the existing `.clj` files.
+
+`seon.schema` is the one exception — promoted to `.cljc` 2026-05-16 because the file was 100% platform-portable. Other promotions wait until both sides converge on the spec §3 map-in/map-out + `*conn*` shape.
+
+Full plan (call-site counts, JVM topology collapse to one-conn-per-user, test-fixture migration scope, lane coordination): `consumer-docs/2026-05-16-cljc-migration-plan.md` (in the seon parent tree).
+
 ---
 
 ## Data Rules

@@ -1,0 +1,428 @@
+#!/usr/bin/env bb
+
+;; MCP server for the libdatahike-cljs pod-host runtime.
+;;
+;; Bridges the Claude Code orchestrator to a running shadow-cljs build's
+;; nREPL, pivoting clones into a CLJS runtime via shadow-cljs piggieback.
+;;
+;; Discovery: the shadow watcher writes its nREPL port to
+;;   <project>/.shadow-cljs/nrepl.port
+;; on startup. We read that on demand each call (cheap) so the server stays
+;; correct across watcher restarts.
+;;
+;; Tools (registered with prefix mcp__seon_cljs__):
+;;   - eval               Eval CLJS code in the :repl build's runtime.
+;;   - create_session     Clone a persistent CLJS session for *1/*2/*3.
+;;   - list_sessions      List known sessions.
+;;   - stop_session       Forget a session (does not interrupt eval).
+;;   - reload_deps        Trigger shadow's reload-deps! (CLJ side).
+;;   - runtime_status     Report shadow watcher status + which runtimes connect.
+;;
+;; Protocol: JSON-RPC 2.0 over stdin/stdout.
+
+(require '[cheshire.core :as json]
+         '[bencode.core :as b]
+         '[clojure.string :as str])
+
+(import '[java.net Socket InetSocketAddress]
+        '[java.io PushbackInputStream BufferedOutputStream BufferedReader])
+
+;;; ---------------------------------------------------------------------------
+;;; Configuration
+;;; ---------------------------------------------------------------------------
+
+(def project-root
+  (or (System/getenv "SEON_CLJS_PROJECT")
+      "/Users/you/src/seon"))
+
+(def shadow-port-file (str project-root "/.shadow-cljs/nrepl.port"))
+
+(def default-build-id ":client")
+(def default-timeout-ms 30000)
+(def connect-timeout-ms 5000)
+
+(def server-info {:name "seon-cljs" :version "0.1.0"})
+
+;; sid (string) -> {:nrepl-session "<uuid>" :build "<:repl>" :created-at ms}
+(def sessions (atom {}))
+
+(def stdout-lock (Object.))
+
+;;; ---------------------------------------------------------------------------
+;;; Logging (stderr only — stdout is reserved for JSON-RPC)
+;;; ---------------------------------------------------------------------------
+
+(def ^:dynamic *debug* (= "1" (System/getenv "DEBUG")))
+
+(defn log-info [& args]
+  (binding [*out* *err*]
+    (apply println "[mcp-cljs INFO]" args)
+    (flush)))
+
+(defn log-debug [& args]
+  (when *debug*
+    (binding [*out* *err*]
+      (apply println "[mcp-cljs DEBUG]" args)
+      (flush))))
+
+(defn log-error [& args]
+  (binding [*out* *err*]
+    (apply println "[mcp-cljs ERR ]" args)
+    (flush)))
+
+;;; ---------------------------------------------------------------------------
+;;; Shadow port discovery
+;;; ---------------------------------------------------------------------------
+
+(defn read-shadow-port
+  "Returns the current shadow-cljs nREPL port, or nil if no watcher is running."
+  []
+  (try
+    (let [f (java.io.File. shadow-port-file)]
+      (when (.exists f)
+        (some-> (slurp f) str/trim parse-long)))
+    (catch Exception e
+      (log-error "Failed to read shadow port:" (.getMessage e))
+      nil)))
+
+;;; ---------------------------------------------------------------------------
+;;; nREPL bencode plumbing
+;;; ---------------------------------------------------------------------------
+
+(defn- ->str [x]
+  (cond
+    (bytes? x) (String. ^bytes x "UTF-8")
+    (vector? x) (mapv ->str x)
+    :else x))
+
+(defn- normalize [m]
+  (reduce-kv (fn [acc k v] (assoc acc (->str k) (->str v))) {} m))
+
+(defn- connect [port]
+  (let [s (Socket.)]
+    (.connect s (InetSocketAddress. "127.0.0.1" (int port)) connect-timeout-ms)
+    s))
+
+(defn- send-and-collect
+  "Send a single message; collect responses until status contains 'done' or 'error'.
+   Returns the vector of normalized responses."
+  [^Socket sock msg timeout-ms]
+  (let [in (PushbackInputStream. (.getInputStream sock))
+        out (BufferedOutputStream. (.getOutputStream sock))
+        deadline (+ (System/currentTimeMillis) timeout-ms)]
+    (b/write-bencode out msg)
+    (.flush out)
+    (loop [acc []]
+      (let [remaining (- deadline (System/currentTimeMillis))]
+        (when (pos? remaining)
+          (.setSoTimeout sock (int (min remaining 5000))))
+        (let [resp (try (b/read-bencode in)
+                        (catch java.net.SocketTimeoutException _ ::timeout)
+                        (catch java.io.EOFException _ ::eof))]
+          (cond
+            (= resp ::timeout)
+            (conj acc {"status" ["error" "timeout"]})
+
+            (= resp ::eof)
+            (conj acc {"status" ["error" "eof"]})
+
+            :else
+            (let [resp* (normalize resp)
+                  acc' (conj acc resp*)
+                  status (get resp* "status")]
+              (if (and (vector? status)
+                       (or (some #{"done"} status)
+                           (some #{"error"} status)))
+                acc'
+                (recur acc')))))))))
+
+(defn nrepl-clone-session
+  "Returns a new bare nREPL session id string."
+  [port]
+  (try
+    (with-open [sock (connect port)]
+      (let [responses (send-and-collect sock {"op" "clone"} 5000)]
+        (some #(get % "new-session") responses)))
+    (catch Exception e
+      (log-error "clone failed:" (.getMessage e))
+      nil)))
+
+(defn nrepl-eval
+  "Evaluate `code` in `nrepl-session`. Returns {:value :ns :out :err :ex :status}."
+  [port nrepl-session code timeout-ms]
+  (try
+    (with-open [sock (connect port)]
+      (let [msg {"op" "eval" "code" code "session" nrepl-session
+                 "id" (str (random-uuid))}
+            responses (send-and-collect sock msg timeout-ms)
+            collect (fn [k] (->> responses (keep #(get % k)) (str/join "\n")))
+            value (last (keep #(get % "value") responses))
+            status (mapcat #(get % "status" []) responses)]
+        {:value value
+         :ns (last (keep #(get % "ns") responses))
+         :out (collect "out")
+         :err (collect "err")
+         :ex (last (keep #(get % "ex") responses))
+         :status (vec status)}))
+    (catch Exception e
+      (log-error "eval failed:" (.getMessage e))
+      {:err (.getMessage e) :status ["error"]})))
+
+(defn nrepl-interrupt
+  [port nrepl-session]
+  (try
+    (with-open [sock (connect port)]
+      (send-and-collect sock {"op" "interrupt" "session" nrepl-session} 5000))
+    (catch Exception e
+      (log-error "interrupt failed:" (.getMessage e))
+      nil)))
+
+;;; ---------------------------------------------------------------------------
+;;; Session lifecycle (pivot a fresh nREPL session into CLJS)
+;;; ---------------------------------------------------------------------------
+
+(defn- gen-sid []
+  (let [hex (-> (java.util.UUID/randomUUID) str (str/replace "-" ""))]
+    (subs hex 0 6)))
+
+(defn create-cljs-session!
+  "Clone a fresh nREPL session and pivot it into the given shadow build's
+   CLJS REPL. Returns a sid (short id) the orchestrator passes back on
+   subsequent evals. Stores {sid -> nrepl-session/build} in `sessions`."
+  [port build-id]
+  (let [nrepl-sid (nrepl-clone-session port)]
+    (when nrepl-sid
+      (let [pivot-resp (nrepl-eval port nrepl-sid
+                                   (str "(require '[shadow.cljs.devtools.api :as shadow]) "
+                                        "(shadow/nrepl-select " build-id ")")
+                                   10000)]
+        (log-debug "pivot result:" pivot-resp)
+        (let [sid (gen-sid)]
+          (swap! sessions assoc sid
+                 {:nrepl-session nrepl-sid
+                  :build build-id
+                  :created-at (System/currentTimeMillis)
+                  :pivot-value (:value pivot-resp)})
+          sid)))))
+
+(defn require-port! []
+  (or (read-shadow-port)
+      (throw (ex-info "no shadow-cljs watcher running (no .shadow-cljs/nrepl.port)"
+                      {:port-file shadow-port-file}))))
+
+(defn get-or-create-session!
+  "If sid is provided, look it up. If sid is 'default', use a singleton
+   :repl-build session. Otherwise create a new one."
+  [sid-arg]
+  (let [port (require-port!)
+        sid (or sid-arg "default")]
+    (or (when-let [s (get @sessions sid)]
+          {:sid sid :session-info s})
+        (cond
+          (= sid "default")
+          (let [new-sid (create-cljs-session! port default-build-id)]
+            {:sid "default" :session-info (assoc (get @sessions new-sid) :alias "default")
+             :_remapped (do (swap! sessions
+                                    (fn [m]
+                                      (let [info (get m new-sid)]
+                                        (-> m (dissoc new-sid) (assoc "default" info)))))
+                            true)})
+
+          :else
+          (throw (ex-info (str "unknown session id: " sid) {:sid sid}))))))
+
+;;; ---------------------------------------------------------------------------
+;;; MCP result builders
+;;; ---------------------------------------------------------------------------
+
+(defn mcp-success [text]
+  {:content [{:type "text" :text text}]})
+
+(defn mcp-error [msg]
+  {:content [{:type "text" :text (str "ERROR: " msg)}]
+   :isError true})
+
+(defn render-eval-result [{:keys [value ns out err ex status]} sid]
+  (let [parts (cond-> []
+                (seq out) (conj (str "stdout:\n" out))
+                (seq err) (conj (str "stderr:\n" err))
+                value (conj (str "=> " value))
+                ns (conj (str "ns: " ns))
+                ex (conj (str "ex: " ex)))
+        header (str "session=" sid (when (some #{"error"} status) " STATUS=error"))]
+    (mcp-success (str header "\n" (str/join "\n" parts)))))
+
+;;; ---------------------------------------------------------------------------
+;;; Tool implementations
+;;; ---------------------------------------------------------------------------
+
+(defn execute-eval [{:keys [code session_id timeout_ms]}]
+  (let [port (require-port!)
+        timeout (or timeout_ms default-timeout-ms)
+        {:keys [sid session-info]} (get-or-create-session! session_id)
+        nrepl-sid (:nrepl-session session-info)
+        result (nrepl-eval port nrepl-sid code timeout)]
+    (render-eval-result result sid)))
+
+(defn execute-create-session [{:keys [build]}]
+  (let [port (require-port!)
+        build-id (or build default-build-id)
+        sid (create-cljs-session! port build-id)]
+    (if sid
+      (mcp-success (str "session=" sid " build=" build-id
+                        " (use this sid in mcp__seon_cljs__eval's session_id)"))
+      (mcp-error "failed to clone/pivot CLJS session"))))
+
+(defn execute-list-sessions [_args]
+  (let [now (System/currentTimeMillis)
+        rows (for [[sid info] @sessions]
+               (format "  %s  build=%s  nrepl-sid=%s  age=%.1fs"
+                       sid (:build info) (:nrepl-session info)
+                       (/ (double (- now (:created-at info))) 1000.0)))
+        port (read-shadow-port)]
+    (mcp-success (str "shadow port: " (or port "<no watcher>")
+                      "\nsessions:\n" (if (seq rows) (str/join "\n" rows) "  (none)")))))
+
+(defn execute-stop-session [{:keys [session_id]}]
+  (if-let [info (get @sessions session_id)]
+    (do (swap! sessions dissoc session_id)
+        (mcp-success (str "stopped session " session_id)))
+    (mcp-error (str "no such session: " session_id))))
+
+(defn execute-reload-deps [{:keys [session_id]}]
+  (let [port (require-port!)
+        ;; Reload-deps runs on the CLJ side (compiler), so we use a bare
+        ;; nREPL session (no CLJS pivot) for the JVM eval, then trigger
+        ;; the watcher reload of the build the orchestrator is on.
+        clj-sid (nrepl-clone-session port)
+        build (or (get-in @sessions [(or session_id "default") :build])
+                  default-build-id)
+        code (str "(do (require '[shadow.cljs.devtools.api :as shadow]) "
+                  "(shadow.cljs.devtools.api/reload-deps! " build "))")
+        result (nrepl-eval port clj-sid code 60000)]
+    (render-eval-result result (or session_id "default"))))
+
+(defn execute-runtime-status [_args]
+  (let [port (read-shadow-port)
+        info (when port
+               (let [sid (nrepl-clone-session port)
+                     code "(do (require '[shadow.cljs.devtools.api :as shadow]) (pr-str (mapv (fn [b] {:build b :runtimes (count (shadow/repl-runtimes b))}) (keys (shadow/active-builds)))))"
+                     r (nrepl-eval port sid code 10000)]
+                 (:value r)))]
+    (mcp-success (str "shadow nREPL port: " (or port "<no watcher>")
+                      "\nbuilds: " (or info "<unable to query>")
+                      "\nmcp sessions: " (count @sessions)))))
+
+;;; ---------------------------------------------------------------------------
+;;; Tool registry
+;;; ---------------------------------------------------------------------------
+
+(def tools
+  [{:name "eval"
+    :description "Evaluate ClojureScript code in a watched shadow-cljs build's runtime. Returns {value, ns, out, err}. Reload-on-save is automatic — your source edits propagate without restart. Use session_id 'default' for the singleton :repl-build session, or a 6-char hex sid from create_session for an isolated session."
+    :inputSchema {:type "object"
+                  :properties {:code {:type "string"
+                                      :description "ClojureScript code to evaluate. Must reference fully-qualified names (cljs.user has no implicit aliases beyond core)."}
+                               :session_id {:type "string"
+                                            :description "Session sid. 'default' for the singleton :repl build session (auto-created). Or a sid from create_session."}
+                               :timeout_ms {:type "integer"
+                                            :description "Eval timeout. Default 30000ms."}}
+                  :required ["code"]}}
+
+   {:name "create_session"
+    :description "Clone a fresh nREPL session and pivot it into the named shadow-cljs build's CLJS REPL. Returns a 6-char sid. Use this when you want a session distinct from 'default'."
+    :inputSchema {:type "object"
+                  :properties {:build {:type "string"
+                                       :description "Shadow build id keyword string, e.g. ':repl' or ':bench'. Defaults to ':repl'."}}
+                  :required []}}
+
+   {:name "list_sessions"
+    :description "List active CLJS REPL sessions tracked by this MCP server, plus the shadow nREPL port."
+    :inputSchema {:type "object" :properties {} :required []}}
+
+   {:name "stop_session"
+    :description "Forget a session (frees the local sid; does not interrupt running eval)."
+    :inputSchema {:type "object"
+                  :properties {:session_id {:type "string"}}
+                  :required ["session_id"]}}
+
+   {:name "reload_deps"
+    :description "Trigger shadow-cljs's reload-deps! to pick up new clojars/npm deps in the watched build without restarting the watcher."
+    :inputSchema {:type "object"
+                  :properties {:session_id {:type "string" :description "Which session's build to reload-deps on. Defaults to 'default'."}}
+                  :required []}}
+
+   {:name "runtime_status"
+    :description "Report shadow watcher state — port, active builds, runtime counts, mcp session count."
+    :inputSchema {:type "object" :properties {} :required []}}])
+
+;;; ---------------------------------------------------------------------------
+;;; JSON-RPC plumbing
+;;; ---------------------------------------------------------------------------
+
+(defn- send-response [resp]
+  (let [s (json/generate-string resp)]
+    (log-debug "<<" s)
+    (locking stdout-lock (println s) (flush))))
+
+(defn- send-result [id result]
+  (send-response {:jsonrpc "2.0" :id id :result result}))
+
+(defn- send-error [id code message]
+  (send-response {:jsonrpc "2.0" :id id
+                  :error {:code code :message message}}))
+
+(defn- execute-tool [name args]
+  (let [args' (or args {})
+        args' (reduce-kv (fn [m k v] (assoc m (keyword k) v)) {} args')]
+    (case name
+      "eval" (execute-eval args')
+      "create_session" (execute-create-session args')
+      "list_sessions" (execute-list-sessions args')
+      "stop_session" (execute-stop-session args')
+      "reload_deps" (execute-reload-deps args')
+      "runtime_status" (execute-runtime-status args')
+      (throw (ex-info (str "Unknown tool: " name) {:tool name})))))
+
+(defn- handle-request [{:keys [jsonrpc method params id] :as req}]
+  (log-debug ">>" (pr-str req))
+  (try
+    (case method
+      "initialize"
+      (send-result id {:protocolVersion "2024-11-05"
+                       :capabilities {:tools {}}
+                       :serverInfo server-info})
+
+      "notifications/initialized"
+      nil  ;; notification — no response
+
+      "tools/list"
+      (send-result id {:tools tools})
+
+      "tools/call"
+      (let [{:keys [name arguments]} params
+            result (execute-tool name arguments)]
+        (send-result id result))
+
+      ;; default
+      (when id (send-error id -32601 (str "Method not found: " method))))
+    (catch clojure.lang.ExceptionInfo e
+      (when id (send-result id (mcp-error (ex-message e)))))
+    (catch Exception e
+      (log-error "handler exception:" (.getMessage e))
+      (when id (send-result id (mcp-error (.getMessage e)))))))
+
+(defn -main []
+  (log-info "seon-cljs MCP server starting; project=" project-root)
+  (let [reader (BufferedReader. *in*)]
+    (loop []
+      (when-let [line (.readLine reader)]
+        (when-not (str/blank? line)
+          (try
+            (let [req (json/parse-string line true)]
+              (handle-request req))
+            (catch Exception e
+              (log-error "parse error:" (.getMessage e) "line:" line))))
+        (recur)))))
+
+(-main)
