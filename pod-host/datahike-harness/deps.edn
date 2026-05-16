@@ -1,0 +1,29 @@
+;; JVM-side datahike performance + load testing harness across konserve backends.
+;; Reusable substrate for: backend perf comparison, cold-resume timing,
+;; snapshot export/import experiments, mixed workloads, soak tests.
+{:paths ["src"]
+
+ :deps {org.clojure/clojure             {:mvn/version "1.11.1"}
+        ;; Datahike pinned at the same version as pod-host/libdatahike-cljs so
+        ;; numbers compare apples-to-apples across JVM/CLJS.
+        io.replikativ/datahike          {:mvn/version "0.7.1624"}
+        ;; Persistent backends. konserve-lmdb registers :lmdb dispatch on require;
+        ;; konserve-gcs registers :gcs the same way. Built-in :memory + :file
+        ;; come with datahike itself.
+        io.replikativ/konserve-lmdb     {:mvn/version "0.1.11"}
+        io.replikativ/konserve-gcs      {:mvn/version "0.1.9"}
+        ;; Logging — datahike pulls timbre transitively but be explicit so we
+        ;; can quiet it during bench runs.
+        com.taoensso/timbre             {:mvn/version "6.8.0"}}
+
+ :aliases
+ {:run
+  {:main-opts ["-m" "seon.podhost.datahike-harness.cli"]
+   :jvm-opts  ["--enable-native-access=ALL-UNNAMED"
+               "-Dtimbre.min-level=:warn"]}
+
+  ;; Drop into a REPL with everything loaded.
+  :repl
+  {:extra-deps {nrepl/nrepl {:mvn/version "1.3.0"}}
+   :jvm-opts   ["--enable-native-access=ALL-UNNAMED"]
+   :main-opts  ["-m" "nrepl.cmdline" "--port" "7889"]}}}
