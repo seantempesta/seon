@@ -1,28 +1,14 @@
 (ns seon.client
   "V0 CLJS pod entry point. Long-running Node process; the V0 client.
 
-   This file is intentionally minimal — it proves three things end-to-end:
+   Two responsibilities:
 
-     1. The shadow-cljs watch / hot-reload / nREPL pipeline is working
-        (heartbeat + reload hooks below).
-     2. datahike-cljs is alive — the runtime patches at the top of this
-        file plus the smoke test (`datahike-smoke-test!`) verify that a
-        :memory DB boots, transacts schema + entities, and queries them
-        correctly. Runs once on `-main`; callable any time from the REPL.
-     3. The MCP eval surface routes into this runtime — connect to nREPL
-        :7889, pivot via `(shadow.cljs.devtools.api/nrepl-select :client)`,
-        eval `(seon.client/datahike-smoke-test!)` and watch it pass.
-
-   Real lifecycle (read config.edn, open user's datahike DB with
-   konserve :tiered storage, register platform schemas, install the
-   seon.db/listen! tx-listener, spawn the user's default session, hand
-   control to the session's flow) lands in subsequent commits per
-   spec-01 §6.2.
+     1. Run the smoke test on boot — proves datahike-cljs is alive.
+     2. Boot the V0 agent on demand via `start-agent!`.
 
    How to run it:
 
      ;; Terminal 1 — the watcher (compiles + writes nREPL port file)
-     cd consumer/seon
      clj -M:cljs watch client
 
      ;; Terminal 2 — the Node host
@@ -32,65 +18,24 @@
      ;; pivot into the running CLJS runtime:
      (shadow.cljs.devtools.api/nrepl-select :client)
 
-   Edit this file → save → watcher recompiles → running process reloads
-   automatically. `^:dev/before-load` fires before the namespace's new
-   code lands; `^:dev/after-load` fires after."
+     ;; To bring up the V0 agent (stub LLM):
+     (cljs.core.async/go
+       (cljs.core.async/<! (seon.client/start-agent-with-stub!)))
+
+     ;; Then chat with it:
+     (seon.session/chat \"seon\" \"hello\")"
   (:require
     [datahike.api :as d]
-    [datahike.datom]
-    [datahike.index.persistent-set]
-    [me.tonsky.persistent-sorted-set :as psset]
-    [me.tonsky.persistent-sorted-set.btset :as btset]
-    [cljs.core.async :as a :refer [<!]])
+    [cljs.core.async :as a :refer [<!]]
+    ;; Pull in the agent's required namespaces at compile time so all
+    ;; schemas are registered before start-agent! runs.
+    [seon.agent]
+    [seon.agents.alice]
+    [seon.ai.deepseek :as deepseek]
+    [seon.db :as db]
+    [seon.session :as session])
   (:require-macros
     [cljs.core.async :refer [go]]))
-
-;; ---------------------------------------------------------------------------
-;; CLJS-DATAHIKE RUNTIME PATCHES
-;;
-;; Two upstream incompatibilities between datahike 0.7.1624 and
-;; persistent-sorted-set 0.3.116 must be patched at runtime before any
-;; datahike DB is created.
-;;
-;; (1) `empty-index` opt-key mismatch — datahike passes
-;;       (psset/sorted-set* {:cmp <cmp-fn> ...})
-;;     but psset's `btset/from-opts` only reads `:comparator`. Empty-built
-;;     indexes therefore default their comparator to `cljs.core/compare`,
-;;     which throws on Datom-vs-Datom comparison.
-;;
-;; (2) `insert` calls `(psset/lookup pset datom prefix-cmp)` expecting the
-;;     3rd arg to be a custom comparator (works in CLJ where psset's
-;;     `.lookup` Java method has a 3-arg overload), but in CLJS the 3-arg
-;;     `psset/lookup` treats the 3rd argument as a `not-found` value, not
-;;     a comparator. With `prefix-cmp` (a function) as `not-found`, lookup
-;;     returns the function on "not found" — a truthy value — so `insert`
-;;     thinks the datom already exists and skips the conj. Result:
-;;     subsequent inserts into the same (e,a) get dropped silently. Most
-;;     visible for cardinality/many where the second-and-later values all
-;;     disappear.
-;;
-;; `defonce` so a hot-reload doesn't re-patch.
-;; ---------------------------------------------------------------------------
-
-(defonce ^:private patches-applied?
-  (do
-    ;; FIX (1) — from-opts honors :cmp as alias for :comparator.
-    (let [orig btset/from-opts]
-      (set! btset/from-opts
-            (fn [opts]
-              (let [opts' (if (and (:cmp opts) (not (:comparator opts)))
-                            (assoc opts :comparator (:cmp opts))
-                            opts)]
-                (orig opts')))))
-    ;; FIX (2) — replace `insert` to use conj's idempotency with a quick
-    ;; comparator. conj with a 3-arg cmp returns the same set if the key
-    ;; already exists per cmp, so we can detect "no change" by identity
-    ;; comparison. Costs us the zero-allocation lookup path but is correct.
-    (set! datahike.index.persistent-set/insert
-          (fn [pset datom index-type]
-            (let [quick-cmp (datahike.datom/index-type->cmp-quick index-type)]
-              (psset/conj pset datom quick-cmp))))
-    true))
 
 ;; ---------------------------------------------------------------------------
 ;; Process-lifetime state. `defonce` so reloads don't reset it.
@@ -125,8 +70,7 @@
   (swap! !state update :reload-count inc)
   (js/console.log
     (str "[client] reload #" (:reload-count @!state)
-         " — booted " (:boot-at @!state)
-         " — patches=" (boolean patches-applied?)))
+         " — booted " (:boot-at @!state)))
   (start-heartbeat!))
 
 ;; ---------------------------------------------------------------------------
@@ -149,7 +93,7 @@
     :db/valueType   :db.type/long}])
 
 (def ^:private smoke-seed
-  [{:name "Alpha"     :rank 1}
+  [{:name "Alpha"    :rank 1}
    {:name "Seon"     :rank 2}
    {:name "Datahike" :rank 3}])
 
@@ -202,12 +146,153 @@
          conn)))))
 
 ;; ---------------------------------------------------------------------------
+;; Agent boot
+;;
+;; The V0 agent runs against a long-lived :memory datahike conn distinct
+;; from the smoke-test's ephemeral conn. start-agent! opens it, bootstraps
+;; the datahike schema (idents needed for lookup-refs), binds seon.db/*conn*
+;; at the var root, and hands off to seon.session/boot!.
+;;
+;; Idempotent: re-calling start-agent! reuses the existing conn (stored in
+;; !agent-conn) and overwrites the kick listener. Useful during dev hot-
+;; reload where the watcher rebuilds client.cljs.
+;; ---------------------------------------------------------------------------
+
+(defonce !agent-conn (atom nil))
+
+;; Datahike-side schema. Datahike requires every attribute have a
+;; declared :db/valueType + :db/cardinality before first use — our
+;; seon.schema Malli registry only handles pre-transact validation,
+;; not storage shape. Eventually we'd derive this from seon.schema
+;; (a generic Malli→datahike bridge), but for V0 we hand-write the
+;; small attribute surface here.
+(def ^:private agent-bootstrap-schema
+  ;; --- Session ---
+  [{:db/ident :seon.session/id
+    :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one
+    :db/unique :db.unique/identity}
+   {:db/ident :seon.session/agent-ns
+    :db/valueType :db.type/symbol
+    :db/cardinality :db.cardinality/one}
+   {:db/ident :seon.session/agent-loop-state
+    :db/valueType :db.type/keyword
+    :db/cardinality :db.cardinality/one}
+   {:db/ident :seon.session/scratchpad
+    :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one}
+   {:db/ident :seon.session/tick-count
+    :db/valueType :db.type/long
+    :db/cardinality :db.cardinality/one}
+
+   ;; --- Message ---
+   {:db/ident :seon.message/id
+    :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one
+    :db/unique :db.unique/identity}
+   {:db/ident :seon.message/role
+    :db/valueType :db.type/keyword
+    :db/cardinality :db.cardinality/one}
+   {:db/ident :seon.message/content
+    :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one}
+   {:db/ident :seon.message/session
+    :db/valueType :db.type/ref
+    :db/cardinality :db.cardinality/one}
+   {:db/ident :seon.message/at
+    :db/valueType :db.type/instant
+    :db/cardinality :db.cardinality/one}
+
+   ;; --- Eval ---
+   {:db/ident :seon.eval/id
+    :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one
+    :db/unique :db.unique/identity}
+   {:db/ident :seon.eval/session
+    :db/valueType :db.type/ref
+    :db/cardinality :db.cardinality/one}
+   {:db/ident :seon.eval/at
+    :db/valueType :db.type/instant
+    :db/cardinality :db.cardinality/one}
+   {:db/ident :seon.eval/turn
+    :db/valueType :db.type/long
+    :db/cardinality :db.cardinality/one}
+   {:db/ident :seon.eval/narration
+    :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one}
+   {:db/ident :seon.eval/source
+    :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one}
+   {:db/ident :seon.eval/result-edn
+    :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one}
+   {:db/ident :seon.eval/error
+    :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one}])
+
+(defn- open-agent-conn! []
+  (let [cfg {:store {:backend :memory :id (random-uuid)}
+             :schema-flexibility :write
+             :keep-history? false}]
+    (go
+      (<! (d/create-database cfg))
+      (let [conn (<! (d/connect cfg {:sync? false}))]
+        (<! (d/transact! conn agent-bootstrap-schema))
+        conn))))
+
+(defn- stub-llm
+  "A fake LLM that echoes the last few characters of ctx so we can
+   verify the loop end-to-end without an API key. Returns a Promise."
+  [ctx]
+  (let [snippet (apply str (take-last 200 ctx))
+        canned-reply (str ";; stub LLM acknowledges your message; the real one needs DEEPSEEK_API_KEY\n"
+                          "(say! \"hello from the stub LLM — I saw " (count ctx) " chars of ctx\")\n"
+                          "(done!)\n")]
+    (.resolve js/Promise #js {})
+    (-> (.resolve js/Promise nil)
+        (.then (fn [_] {:text canned-reply})))))
+
+(defn start-agent!
+  "Bring up the V0 agent against this process's datahike-cljs runtime.
+
+     :llm-fn — fn of ctx-string returning a Promise of {:text \"...\"}.
+               Optional; defaults to stub-llm for verification without
+               an API key. Pass (seon.ai.deepseek/agent-adapter) for the
+               real thing.
+
+   Returns a channel resolving to {:seon.session/id _ :seon.session/agent-ns _}.
+   Subsequent (seon.session/chat ...) calls drive the loop."
+  [& [{:keys [llm-fn] :or {llm-fn stub-llm}}]]
+  (go
+    (let [conn (or @!agent-conn (<! (open-agent-conn!)))]
+      (reset! !agent-conn conn)
+      ;; Make the conn the default for seon.db calls. set! on a dynamic
+      ;; var at top-level rebinds the root binding — equivalent to JVM
+      ;; alter-var-root. Listener callbacks see this without per-tick
+      ;; re-binding.
+      (set! db/*conn* conn)
+      (let [{:seon.session/keys [id agent-ns]} (session/boot! llm-fn)]
+        (js/console.log "[client] agent started — session" id "ns" (str agent-ns))
+        {:seon.session/id id :seon.session/agent-ns agent-ns}))))
+
+(defn start-agent-with-stub!
+  "Bring up the V0 agent with the canned stub LLM. Useful for verifying
+   the full loop without a deepseek API key. Returns a channel."
+  []
+  (start-agent!))
+
+(defn start-agent-with-deepseek!
+  "Bring up the V0 agent against the real deepseek API. Requires
+   DEEPSEEK_API_KEY in process.env. Returns a channel."
+  []
+  (start-agent! {:llm-fn (deepseek/agent-adapter)}))
+
+;; ---------------------------------------------------------------------------
 ;; Entry point
 ;; ---------------------------------------------------------------------------
 
 (defn -main [& _args]
   (js/console.log "[client] -main boot at" (:boot-at @!state))
-  (js/console.log "[client] patches applied? " (boolean patches-applied?))
   (go
     (let [result (<! (datahike-smoke-test!))]
       (case (:status result)
