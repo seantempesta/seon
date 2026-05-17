@@ -64,16 +64,23 @@
 ;; Init — load the bundle once at pod start.
 ;; ============================================================
 
-;; Namespaces already loaded by the :client bundle. We mark these in
-;; shadow's bootstrap env BEFORE boot/init so the bootstrap loader
-;; skips re-executing their JS (which would re-declare goog.* deps
-;; and throw "Namespace already declared"). The bootstrap loader
-;; still loads their analyzer caches — that's what makes the compiler
-;; know var shapes — but doesn't re-emit code.
+;; The set of CLJS / Closure symbols the :client bundle has already
+;; loaded into this runtime. We feed this to shadow's bootstrap env
+;; BEFORE boot/init so the loader skips re-executing their JS — which
+;; would re-declare goog.* deps and throw "Namespace already declared".
+;; Analyzer caches for these are still loaded by the bootstrap loader
+;; (so the compiler knows var shapes); only JS execution is skipped.
 ;;
-;; The pattern is documented in shadow.cljs.bootstrap.node:
-;;   line 87  (filter (superset? loaded-ref provides))   <- analyzer
-;;   line 93  (remove (superset? loaded-ref provides))   <- JS skip
+;; FRAGILITY NOTE — TODO: derive dynamically.
+;;
+;; This list shadows what's both in the :bootstrap bundle :entries AND
+;; in the :client bundle. We tried dynamic derivation (read the
+;; bundle's index, mark everything-except-compiler-nses as loaded)
+;; but the analyzer-cache loading for cljs.core got broken when the
+;; skip-set was computed by walking deps. Hardcoded works; dynamic
+;; needs more investigation into shadow's load-namespaces sequencing.
+;; Two places to edit if we add a bundle entry — flag for future
+;; cleanup.
 (def ^:private already-loaded
   '#{cljs.core
      cljs.core$macros
@@ -101,7 +108,9 @@
       (do (a/close! done) done)
       (do
         ;; Tell the bootstrap loader what's already in this process so
-        ;; it doesn't try to re-execute the JS.
+        ;; it doesn't try to re-execute the JS. See the fragility-note
+        ;; comment on `already-loaded` above — this is a static list
+        ;; for now; dynamic derivation pending follow-up.
         (boot-env/set-loaded already-loaded)
         (boot/init
           compile-state-ref
@@ -123,13 +132,20 @@
             ;;
             ;; Future multi-agent boot will iterate over all session
             ;; agent-ns values; for V0 the one hardcoded agent suffices.
+            ;; IMPORTANT: do NOT pass :analyze-deps false here. The
+            ;; ns form analyzes cljs.core's refer map to wire up
+            ;; implicit refers (defn, str, +, etc.). Skipping that
+            ;; leaves the agent ns with empty :uses / :use-macros and
+            ;; every cljs.core macro lookup throws findInternedVar.
+            ;; :analyze-deps false is correct for agent forms (which
+            ;; reference seon.* nses not in the bundle), but wrong
+            ;; for the bootstrap init that wires up the ns itself.
             (cljs/eval-str
               compile-state-ref
               "(ns seon.agents.alice)"
               "[init-agent-ns]"
               {:eval cljs/js-eval
                :load (partial boot/load compile-state-ref)
-               :analyze-deps false
                :ns 'cljs.user}
               (fn [_]
                 (reset! !ready? true)
