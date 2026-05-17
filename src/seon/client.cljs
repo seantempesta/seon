@@ -26,7 +26,6 @@
      (seon.session/chat \"seon\" \"hello\")"
   (:require
     [datahike.api :as d]
-    [cljs.core.async :as a :refer [<!]]
     ;; Pull in the agent's required namespaces at compile time so all
     ;; schemas are registered before start-agent! runs.
     [seon.agent]
@@ -34,9 +33,7 @@
     [seon.ai.deepseek :as deepseek]
     [seon.bootstrap :as bootstrap]
     [seon.db :as db]
-    [seon.session :as session])
-  (:require-macros
-    [cljs.core.async :refer [go]]))
+    [seon.session :as session]))
 
 ;; ---------------------------------------------------------------------------
 ;; Process-lifetime state. `defonce` so reloads don't reset it.
@@ -101,50 +98,46 @@
 (def ^:private smoke-expected
   #{["Alpha" 1] ["Seon" 2] ["Datahike" 3]})
 
-(defn datahike-smoke-test!
+(defn ^:async datahike-smoke-test!
   "Create a fresh :memory datahike-cljs DB, transact schema + seed entities,
-   query, compare to expected. Returns a channel resolving to
+   query, compare to expected. Returns a Promise resolving to
    {:status :pass :datoms <n> :rows <set>} or
    {:status :fail :got <set> :expected <set>}.
 
    REPL usage:
-     (cljs.core.async/go
-       (println (cljs.core.async/<! (datahike-smoke-test!))))"
+     (.then (datahike-smoke-test!) println)"
   []
   (let [cfg {:store              {:backend :memory
                                   :id (random-uuid)}
              :schema-flexibility :write
              :keep-history?      false}]
-    (go
-      (<! (d/create-database cfg))
-      (let [conn (<! (d/connect cfg {:sync? false}))
-            _    (<! (d/transact! conn smoke-schema))
-            tx   (<! (d/transact! conn smoke-seed))
-            rows (d/q '[:find ?name ?rank
-                        :where
-                        [?e :name ?name]
-                        [?e :rank ?rank]]
-                      @conn)]
-        (if (= rows smoke-expected)
-          {:status :pass :datoms (count (:tx-data tx)) :rows rows}
-          {:status :fail :got rows :expected smoke-expected})))))
+    (await (d/create-database cfg))
+    (let [conn (await (d/connect cfg))
+          _    (await (d/transact! conn smoke-schema))
+          tx   (await (d/transact! conn smoke-seed))
+          rows (d/q '[:find ?name ?rank
+                      :where
+                      [?e :name ?name]
+                      [?e :rank ?rank]]
+                    @conn)]
+      (if (= rows smoke-expected)
+        {:status :pass :datoms (count (:tx-data tx)) :rows rows}
+        {:status :fail :got rows :expected smoke-expected}))))
 
-(defn mem-db
+(defn ^:async mem-db
   "REPL convenience — open a fresh :memory datahike-cljs DB with optional
-   schema. Returns a channel resolving to a conn atom. Useful for ad-hoc
-   exploration."
+   schema. Returns a Promise resolving to a conn atom."
   ([] (mem-db []))
   ([schema]
    (let [cfg {:store              {:backend :memory
                                    :id (random-uuid)}
               :schema-flexibility :write
               :keep-history?      false}]
-     (go
-       (<! (d/create-database cfg))
-       (let [conn (<! (d/connect cfg {:sync? false}))]
-         (when (seq schema)
-           (<! (d/transact! conn schema)))
-         conn)))))
+     (await (d/create-database cfg))
+     (let [conn (await (d/connect cfg))]
+       (when (seq schema)
+         (await (d/transact! conn schema)))
+       conn))))
 
 ;; ---------------------------------------------------------------------------
 ;; Agent boot
@@ -231,15 +224,14 @@
     :db/valueType :db.type/string
     :db/cardinality :db.cardinality/one}])
 
-(defn- open-agent-conn! []
+(defn ^:async open-agent-conn! []
   (let [cfg {:store {:backend :memory :id (random-uuid)}
              :schema-flexibility :write
              :keep-history? false}]
-    (go
-      (<! (d/create-database cfg))
-      (let [conn (<! (d/connect cfg {:sync? false}))]
-        (<! (d/transact! conn agent-bootstrap-schema))
-        conn))))
+    (await (d/create-database cfg))
+    (let [conn (await (d/connect cfg))]
+      (await (d/transact! conn agent-bootstrap-schema))
+      conn)))
 
 (defn- stub-llm
   "A fake LLM that echoes the last few characters of ctx so we can
@@ -253,7 +245,7 @@
     (-> (.resolve js/Promise nil)
         (.then (fn [_] {:text canned-reply})))))
 
-(defn start-agent!
+(defn ^:async start-agent!
   "Bring up the V0 agent against this process's datahike-cljs runtime.
 
      :llm-fn — fn of ctx-string returning a Promise of {:text \"...\"}.
@@ -261,20 +253,19 @@
                an API key. Pass (seon.ai.deepseek/agent-adapter) for the
                real thing.
 
-   Returns a channel resolving to {:seon.session/id _ :seon.session/agent-ns _}.
+   Returns a Promise resolving to {:seon.session/id _ :seon.session/agent-ns _}.
    Subsequent (seon.session/chat ...) calls drive the loop."
   [& [{:keys [llm-fn] :or {llm-fn stub-llm}}]]
-  (go
-    (let [conn (or @!agent-conn (<! (open-agent-conn!)))]
-      (reset! !agent-conn conn)
-      ;; Make the conn the default for seon.db calls. set! on a dynamic
-      ;; var at top-level rebinds the root binding — equivalent to JVM
-      ;; alter-var-root. Listener callbacks see this without per-tick
-      ;; re-binding.
-      (set! db/*conn* conn)
-      (let [{:seon.session/keys [id agent-ns]} (session/boot! llm-fn)]
-        (js/console.log "[client] agent started — session" id "ns" (str agent-ns))
-        {:seon.session/id id :seon.session/agent-ns agent-ns}))))
+  (let [conn (or @!agent-conn (await (open-agent-conn!)))]
+    (reset! !agent-conn conn)
+    ;; Make the conn the default for seon.db calls. set! on a dynamic
+    ;; var at top-level rebinds the root binding — equivalent to JVM
+    ;; alter-var-root. Listener callbacks see this without per-tick
+    ;; re-binding.
+    (set! db/*conn* conn)
+    (let [{:seon.session/keys [id agent-ns]} (session/boot! llm-fn)]
+      (js/console.log "[client] agent started — session" id "ns" (str agent-ns))
+      {:seon.session/id id :seon.session/agent-ns agent-ns})))
 
 (defn start-agent-with-stub!
   "Bring up the V0 agent with the canned stub LLM. Useful for verifying
@@ -294,15 +285,17 @@
 
 (defn -main [& _args]
   (js/console.log "[client] -main boot at" (:boot-at @!state))
-  (go
-    (let [result (<! (datahike-smoke-test!))]
-      (case (:status result)
-        :pass (js/console.log
-                "[client] datahike-cljs smoke test PASS —"
-                (:datoms result) "datoms")
-        :fail (do (js/console.error "[client] datahike-cljs smoke test FAIL")
-                  (js/console.error "  got:     " (pr-str (:got result)))
-                  (js/console.error "  expected:" (pr-str (:expected result)))))))
+  (-> (datahike-smoke-test!)
+      (.then (fn [result]
+               (case (:status result)
+                 :pass (js/console.log
+                         "[client] datahike-cljs smoke test PASS —"
+                         (:datoms result) "datoms")
+                 :fail (do (js/console.error "[client] datahike-cljs smoke test FAIL")
+                           (js/console.error "  got:     " (pr-str (:got result)))
+                           (js/console.error "  expected:" (pr-str (:expected result)))))))
+      (.catch (fn [err]
+                (js/console.error "[client] datahike-cljs smoke test THREW —" err))))
   (js/console.log "[client] connect editor / mcp to nREPL :7889 then")
   (js/console.log "[client]   (shadow.cljs.devtools.api/nrepl-select :client)")
   (start-heartbeat!))

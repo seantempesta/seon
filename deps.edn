@@ -150,11 +150,35 @@
   ;;      (`shadow.cljs.devtools.cli/-main`), bypassing the npx wrapper.
   ;; Usage: `clj -M:cljs watch client`, `clj -M:cljs compile client`,
   ;;        `clj -M:cljs server`, `clj -M:cljs --help`.
-  :cljs {:extra-deps {org.clojure/clojurescript            {:mvn/version "1.11.132"}
-                      thheller/shadow-cljs                 {:mvn/version "2.28.20"}
-                      org.replikativ/datahike              {:mvn/version "0.8.1681"}
-                      org.replikativ/persistent-sorted-set {:mvn/version "0.4.122"}}
-         :main-opts  ["-m" "shadow.cljs.devtools.cli"]}
+  ;;
+  ;; Two git/url overrides per spec-02 §5.2 — both reach for Sean's
+  ;; personal forks of upstream libs while the patches are in review.
+  ;; They live in :extra-deps (not :override-deps) so a direct
+  ;; `clj -A:cljs:test -Stree` shows the forks resolving by :git/sha.
+  ;;   - datahike: feat/cljs-promise-api — selective Promise wrap on
+  ;;     the public API driven by :referentially-transparent?, plus
+  ;;     a chan->promise helper and a build.clj fix so deps/prep-lib
+  ;;     works cold.
+  ;;   - partial-cps: fix/ioc-await-probe-safety — defensive try/catch
+  ;;     around the three macro-probe sites in ioc.clj so CLJS 1.12.145's
+  ;;     cljs.core/await doesn't crash the CPS transformer.
+  :cljs {:extra-deps    {org.clojure/clojurescript            {:mvn/version "1.12.145"}
+                         org.clojure/core.async               {:mvn/version "1.10.870-alpha2"}
+                         thheller/shadow-cljs                 {:mvn/version "3.4.10"}
+                         org.replikativ/datahike              {:mvn/version "0.8.1681"}
+                         org.replikativ/persistent-sorted-set {:mvn/version "0.4.122"}}
+         ;; Spec-02 §5.2 — point datahike at the patched fork (selective
+         ;; Promise wrap driven by :referentially-transparent?) and
+         ;; partial-cps at the cps-probe-safety patch (transitive via
+         ;; persistent-sorted-set + datahike's superv.async). Both are
+         ;; PR-shaped pending upstream review.
+         :override-deps {org.replikativ/datahike
+                         {:git/url "https://github.com/seantempesta/datahike"
+                          :git/sha "f6ecf17328103c7d97d29f6496af4c6b79fd5e73"}
+                         is.simm/partial-cps
+                         {:git/url "https://github.com/seantempesta/partial-cps"
+                          :git/sha "c0d941d4b591351267bc828fdfdf029be53a132f"}}
+         :main-opts     ["-m" "shadow.cljs.devtools.cli"]}
 
   :nrepl {:jvm-opts ["-Xms512m"
                      "-Xmx2g"
