@@ -32,6 +32,7 @@
     [seon.agent]
     [seon.agents.alice]
     [seon.ai.deepseek :as deepseek]
+    [seon.bootstrap :as bootstrap]
     [seon.db :as db]
     [seon.session :as session])
   (:require-macros
