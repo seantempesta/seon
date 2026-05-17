@@ -55,18 +55,18 @@
        (db/pull {::db/pull-pattern '[*]
                  ::db/ref          eid}))
 
-   `transact!` returns a `cljs.core.async` channel with an envelope:
+   `transact!` is `^:async` and returns a Promise with an envelope:
 
-     (go
-       (let [{::db/keys [ok? tx-report error]}
-             (<! (db/transact! {::db/tx-data [...]}))]
-         (if ok?
-           (handle-success tx-report)
-           (handle-failure error))))
+     (let [{::db/keys [ok? tx-report error]}
+           (await (db/transact! {::db/tx-data [...]}))]
+       (if ok?
+         (handle-success tx-report)
+         (handle-failure error)))
 
-   The envelope keeps commit failures (datahike-side) distinct from
-   validation failures (which throw synchronously). You catch one, you
-   destructure the other.
+   The envelope keeps commit failures (datahike-side, returned as values
+   per spec-02 §2.5 safe-by-default — `error` is a `seon.error/->map`)
+   distinct from validation failures (which throw synchronously because
+   they're local programmer-mistakes the agent's eval boundary catches).
 
    ## Reactions: register a listener with a key
 
@@ -201,12 +201,10 @@
    `::seon.trigger/dispatcher`. Direct `db/listen!` (above) is the
    primitive; `seon.trigger` is the data-driven layer on top."
   (:require
-    [cljs.core.async :as a :refer [chan close! put!]]
     [datahike.api :as d]
     [malli.core :as m]
-    [seon.schema :as schema])
-  (:require-macros
-    [cljs.core.async :refer [go]]))
+    [seon.error :as error]
+    [seon.schema :as schema]))
 
 ;; ---------------------------------------------------------------------------
 ;; Schemas — registered at namespace load. seon.schema is global + atom-backed,
@@ -422,7 +420,7 @@
 ;; Public write path
 ;; ---------------------------------------------------------------------------
 
-(defn transact!
+(defn ^:async transact!
   "Commit tx-data to the agent's conn. Map-in / map-out.
 
    Validates synchronously BEFORE reaching datahike:
@@ -430,42 +428,37 @@
      2. every value in an entity-map form satisfies its attribute's
         registered Malli schema.
 
-   Validation failures throw `ex-info` immediately. Datahike-side commit
-   failures come back through the response envelope.
+   Validation failures throw `ex-info` immediately (these are local
+   programmer-mistakes the agent boundary catches separately).
 
-   Returns a `cljs.core.async` channel resolving to:
+   Returns a Promise resolving to:
      {:seon.db/ok? true  :seon.db/tx-report <datahike report>}   ; ok
-     {:seon.db/ok? false :seon.db/error {:seon.db/msg <str>
-                                         :seon.db/data <map>}}   ; fail
+     {:seon.db/ok? false :seon.db/error <seon.error/->map e>}    ; fail
+
+   Datahike-side commit failures come back as `:ok? false`, never thrown —
+   this is the boundary layer (spec-02 §2.5 safe-by-default).
 
    Example:
 
      (require '[seon.db :as db] '[seon.schema :as schema])
      (schema/register! ::name :string)
      (schema/register! ::rank :int)
-     (cljs.core.async/go
-       (let [r (cljs.core.async/<!
-                 (db/transact!
-                   {::db/tx-data [{::name \"Alpha\" ::rank 1}]}))]
-         (println r)))"
+     (let [r (await (db/transact! {::db/tx-data [{::name \"Alpha\" ::rank 1}]}))]
+       (println r))"
   {:malli/schema [:=> [:cat ::transact-request] [:fn some?]]}
   [{::keys [tx-data opts conn] :or {conn *conn*}}]
   (let [c     (resolve-conn conn)
         attrs (extract-tx-attrs tx-data)]
     (validate-attrs! attrs)
     (validate-values! tx-data)
-    (let [out (chan 1)]
-      (go (try
-            (let [report (if opts
-                           (a/<! (d/transact! c tx-data opts))
-                           (a/<! (d/transact! c tx-data)))]
-              (put! out {::ok? true ::tx-report report}))
-            (catch :default e
-              (put! out {::ok?  false
-                         ::error {::msg  (or (ex-message e) (str e))
-                                  ::data (ex-data e)}}))
-            (finally (close! out))))
-      out)))
+    (try
+      (let [report (if opts
+                     (await (d/transact! c tx-data opts))
+                     (await (d/transact! c tx-data)))]
+        {::ok? true ::tx-report report})
+      (catch :default e
+        {::ok?  false
+         ::error (error/->map e)}))))
 
 ;; ---------------------------------------------------------------------------
 ;; Public read path — synchronous over a db value (datahike-cljs is sync
@@ -551,7 +544,10 @@
      ::attr-index (group-by ::a datoms)}))
 
 (defn listen!
-  "Install a tx-listener on the conn. Map-in / map-out.
+  "Install a tx-listener on the conn. Map-in / map-out. SAFE BY DEFAULT
+   per spec-02 §2.5 — the handler's sync throws are caught, and if the
+   handler returns a rejecting Promise, `.catch` swallows it. Neither
+   takes down the pod. Errors are logged via `js/console.warn`.
 
    `::db/handler` is a fn-of-one-map. It receives:
 
@@ -566,35 +562,51 @@
    (whatever attr appeared in the tx); the values are vectors of
    `::db/datom` maps.
 
+   If the handler returns a sync value, transact blocks until it returns
+   (back-pressure preserved). If it returns a Promise, transact resolves
+   immediately and the listener completes fire-and-forget. Use
+   `listen-sync!` / `listen-async!` aliases below to make the intent
+   explicit at the call site.
+
    If the caller doesn't supply `::db/key`, a fresh `random-uuid` is
-   generated. Same key on subsequent calls replaces the prior handler
-   (datahike's own listener atom is the underlying registry — same-key
-   behavior is upstream).
+   generated. Same key on subsequent calls replaces the prior handler.
 
-   Returns `{:seon.db/key <key>}` — the key suitable for `unlisten!`.
-
-   Agent code typically registers triggers via `seon.trigger/register!`
-   to get data-driven Shape B dispatch (queryable, retractable per-
-   trigger). Direct `listen!` is for platform code, debug taps, and
-   ad-hoc reactions the agent doesn't want to surface as a trigger
-   entity.
-
-   Example:
-
-     (db/listen!
-       {::db/key     ::log-messages
-        ::db/handler (fn [{::db/keys [attr-index]}]
-                       (when-let [ds (seq (:seon.message/role attr-index))]
-                         (js/console.log \"saw\" (count ds)
-                                         \"message changes\")))})"
+   Returns `{:seon.db/key <key>}` — the key suitable for `unlisten!`."
   {:malli/schema [:=> [:cat ::listen-request] ::listen-response]}
   [{::keys [handler key conn] :or {conn *conn*}}]
   (let [c (resolve-conn conn)
         k (or key (random-uuid))]
     (d/listen c k
               (fn [raw-tx-report]
-                (handler (build-handler-input raw-tx-report))))
+                (try
+                  (let [input  (build-handler-input raw-tx-report)
+                        result (handler input)]
+                    (if (instance? js/Promise result)
+                      (.catch result
+                              (fn [err]
+                                (js/console.warn "[seon.db/listen!" (pr-str k)
+                                                 "] async-rejected:"
+                                                 (error/->message err))))
+                      result))
+                  (catch :default e
+                    (js/console.warn "[seon.db/listen!" (pr-str k) "] threw:"
+                                     (error/->message e))
+                    nil))))
     {::key k}))
+
+(defn listen-sync!
+  "Intent-revealing alias for [[listen!]]. Use when the handler is
+   intentionally sync and should gate transactions via back-pressure."
+  {:malli/schema [:=> [:cat ::listen-request] ::listen-response]}
+  [request]
+  (listen! request))
+
+(defn listen-async!
+  "Intent-revealing alias for [[listen!]]. Use when the handler returns
+   a Promise (fire-and-forget — transact does not wait)."
+  {:malli/schema [:=> [:cat ::listen-request] ::listen-response]}
+  [request]
+  (listen! request))
 
 (defn unlisten!
   "Remove a listener by key. Returns `{:seon.db/ok? true}`. Idempotent —
