@@ -1,33 +1,22 @@
 (ns seon.ai.deepseek
-  "DeepSeek HTTP client — V0 MVP.
+  "DeepSeek HTTP client. ^:async — returns Promises.
 
-   One fn: `complete`. Takes a ctx string + opts; returns a channel of
-   `{:seon.ai/text \"...\"}`. No tool-calling envelope, no streaming.
-   The MVP agent loop parses tool-like forms out of the response text
-   itself (bash-style) — we don't use deepseek's tool_calls feature
-   at all in V0. Future: add streaming when we want the user to see
-   `say!` results land progressively from a single LLM completion.
+   One agent-facing fn: [[agent-adapter]] returns `(fn [ctx-string])`
+   compatible with `seon.session/run-turn-once!`'s `llm-fn`. Reads the
+   API key from `DEEPSEEK_API_KEY` in `process.env`.
 
-   ## Auth
+   The system prompt sets the agent up as a REPL — see
+   [[default-system-prompt]] for the contract. The per-turn ctx
+   (rendered by [[seon.agent/build-ctx]]) follows.
 
-   Reads `DEEPSEEK_API_KEY` from `process.env`. Throws on first call
-   if unset.
-
-   ## Models
-
-   Pinned to `deepseek-chat` (V3) for V0. We'll add the reasoning
-   model (`deepseek-reasoner`) once the bash-style parse loop is
-   battle-tested — the reasoning model interleaves `<think>` blocks
-   in its responses which would need a different parser pass."
-  (:require
-    [cljs.core.async :as a :refer [chan close! put!]]
-    [clojure.string :as str]
-    [seon.schema :as schema])
-  (:require-macros
-    [cljs.core.async :refer [go]]))
+   No tool-calling envelope, no streaming — the agent's responses are
+   parsed as Clojure forms by `seon.repl/parse-forms`, evaluated as
+   a REPL batch by `seon.eval/eval-batch!`."
+  (:require [seon.error :as error]
+            [seon.schema :as schema]))
 
 ;; ============================================================
-;; Schemas — the request and response shapes seon.ai.deepseek owns.
+;; Schemas — request + response shapes.
 ;; ============================================================
 
 (schema/register! :seon.ai/text :string)
@@ -55,7 +44,7 @@
    [:seon.ai/usage                   {:optional true} :map]])
 
 ;; ============================================================
-;; Config — pinned model + endpoint. Override via opts if needed.
+;; Config — pinned model + endpoint.
 ;; ============================================================
 
 (def ^:private default-model       "deepseek-chat")
@@ -64,31 +53,40 @@
 (def ^:private default-max-tokens  4096)
 
 (def ^:private default-system-prompt
-  "You are a Clojure-fluent agent running inside a sandboxed CLJS pod
-on Node. Your responses are parsed as a Clojure REPL session:
+  "You are a Clojure-fluent agent running inside a CLJS pod on Node.
 
-  - `;; foo` lines are NARRATION shown to both you (next turn) and the
-    user (rendered as markdown). Write comments worth reading.
-  - The form on the line after a comment block gets EVALUATED in your
-    personal namespace.
-  - You can do many forms per response — each evaluated serially.
+Your responses are parsed by a real REPL: each `;; narration` line
+group is associated with the form that follows; every form is
+evaluated in your personal namespace (shown at the top of every turn's
+ctx as `current-ns`). Form N+1 always runs even if N failed — like
+pasting a block into a fresh REPL.
 
-To message the user, call `(seon.agent/say! \"text\")`. To halt your
-turn, call `(seon.agent/done!)`. To run another tick without halting,
-call `(seon.agent/keep-going)`.
+You talk to the system by calling the real APIs you'll see worked
+examples for in every turn's `## What you can do` section:
+`seon.db/transact!`, `seon.db/query`, `seon.db/pull`, `seon.db/entity`.
+Inside your personal ns, `(session-id)` returns your session id and
+`(result :<eval-id>)` retrieves any prior form's value.
 
-You will see two namespaces rendered in your context every turn:
-seon.agent (the runtime) and your personal playground. Everything you
-need to know is there. Define new helpers in your playground;
-they'll be visible to you next turn.")
+You do not have `say!` or `done!` verbs — those are gone. To message
+the user, transact a `:seon.message` entity with `:role :assistant`
+(see the worked example). Your turn ends automatically after your
+forms run; you don't have to halt explicitly.
+
+You can `(defn fib [n] …)` and call it later — function definitions
+persist in your personal ns across turns. Use atoms for stateful
+values: `(def !x (atom 0))` then `@!x` works; bare `(def x 42)`
+doesn't survive cross-eval reads (a cljs.js limitation, explained in
+the `## Conventions + gotchas` section every turn).
+
+Be concise. Narrate what you're about to do, then do it. Look at
+`## Recent evals` to see what worked or failed last time — errors are
+values you can read and adapt to, not exceptions that crash the
+session.")
 
 ;; ============================================================
-;; HTTP plumbing.
-;;
-;; Uses js/fetch (Node 18+ has it native; shadow's :node-script target
-;; doesn't bundle a fetch polyfill but Node 18+ doesn't need one).
-;; Errors land on the channel as {:seon.ai/error {...}} — caller can
-;; pattern-match.
+;; HTTP — js/fetch + ^:async/await. Errors return as values on the
+;; response map (caller destructures :seon.ai/text + :seon.ai/error).
+;; Uses Node 18+'s native fetch; no polyfill.
 ;; ============================================================
 
 (defn- api-key []
@@ -100,12 +98,12 @@ they'll be visible to you next turn.")
 (defn- body-json [{:keys [system-prompt ctx model temperature max-tokens]}]
   (.stringify js/JSON
     (clj->js
-      {:model (or model default-model)
-       :messages [{:role "system" :content (or system-prompt default-system-prompt)}
-                  {:role "user"   :content ctx}]
+      {:model       (or model default-model)
+       :messages    [{:role "system" :content (or system-prompt default-system-prompt)}
+                     {:role "user"   :content ctx}]
        :temperature (or temperature default-temperature)
        :max_tokens  (or max-tokens default-max-tokens)
-       :stream false})))
+       :stream      false})))
 
 (defn- parse-response [body-text]
   (try
@@ -116,80 +114,75 @@ they'll be visible to you next turn.")
        :seon.ai/usage                   (-> body :usage)})
     (catch :default e
       {:seon.ai/text  ""
-       :seon.ai/error {:seon.ai/msg (str "Failed to parse deepseek response: " e)
+       :seon.ai/error {:seon.ai/msg (str "Failed to parse deepseek response: "
+                                         (error/->message e))
                        :seon.ai/raw body-text}})))
 
-(defn complete
-  "Send a completion request to DeepSeek. Returns a channel of
-   :seon.ai.deepseek/complete-response.
+(defn ^:async complete
+  "Send a completion request to DeepSeek. Returns a Promise of a
+   `:seon.ai.deepseek/complete-response` map.
 
-   Request opts (all optional except :seon.ai/ctx):
+   Request opts (only :seon.ai/ctx required):
      :seon.ai/ctx           — the full ctx text (required)
      :seon.ai/system-prompt — overrides the default agent system prompt
-     :seon.ai/model         — override default-model (\"deepseek-chat\")
-     :seon.ai/temperature   — override default-temperature (0.7)
-     :seon.ai/max-tokens    — override default-max-tokens (4096)
+     :seon.ai/model         — override default-model
+     :seon.ai/temperature   — override default-temperature
+     :seon.ai/max-tokens    — override default-max-tokens
 
-   Errors during the HTTP call put `{:seon.ai/text \"\" :seon.ai/error {...}}`
-   on the channel. Callers should always destructure both keys."
+   Network/HTTP failures resolve to `{:seon.ai/text \"\" :seon.ai/error
+   {…}}` (per spec-02 §2.5: safe-by-default at the boundary). Callers
+   destructure both `:seon.ai/text` and `:seon.ai/error`."
   {:malli/schema [:=> [:cat :seon.ai.deepseek/complete-request]
                   :seon.ai.deepseek/complete-response]}
   [{:seon.ai/keys [ctx system-prompt model temperature max-tokens]
-    :or {model default-model
+    :or {model       default-model
          temperature default-temperature
-         max-tokens default-max-tokens}}]
-  (let [out (chan 1)]
-    (-> (js/fetch default-endpoint
-          (clj->js
-            {:method "POST"
-             :headers {:Content-Type "application/json"
-                       :Authorization (str "Bearer " (api-key))}
-             :body (body-json {:ctx ctx
-                               :system-prompt system-prompt
-                               :model model
-                               :temperature temperature
-                               :max-tokens max-tokens})}))
-        (.then (fn [resp]
-                 (if (.-ok resp)
-                   (-> (.text resp)
-                       (.then (fn [text]
-                                (put! out (parse-response text))
-                                (close! out))))
-                   (-> (.text resp)
-                       (.then (fn [text]
-                                (put! out {:seon.ai/text ""
-                                           :seon.ai/error
-                                           {:seon.ai/msg
-                                            (str "DeepSeek HTTP "
-                                                 (.-status resp) ": " text)
-                                            :seon.ai/status (.-status resp)}})
-                                (close! out)))))))
-        (.catch (fn [e]
-                  (put! out {:seon.ai/text ""
-                             :seon.ai/error
-                             {:seon.ai/msg (str "DeepSeek fetch failed: " e)}})
-                  (close! out))))
-    out))
+         max-tokens  default-max-tokens}}]
+  (try
+    (let [resp (await (js/fetch default-endpoint
+                        (clj->js
+                          {:method  "POST"
+                           :headers {:Content-Type  "application/json"
+                                     :Authorization (str "Bearer " (api-key))}
+                           :body    (body-json {:ctx           ctx
+                                                :system-prompt system-prompt
+                                                :model         model
+                                                :temperature   temperature
+                                                :max-tokens    max-tokens})})))
+          body-text (await (.text resp))]
+      (if (.-ok resp)
+        (parse-response body-text)
+        {:seon.ai/text  ""
+         :seon.ai/error {:seon.ai/msg    (str "DeepSeek HTTP " (.-status resp)
+                                              ": " body-text)
+                         :seon.ai/status (.-status resp)}}))
+    (catch :default e
+      {:seon.ai/text  ""
+       :seon.ai/error {:seon.ai/msg (str "DeepSeek fetch failed: "
+                                         (error/->message e))}})))
 
 ;; ============================================================
-;; Adapter for seon.agent.
+;; Adapter for seon.session.
 ;;
-;; seon.agent expects (fn [ctx-string]) → chan of {:text "..."}.
-;; deepseek's complete takes a request map and returns a chan of
-;; namespaced keys. This adapter bridges the two so we can wire it
-;; in seon.client at boot via (agent/set-llm-fn! deepseek-adapter).
+;; seon.session/run-turn-once! expects (fn [ctx-string]) → Promise of
+;; `{:text "..."}`. complete takes a request map and returns a Promise
+;; of namespaced keys. This bridges the two.
 ;; ============================================================
+
+(defn ^:async ^:private complete+wrap
+  "Internal — call complete with merged opts, wrap response into the
+   shape session loop expects."
+  [opts ctx-text]
+  (let [resp (await (complete (assoc opts :seon.ai/ctx ctx-text)))]
+    {:text        (:seon.ai/text resp)
+     :seon.ai/raw resp}))
 
 (defn agent-adapter
-  "Returns a fn-of-ctx-string suitable for seon.agent/set-llm-fn!.
-   Optional `opts` override request defaults."
+  "Returns a fn-of-ctx-string suitable for
+   `seon.session/run-turn-once!`'s `llm-fn`. Optional `opts` override
+   request defaults (e.g. `{:seon.ai/temperature 0.2}`). The returned
+   fn calls `complete` ^:async-internally and returns a Promise of
+   `{:text \"…\" :seon.ai/raw <full response>}`."
   ([] (agent-adapter {}))
   ([opts]
-   (fn [ctx-text]
-     (let [out (chan 1)]
-       (go
-         (let [resp (a/<! (complete (assoc opts :seon.ai/ctx ctx-text)))]
-           (put! out {:text (:seon.ai/text resp)
-                      :seon.ai/raw resp})
-           (close! out)))
-       out))))
+   (fn [ctx-text] (complete+wrap opts ctx-text))))
