@@ -29,10 +29,9 @@
     ;; Pull in the agent's required namespaces at compile time so all
     ;; schemas are registered before start-agent! runs.
     [seon.agent]
-    [seon.agents.alice]
     [seon.ai.deepseek :as deepseek]
-    [seon.bootstrap :as bootstrap]
     [seon.db :as db]
+    [seon.eval :as seval]
     [seon.session :as session]))
 
 ;; ---------------------------------------------------------------------------
@@ -153,6 +152,7 @@
 ;; ---------------------------------------------------------------------------
 
 (defonce !agent-conn (atom nil))
+(defonce !compile-state (atom nil))
 
 ;; Datahike-side schema. Datahike requires every attribute have a
 ;; declared :db/valueType + :db/cardinality before first use — our
@@ -171,9 +171,6 @@
     :db/cardinality :db.cardinality/one}
    {:db/ident :seon.session/agent-loop-state
     :db/valueType :db.type/keyword
-    :db/cardinality :db.cardinality/one}
-   {:db/ident :seon.session/scratchpad
-    :db/valueType :db.type/string
     :db/cardinality :db.cardinality/one}
    {:db/ident :seon.session/tick-count
     :db/valueType :db.type/long
@@ -217,6 +214,9 @@
    {:db/ident :seon.eval/source
     :db/valueType :db.type/string
     :db/cardinality :db.cardinality/one}
+   {:db/ident :seon.eval/ok?
+    :db/valueType :db.type/boolean
+    :db/cardinality :db.cardinality/one}
    {:db/ident :seon.eval/result-edn
     :db/valueType :db.type/string
     :db/cardinality :db.cardinality/one}
@@ -234,38 +234,69 @@
       conn)))
 
 (defn- stub-llm
-  "A fake LLM that echoes the last few characters of ctx so we can
-   verify the loop end-to-end without an API key. Returns a Promise."
+  "A fake LLM that demonstrates the REPL-as-harness response shape: a
+   `;; narration` line then a real `seon.db/transact!` form, then
+   another narration + the state-flip-to-idle form. The agent reads
+   its own eval log in subsequent turns and learns by mimicking what
+   it sees here. Returns a Promise of {:text \"...\"}."
   [ctx]
-  (let [snippet (apply str (take-last 200 ctx))
-        canned-reply (str ";; stub LLM acknowledges your message; the real one needs DEEPSEEK_API_KEY\n"
-                          "(say! \"hello from the stub LLM — I saw " (count ctx) " chars of ctx\")\n"
-                          "(done!)\n")]
-    (.resolve js/Promise #js {})
-    (-> (.resolve js/Promise nil)
-        (.then (fn [_] {:text canned-reply})))))
+  (let [text (str
+               ";; stub LLM here — the real one needs DEEPSEEK_API_KEY\n"
+               ";; reply to the user\n"
+               "(seon.db/transact!\n"
+               "  {:seon.db/tx-data\n"
+               "   [{:seon.message/id      (seon.agent/new-id!)\n"
+               "     :seon.message/role    :assistant\n"
+               "     :seon.message/content "
+               (pr-str (str "hello from the stub LLM — saw "
+                            (count ctx) " chars of ctx"))
+               "\n"
+               "     :seon.message/session [:seon.session/id (session-id)]\n"
+               "     :seon.message/at      (js/Date.)}]})\n\n"
+               ";; halt the loop\n"
+               "(seon.db/transact!\n"
+               "  {:seon.db/tx-data\n"
+               "   [{:seon.session/id              (session-id)\n"
+               "     :seon.session/agent-loop-state :idle}]})\n")]
+    (.then (.resolve js/Promise nil) (fn [_] {:text text}))))
 
 (defn ^:async start-agent!
-  "Bring up the V0 agent against this process's datahike-cljs runtime.
+  "Bring up the V0 agent: open conn, init bootstrap-CLJS, prime the
+   agent's home namespace with !session-id / !results / !current-ns
+   atoms, then boot the session loop.
 
      :llm-fn — fn of ctx-string returning a Promise of {:text \"...\"}.
                Optional; defaults to stub-llm for verification without
-               an API key. Pass (seon.ai.deepseek/agent-adapter) for the
-               real thing.
+               an API key. Pass (seon.ai.deepseek/agent-adapter) for
+               the real thing.
 
-   Returns a Promise resolving to {:seon.session/id _ :seon.session/agent-ns _}.
-   Subsequent (seon.session/chat ...) calls drive the loop."
+   Returns a Promise resolving to
+     {:seon.session/id _ :seon.session/agent-ns _}.
+   Subsequent (seon.session/chat ...) calls drive the loop via the
+   kick listener."
   [& [{:keys [llm-fn] :or {llm-fn stub-llm}}]]
-  (let [conn (or @!agent-conn (await (open-agent-conn!)))]
-    (reset! !agent-conn conn)
-    ;; Make the conn the default for seon.db calls. set! on a dynamic
-    ;; var at top-level rebinds the root binding — equivalent to JVM
-    ;; alter-var-root. Listener callbacks see this without per-tick
-    ;; re-binding.
-    (set! db/*conn* conn)
-    (let [{:seon.session/keys [id agent-ns]} (session/boot! llm-fn)]
-      (js/console.log "[client] agent started — session" id "ns" (str agent-ns))
-      {:seon.session/id id :seon.session/agent-ns agent-ns})))
+  (let [conn          (or @!agent-conn (await (open-agent-conn!)))
+        _             (reset! !agent-conn conn)
+        ;; Bind the conn as the root *conn* so seon.db calls + the
+        ;; kick listener resolve without per-call threading.
+        _             (set! db/*conn* conn)
+        ;; Bootstrap-CLJS init — defonce-equivalent (idempotent).
+        compile-state (or @!compile-state
+                          (let [s (await (seval/init-bootstrap!))]
+                            (reset! !compile-state s)
+                            s))
+        ;; Prime the agent's home namespace with the atoms + accessors.
+        ;; agent-ns-sym is the session.cljs default (`seon.agent.seon`
+        ;; for V0); when multi-session/multi-agent comes, derive per-id.
+        _             (await (seval/setup-agent-ns!
+                               compile-state
+                               session/default-agent-ns
+                               session/default-session-id))
+        ;; Boot the session loop (creates entity + installs kick).
+        {:seon.session/keys [id agent-ns]}
+        (await (session/boot! llm-fn compile-state))]
+    (js/console.log "[client] agent started — session" id "ns" (str agent-ns))
+    {:seon.session/id id :seon.session/agent-ns agent-ns}))
 
 (defn start-agent-with-stub!
   "Bring up the V0 agent with the canned stub LLM. Useful for verifying
