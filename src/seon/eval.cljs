@@ -233,6 +233,24 @@
       (js/console.warn "[seon.eval/eval-batch!] update-current-ns! soft-fail:"
                        (-> r :error :seon.error/message)))))
 
+(defn ^:async ^:private maybe-await-value
+  "Agent-REPL ergonomic: if a form returns a Promise (because the form
+   called a ^:async fn like `seon.db/transact!`), await it and return
+   the resolved value. Agents don't write `await` — that's a
+   CLJS-1.12.145 syntax they don't see. This makes calls to seon.db/*
+   feel synchronous from inside agent forms.
+
+   Returns {:ok true :value v} on resolution OR a non-Promise value;
+           {:ok false :error <seon.error/->map>} on rejection."
+  [v]
+  (if (instance? js/Promise v)
+    (try
+      (let [resolved (await v)]
+        {:ok true :value resolved})
+      (catch :default e
+        {:ok false :error (error/->map e)}))
+    {:ok true :value v}))
+
 (defn ^:async record-eval!
   "Transact one :seon.eval entity capturing this form's narration,
    source, and result. Soft-fails — a DB write failure is logged but
@@ -288,13 +306,27 @@
       (let [eval-id     (new-eval-id)
             at          (js/Date.)
             current-ns  (await (read-current-ns compile-state agent-ns-sym))
-            result      (await (eval compile-state source
+            raw-result  (await (eval compile-state source
                                      {:ns current-ns
-                                      :analyze-deps? false}))]
+                                      :analyze-deps? false}))
+            ;; Auto-await Promise return values so agent code calling
+            ;; ^:async fns (seon.db/transact!, etc.) gets the resolved
+            ;; value, not the Promise. If the Promise rejects, that
+            ;; becomes the form's error.
+            result
+            (cond
+              ;; Form itself failed (compile / read / runtime throw)
+              (not (:ok raw-result)) raw-result
+              ;; Form succeeded; the value might be a Promise.
+              :else (let [r2 (await (maybe-await-value (:value raw-result)))]
+                      (if (:ok r2)
+                        {:ok true :value (:value r2) :ns (:ns raw-result)}
+                        ;; Promise rejected — surface the rejection as the form's error
+                        r2)))]
         ;; Track ending ns for REPL-style navigation. nil means the form
         ;; failed before producing one (compile error etc.); leave atom alone.
-        (when (and (:ok result) (:ns result))
-          (await (update-current-ns! compile-state agent-ns-sym (:ns result))))
+        (when (and (:ok result) (:ns raw-result))
+          (await (update-current-ns! compile-state agent-ns-sym (:ns raw-result))))
         ;; Live-value stash — direct js/Reflect.set on globalThis, no
         ;; eval-str round-trip (so opaque values like datahike DB tagged
         ;; literals don't break the stash). Agent reads via (result :id).
