@@ -20,64 +20,44 @@
    :devtools         {:enabled true}
    :compiler-options {:warnings-as-errors false}}
 
-  ;; Bootstrap-CLJS bundle. The :target :bootstrap output is the
-  ;; analysis-cache + compiled-js for each namespace listed in
-  ;; :entries, suitable for runtime loading via
-  ;; `shadow.cljs.bootstrap.node/init`. This is what the agent's
-  ;; eval uses — once loaded, the compiler is IN the pod, and
-  ;; `(cljs.js/eval-str ...)` works against arbitrary forms in
-  ;; *agent-ns*. The pod becomes self-contained: no shadow watcher
-  ;; involvement at agent-eval time, no external compiler. That's
-  ;; the Wasmer-pod-correct shape — when we eventually ship to
-  ;; sandboxed pods, this bundle goes with the pod and nothing
-  ;; external is needed for the loop to run.
+  ;; Bootstrap-CLJS bundle (spec-02 §6.1). The :target :bootstrap
+  ;; output is the analysis-cache + per-namespace compiled JS for
+  ;; each namespace in :entries, suitable for runtime loading via
+  ;; `shadow.cljs.bootstrap.node/init`. The loader uses
+  ;; goog.globalEval, which is indirect eval, which runs in global
+  ;; scope — so the namespaces land on globalThis, which is what
+  ;; cljs.core/find-ns-obj needs (`js/eval("cljs")` resolves
+  ;; globally). That sidesteps the "TypeError: Cannot read
+  ;; properties of null (reading 'findInternedVar')" mode the prior
+  ;; in-pod-eval investigation got stuck on.
   ;;
-  ;; cljs.core is implicit. We list every namespace the agent's
-  ;; eval might reference: seon.agent (verbs), seon.agents.alice
-  ;; (the playground), seon.db (DB access), seon.session (chat/
-  ;; lifecycle the agent may want to introspect), seon.schema
-  ;; (registry).
+  ;; Keep :entries minimal — every namespace pulls a transitive
+  ;; subtree into the bundle. cljs.core is the must-have. Add more
+  ;; per agent vocabulary growth (clojure.string, clojure.set, …)
+  ;; once measured.
   ;;
-  ;; To build: `clj -M:cljs compile bootstrap`
-  ;; Output:  out/bootstrap/
-  ;; Includes cljs.js (the in-runtime compiler itself), reader, and
-  ;; the supporting standard libs the agent might use. The agent's
-  ;; namespaces (seon.agent, seon.agents.alice, seon.db, …) are NOT
-  ;; in the bundle — they're already loaded in the Node runtime
-  ;; from the :client bundle. The agent's eval references them via
-  ;; fully-qualified names, which compile to JS that resolves the
-  ;; already-loaded globalThis vars at runtime.
+  ;; :macros [cljs.core] is NOT optional. cljs.core's runtime ns
+  ;; doesn't (:require-macros cljs.core), so without an explicit
+  ;; listing the bootstrap target ships cljs.core but not
+  ;; cljs.core$macros — the macro namespace lives in a separate
+  ;; file because macros are CLJ code that runs at compile time.
+  ;; Without it, find-ns-obj finds cljs.core, then findInternedVar
+  ;; throws on the first macro the analyzer expands (`let`, `defn`,
+  ;; `+`). This is the failure the POC at
+  ;; ../docs/research/scratch/seon-style-poc/ bottomed out.
   ;;
-  ;; CRITICAL — `:analyze-deps false` MUST be passed to cljs.js/
-  ;; eval-str. Otherwise the analyzer tries to walk seon.* during
-  ;; compile and fails because those namespaces aren't in the
-  ;; bundle's `index.transit.json`. With :analyze-deps false, the
-  ;; analyzer emits :undeclared-var warnings but still compiles
-  ;; the calls — and the calls resolve against the already-loaded
-  ;; Node globals at runtime, which is exactly what we want.
+  ;; cljs.js (the in-runtime compiler itself) is NOT in this
+  ;; bundle — it gets pulled into the main :client bundle via
+  ;; (:require [cljs.js :as cljs]) in seon.client / seon.eval and
+  ;; ships there. The bootstrap bundle only provides the
+  ;; analysis-cache cljs.js consumes at eval time.
   ;;
-  ;; Sidesteps the core.async-in-bootstrap problem: by not pulling
-  ;; seon.* into the bundle, we never analyze core.async's macro
-  ;; namespaces that depend on JVM-only types.
-  ;;
-  ;; To build: `clj -M:cljs compile bootstrap`
-  ;; Output:  out/bootstrap/ (~11M)
+  ;; Build: `clj -M:cljs compile bootstrap`   (or release)
+  ;; Output: out/bootstrap/  — index.transit.json + per-ns .js
   :bootstrap
-  {:target  :bootstrap
+  {:target     :bootstrap
    :output-dir "out/bootstrap"
-   :entries [cljs.js
-             cljs.reader
-             cljs.pprint
-             clojure.set
-             clojure.string
-             clojure.walk]
-   ;; :exclude on cljs.js skips re-analyzing its deps (which include
-   ;; the JVM-only cljs.env.macros and cljs.tagged-literals). The
-   ;; bundle still ships cljs.js's compiled JS; :exclude is purely
-   ;; an analyzer-walker directive. This is exactly what shadow's
-   ;; own :bootstrap-script-support demo does — see
-   ;; reference/thheller-shadow-cljs/shadow-cljs.edn:500.
-   :exclude #{cljs.js}
-   :macros []
-   :js-options {:js-provider :require}
+   :entries    [cljs.core]
+   :macros     [cljs.core]
+   :exclude    #{}
    :compiler-options {:warnings-as-errors false}}}}
