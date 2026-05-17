@@ -45,7 +45,8 @@
    Env vars:
 
      BENCH_SIZES=1000,10000          ;; entity counts to run (default 1000,10000)
-     BENCH_BACKENDS=memory,fs,idb    ;; backends (default memory,fs,idb)
+     BENCH_BACKENDS=memory,fs,sqlite-mem,sqlite-file,tiered-mem-fs,tiered-mem-sqlite
+                                     ;; backends (this is the default set)
      BENCH_ITERATIONS=10             ;; iterations per measurement (default 10)
      BENCH_TX_BATCHES=100,1000,10000 ;; tx batch sizes for transaction-time measurement
      BENCH_BATCH=1000                ;; bulk-load batch size
@@ -55,18 +56,21 @@
 
    Notes:
      - `:idb` is skipped for size > 100000 (fake-indexeddb is too slow there).
+       Not in the default set; opt-in via BENCH_BACKENDS=idb.
      - 100000 is reachable but not default.
-     - `:sqlite` backend is a follow-up (needs konserve-sqlite-cljs adapter).
-       TODO: :sqlite backend"
+     - `:sqlite-mem`/`:sqlite-file` use konserve-sqlite-cljs over
+       node-sqlite3-wasm. `:sqlite-file` is real on-disk WAL'd SQLite."
   (:require [datahike.api :as d]
             [datahike.datom]
             [datahike.index.persistent-set]
             [konserve.node-filestore]
             [konserve.indexeddb]
+            [konserve-sqlite-cljs.core]
             [me.tonsky.persistent-sorted-set :as psset]
             [me.tonsky.persistent-sorted-set.btset :as btset]
             [cljs.core.async :as a :refer [<!]]
-            [cljs.pprint :as pp])
+            [cljs.pprint :as pp]
+            [clojure.string :as str])
   (:require-macros [cljs.core.async :refer [go go-loop]]))
 
 ;; ---------------------------------------------------------------------------
@@ -256,6 +260,34 @@
                           :id              tid}
      :schema-flexibility :write :keep-history? false}))
 
+(defn- sqlite-mem-cfg []
+  {:store              {:backend :sqlite
+                        :path    ":memory:"
+                        :id      (random-uuid)}
+   :schema-flexibility :write :keep-history? false})
+
+(defn- sqlite-file-cfg [store-path]
+  {:store              {:backend :sqlite
+                        :path    store-path
+                        :id      (random-uuid)}
+   :schema-flexibility :write :keep-history? false})
+
+(defn- tiered-mem-fs-cfg [fs-path]
+  (let [tid (random-uuid)]
+    {:store              {:backend         :tiered
+                          :frontend-config {:backend :memory :id tid}
+                          :backend-config  {:backend :file :path fs-path :id tid}
+                          :id              tid}
+     :schema-flexibility :write :keep-history? false}))
+
+(defn- tiered-mem-sqlite-cfg [sqlite-path]
+  (let [tid (random-uuid)]
+    {:store              {:backend         :tiered
+                          :frontend-config {:backend :memory :id tid}
+                          :backend-config  {:backend :sqlite :path sqlite-path :id tid}
+                          :id              tid}
+     :schema-flexibility :write :keep-history? false}))
+
 ;; ---------------------------------------------------------------------------
 ;; Bulk-load + connection helpers.
 ;; ---------------------------------------------------------------------------
@@ -277,26 +309,51 @@
                 (println "[bench] tx ERR @start=" start ":" (.-message tx-rep)))
               (recur (+ start m) (inc batches)))))))))
 
+(defn- tmp-path
+  "Build a unique tmp path with the given suffix (no extension assumed)."
+  [prefix]
+  (str (.tmpdir os) "/" prefix "-" (.getTime (js/Date.)) "-" (rand-int 1000000)))
+
+(defn- rm-rf-sqlite [p]
+  ;; SQLite leaves -wal and -shm sidecars in WAL mode; clear them too.
+  (rm-rf p) (rm-rf (str p "-wal")) (rm-rf (str p "-shm")))
+
 (defn- make-store!
-  "Create + connect to a fresh store. Returns channel yielding [conn cfg fs-path]."
+  "Create + connect to a fresh store. Returns channel yielding [conn cfg cleanup-path].
+   `cleanup-path` is either a single string (for :fs) or a [:sqlite path] / [:tiered-sqlite path]
+   marker for backends with non-directory artefacts. Teardown handles each shape."
   [backend]
   (go
-    (let [[cfg fs-path] (case backend
+    (let [[cfg cleanup] (case backend
                          :memory [(mem-cfg) nil]
-                         :fs     (let [p (str (.tmpdir os)
-                                              "/vault-bench-" (.getTime (js/Date.))
-                                              "-" (rand-int 1000000))]
+                         :fs     (let [p (tmp-path "vault-bench")]
                                    (rm-rf p)
-                                   [(fs-cfg p) p])
-                         :idb    [(idb-cfg) nil])]
+                                   [(fs-cfg p) [:dir p]])
+                         :idb    [(idb-cfg) nil]
+                         :sqlite-mem        [(sqlite-mem-cfg) nil]
+                         :sqlite-file       (let [p (str (tmp-path "vault-bench-sqlite") ".db")]
+                                              (rm-rf-sqlite p)
+                                              [(sqlite-file-cfg p) [:sqlite p]])
+                         :tiered-mem-fs     (let [p (tmp-path "vault-bench-tiered-fs")]
+                                              (rm-rf p)
+                                              [(tiered-mem-fs-cfg p) [:dir p]])
+                         :tiered-mem-sqlite (let [p (str (tmp-path "vault-bench-tiered-sqlite") ".db")]
+                                              (rm-rf-sqlite p)
+                                              [(tiered-mem-sqlite-cfg p) [:sqlite p]]))]
       (<! (d/create-database cfg))
-      [(<! (d/connect cfg {:sync? false})) cfg fs-path])))
+      [(<! (d/connect cfg {:sync? false})) cfg cleanup])))
 
 (defn- teardown!
   "Best-effort store teardown. konserve.node-filestore needs its directory
-   removed; :memory and :indexeddb (under fake-indexeddb) are GC'd."
-  [_backend fs-path]
-  (when fs-path (rm-rf fs-path)))
+   removed; :memory and :indexeddb (under fake-indexeddb) are GC'd.
+   `cleanup` is the marker returned from make-store!: nil, [:dir path], or [:sqlite path]."
+  [_backend cleanup]
+  (when (vector? cleanup)
+    (let [[kind p] cleanup]
+      (case kind
+        :dir    (rm-rf p)
+        :sqlite (rm-rf-sqlite p)
+        nil))))
 
 ;; ---------------------------------------------------------------------------
 ;; Per-query timing primitive.
@@ -461,20 +518,14 @@
         attr-roles (cond-> []
                      s1-attr (conj {:dt :str :ak :s1 :attr s1-attr :attr2-ak :s2 :attr2 s2-attr})
                      i1-attr (conj {:dt :int :ak :i1 :attr i1-attr :attr2-ak :i2 :attr2 i2-attr}))]
-    (println "[bench] var-queries roles:" (pr-str (mapv #(select-keys % [:dt :ak :attr :attr2]) attr-roles)))
     (mapcat
      (fn [{:keys [dt ak attr attr2-ak attr2]}]
-       (println "[bench] var-queries entering role" dt ak attr "/" attr2-ak attr2)
        (mapcat
         (fn [in-db?]
-          (println "[bench] var-queries  in-db?=" in-db?)
           (let [v1     (if in-db? (pick-value db mode ak attr n) (pick-miss-value mode ak))
-                _      (println "[bench] var-queries   v1=" (pr-str v1))
                 v2     (when attr2
                          (if in-db? (pick-value db mode attr2-ak attr2 n) (pick-miss-value mode attr2-ak)))
-                _      (println "[bench] var-queries   v2=" (pr-str v2))
                 v-comp (pick-value db mode ak attr n)
-                _      (println "[bench] var-queries   v-comp=" (pr-str v-comp))
                 d      {:data-type dt :data-in-db? in-db? :a1 attr}
                 rows   [{:function :simple-query
                          :query   (vec (concat '[:find ?e :where] [['?e attr v1]]))
@@ -607,7 +658,11 @@
   (try
     [(vec (thunk)) nil]
     (catch :default e
-      (println (str "[bench] " label " threw: " (or (ex-message e) (str e))))
+      (println (str "[bench] " label " threw: "
+                    (or (ex-message e) (str e))))
+      (when-let [stack (.-stack e)]
+        (println (str "[bench]   stack: "
+                      (->> (.split stack "\n") (take 8) (str/join "\n           ")))))
       [[] e])))
 
 (defn- all-queries
@@ -628,7 +683,10 @@
   {:memory "pure in-process; no persistence, no I/O cost; reset each run."
    :fs     "real disk via konserve.node-filestore; persistence cost included; macOS APFS / SSD latency dominates writes."
    :idb    "fake-indexeddb shim under Node, NOT a real browser IndexedDB; reflects algorithm cost in CLJS, not real-browser IDB persistence."
-   :sqlite "(not yet wired) — would use sql.js, in-memory only; real SQLite query planner, no disk."
+   :sqlite-mem        "real SQLite query planner via node-sqlite3-wasm; no disk; single-process; no WAL fsync cost."
+   :sqlite-file       "node-sqlite3-wasm with WAL mode + synchronous=NORMAL; real fsync per commit; real disk persistence."
+   :tiered-mem-fs     "memory-speed reads after warm-up, write-through to konserve.node-filestore on disk; reflects best-case caching + durable writes."
+   :tiered-mem-sqlite "memory-speed reads after warm-up, write-through to SQLite WAL on disk; SQLite per-key fsync cost dominates writes."
    :methodology
    {:limit-query        "client-side .slice applied to full query result — engine still does full scan."
     :less-1-fixed       "predicate baked into query body (no `:in`); planner sees the constant."
@@ -648,11 +706,22 @@
   [db conn cfg mode id-vec n iterations]
   (let [datom-count (* n (count (if (= mode :vault) vault-schema synthetic-schema)))
         simple-cfg  (simple-config cfg)
+        skip-set    (->> (env "BENCH_SKIP_QUERIES" "")
+                         (#(if (empty? %) [] (.split % ",")))
+                         (map #(let [s (.trim %)
+                                     s (if (.startsWith s ":") (subs s 1) s)]
+                                 (keyword s)))
+                         set)
         specs       (try
-                      (vec (all-queries db mode id-vec n))
+                      (let [all (vec (all-queries db mode id-vec n))]
+                        (if (seq skip-set)
+                          (vec (remove #(contains? skip-set (:function %)) all))
+                          all))
                       (catch :default e
                         (println "[bench] all-queries threw:" (ex-message e))
                         []))]
+    (when (seq skip-set)
+      (println (str "[bench] skipping queries: " skip-set)))
     (println (str "[bench] specs: " (count specs) " query specs"))
     (vec
      (for [{:keys [function query inputs details pull? lookup-ref]} specs]
@@ -750,7 +819,7 @@
     (println (str "\n[bench] backend=" backend " size=" size
                   " mode=" mode " iters=" iterations " batch=" batch-size))
     (let [t-setup0       (now-ms)
-          [conn cfg fs-path] (<! (make-store! backend))
+          [conn cfg cleanup] (<! (make-store! backend))
           schema         (if (= mode :vault) vault-schema synthetic-schema)
           _              (<! (d/transact! conn schema))
           t-setup        (- (now-ms) t-setup0)
@@ -783,7 +852,7 @@
                    :time    {:mean load-ms :median load-ms :std 0
                              :min load-ms :max load-ms :count 1
                              :observations [load-ms]}}]
-      (teardown! backend fs-path)
+      (teardown! backend cleanup)
       {:backend backend
        :size    size
        :rows    (vec (concat [load-row conn-row] tx-rows query-rows))
@@ -886,7 +955,8 @@
   (mapv parse-long (parse-csv (env "BENCH_SIZES" "1000,10000"))))
 
 (defn- parse-backends []
-  (mapv keyword (parse-csv (env "BENCH_BACKENDS" "memory,fs,idb"))))
+  (mapv keyword (parse-csv (env "BENCH_BACKENDS"
+                                "memory,fs,sqlite-mem,sqlite-file,tiered-mem-fs,tiered-mem-sqlite"))))
 
 (defn- parse-tx-batches []
   (mapv parse-long (parse-csv (env "BENCH_TX_BATCHES" "100,1000"))))

@@ -11,7 +11,10 @@
     "clean": "rm -rf out .shadow-cljs"
   },
   "devDependencies": {
-    "shadow-cljs": "^3.4.10",
-    "fake-indexeddb": "^6.0.0"
+    "fake-indexeddb": "^6.0.0",
+    "shadow-cljs": "^3.4.10"
+  },
+  "dependencies": {
+    "node-sqlite3-wasm": "^0.8.57"
   }
 }
