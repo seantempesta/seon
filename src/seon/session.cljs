@@ -176,9 +176,11 @@
 ;; ============================================================
 ;; V0 MVP defaults — one hardcoded agent at the canonical id.
 ;;
-;; Note: agent-ns is now the per-agent RUNTIME ns (`seon.agent.seon`),
-;; created via seon.eval/setup-agent-ns! at boot, not a compile-time
-;; placeholder like the old `seon.agents.alice`.
+;; agent-ns is the per-agent RUNTIME ns (`seon.agent.seon`), created
+;; via seon.eval/setup-agent-ns! at boot. There's no compile-time
+;; placeholder; the ns comes into existence when the loader runs
+;; setup-agent-ns!'s `(ns seon.agent.seon)` form against the
+;; bootstrap compile-state.
 ;; ============================================================
 
 (def default-session-id "seon")
