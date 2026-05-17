@@ -189,9 +189,14 @@ Full plan (call-site counts, JVM topology collapse to one-conn-per-user, test-fi
 
 All data flowing through Seon must be safe at every boundary: Malli validation, core.async channels, Nippy serialization, Datalevin transact/pull.
 
-**Maps with namespaced keywords.** Every public function takes one map and returns one map. All keys are fully namespaced keywords (`:seon.runtime/status`, never `:status`). No exceptions.
+**Maps with namespaced keywords. Every key. No exceptions.** This is the load-bearing rule the rest of the system depends on:
 
-**Keyword namespaces = real code namespaces.** Use `::subject` freely — it correctly expands to `:seon.email.message/subject` when you're in `seon.email.message`. This is the intended pattern: schemas live in the namespace that owns them. Never invent keyword namespace prefixes that don't correspond to actual code namespaces.
+- **Every public function** takes one map and returns one map. Every key in both maps is fully namespaced (`:seon.runtime/status`, never `:status`). Both the request and response map are themselves named Malli schemas (`::foo-request`, `::foo-response`) registered via `seon.schema/register!`. The `:malli/schema` metadata on the fn points at them.
+- **Every datom persisted to the DB** uses a fully-namespaced attribute keyword whose Malli schema is registered. `seon.db/transact!` enforces this at the boundary — unregistered or unspec'd attrs throw before the tx reaches the DB.
+- **Every map handed to a callback** (tx-listener handlers, trigger handlers, flow step-fns, async channel envelopes) — fully namespaced. The reason: a single Datalog query should be able to join function specs to the data those functions operate on. `:tx-data` carries no information about which fn owns it; `:seon.db/tx-data` does.
+- **Specificity, not single keywords.** Bare keywords (`:status`, `:ok`, `:tx-data`, `:e`, `:a`, `:v`) are banned in any seon-authored map. If a key feels too generic to namespace, namespace it anyway — that's a signal the schema isn't precise enough yet.
+
+**Keyword namespaces = real code namespaces.** Use `::subject` freely — it correctly expands to `:seon.email.message/subject` when you're in `seon.email.message`. This is the intended pattern: **schemas live in the namespace that owns the data, alongside the fns that process it.** Colocation isn't strict (fns will mix data across namespaces — that's fine), but the schema for a piece of data lives with the namespace whose name it carries. Never invent keyword namespace prefixes that don't correspond to actual code namespaces.
 
 **Concrete types only.** Every persisted field has a specific type (`:string`, `:int`, `:keyword`, `:inst`, etc.).
 
