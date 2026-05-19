@@ -108,11 +108,29 @@
      (->> rows (sort-by second #(compare %2 %1)) (take n) reverse))))
 
 (defn ^:no-doc recent-errors
-  "Return the most-recent `n` undismissed :seon.log/level :error
-   entries for `id`. Stub for now — `seon.log/error!` lands in A-6
-   and starts populating these entities. Returns `()` until then."
-  ([_db _id] [])
-  ([_db _id _n] []))
+  "Return the most-recent `n` undismissed `:seon.log/level :error`
+   entries for `id`, newest-first. Populated by `seon.log/error!`
+   transactions (A-6). Returns `()` when none."
+  ([db id] (recent-errors db id 10))
+  ([db id n]
+   (let [args  [id]
+         query '[:find ?eid ?at ?msg
+                 :in $ ?aid
+                 :where
+                 [?e :seon.log/level :error]
+                 [?e :seon.log/agent ?aid]
+                 [?e :seon.log/at ?at]
+                 [?e :seon.log/message ?msg]
+                 (not [?e :seon.log/dismissed-at _])
+                 [(identity ?e) ?eid]]
+         rows  (if db
+                 (db/query {:seon.db/db db :seon.db/query query :seon.db/args args})
+                 (db/query {:seon.db/query query :seon.db/args args}))]
+     (->> rows
+          (sort-by second #(compare %2 %1))
+          (take n)
+          (map (fn [[eid _at msg]]
+                 {:db/id eid :seon.log/message msg}))))))
 
 (defn ^:no-doc all-running-agents
   "Return every agent entity whose `:seon.agent/state` is `:idle` or

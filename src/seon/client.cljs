@@ -38,7 +38,11 @@
     [seon.render.default]
     ;; Pod HTTP+SSE server — A-5. Required here so the build includes
     ;; it; start-agent! calls (web.serve/start!) at boot.
-    [seon.web.serve :as web.serve]))
+    [seon.web.serve :as web.serve]
+    ;; Broadcast tx-listener — A-6. Required here so the build includes
+    ;; it; start-agent! calls (web.broadcast/install!) at boot.
+    [seon.log]
+    [seon.web.broadcast :as web.broadcast]))
 
 ;; ---------------------------------------------------------------------------
 ;; Process-lifetime state. `defonce` so reloads don't reset it.
@@ -205,6 +209,46 @@
    {:db/ident :seon.eval/agent
     :db/valueType :db.type/ref
     :db/cardinality :db.cardinality/one}
+
+   ;; --- Render slots (A-6) ---
+   ;; Symbol-only at storage. Spec §15.2's "literal hiccup as slot
+   ;; value" path is gated by datahike's strict-typed schema — it
+   ;; refuses `:db.type/any` (not in its allowed-types enum). For V0.5
+   ;; the agent wraps literal hiccup in a fn and transacts the symbol;
+   ;; html-dispatch's vector-short-circuit branch still applies at
+   ;; in-memory call sites (e.g. when a render fn returns another
+   ;; vector). Polymorphic storage is a V0.6 concern — solved either
+   ;; by switching the conn to schema-flexibility :read (loses
+   ;; unique-by-identity) or by EDN-serializing at the boundary.
+   {:db/ident :seon.render/ai
+    :db/valueType :db.type/symbol
+    :db/cardinality :db.cardinality/one}
+   {:db/ident :seon.render/html
+    :db/valueType :db.type/symbol
+    :db/cardinality :db.cardinality/one}
+
+   ;; --- Log (A-6) ---
+   {:db/ident :seon.log/at
+    :db/valueType :db.type/instant
+    :db/cardinality :db.cardinality/one}
+   {:db/ident :seon.log/level
+    :db/valueType :db.type/keyword
+    :db/cardinality :db.cardinality/one}
+   {:db/ident :seon.log/source
+    :db/valueType :db.type/keyword
+    :db/cardinality :db.cardinality/one}
+   {:db/ident :seon.log/agent
+    :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one}
+   {:db/ident :seon.log/message
+    :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one}
+   {:db/ident :seon.log/stack
+    :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one}
+   {:db/ident :seon.log/dismissed-at
+    :db/valueType :db.type/instant
+    :db/cardinality :db.cardinality/one}
    {:db/ident :seon.eval/at
     :db/valueType :db.type/instant
     :db/cardinality :db.cardinality/one}
@@ -305,10 +349,14 @@
         {:seon.agent/keys [id ns]}
         (await (agent/boot! llm-fn compile-state))
         ;; Boot the pod's HTTP+SSE server (A-5). The browser hits
-        ;; this for the dev iteration loop; SSE patches arrive once
-        ;; A-6 wires the broadcast tx-listener.
+        ;; this for the dev iteration loop.
         {:seon.web/keys [port port-file]}
-        (await (web.serve/start!))]
+        (await (web.serve/start!))
+        ;; Install the broadcast tx-listener (A-6) — every DB tx now
+        ;; re-renders running agents + diffs against the per-agent
+        ;; HTML cache + pushes datastar-patch-elements to open SSE
+        ;; connections when the rendered string changes.
+        _ (web.broadcast/install!)]
     (js/console.log "[client] agent started — id" id "ns" (str ns))
     (js/console.log "[client] pod listening on http://127.0.0.1:" port
                     "(port file" port-file ")")

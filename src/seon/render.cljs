@@ -39,10 +39,11 @@
 ;; Force-function ensures the default ctx fn is always the baseline.
 (schema/register! :seon.render/ai [:fn symbol?])
 
-;; :seon.render/html accepts a symbol (fn taking the input map → hiccup)
-;; or a literal hiccup value. Static views don't impair the agent the
-;; way a static prompt would.
-(schema/register! :seon.render/html [:or [:fn symbol?] :any])
+;; :seon.render/html — symbol-only at entity storage (V0.5 limitation;
+;; see seon.client/agent-bootstrap-schema for the datahike side). The
+;; in-process dispatch path still accepts literal hiccup at call sites
+;; (e.g. when a render fn returns a vector that wraps another).
+(schema/register! :seon.render/html [:fn symbol?])
 
 ;; Hiccup data shape — recursive vector starting with keyword, optional
 ;; attrs map, children. Defined via Malli local registry so the
