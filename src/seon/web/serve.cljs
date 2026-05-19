@@ -42,6 +42,7 @@
     ["node:fs" :as fs]
     ["node:path" :as path]
     [clojure.string :as str]
+    [seon.agent :as agent]
     [seon.web.page :as page]))
 
 ;; ============================================================
@@ -136,19 +137,88 @@
            (swap! !sse-connections
                   (fn [conns] (vec (remove #(= (:id %) (:id conn)) conns))))))))
 
+;; ============================================================
+;; POST /chat — inject a :user message into the named agent's log.
+;; The agent's kick listener (seon.agent/install-kick!) fires on the
+;; resulting tx, run-turn-once! starts, the LLM responds, broadcast
+;; morphs the tile via SSE.
+;;
+;; Body is application/x-www-form-urlencoded (Datastar's
+;; `@post('/chat', {contentType:'form'})` posts FormData). `agent` is
+;; in the query string (defaults to "seon").
+;; ============================================================
+
+(defn- read-body
+  "Collect a Node request body into a String. Returns a Promise."
+  [req]
+  (js/Promise.
+    (fn [resolve _reject]
+      (let [chunks (atom [])]
+        (.on req "data"
+             (fn [chunk]
+               (swap! chunks conj chunk)))
+        (.on req "end"
+             (fn []
+               (resolve (.toString
+                          (.concat js/Buffer (clj->js @chunks))))))))))
+
+(defn- parse-urlencoded
+  "Parse an `application/x-www-form-urlencoded` body into a map of
+   String → String. URLSearchParams handles RFC 3986 percent decoding."
+  [body]
+  (let [params (js/URLSearchParams. body)]
+    (into {} (map (fn [[k v]] [k v]) (es6-iterator-seq (.entries params))))))
+
+(defn- query-param
+  "Pull a single query-string value out of `req.url`. Returns nil if
+   absent. Defensive against malformed URLs."
+  [req k]
+  (try
+    (let [full-url (str "http://x" (.-url req))   ; URL needs an origin
+          u (js/URL. full-url)]
+      (.get (.-searchParams u) k))
+    (catch :default _ nil)))
+
+(defn- handle-chat! [req res]
+  (let [agent-id (or (query-param req "agent") "seon")]
+    (-> (read-body req)
+        (.then (fn [body]
+                 (let [params (parse-urlencoded body)
+                       text   (get params "text")]
+                   (if (or (nil? text) (str/blank? text))
+                     (write-status! res 400 "text/plain; charset=utf-8"
+                                    "missing 'text' param")
+                     (-> (agent/chat agent-id text)
+                         (.then (fn [_mid]
+                                  (write-status! res 204 "text/plain; charset=utf-8" "")))
+                         (.catch (fn [err]
+                                   (js/console.error "[seon.web.serve] /chat agent/chat threw:" err)
+                                   (write-status! res 500 "text/plain; charset=utf-8"
+                                                  (str "chat failed: " err)))))))))
+        (.catch (fn [err]
+                  (js/console.error "[seon.web.serve] /chat body read failed:" err)
+                  (try
+                    (write-status! res 500 "text/plain; charset=utf-8" (str err))
+                    (catch :default _ nil)))))))
+
 (defn- handler [req res]
   (let [url    (or (.-url req) "/")
+        ;; Strip query string for routing match
+        path   (first (str/split url #"\?"))
         method (or (.-method req) "GET")]
     (try
       (case method
-        "GET" (cond
-                (= url "/")                        (serve-root! res)
-                (str/starts-with? url "/css/")     (serve-static! res url)
-                (str/starts-with? url "/js/")      (serve-static! res url)
-                (= url "/sse")                     (open-sse! req res)
-                :else                              (write-status! res 404 "text/plain; charset=utf-8"
-                                                                  (str "Not found: " url)))
-        ;; A-8 will add POST /chat. For now everything non-GET is 405.
+        "GET"  (cond
+                 (= path "/")                       (serve-root! res)
+                 (str/starts-with? path "/css/")    (serve-static! res path)
+                 (str/starts-with? path "/js/")     (serve-static! res path)
+                 (= path "/sse")                    (open-sse! req res)
+                 :else                              (write-status! res 404 "text/plain; charset=utf-8"
+                                                                   (str "Not found: " url)))
+        "POST" (cond
+                 (= path "/chat")                   (handle-chat! req res)
+                 :else                              (write-status! res 404 "text/plain; charset=utf-8"
+                                                                   (str "Not found: " url)))
         (write-status! res 405 "text/plain; charset=utf-8" "Method not allowed"))
       (catch :default e
         (js/console.error "[seon.web.serve] handler error:" e)

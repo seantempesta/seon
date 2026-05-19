@@ -35,6 +35,7 @@
     [seon.render :as render]
     [seon.render.default :as default]
     [seon.ui.html :as html]
+    [seon.web.serve :as serve]
     [seon.web.sse :as sse]))
 
 ;; ============================================================
@@ -121,17 +122,55 @@
 ;; Install / remove
 ;; ============================================================
 
+;; ============================================================
+;; Render-on-connect — when a fresh SSE client opens (datastar opens
+;; `/sse` on page load via the shell's `data-on-load`), immediately
+;; push the current render of every running agent to that connection.
+;; Without this, a page-load on a fully-booted pod would show an empty
+;; shell until the next tx happens to fire the broadcast.
+;;
+;; Implemented as an `add-watch` on serve/!sse-connections so seon.web.serve
+;; doesn't need to know about broadcast — pure observer pattern, no cycle.
+;; ============================================================
+
+(defn- render-for-new-conn!
+  "Render every running agent and write the patch directly to `res`
+   (single connection — not the fan-out path). Also seeds
+   `!last-rendered` so subsequent broadcasts diff against the same
+   bytes."
+  [res db]
+  (doseq [ent (default/all-running-agents db)
+          :when (some? ent)]
+    (try
+      (let [aid      (:seon.agent/id ent)
+            html-str (render-agent! db ent)
+            payload  (sse/patch-elements html-str)]
+        (.write res payload)
+        (swap! !last-rendered assoc aid html-str))
+      (catch :default e
+        (js/console.error "[seon.web.broadcast] render-for-new-conn! failed:" e)))))
+
+(defn- on-sse-connections-change
+  [_k _ref old-conns new-conns]
+  (when-let [added (seq (remove (set old-conns) new-conns))]
+    (let [db @db/*conn*]
+      (doseq [{:keys [res]} added]
+        (render-for-new-conn! res db)))))
+
 (defn install!
-  "Register the broadcast tx-listener under `::broadcast`. Idempotent —
-   re-registering replaces the prior handler (datahike upstream
-   semantics). Returns the listener key."
+  "Register the broadcast tx-listener under `::broadcast` AND wire the
+   render-on-connect watcher on the SSE connection registry. Idempotent
+   — re-installing replaces the prior handler + watcher."
   []
+  (add-watch serve/!sse-connections ::render-on-connect
+             on-sse-connections-change)
   (db/listen!
     {:seon.db/key     ::broadcast
      :seon.db/handler broadcast-on-tx}))
 
 (defn uninstall!
-  "Remove the broadcast listener. Useful from the REPL when iterating
-   on the listener body without restarting the pod."
+  "Remove the broadcast listener + SSE watcher. Useful from the REPL
+   when iterating on the listener body without restarting the pod."
   []
+  (remove-watch serve/!sse-connections ::render-on-connect)
   (db/unlisten! {:seon.db/key ::broadcast}))

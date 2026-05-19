@@ -42,7 +42,10 @@
     ;; Broadcast tx-listener — A-6. Required here so the build includes
     ;; it; start-agent! calls (web.broadcast/install!) at boot.
     [seon.log]
-    [seon.web.broadcast :as web.broadcast]))
+    [seon.web.broadcast :as web.broadcast]
+    ;; V0.5 demo bootstrap — A-8. Transacts alice's initial render
+    ;; slots so a fresh page load shows the welcome tile + chat form.
+    [seon.example :as demo]))
 
 ;; ---------------------------------------------------------------------------
 ;; Process-lifetime state. `defonce` so reloads don't reset it.
@@ -355,8 +358,13 @@
         ;; Install the broadcast tx-listener (A-6) — every DB tx now
         ;; re-renders running agents + diffs against the per-agent
         ;; HTML cache + pushes datastar-patch-elements to open SSE
-        ;; connections when the rendered string changes.
-        _ (web.broadcast/install!)]
+        ;; connections when the rendered string changes. Also wires the
+        ;; render-on-connect watcher so a fresh /sse open gets the
+        ;; current state immediately.
+        _ (web.broadcast/install!)
+        ;; V0.5 demo bootstrap (A-8) — transact alice's initial render
+        ;; slots so the page tile renders on first browser load.
+        _ (await (demo/setup!))]
     (js/console.log "[client] agent started — id" id "ns" (str ns))
     (js/console.log "[client] pod listening on http://127.0.0.1:" port
                     "(port file" port-file ")")
