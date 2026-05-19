@@ -35,7 +35,10 @@
     ;; Render protocol — A-2. Required here so the build includes it
     ;; AND so `use-compile-state!` is callable from start-agent!.
     [seon.render :as render]
-    [seon.render.default]))
+    [seon.render.default]
+    ;; Pod HTTP+SSE server — A-5. Required here so the build includes
+    ;; it; start-agent! calls (web.serve/start!) at boot.
+    [seon.web.serve :as web.serve]))
 
 ;; ---------------------------------------------------------------------------
 ;; Process-lifetime state. `defonce` so reloads don't reset it.
@@ -300,9 +303,17 @@
                                agent/default-id))
         ;; Boot the turn loop (creates entity + installs kick).
         {:seon.agent/keys [id ns]}
-        (await (agent/boot! llm-fn compile-state))]
+        (await (agent/boot! llm-fn compile-state))
+        ;; Boot the pod's HTTP+SSE server (A-5). The browser hits
+        ;; this for the dev iteration loop; SSE patches arrive once
+        ;; A-6 wires the broadcast tx-listener.
+        {:seon.web/keys [port port-file]}
+        (await (web.serve/start!))]
     (js/console.log "[client] agent started — id" id "ns" (str ns))
-    {:seon.agent/id id :seon.agent/ns ns}))
+    (js/console.log "[client] pod listening on http://127.0.0.1:" port
+                    "(port file" port-file ")")
+    {:seon.agent/id id :seon.agent/ns ns
+     :seon.web/port port :seon.web/port-file port-file}))
 
 (defn start-agent-with-stub!
   "Bring up the V0 agent with the canned stub LLM. Useful for verifying
@@ -333,6 +344,18 @@
                            (js/console.error "  expected:" (pr-str (:expected result)))))))
       (.catch (fn [err]
                 (js/console.error "[client] datahike-cljs smoke test THREW —" err))))
+  ;; A-5: auto-boot the V0 agent + HTTP server unless SEON_NO_AUTO_BOOT.
+  ;; Cheap default for dev iteration — browser hits the loopback port,
+  ;; no REPL needed. Disable when running the bare smoke test alone.
+  (when-not (.. js/process -env -SEON_NO_AUTO_BOOT)
+    (-> (start-agent-with-stub!)
+        (.then (fn [{:seon.agent/keys [id ns]
+                     :seon.web/keys [port port-file]}]
+                 (js/console.log "[client] auto-boot ready — agent" id "ns" (str ns))
+                 (js/console.log "[client]   open http://127.0.0.1:" port
+                                 "(port:" port-file ")")))
+        (.catch (fn [err]
+                  (js/console.error "[client] auto-boot failed —" err)))))
   (js/console.log "[client] connect editor / mcp to nREPL :7889 then")
   (js/console.log "[client]   (shadow.cljs.devtools.api/nrepl-select :client)")
   (start-heartbeat!))
