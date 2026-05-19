@@ -28,7 +28,14 @@
    :output-to        "out/client/main.js"
    :main             seon.client/-main
    :devtools         {:enabled true}
-   :compiler-options {:warnings-as-errors false}}
+   ;; externs/node_fs.js declares `fs.existsSync` etc. so Closure's
+   ;; :advanced pass doesn't rename them to `fs.g_(...)` and crash
+   ;; environ.core's load-time `.lein-env` probe. Originally shipped
+   ;; in datahike's tree but its deps.cljs points at the wrong path
+   ;; (`datahike/externs.js` vs the real `externs/node_fs.js`), so we
+   ;; vendor the file directly here. Only matters under :release.
+   :compiler-options {:warnings-as-errors false
+                      :externs           ["externs/node_fs.js"]}}
 
   ;; Bootstrap-CLJS bundle (spec-02 §6.1). The :target :bootstrap
   ;; output is the analysis-cache + per-namespace compiled JS for
