@@ -232,7 +232,24 @@
     "(defn double-it [n] (* n 2))\n\n"
 
     ";; later (this turn or any future turn): just call it\n"
-    "(double-it 21)\n"))
+    "(double-it 21)\n\n"
+
+    ";; ── filesystem (your local-machine surface; spec-05 A-9) ──────\n"
+    ";; check what runtime you're on (`:node` in V0.5 dev; `:wasi` in V1+ Tauri)\n"
+    "(seon.platform/host)\n\n"
+
+    ";; read a file from disk — returns {:seon.fs/ok? :seon.fs/content ...}\n"
+    "(seon.fs/read-file {:seon.fs/path \"/Users/sean/.zshrc\"})\n\n"
+
+    ";; list a directory — returns {:seon.fs/ok? :seon.fs/entries [...]}\n"
+    "(seon.fs/list-dir  {:seon.fs/path (seon.fs/home-dir)})\n\n"
+
+    ";; stat a file — size, mtime, dir?/file?\n"
+    "(seon.fs/stat      {:seon.fs/path \"/Users/sean/.zshrc\"})\n\n"
+
+    ";; write a file — overwrites; returns {:seon.fs/ok? :seon.fs/path}\n"
+    "(seon.fs/write-file {:seon.fs/path \"/tmp/seon-note.txt\"\n"
+    "                     :seon.fs/content \"hi from \" (str (session-id))})\n"))
 
 (defn conventions
   "Hard rules + gotchas the agent should know up front."

@@ -45,7 +45,12 @@
     [seon.web.broadcast :as web.broadcast]
     ;; V0.5 demo bootstrap — A-8. Transacts alice's initial render
     ;; slots so a fresh page load shows the welcome tile + chat form.
-    [seon.example :as demo]))
+    [seon.example :as demo]
+    ;; Local-machine capability surface — A-9. Required so the agent
+    ;; can call (seon.fs/read-file ...) + (seon.platform/host) from
+    ;; bootstrap-CLJS eval.
+    [seon.fs]
+    [seon.platform]))
 
 ;; ---------------------------------------------------------------------------
 ;; Process-lifetime state. `defonce` so reloads don't reset it.
