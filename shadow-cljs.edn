@@ -13,6 +13,16 @@
   ;; the agent loop's pending operations (or, in this skeleton, a
   ;; heartbeat setInterval). `:devtools {:enabled true}` is the default
   ;; for :node-script — listed here for visibility.
+  ;;
+  ;; Stays on :target :node-script (NOT :esm). A previous push toward
+  ;; ESM ran into pain: shadow.cljs.bootstrap.node does `(:require ["fs"])`
+  ;; and environ.core (transitive via datahike) does `(js/require "fs")`
+  ;; at namespace-load time; both work cleanly under :node-script and
+  ;; require ESM-glue (createRequire polyfill, __dirname shim, externs
+  ;; for closure-renamed fs.existsSync under :advanced) under :esm.
+  ;; Downstream consumers that need an ESM entry can wrap this CJS
+  ;; bundle in a one-line `.mjs` shim — cheap at the boundary, no cost
+  ;; here.
   :client
   {:target           :node-script
    :output-to        "out/client/main.js"
