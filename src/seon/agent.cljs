@@ -13,8 +13,10 @@
    This namespace owns:
      - `new-id!`            — base62 10-char id generator
      - the `:seon.agent/*`, `:seon.message/*`, `:seon.eval/*` schemas
-     - `build-ctx`          — fallback prompt builder (see seon.render.default/ctx)
-     - `run-turn-once!`     — one LLM call + REPL-batch eval cycle
+     - `run-turn-once!`     — one LLM call + REPL-batch eval cycle;
+                              builds the prompt via `seon.render/ai-dispatch`
+                              against the agent's `:seon.render/ai` slot
+                              (defaults to `'seon.render.default/ctx`)
      - `install-kick!`      — register the user-message-kick listener
      - `create!`            — allocate an agent entity, init state
      - `chat`               — inject a :user message
@@ -35,26 +37,22 @@
    no-op — the next kick after the turn ends picks up any messages
    that landed during it.
 
-   ## build-ctx shape
+   ## Prompt assembly
 
-   What the LLM sees is structured as a REPL session header (current
-   ns, agent-id, turn count) followed by capability examples in the
-   SAME shape the agent is expected to respond in (`;; narration` +
-   `(form)`). Live DB state, recent conversation, and recent evals
-   land below. The agent learns by mimicking what it sees — there's
-   no schema-as-docs to interpret, only worked patterns.
+   Per spec-05 §15.4 the LLM ctx is built via the render dispatch:
 
-   `build-ctx` is the fallback prompt builder. The canonical render
-   path is `seon.render.default/ctx` (see spec-05 §15.3); when an
-   agent's `:seon.render/ai` slot is unset, the dispatcher falls
-   through to a pretty-print. `build-ctx` is kept here for legacy
-   call sites until spec-05 A-7 wires the render dispatcher in
-   front of `run-turn-once!`."
+     entity → :seon.render/ai slot → resolve-symbol → call → text
+
+   Default: `'seon.render.default/ctx` composes REPL header + 'how you
+   respond' + worked examples + conventions + recent conversation +
+   recent evals + recent errors + schema reference. Agents override
+   by transacting their own `:seon.render/ai` symbol pointing at a
+   fn that picks which fragments to keep + adds their own."
   (:require
     [clojure.string :as str]
-    [cljs.reader :as edn]
     [seon.db :as db]
     [seon.eval :as seval]
+    [seon.render :as render]
     [seon.repl :as repl]
     [seon.schema :as schema]))
 
@@ -124,273 +122,6 @@
   (symbol (str "seon.agent." agent-id)))
 
 ;; ============================================================
-;; Live state probes — pure DB queries used to render ctx.
-;; ============================================================
-
-(defn- agent-entity [agent-id]
-  (db/entity {:seon.db/ref [:seon.agent/id agent-id]}))
-
-(defn- recent-messages [agent-id n]
-  (->> (db/query
-         {:seon.db/query '[:find ?at ?role ?content
-                           :in $ ?aid
-                           :where
-                           [?m :seon.message/agent ?aid]
-                           [?m :seon.message/at ?at]
-                           [?m :seon.message/role ?role]
-                           [?m :seon.message/content ?content]]
-          :seon.db/args [[:seon.agent/id agent-id]]})
-       (sort-by first)
-       (take-last n)))
-
-(defn- recent-evals [agent-id n]
-  (->> (db/query
-         {:seon.db/query
-          '[:find ?id ?at ?src ?ok ?res ?err
-            :in $ ?aid
-            :where
-            [?e :seon.eval/agent ?aid]
-            [?e :seon.eval/id ?id]
-            [?e :seon.eval/at ?at]
-            [?e :seon.eval/source ?src]
-            [(get-else $ ?e :seon.eval/ok? true) ?ok]
-            [(get-else $ ?e :seon.eval/result-edn "") ?res]
-            [(get-else $ ?e :seon.eval/error "") ?err]]
-          :seon.db/args [[:seon.agent/id agent-id]]})
-       (sort-by second #(compare %2 %1))
-       (take n)
-       reverse))
-
-(defn- try-read-edn
-  "Read an EDN string and render it for the agent. If it round-trips
-   cleanly, return the pretty-printed value. Otherwise return the raw
-   string truncated — the agent reads whatever's there (it's still
-   informative even when CLJS-side tagged literals like #datahike/DB
-   aren't reader-registered)."
-  [s]
-  (when-not (str/blank? s)
-    (let [trimmed (if (> (count s) 400)
-                    (str (subs s 0 400) " …")
-                    s)]
-      (try (pr-str (edn/read-string s))
-           (catch :default _ trimmed)))))
-
-;; ============================================================
-;; Render sections — each emits a markdown block. build-ctx
-;; concatenates them in order.
-;;
-;; Examples are formatted in the SAME shape the agent's expected
-;; response is parsed (`;; narration\n(form)`) — see seon.repl/
-;; parse-forms. The agent learns by mimicking.
-;; ============================================================
-
-(defn- render-repl-state
-  "REPL prompt header — who you are, where you are, what turn this is.
-   `current-ns` defaults to the agent's home ns; updates on `(ns …)`."
-  [{:keys [agent-id agent-ns-sym current-ns turn-n]}]
-  (let [ae (agent-entity agent-id)]
-    (str "## REPL state\n"
-         ";; current-ns:  " current-ns "\n"
-         ";; agent home:  " agent-ns-sym
-         "  (auto-loaded with !session-id, !current-ns atoms"
-         " + session-id, result accessor fns)\n"
-         ";; agent-id:    " (pr-str agent-id) "\n"
-         ";; turn:        " (or turn-n (:seon.agent/turn-count ae) 0) "\n"
-         ";; agent-state: " (pr-str (:seon.agent/state ae)) "\n")))
-
-(defn- render-how-you-respond
-  "Tell the LLM the response shape it should emit. Mimics what
-   `seon.repl/parse-forms` reads back out: `;; narration` lines paired
-   with s-exprs. Each form runs independently — form N+1 still runs
-   if N fails (real-REPL copy-paste semantics)."
-  [_]
-  (str "## How you respond\n\n"
-       "Write a sequence of Clojure forms. You may precede each form\n"
-       "with one or more `;; narration` lines explaining what you're\n"
-       "about to do. Forms run in order. If form N fails, form N+1\n"
-       "still runs (just like pasting a block into a REPL). The result\n"
-       "of every form is captured under a 10-char eval-id; you'll see\n"
-       "those in the next turn's `recent evals` and can refer back to\n"
-       "any of them via `(result :<eval-id>)`.\n\n"
-       "Example response shape:\n\n"
-       ";; first, look at what's here\n"
-       "(seon.db/query ...)\n\n"
-       ";; then, write a reply\n"
-       "(seon.db/transact! ...)\n"))
-
-(defn- render-what-you-can-do
-  "Worked examples for each primitive the agent uses. Real forms with
-   real agent-id — the agent can copy them, change the strings, and
-   the patterns work."
-  [{:keys [agent-id]}]
-  (str
-    "## What you can do\n\n"
-
-    ";; read your own agent entity\n"
-    "(seon.db/entity {:seon.db/ref [:seon.agent/id " (pr-str agent-id) "]})\n\n"
-
-    ";; query for recent user messages\n"
-    "(seon.db/query\n"
-    "  {:seon.db/query '[:find ?at ?content\n"
-    "                    :in $ ?aid\n"
-    "                    :where\n"
-    "                    [?m :seon.message/agent ?aid]\n"
-    "                    [?m :seon.message/role :user]\n"
-    "                    [?m :seon.message/at ?at]\n"
-    "                    [?m :seon.message/content ?content]]\n"
-    "   :seon.db/args  [[:seon.agent/id " (pr-str agent-id) "]]})\n\n"
-
-    ";; reply by transacting an :assistant message\n"
-    ";; (session-id) reads your own id from the home-ns atom\n"
-    "(seon.db/transact!\n"
-    "  {:seon.db/tx-data\n"
-    "   [{:seon.message/id      (seon.agent/new-id!)\n"
-    "     :seon.message/role    :assistant\n"
-    "     :seon.message/content \"your text here\"\n"
-    "     :seon.message/agent   [:seon.agent/id (session-id)]\n"
-    "     :seon.message/at      (js/Date.)}]})\n\n"
-
-    ";; pull a specific entity by lookup-ref\n"
-    "(seon.db/pull {:seon.db/pull-pattern '[*]\n"
-    "               :seon.db/ref [:seon.message/id \"some-msg-id\"]})\n\n"
-
-    ";; reach back to a prior eval's value by id\n"
-    "(result :<eval-id-from-recent-evals>)\n\n"
-
-    ";; define a function for later turns — vars persist in your home ns\n"
-    "(defn double-it [n] (* n 2))\n\n"
-
-    ";; later (this turn or any future turn): just call it\n"
-    "(double-it 21)\n"))
-
-(defn- render-conventions
-  "Hard rules + gotchas the agent should know up front."
-  [{:keys [agent-ns-sym]}]
-  (str "## Conventions + gotchas\n\n"
-       "- Stay in your home namespace `" agent-ns-sym "` unless you have\n"
-       "  a reason to switch. (`(ns other)` works but cross-ns bare\n"
-       "  value reads return nil — that's a cljs.js limitation. Atoms\n"
-       "  cross-ns fine; fns cross-ns fine.)\n"
-       "- Use atoms for state you want to read back: `(def !x (atom 0))`\n"
-       "  + `@!x` works. `(def x 42)` then later `x` returns nil — use\n"
-       "  `(def x (atom 42))` instead.\n"
-       "- Your turn ends automatically after your forms run; the agent\n"
-       "  state flips to :idle. The user's next message kicks a new\n"
-       "  turn.\n"
-       "- Errors from your forms are values, not exceptions. A failed\n"
-       "  form lands in `recent evals` as `:ok? false` with the full\n"
-       "  error map readable from `:error`. The agent keeps going.\n"))
-
-(defn- render-current-state
-  "Live snapshot — output of the example queries against the real DB.
-   This is what the example queries above would actually return RIGHT
-   NOW. The agent sees these as a feedback loop."
-  [{:keys [agent-id]}]
-  (let [ae          (agent-entity agent-id)
-        recent-user (->> (db/query
-                           {:seon.db/query
-                            '[:find ?at ?content
-                              :in $ ?aid
-                              :where
-                              [?m :seon.message/agent ?aid]
-                              [?m :seon.message/role :user]
-                              [?m :seon.message/at ?at]
-                              [?m :seon.message/content ?content]]
-                            :seon.db/args [[:seon.agent/id agent-id]]})
-                         (sort-by first)
-                         (take-last 5))]
-    (str "## Current state (live)\n\n"
-         ";; your agent entity\n"
-         (pr-str {:seon.agent/id          (:seon.agent/id ae)
-                  :seon.agent/state       (:seon.agent/state ae)
-                  :seon.agent/turn-count  (:seon.agent/turn-count ae)}) "\n\n"
-         ";; last 5 user messages\n"
-         (if (seq recent-user)
-           (str/join "\n" (map (fn [[at content]]
-                                 (str "  " (pr-str at) "  " (pr-str content)))
-                               recent-user))
-           "  (none)") "\n")))
-
-(defn- render-recent-conversation
-  [{:keys [agent-id]}]
-  (let [msgs (recent-messages agent-id 20)]
-    (str "## Recent conversation (last 20)\n\n"
-         (if (seq msgs)
-           (str/join "\n" (map (fn [[_ role content]]
-                                 (str (name role) ": " content))
-                               msgs))
-           "  (no messages yet)"))))
-
-(defn- render-recent-evals
-  [{:keys [agent-id]}]
-  (let [rows (recent-evals agent-id 10)]
-    (str "## Recent evals (last 10, oldest-first)\n\n"
-         (if (seq rows)
-           (str/join "\n\n"
-                     (map (fn [[id _ src ok res err]]
-                            (str "[" id "] " src "\n"
-                                 ";; " (if ok ":ok " ":error ")
-                                 (cond
-                                   ok                       (or (try-read-edn res) res)
-                                   (not (str/blank? err))   (pr-str (try-read-edn err))
-                                   :else                    "<no result>")))
-                          rows))
-           "  (none yet)"))))
-
-(defn- render-schema-reference
-  "Bottom — schema reference. Reference material, not example, so it
-   lives at the end."
-  [_]
-  (let [filtered (->> (schema/registered-schemas)
-                      (filter (fn [[k _]]
-                                (#{"seon.agent" "seon.message" "seon.eval"}
-                                  (namespace k))))
-                      sort)]
-    (str "## Schema reference\n\n"
-         (str/join "\n"
-                   (map (fn [[k v]] (str "  " k "  " (pr-str v)))
-                        filtered)))))
-
-;; ============================================================
-;; build-ctx — concatenate the sections in order. Pure of state
-;; once the DB queries land; safe to call from anywhere.
-;;
-;; Args:
-;;   agent-id      — agent id string (e.g. \"seon\")
-;;   agent-ns-sym  — agent's home ns symbol (e.g. 'seon.agent.seon)
-;;   current-ns    — the agent's tracked current ns (from @!current-ns;
-;;                   defaults to agent-ns-sym if not provided)
-;;   turn-n        — current turn counter (optional; reads from agent
-;;                   entity if not provided)
-;; ============================================================
-
-(defn build-ctx
-  "Build the text blob the LLM sees this turn. Pure DB queries; no
-   bootstrap-eval round-trip required."
-  ([agent-id agent-ns-sym]
-   (build-ctx agent-id agent-ns-sym nil nil))
-  ([agent-id agent-ns-sym current-ns turn-n]
-   (let [m {:agent-id     agent-id
-            :agent-ns-sym agent-ns-sym
-            :current-ns   (or current-ns agent-ns-sym)
-            :turn-n       turn-n}]
-     (str (render-repl-state m)
-          "\n"
-          (render-how-you-respond m)
-          "\n"
-          (render-what-you-can-do m)
-          "\n"
-          (render-conventions m)
-          "\n"
-          (render-current-state m)
-          "\n"
-          (render-recent-conversation m)
-          "\n\n"
-          (render-recent-evals m)
-          "\n\n"
-          (render-schema-reference m)))))
-
-;; ============================================================
 ;; Turn loop — was seon.session.cljs, now consolidated here.
 ;;
 ;; One turn = build ctx → call LLM → parse → eval batch → flip to :idle.
@@ -420,9 +151,35 @@
            {:seon.db/tx-data [{:seon.agent/id    agent-id
                                :seon.agent/state :idle}]})))
 
+(defn- per-agent-shape?
+  "True when `sym` is in the agent's own home namespace (per spec-05
+   §15.1a). Per-agent fns get the per-agent input shape (entity
+   pre-pulled under a namespaced key); everything else gets the system
+   shape (`:seon.agent/id` + DB; fn pulls the entity itself)."
+  [sym agent-id]
+  (and (qualified-symbol? sym)
+       (str/starts-with? (namespace sym)
+                         (str "seon.agent." agent-id))))
+
+(defn- ai-render-input
+  "Build the input map for the agent's `:seon.render/ai` dispatch.
+   Two shapes, picked by symbol namespace (spec-05 §15.1a)."
+  [sym db agent-id ent]
+  (if (per-agent-shape? sym agent-id)
+    {:seon.db/db                                          db
+     (keyword (str "seon.agent." agent-id) "ctx")         ent}
+    {:seon.db/db    db
+     :seon.agent/id agent-id}))
+
 (defn ^:async run-turn-once!
   "Execute exactly one turn for `agent-id`. Returns a Promise that
    resolves to a status map.
+
+   Per spec-05 §15.4 the prompt now flows through `seon.render/ai-dispatch`
+   against the agent's `:seon.render/ai` slot — defaults to
+   `'seon.render.default/ctx` when unset. Symbol resolution falls
+   through to pretty-print when unresolvable (render mechanism never
+   crashes; missing → pretty-print floor).
 
    Args:
      agent-id      — the agent's id string
@@ -432,12 +189,18 @@
   [agent-id agent-ns-sym llm-fn compile-state]
   (try
     (let [turn-n  (await (bump-turn! agent-id))
-          ctx     (build-ctx agent-id agent-ns-sym)
-          _       (log agent-id turn-n "req" (count ctx) "chars")
+          db      @db/*conn*
+          ent     (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id agent-id]})
+          sym     (:seon.render/ai ent 'seon.render.default/ctx)
+          input   (ai-render-input sym db agent-id ent)
+          {:seon.render/keys [text]} (render/ai-dispatch sym input)
+          ctx     (or text "")
+          _       (log agent-id turn-n "req" (count ctx) "chars"
+                       "via" (str sym))
           resp    (await (llm-fn ctx))
-          text    (or (:text resp) "")
-          _       (log agent-id turn-n "resp" (count text) "chars")
-          parsed  (repl/parse-forms text)
+          text2   (or (:text resp) "")
+          _       (log agent-id turn-n "resp" (count text2) "chars")
+          parsed  (repl/parse-forms text2)
           _       (log agent-id turn-n "parsed" (count parsed) "forms")
           eids    (await (seval/eval-batch! compile-state parsed
                                             agent-ns-sym agent-id turn-n))]

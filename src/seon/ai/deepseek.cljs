@@ -7,7 +7,8 @@
 
    The system prompt sets the agent up as a REPL — see
    [[default-system-prompt]] for the contract. The per-turn ctx
-   (rendered by [[seon.agent/build-ctx]]) follows.
+   (rendered via `seon.render/ai-dispatch` against the agent's
+   `:seon.render/ai` slot; default `'seon.render.default/ctx`) follows.
 
    No tool-calling envelope, no streaming — the agent's responses are
    parsed as Clojure forms by `seon.repl/parse-forms`, evaluated as
