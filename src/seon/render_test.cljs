@@ -81,21 +81,24 @@
            (render/ai-dispatch 'bare-sym input)))))
 
 ;; ============================================================
-;; resolve-symbol — late-bound compile-state; returns nil when
-;; nothing is wired AND when the compile-state is wired but the
-;; symbol can't be found. Never throws.
+;; resolve-symbol — globalThis walker for system fns (A-4); bootstrap
+;; compile-state path for agent-defined fns (stub until A-8). Never
+;; throws on bad input.
 ;; ============================================================
 
-(deftest resolve-symbol-returns-nil-when-compile-state-not-wired
-  ;; Default state — !compile-state-ref is nil (unless seon.client booted).
-  ;; Save + restore to keep test idempotent under repeated runs.
-  (let [orig @render/!compile-state-ref]
-    (try
-      (reset! render/!compile-state-ref nil)
-      (is (nil? (render/resolve-symbol 'foo/bar)))
-      (is (nil? (render/resolve-symbol 'nonexistent/sym)))
-      (finally
-        (reset! render/!compile-state-ref orig)))))
+(deftest resolve-symbol-finds-system-fn
+  ;; The :client bundle ships seon.render.default — resolve-symbol
+  ;; should walk globalThis and return the callable.
+  (let [view-fn (render/resolve-symbol 'seon.render.default/view)
+        ctx-fn  (render/resolve-symbol 'seon.render.default/ctx)
+        pretty-fn (render/resolve-symbol 'seon.render.default/pretty-html)]
+    (is (fn? view-fn))
+    (is (fn? ctx-fn))
+    (is (fn? pretty-fn))))
+
+(deftest resolve-symbol-returns-nil-for-nonexistent-ns
+  (is (nil? (render/resolve-symbol 'no.such.ns/sym)))
+  (is (nil? (render/resolve-symbol 'seon.render.default/no-such-fn))))
 
 (deftest resolve-symbol-returns-nil-for-unqualified
   (is (nil? (render/resolve-symbol 'bare))))
