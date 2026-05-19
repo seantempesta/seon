@@ -92,7 +92,15 @@
 (schema/register! :seon.agent/id            :string)
 (schema/register! :seon.agent/state         [:enum :idle :running])
 (schema/register! :seon.agent/turn-count    :int)
+(schema/register! :seon.agent/turns-since-user :int)
 (schema/register! :seon.agent/interrupted?  :boolean)
+
+;; Cap on consecutive agentic turns per user message. The agent may
+;; need several turns to walk the user's folder, read files, decide,
+;; then reply — but it must not loop forever. After this many turns
+;; without a final :assistant message we stop and surface a system
+;; note so the user can re-prompt.
+(def max-turns-per-message 20)
 
 (schema/register! :seon.message/id      :string)
 (schema/register! :seon.message/role    [:enum :user :assistant :system])
@@ -136,22 +144,41 @@
     (if (= 1 (count info)) (first info) (vec info))))
 
 (defn ^:async ^:private bump-turn!
-  "Increment :seon.agent/turn-count, flip state to :running. Returns
-   the new turn-count."
+  "Increment :seon.agent/turn-count + :seon.agent/turns-since-user,
+   flip state to :running. Returns `[turn-count turns-since-user]`."
   [agent-id]
-  (let [a (db/entity {:seon.db/ref [:seon.agent/id agent-id]})
-        n (inc (or (:seon.agent/turn-count a) 0))]
+  (let [a       (db/entity {:seon.db/ref [:seon.agent/id agent-id]})
+        n       (inc (or (:seon.agent/turn-count a) 0))
+        since-u (inc (or (:seon.agent/turns-since-user a) 0))]
     (await (db/transact!
              {:seon.db/tx-data
-              [{:seon.agent/id          agent-id
-                :seon.agent/turn-count  n
-                :seon.agent/state       :running}]}))
-    n))
+              [{:seon.agent/id                agent-id
+                :seon.agent/turn-count        n
+                :seon.agent/turns-since-user  since-u
+                :seon.agent/state             :running}]}))
+    [n since-u]))
 
 (defn ^:async ^:private end-turn! [agent-id]
   (await (db/transact!
            {:seon.db/tx-data [{:seon.agent/id    agent-id
                                :seon.agent/state :idle}]})))
+
+(defn- latest-message-role
+  "Return the `:seon.message/role` of the most-recent message for
+   `agent-id` in `db`, or nil. Used by the multi-turn loop to decide
+   whether the agent has issued its final reply this conversation."
+  [db agent-id]
+  (let [rows (db/query
+               {:seon.db/db    db
+                :seon.db/query
+                '[:find ?at ?role
+                  :in $ ?aid
+                  :where
+                  [?m :seon.message/agent ?aid]
+                  [?m :seon.message/at ?at]
+                  [?m :seon.message/role ?role]]
+                :seon.db/args [[:seon.agent/id agent-id]]})]
+    (->> rows (sort-by first) last second)))
 
 (defn- per-agent-shape?
   "True when `sym` is in the agent's own home namespace (per spec-05
@@ -190,7 +217,7 @@
      compile-state — the defonce'd bootstrap compile-state"
   [agent-id agent-ns-sym llm-fn compile-state]
   (try
-    (let [turn-n  (await (bump-turn! agent-id))
+    (let [[turn-n since-u] (await (bump-turn! agent-id))
           db      @db/*conn*
           ent     (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id agent-id]})
           sym     (:seon.render/ai ent 'seon.render.default/ctx)
@@ -198,7 +225,7 @@
           {:seon.render/keys [text]} (render/ai-dispatch sym input)
           ctx     (or text "")
           _       (log agent-id turn-n "req" (count ctx) "chars"
-                       "via" (str sym))
+                       "via" (str sym) "since-user" since-u)
           resp    (await (llm-fn ctx))
           text2   (or (:text resp) "")
           _       (log agent-id turn-n "resp" (count text2) "chars")
@@ -208,9 +235,41 @@
                                             agent-ns-sym agent-id turn-n))]
       (await (end-turn! agent-id))
       (log agent-id turn-n "done" (count parsed) "forms eval'd")
-      {:seon.agent/turn turn-n
-       :seon.agent/forms (count parsed)
-       :seon.agent/eval-ids eids})
+      ;; Multi-turn loop: if the agent didn't emit an :assistant
+      ;; message this turn (i.e. it's still researching) and we
+      ;; haven't hit the per-message cap, kick another turn. This
+      ;; lets the agent walk the user's folder over multiple turns
+      ;; before composing its final reply.
+      (let [db2          @db/*conn*
+            last-role    (latest-message-role db2 agent-id)
+            replied?     (= :assistant last-role)
+            hit-cap?     (>= since-u max-turns-per-message)]
+        (cond
+          replied?
+          nil
+
+          hit-cap?
+          (await (db/transact!
+                   {:seon.db/tx-data
+                    [{:seon.message/id      (new-id!)
+                      :seon.message/role    :system
+                      :seon.message/agent   [:seon.agent/id agent-id]
+                      :seon.message/at      (js/Date.)
+                      :seon.message/content
+                      (str "[turn cap hit — " max-turns-per-message
+                           " agentic turns since your last message"
+                           " without a final reply. Ask again or"
+                           " narrow the question.]")}]}))
+
+          :else
+          (js/setTimeout
+            (fn []
+              (run-turn-once! agent-id agent-ns-sym llm-fn compile-state))
+            0)))
+      {:seon.agent/turn        turn-n
+       :seon.agent/since-user  since-u
+       :seon.agent/forms       (count parsed)
+       :seon.agent/eval-ids    eids})
     (catch :default e
       (log agent-id "?" "error" (str e))
       (await (end-turn! agent-id))
@@ -237,6 +296,13 @@
                                 :seon.db/ref [:seon.agent/id agent-id]})
               state (:seon.agent/state ae)]
           (when-not (= :running state)
+            ;; Fresh user message ⇒ reset the multi-turn counter. The
+            ;; agent gets up to `max-turns-per-message` agentic turns
+            ;; before the loop self-terminates.
+            (db/transact!
+              {:seon.db/tx-data
+               [{:seon.agent/id               agent-id
+                 :seon.agent/turns-since-user 0}]})
             (js/setTimeout
               (fn [] (run-turn-once! agent-id agent-ns-sym llm-fn
                                      compile-state))

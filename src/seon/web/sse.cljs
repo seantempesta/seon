@@ -44,13 +44,16 @@
   {:malli/schema [:=> [:cat :string] :int]}
   [html]
   (let [payload (patch-elements html)
-        conns   (serve/open-sse-connections)]
-    (reduce (fn [n {:keys [res]}]
-              (try
-                (.write res payload)
-                (inc n)
-                (catch :default e
-                  (log/error-console! "seon.web.sse" "write failed" e)
-                  n)))
-            0
-            conns)))
+        conns   (serve/open-sse-connections)
+        n       (reduce (fn [n {:keys [res]}]
+                          (try
+                            (.write res payload)
+                            (inc n)
+                            (catch :default e
+                              (log/error-console! "seon.web.sse" "write failed" e)
+                              n)))
+                        0
+                        conns)]
+    (log/info-console! "seon.web.sse" "emit-patch!"
+                       {:conns (count conns) :wrote n :bytes (count payload)})
+    n))

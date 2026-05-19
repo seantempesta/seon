@@ -108,15 +108,23 @@
   "Iterate every running agent; emit a `datastar-patch-elements`
    per-agent only when its rendered HTML differs from the last push."
   [{:seon.db/keys [db attr-index]}]
-  (when-not (log-only-tx? attr-index)
-    (doseq [ent (default/all-running-agents db)
-            :when (some? ent)
-            :let [aid  (:seon.agent/id ent)
-                  html-str (render-agent! db ent)
-                  prev (get @!last-rendered aid)]
-            :when (not= prev html-str)]
-      (sse/emit-patch! html-str)
-      (swap! !last-rendered assoc aid html-str))))
+  (let [attrs (keys attr-index)
+        log-only (log-only-tx? attr-index)]
+    (log/info-console! "seon.web.broadcast" "tx received"
+                       {:attrs attrs :skip? log-only})
+    (when-not log-only
+      (doseq [ent (default/all-running-agents db)
+              :when (some? ent)
+              :let [aid  (:seon.agent/id ent)
+                    html-str (render-agent! db ent)
+                    prev (get @!last-rendered aid)
+                    diff? (not= prev html-str)]]
+        (log/info-console! "seon.web.broadcast" "agent render"
+                           {:agent aid :diff? diff? :html-len (count html-str)})
+        (when diff?
+          (sse/emit-patch! html-str)
+          (swap! !last-rendered assoc aid html-str)
+          (log/info-console! "seon.web.broadcast" "patch emitted" {:agent aid}))))))
 
 ;; ============================================================
 ;; Install / remove
@@ -146,7 +154,10 @@
             html-str (render-agent! db ent)
             payload  (sse/patch-elements html-str)]
         (.write res payload)
-        (swap! !last-rendered assoc aid html-str))
+        (swap! !last-rendered assoc aid html-str)
+        (log/info-console! "seon.web.broadcast" "render-for-new-conn!"
+                           {:agent aid :html-len (count html-str)
+                            :payload-len (count payload)}))
       (catch :default e
         (log/error-console! "seon.web.broadcast" "render-for-new-conn! failed" e)))))
 

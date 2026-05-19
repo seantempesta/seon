@@ -43,6 +43,7 @@
     ["node:path" :as path]
     [clojure.string :as str]
     [seon.agent :as agent]
+    [seon.db :as db]
     [seon.log :as log]
     [seon.web.page :as page]))
 
@@ -88,8 +89,10 @@
     :else                             "application/octet-stream"))
 
 (defn- write-status! [res code mime body]
-  (.writeHead res code #js {"Content-Type" mime
-                            "Cache-Control" "no-cache"})
+  (.writeHead res code #js {"Content-Type"  mime
+                            "Cache-Control" "no-store, no-cache, must-revalidate"
+                            "Pragma"        "no-cache"
+                            "Expires"       "0"})
   (.end res body))
 
 (defn- serve-static! [res url]
@@ -133,10 +136,17 @@
   ;; Register the connection so A-6's broadcast can write into it.
   (let [conn {:id (random-uuid) :res res :opened-at (js/Date.)}]
     (swap! !sse-connections conj conn)
+    (log/info-console! "seon.web.serve" "SSE OPEN"
+                       {:conn-id (str (:id conn))
+                        :total   (count @!sse-connections)
+                        :ua      (some-> req .-headers (aget "user-agent"))})
     (.on req "close"
          (fn []
            (swap! !sse-connections
-                  (fn [conns] (vec (remove #(= (:id %) (:id conn)) conns))))))))
+                  (fn [conns] (vec (remove #(= (:id %) (:id conn)) conns))))
+           (log/info-console! "seon.web.serve" "SSE CLOSE"
+                              {:conn-id (str (:id conn))
+                               :remaining (count @!sse-connections)})))))
 
 ;; ============================================================
 ;; POST /chat — inject a :user message into the named agent's log.
@@ -180,6 +190,84 @@
       (.get (.-searchParams u) k))
     (catch :default _ nil)))
 
+(defn- handle-log! [req res]
+  ;; Receives WebView console.log/warn/error forwards. Body is JSON
+  ;; `{level, msg}`. We just print them on the server so a tail of
+  ;; /tmp/seon-node.log shows browser-side events too.
+  (-> (read-body req)
+      (.then (fn [body]
+               (try
+                 (let [parsed (js->clj (js/JSON.parse body) :keywordize-keys true)
+                       level  (or (:level parsed) "log")
+                       msg    (str (:msg parsed))]
+                   (case level
+                     "error" (log/error-console! "browser" msg nil)
+                     "warn"  (log/info-console!  "browser" (str "WARN " msg) nil)
+                     (log/info-console! "browser" msg nil))
+                   (write-status! res 204 "text/plain; charset=utf-8" ""))
+                 (catch :default e
+                   (log/error-console! "seon.web.serve" "/log parse failed" e)
+                   (write-status! res 400 "text/plain; charset=utf-8"
+                                  (str "bad log body: " e))))))
+      (.catch (fn [err]
+                (log/error-console! "seon.web.serve" "/log body read failed" err)
+                (write-status! res 500 "text/plain; charset=utf-8" (str err))))))
+
+(defn- handle-clear! [req res]
+  ;; Retract every :seon.message AND :seon.eval entity for the agent.
+  ;; Evals contain the full source of (seon.db/transact! ...) calls
+  ;; that include the assistant message text — so retracting messages
+  ;; alone leaves the conversation visible via the timeline's eval
+  ;; rendering. Notes (`:seon.note/*`) are preserved — they ARE the
+  ;; durable memory.
+  (let [agent-id (or (query-param req "agent") "seon")]
+    (log/info-console! "seon.web.serve" "/clear ENTER" {:agent agent-id})
+    (try
+      (let [msg-eids (->> (db/query
+                            {:seon.db/query
+                             '[:find ?m
+                               :in $ ?aid
+                               :where
+                               [?m :seon.message/agent ?aid]]
+                             :seon.db/args [[:seon.agent/id agent-id]]})
+                          (map first))
+            eval-eids (->> (db/query
+                             {:seon.db/query
+                              '[:find ?e
+                                :in $ ?aid
+                                :where
+                                [?e :seon.eval/agent ?aid]]
+                              :seon.db/args [[:seon.agent/id agent-id]]})
+                           (map first))
+            retractions (concat
+                          (mapv (fn [e] [:db/retractEntity e]) msg-eids)
+                          (mapv (fn [e] [:db/retractEntity e]) eval-eids))]
+        (log/info-console! "seon.web.serve" "/clear query OK"
+                           {:agent agent-id
+                            :msg-count (count msg-eids)
+                            :eval-count (count eval-eids)})
+        (-> (db/transact!
+              {:seon.db/tx-data
+               (into [{:seon.agent/id               agent-id
+                       :seon.agent/turns-since-user 0
+                       :seon.agent/turn-count       0}]
+                     retractions)})
+            (.then (fn [_]
+                     (log/info-console! "seon.web.serve" "/clear TRANSACT OK"
+                                        {:agent agent-id
+                                         :messages-retracted (count msg-eids)
+                                         :evals-retracted    (count eval-eids)})
+                     (write-status! res 204 "text/plain; charset=utf-8" "")
+                     (log/info-console! "seon.web.serve" "/clear RESPONSE SENT" {})))
+            (.catch (fn [err]
+                      (log/error-console! "seon.web.serve" "/clear transact failed" err)
+                      (write-status! res 500 "text/plain; charset=utf-8"
+                                     (str "clear failed: " err))))))
+      (catch :default e
+        (log/error-console! "seon.web.serve" "/clear THREW SYNC" e)
+        (write-status! res 500 "text/plain; charset=utf-8"
+                       (str "clear failed: " e))))))
+
 (defn- handle-chat! [req res]
   (let [agent-id (or (query-param req "agent") "seon")]
     (-> (read-body req)
@@ -220,6 +308,8 @@
                                                                    (str "Not found: " url)))
         "POST" (cond
                  (= path "/chat")                   (handle-chat! req res)
+                 (= path "/clear")                  (handle-clear! req res)
+                 (= path "/log")                    (handle-log! req res)
                  :else                              (write-status! res 404 "text/plain; charset=utf-8"
                                                                    (str "Not found: " url)))
         (write-status! res 405 "text/plain; charset=utf-8" "Method not allowed"))

@@ -47,22 +47,56 @@
           :else (rt/unread rdr ch))))
     (str/join "\n" @comments)))
 
+(defn- prose-symbol?
+  "Heuristic — true if `form` is a bare symbol that almost certainly
+   came from the LLM emitting unescaped prose instead of code. The
+   reader cheerfully tokenizes 'Let me read' into three separate
+   symbol forms, each of which evaluates to nil under cljs.js's
+   permissive bootstrap and pollutes the eval log. Filtering these
+   out at parse-time is much safer than eval-time.
+
+   Legitimate agent code is overwhelmingly list-shaped (function
+   calls, special forms, defs) or reader-macro-shaped (`@!atom`,
+   `'sym` — both list forms after read). Bare unqualified symbols
+   at the top level have no legitimate use in the agent protocol."
+  [form]
+  (and (symbol? form)
+       (not (special-symbol? form))))
+
 (defn parse-forms
   "Read `text` top-to-bottom, pairing each contiguous block of `;-`
    comments with the form that follows it. Returns a vector of
    `{:narration string :source string :form any}`.
 
-   Comments at the end of the text (no trailing form) are dropped.
-   Read errors halt — caller sees a truncated vector + can decide.
+   Bare top-level symbols (LLM prose tokenized by the reader) are
+   dropped silently — see `prose-symbol?`. Comments at the end of
+   the text (no trailing form) are dropped. Read errors halt — caller
+   sees a truncated vector + can decide.
+
    (V0.5 we'll thread the read error back as a sentinel pair.)"
   [text]
   (let [rdr (rt/string-push-back-reader text)]
-    (loop [out []]
-      (let [narration (skip-comments-and-blanks! rdr)
+    (loop [out [] pending-narration ""]
+      (let [more-narration (skip-comments-and-blanks! rdr)
+            narration      (str/trim
+                             (str pending-narration
+                                  (when (and (seq pending-narration)
+                                             (seq more-narration))
+                                    "\n")
+                                  more-narration))
             form (try (r/read {:eof ::eof} rdr)
                       (catch :default _ ::eof))]
-        (if (= form ::eof)
+        (cond
+          (= form ::eof)
           out
+
+          ;; LLM prose tokenized as bare symbols — skip, carry narration
+          ;; forward so it attaches to the next real form.
+          (prose-symbol? form)
+          (recur out narration)
+
+          :else
           (recur (conj out {:narration narration
                             :source    (pr-str form)
-                            :form      form})))))))
+                            :form      form})
+                 ""))))))

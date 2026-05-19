@@ -50,7 +50,11 @@
     ;; can call (seon.fs/read-file ...) + (seon.platform/host) from
     ;; bootstrap-CLJS eval.
     [seon.fs]
-    [seon.platform]))
+    [seon.platform]
+    ;; Pre-loaded agent toolkit — grep-files / search / slurp* /
+    ;; section / head. Eliminates the per-conversation re-definition
+    ;; burden; agent calls (seon.toolkit/search ...) directly.
+    [seon.toolkit]))
 
 ;; ---------------------------------------------------------------------------
 ;; Process-lifetime state. `defonce` so reloads don't reset it.
@@ -190,6 +194,9 @@
    {:db/ident :seon.agent/turn-count
     :db/valueType :db.type/long
     :db/cardinality :db.cardinality/one}
+   {:db/ident :seon.agent/turns-since-user
+    :db/valueType :db.type/long
+    :db/cardinality :db.cardinality/one}
 
    ;; --- Message ---
    {:db/ident :seon.message/id
@@ -215,6 +222,32 @@
     :db/cardinality :db.cardinality/one
     :db/unique :db.unique/identity}
    {:db/ident :seon.eval/agent
+    :db/valueType :db.type/ref
+    :db/cardinality :db.cardinality/one}
+
+   ;; --- Notes — durable learned facts (V0.5 minimal memory) ---
+   ;; The agent writes a note whenever she discovers something worth
+   ;; remembering: who someone is, what a project is about, where a
+   ;; file lives. Next conversation she queries her own notes before
+   ;; re-reading files. Schema is intentionally narrow tonight; the
+   ;; full world-model lands later (see docs/research/2026-05-14-…).
+   {:db/ident :seon.note/id
+    :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one
+    :db/unique :db.unique/identity}
+   {:db/ident :seon.note/topic
+    :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one}
+   {:db/ident :seon.note/content
+    :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one}
+   {:db/ident :seon.note/sources
+    :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/many}
+   {:db/ident :seon.note/at
+    :db/valueType :db.type/instant
+    :db/cardinality :db.cardinality/one}
+   {:db/ident :seon.note/agent
     :db/valueType :db.type/ref
     :db/cardinality :db.cardinality/one}
 

@@ -138,6 +138,47 @@
    :seon.fs/path  path
    :seon.fs/error (or (some-> e .-message) (str e))})
 
+;; ============================================================
+;; Demo-mode capability guards (added 2026-05-19 for the demo).
+;;
+;; Two env vars, both opt-in:
+;;
+;;   SEON_FS_READ_ONLY=1
+;;     write-file refuses with an error envelope. read-file / list-dir /
+;;     stat / walk-dir / exists? are unaffected.
+;;
+;;   SEON_FS_ROOT=<abs-path>
+;;     read-file / list-dir / stat / exists? / walk-dir refuse paths
+;;     outside the prefix. write-file is gated by SEON_FS_READ_ONLY
+;;     independently.
+;;
+;; Neither var set ⇒ same Node-full-fs behaviour as before. The agent
+;; sees the same error-map shape as any other failed call
+;; (`:seon.fs/ok? false` + `:seon.fs/error`).
+;; ============================================================
+
+(defn- read-only? []
+  (case (platform/host)
+    :node (= "1" (some-> js/process .-env .-SEON_FS_READ_ONLY))
+    :wasi false))
+
+(defn- fs-root []
+  (case (platform/host)
+    :node (some-> js/process .-env .-SEON_FS_ROOT)
+    :wasi nil))
+
+(defn- denied [path reason]
+  {:seon.fs/ok?   false
+   :seon.fs/path  path
+   :seon.fs/error reason})
+
+(defn- out-of-scope? [path]
+  (when-let [root (fs-root)]
+    (not (str/starts-with? (str path) root))))
+
+(defn- scope-denied [path]
+  (denied path (str "path outside SEON_FS_ROOT (" (fs-root) ")")))
+
 (defn- wasi-pending
   "Stub response for the :wasi branch until Lane B B-5 wires
    wasi:filesystem/preopens."
@@ -161,12 +202,14 @@
   {:malli/schema [:=> [:cat :seon.fs/read-request] :seon.fs/read-response]}
   [{:seon.fs/keys [path encoding] :or {encoding "utf-8"}}]
   (case (platform/host)
-    :node (try
-            (let [content (.readFileSync fs path encoding)]
-              {:seon.fs/ok?     true
-               :seon.fs/path    path
-               :seon.fs/content content})
-            (catch :default e (->err path e)))
+    :node (cond
+            (out-of-scope? path) (scope-denied path)
+            :else (try
+                    (let [content (.readFileSync fs path encoding)]
+                      {:seon.fs/ok?     true
+                       :seon.fs/path    path
+                       :seon.fs/content content})
+                    (catch :default e (->err path e))))
     :wasi (wasi-pending path "read-file")))
 
 (defn write-file
@@ -177,11 +220,14 @@
   {:malli/schema [:=> [:cat :seon.fs/write-request] :seon.fs/write-response]}
   [{:seon.fs/keys [path content encoding] :or {encoding "utf-8"}}]
   (case (platform/host)
-    :node (try
-            (.writeFileSync fs path content encoding)
-            {:seon.fs/ok?  true
-             :seon.fs/path path}
-            (catch :default e (->err path e)))
+    :node (cond
+            (read-only?)         (denied path "filesystem is read-only (SEON_FS_READ_ONLY=1)")
+            (out-of-scope? path) (scope-denied path)
+            :else (try
+                    (.writeFileSync fs path content encoding)
+                    {:seon.fs/ok?  true
+                     :seon.fs/path path}
+                    (catch :default e (->err path e))))
     :wasi (wasi-pending path "write-file")))
 
 (defn list-dir
@@ -189,12 +235,14 @@
   {:malli/schema [:=> [:cat :seon.fs/list-request] :seon.fs/list-response]}
   [{:seon.fs/keys [path]}]
   (case (platform/host)
-    :node (try
-            (let [arr (.readdirSync fs path)]
-              {:seon.fs/ok?     true
-               :seon.fs/path    path
-               :seon.fs/entries (vec arr)})
-            (catch :default e (->err path e)))
+    :node (cond
+            (out-of-scope? path) (scope-denied path)
+            :else (try
+                    (let [arr (.readdirSync fs path)]
+                      {:seon.fs/ok?     true
+                       :seon.fs/path    path
+                       :seon.fs/entries (vec arr)})
+                    (catch :default e (->err path e))))
     :wasi (wasi-pending path "list-dir")))
 
 (defn stat
@@ -202,15 +250,17 @@
   {:malli/schema [:=> [:cat :seon.fs/stat-request] :seon.fs/stat-response]}
   [{:seon.fs/keys [path]}]
   (case (platform/host)
-    :node (try
-            (let [s (.statSync fs path)]
-              {:seon.fs/ok?    true
-               :seon.fs/path   path
-               :seon.fs/size   (.-size s)
-               :seon.fs/dir?   (.isDirectory s)
-               :seon.fs/file?  (.isFile s)
-               :seon.fs/mtime  (.-mtime s)})
-            (catch :default e (->err path e)))
+    :node (cond
+            (out-of-scope? path) (scope-denied path)
+            :else (try
+                    (let [s (.statSync fs path)]
+                      {:seon.fs/ok?    true
+                       :seon.fs/path   path
+                       :seon.fs/size   (.-size s)
+                       :seon.fs/dir?   (.isDirectory s)
+                       :seon.fs/file?  (.isFile s)
+                       :seon.fs/mtime  (.-mtime s)})
+                    (catch :default e (->err path e))))
     :wasi (wasi-pending path "stat")))
 
 ;; ============================================================
@@ -308,18 +358,20 @@
   [{:seon.fs/keys [path match-ext skip-hidden max-results]
     :or {skip-hidden true max-results 5000}}]
   (case (platform/host)
-    :node (try
-            (let [pred       (if match-ext
-                               #(str/ends-with? % match-ext)
-                               (constantly true))
-                  !out       (atom [])
-                  !truncated (atom false)]
-              (walk-dir-recursive! path pred skip-hidden max-results
-                                   !out !truncated)
-              {:seon.fs/ok?         true
-               :seon.fs/path        path
-               :seon.fs/entries     @!out
-               :seon.fs/total-found (count @!out)
-               :seon.fs/truncated?  @!truncated})
-            (catch :default e (->err path e)))
+    :node (cond
+            (out-of-scope? path) (scope-denied path)
+            :else (try
+                    (let [pred       (if match-ext
+                                       #(str/ends-with? % match-ext)
+                                       (constantly true))
+                          !out       (atom [])
+                          !truncated (atom false)]
+                      (walk-dir-recursive! path pred skip-hidden max-results
+                                           !out !truncated)
+                      {:seon.fs/ok?         true
+                       :seon.fs/path        path
+                       :seon.fs/entries     @!out
+                       :seon.fs/total-found (count @!out)
+                       :seon.fs/truncated?  @!truncated})
+                    (catch :default e (->err path e))))
     :wasi (wasi-pending path "walk-dir")))

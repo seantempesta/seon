@@ -35,8 +35,38 @@
         [:meta {:name "viewport" :content "width=device-width, initial-scale=1.0"}]
         [:title "Alpha"]
         [:link {:rel "stylesheet" :href "/css/output.css"}]
-        [:script {:type "module" :src "/js/datastar.js"}]]
-       [:body {:class "h-screen bg-base-950 text-text-50 font-mono antialiased"}
+        [:script {:type "module" :src "/js/datastar.js"}]
+        ;; Console-forwarder — pipe WebView console.log/warn/error to
+        ;; the server's stdout via POST /log so we can tail /tmp/seon-node.log
+        ;; and see what the browser is doing. Tauri WebView has no
+        ;; visible devtools by default; this is how we debug.
+        [:script {:type "text/javascript"}
+         (str
+           "(function(){"
+           "  function send(level, args){"
+           "    try{"
+           "      var msg = Array.prototype.map.call(args, function(a){"
+           "        if(a===null||a===undefined) return String(a);"
+           "        if(typeof a==='object') {try{return JSON.stringify(a);}catch(e){return String(a);}}"
+           "        return String(a);"
+           "      }).join(' ');"
+           "      fetch('/log',{method:'POST',headers:{'Content-Type':'application/json'},"
+           "        body:JSON.stringify({level:level,msg:msg})});"
+           "    }catch(e){}"
+           "  }"
+           "  ['log','info','warn','error','debug'].forEach(function(lvl){"
+           "    var orig = console[lvl] && console[lvl].bind(console);"
+           "    console[lvl] = function(){ if(orig) orig.apply(null,arguments); send(lvl, arguments); };"
+           "  });"
+           "  window.addEventListener('error', function(e){"
+           "    send('error','[window.onerror] '+e.message+' at '+e.filename+':'+e.lineno);"
+           "  });"
+           "  window.addEventListener('unhandledrejection', function(e){"
+           "    send('error','[unhandledrejection] '+ (e.reason && e.reason.stack || e.reason));"
+           "  });"
+           "  console.log('[client] console-forwarder armed');"
+           "})();")]]
+       [:body {:class "h-screen bg-base-950 text-text-50 font-sans antialiased"}
         [:noscript {:class "block p-4 bg-amber-100 text-amber-800 rounded mb-4"}
          "Seon requires JavaScript."]
         ;; Datastar init div — opens the SSE stream on element-mount
