@@ -23,16 +23,15 @@
        (cljs.core.async/<! (seon.client/start-agent-with-stub!)))
 
      ;; Then chat with it:
-     (seon.session/chat \"seon\" \"hello\")"
+     (seon.agent/chat \"seon\" \"hello\")"
   (:require
     [datahike.api :as d]
     ;; Pull in the agent's required namespaces at compile time so all
     ;; schemas are registered before start-agent! runs.
-    [seon.agent]
+    [seon.agent :as agent]
     [seon.ai.deepseek :as deepseek]
     [seon.db :as db]
-    [seon.eval :as seval]
-    [seon.session :as session]))
+    [seon.eval :as seval]))
 
 ;; ---------------------------------------------------------------------------
 ;; Process-lifetime state. `defonce` so reloads don't reset it.
@@ -144,7 +143,7 @@
 ;; The V0 agent runs against a long-lived :memory datahike conn distinct
 ;; from the smoke-test's ephemeral conn. start-agent! opens it, bootstraps
 ;; the datahike schema (idents needed for lookup-refs), binds seon.db/*conn*
-;; at the var root, and hands off to seon.session/boot!.
+;; at the var root, and hands off to seon.agent/boot!.
 ;;
 ;; Idempotent: re-calling start-agent! reuses the existing conn (stored in
 ;; !agent-conn) and overwrites the kick listener. Useful during dev hot-
@@ -161,18 +160,15 @@
 ;; (a generic Malli→datahike bridge), but for V0 we hand-write the
 ;; small attribute surface here.
 (def ^:private agent-bootstrap-schema
-  ;; --- Session ---
-  [{:db/ident :seon.session/id
+  ;; --- Agent ---
+  [{:db/ident :seon.agent/id
     :db/valueType :db.type/string
     :db/cardinality :db.cardinality/one
     :db/unique :db.unique/identity}
-   {:db/ident :seon.session/agent-ns
-    :db/valueType :db.type/symbol
-    :db/cardinality :db.cardinality/one}
-   {:db/ident :seon.session/agent-loop-state
+   {:db/ident :seon.agent/state
     :db/valueType :db.type/keyword
     :db/cardinality :db.cardinality/one}
-   {:db/ident :seon.session/tick-count
+   {:db/ident :seon.agent/turn-count
     :db/valueType :db.type/long
     :db/cardinality :db.cardinality/one}
 
@@ -187,7 +183,7 @@
    {:db/ident :seon.message/content
     :db/valueType :db.type/string
     :db/cardinality :db.cardinality/one}
-   {:db/ident :seon.message/session
+   {:db/ident :seon.message/agent
     :db/valueType :db.type/ref
     :db/cardinality :db.cardinality/one}
    {:db/ident :seon.message/at
@@ -199,7 +195,7 @@
     :db/valueType :db.type/string
     :db/cardinality :db.cardinality/one
     :db/unique :db.unique/identity}
-   {:db/ident :seon.eval/session
+   {:db/ident :seon.eval/agent
     :db/valueType :db.type/ref
     :db/cardinality :db.cardinality/one}
    {:db/ident :seon.eval/at
@@ -251,13 +247,13 @@
                (pr-str (str "hello from the stub LLM — saw "
                             (count ctx) " chars of ctx"))
                "\n"
-               "     :seon.message/session [:seon.session/id (session-id)]\n"
+               "     :seon.message/agent   [:seon.agent/id (session-id)]\n"
                "     :seon.message/at      (js/Date.)}]})\n\n"
                ";; halt the loop\n"
                "(seon.db/transact!\n"
                "  {:seon.db/tx-data\n"
-               "   [{:seon.session/id              (session-id)\n"
-               "     :seon.session/agent-loop-state :idle}]})\n")]
+               "   [{:seon.agent/id     (session-id)\n"
+               "     :seon.agent/state  :idle}]})\n")]
     (.then (.resolve js/Promise nil) (fn [_] {:text text}))))
 
 (defn ^:async start-agent!
@@ -271,8 +267,8 @@
                the real thing.
 
    Returns a Promise resolving to
-     {:seon.session/id _ :seon.session/agent-ns _}.
-   Subsequent (seon.session/chat ...) calls drive the loop via the
+     {:seon.agent/id _ :seon.agent/ns _}.
+   Subsequent (seon.agent/chat ...) calls drive the loop via the
    kick listener."
   [& [{:keys [llm-fn] :or {llm-fn stub-llm}}]]
   (let [conn          (or @!agent-conn (await (open-agent-conn!)))
@@ -286,17 +282,17 @@
                             (reset! !compile-state s)
                             s))
         ;; Prime the agent's home namespace with the atoms + accessors.
-        ;; agent-ns-sym is the session.cljs default (`seon.agent.seon`
-        ;; for V0); when multi-session/multi-agent comes, derive per-id.
+        ;; agent-ns-sym is the V0 default (`seon.agent.seon`); when
+        ;; multi-agent comes, derive per-id via (seon.agent/home-ns id).
         _             (await (seval/setup-agent-ns!
                                compile-state
-                               session/default-agent-ns
-                               session/default-session-id))
-        ;; Boot the session loop (creates entity + installs kick).
-        {:seon.session/keys [id agent-ns]}
-        (await (session/boot! llm-fn compile-state))]
-    (js/console.log "[client] agent started — session" id "ns" (str agent-ns))
-    {:seon.session/id id :seon.session/agent-ns agent-ns}))
+                               agent/default-ns
+                               agent/default-id))
+        ;; Boot the turn loop (creates entity + installs kick).
+        {:seon.agent/keys [id ns]}
+        (await (agent/boot! llm-fn compile-state))]
+    (js/console.log "[client] agent started — id" id "ns" (str ns))
+    {:seon.agent/id id :seon.agent/ns ns}))
 
 (defn start-agent-with-stub!
   "Bring up the V0 agent with the canned stub LLM. Useful for verifying

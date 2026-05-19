@@ -104,58 +104,59 @@
      (schema/register! :seon.message/role
                        [:enum :user :assistant :system])
      (schema/register! :seon.message/content   :string)
-     (schema/register! :seon.message/session   :seon.db/ref)
-     (schema/register! :seon.session/agent-loop-state
+     (schema/register! :seon.message/agent     :seon.db/ref)
+     (schema/register! :seon.agent/state
                        [:enum :idle :running])
 
      ;; ---- the kick-the-loop reaction ----
      (defn kick-on-user-message
        \"Trigger handler. Fires on every tx. For each newly-added
         :seon.message/role datom whose value is :user, look at the
-        session that owns the message and decide whether to spawn an
-        agent-loop tick.\"
+        agent that owns the message and decide whether to spawn a
+        turn.\"
        [{::db/keys [db attr-index]}]
        (doseq [{::db/keys [e added?]} (:seon.message/role attr-index)
                :when added?
                :let [msg (db/entity {::db/db db ::db/ref e})]
                :when (= :user (:seon.message/role msg))
-               :let [sess  (:seon.message/session msg)
-                     state (:seon.session/agent-loop-state sess)]]
+               :let [agent (:seon.message/agent msg)
+                     state (:seon.agent/state agent)]]
          (case state
            ;; Loop already running — it will see the new message on its
            ;; next ctx-build and respond to it. Doing nothing here is
            ;; the idempotency guarantee: you can paste 10 user messages
            ;; in a row and exactly one loop runs, processing all of them.
            :running nil
-           ;; Idle (or nil for a fresh session). Flip the state and
-           ;; spawn one tick. The loop owns its own continuation —
-           ;; once it has the `:running` flag it'll keep ticking until
-           ;; it decides to stop.
+           ;; Idle (or nil for a fresh agent). Flip the state and run
+           ;; one turn. The loop owns its own continuation — once it
+           ;; has the `:running` flag it'll keep ticking until it
+           ;; decides to stop.
            (do
              (db/transact!
-               {::db/tx-data [{:db/id (:db/id sess)
-                               :seon.session/agent-loop-state :running}]})
-             (seon.session/run-agent-tick!
-               {:seon.session/id (:seon.session/id sess)})))))
+               {::db/tx-data [{:db/id (:db/id agent)
+                               :seon.agent/state :running}]})
+             (seon.agent/run-turn-once!
+               (:seon.agent/id agent) (seon.agent/home-ns (:seon.agent/id agent))
+               llm-fn compile-state))))
 
      (db/listen! {::db/key     ::user-message-kick
                   ::db/handler kick-on-user-message})
 
    ### How the loop stops itself
 
-   Each tick of `seon.session/run-agent-tick!` does:
+   Each turn of `seon.agent/run-turn-once!` does:
 
-     1. build ctx from the session's messages (user + prior assistant
+     1. build ctx from the agent's messages (user + prior assistant
         + tool-call results),
      2. call the LLM,
      3. parse the response:
         - if it has tool calls → execute them, transact their results
-          as `:seon.tool-call/*` entities, recurse for another tick
+          as `:seon.tool-call/*` entities, recurse for another turn
           (the tool-call results re-trigger ctx-build; the LLM gets
           its own outputs back),
         - if it's plain text with no tool calls → transact an
           `:seon.message/role :assistant` entity carrying the text,
-          set `:seon.session/agent-loop-state :idle`, return.
+          set `:seon.agent/state :idle`, return.
 
    The exit condition is what LLMs do most of the time anyway: when
    they have nothing useful left to do, they return prose. That prose

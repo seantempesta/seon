@@ -2,7 +2,7 @@
   "DeepSeek HTTP client. ^:async — returns Promises.
 
    One agent-facing fn: [[agent-adapter]] returns `(fn [ctx-string])`
-   compatible with `seon.session/run-turn-once!`'s `llm-fn`. Reads the
+   compatible with `seon.agent/run-turn-once!`'s `llm-fn`. Reads the
    API key from `DEEPSEEK_API_KEY` in `process.env`.
 
    The system prompt sets the agent up as a REPL — see
@@ -162,16 +162,16 @@ session.")
                                          (error/->message e))}})))
 
 ;; ============================================================
-;; Adapter for seon.session.
+;; Adapter for seon.agent.
 ;;
-;; seon.session/run-turn-once! expects (fn [ctx-string]) → Promise of
+;; seon.agent/run-turn-once! expects (fn [ctx-string]) → Promise of
 ;; `{:text "..."}`. complete takes a request map and returns a Promise
 ;; of namespaced keys. This bridges the two.
 ;; ============================================================
 
 (defn ^:async ^:private complete+wrap
   "Internal — call complete with merged opts, wrap response into the
-   shape session loop expects."
+   shape the turn loop expects."
   [opts ctx-text]
   (let [resp (await (complete (assoc opts :seon.ai/ctx ctx-text)))]
     {:text        (:seon.ai/text resp)
@@ -179,7 +179,7 @@ session.")
 
 (defn agent-adapter
   "Returns a fn-of-ctx-string suitable for
-   `seon.session/run-turn-once!`'s `llm-fn`. Optional `opts` override
+   `seon.agent/run-turn-once!`'s `llm-fn`. Optional `opts` override
    request defaults (e.g. `{:seon.ai/temperature 0.2}`). The returned
    fn calls `complete` ^:async-internally and returns a Promise of
    `{:text \"…\" :seon.ai/raw <full response>}`."

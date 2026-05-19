@@ -91,7 +91,7 @@
   (is (system-attr? :db/ident))
   (is (system-attr? :db/valueType))
   (is (not (system-attr? ::name)))
-  (is (not (system-attr? :seon.session/id)))
+  (is (not (system-attr? :seon.agent/id)))
   (is (not (system-attr? nil)))
   (is (not (system-attr? "db/ident"))))
 

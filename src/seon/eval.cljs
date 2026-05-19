@@ -166,7 +166,8 @@
    resets atoms to initial values.
 
    After setup, agent code running in this ns has access to:
-     !session-id  — atom holding the session-id string
+     !session-id  — atom holding the agent-id string (preserves the
+                    `(session-id)` accessor name per spec-05 §21.1)
      !current-ns  — atom holding the agent's current ns symbol
      (session-id) — sugar for @!session-id
      (result id)  — looks up the live value of a prior eval, keyed by
@@ -176,10 +177,10 @@
    Uses `:analyze-deps? true` so the `(ns …)` form analyzes cljs.core's
    refer map and wires up implicit macro refers (defn, str, atom, etc.)
    for subsequent forms in the new ns."
-  [compile-state agent-ns-sym session-id]
+  [compile-state agent-ns-sym agent-id]
   (let [setup-src
         (str "(ns " agent-ns-sym ")"
-             "(def !session-id (atom " (pr-str session-id) "))"
+             "(def !session-id (atom " (pr-str agent-id) "))"
              "(def !current-ns (atom '" agent-ns-sym "))"
              "(defn session-id [] @!session-id)"
              "(defn result [id]"
@@ -255,9 +256,9 @@
   "Transact one :seon.eval entity capturing this form's narration,
    source, and result. Soft-fails — a DB write failure is logged but
    doesn't abort the batch."
-  [{:keys [eval-id session-id turn-n at narration source result]}]
+  [{:keys [eval-id agent-id turn-n at narration source result]}]
   (let [tx-data [(cond-> {:seon.eval/id        eval-id
-                          :seon.eval/session   [:seon.session/id session-id]
+                          :seon.eval/agent     [:seon.agent/id agent-id]
                           :seon.eval/at        at
                           :seon.eval/turn      turn-n
                           :seon.eval/narration (or narration "")
@@ -296,11 +297,11 @@
      parsed        — vector of {:narration :source :form} maps
                      (from seon.repl/parse-forms)
      agent-ns-sym  — agent's home ns (e.g. 'seon.agent.seon)
-     session-id    — the owning session id
+     agent-id      — the owning agent's id
      turn-n        — the turn counter
 
    Returns the ordered vector of eval-id strings."
-  [compile-state parsed agent-ns-sym session-id turn-n]
+  [compile-state parsed agent-ns-sym agent-id turn-n]
   (let [eids (volatile! [])]
     (doseq [{:keys [narration source]} parsed]
       (let [eval-id     (new-eval-id)
@@ -333,12 +334,12 @@
         (when (:ok result)
           (stash-result-raw! eval-id (:value result)))
         ;; Durable record — always.
-        (await (record-eval! {:eval-id    eval-id
-                              :session-id session-id
-                              :turn-n     turn-n
-                              :at         at
-                              :narration  narration
-                              :source     source
-                              :result     result}))
+        (await (record-eval! {:eval-id   eval-id
+                              :agent-id  agent-id
+                              :turn-n    turn-n
+                              :at        at
+                              :narration narration
+                              :source    source
+                              :result    result}))
         (vswap! eids conj eval-id)))
     @eids))
