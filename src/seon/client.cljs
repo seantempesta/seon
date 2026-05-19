@@ -31,7 +31,11 @@
     [seon.agent :as agent]
     [seon.ai.deepseek :as deepseek]
     [seon.db :as db]
-    [seon.eval :as seval]))
+    [seon.eval :as seval]
+    ;; Render protocol — A-2. Required here so the build includes it
+    ;; AND so `use-compile-state!` is callable from start-agent!.
+    [seon.render :as render]
+    [seon.render.default]))
 
 ;; ---------------------------------------------------------------------------
 ;; Process-lifetime state. `defonce` so reloads don't reset it.
@@ -280,6 +284,12 @@
         compile-state (or @!compile-state
                           (let [s (await (seval/init-bootstrap!))]
                             (reset! !compile-state s)
+                            ;; Wire seon.render's late-bound resolver
+                            ;; (A-2). A-4 will start consuming it from
+                            ;; the default ctx/view fns; until then it
+                            ;; stays nil-safe (every resolve → nil →
+                            ;; pretty-print fallback).
+                            (render/use-compile-state! !compile-state)
                             s))
         ;; Prime the agent's home namespace with the atoms + accessors.
         ;; agent-ns-sym is the V0 default (`seon.agent.seon`); when
