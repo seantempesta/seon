@@ -25,8 +25,68 @@
      :seon.log/data    :any       ; optional — structured payload
      :seon.log/dismissed-at :inst ; set when user clicks × on the tile"
   (:require
+    [clojure.string :as str]
     [seon.db :as db]
     [seon.schema :as schema]))
+
+;; ============================================================
+;; Console output — structured, grepable. Format:
+;;
+;;   2026-05-19T18:23:45.123Z  INFO  [seon.web.serve] listening on …
+;;
+;; ISO timestamp + 5-char level + bracketed source + message. Errors
+;; go to stderr (`console.error`); everything else to stdout
+;; (`console.log`). Use these for the ephemeral process-lifetime log
+;; (boot messages, request handling, turn ticks). Use error!/warn!/
+;; info!/debug! BELOW (the DB-backed pair) for entries you want the
+;; agent to see in `recent-errors` ctx or the user to see in the tile.
+;; ============================================================
+
+(defn- ->safe-str
+  "Render a non-string log payload as a flat one-line edn string. JS's
+   `console.log` prints CLJS persistent collections as their internal
+   Object guts; pr-str gives a readable, grepable, machine-friendly
+   string instead. Errors and primitive types pass through unchanged."
+  [x]
+  (cond
+    (nil? x)     ""
+    (string? x)  x
+    (number? x)  (str x)
+    (boolean? x) (str x)
+    (instance? js/Error x)
+    (str x (when-let [s (.-stack x)] (str "\n" s)))
+    :else        (try (pr-str x) (catch :default _ (str x)))))
+
+(defn- console!
+  "Emit one structured line. Internal — public helpers below.
+
+   Format: `2026-05-19T18:23:45.123Z  INFO  [source] message [edn ...]`
+   Extras get pr-str'd so CLJS maps/seqs print as readable edn instead
+   of `{cljs$lang$protocol_mask… 16647951 …}`."
+  [level source msg & extra]
+  (let [ts   (.toISOString (js/Date.))
+        lvl  (str/upper-case (name level))
+        pad  (str lvl (apply str (repeat (- 5 (count lvl)) " ")))
+        body (if (seq extra)
+               (str msg " " (str/join " " (map ->safe-str extra)))
+               msg)
+        line (str ts "  " pad " [" source "] " body)
+        sink (case level
+               :error js/console.error
+               :warn  js/console.warn
+               js/console.log)]
+    (sink line)))
+
+(defn error-console!
+  "stderr log line — use for boot errors, request failures, etc.
+   For agent-visible errors (with `recent-errors` integration) use
+   `error!` instead (DB-backed)."
+  [source msg & extra]
+  (apply console! :error source msg extra))
+
+(defn warn-console!  [source msg & extra] (apply console! :warn  source msg extra))
+(defn info-console!  [source msg & extra] (apply console! :info  source msg extra))
+(defn debug-console! [source msg & extra] (apply console! :debug source msg extra))
 
 ;; ============================================================
 ;; Schemas. Registered here so any namespace requiring seon.log

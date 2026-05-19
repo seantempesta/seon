@@ -43,6 +43,7 @@
     ["node:path" :as path]
     [clojure.string :as str]
     [seon.agent :as agent]
+    [seon.log :as log]
     [seon.web.page :as page]))
 
 ;; ============================================================
@@ -190,13 +191,15 @@
                                     "missing 'text' param")
                      (-> (agent/chat agent-id text)
                          (.then (fn [_mid]
+                                  (log/info-console! "seon.web.serve" "POST /chat"
+                                                     {:agent agent-id :text-len (count text)})
                                   (write-status! res 204 "text/plain; charset=utf-8" "")))
                          (.catch (fn [err]
-                                   (js/console.error "[seon.web.serve] /chat agent/chat threw:" err)
+                                   (log/error-console! "seon.web.serve" "/chat agent/chat threw" err)
                                    (write-status! res 500 "text/plain; charset=utf-8"
                                                   (str "chat failed: " err)))))))))
         (.catch (fn [err]
-                  (js/console.error "[seon.web.serve] /chat body read failed:" err)
+                  (log/error-console! "seon.web.serve" "/chat body read failed" err)
                   (try
                     (write-status! res 500 "text/plain; charset=utf-8" (str err))
                     (catch :default _ nil)))))))
@@ -221,7 +224,7 @@
                                                                    (str "Not found: " url)))
         (write-status! res 405 "text/plain; charset=utf-8" "Method not allowed"))
       (catch :default e
-        (js/console.error "[seon.web.serve] handler error:" e)
+        (log/error-console! "seon.web.serve" "handler error" e)
         (try
           (write-status! res 500 "text/plain; charset=utf-8" (str "Internal error: " e))
           (catch :default _ nil))))))
@@ -236,16 +239,37 @@
     (.writeFileSync fs target (str port))
     target))
 
+(defn- requested-port
+  "Pick the bind port. $SEON_PORT > 0 (default 7890) for stable
+   reload-friendly URLs across pod restarts. Pass 0 to get an
+   ephemeral port (old V0 behavior; useful when running multiple pods).
+
+   Examples:
+     SEON_PORT=7890           ; default — bookmarkable
+     SEON_PORT=0              ; ephemeral — pick whatever's free
+     SEON_PORT=8080           ; explicit"
+  []
+  (let [raw (.. js/process -env -SEON_PORT)]
+    (cond
+      (nil? raw) 7890
+      :else      (let [n (js/parseInt raw 10)]
+                   (if (js/Number.isNaN n) 7890 n)))))
+
 (defn start!
-  "Start the HTTP+SSE server on an ephemeral loopback port. Returns a
-   Promise resolving to:
+  "Start the HTTP+SSE server on a loopback port. Returns a Promise
+   resolving to:
      {:seon.web/port <int> :seon.web/port-file <abs-path>}
 
-   Writes the bound port to $SEON_PORT_FILE (default /tmp/seon-port).
-   Idempotent — repeat calls close the old server first.
+   Default port is 7890 (override via $SEON_PORT). Writes the bound
+   port to $SEON_PORT_FILE (default /tmp/seon-port). Idempotent —
+   repeat calls close the old server first.
 
    The server binds to 127.0.0.1 (loopback only). Browsers on the
-   same machine can connect; nothing on the LAN sees the pod."
+   same machine can connect; nothing on the LAN sees the pod.
+
+   If the requested port is in use, the listen fails fast — that's
+   the expected behavior for a dev pod (only one instance at a time).
+   To run multiple pods, set SEON_PORT=0 for ephemeral allocation."
   {:malli/schema [:=> [:cat] :any]}
   []
   (js/Promise.
@@ -254,17 +278,23 @@
         (try (.close old) (catch :default _ nil))
         (reset! !server nil)
         (reset! !sse-connections []))
-      (let [server (.createServer http handler)]
-        (.once server "error" reject)
-        (.listen server 0 "127.0.0.1"
+      (let [server (.createServer http handler)
+            port   (requested-port)]
+        (.once server "error"
+               (fn [err]
+                 (log/error-console! "seon.web.serve"
+                                     (str "listen failed on port " port) err)
+                 (reject err)))
+        (.listen server port "127.0.0.1"
                  (fn []
-                   (let [addr (.address server)
-                         port (.-port addr)
-                         port-file (write-port-file! port)]
+                   (let [addr      (.address server)
+                         bound     (.-port addr)
+                         port-file (write-port-file! bound)]
                      (reset! !server server)
-                     (js/console.log "[seon.web.serve] listening on http://127.0.0.1:"
-                                     port "— port written to" port-file)
-                     (resolve {:seon.web/port port
+                     (log/info-console! "seon.web.serve"
+                                        (str "listening on http://127.0.0.1:" bound)
+                                        {:port-file port-file})
+                     (resolve {:seon.web/port bound
                                :seon.web/port-file port-file}))))))))
 
 (defn stop!

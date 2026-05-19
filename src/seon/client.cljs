@@ -32,6 +32,7 @@
     [seon.ai.deepseek :as deepseek]
     [seon.db :as db]
     [seon.eval :as seval]
+    [seon.log :as log]
     ;; Render protocol — A-2. Required here so the build includes it
     ;; AND so `use-compile-state!` is callable from start-agent!.
     [seon.render :as render]
@@ -41,7 +42,6 @@
     [seon.web.serve :as web.serve]
     ;; Broadcast tx-listener — A-6. Required here so the build includes
     ;; it; start-agent! calls (web.broadcast/install!) at boot.
-    [seon.log]
     [seon.web.broadcast :as web.broadcast]
     ;; V0.5 demo bootstrap — A-8. Transacts alice's initial render
     ;; slots so a fresh page load shows the welcome tile + chat form.
@@ -68,7 +68,7 @@
   []
   (let [id (js/setInterval
              (fn []
-               (js/console.log "[client] heartbeat" (.toISOString (js/Date.))))
+               (log/debug-console! "seon.client" "heartbeat"))
              60000)]
     (swap! !state assoc :heartbeat-id id)))
 
@@ -78,14 +78,14 @@
     (swap! !state assoc :heartbeat-id nil)))
 
 (defn ^:dev/before-load before-reload []
-  (js/console.log "[client] reloading…")
+  (log/info-console! "seon.client" "reloading…")
   (stop-heartbeat!))
 
 (defn ^:dev/after-load after-reload []
   (swap! !state update :reload-count inc)
-  (js/console.log
-    (str "[client] reload #" (:reload-count @!state)
-         " — booted " (:boot-at @!state)))
+  (log/info-console! "seon.client"
+                     (str "reload #" (:reload-count @!state)
+                          " — booted " (:boot-at @!state)))
   (start-heartbeat!))
 
 ;; ---------------------------------------------------------------------------
@@ -370,9 +370,8 @@
         ;; V0.5 demo bootstrap (A-8) — transact alice's initial render
         ;; slots so the page tile renders on first browser load.
         _ (await (demo/setup!))]
-    (js/console.log "[client] agent started — id" id "ns" (str ns))
-    (js/console.log "[client] pod listening on http://127.0.0.1:" port
-                    "(port file" port-file ")")
+    (log/info-console! "seon.client" "agent started"
+                       {:agent id :ns (str ns) :port port :port-file port-file})
     {:seon.agent/id id :seon.agent/ns ns
      :seon.web/port port :seon.web/port-file port-file}))
 
@@ -393,30 +392,33 @@
 ;; ---------------------------------------------------------------------------
 
 (defn -main [& _args]
-  (js/console.log "[client] -main boot at" (:boot-at @!state))
+  (log/info-console! "seon.client" "-main boot" {:boot-at (:boot-at @!state)})
   (-> (datahike-smoke-test!)
       (.then (fn [result]
                (case (:status result)
-                 :pass (js/console.log
-                         "[client] datahike-cljs smoke test PASS —"
-                         (:datoms result) "datoms")
-                 :fail (do (js/console.error "[client] datahike-cljs smoke test FAIL")
-                           (js/console.error "  got:     " (pr-str (:got result)))
-                           (js/console.error "  expected:" (pr-str (:expected result)))))))
+                 :pass (log/info-console! "seon.client" "datahike-cljs smoke test PASS"
+                                          {:datoms (:datoms result)})
+                 :fail (log/error-console! "seon.client" "datahike-cljs smoke test FAIL"
+                                           {:got (:got result) :expected (:expected result)}))))
       (.catch (fn [err]
-                (js/console.error "[client] datahike-cljs smoke test THREW —" err))))
+                (log/error-console! "seon.client" "datahike-cljs smoke test THREW" err))))
   ;; A-5: auto-boot the V0 agent + HTTP server unless SEON_NO_AUTO_BOOT.
   ;; Cheap default for dev iteration — browser hits the loopback port,
   ;; no REPL needed. Disable when running the bare smoke test alone.
   (when-not (.. js/process -env -SEON_NO_AUTO_BOOT)
-    (-> (start-agent-with-stub!)
-        (.then (fn [{:seon.agent/keys [id ns]
-                     :seon.web/keys [port port-file]}]
-                 (js/console.log "[client] auto-boot ready — agent" id "ns" (str ns))
-                 (js/console.log "[client]   open http://127.0.0.1:" port
-                                 "(port:" port-file ")")))
-        (.catch (fn [err]
-                  (js/console.error "[client] auto-boot failed —" err)))))
-  (js/console.log "[client] connect editor / mcp to nREPL :7889 then")
-  (js/console.log "[client]   (shadow.cljs.devtools.api/nrepl-select :client)")
+    (let [llm-fn (if (.. js/process -env -DEEPSEEK_API_KEY)
+                   (do (log/info-console! "seon.client" "using DeepSeek LLM (DEEPSEEK_API_KEY set)")
+                       (deepseek/agent-adapter))
+                   (do (log/info-console! "seon.client" "using stub LLM (DEEPSEEK_API_KEY unset)")
+                       nil))]
+      (-> (start-agent! {:llm-fn (or llm-fn stub-llm)})
+          (.then (fn [{:seon.agent/keys [id ns]
+                       :seon.web/keys [port port-file]}]
+                   (log/info-console! "seon.client" "auto-boot ready"
+                                      {:agent id :ns (str ns)
+                                       :url (str "http://127.0.0.1:" port)
+                                       :port-file port-file})))
+          (.catch (fn [err]
+                    (log/error-console! "seon.client" "auto-boot failed" err))))))
+  (log/info-console! "seon.client" "nREPL :7889 — (shadow.cljs.devtools.api/nrepl-select :client)")
   (start-heartbeat!))

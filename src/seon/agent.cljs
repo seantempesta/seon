@@ -52,6 +52,7 @@
     [clojure.string :as str]
     [seon.db :as db]
     [seon.eval :as seval]
+    [seon.log :as seon-log]
     [seon.render :as render]
     [seon.repl :as repl]
     [seon.schema :as schema]))
@@ -129,9 +130,10 @@
 ;; ============================================================
 
 (defn- log [agent-id turn-n stage & info]
-  (apply js/console.log
-         (str "[agent " agent-id " ▸ turn " turn-n " ▸ " stage "]")
-         info))
+  (seon-log/info-console!
+    (str "seon.agent/" agent-id)
+    (str "turn " turn-n " ▸ " stage)
+    (if (= 1 (count info)) (first info) (vec info))))
 
 (defn ^:async ^:private bump-turn!
   "Increment :seon.agent/turn-count, flip state to :running. Returns

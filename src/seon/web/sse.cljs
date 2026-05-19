@@ -12,6 +12,7 @@
    stays in the registry until its 'close' event fires + removes it."
   (:require
     [clojure.string :as str]
+    [seon.log :as log]
     [seon.web.serve :as serve]))
 
 ;; ============================================================
@@ -49,7 +50,7 @@
                 (.write res payload)
                 (inc n)
                 (catch :default e
-                  (js/console.error "[seon.web.sse] write failed:" e)
+                  (log/error-console! "seon.web.sse" "write failed" e)
                   n)))
             0
             conns)))

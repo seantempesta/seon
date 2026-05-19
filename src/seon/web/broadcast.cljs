@@ -148,7 +148,7 @@
         (.write res payload)
         (swap! !last-rendered assoc aid html-str))
       (catch :default e
-        (js/console.error "[seon.web.broadcast] render-for-new-conn! failed:" e)))))
+        (log/error-console! "seon.web.broadcast" "render-for-new-conn! failed" e)))))
 
 (defn- on-sse-connections-change
   [_k _ref old-conns new-conns]

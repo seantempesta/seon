@@ -36,8 +36,13 @@
 ;; ============================================================
 
 (defn- chat-form [agent-id]
+  ;; Datastar v1 attribute naming uses COLON between segments
+  ;; (`data-on:submit__prevent`), not hyphen — the JVM seon
+  ;; web layer is the known-good reference here (seon/src/seon/web/*.clj).
+  ;; The `__prevent` modifier blocks the native form-submit so we don't
+  ;; navigate away from the SSE stream.
   [:form {:class "flex gap-2 pt-2 border-t border-base-700"
-          :data-on-submit__prevent
+          :data-on:submit__prevent
           (str "@post('/chat?agent=" agent-id "', {contentType:'form'})")}
    [:input {:type "text"
             :name "text"
