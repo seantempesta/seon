@@ -273,7 +273,11 @@
 ;; seon.eval/setup-agent-ns! at boot.
 ;; ============================================================
 
-(def default-id "seon")
+(def default-id
+  "The V0.5 agent's id. Renamed from \"seon\" → \"seon\" per Sean
+   2026-05-19. Lowercase keeps URLs (/chat?agent=seon) + namespace
+   (seon.agent.seon) consistent; displays capitalize as \"Alpha\"."
+  "seon")
 (def default-ns (home-ns default-id))
 
 ;; ============================================================

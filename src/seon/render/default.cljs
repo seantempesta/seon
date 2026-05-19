@@ -249,7 +249,18 @@
 
     ";; write a file — overwrites; returns {:seon.fs/ok? :seon.fs/path}\n"
     "(seon.fs/write-file {:seon.fs/path \"/tmp/seon-note.txt\"\n"
-    "                     :seon.fs/content \"hi from \" (str (session-id))})\n"))
+    "                     :seon.fs/content \"hi from \" (str (session-id))})\n\n"
+
+    ";; recursively walk a tree, filter by extension — returns absolute paths\n"
+    "(seon.fs/walk-dir {:seon.fs/path \"/Users/you/src/your-project\"\n"
+    "                   :seon.fs/match-ext \".md\"})\n\n"
+
+    ";; pattern for digesting a knowledge base — walk, then read selectively\n"
+    ";; based on the user's question (don't read everything; pick relevant files)\n"
+    "(let [r (seon.fs/walk-dir {:seon.fs/path \"/Users/you/src/your-project\"\n"
+    "                           :seon.fs/match-ext \".md\"})]\n"
+    "  (when (:seon.fs/ok? r)\n"
+    "    (count (:seon.fs/entries r))))\n"))
 
 (defn conventions
   "Hard rules + gotchas the agent should know up front."

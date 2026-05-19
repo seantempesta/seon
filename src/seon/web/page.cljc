@@ -48,11 +48,11 @@
         [:div#seon-shell
          {:class "grid gap-2 p-2 h-full"
           :style "grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));"}
-         ;; V0.5 placeholder for alice's tile — Datastar's default
-         ;; :outer morph needs the target to already exist in the DOM.
-         ;; Subsequent broadcast patches morph this empty div by id.
-         ;; V0.6 multi-agent will inject placeholders dynamically as
-         ;; agents come online.
+         ;; V0.5 placeholder for the default agent's tile — Datastar's
+         ;; default :outer morph needs the target to already exist in
+         ;; the DOM. Subsequent broadcast patches morph this empty div
+         ;; by id. V0.6 multi-agent will inject placeholders dynamically
+         ;; as agents come online.
          [:div#agent-seon
           {:class "h-full p-3 bg-base-900 rounded text-text-500 italic"}
           "loading…"]]]])))

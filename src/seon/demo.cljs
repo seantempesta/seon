@@ -16,6 +16,7 @@
    seon.render.default/ctx), the LLM responds, eval-batch! runs the
    forms, and broadcast morphs the tile."
   (:require
+    [clojure.string :as str]
     [seon.agent :as agent]
     [seon.db :as db]
     [seon.render.default :as default]
@@ -35,6 +36,11 @@
 ;;   • chat form (POST /chat?agent=<id>)
 ;; ============================================================
 
+(defn- display-name
+  "Title-case the agent id for the tile header. 'seon' → 'Seon'."
+  [agent-id]
+  (str/capitalize agent-id))
+
 (defn- chat-form [agent-id]
   ;; Datastar v1 attribute naming uses COLON between segments
   ;; (`data-on:submit__prevent`), not hyphen — the JVM seon
@@ -48,7 +54,7 @@
             :name "text"
             :required true
             :autocomplete "off"
-            :placeholder (str "say hi to " agent-id "…")
+            :placeholder (str "say hi to " (display-name agent-id) "…")
             :class (str "flex-1 px-2 py-1 bg-base-800 text-text-100 "
                         "border border-base-700 rounded text-sm "
                         "focus:outline-none focus:border-signal")}]
@@ -58,21 +64,77 @@
                          "transition-colors")}
     "send"]])
 
+(defn- truncate
+  "Cap a string for display, with an ellipsis marker."
+  [s n]
+  (if (and s (> (count s) n))
+    (str (subs s 0 n) " …(" (- (count s) n) " more chars)")
+    (or s "")))
+
+(defn- eval-block
+  "Render one `:seon.eval` entry as a code block + result block.
+
+   row is `[at id src ok res err]` per recent-evals's shape."
+  [[_at eid src ok res err]]
+  [:div {:class (str "flex flex-col gap-1 py-1 border-l-2 pl-2 "
+                     (if ok "border-signal/40" "border-error/60"))}
+   [:div {:class "flex items-baseline gap-2"}
+    [:span {:class "text-text-500 text-xs font-mono"} (str "[" eid "]")]
+    [:span {:class (str "text-xs font-bold "
+                        (if ok "text-signal" "text-error"))}
+     (if ok "ok" "error")]]
+   [:pre {:class (str "text-xs font-mono text-text-200 bg-base-800 "
+                      "rounded p-2 overflow-x-auto whitespace-pre-wrap break-all")}
+    [:code (truncate src 600)]]
+   (when (or (and ok (not (str/blank? res)))
+             (not (str/blank? err)))
+     [:pre {:class (str "text-xs font-mono rounded p-2 overflow-x-auto whitespace-pre-wrap break-all "
+                        (if ok
+                          "bg-base-900 text-text-400"
+                          "bg-error/10 text-error"))}
+      (truncate (if ok res err) 600)])])
+
+;; Merge messages + evals into one chronological timeline so the user
+;; sees the agent's reasoning interleaved with the conversation. Each
+;; item is `{:kind :message|:eval :at <Date> :payload [...]}`.
+
+(defn- timeline-items
+  "Pull recent messages + evals, merge by `:at`, return oldest-first."
+  [db id n]
+  (let [msgs (->> (#'default/recent-messages db id n)
+                  (map (fn [[at role content]]
+                         {:kind :message :at at :payload [role content]})))
+        evs  (->> (#'default/recent-evals db id n)
+                  (map (fn [[eid at src ok res err]]
+                         {:kind :eval :at at
+                          :payload [at eid src ok res err]})))]
+    (->> (concat msgs evs)
+         (sort-by :at)
+         (take-last n))))
+
 (defn welcome-view
   "Default `:seon.render/html` for the V0.5 demo. System fn → takes
-   system input shape. Returns `{:seon.render/hiccup [...]}`."
+   system input shape. Returns `{:seon.render/hiccup [...]}`.
+
+   The body shows:
+     • header — capitalized agent name + status + turn count
+     • optional error banner
+     • timeline — messages interleaved with eval code blocks (the agent's
+       actual code + result) so you can see the reasoning, not just the
+       chat
+     • chat form"
   {:malli/schema [:=> [:cat :seon.render/system-input] :seon.render/html-response]}
   [{:seon.db/keys [db] :seon.agent/keys [id]}]
   (let [ent   (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id id]})
         state (or (:seon.agent/state ent) :unknown)
         turns (or (:seon.agent/turn-count ent) 0)
-        msgs  (#'default/recent-messages db id 10)
+        items (timeline-items db id 20)
         errs  (#'default/recent-errors db id 5)]
     {:seon.render/hiccup
      [:div {:id (str "agent-" id)
             :class "h-full flex flex-col p-3 gap-2 bg-base-900 rounded"}
       [:header {:class "flex items-center gap-2"}
-       (comp/status-dot state id)
+       (comp/status-dot state (display-name id))
        [:span {:class "text-xs text-text-400 ml-auto"} (str "turn " turns)]]
       (when (seq errs)
         [:section {:class (str "flex flex-col gap-1 border border-error/40 "
@@ -82,18 +144,27 @@
             [:span {:class "text-error font-bold"} "⚠"]
             [:span {:class "flex-1 text-error font-mono break-all"}
              (str (:seon.log/message e))]])])
-      [:section {:class "flex-1 overflow-auto text-xs font-mono space-y-1"}
-       (if (seq msgs)
-         (for [[_at role content] msgs]
-           [:div {:class "py-0.5"}
-            [:span {:class (case role
-                             :user      "text-info"
-                             :assistant "text-signal"
-                             :system    "text-text-400"
-                             "text-text-400")}
-             (str (name role) ": ")]
-            [:span {:class "text-text-100"} content]])
-         [:div {:class "text-text-500 italic"} "no messages yet — say hi below"])]
+      [:section {:class "flex-1 overflow-auto text-xs font-mono space-y-2"}
+       (if (seq items)
+         (for [{:keys [kind payload]} items]
+           (case kind
+             :message
+             (let [[role content] payload]
+               [:div {:class "py-0.5"}
+                [:span {:class (case role
+                                 :user      "text-info font-bold"
+                                 :assistant "text-signal font-bold"
+                                 :system    "text-text-400 font-bold"
+                                 "text-text-400 font-bold")}
+                 (str (name role) ": ")]
+                [:span {:class "text-text-100 whitespace-pre-wrap"} content]])
+
+             :eval
+             (eval-block payload)
+
+             nil))
+         [:div {:class "text-text-500 italic"}
+          (str "no messages yet — say hi to " (display-name id) " below")])]
       (chat-form id)]}))
 
 ;; ============================================================
