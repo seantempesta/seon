@@ -192,11 +192,16 @@
 
 (deftest inject-vars-test
   (testing "injects *ctx* dynamic var into namespace"
-    (let [test-atom (atom {:test true})
-          result (lifecycle/inject-vars! {::lifecycle/ns-sym 'seon.health.workout
+    (let [test-ns-sym 'seon.test.placeholder.inject-vars
+          _ (create-ns test-ns-sym)
+          test-atom (atom {:test true})
+          result (lifecycle/inject-vars! {::lifecycle/ns-sym test-ns-sym
                                           ::lifecycle/ctx-atom test-atom})]
-      (is (true? result))
-      (let [v (ns-resolve 'seon.health.workout '*ctx*)]
-        (is (some? v) "*ctx* var should exist")
-        (is (.isDynamic v) "*ctx* should be dynamic")
-        (is (= test-atom @v) "*ctx* should hold the atom")))))
+      (try
+        (is (true? result))
+        (let [v (ns-resolve test-ns-sym '*ctx*)]
+          (is (some? v) "*ctx* var should exist")
+          (is (.isDynamic v) "*ctx* should be dynamic")
+          (is (= test-atom @v) "*ctx* should hold the atom"))
+        (finally
+          (remove-ns test-ns-sym))))))
