@@ -53,13 +53,43 @@
 ;; ============================================================
 
 ;; Per-form wall-clock timeout in milliseconds. Default 10000.
-;; Replace via [[set-timeout-ms!]].
+;; Replace via [[set-timeout-ms!]] (persistent) or [[budget]] (one-shot
+;; override that agents call from inside a form).
 (defonce !timeout-ms (atom 10000))
 
 (defn set-timeout-ms!
   "Replace the per-form wall-clock timeout. Returns the new value."
   [ms]
   (reset! !timeout-ms ms))
+
+;; Side-channel: when set, applies to exactly the next auto-await
+;; in `maybe-await-value` (then resets to nil so it doesn't leak to
+;; subsequent forms). Agents set this via [[budget]].
+(defonce ^:private !next-budget-ms (atom nil))
+
+(defn budget
+  "Override the default wall-clock timeout for the form's auto-awaited
+   return value. Use when a form does a slow async op that legitimately
+   needs more than `@!timeout-ms` (default 10000ms).
+
+     ;; default 10s budget
+     (some-fs-walk \"/Users/me/dir\")
+
+     ;; give this form 60 seconds
+     (seon.eval/budget 60000 (some-fs-walk \"/Users/me/dir\"))
+
+   `inner` is returned unchanged; `ms` is recorded as a one-shot hint
+   that `eval-batch!`'s auto-await reads after the form returns,
+   consumes once, and resets. Pattern:
+
+   ;; turn 1 — budget applies only to THIS form
+   (seon.eval/budget 60000 (slow-async-op))
+
+   ;; turn 2 — uses the default 10s again
+   (regular-op)"
+  [ms inner]
+  (reset! !next-budget-ms ms)
+  inner)
 
 ;; Identity-checked marker returned by `race-timeout` when the timer
 ;; wins. A fresh JS object so `identical?` distinguishes it from any
@@ -295,7 +325,8 @@
    CLJS-1.12.145 syntax they don't see. This makes calls to seon.db/*
    feel synchronous from inside agent forms.
 
-   Bounded by `@!timeout-ms` — a Promise that never resolves returns
+   Bounded by `@!timeout-ms` (default) OR the one-shot override left
+   by [[budget]]. A Promise that never resolves returns
    `{:ok false :error <timeout>}` instead of wedging the agent loop.
 
    Returns {:ok true :value v} on resolution OR a non-Promise value;
@@ -303,17 +334,25 @@
   [v]
   (if (instance? js/Promise v)
     (try
-      (let [ms     @!timeout-ms
-            raced  (await (race-timeout v ms))]
+      (let [override (let [m @!next-budget-ms]
+                       (reset! !next-budget-ms nil)
+                       m)
+            ms       (or override @!timeout-ms)
+            raced    (await (race-timeout v ms))]
         (if (identical? raced timeout-sentinel)
           {:ok false
            :error (error/->map
                     (js/Error.
-                      (str "auto-await timed out after " ms "ms")))}
+                      (str "auto-await timed out after " ms "ms"
+                           (when override " (explicit (budget) override)"))))}
           {:ok true :value raced}))
       (catch :default e
         {:ok false :error (error/->map e)}))
-    {:ok true :value v}))
+    (do
+      ;; Even for non-Promise values, consume any pending budget so it
+      ;; doesn't leak into the NEXT form's auto-await.
+      (reset! !next-budget-ms nil)
+      {:ok true :value v})))
 
 (defn ^:async record-eval!
   "Transact one :seon.eval entity capturing this form's narration,

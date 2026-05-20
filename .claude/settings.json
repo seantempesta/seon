@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "./bin/seon-hook"
+            "command": "$CLAUDE_PROJECT_DIR/bin/seon-hook"
           }
         ]
       }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "./bin/seon-hook"
+            "command": "$CLAUDE_PROJECT_DIR/bin/seon-hook"
           }
         ]
       }
