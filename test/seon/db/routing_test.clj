@@ -3,12 +3,11 @@
 
    Covers `seon.db`'s routing logic: when the running datahike flow owns
    a conn-process for a db-name, public ops route through the flow; when
-   it doesn't, `datahike-owned?` reports false so the legacy datalevin
-   path is still selected.
+   it doesn't, `datahike-owned?` reports false.
 
    The datahike flow is built manually in a fixture (via
    `build-datahike-flow!`) and bound to `seon.db/*datahike-flow*`.
-   No Integrant boot, no datalevin — keeps the test hermetic."
+   No Integrant boot — keeps the test hermetic."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [datahike.api :as dh]
             [seon.db :as db]
@@ -70,7 +69,7 @@
 
 (deftest routes-transact-and-query-through-datahike
   (testing "db/transact! + db/query on a datahike-owned db-name round-trip
-            through the flow without touching datalevin"
+            through the flow"
     (let [uid (random-uuid)]
       ;; transact! through db dispatch
       (db/transact! :seon.phase2.demo
@@ -138,7 +137,7 @@
       (is (not (pred :seon.unknown))
           "unknown db-name is not owned")
       (is (not (pred :seon))
-          ":seon (datalevin-era) is not owned by this flow"))))
+          ":seon is not owned by this flow"))))
 
 (deftest stamp-does-not-override-explicit-namespace
   (testing "if the caller already set :seon.db/namespace, stamp leaves it alone"

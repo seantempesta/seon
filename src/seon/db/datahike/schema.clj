@@ -2,8 +2,7 @@
   "Malli -> Datahike schema bridge.
 
    Derives a Datahike schema (a vector of ident entity maps) from a Malli
-   `:map` schema. Parallel to `seon.db.schema` (Datalevin bridge), but targets
-   datahike's `d/transact`-ready shape:
+   `:map` schema, targeting datahike's `d/transact`-ready shape:
 
      [{:db/ident :foo/bar
        :db/valueType :db.type/string
@@ -15,7 +14,6 @@
      ;; or inline on the entry:
      [:map [:foo/id {:seon.db/identity true} :uuid]]
 
-   Leaf types mirror `seon.db.schema` exactly (same `:db.type/*` values).
    Nested `:map` component refs are **not supported** in phase 1 -- throws a
    clear error. Cross-namespace refs use `:seon.db/ref` (stored as UUID,
    Decision 6 of the datahike migration PRD).
@@ -31,8 +29,7 @@
 
 (def ^:private leaf-type-map
   "Maps Malli leaf types to Datahike value types.
-   Includes both keyword types (:string) and predicate types (string?).
-   Values are identical to Datalevin mappings."
+   Includes both keyword types (:string) and predicate types (string?)."
   {:string   :db.type/string
    'string?  :db.type/string
    :int      :db.type/long
@@ -57,8 +54,7 @@
   "Maps a Malli type to a Datahike `:db.type/*` keyword.
    Returns nil for unmappable types.
 
-   Note: single-arg positional (not map-in). Pure derivation utility
-   matching the shape of `seon.db.schema/malli-type->datalevin-type`."
+   Note: single-arg positional (not map-in). Pure derivation utility."
   {:malli/schema [:=> [:cat :any] [:maybe :keyword]]}
   [malli-type]
   (get leaf-type-map malli-type))
@@ -241,7 +237,6 @@
    Returns a vector ready to pass directly to `d/transact`.
 
    Rules:
-   - Leaf types map identically to the Datalevin bridge.
    - `:vector` / `:set` become `:db.cardinality/many`; nested collections
      (`[:vector [:vector X]]`, `[:vector [:map ...]]`) are rejected.
    - `:maybe` unwraps to its inner type (project convention prefers
@@ -256,8 +251,7 @@
    - `:or` requires `:seon.db/value-type` in properties to be persistable.
    - Nested `:map` as component ref is not supported in phase 1.
 
-   Note: single-arg positional (not map-in). Pure derivation utility matching
-   the shape of `seon.db.schema/malli-map->datalevin-schema`."
+   Note: single-arg positional (not map-in). Pure derivation utility."
   {:malli/schema [:=> [:cat :any] [:vector [:map-of :keyword :any]]]}
   [malli-schema]
   (let [schema (try

@@ -1,12 +1,12 @@
 (ns seon.db.tx
-  "Transaction metadata for Datalevin writes.
+  "Transaction metadata for Datahike writes.
 
    Every transaction gets `:seon.db.tx/at`, `:seon.db.tx/caller`, and
    `:seon.db.tx/source` automatically. Callers can pass additional
    metadata (session-id, agent-ns, op, reason) which gets merged onto
    the transaction entity via `:db/current-tx`.
 
-   Datalevin does NOT auto-add timestamps (unlike Datomic), so we must."
+   Datahike does NOT auto-add timestamps (unlike Datomic), so we must."
   (:require [seon.db.schema :as dbs]
             [seon.schema :as schema]))
 

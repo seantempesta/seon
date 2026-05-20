@@ -62,7 +62,7 @@ Every namespace instance has a durable atom. Agents read/write it like any atom:
 
 Changes to `*ctx*` automatically trigger re-render and push to connected clients.
 
-**Durability:** STM-backed, survives restarts. Not a database - use Datalevin for heavy queries.
+**Durability:** STM-backed, survives restarts. Not a database - use Datahike for heavy queries.
 
 **Schema enforcement:** Every key must have a Malli schema. Invalid data throws.
 
@@ -231,9 +231,9 @@ Server-side state means network latency on every interaction.
 | Layer | Use Case |
 |-------|----------|
 | `*ctx*` durable atom | Fast prototyping, UI state, per-instance |
-| Datalevin | Heavy queries, shared data, cross-agent |
+| Datahike | Heavy queries, shared data, cross-agent |
 
-Progression: prototype with `*ctx*`, graduate to Datalevin. Same Malli schemas.
+Progression: prototype with `*ctx*`, graduate to Datahike. Same Malli schemas.
 
 ---
 

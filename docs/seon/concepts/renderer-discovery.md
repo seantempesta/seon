@@ -9,11 +9,11 @@ tags: [concept, web]
 
 ## The Pattern
 
-Renderer discovery is a zero-registration pattern for connecting data to visualization. A render function declares what data it needs (input keys) and what it produces (`:seon.render/html` or `:seon.render/ai` in the output schema) via standard `:malli/schema` metadata. The [[components/code-graph]] scanner extracts this metadata and indexes it in Datalevin. At render time, a specificity algorithm finds the best match.
+Renderer discovery is a zero-registration pattern for connecting data to visualization. A render function declares what data it needs (input keys) and what it produces (`:seon.render/html` or `:seon.render/ai` in the output schema) via standard `:malli/schema` metadata. The [[components/code-graph]] scanner extracts this metadata and indexes it in Datahike. At render time, a specificity algorithm finds the best match.
 
 The resolution algorithm:
 
-1. **Find candidates** — query Datalevin for functions whose output schema contains the target format key (e.g., `:seon.render/html`)
+1. **Find candidates** — query Datahike for functions whose output schema contains the target format key (e.g., `:seon.render/html`)
 2. **Filter** — candidate's required input keys must be a subset of the available data keys
 3. **Rank by specificity** — most required keys matched wins (more specific = better)
 4. **Tiebreak** — depends on the function: `resolve-renderer` (used by the namespace page renderer) uses namespace proximity (same ns > `.render` child > sibling > distant), then alphabetical. `find-renderer` (used by the data-key renderer) uses recency (most recently updated), then alphabetical.
@@ -25,7 +25,7 @@ No registration step. No dispatch maps. Just author the function with the right 
 This is **working in production**. Key files:
 
 - `src/seon/render.clj` — `find-renderer` and `resolve-renderer` implement the specificity algorithm. `try-render` and `render` are the public API. Resolution results are cached and invalidated when the code graph updates.
-- `src/seon/graph/query.clj` — `functions-with-output-key` queries Datalevin for render function candidates via ref joins on spec entities.
+- `src/seon/graph/query.clj` — `functions-with-output-key` queries Datahike for render function candidates via ref joins on spec entities.
 - `src/seon/graph/extract.clj` — the scanner extracts `:seon.render/html` and `:seon.render/ai` from function output schemas during code graph building.
 - `src/seon/ns/routes.clj` — the namespace page renderer uses `resolve-renderer` to find the best HTML renderer for a namespace's available data keys.
 

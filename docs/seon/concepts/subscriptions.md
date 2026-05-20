@@ -23,9 +23,9 @@ Subscriptions are not yet implemented as a first-class feature. The pattern exis
 
 The building blocks are in place: flow processes can have arbitrary named inputs (`:subscription-update` would be one), `flow/inject` can target any process input, and the [[concepts/request-reply]] pattern provides the messaging envelope.
 
-## Reactive Datalevin Subscriptions
+## Reactive Datahike Subscriptions
 
-Beyond namespace-to-namespace subscriptions, the same pattern extends to **database change reactions**. When a Datalevin transaction commits, the system can fingerprint the changed attributes and entity shapes, then find functions whose input schema matches that change shape. Those functions run automatically.
+Beyond namespace-to-namespace subscriptions, the same pattern extends to **database change reactions**. When a Datahike transaction commits, the system can fingerprint the changed attributes and entity shapes, then find functions whose input schema matches that change shape. Those functions run automatically.
 
 This is [[concepts/renderer-discovery]] applied to data mutations instead of rendering:
 
@@ -45,7 +45,7 @@ Each [[concepts/namespace-as-process]] would gain a `:subscription-update` input
 
 Source namespaces would maintain a subscriber registry in their process state and use a standard protocol for change detection (likely comparing serialized results, since Clojure values have structural equality).
 
-For Datalevin-triggered subscriptions, the writer process (`:seon.flow/writer`) would emit change fingerprints after each successful transaction. A subscription router process would match fingerprints against registered function schemas and inject results into the appropriate namespace processes.
+For Datahike-triggered subscriptions, the writer process (`:seon.flow/writer`) would emit change fingerprints after each successful transaction. A subscription router process would match fingerprints against registered function schemas and inject results into the appropriate namespace processes.
 
 ## Key Schemas
 
@@ -57,7 +57,7 @@ For Datalevin-triggered subscriptions, the writer process (`:seon.flow/writer`) 
  [:args [:vector :any]]   ; arguments for the function
  [:current {:optional true} :any]]  ; last known value for diffing
 
-;; Change fingerprint from Datalevin transaction (design)
+;; Change fingerprint from Datahike transaction (design)
 [:map
  [:changed-attrs [:set :keyword]]  ; attributes that changed
  [:entity-ids [:set :int]]         ; affected entity IDs

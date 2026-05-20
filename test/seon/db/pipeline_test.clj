@@ -359,8 +359,8 @@
 
 (defn- assert-tempid-roundtrip!
   "Generative roundtrip test for entity schemas that lack a :db/unique identity
-   key. Datahike supports negative tempids, so the pattern is the same as
-   datalevin: transact with a tempid, resolve via :tempids, pull, compare.
+   key. Datahike supports negative tempids: transact with a tempid, resolve via
+   :tempids, pull, compare.
 
    Routes through `seon.db/transact!`, which auto-stamps `:seon.db/namespace`
    onto every entity map (Decision 7). The stamp is stripped before equality.
@@ -748,9 +748,8 @@
 ;;; Tests: Complex Entity (Mix of All Supported Types)
 ;;; ---------------------------------------------------------------------------
 ;;;
-;;; The datalevin version included a nested `:map` component-ref; the datahike
-;;; bridge rejects nested maps in phase 1, so this test exercises the same
-;;; surface minus that one shape.
+;;; The datahike bridge rejects nested `:map` (component-ref) in phase 1, so
+;;; this test exercises the supported surface only.
 
 (deftest complex-entity-pipeline-test
   (testing "complex entity with mix of leaf types, enums, sets, optional"

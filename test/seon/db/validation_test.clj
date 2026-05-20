@@ -3,8 +3,7 @@
 
    Verifies that transact! validates entity map values against their
    registered Malli schemas before data reaches the datahike flow.
-   Ported in M-2b from the legacy datalevin `with-temp-conn` shape to
-   the canonical datahike `:memory` fixture."
+   Uses the canonical datahike `:memory` fixture."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [seon.db :as db]
             [seon.schema :as schema]

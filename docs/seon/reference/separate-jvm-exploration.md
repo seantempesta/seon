@@ -24,7 +24,7 @@ The original plan identified three hard problems with namespace cloning in a sha
 | Malli global registry conflicts | Per-instance local registries, merge on graduation | Each JVM has its own registry. No conflicts. |
 | `defn` clobbering between agents | Namespace clones via `create-ns` + `refer` | Separate memory spaces. Impossible to clobber. |
 | Agent crashes orchestrator | Can't prevent OOM/infinite loop/System.exit | OS-level isolation. Agent crash = process dies. |
-| Privilege separation | Not possible — all code on same classpath | Agent JVM only has its namespace's deps. Can't access web server, XTDB, orchestrator code. |
+| Privilege separation | Not possible — all code on same classpath | Agent JVM only has its namespace's deps. Can't access web server, database, orchestrator code. |
 
 ---
 
@@ -45,18 +45,11 @@ The original plan identified three hard problems with namespace cloning in a sha
 1. **RemoteProcLauncher** — Implement ProcLauncher protocol to spawn JVM subprocesses, bridge channels over nREPL
 2. **Proxy flow node** (simpler) — Regular flow process whose `transform` does nREPL communication to the agent JVM. Agent JVM knows nothing about flow.
 
-### 2. Datalevin Is True Client-Server
+### 2. Database Access Across JVMs
 
-**Source:** Read actual Datalevin source in `reference-code/datalevin/`
+**Note (2026-05):** The original exploration assumed Datalevin's client-server model. The current substrate uses **Datahike**, which is embedded (in-process LMDB) — there is no TCP server to connect to.
 
-- Server: NIO `ServerSocketChannel`, non-blocking event loop, handles multiple clients
-- Client: `SocketChannel` with connection pool (default 3 connections), `SO_KEEPALIVE`, `TCP_NODELAY`
-- URI format: `dtlv://username:password@host:port/db-name`
-- ALL operations work remotely: `transact!`, `q`, `pull`, schema ops
-- Authentication: per-client with Argon2 password hashing
-- Seon already has the server running as Integrant component on port 8898
-
-**Implication:** Agent JVMs connect to the orchestrator's Datalevin server as clients. No local database needed. Connection is ~50ms.
+**Implication for separate-JVM isolation:** Agent JVMs cannot share a single embedded Datahike instance directly. Cross-JVM database access must route through the orchestrator's flow topology (the orchestrator owns the embedded Datahike; agents send query/transact requests via nREPL or core.async.flow channels and receive replies). This is heavier than the original ~50ms TCP-client estimate, but the flow path is already how `seon.db` works inside a single JVM.
 
 ### 3. nREPL Already Works Cross-Process
 
@@ -79,7 +72,7 @@ With XTDB + Arrow + Netty:
 - 6-8s startup
 - Requires `--add-opens` JVM flags for Java 21
 
-Without XTDB (Datalevin client only):
+Without XTDB (lightweight DB client only):
 
 - **186MB measured** (prototype agent JVM)
 - ~2-3s startup
@@ -103,7 +96,7 @@ Loads Maven artifacts at runtime into the running JVM. Agent can request new dep
 
 Created and tested a minimal agent JVM. Files:
 
-- `src/seon/flow/agent_runner.clj` — Entry point: nREPL + Datalevin client + ctx atom
+- `src/seon/flow/agent_runner.clj` — Entry point: nREPL + DB client (originally Datalevin; see note above) + ctx atom
 - `src/seon/test/hello.clj` — Test namespace with Malli validation
 - `bin/agent-runner` — Launch script
 - `deps.edn` `:agent` alias — `:replace-deps` with only 7 deps
@@ -122,7 +115,7 @@ Created and tested a minimal agent JVM. Files:
 - `org.clojure/clojure` 1.12.0
 - `org.clojure/core.async` 1.9.829-alpha2
 - `metosin/malli` 0.17.0
-- `datalevin/datalevin` (local from reference-code)
+- `datalevin/datalevin` (local from reference-code; the substrate has since migrated to embedded Datahike — see Section 2 note)
 - `nrepl/nrepl` 1.3.0
 - `com.taoensso/timbre` 6.5.0
 - `cheshire/cheshire` 5.13.0
@@ -160,7 +153,7 @@ The Super REPL plan should be updated to reflect:
 4. **Super REPL becomes simpler** — It's a form router that:
    - Receives forms from agents (or orchestrator)
    - Sends them to the right agent JVM via nREPL
-   - Stores them in Datalevin (knowledge graph)
+   - Stores them in Datahike (knowledge graph)
    - Runs clj-kondo analysis (stdin, no files needed)
    - On graduation: writes forms to disk as real `.clj` files, git commits
 
@@ -170,17 +163,17 @@ The Super REPL plan should be updated to reflect:
 
 ### What Stays The Same
 
-1. **Knowledge Graph (Phase 1)** — clj-kondo analysis → Datalevin. Still needed for querying dependencies, functions, specs.
+1. **Knowledge Graph (Phase 1)** — clj-kondo analysis → Datahike. Still needed for querying dependencies, functions, specs.
 
 2. **Agent-as-Flow-Node (Phase 3)** — Orchestrator wraps agent JVMs as flow nodes. The proxy pattern works: flow process in orchestrator whose `transform` does nREPL eval on the agent.
 
 3. **Dynamic Cockpit (Phase 4)** — MCP tools for agents to query the knowledge graph.
 
-4. **Inter-Agent Messaging (Phase 5)** — Messages via Datalevin + flow channels in orchestrator.
+4. **Inter-Agent Messaging (Phase 5)** — Messages via Datahike + flow channels in orchestrator.
 
-5. **Graduation** — Generate namespace file from Datalevin forms, git commit, verify tests.
+5. **Graduation** — Generate namespace file from Datahike forms, git commit, verify tests.
 
-6. **Eval-only model** — Agents get code via eval (Super REPL), not file editing. Forms stored in Datalevin.
+6. **Eval-only model** — Agents get code via eval (Super REPL), not file editing. Forms stored in Datahike.
 
 ### New Phase 2: Agent JVM Runner
 
@@ -195,7 +188,7 @@ Replace the old "Namespace Instances" phase with:
 
 ## Existing Research to Reference
 
-- `docs/archive/agent-isolation/research/complete-isolation.md` — Earlier research on JVM isolation. Assumed XTDB (expensive). Our Datalevin-only approach changes the numbers dramatically.
+- `docs/archive/agent-isolation/research/complete-isolation.md` — Earlier research on JVM isolation. Assumed XTDB (expensive). The lightweight-DB approach explored here changes the numbers dramatically.
 - `src/seon/experimental/ns_instance.clj` — Namespace cloning prototype (historical — file no longer exists). Still useful as reference for understanding var resolution, but the separate-JVM approach makes this unnecessary.
 - `src/seon/web/sse/flow.clj` — Proven core.async.flow pattern (aggregator → broadcaster). Use as template for agent proxy flow nodes.
 - `src/seon/ai/claude/sdk.clj` — Already spawns subprocesses (Claude Code CLI). Pattern for process lifecycle management.
@@ -208,7 +201,7 @@ Replace the old "Namespace Instances" phase with:
 
 2. **nREPL eval latency** — How much overhead does nREPL add per eval? For interactive agent work, <10ms per eval is fine.
 
-3. **Datalevin client from agent JVM** — Need to test actually connecting and querying from the prototype. The code is there (`--datalevin-uri` flag) but we haven't verified it end-to-end.
+3. **Cross-JVM DB access from agent JVM** — Originally planned as a Datalevin client connection; with Datahike (embedded), this needs to route through the orchestrator's flow topology instead. Not yet verified end-to-end.
 
 4. **Per-namespace deps generation** — How do we automatically determine what deps a namespace needs? clj-kondo analysis gives us `require` chains, but mapping those to Maven coordinates needs work.
 
@@ -290,9 +283,9 @@ java -XX:SharedArchiveFile=agent.jsa -jar target/agent.jar --port $PORT
 
 #### 4. Deferred Namespace Loading (MODERATE: ~400ms improvement)
 
-**How:** Move heavy requires (malli, core.async, datalevin) out of the top-level `ns` form. Use `requiring-resolve` or `delay` blocks. Print AGENT_READY after nREPL starts but before all deps are loaded. Background-load the rest.
+**How:** Move heavy requires (malli, core.async, datahike) out of the top-level `ns` form. Use `requiring-resolve` or `delay` blocks. Print AGENT_READY after nREPL starts but before all deps are loaded. Background-load the rest.
 
-**Current agent_runner.clj requires:** nrepl.server, taoensso.timbre, clojure.core.async, malli.core. Of these, malli and core.async are the heaviest. Datalevin is already deferred via `requiring-resolve`.
+**Current agent_runner.clj requires:** nrepl.server, taoensso.timbre, clojure.core.async, malli.core. Of these, malli and core.async are the heaviest. The DB client is already deferred via `requiring-resolve`.
 
 **Realistic improvement:** ~400ms. The AGENT_READY signal fires faster, but the agent isn't fully functional until background loading completes.
 

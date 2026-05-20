@@ -7,11 +7,9 @@
    datahike bridge in `seon.db.datahike.schema` cannot express
    (`:any`, `:some`, `:nil`, `[:maybe X]`, mixed-type enums).
 
-   This namespace used to also own the Malli→Datalevin schema bridge
-   (`malli-map->datalevin-schema`); that path was deleted in chunk M-2
-   along with the rest of the datalevin substrate. The datahike-side
-   replacement lives at `seon.db.datahike.schema/malli-map->datahike-schema`
-   and is invoked from `seon.db.datahike.conn-process` at conn `:init`."
+   The Malli→Datahike schema bridge lives at
+   `seon.db.datahike.schema/malli-map->datahike-schema` and is invoked
+   from `seon.db.datahike.conn-process` at conn `:init`."
   (:require [clojure.string :as str]
             [malli.core :as m]
             [taoensso.timbre :as log]))

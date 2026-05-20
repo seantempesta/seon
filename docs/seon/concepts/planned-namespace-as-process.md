@@ -20,6 +20,6 @@ Every namespace becomes a full citizen in the flow topology — not just a routi
 
 ## Schema-Driven Dispatch
 
-In the planned model, the dispatch layer is Malli's `m/decode` with `mt/default-value-transformer`. Schema properties (`:default/fn`) on registered specs provide values when keys are missing. Functions are pure data-in/data-out — no atoms inside functions, no dynamic var injection. The atom is the agent's REPL workspace; Datalevin is the source of truth.
+In the planned model, the dispatch layer is Malli's `m/decode` with `mt/default-value-transformer`. Schema properties (`:default/fn`) on registered specs provide values when keys are missing. Functions are pure data-in/data-out — no atoms inside functions, no dynamic var injection. The atom is the agent's REPL workspace; Datahike is the source of truth.
 
-Session restore works via decode: non-serializable keys are naturally absent from Datalevin, and `:default/fn` fires to rebuild them from available data.
+Session restore works via decode: non-serializable keys are naturally absent from Datahike, and `:default/fn` fires to rebuild them from available data.
