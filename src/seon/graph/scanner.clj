@@ -3,7 +3,7 @@
    Parses schema/register! calls and def forms from Clojure source using edamame.
 
    Walks parsed forms looking for `(schema/register! <key> <schema>)` patterns
-   and produces `:seon.spec/*` entities for Datalevin ingestion. Also extracts
+   and produces `:seon.spec/*` entities for Datahike ingestion. Also extracts
    `(def ...)` forms as `:seon.var/*` entities with value-type inference.
 
    Function extraction (defn) and fn-to-spec linking are handled by
@@ -123,7 +123,7 @@
 
 (defn extract-contains-keys
   "For :map schemas, extract qualified keyword keys.
-   [:map [::exercise ...] [::sets ...]] -> [:seon.health.workout/exercise ...]
+   [:map [::a ...] [::b ...]] -> [:my.ns/a :my.ns/b]
    Only includes qualified keywords."
   [schema-form]
   (when (and (vector? schema-form)

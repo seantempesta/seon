@@ -1,8 +1,8 @@
 (ns seon.graph.ingest
-  "Ingest analysis data into the Datalevin knowledge graph.
+  "Ingest analysis data into the Datahike knowledge graph.
 
    Transforms clj-kondo analysis output (via seon.graph.analyzer/extract-entities)
-   into Datalevin entities and transacts them into the master database.
+   into Datahike entities and transacts them into the master database.
 
    Uses upsert + retract-stale pattern: identity attrs handle create-or-update,
    then entities present in the old scan but absent from the new scan are retracted.
@@ -108,7 +108,7 @@
 (schema/register! :seon.fn/output-shape :seon.db/ref)
 
 ;;; ---------------------------------------------------------------------------
-;;; Datalevin Entity Schemas (Malli is the source of truth)
+;;; Datahike Entity Schemas (Malli is the source of truth)
 ;;; ---------------------------------------------------------------------------
 
 (def ns-entity-schema
@@ -355,7 +355,7 @@
           (instance? java.net.ConnectException (.getCause e))))))
 
 (defn- transact-in-batches!
-  "Transact entities in batches to avoid overwhelming Datalevin.
+  "Transact entities in batches to avoid overwhelming Datahike.
    Returns {:succeeded N :failed N :errors [...]} for error isolation.
    Individual batch failures are logged and skipped, not propagated."
   [db-name entities batch-size]
@@ -429,7 +429,7 @@
       false)))
 
 (def ^:const batch-size
-  "Entities per Datalevin transaction.
+  "Entities per Datahike transaction.
    Tuned for memory vs latency tradeoff on typical project analysis."
   500)
 
@@ -531,7 +531,7 @@
        ::entry-count (count (or entries []))})))
 
 (defn ingest-analysis!
-  "Bulk ingest extracted entities into Datalevin.
+  "Bulk ingest extracted entities into Datahike.
 
    Uses upsert + retract-stale per namespace. Safe for initial graph population
    at startup -- entities not in the new scan are retracted, but entities the
@@ -635,7 +635,7 @@
         ::ns-entities namespaces}))))
 
 (defn ingest-file!
-  "Extract graph from a source file and transact into Datalevin.
+  "Extract graph from a source file and transact into Datahike.
 
    Uses seon.graph.extract for unified extraction pipeline, then
    delegates to ingest-namespace! for transacting.

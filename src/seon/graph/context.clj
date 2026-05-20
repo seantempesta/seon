@@ -1,7 +1,7 @@
 (ns seon.graph.context
   "Topological context builder for AI agents.
 
-   Builds linearized context strings from the Datalevin knowledge graph
+   Builds linearized context strings from the Datahike knowledge graph
    using recursive pull and topological sort. When an AI agent needs context
    about a function or namespace, this module:
 
@@ -14,9 +14,9 @@
      (require '[seon.graph.context :as ctx])
 
      (ctx/build {::ctx/db-name :seon.runtime
-                 ::ctx/seed \"seon.health.workout/log-workout!\"
+                 ::ctx/seed \"seon.db.schema/register-entity-schema!\"
                  ::ctx/depth 2})
-     ;; => {::ctx/context-text \"## seon.health.workout/log-workout!\\n...\"
+     ;; => {::ctx/context-text \"## seon.db.schema/register-entity-schema!\\n...\"
      ;;     ::ctx/entity-count 5}
 
      (ctx/build-for-namespace {::ctx/db-name :seon.runtime

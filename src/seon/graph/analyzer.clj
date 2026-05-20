@@ -6,7 +6,7 @@
    - Incremental per-form analysis via clj-kondo on strings
 
    The analysis output is transformed into structured entity maps ready
-   for ingestion into Datalevin by seon.graph.ingest.
+   for ingestion into Datahike by seon.graph.ingest.
 
    Example:
      (require '[seon.graph.analyzer :as analyzer])
@@ -279,7 +279,7 @@
   "Transform raw clj-kondo analysis output into structured graph entities.
 
    Takes the raw analysis map from clj-kondo and produces entity maps
-   suitable for Datalevin ingestion by seon.graph.ingest.
+   suitable for Datahike ingestion by seon.graph.ingest.
 
    Request keys:
      ::raw-analysis - Raw clj-kondo analysis map (from analyze-project! or analyze-form)

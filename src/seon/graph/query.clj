@@ -1,7 +1,7 @@
 (ns seon.graph.query
   "Datalog query API for the knowledge graph.
 
-   Provides high-level query functions over the Datalevin graph populated
+   Provides high-level query functions over the Datahike graph populated
    by seon.graph.ingest. All queries operate on a named database resolved
    via seon.db.
 
