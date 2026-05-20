@@ -20,7 +20,7 @@
    ## Functions
 
    All functions use map-in, map-out with namespaced keys.
-   All data is stored in Datalevin.
+   All data is stored in Datahike.
 
    - `(start-session! {::namespace 'seon.trading ::prompt \"...\"})`
    - `(end-session! {::session-id \"...\" ::status :completed})`
@@ -32,16 +32,14 @@
   (:import [java.time Instant]))
 
 ;;; ---------------------------------------------------------------------------
-;;; AI persistence — disabled in M-2; M-3 ports to a :seon.ai datahike namespace
+;;; AI persistence — currently a no-op; pending port to a :seon.ai datahike namespace
 ;;; ---------------------------------------------------------------------------
 
 (defn- datalevin-write!
-  "No-op since chunk M-2. The legacy datalevin persistence
-   (`seon.ai.datalevin/save-session!` etc.) was deleted. M-3 will register
-   `:seon.ai` as a datahike-flow namespace and route this through
-   `seon.db/transact!`."
+  "No-op stub. Pending port to register `:seon.ai` as a datahike-flow
+   namespace and route this through `seon.db/transact!`."
   [_op _entity]
-  ;; FIXME(M-3): port to :seon.ai datahike namespace via seon.db/transact!
+  ;; FIXME: port to :seon.ai datahike namespace via seon.db/transact!
   nil)
 
 ;;; ---------------------------------------------------------------------------
@@ -59,7 +57,7 @@
                    "user" "assistant" "system"])
 
 ;; Message content - can be string or structured map.
-;; Datalevin stores as string; structured content is Nippy-serialized by Datalevin.
+;; Datahike stores as string; structured content is serialized by the DB layer.
 (schema/register! ::content
                   [:or {:description "Message content"
                         :seon.db/value-type :db.type/string}
@@ -338,7 +336,7 @@
 (defn start-session!
   "Start a new AI session.
 
-   Creates a session entity in Datalevin with status :active.
+   Creates a session entity in Datahike with status :active.
 
    Request keys:
      ::namespace        - Optional. Clojure namespace context (symbol or string)

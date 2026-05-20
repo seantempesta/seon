@@ -160,7 +160,7 @@
      :message    - Provider-specific message map
      :session-id - Optional. AI session ID to attach to the entity
 
-   Returns a map suitable for Datalevin storage with:
+   Returns a map suitable for Datahike storage with:
      :seon/id            - Generated message ID
      :seon.ai/type     - :message
      :seon.ai/role     - \"user\", \"assistant\", or \"system\"
@@ -536,7 +536,7 @@
            :details (str/join " | " (drop 2 parts))})))))
 
 (defn- completed-sessions
-  "Get recent completed/failed sessions from Datalevin."
+  "Get recent completed/failed sessions from Datahike."
   [limit]
   (ai/list-sessions {::ai/limit limit}))
 

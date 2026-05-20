@@ -331,7 +331,7 @@
 (defn- extract-tool-results
   "Extract tool_result blocks from user message content.
    Large content (>2KB) is truncated to prevent storage overload from file reads.
-   Nil content is omitted (not stored as nil to avoid Datalevin NPE)."
+   Nil content is omitted (not stored as nil to avoid DB NPE)."
   [content]
   (when (sequential? content)
     (->> content
@@ -339,7 +339,7 @@
          (mapv (fn [tr]
                  (let [base (select-keys tr [:tool_use_id :is_error])
                        truncated (truncate-tool-result-content (:content tr))]
-                   ;; Only add :content if present (nil breaks Datalevin)
+                   ;; Only add :content if present (nil breaks the DB)
                    (cond-> base
                      (some? truncated)
                      (assoc :content truncated)))))
@@ -361,7 +361,7 @@
   "Convert a Claude SDK message to a seon.ai message entity.
 
    Takes a request map with the SDK message and converts it to a normalized
-   entity suitable for Datalevin storage. Claude-specific attributes are preserved
+   entity suitable for Datahike storage. Claude-specific attributes are preserved
    under the ::seon.ai.claude namespace.
 
    Request keys:
@@ -411,7 +411,7 @@
              ::ai/role role
              ::ai/content text-content
              ::ai/timestamp (Instant/now)}
-      ;; Message type - only include if present (nil breaks Datalevin)
+      ;; Message type - only include if present (nil breaks the DB)
       msg-type
       (assoc ::message-type msg-type)
 
@@ -460,7 +460,7 @@
 ;;   :message    - Claude SDK message map (with :type, :message, :uuid, etc.)
 ;;   :session-id - Optional. AI session ID to attach
 ;;
-;; Returns entity map suitable for Datalevin storage.
+;; Returns entity map suitable for Datahike storage.
 (defmethod agent/normalize-message :claude
   [{:keys [message session-id]}]
   (sdk-message->entity (cond-> {::sdk-message message}
@@ -525,7 +525,7 @@
 (defn persist-message!
   "Persist a Claude SDK message as an AI message entity.
 
-   Converts the SDK message to an entity and stores it in Datalevin.
+   Converts the SDK message to an entity and stores it in Datahike.
    This is used internally by launch-agent! to auto-persist all messages.
 
    Request keys:
@@ -542,9 +542,8 @@
   (let [entity (sdk-message->entity {::sdk-message sdk-message
                                      ::ai/session-id session-id})
         message-id (:seon/id entity)]
-    ;; FIXME(M-3): port to :seon.ai datahike namespace via seon.db/transact!
-    ;; The legacy datalevin persistence was deleted in M-2; M-3 registers
-    ;; `:seon.ai` in `:seon.db/flow` and rewires this to `seon.db/transact!`.
+    ;; FIXME: port to :seon.ai datahike namespace via seon.db/transact!
+    ;; Register `:seon.ai` in `:seon.db/flow` and rewire this to `seon.db/transact!`.
     {::ai/message-id message-id}))
 
 ;;; ---------------------------------------------------------------------------
@@ -742,9 +741,9 @@
    - Persisted ctx atom for state management
    - Dedicated nREPL server
    - Claude Code process with MCP configured
-   - AI session in Datalevin for conversation persistence
+   - AI session in Datahike for conversation persistence
 
-   All SDK messages are automatically persisted to Datalevin during execution.
+   All SDK messages are automatically persisted to Datahike during execution.
    On completion, the AI session is closed with final stats (tokens, cost).
 
    Request keys:
@@ -764,7 +763,7 @@
 
    Response keys (agent handle):
      ::ai/session-id      - 4-char hex session ID (Seon agent session)
-     ::ai-session-id      - AI conversation session ID (for Datalevin queries)
+     ::ai-session-id      - AI conversation session ID (for Datahike queries)
      ::ai/namespace       - Agent namespace
      ::nrepl-port         - nREPL port for the agent
      ::messages-ch        - Channel of SDK messages
@@ -804,8 +803,6 @@
                          :existing-session (:seon.ai.agent/session-id existing)})))))
 
   ;; 1. Create Seon session (nREPL, ctx, db)
-  ;; FIXME(M-3): the legacy ::session/datalevin-manager attachment was
-  ;; deleted in M-2 along with the dead :seon.db.datalevin/connections lookup.
   (let [{::session/keys [id nrepl-port] :as session-result}
         (session/start-agent-session! {::session/namespace namespace})]
 
@@ -922,7 +919,7 @@
                                     (log/info "Mapped Claude session to Seon session"
                                               {:claude-session claude-session-id :seon-session id})))
 
-                                ;; Persist message to Datalevin (skip keep_alive, parse_error)
+                                ;; Persist message to Datahike (skip keep_alive, parse_error)
                                 ;; Retry once after 100ms on failure
                                 (when (persistable-message-type? msg-type)
                                   (try
@@ -1357,16 +1354,15 @@
    Note: This function queries the database, so it works for both running
    and completed agents. For running agents, ::result-text will be nil."
   [{::ai/keys [session-id]}]
-  ;; FIXME(M-3): port to :seon.ai datahike namespace via seon.db/transact!
-  ;; The legacy datalevin reads (dl-find-by-agent-session-id, etc.) were
-  ;; deleted in M-2. Until M-3 wires `:seon.ai` into `:seon.db/flow`,
-  ;; agent-result returns a stub indicating the persistence layer is down.
+  ;; FIXME: port to :seon.ai datahike namespace via seon.db/transact!
+  ;; Until `:seon.ai` is wired into `:seon.db/flow`, agent-result returns a
+  ;; stub indicating the persistence layer is down.
   {::agent-status :failed
-   ::error (str "Agent session lookup unavailable (M-3 pending): " session-id)})
+   ::error (str "Agent session lookup unavailable: " session-id)})
 (defn agent-messages
   "Get recent messages from an agent session.
 
-   Queries Datalevin for messages, returning them in chronological order.
+   Queries Datahike for messages, returning them in chronological order.
    Useful for checking agent progress without blocking.
 
    Request keys:

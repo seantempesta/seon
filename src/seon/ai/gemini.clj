@@ -185,7 +185,7 @@
 ;; ---- Response components ----
 ;; Note: ::ai/error in seon.ai uses {::ai/message ::ai/code ::ai/data} structure.
 ;; Gemini's error structure is different (HTTP status, exception), so we keep
-;; a Gemini-specific error schema. If persisting to Datalevin, convert to ::ai/error.
+;; a Gemini-specific error schema. If persisting to Datahike, convert to ::ai/error.
 (schema/register! ::text
                   [:string {:description "Generated text response"}])
 
