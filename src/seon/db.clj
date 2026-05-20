@@ -19,8 +19,9 @@
    - `entity-by-name` -- get entity by eid
 
    Unregistered db-names raise `ex-info` with `:type :seon.db/unregistered-namespace`
-   plus the list of currently-registered namespaces. There is no legacy
-   datalevin fall-through (deleted in chunk M-2).
+   plus the list of currently-registered namespaces. All routes go through the
+   datahike flow (`seon.db.datahike.flow`) or the cross-JVM relay; there is no
+   fall-through to a raw store.
 
    Positional args are intentional for drop-in compatibility -- this is
    the one namespace where map-in/map-out does not apply."
@@ -136,22 +137,23 @@
 
 ;;; --- Legacy dynamic vars (deprecated; preserved as no-op stubs) ---
 ;;;
-;;; M-2 removed the legacy datalevin path. These vars are no longer
+;;; These vars predate the datahike migration (they steered the prior
+;;; substrate's direct-mode and connection manager). They are no longer
 ;;; consulted by any active code path; they survive only so that the few
 ;;; remaining call sites that `(binding [db/*direct-mode* true] ...)` or
 ;;; `(binding [db/*conn-manager* ...] ...)` continue to compile. Both will
 ;;; be deleted once those call sites are ported off (M-3).
 
 (def ^:dynamic *direct-mode*
-  "Deprecated. No-op since M-2. Pre-M-2 this caused reads and writes to
-   bypass the infrastructure flow and call Datalevin directly. There is no
-   direct path now; the only routes are the datahike flow and the cross-JVM
-   relay. Binding this has no effect."
+  "Deprecated. No-op. Pre-migration this caused reads and writes to bypass
+   the infrastructure flow and call the underlying store directly. There is
+   no direct path now; the only routes are the datahike flow
+   (`seon.db.datahike.flow`) and the cross-JVM relay. Binding has no effect."
   false)
 
 (def ^:dynamic *conn-manager*
-  "Deprecated. No-op since M-2. Pre-M-2 this overrode the connection manager
-   used by the legacy datalevin path. Binding this has no effect."
+  "Deprecated. No-op. Pre-migration this overrode the connection manager
+   used by the now-replaced direct path. Binding has no effect."
   nil)
 
 ;;; --- Infrastructure Flow Access ---
@@ -216,8 +218,8 @@
 (defn- throw-unregistered!
   "Throw a clear `:type :seon.db/unregistered-namespace` ex-info for a
    db-name that isn't in the running datahike flow. Operator-friendly
-   replacement for the legacy datalevin fall-through that silently timed
-   out (per `remaining.md` smell #8)."
+   failure mode — unregistered names fail loudly here instead of silently
+   timing out further down the stack (per `remaining.md` smell #8)."
   [db-name op]
   (throw (ex-info (str "No conn-process for db-name " (pr-str db-name)
                        " — not registered in :seon.db/flow."
@@ -228,12 +230,12 @@
                    :registered (registered-db-names)})))
 
 (defn resolve-conn
-  "Deprecated. Pre-M-2 this resolved a db-name to a raw Datalevin connection.
-   The legacy path is gone; callers that ask for a raw conn now get
-   `:type :seon.db/unregistered-namespace` so the failure is loud rather than
-   silent. Replace usages with `transact!` / `query` / `pull-by-name` /
-   `pull-many-by-name` / `entity-by-name` — they route through the datahike
-   flow."
+  "Deprecated. Pre-migration this resolved a db-name to a raw store
+   connection. There is no raw conn handed out from `seon.db` now; callers
+   that ask for one get `:type :seon.db/unregistered-namespace` so the
+   failure is loud rather than silent. Replace usages with `transact!` /
+   `query` / `pull-by-name` / `pull-many-by-name` / `entity-by-name` — they
+   route through the datahike flow."
   [db-name]
   (throw-unregistered! db-name :resolve-conn))
 
@@ -250,7 +252,7 @@
             datum))
         tx-data))
 
-;;; --- Public API (positional, mirrors datalevin.core) ---
+;;; --- Public API (positional; routes through `seon.db.datahike.flow`) ---
 
 (defn transact!
   "Transact data into a named database via the running datahike flow.

@@ -1,15 +1,14 @@
 (ns seon.ctx-test
   "Tests for seon.ctx (instance registry + atom lifecycle + client tracking +
-   validation + reserved keys + ctx-schema). Ported in M-2b from the legacy
-   datalevin `with-temp-conn` shape.
+   validation + reserved keys + ctx-schema). Ported in M-2b from the earlier
+   `with-temp-conn` fixture shape.
 
    M-2b dropped the persist/load round-trip tests:
    `persistence-round-trip-test`, `manual-persist-test`,
    `non-serializable-stripped-test`, `load-without-instance-test`. They
-   exercise `seon.ctx/persist!`, which still calls the deleted
-   `seon.db/resolve-conn` (now a deprecation shim that throws) and
-   directly probes `datalevin.conn/closed?`. M-4 will redesign
-   `seon.ctx/do-persist!` to route through the datahike flow; the
+   exercise `seon.ctx/persist!`, which still calls `seon.db/resolve-conn`
+   (now a deprecation shim that throws). A follow-on milestone will
+   redesign `seon.ctx/do-persist!` to route through the datahike flow; the
    round-trip tests will be re-introduced then."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [seon.ctx :as ctx]

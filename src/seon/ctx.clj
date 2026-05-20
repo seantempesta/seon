@@ -1,14 +1,14 @@
 (ns seon.ctx
-  "Purpose: Unified stateful context for namespace instances — atom + Datalevin
+  "Purpose: Unified stateful context for namespace instances — atom + Datahike
    persistence + SSE push + Malli validation in one module. Every dynamic namespace
    page gets its state through ctx. Replaced four prior systems with no legacy shims.
 
    Depends on: seon.schema, seon.runtime (ID generation), taoensso.timbre.
-   Soft deps: datalevin.core, seon.db, org.httpkit.server, seon.web.sse,
-   seon.web.reactive.transform, dev.onionpancakes.chassis.core.
+   Soft deps: seon.db (datahike flow), datahike.connector, org.httpkit.server,
+   seon.web.sse, seon.web.reactive.transform, dev.onionpancakes.chassis.core.
 
    Depended on by: seon.ns.lifecycle (primary), seon.ns.routes, seon.web.browser,
-   seon.orchestrator.session, seon.agent.env (aliases datalevin-schema).
+   seon.orchestrator.session, seon.agent.env.
 
    Consumers:
    - seon.ns.lifecycle: Creates instances, uses resolve-instance to query by
@@ -244,8 +244,12 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- do-persist!
-  "Persist ctx value to Datalevin. Strips non-serializable values.
-   Resolves conn from db-name internally, checks usability first."
+  "Persist ctx value to Datahike. Strips non-serializable values.
+   Resolves conn from db-name internally, checks usability first.
+
+   Usability check mirrors datahike's `::connection` spec
+   (`datahike.connector`): the value must be a `Connection` whose
+   wrapped-atom has not been reset to `:released` by `datahike.api/release`."
   [db-name instance-id namespace-sym value]
   (let [conn (try
                ((requiring-resolve 'seon.db/resolve-conn) db-name)
@@ -254,11 +258,13 @@
                  nil))
         conn-usable? (when conn
                        (try
-                         (require 'datalevin.conn)
-                         (if-let [closed? (resolve 'datalevin.conn/closed?)]
-                           (not (closed? conn))
-                           true)
-                         (catch Exception _ true)))]
+                         (require 'datahike.connector)
+                         (let [connection? (resolve 'datahike.connector/connection?)]
+                           (boolean
+                             (and connection?
+                                  (connection? conn)
+                                  (not= :released @(:wrapped-atom conn)))))
+                         (catch Exception _ false)))]
     (if-not conn-usable?
       (log/warn "Skipping ctx persist — connection not usable" {:instance-id instance-id :db-name db-name})
       (try

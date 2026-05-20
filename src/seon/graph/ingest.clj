@@ -340,8 +340,8 @@
 
 (defn- connection-error?
   "Return true if an exception's message looks like a transient connection
-   failure. Inlined here from the deleted `seon.db.datalevin.conn/connection-error?`
-   so the same retry/log heuristic survives the substrate cleanup."
+   failure. Local heuristic for retry/log decisions when the store layer
+   bubbles a network/IO error up through `db/transact!`."
   [^Throwable e]
   (let [msg (str (.getMessage e) " " (some-> (.getCause e) (.getMessage)))]
     (boolean
