@@ -42,7 +42,7 @@ Manages the full lifecycle of the Seon system: configuration loading, two-phase 
 | Function | Schema | Description |
 |----------|--------|-------------|
 | `check` | `::check-request => ::check-response` | Full health check: all services, resources, startup phase |
-| `readiness-gate` | (returns map) | Post-Phase-2 operational checks: Datalevin query, flow responsive, runtime persisted |
+| `readiness-gate` | (returns map) | Post-Phase-2 operational checks: Datahike query, flow responsive, runtime persisted |
 | `set-startup-phase!` | (atom reset) | Update startup phase (`:phase-1`, `:phase-2`, `:ready`, `:degraded`) |
 | `start-post-start-observation!` | (side effect) | Schedule re-checks at 30s and 60s after startup |
 | `log-startup-summary!` | (side effect) | Log clean service table with ports and modes |
@@ -68,10 +68,10 @@ The full system has 15 components. Integrant resolves init order from `#ig/ref` 
 | `:seon.web.server/http-server` | — | — | HTTP on :8080 |
 | `:seon.web/tailwind` | — | — | Tailwind CSS watcher (dev only) |
 | `:seon.ai.claude/sdk` | — | — | Claude CLI path config |
-| `:seon.db.datalevin/server` | — | — | Start/adopt Datalevin on :8898 |
-| `:seon.db.datalevin/connections` | server | — | Connection manager (caching, lazy DB creation) |
-| `:seon.flow/infrastructure` | connections | Always re-init | Infrastructure flow (writer + reply-router) |
-| `:seon/runtime-db` | connections, infrastructure | Survives reset | Runtime DB conn, `mark-crashed!`, `hydrate-cache!` |
+| `:seon.db.datahike/system` | — | Survives reset | Embedded Datahike: opens per-db stores under `data/datahike/<db-name>/` |
+| `:seon.db.datahike/flow` | datahike/system | Always re-init | Per-db conn-process flow (one process per db-name, serializes reads/writes) |
+| `:seon.flow/infrastructure` | datahike/flow | Always re-init | Infrastructure flow (reply-router, sinks) |
+| `:seon/runtime-db` | datahike/system, infrastructure | Survives reset | Runtime DB conn, `mark-crashed!`, `hydrate-cache!` |
 | `:seon.graph/scanner` | runtime-db | Always re-init | Background code scan (~3s, with circuit breaker) |
 | `:seon.flow/pool` | server | — | Pre-warmed agent JVM pool |
 | `:seon.orchestrator/sessions` | connections, pool | Survives reset | Session storage init |
@@ -85,7 +85,7 @@ All components derive from `:seon/component` via `resources/integrant/hierarchy.
 -main
   |
   +-- logging/configure!
-  +-- preflight-port-checks! (7888, 8080 — NOT 8898, Datalevin auto-adopted)
+  +-- preflight-port-checks! (7888, 8080 — no DB port; Datahike is embedded)
   |     +-- If Seon already running: print status, exit 0
   |
   +-- start-app
@@ -106,7 +106,7 @@ All components derive from `:seon/component` via `resources/integrant/hierarchy.
         |
         +-- Readiness Gate
         |   health/readiness-gate checks:
-        |     :datalevin-query — Can execute a Datalevin query?
+        |     :datahike-query — Can execute a Datahike query?
         |     :flow-responsive — Can route through infrastructure flow?
         |     :runtime-persisted — Are runtime instances registered?
         |   -> All pass: set-startup-phase! :ready
@@ -158,17 +158,17 @@ The health system has three tiers:
 
 | Service | Port | Notes |
 |---------|------|-------|
-| Datalevin | 8898 | Reports mode (adopted/started), PID, connection manager health |
 | nREPL | 7888 | Reads `.nrepl-port` file |
 | HTTP | 8080 | Always `:started` mode |
 | Caddy | 3030 | Reports mode (adopted/started) |
 | Tailwind | — | Process alive check |
+| Datahike | — | Embedded, no port; health is the conn-process probe below |
 
 ### 2. Operational Checks (only after Phase 2)
 
 | Check | What It Does |
 |-------|-------------|
-| `:datalevin-query` | Execute a real Datalevin query |
+| `:datahike-query` | Execute a real Datahike query |
 | `:flow-responsive` | Route a probe query through infrastructure flow |
 | `:runtime-persisted` | Verify runtime instances exist in memory |
 
@@ -180,7 +180,7 @@ Agents running, pool JVMs, active sessions.
 
 - **`:healthy`** — All checks pass, phase is `:ready`
 - **`:degraded`** — Non-critical failures, or startup phase is `:degraded`
-- **`:unhealthy`** — Critical checks fail (datalevin, datalevin-query, flow-responsive)
+- **`:unhealthy`** — Critical checks fail (datahike-query, flow-responsive)
 
 ## Configuration Loading (Aero)
 
@@ -212,13 +212,13 @@ Component config validation uses Malli schemas in `seon.system.config/schemas`, 
 
 ## Design Decisions
 
-1. **Two-phase startup**: Phase 1 gives the developer a working REPL immediately. If Datalevin is down or the flow fails, you can still connect and debug. This is critical for REPL-driven development.
+1. **Two-phase startup**: Phase 1 gives the developer a working REPL immediately. If Datahike fails to open or the flow fails, you can still connect and debug. This is critical for REPL-driven development.
 
 2. **`integrant.repl.state/system` as single source**: No separate system atom. Both `-main` and REPL `(go)` store state in the same var. This is the "real Kit pattern" — `(reset)` works regardless of how the system was started.
 
-3. **Port conflict detection with actionable errors**: Pre-flight checks provide PID and kill command in the error message. Datalevin port (8898) is NOT checked because the server component auto-detects and adopts existing instances.
+3. **Port conflict detection with actionable errors**: Pre-flight checks provide PID and kill command in the error message. There is no DB port to check — Datahike is embedded.
 
-4. **Readiness gate separates "started" from "operational"**: Components can be initialized but not actually working (e.g., Datalevin accepting TCP but failing queries). The readiness gate catches this.
+4. **Readiness gate separates "started" from "operational"**: Components can be initialized but not actually working (e.g., a Datahike conn open but failing queries). The readiness gate catches this.
 
 5. **Post-start observation**: Background re-checks at 30s and 60s catch delayed degradation (e.g., connection pool exhaustion, flow stalls).
 

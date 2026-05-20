@@ -5,24 +5,21 @@ tags: [component, database]
 ---
 # Database
 
-> Sole database API for Seon — all reads and writes route through `seon.db`. Migration in progress: Datalevin → embedded Datahike, per-namespace stores owned by a `core.async.flow`.
+> Sole database API for Seon — all reads and writes route through `seon.db`. Backed by embedded Datahike (in-process LMDB), with per-namespace stores owned by a `core.async.flow`.
 
-## Migration Status (2026-04-25)
+## Status (2026-05-20)
 
-Datalevin is being replaced by embedded Datahike. See [[orchestrator/active]] for current phase status, [[orchestrator/issues/datalevin-disabled]] for the boot disable, and `docs/prds/datahike-migration/` for the design.
+Datahike is the substrate. `seon.db` dispatches per db-name through dedicated flow processes (`seon.db.datahike.conn-process`), one per database. Migration narrative lives in `docs/prds/datahike-migration/`.
 
-- **`seon.db` public API is unchanged at the call site** — `(transact! :seon.weather ...)`, `(query :seon.weather ...)`, etc.
-- **Internally**: `seon.db` dispatches per db-name. Namespaces declared under `:seon.db/flow` in `resources/system.edn` route through the new datahike flow (one conn-process per db-name); other db-names fall through to the legacy datalevin path (currently disabled in dev).
+- **`seon.db` public API**: `(transact! :seon.weather ...)`, `(query :seon.weather ...)`, etc. Stable at the call site.
+- **Internally**: db-names declared under `:seon.db/flow` in `resources/system.edn` route through the datahike flow.
 - **Auto-stamp**: every datahike-routed `transact!` adds `{:seon.db/namespace <db-name>}` to entity maps (Decision 7).
-- **Live in datahike today**: `:seon.session :seon.repl :seon.flow :seon.orchestrator :seon.phase2.demo`. Domain namespaces migrate in Phase 4.
-
-The sections below describe the **new datahike path**. Datalevin source still ships in `src/seon/db/datalevin/**` until Phase 5 deletes it.
 
 ## Purpose
 
 Single database API surface (`seon.db`) that:
 - Enforces Malli validation on every write
-- Auto-derives datahike schemas from the Malli registry (`seon.db.datahike.schema`)
+- Auto-derives Datahike schemas from the Malli registry (`seon.db.datahike.schema`)
 - Routes per db-name through dedicated flow processes (`seon.db.datahike.conn-process`), one per database
 - Auto-stamps `:seon.db/namespace` so pulled entities are self-describing without consulting a schema (Decision 7)
 - Provides a single inspection point for future security filters and policy gates (Decision 9: state lives in flow state, not atoms)
@@ -32,13 +29,13 @@ Single database API surface (`seon.db`) that:
 | Namespace | File | Role |
 |-----------|------|------|
 | `seon.db` | `src/seon/db.clj` | Public API: `transact!`, `query`, `pull-by-name`, flow routing |
-| `seon.db.schema` | `src/seon/db/schema.clj` | Malli-to-Datalevin schema bridge (see [[components/schema-system]]) |
+| `seon.db.schema` | `src/seon/db/schema.clj` | Malli-to-Datahike schema bridge (see [[components/schema-system]]) |
 | `seon.db.tx` | `src/seon/db/tx.clj` | Transaction metadata: timestamps, caller, source on every write |
-| `seon.db.datalevin.conn` | `src/seon/db/datalevin/conn.clj` | Connection manager: per-DB locking, caching, Integrant component |
-| `seon.db.datalevin.server` | `src/seon/db/datalevin/server.clj` | External Datalevin JVM process: start, adopt, health, suspend/resume |
-| `seon.db.datalevin.writer` | `src/seon/db/datalevin/writer.clj` | Infrastructure flow writer step-fn |
-| `seon.db.datalevin.reader` | `src/seon/db/datalevin/reader.clj` | Infrastructure flow reader step-fn |
-| `seon.db.datalevin.backup` | `src/seon/db/datalevin/backup.clj` | Backup: pause writer, copy LMDB dir, resume, prune |
+| `seon.db.datahike.conn-process` | `src/seon/db/datahike/conn_process.clj` | Per-db flow process: owns the embedded Datahike conn, serializes reads/writes |
+| `seon.db.datahike.schema` | `src/seon/db/datahike/schema.clj` | Malli-derived schema installation against an embedded Datahike store |
+| `seon.db.datahike.flow` | `src/seon/db/datahike/flow.clj` | Flow wiring: spawn/teardown per-db conn-processes |
+| `seon.db.datahike.system` | `src/seon/db/datahike/system.clj` | Integrant component: starts the datahike flow, registers db-names |
+| `seon.db.datahike.tx-bus` | `src/seon/db/datahike/tx_bus.clj` | Post-commit tx broadcast for subscribers |
 
 ## Public API Surface
 
@@ -49,38 +46,38 @@ Single database API surface (`seon.db`) that:
 1. Extracts all attribute keywords from tx-data (map entities and vector tuples).
 2. **Validates attributes** — every non-`:db/*` attribute must be registered in `seon.schema`. Throws if unregistered.
 3. **Validates values** — each attribute value is checked against its Malli schema. Throws on first failure with the attribute, expected schema, actual value, and Malli explanation.
-4. **Ensures Datalevin schema** — for any attribute missing from the live Datalevin schema, derives the type from Malli and calls `d/update-schema`.
-5. Routes through the infrastructure flow writer (or direct `d/transact!` in test mode).
+4. **Ensures Datahike schema** — for any attribute missing from the live Datahike schema, derives the type from Malli and installs it via the schema bridge.
+5. Routes through the per-db conn-process flow (or direct `d/transact` in test mode).
 
 ### Read Path
 
-- **`query [db-name datalog-query & inputs]`** — Datalog query. Routes through flow reader, or direct with retry.
+- **`query [db-name datalog-query & inputs]`** — Datalog query. Routes through the per-db conn-process, or direct with retry.
 - **`pull-by-name [db-name selector eid]`** — Pull entity by selector and eid.
 - **`pull-many-by-name [db-name selector eids]`** — Pull multiple entities.
 - **`entity-by-name [db-name eid]`** — Get entity by eid.
 
-All read functions accept a db-name keyword (`:seon`, `:seon.runtime`, `:seon.ai`, `:seon.flow`, or any namespace keyword) and resolve to a connection via the connection manager.
+All read functions accept a db-name keyword (`:seon`, `:seon.runtime`, `:seon.ai`, `:seon.flow`, or any namespace keyword) and resolve to a connection via the conn-process.
 
 ### Connection Resolution
 
-- **`resolve-conn [db-name]`** — Resolve db-name to a raw Datalevin connection. Used by `ensure-schema!` and callers needing raw access.
+- **`resolve-conn [db-name]`** — Resolve db-name to a raw Datahike connection. Used by `ensure-schema!` and callers needing raw access.
 
 ### Flow Coordination
 
-- **`pause-writer! []`** — Pause the entire infrastructure flow (for backups); calls `flow/pause` then `flow/ping` to confirm quiescence.
-- **`resume-writer! []`** — Resume the infrastructure flow after backup.
+- **`pause-writer! []`** — Pause the per-db conn-process (for backups); calls `flow/pause` then `flow/ping` to confirm quiescence.
+- **`resume-writer! []`** — Resume the conn-process after backup.
 
 ### Direct Mode
 
-`*direct-mode*` is a dynamic var (default `false`). When bound to `true`, reads and writes bypass the infrastructure flow and use Datalevin directly. Used in two contexts:
+`*direct-mode*` is a dynamic var (default `false`). When bound to `true`, reads and writes bypass the flow and call Datahike directly. Used in two contexts:
 
-- **Test fixtures** that don't have a running infrastructure flow.
+- **Test fixtures** that don't have a running datahike flow.
 - **Integrant init** during bootstrap before the flow is started.
 
 ## Dependencies
 
-- **Uses**: [[components/schema-system]] (validation, schema derivation), `seon.flow.topology` (via requiring-resolve to break circular dep), `seon.flow.msg` (message envelope), `seon.db.datalevin.conn` (connection manager), `datalevin.core`
-- **Used by**: Every domain namespace, `seon.ctx` (state persistence), `seon.graph.ingest` (knowledge graph writes), `seon.ai.datalevin` (session persistence), `seon.flow.trace` (event persistence), `seon.db.datalevin.backup` (pause/resume)
+- **Uses**: [[components/schema-system]] (validation, schema derivation), `seon.flow.topology` (via requiring-resolve to break circular dep), `seon.flow.msg` (message envelope), `seon.db.datahike.conn-process` (per-db flow owner), `datahike.api`
+- **Used by**: Every domain namespace, `seon.ctx` (state persistence), `seon.graph.ingest` (knowledge graph writes), `seon.ai.session` (session persistence), `seon.flow.trace` (event persistence)
 
 ## How Data Flows
 
@@ -90,9 +87,8 @@ All read functions accept a db-name keyword (`:seon`, `:seon.runtime`, `:seon.ai
 Caller
   -> db/transact! (validate attrs, validate values, ensure-schema!)
     -> flow-request! (create promise, inject into flow)
-      -> infrastructure flow writer step-fn
-        -> conn/get-conn! (from connection manager)
-        -> d/transact! (with timeout, retry on connection error)
+      -> per-db conn-process step-fn
+        -> d/transact (against the embedded conn it owns)
         -> reply envelope -> reply-router -> deliver promise
     -> caller receives result
 
@@ -103,8 +99,8 @@ Caller
 ```
 Caller
   -> db/transact! (validate attrs, validate values, ensure-schema!)
-    -> resolve-conn (from connection manager)
-    -> d/transact! (direct)
+    -> resolve-conn (from the conn-process registry)
+    -> d/transact (direct)
 
 ```
 
@@ -113,7 +109,7 @@ Caller
 ```
 Caller
   -> db/query (or pull-by-name, etc.)
-    -> flow-request! -> infrastructure flow reader step-fn
+    -> flow-request! -> per-db conn-process step-fn
       -> execute-query (dispatches on :q/:pull/:pull-many/:entity)
       -> reply envelope -> reply-router -> deliver promise
 
@@ -124,13 +120,13 @@ Caller
 ```
 Caller
   -> db/query
-    -> with-retry (resolve-db, execute, reconnect on error)
+    -> with-retry (resolve-db, execute)
 
 ```
 
 ## Multi-Database Strategy
 
-Datalevin runs as a single server process managing multiple databases. Each database is identified by a keyword:
+Datahike runs **in-process**. Each db-name has a dedicated conn-process that owns a single embedded Datahike connection over its own LMDB directory.
 
 | Database | Contents | Typical Access Pattern |
 |----------|----------|----------------------|
@@ -140,40 +136,35 @@ Datalevin runs as a single server process managing multiple databases. Each data
 | `:seon.flow` | Flow traces, snapshots | Tracing, debugging |
 | `:seon.{ns}` | Per-namespace agent context | Agent sessions (dynamic, on-demand) |
 
-The connection manager (`seon.db.datalevin.conn`) caches connections per database keyword. Core databases (`:seon`, `:seon.runtime`, `:seon.ai`, `:seon.flow`) survive `(user/reset)` via Integrant suspend/resume. Non-core connections are closed on suspend.
+Core db-names (`:seon`, `:seon.runtime`, `:seon.ai`, `:seon.flow`) survive `(user/reset)` via Integrant suspend/resume — their conn-processes hold open conns across restarts. Non-core conn-processes are torn down on suspend.
 
-## Connection Manager Design
+## Conn-Process Design
 
-The connection manager solves a critical concurrency problem: when two threads simultaneously request a database that hasn't been opened yet on the Datalevin server, `open-kv` races and corrupts LMDB state.
-
-**Solution**: Per-DB locking via `ConcurrentHashMap`. Each database name gets its own lock object. The fast path (cached, valid connection) requires no locking. The slow path (first connection or reconnection) holds the per-DB lock during `d/get-conn`.
+Each db-name has one conn-process that owns the embedded Datahike connection and serializes all reads and writes through its inbox. This removes the concurrent-open race that plagued the old external-server design: there is exactly one opener per db-name, and it lives inside the JVM.
 
 **Key operations**:
 
-- `get-conn!` — Get or create connection (fast path: no lock; slow path: per-DB lock)
-- `reconnect!` — Force close + fresh connection
-- `sweep-stale-connections!` — Remove dead connections from cache
-- `close-non-core-connections!` — Used during suspend
-- `health` — TCP probe against server port; returns `::status` (`:connected`/`:disconnected`/`:degraded`), `::total-connections`, `::server-reachable?`
+- The conn-process holds `::conn`, `::db-name`, and `::schema-cache` in its flow state.
+- Writes apply Malli-derived schema deltas before `d/transact`.
+- Post-commit tx-data is broadcast on the `tx-bus` for subscribers.
+- Suspend closes the conn cleanly; resume reopens lazily on next request.
 
 ## Design Decisions
 
-**Separate JVM for Datalevin.** The database runs as an external process started via `bin/run-datalevin`. This means killing Seon does NOT kill the database. Data is safe across Seon restarts. Integrant adopts an existing server if the port is already open.
+**Embedded Datahike.** The database lives in the Seon JVM. There is no separate database process and no database TCP port. LMDB files live under `data/datahike/<db-name>/`. Bringing the JVM down brings the database down with it; bringing it back up reopens cleanly.
 
-**Positional arguments on `seon.db`.** This is the one namespace where map-in/map-out does not apply. The API mirrors `datalevin.core` for drop-in familiarity: `(query :seon '[:find ?e ...])`.
+**Positional arguments on `seon.db`.** This is the one namespace where map-in/map-out does not apply. The API mirrors `datahike.api` for drop-in familiarity: `(query :seon '[:find ?e ...])`.
 
 **Requiring-resolve for circular deps.** `seon.db` needs `seon.flow.topology` (to inject into the flow) and `seon.runtime` (to find the flow), but those namespaces depend on `seon.db`. The circular dep is broken with `requiring-resolve` at call time, not load time.
 
-**Writer owns connections.** The writer and reader step-fns maintain their own `::owned-conns` map. On first use of a database, they acquire a connection from the connection manager and cache it in their flow state. This avoids per-request connection lookups.
+**Conn-process owns the conn.** Each per-db conn-process owns its Datahike conn for its entire lifetime. There is no shared connection cache; the flow process IS the cache.
 
-**Retry on connection error.** Both the writer step-fn and the direct-mode read path detect connection errors (refused, reset, broken pipe, timeout) and retry once with a fresh connection. The connection manager evicts stale entries on reconnect.
+**Retry on transient error.** The direct-mode read path detects transient errors and retries once. The conn-process is single-threaded per db-name, so flow-routed writes never race.
 
-**Transaction metadata via `seon.db.tx`.** Every write can include `:db/current-tx` metadata with timestamp, caller namespace, source (`:agent`, `:system`, `:user`, `:repl`, `:migration`), and optional session/operation info. Datalevin does not auto-add timestamps like Datomic, so this is the auditability mechanism.
+**Transaction metadata via `seon.db.tx`.** Every write can include `:db/current-tx` metadata with timestamp, caller namespace, source (`:agent`, `:system`, `:user`, `:repl`, `:migration`), and optional session/operation info. Datahike does not auto-add timestamps the way Datomic peer libs do, so this is the auditability mechanism.
 
 ## Refactoring Opportunities
 
-- **Duplicate `connection-error?`** — Defined in both `seon.db` and `seon.db.datalevin.conn`. The `seon.db` version is private and identical. Should use `conn/connection-error?` directly.
-- **Writer and reader step-fns are ~220 lines each of very similar code** — The retry-with-reconnect pattern is duplicated. Could extract a shared `with-flow-retry` utility.
-- **`transact!` schema uses `:any`** — `[:sequential :any]` for tx-data and `:any` for return. These are the correct dynamic types for Datalevin tx-data, but the `:malli/schema` metadata is aspirational rather than enforced.
+- **`transact!` schema uses `:any`** — `[:sequential :any]` for tx-data and `:any` for return. These are the correct dynamic types for Datahike tx-data, but the `:malli/schema` metadata is aspirational rather than enforced.
 - **`*conn-manager*` dynamic var** — Exists for test override but is separate from `*direct-mode*`. The two testing mechanisms could potentially be unified.
-- **`seon.agent.helpers`** — References SQL helpers that predate the Datalevin migration. Marked deprecated in the namespace inventory.
+- **`seon.agent.helpers`** — References SQL helpers that predate the migration. Marked deprecated in the namespace inventory.

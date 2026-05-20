@@ -71,9 +71,9 @@ PostToolUse (after edit lands)
 | `src/seon/dev/clojure_replace.clj` | Comment-aware s-expression match/replace editing using rewrite-clj (MCP `clojure_replace` tool backend) |
 | `src/seon/dev/test.clj` | REPL-first structured test runner (`test`, `test-all`, `test-affected`, `test-gen`) |
 | `src/seon/dev/test_select.clj` | Dependency-aware test selection via code graph |
-| `src/seon/repl.clj` | REPL form router — classify, eval via flow, store in Datalevin, index |
+| `src/seon/repl.clj` | REPL form router — classify, eval via flow, store in Datahike, index |
 | `src/seon/repl/context.clj` | Agent context cockpit — graph-based context for functions/namespaces |
-| `src/seon/repl/graduate.clj` | Namespace graduation — assembles Datalevin forms into .clj files |
+| `src/seon/repl/graduate.clj` | Namespace graduation — assembles stored forms from Datahike into .clj files |
 
 ## Subsystems
 
@@ -192,12 +192,12 @@ The REPL form router (`seon.repl`) handles agent code evaluation:
 
 1. **Classify** — edamame parses the form to determine type (defn/def/ns/require/expression)
 2. **Eval** — routes through the infrastructure [[components/flow-topology]] via `flow/inject`
-3. **Store** — versioned form storage in Datalevin (`:form/id`, `:form/version`, etc.)
+3. **Store** — versioned form storage in Datahike (`:form/id`, `:form/version`, etc.)
 4. **Index** — updates the code graph via `graph/analyzer` + `graph/ingest`
 
 `repl/context.clj` provides agent context cockpit — graph-based context retrieval for functions, namespaces, and data (finding matching [[concepts/renderer-discovery|renderers]]).
 
-`repl/graduate.clj` assembles Datalevin-stored forms into proper `.clj` files, writes to disk, and optionally git commits. This is the "Super REPL" graduation path.
+`repl/graduate.clj` assembles Datahike-stored forms into proper `.clj` files, writes to disk, and optionally git commits. This is the "Super REPL" graduation path.
 
 ## Connections
 
@@ -205,7 +205,7 @@ The REPL form router (`seon.repl`) handles agent code evaluation:
 - **[[components/renderer]]** — repl/context uses renderer discovery for `for-data`
 - **[[components/flow-topology]]** — REPL eval routes through the infrastructure flow topology
 - **[[components/schema-system]]** — instrumentation validates all public functions at runtime; compliance checks schema presence
-- **[[components/database]]** — REPL forms stored in Datalevin; context queries use Datalevin
+- **[[components/database]]** — REPL forms stored in Datahike; context queries run against Datahike
 
 ## REPL Helpers
 

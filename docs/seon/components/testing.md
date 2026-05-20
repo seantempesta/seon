@@ -20,7 +20,7 @@ Test files mirror source files with a `-test` suffix:
 
 | Category | Count | Description |
 |----------|-------|-------------|
-| Unit | ~60 files | Pure logic, temp Datalevin connections, `*direct-mode*` bindings |
+| Unit | ~60 files | Pure logic, temp Datahike connections, `*direct-mode*` bindings |
 | Integration | ~5 files | Tagged `^:integration`, excluded from `test-all`. Real JVMs, network, I/O |
 | Generative / Pipeline | ~3 files | Malli generators, `assert-pipeline-roundtrip!`, schema->DB->pull verification |
 
@@ -28,13 +28,13 @@ Test files mirror source files with a `-test` suffix:
 
 - `test/seon/flow/pool_integration_test.clj` — real JVM spawning
 - `test/seon/flow/domain_integration_test.clj` — cross-namespace on real JVMs
-- `test/seon/db/datalevin/backup_test.clj` — filesystem I/O
+- `test/seon/db/datahike/backup_test.clj` — filesystem I/O
 - Individual `^:integration` deftests in `flow/pool_test.clj`
 
 **Shared test utilities**: `test/seon/test_utils.clj`
 
-- `with-temp-conn` — temporary Datalevin connection with `:nosync` for speed, auto-cleanup
-- `with-test-datalevin` — fake conn-manager binding `db/*direct-mode*` + `db/*conn-manager*`
+- `with-temp-conn` — temporary Datahike connection with `:nosync` for speed, auto-cleanup
+- `with-test-datahike` — fake conn-manager binding `db/*direct-mode*` + `db/*conn-manager*`
 - `with-small-db-size` — fixture binding `dc/*init-db-size*` to 10 MiB (also set globally via `alter-var-root`)
 - `gen-uuid`, `days-ago`, `days-from-now` — test data helpers
 
@@ -115,16 +115,16 @@ Most test namespaces use `clojure.test/use-fixtures` with either:
 - `:once` fixtures for expensive setup (temp DB connections)
 - `:each` fixtures for per-test isolation
 
-Common fixture: `tu/with-test-datalevin` — creates a temp Datalevin, binds `*direct-mode*` and `*conn-manager*`, cleans up on exit.
+Common fixture: `tu/with-test-datahike` — creates a temp Datahike conn, binds `*direct-mode*` and `*conn-manager*`, cleans up on exit.
 
 ### Pipeline Roundtrip Testing
 
 The `assert-pipeline-roundtrip!` utility in `test/seon/db/pipeline_test.clj` is the contract test for [[components/schema-system]] -> [[components/database]] integration:
 
 1. Validates schema constraints (no `:any`, no `[:maybe X]`, namespaced keys only)
-2. Derives Datalevin schema from Malli via the bridge
+2. Derives Datahike schema from Malli via the bridge
 3. Generates N entities from Malli schema
-4. Transacts to a temp Datalevin DB
+4. Transacts to a temp Datahike DB
 5. Pulls entities back
 6. Coerces for known transformations (vector->set for cardinality-many, strip `:db/id`)
 7. Validates pulled entities against the original Malli schema
@@ -139,7 +139,7 @@ Also provides `assert-tempid-roundtrip!` for entities without a `:db/unique` ide
 8 test files use `malli.generator`:
 
 - `db/pipeline_test.clj` — entity roundtrips (main generative suite)
-- `db/schema_roundtrip_test.clj` — Malli->Datalevin type mapping roundtrips
+- `db/schema_roundtrip_test.clj` — Malli->Datahike type mapping roundtrips
 - `ai/claude_test.clj`, `ai/agent_test.clj`, `ai/gemini_test.clj`, `ai_test.clj` — AI function contract testing
 - `health/metrics_test.clj` — health domain generators
 - `flow/msg_test.clj` — flow message schema generators
@@ -149,7 +149,7 @@ Also provides `assert-tempid-roundtrip!` for entities without a `:db/unique` ide
 | Component | Test Namespaces | Coverage |
 |-----------|----------------|----------|
 | [[components/schema-system]] | `db/schema_test` (9), `db/schema_roundtrip_test` (37), `db/pipeline_test` (29), `db/validation_test` (22) | **good** — type mapping, bridge, roundtrip, validation gate |
-| [[components/database]] | `db_test` (7), `db/consistency_test` (14), `db/datalevin/writer_test` (7), `db/datalevin/backup_test` (4), `db/validation_test` (22), `db/pipeline_test` (29) | **good** — transact, query, validation, writer, backup |
+| [[components/database]] | `db_test` (7), `db/consistency_test` (14), `db/datahike/conn_process_test` (7), `db/datahike/backup_test` (4), `db/validation_test` (22), `db/pipeline_test` (29) | **good** — transact, query, validation, conn-process, backup |
 | [[components/runtime]] | `runtime_test` (24) | **good** |
 | [[components/system-lifecycle]] | `core_test` (2), `system/config_test` (5) | **partial** — config tested, but system start/stop has minimal coverage |
 | [[components/context]] | `ctx_test` (28), `ctx/history_test` (5) | **good** |
@@ -159,7 +159,7 @@ Also provides `assert-tempid-roundtrip!` for entities without a `:db/unique` ide
 | [[components/renderer]] | `render_test` (28), `render/code_test` (15) | **good** |
 | [[components/namespace-lifecycle]] | `ns/lifecycle_test` (14), `ns/routes_test` (6) | **good** |
 | [[components/web-layer]] | `web/handlers_test` (5), `web/browser_test` (21), `web/sse/flow_test` (20), `web/reactive/actions_test` (2), `web/reactive/transform_test` (7) | **good** — handlers, browser, SSE, reactive |
-| [[components/agent-system]] | `ai/agent_test` (35), `ai/agent/log_test` (9), `ai/claude_test` (22), `ai/gemini_test` (14), `ai/datalevin_test` (14), `ai_test` (27), `agent/env_test` (14), `orchestrator/session_test` (15) | **good** — extensive |
+| [[components/agent-system]] | `ai/agent_test` (35), `ai/agent/log_test` (9), `ai/claude_test` (22), `ai/gemini_test` (14), `ai_test` (27), `agent/env_test` (14), `orchestrator/session_test` (15) | **good** — extensive |
 | [[components/dev-tools]] | `dev/hook_test` (19), `dev/verify_test` (7), `dev/test_select_test` (6), `dev/context_test` (10), `dev/clojure_replace_test` (27), `dev/lint_test` (8), `dev/suggestions_test` (4), `dev/analysis_test` (6), `dev/codebase_test` (9), `dev/review_test` (10), `dev/compliance_test` (8), `dev/repair_test` (5), `dev/markdown_test` (24) | **good** — very thorough |
 
 ### Other Test Files (not mapped to components)
@@ -185,9 +185,9 @@ Source namespaces with **no corresponding test file**:
 | `seon.config` | Aero config loading — tested via `system/config_test` indirectly |
 | `seon.logging` | Timbre/logback setup — no tests |
 | `seon.schema` | Core schema registry — tested heavily via `db/schema_test` and `db/pipeline_test`, but no dedicated `schema_test.clj` at root level |
-| `seon.db.datalevin.conn` | Connection manager with per-DB locking — no dedicated tests (critical concurrency code) |
-| `seon.db.datalevin.server` | Datalevin server lifecycle — no tests |
-| `seon.db.datalevin.reader` | Flow reader process — no dedicated tests (covered indirectly by flow tests) |
+| `seon.db.datahike.conn-process` | Per-db conn-process — no dedicated tests (covered indirectly by db/pipeline tests) |
+| `seon.db.datahike.system` | Datahike Integrant component — no dedicated tests |
+| `seon.db.datahike.tx-bus` | Post-commit tx broadcast — no dedicated tests |
 | `seon.db.tx` | Transaction metadata — schema tested in pipeline_test, but no dedicated tx_test |
 | `seon.web.server` | HTTP server startup — no tests |
 | `seon.web.routes` | Route table — no dedicated tests |
@@ -215,7 +215,7 @@ Source namespaces with **no corresponding test file**:
 
 **Notable gaps**:
 
-- `seon.db.datalevin.conn` — the connection manager with per-DB locking is critical concurrency infrastructure with no dedicated tests
+- `seon.db.datahike.conn-process` — the per-db flow process is the read/write serializer; only covered indirectly via pipeline and integration tests
 - `seon.web.*` UI namespaces — the entire web view layer (components, logs, flows, agents, namespace views) has no unit tests
 - `seon.dev.instrumentation` — Malli instrumentation lifecycle is untested
 - `seon.flow.agent_runner` — agent JVM spawning logic only covered indirectly
@@ -230,4 +230,4 @@ Source namespaces with **no corresponding test file**:
 | `test/seon/test_utils.clj` | Shared fixtures, temp DB helpers |
 | `test/seon/db/pipeline_test.clj` | `assert-pipeline-roundtrip!` — the generative contract test |
 | `test/seon/db/validation_test.clj` | Malli validation gate in `db/transact!` |
-| `test/seon/db/schema_roundtrip_test.clj` | Malli->Datalevin type roundtrip properties |
+| `test/seon/db/schema_roundtrip_test.clj` | Malli->Datahike type roundtrip properties |

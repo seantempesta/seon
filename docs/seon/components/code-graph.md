@@ -5,11 +5,11 @@ tags: [component, schema]
 ---
 # Code Graph
 
-> Self-introspection engine that indexes function definitions, call edges, namespace dependencies, and schema specs into Datalevin for runtime discovery.
+> Self-introspection engine that indexes function definitions, call edges, namespace dependencies, and schema specs into Datahike for runtime discovery.
 
 ## Purpose
 
-The code graph is Seon's self-awareness layer. It statically analyzes the codebase, stores the results in Datalevin (via [[components/database]]), and exposes query APIs that other components use for discovery. The most important consumer is the [[components/renderer]] system, which uses `functions-with-output-key` to find render functions by their output spec keys — no registration needed, just write a function with the right `:malli/schema` metadata.
+The code graph is Seon's self-awareness layer. It statically analyzes the codebase, stores the results in Datahike (via [[components/database]]), and exposes query APIs that other components use for discovery. The most important consumer is the [[components/renderer]] system, which uses `functions-with-output-key` to find render functions by their output spec keys — no registration needed, just write a function with the right `:malli/schema` metadata.
 
 The graph also powers AI agent context building: given a seed function, `context.clj` walks the call graph, pulls related entities, topologically sorts them, and renders a compact text block for injection into agent prompts.
 
@@ -20,7 +20,7 @@ The graph also powers AI agent context building: given a seed function, `context
 | `seon.graph.analyzer` | `src/seon/graph/analyzer.clj` | clj-kondo wrapper for project/form analysis |
 | `seon.graph.extract` | `src/seon/graph/extract.clj` | Unified pipeline: edamame + clj-kondo, merge, spec-to-fn linking |
 | `seon.graph.scanner` | `src/seon/graph/scanner.clj` | Edamame-based `schema/register!` and `def` form extraction |
-| `seon.graph.ingest` | `src/seon/graph/ingest.clj` | Transacts entities into Datalevin with upsert + retract-stale |
+| `seon.graph.ingest` | `src/seon/graph/ingest.clj` | Transacts entities into Datahike with upsert + retract-stale |
 | `seon.graph.query` | `src/seon/graph/query.clj` | Datalog query API over the graph |
 | `seon.graph.context` | `src/seon/graph/context.clj` | Topological context builder for AI agents |
 
@@ -72,7 +72,7 @@ The graph also powers AI agent context building: given a seed function, `context
 ### Uses
 
 - [[components/database]] — All storage and queries go through `seon.db` (`db/transact!`, `db/query`, `db/pull-by-name`)
-- `seon.db.schema` — `db-schema/register-entity-schema!` and `db-schema/malli-map->datalevin-schema` for entity schema registration
+- `seon.db.schema` — `db-schema/register-entity-schema!` and `db-schema/malli-map->datahike-schema` for entity schema registration
 - [[components/schema-system]] — `schema/register!` for attribute type registration
 - [[components/renderer]] — `render/invalidate-render-cache!` called after every `ingest-namespace!`
 - clj-kondo — Static analysis engine for functions, calls, namespace dependencies
@@ -114,7 +114,7 @@ Source files (.clj)
               +- Retract stale (old entities not in new scan)
               +- Call edges + ns-deps: retract-then-insert (no identity attrs)
               +- Stub entities for external call targets
-              +-> Datalevin (:seon.runtime database)
+              +-> Datahike (:seon.runtime database)
 
 ```
 
@@ -151,7 +151,7 @@ Six entity types, all stored in the `:seon.runtime` database:
 | NS Dependency | (none — retract/insert) | `from-ns`, `to-ns`, `alias` |
 | Spec | `:seon.spec/key` | `namespace`, `definition`, `base-type`, `contains-keys` (vector), `optional-keys` (vector), `references` (vector) |
 
-Function-to-spec links use Datalevin refs (`:seon.fn/input-spec` and `:seon.fn/output-spec` point at `:seon.spec/key` entities via lookup refs at transact time).
+Function-to-spec links use Datahike refs (`:seon.fn/input-spec` and `:seon.fn/output-spec` point at `:seon.spec/key` entities via lookup refs at transact time).
 
 ## Design Decisions
 
@@ -161,7 +161,7 @@ clj-kondo is authoritative for functions, calls, and namespace dependencies (it 
 
 ### Upsert + Retract-Stale Pattern
 
-Entities with identity attrs (functions, specs, vars, namespaces) use Datalevin's upsert semantics — transacting an entity with the same identity key updates it. After upserting the new scan, `retract-stale-*` queries for entities in the namespace that weren't in the new scan and retracts them. This is safe for incomplete scans (only explicitly absent entities get removed).
+Entities with identity attrs (functions, specs, vars, namespaces) use Datahike's upsert semantics — transacting an entity with the same identity key updates it. After upserting the new scan, `retract-stale-*` queries for entities in the namespace that weren't in the new scan and retracts them. This is safe for incomplete scans (only explicitly absent entities get removed).
 
 Call edges and ns-deps lack identity attrs, so they use retract-then-insert: delete all existing edges from the namespace, then insert the new ones.
 
@@ -191,6 +191,6 @@ When function A calls function B but B hasn't been analyzed yet (external dep, o
 
 4. **Context module re-queries call graph** — `context.clj` and `query.clj` both implement call-graph lookups. `context.clj` has its own private `calls-of` and `callers-of-fn` helpers rather than using `gq/call-graph` and `gq/callers-of`. These could be consolidated.
 
-5. **Search is client-side filtering** — `search-functions` pulls ALL functions from Datalevin and filters in Clojure. For large codebases, this should use Datalevin's built-in search or at minimum a server-side filter.
+5. **Search is client-side filtering** — `search-functions` pulls ALL functions from Datahike and filters in Clojure. For large codebases, this should be replaced with a Datalog-side filter or an external index.
 
 6. **`::raw-analysis` is typed as `:map`** — The analyzer registers `::raw-analysis` as `[:map ...]` with no inner keys specified. This is effectively untyped — it carries the full clj-kondo analysis structure. Not easily fixable (clj-kondo's output shape is complex), but worth noting.

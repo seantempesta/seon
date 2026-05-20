@@ -12,7 +12,7 @@ tags: [component, flow]
 The runtime registry answers three questions for the entire system:
 
 1. **What's running?** — In-memory cache of all namespace instances with status, location, and identity.
-2. **What was running before a crash?** — Datalevin persistence allows `mark-crashed!` on startup to detect unclean shutdowns.
+2. **What was running before a crash?** — Datahike persistence allows `mark-crashed!` on startup to detect unclean shutdowns.
 3. **Where is a namespace instance located?** — Tracks whether an instance is `:in-process` or `:external` (agent JVM), with session IDs and nREPL ports.
 
 Beyond instance tracking, this namespace owns ID generation, agent run lifecycle recording, flow handle registration, and topology snapshotting.
@@ -31,13 +31,13 @@ This is a single-file component — everything lives in `seon.runtime`. It is on
 
 | Function | Schema | Description |
 |----------|--------|-------------|
-| `register!` | `::register-request => ::instance-response` | Register a namespace instance (cache + Datalevin upsert) |
+| `register!` | `::register-request => ::instance-response` | Register a namespace instance (cache + Datahike upsert) |
 | `unregister!` | `::unregister-request => ::unregister-response` | Set status to `:stopped` with timestamp; returns nil if namespace not found (`::unregister-response` is `[:maybe ::instance-response]`) |
 | `instance` | `::instance-request => [:maybe ::instance-response]` | Look up one instance by namespace string |
 | `instances` | `::instances-request => ::instances-response` | List all registered instances |
 | `running-sessions` | `::running-sessions-request => ::running-sessions-response` | All external + running instances (agent sessions) |
 | `mark-crashed!` | `::mark-crashed-request => ::mark-crashed-response` | On startup: mark all previously-running as `:crashed` |
-| `hydrate-cache!` | `::hydrate-cache-request => ::hydrate-cache-response` | Load Datalevin state into in-memory cache |
+| `hydrate-cache!` | `::hydrate-cache-request => ::hydrate-cache-response` | Load Datahike state into in-memory cache |
 | `cleanup-stale!` | `::cleanup-stale-request => ::cleanup-stale-response` | Retract legacy entities missing required fields |
 
 ### ID Generation
@@ -72,7 +72,7 @@ Flow objects are opaque and not serializable, so this registry is purely in-memo
 
 | Function | Schema | Description |
 |----------|--------|-------------|
-| `snapshot-topology!` | `::snapshot-request => ::snapshot-response` | Capture paused flow state via `flow/ping`, persist as `pr-str` to Datalevin |
+| `snapshot-topology!` | `::snapshot-request => ::snapshot-response` | Capture paused flow state via `flow/ping`, persist as `pr-str` to Datahike |
 | `latest-snapshot` | (no `:malli/schema` metadata; `::latest-snapshot-request` schema registered) | Get most recent snapshot for a flow label; takes `{::label ...}` map |
 
 ### Testing Helpers
@@ -83,12 +83,12 @@ Flow objects are opaque and not serializable, so this registry is purely in-memo
 
 ### Schema: `runtime-merged-schema`
 
-The function `runtime-merged-schema` lazily merges four Datalevin schemas into one:
+The function `runtime-merged-schema` lazily merges four Datahike schemas into one:
 
 - `runtime-schema` (runtime instances + agent runs + flow snapshots)
-- `seon.graph.ingest/datalevin-schema` (code graph)
-- `seon.ctx/datalevin-schema` (context instances)
-- `seon.flow.trace/datalevin-schema` (flow traces)
+- `seon.graph.ingest/datahike-schema` (code graph)
+- `seon.ctx/datahike-schema` (context instances)
+- `seon.flow.trace/datahike-schema` (flow traces)
 
 This merged schema is what the `:seon.runtime` database connection uses. It is cached after first computation.
 
@@ -98,7 +98,7 @@ This merged schema is what the `:seon.runtime` database connection uses. It is c
 
 - [[components/database]] — `db/transact!`, `db/query` against `:seon.runtime`
 - [[components/schema-system]] — `schema/register!` for all attribute and request/response schemas
-- `seon.db.schema` — `register-entity-schema!`, `malli-map->datalevin-schema`
+- `seon.db.schema` — `register-entity-schema!`, `malli-map->datahike-schema`
 - `clojure.core.async.flow` — `flow/ping` for topology snapshots
 
 ### Used By (almost everything)
@@ -122,11 +122,11 @@ mark-crashed!() ---> db/query :seon.runtime (find :running) ---> db/transact! (s
 hydrate-cache!() ---> cleanup-stale!() ---> db/query :seon.runtime ---> reset! registry-cache
 
 register-flow!() --+---> flow-handles atom (in-memory only, flow objects not serializable)
-                   +---> register!() (Datalevin persistence of flow-as-namespace-instance)
+                   +---> register!() (Datahike persistence of flow-as-namespace-instance)
 
 ```
 
-### Entity Schemas (3 Datalevin entity types)
+### Entity Schemas (3 Datahike entity types)
 
 | Entity | Identity Attr | Key Fields |
 |--------|--------------|------------|
@@ -136,7 +136,7 @@ register-flow!() --+---> flow-handles atom (in-memory only, flow objects not ser
 
 ## Design Decisions
 
-1. **Dual storage (cache + Datalevin)**: The in-memory `registry-cache` atom provides fast reads. Datalevin provides crash recovery. Writes go to both — async in production (via `future`), synchronous in `*direct-mode*` (tests and Integrant init).
+1. **Dual storage (cache + Datahike)**: The in-memory `registry-cache` atom provides fast reads. Datahike provides crash recovery. Writes go to both — async in production (via `future`), synchronous in `*direct-mode*` (tests and Integrant init).
 
 2. **Base62 IDs over UUIDs**: 6-char base62 (`a1Bx9z`) is human-readable in logs, session names, and UI. Collision-checked against in-memory set. The set resets on reload (negligible risk for 6-char space).
 
@@ -152,6 +152,6 @@ register-flow!() --+---> flow-handles atom (in-memory only, flow objects not ser
 
 2. **`latest-snapshot` lacks `:malli/schema`**: Unlike every other public function, `latest-snapshot` has no schema metadata. Should be instrumented.
 
-3. **`datalevin->cache` key mapping is manual**: The translation between `:seon.runtime/*` and `::runtime/*` keys is a hand-maintained map. A more systematic approach (e.g., a shared key registry) could reduce drift risk.
+3. **`datahike->cache` key mapping is manual**: The translation between `:seon.runtime/*` and `::runtime/*` keys is a hand-maintained map. A more systematic approach (e.g., a shared key registry) could reduce drift risk.
 
 4. **Agent run entity schema duplication**: `agent-run-entity-schema` and `::agent-run-entity` define similar shapes in different formats. Could be unified.

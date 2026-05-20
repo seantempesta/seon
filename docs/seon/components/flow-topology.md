@@ -25,12 +25,12 @@ Both flows use the same reply-router pattern: caller registers a promise, inject
 | `seon.flow.topology` | `src/seon/flow/topology.clj` | Infrastructure flow, namespace flow, `request!`, reply-router, cycle detection |
 | `seon.flow.msg` | `src/seon/flow/msg.clj` | Message envelope schemas (request, reply, event) -- wire protocol |
 | `seon.flow.status` | `src/seon/flow/status.clj` | Runtime status collection, throughput calculation, error drain |
-| `seon.flow.trace` | `src/seon/flow/trace.clj` | Persist flow events to Datalevin for Observatory UI |
+| `seon.flow.trace` | `src/seon/flow/trace.clj` | Persist flow events to Datahike (`:seon.flow` db) for Observatory UI |
 | `seon.flow.pool` | `src/seon/flow/pool.clj` | Pre-warmed JVM pool -- spawn, acquire, release, health check agent JVMs |
 | `seon.flow.harness` | `src/seon/flow/harness.clj` | Per-namespace step-fn that routes requests to agent JVMs via TCP |
 | `seon.flow.harness.channel` | `src/seon/flow/harness/channel.clj` | TCP channel management for harness-to-agent communication |
 | `seon.flow.harness.proxy` | `src/seon/flow/harness/proxy.clj` | Proxy namespace generation for transparent cross-namespace calls on agent JVMs |
-| `seon.flow.agent-runner` | `src/seon/flow/agent_runner.clj` | Agent JVM entry point — starts nREPL server, optionally connects to Datalevin |
+| `seon.flow.agent-runner` | `src/seon/flow/agent_runner.clj` | Agent JVM entry point — starts nREPL server (M-1: removed the legacy `--datalevin-uri` flag; agents no longer dial a separate database process) |
 
 ## Public API Surface
 
@@ -61,7 +61,7 @@ No functions -- pure schema definitions. Registers schemas for `::request`, `::r
 
 | Function | Purpose |
 |----------|---------|
-| `persist-event!` | Fire-and-forget write of a flow event to Datalevin (`:seon.flow` db). |
+| `persist-event!` | Fire-and-forget write of a flow event to Datahike (`:seon.flow` db). |
 | `events-for-session` | Query trace events for an agent session, newest first. |
 
 ### pool (JVM management)
@@ -85,7 +85,7 @@ No functions -- pure schema definitions. Registers schemas for `::request`, `::r
 
 - `clojure.core.async.flow` -- flow creation, process definition, inject, ping, start/stop/pause/resume
 - `clojure.core.async` -- go-loops for cross-ns relay and error drains
-- [[components/database]] (`seon.db`, `seon.db.datalevin.writer`, `seon.db.datalevin.reader`) -- writer and reader step-fns
+- [[components/database]] (`seon.db`, `seon.db.datahike.conn-process`) -- per-db conn-process step-fns serialize reads/writes against the embedded Datahike store
 - [[components/schema-system]] (`seon.schema`) -- schema registration
 - `seon.runtime` -- flow registry (register/unregister/list/get flows), topology snapshots
 - `nrepl.core` -- communication with agent JVMs
@@ -193,7 +193,7 @@ Wire format is length-prefixed Nippy (`fast-freeze`/`fast-thaw`) for inter-JVM T
 - **Promise cleanup on shutdown**: Both `stop-topology!` and `before-ns-unload` deliver timeout errors to all pending promises, preventing caller threads from blocking forever.
 - **LinkedBlockingQueue for pool**: Natural thread-safety -- `poll` prevents two threads from grabbing the same JVM. `take` provides blocking semantics for `acquire!!`.
 - **Auto-replenishment**: Every `acquire!` triggers background `replenish-pool!` to maintain target idle count. Rate-limited to 6 respawns/minute to prevent port exhaustion.
-- **Grace period for health checks**: New JVMs get 60s before health checks start, allowing post-ready setup (Datalevin connect, namespace loading) to complete.
+- **Grace period for health checks**: New JVMs get 60s before health checks start, allowing post-ready setup (namespace loading and instrumentation) to complete.
 - **Stale process cleanup on pool creation**: Scans full port range 7900-7999, kills any bound processes via `lsof` + `kill -9`. Prevents port conflicts from previous crashes.
 
 ## Channel Buffer Configuration

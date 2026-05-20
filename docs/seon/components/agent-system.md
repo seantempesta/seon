@@ -9,7 +9,7 @@ tags: [component, agent]
 
 ## Purpose
 
-The agent system manages the full lifecycle of AI agents: spawning isolated JVM processes with nREPL, routing prompts through the Claude Code CLI, persisting every conversation message to Datalevin, and providing real-time observability through the Observatory UI. It is designed to be provider-agnostic at the multimethod layer, with Claude as the primary (and currently only active) provider.
+The agent system manages the full lifecycle of AI agents: spawning isolated JVM processes with nREPL, routing prompts through the Claude Code CLI, persisting every conversation message to the `:seon.ai` Datahike store, and providing real-time observability through the Observatory UI. It is designed to be provider-agnostic at the multimethod layer, with Claude as the primary (and currently only active) provider.
 
 ## Namespaces
 
@@ -20,12 +20,12 @@ The agent system manages the full lifecycle of AI agents: spawning isolated JVM 
 | `seon.ai.claude` | `src/seon/ai/claude.clj` | Claude provider: `launch-agent!` / `launch-agent!!`, multimethod implementations, SDK message-to-entity conversion, file context reading, message processing loop |
 | `seon.ai.claude.sdk` | `src/seon/ai/claude/sdk.clj` | Low-level CLI process management: `spawn-claude-code`, `build-args`, `build-env`, `write-message!`, `parse-line`, `make-user-message` |
 | `seon.ai.gemini` | `src/seon/ai/gemini.clj` | Gemini provider: `ask`, `search`, `calculate`, `review-code` — synchronous HTTP API, not an agent provider (used for code review in dev hook and REPL queries) |
-| `seon.ai.datalevin` | `src/seon/ai/datalevin.clj` | Datalevin storage: fire-and-forget writes for sessions/messages, Datalog queries for Observatory, entity conversion, session stats aggregation |
+| (session persistence) | (consolidated into `seon.ai.claude`) | Session/message writes go through `seon.db/transact!` to `:seon.ai`. The legacy `seon.ai.datalevin` storage layer was removed during the Datahike migration; remaining call sites are tracked as `FIXME(M-3)` in `seon.ai.claude` |
 | `seon.ai.agent.log` | `src/seon/ai/agent/log.clj` | Per-agent structured logging to `logs/agents/{session-id}.log` — LAUNCH, MESSAGE, TOOL, RESULT, HOOK, COMPLETE, ERROR events |
 | `seon.ai.agent.views` | `src/seon/ai/agent/views.clj` | Multimethod view renderers for agent data types: summary rows, detail pages, tool-specific log line rendering with 3-tier display (inline/hover/expanded) |
 | `seon.orchestrator.session` | `src/seon/orchestrator/session.clj` | High-level session abstraction: `start-agent-session!` (ctx + pool JVM + nREPL), `stop-agent-session!`, activity tracking, session recovery on restart |
 | `seon.agent.env` | `src/seon/agent/env.clj` | Agent environment toolkit: graph search wrappers, schema discovery (`related-schemas`, `who-produces`, `who-consumes`), context persistence (`ctx-save!`, `ctx-load`) |
-| `seon.agent.helpers` | `src/seon/agent/helpers.clj` | Agent SQL helpers with `*ctx*` binding — currently all throw "not yet migrated to Datalevin" |
+| `seon.agent.helpers` | `src/seon/agent/helpers.clj` | Agent SQL helpers with `*ctx*` binding — currently all throw "not yet migrated"; deprecated, slated for removal |
 
 ## Public API Surface
 
@@ -45,7 +45,7 @@ The agent system manages the full lifecycle of AI agents: spawning isolated JVM 
 
 **Session management** (`seon.ai`):
 
-- `start-session!` / `end-session!` — AI conversation session lifecycle in Datalevin
+- `start-session!` / `end-session!` — AI conversation session lifecycle in the `:seon.ai` Datahike store
 - `add-message!` — persist a message to a session
 - `get-session` / `get-messages` / `list-sessions` / `session-stats` — query stored data
 
@@ -71,7 +71,7 @@ The agent system manages the full lifecycle of AI agents: spawning isolated JVM 
 - Claude Code CLI — spawned as child process via `clojure.java.process`, stream-json I/O
 - core.async — message channels, mult for broadcasting, result channels
 - Integrant — session initialization wired through system map
-- [[components/database]] — session and message persistence via `seon.ai.datalevin`
+- [[components/database]] — session and message persistence via `seon.db/transact!` to `:seon.ai`
 - [[components/schema-system]] — schema registration for all entities
 - [[components/context]] — persisted ctx atoms for agent state
 - [[components/flow-topology]] — pool of pre-warmed JVM processes with nREPL
@@ -96,14 +96,14 @@ The agent system manages the full lifecycle of AI agents: spawning isolated JVM 
    - Creates persisted ctx atom via `seon.ctx/create!`
    - Claims a pool JVM via `seon.flow.pool/claim!` (gets nREPL port)
    - Registers in runtime registry
-3. Starts AI session in Datalevin via `ai/start-session!`
+3. Starts AI session in the `:seon.ai` Datahike store via `ai/start-session!`
 4. Reads file context (if `::files` provided) and builds prompt with AGENT.md instructions
 5. Builds MCP config pointing at the agent's nREPL port
 6. Spawns Claude Code CLI process via `sdk/spawn-claude-code`
 7. Sends initial user message via `sdk/write-message!`
 8. Starts virtual thread to read stdout lines, parse JSON, and:
    - Normalize each message via `agent/normalize-message` multimethod
-   - Persist to Datalevin via `ai/add-message!`
+   - Persist to the `:seon.ai` store via `ai/add-message!`
    - Log to `logs/agents/{id}.log` via `agent-log/log-sdk-message!`
    - Put on messages channel (for `tail`)
    - Check for result via `agent/result-message?`
@@ -114,7 +114,7 @@ The agent system manages the full lifecycle of AI agents: spawning isolated JVM 
 
 ```
 Claude CLI stdout -> parse-line (JSON) -> normalize-message (multimethod)
-  -> add-message! (Datalevin)
+  -> add-message! (:seon.ai Datahike store)
   -> log-sdk-message! (file log)
   -> messages-ch (core.async)
   -> result-message? -> if true: parse-result, end-session!, put result-ch
@@ -135,9 +135,9 @@ All multimethods dispatch on `:provider` key:
 
 **Isolated JVM processes**: Each agent runs in its own JVM from the pool (`seon.flow.pool`), with its own nREPL server. This provides complete isolation — agents cannot corrupt each other's state, and a crashed agent doesn't affect the orchestrator.
 
-**Fire-and-forget persistence**: `seon.ai.datalevin` writes are best-effort — errors are logged but never propagated. This prevents a Datalevin hiccup from killing a running agent. Stats are tracked via `stats-atom` for monitoring.
+**Fire-and-forget persistence**: Session and message writes are best-effort — errors are logged but never propagated. This prevents a database hiccup from killing a running agent. Stats are tracked via `stats-atom` for monitoring.
 
-**Dual ID system**: Each agent has both a 6-char Base62 "Seon session ID" (used for log files, MCP routing, display) and a longer "AI session ID" (ses-xxx, used for Datalevin entity references). The mapping is stored in the session entity.
+**Dual ID system**: Each agent has both a 6-char Base62 "Seon session ID" (used for log files, MCP routing, display) and a longer "AI session ID" (ses-xxx, used as the database entity identity). The mapping is stored in the session entity.
 
 **File context in prompt**: The `::files` option reads files at launch time and embeds their content directly in the agent's prompt. This is simpler than having agents discover files themselves and ensures they start with the right context.
 
@@ -153,15 +153,15 @@ All multimethods dispatch on `:provider` key:
 
 **Gemini as utility, not agent**: `seon.ai.gemini` provides synchronous HTTP calls for code review, web search, and calculations. It does not implement the agent multimethods — it's a tool, not an autonomous agent.
 
-**Monotonic sequence numbers**: Messages within the same millisecond are ordered by a global `msg-sequence` atom, ensuring deterministic ordering in Datalevin queries.
+**Monotonic sequence numbers**: Messages within the same millisecond are ordered by a global `msg-sequence` atom, ensuring deterministic ordering in Datalog queries.
 
 **nREPL middleware ordering**: Must use var references (`#'nrepl.middleware.session/session`) not strings in `:requires`/`:expects`. String references refer to operation names, not middleware vars. Using strings produces silent incorrect behavior, not an error.
 
 ## Refactoring Opportunities
 
-- **`seon.agent.helpers`** — SQL functions all throw "not yet migrated to Datalevin". This is dead code that should either be migrated to Datalevin query helpers or removed entirely
-- **`seon.ai.datalevin` dl-* functions** use positional args (internal pattern) but are de-facto public API consumed by `seon.web.agents` and `seon.ai.claude`. Migrating to map-in would break consumers but improve consistency
-- **`seon.ai.datalevin` entity conversion** manually handles nil filtering and Instant-to-Date coercion — this could be unified with the schema bridge
+- **`seon.agent.helpers`** — SQL functions all throw "not yet migrated". This is dead code that should either be ported to Datalog query helpers or removed entirely
+- **`FIXME(M-3)` reads in `seon.ai.claude`** — a handful of legacy session/message read sites still need to be ported onto `seon.db/query` against `:seon.ai`. Tracked in source as `FIXME(M-3)`
+- **Session/message entity conversion** manually handles nil filtering and `Instant`-to-`Date` coercion — this could be unified with the schema bridge
 - **`:any` in tool schemas** — `::tool-call` and `::tool-result` have `:any` for `:input` and `:content` fields. The wire protocol carries arbitrary data, but this violates the "no `:any`" rule
 - **`seon.ai.claude`** is ~1370 lines — `launch-agent!` alone is 300+ lines. The prompt building, MCP config, and message processing loop could each be extracted
 - **`seon.orchestrator.session`** uses `[:maybe ...]` in some schemas despite the project convention preferring `{:optional true}`

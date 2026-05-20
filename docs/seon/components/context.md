@@ -9,7 +9,7 @@ tags: [component, flow]
 
 ## Purpose
 
-The context system gives each namespace instance a managed stateful atom. When namespace code runs (e.g. a trading dashboard), it gets a ctx atom that automatically persists changes to Datalevin, pushes SSE updates to connected browsers, and validates state transitions via Malli. It replaced four prior state systems with a single unified API.
+The context system gives each namespace instance a managed stateful atom. When namespace code runs (e.g. a trading dashboard), it gets a ctx atom that automatically persists changes to Datahike, pushes SSE updates to connected browsers, and validates state transitions via Malli. It replaced four prior state systems with a single unified API.
 
 ## Namespaces
 
@@ -35,7 +35,7 @@ The context system gives each namespace instance a managed stateful atom. When n
 | `force-push!` | Manually trigger render + SSE push |
 | `set-render-fn!` | Update render function post-creation |
 | `instances-for-namespace` / `clients-for-namespace` / `client-count-for-namespace` | Namespace-level queries |
-| `persist!` / `load!` | Manual persistence to/from Datalevin |
+| `persist!` / `load!` | Manual persistence to/from Datahike |
 | `list-instances` | List all active instances |
 
 ### seon.ctx.history
@@ -53,7 +53,7 @@ The context system gives each namespace instance a managed stateful atom. When n
 
 - [[components/schema-system]] (`seon.schema`) -- schema registration, validation
 - [[components/database]] (`seon.db`) -- persistence via `transact!` and `query`
-- `seon.db.schema` -- entity schema registration and Malli-to-Datalevin bridge
+- `seon.db.schema` -- entity schema registration and Malli-to-Datahike bridge
 - `seon.runtime` -- ID generation
 - `org.httpkit.server` -- SSE channel management (soft dep via `requiring-resolve`)
 - `seon.web.sse` -- broadcast refresh (soft dep)
@@ -71,10 +71,10 @@ The context system gives each namespace instance a managed stateful atom. When n
 
 1. **Creation**: `seon.ns.lifecycle` calls `ctx/create!` with config (db-name, namespace, initial value, options). Returns an atom.
 2. **State changes**: Namespace code calls `ctx/update!` (or swaps the atom directly). Three watches fire:
-   - **Persistence watch** (`::persist`): Cancels any pending persist, schedules a new one via `ScheduledExecutorService` with configurable debounce (default 100ms). The scheduled task calls `do-persist!` which filters non-serializable values, serializes to EDN, and transacts to Datalevin.
+   - **Persistence watch** (`::persist`): Cancels any pending persist, schedules a new one via `ScheduledExecutorService` with configurable debounce (default 100ms). The scheduled task calls `do-persist!` which filters non-serializable values, serializes to EDN, and transacts to Datahike.
    - **SSE broadcast watch** (`::sse-push`): Calls `seon.web.sse/refresh-all!` to notify all connected browsers.
    - **Client-targeted watch** (`::client-push`): Calls the registered `render-fn` with current state, transforms hiccup via `seon.web.reactive.transform`, converts to HTML, formats as Datastar SSE `patch-elements` event, and pushes to each tracked client channel. Dead channels are cleaned up on failure.
-3. **Loading**: On instance creation, `load!` can restore persisted state from Datalevin via Datalog query.
+3. **Loading**: On instance creation, `load!` can restore persisted state from Datahike via Datalog query.
 4. **Destruction**: `destroy!` closes client channels, cancels pending persists, shuts down the scheduler, removes watches, and removes from registry.
 
 See [[components/planned-ctx-flow-first]] for the planned flow-first model that would replace these watches with flow outputs.
@@ -110,5 +110,5 @@ Before persisting, `filter-serializable` round-trips each value through `pr-str`
 - **`get-entry` exposes internals**: Returns the raw registry map. Consumers (`seon.ns.routes`) are coupled to `::atom`, `::render-fn`, `::clients`. A curated return map would decouple them (noted as P3 in source).
 - **`::initial-value` and `::render-fn` typed as `:any`**: These resist schema validation. `::render-fn` could be `[:=> [:cat :map] :any]` at minimum.
 - **No generative tests**: Most functions have `:malli/schema` metadata, making them candidates for property-based testing.
-- **EDN string persistence is opaque**: State stored as a single string means you can't query individual ctx fields in Datalevin. A structured entity per ctx key would enable richer queries.
+- **EDN string persistence is opaque**: State stored as a single string means you can't query individual ctx fields in Datahike. A structured entity per ctx key would enable richer queries.
 - **One ScheduledExecutorService per instance**: Could share a single pool across all instances to reduce thread count.

@@ -9,7 +9,7 @@ tags: [component, flow]
 
 ## Purpose
 
-Every namespace in Seon is browsable at `/ns/{namespace}`. Some namespaces are **dynamic** — they declare a `*ctx*` spec (detected by the scanner as `:seon.ns/dynamic? true`), which means they carry mutable state. This component manages the full lifecycle of those dynamic namespaces: creating validated ctx atoms, injecting dynamic vars (`*ctx*`, `*conn*`), discovering page renderers from the code graph, persisting state to Datalevin on shutdown, and restoring it on startup.
+Every namespace in Seon is browsable at `/ns/{namespace}`. Some namespaces are **dynamic** — they declare a `*ctx*` spec (detected by the scanner as `:seon.ns/dynamic? true`), which means they carry mutable state. This component manages the full lifecycle of those dynamic namespaces: creating validated ctx atoms, injecting dynamic vars (`*ctx*`, `*conn*`), discovering page renderers from the code graph, persisting state to Datahike on shutdown, and restoring it on startup.
 
 The routes layer (`seon.ns.routes`) is the HTTP-facing surface; this component is the machinery underneath.
 
@@ -28,14 +28,14 @@ The routes layer (`seon.ns.routes`) is the HTTP-facing surface; this component i
 
 | Function | Schema | Purpose |
 |----------|--------|---------|
-| `ensure-instance!` | `::ensure-instance-request -> ::ensure-instance-response` | Main entry point. Checks in-memory registry first, then Datalevin persistence, then creates fresh. Returns `{::instance-id, ::ctx-atom}` |
-| `dynamic-namespace?` | `::dynamic-namespace-request -> ::dynamic-namespace-response` | Query Datalevin for `:seon.ns/dynamic?` flag |
+| `ensure-instance!` | `::ensure-instance-request -> ::ensure-instance-response` | Main entry point. Checks in-memory registry first, then Datahike persistence, then creates fresh. Returns `{::instance-id, ::ctx-atom}` |
+| `dynamic-namespace?` | `::dynamic-namespace-request -> ::dynamic-namespace-response` | Query Datahike for `:seon.ns/dynamic?` flag |
 | `ctx-spec-key` | `::ctx-spec-key-request -> ::ctx-spec-key-response` | Convert ns symbol to `*ctx*` spec keyword (`'seon.health.workout` -> `:seon.health.workout/*ctx*`) |
 | `initial-value` | `::initial-value-request -> ::initial-value-response` | Get initial ctx: tries `ns/initial-state` fn, falls back to `mg/generate` from spec |
 | `find-page-render-fn` | `::find-page-render-fn-request -> ::find-page-render-fn-response` | Find page renderer via graph (functions with `:seon.render/html` output whose required-keys include `*ctx*`) |
 | `make-render-fn` | `::make-render-fn-request -> :any` | Wrap renderer: `(ctx-value) -> {ctx-key ctx-value} -> renderer -> :seon.render/html` |
 | `inject-vars!` | `::inject-vars-request -> :boolean` | Intern `*ctx*` and `*conn*` dynamic vars into namespace |
-| `backup-all-instances!` | `::backup-all-instances-request -> ::backup-all-instances-response` | Persist all ctx atoms to Datalevin (shutdown hook) |
+| `backup-all-instances!` | `::backup-all-instances-request -> ::backup-all-instances-response` | Persist all ctx atoms to Datahike (shutdown hook) |
 | `restore-instances!` | `::restore-instances-request -> ::restore-instances-response` | Restore persisted instances on startup, validating against current specs |
 
 ### introspect.clj — Runtime Discovery
@@ -94,7 +94,7 @@ The routes layer (`seon.ns.routes`) is the HTTP-facing surface; this component i
 
 2. Derive ctx-spec-key: 'seon.health.workout -> :seon.health.workout/*ctx*
 
-3. Check Datalevin persistence (resolve-instance)
+3. Check Datahike persistence (resolve-instance)
    -> If found, validate against current Malli spec
    -> If valid, use persisted data; if invalid, log warning and create fresh
 
@@ -110,7 +110,7 @@ The routes layer (`seon.ns.routes`) is the HTTP-facing surface; this component i
    - ::render-fn (if discovered)
    - ::ctx-schema (if spec registered)
 
-6. Inject vars: intern *ctx* (atom) and *conn* (Datalevin conn) into namespace
+6. Inject vars: intern *ctx* (atom) and *conn* (Datahike conn) into namespace
 
 7. Return {::instance-id, ::ctx-atom}
 
@@ -124,7 +124,7 @@ Request: GET /ns/seon.health.workout
 1. Parse namespace from path, detect format (html/ai/raw)
 2. Non-HTML fast path: render-for-format -> return immediately
 
-3. Check if dynamic namespace (query Datalevin for :seon.ns/dynamic?)
+3. Check if dynamic namespace (query Datahike for :seon.ns/dynamic?)
 
 4a. Dynamic, no ?instance param:
     -> ensure-instance! -> 302 redirect to ?instance=<id>
@@ -169,7 +169,7 @@ Two SSE modes based on namespace type:
 `inject-vars!` uses `intern` + `.setDynamic` to create proper dynamic vars:
 
 - `*ctx*` — the ctx atom (deref to get state, swap! to update)
-- `*conn*` — raw Datalevin connection (for namespace code that queries directly)
+- `*conn*` — raw Datahike connection (for namespace code that queries directly)
 
 These vars are accessible from within the namespace's functions without explicit passing.
 
@@ -180,7 +180,7 @@ Shutdown:
   backup-all-instances! -> iterate ctx/list-instances -> ctx/persist! each
 
 Startup:
-  restore-instances! -> query Datalevin for all persisted instances
+  restore-instances! -> query Datahike for all persisted instances
     -> validate each against current Malli spec
     -> ensure-instance! for valid ones (creates atom, injects vars)
     -> skip invalid ones with warning
@@ -189,7 +189,7 @@ Startup:
 
 ## Design Decisions
 
-1. **In-memory first.** `ensure-instance!` checks the in-memory atom registry before Datalevin. This prevents duplicate atoms when the same instance is requested multiple times (e.g., SSE reconnect).
+1. **In-memory first.** `ensure-instance!` checks the in-memory atom registry before Datahike. This prevents duplicate atoms when the same instance is requested multiple times (e.g., SSE reconnect).
 
 2. **Spec validation on restore.** Persisted state is validated against the current Malli spec. If the schema evolved since the state was saved, the old state is discarded rather than loaded with mismatched shape.
 
@@ -208,4 +208,4 @@ Startup:
 - **`resolve-and-call` discards return value** in POST handler — only GET handler returns the function result to the client.
 - **Multiple `:any` schemas in lifecycle.clj** — `::ctx-atom`, `::render-fn`, `::data` are all registered as `:any`, which violates the no-`:any` convention. These are difficult to type precisely (atoms, function vars, arbitrary maps) but could use more specific shapes.
 - **`[:maybe ::render-fn]`** in `find-page-render-fn-response` — project convention prefers `{:optional true}` over `[:maybe ...]`.
-- **view.clj and render.clj overlap** — both render values in multiple formats. view.clj uses multimethods (`render*`), render.clj uses Datalevin resolution. A unified dispatch path would reduce confusion about which to use when.
+- **view.clj and render.clj overlap** — both render values in multiple formats. view.clj uses multimethods (`render*`), render.clj uses graph-driven resolution against Datahike. A unified dispatch path would reduce confusion about which to use when.
