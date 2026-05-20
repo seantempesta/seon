@@ -5,10 +5,7 @@
   moderate memory footprint (512MB max heap).
 
   Cross-JVM data access goes through the flow harness (relay request/reply);
-  agents no longer auto-connect to a Datalevin server. Chunk M-1 (2026-05-15)
-  removed the --datalevin-uri CLI flag and the try-connect-datalevin helper
-  that conn'd to a Datalevin server at boot — both were always-nil dead paths
-  in the current pool config.
+  agents do not connect to the database directly.
 
   Malli instrumentation is NOT started here -- it is deferred to claim time
   when the pool assigns the JVM to a session (see pool.clj:claim!).

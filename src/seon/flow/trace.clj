@@ -2,7 +2,7 @@
   "Flow event tracing and persistence.
 
    Persists flow events (request forwarding, replies, errors, overloads)
-   to Datalevin for querying in Observatory. Provides query functions
+   to Datahike for querying in Observatory. Provides query functions
    for the agent detail view.
 
    Events are stored with:
@@ -58,12 +58,12 @@
                   [:keyword {:description "Entity type tag for flow events"}])
 
 ;;; ---------------------------------------------------------------------------
-;;; Entity Schema & Datalevin Schema
+;;; Entity Schema
 ;;; ---------------------------------------------------------------------------
 
 (def entity-schema
   "Malli schema for flow trace entities. Single source of truth.
-   Bridge derives all Datalevin types — no manual :db/valueType needed."
+   Bridge derives all Datahike types — no manual :db/valueType needed."
   [:map
    [::trace-id :uuid]
    [::session-id {:optional true} [:string {:min 1}]]
@@ -83,7 +83,7 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn persist-event!
-  "Persist a flow event to Datalevin. Fire-and-forget: errors logged but not thrown.
+  "Persist a flow event to Datahike. Fire-and-forget: errors logged but not thrown.
 
    Request keys:
      ::trace-id     - Required. Correlation UUID

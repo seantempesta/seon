@@ -22,10 +22,10 @@
 
    ## Integrant Component
 
-   Register as `:seon.flow/pool` in system.edn. Pool agents no longer
-   auto-connect to a Datalevin server (chunk M-1, 2026-05-15: --datalevin-uri
-   plumbing removed). Cross-JVM data access goes through the flow harness.
-   Supports `suspend-key!`/`resume-key` to keep pool alive during `(reset)`.
+   Register as `:seon.flow/pool` in system.edn. Pool agents do not connect
+   to the database directly; cross-JVM data access goes through the flow
+   harness. Supports `suspend-key!`/`resume-key` to keep pool alive during
+   `(reset)`.
 
    Usage:
      (def pool (create-pool! {::size 3 ::base-port 7900}))
@@ -71,7 +71,7 @@
 (def ^:const agent-port-max 7999)
 (def ^:const grace-period-ms
   "Don't health-check a JVM within this many ms of AGENT_READY.
-   Allows post-ready setup (Datalevin connect, namespace loading) to complete." 60000)
+   Allows post-ready setup (namespace loading, etc.) to complete." 60000)
 (def ^:const max-respawns-per-minute
   "Rate limit: max respawns across all slots per minute.
    Prevents port exhaustion from crash loops." 6)
@@ -145,10 +145,8 @@
   "Spawn an agent JVM on the given port. Blocks until AGENT_READY signal
    or timeout. Returns {::port ::pid ::process ...} or throws.
 
-   Chunk M-1 (2026-05-15) removed the optional `:datalevin-uri` kwarg and the
-   `--datalevin-uri` CLI flag passed to the agent process — agent JVMs no
-   longer auto-connect to a Datalevin server. Cross-JVM data access goes
-   through the flow harness.
+   Agent JVMs do not connect to the database directly; cross-JVM data
+   access goes through the flow harness.
 
    Starts both stdout and stderr reader threads. Stderr is logged at WARN
    level so crash reasons are visible."
@@ -884,7 +882,6 @@
 (comment
   ;; Create a pool of 2 warm JVMs
   (def pool (create-pool! {::size 2 ::base-port 7900}))
-  ;; ::datalevin-port option deleted in chunk M-1 (2026-05-15).
 
   ;; Check status
   (pool-status pool)

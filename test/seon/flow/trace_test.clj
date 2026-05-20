@@ -1,6 +1,5 @@
 (ns seon.flow.trace-test
-  "Tests for flow event tracing + persistence. Ported in M-2b from the
-   legacy datalevin shape to the canonical datahike `:memory` fixture.
+  "Tests for flow event tracing + persistence.
 
    `seon.flow.trace/persist-event!` writes to `:seon.flow` (which is in
    `:seon.db/flow` on the running system); the fixture stands up an

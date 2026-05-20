@@ -598,7 +598,7 @@
    The infrastructure flow handles cross-cutting concerns that are shared
    across all namespace flows: REPL eval, status collection, and reply
    routing. Database writes are owned by the per-namespace conn-processes
-   in `:seon.db/flow` since the datalevin substrate was removed in M-2.
+   in `:seon.db/flow`.
 
    Processes:
      :seon.flow/repl          - repl-step (nREPL eval via pool)
