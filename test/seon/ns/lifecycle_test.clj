@@ -89,11 +89,10 @@
 ;;; initial-value tests
 ;;; ---------------------------------------------------------------------------
 
-(deftest initial-value-calls-namespace-fn-test
-  (testing "calls initial-state fn when present"
-    (let [result (lifecycle/initial-value {::lifecycle/ns-sym 'seon.health.workout})]
-      (is (map? (::lifecycle/data result)))
-      (is (vector? (:seon.health.workout/workouts (::lifecycle/data result)))))))
+;; M-2c: initial-value-calls-namespace-fn-test removed when the
+;; seon.health.workout demo namespace was deleted. Restore once a
+;; substrate-internal fixture namespace exposes an `initial-state` fn
+;; and a registered `*ctx*` schema for testing.
 
 (deftest initial-value-returns-nil-for-unknown-ns-test
   (testing "returns nil data for namespace without initial-state or spec"
@@ -119,22 +118,11 @@
       (.setDynamic v true))
     true))
 
-(deftest ensure-instance-creates-fresh-test
-  (testing "creates fresh instance with schema validation"
-    (with-redefs [lifecycle/inject-vars! stub-inject-vars!]
-      (let [result (lifecycle/ensure-instance! {::lifecycle/ns-sym 'seon.health.workout})]
-        (is (string? (::lifecycle/instance-id result)))
-        (is (some? (::lifecycle/ctx-atom result)))
-        (let [ctx-val @(::lifecycle/ctx-atom result)]
-          (is (vector? (:seon.health.workout/workouts ctx-val))))))))
-
-(deftest ensure-instance-validates-state-test
-  (testing "ctx-schema rejects invalid swap! (wrong type for required key)"
-    (with-redefs [lifecycle/inject-vars! stub-inject-vars!]
-      (let [result (lifecycle/ensure-instance! {::lifecycle/ns-sym 'seon.health.workout})
-            ctx-atom (::lifecycle/ctx-atom result)]
-        (is (thrown? clojure.lang.ExceptionInfo
-                     (swap! ctx-atom assoc :seon.health.workout/workouts "not-a-vector")))))))
+;; M-2c: ensure-instance-creates-fresh-test and ensure-instance-validates-state-test
+;; removed when the seon.health.workout demo namespace was deleted. Both depend on
+;; a real loadable namespace with an `initial-state` fn and a registered ctx schema
+;; whose required keys are typed (so a wrong-type swap! throws). Restore once a
+;; substrate-internal fixture namespace fills that role.
 
 (deftest ensure-instance-with-explicit-id-test
   (testing "uses provided instance-id when no existing instance"

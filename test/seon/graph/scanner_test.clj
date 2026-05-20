@@ -149,16 +149,6 @@
         ;; All vars should have updated-at
         (is (every? #(inst? (:seon.var/updated-at %)) vars))))))
 
-(deftest scan-workout-finds-def-vars-test
-  (testing "scanning workout.clj finds def vars like workouts"
-    (let [results (scanner/scan-file {::scanner/file-path "src/seon/health/workout.clj"})
-          vars (filter :seon.var/qualified-name results)
-          workouts-var (first (filter #(= "workouts" (:seon.var/name %)) vars))]
-      (is (some? workouts-var) "Should find workouts def var")
-      (is (= "seon.health.workout/workouts"
-             (:seon.var/qualified-name workouts-var)))
-      (is (= :vector (:seon.var/value-type workouts-var))))))
-
 (deftest extract-optional-keys-test
   (testing "extracts optional qualified keys from :map schemas"
     (is (= [:seon.foo/bar]
