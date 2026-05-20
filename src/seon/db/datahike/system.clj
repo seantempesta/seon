@@ -31,6 +31,21 @@
                    [:namespace-schemas {:optional true} ::dh-flow/namespace-schemas]])
 
 ;;; ---------------------------------------------------------------------------
+;;; Live Flow Reference
+;;; ---------------------------------------------------------------------------
+;;; Holds the in-progress flow-state during integrant init/halt so consumers
+;;; that fire mid-boot (e.g. `:seon.flow/infrastructure` calling
+;;; `runtime/register-flow!` -> `db/transact! :seon.runtime`) can resolve the
+;;; flow before `integrant.repl.state/system` is populated (that var is only
+;;; set by `core/start-app` AFTER `ig/init`/`ig/resume` completes — too late
+;;; for components initialised in the same call). `seon.db/get-datahike-flow`
+;;; reads this atom as a fallback when `state/system` returns nil.
+
+(defonce ^{:doc "Current running datahike flow-state, or nil if halted."}
+  current-flow
+  (atom nil))
+
+;;; ---------------------------------------------------------------------------
 ;;; Integrant key
 ;;; ---------------------------------------------------------------------------
 
@@ -38,15 +53,18 @@
   [_ {:keys [namespaces backend data-root namespace-schemas]}]
   (log/info "Starting datahike flow"
             {:namespaces namespaces :backend backend})
-  (dh-flow/build-datahike-flow!
-   (cond-> {::dh-flow/namespaces (vec namespaces)
-            ::dh-flow/backend backend}
-     data-root         (assoc ::dh-flow/data-root data-root)
-     namespace-schemas (assoc ::dh-flow/namespace-schemas namespace-schemas))))
+  (let [state (dh-flow/build-datahike-flow!
+               (cond-> {::dh-flow/namespaces (vec namespaces)
+                        ::dh-flow/backend backend}
+                 data-root         (assoc ::dh-flow/data-root data-root)
+                 namespace-schemas (assoc ::dh-flow/namespace-schemas namespace-schemas)))]
+    (reset! current-flow state)
+    state))
 
 (defmethod ig/halt-key! :seon.db/flow
   [_ state]
   (log/info "Stopping datahike flow")
+  (reset! current-flow nil)
   (dh-flow/stop-datahike-flow! state))
 
 ;; Flow objects are not reusable across restarts (channels bound at start),

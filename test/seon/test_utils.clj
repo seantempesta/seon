@@ -14,12 +14,7 @@
     re-deriving the dependency order inline in each test.
   - Time helpers for test data.
 
-  Design doc: `docs/prds/datahike-migration/test-fixture-design.md`.
-
-  The legacy datalevin helpers `with-temp-conn` and `with-test-datalevin`
-  (plus `with-small-db-size`, `*init-db-size*` rebinding) were deleted in
-  chunk M-2 along with the datalevin dep. Tests that needed a raw conn
-  for the deleted substrate are gone or ported to the datahike fixture."
+  Design doc: `docs/prds/datahike-migration/test-fixture-design.md`."
   (:require [clojure.test :refer [is]]
             [seon.db :as db]
             [seon.db.datahike.flow :as dh-flow]

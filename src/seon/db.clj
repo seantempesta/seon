@@ -179,10 +179,18 @@
 
    Resolution order:
      1. `*datahike-flow*` dynamic var (tests)
-     2. `:seon.db/flow` key in `integrant.repl.state/system`
+     2. `seon.db.datahike.system/current-flow` atom (set by `:seon.db/flow`
+        init-key the moment the flow finishes building — visible to components
+        that boot in the same `ig/init` pass, before `integrant.repl.state/system`
+        has been populated)
+     3. `:seon.db/flow` key in `integrant.repl.state/system` (post-boot fallback)
    Tolerates the system not being up — returns nil rather than throwing."
   []
   (or *datahike-flow*
+      (try
+        (when-let [a (requiring-resolve 'seon.db.datahike.system/current-flow)]
+          (deref @a))
+        (catch Exception _ nil))
       (try
         (let [sys (deref (requiring-resolve 'integrant.repl.state/system))]
           (get sys :seon.db/flow))

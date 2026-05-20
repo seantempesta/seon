@@ -18,7 +18,6 @@
           state (atom {::pool/all-jvms {}
                        ::pool/target-size 3
                        ::pool/next-port 7900
-                       ::pool/datalevin-port nil
                        ::pool/shutdown? false})
           pool {::pool/state state
                 ::pool/idle-queue idle-queue
@@ -40,7 +39,6 @@
           state (atom {::pool/all-jvms {7900 jvm-idle 7901 jvm-active}
                        ::pool/target-size 2
                        ::pool/next-port 7902
-                       ::pool/datalevin-port nil
                        ::pool/shutdown? false})
           pool {::pool/state state
                 ::pool/idle-queue idle-queue
@@ -56,7 +54,6 @@
           state (atom {::pool/all-jvms {}
                        ::pool/target-size 1
                        ::pool/next-port 7950
-                       ::pool/datalevin-port nil
                        ::pool/shutdown? false})
           pool {::pool/state state
                 ::pool/idle-queue idle-queue
@@ -73,7 +70,6 @@
           state (atom {::pool/all-jvms {7900 jvm}
                        ::pool/target-size 1
                        ::pool/next-port 7901
-                       ::pool/datalevin-port nil
                        ::pool/shutdown? false})
           pool {::pool/state state
                 ::pool/idle-queue idle-queue
@@ -82,19 +78,6 @@
       (is (true? (::pool/shutdown? @state)))
       (is (= {} (::pool/all-jvms @state)))
       (is (= 0 (.size idle-queue))))))
-
-(deftest datalevin-uri-construction-test
-  (testing "Pool passes datalevin-port through to state"
-    (let [idle-queue (LinkedBlockingQueue.)
-          state (atom {::pool/all-jvms {}
-                       ::pool/target-size 1
-                       ::pool/next-port 7900
-                       ::pool/datalevin-port 8898
-                       ::pool/shutdown? false})
-          pool {::pool/state state
-                ::pool/idle-queue idle-queue
-                ::pool/scheduler nil}]
-      (is (= 8898 (::pool/datalevin-port @(::pool/state pool)))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Phase 1b: Production hardening unit tests
@@ -106,7 +89,6 @@
           state (atom {::pool/all-jvms {}
                        ::pool/target-size 2
                        ::pool/next-port 7900
-                       ::pool/datalevin-port nil
                        ::pool/shutdown? false
                        ::pool/warming? true})
           pool {::pool/state state
@@ -122,7 +104,6 @@
           state (atom {::pool/all-jvms {}
                        ::pool/target-size 2
                        ::pool/next-port 7900
-                       ::pool/datalevin-port nil
                        ::pool/shutdown? false
                        ::pool/warming? false})
           pool {::pool/state state
@@ -139,7 +120,6 @@
           state (atom {::pool/all-jvms {}
                        ::pool/target-size 1
                        ::pool/next-port 7950
-                       ::pool/datalevin-port nil
                        ::pool/shutdown? false})
           pool {::pool/state state
                 ::pool/idle-queue idle-queue
@@ -181,7 +161,6 @@
           state (atom {::pool/all-jvms {7970 jvm}
                        ::pool/target-size 1
                        ::pool/next-port 7971
-                       ::pool/datalevin-port nil
                        ::pool/shutdown? false})
           pool {::pool/state state
                 ::pool/idle-queue idle-queue
@@ -209,7 +188,6 @@
           state (atom {::pool/all-jvms {}
                        ::pool/target-size 1
                        ::pool/next-port 7950
-                       ::pool/datalevin-port nil
                        ::pool/shutdown? false})
           pool {::pool/state state
                 ::pool/idle-queue idle-queue
@@ -246,7 +224,6 @@
           state (atom {::pool/all-jvms {}
                        ::pool/target-size 1
                        ::pool/next-port 7900
-                       ::pool/datalevin-port nil
                        ::pool/shutdown? false
                        ::pool/warming? false})
           pool {::pool/state state
@@ -264,7 +241,6 @@
           state (atom {::pool/all-jvms {}
                        ::pool/target-size 1
                        ::pool/next-port 7900
-                       ::pool/datalevin-port nil
                        ::pool/shutdown? false
                        ::pool/warming? true})
           pool {::pool/state state
@@ -287,7 +263,6 @@
           state (atom {::pool/all-jvms {}
                        ::pool/target-size 1
                        ::pool/next-port 7900
-                       ::pool/datalevin-port nil
                        ::pool/shutdown? false
                        ::pool/warming? true})
           pool {::pool/state state

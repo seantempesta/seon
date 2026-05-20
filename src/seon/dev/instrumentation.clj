@@ -344,7 +344,7 @@
       (log/info "Malli instrumentation started"
                 {:instrumented instrumented :errors error-count})
       (when (pos? error-count)
-        (log/debug "Namespaces with schema collection errors" {:errors @errors}))
+        (log/warn "Namespaces with schema collection errors" {:errors @errors}))
       {:instrumented instrumented :errors error-count})))
 
 (defn stop!

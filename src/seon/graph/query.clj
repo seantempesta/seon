@@ -368,7 +368,7 @@
 ;;; ---------------------------------------------------------------------------
 
 (schema/register! ::available-keys
-                  [:set :keyword {:description "Set of data keys available for matching"}])
+                  [:set {:description "Set of data keys available for matching"} :keyword])
 
 (schema/register! ::qualified-name
                   [:string {:min 1 :description "Fully qualified function name e.g. seon.foo/bar"}])
