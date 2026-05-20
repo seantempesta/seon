@@ -1,29 +1,36 @@
 (ns seon.render.default
   "The renderers a fresh agent uses when no slot override is set.
 
-   Two universal floors (`pretty-ai`, `pretty-html`) plus the rich
+   Two universal floors (`pretty-ai`, `pretty-html`) plus the substrate
    defaults — `ctx` (the agent's prompt) and `view` (the agent's
-   HTML tile) — composed from public helpers an agent can call back
-   into when writing its own.
+   HTML tile) — composed from public helpers a consumer overlay can
+   call back into when writing its own.
 
    Per spec-05 §15.3 + §15.4b these renderers all follow seon's
    map-in / map-out convention with `:malli/schema` metadata on every
-   public fn. The helpers are public so an agent override (typically
-   `seon.agent.seon/my-ctx`) can pick which fragments to keep + add
-   its own pieces.
+   public fn. The helpers are public so a consumer renderer (typically
+   in the consumer's own namespace) can pick which fragments to keep
+   + add its own pieces.
+
+   ## Substrate-only
+
+   This namespace ships nothing consumer-specific: no notes, no
+   mission framing, no markdown/wiki assumptions. The default `ctx`
+   teaches the LLM the substrate surface (seon.db / seon.fs /
+   seon.platform / REPL conventions) and surfaces the conversation
+   + eval history. Consumer overlays compose their own ctx that
+   prepends product-specific framing (mission, memory, toolkits).
 
    ## Independent of seon.agent
 
    This namespace queries the DB directly via `seon.db` — it does NOT
-   require `seon.agent`. That keeps the dependency graph acyclic when
-   A-7 wires `seon.agent/run-turn-once!` to call `seon.render/ai-dispatch`
-   (which calls into this namespace). seon.agent → seon.render →
-   seon.render.default is the one-way arrow; we do not close it."
+   require `seon.agent`. That keeps the dependency graph acyclic:
+   seon.agent → seon.render → seon.render.default is the one-way
+   arrow; we do not close it."
   (:require
     [cljs.reader :as edn]
     [clojure.string :as str]
     [seon.db :as db]
-    [seon.fs :as fs]
     [seon.schema :as schema]
     [seon.ui.components :as comp]))
 
@@ -31,33 +38,6 @@
 ;; Pretty-print floors — universal fallbacks for both surfaces.
 ;; A-2 contract: render mechanism never crashes; missing → pretty-print.
 ;; ============================================================
-
-(defn- pod-cwd []
-  (try (.cwd js/process) (catch :default _ ".")))
-
-(defn- read-source-file
-  "Read a `.cljs` source file relative to the pod's cwd. Used to
-   inject the live toolkit source into the agent's prompt so its
-   API surface is always exactly what the code says it is."
-  [rel-path]
-  (let [abs (str (pod-cwd) "/" rel-path)
-        r   (fs/read-file {:seon.fs/path abs})]
-    (when (:seon.fs/ok? r) (:seon.fs/content r))))
-
-(defn fs-root
-  "The folder the user has pointed the agent at. Reads `SEON_FS_ROOT` from
-   process env; returns nil if not set. Used by the welcome tile and
-   the agent prompt to ground every answer in the user's own files."
-  {:malli/schema [:=> [:cat] [:maybe :string]]}
-  []
-  (some-> js/process .-env .-SEON_FS_ROOT))
-
-(defn read-only?
-  "True iff the pod was launched with `SEON_FS_READ_ONLY=1`. The agent
-   sees this in its prompt so it knows write-file will be denied."
-  {:malli/schema [:=> [:cat] :boolean]}
-  []
-  (= "1" (some-> js/process .-env .-SEON_FS_READ_ONLY)))
 
 (defn pretty-ai
   "Universal AI-side fallback. Emits the input map as edn."
@@ -135,31 +115,6 @@
                  (db/query {:seon.db/query query
                             :seon.db/args args}))]
      (->> rows (sort-by second #(compare %2 %1)) (take n) reverse))))
-
-(defn ^:no-doc notes-helper
-  "Return all `:seon.note/*` entities for `id`, newest-first. Each
-   row is `{:seon.note/id :seon.note/topic :seon.note/content
-   :seon.note/at}`."
-  [db id]
-  (let [args  [[:seon.agent/id id]]
-        query '[:find ?nid ?topic ?content ?at
-                :in $ ?aid
-                :where
-                [?n :seon.note/agent ?aid]
-                [?n :seon.note/id ?nid]
-                [?n :seon.note/topic ?topic]
-                [?n :seon.note/content ?content]
-                [?n :seon.note/at ?at]]
-        rows  (if db
-                (db/query {:seon.db/db db :seon.db/query query :seon.db/args args})
-                (db/query {:seon.db/query query :seon.db/args args}))]
-    (->> rows
-         (sort-by #(nth % 3) #(compare %2 %1))
-         (map (fn [[nid topic content at]]
-                {:seon.note/id nid
-                 :seon.note/topic topic
-                 :seon.note/content content
-                 :seon.note/at at})))))
 
 (defn ^:no-doc recent-errors
   "Return the most-recent `n` undismissed `:seon.log/level :error`
@@ -269,158 +224,6 @@
          ";; agent-state: " (pr-str (:seon.agent/state ent)) "\n"
          pressure)))
 
-(defn your-mission
-  "Top-of-prompt framing: what the user pointed the agent at, the answering
-   posture, and the build-tools-then-use-them work style. Emitted only
-   when `SEON_FS_ROOT` is set."
-  {:malli/schema [:=> [:cat :map] :string]}
-  [_input]
-  (when-let [root (fs-root)]
-    (str "## Your mission\n\n"
-         "TWO goals each conversation:\n\n"
-         "  1. **Reply.** Transact ONE `:seon.message/role :assistant`\n"
-         "     message answering the user, grounded in files you read\n"
-         "     under " root (when (read-only?) " (read-only)") ".\n"
-         "     Until you transact it, the user sees nothing useful\n"
-         "     and the multi-turn loop keeps firing.\n\n"
-         "  2. **Remember.** Whenever you discover a durable fact\n"
-         "     (who someone is, what a project does, where something\n"
-         "     lives), call `(seon.toolkit/note! {...})`. Notes\n"
-         "     survive even when the user clears the chat. Next time\n"
-         "     they ask about the same thing, you'll have it already.\n\n"
-         "Most questions should take 2–4 turns. Don't burn turns\n"
-         "inspecting; reply as soon as you have something defensible.\n\n"
-
-         "## ⚠ Common traps (read carefully)\n\n"
-         "  - **`println` is INVISIBLE to the user.** It writes to the\n"
-         "    Node stdout, not to the chat. It also returns `nil`, so\n"
-         "    you can't see what you printed. NEVER use println.\n"
-         "    To inspect a value, just write the expression by itself —\n"
-         "    its return value appears in `recent evals` next turn.\n"
-         "      WRONG:  (println \"count:\" (count xs))   ;; you see nil\n"
-         "      RIGHT:  (count xs)                       ;; you see the count\n"
-         "  - **The reply must be a `seon.db/transact!`.** Pretty-printing\n"
-         "    a result, doseq-printing rows, returning a map — none of\n"
-         "    these reach the user. Only an `:assistant` message in the\n"
-         "    DB shows up in the chat.\n"
-         "  - **If `slurp*` returns nil, the file doesn't exist** at that\n"
-         "    path. Do NOT call `(subs nil ...)` next — that crashes.\n"
-         "    Re-run `search` with a different `:name-pattern` instead.\n"
-         "  - **Case-insensitive grep**: most names in the wiki are\n"
-         "    capitalized (Maya, Daniel). Always use `(?i)` in your\n"
-         "    pattern: `#\"(?i)maya\"`, not `#\"maya\"`.\n\n"
-
-         "## How to work — build tools, then use them\n\n"
-         "You have up to ~20 agentic turns per user message. You do\n"
-         "NOT have to fit your reply in one turn. The expected work\n"
-         "style is:\n\n"
-         "  1. write helper functions into your home ns\n"
-         "  2. compose them to narrow → read → answer\n"
-         "  3. transact a single :assistant message with the result\n\n"
-         "This is a REPL. `(def x ...)` persists across turns —\n"
-         "your home namespace is long-lived. Don't read every file\n"
-         "in the folder; there are thousands. Use the toolkit's\n"
-         "filename + content grep to narrow first.\n\n"
-
-         "## Pre-loaded toolkit — `seon.toolkit/*`\n\n"
-         "All pre-loaded — call directly, no `require` needed.\n\n"
-         "### High-leverage first moves\n\n"
-         "  (seon.toolkit/about \"Seon\")\n"
-         "  ;; ⇒ {:notes [...] :paths [...] :index-hits [{:line :line-num}]}\n"
-         "  ;; The SMARTEST first call for any 'tell me about X' question.\n"
-         "  ;; Combines: recall existing notes + find filenames matching\n"
-         "  ;; X + grep the root CLAUDE.md for X. No file reads beyond\n"
-         "  ;; the cached index. Decide what to slurp from what comes back.\n\n"
-         "  (seon.toolkit/find-by-name #\"(?i)<topic>\")\n"
-         "  ;; ⇒ [\"<abs-path>\" …]  — paths only, very fast (cached).\n"
-         "  ;; Use to learn WHERE something lives before deciding what\n"
-         "  ;; to read. NEVER guess at paths — `list-dir` on a non-\n"
-         "  ;; existent dir wastes a turn.\n\n"
-         "  (seon.toolkit/index)\n"
-         "  ;; ⇒ body of " root "/CLAUDE.md\n"
-         "  ;; The user's own hand-written index of everything. Best\n"
-         "  ;; starting point when you have no idea where to look.\n\n"
-         "### Read + extract\n\n"
-         "  (seon.toolkit/slurp* \"<abs-path>\")    ;; body or nil\n"
-         "  (seon.toolkit/head body 800)           ;; first N chars\n"
-         "  (seon.toolkit/section body \"Heading\") ;; pull a markdown section\n\n"
-         "### Lower-level grep\n\n"
-         "  (seon.toolkit/search\n"
-         "    {:root         \"" root "\"\n"
-         "     :pattern      #\"(?i)<topic>\"\n"
-         "     :name-pattern #\"<scope-regex>\"\n"
-         "     :limit 12})\n"
-         "  (seon.toolkit/grep-files opts)         ;; raw hit list\n\n"
-         "### Memory\n\n"
-         "  (seon.toolkit/recall #\"(?i)<topic>\")\n"
-         "  (seon.toolkit/note! {:topic \"…\" :content \"…\" :sources [\"…\"]})\n\n"
-
-         "## ;; narration is the user's primary view\n\n"
-         "The chat tile shows your `;; narration` comments as the\n"
-         "MAIN text and tucks the code into a collapsible block\n"
-         "below. Write your thinking out loud — sparse code, rich\n"
-         "`;;` narration:\n\n"
-         "  ;; Looking for files about the build service.\n"
-         "  ;; Starting with CLAUDE.md and docs/timeline — those\n"
-         "  ;; carry the deployment URLs and status updates.\n"
-         "  (seon.toolkit/search\n"
-         "    {:root \"" root "\"\n"
-         "     :pattern #\"(?i)build.*service\"\n"
-         "     :name-pattern #\"(?i)CLAUDE\\.md|docs/timeline\"})\n\n"
-
-         "## Code style — NO scattered atoms\n\n"
-         "Use `let` bindings within a turn. Use `def` to hold a\n"
-         "single named value across turns. Don't wrap every\n"
-         "intermediate in its own atom — that's noise. If you do\n"
-         "need cross-turn mutable state, ONE atom holding a map.\n\n"
-         "BAD:\n"
-         "  (def !hits  (atom (search ...)))\n"
-         "  (def !top   (atom (->> @!hits :by-path (take 2))))\n"
-         "  (def !body1 (atom (slurp* (-> @!top first :path))))\n"
-         "  (def !body2 (atom (slurp* (-> @!top second :path))))\n\n"
-         "GOOD:\n"
-         "  (def hits (seon.toolkit/search ...))\n"
-         "  hits   ;; result visible in next turn's recent-evals\n\n"
-         "## Two-turn template (the demo target)\n\n"
-         "  ;; turn 1 — probe everything cheap at once with `about`\n"
-         "  (def probe (seon.toolkit/about \"<topic>\"))\n"
-         "  probe\n\n"
-         "  ;; turn 2 — slurp 1–2 of probe's :paths, compose ONE reply,\n"
-         "  ;;          and `note!` what you learned in the same form.\n"
-         "  (let [paths  (->> probe :paths (take 2))\n"
-         "        bodies (zipmap paths (map seon.toolkit/slurp* paths))\n"
-         "        answer (str \"## <topic>\\n\\n<your synthesis here, citing paths>\\n\\n\"\n"
-         "                    \"### Sources\\n\"\n"
-         "                    (clojure.string/join \"\\n\"\n"
-         "                      (map #(str \"- \" %) paths)))]\n"
-         "    (seon.toolkit/note!\n"
-         "      {:topic   \"<topic>\"\n"
-         "       :content \"<one-paragraph durable summary>\"\n"
-         "       :sources (vec paths)})\n"
-         "    (seon.db/transact!\n"
-         "      {:seon.db/tx-data\n"
-         "       [{:seon.message/id      (seon.agent/new-id!)\n"
-         "         :seon.message/role    :assistant\n"
-         "         :seon.message/content answer\n"
-         "         :seon.message/agent   [:seon.agent/id (session-id)]\n"
-         "         :seon.message/at      (js/Date.)}]}))\n\n"
-         "## Picking `:name-pattern`\n\n"
-         "The user's wiki is well-organized:\n"
-         "  - people / who-is:           #\"docs/(people|timeline)\"\n"
-         "  - project status:            #\"CLAUDE\\.md|docs/timeline\"\n"
-         "  - meetings / decisions:      #\"meetings/|/decisions\\.md\"\n"
-         "  - when unsure:               #\"CLAUDE\\.md$\"   — the index\n\n"
-
-         "## Rules\n\n"
-         "  - Don't slurp the same path twice — `(def x ...)` once.\n"
-         "  - Read at most ~3 files in full per question. If grep\n"
-         "    snippets answer it, skip the slurp.\n"
-         "  - Show your work in `;;` narration — that IS the reply\n"
-         "    visible to the user. Don't lie about sources; saying\n"
-         "    \"couldn't find it\" is fine.\n"
-         "  - End with exactly ONE `:assistant` transact!. Until\n"
-         "    you do, the loop keeps firing turns.\n")))
-
 (defn how-you-respond
   "Tell the LLM the response shape it should emit — `;; narration`
    lines paired with s-exprs, partial-failure semantics, and the
@@ -519,10 +322,9 @@
     "(seon.fs/walk-dir {:seon.fs/path \"/Users/you/src/your-project\"\n"
     "                   :seon.fs/match-ext \".md\"})\n\n"
 
-    ";; pattern for digesting a knowledge base — walk, then read selectively\n"
-    ";; based on the user's question (don't read everything; pick relevant files)\n"
+    ";; walk a tree and process selectively — pick relevant files, don't read everything\n"
     "(let [r (seon.fs/walk-dir {:seon.fs/path \"/Users/you/src/your-project\"\n"
-    "                           :seon.fs/match-ext \".md\"})]\n"
+    "                           :seon.fs/match-ext \".clj\"})]\n"
     "  (when (:seon.fs/ok? r)\n"
     "    (count (:seon.fs/entries r))))\n"))
 
@@ -556,49 +358,6 @@
                                  (str (name role) ": " content))
                                msgs))
            "  (no messages yet)"))))
-
-(defn available-code
-  "Inject the live source of `seon.toolkit` and `seon.fs` into the
-   prompt. The agent doesn't have to guess at signatures — it reads
-   the code. Source is fetched at render time, so any update to the
-   files appears on the next turn without a pod restart."
-  {:malli/schema [:=> [:cat :map] :string]}
-  [_input]
-  (let [tk (read-source-file "src/seon/toolkit.cljs")
-        fs (read-source-file "src/seon/fs.cljs")]
-    (str "## Available code — read this; don't guess signatures\n\n"
-         (when tk
-           (str "### `seon.toolkit` (pre-loaded; call directly)\n\n"
-                "```clojure\n" tk "\n```\n\n"))
-         (when fs
-           (str "### `seon.fs` (lower-level filesystem primitives)\n\n"
-                "```clojure\n" fs "\n```\n\n"))
-         "Cite functions by their fully-qualified name when calling:\n"
-         "`(seon.toolkit/search ...)`, `(seon.fs/read-file ...)`, etc.\n")))
-
-(defn what-you-already-know
-  "Surface the agent's durable `:seon.note/*` entries at the top of the
-   prompt. This is THE memory that persists across conversations —
-   the user can clear the chat, refresh the page, and these notes
-   still apply. The agent should query them BEFORE walking the filesystem."
-  {:malli/schema [:=> [:cat :map] :string]}
-  [{:seon.db/keys [db] :seon.agent/keys [id]}]
-  (let [ns (notes-helper db id)]
-    (if (empty? ns)
-      (str "## What you already know\n\n"
-           "  (no notes yet — write some with `seon.toolkit/note!` when\n"
-           "   you find facts worth remembering. They persist across\n"
-           "   conversations.)\n")
-      (str "## What you already know  (your durable notes)\n\n"
-           ";; You wrote these in past turns. They persist even after\n"
-           ";; the user clears the chat. Check them BEFORE walking the\n"
-           ";; filesystem; you may already have the answer.\n\n"
-           (str/join "\n\n"
-             (map (fn [{:seon.note/keys [id topic content]}]
-                    (str "[" id "]  **" topic "**\n"
-                         "  " content))
-                  ns))
-           "\n\nQuery these directly:  `(seon.toolkit/recall #\"(?i)<topic>\")`\n"))))
 
 (defn- try-read-edn
   "Read an EDN string and pretty-print it. Falls back to the raw
@@ -666,25 +425,23 @@
 
 (defn ctx
   "Default :seon.render/ai renderer. System fn → takes system input
-   shape (`:seon.db/db` + `:seon.agent/id`). Concatenates the helper
-   sections in order; recent-errors stays inline so the agent sees
-   its own thrown exceptions next turn (per spec-05 §15.4a)."
+   shape (`:seon.db/db` + `:seon.agent/id`). Substrate-only: teaches
+   the LLM the REPL contract + the seon.db / seon.fs / seon.platform
+   surfaces, and surfaces the conversation + eval history. Consumer
+   overlays prepend their own mission/memory/toolkit blocks."
   {:malli/schema [:=> [:cat :seon.render/system-input] :seon.render/ai-response]}
   [input]
   {:seon.render/text
    (str/join "\n\n"
      (remove str/blank?
-       [(repl-state-header      input)
-        (your-mission           input)
-        (what-you-already-know  input)
-        (available-code         input)
-        (how-you-respond        input)
-        (what-you-can-do        input)
-        (conventions            input)
-        (recent-conversation    input)
-        (recent-evals-block     input)
-        (recent-errors-block    input)
-        (schema-reference       input)]))})
+       [(repl-state-header    input)
+        (how-you-respond      input)
+        (what-you-can-do      input)
+        (conventions          input)
+        (recent-conversation  input)
+        (recent-evals-block   input)
+        (recent-errors-block  input)
+        (schema-reference     input)]))})
 
 ;; ============================================================
 ;; VIEW — the default :seon.render/html. Agent-tile dashboard:
