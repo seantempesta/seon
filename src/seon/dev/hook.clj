@@ -267,7 +267,7 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- update-code-index!
-  "Update the Datalevin code index after a file change.
+  "Update the Datahike code index after a file change.
    Uses the unified extract pipeline + ingest-namespace! for upsert + retract-stale.
    Best-effort: logs warnings on failure, never blocks the hook."
   [file-path]
@@ -486,7 +486,7 @@
                                         :tool tool-name
                                         :file file-path})
 
-    ;; Handle TodoWrite events specially - just record to Datalevin, no other processing
+    ;; Handle TodoWrite events specially - just record to Datahike, no other processing
     (if (and (= event-name "PostToolUse") (= tool-name "TodoWrite"))
       (let [session-id (:session_id event)
             todos (get-in event [:tool_input :todos])]

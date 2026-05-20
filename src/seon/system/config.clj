@@ -7,13 +7,7 @@
             [malli.error :as me]))
 
 (def schemas
-  "Component key -> Malli config schema.
-   M-1 (2026-05-15): the legacy `:seon.db.datalevin/server`,
-   `:seon.db.datalevin/connections`, and `:seon/runtime-db` schemas were
-   removed — their Integrant keys are absent from system.edn. The
-   `:seon.flow/pool` schema dropped its `:datalevin-server` field; the
-   `:seon.graph/scanner` schema was removed entirely (defmethods deleted
-   in `seon.system`)."
+  "Component key -> Malli config schema."
   {;; Schema Registry — empty map, no required keys
    :seon.schema/registry
    [:map]

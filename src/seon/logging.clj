@@ -3,7 +3,7 @@
 
   Call `(configure! {})` early in startup to set up file appenders.
   Timbre handles all application logging (seon.* namespaces).
-  Logback handles library logging (Datalevin, nREPL, etc.) via SLF4J.
+  Logback handles library logging (Datahike, nREPL, etc.) via SLF4J.
 
   Log files:
     logs/app.log      - Current session, all levels (rotating, 50MB max)

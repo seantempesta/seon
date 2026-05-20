@@ -264,9 +264,7 @@
 (defn- deferred-ns?
   "Check if a test namespace has ^:deferred metadata. Deferred
    namespaces are placeholders for tests whose subject is parked
-   pending some architectural trigger — see
-   `seon/docs/prds/datahike-migration/deferred.md` for the index +
-   each entry's revisit condition. Default test runs skip them."
+   pending some architectural trigger. Default test runs skip them."
   [ns-sym]
   (try
     (require ns-sym)
@@ -283,7 +281,7 @@
 
 (defn- safe-run-ns-tests
   "Run tests for a single namespace, catching Throwable to prevent
-   LMDB native crashes from killing the REPL session."
+   native crashes from killing the REPL session."
   [test-ns-sym]
   (try
     (run-ns-tests test-ns-sym)
@@ -331,13 +329,10 @@
      (test-affected 'seon.graph.query :depth :transitive)"
   [ns-sym & {:keys [depth] :or {depth :direct}}]
   (let [ns-str (str ns-sym)
-        ;; M-1 (2026-05-15): the previous probe looked at
-        ;; :seon.db.datalevin/connections (removed from system.edn). The
-        ;; graph backing affected-test-namespaces queries `:seon.runtime`,
-        ;; which is not yet in :seon.db/flow (Cluster 4 — :seon.runtime
-        ;; migration). Until that lands, this stays `false` and
-        ;; `test-affected` falls back to running only the ns's own test —
-        ;; identical behaviour to the live system before M-1.
+        ;; The graph backing affected-test-namespaces queries `:seon.runtime`,
+        ;; which is not yet wired into the datahike flow. Until that lands,
+        ;; this stays `false` and `test-affected` falls back to running only
+        ;; the ns's own test.
         has-db? false
         test-nses (if has-db?
                     (ts/affected-test-namespaces

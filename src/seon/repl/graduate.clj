@@ -1,5 +1,5 @@
 (ns seon.repl.graduate
-  "Namespace graduation: assembles Datalevin-stored forms into a .clj file,
+  "Namespace graduation: assembles Datahike-stored forms into a .clj file,
    writes to disk, and optionally git commits."
   (:require [clojure.java.io :as io]
             [clojure.java.shell :as shell]

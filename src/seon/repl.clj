@@ -1,6 +1,6 @@
 (ns seon.repl
   "REPL form router.
-   Receives forms, classifies, stores in Datalevin, routes eval through
+   Receives forms, classifies, stores in Datahike, routes eval through
    the infrastructure flow topology, updates the code index after each eval."
   (:require [clojure.core.async.flow :as flow]
             [edamame.core :as edamame]
@@ -50,7 +50,7 @@
                   [:any {:description "nREPL eval result value"}])
 
 ;;; ---------------------------------------------------------------------------
-;;; Datalevin attribute registrations (enforcement layer requires these)
+;;; Datahike attribute registrations (enforcement layer requires these)
 ;;; ---------------------------------------------------------------------------
 
 (schema/register! :form/id
@@ -72,11 +72,11 @@
                   [:inst {:description "Timestamp of form creation"}])
 
 ;;; ---------------------------------------------------------------------------
-;;; Datalevin Entity Schema (Malli is the source of truth)
+;;; Datahike Entity Schema (Malli is the source of truth)
 ;;; ---------------------------------------------------------------------------
 
 (def form-entity-schema
-  "Malli schema for a REPL form entity stored in Datalevin.
+  "Malli schema for a REPL form entity stored in Datahike.
    All persisted attrs have concrete types — no :any, no [:maybe X].
    :form/name is optional because expressions and requires have no name."
   [:map
@@ -145,7 +145,7 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- next-version
-  "Query Datalevin for the max version of a named form in a namespace.
+  "Query Datahike for the max version of a named form in a namespace.
    Returns max + 1, or 1 if no prior version exists."
   [db-name ns-str form-name]
   (if (nil? form-name)
@@ -167,7 +167,7 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- store-form!
-  "Store a form in Datalevin with versioning. Returns the entity map."
+  "Store a form in Datahike with versioning. Returns the entity map."
   [db-name ns-str form-type form-name source agent-id]
   (let [version (next-version db-name ns-str form-name)
         entity (cond-> {:form/id (UUID/randomUUID)
@@ -286,7 +286,7 @@
         ;; Eval on agent JVM via flow topology
         eval-result (when nrepl-port
                       (eval-via-flow! nrepl-port source))
-        ;; Store in Datalevin
+        ;; Store in Datahike
         stored (store-form! db-name ns-str form-type form-name source agent-id)
         ;; Update code index
         _ (update-code-index! db-name source)]

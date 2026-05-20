@@ -182,13 +182,10 @@
 ;;; Code Scanner Component
 ;;; ---------------------------------------------------------------------------
 ;;; Populates the runtime knowledge graph at startup by analyzing the codebase
-;;; with clj-kondo and scanning for schema/register! calls.
-;;; Currently absent from resources/system.edn — the :seon/runtime-db Integrant
-;;; key it depended on was removed during the datahike migration. The defmethods
-;;; below (and runtime-db-conn) were deleted in chunk M-1 (2026-05-15) along
-;;; with the dead :seon/runtime-db wiring. The scanner defmethod was also
-;;; deleted because its body referenced runtime-db-conn. Re-introducing the
-;;; scanner is post-M-4 work (the :seon.runtime → datahike migration).
+;;; with clj-kondo and scanning for schema/register! calls. Currently absent
+;;; from resources/system.edn — the scanner depends on a runtime db connection
+;;; that is not yet wired into the datahike flow. Re-introducing the scanner
+;;; waits on the :seon.runtime datahike migration.
 
 ;;; ---------------------------------------------------------------------------
 ;;; Infrastructure Flow Component
@@ -196,8 +193,7 @@
 ;;; Starts the infrastructure flow (reply-router + sinks + REPL eval + status)
 ;;; at boot. Namespace flows are NOT part of this — they're created lazily
 ;;; later. Database writes are owned by per-namespace conn-processes in
-;;; `:seon.db/flow`; the legacy datalevin writer/reader path was removed in
-;;; chunk M-2.
+;;; `:seon.db/flow`.
 
 (defmethod ig/init-key :seon.flow/infrastructure
   [_ _opts]
