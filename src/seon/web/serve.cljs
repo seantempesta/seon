@@ -14,10 +14,11 @@
 
    ## Port discovery
 
-   `start!` listens on port 0 (ephemeral), reads the bound port from
-   `server.address()`, and writes it to `$SEON_PORT_FILE` (default
-   `/tmp/seon-port`). External tooling (`bin/dev-harness`, the
-   convergence test in spec-05 §21.3) reads this file rather than
+   `start!` listens on a fixed port (default 7890, override via
+   `SEON_PORT`; set to 0 for ephemeral allocation) and writes the
+   actually-bound port to `$SEON_PORT_FILE` (default
+   `tmp/seon-port` — project-local per CLAUDE.md). External tooling
+   reads this file rather than
    parsing logs.
 
    ## V0.5 throwaway
@@ -88,7 +89,7 @@
     (str/ends-with? filename ".svg")  "image/svg+xml"
     :else                             "application/octet-stream"))
 
-(defn- write-status! [res code mime body]
+(defn- write-status! [^js res code mime body]
   (.writeHead res code #js {"Content-Type"  mime
                             "Cache-Control" "no-store, no-cache, must-revalidate"
                             "Pragma"        "no-cache"
@@ -125,7 +126,7 @@
 (defn- serve-root! [res]
   (write-status! res 200 "text/html; charset=utf-8" (page/root-html)))
 
-(defn- open-sse! [req res]
+(defn- open-sse! [^js req ^js res]
   (.writeHead res 200 #js {"Content-Type"      "text/event-stream"
                            "Cache-Control"     "no-cache"
                            "Connection"        "keep-alive"
@@ -161,7 +162,7 @@
 
 (defn- read-body
   "Collect a Node request body into a String. Returns a Promise."
-  [req]
+  [^js req]
   (js/Promise.
     (fn [resolve _reject]
       (let [chunks (atom [])]
@@ -323,36 +324,44 @@
 ;; Lifecycle
 ;; ============================================================
 
+(defn- ensure-tmp-dir! []
+  ;; Project-local `tmp/` per CLAUDE.md ("never use /tmp"). Created
+  ;; relative to cwd — assumes the pod runs from the project root.
+  (try (.mkdirSync fs "tmp" #js {:recursive true})
+       (catch :default _ nil)))
+
 (defn- write-port-file! [port]
+  (ensure-tmp-dir!)
   (let [target (or (.. js/process -env -SEON_PORT_FILE)
-                   "/tmp/seon-port")]
+                   "tmp/seon-port")]
     (.writeFileSync fs target (str port))
     target))
 
 (defn- requested-port
-  "Pick the bind port. $SEON_PORT > 0 (default 7890) for stable
-   reload-friendly URLs across pod restarts. Pass 0 to get an
-   ephemeral port (old V0 behavior; useful when running multiple pods).
+  "Pick the bind port. Default 7890 (fixed, bookmarkable across pod
+   restarts). Override via SEON_PORT — set to 0 for ephemeral
+   allocation (useful when running multiple pods side-by-side).
 
    Examples:
-     SEON_PORT=7890           ; default — bookmarkable
-     SEON_PORT=0              ; ephemeral — pick whatever's free
-     SEON_PORT=8080           ; explicit"
+     SEON_PORT=7890   ; default — fixed
+     SEON_PORT=0      ; ephemeral — Node picks a free port
+     SEON_PORT=8080   ; explicit override"
   []
   (let [raw (.. js/process -env -SEON_PORT)]
-    (cond
-      (nil? raw) 7890
-      :else      (let [n (js/parseInt raw 10)]
-                   (if (js/Number.isNaN n) 7890 n)))))
+    (if (nil? raw)
+      7890
+      (let [n (js/parseInt raw 10)]
+        (if (js/Number.isNaN n) 7890 n)))))
 
 (defn start!
   "Start the HTTP+SSE server on a loopback port. Returns a Promise
    resolving to:
      {:seon.web/port <int> :seon.web/port-file <abs-path>}
 
-   Default port is 7890 (override via $SEON_PORT). Writes the bound
-   port to $SEON_PORT_FILE (default /tmp/seon-port). Idempotent —
-   repeat calls close the old server first.
+   Default port is 7890 (override via $SEON_PORT; set to 0 for
+   ephemeral). Writes the bound port to $SEON_PORT_FILE (default
+   `tmp/seon-port`). Idempotent — repeat calls close the old server
+   first.
 
    The server binds to 127.0.0.1 (loopback only). Browsers on the
    same machine can connect; nothing on the LAN sees the pod.

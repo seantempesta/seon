@@ -53,6 +53,17 @@
 (def ^:private default-temperature 0.7)
 (def ^:private default-max-tokens  4096)
 
+;; Wall-clock timeout for the DeepSeek HTTP call. A hung API stops
+;; wedging the agent loop — turn fails with a timeout error and the
+;; next user message kicks again. Replace via [[set-timeout-ms!]].
+(defonce !timeout-ms (atom 60000))
+
+(defn set-timeout-ms!
+  "Replace the per-call wall-clock timeout (default 60000ms). Returns
+   the new value."
+  [ms]
+  (reset! !timeout-ms ms))
+
 (def ^:private default-system-prompt
   "You are a Clojure-fluent agent running inside a CLJS pod on Node.
 
@@ -139,28 +150,38 @@ session.")
     :or {model       default-model
          temperature default-temperature
          max-tokens  default-max-tokens}}]
-  (try
-    (let [resp (await (js/fetch default-endpoint
-                        (clj->js
-                          {:method  "POST"
-                           :headers {:Content-Type  "application/json"
-                                     :Authorization (str "Bearer " (api-key))}
-                           :body    (body-json {:ctx           ctx
-                                                :system-prompt system-prompt
-                                                :model         model
-                                                :temperature   temperature
-                                                :max-tokens    max-tokens})})))
-          body-text (await (.text resp))]
-      (if (.-ok resp)
-        (parse-response body-text)
-        {:seon.ai/text  ""
-         :seon.ai/error {:seon.ai/msg    (str "DeepSeek HTTP " (.-status resp)
-                                              ": " body-text)
-                         :seon.ai/status (.-status resp)}}))
-    (catch :default e
-      {:seon.ai/text  ""
-       :seon.ai/error {:seon.ai/msg (str "DeepSeek fetch failed: "
-                                         (error/->message e))}})))
+  (let [controller (js/AbortController.)
+        ms         @!timeout-ms
+        timer      (js/setTimeout #(.abort controller) ms)]
+    (try
+      (let [resp (await (js/fetch default-endpoint
+                          (clj->js
+                            {:method  "POST"
+                             :signal  (.-signal controller)
+                             :headers {:Content-Type  "application/json"
+                                       :Authorization (str "Bearer " (api-key))}
+                             :body    (body-json {:ctx           ctx
+                                                  :system-prompt system-prompt
+                                                  :model         model
+                                                  :temperature   temperature
+                                                  :max-tokens    max-tokens})})))
+            body-text (await (.text resp))]
+        (js/clearTimeout timer)
+        (if (.-ok resp)
+          (parse-response body-text)
+          {:seon.ai/text  ""
+           :seon.ai/error {:seon.ai/msg    (str "DeepSeek HTTP " (.-status resp)
+                                                ": " body-text)
+                           :seon.ai/status (.-status resp)}}))
+      (catch :default e
+        (js/clearTimeout timer)
+        (let [aborted? (= "AbortError" (some-> e .-name))]
+          {:seon.ai/text  ""
+           :seon.ai/error {:seon.ai/msg
+                           (if aborted?
+                             (str "DeepSeek request timed out after " ms "ms")
+                             (str "DeepSeek fetch failed: " (error/->message e)))
+                           :seon.ai/timeout? aborted?}})))))
 
 ;; ============================================================
 ;; Adapter for seon.agent.

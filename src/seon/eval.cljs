@@ -40,6 +40,45 @@
             [seon.error :as error]))
 
 ;; ============================================================
+;; Per-form wall-clock timeout. Stability guard, not a security
+;; boundary — the agent can mutate `!timeout-ms` from inside eval.
+;;
+;; CAVEAT: single-threaded Node only preempts **async** hangs (a form
+;; awaiting a Promise that never resolves — fetch, db call, etc.). A
+;; tight CPU loop blocks the event loop entirely, including the
+;; timer, and can NOT be cancelled here. Real preemption needs
+;; worker_thread (Phase 2) or wasmtime (Phase 3). What this DOES buy:
+;; a hung fetch / never-resolving Promise no longer wedges the agent
+;; loop indefinitely.
+;; ============================================================
+
+;; Per-form wall-clock timeout in milliseconds. Default 10000.
+;; Replace via [[set-timeout-ms!]].
+(defonce !timeout-ms (atom 10000))
+
+(defn set-timeout-ms!
+  "Replace the per-form wall-clock timeout. Returns the new value."
+  [ms]
+  (reset! !timeout-ms ms))
+
+;; Identity-checked marker returned by `race-timeout` when the timer
+;; wins. A fresh JS object so `identical?` distinguishes it from any
+;; resolved eval value.
+(defonce ^:private timeout-sentinel #js {:_seon_eval_timeout true})
+
+(defn ^:async ^:private race-timeout
+  "Race `inner` (a Promise) against a wall-clock timer of `ms`. If
+   `inner` settles first, returns its resolved value. If the timer
+   fires first, returns `timeout-sentinel`. Even when the timer wins,
+   the underlying eval keeps running — JS has no preemptive
+   cancellation. Caller MUST identity-check the sentinel."
+  [inner ms]
+  (let [timer (js/Promise.
+                (fn [resolve _]
+                  (js/setTimeout (fn [] (resolve timeout-sentinel)) ms)))]
+    (await (js/Promise.race #js [inner timer]))))
+
+;; ============================================================
 ;; Bootstrap init — load cljs.core + cljs.core$macros from the
 ;; :bootstrap shadow build into a fresh compile-state. ^:async so
 ;; callers can `(await ...)` it from straight-line agent code.
@@ -110,18 +149,33 @@
                     still emits JS that resolves at runtime via the
                     already-loaded globalThis vars (the `:client`
                     bundle's emission).
+     :timeout-ms    override the default `@!timeout-ms` per-call.
 
    For setup forms that need cljs.core's macro refers wired up via
-   `(ns …)` analysis, pass `:analyze-deps? true` explicitly."
+   `(ns …)` analysis, pass `:analyze-deps? true` explicitly.
+
+   A form that hangs on a never-resolving Promise returns
+     {:ok false :error {:seon.error/message \"eval timed out after Nms\" …}}
+   The underlying form keeps running — see `race-timeout` docstring."
   ([compile-state form-str]
    (eval compile-state form-str nil))
-  ([compile-state form-str {:keys [ns analyze-deps?]
+  ([compile-state form-str {:keys [ns analyze-deps? timeout-ms]
                             :or   {ns            'cljs.user
                                    analyze-deps? false}}]
    (try
-     (let [{:keys [value] :as result}
-           (await (raw-eval compile-state form-str ns analyze-deps?))]
-       {:ok true :value value :ns (:ns result)})
+     (let [ms      (or timeout-ms @!timeout-ms)
+           raced   (await (race-timeout
+                            (raw-eval compile-state form-str ns analyze-deps?)
+                            ms))]
+       (if (identical? raced timeout-sentinel)
+         {:ok false
+          :error (error/->map
+                   (js/Error.
+                     (str "eval timed out after " ms "ms (form still "
+                          "running in background; JS has no preemption — "
+                          "Phase 2 worker_thread or Phase 3 wasmtime "
+                          "needed for hard cancellation)")))}
+         {:ok true :value (:value raced) :ns (:ns raced)}))
      (catch :default e
        {:ok false :error (error/->map e)}))))
 
@@ -241,13 +295,22 @@
    CLJS-1.12.145 syntax they don't see. This makes calls to seon.db/*
    feel synchronous from inside agent forms.
 
+   Bounded by `@!timeout-ms` — a Promise that never resolves returns
+   `{:ok false :error <timeout>}` instead of wedging the agent loop.
+
    Returns {:ok true :value v} on resolution OR a non-Promise value;
-           {:ok false :error <seon.error/->map>} on rejection."
+           {:ok false :error <seon.error/->map>} on rejection or timeout."
   [v]
   (if (instance? js/Promise v)
     (try
-      (let [resolved (await v)]
-        {:ok true :value resolved})
+      (let [ms     @!timeout-ms
+            raced  (await (race-timeout v ms))]
+        (if (identical? raced timeout-sentinel)
+          {:ok false
+           :error (error/->map
+                    (js/Error.
+                      (str "auto-await timed out after " ms "ms")))}
+          {:ok true :value raced}))
       (catch :default e
         {:ok false :error (error/->map e)}))
     {:ok true :value v}))

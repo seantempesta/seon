@@ -310,13 +310,16 @@
 
 (defn install-kick!
   "Register the user-message-kick listener for this agent, closing
-   over the LLM fn + compile-state. Returns the listener key for
-   unlisten!."
+   over the LLM fn + compile-state. Idempotent: unlistens any prior
+   handler for the same agent-id first so hot-reload of agent.cljs
+   doesn't leave stale closures wired to the tx bus."
   [agent-id agent-ns-sym llm-fn compile-state]
-  (db/listen!
-    {:seon.db/key     [::user-message-kick agent-id]
-     :seon.db/handler (kick-handler agent-id agent-ns-sym llm-fn
-                                    compile-state)}))
+  (let [k [::user-message-kick agent-id]]
+    (try (db/unlisten! {:seon.db/key k}) (catch :default _ nil))
+    (db/listen!
+      {:seon.db/key     k
+       :seon.db/handler (kick-handler agent-id agent-ns-sym llm-fn
+                                      compile-state)})))
 
 ;; ============================================================
 ;; Agent creation. Allocates an id, transacts the entity.

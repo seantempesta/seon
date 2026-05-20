@@ -174,7 +174,7 @@
          ;; PR-shaped pending upstream review.
          :override-deps {org.replikativ/datahike
                          {:git/url "https://github.com/seantempesta/datahike"
-                          :git/sha "f6ecf17328103c7d97d29f6496af4c6b79fd5e73"}
+                          :git/sha "01ba3f18bf08da2c093eb0972ec1f272b817f23d"}
                          is.simm/partial-cps
                          {:git/url "https://github.com/seantempesta/partial-cps"
                           :git/sha "c0d941d4b591351267bc828fdfdf029be53a132f"}}

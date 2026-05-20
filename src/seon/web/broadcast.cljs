@@ -185,3 +185,10 @@
   []
   (remove-watch serve/!sse-connections ::render-on-connect)
   (db/unlisten! {:seon.db/key ::broadcast}))
+
+;; Hot-reload hygiene: when broadcast.cljs is recompiled, drop the
+;; prior listener + watcher so we don't double-fire on every tx. The
+;; ^:dev/after-load on `seon.client` re-runs `start-agent!`, which
+;; calls `install!` again — net effect: exactly one active listener.
+(defn ^:dev/before-load before-reload []
+  (try (uninstall!) (catch :default _ nil)))

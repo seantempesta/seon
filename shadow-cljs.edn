@@ -77,4 +77,8 @@
    :entries    [cljs.core]
    :macros     [cljs.core]
    :exclude    #{}
-   :compiler-options {:warnings-as-errors false}}}}
+   ;; `:redef false` suppresses 4 upstream warnings inside cljs.core$macros
+   ;; (refer-global / require-global each have both a def AND a defmacro
+   ;; of the same name — intentional in ClojureScript). Not our code.
+   :compiler-options {:warnings-as-errors false
+                      :warnings           {:redef false}}}}}

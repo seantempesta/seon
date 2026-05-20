@@ -1,44 +1,57 @@
 (ns seon.fs
   "Local-filesystem capability — the agent's eyes + hands on the
-   user's machine. Two backends in V0.5:
+   user's machine, gated by an explicit allowlist.
 
-     :node — `node:fs/promises` directly. Full filesystem access; no
-             sandbox. This is the Lane A dev path AND the V1+
-             production path now that Sean's pulled back from
-             multi-user JVM-server isolation (2026-05-19 — V1 will
-             be 100% CLJS in Tauri).
+   Two backends:
 
-     :wasi — stubbed; lands in Lane B's B-5 when wasi:filesystem/preopens
-             gets wired (spec-05 §9.2). Until then, agents running under
-             wasm-rquickjs see `:seon.fs/ok? false` with a wasi-pending
-             error message.
+     :node — `node:fs` directly, sandboxed by [[!config]].
+     :wasi — stubbed until wasi:filesystem/preopens lands.
+
+   ## Security model
+
+   **Default-deny.** With no configuration, every op returns
+   `:seon.fs/ok? false`. Callers must explicitly grant access via
+   [[configure!]] (or the legacy `SEON_FS_ROOT` env var) before
+   `read-file` / `list-dir` / `walk-dir` / `stat` will resolve a
+   path. Writes additionally require `:seon.fs/read-only? false`.
+
+   This is a SOFT boundary against LLM-emitted accidents, not a
+   security boundary against malicious code. The agent's `cljs.js`
+   eval can `(js/require \"node:fs\")` directly and bypass us
+   entirely — closing that gap requires process isolation (Phase 2
+   worker-thread eval) or WASM containment (Phase 3 wasmtime+WIT).
+   We harden what we can in the meantime; LLM hallucinations
+   calling `seon.fs` with `..`-traversal paths or out-of-scope
+   absolute paths land on `denied` rather than `unlinkSync`.
 
    ## House-rule API
 
-   Map-in / map-out per seon's CLAUDE.md data rules. Every fn:
+   Map-in / map-out per CLAUDE.md data rules. Every fn:
      • takes one map argument with fully-namespaced keys
      • returns one map with `:seon.fs/ok?` discriminator
      • never throws — errors land as `:seon.fs/error` strings
 
-   The schema keeps the caller's hands clean: `(if (:seon.fs/ok? r)
-   (:seon.fs/content r) (handle-error (:seon.fs/error r)))`.
+   ## Configuration
+
+     ;; In a consumer overlay's boot fn — explicit allowlist.
+     (seon.fs/configure!
+       {:seon.fs/allowed-roots [\"/Users/me/work-folder\"]
+        :seon.fs/read-only?    false})
+
+     ;; Or via env vars at process start (back-compat shim — the
+     ;; ns-load reads SEON_FS_ROOT / SEON_FS_READ_ONLY into the
+     ;; same atom).
 
    ## Worked examples
 
-     (seon.fs/read-file  {:seon.fs/path \"/Users/sean/.zshrc\"})
-     (seon.fs/write-file {:seon.fs/path \"/tmp/note.txt\"
+     (seon.fs/read-file  {:seon.fs/path \"/Users/me/work-folder/notes.md\"})
+     (seon.fs/write-file {:seon.fs/path \"/Users/me/work-folder/out.txt\"
                           :seon.fs/content \"hello\"})
-     (seon.fs/list-dir   {:seon.fs/path \"/Users/sean\"})
-     (seon.fs/stat       {:seon.fs/path \"/Users/sean/.zshrc\"})
-
-   ## V0.5 + V1+ posture (per Sean's 2026-05-19 direction)
-
-   Plain Node = no sandbox. The agent CAN read `~/Documents/whatever`,
-   write to `~/seon-dev-share/`, etc. The trust model is 'the agent
-   is part of the user's process'; capability prompts come later (V0.6+
-   when Tauri's native dialog ships with the wasmtime sandbox)."
+     (seon.fs/list-dir   {:seon.fs/path \"/Users/me/work-folder\"})
+     (seon.fs/stat       {:seon.fs/path \"/Users/me/work-folder/notes.md\"})"
   (:require
     ["node:fs" :as fs]
+    ["node:path" :as np]
     [clojure.string :as str]
     [seon.platform :as platform]
     [seon.schema :as schema]))
@@ -139,45 +152,105 @@
    :seon.fs/error (or (some-> e .-message) (str e))})
 
 ;; ============================================================
-;; Demo-mode capability guards (env-var-driven read-only / scoped-root).
+;; Capability config — default-deny allowlist.
 ;;
-;; Two env vars, both opt-in:
+;; `!config` holds:
+;;   :seon.fs/allowed-roots — vector of absolute paths. A path is
+;;       in-scope iff its resolved absolute form lives under one
+;;       of these roots. Empty = nothing allowed.
+;;   :seon.fs/read-only?    — when true, write-file refuses.
 ;;
-;;   SEON_FS_READ_ONLY=1
-;;     write-file refuses with an error envelope. read-file / list-dir /
-;;     stat / walk-dir / exists? are unaffected.
-;;
-;;   SEON_FS_ROOT=<abs-path>
-;;     read-file / list-dir / stat / exists? / walk-dir refuse paths
-;;     outside the prefix. write-file is gated by SEON_FS_READ_ONLY
-;;     independently.
-;;
-;; Neither var set ⇒ same Node-full-fs behaviour as before. The agent
-;; sees the same error-map shape as any other failed call
-;; (`:seon.fs/ok? false` + `:seon.fs/error`).
+;; Bootstrap reads SEON_FS_ROOT / SEON_FS_READ_ONLY at ns load for
+;; back-compat (singleton root → singleton allowlist). Consumers
+;; can replace via `configure!`.
 ;; ============================================================
 
-(defn- read-only? []
-  (case (platform/host)
-    :node (= "1" (some-> js/process .-env .-SEON_FS_READ_ONLY))
-    :wasi false))
+(defn- env-bootstrap []
+  (let [host (platform/host)]
+    {:seon.fs/allowed-roots
+     (case host
+       :node (when-let [r (some-> js/process .-env .-SEON_FS_ROOT)]
+               [r])
+       :wasi nil)
+     :seon.fs/read-only?
+     (case host
+       :node (= "1" (some-> js/process .-env .-SEON_FS_READ_ONLY))
+       :wasi true)}))
 
-(defn- fs-root []
-  (case (platform/host)
-    :node (some-> js/process .-env .-SEON_FS_ROOT)
-    :wasi nil))
+;; Active fs capability config. Read by every op; replace via
+;; [[configure!]]. Defaults to env-var bootstrap so existing
+;; SEON_FS_ROOT / SEON_FS_READ_ONLY callers keep working.
+(defonce !config (atom (or (env-bootstrap) {})))
+
+(defn configure!
+  "Replace the active fs capability config. Merges over current state;
+   pass nil for a key to leave it unchanged.
+
+     (configure! {:seon.fs/allowed-roots [\"/Users/me/work\"]
+                  :seon.fs/read-only?    false})
+
+   Returns the new config map."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [updates]
+  (let [next (merge @!config
+                    (select-keys updates
+                                 [:seon.fs/allowed-roots
+                                  :seon.fs/read-only?]))]
+    (reset! !config next)
+    next))
+
+(defn- read-only? []
+  (boolean (:seon.fs/read-only? @!config)))
+
+(defn- allowed-roots []
+  (vec (:seon.fs/allowed-roots @!config)))
 
 (defn- denied [path reason]
   {:seon.fs/ok?   false
    :seon.fs/path  path
    :seon.fs/error reason})
 
-(defn- out-of-scope? [path]
-  (when-let [root (fs-root)]
-    (not (str/starts-with? (str path) root))))
+(defn- resolve-abs
+  "Normalize `path` to an absolute, `..`-resolved string. Returns nil
+   on the WASI host (paths there are pre-opened and don't normalize
+   through node:path)."
+  [path]
+  (case (platform/host)
+    :node (try (.resolve np path) (catch :default _ nil))
+    :wasi nil))
+
+(defn- under-root?
+  "True iff `abs-path` is `root` itself or a descendant. Uses path
+   separator boundary to avoid the classic /foo/bar vs /foobar
+   false-positive."
+  [abs-path root]
+  (let [r (try (.resolve np root) (catch :default _ root))]
+    (or (= abs-path r)
+        (str/starts-with? (str abs-path)
+                          (if (str/ends-with? r np/sep)
+                            r
+                            (str r np/sep))))))
+
+(defn- out-of-scope?
+  "True iff `path` is denied by the current allowlist. Always true
+   when allowlist is empty (default-deny)."
+  [path]
+  (case (platform/host)
+    :node (let [roots (allowed-roots)]
+            (or (empty? roots)
+                (let [abs (resolve-abs path)]
+                  (or (nil? abs)
+                      (not (some #(under-root? abs %) roots))))))
+    ;; :wasi defers to wasi-pending elsewhere; treat as out-of-scope
+    ;; so callers hit the wasi-pending branch.
+    :wasi true))
 
 (defn- scope-denied [path]
-  (denied path (str "path outside SEON_FS_ROOT (" (fs-root) ")")))
+  (let [roots (allowed-roots)]
+    (denied path
+            (if (empty? roots)
+              "seon.fs has no allowed-roots configured (default-deny). Call (seon.fs/configure! {:seon.fs/allowed-roots [...]}) or set SEON_FS_ROOT."
+              (str "path outside allowed-roots " (pr-str roots))))))
 
 (defn- wasi-pending
   "Stub response for the :wasi branch until Lane B B-5 wires
@@ -221,7 +294,7 @@
   [{:seon.fs/keys [path content encoding] :or {encoding "utf-8"}}]
   (case (platform/host)
     :node (cond
-            (read-only?)         (denied path "filesystem is read-only (SEON_FS_READ_ONLY=1)")
+            (read-only?)         (denied path "filesystem is read-only (:seon.fs/read-only? true)")
             (out-of-scope? path) (scope-denied path)
             :else (try
                     (.writeFileSync fs path content encoding)
@@ -268,9 +341,9 @@
 ;; worked-example shapes in seon.render.default/what-you-can-do.
 ;; ============================================================
 
-(defn exists?
+(defn file-exists?
   "True/false convenience — checks via stat. Soft-fails to false on
-   any error."
+   any error. Named to avoid shadowing `cljs.core/exists?`."
   {:malli/schema [:=> [:cat :seon.fs/stat-request] :boolean]}
   [req]
   (:seon.fs/ok? (stat req)))
