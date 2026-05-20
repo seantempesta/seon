@@ -4,24 +4,24 @@ status: active
 tags: [architecture, flow, database]
 ---
 
-# Datalevin-Reactive Architecture
+# Datahike-Reactive Architecture
 
-> Functions declare what they read and write via Malli specs. The system handles pulling, transacting, and reactive dispatch. Datalevin IS the reactive backbone.
+> Functions declare what they read and write via Malli specs. The system handles pulling, transacting, and reactive dispatch. Datahike IS the reactive backbone.
 
 ## Overview
 
 Every function in Seon is a pure data transformer: it takes a map, returns a map. The system uses the function's `:malli/schema` to determine:
 
-- **What to pull** — identity keys (`{:seon.db/identity true}`) in the input spec tell the system which Datalevin entity to read
+- **What to pull** — identity keys (`{:seon.db/identity true}`) in the input spec tell the system which Datahike entity to read
 - **What to inject** — keys with `:default/fn` or `:default` are filled automatically if the caller doesn't provide them
 - **What to write** — identity keys in the output spec tell the system which entity to update
-- **What to trigger** — after a write, `d/listen!` fires and the [[concepts/renderer-discovery|shape graph]] discovers downstream functions whose input specs match the changed attributes
+- **What to trigger** — after a write, the tx-bus fires and the [[concepts/renderer-discovery|shape graph]] discovers downstream functions whose input specs match the changed attributes
 
 The agent writes functions and schemas. They never call `d/transact!`. The system controls all writes.
 
 ## Working Implementation
 
-Fully tested in `src/seon/test/bootstrap_v2.clj` — 29 tests, 0 failures. Self-contained with embedded Datalevin.
+Fully tested in `src/seon/test/bootstrap_v2.clj` — 29 tests, 0 failures. Self-contained with embedded Datahike.
 
 ## How It Works
 
@@ -75,7 +75,7 @@ Functions are classified by their specs — the agent doesn't choose a category:
    ::workouts (conj workouts {::exercise exercise ::weight weight ::reps reps})})
 ```
 
-The function doesn't know about Datalevin. It receives a map, returns a map.
+The function doesn't know about Datahike. It receives a map, returns a map.
 
 ### 3. The System Handles Everything
 
@@ -85,7 +85,7 @@ When `(call! {::fn-var #'add-workout! ::args {::exercise "Squat" ::weight 100.0 
 Step 1: RESOLVE INPUTS
   Input spec: [::ns-id ::workouts ::exercise ::weight ::reps]
   - ::ns-id has {:seon.db/identity true} + :default/fn → defaults to "seon.test.bootstrap-v2"
-  - System pulls entity from Datalevin where ::ns-id = "seon.test.bootstrap-v2"
+  - System pulls entity from Datahike where ::ns-id = "seon.test.bootstrap-v2"
   - Entity has ::workouts [...] → merged into args
   - ::exercise, ::weight, ::reps → from caller args
   - m/decode fills any remaining defaults
@@ -98,10 +98,10 @@ Step 2: CALL FUNCTION
 
 Step 3: TRANSACT RESULT
   Output spec has ::ns-id (identity key) → write back to entity:
-  (d/transact! conn [{::ns-id "seon.test.bootstrap-v2"
-                       ::workouts [...updated...]}])
+  (d/transact conn [{::ns-id "seon.test.bootstrap-v2"
+                      ::workouts [...updated...]}])
 
-Step 4: REACTIVE CASCADE (automatic via d/listen!)
+Step 4: REACTIVE CASCADE (automatic via tx-bus)
   Transaction report: #{::workouts} changed
   Shape graph query: which functions need ::workouts?
   → update-weekly-volume needs [::ns-id ::workouts]
@@ -140,16 +140,16 @@ Enhanced version of Malli's `mt/default-value-transformer` from `reference-code/
 
 ### Shape Graph Cache
 
-Shape graph queries (function→shape→entry joins in [[components/code-graph|Datalevin]]) are cached in a `defonce` atom. Cache key = set of changed attribute keywords. Invalidated when the namespace is re-indexed (code reload).
+Shape graph queries (function→shape→entry joins in [[components/code-graph|Datahike]]) are cached in a `defonce` atom. Cache key = set of changed attribute keywords. Invalidated when the namespace is re-indexed (code reload).
 
 9x faster lookups (12μs → 1.3μs per 1000 calls). Cache misses fall through to [[components/code-graph|`seon.graph.query`]] Datalog queries.
 
 ### Transaction Listener
 
-Uses `d/listen!` (Datalevin built-in) instead of wrapping `d/transact!`:
+The per-db conn-process flow exposes a tx-bus — every successful `d/transact` publishes its tx-report. The reactive dispatcher subscribes once per db:
 
 ```clojure
-(d/listen! conn :reactive-dispatch
+(tx-bus/subscribe! :seon
   (fn [tx-report]
     ;; Extract changed attrs from tx-data
     ;; Query shape graph cache for matching functions
@@ -159,7 +159,7 @@ Uses `d/listen!` (Datalevin built-in) instead of wrapping `d/transact!`:
     ))
 ```
 
-Listeners fire synchronously inside `d/transact!`, so recursive reactive chains work naturally — each downstream transact triggers the listener again.
+The tx-bus delivers reports synchronously on the conn-process thread, so recursive reactive chains work naturally — each downstream transact publishes again on the same bus.
 
 ### Connection Registry
 
@@ -176,12 +176,12 @@ Tracks active consumers (REPL sessions, browser tabs, agent connections):
 
 ## Entity Refs + Atom as Cached Pull
 
-Entities reference each other via Datalevin refs — not EDN-serialized collections. Each workout is its own entity with `:db/id`. The namespace entity has `::workouts` as a cardinality-many ref.
+Entities reference each other via Datahike refs — not EDN-serialized collections. Each workout is its own entity with `:db/id`. The namespace entity has `::workouts` as a cardinality-many ref.
 
 The atom holds the result of a recursive pull:
 
 ```clojure
-;; The atom IS a Datalevin pull result — :db/id at every level
+;; The atom IS a Datahike pull result — :db/id at every level
 {:db/id 3
  ::ns-id "seon.test.bootstrap-v2"
  ::screen :home
@@ -194,25 +194,25 @@ When the agent does `(swap! *ctx* assoc-in [::workouts 0 ::weight] 120.0)`:
 1. Watch fires with old + new atom states
 2. `diff-to-tx` compares by `:db/id` at each level
 3. Produces minimal transact: `[{:db/id 1 ::weight 120.0}]`
-4. `d/transact!` updates just that workout entity
-5. Listener fires → reactive chain
+4. `d/transact` updates just that workout entity
+5. tx-bus publishes → reactive chain
 
 The agent uses normal Clojure data manipulation (`swap!`, `assoc-in`, `update`). The system handles persistence automatically.
 
 ### Creating New Entities via Functions
 
 `add-workout!` returns a new workout entity (with `::workout-id`, without `:db/id`). The system:
-1. Transacts the new workout entity → Datalevin assigns `:db/id`
+1. Transacts the new workout entity → Datahike assigns `:db/id`
 2. Adds a ref from the namespace entity's `::workouts` to the new workout
-3. Transaction listener fires → downstream reactions
+3. tx-bus publishes → downstream reactions
 
 ## Performance
 
 | Metric | Value | Notes |
 |--------|-------|-------|
-| Chains/second | ~36 | Each chain = 4+ LMDB writes (separate entities) |
+| Chains/second | ~36 | Each chain = 4+ store writes (separate entities) |
 | Shape cache speedup | 9x | Eliminates Datalog join overhead |
-| LMDB write latency | ~5ms | Sync write is the throughput floor |
+| Store write latency | ~5ms | Sync write is the throughput floor |
 | Shape entities indexed | 138 | Across full codebase |
 | Entry entities indexed | 333 | Across full codebase |
 
@@ -229,16 +229,16 @@ This is correct for add/remove operations (which DO change the `::workouts` ref)
 ```clojure
 ;; Lifecycle
 (init! {::conn domain-conn ::graph-conn graph-conn})
-;; → registers d/listen! callback, returns {::results-acc atom}
+;; → subscribes to tx-bus, returns {::results-acc atom}
 
 (call! {::conn conn ::fn-var #'add-workout! ::args {::exercise "Squat" ...}
         ::results-acc results-acc})
 ;; → resolves inputs, calls function, transacts result
-;; → listener fires cascade automatically
+;; → tx-bus publishes; reactive cascade dispatches automatically
 ;; → returns {:result direct-result :chain [[fn-name result] ...]}
 
 (shutdown! {::conn conn})
-;; → d/unlisten!, clear cache and connections
+;; → unsubscribes from tx-bus, clears cache and connections
 
 ;; Consumer management
 (register-connection! {::conn-id "repl-1" ::conn-type :repl
@@ -254,7 +254,7 @@ This is correct for add/remove operations (which DO change the `::workouts` ref)
 - [[architecture/decisions/004-schema-unification]] — Malli as single source of truth
 - [[concepts/renderer-discovery]] — same specificity matching used for function discovery
 - `docs/prds/shape-graph/design.md` — shape graph PRD with full data model
-- `docs/prds/datalevin-reactive/design.md` — detailed PRD with transaction operations
+- `docs/prds/datalevin-reactive/design.md` — detailed PRD with transaction operations (historical name; describes the same pattern that now runs on Datahike)
 - `docs/prds/namespace-bootstrap/design.md` — v1 in-memory routing (predecessor)
 - `src/seon/test/bootstrap_v2.clj` — working implementation (29 tests)
 - `src/seon/test/bootstrap.clj` — v1 for comparison

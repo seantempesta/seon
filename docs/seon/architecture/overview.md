@@ -16,7 +16,7 @@ The result is a live namespace instance — it has state, it has routes, it can 
 
 ## How State Changes Propagate
 
-Once alive, a namespace's state lives in its ctx atom. When an agent (or any code) calls `swap!` on that atom, a chain of side effects fires. Atom watches on the ctx detect the change. One watch debounces and persists the new state to Datalevin via the [[components/database]] layer. Another watch triggers a global SSE broadcast via `seon.web.sse/refresh-all!`, signalling all connected browser clients to refresh.
+Once alive, a namespace's state lives in its ctx atom. When an agent (or any code) calls `swap!` on that atom, a chain of side effects fires. Atom watches on the ctx detect the change. One watch debounces and persists the new state to Datahike via the [[components/database]] layer. Another watch triggers a global SSE broadcast via `seon.web.sse/refresh-all!`, signalling all connected browser clients to refresh.
 
 When a namespace instance is created with `::track-clients? true`, a third watch fires targeted per-client pushes: the server calls the namespace's render function with the new ctx value, converts the Hiccup output to HTML, and sends the fragment directly to each connected client via their http-kit channel. The browser, using Datastar, swaps the fragment into the DOM without a full page reload. This targeted path is used for namespace page views; the global broadcast path is used for system-wide refresh events.
 
@@ -32,7 +32,7 @@ This is the [[concepts/request-reply]] pattern — one unified mechanism for bot
 
 ## How the Code Graph Powers Everything
 
-Seon is self-aware. The [[components/code-graph]] maintains a complete map of the codebase in Datalevin: every namespace, function, var, dependency edge, and schema registration. This graph is built by running clj-kondo analysis, extracting entities (functions, vars, deps), and ingesting them into the graph database.
+Seon is self-aware. The [[components/code-graph]] maintains a complete map of the codebase in Datahike: every namespace, function, var, dependency edge, and schema registration. This graph is built by running clj-kondo analysis, extracting entities (functions, vars, deps), and ingesting them into the graph database.
 
 The scanner runs at startup (in a background future to avoid blocking boot) and is triggered by the dev hook on code changes, keeping the graph fresh. Other components query it constantly: [[components/renderer]] uses it to discover render functions (functions whose `:malli/schema` output spec contains `:seon.render/html`). The namespace UI uses it to show dependency trees and caller chains. AI context builders use it to assemble relevant code for agent prompts.
 
@@ -51,18 +51,18 @@ Render functions produce either `:seon.render/html` (Hiccup for browsers) or `:s
 
 Startup is orchestrated by Integrant, configured via Aero. [[components/system-lifecycle]] manages a two-phase boot:
 
-**Phase 1** brings up foundational services: Datalevin connections (adopting the already-running external DB server), schema registration, the runtime registry, and the connection manager. These have no dependencies on the flow topology.
+**Phase 1** brings up foundational services: Datahike connections (opened in-process against the LMDB store on disk), schema registration, the runtime registry, and the connection manager. These have no dependencies on the flow topology.
 
 **Phase 2** builds on Phase 1: the infrastructure flow starts (with a sync barrier — `flow/ping` must succeed within 5 seconds), the runtime database initializes, the web server binds ports, the code graph scanner runs its first pass in a background future, and function instrumentation activates.
 
-Integrant's dependency graph enforces the phasing — components declare `#ig/ref` dependencies that determine init order. There is no explicit readiness gate; the dependency chain IS the gate. A Datalevin crash during Phase 1 fails fast, while a flow timeout in Phase 2 gives clear diagnostics about what's stuck.
+Integrant's dependency graph enforces the phasing — components declare `#ig/ref` dependencies that determine init order. There is no explicit readiness gate; the dependency chain IS the gate. A Datahike connection failure during Phase 1 fails fast, while a flow timeout in Phase 2 gives clear diagnostics about what's stuck.
 
 ## Three State Tracking Mechanisms
 
 The system tracks namespace state in three mechanisms:
 
 1. **ctx registry** (atom in ctx.clj) — maps instance-id to a registry entry containing the ctx atom, render fn, client set, and scheduler. This is the "live state" view.
-2. **runtime registry** (atom + Datalevin in runtime.clj) — tracks instance lifecycle: when started, current status, configuration. This is the "administrative" view.
+2. **runtime registry** (atom + Datahike in runtime.clj) — tracks instance lifecycle: when started, current status, configuration. This is the "administrative" view.
 3. **flow/ping** — the flow topology knows which processes are running. This is the "infrastructure" view.
 
 A namespace can be "running" in the runtime registry but have no ctx atom (if creation failed partway). Or it can have a ctx atom but no flow process (if it's a local-only namespace). Or the flow process can be alive but runtime shows "stopped" (if a restart was interrupted).

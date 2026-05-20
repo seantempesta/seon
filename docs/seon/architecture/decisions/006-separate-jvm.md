@@ -13,7 +13,7 @@ The original agent isolation plan proposed creating namespace clones (e.g., `seo
 
 ## Decision
 
-**Separate JVMs per agent.** Each agent gets its own JVM process with isolated nREPL, Malli registry, and Datalevin client connection. The namespace cloning approach is abandoned.
+**Separate JVMs per agent.** Each agent gets its own JVM process with isolated nREPL, Malli registry, and Datahike connection. The namespace cloning approach is abandoned.
 
 ## Rationale
 
@@ -43,10 +43,12 @@ Pre-warmed JVM pool eliminates startup latency:
 
 ### Architecture
 
-- Agent JVMs connect to Datalevin server over TCP (port 8898) -- no local database needed
+- Agent JVMs reach the database through the orchestrator over the flow harness channel -- no local LMDB store in the agent process
 - nREPL over TCP is the transport layer (already proven by MCP server)
 - `seon.flow.pool` manages claim!/release-session! lifecycle
 - Pool of 2-3 pre-warmed JVMs at ~186MB each
+
+> **Note (Datahike migration, 2026-04):** This ADR originally described agents holding a Datalevin client to a shared server on port 8898. With the move to embedded Datahike on LMDB, LMDB's single-writer-process model means agents no longer open the store directly. DB requests from agents route through `topology/request!` to the orchestrator's per-db conn-process, which owns the LMDB handle. The isolation properties (separate Malli registry, separate memory, OS-level crash isolation) still hold.
 
 ## Consequences
 

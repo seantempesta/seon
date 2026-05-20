@@ -9,7 +9,7 @@ tags: [decision, architecture, database, schema]
 
 ## Context
 
-Entity references in Datalevin accept two forms: `pos-int?` (entity IDs from `d/pull`) and lookup refs (`[:identity-attr value]`). Before unification, ref attributes were typed as `:any` or `:int` with ad-hoc `:db/valueType :db.type/ref` properties, scattered across 5 attributes in runtime and ingest modules.
+Entity references in Datahike accept two forms: `pos-int?` (entity IDs from `d/pull`) and lookup refs (`[:identity-attr value]`). Before unification, ref attributes were typed as `:any` or `:int` with ad-hoc `:db/valueType :db.type/ref` properties, scattered across 5 attributes in runtime and ingest modules.
 
 ## Decision
 
@@ -41,7 +41,7 @@ Define `:seon.db/ref` as a custom Malli type in `seon.schema` that accepts both 
 
 - **`:int` with `:db/valueType` property** -- doesn't accept lookup refs, which are vectors.
 - **`:any`** -- banned. No validation, no type safety.
-- **Separate types for entity ID vs lookup ref** -- unnecessary complexity. Both resolve to the same Datalevin ref at transact time.
+- **Separate types for entity ID vs lookup ref** -- unnecessary complexity. Both resolve to the same Datahike ref at transact time.
 
 ## Details
 

@@ -9,17 +9,17 @@ tags: [decision, architecture, database, schema]
 
 ## Context
 
-Datalevin (and all EAV databases) have no concept of a null datom -- an attribute either has a value or does not exist. Transacting `{:foo nil}` throws. Meanwhile, Malli's `[:maybe X]` validates both nil and X, creating a semantic gap at the persistence boundary. Naive nil-stripping is lossy: it turns "clear this field" into "leave unchanged."
+Datahike (and all EAV databases) have no concept of a null datom -- an attribute either has a value or does not exist. Transacting `{:foo nil}` throws. Meanwhile, Malli's `[:maybe X]` validates both nil and X, creating a semantic gap at the persistence boundary. Naive nil-stripping is lossy: it turns "clear this field" into "leave unchanged."
 
 ## Decision
 
-Model "no value" as **key absence**, never as nil. For persisted schemas: `{:optional true}` on the map entry, never `[:maybe X]`. No nil values cross the Datalevin boundary.
+Model "no value" as **key absence**, never as nil. For persisted schemas: `{:optional true}` on the map entry, never `[:maybe X]`. No nil values cross the Datahike boundary.
 
 ## Rules
 
 1. **`{:optional true} X`** -- key may be absent. If present, value must match X. Absent key = no value.
-2. **No `[:maybe X]` on persisted schemas.** Banned. Generators produce nil ~50% of the time, which crashes Datalevin.
-3. **No nil values in entity maps** at the DB boundary. `db/transact!` validates via Malli before Datalevin sees the data.
+2. **No `[:maybe X]` on persisted schemas.** Banned. Generators produce nil ~50% of the time, which crashes Datahike.
+3. **No nil values in entity maps** at the DB boundary. `db/transact!` validates via Malli before Datahike sees the data.
 4. **Retraction is explicit.** To clear a field on an existing entity, use `[:db/retract eid :attr]`. Omitting a key from a transact map means "leave unchanged."
 5. **Pull output matches schema directly.** `d/pull` omits absent attributes -- no hydration layer needed. `(:foo pulled-entity)` returns nil naturally via Clojure's map lookup.
 
@@ -27,7 +27,7 @@ Model "no value" as **key absence**, never as nil. For persisted schemas: `{:opt
 
 - **Eliminates an entire class of bugs.** No nil-stripping layers, no nil-to-retraction conversion, no hydration on read. Pull output is directly Malli-valid.
 - **One representation of "no value."** Absence everywhere. No confusion about whether you're looking at app-level nil or DB-level absence.
-- **Matches Datalevin's actual semantics.** Zero impedance mismatch.
+- **Matches Datahike's actual semantics.** Zero impedance mismatch.
 - **Simplest of three options evaluated.** Option B (nil-stripping + hydration) and Option C (mixed boundary) both required two new layers and introduced "which representation am I looking at?" confusion.
 
 ## Rejected Alternatives

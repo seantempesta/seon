@@ -38,9 +38,9 @@ Flow was designed for concurrent data processing pipelines (Clojure threads proc
 
 ### Where Flow Doesn't Apply (kept current approach)
 
-- **Agent lifecycle** -- Integrant for resource management (nREPL, Datalevin per agent)
+- **Agent lifecycle** -- Integrant for resource management (nREPL, Datahike per agent)
 - **External process management** -- Direct subprocess management for Claude CLI
-- **Persistence** -- Datalevin for all data storage
+- **Persistence** -- Datahike for all data storage
 - **Schema discovery** -- Malli registry (Flow has no contracts concept)
 
 ## Consequences
@@ -62,8 +62,8 @@ Flow was designed for concurrent data processing pipelines (Clojure threads proc
 
 Flow is used for:
 
-- `seon.db.datalevin.writer` -- serialized DB writes
-- `seon.db.datalevin.reader` -- serialized DB reads
+- `seon.db.datahike.conn-process` -- serialized per-db reads and writes (one conn-process per db)
+- `seon.db.datahike.flow` -- routing front for `seon.db` requests into the conn-process
 - `seon.flow.topology` -- unified request-reply backbone
 - `seon.web.sse.flow` -- SSE broadcasting
 

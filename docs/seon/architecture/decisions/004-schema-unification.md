@@ -9,21 +9,21 @@ tags: [decision, architecture, schema, database, flow]
 
 ## Context
 
-Seon maintained two parallel schema systems that diverged: Malli schemas for validation and hardcoded Datalevin schema maps for storage. 15 LMDB assertion failures in 3 days. Root cause: bad data bypassed Malli and crashed Datalevin's C layer (e.g., String where Keyword expected causes `(namespace value)` to throw through LMDB's JNI layer).
+Seon maintained two parallel schema systems that diverged: Malli schemas for validation and hardcoded database schema maps for storage. 15 LMDB assertion failures in 3 days. Root cause: bad data bypassed Malli and reached the store layer (e.g., String where Keyword expected causes `(namespace value)` to throw inside transaction processing).
 
 ## Decision
 
-Malli is the **single source of truth**. `schema/register!` carries all metadata -- type and persistence properties. The bridge derives Datalevin schemas automatically. No hardcoded Datalevin schemas anywhere.
+Malli is the **single source of truth**. `schema/register!` carries all metadata -- type and persistence properties. The bridge derives Datahike schemas automatically. No hardcoded Datahike schemas anywhere.
 
 ## Phases
 
 | Phase | What | Status |
 |-------|------|--------|
-| 1 | Validation gate in `db/transact!` -- Malli validates before Datalevin sees data | Done |
+| 1 | Validation gate in `db/transact!` -- Malli validates before Datahike sees data | Done |
 | 2 | Generative pipeline test (`assert-pipeline-roundtrip!`) -- generate, transact, pull, validate | Done |
 | 3a-d | Eliminate hardcoded schemas in ctx, repl, trace, runtime, ingest (72+ attrs across 5 modules) | Done |
 | 4 | Nippy inter-JVM channel (see [[architecture/decisions/001-nippy-serialization]]) | Done |
-| 5 | Startup consistency check -- validate all registered schemas derive valid Datalevin types at boot | Done |
+| 5 | Startup consistency check -- validate all registered schemas derive valid Datahike types at boot | Done |
 | 5b | Unified registration -- `register!` carries `:seon.db/identity`, `:seon.db/unique`; bridge reads from leaf properties; entity schema vars removed from production | Done |
 
 ## The Pattern
@@ -36,7 +36,7 @@ Malli is the **single source of truth**. `schema/register!` carries all metadata
 (schema/register! :seon.foo/parent :seon.db/ref)
 
 ;; Bridge translates :seon.db/* -> :db/* automatically.
-;; db/transact! validates via Malli before Datalevin.
+;; db/transact! validates via Malli before Datahike.
 (db/transact! :seon [{:seon.foo/id "abc" :seon.foo/name "hello"}])
 
 ```
@@ -44,7 +44,7 @@ Malli is the **single source of truth**. `schema/register!` carries all metadata
 ## Key Design Decisions Within
 
 - **Persistence properties on leaf schema, not entity map entries.** `{:seon.db/identity true}` lives on the Malli schema via `register!`, not as `:db/unique` on a `:map` entry. One surface, define once, inherit everywhere. (See Phase 5b in design doc.)
-- **`:seon.db/*` namespace, not `:db/*`.** Application code never writes raw Datalevin properties. The bridge translates. Clean separation of concerns.
+- **`:seon.db/*` namespace, not `:db/*`.** Application code never writes raw Datahike properties. The bridge translates. Clean separation of concerns.
 - **Banned types** rejected at registration: `:any`, `:some`, `:nil`, `[:maybe X]` on persisted data, mixed-type enums.
 
 ## Still Open
