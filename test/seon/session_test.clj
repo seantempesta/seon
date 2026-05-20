@@ -6,7 +6,12 @@
 
    Spawns a real JVM on a port outside the pool's default range (7900-7902)
    and inside its agent range (7980-7999). Slow but deterministic — the only
-   way to verify the cross-JVM nREPL plumbing actually works."
+   way to verify the cross-JVM nREPL plumbing actually works.
+
+   Marked `^:integration`: requires the live system (`:seon.db/flow` with
+   `:seon.session` registered, `seon.flow/pool` for agent spawning, free
+   ports in 7980-7999). Excluded from `bin/test --unit`; run via
+   `bin/test --all` or `clj -M:test -m kaocha.runner integration`."
   (:require [clojure.test :refer [deftest is testing]]
             [seon.db :as db]
             [seon.flow.pool :as pool]
@@ -30,7 +35,7 @@
                   (recur (db/pull-by-name :seon.session '[*]
                                           [:seon.session/agent session-id])))))))
 
-(deftest launch-eval-checkpoint-stop-roundtrip
+(deftest ^:integration launch-eval-checkpoint-stop-roundtrip
   (testing "end-to-end agent JVM lifecycle"
     (let [launched (atom nil)]
       (try
@@ -85,7 +90,7 @@
           (when-let [sid @launched]
             (safe-stop! sid)))))))
 
-(deftest agent-jvm-relays-seon-db-to-orchestrator
+(deftest ^:integration agent-jvm-relays-seon-db-to-orchestrator
   (testing "agent JVM -> relay -> orchestrator -> datahike round-trip"
     (let [launched (atom nil)
           test-id "rly001"]
@@ -136,7 +141,7 @@
                             [:seon.orchestrator.session/id test-id]]])
             (catch Exception _)))))))
 
-(deftest auto-checkpoint-on-ctx-change
+(deftest ^:integration auto-checkpoint-on-ctx-change
   (testing "launch! schedules a watcher that auto-checkpoints on *ctx* change"
     (let [launched (atom nil)]
       (try

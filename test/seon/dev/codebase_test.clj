@@ -1,7 +1,8 @@
 (ns seon.dev.codebase-test
   "Tests for the codebase namespace - file introspection utilities."
-  (:require [clojure.test :refer :all]
-            [clojure.java.io :as io]
+  (:require [clojure.java.io :as io]
+            [clojure.string :as str]
+            [clojure.test :refer :all]
             [seon.dev.codebase :as cb]))
 
 ;;; ---------------------------------------------------------------------------
@@ -51,7 +52,7 @@
   (testing "Parses namespace from real project files"
     ;; Test with actual files in the project
     (is (= 'seon.core (cb/file->namespace {::cb/file-path "src/seon/core.clj"})))
-    (is (= 'seon.schema (cb/file->namespace {::cb/file-path "src/seon/schema.clj"})))
+    (is (= 'seon.ctx (cb/file->namespace {::cb/file-path "src/seon/ctx.clj"})))
     (is (= 'seon.dev.codebase (cb/file->namespace {::cb/file-path "src/seon/dev/codebase.clj"}))))
 
   (testing "Returns nil for non-existent files"
@@ -76,7 +77,7 @@
 (deftest file->test-namespace-test
   (testing "Derives test namespace from source file"
     (is (= 'seon.core-test (cb/file->test-namespace {::cb/file-path "src/seon/core.clj"})))
-    (is (= 'seon.schema-test (cb/file->test-namespace {::cb/file-path "src/seon/schema.clj"}))))
+    (is (= 'seon.ctx-test (cb/file->test-namespace {::cb/file-path "src/seon/ctx.clj"}))))
 
   (testing "Test files return unchanged namespace"
     ;; Test namespace already ends with -test

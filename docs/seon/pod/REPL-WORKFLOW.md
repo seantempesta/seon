@@ -1,7 +1,7 @@
 ---
 type: reference
 status: active
-tags: [reference, pod, cljs, repl, mcp]
+tags: [reference, pod, cljs, mcp]
 ---
 
 # CLJS pod — REPL workflow (V0 / pre-WASM)

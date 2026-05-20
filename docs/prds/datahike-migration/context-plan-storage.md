@@ -45,6 +45,7 @@ Desired properties for the persisted form:
 ## 4. Options evaluated
 
 ### (a) Single EDN-blob attribute on the agent
+
 `:seon.agent/plan` :string, value is `pr-str`'d vector.
 
 - Spec'd: only at the blob boundary; per-entry validation is your code's job.
@@ -58,17 +59,20 @@ Desired properties for the persisted form:
 Verdict: easy and tempting, but fails properties 1, 3, 4, 5, and 7. Reject.
 
 ### (b) cardinality:many ref set
+
 `:seon.agent/plan-entries :db.type/ref :db.cardinality/many` → entry entities.
 
 Ordering not preserved (§3). Reject without further analysis.
 
 ### (c) Per-entry entity with `:position` attribute (BASELINE)
+
 ```
 :seon.plan.entry/plan      :db.type/ref       cardinality/one  index=true
 :seon.plan.entry/position  :db.type/long      cardinality/one  index=true
 :seon.plan.entry/key       :db.type/keyword   cardinality/one
 :seon.plan.entry/source    :db.type/string    cardinality/one
 :seon.plan.entry/kind      :db.type/keyword   cardinality/one   ;; :literal | :computed
+
 ```
 
 - Spec'd: yes — each attr registered through `seon.schema/register!`.
@@ -82,6 +86,7 @@ Ordering not preserved (§3). Reject without further analysis.
 Verdict: solid, passes all properties, weak only on dense renumbering.
 
 ### (d) Linked list (`:seon.plan.entry/next :db.type/ref`)
+
 - Insertion: rewires two pointers, cheap.
 - Read order: requires walking the list O(N) — no single sorted scan from the index.
 - Queryable per index: no; "what's at position 3" means traversal.
@@ -90,6 +95,7 @@ Verdict: solid, passes all properties, weak only on dense renumbering.
 Verdict: best for insertion-heavy workloads, worst for "what's at index N" or "give me entries in order". For the agent's read-dominated loop that wants the plan in order each tick, this is the wrong tradeoff.
 
 ### (e) Composite tuple `[plan position]` (RECOMMENDED extension of c)
+
 Add to (c):
 
 ```
@@ -99,6 +105,7 @@ Add to (c):
   :db/cardinality :db.cardinality/one
   :db/unique :db.unique/identity
   :db/index true
+
 ```
 
 The tuple is **derived** — you keep writing `:plan` and `:position` separately and datahike maintains the composite (`db/transaction.cljc:408-440`). Per (§3) the tuple is sorted in AVET lexicographically, so `d/datoms :avet :seon.plan.entry/plan+position [plan-id]` is a contiguous slice in position order.
@@ -114,6 +121,7 @@ The tuple is **derived** — you keep writing `:plan` and `:position` separately
 Verdict: strictly dominates (c) for the read path. Same write cost.
 
 ### (f) Sparse positions / fractional indexing
+
 Use `:position :db.type/double` and insert between two entries by averaging. No renumbering on insert.
 
 - All (c)/(e) properties hold.
@@ -140,6 +148,7 @@ Malli schema (using seon's `schema/register!`):
                   {:seon.db/tuple-attrs [:seon.plan.entry/plan :seon.plan.entry/position]
                    :seon.db/identity true
                    :seon.db/index true})
+
 ```
 
 Tx:
@@ -158,6 +167,7 @@ Tx:
     :seon.plan.entry/key :seon.agent.ctx/recent-messages
     :seon.plan.entry/kind :computed
     :seon.plan.entry/source "(fn [acc] (d/q ...))"}])
+
 ```
 
 Read the plan in order (single contiguous slice over AVET):
@@ -168,12 +178,14 @@ Read the plan in order (single contiguous slice over AVET):
      (map #(d/pull @conn '[:seon.plan.entry/key
                            :seon.plan.entry/kind
                            :seon.plan.entry/source] %)))
+
 ```
 
 Update one entry's source (touches one entry's datoms only):
 
 ```clojure
 (db/transact! :seon [[:db/add entry-eid :seon.plan.entry/source "new source"]])
+
 ```
 
 Insert at position 1, shifting 1→2, 2→3, …: emit retracts+asserts for `:position` on each affected entry in a single tx. For the agent's plan sizes this is cheap; for larger plans, switch to option (f).
@@ -182,6 +194,7 @@ Per-entry history (asks the property-6 question for free):
 
 ```clojure
 (d/pull (d/as-of @conn week-ago) '[*] entry-eid)
+
 ```
 
 ## 6. Tradeoffs we accept

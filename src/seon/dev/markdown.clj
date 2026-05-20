@@ -558,7 +558,9 @@
     :database :schema :flow :web :agent :trading :health
     :prd :decision :research
     :dashboard :index
-    :capability :milestone :orchestrator :archive})
+    :capability :milestone :orchestrator :archive
+    ;; Substrate / pod domain (Phase 3 WASM containment work).
+    :pod :wasm :cljs :mcp})
 
 (defn- parse-tag-list
   "Parse a frontmatter tags value like '[database, schema]' into keywords."

@@ -1,13 +1,12 @@
 ---
 type: reference
 status: active
-tags: [reference, cljs, shadow-cljs, mcp, runbook]
+tags: [reference, cljs, mcp]
 ---
 
 # CLJS dev loop — first 5 minutes
 
 How to bring the V0 CLJS pod runtime up and verify it via MCP eval. Aimed at a fresh agent or returning Sean after a context reset.
-
 
 ## TL;DR — three commands
 
@@ -21,6 +20,7 @@ node out/client/main.js
 
 # Editor / Claude MCP: eval against the running runtime
 mcp__seon_cljs__eval { code: "@seon.client/!state" }
+
 ```
 
 After `clj -M:cljs watch client` reports `[:client] Build completed`, the watcher writes `.shadow-cljs/nrepl.port` (pinned to `:7889`). `node out/client/main.js` should print `[client] datahike-cljs smoke test PASS — 6 datoms` on boot. Then `mcp__seon_cljs__eval` reaches the runtime via shadow-cljs's nREPL piggyback.
@@ -34,6 +34,7 @@ After `clj -M:cljs watch client` reports `[:client] Build completed`, the watche
 shadow nREPL port: 7889
 builds: [{:build :client, :runtimes 1}]
 mcp sessions: 0
+
 ```
 
 If `runtime_status` returns `<no watcher>`, the watcher isn't running. Restart Terminal 1.
@@ -51,6 +52,7 @@ mcp__seon_cljs__eval {
 ;; Expected stdout:
 ;; [client] datahike-cljs smoke test ...
 ;; {:rows #{["Alpha" 1] ["Seon" 2] ["Datahike" 3]}, :status :pass, :datoms 6}
+
 ```
 
 ### 3. The patches are loaded
@@ -59,6 +61,7 @@ mcp__seon_cljs__eval {
 mcp__seon_cljs__eval { code: "@seon.client/!state" session_id: "<sid>" }
 ;; Expected:
 ;; => {:boot-at "...", :reload-count <N>, :heartbeat-id #object [Timeout ...]}
+
 ```
 
 The presence of a non-nil `:heartbeat-id` confirms `start-heartbeat!` ran. The patches' state lives in `seon.client/patches-applied?` (private `defonce`); checking `(boolean ...)` from inside the ns confirms.
@@ -71,6 +74,7 @@ Edit any `.cljs` file in `src/seon/`, save. The watcher recompiles within ~1s; t
 ;; Verify reload landed:
 mcp__seon_cljs__eval { code: "(:reload-count @seon.client/!state)" session_id: "<sid>" }
 ;; => 1, 2, 3, ... after each save
+
 ```
 
 ## Stopping
@@ -81,6 +85,7 @@ pkill -f "clj.*shadow.cljs.devtools.cli watch"
 pkill -f "node out/client/main.js"
 
 # Or, if you started them via Claude background tasks: TaskStop them.
+
 ```
 
 ## Common failure modes
@@ -103,4 +108,3 @@ After the smoke test is green, the V0 work queue per spec-01 §7 is:
 - **V0-B-3** — wire konserve `:tiered :memory + :sqlite-file`.
 - **V0-B-4** — `src/seon/ai.cljs` + `src/seon/ai/deepseek.cljs` delegating to clj-llm.
 - **V0-B-5..V0-B-9** — trigger dispatch, session lifecycle, end-to-end LLM loop, define-fn, snapshot/restore.
-
