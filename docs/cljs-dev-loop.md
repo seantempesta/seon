@@ -8,13 +8,12 @@ tags: [reference, cljs, shadow-cljs, mcp, runbook]
 
 How to bring the V0 CLJS pod runtime up and verify it via MCP eval. Aimed at a fresh agent or returning Sean after a context reset.
 
-Authoritative architecture: [`consumer-spec/spec-01-webassembly-agents.md`](../../specifications/spec-01-webassembly-agents.md) — start at §6.10 for current state, §7 for the V0-B-2..V0-B-9 queue.
 
 ## TL;DR — three commands
 
 ```bash
 # Terminal 1 (this seon repo): shadow-cljs watcher
-cd /Users/you/src/seon
+cd /Users/sean/src/seon
 clj -M:cljs watch client
 
 # Terminal 2 (same seon repo): Node host loads the bundle
@@ -105,4 +104,3 @@ After the smoke test is green, the V0 work queue per spec-01 §7 is:
 - **V0-B-4** — `src/seon/ai.cljs` + `src/seon/ai/deepseek.cljs` delegating to clj-llm.
 - **V0-B-5..V0-B-9** — trigger dispatch, session lifecycle, end-to-end LLM loop, define-fn, snapshot/restore.
 
-Lane coordination for the `.cljs`-alongside-`.clj` migration: [`consumer-docs/2026-05-16-cljc-migration-plan.md`](../../docs/2026-05-16-cljc-migration-plan.md).

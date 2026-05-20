@@ -28,7 +28,7 @@
     :db/valueType   :db.type/string}])
 
 (def ^:private tag-pool
-  ["seon" "seon" "datahike" "wasmer" "edgejs" "clojure" "cljs"
+  ["seon" "datahike" "wasmer" "edgejs" "clojure" "cljs"
    "research" "spec" "todo" "meeting" "idea" "decision"])
 
 (defn- pick-tags

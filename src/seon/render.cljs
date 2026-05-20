@@ -99,8 +99,8 @@
 ;;      stub returns nil.
 ;;
 ;;   2. globalThis walker — for SYSTEM fns from the :client bundle
-;;      (seon.render.default/view, seon.example/setup!, anything
-;;      compiled into out/client/main.js). Shadow-cljs in :node-script
+;;      (e.g. seon.render.default/view, or any consumer-side render
+;;      fn compiled into out/client/main.js). Shadow-cljs in :node-script
 ;;      target emits namespace objects at goog-global paths matching
 ;;      the source namespace (with per-segment munge). We walk the
 ;;      path with `goog.object/get` and `cljs.core/munge`.

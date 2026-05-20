@@ -43,9 +43,6 @@
     ;; Broadcast tx-listener — A-6. Required here so the build includes
     ;; it; start-agent! calls (web.broadcast/install!) at boot.
     [seon.web.broadcast :as web.broadcast]
-    ;; V0.5 demo bootstrap — A-8. Transacts alice's initial render
-    ;; slots so a fresh page load shows the welcome tile + chat form.
-    [seon.example :as demo]
     ;; Local-machine capability surface — A-9. Required so the agent
     ;; can call (seon.fs/read-file ...) + (seon.platform/host) from
     ;; bootstrap-CLJS eval.
@@ -226,11 +223,11 @@
     :db/cardinality :db.cardinality/one}
 
    ;; --- Notes — durable learned facts (V0.5 minimal memory) ---
-   ;; The agent writes a note whenever she discovers something worth
+   ;; The agent writes a note whenever it discovers something worth
    ;; remembering: who someone is, what a project is about, where a
-   ;; file lives. Next conversation she queries her own notes before
+   ;; file lives. Next conversation it queries its own notes before
    ;; re-reading files. Schema is intentionally narrow tonight; the
-   ;; full world-model lands later (see docs/research/2026-05-14-…).
+   ;; full world-model lands later.
    {:db/ident :seon.note/id
     :db/valueType :db.type/string
     :db/cardinality :db.cardinality/one
@@ -399,10 +396,7 @@
         ;; connections when the rendered string changes. Also wires the
         ;; render-on-connect watcher so a fresh /sse open gets the
         ;; current state immediately.
-        _ (web.broadcast/install!)
-        ;; V0.5 demo bootstrap (A-8) — transact alice's initial render
-        ;; slots so the page tile renders on first browser load.
-        _ (await (demo/setup!))]
+        _ (web.broadcast/install!)]
     (log/info-console! "seon.client" "agent started"
                        {:agent id :ns (str ns) :port port :port-file port-file})
     {:seon.agent/id id :seon.agent/ns ns

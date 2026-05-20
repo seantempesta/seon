@@ -340,9 +340,9 @@
 ;; ============================================================
 
 (def default-id
-  "The V0.5 agent's id. Renamed from \"seon\" → \"seon\" per Sean
-   2026-05-19. Lowercase keeps URLs (/chat?agent=seon) + namespace
-   (seon.agent.seon) consistent; displays capitalize as \"Alpha\"."
+  "The V0.5 agent's id. Lowercase keeps URLs (/chat?agent=seon) and
+   namespace (seon.agent.seon) consistent; consumers display it with
+   their own capitalization rule."
   "seon")
 (def default-ns (home-ns default-id))
 

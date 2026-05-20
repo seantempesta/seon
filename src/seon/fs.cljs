@@ -139,7 +139,7 @@
    :seon.fs/error (or (some-> e .-message) (str e))})
 
 ;; ============================================================
-;; Demo-mode capability guards (added 2026-05-19 for the demo).
+;; Demo-mode capability guards (env-var-driven read-only / scoped-root).
 ;;
 ;; Two env vars, both opt-in:
 ;;

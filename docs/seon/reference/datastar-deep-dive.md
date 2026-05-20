@@ -333,7 +333,7 @@ Sets HTML attribute values.
 <!-- Multiple attributes -->
 <div data-attr="{
   title: $tooltip,
-  'title': $label
+  'data-label': $label
 }"></div>
 
 ```

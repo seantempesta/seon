@@ -181,7 +181,6 @@ As of 2026-05-16, for spec-01 `seon.*` API surfaces the V0 substrate uses **`.cl
 
 `seon.schema` is the one exception — promoted to `.cljc` 2026-05-16 because the file was 100% platform-portable. Other promotions wait until both sides converge on the spec §3 map-in/map-out + `*conn*` shape.
 
-Full plan (call-site counts, JVM topology collapse to one-conn-per-user, test-fixture migration scope, lane coordination): `consumer-docs/2026-05-16-cljc-migration-plan.md` (in the seon parent tree).
 
 ---
 

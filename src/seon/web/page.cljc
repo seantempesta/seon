@@ -33,7 +33,7 @@
        [:head
         [:meta {:charset "utf-8"}]
         [:meta {:name "viewport" :content "width=device-width, initial-scale=1.0"}]
-        [:title "Alpha"]
+        [:title "Seon"]
         [:link {:rel "stylesheet" :href "/css/output.css"}]
         [:script {:type "module" :src "/js/datastar.js"}]
         ;; Console-forwarder — pipe WebView console.log/warn/error to

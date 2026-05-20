@@ -124,12 +124,12 @@ Verdict: if reorder-without-renumber is a real requirement, this is the right ch
 
 ## 5. Recommendation
 
-**Adopt option (e): per-entry entity with a composite-tuple index.** Defer option (f) — Seon plans are short (<20 entries), so renumber-on-insert costs are trivially small and not worth the precision-management overhead of fractional indices yet.
+**Adopt option (e): per-entry entity with a composite-tuple index.** Defer option (f) — Plans are short (<20 entries), so renumber-on-insert costs are trivially small and not worth the precision-management overhead of fractional indices yet.
 
 Malli schema (using seon's `schema/register!`):
 
 ```clojure
-;; in seon.agent.plan (or seon's own ns; this file uses :seon.* for example only)
+;; in seon.agent.plan (or the consumer's own ns; this file uses :seon.* for example only)
 (schema/register! :seon.plan.entry/plan      :seon.db/ref)
 (schema/register! :seon.plan.entry/position  :int)
 (schema/register! :seon.plan.entry/key       :keyword)
@@ -197,5 +197,5 @@ Per-entry history (asks the property-6 question for free):
 - **Bridge gap (code smell).** `seon/src/seon/db/datahike/schema.clj` does not emit any tuple attrs from Malli. The simplest fix is to recognize `[:tuple ...]` schemas in `schema->attr-partial` and forward `:seon.db/tuple-attrs` / `:seon.db/tuple-types` / `:seon.db/tuple-type` properties to `:db/tupleAttrs` / `:db/tupleTypes` / `:db/tupleType`. Path to verify: REPL-build a tiny in-memory db with a composite tuple, transact entries, and confirm `d/datoms :avet plan+position [plan-id]` returns position-ordered entries. Worth ~15 minutes of REPL probing before committing the bridge change.
 - **History under composite-tuple changes.** I assume the temporal-avet index logs the auto-maintained composite-tuple datom on each constituent change, so `(d/as-of db t)` correctly reconstructs `plan+position` at time `t`. The transaction code in `db/transaction.cljc:273-279,408-440` queues the tuple alongside the constituents but I did not chase every branch into the temporal index path. REPL probe: assert plan at position 5, change to 6, `as-of` the earlier tx, scan AVET → expect to see position 5.
 - **Tuple range scan API surface.** `d/datoms :avet :plan+position [plan-id]` is shown working in `reference/datahike/test/datahike/test/tuples_test.cljc:558-564` with both partially-bound and fully-bound prefixes. We rely on prefix scans returning in tuple order — this is consistent with how `slice-from-to-tree` builds comparators (`reference/datahike/src/datahike/index/persistent_set.cljc:34-…`), but I did not trace every comparator branch for the partially-bound case. REPL probe: 10 entries, mixed plan IDs, scan one plan, confirm contiguous and ordered.
-- **Reorder-heavy workloads.** If Seon turns out to insert at index 0 a lot (rather than appending), we should escalate to option (f) before the renumber tx-size becomes a UX issue. The current default design (start-at-zero + append observations) suggests appends dominate, but worth a sanity check once the agent loop is running on the substrate.
+- **Reorder-heavy workloads.** If a consumer turns out to insert at index 0 a lot (rather than appending), we should escalate to option (f) before the renumber tx-size becomes a UX issue. The current default design (start-at-zero + append observations) suggests appends dominate, but worth a sanity check once the agent loop is running on the substrate.
 - **Source-string Malli predicate.** Per §6, we want a custom Malli validator on `:seon.plan.entry/source` that confirms `read-string` succeeds and (for `:computed`) that the result is a 1-arg fn form. This is a registration concern, not a datahike concern — flagging it so it doesn't get forgotten when this lands.

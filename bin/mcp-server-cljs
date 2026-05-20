@@ -33,7 +33,7 @@
 
 (def project-root
   (or (System/getenv "SEON_CLJS_PROJECT")
-      "/Users/you/src/seon"))
+      "/Users/sean/src/seon"))
 
 (def shadow-port-file (str project-root "/.shadow-cljs/nrepl.port"))
 

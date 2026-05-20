@@ -106,9 +106,9 @@
    the cheapest way to answer 'where do things about X live?' and
    it'll never return a path that doesn't exist (unlike guessing).
 
-     (seon.toolkit/find-by-name #\"(?i)seon\")
-     ;; ⇒ [\"…/consumer-CLAUDE.md\"
-     ;;    \"…/consumer-docs/2026-05-11-architecture-notes.md\"
+     (seon.toolkit/find-by-name #\"(?i)readme\")
+     ;; ⇒ [\"…/project/README.md\"
+     ;;    \"…/project/docs/getting-started.md\"
      ;;    …]
 
    Returns at most `limit` paths (default 40)."
@@ -223,9 +223,9 @@
   "Record a durable note. Returns the new note's id.
 
      (seon.toolkit/note!
-       {:topic   \"Demo\"
-        :content \"Example contact and short bio.\"
-        :sources [\"/Users/you/src/your-project/docs/people.md\"]
+       {:topic   \"meeting-notes\"
+        :content \"Example note showing the call shape.\"
+        :sources [\"/path/to/some/file.md\"]
         :agent-id \"seon\"})
 
    `:agent-id` defaults to the V0 default agent id when omitted."

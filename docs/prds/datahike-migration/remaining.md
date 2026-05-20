@@ -374,7 +374,7 @@ Per the seon CLAUDE.md "Report Code Smells" rule. None of these are blocking boo
 
 8. **`seon.db/transact!` legacy branch (`:else`) throws on every call to an unregistered db-name.** With cluster 3 deletions, the `:else` branch can be replaced with an explicit `(throw (ex-info "No conn-process for db-name; not registered in :seon.db/flow" {...}))` — better operator UX than the current "Connection manager not available -- is the system running?" message that misleads about root cause.
 
-9. **`seon.flow.pool` carries datalevin-uri plumbing in its public API surface (`::datalevin-port`, `::datalevin-uri` in pool status, `:datalevin-server` Integrant arg).** External callers building pools could conceivably pass these. Verify nothing in `test/`, `some-test-dir/`, or `bin/` constructs a pool with these keys before deletion; otherwise the API break needs a deprecation note.
+9. **`seon.flow.pool` carries datalevin-uri plumbing in its public API surface (`::datalevin-port`, `::datalevin-uri` in pool status, `:datalevin-server` Integrant arg).** External callers building pools could conceivably pass these. Verify nothing in `test/` or `bin/` constructs a pool with these keys before deletion; otherwise the API break needs a deprecation note.
 
 ## Code smells surfaced during Stage 2.1 test migration (2026-05-14)
 

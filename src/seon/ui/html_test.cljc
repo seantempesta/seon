@@ -87,9 +87,9 @@
     (is (= a b))
     (is (= "<input id=\"i\" name=\"x\" type=\"text\">" a))))
 
-(deftest attribute-data-and-seon
-  ;; Datastar + SEON attributes flow through unchanged.
-  (is (= "<button title=\"go\" data-on-click__post=\"/chat\">x</button>"
+(deftest attribute-data-and-extras
+  ;; Datastar + arbitrary attributes flow through unchanged.
+  (is (= "<button data-on-click__post=\"/chat\" title=\"go\">x</button>"
          (h/->string [:button {:data-on-click__post "/chat"
                                :title "go"}
                       "x"]))))

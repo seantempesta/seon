@@ -8,8 +8,9 @@
    expose Node's process shim).
 
    Used by `seon.fs` to dispatch between Node native APIs and WASI
-   filesystem interfaces. Used by `seon.example` ctx examples to tell the
-   agent what file-access surface it actually has on a given host.")
+   filesystem interfaces. Consumers can also call `(host)` from ctx
+   examples to tell the agent what file-access surface it actually
+   has on a given host.")
 
 (defn host
   "Return the runtime host as a keyword.

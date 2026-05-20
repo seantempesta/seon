@@ -160,7 +160,7 @@
 ;; Attribute names are stringified via `name-of` (keywords + symbols
 ;; → name; strings pass through). We don't restrict allowed attr
 ;; names — Datastar's `data-on-click__post`, `:hx-get`, custom
-;; `seon-*` etc. all flow through unchanged.
+;; attributes etc. all flow through unchanged.
 ;;
 ;; Sort attribute output by key string so the same attrs in different
 ;; map literal order produce identical HTML. Makes tests stable AND

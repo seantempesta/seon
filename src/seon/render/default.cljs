@@ -136,7 +136,7 @@
                             :seon.db/args args}))]
      (->> rows (sort-by second #(compare %2 %1)) (take n) reverse))))
 
-(defn ^:no-doc seon-notes
+(defn ^:no-doc notes-helper
   "Return all `:seon.note/*` entities for `id`, newest-first. Each
    row is `{:seon.note/id :seon.note/topic :seon.note/content
    :seon.note/at}`."
@@ -308,7 +308,7 @@
          "    Re-run `search` with a different `:name-pattern` instead.\n"
          "  - **Case-insensitive grep**: most names in the wiki are\n"
          "    capitalized (Maya, Daniel). Always use `(?i)` in your\n"
-         "    pattern: `#\"(?i)maya\"`, not `#\"demo\"`.\n\n"
+         "    pattern: `#\"(?i)maya\"`, not `#\"maya\"`.\n\n"
 
          "## How to work — build tools, then use them\n\n"
          "You have up to ~20 agentic turns per user message. You do\n"
@@ -325,7 +325,7 @@
          "## Pre-loaded toolkit — `seon.toolkit/*`\n\n"
          "All pre-loaded — call directly, no `require` needed.\n\n"
          "### High-leverage first moves\n\n"
-         "  (seon.toolkit/about \"Alpha\")\n"
+         "  (seon.toolkit/about \"Seon\")\n"
          "  ;; ⇒ {:notes [...] :paths [...] :index-hits [{:line :line-num}]}\n"
          "  ;; The SMARTEST first call for any 'tell me about X' question.\n"
          "  ;; Combines: recall existing notes + find filenames matching\n"
@@ -408,7 +408,6 @@
          "The user's wiki is well-organized:\n"
          "  - people / who-is:           #\"docs/(people|timeline)\"\n"
          "  - project status:            #\"CLAUDE\\.md|docs/timeline\"\n"
-         "  - consumer-specific:             #\"consumer/\"\n"
          "  - meetings / decisions:      #\"meetings/|/decisions\\.md\"\n"
          "  - when unsure:               #\"CLAUDE\\.md$\"   — the index\n\n"
 
@@ -584,7 +583,7 @@
    still apply. The agent should query them BEFORE walking the filesystem."
   {:malli/schema [:=> [:cat :map] :string]}
   [{:seon.db/keys [db] :seon.agent/keys [id]}]
-  (let [ns (seon-notes db id)]
+  (let [ns (notes-helper db id)]
     (if (empty? ns)
       (str "## What you already know\n\n"
            "  (no notes yet — write some with `seon.toolkit/note!` when\n"

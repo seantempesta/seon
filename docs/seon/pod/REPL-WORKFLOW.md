@@ -6,7 +6,7 @@ compile/run/error loop becomes a single eval round-trip.
 ## 1. Boot the runtime (one-time per session)
 
 ```sh
-cd /Users/you/src/seon/pod-host/libdatahike-cljs
+cd /Users/sean/src/seon/pod-host/libdatahike-cljs
 # Watcher: builds both targets, writes nREPL port to .shadow-cljs/nrepl.port
 nohup npx shadow-cljs watch bench repl > /tmp/shadow-watch.log 2>&1 &
 # Wait for "Build completed" in /tmp/shadow-watch.log, then:
@@ -23,7 +23,7 @@ pkill -f "shadow-cljs watch"; pkill -f "node out/repl.js"
 
 ## 2. MCP tools
 
-Registered in `seon/.mcp.json` under the namespace `seon_cljs`. Once the
+Registered in `your-project/.mcp.json` under the namespace `seon_cljs`. Once the
 orchestrator has reloaded MCP config, the tools become available as
 `mcp__seon_cljs__<name>`:
 
