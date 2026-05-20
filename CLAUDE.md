@@ -2,6 +2,29 @@
 
 **Every Claude instance reads this file** — orchestrator, seon agents, and Claude Code subagents. Keep it universal. Role-specific instructions live in `ORCHESTRATOR.md` and `AGENT.md`.
 
+## Current focus (2026-05-20)
+
+Active branch: **`webassembly-agents`**.
+
+The current substrate is the **V0 CLJS pod** at `src/seon/*.cljs` — a long-running Node process that hosts the agent loop, datahike-cljs, the bootstrap CLJS compiler, and a loopback HTTP+SSE server. Run it via `node out/client/main.js` after `clj -M:cljs compile client`. See `docs/cljs-dev-loop.md` for the dev loop.
+
+**Where we are:**
+
+- Phase 1 (stability + accident-prevention) shipped 2026-05-20: default-deny `seon.fs` allowlist with path-traversal-proof normalization, per-form eval timeout (`seon.eval/budget` for one-shot overrides), AbortController HTTP timeout in `seon.ai.deepseek`, project-local `tmp/seon-port`, hot-reload hygiene on broadcast + agent listeners. All seon CLJS builds: **0 warnings**.
+- The CLJS sandbox layer is **NOT a security boundary** — the agent's `cljs.js` eval can mutate the `!config` atoms or `(js/require "node:fs")` directly. It catches LLM hallucinations, not adversarial code.
+
+**Where we're going (Phase 3 — alpha-blocking):**
+
+WASM-Tauri containment. The seon CLJS pod runs as a `wasm32-wasip2` Component (via wasm-rquickjs) inside wasmtime, embedded in a Tauri Rust process. The capability surface is WIT-typed: `fs`, `http`, `mcp`, `capability-prompt`, `eval`. The Rust host decides what to grant. The agent's CLJS code cannot reach beyond the WIT imports — wasmtime enforces.
+
+- **Spike report (authoritative design):** `docs/seon/pod/wasm-spike-2026-05-20.md`
+- **Pod-host workspace** (Rust + WIT, imported 2026-05-20): `pod-host/wasm-tauri/`
+- **First milestone:** `cljs.js` smoke test under `wasmtime` CLI — go/no-go for the whole approach.
+
+**Hard rule:** seon is the substrate. Consumer-product code (specific UI, vendor integrations, custom domain models) lives in downstream repos. No consumer-specific references in `src/`, `docs/`, or `pod-host/`.
+
+---
+
 ## Agent Model Policy
 
 **Never use haiku for coding tasks.** Only use haiku for quick file reads or context gathering. All implementation, bug fixes, and verification that involves writing code must use opus 4.6 (default model).

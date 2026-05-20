@@ -1,0 +1,41 @@
+# mcp-server-seon — MCP-over-stdio server that talks to the running Tauri pod.
+#
+# Spec-05 §8.2. Speaks `mcp__seon__*` tools; routes per-agent requests over a
+# Unix domain socket to the Tauri host (which holds the wasmtime pod). At B-1
+# this is a minimal binary skeleton just so `cargo check` resolves.
+
+[package]
+name = "mcp-server-seon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "MCP-over-stdio bridge to the running Seon Tauri pod (V0.5)"
+
+[[bin]]
+name = "mcp-server-seon"
+path = "src/main.rs"
+
+[dependencies]
+# MCP SDK — rmcp 1.7 with stdio transport + the tool macros for our tool surface.
+rmcp = { version = "1.7", default-features = false, features = ["server", "macros", "transport-io", "schemars"] }
+
+# Local crate — gives us the seon-pod WIT bindings + Pod lifecycle. The pod is
+# instantiated in-process by mcp-server-seon for V0.5 (no Tauri-side UDS yet);
+# routing to a remote Tauri pod over UDS is deferred to whichever follow-up
+# pairs B-4 + B-6.
+seon-tauri = { path = "../src-tauri" }
+
+# Async runtime + utilities.
+tokio       = { workspace = true, features = ["macros", "rt-multi-thread", "io-std", "sync"] }
+anyhow      = { workspace = true }
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+schemars    = "1"
+clap        = { version = "4", features = ["derive", "env"] }
+shellexpand = "3"
+tracing     = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[lints.rust]
+unsafe_code = "forbid"

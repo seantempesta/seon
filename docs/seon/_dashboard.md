@@ -7,6 +7,18 @@ status: active
 
 > Infrastructure for AI agents to write reliable software.
 
+## Active focus — V0 CLJS pod + WASM-Tauri (2026-05-20)
+
+Branch: **`webassembly-agents`**.
+
+- **What runs today:** the V0 CLJS pod (Node-hosted, in `src/seon/*.cljs`). Phase 1 hardening shipped — see `docs/seon/pod/`.
+- **What's next:** WASM-Tauri containment. The pod runs inside `wasm32-wasip2` (via wasm-rquickjs) inside a Tauri Rust process running wasmtime; capability surface is WIT-typed (`fs`, `http`, `mcp`, `capability-prompt`, `eval`).
+- **Authoritative design:** [[pod/wasm-spike-2026-05-20]]
+- **Pod-host workspace:** `pod-host/wasm-tauri/` (Rust + WIT, imported 2026-05-20)
+- **Dev loop:** [[../cljs-dev-loop]] (V0 / pre-WASM). WASM dev loop is documented in the spike doc.
+
+The component tables below describe the **older JVM substrate** (Datalevin + Integrant + flow topology). That substrate is paused, not deleted — its files still live under `src/seon/*.clj`. The active development is the CLJS pod + Phase 3 WASM-Tauri work, not the JVM seat.
+
 ## How to Use This Vault
 
 **Orchestrator**: Start here. Read [[orchestrator/active]] for current pipeline. Issues are in `orchestrator/issues/`. PRD index at [[orchestrator/prds]].

@@ -1,0 +1,36 @@
+# seon-tauri — the desktop host that runs the WASM pod.
+#
+# Spec-05 §7. The actual Tauri / wasmtime integration lands in B-3 (pod.rs +
+# http.rs) and B-4 (main.rs). At B-1 this is a minimal binary skeleton just
+# so `cargo check` resolves the workspace.
+
+[package]
+name = "seon-tauri"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Seon desktop host (V0.5)"
+
+[lib]
+name = "seon_tauri"
+path = "src/lib.rs"
+
+[[bin]]
+name = "seon"
+path = "src/main.rs"
+
+[dependencies]
+wasmtime           = { workspace = true, features = ["component-model", "async", "cranelift", "runtime"] }
+wasmtime-wasi      = { workspace = true, features = ["p2"] }
+wasmtime-wasi-http = { workspace = true, features = ["p2"] }
+tokio              = { workspace = true }
+anyhow             = { workspace = true }
+thiserror          = { workspace = true }
+tracing            = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints.rust]
+unsafe_code = "forbid"
