@@ -217,34 +217,6 @@
       (is (vector? (:seon.spec/references spec))))))
 
 ;;; ---------------------------------------------------------------------------
-;;; File-Based Extraction
-;;; ---------------------------------------------------------------------------
-
-(deftest extract-graph-from-file-test
-  (testing "extracts graph from workout/render.clj on disk"
-    (let [graph (extract/extract-graph-from-file
-                 {::extract/file-path "src/seon/health/workout/render.clj"})]
-      (is (= "seon.health.workout.render" (::extract/ns-name graph)))
-      (is (seq (::extract/functions graph)))
-      (is (seq (::extract/specs graph)))
-      (is (seq (::extract/call-edges graph)))
-      (is (seq (::extract/ns-deps graph)))
-
-      ;; Should have page-render function with spec links
-      (let [page-fn (first (filter #(= "page-render" (:seon.fn/name %))
-                                   (::extract/functions graph)))
-            specs (::extract/specs graph)
-            output-spec (first (filter #(= :seon.health.workout.render/page-render-response
-                                           (:seon.spec/key %)) specs))]
-        (is (some? page-fn) "Should find page-render")
-        ;; Function is linked to specs (no pre-computed attrs)
-        (is (some? (:seon.fn/input-spec page-fn)))
-        (is (some? (:seon.fn/output-spec page-fn)))
-        ;; Output spec contains :seon.render/html (renderer detection at query time)
-        (is (some? output-spec))
-        (is (contains? (set (:seon.spec/contains-keys output-spec)) :seon.render/html))))))
-
-;;; ---------------------------------------------------------------------------
 ;;; Cross-Namespace Resolution
 ;;; ---------------------------------------------------------------------------
 

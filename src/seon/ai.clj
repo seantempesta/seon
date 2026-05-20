@@ -32,17 +32,6 @@
   (:import [java.time Instant]))
 
 ;;; ---------------------------------------------------------------------------
-;;; AI persistence — currently a no-op; pending port to a :seon.ai datahike namespace
-;;; ---------------------------------------------------------------------------
-
-(defn- datalevin-write!
-  "No-op stub. Pending port to register `:seon.ai` as a datahike-flow
-   namespace and route this through `seon.db/transact!`."
-  [_op _entity]
-  ;; FIXME: port to :seon.ai datahike namespace via seon.db/transact!
-  nil)
-
-;;; ---------------------------------------------------------------------------
 ;;; Schema Registration
 ;;; ---------------------------------------------------------------------------
 
@@ -349,20 +338,9 @@
 
    Example:
      (start-session! {::namespace 'seon.trading ::prompt \"Analyze data\"})"
-  [{::keys [namespace prompt agent-session-id initial-context]}]
-  (let [session-id (generate-id "ses")
-        ;; Convert namespace to string for database compatibility
-        ns-str (when namespace (str namespace))
-        entity (cond-> {:seon/id session-id
-                        ::type :session
-                        ::status :active
-                        ::started-at (Instant/now)}
-                 ns-str (assoc ::namespace ns-str)
-                 prompt (assoc ::prompt prompt)
-                 agent-session-id (assoc ::agent-session-id agent-session-id)
-                 initial-context (assoc ::initial-context initial-context))]
-    (datalevin-write! :save-session entity)
-    {::session-id session-id}))
+  [{::keys [_namespace _prompt _agent-session-id _initial-context]}]
+  ;; FIXME: port to :seon.ai datahike namespace via seon.db/transact!
+  {::session-id (generate-id "ses")})
 
 (defn end-session!
   "End an AI session.
@@ -386,19 +364,10 @@
                     ::status :completed
                     ::input-tokens 1500
                     ::output-tokens 800})"
-  [{::keys [session-id status input-tokens output-tokens cost-usd error]}]
+  [{::keys [session-id status _input-tokens _output-tokens _cost-usd _error]}]
   ;; FIXME(M-3): port to :seon.ai datahike namespace via seon.db/transact!
-  (let [final-status (or status :completed)
-        updated (cond-> {:seon/id session-id ::type :session
-                         ::status final-status
-                         ::ended-at (Instant/now)}
-                  input-tokens (assoc ::input-tokens input-tokens)
-                  output-tokens (assoc ::output-tokens output-tokens)
-                  cost-usd (assoc ::cost-usd cost-usd)
-                  error (assoc ::error error))]
-    (datalevin-write! :update-session updated)
-    {::session-id session-id
-     ::status final-status}))
+  {::session-id session-id
+   ::status (or status :completed)})
 
 (defn add-message!
   "Add a message to a session.
@@ -419,18 +388,9 @@
      (add-message! {::session-id \"ses-abc123\"
                     ::role \"assistant\"
                     ::content \"I'll analyze the data...\"})"
-  [{::keys [session-id role content input-tokens output-tokens]}]
-  (let [message-id (generate-id "msg")
-        entity (cond-> {:seon/id message-id
-                        ::type :message
-                        ::session-id session-id
-                        ::role role
-                        ::content content
-                        ::timestamp (Instant/now)}
-                 input-tokens (assoc ::input-tokens input-tokens)
-                 output-tokens (assoc ::output-tokens output-tokens))]
-    (datalevin-write! :save-message entity)
-    {::message-id message-id}))
+  [{::keys [_session-id _role _content _input-tokens _output-tokens]}]
+  ;; FIXME: port to :seon.ai datahike namespace via seon.db/transact!
+  {::message-id (generate-id "msg")})
 
 (defn get-session
   "Get a session by ID.
