@@ -227,46 +227,76 @@ One string containing N top-level forms.
 
 ### Processing
 
-The agent's response is a single string. The pipeline walks it
-top-to-bottom and classifies each chunk into one of three kinds.
+The agent's response is a single string of **valid ClojureScript** —
+forms interleaved with `;;` comments. Nothing else. The reader does
+the heavy lifting: we ask it for every form AND every comment, then
+pair them up in order.
+
 **No reordering.** Forms run in input order. `(in-ns 'foo)` mid-batch
 switches the namespace for subsequent forms.
 
-#### Three-way line/chunk classification
+#### Parse: forms-and-comments
 
-1. **Clojure form** — starts with `(`, `[`, `{`, `@`, `'`, `\``, `~`,
-   or a reader macro (`#"…"`, `#{…}`, `#(…)`, `#_…`). Try to parse
-   with Edamame's `source-reader` + `parse-next+string`. On parse
-   success → eval. On parse failure → this is a malformed form (the
-   agent meant to write code and got the syntax wrong); record an
-   eval entry with `:ok? false` and an `:error` payload of kind
-   `:read`.
-2. **`;;`-comment line** — the existing narration convention.
-   Strip the leading `;;` and accumulate into pending-narration.
-3. **Prose** — anything else. Markdown headings (`# Plan`, `## Step
-   1`), bullets (`- foo`, `* foo`), bare text, code-fence delimiters
-   (` ``` `). Accumulate verbatim into pending-narration.
+Use Edamame's `parse-next` in a loop against a `source-reader`, with
+comment preservation enabled (Edamame returns `;;`-comment text as
+ordinary values when configured to do so). The loop yields an ordered
+vector like:
 
-Pending narration is **attached to the next Clojure-form chunk** as
-`:seon.eval/narration`. If the input ends with pending narration and
-no following form, emit a **thinking-only** eval entry:
-`{:seon.eval/source "" :seon.eval/narration <accumulated>
-:seon.eval/ok? true}`. This preserves the agent's reasoning in
-scrollback even when they choose not to eval anything else this
-turn.
+```clojure
+[{:kind :comment :text "## Plan"}
+ {:kind :comment :text "Schema first, then the function."}
+ {:kind :form    :form  '(schema/register! ::ticker :string) :source "(schema/register! ::ticker :string)"}
+ {:kind :comment :text "Now the analyzer:"}
+ {:kind :form    :form  '(defn analyze …) :source "(defn analyze …)"}
+ {:kind :comment :text "Sanity-check it returns the right shape:"}
+ {:kind :form    :form  'analyze :source "analyze"}]
+```
 
-#### Per-chunk loop
+Notice the last entry: a bare symbol `analyze`. **Bare symbols are
+forms.** They eval like any other expression — return the value, or
+throw an unbound-symbol error if the agent referenced something that
+doesn't exist. That's standard REPL behavior; we don't try to
+disambiguate at parse time.
 
-For each chunk the classifier identifies as a form:
+**Markdown lives inside `;;` comments.** Multi-line markdown is
+just multiple `;;` lines in a row:
+
+```clojure
+;; ## Plan
+;;
+;; 1. Register the ticker schema
+;; 2. Build analyze
+;; 3. Verify by evaling `analyze`
+```
+
+The reader sees these as four/five consecutive comments. The pairer
+joins consecutive comments into one narration block. The agent
+formats with markdown freely (`##`, `-`, code-spans, whatever);
+those characters are valid inside a `;;` line.
+
+#### Pair: comments → narration → form
+
+Walk the vector front to back:
+
+- Comments accumulate into pending-narration, separated by `\n`.
+- The next form's `:seon.eval/narration` = the accumulated text;
+  pending-narration resets.
+- If the vector ends with pending narration and no following form,
+  emit a **thinking-only** eval entry: `{:seon.eval/source ""
+  :seon.eval/narration <accumulated> :seon.eval/ok? true}`. The
+  agent's closing thoughts survive in scrollback.
+
+#### Per-form loop
+
+For each entry classified as a form:
 
 1. **Snap a start timestamp.** `(js/Date.now)` before the eval call.
 2. **Capture `:seon.eval/ns`** at the moment of evaluation — read
    from the agent's `!current-ns` atom.
 3. **Eval** the parsed form in that ns. On success, record
    `:ok? true` + `:result-edn`. On any failure (compile, runtime,
-   timeout), record `:ok? false` + `:error` (a pr-str'd map
-   carrying the failure kind: `:read | :compile | :runtime |
-   :timeout`).
+   timeout, unbound-symbol), record `:ok? false` + `:error`
+   (pr-str'd map carrying `:kind :compile | :runtime | :timeout`).
 4. **Record `:seon.eval/duration-ms`** = `(- (js/Date.now) start)`.
    Covers the form's eval AND any auto-await — i.e. what the agent
    actually waited for. Cheap (two `Date.now()` calls); always on.
@@ -279,24 +309,39 @@ For each chunk the classifier identifies as a form:
    persistent-entity datoms in its own tx. A failure on form 5
    doesn't roll back forms 1-4.
 
-After all chunks are processed, render the full context.
+After every entry is processed, render the full context.
 
-#### Why no `;;`-prefix discipline
+#### Parse failures
 
-The previous design (still live in `seon.repl/parse-forms`,
-`src/seon/repl.cljs`) required prose to be `;;`-prefixed and silently
-dropped bare-symbol "prose-shaped" reader tokens. That rule existed
-because the reader cheerfully tokenized `Let me read the file` into
-four symbol forms that polluted the eval log.
+If Edamame throws while reading (the agent emitted something that
+isn't valid ClojureScript and isn't a `;;` comment — e.g. raw
+markdown outside a comment), we record an `:ok? false` eval entry
+with `:kind :read`, advance to the next balanced top-level boundary,
+and continue. The error message tells the agent exactly what went
+wrong, the system-section reminds them prose belongs in `;;`
+comments, and they self-correct on the next turn. No silent drops.
 
-The three-way classification subsumes that rule. A bare-symbol
-chunk no longer reaches the eval call — it's classified as prose at
-the parse step, so the reader never produces those phantom forms in
-the first place. The agent can write natural markdown between forms;
-the LLM doesn't have to remember the `;;` discipline. The `how-you-
-respond` ctx fragment becomes much shorter: "write your thinking
-freely; wrap code in s-expressions" rather than "every prose line
-must start with `;;`".
+#### Why this works
+
+The contract is simple: **the agent emits a ClojureScript file's
+worth of code.** Functions, expressions, bare symbols to inspect
+values — all of it is just code. Markdown narration is documentation
+attached to forms, stored in the same `;;` comments any other
+Clojure source uses. The LLM doesn't have to learn anything beyond
+"write ClojureScript with comments."
+
+The replaced design (still live in `seon.repl/parse-forms` in
+`src/seon/repl.cljs`) hand-rolled a comment-collector and added a
+`prose-symbol?` heuristic that silently dropped bare-symbol forms to
+avoid the "Let me read the file" pollution problem. The new design
+removes both. There is no special prose-detection. If the agent
+writes "Let me read the file" outside a `;;` comment, the reader
+parses it as four bare symbols, each eval'd in turn — `Let`,
+`me`, `read`, `file` — three unbound-symbol errors and one
+accidental reference to `cljs.core/read`. Four loud entries in the
+eval log. The agent reads the next turn's `recent-evals` tile,
+sees the flurry of errors, learns to put their thinking inside
+`;;` comments. One painful turn, learned once.
 
 **Partial-success principle.** If the agent sends 10 forms and 9
 succeed, the database keeps 9 successes. Read failures and eval
@@ -675,13 +720,17 @@ section :current-ns    → "<current-namespace name=\":seon.trading\">
                           </current-namespace>"
 section :warnings      → "<warnings>analyze has no test coverage</warnings>"
 section :recent-evals  → "<recent-evals>
-                          ;; thinking: I'll start with the ticker
-                          ;; schema, then build analyze on top.
+                          ;; ## Plan
+                          ;; 1. Register the ticker schema
+                          ;; 2. Build analyze on top
                                                             ; # J3p8m2rA1k
                           > (schema/register! ::ticker :string)
                           true                              ; # K9p2x4nB7q  3ms
                           > (defn analyze …)
                           #'seon.trading/analyze            ; # L4m9p1xA3v  1ms
+                          ;; sanity check the var resolves
+                          > analyze
+                          #object[seon$trading$analyze]     ; # M2q7w0vB9x  0ms
                           </recent-evals>"
 
 composer drops blank strings and joins the rest with "\n\n":
@@ -1107,11 +1156,13 @@ Mechanisms supporting this:
 
 - The database attributes defined above (`:seon.ns/*`, `:seon.fn/*`,
   `:seon.schema/*`, `:seon.test/*`, `:seon.eval/*`, `:seon.ctx/*`).
-- `seon.repl/eval-batch!` — pod-side CLJS, runs the per-form
-  read/eval/transact pipeline with the three-way classifier
-  (form / `;;`-comment / prose). Prose chunks accumulate as
-  `:seon.eval/narration` and attach to the next form; trailing prose
-  with no following form becomes a thinking-only eval entry.
+- `seon.repl/eval-batch!` — pod-side CLJS, runs the
+  forms-and-comments read/eval/transact pipeline via Edamame with
+  comment preservation enabled. `;;` comments accumulate into
+  `:seon.eval/narration` and attach to the next form; trailing
+  comments with no following form become a thinking-only eval entry.
+  Bare symbols ARE forms — they eval and may produce
+  unbound-symbol errors like any other REPL.
 - `seon.repl/forget!` + `seon.schema/unregister!`.
 - `seon.render.default/*` — the five default section functions
   (`system-section`, `related-ns-section`, `current-ns-section`,
@@ -1168,11 +1219,16 @@ A new agent session can:
    system tile.
 2. Eval a multi-form batch including a schema, defn, and test; see
    each form's `:duration-ms` rendered next to its eval-id.
-2a. Submit a response that mixes markdown prose ("## Plan\n- step
-   one") with Clojure forms; see the prose captured as
-   `:seon.eval/narration` on the next form's entry, and any
-   trailing prose stored as a thinking-only entry. Verify NO false
-   "read-error" entries are produced for the markdown lines.
+2a. Submit a response that uses `;;` multi-line markdown
+   (`;; ## Plan\n;; - step one\n;; - step two`) between forms; see
+   the comments captured as `:seon.eval/narration` on the next
+   form's entry, with the markdown formatting preserved verbatim.
+   Trailing `;;` comments after the last form land as a
+   thinking-only eval entry.
+2b. Eval a bare symbol that resolves (e.g. just `analyze` after it
+   was defined); see its value returned. Eval a bare symbol that
+   doesn't resolve; see the natural unbound-symbol error in the
+   eval log (`:ok? false`, kind `:compile`).
 3. **Partial success**: send 10 forms where one fails; see 9 successes
    persisted and 1 error reported in the eval log.
 4. `(in-ns 'seon.foo)` to switch namespaces mid-batch and see subsequent
@@ -1289,23 +1345,26 @@ A new agent session can:
    The bootstrap ships attr-schemas first, persistent entities
    second. New runtime versions can ADD attrs but not change existing
    ones.
-4. **Three-way classifier implementation.** Existing
+4. **Edamame comment preservation.** Edamame is in `deps.edn`
+   (1.4.27). Verify which option produces comments as ordered values
+   alongside forms — likely `:postprocess` or a related callback hook
+   that receives every read element including comments. The existing
    `seon.repl/parse-forms` (`src/seon/repl.cljs`) uses
-   `cljs.tools.reader` with a hand-rolled comment collector AND a
-   bare-symbol drop rule. Extending it to classify prose as a third
-   kind (instead of dropping it) is a small change: do a line-based
-   pre-pass to classify by leading character before reading. Lines
-   starting with `(`/`[`/`{`/`@`/`'`/`\``/`~`/`#` (specifically the
-   reader-macro `#` forms) are form-starters and feed the reader;
-   lines starting with `;;` are narration; everything else is prose.
-   Multi-line forms are stitched by tracking paren depth across the
-   form-starter lines.
-5. **Form-starter set.** The exact prefix set determining "this line
-   starts a form" matters for false-positives. `#` is ambiguous —
-   `#"…"` is a regex literal (form) but `# Heading` is markdown (prose).
-   Resolution: `#` followed by `"`/`{`/`(`/`_`/`'` is a form-starter;
-   `#` followed by whitespace is prose. Document the table; cover
-   in tests.
+   `cljs.tools.reader` and hand-rolls a comment-pairing loop; with
+   Edamame's preservation hook we can replace the hand-roll with a
+   single walk over `(parse-string-all source {:comments? true …})`.
+   Confirm the exact option name; if Edamame doesn't expose comments
+   directly, scan the source string between consecutive form
+   positions for `;;` lines instead (forms carry line/col metadata
+   from `source-reader`).
+5. **Bare-symbol eval and the unbound-symbol error.** The new design
+   relies on the eval surface throwing a clean unbound-symbol error
+   for undefined references rather than us inferring "this was
+   probably prose." Confirm: when bootstrap-CLJS `eval-str` is asked
+   to evaluate `Let`, it returns `{:ok false :error <unbound>}`
+   rather than a vague compile failure. Test against the actual
+   compile-state behavior; adjust the `:error` payload's `:kind`
+   field accordingly (`:compile` vs `:runtime`).
 6. **Replay dep analysis.** Topological ordering of resume needs to
    know "what schemas does this fn ref?". Lightweight (regex over
    `::keyword` patterns) probably works for agent-authored CLJS code,
