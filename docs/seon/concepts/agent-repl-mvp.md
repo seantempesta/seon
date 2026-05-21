@@ -157,6 +157,7 @@ absent).
 ::seon.eval/agent           :seon.db/ref                          ; → :seon.agent entity (owning agent)
 ::seon.eval/turn            :long                                 ; the agent's turn-counter at eval time
 ::seon.eval/at              :inst                                 ; wall-clock at eval start
+::seon.eval/duration-ms     :long                                 ; wall-clock elapsed for this form (eval + auto-await)
 ::seon.eval/ns              :keyword                              ; namespace the form ran in
 
 ;; Form text + result
@@ -241,16 +242,20 @@ For each form:
    chunk as a failed eval (`:ok? false`) and continue.
 2. **Capture `:seon.eval/ns`** at the moment of evaluation — read from
    the agent's `!current-ns` atom.
-3. **Eval** the parsed form in that ns. On success, record
+3. **Snap a start timestamp.** `(js/Date.now)` before the eval call.
+4. **Eval** the parsed form in that ns. On success, record
    `:ok? true` + `:result-edn`. On any failure (compile, runtime,
    timeout), record `:ok? false` + `:error` (a pr-str'd map carrying
    the failure kind: `:read | :compile | :runtime | :timeout`).
-4. **Classify effects implicitly.** If the form defined a function,
+5. **Record `:seon.eval/duration-ms`** = `(- (js/Date.now) start)`.
+   Covers the form's eval AND any auto-await — i.e. what the agent
+   actually waited for. Cheap (two `Date.now()` calls); always on.
+6. **Classify effects implicitly.** If the form defined a function,
    add the new `:seon.fn` entity to `:touches`. If it registered a
    schema, add the `:seon.schema` entity. If it called
    `(forget! 'x)`, add the now-retracted entity to `:forgot`. If it
    changed namespace, set `:switched-ns-to`.
-5. **Independent transact per form** — one `:seon.eval` datom + any
+7. **Independent transact per form** — one `:seon.eval` datom + any
    persistent-entity datoms in its own tx. A failure on form 5 doesn't
    roll back forms 1-4.
 
@@ -412,10 +417,19 @@ them by transacting different attrs on the same entity (lookup by
           :seon.agent/current-ns)
       (seon.agent/home-ns id)))
 
+(defn- host-timezone
+  "Best-effort IANA timezone of the pod's host. POD timezone, not the
+   user's — surfacing the user's tz needs a signal from outside the
+   pod (browser, env var, agent entity attr). See post-MVP note below."
+  []
+  (.. (js/Intl.DateTimeFormat.) resolvedOptions -timeZone))
+
 (defn system-section
   [{:seon.db/keys [db] :seon.agent/keys [id]}]
-  (let [ns (agent-current-ns db id)]
+  (let [ns  (agent-current-ns db id)
+        now (js/Date.)]
     (str "<system agent=\"" id "\" ns=\"" ns "\">\n"
+         "  Now: " (.toISOString now) "  (pod tz: " (host-timezone) ")\n"
          "  Restore defaults: (seon.render/reset-defaults!)\n"
          "</system>")))
 
@@ -486,6 +500,24 @@ them by transacting different attrs on the same entity (lookup by
            (str/join "\n" (map :seon.warning/text ws))
            "\n</warnings>")
       "")))
+
+;; Example warning predicate, registered as a default. Surfaces any
+;; eval in the recent-evals window that took longer than the threshold.
+;; Pure derivation from :seon.eval/duration-ms — no stored state.
+(def slow-eval-threshold-ms 500)
+
+(defn slow-eval-warning
+  [{:seon.db/keys [db] :seon.agent/keys [id]}]
+  (let [recent (recent-evals-rows db id 20)
+        slow   (filter #(> (or (:seon.eval/duration-ms %) 0)
+                           slow-eval-threshold-ms)
+                       recent)]
+    (for [e slow]
+      {:seon.warning/severity :info
+       :seon.warning/text
+       (str "slow eval " (:seon.eval/id e)
+            " took " (:seon.eval/duration-ms e) "ms — consider"
+            " profiling: (seon.perf/profile-form …)")})))
 
 (defn recent-evals-section
   "The last N evals (default N=20), oldest-first so it reads
@@ -607,9 +639,9 @@ section :current-ns    → "<current-namespace name=\":seon.trading\">
 section :warnings      → "<warnings>analyze has no test coverage</warnings>"
 section :recent-evals  → "<recent-evals>
                           > (schema/register! ::ticker :string)
-                          true                              ; # K9p2x4nB7q
+                          true                              ; # K9p2x4nB7q  3ms
                           > (defn analyze …)
-                          #'seon.trading/analyze            ; # L4m9p1xA3v
+                          #'seon.trading/analyze            ; # L4m9p1xA3v  1ms
                           </recent-evals>"
 
 composer drops blank strings and joins the rest with "\n\n":
@@ -629,9 +661,15 @@ For each eval in the rendered window, emit:
 
 ```
 > (form-source-as-typed)
-result-rendered    # eval-id
+result-rendered    ; # eval-id  4ms
 
 ```
+
+The trailing `<n>ms` is `:seon.eval/duration-ms` formatted: ms for
+sub-second, `1.2s` / `12.5s` / `2m 30s` for longer. Always present.
+Cheap, always-on per-form timing so the agent sees the cost of every
+form they evaluate. Fast forms vanish into the noise; slow forms
+shout.
 
 For the MVP, `result-rendered` is just `truncate-edn` applied to
 `:seon.eval/result-edn`. Smart per-shape result rendering is the
@@ -728,74 +766,78 @@ agent knows what broke.
 
 ## Self-instrumentation
 
-Every public function is profiled. Section functions, eval-batch,
-db/query, db/transact!, agent-authored fns — anything carrying
-`:malli/schema` gets a Tufte `p` wrap at the same boundary Malli's
-runtime validation already hits. The agent rewrites a function, the
-next render shows the timing delta. Self-improvement loop without
-external tools.
+Two layers, both opt-in past their default:
 
-Mechanism: extend the existing instrumentation layer.
+### Layer 1 — per-eval timing (always on, cheap)
 
-- Seon already wraps every `:malli/schema`-annotated public fn with
-  Malli's runtime validator (Integrant key
-  `:seon.dev/instrumentation`, see CLAUDE.md "Function
-  Instrumentation"). That wrapper is the only sane place to add a
-  second concern.
-- Profile concern: when registering instrumentation for a fn, also
-  wrap its invocation with `(taoensso.tufte/p ::fully-qualified-fn-name
-  body)`. The same atom that holds the validated wrapper now holds
-  the profiled+validated wrapper. One pass, one indirection.
-- Result: every call to every public fn lands in Tufte's stats
-  store under its ns-qualified id. Including agent-authored fns —
-  they pass through `seon.code/check` which requires `:malli/schema`,
-  which gets them instrumented, which gets them profiled. The agent
-  cannot write an un-profiled public fn.
+Every eval entry carries `:seon.eval/duration-ms` (two `Date.now()`
+calls per form, negligible cost). The recent-evals tile shows the
+duration next to each eval-id. A default warning predicate
+(`slow-eval-warning`) surfaces any eval over a threshold in the
+warnings tile so the agent doesn't have to scan visually.
+
+That's it for the default surface. No registry, no opt-in step. The
+agent learns "this took 1200ms" without doing anything; the warning
+tells them "go look" once it crosses the line.
+
+### Layer 2 — Tufte profiling (opt-in, deeper)
+
+When per-eval timing says "this form was slow" and the agent wants
+to know *why*, they reach for Tufte. The hook point is the existing
+`:seon.dev/instrumentation` Integrant layer that already wraps every
+`:malli/schema`-annotated public fn for runtime validation. When
+profiling is enabled, the same wrapper additionally wraps each fn
+with `(taoensso.tufte/p ::ns/name body)`.
 
 ```clojure
-;; in seon.dev (the instrumentation entry point — extends what's there)
-(defn install-instrumentation! [registry]
-  (doseq [[sym schema] (resolve-instrumented-fns registry)]
-    (alter-var-root (find-var sym)
-      (fn [original]
-        (fn [& args]
-          (tufte/p sym
-            (apply (malli-validate-wrap original schema) args)))))))
+;; turn profiling on for the next render or for a specific form
+(seon.perf/with-profiling
+  (assemble-ctx input))
+;; => {:value <result> :stats #tufte/PStats { … }}
+
+;; or globally for a window of time
+(seon.perf/set-enabled! true)
+;; … do work …
+(seon.perf/set-enabled! false)
+(seon.perf/last-stats)   ; the accumulated stats since enable
 ```
 
-Render scope-marker: the composer wraps its whole pass in
-`(tufte/profile {:dynamic? true :id ::render} ...)`. Everything the
-render touches lands in the per-render stats bucket; everything
-outside it (post-eval LLM call, kick-handler bookkeeping) lands in
-its own bucket. The agent can ask for either.
+Why not always on: even at ~50ns per `p`, in a tight loop that adds
+up. The user said it — leave deep profiling off by default and use
+cheap timestamps for routine signal. Tufte is the precision tool
+the agent picks up when the cheap signal points them at a problem.
 
-What the agent sees:
+When enabled, every call to every public fn lands in Tufte's stats
+store under its ns-qualified id — including agent-authored fns,
+since they pass through `seon.code/check` which requires
+`:malli/schema`, which gets them instrumented, which gets them
+profiled. The agent cannot write a public fn that's invisible to
+profiling.
+
+### Surface section: `perf-section`
 
 ```clojure
 ;; ships disabled — agent enables when they want to look
 (defn perf-section
   [_input]
-  (let [{:keys [stats]} @seon.perf/!last-render]
-    (if (seq stats)
+  (let [stats (seon.perf/last-stats)]
+    (if stats
       (str "<perf>\n" (tufte/format-pstats stats {:columns [:n :sum :mean :p90]})
            "\n</perf>")
       "")))
-
-;; or ad-hoc inside any form
-(seon.perf/profile-form (compute-related-ns @db :seon.trading))
-;; => {:value [...] :stats #tufte/PStats { … }}
 ```
 
-Cost: Tufte's `p` is ~50ns of overhead per call when capture is
-active, free when disabled. Disable globally with
-`(tufte/set-min-level! :off)` if a hot loop turns out to be too
-expensive — the validator stays on; only the profile concern drops.
+The agent enables this tile when they're optimizing; disables it
+when they're not. Both states are one transact on the `:perf`
+section entity. The section is silent when stats are empty (e.g.
+profiling has been off since boot).
 
-Out of MVP scope: per-form sampling, percentiles aggregated across
-sessions, automatic regression detection. The MVP just exposes the
-last-render stats and offers `(seon.perf/profile-form ...)` for
-ad-hoc measurement; everything else is built by writing more
-section functions.
+### Out of scope
+
+- Per-form sampling, percentiles aggregated across sessions,
+  automatic regression detection.
+- Always-on Tufte — see above; the cheap default covers the common
+  case.
 
 ## Restoring defaults
 
@@ -1021,13 +1063,20 @@ Mechanisms supporting this:
   `warnings-section`, `recent-evals-section`) returning strings +
   `truncate-edn` helper + `pretty-ai` fallback (already exists).
 - `seon.render/explain-section`, `reset-defaults!`.
-- Tufte instrumentation wired into the existing
-  `:seon.dev/instrumentation` layer so every `:malli/schema`-annotated
-  public fn is profiled (section fns + composer + eval-batch +
-  db/query + db/transact! + every agent-authored public fn — the
-  whole surface, one indirection). `seon.perf/!last-render` atom
-  carries the latest stats. Optional `perf-section` (disabled by
-  default; agent enables when they want to see where time went).
+- Per-eval timing: `:seon.eval/duration-ms` captured for every form
+  via two `Date.now()` calls; rendered in the recent-evals tile;
+  surfaced as warnings via `slow-eval-warning` over a configurable
+  threshold. Always on, no opt-in.
+- Tufte hook wired into the existing `:seon.dev/instrumentation`
+  layer so every `:malli/schema`-annotated public fn can be profiled
+  on demand (section fns + composer + eval-batch + db/query +
+  db/transact! + every agent-authored public fn — the whole surface,
+  one indirection). OFF by default. `seon.perf/with-profiling` /
+  `seon.perf/set-enabled!` toggle it. Optional `perf-section`
+  formats the latest stats when the agent wants to see them.
+- Current time in `system-section` (`(js/Date.)` + the pod's IANA
+  timezone). User-timezone lookup is post-v1; the section surfaces
+  pod-time today with a clear note.
 - Bootstrap phase: detect-empty + ordered `(d/transact!)` from
   `resources/seon/bootstrap.edn`.
 - Resume phase: topo-walk persistent entities, eval each, log results.
@@ -1047,14 +1096,23 @@ Mechanisms supporting this:
 - Token budgeting for the renderer (no compression beyond truncate-edn)
 - Test auto-run on dependent-change (manual `(run-tests)` for MVP)
 - Caching of section outputs (recompute every turn for MVP)
+- User-timezone lookup. The system-section surfaces *pod* time and
+  timezone — that's what `js/Intl.DateTimeFormat` resolves to inside
+  the wasmtime/Node host. The *user's* timezone lives outside the
+  pod (browser, env var, or an attr the user transacts onto their
+  agent entity). Post-v1: pull `:seon.user/timezone` from the agent
+  entity when present, format `now` in that zone; until then, the
+  agent and user negotiate timezone in conversation if it matters.
 
 ### Acceptance criteria for MVP
 
 A new agent session can:
 
 1. See a default-rendered context with the relevant sections present
-   (empty sections suppressed).
-2. Eval a multi-form batch including a schema, defn, and test.
+   (empty sections suppressed), including current pod-time in the
+   system tile.
+2. Eval a multi-form batch including a schema, defn, and test; see
+   each form's `:duration-ms` rendered next to its eval-id.
 3. **Partial success**: send 10 forms where one fails; see 9 successes
    persisted and 1 error reported in the eval log.
 4. `(in-ns 'seon.foo)` to switch namespaces mid-batch and see subsequent
@@ -1063,6 +1121,9 @@ A new agent session can:
    to `:related-ns` digest.
 5. See the new entities in the next-turn context, plus warnings for any
    missing pieces.
+5a. Eval a deliberately slow form (e.g. `(do (js/Date.now)
+   ; busy-wait 600ms; (js/Date.now))`); see the slow-eval warning
+   surface in the warnings tile on the next render.
 6. Rewrite a section function (e.g. `recent-evals-section` to a compact
    one-line-per-row form); see it applied on the next turn.
 7. Forget a function and see dependents flagged.
