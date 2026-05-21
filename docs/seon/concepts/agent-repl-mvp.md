@@ -11,6 +11,60 @@ rendering layer, and the defaults that make the loop work out of the
 box. Reference for `seon.repl`, `seon.render`, `seon.eval` namespace
 work.
 
+## Decisions pending
+
+Items that need your call before this MVP can be implemented. Each
+links to the full discussion below. **Refer to them by id** (e.g.
+"yes on D3, defer D7") so we don't have to re-explain.
+
+**Architectural questions** (the design depends on these):
+
+- **[D1](#d1)** — Naming: `:seon.fn/sym` (this spec) vs
+  `:seon.fn/qualified-name` (existing CLJ graph indexer). Pick one
+  or accept parallel namings.
+- **[D2](#d2)** — Datahike `:keep-history? true` for the agent DB
+  (currently `false`). Required for `:db/txInstant` + tx-range.
+- **[D3](#d3)** — Attribute schema evolution under
+  `:schema-flexibility :write`. Bootstrap ordering implication.
+- **[D4](#d4)** — Add `rewrite-clj` to deps for comment-preserving
+  parse. Confirm CLJS-compatibility.
+- **[D5](#d5)** — Bare-symbol eval error shape from bootstrap-CLJS.
+- **[D6](#d6)** — Replay topological dep analysis: lightweight regex
+  vs full `cljs.analyzer`.
+- **[D7](#d7)** — Result-value retention across pod restart. Document
+  the contract.
+- **[D8](#d8)** — Older DB on newer runtime upgrade strategy. Out
+  of MVP, but data model must permit.
+
+**Simplifications surfaced** (could collapse concepts; need your call):
+
+- **[D9](#d9)** — Section entities vs `:seon.fn` entities — merge?
+- **[D10](#d10)** — `:seon.eval/touches` vs deriving from datahike
+  tx history.
+- **[D11](#d11)** — `:seon.eval/at` vs time-prefixed eval-id (id
+  wraps; not currently round-trip-safe).
+- **[D12](#d12)** — `:seon.eval/result-edn` always-store-full vs
+  store-truncated + opt-in re-eval.
+
+**New behavior I want to add to MVP** (not yet in the body):
+
+- **[D13](#d13)** — Spec redefinability: never reject; surface
+  violations against existing data as warnings; agent fixes when
+  ready.
+- **[D14](#d14)** — `(def x …)` not-persisted warning when the
+  form isn't a `defn` / `schema/register!` / `deftest`.
+- **[D15](#d15)** — Test auto-run on every define/redefine —
+  targeted, silent on pass, warns on fail. Always on.
+- **[D16](#d16)** — `(forget!)` for namespaces (whole ns entity).
+- **[D17](#d17)** — `(seon.repl/show-ns 'foo)` helper to inspect
+  other namespaces without switching.
+- **[D18](#d18)** — `(seon.repl/undo :<eval-id>)` helper using the
+  existing reversibility derivation.
+
+The detailed notes for each live in [§ Decision details](#decision-details)
+at the bottom. The body of the spec describes the design as it stands;
+the decisions above are where it isn't settled.
+
 ## Goal
 
 Deliver an MVP where an LLM agent can:
@@ -1177,6 +1231,16 @@ Mechanisms supporting this:
   `perf-section` formats Tufte stats on demand.
 - Current time in `system-section`. User-timezone lookup is post-v1
   (see "Out" below).
+- **Targeted test auto-run** ([D15](#d15)): every `:touches` of a
+  `:seon.fn` post-fires the tests that target that fn (reverse
+  ref). Test entities' `:last-passed-at` / `:last-failed-at` /
+  `:last-failure` update. The `failing-test-warning` predicate
+  surfaces any test whose latest run failed.
+- **Spec-violation warning** ([D13](#d13)): when a schema is
+  redefined, validate existing data against the new shape;
+  violations become warnings. No reject.
+- **Def-not-persisted warning** ([D14](#d14)): bare `(def x …)`
+  outside `defn`/`schema/register!`/`deftest` surfaces a warning.
 - Bootstrap + resume phases per "Boot sequence".
 - Per-form independent transacts (partial-success preservation).
 - Eval classification implicit via `:seon.eval/touches` / `:forgot`
@@ -1192,7 +1256,9 @@ Mechanisms supporting this:
 - Result-value retention across sessions (eval-ids reference values that
   don't survive pod restart; agent re-evals if needed)
 - Token budgeting for the renderer (no compression beyond truncate-edn)
-- Test auto-run on dependent-change (manual `(run-tests)` for MVP)
+- Auto-run on **dependent**-change (i.e. fn B's tests fire when fn A
+  that B depends on changes). MVP runs only tests targeting the
+  directly-modified fn; transitive triggering follows. See [D15](#d15).
 - Caching of section outputs (recompute every turn for MVP)
 - User-timezone lookup. The system-section surfaces *pod* time and
   timezone — that's what `js/Intl.DateTimeFormat` resolves to inside
@@ -1315,128 +1381,302 @@ A new agent session can:
   out the Integrant key; the wrapper is the single seam where this
   bolts on.
 
-### Open architectural questions
-
-1. **Naming reconciliation.** The CLJ codebase already has
-   `:seon.fn/qualified-name`, `:seon.fn/namespace`, `:seon.spec/key`.
-   This spec proposes `:seon.fn/sym`, `:seon.fn/ns`,
-   `:seon.schema/key`. Either rename to match the existing graph
-   model (cheap, consistent) or treat the CLJS-pod entities as a
-   parallel family — to be decided by the spec author. Affects
-   bootstrap, queries, renderers, every example in this doc.
-2. **Datahike + `:keep-history? true`.** `:db/txInstant` and the
-   history/tx-range API depend on it. The V0.5 agent conn currently
-   opens with `:keep-history? false` (see
-   `seon.client/open-agent-conn!`). Turning history on for the agent
-   DB is the prerequisite for "what changed since tx T" style
-   queries; warrants an ADR.
-3. **Datahike schema-flexibility and attr evolution.** The V0.5 conn
-   uses `:schema-flexibility :write`, so attribute properties
-   (cardinality, valueType, unique, ref-vs-value) must be installed
-   before any data is transacted, and cannot be re-typed afterwards.
-   The bootstrap ships attr-schemas first, persistent entities
-   second. New runtime versions can ADD attrs but not change existing
-   ones.
-4. **Add rewrite-clj to deps.** rewrite-clj is the parser we want —
-   it preserves comments as `:comment` nodes alongside form nodes
-   (verified in `reference-code/rewrite-clj/`). It's not yet in
-   `deps.edn` (Edamame is, but Edamame drops comments at the reader).
-   Adding rewrite-clj as a CLJS-compatible dep is a small change;
-   confirm the version bundled in `reference-code/` works with the
-   bootstrap-CLJS / shadow-cljs build chain.
-5. **Bare-symbol eval and the unbound-symbol error.** The new design
-   relies on the eval surface throwing a clean unbound-symbol error
-   for undefined references rather than us inferring "this was
-   probably prose." Confirm: when bootstrap-CLJS `eval-str` is asked
-   to evaluate `Let`, it returns `{:ok false :error <unbound>}`
-   rather than a vague compile failure. Test against the actual
-   compile-state behavior; adjust the `:error` payload's `:kind`
-   field accordingly (`:compile` vs `:runtime`).
-6. **Replay dep analysis.** Topological ordering of resume needs to
-   know "what schemas does this fn ref?". Lightweight (regex over
-   `::keyword` patterns) probably works for agent-authored CLJS code,
-   but verify against real agent outputs before committing.
-7. **Result-value retention vs eval-id references.** Eval-ids are
-   stable in the DB; the live values they reference live on
-   `globalThis` (per existing `seon.eval/stash-result-raw!`) and do
-   NOT survive pod restart. The agent must re-eval to get a fresh
-   value. Document this explicitly so the agent learns the pattern.
-8. **Resume of an older DB on a newer runtime.** Strategy is sketched
-   but not designed: detect substrate version delta, merge
-   missing-from-DB bootstrap entries (lookup by identity), surface
-   agent overrides that conflict with the new substrate as warnings.
-   Out of MVP scope.
-
 ## Out-of-scope but adjacent
 
-- **Test runner**: when does `(deftest)` actually run? MVP says: only when
-  the agent eval's `(run-tests)` or specific `(t/run-test x-test)`. No
-  auto-run. Auto-run on dependent-change is a follow-on.
-- **Benchmarks under WASM**: `pod-host/datahike-harness` workloads ported
-  to CLJS. Follows MVP.
+- **Benchmarks under WASM**: `pod-host/datahike-harness` workloads
+  ported to CLJS. Follows MVP.
 - **Multi-agent**: when does ownership matter? `:seon.fn/owner-agent`
   attribute is the next addition; MVP single-agent.
 
-## Surfaced for review
+## Decision details
 
-Plausible simplifications I noticed but did not apply because the
-verification wasn't conclusive. Each is an architectural question
-for the spec author, not a defect.
+The "Decisions pending" dashboard at the top is the index. Each item
+below is the full discussion. Anchor IDs (`d1`, `d2`, …) are stable
+across edits; refer by id.
 
-1. **Section entities vs `:seon.fn` entities.** `:seon.ctx/*` carries
-   three attrs: `:name` (identity), `:priority` (sort key), `:fn`
-   (symbol). A section is conceptually "a render fn with a sort
-   key" — which could be expressed as a `:seon.fn` entity carrying
-   extra section-only attrs (`:seon.fn/section-name`,
-   `:seon.fn/section-priority`). Merging would drop the `:seon.ctx`
-   namespace entirely. Counter: this overloads `:seon.fn` with
-   render-scheduling concerns and complicates queries that just
-   want "all functions". Surfacing for review — collapse-or-keep is
-   an architectural call.
+### <a id="d1"></a>D1 — Naming reconciliation
 
-2. **`:seon.eval/touches` vs datahike history.** The spec already
-   requires `:keep-history? true` for the agent DB (so the eval log
-   can answer "what changed"). With history on, every transact has
-   a tx-id and the set of datoms it wrote — which IS what `:touches`
-   encodes. Could replace `:touches` with `:seon.eval/tx-id` and
-   derive the touched entities via datahike's history API. Did not
-   apply because the history API surface for "datoms in this tx" on
-   datahike-cljs isn't verified against
-   `reference-code/datahike/`, and the explicit ref-set is cheap.
+The CLJ codebase already has `:seon.fn/qualified-name`,
+`:seon.fn/namespace`, `:seon.spec/key` (see
+`src/seon/graph/ingest.clj` and `src/seon/graph/context.clj`).
+This spec proposes `:seon.fn/sym`, `:seon.fn/ns`, `:seon.schema/key`.
 
-3. **`:seon.fn/sym` naming vs the existing `:seon.fn/qualified-name`
-   (CLJ side).** The spec already calls this out as open question
-   Q1. Verified: `src/seon/graph/context.clj` uses
-   `:seon.fn/qualified-name` and `:seon.fn/namespace` across many
-   queries; reconciling means a renaming sweep on the CLJ side OR
-   accepting parallel namings. Not a simplification I can apply
-   alone; flagging.
+Three options: (a) rename the spec to match the existing CLJ attrs,
+(b) rename the CLJ side, (c) accept parallel naming families for
+CLJ-graph-of-the-substrate vs CLJS-pod-of-the-agent. Affects every
+attr reference in this doc plus a sweep on the CLJ side if you pick
+(b). I lean (a) but want your call.
 
-4. **`:seon.eval/turn` vs `:seon.eval/at`.** Considered whether one
-   is derivable from the other. They aren't — `:turn` is the
-   per-agent counter that groups all evals from one batch, `:at` is
-   wall-clock. Different queries. Keep both.
+### <a id="d2"></a>D2 — Datahike `:keep-history? true`
 
-5. **`:seon.eval/at` vs the time-prefixed eval-id.** The id is
-   "10-char base62, time-prefixed → sorts by creation". Ordering
-   queries can sort by id and skip `:at` entirely. `:at` survives as
-   a human-readable timestamp for display. Could drop it and format
-   the time-prefix on render. Did not apply because the time-prefix
-   resolution (mod-62^4 ms; see `seon.agent/new-id!` at
-   `src/seon/agent.cljs:75`) loses information beyond ~4 days of
-   range, so reconstructing a real `js/Date` from the prefix isn't
-   round-trip-safe. Keep `:at`.
+`:db/txInstant` and the history/tx-range API depend on it. The V0.5
+agent conn opens with `:keep-history? false` (`seon.client/
+open-agent-conn!`). Turning history on is the prerequisite for "what
+changed since tx T" queries and (depending on D10) for deriving
+`:touches` from tx-data. Warrants an ADR. Storage cost vs render
+power is the tradeoff.
 
-6. **The eval-id encoding's overlap with `:at`.** Related to #5 —
-   the time-prefix is *almost* the wall-clock, but with a finite
-   alphabet width it wraps. If we widened the prefix or stored
-   epoch-ms directly, `:at` would be redundant. Architectural call.
+### <a id="d3"></a>D3 — Datahike `:schema-flexibility :write`
 
-7. **`:seon.eval/result-edn` vs render-time formatting.** The spec
-   notes (correctly) that `truncate-edn` is applied at render time.
-   If result-edn is always rendered through `truncate-edn`, storing
-   the FULL pr-str is wasteful for huge values — a pre-truncated
-   version could be stored and a `#_:full` opt-in re-evaluates the
-   source to get the live value. Did not apply because round-tripping
-   "the live value at the time of eval" through source re-evaluation
-   isn't generally safe (side-effects).
+V0.5 uses `:write`. Attribute properties (cardinality, valueType,
+unique, ref-vs-value) must be installed before any data is
+transacted, and **cannot be re-typed** after. Implications:
+
+- Bootstrap ships attr-schemas first, persistent entities second.
+- New runtime versions can ADD attrs but not change existing ones.
+- Couples directly to D13 (spec redefinability) — for DB attrs, the
+  underlying datahike schema is immutable once installed; the
+  Malli-level "free redefine if no datoms exist" check needs to
+  treat this carefully.
+
+### <a id="d4"></a>D4 — Add `rewrite-clj` to deps
+
+rewrite-clj preserves `:comment` nodes alongside form nodes
+(verified in `reference-code/rewrite-clj/src/rewrite_clj/node/
+comment.cljc`). Edamame drops comments at the reader
+(`edamame.impl.parser/parse-comment`). The forms-and-comments parse
+the spec describes requires rewrite-clj.
+
+Confirm the version bundled in `reference-code/rewrite-clj/` works
+with bootstrap-CLJS + shadow-cljs. Small dep addition; should be
+straightforward.
+
+### <a id="d5"></a>D5 — Bare-symbol unbound-symbol error shape
+
+The forms-and-comments design relies on the eval surface throwing a
+clean unbound-symbol error for undefined references rather than us
+inferring "this was probably prose."
+
+Confirm: when bootstrap-CLJS `eval-str` is asked to evaluate `Let`,
+it returns `{:ok false :error <unbound>}` rather than a vague
+compile failure. Test against the actual compile-state behavior;
+adjust the `:error` payload's `:kind` field accordingly (`:compile`
+vs `:runtime`).
+
+### <a id="d6"></a>D6 — Replay topological dep analysis
+
+Topological ordering of resume needs to know "what schemas does this
+fn ref?". Lightweight (regex over `::keyword` patterns) probably
+works for agent-authored CLJS code; full `cljs.analyzer` walk is the
+robust option. MVP prefers lightweight; verify against real agent
+outputs before committing.
+
+### <a id="d7"></a>D7 — Result-value retention across pod restart
+
+Eval-ids are stable in the DB; the live values they reference live
+on `globalThis` (`seon.eval/stash-result-raw!` in
+`src/seon/eval.cljs:235`) and do **not** survive pod restart. The
+agent must re-eval to get a fresh value.
+
+Document this in the system-section so the agent learns the pattern.
+No code change; just a teaching note.
+
+### <a id="d8"></a>D8 — Older DB on newer runtime upgrade strategy
+
+Sketched but not designed: detect substrate version delta, merge
+missing-from-DB bootstrap entries (lookup by identity), surface
+agent overrides that conflict with the new substrate as warnings
+with diffs. Out of MVP scope but the data model must permit it.
+
+### <a id="d9"></a>D9 — Section entities vs `:seon.fn` entities
+
+`:seon.ctx/*` carries three attrs: `:name` (identity), `:priority`
+(sort key), `:fn` (symbol). A section is conceptually "a render fn
+with a sort key" — which could be expressed as a `:seon.fn` entity
+carrying extra section-only attrs (`:seon.fn/section-name`,
+`:seon.fn/section-priority`). Merging drops the `:seon.ctx`
+namespace entirely.
+
+Counter: this overloads `:seon.fn` with render-scheduling concerns
+and complicates queries that just want "all functions". Collapse or
+keep is an architectural call.
+
+### <a id="d10"></a>D10 — `:seon.eval/touches` vs datahike history
+
+With `:keep-history? true` (D2) on, every transact has a tx-id and
+the set of datoms it wrote — which IS what `:touches` encodes. Could
+replace `:touches` with `:seon.eval/tx-id` and derive the touched
+entities via datahike's history API.
+
+Did not apply because the history API surface for "datoms in this
+tx" on datahike-cljs isn't verified against
+`reference-code/datahike/`, and the explicit ref-set is cheap.
+
+### <a id="d11"></a>D11 — `:seon.eval/at` vs time-prefixed eval-id
+
+The id is "10-char base62, time-prefixed → sorts by creation". The
+time-prefix uses `(mod (.now js/Date) (Math/pow 62 4))` (see
+`seon.agent/new-id!` in `src/seon/agent.cljs:75`), which wraps every
+~4 days. So the id is sortable within a window but doesn't survive
+roundtrip to `js/Date`.
+
+`:at` survives as a human-readable timestamp. Could either drop
+`:at` and widen the time-prefix to be roundtrip-safe, or keep both.
+Current spec keeps both; you may want to revisit.
+
+### <a id="d12"></a>D12 — `:seon.eval/result-edn` storage
+
+The spec stores the FULL pr-str and applies `truncate-edn` at render
+time. For huge values that's wasteful storage. A pre-truncated
+version could be stored and the `#_:full` opt-in (D14-adjacent;
+mirrors `bin/mcp-server`'s `full-output-prefix`) could re-eval the
+source to get the live value.
+
+Did not apply because re-evaluating source isn't side-effect-safe in
+general. If you want this, the contract has to be "only for
+expressions known to be pure" — a meaningful classifier the MVP
+doesn't have.
+
+### <a id="d13"></a>D13 — Spec redefinability + always-warn-when-broken
+
+**Redefines are never rejected.** The agent is allowed to break
+things. The warning system's job is to show what's currently broken
+so the agent can decide to fix in this turn, the next turn, or
+multiple batches.
+
+When `(schema/register! ::foo new-shape)` runs and `::foo` already
+exists:
+
+1. Replace the registered schema unconditionally.
+2. Run a violation check: for any persistent entity whose schema
+   references `::foo`, validate the stored data against the new
+   schema. Any violations become warnings in the warnings tile,
+   not errors and not rejections. Format:
+   `"<entity> no longer matches ::foo — <why>"`.
+3. The instrumentation layer (D5 / Malli runtime validation) is
+   **always on**, so the next call to any fn whose `:malli/schema`
+   uses `::foo` will throw at the call site if the inputs violate
+   the new shape. That's the agent's runtime feedback channel.
+
+Datahike-level type changes (D3) still can't be applied — the
+underlying attribute schema is immutable once installed. If the
+agent tries to change the datahike type for an attr that's been
+used for storage, the warning explains: "the Malli schema was
+replaced, but the datahike attribute type stays. To change the
+storage type you must rename the attr."
+
+No code path "approves" or "rejects" the change. The DB always
+reflects the current ground truth; the warnings tile always
+reflects what's currently broken against current schemas + tests.
+
+### <a id="d14"></a>D14 — `(def x …)` not-persisted warning
+
+Agents reach for `(def !x (atom …))` because of a known
+bootstrap-CLJS gotcha (bare-value defs don't resolve across
+eval-str calls; see `src/seon/eval.cljs` opening docstring). The
+defs eval fine but **aren't persisted** — pod restart loses them.
+
+Warning predicate proposal:
+
+```clojure
+(defn def-not-persisted-warning [{:seon.db/keys [db]
+                                  :seon.agent/keys [id]}]
+  (let [orphans (recent-evals-matching db id
+                  #(re-find #"^\(def\s+[^\s(]+" (:seon.eval/source %)))
+        ;; Cross-check: any persistent entity references this name?
+        deps    (find-dependents-by-source db orphans)]
+    (for [{::keys [eval-id var-name dependents]}
+          (annotate-orphans orphans deps)]
+      {:seon.warning/severity (if (seq dependents) :error :warn)
+       :seon.warning/text
+       (str "(def " var-name ") at " eval-id " isn't persisted. "
+            (if (seq dependents)
+              (str "It WILL break on pod restart — these entities "
+                   "reference it: " (str/join ", " dependents) ". "
+                   "Wrap it in (defn) or use seon.db to store the value.")
+              "It won't survive pod restart — fine for scratch, "
+              "but if you keep it, persist via (defn) or seon.db."))})))
+```
+
+Two tiers: `:warn` (just sitting there) and `:error` (a persisted
+fn's source references it).
+
+### <a id="d15"></a>D15 — Targeted test auto-run on every define / redefine
+
+Tests run automatically every time a function is defined or
+redefined — and ONLY the tests targeting that specific function.
+The agent never has to say "run tests." If the tests pass, the
+warnings tile says nothing. If any fail, the warnings tile shows
+the failure with the test source and the diff between expected and
+actual, so the agent knows what to fix.
+
+**Triggering.** A `:seon.eval` entry with `:touches [<seon.fn ref>]`
+fires a post-tx hook. The hook queries: every `:seon.test` entity
+whose `:seon.test/target` ref resolves to the touched fn. Run each.
+Update the test's `:last-passed-at` / `:last-failed-at` /
+`:last-failure`.
+
+**Why this works cheaply.** Tests target one fn each (the
+`:seon.test/target → :seon.fn` ref). The reverse index is one
+datalog query. Most fns have ≤2 tests. The post-eval cost is
+"run a small number of tests for the one fn that just changed,"
+not "all tests."
+
+**Warning predicate.** `failing-test-warning` queries every test
+where `:last-failed-at > :last-passed-at` (or `:last-passed-at`
+is nil). Each becomes one warning showing test name, target fn,
+and `:last-failure`. Pure derivation from current test-entity
+state — no separate failure-cache.
+
+**Manual run.** `(run-tests)` still works for "I want to re-run
+everything." `(t/run-test 'foo-test)` runs one by name. But the
+common case — write a fn, test runs immediately, see breakage in
+the next render — needs nothing from the agent.
+
+**Instrumentation interplay.** Spec instrumentation (Malli runtime
+validation per CLAUDE.md "Function Instrumentation") stays on
+always. That's the in-call feedback: "you called fn X with wrong
+shape → throws at the call site." Test auto-run is the post-define
+feedback: "fn X's tests still pass against the new definition."
+Two complementary signals; both always on; the agent doesn't have
+to ask for either.
+
+In MVP.
+
+### <a id="d16"></a>D16 — `(forget!)` for namespaces
+
+Currently `(forget! 'sym)` works on functions / schemas / tests via
+their identity attr. Should it also work on a whole `:seon.ns/*`
+entity? Semantics:
+
+- Retract the `:seon.ns` entity.
+- Cascade: retract every `:seon.fn`/`:seon.schema`/`:seon.test`
+  entity whose ns-prefix matches.
+- `ns-unmap` each member; `goog.object/remove` the ns namespace
+  object from globalThis.
+- Log one `:seon.eval` entry with `:forgot` populated by all retracted
+  entities.
+
+Useful when the agent decides an entire experiment-namespace is
+trash. MVP-include or defer?
+
+### <a id="d17"></a>D17 — `(seon.repl/show-ns 'foo)` helper
+
+The agent's default render shows current-ns + immediately-related-ns.
+To inspect "what entities exist in seon.foo without switching to
+it," they currently have to run a datalog query by hand. A small
+helper:
+
+```clojure
+(seon.repl/show-ns 'seon.foo)
+;; => same string current-ns-section would produce for that ns
+```
+
+One-line wrapper around `current-ns-section`. MVP-include? It's
+trivial to add but worth deciding so the system-section can teach
+it.
+
+### <a id="d18"></a>D18 — `(seon.repl/undo :<eval-id>)` helper
+
+The spec already derives reversibility per-eval (see the
+"Reversibility is derived" table in the Forget section). Exposing
+the inverse as a helper:
+
+```clojure
+(seon.repl/undo :K9p2x4nB7q)
+;; => looks up eval, checks reversibility, retracts/unmaps if Yes,
+;;    refuses with a clear reason if No or Partial.
+```
+
+The classifier already exists in spec form; this just wires it to a
+verb the agent can type. MVP or post-MVP?
