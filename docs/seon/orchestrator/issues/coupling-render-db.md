@@ -1,26 +1,15 @@
 ---
 type: issue
-status: open
+status: archived
 severity: architectural
 milestone: M2
-tags: [issue, web, database, architecture]
+tags: [issue, web, database, architecture, archive]
 ---
-# Coupling: render.clj Reaches Into db.datalevin.conn Directly
+# Coupling: render.clj Reaches Into db.datalevin.conn Directly (Archived)
 
-## Problem
+## Resolution
 
-`render.clj` bypasses the `seon.db` API and reaches directly into `db.datalevin.conn`. Every other namespace uses `seon.db` as the sole database API. This coupling means render depends on the database implementation layer, not just the public API.
-
-## Where
-
-- `src/seon/render.clj` — direct dependency on `seon.db.datalevin.conn`
-
-## Acceptance Criteria
-
-- `render.clj` uses only `seon.db` public API
-- No direct imports of `seon.db.datalevin.conn` outside `src/seon/db/`
-- Render functionality unchanged
-- Tests pass
+Resolved by the datahike migration. `src/seon/render.clj` no longer imports anything from `seon.db.datalevin.conn` (that namespace doesn't exist). Render now goes through the `seon.db` public API or receives a `db-name` keyword.
 
 ## Related
 

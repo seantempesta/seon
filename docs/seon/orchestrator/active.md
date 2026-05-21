@@ -15,7 +15,7 @@ status: active
 
 ## What's Going On
 
-We're replacing Datalevin (external JVM, broken event-loop, crash-loops at boot) with embedded Datahike. PRD set: `docs/prds/datahike-migration/{prd,decisions,notes,phase-3-harness-migration}.md`.
+Datahike (embedded, in-process LMDB) is the database. PRD set: `docs/prds/datahike-migration/{prd,decisions,notes,phase-3-harness-migration}.md`.
 
 Phases shipped:
 
@@ -23,11 +23,10 @@ Phases shipped:
 |---|---|---|
 | 1 | `db40ce2` | Schema bridge + flow topology (`conn-process`, `tx-bus`, `:seon.db/flow` Integrant key) |
 | 2 | `9455f3f` | `seon.db` dispatches per-namespace to datahike flow + auto-stamp `:seon.db/namespace` |
-| Disable | `d453ae5` | Datalevin removed from `system.edn`; load-cycle fix in `seon.db` |
 | 3 step 1 | `0bb16ac` | Five DBs in `:seon.db/flow` (`:seon.session :seon.repl :seon.flow :seon.orchestrator :seon.phase2.demo`) |
 | 3 demo | `baa2b41` | `seon.session/launch!` / `checkpoint!` / `stop!` end-to-end |
 
-Test baseline: **4054 pass / 0 fail / 2 errors**. The 2 errors are pre-existing (`seon.db.pipeline-test`, `seon.health.workout-test`); both depend on the disabled datalevin runtime DB and disappear in Phase 4.
+Test baseline: **4054 pass / 0 fail / 2 errors**. The 2 errors are pre-existing (`seon.db.pipeline-test`, `seon.health.workout-test`); both depend on the legacy runtime DB and disappear in Phase 4.
 
 ## Boot Reality
 
@@ -36,7 +35,7 @@ Test baseline: **4054 pass / 0 fail / 2 errors**. The 2 errors are pre-existing 
 - Phase 1 complete (nREPL :7888, HTTP :8080)
 - Phase 2 reports "failed" — **expected**. `:seon/runtime-db` is intentionally absent. Don't try to "fix" this until Phase 5.
 - Datahike flow up with 5 conn-processes
-- Agent pool re-enabled in `:dev`/`:prod` (size 3). Idle JVMs survive health-check cycles. The previously-feared SIGKILL bug did not reproduce in the live REPL (likely fixed by intervening commits since the disable note was written).
+- Agent pool re-enabled in `:dev`/`:prod` (size 3). Idle JVMs survive health-check cycles. The previously-feared SIGKILL bug did not reproduce in the live REPL.
 
 ## Phase 3 Step Status (from `phase-3-harness-migration.md` §Phasing)
 
@@ -104,7 +103,6 @@ Test baseline: **4054 pass / 0 fail / 2 errors**. The 2 errors are pre-existing 
 ## Out of Scope (Phase 4+)
 
 - Domain namespace migration (`seon.health.*`, `seon.trading.*`, `seon.ai.*`)
-- Datalevin source deletion (Phase 5)
 - Datahike named branches for clone-and-merge
 - Cross-process security filters (`d/filter` grants)
 - Token-aware truncation in AI render output
@@ -112,5 +110,4 @@ Test baseline: **4054 pass / 0 fail / 2 errors**. The 2 errors are pre-existing 
 
 ## Issue Notes
 
-- [[orchestrator/issues/datalevin-disabled]] — Datalevin's broken event-loop and the disable workaround
 - [[orchestrator/issues/agent-pool-sigkill-cycle]] — pool's health-check SIGKILLs idle JVMs (deferred to Phase 3 step 5)

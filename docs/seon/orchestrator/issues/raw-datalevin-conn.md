@@ -1,25 +1,17 @@
 ---
 type: issue
-status: open
+status: archived
 severity: cleanup
 milestone: M1
-tags: [issue, database]
+tags: [issue, database, archive]
 ---
-# Raw Datalevin Connection in agent_runner.clj
+# Raw Datalevin Connection in agent_runner.clj (Resolved)
 
-## Problem
+## Resolution
 
-`agent_runner.clj:44` calls `datalevin.core/get-conn` directly via `requiring-resolve`, bypassing the `seon.db` API that the rest of the codebase uses. This creates an untracked database connection outside the connection manager's control. Low priority since it's only used during agent JVM bootstrap.
+Resolved by the datahike migration. `src/seon/flow/agent_runner.clj` no longer touches a datalevin connection — `datalevin.core/get-conn` is gone from the namespace. Agent JVMs reach the database via `seon.db` and the cross-JVM relay (`seon.db.relay`), which routes through the orchestrator's `:seon.db/flow`.
 
-## Where
-
-- `src/seon/flow/agent_runner.clj:44` — direct `d/get-conn` call
-
-## Acceptance Criteria
-
-- `agent_runner.clj` uses `db/resolve-conn` or equivalent `seon.db` API
-- No direct `datalevin.core/get-conn` calls outside `src/seon/db/`
-- Agent JVM bootstrap still works correctly
+The general principle still holds: only `src/seon/db/` and `src/seon/db/datahike/` may touch a raw connection. Everything else uses `seon.db/transact!`, `seon.db/query`, `seon.db/pull-by-name`, etc.
 
 ## Related
 

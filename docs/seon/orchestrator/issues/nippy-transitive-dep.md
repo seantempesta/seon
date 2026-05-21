@@ -7,7 +7,7 @@ tags: [issue, flow]
 
 ## Problem
 
-`taoensso.nippy` is used directly in `src/seon/flow/harness/bridge.clj` and `src/seon/flow/harness/channel.clj` (fast-freeze/fast-thaw for TCP wire protocol), but is not declared in `deps.edn`. It arrives transitively via Datalevin or Timbre.
+`taoensso.nippy` is used directly in `src/seon/flow/harness/bridge.clj` and `src/seon/flow/harness/channel.clj` (fast-freeze/fast-thaw for TCP wire protocol), but is not declared in `deps.edn`. It arrives transitively via Datahike or Timbre.
 
 The `:agent` alias also lacks Nippy — agent JVMs use bridge.clj for cross-namespace calls.
 

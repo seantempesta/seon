@@ -1,24 +1,13 @@
 ---
 type: issue
-status: open
-tags: [issue, schema]
+status: archived
+tags: [issue, schema, archive]
 ---
-# routes.clj passes conn where db-name expected
+# routes.clj passes conn where db-name expected (Archived)
 
-## Problem
+## Resolution
 
-`src/seon/ns/routes.clj` line ~486 passes a Datalevin conn object to `resolve-renderer`, which expects a `db-name` keyword. This violates the function's contract. May work accidentally if downstream code tolerates a conn where it expects a keyword, but it's a type mismatch at the call site.
-
-## File Refs
-
-- `src/seon/ns/routes.clj:486` — call site
-- `src/seon/render.clj` — `resolve-renderer` signature takes `[db-name available-keys target-ns]`
-
-## Acceptance Criteria
-
-- Call site passes a db-name keyword, not a conn object
-- `resolve-renderer` behavior unchanged
-- Tests pass
+Resolved by the datahike migration. In `src/seon/ns/routes.clj` the call site at line ~482 now hardcodes `conn nil` (M-1: `get-conn` deleted), and `render/resolve-renderer` is only invoked when `conn` is non-nil. The conn-vs-db-name mismatch is gone — the boot path passes nothing, and the renderer-resolution flow needs to be wired afresh against datahike (tracked as Phase 3 step 7 in [[orchestrator/active]]).
 
 ## Severity
 

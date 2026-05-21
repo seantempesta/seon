@@ -7,24 +7,24 @@ tags: [issue, reference]
 
 ## Problem
 
-Several `docs/seon/reference/` files contain stale references (XTDB, ml-options namespaces, dead file paths) mixed with still-valid content. Quick fixes applied for high-priority items; these need deeper cleanup.
+A few `docs/seon/reference/` files still mix stale references (XTDB, ml-options namespaces, dead file paths, Datalevin-era assumptions) with still-valid content. The bulk was cleaned in the doc-scrub waves; what's left is below.
 
 ## Remaining Work
 
 | File | Issue |
 |------|-------|
-| `flow-foundation.md` | 17 XTDB mentions should be Datalevin; `src/seon/web/sse/flow.clj` path wrong |
-| `separate-jvm-exploration.md` | `src/seon/experimental/ns_instance.clj` dead; PRD path needs archive prefix |
-| `durable-ctx-design.md` | Broken internal link `docs/reference/` → `docs/seon/reference/`; vision doc could mislead agents |
-| `datastar-extended-patterns.md` | Test examples use stale namespaces |
+| `separate-jvm-exploration.md` | `src/seon/experimental/ns_instance.clj` dead; PRD path needs archive prefix; surviving Datalevin/XTDB mentions need rewording for embedded Datahike |
+| `durable-ctx-design.md` | Broken internal link `docs/reference/` → `docs/seon/reference/`; some Datalevin assumptions linger in the design narrative |
 
-## Already Fixed (this session)
+## Already Fixed (prior waves)
 
 - `async-ui-patterns.md` → status: abandoned (entirely ml-options)
 - `hyperlith-patterns.md` → status: abandoned (entirely ml-options)
-- `datastar-quick-reference.md` → fixed 3x CONVENTIONS.md refs
+- `datastar-quick-reference.md` → fixed CONVENTIONS.md refs
 - `gemini-native-integration.md` → status: completed, added staleness preamble
 - `linting-setup.md` → fixed PRD path to archive
+- `flow-foundation.md` → no datalevin/xtdb/datahike refs remain
+- `datastar-extended-patterns.md` → no db-engine refs remain
 
 ## Severity
 
