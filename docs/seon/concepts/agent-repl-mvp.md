@@ -64,14 +64,14 @@ rendering (warnings on cross-namespace edits, etc.), not through ACL.
 └──────────────────────────────────────────────────────────────────┘
 
 ┌──────────────────────────────────────────────────────────────────┐
-│  Rendering = `render-ai` dispatch, applied recursively           │
+│  Rendering = section entities → section fns → strings            │
 │                                                                  │
-│  section entities → section fns → entity-shaped maps             │
-│        ↓                                                         │
-│  every map → render-ai (specificity dispatch) → string           │
+│  composer queries :seon.ctx entities, sorts by priority,         │
+│  resolves each :seon.ctx/fn symbol, calls it with ctx, joins     │
+│  the resulting strings. Empty strings are elided.                │
 │                                                                  │
-│  Sections are entities; section fns are arbitrary Clojure.       │
-│  Agent extends by writing more-specific render-ai fns.           │
+│  Agent extends by rewriting section fns and transacting          │
+│  different :seon.ctx/fn symbols on the section entities.         │
 └──────────────────────────────────────────────────────────────────┘
 
 ```
@@ -475,26 +475,25 @@ special-cased.
 ### Data shapes
 
 ```clojure
+;; Render-context: every section fn receives this as its sole argument.
 ::seon.render/context
   [:map
    [::db          :any]
    [::agent-id    :string]
    [::ns          :keyword]]
 
-;; A section entity. Identified by presence of name + priority + fn.
+;; Section entity (persisted). Identified by :seon.ctx/name.
 ::seon.ctx/entity
   [:map
    [:seon.ctx/name      :keyword]
    [:seon.ctx/priority  :long]
-   [:seon.ctx/fn        :symbol]]   ; ns-qualified, resolves to a section function
+   [:seon.ctx/fn        :symbol]]   ; ns-qualified, resolves to a section fn
 
-;; Derived warning (not stored as a DB entity; produced by warning preds at render time).
+;; Warning record (transient; produced by warning predicates at render time).
 ::seon.warning/record
   [:map
-   [:seon.warning/entity      :string]
-   [:seon.warning/issue       :keyword]
-   [:seon.warning/severity    :keyword]   ; :persist-blocker | :runtime-warning | :info
-   [:seon.warning/repair-hint :string]]
+   [:seon.warning/text     :string]                ; rendered text
+   [:seon.warning/severity :keyword]]              ; :error | :warn | :info
 
 ```
 
@@ -652,21 +651,24 @@ regardless of what's in the DB. The DB carries source records for those
 vars (and any agent additions/overrides). Forgetting a DB entity
 removes the source record, not the runtime var.
 
-**`(seon.render/reset-defaults!)`** re-runs the bootstrap transaction
-(`resources/seon/bootstrap.edn`) as an idempotent upsert. Effect:
+**`(seon.render/reset-defaults!)`** replays the bootstrap as an
+"add-missing-only" pass. Implementation: for each entry in
+`resources/seon/bootstrap.edn`, pull the entity by its identity attr;
+if absent, transact the entry; if present, skip it. This preserves
+every attr the agent has edited — datahike's plain upsert would
+overwrite them, so the no-op-on-existing check is explicit.
 
 - Missing-from-DB defaults are added back (section entities, default
   `seon.render.default/*` source records, etc.).
-- Entries the agent has modified keep the agent's version; the bootstrap
-  doesn't overwrite (lookup-by-identity finds the existing entity and
-  leaves attrs the agent set alone).
+- Entries the agent has modified keep the agent's version; the
+  bootstrap's version is skipped, not merged.
 - Entries the agent retracted are re-added.
 - Strictly additive — never destructive of agent work.
 
-A more aggressive `(seon.render/reset-defaults! :overwrite true)` exists
-for "I broke my context and want the original everything back" — this
-version transacts the bootstrap with retractions for any attr the agent
-set differently. Always logged.
+A more aggressive `(seon.render/reset-defaults! :overwrite true)`
+transacts the bootstrap directly (datahike upsert), overwriting every
+attr that conflicts. Always logged. The agent uses this when they've
+broken their context and want the original everything back.
 
 System-instructions tile (in every render) includes:
 
