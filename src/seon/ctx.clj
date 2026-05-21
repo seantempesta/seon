@@ -83,10 +83,10 @@
                   [:any {:description "Additional arguments for the update function"}])
 
 (schema/register! ::updated-at
-                  [inst? {:description "When the ctx was last persisted to Datalevin"}])
+                  [inst? {:description "When the ctx was last persisted to Datahike"}])
 
 (schema/register! ::data
-                  [:string {:description "EDN-serialized ctx state for Datalevin persistence"}])
+                  [:string {:description "EDN-serialized ctx state for Datahike persistence"}])
 
 (schema/register! ::created-at
                   [inst? {:description "When the instance was created"}])
@@ -174,12 +174,12 @@
                             :description "Agent namespace as string (read-only in ctx)"}])
 
 ;;; ---------------------------------------------------------------------------
-;;; Datalevin Entity Schema (Malli is the source of truth)
+;;; Datahike Entity Schema (Malli is the source of truth)
 ;;; ---------------------------------------------------------------------------
 
 (def ctx-entity-schema
   "Malli schema for a ctx persistence entity.
-   Defines the shape of what gets stored in Datalevin.
+   Defines the shape of what gets stored in Datahike.
    All persisted attrs have concrete types — no :any, no [:maybe X]."
   [:map
    [:seon.ctx/instance-id ::instance-id]
@@ -804,7 +804,7 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn persist!
-  "Manually persist current value to Datalevin.
+  "Manually persist current value to Datahike.
 
    Request keys:
      ::db-name     - Required. Database name keyword
@@ -821,7 +821,7 @@
       (filter-serializable value))))
 
 (defn load!
-  "Load persisted value from Datalevin.
+  "Load persisted value from Datahike.
 
    Request keys:
      ::db-name     - Required. Database name keyword

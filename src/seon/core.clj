@@ -19,7 +19,7 @@
   system, reusing Phase 1 components via ig/resume. If Phase 2 fails,
   Phase 1 remains running and the system is degraded but debuggable.
 
-  Datalevin is the sole database."
+  Datahike is the sole database."
   (:require
    [cheshire.core :as json]
    [clojure.string :as str]
@@ -109,8 +109,8 @@
 
 (defn- preflight-port-checks!
   "Check that in-process ports are free before starting.
-   Datalevin (8898) is NOT checked here — the server component auto-detects
-   and adopts an existing server if one is running.
+   Datahike runs in-process (no port) — its connection is managed by the
+   :seon.db/conn-process Integrant component, not this preflight check.
    If Seon is already running and healthy, prints status summary and exits."
   []
   (when-let [health (fetch-health)]

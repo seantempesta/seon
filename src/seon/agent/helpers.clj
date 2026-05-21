@@ -90,7 +90,7 @@
      (sql \"SELECT * FROM signals WHERE symbol = ? AND score > ?\" \"AAPL\" 0.8)"
   {:malli/schema [:=> [:cat ::query [:* :any]] ::query-result]}
   [query & _params]
-  (throw (ex-info "SQL helpers not yet migrated to Datalevin"
+  (throw (ex-info "SQL helpers not yet migrated to Datahike"
                   {:query query})))
 
 (defn sql!
@@ -105,7 +105,7 @@
      (sql! \"DELETE FROM signals WHERE _id = ?\" \"sig-1\")"
   {:malli/schema [:=> [:cat ::statement [:* :any]] ::tx-result]}
   [stmt & _params]
-  (throw (ex-info "SQL helpers not yet migrated to Datalevin"
+  (throw (ex-info "SQL helpers not yet migrated to Datahike"
                   {:statement stmt})))
 
 (defn sql-batch!
@@ -120,7 +120,7 @@
                  [\"sig-3\" \"GOOG\" \"long\"])"
   {:malli/schema [:=> [:cat ::statement [:* ::param-row]] ::tx-result]}
   [stmt & _param-rows]
-  (throw (ex-info "SQL helpers not yet migrated to Datalevin"
+  (throw (ex-info "SQL helpers not yet migrated to Datahike"
                   {:statement stmt})))
 
 (comment

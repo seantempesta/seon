@@ -5,12 +5,12 @@
    `:seon.ns/dynamic? true`), this module handles:
    - Creating validated ctx atoms with Malli schema enforcement
    - Injecting `*ctx*` and `*conn*` dynamic vars into the namespace
-   - Resolving page render functions from Datalevin metadata
+   - Resolving page render functions from Datahike metadata
    - Persisting and restoring ctx state across restarts
 
    Usage:
      (lifecycle/ensure-instance! {::db-name :seon.runtime
-                                  ::ns-sym 'seon.health.workout})
+                                  ::ns-sym 'seon.db.schema})
      ;; => {::instance-id \"abc123\" ::ctx-atom #<Atom@...>}
 
      (lifecycle/backup-all-instances! {::db-name :seon.runtime})
@@ -34,7 +34,7 @@
                   [:keyword {:description "Database name keyword (e.g. :seon.runtime)"}])
 
 (schema/register! ::ns-sym
-                  [:symbol {:description "Namespace symbol (e.g. 'seon.health.workout)"}])
+                  [:symbol {:description "Namespace symbol (e.g. 'seon.db.schema)"}])
 
 (schema/register! ::instance-id
                   [:string {:min 1 :description "Instance ID"}])
@@ -160,7 +160,7 @@
 
 (defn dynamic-namespace?
   "Check if a namespace is dynamic (has ::*ctx* spec).
-   Queries Datalevin for :seon.ns/dynamic? set by the scanner.
+   Queries Datahike for :seon.ns/dynamic? set by the scanner.
 
    Request keys:
      ::db-name - Required. Database name keyword
@@ -182,7 +182,7 @@
 
 (defn ctx-spec-key
   "Convert namespace symbol to its *ctx* spec keyword.
-   'seon.health.workout => :seon.health.workout/*ctx*
+   'seon.db.schema => :seon.db.schema/*ctx*
 
    Request keys:
      ::ns-sym - Required. Namespace symbol
@@ -218,11 +218,11 @@
              {}))))}))
 
 (defn find-page-render-fn
-  "Find the page renderer function for a namespace via Datalevin metadata.
+  "Find the page renderer function for a namespace via Datahike metadata.
    Uses functions-with-output-key to find HTML renderers, then filters for
    those whose required-keys include the namespace's *ctx* key.
    This handles renderers in child namespaces
-   (e.g. seon.health.workout.render/page-render for seon.health.workout).
+   (e.g. seon.code.render/page-render for seon.code).
 
    Request keys:
      ::db-name - Required. Database name keyword
@@ -296,7 +296,7 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn resolve-instance
-  "Resolve an existing instance from Datalevin.
+  "Resolve an existing instance from Datahike.
    With instance-id: look up that specific instance.
    Without: find the most recent instance for this namespace.
 
@@ -349,7 +349,7 @@
    FIRST checks in-memory registry for existing live instance.
    If found, returns it immediately (preserving in-memory state).
 
-   If not in memory, checks Datalevin for persisted state.
+   If not in memory, checks Datahike for persisted state.
    If valid, restores from persistence. Otherwise creates fresh.
 
    Request keys:
@@ -420,7 +420,7 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn backup-all-instances!
-  "Force-persist all ctx atoms to Datalevin. Called on shutdown.
+  "Force-persist all ctx atoms to Datahike. Called on shutdown.
 
    Request keys:
      ::db-name - Required. Database name keyword
@@ -443,7 +443,7 @@
     {::backed-up @persisted ::total (count instances)}))
 
 (defn restore-instances!
-  "Restore persisted instances from Datalevin on startup.
+  "Restore persisted instances from Datahike on startup.
    Queries for all persisted ctx instances and recreates valid ones.
 
    Request keys:

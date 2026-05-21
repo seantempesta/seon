@@ -127,7 +127,7 @@
 (defn related-schemas
   "Find specs that share keys with a given spec.
 
-   Queries Datalevin for specs whose :seon.spec/contains-keys overlap
+   Queries Datahike for specs whose :seon.spec/contains-keys overlap
    with the given spec's contains-keys.
 
    Request keys:
@@ -138,7 +138,7 @@
      Vector of maps with :seon.spec/* keys for specs sharing at least one key.
 
    Example:
-     (related-schemas {::db-name :seon.runtime ::spec-key :seon.health/workout})"
+     (related-schemas {::db-name :seon.runtime ::spec-key :seon.db.schema/entity-name})"
   [{::keys [db-name spec-key]}]
   (let [db-name (or db-name :seon.runtime)
         source-keys (db/query db-name
@@ -187,7 +187,7 @@
      include any of the given keys.
 
    Example:
-     (who-produces {::db-name :seon.runtime ::keys [:seon.health/workout]})"
+     (who-produces {::db-name :seon.runtime ::keys [:seon.db.schema/entity-name]})"
   [{::keys [db-name keys]}]
   (let [db-name (or db-name :seon.runtime)]
     (->> keys
@@ -217,7 +217,7 @@
      include any of the given keys.
 
    Example:
-     (who-consumes {::db-name :seon.runtime ::keys [:seon.health/workout]})"
+     (who-consumes {::db-name :seon.runtime ::keys [:seon.db.schema/entity-name]})"
   [{::keys [db-name keys]}]
   (let [db-name (or db-name :seon.runtime)]
     (->> keys
@@ -240,7 +240,7 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn ctx-save!
-  "Save agent context to Datalevin, keyed by instance-id.
+  "Save agent context to Datahike, keyed by instance-id.
 
    Serializes data via pr-str. Non-serializable values will cause an error.
 
@@ -263,7 +263,7 @@
     data))
 
 (defn ctx-load
-  "Load saved agent context from Datalevin.
+  "Load saved agent context from Datahike.
 
    Request keys:
      ::db-name     - Optional. Database name keyword (default :seon.runtime)

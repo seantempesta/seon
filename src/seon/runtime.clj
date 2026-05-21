@@ -18,7 +18,7 @@
    ## Connection
 
    All database access goes through the seon.db API using the :seon.runtime
-   db-name keyword. No direct Datalevin access.
+   db-name keyword. No direct Datahike access.
 
    ## Usage
 
@@ -215,12 +215,12 @@
                   [:string {:description "pr-str of flow state map"}])
 
 ;;; ---------------------------------------------------------------------------
-;;; Datalevin Entity Schemas (Malli is the source of truth)
+;;; Datahike Entity Schemas (Malli is the source of truth)
 ;;; ---------------------------------------------------------------------------
 
 (def runtime-entity-schema
   "Malli schema for a runtime namespace instance entity.
-   Defines the shape of what gets stored in Datalevin.
+   Defines the shape of what gets stored in Datahike.
    All persisted attrs have concrete types -- no :any, no [:maybe X].
    Optional fields are conditionally added via cond-> in build-tx-map."
   [:map
@@ -265,11 +265,8 @@
 (db-schema/register-entity-schema! "seon.agent.run" agent-run-entity-schema)
 (db-schema/register-entity-schema! "seon.flow.snap" flow-snap-entity-schema)
 
-;; runtime-merged-schema + merged-schema-cache deleted (chunk M-1, 2026-05-15).
-;; The aggregator was only consumed by :seon/runtime-db (Integrant key absent
-;; from system.edn — defmethods deleted), seon.render/get-conn (deleted), and
-;; seon.ns.routes/get-conn (deleted). Datahike-flow namespaces install schema
-;; from the Malli registry; no manual schema merge needed.
+;; Datahike-flow namespaces install schema from the Malli registry;
+;; no manual schema merge needed.
 
 ;;; ---------------------------------------------------------------------------
 ;;; Session ID Validation
@@ -337,7 +334,7 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- build-tx-map
-  "Build a Datalevin transaction map from an instance map."
+  "Build a Datahike transaction map from an instance map."
   [instance]
   (cond-> {:seon.runtime/namespace (::namespace instance)
            :seon.runtime/status (::status instance)
@@ -358,7 +355,7 @@
     (assoc :seon.runtime/component-key (::component-key instance))))
 
 (defn- persist-instance!
-  "Persist an instance to Datalevin. Synchronous in direct mode (tests),
+  "Persist an instance to Datahike. Synchronous in direct mode (tests),
    async (future) in production. Upserts via :db.unique/identity."
   [instance]
   (let [do-persist (fn []
@@ -379,7 +376,7 @@
 (defn register!
   "Register a namespace instance in the runtime registry.
 
-   Persists to Datalevin (upsert via namespace identity) and updates the
+   Persists to Datahike (upsert via namespace identity) and updates the
    in-memory cache.
 
    Request keys:
@@ -407,7 +404,7 @@
                    component-key (assoc ::component-key component-key))]
     ;; Update in-memory cache
     (swap! registry-cache assoc ns-str inst-map)
-    ;; Persist to Datalevin
+    ;; Persist to Datahike
     (persist-instance! inst-map)
     (log/debug "Registered runtime instance" {:namespace ns-str
                                                :status status
@@ -418,7 +415,7 @@
   "Unregister a namespace instance.
 
    Updates status to :stopped with stopped-at timestamp in both
-   in-memory cache and Datalevin.
+   in-memory cache and Datahike.
 
    Request keys:
      ::namespace - Required. Namespace string to unregister
@@ -435,7 +432,7 @@
                            ::stopped-at now)]
         ;; Update in-memory cache
         (swap! registry-cache assoc ns-str updated)
-        ;; Persist to Datalevin
+        ;; Persist to Datahike
         (persist-instance! updated)
         (log/debug "Unregistered runtime instance" {:namespace ns-str})
         updated)
@@ -490,7 +487,7 @@
   "Mark all :running instances as :crashed.
 
    Called on startup to detect instances from a previous unclean shutdown.
-   Reads from Datalevin to find previously-running instances and updates
+   Reads from Datahike to find previously-running instances and updates
    their status.
 
    Request keys:
@@ -519,9 +516,10 @@
       {::crashed-count 0})))
 
 (defn- datalevin->cache
-  "Convert a Datalevin entity map (`:seon.runtime/*` keys) to the
+  "Convert a Datahike entity map (`:seon.runtime/*` keys) to the
    in-memory cache format (`::runtime/*` keys). Drops :db/id and any
-   keys not part of the runtime schema."
+   keys not part of the runtime schema.
+   (Name retained from earlier Datalevin lineage.)"
   [entity]
   (let [key-map {:seon.runtime/namespace  ::namespace
                  :seon.runtime/status     ::status
@@ -573,7 +571,7 @@
       {::cleaned-count 0})))
 
 (defn hydrate-cache!
-  "Load all runtime instances from Datalevin into the in-memory cache.
+  "Load all runtime instances from Datahike into the in-memory cache.
 
    First cleans up stale entities missing required fields, then populates
    the cache. Called after mark-crashed! to reflect persisted state (e.g.
@@ -680,7 +678,7 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn start-agent-run!
-  "Record the start of an agent run in Datalevin.
+  "Record the start of an agent run in Datahike.
 
    Creates a :seon.agent.run/* entity with status :running, linked to the
    runtime instance via ref if it exists.
@@ -718,7 +716,7 @@
    ::status :running})
 
 (defn complete-agent-run!
-  "Record the completion of an agent run in Datalevin.
+  "Record the completion of an agent run in Datahike.
 
    Updates the :seon.agent.run/* entity with final status and stats.
 
@@ -750,7 +748,7 @@
    ::status status})
 
 (defn agent-runs
-  "Query all agent runs from Datalevin.
+  "Query all agent runs from Datahike.
 
    Optionally filtered by namespace.
 
@@ -824,7 +822,7 @@
                    [::label ::label]])
 
 (defn snapshot-topology!
-  "Capture flow state and persist to Datalevin.
+  "Capture flow state and persist to Datahike.
    Call AFTER pausing the flow (caller must pause first).
 
    Request keys:
@@ -888,7 +886,7 @@
 (defn register-flow!
   "Register a flow handle (in-memory only -- flow objects aren't serializable).
 
-   Also registers in the runtime registry for Datalevin persistence.
+   Also registers in the runtime registry for Datahike persistence.
 
    Request keys:
      ::flow-id - Keyword identifier for the flow
@@ -901,7 +899,7 @@
   (let [now (java.time.Instant/now)
         handle {:flow flow :chans chans :label label :started-at now}]
     (swap! flow-handles assoc flow-id handle)
-    ;; Also register in runtime registry for Datalevin persistence
+    ;; Also register in runtime registry for Datahike persistence
     (register! {::namespace (str "flow." (name flow-id))
                 ::status :running
                 ::location :in-process})
