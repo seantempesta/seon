@@ -205,6 +205,11 @@ entity carrying `:seon.fn/sym` or `:seon.schema/key` or `:seon.test/sym`
   "This session" is the suffix of evals after the most recent
   resume-marker (see "Resume phase").
 - No `:seon.eval/grades` storage. Grades are computed on render.
+- No `:seon.warning/*` persistent entities. Warnings are pure functions
+  of current DB state — every warning is recomputed at render time by
+  whichever predicate registers itself. Storing them would just risk
+  the stored warning going stale relative to the live data it refers
+  to. See `warnings-section` below.
 - No tx-metadata extension. Plain datahike tx info only.
 
 ## The eval batch
@@ -649,6 +654,39 @@ EDN truncator. Behavior:
 - Trailing `...` is valid EDN — the truncated output round-trips
   through the reader (no half-open delimiters).
 
+Prior art: `bin/mcp-server` (babashka, JVM-side) already implements
+the same shape under different mechanics — `max-eval-output-chars`
+(default 2 KB), `truncated-preview-chars` (1.5 KB), `truncate-stdout`
+which keeps the LAST N chars rather than the first. The opt-out
+prefix `#_:full` in agent code there skips truncation entirely. We
+can port the prefix idea into `eval-batch!` so the agent has the same
+escape hatch from inside the pod.
+
+### Result auto-save (per-eval addressable values)
+
+Every successful eval's value is reachable by eval-id on the next
+turn. Implementation already exists in `seon.eval/stash-result-raw!`
+(`src/seon/eval.cljs:235`): the raw value is written to
+`globalThis` under `__seon_results_<eval-id>`, and the agent's home
+ns exposes `(result :<eval-id>)` to look it up. No pr-str round-trip
+— values that don't round-trip through `read-string` (datahike DB
+tagged literals, JS objects, fns) still come back identical.
+
+Prior art on the JVM side: `bin/mcp-server` (`wrap-code-with-autosave`,
+L461) wraps every form so its return value lands in
+`@user/repl-<session>` under a content-hash key, and the rendered
+output ends with `;; stored as :r-<hash> in @user/repl-<session>`.
+Same idea, different storage. The CLJS pod keeps the per-eval-id
+keying because that's the handle the eval-log already exposes; the
+mcp-server's hash-key approach is incompatible with replay (the
+hash is not the eval-id).
+
+Cross-session retention: `globalThis` values die with the pod. On
+the next pod boot, `(result :<eval-id>)` for an eval recorded by a
+prior session returns nil. The agent re-evals the source from
+`:seon.eval/source` if they need the value live again — surface this
+behavior in the system-section so the agent learns the pattern.
+
 ### Retro-format
 
 Because rendering is pure-functional over current data + current
@@ -687,6 +725,65 @@ recent-evals tile to one line per eval.
 If the new function throws or returns a non-string, `pretty-ai` takes
 over for that section and the failure surfaces as a warning so the
 agent knows what broke.
+
+## Self-instrumentation
+
+Rendering runs on every turn. Section functions can become slow as
+they're rewritten — long queries, large entity walks, accidental
+N+1s. The agent needs to see where time is going so they can
+self-optimize.
+
+Approach: wrap the composer and each section call with
+[Tufte](https://github.com/ptaoussanis/tufte) (Clojure(Script)
+profiler from the same taoensso family as Timbre + Nippy that seon
+already uses). Tufte's `p` macro stamps an id around any
+expression; `profile` collects elapsed-time stats during execution
+and returns them. Overhead is small enough to leave on by default.
+
+```clojure
+;; in seon.render.default
+(ns seon.render.default
+  (:require [taoensso.tufte :as tufte]
+            …))
+
+(defn assemble-ctx [input]
+  (tufte/profile {:dynamic? true :id ::render}
+    {:seon.render/text
+     (->> (sections-in-db (:seon.db/db input))
+          (sort-by :seon.ctx/priority)
+          (map (fn [section]
+                 (tufte/p (:seon.ctx/name section)
+                   (let [f (seon.render/resolve-symbol (:seon.ctx/fn section))]
+                     (if f (f input) (default/pretty-ai section))))))
+          (remove str/blank?)
+          (str/join "\n\n"))}))
+```
+
+What the agent sees: a new section function (or a builtin one) can
+read the latest profile and surface it as a tile.
+
+```clojure
+;; ships disabled — agent enables when they want to look
+(defn perf-section
+  [_input]
+  (let [{:keys [stats]} @seon.perf/!last-render]
+    (if (seq stats)
+      (str "<perf>\n" (tufte/format-pstats stats {:columns [:n :sum :mean :p90]})
+           "\n</perf>")
+      "")))
+```
+
+Why this matters for self-improvement: the agent rewrites
+`recent-evals-section`, sees `:recent-evals` jump from 6ms to 90ms
+on the next render, and learns the cost of their change immediately
+— without external tooling, without the user asking. The same
+mechanism wraps `seon.repl/eval-batch!` and `seon.db/query`, so the
+agent can profile their own forms too.
+
+Out of MVP scope: per-form sampling, percentiles aggregated across
+sessions, automatic regression detection. The MVP just exposes the
+last-render stats; everything else is built by writing more section
+functions.
 
 ## Restoring defaults
 
@@ -912,6 +1009,10 @@ Mechanisms supporting this:
   `warnings-section`, `recent-evals-section`) returning strings +
   `truncate-edn` helper + `pretty-ai` fallback (already exists).
 - `seon.render/explain-section`, `reset-defaults!`.
+- Tufte instrumentation around the composer + each section call;
+  `seon.perf/!last-render` atom carrying the most recent stats.
+  Optional `perf-section` (disabled by default; agent enables when
+  they want to see where the render budget went).
 - Bootstrap phase: detect-empty + ordered `(d/transact!)` from
   `resources/seon/bootstrap.edn`.
 - Resume phase: topo-walk persistent entities, eval each, log results.
@@ -996,6 +1097,36 @@ A new agent session can:
   checks "this is a `(defn name [{::keys [...]}] …)` form with
   `:malli/schema` metadata and namespaced destructure keys". The
   eval-batch's pre-eval gate (if we want one) reuses this directly.
+- **`bin/mcp-server` — JVM-side analog of this pipeline.** A babashka
+  script wired into Claude Code's MCP. It implements many of the
+  patterns this spec describes, against the JVM nREPL instead of the
+  CLJS pod:
+  - Output cap: `max-eval-output-chars 2000`, `truncated-preview-chars
+    1500`. Keeps the trailing portion (last N chars) rather than the
+    head — different tradeoff from the spec's structure-preserving
+    `truncate-edn`, both valid.
+  - Opt-out prefix: forms prefixed with `#_:full ` skip truncation
+    entirely (`full-output-prefix`, L92). Port this idea into
+    `eval-batch!` so the agent can demand the full value on demand.
+  - Result auto-save: `wrap-code-with-autosave` (L461) wraps the
+    user's code so the value lands in `@user/repl-<session>` under a
+    content-hash key (`:r-<hash>`). The rendered output ends with
+    `;; stored as :r-1234 in @user/repl-abc1`. Same intent as the
+    CLJS pod's `stash-result-raw!`, different storage.
+  - Concurrent-eval guard: `orchestrator-eval-state` CAS prevents two
+    evals from racing on the same nREPL session.
+  - AI-render fallback: `try-ai-render` (L492) calls
+    `seon.render/try-render` (CLJ) for the result's data shape; if
+    no renderer matches, the response ends with a suggestion of
+    which `-request/-response` specs to add. Same shape the
+    post-MVP per-entity dispatch enables on the CLJS side.
+- **Tufte (CLJS profiler).** Same `com.taoensso/*` family already in
+  `deps.edn` (Timbre + Nippy). `taoensso/tufte` works in CLJS,
+  exposes `(p ::id body)` / `(profile {…} body)` / `format-pstats`
+  — exactly the surface the "Self-instrumentation" section needs. Add
+  to `deps.edn`, wrap the composer + section calls, expose the latest
+  stats via `seon.perf/!last-render`. The agent's optional
+  `perf-section` formats and surfaces them on demand.
 
 ### Open architectural questions
 
