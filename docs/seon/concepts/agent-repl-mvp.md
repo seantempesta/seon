@@ -261,34 +261,17 @@ machinery anywhere.
 
 The reply IS the next-turn context render. Same shape, same renderer.
 
-## Rendering — per-entity is the primitive
+## Rendering — sections compose strings
 
-The whole context is a reduce over entities pulled from the database.
-Solve the case for one entity, then extend to N, with priority
-attributes on section entities to order things.
+The whole context is a concat over **section entities** queried from
+the database. Each section function reduces the DB into a chunk of
+text. The composer joins them by priority.
 
-### The atomic step: render one entity
-
-```clojure
-;; Schema: [:=> [:cat ::seon.render/context ::entity] ::seon.render/ai]
-(defn render-ai [ctx entity]
-  ...)
-
-```
-
-The renderer is dispatched on the entity's shape via the existing seon
-specificity-based dispatch — the more attrs an input schema requires,
-the higher its specificity. Default renderers branch on **rendering
-context**, not on an explicit fidelity tag: the same entity rendered
-inside `:current-ns` ends up verbose; the same entity inside
-`:related-ns` ends up terse. Context comes from attrs set by the
-section function (e.g. `:seon.render/from-related-ns? true`) or from
-information already on the entity.
-
-Adding a more compact (or more verbose, or differently structured) view
-is just writing a more specific renderer that matches when those attrs
-are present. There is no enum of "fidelity tiers" anywhere in the
-system.
+This is deliberately small: no per-entity-shape dispatch in the MVP.
+The agent extends rendering by writing more section functions and by
+overriding the symbol stored in each section's `:seon.ctx/fn` slot. A
+later milestone adds specificity-based per-entity dispatch on top
+(see "Future: per-entity dispatch" below); the MVP doesn't need it.
 
 ### Sections are entities with section-functions
 
@@ -302,25 +285,23 @@ something a section — there's no separate "section type":
 
 ```
 
-The `:seon.ctx/fn` is a **regular Clojure function** that takes the
-render-context and **returns a vector of entity-shaped maps**. Each map
-in the vector is rendered individually via `:seon.render/ai` dispatch.
+The `:seon.ctx/fn` slot holds a **fully-qualified symbol**. At render
+time the existing `seon.render/resolve-symbol` (CLJS) or
+`requiring-resolve` (CLJ) resolves it to a function; the function
+takes the render context and **returns a string** (possibly empty).
 
 That contract is fixed:
 
-- **Return value is always a vector** (possibly empty).
-- **Each element is a map with namespaced keys** — either a real entity
-  pulled from the DB (carries `:db/id`) or a synthetic map carrying
-  whatever attrs the renderer is supposed to dispatch on.
-- **A renderer must exist for each element's shape.** The fallback
-  renderer matches `:map` (any map) and emits `(pr-str entity)` so the
-  default is never "blow up" — but if the agent wants nice rendering,
-  they write a renderer with a more-specific input schema.
-
-The section function itself is unrestricted: it can merge multiple
-queries, sort/group/paginate, inject synthetic entities (a banner row,
-a separator), or branch on `ctx`. Anything that returns a vector of
-maps is valid.
+- **Return value is always a string.** An empty string elides the
+  section in the composer's output (no double newlines).
+- **The function decides its own internal structure.** It can run
+  multiple DB queries, sort/group/paginate, call helper renderers, or
+  branch on `ctx`. The MVP imposes no schema on the function body —
+  whatever returns a string is valid.
+- **Symbol misses fall through to pretty-print.** If a slot points at
+  a symbol that doesn't resolve (typo, agent retracted the fn), the
+  composer renders the section entity itself via the universal
+  `pretty-ai` fallback. The render never crashes.
 
 ### The composer
 
@@ -328,46 +309,46 @@ maps is valid.
 (defn assemble-context [ctx]
   (->> (sections-in-db ctx)                     ; query for :seon.ctx entities
        (sort-by :seon.ctx/priority)
-       (mapv (fn [section]
-               (let [section-fn (resolve (:seon.ctx/fn section))
-                     entities   (section-fn ctx)             ; vector of maps
-                     rendered   (mapv #(seon.render/render-ai ctx %) entities)]
-                 (seon.render/render-ai ctx (assoc section ::children rendered)))))
-       (str/join "\n")))
+       (map (fn [section]
+              (let [section-fn (resolve-symbol (:seon.ctx/fn section))]
+                (if section-fn
+                  (section-fn ctx)
+                  (pretty-ai section)))))
+       (remove str/blank?)
+       (str/join "\n\n")))
 
 ```
 
-Note that the **section entity itself is rendered** via the same
-dispatch — its renderer sees the rendered children in `::children` and
-decides how to wrap them. So `<current-namespace>…</current-namespace>`
-isn't a hardcoded wrap function; it's the `:seon.render/ai` renderer
-for entities matching `[:map [:seon.ctx/name [:= :current-ns]] [::children …]]`.
+The composer is the only piece that knows about "sections". Section
+functions are ordinary Clojure — the agent can read, write, or replace
+any of them by transacting a different symbol into the slot.
 
-That's the whole rendering pipeline at the conceptual level. Section
-entities + section-functions + the universal `render-ai` dispatch.
-Same pattern at every level. Nothing about "sections" is special; they
-are just entities with the `:seon.ctx/*` attribute family.
+### Future: per-entity dispatch (post-MVP)
 
-### Solving for 1 → extending to N
+The CLJ side of seon already has a specificity-based renderer
+discovery (see `seon.render/find-renderer` and `resolve-renderer` in
+`src/seon/render.clj`): functions whose `:malli/schema` output is
+`:seon.render/ai` are queried out of the codebase graph, then ranked
+by how many of their required input keys match the data's keys.
 
-- **1 entity render**: `(seon.render/render-ai ctx entity)` → string.
-- **N entities in a section**: `(mapv #(seon.render/render-ai ctx %) entities)` then concat.
-- **N sections in the context**: query all `:seon.ctx` entities, sort by
-  priority, render each (which itself is the per-section reduce above).
+A natural follow-on for the agent REPL: lift that dispatch into the
+CLJS pod so section functions can `(render entity)` and get the most
+specific renderer for whatever shape `entity` has. That's strictly
+additive — the section function still returns a string, it just
+delegates more of the work to dispatch. Reserved for a later
+milestone; the MVP ships without it.
 
-Same primitive, applied at three nesting levels.
+### Agent customization, two levers
 
-### Agent customization, three levers
-
-1. **Override per-entity render**: write a `:seon.render/ai` function
-   with a more-specific input schema. Affects every section that
-   surfaces an entity of that shape.
-2. **Change what a section returns**: write a new section function and
-   transact `(:seon.ctx/fn 'my.ns/my-section)` on the section entity, or
+1. **Change what a section returns**: write a new section function and
+   transact `:seon.ctx/fn 'my.ns/my-section` on the section entity, or
    change priority by transacting `:seon.ctx/priority` on it. Add a
-   section by transacting a new `:seon.ctx` entity.
-3. **Override the composer**: rare; needed only if the agent wants a
-   completely different top-level layout.
+   new section by transacting a new `:seon.ctx` entity. The body of
+   the section function is unconstrained — query the DB, format the
+   string, return it.
+2. **Override the composer**: rare; needed only if the agent wants a
+   completely different top-level layout. Transact a different
+   `:seon.render/ai` symbol on the agent entity.
 
 ### Initial default context — what ships
 
@@ -398,15 +379,15 @@ them by transacting different attrs on the same entity (lookup by
 
 ```clojure
 ;; --- Section functions (baseline, in seon.render.default) ---
+;; Each returns a string. Empty string = section omitted.
 
 (defn system-section
-  "Always-present preamble. Returns one synthetic entity with the
-   restore-defaults recipe and the agent's current ns banner."
-  [{::keys [agent-id ns] :as ctx}]
-  [{:seon.render/kind  :system-banner
-    :seon.system/agent agent-id
-    :seon.system/ns    ns
-    :seon.system/restore-recipe "(seon.render/reset-defaults!)"}])
+  "Always-present preamble. The restore-defaults recipe + the agent's
+   current ns banner."
+  [{::keys [agent-id ns]}]
+  (str "<system agent=\"" agent-id "\" ns=\"" ns "\">\n"
+       "  Restore defaults: (seon.render/reset-defaults!)\n"
+       "</system>"))
 
 (defn current-ns-section
   "Every persistent entity owned by the current ns: the ns entity itself
@@ -414,44 +395,57 @@ them by transacting different attrs on the same entity (lookup by
    Schema/test ownership is derived from the namespaced key or sym."
   [{::keys [db ns]}]
   (let [ns-prefix (name ns)
-        ns-ent   (d/q '[:find (pull ?e [*]) .
-                        :in $ ?ns
-                        :where [?e :seon.ns/name ?ns]] db ns)
-        fns      (d/q '[:find [(pull ?e [*]) ...]
-                        :in $ ?ns
-                        :where [?e :seon.fn/ns ?ns]] db ns)
-        schemas  (->> (d/q '[:find [(pull ?e [*]) ...]
-                             :where [?e :seon.schema/key _]] db)
+        ns-ent   (db/pull db '[*] [:seon.ns/name ns])
+        fns      (db/q db '[:find [(pull ?e [*]) ...]
+                            :in $ ?ns
+                            :where [?e :seon.fn/ns ?ns]] ns)
+        schemas  (->> (db/q db '[:find [(pull ?e [*]) ...]
+                                 :where [?e :seon.schema/key _]])
                       (filter #(= ns-prefix (namespace (:seon.schema/key %)))))
-        tests    (->> (d/q '[:find [(pull ?e [*]) ...]
-                             :where [?e :seon.test/sym _]] db)
+        tests    (->> (db/q db '[:find [(pull ?e [*]) ...]
+                                 :where [?e :seon.test/sym _]])
                       (filter #(let [s (:seon.test/sym %)
                                      slash (.indexOf s "/")]
                                  (and (pos? slash)
-                                      (= ns-prefix (subs s 0 slash)))))) ]
-    (vec (concat (when ns-ent [ns-ent]) schemas fns tests))))
+                                      (= ns-prefix (subs s 0 slash))))))
+        parts    (concat
+                   (when ns-ent     [(str "(ns " ns ")")])
+                   (map :seon.schema/source schemas)
+                   (map :seon.fn/source fns)
+                   (map :seon.test/source tests))]
+    (if (seq parts)
+      (str "<current-namespace name=\"" ns "\">\n"
+           (str/join "\n\n" parts)
+           "\n</current-namespace>")
+      "")))
 
 (defn related-ns-section
-  "Entities from namespaces referenced by the current ns. Each entity
-   gets `:seon.render/from-related-ns? true` so a separate, more compact
-   render-ai dispatch can match it."
+  "Symbols from namespaces referenced by the current ns, signature-only.
+   Agent reaches for `:seon.fn/source` when they need the full body."
   [{::keys [db ns]}]
-  (let [rel (compute-related-ns db ns)]
-    (->> (sort rel)
-         (mapcat #(current-ns-section {::db db ::ns %}))
-         (mapv #(assoc % :seon.render/from-related-ns? true)))))
+  (let [related (compute-related-ns db ns)              ; helper, defined elsewhere
+        rows    (for [other (sort related)
+                      f     (db/q db '[:find [(pull ?e [:seon.fn/sym]) ...]
+                                       :in $ ?ns
+                                       :where [?e :seon.fn/ns ?ns]] other)]
+                  (str "  " (:seon.fn/sym f)))]
+    (if (seq rows)
+      (str "<related-namespaces>\n" (str/join "\n" rows) "\n</related-namespaces>")
+      "")))
 
 (defn warnings-section
-  "Run every registered warning-predicate over current-ns entities,
-   flatten, sort by severity. Returns warning maps (no :db/id; derived)."
-  [{::keys [db ns] :as ctx}]
-  (let [entities (current-ns-section ctx)
-        preds    (registered-warning-predicates db)]
-    (->> (for [entity entities, pred preds
-               :let [w (pred ctx entity)]
-               :when w]
-           w)
-         (sort-by :seon.warning/severity))))
+  "Run every registered warning-predicate over the agent's accessible
+   entities. Each predicate returns either nil or a map carrying
+   :seon.warning/severity + :seon.warning/text. Sort by severity, format."
+  [{::keys [db] :as ctx}]
+  (let [preds (registered-warning-predicates db)
+        ws    (->> (for [p preds, w (p ctx) :when w] w)
+                   (sort-by :seon.warning/severity))]
+    (if (seq ws)
+      (str "<warnings>\n"
+           (str/join "\n" (map :seon.warning/text ws))
+           "\n</warnings>")
+      "")))
 
 (defn recent-evals-section
   "The last N evals (default N=20), oldest-first so it reads
@@ -459,47 +453,24 @@ them by transacting different attrs on the same entity (lookup by
    time-prefixed base62 — sorting by id is identical to sorting by
    creation order, and cheaper than sorting by `:at`."
   [{::keys [db agent-id]}]
-  (->> (d/q '[:find [(pull ?e [*]) ...]
-              :in $ ?aid
-              :where [?e :seon.eval/agent ?aid]]
-            db [:seon.agent/id agent-id])
-       (sort-by :seon.eval/id)
-       (take-last 20)))
+  (let [rows (->> (db/q db '[:find [(pull ?e [*]) ...]
+                             :in $ ?aid
+                             :where [?e :seon.eval/agent ?aid]]
+                        [:seon.agent/id agent-id])
+                  (sort-by :seon.eval/id)
+                  (take-last 20))]
+    (if (seq rows)
+      (str "<recent-evals>\n"
+           (str/join "\n\n" (map format-eval-row rows))
+           "\n</recent-evals>")
+      "")))
 
 ```
 
-```clojure
-;; --- Per-entity renderers (baseline) ---
-
-;; An entity marked `:seon.render/from-related-ns? true` matches a more
-;; specific (compact) renderer; the same shape without the marker
-;; matches the verbose default. Agent overrides win when even more
-;; specific.
-
-(defn render-fn-default
-  {:malli/schema [:=> [:cat ::seon.render/context ::seon.fn/entity]
-                  ::seon.render/ai]}
-  [_ {:seon.fn/keys [sym source]}]
-  (str "<function name=\"" sym "\">\n" source "\n</function>"))
-
-(defn render-fn-from-related-ns
-  {:malli/schema [:=> [:cat ::seon.render/context
-                            [:and ::seon.fn/entity
-                             [:map [:seon.render/from-related-ns? [:= true]]]]]
-                  ::seon.render/ai]}
-  [_ {:seon.fn/keys [sym]}]
-  (str "<fn-signature>" sym "</fn-signature>"))
-
-;; …and so on for :seon.schema/entity, :seon.test/entity, :seon.eval/entity,
-;; :seon.warning, :seon.system/banner. Each is a small function; agent can
-;; override any of them by registering a more-specific dispatch.
-
-```
-
-That's the whole default surface: 5 section entities, 5 section
-functions, ~6 per-entity renderers. About 100 lines of straightforward
-Clojure. Adding or modifying any of it = writing one function. Nothing
-is hidden; nothing is special-cased.
+That's the whole default surface: 5 section entities + 5 section
+functions, ~80 lines of straightforward Clojure. Adding or modifying
+any of it = writing one function. Nothing is hidden; nothing is
+special-cased.
 
 ### Data shapes
 
@@ -573,41 +544,26 @@ Render walk:
 (sort-by :seon.ctx/priority)
 
 For each section:
-  entities ← ((resolve (:seon.ctx/fn section)) ctx)   ; section function returns a vector
-  rendered ← (mapv #(render-ai ctx %) entities)       ; per-entity dispatch
-  section-output ← (render-ai ctx (assoc section ::children rendered))
+  text ← ((resolve-symbol (:seon.ctx/fn section)) ctx)
+  ; → string (possibly "")
 
-section :system   (system-section ctx)
-                  → [{:seon.render/kind :system-banner
-                      :seon.system/agent "alpha"
-                      :seon.system/ns :seon.trading
-                      :seon.system/restore-recipe "(seon.render/reset-defaults!)"}]
-                  → render-ai on the banner entity → banner text
-                  → render-ai on the section entity (with ::children attached)
-                  → "<system>You are agent alpha, in :seon.trading. …</system>"
+section :system        → "<system agent=\"alpha\" ns=\":seon.trading\">…</system>"
+section :related-ns    → ""   ; no cross-ns refs in this example
+section :current-ns    → "<current-namespace name=\":seon.trading\">
+                          (ns seon.trading)
+                          (schema/register! ::analyze-req …)
+                          (schema/register! ::ticker :string)
+                          (defn analyze …)
+                          </current-namespace>"
+section :warnings      → "<warnings>analyze has no test coverage</warnings>"
+section :recent-evals  → "<recent-evals>
+                          > (schema/register! ::ticker :string)
+                          true                              ; # K9p2x4nB7q
+                          > (defn analyze …)
+                          #'seon.trading/analyze            ; # L4m9p1xA3v
+                          </recent-evals>"
 
-section :related-ns   (related-ns-section ctx) → []   ; no cross-ns refs in this example
-                      → render-ai on section with empty ::children → "" (default elides empty)
-
-section :current-ns   (current-ns-section ctx)
-                      → [analyze-req-schema, ticker-schema, analyze-fn]
-                      → render-ai on each (no :from-related-ns? marker, verbose dispatch wins)
-                      → render-ai on section → "<current-namespace name=\":seon.trading\">…</current-namespace>"
-
-section :warnings     (warnings-section ctx)
-                      → [{:seon.warning/entity "seon.trading/analyze"
-                          :seon.warning/issue :seon.warning/no-test-coverage
-                          :seon.warning/severity :persist-blocker
-                          :seon.warning/repair-hint "(deftest analyze-test (is (= ...)))"}]
-                      → render-ai on the warning record → "<warning entity=\"analyze\" …/>"
-                      → render-ai on section → "<warnings>…</warnings>"
-
-section :recent-evals (recent-evals-section ctx)
-                      → [eval-K9p2, eval-L4m9]   ; sorted by :seon.eval/id
-                      → render-ai on each eval entity → "> (form)\nresult # eval-id"
-                      → render-ai on section → "<recent-evals>…</recent-evals>"
-
-composer concatenates non-empty section renders, separated by \n:
+composer drops blank strings and joins the rest with "\n\n":
   <system>…</system>
   <current-namespace>…</current-namespace>
   <warnings>…</warnings>
@@ -615,26 +571,8 @@ composer concatenates non-empty section renders, separated by \n:
 
 ```
 
-The full path: query for section entities → each section function
-returns a vector of entity maps → `render-ai` fires per entity by
-specificity dispatch → the section entity itself is rendered with
-children attached → composer concatenates → final text.
-
-### Reduce framing
-
-The whole pipeline is a reduce-of-reduces over the database:
-
-```clojure
-(reduce (fn [acc section]
-          (str acc (render-section ctx section)))
-        ""
-        (sort-by :seon.ctx/priority (sections-in-db ctx)))
-
-```
-
-Each `(render-section …)` is itself a reduce over the entities its
-section function returned. Section entities choose the slices; the
-universal `render-ai` dispatch shapes the strings.
+The full path: query for section entities → resolve each section's
+symbol → call the function → join the resulting strings.
 
 ## Recent-evals tile (REPL-style)
 
@@ -646,20 +584,13 @@ result-rendered    # eval-id
 
 ```
 
-Where `result-rendered` is determined as follows:
+For the MVP, `result-rendered` is just `truncate-edn` applied to
+`:seon.eval/result-edn`. Smart per-shape result rendering is the
+first thing the per-entity dispatch (post-MVP) enables.
 
-1. Parse `::seon.eval/result-edn` to data (skip if it was already a var
-   reference like `#'seon.trading/analyze`).
-2. Compute the result's **shape signature** (e.g. `:map-of-string-keys`,
-   `:vector-of-strings`, `:set-of-tuples`).
-3. Look up renderers matching `[:=> [:cat <shape>] ::seon.render/ai]` via
-   specificity dispatch.
-4. If a renderer matches → call it; output its result.
-5. If no renderer matches → render raw with `truncate-edn` (see below).
-
-The `# eval-id` comment ALWAYS appears on the result line, regardless of
-custom rendering. It's the handle the agent uses to reference past
-results in subsequent forms.
+The `# eval-id` comment ALWAYS appears on the result line, regardless
+of custom formatting. It's the handle the agent uses to reference past
+results in subsequent forms via `(result :<eval-id>)`.
 
 ### Smart EDN truncation
 
@@ -674,34 +605,44 @@ EDN truncator. Behavior:
 - Trailing `...` is valid EDN — the truncated output round-trips
   through the reader (no half-open delimiters).
 
-### Retro-render
+### Retro-format
 
-Because rendering is pure-functional over current data + current renderer
-set, when the agent adds a renderer for shape `X`, **all past eval results
-of shape X in the recent-evals window are rendered using the new renderer
-on the next turn**. No replay needed. The result-edn is stored in the
-log; the renderer is dispatched at render time.
+Because rendering is pure-functional over current data + current
+section functions, when the agent rewrites `recent-evals-section` (or
+the `format-eval-row` helper it calls) the new format applies to
+every entry in the window on the next turn. No replay needed —
+`:seon.eval/result-edn` is stored in the log, the format is computed
+at render time.
 
-## Custom renderers
+## Custom rendering
 
-The agent writes a function:
+The agent customizes rendering by rewriting section functions, not by
+registering per-shape renderers (post-MVP). Example: collapse the
+recent-evals tile to one line per eval.
 
 ```clojure
-(defn render-confidence-result
-  "Custom rendering for `{::signal-type _ ::confidence _}` maps."
-  {:malli/schema [:=> [:cat ::analyze-response] ::seon.render/ai]}
-  [{::keys [signal-type confidence]}]
-  (str "signal=" (name signal-type) " conf=" (format "%.2f" confidence)))
+(defn my.work/compact-recent-evals
+  [{::keys [db agent-id]}]
+  (let [rows (->> (db/q db '[:find [(pull ?e [:seon.eval/id :seon.eval/source]) ...]
+                             :in $ ?aid
+                             :where [?e :seon.eval/agent ?aid]]
+                        [:seon.agent/id agent-id])
+                  (sort-by :seon.eval/id)
+                  (take-last 20))]
+    (str "<recent-evals>\n"
+         (str/join "\n" (map (fn [{:seon.eval/keys [id source]}]
+                               (str id "  " (subs source 0 (min 60 (count source)))))
+                             rows))
+         "\n</recent-evals>")))
 
+(db/transact! {:seon.db/tx-data
+               [{:seon.ctx/name :recent-evals
+                 :seon.ctx/fn 'my.work/compact-recent-evals}]})
 ```
 
-They eval it. Next turn, any recent-evals result matching `::analyze-response`
-renders compactly. Specificity dispatch (existing `seon.render` system)
-picks this over the generic `truncate-edn` fallback.
-
-If their custom renderer **throws** or returns non-string, the dispatch
-catches it and falls back to the default. The error appears as a warning
-("your render-confidence-result threw — using default") so they know.
+If the new function throws or returns a non-string, `pretty-ai` takes
+over for that section and the failure surfaces as a warning so the
+agent knows what broke.
 
 ## Restoring defaults
 
@@ -743,29 +684,21 @@ flag — just the substrate's right to re-seed itself.
 ## Provenance — "why is this in my context?"
 
 Provenance is derivable, not stored. Each section entity carries
-`:seon.ctx/fn`; the per-entity renderer that fires is the
-most-specific match for the entity's shape — both pieces of information
-are recoverable at any time.
+`:seon.ctx/fn` — the function that produced that section's text. The
+agent can pull the section entity to find out which function ran:
 
 ```clojure
-(seon.render/explain-context)
-;; => returns a map shaped like the rendered context, where each section
-;;    and each rendered entity is annotated with:
-;;      ::seon.render/by         — symbol of the function that produced it
-;;      ::seon.render/dispatched — the input schema that matched (for entity
-;;                                 renderers, this shows specificity)
-;;      ::seon.render/inputs     — what data the fn was called with
-
+(seon.db/pull-by-name {:seon.ctx/name :recent-evals})
+;; => {:seon.ctx/name :recent-evals
+;;     :seon.ctx/priority 50
+;;     :seon.ctx/fn 'seon.render.default/recent-evals-section}
 ```
 
-By default this trace is NOT in the rendered context (saves tokens).
-The agent calls `explain-context` when something looks weird, or toggles
-`(seon.render/show-provenance!)` to attach inline provenance comments to
-subsequent renders.
-
-The dispatch model is uniform across the system: write a function with
-the right schema; the system discovers and runs it. `explain-context`
-exposes that dispatch trace.
+For "what did this function emit?" the agent simply calls the section
+function directly in the REPL with `(seon.render/explain-section ctx :recent-evals)`
+— it runs the section-fn and returns the string with the source-symbol
+annotation. No special tracing infrastructure; just two operations on
+the section entity (pull + call).
 
 ## Forget — symbol deletion
 
@@ -929,10 +862,9 @@ Mechanisms supporting this:
 - `seon.repl/forget!` + `seon.schema/unregister!`.
 - `seon.render.default/*` — the five default section functions
   (`system-section`, `related-ns-section`, `current-ns-section`,
-  `warnings-section`, `recent-evals-section`) + per-entity render-ai
-  defaults for each entity kind + smart EDN truncator.
-- `seon.render/explain-context`, `reset-defaults!`, optional
-  `show-provenance!`.
+  `warnings-section`, `recent-evals-section`) returning strings +
+  `truncate-edn` helper + `pretty-ai` fallback (already exists).
+- `seon.render/explain-section`, `reset-defaults!`.
 - Bootstrap phase: detect-empty + ordered `(d/transact!)` from
   `resources/seon/bootstrap.edn`.
 - Resume phase: topo-walk persistent entities, eval each, log results.
@@ -968,72 +900,107 @@ A new agent session can:
    to `:related-ns` digest.
 5. See the new entities in the next-turn context, plus warnings for any
    missing pieces.
-6. Write a per-entity render override; see it applied retroactively on
-   next turn (recent-evals AND current-ns AND related-ns sections all
-   pick it up where the shape matches).
+6. Rewrite a section function (e.g. `recent-evals-section` to a compact
+   one-line-per-row form); see it applied on the next turn.
 7. Forget a function and see dependents flagged.
-8. Break their renderer; see the fallback engage with a warning.
+8. Break a section function; see `pretty-ai` engage for that section
+   with a warning.
 9. `(seon.render/reset-defaults!)`; see defaults restored.
 10. Restart the pod; see all persistent entities re-eval'd in the correct
     order; see the eval log retained as readable scrollback.
 
-## Open questions / research items
+## Open questions / prior art
 
-1. **Smart EDN truncation prior art.** Research whether seon already has
-   a structure-preserving EDN truncator (likely under `seon.render.*` or
-   `seon.util.*`). Reuse if so.
-2. **Datalog query for shape-based renderer dispatch.** The existing
-   `seon.render` system dispatches via `:malli/schema` specificity. Confirm
-   it handles dispatch on "any value matching schema X" efficiently when
-   thousands of entities exist. Benchmark.
-3. **Edamame parse-time comment extraction.** Need to extract leading
-   `;;` comments per form for `::seon.eval/comment` (or drop that attr
-   from MVP if Edamame doesn't expose it cleanly).
-4. **Replay topological analysis.** The "what schemas does this fn ref?"
-   analyzer can be lightweight (regex over `::schema-key`-like patterns)
-   or heavy (full `cljs.analyzer`). MVP prefers lightweight; verify it
-   covers normal agent-authored code.
-5. **Specificity dispatch for renderer overrides + retro-render.** The
-   recent-evals tile parses past EDN per turn and dispatches per result.
-   Per-turn cost at N=20 results × M renderers. Estimate; cache if
-   meaningful.
-6. **Provenance vs token cost.** Should the per-section provenance
-   trace (`(seon.render/explain-context)` output) be attached inline by
-   default, or only when `(show-provenance!)` is on? Confirm default
-   doesn't bloat prompts.
-7. **Custom renderer infinite loop guard.** If an agent writes a renderer
-   that itself emits forms that re-trigger rendering, we need a
-   recursion limit. MVP: render-depth cap at 3, fall back to default
-   beyond.
-8. **`(d/q ...)` result rendering.** A common case. Verify the smart
-   truncator + shape dispatch handles datalog result sets well by
-   default. Possibly ship a built-in renderer for common shapes
-   (set-of-tuples, vector-of-pulls).
-9. **Property-test generation prior art.** seon has prior work on
-   generating property-based tests from Malli schemas (research how
-   it's been used in the existing REPL flow). The MVP should:
-   - ship at least one default unit test per substrate function
-   - surface "no property tests yet" as a warning that includes a
-     generated stub the agent can accept
-   - run property tests on demand via `(seon.test/run-properties …)`
-     or analogous
-10. **Datahike schema evolution constraints.** Datahike's tx-data is
-    fully mutable (retract, assert) but its attribute-schema layer
-    appears more constrained. Confirm: which attribute properties are
-    immutable after first install? Cardinality? Ref-vs-value? Identity?
-    The answer bounds how aggressively we can evolve `:seon.X/*` attrs
-    across substrate versions.
-11. **Bootstrap emission step.** Build process that walks the
-    substrate's `src/`, extracts every `defn` / `schema/register!` /
-    `deftest` / `(ns … (:require …))`, and emits an ordered vector to
-    `resources/seon/bootstrap.edn`. Research existing seon work (the
-    JVM-side codebase indexer per CLAUDE.md; the `seon.code` gate;
-    `seon.graph.ingest`) for prior art on extracting and ordering.
-12. **Optimal replay on a newer runtime.** Strategy for opening an
-    older DB on a newer substrate: detect substrate version delta,
-    merge missing-from-DB bootstrap entries, surface agent overrides
-    that conflict with the new substrate as warnings with diffs. Out
-    of MVP scope but the data model should permit it.
+### Prior art located
+
+- **Smart EDN truncator.** Not present. The closest is
+  `seon.render.default/try-read-edn` (in `src/seon/render/default.cljs`)
+  which slices the raw string at 400 chars — not structure-preserving.
+  The new `truncate-edn` is a fresh helper for `seon.render.default`.
+- **Codebase indexer.** Already exists JVM-side in
+  `src/seon/graph/ingest.clj` + `src/seon/graph/analyzer.clj`: uses
+  clj-kondo to extract every `defn` / `var` / schema-as-spec
+  (`:seon.spec/*`) / ns-dep into datahike. The bootstrap-emission step
+  is conceptually the CLJS-side equivalent — note that the existing
+  attrs are `:seon.fn/qualified-name` / `:seon.fn/namespace` /
+  `:seon.spec/key`, not the `:seon.fn/sym` / `:seon.fn/ns` /
+  `:seon.schema/key` this spec uses. Reconciling the two namings is a
+  follow-on; for now we can either rename, or treat the CLJS-pod
+  attrs as a separate (parallel) family of entities.
+- **Renderer specificity dispatch (CLJ-only).** Implemented in
+  `src/seon/render.clj`: `find-renderer` (L133), `resolve-renderer`
+  (L202), `namespace-proximity` tiebreak (L112). Queries
+  `seon.graph.query/functions-with-output-key` to find candidates,
+  filters to those whose required input keys are a subset of the
+  data's keys, ranks by `(count required-keys)` descending. The
+  post-MVP per-entity dispatch can lift this directly into the CLJS
+  pod once the graph indexer is mirrored there.
+- **CLJS renderer dispatch (today's surface).** Symbol-only slot
+  resolution in `src/seon/render.cljs`: `ai-dispatch` /
+  `html-dispatch` resolve a `:seon.render/ai` slot to a fn (via
+  `resolve-symbol` against bootstrap compile-state OR `globalThis`)
+  and fall through to `seon.render.default/pretty-ai` on miss. This
+  is the surface the MVP composer uses.
+- **Property-test infrastructure.** Malli 0.20.0 + test.check 1.1.3
+  are in `deps.edn`. `malli.generator/generate` is reachable today.
+  There is no existing property-test runner wrapper in
+  `src/seon/test/*` — that helper still needs to be written.
+- **Agent-source structural gate.** `src/seon/code.cljc` already
+  checks "this is a `(defn name [{::keys [...]}] …)` form with
+  `:malli/schema` metadata and namespaced destructure keys". The
+  eval-batch's pre-eval gate (if we want one) reuses this directly.
+
+### Open architectural questions
+
+1. **Naming reconciliation.** The CLJ codebase already has
+   `:seon.fn/qualified-name`, `:seon.fn/namespace`, `:seon.spec/key`.
+   This spec proposes `:seon.fn/sym`, `:seon.fn/ns`,
+   `:seon.schema/key`. Either rename to match the existing graph
+   model (cheap, consistent) or treat the CLJS-pod entities as a
+   parallel family — to be decided by the spec author. Affects
+   bootstrap, queries, renderers, every example in this doc.
+2. **Datahike + `:keep-history? true`.** `:db/txInstant` and the
+   history/tx-range API depend on it. The V0.5 agent conn currently
+   opens with `:keep-history? false` (see
+   `seon.client/open-agent-conn!`). Turning history on for the agent
+   DB is the prerequisite for "what changed since tx T" style
+   queries; warrants an ADR.
+3. **Datahike schema-flexibility and attr evolution.** The V0.5 conn
+   uses `:schema-flexibility :write`, so attribute properties
+   (cardinality, valueType, unique, ref-vs-value) must be installed
+   before any data is transacted, and cannot be re-typed afterwards.
+   The bootstrap ships attr-schemas first, persistent entities
+   second. New runtime versions can ADD attrs but not change existing
+   ones.
+4. **Edamame parse-time comment extraction.** The existing
+   `seon.repl/parse-forms` (uses `cljs.tools.reader`) DOES pair
+   leading `;;` comments with the form that follows, by hand-rolling
+   a comment-collector. Edamame doesn't expose comment text on
+   parsed forms directly; if we move the eval-batch reader to
+   Edamame's `parse-next`, we lose the comment-pairing unless we
+   keep the hand-rolled pre-scanner. Keep the existing
+   `parse-forms` shape unless we have a reason to switch.
+5. **Read-error advance strategy.** Edamame's `parse-next` throws on
+   a malformed form and leaves the reader in an uncertain position.
+   Per-form independence requires advancing past the bad chunk. Two
+   options: (a) pre-split via a paren-counting scanner, then parse
+   each chunk; (b) on parse-throw, skip the reader to the next
+   newline-followed-by-`(` boundary. (a) is more predictable; (b)
+   loses fewer forms when the bad form is short.
+6. **Replay dep analysis.** Topological ordering of resume needs to
+   know "what schemas does this fn ref?". Lightweight (regex over
+   `::keyword` patterns) probably works for agent-authored CLJS code,
+   but verify against real agent outputs before committing.
+7. **Result-value retention vs eval-id references.** Eval-ids are
+   stable in the DB; the live values they reference live on
+   `globalThis` (per existing `seon.eval/stash-result-raw!`) and do
+   NOT survive pod restart. The agent must re-eval to get a fresh
+   value. Document this explicitly so the agent learns the pattern.
+8. **Resume of an older DB on a newer runtime.** Strategy is sketched
+   but not designed: detect substrate version delta, merge
+   missing-from-DB bootstrap entries (lookup by identity), surface
+   agent overrides that conflict with the new substrate as warnings.
+   Out of MVP scope.
 
 ## Out-of-scope but adjacent
 
