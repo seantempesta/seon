@@ -227,39 +227,76 @@ One string containing N top-level forms.
 
 ### Processing
 
-Forms are read and evaluated one at a time, in input order. Read errors
-and eval errors are both per-form events — never batch-level rejections.
-**Eval forms in input order.** No reordering. `(in-ns 'foo)` mid-batch
+The agent's response is a single string. The pipeline walks it
+top-to-bottom and classifies each chunk into one of three kinds.
+**No reordering.** Forms run in input order. `(in-ns 'foo)` mid-batch
 switches the namespace for subsequent forms.
 
-For each form:
+#### Three-way line/chunk classification
 
-1. **Split the source into the next top-level form.** Use Edamame's
-   `source-reader` + `parse-next+string` in a try-loop — each call
-   returns `[form source-string]` for the next form, or throws on a
-   read error. On a read error, scan ahead to the next balanced
-   top-level expression boundary and resume; record the unreadable
-   chunk as a failed eval (`:ok? false`) and continue.
-2. **Capture `:seon.eval/ns`** at the moment of evaluation — read from
-   the agent's `!current-ns` atom.
-3. **Snap a start timestamp.** `(js/Date.now)` before the eval call.
-4. **Eval** the parsed form in that ns. On success, record
+1. **Clojure form** — starts with `(`, `[`, `{`, `@`, `'`, `\``, `~`,
+   or a reader macro (`#"…"`, `#{…}`, `#(…)`, `#_…`). Try to parse
+   with Edamame's `source-reader` + `parse-next+string`. On parse
+   success → eval. On parse failure → this is a malformed form (the
+   agent meant to write code and got the syntax wrong); record an
+   eval entry with `:ok? false` and an `:error` payload of kind
+   `:read`.
+2. **`;;`-comment line** — the existing narration convention.
+   Strip the leading `;;` and accumulate into pending-narration.
+3. **Prose** — anything else. Markdown headings (`# Plan`, `## Step
+   1`), bullets (`- foo`, `* foo`), bare text, code-fence delimiters
+   (` ``` `). Accumulate verbatim into pending-narration.
+
+Pending narration is **attached to the next Clojure-form chunk** as
+`:seon.eval/narration`. If the input ends with pending narration and
+no following form, emit a **thinking-only** eval entry:
+`{:seon.eval/source "" :seon.eval/narration <accumulated>
+:seon.eval/ok? true}`. This preserves the agent's reasoning in
+scrollback even when they choose not to eval anything else this
+turn.
+
+#### Per-chunk loop
+
+For each chunk the classifier identifies as a form:
+
+1. **Snap a start timestamp.** `(js/Date.now)` before the eval call.
+2. **Capture `:seon.eval/ns`** at the moment of evaluation — read
+   from the agent's `!current-ns` atom.
+3. **Eval** the parsed form in that ns. On success, record
    `:ok? true` + `:result-edn`. On any failure (compile, runtime,
-   timeout), record `:ok? false` + `:error` (a pr-str'd map carrying
-   the failure kind: `:read | :compile | :runtime | :timeout`).
-5. **Record `:seon.eval/duration-ms`** = `(- (js/Date.now) start)`.
+   timeout), record `:ok? false` + `:error` (a pr-str'd map
+   carrying the failure kind: `:read | :compile | :runtime |
+   :timeout`).
+4. **Record `:seon.eval/duration-ms`** = `(- (js/Date.now) start)`.
    Covers the form's eval AND any auto-await — i.e. what the agent
    actually waited for. Cheap (two `Date.now()` calls); always on.
-6. **Classify effects implicitly.** If the form defined a function,
+5. **Classify effects implicitly.** If the form defined a function,
    add the new `:seon.fn` entity to `:touches`. If it registered a
    schema, add the `:seon.schema` entity. If it called
    `(forget! 'x)`, add the now-retracted entity to `:forgot`. If it
    changed namespace, set `:switched-ns-to`.
-7. **Independent transact per form** — one `:seon.eval` datom + any
-   persistent-entity datoms in its own tx. A failure on form 5 doesn't
-   roll back forms 1-4.
+6. **Independent transact per form** — one `:seon.eval` datom + any
+   persistent-entity datoms in its own tx. A failure on form 5
+   doesn't roll back forms 1-4.
 
-After all forms are processed, render the full context.
+After all chunks are processed, render the full context.
+
+#### Why no `;;`-prefix discipline
+
+The previous design (still live in `seon.repl/parse-forms`,
+`src/seon/repl.cljs`) required prose to be `;;`-prefixed and silently
+dropped bare-symbol "prose-shaped" reader tokens. That rule existed
+because the reader cheerfully tokenized `Let me read the file` into
+four symbol forms that polluted the eval log.
+
+The three-way classification subsumes that rule. A bare-symbol
+chunk no longer reaches the eval call — it's classified as prose at
+the parse step, so the reader never produces those phantom forms in
+the first place. The agent can write natural markdown between forms;
+the LLM doesn't have to remember the `;;` discipline. The `how-you-
+respond` ctx fragment becomes much shorter: "write your thinking
+freely; wrap code in s-expressions" rather than "every prose line
+must start with `;;`".
 
 **Partial-success principle.** If the agent sends 10 forms and 9
 succeed, the database keeps 9 successes. Read failures and eval
@@ -638,6 +675,9 @@ section :current-ns    → "<current-namespace name=\":seon.trading\">
                           </current-namespace>"
 section :warnings      → "<warnings>analyze has no test coverage</warnings>"
 section :recent-evals  → "<recent-evals>
+                          ;; thinking: I'll start with the ticker
+                          ;; schema, then build analyze on top.
+                                                            ; # J3p8m2rA1k
                           > (schema/register! ::ticker :string)
                           true                              ; # K9p2x4nB7q  3ms
                           > (defn analyze …)
@@ -657,7 +697,8 @@ symbol → call the function → join the resulting strings.
 
 ## Recent-evals tile (REPL-style)
 
-For each eval in the rendered window, emit:
+For each eval in the rendered window, emit one of two shapes
+depending on whether the entry has a form or is thinking-only:
 
 ```
 > (form-source-as-typed)
@@ -665,11 +706,22 @@ result-rendered    ; # eval-id  4ms
 
 ```
 
-The trailing `<n>ms` is `:seon.eval/duration-ms` formatted: ms for
-sub-second, `1.2s` / `12.5s` / `2m 30s` for longer. Always present.
-Cheap, always-on per-form timing so the agent sees the cost of every
-form they evaluate. Fast forms vanish into the noise; slow forms
-shout.
+```
+;; thinking: <narration text, indented as a markdown block>
+                                ; # eval-id
+
+```
+
+The trailing `<n>ms` on a form row is `:seon.eval/duration-ms`
+formatted: ms for sub-second, `1.2s` / `12.5s` / `2m 30s` for
+longer. Always present on form rows; omitted on thinking-only rows
+(no duration to report). Cheap, always-on per-form timing so the
+agent sees the cost of every form they evaluate. Fast forms vanish
+into the noise; slow forms shout.
+
+Thinking-only entries — `:seon.eval/source` blank, `:narration`
+populated — render as a quoted block. The agent's reasoning between
+turns survives as scrollback context, exactly as their code does.
 
 For the MVP, `result-rendered` is just `truncate-edn` applied to
 `:seon.eval/result-edn`. Smart per-shape result rendering is the
@@ -1056,7 +1108,10 @@ Mechanisms supporting this:
 - The database attributes defined above (`:seon.ns/*`, `:seon.fn/*`,
   `:seon.schema/*`, `:seon.test/*`, `:seon.eval/*`, `:seon.ctx/*`).
 - `seon.repl/eval-batch!` — pod-side CLJS, runs the per-form
-  read/eval/transact pipeline.
+  read/eval/transact pipeline with the three-way classifier
+  (form / `;;`-comment / prose). Prose chunks accumulate as
+  `:seon.eval/narration` and attach to the next form; trailing prose
+  with no following form becomes a thinking-only eval entry.
 - `seon.repl/forget!` + `seon.schema/unregister!`.
 - `seon.render.default/*` — the five default section functions
   (`system-section`, `related-ns-section`, `current-ns-section`,
@@ -1113,6 +1168,11 @@ A new agent session can:
    system tile.
 2. Eval a multi-form batch including a schema, defn, and test; see
    each form's `:duration-ms` rendered next to its eval-id.
+2a. Submit a response that mixes markdown prose ("## Plan\n- step
+   one") with Clojure forms; see the prose captured as
+   `:seon.eval/narration` on the next form's entry, and any
+   trailing prose stored as a thinking-only entry. Verify NO false
+   "read-error" entries are produced for the markdown lines.
 3. **Partial success**: send 10 forms where one fails; see 9 successes
    persisted and 1 error reported in the eval log.
 4. `(in-ns 'seon.foo)` to switch namespaces mid-batch and see subsequent
@@ -1229,21 +1289,23 @@ A new agent session can:
    The bootstrap ships attr-schemas first, persistent entities
    second. New runtime versions can ADD attrs but not change existing
    ones.
-4. **Edamame parse-time comment extraction.** The existing
-   `seon.repl/parse-forms` (uses `cljs.tools.reader`) DOES pair
-   leading `;;` comments with the form that follows, by hand-rolling
-   a comment-collector. Edamame doesn't expose comment text on
-   parsed forms directly; if we move the eval-batch reader to
-   Edamame's `parse-next`, we lose the comment-pairing unless we
-   keep the hand-rolled pre-scanner. Keep the existing
-   `parse-forms` shape unless we have a reason to switch.
-5. **Read-error advance strategy.** Edamame's `parse-next` throws on
-   a malformed form and leaves the reader in an uncertain position.
-   Per-form independence requires advancing past the bad chunk. Two
-   options: (a) pre-split via a paren-counting scanner, then parse
-   each chunk; (b) on parse-throw, skip the reader to the next
-   newline-followed-by-`(` boundary. (a) is more predictable; (b)
-   loses fewer forms when the bad form is short.
+4. **Three-way classifier implementation.** Existing
+   `seon.repl/parse-forms` (`src/seon/repl.cljs`) uses
+   `cljs.tools.reader` with a hand-rolled comment collector AND a
+   bare-symbol drop rule. Extending it to classify prose as a third
+   kind (instead of dropping it) is a small change: do a line-based
+   pre-pass to classify by leading character before reading. Lines
+   starting with `(`/`[`/`{`/`@`/`'`/`\``/`~`/`#` (specifically the
+   reader-macro `#` forms) are form-starters and feed the reader;
+   lines starting with `;;` are narration; everything else is prose.
+   Multi-line forms are stitched by tracking paren depth across the
+   form-starter lines.
+5. **Form-starter set.** The exact prefix set determining "this line
+   starts a form" matters for false-positives. `#` is ambiguous —
+   `#"…"` is a regex literal (form) but `# Heading` is markdown (prose).
+   Resolution: `#` followed by `"`/`{`/`(`/`_`/`'` is a form-starter;
+   `#` followed by whitespace is prose. Document the table; cover
+   in tests.
 6. **Replay dep analysis.** Topological ordering of resume needs to
    know "what schemas does this fn ref?". Lightweight (regex over
    `::keyword` patterns) probably works for agent-authored CLJS code,
