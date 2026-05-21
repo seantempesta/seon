@@ -49,10 +49,10 @@ the few things that protect the substrate from incoherence.
   "I have no tests"; the absence is computed. Convention: every
   public fn ships with a `<name>-example` test exercising the
   documented happy path; the warning vanishes the moment one
-  exists. See [[#^d9]].
+  exists. See [[#^d7]].
 - **`(def …)` outside `defn`/`schema/register!`/`deftest` is
   scratch.** Warning surfaces; the value lives in the process but
-  won't survive restart ([[#^d5]]).
+  won't survive restart ([[#^d3]]).
 - **Slow forms get flagged.** Default 500ms; agent can retune.
 
 **Flexible everywhere else.** Functions redefine freely. Tests
@@ -75,7 +75,7 @@ predicates can ask any direction of the question:
   exercises.
 
 The reverse index is what makes targeted test auto-run cheap
-([[#^d6]]) and what makes "who depends on X?" answerable in one
+([[#^d4]]) and what makes "who depends on X?" answerable in one
 query.
 
 ## ID conventions
@@ -124,34 +124,28 @@ Each links to the detail block at the bottom via Obsidian block-id.
 Refer by id ("yes D3, defer D7"). The body of the spec reflects the
 current design; only items below remain open.
 
-**Open — needs REPL verification:**
-
-- **[[#^d1]]** — Add `rewrite-clj` to deps; verify it works in
-  bootstrap-CLJS / shadow.
-- **[[#^d2]]** — Verify bootstrap-CLJS unbound-symbol error shape.
-
 **Open — design questions:**
 
-- **[[#^d3]]** — Older-DB-on-newer-runtime upgrade. Deferred; focus
-  on bootstrap-from-compiled-code first ([[#^d12]]).
-- **[[#^d4]]** — Per-kind redefinability rules (specs / fns /
+- **[[#^d1]]** — Older-DB-on-newer-runtime upgrade. Deferred; focus
+  on bootstrap-from-compiled-code first ([[#^d10]]).
+- **[[#^d2]]** — Per-kind redefinability rules (specs / fns /
   tests).
-- **[[#^d5]]** — Detect `(def …)` via rewrite-clj AST (no regex).
-- **[[#^d6]]** — Targeted test auto-run wiring + warning predicate
+- **[[#^d3]]** — Detect `(def …)` via rewrite-clj AST (no regex).
+- **[[#^d4]]** — Targeted test auto-run wiring + warning predicate
   + runtime-var stash.
-- **[[#^d7]]** — `(forget!)` for whole namespaces.
-- **[[#^d8]]** — Explicit `seon.repl/remove-spec`, `remove-fn`,
+- **[[#^d5]]** — `(forget!)` for whole namespaces.
+- **[[#^d6]]** — Explicit `seon.repl/remove-spec`, `remove-fn`,
   `remove-test`.
-- **[[#^d9]]** — `<name>-example` test convention as the documented-
+- **[[#^d7]]** — `<name>-example` test convention as the documented-
   happy-path stub.
-- **[[#^d10]]** — Reference-graph attrs (`:seon.fn/refs`,
+- **[[#^d8]]** — Reference-graph attrs (`:seon.fn/refs`,
   `:seon.fn/input-spec`, `:seon.test/target`) — confirm shape +
   cardinality.
-- **[[#^d11]]** — Forgiving parse recovery on parse-error; advance
+- **[[#^d9]]** — Forgiving parse recovery on parse-error; advance
   to next balanced top-level form.
-- **[[#^d12]]** — Topological bootstrap: how to emit
-  `bootstrap.edn` from substrate source in correct dep order.
-  Solve this first; indexing follows.
+- **[[#^d10]]** — Topological `bootstrap.edn` emission at substrate
+  build time. (Resume topo at runtime is solved: sort by datahike
+  tx-id; see Resume phase.)
 
 The detailed notes for each live in [Decision details](#decision-details) at the
 bottom.
@@ -512,6 +506,35 @@ reminds them prose belongs in `;;` comments. Bare prose tokenizes
 into unbound-symbol errors the agent sees in the next turn's
 `recent-evals` tile — a loud, self-correcting signal, no
 prose-detection heuristic needed.
+
+#### Undeclared-var surfacing
+
+`cljs.js/eval-str` is permissive by default: an undeclared var
+emits a `:undeclared-var` warning to stderr but the form still
+compiles. At runtime the unresolved reference becomes `nil`, and
+the eval returns `{:ok true :value nil}`. That's wrong for our
+contract — bare prose like `Let me read` would tokenize into four
+silent `nil`-valued evals.
+
+The fix is configuration, not design. `seon.eval/raw-eval` installs
+a `cljs.analyzer/*cljs-warning-handlers*` binding that throws on
+`:undeclared-var` / `:undeclared-ns` / `:undeclared-ns-form`:
+
+```clojure
+(set! cljs.analyzer/*cljs-warning-handlers*
+  [(fn [type _env extra]
+     (when (#{:undeclared-var :undeclared-ns :undeclared-ns-form} type)
+       (throw (ex-info (str "undeclared-var: "
+                            (:prefix extra) "/" (:suffix extra))
+                       {:kind :compile
+                        :seon.eval/warning-type type
+                        :seon.eval/extra extra}))))])
+```
+
+cljs.js wraps the throw as `{:tag :cljs/analysis-error}` and returns
+it via `:error`. `raw-eval`'s existing `:error` branch then yields
+`{:ok false :error ...}` — and the agent's `recent-evals` tile
+shows the loud feedback the design depends on. Verified in REPL.
 
 **Partial-success principle.** If the agent sends 10 forms and 9
 succeed, the database keeps 9 successes. Read failures and eval
@@ -1282,25 +1305,27 @@ things — forget.
 ### Resume phase (runs every boot)
 
 Restore runtime state by walking the persistent entities and evaling
-each in dependency order. On a freshly-bootstrapped DB this is what
+each in creation order. On a freshly-bootstrapped DB this is what
 makes the substrate "real" as vars; on a persistent DB this restores
 the agent's accumulated work.
 
+**No dep DAG, no analyzer walk.** Datahike tx-ids are strictly
+monotonic, and an entity can only reference another via lookup-ref
+if the referenced entity already exists at write time. So creation
+order IS a valid topological order by construction. Replay is just
+"sort by asserting tx-id and eval each entity's `:source`."
+
 1. Compiled CLJS substrate is loaded.
-2. Query all `:seon.ns` / `:seon.schema` / `:seon.fn` / `:seon.test`
-   entities from the DB.
-3. Build dep DAG by analyzing `:source` for references.
-4. Topo sort:
-   - `:seon.ns` first (each carries its own `(ns foo (:require [...]))`
-     source — re-evaluating it re-establishes the namespace + requires
-     in one step)
-   - `:seon.schema` next (topological by schema-key references)
-   - `:seon.fn` next (topological by var references)
-   - `:seon.test` last (after their target fns)
-5. For each entity, eval its `:source` in the entity's home ns. The
-   replay transact carries `:tx-meta {:seon.eval/id <id>}` so the
-   eval entry and the persistent datoms share a tx-id.
-6. If an eval throws during replay, its eval-log entry carries
+2. Query all persistent entities along with the tx that asserted
+   them: `[:find ?e ?source ?tx :where [?e :seon.fn/source ?source ?tx]]`
+   (and similar for `:seon.schema`, `:seon.test`, `:seon.ns`).
+3. Sort by `?tx`. That's the order the agent created them in.
+4. For each entity, eval its `:source` in the right ns. The replay
+   transact carries `:tx-meta {:seon.eval/id <id>
+   :seon.eval/replay? true}` so the eval entry and the persistent
+   datoms share a tx-id, and the renderer can distinguish replay
+   evals from session evals.
+5. If an eval throws during replay, its eval-log entry has
    `:ok? false`. The renderer surfaces it as a warning ("X failed
    to replay this session — fix or forget") with the source available
    for inspection. The entity stays in the DB unchanged; nothing is
@@ -1334,7 +1359,7 @@ Mechanisms supporting this:
   :one→:many` is allowed only when no `:db/unique` is set. The
   baseline attribute schema in `seon.schema/register!` calls should
   be treated as non-negotiable across versions; extensions add new
-  attrs, never re-type existing ones. See [[#^d3]].
+  attrs, never re-type existing ones. See [[#^d1]].
 
 ## MVP scope
 
@@ -1357,16 +1382,16 @@ Mechanisms supporting this:
   `perf-section` formats Tufte stats on demand.
 - Current time in `system-section`. User-timezone lookup is post-v1
   (see "Out" below).
-- **Targeted test auto-run** ([[#^d6]]): every eval whose tx
+- **Targeted test auto-run** ([[#^d4]]): every eval whose tx
   asserted datoms on a `:seon.fn` entity post-fires the tests that
   target that fn (reverse ref via `:seon.test/target`). Test
   entities' `:last-passed-at` / `:last-failed-at` / `:last-failure`
   update. The `failing-test-warning` predicate surfaces any test
   whose latest run failed.
-- **Spec-violation warning** ([[#^d4]]): when a schema is
+- **Spec-violation warning** ([[#^d2]]): when a schema is
   redefined, validate existing data against the new shape;
   violations become warnings. No reject.
-- **Def-not-persisted warning** ([[#^d5]]): bare `(def x …)`
+- **Def-not-persisted warning** ([[#^d3]]): bare `(def x …)`
   outside `defn`/`schema/register!`/`deftest` surfaces a warning.
 - Bootstrap + resume phases per "Boot sequence".
 - Per-form independent transacts (partial-success preservation).
@@ -1385,7 +1410,7 @@ Mechanisms supporting this:
 - Token budgeting for the renderer (no compression beyond truncate-edn)
 - Auto-run on **dependent**-change (i.e. fn B's tests fire when fn A
   that B depends on changes). MVP runs only tests targeting the
-  directly-modified fn; transitive triggering follows. See [[#^d6]].
+  directly-modified fn; transitive triggering follows. See [[#^d4]].
 - Caching of section outputs (recompute every turn for MVP)
 - User-timezone lookup. The system-section surfaces *pod* time and
   timezone — that's what `js/Intl.DateTimeFormat` resolves to inside
@@ -1521,42 +1546,18 @@ below is the full discussion. Anchor IDs are stable across edits;
 refer by id. Each heading uses both an HTML anchor (for GFM) and an
 Obsidian block-id (for `[[#^dN]]` links in this vault).
 
-### <a id="d1"></a>D1 — Add `rewrite-clj` to deps ^d1
-
-rewrite-clj preserves `:comment` nodes alongside form nodes
-(verified in `reference-code/rewrite-clj/src/rewrite_clj/node/
-comment.cljc`). Edamame drops comments at the reader
-(`edamame.impl.parser/parse-comment`). The forms-and-comments parse
-the spec describes requires rewrite-clj.
-
-Confirm the version bundled in `reference-code/rewrite-clj/` works
-with bootstrap-CLJS + shadow-cljs. Small dep addition; should be
-straightforward.
-
-### <a id="d2"></a>D2 — Bare-symbol unbound-symbol error shape ^d2
-
-The forms-and-comments design relies on the eval surface throwing a
-clean unbound-symbol error for undefined references rather than us
-inferring "this was probably prose."
-
-Confirm: when bootstrap-CLJS `eval-str` is asked to evaluate `Let`,
-it returns `{:ok false :error <unbound>}` rather than a vague
-compile failure. Test against the actual compile-state behavior;
-adjust the `:error` payload's `:kind` field accordingly (`:compile`
-vs `:runtime`).
-
-### <a id="d3"></a>D3 — Older DB on newer runtime upgrade strategy ^d3
+### <a id="d1"></a>D1 — Older DB on newer runtime upgrade strategy ^d1
 
 Sketched but not designed: detect substrate version delta, merge
 missing-from-DB bootstrap entries (lookup by identity), surface
 agent overrides that conflict with the new substrate as warnings
 with diffs. Out of MVP scope but the data model must permit it.
 
-Solve [[#^d12]] first — once the substrate analyzer emits a clean
+Solve [[#^d10]] first — once the substrate analyzer emits a clean
 ordered bootstrap vector, upgrades follow naturally (diff old
 vector against new; transact the additions).
 
-### <a id="d4"></a>D4 — Per-kind redefinability rules ^d4
+### <a id="d2"></a>D2 — Per-kind redefinability rules ^d2
 
 The three persistent kinds have different redefine rules because
 they have different relationships to stored data:
@@ -1580,7 +1581,7 @@ they have different relationships to stored data:
 **Functions (`:seon.fn/*`).** Flexible.
 
 - Always allowed to redefine. The agent is iterating.
-- Targeted tests auto-run on the new definition ([[#^d6]]); failing
+- Targeted tests auto-run on the new definition ([[#^d4]]); failing
   tests surface as warnings.
 - Callers that reference the fn keep working (the var binding
   updates).
@@ -1602,7 +1603,7 @@ feedback channel. After a fn redefine, targeted tests fire. After
 a test redefine, the test fires. All three give immediate
 feedback without the agent asking.
 
-### <a id="d5"></a>D5 — `(def …)` not-persisted warning (no regex) ^d5
+### <a id="d3"></a>D3 — `(def …)` not-persisted warning (no regex) ^d3
 
 Agents reach for `(def !x (atom …))` because of a known
 bootstrap-CLJS gotcha (bare-value defs don't resolve across
@@ -1610,7 +1611,7 @@ eval-str calls; see `src/seon/eval.cljs` opening docstring). The
 defs eval fine but **aren't persisted** — pod restart loses them.
 
 Detection uses the parsed form, not a regex. Since rewrite-clj
-already gives us the form structurally ([[#^d1]]), the check is:
+already gives us the form structurally, the check is:
 
 ```clojure
 (defn- def-not-persisted? [parsed-form]
@@ -1632,9 +1633,9 @@ references it; restart will break).
 Dependent-finding ALSO uses the AST, not text search: each
 `:seon.fn/source` parses via rewrite-clj; we walk the form looking
 for symbol-references that match the orphan `def`'s name. (Same
-analyzer surface as [[#^d10]] / [[#^d12]].)
+analyzer surface as [[#^d8]] / [[#^d10]].)
 
-### <a id="d6"></a>D6 — Targeted test auto-run on every define / redefine ^d6
+### <a id="d4"></a>D4 — Targeted test auto-run on every define / redefine ^d4
 
 Tests run automatically every time a function is defined or
 redefined — and ONLY the tests targeting that specific function.
@@ -1681,7 +1682,7 @@ for either.
 
 In MVP, default-on.
 
-### <a id="d7"></a>D7 — `(forget!)` for namespaces ^d7
+### <a id="d5"></a>D5 — `(forget!)` for namespaces ^d5
 
 Currently `(forget! 'sym)` works on functions / schemas / tests via
 their identity attr. Should it also work on a whole `:seon.ns/*`
@@ -1699,7 +1700,7 @@ entity? Semantics:
 Useful when the agent decides an entire experiment-namespace is
 trash. MVP-include or defer?
 
-### <a id="d8"></a>D8 — Explicit remove-spec / remove-fn / remove-test ^d8
+### <a id="d6"></a>D6 — Explicit remove-spec / remove-fn / remove-test ^d6
 
 Three explicit verbs, one for each persistent kind. Each takes a
 map specifying what's being removed and refuses (with a clear
@@ -1731,7 +1732,7 @@ The reversibility classifier in the "Forget" section is used by the
 targeted-test auto-run and the warning predicates to explain what
 would break if you removed something, not as a do-anything `undo`.
 
-### <a id="d9"></a>D9 — `<name>-example` test convention ^d9
+### <a id="d7"></a>D7 — `<name>-example` test convention ^d7
 
 A function persists as `:seon.fn/*`. The warnings tile runs a
 no-test predicate at render time — for every `:seon.fn`, check
@@ -1770,7 +1771,7 @@ The warning predicate looks for `:seon.test/target` matches; it
 doesn't care about the name. The convention is for human + LLM
 readability, not enforcement.
 
-### <a id="d10"></a>D10 — Reference-graph attrs ^d10
+### <a id="d8"></a>D8 — Reference-graph attrs ^d8
 
 Confirming the schema shape:
 
@@ -1800,11 +1801,11 @@ schemas. New attr:
 ```
 
 The reference graph is what makes the targeted-test auto-run
-([[#^d6]]) and the spec-violation check ([[#^d4]]) cheap: every
+([[#^d4]]) and the spec-violation check ([[#^d2]]) cheap: every
 "who is affected by changing X" question is one datalog query
 over the reverse index.
 
-### <a id="d11"></a>D11 — Forgiving parse recovery ^d11
+### <a id="d9"></a>D9 — Forgiving parse recovery ^d9
 
 The parser surface needs to be helpful when the agent writes
 something partially-broken. Current spec already says
@@ -1834,7 +1835,7 @@ an unclosed paren spanning EOF), the whole tail becomes one
 (the agent sees one error and knows where to look) but worth
 confirming.
 
-### <a id="d12"></a>D12 — Topological bootstrap emission ^d12
+### <a id="d10"></a>D10 — Topological bootstrap emission ^d10
 
 The substrate is compiled CLJS. To seed the agent's DB on first
 boot, we need a `bootstrap.edn` containing every substrate
@@ -1858,7 +1859,7 @@ If we do (1) and (2) right, indexing future agent work is the
 same code — the substrate is just data the analyzer happens to
 see first. No special "compile vs runtime" path.
 
-Solve this BEFORE worrying about [[#^d3]] (older-DB-on-newer-runtime).
+Solve this BEFORE worrying about [[#^d1]] (older-DB-on-newer-runtime).
 Once we have the analyzer walk producing a clean ordered vector,
 upgrades follow naturally (diff old vector against new; transact
 the additions).
