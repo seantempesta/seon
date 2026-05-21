@@ -2095,8 +2095,9 @@ the additions).
 
 When [D2](#d2) (`:keep-history? true`) is on, every transact has a
 tx-id and the set of datoms it wrote. Datahike's history API can
-answer "what changed in tx T" via `tx-range` + filtering. So what
-is `:seon.eval/touches` doing that the tx data wouldn't?
+answer "what changed in tx T" via `(d/history db)` + datom-pattern
+filtering. So what is `:seon.eval/touches` doing that the tx data
+wouldn't?
 
 Hypothesis: `:touches` was a redundant denormalization invented
 when we weren't sure history was on. With history on, the agent
@@ -2109,17 +2110,96 @@ queries:
      (d/history db) eval-tx-id)
 ```
 
-…and gets the same answer. If this is right, `:touches` should be
-dropped: the eval entry stores `:seon.eval/tx-id :long` instead,
-and "what did this eval touch" is one history query.
+…and gets the same answer.
 
-Counter-argument: explicit ref-vector is cheap to query (no
-history surface needed). For agents reading scrollback, "this
-eval produced these entities" is a direct attribute, not a join.
+**Verified against `reference-code/datahike/` (2026-05-21) —
+recommend dropping `:touches`:**
 
-Research task launched to verify the datahike-cljs history API
-shape and confirm one approach. Decision pending the research
-result.
+- The transact return value (`TxReport`) carries `:tx-data` — the
+  full list of datoms the tx wrote
+  (`src/datahike/db.cljc:130`:
+  `defrecord TxReport [db-before db-after tx-data tempids tx-meta]`).
+  Confirmed in use by `test/datahike/test/listen_test.cljc:32-38`
+  which reads `(:tx-data ...)` directly off the report. So at eval
+  time we ALREADY have the datoms without going through history.
+- Even better: **datahike supports per-tx custom metadata** via
+  `:tx-meta`. Passing
+  `{:tx-data [...] :tx-meta {:seon.eval/id "K9p2x4nB7q"}}` makes
+  datahike auto-attach the metadata as a datom on the tx-id (see
+  `flush-tx-meta` at
+  `src/datahike/db/transaction.cljc:605-624` and the test
+  `test-tx-meta` at
+  `test/datahike/test/transact_test.cljc:410-496`). Lines 465-474
+  of that test prove it's queryable:
+  ```clojure
+  ;; tx-meta {:foo :bar} on the transact …
+  (d/q '[:find ?e ?v :where [?e :foo ?v]] @conn)
+  ;; => #{[536870913 :bar]}   ; the tx-id (536870913) is the entity
+  ```
+- **Constraint:** under `:schema-flexibility :write` the tx-meta
+  attr must be installed in the schema first
+  (`db/transaction.cljc:621-622`: raises "Bad transaction meta
+  attribute X ... not defined in system or current schema"). So
+  we'd register `:seon.eval/id` once as a normal datahike attr
+  (already required for the identity attr on the eval entity) and
+  use the same attr as tx-meta on the tx the eval triggered.
+- This collapses the eval-to-tx link: **the eval entity IS the tx
+  entity** (the tx-id of the eval's transact carries
+  `:seon.eval/id "..."` as a datom; the eval entry is the same
+  entity). We don't need a separate `:seon.eval/tx-id :long` attr
+  at all — querying
+  `[?eval-tx-id :seon.eval/id "K9p2x4nB7q"]` then
+  `[?e ?a ?v ?eval-tx-id]` against `(d/history db)` answers "what
+  did this eval touch", and the eval entry's other attrs
+  (`:source`, `:duration-ms`, etc.) sit on the SAME entity.
+- Cost: O(datoms-in-tx) for the second query — exactly the size
+  of the answer.
+
+**Recommendation:** drop `:seon.eval/touches` AND `:seon.eval/forgot`
+from the spec. Replace with the tx-meta pattern: register
+`:seon.eval/id` as a normal attr, attach it as `:tx-meta` on the
+eval's transact, derive touched / forgotten entities via history
+query when the renderer needs them. Strong reasons:
+
+1. **Eliminates drift.** With `:touches` we'd be writing the
+   denormalization by hand, and any cardinality-many add we forgot
+   to surface would silently disappear from scrollback.
+2. **Unifies the eval and its tx.** Today the spec implies two
+   transactions per form (one for the persistent entities, one for
+   the eval entry that points at them). Tx-meta means it's
+   one transact, one tx-id, both views observable.
+3. **Storage win.** No extra ref-vector per eval. The history
+   index already records what changed.
+
+**Caveats to verify in a follow-up REPL test (suggested form for
+the next agent):**
+
+```clojure
+;; Verify under wasm-tauri / V0 CLJS pod that:
+;; 1. tx-meta with a user attr works under :write flexibility once
+;;    the attr is registered.
+;; 2. The tx-id can be looked up via the meta attr and queried
+;;    against (d/history db) to recover all datoms in that tx.
+(let [conn (...)]
+  (schema/register! :seon.eval/id [:string {:seon.db/identity true}])
+  (let [report (d/transact conn {:tx-data [{:seon.fn/sym "foo/bar"
+                                            :seon.fn/source "..."}]
+                                 :tx-meta {:seon.eval/id "K9p2x4nB7q"}})
+        tx-id (->> (:tx-data report)
+                   (filter (fn [d] (= :seon.eval/id (:a d))))
+                   first :e)]
+    ;; recover via history
+    (d/q '[:find ?e ?a ?v
+           :in $ ?tx
+           :where [?e ?a ?v ?tx true]
+           [(not= :seon.eval/id ?a)]]
+         (d/history @conn) tx-id)))
+```
+
+Plus: confirm async behavior is sane on `:indexeddb` backend if
+we ever ship to browser (`doc/cljs-support.md:129` says history
+queries are slower under async backends but functional). The
+`:memory` backend (default in V0 pod) is fully sync.
 
 ### <a id="d26"></a>D26 — Verify the whole spec against datahike
 
