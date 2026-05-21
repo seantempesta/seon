@@ -1147,40 +1147,23 @@ Mechanisms supporting this:
 
 - The database attributes defined above (`:seon.ns/*`, `:seon.fn/*`,
   `:seon.schema/*`, `:seon.test/*`, `:seon.eval/*`, `:seon.ctx/*`).
-- `seon.repl/eval-batch!` — pod-side CLJS, runs the
-  forms-and-comments read/eval/transact pipeline via Edamame with
-  comment preservation enabled. `;;` comments accumulate into
-  `:seon.eval/narration` and attach to the next form; trailing
-  comments with no following form become a thinking-only eval entry.
-  Bare symbols ARE forms — they eval and may produce
-  unbound-symbol errors like any other REPL.
+- `seon.repl/eval-batch!` — runs the forms-and-comments
+  read/eval/transact pipeline (rewrite-clj for parse; see "Parse:
+  forms-and-comments"). Trailing comments without a following form
+  become a thinking-only eval entry. Bare symbols are forms.
 - `seon.repl/forget!` + `seon.schema/unregister!`.
-- `seon.render.default/*` — the five default section functions
-  (`system-section`, `related-ns-section`, `current-ns-section`,
-  `warnings-section`, `recent-evals-section`) returning strings +
-  `truncate-edn` helper + `pretty-ai` fallback (already exists).
+- `seon.render.default/*` — the five default section functions plus
+  the `truncate-edn` helper (`pretty-ai` already exists).
 - `seon.render/explain-section`, `reset-defaults!`.
-- Per-eval timing: `:seon.eval/duration-ms` captured for every form
-  via two `Date.now()` calls; rendered in the recent-evals tile;
-  surfaced as warnings via `slow-eval-warning` over a configurable
-  threshold. Always on, no opt-in.
-- Tufte hook wired into the existing `:seon.dev/instrumentation`
-  layer so every `:malli/schema`-annotated public fn can be profiled
-  on demand (section fns + composer + eval-batch + db/query +
-  db/transact! + every agent-authored public fn — the whole surface,
-  one indirection). OFF by default. `seon.perf/with-profiling` /
-  `seon.perf/set-enabled!` toggle it. Optional `perf-section`
-  formats the latest stats when the agent wants to see them.
-- Current time in `system-section` (`(js/Date.)` + the pod's IANA
-  timezone). User-timezone lookup is post-v1; the section surfaces
-  pod-time today with a clear note.
-- Bootstrap phase: detect-empty + ordered `(d/transact!)` from
-  `resources/seon/bootstrap.edn`.
-- Resume phase: topo-walk persistent entities, eval each, log results.
+- Per-eval timing + Tufte hook per "Self-instrumentation"; optional
+  `perf-section` formats Tufte stats on demand.
+- Current time in `system-section`. User-timezone lookup is post-v1
+  (see "Out" below).
+- Bootstrap + resume phases per "Boot sequence".
 - Per-form independent transacts (partial-success preservation).
 - Eval classification implicit via `:seon.eval/touches` / `:forgot`
   presence + `:ok?` boolean + cross-eval `:ns` comparison — no
-  classifier enum to maintain, no ns-switch attr.
+  classifier enum to maintain.
 
 ### Out
 
