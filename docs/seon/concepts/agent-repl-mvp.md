@@ -11,59 +11,153 @@ rendering layer, and the defaults that make the loop work out of the
 box. Reference for `seon.repl`, `seon.render`, `seon.eval` namespace
 work.
 
+## What we're strict about (everything else is flexible)
+
+We're building this to work **with** the agent. Understand intent;
+ship good defaults; let them experiment. We're only strict about
+the few things that protect the substrate from incoherence.
+
+**Hard rules (eval-batch enforces; failures land as `:ok? false`):**
+
+1. **Forms must be parseable.** rewrite-clj parses the input; on
+   failure we recover (skip to the next balanced top-level form;
+   continue). Genuinely malformed code becomes an `:ok? false` eval
+   entry with the parse error. We do not silently drop or guess.
+2. **Functions must have `:malli/schema`.** The existing
+   `seon.code/check` gate enforces this (`src/seon/code.cljc`).
+3. **Spec changes against persisted data must be accretive.** If
+   `(schema/register! ::foo new)` would invalidate existing
+   `[?e ::foo _]` datoms, reject with a warning naming the affected
+   entities. Accretive changes (add optional key, loosen constraint,
+   widen union) go through. `seon.repl/remove-spec` is the explicit
+   escape hatch.
+4. **Datahike attribute schemas are append-only.** Once an attr is
+   installed in the underlying datahike schema, its type /
+   cardinality / unique can't change ([[#D3]]). New attrs welcome.
+
+**Soft rules (warnings only; never reject):**
+
+- **Functions without tests don't fully count.** A `:seon.fn/*`
+  entity transacts, but a `:seon.warning/no-test-coverage` lives on
+  it until at least one `:seon.test/*` targets it. Convention:
+  every public fn ships with a `<name>-example` test exercising
+  the documented happy path. See [[#D19]].
+- **`(def …)` outside `defn`/`schema/register!`/`deftest` is
+  scratch.** Warning surfaces; the value lives in the process but
+  won't survive restart ([[#D14]]).
+- **Slow forms get flagged.** Default 500ms; agent can retune.
+
+**Flexible everywhere else.** Functions redefine freely. Tests
+redefine freely. Refactors break things in flight; the warnings
+tile is the always-current picture of what's broken; the agent
+decides when to fix.
+
+## Reference graph (specs / fns / tests link together)
+
+Every `:seon.fn` / `:seon.schema` / `:seon.test` entity is reachable
+from the others via explicit refs. The agent and the warning
+predicates can ask any direction of the question:
+
+- `:seon.fn/input-spec`, `:seon.fn/output-spec`: `:seon.db/ref` →
+  `:seon.schema`.
+- `:seon.fn/refs`: cardinality-many `:seon.db/ref` → other
+  `:seon.fn` entities this fn calls. Extracted by the analyzer
+  walk at define time ([[#D6]]).
+- `:seon.test/target`: `:seon.db/ref` → the `:seon.fn` the test
+  exercises.
+
+The reverse index is what makes targeted test auto-run cheap
+([[#D15]]) and what makes "who depends on X?" answerable in one
+query.
+
+## ID conventions
+
+- **Eval-id, message-id, log-id**: 12-char base62 — 8-char
+  non-wrapping time prefix + 4-char random. Time prefix is
+  `base62(epoch-ms)` widened so it doesn't wrap for any timestamp
+  the system will see (62^8 ≈ 2.2 × 10^14, covers epoch-ms past
+  year 9000). Stored as `:string`. Lex-sort = creation-time sort.
+- **`:seon.eval/at`**: `:long` epoch-millis. Indisputable; doesn't
+  require id-decoding. The canonical timestamp ([[#D11]]).
+- **Agent-id**: human-chosen string (e.g. `"seon"`). Not random;
+  used in URLs and the home-ns name.
+- **Entity references in maps**: identity-attr **values** are
+  strings (`:seon.fn/sym "seon.foo/bar"`). References use lookup-refs
+  `[:seon.fn/sym "seon.foo/bar"]`.
+- **Function references in slot attrs** (`:seon.ctx/fn`,
+  `:seon.render/ai`): fully-qualified **symbols**, e.g.
+  `'seon.render.default/system-section`. Stored as `:symbol`. The
+  dispatcher resolves at call time.
+
+When this doc says "symbol" it means the Clojure symbol type
+(resolvable reference). "string" / "keyword" mean those types.
+
 ## Decisions pending
 
-Items that need your call before this MVP can be implemented. Each
-links to the full discussion below. **Refer to them by id** (e.g.
-"yes on D3, defer D7") so we don't have to re-explain.
+Each links via Obsidian wiki-link to the detail block at the bottom.
+Refer by id ("yes D3, defer D7"). **[RESOLVED]** items kept as a
+log; the body of the spec reflects the resolution.
 
-**Architectural questions** (the design depends on these):
+**Resolved this round:**
 
-- **[D1](#d1)** — Naming: `:seon.fn/sym` (this spec) vs
-  `:seon.fn/qualified-name` (existing CLJ graph indexer). Pick one
-  or accept parallel namings.
-- **[D2](#d2)** — Datahike `:keep-history? true` for the agent DB
-  (currently `false`). Required for `:db/txInstant` + tx-range.
-- **[D3](#d3)** — Attribute schema evolution under
-  `:schema-flexibility :write`. Bootstrap ordering implication.
-- **[D4](#d4)** — Add `rewrite-clj` to deps for comment-preserving
-  parse. Confirm CLJS-compatibility.
-- **[D5](#d5)** — Bare-symbol eval error shape from bootstrap-CLJS.
-- **[D6](#d6)** — Replay topological dep analysis: lightweight regex
-  vs full `cljs.analyzer`.
-- **[D7](#d7)** — Result-value retention across pod restart. Document
-  the contract.
-- **[D8](#d8)** — Older DB on newer runtime upgrade strategy. Out
-  of MVP, but data model must permit.
+- **[[#D1]]** ✅ `:seon.fn/sym` (shorter). Body uses this.
+- **[[#D2]]** ✅ `:keep-history? true` on the agent DB.
+- **[[#D3]]** ✅ Bootstrap orders attrs first, data second.
+- **[[#D6]]** ✅ Full analyzer walk (no regex).
+- **[[#D7]]** ✅ Result values are convenience-only; don't survive
+  pod restart; teach this in the system-section.
+- **[[#D9]]** ✅ Keep `:seon.ctx/*` namespace explicit; XML wrapper
+  tags for key ctx sections (LLMs parse them cleanly).
+- **[[#D11]]** ✅ 12-char id (8 time + 4 random); `:at` is
+  epoch-millis.
+- **[[#D12]]** ✅ Store truncated result-edn only; full value lives
+  on globalThis under the eval-id; the agent transacts what they
+  want preserved.
+- **[[#D17]]** ✅ Yes, a `seon.repl/show-ns 'foo` helper that
+  returns the same string `current-ns-section` would for that ns.
+  Covered by the reference-graph design.
 
-**Simplifications surfaced** (could collapse concepts; need your call):
+**Open — needs REPL verification:**
 
-- **[D9](#d9)** — Section entities vs `:seon.fn` entities — merge?
-- **[D10](#d10)** — `:seon.eval/touches` vs deriving from datahike
-  tx history.
-- **[D11](#d11)** — `:seon.eval/at` vs time-prefixed eval-id (id
-  wraps; not currently round-trip-safe).
-- **[D12](#d12)** — `:seon.eval/result-edn` always-store-full vs
-  store-truncated + opt-in re-eval.
+- **[[#D4]]** — Test `rewrite-clj` works in bootstrap-CLJS / shadow.
+- **[[#D5]]** — Verify bootstrap-CLJS unbound-symbol error shape.
 
-**New behavior I want to add to MVP** (not yet in the body):
+**Open — design questions:**
 
-- **[D13](#d13)** — Spec redefinability: never reject; surface
-  violations against existing data as warnings; agent fixes when
-  ready.
-- **[D14](#d14)** — `(def x …)` not-persisted warning when the
-  form isn't a `defn` / `schema/register!` / `deftest`.
-- **[D15](#d15)** — Test auto-run on every define/redefine —
-  targeted, silent on pass, warns on fail. Always on.
-- **[D16](#d16)** — `(forget!)` for namespaces (whole ns entity).
-- **[D17](#d17)** — `(seon.repl/show-ns 'foo)` helper to inspect
-  other namespaces without switching.
-- **[D18](#d18)** — `(seon.repl/undo :<eval-id>)` helper using the
-  existing reversibility derivation.
+- **[[#D8]]** — Older-DB-on-newer-runtime upgrade. Deferred; focus
+  on bootstrap-from-compiled-code first ([[#D24]]).
+- **[[#D13]]** — Per-kind redefinability rules (specs / fns /
+  tests).
+- **[[#D14]]** — Detect `(def …)` via rewrite-clj AST (no regex).
+- **[[#D15]]** — Targeted test auto-run wiring + warning predicate
+  + runtime-var stash.
+- **[[#D16]]** — `(forget!)` for whole namespaces.
+- **[[#D18]]** — Explicit `seon.repl/remove-spec`, `remove-fn`,
+  `remove-test` (replaces the generic `undo` proposal).
 
-The detailed notes for each live in [§ Decision details](#decision-details)
-at the bottom. The body of the spec describes the design as it stands;
-the decisions above are where it isn't settled.
+**New in this round:**
+
+- **[[#D19]]** — `<name>-example` test convention as the documented-
+  happy-path stub.
+- **[[#D20]]** — Reference-graph attrs (`:seon.fn/refs`,
+  `:seon.fn/input-spec`, `:seon.test/target`) — confirm shape +
+  cardinality.
+- **[[#D21]]** — Forgiving parse recovery on parse-error; advance
+  to next balanced top-level form.
+- **[[#D22]]** — XML wrapper convention for ctx sections. Which
+  tags; which sections get them.
+- **[[#D23]]** — In-doc link syntax that works in Obsidian.
+  Research task launched.
+- **[[#D24]]** — Topological bootstrap: how to emit
+  `bootstrap.edn` from substrate source in correct dep order.
+  Solve this first; indexing follows.
+- **[[#D25]]** — What `:touches` is for once `:keep-history? true`
+  is on. Research task launched against datahike source.
+- **[[#D26]]** — Whole-spec verification against datahike's actual
+  capabilities. Research task launched.
+
+The detailed notes for each live in [[#Decision details]] at the
+bottom. The body of the spec reflects the resolved decisions.
 
 ## Goal
 
@@ -1502,94 +1596,122 @@ Did not apply because the history API surface for "datoms in this
 tx" on datahike-cljs isn't verified against
 `reference-code/datahike/`, and the explicit ref-set is cheap.
 
-### <a id="d11"></a>D11 — `:seon.eval/at` vs time-prefixed eval-id
+### <a id="d11"></a>D11 — Eval-id encoding ✅ RESOLVED
 
-The id is "10-char base62, time-prefixed → sorts by creation". The
-time-prefix uses `(mod (.now js/Date) (Math/pow 62 4))` (see
-`seon.agent/new-id!` in `src/seon/agent.cljs:75`), which wraps every
-~4 days. So the id is sortable within a window but doesn't survive
-roundtrip to `js/Date`.
+**Resolution:** 12-char base62 — 8-char time prefix (non-wrapping)
++ 4-char random. `:seon.eval/at` is `:long` epoch-millis (canonical
+indisputable timestamp).
 
-`:at` survives as a human-readable timestamp. Could either drop
-`:at` and widen the time-prefix to be roundtrip-safe, or keep both.
-Current spec keeps both; you may want to revisit.
+Math: `62^8 ≈ 2.18 × 10^14`. Epoch-millis today is `~1.78 × 10^12`.
+At current rate the time-prefix wraps around the year 9000 — fine
+for our lifetime. 4 random chars (`62^4 ≈ 1.5 × 10^7`) is enough
+collision space for the few-evals-per-millisecond rate this system
+will ever see.
 
-### <a id="d12"></a>D12 — `:seon.eval/result-edn` storage
+`:seon.eval/at` is the canonical timestamp. Renderers can format it
+however they want (human ISO, "5s ago", whatever). The id's
+time-prefix is for sortability only; the agent never has to decode
+it.
 
-The spec stores the FULL pr-str and applies `truncate-edn` at render
-time. For huge values that's wasteful storage. A pre-truncated
-version could be stored and the `#_:full` opt-in (D14-adjacent;
-mirrors `bin/mcp-server`'s `full-output-prefix`) could re-eval the
-source to get the live value.
+Existing `seon.agent/new-id!` (in `src/seon/agent.cljs`) needs
+widening from 10 chars (4 time + 6 random, wraps in ~4 days) to 12
+chars (8 time + 4 random, non-wrapping). One-line change to the
+helper.
 
-Did not apply because re-evaluating source isn't side-effect-safe in
-general. If you want this, the contract has to be "only for
-expressions known to be pure" — a meaningful classifier the MVP
-doesn't have.
+### <a id="d12"></a>D12 — Store truncated only ✅ RESOLVED
 
-### <a id="d13"></a>D13 — Spec redefinability + always-warn-when-broken
+**Resolution:** `:seon.eval/result-edn` stores the **truncated**
+value (default 2KB; configurable). The full live value lives on
+globalThis under the eval-id (`stash-result-raw!`), reachable via
+`(result :<eval-id>)` within the same pod session.
 
-**Redefines are never rejected.** The agent is allowed to break
-things. The warning system's job is to show what's currently broken
-so the agent can decide to fix in this turn, the next turn, or
-multiple batches.
+If the agent wants a full value preserved across restart, they
+transact it explicitly via `seon.db/transact!` against an attr they
+register. That's why schemas can be created and arbitrary data
+written — the agent decides what's worth keeping.
 
-When `(schema/register! ::foo new-shape)` runs and `::foo` already
-exists:
+This kills the storage-bloat concern (huge values don't ride the
+eval log) and clarifies the contract: result-edn is for display in
+recent-evals; persistent data is something the agent chooses to
+write.
 
-1. Replace the registered schema unconditionally.
-2. Run a violation check: for any persistent entity whose schema
-   references `::foo`, validate the stored data against the new
-   schema. Any violations become warnings in the warnings tile,
-   not errors and not rejections. Format:
-   `"<entity> no longer matches ::foo — <why>"`.
-3. The instrumentation layer (D5 / Malli runtime validation) is
-   **always on**, so the next call to any fn whose `:malli/schema`
-   uses `::foo` will throw at the call site if the inputs violate
-   the new shape. That's the agent's runtime feedback channel.
+### <a id="d13"></a>D13 — Per-kind redefinability rules
 
-Datahike-level type changes (D3) still can't be applied — the
-underlying attribute schema is immutable once installed. If the
-agent tries to change the datahike type for an attr that's been
-used for storage, the warning explains: "the Malli schema was
-replaced, but the datahike attribute type stays. To change the
-storage type you must rename the attr."
+The three persistent kinds have different redefine rules because
+they have different relationships to stored data:
 
-No code path "approves" or "rejects" the change. The DB always
-reflects the current ground truth; the warnings tile always
-reflects what's currently broken against current schemas + tests.
+**Specs (`:seon.schema/*`).** Strict.
 
-### <a id="d14"></a>D14 — `(def x …)` not-persisted warning
+- No data uses the spec yet (no `[?e ::foo _]` datoms) → replace
+  freely.
+- Data exists AND the change is **accretive** (add optional key;
+  loosen constraint; widen union; add to enum) → replace.
+- Data exists AND the change is **breaking** (remove key; narrow
+  type; tighten constraint; change cardinality; remove from enum) →
+  **reject**. Eval entry is `:ok? false` with a clear error showing
+  which entities would be invalidated. The agent's recourse is
+  `seon.repl/remove-spec ::foo` first (which is itself rejected if
+  data uses it; explicit migration is the only path).
+- Underlying datahike attribute type (`:db.type/string` etc) is
+  immutable in either case. Spec changes that would require a
+  datahike-level retype are rejected with that specific message.
+
+**Functions (`:seon.fn/*`).** Flexible.
+
+- Always allowed to redefine. The agent is iterating.
+- Targeted tests auto-run on the new definition ([[#D15]]); failing
+  tests surface as warnings.
+- Callers that reference the fn keep working (the var binding
+  updates).
+- No data-validity check — fn definitions aren't stored data, just
+  source.
+
+**Tests (`:seon.test/*`).** Flexible.
+
+- Always allowed to redefine.
+- The new test runs on the next define-or-redefine of its target fn
+  (or immediately on redefine of the test itself, since redefining
+  a test = re-eval'ing it = same trigger).
+
+The spec instrumentation layer (Malli runtime validation per
+CLAUDE.md "Function Instrumentation") stays on always. After a
+spec redefine, the next call to any fn using that spec will throw
+at the call site if shapes don't match — that's the in-call
+feedback channel. After a fn redefine, targeted tests fire. After
+a test redefine, the test fires. All three give immediate
+feedback without the agent asking.
+
+### <a id="d14"></a>D14 — `(def …)` not-persisted warning (no regex)
 
 Agents reach for `(def !x (atom …))` because of a known
 bootstrap-CLJS gotcha (bare-value defs don't resolve across
 eval-str calls; see `src/seon/eval.cljs` opening docstring). The
 defs eval fine but **aren't persisted** — pod restart loses them.
 
-Warning predicate proposal:
+Detection uses the parsed form, not a regex. Since rewrite-clj
+already gives us the form structurally ([[#D4]]), the check is:
 
 ```clojure
-(defn def-not-persisted-warning [{:seon.db/keys [db]
-                                  :seon.agent/keys [id]}]
-  (let [orphans (recent-evals-matching db id
-                  #(re-find #"^\(def\s+[^\s(]+" (:seon.eval/source %)))
-        ;; Cross-check: any persistent entity references this name?
-        deps    (find-dependents-by-source db orphans)]
-    (for [{::keys [eval-id var-name dependents]}
-          (annotate-orphans orphans deps)]
-      {:seon.warning/severity (if (seq dependents) :error :warn)
-       :seon.warning/text
-       (str "(def " var-name ") at " eval-id " isn't persisted. "
-            (if (seq dependents)
-              (str "It WILL break on pod restart — these entities "
-                   "reference it: " (str/join ", " dependents) ". "
-                   "Wrap it in (defn) or use seon.db to store the value.")
-              "It won't survive pod restart — fine for scratch, "
-              "but if you keep it, persist via (defn) or seon.db."))})))
+(defn- def-not-persisted? [parsed-form]
+  (and (seq? parsed-form)
+       (= 'def (first parsed-form))
+       (symbol? (second parsed-form))))
 ```
 
-Two tiers: `:warn` (just sitting there) and `:error` (a persisted
-fn's source references it).
+That's it. `def` as the head symbol, a symbol as the name. `defn`
+doesn't match because `defn` isn't `def`. `(let [x …])` doesn't
+match. No regex.
+
+Warning predicate then queries recent evals where `:source` was a
+plain `(def …)`, cross-checks against persisted entities'
+`:source` for references to the var name, and emits two tiers:
+`:warn` (sitting around) and `:error` (a persisted fn's source
+references it; restart will break).
+
+Dependent-finding ALSO uses the AST, not text search: each
+`:seon.fn/source` parses via rewrite-clj; we walk the form looking
+for symbol-references that match the orphan `def`'s name. (Same
+analyzer surface as [[#D6]] / [[#D20]].)
 
 ### <a id="d15"></a>D15 — Targeted test auto-run on every define / redefine
 
@@ -1597,41 +1719,47 @@ Tests run automatically every time a function is defined or
 redefined — and ONLY the tests targeting that specific function.
 The agent never has to say "run tests." If the tests pass, the
 warnings tile says nothing. If any fail, the warnings tile shows
-the failure with the test source and the diff between expected and
-actual, so the agent knows what to fix.
+a summary of what broke, with the full failure output reachable
+via a runtime var the agent can dig into.
 
-**Triggering.** A `:seon.eval` entry with `:touches [<seon.fn ref>]`
-fires a post-tx hook. The hook queries: every `:seon.test` entity
-whose `:seon.test/target` ref resolves to the touched fn. Run each.
-Update the test's `:last-passed-at` / `:last-failed-at` /
-`:last-failure`.
+**Triggering.** A `:seon.eval` entry that touches a `:seon.fn`
+fires a post-eval hook. The hook queries: every `:seon.test`
+entity whose `:seon.test/target` ref resolves to the touched fn.
+Run each. Update each test's `:last-passed-at` /
+`:last-failed-at` / `:last-failure`.
 
-**Why this works cheaply.** Tests target one fn each (the
-`:seon.test/target → :seon.fn` ref). The reverse index is one
-datalog query. Most fns have ≤2 tests. The post-eval cost is
-"run a small number of tests for the one fn that just changed,"
-not "all tests."
+**Why this works cheaply.** Tests target one fn each via
+`:seon.test/target → :seon.fn`. The reverse index is one datalog
+query. Most fns have a couple tests. Post-eval cost is "run the
+few tests for the one fn that just changed."
+
+**Runtime var stash.** Full output of the test run lives on
+globalThis under a stable id (same mechanism as eval-id results;
+see [[#D7]]). The agent fetches via `(result :<test-run-id>)` if
+they want to see assertion-by-assertion detail. The warnings tile
+just shows the summary: "3 of 4 tests passed for analyze; 1
+failed (analyze-empty-ticker)" + the failure's `:last-failure`
+message.
 
 **Warning predicate.** `failing-test-warning` queries every test
 where `:last-failed-at > :last-passed-at` (or `:last-passed-at`
-is nil). Each becomes one warning showing test name, target fn,
-and `:last-failure`. Pure derivation from current test-entity
-state — no separate failure-cache.
+is nil). Each becomes one warning. Pure derivation from
+current test-entity state.
 
-**Manual run.** `(run-tests)` still works for "I want to re-run
-everything." `(t/run-test 'foo-test)` runs one by name. But the
-common case — write a fn, test runs immediately, see breakage in
-the next render — needs nothing from the agent.
+**Manual runs.** `(seon.test/run-all)` runs every persisted test.
+`(seon.test/run-fn 'fn-sym)` runs just that fn's tests.
+`(seon.test/run 'test-sym)` runs one by name. But the common
+case — write a fn, tests run, warnings render next turn — needs
+nothing from the agent.
 
-**Instrumentation interplay.** Spec instrumentation (Malli runtime
-validation per CLAUDE.md "Function Instrumentation") stays on
-always. That's the in-call feedback: "you called fn X with wrong
-shape → throws at the call site." Test auto-run is the post-define
-feedback: "fn X's tests still pass against the new definition."
-Two complementary signals; both always on; the agent doesn't have
-to ask for either.
+**Instrumentation interplay.** Spec instrumentation (Malli
+runtime validation per CLAUDE.md "Function Instrumentation")
+stays on always. That's the in-call feedback: "you called fn X
+with wrong shape → throws at the call site." Test auto-run is
+the post-define feedback. Both always on; the agent doesn't ask
+for either.
 
-In MVP.
+In MVP, default-on.
 
 ### <a id="d16"></a>D16 — `(forget!)` for namespaces
 
@@ -1650,33 +1778,270 @@ entity? Semantics:
 Useful when the agent decides an entire experiment-namespace is
 trash. MVP-include or defer?
 
-### <a id="d17"></a>D17 — `(seon.repl/show-ns 'foo)` helper
+### <a id="d17"></a>D17 — `(seon.repl/show-ns 'foo)` helper ✅ RESOLVED
 
-The agent's default render shows current-ns + immediately-related-ns.
-To inspect "what entities exist in seon.foo without switching to
-it," they currently have to run a datalog query by hand. A small
-helper:
+**Returns:** the same string `current-ns-section` would produce
+for the target ns. One thin wrapper:
 
 ```clojure
 (seon.repl/show-ns 'seon.foo)
-;; => same string current-ns-section would produce for that ns
+;; => "<current-namespace name=\":seon.foo\">…</current-namespace>"
 ```
 
-One-line wrapper around `current-ns-section`. MVP-include? It's
-trivial to add but worth deciding so the system-section can teach
-it.
+Implementation is literally `(current-ns-section {... :seon.agent/id
+overridden-to-target-ns})`. The agent uses this to peek at any
+namespace without switching to it. The system-section teaches the
+pattern.
 
-### <a id="d18"></a>D18 — `(seon.repl/undo :<eval-id>)` helper
+### <a id="d18"></a>D18 — Explicit remove-spec / remove-fn / remove-test
 
-The spec already derives reversibility per-eval (see the
-"Reversibility is derived" table in the Forget section). Exposing
-the inverse as a helper:
+Three explicit verbs, one for each persistent kind. Each takes a
+map specifying what's being removed and refuses (with a clear
+warning) when the removal would break invariants.
 
 ```clojure
-(seon.repl/undo :K9p2x4nB7q)
-;; => looks up eval, checks reversibility, retracts/unmaps if Yes,
-;;    refuses with a clear reason if No or Partial.
+(seon.repl/remove-spec {:seon.schema/key ::ticker})
+;; -- if no datoms use the spec: retract the :seon.schema entity,
+;;    unregister from the Malli registry.
+;; -- if data exists: refuse with the list of affected entities.
+;;    "Cannot remove ::ticker; 12 entities use it. Migrate or
+;;     accept-cascade-retract first."
+
+(seon.repl/remove-fn {:seon.fn/sym "seon.trading/analyze"})
+;; -- retract the :seon.fn entity, ns-unmap the var, retract any
+;;    :seon.test entities whose :target was this fn (the targets
+;;    no longer exist; the tests are stale).
+;; -- emits one :seon.eval entry with :forgot populated by the
+;;    removed entities for scrollback.
+
+(seon.repl/remove-test {:seon.test/sym "seon.trading/analyze-example"})
+;; -- retract the :seon.test entity, ns-unmap the deftest var.
 ```
 
-The classifier already exists in spec form; this just wires it to a
-verb the agent can type. MVP or post-MVP?
+Replaces the earlier generic-undo proposal. Explicit verbs are
+clearer to the agent and easier to teach in the system-section
+(one example each). No `seon.repl/forget!` — that name went with
+the generic design.
+
+The reversibility classifier from the old "Forget" section moves
+to a different role: it's used by the targeted-test auto-run + the
+warning predicates to explain what would break if you removed
+something, not as a do-anything `undo`.
+
+### <a id="d19"></a>D19 — `<name>-example` test convention
+
+A function persists as `:seon.fn/*`, but the warnings tile shows
+`:seon.warning/no-test-coverage` until at least one
+`:seon.test/*` targets it. Convention to clear the warning fast:
+
+For a fn `seon.trading/analyze`, the agent writes a test named
+`seon.trading/analyze-example` that exercises the documented happy
+path. The pattern is:
+
+```clojure
+(defn analyze
+  "Compute the trading signal for a ticker."
+  {:malli/schema [:=> [:cat ::analyze-req] ::analyze-resp]}
+  [{::keys [ticker]}]
+  {::signal :hold ::confidence 0.5})
+
+(deftest analyze-example
+  (is (= {:seon.trading/signal :hold
+          :seon.trading/confidence 0.5}
+         (analyze {:seon.trading/ticker "AAPL"}))))
+```
+
+Why `-example`: it's a documented use-case the agent (and future
+agents reading the persistent entities) can look at. It demonstrates
+shape, intent, and at least one passing input. Edge-case tests live
+under other names; `*-example` is the canonical "this is what calling
+this fn looks like."
+
+The warning predicate looks for `:seon.test/target` matches; it
+doesn't care about the name. The convention is for human + LLM
+readability, not enforcement.
+
+### <a id="d20"></a>D20 — Reference-graph attrs
+
+Confirming the schema shape:
+
+```clojure
+;; Function entity gains reference attrs
+::seon.fn/input-spec   :seon.db/ref                          ; → :seon.schema entity
+::seon.fn/output-spec  :seon.db/ref                          ; → :seon.schema entity
+::seon.fn/refs         [:vector :seon.db/ref] {:optional true}  ; other :seon.fn entities this fn calls
+
+;; Test entity already has
+::seon.test/target     :seon.db/ref                          ; → :seon.fn entity
+```
+
+`:seon.fn/refs` is populated at define-time by the analyzer walk
+([[#D6]]): parse `:seon.fn/source` with rewrite-clj, walk the AST,
+collect every qualified symbol that resolves to a `:seon.fn`, emit
+those as refs. Reverse-index via datalog gives "who calls X" for
+free.
+
+Spec dependencies (a `:seon.schema/source` like
+`(schema/register! ::foo [:map [::bar :string]])` references
+`::bar`) are similarly extracted — the analyzer walks the
+registered Malli schema for keyword references to other registered
+schemas. New attr:
+
+```clojure
+::seon.schema/refs  [:vector :seon.db/ref] {:optional true}  ; other :seon.schema entities this schema uses
+```
+
+The reference graph is what makes the targeted-test auto-run
+([[#D15]]) and the spec-violation check ([[#D13]]) cheap: every
+"who is affected by changing X" question is one datalog query
+over the reverse index.
+
+### <a id="d21"></a>D21 — Forgiving parse recovery
+
+The parser surface needs to be helpful when the agent writes
+something partially-broken. Current spec already says
+"continue with the next top-level form" on parse-fail (in §"Parse
+failures"); this decision is about how aggressively we recover.
+
+Proposal:
+
+- rewrite-clj parses the top-level form; if it throws, capture the
+  source up to the next balanced top-level boundary as the failing
+  chunk's `:source`.
+- Recovery boundary detection: scan forward token-by-token tracking
+  paren/bracket/brace depth; when depth returns to 0 AND a newline
+  follows, that's the next boundary.
+- The failing chunk becomes one `:ok? false` eval entry with the
+  parse error as `:error`. Subsequent forms parse normally.
+
+A more ambitious recovery — try to extract sub-forms from a chunk
+that contains both valid and invalid pieces — is out of MVP scope.
+The simple "skip to next boundary" path covers the common case
+(agent wrote a typo in form N; forms N+1, N+2 are fine).
+
+Open question: when the recovery boundary detection itself runs
+out of input (the agent's whole response after the broken form is
+an unclosed paren spanning EOF), the whole tail becomes one
+`:ok? false` entry. Is that the right behavior? I think yes
+(the agent sees one error and knows where to look) but worth
+confirming.
+
+### <a id="d22"></a>D22 — XML wrapper convention for ctx sections
+
+Yes, LLMs parse XML cleanly — clear start/end markers, no
+paren-counting needed. We use XML wrappers for **structural**
+sections in the rendered context where the LLM benefits from
+unambiguous boundaries:
+
+- `<system>…</system>`
+- `<current-namespace name=":seon.trading">…</current-namespace>`
+- `<related-namespaces>…</related-namespaces>`
+- `<warnings>…</warnings>`
+- `<recent-evals>…</recent-evals>`
+
+Inside the section, we **don't** wrap individual entities. Clojure
+source stays as Clojure source — that's what we want the agent
+emitting, and the more it looks like REPL output the more naturally
+it writes the same. The XML is the scaffolding around the Clojure;
+the Clojure is the content.
+
+Exception: the per-eval row in recent-evals uses bash-style `> form`
++ `; # eval-id  Nms` because that's what a real REPL transcript
+looks like. No XML around each row — too noisy.
+
+This is the existing convention in the worked example. D22 just
+makes it explicit so we don't drift.
+
+### <a id="d23"></a>D23 — In-doc link syntax for Obsidian
+
+Your renderer (likely Obsidian) doesn't follow the GitHub-style
+`[D1](#d1)` anchors. I've switched the dashboard to Obsidian
+wiki-link syntax `[[#D1]]` which Obsidian DOES support natively.
+
+Research-agent task: confirm whether the spec author's Obsidian
+config recognizes `[[#heading]]` and `[[#anchor-id]]` formats
+equivalently. Also research whether Obsidian respects explicit
+HTML `<a id="…"></a>` anchors. If yes to both, we're set; if no,
+fall back to GFM-style anchors derived from the heading text and
+verify they resolve.
+
+### <a id="d24"></a>D24 — Topological bootstrap emission
+
+The substrate is compiled CLJS. To seed the agent's DB on first
+boot, we need a `bootstrap.edn` containing every substrate
+`:seon.ns` / `:seon.schema` / `:seon.fn` / `:seon.test` /
+`:seon.ctx` entity in correct dependency order. The "topological"
+problem: an entity can't reference (via `:seon.fn/refs` or a
+spec-key reference) something that hasn't been transacted yet.
+
+Solve in two passes:
+
+1. **Walk the substrate source.** For each `.cljs` file we ship,
+   parse with rewrite-clj, extract every top-level `(defn)` /
+   `(schema/register!)` / `(deftest)` / `(ns …)` form. Build a
+   provisional entity for each, with a placeholder `:refs` list.
+2. **Resolve references and toposort.** Walk each entity's
+   parsed source AST; turn each name-reference into a ref to the
+   provisional entity. Toposort by depends-on. Output the ordered
+   vector to `resources/seon/bootstrap.edn`.
+
+If we do (1) and (2) right, indexing future agent work is the
+same code — the substrate is just data the analyzer happens to
+see first. No special "compile vs runtime" path.
+
+Solve this BEFORE worrying about D8 (older-DB-on-newer-runtime).
+Once we have the analyzer walk producing a clean ordered vector,
+upgrades follow naturally (diff old vector against new; transact
+the additions).
+
+### <a id="d25"></a>D25 — `:touches` semantics (re-examine vs history)
+
+When [[#D2]] (`:keep-history? true`) is on, every transact has a
+tx-id and the set of datoms it wrote. Datahike's history API can
+answer "what changed in tx T" via `tx-range` + filtering. So what
+is `:seon.eval/touches` doing that the tx data wouldn't?
+
+Hypothesis: `:touches` was a redundant denormalization invented
+when we weren't sure history was on. With history on, the agent
+queries:
+
+```clojure
+(d/q '[:find ?e ?a ?v
+       :in $ ?tx
+       :where [?e ?a ?v ?tx true]]   ; assertions in tx
+     (d/history db) eval-tx-id)
+```
+
+…and gets the same answer. If this is right, `:touches` should be
+dropped: the eval entry stores `:seon.eval/tx-id :long` instead,
+and "what did this eval touch" is one history query.
+
+Counter-argument: explicit ref-vector is cheap to query (no
+history surface needed). For agents reading scrollback, "this
+eval produced these entities" is a direct attribute, not a join.
+
+Research task launched to verify the datahike-cljs history API
+shape and confirm one approach. Decision pending the research
+result.
+
+### <a id="d26"></a>D26 — Verify the whole spec against datahike
+
+Many of the open decisions hinge on datahike's actual capabilities:
+
+- Does `:keep-history? true` work the same in datahike-cljs as the
+  CLJ side? ([[#D2]])
+- Are lookup-refs intra-tx resolved when the referenced entity is
+  added earlier in the same tx vector? (Worked-example claim;
+  verified once against `reference-code/datahike/test/lookup_refs_test.cljc`
+  but worth re-verifying for the bootstrap pattern.)
+- What's the history API for "datoms asserted in tx T"? ([[#D25]])
+- Does datahike-cljs support `:db.type/symbol`? (Required for
+  `:seon.ctx/fn`.)
+- What's the actual schema-evolution constraint surface under
+  `:schema-flexibility :write`? ([[#D3]])
+- Can we tx-meta the eval entry with the agent-id, or is that
+  not a thing in datahike?
+
+Research task launched: read `reference-code/datahike/` end-to-end
+with this spec in hand, confirm or refute each claim, and surface
+anything else that affects MVP design.
