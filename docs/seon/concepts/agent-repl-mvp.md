@@ -102,8 +102,8 @@ Built on the `:seon.fn/*` / `:seon.schema/*` / `:seon.test/*` taxonomy.
 ::seon.test/last-failed-at  :inst {:optional true}          ; most recent failed run
 ::seon.test/last-failure    :string {:optional true}        ; ex-message of most recent failure
 
-;; Agent — no new attrs. "Current ns" is derived from the eval log
-;; (see :seon.eval/ns below) rather than stored on the entity.
+;; Agent (extends the existing :seon.agent/* family with one new attr)
+::seon.agent/current-ns  :keyword {:optional true}           ; agent's current ns; upserted on every (ns …) form. Falls back to home-ns.
 
 ;; Namespaces (one entity per agent-defined or substrate ns)
 ::seon.ns/name    [:keyword {:seon.db/identity true}]        ; :seon.trading.signals
@@ -178,13 +178,21 @@ absent).
 `:seon.eval/ns` is the namespace the agent ended in after this form
 ran — i.e. the live `!current-ns` value seon.eval/eval-batch! writes
 after each form. A `(ns other)` form's eval entry carries `:ns :other`
-even though the form itself was parsed in the previous ns. Consequences:
+even though the form itself was parsed in the previous ns.
 
-- **Current ns is derivable** as `:seon.eval/ns` of the most recent
-  eval for the agent (or `seon.agent/home-ns` when no evals yet). No
-  stored agent attr.
-- **Ns switches are derivable** by comparing `:ns` across consecutive
-  evals. No `:switched-ns-to` attr; the renderer asks the query.
+The agent's **current namespace** also lives on the agent entity as
+`:seon.agent/current-ns :keyword {:optional true}`, upserted on
+every form that changes the ns. Two writes (eval-log + agent entity)
+sound redundant, but the agent-entity attr is the one renderers
+pull on every render — turning that into a "sort eval log, take
+most recent" query at render time would be a measurable cost for no
+gain. The eval-log `:ns` is per-form history; the agent attr is the
+current value. Both load-bearing, both cheap. Falls back to
+`seon.agent/home-ns` when absent.
+
+Ns-switch events ARE derivable from consecutive eval entries
+(`:ns` differs from prior eval's `:ns`); no `:switched-ns-to`
+attr needed.
 
 The "kind" of an eval is read from which optional attrs are present.
 The renderer never branches on a discriminator field; it asks
@@ -324,7 +332,9 @@ For each entry classified as a form:
 3. **Record `:seon.eval/ns`** as the ending ns returned by
    `cljs.js/eval-str`'s `:ns` field — i.e. where the form left the
    agent. Same value the existing pipeline already writes back into
-   `!current-ns`.
+   `!current-ns`. If `:ns` differs from the agent entity's
+   `:seon.agent/current-ns`, upsert the new value onto the entity
+   in the same tx as the eval entry.
 4. **Record `:seon.eval/duration-ms`** = `(- (js/Date.now) start)`.
    Covers the form's eval AND any auto-await — i.e. what the agent
    actually waited for. Cheap (two `Date.now()` calls); always on.
@@ -493,27 +503,21 @@ them by transacting different attrs on the same entity (lookup by
 {:seon.ctx/name :recent-evals  :seon.ctx/priority 50
  :seon.ctx/fn 'seon.render.default/recent-evals-section}
 
+{:seon.ctx/name :prompt  :seon.ctx/priority 99
+ :seon.ctx/fn 'seon.render.default/prompt-section}
+
 ```
 
 ```clojure
 ;; --- Section functions (baseline, in seon.render.default) ---
 ;; Each takes :seon.render/system-input and returns a string.
-;; Empty string = section omitted. `current-ns` is derived from the
-;; most recent eval's :seon.eval/ns (the ending ns), falling back to
-;; the agent's home ns when no evals exist yet.
+;; Empty string = section omitted. `current-ns` is read directly
+;; off the agent entity; eval-batch! upserts it on every (ns …) form.
 
 (defn- agent-current-ns [db id]
-  (let [recent (db/query
-                 {:seon.db/db db
-                  :seon.db/query '[:find [?ns ...]
-                                   :in $ ?aid
-                                   :where
-                                   [?e :seon.eval/agent ?aid]
-                                   [?e :seon.eval/ns ?ns]
-                                   [?e :seon.eval/at ?at]]
-                  :seon.db/args [[:seon.agent/id id]]})]
-    (or (last (sort recent))      ; placeholder: real impl picks by max :at / id
-        (seon.agent/home-ns id))))
+  (or (-> (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id id]})
+          :seon.agent/current-ns)
+      (seon.agent/home-ns id)))
 
 (defn- host-timezone
   "Best-effort IANA timezone of the pod's host. POD timezone, not the
@@ -637,10 +641,21 @@ them by transacting different attrs on the same entity (lookup by
            "\n</recent-evals>")
       "")))
 
+(defn prompt-section
+  "Renders the final piece of context as a REPL prompt the agent is
+   typing into. The current ns appears exactly as a real Clojure REPL
+   shows it, so the LLM is primed to continue the conversation as
+   the next form in that ns. Always present — never empty."
+  [{:seon.db/keys [db] :seon.agent/keys [id]}]
+  (let [ent  (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id id]})
+        ns   (or (:seon.agent/current-ns ent) (seon.agent/home-ns id))
+        turn (or (:seon.agent/turn-count ent) 0)]
+    (str ns "=>  ; turn " turn)))
+
 ```
 
-That's the whole default surface: 5 section entities + 5 section
-functions, ~80 lines of straightforward Clojure. Adding or modifying
+That's the whole default surface: 6 section entities + 6 section
+functions, ~100 lines of straightforward Clojure. Adding or modifying
 any of it = writing one function. Nothing is hidden; nothing is
 special-cased.
 
@@ -749,12 +764,14 @@ section :recent-evals  → "<recent-evals>
                           > analyze
                           #object[seon$trading$analyze]     ; # M2q7w0vB9x  0ms
                           </recent-evals>"
+section :prompt        → ":seon.trading=>  ; turn 7"
 
 composer drops blank strings and joins the rest with "\n\n":
   <system>…</system>
   <current-namespace>…</current-namespace>
   <warnings>…</warnings>
   <recent-evals>…</recent-evals>
+  :seon.trading=>  ; turn 7
 
 ```
 
@@ -1150,8 +1167,11 @@ Mechanisms supporting this:
   forms-and-comments"). Trailing comments without a following form
   become a thinking-only eval entry. Bare symbols are forms.
 - `seon.repl/forget!` + `seon.schema/unregister!`.
-- `seon.render.default/*` — the five default section functions plus
-  the `truncate-edn` helper (`pretty-ai` already exists).
+- `seon.render.default/*` — six default section functions
+  (system, related-ns, current-ns, warnings, recent-evals, prompt)
+  plus the `truncate-edn` helper (`pretty-ai` already exists). The
+  prompt section renders the trailing `:current.ns=> ; turn N` line
+  so the agent's view ends like a real Clojure REPL prompt.
 - `seon.render/explain-section`, `reset-defaults!`.
 - Per-eval timing + Tufte hook per "Self-instrumentation"; optional
   `perf-section` formats Tufte stats on demand.
