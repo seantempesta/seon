@@ -1358,3 +1358,67 @@ A new agent session can:
   to CLJS. Follows MVP.
 - **Multi-agent**: when does ownership matter? `:seon.fn/owner-agent`
   attribute is the next addition; MVP single-agent.
+
+## Surfaced for review
+
+Plausible simplifications I noticed but did not apply because the
+verification wasn't conclusive. Each is an architectural question
+for the spec author, not a defect.
+
+1. **Section entities vs `:seon.fn` entities.** `:seon.ctx/*` carries
+   three attrs: `:name` (identity), `:priority` (sort key), `:fn`
+   (symbol). A section is conceptually "a render fn with a sort
+   key" — which could be expressed as a `:seon.fn` entity carrying
+   extra section-only attrs (`:seon.fn/section-name`,
+   `:seon.fn/section-priority`). Merging would drop the `:seon.ctx`
+   namespace entirely. Counter: this overloads `:seon.fn` with
+   render-scheduling concerns and complicates queries that just
+   want "all functions". Surfacing for review — collapse-or-keep is
+   an architectural call.
+
+2. **`:seon.eval/touches` vs datahike history.** The spec already
+   requires `:keep-history? true` for the agent DB (so the eval log
+   can answer "what changed"). With history on, every transact has
+   a tx-id and the set of datoms it wrote — which IS what `:touches`
+   encodes. Could replace `:touches` with `:seon.eval/tx-id` and
+   derive the touched entities via datahike's history API. Did not
+   apply because the history API surface for "datoms in this tx" on
+   datahike-cljs isn't verified against
+   `reference-code/datahike/`, and the explicit ref-set is cheap.
+
+3. **`:seon.fn/sym` naming vs the existing `:seon.fn/qualified-name`
+   (CLJ side).** The spec already calls this out as open question
+   Q1. Verified: `src/seon/graph/context.clj` uses
+   `:seon.fn/qualified-name` and `:seon.fn/namespace` across many
+   queries; reconciling means a renaming sweep on the CLJ side OR
+   accepting parallel namings. Not a simplification I can apply
+   alone; flagging.
+
+4. **`:seon.eval/turn` vs `:seon.eval/at`.** Considered whether one
+   is derivable from the other. They aren't — `:turn` is the
+   per-agent counter that groups all evals from one batch, `:at` is
+   wall-clock. Different queries. Keep both.
+
+5. **`:seon.eval/at` vs the time-prefixed eval-id.** The id is
+   "10-char base62, time-prefixed → sorts by creation". Ordering
+   queries can sort by id and skip `:at` entirely. `:at` survives as
+   a human-readable timestamp for display. Could drop it and format
+   the time-prefix on render. Did not apply because the time-prefix
+   resolution (mod-62^4 ms; see `seon.agent/new-id!` at
+   `src/seon/agent.cljs:75`) loses information beyond ~4 days of
+   range, so reconstructing a real `js/Date` from the prefix isn't
+   round-trip-safe. Keep `:at`.
+
+6. **The eval-id encoding's overlap with `:at`.** Related to #5 —
+   the time-prefix is *almost* the wall-clock, but with a finite
+   alphabet width it wraps. If we widened the prefix or stored
+   epoch-ms directly, `:at` would be redundant. Architectural call.
+
+7. **`:seon.eval/result-edn` vs render-time formatting.** The spec
+   notes (correctly) that `truncate-edn` is applied at render time.
+   If result-edn is always rendered through `truncate-edn`, storing
+   the FULL pr-str is wasteful for huge values — a pre-truncated
+   version could be stored and a `#_:full` opt-in re-evaluates the
+   source to get the live value. Did not apply because round-tripping
+   "the live value at the time of eval" through source re-evaluation
+   isn't generally safe (side-effects).
