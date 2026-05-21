@@ -306,10 +306,12 @@ flag.
 **No `:touched-tx` attribute.** Datahike attaches `:db/txInstant` and a
 tx-id to every datom — provided the conn was opened with
 `:keep-history? true`. "What changed since tx T" comes from datahike's
-history / tx-range API. The default V0.5 conn uses
-`:keep-history? false`; turning history on for the agent DB is a
-prerequisite for this part of the model, and likely a tradeoff
-worth making (storage cost vs render power).
+history API (`d/history` + `d/q` with the 5-tuple datom pattern). No
+`tx-range` function exists — confirmed in
+`reference-code/datahike/doc/datomic_differences.md:45`. The default
+V0.5 conn uses `:keep-history? false`; turning history on for the
+agent DB is a prerequisite for this part of the model, and likely a
+tradeoff worth making (storage cost vs render power).
 
 **Entity kind is implicit in attribute presence.** No `:seon.X/kind`
 discriminator. An entity is "a function" by carrying `:seon.fn/sym`; it
@@ -1525,12 +1527,45 @@ attr reference in this doc plus a sweep on the CLJ side if you pick
 
 ### <a id="d2"></a>D2 — Datahike `:keep-history? true`
 
-`:db/txInstant` and the history/tx-range API depend on it. The V0.5
-agent conn opens with `:keep-history? false` (`seon.client/
-open-agent-conn!`). Turning history on is the prerequisite for "what
-changed since tx T" queries and (depending on D10) for deriving
-`:touches` from tx-data. Warrants an ADR. Storage cost vs render
-power is the tradeoff.
+`:db/txInstant` and the history API depend on it. The V0.5 agent conn
+opens with `:keep-history? false` (`seon.client/open-agent-conn!`).
+Turning history on is the prerequisite for "what changed since tx T"
+queries and (depending on D10) for deriving `:touches` from tx-data.
+Warrants an ADR. Storage cost vs render power is the tradeoff.
+
+**Verified against `reference-code/datahike/` (2026-05-21):**
+
+- `:keep-history?` is a valid config flag on `d/create-database` /
+  `d/connect`, declared in `src/datahike/config.cljc:31` (`s/def
+  ::keep-history? boolean?`) and listed in the `:datahike/config`
+  spec at L48-60. Default value: `*default-keep-history?* true`
+  (`config.cljc:21`). Code is `.cljc` so identical on CLJ + CLJS.
+- When `keep-history?` is on, `transact-tx-data`
+  (`src/datahike/db/transaction.cljc:865-881`) auto-merges
+  `{:db/txInstant (get-date)}` into `:tx-meta` (L874-875), then
+  prepends `meta-entities` to the transactable list ONLY when
+  `(dbi/-keep-history? db-before)` is true (L878-880). Each tx-meta
+  k/v becomes a `[:db/add tid attr value tid]` datom via
+  `flush-tx-meta` (L605-624), so `:db/txInstant` lands as a datom
+  with the tx-id as entity.
+- `:db/txInstant` is `:db.type/instant` (`src/datahike/schema.cljc:118-121`),
+  i.e. `java.util.Date` on JVM / `js/Date` on CLJS.
+- **No tx-range API exists.** Confirmed by
+  `doc/datomic_differences.md:45` ("These functions of Datomic are
+  not yet implemented but considered candidates for future
+  development: tx-range, index-pull, with-db"). The actual API is
+  `(d/history db)` which returns a `HistoricalDB`
+  (`src/datahike/api/impl.cljc:145-148`), queryable via `d/q` with
+  the 5-tuple datom pattern `[?e ?a ?v ?tx]` joined against
+  `[?tx :db/txInstant ?t]`. See `doc/time_variance.md:124-165` for
+  the documented pattern.
+- Per `doc/cljs-support.md:129` history queries "Work but may be
+  slower due to async index traversal" on the CLJS side. No
+  functional difference, just perf.
+
+The spec should not say "history / tx-range API" — drop "tx-range".
+The correct phrasing is "history API (`d/history` + `d/as-of` +
+`d/since`)".
 
 ### <a id="d3"></a>D3 — Datahike `:schema-flexibility :write`
 
