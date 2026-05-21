@@ -102,11 +102,18 @@ Built on the `:seon.fn/*` / `:seon.schema/*` / `:seon.test/*` taxonomy.
 ::seon.test/last-failed-at  :inst {:optional true}          ; most recent failed run
 ::seon.test/last-failure    :string {:optional true}        ; ex-message of most recent failure
 
-;; Namespace requires (only ones we need to replay)
-::seon.require/in-ns   :keyword
-::seon.require/spec    :string                               ; "[seon.schema :as schema]"
+;; Namespaces (one entity per agent-defined or substrate ns)
+::seon.ns/name    [:keyword {:seon.db/identity true}]        ; :seon.trading.signals
+::seon.ns/source  :string                                    ; "(ns seon.trading.signals (:require [seon.db :as db]))"
 
 ```
+
+A namespace is one entity carrying the full `(ns …)` form as source —
+that includes the `:require` clause and anything else inside the ns
+declaration. Replaying the entity = evaluating the source = the
+namespace and its dependencies become available in one step. There
+is no separate `:seon.require/*` entity; per-clause storage would
+duplicate what `(ns …)` already structures.
 
 **The database IS the system after first boot.** The seon substrate is
 compiled CLJS that knows how to interpret what's in the DB and how to
@@ -119,13 +126,17 @@ brings the source.
 **An entity is in the DB iff it passed its gates.** A function that
 fails to compile is never persisted in the first place; nothing to
 quarantine. A function that fails on replay surfaces the failure
-through the eval log (`:seon.eval/exception` on that replay's eval
-entry) — and is rendered as a warning the next turn. No persistent
-quarantine flag.
+through the eval log (`:ok? false` on that replay's eval entry) —
+and is rendered as a warning the next turn. No persistent quarantine
+flag.
 
 **No `:touched-tx` attribute.** Datahike attaches `:db/txInstant` and a
-tx-id to every datom. "What changed since tx T" comes from datahike's
-history / tx-range API.
+tx-id to every datom — provided the conn was opened with
+`:keep-history? true`. "What changed since tx T" comes from datahike's
+history / tx-range API. The default V0.5 conn uses
+`:keep-history? false`; turning history on for the agent DB is a
+prerequisite for this part of the model, and likely a tradeoff
+worth making (storage cost vs render power).
 
 **Entity kind is implicit in attribute presence.** No `:seon.X/kind`
 discriminator. An entity is "a function" by carrying `:seon.fn/sym`; it
@@ -138,50 +149,59 @@ absent).
 ### Eval log — "the REPL scrollback"
 
 ```clojure
-::seon.eval/id              [:string {:seon.db/identity true}]   ; 10-char base62, globally unique
-::seon.eval/session-id      :string                               ; tags evals from one pod boot
-::seon.eval/seq             :long                                 ; monotonic within session
-::seon.eval/at              :inst
-::seon.eval/ns              :keyword                              ; where it was evaluated
-::seon.eval/source          :string                               ; the form text
-::seon.eval/result-edn      :string {:optional true}             ; pr-str of result, truncated
-::seon.eval/read-error      :string {:optional true}             ; set if source failed to parse
-::seon.eval/exception       :string {:optional true}             ; set if eval threw
-::seon.eval/produced-fn     :seon.db/ref   {:optional true}      ; → :seon.fn entity, when a defn lands
-::seon.eval/produced-schema :seon.db/ref   {:optional true}      ; → :seon.schema entity
-::seon.eval/produced-test   :seon.db/ref   {:optional true}      ; → :seon.test entity
-::seon.eval/switched-ns-to  :keyword       {:optional true}      ; (in-ns 'foo) → :foo
-::seon.eval/forgot          :seon.db/ref   {:optional true}      ; → entity that was retracted
-::seon.eval/reversible?     :boolean                              ; can effects be undone
+;; Identity + context
+::seon.eval/id              [:string {:seon.db/identity true}]   ; 10-char base62, time-prefixed → sorts by creation
+::seon.eval/agent           :seon.db/ref                          ; → :seon.agent entity (owning agent)
+::seon.eval/turn            :long                                 ; the agent's turn-counter at eval time
+::seon.eval/at              :inst                                 ; wall-clock at eval start
+::seon.eval/ns              :keyword                              ; namespace the form ran in
+
+;; Form text + result
+::seon.eval/narration       :string                               ; leading ;; comments captured by parse-forms
+::seon.eval/source          :string                               ; the form text (or the unparseable chunk)
+::seon.eval/ok?             :boolean                              ; reader + eval both succeeded
+::seon.eval/result-edn      :string {:optional true}             ; pr-str of result on success (truncated)
+::seon.eval/error           :string {:optional true}             ; pr-str of error payload on failure
+
+;; Effects on persistent state
+::seon.eval/touches         [:seon.db/ref {:db/cardinality :db.cardinality/many
+                                            :optional true}]      ; entities created / updated by this form
+::seon.eval/forgot          [:seon.db/ref {:db/cardinality :db.cardinality/many
+                                            :optional true}]      ; entities retracted by this form
+::seon.eval/switched-ns-to  :keyword       {:optional true}      ; (in-ns 'foo) / (ns foo) → :foo
 
 ```
 
-The "kind" of an eval is read from which `:seon.eval/produced-*`,
-`:switched-ns-to`, `:forgot`, `:read-error`, or `:exception` attributes
-are present:
+The "kind" of an eval is read from which optional attrs are present.
+The renderer never branches on a discriminator field; it asks
+"is `:ok?` false?", "what does `:touches` resolve to?", "is
+`:switched-ns-to` set?". Each `:touches` ref is itself a persistent
+entity carrying `:seon.fn/sym` or `:seon.schema/key` or `:seon.test/sym`
+— that's how the renderer learns "this eval produced a function".
 
-- `:produced-fn` present → the eval defined a function
-- `:produced-schema` present → registered a schema
-- `:produced-test` present → defined a test
-- `:switched-ns-to` present → an `(in-ns …)` call
-- `:forgot` present → a `(forget! …)` call
-- `:read-error` present → source did not parse
-- `:exception` present → eval threw
+- `:ok?` false → look at `:error`. The kind of failure (parse vs runtime
+  vs timeout) lives in the error payload, not as a separate attr.
+- `:touches` populated → the eval created or updated persistent state.
+  One ref per entity touched; cardinality-many because `(defn` +
+  inline `(deftest` is a single form that touches both.
+- `:forgot` populated → the eval retracted entities.
+- `:switched-ns-to` set → an `(in-ns …)` / `(ns …)` call. Used by
+  the next form's `:seon.eval/ns` and by the renderer to anchor the
+  agent's "current ns" indicator.
 - None of the above → the eval ran successfully but produced no
-  persistent entity (an expression like `(+ 1 2)` or `(d/q …)`)
-
-Multiple may be present on one eval (e.g. an `(in-ns …)` that itself
-threw because the target ns doesn't exist would carry both
-`:switched-ns-to` and `:exception`). Renderers branch on which attrs
-are set, not on a discriminator field.
+  persistent change (an expression like `(+ 1 2)` or `(d/q …)`).
 
 ### What's NOT in the model
 
-- No `:seon.eval/touched-entities` ref vector. Renderer recomputes from
-  current entity tables; ref vector is redundant.
-- No `:seon.eval/grades` storage. Grades are computed-on-render; not stored.
-- No separate `:seon.session` entity. Session-id is a tag string; sessions
-  are implicit.
+- No separate `:read-error` / `:exception` attrs. The kind of failure
+  lives in the `:seon.eval/error` payload, not as a top-level attr.
+- No `:reversible?` boolean. Reversibility is derived per-render from
+  which attrs the eval carries (see the table in "Forget" below).
+- No `:session-id` and no monotonic `:seq`. The eval-id is already
+  time-prefixed base62 and unique; ordering is by `:at` (or by id).
+  "This session" is the suffix of evals after the most recent
+  resume-marker (see "Resume phase").
+- No `:seon.eval/grades` storage. Grades are computed on render.
 - No tx-metadata extension. Plain datahike tx info only.
 
 ## The eval batch
@@ -205,21 +225,24 @@ switches the namespace for subsequent forms.
 
 For each form:
 
-1. **Split the source into the next top-level form** using a
-   paren-counting scanner. The scanner advances on balanced parens; an
-   imbalance at end-of-input is the read error for the final form,
-   nothing else.
-2. **Try to parse that chunk with Edamame.**
-   - On parse success: continue to eval.
-   - On parse failure: write a `:seon.eval` entry carrying
-     `:read-error` (the parse error message) and `:source` (the chunk
-     text as-is). Skip eval. Continue with the next chunk.
-3. **Capture `:seon.eval/ns`** at the moment of evaluation.
-4. **Eval** in whatever ns the agent is currently in.
-5. **Capture result-edn (or exception).** Classification is implicit:
-   `:produced-fn` / `:produced-schema` / `:produced-test` / `:switched-ns-to`
-   / `:forgot` / `:exception` attrs are set as applicable.
-6. **Independent transact per form** — one `:seon.eval` datom + any
+1. **Split the source into the next top-level form.** Use Edamame's
+   `source-reader` + `parse-next+string` in a try-loop — each call
+   returns `[form source-string]` for the next form, or throws on a
+   read error. On a read error, scan ahead to the next balanced
+   top-level expression boundary and resume; record the unreadable
+   chunk as a failed eval (`:ok? false`) and continue.
+2. **Capture `:seon.eval/ns`** at the moment of evaluation — read from
+   the agent's `!current-ns` atom.
+3. **Eval** the parsed form in that ns. On success, record
+   `:ok? true` + `:result-edn`. On any failure (compile, runtime,
+   timeout), record `:ok? false` + `:error` (a pr-str'd map carrying
+   the failure kind: `:read | :compile | :runtime | :timeout`).
+4. **Classify effects implicitly.** If the form defined a function,
+   add the new `:seon.fn` entity to `:touches`. If it registered a
+   schema, add the `:seon.schema` entity. If it called
+   `(forget! 'x)`, add the now-retracted entity to `:forgot`. If it
+   changed namespace, set `:switched-ns-to`.
+5. **Independent transact per form** — one `:seon.eval` datom + any
    persistent-entity datoms in its own tx. A failure on form 5 doesn't
    roll back forms 1-4.
 
@@ -228,7 +251,7 @@ After all forms are processed, render the full context.
 **Partial-success principle.** If the agent sends 10 forms and 9
 succeed, the database keeps 9 successes. Read failures and eval
 failures both land in the eval log as `:seon.eval` entries with
-`:read-error` or `:exception` set respectively — same partial-success
+`:ok? false` and a structured `:error` payload — same partial-success
 shape, no special batch-level handling. Dependents of a failed form
 (later forms that referenced what it would have defined) get their own
 runtime errors naturally and appear in the log as such. No rollback
@@ -386,16 +409,17 @@ them by transacting different attrs on the same entity (lookup by
     :seon.system/restore-recipe "(seon.render/reset-defaults!)"}])
 
 (defn current-ns-section
-  "Every persistent entity owned by the current ns: fns, schemas, tests,
-   requires. Schema/test ns is derived from the namespaced key or sym."
+  "Every persistent entity owned by the current ns: the ns entity itself
+   (which carries the (ns …) form), then its fns, schemas, tests.
+   Schema/test ownership is derived from the namespaced key or sym."
   [{::keys [db ns]}]
   (let [ns-prefix (name ns)
+        ns-ent   (d/q '[:find (pull ?e [*]) .
+                        :in $ ?ns
+                        :where [?e :seon.ns/name ?ns]] db ns)
         fns      (d/q '[:find [(pull ?e [*]) ...]
                         :in $ ?ns
                         :where [?e :seon.fn/ns ?ns]] db ns)
-        requires (d/q '[:find [(pull ?e [*]) ...]
-                        :in $ ?ns
-                        :where [?e :seon.require/in-ns ?ns]] db ns)
         schemas  (->> (d/q '[:find [(pull ?e [*]) ...]
                              :where [?e :seon.schema/key _]] db)
                       (filter #(= ns-prefix (namespace (:seon.schema/key %)))))
@@ -405,7 +429,7 @@ them by transacting different attrs on the same entity (lookup by
                                      slash (.indexOf s "/")]
                                  (and (pos? slash)
                                       (= ns-prefix (subs s 0 slash)))))) ]
-    (vec (concat requires schemas fns tests))))
+    (vec (concat (when ns-ent [ns-ent]) schemas fns tests))))
 
 (defn related-ns-section
   "Entities from namespaces referenced by the current ns. Each entity
@@ -430,15 +454,16 @@ them by transacting different attrs on the same entity (lookup by
          (sort-by :seon.warning/severity))))
 
 (defn recent-evals-section
-  "The last N evals from this session (default N=20), oldest-first so it
-   reads top-to-bottom like a real REPL transcript."
-  [{::keys [db session-id]
-    :or {session-id (current-session-id)}}]
+  "The last N evals (default N=20), oldest-first so it reads
+   top-to-bottom like a real REPL transcript. The eval-id is
+   time-prefixed base62 — sorting by id is identical to sorting by
+   creation order, and cheaper than sorting by `:at`."
+  [{::keys [db agent-id]}]
   (->> (d/q '[:find [(pull ?e [*]) ...]
-              :in $ ?sid
-              :where [?e :seon.eval/session-id ?sid]]
-            db session-id)
-       (sort-by :seon.eval/seq)
+              :in $ ?aid
+              :where [?e :seon.eval/agent ?aid]]
+            db [:seon.agent/id agent-id])
+       (sort-by :seon.eval/id)
        (take-last 20)))
 
 ```
@@ -483,8 +508,7 @@ is hidden; nothing is special-cased.
   [:map
    [::db          :any]
    [::agent-id    :string]
-   [::ns          :keyword]
-   [::session-id  :string]]
+   [::ns          :keyword]]
 
 ;; A section entity. Identified by presence of name + priority + fn.
 ::seon.ctx/entity
@@ -527,19 +551,19 @@ Database state (illustrative):
 {:seon.ctx/name :recent-evals  :seon.ctx/priority 50 :seon.ctx/fn 'seon.render.default/recent-evals-section}
 
 ;; Eval log (last 2 from this session)
-{:seon.eval/id "K9p2x4nB7q" :seon.eval/seq 11
+{:seon.eval/id "K9p2x4nB7q" :seon.eval/turn 7 :seon.eval/ok? true
  :seon.eval/source "(schema/register! ::ticker :string)"
  :seon.eval/result-edn "true"
- :seon.eval/produced-schema [:seon.schema/key :seon.trading/ticker]}
+ :seon.eval/touches [[:seon.schema/key :seon.trading/ticker]]}
 
-{:seon.eval/id "L4m9p1xA3v" :seon.eval/seq 12
+{:seon.eval/id "L4m9p1xA3v" :seon.eval/turn 7 :seon.eval/ok? true
  :seon.eval/source "(defn analyze ...)"
  :seon.eval/result-edn "#'seon.trading/analyze"
- :seon.eval/produced-fn [:seon.fn/sym "seon.trading/analyze"]}
+ :seon.eval/touches [[:seon.fn/sym "seon.trading/analyze"]]}
 
 ```
 
-Render context: `{::db <db> ::agent-id "alpha" ::ns :seon.trading ::session-id "sess-abc"}`.
+Render context: `{::db <db> ::agent-id "alpha" ::ns :seon.trading}`.
 
 Render walk:
 
@@ -579,7 +603,7 @@ section :warnings     (warnings-section ctx)
                       → render-ai on section → "<warnings>…</warnings>"
 
 section :recent-evals (recent-evals-section ctx)
-                      → [eval-K9p2, eval-L4m9]   ; sorted by :seq
+                      → [eval-K9p2, eval-L4m9]   ; sorted by :seon.eval/id
                       → render-ai on each eval entity → "> (form)\nresult # eval-id"
                       → render-ai on section → "<recent-evals>…</recent-evals>"
 
@@ -765,22 +789,23 @@ Forgetting a default brought in by bootstrap is allowed — the next
 `(seon.render/reset-defaults!)` brings it back. There is no
 forget-refusal.
 
-**Reversibility**. Each `:seon.eval` entry carries
-`:seon.eval/reversible?` — true if the form's effects can be cleanly
-undone, false otherwise. Reversibility is decided by which other attrs
-are set on the eval:
+**Reversibility is derived, not stored.** A small classifier runs at
+render time over each eval entry and decides reversibility from the
+attrs already present:
 
 | Eval shape | Reversible? | Mechanism |
 |---|---|---|
-| Carries `:produced-fn` / `:produced-schema` / `:produced-test` | Yes | retract the produced entity + ns-unmap (or unregister) |
-| Carries only `:switched-ns-to` | Yes | just an ns pointer change |
-| Carries `:forgot` | Partial | the entity can be re-defined by re-evaluating its source |
-| Mutates a Clojure atom (`(swap! …)`, `(reset! …)`) | No | state already mutated; no recorded "before" |
-| Calls a WIT capability (file write, http call) | No | host already acted |
-| Otherwise plain expression (`(+ 1 2)`, `(d/q …)`) | Yes | no side effects to undo |
+| `:touches` populated, no atom/capability calls in `:source` | Yes | retract each touched entity + ns-unmap (or unregister) |
+| Only `:switched-ns-to` set | Yes | just an ns pointer change |
+| `:forgot` populated | Partial | the entity can be re-defined by re-evaluating its source |
+| `:source` calls `swap!`/`reset!` or a WIT capability | No | state already mutated; no recorded "before" |
+| Plain expression — no `:touches`, no `:forgot`, no mutating call | Yes | no side effects to undo |
 
-The agent sees `:reversible?` on every recent-evals entry so they
-always know which steps can be cleanly walked back.
+The renderer surfaces "↶ reversible" / "✘ irreversible" alongside each
+recent-evals entry so the agent always knows which steps can be cleanly
+walked back. Classifier lives next to the renderer (`seon.render.default`),
+not in the eval log — it can be replaced by registering a more specific
+classifier without a schema change.
 
 ## Boot sequence
 
@@ -807,7 +832,8 @@ compiled from.
 
 ```clojure
 ;; resources/seon/bootstrap.edn (shape; ordered for single-transact)
-[{:seon.require/in-ns :seon.render.default :seon.require/spec "[seon.schema :as schema]"}
+[{:seon.ns/name   :seon.render.default
+  :seon.ns/source "(ns seon.render.default (:require [seon.schema :as schema] [seon.db :as db]))"}
  ...
  {:seon.schema/key :seon.render/ai  :seon.schema/source "(schema/register! ::ai :string)"}
  ...
@@ -843,22 +869,31 @@ makes the substrate "real" as vars; on a persistent DB this restores
 the agent's accumulated work.
 
 1. Compiled CLJS substrate is loaded.
-2. Query all `:seon.fn` / `:seon.schema` / `:seon.test` /
-   `:seon.require` entities from the DB.
+2. Query all `:seon.ns` / `:seon.schema` / `:seon.fn` / `:seon.test`
+   entities from the DB.
 3. Build dep DAG by analyzing `:source` for references.
 4. Topo sort:
-   - `:seon.require` first (lexical within tier)
+   - `:seon.ns` first (each carries its own `(ns foo (:require [...]))`
+     source — re-evaluating it re-establishes the namespace + requires
+     in one step)
    - `:seon.schema` next (topological by schema-key references)
    - `:seon.fn` next (topological by var references)
    - `:seon.test` last (after their target fns)
-5. For each entity, `(in-ns …)` then eval `:source`. Log each as a
-   `:seon.eval` entry in a fresh session log, with the appropriate
-   `:produced-*` ref pointing at the entity that was recreated.
+5. For each entity, eval its `:source` in the entity's home ns. Log
+   each as a `:seon.eval` entry, with `:touches` pointing at the
+   entity that was recreated.
 6. If an eval throws during replay, its eval-log entry carries
-   `:exception` and references the failing entity. The renderer
-   surfaces it as a warning ("X failed to replay this session — fix or
-   forget") with the source available for inspection. The entity stays
-   in the DB unchanged; nothing is retracted automatically.
+   `:ok? false` and references the failing entity in `:touches` (so
+   the source-of-the-attempt is reachable). The renderer surfaces it
+   as a warning ("X failed to replay this session — fix or forget")
+   with the source available for inspection. The entity stays in the
+   DB unchanged; nothing is retracted automatically.
+
+The first eval transacted by the resume phase carries an
+`:seon.eval/resume-marker? true` attr (cheap signal, default-false so
+absent on every other entry). "This session's evals" =
+"entries since the most recent resume marker." That's the only
+"session" demarcation the system needs.
 
 Eval log itself is not replayed. Scratch is scratch.
 
@@ -887,8 +922,8 @@ Mechanisms supporting this:
 
 ### In
 
-- The database attributes defined above (`:seon.fn/*`, `:seon.schema/*`,
-  `:seon.test/*`, `:seon.require/*`, `:seon.eval/*`, `:seon.ctx/*`).
+- The database attributes defined above (`:seon.ns/*`, `:seon.fn/*`,
+  `:seon.schema/*`, `:seon.test/*`, `:seon.eval/*`, `:seon.ctx/*`).
 - `seon.repl/eval-batch!` — pod-side CLJS, runs the per-form
   read/eval/transact pipeline.
 - `seon.repl/forget!` + `seon.schema/unregister!`.
@@ -902,9 +937,9 @@ Mechanisms supporting this:
   `resources/seon/bootstrap.edn`.
 - Resume phase: topo-walk persistent entities, eval each, log results.
 - Per-form independent transacts (partial-success preservation).
-- Eval classification implicit via `:seon.eval/produced-*` / `:forgot` /
-  `:switched-ns-to` / `:read-error` / `:exception` presence — no
-  classifier enum to maintain.
+- Eval classification implicit via `:seon.eval/touches` / `:forgot` /
+  `:switched-ns-to` presence + `:ok?` boolean — no classifier enum to
+  maintain.
 
 ### Out
 
