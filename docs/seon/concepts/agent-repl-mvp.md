@@ -102,8 +102,8 @@ Built on the `:seon.fn/*` / `:seon.schema/*` / `:seon.test/*` taxonomy.
 ::seon.test/last-failed-at  :inst {:optional true}          ; most recent failed run
 ::seon.test/last-failure    :string {:optional true}        ; ex-message of most recent failure
 
-;; Agent (extends the existing :seon.agent/* family with one new attr)
-::seon.agent/current-ns  :keyword {:optional true}           ; ns the agent is "in"; falls back to home-ns when absent
+;; Agent — no new attrs. "Current ns" is derived from the eval log
+;; (see :seon.eval/ns below) rather than stored on the entity.
 
 ;; Namespaces (one entity per agent-defined or substrate ns)
 ::seon.ns/name    [:keyword {:seon.db/identity true}]        ; :seon.trading.signals
@@ -158,7 +158,7 @@ absent).
 ::seon.eval/turn            :long                                 ; the agent's turn-counter at eval time
 ::seon.eval/at              :inst                                 ; wall-clock at eval start
 ::seon.eval/duration-ms     :long                                 ; wall-clock elapsed for this form (eval + auto-await)
-::seon.eval/ns              :keyword                              ; namespace the form ran in
+::seon.eval/ns              :keyword                              ; namespace the form LEFT the agent in (= ending ns)
 
 ;; Form text + result
 ::seon.eval/narration       :string                               ; leading ;; comments captured by parse-forms
@@ -172,16 +172,26 @@ absent).
                                             :optional true}]      ; entities created / updated by this form
 ::seon.eval/forgot          [:seon.db/ref {:db/cardinality :db.cardinality/many
                                             :optional true}]      ; entities retracted by this form
-::seon.eval/switched-ns-to  :keyword       {:optional true}      ; (in-ns 'foo) / (ns foo) → :foo
 
 ```
 
+`:seon.eval/ns` is the namespace the agent ended in after this form
+ran — i.e. the live `!current-ns` value seon.eval/eval-batch! writes
+after each form. A `(ns other)` form's eval entry carries `:ns :other`
+even though the form itself was parsed in the previous ns. Consequences:
+
+- **Current ns is derivable** as `:seon.eval/ns` of the most recent
+  eval for the agent (or `seon.agent/home-ns` when no evals yet). No
+  stored agent attr.
+- **Ns switches are derivable** by comparing `:ns` across consecutive
+  evals. No `:switched-ns-to` attr; the renderer asks the query.
+
 The "kind" of an eval is read from which optional attrs are present.
 The renderer never branches on a discriminator field; it asks
-"is `:ok?` false?", "what does `:touches` resolve to?", "is
-`:switched-ns-to` set?". Each `:touches` ref is itself a persistent
-entity carrying `:seon.fn/sym` or `:seon.schema/key` or `:seon.test/sym`
-— that's how the renderer learns "this eval produced a function".
+"is `:ok?` false?" and "what does `:touches` resolve to?". Each
+`:touches` ref is itself a persistent entity carrying `:seon.fn/sym`
+or `:seon.schema/key` or `:seon.test/sym` — that's how the renderer
+learns "this eval produced a function".
 
 - `:ok?` false → look at `:error`. The kind of failure (parse vs runtime
   vs timeout) lives in the error payload, not as a separate attr.
@@ -189,9 +199,8 @@ entity carrying `:seon.fn/sym` or `:seon.schema/key` or `:seon.test/sym`
   One ref per entity touched; cardinality-many because `(defn` +
   inline `(deftest` is a single form that touches both.
 - `:forgot` populated → the eval retracted entities.
-- `:switched-ns-to` set → an `(in-ns …)` / `(ns …)` call. Used by
-  the next form's `:seon.eval/ns` and by the renderer to anchor the
-  agent's "current ns" indicator.
+- `:ns` differs from the previous eval's `:ns` → the form switched
+  namespace. Renderer compares; no discriminator attr.
 - None of the above → the eval ran successfully but produced no
   persistent change (an expression like `(+ 1 2)` or `(d/q …)`).
 
@@ -306,20 +315,24 @@ Walk the vector front to back:
 For each entry classified as a form:
 
 1. **Snap a start timestamp.** `(js/Date.now)` before the eval call.
-2. **Capture `:seon.eval/ns`** at the moment of evaluation — read
-   from the agent's `!current-ns` atom.
-3. **Eval** the parsed form in that ns. On success, record
-   `:ok? true` + `:result-edn`. On any failure (compile, runtime,
-   timeout, unbound-symbol), record `:ok? false` + `:error`
-   (pr-str'd map carrying `:kind :compile | :runtime | :timeout`).
+2. **Eval** the parsed form in the agent's current ns (the value of
+   the `!current-ns` atom seon.eval/eval-batch! already maintains).
+   On success, record `:ok? true` + `:result-edn`. On any failure
+   (compile, runtime, timeout, unbound-symbol), record `:ok? false` +
+   `:error` (pr-str'd map carrying `:kind :compile | :runtime |
+   :timeout`).
+3. **Record `:seon.eval/ns`** as the ending ns returned by
+   `cljs.js/eval-str`'s `:ns` field — i.e. where the form left the
+   agent. Same value the existing pipeline already writes back into
+   `!current-ns`.
 4. **Record `:seon.eval/duration-ms`** = `(- (js/Date.now) start)`.
    Covers the form's eval AND any auto-await — i.e. what the agent
    actually waited for. Cheap (two `Date.now()` calls); always on.
 5. **Classify effects implicitly.** If the form defined a function,
    add the new `:seon.fn` entity to `:touches`. If it registered a
    schema, add the `:seon.schema` entity. If it called
-   `(forget! 'x)`, add the now-retracted entity to `:forgot`. If it
-   changed namespace, set `:switched-ns-to`.
+   `(forget! 'x)`, add the now-retracted entity to `:forgot`. Ns
+   switches need no special handling — `:ns` already captured it.
 6. **Independent transact per form** — one `:seon.eval` datom + any
    persistent-entity datoms in its own tx. A failure on form 5
    doesn't roll back forms 1-4.
@@ -505,14 +518,22 @@ them by transacting different attrs on the same entity (lookup by
 ```clojure
 ;; --- Section functions (baseline, in seon.render.default) ---
 ;; Each takes :seon.render/system-input and returns a string.
-;; Empty string = section omitted. `current-ns` is read from the
-;; agent entity (:seon.agent/current-ns); falls back to the agent's
-;; home ns when absent.
+;; Empty string = section omitted. `current-ns` is derived from the
+;; most recent eval's :seon.eval/ns (the ending ns), falling back to
+;; the agent's home ns when no evals exist yet.
 
 (defn- agent-current-ns [db id]
-  (or (-> (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id id]})
-          :seon.agent/current-ns)
-      (seon.agent/home-ns id)))
+  (let [recent (db/query
+                 {:seon.db/db db
+                  :seon.db/query '[:find [?ns ...]
+                                   :in $ ?aid
+                                   :where
+                                   [?e :seon.eval/agent ?aid]
+                                   [?e :seon.eval/ns ?ns]
+                                   [?e :seon.eval/at ?at]]
+                  :seon.db/args [[:seon.agent/id id]]})]
+    (or (last (sort recent))      ; placeholder: real impl picks by max :at / id
+        (seon.agent/home-ns id))))
 
 (defn- host-timezone
   "Best-effort IANA timezone of the pod's host. POD timezone, not the
@@ -669,10 +690,11 @@ special-cased.
 
 ```
 
-Note: the section fn pulls the agent's current ns from the agent
-entity itself (`(:seon.agent/current-ns ent)`) rather than getting it
-on `ctx`. This keeps the ctx schema identical to the existing render
-input and avoids the bookkeeping of passing `ns` separately.
+Note: section fns derive the agent's current ns from the eval log
+(`:seon.eval/ns` of the most recent eval) rather than reading it off
+`ctx` or off a dedicated agent attr. This keeps the ctx schema
+identical to the existing render input and avoids the bookkeeping of
+passing `ns` separately or storing it twice.
 
 ## Worked example — DB to rendered text
 
@@ -1043,7 +1065,7 @@ attrs already present:
 | Eval shape | Reversible? | Mechanism |
 |---|---|---|
 | `:touches` populated, no atom/capability calls in `:source` | Yes | retract each touched entity + ns-unmap (or unregister) |
-| Only `:switched-ns-to` set | Yes | just an ns pointer change |
+| `:ns` differs from previous eval's `:ns`, otherwise empty | Yes | re-eval the previous eval's source to restore the old ns |
 | `:forgot` populated | Partial | the entity can be re-defined by re-evaluating its source |
 | `:source` calls `swap!`/`reset!` or a WIT capability | No | state already mutated; no recorded "before" |
 | Plain expression — no `:touches`, no `:forgot`, no mutating call | Yes | no side effects to undo |
@@ -1202,9 +1224,9 @@ Mechanisms supporting this:
   `resources/seon/bootstrap.edn`.
 - Resume phase: topo-walk persistent entities, eval each, log results.
 - Per-form independent transacts (partial-success preservation).
-- Eval classification implicit via `:seon.eval/touches` / `:forgot` /
-  `:switched-ns-to` presence + `:ok?` boolean — no classifier enum to
-  maintain.
+- Eval classification implicit via `:seon.eval/touches` / `:forgot`
+  presence + `:ok?` boolean + cross-eval `:ns` comparison — no
+  classifier enum to maintain, no ns-switch attr.
 
 ### Out
 
