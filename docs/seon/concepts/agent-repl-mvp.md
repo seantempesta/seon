@@ -728,39 +728,48 @@ agent knows what broke.
 
 ## Self-instrumentation
 
-Rendering runs on every turn. Section functions can become slow as
-they're rewritten — long queries, large entity walks, accidental
-N+1s. The agent needs to see where time is going so they can
-self-optimize.
+Every public function is profiled. Section functions, eval-batch,
+db/query, db/transact!, agent-authored fns — anything carrying
+`:malli/schema` gets a Tufte `p` wrap at the same boundary Malli's
+runtime validation already hits. The agent rewrites a function, the
+next render shows the timing delta. Self-improvement loop without
+external tools.
 
-Approach: wrap the composer and each section call with
-[Tufte](https://github.com/ptaoussanis/tufte) (Clojure(Script)
-profiler from the same taoensso family as Timbre + Nippy that seon
-already uses). Tufte's `p` macro stamps an id around any
-expression; `profile` collects elapsed-time stats during execution
-and returns them. Overhead is small enough to leave on by default.
+Mechanism: extend the existing instrumentation layer.
+
+- Seon already wraps every `:malli/schema`-annotated public fn with
+  Malli's runtime validator (Integrant key
+  `:seon.dev/instrumentation`, see CLAUDE.md "Function
+  Instrumentation"). That wrapper is the only sane place to add a
+  second concern.
+- Profile concern: when registering instrumentation for a fn, also
+  wrap its invocation with `(taoensso.tufte/p ::fully-qualified-fn-name
+  body)`. The same atom that holds the validated wrapper now holds
+  the profiled+validated wrapper. One pass, one indirection.
+- Result: every call to every public fn lands in Tufte's stats
+  store under its ns-qualified id. Including agent-authored fns —
+  they pass through `seon.code/check` which requires `:malli/schema`,
+  which gets them instrumented, which gets them profiled. The agent
+  cannot write an un-profiled public fn.
 
 ```clojure
-;; in seon.render.default
-(ns seon.render.default
-  (:require [taoensso.tufte :as tufte]
-            …))
-
-(defn assemble-ctx [input]
-  (tufte/profile {:dynamic? true :id ::render}
-    {:seon.render/text
-     (->> (sections-in-db (:seon.db/db input))
-          (sort-by :seon.ctx/priority)
-          (map (fn [section]
-                 (tufte/p (:seon.ctx/name section)
-                   (let [f (seon.render/resolve-symbol (:seon.ctx/fn section))]
-                     (if f (f input) (default/pretty-ai section))))))
-          (remove str/blank?)
-          (str/join "\n\n"))}))
+;; in seon.dev (the instrumentation entry point — extends what's there)
+(defn install-instrumentation! [registry]
+  (doseq [[sym schema] (resolve-instrumented-fns registry)]
+    (alter-var-root (find-var sym)
+      (fn [original]
+        (fn [& args]
+          (tufte/p sym
+            (apply (malli-validate-wrap original schema) args)))))))
 ```
 
-What the agent sees: a new section function (or a builtin one) can
-read the latest profile and surface it as a tile.
+Render scope-marker: the composer wraps its whole pass in
+`(tufte/profile {:dynamic? true :id ::render} ...)`. Everything the
+render touches lands in the per-render stats bucket; everything
+outside it (post-eval LLM call, kick-handler bookkeeping) lands in
+its own bucket. The agent can ask for either.
+
+What the agent sees:
 
 ```clojure
 ;; ships disabled — agent enables when they want to look
@@ -771,19 +780,22 @@ read the latest profile and surface it as a tile.
       (str "<perf>\n" (tufte/format-pstats stats {:columns [:n :sum :mean :p90]})
            "\n</perf>")
       "")))
+
+;; or ad-hoc inside any form
+(seon.perf/profile-form (compute-related-ns @db :seon.trading))
+;; => {:value [...] :stats #tufte/PStats { … }}
 ```
 
-Why this matters for self-improvement: the agent rewrites
-`recent-evals-section`, sees `:recent-evals` jump from 6ms to 90ms
-on the next render, and learns the cost of their change immediately
-— without external tooling, without the user asking. The same
-mechanism wraps `seon.repl/eval-batch!` and `seon.db/query`, so the
-agent can profile their own forms too.
+Cost: Tufte's `p` is ~50ns of overhead per call when capture is
+active, free when disabled. Disable globally with
+`(tufte/set-min-level! :off)` if a hot loop turns out to be too
+expensive — the validator stays on; only the profile concern drops.
 
 Out of MVP scope: per-form sampling, percentiles aggregated across
 sessions, automatic regression detection. The MVP just exposes the
-last-render stats; everything else is built by writing more section
-functions.
+last-render stats and offers `(seon.perf/profile-form ...)` for
+ad-hoc measurement; everything else is built by writing more
+section functions.
 
 ## Restoring defaults
 
@@ -1009,10 +1021,13 @@ Mechanisms supporting this:
   `warnings-section`, `recent-evals-section`) returning strings +
   `truncate-edn` helper + `pretty-ai` fallback (already exists).
 - `seon.render/explain-section`, `reset-defaults!`.
-- Tufte instrumentation around the composer + each section call;
-  `seon.perf/!last-render` atom carrying the most recent stats.
-  Optional `perf-section` (disabled by default; agent enables when
-  they want to see where the render budget went).
+- Tufte instrumentation wired into the existing
+  `:seon.dev/instrumentation` layer so every `:malli/schema`-annotated
+  public fn is profiled (section fns + composer + eval-batch +
+  db/query + db/transact! + every agent-authored public fn — the
+  whole surface, one indirection). `seon.perf/!last-render` atom
+  carries the latest stats. Optional `perf-section` (disabled by
+  default; agent enables when they want to see where time went).
 - Bootstrap phase: detect-empty + ordered `(d/transact!)` from
   `resources/seon/bootstrap.edn`.
 - Resume phase: topo-walk persistent entities, eval each, log results.
@@ -1123,10 +1138,13 @@ A new agent session can:
 - **Tufte (CLJS profiler).** Same `com.taoensso/*` family already in
   `deps.edn` (Timbre + Nippy). `taoensso/tufte` works in CLJS,
   exposes `(p ::id body)` / `(profile {…} body)` / `format-pstats`
-  — exactly the surface the "Self-instrumentation" section needs. Add
-  to `deps.edn`, wrap the composer + section calls, expose the latest
-  stats via `seon.perf/!last-render`. The agent's optional
-  `perf-section` formats and surfaces them on demand.
+  — exactly the surface the "Self-instrumentation" section needs.
+  Add to `deps.edn`, hook into the existing
+  `:seon.dev/instrumentation` registration so every Malli-validated
+  fn gets a `tufte/p` wrap at the same boundary. Existing
+  instrumentation code: CLAUDE.md "Function Instrumentation" calls
+  out the Integrant key; the wrapper is the single seam where this
+  bolts on.
 
 ### Open architectural questions
 
