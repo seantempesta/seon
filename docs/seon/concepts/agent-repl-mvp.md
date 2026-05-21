@@ -871,28 +871,22 @@ agent knows what broke.
 
 ## Self-instrumentation
 
-Two layers, both opt-in past their default:
+Two layers, cheap-by-default and precise-on-demand.
 
-### Layer 1 — per-eval timing (always on, cheap)
+**Layer 1 — per-eval timing (always on).** `:seon.eval/duration-ms`
+is captured on every eval (see "Per-form loop" #4) and rendered next
+to the eval-id; `slow-eval-warning` (defined alongside the other
+default warning predicates) lifts slow forms into the warnings tile.
+No registry, no opt-in.
 
-Every eval entry carries `:seon.eval/duration-ms` (two `Date.now()`
-calls per form, negligible cost). The recent-evals tile shows the
-duration next to each eval-id. A default warning predicate
-(`slow-eval-warning`) surfaces any eval over a threshold in the
-warnings tile so the agent doesn't have to scan visually.
-
-That's it for the default surface. No registry, no opt-in step. The
-agent learns "this took 1200ms" without doing anything; the warning
-tells them "go look" once it crosses the line.
-
-### Layer 2 — Tufte profiling (opt-in, deeper)
-
-When per-eval timing says "this form was slow" and the agent wants
-to know *why*, they reach for Tufte. The hook point is the existing
-`:seon.dev/instrumentation` Integrant layer that already wraps every
-`:malli/schema`-annotated public fn for runtime validation. When
-profiling is enabled, the same wrapper additionally wraps each fn
-with `(taoensso.tufte/p ::ns/name body)`.
+**Layer 2 — Tufte profiling (opt-in).** When timing says "slow" and
+the agent wants to know *why*, they enable Tufte. The hook point is
+the existing `:seon.dev/instrumentation` Integrant layer that
+already wraps every `:malli/schema`-annotated public fn for runtime
+validation; when profiling is enabled, the same wrapper additionally
+wraps each fn with `(taoensso.tufte/p ::ns/name body)`. Every public
+fn — substrate AND agent-authored — flows through this seam, because
+`seon.code/check` requires `:malli/schema` before a fn is persisted.
 
 ```clojure
 ;; turn profiling on for the next render or for a specific form
@@ -907,17 +901,10 @@ with `(taoensso.tufte/p ::ns/name body)`.
 (seon.perf/last-stats)   ; the accumulated stats since enable
 ```
 
-Why not always on: even at ~50ns per `p`, in a tight loop that adds
-up. The user said it — leave deep profiling off by default and use
-cheap timestamps for routine signal. Tufte is the precision tool
-the agent picks up when the cheap signal points them at a problem.
-
-When enabled, every call to every public fn lands in Tufte's stats
-store under its ns-qualified id — including agent-authored fns,
-since they pass through `seon.code/check` which requires
-`:malli/schema`, which gets them instrumented, which gets them
-profiled. The agent cannot write a public fn that's invisible to
-profiling.
+Off by default because `tufte/p` at ~50ns per call adds up in tight
+loops — cheap `Date.now()` deltas carry the routine signal, Tufte is
+the precision tool the agent reaches for when routine signal points
+at a problem.
 
 ### Surface section: `perf-section`
 
