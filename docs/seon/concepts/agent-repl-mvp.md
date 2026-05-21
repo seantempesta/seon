@@ -38,10 +38,14 @@ the few things that protect the substrate from incoherence.
 **Soft rules (warnings only; never reject):**
 
 - **Functions without tests don't fully count.** A `:seon.fn/*`
-  entity transacts, but a `:seon.warning/no-test-coverage` lives on
-  it until at least one `:seon.test/*` targets it. Convention:
-  every public fn ships with a `<name>-example` test exercising
-  the documented happy path. See [[#D19]].
+  entity transacts normally. The warnings tile derives the no-test
+  warning on the fly: query every `:seon.fn` entity, left-join
+  against `:seon.test/target`, emit a warning for any fn with no
+  matching test. Pure derivation — nothing on the fn entity says
+  "I have no tests"; the absence is computed. Convention: every
+  public fn ships with a `<name>-example` test exercising the
+  documented happy path; the warning vanishes the moment one
+  exists. See [[#D19]].
 - **`(def …)` outside `defn`/`schema/register!`/`deftest` is
   scratch.** Warning surfaces; the value lives in the process but
   won't survive restart ([[#D14]]).
@@ -301,10 +305,10 @@ absent).
 
 ```clojure
 ;; Identity + context
-::seon.eval/id              [:string {:seon.db/identity true}]   ; 10-char base62, time-prefixed → sorts by creation
+::seon.eval/id              [:string {:seon.db/identity true}]   ; 12-char base62, time-prefixed → sorts by creation
 ::seon.eval/agent           :seon.db/ref                          ; → :seon.agent entity (owning agent)
 ::seon.eval/turn            :long                                 ; the agent's turn-counter at eval time
-::seon.eval/at              :inst                                 ; wall-clock at eval start
+::seon.eval/at              :long                                 ; epoch-millis at eval start (canonical timestamp)
 ::seon.eval/duration-ms     :long                                 ; wall-clock elapsed for this form (eval + auto-await)
 ::seon.eval/ns              :keyword                              ; namespace the form LEFT the agent in (= ending ns)
 
@@ -1830,9 +1834,15 @@ something, not as a do-anything `undo`.
 
 ### <a id="d19"></a>D19 — `<name>-example` test convention
 
-A function persists as `:seon.fn/*`, but the warnings tile shows
-`:seon.warning/no-test-coverage` until at least one
-`:seon.test/*` targets it. Convention to clear the warning fast:
+A function persists as `:seon.fn/*`. The warnings tile runs a
+no-test predicate at render time — for every `:seon.fn`, check
+whether any `:seon.test/target` resolves to it; if not, emit a
+warning. Nothing about "no test coverage" is stored on the fn
+entity; the warning is the result of the query against the current
+graph. The moment a test targeting the fn lands, the next render
+omits the warning.
+
+Convention to clear the warning fast:
 
 For a fn `seon.trading/analyze`, the agent writes a test named
 `seon.trading/analyze-example` that exercises the documented happy
