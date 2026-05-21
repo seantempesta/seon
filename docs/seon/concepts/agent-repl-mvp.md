@@ -2219,6 +2219,95 @@ Many of the open decisions hinge on datahike's actual capabilities:
 - Can we tx-meta the eval entry with the agent-id, or is that
   not a thing in datahike?
 
-Research task launched: read `reference-code/datahike/` end-to-end
-with this spec in hand, confirm or refute each claim, and surface
-anything else that affects MVP design.
+**Verified against `reference-code/datahike/` (2026-05-21):**
+
+Summary of findings; each updated in detail under its own D-entry.
+
+1. **`:keep-history? true`** ✅ supported in `.cljc` (works on
+   CLJS). See [D2](#d2). One nuance: there is NO `tx-range`
+   function in datahike — `doc/datomic_differences.md:45` confirms
+   it's an unimplemented Datomic feature. Use `(d/history db)` +
+   `d/q` with the 5-tuple datom pattern instead.
+
+2. **Intra-tx lookup-refs** ✅ confirmed in
+   `test/datahike/test/lookup_refs_test.cljc:53-56`:
+   ```clojure
+   ;; lookup refs are resolved at intermediate DB value
+   [[:db/add 3 :name "Oleg"]
+    [:db/add 1 :friend [:name "Oleg"]]]
+   ```
+   And — critically for the bootstrap pattern —
+   `test/datahike/test/upsert_test.cljc:111-117` confirms map-form
+   entities without `:db/id` upsert by their identity attr and
+   resolve against the intermediate DB:
+   ```clojure
+   (d/with db [{:name "Igor" :age 35}
+               {:name "Igor" :age 36}])  ;; upserts onto the first
+   ```
+   Combined: the spec's bootstrap `[{:seon.fn/sym "foo/bar" …}
+   {:seon.test/sym "test-x" :seon.test/target [:seon.fn/sym
+   "foo/bar"]}]` pattern works as designed, provided the
+   referenced entity's identity attr (`:seon.fn/sym`) is asserted
+   earlier in the vector.
+
+3. **History API for "datoms in tx T"** ✅ via `(d/history db)`
+   queried with `[?e ?a ?v ?tx ?added]` 5-tuple pattern. Reference
+   pattern in `test/datahike/test/utils.cljc:8-32` (`get-all-datoms`).
+   Even better: the synchronous `transact` return value already
+   carries `:tx-data` (`src/datahike/db.cljc:130`), so the renderer
+   doesn't need a history query at write time. See [D25](#d25).
+
+4. **`:db.type/symbol`** ✅ supported.
+   `src/datahike/schema.cljc:31` declares `(s/def :db.type/symbol
+   symbol?)` and L48 lists it in `:db.type/value`. Used by datahike
+   itself for `:db.entity/preds` (`schema.cljc:132`). Storing
+   `:seon.ctx/fn` as a symbol is fine.
+
+5. **Schema-flexibility `:write` rules** — see [D3](#d3) for full
+   detail. Key results: `:db/valueType` immutable;
+   `:db/cardinality :one→:many` allowed only with no `:db/unique`;
+   `:db/unique` addable only at cardinality :one; `:db/doc`/
+   `:db/noHistory`/`:db/isComponent` always updatable.
+   (`src/datahike/schema.cljc:218-251` is the authoritative rule
+   surface.)
+
+6. **Per-tx custom tx-meta** ✅ first-class.
+   `src/datahike/db/transaction.cljc:605-624` (`flush-tx-meta`)
+   converts each k/v in `:tx-meta` into a datom on the tx-id.
+   Test `test-tx-meta` at
+   `test/datahike/test/transact_test.cljc:410-496` exercises it
+   end-to-end including: queryability (L465-474), retraction
+   (L475-485), overwrite (L486-496). Under `:schema-flexibility
+   :write` the attr must be installed first (L449-464). This
+   resolves D25.
+
+**Surprises / additions worth noting in the spec body:**
+
+- `:db/txInstant` has `{:db/noHistory true}` set on it by default
+  (`src/datahike/constants.cljc:128`). That means tx-instants are
+  visible at the current DB and via the `(d/history db)` view, but
+  are not part of the temporal index in the way other datoms are.
+  Practical effect: querying `[?tx :db/txInstant ?inst]` works on
+  both `@conn` and `(d/history @conn)`. No spec change; just an
+  implementation note for the renderer.
+- `:db.type/instant` corresponds to `java.util.Date` on JVM and
+  `js/Date` on CLJS (`src/datahike/schema.cljc:21-25`). The spec's
+  use of `:inst` for `:seon.eval/at` is fine cross-platform.
+- Reverse refs are first-class via the `_attr` syntax (e.g.
+  `:_friends` at `test/datahike/test/lookup_refs_test.cljc:126-132`).
+  Useful for the "who calls X" query in D20.
+- `(d/datoms (d/history db) :eavt [...])` indexes ARE available
+  on a HistoricalDB (`test/datahike/test/upsert_test.cljc:211`,
+  `time_variance_test.cljc:256`). So we have efficient AEVT/EAVT
+  access to historical datoms; not just predicate-filtered `d/q`.
+- Listener API exists (`test/datahike/test/listen_test.cljc`) —
+  callback receives a `TxReport` with `:tx-data`. Could feed the
+  renderer's "tile invalidation" if we ever want push updates
+  instead of pull-on-render. Out of MVP scope.
+- `:read` schema-flexibility mode exists (no install required) —
+  used by most datahike tests. seon V0.5 uses `:write`, so this is
+  just a note for understanding test fixtures we read.
+
+**No claims refuted.** The only spec-level wording fix already
+applied: "history / tx-range" → "history API". All other claims
+held up under verification.
