@@ -341,35 +341,15 @@ After every entry is processed, render the full context.
 
 #### Parse failures
 
-If Edamame throws while reading (the agent emitted something that
-isn't valid ClojureScript and isn't a `;;` comment — e.g. raw
-markdown outside a comment), we record an `:ok? false` eval entry
-with `:kind :read`, advance to the next balanced top-level boundary,
-and continue. The error message tells the agent exactly what went
-wrong, the system-section reminds them prose belongs in `;;`
-comments, and they self-correct on the next turn. No silent drops.
-
-#### Why this works
-
-The contract is simple: **the agent emits a ClojureScript file's
-worth of code.** Functions, expressions, bare symbols to inspect
-values — all of it is just code. Markdown narration is documentation
-attached to forms, stored in the same `;;` comments any other
-Clojure source uses. The LLM doesn't have to learn anything beyond
-"write ClojureScript with comments."
-
-The replaced design (still live in `seon.repl/parse-forms` in
-`src/seon/repl.cljs`) hand-rolled a comment-collector and added a
-`prose-symbol?` heuristic that silently dropped bare-symbol forms to
-avoid the "Let me read the file" pollution problem. The new design
-removes both. There is no special prose-detection. If the agent
-writes "Let me read the file" outside a `;;` comment, the reader
-parses it as four bare symbols, each eval'd in turn — `Let`,
-`me`, `read`, `file` — three unbound-symbol errors and one
-accidental reference to `cljs.core/read`. Four loud entries in the
-eval log. The agent reads the next turn's `recent-evals` tile,
-sees the flurry of errors, learns to put their thinking inside
-`;;` comments. One painful turn, learned once.
+If the parser throws (the agent emitted something that isn't valid
+ClojureScript and isn't a `;;` comment — e.g. raw markdown outside
+a comment), we record an `:ok? false` eval entry with `:kind :read`,
+advance to the next balanced top-level boundary, and continue. The
+error message tells the agent what went wrong; the system-section
+reminds them prose belongs in `;;` comments. Bare prose tokenizes
+into unbound-symbol errors the agent sees in the next turn's
+`recent-evals` tile — a loud, self-correcting signal, no
+prose-detection heuristic needed.
 
 **Partial-success principle.** If the agent sends 10 forms and 9
 succeed, the database keeps 9 successes. Read failures and eval
