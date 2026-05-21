@@ -1580,6 +1580,40 @@ transacted, and **cannot be re-typed** after. Implications:
   Malli-level "free redefine if no datoms exist" check needs to
   treat this carefully.
 
+**Verified against `reference-code/datahike/` (2026-05-21):**
+
+- Two modes exist: `:read` and `:write`
+  (`src/datahike/config.cljc:32`); default is `:write`
+  (`config.cljc:20`). `:read` is the schemaless mode — no attribute
+  install required.
+- Under `:write`, schema updates go through
+  `find-invalid-schema-updates`
+  (`src/datahike/schema.cljc:218-251`). The actual rules:
+  - `:db/valueType` change → **invalid** (falls into catch-all at
+    L249). Re-typing rejected.
+  - `:db/cardinality` `:one→:many` → invalid only when
+    `:db/unique` is set on the attr (L223-228). With no
+    unique constraint, the upgrade is permitted.
+  - `:db/cardinality` `:many→:one` → falls into catch-all → invalid.
+  - `:db/unique` can be ADDED only when not previously set AND
+    cardinality is `:one` (L230-233); cannot be removed (also
+    catch-all).
+  - `:db/doc`, `:db/noHistory`, `:db/isComponent` → always allowed
+    to be updated (L235-238).
+- `check-schema-update`
+  (`src/datahike/db/transaction.cljc:626-646`) raises
+  `:error :transact/schema` when `find-invalid-schema-updates`
+  returns a non-empty map.
+- Under `:read` mode (`config.cljc:103`, `db/transaction.cljc:34`),
+  attributes don't need to be installed at all — they're inferred
+  from data. This is what most datahike tests use, e.g.
+  `cfg-template` in `test/datahike/test/utils.cljc:39-45`.
+
+Spec's claim is correct for `:write` (the seon V0.5 setting). The
+nuance to add: `:db/doc`/`:db/noHistory`/`:db/isComponent` ARE
+updatable, and `:one→:many` is allowed when no unique constraint.
+The "no re-typing" framing holds for `:db/valueType` specifically.
+
 ### <a id="d4"></a>D4 — Add `rewrite-clj` to deps
 
 rewrite-clj preserves `:comment` nodes alongside form nodes
