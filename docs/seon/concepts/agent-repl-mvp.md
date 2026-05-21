@@ -810,13 +810,9 @@ EDN truncator. Behavior:
 - Trailing `...` is valid EDN — the truncated output round-trips
   through the reader (no half-open delimiters).
 
-Prior art: `bin/mcp-server` (babashka, JVM-side) already implements
-the same shape under different mechanics — `max-eval-output-chars`
-(default 2 KB), `truncated-preview-chars` (1.5 KB), `truncate-stdout`
-which keeps the LAST N chars rather than the first. The opt-out
-prefix `#_:full` in agent code there skips truncation entirely. We
-can port the prefix idea into `eval-batch!` so the agent has the same
-escape hatch from inside the pod.
+Prior art and a portable opt-out prefix idea (`#_:full` for "don't
+truncate this form") live in `bin/mcp-server` — see the
+"Prior art located" section below for the full reference.
 
 ### Result auto-save (per-eval addressable values)
 
@@ -827,15 +823,6 @@ turn. Implementation already exists in `seon.eval/stash-result-raw!`
 ns exposes `(result :<eval-id>)` to look it up. No pr-str round-trip
 — values that don't round-trip through `read-string` (datahike DB
 tagged literals, JS objects, fns) still come back identical.
-
-Prior art on the JVM side: `bin/mcp-server` (`wrap-code-with-autosave`,
-L461) wraps every form so its return value lands in
-`@user/repl-<session>` under a content-hash key, and the rendered
-output ends with `;; stored as :r-<hash> in @user/repl-<session>`.
-Same idea, different storage. The CLJS pod keeps the per-eval-id
-keying because that's the handle the eval-log already exposes; the
-mcp-server's hash-key approach is incompatible with replay (the
-hash is not the eval-id).
 
 Cross-session retention: `globalThis` values die with the pod. On
 the next pod boot, `(result :<eval-id>)` for an eval recorded by a
