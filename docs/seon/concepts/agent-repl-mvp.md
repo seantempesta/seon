@@ -43,7 +43,7 @@ rendering (warnings on cross-namespace edits, etc.), not through ACL.
 
 ## Mental model
 
-```
+```text
 ┌──────────────────────────────────────────────────────────────────┐
 │  REPL conversation = data exchange                               │
 │                                                                  │
@@ -718,7 +718,7 @@ fn pulls the agent entity itself to learn the current ns (here:
 
 Render walk:
 
-```
+```text
 (sections-in-db ctx)  → query for entities with :seon.ctx/name + :priority + :fn
                       → 5 default section entities
 (sort-by :seon.ctx/priority)
@@ -766,16 +766,14 @@ symbol → call the function → join the resulting strings.
 For each eval in the rendered window, emit one of two shapes
 depending on whether the entry has a form or is thinking-only:
 
-```
+```text
 > (form-source-as-typed)
 result-rendered    ; # eval-id  4ms
-
 ```
 
-```
+```text
 ;; thinking: <narration text, indented as a markdown block>
                                 ; # eval-id
-
 ```
 
 The trailing `<n>ms` on a form row is `:seon.eval/duration-ms`
@@ -960,7 +958,7 @@ broken their context and want the original everything back.
 
 System-instructions tile (in every render) includes:
 
-```
+```text
 If your context renders incorrectly, restore the defaults:
   (seon.render/reset-defaults!)            ; idempotent upsert, agent edits preserved
   (seon.render/reset-defaults! :overwrite true) ; full reset, overwrites agent renderer edits
@@ -1032,7 +1030,7 @@ classifier without a schema change.
 
 ## Boot sequence
 
-```
+```text
 boot:
   if (database-empty? db) bootstrap-phase!    ; seed the DB
   resume-phase!                                ; rebuild runtime from DB
