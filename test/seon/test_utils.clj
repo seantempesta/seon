@@ -443,7 +443,8 @@
   nil)
 
 (defn with-test-node
-  "Legacy fixture stub. Tests that need a database should use with-test-datalevin instead."
+  "No-op fixture stub. Tests that need a real database should use the
+   `with-test-db-fixture` macro from this namespace instead."
   [f]
   (f))
 

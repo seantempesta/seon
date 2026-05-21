@@ -407,8 +407,8 @@
     ;; Persist to Datahike
     (persist-instance! inst-map)
     (log/debug "Registered runtime instance" {:namespace ns-str
-                                               :status status
-                                               :location location})
+                                              :status status
+                                              :location location})
     inst-map))
 
 (defn unregister!
@@ -515,7 +515,7 @@
       (log/warn "Failed to mark crashed instances" {:error (.getMessage e)})
       {::crashed-count 0})))
 
-(defn- datalevin->cache
+(defn- entity->cache
   "Convert a Datahike entity map (`:seon.runtime/*` keys) to the
    in-memory cache format (`::runtime/*` keys). Drops :db/id and any
    keys not part of the runtime schema."
@@ -596,7 +596,7 @@
           valid-entities (filter (complement stale-entity?) all-entities)
           skipped (- (count all-entities) (count valid-entities))
           cache-map (reduce (fn [m entity]
-                              (let [inst (datalevin->cache entity)]
+                              (let [inst (entity->cache entity)]
                                 (assoc m (::namespace inst) inst)))
                             {}
                             valid-entities)]
@@ -710,7 +710,7 @@
       (db/transact! :seon.runtime [tx-map]))
     (catch Exception e
       (log/warn "Failed to start agent run" {:agent-run-id agent-run-id
-                                              :error (.getMessage e)})))
+                                             :error (.getMessage e)})))
   {::agent-run-id agent-run-id
    ::status :running})
 
@@ -742,7 +742,7 @@
       (db/transact! :seon.runtime [tx-map]))
     (catch Exception e
       (log/warn "Failed to complete agent run" {:agent-run-id agent-run-id
-                                                 :error (.getMessage e)})))
+                                                :error (.getMessage e)})))
   {::agent-run-id agent-run-id
    ::status status})
 
