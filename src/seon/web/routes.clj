@@ -21,10 +21,8 @@
    ;; Flow monitor routes
    [:get "/flows"]                 #'flows/flows-page
    [:post "/flows"]                #'flows/flows-sse
-   ;; Agent observatory routes — handlers removed in M-2 along with
-   ;; `seon.web.agents` (which read from the deleted `seon.ai.datalevin`).
-   ;; M-3 will restore the observatory against the new :seon.ai datahike
-   ;; namespace.
+   ;; Agent observatory routes — handlers pending restoration against
+   ;; the :seon.ai datahike namespace.
    ;; Browser execution bridge result callback
    [:post "/api/browser/result"]   #'browser/result-handler})
 

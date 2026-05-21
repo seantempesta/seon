@@ -1,7 +1,6 @@
 (ns seon.agent.env-test
-  "Tests for the agent environment toolkit. Ported in M-2b from the legacy
-   datalevin `d/create-conn` + `*direct-mode*` + `*conn-manager*` shape to
-   the canonical datahike `:memory` fixture.
+  "Tests for the agent environment toolkit. Uses the canonical datahike
+   `:memory` fixture.
 
    The fixture installs a merged schema covering both the graph entity
    types (`:seon.ns/*`, `:seon.fn/*`, `:seon.spec/*`, `:seon.call/*`) and

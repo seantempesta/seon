@@ -1,12 +1,10 @@
 (ns seon.repl-test
-  "Tests for seon.repl namespace. Ported in M-2b from the legacy datalevin
-   `d/create-conn` + `*direct-mode*` + `*conn-manager*` shape to the
-   canonical datahike `:memory` fixture.
+  "Tests for seon.repl namespace. Uses the canonical datahike `:memory`
+   fixture.
 
-   The fixture uses logical db-name `:test-db` (same as the pre-port test)
-   and a merged Malli schema covering both REPL form entities and the
-   graph-ingest entities the analyzer writes when `eval-form!` updates
-   the code index."
+   The fixture uses logical db-name `:test-db` and a merged Malli schema
+   covering both REPL form entities and the graph-ingest entities the
+   analyzer writes when `eval-form!` updates the code index."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [seon.db :as db]
             [seon.repl :as super]
@@ -227,12 +225,11 @@
 ;;; Code index update tests
 ;;; ---------------------------------------------------------------------------
 ;;;
-;;; M-2b: `code-index-updated-test` dropped pending M-3. `eval-form!`'s
-;;; side-effect chain through `seon.graph.ingest/ingest-incremental!`
-;;; transacts an entity that lookup-refs `[:seon.fn/qualified-name <name>]`
-;;; before the corresponding `:seon.fn` entity is inserted. Datalevin
-;;; tolerated the missing-entity lookup; datahike throws
+;;; `code-index-updated-test` is dropped pending an ingest fix.
+;;; `eval-form!`'s side-effect chain through
+;;; `seon.graph.ingest/ingest-incremental!` transacts an entity that
+;;; lookup-refs `[:seon.fn/qualified-name <name>]` before the
+;;; corresponding `:seon.fn` entity is inserted; datahike throws
 ;;; `:entity-id/missing`. The proper fix lives in `seon.graph.ingest`
-;;; (either upsert-first then ref, or batch the inserts in tempid order)
-;;; and is bundled with M-3's `:seon.runtime` migration to the datahike
-;;; flow. Restore this test after that lands.
+;;; (either upsert-first then ref, or batch inserts in tempid order).
+;;; Restore this test once that lands.

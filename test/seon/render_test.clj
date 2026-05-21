@@ -1,12 +1,10 @@
 (ns seon.render-test
   "Tests for seon.render — including find-renderer / resolve-renderer.
-   Ported in M-2b from the legacy datalevin `d/create-conn` +
-   `*direct-mode*` + `*conn-manager*` shape to the canonical datahike
-   `:memory` fixture. The auto-discovery machinery (find-renderer,
-   resolve-renderer, find-page-renderer) is dormant on the running
-   system per remaining.md Forward decisions §Renderer auto-resolution:
-   deferred — but the fns themselves still work when given a populated
-   db, which is what these tests exercise."
+   Uses the canonical datahike `:memory` fixture. The auto-discovery
+   machinery (find-renderer, resolve-renderer, find-page-renderer) is
+   dormant on the running system (renderer auto-resolution deferred) —
+   but the fns themselves still work when given a populated db, which
+   is what these tests exercise."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [seon.db :as db]
             [seon.graph.query :as gq]

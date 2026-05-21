@@ -1,10 +1,8 @@
 (ns seon.render.code-test
-  "Tests for seon.render.code. Ported in M-2b from the legacy datalevin
-   `d/create-conn` + `*direct-mode*` + `*conn-manager*` shape to the
-   canonical datahike `:memory` fixture. The fixture preloads the same
-   test-data graph the pre-port test built (one ns with three fns + two
-   spec pairs) via a single `db/transact!` — datahike resolves same-tx
-   tempids order-independently."
+  "Tests for seon.render.code. Uses the canonical datahike `:memory`
+   fixture. The fixture preloads a test-data graph (one ns with three
+   fns + two spec pairs) via a single `db/transact!` — datahike
+   resolves same-tx tempids order-independently."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [seon.db :as db]
             [seon.graph.query :as gq]

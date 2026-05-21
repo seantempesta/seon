@@ -65,9 +65,8 @@
 
 (defmethod ig/init-key ::http-server
   [_ {:keys [port bind handler]}]
-  ;; Agent observatory module (`seon.web.agents/init!`) was removed in M-2
-  ;; together with the dead `seon.ai.datalevin` reads it depended on. M-3
-  ;; will restore it against the new `:seon.ai` datahike namespace.
+  ;; Agent observatory module pending restoration against the
+  ;; `:seon.ai` datahike namespace.
 
   ;; Initialize SSE broadcast infrastructure with 100ms throttle
   (let [refresh-mult (sse/init-sse! :max-refresh-ms 100)

@@ -1,19 +1,15 @@
 (ns seon.repl.context-test
-  "Tests for seon.repl.context — context cockpit for AI agents. Ported in
-   M-2b from the legacy datalevin `d/create-conn` + `*direct-mode*` +
-   `*conn-manager*` shape to the canonical datahike `:memory` fixture.
+  "Tests for seon.repl.context — context cockpit for AI agents. Uses
+   the canonical datahike `:memory` fixture.
 
-   The pre-port test invoked `seon.graph.analyzer/analyze-project!` over
-   `src/seon/graph/` and then `seon.graph.ingest/ingest-analysis!` to
-   populate the fixture conn. That ingest path currently breaks against
-   datahike (lookup-ref to non-yet-existent `:seon.fn` entity throws
-   `:entity-id/missing`; the proper fix is bundled with M-3's
-   `:seon.runtime`-into-flow migration). To keep the tests testing the
-   surface they target — `context/for-function` / `for-namespace` /
-   `for-data` against a populated graph — the port substitutes a minimal
-   hand-transacted graph stub for the analyzer + ingest pipeline. The
-   surface under test (build → linearize → format) is exercised; the
-   ingest path remains M-3's problem."
+   The analyzer + ingest pipeline currently breaks against datahike
+   (lookup-ref to a not-yet-existent `:seon.fn` entity throws
+   `:entity-id/missing`). To keep the tests focused on their target
+   surface — `context/for-function` / `for-namespace` / `for-data`
+   against a populated graph — these tests substitute a minimal
+   hand-transacted graph stub for analyzer + ingest. The surface under
+   test (build → linearize → format) is exercised; the ingest path is
+   tracked separately."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.string :as str]
             [seon.db :as db]

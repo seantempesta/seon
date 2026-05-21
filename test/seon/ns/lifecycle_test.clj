@@ -1,12 +1,12 @@
 (ns seon.ns.lifecycle-test
-  "Tests for seon.ns.lifecycle. Ported in M-2b from the legacy datalevin
-   shape to the canonical datahike `:memory` fixture.
+  "Tests for seon.ns.lifecycle. Uses the canonical datahike `:memory`
+   fixture.
 
-   Two pre-port tests are dropped pending M-4 — they exercise
-   `seon.ctx/persist!` which currently calls into `seon.db/resolve-conn`
-   (a deprecation shim that throws). M-4 redesigns `*ctx*` with
-   atom-semantics + auto-persist + warn-on-unserializable; restore
-   instance-resume-round-trip and backup-all-instances then."
+   Two tests are pending restoration — they exercise `seon.ctx/persist!`
+   which currently calls into `seon.db/resolve-conn` (a deprecation shim
+   that throws). Restore instance-resume-round-trip and
+   backup-all-instances once `*ctx*` is redesigned with atom-semantics
+   + auto-persist + warn-on-unserializable."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [seon.ctx :as ctx]
             [seon.db :as db]

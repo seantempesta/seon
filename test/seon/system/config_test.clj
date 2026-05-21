@@ -2,11 +2,12 @@
   (:require [clojure.test :refer [deftest is testing]]
             [seon.system.config :as config]))
 
-;; M-1 (2026-05-15): the legacy `:seon.db.datalevin/server`,
-;; `:seon.db.datalevin/connections`, `:seon/runtime-db`, and
-;; `:seon.graph/scanner` config schemas were removed alongside their dead
-;; Integrant defmethods. The `:seon.flow/pool` schema dropped
-;; `:datalevin-server`. Tests now exercise the surviving schemas.
+;; Legacy `:seon.db.datalevin/*`, `:seon/runtime-db`, and
+;; `:seon.graph/scanner` config schemas were removed alongside their
+;; dead Integrant defmethods. The `:seon.flow/pool` schema no longer
+;; carries a `:datalevin-server` key. The `describe` test below asserts
+;; these removed component keys still return nil so we catch any
+;; accidental re-introduction.
 
 (deftest validate-valid-configs-test
   (testing "valid configs return nil"

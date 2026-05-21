@@ -1,13 +1,12 @@
 (ns seon.runtime-test
-  "Tests for the unified runtime registry. Ported in M-2b from the legacy
-   datalevin `d/create-conn` + `*direct-mode*` + `*conn-manager*` shape to
-   the canonical datahike `:memory` fixture.
+  "Tests for the unified runtime registry. Uses the canonical datahike
+   `:memory` fixture.
 
    The runtime registry mixes in-memory cache state with persistence to
    `:seon.runtime`. The fixture spins up an isolated datahike flow against
    that logical db-name; `db/*direct-mode*` is bound true so the
    `persist-instance!` synchronous-vs-future branch runs in-thread (the
-   flag is otherwise a no-op since M-2)."
+   flag is otherwise a no-op)."
   (:require [clojure.test :refer [deftest testing is use-fixtures]]
             [seon.db :as db]
             [seon.runtime :as runtime]

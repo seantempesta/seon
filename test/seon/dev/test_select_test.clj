@@ -7,7 +7,6 @@
    resulting graph. Restore body when the static-ingest path is
    revived.
 
-   Note: chunk M-1 already replaced `seon.dev.test/test-affected`'s
-   datalevin presence-check with `has-db? false`, so the production
-   fallback path (run-only-this-ns-test) works today — that's
-   sufficient until the affected-tests UX matters again.")
+   Note: `seon.dev.test/test-affected` uses `has-db? false` so the
+   production fallback path (run-only-this-ns-test) works today —
+   that's sufficient until the affected-tests UX matters again.")

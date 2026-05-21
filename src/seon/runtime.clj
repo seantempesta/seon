@@ -518,8 +518,7 @@
 (defn- datalevin->cache
   "Convert a Datahike entity map (`:seon.runtime/*` keys) to the
    in-memory cache format (`::runtime/*` keys). Drops :db/id and any
-   keys not part of the runtime schema.
-   (Name retained from earlier Datalevin lineage.)"
+   keys not part of the runtime schema."
   [entity]
   (let [key-map {:seon.runtime/namespace  ::namespace
                  :seon.runtime/status     ::status

@@ -1,13 +1,12 @@
 (ns seon.repl.graduate-test
-  "Tests for seon.repl.graduate namespace. Ported in M-2b from the legacy
-   datalevin `d/create-conn` + `*direct-mode*` + `*conn-manager*` shape to
-   the canonical datahike `:memory` fixture.
+  "Tests for seon.repl.graduate namespace. Uses the canonical datahike
+   `:memory` fixture.
 
    The fixture installs only the form-entity schema; `eval-form!`'s
    internal `update-code-index!` side-effect catches its own exceptions
    (the analyzer + graph-ingest path is currently incompatible with
-   datahike's lookup-ref strictness — fix bundled with M-3), so the
-   tests that only care about form storage still pass."
+   datahike's lookup-ref strictness), so the tests that only care about
+   form storage still pass."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.string :as str]
             [seon.repl :as super]
