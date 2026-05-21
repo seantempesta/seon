@@ -2053,14 +2053,99 @@ makes it explicit so we don't drift.
 
 Your renderer (likely Obsidian) doesn't follow the GitHub-style
 `[D1](#d1)` anchors. I've switched the dashboard to Obsidian
-wiki-link syntax `[D1](#d1)` which Obsidian DOES support natively.
+wiki-link syntax `[[#D1]]`.
 
-Research-agent task: confirm whether the spec author's Obsidian
-config recognizes `[[#heading]]` and `[[#anchor-id]]` formats
-equivalently. Also research whether Obsidian respects explicit
-HTML `<a id="…"></a>` anchors. If yes to both, we're set; if no,
-fall back to GFM-style anchors derived from the heading text and
-verify they resolve.
+**Verified against the official Obsidian docs (2026-05-21):**
+
+Sources:
+[help / Internal links](https://obsidian.md/help/Linking+notes+and+files/Internal+links),
+[help / Links](https://obsidian.md/help/links).
+
+- `[[#Heading]]` matches the **exact heading text** in the same
+  document. The docs (Links page) show
+  `[[About Obsidian#Links are first-class citizens]]` as the
+  prescribed form — the substring after `#` must be the literal
+  heading text.
+- **HTML anchors (`<a id="d1"></a>`) are NOT documented as link
+  targets in Obsidian.** Wiki-links don't resolve to them. The
+  HTML-anchor convention this spec is using will be invisible to
+  Obsidian's link resolver. (They render fine but produce broken
+  links.)
+- **Block IDs ARE the Obsidian-native stable-anchor mechanism.**
+  Syntax: place `^block-id` at the end of a block (or on its own
+  line after a structured block). Block IDs allow only Latin
+  letters, numbers, and dashes. Link via `[[#^block-id]]` for
+  same-doc, or `[[note#^block-id]]` cross-doc. From the docs:
+  "You can link to a block by adding `#^` at the end of your link
+  destination". Block IDs are stable across heading renames —
+  exactly what GFM's `<a id>` provides in plain markdown.
+- Caveat: "Block references are specific to Obsidian and not part
+  of the standard Markdown format. Links containing block
+  references won't work outside of Obsidian." So they fail
+  gracefully in GitHub (the link text just becomes literal
+  `[[#^d1]]`), unlike `<a id>` + `[D1](#d1)` which DOES render in
+  GFM.
+
+**Recommendation — two options, pick one:**
+
+**(A) Pure Obsidian wins (recommended):** drop the
+`<a id="..."></a>` HTML anchors entirely; put a block-id `^d1`
+at the end of each heading; rewrite dashboard references to
+`[[#^d1]]`. Pattern per decision section:
+
+```markdown
+### D1 — Naming reconciliation ^d1
+
+...body...
+```
+
+And in the dashboard:
+
+```markdown
+- **[[#^d1]]** ✅ `:seon.fn/sym` (shorter). Body uses this.
+```
+
+Trade-off: links break in GitHub's preview (rendered as literal
+text), but resolve perfectly in Obsidian. Stable across heading
+text changes. Lowest visual noise in the source.
+
+**(B) Hybrid:** keep `<a id="d1"></a>` HTML anchors for GitHub +
+add a `^d1` block-id at the end of each heading for Obsidian.
+Dashboard uses `[[#^d1]]`. Both renderers get what they need.
+
+```markdown
+### <a id="d1"></a>D1 — Naming reconciliation ^d1
+```
+
+Trade-off: redundant identifier per heading, but works everywhere
+and survives heading renames in both renderers.
+
+Lean **(B)** for this doc because:
+- the user reads it in Obsidian primarily but the agent reads it
+  via Read tool (which sees raw markdown — both anchor forms work
+  fine for that)
+- if anyone ever views it on GitHub the GFM anchors keep links
+  navigable
+- the cost is one extra `^id` per heading
+
+Body of the spec currently uses `[D1](#d1)`-style references
+internally (e.g. inside D2 / D3 / D25 etc.) and `[[#D1]]`-style
+in the dashboard. Per the verified Obsidian behavior, **neither
+form currently resolves** for the spec author:
+
+- `[D1](#d1)` → relies on the HTML anchor; Obsidian doesn't
+  follow it.
+- `[[#D1]]` → expects the literal heading text "D1" but the
+  actual heading is "D1 — Naming reconciliation". Obsidian
+  matches on full heading text.
+
+The fix in either (A) or (B) is mechanical — add `^d1` to each
+heading, rewrite all internal references to `[[#^d1]]`. Block
+IDs need only `[a-zA-Z0-9-]` so `d1` through `d26` are valid.
+
+Action: pending user pick between (A) and (B). The verification
+work is done; the rewrite is a single search-and-replace once
+the call is made.
 
 ### <a id="d24"></a>D24 — Topological bootstrap emission
 
