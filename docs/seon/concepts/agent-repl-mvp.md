@@ -102,6 +102,9 @@ Built on the `:seon.fn/*` / `:seon.schema/*` / `:seon.test/*` taxonomy.
 ::seon.test/last-failed-at  :inst {:optional true}          ; most recent failed run
 ::seon.test/last-failure    :string {:optional true}        ; ex-message of most recent failure
 
+;; Agent (extends the existing :seon.agent/* family with one new attr)
+::seon.agent/current-ns  :keyword {:optional true}           ; ns the agent is "in"; falls back to home-ns when absent
+
 ;; Namespaces (one entity per agent-defined or substrate ns)
 ::seon.ns/name    [:keyword {:seon.db/identity true}]        ; :seon.trading.signals
 ::seon.ns/source  :string                                    ; "(ns seon.trading.signals (:require [seon.db :as db]))"
@@ -305,17 +308,32 @@ That contract is fixed:
 
 ### The composer
 
+The composer IS the function pointed at by the agent's
+`:seon.render/ai` slot (currently `seon.render.default/ctx`). It
+returns the map-shape the existing `ai-dispatch` expects
+(`{:seon.render/text "..."}`), so it plugs into the agent surface
+already in code:
+
 ```clojure
-(defn assemble-context [ctx]
-  (->> (sections-in-db ctx)                     ; query for :seon.ctx entities
-       (sort-by :seon.ctx/priority)
-       (map (fn [section]
-              (let [section-fn (resolve-symbol (:seon.ctx/fn section))]
-                (if section-fn
-                  (section-fn ctx)
-                  (pretty-ai section)))))
-       (remove str/blank?)
-       (str/join "\n\n")))
+(defn assemble-ctx
+  {:malli/schema [:=> [:cat :seon.render/system-input]
+                  :seon.render/ai-response]}
+  [{:seon.db/keys [db] :seon.agent/keys [id]}]
+  {:seon.render/text
+   (->> (db/query
+          {:seon.db/db db
+           :seon.db/query '[:find [(pull ?e [*]) ...]
+                            :where [?e :seon.ctx/name _]]})
+        (sort-by :seon.ctx/priority)
+        (map (fn [section]
+               (let [f (seon.render/resolve-symbol (:seon.ctx/fn section))
+                     ctx-in {:seon.db/db    db
+                             :seon.agent/id id}]
+                 (if f
+                   (f ctx-in)
+                   (str (default/pretty-ai section))))))
+        (remove str/blank?)
+        (str/join "\n\n"))})
 
 ```
 
@@ -379,37 +397,49 @@ them by transacting different attrs on the same entity (lookup by
 
 ```clojure
 ;; --- Section functions (baseline, in seon.render.default) ---
-;; Each returns a string. Empty string = section omitted.
+;; Each takes :seon.render/system-input and returns a string.
+;; Empty string = section omitted. `current-ns` is read from the
+;; agent entity (:seon.agent/current-ns); falls back to the agent's
+;; home ns when absent.
+
+(defn- agent-current-ns [db id]
+  (or (-> (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id id]})
+          :seon.agent/current-ns)
+      (seon.agent/home-ns id)))
 
 (defn system-section
-  "Always-present preamble. The restore-defaults recipe + the agent's
-   current ns banner."
-  [{::keys [agent-id ns]}]
-  (str "<system agent=\"" agent-id "\" ns=\"" ns "\">\n"
-       "  Restore defaults: (seon.render/reset-defaults!)\n"
-       "</system>"))
+  [{:seon.db/keys [db] :seon.agent/keys [id]}]
+  (let [ns (agent-current-ns db id)]
+    (str "<system agent=\"" id "\" ns=\"" ns "\">\n"
+         "  Restore defaults: (seon.render/reset-defaults!)\n"
+         "</system>")))
 
 (defn current-ns-section
   "Every persistent entity owned by the current ns: the ns entity itself
    (which carries the (ns …) form), then its fns, schemas, tests.
    Schema/test ownership is derived from the namespaced key or sym."
-  [{::keys [db ns]}]
-  (let [ns-prefix (name ns)
-        ns-ent   (db/pull db '[*] [:seon.ns/name ns])
-        fns      (db/q db '[:find [(pull ?e [*]) ...]
-                            :in $ ?ns
-                            :where [?e :seon.fn/ns ?ns]] ns)
-        schemas  (->> (db/q db '[:find [(pull ?e [*]) ...]
-                                 :where [?e :seon.schema/key _]])
+  [{:seon.db/keys [db] :seon.agent/keys [id]}]
+  (let [ns       (agent-current-ns db id)
+        ns-prefix (name ns)
+        ns-ent   (db/entity {:seon.db/db db :seon.db/ref [:seon.ns/name ns]})
+        fns      (db/query {:seon.db/db db
+                            :seon.db/query '[:find [(pull ?e [*]) ...]
+                                             :in $ ?ns
+                                             :where [?e :seon.fn/ns ?ns]]
+                            :seon.db/args [ns]})
+        schemas  (->> (db/query {:seon.db/db db
+                                 :seon.db/query '[:find [(pull ?e [*]) ...]
+                                                  :where [?e :seon.schema/key _]]})
                       (filter #(= ns-prefix (namespace (:seon.schema/key %)))))
-        tests    (->> (db/q db '[:find [(pull ?e [*]) ...]
-                                 :where [?e :seon.test/sym _]])
+        tests    (->> (db/query {:seon.db/db db
+                                 :seon.db/query '[:find [(pull ?e [*]) ...]
+                                                  :where [?e :seon.test/sym _]]})
                       (filter #(let [s (:seon.test/sym %)
                                      slash (.indexOf s "/")]
                                  (and (pos? slash)
                                       (= ns-prefix (subs s 0 slash))))))
         parts    (concat
-                   (when ns-ent     [(str "(ns " ns ")")])
+                   (when ns-ent     [(:seon.ns/source ns-ent)])
                    (map :seon.schema/source schemas)
                    (map :seon.fn/source fns)
                    (map :seon.test/source tests))]
@@ -421,13 +451,18 @@ them by transacting different attrs on the same entity (lookup by
 
 (defn related-ns-section
   "Symbols from namespaces referenced by the current ns, signature-only.
-   Agent reaches for `:seon.fn/source` when they need the full body."
-  [{::keys [db ns]}]
-  (let [related (compute-related-ns db ns)              ; helper, defined elsewhere
+   Agent reaches for `:seon.fn/source` via current-ns-section when they
+   switch ns and want the full body."
+  [{:seon.db/keys [db] :seon.agent/keys [id]}]
+  (let [ns      (agent-current-ns db id)
+        related (compute-related-ns db ns)              ; helper, defined elsewhere
         rows    (for [other (sort related)
-                      f     (db/q db '[:find [(pull ?e [:seon.fn/sym]) ...]
-                                       :in $ ?ns
-                                       :where [?e :seon.fn/ns ?ns]] other)]
+                      f     (db/query {:seon.db/db db
+                                       :seon.db/query
+                                       '[:find [(pull ?e [:seon.fn/sym]) ...]
+                                         :in $ ?ns
+                                         :where [?e :seon.fn/ns ?ns]]
+                                       :seon.db/args [other]})]
                   (str "  " (:seon.fn/sym f)))]
     (if (seq rows)
       (str "<related-namespaces>\n" (str/join "\n" rows) "\n</related-namespaces>")
@@ -436,10 +471,10 @@ them by transacting different attrs on the same entity (lookup by
 (defn warnings-section
   "Run every registered warning-predicate over the agent's accessible
    entities. Each predicate returns either nil or a map carrying
-   :seon.warning/severity + :seon.warning/text. Sort by severity, format."
-  [{::keys [db] :as ctx}]
+   :seon.warning/text + :seon.warning/severity."
+  [{:seon.db/keys [db] :as input}]
   (let [preds (registered-warning-predicates db)
-        ws    (->> (for [p preds, w (p ctx) :when w] w)
+        ws    (->> (for [p preds, w (p input) :when w] w)
                    (sort-by :seon.warning/severity))]
     (if (seq ws)
       (str "<warnings>\n"
@@ -452,11 +487,13 @@ them by transacting different attrs on the same entity (lookup by
    top-to-bottom like a real REPL transcript. The eval-id is
    time-prefixed base62 — sorting by id is identical to sorting by
    creation order, and cheaper than sorting by `:at`."
-  [{::keys [db agent-id]}]
-  (let [rows (->> (db/q db '[:find [(pull ?e [*]) ...]
-                             :in $ ?aid
-                             :where [?e :seon.eval/agent ?aid]]
-                        [:seon.agent/id agent-id])
+  [{:seon.db/keys [db] :seon.agent/keys [id]}]
+  (let [rows (->> (db/query {:seon.db/db db
+                             :seon.db/query
+                             '[:find [(pull ?e [*]) ...]
+                               :in $ ?aid
+                               :where [?e :seon.eval/agent ?aid]]
+                             :seon.db/args [[:seon.agent/id id]]})
                   (sort-by :seon.eval/id)
                   (take-last 20))]
     (if (seq rows)
@@ -476,11 +513,12 @@ special-cased.
 
 ```clojure
 ;; Render-context: every section fn receives this as its sole argument.
-::seon.render/context
+;; Matches the existing :seon.render/system-input shape (src/seon/render.cljs)
+;; so a section fn can also be called as an agent's :seon.render/ai slot.
+:seon.render/system-input
   [:map
-   [::db          :any]
-   [::agent-id    :string]
-   [::ns          :keyword]]
+   [:seon.db/db    :any]
+   [:seon.agent/id :string]]
 
 ;; Section entity (persisted). Identified by :seon.ctx/name.
 ::seon.ctx/entity
@@ -496,6 +534,11 @@ special-cased.
    [:seon.warning/severity :keyword]]              ; :error | :warn | :info
 
 ```
+
+Note: the section fn pulls the agent's current ns from the agent
+entity itself (`(:seon.agent/current-ns ent)`) rather than getting it
+on `ctx`. This keeps the ctx schema identical to the existing render
+input and avoids the bookkeeping of passing `ns` separately.
 
 ## Worked example — DB to rendered text
 
@@ -533,7 +576,9 @@ Database state (illustrative):
 
 ```
 
-Render context: `{::db <db> ::agent-id "alpha" ::ns :seon.trading}`.
+Render input: `{:seon.db/db <db> :seon.agent/id "alpha"}`. Each section
+fn pulls the agent entity itself to learn the current ns (here:
+`:seon.trading`).
 
 Render walk:
 
