@@ -237,10 +237,17 @@ switches the namespace for subsequent forms.
 
 #### Parse: forms-and-comments
 
-Use Edamame's `parse-next` in a loop against a `source-reader`, with
-comment preservation enabled (Edamame returns `;;`-comment text as
-ordinary values when configured to do so). The loop yields an ordered
-vector like:
+Use `rewrite-clj.parser/parse-string-all`, which parses Clojure
+source as a tree of nodes that **includes** whitespace and `:comment`
+nodes alongside form nodes (verified against
+`reference-code/rewrite-clj/src/rewrite_clj/parser.cljc` and
+`node/comment.cljc`). Walk the top-level children, filtering
+whitespace, and you get the ordered vector below — no extra
+machinery, no hand-rolled scanner.
+
+(Aside: Edamame, the other parser in our deps, drops comments at the
+reader — `edamame.impl.parser/parse-comment` reads the line and
+returns the reader. rewrite-clj is the right tool here.)
 
 ```clojure
 [{:kind :comment :text "## Plan"}
@@ -273,6 +280,14 @@ The reader sees these as four/five consecutive comments. The pairer
 joins consecutive comments into one narration block. The agent
 formats with markdown freely (`##`, `-`, code-spans, whatever);
 those characters are valid inside a `;;` line.
+
+**Comments are how the agent talks to the user.** The web view (a
+later milestone) renders `:seon.eval/narration` as Markdown — the
+user sees the same `## Plan` / bullets / code-spans the agent wrote,
+formatted. So `;;` is two channels at once: the agent's thinking
+captured in the eval log, AND the agent's explanation to the user.
+Teach this in the system-section so the LLM uses comments as a
+first-class communication device, not an afterthought.
 
 #### Pair: comments → narration → form
 
@@ -1345,18 +1360,13 @@ A new agent session can:
    The bootstrap ships attr-schemas first, persistent entities
    second. New runtime versions can ADD attrs but not change existing
    ones.
-4. **Edamame comment preservation.** Edamame is in `deps.edn`
-   (1.4.27). Verify which option produces comments as ordered values
-   alongside forms — likely `:postprocess` or a related callback hook
-   that receives every read element including comments. The existing
-   `seon.repl/parse-forms` (`src/seon/repl.cljs`) uses
-   `cljs.tools.reader` and hand-rolls a comment-pairing loop; with
-   Edamame's preservation hook we can replace the hand-roll with a
-   single walk over `(parse-string-all source {:comments? true …})`.
-   Confirm the exact option name; if Edamame doesn't expose comments
-   directly, scan the source string between consecutive form
-   positions for `;;` lines instead (forms carry line/col metadata
-   from `source-reader`).
+4. **Add rewrite-clj to deps.** rewrite-clj is the parser we want —
+   it preserves comments as `:comment` nodes alongside form nodes
+   (verified in `reference-code/rewrite-clj/`). It's not yet in
+   `deps.edn` (Edamame is, but Edamame drops comments at the reader).
+   Adding rewrite-clj as a CLJS-compatible dep is a small change;
+   confirm the version bundled in `reference-code/` works with the
+   bootstrap-CLJS / shadow-cljs build chain.
 5. **Bare-symbol eval and the unbound-symbol error.** The new design
    relies on the eval surface throwing a clean unbound-symbol error
    for undefined references rather than us inferring "this was
