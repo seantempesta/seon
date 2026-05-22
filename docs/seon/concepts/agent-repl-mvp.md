@@ -148,7 +148,40 @@ current design; only items below remain open.
   tx-id; see Resume phase.)
 
 The detailed notes for each live in [Decision details](#decision-details) at the
-bottom.
+bottom. [Known issues](#known-issues) at the very bottom tracks bugs
+the implementation needs to chase that aren't spec questions.
+
+## Verified live in the V0 pod
+
+Every claim below has been exercised end-to-end against the running
+CLJS pod via `mcp__seon_cljs__eval`. Source citations + REPL probes
+recorded in commit history.
+
+- **rewrite-clj preserves comments + forms as ordered nodes.**
+  `(rewrite-clj.parser/parse-string-all ";; hi\n(+ 1 2)\n")` returns a
+  `:forms` root whose `:children` include `:comment` and `:list` nodes
+  in source order, with full text including trailing newlines.
+- **Bare-symbol undeclared-var rejects loudly.**
+  `(seon.eval/eval state "Let")` returns
+  `{:ok false :error "undeclared undeclared-var: cljs.user/Let"}`.
+  Powered by a `set!`+restore on
+  `cljs.analyzer/*cljs-warning-handlers*` + a `truly-undeclared?`
+  resolver that checks globalThis. See `src/seon/eval.cljs:117-243`.
+- **Unqualified core vars resolve.**
+  `(seon.eval/eval state "(reduce + (range 10))")` returns
+  `{:ok true :value 45 :ns cljs.user}`. Powered by an explicit
+  `cljs.js/load-analysis-cache!` call in `init-bootstrap!` (see
+  [analyzer-cache load](#analyzer-cache-load) below).
+- **tx-meta is the eval-id pointer.** A datahike transact with
+  `:tx-meta {:seon.eval/id "..."}` makes the eval-id queryable as
+  a datom on the tx-id entity:
+  `(d/q '[:find ?tx :where [?tx :seon.eval/id ?eid]] db "...")`
+  returns the tx-id. The eval entity and tx entity coincide.
+- **Topological replay is `sort-by tx-id`.** Datahike tx-ids are
+  strictly monotonic; entity ordering follows creation order, which
+  is a valid topo order by construction (lookup-ref forward
+  references would have failed at write time). No analyzer-walk
+  needed for resume.
 
 ## Goal
 
@@ -1252,6 +1285,7 @@ classifier without a schema change.
 
 ```text
 boot:
+  init-bootstrap!                              ; cljs.core analyzer-cache load (see below)
   if (database-empty? db) bootstrap-phase!    ; seed the DB
   resume-phase!                                ; rebuild runtime from DB
   render-initial-context!                      ; first turn for the agent
@@ -1263,6 +1297,46 @@ seeds and then resume eval's the freshly-seeded entries. On a persistent
 DB, bootstrap is skipped and resume walks whatever the agent has built
 up. Either path ends in the same place: every persistent entity has a
 DB row AND a live var.
+
+### <a id="analyzer-cache-load"></a>Analyzer-cache load ^analyzer-cache-load
+
+Before any agent form can be evaluated, the bootstrap-CLJS compile-state
+needs `:cljs.analyzer/namespaces 'cljs.core` populated with cljs.core's
+defs. Without this, every unqualified core reference (`reduce`,
+`map`, `inc`, even the `@` reader macro's underlying `deref`) compiles
+to `cljs.user.<name>` (undefined) and fails at runtime.
+
+`cljs.js/empty-state` calls `(dump-core)` which leaves cljs.core
+entry's `:name` set but `:defs` empty. Shadow's `boot/init` then
+SKIPS loading the real ~712KB `cljs.core.transit.json` analyzer
+cache because its loader filter at
+`shadow.cljs.bootstrap.node:104` reads "`:name` is set → already
+loaded → skip." Net result: the analyzer can't resolve any
+unqualified core var.
+
+`seon.eval/init-bootstrap!` works around this by calling
+`cljs.js/load-analysis-cache!` for EVERY namespace shadow emitted
+into `out/bootstrap/ana/`. The helper `load-all-analysis-caches!`
+walks the dir, reads each `*.transit.json`, and loads it into the
+compile-state. After init,
+`(count (:defs (get-in @compile-state [:cljs.analyzer/namespaces 'cljs.core])))`
+should return ~980; and any namespace listed in `shadow-cljs.edn
+:bootstrap :entries` is similarly analyzer-visible (e.g.
+`cljs.test`, `clojure.set`, `clojure.string`, `clojure.walk` after
+the entries expansion that landed alongside this fix).
+
+The discover-and-load-all shape replaced an earlier hand-coded
+load list (`[cljs.core cljs.core$macros]` only). Without the
+walk, every future expansion of `:bootstrap :entries` would have
+to remember a second edit — fragile. Now the bootstrap output is
+the single source of truth.
+
+This is invisible from the spec's design but load-bearing for the
+eval surface. The `truly-undeclared?` resolver
+(`src/seon/eval.cljs:158`) leans on the analyzer having the right
+view of bundled namespaces to short-circuit false-positives; if
+the cache load fails silently, every form rejects with
+`undeclared-var: cljs.user/<core-fn>`.
 
 ### Bootstrap phase (runs only when DB is empty)
 
@@ -1863,3 +1937,106 @@ Solve this BEFORE worrying about [[#^d1]] (older-DB-on-newer-runtime).
 Once we have the analyzer walk producing a clean ordered vector,
 upgrades follow naturally (diff old vector against new; transact
 the additions).
+
+## <a id="known-issues"></a>Known issues
+
+Implementation problems known to me as of the latest REPL-verification
+round. Not spec decisions — bugs / quirks to triage.
+
+### KI-1 — `seon.db/transact!` invocation shape is non-obvious
+
+The fn signature is `[{::keys [tx-data opts conn]}]` — single map
+argument with namespaced keys. The common-mistake forms
+
+```clojure
+(seon.db/transact! @conn {:tx-data ...})       ; positional — crashes inside seon.db with
+                                               ; "ILookup$_lookup$arity$3 is not a function"
+(seon.db/transact! {:conn @conn :tx-data ...}) ; unqualified keys — "no conversion to symbol"
+```
+
+both fail badly. The correct call is
+
+```clojure
+(seon.db/transact! {:seon.db/conn @conn
+                    :seon.db/tx-data [...]})
+```
+
+…OR rely on the dynamic `seon.db/*conn*` and omit `:conn`. The
+crash on form 1 takes the whole Node process down because the
+TypeError isn't caught at the boundary. Triage: (a) add a precondition
+that throws a clean validation error on bad-shape inputs, OR (b)
+accept positional `[conn tx-data]` as a backward-compatible
+alternative. The current crash mode is hostile to agents who
+mis-call the API.
+
+### KI-2 — `defonce` atoms can hold pre-fix state across hot-reloads
+
+`seon.repl/!compile-state` is `defonce`'d to survive hot-reload. When
+the substrate's auto-boot ran the OLD `init-bootstrap!` (before the
+analyzer-cache fix landed) and populated the atom, a subsequent
+hot-reload of `seon.eval` to the NEW `init-bootstrap!` left the
+stale state in place. `seon.repl/dev-init!`'s
+`(or @!compile-state ...)` short-circuits on the stale atom.
+
+Workarounds:
+
+- Manually `(reset! seon.repl/!compile-state nil)` before
+  `(seon.repl/dev-init!)`.
+- Add a `^:dev/before-load` handler in `seon.repl` that nils the
+  atoms (loses cached state but pays for hot-reload correctness).
+- Stamp the atom with a `:seon.eval/init-version` and re-init if
+  the running code's version differs.
+
+Triage: pick one. The third option preserves cached state during
+benign reloads but rebuilds when the init code itself changed.
+
+### KI-3 — Eval error envelope is deeply nested
+
+`seon.eval/eval` returns errors with a nested cause chain four
+levels deep:
+
+```text
+:error
+  :seon.error/message  "Could not eval seon.dynamic"
+  :seon.error/cause
+    :seon.error/message  "<wrap>"
+    :seon.error/cause
+      :seon.error/message  "undeclared-var: cljs.user/Let"
+      :seon.error/ex-data  {:kind :compile, :seon.eval/warning-type :undeclared-var}
+```
+
+The actionable info (`:seon.eval/warning-type`,
+`:seon.eval/undeclared`) lives at the bottom. The recent-evals
+renderer needs to walk the chain to surface it. Worth promoting
+the key fields to the top-level `:error` map so renderers don't
+have to descend.
+
+### KI-4 — Shadow watcher gets confused after multiple Node restart cycles
+
+After ~2-3 cycles of `pkill node && node out/client/main.js`, shadow's
+nREPL piggyback says "no available JS runtime" even though the new
+Node process is running and the watcher is up. Recovery requires
+restarting the watcher (`Ctrl-C` then `clj -M:cljs watch client`).
+
+This blocks autonomous REPL-iteration loops where an agent might
+need to restart Node programmatically. Triage: investigate shadow
+runtime-tracker state; possibly an idle-timeout or a runtime-id
+collision. Not blocking MVP; manual recovery is fine for now.
+
+### KI-5 — `start-agent!` auto-boot runs init before `dev-init!`
+
+The pod's `seon.client/start-agent!` runs at module load and uses
+its own init path. If an iteration session wants a clean
+`init-bootstrap!` (e.g. after editing eval.cljs), `dev-init!`
+won't run a fresh init because `!compile-state` is already
+populated by start-agent's path (see KI-2). Triage: align
+start-agent! with `seon.repl/ensure-bootstrap!` so they share the
+same atom + same init path, OR decouple `!compile-state` between
+the iteration surface and the agent loop entirely.
+
+### KI-6 — `npm install ws` was required for first run
+
+Shadow's hot-reload websocket import expects the `ws` module but
+it wasn't in `package.json`. Fresh checkouts will hit this. Either
+add `ws` to `package.json` dev deps, or document the install in
+the REPL workflow.
