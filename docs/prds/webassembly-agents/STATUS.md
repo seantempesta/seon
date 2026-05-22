@@ -4,141 +4,179 @@ status: active
 tags: [reference, prd]
 ---
 
-# webassembly-agents — working state
+# webassembly-agents — recent ships + cross-track coordination
 
-Resume notes for the two parallel tracks. Read this first when picking
-the project back up.
+This file is for time-sensitive coordination: what shipped this week,
+what's in flight, what's needed across the MVP↔Platform boundary,
+and how to iterate. **Design lives in [README.md](README.md) and the
+versioned specs (v1.md, v2.md, v3.md). This file does not duplicate
+spec content.**
 
 ## Tracks
 
-- **MVP track** (this session's owner): the agent eval surface — design
-  in [[agent-repl-mvp]]. Currently in REPL-verification phase against
-  the V0 CLJS pod (Node, not WASM yet).
-- **Platform track**: the WASM-Tauri containment — design in
-  [[platform]]. Owned by the platform agent.
+- **MVP track**: agent eval surface — design in [v1.md](v1.md).
+  Currently in implementation against the V0 CLJS pod (Node, not
+  WASM yet).
+- **Platform track**: WASM-Tauri containment — design in
+  [platform.md](platform.md). Capability hardening + Phase 2 test
+  infra shipped 2026-05-22 (below).
 
-## Where we are
+## In flight on the MVP track (2026-05-22)
 
-### Spec status
+### v1 spec draft landed — implementation has NOT started
 
-[[agent-repl-mvp]] has a "Verified live in the V0 pod" section listing
-what's been REPL-confirmed end-to-end. As of this checkpoint:
+The 2849-line `agent-repl-mvp.md` was rewritten from scratch as
+[v1.md](v1.md) (~1483 lines, defines each thing once). Old doc
+preserved at `archive/agent-repl-mvp-pre-2026-05-22.md`. **This is a
+spec, not code.** Nothing in v1 has been built yet — `:seon.session`,
+`:seon.turn`, `:seon.blob`, `*tx-context*`, `run-turn!` /
+`run-agentic-loop!`, the persistent-program detect-and-tee, the
+5-section composer in `seon.agent`, the boot preconditions — none of
+it exists in `src/seon/`. The current V0 pod (which runs deepseek
+end-to-end today via `start-agent-with-deepseek!`) implements an
+earlier substrate-teaching ctx and lacks every v1 entity past
+`:seon.agent` / `:seon.message` / `:seon.eval`.
 
-- ✅ rewrite-clj parses comments + forms as ordered nodes
-- ✅ Bare-symbol unbound-var rejects loudly (via warning-handler set!)
-- ✅ Unqualified core vars resolve (analyzer-cache load fixed)
-- ✅ tx-meta = eval-id; eval entity AND tx entity coincide
-- ✅ Topological replay = sort-by tx-id (no analyzer walk needed)
+What [v1.md](v1.md) IS: the agreed-upon design for what to build
+next on the MVP track.
 
-Dashboard has 10 open Ds (see [[agent-repl-mvp#decisions-pending]]).
-Known Issues at the bottom of the spec list 6 implementation bugs that
-need triage (KI-1 through KI-6).
+The rewrite was driven by three research artifacts under `research/`:
 
-### Next priorities for the MVP track
+- `v0-implementation-state-2026-05-22.md` — what's wired vs specced
+- `datahike-capabilities-2026-05-22.md` — datahike primitives we
+  should leverage (tx-meta + history, `:db/isComponent`, reverse-ref
+  pulls, `d/listen!`)
+- `gemini-graph-modeling-2026-05-22.md` — full-context Gemini
+  critique with raw response preserved
 
-In rough order:
+Sean's locked-in design decisions and version dependency graph live
+in [README.md](README.md); don't re-litigate them.
 
-1. **D11 — per-agent ctx set on the agent record.** The agent record
-   becomes the hub: `:seon.agent/ctx` is a cardinality-many vector
-   of refs to that agent's `:seon.ctx` entities. Defaults point at
-   `seon.agent/*` substrate fns; customization writes a fn in
-   `seon.agent.<id>` and re-points refs. V1 has NO dynamic dispatch
-   — symbols resolve at call time, period. V2 layers per-entity
-   specificity dispatch on top.
-2. **D5 — explicit remove-spec / remove-fn / remove-test** verbs.
-   Small surface; high agent-utility; gates the "agent can curate
-   without accumulating cruft" story.
-3. **D4 — targeted test auto-run** wiring. Trigger on `:seon.fn`
-   touches; query tests via `:seon.test/target`; stash full output
-   via eval-id; surface failures as warnings. Verifies the whole
-   reference-graph mechanic.
-4. **D2 — per-kind redefinability rules**. Specs must be accretive
-   when data exists; fns redefine freely; tests redefine freely.
-   Implementation-only; spec already settled.
-5. **D3 — `(def …)` detection via rewrite-clj AST**. No regex.
-   Small, well-bounded.
-6. **D7 — `<name>-example` test convention** + the "no-test-coverage"
-   warning predicate.
+## Recent ships (2026-05-22) — Platform track only
 
-Defer: D1 (older-DB upgrade), D8 (reference-graph attrs — confirm
-shape once we actually populate refs), D9 (forgiving parse recovery —
-edge case), D10 (bootstrap.edn emission — separate work item).
+### Platform track — Capability surface Phase A shipped
 
-### Queued simplifications (not yet decisions)
+HTTPS allowlist override via `SeonHttpHooks::send_request` in
+`pod-host/wasm-tauri/src-tauri/src/pod.rs`; 3 unit tests in
+`tests/http_allowlist.rs` pass. Note: wasmtime 44 moved the override
+hook from `WasiHttpView::send_request` (per the research file) to a
+separate `WasiHttpHooks` trait — implementation differs from
+research pseudocode but behaviorally equivalent.
 
-Round-2 cuts I surfaced earlier in the session but haven't applied.
-Each follows the same "use the primitive" pattern that paid off for
-`:touches` → tx-meta:
+Side-fix: the subagent fixed a pre-existing `[workspace.package]`
+missing `authors` field that was blocking ALL `cargo` invocations
+on the workspace.
 
-- **Drop `:seon.test/last-passed-at` / `:last-failed-at` /
-  `:last-failure`.** A test run IS an eval; tag the run's tx with
-  `:seon.eval/test [:seon.test/sym "..."]` in tx-meta. "Latest pass/
-  fail" becomes a history query. Three stored attrs collapse to zero.
-- **Drop `:seon.fn/refs` extraction.** cljs.analyzer's compile-state
-  ALREADY has the AST per `defn` with var references. We can query
-  `(get-in @compile-state [:cljs.analyzer/namespaces ns :defs fn :body])`
-  for free; no separate walk + storage needed.
-- **Audit the Reversibility classifier table.** It existed to power a
-  generic `undo`; we replaced that with explicit remove-* verbs. The
-  classifier may now be dead code in the spec. Confirm or remove.
+Remaining capability phases (B–E) pending. Research:
+`research/capability-surface-2026-05-22.md`.
 
-These should be promoted to D-decisions if they survive a closer look.
+### Platform track — Phase 2 test capture shipped
 
-### Known Issues (need triage)
+`src/seon/test/runner.cljs` ships `run-vars` + `stash-run!` +
+`record-run!` + `run-and-record!`. Storage design per Sean's
+three-tier rule: FULL run-result lives on the agent's ns (globalThis
+stash, reached via `(result <run-id>)`); DB carries the surfaced
+projection only (`:seon.test/sym`, `:last-passed-at`,
+`:last-failed-at`, `:last-failure-summary` ≤200 chars,
+`:last-run-id`).
 
-See [[agent-repl-mvp#known-issues]] for the full list. Quick summary:
+This unblocks the MVP track's D4 auto-run hook — eval-batch's
+`:seon.fn`-touch listener calls `seon.test.runner/run-and-record!`.
+Agent-facing surface is `seon.agent/test` / `seon.agent/tests`
+(wraps the runner; agent never types the runner namespace).
 
-- KI-1: `seon.db/transact!` invocation shape (wrong shape crashes Node).
-- KI-2: `defonce !compile-state` holds pre-fix state across hot-reloads.
-- KI-3: Eval error envelope is 4-levels-deep; promote useful keys.
-- KI-4: Shadow watcher gets confused after ~3 Node restart cycles.
-- KI-5: `start-agent!` and `dev-init!` race for `!compile-state`.
-- KI-6: `ws` npm dep was missing for fresh checkout (now in package.json).
+See [platform.md](platform.md) §"Phase 2 — Test infra promoted to
+data" for the platform-side design rationale.
 
-KI-1 may already be fixed by another agent's parallel work — check
-when integrating.
+### Known issues — recent fixes
+
+- **KI-2 + KI-5 FIXED** (platform track). Two independent `defonce
+  !compile-state` atoms (`seon.client/!compile-state`,
+  `seon.repl/!compile-state`) were silently diverging. Collapsed to
+  one canonical atom in `seon.repl`, shared via
+  `seon.repl/ensure-bootstrap!`. Version-stamped via
+  `seon.eval/init-version` so hot-reloads rotate the cache.
+  Findings: `research/compile-state-lifecycle-2026-05-22.md`.
+- **KI-3 FIXED** (platform track). `seon.error/->map` now emits a
+  top-level `:seon.error/data` key holding the deep-merged ex-data
+  across the entire cause chain (deepest-wins). Renderers read one
+  key. Findings: `research/eval-error-envelope-2026-05-22.md`.
+- Remaining unfixed KIs (KI-1, KI-4, KI-6) listed in
+  [v1.md Appendix B](v1.md#appendix-b--known-implementation-issues-unfixed-as-of-2026-05-22).
 
 ## Cross-track touchpoints
 
-The MVP and Platform tracks share infrastructure. Coordination points:
+The MVP and Platform tracks share infrastructure. Coordination
+points outstanding:
 
-- **Eval surface contract.** [[agent-repl-mvp]]'s spec describes what
-  `eval` returns; [[platform]] §"Eval surface" wires it into the WIT
-  `eval-form` export. Changes to error envelope shape (KI-3) affect
-  both.
-- **tx-meta as eval-id pointer.** Verified in the V0 Node pod
-  ([[agent-repl-mvp]]). Platform agent needs to confirm it still
-  works under wasmtime + the WIT shim.
+### MVP needs from Platform (added 2026-05-22, v1 design)
+
+1. **Blob dir read+write in the `seon:fs/sandbox` WIT interface.**
+   V1 adds `:seon.blob` content-addressed archival storage; bytes
+   at `<pod-data>/blobs/<hash[:2]>/<hash>.zst`. The drafted
+   `seon:fs/sandbox` WIT (`pod-host/wasm-tauri/src-wit/seon-pod.wit`)
+   needs to expose read+write to the blob subdir as a preopened
+   directory. Phase 7 capability hardening plans this; v1 needs it
+   concrete. No new WIT interface — just `seon.fs` default-deny
+   allowlist + WIT host config.
+
+2. **Agent conn must open with `:keep-history? true`.** Currently
+   `client.cljs:285` is `false`, silently killing the entire
+   tx-meta-as-history mechanic. One-line CLJS fix; no WIT change.
+   Boot precondition in v1 §8.1 throws clearly if absent.
+
+3. **D13 — dynvar propagation across WASM message-passing (SPIKE
+   REQUIRED before Phase 3 cutover).** V1 relies on
+   `seon.db/*tx-context*` — a CLJS dynvar bound by `eval-batch!`
+   around each form's eval, auto-merged into every tx's `:tx-meta`
+   by `seon.db/transact!`. CLJS `binding` is fiber-local. If a
+   transact is enqueued in one fiber and applied on another (the
+   wstd flow message-passing model), the binding may not propagate
+   — every tx then loses its causality bundle and the
+   capture-EVERYTHING-for-playback goal silently degrades.
+   **30-min REPL probe under wasmtime CLI** to confirm survival, OR
+   find an alternative propagation mechanism (explicit-arg pass
+   through to transact, or atom-backed scope token).
+
+### Other cross-track touchpoints
+
+- **Eval surface contract.** [v1.md](v1.md) §4 describes what
+  `eval` returns; [platform.md](platform.md) §"Eval surface" wires
+  it into the WIT `eval-form` export.
 - **Analyzer-cache load.** V0 pod loads from `out/bootstrap/ana/`.
-  Platform's WASM build needs the same caches packaged into the
-  Component bundle (see [[research/m2-findings-2026-05-21]] for the
-  bundle structure).
+  WASM build needs the same caches packaged into the Component
+  bundle (see `research/m2-findings-2026-05-21.md`).
+
+## Multi-pod concurrency rules
+
+Locking in so future agents don't re-derive:
+
+- **Each pod gets its own datahike DB.** Single-writer per LMDB
+  store; two processes on one DB will deadlock or corrupt.
+- **Blob dirs can be shared across pods.** Content-addressed by
+  SHA-256; duplicate writes are no-ops. Safe by construction. Useful
+  when multiple agents want to read each other's archived artifacts.
+- **Different pod versions on the same DB sequentially:** OK via D1
+  rules (substrate schemas are additive; datahike `:db/valueType`
+  is immutable; newer bootstrap is "transact only entries not
+  present" by identity-attr lookup).
+- **Different pod versions on the same DB concurrently:** NOT
+  supported — single-writer constraint.
+- **Multiple agents in one pod process:** supported by architecture;
+  v1 assumes single-agent. `seon.agent/*id*` dynvar provides
+  per-agent scope when v3 cross-agent collab lands.
 
 ## Iteration surface
 
 - Bring up the V0 pod: `clj -M:cljs watch client` (terminal 1) +
   `node out/client/main.js` (terminal 2). See
-  [[../../seon/pod/REPL-WORKFLOW]].
+  `docs/seon/pod/REPL-WORKFLOW.md`.
 - MCP tools: `mcp__seon_cljs__eval` for host-side eval (the
   substrate's `:client` runtime). `(seon.repl/dev-init!)` once per
   pod boot brings up `@!compile-state` and `@!conn`.
 - WASM iteration: reserve for confidence runs. See
-  [[research/m2-findings-2026-05-21]] §"Iteration cadence".
+  `research/m2-findings-2026-05-21.md` §"Iteration cadence".
 
 ## Layout
 
-```text
-docs/prds/webassembly-agents/
-├── STATUS.md           ← you are here
-├── agent-repl-mvp.md   ← MVP track design
-├── platform.md         ← Platform track design
-└── research/
-    ├── m2-findings-2026-05-21.md   (WASM landmines, owned by platform)
-    ├── v0-state-2026-05-20.md      (V0 Node pod state snapshot)
-    └── wasm-spike-2026-05-20.md    (earlier spike report)
-
-```
-
-The operational doc [[../../seon/pod/REPL-WORKFLOW]] stays under
-`docs/seon/pod/` because it's substrate-wide (used by both tracks
-and by anything else iterating against the V0 pod).
+See [README.md](README.md) §"Layout" for the canonical file map.

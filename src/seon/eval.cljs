@@ -33,7 +33,8 @@
      this.
    - **`(in-ns 'foo)` is not bootstrapped.** Use `(ns foo)` to switch."
   (:refer-clojure :exclude [eval])
-  (:require [cljs.js :as cljs]
+  (:require [cljs.analyzer :as ana]
+            [cljs.js :as cljs]
             [clojure.string :as str]
             [shadow.cljs.bootstrap.node :as boot]
             [seon.db :as db]
@@ -114,12 +115,75 @@
 ;; callers can `(await ...)` it from straight-line agent code.
 ;; ============================================================
 
+(defn- bootstrap-cache-files
+  "Enumerate `<bootstrap>/ana/*.transit.json` files. Returns a vector
+   of `[ns-sym path]` pairs. cljs.core + cljs.core$macros are sorted
+   first so they land in the analyzer state before anything that
+   references them — order doesn't strictly matter (load-analysis-
+   cache! is just a swap), but cosmetic ordering helps when debugging
+   the @compile-state map."
+  [bootstrap-path]
+  (let [fs       (js/require "fs")
+        path-mod (js/require "path")
+        ana-dir  (.resolve path-mod bootstrap-path "ana")
+        names    (.readdirSync fs ana-dir)
+        suffix   ".transit.json"]
+    (->> (array-seq names)
+         (filter #(str/ends-with? % suffix))
+         (map (fn [filename]
+                (let [ns-name (subs filename 0 (- (count filename) (count suffix)))]
+                  [(symbol ns-name) (.resolve path-mod ana-dir filename)])))
+         (sort-by (fn [[ns-sym _]]
+                    (case (str ns-sym)
+                      "cljs.core"        0
+                      "cljs.core$macros" 1
+                      2))))))
+
+(defn- load-all-analysis-caches!
+  "Read every `*.transit.json` under `<bootstrap>/ana/` and call
+   `cljs.js/load-analysis-cache!` on each. Solves a class of fragility:
+   any namespace listed in `shadow-cljs.edn :bootstrap :entries`
+   automatically lands in the analyzer state, so agent code can
+   `(require ...)` and reference it from inside cljs.js/eval-str
+   without manual maintenance of a load-list.
+
+   Why this is needed: shadow's `boot/init` only auto-loads the
+   analyzer cache for entries whose `[:cljs.analyzer/namespaces ns
+   :name]` is nil (`bootstrap/node.cljs:104`). `(cljs/empty-state)`
+   calls `(dump-core)` which leaves stubs with `:name` set for many
+   nses, so the filter short-circuits. Loading unconditionally
+   here is the robust answer."
+  [state bootstrap-path]
+  (let [fs (js/require "fs")]
+    (doseq [[ns-sym path] (bootstrap-cache-files bootstrap-path)]
+      (let [txt  (.readFileSync fs path "utf8")
+            data (boot/transit-read txt)]
+        (cljs/load-analysis-cache! state ns-sym data)))))
+
+;; Stamped at code-eval time. Hot-reload of THIS namespace produces a
+;; fresh gensym; the cached compile-state in `seon.repl/!compile-state`
+;; carries the old version via `seon.repl/!init-version`, so the next
+;; `ensure-bootstrap!` re-runs init. Hot-reloads of unrelated nses
+;; keep the version, leaving the warm state in place.
+;; Use `def` (not `defonce`) so reloads of `seon.eval` rotate it.
+(def init-version (gensym "seon.eval/init-v_"))
+
 (defn ^:async init-bootstrap!
   "Initialize a fresh compile-state from out/bootstrap/. Returns the
    compile-state, ready for `eval` / `eval-batch!`. Stores cljs.core
    on globalThis (via goog.globalEval inside shadow's loader); without
    that, find-ns-obj fails on the first macro form and eval-str
-   throws TypeError on findInternedVar."
+   throws TypeError on findInternedVar.
+
+   Force-populates the analyzer caches for EVERY namespace shadow
+   emitted into the bootstrap output — see `load-all-analysis-caches!`
+   for the rationale and the alternative we rejected (hand-coded
+   load list for `[cljs.core cljs.core$macros]` only, which would
+   silently break the moment someone expanded `:bootstrap :entries`).
+
+   Callers (`seon.repl/ensure-bootstrap!`, `seon.client/start-agent!`)
+   pair the result with `init-version` to detect stale-after-reload
+   state; see [[seon.repl/!init-version]]."
   []
   (let [state (cljs/empty-state)]
     (await (js/Promise.
@@ -128,6 +192,7 @@
                           {:path "out/bootstrap"
                            :load-on-init '#{cljs.core}}
                           (fn [] (resolve nil))))))
+    (load-all-analysis-caches! state "out/bootstrap")
     (when-not (and (some? (.-cljs js/global))
                    (some? (.-core (.-cljs js/global))))
       (throw (js/Error.
@@ -138,23 +203,118 @@
 ;; Core eval — one form. Safe by default.
 ;; ============================================================
 
+(defn- resolves-on-globalthis?
+  "True if `path` (a munged dotted name like `seon.db.transact_BANG_`)
+   walks to a non-nil JS object via `goog.getObjectByName`."
+  [path]
+  (some? (js/goog.getObjectByName path)))
+
+(defn- truly-undeclared?
+  "Decide whether an `:undeclared-var` / `:undeclared-ns` analyzer
+   warning is REAL (the symbol resolves nowhere) vs. a benign
+   false-positive (bundled into the host runtime but the analyzer
+   didn't see it because we run with `:analyze-deps? false`).
+
+   `:analyze-deps? false` is load-bearing — see the docstring on
+   `eval`. The analyzer warns on every cross-ns ref to a bundled var
+   (e.g. `seon.db/transact!`); at runtime those resolve via
+   `cljs.core/munge`'d paths on globalThis. So the warning alone
+   isn't a failure signal.
+
+   Resolution strategy, in order:
+
+   1. If the warning targets a ns already in
+      `:cljs.analyzer/namespaces`, treat as analyzer false-positive
+      (the analyzer DID know — something else is going on, but it's
+      not the agent's typo). Don't escalate.
+   2. Otherwise check globalThis at the munged path. Try the warning's
+      own prefix first, then `cljs.core` as a fallback for unqualified
+      refs (analyzer reports prefix=current-ns for those; `(+ 1 2)` in
+      `cljs.user` warns prefix=cljs.user suffix=+, and the var lives
+      at `cljs.core._PLUS_`).
+   3. If neither path resolves, truly undeclared → escalate."
+  [compile-state {:keys [prefix suffix] :as _warning}]
+  (cond
+    ;; Strong short-circuit: ns has real :defs in the analyzer's
+    ;; compile-state. If the var is registered on a populated ns and
+    ;; the analyzer still warned, that's an analyzer bug, not the
+    ;; agent's typo — don't escalate. Empty-ns case (`cljs.user`
+    ;; before any defs) doesn't trip this, so `Let` still routes
+    ;; through the globalThis check below.
+    (let [ns-defs (:defs (get-in @compile-state
+                                 [:cljs.analyzer/namespaces (symbol prefix)]))]
+      (and ns-defs (contains? ns-defs (symbol suffix))))
+    false
+
+    :else
+    (let [munged-suffix (cljs.core/munge (str suffix))
+          prefix-path   (when prefix
+                          (str (cljs.core/munge (str prefix)) "." munged-suffix))
+          core-path     (str "cljs.core." munged-suffix)]
+      (not (or (and prefix-path (resolves-on-globalthis? prefix-path))
+               (resolves-on-globalthis? core-path)
+               ;; Bare lookup for nil-prefix shapes.
+               (resolves-on-globalthis? munged-suffix))))))
+
 (defn ^:async ^:private raw-eval
   "Internal — returns a Promise that resolves with {:value v :ns ns}
-   or rejects with the error. The public `eval` catches both."
+   or rejects with the error. The public `eval` catches both.
+
+   `cljs.js`'s `:warning-handlers` option doesn't actually replace the
+   analyzer's `*cljs-warning-handlers*` chain — the default handlers
+   still fire and surface an `:error` to the callback for
+   `:undeclared-var` before our hook runs. To gate that path we
+   `set!` the dynamic var directly and restore it on callback.
+
+   Warning shape captured: `{:prefix … :suffix … :seon.eval/warning-type
+   …}`. After eval, any warning whose target doesn't resolve through
+   the strategy in `truly-undeclared?` is promoted to a `:compile`-
+   kind error. Warning check runs BEFORE the `error` branch — when
+   our handler IS the only one installed, the analyzer no longer
+   raises an :error for undeclared-var, so the cond ordering decides
+   which shape we surface."
   [compile-state form-str ns-sym analyze-deps?]
-  (js/Promise.
-    (fn [resolve reject]
-      (cljs/eval-str compile-state form-str 'seon.dynamic
-        {:eval          cljs/js-eval
-         :load          (partial boot/load compile-state)
-         :ns            ns-sym
-         :context       :statement
-         :def-emits-var true
-         :analyze-deps  analyze-deps?}
-        (fn [{:keys [error value ns]}]
-          (if error
-            (reject error)
-            (resolve {:value value :ns ns})))))))
+  (let [warnings (atom [])
+        prev-h  ana/*cljs-warning-handlers*]
+    (js/Promise.
+      (fn [resolve reject]
+        (set! ana/*cljs-warning-handlers*
+              [(fn [type _env extra]
+                 (when (#{:undeclared-var :undeclared-ns} type)
+                   (swap! warnings conj
+                          (assoc extra :seon.eval/warning-type type))))])
+        (cljs/eval-str compile-state form-str 'seon.dynamic
+          {:eval          cljs/js-eval
+           :load          (partial boot/load compile-state)
+           :ns            ns-sym
+           :context       :statement
+           :def-emits-var true
+           :analyze-deps  analyze-deps?}
+          (fn [{:keys [error value ns]}]
+            ;; Restore FIRST so a thrown reject doesn't leak the binding.
+            (set! ana/*cljs-warning-handlers* prev-h)
+            (cond
+              ;; Truly-undeclared check runs before :error — with the
+              ;; analyzer's default handler chain swapped out, the
+              ;; analyzer no longer fires an :error for undeclared-var,
+              ;; so our captured warnings are the authoritative signal.
+              (some (partial truly-undeclared? compile-state) @warnings)
+              (let [{:keys [prefix suffix] :as w}
+                    (first (filter (partial truly-undeclared? compile-state)
+                                   @warnings))]
+                (reject
+                  (ex-info (str "undeclared " (name (:seon.eval/warning-type w))
+                                ": " prefix "/" suffix)
+                           {:seon.error/kind :compile
+                            :seon.eval/warning-type (:seon.eval/warning-type w)
+                            :seon.eval/undeclared (str prefix "/" suffix)
+                            :seon.eval/warning (dissoc w :seon.eval/warning-type)})))
+
+              error
+              (reject error)
+
+              :else
+              (resolve {:value value :ns ns}))))))))
 
 (defn ^:async eval
   "Evaluate a string of CLJS in the agent's persistent compile-state.

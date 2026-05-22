@@ -5,7 +5,11 @@
  {;; === ERROR LEVEL (block on these) ===
   ;; These are definite bugs that should block commits
 
-  :unresolved-symbol {:level :error}
+  ;; `await` is a CLJS 1.12.145+ special form for native async/await
+  ;; (see memory: reference-cljs-async-await). clj-kondo doesn't know
+  ;; the special form yet; whitelist it so ^:async fns lint clean.
+  :unresolved-symbol {:level :error
+                      :exclude [await]}
   :unresolved-namespace {:level :error}
   :unresolved-var {:level :error}
   :invalid-arity {:level :error}

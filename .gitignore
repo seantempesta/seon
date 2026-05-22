@@ -41,6 +41,23 @@ hs_err_pid*.log
 .shadow-cljs/
 out/
 
+# Symlink into out/ — convenience for local dev; resolves to nothing elsewhere
+/bootstrap
+
+# Rust / wasm-tauri build artifacts (per-user, large)
+pod-host/wasm-tauri/target/
+pod-host/wasm-tauri/pod-build/
+pod-host/wasm-tauri/eval-smoke-build/
+pod-host/wasm-tauri/smoke-build/
+pod-host/wasm-tauri/.envrc
+
+# Per-user reference checkouts (separate git clones, not Seon source)
+reference-code/datahike-lmdb/
+
+# Agent worktree state (per-user, local-only)
+.claude/worktrees/
+.antigravitycli/
+
 # Obsidian vault state (per-user)
 docs/.obsidian/workspace.json
 docs/.obsidian/workspace-mobile.json

@@ -15,8 +15,17 @@
 
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")"
 ROOT="$(pwd)"
+
+# Share Cargo's target dir across builds (placeholder vs smoke vs real pod).
+# Cold builds pull ~120 deps (rquickjs + WASI bindings + crypto stack) =
+# ~8 minutes. With a shared target/, incremental rebuilds drop to ~15-20s
+# because the deps are already compiled.
+#
+# Default to pod-build/target/ so all wasm32-wasip2 artifacts land in one
+# place. Honor an externally-set CARGO_TARGET_DIR (devs may override).
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/pod-build/target}"
 
 WANT_TAURI=false
 FORCE_PLACEHOLDER=false

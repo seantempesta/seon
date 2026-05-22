@@ -37,4 +37,11 @@ impl HttpAllowlist {
     pub fn contains(&self, host: &str) -> bool {
         self.hosts.contains(host)
     }
+
+    /// `true` iff `host` (bare authority — no port) was previously seeded via
+    /// [`allow_host`](Self::allow_host). Used by the wasi-http outgoing-handler
+    /// gate in `pod.rs` to deny by default.
+    pub fn is_allowed(&self, host: &str) -> bool {
+        self.hosts.contains(host)
+    }
 }

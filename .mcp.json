@@ -5,6 +5,12 @@
       "command": "/Users/sean/src/seon/bin/mcp-server",
       "args": [],
       "env": {}
+    },
+    "seon_cljs": {
+      "type": "stdio",
+      "command": "/Users/sean/src/seon/bin/mcp-server-cljs",
+      "args": [],
+      "env": {}
     }
   }
 }

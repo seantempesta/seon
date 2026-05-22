@@ -15,12 +15,16 @@
 //     calls `get-ui-port` (B-3 green criterion).
 
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 
 use wasmtime::component::{Component, HasSelf, Linker, Resource, ResourceTable};
 use wasmtime::{Config, Engine, Store};
 use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
-use wasmtime_wasi_http::p2::{WasiHttpCtxView, WasiHttpView};
+use wasmtime_wasi_http::p2::bindings::http::types::ErrorCode;
+use wasmtime_wasi_http::p2::body::HyperOutgoingBody;
+use wasmtime_wasi_http::p2::types::{HostFutureIncomingResponse, OutgoingRequestConfig};
+use wasmtime_wasi_http::p2::{
+    default_send_request, HttpResult, WasiHttpCtxView, WasiHttpHooks, WasiHttpView,
+};
 use wasmtime_wasi_http::WasiHttpCtx;
 
 use crate::http::HttpAllowlist;
@@ -71,11 +75,54 @@ pub use seon::pod::types::AgentState;
 // ---------------------------------------------------------------------------
 
 pub struct SeonStore {
-    wasi:    WasiCtx,
-    http:    WasiHttpCtx,
-    table:   ResourceTable,
-    #[allow(dead_code)]
-    allowed: Mutex<HttpAllowlist>,
+    wasi:  WasiCtx,
+    http:  WasiHttpCtx,
+    table: ResourceTable,
+    hooks: SeonHttpHooks,
+}
+
+/// Per-store hooks for `wasmtime-wasi-http`. Holds the outbound-HTTPS allowlist
+/// and overrides [`WasiHttpHooks::send_request`] so denied hosts never reach
+/// hyper. This is the URL-filtering hook referenced in
+/// `docs/prds/webassembly-agents/research/capability-surface-2026-05-22.md`
+/// §"Capability #2: Outbound HTTPS" §(B) item 1.
+pub struct SeonHttpHooks {
+    allowed: HttpAllowlist,
+}
+
+impl SeonHttpHooks {
+    /// Construct a new hooks instance with the given allowlist. Exposed for
+    /// integration tests that exercise the override without spinning up a
+    /// full pod.
+    pub fn new(allowed: HttpAllowlist) -> Self {
+        Self { allowed }
+    }
+}
+
+impl WasiHttpHooks for SeonHttpHooks {
+    fn send_request(
+        &mut self,
+        request: hyper::Request<HyperOutgoingBody>,
+        config: OutgoingRequestConfig,
+    ) -> HttpResult<HostFutureIncomingResponse> {
+        let host = request.uri().host().unwrap_or("");
+        if self.allowed.is_allowed(host) {
+            Ok(default_send_request(request, config))
+        } else {
+            tracing::warn!(
+                target: "seon::pod::http",
+                host = %host,
+                uri = %request.uri(),
+                "outbound HTTPS denied — host not in allowlist",
+            );
+            eprintln!(
+                "[pod http] DENY {} (host {:?} not in allowlist)",
+                request.uri(),
+                host
+            );
+            Err(ErrorCode::HttpRequestDenied.into())
+        }
+    }
 }
 
 impl SeonStore {
@@ -106,10 +153,10 @@ impl SeonStore {
                 })?;
         }
         Ok(Self {
-            wasi:    builder.build(),
-            http:    WasiHttpCtx::new(),
-            table:   ResourceTable::new(),
-            allowed: Mutex::new(allowed),
+            wasi:  builder.build(),
+            http:  WasiHttpCtx::new(),
+            table: ResourceTable::new(),
+            hooks: SeonHttpHooks { allowed },
         })
     }
 }
@@ -125,7 +172,7 @@ impl WasiHttpView for SeonStore {
         WasiHttpCtxView {
             ctx:   &mut self.http,
             table: &mut self.table,
-            hooks: Default::default(),
+            hooks: &mut self.hooks,
         }
     }
 }

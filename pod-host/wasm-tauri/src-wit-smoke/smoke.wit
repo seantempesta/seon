@@ -1,0 +1,31 @@
+// smoke.wit — minimal WIT world for the M1 cljs.js smoke test.
+//
+// Deliberately has NO host-mediated imports (no fs/mcp/capability-prompt).
+// The smoke runs entirely in-memory via datahike-cljs's :memory backend.
+// This lets `wasmtime run --invoke smoke` instantiate the component
+// without a Rust host providing capability stubs — a clean go/no-go
+// for the riskiest question: does cljs.js work under QuickJS at all?
+//
+// Once this passes, M2 introduces the full seon-pod world with host
+// capabilities.
+
+package seon:smoke@0.1.0;
+
+world smoke {
+  // WASI standard imports the wasm-rquickjs runtime needs regardless.
+  // These match the versions vendored in deps/ (shared symlink to
+  // src-wit/deps/).
+  import wasi:clocks/wall-clock@0.2.3;
+  import wasi:clocks/monotonic-clock@0.2.3;
+  import wasi:random/random@0.2.3;
+  // wasi:logging intentionally omitted — stock wasmtime CLI provides
+  // a `log` function whose signature doesn't match the draft we'd want
+  // imported here. We disable the `logging` feature in the wrapper
+  // crate; console.* calls from inside QuickJS become silent. Fine for
+  // a smoke test; the real seon-pod world keeps wasi:logging because
+  // the Rust host provides it explicitly.
+
+  // Returns the pr-str'd EDN of the smoke result, e.g.
+  //   "{:status :pass, :datoms 6, :rows #{...}}"
+  export smoke: func() -> string;
+}

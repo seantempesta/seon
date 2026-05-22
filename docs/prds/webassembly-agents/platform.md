@@ -40,12 +40,6 @@ beyond MVP turns the pod into a real package-installable workspace.
   map and output map. The agent must be able to look at any
   `seon.*` fn and learn its contract from the schema without reading
   the body.
-- **No globals, no atoms in the API.** Atoms are an implementation
-  detail when they truly fit (e.g. a transient builder local to one
-  fn that converts back to a value before returning); they're never
-  the way a caller communicates with a function. State that has to
-  cross fn boundaries belongs in the datahike conn, which IS a data
-  surface — queries return data, transacts take data.
 - **Per-call binding > install! mutation.** When a library wants a
   "global" handler (cljs.test's `*current-env*`, etc.), wrap the
   call in a `binding` of a per-call value instead of mutating the
@@ -54,6 +48,33 @@ beyond MVP turns the pod into a real package-installable workspace.
 - **Capabilities are explicit.** Every external action (HTTP, fs,
   npm install, package fetch) flows through a WIT import the agent
   can see and the host can deny. No ambient authority.
+
+### Where state goes — pick the narrowest scope that fits
+
+Most code doesn't need state. When it does, pick the smallest
+container that solves the problem. Going wider than needed is the
+default mistake.
+
+| Need | Use | Example |
+|---|---|---|
+| Compute a value from inputs | Pure fn args → return | `(run-vars req) → run-result` |
+| Build up a collection inside one call | `volatile!` + `transient` local-to-fn, returned as immutable value | The `!builder` in `run-vars` |
+| Track per-call settings a callback chain reads | Dynvar + `binding` | `cljs.test/*current-env*` |
+| State that must outlive the call and survive restart | Datahike — transact in, query out | `:seon.test/last-passed-at`, `:seon.fn/source`, the eval log |
+| State pinned to one process lifetime (caches, connection handles, in-flight Promises) | `defonce` atom in a clearly-named ns | `seon.repl/!compile-state`, `seon.repl/!conn` |
+
+The DB is a data surface: `db/query` returns data, `db/transact!`
+takes data. It's the right answer for the cross-session story —
+session N writes `:seon.test/last-failed-at`, session N+1 queries
+it for the warnings tile — same as for any other persistent entity
+(`:seon.fn/*`, `:seon.schema/*`, etc.).
+
+Process-lifetime defoncing IS fine for things that can't be
+serialized through the DB (the live cljs.js compile-state, an open
+datahike conn, an in-flight Promise). These are reachable as data
+through `db/pull-by-name` / `db/query` to the extent they have a
+DB shadow; the atom holds the live JS object. Don't go through
+defonce when a fn-local volatile or a DB transact would work.
 
 ## Current state (2026-05-22)
 
@@ -73,6 +94,10 @@ beyond MVP turns the pod into a real package-installable workspace.
 | Bootstrap-macros workaround | shipped | `bin/fix-bootstrap-macros` (defensive; not currently needed) |
 | `mcp__seon_cljs__eval` MCP server | shipped | `bin/mcp-server-cljs` |
 | Capability-bounded WIT surface (fs/http/mcp/capability-prompt) | designed | `pod-host/wasm-tauri/src-wit/seon-pod.wit` (not yet built into eval-smoke) |
+| One canonical `!compile-state` shared between `start-agent!` and `dev-init!` | shipped 2026-05-22 | `seon.repl/!compile-state` + `seon.eval/init-version` version-stamp ([[research/compile-state-lifecycle-2026-05-22]]) |
+| Flattened error envelope (top-level `:seon.error/data` across cause chain) | shipped 2026-05-22 | `seon.error/->map` ([[research/eval-error-envelope-2026-05-22]]) |
+| Test capture as data (Phase 2) — `run-vars` + `stash-run!` + `record-run!` | shipped 2026-05-22 | `seon.test.runner` |
+| Outbound HTTPS allowlist (capability Phase A) | shipped 2026-05-22 | `SeonHttpHooks::send_request` (`pod-host/wasm-tauri/src-tauri/src/pod.rs`) — gates on `HttpAllowlist` |
 
 ### 🚧 Known gaps the MVP doesn't address
 
@@ -89,17 +114,72 @@ beyond MVP turns the pod into a real package-installable workspace.
 
 ## Solution design — Phased roadmap
 
+The roadmap below frames Phases 1-7 by capability. For an
+operational A-E rollout that maps the host-side substrate work
+(HTTPS allowlist override → preopen layout → MCP bridge → ad-hoc
+fs → lifted mode), source-grounded against `pod.rs` +
+`wasm-rquickjs` + `wasi:http`, see
+[[research/capability-surface-2026-05-22]].
+
 ### Phase 1 — MVP substrate (DONE)
 
 Today's deliverables. See [[research/m2-findings-2026-05-21]] for the WASM landmines + workarounds, and [[../../seon/pod/REPL-WORKFLOW]] for the iteration surface.
 
-### Phase 2 — Test infra promoted to data
+### Phase 2 — Test infra promoted to data (SHIPPED 2026-05-22)
 
-Goal: every cljs.test event becomes an EDN datom the renderer can show. Foundation for the agent reading test results as part of its context, not by parsing console output.
+Goal: every cljs.test event becomes captured data the renderer can show. Foundation for the agent reading test results as part of its context, not by parsing console output.
+
+Implementation in `src/seon/test/runner.cljs`. The shipped surface
+is `run-vars` + `stash-run!` + `record-run!` + the convenience
+`run-and-record!`. See below for the as-shipped storage model
+(differs from the initial design here in one important way — see
+"Storage redirect" subsection).
+
+#### Storage redirect (2026-05-22)
+
+**Full data lives on the agent's namespace, not the DB.** Per the
+user's directive: "only put data in the database schema that we
+want to surface in the agent's context." So:
+
+- `run-vars` returns the full `{::events [...] ::summary {...}}`
+  data structure — pure fn, no side effects.
+- `stash-run!` writes that result onto globalThis under
+  `__seon_test_run_<run-id>`. The agent reaches the blob through
+  the existing `(result <run-id>)` helper that
+  `seon.eval/setup-agent-ns!` wires into the agent's home ns. Same
+  retrieval pattern as eval results.
+- `record-run!` transacts ONLY the surfaced projection:
+  `:seon.test/sym + :last-passed-at | :last-failed-at +
+  :last-failure-summary (≤200 chars) + :last-run-id`. The full
+  failure event is NOT in the DB — the agent fetches it via
+  `(result <run-id>)` when it wants to dig in.
+- For runs that are extremely large (multi-MB), the future move is
+  to spill the stashed result to disk under `tmp/test-runs/<id>.edn`
+  so it survives process restart. V0.5 keeps it on globalThis.
+
+Why this matters: huge event sequences would balloon datahike
+transit cost on every read, and the agent typically only needs the
+latest run + a short summary in its context. The blob is on the
+ns, the projection is in the DB.
 
 #### Capture mechanism
 
-**Data in, data out — no globals, no atoms in the API.** cljs.test already supports a per-run `:reporter` slot on its environment (`cljs.test/*current-env*`). We bind a per-call environment whose reporter accumulates into a local builder, then return the events as data.
+**Data in, data out — no globals, no atoms in the API.** cljs.test
+dispatches `report` on `[(:reporter env) :type]`. We claim a
+`::seon.test.runner/capture` reporter keyword and ship per-event
+`defmethod`s that append to a `volatile!` builder living in the env
+under `::!builder`. The defmethods close over nothing; the env IS
+the per-call context.
+
+Because cljs.test's `test-vars` requires actual `Var` instances
+(`{:pre [(instance? Var v)]}`) which self-host can't synthesize
+from runtime symbol values, the runner DRIVES the test fns
+directly via the munged-globalThis path (mirroring
+`seon.eval/truly-undeclared?`). Every `(is …)` inside a test still
+fires `cljs.test/do-report`, which dispatches through our
+`::capture` defmethods — so captured event shape matches what
+`t/test-vars` would have produced, minus a real `Var` reference
+(we use `#js {:sym <symbol>}` as a stand-in).
 
 ```clojure
 ;; src/seon/test/runner.cljs

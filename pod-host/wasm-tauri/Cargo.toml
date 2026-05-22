@@ -28,6 +28,7 @@ members = [
 version = "0.1.0"
 edition = "2021"
 license = "AGPL-3.0-or-later"
+authors = ["Seon Contributors"]
 
 # Versions pinned 2026-05-19 to latest published on crates.io. Earlier
 # planning named wasmtime 46.x / Tauri 2.11.x; wasmtime's main branch

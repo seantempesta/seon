@@ -1,0 +1,65 @@
+// eval-smoke.wit — M2 WIT world: self-hosted CLJS eval under wasmtime.
+//
+// Where M1 (src-wit-smoke/smoke.wit) proved datahike-cljs loads under
+// wasm-rquickjs, M2 proves the cljs.js + shadow.cljs.bootstrap.node
+// compiler stack works inside the same container — the prerequisite
+// for live agent eval inside the WASM pod.
+//
+// Diff vs M1's smoke world:
+//   - wasi:filesystem/{preopens,types} imports — bootstrap loader needs
+//     fs.readFile to load out/bootstrap/index.transit.json + per-ns .js
+//     files. Run wasmtime with `--dir out/bootstrap::bootstrap` so the
+//     bundle (which passes :path "bootstrap" to boot/init) finds them.
+//   - Two exports instead of one. init-bootstrap is idempotent; the
+//     host calls it once, then eval-form repeatedly. Both return EDN
+//     strings so the WIT surface stays trivially typed.
+
+package seon:eval-smoke@0.1.0;
+
+world eval-smoke {
+  // WASI imports the wasm-rquickjs runtime needs regardless. Versions
+  // must match the ones vendored in deps/ (copied from src-wit-smoke
+  // which copies from src-wit).
+  import wasi:clocks/wall-clock@0.2.3;
+  import wasi:clocks/monotonic-clock@0.2.3;
+  import wasi:random/random@0.2.3;
+
+  // Filesystem — needed by shadow.cljs.bootstrap.node/transit-load and
+  // load-namespaces, which both do `fs.readFile(asset-path, cb)`. The
+  // wasm-rquickjs fs shim is backed by wasip2::filesystem.
+  import wasi:filesystem/preopens@0.2.3;
+  import wasi:filesystem/types@0.2.3;
+
+  // wasi:logging intentionally omitted — same rationale as smoke.wit.
+  // console.* calls inside the bundle are silent under wasmtime CLI.
+
+  // Initialize the bootstrap-CLJS compile-state. Returns "ok" on
+  // success or a pr-str'd EDN map on failure. Idempotent — second
+  // call is a no-op. MUST be called before any eval-form.
+  export init-bootstrap: func() -> string;
+
+  // Evaluate one CLJS form-string against the persistent compile-state.
+  // Returns a pr-str'd EDN map:
+  //   {:ok true  :value-edn "..." :ns cljs.user}
+  //   {:ok false :error "..."}
+  //
+  // The compile-state persists across calls so `(def x 42)` then
+  // `(defn use-x [] x)` then `(use-x)` works across three eval-form
+  // calls. `(ns other.ns)` switches the persistent current-ns.
+  //
+  // Note: this is `eval-form` (kebab) → JS `evalForm` (camel). WIT
+  // forbids the literal name `eval` since `export const eval = ...`
+  // is a JS SyntaxError; same convention as src-wit/seon-pod.wit.
+  export eval-form: func(form: string) -> string;
+
+  // Evaluate ALL top-level forms in `source` against the persistent
+  // compile-state. Returns a pr-str'd EDN vector — one entry per form
+  // — with the same shape `eval-form` returns. Bare-symbol prose
+  // tokens are dropped silently (mirrors seon.repl/parse-forms).
+  //
+  // Use for confidence runs: write a multi-form test program (require
+  // + deftests + run-tests), invoke once, read the result vector.
+  // wasmtime's `--invoke` spawns a fresh component instance per call,
+  // so a single batch invocation IS the test session.
+  export eval-batch: func(source: string) -> string;
+}

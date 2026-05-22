@@ -31,6 +31,24 @@ WASM-Tauri containment. The seon CLJS pod runs as a `wasm32-wasip2` Component (v
 
 ---
 
+## Image Generation Policy
+
+For tasks requiring UI design, mockup assets, or visual demonstrations, the agent can use the built-in `generate_image` tool. Avoid using generic image placeholders—generate working demonstration assets instead.
+
+---
+
+## Research Agent Policy
+
+**One agent, full context — not N parallel agents with slivers.** When delegating research (spec critique, library audits, external LLM consultations, codebase surveys), launch ONE agent and give it the COMPLETE relevant context: the full spec, the goals, the prior research, the constraints. Do not split a research question into 4-6 parallel sub-queries — that pattern produces shallow, disconnected findings AND drains the orchestrator's token budget loading each agent's separate context.
+
+The exception is genuinely independent topics (e.g., "audit datahike capabilities" and "survey V0 implementation" are different bodies of source code, run them in parallel). But "do 4 Gemini queries each asking about one schema concern" is the anti-pattern — make it one Gemini call with everything.
+
+**Research deliverable is a file, not a chat summary.** Every research agent writes to `docs/prds/<project>/research/<topic>-<date>.md` with frontmatter, a TL;DR, and raw external responses preserved verbatim. Conversations get compacted; files survive across sessions. Prior agents have re-derived the same research three times because findings only existed in chat.
+
+**External LLM CLI:** `agy -p "..."` (model: `gemini-3.5-flash` by default, configured in `~/.gemini/antigravity-cli/settings.json`). Pipe long prompts via stdin: `cat prompt.txt | agy -p ""`. For very long contexts (multi-thousand-line specs), write the prompt to a file and `cat` it in.
+
+---
+
 ## System Documentation
 
 All documentation lives in `docs/` — markdown files under version control. Use Read, Glob, and Grep to navigate.

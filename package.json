@@ -11,7 +11,7 @@
     "css:build": "tailwindcss -i resources/public/css/input.css -o resources/public/css/output.css",
     "css:watch": "tailwindcss -i resources/public/css/input.css -o resources/public/css/output.css --watch",
     "client:watch": "clj -M:cljs watch client",
-    "client:run":   "node out/client/main.js",
+    "client:run": "node out/client/main.js",
     "client:clean": "rm -rf out/client .shadow-cljs"
   },
   "keywords": [],
@@ -23,7 +23,8 @@
     "@tailwindcss/typography": "^0.5.19",
     "fake-indexeddb": "^6.0.0",
     "shadow-cljs": "^3.4.10",
-    "tailwindcss": "^4.1.18"
+    "tailwindcss": "^4.1.18",
+    "ws": "^8.20.1"
   },
   "dependencies": {
     "@js-joda/core": "3.2.0",

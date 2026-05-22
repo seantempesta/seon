@@ -175,6 +175,21 @@
          :override-deps {org.replikativ/datahike
                          {:git/url "https://github.com/seantempesta/datahike"
                           :git/sha "01ba3f18bf08da2c093eb0972ec1f272b817f23d"}
+                         org.replikativ/superv.async
+                         ;; Patched simple-supervisor's stale-pending
+                         ;; watchdog to be LAZY: instead of starting a
+                         ;; self-rescheduling setTimeout chain at
+                         ;; namespace load, the watchdog activates on
+                         ;; the first -track-exception call. Namespace
+                         ;; load is timer-free, which lets wasm-rquickjs
+                         ;; hosts under wstd::runtime::block_on (e.g.
+                         ;; wasmtime CLI's `run --invoke`) return cleanly.
+                         ;; Exception surfacing semantics preserved — the
+                         ;; watchdog kicks in the moment a real channel
+                         ;; exception needs tracking. Branch
+                         ;; `wasm/lazy-watchdog`. Upstream PR pending.
+                         {:git/url "https://github.com/seantempesta/superv.async"
+                          :git/sha "3e6ed755f83634c9e9bbb58707f9446420d32ce9"}
                          is.simm/partial-cps
                          {:git/url "https://github.com/seantempesta/partial-cps"
                           :git/sha "c0d941d4b591351267bc828fdfdf029be53a132f"}}

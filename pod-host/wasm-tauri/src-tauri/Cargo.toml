@@ -24,13 +24,19 @@ path = "src/main.rs"
 wasmtime           = { workspace = true, features = ["component-model", "async", "cranelift", "runtime"] }
 wasmtime-wasi      = { workspace = true, features = ["p2"] }
 wasmtime-wasi-http = { workspace = true, features = ["p2"] }
+# `hyper` is re-exported by wasmtime-wasi-http internally; we depend on it
+# directly for the `SeonHttpHooks::send_request` override type signature.
+hyper              = { version = "1", default-features = false }
 tokio              = { workspace = true }
 anyhow             = { workspace = true }
 thiserror          = { workspace = true }
 tracing            = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tokio            = { workspace = true, features = ["macros", "rt-multi-thread"] }
+http-body-util   = "0.1"
+bytes            = "1"
+http             = "1"
 
 [lints.rust]
 unsafe_code = "forbid"

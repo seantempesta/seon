@@ -151,6 +151,75 @@ Avoid `(with-out-str (run-tests))` inside eval-str — that combo
 trips a `cljs.core$macros/str` expansion edge case in self-host.
 Read test output via host stdout instead.
 
+### Test capture as data — `seon.test.runner` (Phase 2, shipped 2026-05-22)
+
+For agent-facing usage where the test output must be readable as
+DATA (not parsed from stdout), use `seon.test.runner`. Same
+`(deftest …)` definitions; different runner.
+
+```clojure
+(require '[cljs.test :refer-macros [deftest is]]
+         '[seon.test.runner :as runner])
+
+(deftest mytest (is (= 49 (* 7 7))))
+
+;; Pure capture — returns events + summary as data, no DB write.
+(runner/run-vars {:seon.test.runner/vars ['cljs.user/mytest]})
+;; => {:seon.test.runner/events
+;;       [{:type :begin-test-var, :var cljs.user/mytest, :ns cljs.user}
+;;        {:type :pass, :expected "(= 49 (* 7 7))", :actual "(= 49 49)",
+;;         :var cljs.user/mytest, :ns cljs.user}
+;;        {:type :end-test-var, :var cljs.user/mytest, :ns cljs.user}
+;;        {:type :summary, :test 1, :pass 1, :fail 0, :error 0}]
+;;     :seon.test.runner/summary {:test 1 :pass 1 :fail 0 :error 0}}
+
+;; Full surface — run + stash full result on agent's ns + record
+;; projection to DB. The convenience the agent's eval-batch uses
+;; after a (defn …) that touches a :seon.fn (spec D4).
+(.then (runner/run-and-record! {:seon.test.runner/vars ['cljs.user/mytest]})
+       prn)
+;; => Promise<{:seon.test.runner/run-id "Ab12Cd34Ef"
+;;             :seon.test.runner/run-result <same shape as above>
+;;             :seon.test.runner/tx-report {:seon.db/ok? true ...}}>
+
+;; To dig into a stashed run later, the agent's home ns has a
+;; (result <id>) helper wired by seon.eval/setup-agent-ns! — the
+;; same helper used for eval results. The full event sequence is
+;; on globalThis, NOT in the DB.
+(result "Ab12Cd34Ef")
+;; => {:seon.test.runner/events [...] :seon.test.runner/summary {...}}
+```
+
+**Storage model.** The full result lives on the agent's ns (via
+the run-id stash). The DB row carries ONLY the surfaced
+projection:
+
+| Attr | Purpose |
+|---|---|
+| `:seon.test/sym` | "cljs.user/mytest" |
+| `:seon.test/last-passed-at` / `:last-failed-at` | timestamps |
+| `:seon.test/last-failure-summary` | ≤200-char rendered failure (for warnings tile) |
+| `:seon.test/last-run-id` | pointer back to the agent-ns stash |
+
+Renderers read the projection via Datalog; the agent reaches the
+blob via `(result <run-id>)` when it wants to dig deeper.
+
+**Reporter mechanism.** The runner claims the `::runner/capture`
+reporter keyword via per-event `defmethod`s. `cljs.test/test-vars`'
+`Var`-instance precondition is sidestepped — we look up each
+symbol's compiled fn through `goog.getObjectByName` and drive it
+directly. `(is …)` inside the test body still calls
+`cljs.test/do-report`, which dispatches through our defmethods,
+so captured event shape matches what `t/test-vars` would produce
+(minus a real `Var` reference — we use a `#js {:sym <sym>}`
+stand-in).
+
+**Build wiring.** `seon.test.runner` is `:require`d from
+`seon.client`, so it's in the `:client` bundle. Agent eval-str
+calls reach it via the analyzer's globalThis fallback (see
+`seon.eval/truly-undeclared?`) — no bootstrap-entries change
+needed.
+
 ### Bootstrap-macros workaround (defensive)
 
 `bin/fix-bootstrap-macros` is a babashka script that rewrites

@@ -37,6 +37,58 @@
    :compiler-options {:warnings-as-errors false
                       :externs           ["externs/node_fs.js"]}}
 
+  ;; Milestone-1 WASM smoke build. Minimal CLJS bundle that exposes
+  ;; `datahike-smoke-test!` (inlined) on globalThis.seonSmoke for the
+  ;; wasm-rquickjs ESM shim. Deliberately doesn't require seon.client
+  ;; (no agent loop, no web server, no deepseek) — narrow the surface
+  ;; so a smoke failure points at cljs.js or datahike-cljs.
+  ;;
+  ;; Build: `clj -M:cljs release smoke`
+  ;; Output: out/smoke/main.js (CJS, :node-script target)
+  :smoke
+  {:target           :node-script
+   :output-to        "out/smoke/main.js"
+   :main             seon.wasm-smoke/-main
+   :devtools         {:enabled false}
+   :compiler-options {:warnings-as-errors false
+                      :externs           ["externs/node_fs.js"]}}
+
+  ;; Milestone-2 WASM eval-smoke build. Sibling of :smoke but pulls in
+  ;; cljs.js + shadow.cljs.bootstrap.node so the bundle can compile
+  ;; arbitrary CLJS forms at runtime via the bootstrap-loaded analysis
+  ;; cache.
+  ;;
+  ;; Designed to be invoked inside wasmtime with `out/bootstrap/`
+  ;; mounted as a WASI preopen (e.g. `--dir out/bootstrap::bootstrap`).
+  ;; The bundle sets globalThis.seonEvalInitBootstrap and
+  ;; globalThis.seonEvalForm; the WIT host wraps both.
+  ;;
+  ;; Build: `clj -M:cljs release eval-smoke`
+  ;; Output: out/eval-smoke/main.js (CJS, :node-script target)
+  :eval-smoke
+  {:target           :node-script
+   :output-to        "out/eval-smoke/main.js"
+   :main             seon.wasm-eval-smoke/-main
+   :devtools         {:enabled false}
+   ;; `:optimizations :simple` (NOT :advanced) is load-bearing here.
+   ;; shadow.cljs.bootstrap.node calls `(js/goog.globalEval js)` at
+   ;; runtime, and the JS text it evals references `cljs.core.X` /
+   ;; `goog.provide(...)` directly. :advanced would rename everything;
+   ;; :simple preserves the names. (Heller's bootstrap blog + the
+   ;; shadow-cljs user guide both call this out — `:simple` is the
+   ;; canonical host-build setting.)
+   ;;
+   ;; NOTE: shadow-cljs wraps both `:node-script` and `:node-library`
+   ;; targets in an IIFE / UMD factory regardless of `:output-wrapper`
+   ;; (that flag only affects Closure's own wrapper, not shadow's
+   ;; per-target wrapper). The hoist in seon.wasm-eval-smoke
+   ;; (`(js* "globalThis.goog = goog")` etc.) bridges out of the IIFE
+   ;; so the bootstrap-loaded JS — which runs in GLOBAL scope via
+   ;; `goog.globalEval = (0,eval)(s)` — can find them by name.
+   :compiler-options {:warnings-as-errors false
+                      :optimizations     :simple
+                      :externs           ["externs/node_fs.js"]}}
+
   ;; Bootstrap-CLJS bundle (spec-02 §6.1). The :target :bootstrap
   ;; output is the analysis-cache + per-namespace compiled JS for
   ;; each namespace in :entries, suitable for runtime loading via
@@ -74,8 +126,28 @@
   :bootstrap
   {:target     :bootstrap
    :output-dir "out/bootstrap"
-   :entries    [cljs.core]
-   :macros     [cljs.core]
+   ;; Expanded for the agent vocabulary needed by the spec's
+   ;; eval-batch / confidence-run path. Each new entry pulls its
+   ;; transitive subtree into the bootstrap output (analyzer caches +
+   ;; per-ns JS), so the agent can `(require ...)` these from inside
+   ;; cljs.js eval and have the analyzer resolve their vars.
+   ;;
+   ;; What each adds:
+   ;; - cljs.core           — runtime + the must-have foundation
+   ;; - cljs.test           — deftest / is / run-tests — required for
+   ;;                         confidence-run pattern in the WASM pod
+   ;; - clojure.set         — set ops the agent reaches for often
+   ;; - clojure.string      — string ops; also pulled by cljs.test
+   ;; - clojure.walk        — postwalk / prewalk for AST manipulation
+   :entries    [cljs.core
+                cljs.test
+                clojure.set
+                clojure.string
+                clojure.walk]
+   ;; cljs.test ships macros (deftest / is / are / testing) — must be
+   ;; listed alongside cljs.core for the same reason cljs.core itself
+   ;; needs it (the macro ns is a separate file).
+   :macros     [cljs.core cljs.test]
    :exclude    #{}
    ;; `:redef false` suppresses 4 upstream warnings inside cljs.core$macros
    ;; (refer-global / require-global each have both a def AND a defmacro

@@ -37,6 +37,15 @@
     ;; AND so `use-compile-state!` is callable from start-agent!.
     [seon.render :as render]
     [seon.render.default]
+    ;; Iteration surface — owns the canonical !compile-state +
+    ;; !conn defonces. start-agent! shares those atoms (no second
+    ;; copy in this ns; see compile-state-lifecycle research note).
+    [seon.repl :as repl]
+    ;; Phase 2 — test capture as data. Required so the bundle
+    ;; includes the runner; agent code reaches it from
+    ;; bootstrap-CLJS eval via the analyzer's globalThis fallback
+    ;; (seon.eval/truly-undeclared?).
+    [seon.test.runner]
     ;; Pod HTTP+SSE server — A-5. Required here so the build includes
     ;; it; start-agent! calls (web.serve/start!) at boot.
     [seon.web.serve :as web.serve]
@@ -277,6 +286,40 @@
     :db/cardinality :db.cardinality/one}
    {:db/ident :seon.eval/error
     :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one}
+
+   ;; --- Test (Phase 2 — test capture as data) ---
+   ;; `:seon.test/sym` is the test's fully-qualified symbol as a string
+   ;; (e.g. "seon.user/my-test"). Identity = single entity per test.
+   ;; `:seon.test/last-passed-at` / `:last-failed-at` / `:last-failure`
+   ;; let warnings/recent-evals tiles read test state via Datalog
+   ;; without walking eval entities. Per platform.md §Phase 2.
+   ;; Note: STATUS.md "Queued simplifications" proposes replacing
+   ;; these stored attrs with tx-meta `:seon.eval/test` + history
+   ;; queries — once the MVP track lands the eval-id-tx-meta
+   ;; infrastructure, we revisit.
+   {:db/ident :seon.test/sym
+    :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one
+    :db/unique :db.unique/identity}
+   {:db/ident :seon.test/last-passed-at
+    :db/valueType :db.type/instant
+    :db/cardinality :db.cardinality/one}
+   {:db/ident :seon.test/last-failed-at
+    :db/valueType :db.type/instant
+    :db/cardinality :db.cardinality/one}
+   ;; A short summary string (~200 chars max) suitable for direct
+   ;; render in the warnings tile. The FULL failure data — events,
+   ;; expected/actual, stack traces — lives in the agent's ns under
+   ;; the test-run-id stash; this attr is JUST the surfaced fragment.
+   {:db/ident :seon.test/last-failure-summary
+    :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one}
+   ;; Pointer to the latest run's stashed full result. Agent reaches
+   ;; the blob via `(result <run-id>)` (the existing setup-agent-ns!
+   ;; helper that reads globalThis-stashed eval values).
+   {:db/ident :seon.test/last-run-id
+    :db/valueType :db.type/string
     :db/cardinality :db.cardinality/one}])
 
 (defn ^:async open-agent-conn! []
@@ -335,17 +378,17 @@
         ;; Bind the conn as the root *conn* so seon.db calls + the
         ;; kick listener resolve without per-call threading.
         _             (set! db/*conn* conn)
-        ;; Bootstrap-CLJS init — defonce-equivalent (idempotent).
-        compile-state (or @!compile-state
-                          (let [s (await (seval/init-bootstrap!))]
-                            (reset! !compile-state s)
-                            ;; Wire seon.render's late-bound resolver
-                            ;; (A-2). A-4 will start consuming it from
-                            ;; the default ctx/view fns; until then it
-                            ;; stays nil-safe (every resolve → nil →
-                            ;; pretty-print fallback).
-                            (render/use-compile-state! !compile-state)
-                            s))
+        ;; Bootstrap-CLJS init via the shared iteration-surface atom.
+        ;; Version-stamped — a hot-reload of seon.eval rotates the
+        ;; gensym so the next call rebuilds the state. Idempotent
+        ;; while the substrate code is stable.
+        compile-state (await (repl/ensure-bootstrap!))
+        ;; Wire seon.render's late-bound resolver against the SAME
+        ;; atom dev-init! reads from, so render-time symbol lookup
+        ;; resolves agent-defined vars regardless of which surface
+        ;; first triggered init. Idempotent (`use-compile-state!`'s
+        ;; docstring).
+        _             (render/use-compile-state! repl/!compile-state)
         ;; Prime the agent's home namespace with the atoms + accessors.
         ;; agent-ns-sym is the V0 default (`seon.agent.seon`); when
         ;; multi-agent comes, derive per-id via (seon.agent/home-ns id).

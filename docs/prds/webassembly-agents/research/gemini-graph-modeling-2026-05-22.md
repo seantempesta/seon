@@ -1,4 +1,706 @@
 ---
+type: research
+status: active
+tags: [research, agent, database]
+---
+
+# Gemini graph-modeling critique — 2026-05-22
+
+## TL;DR (for the next agent)
+
+1. **Persist the rendered prompt per turn.** The highest-leverage gap. Without `:seon.turn/prompt` as a stored string, "play back turn N" is impossible because the renderer is non-deterministic across time — re-running it later sees newer code and newer data.
+2. **Introduce a first-class `:seon.turn` entity** (id, index, prompt-snapshot, messages, evals, status). It's the causality container that ties "what the agent saw" to "what the agent thought" to "what the agent did" in one pull.
+3. **Flip the dominant ref direction from backref to forward-ref components.** Agent → Sessions → Turns → Messages/Evals via cardinality-many `:db/isComponent` refs. This lets the agent walk its own state with a nested pull pattern instead of memorizing reverse-ref syntax or wrapper fns.
+4. **Eliminate the `seon.agent/my-*` helper layer.** Replace with one root-pull helper plus a short library of example pull-patterns the agent reads in its system instructions and copies. The graph itself is the API.
+5. **Auto-tag every transaction with `seon.db/*tx-context*`** carrying `:seon.db/{agent,session,turn,eval}-id` + `:seon.db/origin`. This makes every datom in history forensically traceable without manual plumbing on each `transact!` site.
+6. **Model namespaces as entities** (`:seon.ns`) with function entities ref'ing them. Stops the spec's SQL-flavored use of `"ns/name"` strings as composite identifiers.
+
+## The full prompt sent to Gemini
+
+The complete prompt (~140 KB, 2978 lines) including the verbatim spec, STATUS, v0 survey, CLAUDE.md Data Rules, and the structured deliverable instructions is preserved below.
+
+````text
+You are a senior Datomic / Datalog data modeler reviewing a spec for an AI agent harness.
+The harness embeds a CLJS REPL pod inside a WASM-Tauri container, with a persistent Datahike (LMDB) DB.
+The agent reads and writes the DB; every turn, every tool call, every eval is captured.
+
+Your job: critique the data model and propose concrete fixes.
+The spec below is ~2200 lines, please read it carefully.
+
+============================================================
+USER GOALS (verbatim — these are the most important constraints):
+============================================================
+
+> Focus on v1 where we can get the agent actually running in a harness (deepseek 4 pro) and
+> building / accessing real data. Build the harness around watching its actions — the DB must
+> capture EVERYTHING so we can playback sessions and see what the agent was doing and what it
+> was seeing. Initial set of functions must be so simple and intuitive that the agent
+> immediately learns the right patterns for creating new schemas and storing/querying/retrieving
+> data and surfacing it to its context. The current schema isn't well thought out for an agent
+> to query and store info about its own environment. The agent shouldn't have to write
+> helper-fn-per-thing to discover its own state — pulls should just work because the graph is
+> fully connected. Patterns should make it easy to find and discover information, not have
+> entities be self-contained with refs so you have to do reverse references just to find info.
+> Don't reinvent capabilities datahike already provides (tx-meta, history, lookup-refs, etc.)
+> — document the right PATTERNS instead.
+
+============================================================
+PROJECT CONVENTIONS (from CLAUDE.md — these are HARD constraints):
+============================================================
+
+## Data Rules
+
+All data flowing through Seon must be safe at every boundary: Malli validation, core.async channels, Nippy serialization, Datalevin transact/pull.
+
+**Maps with namespaced keywords. Every key. No exceptions.** This is the load-bearing rule the rest of the system depends on:
+
+- **Every public function** takes one map and returns one map. Every key in both maps is fully namespaced (`:seon.runtime/status`, never `:status`). Both the request and response map are themselves named Malli schemas (`::foo-request`, `::foo-response`) registered via `seon.schema/register!`. The `:malli/schema` metadata on the fn points at them.
+- **Every datom persisted to the DB** uses a fully-namespaced attribute keyword whose Malli schema is registered. `seon.db/transact!` enforces this at the boundary — unregistered or unspec'd attrs throw before the tx reaches the DB.
+- **Every map handed to a callback** (tx-listener handlers, trigger handlers, flow step-fns, async channel envelopes) — fully namespaced. The reason: a single Datalog query should be able to join function specs to the data those functions operate on. `:tx-data` carries no information about which fn owns it; `:seon.db/tx-data` does.
+- **Specificity, not single keywords.** Bare keywords (`:status`, `:ok`, `:tx-data`, `:e`, `:a`, `:v`) are banned in any seon-authored map. If a key feels too generic to namespace, namespace it anyway — that's a signal the schema isn't precise enough yet.
+
+**Keyword namespaces = real code namespaces.** Use `::subject` freely — it correctly expands to `:seon.email.message/subject` when you're in `seon.email.message`. This is the intended pattern: **schemas live in the namespace that owns the data, alongside the fns that process it.** Colocation isn't strict (fns will mix data across namespaces — that's fine), but the schema for a piece of data lives with the namespace whose name it carries. Never invent keyword namespace prefixes that don't correspond to actual code namespaces.
+
+**Concrete types only.** Every persisted field has a specific type (`:string`, `:int`, `:keyword`, `:inst`, etc.).
+
+**Optional = absent.** Use `{:optional true}` for fields that may not be present. If the key is present, it must have a valid value. Never store nil.
+
+**Retraction is explicit.** To clear a field, use `[:db/retract eid :attr]`. Omitting a key from a transact map means "leave unchanged."
+
+### Schema Registration
+
+`schema/register!` is the **single source of truth** for all attribute schemas. Register the type, and the system auto-derives everything needed for database storage. You never write Datalevin schema directly.
+
+```clojure
+;; Inside src/seon/foo.clj — use :: for namespace-local keywords
+(schema/register! ::name :string)
+(schema/register! ::id [:string {:seon.db/identity true}])
+(schema/register! ::tags [:vector :keyword])
+(schema/register! ::parent :seon.db/ref)
+
+(db/transact! :seon [{::id "abc" ::name "hello"}])
+```
+
+See `/datalevin` skill for bridge details, persistence properties, refs, and banned types.
+
+Additional non-negotiable constraints (from MEMORY.md):
+- No `:any` in Malli schemas (acceptable only for genuinely opaque Java objects with :default/fn)
+- No `[:maybe X]` — use `{:optional true}` instead. Absent key = no value. Never store nil.
+- Concrete types only: `:string :int :keyword :inst :boolean` etc.
+- Refs use `:seon.db/ref` type (lives in seon.schema)
+- All identity attrs use `{:seon.db/identity true}` in register! calls
+- Every public fn: map-in/map-out, fully-namespaced keys
+- Keyword namespace must equal a real code namespace (`:seon.agent.message/role` = ns seon.agent.message)
+
+============================================================
+STATUS.md — where the project is right now:
+============================================================
+
+---
+type: reference
+status: active
+tags: [reference, prd]
+---
+
+# webassembly-agents — working state
+
+Resume notes for the two parallel tracks. Read this first when picking
+the project back up.
+
+## Tracks
+
+- **MVP track** (this session's owner): the agent eval surface — design
+  in [[agent-repl-mvp]]. Currently in REPL-verification phase against
+  the V0 CLJS pod (Node, not WASM yet).
+- **Platform track**: the WASM-Tauri containment — design in
+  [[platform]]. Owned by the platform agent.
+
+## Where we are
+
+### Spec status
+
+[[agent-repl-mvp]] has a "Verified live in the V0 pod" section listing
+what's been REPL-confirmed end-to-end. As of this checkpoint:
+
+- ✅ rewrite-clj parses comments + forms as ordered nodes
+- ✅ Bare-symbol unbound-var rejects loudly (via warning-handler set!)
+- ✅ Unqualified core vars resolve (analyzer-cache load fixed)
+- ✅ tx-meta = eval-id; eval entity AND tx entity coincide
+- ✅ Topological replay = sort-by tx-id (no analyzer walk needed)
+
+Dashboard has 10 open Ds (see [[agent-repl-mvp#decisions-pending]]).
+Known Issues at the bottom of the spec list 6 implementation bugs that
+need triage (KI-1 through KI-6).
+
+### Next priorities for the MVP track
+
+In rough order:
+
+1. **D11 — per-agent ctx set on the agent record.** The agent record
+   becomes the hub: `:seon.agent/ctx` is a cardinality-many vector
+   of refs to that agent's `:seon.ctx` entities. Defaults point at
+   `seon.agent/*` substrate fns; customization writes a fn in
+   `seon.agent.<id>` and re-points refs. V1 has NO dynamic dispatch
+   — symbols resolve at call time, period. V2 layers per-entity
+   specificity dispatch on top.
+2. **D5 — explicit remove-spec / remove-fn / remove-test** verbs.
+   Small surface; high agent-utility; gates the "agent can curate
+   without accumulating cruft" story.
+3. **D4 — targeted test auto-run** wiring. Trigger on `:seon.fn`
+   touches; query tests via `:seon.test/target`; stash full output
+   via eval-id; surface failures as warnings. Verifies the whole
+   reference-graph mechanic.
+4. **D2 — per-kind redefinability rules**. Specs must be accretive
+   when data exists; fns redefine freely; tests redefine freely.
+   Implementation-only; spec already settled.
+5. **D3 — `(def …)` detection via rewrite-clj AST**. No regex.
+   Small, well-bounded.
+6. **D7 — `<name>-example` test convention** + the "no-test-coverage"
+   warning predicate.
+
+Defer: D1 (older-DB upgrade), D8 (reference-graph attrs — confirm
+shape once we actually populate refs), D9 (forgiving parse recovery —
+edge case), D10 (bootstrap.edn emission — separate work item).
+
+### Queued simplifications (not yet decisions)
+
+Round-2 cuts I surfaced earlier in the session but haven't applied.
+Each follows the same "use the primitive" pattern that paid off for
+`:touches` → tx-meta:
+
+- **Drop `:seon.test/last-passed-at` / `:last-failed-at` /
+  `:last-failure`.** A test run IS an eval; tag the run's tx with
+  `:seon.eval/test [:seon.test/sym "..."]` in tx-meta. "Latest pass/
+  fail" becomes a history query. Three stored attrs collapse to zero.
+- **Drop `:seon.fn/refs` extraction.** cljs.analyzer's compile-state
+  ALREADY has the AST per `defn` with var references. We can query
+  `(get-in @compile-state [:cljs.analyzer/namespaces ns :defs fn :body])`
+  for free; no separate walk + storage needed.
+- **Audit the Reversibility classifier table.** It existed to power a
+  generic `undo`; we replaced that with explicit remove-* verbs. The
+  classifier may now be dead code in the spec. Confirm or remove.
+
+These should be promoted to D-decisions if they survive a closer look.
+
+### Known Issues (need triage)
+
+See [[agent-repl-mvp#known-issues]] for the full list. Quick summary:
+
+- KI-1: `seon.db/transact!` invocation shape (wrong shape crashes Node).
+- KI-2: `defonce !compile-state` holds pre-fix state across hot-reloads.
+- KI-3: Eval error envelope is 4-levels-deep; promote useful keys.
+- KI-4: Shadow watcher gets confused after ~3 Node restart cycles.
+- KI-5: `start-agent!` and `dev-init!` race for `!compile-state`.
+- KI-6: `ws` npm dep was missing for fresh checkout (now in package.json).
+
+KI-1 may already be fixed by another agent's parallel work — check
+when integrating.
+
+## Cross-track touchpoints
+
+The MVP and Platform tracks share infrastructure. Coordination points:
+
+- **Eval surface contract.** [[agent-repl-mvp]]'s spec describes what
+  `eval` returns; [[platform]] §"Eval surface" wires it into the WIT
+  `eval-form` export. Changes to error envelope shape (KI-3) affect
+  both.
+- **tx-meta as eval-id pointer.** Verified in the V0 Node pod
+  ([[agent-repl-mvp]]). Platform agent needs to confirm it still
+  works under wasmtime + the WIT shim.
+- **Analyzer-cache load.** V0 pod loads from `out/bootstrap/ana/`.
+  Platform's WASM build needs the same caches packaged into the
+  Component bundle (see [[research/m2-findings-2026-05-21]] for the
+  bundle structure).
+
+## Iteration surface
+
+- Bring up the V0 pod: `clj -M:cljs watch client` (terminal 1) +
+  `node out/client/main.js` (terminal 2). See
+  [[../../seon/pod/REPL-WORKFLOW]].
+- MCP tools: `mcp__seon_cljs__eval` for host-side eval (the
+  substrate's `:client` runtime). `(seon.repl/dev-init!)` once per
+  pod boot brings up `@!compile-state` and `@!conn`.
+- WASM iteration: reserve for confidence runs. See
+  [[research/m2-findings-2026-05-21]] §"Iteration cadence".
+
+## Layout
+
+```text
+docs/prds/webassembly-agents/
+├── STATUS.md           ← you are here
+├── agent-repl-mvp.md   ← MVP track design
+├── platform.md         ← Platform track design
+└── research/
+    ├── m2-findings-2026-05-21.md   (WASM landmines, owned by platform)
+    ├── v0-state-2026-05-20.md      (V0 Node pod state snapshot)
+    └── wasm-spike-2026-05-20.md    (earlier spike report)
+
+```
+
+The operational doc [[../../seon/pod/REPL-WORKFLOW]] stays under
+`docs/seon/pod/` because it's substrate-wide (used by both tracks
+and by anything else iterating against the V0 pod).
+
+============================================================
+V0 IMPLEMENTATION SURVEY (current state of the CLJS pod):
+============================================================
+
+---
+type: research
+status: active
+tags: [research, agent, cljs]
+---
+
+# V0 Implementation State vs MVP Spec — 2026-05-22
+
+Survey of the V0 CLJS pod against the
+[[agent-repl-mvp]] spec. Goal: identify what exists in code, what is
+spec-only, and the smallest set of additions needed to drive the agent
+loop end-to-end against a real LLM (deepseek).
+
+Branch: `webassembly-agents`. Spec last touched recently; prior state
+snapshot lives at [[research/v0-state-2026-05-20]] (~2 days old).
+
+## TL;DR
+
+The **agent loop is fully wired and runnable today** —
+`seon.client/start-agent!` boots a datahike conn, primes a
+home-namespace, installs a kick-listener, and drives
+`render → LLM → parse → eval-batch → record` cycles. DeepSeek adapter
+plugs in via `start-agent-with-deepseek!`. Messages, evals, and the
+agent record are all real schemas with real datahike attrs.
+
+**But the *persistent program* layer is entirely missing.** No
+`:seon.fn/*`, no `:seon.schema/*`, no `:seon.test/*`, no `:seon.ns/*`,
+no `:seon.ctx/*`. The composer described in the spec (section entities
+with `:seon.ctx/fn` symbol slots) does not exist; instead a single
+hard-coded `seon.render.default/ctx` concatenates 8 fragment fns. No
+`forget!`, no `reset-defaults!`, no `bootstrap.edn`, no resume walk —
+all program state lives in defns evaluated through `cljs.js` whose vars
+die with the pod (the agent's home-ns is the only thing that survives,
+and only because Node defonces hold it).
+
+**The agent DB does NOT enable history** (`:keep-history? false` at
+`client.cljs:285`), which breaks the spec's whole "tx-meta IS the
+eval-id pointer" trick. Only the `seon.repl/dev-init!` iteration conn
+sets `:keep-history? true` (`repl.cljs:179`) — that's the conn the
+spec was verified against, not the conn the agent actually runs on.
+
+## 1. Agent entity
+
+**SPEC** ([[agent-repl-mvp]] §"Agent record is the hub"):
+`:seon.agent/id` (12-char `:seon.id/id`),
+`:seon.agent/state` `[:enum :idle :running]`,
+`:seon.agent/turn-count :int`,
+`:seon.agent/turns-since-user :int`,
+`:seon.agent/interrupted? :boolean {:optional true}`,
+`:seon.agent/current-ns :keyword {:optional true}`,
+`:seon.agent/ctx [:vector :seon.db/ref]` (D11 — cardinality-many refs
+to per-agent `:seon.ctx` entities).
+
+**CODE**: `src/seon/agent.cljs:92-96` registers everything EXCEPT
+`:seon.agent/current-ns` and `:seon.agent/ctx`.
+
+- `:seon.agent/id` is plain `:string` (no 12-char constraint, no shared
+  `:seon.id/id`); the generator at `agent.cljs:75-82` produces
+  **10-char base62** (4-time + 6-rand), not 12 (8-time + 4-rand) as the
+  spec specifies.
+- `:seon.agent/state`, `turn-count`, `turns-since-user`,
+  `interrupted?` are all registered.
+- Datahike side at `client.cljs:180-192` declares `:seon.agent/id`
+  (string/identity), `state` (keyword), `turn-count` (long),
+  `turns-since-user` (long). Note: `interrupted?` is NOT in the
+  datahike bootstrap schema — registering it in Malli without a
+  matching datahike attr means a transact would fail at write time.
+- `:seon.agent/current-ns` is NOT registered anywhere; the renderer
+  derives current-ns from agent-id via `home-ns` (`agent.cljs:127`,
+  `render/default.cljs:196`) — no per-form upsert as spec requires.
+- `:seon.agent/ctx` (the D11 hub multi-ref) does not exist.
+
+**GAP**: Add `current-ns` and `ctx` attrs (Malli + datahike); switch
+ID generator to 12-char; share an `:seon.id/id` schema; wire
+per-form `current-ns` upsert in `eval-batch!`. Current code only
+maintains `!current-ns` as an atom IN the agent's home-ns
+(`eval.cljs:460-467`) — not on the DB entity.
+
+## 2. Message entity
+
+**SPEC**: only mentioned in passing ("messages tagged via
+`:seon.message/agent`"); the spec lists message accessors but doesn't
+re-define the entity.
+
+**CODE**: `agent.cljs:105-109` registers:
+
+- `:seon.message/id` :string
+- `:seon.message/role` `[:enum :user :assistant :system]`
+- `:seon.message/content` :string
+- `:seon.message/agent` `:seon.db/ref`
+- `:seon.message/at` :inst
+
+Datahike side at `client.cljs:195-210` mirrors all five attrs.
+
+**GAP**: Implementation is ahead of spec here — fully wired and used
+by `chat` (`agent.cljs:378-391`), `replies-after`
+(`agent.cljs:393-412`), the kick handler (`agent.cljs:285-309`), and
+the `recent-conversation` ctx fragment (`render/default.cljs:349`).
+The spec should adopt this shape rather than redefine it.
+
+## 3. Eval entity
+
+**SPEC** ([[agent-repl-mvp]] §"Eval log"): nine attrs including
+`:seon.eval/turn :long`, `:seon.eval/at :long` (epoch-ms),
+`:seon.eval/duration-ms :long`, `:seon.eval/ns :keyword`,
+`:seon.eval/narration`, `:seon.eval/source`, `:seon.eval/ok?`,
+`:seon.eval/result-edn {:optional true}`,
+`:seon.eval/error {:optional true}`.
+
+Critical mechanic: each eval transacts ITS persistent datoms in the
+same tx with `:tx-meta {:seon.eval/id <id>}`, so the eval entity IS the
+tx entity. "What did this eval touch?" → `(d/history db)` query.
+
+**CODE**: `agent.cljs:111-119` registers id/agent/at/turn/narration/
+source/ok?/result-edn/error (all 9 conceptually present). Datahike side
+at `client.cljs:212-280` mirrors.
+
+What's wired in `record-eval!` (`eval.cljs:505-530`):
+
+- writes `:seon.eval/id`, `:seon.eval/agent`, `:seon.eval/at`,
+  `:seon.eval/turn`, `:seon.eval/narration`, `:seon.eval/source`,
+  `:seon.eval/ok?`
+- conditionally writes `:result-edn` (on success) or `:error` (on
+  failure)
+
+What's MISSING:
+
+- **`:seon.eval/at` is `:inst` (java.util.Date), not `:long`
+  (epoch-ms)**. Datahike side: `:db.type/instant` at
+  `client.cljs:212-213` + `client.cljs:260-262`. Spec wants epoch-ms.
+- **`:seon.eval/duration-ms` not registered, not captured.** Spec calls
+  for `(- (js/Date.now) start)` per form. `eval-batch!`
+  (`eval.cljs:554-595`) snaps `at` once but never measures duration.
+- **`:seon.eval/ns` not registered, not captured.** Spec calls for the
+  ENDING ns to be recorded per eval. The code DOES compute the ending
+  ns (`raw-result :ns` at `eval.cljs:573-574`) and pushes it to the
+  agent's atom but never persists it.
+- **No tx-meta wiring.** `record-eval!` calls
+  `db/transact! {:seon.db/tx-data [...]}` — no
+  `:seon.db/opts {:tx-meta {:seon.eval/id ...}}`. Looking at
+  `db/transact!` (`db.cljs:424-462`), it passes `opts` through to
+  `d/transact!` as `opts`, so the plumbing exists; nothing calls it.
+- **Eval entity and persistent-entity datoms are NOT in the same tx.**
+  Each successful form's defn/schema/test would run via `cljs.js/eval-
+  str` (which doesn't transact at all — those defns just become
+  globalThis vars), then `record-eval!` transacts the eval entry
+  separately. There are no persistent entities to share a tx with
+  because no persistent-entity layer exists (see §5).
+
+**GAP**: Add `duration-ms` + `ns` attrs (Malli + datahike), switch
+`at` from `:inst`/`:db.type/instant` to `:long`/`:db.type/long`, wire
+tx-meta — but the bigger gap is §5: there are no persistent entities
+for the tx-meta trick to point at.
+
+## 4. Section / ctx entity & the composer
+
+**SPEC** ([[agent-repl-mvp]] §"Rendering — sections compose strings",
+§"Initial default context"): section entities carry `:seon.ctx/name`,
+`:seon.ctx/priority`, `:seon.ctx/fn` (qualified symbol). The composer
+queries `[?e :seon.ctx/name _]`, sorts by priority, resolves each
+`:seon.ctx/fn` via `resolve-symbol`, calls it, joins strings. D11
+makes this per-agent via `:seon.agent/ctx` multi-ref. Six default
+section fns: `system-section`, `related-ns-section`,
+`current-ns-section`, `warnings-section`, `recent-evals-section`,
+`prompt-section`.
+
+**CODE**: NONE of this exists.
+
+- No `:seon.ctx/*` schema registrations anywhere in `src/seon/*.cljs`
+  or `src/seon/*.cljc`. (`grep "seon\.ctx/" src/seon/*.cljs` returns
+  zero hits.)
+- No composer that walks section entities. Instead,
+  `seon.render.default/ctx` (`render/default.cljs:426-444`) hard-codes
+  a concat of 8 fragment fns: `repl-state-header`, `how-you-respond`,
+  `what-you-can-do`, `conventions`, `recent-conversation`,
+  `recent-evals-block`, `recent-errors-block`, `schema-reference`.
+- None of the 6 spec section names (`system-section`,
+  `related-ns-section`, `current-ns-section`, `warnings-section`,
+  `recent-evals-section`, `prompt-section`) exist. The fragment fns
+  serve a different purpose and produce different output (markdown
+  headings, not XML wrappers).
+- Dispatch through symbol slots IS wired: `render/ai-dispatch`
+  (`render.cljs:159-166`) resolves the agent's `:seon.render/ai`
+  symbol and falls through to `pretty-ai`. But the slot points at ONE
+  fn (`'seon.render.default/ctx` default at `agent.cljs:223`), not at
+  a vector of section fns.
+- `:seon.render/ai` schema (`render.cljs:40`) is `[:fn symbol?]` —
+  function-only, no literal slot path. Datahike side
+  (`client.cljs:231-236`) is `:db.type/symbol`.
+
+**GAP**: Build the entire section-composer machinery from scratch:
+register `:seon.ctx/{name,priority,fn}` (Malli + datahike), write the
+composer fn, write the 6 default section fns. D11's `:seon.agent/ctx`
+multi-ref is also missing. Replace
+`seon.render.default/ctx`'s hard-coded fragment list with the composer.
+
+## 5. Persistent entities (`:seon.fn`, `:seon.schema`, `:seon.test`, `:seon.ns`)
+
+**SPEC** ([[agent-repl-mvp]] §"Persistent entities"): the database IS
+the program. Every `(defn ...)`, `(schema/register! ...)`,
+`(deftest ...)`, `(ns ...)` form the agent emits transacts an entity
+with its source text. Replay rebuilds runtime vars from these
+entities. Identity attrs: `:seon.fn/sym` (string),
+`:seon.schema/key` (keyword), `:seon.test/sym` (string),
+`:seon.ns/name` (keyword) — each with `{:seon.db/identity true}`.
+
+The references graph (D8): `:seon.fn/input-spec`,
+`:seon.fn/output-spec`, `:seon.fn/refs`, `:seon.test/target`,
+`:seon.schema/refs`.
+
+The auto-registration is wired by `eval-batch!`: parse the form, if
+it's `(defn ...)`/`(schema/register! ...)`/`(deftest ...)`/`(ns ...)`,
+extract source + transact the persistent entity in the same tx as the
+eval entry.
+
+**CODE**: NONE of this exists.
+
+- No `:seon.fn/sym`, `:seon.fn/source`, `:seon.fn/ns` schemas
+  anywhere in CLJS source. The only `:seon.fn/*` references are in
+  `src/seon/render/code.clj` (JVM-side graph indexer, completely
+  separate). That code uses `:seon.fn/qualified-name`, NOT the spec's
+  `:seon.fn/sym`, confirming the two pipelines diverge.
+- No `:seon.schema/key` / `:seon.schema/source` schemas.
+- No `:seon.test/sym` / `:seon.test/target` schemas.
+- No `:seon.ns/name` / `:seon.ns/source` schemas.
+- `eval-batch!` (`eval.cljs:532-595`) does NOT inspect the parsed form
+  to detect define-class forms. Every form is run through
+  `cljs.js/eval-str` and its return value stashed via
+  `stash-result-raw!` (`eval.cljs:383-393`); nothing is persisted
+  about WHAT the form defined.
+- `seon.code/check` (`src/seon/code.cljc`) exists as a structural
+  gate but is not invoked from the CLJS eval pipeline as of this
+  checkpoint.
+
+**GAP**: This is the single largest missing chunk. To get even minimal
+persistence, you need register the entity attrs, write a
+form-classifier (rewrite-clj walk for `defn`/`schema/register!`/
+`deftest`/`ns`), and tee the source + parsed-form data into a
+post-eval transact paired with the eval entry. Without this, agent
+work doesn't survive a pod restart even in principle.
+
+## 6. Bootstrap + resume
+
+**SPEC** ([[agent-repl-mvp]] §"Boot sequence"): `init-bootstrap!` →
+`bootstrap-phase!` (only if DB empty) → `resume-phase!` → render. The
+bootstrap reads `resources/seon/bootstrap.edn` (a build-time emitted
+ordered vector of substrate entities) and transacts it. Resume walks
+all `:seon.fn`/`:seon.schema`/`:seon.test`/`:seon.ns` entities sorted
+by tx-id and re-evals each's `:source`. The first resume eval carries
+`:seon.eval/resume-marker? true`.
+
+**CODE**:
+
+- `seon.eval/init-bootstrap!` (`eval.cljs:163-188`) exists and is
+  load-bearing — it sets up the CLJS analyzer-cache load described in
+  the spec's "analyzer-cache load" section. This IS the
+  `out/bootstrap/ana/*.transit.json` walk. Works.
+- `seon.eval/setup-agent-ns!` (`eval.cljs:395-430`) primes the
+  agent's home-ns with `!session-id`, `!current-ns`, `session-id`,
+  and `result` helpers. Idempotent.
+- NO bootstrap-edn emission. No `resources/seon/bootstrap.edn` exists
+  in the project (checked).
+- NO `bootstrap-phase!` / `resume-phase!` separation. `start-agent!`
+  always opens a fresh in-memory conn (`open-agent-conn!`,
+  `client.cljs:282-289`) and transacts `agent-bootstrap-schema`
+  (datahike schema only — no entity data); nothing replays prior
+  state because there's nothing to replay (no persistent entities,
+  see §5).
+- NO `:seon.eval/resume-marker?` attr.
+
+**GAP**: Resume is meaningless until persistent entities exist (§5).
+Bootstrap.edn emission is D10, marked as defer. The analyzer-cache
+load is the one piece that IS in place.
+
+## 7. History on the agent DB
+
+**SPEC** ([[agent-repl-mvp]] §"What's NOT in the model"): "the default
+V0.5 conn uses `:keep-history? false`; turning history on for the
+agent DB is a prerequisite for [the tx-meta-IS-eval-id model]".
+
+**CODE**:
+
+- `open-agent-conn!` at `client.cljs:282-289` uses `:keep-history?
+  false`. The CONN THE AGENT ACTUALLY RUNS ON has no history.
+- `seon.repl/ensure-conn!` at `repl.cljs:170-183` uses
+  `:keep-history? true` — but this is the iteration-surface conn used
+  by `mcp__seon_cljs__eval` probes via `dev-init!`, distinct from the
+  agent conn at `client.cljs:169 !agent-conn`.
+- The smoke-test conn (`client.cljs:124-127`) and
+  `wasm_smoke.cljs:44` also use `:keep-history? false`.
+
+**GAP**: One-line fix at `client.cljs:285` — flip to `true`. But this
+unlocks tx-meta retrieval that nothing currently uses (§3 has no
+tx-meta writes, §5 has no entities to tx-meta about).
+
+## 8. The harness loop
+
+**SPEC** ([[agent-repl-mvp]] §"Goal"): one turn = rendered ctx → LLM
+→ parse → eval-batch.
+
+**CODE**: This works end-to-end TODAY.
+
+`seon.agent/run-turn-once!` at `agent.cljs:203-276` does exactly the
+spec sequence:
+
+1. `bump-turn!` increments counters, flips state to `:running`
+   (`agent.cljs:146-159`).
+2. Resolves the agent's `:seon.render/ai` symbol (default
+   `'seon.render.default/ctx`) and calls
+   `render/ai-dispatch` to build the ctx string
+   (`agent.cljs:222-226`).
+3. Calls `llm-fn` (await), gets back `{:text "..."}`
+   (`agent.cljs:229-231`).
+4. `seon.repl/parse-forms` (`repl.cljs:112-148`) splits the LLM reply
+   into `{:narration :source :form}` triples using cljs.tools.reader
+   (NOT rewrite-clj — spec calls for rewrite-clj but tools.reader is
+   what's running).
+5. `seon.eval/eval-batch!` (`eval.cljs:532-595`) iterates each parsed
+   pair: reads current-ns, evals via `cljs.js/eval-str`, auto-awaits
+   Promise returns (`maybe-await-value`, `eval.cljs:469-503`),
+   stashes raw value on globalThis, transacts an eval entity.
+6. `end-turn!` flips state to `:idle` (`agent.cljs:161-164`).
+7. Multi-turn loop: if no `:assistant` message landed and
+   `turns-since-user < 20`, schedules another `run-turn-once!`
+   (`agent.cljs:243-268`).
+
+The kick handler at `agent.cljs:289-309` fires on every `:user`
+message tx (state-guarded; doesn't kick during `:running`).
+
+The DeepSeek adapter (`seon.ai.deepseek/agent-adapter`,
+`deepseek.cljs:202-209`) returns `(fn [ctx-string]) → Promise<{:text}>`
+— matches the `llm-fn` signature exactly. `start-agent-with-deepseek!`
+(`client.cljs:381-385`) wires it.
+
+`-main` (`client.cljs:391-421`) auto-boots: if `DEEPSEEK_API_KEY` is in
+`process.env`, uses the real adapter; else `stub-llm` (an inline canned
+response at `client.cljs:291-316` that transacts an assistant message
+and flips state).
+
+**GAP**: The loop runs and routes messages. What it DOESN'T do —
+because §1-§7 are missing — is produce a context that mentions the
+spec's persistent-entity world (no current-ns block, no
+recent-evals XML-wrapped section, no warnings, no
+section-customization point). The current ctx is good but is the
+**substrate-teaching** ctx, not the **REPL-scrollback** ctx the spec
+describes. An agent running today sees `repl-state-header`,
+`how-you-respond`, `what-you-can-do`, etc — instructions for using
+seon.db/seon.fs primitives — but does not see a window into a
+persistent program it's building up. That's the spec gap, not a loop
+gap.
+
+## Killer gaps — smallest set to make the agent loop run end-to-end against deepseek
+
+The loop already runs against deepseek today.
+`start-agent-with-deepseek!` works. What's missing is making the
+result MATCH THE SPEC, not making the loop functional. Ordered by
+"smallest change that unlocks the most spec":
+
+1. **Flip `open-agent-conn!` to `:keep-history? true`**
+   (`client.cljs:285`). One line; prerequisite for tx-meta-as-history
+   trick. Cost: storage overhead for the agent's DB.
+2. **Wire `tx-meta {:seon.eval/id <id>}` in `record-eval!`**
+   (`eval.cljs:505-530`). Use `:seon.db/opts` to pass it through;
+   `db/transact!` already plumbs `opts` to `d/transact!`
+   (`db.cljs:455-458`). Minor: ~5 lines.
+3. **Capture `:seon.eval/duration-ms` and `:seon.eval/ns`**
+   (`eval.cljs:554-595`). Snap `(js/Date.now)` before eval, diff
+   after auto-await; carry `(:ns raw-result)` into `record-eval!`.
+   Register both attrs in Malli AND datahike (`agent.cljs:111-119`,
+   `client.cljs:212-280`). Convert `:seon.eval/at` from
+   `:inst`/`:db.type/instant` to `:long`/`:db.type/long` (or accept
+   the spec drift on this).
+4. **Register + persist `:seon.agent/current-ns`**: Malli attr
+   (`agent.cljs:92-96`), datahike attr (`client.cljs:180-192`),
+   upsert in `eval-batch!` whenever the ending-ns changes.
+5. **Define the persistent-entity attrs** (§5): minimum is
+   `:seon.fn/sym`, `:seon.fn/source`, `:seon.fn/ns`. Skip
+   `:seon.schema/*` / `:seon.test/*` / `:seon.ns/*` for the very
+   first cut. Register in Malli + datahike.
+6. **Detect-and-tee defns in `eval-batch!`**: parse the `:form` (rewrite-clj
+   parse already happens for the LLM reply, but `parse-forms` uses
+   tools.reader and produces evaluated forms — switch to rewrite-clj OR
+   re-parse the `:source` string). When the form's head is `defn`,
+   transact a `:seon.fn` entity carrying `:source` in the SAME tx as
+   the eval entry (via tx-meta-tagged combined tx).
+7. **Build the `:seon.ctx/*` composer + the 6 default section fns**
+   (§4). This is the biggest single piece, but the rendered ctx today
+   already concatenates 8 fragments — refactor those into named
+   section entities. Default section fns (`system-section` etc.) can
+   wrap existing fragments (`repl-state-header` ≈ `system-section`,
+   `recent-evals-block` ≈ `recent-evals-section`, etc.).
+8. **D11 — `:seon.agent/ctx` multi-ref**: per-agent ctx-entity refs on
+   the agent record. Bootstrap creates the default 6 in
+   `create!` (`agent.cljs:328-335`).
+
+Items 1-4 are mechanical and small (probably ~2 hours of
+careful edits). Items 5-8 are the substantial design work — that's
+where "v0 implementation" actually becomes "MVP implementation."
+
+Resume (§6), forget!, reset-defaults!, bootstrap.edn (§D10),
+warnings-section + warning predicates (§D4 targeted test auto-run,
+§D2 spec-violation, §D3 def-not-persisted), and per-kind
+redefinability gates are NOT on this critical path — they layer on
+top of §5+§7.
+
+## Files inventory
+
+CLJS pod (agent runtime, what's loaded by `node out/client/main.js`):
+
+| File | Role |
+|---|---|
+| `/Users/sean/src/seon/src/seon/client.cljs` | Node entry, datahike-smoke-test, `start-agent!`, `start-agent-with-deepseek!`, agent conn lifecycle, hand-written datahike bootstrap schema (`agent-bootstrap-schema`). |
+| `/Users/sean/src/seon/src/seon/agent.cljs` | Agent loop: `new-id!`, schemas for agent/message/eval, `run-turn-once!`, `install-kick!`, `create!`, `chat`, `boot!`. |
+| `/Users/sean/src/seon/src/seon/eval.cljs` | Eval pipeline: `init-bootstrap!`, `eval` (safe-by-default), `eval-batch!`, `setup-agent-ns!`, `record-eval!`, `stash-result-raw!`, timeout/budget primitives. |
+| `/Users/sean/src/seon/src/seon/repl.cljs` | `parse-forms` (cljs.tools.reader-based, NOT rewrite-clj despite spec), `dev-init!`/`!compile-state`/`!conn` for the iteration surface. |
+| `/Users/sean/src/seon/src/seon/db.cljs` | Sole DB API: `transact!` (with Malli validation gate), `query`, `pull`, `entity`, `listen!`, `unlisten!`; `*conn*` dynvar; full docstring example of the user-message-kick reaction. |
+| `/Users/sean/src/seon/src/seon/render.cljs` | `ai-dispatch`, `html-dispatch`, `resolve-symbol` (globalThis walker + late-bound compile-state); `:seon.render/ai`/`html` slot schemas. |
+| `/Users/sean/src/seon/src/seon/render/default.cljs` | Default `ctx` (the agent's prompt — concat of 8 fragments), `view` (HTML tile), plus `pretty-ai`/`pretty-html` fallbacks and DB-query helpers (`recent-messages`, `recent-evals`, `recent-errors`, `all-running-agents`). |
+| `/Users/sean/src/seon/src/seon/ai/deepseek.cljs` | DeepSeek HTTP client (`complete`, AbortController timeout, `agent-adapter`). |
+| `/Users/sean/src/seon/src/seon/schema.cljc` | Malli registry: `register!`, `registered?`, `schema-definition`, baseline types (`:inst`, `:seon.db/ref`, etc.). |
+| `/Users/sean/src/seon/src/seon/code.cljc` | Structural defn gate (referenced by spec; NOT invoked from agent eval pipeline today). |
+| `/Users/sean/src/seon/src/seon/error.cljs` | Error → map normalization (`->map`, `->message`). |
+| `/Users/sean/src/seon/src/seon/fs.cljs` | Default-deny filesystem capability surface. |
+| `/Users/sean/src/seon/src/seon/log.cljs` | Pod-side logging. |
+| `/Users/sean/src/seon/src/seon/platform.cljs` | Host detection (`:node` / `:wasi`). |
+| `/Users/sean/src/seon/src/seon/web/serve.cljs` | HTTP+SSE server with project-local port file. |
+| `/Users/sean/src/seon/src/seon/web/broadcast.cljs` | tx-listener → SSE morph for browser dev loop. |
+
+JVM-side (NOT loaded by the V0 CLJS pod — separate `.clj` codebase):
+
+| File | Role |
+|---|---|
+| `/Users/sean/src/seon/src/seon/render/code.clj` | JVM-side graph indexer renderers; uses `:seon.fn/qualified-name` not `:seon.fn/sym` — different pipeline, do not conflate. |
+| `/Users/sean/src/seon/src/seon/agent/env.clj` | Agent toolkit for JVM nREPL agents — graph search, ctx-save/load. |
+| `/Users/sean/src/seon/src/seon/render/default_page.clj` | JVM default-page renderer; comments reference deleted `:seon.ctx/*` schemas — those `:seon.ctx/*` keys are NOT the spec's `:seon.ctx/*` section entities. |
+
+WASM/pod-host (stubbed for Phase 3; not relevant to the loop today):
+
+| Path | Role |
+|---|---|
+| `/Users/sean/src/seon/pod-host/wasm-tauri/` | WIT-typed Rust+CLJS pod skeleton; `src-wit/seon-pod.wit` defines the eventual `eval-form` export. Out of scope for MVP loop. |
+| `/Users/sean/src/seon/src/seon/wasm_smoke.cljs`, `wasm_eval_smoke.cljs` | Smoke harnesses for the WASM build. Stubs. |
+
+Spec / status:
+
+| Path | Role |
+|---|---|
+| `/Users/sean/src/seon/docs/prds/webassembly-agents/agent-repl-mvp.md` | The spec this survey is against. |
+| `/Users/sean/src/seon/docs/prds/webassembly-agents/STATUS.md` | Resume notes; lists next priorities D11/D5/D4/D2/D3/D7 (in order). |
+| `/Users/sean/src/seon/docs/prds/webassembly-agents/research/v0-state-2026-05-20.md` | Prior pod-state snapshot. |
+
+============================================================
+THE SPEC TO CRITIQUE — agent-repl-mvp.md (full text, ~2200 lines):
+============================================================
+
+---
 type: concept
 status: draft
 tags: [concept, agent, cljs]
@@ -2234,3 +2936,275 @@ Shadow's hot-reload websocket import expects the `ws` module but
 it wasn't in `package.json`. Fresh checkouts will hit this. Either
 add `ws` to `package.json` dev deps, or document the install in
 the REPL workflow.
+
+============================================================
+YOUR DELIVERABLE
+============================================================
+
+Please return a structured critique with these eight sections. Use Markdown headings (## a) ..., ## b) ...).
+Be specific, cite line numbers / attr names from the spec, and propose concrete fixes.
+Total target length: 2000–5000 words. Prioritize concrete, actionable directives over generalities.
+
+## a) Graph-modeling critique
+What's SQL-flavored in this spec that should be graph-flavored? What entities should exist that
+don't? What entities exist that shouldn't? Look for: bag-of-attributes entities, missing
+intermediate entities that would let you join, attrs that should be refs, refs that should be
+components.
+
+## b) Observability / playback gaps
+To 'play back turn N' as a single pull, what entities and refs do we need? Currently the spec
+has no first-class `:seon.agent.message` entity defined (only `:seon.message` referenced in
+passing), and there is no stored snapshot of 'what the LLM saw' per turn (the full rendered
+prompt at that moment). Confirm or contradict that as the highest-priority gap. List every other
+gap that prevents single-pull playback.
+
+## c) Backref vs forward-ref strategy
+The spec backref-joins agent-message, agent-eval, agent-log via :seon.agent.message/agent etc.,
+and hides them behind `seon.agent/my-messages`-style helper fns. Senior Datomic perspective:
+is this the right tradeoff? Should the agent record have explicit forward-ref vectors for the
+most-recent-N tails to make pulls one-step? What's the most discoverable pattern for an LLM
+agent that needs to write its own pulls?
+
+## d) Helper-function inflation
+The spec ships ~6 default section fns + several `seon.agent/my-*` helpers. The user wants the
+agent to learn graph patterns directly, not memorize wrapper-fn-per-thing. What's the minimum
+set of helpers that earns its keep? Where should we strip back to raw pulls / raw queries that
+the agent reads in their context once and learns?
+
+## e) Rendering model
+Section entities point at symbols; the composer resolves at call time. Is this the right
+separation in a graph DB? Should the rendered output also persist as an entity (for playback)?
+Or is it always re-derivable from the DB at the relevant tx? Take a strong opinion.
+
+## f) Tx-meta payload
+What should EVERY transaction carry as tx-meta so a future query can answer:
+  'what turn / what message / what agent / what eval-id caused this datom?'
+List the recommended tx-meta attrs with Malli types. Make sure the names follow the seon
+namespacing convention. Show the smallest set that lets you reconstruct causality.
+
+## g) Concrete schema rewrite
+Given everything above, propose the v1 entity schemas as datahike-flavored register! calls the
+spec should ship with. Cover at least: :seon.agent, :seon.agent.session, :seon.agent.turn,
+:seon.agent.message, :seon.agent.eval, :seon.agent.log, :seon.ctx.section, :seon.ctx.snapshot
+(if you think it should exist), :seon.tool.call, :seon.tool.result. For each attr give:
+  - the type (:string, :int, :inst, :seon.db/ref, etc.)
+  - cardinality (:db.cardinality/one or /many) if non-default
+  - :db/isComponent where appropriate
+  - identity props where appropriate
+  - one-line rationale
+Prefer fewer entities with more refs over many narrow entities.
+
+## h) Anti-patterns to forbid in CLAUDE.md / spec
+What would a junior Datomic modeler do wrong here that we should explicitly forbid in writing?
+List 5–10 anti-patterns specific to this codebase (not generic database advice). Each should
+include: the bad pattern, why it bites in this context, and the correct alternative.
+````
+
+## Gemini's raw response (verbatim, no editing)
+
+````markdown
+Ripgrep is not available. Falling back to GrepTool.
+I have completed the review of the `webassembly-agents` data model. The following critique identifies structural gaps, proposes a more idiomatic Datalog-first architecture, and provides a concrete schema rewrite to satisfy the goal of "capturing everything" for seamless session playback and agent discovery.
+
+## a) Graph-modeling critique
+
+The current spec and V0 implementation treat the database as a **side-effect log** (SQL-flavored) rather than a **connected program graph** (Datomic-flavored).
+
+1.  **Composite Strings vs. Entity Nodes:** 
+    *   **The Problem:** Attributes like `:seon.fn/sym "seon.trading/analyze"` use string-concatenation for namespacing. This forces the agent to use regex or string-prefix matching to find "all functions in this namespace."
+    *   **The Fix:** Model **Namespaces** as first-class entities (`:seon.ns/name`). A function entity should have a `:seon.fn/ns` ref to a namespace entity and a `:seon.fn/name` symbol. This allows joining on the namespace node to find dependencies, metadata, and documentation in one recursive pull.
+2.  **The "Turn" as a Scalar, not an Entity:**
+    *   **The Problem:** The "turn" currently exists only as an integer counter on the agent and a field on the eval. It has no identity.
+    *   **The Fix:** A **Turn** is a load-bearing lifecycle event. It is the container for "what the agent saw" (prompt), "what the agent thought" (narration), and "what the agent did" (messages/evals). Without a `:seon.turn` entity, you cannot "Pull Turn 5" to see the causality bundle.
+3.  **Bag-of-Attributes for Agent State:**
+    *   **The Problem:** `turn-count` and `turns-since-user` are scalars on the agent record. 
+    *   **The Fix:** These are transient properties of the **current session**. Moving them to a `:seon.agent.session` entity prevents the agent record from becoming a dumping ground for transient counters.
+
+## b) Observability / playback gaps
+
+To "play back turn N," we must be able to reconstruct the exact state of the agent's context at that moment.
+
+1.  **The "Ghost" Prompt (Highest Priority):** 
+    *   The current spec derives the rendered context at turn start but **never persists it**. If the agent updates a rendering function in Turn 6, re-playing Turn 5 by re-running the renderer will produce a *different* string (or fail if the new code references data that didn't exist yet). 
+    *   **Fix:** Every `:seon.turn` entity MUST persist its `:seon.turn/rendered-context` as a string. This is the literal "what did the LLM see?" snapshot.
+2.  **Causality Disconnection:**
+    *   Currently, if an eval in Turn 5 transacts data, and `record-eval!` separately transacts the log entry, they land in **two different transactions**. There is no hard link between the "side-effect data" and the "log data."
+    *   **Fix:** The `eval-batch!` loop must wrap the entire batch (or each form) in a way that captures every transaction made *during* that execution and tags them with the same `eval-id` and `turn-id` in `tx-meta`.
+
+## c) Backref vs forward-ref strategy
+
+The current spec relies heavily on **backrefs** (`:seon.message/agent`). While Datalog can query these via `_agent`, it is an anti-pattern for agent discovery.
+
+1.  **Discovery via Forward Walk:** 
+    *   Senior Datomic perspective: If you want an agent to "immediately learn the right patterns," make the data reachable by **walking forward**.
+    *   **Fix:** The Agent entity should have a cardinality-many ref to its **Sessions**. A Session has a cardinality-many ref to its **Turns**. A Turn has refs to its **Messages** and **Evals**.
+    *   **Benefit:** An agent can type `(db/pull {::db/ref [:seon.agent/id "alpha"] ::db/pull-pattern '[{:seon.agent/sessions [{:seon.session/turns [*]}]}]})` and see their entire history as a nested map. This is 10x more intuitive for an LLM than writing a `:where [?m :seon.message/agent ?a]` join.
+2.  **The "Tails" Problem:** 
+    *   Cardinality-many refs can grow too large. Use a **Session** entity to bound the history. An agent doesn't need to pull *all* messages ever; it needs to pull the *current session's* turns.
+
+## d) Helper-function inflation
+
+The user wants to avoid "helper-fn-per-thing." The current set of `seon.agent/my-*` helpers exists because the graph is flat and backref-heavy.
+
+1.  **Helper Erasure:**
+    *   `replies-after` → Replaced by pulling the current Turn or Session.
+    *   `latest-message-role` → Replaced by `(-> session :seon.session/turns last :seon.turn/messages last :seon.message/role)`.
+    *   `my-evals` → Replaced by `(-> agent :seon.agent/current-session :seon.session/turns last :seon.turn/evals)`.
+2.  **The "One True Helper":**
+    *   The only helper that earns its keep is one that returns the **Agent's Context Root**. Everything else should be a standard Datalog query or Pull that the agent reads once in their system-instructions and copies.
+
+## e) Rendering model
+
+The "symbols in slots" model is excellent for runtime dispatch but incomplete for persistence.
+
+1.  **Derivation vs. Snapshot:**
+    *   **Opinion:** Rendering should remain functional at runtime (symbols in slots), but the **output** of the composer must be persisted to the `:seon.turn` entity. 
+    *   **Rationale:** In a graph DB, "playback" is a data walk. If you have to "re-run code" to see what happened, you have a debugger, not an observability log.
+2.  **Section Entities as Data:**
+    *   The spec's idea of `:seon.ctx` section entities is correct. It makes the "layout" of the prompt something the agent can query and edit as data, rather than a hard-coded list of fns.
+
+## f) Tx-meta payload
+
+Every transaction in Seon should carry a **Causality Bundle**. This allows a developer (or verifier agent) to look at any single datom in history and know exactly *why* it exists.
+
+**Recommended `tx-meta` attributes:**
+- `:seon.db/agent-id` (`:string`) - Who did this?
+- `:seon.db/session-id` (`:string`) - In which session?
+- `:seon.db/turn-id` (`:string`) - In which turn?
+- `:seon.db/eval-id` (`:string`, optional) - Which specific form caused this?
+- `:seon.db/origin` (`:enum [:user :agent :system]`) - Did the agent's code do this, or was it a manual system bootstrap?
+
+**Propagation Pattern:**
+Bind these IDs to a dynamic var `seon.db/*tx-context*` during the `eval-batch!` loop. `seon.db/transact!` should automatically merge this context into the `:tx-meta` of every transaction it performs.
+
+## g) Concrete schema rewrite
+
+This schema replaces the loose attributes in the spec with a hierarchical, fully-connected graph.
+
+```clojure
+;; --- Agent & Session Hierarchy ---
+
+(schema/register! :seon.agent/id            [:string {:seon.db/identity true}]) ; 12-char
+(schema/register! :seon.agent/sessions      [:vector :seon.db/ref]) ; component
+
+(schema/register! :seon.session/id          [:string {:seon.db/identity true}])
+(schema/register! :seon.session/turns       [:vector :seon.db/ref]) ; component
+(schema/register! :seon.session/at          :inst)
+
+(schema/register! :seon.turn/id             [:string {:seon.db/identity true}])
+(schema/register! :seon.turn/index          :int) ; 0, 1, 2...
+(schema/register! :seon.turn/prompt         :string) ; The full rendered context snapshot
+(schema/register! :seon.turn/messages       [:vector :seon.db/ref]) ; user msg + assistant msg
+(schema/register! :seon.turn/evals          [:vector :seon.db/ref]) ; component
+(schema/register! :seon.turn/status         [:enum :running :done :error])
+
+;; --- The REPL "Tool Call" (Eval) ---
+
+(schema/register! :seon.eval/id             [:string {:seon.db/identity true}])
+(schema/register! :seon.eval/at             :inst)
+(schema/register! :seon.eval/source         :string)
+(schema/register! :seon.eval/narration      :string)
+(schema/register! :seon.eval/ok?            :boolean)
+(schema/register! :seon.eval/result-edn     :string) ; Truncated for display
+(schema/register! :seon.eval/error          :string)
+(schema/register! :seon.eval/duration-ms    :int)
+
+;; --- The Program Graph (Persistent Entities) ---
+
+(schema/register! :seon.ns/name             [:keyword {:seon.db/identity true}])
+(schema/register! :seon.ns/source           :string)
+
+(schema/register! :seon.fn/sym              [:string {:seon.db/identity true}])
+(schema/register! :seon.fn/ns               :seon.db/ref) ; -> :seon.ns
+(schema/register! :seon.fn/name             :keyword) ; simple name: :analyze
+(schema/register! :seon.fn/source           :string)
+(schema/register! :seon.fn/refs             [:vector :seon.db/ref]) ; -> :seon.fn
+
+(schema/register! :seon.test/sym            [:string {:seon.db/identity true}])
+(schema/register! :seon.test/target         :seon.db/ref) ; -> :seon.fn
+(schema/register! :seon.test/source         :string)
+
+;; --- The Rendering Logic ---
+
+(schema/register! :seon.ctx/name            [:keyword {:seon.db/identity true}])
+(schema/register! :seon.ctx/priority        :int)
+(schema/register! :seon.ctx/fn              :symbol) ; 'seon.render.default/system-section
+```
+
+## h) Anti-patterns to forbid
+
+1.  **The "Untagged Side-Effect":**
+    *   **Bad:** Calling `db/transact!` without linking it to the current `eval-id`.
+    *   **Why:** Breaks playback. You see data appeared, but you don't know which code form created it.
+    *   **Alternative:** Use `seon.db/*tx-context*` to auto-tag all transactions in an eval scope.
+2.  **Composite String Keys:**
+    *   **Bad:** `:seon.fn/sym "my.ns/my-fn"`.
+    *   **Why:** SQL thinking. Prevents graph joins on the namespace entity.
+    *   **Alternative:** Use a ref to a `:seon.ns` entity.
+3.  **`:any` in Schemas:**
+    *   **Bad:** `(schema/register! ::data :any)`.
+    *   **Why:** "Safe-at-every-boundary" rule (CLAUDE.md) demands precision. `:any` is a black hole that hides bugs.
+    *   **Alternative:** Use `:seon.db/ref`, `:string`, or a specific union of types.
+4.  **Storing `nil`:**
+    *   **Bad:** `{:seon.eval/error nil}`.
+    *   **Why:** Datahike/Datomic semantics: absent key = no value. Storing `nil` creates ambiguous queries.
+    *   **Alternative:** Use `{:optional true}` in Malli and simply omit the key.
+5.  **Positional DB API:**
+    *   **Bad:** `(db/transact! conn tx-data)`.
+    *   **Why:** Brittle; easy for agents to swap args and crash the pod (KI-1).
+    *   **Alternative:** Strict map-in/map-out: `(db/transact! {::db/conn c ::db/tx-data d})`.
+6.  **Reverse-Ref Discovery:**
+    *   **Bad:** Teaching agents to find their evals via `[:seon.eval/_agent]`.
+    *   **Why:** High cognitive load for LLMs; reverse syntax is error-prone.
+    *   **Alternative:** Provide forward ref vectors (`:seon.agent/sessions`) for natural walks.
+````
+
+## Synthesis: design directives we should adopt
+
+Priority order — top items unblock the spec rewrite the most.
+
+### P0 — Adopt before any further harness work
+
+1. **Introduce `:seon.turn` as a first-class entity.** Spec currently treats a turn as `:seon.agent/turn-count` (a scalar). Make it an entity with:
+   - `:seon.turn/id` (string, identity)
+   - `:seon.turn/index` (int)
+   - `:seon.turn/prompt` (string) — the literal rendered context
+   - `:seon.turn/messages` (cardinality-many ref, component)
+   - `:seon.turn/evals` (cardinality-many ref, component)
+   - `:seon.turn/status` (enum)
+2. **Persist the rendered prompt snapshot.** Every turn must store the exact string the LLM saw. Re-deriving from a (possibly mutated) renderer + DB-at-tx is not equivalent — code mutates faster than data, and the V1 we already shipped lets the agent rewrite renderers mid-session.
+3. **Introduce `:seon.agent.session`** as the container for a run. Agent → Sessions → Turns. Moves transient counters (`turn-count`, `turns-since-user`) off the agent entity and onto the session where they belong.
+4. **Forward-ref component vectors top-down.** `:seon.agent/sessions`, `:seon.session/turns`, `:seon.turn/messages`, `:seon.turn/evals`. Use `:db/isComponent true` so a recursive pull on the agent reaches everything in one call.
+5. **Move from `seon.agent/my-*` helpers to documented pull patterns.** Replace the helper fns with a `seon.agent.examples` namespace containing literal pull patterns, plus ONE helper (`seon.agent/root-pull`) that returns the current agent's nested context.
+
+### P1 — Adopt for V1.1 / shortly after
+
+6. **`seon.db/*tx-context*` dynamic var + auto tx-meta.** `eval-batch!` binds `{:seon.db/agent-id ... :seon.db/session-id ... :seon.db/turn-id ... :seon.db/eval-id ...}`; `db/transact!` merges into every tx's `:tx-meta`. No manual plumbing.
+7. **First-class `:seon.ns` and `:seon.fn` entities.** Replace `"my.ns/my-fn"` composite strings with `:seon.fn/ns` ref + `:seon.fn/name` keyword. Enables namespace-scoped queries without string parsing.
+8. **`:seon.db/origin` enum on every tx.** Lets playback distinguish system bootstrap from agent action from user injection.
+
+### P2 — Worth keeping in mind but lower urgency
+
+9. Section entities as data (already in spec — keep it, just confirm `:seon.ctx/fn` is a symbol, not a string).
+10. Strict map-in/map-out for `db/transact!` itself (spec already uses positional; consider migrating before agents have learned the positional shape).
+
+## Synthesis: ideas to consider but not blindly adopt
+
+- **Gemini suggests making `:seon.fn/refs` a cardinality-many ref.** Useful for static analysis, but the V0 pod doesn't have a code analyzer yet, and this attribute will be empty until one exists. Defer to V1.2 or whenever we wire up the analyzer-cache.
+- **Gemini's `:seon.test/sym` and `:seon.test/target` entities** are nice but premature — the MVP harness isn't running tests as first-class observations yet. Park for V2.
+- **Reverse-ref as anti-pattern is overstated for V1.** Datahike supports `_attr` syntax fine; the issue is *discoverability for LLMs*, not correctness. Forward-ref components are better for the agent's primary access path, but we shouldn't forbid backrefs — schema migration entities or audit-log walks will still need them.
+
+## Synthesis: things Gemini missed or under-emphasized
+
+- **WASM persistence boundary.** Gemini didn't address the Phase 3 WASM-Tauri move. Component refs and recursive pulls are great until the DB lives in the Rust host and the pod calls in via WIT — a recursive pull traversing 5 levels deep means a big serialized result crossing the WIT boundary. We should benchmark before assuming `[* {:seon.agent/sessions [{:seon.session/turns [*]}]}]` is cheap.
+- **Schema evolution.** Spec lets the agent register new schemas mid-session. None of Gemini's schema proposal addresses how an old turn's pull pattern remains valid after the agent has added/renamed attrs. Need to think about whether the playback layer pins to as-of tx.
+- **Tx-meta size.** Gemini recommends 5 string attrs on every tx. For a session with 10K txs, that's ~500KB of meta overhead. Worth measuring on Datahike before committing.
+
+## Open questions for Sean
+
+1. **Component refs vs. plain refs for the session/turn/message chain.** Components mean "deleting the session deletes its turns." Do we want that, or do we want forensic history to survive session deletion? (Datalog history retains either way, but the *current* DB shape changes.)
+2. **`:seon.turn/prompt` storage cost.** Each turn snapshot is plausibly 20–50KB of context. Over 10K turns that's 200–500MB just in prompt snapshots. Acceptable, or do we want a content-addressed `:seon.blob` entity with refs?
+3. **Tx-meta auto-tagging via dynamic var — does this survive the WASM boundary cleanly?** `binding` inside CLJS works, but if a transaction is enqueued and applied on a different "thread" (we don't really have threads in wasm32, but the flow message-passing model fakes it), the binding may not propagate. Worth a spike before committing.
+4. **Do we keep `seon.agent/my-messages` and friends as thin shims for backward compat with already-written agent prompts, or rip-and-replace now while no agent has memorized them?** User's "no legacy code" memory leans rip-and-replace, but worth confirming.
+5. **Is `:seon.eval/result-edn` as a truncated string the right model, or do we want `:seon.eval/result-ref` pointing at a `:seon.blob` so we can preserve the full result?** Gemini chose truncation; the user's "DB must capture EVERYTHING" goal argues for full preservation.
+

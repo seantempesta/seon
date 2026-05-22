@@ -82,8 +82,8 @@
 
 (defn use-compile-state!
   "Wire `compile-state-atom` as the source for `resolve-symbol`.
-   `compile-state-atom` is the atom returned by `seon.eval/init-bootstrap!`
-   (typically `seon.client/!compile-state`). Idempotent."
+   `compile-state-atom` is the atom holding the bootstrap-CLJS
+   compile-state (canonically `seon.repl/!compile-state`). Idempotent."
   [compile-state-atom]
   (reset! !compile-state-ref compile-state-atom))
 

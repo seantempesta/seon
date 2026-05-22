@@ -1,0 +1,128 @@
+#!/usr/bin/env bb
+;; fix-bootstrap-macros — post-build workaround for a shadow-cljs
+;; `:bootstrap` target bug.
+;;
+;; When shadow compiles user-listed `:macros` entries (e.g. cljs.test)
+;; for the `:bootstrap` output, syntax-quoted sibling references in
+;; the macro bodies lose their namespace. The emitted JS contains
+;;   new cljs.core.Symbol("", "set-env!", "/set-env!", ...)
+;; instead of the correctly-qualified form:
+;;   new cljs.core.Symbol("cljs.test", "set-env!", "cljs.test/set-env!", ...)
+;;
+;; At runtime, the analyzer can't resolve these refs and macroexpansion
+;; fails. Confirmed via reading shadow's `:bootstrap` target source —
+;; user-listed `:macros` entries hit a different code path than the
+;; hard-wired cljs.core macros build, which works correctly. Upstream
+;; fix pending; this script is the workaround.
+;;
+;; Algorithm: for each `<ns>$macros.js` file in `out/bootstrap/js/`,
+;; load the analyzer-cache transit files for BOTH `<ns>` (runtime)
+;; and `<ns>$macros` (macros). Then for each broken Symbol literal,
+;; decide which ns the var lives in:
+;;   - in `<ns>$macros` :defs → write `<ns>$macros`
+;;   - else in `<ns>`     :defs → write `<ns>` (the runtime sibling)
+;;   - else                     → leave as-is, warn
+;; The two-cache lookup is the load-bearing improvement over a naive
+;; "always use the file's own ns" rewrite, which mis-classifies
+;; refs to runtime sibling fns.
+;;
+;; Idempotent — running twice is a no-op because the second pass
+;; finds no empty-ns symbols.
+;;
+;; Usage:
+;;   bin/fix-bootstrap-macros            # after `clj -M:cljs compile bootstrap`
+;;
+;; Exit 0 if everything succeeds. Non-zero on filesystem errors.
+
+(require '[babashka.fs :as fs]
+         '[clojure.string :as str]
+         '[cognitect.transit :as t])
+
+(import '[java.io ByteArrayInputStream])
+
+(def project-root
+  (-> *file* fs/canonicalize fs/parent fs/parent str))
+
+(def bootstrap-js  (str project-root "/out/bootstrap/js"))
+(def bootstrap-ana (str project-root "/out/bootstrap/ana"))
+
+(defn transit-read [^String txt]
+  (let [in (ByteArrayInputStream. (.getBytes txt "UTF-8"))
+        r  (t/reader in :json)]
+    (t/read r)))
+
+(defn read-ana-defs
+  "Return the set of def-name strings declared in `<ns>` according to
+   its `.transit.json` analyzer cache. Returns nil if the file is
+   missing."
+  [ns-name]
+  (let [path (str bootstrap-ana "/" ns-name ".transit.json")]
+    (when (fs/exists? path)
+      (let [data (transit-read (slurp path))
+            defs (get data :defs)]
+        (set (map (fn [k]
+                    (cond
+                      (symbol? k)  (name k)
+                      (string? k)  k
+                      :else        (str k)))
+                  (keys defs)))))))
+
+(defn classify-target-ns
+  "Given a broken symbol name (e.g. \"set-env!\") and the runtime +
+   macro def-sets for some base ns, return the namespace string the
+   rewrite should use. Macros ns wins ties (sibling-macro reference)."
+  [sym-name macro-defs runtime-defs macros-ns runtime-ns]
+  (cond
+    (contains? macro-defs sym-name)   macros-ns
+    (contains? runtime-defs sym-name) runtime-ns
+    :else                             nil))
+
+(defn fix-file
+  "Read `js-file`, rewrite broken Symbol literals using the dual-cache
+   classification. Returns {:fixed N :unfixed M :warnings [..]}."
+  [js-file]
+  (let [filename    (fs/file-name js-file)
+        macros-ns   (str/replace filename #"\.js$" "")             ; e.g. cljs.test$macros
+        runtime-ns  (str/replace macros-ns #"\$macros$" "")        ; e.g. cljs.test
+        macro-defs  (or (read-ana-defs macros-ns) #{})
+        runtime-defs (or (read-ana-defs runtime-ns) #{})
+        text        (slurp js-file)
+        pattern     #"new cljs\.core\.Symbol\(\"\",\"([^\"]+)\",\"\/\1\""
+        warnings    (atom [])
+        fixed-count (atom 0)
+        unfixed     (atom 0)
+        new-text    (str/replace text pattern
+                                 (fn [[match sym-name]]
+                                   (if-let [target-ns (classify-target-ns sym-name macro-defs runtime-defs
+                                                                          macros-ns runtime-ns)]
+                                     (do (swap! fixed-count inc)
+                                         (str "new cljs.core.Symbol(\"" target-ns "\",\""
+                                              sym-name "\",\"" target-ns "/" sym-name "\""))
+                                     (do (swap! unfixed inc)
+                                         (swap! warnings conj sym-name)
+                                         match))))]
+    (when (pos? @fixed-count)
+      (spit js-file new-text))
+    {:fixed   @fixed-count
+     :unfixed @unfixed
+     :warnings @warnings}))
+
+(when-not (fs/directory? bootstrap-js)
+  (binding [*out* *err*]
+    (println "✗" bootstrap-js "not found — run `clj -M:cljs compile bootstrap` first"))
+  (System/exit 1))
+
+(let [files       (->> (fs/glob bootstrap-js "*$macros.js")
+                       (map str))
+      total-fixed (atom 0)]
+  (doseq [f files]
+    (let [{:keys [fixed unfixed warnings]} (fix-file f)]
+      (when (pos? fixed)
+        (println "✓" (fs/file-name f) "— rewrote" fixed "broken symbols"))
+      (when (pos? unfixed)
+        (binding [*out* *err*]
+          (println "  ⚠" (fs/file-name f) "—" unfixed "symbols couldn't be classified:"
+                   (vec (take 5 warnings)))))
+      (swap! total-fixed + fixed)))
+  (when (zero? @total-fixed)
+    (println "✓ no broken symbols found (already fixed or unaffected build)")))
