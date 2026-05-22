@@ -12,6 +12,23 @@ Research project by [Sean Tempesta](https://github.com/seantempesta). Public for
 
 For the project thesis and capability set, start at [`docs/seon/vision/index.md`](docs/seon/vision/index.md).
 
+## Active tracks
+
+Parallel lines of work, each with design notes under
+[`docs/prds/`](docs/prds/). This is a pointer, not a roadmap.
+
+- **Substrate** — `feature/datahike-migration` is the main active
+  branch: the datahike-backed graph store, Malli-derived schemas,
+  the `seon.db` validation gate, and flow-based routing. PRs
+  generally land here.
+- **WebAssembly containment** — complimentary. The `webassembly-agents`
+  branch carries a WASM-Tauri sandbox design for the agent eval
+  surface, plus a CLJS pod (`src/seon/*.cljs`) that runs the v1 agent
+  REPL spec ([`docs/prds/webassembly-agents/v1.md`](docs/prds/webassembly-agents/v1.md)).
+  The pod is the iteration substrate today; wasmtime is the eventual
+  deployment target. This is the deployment story on top of the same
+  data model — not a redirection of project scope.
+
 ## Lineage
 
 This project consolidated ~18 months of experiments documented in predecessor
