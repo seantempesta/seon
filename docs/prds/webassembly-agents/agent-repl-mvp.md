@@ -146,9 +146,11 @@ current design; only items below remain open.
 - **[[#^d10]]** — Topological `bootstrap.edn` emission at substrate
   build time. (Resume topo at runtime is solved: sort by datahike
   tx-id; see Resume phase.)
-- **[[#^d11]]** — Agent-scope `:seon.ctx/*` section entities. Today
-  there's one global set; for proper multi-agent isolation each
-  agent needs its own section family.
+- **[[#^d11]]** — Per-agent ctx set as `:seon.agent/ctx` multi-ref on
+  the agent record. Each agent's record carries cardinality-many refs
+  to ITS section entities. Defaults point at `seon.agent/*` fns.
+  Customization writes a fn in `seon.agent.<id>` and re-points refs.
+  Defers all dynamic dispatch to V2.
 
 The detailed notes for each live in [Decision details](#decision-details) at the
 bottom. [Known issues](#known-issues) at the very bottom tracks bugs
@@ -216,6 +218,85 @@ There is no ownership boundary. Any agent can `(in-ns 'seon.foo)` and
 work there. Naming hygiene is a social convention enforced through
 rendering (warnings on cross-namespace edits, etc.), not through ACL.
 
+## The agent record is the hub
+
+The library is built around serving agents. The mental model is
+**start at your record; everything you own is reachable from there.**
+
+```clojure
+(seon.agent/my)
+;; => {:seon.agent/id          "AbCdEfGh1234"
+;;     :seon.agent/state       :idle
+;;     :seon.agent/turn-count  7
+;;     :seon.agent/current-ns  :seon.trading
+;;     :seon.agent/ctx         [<ctx-ref> <ctx-ref> ...]
+;;     ;; …other scalars
+;;     }
+```
+
+What an agent owns and where it lives:
+
+| State | Location | How agent reaches it |
+|---|---|---|
+| **Scalars** (`:state`, `:turn-count`, `:current-ns`, etc.) | on the agent record | `(seon.agent/my)` |
+| **Ctx set** (their context render layout) | `:seon.agent/ctx` cardinality-many ref on agent record | `(seon.agent/my-ctx)` |
+| **Conversation** (`:seon.message/*`) | separate entities tagged via `:seon.message/agent` | `(seon.agent/my-messages 20)` |
+| **Eval log** (`:seon.eval/*`) | separate entities tagged via `:seon.eval/agent` | `(seon.agent/my-evals 20)` |
+| **Errors** (`:seon.log/*`) | separate entities tagged via `:seon.log/agent` | `(seon.agent/my-logs 20)` |
+| **Home ns** | `seon.agent.<id>` (deterministic) | already in it; `(in-ns)` to switch back |
+| **Result stash** | globalThis keyed by eval-id | `(result :<eval-id>)` |
+
+Scalars + the actively-mutated ctx set live ON the agent record
+(one pull, no joins). High-volume tails (messages, evals, logs)
+live as separate entities with a back-ref to the agent record; the
+`seon.agent/my-*` helper fns wrap the queries so the agent doesn't
+need to know the back-ref idiom.
+
+What's NOT agent-owned and stays globally shared:
+
+- `:seon.fn/*`, `:seon.schema/*`, `:seon.test/*`, `:seon.ns/*` — the
+  namespace graph. All agents collaborate on the same fns / schemas
+  / tests. "No ownership boundary" per the lifecycle rule above.
+
+### Self-recovery
+
+If an agent borks their context (their custom ctx fn throws, returns
+non-string, returns nothing useful), reset is a single transact on
+their own record:
+
+```clojure
+(seon.agent/reset-my-ctx!)
+;; equivalent to:
+(seon.db/transact!
+  {:seon.db/tx-data [{:seon.agent/id <my-id>
+                      :seon.agent/ctx <default-refs>}]})
+```
+
+The default ctx refs all point at `seon.agent/*` fns (substrate-
+shipped, always present). Nothing the agent does to their home ns
+`seon.agent.<id>` can break that. Render mechanism never crashes;
+worst case the agent gets the substrate's default view back.
+
+### Helper fns in `seon.agent`
+
+The substrate ships ergonomic accessors so the agent doesn't have
+to know datahike idioms. (V1 surface; expand later as needed.)
+
+```clojure
+(seon.agent/my)                ; → my agent entity (full pull)
+(seon.agent/my-ctx)            ; → [{:seon.ctx/priority _ :seon.ctx/fn _} …] sorted
+(seon.agent/my-messages n)     ; → last n messages, oldest-first
+(seon.agent/my-evals n)        ; → last n evals, oldest-first
+(seon.agent/my-logs n)         ; → last n log entries, newest-first
+
+(seon.agent/reset-my-ctx!)     ; revert ctx to substrate defaults
+(seon.agent/update-my-ctx! f)  ; transact (f current-ctx) onto my record
+```
+
+These are taught in the system-section ctx so the agent learns them
+on turn one. Datalog queries still work for everything not covered
+by a helper; the helpers are convenience, not gatekeepers.
+
 ## Mental model
 
 ```text
@@ -277,8 +358,16 @@ Built on the `:seon.fn/*` / `:seon.schema/*` / `:seon.test/*` taxonomy.
 ::seon.test/last-failed-at  :inst {:optional true}          ; most recent failed run
 ::seon.test/last-failure    :string {:optional true}        ; ex-message of most recent failure
 
-;; Agent (extends the existing :seon.agent/* family with one new attr)
-::seon.agent/current-ns  :keyword {:optional true}           ; agent's current ns; upserted on every (ns …) form. Falls back to home-ns.
+;; Agent (the hub for everything one agent owns)
+::seon.agent/id          [:seon.id/id {:seon.db/identity true}]   ; 12-char id
+::seon.agent/state       [:enum :idle :running]
+::seon.agent/turn-count  :int
+::seon.agent/turns-since-user :int
+::seon.agent/interrupted? :boolean {:optional true}
+::seon.agent/current-ns  :keyword {:optional true}                ; falls back to home-ns
+::seon.agent/ctx         [:vector :seon.db/ref]                   ; → :seon.ctx entities, cardinality-many.
+                                                                  ; Each agent has its OWN ordered set.
+                                                                  ; Customize by transacting different refs.
 
 ;; Namespaces (one entity per agent-defined or substrate ns)
 ::seon.ns/name    [:keyword {:seon.db/identity true}]        ; :seon.trading.signals
@@ -1941,59 +2030,107 @@ Once we have the analyzer walk producing a clean ordered vector,
 upgrades follow naturally (diff old vector against new; transact
 the additions).
 
-### <a id="d11"></a>D11 — Agent-scope `:seon.ctx/*` section entities ^d11
+### <a id="d11"></a>D11 — Per-agent ctx set as a multi-ref on the agent record ^d11
 
-Today `:seon.ctx/name` is the identity attr — one global set of
-section entities shared across every agent in the pod. Per-agent
-isolation today happens only at the top level: each agent owns its
-own `:seon.render/ai` symbol on its agent entity. An agent who wants
-a custom layout writes their own ctx fn and points the slot at it.
-
-That's enough if customization is total ("write your own ctx fn from
-scratch"). It's NOT enough if you want fine-grained customization —
-e.g. Agent A keeps the default `:current-ns` section but replaces
-just `:recent-evals` with a one-line-per-row version. Without
-agent-scoping, that change would affect every other agent's render
-too.
-
-**Proposed fix.** Make sections agent-owned:
+The agent record is the hub. Each agent owns a cardinality-many
+`:seon.agent/ctx` vector of refs to `:seon.ctx` entities. The
+section entities themselves carry no `:agent` field — ownership
+is reverse-implied by the ref direction.
 
 ```clojure
-;; section schema gains an :agent ref; identity becomes compound
-::seon.ctx/agent     :seon.db/ref                  ; → :seon.agent
-::seon.ctx/name      :keyword                      ; no longer identity on its own
-;; tuple-identity ensures one (agent, name) section per agent
-[:seon.ctx/agent :seon.ctx/name]   ; :db/unique :db.unique/identity
+;; on the agent
+::seon.agent/ctx  [:vector :seon.db/ref]    ; → :seon.ctx, cardinality-many
+
+;; on the ctx entity (no :agent attr — it's owned via the back-ref)
+::seon.ctx/priority  :long
+::seon.ctx/fn        :symbol                ; ns-qualified, resolves to a section fn
 ```
 
-Bootstrap creates one set of six section entities per agent
-(idempotent; one inner loop). The composer query becomes
-`[?e :seon.ctx/agent ?aid] [?e :seon.ctx/name _]`. Each agent
-customizes by transacting changes only to their own section row.
+Why this shape:
 
-Cost: storage is six rows × N agents (negligible). Query cost is
-the same datalog with one extra clause.
+- **The agent's record IS the index.** `(seon.db/entity [:seon.agent/id
+  id])` returns the agent map; `:seon.agent/ctx` resolves to the
+  ordered vector of ctx entities. One pull, no joins.
+- **Customization is "transact a different ref onto my own record."**
+  Agent writes their custom fn in their home ns (`seon.agent.<id>`),
+  transacts a new `:seon.ctx` entity, and either replaces an existing
+  ref in `:seon.agent/ctx` or appends to the vector. No global
+  side-effect on other agents.
+- **Recovery from a borked context.** Reset is "rewrite
+  `:seon.agent/ctx` to the substrate defaults" — exactly one transact
+  on the agent record. No cleanup of orphan section entities needed
+  for correctness (the agent's ctx vector no longer references them);
+  GC them later if you want.
+- **No global registry.** Section entities are per-agent by
+  construction. Two agents can have completely different ctx sets
+  with zero interference.
 
-What gets ALSO agent-scoped (and should NOT): `:seon.fn/*`,
-`:seon.schema/*`, `:seon.test/*`, `:seon.ns/*` stay GLOBAL. That's
-the "no ownership boundary" rule — agents collaborate on the
-namespace graph. Only the render-customization machinery is
-per-agent.
+#### V1 default — substrate fns, no dispatch
 
-What's already agent-scoped via existing refs:
-`:seon.eval/agent`, `:seon.message/agent`, `:seon.log/agent`,
-`:seon.agent/current-ns`, `:seon.render/ai`, `:seon.render/html`,
-and the per-agent home ns `seon.agent.<id>`. The result-stash on
-globalThis is keyed by eval-id which is globally unique, so it's
-implicitly per-agent in practice.
+V1 ships with default ctx entities pointing at fns in the
+**`seon.agent`** namespace (substrate-shipped, shared across
+agents). The substrate's bootstrap creates one default ctx set
+per agent at agent-create-time:
 
-Multi-agent runtime correctness check: the compile-state is SHARED
-across agents in one pod. CLJS eval is single-threaded so the
-forms serialize — no race in the compile-state — but `(in-ns
-'foo)` mid-form by one agent could leak to another's form. The
-existing `seon.agent/current-ns` per-agent atom mitigates this for
-the eval-batch level. Worth verifying once we run two concurrent
-agents in the same pod.
+```clojure
+;; substrate bootstrap creates these as part of (seon.agent/create! …)
+[{:seon.ctx/priority 10 :seon.ctx/fn 'seon.agent/system-section}
+ {:seon.ctx/priority 20 :seon.ctx/fn 'seon.agent/related-ns-section}
+ {:seon.ctx/priority 30 :seon.ctx/fn 'seon.agent/current-ns-section}
+ {:seon.ctx/priority 40 :seon.ctx/fn 'seon.agent/warnings-section}
+ {:seon.ctx/priority 50 :seon.ctx/fn 'seon.agent/recent-evals-section}
+ {:seon.ctx/priority 99 :seon.ctx/fn 'seon.agent/prompt-section}]
+;; agent gets {:seon.agent/ctx [<ref> <ref> <ref> <ref> <ref> <ref>]}
+```
+
+Agent customizes by writing their own fn in `seon.agent.<id>`
+(their home ns) and re-pointing one ref:
+
+```clojure
+;; in their home ns
+(defn my-compact-evals [input] ...)
+
+;; transact onto own record
+(seon.db/transact!
+  {:seon.db/tx-data
+   [{:seon.agent/id "AbCdEfGh1234"
+     :seon.agent/ctx [<refs to all but recent-evals>
+                      <ref to new section with :seon.ctx/fn 'seon.agent.AbCdEfGh1234/my-compact-evals>]}]})
+```
+
+#### V1 default — section fn signature
+
+A section fn takes one map and returns a string. The map is the
+agent's `:seon.render/system-input` (no change from earlier spec):
+
+```clojure
+{:seon.db/db    <datahike db>
+ :seon.agent/id <agent-id string>}
+```
+
+Section fn handles the rest (queries DB, formats, returns string).
+Empty string omits the section.
+
+#### Dynamic dispatch is V2 / V3
+
+The earlier spec described "per-entity dispatch by Malli specificity"
+as a post-MVP enhancement. V1 explicitly defers that AND defers any
+sophisticated `:seon.render/ai` / `:seon.render/html` symbol-slot
+resolution. V1 has:
+
+- A direct vector of section refs.
+- Section fns that return strings.
+- One composer that walks the vector and joins.
+
+V2 layers per-entity-shape dispatch on top of that (sections can
+return entity maps; a registry resolves a specific render-fn for each
+shape). V3 explores cross-agent collaboration features, profile
+dashboards, etc.
+
+This split is intentional. The MVP must work without any dynamic
+resolution infrastructure. If everything compiles to a known symbol
+that's part of `:seon.agent` or `seon.agent.<id>`, the contract is
+"resolve the symbol at call time" — the simplest possible mechanism.
 
 ## <a id="known-issues"></a>Known issues
 

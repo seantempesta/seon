@@ -38,12 +38,13 @@ need triage (KI-1 through KI-6).
 
 In rough order:
 
-1. **D11 — agent-scope `:seon.ctx/*` section entities.** Today
-   sections are global. Per-agent customization only works at the
-   top-level render-fn slot, which forces "write your own ctx fn
-   from scratch" rather than "tweak one section." Schema change is
-   tiny (add `:agent` ref, compound identity); composer query gains
-   one clause. Prerequisite for serious multi-agent runtime.
+1. **D11 — per-agent ctx set on the agent record.** The agent record
+   becomes the hub: `:seon.agent/ctx` is a cardinality-many vector
+   of refs to that agent's `:seon.ctx` entities. Defaults point at
+   `seon.agent/*` substrate fns; customization writes a fn in
+   `seon.agent.<id>` and re-points refs. V1 has NO dynamic dispatch
+   — symbols resolve at call time, period. V2 layers per-entity
+   specificity dispatch on top.
 2. **D5 — explicit remove-spec / remove-fn / remove-test** verbs.
    Small surface; high agent-utility; gates the "agent can curate
    without accumulating cruft" story.
