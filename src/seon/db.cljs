@@ -139,7 +139,7 @@
                (:seon.agent/id agent) (seon.agent/home-ns (:seon.agent/id agent))
                llm-fn compile-state))))
 
-     (db/listen! {::db/key     ::user-message-kick
+     (db/listen! {::db/key     ::user-message-trigger
                   ::db/handler kick-on-user-message})
 
    ### How the loop stops itself
@@ -187,7 +187,7 @@
    want a session that the user can append to but you don't auto-
    respond to), just retract the listener:
 
-     (db/unlisten! {::db/key ::user-message-kick})
+     (db/unlisten! {::db/key ::user-message-trigger})
 
    The session's message log keeps growing; no loops spawn. To bring
    it back, register the handler again.
@@ -304,6 +304,43 @@
   [:map [::ok? :boolean]])
 
 ;; ---------------------------------------------------------------------------
+;; Tx-meta attrs (v1.md §2.3) — the causality bundle attached to every tx.
+;;
+;; These are registered HERE (not in seon.eval or seon.agent) for two reasons:
+;;
+;;   1. They live in the `:seon.db/*` namespace; seon.db owns it.
+;;   2. The `transact!` auto-merge path below reads `current-tx-context` and
+;;      writes these keys to `:tx-meta`. Datahike's `flush-tx-meta` rejects
+;;      unregistered keys at write time — so they MUST be registered before
+;;      any `(seon.db/transact! …)` call fires. Registering at namespace
+;;      load (here) means by the time the agent boots, they're known.
+;;
+;; `assert-preconditions!` (below) double-checks this at boot so a
+;; misconfigured registry fails loud instead of crashing the first tx.
+;; ---------------------------------------------------------------------------
+
+;; ID values are 12-char base62 strings (8-char time prefix +
+;; 4-char random suffix; produced by `seon.agent/new-id!`). Shape
+;; inlined here rather than referenced via a named schema — the
+;; previous `:seon.id/id` indirection was a one-fn namespace whose
+;; only contribution was the shape it registered; collapsing it is
+;; the "no stupid shit" rule in action.
+(schema/register! ::agent-id        [:string {:min 12 :max 12}])
+(schema/register! ::session-id      [:string {:min 12 :max 12}])
+(schema/register! ::turn-id         [:string {:min 12 :max 12}])
+(schema/register! ::eval-id         [:string {:min 12 :max 12}])
+(schema/register! ::origin          [:enum :user :agent :system :replay])
+(schema/register! ::replay?         :boolean)
+(schema/register! ::resume-marker?  :boolean)
+
+(def ^:private tx-meta-attrs
+  "Set of attr keywords the tx-meta auto-merge writes. Used by
+   `assert-preconditions!` to confirm registration. Update both lists
+   together when adding new tx-meta attrs."
+  #{::agent-id ::session-id ::turn-id ::eval-id
+    ::origin ::replay? ::resume-marker?})
+
+;; ---------------------------------------------------------------------------
 ;; The agent's universe. Bound by the session-flow boundary at session start;
 ;; nil outside a bound scope. Test/admin code may pass `:conn` explicitly per
 ;; the spec's escape-hatch posture.
@@ -319,6 +356,85 @@
    same user share this conn — sessions are entities in it, not partitions
    of it."
   nil)
+
+;; ---------------------------------------------------------------------------
+;; *tx-context* — the causality bundle for every tx in an eval scope.
+;;
+;; v1.md §2.3 establishes the contract:
+;;   - `eval-batch!` enters a `(with-tx-context {…} f)` scope around each
+;;     form's per-form work.
+;;   - `transact!` reads `(current-tx-context)` and deep-merges into
+;;     `:tx-meta`. Explicit `opts.tx-meta` wins per-key.
+;;
+;; We DO NOT use a CLJS `^:dynamic` Var here, even though that's the
+;; idiomatic Clojure spelling. CLJS `binding` macroexpands to
+;; `(set! var :new)` + `(try … (finally (set! var orig)))` against ONE
+;; global slot — it survives single-binder cases but silently clobbers
+;; under overlapping awaits when two `^:async` fns each bind it (see
+;; `research/impl-finding-tx-context-promise-2026-05-22.md` Probe 13).
+;; v1 supports concurrent agents in one pod, so a fiber-local primitive
+;; is required.
+;;
+;; `node:async_hooks/AsyncLocalStorage` IS fiber-local: V8 instruments
+;; the async context propagation at the engine level so a `.run`-scoped
+;; store survives across any `await`s (real timers, microtasks,
+;; rejections, nested ^:async calls) AND does not interfere with
+;; concurrent `.run`s in other fibers. Probe 14 verified this under the
+;; same adversarial interleaving that broke Probe 13.
+;;
+;; The require is at top-level so a pod missing `node:async_hooks`
+;; fails loudly at ns load instead of silently at first transact.
+;; Phase 3 (WASM cutover) needs an ALS-equivalent in wasm-rquickjs;
+;; tracked as a separate D13-WASM prerequisite.
+;; ---------------------------------------------------------------------------
+
+(defonce ^:private als-instance
+  (let [AsyncLocalStorage (.-AsyncLocalStorage (js/require "node:async_hooks"))]
+    (AsyncLocalStorage.)))
+
+(defn current-tx-context
+  "Return the active tx-context map, or nil if no `with-tx-context` is
+   in scope. Reads from AsyncLocalStorage — fiber-local across awaits,
+   safe under concurrent agents.
+
+   Auto-merged into every `transact!` call's `:tx-meta`. Explicit
+   `opts.tx-meta` keys on the call site win per-key."
+  []
+  (let [store (.getStore als-instance)]
+    ;; Outside a `.run` scope the JS getStore returns undefined; CLJS
+    ;; treats that as nil in `when`-position. Be explicit anyway —
+    ;; callers downstream `merge` on the result.
+    (when (some? store) store)))
+
+(defn with-tx-context
+  "Establish a tx-context for the dynamic extent of `f` (a 0-arg fn).
+   Nested calls MERGE: the new `ctx-map` is merged on top of any
+   already-active context.
+
+   Returns whatever `f` returns — including a Promise, in which case
+   the context propagates across `await` points inside `f` and any
+   `^:async` fn `f` calls.
+
+     (seon.db/with-tx-context
+       {:seon.db/origin :agent
+        :seon.db/agent-id agent-id}
+       (fn []
+         (seon.db/transact! {:seon.db/tx-data [...]})))   ; auto-tagged
+
+   The ctx-map's keys are typically the 7 `:seon.db/*` tx-meta attrs
+   (see `tx-meta-attrs` above). Any registered scalar attr is allowed
+   — `seon.db/transact!` will fail at write time if the key isn't
+   registered in `seon.schema`.
+
+   Implementation note: the merging behavior makes nested-scope
+   tx-meta natural — e.g. `eval-batch!` opens a turn-scoped ctx;
+   a sub-call that wants to add `:seon.db/origin :replay` for one
+   form just wraps that form with the override, and turn-id /
+   agent-id flow through unchanged."
+  [ctx-map f]
+  (let [current (current-tx-context)
+        merged  (merge current ctx-map)]
+    (.run als-instance merged f)))
 
 ;; ---------------------------------------------------------------------------
 ;; Validation gate — mirrors `seon.db/transact!` 60–135 on JVM byte-for-byte
@@ -421,16 +537,77 @@
 ;; Public write path
 ;; ---------------------------------------------------------------------------
 
+(defn- assert-invocation-shape!
+  "KI-1 guard. `transact!` is map-in / map-out — every key namespaced
+   under `:seon.db/*`. Positional invocations (`(transact! conn tx-data)`)
+   or unqualified-key maps (`{:tx-data […]}`) silently destructure to
+   nil/empty and used to crash deep inside datahike with cryptic errors.
+   This precondition catches both at the boundary with a clear message.
+
+   Run BEFORE destructuring so the error message can name the actual
+   shape received."
+  [arg]
+  (cond
+    (not (map? arg))
+    (throw (ex-info
+             (str "seon.db/transact! expects ONE map argument with "
+                  "`:seon.db/tx-data`. Got: " (truncate-value arg)
+                  " — did you call positionally? "
+                  "Use {::db/tx-data […]} or {:seon.db/tx-data […]}.")
+             {::error :seon.db/invalid-invocation-shape
+              ::actual-shape (type arg)
+              ::actual-value arg}))
+
+    (not (contains? arg ::tx-data))
+    (let [unqualified-tx-data (get arg :tx-data ::not-present)
+          hint                (if (not= unqualified-tx-data ::not-present)
+                                " — Hint: keys must be namespaced. Use `:seon.db/tx-data`, not bare `:tx-data`."
+                                "")]
+      (throw (ex-info
+               (str "seon.db/transact!: missing `:seon.db/tx-data` key."
+                    hint
+                    " Got keys: " (pr-str (vec (keys arg))))
+               {::error :seon.db/invalid-invocation-shape
+                ::missing :seon.db/tx-data
+                ::actual-keys (vec (keys arg))})))))
+
+(defn- merge-tx-context-into-opts
+  "Merge `(current-tx-context)` into `opts.:tx-meta`. Explicit
+   `(:tx-meta opts)` keys win per-key; the context fills any unset keys.
+
+   Conflict rule from v1.md §2.3: explicit `:seon.db/opts {:tx-meta {…}}`
+   on the transact call wins per-key; the context fills unset keys.
+
+   Returns the (possibly-updated) opts, or nil if there's nothing to merge
+   AND nothing was passed."
+  [opts]
+  (let [ctx (current-tx-context)]
+    (cond
+      (and (nil? opts) (nil? ctx))  nil
+      (nil? ctx)                    opts
+      :else                         (update (or opts {}) :tx-meta
+                                            #(merge ctx %)))))
+
 (defn ^:async transact!
   "Commit tx-data to the agent's conn. Map-in / map-out.
 
    Validates synchronously BEFORE reaching datahike:
-     1. every non-`:db/*` attribute in tx-data is registered;
-     2. every value in an entity-map form satisfies its attribute's
+     1. invocation shape is `{:seon.db/tx-data […] …}` (KI-1 guard).
+     2. every non-`:db/*` attribute in tx-data is registered;
+     3. every value in an entity-map form satisfies its attribute's
         registered Malli schema.
 
    Validation failures throw `ex-info` immediately (these are local
    programmer-mistakes the agent boundary catches separately).
+
+   ## Auto-merged tx-meta (v1.md §2.3)
+
+   If a `(seon.db/with-tx-context {…} f)` scope is active when this
+   call fires, the active context map is merged into `opts.:tx-meta`.
+   Explicit `:tx-meta` keys on the call site win per-key. The merged
+   bundle reaches datahike via `(d/transact! conn tx-data opts)`,
+   landing every key as a datom on the tx entity (requires
+   `:keep-history? true` on the conn — see `assert-preconditions!`).
 
    Returns a Promise resolving to:
      {:seon.db/ok? true  :seon.db/tx-report <datahike report>}   ; ok
@@ -447,19 +624,277 @@
      (let [r (await (db/transact! {::db/tx-data [{::name \"Alpha\" ::rank 1}]}))]
        (println r))"
   {:malli/schema [:=> [:cat ::transact-request] [:fn some?]]}
-  [{::keys [tx-data opts conn] :or {conn *conn*}}]
-  (let [c     (resolve-conn conn)
-        attrs (extract-tx-attrs tx-data)]
+  [arg]
+  (assert-invocation-shape! arg)
+  (let [{::keys [tx-data opts conn] :or {conn *conn*}} arg
+        c           (resolve-conn conn)
+        attrs       (extract-tx-attrs tx-data)
+        merged-opts (merge-tx-context-into-opts opts)]
     (validate-attrs! attrs)
     (validate-values! tx-data)
     (try
-      (let [report (if opts
-                     (await (d/transact! c tx-data opts))
-                     (await (d/transact! c tx-data)))]
+      ;; Datahike-cljs `d/transact!` takes one arg-map combining
+      ;; `:tx-data` + `:tx-meta` (see datahike.api.impl/transact! L29-41).
+      ;; The previous shape `(d/transact! c tx-data opts)` passed opts
+      ;; as a third arg that datahike silently ignored — so user
+      ;; tx-meta NEVER reached the db before this fix. The single
+      ;; arg-map shape is the only supported call path.
+      (let [arg-map (merge {:tx-data tx-data} merged-opts)
+            report  (await (d/transact! c arg-map))]
         {::ok? true ::tx-report report})
       (catch :default e
         {::ok?  false
          ::error (error/->map e)}))))
+
+;; ---------------------------------------------------------------------------
+;; Malli → datahike schema bridge.
+;;
+;; Datahike requires every attribute have a declared `:db/valueType` +
+;; `:db/cardinality` before its first transact. seon.schema (Malli) is
+;; our source of truth for attr shape; this bridge derives the datahike
+;; declaration from the Malli registration so the two layers can't
+;; drift.
+;;
+;; Currently handles the type surface v1 needs (string, keyword,
+;; boolean, inst, int, uuid, enum, vector/set cardinality, ref,
+;; component refs, identity attrs). Anything else throws — caller
+;; decides whether to hand-write the entry or extend the bridge. Phase
+;; 2.6 (`client.cljs` cleanup) expands coverage.
+;; ---------------------------------------------------------------------------
+
+(defn- form-properties
+  "Extract the Malli properties map from a schema form, or nil. For
+   `[:string {:min 12} …]` returns `{:min 12}`; for `:string` returns nil."
+  [form]
+  (when (and (vector? form)
+             (>= (count form) 2)
+             (map? (second form)))
+    (second form)))
+
+(defn- form-children
+  "The non-property children of a schema form. For
+   `[:vector {:min 1} :int]` returns `[:int]`; for `[:vector :int]` also
+   `[:int]`; for `:string` returns `[]`."
+  [form]
+  (if (vector? form)
+    (let [body (rest form)
+          body (if (and (seq body) (map? (first body))) (rest body) body)]
+      (vec body))
+    []))
+
+(declare ^:private resolve-malli-form)
+
+(defn- resolve-malli-form
+  "Follow a Malli schema form through seon.schema-registered keyword
+   indirections until it reaches a non-keyword form OR a keyword that
+   isn't in the seon.schema mutable registry. The latter case covers
+   Malli built-ins (`:string`, `:int`, `:keyword`, `:boolean`, `:inst`,
+   etc.) and is left unresolved — `form->datahike-value-type` maps the
+   built-in heads directly.
+
+   `:seon.db/ref` is special: even though it's registered, the bridge
+   maps it directly to `:db.type/ref` rather than following its
+   `[:or ...]` registration (which describes valid value shapes, not
+   the underlying datahike type)."
+  [form]
+  (cond
+    (= :seon.db/ref form)
+    :seon.db/ref
+
+    (and (keyword? form) (schema/registered? form))
+    (resolve-malli-form (schema/schema-definition form))
+
+    :else
+    form))
+
+(def ^:private malli-type->datahike-type
+  "Mapping from Malli base types to datahike `:db.type/*` keywords.
+   Lookup is by the *head* of a resolved Malli form (or the form
+   itself when it's a bare keyword)."
+  {:string  :db.type/string
+   :int     :db.type/long
+   :keyword :db.type/keyword
+   :boolean :db.type/boolean
+   :inst    :db.type/instant
+   :uuid    :db.type/uuid
+   :symbol  :db.type/symbol})
+
+(defn- form-head
+  "The head of a Malli form. For `[:string {:min 1}]` returns `:string`;
+   for `:boolean` returns `:boolean`; for `[:enum :a :b]` returns
+   `:enum`; for `:seon.db/ref` returns itself (special case)."
+  [form]
+  (cond
+    (vector? form)  (first form)
+    :else           form))
+
+(defn- form->datahike-value-type
+  "Given a resolved (no more keyword refs) Malli form, return the
+   matching datahike `:db.type/*` keyword. Throws on unmappable
+   shapes — caller extends the bridge or hand-writes the entry."
+  [resolved-form]
+  (let [head (form-head resolved-form)]
+    (cond
+      (= head :seon.db/ref)
+      :db.type/ref
+
+      (= head :enum)
+      ;; All current v1 enum schemas hold keyword values
+      ;; (`:user`/`:agent`/`:system`/etc). Verify before mapping so a
+      ;; non-keyword enum (e.g. enum of strings) doesn't silently land
+      ;; as :keyword. If we add string-enums later, branch here.
+      (if (every? keyword? (form-children resolved-form))
+        :db.type/keyword
+        (throw (ex-info (str "Malli :enum with non-keyword values not "
+                             "supported by the v1 bridge: "
+                             (pr-str resolved-form))
+                        {::error :seon.db/unbridgeable-malli-form
+                         ::form resolved-form})))
+
+      ;; [:and base extra-constraints] — bridge on the base.
+      (= head :and)
+      (form->datahike-value-type (resolve-malli-form (first (form-children resolved-form))))
+
+      ;; [:or alt-1 alt-2] — bridge on the first alt. We don't have
+      ;; mixed-type :or fields in v1; if one appears, fail loud.
+      (= head :or)
+      (let [child-types (set (map #(form->datahike-value-type (resolve-malli-form %))
+                                  (form-children resolved-form)))]
+        (if (= 1 (count child-types))
+          (first child-types)
+          (throw (ex-info (str "Malli :or with mixed datahike types not "
+                               "supported: "
+                               (pr-str resolved-form))
+                          {::error :seon.db/unbridgeable-malli-form
+                           ::form resolved-form
+                           ::distinct-types child-types}))))
+
+      :else
+      (or (malli-type->datahike-type head)
+          (throw (ex-info (str "Cannot map Malli type to datahike type: "
+                               (pr-str resolved-form))
+                          {::error :seon.db/unbridgeable-malli-form
+                           ::form resolved-form
+                           ::head head}))))))
+
+(defn- form->cardinality
+  "`:db.cardinality/many` if the form is a vector/set/sequential
+   container; `:db.cardinality/one` otherwise. The CHILD is the value
+   type — caller resolves it separately."
+  [form]
+  (if (and (vector? form)
+           (#{:vector :sequential :set} (first form)))
+    :db.cardinality/many
+    :db.cardinality/one))
+
+(defn- form->child-form
+  "For container forms (`:vector`/`:set`/`:sequential`), the child
+   value form. For scalar forms, returns the form unchanged."
+  [form]
+  (if (and (vector? form)
+           (#{:vector :sequential :set} (first form)))
+    (first (form-children form))
+    form))
+
+(defn malli->datahike-attr
+  "Translate a single attr keyword from the seon.schema Malli registry
+   into a datahike attribute declaration map (the shape datahike's
+   bootstrap schema vector wants).
+
+   Returns:
+     {:db/ident       <attr-key>
+      :db/valueType   <:db.type/*>
+      :db/cardinality <:db.cardinality/one|many>
+      :db/unique      <optional :db.unique/identity>
+      :db/isComponent <optional true>}
+
+   Properties on the Malli registration drive the optional fields:
+     - `{:seon.db/identity true}` → `:db/unique :db.unique/identity`
+     - `{:seon.db/component true}` → `:db/isComponent true`
+
+   Throws on unregistered attrs or Malli forms the bridge can't map."
+  [attr-key]
+  (let [raw-form    (or (schema/schema-definition attr-key)
+                        (throw (ex-info (str "Attr not registered in seon.schema: "
+                                             (pr-str attr-key))
+                                        {::error :seon.db/unregistered-attr
+                                         ::attr attr-key})))
+        props       (form-properties raw-form)
+        outer-form  raw-form
+        cardinality (form->cardinality (resolve-malli-form outer-form))
+        ;; For vectors/sets, the child is the value form; for scalars,
+        ;; same as outer.
+        value-form  (-> outer-form
+                        resolve-malli-form
+                        form->child-form
+                        resolve-malli-form)
+        value-type  (form->datahike-value-type value-form)]
+    (cond-> {:db/ident       attr-key
+             :db/valueType   value-type
+             :db/cardinality cardinality}
+      (:seon.db/identity props)  (assoc :db/unique :db.unique/identity)
+      (:seon.db/component props) (assoc :db/isComponent true))))
+
+(defn malli->datahike-schema
+  "Vector form of [[malli->datahike-attr]]. Pass a sequence of attr
+   keywords; get a vector of datahike-ready attr declarations.
+
+   The vector ordering preserves the input ordering — when a
+   datahike conn boot-transacts the result, attrs land in the order
+   given (matters for forward references between schema entities)."
+  [attr-keys]
+  (mapv malli->datahike-attr attr-keys))
+
+(defn tx-meta-datahike-schema
+  "The datahike schema entries for the 7 tx-meta attrs (v1.md §2.3).
+   Built by running `tx-meta-attrs` through the bridge. Called by
+   `seon.client/agent-bootstrap-schema` so the entries are derived
+   from Malli, never hand-written."
+  []
+  (malli->datahike-schema (sort tx-meta-attrs)))
+
+(defn assert-preconditions!
+  "Validate v1.md §7.1 boot preconditions. Throws ex-info on failure.
+
+   Preconditions:
+     1. Resolved conn is opened with `:keep-history? true`. Without
+        history, tx-meta datoms don't persist (datahike drops them on
+        compaction) — the causality bundle silently degrades.
+     2. All tx-meta attrs in `tx-meta-attrs` are registered in
+        `seon.schema`. Datahike's `flush-tx-meta` rejects unregistered
+        keys at write time; the first tx after boot would crash.
+
+   Called from `seon.client/start-agent!` before any agent work fires.
+   Tests pass an explicit `:seon.db/conn` to verify against a fresh
+   conn without touching `*conn*`."
+  ([] (assert-preconditions! {}))
+  ([{::keys [conn] :or {conn *conn*}}]
+   (let [c (resolve-conn conn)]
+     ;; datahike-cljs exposes the conn's config map at `(:config @conn)`.
+     ;; There's no `d/get-config` on the CLJS side (it exists on JVM
+     ;; only). Deref + key access is the supported path.
+     (when-not (:keep-history? (:config @c))
+       (throw (ex-info
+                (str "seon.db: agent conn opened with `:keep-history? false`. "
+                     "v1's tx-meta-as-history mechanic requires history "
+                     "(see v1.md §7.1). Open the conn with "
+                     "`:keep-history? true`.")
+                {:kind          :seon.boot/precondition-failed
+                 :failure       :keep-history-off
+                 ::error        :seon.boot/precondition-failed})))
+     (let [unregistered (into [] (remove schema/registered?) tx-meta-attrs)]
+       (when (seq unregistered)
+         (throw (ex-info
+                  (str "seon.db: tx-meta attrs not registered: "
+                       (pr-str unregistered) ". seon.db registers these at "
+                       "namespace load — if this fires, the seon.schema "
+                       "registry was likely cleared after seon.db loaded "
+                       "(`schema/clear-all!` in a test, or stale REPL state).")
+                  {:kind          :seon.boot/precondition-failed
+                   :failure       :tx-meta-attrs-unregistered
+                   :unregistered  unregistered
+                   ::error        :seon.boot/precondition-failed})))))
+   true))
 
 ;; ---------------------------------------------------------------------------
 ;; Public read path — synchronous over a db value (datahike-cljs is sync

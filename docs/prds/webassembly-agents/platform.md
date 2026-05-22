@@ -219,6 +219,7 @@ fires `cljs.test/do-report`, which dispatches through our
                       {:test 0 :pass 0 :fail 0 :error 0})]
       {::events events
        ::summary summary})))
+
 ```
 
 The volatile is a local builder — the API is pure: `::run-request → ::run-result`. Both schemas registered, both validatable, no shared state.
@@ -245,18 +246,135 @@ Each `(deftest)` definition can ALSO transact a `:seon.test/*` entity into the a
                     :seon.test/last-failure (when failed?
                                               (pr-str (first (filter #(#{:fail :error} (:type %)) events))))})]
     (db/transact! {:seon.db/conn conn :seon.db/tx-data tx-data})))
+
 ```
 
 Same shape — `::record-request → ::tx-report`. The conn is passed in (not reached for via a global), the time is captured at the boundary, the events drive the tx-data via a pure transformation.
 
 #### Out of MVP scope, in scope here
 
-- Auto-run on define (spec [[agent-repl-mvp#d6]]) — when an eval's tx asserts on a `:seon.fn`, a post-eval fn queries reverse-targets, runs them via `run-vars`, then records via `record-run!`. All data-shaped; the eval-batch caller chains them.
+- Auto-run on define (deferred to v2 — see [[v2]] §"Test entity and auto-run") — when an eval's tx asserts on a `:seon.fn`, a post-eval fn queries reverse-targets, runs them via `run-vars`, then records via `record-run!`. All data-shaped; the eval-batch caller chains them.
 - Per-agent reporter — pass a custom `:reporter` fn into `cljs.test/empty-env` before binding. The fn is part of the call's input, not registered globally.
 
 **Anti-pattern to avoid:** a `(seon.test/install!)` that mutates `cljs.test/report` globally. That makes the test machinery's behavior depend on whether `install!` has been called and whether some other code re-rebound it. The per-call binding-of-env approach is the data-friendly version.
 
 **Effort:** ~1 day. Pure CLJS work, no WASM changes.
+
+### Phase 2.5 — v1 substrate primitives (in flight, 2026-05-22)
+
+MVP track has started v1 implementation. The six items below are
+substrate primitives the whole system rides on — auto tx-meta
+plumbing, the shared id namespace, history flip, a rewrite-clj
+parser, and defn-shape extractors. MVP work would land them inline
+in feature code if Platform didn't pre-position them; that would
+create permanent substrate API surface inside files labeled "MVP
+track" and produce merge pain when v2 follows. Negotiated split
+recorded here so neither track drifts.
+
+#### Owned end-to-end by Platform
+
+1. **D13 Node-side dynvar probe.** Verify `seon.db/*tx-context*`
+   survives `(.then promise callback)` boundaries on Node (V0 pod).
+   ~15-minute probe per v1.md §11 Risk 1. If broken, surface to
+   Sean with the three remediation options (explicit-arg threading
+   / atom-backed scope token / no-dynvar API change) BEFORE any
+   production code commits. Land a one-paragraph
+   `research/impl-finding-tx-context-promise-<date>.md` either way.
+   D13 WASM-side probe is a separate Phase 3 prerequisite — not in
+   scope here.
+2. **`seon.id` namespace.** Extract the 12-char base62 generator
+   from `agent.cljs:75-82` (currently 10-char, wrong shape per
+   v1.md §3) into `src/seon/id.cljs`. Register `:seon.id/id` Malli
+   schema. Every identity attr in v1 (`:seon.agent/id`,
+   `:seon.session/id`, etc.) references it.
+3. **`:keep-history? true` flip + boot `assert-preconditions!`.**
+   `client.cljs:285` per the 2026-05-22 morning survey (re-verify
+   against HEAD — code may have shifted). `assert-preconditions!`
+   throws cleanly on (a) history off, (b) any of the 7 tx-meta
+   attrs unregistered. Also re-verify `wasm_smoke.cljs:44`'s
+   `:keep-history? false` is intentional (smoke harness likely OK
+   as-is; confirm with Sean if not).
+4. **Tx-meta plumbing on `seon.db/transact!` + tx-meta attr
+   registrations.** One coherent patch. `transact!` reads
+   `*tx-context*` dynvar and merges into `:tx-meta`. **Conflict
+   rule: explicit `opts.tx-meta` wins per-key; dynvar fills unset
+   keys.** This makes MVP's explicit-passthrough scaffolding
+   forward-compatible — same datoms persist when auto-merge lands,
+   MVP deletes plumbing at their leisure, no cutover. Register
+   `:seon.db/agent-id`, `:seon.db/session-id`, `:seon.db/turn-id`,
+   `:seon.db/eval-id`, `:seon.db/origin`, `:seon.db/replay?`,
+   `:seon.db/resume-marker?` (all 7 per v1.md §2.3) in the same
+   patch — datahike's `flush-tx-meta` rejects unregistered keys at
+   write time.
+5. **KI-1 fix: `seon.db/transact!` invocation-shape precondition.**
+   Positional or unqualified-key calls currently crash Node with
+   cryptic errors. Throw a clean validation error explaining the
+   expected `{:seon.db/tx-data ... :seon.db/opts ...}` shape.
+   Bundled with item 4 since both touch `transact!`.
+
+#### Waits on MVP-track artifacts
+
+6. **`parse-forms` rewrite-clj refactor.** Switch
+   `seon.repl/parse-forms` from `cljs.tools.reader` to
+   `rewrite-clj.parser/parse-string-all` with the v1.md §4.1 return
+   shape verbatim: ordered vector of `{:kind :comment :text "..."}`
+   and `{:kind :form :form ... :source "..."}` maps, consecutive
+   comments pair-joined onto the next form's `:narration`,
+   trailing comments become thinking-only eval entries. **Waits on
+   MVP confirming v1.md §4.1 is final** (no further tweaks) before
+   Platform refactors.
+7. **`seon.code/extract-defn-name` + `extract-schema-key` +
+   `extract-ns-name`.** Implements the rewrite-clj-based extractors
+   v1.md §11 Risk 2 enumerates. **Waits on MVP landing
+   `test/seon/eval/detect_tee_test.cljs`** with the ~15-form corpus
+   (canonical defn, with docstring, with attr-map, multi-arity,
+   `defn-`, metadata on name, computed schema keys that should
+   NOT extract, etc.). Platform implements against the corpus —
+   ambiguous heads return nil so MVP's detect-and-tee can skip
+   teeing rather than guess.
+
+#### Explicitly NOT in scope here (MVP-owned)
+
+- `:seon.session`, `:seon.turn`, `:seon.ctx`, `:seon.fn`,
+  `:seon.schema`, `:seon.ns` schemas — MVP's data model.
+- `run-turn!`, `run-agentic-loop!`, the section composer, the 6
+  default section fns.
+- The detect-and-tee step inside `eval-batch!` itself (uses
+  Platform's extractors but lives in MVP's eval pipeline).
+- `bin/emit-bootstrap` — deferred until MVP's program-graph
+  schemas are stable enough to emit against. Will come back to
+  Platform when MVP signals readiness.
+
+#### Execution order
+
+1. D13 Node probe (15 min, gates everything).
+2. `seon.id` (zero dependencies, can interleave with item 1).
+3. One coherent patch: history flip + tx-meta registrations +
+   `transact!` auto-merge + KI-1 precondition + `assert-preconditions!`.
+4. *Pause* — MVP confirms v1.md §4.1 shape and lands corpus file.
+5. `parse-forms` refactor.
+6. `seon.code/extract-*`.
+
+Total Platform effort: ~1-2 days of code. MVP unblocks items 1-3
+of their work plan the moment Platform items 1-4 land; their items
+6-7 (program graph + detect-and-tee) wait on Platform items 6-7
+(parser + extractors).
+
+#### Why this lives in Platform, not in v1 feature work
+
+The MVP track's value is iterating on the agent's data model
+(`:seon.session` shape, what goes in `:seon.ctx`, what default
+sections render). The substrate primitives above (dynvar plumbing,
+id ns, parser, extractors) are infrastructure every track will
+ride on — observer/playback, the v2 blob subsystem, the v2 test
+auto-run hook, the v3 cross-agent collab story. If they grow up
+inside `seon.agent` or `seon.eval` as private helpers, every later
+consumer has to either reach across abstraction boundaries or
+reimplement. Pre-positioning them in `seon.db` / `seon.id` /
+`seon.code` lets MVP feature code stay clean and gives future
+tracks an obvious target to import from.
+
+**Effort:** ~1-2 days. Pure CLJS work, no WASM changes.
 
 ### Phase 3 — CLJS function instrumentation
 
@@ -281,6 +399,7 @@ Goal: agent runs specific tests, not the whole suite. The cljs.test API supports
 (seon.test/run-fn 'agent.foo/analyze)           ; all tests targeting one fn
 (seon.test/run-ns 'agent.foo)                   ; all tests in a ns
 (seon.test/run-all)                             ; everything
+
 ```
 
 Backed by:
@@ -377,6 +496,7 @@ End-state vignette:
 ;; => {:summary {:pass 1 :fail 0 :error 0} :events [...]}
 
 ;; Renderer turns those events into a context tile the agent reads next turn.
+
 ```
 
 Today's agent can write the deftest and run it. They can't install the dep — that's Phase 5. Path is clear; substrate is ready to grow into it.
@@ -442,7 +562,7 @@ Phase 7 — capability matrix expanded.
 
 ## Reference
 
-- Spec the agent's writing against: [[agent-repl-mvp]]
+- Spec the agent's writing against: [[v1]]
 - WASM landmines + workarounds: [[research/m2-findings-2026-05-21]]
 - Iteration loop docs: [[../../seon/pod/REPL-WORKFLOW]]
 - WASM spike design (precursor): [[research/wasm-spike-2026-05-20]]

@@ -150,9 +150,12 @@ design pass. Listed here so future agents don't re-litigate them.
   `seon.agent`. `seon.render` is reserved for v2's
   per-entity-specificity dispatch system.
 - **No `seon.blob` namespace in v1.** Full subsystem ships in v2.
-- **Namespace count: 7 in v1, 8 in v2.** `seon.db`, `seon.schema`,
-  `seon.id`, `seon.fs`, `seon.eval`, `seon.agent`,
-  `seon.ai.deepseek` (v1) + `seon.blob` (v2). Keep it focused.
+- **Namespace count: 6 in v1, 7 in v2.** `seon.db`, `seon.schema`,
+  `seon.fs`, `seon.eval`, `seon.agent`, `seon.ai.deepseek` (v1) +
+  `seon.blob` (v2). Earlier drafts split ID generation into
+  `seon.id`; collapsed into `seon.agent` 2026-05-22 — a 5-line
+  generator + a single schema does not earn its own namespace.
+  Keep it focused.
 
 ## Cross-track coordination
 

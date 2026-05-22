@@ -133,7 +133,11 @@
   (let [cfg {:store              {:backend :memory
                                   :id (random-uuid)}
              :schema-flexibility :write
-             :keep-history?      false}]
+             ;; Smoke + dev conns share the same history posture as the
+             ;; agent conn so behavior parity holds across diagnostics
+             ;; (Phase 2.5, 2026-05-22 — per Sean: storage overhead
+             ;; trivial, consistency wins).
+             :keep-history?      true}]
     (await (d/create-database cfg))
     (let [conn (await (d/connect cfg))
           _    (await (d/transact! conn smoke-schema))
@@ -155,7 +159,8 @@
    (let [cfg {:store              {:backend :memory
                                    :id (random-uuid)}
               :schema-flexibility :write
-              :keep-history?      false}]
+              ;; Match agent + smoke conn history posture (Phase 2.5).
+              :keep-history?      true}]
      (await (d/create-database cfg))
      (let [conn (await (d/connect cfg))]
        (when (seq schema)
@@ -197,6 +202,20 @@
     :db/valueType :db.type/long
     :db/cardinality :db.cardinality/one}
    {:db/ident :seon.agent/turns-since-user
+    :db/valueType :db.type/long
+    :db/cardinality :db.cardinality/one}
+   ;; v1 — new :seon.agent attrs. :sessions is a component-many ref
+   ;; to :seon.session (cascade-retract on agent retract).
+   {:db/ident :seon.agent/current-ns
+    :db/valueType :db.type/keyword
+    :db/cardinality :db.cardinality/one}
+   {:db/ident :seon.agent/sessions
+    :db/valueType :db.type/ref
+    :db/cardinality :db.cardinality/many
+    :db/isComponent true}
+   ;; turns-cap — per-message agentic-turn limit; overridable via
+   ;; transact, default 20 (seon.agent/default-turns-cap).
+   {:db/ident :seon.agent/turns-cap
     :db/valueType :db.type/long
     :db/cardinality :db.cardinality/one}
 
@@ -288,6 +307,56 @@
     :db/valueType :db.type/string
     :db/cardinality :db.cardinality/one}
 
+   ;; --- Session (v1.md §2.1) ---
+   ;; One pod run from boot to halt. Component refs on the session
+   ;; (turns), cascade-retract on session retract. turn-count +
+   ;; turns-since-user are transient counters on the session itself
+   ;; (NOT on the agent — v1 moves them off :seon.agent).
+   {:db/ident :seon.session/id
+    :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one
+    :db/unique :db.unique/identity}
+   {:db/ident :seon.session/at
+    :db/valueType :db.type/instant
+    :db/cardinality :db.cardinality/one}
+   ;; turn-count NOT persisted — derived from (count :seon.session/turns).
+   {:db/ident :seon.session/turns-since-user
+    :db/valueType :db.type/long
+    :db/cardinality :db.cardinality/one}
+   {:db/ident :seon.session/turns
+    :db/valueType :db.type/ref
+    :db/cardinality :db.cardinality/many
+    :db/isComponent true}
+
+   ;; --- Turn (v1.md §2.1) ---
+   ;; One full render → LLM → parse → eval-batch cycle. Component
+   ;; refs on the turn (messages, evals), cascade-retract on turn
+   ;; retract. :prompt-text is the literal rendered ctx the LLM saw,
+   ;; inline as a string in v1 (moves to :prompt-blob ref in v2).
+   {:db/ident :seon.turn/id
+    :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one
+    :db/unique :db.unique/identity}
+   ;; :seon.turn/index NOT persisted — derived from (count :seon.session/turns)
+   ;; at the time of opening. Storing it lets it desync.
+   {:db/ident :seon.turn/at
+    :db/valueType :db.type/instant
+    :db/cardinality :db.cardinality/one}
+   {:db/ident :seon.turn/status
+    :db/valueType :db.type/keyword
+    :db/cardinality :db.cardinality/one}
+   {:db/ident :seon.turn/prompt-text
+    :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one}
+   {:db/ident :seon.turn/messages
+    :db/valueType :db.type/ref
+    :db/cardinality :db.cardinality/many
+    :db/isComponent true}
+   {:db/ident :seon.turn/evals
+    :db/valueType :db.type/ref
+    :db/cardinality :db.cardinality/many
+    :db/isComponent true}
+
    ;; --- Test (Phase 2 — test capture as data) ---
    ;; `:seon.test/sym` is the test's fully-qualified symbol as a string
    ;; (e.g. "seon.user/my-test"). Identity = single entity per test.
@@ -325,10 +394,22 @@
 (defn ^:async open-agent-conn! []
   (let [cfg {:store {:backend :memory :id (random-uuid)}
              :schema-flexibility :write
-             :keep-history? false}]
+             ;; v1.md §7.1 precondition. The tx-meta-as-history mechanic
+             ;; (every tx carries the seon.db/* causality bundle as
+             ;; persisted datoms on the tx entity) is silent-no-op unless
+             ;; history is on. `seon.db/assert-preconditions!` (called
+             ;; from `start-agent!` below) re-asserts this at runtime.
+             :keep-history? true}]
     (await (d/create-database cfg))
-    (let [conn (await (d/connect cfg))]
-      (await (d/transact! conn agent-bootstrap-schema))
+    (let [conn (await (d/connect cfg))
+          ;; v1 tx-meta datahike schema is derived from the Malli
+          ;; registry, not hand-written — see seon.db/tx-meta-datahike-schema.
+          ;; Future cleanup (Phase 2.6) extends this bridge across all
+          ;; of `agent-bootstrap-schema` so the hand-written entries
+          ;; above can go away too.
+          full-schema (into agent-bootstrap-schema
+                            (db/tx-meta-datahike-schema))]
+      (await (d/transact! conn full-schema))
       conn)))
 
 (defn- stub-llm
@@ -378,6 +459,12 @@
         ;; Bind the conn as the root *conn* so seon.db calls + the
         ;; kick listener resolve without per-call threading.
         _             (set! db/*conn* conn)
+        ;; v1.md §7.1 boot preconditions. Throws cleanly if the conn
+        ;; was opened without :keep-history? OR if the seon.db tx-meta
+        ;; attrs aren't registered. Catches misconfigured schema
+        ;; registries before the agent starts writing txs that would
+        ;; silently lose their causality bundle.
+        _             (db/assert-preconditions! {:seon.db/conn conn})
         ;; Bootstrap-CLJS init via the shared iteration-surface atom.
         ;; Version-stamped — a hot-reload of seon.eval rotates the
         ;; gensym so the next call rebuilds the state. Idempotent
@@ -398,7 +485,8 @@
                                agent/default-id))
         ;; Boot the turn loop (creates entity + installs kick).
         {:seon.agent/keys [id ns]}
-        (await (agent/boot! llm-fn compile-state))
+        (await (agent/boot! {:seon.agent/llm-fn       llm-fn
+                             :seon.agent/compile-state compile-state}))
         ;; Boot the pod's HTTP+SSE server (A-5). The browser hits
         ;; this for the dev iteration loop.
         {:seon.web/keys [port port-file]}

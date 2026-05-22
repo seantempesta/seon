@@ -151,9 +151,9 @@
 
 ;; ============================================================
 ;; POST /chat — inject a :user message into the named agent's log.
-;; The agent's kick listener (seon.agent/install-kick!) fires on the
-;; resulting tx, run-turn-once! starts, the LLM responds, broadcast
-;; morphs the tile via SSE.
+;; The agent's user-message trigger (seon.agent/install-user-trigger!)
+;; fires on the resulting tx, run-agentic-loop! starts, the LLM
+;; responds, broadcast morphs the tile via SSE.
 ;;
 ;; Body is application/x-www-form-urlencoded (Datastar's
 ;; `@post('/chat', {contentType:'form'})` posts FormData). `agent` is

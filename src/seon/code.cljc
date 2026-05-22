@@ -27,8 +27,15 @@
 (def ^:private parse-opts
   "Edamame options shared by `parse` and the `::source` schema predicate.
    `:auto-resolve` collapses `::keys` / `::ns/foo` so we can structurally
-   inspect destructuring without needing the original ns context."
+   inspect destructuring without needing the original ns context.
+
+   `:fn true` enables the `#(…)` reader macro for function literals
+   — required so schema bodies like `[:fn #(> (count %) 0)]` parse
+   cleanly under `extract-schema-key`. Without it edamame throws on
+   the function literal and the extractor returns nil for an
+   otherwise-valid form (corpus regression as of 2026-05-22)."
   {:all          false
+   :fn           true
    :readers      (fn [_tag] identity)
    :auto-resolve (fn [alias]
                    (if (= alias :current)
@@ -48,6 +55,16 @@
    via instrumentation — the throw means the boundary check is missing."
   [s]
   (e/parse-string s parse-opts))
+
+(defn- safe-parse
+  "Parse `s` returning the form or nil on parse failure / empty input.
+   Used by the detect-and-tee extractors below, which need to handle
+   arbitrary agent-typed source without throwing."
+  ([s] (safe-parse s parse-opts))
+  ([s opts]
+   (try
+     (e/parse-string s opts)
+     (catch #?(:clj Exception :cljs :default) _ nil))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas
@@ -163,6 +180,97 @@
       (vector? head)          {:kind :single :args head}
       (seq?    head)          {:kind :multi}
       :else                   {:kind :none})))
+
+;;; ---------------------------------------------------------------------------
+;;; Detect-and-tee extractors (v1.md §2.2 Risk 2 corpus contract).
+;;;
+;;; Three pure source-string fns the per-form eval loop in `seon.eval/
+;;; eval-batch!` uses to decide whether to write a program-graph entity
+;;; (`:seon.fn` / `:seon.schema` / `:seon.ns`) alongside the `:seon.eval`
+;;; entry. The contract under test lives in
+;;; `test/seon/eval/detect_tee_test.cljc` — the corpus enumerates the
+;;; defn / schema/register! / ns shapes the agent will legitimately
+;;; type. Each extractor returns the extracted value on positive cases
+;;; and nil on negative cases (computed keys, nested forms, malformed
+;;; input).
+;;;
+;;; The corpus is the contract. Treat new failing cases as bugs in the
+;;; extractor, not gaps the caller has to work around — the per-form
+;;; loop falls through to "no tee" on nil, so missing a shape silently
+;;; loses program-graph data. Add the case, fix the code, no soft
+;;; deprecation.
+;;; ---------------------------------------------------------------------------
+
+(defn extract-defn-name
+  "Extract the local name string from a top-level
+   `(defn name …)` or `(defn- name …)` form. Returns the bare local
+   symbol name (e.g. `\"analyze\"`); the caller concatenates the
+   current ns to build a `:seon.fn/sym` value (`\"seon.trading/analyze\"`).
+
+   Returns nil for non-`defn` forms (def, defmacro), nested defns
+   (`(let [x 1] (defn …))`), and malformed shapes (`(defn)` with no
+   name). Metadata on the name (`^:private`, `^{:malli/schema …}`),
+   docstrings, and attr-maps are ignored — the extractor only cares
+   about the form head and the local name symbol.
+
+   Contract: see `seon.eval.detect-tee-test/defn-positive-cases` and
+   `seon.eval.detect-tee-test/defn-negative-cases`."
+  [source]
+  (when-let [form (safe-parse source)]
+    (when (and (seq? form)
+               (#{'defn 'defn-} (first form))
+               (symbol? (second form)))
+      (name (second form)))))
+
+(defn extract-ns-name
+  "Extract the namespace name as a keyword from a top-level
+   `(ns name …)` form. Returns nil for `in-ns`, nested ns calls,
+   and malformed shapes.
+
+   Contract: see `seon.eval.detect-tee-test/ns-positive-cases` and
+   `seon.eval.detect-tee-test/ns-negative-cases`."
+  [source]
+  (when-let [form (safe-parse source)]
+    (when (and (seq? form)
+               (= 'ns (first form))
+               (symbol? (second form)))
+      (keyword (name (second form))))))
+
+(defn extract-schema-key
+  "Extract the fully-qualified keyword from a top-level
+   `(schema/register! k …)` form, where `k` is a literal keyword.
+   Pass `current-ns-sym` (the ns the form was typed in) so `::ticker`
+   auto-resolves to `:<current-ns>/ticker`.
+
+   Returns nil for:
+     - computed keys: `(let [k ::ticker] (schema/register! k …))`,
+       `(schema/register! (keyword \"foo\" \"bar\") …)`;
+     - non-`register!` heads: `register-all!`, `defn`, `doseq`, `let`;
+     - forms with the key in an unqualified position
+       (auto-resolved to current-ns-sym but stripped of namespace);
+     - malformed `(schema/register!)` with no key.
+
+   Both `schema/register!` and `seon.schema/register!` (full alias)
+   match — the extractor keys off `(name (first form))` = `\"register!\"`,
+   independent of whether the call goes through the local `schema/`
+   alias or the fully qualified namespace.
+
+   Contract: see `seon.eval.detect-tee-test/schema-positive-cases`
+   and `seon.eval.detect-tee-test/schema-negative-cases`."
+  [source current-ns-sym]
+  (let [opts (assoc parse-opts
+                    :auto-resolve (fn [alias]
+                                    (if (= alias :current)
+                                      current-ns-sym
+                                      (symbol (name alias)))))]
+    (when-let [form (safe-parse source opts)]
+      (when (and (seq? form)
+                 (symbol? (first form))
+                 (= "register!" (name (first form)))
+                 (>= (count form) 2)
+                 (keyword? (nth form 1))
+                 (some? (namespace (nth form 1))))
+        (nth form 1)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Public API

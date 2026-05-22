@@ -454,12 +454,22 @@
 ;; ============================================================
 
 (defn- new-eval-id
-  "10-char base62 id. Local copy of agent.cljs's new-id! to avoid the
-   eval ↔ agent require cycle (agent rewrites land in H-1a too)."
+  "12-char base62 id (8-char epoch-ms prefix + 4-char random). Local
+   copy of `seon.agent/new-id!` algorithm to avoid an eval ↔ agent
+   require cycle. Lex-sorts by creation time."
   []
-  (let [alphabet "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+  (let [alphabet "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+        encode   (fn [n width]
+                   (loop [n n acc ""]
+                     (if (zero? n)
+                       (if (empty? acc)
+                         (apply str (repeat width "0"))
+                         (str (apply str (repeat (max 0 (- width (count acc))) "0")) acc))
+                       (recur (js/Math.floor (/ n 62))
+                              (str (nth alphabet (mod n 62)) acc)))))
         rand-ch  #(nth alphabet (rand-int 62))]
-    (apply str (repeatedly 10 rand-ch))))
+    (str (encode (.now js/Date) 8)
+         (apply str (repeatedly 4 rand-ch)))))
 
 (defn ^:async ^:private read-current-ns
   "Read @!current-ns from the agent's home ns. Returns the symbol, or

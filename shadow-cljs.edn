@@ -8,6 +8,18 @@
 
  :nrepl {:port 7889}
 
+ ;; Top-level :source-paths is the only place shadow-cljs accepts
+ ;; the directive (per-build :source-paths errors with "only valid
+ ;; globally"). `test/` is included so platform-track CLJS tests
+ ;; (`.cljs` / `.cljc` files under `test/seon/...`) are discoverable
+ ;; from the shadow nREPL. Tests run via
+ ;; `(seon.test.runner/run-vars {::vars [...]})` over MCP. Each
+ ;; build only compiles what's transitively required from its
+ ;; `:main` — test namespaces are unreachable from `:client`,
+ ;; `:smoke`, and `:eval-smoke`, so they don't bloat release output
+ ;; or break smoke targets.
+ :source-paths ["src" "test"]
+
  :builds
  {;; The V0 pod entry. One long-running Node process; stays alive via
   ;; the agent loop's pending operations (or, in this skeleton, a

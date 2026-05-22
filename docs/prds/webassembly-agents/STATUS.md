@@ -111,6 +111,35 @@ points outstanding:
 
 ### MVP needs from Platform (added 2026-05-22, v1 design)
 
+**Phase 2.5 substrate primitives — in flight 2026-05-22.** Six
+items negotiated with the MVP agent so v1 substrate doesn't land
+inline in feature code. Full plan + execution order +
+responsibility split lives in [platform.md](platform.md) §"Phase
+2.5 — v1 substrate primitives". Summary:
+
+1. D13 Node-side dynvar probe (Platform, blocks everything).
+2. `seon.id` namespace extraction (Platform, no deps).
+3. `:keep-history? true` flip + boot `assert-preconditions!`
+   (Platform).
+4. Tx-meta auto-merge in `seon.db/transact!` + 7 tx-meta attr
+   registrations + KI-1 invocation-shape precondition (Platform,
+   one coherent patch). Conflict rule: explicit `opts.tx-meta`
+   wins per-key; dynvar fills unset keys — keeps MVP's explicit
+   plumbing forward-compatible.
+5. `parse-forms` rewrite-clj refactor (Platform, waits on MVP
+   confirming v1.md §4.1 return shape is final).
+6. `seon.code/extract-defn-name` / `extract-schema-key` /
+   `extract-ns-name` (Platform, waits on MVP landing
+   `test/seon/eval/detect_tee_test.cljs` corpus per v1.md §11
+   Risk 2).
+
+MVP track does NOT touch the 6 items above in their feature
+branch; works in parallel on `:seon.session`/`:seon.turn` schemas,
+`run-turn!` scaffolding (with explicit `:tx-meta` passthrough
+until item 4 lands), and the Risk 2 corpus.
+
+### Other Platform-blocking items (not Phase 2.5)
+
 1. **Blob dir read+write in the `seon:fs/sandbox` WIT interface.**
    V1 adds `:seon.blob` content-addressed archival storage; bytes
    at `<pod-data>/blobs/<hash[:2]>/<hash>.zst`. The drafted
@@ -118,25 +147,19 @@ points outstanding:
    needs to expose read+write to the blob subdir as a preopened
    directory. Phase 7 capability hardening plans this; v1 needs it
    concrete. No new WIT interface — just `seon.fs` default-deny
-   allowlist + WIT host config.
+   allowlist + WIT host config. *(Note: v1 stores
+   `:seon.turn/prompt-text` inline as a string — blob subsystem
+   itself defers to v2. This entry survives because the WIT
+   surface needs the directory grant ahead of v2 implementation.)*
 
-2. **Agent conn must open with `:keep-history? true`.** Currently
-   `client.cljs:285` is `false`, silently killing the entire
-   tx-meta-as-history mechanic. One-line CLJS fix; no WIT change.
-   Boot precondition in v1 §8.1 throws clearly if absent.
-
-3. **D13 — dynvar propagation across WASM message-passing (SPIKE
-   REQUIRED before Phase 3 cutover).** V1 relies on
-   `seon.db/*tx-context*` — a CLJS dynvar bound by `eval-batch!`
-   around each form's eval, auto-merged into every tx's `:tx-meta`
-   by `seon.db/transact!`. CLJS `binding` is fiber-local. If a
-   transact is enqueued in one fiber and applied on another (the
-   wstd flow message-passing model), the binding may not propagate
-   — every tx then loses its causality bundle and the
-   capture-EVERYTHING-for-playback goal silently degrades.
-   **30-min REPL probe under wasmtime CLI** to confirm survival, OR
-   find an alternative propagation mechanism (explicit-arg pass
-   through to transact, or atom-backed scope token).
+2. **D13 WASM-boundary dynvar probe (separate from Phase 2.5 item
+   1).** Phase 2.5 verifies survival on Node. WASM-boundary
+   survival across wstd's message-passing fiber model is a
+   distinct probe required before Phase 3 cutover. If Node passes
+   but WASM fails, the remediation options from v1.md §11 Risk 1
+   apply at the Component boundary specifically (explicit-arg
+   threading through host imports, or host-side scope-token store).
+   ~30-min probe under wasmtime CLI.
 
 ### Other cross-track touchpoints
 
