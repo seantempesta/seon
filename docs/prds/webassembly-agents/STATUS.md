@@ -38,19 +38,25 @@ need triage (KI-1 through KI-6).
 
 In rough order:
 
-1. **D5 — explicit remove-spec / remove-fn / remove-test** verbs. Small
-   surface; high agent-utility; gates the "agent can curate without
-   accumulating cruft" story.
-2. **D4 — targeted test auto-run** wiring. Trigger on `:seon.fn`
-   touches; query tests via `:seon.test/target`; stash full output via
-   eval-id; surface failures as warnings. Verifies the whole
+1. **D11 — agent-scope `:seon.ctx/*` section entities.** Today
+   sections are global. Per-agent customization only works at the
+   top-level render-fn slot, which forces "write your own ctx fn
+   from scratch" rather than "tweak one section." Schema change is
+   tiny (add `:agent` ref, compound identity); composer query gains
+   one clause. Prerequisite for serious multi-agent runtime.
+2. **D5 — explicit remove-spec / remove-fn / remove-test** verbs.
+   Small surface; high agent-utility; gates the "agent can curate
+   without accumulating cruft" story.
+3. **D4 — targeted test auto-run** wiring. Trigger on `:seon.fn`
+   touches; query tests via `:seon.test/target`; stash full output
+   via eval-id; surface failures as warnings. Verifies the whole
    reference-graph mechanic.
-3. **D2 — per-kind redefinability rules**. Specs must be accretive
+4. **D2 — per-kind redefinability rules**. Specs must be accretive
    when data exists; fns redefine freely; tests redefine freely.
    Implementation-only; spec already settled.
-4. **D3 — `(def …)` detection via rewrite-clj AST**. No regex.
+5. **D3 — `(def …)` detection via rewrite-clj AST**. No regex.
    Small, well-bounded.
-5. **D7 — `<name>-example` test convention** + the "no-test-coverage"
+6. **D7 — `<name>-example` test convention** + the "no-test-coverage"
    warning predicate.
 
 Defer: D1 (older-DB upgrade), D8 (reference-graph attrs — confirm

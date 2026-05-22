@@ -146,6 +146,9 @@ current design; only items below remain open.
 - **[[#^d10]]** — Topological `bootstrap.edn` emission at substrate
   build time. (Resume topo at runtime is solved: sort by datahike
   tx-id; see Resume phase.)
+- **[[#^d11]]** — Agent-scope `:seon.ctx/*` section entities. Today
+  there's one global set; for proper multi-agent isolation each
+  agent needs its own section family.
 
 The detailed notes for each live in [Decision details](#decision-details) at the
 bottom. [Known issues](#known-issues) at the very bottom tracks bugs
@@ -1937,6 +1940,60 @@ Solve this BEFORE worrying about [[#^d1]] (older-DB-on-newer-runtime).
 Once we have the analyzer walk producing a clean ordered vector,
 upgrades follow naturally (diff old vector against new; transact
 the additions).
+
+### <a id="d11"></a>D11 — Agent-scope `:seon.ctx/*` section entities ^d11
+
+Today `:seon.ctx/name` is the identity attr — one global set of
+section entities shared across every agent in the pod. Per-agent
+isolation today happens only at the top level: each agent owns its
+own `:seon.render/ai` symbol on its agent entity. An agent who wants
+a custom layout writes their own ctx fn and points the slot at it.
+
+That's enough if customization is total ("write your own ctx fn from
+scratch"). It's NOT enough if you want fine-grained customization —
+e.g. Agent A keeps the default `:current-ns` section but replaces
+just `:recent-evals` with a one-line-per-row version. Without
+agent-scoping, that change would affect every other agent's render
+too.
+
+**Proposed fix.** Make sections agent-owned:
+
+```clojure
+;; section schema gains an :agent ref; identity becomes compound
+::seon.ctx/agent     :seon.db/ref                  ; → :seon.agent
+::seon.ctx/name      :keyword                      ; no longer identity on its own
+;; tuple-identity ensures one (agent, name) section per agent
+[:seon.ctx/agent :seon.ctx/name]   ; :db/unique :db.unique/identity
+```
+
+Bootstrap creates one set of six section entities per agent
+(idempotent; one inner loop). The composer query becomes
+`[?e :seon.ctx/agent ?aid] [?e :seon.ctx/name _]`. Each agent
+customizes by transacting changes only to their own section row.
+
+Cost: storage is six rows × N agents (negligible). Query cost is
+the same datalog with one extra clause.
+
+What gets ALSO agent-scoped (and should NOT): `:seon.fn/*`,
+`:seon.schema/*`, `:seon.test/*`, `:seon.ns/*` stay GLOBAL. That's
+the "no ownership boundary" rule — agents collaborate on the
+namespace graph. Only the render-customization machinery is
+per-agent.
+
+What's already agent-scoped via existing refs:
+`:seon.eval/agent`, `:seon.message/agent`, `:seon.log/agent`,
+`:seon.agent/current-ns`, `:seon.render/ai`, `:seon.render/html`,
+and the per-agent home ns `seon.agent.<id>`. The result-stash on
+globalThis is keyed by eval-id which is globally unique, so it's
+implicitly per-agent in practice.
+
+Multi-agent runtime correctness check: the compile-state is SHARED
+across agents in one pod. CLJS eval is single-threaded so the
+forms serialize — no race in the compile-state — but `(in-ns
+'foo)` mid-form by one agent could leak to another's form. The
+existing `seon.agent/current-ns` per-agent atom mitigates this for
+the eval-batch level. Worth verifying once we run two concurrent
+agents in the same pod.
 
 ## <a id="known-issues"></a>Known issues
 
