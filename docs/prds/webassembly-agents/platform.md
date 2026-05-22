@@ -33,6 +33,28 @@ The point: the agent should be able to **write live code**, not just
 read pre-bundled code. Today's MVP delivers eval + tests; the runway
 beyond MVP turns the pod into a real package-installable workspace.
 
+## Design constraints (apply to every phase)
+
+- **Functions take data, return data. Spec both ends.** Every public
+  fn on this platform has a registered `:malli/schema` for its input
+  map and output map. The agent must be able to look at any
+  `seon.*` fn and learn its contract from the schema without reading
+  the body.
+- **No globals, no atoms in the API.** Atoms are an implementation
+  detail when they truly fit (e.g. a transient builder local to one
+  fn that converts back to a value before returning); they're never
+  the way a caller communicates with a function. State that has to
+  cross fn boundaries belongs in the datahike conn, which IS a data
+  surface — queries return data, transacts take data.
+- **Per-call binding > install! mutation.** When a library wants a
+  "global" handler (cljs.test's `*current-env*`, etc.), wrap the
+  call in a `binding` of a per-call value instead of mutating the
+  var globally. Behavior depends on the call, not on whether some
+  prior code did setup.
+- **Capabilities are explicit.** Every external action (HTTP, fs,
+  npm install, package fetch) flows through a WIT import the agent
+  can see and the host can deny. No ambient authority.
+
 ## Current state (2026-05-22)
 
 ### ✅ Shipped — MVP substrate
@@ -69,7 +91,7 @@ beyond MVP turns the pod into a real package-installable workspace.
 
 ### Phase 1 — MVP substrate (DONE)
 
-Today's deliverables. See [[../../seon/pod/m2-findings-2026-05-21]] for the WASM landmines + workarounds, and [[../../seon/pod/REPL-WORKFLOW]] for the iteration surface.
+Today's deliverables. See [[research/m2-findings-2026-05-21]] for the WASM landmines + workarounds, and [[../../seon/pod/REPL-WORKFLOW]] for the iteration surface.
 
 ### Phase 2 — Test infra promoted to data
 
@@ -77,31 +99,82 @@ Goal: every cljs.test event becomes an EDN datom the renderer can show. Foundati
 
 #### Capture mechanism
 
-`cljs.test/report` is a multimethod. Default impls print to stdout. Replace with seon-owned impls that push events to an atom:
+**Data in, data out — no globals, no atoms in the API.** cljs.test already supports a per-run `:reporter` slot on its environment (`cljs.test/*current-env*`). We bind a per-call environment whose reporter accumulates into a local builder, then return the events as data.
 
 ```clojure
-;; src/seon/test/capture.cljs
-(defmulti report-event (fn [m] (:type m)))
-(defmethod report-event :pass    [m] (swap! !events conj m))
-(defmethod report-event :fail    [m] (swap! !events conj m))
-(defmethod report-event :error   [m] (swap! !events conj m))
-(defmethod report-event :summary [m] (swap! !events conj m))
+;; src/seon/test/runner.cljs
 
-(defn install! []
-  ;; Replace cljs.test/report's dispatch with ours.
-  (set! cljs.test/report report-event))
+(schema/register! ::test-event
+  [:map
+   [:type :keyword]                       ; :pass | :fail | :error | :summary | :begin-test-ns ...
+   [:expected {:optional true} :any]
+   [:actual   {:optional true} :any]
+   [:message  {:optional true} :string]
+   [:file     {:optional true} :string]
+   [:line     {:optional true} :int]])
+
+(schema/register! ::run-request
+  [:map
+   [::vars       [:vector :symbol]]       ; fully-qualified test vars
+   [::ns-filter  {:optional true} :keyword]])
+
+(schema/register! ::run-result
+  [:map
+   [::events  [:vector ::test-event]]
+   [::summary [:map [:test :int] [:pass :int] [:fail :int] [:error :int]]]])
+
+(defn run-vars
+  "Run the given test vars, return collected events as data. The
+   reporter callback closes over a transient builder that's reified
+   to an immutable vector at return — no global, no atom escape."
+  {:malli/schema [:=> [:cat ::run-request] ::run-result]}
+  [{::keys [vars]}]
+  (let [!builder (volatile! (transient []))   ; impl detail, scoped to fn
+        env      (-> (cljs.test/empty-env)
+                     (assoc :reporter (fn [m] (vswap! !builder conj! m))))]
+    (binding [cljs.test/*current-env* env]
+      (cljs.test/test-vars (mapv resolve vars)))
+    (let [events  (persistent! @!builder)
+          summary (or (->> events (filter #(= :summary (:type %))) last)
+                      {:test 0 :pass 0 :fail 0 :error 0})]
+      {::events events
+       ::summary summary})))
 ```
 
-After a run, the agent reads `@seon.test.capture/!events` for the structured event vector. The eval-batch wrapper can include it in the response automatically (one more key in the per-form EDN result).
+The volatile is a local builder — the API is pure: `::run-request → ::run-result`. Both schemas registered, both validatable, no shared state.
+
+cljs.test's reporter slot is a callback because that's how the underlying test runner streams events (some tests are async). Wrapping the streaming-callback in a local builder + returning data at the end is the standard pattern.
 
 #### Per-test transact
 
-Each `(deftest)` definition can ALSO transact a `:seon.test/*` entity into the agent's datahike conn — matching the spec §"Data model" section. Then the renderer's `recent-evals` / `warnings` tiles can show test status from DB state, not from per-run console output.
+Each `(deftest)` definition can ALSO transact a `:seon.test/*` entity into the agent's datahike conn — matching the spec §"Data model" section. The renderer's `recent-evals` / `warnings` tiles read test status from DB state via Datalog queries (also data in / data out).
+
+```clojure
+(defn record-run!
+  "Transact run results onto the corresponding :seon.test entities.
+   Returns the tx-report (data). No hidden state."
+  {:malli/schema [:=> [:cat ::record-request] ::tx-report]}
+  [{::keys [conn run-result agent-id]}]
+  (let [now      (js/Date.)
+        per-test (group-by :var (::events run-result))
+        tx-data  (for [[var-sym events] per-test
+                       :let [failed? (some #(#{:fail :error} (:type %)) events)]]
+                   {:seon.test/sym (str var-sym)
+                    (if failed? :seon.test/last-failed-at
+                                :seon.test/last-passed-at) now
+                    :seon.test/last-failure (when failed?
+                                              (pr-str (first (filter #(#{:fail :error} (:type %)) events))))})]
+    (db/transact! {:seon.db/conn conn :seon.db/tx-data tx-data})))
+```
+
+Same shape — `::record-request → ::tx-report`. The conn is passed in (not reached for via a global), the time is captured at the boundary, the events drive the tx-data via a pure transformation.
 
 #### Out of MVP scope, in scope here
 
-- Auto-run on define (spec [[agent-repl-mvp#d6]]) — when an eval transacts datoms on a `:seon.fn`, post-fire the tests targeting it. Update `:seon.test/last-passed-at` etc.
-- Replacing default `report` per-agent (so different agents can have different test reporters).
+- Auto-run on define (spec [[agent-repl-mvp#d6]]) — when an eval's tx asserts on a `:seon.fn`, a post-eval fn queries reverse-targets, runs them via `run-vars`, then records via `record-run!`. All data-shaped; the eval-batch caller chains them.
+- Per-agent reporter — pass a custom `:reporter` fn into `cljs.test/empty-env` before binding. The fn is part of the call's input, not registered globally.
+
+**Anti-pattern to avoid:** a `(seon.test/install!)` that mutates `cljs.test/report` globally. That makes the test machinery's behavior depend on whether `install!` has been called and whether some other code re-rebound it. The per-call binding-of-env approach is the data-friendly version.
 
 **Effort:** ~1 day. Pure CLJS work, no WASM changes.
 
@@ -254,7 +327,7 @@ Each phase needs specific WASI/WIT capabilities. Tracking what's available + whe
 
 - **Where does the writable cache live?** Per-agent (`~/.seon/agents/<id>/cache`) vs. shared across agents (`~/.seon/cache`). Sharing saves disk; per-agent is cleaner for capability bounds. Recommend shared with content-addressed paths.
 - **Pre-install vs lazy install?** When the agent does `(require '[foo.bar])` and foo.bar isn't in the cache, do we auto-fetch or error and require explicit `seon.deps/install`? Recommend auto-fetch on first require with a capability prompt (yes / no / always-for-this-prefix).
-- **Test reporter as data vs renderer?** Should Phase 2's capture write to an atom (eval-batch returns) OR transact into the DB (the renderer picks up next turn)? Both are valid. Recommend: atom for immediate eval result, DB for cross-turn persistence (spec'd `:seon.test/last-passed-at` model).
+- **Per-call return vs DB persistence?** Phase 2's `run-vars` returns events+summary as data inline (caller sees them in the eval-batch response). Cross-turn history needs a transact onto `:seon.test/*` entities so subsequent renders pick them up. Both — return the data inline so the agent sees immediate results, AND `record-run!` writes to DB so the warnings tile + history queries work across turns. Two specced fns, no shared mutable state.
 - **Bootstrap vs runtime compile?** If a CLJS dep arrives via Phase 5 install, do we re-emit bootstrap artifacts (so subsequent boots are fast) or always compile fresh from source (simpler but slower cold start)? Recommend cache compiled JS + analyzer transit alongside source for warm restarts.
 
 ---
@@ -290,9 +363,9 @@ Phase 7 — capability matrix expanded.
 ## Reference
 
 - Spec the agent's writing against: [[agent-repl-mvp]]
-- WASM landmines + workarounds: [[../../seon/pod/m2-findings-2026-05-21]]
+- WASM landmines + workarounds: [[research/m2-findings-2026-05-21]]
 - Iteration loop docs: [[../../seon/pod/REPL-WORKFLOW]]
-- WASM spike design (precursor): [[../../seon/pod/wasm-spike-2026-05-20]]
-- V0 Node pod state: [[../../seon/pod/v0-state-2026-05-20]]
+- WASM spike design (precursor): [[research/wasm-spike-2026-05-20]]
+- V0 Node pod state: [[research/v0-state-2026-05-20]]
 - Project root: `pod-host/wasm-tauri/` (Rust + WIT workspace)
 - Bootstrap output: `out/bootstrap/` (analyzer caches + per-ns JS)

@@ -51,6 +51,138 @@ mcp__seon_cljs__eval { code: "(seon.fs/configure!
                                    :seon.fs/read-only? false})" }
 ```
 
+### Iteration surface — `seon.repl/dev-init!`
+
+For substrate experiments (spec verification, REPL-as-data-shape work,
+testing claims one form at a time) the V0 pod ships a tiny init
+helper that opens a history-enabled datahike conn AND initializes
+bootstrap-CLJS, both as defonce'd atoms. **Decoupled from
+`seon.client/start-agent!`** — you don't have to spin the stub LLM,
+web server, or broadcast watcher just to test how an eval-str error
+is shaped or how `:tx-meta` propagates.
+
+```clojure
+;; Once per pod boot. Idempotent — subsequent calls are O(atom-deref).
+mcp__seon_cljs__eval { code: "(.then (seon.repl/dev-init!) prn)" }
+;; => {:compile-state #object[Atom ...] :conn #object[Atom ...]}
+
+;; After init:
+;;   @seon.repl/!compile-state  — bootstrap-CLJS compile-state
+;;   @seon.repl/!conn           — :memory datahike conn (:keep-history? true)
+```
+
+### Two eval surfaces — pick the one matching your question
+
+The pod has two distinct paths to "evaluate this CLJS code." Use the
+one whose semantics match the question you're asking.
+
+| Surface | Mechanism | Use when |
+|---|---|---|
+| **Host eval** | `mcp__seon_cljs__eval` piggybacks shadow's nREPL into the `:client` runtime. Forms see every var statically required by `seon.client` (rewrite-clj, datahike, cljs.js, the whole substrate). | Substrate-library questions. "Does rewrite-clj parse comments alongside forms?" "Does `(d/history db)` return the tx datoms I expect?" — no in-pod simulation needed. |
+| **Bootstrap-CLJS eval** | `(seon.eval/eval @seon.repl/!compile-state "...")` compiles + runs the string through `cljs.js` against the persistent compile-state. | The question IS what an LLM-emitted form experiences. Error shapes (`:kind :compile` vs `:runtime`), `(ns other)` switches, `(def x …)` cross-call persistence gotcha, `^:async`/`await`. |
+
+Both surfaces write to the same datahike conn (`@seon.repl/!conn`)
+when they do persistence work, so `:tx-meta {:seon.eval/id ...}`
+tagging and history queries behave the same through either path.
+
+```clojure
+;; Host eval — testing a substrate library
+mcp__seon_cljs__eval { code:
+  "(rewrite-clj.parser/parse-string-all \";; hi\\n(+ 1 2)\\n\")" }
+
+;; Bootstrap-CLJS eval — testing what the agent will see
+mcp__seon_cljs__eval { code:
+  "(.then (seon.eval/eval @seon.repl/!compile-state \"Let\")
+          (fn [r] (js/console.log (pr-str r))))" }
+```
+
+`seon.repl/!compile-state` is nil until `dev-init!` runs. Call it
+once at the start of any iteration session.
+
+## Platform substrate — what's robust, what to know
+
+### Bootstrap analyzer cache: discover-and-load-all
+
+`seon.eval/init-bootstrap!` walks `out/bootstrap/ana/*.transit.json`
+and loads EVERY analyzer cache shadow emitted, not just `cljs.core`.
+The takeaway: **whatever's listed in `shadow-cljs.edn :bootstrap
+:entries` is automatically analyzer-visible** to the agent's eval.
+Adding a new ns to that vector + recompiling bootstrap is the whole
+story — no second load-list to maintain.
+
+Currently bundled (analyzer-visible in agent eval): `cljs.core`,
+`cljs.test`, `clojure.set`, `clojure.string`, `clojure.walk`, plus
+the transitive deps of cljs.core (`cljs.reader`, `cljs.tools.reader.*`,
+`cljs.analyzer.*`, `clojure.set`, `cognitect.transit`, etc.).
+
+This solves a real fragility — without the discover-and-load pass,
+shadow's `boot/init` short-circuits the cljs.core analyzer load
+(its filter sees `:name` already set by `(dump-core)` and skips),
+leaving unqualified core refs (`(reduce + (range 10))`) resolving
+to `cljs.user.reduce` (undefined → nil) at runtime.
+
+### Undeclared-var detection: dual-strategy
+
+`seon.eval/eval` rejects on truly-undeclared symbols. With the
+analyzer-cache load above, most refs resolve through the analyzer
+itself and never reach the rejection path. For warnings that DO
+slip through (e.g. agent code references a ns not in the bootstrap
+cache but bundled into `:client` at the JS level), a runtime
+`goog.getObjectByName` fallback resolves them via globalThis — so
+bundled vars don't false-positive. Real typos (`Let` in `cljs.user`)
+reject with `:seon.error/kind :compile` + `:seon.eval/warning-type
+:undeclared-var` / `:undeclared-ns`.
+
+### cljs.test self-hosted
+
+`(require '[cljs.test :refer-macros [deftest is run-tests]])` works
+inside both the V0 pod's bootstrap-CLJS eval AND the wasm eval-smoke
+component. Confidence-run shape:
+
+```clojure
+(require '[cljs.test :refer-macros [deftest is run-tests]])
+(deftest mytest (is (= 49 (* 7 7))))
+(run-tests)
+;; stdout: "Ran 1 tests containing 1 assertions. 0 failures, 0 errors."
+;; return: nil
+```
+
+Avoid `(with-out-str (run-tests))` inside eval-str — that combo
+trips a `cljs.core$macros/str` expansion edge case in self-host.
+Read test output via host stdout instead.
+
+### Bootstrap-macros workaround (defensive)
+
+`bin/fix-bootstrap-macros` is a babashka script that rewrites
+empty-namespace `Symbol` literals in `out/bootstrap/js/*$macros.js`
+if shadow's `:bootstrap` target ever regresses on user-listed
+`:macros` entries. The current build doesn't need it — recent
+shadow-cljs versions handle this correctly — but it's a one-call
+safety net. Run after `clj -M:cljs compile bootstrap` if you see
+"Use of undeclared Var /try-expr" or similar empty-ns analyzer
+errors at agent-eval time.
+
+### WASM confidence runs
+
+`pod-host/wasm-tauri/eval-smoke-build/` builds a wasm32-wasip2
+component that exposes WIT exports: `init-bootstrap`, `eval-form`,
+`eval-batch`. Same self-hosted CLJS surface as the V0 pod; same
+`out/bootstrap/` cache (mounted via `--dir`); same analyzer-cache
+discovery + `cljs.test` support. Use for end-to-end confidence runs
+AFTER Node iteration is green. The wasmtime CLI invokes each
+`--invoke` as a fresh component instance, so a single `eval-batch`
+call IS the session.
+
+```bash
+cd pod-host/wasm-tauri && ./build-eval-smoke
+
+# Run a multi-form test program inside wasm:
+wasmtime run -S http=y \
+  --dir /Users/sean/src/seon/out/bootstrap::bootstrap \
+  --invoke 'eval-batch("(require ...) (deftest ...) (run-tests)")' \
+  eval-smoke-build/target/wasm32-wasip2/release/eval_smoke.wasm
+```
+
 ### Hot reload
 
 Edit any `.cljs` in `src/seon/`, save. shadow-cljs recompiles in ~1s;
