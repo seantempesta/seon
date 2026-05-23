@@ -88,8 +88,9 @@ v2 (all the polish v1 deliberately deferred)
 ├─ ships: every "defers" item above, plus
 │         D8 reference-graph attrs (:seon.fn/refs, etc.) — requires analyzer walk
 │         seon.render namespace + per-entity Malli-specificity dispatch
-│         per-section HTML composer (:seon.ctx/html-fn + 6 default HTML companions;
-│           v1 HTML stays whole-tile per agent)
+│         per-section HTML composer — section fns grow :seon.render/hiccup
+│           in their return map alongside v1's :seon.render/text;
+│           no new :seon.ctx slot; v1 HTML stays whole-tile per agent
 │         related-ns-section (depends on D8)
 │         Tufte profiling + perf-section
 │         resume-via-program-graph (faster than v1's eval-replay)
