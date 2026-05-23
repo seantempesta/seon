@@ -168,6 +168,22 @@ This is how we build a consistent system. Every agent that reports a smell makes
 
 ---
 
+## Reactive context — derived by default
+
+**Agents see derived views of the database, not accumulated state. Sections are functions of the DB at render time. New ways to surface data are new section functions, not new mechanisms.**
+
+When you're about to surface something to an agent — a warning, a related item, a status — the default approach is: write a section function (or extend an existing one) that queries the DB for the current state of that thing. The section renders only when the query returns rows. When the underlying problem is fixed, the query returns empty, and the surface vanishes. No acknowledgement, no stored "last error", no notification queue. **The system is self-healing because nothing is stored that needs to be cleared.**
+
+Caching is the perf escape hatch — memoize an expensive derivation, don't bifurcate the architecture into "stored fast path" + "derived slow path". Datahike `:memory` queries are sub-millisecond for small datom counts; measure before caching.
+
+What this rules out: storing counters derivable from the log, atom-backed registries for derivable state, separate event/notification systems for new context kinds, "mark this warning as seen" acknowledgement state. What it does NOT rule out: genuinely stateful runtime artifacts (compile-state, DB conn, AsyncLocalStorage instance), identity attrs for lookup, the eval/message/turn log itself.
+
+Cross-agent coordination falls out: a section function that doesn't filter by `:seon.agent/id` sees the whole substrate. Agent A's failed eval shows up in agent B's render. No subscription, no event bus.
+
+Full principle + design checklist + canonical examples: [[docs/seon/concepts/reactive-context]].
+
+---
+
 ## Architecture
 
 ```
