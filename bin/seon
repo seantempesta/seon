@@ -71,7 +71,12 @@ ensure_state() { mkdir -p "$(state_dir "$1")"; }
 
 # ============================================================
 # Mutex via mkdir (atomic on POSIX, works on macOS without flock).
-# Released by trap on EXIT/INT/TERM.
+# Each lock dir contains an `owner` file with the holding script's PID
+# so a competing acquirer can detect + reclaim stale locks (held by
+# a script that died without cleanup, e.g. SIGKILL).
+#
+# Lock is released by `release_lock` (explicit) or by the EXIT trap as
+# a backstop. Both call paths converge on the same rm -rf.
 # ============================================================
 
 acquire_lock() {
@@ -80,18 +85,48 @@ acquire_lock() {
   local lock
   lock="$(lock_dir "$name")"
   local tries=0
-  while ! mkdir "$lock" 2>/dev/null; do
+  while true; do
+    if mkdir "$lock" 2>/dev/null; then
+      # Got it — record our PID and arm the EXIT-trap backstop.
+      echo "$$" > "$lock/owner"
+      # shellcheck disable=SC2064
+      trap "rm -rf '$lock' 2>/dev/null || true" EXIT INT TERM
+      return 0
+    fi
+    # Lock exists — is the owner still alive?
+    local owner_pid=""
+    if [ -f "$lock/owner" ]; then
+      owner_pid="$(cat "$lock/owner" 2>/dev/null || true)"
+      if [ -n "$owner_pid" ] && ! kill -0 "$owner_pid" 2>/dev/null; then
+        echo "  ↻ reclaiming stale lock for $name (owner pid $owner_pid is dead)" >&2
+        rm -rf "$lock"
+        continue
+      fi
+    elif [ "$tries" -gt 5 ]; then
+      # Lock exists with no owner file after 0.5s — abandoned mid-init.
+      echo "  ↻ reclaiming abandoned lock for $name (no owner file)" >&2
+      rm -rf "$lock"
+      continue
+    fi
     tries=$((tries + 1))
     if [ "$tries" -gt 100 ]; then
       echo "  ✗ could not acquire lock for $name after 10s" >&2
-      echo "  another bin/seon invocation may be in progress;" >&2
-      echo "  if stale: rm -rf $lock" >&2
+      echo "  held by pid ${owner_pid:-unknown};" >&2
+      echo "  if confirmed stale: rm -rf $lock" >&2
       exit 1
     fi
     sleep 0.1
   done
-  # shellcheck disable=SC2064
-  trap "rmdir '$lock' 2>/dev/null || true" EXIT INT TERM
+}
+
+release_lock() {
+  # Explicit release — used by public commands so multi-step ops
+  # (e.g. restart's stop+start) can chain without self-deadlocking.
+  # Idempotent — the EXIT trap still fires as a backstop if release
+  # is missed.
+  local name="$1"
+  rm -rf "$(lock_dir "$name")" 2>/dev/null || true
+  trap - EXIT INT TERM
 }
 
 # ============================================================
@@ -111,11 +146,16 @@ is_running() {
 
 # ============================================================
 # Subcommands.
+#
+# Public commands acquire the lock once and delegate to `_unlocked`
+# workers that do the actual work. This lets `cmd_restart` hold the
+# lock across stop+start without self-deadlocking (an earlier bug
+# where each sub-call tried to acquire a lock its own parent already
+# held).
 # ============================================================
 
-cmd_start() {
-  local name="${1:?start requires a process name}"
-  acquire_lock "$name"
+_start_unlocked() {
+  local name="$1"
 
   if is_running "$name"; then
     echo "● $name already running (pid $(cat "$(pid_file "$name")"))"
@@ -123,7 +163,7 @@ cmd_start() {
   fi
 
   local cmd
-  cmd="$(process_command "$name")" || { echo "unknown process: $name" >&2; exit 1; }
+  cmd="$(process_command "$name")" || { echo "unknown process: $name" >&2; return 1; }
 
   # Fresh log on each start so tail isn't polluted with prior runs.
   : > "$(log_file "$name")"
@@ -141,9 +181,8 @@ cmd_start() {
   process_ready_hint "$name"
 }
 
-cmd_stop() {
-  local name="${1:?stop requires a process name}"
-  acquire_lock "$name"
+_stop_unlocked() {
+  local name="$1"
 
   if ! is_running "$name"; then
     rm -f "$(pid_file "$name")"
@@ -172,10 +211,29 @@ cmd_stop() {
   rm -f "$(pid_file "$name")"
 }
 
+cmd_start() {
+  local name="${1:?start requires a process name}"
+  acquire_lock "$name"
+  _start_unlocked "$name"
+  release_lock "$name"
+}
+
+cmd_stop() {
+  local name="${1:?stop requires a process name}"
+  acquire_lock "$name"
+  _stop_unlocked "$name"
+  release_lock "$name"
+}
+
 cmd_restart() {
+  # One lock spans stop+start. Atomic from any other agent's POV —
+  # they see "stopped" or "started" but never an intermediate state
+  # where another agent could race in and start a competing instance.
   local name="${1:?restart requires a process name}"
-  cmd_stop "$name"
-  cmd_start "$name"
+  acquire_lock "$name"
+  _stop_unlocked "$name"
+  _start_unlocked "$name"
+  release_lock "$name"
 }
 
 cmd_status() {
@@ -231,14 +289,15 @@ cmd_adopt() {
   local pid="${2:?adopt requires a PID}"
   acquire_lock "$name"
   if ! kill -0 "$pid" 2>/dev/null; then
+    release_lock "$name"
     echo "✗ pid $pid not alive" >&2; exit 1
   fi
-  ensure_state "$name"
   echo "$pid"        > "$(pid_file "$name")"
   echo "(adopted)"   > "$(cmd_file "$name")"
   date -u +%FT%TZ    > "$(started_file "$name")"
   echo "● $name adopted (pid $pid)"
   echo "  (no log file managed; the foreground terminal owns stdout)"
+  release_lock "$name"
 }
 
 # ============================================================
