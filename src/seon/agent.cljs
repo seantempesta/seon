@@ -15,21 +15,44 @@
                               epoch-ms prefix + 4-char random suffix;
                               lex-sorts by creation time)
      - the `:seon.agent/*`, `:seon.session/*`, `:seon.turn/*`,
-       `:seon.message/*`, `:seon.eval/*` schemas
-     - `run-turn!`          — open turn entity → render → ask LLM →
-                              record assistant message + prompt-text →
-                              eval-batch → close turn (v1.md §6.1)
+       `:seon.message/*`, `:seon.eval/*`, `:seon.ctx/*`, `:seon.ns/*`,
+       `:seon.fn/*`, `:seon.schema/*` schemas
+     - `run-turn!`          — one full turn end-to-end (v1.md §6.1).
+                              Thin orchestrator: composes
+                              `ensure-session!` + `render-prompt` +
+                              `with-turn!` + `ask-and-eval!` under one
+                              outer `seon.db/with-tx-context` scope
+                              so every tx auto-tags with the causality
+                              bundle
+     - `with-turn!`         — bracketing combinator: opens a turn with
+                              prompt-text attached, runs a body thunk,
+                              folds its result into the close-tx (so
+                              one open-tx + one close-tx covers the
+                              whole turn-level write surface; eval
+                              batch adds its own per-form txs)
+     - `ask-and-eval!`      — body of `with-turn!`: LLM call + parse
+                              + eval-batch; returns the assistant msg
+                              and `:seon.agent/eval-count` for the
+                              loop's stop policy
+     - `render-prompt`      — sync; resolve `:seon.render/ai` slot
+                              (defaults to `seon.agent/assemble-ctx`)
+                              and call the composer
+     - `assemble-ctx` + 6 default section fns — v1.md §5.2/§5.3
      - `run-agentic-loop!`  — multi-turn driver, stop policies (v1 §6.2)
      - `install-user-trigger!` — register the tx-listener that wakes
                               `run-agentic-loop!` on a new :user message
      - `turns-cap`          — read :seon.agent/turns-cap or fallback
                               to `default-turns-cap`
-     - `current-session`    — most-recent :seon.session for an agent
-     - `start-session!`     — open a new :seon.session
+     - `current-session` / `ensure-session!` / `start-session!`
      - `create!`            — allocate an agent entity, init state
      - `chat`               — inject a :user message
      - `boot!`              — wire everything: create entity + install
-                              user-message trigger
+                              user-message trigger + install substrate
+                              default `:seon.ctx` layout
+     - `reset-ctx!` / `update-ctx!` / `ctx-entities` — agent's ctx-layout
+       editing surface
+     - `register-warning!` / `unregister-warning!` — warning predicate
+       registry (atom-backed; v1.md §5.2)
      - `replies-after`      — poll-style read of :assistant messages
      - `default-id`         — \"seon\" (V0 hardcoded default; tightening
                               to 12-char strict pairs with the
@@ -50,15 +73,24 @@
 
    ## Prompt assembly
 
-   Per spec-05 §15.4 the LLM ctx is built via the render dispatch:
+   v1.md §5 — the LLM ctx is built via the render dispatch:
 
-     entity → :seon.render/ai slot → eval/lookup-value → call → text
+     agent entity → :seon.render/ai slot → eval/lookup-value → call → text
 
-   Default: `'seon.render.default/ctx` composes REPL header + 'how you
-   respond' + worked examples + conventions + recent conversation +
-   recent evals + recent errors + schema reference. Agents override
-   by transacting their own `:seon.render/ai` symbol pointing at a
-   fn that picks which fragments to keep + adds their own."
+   Default symbol: `'seon.agent/assemble-ctx`, which reads the
+   agent's `:seon.agent/ctx` vector (a cardinality-many component
+   ref to `:seon.ctx` entities), sorts by `:seon.ctx/priority`,
+   resolves each entity's `:seon.ctx/fn` symbol via
+   `seon.eval/lookup-value`, calls it with the system-input map
+   `{:seon.db/db :seon.agent/id :seon.agent/ctx-entity}`, and joins
+   the non-blank string results.
+
+   Substrate defaults (`substrate-default-ctx`): six sections —
+   `system`, `messages`, `current-ns`, `warnings`, `recent-evals`,
+   `prompt`. The agent customizes by transacting different
+   `:seon.ctx` entities into `:seon.agent/ctx` (use `update-ctx!`)
+   or by transacting a completely different symbol onto the agent's
+   `:seon.render/ai` slot."
   (:require
     [clojure.string :as str]
     [seon.db :as db]
@@ -439,25 +471,26 @@
        (mapv second)))
 
 ;; ============================================================
-;; v1 §6 — run-turn! + run-agentic-loop! scaffold
+;; v1 §6 — turn lifecycle.
 ;;
-;; New entry points per v1.md §6.1 / §6.2. Each turn opens a
-;; :seon.turn entity on the agent's current session, renders ctx,
-;; calls the LLM, records the assistant message + prompt-text as
-;; turn components, eval-batches, closes the turn.
+;; Composition: three small ^:async helpers + a `with-turn!`
+;; bracketing combinator + a `run-turn!` orchestrator. Every transact
+;; in the pipeline runs inside ONE outer `with-tx-context` scope that
+;; carries agent/session/turn/origin — no manual `:tx-meta` plumbing
+;; at any call site (auto-merged via `seon.db/transact!`'s
+;; `merge-tx-context-into-opts`).
 ;;
-;; Status: scaffold lives alongside the v0 run-turn-once! +
-;; user-message-handler path so the live deepseek loop keeps working.
-;; Cut-over (kick handler → run-agentic-loop!, delete the v0
-;; machinery) is a follow-on patch after end-to-end REPL
-;; verification.
+;; Two transacts per turn instead of four: `with-turn!` folds the
+;; prompt-text into the open-tx and the assistant message into the
+;; close-tx. Eval-batch's per-form txs stay (each form is its own
+;; tx for partial-failure semantics — v1.md §4.4).
 ;;
-;; :tx-meta plumbing is intentionally absent — Platform's Phase 3a
-;; `*tx-context*` auto-merge will tag every tx with the causality
-;; bundle once it ships. The conflict rule ("explicit opts.tx-meta
-;; wins per-key; dynvar fills unset keys") means this scaffold
-;; gets the full bundle automatically when Platform's patch lands,
-;; no rewrite needed.
+;; The named-inline `(fn ^:async name [] …)` is the one CLJS shape
+;; that propagates `:async` correctly across `(.run als-instance …
+;; f)`; the cleaner pattern (which we use here) is to define helpers
+;; with `defn ^:async` and pass plain anonymous thunks to
+;; `with-tx-context`. See `docs/prds/agent-runtime/research/
+;; cljs-runturn-simplification-2026-05-23.md`.
 ;; ============================================================
 
 (defn current-session
@@ -477,7 +510,7 @@
 
 (defn ^:async start-session!
   "Open a new `:seon.session` for `agent-id` and append to
-   `:seon.agent/sessions`. Returns the session-id string."
+   `:seon.agent/sessions`. Returns the new session entity."
   [agent-id]
   (let [session-id (new-id!)]
     (await (db/transact!
@@ -487,104 +520,146 @@
                 [{:seon.session/id session-id
                   :seon.session/at (js/Date.)
                   :seon.session/turns-since-user 0}]}]}))
-    session-id))
+    (db/entity {:seon.db/ref [:seon.session/id session-id]})))
 
-(defn ^:async run-turn!
-  "Per v1.md §6.1 — one full turn end-to-end. Map-in / map-out.
+(defn ^:async ensure-session!
+  "Return the agent's current session, opening one if none exists.
+   Idempotent — re-uses an existing session within the same pod run."
+  [agent-id]
+  (or (current-session agent-id)
+      (await (start-session! agent-id))))
 
-   Input keys:
-     :seon.agent/id             the agent's id string
-     :seon.agent/llm-fn         ctx-string -> Promise<{:text \"…\"}>
-     :seon.agent/compile-state  bootstrap compile-state
+(defn render-prompt
+  "Sync — resolve the agent's `:seon.render/ai` symbol (default
+   `seon.agent/assemble-ctx`) and call it. Returns the prompt string
+   (empty when the symbol can't be resolved)."
+  [agent-id]
+  (let [ent   (db/entity {:seon.db/ref [:seon.agent/id agent-id]})
+        sym   (:seon.render/ai ent 'seon.agent/assemble-ctx)
+        input (ai-render-input sym @db/*conn* agent-id ent)]
+    (or (:seon.render/text (render/ai-render sym input)) "")))
 
-   Returns the closed `:seon.turn` entity via `db/pull '[*]`, plus
-   an :seon.agent/eval-count key tallying forms eval'd. On caught
-   error, returns `{:seon.turn/status :error :seon.error/data <str>}`."
-  [{:seon.agent/keys [id llm-fn compile-state]}]
+(defn ^:async with-turn!
+  "Bracketing combinator. Opens a `:seon.turn` on the given session
+   with `prompt-text` already attached, flips agent state to
+   `:running`, then awaits `body-fn` (a plain 0-arg thunk that returns
+   a Promise<map>). On success, closes the turn with `:status :done`,
+   folds in any `:seon.turn/messages` from the body's result map, and
+   flips agent state back to `:idle`. On throw, flips the turn to
+   `:status :error` and re-throws so callers see the failure shape.
+
+   Returns whatever `body-fn` returned, so the caller can read e.g.
+   `:seon.agent/eval-count` for stop-policy decisions."
+  [{:seon.agent/keys [id]
+    :seon.session/keys [id-of-session]
+    :seon.turn/keys [id-of-turn prompt-text]}
+   body-fn]
+  (await
+    (db/transact!
+      {:seon.db/tx-data
+       [{:seon.session/id id-of-session
+         :seon.session/turns
+         [{:seon.turn/id          id-of-turn
+           :seon.turn/at          (js/Date.)
+           :seon.turn/status      :running
+           :seon.turn/prompt-text prompt-text}]}
+        {:seon.agent/id id :seon.agent/state :running}]}))
   (try
-    (let [_          (when-not (current-session id)
-                       (await (start-session! id)))
-          turn-id    (new-id!)
-          session-id (:seon.session/id (current-session id))
-          turn-idx   (turn-index session-id)
-          _ (log id turn-idx "open" turn-id)
-          ;; 1. Open turn entity. Bump turns-since-user only; turn-
-          ;; count is derived from (count turns) at read time.
-          _ (await
-              (db/transact!
-                {:seon.db/tx-data
-                 [{:seon.session/id session-id
-                   :seon.session/turns-since-user
-                   (inc (or (:seon.session/turns-since-user
-                              (db/entity {:seon.db/ref [:seon.session/id session-id]}))
-                            0))
-                   :seon.session/turns
-                   [{:seon.turn/id turn-id
-                     :seon.turn/at (js/Date.)
-                     :seon.turn/status :running}]}
-                  {:seon.agent/id id :seon.agent/state :running}]}))
-          ;; 2. Render via the existing composer.
-          ent     (db/entity {:seon.db/ref [:seon.agent/id id]})
-          sym     (:seon.render/ai ent 'seon.render.default/ctx)
-          input   (ai-render-input sym @db/*conn* id ent)
-          {:seon.render/keys [text]} (render/ai-render sym input)
-          prompt-text (or text "")
-          _ (log id turn-idx "render" (count prompt-text) "chars"
-                 "via" (str sym))
-          ;; 3. Persist :seon.turn/prompt-text inline (v1 §5.3).
-          _ (await
-              (db/transact!
-                {:seon.db/tx-data
-                 [{:seon.turn/id turn-id
-                   :seon.turn/prompt-text prompt-text}]}))
-          ;; 4. Ask the LLM.
-          resp        (await (llm-fn prompt-text))
-          reply-text  (or (:text resp) "")
-          _ (log id turn-idx "resp" (count reply-text) "chars")
-          ;; 5. Record assistant message as turn component.
-          ;; Assistant messages do NOT set :seon.message/agent —
-          ;; the chain (agent → sessions → turns → messages) is
-          ;; the canonical lookup. Only :user messages carry the
-          ;; agent ref (user-message-handler join key).
-          _ (await
-              (db/transact!
-                {:seon.db/tx-data
-                 [{:seon.turn/id turn-id
-                   :seon.turn/messages
-                   [{:seon.message/id (new-id!)
-                     :seon.message/role :assistant
-                     :seon.message/content reply-text
-                     :seon.message/at (js/Date.)}]}]}))
-          ;; 6. Eval the forms. eval-batch! attaches each :seon.eval
-          ;; as a component child of the turn (v1.md §2.1) and returns
-          ;; {:seon.eval/ids :seon.eval/n-ok :seon.eval/n-fail} so the
-          ;; loop's stop policy can distinguish "10 evals all failed"
-          ;; from "10 evals all succeeded".
-          parsed (repl/parse-forms reply-text)
-          _ (log id turn-idx "parsed" (count parsed) "forms")
-          batch  (await (seval/eval-batch! compile-state parsed
-                                           (home-ns id) id turn-id))
-          n-ok   (:seon.eval/n-ok   batch)
-          n-fail (:seon.eval/n-fail batch)
-          ;; 7. Close the turn.
-          _ (await
-              (db/transact!
-                {:seon.db/tx-data
-                 [{:seon.turn/id turn-id :seon.turn/status :done}
-                  {:seon.agent/id id :seon.agent/state :idle}]}))]
-      (log id turn-idx "done" n-ok "ok" n-fail "fail")
-      (assoc (db/pull {:seon.db/pull-pattern '[*]
-                       :seon.db/ref [:seon.turn/id turn-id]})
-             :seon.agent/eval-count n-ok))
+    (let [result (await (body-fn))]
+      (await
+        (db/transact!
+          {:seon.db/tx-data
+           [(merge {:seon.turn/id id-of-turn :seon.turn/status :done}
+                   (select-keys result [:seon.turn/messages]))
+            {:seon.agent/id id :seon.agent/state :idle}]}))
+      result)
     (catch :default e
-      (log id "?" "run-turn! error" (str e))
       (try
         (await (db/transact!
                  {:seon.db/tx-data
-                  [{:seon.agent/id id :seon.agent/state :idle}]}))
+                  [{:seon.turn/id id-of-turn :seon.turn/status :error}
+                   {:seon.agent/id id :seon.agent/state :idle}]}))
         (catch :default _ nil))
-      {:seon.turn/status :error
-       :seon.error/data (str e)})))
+      (throw e))))
+
+(defn ^:async ask-and-eval!
+  "Body of `with-turn!`. Calls the LLM with `prompt-text`, parses the
+   reply, eval-batches the forms (each as a `:seon.turn/evals`
+   component via Platform's eval-batch!), and returns
+   `{:seon.turn/messages [<assistant>] :seon.agent/eval-count n-ok}`
+   for `with-turn!` to fold into the close-tx."
+  [{:seon.agent/keys [id llm-fn compile-state]
+    :seon.turn/keys  [id-of-turn prompt-text]}]
+  (let [resp       (await (llm-fn prompt-text))
+        reply-text (or (:text resp) "")
+        parsed     (repl/parse-forms reply-text)
+        batch      (await (seval/eval-batch! compile-state parsed
+                                             (home-ns id) id id-of-turn))]
+    {:seon.turn/messages
+     [{:seon.message/id      (new-id!)
+       :seon.message/role    :assistant
+       :seon.message/content reply-text
+       :seon.message/at      (js/Date.)}]
+     :seon.agent/eval-count (:seon.eval/n-ok batch)}))
+
+(defn ^:async run-turn!
+  "v1.md §6.1 — one full turn end-to-end. Map-in / map-out.
+
+   Input keys:
+     :seon.agent/id             agent id string
+     :seon.agent/llm-fn         ctx-string -> Promise<{:text \"…\"}>
+     :seon.agent/compile-state  bootstrap compile-state
+
+   Wraps the whole pipeline in a `with-tx-context` scope so every
+   transact (including the per-form txs inside `eval-batch!`)
+   auto-tags with the full causality bundle.
+
+   Returns the closed turn entity pulled with messages + evals
+   inlined (one pull = full turn, per v1.md §9 acceptance criterion
+   11), plus `:seon.agent/eval-count`. On catastrophic error (LLM
+   throw, eval engine crash) returns
+   `{:seon.turn/status :error :seon.error/data <str>}`."
+  [{:seon.agent/keys [id llm-fn compile-state]}]
+  (let [session    (await (ensure-session! id))
+        session-id (:seon.session/id session)
+        turn-id    (new-id!)
+        turn-idx   (turn-index session-id)
+        prompt     (render-prompt id)]
+    (log id turn-idx "open" turn-id "+" (count prompt) "ctx-chars")
+    (try
+      (let [result (await
+                     (db/with-tx-context
+                       {:seon.db/agent-id   id
+                        :seon.db/session-id session-id
+                        :seon.db/turn-id    turn-id
+                        :seon.db/origin     :system}
+                       (fn []
+                         (with-turn!
+                           {:seon.agent/id           id
+                            :seon.session/id-of-session session-id
+                            :seon.turn/id-of-turn    turn-id
+                            :seon.turn/prompt-text   prompt}
+                           #(ask-and-eval! {:seon.agent/id            id
+                                            :seon.agent/llm-fn        llm-fn
+                                            :seon.agent/compile-state compile-state
+                                            :seon.turn/id-of-turn     turn-id
+                                            :seon.turn/prompt-text    prompt})))))
+            n-ok (or (:seon.agent/eval-count result) 0)]
+        (log id turn-idx "done" n-ok "ok")
+        (assoc (db/pull {:seon.db/pull-pattern
+                         '[* {:seon.turn/messages [*]
+                              :seon.turn/evals    [*]}]
+                         :seon.db/ref [:seon.turn/id turn-id]})
+               :seon.agent/eval-count n-ok))
+      (catch :default e
+        (log id turn-idx "run-turn! error" (str e))
+        (try
+          (await (db/transact!
+                   {:seon.db/tx-data
+                    [{:seon.agent/id id :seon.agent/state :idle}]}))
+          (catch :default _ nil))
+        {:seon.turn/status :error
+         :seon.error/data (str e)}))))
 
 (defn ^:async run-agentic-loop!
   "Per v1.md §6.2 — multi-turn driver. Calls `run-turn!` repeatedly
@@ -912,12 +987,18 @@
                         :seon.db/pull-pattern '[:seon.agent/current-ns]
                         :seon.db/ref [:seon.agent/id id]})
         ns    (or (:seon.agent/current-ns agent) (home-ns id))
-        owned (db/pull {:seon.db/db db
-                        :seon.db/pull-pattern
-                        '[:seon.ns/source
-                          {:seon.schema/_ns [:seon.schema/source]
-                           :seon.fn/_ns     [:seon.fn/source]}]
-                        :seon.db/ref [:seon.ns/name (keyword (str ns))]})
+        ns-kw (if (keyword? ns) ns (keyword (str ns)))
+        ;; db/pull throws on unresolved lookup-refs; guard with entity
+        ;; (returns nil for missing) so the section renders blank
+        ;; rather than crashing when no :seon.ns entity exists yet
+        ;; (e.g. before Platform's detect-and-tee step has tee'd one).
+        owned (when (db/entity {:seon.db/db db :seon.db/ref [:seon.ns/name ns-kw]})
+                (db/pull {:seon.db/db db
+                          :seon.db/pull-pattern
+                          '[:seon.ns/source
+                            {:seon.schema/_ns [:seon.schema/source]
+                             :seon.fn/_ns     [:seon.fn/source]}]
+                          :seon.db/ref [:seon.ns/name ns-kw]}))
         parts (concat
                 (when-let [src (:seon.ns/source owned)] [src])
                 (map :seon.schema/source (:seon.schema/_ns owned))
