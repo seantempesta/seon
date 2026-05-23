@@ -14,7 +14,7 @@ Platform track        MVP track
 Phase 1 ✅ shipped    v1  📝 spec draft (see v1.md) — implementation NOT started
 Phase 2 ✅ shipped    v2  📝 stub (see v2.md) — deferred from v1
 Phase 3 🚧 active     v3  📝 stub (see v3.md) — deferred from v2
-Phase 4–7 designed
+Phase 4–10 designed
 ```
 
 "Shipped" means code in `src/seon/` (Platform track). "Spec
@@ -88,6 +88,8 @@ v2 (all the polish v1 deliberately deferred)
 ├─ ships: every "defers" item above, plus
 │         D8 reference-graph attrs (:seon.fn/refs, etc.) — requires analyzer walk
 │         seon.render namespace + per-entity Malli-specificity dispatch
+│         per-section HTML composer (:seon.ctx/html-fn + 6 default HTML companions;
+│           v1 HTML stays whole-tile per agent)
 │         related-ns-section (depends on D8)
 │         Tufte profiling + perf-section
 │         resume-via-program-graph (faster than v1's eval-replay)

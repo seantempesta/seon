@@ -471,6 +471,59 @@ Per-agent capability grants come from a config the host reads at boot. Productio
 
 **Effort:** ongoing; trails Phases 5/6.
 
+### Phase 8 — Tauri desktop shell
+
+Goal: a double-click installer that brings up the pod + dashboard with zero setup. Today's iteration loop assumes `clj`, Node, and two terminals — fine for substrate work, hostile to anyone not building Seon.
+
+Phases 8-10 are a new axis: how the agent reaches users on devices that aren't the dev machine. Phase 8 is the novice desktop install; Phase 9 lets a phone browser connect to that desktop over LAN / Tailscale; Phase 10 ships a mobile app that runs the pod inside the webview itself.
+
+Scope:
+
+- Add `tauri 2.x` + `tauri-build` as real deps in `src-tauri/Cargo.toml`. The workspace `Cargo.toml` already declares them at the workspace level; today's `src-tauri/` binary is wasmtime-only and doesn't pull them in yet.
+- `main.rs` setup hook boots wasmtime + pod in a Tokio task; webview opens to `http://127.0.0.1:<pod-port>` — **the pod's own HTTP+SSE loopback server** (`seon.web.serve`, started by `seon.client/main!` at `client.cljs:493`). The pod already serves the agent UI today via `seon.web.broadcast`'s tx-listener → per-agent tile morphs over `datastar-patch-elements` SSE events; the Tauri webview is just one more HTTP client. The JVM Datastar dashboard is a separate process on a different port reading a different datahike — not what Phase 8 targets.
+- Auto-port-discovery via `tmp/seon-port` (shipped Phase 1).
+- Platform bundling: DMG on macOS, MSI on Windows, AppImage on Linux. Code-signing + notarization is a follow-on.
+
+The webview backing is whatever the OS gives — WKWebView on macOS, WebView2 on Windows, webkit2gtk on Linux. Canvas 2D is universally supported (see [[../dynamic-context-and-canvas/research-2026-05-23]] §4).
+
+**Effort:** ~3-5 days for the basic shell; +1-2 days for code-signing.
+
+### Phase 9 — Remote-access mode
+
+Goal: the desktop instance binds **the pod's HTTP+SSE server** (`seon.web.serve`) on a LAN / Tailscale-reachable address with auth, so a phone browser reaches the agent without a mobile app at all. Same server the Tauri webview connects to locally in Phase 8 — just bound on a different interface.
+
+Scope:
+
+- Bind toggle (`127.0.0.1` vs `0.0.0.0`) on the pod's HTTP server, runtime UI in the desktop shell.
+- Token-based auth on the pod's HTTP server when bound to a non-loopback interface. Token generated on first launch, displayed in the desktop UI for entry on the phone, persisted in the pod's data dir.
+- HTTPS via Tailscale's automatic `*.ts.net` cert, or self-signed + first-visit trust prompt for plain-LAN use. The existing Caddy setup on port 3030 is the local fallback.
+- Phone-side: open Safari to `https://<machine>.tail-net.ts.net`, enter the token once, see the full dashboard. Same Datastar UI as the desktop webview.
+
+Lowest-friction mobile story — the phone is a browser, the desktop does all the work. Good enough for "check on the agent from anywhere" without an iOS dev account or App Store review.
+
+**Effort:** ~2-3 days. Auth + binding is easy; the cert UX is the tricky part.
+
+### Phase 10 — Mobile-native shell (pod-in-webview)
+
+Goal: a phone-only experience that doesn't require a desktop. The pod runs inside WKWebView (iOS) or Android System WebView's JS engine directly — no wasmtime, no Cranelift JIT, no App Store restrictions.
+
+**Why this is App Store-legal:** Apple's JIT restriction blocks third-party native JIT (so wasmtime's Cranelift can't run on iOS App Store builds), but permits JIT *inside* WKWebView (Safari's OS-level exception). The pod's CLJS bootstrap output is JavaScript; loading it in a `<script>` tag gets JavaScriptCore's JIT for free. Same on Android with Chromium's V8. Two different "WASM" stories — wasmtime-in-process is blocked, `WebAssembly.instantiate(...)` inside a webview is fine.
+
+Scope:
+
+- Tauri 2 mobile build targets (`tauri ios build`, `tauri android build`).
+- Build-time selector for the capability shim: WIT imports (desktop, wasmtime path) vs Tauri JS commands (mobile, webview path). Same `seon.fs` / `seon.http` / `seon.deps` surface, different implementation. The CLJS above the shim is identical.
+- Datahike-CLJS persists into the app's sandboxed data dir via Tauri's filesystem plugin.
+- Mobile capability story: OS sandbox + Tauri's per-command allowlist in `tauri.conf.json`. The WIT-level precision from Phase 7 doesn't transfer; the OS sandbox does the heavy lifting instead.
+
+Open questions:
+
+- **Bootstrap startup time on phones.** V0 desktop takes ~2-3s for `cljs.js` bootstrap; phones may be 3-5×. May need pre-compiled JS for common namespaces shipped in the app bundle.
+- **Dynamic deps under App Store review.** Apple permits downloading and eval'ing JS — Safari does it constantly — but reviewers expect to audit what an app does at runtime. Likely needs a curated registry of approved-at-build-time packages, with arbitrary `(seon.deps/install ...)` disabled in App Store builds.
+- **Where does the pod live when both a desktop and a mobile shell are installed?** Desktop runs the canonical pod; mobile detects the desktop on the network and becomes a remote viewer (Phase 9 path) rather than booting its own pod. Mobile-only pod is the fallback when no desktop is reachable.
+
+**Effort:** ~2-3 weeks. The core "pod runs in webview" is technically straightforward once the capability shim is factored.
+
 ---
 
 ## What we want the agent to be able to do
