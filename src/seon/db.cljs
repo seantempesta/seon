@@ -663,13 +663,17 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- form-properties
-  "Extract the Malli properties map from a schema form, or nil. For
-   `[:string {:min 12} …]` returns `{:min 12}`; for `:string` returns nil."
+  "Extract the Malli properties map from a schema form, or nil. Returns
+   the first map-typed child.
+
+   Malli's canonical placement is index 1 (after the head):
+   `[:string {:min 12} …]` → `{:min 12}`. But some authors put bridge
+   markers after the child schema for readability:
+   `[:vector :seon.db/ref {:seon.db/component true}]`. The bridge
+   accepts either — there's at most one props map per schema form."
   [form]
-  (when (and (vector? form)
-             (>= (count form) 2)
-             (map? (second form)))
-    (second form)))
+  (when (vector? form)
+    (some (fn [x] (when (map? x) x)) (rest form))))
 
 (defn- form-children
   "The non-property children of a schema form. For
@@ -686,11 +690,19 @@
 
 (defn- resolve-malli-form
   "Follow a Malli schema form through seon.schema-registered keyword
-   indirections until it reaches a non-keyword form OR a keyword that
-   isn't in the seon.schema mutable registry. The latter case covers
-   Malli built-ins (`:string`, `:int`, `:keyword`, `:boolean`, `:inst`,
-   etc.) and is left unresolved — `form->datahike-value-type` maps the
-   built-in heads directly.
+   indirections until it reaches a non-keyword form OR a keyword whose
+   resolved schema is a built-in `IntoSchema` (not a raw Malli form).
+
+   Malli built-ins like `:inst`/`:string`/`:int` ARE present in the
+   registry (they have to be — Malli looks them up too), but their
+   `schema-definition` returns an `IntoSchema` instance rather than a
+   reducible Malli form (keyword or vector). The bridge maps the
+   built-in heads directly via `form->datahike-value-type`; recursing
+   into the IntoSchema would lose the head and break the mapping.
+
+   So: only recurse when the resolved definition is itself a Malli
+   form (keyword or vector). Anything else (IntoSchema, compiled
+   schema) means we've hit a built-in — return the form unchanged.
 
    `:seon.db/ref` is special: even though it's registered, the bridge
    maps it directly to `:db.type/ref` rather than following its
@@ -702,7 +714,10 @@
     :seon.db/ref
 
     (and (keyword? form) (schema/registered? form))
-    (resolve-malli-form (schema/schema-definition form))
+    (let [def (schema/schema-definition form)]
+      (if (or (keyword? def) (vector? def))
+        (resolve-malli-form def)
+        form))
 
     :else
     form))

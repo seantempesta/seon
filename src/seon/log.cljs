@@ -93,14 +93,22 @@
 ;; gets them automatically.
 ;; ============================================================
 
-(schema/register! :seon.log/at            :any)  ; js/Date — not really :inst in CLJS
+;; :inst validates js/Date in CLJS (inst? returns true). The bridge
+;; maps :inst → :db.type/instant; datahike accepts js/Date for that.
+;; Confirmed working pattern — :seon.message/at, :seon.eval/at, and
+;; :seon.turn/at all use :inst.
+(schema/register! :seon.log/at            :inst)
 (schema/register! :seon.log/level         [:enum :error :warn :info :debug])
 (schema/register! :seon.log/source        :keyword)
 (schema/register! :seon.log/agent         :string)
 (schema/register! :seon.log/message       :string)
 (schema/register! :seon.log/stack         :string)
+;; :seon.log/data is genuinely polymorphic (arbitrary log payloads).
+;; Not in agent-bootstrap-schema — log code stringifies before transact
+;; via :seon.log/message + :seon.log/stack. Kept registered as :any
+;; for in-memory validation only.
 (schema/register! :seon.log/data          :any)
-(schema/register! :seon.log/dismissed-at  :any)
+(schema/register! :seon.log/dismissed-at  :inst)
 
 ;; ============================================================
 ;; Internal — transact one entry. Promise-returning; soft-fails to

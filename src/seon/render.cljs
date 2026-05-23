@@ -40,16 +40,19 @@
 ;; Datahike db snapshot — opaque to validation; the renderer body uses it.
 (schema/register! :seon.db/db :any)
 
-;; :seon.render/ai is FUNCTION-ONLY (literal strings would deprive the
-;; agent of dynamic ctx — current convo, recent evals, schema ref, …).
-;; Force-function ensures the default ctx fn is always the baseline.
-(schema/register! :seon.render/ai [:fn symbol?])
+;; :seon.render/ai is SYMBOL-ONLY at storage (literal strings would
+;; deprive the agent of dynamic ctx — current convo, recent evals,
+;; schema ref, …). Force-symbol ensures the default ctx fn is always
+;; the baseline. The Malli :symbol type validates identically to
+;; `[:fn symbol?]` AND maps cleanly through the seon.db schema bridge
+;; to `:db.type/symbol`; the previous `[:fn symbol?]` shape didn't.
+(schema/register! :seon.render/ai :symbol)
 
 ;; :seon.render/html — symbol-only at entity storage (V0.5 limitation;
 ;; see seon.client/agent-bootstrap-schema for the datahike side). The
 ;; in-process dispatch path still accepts literal hiccup at call sites
 ;; (e.g. when a render fn returns a vector that wraps another).
-(schema/register! :seon.render/html [:fn symbol?])
+(schema/register! :seon.render/html :symbol)
 
 ;; Hiccup data shape — recursive vector starting with keyword, optional
 ;; attrs map, children. Defined via Malli local registry so the

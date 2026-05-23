@@ -79,7 +79,7 @@
 ;; minimal projection the warnings / recent-evals tiles render.
 ;; Per the user's design directive: "only put data in the database
 ;; schema that we want to surface in the agent's context."
-(schema/register! :seon.test/sym :string)
+(schema/register! :seon.test/sym [:string {:seon.db/identity true}])
 (schema/register! :seon.test/last-passed-at :inst)
 (schema/register! :seon.test/last-failed-at :inst)
 (schema/register! :seon.test/last-failure-summary :string)

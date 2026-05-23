@@ -187,211 +187,96 @@
 
 ;; Datahike-side schema. Datahike requires every attribute have a
 ;; declared :db/valueType + :db/cardinality before first use — our
-;; seon.schema Malli registry only handles pre-transact validation,
-;; not storage shape. Eventually we'd derive this from seon.schema
-;; (a generic Malli→datahike bridge), but for V0 we hand-write the
-;; small attribute surface here.
-(def ^:private agent-bootstrap-schema
-  ;; --- Agent ---
-  [{:db/ident :seon.agent/id
-    :db/valueType :db.type/string
-    :db/cardinality :db.cardinality/one
-    :db/unique :db.unique/identity}
-   {:db/ident :seon.agent/state
-    :db/valueType :db.type/keyword
-    :db/cardinality :db.cardinality/one}
-   {:db/ident :seon.agent/turn-count
-    :db/valueType :db.type/long
-    :db/cardinality :db.cardinality/one}
-   {:db/ident :seon.agent/turns-since-user
-    :db/valueType :db.type/long
-    :db/cardinality :db.cardinality/one}
-   ;; v1 — new :seon.agent attrs. :sessions is a component-many ref
-   ;; to :seon.session (cascade-retract on agent retract).
-   {:db/ident :seon.agent/current-ns
-    :db/valueType :db.type/keyword
-    :db/cardinality :db.cardinality/one}
-   {:db/ident :seon.agent/sessions
-    :db/valueType :db.type/ref
-    :db/cardinality :db.cardinality/many
-    :db/isComponent true}
-   ;; turns-cap — per-message agentic-turn limit; overridable via
-   ;; transact, default 20 (seon.agent/default-turns-cap).
-   {:db/ident :seon.agent/turns-cap
-    :db/valueType :db.type/long
-    :db/cardinality :db.cardinality/one}
+;; Phase 2.6 cleanup (2026-05-23): the datahike attribute schema is
+;; now Malli-derived. Each entry below is a keyword reference into the
+;; `seon.schema` Malli registry; `seon.db/malli->datahike-schema`
+;; produces the datahike attr-declaration vector at boot time, reading
+;; the registered Malli shape (type, cardinality, `:seon.db/identity`,
+;; `:seon.db/component`).
+;;
+;; To add a new datahike attribute: register the Malli schema in the
+;; owning namespace (`seon.agent`, `seon.log`, `seon.test.runner`, etc.)
+;; with the usual marker props, then add the keyword to this vector.
+;; No more hand-written `:db.type/*` entries.
+;;
+;; Order doesn't matter for forward refs — datahike's `:db.type/ref`
+;; is loosely typed (no target-entity check); the Malli registry is
+;; populated at ns-load time before this vector resolves.
+(def ^:private agent-bootstrap-attrs
+  [;; --- Agent ---
+   :seon.agent/id
+   :seon.agent/state
+   :seon.agent/current-ns
+   :seon.agent/sessions
+   :seon.agent/turns-cap
+   :seon.agent/ctx
 
-   ;; --- Message ---
-   {:db/ident :seon.message/id
-    :db/valueType :db.type/string
-    :db/cardinality :db.cardinality/one
-    :db/unique :db.unique/identity}
-   {:db/ident :seon.message/role
-    :db/valueType :db.type/keyword
-    :db/cardinality :db.cardinality/one}
-   {:db/ident :seon.message/content
-    :db/valueType :db.type/string
-    :db/cardinality :db.cardinality/one}
-   {:db/ident :seon.message/agent
-    :db/valueType :db.type/ref
-    :db/cardinality :db.cardinality/one}
-   {:db/ident :seon.message/at
-    :db/valueType :db.type/instant
-    :db/cardinality :db.cardinality/one}
+   ;; --- Render slots (A-6) — symbol-only at storage. ---
+   :seon.render/ai
+   :seon.render/html
 
-   ;; --- Eval ---
-   {:db/ident :seon.eval/id
-    :db/valueType :db.type/string
-    :db/cardinality :db.cardinality/one
-    :db/unique :db.unique/identity}
-   {:db/ident :seon.eval/agent
-    :db/valueType :db.type/ref
-    :db/cardinality :db.cardinality/one}
-
-   ;; --- Render slots (A-6) ---
-   ;; Symbol-only at storage. Spec §15.2's "literal hiccup as slot
-   ;; value" path is gated by datahike's strict-typed schema — it
-   ;; refuses `:db.type/any` (not in its allowed-types enum). For V0.5
-   ;; the agent wraps literal hiccup in a fn and transacts the symbol;
-   ;; html-render's vector-short-circuit branch still applies at
-   ;; in-memory call sites (e.g. when a render fn returns another
-   ;; vector). Polymorphic storage is a V0.6 concern — solved either
-   ;; by switching the conn to schema-flexibility :read (loses
-   ;; unique-by-identity) or by EDN-serializing at the boundary.
-   {:db/ident :seon.render/ai
-    :db/valueType :db.type/symbol
-    :db/cardinality :db.cardinality/one}
-   {:db/ident :seon.render/html
-    :db/valueType :db.type/symbol
-    :db/cardinality :db.cardinality/one}
-
-   ;; --- Log (A-6) ---
-   {:db/ident :seon.log/at
-    :db/valueType :db.type/instant
-    :db/cardinality :db.cardinality/one}
-   {:db/ident :seon.log/level
-    :db/valueType :db.type/keyword
-    :db/cardinality :db.cardinality/one}
-   {:db/ident :seon.log/source
-    :db/valueType :db.type/keyword
-    :db/cardinality :db.cardinality/one}
-   {:db/ident :seon.log/agent
-    :db/valueType :db.type/string
-    :db/cardinality :db.cardinality/one}
-   {:db/ident :seon.log/message
-    :db/valueType :db.type/string
-    :db/cardinality :db.cardinality/one}
-   {:db/ident :seon.log/stack
-    :db/valueType :db.type/string
-    :db/cardinality :db.cardinality/one}
-   {:db/ident :seon.log/dismissed-at
-    :db/valueType :db.type/instant
-    :db/cardinality :db.cardinality/one}
-   {:db/ident :seon.eval/at
-    :db/valueType :db.type/instant
-    :db/cardinality :db.cardinality/one}
-   {:db/ident :seon.eval/turn
-    :db/valueType :db.type/long
-    :db/cardinality :db.cardinality/one}
-   {:db/ident :seon.eval/narration
-    :db/valueType :db.type/string
-    :db/cardinality :db.cardinality/one}
-   {:db/ident :seon.eval/source
-    :db/valueType :db.type/string
-    :db/cardinality :db.cardinality/one}
-   {:db/ident :seon.eval/ok?
-    :db/valueType :db.type/boolean
-    :db/cardinality :db.cardinality/one}
-   {:db/ident :seon.eval/result-edn
-    :db/valueType :db.type/string
-    :db/cardinality :db.cardinality/one}
-   {:db/ident :seon.eval/error
-    :db/valueType :db.type/string
-    :db/cardinality :db.cardinality/one}
+   ;; --- Ctx section entities (v1.md §5) ---
+   :seon.ctx/name
+   :seon.ctx/priority
+   :seon.ctx/fn
 
    ;; --- Session (v1.md §2.1) ---
-   ;; One pod run from boot to halt. Component refs on the session
-   ;; (turns), cascade-retract on session retract. turn-count +
-   ;; turns-since-user are transient counters on the session itself
-   ;; (NOT on the agent — v1 moves them off :seon.agent).
-   {:db/ident :seon.session/id
-    :db/valueType :db.type/string
-    :db/cardinality :db.cardinality/one
-    :db/unique :db.unique/identity}
-   {:db/ident :seon.session/at
-    :db/valueType :db.type/instant
-    :db/cardinality :db.cardinality/one}
-   ;; turn-count NOT persisted — derived from (count :seon.session/turns).
-   {:db/ident :seon.session/turns-since-user
-    :db/valueType :db.type/long
-    :db/cardinality :db.cardinality/one}
-   {:db/ident :seon.session/turns
-    :db/valueType :db.type/ref
-    :db/cardinality :db.cardinality/many
-    :db/isComponent true}
+   :seon.session/id
+   :seon.session/at
+   :seon.session/turns-since-user
+   :seon.session/turns
 
    ;; --- Turn (v1.md §2.1) ---
-   ;; One full render → LLM → parse → eval-batch cycle. Component
-   ;; refs on the turn (messages, evals), cascade-retract on turn
-   ;; retract. :prompt-text is the literal rendered ctx the LLM saw,
-   ;; inline as a string in v1 (moves to :prompt-blob ref in v2).
-   {:db/ident :seon.turn/id
-    :db/valueType :db.type/string
-    :db/cardinality :db.cardinality/one
-    :db/unique :db.unique/identity}
-   ;; :seon.turn/index NOT persisted — derived from (count :seon.session/turns)
-   ;; at the time of opening. Storing it lets it desync.
-   {:db/ident :seon.turn/at
-    :db/valueType :db.type/instant
-    :db/cardinality :db.cardinality/one}
-   {:db/ident :seon.turn/status
-    :db/valueType :db.type/keyword
-    :db/cardinality :db.cardinality/one}
-   {:db/ident :seon.turn/prompt-text
-    :db/valueType :db.type/string
-    :db/cardinality :db.cardinality/one}
-   {:db/ident :seon.turn/messages
-    :db/valueType :db.type/ref
-    :db/cardinality :db.cardinality/many
-    :db/isComponent true}
-   {:db/ident :seon.turn/evals
-    :db/valueType :db.type/ref
-    :db/cardinality :db.cardinality/many
-    :db/isComponent true}
+   :seon.turn/id
+   :seon.turn/at
+   :seon.turn/status
+   :seon.turn/prompt-text
+   :seon.turn/messages
+   :seon.turn/evals
+
+   ;; --- Message ---
+   :seon.message/id
+   :seon.message/role
+   :seon.message/content
+   :seon.message/agent
+   :seon.message/at
+
+   ;; --- Eval ---
+   :seon.eval/id
+   :seon.eval/agent
+   :seon.eval/at
+   :seon.eval/turn
+   :seon.eval/narration
+   :seon.eval/source
+   :seon.eval/ok?
+   :seon.eval/result-edn
+   :seon.eval/error
+
+   ;; --- Program graph (v1.md §2.2) ---
+   :seon.ns/name
+   :seon.ns/source
+   :seon.fn/sym
+   :seon.fn/ns
+   :seon.fn/source
+   :seon.schema/key
+   :seon.schema/ns
+   :seon.schema/source
+
+   ;; --- Log (A-6) ---
+   :seon.log/at
+   :seon.log/level
+   :seon.log/source
+   :seon.log/agent
+   :seon.log/message
+   :seon.log/stack
+   :seon.log/dismissed-at
 
    ;; --- Test (Phase 2 — test capture as data) ---
-   ;; `:seon.test/sym` is the test's fully-qualified symbol as a string
-   ;; (e.g. "seon.user/my-test"). Identity = single entity per test.
-   ;; `:seon.test/last-passed-at` / `:last-failed-at` / `:last-failure`
-   ;; let warnings/recent-evals tiles read test state via Datalog
-   ;; without walking eval entities. Per platform.md §Phase 2.
-   ;; Note: STATUS.md "Queued simplifications" proposes replacing
-   ;; these stored attrs with tx-meta `:seon.eval/test` + history
-   ;; queries — once the MVP track lands the eval-id-tx-meta
-   ;; infrastructure, we revisit.
-   {:db/ident :seon.test/sym
-    :db/valueType :db.type/string
-    :db/cardinality :db.cardinality/one
-    :db/unique :db.unique/identity}
-   {:db/ident :seon.test/last-passed-at
-    :db/valueType :db.type/instant
-    :db/cardinality :db.cardinality/one}
-   {:db/ident :seon.test/last-failed-at
-    :db/valueType :db.type/instant
-    :db/cardinality :db.cardinality/one}
-   ;; A short summary string (~200 chars max) suitable for direct
-   ;; render in the warnings tile. The FULL failure data — events,
-   ;; expected/actual, stack traces — lives in the agent's ns under
-   ;; the test-run-id stash; this attr is JUST the surfaced fragment.
-   {:db/ident :seon.test/last-failure-summary
-    :db/valueType :db.type/string
-    :db/cardinality :db.cardinality/one}
-   ;; Pointer to the latest run's stashed full result. Agent reaches
-   ;; the blob via `(result <run-id>)` (the existing setup-agent-ns!
-   ;; helper that reads globalThis-stashed eval values).
-   {:db/ident :seon.test/last-run-id
-    :db/valueType :db.type/string
-    :db/cardinality :db.cardinality/one}])
+   :seon.test/sym
+   :seon.test/last-passed-at
+   :seon.test/last-failed-at
+   :seon.test/last-failure-summary
+   :seon.test/last-run-id])
 
 (defn ^:async open-agent-conn! []
   (let [cfg {:store {:backend :memory :id (random-uuid)}
@@ -404,12 +289,13 @@
              :keep-history? true}]
     (await (d/create-database cfg))
     (let [conn (await (d/connect cfg))
-          ;; v1 tx-meta datahike schema is derived from the Malli
-          ;; registry, not hand-written — see seon.db/tx-meta-datahike-schema.
-          ;; Future cleanup (Phase 2.6) extends this bridge across all
-          ;; of `agent-bootstrap-schema` so the hand-written entries
-          ;; above can go away too.
-          full-schema (into agent-bootstrap-schema
+          ;; Phase 2.6 (2026-05-23) — the agent schema AND the tx-meta
+          ;; schema both flow through `seon.db/malli->datahike-schema`,
+          ;; reading the shared `seon.schema` Malli registry. Adding a
+          ;; new attr is a Malli `register!` in the owning ns plus a
+          ;; keyword line in `agent-bootstrap-attrs` above. No more
+          ;; hand-written `:db.type/*` entries.
+          full-schema (into (db/malli->datahike-schema agent-bootstrap-attrs)
                             (db/tx-meta-datahike-schema))]
       (await (d/transact! conn full-schema))
       conn)))

@@ -54,6 +54,23 @@ in [README.md](README.md); don't re-litigate them.
 
 ## Recent ships (2026-05-23) — Platform track only
 
+### Platform track — Phase 2.6 schema bridge cleanup (resolves MVP PLATFORM-FLAG)
+
+`seon.client/agent-bootstrap-schema` (~200 lines of hand-written `:db.type/*` entries) is now `seon.client/agent-bootstrap-attrs` — a 55-keyword vector that flows through `seon.db/malli->datahike-schema` at boot. Adding a new datahike attr is now: `(schema/register! :foo/bar <malli-shape>)` in the owning ns + add `:foo/bar` to `agent-bootstrap-attrs`. No more spread-the-smell hand-written entries.
+
+Touch surface:
+
+- **`seon.db/resolve-malli-form`** — only recurse on registry indirections when the resolved definition is a Malli form (keyword/vector). Malli built-ins like `:inst` resolve to an `IntoSchema` object via the seon.schema registry; recursing into that lost the head and broke the mapping. Now returns the form unchanged when the resolved def is anything other than a follow-able shape.
+- **`seon.db/form-properties`** — finds the first map-typed child anywhere in the form (not just index 1). Supports both Malli's canonical `[:vector {props} child]` placement and the readability variant `[:vector child {props}]` MVP's regs use.
+- **`seon.log/at` and `:seon.log/dismissed-at`** — `:any` → `:inst`. The pre-Phase-2.6 comment ("not really :inst in CLJS") was stale; `inst?` returns true for `js/Date` and datahike's `:db.type/instant` accepts it. Confirmed pattern: `:seon.message/at`, `:seon.eval/at`, `:seon.turn/at` all use `:inst`.
+- **`seon.render/ai` and `:seon.render/html`** — `[:fn symbol?]` → `:symbol`. Same validation (both reject non-symbols), but `:symbol` maps through the bridge to `:db.type/symbol`; `[:fn ...]` had no mapping.
+- **`seon.test/sym`** — added `{:seon.db/identity true}` marker (was identity in old hand-written schema; Malli reg was missing the property).
+- **`seon.agent/id`, `:seon.message/id`, `:seon.eval/id`** — added `{:seon.db/identity true}` marker. Same reason. Surgical 4-character additions in MVP's lane; no overlap with their active loop/turn work area.
+
+Verified: derived schema has 55 attrs + 7 tx-meta attrs = 62. 5 component-refs (sessions, ctx, turns, messages, evals). 9 identity attrs (agent.id, session.id, turn.id, message.id, eval.id, ns.name, fn.sym, schema.key, test.sym). 8 instant attrs, 9 ref attrs, 9 keyword attrs, 3 symbol attrs. Fresh in-memory conn transacts the derived schema cleanly (201 tx-data datoms, no errors).
+
+**Live pod still uses the OLD schema** — the in-memory conn was created at boot before the new code loaded. To switch to the new schema, restart: `bin/seon restart pod`. MVP, your call when — heads up I won't restart unilaterally because you'll lose any in-flight conn state. The new code IS hot-loaded into the bundle; `(open-agent-conn!)` calls create-with-new-schema.
+
 ### Platform track — multi-agent process supervisor `bin/seon`
 
 Idempotent, lock-safe (mkdir-mutex per process), multi-agent-friendly process supervisor. Replaces ad-hoc `pkill` / `nohup` / `lsof` patterns and resolves the ownership problem where two agents might race to start/stop the same process.
