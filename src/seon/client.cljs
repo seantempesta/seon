@@ -204,9 +204,11 @@
 ;; populated at ns-load time before this vector resolves.
 (def ^:private agent-bootstrap-attrs
   [;; --- Agent ---
+   ;; :seon.agent/current-ns deleted 2026-05-23 — derived from the
+   ;; latest successful eval's :seon.eval/ns. See
+   ;; docs/seon/concepts/reactive-context.
    :seon.agent/id
    :seon.agent/state
-   :seon.agent/current-ns
    :seon.agent/sessions
    :seon.agent/turns-cap
    :seon.agent/ctx
@@ -221,9 +223,11 @@
    :seon.ctx/fn
 
    ;; --- Session (v1.md §2.1) ---
+   ;; :seon.session/turns-since-user deleted 2026-05-23 — derived from
+   ;; the count of :seon.turn entities with :seon.turn/at > the latest
+   ;; :seon.message/role :user's :at. See seon.agent/turns-since-user.
    :seon.session/id
    :seon.session/at
-   :seon.session/turns-since-user
    :seon.session/turns
 
    ;; --- Turn (v1.md §2.1) ---
@@ -253,6 +257,9 @@
    :seon.eval/ok?
    :seon.eval/result-edn
    :seon.eval/error
+   ;; :seon.eval/ns — ending ns from cljs.js/eval-str's :ns, or
+   ;; unchanged accumulator on parse/eval failure (v1.md:236).
+   :seon.eval/ns
 
    ;; --- Program graph (v1.md §2.2) ---
    :seon.ns/name

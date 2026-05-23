@@ -459,10 +459,14 @@
    refer map and wires up implicit macro refers (defn, str, atom, etc.)
    for subsequent forms in the new ns."
   [compile-state agent-ns-sym agent-id]
-  (let [setup-src
+  (let [;; `!current-ns` removed 2026-05-23 — was a process-global
+        ;; cache forcing two extra cljs.js/eval-str round-trips per
+        ;; form. The agent's current ns is now derived at read time
+        ;; from the latest :seon.eval/ns datom (see
+        ;; seon.agent/current-ns + docs/seon/concepts/reactive-context).
+        setup-src
         (str "(ns " agent-ns-sym ")"
              "(def !session-id (atom " (pr-str agent-id) "))"
-             "(def !current-ns (atom '" agent-ns-sym "))"
              "(defn session-id [] @!session-id)"
              "(defn result [id]"
              "  (js/Reflect.get js/globalThis"
@@ -507,23 +511,6 @@
         rand-ch  #(nth alphabet (rand-int 62))]
     (str (encode (.now js/Date) 8)
          (apply str (repeatedly 4 rand-ch)))))
-
-(defn ^:async ^:private read-current-ns
-  "Read @!current-ns from the agent's home ns. Returns the symbol, or
-   `agent-ns-sym` if reading failed (fresh-boot fallback)."
-  [compile-state agent-ns-sym]
-  (let [src (str "@" agent-ns-sym "/!current-ns")
-        r   (await (eval compile-state src {:ns agent-ns-sym}))]
-    (if (:ok r) (:value r) agent-ns-sym)))
-
-(defn ^:async ^:private update-current-ns!
-  "Write @!current-ns = new-ns. Soft-fails (logs + ignores)."
-  [compile-state agent-ns-sym new-ns]
-  (let [src (str "(reset! " agent-ns-sym "/!current-ns '" new-ns ")")
-        r   (await (eval compile-state src {:ns agent-ns-sym}))]
-    (when-not (:ok r)
-      (js/console.warn "[seon.eval/eval-batch!] update-current-ns! soft-fail:"
-                       (-> r :error :seon.error/message)))))
 
 (defn ^:async ^:private maybe-await-value
   "Agent-REPL ergonomic: if a form returns a Promise (because the form
@@ -573,13 +560,22 @@
    `(seon.db/current-tx-context)` (eval-batch! opens the per-eval
    scope with `:seon.db/agent-id` + `:seon.db/eval-id` + `:seon.db/
    origin :agent`, plus whatever the caller layered above)."
-  [{:keys [eval-id turn-id at narration source result duration-ms]}]
+  [{:keys [eval-id turn-id at narration source result duration-ms ns]}]
   (let [eval-map (cond-> {:seon.eval/id          eval-id
                           :seon.eval/at          at
                           :seon.eval/duration-ms (or duration-ms 0)
                           :seon.eval/narration   (or narration "")
                           :seon.eval/source      source
-                          :seon.eval/ok?         (boolean (:ok result))}
+                          :seon.eval/ok?         (boolean (:ok result))
+                          ;; v1.md:236 — ending ns. From the eval result
+                          ;; on success; from the fold accumulator on
+                          ;; failure (last-known-good). Always populated.
+                          ;; Stored as :keyword per spec; eval-batch
+                          ;; holds it as a symbol for cljs.js, coerce
+                          ;; at this boundary.
+                          :seon.eval/ns          (if (keyword? ns)
+                                                   ns
+                                                   (keyword (str ns)))}
                    (:ok result)
                    (assoc :seon.eval/result-edn
                           (try (pr-str (:value result))
@@ -607,23 +603,31 @@
 
    Per entry, two kinds:
 
+   The per-form loop is a fold over `parsed`, carrying `current-ns`
+   as the accumulator. Each successful eval that switches ns (via
+   `(ns …)`) updates the accumulator to the eval's `:ns`. Failed
+   forms (parse OR eval) leave the accumulator unchanged — the
+   last-known-good ns naturally propagates to the next form. The
+   final `:seon.eval/ns` written for each form is the accumulator's
+   value at write time (post-update on success; unchanged on failure).
+   See docs/seon/concepts/reactive-context.
+
    `:kind :form` (the normal path):
-     1. Read current-ns from agent's atom (defaults to agent-ns-sym).
-     2. Capture start time. (await (eval compile-state source current-ns))
-     3. Auto-await Promise return values so agent code calling
-        ^:async fns gets the resolved value or the rejection.
-     4. Compute duration-ms = (now - start).
-     5. Update !current-ns from the result's :ns (so (ns other) inside
-        a form affects subsequent forms).
-     6. Stash the live value in !results under the eval-id kw.
-     7. Transact a :seon.eval entity (durable record).
+     1. Eval in the accumulator's current-ns.
+     2. Auto-await Promise return values.
+     3. Compute duration-ms = (now - start).
+     4. On success: advance accumulator to (:ns raw-result); stash
+        the live value in globalThis under the eval-id kw.
+     5. Transact a :seon.eval entity carrying :seon.eval/ns = the
+        post-update accumulator value.
 
    `:kind :read` (a parse-forms failure, see seon.parse):
-     1. Skip the eval (there's nothing to evaluate).
-     2. Synthesize a `{:ok false :error <read-failure-map>}` result.
-     3. Record as a failed :seon.eval entity so the agent sees its
-        own broken text in the next turn's ctx and self-corrects.
-     4. duration-ms = 0 (no eval happened).
+     1. Skip the eval (no source to evaluate).
+     2. Record as a failed :seon.eval with :seon.eval/ns = the
+        unchanged accumulator value (the ns the form WOULD have
+        run in). Agent sees its own broken text in the next turn's
+        ctx and self-corrects.
+     3. duration-ms = 0 (no eval happened).
 
    Per-form work is wrapped in `(db/with-tx-context {…} f)` so every
    transact inside auto-tags with the causality bundle (agent-id +
@@ -648,9 +652,15 @@
    'progress made this turn' and :n-fail to surface to the agent's
    warnings tile."
   [compile-state parsed agent-ns-sym agent-id turn-id]
-  (let [eids   (volatile! [])
-        n-ok   (volatile! 0)
-        n-fail (volatile! 0)]
+  (let [;; Fold-step local accumulators. Volatile! is a transient
+        ;; mutation impl detail inside this one fn; not shared state.
+        ;; current-ns is the per-form fold value: starts at agent
+        ;; home-ns, advances on each successful `(ns …)` eval, stays
+        ;; unchanged on any failure (last-known-good propagates).
+        eids       (volatile! [])
+        n-ok       (volatile! 0)
+        n-fail     (volatile! 0)
+        current-ns (volatile! agent-ns-sym)]
     (doseq [entry parsed]
       (let [eval-id    (new-eval-id)
             tx-context {:seon.db/agent-id agent-id
@@ -661,7 +671,8 @@
             (fn ^:async run-one-entry! []
               (cond
                 ;; Read-failure entry from seon.parse — no eval, record
-                ;; directly as a failed :seon.eval so the agent sees it.
+                ;; directly as a failed :seon.eval. :seon.eval/ns =
+                ;; the unchanged accumulator (last-known-good ns).
                 (and (= :read (:kind entry)) (false? (:ok? entry)))
                 (do
                   (await (record-eval!
@@ -671,6 +682,7 @@
                             :duration-ms 0
                             :narration   (:narration entry)
                             :source      (:source entry)
+                            :ns          @current-ns
                             :result      {:ok false
                                           :error {:seon.error/kind    :read
                                                   :seon.error/message (:error entry)}}}))
@@ -681,37 +693,39 @@
                 (let [{:keys [narration source]} entry
                       at          (js/Date.)
                       start-ms    (.now js/Date)
-                      current-ns  (await (read-current-ns compile-state agent-ns-sym))
                       raw-result  (await (eval compile-state source
-                                               {:ns current-ns
+                                               {:ns @current-ns
                                                 :analyze-deps? false}))
                       result
                       (cond
-                        ;; Form itself failed (compile / read / runtime throw)
                         (not (:ok raw-result)) raw-result
-                        ;; Form succeeded; the value might be a Promise.
                         :else (let [r2 (await (maybe-await-value (:value raw-result)))]
                                 (if (:ok r2)
                                   {:ok true :value (:value r2) :ns (:ns raw-result)}
-                                  ;; Promise rejected — surface as the form's error
                                   r2)))
                       duration-ms (- (.now js/Date) start-ms)]
-                  ;; Track ending ns for REPL-style navigation. nil means the form
-                  ;; failed before producing one (compile error etc.); leave atom alone.
+                  ;; Advance the accumulator on successful ns switch.
+                  ;; Failed evals leave the accumulator untouched —
+                  ;; the form ran in @current-ns and we record that
+                  ;; value as the form's :seon.eval/ns.
                   (when (and (:ok result) (:ns raw-result))
-                    (await (update-current-ns! compile-state agent-ns-sym (:ns raw-result))))
-                  ;; Live-value stash — direct js/Reflect.set on globalThis, no
-                  ;; eval-str round-trip (so opaque values like datahike DB tagged
-                  ;; literals don't break the stash). Agent reads via (result :id).
+                    (vreset! current-ns (:ns raw-result)))
+                  ;; Live-value stash — direct js/Reflect.set on globalThis,
+                  ;; no eval-str round-trip (opaque values like datahike DB
+                  ;; tagged literals don't break the stash). Agent reads
+                  ;; via (result :id).
                   (when (:ok result)
                     (stash-result-raw! eval-id (:value result)))
-                  ;; Durable record — always.
+                  ;; Durable record — always. :seon.eval/ns is the
+                  ;; post-update accumulator (ending ns on success;
+                  ;; unchanged ns on failure).
                   (await (record-eval! {:eval-id     eval-id
                                         :turn-id     turn-id
                                         :at          at
                                         :duration-ms duration-ms
                                         :narration   narration
                                         :source      source
+                                        :ns          @current-ns
                                         :result      result}))
                   (if (:ok result)
                     (vswap! n-ok   inc)
