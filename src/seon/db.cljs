@@ -500,29 +500,32 @@
 (declare ^:private form-head)
 (declare ^:private form-children)
 
-(defn- ref-typed-attr-form?
-  "True if the attr's resolved Malli schema describes a ref slot —
-   either a bare `:seon.db/ref` or a `[:vector :seon.db/ref]` /
-   `[:set :seon.db/ref]` container.
+(defn- ref-attr-arity
+  "If the attr's resolved Malli schema describes a ref slot, returns
+   `:one` (single ref) or `:many` (container of refs). Returns `nil`
+   if the schema isn't a ref slot.
 
-   Used by `validate-entity-values!` to recognize that the attr accepts
-   datahike's nested-map shorthand (the standard pattern where passing
-   `{:seon.foo/bar …}` instead of an eid/lookup-ref tells datahike to
-   create a new entity inline). Without this branch, a perfectly legal
-   `{:seon.agent/ctx [{:seon.ctx/name :system …}]}` transact fails
-   validation because the nested map isn't a `:seon.db/ref` literal."
+   Arity matters because the validation gate's nested-map-shorthand
+   path branches differently:
+
+   - `:one` — value may be a single map (validate as nested entity),
+     OR a single ref-shape (eid, lookup tuple). A lookup tuple is
+     itself a 2-element vector — we MUST NOT iterate it as a
+     container or we'd validate the keyword + string separately.
+   - `:many` — value is a sequential of mixed (maps + refs); iterate
+     and validate each child."
   [schema-form]
   (let [resolved (resolve-malli-form schema-form)
         head     (form-head resolved)]
     (cond
-      (= resolved :seon.db/ref) true
+      (= resolved :seon.db/ref) :one
 
       (and (#{:vector :set :sequential} head)
            (when-let [child (first (form-children resolved))]
              (= :seon.db/ref (resolve-malli-form child))))
-      true
+      :many
 
-      :else false)))
+      :else nil)))
 
 (declare validate-entity-values!)
 
@@ -553,30 +556,49 @@
    Malli schema. Skips system attrs and unregistered attrs (the latter
    should have been caught by `validate-attrs!`).
 
-   Special-cases ref-typed attrs: accepts datahike's nested-map shorthand
-   in place of explicit refs. A map value (or vector of maps + refs) is
-   recursively validated against the children's own per-attr schemas;
-   the outer ref-type check is skipped because datahike will turn the
-   maps into entities at write time. See [[ref-typed-attr-form?]] for
-   the rationale."
+   Special-cases ref-typed attrs (see [[ref-attr-arity]]): accepts
+   datahike's nested-map shorthand in place of explicit refs. A map
+   value is recursively validated against the children's own per-attr
+   schemas; the outer ref-type check is skipped because datahike will
+   turn the map into an entity at write time.
+
+   Arity matters: a single-ref slot whose value is a 2-element vector
+   like `[:seon.agent/id \"seon\"]` is a LOOKUP REF, not a container
+   of refs. We must dispatch on schema-declared arity, not on the
+   value's `sequential?` shape, or we'd iterate the lookup tuple's
+   keyword + string and validate them as separate refs."
   [entity]
   (doseq [[attr val] entity]
     (when (and (not (system-attr? attr))
                (schema/registered? attr))
-      (let [schema-form (schema/schema-definition attr)]
+      (let [schema-form (schema/schema-definition attr)
+            arity       (ref-attr-arity schema-form)]
         (cond
-          ;; Single-card ref with nested-map shorthand:
-          ;; `{:seon.foo/bar {:seon.bar/id "…"}}`
-          (and (ref-typed-attr-form? schema-form)
-               (map? val))
-          (validate-entity-values! val)
+          ;; Single-card ref slot.
+          (= arity :one)
+          (cond
+            ;; Nested-map shorthand → recurse as entity.
+            (map? val)
+            (validate-entity-values! val)
+            ;; Anything else (eid, lookup tuple, ident) → validate as ref.
+            :else
+            (when-not (m/validate :seon.db/ref val)
+              (throw (ex-info (str "Malli validation failed for " attr
+                                   ": expected :seon.db/ref (eid, lookup "
+                                   "tuple, or nested entity map), got "
+                                   (truncate-value val))
+                              {::error             :seon.db/invalid-value
+                               ::attr              attr
+                               ::expected-schema   schema-form
+                               ::actual-value      val
+                               ::malli-explanation (m/explain :seon.db/ref val)}))))
 
-          ;; Many-card ref with mixed shorthand:
-          ;; `{:seon.foo/bars [{:seon.bar/id "…"} 42 [:seon.bar/id "…"]]}`
-          (and (ref-typed-attr-form? schema-form)
-               (sequential? val))
-          (doseq [child val]
-            (validate-ref-child! attr child))
+          ;; Many-card ref slot — iterate children, each may be a
+          ;; map (nested entity), eid, or lookup tuple.
+          (= arity :many)
+          (when (sequential? val)
+            (doseq [child val]
+              (validate-ref-child! attr child)))
 
           ;; Normal scalar / non-ref path — validate against the schema.
           :else
