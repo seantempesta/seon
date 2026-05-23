@@ -52,11 +52,11 @@ Same query mechanism. Different intent. The discovery API does not care whether 
 
 ## What This Requires
 
-**Graph indexes full function schemas.** The ingest pipeline already extracts `:malli/schema` metadata and stores input/output specs as Datalevin refs (`:seon.fn/input-spec`, `:seon.fn/output-spec`) pointing to spec entities with `contains-keys` and `optional-keys`. Output-key discovery works via `gq/functions-with-output-key`. What is missing is the generalized discovery API (`gq/discover` or similar) that accepts arbitrary input/output key combinations. See [[orchestrator/issues/graph-missing-schema-index]].
+**Graph indexes full function schemas.** The ingest pipeline already extracts `:malli/schema` metadata and stores input/output specs as Datahike refs (`:seon.fn/input-spec`, `:seon.fn/output-spec`) pointing to spec entities with `contains-keys` and `optional-keys`. Output-key discovery works via `gq/functions-with-output-key`. What is missing is the generalized discovery API (`gq/discover` or similar) that accepts arbitrary input/output key combinations. See [[orchestrator/issues/graph-missing-schema-index]].
 
 **One discovery API.** A single query function (`gq/discover` or similar) that accepts input keys, output keys, or both, and returns ranked matches. The ranking algorithm is the same one renderer discovery already uses: count of matched required keys for specificity, namespace proximity for tiebreaking. This generalizes [[concepts/renderer-discovery]] from "find render functions" to "find any function."
 
-**One rendering system.** Currently two dispatch mechanisms coexist: the Datalevin-backed specificity resolver in `seon.render` and the multimethod-based dispatch in `seon.ns.view`. These must converge into the single discovery mechanism. The namespace view should be a render function discovered by the graph, not a special case with its own dispatch.
+**One rendering system.** Currently two dispatch mechanisms coexist: the graph-backed specificity resolver in `seon.render` and the multimethod-based dispatch in `seon.ns.view`. These must converge into the single discovery mechanism. The namespace view should be a render function discovered by the graph, not a special case with its own dispatch.
 
 **One SSE push path.** Three SSE push mechanisms exist (ctx watch-based, render-handler poll, deprecated `send!`). All should converge to a single push pattern that routes through the flow topology, making push observable and interceptable.
 

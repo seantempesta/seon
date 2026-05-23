@@ -13,9 +13,9 @@ Nothing beyond renderer discovery (see [[capabilities/renderer-discovery]]), whi
 
 ## Reactive Discovery via Data Changes
 
-Function discovery is not only demand-driven ("I need a function that does X") but also change-driven ("data changed, what functions should react?"). When a Datalevin transaction changes attributes on entities, the system fingerprints the change (which attributes, which entity shapes) and discovers functions whose input schemas match. Those functions execute automatically.
+Function discovery is not only demand-driven ("I need a function that does X") but also change-driven ("data changed, what functions should react?"). When a Datahike transaction changes attributes on entities, the system fingerprints the change (which attributes, which entity shapes) and discovers functions whose input schemas match. Those functions execute automatically.
 
-This is the same discovery mechanism applied reactively. See [[concepts/subscriptions]] for the reactive Datalevin subscription pattern. The discovery query is identical -- "find functions whose required input keys are a subset of the available data keys" -- but the trigger is a data mutation rather than a render request or explicit call.
+This is the same discovery mechanism applied reactively. See [[concepts/subscriptions]] for the reactive database subscription pattern. The discovery query is identical -- "find functions whose required input keys are a subset of the available data keys" -- but the trigger is a data mutation rather than a render request or explicit call.
 
 Combined with [[concepts/progressive-enhancement]], this means: new data flows through the system, and any namespace that has written a compatible function reacts automatically. Namespaces that haven't written handlers yet are unaffected. As agents add functions, the reactive surface grows organically.
 

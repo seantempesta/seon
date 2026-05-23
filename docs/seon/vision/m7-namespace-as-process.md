@@ -11,7 +11,7 @@ A namespace is still just functions, specs, and tests. That does not change. Wha
 
 ## The Scenario
 
-`seon.health.workout` starts with the default step function. It handles requests via `topology/request!`, persists ctx changes to Datalevin, and pushes SSE updates to connected browsers. Standard behavior, no custom code.
+`seon.health.workout` starts with the default step function. It handles requests via `topology/request!`, persists ctx changes to the database, and pushes SSE updates to connected browsers. Standard behavior, no custom code.
 
 A user starts logging workouts. The health agent notices a pattern: after every workout log, three other namespaces poll for the updated workout count. The agent decides to add a feed signal.
 
@@ -66,7 +66,7 @@ The topology builder discovers the var via `{:seon.flow/step true}` metadata in 
 
 **Feed signal outputs.** Namespaces declare feeds via `:seon.ns/feeds` metadata. The topology builder reads feed declarations, configures process outputs, and wires `:signal-select` for subscribing processes. Emission is via `flow/inject` to `[::flow/cast signal-id]` -- a first-class core.async.flow feature.
 
-**Reactive Datalevin subscriptions.** When a Datalevin transaction commits, the writer process fingerprints the change (which attributes, which entity shapes). A subscription router matches fingerprints against registered function schemas. Matching functions execute, and their outputs route through flow. See [[concepts/subscriptions]] for the full pattern.
+**Reactive database subscriptions.** When a Datahike transaction commits, the writer process fingerprints the change (which attributes, which entity shapes). A subscription router matches fingerprints against registered function schemas. Matching functions execute, and their outputs route through flow. See [[concepts/subscriptions]] for the full pattern.
 
 **Unified namespace model.** A single component represents "a namespace as a running entity" -- combining behavior (step function), state (ctx atom), metadata (feeds, subscriptions, specs), and lifecycle (start/stop/restore). Consumers interact with one system, not the current split between harness and ctx.
 
@@ -75,7 +75,7 @@ The topology builder discovers the var via `{:seon.flow/step true}` metadata in 
 ## What Already Exists
 
 - [[vision/capabilities/flow-topology]] -- complete. The routing backbone, request/reply, and process lifecycle are production.
-- [[vision/capabilities/namespace-persistence]] -- complete. Ctx atoms persist to Datalevin and restore on reload.
+- [[vision/capabilities/namespace-persistence]] -- complete. Ctx atoms persist to Datahike and restore on reload.
 - [[vision/capabilities/unified-context]] -- complete. Atom + validation + SSE push. The state container is ready.
 - The default step function (`namespace-step` in `harness.clj`) handles request forwarding, queue cap, overload replies, and observability. It is the foundation for expansion.
 - The 4-arity step function pattern is documented and production-tested across five step functions. See [[concepts/step-functions]].

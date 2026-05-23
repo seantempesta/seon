@@ -10,10 +10,10 @@ Every attribute and function in the system has a machine-readable contract. Sche
 ## What Exists
 
 - `schema/register!` is the sole registration point for all attribute schemas
-- Three custom types (`:inst`, `:seon.db/ref`, `:seon.flow/dynamic`) bridge Malli to Datalevin
+- Three custom types (`:inst`, `:seon.db/ref`, `:seon.flow/dynamic`) bridge Malli to Datahike
 - Runtime instrumentation validates inputs, outputs, and arity on every public function call
 - Startup consistency check bans `:any` and `[:maybe X]` from registered schemas
-- Generative pipeline roundtrip tests prove schemas survive Malli -> Datalevin -> Nippy -> back
+- Generative pipeline roundtrip tests prove schemas survive Malli -> Datahike -> Nippy -> back
 
 ## Gaps
 

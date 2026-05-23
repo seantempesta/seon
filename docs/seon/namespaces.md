@@ -23,7 +23,7 @@ Foundation: system lifecycle, configuration, schema, runtime registry.
 | `seon.runtime` | `src/seon/runtime.clj` | Unified runtime registry for all namespace instances (status, location, flows) | mature |
 | `seon.logging` | `src/seon/logging.clj` | Centralized Timbre logging configuration, file appenders | mature |
 | `seon.health` | `src/seon/health.clj` | System health checks (nREPL, pool, agents, resources) | stable |
-| `seon.ctx` | `src/seon/ctx.clj` | Unified stateful context for namespace instances (atom + Datalevin + SSE + Malli) | mature |
+| `seon.ctx` | `src/seon/ctx.clj` | Unified stateful context for namespace instances (atom + Datahike + SSE + Malli) | mature |
 | `seon.ctx.history` | `src/seon/ctx/history.clj` | Pure diff utilities for ctx history (deltas, undo/redo) | stable |
 
 ## Database Layer
@@ -33,13 +33,13 @@ See [[seon/components/database]] for full component documentation.
 | Namespace | File | Purpose | Status |
 |-----------|------|---------|--------|
 | `seon.db` | `src/seon/db.clj` | Sole database API — `transact!`, `query`, `pull-by-name`, flow routing | mature |
-| `seon.db.schema` | `src/seon/db/schema.clj` | Malli-to-Datalevin schema bridge, entity schema validation | mature |
+| `seon.db.schema` | `src/seon/db/schema.clj` | Malli-to-Datahike schema bridge, entity schema validation | mature |
 | `seon.db.tx` | `src/seon/db/tx.clj` | Transaction metadata (timestamps, caller, source) for every write | stable |
-| `seon.db.datalevin.conn` | `src/seon/db/datalevin/conn.clj` | Connection manager: caching, per-DB locking, Integrant component | mature |
-| `seon.db.datalevin.server` | `src/seon/db/datalevin/server.clj` | Datalevin server as external JVM process, adopt/start/health | mature |
-| `seon.db.datalevin.writer` | `src/seon/db/datalevin/writer.clj` | Infrastructure flow writer step-fn, serialized writes with retry | mature |
-| `seon.db.datalevin.reader` | `src/seon/db/datalevin/reader.clj` | Infrastructure flow reader step-fn, dispatches d/q, d/pull, etc. | mature |
-| `seon.db.datalevin.backup` | `src/seon/db/datalevin/backup.clj` | Backup coordination: pause writer, copy LMDB, resume, prune | stable |
+| `seon.db.datahike.conn-process` | `src/seon/db/datahike/conn_process.clj` | Connection manager: caching, per-DB locking, Integrant component | mature |
+| `seon.db.datahike.system` | `src/seon/db/datahike/system.clj` | Datahike Integrant system wiring (embedded LMDB store) | mature |
+| `seon.db.datahike.flow` | `src/seon/db/datahike/flow.clj` | Infrastructure flow writer/reader step-fns over Datahike | mature |
+| `seon.db.datahike.schema` | `src/seon/db/datahike/schema.clj` | Bridge translating registered Malli schemas to Datahike schema tx | mature |
+| `seon.db.datahike.tx-bus` | `src/seon/db/datahike/tx_bus.clj` | Transaction bus for tx-listener fan-out | mature |
 
 ## Flow Layer
 
@@ -50,9 +50,9 @@ core.async.flow routing backbone for cross-namespace calls and DB access.
 | `seon.flow.topology` | `src/seon/flow/topology.clj` | Reply router, `request!` entry point, topology wiring | mature |
 | `seon.flow.msg` | `src/seon/flow/msg.clj` | Message envelope schemas for wire protocol (Nippy serialization) | mature |
 | `seon.flow.status` | `src/seon/flow/status.clj` | Runtime status collection from registered flows (ping, throughput, errors) | stable |
-| `seon.flow.trace` | `src/seon/flow/trace.clj` | Flow event tracing and persistence to Datalevin for Observatory | stable |
+| `seon.flow.trace` | `src/seon/flow/trace.clj` | Flow event tracing and persistence to Datahike for Observatory | stable |
 | `seon.flow.pool` | `src/seon/flow/pool.clj` | Pre-warmed JVM pool for instant agent startup (LinkedBlockingQueue) | mature |
-| `seon.flow.agent-runner` | `src/seon/flow/agent_runner.clj` | Agent JVM entry point (-main), nREPL server, Datalevin connection | mature |
+| `seon.flow.agent-runner` | `src/seon/flow/agent_runner.clj` | Agent JVM entry point (-main), nREPL server, Datahike connection | mature |
 | `seon.flow.harness` | `src/seon/flow/harness.clj` | Orchestrator-side flow process for a namespace, routes calls to agent JVM via TCP | mature |
 | `seon.flow.harness.proxy` | `src/seon/flow/harness/proxy.clj` | Proxy namespace generation for transparent cross-namespace calls in agent JVMs | stable |
 | `seon.flow.harness.channel` | `src/seon/flow/harness/channel.clj` | Bidirectional TCP-to-core.async adapter (length-prefixed Nippy) | mature |
@@ -67,7 +67,7 @@ Knowledge graph: static analysis, ingestion, querying.
 | `seon.graph.scanner` | `src/seon/graph/scanner.clj` | Static source scanner (edamame) for schema/register! and def forms | mature |
 | `seon.graph.extract` | `src/seon/graph/extract.clj` | Unified extraction pipeline: edamame + clj-kondo, merges results | mature |
 | `seon.graph.analyzer` | `src/seon/graph/analyzer.clj` | Code analysis via clj-kondo (full project or incremental) | mature |
-| `seon.graph.ingest` | `src/seon/graph/ingest.clj` | Ingest analysis data into Datalevin (upsert + retract-stale pattern) | mature |
+| `seon.graph.ingest` | `src/seon/graph/ingest.clj` | Ingest analysis data into Datahike (upsert + retract-stale pattern) | mature |
 | `seon.graph.query` | `src/seon/graph/query.clj` | Datalog query API for knowledge graph (deps, call graph, discovery) | mature |
 | `seon.graph.context` | `src/seon/graph/context.clj` | Topological context builder for AI agents (recursive pull, linearized text) | stable |
 
@@ -77,7 +77,7 @@ Multi-format rendering system for displaying data in HTML, AI, and human context
 
 | Namespace | File | Purpose | Status |
 |-----------|------|---------|--------|
-| `seon.render` | `src/seon/render.clj` | Multi-format rendering with Datalevin-based renderer resolution | mature |
+| `seon.render` | `src/seon/render.clj` | Multi-format rendering with graph-based renderer resolution | mature |
 | `seon.render.default-page` | `src/seon/render/default_page.clj` | Default page template for namespaces with ctx but no custom renderer | stable |
 | `seon.render.code` | `src/seon/render/code.clj` | Code and documentation rendering from the knowledge graph | stable |
 | `seon.render.example` | `src/seon/render/example.clj` | Example usage of multi-format rendering | experimental |
@@ -130,7 +130,6 @@ AI provider integrations, agent lifecycle, persistence.
 | `seon.ai.claude` | `src/seon/ai/claude.clj` | Claude Code provider: schemas, lifecycle, message normalization | mature |
 | `seon.ai.claude.sdk` | `src/seon/ai/claude/sdk.clj` | Claude Code CLI process management (spawn, communicate) | mature |
 | `seon.ai.gemini` | `src/seon/ai/gemini.clj` | Native Clojure Gemini API client (text, grounding, code execution) | stable |
-| `seon.ai.datalevin` | `src/seon/ai/datalevin.clj` | Datalevin storage for AI sessions and messages (fire-and-forget) | stable |
 | `seon.ai.agent.log` | `src/seon/ai/agent/log.clj` | Structured per-agent logging to logs/agents/{session-id}.log | stable |
 | `seon.ai.agent.views` | `src/seon/ai/agent/views.clj` | View renderers for agent data types (HTML, AI, human formats) | stable |
 
@@ -150,9 +149,9 @@ REPL-specific utilities for interactive development.
 
 | Namespace | File | Purpose | Status |
 |-----------|------|---------|--------|
-| `seon.repl` | `src/seon/repl.clj` | REPL form router: classifies forms, stores in Datalevin, routes eval through flow topology | stable |
+| `seon.repl` | `src/seon/repl.clj` | REPL form router: classifies forms, stores in Datahike, routes eval through flow topology | stable |
 | `seon.repl.context` | `src/seon/repl/context.clj` | Context cockpit for AI agents (wraps graph context + render) | stable |
-| `seon.repl.graduate` | `src/seon/repl/graduate.clj` | Namespace graduation: Datalevin-stored forms to .clj file on disk | experimental |
+| `seon.repl.graduate` | `src/seon/repl/graduate.clj` | Namespace graduation: Datahike-stored forms to .clj file on disk | experimental |
 
 ## Dev Layer
 

@@ -5,11 +5,11 @@ tags: [vision, flow]
 ---
 # REPL Eval Pipeline
 
-Agents eval forms through a pipeline that validates, persists to Datalevin with versioning, and updates the code graph. Form history and current-forms queries work. The pipeline does not yet enforce the vision's constraints (schema presence, no `:any`, map-in/map-out) before accepting forms.
+Agents eval forms through a pipeline that validates, persists to Datahike with versioning, and updates the code graph. Form history and current-forms queries work. The pipeline does not yet enforce the vision's constraints (schema presence, no `:any`, map-in/map-out) before accepting forms.
 
 ## What Exists
 
-- `eval-form!` evaluates via flow, stores in Datalevin with versioning, updates code index
+- `eval-form!` evaluates via flow, stores in Datahike with versioning, updates code index
 - Form history and current-forms queries work
 - Eval routed through flow topology like all cross-boundary calls
 

@@ -10,7 +10,7 @@ Each agent operates in its own JVM with isolated nREPL and database connections.
 ## What Exists
 
 - Pre-warmed JVM pool with acquire/claim/release/dispose lifecycle
-- Each agent gets isolated nREPL + Datalevin connection
+- Each agent gets isolated nREPL + embedded Datahike connection
 - TCP-based cross-namespace routing via harness
 - Length-prefixed Nippy communication protocol
 - Health checks with grace period, auto-replenishment, stale cleanup

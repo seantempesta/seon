@@ -5,11 +5,11 @@ tags: [vision, schema]
 ---
 # Queryable Code Graph
 
-The system stores functions, schemas, call edges, and namespace dependencies as queryable data in Datalevin. This is the foundation for the vision's core primitive: given a data shape, find all functions that accept or produce it. The graph works today for renderer discovery; full schema-based composition discovery is not yet built.
+The system stores functions, schemas, call edges, and namespace dependencies as queryable data in Datahike. This is the foundation for the vision's core primitive: given a data shape, find all functions that accept or produce it. The graph works today for renderer discovery; full schema-based composition discovery is not yet built.
 
 ## What Exists
 
-- Graph stores functions, specs, call edges, namespace dependencies in Datalevin
+- Graph stores functions, specs, call edges, namespace dependencies in Datahike
 - `functions-with-output-key` powers renderer discovery
 - Spec linking via `:malli/schema` metadata works for registered spec keywords
 

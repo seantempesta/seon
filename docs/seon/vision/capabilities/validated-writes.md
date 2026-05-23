@@ -9,7 +9,7 @@ Every write to the database is validated against Malli schemas before it reaches
 
 ## What Exists
 
-- `db/transact!` validates every attribute and value via Malli before Datalevin
+- `db/transact!` validates every attribute and value via Malli before Datahike
 - Per-DB locking (ConcurrentHashMap) prevents concurrent-open LMDB corruption race
 - Writer step-fn retries on transient connection errors
 - Nippy wire protocol for inter-JVM TCP (replaced EDN)

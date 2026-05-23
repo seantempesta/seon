@@ -9,7 +9,7 @@ Tests run against isolated database state so they cannot interfere with each oth
 
 ## What Exists
 
-- `with-temp-conn` and `with-test-datalevin` fixtures
+- `with-temp-conn` and `with-test-db` / `with-test-db-fixture` fixtures (Datahike-on-`:memory`)
 - 19 test files bind `db/*direct-mode*` for flow bypass
 - 71 test files with approximately 843 deftest forms
 

@@ -20,7 +20,7 @@ The agent evals a form:
 
 ```
 
-The REPL interceptor catches this. It discovers all constraint functions matching `::eval/form -> ::constraint/result` in the graph and runs them. The constraints check: no `:any` in the schema? Types Datalevin-compatible? Generator produces valid samples? All pass. The schema is registered. `*ctx*` updates: `:seon.repl/schemas` gains an entry with status `:live`, 0 consumers.
+The REPL interceptor catches this. It discovers all constraint functions matching `::eval/form -> ::constraint/result` in the graph and runs them. The constraints check: no `:any` in the schema? Types Datalog-compatible? Generator produces valid samples? All pass. The schema is registered. `*ctx*` updates: `:seon.repl/schemas` gains an entry with status `:live`, 0 consumers.
 
 The agent defines a function:
 
@@ -37,7 +37,7 @@ The interceptor runs constraints: `:malli/schema` present? Schema concrete (no `
 
 The agent writes a test. The interceptor runs it immediately, records which instrumented functions were called, and updates `*ctx*`: the test appears in `:seon.repl/tests` with result `:pass`, and `analyze` gets `tested? true`.
 
-The agent calls `(seon/persist!)`. The pipeline checks: all functions tested? All schemas concrete? No orphan schemas? Yes. It generates the `(ns ...)` form from `*ctx*` requires, writes the `.clj` file, updates the Datalevin graph. Status transitions from `:live` to `:persisted`. Other agents can now discover these functions.
+The agent calls `(seon/persist!)`. The pipeline checks: all functions tested? All schemas concrete? No orphan schemas? Yes. It generates the `(ns ...)` form from `*ctx*` requires, writes the `.clj` file, updates the code graph in Datahike. Status transitions from `:live` to `:persisted`. Other agents can now discover these functions.
 
 Throughout, the agent's AI context is rendered from `*ctx*` -- composable per-key renderers produce XML sections. The agent sees its schemas, functions, tests, issues, and history without any special context-building code.
 
@@ -51,13 +51,13 @@ Throughout, the agent's AI context is rendered from `*ctx*` -- composable per-ke
 
 **Composable AI renderers.** Per-key renderer functions produce `{:seon.render/ai "..."}` with XML section delimiters. The ctx walk finds the most specific renderer for each key-value pair. Generic fallbacks handle anything without a specific renderer. Agents can override by writing more specific functions in their JVM.
 
-**Persist pipeline.** `(seon/persist!)` validates all requirements, generates the `(ns ...)` form from `*ctx*` state, writes the source file, updates the Datalevin graph, and transitions status from `:live` to `:persisted`. Like `git commit` -- explicit, agent-controlled.
+**Persist pipeline.** `(seon/persist!)` validates all requirements, generates the `(ns ...)` form from `*ctx*` state, writes the source file, updates the code graph in Datahike, and transitions status from `:live` to `:persisted`. Like `git commit` -- explicit, agent-controlled.
 
 **Two-state status model.** `:live` (in memory, this JVM only) and `:persisted` (on disk, in graph, discoverable). No intermediate states. Status is derived from current truth: has tests? schemas concrete? consumers exist?
 
 ## What Already Exists
 
-- [[vision/capabilities/repl-eval-pipeline]] -- partial. `eval-form!` evaluates via flow, stores in Datalevin with versioning. No constraint enforcement.
+- [[vision/capabilities/repl-eval-pipeline]] -- partial. `eval-form!` evaluates via flow, stores in Datahike with versioning. No constraint enforcement.
 - [[vision/capabilities/unified-context]] -- complete. Ctx atoms with validation, persistence, SSE push. The container is ready; the REPL-specific content is not.
 - [[vision/capabilities/renderer-discovery]] -- complete. Specificity-based function discovery. The mechanism for AI renderers is production-ready.
 - [[vision/capabilities/flow-topology]] -- complete. The routing backbone for eval requests exists.

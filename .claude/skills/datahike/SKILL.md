@@ -1,15 +1,15 @@
 ---
-name: datalevin
+name: datahike
 description: "Seon database patterns. Use when writing Datalog queries, transacting data, debugging empty results, working with schema/register!, db/transact!, db/query, or db/pull-by-name. Use when you see seon.db or seon.schema namespaces, or when queries return unexpected results or schema validation errors."
 ---
 
-# Datalevin -- Seon Database Patterns
+# Datahike -- Seon Database Patterns
 
 > See also: `docs/seon/components/database.md`, `docs/seon/components/schema-system.md`
 
 ## Architecture
 
-Datalevin runs as a **separate JVM process** on port 8898. It survives Seon restarts. All database access goes through the `seon.db` API, routed via core.async flow for serialized reads and writes. Schema-first: call `schema/register!`, Malli validates at transact time, and the bridge auto-derives Datalevin types.
+Datahike runs **embedded in-process** (LMDB on disk under `data/datahike/`). No separate JVM, no port to track -- the database lives in the Seon JVM and is managed by the `:seon.db/flow` Integrant component. All database access goes through the `seon.db` API, routed via core.async flow for serialized reads and writes. Schema-first: call `schema/register!`, Malli validates at transact time, and the bridge auto-derives Datahike schema.
 
 ## Quick Start
 
@@ -65,14 +65,16 @@ Annotate schemas with `:seon.db/` properties (never bare `:db/` properties):
 
 | You write | Bridge produces |
 |-----------|-----------------|
-| `:string`, `:int`, `:keyword`, `:boolean`, `:double`, `:uuid`, `:symbol` | Correct `:db.type/*` |
+| `:string`, `:int`, `:keyword`, `:boolean`, `:double`, `:uuid`, `:symbol` | Correct `:db/valueType` (`:db.type/*`) |
 | `:inst` | `:db.type/instant` |
 | `[:enum :a :b]` | Type inferred from enum values |
-| `[:vector X]` / `[:set X]` | `:db.cardinality/many` with inner type |
+| `[:vector X]` / `[:set X]` | `:db/cardinality :db.cardinality/many` with inner type |
 | Nested `[:map ...]` | `:db.type/ref` + `:db/isComponent true` |
 | `:seon.db/ref` | `:db.type/ref` |
 | `{:seon.db/identity true}` | `:db/unique :db.unique/identity` |
 | `{:seon.db/unique true}` | `:db/unique :db.unique/value` |
+
+The bridge lives in `src/seon/db/datahike/schema.clj` (`malli-map->datahike-schema`). In Datahike, schema is transacted as datoms (entity maps with `:db/ident`, `:db/valueType`, `:db/cardinality`, `:db/unique`), not passed as a plain map at connection time.
 
 ### Refs
 
@@ -80,7 +82,7 @@ Annotate schemas with `:seon.db/` properties (never bare `:db/` properties):
 ;; Register a ref attribute
 (schema/register! :myns/parent :seon.db/ref)
 
-;; Transact with a lookup ref (resolved by Datalevin automatically)
+;; Transact with a lookup ref (resolved by Datahike automatically)
 (db/transact! :myns [{:myns/id "child-1" :myns/parent [:myns/id "parent-1"]}])
 ```
 
@@ -116,7 +118,7 @@ All functions are in `seon.db`. Positional arguments (not map-in/map-out) -- thi
 - `tx-data` -- vector of entity maps or datom tuples
 - `opts` -- optional map with `:timeout-ms` (default 10000)
 
-Validates attributes against the Malli registry, validates values, auto-adds missing Datalevin schema, then routes through the flow writer.
+Validates attributes against the Malli registry, validates values, auto-transacts missing Datahike schema datoms, then routes through the flow writer.
 
 ### Read
 
@@ -207,13 +209,13 @@ The value does not match the registered schema. Check the type -- e.g., passing 
 
 Common causes:
 1. **Wrong db-name** -- querying `:seon.runtime` but data is in `:seon.ai`
-2. **Attribute typo** -- Datalevin silently matches nothing on unknown attributes
+2. **Attribute typo** -- Datahike silently matches nothing on unknown attributes
 3. **Type mismatch** -- querying `:myns/count 30` when stored as `30.0`
 4. **Stale snapshot** -- reading before a transaction is flushed (rare in flow mode)
 
 ### Nil Values
 
-Datalevin drops nils silently. Transacting `{:myns/name nil}` does nothing. To remove an attribute, retract explicitly:
+Datahike rejects nil attribute values. Transacting `{:myns/name nil}` will fail validation in `db/transact!`. To remove an attribute, retract explicitly:
 
 ```clojure
 (db/transact! :myns [[:db/retract eid :myns/name "old-value"]])
@@ -251,7 +253,7 @@ Bind `db/*direct-mode*` to bypass the infrastructure flow in tests:
   (db/query :myns '[:find ?n . :where [_ :myns/name ?n]]))
 ```
 
-See `test/seon/test_utils.clj` for `with-temp-conn` and `with-test-datalevin` helpers. See `/clojure-testing` skill for fixtures and patterns.
+See `test/seon/test_utils.clj` for `with-temp-conn` and `with-test-db` helpers. See `/clojure-testing` skill for fixtures and patterns.
 
 ## Key Files
 
@@ -259,16 +261,17 @@ See `test/seon/test_utils.clj` for `with-temp-conn` and `with-test-datalevin` he
 |------|---------|
 | `src/seon/db.clj` | Public database API (transact!, query, pull-by-name, etc.) |
 | `src/seon/schema.clj` | Schema registration (register!, registered?, schema-definition) |
-| `src/seon/db/schema.clj` | Malli-to-Datalevin bridge (malli-map->datalevin-schema) |
-| `src/seon/db/datalevin/writer.clj` | Flow writer process (serialized writes) |
-| `src/seon/db/datalevin/reader.clj` | Flow reader process (serialized reads) |
-| `src/seon/db/datalevin/server.clj` | Datalevin server Integrant component |
-| `src/seon/db/datalevin/conn.clj` | Connection manager (internal -- do not use directly) |
-| `src/seon/graph/ingest.clj` | Code graph ingestion into Datalevin |
+| `src/seon/db/schema.clj` | Schema-side helpers shared across DB layer |
+| `src/seon/db/datahike/schema.clj` | Malli-to-Datahike bridge (malli-map->datahike-schema) |
+| `src/seon/db/datahike/system.clj` | `:seon.db/flow` Integrant component (owns connections + tx-bus) |
+| `src/seon/db/datahike/flow.clj` | core.async.flow topology: writer / reader processes |
+| `src/seon/db/datahike/conn_process.clj` | Per-db connection process (serialized access) |
+| `src/seon/db/datahike/tx_bus.clj` | Transaction broadcast bus (tx listeners, triggers) |
+| `src/seon/graph/ingest.clj` | Code graph ingestion |
 | `src/seon/graph/query.clj` | Code graph queries |
-| `test/seon/test_utils.clj` | Test helpers (with-temp-conn, with-test-datalevin) |
+| `test/seon/test_utils.clj` | Test helpers (with-temp-conn, with-test-db) |
 
 ## When to Read References
 
-- `references/querying.md` -- aggregates, order/limit, rules, index lookups, performance tips
-- `references/datalevin-internals.md` -- raw Datalevin API, EAV model, schema format, connection model, debugging
+- `references/querying.md` -- aggregates, rules, predicates, nested pull, performance tips
+- `references/datahike-internals.md` -- raw Datahike API, EAV model, schema format, connection model, debugging

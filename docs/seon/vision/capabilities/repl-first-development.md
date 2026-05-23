@@ -20,7 +20,7 @@ The REPL pipeline is not standard nREPL eval. Every form is parsed, validated, a
 1. **Parse** -- read the form into a Clojure data structure.
 2. **Validate** -- check schema presence, concrete types, map-in/map-out (for `defn`). Reject invalid forms with clear errors.
 3. **Compile and execute** -- standard Clojure compilation.
-4. **Transact to graph** -- function metadata (name, schema, dependencies, docstring) persisted to Datalevin.
+4. **Transact to graph** -- function metadata (name, schema, dependencies, docstring) persisted to Datahike.
 5. **Persist to disk** -- the source form written to the `.clj` file, keeping filesystem and database in sync.
 6. **Run affected tests** -- schema-based test selection, not file-based.
 

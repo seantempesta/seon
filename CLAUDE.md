@@ -104,7 +104,7 @@ The personal domains (trading, health, finance) are test cases, not the point. T
 
 ### Core Infrastructure
 
-- **Datalevin** - Embedded Datalog database on LMDB. EAV datoms, Datomic-compatible queries, ACID transactions.
+- **Datahike** - Embedded Datalog database on LMDB. EAV datoms, Datomic-compatible queries, ACID transactions, bitemporal history.
 - **Malli** - Schema validation, generative testing, function contracts. The type system agents actually use.
 - **Integrant** - Component lifecycle. Clean start/stop semantics for the whole system.
 - **Datastar/SSE** - Real-time UI updates. Agents can see their work reflected immediately.
@@ -127,7 +127,7 @@ The personal domains (trading, health, finance) are test cases, not the point. T
 
 1. **Observe the live system.** Query the REPL. Establish current state with actual data, not assumptions.
 2. **Define what failure looks like.** If you can't articulate how you'd know your change is broken, you don't understand the problem well enough to fix it.
-3. **Read the source.** Read the existing code you're modifying. Read library source in `reference-code/` (Datalevin, Malli, Integrant, core.async — they're all there). Agents that guess instead of reading produce confident, wrong answers.
+3. **Read the source.** Read the existing code you're modifying. Read library source in `reference-code/` (Datahike, Malli, Integrant, core.async — they're all there). Agents that guess instead of reading produce confident, wrong answers.
 4. **Test assumptions in the REPL.** Before building a function that queries the graph, try the query manually. Before wrapping a library call, call it directly and see what it returns. A 30-second experiment prevents hours of debugging.
 5. **Ask Gemini when stuck.** Two functions, both in the `user` namespace:
    - `(user/search "question" :files ["relevant/file.clj"])` — Gemini with **web access**. Include `:files` so it sees your actual code.
@@ -143,7 +143,7 @@ The personal domains (trading, health, finance) are test cases, not the point. T
                      "src/seon/db/schema.clj"])
 
 ;; Model knowledge only (quick conceptual questions)
-(user/ask "Explain Datalog pull patterns in Datalevin")
+(user/ask "Explain Datalog pull patterns in Datahike")
 ```
 
 ### After writing code:
@@ -180,10 +180,11 @@ seon/
 │   ├── domains/              ; Domain modules (trading, health, etc.)
 │   └── web/                  ; HTTP server, SSE, handlers
 ├── reference-code/           ; Git submodules of dependency source
-│   ├── datalevin/            ; Datalevin source (read when stuck)
+│   ├── datahike/             ; Datahike source (read when stuck)
 │   ├── malli/                ; Malli source
 │   ├── integrant/            ; Integrant source
-│   └── core.async/           ; core.async + flow source
+│   ├── core.async/           ; core.async + flow source
+│   └── ...                   ; others (datastar, nippy, sci, etc.)
 └── docs/
     ├── prds/                 ; Feature specifications
     └── reference/            ; Technical reference docs
@@ -191,7 +192,7 @@ seon/
 
 ### Database Access
 
-`seon.db` is the **sole database API**. Only `src/seon/db/` and `src/seon/db/datalevin/` touch `datalevin.core` directly. Everything else uses `db/transact!`, `db/query`, `db/pull-by-name`, etc. with db-name keywords (`:seon`, `:seon.runtime`, or namespace keywords). Reader and writer flow processes serialize all access. Tests bind `db/*direct-mode*` to bypass the flow. See `docs/conventions.md` "Database Access" for patterns.
+`seon.db` is the **sole database API**. Only `src/seon/db/` and `src/seon/db/datahike/` touch `datahike.api` directly. Everything else uses `db/transact!`, `db/query`, `db/pull-by-name`, etc. with db-name keywords (`:seon`, `:seon.runtime`, or namespace keywords). Reader and writer flow processes serialize all access. Tests bind `db/*direct-mode*` to bypass the flow. See `docs/conventions.md` "Database Access" for patterns.
 
 ### Flow Topology (routing backbone)
 
@@ -227,7 +228,7 @@ As of 2026-05-16, for spec-01 `seon.*` API surfaces the V0 substrate uses **`.cl
 
 ## Data Rules
 
-All data flowing through Seon must be safe at every boundary: Malli validation, core.async channels, Nippy serialization, Datalevin transact/pull.
+All data flowing through Seon must be safe at every boundary: Malli validation, core.async channels, Nippy serialization, Datahike transact/pull.
 
 **Maps with namespaced keywords. Every key. No exceptions.** This is the load-bearing rule the rest of the system depends on:
 
@@ -246,7 +247,7 @@ All data flowing through Seon must be safe at every boundary: Malli validation, 
 
 ### Schema Registration
 
-`schema/register!` is the **single source of truth** for all attribute schemas. Register the type, and the system auto-derives everything needed for database storage. You never write Datalevin schema directly.
+`schema/register!` is the **single source of truth** for all attribute schemas. Register the type, and the system auto-derives everything needed for database storage. You never write Datahike schema directly.
 
 ```clojure
 ;; Inside src/seon/foo.clj — use :: for namespace-local keywords
@@ -258,7 +259,7 @@ All data flowing through Seon must be safe at every boundary: Malli validation, 
 (db/transact! :seon [{::id "abc" ::name "hello"}])
 ```
 
-See `/datalevin` skill for bridge details, persistence properties, refs, and banned types.
+See `/datahike` skill for bridge details, persistence properties, refs, and banned types.
 
 ---
 
@@ -268,7 +269,7 @@ See `/datalevin` skill for bridge details, persistence properties, refs, and ban
 
 | Skill | Invoke When |
 |-------|-------------|
-| `/datalevin` | Writing Datalog queries, transacting data, debugging empty results, working with `d/q` |
+| `/datahike` | Writing Datalog queries, transacting data, debugging empty results, working with `d/q` against the Datahike-backed `seon.db` |
 | `/datastar-web-ui` | SSE handlers, `data-*` attributes, streaming responses |
 | `/browser-automation` | Testing UI in browser, debugging frontend issues |
 | `/clojure-testing` | Test patterns: mocking, generators, fixtures, debugging failures |
@@ -306,7 +307,7 @@ Use `(user/reload)` or `(user/reset)` for reloading — they handle cleanup prop
 2. **Diagnose the root cause.** Fix the disease, not the symptoms.
 3. Try `(user/reload)` — often fixes code-level issues.
 4. Try `(user/reset)` — clean Integrant restart. Note: `resume-key` may preserve old state.
-5. **Last resort only:** `(user/restart-db!)` for Datalevin, `pkill -f seon.runner` for the Seon JVM. Document WHY.
+5. **Last resort only:** `(user/restart-db!)` for the database, `pkill -f seon.runner` for the Seon JVM. Document WHY.
 
 ---
 
@@ -378,78 +379,69 @@ Instrumentation is managed by Integrant (`:seon.dev/instrumentation`), survives 
 |-----------|---------|------------|
 | `logs/` | Debug logs, hook logs, agent activity | Ignored |
 | `tmp/` | Temporary test files, scratch data | Ignored |
-| `data/` | Datalevin database files | Ignored |
+| `data/` | Datahike database files (LMDB) | Ignored |
 
 ---
 
 ## Process Architecture (IMPORTANT)
 
-Seon runs as **multiple separate JVM processes**. They are independent — killing one does NOT require killing others.
+Datahike is **embedded** in the Seon JVM (in-process LMDB) — there is no separate database service to start, stop, or adopt. The Seon JVM and the database are the same process. Agent JVMs are independent processes that talk to Seon, not to a separate database.
 
-| Process | Port | PID File | What It Does |
-|---------|------|----------|-------------|
-| **Datalevin** | 8898 | `data/datalevin/server.pid` | Database server (LMDB). Survives Seon restarts. |
-| **Seon** | 7888 (nREPL), 8080 (HTTP) | — | Main app: orchestrator, web UI, agents |
-| **Caddy** | 3030 | — | HTTPS reverse proxy (optional) |
-| **Agent JVMs** | 7900-7902 | — | Isolated agent nREPL processes |
+| Process | Port | What It Does |
+|---------|------|-------------|
+| **Seon JVM** | 7888 (nREPL), 8080 (HTTP) | Main app — orchestrator, web UI, agents, and embedded Datahike (LMDB) |
+| **Caddy** | 3030 | HTTPS reverse proxy (optional) |
+| **Agent JVMs** | 7900-7902 | Isolated agent nREPL processes |
 
 ### Why This Matters
 
-Datalevin runs as an **external JVM process**, not embedded in Seon. This means:
-- **Killing Seon does NOT kill Datalevin.** Data is safe.
-- **Restarting Seon adopts the existing Datalevin** — no data loss, no LMDB corruption.
-- **`(user/reset)` keeps Datalevin alive** via Integrant suspend/resume.
-- **Agent JVMs connect to Datalevin over TCP** — they're unaffected by Seon restarts.
+- **The database lives inside Seon.** Killing the Seon JVM stops the database. Restarting Seon starts a fresh Datahike connection against the on-disk LMDB store — data persists across restarts because LMDB is on disk, not because a separate process survives.
+- **`(user/reset)` restarts the Datahike connection** via Integrant alongside the rest of the system. No suspend/resume gymnastics needed; the LMDB files on disk are the source of truth.
+- **Agent JVMs do not connect to the database directly.** They talk to Seon (over its REPL / message channels); Seon owns the sole connection.
 
 ### How to Check What's Running
 
 ```clojure
-(user/status)  ;; Shows all services with :mode (:started/:adopted), :pid, :ok
+(user/status)  ;; Shows all Integrant components with :mode (:started/:adopted), :ok
 ```
 
 ```bash
-lsof -ti :8898   # Datalevin PID
 lsof -ti :7888   # Seon nREPL PID
-cat data/datalevin/server.pid  # Recorded Datalevin PID
+lsof -ti :8080   # Seon HTTP PID
+ls data/datahike/  # On-disk LMDB store (no PID file — embedded)
 ```
 
 ### Surgical Process Management
 
-Each process is independent — only target the specific one you need to restart.
-
 | Want to... | Do this |
 |-----------|---------|
-| Restart Seon only | `pkill -f seon.runner` |
-| Restart Datalevin | `(user/restart-db!)` |
+| Reload code | `(user/reload)` |
+| Restart the whole system (incl. DB connection) | `(user/reset)` |
+| Restart just the DB component | `(user/restart-db!)` |
 | Full data wipe | `(user/db-reset!)` |
-| Clean restart of everything | `(halt)`, wait 3s, `(go)` |
-
-After killing Seon: just `./bin/run` — it adopts the still-running Datalevin.
+| Restart Seon JVM from scratch | `pkill -f seon.runner` then `./bin/run` |
 
 ### Recovery Procedures
 
 | Symptom | Diagnosis | Fix |
 |---------|-----------|-----|
-| "Connection refused" on :8898 | Datalevin died | `(user/restart-db!)` or `(user/reset)` (auto-starts new one) |
-| Seon JVM died but Datalevin alive | Normal — Datalevin survives | `./bin/run` (adopts existing) |
-| LMDB lock errors on start | Stale locks from previous crash | `(user/restart-db!)` — Datalevin manages its own locks |
-| Everything dead | Both processes killed | `./bin/run` (starts both fresh) |
-| Data corrupted | Rare — only from `kill -9` on Datalevin mid-write | `(user/db-reset!)` for clean slate |
+| Datahike connection errors after reload | Stale connection or schema change | `(user/restart-db!)` or `(user/reset)` |
+| LMDB lock errors on start | Previous JVM was killed mid-write | Usually self-heals on restart; if not, `(user/restart-db!)` |
+| Seon JVM dead | Crashed or killed | `./bin/run` — fresh start against existing LMDB store |
+| Data corrupted | Rare — usually from `kill -9` mid-write | `(user/db-reset!)` for clean slate |
 
 ### Log Files for Debugging
 
 ```bash
-tail -f logs/datalevin.log          # Datalevin process output (starts, stops, client connects)
-tail -f logs/app.log | grep -i datalevin  # Seon-side lifecycle (adopt, start, stop, health)
-cat logs/startup.log | grep -i datalevin  # Boot sequence
-cat data/datalevin/server.pid       # Current Datalevin PID
+tail -f logs/app.log | grep -iE 'datahike|db'  # DB lifecycle inside Seon
+cat logs/startup.log | grep -iE 'datahike|db'  # Boot sequence
 ```
 
 ---
 
 ## Logging
 
-Application: `logs/app.log` (Timbre). Database: `logs/datalevin.log`. Errors: `logs/error.log` (logback). Boot: `logs/startup.log`. Libraries: `logs/lib.log` (SLF4J).
+Application: `logs/app.log` (Timbre). Errors: `logs/error.log` (logback). Boot: `logs/startup.log`. Libraries: `logs/lib.log` (SLF4J).
 
 ---
 

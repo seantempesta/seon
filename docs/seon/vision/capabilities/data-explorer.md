@@ -20,7 +20,7 @@ Nothing. Both existing renderers output fully expanded collections with no inter
 
 ## Prior Art (from archive)
 
-The `docs/archive/xtdb-browser/` PRD has a complete UX design for entity-graph navigation that is directly reusable with Datalevin/Datalog equivalents:
+The `docs/archive/xtdb-browser/` PRD has a complete UX design for entity-graph navigation that is directly reusable with Datahike/Datalog equivalents:
 
 - **Forward reference navigation**: click entity IDs to drill into related entities
 - **Reverse reference lookup**: "what points here?" via Datalog query over EAV store

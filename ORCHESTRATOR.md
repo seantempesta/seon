@@ -121,7 +121,7 @@ The goal isn't to check boxes. It's to catch the gap between "agent says done" a
 
 ### Seon Agents (via MCP REPL)
 
-These get isolated nREPL + Datalevin database + Observatory UI monitoring. Agents receive `AGENT.md` automatically.
+These get isolated nREPL + isolated Datahike database + Observatory UI monitoring. Agents receive `AGENT.md` automatically.
 
 **Always check for existing agents first:**
 ```clojure
@@ -194,38 +194,37 @@ Each namespace should have a **steward** — see `docs/seon/concepts/namespace-s
 
 **Never blindly kill processes.** The orchestrator owns system restarts. Agents diagnose and report — they never restart. See `CLAUDE.md` "Process Architecture" for the full process map.
 
-### Separate Processes — Know What You're Killing
+### One Process, One Database
 
-Datalevin runs as an **external JVM** — separate from Seon. Killing Seon leaves Datalevin alive. This is by design.
+Datahike is **embedded** in the Seon JVM. There is no separate database service to manage — the Seon JVM owns the connection, the LMDB store lives on disk under `data/`, and starting the JVM opens a connection against it.
 
 ```bash
-lsof -ti :8898   # Datalevin PID (separate JVM)
 lsof -ti :7888   # Seon nREPL PID
-cat data/datalevin/server.pid  # Recorded Datalevin PID
+lsof -ti :8080   # Seon HTTP PID
+ls data/datahike/  # On-disk LMDB store
 ```
 
 ### Server
 
 ```bash
-./bin/run              # Start everything (adopts existing Datalevin if running)
-./bin/run-datalevin    # Start standalone Datalevin server (rarely needed — Seon starts it)
+./bin/run              # Start Seon (opens Datahike connection against on-disk store)
 ```
 
 ### Health Checks
 
 ```clojure
-(user/status)  ;; Full health: shows :pid, :mode (:adopted/:started), :ok for every service
+(user/status)  ;; Full health: shows :mode (:started/:adopted), :ok for every Integrant component
 ```
 ```bash
 curl http://localhost:8080/api/health
-cat logs/startup.log | grep -i datalevin
-tail -f logs/datalevin.log   ;; Datalevin's own output
+cat logs/startup.log | grep -iE 'datahike|db'
+tail -f logs/app.log | grep -iE 'datahike|db'
 ```
 
 ### Two-Phase Startup
 
 - **Phase 1 (~1.5s)**: nREPL (7888) + HTTP (8080) + schema registry + Tailwind + Claude SDK
-- **Phase 2 (~8s)**: Datalevin external JVM (8898) + connection manager + agent pool + code scanner
+- **Phase 2 (~8s)**: Datahike connection + flow topology + agent pool + code scanner
 
 If Phase 2 fails, Phase 1 stays alive — connect via nREPL and investigate.
 
@@ -233,32 +232,31 @@ If Phase 2 fails, Phase 1 stays alive — connect via nREPL and investigate.
 
 | Function | What it does |
 |----------|-------------|
-| `(user/restart-db!)` | Close connections → stop Datalevin → start fresh. Data preserved. |
-| `(user/db-reset!)` | Stop everything → delete all data → fresh start. **Destructive.** |
-| `(user/reset)` | Integrant restart. Datalevin stays alive (suspend/resume). |
+| `(user/restart-db!)` | Close + reopen the Datahike connection. Data preserved (LMDB on disk). |
+| `(user/db-reset!)` | Stop everything → delete on-disk LMDB store → fresh start. **Destructive.** |
+| `(user/reset)` | Integrant restart, including DB connection. |
 
 ### When Something Breaks
 
 **Step 1: Diagnose, don't kill.**
 ```clojure
-(user/status)  ;; Check :datalevin — :ok, :pid, :mode, :process-alive?
+(user/status)  ;; Check :datahike / DB component — :ok, :mode
 ```
 ```bash
 cat logs/startup.log
-tail -50 logs/app.log | grep -i datalevin
-tail -20 logs/datalevin.log
+tail -50 logs/app.log | grep -iE 'datahike|db'
 ```
 
 **Step 2: Understand WHY.** A component being unhealthy is a symptom. Debug the cause.
 
 **Step 3: Minimize blast radius.** Escalation ladder:
 1. Check `(user/agents)` — wait for running agents or interrupt gracefully
-2. `(user/reset)` — Integrant restart, Datalevin stays alive
-3. `(user/restart-db!)` — restart just the Datalevin server
-4. `pkill -f seon.runner` — kill Seon only, Datalevin survives, then `./bin/run`
-5. **Absolute last resort:** `pkill -f "java.*seon" && ./bin/run` — kills everything. Document WHY.
+2. `(user/reset)` — Integrant restart (rebuilds DB connection alongside the rest of the system)
+3. `(user/restart-db!)` — close + reopen the Datahike connection only
+4. `pkill -f seon.runner` then `./bin/run` — full JVM restart against existing on-disk store
+5. **Absolute last resort:** `(user/db-reset!)` — wipes the LMDB store. Document WHY.
 
-**Never `pkill -9 -f java`** — this kills ALL Java processes including Datalevin mid-write (LMDB corruption risk) and any agent JVMs.
+**Never `pkill -9 -f java`** — killing mid-write risks LMDB corruption, and you'd kill any agent JVMs as well.
 
 ---
 

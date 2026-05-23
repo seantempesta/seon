@@ -5,7 +5,7 @@ order: 1
 ---
 # M1: Reliable Runtime
 
-When this milestone is crossed, the system is a trustworthy execution environment. Agents run in isolated JVMs that cannot corrupt each other. All cross-boundary communication routes through a single flow topology. Datalevin survives application crashes. Startup is deterministic -- every component has a health gate, and the system either starts fully or fails with clear diagnostics. The pool self-heals without human intervention.
+When this milestone is crossed, the system is a trustworthy execution environment. Agents run in isolated JVMs that cannot corrupt each other. All cross-boundary communication routes through a single flow topology. The on-disk Datalog store survives application crashes. Startup is deterministic -- every component has a health gate, and the system either starts fully or fails with clear diagnostics. The pool self-heals without human intervention.
 
 An operator can kill the Seon JVM, restart it, and find all data intact. An agent can crash without affecting any other agent. The flow topology is the sole routing backbone -- nothing bypasses it.
 
@@ -16,13 +16,13 @@ An agent working on `seon.trading.signals` hits an infinite loop. Its JVM pegs a
 1. The pool's health monitor detects the unresponsive JVM after the grace period expires.
 2. The pool disposes of the dead JVM and marks the agent run as crashed in the runtime registry.
 3. A pre-warmed replacement JVM is already available. The pool's auto-replenishment had kept the target size filled.
-4. The operator (or orchestrator) relaunches the agent. It acquires a fresh JVM, connects to Datalevin over TCP, and picks up where it left off -- its session history is in the database, not in the dead process.
+4. The operator (or orchestrator) relaunches the agent. It acquires a fresh JVM, opens its embedded Datahike connection, and picks up where it left off -- its session history is in the database, not in the dead process.
 5. Meanwhile, `seon.health.metrics` and `seon.web` continued running without interruption. They never knew the trading agent died, because their flow processes are independent.
 
 ```clojure
 ;; The operator checks system health after the crash
 (user/status)
-;; => {:datalevin {:ok true, :mode :adopted, :pid 12345}
+;; => {:datahike {:ok true, :mode :started}
 ;;     :flow {:ok true, :processes 8}
 ;;     :pool {:ok true, :available 2, :in-use 1}
 ;;     :web {:ok true, :port 8080}}
@@ -35,11 +35,11 @@ The crash was contained. No data was lost. No other process was affected.
 
 **Flow as sole routing backbone.** Every cross-boundary call -- database writes, REPL evals, inter-namespace function calls -- routes through `topology/request!`. No side channel. The promise-register/inject/step/reply-router/deliver pattern is the only way data crosses process boundaries.
 
-**Datalevin as a separate process.** The database server runs in its own JVM on port 8898. Seon connects as a TCP client. Killing Seon does not kill Datalevin. Restarting Seon adopts the existing database. LMDB locks are managed by the server, not by clients.
+**Datahike as embedded LMDB store.** The database is embedded in the Seon JVM via Datahike — there is no separate database service. Persistence is guaranteed by the on-disk LMDB store under `data/`: killing the JVM and restarting it reopens the same store with full history intact. The LMDB process-local lock is owned by whichever JVM holds the connection; the connection manager ensures only one JVM at a time opens a given store.
 
-**Per-DB connection locking.** The connection manager uses `ConcurrentHashMap` with double-checked locking so that two threads never race to open the same database simultaneously. This prevents the LMDB corruption race that occurs when concurrent first-opens hit `open-kv` before the `VERSION` file is written.
+**Per-DB connection locking.** The connection manager uses `ConcurrentHashMap` with double-checked locking so that two threads never race to open the same database simultaneously. This prevents the LMDB corruption race that occurs when concurrent first-opens hit the store before initialization completes.
 
-**Deterministic two-phase startup.** Phase 1 brings up foundations (Datalevin, schema registry, connection manager) with no flow dependency. Phase 2 starts the flow topology with a sync barrier (`flow/ping` within 5 seconds), then the web server, code graph, and instrumentation. Failure at any point produces a clear diagnostic, not a half-started system.
+**Deterministic two-phase startup.** Phase 1 brings up foundations (Datahike connection, schema registry, connection manager) with no flow dependency. Phase 2 starts the flow topology with a sync barrier (`flow/ping` within 5 seconds), then the web server, code graph, and instrumentation. Failure at any point produces a clear diagnostic, not a half-started system.
 
 **Pool self-healing.** Pre-warmed JVMs with correct memory settings. Health checks with grace period. Automatic disposal of dead JVMs. Rate-limited auto-replenishment. The pool converges to its target size without human intervention.
 
@@ -47,9 +47,9 @@ The crash was contained. No data was lost. No other process was affected.
 
 ## What Already Exists
 
-- [[vision/capabilities/agent-isolation]] -- complete. Each agent gets an isolated JVM with nREPL and Datalevin connection. TCP routing via harness. Nippy wire protocol.
+- [[vision/capabilities/agent-isolation]] -- complete. Each agent gets an isolated JVM with nREPL and its own embedded Datahike connection. TCP routing via harness. Nippy wire protocol.
 - [[vision/capabilities/flow-topology]] -- complete. `topology/request!` is the universal entry point. Infrastructure flow handles writer, reader, REPL eval, reply-router.
-- [[vision/capabilities/database-platform]] -- complete. Datalevin as separate JVM. Connection manager with per-DB locking. Two-phase startup with adoption.
+- [[vision/capabilities/database-platform]] -- complete. Datahike embedded in-process. Connection manager with per-DB locking. Two-phase startup.
 - [[vision/capabilities/pool-self-healing]] -- complete. Health checks, auto-replenishment, rate limiting, correct JVM opts.
 - [[vision/capabilities/mcp-resilience]] -- complete. Async dispatch, cancellation, non-blocking init.
 - [[vision/capabilities/self-monitoring]] -- complete. Readiness gates, post-start observation, circuit breakers.
@@ -63,7 +63,7 @@ The crash was contained. No data was lost. No other process was affected.
 - [[orchestrator/issues/no-custom-namespace-behavior]] -- all namespaces get the same behavioral mold. No extension points for custom request handling or derived state.
 - [[orchestrator/issues/coupling-circular-deps]] -- three pairs of namespaces use `requiring-resolve` to mask circular dependencies.
 - [[orchestrator/issues/dead-agent-helpers]] -- dead code in agent/helpers.clj.
-- [[orchestrator/issues/raw-datalevin-conn]] -- agent_runner.clj bypasses `seon.db` for bootstrap connection.
+- [[orchestrator/issues/raw-datalevin-conn]] -- agent_runner.clj bypasses `seon.db` for bootstrap connection (issue filename retained for stable link; now applies to the Datahike-backed bootstrap).
 
 The infrastructure works. Agents are isolated, the database survives crashes, the pool self-heals. The gap is that the flow topology is not yet the *sole* routing backbone -- atom watches and multiple state registries create invisible side channels.
 
@@ -81,10 +81,10 @@ The infrastructure works. Agents are isolated, the database survives crashes, th
                     :seon.db/tx-data [{:seon.test/id "verify"}]})
 ;; Returns successfully -- write went through flow
 
-;; Kill and restart Seon, verify Datalevin survives
+;; Kill and restart the Seon JVM, verify the on-disk LMDB store survives
 ;; (shell: pkill -f seon.runner, then ./bin/run)
 (d/q '[:find ?e :where [?e :seon.test/id "verify"]]
-     (d/db (db/conn :seon)))
+     @(db/conn :seon))
 ;; Data is still there
 
 ;; Pool recovers from agent death
@@ -96,7 +96,7 @@ The infrastructure works. Agents are isolated, the database survives crashes, th
 
 ```
 
-**M1 is fully crossed when:** `(user/status)` shows all green AND there are zero code paths that write to Datalevin or push to SSE outside of `topology/request!`.
+**M1 is fully crossed when:** `(user/status)` shows all green AND there are zero code paths that write to the database or push to SSE outside of `topology/request!`.
 
 ## Dependencies
 

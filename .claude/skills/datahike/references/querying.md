@@ -2,7 +2,7 @@
 
 Loaded when agents need patterns beyond the basics in SKILL.md.
 
-All examples use `db/query` which wraps Datalevin's `d/q` with the named database.
+All examples use `db/query`, which wraps Datahike's `d/q` with the named database.
 
 ## Aggregates
 
@@ -16,17 +16,17 @@ Built-in aggregates: `count`, `count-distinct`, `sum`, `avg`, `min`, `max`, `med
 
 ## Order and Limit
 
-Datalevin extension (not standard Datalog):
+Datahike's query language does not support `:order-by` or `:limit` clauses inside `:find`. Sort and slice the result set in Clojure:
 
 ```clojure
-(db/query :myns '[:find ?name ?score
-                   :where [?e :myns/name ?name]
-                          [?e :myns/score ?score]
-                   :order-by [?score :desc]
-                   :limit 10])
+(->> (db/query :myns '[:find ?name ?score
+                       :where [?e :myns/name ?name]
+                              [?e :myns/score ?score]])
+     (sort-by second >)
+     (take 10))
 ```
 
-`:order-by` takes `[var :asc|:desc]` pairs. `:limit` and `:offset` work as expected.
+For very large result sets, narrow the `:where` clauses first (use predicate filters or index lookups) rather than fetching everything and trimming in memory.
 
 ## Rules
 
@@ -99,27 +99,29 @@ Wildcard pull: `(pull ?e [*])` returns all attributes.
 
 ## Index Lookups (Debugging)
 
-These use raw Datalevin calls -- for debugging and optimization only, not normal application code. Require `datalevin.core` directly.
+These use raw Datahike calls -- for debugging and optimization only, not normal application code. You need an actual conn, which lives inside the per-db `conn_process`; for one-off REPL debugging, get it via the relay or open a temporary direct conn in a test.
 
 ```clojure
-(require '[datalevin.core :as d])
+(require '[datahike.api :as d])
 
-;; All datoms for entity 1 (requires raw conn, not db-name)
-(d/datoms (d/db conn) :eav 1)
+;; All datoms in an index (eavt/aevt/avet). Pass a db value, not a conn.
+(d/datoms @conn {:index :eavt :components [1]})        ;; all datoms for entity 1
+(d/datoms @conn {:index :aevt :components [:myns/name]}) ;; all datoms by attr
 
-;; Count datoms matching pattern (nil = wildcard)
-(d/count-datoms (d/db conn) nil :myns/name nil)
+;; Seek to a specific position
+(d/seek-datoms @conn {:index :avet :components [:myns/score 25]})
 
-;; Range query on typed attribute
-(d/index-range (d/db conn) :myns/score 25 50)
+;; Pull at the raw API
+(d/pull @conn '[*] 1)
 ```
 
-Use `d/count-datoms` instead of `(count (d/q ...))` when only counts are needed.
+For history-aware lookups, wrap the db: `(d/datoms (d/history @conn) {:index :eavt :components [1]})`.
 
 ## Performance Tips
 
-- **Batch inserts** in single `db/transact!` calls (not one entity per call)
-- **Define schema** for attributes used in range queries (auto-derived from `schema/register!`)
-- **Use scalar result form** (`.`) when expecting one result -- avoids wrapping in sets
-- **Prefer pull** over multiple queries when fetching related entities
-- Datalevin has two indexes: `:eav` and `:ave` (not four like Datomic)
+- **Batch inserts** in single `db/transact!` calls (not one entity per call).
+- **Declare schema** for every attribute (already enforced by `db/transact!`).
+- **Use scalar result form** (`.`) when expecting one result -- avoids wrapping in sets.
+- **Prefer pull** over multiple queries when fetching related entities.
+- **Avoid full-index scans** -- start `:where` clauses with the most selective constraint (a known entity id or a unique attribute value) so Datahike picks a small AEVT/AVET slice.
+- **Skip history when you don't need it** -- queries against `@conn` are against the current db (no history overhead). Only use `(d/history @conn)` when you actually need retracted datoms.

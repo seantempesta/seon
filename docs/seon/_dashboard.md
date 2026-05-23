@@ -17,7 +17,7 @@ Branch: **`webassembly-agents`**.
 - **Pod-host workspace:** `pod-host/wasm-tauri/` (Rust + WIT, imported 2026-05-20)
 - **Dev loop:** [[../cljs-dev-loop]] (V0 / pre-WASM). WASM dev loop is documented in the spike doc.
 
-The component tables below describe the **older JVM substrate** (Datalevin + Integrant + flow topology). That substrate is paused, not deleted — its files still live under `src/seon/*.clj`. The active development is the CLJS pod + Phase 3 WASM-Tauri work, not the JVM seat.
+The component tables below describe the **JVM substrate** (Datahike + Integrant + flow topology). That substrate is paused as the active feature track but not deleted — its files still live under `src/seon/*.clj`. The active development is the CLJS pod + Phase 3 WASM-Tauri work, not the JVM seat.
 
 ## How to Use This Vault
 

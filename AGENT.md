@@ -6,7 +6,7 @@ You are a **subagent** working on the Seon project. The orchestrator (another Cl
 
 - **Session ID**: Check your MCP config - the `SEON_SESSION_ID` env var is your 4-char hex ID
 - **Namespace**: Your default REPL namespace (doesn't restrict your work - switch namespaces freely)
-- **Isolated Environment**: You have your own nREPL (unique port) and Datalevin database
+- **Isolated Environment**: You have your own nREPL (unique port) and Datahike database
 
 ## CRITICAL: Scope Is Sacred
 
@@ -116,12 +116,10 @@ Search returns a plain text string, auto-saved like all REPL output. Truncated r
 
 ### Process Architecture (Know What Exists)
 
-Seon runs as **multiple separate JVM processes**:
-- **Datalevin** (port 8898) — Database server, separate JVM, survives Seon restarts
-- **Seon** (ports 7888/8080) — Main app, orchestrator, your REPL host
-- **Agent JVMs** (ports 7900+) — Isolated nREPL processes, one per agent (including you)
+- **Seon JVM** (ports 7888/8080) — Main app, orchestrator, embedded Datahike database (in-process LMDB), and the REPL host the orchestrator uses
+- **Agent JVMs** (ports 7900+) — Isolated nREPL processes, one per agent (including you). Each agent has its own Datahike instance for sandboxed work.
 
-You connect to Datalevin over TCP. If Datalevin dies, your connection will fail — but that's the orchestrator's problem to fix, not yours.
+Datahike is **embedded** in whichever JVM owns it — there is no separate database service. If your agent JVM's Datahike connection fails, that's your problem to diagnose; if the orchestrator's Seon JVM has DB trouble, it's the orchestrator's problem.
 
 ### If Something Breaks During Your Work
 
@@ -130,41 +128,41 @@ You connect to Datalevin over TCP. If Datalevin dies, your connection will fail 
 1. **Stop your current task.** A broken system is the priority.
 2. **Check health:**
    ```clojure
-   (user/status)    ;; Shows :datalevin with :ok, :pid, :mode, :process-alive?
+   (user/status)    ;; Shows all Integrant components with :mode, :ok
    ```
 3. **Understand WHY it's broken.** Read logs, check errors:
    ```bash
-   tail -50 logs/app.log        # Recent application errors
-   grep ERROR logs/app.log      # Error summary
-   tail -20 logs/datalevin.log  # Datalevin server's own output
-   cat logs/startup.log         # Boot sequence (if recent restart)
+   tail -50 logs/app.log                       # Recent application errors
+   grep ERROR logs/app.log                     # Error summary
+   tail -50 logs/app.log | grep -iE 'datahike|db'  # DB lifecycle inside the JVM
+   cat logs/startup.log                        # Boot sequence (if recent restart)
    ```
 4. **Report to the orchestrator** with:
-   - What broke (specific error, not "Datalevin isn't working")
+   - What broke (specific error, not "the database isn't working")
    - What you think caused it (your edit? resource exhaustion? external?)
    - Whether your task can continue or is blocked
    - Suggested fix if you have one
 
 **Example of good reporting:**
-> "Datalevin connection refused on port 8898. `(user/status)` shows `:datalevin {:ok false, :pid "12345", :process-alive? false}` — the Datalevin process died. My edit to `seon.db.schema` may have triggered it. I've reverted my edit. The orchestrator should run `(user/restart-db!)` to bring it back."
+> "Datahike transact throws `:db.error/incompatible-schema` after my edit to `seon.db.schema`. `(user/status)` shows the DB component is `:ok true` but the schema reload appears to have left an inconsistent state. I've reverted my edit. The orchestrator should run `(user/restart-db!)` to reopen the connection cleanly."
 
 **Example of bad reporting:**
-> "Datalevin isn't working. Try killing and restarting it."
+> "The database isn't working. Try killing and restarting it."
 
 ### What You CAN Do
 
 ```clojure
 (user/reload)  ; Fast code reload (safe, doesn't restart system)
-(user/status)  ; Check system health — shows all processes with PIDs
+(user/status)  ; Check system health — shows all components with their modes
 ```
 
 ### What You MUST NOT Do
 
 - `(user/reset)` — restarts the Seon system, disrupts other agents
 - `pkill` anything — kills processes you don't own
-- `kill` any PID on ports 8898, 7888, 8080 — those belong to the system
-- Delete `data/datalevin/` — destroys all databases and the running server's data
-- Run `./bin/run` or `./bin/run-datalevin` — the orchestrator manages process lifecycle
+- `kill` any PID on ports 7888, 8080 — those belong to the orchestrator's Seon JVM
+- Delete `data/datahike/` or any other on-disk store — destroys persisted data
+- Run `./bin/run` — the orchestrator manages process lifecycle
 
 ---
 
@@ -185,7 +183,7 @@ You have access to project-specific skills that encode domain knowledge. **Invok
 | Skill | When to Use |
 |-------|-------------|
 | `/clojure-testing` | Running tests, test failures, kaocha, mocking |
-| `/datalevin` | Datalog queries, transacting data, schema, connections |
+| `/datahike` | Datalog queries, transacting data, schema, connections against the Datahike-backed `seon.db` |
 | `/datastar-web-ui` | SSE handlers, `data-*` attributes, streaming |
 | `/browser-automation` | Testing UI in browser |
 
@@ -227,7 +225,7 @@ This pattern is recursive. If the orchestrator decomposes and launches a sub-age
 Your training rewards task completion. Override that instinct. It is better to spend 60% of your time reading and testing in the REPL and 40% writing code than the reverse. Agents who charge ahead and declare victory are the most expensive kind of wrong.
 
 **Before writing any code:**
-- **Read the source** you're about to modify. Read the source of libraries you're using (`reference-code/`). Don't guess how Datalevin refs work — read `reference-code/datalevin/`. Don't guess how Integrant resume works — read `reference-code/integrant/`.
+- **Read the source** you're about to modify. Read the source of libraries you're using (`reference-code/`). Don't guess how Datahike refs work — read `reference-code/datahike/`. Don't guess how Integrant resume works — read `reference-code/integrant/`.
 - **Test your assumptions in the REPL.** Before building a function that queries the graph, try the query manually. Before wrapping a library call, call it directly and see what it returns. A 30-second experiment prevents hours of debugging.
 - **Define what failure looks like.** Before implementing, ask: "How would I know if this is broken?" If you can't answer that, you don't understand the problem well enough.
 
@@ -391,7 +389,7 @@ If you repeatedly fail to edit a function—even when trying to Write the whole 
 
 - `logs/` - Debug logs (gitignored)
 - `tmp/` - Scratch files (gitignored)
-- `data/` - Datalevin databases (gitignored)
+- `data/` - Datahike databases / LMDB stores (gitignored)
 
 Never use `/tmp` or system directories.
 
@@ -401,12 +399,12 @@ Never use `/tmp` or system directories.
 
 1. **Stop your task** — a broken system takes priority over feature work
 2. **Check `(user/status)`** — shows every process with PID, alive status, and health
-3. **Read logs** — `tail -50 logs/app.log`, `tail -20 logs/datalevin.log`
+3. **Read logs** — `tail -50 logs/app.log`, `tail -50 logs/app.log | grep -iE 'datahike|db'`
 4. **Try `(user/reload)`** — often fixes code-level issues without touching the system
 5. **Diagnose the root cause** — WHY is it broken? Your edit? Resource leak? External?
 6. **If you caused it, revert your change** — `git checkout -- path/to/file`
 7. **Report to the orchestrator** with specifics — see the "CRITICAL" section above
 
-**Never attempt to restart services yourself.** Never `pkill`. Never delete data directories. Never kill PIDs on ports. The orchestrator manages all process lifecycle — Seon, Datalevin, and agents are separate JVMs with specific shutdown procedures.
+**Never attempt to restart services yourself.** Never `pkill`. Never delete data directories. Never kill PIDs on ports. The orchestrator manages all process lifecycle — the Seon JVM (with embedded Datahike) and agent JVMs are separate processes with specific shutdown procedures.
 
 **Never attempt to restart services yourself.** Never `pkill`. Never delete data directories. The orchestrator manages the system lifecycle and will coordinate restarts to minimize impact on other running agents.

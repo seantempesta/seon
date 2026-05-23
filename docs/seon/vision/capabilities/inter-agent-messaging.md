@@ -5,7 +5,7 @@ tags: [vision, agent, flow]
 ---
 # Inter-Agent Messaging
 
-Agents communicate asynchronously via typed mailboxes. Feature requests, bug reports, schema change notifications, and status updates are Malli-spec'd maps that persist in Datalevin and survive restarts. This closes the feedback loop where one agent's change triggers another agent's response.
+Agents communicate asynchronously via typed mailboxes. Feature requests, bug reports, schema change notifications, and status updates are Malli-spec'd maps that persist in Datahike and survive restarts. This closes the feedback loop where one agent's change triggers another agent's response.
 
 ## Event-Driven Message Routing
 
@@ -26,7 +26,7 @@ The agent-fallback behavior is central to the [[concepts/progressive-enhancement
 | Upstream schema changed | `::schema/change-notification` | Log warning | Migrate local data, update dependents |
 | Test failed in dependent | `::test/failure-notification` | Add to notifications list | Auto-investigate, attempt fix |
 | User clicked UI element | `::ui/click-event` | No-op | Custom interaction logic |
-| Data changed in Datalevin | `::db/change-notification` | Ignore | Recalculate derived state |
+| Data changed in the database | `::db/change-notification` | Ignore | Recalculate derived state |
 
 ### Smart Defaults Philosophy
 

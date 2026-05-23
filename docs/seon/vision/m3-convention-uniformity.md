@@ -5,7 +5,7 @@ order: 3
 ---
 # M3: Convention Uniformity
 
-When this milestone is crossed, every public function in the codebase follows the same shape: one map in, one map out, all keys namespaced, `:malli/schema` metadata on every `defn`. Every schema uses concrete types -- no `:any`, no `[:maybe X]`, no inline Datalevin properties. The code graph can index everything because everything follows the same conventions.
+When this milestone is crossed, every public function in the codebase follows the same shape: one map in, one map out, all keys namespaced, `:malli/schema` metadata on every `defn`. Every schema uses concrete types -- no `:any`, no `[:maybe X]`, no inline Datalog properties. The code graph can index everything because everything follows the same conventions.
 
 This is not cleanup. This is the foundational work that makes M4 possible. Without uniform conventions, the graph indexes an incomplete picture. Function discovery queries return partial results or nothing at all. The vision's core primitive -- "given a data shape, find functions" -- requires that every function *has* a declared shape to find.
 
@@ -52,7 +52,7 @@ Every key is namespaced. Every type is concrete. The agent knows exactly what to
 
 **No overlapping implementations.** One way to build AI context (not three). One way to wrap clj-kondo analysis (not three). One way to render status badges (not three). One way to push SSE updates (not three). When two implementations exist for the same purpose, one is chosen and the other is deleted.
 
-**Graph indexes function schemas.** The code graph ingest pipeline already extracts `:malli/schema` metadata and stores input/output specs as Datalevin refs (`:seon.fn/input-spec`, `:seon.fn/output-spec` pointing to `:seon.spec/*` entities with `:seon.spec/contains-keys`). Output-key discovery works via `gq/functions-with-output-key`. What is missing is the generalized discovery API: `functions-with-input-key` and the unified `gq/discover` that accepts arbitrary input/output key combinations.
+**Graph indexes function schemas.** The code graph ingest pipeline already extracts `:malli/schema` metadata and stores input/output specs as Datahike refs (`:seon.fn/input-spec`, `:seon.fn/output-spec` pointing to `:seon.spec/*` entities with `:seon.spec/contains-keys`). Output-key discovery works via `gq/functions-with-output-key`. What is missing is the generalized discovery API: `functions-with-input-key` and the unified `gq/discover` that accepts arbitrary input/output key combinations.
 
 ## What Already Exists
 
@@ -67,7 +67,7 @@ The issue list for M3 is long because convention uniformity touches every file.
 
 **Schema gaps:**
 
-- [[orchestrator/issues/missing-malli-schema]] -- many public functions lack `:malli/schema`, especially in `ai/datalevin.clj`. This is the single biggest blocker.
+- [[orchestrator/issues/missing-malli-schema]] -- many public functions lack `:malli/schema`. This is the single biggest blocker.
 - [[orchestrator/issues/map-in-map-out-compliance]] -- many public functions use positional arguments.
 - [[orchestrator/issues/graph-missing-schema-index]] -- the graph does not index function schemas. Discovery cannot work without this.
 - [[orchestrator/issues/any-in-render-html]] -- render response schemas use `:any`.

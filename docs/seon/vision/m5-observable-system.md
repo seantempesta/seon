@@ -7,7 +7,7 @@ order: 5
 
 When this milestone is crossed, any part of the running system is visible in real time -- agents, namespaces, schemas, data, and health -- through a unified, terminal-dense interface. Humans see it in the browser. Agents see it through rendered context. The same data, two formats, one discovery mechanism. There is no "hidden state" in Seon.
 
-An operator opens the dashboard and sees everything: which namespaces are alive, which agents are working, what schemas exist, what data is stored, and whether the system is healthy. They can drill into any namespace and see its functions, its ctx atom, its dependencies, and its test results. They can browse schemas by namespace, see which functions consume them, and inspect entity relationships. They can explore live data in Datalevin -- expanding nested structures, following entity references, searching by attribute.
+An operator opens the dashboard and sees everything: which namespaces are alive, which agents are working, what schemas exist, what data is stored, and whether the system is healthy. They can drill into any namespace and see its functions, its ctx atom, its dependencies, and its test results. They can browse schemas by namespace, see which functions consume them, and inspect entity relationships. They can explore live data in the database -- expanding nested structures, following entity references, searching by attribute.
 
 None of this is hardcoded. Every view is a function discovered by schema shape. Adding a new view for a new data type means writing a function with the right `:malli/schema` -- the system finds it.
 
@@ -17,7 +17,7 @@ An agent writes a new function in `seon.trading.signals`. The code graph scanner
 
 The operator clicks "Schemas" in the nav. The schema browser shows all registered schemas grouped by namespace. Under `seon.trading.signals`, the new function's input and output schemas appear. Clicking a schema shows its Malli definition, which functions accept it as input, which produce it as output, and which entity attributes use it.
 
-The operator clicks "Data" and queries `:seon.trading.signals/ticker`. Datalevin results appear as an interactive table -- nested maps collapse, entity references are clickable links that navigate to the referenced entity. Large collections paginate.
+The operator clicks "Data" and queries `:seon.trading.signals/ticker`. Datalog results appear as an interactive table -- nested maps collapse, entity references are clickable links that navigate to the referenced entity. Large collections paginate.
 
 Throughout all of this, SSE pushes updates through a single flow-based mechanism. No polling. No three-way split between ctx watches, content-hash handlers, and flow SSE. One push path.
 
@@ -29,7 +29,7 @@ Throughout all of this, SSE pushes updates through a single flow-based mechanism
 
 **Schema browser.** Routes at `/schemas` and `/schemas/{namespace}`. Data API already exists (`registered-schemas`, `schemas-in-namespace`). Web layer renders schema definitions, consumer functions, and entity relationships.
 
-**Data explorer.** Routes at `/data` and `/data/{db-name}`. Interactive rendering: expand/collapse for nested structures, truncation with expand-on-demand, clickable entity references. Datalevin query interface for ad-hoc exploration.
+**Data explorer.** Routes at `/data` and `/data/{db-name}`. Interactive rendering: expand/collapse for nested structures, truncation with expand-on-demand, clickable entity references. Datalog query interface for ad-hoc exploration.
 
 **Dashboard density.** The dashboard at `/` shows system liveness, namespace tree with inline status indicators, agent activity summary, and health for all components. Follows the Phosphor Terminal design system: `text-xs`, `p-3`, monospace, warm colors.
 
@@ -54,7 +54,7 @@ Throughout all of this, SSE pushes updates through a single flow-based mechanism
   (assert (= 200 (:status resp)))
   (assert (str/includes? (:body resp) "seon.trading.signals/ticker")))
 
-;; Data explorer renders Datalevin query results
+;; Data explorer renders Datalog query results
 (let [resp (http/get "http://localhost:8080/data/seon")]
   (assert (= 200 (:status resp))))
 

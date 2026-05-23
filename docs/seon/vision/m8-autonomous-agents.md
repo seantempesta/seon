@@ -72,7 +72,7 @@ Now the router finds this handler for the next schema change notification. The s
 
 **Cross-agent visibility.** When agent A persists a function, agent B sees it immediately via the graph. Schema changes trigger notifications to dependent namespaces. The feedback loop is closed: A writes code, B is notified, B adapts, A sees B's adaptation.
 
-**Inter-agent messaging.** Agents communicate through typed mailboxes. Feature requests, bug reports, compatibility questions -- all are Malli-specced maps that persist in Datalevin, survive restarts, and deliver through flow. No out-of-band communication.
+**Inter-agent messaging.** Agents communicate through typed mailboxes. Feature requests, bug reports, compatibility questions -- all are Malli-specced maps that persist in Datahike, survive restarts, and deliver through flow. No out-of-band communication.
 
 ## What Already Exists
 
