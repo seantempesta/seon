@@ -39,6 +39,21 @@ bin/seon adopt <name> <pid> Register a manually-started PID under <name>
 | `cljs-watch` | `clj -M:cljs watch client` | `logs/cljs-watch.log` | "Build completed" appears in log |
 | `jvm` | `./bin/run` | `logs/jvm.log` | `logs/app.log` shows "Server started" |
 
+### IMPORTANT — pod ↔ cljs-watch dependency
+
+**`cljs-watch` must be running BEFORE the pod is built or restarted** for MCP eval (`mcp__seon_cljs__eval`) to reach the pod. Reason: shadow-cljs only injects the websocket-based REPL runtime client (`shadow.cljs.devtools.client.node`) into the bundle when compilation runs under a **watcher**. A one-shot `clj -M:cljs compile client` produces a NO-REPL bundle — pod boots and runs, but MCP eval against it fails with "No available JS runtime."
+
+**Don't run `clj -M:cljs compile client` for the pod.** Always go through `bin/seon start cljs-watch` (or restart it after build config changes) and let watch own the bundle. The supervisor enforces this implicitly — `bin/seon start pod` doesn't trigger a build itself.
+
+Recovery if a manual `compile` has overwritten the bundle:
+
+```bash
+bin/seon restart cljs-watch  # forces full rebuild with ws client
+bin/seon restart pod         # pod loads the REPL-able bundle
+```
+
+Full root-cause analysis: [[../prds/agent-runtime/research/shadow-node-runtime-2026-05-23]].
+
 Add a new process by editing the `process_command` case branch at the top of `bin/seon` (plus `process_ready_hint` and `all_processes` if you want it in default-status output).
 
 ## Concurrency model
