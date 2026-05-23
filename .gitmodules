@@ -28,9 +28,6 @@
 [submodule "reference-code/datastar"]
 	path = reference-code/datastar
 	url = https://github.com/starfederation/datastar.git
-[submodule "reference-code/portal"]
-	path = reference-code/portal
-	url = https://github.com/djblue/portal.git
 [submodule "reference-code/reveal"]
 	path = reference-code/reveal
 	url = https://github.com/vlaaad/reveal.git
@@ -43,9 +40,6 @@
 [submodule "reference-code/core.async"]
 	path = reference-code/core.async
 	url = https://github.com/clojure/core.async.git
-[submodule "reference-code/sci"]
-	path = reference-code/sci
-	url = https://github.com/babashka/sci
 [submodule "reference-code/rewrite-clj"]
 	path = reference-code/rewrite-clj
 	url = https://github.com/clj-commons/rewrite-clj.git
@@ -64,9 +58,6 @@
 [submodule "reference-code/nippy"]
 	path = reference-code/nippy
 	url = https://github.com/taoensso/nippy.git
-[submodule "reference-code/fressian"]
-	path = reference-code/fressian
-	url = https://github.com/Datomic/fressian.git
 [submodule "reference-code/test.check"]
 	path = reference-code/test.check
 	url = https://github.com/clojure/test.check.git
@@ -85,3 +76,9 @@
 [submodule "reference-code/konserve-lmdb"]
 	path = reference-code/konserve-lmdb
 	url = https://github.com/replikativ/konserve-lmdb.git
+[submodule "reference-code/datastar-clojure"]
+	path = reference-code/datastar-clojure
+	url = https://github.com/starfederation/datastar-clojure.git
+[submodule "reference-code/hyperlith"]
+	path = reference-code/hyperlith
+	url = https://github.com/andersmurphy/hyperlith.git
