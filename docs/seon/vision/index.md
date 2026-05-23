@@ -3,324 +3,191 @@ type: vision
 tags: [vision, index]
 status: active
 ---
-
+	B
 # Seon Vision
 
-## The Thesis
+**A personal AI that can do anything for you, because it can write code.**
 
-AI agents will write most software. The question isn't *if* but *how well*.
+Seon — from the archaic "to see", and from the Seons of Brandon Sanderson's Cosmere: sentient, luminous beings bonded to their humans — is built around a different premise. The right shape for an AI assistant is not a chat window and a fixed catalog of tools, but a long-running runtime that grows alongside you. You ask Seon for something; Seon writes the code that does it; the code lives in Seon from then on; the next thing you ask uses what was built last time. The runtime accretes. Nothing leaks. The whole thing runs on your hardware, under your control, in your name.
 
-Current approaches are broken: agents bolt onto codebases designed for humans, hallucinate interfaces, have no memory, step on each other, and ship broken code. The result is increasingly fragmented codebases with mounting technical debt.
+This document is the long form. The [README](../../../README.md) is the elevator pitch; what follows is the load-bearing argument, the lineage, the architecture in narrative form, and an honest accounting of where the eighteen months of work have actually landed.
 
-**Seon is infrastructure for AI agents to write reliable software.**
+The premise underneath all of it is that the dominant cultural image of artificial intelligence — the singular adversarial superintelligence, the Judgment Day cold open — is a story we keep telling ourselves because it makes for better cinema than what is actually happening. What is actually happening is that millions of small competent agents are about to be cheap, persistent, and increasingly trustworthy, and almost nobody is building the *runtime* they should live inside. The serious infrastructure question — what should a personal AI's *home* look like, when the AI is going to be there for a decade and you are going to ask it to do things its original designers never anticipated — is mostly unasked. Seon is one attempt to ask it well and answer it concretely.
 
-Not a framework. Not a library. A complete codebase architecture where agents can:
+The Sanderson name is not decoration. A Seon, in *Elantris*, is a small luminous companion bonded for life to a single human, present at every domestic and professional moment, holding memory across years, capable of summoning information, witnessing conversations, and acting on its bonded human's behalf without ever stopping being theirs. That is the right metaphor for the product. Not a tool you reach for. Not a service you subscribe to. A bonded counterpart that, over months, learns your shape — your data, your tastes, your tolerances, the dashboards you wish existed — and builds for you, in your runtime, with code you own.
 
-- Discover functions by their contracts (not hallucinate them)
-- Learn from history (not repeat mistakes)
-- Own code long-term (not just complete tasks)
-- Compose safely (not break each other's work)
+That future sounds awesome. So this is an attempt to build it instead of waiting for it.
 
-The personal domains (trading, health, finance) are test cases. The infrastructure is the product.
+## What this lets you do
 
----
+Today's commercial AI assistants are excellent autocomplete and good at answering questions. They are not, in any meaningful sense, *yours*. Their memory of you is whatever the vendor decided you were allowed to keep this quarter. Their capabilities are whatever was in the platform release. Their workflows are the workflows their designers shipped, and the second you want to do something the designers did not anticipate, you are back to gluing services together by hand.
 
-## Why This Might Work
+Seon aims at something different: a personal system that, over months and years, accretes into a tailored interface to your own life. Some of the domains I have personally explored or want to explore on top of this runtime:
 
-### The Right Language
+- **Education.** *The Diamond Age*'s "Young Lady's Illustrated Primer" — a pedagogical AI bonded to a child, adapting to its developmental trajectory, capable of inventing curriculum on the fly — is the design north star here. The repo has a working prototype of a primer-style storytelling system; the long-term goal is something my niece and nephew could actually use, and that anyone with children could fork and tailor to their own pedagogy.
+- **Personal finance and trading.** Track your accounts. Have the system propose strategies. Have it write the dashboard you want — the one that asks the question you actually care about — not the dashboard a SaaS company decided was the lowest common denominator.
+- **Health.** Workout data, biomarkers, sleep, the boring spreadsheets that turn into useful patterns when something is actually paying attention. Cross-reference what you ate with how you slept with how you trained; let the system tell you what it sees; let it ask whether the pattern is worth a notification.
+- **Knowledge work.** A persistent, queryable graph of what you have read, what you have decided, and why. Notes that the system actually understands, because it wrote the schema for them with you, alongside the functions that operate on them.
+- **Tasks and ambient automation.** Calendar, inbox, the long tail of "I wish my computer just did this when X happens." The original Seon vision (Feb 2025) listed *tasks* and *knowledge* alongside trading, health, and finance; both have been quietly waiting for the runtime to be ready.
+- **Whatever else.** The point of a self-evolving runtime is that you do not have to enumerate in advance. The runtime composes; you and your bonded agent decide what to build.
 
-Clojure isn't a limitation - it's a requirement:
+The personal domains are test cases. The runtime is the product. The domains exist to prove the runtime can carry weight; the runtime exists so the domains can be whatever you need them to be next month.
 
-| Property | Why It Matters for Agents |
-|----------|---------------------------|
-| **Stable APIs** | 10-year-old docs still valid. No API churn to track. |
-| **Data-oriented** | Maps in, maps out. No hidden object state. |
-| **Homoiconic** | Code is data. Agents can manipulate programs as data structures. |
-| **REPL-driven** | Interactive development matches agent workflow: try, see, iterate. |
-| **Immutable default** | Outputs depend only on inputs. No spooky action at a distance. |
+## The premise
 
-McCarthy designed Lisp for AI. Maybe the killer app was always agents writing Lisp.
+More code will be written in the next couple of years than has been written in all of history, and the writers will be AI agents. That is not a contestable claim anymore; the only question is what the agents will be writing *into*. Today's languages and toolchains were designed for human beings who edit text files in editors, then build, then test, then deploy — a loop carefully tuned over fifty years to accommodate the bandwidth of a human mind reading code through a sixty-line window. It fits poorly around an agent that should be making thousands of small adjustments per day to a system that is already running.
 
-### The Right Database
+The right shape is the opposite of that loop. An always-on runtime. The agent rewrites it continuously, in place, while it is serving you. There is no build step because the unit of change is one form, not one file. There is no redeploy because the running system *is* the system; "deploying" means committing the form to disk so it survives a restart. There is no abstraction between intent and effect — the agent evaluates a form, the form runs, the result is real. This was the original promise of interactive computing, and the industry mostly walked away from it forty years ago because human teams are easier to coordinate when the source of truth lives in files and the runtime is treated as disposable. Agents do not have human coordination problems. Agents have *agent* coordination problems, which are different.
 
-Datalevin is a Datalog database on LMDB running as a separate JVM process:
+Clojure already has the right shape. McCarthy designed Lisp in 1958 because the languages of his day were ill-suited to symbolic reasoning, the kind of thing he had just started to call "artificial intelligence." Lisp's defining property is that code and data are the same: everything you can read, you can write to, mutate, transform, generate, or analyze with the same primitives. Rich Hickey carried that lineage into Clojure in 2007 and into Datomic in 2012, adding three properties Lisp had not insisted on — immutable data by default, identity and state as distinct concerns, and time as a first-class queryable dimension — and centering the REPL as the way you actually develop. An agent inside a Clojure REPL can read its own functions, edit them, transact the change, watch the running system pick up the new behavior on the next call, and query the database for who else now depends on the change. No build step. No redeploy. No invisible state. The medium does what the agent needs the medium to do.
 
-- **Datomic-compatible** - EAV datoms, pull API, Datalog queries
-- **Separate process** - Survives Seon restarts; TCP client connection on port 8898
-- **Agent isolation** - Each agent gets namespace-scoped database via connection manager
-- **ACID transactions** - Reliable writes with proper isolation
+That is the load-bearing observation. The right medium for AI agents to write reliable software already exists, has existed for almost twenty years, and was, accidentally, designed for exactly this use case sixty-eight years ago. The work is not to invent the language. The work is to take the language seriously: build the surrounding runtime with care, hand the result to an LLM, and find out what happens.
 
-Agents query data with Datalog: "What functions return this schema?" "Which namespaces depend on this one?" Session history and messages persist across restarts.
+## The bet: hand the agent a language, not a list of tools
 
-### The Right Contracts
+The prevailing shape for an AI assistant accepts the existing edit-build-deploy loop and puts the agent on top of it as a participant. The agent gets a fixed catalog of tools: `read_file`, `write_file`, `run_bash`, `search_web`, maybe a dozen others, often a few dozen if the team has been generous. The catalog is the surface; the surface is what the agent can do; what the agent cannot do is anything for which somebody did not write a tool. If you want it to interact with a new system, somebody has to add a new tool. If you want a new behavior, somebody has to integrate it into the harness. The agent is, in a precise sense, a customer of the people who maintain the harness.
 
-Malli schemas with fully namespaced keys create machine-readable contracts:
+Seon takes a different path. The agent's surface is *the entire language*. Clojure today, on the JVM and via a ClojureScript pod, sitting inside a self-evolving runtime that hands it a Datalog graph for memory, Malli schemas for contracts, a REPL pipeline for change, and a capability-gated WebAssembly boundary for what is and is not safe. There is no fixed tool catalog because there is no need for one. You want it to call an API? Have it write a function. You want a new dashboard? Have it write a namespace. You want it to react to data the system has never seen before? Register the schema and let the discovery mechanism find the most specific handler. The "tools" appear *as a side effect of the agent doing its job*, and they persist, and the next agent that needs them finds them in the graph, by shape, without anyone having to remember they exist.
 
-```clojure
-;; Every function advertises its interface
-{:malli/schema [:=> [:cat ::analyze-request] ::analyze-response]}
+This is Rich Sutton's "[Bitter Lesson](http://www.incompleteideas.net/IncIdeas/BitterLesson.html)" applied to agent harness design. Across seventy years of AI research, Sutton observes, general methods that leverage computation beat methods that bake in human knowledge, every time, and the embarrassing fact is that researchers keep relearning the lesson by losing to it. Hand-crafted chess heuristics lost to deeper search. Hand-engineered computer-vision features lost to convolutional nets. Carefully-tuned NLP pipelines lost to transformer pretraining. The pattern is monotonous: any time a researcher decides they know better than the optimizer about which structure matters, the optimizer eventually wins.
 
-;; Every key is globally unique and queryable
-:seon.trading/position  ; Not just :position
-:seon.health/metric     ; No ambiguity
+Seon's bet is that the same lesson applies one level up — that hand-curating an agent's surface is the new "hand-curating features." A fixed tool catalog is somebody deciding, in advance, what an agent should be able to do. A built-in planner is somebody deciding, in advance, how an agent should think. A vendor-managed memory layer is somebody deciding what an agent gets to remember. Each of these is a place where human-curated structure is being inserted into a system that is, in every other dimension, about to be dominated by general methods. Give the agent the language; let generality do what generality does.
 
-```
+The historical lineage of this bet is concrete enough to name. Doug Lenat's [Eurisko](https://en.wikipedia.org/wiki/Eurisko) (1981–83) was a program that modified its own heuristics, including the heuristics for modifying heuristics. Jürgen Schmidhuber's [Gödel Machine](https://arxiv.org/abs/cs/0309048) (2003) formalized the idea: a system that can rewrite its own code provably faster than any fixed competitor, given a sound proof system. [Voyager](https://voyager.minedojo.org/) (Wang et al., 2023) is the LLM-era proof of concept: an agent that grew its own skill library in Minecraft, with monotonically improving capability over weeks of play. DeepMind's [FunSearch](https://www.nature.com/articles/s41586-023-06924-6) (Nature, 2023) and [AlphaEvolve](https://arxiv.org/abs/2506.13131) (2025) ran a structurally identical loop — generate, evaluate, retain, evolve — against published mathematics and discovered new results. The underlying mechanism, in every case, is reinforcement learning with a self-modifying policy operating over a sufficiently general action space.
 
-"What functions accept `:seon.trading/position`?" becomes a database query, not a hallucination.
+Seon is one version of that idea running on a developer's laptop, with the agent's action space being Clojure, its evaluator being the REPL, its retained policy being the function library it accretes in your namespace, and its proof system being the Malli schemas plus the test suite. The ambition is not "build the next agent framework." The ambition is "build the *runtime* that a self-improving agent should already have been living inside." See [[lineage/predecessors]] for the eighteen-month chain of experiments that converged on this shape.
 
----
+## The five primitives that make this work
 
-## The Core Primitive
+Saying "we built the runtime" is cheap. The runtime is the conjunction of five specific design choices, each load-bearing, each defended in its own component note. None of them is novel in isolation; the bet is that *the conjunction* is what was missing.
 
-One function. One map in, one map out. Both fully spec'd with Malli. Registered in the graph.
+### Namespace-as-process — multi-agent shared workspace
 
-Everything else is composition of this primitive.
+Every Clojure namespace in Seon is wired in as a long-running `core.async.flow` process. It has a typed message envelope on its inbox, a `*ctx*` atom that holds its private state under Malli enforcement, and a default step function that handles request-reply, persistence, and SSE push to the browser without any custom code. The agent does not write a step function unless it needs to; the runtime ships the defaults, and progressive enhancement does the rest. When specificity is needed — a custom handler, a subscription, a reaction to upstream schema changes — the agent adds it, and the runtime picks up the new behavior on the next message.
 
-### Function Discovery
+Multiple agents work inside the same running runtime. They call each other's functions, transact into the same graph, edit each other's code under the capability gates the system was given. The namespace is the unit of stewardship; the agent that owns it is responsible for its evolution; but agents are not pinned to their own namespaces. Any agent can touch any surface the capability layer permits, and the flow topology gives every call uniform backpressure, observability, and the same typed-message discipline whether the participants are in the same JVM or separated by a wasmtime boundary. See [[components/flow-topology|flow topology]] and [[concepts/namespace-as-process|the concept note]].
 
-The graph knows every public function's input and output schemas. Given a data shape, query for all functions that accept it. Given a desired output shape, query for all functions that produce it. Given both, find functions that transform one into the other.
+### Schema-as-contract — Malli, namespaced, everywhere
 
-This is the **same operation regardless of intent**:
+Every public function in Seon advertises its inputs and outputs as Malli schemas with fully namespaced keywords. Not `:position` but `:seon.trading/position`. Not `:status` but `:seon.runtime/status`. The convention is total: every public function takes one map and returns one map; every key in both maps carries a namespace that corresponds to a real code location; every persisted attribute is registered through `seon.schema/register!` and validated at the database boundary; `:any` and `[:maybe X]` are banned outside of explicitly opaque values.
 
-| Intent | Input Shape | Output Shape |
-|--------|------------|--------------|
-| Render data as HTML | `::trading/position` | `::html/fragment` |
-| React to a data change | `::db/tx-report` | `::notification` |
-| Transform data | `::raw/csv-row` | `::trading/position` |
-| Handle user action | `::ui/click-event` | `::ui/response` |
-| Validate data | `::trading/position` | `::validation/result` |
-| Test a function | `::trading/position` | `::test/result` |
+This is not a style preference. It is the property that makes the rest of the system possible. Once every function has a known shape and every shape lives in the same registry, "which functions accept this data?" becomes a Datalog query against the graph. The schemas *are* the documentation, the discovery key, the validation gate, the generative test seed, and the boundary at which type confusion gets caught before it propagates. One Malli registration does all five jobs. See [[components/schema-system]].
 
-No separate rendering system, subscription system, test runner, or event system. One discovery mechanism. Functions that match are functions that work.
+### Graph-as-source-of-truth — Datahike, EAV, bitemporal
 
-### Tests Are Functions Too
+The graph is Datahike: an embedded Datalog database in the Datomic family, storing entity-attribute-value datoms on LMDB, with full bitemporal history when `:keep-history? true` is on. Every function, schema, namespace, call edge, test, agent message, eval, and conversation turn lands in the graph as datoms. The agent's first move in a new namespace is not a file read — it is a graph query. "What functions exist here? What schemas do they reference? What tests exercise them? When did this attribute last change, and what did it change *from*?" All of these are pulls.
 
-Tests don't need their own schema metadata. A test calls functions. Those functions have schemas. The graph connects them transitively. So "which tests exercise `::trading/position`?" is a graph traversal: schema -> functions that reference it -> tests that call those functions. The test is just a test. The graph does the bookkeeping.
+The bitemporality is load-bearing in a way that does not always get articulated. Datomic-family databases treat time as a queryable dimension: you can ask the same database what was true last Tuesday, what changed between two transactions, what an entity looked like at any point in its history. For an agent learning from experience, that property is the difference between an instrumented audit log and a memory. The agent can ask "what did this function return last week?" and the database answers, without anyone having to remember to instrument the call. See [[components/database]].
 
-This replaces file-based test selection ("this file changed, run its test file") with **schema-based test selection** ("this schema was touched, run every test that exercises it"). The blast radius is precise -- not "run all 500 tests" and not "guess which files are related" but "these 12 tests touch the changed schemas."
+### REPL-as-interface — the file is a persistence format
 
-### The REPL as Sole Interface
+The agent does not edit files. The agent evaluates forms in an nREPL, and the REPL pipeline does the rest: validate the Malli schema, compile and execute, transact the function metadata into the graph, persist the source to disk as a regular `.clj` file, and run the tests the graph says the schema selects. The file system is a persistence format, not the source of truth. The graph database is the system. The REPL is the only interface the agent needs.
 
-Agents don't edit files. They eval forms in the REPL. The REPL pipeline:
+This is the single most consistently restated claim across eighteen months of predecessor repos and design documents, and it is also the most consequential. Every other "AI writes code for you" product treats files as canonical and the database (if there is one) as a cache. Seon treats the eval *itself* as the transaction; the file falls out as a side effect, written via an explicit `(seon/persist!)` that functions like `git commit`. The implication is that the agent's mistakes, edits, and successes all survive as queryable datoms — replay is a query, not an instrumented capture — and that "what changed between working and broken" has an exact answer. See [[components/dev-tools|the REPL pipeline]] and the [v1 spec](../../prds/webassembly-agents/v1.md).
 
-1. Evaluate the form (compile + execute)
-2. Validate the function's Malli schema
-3. Transact function metadata into the graph (name, namespace, schemas, docstring, dependencies)
-4. Persist the source form to disk as a regular `.clj` file
-5. Run affected tests
+### WASM containment — the deployment story
 
-The file system is a persistence format, not the source of truth. The graph database is the system. The REPL is the only interface agents need.
+The CLJS sandbox alone is not a security boundary. The agent's `cljs.js` eval can mutate the runtime's atoms or call `(js/require "node:fs")` directly; the sandbox catches LLM hallucinations, not adversarial code. That is fine for a single-developer build of a personal AI; it is not fine for the version your bonded agent installs new dependencies into, fetches packages over the network, and runs for a decade.
 
-### Self-Referential
+The deployment story, therefore, is WebAssembly containment. The CLJS pod runs as a `wasm32-wasip2` Component (via wasm-rquickjs) inside wasmtime, embedded in a Tauri Rust host process. The capability surface is WIT-typed: `fs`, `http`, `mcp`, `capability-prompt`, `eval`. The Rust host decides which capabilities to grant. The agent's CLJS code cannot reach beyond the WIT imports — wasmtime enforces. Phase 3, currently in active development, is what makes the personal-AI claim survivable on the user's machine: the agent can write any code it wants, install dependencies live, read and write files, talk to the network — and the user's host is the one deciding which of those actions are allowed in this session. See [the platform spec](../../prds/webassembly-agents/platform.md) for the WIT interface design.
 
-The system uses itself. The functions that discover other functions, route messages, and manage the graph -- they are themselves registered in the graph with spec'd inputs and outputs. An agent looking for "how do I query the graph?" discovers `seon.graph.query/functions-in-ns` through the same mechanism it would use to find a trading signal calculator.
+## Inspirations
 
-### Progressive Enhancement
+The short list. Five people whose work this project would not exist without; each gets more depth here than the README has room for. The longer list — Engelbart, Bush, Licklider, Alan Kay, Bret Victor, Carl Hewitt, Doug Lenat, the Voyager team, the WASI working group, and many more — lives in [[vision/prior-art-credits-2026-05-23]] and [[vision/prior-art-agents-and-evolution-2026-05-23]]. The full lineage of *this* project, including the seventeen predecessor repos that converged on the current architecture, lives in [[lineage/predecessors]].
 
-A namespace starts empty. When the system needs to render data from that namespace and no render function exists, a default renderer handles it. The agent is notified: "namespace X received a render request for schema Y but has no handler." The agent writes a compatible function. On eval, it enters the graph. Next request finds it automatically.
+### John McCarthy (Lisp, 1958)
 
-This applies universally -- rendering, event handling, data transformation, validation. Write a compatible function and it's discoverable immediately. No registration ceremony. The schema IS the registration.
+McCarthy invented Lisp because the languages of his day could not carry symbolic reasoning, the kind of work he had just begun calling "artificial intelligence." He needed a notation in which programs could be data, in which lists could be code and code could be lists, in which a function could read another function and return a third. The choice was made for a problem domain that did not really exist yet. Sixty-eight years later, his choice is still load-bearing for that exact domain.
 
-### Smart Defaults and Message Routing
+The fact that the right medium for this kind of work was designed before the term "artificial intelligence" had a settled meaning is not a coincidence. It is McCarthy thinking carefully about what symbolic reasoning would need and giving it a notation precise enough to survive everything that came afterward — including, eventually, statistical learning machines that emit Lisp expressions over a token stream. See the [History of Lisp](http://jmc.stanford.edu/articles/lisp/lisp.pdf).
 
-Every message type has a default handler that produces a reasonable result. The system never blocks on missing functionality -- it degrades gracefully. When events occur (data changes, user actions, schema updates), the system constructs Malli-specced messages and routes them to namespaces. The router finds the most specific handler whose input schema matches. If none exists, the smart default fires. If the message requires acknowledgment, the namespace's agent is woken to decide.
+### Rich Hickey (Clojure, 2007; Datomic, 2012; clojure.spec, 2016)
 
-This inverts traditional development: ship the default, then build specificity. Agents progressively replace defaults with specific handlers as functionality is needed. Data changes in Datalevin trigger the same discovery -- fingerprint the change, find functions whose input spec matches, run them. The reactive surface grows organically as agents add functions, without explicit subscription wiring.
+Hickey took Lisp's homoiconic core and added the three properties that make it tractable at scale. Immutable data by default, which removes the entire category of "did the state change underneath me?" bugs. The distinction between identity and state, which lets you reason about an entity over time without conflating "the thing it points to right now" with "the thing it is." Time as a queryable dimension in Datomic, which converts the database from a snapshot store into a memory. And `clojure.spec` (later joined by Malli), which made data shapes first-class citizens describable in the language itself, runtime-checkable, generatable for tests, and queryable as data.
 
-### Constraints That Simplify
+Seon uses every one of these. The language is Clojure for the homoiconicity. The graph is Datahike (in the Datomic family) for the bitemporality. The contract layer is Malli for the data-as-data treatment of schemas. The REPL is Hickey's REPL, in which `(eval form)` is the only unit of change and the running system is the source of truth. If you remove any of these properties, the rest stops working. They are co-load-bearing. See Hickey's [rationale for Clojure](https://clojure.org/about/rationale) and the [Datomic data model paper](https://docs.datomic.com/cloud/whatis/data-model.html).
 
-We control Seon. We can add constraints that make this tractable:
+### Brandon Sanderson (the Cosmere, 2005 onward)
 
-- **All public functions**: one map in, one map out, fully spec'd -- no exceptions
-- **All schemas**: registered in the global Malli registry with namespaced keys
-- **All evaluation**: through the REPL pipeline -- validates, persists, tests
-- **All data**: namespaced keywords, concrete types, no `:any`
-- **All cross-boundary calls**: through the flow topology
+The Seons of *Elantris* are the metaphor and the namesake. Small luminous bonded companions, present at every moment of their human's life, holding memory across years, mediating between their human and the wider world, ultimately a kind of distillation of what computing could be if it were genuinely *on your side*. The naming is deliberate: Seon is not a tool you reach for, not a service you subscribe to, not a vendor you depend on. It is a bonded counterpart. The Sanderson reference frames the design target — *what role should a personal AI fill in a human life?* — better than any prose I could write fresh.
 
-These constraints aren't limitations. They're what make universal function discovery possible. A system where every function has a known shape is a system that can compose itself.
+There is a wider Sanderson influence past the name. Sanderson's magic systems are famous for being *engineered*: every system has rules, the rules compose, and the protagonists win by understanding the rules better than their antagonists. That is the right disposition for software a bonded AI lives inside. The Cosmere also gives us a working model of *plurality* — every world has its own physics, the laws compose across worlds, the inhabitants find ways to communicate across them. Seon's plan to host multiple language pods under one capability surface owes something to that disposition.
 
----
+### Neal Stephenson (*The Diamond Age*, 1995)
 
-## The Namespace
+Stephenson's "Young Lady's Illustrated Primer" is the design-fiction reference point for what a bonded AI ought to *do* for the person it serves. The Primer is not a chatbot. It is not a tutor in any narrow sense. It is a dynamic, psychological companion bonded to a child, capable of adapting to her developmental trajectory, of inventing curriculum on the fly, of telling stories that teach exactly the skill the child needs next, of holding memory across years, of mediating between the child and the wider world without ever stopping being hers. The book takes the device seriously enough to make its construction a major plot device, and the result has been a north star for educational technology for thirty years.
 
-The namespace is the unit of ownership. One agent (human or AI) stewards one namespace. Everything they need -- context, tools, feedback -- is scoped to that namespace.
+What Stephenson gets right, and what almost every subsequent attempt at "AI tutoring" gets wrong, is that the Primer is *interactive narrative*, not retrieval. The Primer does not look things up; it composes, invents, watches the child's reaction, and adjusts. The reason that matters for Seon is that *all of these properties generalize beyond pedagogy*: a personal AI that watches your data, composes responses, watches your reaction, and adjusts is the right model for anything a bonded agent should be doing for its bonded human. The Primer is just the maximally evocative special case. Stephenson's broader corpus — *Snow Crash*, *Cryptonomicon*, *Anathem* — also influences the technical aesthetic of this project: long sentences that earn their length, lavish specificity, no apology for ambition.
 
-### What the Namespace Agent Sees
+### Rich Sutton ("The Bitter Lesson", 2019)
 
-When a namespace agent starts, the system provides:
+Sutton's two-page essay is the closest thing AI research has to a single usable principle. Seventy years of accumulated experience, distilled: general methods that leverage computation beat methods that bake in human knowledge, every time, and we keep relearning the lesson by losing to it. Sutton's argument is about model architecture and training objectives — the part where deep learning ate everything from translation to game-playing — but Seon's bet is that the same principle applies one level up, at the harness.
 
-- **Their functions** -- every `defn` in the namespace with its Malli schema, docstring, and current test status
-- **Their schemas** -- every registered schema in the namespace
-- **Their dependencies** -- functions required in from other namespaces, with schemas
-- **Their dependents** -- who calls their functions, so they know the blast radius of changes
-- **Their tests** -- every test that exercises their schemas, with last-run results
-- **Their notifications** -- problems reported by other agents, upstream schema changes, failing tests
+If hand-engineered features lose to learned representations, then hand-engineered *agent surfaces* probably lose to general action spaces. Any fixed tool catalog is, in this framing, feature engineering dressed in agent clothing — somebody deciding in advance what the optimizer should be able to reach. Seon hands the agent a Turing-complete language, a queryable graph, and a containment boundary, and lets the optimizer figure out the rest. Whether that bet pays off is the question the next few years will answer; the historical track record is on the side of generality. See [The Bitter Lesson](http://www.incompleteideas.net/IncIdeas/BitterLesson.html).
 
-All of this is derived from the graph. No special context-building code -- it's the same function discovery mechanism applied to the question "what do I need to know about namespace X?"
+## The multi-language future
 
-### What the Namespace Agent Does
+Clojure is the choice today because Clojure is the language where the five primitives compose without friction: homoiconicity gives the REPL pipeline; immutable defaults give the schema discipline; Datalog matches the graph model; the JVM and the V8 / QuickJS ecosystem give the runtime portability. Picking Clojure is not, however, a permanent commitment to Clojure as the *only* surface the agent ever sees.
 
-Three things: write schemas, write functions, write tests. All vanilla Clojure.
+The deployment story — WebAssembly Components with a WIT-typed capability surface — is language-agnostic by construction. The WIT interfaces (`fs`, `http`, `mcp`, `capability-prompt`, `eval`) do not care what language the pod is written in, only that it speaks the typed boundary. Today there is one pod: a ClojureScript pod compiled to `wasm32-wasip2` via wasm-rquickjs, hosting the agent loop. Next, in roughly the order that the tooling allows: a Python pod, because the data science and machine learning ecosystems will not stop being Python any time soon and the agent should be able to reach into them; after that, anything the WebAssembly Component Model can host, which over the next few years will be most production languages.
 
-```clojure
-;; Register a schema -- standard Malli, namespaced keys
-(schema/register! ::position
-  [:map
-   [::ticker :string]
-   [::quantity :int]
-   [::entry-price :double]])
+The architecture is already mode-agnostic at the wire. A function call in Seon is "send a map, receive a map," whether the target is in the local JVM, in an out-of-process agent, or inside a wasmtime instance running someone else's code. The dispatch layer routes transparently; the agent does not know or care which mode it is in. Adding a new language pod is, in this design, *adding a participant to the existing message bus*, not *building a new runtime*. The language choice becomes a matter of "what fits this task best" — Python for the model training, Clojure for the orchestration, Rust for the hot path, JavaScript for whatever JavaScript is good at — rather than a permanent commitment that calcifies into a vendor lock-in five years later.
 
-;; Write a function -- standard defn with :malli/schema metadata
-(defn value
-  "Calculate position value."
-  {:malli/schema [:=> [:cat ::value-request] ::value-response]}
-  [{::keys [position price]}]
-  {::value (* (::quantity position) price)})
+The honest caveat: as of today the wire format for inter-process Clojure traffic is Nippy, which is Clojure-specific. The first Python pod will force a polyglot wire format decision. The architecture supports it; the decision has not been made yet. See [[architecture/decisions/001-nippy-serialization]] and the open question tracked in the WASM platform spec.
 
-;; Write a test -- standard deftest
-(deftest value-test
-  (testing "calculates position value"
-    (is (= {::value 1500.0}
-           (value {::position {::ticker "AAPL" ::quantity 10 ::entry-price 150.0}
-                   ::price 150.0})))))
+## The milestones
 
-```
+The project is organized around eight milestones. Each milestone is a *threshold* — a property the system either has or does not have — rather than a feature checkpoint. Each lives in its own document with verification criteria, scenarios, and blocking issues. The summaries below are the framing in current voice; the full text lives in the linked notes.
 
-Nothing exotic. The agent writes normal Clojure. The enforcement is in the eval pipeline, not in the syntax.
+The dependency is roughly: M1–M5 are the foundation (reliability, data discipline, conventions, discoverability, observability); M6 is the bootstrap moment where the REPL pipeline becomes the agent's interface; M7 promotes namespaces to long-running flow processes; M8 is the payoff — agents stewarding namespaces autonomously, the system composing itself in response to typed notifications without human orchestration.
 
-### The Eval Pipeline
+### [[vision/m1-reliable-runtime|M1: Reliable Runtime]] — status: partial
 
-When a form is eval'd through the REPL, the pipeline enforces constraints before accepting it:
+The runtime is trustworthy enough that an agent can crash without taking the system with it. Datahike's on-disk store survives application restarts. Startup is deterministic — every component has a health gate, the system either starts fully or fails with clear diagnostics. The flow topology is the sole routing backbone; nothing bypasses it. M1 is the floor below which nothing else works.
 
-**For `defn`:**
+### [[vision/m2-trustworthy-data|M2: Trustworthy Data]] — status: partial
 
-- Schema present? (`:malli/schema` metadata required for public functions)
-- Schema concrete? (no `:any`, no `[:maybe X]`, all types Datalevin-compatible)
-- Schema serializable? (roundtrips through Nippy and Datalevin without loss)
-- Map-in/map-out? (single map argument, map return, namespaced keys)
-- If any fail -> reject with clear error. The function is not compiled, not registered, not persisted.
+Data cannot lie. Every attribute has a Malli schema registered through `schema/register!`. Every write is validated before it reaches storage. Serialization across process boundaries preserves types exactly. Generative tests prove the full pipeline roundtrips data without loss or coercion. There is no `:any` in a persisted schema and no `nil` stored as a value anywhere. The schemas are the single source of truth; every boundary enforces them.
 
-**For `schema/register!`:**
+### [[vision/m3-convention-uniformity|M3: Convention Uniformity]] — status: in progress
 
-- All types concrete and Datalevin-compatible?
-- Namespaced keys throughout?
-- Generator works? (can produce valid samples)
-- If any fail -> reject.
+Every public function in the codebase follows the same shape: one map in, one map out, all keys namespaced, `:malli/schema` metadata on every `defn`. Every schema uses concrete types. The code graph can index everything because everything follows the same conventions. M3 is the foundational work that makes M4 possible; without uniform conventions, the discovery queries return partial results.
 
-**For `deftest`:**
+### [[vision/m4-discoverable-codebase|M4: Discoverable Codebase]] — status: partial
 
-- Register in the graph. Schema association is inferred automatically -- the graph knows which functions the test calls, which schemas those functions reference, and transitively which schemas the test exercises. No metadata needed on the test itself.
+The system answers a single question well: "given this data shape, what functions work with it?" One specificity-ranked discovery mechanism serves rendering, transformation, event handling, validation, testing, and AI context. The agent does not grep source files or hallucinate function names; it queries the graph and gets back a ranked list of compatible functions, picks one, runs it. Renderer discovery is already this pattern in production. M4 is the generalization to *everything*.
 
-**If all pass:**
+### [[vision/m5-observable-system|M5: Observable System]] — status: partial
 
-1. Compile and execute the form
-2. Transact metadata into the graph
-3. Persist source to disk
-4. Run affected tests (discovered by schema, not by file)
-5. Report results immediately
+Any part of the running system is visible in real time — agents, namespaces, schemas, data, health — through a unified terminal-dense interface. Humans see it in the browser, via SSE-pushed updates. Agents see it through the same data, rendered into AI context by the same discovery mechanism. No hidden state. Every view is a function discoverable by schema shape; adding a new view means writing a function with the right `:malli/schema`.
 
-### Constraint Enforcement Is Function Discovery
+### [[vision/m6-eval-pipeline|M6: The Eval Pipeline]] — status: prototyped
 
-The constraints above are not hard-coded in the pipeline. Each constraint is a function with a spec'd input and output:
+The bootstrap moment. Agents develop through the REPL exclusively — no file editing, no line numbers, no `clojure_replace`. The agent evals forms; the pipeline validates them against discoverable constraint functions before accepting; `*ctx*` is the agent's world, rendered into AI context the same way everything else is rendered. The filesystem becomes a persistence format, not the source of truth. The constraints themselves are functions with specs, discoverable and extensible. Turtles all the way down. Three prototype implementations exist today — `feature/super-repl`, `src/seon/repl/graduate.clj`, and the CLJS pod's `eval.cljs` / `agent.cljs` — with a Feb 2025 ancestor in `seon-biff/src/seon/agent.clj`; the constraint-fn discovery layer is the unbuilt piece.
 
-```
-Input shape: ::eval/form (the form being evaluated + its metadata)
-Output shape: ::constraint/result (pass/fail + explanation)
+### [[vision/m7-namespace-as-process|M7: Namespace as Living Process]] — status: prototyped
 
-```
+Every namespace is a long-running flow process with typed inputs, a custom step function (or the default, which ships everything generically), and state that participates in the reactive surface. Agents add specificity over time — custom step functions, subscription handlers, feed signal reactions — and each addition makes the namespace more capable without changing anything else in the system. Progressive enhancement as architecture. The default `namespace-step` is in production today in `src/seon/flow/harness.clj`; per-namespace `*ctx*` atoms with schema enforcement, persistence, and SSE push are live. The reactive cross-namespace surface — feeds and subscriptions — is the unbuilt layer.
 
-The eval pipeline discovers all functions matching this signature and runs them. To add a new constraint -- say, "function names must not exceed 40 characters" -- write a function that accepts `::eval/form` and returns `::constraint/result`. It's picked up automatically on next eval.
+### [[vision/m8-autonomous-agents|M8: Autonomous Namespace Agents]] — status: prototyped
 
-This means the system's quality standards are extensible without changing the pipeline. The pipeline doesn't know what the constraints are. It just discovers functions that match and runs them. Turtles all the way down.
+The payoff. Agents steward namespaces through the REPL without human orchestration. They receive typed notifications about failing tests, upstream schema changes, and consumer requests. They respond by writing functions through the eval pipeline. A namespace receives a request it cannot handle, the agent is notified, it writes a handler, the handler is discovered by shape, and the next equivalent request is handled automatically. No wiring, no registration, no human in the loop. The system composes itself. A working single-agent loop lives in `src/seon/agent.cljs` (`run-agentic-loop!`, `run-turn!`, the user-trigger handler); the Feb 2025 ancestor is `seon-biff/src/seon/agent.clj`'s `development-loop`. Typed inter-agent notifications and multi-agent stewardship are the unbuilt layer.
 
-### Notifications
+## Status — honest
 
-When something goes wrong -- a test fails, an upstream schema changes, a dependent reports a type mismatch -- the namespace agent is notified through the same message routing. A notification is a spec'd map. The namespace either has a handler function for that notification shape or the agent is asked to deal with it.
+A vision document with no honest accounting of what is shipped versus what is aspirational is a sales pitch. The point of this section is to keep the rest of the document trustworthy.
 
-This closes the feedback loop: agent writes code -> pipeline validates -> graph updates -> tests run -> if something breaks elsewhere -> that namespace's agent is notified -> they fix it -> their pipeline validates -> and so on.
+**What works today.** The JVM runtime is real and runs end-to-end. Integrant component lifecycle, `core.async.flow` topology, Datahike on LMDB with the `seon.db` API enforcing Malli validation at the database boundary, the REPL with the dev hook auto-reloading and running affected tests, the renderer-discovery system in production for the dashboard, the Phosphor Terminal UI with SSE updates, the orchestrator that launches Claude Code agents against the running JVM. The renderer-discovery system is the strongest evidence that the schema-driven discovery thesis works — it routes data shapes to render functions in production today, with the specificity algorithm the rest of M4 will eventually generalize.
 
----
+**What is in flight.** The schema unification effort (Malli as single source of truth across the pipeline) is mostly complete; convention uniformity (every public function map-in/map-out with `:malli/schema`) is the in-progress gap closing toward M3. The CLJS pod under `src/seon/*.cljs` is a working second runtime — it boots, hosts the agent loop, talks to datahike-cljs, serves a loopback HTTP+SSE surface — and is being prepared for the wasm32-wasip2 migration. The WASM containment work, the v1 agent REPL spec, and the pod-host Rust workspace under `pod-host/wasm-tauri/` are all active.
 
-## The Architecture
+**What's prototyped but not unified.** M6, M7, and M8 each have working prototype code somewhere — `feature/super-repl`, `src/seon/repl/graduate.clj`, the CLJS pod's `eval.cljs` and `agent.cljs`, and the `seon-biff/src/seon/agent.clj` ancestor from Feb 2025. The default `namespace-step` is in production today. The single-agent loop runs end-to-end against DeepSeek. What's missing is the unification — the constraint-fn discovery layer that closes M6, the reactive feeds/subscriptions layer that closes M7, the typed inter-agent notification surface that closes M8. The designs are in the milestone notes; the capability docs flesh out the scenarios; the v1 spec is the most detailed surviving artifact. Per-milestone evidence is in [[lineage/milestone-prior-work]].
 
-### Layer 1: Contracts & Discovery
+**What is aspirational.** Diamond Age Primer-grade pedagogy. A bonded AI that runs continuously for a decade. Multi-language pods coexisting under one capability surface. Agents that fork their own children and steward dozens of namespaces in parallel. Everything in this document about "the runtime that grows alongside you" is the destination, not the current state. The current state is a working foundation, two functioning runtimes (JVM and CLJS pod) that need to converge, and an architecture that has been iterated across seventeen predecessor repos over eighteen months. The next ship is the v1 agent REPL on the CLJS pod, against DeepSeek today and other models later.
 
-Malli schema registry with namespaced keys. Schema introspection, function schemas via `:malli/schema` metadata. Schema-driven function discovery -- query the graph for functions by input/output schema shape. Composition hints where functions that chain are discoverable relationships in the graph.
+**Falsifiability.** It is worth naming what would falsify the bet. *Near-term:* an agent should be able to complete a multi-phase PRD without human intervention; function discovery should let an agent find composable functions via schema query rather than grep; a 24-hour agent marathon should produce zero resource leaks. *Medium-term:* an agent should maintain a namespace for thirty-plus days, evolving it based on usage; a non-developer should be able to give a problem and have the system build a working solution; the runtime should suggest improvements based on observed usage patterns. *Long-term:* multiple agents should collaborate on a cross-cutting feature; an agent should notice a regression and fix it proactively; a new domain should be added with minimal human guidance. These are real falsifiers, not goalposts. If a year from now they are all still aspirational, the bet has lost. See the validation criteria in [[orchestrator/active]] for current state.
 
-### Layer 2: Agent Isolation
+## The bet, restated
 
-Each agent gets isolated nREPL, isolated Datalevin database, isolated logs. Pool-based JVM model with pre-warmed JVMs. Registry tracks running agents. Health checks detect orphaned resources.
+The bet is that hand-curating an agent's surface is the new hand-curating features, and that the same Bitter Lesson that applied to every previous generation of feature engineering will apply to the current generation of agent frameworks. The bet is that the right shape for an AI to write reliable software for its bonded human is a Lisp running inside a graph database inside a capability-gated WebAssembly boundary, with the REPL as the only interface and the schema registry as the discovery key. The bet is that one developer with eighteen months of accumulated experiments and a clear architectural thesis can build something useful here before the question of what a personal AI's home should look like becomes obvious. If the bet is wrong, this becomes an interesting Clojure project with an unusually disciplined architecture and a working renderer-discovery system. If the bet is right, the work will be ready when somebody needs it.
 
-### Layer 3: Verification
-
-Dev hooks trigger on every Edit/Write. Automatic code reload, affected tests run automatically. Generative testing via Malli schemas. AI review for style/correctness. Hooks block on test failure.
-
-### Layer 4: Observability
-
-Observatory UI shows running agents. Agent logs with tool calls, results, errors. Health endpoint with component status. SSE-based live updates. Namespace introspection, schema browser, data viewer, live atom updates.
-
-### Layer 5: Dynamic Context (The Cockpit)
-
-Live system status, function typeahead, relevant context injection. Message-first namespace protocol -- every namespace is an actor, messages are Malli-spec'd maps, topology routes to most specific handler.
-
-### Layer 6: Learning from History
-
-All agent messages persisted. Session metadata (cost, duration, status). Flow event tracing. Session replay, pattern extraction, mistake tracking.
-
-### Layer 7: Long-term Ownership
-
-Persistent agents assigned to namespaces. Ownership handoff, evolution tracking, proactive maintenance. Progressive enhancement -- namespaces grow organically based on actual usage.
-
----
-
-## Milestones
-
-Milestones are thresholds, not capabilities. Each is crossed when its constituent capabilities are all at least partial. See individual milestone notes for verification criteria and blocking issues.
-
-| Milestone | Status | Bootstrap | Description |
-|-----------|--------|-----------|-------------|
-| [[vision/m1-reliable-runtime|M1: Reliable Runtime]] | partial | Foundation | Isolated JVM agents, flow routing backbone, self-healing pool, crash-resilient database |
-| [[vision/m2-trustworthy-data|M2: Trustworthy Data]] | partial | Foundation | Malli as single schema source, validated writes, Nippy serialization, no :any |
-| [[vision/m3-convention-uniformity|M3: Convention Uniformity]] | in-progress | 1: Claude Code | Every public function: map-in/map-out, :malli/schema, namespaced keys |
-| [[vision/m4-discoverable-codebase|M4: Discoverable Codebase]] | partial | 1: Claude Code | Given a data shape, find functions. One discovery mechanism for all use cases |
-| [[vision/m5-observable-system|M5: Observable System]] | partial | 1: Claude Code | Live observatory, agent logs, health dashboard, SSE-based updates |
-| [[vision/m6-eval-pipeline|M6: The Eval Pipeline]] | not-started | 2: REPL Agents | REPL eval with contract validation, schema-selected tests, graph transact |
-| [[vision/m7-namespace-as-process|M7: Namespace as Living Process]] | not-started | 3: Autonomous | Every namespace is a flow process with typed messaging and smart defaults |
-| [[vision/m8-autonomous-agents|M8: Autonomous Namespace Agents]] | not-started | 3: Autonomous | Namespace-scoped agents with progressive enhancement and long-term ownership |
-
----
-
-## Why Not Just Use [X]?
-
-### Why not just use Cursor/Copilot/etc?
-
-They bolt onto existing codebases. No contracts, no history, no isolation. They're autocomplete, not ownership.
-
-### Why not Python/TypeScript?
-
-- **Python**: Dynamic, but mutable-by-default. No built-in spec system. Ecosystem churn.
-- **TypeScript**: Types help, but object-oriented heritage. Build complexity. Node ecosystem churn.
-- **Clojure**: Immutable, data-oriented, stable, REPL-native. The language is designed for what we're doing.
-
-### Why not a hosted solution?
-
-Local-first means: your data stays yours, no API rate limits, works offline, full control over the runtime.
-
-### Why build the infrastructure instead of domains?
-
-The infrastructure IS the product. Without schema discovery, temporal history, and verified isolation, agents just create more technical debt. The domains prove the infrastructure works.
-
----
-
-## The Bet
-
-This is a bet that:
-
-1. AI agents will write most code within 5 years
-2. Current approaches (bolt-on assistants) won't scale
-3. Purpose-built infrastructure dramatically improves agent reliability
-4. Clojure's properties are uniquely suited to this problem
-5. The investment in infrastructure pays off as agents get more capable
-
-If wrong: interesting Clojure project with good architecture.
-If right: the foundation for how software gets built.
