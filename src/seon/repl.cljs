@@ -1,14 +1,8 @@
 (ns seon.repl
-  "Bash-style REPL reader + iteration-surface helpers.
-
-   ## Parse-forms (original responsibility)
-
-   Parses text containing `;;` narration lines intermixed with Clojure
-   forms into a sequence of (narration, form) pairs. Used by
-   `seon.agent` to interpret an LLM's response as a serial REPL
-   session. (Spec will eventually swap this Edamame-based reader for
-   rewrite-clj — see spec §Parse — but the current shape is the
-   working V0 path and stays here.)
+  "Iteration-surface helpers — `dev-init!`, compile-state + history
+   conn defonces. The text→entries parser used to live here too but
+   was extracted to [[seon.parse]] (.cljc — JVM-testable, no pod
+   required for the corpus).
 
    ## Iteration surface (`dev-init!`)
 
@@ -49,103 +43,27 @@
    Both write to the same datahike conn, so tx-meta tags and
    history queries work the same way through either surface."
   (:require
-    [cljs.tools.reader :as r]
-    [cljs.tools.reader.reader-types :as rt]
-    [clojure.string :as str]
     ;; --- Iteration-surface deps ---
     [datahike.api :as d]
     [seon.eval :as seval]
-    ;; rewrite-clj namespaces pulled into the :client bundle by being
-    ;; required here. After this lands, mcp__seon_cljs__eval can call
-    ;; `(rewrite-clj.parser/parse-string-all ...)` directly against
-    ;; the host runtime. Required for spec §D1 (forms-and-comments
-    ;; parse) and §D10/D12 (analyzer walk + bootstrap emission).
+    ;; Pulled in so the :client bundle can reach rewrite-clj via the
+    ;; host REPL (mcp__seon_cljs__eval) for ad-hoc substrate probes
+    ;; — e.g. `(rewrite-clj.parser/parse-string-all "...")`. The
+    ;; parse-forms parser itself lives in seon.parse (.cljc).
     [rewrite-clj.parser]
     [rewrite-clj.node]
-    [rewrite-clj.zip]))
+    [rewrite-clj.zip]
+    [seon.parse]))
 
 ;; ============================================================
-;; Reader helpers — accumulate ;-comment lines into a narration
-;; string, skip blank lines, then read one form. Returns one pair
-;; per call to read-pair! until EOF.
+;; parse-forms re-export — historical compat. New callers should
+;; require seon.parse directly.
 ;; ============================================================
 
-(defn- skip-comments-and-blanks!
-  "Advance reader past whitespace + ;-lines. Returns accumulated
-   comment text (one ;-line per output line, leading `;` stripped).
-   Position-tolerant: handles `;`, `;;`, `;;;` equivalently."
-  [rdr]
-  (let [comments (atom [])]
-    (loop []
-      (let [ch (rt/read-char rdr)]
-        (cond
-          (nil? ch)        nil
-          (= ch \newline)  (recur)
-          (re-matches #"\s" (str ch)) (recur)
-          (= ch \;)
-          (let [line (loop [acc []]
-                       (let [c (rt/read-char rdr)]
-                         (if (or (nil? c) (= c \newline))
-                           (apply str acc)
-                           (recur (conj acc c)))))]
-            (swap! comments conj (str/replace line #"^[\s;]+" ""))
-            (recur))
-          :else (rt/unread rdr ch))))
-    (str/join "\n" @comments)))
-
-(defn- prose-symbol?
-  "Heuristic — true if `form` is a bare symbol that almost certainly
-   came from the LLM emitting unescaped prose instead of code. The
-   reader cheerfully tokenizes 'Let me read' into three separate
-   symbol forms, each of which evaluates to nil under cljs.js's
-   permissive bootstrap and pollutes the eval log. Filtering these
-   out at parse-time is much safer than eval-time.
-
-   Legitimate agent code is overwhelmingly list-shaped (function
-   calls, special forms, defs) or reader-macro-shaped (`@!atom`,
-   `'sym` — both list forms after read). Bare unqualified symbols
-   at the top level have no legitimate use in the agent protocol."
-  [form]
-  (and (symbol? form)
-       (not (special-symbol? form))))
-
-(defn parse-forms
-  "Read `text` top-to-bottom, pairing each contiguous block of `;-`
-   comments with the form that follows it. Returns a vector of
-   `{:narration string :source string :form any}`.
-
-   Bare top-level symbols (LLM prose tokenized by the reader) are
-   dropped silently — see `prose-symbol?`. Comments at the end of
-   the text (no trailing form) are dropped. Read errors halt — caller
-   sees a truncated vector + can decide.
-
-   (V0.5 we'll thread the read error back as a sentinel pair.)"
-  [text]
-  (let [rdr (rt/string-push-back-reader text)]
-    (loop [out [] pending-narration ""]
-      (let [more-narration (skip-comments-and-blanks! rdr)
-            narration      (str/trim
-                             (str pending-narration
-                                  (when (and (seq pending-narration)
-                                             (seq more-narration))
-                                    "\n")
-                                  more-narration))
-            form (try (r/read {:eof ::eof} rdr)
-                      (catch :default _ ::eof))]
-        (cond
-          (= form ::eof)
-          out
-
-          ;; LLM prose tokenized as bare symbols — skip, carry narration
-          ;; forward so it attaches to the next real form.
-          (prose-symbol? form)
-          (recur out narration)
-
-          :else
-          (recur (conj out {:narration narration
-                            :source    (pr-str form)
-                            :form      form})
-                 ""))))))
+(def parse-forms
+  "Re-exported from [[seon.parse/parse-forms]] for callers that still
+   reference `seon.repl/parse-forms`. New code: `seon.parse/parse-forms`."
+  seon.parse/parse-forms)
 
 ;; ============================================================
 ;; Iteration-surface — dev-init! opens an agent conn (history-on) +
