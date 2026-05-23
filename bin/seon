@@ -1,0 +1,286 @@
+#!/usr/bin/env bash
+#
+# bin/seon — process supervisor for the Seon dev stack.
+#
+# Multi-agent-safe: any agent can call any subcommand at any time;
+# mutex-guarded so concurrent start/stop don't race. Idempotent:
+# repeated `start` no-ops if already running, repeated `stop` no-ops
+# if not running. Designed for the Platform↔MVP two-agent workflow
+# where neither agent "owns" a process — both invoke this script.
+#
+# Subcommands:
+#   start <name>       Idempotent. Spawns via nohup; logs to logs/<name>.log
+#   stop <name>        SIGTERM, wait 2.5s, SIGKILL if still alive
+#   restart <name>     stop + start
+#   status [name]      Show one or all
+#   tail <name>        tail -f logs/<name>.log
+#   logs <name> [n]    Last n lines (default 200) of logs/<name>.log
+#   adopt <name>       Register a manually-started process by PID
+#
+# State per process: tmp/proc/<name>/{pid,cmd,started-at,lock/}
+# Logs:              logs/<name>.log (truncated on fresh start)
+#
+# Stale lock recovery: if `bin/seon` is itself SIGKILLed mid-operation,
+# the lock dir may persist. Remove with `rm -rf tmp/proc/<name>/lock`.
+
+set -euo pipefail
+
+SEON_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$SEON_ROOT"
+
+PROC_DIR="tmp/proc"
+LOG_DIR="logs"
+mkdir -p "$PROC_DIR" "$LOG_DIR"
+
+# ============================================================
+# Process registry — add a process by adding one case branch.
+# ============================================================
+
+process_command() {
+  case "$1" in
+    pod)        echo "node out/client/main.js" ;;
+    cljs-watch) echo "clj -M:cljs watch client" ;;
+    jvm)        echo "./bin/run" ;;
+    *) return 1 ;;
+  esac
+}
+
+process_ready_hint() {
+  case "$1" in
+    pod)        echo "  ready: tmp/seon-port exists (HTTP+SSE loopback bound)" ;;
+    cljs-watch) echo "  ready: 'Build completed' appears in logs/cljs-watch.log" ;;
+    jvm)        echo "  ready: logs/app.log shows 'Server started'" ;;
+    *) echo "" ;;
+  esac
+}
+
+all_processes() { echo "pod cljs-watch jvm"; }
+
+# ============================================================
+# State file paths.
+# ============================================================
+
+state_dir()    { echo "$PROC_DIR/$1"; }
+pid_file()     { echo "$PROC_DIR/$1/pid"; }
+cmd_file()     { echo "$PROC_DIR/$1/cmd"; }
+started_file() { echo "$PROC_DIR/$1/started-at"; }
+lock_dir()     { echo "$PROC_DIR/$1/lock"; }
+log_file()     { echo "$LOG_DIR/$1.log"; }
+
+ensure_state() { mkdir -p "$(state_dir "$1")"; }
+
+# ============================================================
+# Mutex via mkdir (atomic on POSIX, works on macOS without flock).
+# Released by trap on EXIT/INT/TERM.
+# ============================================================
+
+acquire_lock() {
+  local name="$1"
+  ensure_state "$name"
+  local lock
+  lock="$(lock_dir "$name")"
+  local tries=0
+  while ! mkdir "$lock" 2>/dev/null; do
+    tries=$((tries + 1))
+    if [ "$tries" -gt 100 ]; then
+      echo "  ✗ could not acquire lock for $name after 10s" >&2
+      echo "  another bin/seon invocation may be in progress;" >&2
+      echo "  if stale: rm -rf $lock" >&2
+      exit 1
+    fi
+    sleep 0.1
+  done
+  # shellcheck disable=SC2064
+  trap "rmdir '$lock' 2>/dev/null || true" EXIT INT TERM
+}
+
+# ============================================================
+# Aliveness check — handles both managed and adopted PIDs.
+# ============================================================
+
+is_running() {
+  local name="$1"
+  local pf
+  pf="$(pid_file "$name")"
+  [ -f "$pf" ] || return 1
+  local pid
+  pid="$(cat "$pf")"
+  [ -n "$pid" ] || return 1
+  kill -0 "$pid" 2>/dev/null
+}
+
+# ============================================================
+# Subcommands.
+# ============================================================
+
+cmd_start() {
+  local name="${1:?start requires a process name}"
+  acquire_lock "$name"
+
+  if is_running "$name"; then
+    echo "● $name already running (pid $(cat "$(pid_file "$name")"))"
+    return 0
+  fi
+
+  local cmd
+  cmd="$(process_command "$name")" || { echo "unknown process: $name" >&2; exit 1; }
+
+  # Fresh log on each start so tail isn't polluted with prior runs.
+  : > "$(log_file "$name")"
+
+  # nohup + & detaches from this shell; bash -c handles multi-word cmds.
+  nohup bash -c "$cmd" >> "$(log_file "$name")" 2>&1 &
+  local pid=$!
+
+  echo "$pid"        > "$(pid_file "$name")"
+  echo "$cmd"        > "$(cmd_file "$name")"
+  date -u +%FT%TZ    > "$(started_file "$name")"
+
+  echo "● $name started (pid $pid)"
+  echo "  log: logs/$name.log"
+  process_ready_hint "$name"
+}
+
+cmd_stop() {
+  local name="${1:?stop requires a process name}"
+  acquire_lock "$name"
+
+  if ! is_running "$name"; then
+    rm -f "$(pid_file "$name")"
+    echo "○ $name not running"
+    return 0
+  fi
+
+  local pid
+  pid="$(cat "$(pid_file "$name")")"
+  kill "$pid" 2>/dev/null || true
+
+  # Give 2.5s for graceful exit.
+  local i
+  for i in 1 2 3 4 5; do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.5
+  done
+
+  if kill -0 "$pid" 2>/dev/null; then
+    kill -9 "$pid" 2>/dev/null || true
+    echo "○ $name killed (SIGKILL, was pid $pid)"
+  else
+    echo "○ $name stopped (was pid $pid)"
+  fi
+
+  rm -f "$(pid_file "$name")"
+}
+
+cmd_restart() {
+  local name="${1:?restart requires a process name}"
+  cmd_stop "$name"
+  cmd_start "$name"
+}
+
+cmd_status() {
+  local procs
+  if [ "$#" -gt 0 ]; then
+    procs="$*"
+  else
+    procs="$(all_processes)"
+  fi
+  for name in $procs; do
+    if is_running "$name"; then
+      local pid started
+      pid="$(cat "$(pid_file "$name")")"
+      started="$(cat "$(started_file "$name")" 2>/dev/null || echo unknown)"
+      echo "● $name  pid=$pid  started=$started"
+    else
+      echo "○ $name  (not running)"
+    fi
+  done
+  # Bonus: surface the pod's port if it's been written.
+  if [ -f tmp/seon-port ]; then
+    echo "  pod port: $(cat tmp/seon-port)  →  http://127.0.0.1:$(cat tmp/seon-port)"
+  fi
+}
+
+cmd_tail() {
+  local name="${1:?tail requires a process name}"
+  local lf
+  lf="$(log_file "$name")"
+  if [ ! -f "$lf" ]; then
+    echo "no log for $name — start it first (bin/seon start $name)" >&2
+    exit 1
+  fi
+  exec tail -f "$lf"
+}
+
+cmd_logs() {
+  local name="${1:?logs requires a process name}"
+  local n="${2:-200}"
+  local lf
+  lf="$(log_file "$name")"
+  if [ ! -f "$lf" ]; then
+    echo "no log for $name" >&2
+    exit 1
+  fi
+  tail -n "$n" "$lf"
+}
+
+cmd_adopt() {
+  # Use case: process started manually in a terminal (e.g. node out/client/main.js
+  # in a watched tab) and the supervisor should now track it.
+  local name="${1:?adopt requires a process name}"
+  local pid="${2:?adopt requires a PID}"
+  acquire_lock "$name"
+  if ! kill -0 "$pid" 2>/dev/null; then
+    echo "✗ pid $pid not alive" >&2; exit 1
+  fi
+  ensure_state "$name"
+  echo "$pid"        > "$(pid_file "$name")"
+  echo "(adopted)"   > "$(cmd_file "$name")"
+  date -u +%FT%TZ    > "$(started_file "$name")"
+  echo "● $name adopted (pid $pid)"
+  echo "  (no log file managed; the foreground terminal owns stdout)"
+}
+
+# ============================================================
+# Dispatch.
+# ============================================================
+
+case "${1:-help}" in
+  start)   shift; cmd_start "$@" ;;
+  stop)    shift; cmd_stop "$@" ;;
+  restart) shift; cmd_restart "$@" ;;
+  status)  shift; cmd_status "$@" ;;
+  tail)    shift; cmd_tail "$@" ;;
+  logs)    shift; cmd_logs "$@" ;;
+  adopt)   shift; cmd_adopt "$@" ;;
+  help|--help|-h|*)
+    cat <<'EOF'
+Usage: bin/seon <command> [process] [args...]
+
+Commands:
+  start <name>       Start a process (idempotent — no-op if already running)
+  stop <name>        Stop a process (idempotent)
+  restart <name>     stop + start
+  status [name]      Show one or all
+  tail <name>        tail -f logs/<name>.log  (Ctrl-C to exit)
+  logs <name> [n]    Last n lines (default 200)
+  adopt <name> <pid> Register a manually-started PID under <name>
+
+Processes (registered in script):
+  pod          node out/client/main.js
+  cljs-watch   clj -M:cljs watch client
+  jvm          ./bin/run
+
+Examples:
+  bin/seon start pod && bin/seon tail pod
+  bin/seon status
+  bin/seon restart cljs-watch
+
+Concurrency:
+  Multi-agent safe — any number of agents can invoke any command at
+  any time. The supervisor uses mkdir-as-mutex per process. If a
+  bin/seon invocation is killed mid-operation and leaves a stale
+  lock, remove with: rm -rf tmp/proc/<name>/lock
+EOF
+    ;;
+esac

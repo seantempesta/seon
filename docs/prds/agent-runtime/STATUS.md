@@ -54,6 +54,21 @@ in [README.md](README.md); don't re-litigate them.
 
 ## Recent ships (2026-05-23) — Platform track only
 
+### Platform track — multi-agent process supervisor `bin/seon`
+
+Idempotent, lock-safe (mkdir-mutex per process), multi-agent-friendly process supervisor. Replaces ad-hoc `pkill` / `nohup` / `lsof` patterns and resolves the ownership problem where two agents might race to start/stop the same process.
+
+```bash
+bin/seon start pod         # idempotent
+bin/seon status            # which procs alive, PIDs, pod port + URL
+bin/seon tail pod          # tail -f logs/pod.log (any number of agents OK)
+bin/seon restart cljs-watch
+```
+
+Registered: `pod`, `cljs-watch`, `jvm`. State at `tmp/proc/<name>/`, logs at `logs/<name>.log`. Full protocol: [[../../seon/process-management]]. CLAUDE.md "Surgical Process Management" section also rewritten to point at the supervisor.
+
+**Use this for any process lifecycle work** instead of running `node out/client/main.js` directly or pkilling. It's the only way concurrent agents don't step on each other.
+
 ### Platform track — render-surface rename + symbol lookup moved
 
 A-8 closed. Symbol resolution (`seon.render/resolve-symbol`) moved

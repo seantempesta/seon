@@ -413,13 +413,27 @@ ls data/datahike/  # On-disk LMDB store (no PID file — embedded)
 
 ### Surgical Process Management
 
+**Use `bin/seon` as the supervisor.** It's idempotent, multi-agent-safe (mkdir-mutex per process), and replaces ad-hoc `pkill` + `nohup` patterns. Any number of agents can call `start`/`stop`/`restart` simultaneously — the supervisor arbitrates. Logs go to `logs/<process>.log` (consistent path; any agent can `bin/seon tail <process>` from anywhere). See [[docs/seon/process-management]] for the full protocol.
+
+```bash
+bin/seon start pod         # idempotent — no-op if already running
+bin/seon status            # which processes are alive, PIDs, pod port
+bin/seon tail pod          # tail -f logs/pod.log
+bin/seon restart cljs-watch
+bin/seon stop pod
+```
+
+Registered processes: `pod` (CLJS pod via Node), `cljs-watch` (CLJS rebuild watcher), `jvm` (`./bin/run`). Add new ones by editing the `process_command` case statement at the top of the script.
+
+For inside-the-JVM REPL operations, the JVM REPL still has its own verbs:
+
 | Want to... | Do this |
 |-----------|---------|
 | Reload code | `(user/reload)` |
 | Restart the whole system (incl. DB connection) | `(user/reset)` |
 | Restart just the DB component | `(user/restart-db!)` |
 | Full data wipe | `(user/db-reset!)` |
-| Restart Seon JVM from scratch | `pkill -f seon.runner` then `./bin/run` |
+| Restart Seon JVM from scratch | `bin/seon restart jvm` (was `pkill -f seon.runner` then `./bin/run`) |
 
 ### Recovery Procedures
 
