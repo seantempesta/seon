@@ -111,7 +111,7 @@
 ;; deterministic from the id via `home-ns`.
 ;; ============================================================
 
-(schema/register! :seon.agent/id            :string)
+(schema/register! :seon.agent/id            [:string {:seon.db/identity true}])
 (schema/register! :seon.agent/state         [:enum :idle :running])
 ;; v0 :seon.agent/turn-count, :seon.agent/turns-since-user,
 ;; :seon.agent/interrupted? attrs deleted 2026-05-22. turn-count
@@ -136,7 +136,7 @@
         (db/entity {:seon.db/ref [:seon.agent/id agent-id]}))
       default-turns-cap))
 
-(schema/register! :seon.message/id      [:string {:min 12 :max 12}])
+(schema/register! :seon.message/id      [:string {:min 12 :max 12 :seon.db/identity true}])
 (schema/register! :seon.message/role    [:enum :user :assistant :system])
 (schema/register! :seon.message/content :string)
 ;; :seon.message/agent — present on user-originated messages
@@ -148,15 +148,22 @@
 (schema/register! :seon.message/agent   :seon.db/ref)
 (schema/register! :seon.message/at      :inst)
 
-(schema/register! :seon.eval/id         [:string {:min 12 :max 12}])
-(schema/register! :seon.eval/agent      :seon.db/ref)
-(schema/register! :seon.eval/at         :inst)
-(schema/register! :seon.eval/turn       :int)
-(schema/register! :seon.eval/narration  :string)
-(schema/register! :seon.eval/source     :string)
-(schema/register! :seon.eval/ok?        :boolean)
-(schema/register! :seon.eval/result-edn :string)
-(schema/register! :seon.eval/error      :string)
+(schema/register! :seon.eval/id          [:string {:min 12 :max 12 :seon.db/identity true}])
+(schema/register! :seon.eval/at          :inst)
+;; Wall-clock duration of the eval in milliseconds. Populated by
+;; seon.eval/eval-batch! per form. Used by the slow-eval warning
+;; predicate (v1.md §5.2) without needing to walk evals or compute
+;; differences from :at timestamps.
+(schema/register! :seon.eval/duration-ms :int)
+(schema/register! :seon.eval/narration   :string)
+(schema/register! :seon.eval/source      :string)
+(schema/register! :seon.eval/ok?         :boolean)
+(schema/register! :seon.eval/result-edn  :string)
+(schema/register! :seon.eval/error       :string)
+;; :seon.eval/agent and :seon.eval/turn deleted 2026-05-23 — evals
+;; now land as component-many children of :seon.turn/evals (v1.md
+;; §2.1). Agent ref is reachable via the component chain (agent →
+;; sessions → turns → evals); the standalone back-refs were noise.
 
 ;; ============================================================
 ;; v1 causality graph — :seon.session + :seon.turn entities (v1.md §2.1).
@@ -176,20 +183,58 @@
 ;; default-id refactor.
 ;; ============================================================
 
-(schema/register! :seon.session/id               [:string {:min 12 :max 12}])
+(schema/register! :seon.session/id               [:string {:min 12 :max 12 :seon.db/identity true}])
 (schema/register! :seon.session/at               :inst)
 (schema/register! :seon.session/turns-since-user :int)
-(schema/register! :seon.session/turns            [:vector :seon.db/ref])
+;; :db/isComponent on the ref vectors — retracting a session/turn
+;; cascade-retracts its child entities, and one nested pull on the
+;; agent walks the whole causality chain inline (v1.md §2.1).
+(schema/register! :seon.session/turns            [:vector {:seon.db/component true} :seon.db/ref])
 
-(schema/register! :seon.turn/id           [:string {:min 12 :max 12}])
+(schema/register! :seon.turn/id           [:string {:min 12 :max 12 :seon.db/identity true}])
 (schema/register! :seon.turn/at           :inst)
 (schema/register! :seon.turn/status       [:enum :running :done :error])
 (schema/register! :seon.turn/prompt-text  :string)
-(schema/register! :seon.turn/messages     [:vector :seon.db/ref])
-(schema/register! :seon.turn/evals        [:vector :seon.db/ref])
+(schema/register! :seon.turn/messages     [:vector {:seon.db/component true} :seon.db/ref])
+(schema/register! :seon.turn/evals        [:vector {:seon.db/component true} :seon.db/ref])
 
 (schema/register! :seon.agent/current-ns  :keyword)
-(schema/register! :seon.agent/sessions    [:vector :seon.db/ref])
+(schema/register! :seon.agent/sessions    [:vector {:seon.db/component true} :seon.db/ref])
+
+;; ============================================================
+;; v1 §5.1 — :seon.ctx entity. One section in the agent's render
+;; layout. Component-owned by the agent via :seon.agent/ctx, sorted
+;; by :seon.ctx/priority at render time. :seon.ctx/fn is a fully-
+;; qualified symbol resolved via seon.eval/lookup-value at call time.
+;; ============================================================
+
+(schema/register! :seon.ctx/name     :keyword)
+(schema/register! :seon.ctx/priority :int)
+(schema/register! :seon.ctx/fn       :symbol)
+
+(schema/register! :seon.agent/ctx    [:vector {:seon.db/component true} :seon.db/ref])
+
+;; ============================================================
+;; v1 §2.2 — program graph. :seon.ns owns the namespace source;
+;; :seon.fn / :seon.schema reference their ns via child→parent
+;; plain refs (NOT component — a fn does not own its ns). Identity
+;; attrs upsert on redefine; history retains prior :source values.
+;;
+;; Substrate fns/schemas/nses populate via bootstrap.edn on first
+;; boot (§7.3); agent-defined entities populate via detect-and-tee
+;; in eval-batch! (§4.2 step 7).
+;; ============================================================
+
+(schema/register! :seon.ns/name    [:keyword {:seon.db/identity true}])
+(schema/register! :seon.ns/source  :string)
+
+(schema/register! :seon.fn/sym     [:string {:seon.db/identity true}])
+(schema/register! :seon.fn/ns      :seon.db/ref)
+(schema/register! :seon.fn/source  :string)
+
+(schema/register! :seon.schema/key    [:keyword {:seon.db/identity true}])
+(schema/register! :seon.schema/ns     :seon.db/ref)
+(schema/register! :seon.schema/source :string)
 
 ;; ============================================================
 ;; Home-ns derivation. Per spec-05 §22.5 the agent's home ns is a
@@ -510,24 +555,27 @@
                      :seon.message/role :assistant
                      :seon.message/content reply-text
                      :seon.message/at (js/Date.)}]}]}))
-          ;; 6. Eval the forms. eval-batch! still writes evals with
-          ;; :seon.eval/agent + numeric :seon.eval/turn; the move
-          ;; to `:seon.turn/evals` component refs lands when the
-          ;; eval-pipeline refactor follows.
+          ;; 6. Eval the forms. eval-batch! attaches each :seon.eval
+          ;; as a component child of the turn (v1.md §2.1) and returns
+          ;; {:seon.eval/ids :seon.eval/n-ok :seon.eval/n-fail} so the
+          ;; loop's stop policy can distinguish "10 evals all failed"
+          ;; from "10 evals all succeeded".
           parsed (repl/parse-forms reply-text)
           _ (log id turn-idx "parsed" (count parsed) "forms")
-          eids   (await (seval/eval-batch! compile-state parsed
-                                           (home-ns id) id turn-idx))
+          batch  (await (seval/eval-batch! compile-state parsed
+                                           (home-ns id) id turn-id))
+          n-ok   (:seon.eval/n-ok   batch)
+          n-fail (:seon.eval/n-fail batch)
           ;; 7. Close the turn.
           _ (await
               (db/transact!
                 {:seon.db/tx-data
                  [{:seon.turn/id turn-id :seon.turn/status :done}
                   {:seon.agent/id id :seon.agent/state :idle}]}))]
-      (log id turn-idx "done" (count eids) "evals")
+      (log id turn-idx "done" n-ok "ok" n-fail "fail")
       (assoc (db/pull {:seon.db/pull-pattern '[*]
                        :seon.db/ref [:seon.turn/id turn-id]})
-             :seon.agent/eval-count (count eids)))
+             :seon.agent/eval-count n-ok))
     (catch :default e
       (log id "?" "run-turn! error" (str e))
       (try
@@ -583,3 +631,444 @@
 
         :else
         (recur)))))
+
+;; ============================================================
+;; v1 §5 render-side helpers + section fns + composer.
+;;
+;; All purely additive against existing run-turn! / V0 ctx machinery.
+;; Read-only against the DB; nothing transacts state changes except
+;; reset-ctx! / update-ctx! (which the agent invokes explicitly).
+;;
+;; Wire-up to run-turn! (replace render/ai-render call with
+;; assemble-ctx) is task #6 and lands after Platform's Patch 1/2
+;; for eval-batch! so the work doesn't conflict.
+;; ============================================================
+
+;; ------------------------------------------------------------
+;; Pretty-print + truncation helpers.
+;; ------------------------------------------------------------
+
+(defn host-timezone
+  "IANA tz string for the running pod, or 'UTC' if Intl is unavailable."
+  []
+  (try
+    (or (some-> (js/Intl.DateTimeFormat.) .resolvedOptions .-timeZone) "UTC")
+    (catch :default _ "UTC")))
+
+(defn truncate-edn
+  "pr-str a value, truncate to ~2 KB for display in the eval log
+   (v1.md §1's three-tier storage rule: DB datoms hold projections,
+   not full content)."
+  ([v] (truncate-edn v 2048))
+  ([v limit]
+   (let [s (pr-str v)]
+     (if (> (count s) limit)
+       (str (subs s 0 (max 0 (- limit 4))) " ...")
+       s))))
+
+(defn- format-message-row
+  "Single-line render for the messages tile."
+  [{role :seon.message/role content :seon.message/content}]
+  (str (name role) ": " content))
+
+(defn- format-eval-row
+  "Multi-line render for the recent-evals tile — narration, source,
+   result/error, and the timing footer (`; # eval-id  Nms`)."
+  [{src     :seon.eval/source
+    ok?     :seon.eval/ok?
+    res     :seon.eval/result-edn
+    err     :seon.eval/error
+    eid     :seon.eval/id
+    dur     :seon.eval/duration-ms
+    narr    :seon.eval/narration}]
+  (let [body (cond
+               ok?                            (or res "nil")
+               (and (string? err)
+                    (not (str/blank? err)))   (str ";; ERROR " err)
+               :else                          ";; <no result>")
+        footer (str "  ; # " eid (when dur (str "  " dur "ms")))]
+    (str (when (and narr (not (str/blank? narr))) (str narr "\n"))
+         "> " src "\n"
+         body footer)))
+
+;; ------------------------------------------------------------
+;; Read API — what the agent calls from its REPL to walk its own
+;; state. All sync, all pulling from the live conn. Match v1.md §5's
+;; map-arg convention with smart defaults.
+;; ------------------------------------------------------------
+
+(defn root-pull
+  "One nested pull walks the agent's whole causality graph: sessions
+   → turns → (messages + evals) + ctx. Components inline, so a single
+   call returns the full tree.  v1.md §2.4 idiom #1."
+  ([] (root-pull {}))
+  ([{:seon.agent/keys [id] :or {id default-id}}]
+   (db/pull
+     {:seon.db/pull-pattern
+      '[* {:seon.agent/sessions
+           [* {:seon.session/turns
+               [* {:seon.turn/messages [*]
+                   :seon.turn/evals    [*]}]}]
+          :seon.agent/ctx [*]}]
+      :seon.db/ref [:seon.agent/id id]})))
+
+(defn messages
+  "Last N user/assistant/system messages on the agent's current
+   session, oldest-first.  Walks :seon.session/turns →
+   :seon.turn/messages (component refs), so the values are inlined
+   without an extra query. Default {:seon.agent/n 50}."
+  ([] (messages {}))
+  ([{:seon.agent/keys [n id] :or {n 50 id default-id}}]
+   (let [session (current-session id)
+         msgs    (for [t (sort-by :seon.turn/at (:seon.session/turns session))
+                       m (sort-by :seon.message/at (:seon.turn/messages t))]
+                   m)]
+     (vec (take-last n msgs)))))
+
+(defn current-turn
+  "Most-recent :seon.turn on the agent's current session — the one
+   that's :running, or the last :done if no turn is open."
+  ([] (current-turn {}))
+  ([{:seon.agent/keys [id] :or {id default-id}}]
+   (let [session (current-session id)]
+     (last (sort-by :seon.turn/at (:seon.session/turns session))))))
+
+(defn evals
+  "Last N :seon.eval entries for the agent's current session,
+   oldest-first.
+
+   v1 spec puts evals as component-many on :seon.turn/evals (v1.md
+   §2.1). Today eval-batch! still writes them under :seon.eval/agent
+   + :seon.eval/turn :int (V0 shape — PLATFORM-FLAG 2). This fn
+   reads the spec shape; once Platform's Patch 2 migrates eval-batch!,
+   this returns data without changes. Default {:seon.agent/n 20}."
+  ([] (evals {}))
+  ([{:seon.agent/keys [n id] :or {n 20 id default-id}}]
+   (let [session (current-session id)
+         es      (for [t (sort-by :seon.turn/at (:seon.session/turns session))
+                       e (sort-by :seon.eval/at (:seon.turn/evals t))]
+                   e)]
+     (vec (take-last n es)))))
+
+(defn ctx-entities
+  "Pull the agent's :seon.agent/ctx vector with each :seon.ctx entity
+   inlined. Sorted by :seon.ctx/priority. Useful for inspection
+   and for the agent's layout-editing flow."
+  ([] (ctx-entities {}))
+  ([{:seon.agent/keys [id] :or {id default-id}}]
+   (->> (db/pull {:seon.db/pull-pattern
+                  '[{:seon.agent/ctx [:db/id :seon.ctx/name
+                                      :seon.ctx/priority :seon.ctx/fn]}]
+                  :seon.db/ref [:seon.agent/id id]})
+        :seon.agent/ctx
+        (sort-by :seon.ctx/priority)
+        vec)))
+
+;; ------------------------------------------------------------
+;; Warning-predicate registry (v1.md §5.2).
+;;
+;; Atom-backed, volatile. Predicate functions survive across pod
+;; restart because they're agent-eval'd code — the resume phase
+;; re-evals each :seon.fn/source which re-runs the (register-warning!
+;; 'sym) call that lives in or alongside the predicate's defining
+;; form. The atom itself doesn't persist; the act of resuming the
+;; agent's code restores the registry as a side effect.
+;;
+;; This intentionally diverges from "DB-entity for everything" —
+;; predicates are CODE the agent calls, not data the agent queries,
+;; and the registration is a coupling between code and the warnings
+;; tile rather than a piece of persisted state.
+;; ------------------------------------------------------------
+
+(defonce !warning-predicates (atom #{}))
+
+(defn register-warning!
+  "Add `sym` (a fully-qualified symbol) to the warning-predicate
+   registry. Idempotent (set semantics). Each call to
+   warnings-section resolves these symbols at render time via
+   seon.eval/lookup-value, so the predicate fn can be redefined
+   between renders and the new version takes effect immediately."
+  [sym]
+  (swap! !warning-predicates conj sym)
+  sym)
+
+(defn unregister-warning!
+  "Remove `sym` from the registry. Idempotent."
+  [sym]
+  (swap! !warning-predicates disj sym)
+  sym)
+
+(defn registered-warning-predicates
+  "Resolve every registered symbol to its live fn, dropping any that
+   no longer resolve (deleted defns, typos)."
+  []
+  (keep seval/lookup-value @!warning-predicates))
+
+;; ------------------------------------------------------------
+;; Default warning predicates (v1.md §5.2).
+;;
+;; slow-eval-warning is the spec's one default. recent-eval-errors
+;; is added per MVP decision (2026-05-23) — the agent's only header-
+;; level correctness signal. Without it, ok?=false evals are visible
+;; only inline in recent-evals-section, with no rollup.
+;; ------------------------------------------------------------
+
+(def slow-eval-threshold-ms 500)
+
+(defn slow-eval-warning
+  "Predicate: returns warning maps for any eval in the recent N whose
+   :seon.eval/duration-ms exceeds the slow-eval threshold."
+  [_input]
+  (for [e (evals {:seon.agent/n 20})
+        :when (> (or (:seon.eval/duration-ms e) 0) slow-eval-threshold-ms)]
+    {:seon.warning/severity :info
+     :seon.warning/text
+     (str "slow eval " (:seon.eval/id e)
+          " took " (:seon.eval/duration-ms e) "ms")}))
+
+(defn recent-eval-errors
+  "Predicate: surfaces ok?=false evals from the agent's recent N as
+   a single rollup warning (the per-form details still appear inline
+   in recent-evals-section). Header-level correctness signal — without
+   this the agent has no way to notice 'my last 5 forms all failed'
+   except by scanning the eval log."
+  [_input]
+  (let [failed (filter #(false? (:seon.eval/ok? %)) (evals {:seon.agent/n 20}))]
+    (when (seq failed)
+      [{:seon.warning/severity :warn
+        :seon.warning/text
+        (str (count failed) " failed eval"
+             (when (> (count failed) 1) "s")
+             " in the last 20: "
+             (str/join ", " (map :seon.eval/id failed)))}])))
+
+;; Auto-register the two substrate defaults at ns-load. Idempotent
+;; (atom is a set); re-runs on hot reload without duplicating.
+(register-warning! 'seon.agent/slow-eval-warning)
+(register-warning! 'seon.agent/recent-eval-errors)
+
+;; ------------------------------------------------------------
+;; Section fns (v1.md §5.2). Each takes :seon.render/system-input
+;; {:seon.db/db :seon.agent/id} optionally with :seon.agent/ctx-entity
+;; (the :seon.ctx entity that named this section, so the fn can read
+;; per-section overrides like :seon.agent/n). Returns a string;
+;; empty string = section suppressed by the composer.
+;; ------------------------------------------------------------
+
+(defn system-section
+  "REPL header: who-am-I, what's-now, discovery cheat-sheet."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [{:seon.db/keys [db] :seon.agent/keys [id]}]
+  (let [agent (db/pull {:seon.db/db db
+                        :seon.db/pull-pattern
+                        '[:seon.agent/id :seon.agent/current-ns]
+                        :seon.db/ref [:seon.agent/id id]})
+        ns    (or (:seon.agent/current-ns agent) (home-ns id))
+        now   (.toISOString (js/Date.))]
+    (str "<system agent=\"" id "\" ns=\"" ns "\">\n"
+         "  Now: " now "  (pod tz: " (host-timezone) ")\n"
+         "\n"
+         "  Walk your own state:\n"
+         "    (seon.agent/root-pull)       ; you + sessions + turns + messages + evals + ctx\n"
+         "    (seon.agent/messages)        ; current session's messages — default {:seon.agent/n 50}\n"
+         "    (seon.agent/evals)           ; current session's evals — default {:seon.agent/n 20}\n"
+         "    (seon.agent/current-turn)    ; this turn's entity\n"
+         "    (result <eval-id>)           ; full live result of a prior eval (this session)\n"
+         "\n"
+         "  See your code in the current ns:\n"
+         "    (seon.db/pull {:seon.db/pull-pattern\n"
+         "                    '[:seon.ns/source\n"
+         "                       {:seon.fn/_ns [*] :seon.schema/_ns [*]}]\n"
+         "                    :seon.db/ref [:seon.ns/name (:seon.agent/current-ns ...)]})\n"
+         "\n"
+         "  Tune your context:\n"
+         "    (seon.agent/ctx-entities)    ; your section layout\n"
+         "    (seon.agent/update-ctx! id f) ; reshape (swap fn, change priority, etc.)\n"
+         "    (seon.agent/reset-ctx! id)   ; restore substrate defaults\n"
+         "</system>")))
+
+(defn messages-section
+  "Recent user/assistant conversation. Reads :seon.agent/n from the
+   ctx-entity if present, else defaults to 50."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [{:seon.agent/keys [id] :as input}]
+  (let [n    (or (:seon.agent/n (:seon.agent/ctx-entity input)) 50)
+        msgs (messages {:seon.agent/n n :seon.agent/id id})]
+    (if (seq msgs)
+      (str "<messages>\n"
+           (str/join "\n" (map format-message-row msgs))
+           "\n</messages>")
+      "")))
+
+(defn current-ns-section
+  "Every entity owned by the agent's current ns — ns source + every
+   :seon.fn / :seon.schema whose :ns is this ns — via one reverse-ref
+   pull. Empty string today because eval-batch!'s detect-and-tee step
+   (Platform's Patch 2) hasn't shipped, so no program-graph entities
+   exist. Auto-populates once Patch 2 lands."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [{:seon.db/keys [db] :seon.agent/keys [id]}]
+  (let [agent (db/pull {:seon.db/db db
+                        :seon.db/pull-pattern '[:seon.agent/current-ns]
+                        :seon.db/ref [:seon.agent/id id]})
+        ns    (or (:seon.agent/current-ns agent) (home-ns id))
+        owned (db/pull {:seon.db/db db
+                        :seon.db/pull-pattern
+                        '[:seon.ns/source
+                          {:seon.schema/_ns [:seon.schema/source]
+                           :seon.fn/_ns     [:seon.fn/source]}]
+                        :seon.db/ref [:seon.ns/name (keyword (str ns))]})
+        parts (concat
+                (when-let [src (:seon.ns/source owned)] [src])
+                (map :seon.schema/source (:seon.schema/_ns owned))
+                (map :seon.fn/source     (:seon.fn/_ns owned)))]
+    (if (seq parts)
+      (str "<current-namespace name=\"" ns "\">\n"
+           (str/join "\n\n" parts)
+           "\n</current-namespace>")
+      "")))
+
+(defn warnings-section
+  "Run every registered predicate. Each returns nil or a seq of
+   {:seon.warning/severity :seon.warning/text} maps. Sorted by severity
+   descending (:error → :warn → :info)."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [input]
+  (let [preds (registered-warning-predicates)
+        ws    (->> (for [p preds, w (p input) :when w] w)
+                   (sort-by (fn [{sev :seon.warning/severity}]
+                              ({:error 0 :warn 1 :info 2} sev 3))))]
+    (if (seq ws)
+      (str "<warnings>\n"
+           (str/join "\n" (map :seon.warning/text ws))
+           "\n</warnings>")
+      "")))
+
+(defn recent-evals-section
+  "Last N evals in the current session, oldest-first. Reads
+   :seon.agent/n from the ctx-entity if present, else defaults to 20."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [{:seon.agent/keys [id] :as input}]
+  (let [n  (or (:seon.agent/n (:seon.agent/ctx-entity input)) 20)
+        es (evals {:seon.agent/n n :seon.agent/id id})]
+    (if (seq es)
+      (str "<recent-evals>\n"
+           (str/join "\n\n" (map format-eval-row es))
+           "\n</recent-evals>")
+      "")))
+
+(defn prompt-section
+  "Trailing `:current.ns=> ; turn N` line. Always present."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [{:seon.db/keys [db] :seon.agent/keys [id]}]
+  (let [agent   (db/pull {:seon.db/db db
+                          :seon.db/pull-pattern '[:seon.agent/current-ns]
+                          :seon.db/ref [:seon.agent/id id]})
+        ns      (or (:seon.agent/current-ns agent) (home-ns id))
+        sess    (current-session id)
+        n-turns (count (:seon.session/turns sess))]
+    (str ns "=>  ; turn " n-turns)))
+
+;; ------------------------------------------------------------
+;; Composer (v1.md §5.3).
+;;
+;; Reads the agent's :seon.agent/ctx, sorts by priority, resolves
+;; each :seon.ctx/fn symbol via seon.eval/lookup-value, calls it with
+;; the system-input map (plus :seon.agent/ctx-entity), joins the
+;; non-blank results.
+;;
+;; Return shape per MVP decision Q1 (2026-05-23): just
+;; {:seon.render/text "..."}. :seon.turn/prompt-text is run-turn!'s
+;; responsibility to persist (v1.md §6.1 step 3) — composer does not
+;; double-write.
+;;
+;; v2 will extend section-fn return maps with :seon.render/hiccup
+;; alongside :seon.render/text; the composer joins both surfaces
+;; without needing a new :seon.ctx slot.
+;; ------------------------------------------------------------
+
+(defn pretty-ai
+  "Fallback render when a :seon.ctx/fn symbol doesn't resolve.
+   v1.md §5.1 contract: 'symbol misses fall through to pretty-print
+   — the composer renders the section entity itself.'"
+  [section-entity]
+  (str "<unresolved-section name=\""
+       (:seon.ctx/name section-entity)
+       "\">"
+       (pr-str (dissoc section-entity :db/id))
+       "</unresolved-section>"))
+
+(defn assemble-ctx
+  "Compose the LLM ctx from :seon.agent/ctx entities. Returns
+   {:seon.render/text 'composed-text'} matching :seon.render/ai-response."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [{:seon.db/keys [db] :seon.agent/keys [id] :as input}]
+  (let [agent    (db/pull {:seon.db/db db
+                           :seon.db/pull-pattern
+                           '[:seon.agent/id
+                             {:seon.agent/ctx
+                              [:seon.ctx/name :seon.ctx/priority :seon.ctx/fn]}]
+                           :seon.db/ref [:seon.agent/id id]})
+        sections (sort-by :seon.ctx/priority (:seon.agent/ctx agent))
+        ctx-in   (assoc input :seon.agent/ctx-entity nil)
+        text     (->> sections
+                      (map (fn [section]
+                             (let [f  (seval/lookup-value (:seon.ctx/fn section))
+                                   in (assoc ctx-in :seon.agent/ctx-entity section)]
+                               (if f
+                                 (f in)
+                                 (pretty-ai section)))))
+                      (remove str/blank?)
+                      (str/join "\n\n"))]
+    {:seon.render/text text}))
+
+;; ------------------------------------------------------------
+;; Layout verbs — reset-ctx! restores substrate defaults; update-ctx!
+;; threads f over the current :seon.agent/ctx and retract-then-adds
+;; the result. Component-cardinality-many means the retract is needed
+;; to drop the old ctx entities before transacting new ones (per
+;; v1.md §5.4 — cardinality-many ref attrs accumulate on upsert).
+;; ------------------------------------------------------------
+
+(defn substrate-default-ctx
+  "The six default :seon.ctx maps that ship with every fresh agent
+   (v1.md §5.2). Smallest priority first."
+  []
+  [{:seon.ctx/name :system       :seon.ctx/priority 10
+    :seon.ctx/fn   'seon.agent/system-section}
+   {:seon.ctx/name :messages     :seon.ctx/priority 20
+    :seon.ctx/fn   'seon.agent/messages-section}
+   {:seon.ctx/name :current-ns   :seon.ctx/priority 30
+    :seon.ctx/fn   'seon.agent/current-ns-section}
+   {:seon.ctx/name :warnings     :seon.ctx/priority 40
+    :seon.ctx/fn   'seon.agent/warnings-section}
+   {:seon.ctx/name :recent-evals :seon.ctx/priority 50
+    :seon.ctx/fn   'seon.agent/recent-evals-section}
+   {:seon.ctx/name :prompt       :seon.ctx/priority 99
+    :seon.ctx/fn   'seon.agent/prompt-section}])
+
+(defn ^:async reset-ctx!
+  "Restore the substrate-default ctx layout for `agent-id`. Retracts
+   :seon.agent/ctx (cascade-retracts the existing :seon.ctx entities
+   via component semantics), then transacts the six defaults."
+  [agent-id]
+  (await (db/transact!
+           {:seon.db/tx-data
+            [[:db/retract [:seon.agent/id agent-id] :seon.agent/ctx]
+             {:seon.agent/id agent-id
+              :seon.agent/ctx (substrate-default-ctx)}]})))
+
+(defn ^:async update-ctx!
+  "Apply `f` to the current ctx vector for `agent-id`; transact the
+   result. `f` receives the existing seq of :seon.ctx entity maps
+   (component-inlined via pull) and returns a vector of ctx maps.
+   Use to add/remove sections or change priorities without blowing
+   away the whole layout."
+  [agent-id f]
+  (let [current (ctx-entities {:seon.agent/id agent-id})
+        new-ctx (vec (f current))]
+    (await (db/transact!
+             {:seon.db/tx-data
+              [[:db/retract [:seon.agent/id agent-id] :seon.agent/ctx]
+               {:seon.agent/id agent-id
+                :seon.agent/ctx new-ctx}]}))))

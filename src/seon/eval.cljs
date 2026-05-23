@@ -562,17 +562,24 @@
       {:ok true :value v})))
 
 (defn ^:async record-eval!
-  "Transact one :seon.eval entity capturing this form's narration,
-   source, and result. Soft-fails — a DB write failure is logged but
-   doesn't abort the batch."
-  [{:keys [eval-id agent-id turn-n at narration source result]}]
-  (let [tx-data [(cond-> {:seon.eval/id        eval-id
-                          :seon.eval/agent     [:seon.agent/id agent-id]
-                          :seon.eval/at        at
-                          :seon.eval/turn      turn-n
-                          :seon.eval/narration (or narration "")
-                          :seon.eval/source    source
-                          :seon.eval/ok?       (boolean (:ok result))}
+  "Transact one :seon.eval entity as a component child of its owning
+   turn (per v1.md §2.1 — `:seon.turn/evals` is component-many). The
+   nested-map shorthand creates the eval inline; datahike's component
+   semantics mean a one-pull on the turn returns its evals without
+   needing a back-ref query.
+
+   Soft-fails — a DB write failure is logged but doesn't abort the
+   batch. The tx auto-tags with whatever causality bundle is in
+   `(seon.db/current-tx-context)` (eval-batch! opens the per-eval
+   scope with `:seon.db/agent-id` + `:seon.db/eval-id` + `:seon.db/
+   origin :agent`, plus whatever the caller layered above)."
+  [{:keys [eval-id turn-id at narration source result duration-ms]}]
+  (let [eval-map (cond-> {:seon.eval/id          eval-id
+                          :seon.eval/at          at
+                          :seon.eval/duration-ms (or duration-ms 0)
+                          :seon.eval/narration   (or narration "")
+                          :seon.eval/source      source
+                          :seon.eval/ok?         (boolean (:ok result))}
                    (:ok result)
                    (assoc :seon.eval/result-edn
                           (try (pr-str (:value result))
@@ -581,7 +588,12 @@
                    (not (:ok result))
                    (assoc :seon.eval/error
                           (try (pr-str (:error result))
-                               (catch :default _ (str (:error result))))))]
+                               (catch :default _ (str (:error result))))))
+        ;; Attach the eval as a component child of the turn. Datahike's
+        ;; cardinality-many ref accumulates on upsert — each record-eval!
+        ;; call appends one eval to the turn's evals set.
+        tx-data  [{:seon.turn/id    turn-id
+                   :seon.turn/evals [eval-map]}]
         r (await (db/transact! {:seon.db/tx-data tx-data}))]
     (when-not (:seon.db/ok? r)
       (js/console.warn "[seon.eval/eval-batch!] record-eval! tx failed:"
@@ -589,66 +601,122 @@
                        "— source:" source))))
 
 (defn ^:async eval-batch!
-  "Execute a sequence of parsed (narration, form) pairs as a REPL
-   batch. Partial-failure: every pair gets its own try + record +
-   stash; form N+1 always runs even if N failed.
+  "Execute a sequence of parsed entries as a REPL batch. Partial-
+   failure: every entry gets its own try + record + stash; entry
+   N+1 always runs even if N failed.
 
-   Per pair:
+   Per entry, two kinds:
+
+   `:kind :form` (the normal path):
      1. Read current-ns from agent's atom (defaults to agent-ns-sym).
-     2. (await (eval compile-state source current-ns))
-     3. Update !current-ns from the result's :ns (the ending ns) —
-        that's how (ns other) inside a form affects subsequent forms.
-     4. Stash the live value in !results under the eval-id kw.
-     5. Transact a :seon.eval entity (durable record).
+     2. Capture start time. (await (eval compile-state source current-ns))
+     3. Auto-await Promise return values so agent code calling
+        ^:async fns gets the resolved value or the rejection.
+     4. Compute duration-ms = (now - start).
+     5. Update !current-ns from the result's :ns (so (ns other) inside
+        a form affects subsequent forms).
+     6. Stash the live value in !results under the eval-id kw.
+     7. Transact a :seon.eval entity (durable record).
+
+   `:kind :read` (a parse-forms failure, see seon.parse):
+     1. Skip the eval (there's nothing to evaluate).
+     2. Synthesize a `{:ok false :error <read-failure-map>}` result.
+     3. Record as a failed :seon.eval entity so the agent sees its
+        own broken text in the next turn's ctx and self-corrects.
+     4. duration-ms = 0 (no eval happened).
+
+   Per-form work is wrapped in `(db/with-tx-context {…} f)` so every
+   transact inside auto-tags with the causality bundle (agent-id +
+   eval-id + origin). Callers that establish a wider scope first
+   (e.g. agent.cljs/run-turn! adding turn-id) get those keys layered
+   in via with-tx-context's merge.
 
    Args:
      compile-state — the bootstrap compile-state (defonce'd at boot)
-     parsed        — vector of {:narration :source :form} maps
-                     (from seon.repl/parse-forms)
+     parsed        — vector from `seon.parse/parse-forms`
+                     (mix of `:kind :form` and `:kind :read` entries)
      agent-ns-sym  — agent's home ns (e.g. 'seon.agent.seon)
      agent-id      — the owning agent's id
-     turn-n        — the turn counter
+     turn-id       — the owning :seon.turn/id string (eval lands as a
+                     component child of this turn via :seon.turn/evals)
 
-   Returns the ordered vector of eval-id strings."
-  [compile-state parsed agent-ns-sym agent-id turn-n]
-  (let [eids (volatile! [])]
-    (doseq [{:keys [narration source]} parsed]
-      (let [eval-id     (new-eval-id)
-            at          (js/Date.)
-            current-ns  (await (read-current-ns compile-state agent-ns-sym))
-            raw-result  (await (eval compile-state source
-                                     {:ns current-ns
-                                      :analyze-deps? false}))
-            ;; Auto-await Promise return values so agent code calling
-            ;; ^:async fns (seon.db/transact!, etc.) gets the resolved
-            ;; value, not the Promise. If the Promise rejects, that
-            ;; becomes the form's error.
-            result
-            (cond
-              ;; Form itself failed (compile / read / runtime throw)
-              (not (:ok raw-result)) raw-result
-              ;; Form succeeded; the value might be a Promise.
-              :else (let [r2 (await (maybe-await-value (:value raw-result)))]
-                      (if (:ok r2)
-                        {:ok true :value (:value r2) :ns (:ns raw-result)}
-                        ;; Promise rejected — surface the rejection as the form's error
-                        r2)))]
-        ;; Track ending ns for REPL-style navigation. nil means the form
-        ;; failed before producing one (compile error etc.); leave atom alone.
-        (when (and (:ok result) (:ns raw-result))
-          (await (update-current-ns! compile-state agent-ns-sym (:ns raw-result))))
-        ;; Live-value stash — direct js/Reflect.set on globalThis, no
-        ;; eval-str round-trip (so opaque values like datahike DB tagged
-        ;; literals don't break the stash). Agent reads via (result :id).
-        (when (:ok result)
-          (stash-result-raw! eval-id (:value result)))
-        ;; Durable record — always.
-        (await (record-eval! {:eval-id   eval-id
-                              :agent-id  agent-id
-                              :turn-n    turn-n
-                              :at        at
-                              :narration narration
-                              :source    source
-                              :result    result}))
+   Returns `{:seon.eval/ids    [<id> ...]   ; ordered, one per entry
+             :seon.eval/n-ok   <int>        ; successful evals
+             :seon.eval/n-fail <int>}`     ; failed (eval-throw + read)
+
+   The caller (run-agentic-loop! stop-policy logic) reads :n-ok for
+   'progress made this turn' and :n-fail to surface to the agent's
+   warnings tile."
+  [compile-state parsed agent-ns-sym agent-id turn-id]
+  (let [eids   (volatile! [])
+        n-ok   (volatile! 0)
+        n-fail (volatile! 0)]
+    (doseq [entry parsed]
+      (let [eval-id    (new-eval-id)
+            tx-context {:seon.db/agent-id agent-id
+                        :seon.db/eval-id  eval-id
+                        :seon.db/origin   :agent}]
+        (await
+          (db/with-tx-context tx-context
+            (fn ^:async run-one-entry! []
+              (cond
+                ;; Read-failure entry from seon.parse — no eval, record
+                ;; directly as a failed :seon.eval so the agent sees it.
+                (and (= :read (:kind entry)) (false? (:ok? entry)))
+                (do
+                  (await (record-eval!
+                           {:eval-id     eval-id
+                            :turn-id     turn-id
+                            :at          (js/Date.)
+                            :duration-ms 0
+                            :narration   (:narration entry)
+                            :source      (:source entry)
+                            :result      {:ok false
+                                          :error {:seon.error/kind    :read
+                                                  :seon.error/message (:error entry)}}}))
+                  (vswap! n-fail inc))
+
+                ;; Normal eval path.
+                :else
+                (let [{:keys [narration source]} entry
+                      at          (js/Date.)
+                      start-ms    (.now js/Date)
+                      current-ns  (await (read-current-ns compile-state agent-ns-sym))
+                      raw-result  (await (eval compile-state source
+                                               {:ns current-ns
+                                                :analyze-deps? false}))
+                      result
+                      (cond
+                        ;; Form itself failed (compile / read / runtime throw)
+                        (not (:ok raw-result)) raw-result
+                        ;; Form succeeded; the value might be a Promise.
+                        :else (let [r2 (await (maybe-await-value (:value raw-result)))]
+                                (if (:ok r2)
+                                  {:ok true :value (:value r2) :ns (:ns raw-result)}
+                                  ;; Promise rejected — surface as the form's error
+                                  r2)))
+                      duration-ms (- (.now js/Date) start-ms)]
+                  ;; Track ending ns for REPL-style navigation. nil means the form
+                  ;; failed before producing one (compile error etc.); leave atom alone.
+                  (when (and (:ok result) (:ns raw-result))
+                    (await (update-current-ns! compile-state agent-ns-sym (:ns raw-result))))
+                  ;; Live-value stash — direct js/Reflect.set on globalThis, no
+                  ;; eval-str round-trip (so opaque values like datahike DB tagged
+                  ;; literals don't break the stash). Agent reads via (result :id).
+                  (when (:ok result)
+                    (stash-result-raw! eval-id (:value result)))
+                  ;; Durable record — always.
+                  (await (record-eval! {:eval-id     eval-id
+                                        :turn-id     turn-id
+                                        :at          at
+                                        :duration-ms duration-ms
+                                        :narration   narration
+                                        :source      source
+                                        :result      result}))
+                  (if (:ok result)
+                    (vswap! n-ok   inc)
+                    (vswap! n-fail inc)))))))
         (vswap! eids conj eval-id)))
-    @eids))
+    {:seon.eval/ids    @eids
+     :seon.eval/n-ok   @n-ok
+     :seon.eval/n-fail @n-fail}))

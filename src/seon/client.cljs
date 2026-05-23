@@ -242,10 +242,12 @@
    :seon.message/at
 
    ;; --- Eval ---
+   ;; Evals are component-many on :seon.turn/evals — no standalone
+   ;; back-refs to agent / turn-n needed (reachable via the component
+   ;; chain). Deleted 2026-05-23.
    :seon.eval/id
-   :seon.eval/agent
    :seon.eval/at
-   :seon.eval/turn
+   :seon.eval/duration-ms
    :seon.eval/narration
    :seon.eval/source
    :seon.eval/ok?
