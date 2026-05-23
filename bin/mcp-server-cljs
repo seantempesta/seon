@@ -257,19 +257,33 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- stale-runtime?
-  "True if the eval result indicates the JS runtime is missing or
-   detached — pod restarted, watcher restarted, or pod was never
-   started. Shadow surfaces these as :err strings rather than ex
-   markers; matching on substrings is the supported detection.
+  "True if the eval result is the kind of failure a stale or missing
+   JS runtime produces. Shadow surfaces these in TWO distinct shapes:
 
-   See research/shadow-node-runtime-2026-05-23.md §Q3 + gotcha 3
-   for why both messages appear and why first-eval-after-restart
-   typically fails (sticky :runtime-id)."
-  [{:keys [err]}]
-  (and (seq err)
-       (or (str/includes? err "No available JS runtime")
-           (str/includes? err "previously used runtime disappeared")
-           (str/includes? err "client-not-found"))))
+   1. **Loud failure** — :err carries 'No available JS runtime' or
+      similar message. Detected by substring.
+   2. **Silent failure** — :status contains \"error\" but :err is
+      empty (or just whitespace), :value is nil. This happens when
+      shadow's nREPL session is bound to a :runtime-id of a runtime
+      that has disconnected but hasn't been GC'd yet. shadow returns
+      a status-only error envelope; the message is lost.
+
+   Both signal the same recovery: drop the session, create a fresh
+   one (which under :repl {:runtime-select :latest} routes to the
+   currently-connected runtime), retry.
+
+   See research/shadow-node-runtime-2026-05-23.md §Q3 + gotcha 3."
+  [{:keys [err value status]}]
+  (or
+    ;; Shape 1 — :err message match
+    (and (seq err)
+         (or (str/includes? err "No available JS runtime")
+             (str/includes? err "previously used runtime disappeared")
+             (str/includes? err "client-not-found")))
+    ;; Shape 2 — status=error with no value AND no useful :err
+    (and (some #{"error"} status)
+         (nil? value)
+         (or (nil? err) (str/blank? err)))))
 
 (defn- retry-with-fresh-session!
   "Drop the cached session, create a new one, and re-attempt eval.
