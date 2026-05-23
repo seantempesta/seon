@@ -52,7 +52,109 @@ The rewrite was driven by three research artifacts under `research/`:
 Sean's locked-in design decisions and version dependency graph live
 in [README.md](README.md); don't re-litigate them.
 
+## Queued — next Platform agent picks this up
+
+### Resume phase (v1.md §7.4) — DEEP RESEARCH FIRST
+
+Status: **paused at design**. Implementation NOT started despite the
+prior Platform session being ready to ship. Sean's directive:
+"resume from just stored code means we need to intelligently unravel
+the order to execute everything in efficiently and I don't want this
+to be hacked together, but carefully planned."
+
+The v1.md sketch ("tx-id is monotonic → topological by construction
+→ `(doseq [e entities] (raw-eval (:source e)))`") is plausible but
+underverified. The CLJS bootstrap analyzer state, namespace
+dependency ordering, schema-registry timing, and datahike replay
+semantics under our `:keep-history? true` config all have edge cases
+that need source-grounded answers before code lands.
+
+**Next Platform agent action:** read
+[`research/resume-design-questions-2026-05-23.md`](research/resume-design-questions-2026-05-23.md)
+end-to-end. Dispatch the research prompt at the bottom of that file
+as a background agent (`run_in_background: true`, single agent with
+full context). Pick up parallel-safe work while it runs. When the
+research file lands at `research/resume-findings-<date>.md`, design
+the implementation from those findings — NOT from the v1.md sketch
+alone.
+
+### Parallel-safe Platform work (can ship while resume research runs)
+
+- `bin/seon log-stream` SSE endpoint per
+  [`research/error-envelope-and-log-stream-2026-05-23.md`](research/error-envelope-and-log-stream-2026-05-23.md)
+  recommendations §3. New endpoint on the pod's HTTP loopback,
+  filterable + replayable. ~2-3 hours. Doesn't touch any code MVP is
+  actively in.
+- "Cheap sequence-first" envelope items from the same research file
+  (§Key concrete changes): `seon.web.serve` request-level
+  `log/error-console!` → `log/error!` (3 callsites), same for
+  `broadcast/render-for-new-conn!`, add DB write inside
+  `seon.db/listen!`'s currently-swallowed error catch. ~30 min total.
+  Same constraint: doesn't touch `eval.cljs` / `agent.cljs` /
+  `parse.cljc`.
+
+### Held — waits on MVP signal before Platform touches
+
+- Full error-envelope unification (`db/transact!` → return-data
+  refactor, `:ok` → `:seon.eval/ok` keyword rename, ~30 callsites).
+  Per MVP's flag: "If error-envelope work starts now while I'm in
+  eval.cljs, we'll conflict. Let me drive the loop end-to-end first."
+- Persistent backend (`:memory` → on-disk). Separate conversation
+  Sean owns. Resume's end-to-end value is gated on this.
+
 ## Recent ships (2026-05-23) — Platform track only
+
+### Platform track — eval-batch! refactor (Items 1+2 + with-tx-context + duration-ms)
+
+Commit `5786247`. MVP-verified all-clear. Bundles:
+
+- `seon.db/validate-entity-values!` dispatches on schema-declared
+  ref ARITY (`:one` / `:many` / `nil`), not on value-shape. Single-
+  card lookup tuples like `[:seon.ns/name :foo]` no longer get
+  iterated as many-card containers (MVP Item 1, committed separately
+  as `615a120`).
+- Evals attach as `:seon.turn/evals` component children of the
+  owning turn (v1.md §2.1, acceptance criterion 11). One pull on
+  `:seon.turn/id` returns the turn with evals inline. Verified
+  end-to-end via MCP eval.
+- `eval-batch!` return shape: `{:seon.eval/ids […]
+  :seon.eval/n-ok int :seon.eval/n-fail int}`. `run-agentic-loop!`
+  stop policy can distinguish "10 fails" from "10 successes."
+- `eval-batch!` signature: `turn-n` int → `turn-id` string (5
+  args, same arity).
+- `:seon.eval/duration-ms :int` populated per form (wall clock
+  around the await). Slow-eval warning predicate has live data.
+- Read failures from `seon.parse/parse-forms` (`:kind :read
+  :ok? false`) land as failed `:seon.eval` entities — agent sees
+  its own broken text in next turn's ctx.
+- `with-tx-context {:seon.db/agent-id … :seon.db/eval-id … :seon.db/
+  origin :agent}` wraps per-form work in `eval-batch!`. Closes
+  Phase 2.5 item 4 consumer side. Caller (run-turn!) can layer
+  turn-id / session-id at a wider scope.
+- `:seon.eval/agent` and `:seon.eval/turn` schemas deleted — agent
+  reachable via component chain. Dropped from `agent-bootstrap-
+  attrs` in `seon.client`.
+
+### Platform track — parse-forms rewrite-clj + .cljc + JVM corpus
+
+Commit `676baf0`. Phase 2.5 item 5 closed. `seon.repl/parse-forms`
+extracted to `seon.parse.cljc` (JVM-testable). New entry shapes:
+`{:kind :form :narration :source :form}` (success) and
+`{:kind :read :ok? false :narration :source :error}` (per-form
+isolated read failure). Byte-faithful `:source` from rewrite-clj
+(load-bearing for resume re-eval). 5 tests / 47 assertions pass
+on `bin/test seon.parse-test`. `seon.repl/parse-forms` preserved
+as a re-export for MVP's existing call site.
+
+### Platform track — MCP eval retry on status-only errors
+
+Commit `190de3b`. Discovered while testing post-pod-restart eval:
+shadow's nREPL returns TWO distinct failure shapes when a session
+is bound to a dead JS runtime. The retry from `63f5a7b` only
+caught the `:err`-text shape; the status-only shape (where
+`:status [...error]` is set but `:err` is empty) leaked through.
+Widened the detection. Post-restart MCP eval now self-heals
+without manual `create_session`.
 
 ### Platform track — Phase 2.6 schema bridge cleanup (resolves MVP PLATFORM-FLAG)
 
