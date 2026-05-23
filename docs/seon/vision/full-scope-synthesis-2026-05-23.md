@@ -133,7 +133,7 @@ Each pillar is a load-bearing idea. Without any one of them, the personal-AI cla
 
 ### 4.3 REPL-as-interface (not the filesystem)
 
-`vision/index.md:102-112`, milestone `m6-eval-pipeline.md`, `capabilities/repl-first-development.md`, `docs/prds/webassembly-agents/v1.md`. From `vision/index.md:111-112`: "The file system is a persistence format, not the source of truth. The graph database is the system. The REPL is the only interface agents need." The agent never edits files. It evals forms. The pipeline validates the form (schema present, concrete types, map-in/map-out), then compiles, then transacts metadata to the graph, then persists source to disk, then runs affected tests. `(seon/persist!)` is the explicit graduation step — like `git commit`.
+`vision/index.md:102-112`, milestone `m6-eval-pipeline.md`, `capabilities/repl-first-development.md`, `docs/prds/agent-runtime/v1.md`. From `vision/index.md:111-112`: "The file system is a persistence format, not the source of truth. The graph database is the system. The REPL is the only interface agents need." The agent never edits files. It evals forms. The pipeline validates the form (schema present, concrete types, map-in/map-out), then compiles, then transacts metadata to the graph, then persists source to disk, then runs affected tests. `(seon/persist!)` is the explicit graduation step — like `git commit`.
 
 ### 4.4 Graph-as-source-of-truth (Datalog over Datahike on LMDB)
 
@@ -153,7 +153,7 @@ Each pillar is a load-bearing idea. Without any one of them, the personal-AI cla
 
 ### 4.8 WASM containment (the deployment story)
 
-`docs/seon/pod/wasm-spike-2026-05-20.md`, `docs/prds/webassembly-agents/platform.md`, `pod-host/wasm-tauri/`. CLAUDE.md current-focus block: "The seon CLJS pod runs as a `wasm32-wasip2` Component (via wasm-rquickjs) inside wasmtime, embedded in a Tauri Rust process. The capability surface is WIT-typed: `fs`, `http`, `mcp`, `capability-prompt`, `eval`. The Rust host decides what to grant. The agent's CLJS code cannot reach beyond the WIT imports — wasmtime enforces." The CLJS sandbox alone is *not* a security boundary — it catches LLM hallucinations, not adversarial code. WASM is what makes "personal AI that can do anything" survivable on the user's hardware.
+`docs/seon/pod/wasm-spike-2026-05-20.md`, `docs/prds/agent-runtime/platform.md`, `pod-host/wasm-tauri/`. CLAUDE.md current-focus block: "The seon CLJS pod runs as a `wasm32-wasip2` Component (via wasm-rquickjs) inside wasmtime, embedded in a Tauri Rust process. The capability surface is WIT-typed: `fs`, `http`, `mcp`, `capability-prompt`, `eval`. The Rust host decides what to grant. The agent's CLJS code cannot reach beyond the WIT imports — wasmtime enforces." The CLJS sandbox alone is *not* a security boundary — it catches LLM hallucinations, not adversarial code. WASM is what makes "personal AI that can do anything" survivable on the user's hardware.
 
 ## 5. Older README Candidates
 
@@ -210,7 +210,7 @@ This file existed at the repo root before the docs reorganization. It is the dir
 >
 > Most databases can't answer these questions. For agents learning from experience, they're essential.
 
-An earlier draft of the vision doc replaced this with an LMDB-storage pitch and dropped the bitemporal-history framing. The migration to Datahike (which preserves history when `:keep-history? true`; see `docs/prds/webassembly-agents/v1.md:1112`) makes the bitemporal-history pitch load-bearing again and it should be restored. Bitemporality is part of what makes "learn from history" real.
+An earlier draft of the vision doc replaced this with an LMDB-storage pitch and dropped the bitemporal-history framing. The migration to Datahike (which preserves history when `:keep-history? true`; see `docs/prds/agent-runtime/v1.md:1112`) makes the bitemporal-history pitch load-bearing again and it should be restored. Bitemporality is part of what makes "learn from history" real.
 
 **The Validation Criteria block** — `feature/super-repl:VISION.md`:
 
@@ -295,7 +295,7 @@ Imported 2026-05-20. Contains:
 
 ### Active PRDs under `docs/prds/` (28 directories)
 
-`agent-repl-interface`, `dashboard-polish`, `data-viewer`, `datahike-migration`, `datalevin-migration` (predecessor, archive), `datalevin-reactive`, `flow-datalevin-writer`, `graph-cleanup`, `logging-system`, `mcp-resilience`, `namespace-bootstrap`, `namespace-ui`, `refinement`, `render-pipeline`, `schema-unification`, `schema-viewer`, `shape-graph`, `spec-driven-rendering`, `stability-improvements`, `startup-reliability`, `super-repl`, `test-coverage-audit`, `test-infrastructure`, `unified-flow`, `unified-namespace-flow`, `webassembly-agents` — plus `_example-feature` and `readme.md`.
+`agent-repl-interface`, `dashboard-polish`, `data-viewer`, `datahike-migration`, `datalevin-migration` (predecessor, archive), `datalevin-reactive`, `flow-datalevin-writer`, `graph-cleanup`, `logging-system`, `mcp-resilience`, `namespace-bootstrap`, `namespace-ui`, `refinement`, `render-pipeline`, `schema-unification`, `schema-viewer`, `shape-graph`, `spec-driven-rendering`, `stability-improvements`, `startup-reliability`, `super-repl`, `test-coverage-audit`, `test-infrastructure`, `unified-flow`, `unified-namespace-flow`, `agent-runtime` — plus `_example-feature` and `readme.md`.
 
 ### Documentation tree under `docs/seon/`
 
@@ -317,7 +317,7 @@ The current README (~67 lines, 5 sections: title/slogan, Status, Active tracks, 
 6. **WebAssembly containment as the deployment story.** The Active tracks block names it but does not explain *why* it matters: the agent's eval surface needs to be sandboxed beyond what the CLJS sandbox provides (CLAUDE.md current-focus: "The CLJS sandbox layer is NOT a security boundary"). WASM is what makes the personal-AI claim survivable on the user's machine.
 7. **The graph as source of truth.** The single most distinctive architectural claim is missing. From `vision/index.md:111-112`: "The file system is a persistence format, not the source of truth. The graph database is the system."
 8. **Schema-driven function discovery.** The vision's core primitive (`vision/index.md:75-95`). Renderer discovery works in production; M4 generalizes it. None of this is mentioned.
-9. **REPL-as-interface for agents.** Agents don't edit files; they eval forms validated by a constraint pipeline. This is M6 — and the v1 spec under `docs/prds/webassembly-agents/v1.md` is the most detailed surviving artifact of the user's "REPL is the substrate" thesis.
+9. **REPL-as-interface for agents.** Agents don't edit files; they eval forms validated by a constraint pipeline. This is M6 — and the v1 spec under `docs/prds/agent-runtime/v1.md` is the most detailed surviving artifact of the user's "REPL is the substrate" thesis.
 10. **Validation criteria.** The `feature/super-repl:VISION.md` near/medium/long-term checklist is missing. Without falsifiers, "research project" reads as "indefinitely incomplete."
 11. **Lineage prose vs lineage table.** The current lineage section is a four-row table of predecessor repos. That's fine for prior-art but undersells the *story*: 18 months of experiments converged on this specific shape. The 924820e version had this in prose form.
 12. **Why Clojure, why Datalog, why immutable.** `vision/index.md:30-69` has the answer in a table and three paragraphs. The README points at this doc but doesn't summarize it.
@@ -337,7 +337,7 @@ Headings + one-line intent each (no prose):
 9. **The personal domains** — Trading, health, finance as test cases. Link to the relevant component / domain notes for each. Frame them as proofs of the substrate, not as products.
 10. **How to verify it works** — Time-bound validation criteria from `feature/super-repl:VISION.md` (near/medium/long-term).
 11. **Lineage** — Current table + the one-line story "this is the shape that survived 18 months of experiments." Keep the RFC 3161 timestamping note.
-12. **Where to read next** — Pointers: `docs/seon/vision/index.md`, `docs/seon/_dashboard.md`, `docs/prds/webassembly-agents/v1.md`, `CLAUDE.md`.
+12. **Where to read next** — Pointers: `docs/seon/vision/index.md`, `docs/seon/_dashboard.md`, `docs/prds/agent-runtime/v1.md`, `CLAUDE.md`.
 13. **Status, License, Contributing, Contact** — Keep current sections verbatim.
 
 

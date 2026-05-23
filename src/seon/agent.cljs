@@ -52,7 +52,7 @@
 
    Per spec-05 §15.4 the LLM ctx is built via the render dispatch:
 
-     entity → :seon.render/ai slot → resolve-symbol → call → text
+     entity → :seon.render/ai slot → eval/lookup-value → call → text
 
    Default: `'seon.render.default/ctx` composes REPL header + 'how you
    respond' + worked examples + conventions + recent conversation +
@@ -482,7 +482,7 @@
           ent     (db/entity {:seon.db/ref [:seon.agent/id id]})
           sym     (:seon.render/ai ent 'seon.render.default/ctx)
           input   (ai-render-input sym @db/*conn* id ent)
-          {:seon.render/keys [text]} (render/ai-dispatch sym input)
+          {:seon.render/keys [text]} (render/ai-render sym input)
           prompt-text (or text "")
           _ (log id turn-idx "render" (count prompt-text) "chars"
                  "via" (str sym))

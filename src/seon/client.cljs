@@ -33,9 +33,11 @@
     [seon.db :as db]
     [seon.eval :as seval]
     [seon.log :as log]
-    ;; Render protocol — A-2. Required here so the build includes it
-    ;; AND so `use-compile-state!` is callable from start-agent!.
-    [seon.render :as render]
+    ;; Render protocol — A-2. Required here so the build includes it.
+    ;; Symbol-lookup for render slots lives in seon.eval/lookup-value
+    ;; (walks goog-global with cljs.core/munge); no boot-time wire-up
+    ;; needed.
+    [seon.render]
     [seon.render.default]
     ;; Iteration surface — owns the canonical !compile-state +
     ;; !conn defonces. start-agent! shares those atoms (no second
@@ -251,7 +253,7 @@
    ;; value" path is gated by datahike's strict-typed schema — it
    ;; refuses `:db.type/any` (not in its allowed-types enum). For V0.5
    ;; the agent wraps literal hiccup in a fn and transacts the symbol;
-   ;; html-dispatch's vector-short-circuit branch still applies at
+   ;; html-render's vector-short-circuit branch still applies at
    ;; in-memory call sites (e.g. when a render fn returns another
    ;; vector). Polymorphic storage is a V0.6 concern — solved either
    ;; by switching the conn to schema-flexibility :read (loses
@@ -470,12 +472,6 @@
         ;; gensym so the next call rebuilds the state. Idempotent
         ;; while the substrate code is stable.
         compile-state (await (repl/ensure-bootstrap!))
-        ;; Wire seon.render's late-bound resolver against the SAME
-        ;; atom dev-init! reads from, so render-time symbol lookup
-        ;; resolves agent-defined vars regardless of which surface
-        ;; first triggered init. Idempotent (`use-compile-state!`'s
-        ;; docstring).
-        _             (render/use-compile-state! repl/!compile-state)
         ;; Prime the agent's home namespace with the atoms + accessors.
         ;; agent-ns-sym is the V0 default (`seon.agent.seon`); when
         ;; multi-agent comes, derive per-id via (seon.agent/home-ns id).

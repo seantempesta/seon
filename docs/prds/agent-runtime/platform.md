@@ -4,10 +4,14 @@ status: active
 tags: [prd, pod, cljs, wasm, agent]
 ---
 
-# Platform: WebAssembly Agents
+# Platform: Agent Runtime Substrate
 
-(Branch: `webassembly-agents`. This doc tracks the substrate work
-on that branch — what shipped, what's next, where we want to land.)
+(Branch: `feature/agent-runtime`. This doc tracks the platform-track
+substrate work — what shipped, what's next, where we want to land.
+Phases 1–7 are substrate primitives (eval, test capture, capabilities);
+phases 8–10 are cross-platform delivery (Tauri shell, remote access,
+mobile). Renamed from "Platform: WebAssembly Agents" on 2026-05-23 —
+WASM containment is one phase, not the whole platform story.)
 
 The substrate the agent writes against — bootstrap-CLJS eval + datahike +
 test infrastructure + capability-bounded WASM containment — sized for

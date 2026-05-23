@@ -9,7 +9,7 @@
      2. For each `:seon.agent/state {:idle :running}` agent:
         a. Resolve `:seon.render/html` slot (defaults to
            `'seon.render.default/view`).
-        b. Dispatch via `seon.render/html-dispatch` (literal hiccup
+        b. Dispatch via `seon.render/html-render` (literal hiccup
            short-circuits; symbol resolves via globalThis walker).
         c. Render the returned hiccup to an HTML string.
         d. If the per-agent error wraps the body (renderer threw),
@@ -66,7 +66,7 @@
         slot  (:seon.render/html ent 'seon.render.default/view)
         input {:seon.db/db db :seon.agent/id aid}]
     (try
-      (let [{:seon.render/keys [hiccup]} (render/html-dispatch slot input)]
+      (let [{:seon.render/keys [hiccup]} (render/html-render slot input)]
         (html/->string hiccup))
       (catch :default e
         (let [msg (or (some-> e .-message) (str e))]

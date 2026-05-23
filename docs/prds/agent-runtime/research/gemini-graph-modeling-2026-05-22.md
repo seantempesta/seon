@@ -102,7 +102,7 @@ status: active
 tags: [reference, prd]
 ---
 
-# webassembly-agents — working state
+# agent-runtime — working state
 
 Resume notes for the two parallel tracks. Read this first when picking
 the project back up.
@@ -226,7 +226,7 @@ The MVP and Platform tracks share infrastructure. Coordination points:
 ## Layout
 
 ```text
-docs/prds/webassembly-agents/
+docs/prds/agent-runtime/
 ├── STATUS.md           ← you are here
 ├── agent-repl-mvp.md   ← MVP track design
 ├── platform.md         ← Platform track design
@@ -258,7 +258,7 @@ Survey of the V0 CLJS pod against the
 spec-only, and the smallest set of additions needed to drive the agent
 loop end-to-end against a real LLM (deepseek).
 
-Branch: `webassembly-agents`. Spec last touched recently; prior state
+Branch: `feature/agent-runtime`. Spec last touched recently; prior state
 snapshot lives at [[research/v0-state-2026-05-20]] (~2 days old).
 
 ## TL;DR
@@ -692,9 +692,9 @@ Spec / status:
 
 | Path | Role |
 |---|---|
-| `/Users/sean/src/seon/docs/prds/webassembly-agents/agent-repl-mvp.md` | The spec this survey is against. |
-| `/Users/sean/src/seon/docs/prds/webassembly-agents/STATUS.md` | Resume notes; lists next priorities D11/D5/D4/D2/D3/D7 (in order). |
-| `/Users/sean/src/seon/docs/prds/webassembly-agents/research/v0-state-2026-05-20.md` | Prior pod-state snapshot. |
+| `/Users/sean/src/seon/docs/prds/agent-runtime/agent-repl-mvp.md` | The spec this survey is against. |
+| `/Users/sean/src/seon/docs/prds/agent-runtime/STATUS.md` | Resume notes; lists next priorities D11/D5/D4/D2/D3/D7 (in order). |
+| `/Users/sean/src/seon/docs/prds/agent-runtime/research/v0-state-2026-05-20.md` | Prior pod-state snapshot. |
 
 ============================================================
 THE SPEC TO CRITIQUE — agent-repl-mvp.md (full text, ~2200 lines):
@@ -3004,7 +3004,7 @@ include: the bad pattern, why it bites in this context, and the correct alternat
 
 ````markdown
 Ripgrep is not available. Falling back to GrepTool.
-I have completed the review of the `webassembly-agents` data model. The following critique identifies structural gaps, proposes a more idiomatic Datalog-first architecture, and provides a concrete schema rewrite to satisfy the goal of "capturing everything" for seamless session playback and agent discovery.
+I have completed the review of the `agent-runtime` data model. The following critique identifies structural gaps, proposes a more idiomatic Datalog-first architecture, and provides a concrete schema rewrite to satisfy the goal of "capturing everything" for seamless session playback and agent discovery.
 
 ## a) Graph-modeling critique
 

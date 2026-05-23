@@ -4,7 +4,7 @@
 
 ## Current focus (2026-05-20)
 
-Active branch: **`webassembly-agents`**.
+Active branch: **`feature/agent-runtime`**.
 
 The current substrate is the **V0 CLJS pod** at `src/seon/*.cljs` — a long-running Node process that hosts the agent loop, datahike-cljs, the bootstrap CLJS compiler, and a loopback HTTP+SSE server. Run it via `node out/client/main.js` after `clj -M:cljs compile client`. See `docs/cljs-dev-loop.md` for the dev loop.
 

@@ -33,7 +33,7 @@ The single most important finding below: **a verbatim ancestor of that exact pit
   - `~/src/ml-options-trading/` — README is concrete options-platform docs, no aspirational claims.
 - [x] **`~/src/_publishing/`** — discovered (NOT in the brief). It is Sean's curated publication-quality archive of seon's lineage repos, with README rewrites done **2026-04-21** that synthesize what each prior repo contributed. Five repos: `seon`, `seon-2024-10-kit-migration`, `seon-2024-10-xtdb-biff`, `seon-2025-02-architecture`, `seon-2025-11-trading-domain`. All read.
 - [x] **Surface D — grep for "grows with / custom apps / personal AI / companion / bonded".** Hits in `seon-biff/README.md`, `_publishing/seon-2025-02-architecture/README.md`, `primer/ROUGH_PLAN-NEEDS-REFINEMENT.md`. No other sibling matched on multiple of those terms.
-- [x] **Surface E — unreachable commits.** Triaged ~20 by subject line via `git log -1 --format='%ai %s' <sha>`. Findings: nearly all are spec/spike/scrub work from 2026-05-15 to 2026-05-22 — recent dev work on webassembly-agents, datalevin removal, spec-05 render schemas. **No vision-revision commits in the unreachable set.** Skipping deeper dive.
+- [x] **Surface E — unreachable commits.** Triaged ~20 by subject line via `git log -1 --format='%ai %s' <sha>`. Findings: nearly all are spec/spike/scrub work from 2026-05-15 to 2026-05-22 — recent dev work on agent-runtime, datalevin removal, spec-05 render schemas. **No vision-revision commits in the unreachable set.** Skipping deeper dive.
 
 ## 2. The five framings to choose from
 
@@ -351,7 +351,7 @@ Implication: if Seon's README is going to use the Primer as the Diamond Age exis
 
 ### 7.4 Unreachable commits surface no vision revisions
 
-393 unreachable commits per `git fsck`. Triaged ~20 by subject line — all are recent dev work on webassembly-agents, datalevin removal, eval timing spec tweaks, render-schema additions, agent-repl spec changes. No commits with subjects like "vision:", "framing:", or "README rewrite". The framing exists in branches and prior-repo READMEs, not in stranded commits.
+393 unreachable commits per `git fsck`. Triaged ~20 by subject line — all are recent dev work on agent-runtime, datalevin removal, eval timing spec tweaks, render-schema additions, agent-repl spec changes. No commits with subjects like "vision:", "framing:", or "README rewrite". The framing exists in branches and prior-repo READMEs, not in stranded commits.
 
 ### 7.5 The "self-building system" phrase predates "system composes itself" by 14 months
 

@@ -1,7 +1,7 @@
 {
   "name": "libdatahike-cljs",
   "version": "0.0.1",
-  "description": "Pod-side CLJS + datahike spike — Phase CLJS chunks of spec-01-webassembly-agents",
+  "description": "Pod-side CLJS + datahike spike — Phase CLJS chunks of spec-01-agent-runtime",
   "private": true,
   "scripts": {
     "spike": "shadow-cljs compile spike && node out/spike.js",

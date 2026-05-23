@@ -17,7 +17,7 @@
      :seon.error/raw       any    — the original error instance, opaque
      :seon.error/truncated true   — set when cause-chain hits depth 5
 
-   See docs/prds/webassembly-agents/research/eval-error-envelope-2026-05-22.md
+   See docs/prds/agent-runtime/research/eval-error-envelope-2026-05-22.md
    for the cljs.js wrap analysis that motivates :seon.error/data.")
 
 (defn ->message

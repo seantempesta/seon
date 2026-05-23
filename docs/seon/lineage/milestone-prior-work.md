@@ -245,7 +245,7 @@ tests, history, issues. `(seon/persist!)` graduates from `:live` to
 - **PRD:** `docs/prds/super-repl/prd.md` (620 lines) — the original Super
   REPL spec. Branch `feature/super-repl` is the working implementation
   branch.
-- **PRD:** `docs/prds/webassembly-agents/v1.md` §4 "Eval pipeline"
+- **PRD:** `docs/prds/agent-runtime/v1.md` §4 "Eval pipeline"
   (lines 566–697) — the WASM-track rewrite of the eval pipeline,
   REPL-verified per the implementation protocol.
 - **Predecessor `seon-biff/src/seon/agent.clj`** (446 lines) — the
@@ -352,11 +352,11 @@ composes itself.
 - **Current `seon` repo / `main` (CLJS pod):** `src/seon/client.cljs`
   (552 lines) — the agent runtime: HTTP+SSE loopback server, DeepSeek
   integration, bootstrap CLJS compiler. The runtime the agent runs on.
-- **PRD:** `docs/prds/webassembly-agents/v1.md` §6 "The agent loop"
+- **PRD:** `docs/prds/agent-runtime/v1.md` §6 "The agent loop"
   (lines 976–1088) and §10 "Worked example — one turn end-to-end"
   (lines 1325–1425) — fully specified, REPL-verified working code (per
   the implementation protocol in §11).
-- **PRD:** `docs/prds/webassembly-agents/STATUS.md` — implementation status
+- **PRD:** `docs/prds/agent-runtime/STATUS.md` — implementation status
   tracker.
 - **Current `seon` repo / branch `feature/agent-isolation`:** per-agent
   isolated JVMs over TCP nREPL — the multi-agent extension of the same

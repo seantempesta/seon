@@ -7,14 +7,15 @@ status: active
 
 > Infrastructure for AI agents to write reliable software.
 
-## Active focus — V0 CLJS pod + WASM-Tauri (2026-05-20)
+## Active focus — agent runtime (2026-05-23)
 
-Branch: **`webassembly-agents`**.
+Branch: **`feature/agent-runtime`**. PRD root: [[../prds/agent-runtime/README]].
 
-- **What runs today:** the V0 CLJS pod (Node-hosted, in `src/seon/*.cljs`). Phase 1 hardening shipped — see `docs/seon/pod/`.
-- **What's next:** WASM-Tauri containment. The pod runs inside `wasm32-wasip2` (via wasm-rquickjs) inside a Tauri Rust process running wasmtime; capability surface is WIT-typed (`fs`, `http`, `mcp`, `capability-prompt`, `eval`).
-- **Authoritative design:** [[pod/wasm-spike-2026-05-20]]
-- **Pod-host workspace:** `pod-host/wasm-tauri/` (Rust + WIT, imported 2026-05-20)
+- **What runs today:** the V0 CLJS pod (Node-hosted, in `src/seon/*.cljs`). Phase 1 substrate hardening shipped + Phase 2 test capture as data + Phase A HTTPS allowlist + symbol-lookup refactor (`seon.eval/lookup-value` + render fns renamed `*-render`). See `docs/seon/pod/` and [[../prds/agent-runtime/STATUS]].
+- **MVP track next:** v1 spec implementation — sessions/turns/ctx composition, run-turn!, six default section fns, eval-replay resume. Design: [[../prds/agent-runtime/v1]].
+- **Platform track next:** Phase 2.5 substrate primitives (D13 dynvar probe, `seon.id`, history flip, tx-meta auto-merge) in flight; Phase 3 WASM-Tauri containment alpha-blocking. Phases 8–10 (Tauri shell, LAN/Tailscale remote, mobile pod-in-webview) designed.
+- **Cross-platform delivery:** [[../prds/agent-runtime/platform]] Phases 8–10 lay out write-once-run-everywhere via Tauri 2 (macOS/Win/Linux/iOS/Android). Mobile path uses pod-in-webview (Apple's WKWebView JIT exception) to sidestep wasmtime's iOS JIT restriction.
+- **WASM containment:** Authoritative design at [[pod/wasm-spike-2026-05-20]]; pod-host workspace at `pod-host/wasm-tauri/`.
 - **Dev loop:** [[../cljs-dev-loop]] (V0 / pre-WASM). WASM dev loop is documented in the spike doc.
 
 The component tables below describe the **JVM substrate** (Datahike + Integrant + flow topology). That substrate is paused as the active feature track but not deleted — its files still live under `src/seon/*.clj`. The active development is the CLJS pod + Phase 3 WASM-Tauri work, not the JVM seat.

@@ -38,13 +38,13 @@ The mechanism has a long lineage. Lenat's [Eurisko](https://en.wikipedia.org/wik
 
 ## How it works (briefly)
 
-The runtime is built on five primitives. Each has a component note in [`docs/seon/components/`](docs/seon/components/); each has a PRD in [`docs/prds/`](docs/prds/); the v1 specification lives in [`docs/prds/webassembly-agents/v1.md`](docs/prds/webassembly-agents/v1.md).
+The runtime is built on five primitives. Each has a component note in [`docs/seon/components/`](docs/seon/components/); each has a PRD in [`docs/prds/`](docs/prds/); the v1 specification lives in [`docs/prds/agent-runtime/v1.md`](docs/prds/agent-runtime/v1.md).
 
 - **Multi-agent shared workspace.** Multiple agents work inside the same running runtime, calling each other's functions, transacting into the same graph, and editing each other's code under capability gates. Code is organized into Clojure namespaces wired into a `core.async.flow` topology — typed message envelopes, uniform backpressure, observability — but agents aren't pinned to a single namespace. Any agent can touch any surface the capability layer permits. ([`docs/seon/concepts/namespace-as-process.md`](docs/seon/concepts/namespace-as-process.md))
 - **Schema-as-contract.** Public functions advertise Malli input/output schemas with fully namespaced keywords (`:seon.trading/position`, never `:position`). The schemas land as datoms in a Datalog graph. "Which functions accept this shape?" is a database query. ([`docs/seon/components/schema-system.md`](docs/seon/components/schema-system.md))
 - **Graph-as-source-of-truth.** Datahike (embedded Datomic-style EAV with bitemporal history, on LMDB) holds the program graph, the data graph, and the conversation graph. One pull reconstructs any agent turn. Sessions survive restarts because the database is the system. ([`docs/seon/components/database.md`](docs/seon/components/database.md))
 - **REPL-as-interface.** The agent does not edit files. It evals forms in an nREPL. The pipeline validates the schema, transacts metadata into the graph, persists the source to disk, and runs the tests the schema selects. Files are a persistence format, not the source of truth. ([`docs/seon/components/dev-tools.md`](docs/seon/components/dev-tools.md))
-- **WASM containment.** The agent's eval surface is moving into a `wasm32-wasip2` Component embedded in a Tauri host process. The capability surface is WIT-typed: `fs`, `http`, `mcp`, `capability-prompt`, `eval`. The Rust host decides what to grant. Wasmtime enforces. ([`docs/prds/webassembly-agents/platform.md`](docs/prds/webassembly-agents/platform.md))
+- **WASM containment.** The agent's eval surface is moving into a `wasm32-wasip2` Component embedded in a Tauri host process. The capability surface is WIT-typed: `fs`, `http`, `mcp`, `capability-prompt`, `eval`. The Rust host decides what to grant. Wasmtime enforces. ([`docs/prds/agent-runtime/platform.md`](docs/prds/agent-runtime/platform.md))
 
 The language story is open-ended. CLJS today; Python next; ultimately anything the WebAssembly Component Model can host. The runtime is language-agnostic by design — the agent's intelligence comes from the LLM, the safety from the WIT-typed boundary, the persistence from the graph. The language choice becomes a matter of "what fits this task," not a permanent commitment.
 
@@ -75,7 +75,7 @@ This is a research project in active development, not a product. Some parts work
 
 Per-milestone evidence (which commits and branches back which status) is in [`docs/seon/lineage/milestone-prior-work.md`](docs/seon/lineage/milestone-prior-work.md).
 
-The next ship is the [v1 agent REPL specification](docs/prds/webassembly-agents/v1.md): session-survival, observability, program-graph discovery against an LLM (DeepSeek today, others later). Implementation status tracked in [`docs/prds/webassembly-agents/STATUS.md`](docs/prds/webassembly-agents/STATUS.md).
+The next ship is the [v1 agent REPL specification](docs/prds/agent-runtime/v1.md): session-survival, observability, program-graph discovery against an LLM (DeepSeek today, others later). Implementation status tracked in [`docs/prds/agent-runtime/STATUS.md`](docs/prds/agent-runtime/STATUS.md).
 
 API is unstable. Direction may shift unilaterally as the underlying research evolves. Treat anything you build on this as your own to maintain.
 
@@ -85,7 +85,7 @@ If you want to understand the project from the inside, in roughly this order:
 
 1. [`docs/seon/vision/index.md`](docs/seon/vision/index.md) — the project thesis, eight milestones, the architectural pillars in long form.
 2. [`docs/seon/_dashboard.md`](docs/seon/_dashboard.md) — system map. Component notes, concept notes, the current state of every piece.
-3. [`docs/prds/webassembly-agents/v1.md`](docs/prds/webassembly-agents/v1.md) — what's being built next, in detail.
+3. [`docs/prds/agent-runtime/v1.md`](docs/prds/agent-runtime/v1.md) — what's being built next, in detail.
 4. [`docs/seon/architecture/overview.md`](docs/seon/architecture/overview.md) — how the moving parts fit today.
 5. [`CLAUDE.md`](CLAUDE.md) — orientation for anyone (human or AI) sitting down to write code in this repo. Includes conventions, the dev hook, the testing model, and the "slow is fast" rules I make every agent read first.
 

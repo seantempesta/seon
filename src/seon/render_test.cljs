@@ -1,10 +1,14 @@
 (ns seon.render-test
-  "Tests for spec-05 §15 render dispatch + pretty-print floor.
+  "Tests for the render surfaces + the fall-through contract.
 
-   A-2 green criterion (spec-05 §10.2):
-     • html-dispatch literal hiccup → wrapped in :seon.render/hiccup map
-     • html-dispatch unresolvable symbol → pretty-html fallback
-     • html-dispatch unqualified symbol → does not throw
+   A-2 green criteria:
+     • html-render literal hiccup → wrapped in :seon.render/hiccup map
+     • html-render unresolvable symbol → pretty-html fallback
+     • html-render unqualified symbol → does not throw
+     • ai-render unresolvable symbol → pretty-ai fallback
+
+   Plus tests for `seon.eval/lookup-value` — the moved-out
+   symbol-resolution primitive both render fns call.
 
    Run interactively via MCP eval:
 
@@ -12,101 +16,102 @@
      (cljs.test/run-tests 'seon.render-test)"
   (:require
     [cljs.test :as t :refer [deftest is testing]]
+    [seon.eval :as eval]
     [seon.render :as render]
     [seon.render.default :as default]))
 
 ;; ============================================================
-;; html-dispatch — literal hiccup short-circuits, missing symbol
+;; html-render — literal hiccup short-circuits, missing symbol
 ;; falls through to pretty-html, unqualified symbol doesn't throw.
 ;; ============================================================
 
-(deftest html-dispatch-literal-hiccup-wraps-as-is
-  (let [out (render/html-dispatch [:h1 "hi"]
-                                  {:seon.db/db    nil
-                                   :seon.agent/id "x"})]
+(deftest html-render-literal-hiccup-wraps-as-is
+  (let [out (render/html-render [:h1 "hi"]
+                                {:seon.db/db    nil
+                                 :seon.agent/id "x"})]
     (is (= {:seon.render/hiccup [:h1 "hi"]} out))))
 
-(deftest html-dispatch-literal-hiccup-with-attrs-wraps-as-is
+(deftest html-render-literal-hiccup-with-attrs-wraps-as-is
   (let [vec [:div {:class "foo"} [:span "bar"]]
-        out (render/html-dispatch vec
-                                  {:seon.db/db    nil
-                                   :seon.agent/id "x"})]
+        out (render/html-render vec
+                                {:seon.db/db    nil
+                                 :seon.agent/id "x"})]
     (is (= {:seon.render/hiccup vec} out))))
 
-(deftest html-dispatch-nonexistent-symbol-falls-through-to-pretty-html
+(deftest html-render-nonexistent-symbol-falls-through-to-pretty-html
   (let [input {:seon.db/db nil :seon.agent/id "x"}
-        out   (render/html-dispatch 'nonexistent/sym input)]
+        out   (render/html-render 'nonexistent/sym input)]
     (is (= (default/pretty-html input) out))
     (is (vector? (:seon.render/hiccup out)))
     (is (= :pre (first (:seon.render/hiccup out))))))
 
-(deftest html-dispatch-unqualified-symbol-does-not-throw
-  ;; Spec-05 §15.2: the resolver returns nil for unqualified symbols;
-  ;; html-dispatch's symbol-branch sees nil and falls through to
+(deftest html-render-unqualified-symbol-does-not-throw
+  ;; The resolver returns nil for unqualified symbols;
+  ;; html-render's symbol-branch sees nil and falls through to
   ;; pretty-html instead of throwing.
   (let [input {:seon.db/db nil :seon.agent/id "x"}]
     (is (= (default/pretty-html input)
-           (render/html-dispatch 'bare-sym input)))))
+           (render/html-render 'bare-sym input)))))
 
-(deftest html-dispatch-nil-slot-falls-through-to-pretty-html
+(deftest html-render-nil-slot-falls-through-to-pretty-html
   (let [input {:seon.db/db nil :seon.agent/id "x"}]
     (is (= (default/pretty-html input)
-           (render/html-dispatch nil input)))))
+           (render/html-render nil input)))))
 
-(deftest html-dispatch-arbitrary-value-falls-through-to-pretty-html
+(deftest html-render-arbitrary-value-falls-through-to-pretty-html
   (let [input {:seon.db/db nil :seon.agent/id "x"}]
     (is (= (default/pretty-html input)
-           (render/html-dispatch 42 input)))
+           (render/html-render 42 input)))
     (is (= (default/pretty-html input)
-           (render/html-dispatch "string" input)))))
+           (render/html-render "string" input)))))
 
 ;; ============================================================
-;; ai-dispatch — symbol-only slot; missing → pretty-ai.
+;; ai-render — symbol-only slot; missing → pretty-ai.
 ;; ============================================================
 
-(deftest ai-dispatch-nonexistent-symbol-falls-through-to-pretty-ai
+(deftest ai-render-nonexistent-symbol-falls-through-to-pretty-ai
   (let [input {:seon.db/db nil :seon.agent/id "x"}
-        out   (render/ai-dispatch 'nonexistent/sym input)]
+        out   (render/ai-render 'nonexistent/sym input)]
     (is (= (default/pretty-ai input) out))
     (is (string? (:seon.render/text out)))))
 
-(deftest ai-dispatch-nil-slot-falls-through-to-pretty-ai
+(deftest ai-render-nil-slot-falls-through-to-pretty-ai
   (let [input {:seon.db/db nil :seon.agent/id "x"}]
     (is (= (default/pretty-ai input)
-           (render/ai-dispatch nil input)))))
+           (render/ai-render nil input)))))
 
-(deftest ai-dispatch-unqualified-symbol-does-not-throw
+(deftest ai-render-unqualified-symbol-does-not-throw
   (let [input {:seon.db/db nil :seon.agent/id "x"}]
     (is (= (default/pretty-ai input)
-           (render/ai-dispatch 'bare-sym input)))))
+           (render/ai-render 'bare-sym input)))))
 
 ;; ============================================================
-;; resolve-symbol — globalThis walker for system fns (A-4); bootstrap
-;; compile-state path for agent-defined fns (stub until A-8). Never
-;; throws on bad input.
+;; eval/lookup-value — globalThis walker (moved here from
+;; seon.render/resolve-symbol; same semantics, lives next to the
+;; analyzer-cache concerns in seon.eval). Never throws on bad input.
 ;; ============================================================
 
-(deftest resolve-symbol-finds-system-fn
-  ;; The :client bundle ships seon.render.default — resolve-symbol
+(deftest lookup-value-finds-system-fn
+  ;; The :client bundle ships seon.render.default — lookup-value
   ;; should walk globalThis and return the callable.
-  (let [view-fn (render/resolve-symbol 'seon.render.default/view)
-        ctx-fn  (render/resolve-symbol 'seon.render.default/ctx)
-        pretty-fn (render/resolve-symbol 'seon.render.default/pretty-html)]
+  (let [view-fn   (eval/lookup-value 'seon.render.default/view)
+        ctx-fn    (eval/lookup-value 'seon.render.default/ctx)
+        pretty-fn (eval/lookup-value 'seon.render.default/pretty-html)]
     (is (fn? view-fn))
     (is (fn? ctx-fn))
     (is (fn? pretty-fn))))
 
-(deftest resolve-symbol-returns-nil-for-nonexistent-ns
-  (is (nil? (render/resolve-symbol 'no.such.ns/sym)))
-  (is (nil? (render/resolve-symbol 'seon.render.default/no-such-fn))))
+(deftest lookup-value-returns-nil-for-nonexistent-ns
+  (is (nil? (eval/lookup-value 'no.such.ns/sym)))
+  (is (nil? (eval/lookup-value 'seon.render.default/no-such-fn))))
 
-(deftest resolve-symbol-returns-nil-for-unqualified
-  (is (nil? (render/resolve-symbol 'bare))))
+(deftest lookup-value-returns-nil-for-unqualified
+  (is (nil? (eval/lookup-value 'bare))))
 
-(deftest resolve-symbol-returns-nil-for-nil-and-non-symbol
-  (is (nil? (render/resolve-symbol nil)))
-  (is (nil? (render/resolve-symbol :keyword)))
-  (is (nil? (render/resolve-symbol "string"))))
+(deftest lookup-value-returns-nil-for-nil-and-non-symbol
+  (is (nil? (eval/lookup-value nil)))
+  (is (nil? (eval/lookup-value :keyword)))
+  (is (nil? (eval/lookup-value "string"))))
 
 ;; ============================================================
 ;; pretty-print floors — shapes match the spec'd response schemas.

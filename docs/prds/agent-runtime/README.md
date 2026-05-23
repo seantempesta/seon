@@ -4,7 +4,9 @@ status: active
 tags: [reference, prd, index]
 ---
 
-# webassembly-agents — index
+# agent-runtime — index
+
+The Seon agent runtime: substrate (eval, render, datahike, capabilities), agent loop (sessions, turns, ctx composition), and cross-platform delivery (Tauri shell, LAN/Tailscale access, mobile). Renamed from `webassembly-agents` on 2026-05-23 when scope expanded past the WASM proof of concept to cover the full runtime — WASM containment is one phase, not the whole story. Branch: `feature/agent-runtime`.
 
 Two parallel tracks, multiple versions per track.
 
@@ -35,7 +37,7 @@ The V0 CLJS pod that runs deepseek today predates the v1 spec.
 ## Layout
 
 ```text
-docs/prds/webassembly-agents/
+docs/prds/agent-runtime/
 ├── README.md                        ← you are here
 ├── STATUS.md                        ← what's shipped, what's next, cross-track touchpoints
 ├── platform.md                      ← Platform track (WASM-Tauri containment)

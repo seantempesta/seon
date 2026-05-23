@@ -5,7 +5,7 @@
    Owned by MVP track (we decide which shapes the agent needs to be
    able to type and have land in the program graph). Platform-track
    implements the extractors in `seon.code` against this corpus —
-   see docs/prds/webassembly-agents/v1.md §11 Risk 2.
+   see docs/prds/agent-runtime/v1.md §11 Risk 2.
 
    ## Contract under test
 

@@ -11,7 +11,7 @@ Survey of the V0 CLJS pod against the
 spec-only, and the smallest set of additions needed to drive the agent
 loop end-to-end against a real LLM (deepseek).
 
-Branch: `webassembly-agents`. Spec last touched recently; prior state
+Branch: `feature/agent-runtime`. Spec last touched recently; prior state
 snapshot lives at [[research/v0-state-2026-05-20]] (~2 days old).
 
 ## TL;DR
@@ -445,6 +445,6 @@ Spec / status:
 
 | Path | Role |
 |---|---|
-| `/Users/sean/src/seon/docs/prds/webassembly-agents/agent-repl-mvp.md` | The spec this survey is against. |
-| `/Users/sean/src/seon/docs/prds/webassembly-agents/STATUS.md` | Resume notes; lists next priorities D11/D5/D4/D2/D3/D7 (in order). |
-| `/Users/sean/src/seon/docs/prds/webassembly-agents/research/v0-state-2026-05-20.md` | Prior pod-state snapshot. |
+| `/Users/sean/src/seon/docs/prds/agent-runtime/agent-repl-mvp.md` | The spec this survey is against. |
+| `/Users/sean/src/seon/docs/prds/agent-runtime/STATUS.md` | Resume notes; lists next priorities D11/D5/D4/D2/D3/D7 (in order). |
+| `/Users/sean/src/seon/docs/prds/agent-runtime/research/v0-state-2026-05-20.md` | Prior pod-state snapshot. |

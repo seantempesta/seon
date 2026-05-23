@@ -7,7 +7,7 @@
 
    The system prompt sets the agent up as a REPL — see
    [[default-system-prompt]] for the contract. The per-turn ctx
-   (rendered via `seon.render/ai-dispatch` against the agent's
+   (rendered via `seon.render/ai-render` against the agent's
    `:seon.render/ai` slot; default `'seon.render.default/ctx`) follows.
 
    No tool-calling envelope, no streaming — the agent's responses are

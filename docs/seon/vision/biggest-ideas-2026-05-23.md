@@ -22,7 +22,7 @@ can preserve the original ambition.
   `datahike-migration/prd.md`, `schema-unification/design.md`, `unified-flow/design.md`,
   `datalevin-reactive/design.md`, `logging-system/prd.md`, `test-infrastructure/design.md`,
   `graph-cleanup/prd.md`, `namespace-ui/prd.md`, `data-viewer/prd.md`,
-  `webassembly-agents/{README,v1,v2,v3,platform}.md` (v1 read across multiple long ranges).
+  `agent-runtime/{README,v1,v2,v3,platform}.md` (v1 read across multiple long ranges).
   PRDs NOT individually read past summary: `dashboard-polish`, `datalevin-migration`,
   `datalevin-reactive` (only intro), `flow-datalevin-writer`, `mcp-resilience`,
   `schema-viewer`, `stability-improvements`, `startup-reliability`, `test-coverage-audit`,
@@ -58,13 +58,13 @@ can preserve the original ambition.
   duplicates of refinement/super-repl content (auto-test-hook, test-suite-fixes,
   code-cleanup). Not separately re-read.
 - [x] Surface E: PRD research dirs spot-checked. The richest are the
-  webassembly-agents `research/*-2026-05-22.md` consultations (already cited in prior
+  agent-runtime `research/*-2026-05-22.md` consultations (already cited in prior
   synthesis); schema-unification's `serialization-findings.md` and `nil-semantics-findings.md`
   (cited via ADRs 001/002); shape-graph's design is one document; bootstrap research is in the
   PRD itself; the rest are operational findings, not vision.
 - [x] Surface F: `docs/seon/architecture/overview.md` read in full; ADRs 001-007 read
   (headers + rationale). `CLAUDE.md` consumed as system context.
-- [x] Surface G: `docs/prds/webassembly-agents/v1.md` read across ranges 1–400, 400–900,
+- [x] Surface G: `docs/prds/agent-runtime/v1.md` read across ranges 1–400, 400–900,
   1100–1635 (the deferred-to-v2/v3 sections and the implementation protocol §11). v2.md
   read 1–200. Platform.md read 1–200 + 400–571.
 
@@ -114,7 +114,7 @@ that can do anything."
 > no line numbers, no `clojure_replace`. The `*ctx*` atom is the agent's entire
 > world."
 
-`docs/prds/webassembly-agents/v1.md:90-99`:
+`docs/prds/agent-runtime/v1.md:90-99`:
 
 > "**Context is `fn(DB)`, not an accumulated log.** The rendered prompt the LLM
 > sees each turn is derived freshly from current DB state by running the section
@@ -180,7 +180,7 @@ AI-for-code-land works this way today.
 > 'What changed between working and broken?' Most databases can't answer these
 > questions. **For agents learning from experience, they're essential.**"
 
-Current substrate: `docs/prds/webassembly-agents/v1.md:1107-1115`:
+Current substrate: `docs/prds/agent-runtime/v1.md:1107-1115`:
 
 > "`:keep-history? true` on the agent conn. Tx-meta datoms only persist when
 > history is on. ... Pulling `[:seon.eval/id "K9p…"]` returns the eval entity
@@ -188,7 +188,7 @@ Current substrate: `docs/prds/webassembly-agents/v1.md:1107-1115`:
 > [?e ?a ?v ?tx ?op]] (d/history db) [:seon.eval/id "K9p…"])` returns the
 > datoms that eval wrote."
 
-`docs/prds/webassembly-agents/v1.md:442-446`:
+`docs/prds/agent-runtime/v1.md:442-446`:
 
 > "**The eval-IS-tx mechanic.** ... `(d/history db) [:seon.eval/id "K9p…"]`
 > returns the datoms that eval wrote."
@@ -209,7 +209,7 @@ of the database choice.
 > (sandboxed, TCP/Nippy). **The agent never knows or cares which mode it's
 > in.** It requires namespaces, calls functions, gets results."
 
-`docs/prds/webassembly-agents/platform.md:18-24`:
+`docs/prds/agent-runtime/platform.md:18-24`:
 
 > "**Self-hosted CLJS eval inside WASM.** Agent emits any valid CLJS; it runs
 > under wasmtime + wasm-rquickjs with the analyzer fully populated, error
@@ -222,13 +222,13 @@ the user-facing pitch, not just deployment plumbing.
 
 ### #7 Capability surface as a WIT-typed boundary. Every external action — HTTP, fs, npm install, MCP — flows through a host-decided interface. No ambient authority.
 
-`docs/prds/webassembly-agents/platform.md:42-50`:
+`docs/prds/agent-runtime/platform.md:42-50`:
 
 > "**Capabilities are explicit.** Every external action (HTTP, fs, npm install,
 > package fetch) flows through a WIT import the agent can see and the host can
 > deny. No ambient authority."
 
-`docs/prds/webassembly-agents/platform.md:464-472` (Phase 7):
+`docs/prds/agent-runtime/platform.md:464-472` (Phase 7):
 
 > "The agent has explicitly bounded access. Every external action — HTTP, fs
 > read, fs write, npm install, package fetch — flows through a WIT import. The
@@ -246,14 +246,14 @@ makes "personal AI that can do anything" safe to deploy on the user's machine.
 
 ### #8 The agent can install dependencies live, from inside the sandbox, with capability-prompted approval.
 
-`docs/prds/webassembly-agents/platform.md:30-34`:
+`docs/prds/agent-runtime/platform.md:30-34`:
 
 > "**Dynamic deps.** Agent runs `(seon.deps/install ...)` from the REPL and
 > acquires new CLJS or npm packages without a substrate rebuild.
 > Capability-bounded: fs cache + HTTP + (eventually) a curated registry, all
 > via WIT imports."
 
-`docs/prds/webassembly-agents/platform.md:480-502` (end-state vignette):
+`docs/prds/agent-runtime/platform.md:480-502` (end-state vignette):
 
 > "Agent decides it needs a new dep. `(seon.deps/install '[reagent/reagent
 > "1.2.0"])`. Pod fetches, caches, makes analyzer-visible. Returns `:installed`.
@@ -318,12 +318,12 @@ Hunting for any mention of Python, multi-language, polyglot, language-agnostic,
 WASM-as-packaging, runtime portability.
 
 **WASM as the multi-language envelope (current direction).**
-`docs/prds/webassembly-agents/platform.md:18-23`:
+`docs/prds/agent-runtime/platform.md:18-23`:
 
 > "**Self-hosted CLJS eval inside WASM.** Agent emits any valid CLJS; it runs
 > under wasmtime + wasm-rquickjs with the analyzer fully populated."
 
-`docs/prds/webassembly-agents/platform.md:454-463` (Phase 6 — WASM pod, dynamic
+`docs/prds/agent-runtime/platform.md:454-463` (Phase 6 — WASM pod, dynamic
 npm deps):
 
 > "**Pre-bundle a 'universal' npm set** — pick 50 common packages, bundle once.
@@ -445,7 +445,7 @@ load-bearing ideas Sean has returned to across 18+ months.
    design — entities defined before code").
 3. **Datalog as the agent's first move.** `vision/index.md:75-95`,
    `m4-discoverable-codebase.md`, `shape-graph/design.md`,
-   `webassembly-agents/v1.md:262-275` (root pull),
+   `agent-runtime/v1.md:262-275` (root pull),
    `archive/xtdb-browser/prd.md`. The agent queries the graph before it greps.
 4. **Two-tier rendering — HTML for humans, AI text for agents — from the same
    function.** `vision/index.md:75-95` table, `m5-observable-system.md`,
@@ -454,10 +454,10 @@ load-bearing ideas Sean has returned to across 18+ months.
    `{:seon.render/html ... :seon.render/ai ...}` in one map.
 5. **Three-tier storage (DB datoms = projections; blobs = full content; stash
    = volatile per-session).** Memory-pin in user MEMORY.md, full in
-   `webassembly-agents/v1.md:103-115` and `platform.md` "where state goes" table.
+   `agent-runtime/v1.md:103-115` and `platform.md` "where state goes" table.
 6. **Bitemporal history / time-travel debugging.** XTDB era
    (`archive/seon-transform/prd.md`, `archive/observatory-xtdb/prd.md`), survives
-   into Datahike era (`webassembly-agents/v1.md:1107-1115`,
+   into Datahike era (`agent-runtime/v1.md:1107-1115`,
    `datahike-migration/prd.md` "gain time-travel debugging for free").
 7. **Progressive enhancement = ship the default, replace with specificity.**
    `vision/index.md:120-128`, `concepts/progressive-enhancement.md`,
@@ -465,12 +465,12 @@ load-bearing ideas Sean has returned to across 18+ months.
    `bootstrap_v2.clj` impl.
 8. **REPL is the substrate, not the file.** `vision/index.md:99-112`,
    `m6-eval-pipeline.md`, `super-repl/prd.md`, `agent-repl-interface/prd.md`,
-   `webassembly-agents/v1.md`. This is the most consistently restated claim
+   `agent-runtime/v1.md`. This is the most consistently restated claim
    in the codebase.
 9. **Personal hardware, local-first, the user's data stays the user's.**
    `vision/index.md:271-275` ("Local-first means: your data stays yours, no
    API rate limits, works offline, full control over the runtime"),
-   `webassembly-agents/platform.md` (Tauri desktop host), `archive/PLAN-original-transformation.md`
+   `agent-runtime/platform.md` (Tauri desktop host), `archive/PLAN-original-transformation.md`
    ("OS for life").
 
 These nine are the README's load-bearing skeleton.
@@ -724,7 +724,7 @@ it up.
 namespace; idle until woken; wakes on notification; "long-term ownership")
 versus `docs/seon/vision/capabilities/agent-isolation.md` (agents are
 JVM-pool-acquired, instrumentation deferred to claim-time, dispose on death)
-versus `docs/prds/webassembly-agents/v1.md` (sessions span pod runs; agents
+versus `docs/prds/agent-runtime/v1.md` (sessions span pod runs; agents
 have IDs and stable home-ns; resume re-evals the program-graph on boot).
 
 The reconciliation: the *agent identity* is persistent (Datahike entity with
@@ -735,7 +735,7 @@ needs to say this clearly — without it the M8 framing reads as
 
 ### 7.6 :keep-history? true (forever) vs blob GC / forget!
 
-`docs/prds/webassembly-agents/v1.md` ships with `:keep-history? true` and no
+`docs/prds/agent-runtime/v1.md` ships with `:keep-history? true` and no
 GC. `v2.md` adds `:db/noHistory` opt-outs on high-churn scalars and `forget!`
 / `forget-ns!` curation verbs. `v3.md` adds blob GC and per-blob TTL.
 

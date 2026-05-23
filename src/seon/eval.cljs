@@ -36,6 +36,7 @@
   (:require [cljs.analyzer :as ana]
             [cljs.js :as cljs]
             [clojure.string :as str]
+            [goog.object :as gobj]
             [shadow.cljs.bootstrap.node :as boot]
             [seon.db :as db]
             [seon.error :as error]))
@@ -208,6 +209,42 @@
    walks to a non-nil JS object via `goog.getObjectByName`."
   [path]
   (some? (js/goog.getObjectByName path)))
+
+(defn lookup-value
+  "Resolve a fully-qualified symbol to its runtime value, or nil if
+   unresolvable. The CLJS-bootstrap equivalent of JVM's
+   `clojure.core/resolve`.
+
+   Walks `js/globalThis` segment-by-segment, munging each ns segment
+   via `cljs.core/munge` to match the JS names shadow-cljs emits.
+   Handles reserved-word munge (`default` → `default$`, etc.).
+
+   Works uniformly for:
+
+   - Substrate fns precompiled into `out/client/main.js` by
+     shadow-cljs (live at goog-global munged paths).
+   - Agent-defined fns written by `cljs.js/eval-str` (cljs.js uses
+     the same munge logic; lands at the same paths).
+
+   Never throws — `nil`, keywords, strings, unqualified symbols all
+   return nil. Callers that need a never-crash floor (the render
+   dispatchers) treat nil as 'fall through to default'.
+
+   Why this lives in `seon.eval`: it's the same concern as the
+   analyzer-cache management here (`truly-undeclared?`,
+   `load-all-analysis-caches!`, `init-bootstrap!`). Render and any
+   other consumer call `(eval/lookup-value sym)` rather than each
+   maintaining its own copy."
+  {:malli/schema [:=> [:cat :any] [:maybe :any]]}
+  [sym]
+  (when (qualified-symbol? sym)
+    (let [ns-parts (str/split (namespace sym) #"\.")
+          ns-obj   (reduce (fn [obj seg]
+                             (when obj (gobj/get obj (cljs.core/munge seg))))
+                           js/globalThis
+                           ns-parts)]
+      (when ns-obj
+        (gobj/get ns-obj (cljs.core/munge (name sym)))))))
 
 (defn- truly-undeclared?
   "Decide whether an `:undeclared-var` / `:undeclared-ns` analyzer

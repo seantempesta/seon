@@ -171,7 +171,7 @@ A single commit deserves special attention up front: [`b302ef8`](https://github.
 
 ## 8. Capability-gated WASM containment
 
-**First written down**: 2026-05-20, [`967328a`](https://github.com/seantempesta/seon/commit/967328a) "import wasm-tauri skeleton + design docs for WASM containment (Phase 3)" — imports the `pod-host/wasm-tauri/` workspace (Rust + WIT) and the spike report at [`docs/prds/webassembly-agents/research/wasm-spike-2026-05-20.md`](../../prds/webassembly-agents/research/wasm-spike-2026-05-20.md). The spike report is the authoritative design doc: it identifies wasm-rquickjs + wasmtime + Tauri as the chosen stack, documents the WIT-typed import surface (`fs`, `http`, `mcp`, `capability-prompt`, `eval`), and explicitly supersedes an earlier EdgeJS-via-Wasmer-CLI direction.
+**First written down**: 2026-05-20, [`967328a`](https://github.com/seantempesta/seon/commit/967328a) "import wasm-tauri skeleton + design docs for WASM containment (Phase 3)" — imports the `pod-host/wasm-tauri/` workspace (Rust + WIT) and the spike report at [`docs/prds/agent-runtime/research/wasm-spike-2026-05-20.md`](../../prds/agent-runtime/research/wasm-spike-2026-05-20.md). The spike report is the authoritative design doc: it identifies wasm-rquickjs + wasmtime + Tauri as the chosen stack, documents the WIT-typed import surface (`fs`, `http`, `mcp`, `capability-prompt`, `eval`), and explicitly supersedes an earlier EdgeJS-via-Wasmer-CLI direction.
 
 **Earlier seeds**:
 
@@ -185,7 +185,7 @@ A single commit deserves special attention up front: [`b302ef8`](https://github.
 - 2026-05-22 onward (this repo): spec rewrite [`f5d678c`](https://github.com/seantempesta/seon/commit/f5d678c) "v1 spec rewrite, Platform Phase 2 + Capability A".
 
 **Current code**: `pod-host/wasm-tauri/`, `pod-host/libdatahike-cljs/`, `pod-host/datahike-harness/`
-**Current docs**: [`docs/prds/webassembly-agents/`](../../prds/webassembly-agents/) (`platform.md`, `v1.md`, `v2.md`, `v3.md`, `STATUS.md`), [`docs/prds/webassembly-agents/research/wasm-spike-2026-05-20.md`](../../prds/webassembly-agents/research/wasm-spike-2026-05-20.md)
+**Current docs**: [`docs/prds/agent-runtime/`](../../prds/agent-runtime/) (`platform.md`, `v1.md`, `v2.md`, `v3.md`, `STATUS.md`), [`docs/prds/agent-runtime/research/wasm-spike-2026-05-20.md`](../../prds/agent-runtime/research/wasm-spike-2026-05-20.md)
 
 **Why it matters**: The CLJS sandbox in the V0 pod is "accident prevention, not security." WIT-typed capability gates under wasmtime are what turn agent autonomy from a research demo into something an outside user can run without trusting the agent's code.
 

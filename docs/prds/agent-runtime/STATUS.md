@@ -4,7 +4,7 @@ status: active
 tags: [reference, prd]
 ---
 
-# webassembly-agents — recent ships + cross-track coordination
+# agent-runtime — recent ships + cross-track coordination
 
 This file is for time-sensitive coordination: what shipped this week,
 what's in flight, what's needed across the MVP↔Platform boundary,
@@ -51,6 +51,44 @@ The rewrite was driven by three research artifacts under `research/`:
 
 Sean's locked-in design decisions and version dependency graph live
 in [README.md](README.md); don't re-litigate them.
+
+## Recent ships (2026-05-23) — Platform track only
+
+### Platform track — render-surface rename + symbol lookup moved
+
+A-8 closed. Symbol resolution (`seon.render/resolve-symbol`) moved
+to `seon.eval/lookup-value` — same semantics (walks `js/globalThis`
+segment-by-segment with `cljs.core/munge`, handles reserved-word
+munge, never throws), now lives next to the analyzer-cache concerns
+in `seon.eval` it's conceptually paired with. Single implementation,
+shared by render + any future per-entity dispatch.
+
+Renamed `seon.render/ai-dispatch` → `seon.render/ai-render` and
+`html-dispatch` → `html-render` — they're 4-line resolve+call shims,
+NOT multimethod dispatch; the old name overpromised. Real per-entity
+Malli-specificity dispatch arrives in v2 with `:seon.fn/output-keys`
+indexed; that one earns the "dispatch" word and will live in
+`seon.eval` alongside the program-graph queries it needs.
+
+Callers updated: `seon.web.broadcast/render-agent!`,
+`seon.agent/run-turn!`, `seon.ai.deepseek` docstring. `seon.client`
+no longer wires `use-compile-state!` (deleted — lookup-value needs
+no boot-time atom). `out/client/main.js` compiles 0 warnings.
+
+MVP-track impact: any v1 work that calls into render slot
+resolution uses `seon.render/ai-render` / `html-render` and (for
+direct symbol lookup) `seon.eval/lookup-value`. No behavior
+change; just names.
+
+### Platform track — PRD folder rename
+
+`docs/prds/webassembly-agents/` → `docs/prds/agent-runtime/`.
+Scope expanded past the WASM proof of concept to cover the full
+runtime — WASM containment is one phase (Platform Phase 3),
+not the whole story. All internal cross-refs, the dynamic-context-
+and-canvas research doc, `CLAUDE.md`, `README.md`,
+`docs/seon/_dashboard.md`, vision docs, and pod-host Rust source
+docstrings updated. Branch is now `feature/agent-runtime`.
 
 ## Recent ships (2026-05-22) — Platform track only
 

@@ -14,7 +14,7 @@
    env. The builder is fn-local; the API stays pure data-in,
    data-out.
 
-   See docs/prds/webassembly-agents/platform.md §Phase 2 for the
+   See docs/prds/agent-runtime/platform.md §Phase 2 for the
    roadmap context."
   (:require [cljs.test :as t]
             [seon.db :as db]

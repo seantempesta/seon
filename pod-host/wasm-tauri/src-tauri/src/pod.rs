@@ -84,7 +84,7 @@ pub struct SeonStore {
 /// Per-store hooks for `wasmtime-wasi-http`. Holds the outbound-HTTPS allowlist
 /// and overrides [`WasiHttpHooks::send_request`] so denied hosts never reach
 /// hyper. This is the URL-filtering hook referenced in
-/// `docs/prds/webassembly-agents/research/capability-surface-2026-05-22.md`
+/// `docs/prds/agent-runtime/research/capability-surface-2026-05-22.md`
 /// §"Capability #2: Outbound HTTPS" §(B) item 1.
 pub struct SeonHttpHooks {
     allowed: HttpAllowlist,

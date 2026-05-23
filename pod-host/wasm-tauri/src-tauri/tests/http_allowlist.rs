@@ -1,7 +1,7 @@
 // http_allowlist.rs — Phase A smoke for the outbound-HTTPS allowlist override.
 //
 // Implements the unit-test variant from
-// `docs/prds/webassembly-agents/research/capability-surface-2026-05-22.md`
+// `docs/prds/agent-runtime/research/capability-surface-2026-05-22.md`
 // §"Phase A: HTTPS allowlist override + smoke." A full end-to-end smoke
 // (loading eval-smoke.wasm and invoking `(js/fetch ...)`) is intentionally
 // out of scope here — that requires `bin/build-eval-smoke` to have produced
