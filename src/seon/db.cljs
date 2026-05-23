@@ -491,23 +491,104 @@
       (str (subs s 0 97) "...")
       s)))
 
+;; Forward declares — bridge helpers used by validation live further
+;; down in the file (kept grouped with the rest of the Malli→datahike
+;; schema-translation code). The validation gate references them here
+;; to detect ref-typed attrs that accept datahike's nested-map
+;; shorthand. CLJS doesn't allow implicit forward references.
+(declare ^:private resolve-malli-form)
+(declare ^:private form-head)
+(declare ^:private form-children)
+
+(defn- ref-typed-attr-form?
+  "True if the attr's resolved Malli schema describes a ref slot —
+   either a bare `:seon.db/ref` or a `[:vector :seon.db/ref]` /
+   `[:set :seon.db/ref]` container.
+
+   Used by `validate-entity-values!` to recognize that the attr accepts
+   datahike's nested-map shorthand (the standard pattern where passing
+   `{:seon.foo/bar …}` instead of an eid/lookup-ref tells datahike to
+   create a new entity inline). Without this branch, a perfectly legal
+   `{:seon.agent/ctx [{:seon.ctx/name :system …}]}` transact fails
+   validation because the nested map isn't a `:seon.db/ref` literal."
+  [schema-form]
+  (let [resolved (resolve-malli-form schema-form)
+        head     (form-head resolved)]
+    (cond
+      (= resolved :seon.db/ref) true
+
+      (and (#{:vector :set :sequential} head)
+           (when-let [child (first (form-children resolved))]
+             (= :seon.db/ref (resolve-malli-form child))))
+      true
+
+      :else false)))
+
+(declare validate-entity-values!)
+
+(defn- validate-ref-child!
+  "Validate one entry inside a ref-typed slot. A map is treated as
+   datahike's nested-entity shorthand (recursively validated against
+   the children's own per-attr schemas); anything else must satisfy
+   `:seon.db/ref` (eid, lookup tuple, or temp-id keyword)."
+  [parent-attr child]
+  (cond
+    (map? child)
+    (validate-entity-values! child)
+
+    (m/validate :seon.db/ref child)
+    nil
+
+    :else
+    (throw (ex-info (str "Malli validation failed for " parent-attr
+                         " child: expected map or :seon.db/ref, got "
+                         (truncate-value child))
+                    {::error              :seon.db/invalid-ref-child
+                     ::attr               parent-attr
+                     ::actual-value       child
+                     ::malli-explanation  (m/explain :seon.db/ref child)}))))
+
 (defn- validate-entity-values!
   "Validate each `[attr v]` pair in an entity map against its registered
    Malli schema. Skips system attrs and unregistered attrs (the latter
-   should have been caught by `validate-attrs!`)."
+   should have been caught by `validate-attrs!`).
+
+   Special-cases ref-typed attrs: accepts datahike's nested-map shorthand
+   in place of explicit refs. A map value (or vector of maps + refs) is
+   recursively validated against the children's own per-attr schemas;
+   the outer ref-type check is skipped because datahike will turn the
+   maps into entities at write time. See [[ref-typed-attr-form?]] for
+   the rationale."
   [entity]
   (doseq [[attr val] entity]
     (when (and (not (system-attr? attr))
                (schema/registered? attr))
-      (when-not (m/validate attr val)
-        (throw (ex-info (str "Malli validation failed for " attr
-                             ": expected " (pr-str (schema/schema-definition attr))
-                             ", got " (truncate-value val))
-                        {::error              :seon.db/invalid-value
-                         ::attr               attr
-                         ::expected-schema    (schema/schema-definition attr)
-                         ::actual-value       val
-                         ::malli-explanation  (m/explain attr val)}))))))
+      (let [schema-form (schema/schema-definition attr)]
+        (cond
+          ;; Single-card ref with nested-map shorthand:
+          ;; `{:seon.foo/bar {:seon.bar/id "…"}}`
+          (and (ref-typed-attr-form? schema-form)
+               (map? val))
+          (validate-entity-values! val)
+
+          ;; Many-card ref with mixed shorthand:
+          ;; `{:seon.foo/bars [{:seon.bar/id "…"} 42 [:seon.bar/id "…"]]}`
+          (and (ref-typed-attr-form? schema-form)
+               (sequential? val))
+          (doseq [child val]
+            (validate-ref-child! attr child))
+
+          ;; Normal scalar / non-ref path — validate against the schema.
+          :else
+          (when-not (m/validate attr val)
+            (throw (ex-info (str "Malli validation failed for " attr
+                                 ": expected " (pr-str schema-form)
+                                 ", got " (truncate-value val))
+                            {::error              :seon.db/invalid-value
+                             ::attr               attr
+                             ::expected-schema    schema-form
+                             ::actual-value       val
+                             ::malli-explanation  (m/explain attr val)}))))))))
 
 (defn- validate-values!
   "Walk tx-data and validate every entity map. Vector tuple forms

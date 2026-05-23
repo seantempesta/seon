@@ -401,7 +401,34 @@
 ;; Entry point
 ;; ---------------------------------------------------------------------------
 
+(defn- install-process-safety-net!
+  "Belt-and-suspenders: Node 15+ defaults to terminating the process on
+   an unhandled Promise rejection. Anything in the pod (substrate, agent
+   eval, HTTP handlers) that throws inside an async chain and isn't
+   caught upstream brings the whole pod down by default — a tiny
+   substrate bug becomes a denial-of-service.
+
+   This handler converts unhandled rejections into logged warnings and
+   keeps the process alive. The pod stays a 'mostly survives, surfaces
+   the error in logs' system rather than a 'one bad transact kills
+   everything' system. Per the user's reliability directive — operations
+   should return data, not exit codes.
+
+   Individual call sites should still `.catch` and convert to data
+   shapes (`{:ok? false :error ...}`) where it matters; this is the
+   floor, not the ceiling."
+  []
+  (.on js/process "unhandledRejection"
+       (fn [reason _promise]
+         (log/error-console! "seon.client" "unhandled promise rejection"
+                             (or reason "<no reason>"))))
+  (.on js/process "uncaughtException"
+       (fn [err _origin]
+         (log/error-console! "seon.client" "uncaught exception"
+                             (or (.-message err) err)))))
+
 (defn -main [& _args]
+  (install-process-safety-net!)
   (log/info-console! "seon.client" "-main boot" {:boot-at (:boot-at @!state)})
   (-> (datahike-smoke-test!)
       (.then (fn [result]
