@@ -8,6 +8,14 @@
 
  :nrepl {:port 7889}
 
+ ;; When a runtime connects (e.g. the pod's websocket client after
+ ;; `bin/seon restart pod`), make it the default REPL target. Without
+ ;; this, shadow keeps the first-ever runtime's id as :default-runtime-id
+ ;; and a restarted pod isn't auto-routable — MCP eval fails with
+ ;; "No available JS runtime" until the session is manually recreated.
+ ;; Per worker/impl.clj:787-788 in /Users/sean/src/shadow-cljs.
+ :repl  {:runtime-select :latest}
+
  ;; Top-level :source-paths is the only place shadow-cljs accepts
  ;; the directive (per-build :source-paths errors with "only valid
  ;; globally"). `test/` is included so platform-track CLJS tests

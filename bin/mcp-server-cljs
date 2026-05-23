@@ -256,13 +256,72 @@
 ;;; Tool implementations
 ;;; ---------------------------------------------------------------------------
 
+(defn- stale-runtime?
+  "True if the eval result indicates the JS runtime is missing or
+   detached — pod restarted, watcher restarted, or pod was never
+   started. Shadow surfaces these as :err strings rather than ex
+   markers; matching on substrings is the supported detection.
+
+   See research/shadow-node-runtime-2026-05-23.md §Q3 + gotcha 3
+   for why both messages appear and why first-eval-after-restart
+   typically fails (sticky :runtime-id)."
+  [{:keys [err]}]
+  (and (seq err)
+       (or (str/includes? err "No available JS runtime")
+           (str/includes? err "previously used runtime disappeared")
+           (str/includes? err "client-not-found"))))
+
+(defn- retry-with-fresh-session!
+  "Drop the cached session, create a new one, and re-attempt eval.
+   Used as the recovery path when an eval lands on a dead runtime.
+   With shadow's `:repl {:runtime-select :latest}` set (see shadow-
+   cljs.edn), the fresh session will route to whatever runtime is
+   currently connected."
+  [port session_id code timeout]
+  (swap! sessions dissoc (or session_id "default"))
+  (let [{:keys [sid session-info]} (get-or-create-session! session_id)
+        nrepl-sid (:nrepl-session session-info)
+        result (nrepl-eval port nrepl-sid code timeout)]
+    {:sid sid :result result}))
+
+(defn- diagnose-no-runtime
+  "Build the user-facing error when both initial eval AND retry fail
+   with no runtime. Surfaces concrete next steps so the agent can
+   act without consulting a separate runtime_status call."
+  []
+  (str "No CLJS runtime connected to shadow-cljs watcher.\n"
+       "Likely causes:\n"
+       "  - The pod isn't running. Start with: bin/seon start pod\n"
+       "  - The pod was compiled with `clj -M:cljs compile` "
+       "(no REPL client). Restart cljs-watch + pod: "
+       "bin/seon restart cljs-watch && bin/seon restart pod\n"
+       "  - Pod just started and websocket is still connecting "
+       "(wait 1-2s, retry)."))
+
 (defn execute-eval [{:keys [code session_id timeout_ms]}]
   (let [port (require-port!)
         timeout (or timeout_ms default-timeout-ms)
         {:keys [sid session-info]} (get-or-create-session! session_id)
         nrepl-sid (:nrepl-session session-info)
         result (nrepl-eval port nrepl-sid code timeout)]
-    (render-eval-result result sid)))
+    (if (stale-runtime? result)
+      ;; Self-heal: try with a fresh session. With :runtime-select :latest
+      ;; the new session routes to whatever runtime is currently up. If
+      ;; the pod is mid-restart, give it a brief window to reconnect.
+      (loop [tries 0]
+        (let [{retry-sid :sid retry-result :result}
+              (retry-with-fresh-session! port session_id code timeout)]
+          (cond
+            (not (stale-runtime? retry-result))
+            (render-eval-result retry-result retry-sid)
+
+            ;; Pod might be reconnecting — back off briefly and retry.
+            (< tries 10)
+            (do (Thread/sleep 200) (recur (inc tries)))
+
+            :else
+            (mcp-error (diagnose-no-runtime)))))
+      (render-eval-result result sid))))
 
 (defn execute-create-session [{:keys [build]}]
   (let [port (require-port!)
