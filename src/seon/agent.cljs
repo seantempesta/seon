@@ -11,9 +11,6 @@
    `say!`/`done!`/`scratch!` wrappers.
 
    This namespace owns:
-     - `new-id!`            — 12-char base62 id generator (8-char
-                              epoch-ms prefix + 4-char random suffix;
-                              lex-sorts by creation time)
      - the `:seon.agent/*`, `:seon.session/*`, `:seon.turn/*`,
        `:seon.message/*`, `:seon.eval/*`, `:seon.ctx/*`, `:seon.ns/*`,
        `:seon.fn/*`, `:seon.schema/*` schemas
@@ -101,41 +98,6 @@
     [seon.schema :as schema]))
 
 ;; ============================================================
-;; ID generation — 12-char base62: 8-char epoch-ms time prefix +
-;; 4-char random suffix. Lex-sorts by creation time because the
-;; base62 alphabet (0…9A…Za…z) is lex-equivalent to ASCII byte
-;; order. Identity attrs are constrained to exactly 12 chars at
-;; the Malli boundary (see :seon.session/id, :seon.turn/id, etc.).
-;; ============================================================
-
-(def ^:private base62-alphabet
-  "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")
-
-(defn- int->base62
-  "Encode a non-negative integer `n` as base62, left-padded with '0'
-   to `width` chars. Result length = `width` when n fits in that
-   many digits; longer otherwise."
-  [n width]
-  (loop [n n acc ""]
-    (if (zero? n)
-      (if (empty? acc)
-        (apply str (repeat width "0"))
-        (str (apply str (repeat (max 0 (- width (count acc))) "0")) acc))
-      (recur (js/Math.floor (/ n 62))
-             (str (nth base62-alphabet (mod n 62)) acc)))))
-
-(defn- random-base62
-  "Generate `length` random base62 chars."
-  [length]
-  (apply str (repeatedly length #(nth base62-alphabet (rand-int 62)))))
-
-(defn new-id!
-  "Generate a fresh 12-char base62 entity ID. Lex-sorts by creation time."
-  []
-  (str (int->base62 (.now js/Date) 8)
-       (random-base62 4)))
-
-;; ============================================================
 ;; Schemas — every shape the agent reads or writes.
 ;;
 ;; Per spec-05 §22.5 the entity lives at `:seon.agent/*` (formerly
@@ -143,7 +105,7 @@
 ;; deterministic from the id via `home-ns`.
 ;; ============================================================
 
-(schema/register! :seon.agent/id            [:string {:seon.db/identity true}])
+(schema/register! :seon.agent/id            [:and {:seon.db/identity true} :seon.db/id])
 (schema/register! :seon.agent/state         [:enum :idle :running])
 ;; v0 :seon.agent/turn-count, :seon.agent/turns-since-user,
 ;; :seon.agent/interrupted? attrs deleted 2026-05-22. turn-count
@@ -168,7 +130,7 @@
         (db/entity {:seon.db/ref [:seon.agent/id agent-id]}))
       default-turns-cap))
 
-(schema/register! :seon.message/id      [:string {:min 12 :max 12 :seon.db/identity true}])
+(schema/register! :seon.message/id      [:and {:seon.db/identity true} :seon.db/id])
 (schema/register! :seon.message/role    [:enum :user :assistant :system])
 (schema/register! :seon.message/content :string)
 ;; :seon.message/agent — present on user-originated messages
@@ -180,7 +142,7 @@
 (schema/register! :seon.message/agent   :seon.db/ref)
 (schema/register! :seon.message/at      :inst)
 
-(schema/register! :seon.eval/id          [:string {:min 12 :max 12 :seon.db/identity true}])
+(schema/register! :seon.eval/id          [:and {:seon.db/identity true} :seon.db/id])
 (schema/register! :seon.eval/at          :inst)
 ;; Wall-clock duration of the eval in milliseconds. Populated by
 ;; seon.eval/eval-batch! per form. Source of truth for slow-eval
@@ -221,20 +183,20 @@
 ;;   the agent's home-ns if no evals yet). See `seon.agent/current-ns`
 ;;   helper. Derived; no storage.
 ;;
-;; Identity attrs are strict 12-char Malli (matches `new-id!`
-;; output). `:seon.agent/id` is the lone holdout while default-id
-;; `"seon"` (4 chars) is in use — tightening it requires the
-;; default-id refactor.
+;; Identity attrs reference the canonical :seon.db/id shape (single
+;; source of truth in seon.schema). The [:and {…} :seon.db/id]
+;; wrapping adds {:seon.db/identity true} so the bridge writes
+;; :db/unique :db.unique/identity to datahike.
 ;; ============================================================
 
-(schema/register! :seon.session/id    [:string {:min 12 :max 12 :seon.db/identity true}])
+(schema/register! :seon.session/id    [:and {:seon.db/identity true} :seon.db/id])
 (schema/register! :seon.session/at    :inst)
 ;; :db/isComponent on the ref vectors — retracting a session/turn
 ;; cascade-retracts its child entities, and one nested pull on the
 ;; agent walks the whole causality chain inline (v1.md §2.1).
 (schema/register! :seon.session/turns [:vector {:seon.db/component true} :seon.db/ref])
 
-(schema/register! :seon.turn/id           [:string {:min 12 :max 12 :seon.db/identity true}])
+(schema/register! :seon.turn/id           [:and {:seon.db/identity true} :seon.db/id])
 (schema/register! :seon.turn/at           :inst)
 (schema/register! :seon.turn/status       [:enum :running :done :error])
 (schema/register! :seon.turn/prompt-text  :string)
@@ -404,11 +366,14 @@
 ;; seon.eval/setup-agent-ns! at boot.
 ;; ============================================================
 
-(def default-id
-  "The V0.5 agent's id. Lowercase keeps URLs (/chat?agent=seon) and
-   namespace (seon.agent.seon) consistent; consumers display it with
-   their own capitalization rule."
-  "seon")
+(defonce default-id
+  ;; Minted once per pod boot via the canonical generator. `defonce`
+  ;; survives hot-reload of seon.agent so the same id persists across
+  ;; reloads in a session (callers cache it as the "current agent").
+  ;; URL: /chat?agent=<id>; namespace: 'seon.agent.<id>. Both work
+  ;; because the id is always letter-leading by construction (see
+  ;; seon.db/new-id! — alphabet is letters only).
+  (db/new-id!))
 (def default-ns (home-ns default-id))
 
 ;; ============================================================
@@ -446,7 +411,7 @@
    the transact lands. The agent's reply arrives asynchronously —
    poll via `replies-after` or watch the message log."
   [agent-id text]
-  (let [mid (new-id!)]
+  (let [mid (db/new-id!)]
     (await (db/transact!
              {:seon.db/tx-data
               [{:seon.message/id      mid
@@ -519,7 +484,7 @@
   "Open a new `:seon.session` for `agent-id` and append to
    `:seon.agent/sessions`. Returns the new session entity."
   [agent-id]
-  (let [session-id (new-id!)]
+  (let [session-id (db/new-id!)]
     (await (db/transact!
              {:seon.db/tx-data
               [{:seon.agent/id agent-id
@@ -602,7 +567,7 @@
         batch      (await (seval/eval-batch! compile-state parsed
                                              (home-ns id) id id-of-turn))]
     {:seon.turn/messages
-     [{:seon.message/id      (new-id!)
+     [{:seon.message/id      (db/new-id!)
        :seon.message/role    :assistant
        :seon.message/content reply-text
        :seon.message/at      (js/Date.)}]
@@ -628,7 +593,7 @@
   [{:seon.agent/keys [id llm-fn compile-state]}]
   (let [session    (await (ensure-session! id))
         session-id (:seon.session/id session)
-        turn-id    (new-id!)
+        turn-id    (db/new-id!)
         turn-idx   (turn-index session-id)
         prompt     (render-prompt id)]
     (log id turn-idx "open" turn-id "+" (count prompt) "ctx-chars")
@@ -698,7 +663,7 @@
         (do (await
               (db/transact!
                 {:seon.db/tx-data
-                 [{:seon.message/id (new-id!)
+                 [{:seon.message/id (db/new-id!)
                    :seon.message/role :system
                    :seon.message/agent [:seon.agent/id id]
                    :seon.message/at (js/Date.)

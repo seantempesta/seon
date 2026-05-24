@@ -319,16 +319,68 @@
 ;; misconfigured registry fails loud instead of crashing the first tx.
 ;; ---------------------------------------------------------------------------
 
-;; ID values are 12-char base62 strings (8-char time prefix +
-;; 4-char random suffix; produced by `seon.agent/new-id!`). Shape
-;; inlined here rather than referenced via a named schema — the
-;; previous `:seon.id/id` indirection was a one-fn namespace whose
-;; only contribution was the shape it registered; collapsing it is
-;; the "no stupid shit" rule in action.
-(schema/register! ::agent-id        [:string {:min 12 :max 12}])
-(schema/register! ::session-id      [:string {:min 12 :max 12}])
-(schema/register! ::turn-id         [:string {:min 12 :max 12}])
-(schema/register! ::eval-id         [:string {:min 12 :max 12}])
+;; ---------------------------------------------------------------------------
+;; ID generation — single source of truth for both seon.agent (which used to
+;; own it) and seon.eval (which used to keep a duplicate to dodge the
+;; agent↔eval require cycle). Lives in seon.db because (a) every id exists
+;; to identify a DB entity, (b) the id-shape schemas already live here, and
+;; (c) seon.db is required by both agent and eval — no cycle.
+;;
+;; Shape (locked 2026-05-23): <3-letter-random>-<YYMMDDHHmm>, 14 chars.
+;; Example: Kpx-2605232138.
+;;
+;; LLM reads wall-clock time directly from the body; random prefix gives
+;; visual distinguishability for same-minute ids AND guarantees letter-
+;; leading (so home-ns derivation works without special-casing).
+;;
+;; Design rationale, REPL-verified probes, and trade-offs:
+;; docs/prds/agent-runtime/research/id-generator-design-2026-05-23.md.
+;; ---------------------------------------------------------------------------
+
+(def ^:private id-letters
+  "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
+(defn- id-pad-2 [n]
+  (if (< n 10) (str "0" n) (str n)))
+
+(defn- id-rand-letter []
+  (nth id-letters (rand-int 52)))
+
+(defn new-id!
+  "Generate a fresh 14-char LLM-readable id with shape
+   `<3-letter-random>-<YYMMDDHHmm>`. Examples: `Kpx-2605232138`,
+   `Bcd-2605232138`, `Mng-2606010900`.
+
+   Same-minute collision math: 3-char letter random = 140K slots →
+   birthday risk only at ~370 entities/minute. Datahike's tx-id is
+   the canonical creation order for sub-minute ordering; the id's
+   time portion is for LLM readability + cross-pod stable reference
+   frame, not for in-memory sort."
+  []
+  (let [d        (js/Date.)
+        time-str (str (id-pad-2 (mod (.getFullYear d) 100))
+                      (id-pad-2 (inc (.getMonth d)))  ; JS month 0-based
+                      (id-pad-2 (.getDate d))
+                      (id-pad-2 (.getHours d))
+                      (id-pad-2 (.getMinutes d)))
+        rand-str (str (id-rand-letter) (id-rand-letter) (id-rand-letter))]
+    (str rand-str "-" time-str)))
+
+(defn id->time-str
+  "Extract the YYMMDDHHmm portion of an id for programmatic time
+   sorting / comparison. Returns nil if the id doesn't match the
+   expected shape."
+  [id]
+  (when (and (string? id) (= 14 (count id)) (= \- (nth id 3)))
+    (subs id 4)))
+
+;; Tx-meta id scalars — bare references to the canonical :seon.db/id
+;; shape registered in seon.schema. One source of truth; bumping the
+;; id length updates every constraint.
+(schema/register! ::agent-id        :seon.db/id)
+(schema/register! ::session-id      :seon.db/id)
+(schema/register! ::turn-id         :seon.db/id)
+(schema/register! ::eval-id         :seon.db/id)
 (schema/register! ::origin          [:enum :user :agent :system :replay])
 (schema/register! ::replay?         :boolean)
 (schema/register! ::resume-marker?  :boolean)

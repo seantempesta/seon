@@ -494,24 +494,6 @@
 ;; never throws; the agent session is never killed by a bad form.
 ;; ============================================================
 
-(defn- new-eval-id
-  "12-char base62 id (8-char epoch-ms prefix + 4-char random). Local
-   copy of `seon.agent/new-id!` algorithm to avoid an eval ↔ agent
-   require cycle. Lex-sorts by creation time."
-  []
-  (let [alphabet "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-        encode   (fn [n width]
-                   (loop [n n acc ""]
-                     (if (zero? n)
-                       (if (empty? acc)
-                         (apply str (repeat width "0"))
-                         (str (apply str (repeat (max 0 (- width (count acc))) "0")) acc))
-                       (recur (js/Math.floor (/ n 62))
-                              (str (nth alphabet (mod n 62)) acc)))))
-        rand-ch  #(nth alphabet (rand-int 62))]
-    (str (encode (.now js/Date) 8)
-         (apply str (repeatedly 4 rand-ch)))))
-
 (defn ^:async ^:private maybe-await-value
   "Agent-REPL ergonomic: if a form returns a Promise (because the form
    called a ^:async fn like `seon.db/transact!`), await it and return
@@ -662,7 +644,7 @@
         n-fail     (volatile! 0)
         current-ns (volatile! agent-ns-sym)]
     (doseq [entry parsed]
-      (let [eval-id    (new-eval-id)
+      (let [eval-id    (db/new-id!)
             tx-context {:seon.db/agent-id agent-id
                         :seon.db/eval-id  eval-id
                         :seon.db/origin   :agent}]
