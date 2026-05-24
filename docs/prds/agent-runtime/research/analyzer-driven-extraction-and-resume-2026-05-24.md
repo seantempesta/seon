@@ -628,57 +628,68 @@ REPL-tested the toy version of `parse-ns-requires` against probe.norm's source �
 
 ### (c) The shared `seon.analyzer-info` module
 
+**Deviation from this research's original sketch (REPL-verified
+2026-05-24):** self-host CLJS does NOT expose `cljs.analyzer.api/find-ns`
+or `cljs.analyzer.api/ns-resolve` — both throw `TypeError: undefined`
+in the pod bundle. The landed impl reads
+`(:cljs.analyzer/namespaces @compile-state)` directly. Also, the
+analyzer var-map's flag is `:fn-var` (no question mark) — confirmed
+by inspecting `(get-in @cs [:cljs.analyzer/namespaces 'probe.keytest
+:defs 'f])` after a `(defn f [x] x)` eval; keys present include
+`:fn-var true`, no `:fn-var?`. `var-projection` renames it to
+`:fn-var?` on output.
+
+The shipped module (`src/seon/analyzer_info.cljs`):
+
 ```clojure
 (ns seon.analyzer-info
-  "Read-side wrapper over cljs.analyzer.api / @!compile-state.
-   Both detect-and-tee (seon.eval/eval-batch!) and resume
-   (seon.client/replay-program-graph!) consume this."
-  (:require [cljs.analyzer.api :as ana-api]))
+  "Read-side wrapper over the bootstrap-CLJS analyzer state in
+   `@compile-state`. One module so 'how we read the analyzer' lives
+   in one place."
+  (:require [clojure.set :as set]
+            [seon.schema :as schema]))
 
 (defn snapshot-defs
-  "{ns-sym → #{def-sym}}. Cheap; pure read."
   [compile-state]
   (into {}
-    (for [[ns-sym ns] (get @compile-state :cljs.analyzer/namespaces)]
-      [ns-sym (set (keys (:defs ns)))])))
+        (for [[ns-sym ns-info] (get @compile-state :cljs.analyzer/namespaces)]
+          [ns-sym (set (keys (:defs ns-info)))])))
 
 (defn defs-since
-  "Vars added or changed since `before-snapshot`. Returns
-   [{:ns :sym :var-map} ...]"
   [before-snapshot compile-state]
-  (for [[ns-sym defs] (snapshot-defs compile-state)
-        sym defs
-        :when (not (contains? (get before-snapshot ns-sym #{}) sym))]
-    {:ns ns-sym :sym sym
-     :var-map (ana-api/ns-resolve compile-state ns-sym sym)}))
+  (let [ns-map (get @compile-state :cljs.analyzer/namespaces)]
+    (for [[ns-sym ns-info] ns-map
+          [sym var-map]    (:defs ns-info)
+          :when (not (contains? (get before-snapshot ns-sym #{}) sym))]
+      {:ns ns-sym :sym sym :var-map var-map})))
 
 (defn ns-deps
-  "Set of agent-ns syms this ns depends on. Excludes self and
-   bootstrap/cljs/clojure namespaces."
   [compile-state ns-sym known-ns-set]
-  (let [ns (ana-api/find-ns compile-state ns-sym)]
-    (-> (set (concat (vals (:requires ns)) (vals (:uses ns))))
+  (let [ns-info (get-in @compile-state [:cljs.analyzer/namespaces ns-sym])
+        deps   (set (concat (vals (:requires ns-info))
+                            (vals (:uses ns-info))))]
+    (-> deps
         (disj ns-sym)
         (set/intersection known-ns-set))))
 
 (defn var-projection
-  "The persistable subset of a var-map for :seon.fn storage."
   [{:keys [name fn-var arglists meta] :as _var-map}]
   {:sym       (str name)
-   :fn?       (boolean fn-var)
+   :fn-var?   (boolean fn-var)
    :arglists  (pr-str arglists)
    :doc       (or (:doc meta) "")
    :private?  (boolean (:private meta))
    :specced?  (some? (:malli/schema meta))})
 ```
 
-Both detect-and-tee and resume verification (post-eval, did the projection match?) call into this. Single source of truth for "how we read the analyzer".
+Both detect-and-tee and resume verification call into this — single
+source of truth for "how we read the analyzer".
 
 ## PLATFORM-FLAGs
 
 1. **`seon.schema/*schemas` is `^:private`.** Detect-and-tee's atom-diff approach for schemas needs a public read accessor: `(defn current-keys [] (set (keys @*schemas)))`. Trivial PR. Without it, schema-tee stays on `extract-schema-key` source-parsing (which works for the canonical shapes but loses multi-register-per-form and `register-all!`).
 
-1a. **`:bootstrap :entries` expansion.** Add `seon.schema`, `malli.core`, `malli.registry`, `cljs.analyzer.api` to `shadow-cljs.edn`'s `:bootstrap :entries` (and `malli.core` to `:macros`). Rebuild `out/bootstrap/`. Measure pod boot time delta — `load-all-analysis-caches!` walks every file in `out/bootstrap/ana/` unconditionally, so the malli core's 1.3MB transit cache will add some ms. If startup grows past acceptable, gate on lazy-load (load malli's ana cache only when an agent first `(require)`s it).
+1a. **`:bootstrap :entries` expansion.** Add `seon.schema`, `malli.core`, `malli.registry` to `shadow-cljs.edn`'s `:bootstrap :entries` (and `malli.core` to `:macros`). (Correction 2026-05-24: do NOT add `cljs.analyzer.api` — its top-level fns like `find-ns`/`ns-resolve` are not callable in self-host CLJS; read `(:cljs.analyzer/namespaces @compile-state)` directly instead. See §(c).) Rebuild `out/bootstrap/`. Measure pod boot time delta — `load-all-analysis-caches!` walks every file in `out/bootstrap/ana/` unconditionally, so the malli core's 1.3MB transit cache will add some ms. If startup grows past acceptable, gate on lazy-load (load malli's ana cache only when an agent first `(require)`s it).
 
 2. **Platform's `replay-program-graph!` (resume walker) currently uses tx-id order.** Reproducible failure: agent redefines an upstream ns AFTER defining a downstream fn that uses it. Resume runs the downstream fn-source before the new ns-source ⇒ analyzer error on `(u/helper n)`. Fix: replace with the topo-sort + per-ns intra-ordering sketch in Q9b. ~50 LOC swap.
 

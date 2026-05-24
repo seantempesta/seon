@@ -50,9 +50,10 @@
     ;; needed.
     [seon.render]
     [seon.render.default]
-    ;; Iteration surface — owns the canonical !compile-state +
-    ;; !conn defonces. start-agent! shares those atoms (no second
-    ;; copy in this ns; see compile-state-lifecycle research note).
+    ;; Iteration surface — owns the canonical `!compile-state`
+    ;; defonce (in `seon.repl`). start-agent! reads through
+    ;; `seon.repl/ensure-bootstrap!` rather than holding a second
+    ;; copy here. See compile-state-lifecycle research note.
     [seon.repl :as repl]
     ;; Phase 2 — test capture as data. Required so the bundle
     ;; includes the runner; agent code reaches it from
@@ -198,7 +199,6 @@
 ;; ---------------------------------------------------------------------------
 
 (defonce !agent-conn (atom nil))
-(defonce !compile-state (atom nil))
 
 ;; Datahike-side schema. Datahike requires every attribute have a
 ;; declared :db/valueType + :db/cardinality before first use — our
@@ -489,18 +489,18 @@
                ";; reply to the user\n"
                "(seon.db/transact!\n"
                "  {:seon.db/tx-data\n"
-               "   [{:seon.message/id      (seon.agent/new-id!)\n"
+               "   [{:seon.message/id      (seon.db/new-id!)\n"
                "     :seon.message/role    :assistant\n"
                "     :seon.message/content "
                (pr-str (str "hello from the stub LLM — saw "
                             (count ctx) " chars of ctx"))
                "\n"
-               "     :seon.message/agent   [:seon.agent/id (session-id)]\n"
+               "     :seon.message/agent   [:seon.agent/id (seon.db/current-agent-id)]\n"
                "     :seon.message/at      (js/Date.)}]})\n\n"
                ";; halt the loop\n"
                "(seon.db/transact!\n"
                "  {:seon.db/tx-data\n"
-               "   [{:seon.agent/id     (session-id)\n"
+               "   [{:seon.agent/id     (seon.db/current-agent-id)\n"
                "     :seon.agent/state  :idle}]})\n")]
     (.then (.resolve js/Promise nil) (fn [_] {:text text}))))
 

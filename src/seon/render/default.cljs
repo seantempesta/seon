@@ -282,7 +282,7 @@
     ";; (session-id) reads your own id from the home-ns atom\n"
     "(seon.db/transact!\n"
     "  {:seon.db/tx-data\n"
-    "   [{:seon.message/id      (seon.agent/new-id!)\n"
+    "   [{:seon.message/id      (seon.db/new-id!)\n"
     "     :seon.message/role    :assistant\n"
     "     :seon.message/content \"your text here\"\n"
     "     :seon.message/agent   [:seon.agent/id (session-id)]\n"

@@ -113,8 +113,21 @@ green.
 
 **Phase B — detect-and-tee + analyzer module (MVP):**
 
-9. `seon.analyzer-info` shared module (snapshot-defs / defs-since
-   / var-projection helpers).
+9. ✅ `seon.analyzer-info` shared module (snapshot-defs / defs-since
+   / ns-deps / var-projection helpers). Shipped 2026-05-24.
+   REPL-verified against 56 nses in the live pod. Three bugs
+   surfaced + fixed in same patch:
+   - v1.md §2.2 + §7 pseudocode read raw analyzer key as
+     `:fn-var?` — actual key is `:fn-var` (no `?`). §7 now calls
+     `analyzer-info/var-projection` directly so the rename lives
+     in one place.
+   - Research file's reference impl used `cljs.analyzer.api/find-ns`
+     + `ns-resolve` — neither exists in self-host CLJS. Module
+     reads `(:cljs.analyzer/namespaces @compile-state)` directly.
+   - `seon.client/!compile-state` defonce (dead since
+     compile-state-lifecycle research 2026-05-22) deleted. Item 10
+     + Phase C/D should consume `seon.repl/!compile-state` or the
+     inner atom threaded through `eval-batch!`.
 10. `eval-batch!` detect-and-tee using analyzer diff + registry-atom
     diff. Writes `:seon.fn` (with `:fn-var?`, `:arglists`, `:doc`,
     `:private?`, `:specced?`, `:created-at`), `:seon.schema` (with
