@@ -90,7 +90,9 @@
    `:seon.render/ai` slot."
   (:require
     [clojure.string :as str]
+    [cljs.reader :as edn]
     [seon.db :as db]
+    [seon.error.instrument :as einstrument]
     [seon.eval :as seval]
     [seon.log :as seon-log]
     [seon.render :as render]
@@ -153,6 +155,18 @@
 (schema/register! :seon.eval/ok?         :boolean)
 (schema/register! :seon.eval/result-edn  :string)
 (schema/register! :seon.eval/error       :string)
+;; Phase A item 8 — structured envelope alongside the rendered string.
+;; Populated by record-eval! when the failure carries an instrumentation
+;; envelope (i.e. (:seon.error/data error) satisfies
+;; seon.error.instrument/instrument-error?). Programmatic readers
+;; (renderers, agents) branch on this; absent for non-instrumentation
+;; failures (timeouts, generic throws).
+;;
+;; Stored as :string (pr-str at write, read-string at read) because the
+;; seon.db Malli→datahike bridge has no :db.type/map entry today; the
+;; envelope itself is a map per seon.error.instrument/explain-payload.
+;; Bridge enhancement to support :map natively is a follow-up.
+(schema/register! :seon.eval/error-data  :string)
 ;; The namespace the eval ended in (v1.md:236). Written by eval-batch!'s
 ;; per-form reduce from the (:ns raw-result) of cljs.js/eval-str. For
 ;; failed forms (read or eval), carries the unchanged current-ns
@@ -716,21 +730,43 @@
   [{role :seon.message/role content :seon.message/content}]
   (str (name role) ": " content))
 
+(defn- read-error-envelope
+  "Best-effort EDN decode of a `:seon.eval/error-data` string. Returns
+   the envelope map, or nil when blank/unreadable. Never throws."
+  [s]
+  (when (and (string? s) (not (str/blank? s)))
+    (try (edn/read-string s)
+         (catch :default _ nil))))
+
 (defn- format-eval-row
   "Multi-line render for the recent-evals tile — narration, source,
-   result/error, and the timing footer (`; # eval-id  Nms`)."
-  [{src     :seon.eval/source
-    ok?     :seon.eval/ok?
-    res     :seon.eval/result-edn
-    err     :seon.eval/error
-    eid     :seon.eval/id
-    dur     :seon.eval/duration-ms
-    narr    :seon.eval/narration}]
-  (let [body (cond
-               ok?                            (or res "nil")
-               (and (string? err)
-                    (not (str/blank? err)))   (str ";; ERROR " err)
-               :else                          ";; <no result>")
+   result/error, and the timing footer (`; # eval-id  Nms`).
+
+   Error rendering branches: if `:seon.eval/error-data` decodes to a
+   Malli instrumentation envelope, use `render-malli-error` (the
+   structured ;; ERROR block with expected/got/reason/hint columns).
+   Otherwise fall back to the legacy `(str \";; ERROR \" err)` plain
+   path — covers timeouts, generic throws, anything pre-instrumentation."
+  [{src      :seon.eval/source
+    ok?      :seon.eval/ok?
+    res      :seon.eval/result-edn
+    err      :seon.eval/error
+    err-data :seon.eval/error-data
+    eid      :seon.eval/id
+    dur      :seon.eval/duration-ms
+    narr     :seon.eval/narration}]
+  (let [envelope (read-error-envelope err-data)
+        body (cond
+               ok?
+               (or res "nil")
+
+               (einstrument/instrument-error? envelope)
+               (einstrument/render-malli-error envelope)
+
+               (and (string? err) (not (str/blank? err)))
+               (str ";; ERROR " err)
+
+               :else ";; <no result>")
         footer (str "  ; # " eid (when dur (str "  " dur "ms")))]
     (str (when (and narr (not (str/blank? narr))) (str narr "\n"))
          "> " src "\n"

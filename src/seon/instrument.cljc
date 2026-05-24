@@ -30,7 +30,8 @@
   (:require
     #?@(:clj  [[cljs.analyzer.api :as ana]]
         :cljs [[malli.core :as m]
-               [malli.instrument :as mi]])))
+               [malli.instrument :as mi]
+               [seon.error.instrument :as ei]])))
 
 #?(:clj
    (defn- collect-registrations
@@ -104,6 +105,12 @@
        ;; registered fn's var-binding in place to install the validating
        ;; wrapper. n-registered == n-instrumented by construction
        ;; since instrument! reads the same atom collect! just populated.
-       (mi/instrument!)
+       ;;
+       ;; Reporter — Phase A item 8. Default reporter is `m/-fail!`
+       ;; (throws a generic ex-info); we hand in `ei/report-fn` so
+       ;; failures throw with the structured envelope as ex-data,
+       ;; which seon.error/->map flattens into :seon.error/data and
+       ;; record-eval! persists as :seon.eval/error-data.
+       (mi/instrument! {:report ei/report-fn})
        {:seon.instrument/n-registered   n-reg
         :seon.instrument/n-instrumented n-reg})))

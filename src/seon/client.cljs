@@ -268,6 +268,7 @@
    :seon.eval/ok?
    :seon.eval/result-edn
    :seon.eval/error
+   :seon.eval/error-data
    ;; :seon.eval/ns — ending ns from cljs.js/eval-str's :ns, or
    ;; unchanged accumulator on parse/eval failure (v1.md:236).
    :seon.eval/ns

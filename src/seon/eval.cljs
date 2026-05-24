@@ -39,7 +39,8 @@
             [goog.object :as gobj]
             [shadow.cljs.bootstrap.node :as boot]
             [seon.db :as db]
-            [seon.error :as error]))
+            [seon.error :as error]
+            [seon.error.instrument :as einstrument]))
 
 ;; ============================================================
 ;; Per-form wall-clock timeout. Stability guard, not a security
@@ -352,20 +353,28 @@
     ;; agent's typo — don't escalate. Empty-ns case (`cljs.user`
     ;; before any defs) doesn't trip this, so `Let` still routes
     ;; through the globalThis check below.
-    (let [ns-defs (:defs (get-in @compile-state
-                                 [:cljs.analyzer/namespaces (symbol prefix)]))]
-      (and ns-defs (contains? ns-defs (symbol suffix))))
+    ;;
+    ;; Nil-guard `prefix` / `suffix` — some warning shapes from
+    ;; instrumented call sites carry one or both as nil; bare
+    ;; `(symbol nil)` throws "no conversion to symbol". When either
+    ;; is nil this branch cannot decide; fall through to globalThis.
+    (let [ns-defs (when prefix
+                    (:defs (get-in @compile-state
+                                   [:cljs.analyzer/namespaces (symbol prefix)])))]
+      (and ns-defs suffix (contains? ns-defs (symbol suffix))))
     false
 
     :else
-    (let [munged-suffix (cljs.core/munge (str suffix))
-          prefix-path   (when prefix
+    (let [munged-suffix (when suffix (cljs.core/munge (str suffix)))
+          prefix-path   (when (and prefix munged-suffix)
                           (str (cljs.core/munge (str prefix)) "." munged-suffix))
-          core-path     (str "cljs.core." munged-suffix)]
-      (not (or (and prefix-path (resolves-on-globalthis? prefix-path))
-               (resolves-on-globalthis? core-path)
-               ;; Bare lookup for nil-prefix shapes.
-               (resolves-on-globalthis? munged-suffix))))))
+          core-path     (when munged-suffix (str "cljs.core." munged-suffix))]
+      ;; If we can't even build a probe path, the warning carries no
+      ;; symbol-shaped target — treat as benign rather than escalating.
+      (and munged-suffix
+           (not (or (and prefix-path (resolves-on-globalthis? prefix-path))
+                    (and core-path (resolves-on-globalthis? core-path))
+                    (resolves-on-globalthis? munged-suffix)))))))
 
 (defn ^:async ^:private raw-eval
   "Internal — returns a Promise that resolves with {:value v :ns ns}
@@ -637,7 +646,24 @@
                    (not (:ok result))
                    (assoc :seon.eval/error
                           (try (pr-str (:error result))
-                               (catch :default _ (str (:error result))))))
+                               (catch :default _ (str (:error result)))))
+
+                   ;; Phase A item 8 — when the error carries a Malli
+                   ;; instrumentation envelope (flattened into
+                   ;; :seon.error/data by seon.error/->map), persist the
+                   ;; envelope as `:seon.eval/error-data` (pr-str round-
+                   ;; trip — see attr docstring). Renderers branch on
+                   ;; this to produce the structured ;; ERROR block.
+                   (and (not (:ok result))
+                        (einstrument/instrument-error?
+                          (some-> result :error :seon.error/data)))
+                   (assoc :seon.eval/error-data
+                          ;; Use the fn-stubbing serializer — envelope
+                          ;; embeds Malli schemas whose forms contain
+                          ;; unreadable #object[…] fn refs. See
+                          ;; seon.error.instrument/pr-str-readable.
+                          (einstrument/pr-str-readable
+                            (-> result :error :seon.error/data))))
         ;; Attach the eval as a component child of the turn. Datahike's
         ;; cardinality-many ref accumulates on upsert — each record-eval!
         ;; call appends one eval to the turn's evals set.
