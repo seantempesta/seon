@@ -25,6 +25,7 @@
      ;; Then chat with it:
      (seon.agent/chat \"seon\" \"hello\")"
   (:require
+    [clojure.string :as str]
     [datahike.api :as d]
     ;; Pull in the agent's required namespaces at compile time so all
     ;; schemas are registered before start-agent! runs.
@@ -309,6 +310,158 @@
       (await (d/transact! conn full-schema))
       conn)))
 
+;; ---------------------------------------------------------------------------
+;; Resume — replay-program-graph!
+;;
+;; v1.md §7.4. Re-eval every :seon.ns / :seon.fn / :seon.schema entity's
+;; persisted :source in tx-id order after pod restart, restoring the
+;; agent's vars / namespaces / Malli registrations into the live
+;; compile-state + globalThis.
+;;
+;; Design derived from research/resume-findings-2026-05-23.md:
+;;
+;;   - Query against `@conn`, NOT `(d/history db)`. Single-card identity
+;;     attrs are last-write-wins; the current db gives us the latest
+;;     :source per entity. Tx-id bound is the LATEST upsert tx — that's
+;;     the correct order (replaying the current code shape, not the
+;;     original creation order). Live-probe Q2 in the findings file.
+;;   - Bypass `eval-batch!`. Replay goes straight to `seval/eval`.
+;;     - No `:seon.eval` entry written per replay (there's no turn
+;;       to attach to, and the schema doesn't make :seon.eval/turn
+;;       optional).
+;;     - detect-and-tee (MVP's incoming addition to eval-batch!)
+;;       doesn't re-fire, so we don't write no-op upserts that would
+;;       re-anchor tx-ids across boots.
+;;   - Per-entity target ns:
+;;     - :ns     → source IS the (ns foo …) form; eval from 'cljs.user
+;;     - :fn     → ident is "<ns>/<name>" string; ns is the prefix
+;;     - :schema → ident is the keyword; ns is its namespace segment
+;;   - Failures land as `:seon.log` :warn entries (NOT new :seon.eval
+;;     entries — no turn to attach them to). One try/catch per entity;
+;;     a failure doesn't abort the rest of the replay.
+;;   - The replay-level (with-tx-context {:seon.db/origin :replay
+;;     :seon.db/replay? true}) tags only the log-write transactions —
+;;     no eval entities are written.
+;; ---------------------------------------------------------------------------
+
+(defn- target-ns-for-entry
+  "Per-entity target ns symbol for `(seval/eval … {:ns _})`.
+
+   For :ns entries the source itself is a (ns …) form which switches
+   the ns on its own; we eval from 'cljs.user. For :fn / :schema the
+   source is a bare (defn …) / (schema/register! …) — we must be IN
+   the owning ns before eval so the def lands in the right slot."
+  [{:keys [kind ident]}]
+  (case kind
+    :ns     'cljs.user
+    :fn     (-> ident (str/split #"/" 2) first symbol)
+    :schema (-> ident namespace symbol)))
+
+(defn ^:async ^:private query-program-graph-entries
+  "Returns a vector of {:kind <:ns|:fn|:schema> :ident <id-value>
+   :source <string> :tx <long>} sorted by tx-id ascending. Reads
+   against the CURRENT db so only currently-asserted sources land
+   in the replay set; retracted / superseded source values stay in
+   history and are not replayed."
+  [conn]
+  (let [rows (d/q '[:find ?ident ?source ?tx ?kind
+                    :where
+                    (or-join [?e ?ident ?source ?tx ?kind]
+                      (and [?e :seon.ns/name   ?ident ?tx]
+                           [?e :seon.ns/source ?source]
+                           [(ground :ns) ?kind])
+                      (and [?e :seon.fn/sym    ?ident ?tx]
+                           [?e :seon.fn/source ?source]
+                           [(ground :fn) ?kind])
+                      (and [?e :seon.schema/key    ?ident ?tx]
+                           [?e :seon.schema/source ?source]
+                           [(ground :schema) ?kind]))]
+                  @conn)]
+    (->> rows
+         (map (fn [[ident source tx kind]]
+                {:kind kind :ident ident :source source :tx tx}))
+         (sort-by :tx)
+         vec)))
+
+(defn ^:async ^:private replay-one!
+  "Replay a single entry. Returns
+     {:ok? true}
+   or
+     {:ok? false :error <message-string> :stack <stack-string>}.
+   Never throws — converts any exception to data."
+  [compile-state {:keys [source] :as entry}]
+  (try
+    (let [ns-sym (target-ns-for-entry entry)
+          r      (await (seval/eval compile-state source
+                                    {:ns            ns-sym
+                                     :analyze-deps? false}))]
+      (if (:ok r)
+        {:ok? true}
+        {:ok? false
+         :error (or (some-> r :error :seon.error/message) "unknown")
+         :stack (or (some-> r :error :seon.error/stack) "")}))
+    (catch :default e
+      {:ok? false
+       :error (or (.-message e) (str e))
+       :stack (or (.-stack e) "")})))
+
+(defn ^:async ^:private log-replay-failure!
+  [agent-id {:keys [kind ident]} {:keys [error stack]}]
+  (await
+    (db/transact!
+      {:seon.db/tx-data
+       [{:seon.log/at      (js/Date.)
+         :seon.log/level   :warn
+         :seon.log/source  "seon.client/replay-program-graph!"
+         :seon.log/agent   [:seon.agent/id agent-id]
+         :seon.log/message (str "replay of " (name kind) " "
+                                (pr-str ident) " failed: " error)
+         :seon.log/stack   stack}]})))
+
+(defn ^:async replay-program-graph!
+  "Re-eval every :seon.ns / :seon.fn / :seon.schema entity's persisted
+   :source in tx-id order. Failures land as :seon.log :warn entries
+   and do NOT abort replay — every entity gets its own try/catch.
+
+   Returns a Promise of
+     {:seon.client/replay-n-total <int>
+      :seon.client/replay-n-ok    <int>
+      :seon.client/replay-n-fail  <int>}.
+
+   Call sites:
+     - Boot path in start-agent! between assert-preconditions! and
+       setup-agent-ns! so substrate atoms (last to run) win the
+       last-write race against any agent code that redefines them.
+     - REPL probe via the same-pod-session test pattern — see
+       research/resume-findings-2026-05-23.md §'Same-pod-session test'."
+  [{:keys [conn compile-state agent-id]}]
+  (db/with-tx-context
+    {:seon.db/origin   :replay
+     :seon.db/replay?  true
+     :seon.db/agent-id agent-id}
+    (fn ^:async run-replay! []
+      (let [entries (await (query-program-graph-entries conn))
+            !n-ok   (volatile! 0)
+            !n-fail (volatile! 0)]
+        (doseq [entry entries]
+          (let [r (await (replay-one! compile-state entry))]
+            (if (:ok? r)
+              (vswap! !n-ok inc)
+              (do
+                (vswap! !n-fail inc)
+                ;; Best-effort log; swallow log-write failure (would
+                ;; be a double-fault and we want the rest of replay
+                ;; to continue).
+                (try
+                  (await (log-replay-failure! agent-id entry r))
+                  (catch :default e
+                    (log/error-console!
+                      "seon.client/replay-program-graph!"
+                      (str "log-replay-failure failed: " (.-message e)))))))))
+        {:seon.client/replay-n-total (count entries)
+         :seon.client/replay-n-ok    @!n-ok
+         :seon.client/replay-n-fail  @!n-fail}))))
+
 (defn- stub-llm
   "A fake LLM that demonstrates the REPL-as-harness response shape: a
    `;; narration` line then a real `seon.db/transact!` form, then
@@ -367,6 +520,20 @@
         ;; gensym so the next call rebuilds the state. Idempotent
         ;; while the substrate code is stable.
         compile-state (await (repl/ensure-bootstrap!))
+        ;; v1.md §7.4. Re-eval every persisted :seon.ns / :seon.fn /
+        ;; :seon.schema entity's :source in tx-id order. Idempotent
+        ;; against an empty conn (the :memory case until the SQLite
+        ;; flip lands) — returns {…replay-n-total 0 …}. Runs BEFORE
+        ;; setup-agent-ns! so substrate atoms (last to run) win the
+        ;; last-write race against any agent code that touches the
+        ;; home-ns atoms.
+        replay-stats  (await (replay-program-graph!
+                               {:conn          conn
+                                :compile-state compile-state
+                                :agent-id      agent/default-id}))
+        _             (log/info-console!
+                        "seon.client/start-agent!"
+                        (str "replay: " (pr-str replay-stats)))
         ;; Prime the agent's home namespace with the atoms + accessors.
         ;; agent-ns-sym is the V0 default (`seon.agent.seon`); when
         ;; multi-agent comes, derive per-id via (seon.agent/home-ns id).
