@@ -269,9 +269,26 @@
       refs (analyzer reports prefix=current-ns for those; `(+ 1 2)` in
       `cljs.user` warns prefix=cljs.user suffix=+, and the var lives
       at `cljs.core._PLUS_`).
-   3. If neither path resolves, truly undeclared → escalate."
-  [compile-state {:keys [prefix suffix] :as _warning}]
+   3. If neither path resolves, truly undeclared → escalate.
+
+   Step 0 (short-circuit before the cond): when the warning carries
+   `:macro-present? true`, the analyzer found the symbol as a MACRO at
+   macroexpand time even though the same name isn't a runtime var. For
+   example `(defonce x …)` macroexpands to a body that mentions
+   `cljs.core/exists?`, which is a macro-only name — `exists?` does
+   NOT exist at `cljs.core.exists_QMARK_` on globalThis. The
+   macroexpansion already succeeded; the warning is the analyzer
+   over-reporting. Treat as benign by construction."
+  [compile-state {:keys [prefix suffix] :as warning}]
   (cond
+    ;; Macro-position symbols. If `:macro-present? true`, the
+    ;; expander resolved it; the warning is over-reporting. Suppress.
+    ;; Without this, `(defonce x …)`, `(comment …)` macroexpansions,
+    ;; and any other macro that expands to a body referencing another
+    ;; macro by symbol get falsely escalated as :compile errors.
+    (:macro-present? warning)
+    false
+
     ;; Strong short-circuit: ns has real :defs in the analyzer's
     ;; compile-state. If the var is registered on a populated ns and
     ;; the analyzer still warned, that's an analyzer bug, not the
