@@ -69,7 +69,11 @@
     ;; can call (seon.fs/read-file ...) + (seon.platform/host) from
     ;; bootstrap-CLJS eval.
     [seon.fs]
-    [seon.platform]))
+    [seon.platform]
+    ;; Phase B item 9 — shared read-side wrapper over the analyzer
+    ;; state. Required here so the build includes it; item 10's
+    ;; detect-and-tee in seon.eval/eval-batch! consumes it.
+    [seon.analyzer-info]))
 
 ;; ---------------------------------------------------------------------------
 ;; Process-lifetime state. `defonce` so reloads don't reset it.
@@ -531,46 +535,53 @@
         ;; gensym so the next call rebuilds the state. Idempotent
         ;; while the substrate code is stable.
         compile-state (await (repl/ensure-bootstrap!))
-        ;; v1.md §7.4. Re-eval every persisted :seon.ns / :seon.fn /
-        ;; :seon.schema entity's :source in tx-id order. Idempotent
-        ;; against an empty conn (the :memory case until the SQLite
-        ;; flip lands) — returns {…replay-n-total 0 …}. Runs BEFORE
-        ;; setup-agent-ns! so substrate atoms (last to run) win the
-        ;; last-write race against any agent code that touches the
-        ;; home-ns atoms.
-        replay-stats  (await (replay-program-graph!
-                               {:conn          conn
-                                :compile-state compile-state
-                                :agent-id      agent/default-id}))
-        _             (log/info-console!
-                        "seon.client/start-agent!"
-                        (str "replay: " (pr-str replay-stats)))
-        ;; Prime the agent's home namespace with the atoms + accessors.
-        ;; agent-ns-sym is the V0 default (`seon.agent.seon`); when
-        ;; multi-agent comes, derive per-id via (seon.agent/home-ns id).
-        _             (await (seval/setup-agent-ns!
-                               compile-state
-                               agent/default-ns
-                               agent/default-id))
-        ;; Boot the turn loop (creates entity + installs kick).
-        {:seon.agent/keys [id ns]}
-        (await (agent/boot! {:seon.agent/llm-fn       llm-fn
-                             :seon.agent/compile-state compile-state}))
-        ;; Boot the pod's HTTP+SSE server (A-5). The browser hits
-        ;; this for the dev iteration loop.
-        {:seon.web/keys [port port-file]}
-        (await (web.serve/start!))
-        ;; Install the broadcast tx-listener (A-6) — every DB tx now
-        ;; re-renders running agents + diffs against the per-agent
-        ;; HTML cache + pushes datastar-patch-elements to open SSE
-        ;; connections when the rendered string changes. Also wires the
-        ;; render-on-connect watcher so a fresh /sse open gets the
-        ;; current state immediately.
-        _ (web.broadcast/install!)]
-    (log/info-console! "seon.client" "agent started"
-                       {:agent id :ns (str ns) :port port :port-file port-file})
-    {:seon.agent/id id :seon.agent/ns ns
-     :seon.web/port port :seon.web/port-file port-file}))
+        ;; Mint the agent id locally (audit P1 — was a process-global
+        ;; defonce in seon.agent). Every downstream call sees it via
+        ;; the `(db/with-agent agent-id …)` scope wrapping the rest of
+        ;; boot below — replay-program-graph!, setup-agent-ns!,
+        ;; agent/boot!, install-user-trigger!, run-turn!. The
+        ;; user-message-handler re-enters `with-agent` on each kick.
+        agent-id      (db/new-id!)
+        agent-ns-sym  (agent/home-ns agent-id)]
+    (await
+      (db/with-agent agent-id
+        (fn ^:async boot-with-agent! []
+          (let [;; v1.md §7.4. Re-eval every persisted :seon.ns / :seon.fn /
+                ;; :seon.schema entity's :source in tx-id order. Idempotent
+                ;; against an empty conn (the :memory case until the SQLite
+                ;; flip lands) — returns {…replay-n-total 0 …}. Runs BEFORE
+                ;; setup-agent-ns! so substrate atoms (last to run) win the
+                ;; last-write race against any agent code that touches the
+                ;; home-ns atoms.
+                replay-stats  (await (replay-program-graph!
+                                       {:conn          conn
+                                        :compile-state compile-state
+                                        :agent-id      agent-id}))
+                _             (log/info-console!
+                                "seon.client/start-agent!"
+                                (str "replay: " (pr-str replay-stats)))
+                ;; Prime the agent's home namespace with the atoms +
+                ;; accessors. Per-agent: derived via
+                ;; (seon.agent/home-ns agent-id).
+                _             (await (seval/setup-agent-ns!
+                                       compile-state
+                                       agent-ns-sym
+                                       agent-id))
+                ;; Boot the turn loop (creates entity + installs kick).
+                {:seon.agent/keys [id ns]}
+                (await (agent/boot! {:seon.agent/id           agent-id
+                                     :seon.agent/llm-fn       llm-fn
+                                     :seon.agent/compile-state compile-state}))
+                ;; Boot the pod's HTTP+SSE server (A-5). The browser hits
+                ;; this for the dev iteration loop.
+                {:seon.web/keys [port port-file]}
+                (await (web.serve/start!))
+                ;; Install the broadcast tx-listener (A-6).
+                _ (web.broadcast/install!)]
+            (log/info-console! "seon.client" "agent started"
+                               {:agent id :ns (str ns) :port port :port-file port-file})
+            {:seon.agent/id id :seon.agent/ns ns
+             :seon.web/port port :seon.web/port-file port-file}))))))
 
 (defn start-agent-with-stub!
   "Bring up the V0 agent with the canned stub LLM. Useful for verifying

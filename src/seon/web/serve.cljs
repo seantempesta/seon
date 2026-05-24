@@ -221,7 +221,17 @@
   ;; alone leaves the conversation visible via the timeline's eval
   ;; rendering. Notes (`:seon.note/*`) are preserved — they ARE the
   ;; durable memory.
-  (let [agent-id (or (query-param req "agent") "seon")]
+  ;;
+  ;; Agent-id resolution (audit P1 — 2026-05-24): the query param wins;
+  ;; otherwise we read `(db/current-agent-id)` from whatever ALS scope
+  ;; the HTTP handler ran inside (none, by default — Node's request
+  ;; callback runs at the event-loop root). When neither is set, 400 —
+  ;; no silent fallback to a hardcoded id.
+  (let [agent-id (or (query-param req "agent") (db/current-agent-id))]
+    (when-not agent-id
+      (write-status! res 400 "text/plain; charset=utf-8"
+                     "missing 'agent' query param (no agent-id in scope)")
+      (throw (js/Error. "handle-clear!: no agent-id resolved")))
     (log/info-console! "seon.web.serve" "/clear ENTER" {:agent agent-id})
     (try
       (let [msg-eids (->> (db/query
@@ -270,7 +280,13 @@
                        (str "clear failed: " e))))))
 
 (defn- handle-chat! [req res]
-  (let [agent-id (or (query-param req "agent") "seon")]
+  ;; Agent-id resolution (audit P1 — 2026-05-24): query param wins,
+  ;; else `(db/current-agent-id)`, else 400 — no silent "seon" fallback.
+  (let [agent-id (or (query-param req "agent") (db/current-agent-id))]
+    (when-not agent-id
+      (write-status! res 400 "text/plain; charset=utf-8"
+                     "missing 'agent' query param (no agent-id in scope)")
+      (throw (js/Error. "handle-chat!: no agent-id resolved")))
     (-> (read-body req)
         (.then (fn [body]
                  (let [params (parse-urlencoded body)

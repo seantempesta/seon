@@ -51,10 +51,12 @@
      - `register-warning!` / `unregister-warning!` — warning predicate
        registry (atom-backed; v1.md §5.2)
      - `replies-after`      — poll-style read of :assistant messages
-     - `default-id`         — \"seon\" (V0 hardcoded default; tightening
-                              to 12-char strict pairs with the
-                              default-id refactor)
-     - `default-ns`         — 'seon.agent.seon (derived from default-id)
+
+   Agent-id resolution: every read API takes `:seon.agent/id` and falls
+   back to `(seon.db/current-agent-id)` when unset. Callers running
+   inside `(seon.db/with-agent id …)` (the normal boot/run path) need
+   not pass it. REPL callers from outside any scope must pass it
+   explicitly — the helpers throw a clear ex-info rather than guessing.
 
    ## State machine
 
@@ -338,8 +340,12 @@
             ;; (count of turns whose :at is after the latest user msg's
             ;; :at), so the just-landed user message naturally resets
             ;; the window. See docs/seon/concepts/reactive-context.
+            ;;
+            ;; setTimeout breaks the ALS scope — re-enter `with-agent`
+            ;; so the loop's downstream calls (run-turn!, eval-batch!,
+            ;; section fns, web handlers) see (db/current-agent-id).
             (js/setTimeout
-              (fn [] (run-agentic-loop! input))
+              (fn [] (db/with-agent id #(run-agentic-loop! input)))
               0)))))))
 
 (defn install-user-trigger!
@@ -373,40 +379,32 @@
   {:seon.agent/id id})
 
 ;; ============================================================
-;; V0 MVP defaults — one hardcoded agent at the canonical id.
-;;
-;; The home ns is deterministic — `(home-ns default-id)` gives the
-;; runtime ns symbol `'seon.agent.seon`, created via
-;; seon.eval/setup-agent-ns! at boot.
-;; ============================================================
-
-(defonce default-id
-  ;; Minted once per pod boot via the canonical generator. `defonce`
-  ;; survives hot-reload of seon.agent so the same id persists across
-  ;; reloads in a session (callers cache it as the "current agent").
-  ;; URL: /chat?agent=<id>; namespace: 'seon.agent.<id>. Both work
-  ;; because the id is always letter-leading by construction (see
-  ;; seon.db/new-id! — alphabet is letters only).
-  (db/new-id!))
-(def default-ns (home-ns default-id))
-
-;; ============================================================
 ;; Boot. The single entry point seon.client calls at startup.
+;;
+;; V0 hardcoded `default-id` / `default-ns` removed 2026-05-24 (audit P1
+;; — see docs/prds/agent-runtime/research/schema-state-architecture-audit
+;; -2026-05-23.md §2). Multi-agent v1 needs agent identity to flow via
+;; the `seon.db/agent-id-als` substrate, not via process-global atoms.
+;; Callers (seon.client/start-agent!) now mint the id locally and wrap
+;; the boot pipeline in `(seon.db/with-agent id …)`. The home-ns stays
+;; deterministic via `(home-ns id)`.
 ;; ============================================================
 
 (defn ^:async boot!
-  "Create the V0 agent, install the kick listener. Map-in / map-out.
+  "Create an agent entity + install the kick listener. Map-in / map-out.
 
    Input:
+     :seon.agent/id             agent id string (REQUIRED — pass the id
+                                minted by the caller; no implicit default)
      :seon.agent/llm-fn         ctx-string -> Promise<{:text \"…\"}>
      :seon.agent/compile-state  defonce'd bootstrap compile-state
 
    Returns `{:seon.agent/id _ :seon.agent/ns _}`. The first user
    message kicks `run-agentic-loop!` (which lazily opens a
    `:seon.session` on first turn)."
-  [{:seon.agent/keys [llm-fn compile-state]}]
+  [{:seon.agent/keys [id llm-fn compile-state]}]
   (let [{:seon.agent/keys [id]}
-        (await (create! {:seon.agent/id default-id}))
+        (await (create! {:seon.agent/id id}))
         agent-ns (home-ns id)]
     (install-user-trigger! {:seon.agent/id id
                     :seon.agent/llm-fn llm-fn
@@ -613,22 +611,29 @@
     (log id turn-idx "open" turn-id "+" (count prompt) "ctx-chars")
     (try
       (let [result (await
-                     (db/with-tx-context
-                       {:seon.db/agent-id   id
-                        :seon.db/session-id session-id
-                        :seon.db/turn-id    turn-id
-                        :seon.db/origin     :system}
+                     ;; Two nested ALS scopes — tx-context carries the
+                     ;; full causality bundle into every transact's
+                     ;; tx-meta; agent-id-als is the substrate read by
+                     ;; non-tx code (inspectors, section fns, web
+                     ;; handlers) via `(seon.db/current-agent-id)`.
+                     (db/with-agent id
                        (fn []
-                         (with-turn!
-                           {:seon.agent/id           id
-                            :seon.session/id-of-session session-id
-                            :seon.turn/id-of-turn    turn-id
-                            :seon.turn/prompt-text   prompt}
-                           #(ask-and-eval! {:seon.agent/id            id
-                                            :seon.agent/llm-fn        llm-fn
-                                            :seon.agent/compile-state compile-state
-                                            :seon.turn/id-of-turn     turn-id
-                                            :seon.turn/prompt-text    prompt})))))
+                         (db/with-tx-context
+                           {:seon.db/agent-id   id
+                            :seon.db/session-id session-id
+                            :seon.db/turn-id    turn-id
+                            :seon.db/origin     :system}
+                           (fn []
+                             (with-turn!
+                               {:seon.agent/id           id
+                                :seon.session/id-of-session session-id
+                                :seon.turn/id-of-turn    turn-id
+                                :seon.turn/prompt-text   prompt}
+                               #(ask-and-eval! {:seon.agent/id            id
+                                                :seon.agent/llm-fn        llm-fn
+                                                :seon.agent/compile-state compile-state
+                                                :seon.turn/id-of-turn     turn-id
+                                                :seon.turn/prompt-text    prompt})))))))
             n-ok (or (:seon.agent/eval-count result) 0)]
         (log id turn-idx "done" n-ok "ok")
         (assoc (db/pull {:seon.db/pull-pattern
@@ -776,22 +781,42 @@
 ;; Read API — what the agent calls from its REPL to walk its own
 ;; state. All sync, all pulling from the live conn. Match v1.md §5's
 ;; map-arg convention with smart defaults.
+;;
+;; Agent-id resolution: callers pass `:seon.agent/id` explicitly OR
+;; run inside a `(seon.db/with-agent id …)` scope (the normal boot/
+;; run-loop path). `resolve-id` throws a clear ex-info when neither
+;; is available — we don't guess, we don't fall back to a hardcoded
+;; process-global default (audit P1).
 ;; ------------------------------------------------------------
+
+(defn- resolve-id
+  "Return the explicit id when supplied, else `(db/current-agent-id)`,
+   else throw with a clear message. Centralized so every read API
+   surfaces the same instruction when called outside any agent scope."
+  [id]
+  (or id
+      (db/current-agent-id)
+      (throw (ex-info
+               (str "seon.agent: no agent-id in scope — pass "
+                    ":seon.agent/id explicitly or call inside "
+                    "(seon.db/with-agent id …).")
+               {::error :seon.agent/no-agent-id}))))
 
 (defn root-pull
   "One nested pull walks the agent's whole causality graph: sessions
    → turns → (messages + evals) + ctx. Components inline, so a single
    call returns the full tree.  v1.md §2.4 idiom #1."
   ([] (root-pull {}))
-  ([{:seon.agent/keys [id] :or {id default-id}}]
-   (db/pull
-     {:seon.db/pull-pattern
-      '[* {:seon.agent/sessions
-           [* {:seon.session/turns
-               [* {:seon.turn/messages [*]
-                   :seon.turn/evals    [*]}]}]
-          :seon.agent/ctx [*]}]
-      :seon.db/ref [:seon.agent/id id]})))
+  ([{:seon.agent/keys [id]}]
+   (let [id (resolve-id id)]
+     (db/pull
+       {:seon.db/pull-pattern
+        '[* {:seon.agent/sessions
+             [* {:seon.session/turns
+                 [* {:seon.turn/messages [*]
+                     :seon.turn/evals    [*]}]}]
+            :seon.agent/ctx [*]}]
+        :seon.db/ref [:seon.agent/id id]}))))
 
 (defn messages
   "Last N user/assistant/system messages on the agent's current
@@ -799,8 +824,9 @@
    :seon.turn/messages (component refs), so the values are inlined
    without an extra query. Default {:seon.agent/n 50}."
   ([] (messages {}))
-  ([{:seon.agent/keys [n id] :or {n 50 id default-id}}]
-   (let [session (current-session id)
+  ([{:seon.agent/keys [n id] :or {n 50}}]
+   (let [id      (resolve-id id)
+         session (current-session id)
          msgs    (for [t (sort-by :seon.turn/at (:seon.session/turns session))
                        m (sort-by :seon.message/at (:seon.turn/messages t))]
                    m)]
@@ -810,8 +836,9 @@
   "Most-recent :seon.turn on the agent's current session — the one
    that's :running, or the last :done if no turn is open."
   ([] (current-turn {}))
-  ([{:seon.agent/keys [id] :or {id default-id}}]
-   (let [session (current-session id)]
+  ([{:seon.agent/keys [id]}]
+   (let [id      (resolve-id id)
+         session (current-session id)]
      (last (sort-by :seon.turn/at (:seon.session/turns session))))))
 
 (defn evals
@@ -820,8 +847,9 @@
    migrated eval storage to this shape in commit 5786247).
    Default {:seon.agent/n 20}."
   ([] (evals {}))
-  ([{:seon.agent/keys [n id] :or {n 20 id default-id}}]
-   (let [session (current-session id)
+  ([{:seon.agent/keys [n id] :or {n 20}}]
+   (let [id      (resolve-id id)
+         session (current-session id)
          es      (for [t (sort-by :seon.turn/at (:seon.session/turns session))
                        e (sort-by :seon.eval/at (:seon.turn/evals t))]
                    e)]
@@ -834,8 +862,9 @@
    ns (via `(ns …)`) shows up here on the next call. See
    docs/seon/concepts/reactive-context."
   ([] (current-ns {}))
-  ([{:seon.agent/keys [id] :or {id default-id}}]
-   (let [;; All evals across all sessions, latest first.
+  ([{:seon.agent/keys [id]}]
+   (let [id (resolve-id id)
+         ;; All evals across all sessions, latest first.
          all-evals
          (for [s (:seon.agent/sessions (db/entity {:seon.db/ref [:seon.agent/id id]}))
                t (:seon.session/turns s)
@@ -852,8 +881,9 @@
    the message + turn log; nothing stored. See
    docs/seon/concepts/reactive-context."
   ([] (turns-since-user {}))
-  ([{:seon.agent/keys [id] :or {id default-id}}]
-   (let [session (current-session id)
+  ([{:seon.agent/keys [id]}]
+   (let [id      (resolve-id id)
+         session (current-session id)
          turns   (:seon.session/turns session)
          latest-user-at
          (->> (db/query
@@ -878,14 +908,15 @@
    inlined. Sorted by :seon.ctx/priority. Useful for inspection
    and for the agent's layout-editing flow."
   ([] (ctx-entities {}))
-  ([{:seon.agent/keys [id] :or {id default-id}}]
-   (->> (db/pull {:seon.db/pull-pattern
-                  '[{:seon.agent/ctx [:db/id :seon.ctx/name
-                                      :seon.ctx/priority :seon.ctx/fn]}]
-                  :seon.db/ref [:seon.agent/id id]})
-        :seon.agent/ctx
-        (sort-by :seon.ctx/priority)
-        vec)))
+  ([{:seon.agent/keys [id]}]
+   (let [id (resolve-id id)]
+     (->> (db/pull {:seon.db/pull-pattern
+                    '[{:seon.agent/ctx [:db/id :seon.ctx/name
+                                        :seon.ctx/priority :seon.ctx/fn]}]
+                    :seon.db/ref [:seon.agent/id id]})
+          :seon.agent/ctx
+          (sort-by :seon.ctx/priority)
+          vec))))
 
 ;; ------------------------------------------------------------
 ;; Tunables for `warnings-section`. Predicate values; not stored.

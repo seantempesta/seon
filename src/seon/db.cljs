@@ -458,6 +458,53 @@
     ;; callers downstream `merge` on the result.
     (when (some? store) store)))
 
+;; ---------------------------------------------------------------------------
+;; agent-id-als — fiber-local agent identity for the dynamic extent of an
+;; agent's work. Distinct from `als-instance` (tx-context) so non-DB code
+;; paths (inspectors, section fns, web handlers) can read the active
+;; agent-id without depending on tx-context machinery.
+;;
+;; Same ALS substrate, same propagation guarantees (survives ^:async /
+;; await boundaries; concurrent fibers see only their own scope). Wired
+;; from `seon.client/start-agent!` so all downstream calls — boot,
+;; replay, turn loops, listeners — see the agent's id via
+;; `(seon.db/current-agent-id)`.
+;;
+;; The `transact!` auto-merge below stamps `:seon.db/agent-id` into
+;; tx-meta when this ALS has a value AND the caller didn't already supply
+;; one in `(:tx-meta opts)` OR in the tx-context scope. Audit P1 fix.
+;; ---------------------------------------------------------------------------
+
+(defonce ^:private agent-id-als
+  (let [AsyncLocalStorage (.-AsyncLocalStorage (js/require "node:async_hooks"))]
+    (AsyncLocalStorage.)))
+
+(defn current-agent-id
+  "Return the active agent-id (string), or nil if no `with-agent` is in
+   scope. Reads from AsyncLocalStorage — fiber-local across awaits, safe
+   under concurrent agents. The standard accessor for any code (inspector,
+   section fn, web handler, REPL convenience) that needs to know whose
+   universe it's running in."
+  []
+  (let [store (.getStore agent-id-als)]
+    (when (some? store) store)))
+
+(defn with-agent
+  "Establish an agent-id scope for the dynamic extent of `f` (a 0-arg
+   fn). Inside `f`, `(current-agent-id)` returns `agent-id`. Survives
+   ^:async / await boundaries — Promises returned by `f` carry the
+   scope through their continuations.
+
+   Used by `seon.client/start-agent!` to wrap the full boot + run-loop
+   pipeline so every downstream call site (listeners, eval-batch, web
+   handlers, inspectors) can read the agent-id without threading it
+   through every argument list.
+
+   Nesting: the inner `agent-id` wins for the duration of the inner
+   scope; the outer value restores on exit."
+  [agent-id f]
+  (.run agent-id-als agent-id f))
+
 (defn with-tx-context
   "Establish a tx-context for the dynamic extent of `f` (a 0-arg fn).
    Nested calls MERGE: the new `ctx-map` is merged on top of any
@@ -727,21 +774,29 @@
                 ::actual-keys (vec (keys arg))})))))
 
 (defn- merge-tx-context-into-opts
-  "Merge `(current-tx-context)` into `opts.:tx-meta`. Explicit
-   `(:tx-meta opts)` keys win per-key; the context fills any unset keys.
+  "Merge `(current-tx-context)` AND `(current-agent-id)` into
+   `opts.:tx-meta`. Explicit `(:tx-meta opts)` keys win per-key; the
+   tx-context fills the next layer; the agent-id ALS fills the last.
 
-   Conflict rule from v1.md §2.3: explicit `:seon.db/opts {:tx-meta {…}}`
-   on the transact call wins per-key; the context fills unset keys.
+   Precedence (highest → lowest):
+     1. explicit `:tx-meta` keys passed by the caller
+     2. `(current-tx-context)` keys
+     3. `(current-agent-id)` → `:seon.db/agent-id` (audit P1 — every
+        agent-scoped tx is auto-tagged with the originating agent)
 
-   Returns the (possibly-updated) opts, or nil if there's nothing to merge
-   AND nothing was passed."
+   Returns the (possibly-updated) opts, or nil if nothing to merge AND
+   nothing was passed."
   [opts]
-  (let [ctx (current-tx-context)]
+  (let [ctx       (current-tx-context)
+        agent-id  (current-agent-id)
+        als-meta  (cond-> {}
+                    agent-id (assoc ::agent-id agent-id))
+        merged    (merge als-meta ctx)]
     (cond
-      (and (nil? opts) (nil? ctx))  nil
-      (nil? ctx)                    opts
-      :else                         (update (or opts {}) :tx-meta
-                                            #(merge ctx %)))))
+      (and (nil? opts) (empty? merged))  nil
+      (empty? merged)                    opts
+      :else                              (update (or opts {}) :tx-meta
+                                                 #(merge merged %)))))
 
 (defn ^:async transact!
   "Commit tx-data to the agent's conn. Map-in / map-out.
