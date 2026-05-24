@@ -28,11 +28,15 @@
     [clojure.string :as str]
     [datahike.api :as d]
     ;; Phase A item 6 — bundle malli.instrument so Phase A item 7's
-    ;; boot-time (mi/collect!) and (mi/instrument!) calls resolve at
-    ;; runtime without :undeclared-var. Pulled in here (the :client
+    ;; install! call resolves at runtime. Pulled in here (the :client
     ;; entry) rather than seon.repl/seon.eval so reload churn in those
     ;; namespaces doesn't drag instrumentation init into the hot path.
     [malli.instrument :as mi]
+    ;; Phase A item 7 — seon-native collector that walks the analyzer
+    ;; at compile time for :malli/schema metadata and registers with
+    ;; malli.core/-function-schemas*. Bridges the JVM/CLJS gap where
+    ;; mi/collect! is JVM-only.
+    [seon.instrument :as instrument]
     ;; Pull in the agent's required namespaces at compile time so all
     ;; schemas are registered before start-agent! runs.
     [seon.agent :as agent]
@@ -612,6 +616,18 @@
 (defn -main [& _args]
   (install-process-safety-net!)
   (log/info-console! "seon.client" "-main boot" {:boot-at (:boot-at @!state)})
+  ;; Phase A item 7+8 — install Malli instrumentation. Collects every
+  ;; seon.* fn with :malli/schema metadata, registers with
+  ;; -function-schemas*, and wraps each var with input+output
+  ;; validation (Sean's decision #7). Runs after all seon.* nses have
+  ;; loaded (CLJS module-load is eager and happens before -main fires)
+  ;; and before any agent eval that would call them.
+  (try
+    (let [stats (instrument/install!)]
+      (log/info-console! "seon.client" "instrumentation installed" stats))
+    (catch :default e
+      (log/error-console! "seon.client" "instrumentation install failed"
+                          {:msg (.-message e)})))
   (-> (datahike-smoke-test!)
       (.then (fn [result]
                (case (:status result)
