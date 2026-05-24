@@ -69,7 +69,7 @@
 	url = https://github.com/platers/obsidian-linter.git
 [submodule "reference-code/datahike"]
 	path = reference-code/datahike
-	url = https://github.com/replikativ/datahike.git
+	url = https://github.com/seantempesta/datahike.git
 [submodule "reference-code/datahike-lmdb"]
 	path = reference-code/datahike-lmdb
 	url = https://github.com/replikativ/datahike-lmdb.git
