@@ -169,6 +169,59 @@
 ;; Use `def` (not `defonce`) so reloads of `seon.eval` rotate it.
 (def init-version (gensym "seon.eval/init-v_"))
 
+;; ============================================================
+;; Per-fiber warning capture via AsyncLocalStorage
+;;
+;; Phase 0 item 2 of the STATUS.md migration plan. Replaces the prior
+;; per-eval `set!` of `ana/*cljs-warning-handlers*` (a process-global
+;; mutation that silently cross-wired warnings between concurrent
+;; agents — multi-agent v1 hazard, per
+;; research/eval-batch-fragility-2026-05-23.md §Option 1).
+;;
+;; Mechanism:
+;;   - `warnings-als` is a Node AsyncLocalStorage instance, defonce'd
+;;     so it survives hot-reload of seon.eval.
+;;   - `install-warning-dispatcher!` installs a SINGLE root handler on
+;;     `ana/*cljs-warning-handlers*`. The handler reads the active
+;;     per-eval bucket from `warnings-als` via `.getStore`. Outside an
+;;     `(.run warnings-als …)` scope, getStore returns nil and the
+;;     handler is a no-op.
+;;   - `raw-eval` wraps each cljs.js call in `(.run warnings-als <atom>)`
+;;     with its OWN bucket atom. Concurrent evals get isolated buckets;
+;;     ALS guarantees the bucket follows the fiber across awaits.
+;;
+;; D13 result (research/impl-finding-tx-context-promise-2026-05-22.md)
+;; confirms Node `AsyncLocalStorage` survives Promise / await
+;; boundaries; CLJS `binding` does not. Same substrate as
+;; `seon.db/with-tx-context`.
+;; ============================================================
+
+(defonce ^:private warnings-als
+  (let [AsyncLocalStorage (.-AsyncLocalStorage (js/require "node:async_hooks"))]
+    (AsyncLocalStorage.)))
+
+;; defonce, so the recorded version survives hot-reload of seon.eval.
+;; install-warning-dispatcher! reinstalls only when init-version
+;; rotates (i.e. after a real reload), which keeps the dispatcher
+;; in step with this ns's latest closure values.
+(defonce ^:private !warning-dispatcher-version (atom nil))
+
+(defn install-warning-dispatcher!
+  "Idempotent: installs the per-fiber dispatcher on
+   `ana/*cljs-warning-handlers*` once per init-version. Called from
+   `init-bootstrap!` after the cljs.js loader's analyzer setup
+   completes. Safe to call repeatedly; only reinstalls after a
+   hot-reload (when `init-version` has rotated)."
+  []
+  (when (not= @!warning-dispatcher-version init-version)
+    (set! ana/*cljs-warning-handlers*
+          [(fn [type _env extra]
+             (when (#{:undeclared-var :undeclared-ns} type)
+               (when-let [bucket (.getStore warnings-als)]
+                 (swap! bucket conj
+                        (assoc extra :seon.eval/warning-type type)))))])
+    (reset! !warning-dispatcher-version init-version)))
+
 (defn ^:async init-bootstrap!
   "Initialize a fresh compile-state from out/bootstrap/. Returns the
    compile-state, ready for `eval` / `eval-batch!`. Stores cljs.core
@@ -198,6 +251,10 @@
                    (some? (.-core (.-cljs js/global))))
       (throw (js/Error.
                "bootstrap loader did not put cljs.core on globalThis")))
+    ;; Install per-fiber warning dispatcher (Phase 0 item 2).
+    ;; Idempotent + version-stamped against init-version so hot-reload
+    ;; reinstalls the closure.
+    (install-warning-dispatcher!)
     state))
 
 ;; ============================================================
@@ -314,61 +371,58 @@
   "Internal — returns a Promise that resolves with {:value v :ns ns}
    or rejects with the error. The public `eval` catches both.
 
-   `cljs.js`'s `:warning-handlers` option doesn't actually replace the
-   analyzer's `*cljs-warning-handlers*` chain — the default handlers
-   still fire and surface an `:error` to the callback for
-   `:undeclared-var` before our hook runs. To gate that path we
-   `set!` the dynamic var directly and restore it on callback.
+   Warning capture is per-fiber via `warnings-als` (Node
+   AsyncLocalStorage). The root handler installed by
+   `install-warning-dispatcher!` reads each fiber's bucket via
+   `.getStore`. Concurrent `raw-eval` calls — including interleaved
+   across awaits — get fully isolated warning buckets. No global
+   `set!`, no restore. Multi-agent safe by construction.
 
-   Warning shape captured: `{:prefix … :suffix … :seon.eval/warning-type
-   …}`. After eval, any warning whose target doesn't resolve through
-   the strategy in `truly-undeclared?` is promoted to a `:compile`-
-   kind error. Warning check runs BEFORE the `error` branch — when
-   our handler IS the only one installed, the analyzer no longer
-   raises an :error for undeclared-var, so the cond ordering decides
-   which shape we surface."
+   `cljs.js`'s own `:warning-handlers` option doesn't fully replace
+   the analyzer chain (per the prior comment that has now been
+   addressed at the dispatcher layer): we own
+   `ana/*cljs-warning-handlers*` at boot and route every fired warning
+   through the ALS-aware dispatcher. The analyzer therefore never
+   raises an :error for undeclared-var; our captured bucket is the
+   authoritative signal.
+
+   Warning shape captured into the bucket:
+     `{:prefix … :suffix … :macro-present? … :seon.eval/warning-type …}`.
+   After eval, any warning whose target doesn't resolve through the
+   strategy in `truly-undeclared?` (which suppresses
+   `:macro-present? true`) is promoted to a `:compile`-kind error."
   [compile-state form-str ns-sym analyze-deps?]
-  (let [warnings (atom [])
-        prev-h  ana/*cljs-warning-handlers*]
+  (let [warnings (atom [])]
     (js/Promise.
       (fn [resolve reject]
-        (set! ana/*cljs-warning-handlers*
-              [(fn [type _env extra]
-                 (when (#{:undeclared-var :undeclared-ns} type)
-                   (swap! warnings conj
-                          (assoc extra :seon.eval/warning-type type))))])
-        (cljs/eval-str compile-state form-str 'seon.dynamic
-          {:eval          cljs/js-eval
-           :load          (partial boot/load compile-state)
-           :ns            ns-sym
-           :context       :statement
-           :def-emits-var true
-           :analyze-deps  analyze-deps?}
-          (fn [{:keys [error value ns]}]
-            ;; Restore FIRST so a thrown reject doesn't leak the binding.
-            (set! ana/*cljs-warning-handlers* prev-h)
-            (cond
-              ;; Truly-undeclared check runs before :error — with the
-              ;; analyzer's default handler chain swapped out, the
-              ;; analyzer no longer fires an :error for undeclared-var,
-              ;; so our captured warnings are the authoritative signal.
-              (some (partial truly-undeclared? compile-state) @warnings)
-              (let [{:keys [prefix suffix] :as w}
-                    (first (filter (partial truly-undeclared? compile-state)
-                                   @warnings))]
-                (reject
-                  (ex-info (str "undeclared " (name (:seon.eval/warning-type w))
-                                ": " prefix "/" suffix)
-                           {:seon.error/kind :compile
-                            :seon.eval/warning-type (:seon.eval/warning-type w)
-                            :seon.eval/undeclared (str prefix "/" suffix)
-                            :seon.eval/warning (dissoc w :seon.eval/warning-type)})))
+        (.run warnings-als warnings
+          (fn []
+            (cljs/eval-str compile-state form-str 'seon.dynamic
+              {:eval          cljs/js-eval
+               :load          (partial boot/load compile-state)
+               :ns            ns-sym
+               :context       :statement
+               :def-emits-var true
+               :analyze-deps  analyze-deps?}
+              (fn [{:keys [error value ns]}]
+                (cond
+                  (some (partial truly-undeclared? compile-state) @warnings)
+                  (let [{:keys [prefix suffix] :as w}
+                        (first (filter (partial truly-undeclared? compile-state)
+                                       @warnings))]
+                    (reject
+                      (ex-info (str "undeclared " (name (:seon.eval/warning-type w))
+                                    ": " prefix "/" suffix)
+                               {:seon.error/kind :compile
+                                :seon.eval/warning-type (:seon.eval/warning-type w)
+                                :seon.eval/undeclared (str prefix "/" suffix)
+                                :seon.eval/warning (dissoc w :seon.eval/warning-type)})))
 
-              error
-              (reject error)
+                  error
+                  (reject error)
 
-              :else
-              (resolve {:value value :ns ns}))))))))
+                  :else
+                  (resolve {:value value :ns ns}))))))))))
 
 (defn ^:async eval
   "Evaluate a string of CLJS in the agent's persistent compile-state.
