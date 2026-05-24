@@ -133,6 +133,13 @@
   (swap! *schemas assoc k v)
   k)
 
+(defn current-keys
+  "Snapshot of all currently-registered schema keywords. Used by
+   detect-and-tee in eval-batch! for atom-diff schema detection
+   (compare before vs after an eval to see what the form registered)."
+  []
+  (set (keys @*schemas)))
+
 (defn register-all!
   "Register multiple schemas at once.
 
