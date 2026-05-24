@@ -21,6 +21,237 @@ spec content.**
   [platform.md](platform.md). Capability hardening + Phase 2 test
   infra shipped 2026-05-22 (below).
 
+## Sean's locked-in decisions (2026-05-24) + revised migration plan
+
+After four research files this week (analyzer-driven extraction,
+schema-registry unification, bulk-load resume, instrumentation
+error envelope), the v1 architecture for program-graph storage +
+resume + instrumentation is locked. Don't re-litigate.
+
+### Decisions
+
+1. **`:seon.fn/refs` (var-ref graph)** — defer to v2. Add to v2
+   docs as planned future work.
+2. **Schema extraction** — atom-diff against `seon.schema/*schemas`
+   before/after each eval. Needs `seon.schema/current-keys`
+   accessor (Platform PR).
+3. **Per-agent registry overlay** — explicitly NOT happening.
+   Sean's framing: "I want everyone to see all schemas — they are
+   fully namespaced this should be fine and will also be loading
+   all functions added that are fully spec'ed and tested. This is
+   part of the db listener system we are setting up?"
+   - Schemas propagate freely via tx-listener on `:seon.schema/source`.
+   - Fns propagate when `:seon.fn/specced? true` (v1 gate). v2
+     adds the test gate (`:seon.test/last-passed-at > -failed-at`).
+   - This is the "publish gate" — see [[../../seon/concepts/code-as-data-runtime]].
+4. **Cycle prevention** — validate at write time. The CLJS analyzer
+   errors on `:require-cycle`; detect-and-tee only writes entities
+   on `:ok true`, so cycles never enter the DB. Resume topo-sort
+   throws fatal on cycle as defense-in-depth (should be unreachable).
+5. **Bootstrap mechanism** — **no `bootstrap.edn` file.** Substrate
+   ships as `.cljs` source files. At first boot, walk the loaded
+   analyzer state + read source files from disk + transact entities
+   directly. Same code path as detect-and-tee. (Phase 3 / WASM:
+   source files bundled as a resource.)
+6. **Agent schema deletion** — defer to v2. v2 adds
+   `(seon.schema/retract! ::foo)`, gated by "no live `:seon.fn`
+   references this schema in its `:malli/schema`".
+7. **Instrumentation scope** — **validate inputs AND outputs on
+   all public fns** (anything with `:malli/schema` metadata).
+   Sean's call: worth the cycles for immediate feedback.
+8. **Eval-result envelope for instrumentation failures** — design
+   complete (`research/instrumentation-error-envelope-2026-05-24.md`).
+   Canonical map under `:seon.error/data` with namespaced
+   `:seon.error.malli/*` keys. Adds `:seon.eval/error-data :map`
+   attr alongside the existing `:seon.eval/error :string`.
+   Renderer in `format-eval-row` produces 5-line block with
+   `expected`/`got`/`reason`/`hint` columns.
+9. **Resume policy for interrupted turn** — flip turn to
+   `:interrupted`; transact a `:seon.message/role :system` message
+   describing what happened; kick the agentic loop; the agent
+   decides via the reactive ctx (the prior turn's evals naturally
+   render). NOT a bare `:error` flag flip.
+10. **Resume mechanism: bulk-load synthetic ns files.** Per Sean's
+    editor analogy + REPL-verified research. One `cljs.js/eval-str`
+    per ns; topo-sort between nses; analyzer handles intra-ns
+    ordering. PLUS: optional disk-write to
+    `tmp/debug/agents/<id>/<ns-as-path>.cljs` for inspection /
+    editor hookup / export / recursive bootstrap. See
+    [[../../seon/concepts/code-as-data-runtime]].
+
+### Revised migration plan (16 items, 5 phases)
+
+Each item independently shippable. Phase 0 prereqs unblock A;
+A unblocks B; A+B unblock C; C unblocks D; E layers on once C is
+green.
+
+**Phase 0 — prereq probes + fixes (Platform):**
+
+1. `d/listen!` semantics probe in datahike-cljs. Surface any
+   divergence from JVM semantics before committing tx-listener
+   architecture.
+2. eval-batch fragility (a) ALS fix — pulled forward from
+   "v2-blocking" to v1-blocking-by-prerequisite. ~30 LOC; reuses
+   the `with-tx-context` ALS pattern. Must land before detect-and-tee
+   modifies `eval-batch!`.
+3. `truly-undeclared?` `defonce` false-positive fix — `defonce`
+   returns `:ok? false` in `eval-batch!` despite working at
+   runtime. Will bite bulk-load resume.
+
+**Phase A — instrumentation foundation (Platform):**
+
+4. `seon.schema/current-keys` accessor (3-line PR).
+5. Expand `:bootstrap :entries` in `shadow-cljs.edn` (add
+   `seon.schema`, `malli.core`, `malli.registry`,
+   `cljs.analyzer.api`). ~2MB bundle delta.
+6. Bundle `malli.instrument` + transitive deps (~150KB).
+7. Build-time `(mi/collect!)` over seon.* nses (collects
+   `:malli/schema` metadata into `-function-schemas*`).
+8. `mi/instrument!` boot hook + reporter wired to
+   `seon.error.instrument/report-fn` (per envelope research).
+   Adds `:seon.eval/error-data :map` attr.
+
+**Phase B — detect-and-tee + analyzer module (MVP):**
+
+9. `seon.analyzer-info` shared module (snapshot-defs / defs-since
+   / var-projection helpers).
+10. `eval-batch!` detect-and-tee using analyzer diff + registry-atom
+    diff. Writes `:seon.fn` (with `:fn-var?`, `:arglists`, `:doc`,
+    `:private?`, `:specced?`, `:created-at`), `:seon.schema` (with
+    `:created-at`), `:seon.ns` entities. Single tx per form,
+    merged with eval entity. Listener-side schemas-first partition
+    (review's A4 finding).
+
+**Phase C — unified bootstrap (Platform):**
+
+11. `seon.bootstrap/seed-from-source!` — walks `@!compile-state`'s
+    seon.* nses, reads source files from disk, slices defining
+    forms, transacts entities. Replaces the `bootstrap.edn`
+    emission rig entirely.
+12. Boot-time `seed-from-source!` call (idempotent via identity-attr
+    upserts).
+13. `schema/register!` context-aware rewrite — writes DB datom when
+    called inside agent eval (`*tx-context*` set), writes registry
+    atom directly otherwise.
+14. Tx-listener that mirrors `:seon.schema/source` →
+    `*schemas`; parallel listener for `:seon.fn/source` →
+    `-function-schemas*` gated on `:seon.fn/specced?` (v1 publish
+    gate); single tx-listener registration with schemas-first
+    partition.
+
+**Phase D — bulk-load resume + transient + interrupted-turn (Platform):**
+
+15. `seon.client/replay-as-bulk!` — topo-sort known nses; for each,
+    reconstitute one source string from DB; bulk `eval-str`; final
+    single `mi/instrument!` pass after all replay completes
+    (boot-order fix per review's A1).
+16. Interrupted-turn handling — at boot, query `:seon.turn/status
+    :running` entities, flip to `:interrupted`, transact a system
+    message per affected turn, kick the agentic loop.
+
+**Phase E — debug mode + transient surface (MVP, can interleave with D):**
+
+17. `:seon.runtime/debug-write?` flag. When true, detect-and-tee
+    AND `replay-as-bulk!` write reconstituted ns sources to
+    `tmp/debug/agents/<agent-id>/<ns-as-path>.cljs`. Editor / export
+    / recursive-bootstrap use cases per
+    [[../../seon/concepts/code-as-data-runtime]].
+18. `:seon.transient` two-tier heuristic + render section
+    (`:fn-var? false` ⇒ transient; sub-classify by value type).
+    Reactive query — vanishes when transient set is empty.
+
+### Decisions Sean made about NOT-now items
+
+- `:seon.fn/refs` graph (decision 1) — v2.
+- Schema retract verb (decision 6) — v2.
+- Per-agent registry overlay (decision 3 implicit) — never;
+  schemas + tested fns are shared by design.
+
+### Open coordination
+
+- Phase 0 + A are Platform's lane; Phase B is MVP's (waits on A).
+- Phase C is Platform's; Phase D is Platform's; Phase E is MVP's.
+- Total: ~5 Platform items in Phase 0+A; ~2 MVP in B; ~4 Platform
+  in C; ~2 Platform in D; ~2 MVP in E. Mostly Platform-weighted
+  because the substrate refactor (registry, instrumentation,
+  bulk-load resume) is bigger than the MVP-side changes.
+
+## Heads-up to MVP — eval-batch concerns surfaced by resume research (2026-05-23)
+
+Three concerns came out of the resume deep-dive
+([`research/resume-findings-2026-05-23.md`](research/resume-findings-2026-05-23.md)
+§"Open questions — eval-batch concerns"). MVP triaged and is folding
+(b) into the detect-and-tee step landing now. (a) and (c) are
+deferred — Platform owns the eventual fix.
+
+**(b) — concrete coding rule for detect-and-tee:**
+
+> Read the post-eval namespace from the `:seon.eval/ns` attribute on
+> the just-written eval entity, NOT from the `!current-ns` atom in
+> `seon.eval`. The eval entity records what the eval ACTUALLY ended
+> in (set by `eval-batch!` from the eval result's `:ns`); the atom
+> is a derived view of that and can drift on `update-current-ns!`
+> failure paths. The entity is the source of truth.
+
+Where this matters: any `:seon.fn/ns` or `:seon.schema/ns` lookup-ref
+construction inside detect-and-tee should resolve the ns name from
+the eval entity, then build the lookup-ref. Same rule for any future
+substrate code that needs "what ns did the form end up in."
+
+**(a) — `set!` of `cljs.analyzer/*cljs-warning-handlers*` in
+`raw-eval` is a global mutation.** Real multi-agent hazard for v1's
+"concurrent agents in one pod" goal. Doesn't touch detect-and-tee.
+Platform's lane to fix; deferred until walker ships. Likely solution:
+thread the handler through explicitly or wrap each eval in a binding-
+scoped redef.
+
+**(c) — hot-reload of `seon.eval` mid-batch loses in-flight defs
+until next pod restart.** Dev-loop annoyance, not a production
+concern. Tee logic is naturally idempotent (identity-attr upserts
+handle re-defines as last-write-wins), so durable. Lower priority.
+
+Deeper research on (a) and (c) shipped: see
+[`research/eval-batch-fragility-2026-05-23.md`](research/eval-batch-fragility-2026-05-23.md).
+Headlines:
+
+- **(a) fix is ALS-routed warning handlers** — install dispatcher
+  ONCE at boot, route per-eval warnings through `AsyncLocalStorage`
+  (same pattern `seon.db/with-tx-context` already uses).
+  `cljs.js/eval-str` does NOT accept a `:warning-handler` option;
+  ALS is the only viable fix. ~30 lines.
+- **(c) downgraded** — `cljs.js`'s emit step runs `goog.globalEval`
+  synchronously before the callback resolves, so in-flight defns
+  reach globalThis regardless of mid-batch reload. Fix is a
+  `(user/pause-and-reload!)` helper for dev-loop QoL only.
+- **A2 — `!next-budget-ms` has the same hazard as (a)**; same
+  ALS-bucket fix; bundled in the same patch.
+- **A5 — eliminate `!current-ns` entirely** (MVP's proposal,
+  validated). Within-batch loop accumulator, cross-batch persist on
+  `:seon.agent/current-ns`. Bundled in the same patch — closes
+  concern (b) at the root AND removes the 2x analyzer-cost per form
+  from today's `read-current-ns!`/`update-current-ns!` round-trips.
+
+### Platform confirmations to MVP (2026-05-23, post-research)
+
+1. **Forward-compat for detect-and-tee:** YES — the ALS patch
+   preserves `eval-batch!`'s write of `:seon.eval/ns` on each eval
+   entity. The entity is the source of truth per A5's framing;
+   eliminating `!current-ns` does not eliminate the recorded ns.
+   MVP's tee logic reading `(:seon.eval/ns eval-entity)` survives the
+   refactor unchanged.
+
+2. **Framing correction accepted:** ALS patch is **v2-blocking**,
+   not v1-alpha-blocking. v1 spec ships single-agent per
+   "Multi-pod concurrency rules" below ("v1 assumes single-agent").
+   The patch lands before multi-agent-in-one-pod is enabled (v2/v3
+   cross-agent collab). Strong priority but not gating MVP's v1 work.
+
+3. **Multi-agent stress test ownership:** Platform's lane, bundled
+   with the ALS patch. Spec: two concurrent `eval-batch!` calls
+   against malformed forms (distinct compile/analyzer warnings per
+   bucket), assert each batch's recorded warnings contain only its
+   own forms' warnings — no cross-contamination.
+
 ## In flight on the MVP track (2026-05-22)
 
 ### v1 spec draft landed — implementation has NOT started

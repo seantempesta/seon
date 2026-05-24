@@ -123,6 +123,18 @@ The personal domains (trading, health, finance) are test cases, not the point. T
 
 **Your default training rewards task completion. Override that instinct.** Charging forward and declaring victory is worse than pausing to verify. Three agents "fixing" the same bug is more expensive than one agent understanding the problem first.
 
+### Don't be a dumbass
+
+**Whenever you feel like you should re-create a second version of something when we are clearly trying to fix the original — stop and think: am I being a dumbass?**
+
+If a generator, fn, schema, or namespace already exists and you're "fixing" it, the fix lives in the existing one. Creating a parallel `foo-v2`, `foo-new`, or new namespace to "house" the fix is almost always a dumbass move. It leaves two versions in the codebase, doubles the surface for the next bug, and the comments documenting why the duplicate exists will outlive everyone who knew the reason. Examples of this trap:
+
+- "I'll put the new shape in a fresh ns to avoid the require cycle." → wrong; fix the cycle.
+- "I'll make a v2 schema and migrate callers later." → wrong; bump the schema in place, fix the callers in the same patch.
+- "I'll add `do-thing-new` and deprecate `do-thing`." → wrong; change `do-thing`'s implementation.
+
+The whole repo is on a feature branch. Atomic refactors are the cheap option, not the expensive one.
+
 ### Before writing code:
 
 1. **Observe the live system.** Query the REPL. Establish current state with actual data, not assumptions.
@@ -181,6 +193,16 @@ What this rules out: storing counters derivable from the log, atom-backed regist
 Cross-agent coordination falls out: a section function that doesn't filter by `:seon.agent/id` sees the whole substrate. Agent A's failed eval shows up in agent B's render. No subscription, no event bus.
 
 Full principle + design checklist + canonical examples: [[docs/seon/concepts/reactive-context]].
+
+---
+
+## Code as data — the runtime IS the database
+
+**The substrate's source code, the agent's eval log, and the in-memory analyzer state are three views of the same code corpus.** Persisting the agent's defining forms as `:seon.fn` / `:seon.ns` / `:seon.schema` entities lets the substrate seed, detect-and-tee, bulk-load resume, the publish gate, and the disk-write debug mode all read from one place. They look like five separate features; they are one mechanism viewed five ways.
+
+The corollary: don't re-parse source with rewrite-clj when the analyzer already produced the structured data. Don't write a build-time `bootstrap.edn` when the substrate source IS the bootstrap (read at boot via the analyzer). Don't replay-every-eval on resume when bulk-loading reconstituted ns files is what editors already do. One mechanism for "where do program-graph entities come from": always the analyzer plus a source string.
+
+Full principle + the five mechanisms + cross-agent publish gate + recursive-bootstrap use case: [[docs/seon/concepts/code-as-data-runtime]].
 
 ---
 
@@ -276,6 +298,23 @@ All data flowing through Seon must be safe at every boundary: Malli validation, 
 ```
 
 See `/datahike` skill for bridge details, persistence properties, refs, and banned types.
+
+### Shared schema shapes — register once, reference everywhere
+
+**If the same shape appears in two or more registered schemas, the shape itself must be a registered schema that the others reference.** Inlining the same `[:string {:min 14 :max 14}]` (or any constraint) across multiple `register!` calls is a code smell — change the shape and you have to chase every copy. This is the same "don't be a dumbass" rule applied to data shapes.
+
+Pattern (canonical example, lives in `seon.db`):
+
+```clojure
+;; ONE canonical shape
+(schema/register! :seon.db/ref ...)
+
+;; EVERY ref attr references it — no inline shape, no duplication
+(schema/register! :seon.session/turns [:vector {:seon.db/component true} :seon.db/ref])
+(schema/register! :seon.turn/messages [:vector {:seon.db/component true} :seon.db/ref])
+```
+
+The same rule applies to id shapes, length constraints, enum values, and any other property cluster you'd otherwise repeat. If a shape would be repeated, register it under a `:seon.<domain>/<name>` keyword first, then reference it. If the Malli bridge or our `seon.db/malli->datahike-schema` doesn't yet handle the reference shape you need (e.g. adding a property to a referenced schema), **fix the bridge** — do NOT duct-tape by inlining the shape at each site. Duplicated definitions guarantee drift; bridge fixes are one-time.
 
 ---
 
