@@ -159,11 +159,28 @@
    ;; - clojure.set         — set ops the agent reaches for often
    ;; - clojure.string      — string ops; also pulled by cljs.test
    ;; - clojure.walk        — postwalk / prewalk for AST manipulation
+   ;; - seon.schema         — Phase A item 5. Agent-eval'd
+   ;;                         (schema/register!) writes to *schemas;
+   ;;                         eval-batch! detect-and-tee reads via
+   ;;                         (schema/current-keys) for atom-diff.
+   ;; - malli.core          — Phase A item 5. Agent code defines fns
+   ;;                         with :malli/schema metadata; the
+   ;;                         analyzer needs to see malli.core's vars
+   ;;                         at eval time, not error :undeclared-var.
+   ;; - malli.registry      — Phase A item 5. Backs the global
+   ;;                         registry; seon.schema layers atop.
+   ;; - cljs.analyzer.api   — Phase A item 5. Agent + Platform read
+   ;;                         analyzer state for detect-and-tee
+   ;;                         (`all-ns`, `ns-defs`, `find-ns`).
    :entries    [cljs.core
                 cljs.test
                 clojure.set
                 clojure.string
-                clojure.walk]
+                clojure.walk
+                seon.schema
+                malli.core
+                malli.registry
+                cljs.analyzer.api]
    ;; cljs.test ships macros (deftest / is / are / testing) — must be
    ;; listed alongside cljs.core for the same reason cljs.core itself
    ;; needs it (the macro ns is a separate file).
