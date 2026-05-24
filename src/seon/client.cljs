@@ -27,6 +27,12 @@
   (:require
     [clojure.string :as str]
     [datahike.api :as d]
+    ;; Phase A item 6 — bundle malli.instrument so Phase A item 7's
+    ;; boot-time (mi/collect!) and (mi/instrument!) calls resolve at
+    ;; runtime without :undeclared-var. Pulled in here (the :client
+    ;; entry) rather than seon.repl/seon.eval so reload churn in those
+    ;; namespaces doesn't drag instrumentation init into the hot path.
+    [malli.instrument :as mi]
     ;; Pull in the agent's required namespaces at compile time so all
     ;; schemas are registered before start-agent! runs.
     [seon.agent :as agent]
