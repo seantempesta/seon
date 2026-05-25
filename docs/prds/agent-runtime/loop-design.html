@@ -1,0 +1,696 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Seon agent runtime — dispatcher + handlers + effects</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<style>
+  body { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+  .flash { animation: flash 0.9s ease-out; }
+  @keyframes flash {
+    0%   { background-color: rgba(251,191,36,0.55); }
+    100% { background-color: transparent; }
+  }
+  .pulse-handler {
+    animation: pulse-amber 1.1s ease-out;
+  }
+  @keyframes pulse-amber {
+    0%   { box-shadow: 0 0 0 0 rgba(251,191,36,0.6); border-color: rgba(251,191,36,1); }
+    100% { box-shadow: 0 0 0 8px rgba(251,191,36,0);  border-color: rgba(120,113,108,1); }
+  }
+  .scroll-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+  .scroll-thin::-webkit-scrollbar-thumb { background: #44403c; border-radius: 3px; }
+  .scroll-thin::-webkit-scrollbar-track { background: transparent; }
+  details > summary { list-style: none; cursor: pointer; }
+  details > summary::-webkit-details-marker { display: none; }
+</style>
+</head>
+<body class="bg-stone-950 text-stone-200 text-xs leading-snug">
+
+<div x-data="loopViz()" x-init="init()" class="min-h-screen flex flex-col">
+
+  <!-- Header / control bar -->
+  <header class="border-b border-stone-800 bg-stone-900/60 backdrop-blur p-3">
+    <div class="flex items-center justify-between flex-wrap gap-3">
+      <div>
+        <h1 class="text-amber-400 text-sm tracking-wide">SEON · AGENT RUNTIME · LOOP DESIGN</h1>
+        <p class="text-stone-500 text-[10px] mt-0.5">
+          dispatcher + handlers + effects · pure DB-driven · companion to
+          <span class="text-amber-300">loop-design.md</span>
+        </p>
+      </div>
+      <div class="flex items-center gap-2">
+        <button @click="prev()"   :disabled="cursor <= 0"
+                class="px-2 py-1 border border-stone-700 hover:border-amber-500 disabled:opacity-30 disabled:cursor-not-allowed">&lt; back</button>
+        <button @click="step()"   :disabled="cursor >= events.length"
+                class="px-2 py-1 border border-amber-600 text-amber-300 hover:bg-amber-900/30 disabled:opacity-30">step &gt;</button>
+        <button @click="togglePlay()"
+                class="px-2 py-1 border border-stone-700 hover:border-amber-500"
+                :class="playing ? 'bg-amber-900/40 text-amber-300' : ''">
+          <span x-text="playing ? 'pause' : 'play'"></span>
+        </button>
+        <select x-model.number="speed" class="bg-stone-900 border border-stone-700 px-1 py-1 text-stone-200">
+          <option value="1500">1x</option>
+          <option value="800">2x</option>
+          <option value="400">4x</option>
+        </select>
+        <button @click="reset()" class="px-2 py-1 border border-stone-700 hover:border-amber-500">reset</button>
+      </div>
+    </div>
+
+    <div class="mt-3 flex flex-wrap gap-1">
+      <template x-for="(s, i) in scenarios" :key="i">
+        <button @click="loadScenario(i)"
+                class="px-2 py-1 border text-[11px]"
+                :class="scenarioIdx === i
+                  ? 'border-amber-500 bg-amber-900/30 text-amber-300'
+                  : 'border-stone-700 text-stone-400 hover:border-stone-500'">
+          <span x-text="(i+1) + '. ' + s.title"></span>
+        </button>
+      </template>
+    </div>
+
+    <!-- step counter + scenario blurb -->
+    <div class="mt-3 grid grid-cols-12 gap-3 items-start">
+      <div class="col-span-8">
+        <p class="text-stone-300 text-[11px]" x-text="scenarios[scenarioIdx]?.blurb"></p>
+      </div>
+      <div class="col-span-4 text-right text-stone-500 text-[10px]">
+        step <span class="text-amber-400" x-text="cursor"></span> /
+        <span x-text="events.length"></span>
+        · agent <span class="text-amber-400" x-text="agentState"></span>
+      </div>
+    </div>
+  </header>
+
+  <!-- play-by-play banner -->
+  <div class="border-b border-stone-800 bg-stone-900/30 px-3 py-2">
+    <div class="text-amber-300 text-[11px]">
+      <span class="text-stone-500">»</span>
+      <span x-text="commentary || 'press [step >] or [play] to begin'"></span>
+    </div>
+  </div>
+
+  <!-- main grid: tx log (top), db (left), handlers (right), agent render (bottom) -->
+  <main class="flex-1 grid grid-cols-12 gap-2 p-2" style="grid-template-rows: 1fr 1.2fr;">
+
+    <!-- tx log : spans top row, all cols -->
+    <section class="col-span-12 row-span-1 border border-stone-800 bg-stone-900/40 flex flex-col min-h-0">
+      <header class="px-2 py-1 border-b border-stone-800 text-amber-400 text-[10px] tracking-wider flex justify-between">
+        <span>TX LOG</span>
+        <span class="text-stone-500" x-text="'commits: ' + txs.length"></span>
+      </header>
+      <div class="flex-1 overflow-auto scroll-thin p-1.5 space-y-1">
+        <template x-for="(tx, i) in txs" :key="tx.id">
+          <div class="border border-stone-800 px-2 py-1"
+               :class="i === txs.length - 1 ? 'flash border-amber-700' : ''">
+            <div class="flex items-center justify-between text-[10px]">
+              <span class="text-amber-400" x-text="tx.id"></span>
+              <span class="text-stone-500">
+                origin: <span :class="originColor(tx.origin)" x-text="tx.origin"></span>
+                · <span x-text="tx.at + 'ms'"></span>
+              </span>
+            </div>
+            <div class="text-stone-400 mt-0.5" x-text="tx.summary"></div>
+          </div>
+        </template>
+        <div x-show="!txs.length" class="text-stone-600 italic p-2">no commits yet</div>
+      </div>
+    </section>
+
+    <!-- DB pane : left of bottom row -->
+    <section class="col-span-5 border border-stone-800 bg-stone-900/40 flex flex-col min-h-0">
+      <header class="px-2 py-1 border-b border-stone-800 text-amber-400 text-[10px] tracking-wider flex justify-between">
+        <span>DATAHIKE · ENTITIES</span>
+        <span class="text-stone-500" x-text="'datoms: ' + datomCount()"></span>
+      </header>
+      <div class="flex-1 overflow-auto scroll-thin p-1.5 space-y-1.5">
+        <template x-for="ent in groupedEntities()" :key="ent.id">
+          <details open class="border border-stone-800"
+                   :class="recentlyChanged.has(ent.id) ? 'flash border-amber-700' : ''">
+            <summary class="px-2 py-1 bg-stone-900/60 flex items-center justify-between">
+              <span class="text-amber-300" x-text="ent.label"></span>
+              <span class="text-stone-600 text-[10px]" x-text="ent.id"></span>
+            </summary>
+            <div class="px-2 py-1 space-y-0.5">
+              <template x-for="[k,v] in Object.entries(ent.attrs)" :key="k">
+                <div class="grid grid-cols-12 gap-1">
+                  <div class="col-span-5 text-stone-500 truncate" x-text="k"></div>
+                  <div class="col-span-7 text-stone-200 break-all" x-text="formatValue(v)"></div>
+                </div>
+              </template>
+            </div>
+          </details>
+        </template>
+        <div x-show="!groupedEntities().length" class="text-stone-600 italic p-2">db empty</div>
+      </div>
+    </section>
+
+    <!-- Handlers pane : right of bottom row -->
+    <section class="col-span-7 border border-stone-800 bg-stone-900/40 flex flex-col min-h-0">
+      <header class="px-2 py-1 border-b border-stone-800 text-amber-400 text-[10px] tracking-wider flex justify-between">
+        <span>HANDLERS · :seon.handler entities + dispatcher</span>
+        <span class="text-stone-500" x-text="'depth: ' + dispatchDepth + ' / 16'"></span>
+      </header>
+      <div class="flex-1 overflow-auto scroll-thin p-1.5 grid grid-cols-2 gap-1.5">
+        <template x-for="h in handlerList()" :key="h.id">
+          <div class="border px-2 py-1.5 border-stone-800"
+               :class="firingHandlers.has(h.id) ? 'pulse-handler border-amber-500 bg-amber-950/30' : ''">
+            <div class="flex items-center justify-between">
+              <span class="text-amber-300" x-text="':' + h.name"></span>
+              <span class="text-stone-600 text-[10px]"
+                    x-text="h.agent ? 'agent=' + short(h.agent) : 'tenant'"></span>
+            </div>
+            <div class="text-stone-500 mt-0.5 text-[10px]">
+              match { :attr <span class="text-stone-300" x-text="h.match.attr"></span><template x-if="h.match.value !== undefined"><span> :value <span class="text-stone-300" x-text="JSON.stringify(h.match.value)"></span></span></template> }
+            </div>
+            <div class="text-stone-500 mt-0.5 text-[10px]">
+              fn → <span class="text-amber-200" x-text="h.fn"></span>
+            </div>
+            <div x-show="lastEffect[h.id]" class="mt-1 text-[10px] border-t border-stone-800 pt-1">
+              <span class="text-stone-500">last effect:</span>
+              <span class="text-emerald-300" x-text="lastEffect[h.id]"></span>
+            </div>
+          </div>
+        </template>
+        <div x-show="!handlerList().length" class="text-stone-600 italic p-2 col-span-2">no handlers installed</div>
+      </div>
+    </section>
+
+    <!-- Agent render pane : full width bottom -->
+    <section class="col-span-12 border border-stone-800 bg-stone-900/40 flex flex-col">
+      <header class="px-2 py-1 border-b border-stone-800 text-amber-400 text-[10px] tracking-wider flex justify-between">
+        <span>AGENT RENDER · next turn's prompt (sections = pure fns of DB)</span>
+        <span class="text-stone-500">
+          state: <span :class="agentStateColor()" x-text="agentState"></span>
+        </span>
+      </header>
+      <div class="grid grid-cols-12 gap-1.5 p-2">
+        <template x-for="sec in renderSections()" :key="sec.name">
+          <div class="col-span-4 border border-stone-800 p-2"
+               :class="changedSections.has(sec.name) ? 'border-amber-600 bg-amber-950/20' : ''">
+            <div class="text-amber-300 text-[10px] tracking-wider mb-1">
+              &lt;<span x-text="sec.name"></span>&gt;
+            </div>
+            <pre class="text-stone-300 whitespace-pre-wrap text-[10px] leading-snug" x-text="sec.body"></pre>
+          </div>
+        </template>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="border-t border-stone-800 bg-stone-900/60 px-3 py-2 text-stone-500 text-[10px]">
+    keys ·
+    <span class="text-amber-300">amber flash</span> = new tx ·
+    <span class="text-amber-300">amber pulse</span> = handler firing ·
+    <span class="text-amber-300">amber border</span> = section changed ·
+    origins: <span class="text-blue-300">user</span> /
+    <span class="text-emerald-300">agent</span> /
+    <span class="text-purple-300">system</span> /
+    <span class="text-orange-300">handler</span>
+  </footer>
+
+</div>
+
+<script>
+function loopViz() {
+  return {
+    // -------- core state --------
+    scenarioIdx: 0,
+    cursor: 0,
+    playing: false,
+    speed: 800,
+    playTimer: null,
+
+    // -------- substrate state --------
+    entities: {},        // id -> attrs map
+    txs: [],             // [{id, origin, summary, at}]
+    handlers: {},        // id -> handler entity
+    dispatchDepth: 0,
+    agentState: ':stopped',
+    recentlyChanged: new Set(),
+    firingHandlers: new Set(),
+    changedSections: new Set(),
+    lastEffect: {},
+    commentary: '',
+    sectionsOverride: null,   // scenario-specific render hint
+    txCounter: 1,
+    clockMs: 0,
+
+    // -------- scenarios (defined below) --------
+    scenarios: [],
+    events: [],
+
+    init() {
+      this.scenarios = SCENARIOS;
+      this.loadScenario(0);
+    },
+
+    loadScenario(i) {
+      this.pause();
+      this.scenarioIdx = i;
+      this.events = this.scenarios[i].events;
+      this.reset();
+    },
+
+    reset() {
+      this.pause();
+      this.cursor = 0;
+      this.entities = JSON.parse(JSON.stringify(this.scenarios[this.scenarioIdx].initialEntities || {}));
+      this.handlers = JSON.parse(JSON.stringify(this.scenarios[this.scenarioIdx].initialHandlers || {}));
+      this.txs = [];
+      this.dispatchDepth = 0;
+      this.agentState = this.scenarios[this.scenarioIdx].initialAgentState || ':stopped';
+      this.recentlyChanged = new Set();
+      this.firingHandlers = new Set();
+      this.changedSections = new Set();
+      this.lastEffect = {};
+      this.sectionsOverride = null;
+      this.txCounter = 1;
+      this.clockMs = 0;
+      this.commentary = this.scenarios[this.scenarioIdx].opening || '';
+    },
+
+    step() {
+      if (this.cursor >= this.events.length) { this.pause(); return; }
+      this.recentlyChanged = new Set();
+      this.firingHandlers = new Set();
+      this.changedSections = new Set();
+      const ev = this.events[this.cursor];
+      this.applyEvent(ev);
+      this.cursor++;
+    },
+
+    prev() {
+      if (this.cursor <= 0) return;
+      const target = this.cursor - 1;
+      this.reset();
+      for (let k = 0; k < target; k++) this.step();
+    },
+
+    togglePlay() { this.playing ? this.pause() : this.play(); },
+    play() {
+      if (this.cursor >= this.events.length) this.reset();
+      this.playing = true;
+      const tick = () => {
+        if (!this.playing) return;
+        if (this.cursor >= this.events.length) { this.playing = false; return; }
+        this.step();
+        this.playTimer = setTimeout(tick, this.speed);
+      };
+      tick();
+    },
+    pause() {
+      this.playing = false;
+      if (this.playTimer) { clearTimeout(this.playTimer); this.playTimer = null; }
+    },
+
+    // -------- event interpreter --------
+    applyEvent(ev) {
+      this.clockMs += (ev.dt ?? 1);
+      switch (ev.type) {
+        case 'tx': {
+          const txId = 'tx-' + String(this.txCounter++).padStart(3,'0');
+          for (const [eid, attrs] of Object.entries(ev.entities || {})) {
+            this.entities[eid] = Object.assign(this.entities[eid] || {}, attrs);
+            this.recentlyChanged.add(eid);
+          }
+          for (const eid of (ev.retract || [])) {
+            delete this.entities[eid];
+          }
+          this.txs.push({
+            id: txId, origin: ev.origin || ':system',
+            summary: ev.summary || '(tx)', at: this.clockMs
+          });
+          this.commentary = ev.say || this.commentary;
+          break;
+        }
+        case 'install-handler': {
+          this.handlers[ev.handler.id] = ev.handler;
+          this.commentary = ev.say || ('installed handler :' + ev.handler.name);
+          break;
+        }
+        case 'handler-fire': {
+          this.firingHandlers.add(ev.handlerId);
+          this.lastEffect[ev.handlerId] = ev.effect || '(no effect)';
+          this.commentary = ev.say || ('handler :' + (this.handlers[ev.handlerId]?.name || '?') + ' fired');
+          break;
+        }
+        case 'effect': {
+          this.commentary = ev.say || ('effect ' + ev.effectType + ' executing');
+          break;
+        }
+        case 'agent-state': {
+          this.agentState = ev.state;
+          if (this.entities['agent-A']) this.entities['agent-A'][':seon.agent/state'] = ev.state;
+          this.recentlyChanged.add('agent-A');
+          this.commentary = ev.say || ('agent → ' + ev.state);
+          break;
+        }
+        case 'render': {
+          this.sectionsOverride = ev.sections;
+          if (ev.changed) ev.changed.forEach(c => this.changedSections.add(c));
+          this.commentary = ev.say || 'agent re-renders its prompt';
+          break;
+        }
+        case 'depth-tick': {
+          this.dispatchDepth = ev.depth;
+          this.commentary = ev.say || ('handler-depth = ' + ev.depth);
+          break;
+        }
+        case 'note': {
+          this.commentary = ev.say;
+          break;
+        }
+      }
+    },
+
+    // -------- views --------
+    groupedEntities() {
+      return Object.entries(this.entities).map(([id, attrs]) => ({
+        id, label: this.entityLabel(id, attrs), attrs
+      }));
+    },
+    entityLabel(id, attrs) {
+      if (attrs[':seon.agent/id'])           return 'agent · ' + attrs[':seon.agent/id'];
+      if (attrs[':seon.message/role'])       return 'message · ' + attrs[':seon.message/role'];
+      if (attrs[':seon.handler/name'])       return 'handler · :' + attrs[':seon.handler/name'];
+      if (attrs[':seon.async-result/kind'])  return 'async-result · ' + attrs[':seon.async-result/kind'];
+      if (attrs[':seon.eval/id'])            return 'eval · ' + attrs[':seon.eval/id'];
+      return id;
+    },
+    handlerList() { return Object.values(this.handlers); },
+    datomCount() {
+      let n = 0;
+      for (const a of Object.values(this.entities)) n += Object.keys(a).length;
+      return n;
+    },
+    formatValue(v) {
+      if (Array.isArray(v)) return '[' + v.map(x => typeof x === 'string' ? x : JSON.stringify(x)).join(' ') + ']';
+      if (typeof v === 'object' && v !== null) return JSON.stringify(v);
+      return String(v);
+    },
+    originColor(o) {
+      return ({':user':'text-blue-300', ':agent':'text-emerald-300',
+               ':system':'text-purple-300', ':handler':'text-orange-300',
+               ':replay':'text-stone-400'})[o] || 'text-stone-300';
+    },
+    short(ref) {
+      if (Array.isArray(ref)) return ref[1].slice(0,8);
+      return String(ref).slice(0,8);
+    },
+    agentStateColor() {
+      return ({':idle':'text-stone-300', ':running':'text-emerald-300',
+               ':paused':'text-amber-400', ':stopped':'text-stone-500',
+               ':interrupted':'text-rose-400'})[this.agentState] || 'text-stone-300';
+    },
+    renderSections() {
+      // Use scenario-emitted snapshot if available; else derive a default
+      if (this.sectionsOverride) return this.sectionsOverride;
+      return [
+        { name: 'system', body: 'agent="' + (this.entities['agent-A']?.[':seon.agent/id'] || '?') + '"\nstate=' + this.agentState },
+        { name: 'messages', body: this.messageSummary() },
+        { name: 'recent-evals', body: this.evalSummary() },
+      ];
+    },
+    messageSummary() {
+      const msgs = Object.values(this.entities)
+        .filter(e => e[':seon.message/role'])
+        .map(m => `[${m[':seon.message/role']}] ${m[':seon.message/content']}`);
+      return msgs.length ? msgs.join('\n') : '(no messages)';
+    },
+    evalSummary() {
+      const evs = Object.values(this.entities)
+        .filter(e => e[':seon.eval/id']);
+      return evs.length
+        ? evs.map(e => '> ' + e[':seon.eval/source'] + '\n  => ' + (e[':seon.eval/result-edn'] || '?')).join('\n')
+        : '(no evals)';
+    },
+  };
+}
+
+// ============================================================
+//  SCENARIOS
+// ============================================================
+const BASE_AGENT = {
+  'agent-A': {
+    ':seon.agent/id': 'AgentA1234567',
+    ':seon.agent/state': ':stopped',
+  },
+};
+const BASE_HANDLERS = {
+  'h-wake':    { id:'h-wake',    name:'wake-on-message-to-agent', agent:'agent-A',
+                 match:{attr:':seon.message/to', value:'agent-A'}, fn:'seon.runtime/wake' },
+  'h-async':   { id:'h-async',   name:'route-async-result',       agent:'agent-A',
+                 match:{attr:':seon.async-result/agent', value:'agent-A'}, fn:'seon.runtime/wake' },
+  'h-err':     { id:'h-err',     name:'surface-eval-error',       agent:null,
+                 match:{attr:':seon.eval/error-data'}, fn:'seon.runtime/noop' },
+};
+
+// Helper to build common tx events
+const makeTx = (entities, origin, summary, say, opts={}) => ({
+  type:'tx', entities, origin, summary, say, dt: opts.dt ?? 5,
+});
+
+const SCENARIOS = [
+
+// -------- SCENARIO 1 --------
+{
+  title: 'user → agent → stop',
+  blurb: 'User sends a message. wake-on-message-to-agent fires → agent runs one turn → emits narration only → dispatcher detects zero forms + no effects → flips to :stopped.',
+  opening: 'agent is :stopped. waiting for input.',
+  initialEntities: structuredClone(BASE_AGENT),
+  initialHandlers: structuredClone(BASE_HANDLERS),
+  initialAgentState: ':stopped',
+  events: [
+    makeTx({'msg-1': {
+        ':seon.message/id':'msg00000001', ':seon.message/from':':user',
+        ':seon.message/to':['agent-A'], ':seon.message/role':':user',
+        ':seon.message/content':'hi, who are you?', ':seon.message/at':'14:35:00'
+    }}, ':user', '+msg-1 (user → agent-A)',
+       'user tx commits. dispatcher walks handlers indexed on :seon.message/to.'),
+    { type:'handler-fire', handlerId:'h-wake', effect:'{:effect/type :wake :agent agent-A}',
+      say:'wake-on-message-to-agent matches. returns one :wake effect.' },
+    { type:'effect', effectType:':wake',
+      say:'runtime interprets :wake → agent state :stopped → flips :running and invokes (run-agent-loop!).' },
+    { type:'agent-state', state:':running', say:'agent :running. about to render its first prompt.' },
+    { type:'render', changed:['messages'],
+      sections:[
+        { name:'system', body:'agent="AgentA1234567"\nnow=14:35:00\nctx: discovery cheat-sheet…' },
+        { name:'messages', body:'[:user] hi, who are you?' },
+        { name:'recent-evals', body:'(none)' },
+      ],
+      say:'next-turn render: pure fn of db. messages-section query picks up the user msg.' },
+    makeTx({'msg-2': {
+        ':seon.message/id':'msg00000002', ':seon.message/from':'agent-A',
+        ':seon.message/to':[':user'], ':seon.message/role':':assistant',
+        ':seon.message/content':';; thinking…\n(println "I am AgentA.")',
+        ':seon.message/at':'14:35:01'
+    }}, ':agent', '+msg-2 (assistant reply, 1 form)',
+       'LLM responds. assistant message persists with role :assistant + 1 eval form inside.'),
+    makeTx({'eval-1': {
+        ':seon.eval/id':'ev00000001', ':seon.eval/source':'(println "I am AgentA.")',
+        ':seon.eval/result-edn':'nil', ':seon.eval/ok?':true,
+        ':seon.eval/from-message':'msg-2', ':seon.eval/ns':':seon.agent.AgentA1234567'
+    }}, ':agent', '+eval-1 (printed greeting)',
+       'eval-batch runs the form. eval entity links to the assistant message via :from-message.'),
+    { type:'render', changed:['recent-evals'],
+      sections:[
+        { name:'system', body:'agent="AgentA1234567"\nstate=:running' },
+        { name:'messages', body:'[:user] hi, who are you?\n[:assistant] ;; thinking…\n(println "I am AgentA.")' },
+        { name:'recent-evals', body:'> (println "I am AgentA.")\n  => nil  (ok?=true)' },
+      ],
+      say:'composer re-renders for turn 2. recent-evals query picks up eval-1.' },
+    makeTx({'msg-3': {
+        ':seon.message/id':'msg00000003', ':seon.message/from':'agent-A',
+        ':seon.message/to':[':user'], ':seon.message/role':':assistant',
+        ':seon.message/content':';; nothing more to say.',
+        ':seon.message/at':'14:35:02'
+    }}, ':agent', '+msg-3 (narration only, 0 forms)',
+       'assistant reply this turn = just narration. eval-batch returns 0 forms.'),
+    { type:'note', say:'dispatcher post-turn: 0 forms emitted AND no queued effects → stop condition met.' },
+    { type:'agent-state', state:':stopped', say:'agent → :stopped. waits for next external event.' },
+  ],
+},
+
+// -------- SCENARIO 2 --------
+{
+  title: 'agent spawns sub-agent',
+  blurb: 'Parent agent emits :spawn-agent effect → runtime mints child + initial message → child wakes via wake-on-message-to-agent.',
+  opening: 'parent agent is mid-turn, about to spawn a child.',
+  initialEntities: { 'agent-A': { ':seon.agent/id':'AgentA1234567', ':seon.agent/state':':running' }},
+  initialHandlers: structuredClone(BASE_HANDLERS),
+  initialAgentState: ':running',
+  events: [
+    makeTx({'eval-2': {
+        ':seon.eval/id':'ev00000002',
+        ':seon.eval/source':'(seon.runtime/spawn! {:kind :researcher :initial-message "find primes <100"})',
+        ':seon.eval/result-edn':'{:effect/type :spawn-agent :corr c001}',
+        ':seon.eval/ok?':true,
+    }}, ':agent', '+eval-2 (spawn call)',
+       'parent\'s eval returns a :spawn-agent effect descriptor. interpreter consumes it.'),
+    { type:'effect', effectType:':spawn-agent',
+      say:'runtime mints child id, transacts :seon.agent + initial :seon.message in one tx.' },
+    makeTx({
+      'agent-B': { ':seon.agent/id':'AgentB7654321', ':seon.agent/state':':stopped' },
+      'msg-4':   { ':seon.message/id':'msg00000004', ':seon.message/from':'agent-A',
+                   ':seon.message/to':['agent-B'], ':seon.message/role':':user',
+                   ':seon.message/content':'find primes <100',
+                   ':seon.message/refs':[], ':seon.message/at':'14:36:00' },
+    }, ':system', '+agent-B  +msg-4 (parent → child)',
+       'one combined tx. handler-index will lookup on :seon.message/to but no per-agent handler exists yet for agent-B.'),
+    { type:'install-handler',
+      handler: { id:'h-wake-B', name:'wake-on-message-to-agent', agent:'agent-B',
+                 match:{attr:':seon.message/to', value:'agent-B'}, fn:'seon.runtime/wake' },
+      say:'create! also installed agent-B\'s per-agent wake handler (substrate default).' },
+    { type:'handler-fire', handlerId:'h-wake-B', effect:'{:effect/type :wake :agent agent-B}',
+      say:'wake-on-message-to-agent (for agent-B) matches msg-4. effect: wake agent-B.' },
+    { type:'agent-state', state:':running', say:'agent-B :running. (UI follows agent-A but agent-B advances in parallel — visible via the message log.)' },
+    { type:'render', changed:['messages'],
+      sections:[
+        { name:'system', body:'agent="AgentB7654321"\nparent=AgentA1234567' },
+        { name:'messages',
+          body:'[:user/AgentA] find primes <100\n  refs: (none)' },
+        { name:'recent-evals', body:'(none — child\'s first turn)' },
+      ],
+      say:'agent-B\'s first render: messages-section sees its inbox; will reply on next turn.' },
+  ],
+},
+
+// -------- SCENARIO 3 --------
+{
+  title: 'async LLM result after stop',
+  blurb: 'Agent issues :run-llm, finishes the rest of the turn with narration only, stops. 3s later the LLM Promise resolves → :seon.async-result lands → route-async-result wakes the agent.',
+  opening: 'agent kicked off an async LLM tool call and will stop before it returns.',
+  initialEntities: { 'agent-A': { ':seon.agent/id':'AgentA1234567', ':seon.agent/state':':running' }},
+  initialHandlers: structuredClone(BASE_HANDLERS),
+  initialAgentState: ':running',
+  events: [
+    makeTx({'eval-3': {
+        ':seon.eval/id':'ev00000003',
+        ':seon.eval/source':'(seon.runtime/llm! {:prompt "..."})',
+        ':seon.eval/result-edn':'{:effect/type :run-llm :corr c-llm-001}',
+        ':seon.eval/ok?':true,
+    }}, ':agent', '+eval-3 (run-llm effect queued)',
+       'agent issues :run-llm. effect descriptor enqueued; Promise is in flight but pending.'),
+    { type:'effect', effectType:':run-llm',
+      say:'runtime invokes LLM client (Promise started). agent is free to keep emitting forms.' },
+    makeTx({'msg-5': {
+        ':seon.message/role':':assistant', ':seon.message/from':'agent-A',
+        ':seon.message/to':[':user'], ':seon.message/at':'14:37:01',
+        ':seon.message/content':';; will continue once tool returns.',
+    }}, ':agent', '+msg-5 (narration only)',
+       'agent narrates "will continue". zero forms in this reply.'),
+    { type:'note', say:'stop condition: 0 forms + 1 effect-in-flight (not queued for next turn). agent stops; the in-flight Promise keeps running outside the loop.' },
+    { type:'agent-state', state:':stopped', say:'agent → :stopped. listener still subscribed; awaiting external event.' },
+    { type:'note', dt:3000, say:'…3 seconds pass…' },
+    makeTx({'ar-1': {
+        ':seon.async-result/id':'ar00000001', ':seon.async-result/agent':'agent-A',
+        ':seon.async-result/kind':':llm/done', ':seon.async-result/corr':'c-llm-001',
+        ':seon.async-result/payload':'"the answer is 42"', ':seon.async-result/at':'14:37:04'
+    }}, ':system', '+async-result (LLM resolved)',
+       'LLM Promise resolved. runtime transacts :seon.async-result row with the payload.'),
+    { type:'handler-fire', handlerId:'h-async', effect:'{:effect/type :wake :agent agent-A}',
+      say:'route-async-result matches on :seon.async-result/agent agent-A. emits :wake.' },
+    { type:'effect', effectType:':wake', say:':wake interpreter flips agent → :running and re-enters run-agent-loop.' },
+    { type:'agent-state', state:':running', say:'agent :running again. next render will see the async-result via its section query.' },
+    { type:'render', changed:['async-results'],
+      sections:[
+        { name:'system', body:'agent="AgentA1234567"\nstate=:running' },
+        { name:'messages', body:'[:assistant] ;; will continue once tool returns.' },
+        { name:'async-results', body:':llm/done  corr=c-llm-001\n  payload: "the answer is 42"' },
+      ],
+      say:'an async-results-section is just another fn(db). landing rows show up automatically.' },
+  ],
+},
+
+// -------- SCENARIO 4 --------
+{
+  title: 'pod restart mid-turn',
+  blurb: 'Agent is :running when pod dies. Boot replay finds :running agents, transacts a :system message, the wake handler fires, agent resumes via its normal next-render path.',
+  opening: 'pod is dying mid-turn. an agent\'s state is :running on disk.',
+  initialEntities: {
+    'agent-A': { ':seon.agent/id':'AgentA1234567', ':seon.agent/state':':running' },
+    'msg-old': { ':seon.message/id':'msg00000099', ':seon.message/role':':user',
+                 ':seon.message/from':':user', ':seon.message/to':['agent-A'],
+                 ':seon.message/content':'compute fibonacci(40)' },
+    'eval-partial': { ':seon.eval/id':'ev00000099',
+                      ':seon.eval/source':'(fib 40)', ':seon.eval/ok?':false,
+                      ':seon.eval/error-data':':seon.error/pod-interrupted' },
+  },
+  initialHandlers: structuredClone(BASE_HANDLERS),
+  initialAgentState: ':running',
+  events: [
+    { type:'note', say:'« process exited mid-eval. LMDB on disk is intact. »' },
+    { type:'note', say:'« new pod starting up… »' },
+    { type:'note', say:'boot: replay-program-graph! — re-eval ns sources from :seon.fn/source.' },
+    { type:'note', say:'boot: install-dispatcher! — single d/listen! registration with handler index.' },
+    { type:'note', say:'boot: scan for :seon.agent/state :running. found: agent-A.' },
+    makeTx({'msg-sys': {
+        ':seon.message/id':'msg00000100', ':seon.message/from':':system',
+        ':seon.message/to':['agent-A'], ':seon.message/role':':system',
+        ':seon.message/content':'Pod restarted mid-turn. Decide what to do.',
+        ':seon.message/at':'14:40:00'
+    }}, ':system', '+msg-sys (boot interrupt notice)',
+       'boot transacts a system message to interrupted agent. origin=:system so handlers fire normally.'),
+    { type:'handler-fire', handlerId:'h-wake', effect:'{:effect/type :wake :agent agent-A}',
+      say:'wake-on-message-to-agent matches the system msg. emits :wake — no special interrupt code path.' },
+    { type:'effect', effectType:':wake', say:'runtime: agent is already :running on disk; flip to :running (no-op) and re-enter loop.' },
+    { type:'render', changed:['messages'],
+      sections:[
+        { name:'system', body:'agent="AgentA1234567"\nstate=:running  (resumed)' },
+        { name:'messages', body:'[:user] compute fibonacci(40)\n[:system] Pod restarted mid-turn. Decide what to do.' },
+        { name:'error-section', body:'eval-partial: :seon.error/pod-interrupted\n  source: (fib 40)' },
+      ],
+      say:'agent\'s next render: the system message + the partial-error are visible via existing queries. agent reasons and continues.' },
+  ],
+},
+
+// -------- SCENARIO 5 --------
+{
+  title: 'error → self-heals',
+  blurb: 'Eval fails; :seon.eval/error-data lands; no special handler fires; next render\'s error-section picks it up via query; agent fixes via new eval; error vanishes from next render.',
+  opening: 'agent is running. about to eval a broken form.',
+  initialEntities: { 'agent-A': { ':seon.agent/id':'AgentA1234567', ':seon.agent/state':':running' }},
+  initialHandlers: structuredClone(BASE_HANDLERS),
+  initialAgentState: ':running',
+  events: [
+    makeTx({'eval-bad': {
+        ':seon.eval/id':'ev0000bad1', ':seon.eval/source':'(undefined-fn 1 2)',
+        ':seon.eval/ok?':false, ':seon.eval/error-data':':seon.error/undeclared-var',
+        ':seon.eval/from-message':'msg-a',
+    }}, ':agent', '+eval-bad (undeclared-var)',
+       'eval fails. error lands on the eval entity. NO effect is emitted by surface-eval-error — it\'s purely a marker.'),
+    { type:'handler-fire', handlerId:'h-err', effect:'(no effect — render-only surface)',
+      say:'surface-eval-error matched but returned no effect. demonstrates: handlers may be passive markers; sections do the work.' },
+    { type:'render', changed:['errors'],
+      sections:[
+        { name:'system', body:'agent="AgentA1234567"\nstate=:running' },
+        { name:'recent-evals', body:'> (undefined-fn 1 2)\n  =>  ERROR :seon.error/undeclared-var' },
+        { name:'errors', body:'ERROR · eval ev0000bad1\n  :seon.error/undeclared-var\n  source: (undefined-fn 1 2)' },
+      ],
+      say:'errors-section is a fn(db) — queries for evals with :error-data since latest user msg. surface appears automatically.' },
+    makeTx({'eval-fix': {
+        ':seon.eval/id':'ev0000fix1',
+        ':seon.eval/source':'(defn undefined-fn [a b] (+ a b))',
+        ':seon.eval/ok?':true, ':seon.eval/result-edn':'#\'user/undefined-fn',
+    }}, ':agent', '+eval-fix (defines the fn)',
+       'agent defines the missing fn. tx commits. no handler fires (no match).'),
+    { type:'render', changed:['errors','recent-evals'],
+      sections:[
+        { name:'system', body:'agent="AgentA1234567"\nstate=:running' },
+        { name:'recent-evals',
+          body:'> (undefined-fn 1 2)\n  =>  ERROR :seon.error/undeclared-var\n> (defn undefined-fn [a b] (+ a b))\n  =>  #\'user/undefined-fn' },
+        { name:'errors',
+          body:'(none — query returns empty; surface vanishes without acknowledgement.)' },
+      ],
+      say:'errors-section\'s query now filters out ev0000bad1 (history retains it; render does not). self-healing via derivation.' },
+  ],
+},
+
+];
+</script>
+</body>
+</html>
