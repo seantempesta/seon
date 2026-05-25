@@ -80,6 +80,13 @@
     [seon.handlers.fn]
     [seon.handlers.schema]
     [seon.handlers.ns]
+    ;; Substrate handler registration — `wake-on-message`. Required so
+    ;; start-agent! can call `handler/register!` + `wake/bootstrap-schema!`
+    ;; at boot. Without this, the inspector header shows "0 handlers"
+    ;; and the substrate has no wake-on-message responder beyond the
+    ;; per-agent `install-user-trigger!` already wired by agent/boot!.
+    [seon.handler :as h]
+    [seon.handlers.wake :as wake]
     ;; Local-machine capability surface — A-9. Required so the agent
     ;; can call (seon.fs/read-file ...) + (seon.platform/host) from
     ;; bootstrap-CLJS eval.
@@ -597,6 +604,20 @@
                 ;; this for the dev iteration loop.
                 {:seon.web/keys [port port-file]}
                 (await (web.serve/start!))
+                ;; Substrate handlers — register every substrate-wide
+                ;; handler entity in the DB so the dispatcher (and the
+                ;; inspector's handler count) sees them. Idempotent:
+                ;; `handler/register!` upserts on the composite tuple
+                ;; `[name agent]`; `wake/bootstrap-schema!` upserts on
+                ;; `:db/ident`. Re-running on hot-reload is cheap.
+                _ (await (h/bootstrap-schema!))
+                _ (await (wake/bootstrap-schema!))
+                _ (await (h/register!
+                           {:seon.handler/name      :wake/on-message
+                            :seon.handler/match     {:seon.handler.match/attr
+                                                     :seon.message/to}
+                            :seon.handler/fn        'seon.handlers.wake/wake-on-message
+                            :seon.handler/on-origin #{:user :agent}}))
                 ;; Install the broadcast tx-listener (A-6).
                 _ (web.broadcast/install!)
                 ;; Install the per-agent inspector tx-listener. Distinct

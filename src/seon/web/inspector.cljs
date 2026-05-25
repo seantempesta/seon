@@ -187,6 +187,44 @@
       (into [:div {:class "flex flex-col"}] html-cards)
       [:div {:class "text-text-500 italic p-2"} "no renderable entities"])]])
 
+(defn- chat-bar-fragment
+  "Sticky bottom bar spanning both panes. Submits as a regular
+   `application/x-www-form-urlencoded` POST to `/chat?agent=<id>` —
+   the same endpoint Datastar `data-on-click__post` would call. We
+   intercept the submit in inline JS, fetch() the form data, clear
+   the input on success, and let the existing SSE registry push the
+   re-rendered panes once the user message lands in the DB.
+
+   No reload on submit; SSE fans the user-message tx out and the
+   inspector's tx-listener re-renders both panes within ~100ms."
+  [agent-id]
+  [:form {:id "seon-chat-form"
+          :action (str "/chat?agent=" agent-id)
+          :method "post"
+          :class (str "shrink-0 flex items-center gap-2 "
+                      "border-t border-base-800 bg-base-900 px-2 py-1.5")
+          :onsubmit (str "event.preventDefault();"
+                        "var f=this;var i=f.elements['text'];"
+                        "var text=i.value;if(!text||!text.trim())return false;"
+                        "fetch(f.action,{method:'POST',"
+                        "headers:{'Content-Type':'application/x-www-form-urlencoded'},"
+                        "body:'text='+encodeURIComponent(text)})"
+                        ".then(function(r){if(r.ok){i.value='';i.focus();}});"
+                        "return false;")}
+   [:input {:type "text"
+            :name "text"
+            :placeholder (str "message agent " agent-id " …  (Cmd/Ctrl+Enter to send)")
+            :autocomplete "off"
+            :autofocus true
+            :class (str "flex-1 bg-base-950 border border-base-800 rounded "
+                        "px-2 py-1 text-amber-50 text-xs font-mono "
+                        "placeholder:text-text-500 "
+                        "focus:outline-none focus:border-amber-700")}]
+   [:button {:type "submit"
+             :class (str "bg-amber-900/70 hover:bg-amber-800 text-amber-50 "
+                         "px-3 py-1 rounded text-xs font-mono")}
+    "send"]])
+
 (defn- inspector-shell
   "The full page for `/agent/<id>`. The body contains the two-pane grid;
    the header is inside the morph zone so it updates too."
@@ -200,15 +238,52 @@
         [:meta {:name "viewport" :content "width=device-width, initial-scale=1.0"}]
         [:title (str "seon · agent " agent-id)]
         [:link {:rel "stylesheet" :href "/css/output.css"}]
+        ;; highlight.js — atom-one-dark theme. Loaded from CDN; no
+        ;; server-side dep. After SSE morphs swap in new <code> blocks,
+        ;; we re-run `hljs.highlightAll()` via a MutationObserver on
+        ;; the html pane (see inline script below).
+        [:link {:rel "stylesheet"
+                :href "https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/atom-one-dark.min.css"}]
+        [:script {:src "https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"}]
+        ;; Inline override: bend a couple of atom-one-dark colors toward
+        ;; the Phosphor Terminal palette (amber emphasis).
+        [:style (html/raw
+                  (str "code.hljs{background:transparent !important;padding:0 !important;}"
+                       ".hljs-keyword,.hljs-built_in{color:#fbbf24;}"
+                       ".hljs-string{color:#fde68a;}"
+                       ".hljs-symbol,.hljs-literal{color:#fcd34d;}"
+                       ".hljs-comment{color:#78716c;font-style:italic;}"))]
         [:script {:type "module" :src "/js/datastar.js"}]]
        [:body {:class "h-screen bg-base-950 text-text-50 font-sans antialiased flex flex-col"}
         [:div {:data-init (str "@get('/agent/" agent-id "/sse')")
                :data-on:online__window (str "@get('/agent/" agent-id "/sse')")}]
         (header-fragment agent-id snap)
-        [:div {:class "flex-1 grid h-0"
+        [:div {:class "flex-1 grid h-0 min-h-0"
                :style "grid-template-columns: 1fr 1fr;"}
          (ai-pane-fragment   agent-id snap)
-         (html-pane-fragment agent-id snap)]]])))
+         (html-pane-fragment agent-id snap)]
+        (chat-bar-fragment agent-id)
+        ;; Re-highlight on every Datastar morph. The patched HTML lands
+        ;; via `datastar-patch-elements`; we listen for any added <code>
+        ;; node anywhere in the document and call hljs.highlightElement
+        ;; on it (cheaper than highlightAll on every mutation).
+        [:script (html/raw
+                   (str "function seonHighlightAll(){"
+                        "if(!window.hljs)return;"
+                        "document.querySelectorAll('pre code.language-clojure').forEach(function(el){"
+                        "el.removeAttribute('data-highlighted');"
+                        "window.hljs.highlightElement(el);});}"
+                        "document.addEventListener('DOMContentLoaded',seonHighlightAll);"
+                        "new MutationObserver(function(muts){"
+                        "var any=false;for(var i=0;i<muts.length;i++){"
+                        "if(muts[i].addedNodes && muts[i].addedNodes.length){any=true;break;}}"
+                        "if(any)seonHighlightAll();"
+                        "}).observe(document.body,{subtree:true,childList:true});"
+                        ;; Cmd/Ctrl+Enter submits the chat form from anywhere.
+                        "document.addEventListener('keydown',function(e){"
+                        "if((e.metaKey||e.ctrlKey)&&e.key==='Enter'){"
+                        "var f=document.getElementById('seon-chat-form');"
+                        "if(f){e.preventDefault();f.requestSubmit();}}});"))]]])))
 
 (defn- agents-index-page
   []
