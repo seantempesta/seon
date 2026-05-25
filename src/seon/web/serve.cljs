@@ -46,6 +46,7 @@
     [seon.agent :as agent]
     [seon.db :as db]
     [seon.log :as log]
+    [seon.web.inspector :as inspector]
     [seon.web.page :as page]))
 
 ;; ============================================================
@@ -321,6 +322,7 @@
                  (str/starts-with? path "/css/")    (serve-static! res path)
                  (str/starts-with? path "/js/")     (serve-static! res path)
                  (= path "/sse")                    (open-sse! req res)
+                 (inspector/route? path)            (inspector/handle! req res path)
                  :else                              (write-status! res 404 "text/plain; charset=utf-8"
                                                                    (str "Not found: " url)))
         "POST" (cond

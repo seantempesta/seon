@@ -66,6 +66,12 @@
     ;; Broadcast tx-listener — A-6. Required here so the build includes
     ;; it; start-agent! calls (web.broadcast/install!) at boot.
     [seon.web.broadcast :as web.broadcast]
+    ;; Per-agent inspector UI (/agent/<id>) — installs its own
+    ;; tx-listener that pushes morphs to that page's SSE stream.
+    [seon.web.inspector]
+    ;; Default :seon.render/ai + :seon.render/html for :seon.message
+    ;; entities. Referenced by symbol from message tx data.
+    [seon.handlers.message]
     ;; Local-machine capability surface — A-9. Required so the agent
     ;; can call (seon.fs/read-file ...) + (seon.platform/host) from
     ;; bootstrap-CLJS eval.
@@ -584,7 +590,11 @@
                 {:seon.web/keys [port port-file]}
                 (await (web.serve/start!))
                 ;; Install the broadcast tx-listener (A-6).
-                _ (web.broadcast/install!)]
+                _ (web.broadcast/install!)
+                ;; Install the per-agent inspector tx-listener. Distinct
+                ;; from broadcast — it pushes morphs for the agent-view
+                ;; inspector page (/agent/<id>), not the legacy tile grid.
+                _ (seon.web.inspector/install!)]
             (log/info-console! "seon.client" "agent started"
                                {:agent id :ns (str ns) :port port :port-file port-file})
             {:seon.agent/id id :seon.agent/ns ns
