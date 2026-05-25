@@ -216,8 +216,7 @@
     (str "## REPL state\n"
          ";; current-ns:  " ns-sym "\n"
          ";; agent home:  " ns-sym
-         "  (auto-loaded with !session-id, !current-ns atoms"
-         " + session-id, result accessor fns)\n"
+         "  (auto-loaded with (result <eval-id>) accessor)\n"
          ";; agent-id:    " (pr-str id) "\n"
          ";; turn:        " (or (:seon.agent/turn-count ent) 0) "\n"
          ";; since-user:  " since-u "/" cap " turns this conversation\n"
@@ -279,13 +278,14 @@
     "   :seon.db/args  [[:seon.agent/id " (pr-str id) "]]})\n\n"
 
     ";; reply by transacting an :assistant message\n"
-    ";; (session-id) reads your own id from the home-ns atom\n"
+    ";; (seon.db/current-agent-id) is your own id — substrate-bound\n"
+    ";; for the duration of your turn via the ALS dynvar.\n"
     "(seon.db/transact!\n"
     "  {:seon.db/tx-data\n"
     "   [{:seon.message/id      (seon.db/new-id!)\n"
     "     :seon.message/role    :assistant\n"
     "     :seon.message/content \"your text here\"\n"
-    "     :seon.message/agent   [:seon.agent/id (session-id)]\n"
+    "     :seon.message/agent   [:seon.agent/id (seon.db/current-agent-id)]\n"
     "     :seon.message/at      (js/Date.)}]})\n\n"
 
     ";; pull a specific entity by lookup-ref\n"
@@ -316,7 +316,7 @@
 
     ";; write a file — overwrites; returns {:seon.fs/ok? :seon.fs/path}\n"
     "(seon.fs/write-file {:seon.fs/path \"/tmp/seon-note.txt\"\n"
-    "                     :seon.fs/content \"hi from \" (str (session-id))})\n\n"
+    "                     :seon.fs/content \"hi from \" (seon.db/current-agent-id)})\n\n"
 
     ";; recursively walk a tree, filter by extension — returns absolute paths\n"
     "(seon.fs/walk-dir {:seon.fs/path \"/Users/you/src/your-project\"\n"

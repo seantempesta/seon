@@ -82,3 +82,6 @@
 [submodule "reference-code/hyperlith"]
 	path = reference-code/hyperlith
 	url = https://github.com/andersmurphy/hyperlith.git
+[submodule "reference-code/hermes-agent"]
+	path = reference-code/hermes-agent
+	url = https://github.com/nousresearch/hermes-agent

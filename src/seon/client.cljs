@@ -506,8 +506,8 @@
 
 (defn ^:async start-agent!
   "Bring up the V0 agent: open conn, init bootstrap-CLJS, prime the
-   agent's home namespace with !session-id / !results / !current-ns
-   atoms, then boot the session loop.
+   agent's home namespace with the (result <eval-id>) accessor, then
+   boot the turn loop.
 
      :llm-fn — fn of ctx-string returning a Promise of {:text \"...\"}.
                Optional; defaults to stub-llm for verification without

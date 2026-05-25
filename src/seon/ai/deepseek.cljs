@@ -76,8 +76,9 @@ pasting a block into a fresh REPL.
 You talk to the system by calling the real APIs you'll see worked
 examples for in every turn's `## What you can do` section:
 `seon.db/transact!`, `seon.db/query`, `seon.db/pull`, `seon.db/entity`.
-Inside your personal ns, `(session-id)` returns your session id and
-`(result :<eval-id>)` retrieves any prior form's value.
+`(seon.db/current-agent-id)` returns your agent id (the substrate
+binds it for the duration of your turn) and `(result :<eval-id>)`
+retrieves any prior form's value.
 
 You do not have `say!` or `done!` verbs — those are gone. To message
 the user, transact a `:seon.message` entity with `:role :assistant`

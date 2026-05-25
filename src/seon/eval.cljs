@@ -28,19 +28,24 @@
    - **Bare value-def reads don't resolve across eval-str calls.**
      `(def x 42)` then `x` returns nil. Use atoms instead:
      `(def !x (atom 42))` + `@!x` works. Fns are unaffected — they
-     cross namespaces fine. The agent's home ns is set up with atoms
-     for `!session-id` / `!results` / `!current-ns` exactly because of
-     this.
+     cross namespaces fine. (Historically the agent's home ns held
+     a `!session-id` atom for this reason; that was dropped 2026-05-25
+     in favor of the substrate-provided `(seon.db/current-agent-id)`
+     which reads from the turn-scoped ALS dynvar.)
    - **`(in-ns 'foo)` is not bootstrapped.** Use `(ns foo)` to switch."
   (:refer-clojure :exclude [eval])
   (:require [cljs.analyzer :as ana]
             [cljs.js :as cljs]
+            [cljs.reader :as reader]
+            [clojure.set :as set]
             [clojure.string :as str]
             [goog.object :as gobj]
             [shadow.cljs.bootstrap.node :as boot]
+            [seon.analyzer-info :as analyzer-info]
             [seon.db :as db]
             [seon.error :as error]
-            [seon.error.instrument :as einstrument]))
+            [seon.error.instrument :as einstrument]
+            [seon.schema :as schema]))
 
 ;; ============================================================
 ;; Per-form wall-clock timeout. Stability guard, not a security
@@ -523,31 +528,29 @@
 
 (defn ^:async setup-agent-ns!
   "Create + initialize the agent's home namespace. Returns the agent-ns
-   symbol (for convenience — same as the input). Idempotent: re-running
-   resets atoms to initial values.
+   symbol (for convenience — same as the input). Idempotent.
 
    After setup, agent code running in this ns has access to:
-     !session-id  — atom holding the agent-id string (preserves the
-                    `(session-id)` accessor name per spec-05 §21.1)
-     !current-ns  — atom holding the agent's current ns symbol
-     (session-id) — sugar for @!session-id
      (result id)  — looks up the live value of a prior eval, keyed by
                     its 10-char id (string or keyword). Backed by
                     globalThis so any value type round-trips.
 
+   For the agent's own id, use `(seon.db/current-agent-id)` — the
+   substrate provides it via the ALS dynvar bound at turn entry. The
+   prior `!session-id` atom + `(session-id)` accessor were dropped
+   2026-05-25: the agent IS the session, and identity lives in one
+   place (the ALS dynvar). No per-agent home-ns duplicate.
+
+   `:current-ns` is derived at read time from the latest
+   :seon.eval/ns datom (seon.agent/current-ns + reactive-context
+   principle). No home-ns atom.
+
    Uses `:analyze-deps? true` so the `(ns …)` form analyzes cljs.core's
    refer map and wires up implicit macro refers (defn, str, atom, etc.)
    for subsequent forms in the new ns."
-  [compile-state agent-ns-sym agent-id]
-  (let [;; `!current-ns` removed 2026-05-23 — was a process-global
-        ;; cache forcing two extra cljs.js/eval-str round-trips per
-        ;; form. The agent's current ns is now derived at read time
-        ;; from the latest :seon.eval/ns datom (see
-        ;; seon.agent/current-ns + docs/seon/concepts/reactive-context).
-        setup-src
+  [compile-state agent-ns-sym _agent-id]
+  (let [setup-src
         (str "(ns " agent-ns-sym ")"
-             "(def !session-id (atom " (pr-str agent-id) "))"
-             "(defn session-id [] @!session-id)"
              "(defn result [id]"
              "  (js/Reflect.get js/globalThis"
              "    (str " (pr-str results-key-prefix)
@@ -610,6 +613,82 @@
       (reset! !next-budget-ms nil)
       {:ok true :value v})))
 
+;; ============================================================
+;; Detect-and-tee (v1.md §2.2 + §7 / STATUS.md Phase B item 10)
+;;
+;; After a successful eval, snapshot the analyzer's :defs and the
+;; schema registry's keyset before/after; every new def becomes a
+;; :seon.fn entity, every new schema key becomes a :seon.schema entity.
+;; An `(ns …)` form also yields a :seon.ns entity. These ride in the
+;; same tx as the eval entity (via record-eval!'s :tee arg), sharing
+;; the :seon.db/eval-id tx-meta — the eval IS the tx that wrote the
+;; program-graph datom.
+;;
+;; Redefinition: identity-attr upserts on :seon.fn/sym / :seon.schema/key
+;; mean re-evaling (defn foo …) replaces the source/projection in
+;; place; history retains prior values. (defs-since returns empty on
+;; redef since `before` already contained the sym; v1 design pick (b)
+;; in the brief — bulk-load resume reads the latest :seon.fn/source
+;; per identity, which is what the upsert leaves behind.)
+;; ============================================================
+
+(defn- ns-form-name
+  "If `source` parses as an `(ns NAME …)` form, return NAME as a
+   symbol; otherwise nil. Tolerates leading metadata: `(ns ^:foo bar)`
+   — cljs.reader handles metadata on the name slot."
+  [source]
+  (try
+    (let [form (reader/read-string source)]
+      (when (and (seq? form) (= 'ns (first form)) (symbol? (second form)))
+        (second form)))
+    (catch :default _ nil)))
+
+(defn- build-tee-entities
+  "Return a vector of program-graph entity maps for everything `source`
+   newly defined (def/defn → :seon.fn; schema/register! → :seon.schema;
+   (ns …) → :seon.ns). `defs-before` and `schemas-before` are snapshots
+   taken before the eval ran. `ns-kw` is the form's ending ns
+   (`(:seon.eval/ns eval-entity)`, per STATUS.md heads-up (b)).
+
+   Tee-entities reference their owning ns via lookup-ref
+   `[:seon.ns/name <kw>]`. The `:seon.ns` entity for that ns must
+   either already exist (substrate seeded at boot, or prior agent eval)
+   or be in the same tx (the `(ns …)`-form case below). Identity-attr
+   upsert on `:seon.ns/name` keeps the lookup-ref stable."
+  [{:keys [compile-state defs-before schemas-before source at]}]
+  (let [new-defs    (analyzer-info/defs-since defs-before compile-state)
+        new-schemas (set/difference (schema/current-keys) schemas-before)
+        fn-entities (for [{:keys [ns var-map]} new-defs
+                          :let [{:keys [sym fn-var? arglists doc private? specced?]}
+                                (analyzer-info/var-projection var-map)]]
+                      ;; var-projection's `:sym` is already the FQ string
+                      ;; (`pr-str` of analyzer's `:name` which carries the
+                      ;; ns). v1.md §7 pseudocode shows
+                      ;; `(str ns "/" sym)` here — that's stale (would
+                      ;; double-prefix to "probe.tee/probe.tee/f1"). The
+                      ;; spec language is the dumbass-trap; var-projection
+                      ;; is canonical.
+                      {:seon.fn/sym        sym
+                       :seon.fn/ns         [:seon.ns/name (keyword (str ns))]
+                       :seon.fn/source     source
+                       :seon.fn/fn-var?    fn-var?
+                       :seon.fn/arglists   arglists
+                       :seon.fn/doc        doc
+                       :seon.fn/private?   private?
+                       :seon.fn/specced?   specced?
+                       :seon.fn/created-at at})
+        schema-entities (for [k new-schemas]
+                          {:seon.schema/key        k
+                           :seon.schema/ns         [:seon.ns/name
+                                                    (keyword (namespace k))]
+                           :seon.schema/source     source
+                           :seon.schema/created-at at})
+        ns-sym      (ns-form-name source)
+        ns-entities (when ns-sym
+                      [{:seon.ns/name   (keyword (str ns-sym))
+                        :seon.ns/source source}])]
+    (vec (concat ns-entities fn-entities schema-entities))))
+
 (defn ^:async record-eval!
   "Transact one :seon.eval entity as a component child of its owning
    turn (per v1.md §2.1 — `:seon.turn/evals` is component-many). The
@@ -617,12 +696,17 @@
    semantics mean a one-pull on the turn returns its evals without
    needing a back-ref query.
 
+   When `:tee` is non-empty, the detect-and-tee program-graph entities
+   (`:seon.fn` / `:seon.schema` / `:seon.ns` — see v1.md §2.2 / Phase
+   B item 10) land in the SAME tx as the eval entity. Identity-attr
+   upserts handle redefinition.
+
    Soft-fails — a DB write failure is logged but doesn't abort the
    batch. The tx auto-tags with whatever causality bundle is in
    `(seon.db/current-tx-context)` (eval-batch! opens the per-eval
    scope with `:seon.db/agent-id` + `:seon.db/eval-id` + `:seon.db/
    origin :agent`, plus whatever the caller layered above)."
-  [{:keys [eval-id turn-id at narration source result duration-ms ns]}]
+  [{:keys [eval-id turn-id at narration source result duration-ms ns tee]}]
   (let [eval-map (cond-> {:seon.eval/id          eval-id
                           :seon.eval/at          at
                           :seon.eval/duration-ms (or duration-ms 0)
@@ -667,8 +751,14 @@
         ;; Attach the eval as a component child of the turn. Datahike's
         ;; cardinality-many ref accumulates on upsert — each record-eval!
         ;; call appends one eval to the turn's evals set.
-        tx-data  [{:seon.turn/id    turn-id
-                   :seon.turn/evals [eval-map]}]
+        ;;
+        ;; Tee entities (`:seon.fn` / `:seon.schema` / `:seon.ns` from
+        ;; detect-and-tee, v1.md §2.2 / Phase B item 10) ride in the same
+        ;; tx so they share `:seon.db/eval-id` tx-meta and either all
+        ;; land or none do.
+        tx-data  (into [{:seon.turn/id    turn-id
+                         :seon.turn/evals [eval-map]}]
+                       tee)
         r (await (db/transact! {:seon.db/tx-data tx-data}))]
     (when-not (:seon.db/ok? r)
       (js/console.warn "[seon.eval/eval-batch!] record-eval! tx failed:"
@@ -772,6 +862,11 @@
                 (let [{:keys [narration source]} entry
                       at          (js/Date.)
                       start-ms    (.now js/Date)
+                      ;; Snapshot analyzer + schema registry BEFORE eval
+                      ;; so detect-and-tee (v1.md §2.2 / Phase B item 10)
+                      ;; can diff after. Cheap reads — keyset extraction.
+                      defs-before    (analyzer-info/snapshot-defs compile-state)
+                      schemas-before (schema/current-keys)
                       raw-result  (await (eval compile-state source
                                                {:ns @current-ns
                                                 :analyze-deps? false}))
@@ -795,17 +890,29 @@
                   ;; via (result :id).
                   (when (:ok result)
                     (stash-result-raw! eval-id (:value result)))
-                  ;; Durable record — always. :seon.eval/ns is the
-                  ;; post-update accumulator (ending ns on success;
-                  ;; unchanged ns on failure).
-                  (await (record-eval! {:eval-id     eval-id
-                                        :turn-id     turn-id
-                                        :at          at
-                                        :duration-ms duration-ms
-                                        :narration   narration
-                                        :source      source
-                                        :ns          @current-ns
-                                        :result      result}))
+                  ;; Detect-and-tee — only on success. Failed evals roll
+                  ;; back analyzer defs and never touch the schema registry,
+                  ;; so diff would be empty anyway; we still skip
+                  ;; explicitly to keep the contract obvious.
+                  (let [tee (when (:ok result)
+                              (build-tee-entities
+                                {:compile-state  compile-state
+                                 :defs-before    defs-before
+                                 :schemas-before schemas-before
+                                 :source         source
+                                 :at             at}))]
+                    ;; Durable record — always. :seon.eval/ns is the
+                    ;; post-update accumulator (ending ns on success;
+                    ;; unchanged ns on failure). Tee rides in the same tx.
+                    (await (record-eval! {:eval-id     eval-id
+                                          :turn-id     turn-id
+                                          :at          at
+                                          :duration-ms duration-ms
+                                          :narration   narration
+                                          :source      source
+                                          :ns          @current-ns
+                                          :result      result
+                                          :tee         tee})))
                   (if (:ok result)
                     (vswap! n-ok   inc)
                     (vswap! n-fail inc)))))))
