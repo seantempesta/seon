@@ -430,16 +430,28 @@
 (defn ^:async chat
   "Inject a :user message for an agent. Returns the message-id after
    the transact lands. The agent's reply arrives asynchronously —
-   poll via `replies-after` or watch the message log."
+   poll via `replies-after` or watch the message log.
+
+   Wraps the transact in `(db/with-agent agent-id …)` so the tx-meta
+   `:seon.db/agent-id` is set — required for the inspector's per-agent
+   filtered view to surface this message to the right pane.
+
+   Stamps the message with the substrate-default `:seon.render/ai` +
+   `:seon.render/html` symbols so it appears in the inspector's two
+   panes immediately."
   [agent-id text]
   (let [mid (db/new-id!)]
-    (await (db/transact!
-             {:seon.db/tx-data
-              [{:seon.message/id      mid
-                :seon.message/role    :user
-                :seon.message/content text
-                :seon.message/agent   [:seon.agent/id agent-id]
-                :seon.message/at      (js/Date.)}]}))
+    (await (db/with-agent agent-id
+             (fn ^:async chat-tx! []
+               (db/transact!
+                 {:seon.db/tx-data
+                  [{:seon.message/id      mid
+                    :seon.message/role    :user
+                    :seon.message/content text
+                    :seon.message/agent   [:seon.agent/id agent-id]
+                    :seon.message/at      (js/Date.)
+                    :seon.render/ai       'seon.handlers.message/render-ai
+                    :seon.render/html     'seon.handlers.message/render-html}]}))))
     mid))
 
 (defn replies-after
@@ -591,7 +603,10 @@
      [{:seon.message/id      (db/new-id!)
        :seon.message/role    :assistant
        :seon.message/content reply-text
-       :seon.message/at      (js/Date.)}]
+       :seon.message/agent   [:seon.agent/id id]
+       :seon.message/at      (js/Date.)
+       :seon.render/ai       'seon.handlers.message/render-ai
+       :seon.render/html     'seon.handlers.message/render-html}]
      :seon.agent/eval-count (:seon.eval/n-ok batch)}))
 
 (defn ^:async run-turn!

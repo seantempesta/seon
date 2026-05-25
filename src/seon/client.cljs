@@ -72,6 +72,14 @@
     ;; Default :seon.render/ai + :seon.render/html for :seon.message
     ;; entities. Referenced by symbol from message tx data.
     [seon.handlers.message]
+    ;; Renderers for :seon.eval / :seon.fn / :seon.schema / :seon.ns —
+    ;; stamped at the write site (record-eval!, build-tee-entities) so
+    ;; each persisted entity appears in the inspector's two panes via
+    ;; the substrate-wide `:seon.render/ai`-walking assembler.
+    [seon.handlers.eval]
+    [seon.handlers.fn]
+    [seon.handlers.schema]
+    [seon.handlers.ns]
     ;; Local-machine capability surface — A-9. Required so the agent
     ;; can call (seon.fs/read-file ...) + (seon.platform/host) from
     ;; bootstrap-CLJS eval.
