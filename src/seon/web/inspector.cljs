@@ -245,14 +245,35 @@
         [:link {:rel "stylesheet"
                 :href "https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/atom-one-dark.min.css"}]
         [:script {:src "https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"}]
+        ;; marked.js — renders `:seon.eval/narration` markdown into HTML
+        ;; in the right pane only (the AI pane keeps raw markdown — LLMs
+        ;; read it fine as text). Loaded from CDN; no server-side dep.
+        [:script {:src "https://cdn.jsdelivr.net/npm/marked/marked.min.js"}]
         ;; Inline override: bend a couple of atom-one-dark colors toward
-        ;; the Phosphor Terminal palette (amber emphasis).
+        ;; the Phosphor Terminal palette (amber emphasis), plus minimal
+        ;; markdown body styling for narration (Tailwind's `prose` plugin
+        ;; isn't loaded via CDN).
         [:style (html/raw
                   (str "code.hljs{background:transparent !important;padding:0 !important;}"
                        ".hljs-keyword,.hljs-built_in{color:#fbbf24;}"
                        ".hljs-string{color:#fde68a;}"
                        ".hljs-symbol,.hljs-literal{color:#fcd34d;}"
-                       ".hljs-comment{color:#78716c;font-style:italic;}"))]
+                       ".hljs-comment{color:#78716c;font-style:italic;}"
+                       ".markdown{color:#d6d3d1;font-size:0.75rem;line-height:1.4;}"
+                       ".markdown h1{font-size:0.95rem;color:#fbbf24;margin:0.4rem 0 0.2rem;font-weight:600;}"
+                       ".markdown h2{font-size:0.85rem;color:#fcd34d;margin:0.35rem 0 0.15rem;font-weight:600;}"
+                       ".markdown h3{font-size:0.8rem;color:#fde68a;margin:0.3rem 0 0.1rem;font-weight:600;}"
+                       ".markdown p{margin:0.2rem 0;}"
+                       ".markdown ul,.markdown ol{margin:0.2rem 0 0.2rem 1rem;}"
+                       ".markdown li{margin:0.05rem 0;list-style:disc;}"
+                       ".markdown ol li{list-style:decimal;}"
+                       ".markdown code{font-family:ui-monospace,monospace;color:#fde68a;background:#1c1917;padding:0 0.2rem;border-radius:0.15rem;}"
+                       ".markdown pre{background:#1c1917;padding:0.3rem 0.4rem;border-radius:0.2rem;overflow-x:auto;margin:0.2rem 0;}"
+                       ".markdown pre code{background:transparent;padding:0;}"
+                       ".markdown strong{color:#fef3c7;font-weight:600;}"
+                       ".markdown em{color:#fde68a;font-style:italic;}"
+                       ".markdown a{color:#fbbf24;text-decoration:underline;}"
+                       ".markdown blockquote{border-left:2px solid #57534e;padding-left:0.5rem;color:#a8a29e;margin:0.2rem 0;}"))]
         [:script {:type "module" :src "/js/datastar.js"}]]
        [:body {:class "h-screen bg-base-950 text-text-50 font-sans antialiased flex flex-col"}
         [:div {:data-init (str "@get('/agent/" agent-id "/sse')")
@@ -273,11 +294,21 @@
                         "document.querySelectorAll('pre code.language-clojure').forEach(function(el){"
                         "el.removeAttribute('data-highlighted');"
                         "window.hljs.highlightElement(el);});}"
-                        "document.addEventListener('DOMContentLoaded',seonHighlightAll);"
+                        ;; marked.js: walk every [data-markdown] container,
+                        ;; render its raw text into innerHTML once (then mark
+                        ;; it done so re-runs on subsequent mutations skip).
+                        "function seonMarkdownAll(){"
+                        "if(!window.marked)return;"
+                        "document.querySelectorAll('[data-markdown]:not([data-md-done])').forEach(function(el){"
+                        "var src=el.getAttribute('data-markdown')||'';"
+                        "el.innerHTML=window.marked.parse(src);"
+                        "el.setAttribute('data-md-done','1');});}"
+                        "document.addEventListener('DOMContentLoaded',function(){"
+                        "seonHighlightAll();seonMarkdownAll();});"
                         "new MutationObserver(function(muts){"
                         "var any=false;for(var i=0;i<muts.length;i++){"
                         "if(muts[i].addedNodes && muts[i].addedNodes.length){any=true;break;}}"
-                        "if(any)seonHighlightAll();"
+                        "if(any){seonHighlightAll();seonMarkdownAll();}"
                         "}).observe(document.body,{subtree:true,childList:true});"
                         ;; Cmd/Ctrl+Enter submits the chat form from anywhere.
                         "document.addEventListener('keydown',function(e){"

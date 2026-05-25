@@ -118,9 +118,14 @@
         status-class (if ok? "text-amber-400" "text-error")]
     {:seon.render/hiccup
      [:div {:class "py-1"}
+      ;; Narration is markdown emitted by the agent (`## heading`,
+      ;; `**bold**`, lists). marked.js + the inspector-shell's
+      ;; MutationObserver expand `[data-markdown]` to real HTML on
+      ;; load and after every SSE morph. AI pane keeps it raw — LLMs
+      ;; read markdown fine as text.
       (when (and narration (not (str/blank? narration)))
-        [:div {:class "text-xs text-text-500 italic font-mono whitespace-pre-wrap mb-0.5"}
-         (str/trim narration)])
+        [:div {:class "markdown mb-0.5"
+               :data-markdown (str/trim narration)}])
       [:div {:class "flex items-baseline gap-2"}
        [:span {:class "text-xs font-mono font-semibold text-amber-500"}
         (str "eval " eid)]
