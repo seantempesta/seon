@@ -6,6 +6,17 @@ tags: [research, testing, agent, prd]
 
 # CLJS testing infrastructure — research + plan
 
+## Revision log
+
+- **2026-05-25 (revision):** killed `:seon.test/test` as a separate discovery entity — agent-defined tests are now plain `:seon.fn` rows with `:seon.fn/test?` true and `:seon.fn/test-targets` for explicit targeting; `:seon.test/*` retained only as the run-result projection. (§4.A, §4.G, §4.L, §5, §6, §7, §8.)
+- **2026-05-25:** moved the agent-defined-fn instrumentation hook (`mi/-register!` + `mi/instrument!` in `build-tee-entities`) from Phase 5 → Phase 2; it's load-bearing for the Phase 2 reactive acceptance test, not a polish item. (§4.K, §6 renumbered.)
+- **2026-05-25:** fixed TL;DR numbering — was `1,2,3,1,2,3,4,5`; now a clean `1–7`. (§1.)
+- **2026-05-25:** reconciled the two divergent `::run-result` shapes; canonical definition now lives in §5 with `::run-id`, `::selected-vars`, `::recorded?`, `::recorded-syms`. §4.E/§4.H reference §5 instead of redefining. (§4.E, §4.H, §5.)
+- **2026-05-25:** added §4.N "Pre-Phase-1 probes" with exact REPL forms for `:test` meta survival, `with-redefs` self-host, `use-fixtures :each` async ordering, and `mi/instrument!` on post-bootstrap-defined syms. Each lists expected output + fallback.
+- **2026-05-25:** §4.L "transitive dependents" Datalog sketch marked **PENDING** — depends on `datahike-query-capabilities-2026-05-25.md` audit (currently running in parallel). Same for Phase 2 step.
+- **2026-05-25:** §4.F CLI shim picked Babashka concretely with a 15-line bb-nrepl-client script; deleted the hand-wave `node -e "..."` stub.
+- **2026-05-25:** added §4.O "Test lifecycle / GC" — when a test loses `:seon.fn/test?`, the warnings query filters it out via join (derived-not-stored, matches reactive-context principle); no retraction needed.
+
 Plan for the V0 CLJS pod's testing surface. One shared API serves
 humans (REPL), agents (eval-batch), and CI (CLI). Foundation already
 exists in `src/seon/test/runner.cljs:1-383` (`run-vars` /
@@ -18,31 +29,57 @@ Cross-references:
 - [platform.md](../platform.md) Phase 2 — where the runner was sequenced.
 - `src/seon/test/runner.cljs` — the shipped foundation.
 
+> **Revised 2026-05-25 (follow-up):** the headline framing shifted
+> from "test runner with a run-all entrypoint" to **"reactive test
+> daemon, with `run-all!` as the before-victory escape hatch."** The
+> auto-trigger handler (formerly Phase 6, §4.G) is now the spine. Two
+> new sections — §4.K (Malli instrumentation during tests) and §4.L
+> (Reactive testing) — and a new walkthrough §10 cover the changes.
+> Phase ordering in §6 has been re-sequenced so the reactive loop
+> works end-to-end as early as possible. The existing §4.A–J
+> recommendations still hold; nothing got rewritten, just extended.
+
 ## 1. TL;DR
 
-1. **Keep `seon.test.runner` as the only entrypoint.** Extend it with
+1. **Reactive by default; `run-all!` is the "before-victory" escape
+   hatch.** A `seon.runtime` handler keyed on `:seon.fn/source` tx
+   data computes affected tests via Datalog over the program graph
+   and queues a `:run-tests` effect. Editor-save and agent eval-batch
+   go through the same handler — no editor plugin, no separate
+   filesystem watcher. (§4.L + §10.)
+2. **Malli instrumentation stays on during tests.** The pod boots
+   with `seon.instrument/install!` already wrapping every
+   `:malli/schema`-bearing fn; the test runner does NOT toggle it.
+   Tests get input/output/arity validation for free. Per-test
+   override is via dynvar (`m/-no-checks` shim) only for "I'm
+   intentionally calling this fn wrong to assert the error envelope"
+   tests. (§4.K.)
+3. **Keep `seon.test.runner` as the only entrypoint.** Extend it with
    four new map-in/map-out selectors (`run-ns!`, `run-all!`,
    `run-failed!`, `last-result`) that all funnel into the existing
    `run-vars` core. No `seon.test2`, no `seon.test.api` parallel ns.
-2. **Hybrid discovery.** Platform tests use a hand-maintained
-   discovery ns `seon.test.suite` whose `(:require …)` block lists
-   every test ns — required by `seon.client/-main` at boot so the
-   munged-globalThis lookup finds them. Agent-defined tests register
-   as `:seon.test/test` entities (DB-backed) and dispatch by symbol
-   the same way.
-3. **`test/` is the canonical location.** Move
+4. **Unified discovery via `:seon.fn/test?`.** Both platform tests
+   (`deftest` in `test/`) and agent-defined tests (`deftest` evaled
+   at runtime) land in the program graph as `:seon.fn` rows; the
+   analyzer-tee sets `:seon.fn/test?` true when the symbol carries
+   `:test` meta. Agent-authored tests that target a specific symbol
+   (vs. relying on the `foo` ↔ `foo-test` sibling convention) use
+   `:seon.fn/test-targets [:vector :symbol]`. `:seon.test/*` is NOT
+   a discovery entity — it's only the run-result projection
+   (`:seon.test/last-passed-at`, `:seon.test/last-failed-at`, etc.).
+   A hand-maintained `seon.test.suite` ns still `(:require …)`s every
+   platform test ns so they load at boot.
+5. **`test/` is the canonical location.** Move
    `src/seon/db_test.cljs` and `src/seon/render_test.cljs` to
    `test/seon/db_test.cljs` and `test/seon/render_test.cljs`. `test/`
    is already on the shadow source path (`shadow-cljs.edn:42-43`).
-   Tests that need to be co-required by production builds stay in
-   `src/` (none today; preconditions_test is already in `test/`).
-4. **Async via Promises, not `(async done …)`.** Add an `^:async`-aware
+6. **Async via Promises, not `(async done …)`.** Add an `^:async`-aware
    driver path inside `run-vars` that, when a test fn returns a
    thenable, awaits it before emitting `:end-test-var`. cljs.test's
    `(async done …)` form keeps working (it's just a callback that
    resolves a Promise we wait on). `defspec` from test.check needs a
    small wrapper that wraps the property runner in a thenable.
-5. **One CLI shim, one REPL fn.** `bin/seon test pod` (cold-start
+7. **One CLI shim, one REPL fn.** `bin/seon test pod` (cold-start
    wrapper) and `(seon.test/run)` (REPL helper, JVM nREPL `:7888`-via-MCP
    or shadow nREPL `:7889`) both call `seon.test.runner/run-all!`. The
    human pattern mirrors `(user/run-tests 'ns)` on the JVM side; output
@@ -166,35 +203,50 @@ the analyzer at pod boot. (Pure `(:require …)`; no perf cost — same
 trick used in `shadow-cljs.edn:226-234` to pre-load `cljs.test`,
 `malli.core`, etc.)
 
-**Agent-defined tests: A2 — `:seon.test/test` entity.**
+**Agent-defined tests: A2 — same `:seon.fn` shape, `:seon.fn/test?` flag.**
 
-When an agent's eval-batch redefines a `defn` with a `:test` form (or a
-sibling `foo-test`), the analyzer-tee path (already in
-`seon.eval/build-tee-entities` — see `src/seon/eval.cljs:648`) emits
-a `:seon.test/test` entity:
-
-```clojure
-(schema/register! :seon.test/test [:map
-                                   [:seon.test/sym :string]    ; FQN as string (identity)
-                                   [:seon.test/source :string] ; the (deftest …) form's text
-                                   [:seon.test/defined-at :inst]])
-
-(schema/register! :seon.test/sym [:string {:seon.db/identity true}])
-```
-
-Discovery for `run-all!`:
+Agent-defined tests are not a separate entity kind. When an agent's
+eval-batch lands a `(deftest foo-test …)`, the analyzer-tee path
+(already in `seon.eval/build-tee-entities` — see
+`src/seon/eval.cljs:648`) emits a normal `:seon.fn` row with
+`:seon.fn/test? true`. Optional `:seon.fn/test-targets` lets the
+agent name which production symbols the test exercises (overriding
+the convention-driven `foo` ↔ `foo-test` sibling resolution):
 
 ```clojure
-(into (platform-syms) (map symbol) (db/query
-  {::db/query '[:find [?sym ...] :where [_ :seon.test/sym ?sym]]}))
+(schema/register! :seon.fn/test?         :boolean)
+(schema/register! :seon.fn/test-targets  [:vector :symbol])
 ```
 
-Same `resolve-test-fn` dispatch as platform tests — agent tests live
-on globalThis as soon as their `(deftest …)` eval lands. No second
-mechanism.
+`:seon.fn/source` already holds the form text. `:seon.fn/created-at`
+already exists. No new entity, no parallel registry.
+
+Discovery for `run-all!` queries one shape:
+
+```clojure
+(into [] (map symbol)
+  (db/query {::db/query '[:find [?sym ...]
+                          :where
+                          [?e :seon.fn/sym ?sym]
+                          [?e :seon.fn/test? true]]}))
+```
+
+Platform tests (loaded by `seon.test.suite` requires) also land as
+`:seon.fn` rows with `:seon.fn/test? true` once their containing ns
+is analyzed — single source of truth.
+
+**`:seon.test/*` is the projection.** The only `:seon.test/*` attrs
+that exist are run-result rows written by `record-run!`:
+`:seon.test/sym`, `:seon.test/last-passed-at`,
+`:seon.test/last-failed-at`, `:seon.test/last-failure-summary`,
+`:seon.test/last-run-id`, `:seon.test/trigger`. No
+`:seon.test/source`, no `:seon.test/test`, no
+`:seon.test/defined-at`, no `:seon.test/targets`.
 
 **Rejected:** build-time codegen of the discovery ns (adds rebuild
-latency; doesn't help agent-defined tests anyway).
+latency; doesn't help agent-defined tests anyway). Also rejected:
+a parallel `:seon.test/test` entity kind — `:seon.fn` already
+carries everything needed.
 
 ### B. Test file location
 
@@ -208,11 +260,12 @@ is already on shadow's `:source-paths` (`shadow-cljs.edn:42-43`), and
 the entries comment block (`shadow-cljs.edn:21-28`) explicitly
 documents this layout.
 
-**Agent-defined tests have no file.** They live as `:seon.test/test`
-entities in the DB; their source string in `:seon.test/source`. The
-agent's eval re-defines them, so on pod restart they re-emerge by
-replaying the program-graph entities — same mechanism that restores
-`:seon.fn` defs.
+**Agent-defined tests have no file.** They live as `:seon.fn` rows
+with `:seon.fn/test? true`; their source text lives in
+`:seon.fn/source`, the same field every other agent-defined fn uses.
+On pod restart they re-emerge by replaying the program-graph entities
+— literally the same mechanism that restores any `:seon.fn` def. No
+test-specific code path.
 
 **Rejected:** dual-location (some tests in `src/`, some in `test/`).
 The split is muddy and the "don't be a dumbass" rule applies. Pick
@@ -385,13 +438,10 @@ multi-ns runs).
 
 (schema/register! ::record? :boolean)
 
-;; ::run-result extended with ::run-id when recorded
-(schema/register! ::run-result
-  [:map
-   [::events  [:vector ::test-event]]
-   [::summary ::summary]
-   [::run-id  {:optional true} ::run-id]
-   [::recorded-syms {:optional true} [:vector :string]]])
+;; ::run-result — CANONICAL DEFINITION LIVES IN §5. This section just
+;; references it. The shape includes ::run-id, ::selected-vars,
+;; ::recorded?, ::recorded-syms (the union of what older drafts
+;; previously defined here and in §4.H).
 ```
 
 The five entrypoints:
@@ -455,10 +505,15 @@ add a layer.
   ...)
 
 (defn vars-currently-failing []
-  ;; Datalog: :find ?sym :where [?e :seon.test/sym ?sym]
-  ;;                          [?e :seon.test/last-failed-at ?f]
-  ;;                          [(missing? $ ?e :seon.test/last-passed-at)]
-  ;; OR last-failed-at > last-passed-at
+  ;; Single query: join the run-result projection against the unified
+  ;; :seon.fn registry so de-tested syms drop out (see §4.O).
+  ;; :find ?sym :where
+  ;;   [?fn :seon.fn/sym ?sym]
+  ;;   [?fn :seon.fn/test? true]              ; join-filter — GC built-in
+  ;;   [?r  :seon.test/sym ?sym]
+  ;;   [?r  :seon.test/last-failed-at ?f]
+  ;;   (or [(missing? $ ?r :seon.test/last-passed-at)]
+  ;;       [(and [?r :seon.test/last-passed-at ?p] [(< ?p ?f)])])
   ...)
 ```
 
@@ -492,22 +547,50 @@ once Phase 3 lands):
 Wait for the reply, print `seon.test.render/cli-summary` of the result,
 exit 0/1 on `(zero? (+ fail error))`.
 
-Pseudo:
+**Concrete impl: Babashka.** `bb` is the lightest, most idiomatic
+option — one-file script, ~50ms startup, `babashka.nrepl-client`
+ships built in. Rejected alternatives: Node `nrepl-client` npm
+package (adds a JS dep tree to a Clojure pipeline); `clojure -X`
+(multi-second JVM startup, completely wrong for a CLI shim).
+
+`bin/seon-test-pod` (new, called by `bin/seon test pod`):
+
+```clojure
+#!/usr/bin/env bb
+;; Run CLJS tests via the shadow nREPL on :7889. Argv: optional ns sym.
+(require '[babashka.nrepl-client :as nrepl]
+         '[clojure.edn :as edn])
+
+(let [ns-arg  (first *command-line-args*)
+      req     (if ns-arg
+                (format "(seon.test.runner/run! {:seon.test.runner/ns '%s :seon.test.runner/record? true})" ns-arg)
+                "(seon.test.runner/run! {:seon.test.runner/all? true :seon.test.runner/record? true})")
+      conn    (nrepl/client {:host "127.0.0.1" :port 7889})
+      reply   (nrepl/eval conn req)
+      result  (edn/read-string (:value reply))
+      {:keys [pass fail error]} (:seon.test.runner/summary result)]
+  (println (format "%d pass, %d fail, %d error" pass fail error))
+  (when (seq (:seon.test.runner/events result))
+    ;; render fail/error events via seon.test.render on the pod side, eventually
+    (doseq [ev (filter #(#{:fail :error} (:type %)) (:seon.test.runner/events result))]
+      (println " " (:sym ev) "—" (or (:message ev) (:actual ev)))))
+  (System/exit (if (zero? (+ fail error)) 0 1)))
+```
+
+Wire in `bin/seon` after the `process_command` case statement:
 
 ```bash
-# in bin/seon, after the process_command case:
 "test")
   case "$2" in
-    pod)
-      shift 2
-      exec node -e "..." # pipes EDN over nREPL
-      ;;
+    pod) shift 2; exec bin/seon-test-pod "$@" ;;
+    *)   echo "usage: bin/seon test pod [ns]" >&2; exit 2 ;;
   esac
   ;;
 ```
 
-(Implementation detail. The shape: same as `bin/test` but talks to
-shadow nREPL.)
+The pod must already be running (`bin/seon start pod`) — the shim
+fails with a clear error if the nREPL connection refuses, rather
+than auto-starting (see §8 decision).
 
 ### G. Auto-trigger from eval-batch (D4 of the spec)
 
@@ -525,26 +608,39 @@ counterpart, fire the test.
    :seon.handler/fn    autorun-on-fn-redef})
 
 (defn ^:async autorun-on-fn-redef
-  "When a :seon.fn entity gets a new :source, look up
-   :seon.test/test entities targeting it (by name OR by `<sym>-test`
-   sibling) and queue a run.
+  "When a :seon.fn entity gets a new :source, look up which tests
+   exercise it — either by sibling-name convention (`foo-test`) or
+   by `:seon.fn/test-targets` containing the redefined sym — and
+   queue a run.
 
    Returns {:tx [] :effects [{:effect/type :run-tests
                               :seon.test/vars [<syms>]}]}."
   [{:seon.db/keys [tx-report db]}]
-  (let [redefined-fns (->> (:tx-data tx-report)
-                           (filter #(= :seon.fn/source (:a %)))
-                           (map :e)
-                           distinct)
-        sibling-syms  (for [eid redefined-fns
-                            :let [fn-sym (db/pull {::db/ref eid
-                                                   ::db/pull-pattern [:seon.fn/sym]})]]
-                        (symbol (str (:seon.fn/sym fn-sym) "-test")))
-        existing      (filter test-sym-exists? sibling-syms)]
-    (when (seq existing)
+  (let [redefined-syms (->> (:tx-data tx-report)
+                            (filter #(= :seon.fn/source (:a %)))
+                            (map :e) distinct
+                            (map #(:seon.fn/sym (db/pull {::db/ref %
+                                                          ::db/pull-pattern [:seon.fn/sym]}))))
+        sibling-syms   (map #(symbol (str % "-test")) redefined-syms)
+        ;; Both sibling and target queries hit the same :seon.fn shape.
+        existing       (db/q {::db/query '[:find [?sym ...]
+                                           :in $ [?candidate ...]
+                                           :where
+                                           [?e :seon.fn/sym ?sym]
+                                           [?e :seon.fn/test? true]
+                                           [(= ?sym ?candidate)]]
+                              ::db/args [sibling-syms]})
+        targeted       (db/q {::db/query '[:find [?sym ...]
+                                           :in $ [?changed ...]
+                                           :where
+                                           [?e :seon.fn/test? true]
+                                           [?e :seon.fn/test-targets ?changed]
+                                           [?e :seon.fn/sym ?sym]]
+                              ::db/args [redefined-syms]})]
+    (when-let [vs (seq (distinct (concat existing targeted)))]
       {:tx []
        :effects [{:effect/type :run-tests
-                  :seon.test/vars (vec existing)}]})))
+                  :seon.test/vars (vec vs)}]})))
 ```
 
 The `:run-tests` effect interpreter is one line:
@@ -558,8 +654,9 @@ The `:run-tests` effect interpreter is one line:
 
 - Convention: `foo` ↔ `foo-test` in same ns. (CLJS prevalent pattern,
   matches `src/seon/db_test.cljs` shape.)
-- Override: a `:seon.test/test` entity may name its targets via a
-  `:seon.test/targets [:vector :symbol]` field (agent-authored tests).
+- Override: a `:seon.fn` row with `:seon.fn/test? true` may name its
+  targets explicitly via `:seon.fn/test-targets [:vector :symbol]`
+  (agent-authored tests that don't follow the sibling convention).
 
 When tests pass, `:seon.test/last-passed-at` updates. When tests fail,
 `:seon.test/last-failed-at` and `:seon.test/last-failure-summary` land.
@@ -592,14 +689,17 @@ no notification, no acknowledgement. **Reactive context principle.**
    [:fn {:error/message "exactly one selector key"}
     #(= 1 (count (keep % [::vars ::ns ::nses ::all? ::failed-only? ::tag])))]])
 
-;; --- outputs ---  (extends existing run-result)
+;; --- outputs ---  CANONICAL — single source of truth for ::run-result.
+;; §4.E references this; the existing inline draft in §4.E is gone.
 (schema/register! ::run-result
   [:map
    [::events         [:vector ::test-event]]
    [::summary        ::summary]
    [::run-id         {:optional true} ::run-id]
-   [::selected-vars  {:optional true} ::vars]    ; what the selector resolved to
-   [::recorded?      {:optional true} :boolean]])
+   [::selected-vars  {:optional true} ::vars]            ; what the selector resolved to
+   [::recorded?      {:optional true} :boolean]          ; did record-run! land?
+   [::recorded-syms  {:optional true} [:vector :string]] ; which syms got projections written
+   [::trigger        {:optional true} ::trigger]])       ; how the run was kicked off
 
 (schema/register! ::last-result-response
   [:maybe [:map [::run-id ::run-id] [::run-result ::run-result]]])
@@ -659,9 +759,484 @@ per the reactive-context principle.
   currently `dotimes`-and-`rand`-based hand-rolled properties, which
   works under self-host but loses test.check shrinking.
 
+### K. Malli instrumentation during tests
+
+The pod already installs Malli instrumentation at boot via
+`seon.instrument/install!` (`src/seon/client.cljs:656-666`). The
+machinery is `seon.instrument` (`.cljc`, both sides) — its docstring
+explains the self-host gotcha: `malli.instrument/collect!` is JVM-only
+because it reads `.cljc` files off disk, so the CLJS path uses a
+`collect!` macro that expands at compile time, populates an atom, and
+hands the registry to `mi/instrument!` at runtime. `malli.instrument`
+itself **is available** in self-hosted CLJS — it's bundled in the
+bootstrap entries (`src/seon/client.cljs:34`); only its file-reading
+`collect!` is gone, and we replace that with the macro.
+
+**Recommendation: instrumentation is ON during tests, period.** Three
+reasons:
+
+1. **Tests are the validation cycle.** If a test exercises a fn whose
+   `:malli/schema` is wrong, we WANT the instrumentation error to
+   fire there, not in production. The error envelope already
+   distinguishes input/output/arity failures
+   (`src/seon/error/instrument.cljc`), and the test runner already
+   captures thrown errors into `::run-result` events — the
+   error-envelope shape becomes the test failure.
+2. **Per-Phase-5 reactive loop, the test IS the contract check.**
+   When the agent redefines `foo` and `foo-test` fires, the test
+   body calls `(foo …)` and instrumentation validates the new
+   shape against the registered `:malli/schema`. If the schema
+   itself was wrong, the test fails with a structural error rather
+   than an obscure NPE downstream.
+3. **CLJ side does the same thing.** `:seon.dev/instrumentation` is
+   an Integrant component that survives `(user/reset)`; CLAUDE.md's
+   "Function Instrumentation" section explicitly says "there is no
+   off mode." CLJS pod should match.
+
+**Gap (acceptable risk):** the bootstrap `collect!` macro fires at
+compile time over source paths under `src/`. Agent-defined fns that
+land via `eval-batch!` after boot are NOT in that registry —
+`malli.instrument/instrument!` only wraps what `collect!` saw. For
+agent-defined fns to be instrumented, `seon.eval/eval-batch!` (or
+the analyzer-tee path right after it) must call
+`(mi/-register! sym schema)` + `(mi/instrument! {:filters …})`
+narrowed to that one sym. **Action:** add a one-line hook in
+`build-tee-entities` (`src/seon/eval.cljs:648`) — for each newly-
+defined fn with `:malli/schema` meta, register + instrument that
+sym. Idempotent (`mi/instrument!` replaces the wrapper). This is the
+real Phase 5 prerequisite for "agent-defined tests catch
+agent-defined fn schema drift."
+
+**Per-test override.** Some tests genuinely need to call a fn with
+bad inputs to assert the error envelope (e.g.
+`test/seon/error/instrument_test.cljc` if it existed). Pattern:
+
+```clojure
+(deftest rejects-bad-input
+  (fixtures/with-instrumentation-disabled-for ['seon.foo/bar]
+    (fn []
+      (is (thrown-with-msg? :seon.error.kind/malli-instrument-input
+            #"::name must be string"
+            (foo/bar {::name 42}))))))
+```
+
+Implementation: temporarily `mi/unstrument!` for those syms, call
+thunk, re-instrument in `finally`. Wraps the existing malli API; no
+new mechanism.
+
+**Rejected:** running tests with instrumentation OFF and a separate
+"instrumented run" mode. That fragments the failure surface — the
+test that passes uninstrumented but fails instrumented is a real
+bug, and seeing it only in a special mode means agents skip the
+mode.
+
+### L. Reactive testing — the headline mechanism
+
+The user's framing: **`run-all!` is what you do once, before declaring
+victory. Everything else is reactive.** When code changes, tests that
+exercise that code re-run automatically. Same loop for the human in
+the editor and the agent in eval-batch.
+
+Prior art surveyed:
+
+- **kaocha-watch** (`reference-code/kaocha/src/kaocha/watch.clj`) —
+  Hawk/beholder filesystem watcher + `tools.namespace.tracker` for
+  ns-level dep tracking. Re-runs every test in a changed ns. Coarse
+  (ns-level, not fn-level). We can do better.
+- **shadow-cljs `:autorun`** — same coarse model, ties to shadow's
+  rebuild pipeline. Doesn't help agent-defined tests (they never go
+  through shadow).
+- **lein-test-refresh** — same model again. Watcher + ns-level
+  affected set.
+- **Jest `--watch`** — uses the bundler's module-dep graph. Closer to
+  what we want, but JS-only and not introspectable from Clojure.
+
+**The Seon-native answer is better than any of them, because we
+already own the program graph.** The analyzer
+(`src/seon/analyzer_info.cljs`) writes `:seon.fn/source` per fn into
+the DB; every fn redefinition produces a tx-data datom on
+`:seon.fn/source`. The tx-listener (the same one that drives the
+reactive context sections, per CLAUDE.md) sees those datoms in real
+time. No filesystem watcher, no separate tracker — the DB tx-log IS
+the change stream.
+
+**The current edge model:** the analyzer indexes `:requires` /
+`:uses` at the namespace level (`analyzer_info.cljs:128-141`
+`ns-deps`). It does NOT yet write per-fn call edges (`:seon.fn/calls`
+or `:seon.fn/callees`). Worth noting honestly:
+
+- The JVM `seon.graph.ingest` namespace does extract per-fn call
+  edges (Kondo-driven; see `src/seon/graph/ingest.clj`). The CLJS
+  side does not yet have this.
+- Until CLJS gets a per-fn call graph, the affected-tests query
+  degrades to **ns-level granularity**: redefining any fn in
+  `seon.foo` triggers every test in `seon.foo-test` (and any test
+  ns whose `:requires` includes `seon.foo`). That's already
+  significantly better than kaocha-watch because it's tx-triggered
+  not file-saved-triggered, and because it includes agent-defined
+  tests living in the DB.
+
+**The affected-tests query (ns-level, Phase 2):**
+
+> **PENDING — see `datahike-query-capabilities-2026-05-25.md`.** The
+> `transitive-dependents` call below depends on whether Datahike
+> supports recursive Datalog rules natively. A parallel research
+> agent is currently auditing this. Two possible shapes:
+>
+> 1. **Native recursive rule** (if supported) — one query expresses
+>    "every ns that transitively requires X" via a rule clause.
+> 2. **Iterated joins in CLJS** (fallback) — walk `:seon.ns/requires`
+>    in a loop, accumulating a fixed-point set, calling `db/q` each
+>    iteration.
+>
+> The sketch below is structural — the `(transitive-dependents …)`
+> call is a TODO until the audit lands. **Do NOT implement Phase 2
+> step 10 until the audit returns** — the rule shape changes the
+> ns and the call signature.
+
+```clojure
+(defn affected-test-syms-for-tx
+  "Given a tx-report from the program-graph, return the set of
+   test syms whose ns directly or transitively requires any ns
+   whose fns were redefined.
+
+   Unified discovery: every test is a :seon.fn row with
+   :seon.fn/test? true. Sibling convention (`foo-test`) plus
+   explicit :seon.fn/test-targets cover agent-authored tests."
+  [{:keys [tx-data db]}]
+  (let [changed-fn-eids  (->> tx-data
+                              (filter #(= :seon.fn/source (:a %)))
+                              (map :e) distinct)
+        changed-ns-syms  (db/q {::db/query
+                                '[:find [?ns-name ...]
+                                  :in $ [?fn-eid ...]
+                                  :where
+                                  [?fn-eid :seon.fn/ns ?ns]
+                                  [?ns :seon.ns/name ?ns-name]]
+                                ::db/args [changed-fn-eids]})
+        changed-syms     (db/q {::db/query
+                                '[:find [?sym ...]
+                                  :in $ [?fn-eid ...]
+                                  :where [?fn-eid :seon.fn/sym ?sym]]
+                                ::db/args [changed-fn-eids]})
+        ;; PENDING: shape depends on datahike-query-capabilities audit.
+        dependent-nses   (transitive-dependents db changed-ns-syms)
+        all-affected-ns  (into (set dependent-nses) changed-ns-syms)]
+    (distinct
+      (concat
+        ;; tests in affected nses — ONE query, unified :seon.fn shape
+        (db/q {::db/query '[:find [?sym ...]
+                            :in $ [?ns-name ...]
+                            :where
+                            [?fn :seon.fn/ns ?ns]
+                            [?ns :seon.ns/name ?ns-name]
+                            [?fn :seon.fn/sym ?sym]
+                            [?fn :seon.fn/test? true]]
+               ::db/args [all-affected-ns]})
+        ;; tests with explicit targets pointing at any changed sym —
+        ;; still the same :seon.fn shape, just a different filter.
+        (db/q {::db/query '[:find [?sym ...]
+                            :in $ [?changed ...]
+                            :where
+                            [?fn :seon.fn/test? true]
+                            [?fn :seon.fn/test-targets ?changed]
+                            [?fn :seon.fn/sym ?sym]]
+               ::db/args [changed-syms]})))))
+```
+
+Two new attrs needed for this to work (both registered alongside
+existing `:seon.fn/*` attrs in `src/seon/agent.cljs:251-261`):
+
+- `:seon.fn/test?` (boolean) — set by the analyzer-tee when a
+  `defn` carries `:test` meta or is a `deftest` expansion.
+- `:seon.fn/test-targets` ([:vector :symbol]) — agent-authored
+  explicit target overrides; rarely populated in practice
+  (most tests rely on the sibling convention).
+- `:seon.ns/requires` (vector of ref) — projection of the
+  analyzer's `(ns-deps compile-state ns-sym)` (already implemented;
+  just persist on each `:seon.fn` write or on first
+  `eval-batch!`-derived ns-entity write).
+
+**The on-tx handler (the spine):**
+
+```clojure
+;; src/seon/runtime/test_autorun.cljs (Phase 5 — promoted)
+
+(handler/register!
+  {:seon.handler/name  ::affected-tests
+   :seon.handler/agent nil                                 ; substrate handler
+   :seon.handler/match {:seon.handler.match/attr :seon.fn/source}
+   :seon.handler/fn    `affected-tests-handler})
+
+(defn ^:async affected-tests-handler
+  "Reactive entrypoint. Runs in the tx-listener; computes affected
+   tests; returns an effects map. The dispatcher already runs effects
+   on the agent loop; we don't need our own scheduler."
+  [{:seon.db/keys [tx-report] :as ctx}]
+  (let [affected (affected-test-syms-for-tx tx-report)]
+    (if (seq affected)
+      {:effects [{:effect/type :run-tests
+                  :seon.test/vars (vec affected)
+                  :seon.test/trigger ::on-fn-redef}]}
+      {})))
+
+(defmethod run-effect! :run-tests
+  [{:seon.test/keys [vars trigger]}]
+  ;; Fire-and-forget; the run records its own results into the DB,
+  ;; which (recursive principle) triggers any further reactive section.
+  (await (runner/run! {::runner/vars vars
+                       ::runner/record? true
+                       ::runner/trigger trigger})))
+```
+
+**Why this is reactive-context-correct** (CLAUDE.md
+"Reactive context — derived by default"):
+
+- Nothing is stored. The handler doesn't write a "tests to run"
+  queue. It computes the affected set from the current tx and
+  returns an effect.
+- The output (`:seon.test/last-failed-at` projection) is itself a
+  derived-section input — the warnings tile queries
+  `[?e :seon.test/last-failed-at ?f] [(> ?f cutoff)]` and surfaces
+  the failure. When the agent fixes the fn, the next tx re-fires
+  the handler, the test re-runs, `:seon.test/last-passed-at`
+  updates and is now `> last-failed-at`, and the section returns
+  empty. **Self-healing.**
+- One mechanism, many uses: editor-save-triggered reload also goes
+  through the analyzer-tee path (the dev hook reloads then
+  re-analyzes), so the same handler fires for the human user. No
+  editor plugin.
+
+**Edge cases — known limitations:**
+
+| Case | Behaviour | Mitigation |
+|---|---|---|
+| Test defined BEFORE the fn it tests | The `:seon.test/targets` resolves to no eid yet; handler skips. When the fn lands later, its `:seon.fn/source` tx fires the handler, which now finds the test → runs it. | Lazy resolution via sym, not eid. |
+| Test itself is broken (compile error) | `eval-batch!` already captures the error in the error envelope; no `:seon.fn/source` lands; nothing triggers. Agent sees the eval error in their context. | None needed — fails closed. |
+| Test redefinition (agent changes the test) | The new `:seon.fn/source` for the test sym IS a tx on `:seon.fn/source` — handler fires, finds the test in its OWN affected set, runs it once. | Trivial; intended. |
+| Multimethod / protocol dispatch the analyzer can't see | Ns-level granularity already covers this (any change in the ns runs all tests in dependents). When per-fn edges arrive, this is the one place that still NEEDS the ns-level fallback. | Document; keep ns-level as the floor. |
+| Cycle: test fixes fn, fn-tx triggers test, test passes, no further fires | Correct termination — `:seon.fn/source` tx doesn't fire if value unchanged. | None. |
+| Storm: agent eval-batch redefines 50 fns at once | Handler runs once per tx-listener fire (one tx-report), computes one affected set, runs the union. O(1) handler fires per batch. | Already correct — tx-listener is per-tx, not per-datom. |
+| Test runs forever / infinite loop | Per-test timeout (mirror the JVM `seon.eval/budget` pattern) wraps each `(fn)` call in `run-vars`. Default 5s; override via `::run-request` `::timeout-ms`. | Phase 5 ships with default timeout. |
+| Test transacts to shared `*conn*` and pollutes other tests | `with-test-conn` (§4.C) gives each test a fresh in-memory conn. | Default isolation. |
+
+### M. Shared interface — revised
+
+The `run!` signature gains nothing; the `::trigger` key is an
+informational annotation, not a mode switch. **The reactive daemon
+is NOT a flag on `run!`; it's a separate handler that calls
+`run!`.** Justification: keeping `run!` pure (request → result) means
+the same fn serves the manual REPL caller, the CLI shim, the
+auto-trigger handler, AND any future caller (e.g. a remote-trigger
+schedule). The reactive loop is a *consumer* of `run!`, not a mode
+of it.
+
+Added field on `::run-request`:
+
+```clojure
+(schema/register! ::trigger
+  [:enum ::manual ::on-fn-redef ::pre-victory ::cli])
+
+(schema/register! ::run-request
+  [:and
+   [:map
+    [::vars         {:optional true} ::vars]
+    [::ns           {:optional true} ::ns]
+    [::nses         {:optional true} ::nses]
+    [::all?         {:optional true} ::all?]
+    [::failed-only? {:optional true} ::failed-only?]
+    [::tag          {:optional true} ::tag]
+    [::record?      {:optional true} ::record?]
+    [::trigger      {:optional true} ::trigger]          ; ← new
+    [::timeout-ms   {:optional true} :int]               ; ← new
+    [::conn         {:optional true} :seon.db/ref]]
+   ...])
+```
+
+`::trigger` lands on the `:seon.test/last-*` projection so the
+warnings tile can distinguish "I asked for this and it failed"
+from "the reactive loop noticed it failed."
+
+### N. Pre-Phase-1 probes — verify before building
+
+Four assumptions the plan rests on. Each MUST pass against the
+running pod before Phase 1 work starts. Probes run via shadow nREPL
+:7889 (`mcp__seon_cljs__eval`); each lists the exact form, the
+expected shape of a passing result, and the fallback if it fails.
+
+**Probe 1 — `:test` meta survives `deftest` expansion under bootstrap.**
+
+```clojure
+(do
+  (require '[cljs.test])
+  (cljs.test/deftest probe-1-test (cljs.test/is true))
+  (-> (cljs.analyzer.api/ns-interns 'cljs.user)
+      (get 'probe-1-test)
+      :meta
+      :test))
+```
+
+- **Expected:** truthy (the gensym fn the `deftest` macro stores in
+  `:test` meta).
+- **If false:** the unified `:seon.fn/test?` flag in §4.A cannot
+  be derived from the analyzer alone. Fallback: have the
+  analyzer-tee inspect the raw form pre-expansion to detect
+  `deftest` head, OR walk `cljs.test/get-current-env`'s registered
+  test list. Pick fallback before Phase 1.
+
+**Probe 2 — `with-redefs` works under self-host.**
+
+```clojure
+(do
+  (defn probe-2 [] :original)
+  (let [seen (atom nil)]
+    (with-redefs [probe-2 (fn [] :redef)]
+      (reset! seen (probe-2)))
+    {:during @seen :after (probe-2)}))
+```
+
+- **Expected:** `{:during :redef, :after :original}`.
+- **If `:during` is `:original`:** self-host `with-redefs` doesn't
+  swap the globalThis fn binding. Fallback: dynvar-based stubbing
+  helper in `seon.test.fixtures` that wraps targeted fns in
+  `^:dynamic` shims at test time. Document in §4.C.
+
+**Probe 3 — `use-fixtures :each` ordering with `(async done …)`.**
+
+```clojure
+(do
+  (require '[cljs.test :as t])
+  (def order (atom []))
+  (t/use-fixtures :each
+    {:before #(swap! order conj :before)
+     :after  #(swap! order conj :after)})
+  (t/deftest probe-3-test
+    (t/async done
+      (js/setTimeout
+        (fn [] (swap! order conj :body) (done))
+        10)))
+  (t/run-tests)
+  ;; after run completes:
+  @order)
+```
+
+- **Expected:** `[:before :body :after]` (in that order).
+- **If `:after` lands before `:body`:** cljs.test isn't awaiting the
+  async marker before firing `:each` teardown. Fallback: bypass
+  `:each` for async tests and put setup/teardown inside the
+  Promise chain — document the constraint in §4.C.
+
+**Probe 4 — `mi/instrument!` on a sym defined AFTER bootstrap.**
+
+```clojure
+(do
+  (require '[malli.instrument :as mi]
+           '[malli.core :as m]
+           '[seon.schema :as schema])
+  (schema/register! ::probe-4-in [:map [::probe-4/n :int]])
+  (schema/register! ::probe-4-out [:map [::probe-4/n2 :int]])
+  ;; Define AFTER boot — this is the path agent-eval'd fns take.
+  (defn probe-4
+    {:malli/schema [:=> [:cat ::probe-4-in] ::probe-4-out]}
+    [{::probe-4/keys [n]}] {::probe-4/n2 (* 2 n)})
+  (mi/-register! `probe-4 (m/schema [:=> [:cat ::probe-4-in] ::probe-4-out]))
+  (mi/instrument! {:filters [(mi/-filter-var #(= % #'probe-4))]})
+  ;; Now call it WRONG and check we get an instrumentation error:
+  (try (probe-4 {::probe-4/n "not-an-int"})
+       :no-throw
+       (catch :default e (-> e ex-data :type))))
+```
+
+- **Expected:** a Malli instrumentation error type (the exact
+  keyword depends on `seon.error.instrument` envelope shape —
+  expect something like `:malli/explain-input` or our
+  `:seon.error.kind/malli-instrument-input`).
+- **If `:no-throw`:** instrument! doesn't wrap fns defined post-
+  bootstrap; the §4.K Phase 2 hook is unreachable. Fallback: hand-
+  wrap the fn at register time with `m/-instrument` directly,
+  storing the wrapper in globalThis under the same munged path.
+  This is significantly more invasive — confirm before Phase 2.
+
+If any probe fails, update the plan BEFORE writing code; the
+fallback shape may ripple through multiple phases.
+
+### O. Test lifecycle / garbage collection
+
+When an agent redefines `foo-test` such that it stops being a test
+(e.g. removes `deftest` and replaces with a plain `defn`, or removes
+the `:test` meta), the row at `:seon.test/sym = "…/foo-test"` with
+`:seon.test/last-failed-at` would otherwise stay in the DB forever,
+keeping the warnings tile noisy.
+
+**Recommended mechanism: derive-not-store via join-filter.** The
+warnings query (and `vars-currently-failing` in §4.E) joins the
+`:seon.test/*` projection against the unified `:seon.fn/test? true`
+registry. If a sym's `:seon.fn/test?` becomes false (or absent),
+the join drops the row — the projection still sits in the DB, but
+it's invisible to every query that matters.
+
+```clojure
+;; warnings tile query, post-GC:
+'[:find ?sym ?summary
+  :where
+  [?fn :seon.fn/sym ?sym]
+  [?fn :seon.fn/test? true]              ; join-filter — silently GCs
+  [?r  :seon.test/sym ?sym]
+  [?r  :seon.test/last-failed-at ?f]
+  [?r  :seon.test/last-failure-summary ?summary]
+  (or [(missing? $ ?r :seon.test/last-passed-at)]
+      [(and [?r :seon.test/last-passed-at ?p] [(< ?p ?f)])])]
+```
+
+This matches the reactive-context principle exactly — no
+acknowledgement, no retraction tx, no notification queue. When
+the underlying truth (`:seon.fn/test? true`) goes away, the
+derived view vanishes.
+
+**Rejected:** analyzer-tee emits explicit retractions on
+`:seon.test/*` when it sees `:seon.fn/test?` transition true → false.
+Adds write amplification and a second mechanism for the same goal;
+the join-filter is free.
+
+A periodic compaction pass MAY later retract orphan
+`:seon.test/*` rows for disk-space reasons — but that's a Phase 8+
+concern, not a correctness issue.
+
 ## 5. Shared interface spec
 
-See §4.H. The five entrypoints, all in `src/seon/test/runner.cljs`:
+**Canonical schema lives here** (§4.E and §4.H reference back to this):
+
+```clojure
+;; ::run-request — selector + options
+(schema/register! ::run-request
+  [:and
+   [:map
+    [::vars         {:optional true} ::vars]
+    [::ns           {:optional true} ::ns]
+    [::nses         {:optional true} ::nses]
+    [::all?         {:optional true} ::all?]
+    [::failed-only? {:optional true} ::failed-only?]
+    [::tag          {:optional true} ::tag]
+    [::record?      {:optional true} ::record?]
+    [::trigger      {:optional true} ::trigger]
+    [::timeout-ms   {:optional true} :int]
+    [::conn         {:optional true} :seon.db/ref]]
+   [:fn {:error/message "exactly one selector key required"}
+    #(= 1 (count (keep % [::vars ::ns ::nses ::all? ::failed-only? ::tag])))]])
+
+;; ::run-result — every entrypoint returns this shape.
+(schema/register! ::run-result
+  [:map
+   [::events         [:vector ::test-event]]
+   [::summary        ::summary]
+   [::run-id         {:optional true} ::run-id]
+   [::selected-vars  {:optional true} ::vars]
+   [::recorded?      {:optional true} :boolean]
+   [::recorded-syms  {:optional true} [:vector :string]]
+   [::trigger        {:optional true} ::trigger]])
+```
+
+The five entrypoints, all in `src/seon/test/runner.cljs`:
 
 | Fn | Signature | Notes |
 |---|---|---|
@@ -677,9 +1252,19 @@ Promise-aware driver.
 
 ## 6. Implementation phases
 
-Each phase ships standalone value.
+> **Revised 2026-05-25:** the original sequencing (REPL runner →
+> suite → fixtures → failed-only → auto-trigger → test.check → loop)
+> pushed the reactive loop to Phase 5 because the runner was deemed
+> the prerequisite. That's correct (the daemon literally calls
+> `run!`), but the gap between "ships standalone value" Phase 1 and
+> "the spine works end-to-end" Phase 5 is too wide given that the
+> spine is now the headline feature. **New sequencing: get the
+> reactive loop working for ONE test as early as possible (Phase 2),
+> then expand both selectors and discovery around it.** Phase 1
+> stays as a single-var runner because the daemon needs SOMETHING to
+> call.
 
-### Phase 1 — REPL ns runner (1-2 hr)
+### Phase 1 — Single-var runner + Promise-aware driver (1-2 hr)
 
 Smallest thing that makes humans productive:
 
@@ -695,55 +1280,284 @@ Smallest thing that makes humans productive:
    returns `::run-result` with all assertions captured; a follow-up
    `(seon.test.runner/last-result {})` reads it back.
 
-### Phase 2 — Suite + all-runner + CLI (half day)
+### Phase 2 — Reactive spine, end-to-end for ONE test (1 day)
 
-7. Add `seon.test.suite` ns with hand-maintained requires.
-8. Wire `seon.client/-main` to `(:require [seon.test.suite])`.
-9. Implement `all-test-syms` via `cljs.analyzer.api`.
-10. Implement `run-all!`.
-11. Add `bin/seon test pod` shim (nREPL client + EDN response).
-12. **Acceptance:** `bin/seon test pod` runs the whole suite cold-start,
-    exits 0/1 correctly, prints a readable summary.
+The whole point of the project. Ship this before run-all!, because
+this is the feature.
 
-### Phase 3 — Fixtures + render (half day)
+7. Add `:seon.fn/test?` and `:seon.fn/test-targets` schema attrs
+   (in `src/seon/agent.cljs:251+`).
+8. Extend the analyzer-tee path (`src/seon/eval.cljs:648`,
+   `build-tee-entities`) to set `:seon.fn/test?` true for any
+   `defn` whose name ends `-test` or whose meta carries `:test`.
+9. **Instrument agent-defined fns at write time.** Same
+   `build-tee-entities` pass: for each newly-defined fn whose meta
+   carries `:malli/schema`, call `(mi/-register! sym schema)` then
+   `(mi/instrument! {:filters [(mi/-filter-var #(= % sym))]})`.
+   This is the §4.K hook — load-bearing for the Phase 2 acceptance
+   test, because schema-drift detection only fires if the redefined
+   `foo` is actually wrapped. Idempotent (`mi/instrument!` replaces
+   the wrapper). **Pre-req:** Probe 4 in §4.N must pass; if it
+   doesn't, use the documented fallback before continuing.
+10. Add `:seon.ns/requires` attr + write it from `analyzer-info/ns-deps`
+    on each fn-defining eval-batch (or one shot on first sighting of
+    that ns).
+11. Implement `affected-test-syms-for-tx` (§4.L). Ns-level granularity
+    is fine for Phase 2.
+    **PENDING: `transitive-dependents` rule shape — see
+    `datahike-query-capabilities-2026-05-25.md`.** Do not start this
+    step until the audit lands.
+12. Add `src/seon/runtime/test_autorun.cljs` with the
+    `::affected-tests` handler. Wire `:run-tests` effect interpreter
+    to call `runner/run!` from Phase 1.
+13. **Acceptance:** in shadow nREPL,
+    `(seon.eval/eval-batch! {... :forms ["(defn foo [x] (* x 2))"
+                                          "(deftest foo-test (is (= 4 (foo 2))))"]})`
+    lands both, then redefining `foo` to `(* x 3)` causes
+    `:seon.test/last-failed-at` to become non-nil on `foo-test`
+    WITHOUT any explicit `run!` call. Verified by Datalog query.
+    Additional acceptance: redefining `foo`'s `:malli/schema` to be
+    inconsistent with the fn body produces an instrumentation-error
+    test failure (not a generic NPE), proving step 9 landed.
 
-13. Add `seon.test.fixtures/empty-db` + `with-test-conn`.
-14. Add `with-test-conn-async` macro.
-15. Add `seon.test.render/summary` + `tile-hiccup`.
-16. Refactor `db_test`'s `fresh-conn` to use the fixture.
-17. **Acceptance:** test bodies shrink; one canonical pattern in use
-    across `db_test`, `preconditions_test`, and any new tests.
+### Phase 3 — Suite + all-runner + CLI (half day)
 
-### Phase 4 — Failed-only + DB-backed `:seon.test/test` (1 day)
+The "before-victory" escape hatch.
 
-18. Implement `vars-currently-failing` via Datalog.
-19. Implement `run-failed!`.
-20. Add `:seon.test/test` entity schema (sym/source/defined-at/targets).
-21. Extend discovery to union platform-syms + DB-stored agent-syms.
-22. **Acceptance:** agent eval `(deftest some-agent-test …)` lands a
-    `:seon.test/test` row; `(run-all! {})` includes it.
+14. Add `seon.test.suite` ns with hand-maintained requires.
+15. Wire `seon.client/-main` to `(:require [seon.test.suite])`.
+16. Implement `all-test-syms` via the unified `:seon.fn/test? true`
+    Datalog query (§4.A).
+17. Implement `run-all!`.
+18. Add `bin/seon test pod` shim — Babashka script per §4.F.
+19. **Acceptance:** `bin/seon test pod` runs the whole suite
+    cold-start, exits 0/1 correctly, prints a readable summary.
 
-### Phase 5 — Auto-trigger handler (1 day)
+### Phase 4 — Fixtures + render (half day)
 
-23. Add `src/seon/runtime/test_autorun.cljs` handler.
-24. Wire `:run-tests` effect interpreter.
-25. **Acceptance:** agent redefines `foo`, `foo-test` exists, `:seon.test/last-{passed,failed}-at` updates without explicit `run!`.
+20. Add `seon.test.fixtures/empty-db` + `with-test-conn`.
+21. Add `with-test-conn-async` macro.
+22. Add `seon.test.render/summary` + `tile-hiccup` (warnings tile
+    reads `:seon.test/last-failed-at` joined against
+    `:seon.fn/test? true` per §4.O — surfaces reactive failures
+    in the agent's next render cycle, and silently GCs de-tested
+    syms).
+23. Refactor `db_test`'s `fresh-conn` to use the fixture.
+24. **Acceptance:** test bodies shrink; agent sees reactive test
+    failures in the warnings tile without polling; tests that lose
+    their `:seon.fn/test?` flag drop out of the warnings tile.
+
+### Phase 5 — Failed-only (½ day)
+
+> Folded down: the formerly-Phase-5 `:seon.test/test` entity work is
+> gone (unified into `:seon.fn` per §4.A). The agent-fn
+> instrumentation hook moved to Phase 2 step 9.
+
+25. Implement `vars-currently-failing` via the join-filter Datalog
+    query (§4.E, §4.O).
+26. Implement `run-failed!`.
+27. Extend the Phase-2 handler to also match `:seon.fn/source` tx
+    on rows where `:seon.fn/test? true` (so a redefined test
+    re-runs itself). This is already covered by the unified handler
+    — verify the match shape, no code change expected.
+28. **Acceptance:** `(run-failed! {})` runs only the syms with
+    `last-failed-at > last-passed-at`; redefining a failing test
+    re-triggers it via the existing handler.
 
 ### Phase 6 — test.check integration (½ day)
 
-26. Add `clojure.test.check` + `clojure.test.check.clojure-test` to
+29. Add `clojure.test.check` + `clojure.test.check.clojure-test` to
     `shadow-cljs.edn` `:entries` and `:macros`.
-27. Re-author `prop-*` tests in `db_test` to use `defspec`.
-28. **Acceptance:** `defspec` yields shrinking on failure.
+30. Re-author `prop-*` tests in `db_test` to use `defspec`.
+31. **Acceptance:** `defspec` yields shrinking on failure.
 
-### Phase 7 — Loop-strategy substrate (per loop-testing-strategy.md)
+### Phase 7 — Per-fn call graph + finer-grained affected set (1-2 days)
 
-29. Build `with-test-pod`, `transact-and-tick!`,
+The Phase 2 affected-set is ns-level. Tighten it.
+
+32. Extend `seon.analyzer-info` with `defs-with-callees` — walk each
+    var's `:fn-var`'s body (the analyzer keeps it as IR) and extract
+    invoked symbols. JVM has Kondo do this; CLJS we use the analyzer
+    directly.
+33. Persist `:seon.fn/callees` as a many-ref attr.
+34. Tighten `affected-test-syms-for-tx` to walk `:seon.fn/callees`
+    transitively rather than `:seon.ns/requires`.
+35. **Acceptance:** redefining `seon.foo/bar` runs only the tests in
+    `seon.foo-test` that transitively call `bar`, not every test in
+    the ns.
+
+### Phase 8 — Loop-strategy substrate (per loop-testing-strategy.md)
+
+36. Build `with-test-pod`, `transact-and-tick!`,
     `tick-to-fixpoint!` on top of the now-stable runner +
     fixtures.
-30. Layer 2-5 tests per the strategy doc.
+37. Layer 2-5 tests per the strategy doc.
 
-## 7. Open questions / decisions needed
+## 7. Agent walkthrough — reactive test failure surfacing
+
+A concrete trace, in the spirit of `loop-walkthrough-2026-05-25.md`,
+of the loop that the user specifically asked about: agent defines a
+fn + test, agent breaks the fn, agent sees the failure on the next
+render WITHOUT calling `run!`.
+
+**Initial state:** pod up, agent loop running, agent's recent-evals
+tile empty.
+
+### Step 1 — agent defines the fn and the test
+
+Agent eval-batch:
+
+```clojure
+(seon.eval/eval-batch!
+  {:seon.agent/id "a1"
+   :seon.eval/forms ["(defn foo [x] (* x 2))"
+                     "(deftest foo-test (is (= 4 (foo 2))))"]})
+```
+
+What happens inside the pod:
+
+1. `cljs.js/eval-str` evaluates both forms in order. `foo` lands on
+   globalThis at `seon.user.a1$foo`; `foo-test` at `seon.user.a1$foo_test`.
+2. `seon.eval/build-tee-entities` snapshots `defs-since` and produces
+   two tx-data maps (one per fn). Both transact in the same tx:
+
+   ```clojure
+   [{:seon.fn/sym "seon.user.a1/foo"
+     :seon.fn/ns         [:seon.ns/name :seon.user.a1]
+     :seon.fn/source     "(defn foo [x] (* x 2))"
+     :seon.fn/fn-var?    true
+     :seon.fn/test?      false
+     :seon.fn/arglists   "([x])"
+     :seon.fn/created-at #inst "2026-05-25T18:00:00Z"}
+    {:seon.fn/sym "seon.user.a1/foo-test"
+     :seon.fn/ns      [:seon.ns/name :seon.user.a1]
+     :seon.fn/source  "(deftest foo-test (is (= 4 (foo 2))))"
+     :seon.fn/fn-var? true
+     :seon.fn/test?   true                                      ; ← Phase 2 attr
+     :seon.fn/arglists "([])"
+     :seon.fn/created-at #inst "2026-05-25T18:00:00Z"}]
+   ```
+
+3. Datahike commits. tx-listener fires. The `::affected-tests`
+   handler matches (two datoms on `:seon.fn/source`) and computes
+   `affected-test-syms-for-tx`:
+   - `changed-fn-eids` = [<foo-eid>, <foo-test-eid>]
+   - `changed-ns-syms` = [:seon.user.a1]
+   - `dependent-nses` = [:seon.user.a1] (no other ns requires it)
+   - Affected tests in those nses = `['seon.user.a1/foo-test]`
+4. Handler returns `{:effects [{:effect/type :run-tests
+                                :seon.test/vars ['seon.user.a1/foo-test]
+                                :seon.test/trigger ::on-fn-redef}]}`.
+5. Effect interpreter calls
+   `(runner/run! {::vars ['seon.user.a1/foo-test] ::record? true ::trigger ::on-fn-redef})`.
+6. `foo-test` runs. `(foo 2)` returns 4. `is` records `:pass`.
+   `record-run!` writes:
+
+   ```clojure
+   [{:seon.test/sym "seon.user.a1/foo-test"
+     :seon.test/last-passed-at #inst "..."
+     :seon.test/last-run-id    "<id>"}]
+   ```
+
+7. The warnings-tile section function queries
+   `[?e :seon.test/sym ?s] [?e :seon.test/last-failed-at ?f] [?e :seon.test/last-passed-at ?p] [(> ?f ?p)]`
+   — returns empty. Tile renders nothing. No "you have a failing
+   test" warning.
+
+### Step 2 — agent redefines `foo` (breaks it)
+
+```clojure
+(seon.eval/eval-batch!
+  {:seon.agent/id "a1"
+   :seon.eval/forms ["(defn foo [x] (* x 3))"]})
+```
+
+1. `cljs.js/eval-str` replaces `seon.user.a1$foo` on globalThis. The
+   `foo-test` var on globalThis is unchanged — it still closes over
+   the var resolution, so it'll now see the new `foo`.
+2. `build-tee-entities` sees `foo`'s digest changed (new `:source`).
+   Transacts one datom: `:seon.fn/source` on the existing
+   `:seon.user.a1/foo` entity.
+3. tx-listener fires. Handler matches. `affected-test-syms-for-tx`:
+   - `changed-fn-eids` = [<foo-eid>]
+   - `changed-ns-syms` = [:seon.user.a1]
+   - Affected tests = `['seon.user.a1/foo-test]`
+4. Effect → `runner/run!` → `foo-test` runs. `(foo 2)` returns 6.
+   `is` records `:fail` with `expected=4 actual=6`.
+5. `record-run!` writes:
+
+   ```clojure
+   [{:seon.test/sym "seon.user.a1/foo-test"
+     :seon.test/last-failed-at #inst "..."
+     :seon.test/last-failure-summary
+       "FAIL seon.user.a1/foo-test  expected: 4  actual: 6"
+     :seon.test/last-run-id "<new-id>"
+     :seon.test/trigger ::on-fn-redef}]
+   ```
+
+   Crucially, `:seon.test/last-passed-at` is **not** updated; it
+   stays at its earlier value. So `last-failed-at > last-passed-at`.
+
+### Step 3 — agent's next render cycle
+
+The agent loop ticks (whatever woke it up — its own next prompt,
+or the kick handler observing the failure tx). `agent-view` runs.
+The warnings-tile section function:
+
+```clojure
+(defn render-failing-tests
+  {:malli/schema [:=> [:cat ::ctx] [:vector :seon.render/hiccup]]}
+  [{:seon.agent/keys [id]}]
+  (let [rows (db/q '[:find ?sym ?summary ?trigger
+                     :where
+                     [?e :seon.test/sym ?sym]
+                     [?e :seon.test/last-failed-at ?f]
+                     [?e :seon.test/last-failure-summary ?summary]
+                     [?e :seon.test/trigger ?trigger]
+                     (or [(missing? $ ?e :seon.test/last-passed-at)]
+                         [(and [?e :seon.test/last-passed-at ?p]
+                               [(< ?p ?f)])])])]
+    (for [[sym summary trigger] rows]
+      [:div.warning
+       [:span.dot "●"] " " sym " " summary
+       [:span.subtle " (via " (name trigger) ")"]])))
+```
+
+Returns one row for `foo-test`. The tile renders:
+
+```
+● seon.user.a1/foo-test  FAIL expected: 4 actual: 6 (via on-fn-redef)
+```
+
+The next prompt the agent gets includes this tile in its ctx — **the
+agent reads its own failure in its next turn's input.** No
+notification, no separate "test failed" message, no acknowledgement.
+Just derived context.
+
+### Step 4 — agent fixes `foo`
+
+```clojure
+(seon.eval/eval-batch!
+  {:seon.agent/id "a1"
+   :seon.eval/forms ["(defn foo [x] (* x 2))"]})
+```
+
+Same loop. Handler fires. `foo-test` runs. Passes.
+`:seon.test/last-passed-at` updates to NOW, which is now `>
+last-failed-at`. Next render: warnings-tile query returns empty.
+Warning disappears. **Self-healing per the reactive-context
+principle — no clear, no ack, no notification queue.**
+
+### What the agent's training does NOT need to know
+
+- It does NOT need to call `(run-tests …)`.
+- It does NOT need to know the handler exists.
+- It DOES need to know "if I see a `:seon.test/last-failed-at`
+  warning in my context, it means MY recent code change broke a
+  test, and I should fix it." This is one sentence in the agent's
+  system prompt, not a tool description.
+
+## 8. Open questions / decisions needed
 
 - **@user — auto-load `seon.test.suite` in production builds?** If yes,
   agent gets the test vars on globalThis at all times (good for
@@ -781,9 +1595,39 @@ Smallest thing that makes humans productive:
 
 - **Shared-DB tests.** `::shared-conn? true` opt-in for loop layer 3.
   Implementation: the fixture skips conn creation if a
-  `::fixture-conn` is already bound. Defer to Phase 7.
+  `::fixture-conn` is already bound. Defer to Phase 8.
 
-## 8. Appendix: reference-code findings
+- **@user — should the reactive loop run on EVERY redef, or only
+  when the agent is idle?** Two options: (a) always — every
+  `:seon.fn/source` tx triggers the handler immediately (current
+  recommendation). (b) coalesce — tx-listener buffers redefs for N
+  ms, runs the affected set once at end of burst. Recommendation:
+  **always**, because `eval-batch!` is already a single tx (so a
+  burst of redefs across one batch produces one handler fire), and
+  rapid burst-eval-batch storms are not the common case. Revisit if
+  perf bites.
+
+- **@user — should test runs themselves transact, triggering more
+  test runs?** `:seon.test/last-passed-at` IS a tx datom; if the
+  handler matched any `:seon.fn/source` indiscriminately, a test
+  run could fire itself. The proposed match
+  `{:seon.handler.match/attr :seon.fn/source}` only matches
+  `:seon.fn/source`, not `:seon.test/last-*`, so no cycle. Confirm
+  at impl time.
+
+- **@user — should `:seon.fn/test?` be derived (a property of the
+  arglists meta) or persisted (a separate attr)?** Persisting is
+  cheaper at query time and avoids needing to re-read the analyzer
+  on every affected-set query. Recommendation: **persist** during
+  the analyzer-tee write.
+
+- **@user — instrument agent-defined fns on every eval-batch, or
+  lazily on first call?** `mi/instrument!` per-sym is fast (~µs);
+  doing it eagerly in `build-tee-entities` is simpler than wiring
+  a lazy hook into `cljs.js`'s fn lookup. Recommendation: **eager,
+  per-sym at write time**.
+
+## 9. Appendix: reference-code findings
 
 ### `reference-code/kaocha/`
 

@@ -415,11 +415,292 @@ tx     : n={:>6}  p50={:>8}  p95={:>8}  p99={:>8}  min={:>8}  max={:>8}",
     }
 }
 
+// ---------------- Transact batcher ----------------
+//
+// Opportunistic coalescer. Each guest's transact! produces one mpsc message;
+// the batcher loop drains pending messages within a small window (try_recv +
+// micro-sleep up to `BATCH_MAX_WINDOW`) and ships a single `transact-batch`
+// op to the JVM writer.
+//
+// Ordering guarantee: tokio mpsc preserves enqueue order, the JVM writer
+// applies the batch in array order, so per-batch ordering is FIFO.  Cross-
+// guest ordering is whatever the global mpsc enqueue order is (i.e. whoever
+// landed in the channel first commits first), which matches the pre-batcher
+// behavior since both used a single in-flight pipe to the writer.
+//
+// Partial failure: the writer's `transact-batch` returns a partial-success
+// response with `applied: k` reports + `failed-at: k` if entry k threw.
+// Reports 0..k-1 succeed; their oneshots get the success payload. Entry k's
+// oneshot gets the wire error. Entries k+1..N get a "skipped-after-batch-
+// failure" error so the caller knows their tx did NOT apply.
+//
+// Tuning constants:
+//   BATCH_MAX_SIZE   — cap on how many tx-datas we ship per batch (writer
+//                      processes sequentially so very large batches just
+//                      starve other writers from getting a turn).
+//   BATCH_MAX_WINDOW — wall-clock max we'll wait for additional tx-datas
+//                      to arrive after the first one. Too low = no batching
+//                      under light load; too high = added latency per
+//                      single tx.
+
+const BATCH_MAX_SIZE:   usize        = 32;
+// 2ms window: long enough to coalesce concurrent writes under realistic
+// agent workloads (~5-10 tx/sec/agent), short enough to not noticeably
+// inflate p99 latency vs the JVM commit floor (~30-150ms per tx). Tuned
+// 2026-05-25 empirically; 500us was too tight to engage at typical
+// inter-writer cadence.
+const BATCH_MAX_WINDOW: Duration     = Duration::from_millis(2);
+
+#[derive(Debug)]
+struct TransactItem {
+    tx_data_edn:    String,
+    tx_meta_edn:    Option<String>,
+    request_id:     Option<String>,
+    reply:          oneshot::Sender<Result<Cbor>>,
+}
+
+#[derive(Clone)]
+struct TransactBatcher {
+    tx: mpsc::Sender<TransactItem>,
+}
+
+impl TransactBatcher {
+    async fn submit(
+        &self,
+        tx_data_edn: String,
+        tx_meta_edn: Option<String>,
+        request_id:  Option<String>,
+    ) -> Result<Cbor> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.tx
+            .send(TransactItem {
+                tx_data_edn,
+                tx_meta_edn,
+                request_id,
+                reply: reply_tx,
+            })
+            .await
+            .map_err(|_| anyhow!("transact batcher dropped"))?;
+        reply_rx
+            .await
+            .map_err(|_| anyhow!("transact batcher reply dropped"))?
+    }
+}
+
+/// Build a `transact-batch` request CBOR from a slice of items.
+fn build_batch_request(items: &[TransactItem]) -> Cbor {
+    let tx_data_list: Vec<Cbor> = items.iter().map(|it| Cbor::Text(it.tx_data_edn.clone())).collect();
+
+    // tx-meta-list: nullable per entry. Only emit field if at least one is present.
+    let has_any_meta = items.iter().any(|it| it.tx_meta_edn.is_some());
+    let has_any_rid  = items.iter().any(|it| it.request_id.is_some());
+
+    let mut pairs: Vec<(&str, Cbor)> = vec![
+        ("op", Cbor::Text("transact-batch".into())),
+        ("tx-data-list", Cbor::Array(tx_data_list)),
+    ];
+    if has_any_meta {
+        let meta_list: Vec<Cbor> = items.iter()
+            .map(|it| match &it.tx_meta_edn {
+                Some(m) => Cbor::Text(m.clone()),
+                None    => Cbor::Null,
+            })
+            .collect();
+        pairs.push(("tx-meta-list", Cbor::Array(meta_list)));
+    }
+    if has_any_rid {
+        let rid_list: Vec<Cbor> = items.iter()
+            .map(|it| match &it.request_id {
+                Some(r) => Cbor::Text(r.clone()),
+                None    => Cbor::Null,
+            })
+            .collect();
+        pairs.push(("request-ids", Cbor::Array(rid_list)));
+    }
+    make_map(pairs)
+}
+
+/// Convert a per-tx batch report (an entry of the writer's `"reports"`
+/// array) into a single-transact-shaped response that callers can treat
+/// identically to a pre-batching `transact` reply: `{ok true, basis-t,
+/// basis-t-before, tempids, tx-data, tx-meta, datoms-added, ...}`.
+fn report_to_single_response(report: &Cbor) -> Cbor {
+    // The per-entry report already has the same keys; just inject ok=true.
+    if let Cbor::Map(items) = report {
+        let mut out: Vec<(Cbor, Cbor)> = vec![
+            (Cbor::Text("ok".into()), Cbor::Bool(true)),
+        ];
+        for (k, v) in items {
+            // Strip the per-entry "index" field — it's batch-specific bookkeeping.
+            if let Cbor::Text(s) = k {
+                if s == "index" { continue; }
+            }
+            out.push((k.clone(), v.clone()));
+        }
+        Cbor::Map(out)
+    } else {
+        Cbor::Null
+    }
+}
+
+/// Histogram of observed batch sizes. Index 0 = singletons, index k = batches
+/// of size k+1. Reported alongside cache stats so tuning is visible.
+static BATCH_HIST: [AtomicU64; BATCH_MAX_SIZE] = {
+    // const-fn initializer for an array of AtomicU64.
+    const Z: AtomicU64 = AtomicU64::new(0);
+    [Z; BATCH_MAX_SIZE]
+};
+
+fn batch_hist_report() -> String {
+    let mut total: u64 = 0;
+    let mut sized: u64 = 0;
+    let cells: Vec<String> = (0..BATCH_MAX_SIZE).filter_map(|i| {
+        let n = BATCH_HIST[i].load(Ordering::Relaxed);
+        if n > 0 {
+            total += n;
+            sized += n * (i as u64 + 1);
+            Some(format!("size {}: {}", i + 1, n))
+        } else { None }
+    }).collect();
+    if cells.is_empty() { return "batch hist: (no transacts)".into(); }
+    let avg = sized as f64 / total as f64;
+    format!("batch hist: total-batches={} avg-size={:.2}  | {}",
+            total, avg, cells.join(", "))
+}
+
+async fn run_transact_batcher(
+    writer: WriterClient,
+    mut rx: mpsc::Receiver<TransactItem>,
+    cache: Arc<SnapshotCache>,
+    latency: Arc<LatencyTracker>,
+) {
+    loop {
+        // Block on first request.
+        let first = match rx.recv().await {
+            Some(it) => it,
+            None     => return, // channel closed; sender dropped
+        };
+        let mut batch: Vec<TransactItem> = Vec::with_capacity(BATCH_MAX_SIZE);
+        batch.push(first);
+
+        // Brief drain window: try_recv until empty OR we hit BATCH_MAX_SIZE OR
+        // the wall-clock window expires. We sleep once for the full window
+        // rather than poll — fairness vs other tokio tasks.
+        let deadline = Instant::now() + BATCH_MAX_WINDOW;
+        loop {
+            if batch.len() >= BATCH_MAX_SIZE { break; }
+            match rx.try_recv() {
+                Ok(it) => batch.push(it),
+                Err(mpsc::error::TryRecvError::Empty)        => {
+                    if Instant::now() >= deadline { break; }
+                    // micro-yield to give other tasks a chance to enqueue
+                    tokio::task::yield_now().await;
+                }
+                Err(mpsc::error::TryRecvError::Disconnected) => break,
+            }
+        }
+
+        let batch_size = batch.len();
+        BATCH_HIST[batch_size.saturating_sub(1).min(BATCH_MAX_SIZE - 1)]
+            .fetch_add(1, Ordering::Relaxed);
+        let t0 = Instant::now();
+
+        if batch_size == 1 {
+            // Fast path — for a singleton, skip the batch wire shape and just
+            // do a normal single `transact`. Avoids the empty-batch overhead.
+            let it = batch.into_iter().next().unwrap();
+            let mut pairs: Vec<(&str, Cbor)> = vec![
+                ("op",      Cbor::Text("transact".into())),
+                ("tx-data", Cbor::Text(it.tx_data_edn)),
+            ];
+            if let Some(m) = it.tx_meta_edn { pairs.push(("tx-meta",    Cbor::Text(m))); }
+            if let Some(r) = it.request_id  { pairs.push(("request-id", Cbor::Text(r))); }
+            let req = make_map(pairs);
+            let resp_res = writer.call(req).await;
+            let elapsed = t0.elapsed();
+            LatencyTracker::record(&latency.tx, elapsed);
+            if let Ok(ref resp) = resp_res {
+                if let Some(bt) = cbor_map_get(resp, "basis-t").and_then(cbor_as_i64) {
+                    cache.on_tx(bt);
+                }
+            }
+            let _ = it.reply.send(resp_res);
+            continue;
+        }
+
+        // Multi-entry batch.
+        let req = build_batch_request(&batch);
+        let resp_res = writer.call(req).await;
+        let elapsed = t0.elapsed();
+        // Record one latency sample per batched tx (the per-tx wall time
+        // they each waited).
+        for _ in 0..batch_size {
+            LatencyTracker::record(&latency.tx, elapsed);
+        }
+
+        let resp = match resp_res {
+            Ok(r)  => r,
+            Err(e) => {
+                // Hard failure — wire-level. Fan the error to all waiters.
+                for it in batch {
+                    let _ = it.reply.send(Err(anyhow!("batcher wire error: {}", e)));
+                }
+                continue;
+            }
+        };
+
+        // Walk the response. Successful batch has "reports" of length applied;
+        // partial-failure has "reports" of length k + "failed-at": k +
+        // "error", "error-kind".
+        let reports = match cbor_map_get(&resp, "reports") {
+            Some(Cbor::Array(rs)) => rs.clone(),
+            _ => {
+                for it in batch {
+                    let _ = it.reply.send(Err(anyhow!(
+                        "batcher: writer response missing 'reports' field: {}",
+                        cbor_to_string(&resp)
+                    )));
+                }
+                continue;
+            }
+        };
+        let failed_at = cbor_map_get(&resp, "failed-at").and_then(cbor_as_i64);
+        let err_msg = cbor_map_get(&resp, "error").and_then(|v| {
+            if let Cbor::Text(s) = v { Some(s.clone()) } else { None }
+        }).unwrap_or_else(|| "batcher entry failed without error message".to_string());
+
+        // Push the latest basis-t into the cache invalidation path. Use the
+        // last successful report's basis-t (highest).
+        if let Some(last_ok) = reports.last() {
+            if let Some(bt) = cbor_map_get(last_ok, "basis-t").and_then(cbor_as_i64) {
+                cache.on_tx(bt);
+            }
+        }
+
+        // Hand reports out in order; mark stragglers with skipped error.
+        let mut report_iter = reports.into_iter();
+        for (idx, it) in batch.into_iter().enumerate() {
+            if let Some(rep) = report_iter.next() {
+                let single = report_to_single_response(&rep);
+                let _ = it.reply.send(Ok(single));
+            } else if Some(idx as i64) == failed_at {
+                let _ = it.reply.send(Err(anyhow!("transact failed in batch: {}", err_msg)));
+            } else {
+                let _ = it.reply.send(Err(anyhow!(
+                    "transact skipped after batch failure at entry {} (msg: {})",
+                    failed_at.unwrap_or(-1), err_msg
+                )));
+            }
+        }
+    }
+}
+
 // ---------------- High-level Db API (used by REPL, will also be used by WIT host) ----------------
 
 #[derive(Clone)]
 pub struct DbHandle {
     writer: WriterClient,
+    batcher: TransactBatcher,
     cache: Arc<SnapshotCache>,
     tx_events: broadcast::Sender<TxEvent>,
     latency: Arc<LatencyTracker>,
@@ -495,31 +776,22 @@ impl DbHandle {
         self.transact_full(tx_data_edn, None, None).await
     }
 
-    /// Transact with optional tx-meta and request-id (Phase B / gap-2 prep).
+    /// Transact with optional tx-meta and request-id. Routes through the
+    /// opportunistic batcher — singleton-fast-path commits as a normal
+    /// `transact`; concurrent writers within `BATCH_MAX_WINDOW` coalesce
+    /// into a single `transact-batch` wire call. The latency tracker and
+    /// cache invalidation are updated by the batcher loop, not here.
     pub async fn transact_full(
         &self,
         tx_data_edn: &str,
         tx_meta_edn: Option<&str>,
         request_id: Option<&str>,
     ) -> Result<Cbor> {
-        let mut pairs: Vec<(&str, Cbor)> = vec![
-            ("op", Cbor::Text("transact".into())),
-            ("tx-data", Cbor::Text(tx_data_edn.into())),
-        ];
-        if let Some(m) = tx_meta_edn {
-            pairs.push(("tx-meta", Cbor::Text(m.into())));
-        }
-        if let Some(r) = request_id {
-            pairs.push(("request-id", Cbor::Text(r.into())));
-        }
-        let req = make_map(pairs);
-        let t0 = Instant::now();
-        let resp = self.writer.call(req).await?;
-        LatencyTracker::record(&self.latency.tx, t0.elapsed());
-        if let Some(bt) = cbor_map_get(&resp, "basis-t").and_then(cbor_as_i64) {
-            self.cache.on_tx(bt);
-        }
-        Ok(resp)
+        self.batcher.submit(
+            tx_data_edn.to_string(),
+            tx_meta_edn.map(|s| s.to_string()),
+            request_id.map(|s| s.to_string()),
+        ).await
     }
 
     /// q against a pinned basis-t snapshot.
@@ -538,9 +810,17 @@ impl DbHandle {
         }
         let resp = self.writer.call(req).await?;
         LatencyTracker::record(&self.latency.q_miss, t0.elapsed());
-        if let Some(bt) = cbor_map_get(&resp, "basis-t").and_then(cbor_as_i64) {
-            // q_at is explicitly pinned — entry is immutable forever.
-            self.cache.insert(key, CacheEntry { basis_t: bt, pinned: true, response: resp.clone() });
+        // Tag the entry with the basis_t we REQUESTED at, not the writer's
+        // response basis-t. The writer's response carries the CURRENT db's
+        // basis-t (latest committed), but we asked for an `as-of` snapshot at
+        // `basis_t`. Caching against the response's basis-t made the entry
+        // appear "current-basis" — which on_tx's drop-everything-older path
+        // happily evicted on the next commit. Fix: cache against the
+        // requested basis-t.
+        if basis_t > 0 {
+            self.cache.insert(key, CacheEntry { basis_t, pinned: true, response: resp.clone() });
+        } else if let Some(bt) = cbor_map_get(&resp, "basis-t").and_then(cbor_as_i64) {
+            self.cache.insert(key, CacheEntry { basis_t: bt, pinned: false, response: resp.clone() });
         }
         Ok(resp)
     }
@@ -1108,6 +1388,7 @@ async fn run_multi_agent(
     println!("results:     {}", cbor_to_string(&rcount));
     println!("cache stats: {:?}", db.cache.stats());
     println!("{}", db.latency.report());
+    println!("{}", batch_hist_report());
 
     Ok(())
 }
@@ -1183,11 +1464,26 @@ async fn main() -> Result<()> {
         });
     }
 
+    let latency = Arc::new(LatencyTracker::new());
+    let writer  = WriterClient { tx: req_tx };
+
+    // Spawn the opportunistic transact batcher. All `DbHandle::transact_full`
+    // calls funnel through this — singletons take the fast path, concurrent
+    // writers within BATCH_MAX_WINDOW coalesce into a single transact-batch.
+    let (batch_tx, batch_rx) = mpsc::channel::<TransactItem>(256);
+    {
+        let writer  = writer.clone();
+        let cache   = cache.clone();
+        let latency = latency.clone();
+        tokio::spawn(run_transact_batcher(writer, batch_rx, cache, latency));
+    }
+
     let db = DbHandle {
-        writer: WriterClient { tx: req_tx },
+        writer,
+        batcher: TransactBatcher { tx: batch_tx },
         cache: cache.clone(),
         tx_events: evt_tx,
-        latency: Arc::new(LatencyTracker::new()),
+        latency,
     };
 
     // Ping to confirm.

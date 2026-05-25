@@ -46,7 +46,8 @@ pod-host/sidecar-poc/
 | **PB — protocol overlay surface complete** | **GREEN** | entity-pull, pull-many, schema, reverse-schema, db-filter/q-filtered/filter-release, basis-t threading on q/pull, lookup-ref support, next-tx-event WIT method. JVM-side covered by 25 tests / 105 assertions. CLJS overlay namespace at `guest-cljs/src/sidecar_poc/datahike.cljs`. |
 | **PC — shadow-cljs build + real CLJS agent guest** | **GREEN** | CLJS agent compiled to wasm32-wasip2 via shadow-cljs `:sidecar-agent` build + `build-sidecar-agent` script; `next-tx-event` wired host-to-guest (non-blocking try_recv + setTimeout-based polling in overlay); CAS + tx-data scanning end-to-end. |
 | **PD — N=3 multi-agent smoke**  | **GREEN** | 300s run: writer 752 commits / reader 1827 events / mixed 1828 events + 538 completed CAS-to-done cycles; 0 out-of-order events, 0 CAS conflicts, 0 errors. |
-| P5 — wire a real Seon agent     | not started | |
+| **PE — tx batcher + cache fix**  | **GREEN** | Opportunistic Rust-host transact batcher (2ms / 32-item window, mpsc-FIFO, singleton fast-path); JVM `transact-batch` op wired end-to-end. Cache `q_at` insert path fixed — was using response basis-t which collapsed pinned entries; now uses requested basis-t. **Hit rate 0.97% → 99.1%** on cache-friendly workload; q-hit p50=0us; tx p50 124→86ms. See `bench/tx-batcher-and-cache-fix-2026-05-25.md`. |
+| P5 — wire a real Seon agent     | not started | V0 substrate compiles into the guest (Phase B v0-probe; see `bench/v0-port-survey.md`). Sub-goal-2 work (WASI preopen for bootstrap caches + LLM stub + V0 turn driver) NOT shipped this session; budget consumed by 3b + 4. |
 | P6 — run a compiled tauri wasm pod | not started | |
 | P7 — multi-pod stress           | not started | |
 
