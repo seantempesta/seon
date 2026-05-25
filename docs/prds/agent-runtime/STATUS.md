@@ -346,6 +346,59 @@ alone.
 - Persistent backend (`:memory` → on-disk). Separate conversation
   Sean owns. Resume's end-to-end value is gated on this.
 
+## Recent ships (2026-05-25) — Platform track
+
+### Live multi-agent runtime path — Phase 0+A complete, agent-id ALS landed, async-instrumentation fix, session-id kill (Tier 1)
+
+Eleven commits landed across the past 48h take the substrate from "0 fns instrumented, default-id singleton, untyped agent identity" to "52 seon.* fns input+output validated, ALS-bound agent identity, live agent end-to-end on real DeepSeek LLM."
+
+Phase 0 + Phase A queue items (per the migration plan):
+
+- `3924de2` Item 4 — `seon.schema/current-keys` accessor
+- `57fc018` Item 5 — `:bootstrap :entries` expanded (`seon.schema`, `malli.core`, `malli.registry`, `cljs.analyzer.api`)
+- `9bf51be` Item 6 — `malli.instrument` bundled into `:client`
+- `9ffd3c4` Item 7 — seon-native compile-time collector via `cljs.analyzer.api/all-ns` + macro (workaround for `mi/collect!` being JVM-only); 52 fns registered + instrumented at boot
+- `81042bc` Item 3 — `truly-undeclared?` `defonce` false-positive fix (`:macro-present?` short-circuit)
+- `12e4da3` Item 2 — per-fiber ALS warning capture (multi-agent isolation; same substrate as `with-tx-context`); concurrent eval-batch verified isolated
+- `528a539` Item 8 — error envelope + `:seon.eval/error-data` attr + structured renderer (5-line `;; ERROR` block with expected/got/reason/hint columns); pr-str-readable serializer handles `[:fn …]` schemas
+
+Multi-agent foundation (downstream of the queue):
+
+- `5a82742` — agent-id ALS dynvar (`seon.db/*agent-id*`, `with-agent`, `current-agent-id`); `default-id` defonce DELETED; web-handler hardcoded `"seon"` fallback REPLACED with DB query; 7 inspector `:or` defaults use the accessor; `start-agent!` wraps the boot pipeline in `(with-agent agent-id …)`
+- `31e31cb` — Tier 1 session-kill: `!session-id` atom + `(session-id)` accessor REMOVED from `setup-agent-ns!`; deepseek system prompt + training docs updated to teach `(seon.db/current-agent-id)`. Per Sean's call ("agent IS the session — don't duplicate concepts").
+- `58ccf2d` — `^:async` fns skipped from collector (their output schema describes the resolved value, not the Promise); unblocks live LLM round-trip.
+
+**Live verification (2026-05-25, end-to-end):** booted agent on real DeepSeek LLM, sent user message via `(agent/chat aid "…")`, agent ran turn (LLM call → parse → eval-batch → transact assistant reply), no instrumentation throws, message visible in `agent/messages`. 52 fns input+output validated; agent-id flows via ALS through every transact.
+
+### Tier 2 session-kill — queued, MVP-coordinated
+
+MVP's response (relayed 2026-05-25): endorses killing `:seon.session` entity entirely. Sequencing per their note:
+
+1. MVP lands item 10 (`eval-batch!` detect-and-tee modifications) FIRST. ~30-45 min. Touches `eval.cljs`, `analyzer_info.cljs`, `agent.cljs` schemas, `client.cljs` bootstrap-attrs.
+2. Platform follows with combined Tier 2 patch: kill `:seon.session/*` schemas, `start-session!`/`ensure-session!`/`current-session` fns, collapse `agent → sessions → turns` to `agent → turns` direct (component-many), update pull patterns + render code. SAME COMMIT adds `:paused` to `:seon.agent/state` enum + kick-listener skip when paused.
+
+MVP's two requests on Tier 2:
+- Ping with the rough diff (or list of attrs being killed on `:seon.agent`) before landing — their item 10 tee writes via `:seon.turn/evals` not `:seon.agent/turns`, but want to confirm the upsert chain.
+- `:paused` enum + kick-listener skip in the SAME commit (agent state shape is Platform's lane).
+
+### Multi-agent runtime chain — what Platform builds next
+
+Per Sean's direction (2026-05-25): drop datahike-cljs complications (SQLite flip, bridge `:map`, multi-process datahike) while a new JVM-datahike investigation is in flight. Focus is multi-agent runtime UX with live testing ASAP. Confirmed:
+
+- ⏳ Tier 2 session-kill — blocked on MVP item 10
+- Next: `:seon.agent/kind {:orchestrator | :task}` schema + per-kind ctx defaults
+- Then: orchestrator → task spawn factory (`agent/spawn-task!`)
+- Then: per-agent REPL primitive — `seon.repl/with-agent` macro + `mcp__seon_cljs__eval` `:agent-id` param extension
+- Then: verify per-agent web tiles (broadcast may already do this); two-agent simultaneous-running UI test
+
+By end of that chain: orchestrator agent + spawned task agent both running concurrent turns under ALS isolation, both REPL-controllable independently, both visible in the web tile UI.
+
+### Notes from instrumentation rollout — real correctness wins
+
+- 8 currently-untyped `:any` flagged in earlier audit; instrumentation enforcement now makes those real type-mismatch traps when they hit the boundary
+- `seon.ai.deepseek/complete` schema is technically wrong (describes resolved value, not Promise) — common pattern across all `^:async` fns. Cleanest fix is a custom async-aware wrapper that awaits before output-validating (deferred); current `:async` skip is the pragmatic workaround
+- `/clear` handler in `web/serve.cljs` is silently broken — queries deleted attrs (`:seon.eval/agent`, `:seon.agent/turn-count`, `:seon.agent/turns-since-user`). Flagged by agent-id ALS commit, fix not yet shipped (out-of-scope of all current items).
+
 ## Recent ships (2026-05-23) — Platform track only
 
 ### Platform track — eval-batch! refactor (Items 1+2 + with-tx-context + duration-ms)
