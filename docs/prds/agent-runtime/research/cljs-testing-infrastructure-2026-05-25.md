@@ -8,6 +8,8 @@ tags: [research, testing, agent, prd]
 
 ## Revision log
 
+- **2026-05-25 (post-probe):** §4.A discovery uses runtime var meta (analyzer strips `:test`); §4.K uses real `m/-register-function-schema!` API + adds `malli.instrument` to shadow bootstrap; §4.L recursive-rule replaced with manual CLJS BFS after probe 5 confirmed Datahike self-host recursion is broken (returns only base case). §4.N now annotates each probe with PASS / PARTIAL / FAIL and cross-references `phase-1-probe-results-2026-05-25.md`. §6 Phase 2 step 11 retargeted at the new BFS helper.
+- **2026-05-25:** resolved §4.L PENDING with Datahike recursive-rule shape. Audit at `datahike-query-capabilities-2026-05-25.md` confirms full Datomic-style rule support; added `some-of` macro probe (#5) in §4.N.
 - **2026-05-25 (revision):** killed `:seon.test/test` as a separate discovery entity — agent-defined tests are now plain `:seon.fn` rows with `:seon.fn/test?` true and `:seon.fn/test-targets` for explicit targeting; `:seon.test/*` retained only as the run-result projection. (§4.A, §4.G, §4.L, §5, §6, §7, §8.)
 - **2026-05-25:** moved the agent-defined-fn instrumentation hook (`mi/-register!` + `mi/instrument!` in `build-tee-entities`) from Phase 5 → Phase 2; it's load-bearing for the Phase 2 reactive acceptance test, not a polish item. (§4.K, §6 renumbered.)
 - **2026-05-25:** fixed TL;DR numbering — was `1,2,3,1,2,3,4,5`; now a clean `1–7`. (§1.)
@@ -112,7 +114,7 @@ Cross-references:
 | No "all" entrypoint | Nothing iterates discovered tests | `seon.test.runner/run-all!` + `seon.test.suite` |
 | No "failed-only" | Re-running narrows by hand | `seon.test.runner/run-failed!` reading `:seon.test/last-failed-at` |
 | No human-friendly output | REPL caller sees a giant data map | `seon.test.render` (new) |
-| Agent-defined tests can't be discovered | They live in eval-stash, not in any ns | `:seon.test/test` entity + dispatch |
+| Agent-defined tests can't be discovered | They live in eval-stash, not in any ns | Unified `:seon.fn/test? true` row (§4.A) + dispatch |
 | No CLI shim | `node out/client/main.js` boots the pod with no test mode | `bin/seon test pod` |
 | Async tests don't compose with `run-vars` | `(async done …)` works but doesn't propagate; `^:async/await` doesn't either | `run-vars` Promise-aware driver |
 | No auto-trigger from eval-batch | D4 in spec — when `(defn foo …)` lands and `foo-test` exists, nothing fires | `seon.runtime` handler + lookup table |
@@ -144,7 +146,7 @@ Load-bearing rules — every recommendation below honours these:
    DB → only the surfaced projection (`:seon.test/last-passed-at`,
    `:seon.test/last-failed-at`, `:seon.test/last-failure-summary`,
    `:seon.test/last-run-id`). Source code of agent-defined tests →
-   blob (in `:seon.test/source` Malli-typed string).
+   `:seon.fn/source` (same field every agent-defined fn uses).
 4. **No `_v2` parallel hierarchy.** Extend `seon.test.runner`. Don't
    create `seon.test.runner2`, `seon.test.api`, etc.
 5. **No `:any`.** All event/result/request schemas must be concrete.
@@ -187,14 +189,26 @@ New file `src/seon/test/suite.cljs`:
     ))
 
 (defn ^:export all-test-syms
-  "Walk the analyzer's :defs for every required ns and return the
-   FQ symbols whose meta has :test (the cljs.test marker)."
+  "Walk every required ns and return FQ symbols whose RUNTIME var meta
+   carries :test (the cljs.test marker).
+
+   NOTE (probe 1, phase-1-probe-results-2026-05-25.md): the analyzer's
+   `ns-interns` projection STRIPS `:test` meta under self-hosted CLJS
+   — only source-location keys survive. The cljs.test `deftest` macro
+   stuffs the test fn into the runtime var's meta directly, so we
+   inspect the runtime var via `goog.getObjectByName` on the munged
+   path rather than the analyzer's `:meta` view."
   []
   (vec
-    (for [ns-sym (cljs.analyzer.api/all-ns)
-          :when (str/starts-with? (str ns-sym) "seon.")
-          [name-sym info] (cljs.analyzer.api/ns-interns ns-sym)
-          :when (:test (:meta info))]
+    (for [ns-sym (filter #(str/starts-with? (str %) "seon.")
+                         (cljs.analyzer.api/all-ns))
+          [name-sym _info] (cljs.analyzer.api/ns-interns ns-sym)
+          :let [var-obj (try
+                          (js/goog.getObjectByName
+                            (str (cljs.core/munge ns-sym) "."
+                                 (cljs.core/munge name-sym)))
+                          (catch :default _ nil))]
+          :when (and var-obj (:test (meta var-obj)))]
       (symbol (str ns-sym) (str name-sym)))))
 ```
 
@@ -800,12 +814,26 @@ land via `eval-batch!` after boot are NOT in that registry —
 agent-defined fns to be instrumented, `seon.eval/eval-batch!` (or
 the analyzer-tee path right after it) must call
 `(mi/-register! sym schema)` + `(mi/instrument! {:filters …})`
-narrowed to that one sym. **Action:** add a one-line hook in
-`build-tee-entities` (`src/seon/eval.cljs:648`) — for each newly-
-defined fn with `:malli/schema` meta, register + instrument that
-sym. Idempotent (`mi/instrument!` replaces the wrapper). This is the
-real Phase 5 prerequisite for "agent-defined tests catch
-agent-defined fn schema drift."
+narrowed to that one sym. **Action: this is Phase 2 step 9, not
+Phase 5.** Add a one-line hook in `build-tee-entities`
+(`src/seon/eval.cljs:648`) — for each newly-defined fn with
+`:malli/schema` meta, call the real 6-arity
+`(m/-register-function-schema! 'ns-sym 'sym schema {} :cljs identity)`
+(matches the canonical `m/=>` expansion path that
+`seon.instrument/collect!` uses at build time), then
+`(mi/instrument! {:filters [(mi/-filter-var #(= % #'sym))]})`.
+Idempotent (`mi/instrument!` replaces the wrapper). The doc
+previously cited `mi/-register!` — that fn does not exist; probe 4
+in `phase-1-probe-results-2026-05-25.md` confirmed the real API.
+Also **add `malli.instrument` to `shadow-cljs.edn :bootstrap :entries`**
+so agent code can `(require '[malli.instrument])` cleanly under
+self-host (the runtime ns is present via transitive deps, but the
+analyzer cache is not — probe 4). Without this whole hook, the
+Phase 2 acceptance test ("agent redefines `foo`, `foo-test` fires
+reactively") cannot detect schema-drift errors — schema drift only
+surfaces in the rich instrumentation envelope if the fn is actually
+wrapped. **Pre-req:** §4.N Probe 4 must pass; the fallback path is
+significantly more invasive.
 
 **Per-test override.** Some tests genuinely need to call a fn with
 bad inputs to assert the error envelope (e.g.
@@ -878,23 +906,45 @@ or `:seon.fn/callees`). Worth noting honestly:
 
 **The affected-tests query (ns-level, Phase 2):**
 
-> **PENDING — see `datahike-query-capabilities-2026-05-25.md`.** The
-> `transitive-dependents` call below depends on whether Datahike
-> supports recursive Datalog rules natively. A parallel research
-> agent is currently auditing this. Two possible shapes:
->
-> 1. **Native recursive rule** (if supported) — one query expresses
->    "every ns that transitively requires X" via a rule clause.
-> 2. **Iterated joins in CLJS** (fallback) — walk `:seon.ns/requires`
->    in a loop, accumulating a fixed-point set, calling `db/q` each
->    iteration.
->
-> The sketch below is structural — the `(transitive-dependents …)`
-> call is a TODO until the audit lands. **Do NOT implement Phase 2
-> step 10 until the audit returns** — the rule shape changes the
-> ns and the call signature.
+**Revised 2026-05-25 (post-probe).** Probe 5 in
+`phase-1-probe-results-2026-05-25.md` showed Datahike's recursive rules
+do NOT expand correctly under self-hosted CLJS — only the base case
+returns. The audit at `datahike-query-capabilities-2026-05-25.md` was
+written against JVM Datahike; CLJS port doesn't honour the same rule
+semantics. Filed as a separate concern; tracking via TODO. BFS is the
+pragmatic fix and the data scale (≤10k fns) makes an O(n) edge scan per
+handler fire a non-issue.
+
+So the transitive walk is a manual CLJS BFS over a one-shot inverse
+adjacency map, not a recursive Datalog rule.
 
 ```clojure
+(defn- ns-requires-map
+  "One-shot scan: returns {ns-name #{required-ns-names}}.
+   ~O(n) over :seon.ns/requires datoms; called once per handler fire."
+  [db]
+  (->> (db/q '[:find ?from-name ?to-name
+               :where [?from :seon.ns/requires ?to]
+                      [?from :seon.ns/name ?from-name]
+                      [?to   :seon.ns/name ?to-name]]
+             db)
+       (reduce (fn [acc [from to]] (update acc from (fnil conj #{}) to)) {})))
+
+(defn- transitive-dependents
+  "BFS: starting from `seed-nses`, walk the INVERSE of the requires
+   map to find all dependents. Replaces the JVM-style recursive rule
+   (which doesn't expand under self-hosted CLJS — see probe 5)."
+  [requires-map seed-nses]
+  (let [inverse (reduce-kv (fn [acc from tos]
+                             (reduce (fn [a to] (update a to (fnil conj #{}) from))
+                                     acc tos))
+                           {} requires-map)]
+    (loop [seen (set seed-nses) frontier (set seed-nses)]
+      (let [next-set (->> frontier (mapcat inverse) (remove seen) set)]
+        (if (empty? next-set)
+          seen
+          (recur (into seen next-set) next-set))))))
+
 (defn affected-test-syms-for-tx
   "Given a tx-report from the program-graph, return the set of
    test syms whose ns directly or transitively requires any ns
@@ -904,45 +954,33 @@ or `:seon.fn/callees`). Worth noting honestly:
    :seon.fn/test? true. Sibling convention (`foo-test`) plus
    explicit :seon.fn/test-targets cover agent-authored tests."
   [{:keys [tx-data db]}]
-  (let [changed-fn-eids  (->> tx-data
-                              (filter #(= :seon.fn/source (:a %)))
-                              (map :e) distinct)
-        changed-ns-syms  (db/q {::db/query
-                                '[:find [?ns-name ...]
-                                  :in $ [?fn-eid ...]
-                                  :where
-                                  [?fn-eid :seon.fn/ns ?ns]
-                                  [?ns :seon.ns/name ?ns-name]]
-                                ::db/args [changed-fn-eids]})
-        changed-syms     (db/q {::db/query
-                                '[:find [?sym ...]
-                                  :in $ [?fn-eid ...]
-                                  :where [?fn-eid :seon.fn/sym ?sym]]
-                                ::db/args [changed-fn-eids]})
-        ;; PENDING: shape depends on datahike-query-capabilities audit.
-        dependent-nses   (transitive-dependents db changed-ns-syms)
-        all-affected-ns  (into (set dependent-nses) changed-ns-syms)]
-    (distinct
-      (concat
-        ;; tests in affected nses — ONE query, unified :seon.fn shape
-        (db/q {::db/query '[:find [?sym ...]
-                            :in $ [?ns-name ...]
-                            :where
-                            [?fn :seon.fn/ns ?ns]
-                            [?ns :seon.ns/name ?ns-name]
-                            [?fn :seon.fn/sym ?sym]
-                            [?fn :seon.fn/test? true]]
-               ::db/args [all-affected-ns]})
-        ;; tests with explicit targets pointing at any changed sym —
-        ;; still the same :seon.fn shape, just a different filter.
-        (db/q {::db/query '[:find [?sym ...]
-                            :in $ [?changed ...]
-                            :where
-                            [?fn :seon.fn/test? true]
-                            [?fn :seon.fn/test-targets ?changed]
-                            [?fn :seon.fn/sym ?sym]]
-               ::db/args [changed-syms]})))))
+  (let [changed-fn-eids (->> tx-data (filter #(= :seon.fn/source (:a %))) (map :e) distinct)
+        changed-ns-syms (db/q '[:find [?ns-name ...]
+                                :in $ [?fn-eid ...]
+                                :where [?fn-eid :seon.fn/ns ?ns]
+                                       [?ns :seon.ns/name ?ns-name]]
+                              db changed-fn-eids)
+        req-map         (ns-requires-map db)
+        all-affected    (transitive-dependents req-map changed-ns-syms)]
+    (db/q '[:find [?sym ...]
+            :in $ [?ns-name ...]
+            :where [?fn :seon.fn/ns ?ns]
+                   [?ns :seon.ns/name ?ns-name]
+                   [?fn :seon.fn/sym ?sym]
+                   [?fn :seon.fn/test? true]]
+          db all-affected)))
 ```
+
+**Indexing note (cross-ref audit §5):** the bound-arg lookups above
+hit the AVET index, which Datahike only populates for attributes with
+`:db/index true` or `:db/unique` set
+(`reference-code/datahike/src/datahike/db.cljc:867-869, 922-923`).
+`:seon.fn/sym` and `:seon.ns/name` should carry
+`{:seon.db/identity true}` (identity ⇒ unique ⇒ AVET) so the
+`[?ns :seon.ns/name ?ns-name]` and `[?fn :seon.fn/sym ?sym]` joins
+don't fall back to EAVT scans. The `:seon.ns/requires` ref attr
+doesn't need an extra index — patterns on it go through AEVT, which
+is always populated.
 
 Two new attrs needed for this to work (both registered alongside
 existing `:seon.fn/*` attrs in `src/seon/agent.cljs:251-261`):
@@ -1011,7 +1049,7 @@ existing `:seon.fn/*` attrs in `src/seon/agent.cljs:251-261`):
 
 | Case | Behaviour | Mitigation |
 |---|---|---|
-| Test defined BEFORE the fn it tests | The `:seon.test/targets` resolves to no eid yet; handler skips. When the fn lands later, its `:seon.fn/source` tx fires the handler, which now finds the test → runs it. | Lazy resolution via sym, not eid. |
+| Test defined BEFORE the fn it tests | The `:seon.fn/test-targets` sym doesn't resolve to an existing fn eid yet; handler skips. When the fn lands later, its `:seon.fn/source` tx fires the handler, which now finds the test → runs it. | Lazy resolution via sym, not eid. |
 | Test itself is broken (compile error) | `eval-batch!` already captures the error in the error envelope; no `:seon.fn/source` lands; nothing triggers. Agent sees the eval error in their context. | None needed — fails closed. |
 | Test redefinition (agent changes the test) | The new `:seon.fn/source` for the test sym IS a tx on `:seon.fn/source` — handler fires, finds the test in its OWN affected set, runs it once. | Trivial; intended. |
 | Multimethod / protocol dispatch the analyzer can't see | Ns-level granularity already covers this (any change in the ns runs all tests in dependents). When per-fn edges arrive, this is the one place that still NEEDS the ns-level fallback. | Document; keep ns-level as the floor. |
@@ -1058,6 +1096,19 @@ warnings tile can distinguish "I asked for this and it failed"
 from "the reactive loop noticed it failed."
 
 ### N. Pre-Phase-1 probes — verify before building
+
+**STATUS 2026-05-25:** all five probes executed. Full results in
+`phase-1-probe-results-2026-05-25.md`. Verdicts inlined per-probe
+below; the §4.A discovery snippet, §4.K malli API call, and §4.L
+recursive-rule design have all been rewritten in response.
+
+| # | Probe | Verdict | Adjustment |
+|---|---|---|---|
+| 1 | `:test` meta survival | **PARTIAL** | §4.A now reads runtime var meta via `goog.getObjectByName`, not analyzer projection |
+| 2 | `with-redefs` self-host | **PASS** | no change; `with-redefs` is safe in fixtures |
+| 3 | `use-fixtures :each` async ordering | **PASS** | no change; standard `(async done …)` pattern works |
+| 4 | `mi/instrument!` post-bootstrap | **PASS** (caveats) | §4.K now cites `m/-register-function-schema!` 6-arity + requires `malli.instrument` in bootstrap entries |
+| 5 | Datahike recursive rules | **FAIL** | §4.L recursive rule replaced with manual CLJS BFS; §6 Phase 2 step 11 updated |
 
 Four assumptions the plan rests on. Each MUST pass against the
 running pod before Phase 1 work starts. Probes run via shadow nREPL
@@ -1156,6 +1207,44 @@ expected shape of a passing result, and the fallback if it fails.
   wrap the fn at register time with `m/-instrument` directly,
   storing the wrapper in globalThis under the same munged path.
   This is significantly more invasive — confirm before Phase 2.
+
+**Probe 5 — recursive Datalog rules under self-host (some-of macro).**
+
+The audit at `datahike-query-capabilities-2026-05-25.md` flagged ONE
+uncertainty: `reference-code/datahike/src/datahike/query.cljc:1011`
+defines a `some-of` macro inside `#?(:clj defmacro …)`, used by
+`expand-rule` at line 1033. JVM-only. May not expand under self-hosted
+CLJS (cljs.js). Since the entire §4.L reactive-spine query depends on
+recursive rules, this is a hard gate on Phase 2.
+
+```clojure
+;; Probe 5 — recursive rules under self-host
+(require '[datahike.api :as d])
+(def conn (let [cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write}]
+            (await (d/create-database cfg))
+            (await (d/connect cfg))))
+(await (d/transact conn [{:db/ident :probe/requires :db/valueType :db.type/ref :db/cardinality :db.cardinality/many}
+                          {:db/ident :probe/name :db/valueType :db.type/string :db/unique :db.unique/identity}]))
+(await (d/transact conn [{:probe/name "a" :probe/requires [{:probe/name "b" :probe/requires [{:probe/name "c"}]}]}]))
+(d/q '[:find [?name ...]
+       :in $ %
+       :where [?root :probe/name "a"] (depends ?root ?dep) [?dep :probe/name ?name]]
+     @conn
+     '[[(depends ?x ?y) [?x :probe/requires ?y]]
+       [(depends ?x ?y) [?x :probe/requires ?z] (depends ?z ?y)]])
+;; Expected: ("b" "c")
+```
+
+- **Expected:** `("b" "c")` (order-insensitive).
+- **If errors with "Unable to resolve some-of" or similar:** the
+  JVM-only macro didn't expand under bootstrap. Fallback options, in
+  order of preference: (1) backport the `some-of` macro into a
+  seon-namespaced helper (`seon.db.datahike.compat`) — keeps the
+  reactive handler shape uniform, smallest patch. (2) Loom-style
+  manual BFS over `:seon.ns/requires` in CLJS — works but adds a
+  second graph-walking mechanism in the codebase. The first is
+  strongly preferred; only fall back to (2) if backporting the macro
+  pulls in too much of `expand-rule`'s surrounding machinery.
 
 If any probe fails, update the plan BEFORE writing code; the
 fallback shape may ripple through multiple phases.
@@ -1264,21 +1353,23 @@ Promise-aware driver.
 > stays as a single-var runner because the daemon needs SOMETHING to
 > call.
 
-### Phase 1 — Single-var runner + Promise-aware driver (1-2 hr)
+### Phase 1 — Single-var runner + Promise-aware driver (1-2 hr) — **COMPLETED 2026-05-25**
 
 Smallest thing that makes humans productive:
 
-1. Add `vars-in-ns` helper using `cljs.analyzer.api/ns-interns`.
-2. Add `run-ns!` and `run!` (just `::vars` + `::ns` selectors). No
-   `::all?`, no `::failed-only?` yet.
-3. Promote `run-vars` to `^:async` with Promise-await on test-fn
-   return value.
-4. Move `src/seon/db_test.cljs` → `test/seon/db_test.cljs`.
-5. Move `src/seon/render_test.cljs` → `test/seon/render_test.cljs`.
-6. **Acceptance:** from shadow nREPL :7889,
-   `(seon.test.runner/run-ns! {::ns 'seon.db-test ::record? true})`
-   returns `::run-result` with all assertions captured; a follow-up
-   `(seon.test.runner/last-result {})` reads it back.
+1. ~~Add `vars-in-ns` helper using `cljs.analyzer.api/ns-interns`.~~ **DONE** — runtime var-meta walk via `goog.getObjectByName` per probe 1; analyzer path was unworkable.
+2. ~~Add `run-ns!` and `run!` (just `::vars` + `::ns` selectors).~~ **DONE** — `::selector` schema constrains to exactly one of the two; future selectors gated behind their phases.
+3. ~~Promote `run-vars` to `^:async` with Promise-await on test-fn return value.~~ **DONE** — `drive-test-fn!` awaits thenables AND cljs.test `IAsyncTest` CPS continuations.
+4. ~~Move `src/seon/db_test.cljs` → `test/seon/db_test.cljs`.~~ **DONE**
+5. ~~Move `src/seon/render_test.cljs` → `test/seon/render_test.cljs`.~~ **DONE**
+6. **Acceptance — PASSED:**
+   - `(r/run-ns! {::ns 'seon.db-test ::record? true})` returns `::run-result` with `:test 26 :pass 164 :fail 10 :error 51` (current real DB-test state), `::recorded?` true, `::run-id "dacuvIaERe"`, `::recorded-syms` (15 entries).
+   - `(r/last-result {})` round-trips the same run-id + full event blob from the globalThis stash.
+   - Self-test ns `seon.test.runner-test` (under `test/seon/test/runner_test.cljs`, exercising probes in `seon.test.runner-probes`): **7 tests, 26 assertions, 0 fail, 0 error.**
+7. Plus pickup work that wasn't in the original list but was load-bearing:
+   - `:string` `:message`/`:file`/`:line` event keys must use `some?` checks, not `contains?` — cljs.test passes literal nils that violated the `::test-event` schema.
+   - `:devtools :preloads [seon.dev.test-preload]` on `:client` so test nses are reachable from the live pod; `"test"` added to `:cljs` alias `:extra-paths` in `deps.edn` so shadow's JVM classpath can see them.
+   - Probes live in a SEPARATE `seon.test.runner-probes` ns. If they sat in `runner-test`, the `run!-with-ns-selector` test would re-select its enclosing ns and recurse infinitely. Documented inline.
 
 ### Phase 2 — Reactive spine, end-to-end for ONE test (1 day)
 
@@ -1303,10 +1394,15 @@ this is the feature.
     on each fn-defining eval-batch (or one shot on first sighting of
     that ns).
 11. Implement `affected-test-syms-for-tx` (§4.L). Ns-level granularity
-    is fine for Phase 2.
-    **PENDING: `transitive-dependents` rule shape — see
-    `datahike-query-capabilities-2026-05-25.md`.** Do not start this
-    step until the audit lands.
+    is fine for Phase 2. Uses the manual CLJS BFS helper
+    `transitive-dependents` over an inverse `ns-requires-map`, NOT a
+    recursive Datalog rule — probe 5 in
+    `phase-1-probe-results-2026-05-25.md` confirmed Datahike's
+    recursive rules don't expand under self-hosted CLJS (only the
+    base case returns). The audit at
+    `datahike-query-capabilities-2026-05-25.md` was written against
+    JVM Datahike; the CLJS port doesn't honour the same rule
+    semantics. BFS is pragmatic at the expected scale.
 12. Add `src/seon/runtime/test_autorun.cljs` with the
     `::affected-tests` handler. Wire `:run-tests` effect interpreter
     to call `runner/run!` from Phase 1.
@@ -1581,11 +1677,12 @@ principle — no clear, no ack, no notification queue.**
   the pod is down? Recommendation: **no, fail with a hint** — pod
   startup is multi-second and silent auto-starts make CI flakey.
 
-- **@user — agent-defined test source storage.** A
-  `:seon.test/source :string` field holds the test form text. Is
-  the cap (say 8KB) right? Bigger tests spill to globalThis-blob
-  like results do? Recommendation: cap at 8KB; flag in a follow-up
-  if agents start writing larger tests.
+- **@user — agent-defined test source storage.** Resolved by the
+  unification in §4.A: agent-authored test source lives in
+  `:seon.fn/source` exactly like any other agent-defined fn. The
+  existing cap on `:seon.fn/source` (whatever Phase 2/agent.cljs
+  enforces) applies uniformly; no test-specific limit. Flag a
+  follow-up only if `:seon.fn/source` itself needs spill-to-blob.
 
 - **Selective by tag.** `::tag :keyword` is in the schema sketch but
   no metadata on `deftest` carries it yet. cljs.test allows custom

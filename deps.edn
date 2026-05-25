@@ -172,7 +172,13 @@
   :cljs {;; Phase D — sidecar-poc guest-cljs lives outside src/; add as an
          ;; extra-path so shadow-cljs's classpath picker finds
          ;; sidecar-poc.* namespaces during the :sidecar-agent build.
-         :extra-paths   ["pod-host/sidecar-poc/guest-cljs/src"]
+         ;; `test` is on shadow-cljs.edn :source-paths but must ALSO appear
+         ;; here so shadow's JVM classpath actually sees the test files
+         ;; — without it, `seon.test.runner-test` and friends resolve to
+         ;; "not available" even though the .cljs files exist on disk.
+         ;; The `seon.dev.test-preload` namespace requires the platform
+         ;; CLJS tests so they're reachable from the live `:client` pod.
+         :extra-paths   ["pod-host/sidecar-poc/guest-cljs/src" "test"]
          :extra-deps    {org.clojure/clojurescript            {:mvn/version "1.12.145"}
                          org.clojure/core.async               {:mvn/version "1.10.870-alpha2"}
                          thheller/shadow-cljs                 {:mvn/version "3.4.10"}

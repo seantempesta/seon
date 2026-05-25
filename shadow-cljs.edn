@@ -61,7 +61,14 @@
   {:target           :node-script
    :output-to        "out/client/main.js"
    :main             seon.client/-main
-   :devtools         {:enabled true}
+   ;; `:preloads` pulls dev-only namespaces (notably test code under
+   ;; `test/`) into the build without affecting `:main` or release
+   ;; output. `seon.dev.test-preload` requires every CLJS test ns that
+   ;; needs to be runnable via `(seon.test.runner/run! {::ns 'foo})`
+   ;; against the live `:client` pod. See:
+   ;; docs/prds/agent-runtime/research/cljs-testing-infrastructure-2026-05-25.md §6 Phase 1.
+   :devtools         {:enabled  true
+                      :preloads [seon.dev.test-preload]}
    ;; externs/node_fs.js declares `fs.existsSync` etc. so Closure's
    ;; :advanced pass doesn't rename them to `fs.g_(...)` and crash
    ;; environ.core's load-time `.lein-env` probe. Originally shipped
