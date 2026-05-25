@@ -127,6 +127,25 @@ Why `"ok": true` for partial failure: the operation itself succeeded — the
 writer received the batch, applied as many entries as it could, and is
 returning a structured report. Use `failed-at` to distinguish.
 
+### WIT-side `transact-batch` (guest → host)
+
+The same batch shape is exposed on the WIT contract as
+`transact-batch(tx-data-list, tx-meta-list, request-ids) -> string`. The
+guest's CLJS overlay calls this directly from `transact-batch!`. The Rust
+host forwards to the JVM writer's `transact-batch` op without going through
+the opportunistic `TransactBatcher` (the guest has already done its own
+batching).
+
+WIT length-list convention: the WIT signature uses `list<string>` (not
+`option<list<string>>`) for `tx-meta-list` and `request-ids` because
+wasm-rquickjs does not cleanly marshal nested options on the import side.
+**Empty list means "omit entirely".** A non-empty list MUST have length
+equal to `tx-data-list`. Per-entry "absent" is the empty string `""`. The
+host returns a protocol-error variant if lengths mismatch.
+
+The WIT return value is the EDN-printed reports map (not CBOR) — the guest
+parses it with `edn/read-string`.
+
 ### `{"op": "pull", "selector": <edn-string>, "eid": <int-or-edn-string-lookup-ref>, "basis-t"?: <int>}`
 Pull. If `basis-t` is provided, the writer uses `(d/as-of db basis-t)` for
 the snapshot read; otherwise reads against the latest db. `eid` may be a

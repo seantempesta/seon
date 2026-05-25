@@ -61,6 +61,20 @@ interface db {
   transact: func(tx-data: string, tx-meta: string, request-id: string)
             -> result<string, db-error>;
 
+  /// Submit N tx-datas in one wire call. Each becomes its own datahike
+  /// commit; failures stop the rest (partial success returned in the
+  /// reports). `tx-meta-list` and `request-ids` are optional: empty list
+  /// means "none", otherwise length MUST equal tx-data-list. Per-entry
+  /// nulls are represented by empty strings.
+  ///
+  /// Returns an EDN-printed vector of per-tx report maps, one entry per
+  /// applied tx (matching `applied` from the batch response). For partial
+  /// failures, the EDN map includes `:failed-at` and `:error`.
+  transact-batch: func(tx-data-list: list<string>,
+                       tx-meta-list:  list<string>,
+                       request-ids:   list<string>)
+                  -> result<string, db-error>;
+
   /// Pull. `eid` is an EDN string carrying either an integer eid or a
   /// lookup-ref like `[:person/name "alice"]`. `basis-t` of 0 means "current".
   pull: func(selector: string, eid: string, basis-t: s64) -> result<string, db-error>;

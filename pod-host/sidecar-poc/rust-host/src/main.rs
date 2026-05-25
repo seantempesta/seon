@@ -776,6 +776,72 @@ impl DbHandle {
         self.transact_full(tx_data_edn, None, None).await
     }
 
+    /// Guest-driven batch. Ships N tx-datas in one wire call directly to the
+    /// JVM writer's `transact-batch` op (bypasses the opportunistic
+    /// `TransactBatcher` because the guest has already done the batching).
+    /// Each list (`tx_meta_list`, `request_ids`) is None to omit, or Some(v)
+    /// where v.len() == tx_data_list.len(). Per-entry None values inside a
+    /// Some list are encoded as Cbor::Null.
+    ///
+    /// Snapshot-cache invalidation: walks every per-tx report in the
+    /// response and calls `cache.on_tx(basis-t)` for each — same effect
+    /// as N individual transact wire calls. Latency: one sample per
+    /// batched tx (each entry "waited" the same wall-time).
+    pub async fn transact_batch(
+        &self,
+        tx_data_list: Vec<String>,
+        tx_meta_list: Option<Vec<Option<String>>>,
+        request_ids:  Option<Vec<Option<String>>>,
+    ) -> Result<Cbor> {
+        if let Some(ms) = &tx_meta_list {
+            if ms.len() != tx_data_list.len() {
+                bail!("transact_batch: tx-meta-list length {} != tx-data-list length {}",
+                      ms.len(), tx_data_list.len());
+            }
+        }
+        if let Some(rs) = &request_ids {
+            if rs.len() != tx_data_list.len() {
+                bail!("transact_batch: request-ids length {} != tx-data-list length {}",
+                      rs.len(), tx_data_list.len());
+            }
+        }
+        let n = tx_data_list.len();
+        let mut pairs: Vec<(&str, Cbor)> = vec![
+            ("op", Cbor::Text("transact-batch".into())),
+            ("tx-data-list",
+             Cbor::Array(tx_data_list.into_iter().map(Cbor::Text).collect())),
+        ];
+        if let Some(ms) = tx_meta_list {
+            pairs.push(("tx-meta-list",
+                        Cbor::Array(ms.into_iter()
+                                    .map(|x| x.map(Cbor::Text).unwrap_or(Cbor::Null))
+                                    .collect())));
+        }
+        if let Some(rs) = request_ids {
+            pairs.push(("request-ids",
+                        Cbor::Array(rs.into_iter()
+                                    .map(|x| x.map(Cbor::Text).unwrap_or(Cbor::Null))
+                                    .collect())));
+        }
+        let req = make_map(pairs);
+        let t0 = Instant::now();
+        let resp = self.writer.call(req).await?;
+        let elapsed = t0.elapsed();
+        // One latency sample per batched tx.
+        for _ in 0..n {
+            LatencyTracker::record(&self.latency.tx, elapsed);
+        }
+        // Walk reports for cache invalidation.
+        if let Some(Cbor::Array(reports)) = cbor_map_get(&resp, "reports") {
+            for rep in reports {
+                if let Some(bt) = cbor_map_get(rep, "basis-t").and_then(cbor_as_i64) {
+                    self.cache.on_tx(bt);
+                }
+            }
+        }
+        Ok(resp)
+    }
+
     /// Transact with optional tx-meta and request-id. Routes through the
     /// opportunistic batcher — singleton-fast-path commits as a normal
     /// `transact`; concurrent writers within `BATCH_MAX_WINDOW` coalesce

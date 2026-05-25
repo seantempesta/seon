@@ -117,6 +117,25 @@
                     (or tx-meta-edn "")
                     (or request-id ""))))
 
+(defn transact-batch-call
+  "Submit N tx-datas in one wire call. `tx-data-edns` is a vector of EDN
+   strings. `tx-meta-edns` and `request-ids` are either nil (= 'none for
+   any entry') or vectors of length N — per-entry nil/\"\" means 'absent'.
+   Returns the parsed reports map."
+  [tx-data-edns tx-meta-edns request-ids]
+  (let [n            (count tx-data-edns)
+        ->arr        (fn [xs] (clj->js (mapv #(or % "") xs)))
+        tx-data-arr  (clj->js (vec tx-data-edns))
+        tx-meta-arr  (if (seq tx-meta-edns) (->arr tx-meta-edns) (clj->js []))
+        req-id-arr   (if (seq request-ids)  (->arr request-ids)  (clj->js []))]
+    (when (and (seq tx-meta-edns) (not= (count tx-meta-edns) n))
+      (throw (ex-info "transact-batch: tx-meta-list length mismatch"
+                      {:expected n :got (count tx-meta-edns)})))
+    (when (and (seq request-ids) (not= (count request-ids) n))
+      (throw (ex-info "transact-batch: request-ids length mismatch"
+                      {:expected n :got (count request-ids)})))
+    (read-edn (invoke "transact-batch" tx-data-arr tx-meta-arr req-id-arr))))
+
 (defn pull-call [selector-edn eid-edn basis-t]
   (read-edn (invoke "pull" selector-edn eid-edn (->bigint basis-t))))
 

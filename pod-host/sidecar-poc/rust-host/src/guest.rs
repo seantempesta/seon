@@ -255,6 +255,67 @@ impl db_iface::Host for GuestStore {
         }
     }
 
+    async fn transact_batch(
+        &mut self,
+        tx_data_list: Vec<String>,
+        tx_meta_list: Vec<String>,
+        request_ids: Vec<String>,
+    ) -> wasmtime::Result<Result<String, db_iface::DbError>> {
+        // WIT can't carry `option<list<string>>` cleanly through wasm-rquickjs,
+        // so the contract is: an empty list means "omit". A non-empty list
+        // must have length equal to tx-data-list. Per-entry "absent" is the
+        // empty string "" (matches the same convention as transact's
+        // tx_meta="" and request_id="").
+        let n = tx_data_list.len();
+        let tx_meta_opt: Option<Vec<Option<String>>> = if tx_meta_list.is_empty() {
+            None
+        } else if tx_meta_list.len() == n {
+            Some(tx_meta_list.into_iter()
+                 .map(|s| if s.is_empty() { None } else { Some(s) })
+                 .collect())
+        } else {
+            return Ok(Err(db_iface::DbError::Protocol(format!(
+                "transact-batch: tx-meta-list length {} != tx-data-list length {}",
+                tx_meta_list.len(), n))));
+        };
+        let rid_opt: Option<Vec<Option<String>>> = if request_ids.is_empty() {
+            None
+        } else if request_ids.len() == n {
+            Some(request_ids.into_iter()
+                 .map(|s| if s.is_empty() { None } else { Some(s) })
+                 .collect())
+        } else {
+            return Ok(Err(db_iface::DbError::Protocol(format!(
+                "transact-batch: request-ids length {} != tx-data-list length {}",
+                request_ids.len(), n))));
+        };
+        match self.db.transact_batch(tx_data_list, tx_meta_opt, rid_opt).await {
+            Ok(resp) if is_ok(&resp) => {
+                // Build an EDN-ish map carrying applied/total/failed-at + the
+                // per-tx reports. Mirrors the wire shape so the CLJS overlay
+                // can read it back with edn/read-string.
+                let applied = cbor_field(&resp, "applied").map(cbor_to_edn).unwrap_or("0".into());
+                let total = cbor_field(&resp, "total").map(cbor_to_edn).unwrap_or("0".into());
+                let reports_edn = cbor_field(&resp, "reports").map(cbor_to_edn).unwrap_or("[]".into());
+                let failed_at = cbor_field(&resp, "failed-at");
+                let mut out = format!(
+                    "{{:applied {} :total {} :reports {}",
+                    applied, total, reports_edn
+                );
+                if let Some(fa) = failed_at {
+                    out.push_str(&format!(" :failed-at {}", cbor_to_edn(fa)));
+                    if let Some(err) = cbor_field(&resp, "error") {
+                        out.push_str(&format!(" :error {}", cbor_to_edn(err)));
+                    }
+                }
+                out.push('}');
+                Ok(Ok(out))
+            }
+            Ok(resp) => Ok(Err(db_iface::DbError::Internal(err_string(&resp)))),
+            Err(e) => Ok(Err(db_iface::DbError::Internal(format!("transact-batch failed: {e}")))),
+        }
+    }
+
     async fn pull(
         &mut self,
         selector: String,

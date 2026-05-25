@@ -110,6 +110,54 @@
      (when new-bt (reset! (:basis-t conn) new-bt))
      (assoc report :request-id request-id))))
 
+(defn transact-batch!
+  "Submit N tx-datas in one wire call. Each becomes its own datahike
+   transaction; failures stop the rest (partial-success report returned).
+
+   `tx-data-list` is a vector of tx-data vectors (or maps of
+   `{:tx-data ... :tx-meta ...}`). `tx-meta-list` and `request-ids` are
+   optional — per-entry nil means 'absent'. Length mismatches throw.
+
+   Returns a map shaped like:
+
+       {:applied N :total N
+        :reports [{:basis-t :basis-t-before :tempids :tx-data :tx-meta
+                   :datoms-added :datoms-retracted :request-id?} ...]
+        :failed-at? K :error? <string>}
+
+   Bumps the conn's `:basis-t` atom to the last successful report's basis-t.
+
+   Use this when a guest has multiple txes to commit in one logical step
+   and wants to amortize wire overhead. For uncoordinated single-tx calls
+   from multiple guests, the Rust host's opportunistic batcher coalesces
+   automatically — `transact!` is fine for that case."
+  ([conn tx-data-list]
+   (transact-batch! conn tx-data-list nil nil))
+  ([conn tx-data-list tx-meta-list]
+   (transact-batch! conn tx-data-list tx-meta-list nil))
+  ([conn tx-data-list tx-meta-list request-ids]
+   (let [n        (count tx-data-list)
+         ;; Each entry may itself be a tx-data vector or a `{:tx-data :tx-meta}` map.
+         pairs    (mapv normalize-tx tx-data-list)
+         tx-edns  (mapv first pairs)
+         ;; Prefer explicit tx-meta-list, fall back to per-entry tx-meta from
+         ;; the map shape (second of normalize-tx).
+         meta-edns
+         (cond
+           (some? tx-meta-list)
+           (mapv #(when % (pr-str %)) tx-meta-list)
+           (some second pairs)
+           (mapv second pairs)
+           :else nil)
+         result   (wit/transact-batch-call tx-edns meta-edns request-ids)
+         reports  (:reports result)
+         last-bt  (some-> reports last :basis-t)]
+     (when (and last-bt (pos? last-bt))
+       (reset! (:basis-t conn) last-bt))
+     ;; Echo `:total n` even when result lacked it (defensive).
+     (cond-> result
+       (not (:total result)) (assoc :total n)))))
+
 ;; ---------- q ----------
 
 (defn q
