@@ -128,12 +128,40 @@ green.
      compile-state-lifecycle research 2026-05-22) deleted. Item 10
      + Phase C/D should consume `seon.repl/!compile-state` or the
      inner atom threaded through `eval-batch!`.
-10. `eval-batch!` detect-and-tee using analyzer diff + registry-atom
+10. ✅ `eval-batch!` detect-and-tee using analyzer diff + registry-atom
     diff. Writes `:seon.fn` (with `:fn-var?`, `:arglists`, `:doc`,
     `:private?`, `:specced?`, `:created-at`), `:seon.schema` (with
     `:created-at`), `:seon.ns` entities. Single tx per form,
     merged with eval entity. Listener-side schemas-first partition
     (review's A4 finding).
+    - Shipped 2026-05-25 across two commits: `31e31cb` (detect-and-tee
+      core path + Tier 1 session-kill, combined) + `e425f79`
+      (projection-attr schema regs + 5 verifier-surfaced analyzer-info
+      bugs). MVP track now has NO blocking work; Tier 2 (kill
+      `:seon.session` entity) and Phase C (Platform unified bootstrap)
+      can proceed.
+    - Open MVP work: Phase E item 17 (debug-write flag) + item 18
+      (transient surface). Both parallel-safe with Platform's Tier 2
+      and Phase C/D.
+
+### Session-kill (Tier 2) — open design questions
+
+Research at [[research/turn-as-unit-2026-05-25]] surfaces 7 questions
+Platform should resolve with Sean before shipping Tier 2:
+
+1. Turn boundary — recommend "per LLM call" (= per `eval-batch!`).
+2. Forward ref only vs back-ref — recommend forward-only
+   (`:seon.agent/turns`), use `:seon.agent/_turns` reverse-ref in pulls.
+3. Turn identity — keep `:seon.turn/id` minted via `seon.db/new-id!`.
+4. `:interrupted` system message attach point — recommend attach to
+   **agent**, not turn (under new model).
+5. `:paused` semantics — kick-handler skips + explicit `(unpause! id)`.
+6. Multi-turn-in-flight per agent — recommend NO (per-agent run-mutex).
+7. MVP-side coupling — none. `record-eval!` needs zero changes;
+   item 10's tee writes don't reference `:seon.session/*`.
+
+Also: delete `:seon.db/session-id` tx-meta attr at the same time
+(agent-id alone suffices under the new model).
 
 **Phase C — unified bootstrap (Platform):**
 
