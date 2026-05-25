@@ -162,7 +162,18 @@
   ;;   - partial-cps: fix/ioc-await-probe-safety — defensive try/catch
   ;;     around the three macro-probe sites in ioc.clj so CLJS 1.12.145's
   ;;     cljs.core/await doesn't crash the CPS transformer.
-  :cljs {:extra-deps    {org.clojure/clojurescript            {:mvn/version "1.12.145"}
+  ;; Sidecar-overlay alias — opt-in V0 namespace shadowing for the
+  ;; sidecar-agent build. Adds `src-overlay/` AHEAD of `src/` so that
+  ;; `seon.db` etc. resolve to the sidecar-flavored copies. NEVER
+  ;; activate alongside `:client` — that build needs the real V0
+  ;; `seon.db`. Use: `clj -M:cljs:cljs-sidecar release sidecar-agent`.
+  :cljs-sidecar {:extra-paths ["pod-host/sidecar-poc/guest-cljs/src-overlay"]}
+
+  :cljs {;; Phase D — sidecar-poc guest-cljs lives outside src/; add as an
+         ;; extra-path so shadow-cljs's classpath picker finds
+         ;; sidecar-poc.* namespaces during the :sidecar-agent build.
+         :extra-paths   ["pod-host/sidecar-poc/guest-cljs/src"]
+         :extra-deps    {org.clojure/clojurescript            {:mvn/version "1.12.145"}
                          org.clojure/core.async               {:mvn/version "1.10.870-alpha2"}
                          thheller/shadow-cljs                 {:mvn/version "3.4.10"}
                          org.replikativ/datahike              {:mvn/version "0.8.1681"}

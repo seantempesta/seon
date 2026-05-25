@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# build-sidecar-agent — Phase C/D build orchestrator.
+#
+# Pipeline:
+#   1. Build the seon CLJS sidecar-agent bundle (clj -M:cljs release sidecar-agent
+#      → out/sidecar-agent/main.js).
+#   2. Generate the wasm-rquickjs wrapper crate from sidecar-agent.mjs +
+#      rust-host/wit/. Embeds the CLJS bundle as virtual module `sidecar/main`.
+#   3. Build to wasm32-wasip2 (release).
+#
+# Output:
+#   guest/sidecar-agent-build/target/wasm32-wasip2/release/sidecar_agent.wasm
+#
+# To run the multi-agent smoke after building:
+#   cd ../sidecar-poc/rust-host
+#   cargo run --release -- \
+#     --guest-wasm ../guest/sidecar-agent-build/target/wasm32-wasip2/release/sidecar_agent.wasm \
+#     --multi-agent --multi-duration-ms 300000
+
+set -euo pipefail
+
+cd "$(dirname "$0")"
+ROOT="$(pwd)"
+SEON_ROOT="$ROOT/../.."
+
+WANT_RUN=false
+DURATION_MS=300000
+
+for arg in "$@"; do
+  case "$arg" in
+    --run) WANT_RUN=true ;;
+    --duration-ms=*) DURATION_MS="${arg#*=}" ;;
+    --help|-h)
+      cat <<EOF
+Usage: ./build-sidecar-agent [--run] [--duration-ms=<ms>]
+
+  --run            After building, run the Rust host with --multi-agent.
+  --duration-ms=N  Duration of multi-agent run (default 300000 = 5min).
+EOF
+      exit 0 ;;
+    *) echo "x unknown arg: $arg" >&2; exit 2 ;;
+  esac
+done
+
+# ----- 1. CLJS bundle ------------------------------------------------------
+echo "> Building seon CLJS sidecar-agent bundle..."
+(cd "$SEON_ROOT" && clj -M:cljs release sidecar-agent)
+test -f "$SEON_ROOT/out/sidecar-agent/main.js" \
+  || { echo "x bundle missing at $SEON_ROOT/out/sidecar-agent/main.js"; exit 1; }
+echo "  bundle: $SEON_ROOT/out/sidecar-agent/main.js ($(wc -c < "$SEON_ROOT/out/sidecar-agent/main.js") bytes)"
+
+# ----- 2. wasm-rquickjs wrapper crate --------------------------------------
+echo "> Generating wasm-rquickjs wrapper crate..."
+rm -rf guest/sidecar-agent-build
+wasm-rquickjs generate-wrapper-crate \
+  --js-modules "bundle/script_module=$ROOT/guest/sidecar-agent.mjs" \
+  --js-modules "sidecar/main=$SEON_ROOT/out/sidecar-agent/main.js" \
+  --wit        "$ROOT/rust-host/wit" \
+  --output     "$ROOT/guest/sidecar-agent-build" \
+  --world      sidecar-guest
+
+# ----- 3. cargo wasm32-wasip2 release --------------------------------------
+echo "> Compiling to wasm32-wasip2 (release)..."
+(cd guest/sidecar-agent-build && cargo build --release --target wasm32-wasip2 \
+  --no-default-features \
+  --features="lite,node-http,crypto,zlib,encoding,logging")
+
+POD_WASM="guest/sidecar-agent-build/target/wasm32-wasip2/release/sidecar_guest.wasm"
+test -f "$POD_WASM" \
+  || { echo "x wasm not produced at $POD_WASM"; exit 1; }
+echo "OK built: $POD_WASM ($(wc -c < "$POD_WASM") bytes)"
+
+# ----- 4. Optional run -----------------------------------------------------
+if [[ "$WANT_RUN" == "true" ]]; then
+  echo "> Running Rust host with --multi-agent (duration ${DURATION_MS}ms)..."
+  (cd rust-host && cargo run --release -- \
+    --guest-wasm "$ROOT/$POD_WASM" \
+    --multi-agent \
+    --multi-duration-ms "$DURATION_MS")
+fi
