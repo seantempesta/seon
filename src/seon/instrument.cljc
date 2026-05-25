@@ -38,15 +38,27 @@
      "Compile-time scan: walk every CLJS namespace matching
       `ns-pattern` (a string prefix; e.g. \"seon\"), find every def
       whose metadata carries `:malli/schema`, and return a vector of
-      [ns-sym fn-sym schema-form] triples. Run at macroexpand time."
+      [ns-sym fn-sym schema-form] triples. Run at macroexpand time.
+
+      `^:async` fns are skipped — their `:malli/schema` describes the
+      RESOLVED value, but the wrapped fn returns a Promise. Instrumenting
+      them would trip `:malli.core/invalid-output` on every call.
+      Validating Promise-returning fns requires `await`-then-validate
+      which `mi/instrument!` doesn't do. Two viable cleanups (both
+      deferred): (1) a custom async-aware wrapper that awaits before
+      output validation, (2) a per-fn opt-out marker. For v1 we just
+      skip — input validation is the bigger win, and async fns mostly
+      delegate to other (synchronously instrumented) fns anyway."
      [ns-pattern]
      (vec
        (for [ns-sym  (ana/all-ns)
              :let    [ns-str (str ns-sym)]
              :when   (clojure.string/starts-with? ns-str ns-pattern)
              [fn-sym ana-info] (ana/ns-publics ns-sym)
-             :let    [schema (get-in ana-info [:meta :malli/schema])]
-             :when   schema]
+             :let    [meta-map (:meta ana-info)
+                      schema   (:malli/schema meta-map)
+                      async?   (boolean (:async meta-map))]
+             :when   (and schema (not async?))]
          [ns-sym fn-sym schema]))))
 
 #?(:clj
