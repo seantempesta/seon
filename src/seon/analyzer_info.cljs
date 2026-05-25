@@ -32,10 +32,14 @@
 ;; map; no useful Malli shape, and consumers pass it opaquely.
 (schema/register! ::compile-state :any)
 
-;; {ns-sym → #{def-sym ...}}
-(schema/register! ::defs-snapshot [:map-of :symbol [:set :symbol]])
+;; {ns-sym → {def-sym → digest-hash}}. The digest is a single int
+;; produced by `var-digest` covering the semantically-load-bearing
+;; subset of the var-map (`:fn-var`, `:arglists`, `:doc`, `:private`,
+;; `:malli/schema`). Re-defs change the digest even when the keyset
+;; doesn't, which is what `defs-since` needs to detect (B1).
+(schema/register! ::defs-snapshot [:map-of :symbol [:map-of :symbol :int]])
 
-;; Output of `defs-since` — one entry per newly-added def.
+;; Output of `defs-since` — one entry per newly-added OR re-defined def.
 (schema/register! ::new-def
                   [:map
                    [:ns :symbol]
@@ -53,42 +57,88 @@
                    [:specced? :boolean]])
 
 ;;; ---------------------------------------------------------------------------
+;;; Internals
+;;; ---------------------------------------------------------------------------
+
+(defn- var-digest
+  "Single-int hash of the semantically-load-bearing subset of an
+   analyzer var-map. Used by snapshot-defs / defs-since to detect
+   re-definitions (B1): two var-maps with the same keys but different
+   `:doc` (or `:arglists`, `:private`, etc.) produce different digests.
+
+   We deliberately exclude `:line` / `:column` / `:file` / `:env` —
+   those churn without semantic effect (e.g. cljs.js re-emits
+   source-location metadata on every eval) and would cause false
+   redef detections."
+  [var-map]
+  (let [m (:meta var-map)]
+    (hash [(:fn-var var-map)
+           (:arglists var-map)
+           (:doc m)
+           (:private m)
+           (:malli/schema m)])))
+
+;;; ---------------------------------------------------------------------------
 ;;; Public API
 ;;; ---------------------------------------------------------------------------
 
 (defn snapshot-defs
-  "Snapshot of `{ns-sym → #{def-syms}}` in the analyzer's current
-   `:cljs.analyzer/namespaces` map. Pure read of `@compile-state`.
-   Cheap — no walking of var-maps, just keyset extraction."
+  "Snapshot of `{ns-sym → {def-sym → digest-hash}}` in the analyzer's
+   current `:cljs.analyzer/namespaces` map. The digest covers the
+   semantically-meaningful fields of each var-map (see `var-digest`),
+   so a re-def with changed doc/arglists/etc. produces a different
+   digest — which is what `defs-since` keys off of (B1)."
   {:malli/schema [:=> [:cat ::compile-state] ::defs-snapshot]}
   [compile-state]
+  {:pre [(some? compile-state)]}
   (into {}
         (for [[ns-sym ns-info] (get @compile-state :cljs.analyzer/namespaces)]
-          [ns-sym (set (keys (:defs ns-info)))])))
+          [ns-sym (into {} (for [[sym var-map] (:defs ns-info)
+                                 :when (simple-symbol? sym)]
+                             [sym (var-digest var-map)]))])))
 
 (defn defs-since
-  "Seq of `{:ns :sym :var-map}` for every def present now that wasn't
-   in `before-snapshot`. Used by detect-and-tee to identify newly-
-   defined vars after a form evals. `var-map` is the raw analyzer
-   entry — pass it to `var-projection` to get the persistable shape."
+  "Seq of `{:ns :sym :var-map}` for every def present now whose digest
+   differs from `before-snapshot` — i.e. brand-new defs AND re-defs
+   whose load-bearing var-map fields changed (B1).
+
+   Filters out `:declared true` entries (`(declare …)` produces a
+   skeleton var-map with no body/arglists; tee'ing it would persist
+   noise and overwrite a subsequent real defn's projection if the
+   declare came after — A7)."
   {:malli/schema [:=> [:cat ::defs-snapshot ::compile-state] [:sequential ::new-def]]}
   [before-snapshot compile-state]
+  {:pre [(map? before-snapshot) (some? compile-state)]}
   (let [ns-map (get @compile-state :cljs.analyzer/namespaces)]
     (for [[ns-sym ns-info] ns-map
           [sym var-map]    (:defs ns-info)
-          :when (not (contains? (get before-snapshot ns-sym #{}) sym))]
+          :let [before-digest (get-in before-snapshot [ns-sym sym])
+                now-digest    (var-digest var-map)]
+          ;; - simple-symbol? filters out the multi-arity sub-records
+          ;;   cljs.js writes into :defs keyed by the FULLY-QUALIFIED
+          ;;   name (e.g. {ns-sym 'probe.q :defs {'probe.q/multi
+          ;;   {:methods …}}}). They carry no :name / :arglists and
+          ;;   would tee as junk.
+          ;; - :declared filters (declare …) skeletons (A7).
+          :when (and (simple-symbol? sym)
+                     (not (true? (:declared var-map)))
+                     (not= before-digest now-digest))]
       {:ns ns-sym :sym sym :var-map var-map})))
 
 (defn ns-deps
   "Set of agent-ns syms `ns-sym` depends on, intersected with
    `known-ns-set` (so cljs.core / clojure.* / bootstrap nses drop
-   out). Reads the analyzer's `:requires` + `:uses` maps directly.
-   Excludes self. Used by Phase D bulk-load resume for topo-sort."
+   out). Reads the analyzer's `:requires` + `:uses` + `:require-macros`
+   maps directly. Excludes self. Used by Phase D bulk-load resume for
+   topo-sort. `:require-macros` matters because macro-only deps
+   (e.g. `(:require-macros [foo.macros :as fm])`) don't show up in
+   `:requires` but DO need to load first on resume."
   {:malli/schema [:=> [:cat ::compile-state :symbol [:set :symbol]] [:set :symbol]]}
   [compile-state ns-sym known-ns-set]
   (let [ns-info (get-in @compile-state [:cljs.analyzer/namespaces ns-sym])
         deps   (set (concat (vals (:requires ns-info))
-                            (vals (:uses ns-info))))]
+                            (vals (:uses ns-info))
+                            (vals (:require-macros ns-info))))]
     (-> deps
         (disj ns-sym)
         (set/intersection known-ns-set))))
@@ -100,14 +150,21 @@
    §2.2 `:seon.fn/*` attr shapes (`:fn-var?`, `:arglists` pr-str'd,
    `:doc`, `:private?`, `:specced?`).
 
-   Analyzer note: `:arglists` arrives wrapped in a `(quote ...)`
-   form (e.g. `(quote ([k v]))`). `pr-str` preserves that exactly —
-   resume parses it back with `read-string` if needed."
+   Arglists normalization (A6): single-arity defs land in the analyzer
+   wrapped in a `(quote …)` form (e.g. `(quote ([x]))`); multi-arity
+   defs land bare (e.g. `(([x]) ([x y]))`). We strip the leading
+   `'quote` if present so the pr-str'd form is consistent across both
+   shapes — callers that read-string the value back get a usable
+   arglists structure either way."
   {:malli/schema [:=> [:cat [:map-of :any :any]] ::var-projection]}
-  [{:keys [name fn-var arglists meta] :as _var-map}]
-  {:sym       (str name)
-   :fn-var?   (boolean fn-var)
-   :arglists  (pr-str arglists)
-   :doc       (or (:doc meta) "")
-   :private?  (boolean (:private meta))
-   :specced?  (some? (:malli/schema meta))})
+  [{:keys [name fn-var arglists meta] :as var-map}]
+  {:pre [(map? var-map)]}
+  (let [al (if (and (seq? arglists) (= 'quote (first arglists)))
+             (second arglists)
+             arglists)]
+    {:sym       (str name)
+     :fn-var?   (boolean fn-var)
+     :arglists  (pr-str al)
+     :doc       (or (:doc meta) "")
+     :private?  (boolean (:private meta))
+     :specced?  (some? (:malli/schema meta))}))

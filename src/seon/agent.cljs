@@ -248,13 +248,22 @@
 (schema/register! :seon.ns/name    [:keyword {:seon.db/identity true}])
 (schema/register! :seon.ns/source  :string)
 
-(schema/register! :seon.fn/sym     [:string {:seon.db/identity true}])
-(schema/register! :seon.fn/ns      :seon.db/ref)
-(schema/register! :seon.fn/source  :string)
+(schema/register! :seon.fn/sym        [:string {:seon.db/identity true}])
+(schema/register! :seon.fn/ns         :seon.db/ref)
+(schema/register! :seon.fn/source     :string)
+;; Projections from the analyzer's var-map (v1.md §2.2 / Phase B item 10).
+;; Re-derived on every detect-and-tee + on bulk-load resume.
+(schema/register! :seon.fn/fn-var?    :boolean)
+(schema/register! :seon.fn/arglists   :string)
+(schema/register! :seon.fn/doc        :string)
+(schema/register! :seon.fn/private?   :boolean)
+(schema/register! :seon.fn/specced?   :boolean)
+(schema/register! :seon.fn/created-at :inst)
 
-(schema/register! :seon.schema/key    [:keyword {:seon.db/identity true}])
-(schema/register! :seon.schema/ns     :seon.db/ref)
-(schema/register! :seon.schema/source :string)
+(schema/register! :seon.schema/key        [:keyword {:seon.db/identity true}])
+(schema/register! :seon.schema/ns         :seon.db/ref)
+(schema/register! :seon.schema/source     :string)
+(schema/register! :seon.schema/created-at :inst)
 
 ;; ============================================================
 ;; Home-ns derivation. Per spec-05 §22.5 the agent's home ns is a

@@ -283,9 +283,16 @@
    :seon.fn/sym
    :seon.fn/ns
    :seon.fn/source
+   :seon.fn/fn-var?
+   :seon.fn/arglists
+   :seon.fn/doc
+   :seon.fn/private?
+   :seon.fn/specced?
+   :seon.fn/created-at
    :seon.schema/key
    :seon.schema/ns
    :seon.schema/source
+   :seon.schema/created-at
 
    ;; --- Log (A-6) ---
    :seon.log/at

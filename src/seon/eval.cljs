@@ -624,12 +624,14 @@
 ;; the :seon.db/eval-id tx-meta — the eval IS the tx that wrote the
 ;; program-graph datom.
 ;;
-;; Redefinition: identity-attr upserts on :seon.fn/sym / :seon.schema/key
-;; mean re-evaling (defn foo …) replaces the source/projection in
-;; place; history retains prior values. (defs-since returns empty on
-;; redef since `before` already contained the sym; v1 design pick (b)
-;; in the brief — bulk-load resume reads the latest :seon.fn/source
-;; per identity, which is what the upsert leaves behind.)
+;; Redefinition: snapshot-defs digests each var-map (B1 fix
+;; 2026-05-25), so a re-defn with changed body/doc/arglists/etc.
+;; surfaces in defs-since just like a brand-new def. The tee then
+;; transacts the updated projection; identity-attr upsert on
+;; :seon.fn/sym / :seon.schema/key replaces the prior value in place;
+;; bitemporal history retains all prior values. Bulk-load resume reads
+;; the latest :seon.fn/source per identity. No special-case guard
+;; against re-defs — the digest + upsert path does the right thing.
 ;; ============================================================
 
 (defn- ns-form-name
