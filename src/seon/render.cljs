@@ -29,6 +29,9 @@
    bundle) AND agent-defined fns (written by `cljs.js/eval-str` at the
    same munged paths). Single path, no boot-time wire-up needed."
   (:require
+    [clojure.string :as str]
+    [datahike.api :as d]
+    [seon.db :as db]
     [seon.eval :as eval]
     [seon.render.default :as default]
     [seon.schema :as schema]))
@@ -108,3 +111,143 @@
 
     :else
     (default/pretty-html input-map)))
+
+;; ============================================================
+;; tx-log-as-context (PRD docs/prds/agent-runtime/tx-log-as-context-v1.md).
+;;
+;; Renderable entities are simply entities carrying a `:seon.render/ai`
+;; symbol. We don't curate a separate `:seon.ctx/*` namespace — the
+;; producer of the entity (eval recorder, message writer, user-message
+;; transactor) attaches the symbol directly.
+;;
+;; Per-agent scoping uses tx-meta `:seon.db/agent-id`: the query reads
+;; the agent-id stamped on each entity's most-recent assertion. Without
+;; an agent-id stamp the entity is substrate-wide (always visible).
+;;
+;; Sticky entities (`:seon.sticky/position :prefix`) are always
+;; included and sorted by `:seon.sticky/order` (sparse int, manual).
+;; The window is "last N renderable entities by tx-time" with N
+;; defaulting to 64 (agent override: `:seon.agent/window-size`).
+;;
+;; Token budget is a coarse char-count heuristic for v0 (4 chars ≈ 1
+;; token). Replace with a real tokenizer when measured.
+;; ============================================================
+
+(schema/register! :seon.sticky/position [:enum :prefix :suffix])
+(schema/register! :seon.sticky/order    :int)
+(schema/register! :seon.sticky/id       [:string {:seon.db/identity true}])
+
+(schema/register! :seon.agent/window-size [:int {:min 1 :max 512}])
+
+(def ^:private default-window-size 64)
+
+(defn- entity-last-tx
+  "Return the latest tx eid that asserted any attr on `eid`. Used to
+   sort renderable entities oldest-first by their newest assertion."
+  [db eid]
+  (->> (d/datoms db :eavt eid)
+       (map (fn [^js d] (.-tx d)))
+       (reduce max 0)))
+
+(defn- tx-agent-id
+  [db tx-eid]
+  (:seon.db/agent-id (d/entity db tx-eid)))
+
+(defn- renderable-entities
+  "Walk the db's AEVT index for `:seon.render/ai` (cheap because
+   datahike maintains an index per attr). Returns a seq of maps:
+
+     {:eid <entity-id>
+      :last-tx <tx-eid>
+      :agent-id <string-or-nil>
+      :entity <pulled-entity-map>}
+
+   Filtered by agent scope: substrate (nil agent-id) or matching
+   agent-id are kept; everything else dropped."
+  [db agent-id]
+  (let [eids (->> (d/datoms db :aevt :seon.render/ai)
+                  (map (fn [^js d] (.-e d)))
+                  distinct)
+        rows (for [eid eids
+                   :let [tx     (entity-last-tx db eid)
+                         tx-aid (tx-agent-id db tx)
+                         ent    (d/pull db '[*] eid)]
+                   :when (or (nil? tx-aid) (= tx-aid agent-id))]
+               {:eid eid :last-tx tx :agent-id tx-aid :entity ent})]
+    rows))
+
+(defn- sticky?
+  [row]
+  (= :prefix (:seon.sticky/position (:entity row))))
+
+(defn- sort-prefix
+  [rows]
+  (sort-by (juxt #(or (:seon.sticky/order (:entity %)) 0)
+                 :last-tx)
+           rows))
+
+(defn- sort-window
+  [rows]
+  (sort-by :last-tx rows))
+
+(defn- render-one
+  "Resolve the entity's `:seon.render/ai` symbol and call it with the
+   system-input shape. Falls back to pretty-ai when the symbol misses.
+   Returns the rendered string."
+  [{:seon.db/keys [db] :seon.agent/keys [id]} entity]
+  (let [sym   (:seon.render/ai entity)
+        f     (or (eval/lookup-value sym) default/pretty-ai)
+        input {:seon.db/db    db
+               :seon.agent/id id
+               :seon.render/entity entity}
+        out   (try (f input) (catch :default _ nil))]
+    (or (:seon.render/text out) (str out))))
+
+(schema/register! :seon.render/assemble-ai-request
+  [:map
+   [:seon.agent/id        :string]
+   [:seon.db/db           {:optional true} :any]
+   [:seon.agent/window-size {:optional true} :seon.agent/window-size]])
+
+(schema/register! :seon.render/assemble-ai-response
+  [:map
+   [:seon.render/text     :string]
+   [:seon.render/entities [:vector :any]]
+   [:seon.render/token-estimate :int]])
+
+(defn assemble-ai-context
+  "Tx-log-as-context assembly.
+
+   1. Query all entities carrying `:seon.render/ai` visible to the agent
+      (substrate or own tx).
+   2. Split into prefix-sticky and window.
+   3. Sort prefix by `:seon.sticky/order` then tx-time; window by tx-time
+      (oldest first).
+   4. Take last N of window where N = `:seon.agent/window-size` (default 64).
+   5. Render each via its symbol; concatenate with blank-line separator.
+
+   Returns
+     `{:seon.render/text \"...\"
+       :seon.render/entities [<entity-map> ...]   ; render order
+       :seon.render/token-estimate <int>}`        ; char-count / 4 v0 heuristic"
+  {:malli/schema [:=> [:cat :seon.render/assemble-ai-request]
+                       :seon.render/assemble-ai-response]}
+  [{:seon.agent/keys [id window-size] :seon.db/keys [db]}]
+  (let [db    (or db @db/*conn*)
+        n     (or window-size default-window-size)
+        rows  (renderable-entities db id)
+        {sticks true window false} (group-by sticky? rows)
+        sticky-sorted (sort-prefix (or sticks []))
+        window-sorted (->> (or window []) sort-window vec)
+        window-tail   (vec (take-last n window-sorted))
+        ordered       (concat sticky-sorted window-tail)
+        ents          (mapv :entity ordered)
+        parts         (->> ordered
+                           (map #(render-one {:seon.db/db db :seon.agent/id id}
+                                              (:entity %)))
+                           (remove str/blank?))
+        text          (str/join "\n\n" parts)
+        token-est     (quot (count text) 4)]
+    {:seon.render/text  text
+     :seon.render/entities ents
+     :seon.render/token-estimate token-est}))
