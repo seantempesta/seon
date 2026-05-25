@@ -47,6 +47,7 @@ pod-host/sidecar-poc/
 | **PC — shadow-cljs build + real CLJS agent guest** | **GREEN** | CLJS agent compiled to wasm32-wasip2 via shadow-cljs `:sidecar-agent` build + `build-sidecar-agent` script; `next-tx-event` wired host-to-guest (non-blocking try_recv + setTimeout-based polling in overlay); CAS + tx-data scanning end-to-end. |
 | **PD — N=3 multi-agent smoke**  | **GREEN** | 300s run: writer 752 commits / reader 1827 events / mixed 1828 events + 538 completed CAS-to-done cycles; 0 out-of-order events, 0 CAS conflicts, 0 errors. |
 | **PE — tx batcher + cache fix**  | **GREEN** | Opportunistic Rust-host transact batcher (2ms / 32-item window, mpsc-FIFO, singleton fast-path); JVM `transact-batch` op wired end-to-end. Cache `q_at` insert path fixed — was using response basis-t which collapsed pinned entries; now uses requested basis-t. **Hit rate 0.97% → 99.1%** on cache-friendly workload; q-hit p50=0us; tx p50 124→86ms. See `bench/tx-batcher-and-cache-fix-2026-05-25.md`. |
+| **PF — multi-world isolation** | **GREEN** | N parallel JVM writers, one per world. Agents partitioned by world via WASI env. Lazy-spawn from `WorldRegistry::get_or_spawn`. 2x2x30s + 3x1x60s smokes both isolate cleanly — disjoint task-id sets, 0 cross-world events, 0 out-of-order. See [WORLDS.md](WORLDS.md). |
 | P5 — wire a real Seon agent     | not started | V0 substrate compiles into the guest (Phase B v0-probe; see `bench/v0-port-survey.md`). Sub-goal-2 work (WASI preopen for bootstrap caches + LLM stub + V0 turn driver) NOT shipped this session; budget consumed by 3b + 4. |
 | P6 — run a compiled tauri wasm pod | not started | |
 | P7 — multi-pod stress           | not started | |
@@ -927,3 +928,73 @@ requires:
    incrementally from tx-data. This is what `datahike.tools.datalog`
    on JVM does for indexes; the sidecar doesn't yet have an
    equivalent.
+
+## Multi-world
+
+Parallel agents in physically isolated datahike databases. Each world owns
+its own JVM writer, sockets, store, snapshot cache, and broadcast channel.
+Lazily spawned from `WorldRegistry::get_or_spawn(name)`. See
+[WORLDS.md](WORLDS.md) for the architecture, isolation guarantees, and
+trade-offs.
+
+```bash
+cd pod-host/sidecar-poc/rust-host
+cargo run --release -- \
+  --guest-wasm ../guest/sidecar-agent-build/target/wasm32-wasip2/release/sidecar_guest.wasm \
+  --multi-world --worlds alpha,beta --agents-per-world 2 --multi-duration-ms 30000
+```
+
+## Phase PF — multi-world smoke (2026-05-25, GREEN)
+
+Two runs, both clean:
+
+### 2 worlds × 2 agents × 30s
+
+```
+worlds:                 alpha, beta
+agents:                 writer + reader per world
+boot:                   34.9s for both JVMs in parallel
+wall:                   49.1s
+
+[world=alpha] total=22 pending=22 in-progress=0 done=0 results=0
+[world=alpha] cache: entries=26 hits=107 misses=27 invalidations=1
+[world=alpha] tx     : n=23  p50=120932us  p95=335074us  p99=1719033us
+[world=beta]  total=21 pending=21 in-progress=0 done=0 results=0
+[world=beta]  cache: entries=26 hits=106 misses=27 invalidations=1
+[world=beta]  tx     : n=22  p50=118483us  p95=173884us  p99=1705757us
+
+--- cross-contamination check ---
+[alpha ∩ beta] disjoint OK  (|alpha|=22, |beta|=21)
+```
+
+Per-world reader `out-of-order` events: **0** in both. Each world's
+reader saw exactly its own world's writer commits (21 events each in
+alpha+beta — no cross-bleed).
+
+### 3 worlds × 1 agent × 60s
+
+```
+worlds:                 alpha, beta, gamma
+agents:                 writer per world
+wall:                   97.2s
+
+[world=alpha] total=114  basis-t=536871027  tx p50=169661us
+[world=beta]  total=114  basis-t=536871027  tx p50=165890us
+[world=gamma] total=112  basis-t=536871025  tx p50=175047us
+
+--- cross-contamination check ---
+[alpha ∩ beta]  disjoint OK  (|alpha|=114, |beta|=114)
+[alpha ∩ gamma] disjoint OK  (|alpha|=114, |gamma|=112)
+[beta ∩ gamma]  disjoint OK  (|beta|=114, |gamma|=112)
+```
+
+Three independent basis-t lines. Each world progressed at ~2 commits/sec
+through its own JVM writer, with zero cross-world coupling.
+
+### Isolation claim
+
+Verified by construction (separate processes + sockets + on-disk stores
++ in-process broadcast channels — see WORLDS.md) and by empirical check
+(disjoint task-id sets across every world pair; 0 out-of-order events
+per world's reader). Adding worlds is constant cost per world (JVM
+boot + tokio plumbing); the host scales linearly.

@@ -6,13 +6,29 @@ tags: [reference, agent, database]
 
 # Sidecar wire protocol (PoC)
 
+The wire protocol is **per-world**. A world is a complete sidecar instance —
+its own JVM writer, its own konserve store, its own pair of UDS sockets,
+its own broadcast channel, its own snapshot cache. The default deployment
+is a single world named `"default"`. Multi-world deployments add named
+worlds (`alpha`, `beta`, …); see [WORLDS.md](WORLDS.md). Each world speaks
+the protocol described below over its own sockets.
+
+The Rust host hides the per-world socket selection from guests: a guest is
+bound to a world at instantiation time (via `WorldRegistry::get_or_spawn`)
+and never sees the underlying socket paths. The `seon:sidecar/db` WIT
+interface routes through the world's `DbHandle` automatically.
+
 Two Unix domain sockets between the **client** (Rust host / smoke driver) and the
-**JVM writer** subprocess:
+**JVM writer** subprocess. Socket paths for world `<name>`:
 
 | Socket | Direction | Shape |
 |---|---|---|
-| `/tmp/seon-poc-req.sock`  | client → writer, length-framed req/resp | one request → one response |
-| `/tmp/seon-poc-pub.sock`  | writer → all subscribers, length-framed pub | server pushes tx events |
+| `<sock-base>-<world>-req.sock`  | client → writer, length-framed req/resp | one request → one response |
+| `<sock-base>-<world>-pub.sock`  | writer → all subscribers, length-framed pub | server pushes tx events |
+
+The default `<sock-base>` is `/tmp/seon-poc`; legacy single-world deployments
+used `/tmp/seon-poc-req.sock` and `/tmp/seon-poc-pub.sock` directly. The
+default world's sockets are now `/tmp/seon-poc-default-{req,pub}.sock`.
 
 Both sockets carry **CBOR-encoded** messages with a 4-byte big-endian length
 prefix on the wire:

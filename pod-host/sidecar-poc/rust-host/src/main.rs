@@ -1009,6 +1009,9 @@ impl DbHandle {
 // ---------------- JVM supervisor ----------------
 
 struct JvmSupervisor {
+    /// Kept alive so the Child's `kill_on_drop(true)` fires when the
+    /// supervisor (and thus the World) is dropped.
+    #[allow(dead_code)]
     child: Mutex<Option<Child>>,
 }
 
@@ -1063,6 +1066,7 @@ impl JvmSupervisor {
         }
     }
 
+    #[allow(dead_code)]
     async fn shutdown(&self) -> Result<()> {
         if let Some(mut child) = self.child.lock().await.take() {
             tracing::info!("killing JVM writer");
@@ -1070,6 +1074,185 @@ impl JvmSupervisor {
             let _ = child.wait().await;
         }
         Ok(())
+    }
+}
+
+// ---------------- World + WorldRegistry ----------------
+//
+// A world = its own JVM writer, sockets, snapshot cache, broadcast channel,
+// transact batcher. Multi-world isolation is by construction: zero shared
+// mutable state across worlds, separate processes/sockets/files.
+//
+// The "default" world is just a world. It's spawned by the registry on first
+// `get_or_spawn("default")` call. Single-guest, smoke, and REPL paths all
+// route through the default world.
+
+/// A world owns one JVM writer + its sockets/cache/broadcast. Cloning a
+/// `DbHandle` (cheap — internally Arcs) gives any caller a per-world db
+/// handle. Drop semantics: the underlying `JvmSupervisor` kills the child
+/// JVM when the last Arc to the World goes away.
+struct World {
+    name: String,
+    db: DbHandle,
+    /// Kept alive for as long as the World exists. The Child is killed
+    /// on Drop via `kill_on_drop(true)`.
+    _supervisor: Arc<JvmSupervisor>,
+    /// JoinHandles for the writer-actor + pub-subscriber + cache-listener
+    /// + batcher tasks. We don't await them; they live until the JVM dies
+    /// or the runtime shuts down. Held here so they're tied to the World
+    /// lifetime (currently not awaited on drop — best-effort).
+    #[allow(dead_code)]
+    _tasks: Vec<tokio::task::JoinHandle<()>>,
+}
+
+impl World {
+    /// Spawn a JVM writer for this world, connect to its sockets, build
+    /// the batcher/cache/latency/broadcast plumbing, return the World.
+    async fn spawn(
+        name: String,
+        writer_dir: &PathBuf,
+        backend: &str,
+        base_data_dir: &PathBuf,
+        sock_base: &str,
+    ) -> Result<Arc<Self>> {
+        let store_path = base_data_dir.join("worlds").join(&name).join("store");
+        // Ensure parent exists so the JVM's File.mkdirs has somewhere to plant.
+        if let Some(p) = store_path.parent() {
+            let _ = tokio::fs::create_dir_all(p).await;
+        }
+        let store_path_str = store_path
+            .to_str()
+            .ok_or_else(|| anyhow!("world store path not UTF-8: {:?}", store_path))?
+            .to_string();
+        let req_sock = format!("{}-{}-req.sock", sock_base, name);
+        let pub_sock = format!("{}-{}-pub.sock", sock_base, name);
+
+        let supervisor = JvmSupervisor::spawn(
+            writer_dir,
+            backend,
+            &store_path_str,
+            &req_sock,
+            &pub_sock,
+        )
+        .await?;
+        let supervisor = Arc::new(supervisor);
+
+        tracing::info!(world = %name, "waiting for world sockets");
+        JvmSupervisor::wait_for_socket(&req_sock, Duration::from_secs(60)).await?;
+        JvmSupervisor::wait_for_socket(&pub_sock, Duration::from_secs(60)).await?;
+
+        let req_stream = UnixStream::connect(&req_sock).await?;
+        let pub_stream = UnixStream::connect(&pub_sock).await?;
+
+        let (req_tx, req_rx) = mpsc::channel::<WriterRequest>(64);
+        let writer_task = tokio::spawn(run_writer_actor(req_stream, req_rx));
+
+        let (evt_tx, _evt_rx_keep) = broadcast::channel::<TxEvent>(256);
+        let pub_task = tokio::spawn(run_pub_subscriber(pub_stream, evt_tx.clone()));
+
+        let cache = Arc::new(SnapshotCache::new());
+
+        // Cache-invalidation listener.
+        let cache_task = {
+            let cache = cache.clone();
+            let mut rx = evt_tx.subscribe();
+            let world_name = name.clone();
+            tokio::spawn(async move {
+                while let Ok(ev) = rx.recv().await {
+                    cache.on_tx(ev.basis_t);
+                    tracing::debug!(world = %world_name, basis_t = ev.basis_t, "pub tx invalidate");
+                }
+            })
+        };
+
+        let latency = Arc::new(LatencyTracker::new());
+        let writer = WriterClient { tx: req_tx };
+
+        // Per-world transact batcher.
+        let (batch_tx, batch_rx) = mpsc::channel::<TransactItem>(256);
+        let batcher_task = {
+            let writer = writer.clone();
+            let cache = cache.clone();
+            let latency = latency.clone();
+            tokio::spawn(run_transact_batcher(writer, batch_rx, cache, latency))
+        };
+
+        let db = DbHandle {
+            writer,
+            batcher: TransactBatcher { tx: batch_tx },
+            cache: cache.clone(),
+            tx_events: evt_tx,
+            latency,
+        };
+
+        // Ping to confirm liveness.
+        let pong = db.ping().await?;
+        tracing::info!(world = %name, ?pong, "world writer ping ok");
+
+        Ok(Arc::new(Self {
+            name,
+            db,
+            _supervisor: supervisor,
+            _tasks: vec![writer_task, pub_task, cache_task, batcher_task],
+        }))
+    }
+
+    fn db(&self) -> DbHandle {
+        self.db.clone()
+    }
+}
+
+/// Registry that lazily spawns worlds by name. Concurrent `get_or_spawn`
+/// calls for the same name are serialized by an inner mutex; the slow
+/// spawn happens exactly once per name.
+struct WorldRegistry {
+    writer_dir: PathBuf,
+    backend: String,
+    base_data_dir: PathBuf,
+    sock_base: String,
+    worlds: tokio::sync::Mutex<std::collections::HashMap<String, Arc<World>>>,
+}
+
+impl WorldRegistry {
+    fn new(
+        writer_dir: PathBuf,
+        backend: String,
+        base_data_dir: PathBuf,
+        sock_base: String,
+    ) -> Self {
+        Self {
+            writer_dir,
+            backend,
+            base_data_dir,
+            sock_base,
+            worlds: tokio::sync::Mutex::new(std::collections::HashMap::new()),
+        }
+    }
+
+    async fn get_or_spawn(&self, name: &str) -> Result<Arc<World>> {
+        // Hold the registry lock across the spawn so a second concurrent
+        // call for the same name waits and reuses the result. For multi-
+        // world parallel spawn use the explicit `spawn_many` below.
+        let mut worlds = self.worlds.lock().await;
+        if let Some(w) = worlds.get(name) {
+            return Ok(w.clone());
+        }
+        tracing::info!(world = %name, "spawning new world");
+        let w = World::spawn(
+            name.to_string(),
+            &self.writer_dir,
+            &self.backend,
+            &self.base_data_dir,
+            &self.sock_base,
+        )
+        .await?;
+        worlds.insert(name.to_string(), w.clone());
+        Ok(w)
+    }
+
+    #[allow(dead_code)]
+    async fn list(&self) -> Vec<Arc<World>> {
+        self.worlds.lock().await.values().cloned().collect()
     }
 }
 
@@ -1086,19 +1269,15 @@ struct Args {
     #[arg(long, default_value = "file")]
     backend: String,
 
-    /// Store path (for --backend file)
-    #[arg(long, default_value = "../data/seon-poc-store")]
-    path: String,
+    /// Base data dir. Each world gets its own subdir at
+    /// `<data_dir>/worlds/<name>/store/`.
+    #[arg(long, default_value = "../data")]
+    data_dir: PathBuf,
 
-    #[arg(long, default_value = "/tmp/seon-poc-req.sock")]
-    req_sock: String,
-
-    #[arg(long, default_value = "/tmp/seon-poc-pub.sock")]
-    pub_sock: String,
-
-    /// Spawn the JVM writer ourselves. If false, assume one is already running.
-    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
-    spawn_writer: bool,
+    /// Base path/prefix for per-world UDS sockets. World `alpha` gets
+    /// `<sock_base>-alpha-req.sock` and `<sock_base>-alpha-pub.sock`.
+    #[arg(long, default_value = "/tmp/seon-poc")]
+    sock_base: String,
 
     /// Run an automated smoke test after startup and exit.
     #[arg(long, default_value_t = false)]
@@ -1129,6 +1308,23 @@ struct Args {
     /// (cache-friendly mode). Passed to the guest via SIDECAR_CACHE_BATCH.
     #[arg(long, default_value_t = 100u32)]
     cache_batch: u32,
+
+    /// Phase PF — multi-world smoke. Spawns N worlds in parallel, each
+    /// with its own JVM writer + sockets + store, and runs --agents-per-world
+    /// guest instances inside each. Use --worlds to name them.
+    #[arg(long, default_value_t = false)]
+    multi_world: bool,
+
+    /// Comma-separated world names for --multi-world. Default: "alpha,beta".
+    #[arg(long, default_value = "alpha,beta")]
+    worlds: String,
+
+    /// Agents per world for --multi-world. Each gets a writer/reader/mixed
+    /// role cycling through the three. With 1 agent per world the role is
+    /// "writer"; with 2 agents the second is "reader"; with 3+ the
+    /// pattern is writer/reader/mixed/writer/...
+    #[arg(long, default_value_t = 2u32)]
+    agents_per_world: u32,
 }
 
 // ---------------- Pretty-print a Cbor value (for the REPL) ----------------
@@ -1471,6 +1667,191 @@ async fn bench_writes(db: &DbHandle, n: usize) -> Result<String> {
     Ok(format!("total={:?} each={:?}", total, each))
 }
 
+/// Install the demo `:person/*` schema. Idempotent — duplicate attrs return
+/// an error from the JVM writer, which we ignore.
+async fn install_person_schema(db: &DbHandle) {
+    let schema = "[{:db/ident :person/name :db/valueType :db.type/string :db/cardinality :db.cardinality/one :db/unique :db.unique/identity}
+                   {:db/ident :person/age  :db/valueType :db.type/long   :db/cardinality :db.cardinality/one}]";
+    match db.transact(schema).await {
+        Ok(_)  => tracing::info!("guest schema installed (or already present)"),
+        Err(e) => tracing::warn!(error=%e, "guest schema install failed (continuing — may already be installed)"),
+    }
+}
+
+/// Install the Phase-D `:task/*` + `:result/*` schema. Idempotent.
+async fn install_phase_d_schema(db: &DbHandle) {
+    let task_schema = r#"[
+        {:db/ident :task/id        :db/valueType :db.type/string :db/cardinality :db.cardinality/one :db/unique :db.unique/identity}
+        {:db/ident :task/status    :db/valueType :db.type/keyword :db/cardinality :db.cardinality/one}
+        {:db/ident :task/created-by :db/valueType :db.type/keyword :db/cardinality :db.cardinality/one}
+        {:db/ident :task/created-ms :db/valueType :db.type/long   :db/cardinality :db.cardinality/one}
+        {:db/ident :task/started-ms :db/valueType :db.type/long   :db/cardinality :db.cardinality/one}
+        {:db/ident :task/done-ms   :db/valueType :db.type/long   :db/cardinality :db.cardinality/one}
+        {:db/ident :result/of      :db/valueType :db.type/string :db/cardinality :db.cardinality/one}
+        {:db/ident :result/blob    :db/valueType :db.type/string :db/cardinality :db.cardinality/one}
+        {:db/ident :result/by      :db/valueType :db.type/keyword :db/cardinality :db.cardinality/one}
+    ]"#;
+    match db.transact(task_schema).await {
+        Ok(_)  => tracing::info!("phase-D schema installed"),
+        Err(e) => tracing::warn!(error=%e, "phase-D schema install failed (continuing)"),
+    }
+}
+
+/// Phase PF — multi-world smoke. Spawns N worlds in parallel, each with
+/// `agents_per_world` guest instances. Returns when all worlds complete.
+async fn run_multi_world(
+    registry: Arc<WorldRegistry>,
+    wasm_path: PathBuf,
+    world_names: Vec<String>,
+    agents_per_world: u32,
+    duration_ms: u32,
+    bench_mode: String,
+    cache_batch: u32,
+) -> Result<()> {
+    println!(
+        "--- Phase PF multi-world smoke (worlds={:?}, agents-per-world={}, duration_ms={}) ---",
+        world_names, agents_per_world, duration_ms
+    );
+
+    let t_start = Instant::now();
+
+    // Spawn all worlds in parallel. Each get_or_spawn holds the registry
+    // mutex briefly during its own slot insert; the heavy work (JVM boot)
+    // happens before that, so worlds boot concurrently.
+    let spawn_futs: Vec<_> = world_names.iter().map(|name| {
+        let registry = registry.clone();
+        let name = name.clone();
+        async move { registry.get_or_spawn(&name).await }
+    }).collect();
+    let worlds: Vec<Arc<World>> = futures::future::try_join_all(spawn_futs).await?;
+    println!("all {} worlds booted in {:?}", worlds.len(), t_start.elapsed());
+
+    // Install the phase-D schema in every world (per-world isolated DBs).
+    for w in &worlds {
+        install_phase_d_schema(&w.db()).await;
+    }
+
+    // Build (world, agent_id, role) tasks. Role cycles writer/reader/mixed.
+    let roles = ["writer", "reader", "mixed"];
+    let mut agent_specs: Vec<(Arc<World>, String, String)> = Vec::new();
+    for w in &worlds {
+        for i in 0..agents_per_world {
+            let role = roles[(i as usize) % roles.len()].to_string();
+            let agent_id = format!("{}-{}-{}", w.name, role, i);
+            agent_specs.push((w.clone(), agent_id, role));
+        }
+    }
+
+    use futures::future::join_all;
+    let agent_futures: Vec<_> = agent_specs.into_iter().map(|(world, agent_id, role)| {
+        let wasm_path = wasm_path.clone();
+        let world_name = world.name.clone();
+        let db = world.db();
+        let dur = duration_ms;
+        let bench_mode = bench_mode.clone();
+        let cache_batch = cache_batch;
+        async move {
+            let t0 = Instant::now();
+            let mut g = guest::Guest::load_with_env(
+                wasm_path,
+                db,
+                &[
+                    ("SIDECAR_WORLD".to_string(),              world_name.clone()),
+                    ("SIDECAR_AGENT_ID".to_string(),           agent_id.clone()),
+                    ("SIDECAR_AGENT_ROLE".to_string(),         role.clone()),
+                    ("SIDECAR_AGENT_DURATION_MS".to_string(),  dur.to_string()),
+                    ("SIDECAR_BENCH_MODE".to_string(),         bench_mode.clone()),
+                    ("SIDECAR_CACHE_BATCH".to_string(),        cache_batch.to_string()),
+                ],
+            ).await?;
+            let loaded = t0.elapsed();
+            println!("[{}/{}/{}] guest loaded in {:?}", world_name, agent_id, role, loaded);
+            let t0 = Instant::now();
+            let bound = Duration::from_millis((dur as u64) + 3000);
+            let r = tokio::time::timeout(bound, g.run_agent(&agent_id, &role, dur)).await;
+            let run = t0.elapsed();
+            match r {
+                Ok(Ok(Ok(s))) => println!("[{}/{}/{}] DONE in {:?}: {}", world_name, agent_id, role, run, s),
+                Ok(Ok(Err(e))) => println!("[{}/{}/{}] ERR in {:?}: {}", world_name, agent_id, role, run, e),
+                Ok(Err(e)) => println!("[{}/{}/{}] HOST-ERR in {:?}: {}", world_name, agent_id, role, run, e),
+                Err(_) => println!("[{}/{}/{}] TIMEOUT-CLEAN-EXIT in {:?}", world_name, agent_id, role, run),
+            }
+            drop(g);
+            Ok::<_, anyhow::Error>(())
+        }
+    }).collect();
+    let _ = join_all(agent_futures).await;
+    let wall = t_start.elapsed();
+
+    // Per-world aggregates (each world has independent DB state).
+    println!("--- Phase PF per-world results ---");
+    let pending_q = "[:find (count ?e) :where [?e :task/status :pending]]";
+    let inprog_q  = "[:find (count ?e) :where [?e :task/status :in-progress]]";
+    let done_q    = "[:find (count ?e) :where [?e :task/status :done]]";
+    let total_q   = "[:find (count ?e) :where [?e :task/id _]]";
+    let results_q = "[:find (count ?e) :where [?e :result/blob _]]";
+    for w in &worlds {
+        let db = w.db();
+        let p     = db.q(pending_q, vec![]).await?;
+        let ip    = db.q(inprog_q,  vec![]).await?;
+        let d     = db.q(done_q,    vec![]).await?;
+        let total = db.q(total_q,   vec![]).await?;
+        let rc    = db.q(results_q, vec![]).await?;
+        println!("[world={}] total={} pending={} in-progress={} done={} results={}",
+                 w.name,
+                 cbor_to_string(&total),
+                 cbor_to_string(&p),
+                 cbor_to_string(&ip),
+                 cbor_to_string(&d),
+                 cbor_to_string(&rc));
+        println!("[world={}] cache: {:?}", w.name, db.cache.stats());
+        println!("[world={}] {}", w.name, db.latency.report());
+    }
+
+    // Cross-contamination check: pick any two worlds' :task/id sets and
+    // assert they are disjoint. Also verify each world only sees its own
+    // agents (via :task/created-by ns prefix).
+    if worlds.len() >= 2 {
+        println!("--- cross-contamination check ---");
+        for (i, wa) in worlds.iter().enumerate() {
+            for wb in worlds.iter().skip(i + 1) {
+                let ids_a = wa.db().q("[:find ?id :where [?e :task/id ?id]]", vec![]).await?;
+                let ids_b = wb.db().q("[:find ?id :where [?e :task/id ?id]]", vec![]).await?;
+                let set_a: std::collections::HashSet<String> = extract_task_id_set(&ids_a);
+                let set_b: std::collections::HashSet<String> = extract_task_id_set(&ids_b);
+                let inter: Vec<&String> = set_a.intersection(&set_b).collect();
+                if inter.is_empty() {
+                    println!("[{} ∩ {}] disjoint OK  (|{}|={}, |{}|={})",
+                             wa.name, wb.name, wa.name, set_a.len(), wb.name, set_b.len());
+                } else {
+                    println!("[{} ∩ {}] CROSS-CONTAMINATION: {} shared ids ({:?})",
+                             wa.name, wb.name, inter.len(), inter);
+                }
+            }
+        }
+    }
+
+    println!("--- wall: {:?} ---", wall);
+    Ok(())
+}
+
+/// Extract a `HashSet<String>` of task ids from a `q` response. The wire
+/// shape is `{"result": [["id"], ...]}` — each row is a vector of one
+/// string. Returns empty set on missing/malformed.
+fn extract_task_id_set(resp: &Cbor) -> std::collections::HashSet<String> {
+    let mut out = std::collections::HashSet::new();
+    if let Some(Cbor::Array(rows)) = cbor_map_get(resp, "result") {
+        for row in rows {
+            if let Cbor::Array(cols) = row {
+                if let Some(Cbor::Text(s)) = cols.first() {
+                    out.insert(s.clone());
+                }
+            }
+        }
+    }
+    out
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -1486,90 +1867,47 @@ async fn main() -> Result<()> {
         .canonicalize()
         .unwrap_or(args.writer_dir.clone());
 
-    let sup = if args.spawn_writer {
-        let s = JvmSupervisor::spawn(
-            &writer_dir,
-            &args.backend,
-            &args.path,
-            &args.req_sock,
-            &args.pub_sock,
-        )
-        .await?;
-        Some(Arc::new(s))
-    } else {
-        None
-    };
+    let registry = Arc::new(WorldRegistry::new(
+        writer_dir.clone(),
+        args.backend.clone(),
+        args.data_dir.clone(),
+        args.sock_base.clone(),
+    ));
 
-    // Wait for sockets to come up.
-    tracing::info!("waiting for req socket {}", args.req_sock);
-    JvmSupervisor::wait_for_socket(&args.req_sock, Duration::from_secs(60)).await?;
-    tracing::info!("waiting for pub socket {}", args.pub_sock);
-    JvmSupervisor::wait_for_socket(&args.pub_sock, Duration::from_secs(60)).await?;
-
-    let req_stream = UnixStream::connect(&args.req_sock).await?;
-    let pub_stream = UnixStream::connect(&args.pub_sock).await?;
-
-    let (req_tx, req_rx) = mpsc::channel::<WriterRequest>(64);
-    tokio::spawn(run_writer_actor(req_stream, req_rx));
-
-    let (evt_tx, _evt_rx_keep) = broadcast::channel::<TxEvent>(256);
-    let evt_tx_clone = evt_tx.clone();
-    tokio::spawn(run_pub_subscriber(pub_stream, evt_tx_clone));
-
-    let cache = Arc::new(SnapshotCache::new());
-
-    // Cache-invalidation listener — independent task that updates the cache.
-    {
-        let cache = cache.clone();
-        let mut rx = evt_tx.subscribe();
-        tokio::spawn(async move {
-            while let Ok(ev) = rx.recv().await {
-                cache.on_tx(ev.basis_t);
-                tracing::debug!(basis_t = ev.basis_t, "pub tx invalidate");
-            }
-        });
-    }
-
-    let latency = Arc::new(LatencyTracker::new());
-    let writer  = WriterClient { tx: req_tx };
-
-    // Spawn the opportunistic transact batcher. All `DbHandle::transact_full`
-    // calls funnel through this — singletons take the fast path, concurrent
-    // writers within BATCH_MAX_WINDOW coalesce into a single transact-batch.
-    let (batch_tx, batch_rx) = mpsc::channel::<TransactItem>(256);
-    {
-        let writer  = writer.clone();
-        let cache   = cache.clone();
-        let latency = latency.clone();
-        tokio::spawn(run_transact_batcher(writer, batch_rx, cache, latency));
-    }
-
-    let db = DbHandle {
-        writer,
-        batcher: TransactBatcher { tx: batch_tx },
-        cache: cache.clone(),
-        tx_events: evt_tx,
-        latency,
-    };
-
-    // Ping to confirm.
-    let pong = db.ping().await?;
-    tracing::info!(?pong, "writer ping ok");
-
-    // Ensure the schema the guest needs is installed. Idempotent — the writer
-    // returns an error if attrs already exist; we ignore that.
-    {
-        let schema = "[{:db/ident :person/name :db/valueType :db.type/string :db/cardinality :db.cardinality/one :db/unique :db.unique/identity}
-                       {:db/ident :person/age  :db/valueType :db.type/long   :db/cardinality :db.cardinality/one}]";
-        match db.transact(schema).await {
-            Ok(_) => tracing::info!("guest schema installed (or already present)"),
-            Err(e) => tracing::warn!(error=%e, "guest schema install failed (continuing — may already be installed)"),
+    // Multi-world path.
+    if args.multi_world {
+        let wasm_path = args.guest_wasm.clone()
+            .ok_or_else(|| anyhow!("--multi-world requires --guest-wasm"))?;
+        let world_names: Vec<String> = args.worlds
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if world_names.is_empty() {
+            bail!("--worlds must list at least one world name");
         }
+        run_multi_world(
+            registry.clone(),
+            wasm_path,
+            world_names,
+            args.agents_per_world,
+            args.multi_duration_ms,
+            args.bench_mode.clone(),
+            args.cache_batch,
+        ).await?;
+        return Ok(());
     }
+
+    // Single-world (default) path. The default world is just another world.
+    let world = registry.get_or_spawn("default").await?;
+    let db = world.db();
+    install_person_schema(&db).await;
 
     // Phase 3 — wasm guest run (single-agent smoke), if requested.
     if let Some(wasm_path) = args.guest_wasm.clone() {
         if args.multi_agent {
+            // Phase D — N=3 multi-agent inside ONE world.
+            install_phase_d_schema(&db).await;
             run_multi_agent(
                 wasm_path,
                 db.clone(),
@@ -1591,7 +1929,6 @@ async fn main() -> Result<()> {
                 Ok(s) => println!("guest run-smoke ok ({:?}): {}", run_dur, s),
                 Err(e) => println!("guest run-smoke ERR ({:?}): {}", run_dur, e),
             }
-            // Verify the new datom is visible (guest's transact persisted via the JVM writer).
             let v = db
                 .q(
                     "[:find ?n ?a :where [?e :person/name ?n] [?e :person/age ?a]]",
@@ -1602,15 +1939,12 @@ async fn main() -> Result<()> {
         }
     }
 
-    let result = if args.smoke {
+    if args.smoke {
         smoke_test(&db).await
-    } else {
+    } else if args.guest_wasm.is_none() {
         run_repl(db).await
-    };
-
-    if let Some(sup) = sup {
-        let _ = sup.shutdown().await;
+    } else {
+        // guest-wasm ran already (smoke or multi-agent); don't drop into the REPL.
+        Ok(())
     }
-
-    result
 }
