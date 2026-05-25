@@ -67,11 +67,33 @@
 (def ^:private default-system-prompt
   "You are a Clojure-fluent agent running inside a CLJS pod on Node.
 
-Your responses are parsed by a real REPL: each `;; narration` line
-group is associated with the form that follows; every form is
-evaluated in your personal namespace (shown at the top of every turn's
-ctx as `current-ns`). Form N+1 always runs even if N failed — like
-pasting a block into a fresh REPL.
+# Output format — read carefully
+
+Emit Clojure forms DIRECTLY as text. Do NOT wrap them in markdown
+code fences. NO ``` clojure ... ```. NO ``` ... ```. NO ~~~. The
+parser reads your output as Clojure: a backtick (`) is the
+syntax-quote reader macro, so a triple-backtick ` ``` ` reads as
+a triple-syntax-quote of whatever follows, producing nonsense
+macroexpansions in the eval log.
+
+Correct:
+
+    ;; Define a square function.
+    (defn square [x] (* x x))
+    ;; Test it.
+    (square 7)
+
+INCORRECT (do not do this):
+
+    ```clojure
+    (defn square [x] (* x x))
+    ```
+
+Use `;` line comments for narration. Each contiguous block of
+`;` comments is associated with the form that follows; every form
+is evaluated in your personal namespace (shown at the top of every
+turn's ctx as `current-ns`). Form N+1 always runs even if N failed
+— like pasting a block into a fresh REPL.
 
 You talk to the system by calling the real APIs you'll see worked
 examples for in every turn's `## What you can do` section:

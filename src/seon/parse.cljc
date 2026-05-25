@@ -39,6 +39,39 @@
     [rewrite-clj.node :as rcn]))
 
 ;; ============================================================
+;; Markdown code-fence strip — Postel's law.
+;;
+;; The system prompt asks the LLM to emit Clojure forms directly,
+;; without ``` markdown wrappers. But if it does (or if a human
+;; pastes an example with fences), we tolerate it: strip the fence
+;; LINES before reading, preserving everything in between.
+;;
+;; Why this matters: ` is Clojure's syntax-quote reader macro, so
+;; ```clojure reads as a triple-syntax-quote of the symbol `clojure`
+;; — `(seq (concat (list 'quote) (list (seq (concat (list 'quote)
+;; …)))))`. The agent's "form" becomes that macroexpansion and the
+;; eval result is incomprehensible noise.
+;;
+;; Line-based strip: a fence is `^\s*```(lang)?\s*$`. Drop the whole
+;; line. Backticks inside multi-line string literals would be at
+;; risk, but real Clojure forms don't put triple-backticks in
+;; strings.
+;; ============================================================
+
+(def ^:private fence-line-re
+  ;; Triple backtick OR triple tilde at line start, optional language
+  ;; tag (clojure / clj / cljs / cljc / edn / nothing), trailing
+  ;; whitespace only.
+  #"(?m)^[ \t]*(?:```|~~~)(?:[ \t]*(?:clojure|clj|cljs|cljc|edn))?[ \t]*$")
+
+(defn strip-code-fences
+  "Remove markdown code-fence LINES (` ``` ` and ` ~~~ `, with optional
+   language tag) from `text`. Content between fences stays put.
+   Comments + forms outside fences are untouched. Idempotent."
+  [text]
+  (str/replace text fence-line-re ""))
+
+;; ============================================================
 ;; Prose filter — LLMs occasionally emit unescaped prose between
 ;; forms ("Let me think about this..."), which the reader cheerfully
 ;; tokenizes into a string of bare symbols. Each bare symbol would
@@ -151,41 +184,45 @@
    dropped silently — see `prose-symbol?`. Comments at the end of
    the text (no trailing form) attach to no entry and are dropped.
    Read errors do NOT halt the parse — each bad span becomes a
-   `:kind :read :ok? false` entry and parsing continues."
+   `:kind :read :ok? false` entry and parsing continues.
+
+   Markdown code-fence lines (` ``` `, ` ```clojure `, ` ~~~ `, …)
+   are stripped before reading — see `strip-code-fences`."
   [text]
-  (loop [offset 0
-         pending-narration []
-         out []]
-    (if (>= offset (count text))
-      out
-      (let [token (try-parse-one-token text offset)]
-        (case (:kind token)
-          :whitespace
-          (recur (:end token) pending-narration out)
-
-          :comment
-          (recur (:end token)
-                 (conj pending-narration (:text token))
-                 out)
-
-          :form
-          (if (prose-symbol? (:form token))
-            ;; LLM prose tokenized as a bare symbol — drop, carry
-            ;; narration forward so it attaches to the next real form.
+  (let [text (strip-code-fences text)]
+    (loop [offset 0
+           pending-narration []
+           out []]
+      (if (>= offset (count text))
+        out
+        (let [token (try-parse-one-token text offset)]
+          (case (:kind token)
+            :whitespace
             (recur (:end token) pending-narration out)
-            (recur (:end token)
-                   []
-                   (conj out {:kind :form
-                              :narration (join-narration pending-narration)
-                              :source    (:source token)
-                              :form      (:form token)})))
 
-          :error
-          (let [recovery (find-recovery-point text offset)]
-            (recur recovery
-                   []
-                   (conj out {:kind  :read
-                              :ok?   false
-                              :narration (join-narration pending-narration)
-                              :source    (subs text offset recovery)
-                              :error     (:error token)}))))))))
+            :comment
+            (recur (:end token)
+                   (conj pending-narration (:text token))
+                   out)
+
+            :form
+            (if (prose-symbol? (:form token))
+              ;; LLM prose tokenized as a bare symbol — drop, carry
+              ;; narration forward so it attaches to the next real form.
+              (recur (:end token) pending-narration out)
+              (recur (:end token)
+                     []
+                     (conj out {:kind :form
+                                :narration (join-narration pending-narration)
+                                :source    (:source token)
+                                :form      (:form token)})))
+
+            :error
+            (let [recovery (find-recovery-point text offset)]
+              (recur recovery
+                     []
+                     (conj out {:kind  :read
+                                :ok?   false
+                                :narration (join-narration pending-narration)
+                                :source    (subs text offset recovery)
+                                :error     (:error token)})))))))))
