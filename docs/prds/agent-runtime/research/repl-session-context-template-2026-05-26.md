@@ -4,6 +4,8 @@ status: draft
 tags: [research, agent, render, repl, template]
 ---
 
+> **SUPERSEDED for design decisions** by `architecture/ctx-render-strategies-prd.md` (2026-05-26 revision). Retained for history; do not use as the current spec.
+
 # REPL-session context template — chronological strategy
 
 Companion to [ctx-render-strategies-prd.md](../architecture/ctx-render-strategies-prd.md).

@@ -4,6 +4,8 @@ status: draft
 tags: [research, agent, runtime]
 ---
 
+> **SUPERSEDED for design decisions** by `architecture/ctx-render-strategies-prd.md` (2026-05-26 revision). Retained for history; do not use as the current spec.
+
 # re-frame vs. roll-own — dispatch for the agent runtime
 
 ## TL;DR

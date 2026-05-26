@@ -4,480 +4,576 @@ status: draft
 tags: [prd, agent, runtime, render, architecture]
 ---
 
-# Agent-context render strategies — substrate PRD
+# Agent-context render — the consolidated PRD
 
-## TL;DR
+This document supersedes the earlier ctx-render fragments (the
+section-with-detail-levels draft of this same file, plus
+`research/repl-session-context-template-2026-05-26.md` and
+`research/agent-loop-pattern-survey-2026-05-25.md` /
+`research/re-frame-vs-roll-own-2026-05-25.md` for the *design*
+questions). Those files remain on disk as history; this is what
+implementation agents read.
 
-The agent's LLM context is produced by a **render strategy**, which is just a Clojure fn whose output schema is `:seon.render.ctx/response`. Strategies aren't registered explicitly — they're **discovered** via the program graph (query all `:seon.fn` entities whose `:malli/schema` output matches the ctx-response shape). The agent picks one by transacting `:seon.agent/ctx-render-fn 'fully-qualified-sym` onto itself — a normal handler-update tx, no special verb. Agents may write their own strategies; discovery picks them up automatically.
+Authoritative as of 2026-05-26.
 
-Substrate ships **four** strategies — `naive-chronological`, `most-referenced`, `chronological-decay`, `data-shape-matching` — built in that order over four weekly phases. Each entity renders at one of **two detail levels**, `:full` or `:concise` (concise falls back to a truncated `:full` if no concise renderer is defined). Every rendered item ends with a real Clojure `#'sym` reference so the agent can drill in via `(seon.inspect/show {:seon.inspect/symbol 'sym})`.
-
-The inspector exposes a dropdown that lets the user (or the agent itself) switch strategies live. Switching causes one LLM-cache miss and then steady state on the new prefix.
+---
 
 ## 1. Vision
 
-### 1.1 What we are trying to do
+The agent's LLM context is the **REPL transcript its work would have
+produced**, reconstructed from the tx-log. Every line is a valid
+Clojure form, a Clojure line comment, or a namespaced map literal
+wrapped in `(comment …)`. Concatenated, the rendered text reads
+top-to-bottom like a session log — substrate boot at the front (stable
+prefix, cacheable forever), conversation and evals at the tail
+(volatile). The agent doesn't see invented `[user]` brackets, markdown
+headings, or "tool envelope" chrome. It sees a `.clj` file the reader
+would happily parse.
 
-Today the substrate has one render path: walk every entity carrying `:seon.render/ai`, sort by tx-time, render each via its slot-symbol, concatenate. That's correct, but it's a single naïve ordering — it can't represent "stable prefix first, volatile tail last," it can't surface fns that match the user's data, and it can't fade unused fns out of the context as the agent's session grows.
+A **render strategy** is a normal Clojure fn `(req → response)` whose
+output schema is `:seon.render.ctx/response`. The substrate ships
+`naive-chronological` as the default and three more strategies
+(`most-referenced`, `chronological-decay`, `data-shape-matching`) built
+on the same per-entity render fns. Strategies are discovered by
+walking the program graph (`:seon.fn` entities whose output schema
+matches), not registered in a separate table. The agent switches
+strategy by transacting `:seon.agent/ctx-render-fn 'sym` onto itself.
 
-This PRD introduces a thin layer of indirection: the agent entity carries a `:seon.agent/ctx-render-fn` slot pointing at a **strategy** — a fully-qualified symbol naming a Clojure fn that, given the agent's view of the DB, returns the full `:seon.render.ctx/response` map. The substrate's `assemble-ai-context` becomes a dispatcher that resolves this slot and calls the fn. Everything else (which entities to include, in what order, at what detail level) is decided by the strategy.
+---
 
-This is the smallest change consistent with the audit's V1–V6 vision (audit doc §1): one mechanism for reads, writes, and rendering; data-driven (not protocol-driven) overrides; cache-aware ordering; section-with-detail-levels; substrate defaults with agent override; code-is-data-is-render.
+## 2. Storage discipline (load-bearing)
 
-### 1.2 What makes a strategy
+**The database stores metadata pointers, not transient data.** If
+something can be re-derived from source, it does not live in the DB.
 
-A strategy is a normal Clojure fn with `:malli/schema` metadata:
+### What goes in the DB
 
-```clojure
-(defn my-strategy
-  "What this strategy optimizes for."
-  {:malli/schema [:=> [:cat :seon.render.ctx/request] :seon.render.ctx/response]}
-  [{:seon.agent/keys [id] :seon.db/keys [db] :as req}]
-  ;; ... query the db, decide what to include, decide :full vs :concise,
-  ;;     call render-one per entity, concat, return ...
-  {:seon.render/text "..."
-   :seon.render/entities [...]
-   :seon.render/token-estimate 0})
-```
+- Schema registrations (`:seon.schema/key`, `:seon.schema/shape`).
+- Fn source and metadata (`:seon.fn/sym`, `:seon.fn/source`,
+  `:seon.fn/output-schema` — these are pointers; the body is in
+  `:source`).
+- Test source (`:seon.test/sym`, `:seon.test/source`).
+- Test status **metadata only**: `:seon.test/last-passed-at`,
+  `:seon.test/last-failed-at`, `:seon.test/last-run-id`. The per-run
+  event sequence does NOT live in the DB.
+- Eval pointers: `:seon.eval/id`, `:seon.eval/source`,
+  `:seon.eval/result-edn` (the small printable result), the error
+  envelope `:seon.eval/error` (one small map with `:cause` snippet,
+  not the full stack).
+- Message content (`:seon.message/content`, `:seon.message/role`,
+  `:seon.message/at`, `:seon.message/from`, `:seon.message/to`).
+- Ns entities (`:seon.ns/name`, `:seon.ns/source`).
 
-That's the entire contract. No registry, no protocol, no multimethod, no `register-strategy!` verb. The strategy IS a fn, period. Discovery walks the program graph (the substrate's existing `:seon.fn` index, populated by the analyzer) and pulls every fn whose `:malli/schema` output is `:seon.render.ctx/response`.
+### What does NOT go in the DB
 
-### 1.3 Why this shape
+- Full test event sequences (per-assertion pass/fail traces). These
+  live in the agent-ns stash keyed by `:seon.test/last-run-id`.
+- Full LLM API request/response bodies. Pointers in the DB; bodies in
+  blob storage or a stash if needed.
+- Log messages.
+- Stack traces beyond a small `:cause` snippet inside the error
+  envelope.
+- Precomputed projections of relationships (see §3).
 
-- **No new mechanism.** Strategies are fns. Fns are already entities in the DB (analyzer-populated). The "registry" of strategies is just a Datalog query.
-- **Reactive.** A new strategy appears in the dropdown the moment its `defn` form is evaled. Delete it: it disappears. No bifurcated "registered" vs "defined" state.
-- **Agent-authored.** An agent writes its own strategy in its home ns; switching to it is one transact. The same mechanism the substrate uses.
-- **Honest with caching.** Switching strategies changes the prefix → one LLM-cache miss, then steady state. We accept this and warn agents not to ping-pong.
+This mirrors the three-tier rule from MEMORY.md: **DB datoms =
+renderer projections only; blobs = persistent full content;
+globalThis stash = volatile per-session live values.** Transient data
+lives in an agent-ns stash (atom) keyed by an id stored in the DB.
 
-## 2. Schemas
+---
 
-### 2.1 Request / response
+## 3. No precomputed projections
 
-```clojure
-(schema/register! :seon.render.ctx/request
-  [:map
-   [:seon.agent/id        :string]
-   [:seon.db/db           {:optional true} :any]
-   [:seon.agent/window-size {:optional true} :seon.agent/window-size]])
+If a relationship can be derived dynamically — via the analyzer,
+Datalog, or a small query — it is **not** stored as a precomputed
+projection.
 
-(schema/register! :seon.render.ctx/response
-  [:map
-   [:seon.render/text           :string]
-   [:seon.render/entities       [:vector :any]]
-   [:seon.render/token-estimate :int]])
-```
+- **`:seon.test/tests-fn`** (which fns a test exercises): NOT stored.
+  Computed at render time by walking `:seon.test/source` via the
+  analyzer (`seon.analyzer-info/fn-refs-in-source`). The test render
+  fn calls this to cluster a test alongside the fn it exercises.
+- **`:seon.fn/use-count` / `:seon.fn/last-used-at`** (for
+  `chronological-decay`): NOT stored. Computed at strategy run time
+  by querying the eval log for fn-symbol mentions.
+- **The render strategy fns themselves**: ordinary `:seon.fn`
+  entities. Discovered via the program graph, not a registered
+  strategy table.
 
-This is the same shape `assemble-ai-context` already returns — strategies are drop-in replacements for the body of that fn.
+**The cache exception.** If a derivation is expensive enough to
+re-run every render, memoize it in a process atom and rebuild
+deterministically from the DB at boot. (Mirror of how the schema
+registry works: persisted entities are the truth; the in-memory
+registry is a fast lookup rebuilt on load.) Default is no caching —
+measure before caching.
 
-### 2.2 Detail levels
+---
 
-```clojure
-(schema/register! :seon.render.ctx/full    :symbol)   ; required on renderable entity
-(schema/register! :seon.render.ctx/concise :symbol)   ; optional
-```
+## 4. The REPL-transcript output shape
 
-`:seon.render.ctx/full` is the existing per-entity render symbol (back-compat alias: `:seon.render/ai` is treated as a synonym so older entities continue to work — no migration tx needed). `:seon.render.ctx/concise` is new and optional. If a strategy asks for `:concise` and the entity has no concise renderer, the substrate calls the `:full` renderer and truncates: `(subs full-text 0 default-concise-chars)`. `default-concise-chars` is a per-agent attr (`:seon.agent/concise-chars`) defaulting to 200.
+Each entity has **one** render fn (one symbol on the entity:
+`:seon.render/ai`). A strategy that wants a "concise" version
+truncates the same output. There is no `:full` / `:concise` /
+`:micro` ladder of separate render fns.
 
-**Two levels, not three.** No `:hidden`. A strategy that wants to hide an entity simply doesn't include it. This keeps the per-entity contract symmetrical: render or don't.
+### 4.1 `:seon.system-prompt` and `:seon.conventions`
 
-### 2.3 The active strategy slot
-
-```clojure
-(schema/register! :seon.agent/ctx-render-fn :symbol)
-```
-
-Defaults to `'seon.strategies.naive/render` at agent boot. The agent (or the user via the inspector) transacts a new value to switch.
-
-## 3. The drill-in affordance — real Clojure references everywhere
-
-Every rendered chunk ends with a clojure-comment reference the agent can copy into its next form to fetch the full entity. Three flavors:
-
-**Eval result reference**:
-
-```clojure
-(+ 1 1)
-;; => 2   #'seon.agent.XAR-.../eval-ABC123XYZ
-```
-
-**Fn reference (concise render)**:
-
-```clojure
-;; seon.db/query — Datalog query against agent-scoped db
-;; (db/query {::db/query '[:find ...] ::db/args [...]}) ;; → vector of rows
-;; #'seon.db/query
-```
-
-**Schema reference**:
-
-```clojure
-;; :seon.message/content :string
-;; #'seon.schema/<schema-key :seon.message/content>
-```
-
-The `#'<sym>` pattern is the agent's drill-in handle. Substrate ships:
-
-```clojure
-(defn show
-  "Resolve `symbol` (qualified) to its :seon.fn / :seon.schema / :seon.eval
-   entity and return its :seon.render.ctx/full render."
-  {:malli/schema [:=> [:cat :seon.inspect/show-request]
-                       :seon.render/ai-response]}
-  [{:seon.inspect/keys [symbol]}]
-  ...)
-```
-
-`show` lives in `seon.inspect` (extending the existing ns). It does an identity-attr lookup on `:seon.fn/sym` (and `:seon.schema/name`, `:seon.eval/id` for the other two flavors), pulls the entity, and calls the entity's `:seon.render.ctx/full` symbol. Documented in the default system prompt so the agent learns the pattern on turn one.
-
-## 4. Discoverability — list-strategies
+Top-of-file `;;` comment block. Stable substrate entities, written
+once at boot. Not drillable.
 
 ```clojure
-(defn list-strategies
-  "Query the program graph for all fns whose :malli/schema output is
-   :seon.render.ctx/response. Returns a vector of
-   {:seon.fn/sym 'qualified.sym :seon.fn/doc \"...\"}."
-  {:malli/schema [:=> [:cat :map] :seon.render.ctx/list-strategies-response]}
-  [_]
-  (let [rows (db/query
-               {:seon.db/query
-                '[:find ?sym ?doc
-                  :where
-                  [?f :seon.fn/sym ?sym]
-                  [?f :seon.fn/output-schema ?out]
-                  [(= ?out :seon.render.ctx/response)]
-                  [(get-else $ ?f :seon.fn/doc "") ?doc]]})]
-    {:seon.render.ctx/strategies (mapv (fn [[s d]] {:seon.fn/sym s :seon.fn/doc d}) rows)}))
+;; ============================================================
+;; You are a Clojure-fluent agent inside a CLJS pod on Node.
+;; Emit forms as text — no markdown fences, no tool envelopes.
+;; Narrate with `;` comments. Each contiguous comment block
+;; binds to the form that follows; form N+1 runs even if N failed.
+;; Your home namespace is `(ns seon.agent.XAR-…)`.
+;; ============================================================
 ```
 
-This lives in `src/seon/render/list_strategies.cljs` (~20 LOC). The inspector calls it to populate its dropdown; agents call it to ask "what can I switch to?". A `defn` form for a new strategy lands in the program graph (analyzer-populated) and shows up in the next query — no registration, no cache invalidation.
+### 4.2 `:seon.ns`
 
-This depends on the analyzer indexing `:seon.fn/output-schema` (the keyword name of the output spec) on every `:seon.fn` entity. The audit doc confirms the analyzer pipeline exists; this PRD asserts that the output-schema attr is populated alongside `:seon.fn/sym` and `:seon.fn/source`. If it isn't yet, Phase 1 adds it (~5 LOC in the analyzer).
-
-## 5. The four strategies
-
-All four return `:seon.render.ctx/response`. They differ only in **which entities they include**, **in what order**, and **at what detail level**.
-
-### 5.1 Strategy 1 — `naive-chronological`
-
-**Goal**: smallest possible baseline. Useful as the control case in A/B experiments and as the strategy a fresh agent boots with.
-
-**Query**: every entity carrying `:seon.render.ctx/full` (or `:seon.render/ai` for back-compat), scoped to the agent via tx-meta `:seon.db/agent-id`. Same query the current `assemble-ai-context` already uses.
-
-**Order**: oldest tx-time first.
-
-**Detail**: all entities rendered at `:full`. No truncation; let the LLM context fill naturally. (Token budget is a future concern — Phase 1 ships with the assumption that small agents fit; Phase 3 introduces decay-based eviction.)
-
-**Sample output** (10 lines of what the agent would see):
-
-```text
-## System prompt
-You are an agent in the Seon substrate. ...
-;; #'seon.runtime/system-prompt
-
-## Conventions
-- Stay in your home namespace seon.agent.XAR-... .
-;; #'seon.runtime/conventions
-
-## Schema  :seon.message/content :string
-;; #'seon.schema/<schema-key :seon.message/content>
-
-## Fn  seon.db/query — Datalog query
-;; (db/query {::db/query '[...] ::db/args [...]}) ;; → vector of rows
-;; #'seon.db/query
-```
-
-### 5.2 Strategy 2 — `most-referenced`
-
-**Goal**: programmer-shop view. What matters is the fns the codebase leans on most heavily; the agent should see those at high detail, and rarely-touched fns can fade to one-liners.
-
-**Query**: walk the program graph; parse each `:seon.fn/source` for symbols matching other registered fns, build a directed call-reference graph, compute an in-degree (reference-count) per fn. Include:
-
-- all `:seon.schema` entities (compact, one line each)
-- top-K `:seon.fn` entities by reference-count
-- all `:seon.message` and `:seon.eval` entities for the agent (recent N at `:full`, older at `:concise`)
-
-**Order**: least-referenced-first at the very front (stable prefix — the foundational ns/system-prompt entities anchor and rarely change), most-referenced near the back (these grow as the agent defines more fns), then schemas in an alphabetical block, then recent messages/evals at the tail.
-
-**Detail**: top-K fns by reference count, plus all current-ns fns → `:full`. Less-referenced fns → `:concise`. Messages → `:full` for last N, `:concise` older. Schemas → `:concise` always (one line is enough).
-
-**Sample output**:
-
-```text
-## seon.fn  seon.platform/host  (refs: 2)
-;; Returns the host runtime kind — :node or :wasi.
-;; (seon.platform/host) ;; → :node
-;; #'seon.platform/host
-
-## seon.schema  :seon.message/role  [:enum :user :assistant :system]
-;; #'seon.schema/<schema-key :seon.message/role>
-
-## seon.fn  seon.db/transact!  (refs: 47)
-;; Transact one map or vector of maps; map-in form.
-;; Full source: (defn transact! ...)
-;;   ...body...
-;; #'seon.db/transact!
-```
-
-**When it's best**: agents working on the substrate itself, or agents whose job is to understand a codebase's structure.
-
-### 5.3 Strategy 3 — `chronological-decay`
-
-**Goal**: long-running agent. The fns and schemas the agent has actually used recently stay at `:full`; everything else fades to `:concise` and eventually evicts.
-
-**Query**: all schemas (always concise); all fns with non-zero `:seon.fn/use-count`; all messages; last N evals.
-
-**New attrs** (Phase 3 adds them):
+Front-block only (substrate-shipped) **or** the agent's home-ns
+opener. Per-eval `ns` forms are subsumed by their producing eval.
 
 ```clojure
-(schema/register! :seon.fn/use-count    :int)
-(schema/register! :seon.fn/last-used-at :inst)
+(ns seon.db "Datalog reads + writes. The sole DB API.")
 ```
 
-Incremented at eval-time: when the analyzer detects a fn call in an evaled form, the post-eval handler bumps `:use-count` and updates `:last-used-at` on the callee.
+Drill-in: `seon.db` evaluates to the namespace; agent can pull
+`(seon.db/pull {:seon.db/ref [:seon.ns/name 'seon.db] ,,,})`.
 
-**Order**: oldest tx-time first (stable prefix).
+### 4.3 `:seon.schema`
 
-**Detail**: scoring fn assigns `:full` or `:concise`:
+Front-block only **or** drill-in. Per-eval `register!` calls are
+subsumed by their producing eval. Rendered as the literal call:
 
 ```clojure
-score = (recency × w-recency)
-      + (use-count × w-use)
-      + (current-ns? × BIG)
-;; :full when score > threshold; :concise otherwise.
+(seon.schema/register! :seon.message/content :string)
 ```
 
-LRU eviction if over a budget: evict lowest-`:seon.fn/last-used-at` from the `:concise` tier first. Current-ns fns never evicted; system-prompt + conventions sticky-prefix never evicted.
+Drill-in: keyword evaluates to itself; **no auto-enrichment**. Agent
+pulls via `(seon.db/pull {:seon.db/ref [:seon.schema/key
+:seon.message/content] ,,,})` or reads the front-block `register!`
+call.
 
-**Sample output**:
+### 4.4 `:seon.fn`
 
-```text
-## seon.fn  seon.db/transact!  (used 12× — last 3m ago)
-;; Full source: ...
-;; #'seon.db/transact!
-
-## seon.fn  seon.fs/walk-dir  (used 1× — last 45m ago)  [concise]
-;; Walks a directory tree, returns absolute paths.
-;; #'seon.fs/walk-dir
-
-## seon.fn  seon.health/import  [evicted from concise tier]
-```
-
-**When it's best**: agents in extended sessions where the working set is small but the substrate has grown.
-
-### 5.4 Strategy 4 — `data-shape-matching`
-
-**Goal**: the best long-term signal — what data exists in the system tells us which fns are useful. If the user's DB has `:seon.email.message/*` entities but no `:seon.trading.*` entities, the agent should see email-related fns at `:full` and trading fns hidden or `:concise`.
-
-**Query**: walk all `:seon.fn` entities. For each, look at its input schema (the `:cat` types in `:malli/schema`). Use the existing shape graph (MEMORY.md "Shape Graph" + `project_shape_graph.md` — 138 shapes, 333 entries already indexed) to check: do any entities currently in the user-scoped DB match the fn's input shape?
-
-Include:
-
-- all schemas the user's actual data uses (filter by `(d/datoms db :aevt <attr>)` returning non-empty)
-- fns whose input or output shape matches user-data shapes — at `:full`
-- fns whose shape matches nothing in the user's data — exclude entirely, or `:concise` if they're in the agent's call history
-- recent messages + evals at the tail
-
-**Order**: foundational data (schemas the user uses) → derived fns (that consume/produce those shapes) → recent activity.
-
-**Detail**: shape-matched → `:full`; shape-unmatched-but-recently-called → `:concise`; everything else → excluded.
-
-**Sample output**:
-
-```text
-## Data shape  :seon.email.message/*  (47 entities in db)
-;; #'seon.schema/<shape-cluster :seon.email.message>
-
-## seon.fn  seon.email/search  (input matches your data)
-;; Full source: (defn search [{:seon.email.search/keys [query]}] ...)
-;; #'seon.email/search
-
-## seon.fn  seon.email.message/parse-mime  (input matches your data)
-;; Full source: ...
-;; #'seon.email.message/parse-mime
-
-;; (trading-related fns hidden — no :seon.trading/* entities in db)
-```
-
-**When it's best**: the agent's job is to operate on the user's data. Show only the fns that can touch that data.
-
-**Why it's last to build**: it depends on the shape-graph index being live in the CLJS pod (currently CLJ-side per MEMORY.md), and on the shape-graph having coverage for the fns we want to index. Phase 4 either ports the shape graph to CLJS or queries it across the JVM/pod boundary. This is the riskiest piece of the plan.
-
-## 6. Bootstrap order at agent boot
-
-When `start-agent!` runs, it transacts entities in a deliberate order so the tx-log reads like a freshly opened editor. This means the naive strategy (which orders by tx-time) gets sensible initial content for free.
-
-1. **`:seon.system-prompt`** entity (one-time, `:seon.sticky/position :prefix`, `:seon.sticky/order 0`).
-2. **`:seon.conventions`** entity (one-time, `:prefix`, `:order 1`).
-3. **Core schemas** — alphabetical by keyword. Schemas don't change often; sorting alphabetically gives a stable mid-prefix block.
-4. **Core fns** — sorted least-referenced first (the same ordering `most-referenced` would compute), so even naïve-chronological gets reasonable initial fn order without computing reference counts.
-5. **Agent's home `:seon.ns` entity** — the empty home ns the agent will `defn` into.
-
-After boot, every subsequent tx (eval, message, fn defn) lands at the tail with a fresh tx-time. The strategies pick from there.
-
-## 7. Switching strategies
-
-The agent (or the user via the inspector) transacts:
+Front-block only **or** drill-in. Per-eval `defn` forms are subsumed
+by their producing eval. Rendered as the literal form with an elided
+body:
 
 ```clojure
-(seon.db/transact!
-  {:seon.db/tx-data
-   [{:seon.agent/id          (seon.db/current-agent-id)
-     :seon.agent/ctx-render-fn 'seon.strategies.most-referenced/render}]})
+(defn seon.db/query
+  "Datalog query. Map-in, map-out."
+  {:malli/schema [:=> [:cat :seon.db/query-request] :seon.db/query-response]}
+  [{:seon.db/keys [query args]}])
 ```
 
-The next `assemble-ai-context` call resolves the new symbol and uses it. No restart, no special verb, no event bus, no broadcast.
+The body is elided — the form **reads** as valid Clojure but **does
+not eval** in a fresh REPL. This is the deliberate boundary between
+"readable top-to-bottom" (hard-required) and "eval-able
+top-to-bottom" (rough — documented honestly, not papered over).
 
-The inspector's strategy dropdown is a tiny `data-on-change` POST to `/agent/<id>/ctx-render-fn` which does exactly the transact above.
+Drill-in: `seon.db/query` evaluates to a Var; the renderer enriches
+with `;; ↳ <pointer-to-:seon.fn-entity>` if a DB hit exists.
 
-**Cache impact**: switching changes the prefix → the next turn is an LLM-cache miss. After that turn the new prefix is hot. We **document this trade-off in the system prompt** and encourage agents to commit to a strategy for a session unless they're deliberately experimenting.
-
-## 8. Agent-authored strategies
-
-An agent writes its own strategy by `defn`-ing it in its home ns with the right `:malli/schema`:
+**Tests rendering.** The fn render is followed by any tests that
+exercise it (analyzer walks `:seon.test/source` for fn-refs; cluster
+by overlap with the rendered fn's symbol):
 
 ```clojure
-;; in seon.agent.XAR-...
-(defn my-favorite-render
-  "Like data-shape-matching but boosted by my taste."
-  {:malli/schema [:=> [:cat :seon.render.ctx/request] :seon.render.ctx/response]}
-  [req]
-  ;; ... own logic ...
-  )
+(deftest seon.db.query-test
+  (testing "round-trip"
+    (is (= [[1]] (q '[:find ?x :where [?x :a 1]] db)))))
+;; ↳ :last-passed-at #inst "2026-05-26T09:00:00Z"
 ```
 
-The analyzer picks up the new fn at eval time and writes its `:seon.fn` entity with `:seon.fn/output-schema :seon.render.ctx/response`. `list-strategies` immediately returns it. The agent transacts `:seon.agent/ctx-render-fn 'seon.agent.XAR-.../my-favorite-render` onto itself. Done.
+### 4.5 `:seon.message`
 
-This is the V2 vision (audit doc §1.2) realized: agent customization via the same mechanism as `schema/register!` — by writing a fn with the right shape from your own ns.
+Rendered as a namespaced map literal inside `(comment …)`:
 
-## 9. Code organization
-
-```text
-src/seon/render.cljs                       — assemble-ai-context dispatcher    (~50 LOC)
-src/seon/render/list_strategies.cljs       — discovery query                   (~20 LOC)
-src/seon/inspect.cljs                      — extend with show + dropdown helper (~80 LOC added)
-src/seon/strategies/naive.cljs             — Strategy 1 — naive-chronological  (~80 LOC)
-src/seon/strategies/most_referenced.cljs   — Strategy 2 — most-referenced      (~180 LOC)
-src/seon/strategies/chronological_decay.cljs — Strategy 3 — chronological-decay (~220 LOC)
-src/seon/strategies/data_shape.cljs        — Strategy 4 — data-shape-matching  (~250 LOC)
-src/seon/handlers/{fn,schema,ns,eval,message}.cljs — extend each render fn
-                                              with `:full` + `:concise` arities (~30 LOC each, +150 LOC total)
+```clojure
+(comment
+  #:seon.message{:role :user
+                 :from :user
+                 :at #inst "2026-05-26T10:00:00Z"
+                 :content "build a calculator with add"})
 ```
 
-**Estimated total**: ~1030 LOC across four strategies + dispatcher + helpers + handler updates. Strategy 4 is the riskiest and biggest; Strategy 1 + dispatcher + inspector dropdown fit in a ~250 LOC patch.
+Drill-in: keywords (`:seon.message/role`) evaluate to themselves; **no
+auto-enrichment**. Agent uses `seon.db/pull` or the front-block
+`register!` for the schema.
 
-## 10. Implementation phases
+### 4.6 `:seon.eval`
 
-### Phase 1 (week 1) — minimum viable framework + Strategy 1
+The load-bearing case. Rendered as: narration (verbatim `;` lines) →
+literal source → `;; => result` (or `;; ! error`) → handle.
 
-**Scope**:
+```clojure
+;; Define add and test it.
+(defn add [x y] (+ x y))
+;; => #'seon.agent.XAR-2605261000/add
+;; #:seon.eval{:id "ev-1"}
 
-- New schemas: `:seon.render.ctx/{request,response,full,concise}`
-- New attr: `:seon.agent/ctx-render-fn` (defaults to `'seon.strategies.naive/render`)
-- `assemble-ai-context` becomes a dispatcher: resolve the slot, call the fn, fall back to naive if symbol misses
-- `list-strategies` fn + tiny inspector dropdown (POST to set the slot)
-- `seon.inspect/show` for drill-in via `#'sym` references
-- Extend `seon.handlers.{fn,schema,ns,eval,message}` with `:full` + `:concise` arities
-- Real-Clojure-reference rendering in concise output
-- Bootstrap-order tx in `start-agent!` (system-prompt + conventions + schemas alpha + fns by ref-count-or-zero + home ns)
-- **Back-compat**: `:seon.render/ai` continues to work as an alias for `:seon.render.ctx/full`. No migration tx needed.
+(add 2 3)
+;; => 5
+;; #:seon.eval{:id "ev-2"}
+```
 
-**Acceptance**:
+Failure:
 
-- Open browser at `/agent/<id>`, see strategy dropdown with one option (`naive-chronological`)
-- `(seon.inspect/ctx-preview {:seon.agent/id "..."})` returns the same text the LLM sees
-- `(seon.inspect/show {:seon.inspect/symbol 'seon.db/query})` returns the full render of the `seon.db/query` `:seon.fn` entity
-- 0 lint warnings
+```clojure
+(throw (ex-info "boom" {}))
+;; ! #:seon.eval/error{:cause "boom"}
+;; #:seon.eval{:id "ev-3"}
+```
 
-### Phase 2 (week 2) — Strategy 2 + reference graph
+If the eval result is a Var with a DB hit, the renderer appends
+`;; ↳ <:seon.fn entity pointer>` enrichment. (Same enrichment the
+drill-in path uses.)
 
-**Scope**:
+Drill-in: `[:seon.eval/id "ev-1"]` evaluates to a vector; **no
+auto-enrichment**. Agent calls `(seon.db/pull {:seon.db/ref
+[:seon.eval/id "ev-1"] :seon.db/pull-pattern [:*]})`.
 
-- New attr `:seon.fn/refs` — vector of symbols this fn calls, computed by analyzer when the `:seon.fn` entity lands
-- Reference-count derivation (Datalog query against `:seon.fn/refs`)
-- `seon.strategies.most-referenced/render`
-- Inspector dropdown now shows two strategies; switching is a one-click op
+### 4.7 `:seon.async-result`
 
-**Acceptance**:
+A foreign event the agent watched land. One permitted "chrome" line
+(a comment marker), because there is no Clojure form that naturally
+expresses "something happened while you were stopped":
 
-- Switch from naive to most-referenced in the inspector; same agent, different rendered order
-- A new `defn` form in the agent's home ns lands and surfaces near the bottom of the ctx after one turn (because its initial use-count is low)
+```clojure
+(comment
+  ;; --- async result arrived ---
+  #:seon.async-result{:of "corr-llm-99"
+                      :ok? true
+                      :value "(brief textual summary)"
+                      :at #inst "2026-05-26T12:00:04Z"})
+```
 
-### Phase 3 (week 3) — Strategy 3 + use-count tracking
+Drill-in via correlation id.
 
-**Scope**:
+### 4.8 `:seon.handler`
 
-- New attrs `:seon.fn/use-count :int`, `:seon.fn/last-used-at :inst`
-- Post-eval handler: walk evaled form, increment use-count + bump last-used-at for each fn symbol found
-- `seon.strategies.chronological-decay/render` with scoring + LRU eviction
-- Per-agent attrs: `:seon.agent/concise-chars`, `:seon.agent/decay-half-life-min`
+Substrate ships **exactly one** worked example in the front block —
+the wake-on-message handler — to teach the mechanism by example.
+Subsequent agent-registered handlers also render (chronologically, at
+their tx-time):
 
-**Acceptance**:
+```clojure
+(seon.handler/register!
+  {:seon.handler/name  :seon.handler/wake-on-message
+   :seon.handler/match {:seon.handler.match/attr :seon.message/to}
+   :seon.handler/fn    'seon.handlers.wake/wake-on-message})
+```
 
-- Run an agent through 50+ evals; verify that fns called many times stay `:full` and ones called once fade to `:concise`
-- Total token estimate stays under a configured budget
+### 4.9 Subsumption rule (decisive)
 
-### Phase 4 (week 4+) — Strategy 4 + the experiment
+An entity is chronologically rendered **at most once**, in its most
+informative form. `:seon.fn` / `:seon.schema` / `:seon.ns` entities
+tee'd by an eval are subsumed by that eval (which already contains
+the source). They are **not stamped with `:seon.render/ai` at the tee
+write site** — only the front-block substrate-shipped versions are
+stamped. The tee'd entities exist for drill-in queries only.
 
-**Scope**:
+---
 
-- Port (or query across pod boundary) the shape graph index to CLJS
-- `seon.strategies.data-shape/render`
-- A/B framework: spawn 3 agents with 3 different `:seon.agent/ctx-render-fn` values, give them the same task, log outcomes (see §11)
+## 5. Drill-in: Clojure-native eval
 
-**Acceptance**:
+No substrate wrapper helpers. No `(inspect/show …)`, no
+`(seon.schema/show …)`, no `(seon.eval/result …)`. Drill-in is normal
+Clojure evaluation:
 
-- Same agent task, three strategies, three different rendered contexts, measurable difference in outcome quality (success rate, token cost, redundant-question count)
-- Agents using `data-shape-matching` outperform the other three on tasks that operate on user data
+- **Var**: `seon.db/query` evaluates to a Var → renderer enriches
+  with `;; ↳ <:seon.fn entity>` if DB hit. (The "renderer enriches"
+  applies only when the eval's *result* is being rendered — i.e. for
+  values the agent sees as eval output. Drill-in evaluations the
+  agent performs return the bare value; the agent then `pull`s if
+  they want more.)
+- **Keyword** (`:seon.message/role`): evaluates to itself; **no
+  enrichment**. Use `seon.db/pull` or read the front-block schema.
+- **Lookup ref** (`[:seon.eval/id "ABC"]`): evaluates to itself; **no
+  enrichment**. Call `(seon.db/pull {:seon.db/ref [:seon.eval/id
+  "ABC"] :seon.db/pull-pattern [:*]})`.
 
-## 11. Test plan
+The substrate exposes `seon.db/pull` and `seon.db/query`. Both
+already exist. No new verbs.
 
-The Platform track is generating test data — agents reading source, building Q/A understanding documents, writing tests. This gives us a corpus of "agent tasks with known-good outcomes" to A/B strategies against.
+---
 
-**Strategy A/B framework**:
+## 6. Substrate boot order (deterministic)
 
-1. Spawn three agents from a clean state, each with a different `:seon.agent/ctx-render-fn`.
-2. Send the same prompt to all three (queued via `/chat?agent=...`).
-3. Log every turn's: token-estimate, eval count, eval success rate, time-to-first-useful-output, redundant-question count (heuristic — questions the agent asks that were answered in its ctx).
-4. Final acceptance: did the agent complete the task? did its assistant reply match the known-good shape?
+At `start-agent!`, the substrate transacts entities in this order so
+the tx-log reads like a freshly opened editor for the
+`naive-chronological` strategy:
 
-**Metrics**:
+1. `:seon.system-prompt` (sticky front).
+2. `:seon.conventions` (sticky front).
+3. Core `:seon.schema` entities — alphabetical by keyword.
+4. Core `:seon.fn` entities — least-referenced first (computed from
+   the substrate's call-graph at build time; fallback to alphabetical
+   if not yet computed).
+5. Core `:seon.test` entities — paired with their fn-refs (rendered
+   adjacent to the fn they exercise via analyzer fn-refs).
+6. Agent's home `:seon.ns` entity (`(ns seon.agent.XAR-…)`).
+7. One substrate-shipped `:seon.handler` registration + one worked
+   message-pair example, so the agent sees the
+   `(handler/register! …)` call and the resulting wake-on-message
+   pattern in their context.
 
-- **Time to first useful output** — wall-clock from POST to first `:assistant` message.
-- **Eval success rate** — `(:ok? true) / total evals`.
-- **Redundant-question rate** — proportion of agent questions whose answers were already in its ctx (manual scoring, but consistent across strategies because the same prompt and same DB).
-- **Token cost per turn** — `:seon.render/token-estimate` averaged.
+After boot, agent activity (user messages, agent evals,
+async-results) accrues at the tail with fresh tx-times. Front stays
+cacheable.
 
-**Logic-issue detection**: agents reading source via different strategies will surface different conceptual gaps. Cross-reference findings — a gap surfaced by all three strategies is a real docs issue; one surfaced by only one is a strategy artifact.
+---
 
-**Unit tests**: each strategy gets a tablet of fixture-DB → expected `:seon.render/entities` order tests. Cheap to write, catches regressions in the ordering logic.
+## 7. The four render strategies
 
-## 12. Risks + open questions
+All four return `:seon.render.ctx/response`. They share the per-entity
+render fns from §4; they differ only in **which entities they pick,
+in what order, and whether they truncate**.
 
-### 12.1 Risks
+### 7.1 `naive-chronological` (default)
 
-1. **Shape-graph coverage in CLJS** (Phase 4). The shape graph is JVM-side per MEMORY.md. Porting to CLJS or querying across the pod boundary is the single largest engineering risk in this plan. Mitigation: design now, defer build to Phase 4 when we have the other three strategies as fallbacks.
-2. **Analyzer output-schema attribute**. `list-strategies` depends on `:seon.fn/output-schema` being indexed. If the analyzer doesn't yet write it, Phase 1 must add it. Quick check + small patch; not a blocker.
-3. **Cache-miss thrash**. If the inspector dropdown is too inviting, agents (or curious users) will switch strategies between turns and pay the LLM-cache miss every time. Mitigation: log a `;; ⚠ strategy switched, prefix will miss cache next turn` line in the ctx for the turn after a switch.
+Every entity carrying `:seon.render/ai`, scoped to the agent via
+tx-meta `:seon.db/agent-id`, sorted by tx-time oldest-first. No
+truncation. This is what `assemble-ai-context` already does; nailing
+the per-entity render shape from §4 gets us a usable agent without
+ever building strategies 2-4.
 
-### 12.2 Open questions
+### 7.2 `most-referenced`
 
-These aren't blocking Phase 1 but want a Sean decision before Phase 2 or 3:
+Walk the program graph at strategy-run time, parse each
+`:seon.fn/source` for symbols, compute call-graph in-degree. Order:
+least-referenced front (stable prefix), most-referenced before the
+volatile tail. Top-K rendered full; tail truncated. No DB writes —
+all derived.
 
-- **Reference count** (Phase 2): is `:seon.fn/refs` per-source-symbol-occurrence or per-unique-callee? (PRD assumes per-unique-callee — one ref per source even if called 5 times.)
-- **Decay half-life** (Phase 3): default minutes for `:seon.agent/decay-half-life-min`? PRD proposes 30 min; cheap to tune.
-- **Shape-graph crossing the JVM/pod boundary** (Phase 4): port to CLJS, or expose a `/shape-graph/query` HTTP endpoint the pod hits? Port is cleaner; HTTP is faster to build.
+### 7.3 `chronological-decay`
 
-## 13. What we are explicitly NOT doing
+Query the eval log at strategy-run time; for each `:seon.fn`,
+compute use-count + recency from the log. Score = recency × w +
+use-count × w + (current-ns? × BIG). Above threshold: render full.
+Below: truncate or omit. LRU eviction over a configured budget.
+Current-ns + system-prompt + conventions: never evicted. No new
+attrs.
 
-- **No `register-strategy!` verb.** Strategies are discovered by output schema, full stop. Adding a registration verb would create two sources of truth (the registry + the program graph) and they would drift.
-- **No three-level detail.** `:full` + `:concise` with concise-fallback-to-truncated-`:full`. A strategy that wants to hide an entity simply doesn't include it.
-- **No separate "section composer" alongside the strategies.** Each strategy IS the composition. We considered (in earlier drafts) a `:specs / :related-ns-fns / :current-ns-fns / :eval-history / :messages / :errors` section registry; that became "the strategy does whatever it wants with the entities it picks." Sections were a way of saying "a strategy can mix detail levels per group" — the strategy is allowed to do that directly without a separate framework.
-- **No breaking change to `:seon.render/ai`.** The existing symbol on every entity continues to work; the substrate treats it as an alias for `:seon.render.ctx/full`. Older entities require no migration.
-- **No tone-deaf "future strategies" list.** What we build after Phase 4 is decided by what the four-strategy experiment teaches us — not by speculative additions.
+### 7.4 `data-shape-matching`
 
-## 14. Acceptance for the PRD itself
+For each `:seon.fn`, check its input schema against entities
+actually present in the agent-scoped DB (via `d/datoms` aevt index).
+Shape-matched fns: full. Shape-unmatched-but-recently-called:
+truncated. Everything else: omitted. Depends on the shape graph
+being reachable from CLJS (port or HTTP query — Phase 4 decision).
 
-This PRD is done (status moves from `draft` to `active`) when:
+The four strategies are **discovered**, not registered: a Datalog
+query for `:seon.fn` entities whose `:seon.fn/output-schema =
+:seon.render.ctx/response`. A new `defn` of a strategy in any
+namespace surfaces in the inspector's dropdown on its next render.
 
-- Sean has signed off on the four strategies and the phase ordering
-- The three open questions in §12.2 have decisions (or explicit "decide later" punts)
-- Phase 1 has a tracking issue in `docs/seon/orchestrator/issues/`
+---
+
+## 8. What this refactor DELETES
+
+This is a refactor, not an addition. The following code goes away.
+
+- **`src/seon/web/broadcast.cljs`** and **`src/seon/web/sse.cljs`**:
+  parallel SSE path with zero live consumers. The per-agent inspector
+  SSE replaces it entirely. (~250 LOC)
+- **Chronological rendering of `:seon.fn` / `:seon.schema` /
+  `:seon.ns` entities.** These are subsumed by their producing eval
+  (§4.9). The tee write-sites stop stamping `:seon.render/ai`.
+- **`seon.handlers.retro_stamp`** (or its no-op portion): if
+  write-site stamping is comprehensive, the retro pass is moot.
+  Verify before delete; the audit says 3-of-5 kinds it tries to stamp
+  have no rows.
+- **Substrate drill-in helpers**: any proposed `(inspect/show ...)`,
+  `(result ...)`, `(seon.schema/show ...)`. The §5 rule replaces
+  them.
+- **The three-level `:micro` / `:compact` / `:full` detail ladder.**
+  One render fn per entity kind. Strategy truncation is the only
+  variation. The `:seon.render/ai` symbol-on-entity attribute stays;
+  there is no `:seon.render.ai/full` / `:seon.render.ai/concise`
+  split.
+- **`seon.render/ai-render` and `seon.render/html-render`** as
+  separate fns if their callers can use the same internal
+  resolve-and-call as `assemble-ai-context`. (~25 LOC; audit before
+  delete.)
+- **`seon.inspect`**: folds into `seon.render` + `seon.handler`. (See
+  audit doc §6 B2.)
+
+---
+
+## 9. Implementation phases
+
+Five phases, sequenced. LOC estimates exclude tests. Each phase is
+self-contained — partial landing leaves the system in a working
+state.
+
+### Phase 1 — Storage discipline + write-site stamping (~150 LOC)
+
+Stop stamping `:seon.render/ai` on tee'd `:seon.fn` / `:seon.schema` /
+`:seon.ns` entities. Stamp at substrate boot for the front-block
+versions. Update `:seon.eval`, `:seon.message`, `:seon.async-result`
+write-sites to stamp comprehensively. Delete `retro_stamp` if it
+becomes a no-op.
+
+**Dependencies**: none. Foundation for everything else.
+
+### Phase 2 — Per-entity render fns rewritten (~250 LOC)
+
+Rewrite `seon.handlers.eval/render-ai`, `…/message/render-ai`,
+`…/fn/render-ai`, `…/schema/render-ai`, `…/ns/render-ai` to emit the
+§4 templates. Add `:seon.async-result` render. Add tests render
+clustered with their fn. Add result-enrichment for Var results.
+
+**Dependencies**: Phase 1 (the entities being rendered must be
+correctly stamped/unstamped first).
+
+### Phase 3 — Substrate boot order + front block (~120 LOC)
+
+Implement §6 in `start-agent!`. Transact system-prompt, conventions,
+core schemas, core fns, home-ns, one example handler + worked
+message pair. Verify the chronological renderer produces a sensible
+front block on a fresh agent.
+
+**Dependencies**: Phase 2 (renderers must produce the right shape
+before front-block content is meaningful).
+
+### Phase 4 — Strategy dispatch + `naive-chronological` formalized (~100 LOC)
+
+Schemas `:seon.render.ctx/{request,response}`. Attr
+`:seon.agent/ctx-render-fn` defaulting to
+`'seon.strategies.naive/render`. `assemble-ai-context` becomes a
+resolve-and-call dispatcher. `list-strategies` Datalog query against
+`:seon.fn/output-schema`. Inspector dropdown POSTs to set the slot.
+Delete `seon.web.broadcast` and `seon.web.sse`.
+
+**Dependencies**: Phase 3 (strategy 1 needs valid front-block output
+to be useful).
+
+### Phase 5 — Strategies 2, 3, 4 (~450 LOC total: 150 + 150 + 150)
+
+`most-referenced`, `chronological-decay`, `data-shape-matching`. All
+three are derived-only — no new persisted attrs. Strategy 4 depends
+on shape-graph reachability from CLJS (port or HTTP query — Sean
+decides; see §11).
+
+**Dependencies**: Phase 4. Strategies 2/3 are independent of each
+other; 4 has the shape-graph dependency.
+
+---
+
+## 10. Verification per phase (Socratic questions for the verifier)
+
+The verifier agent for each phase should be able to answer YES to all
+three questions. If they cannot, the phase has not landed.
+
+### Phase 1
+
+1. **Drill into a tee'd entity**: query `(d/datoms db :aevt
+   :seon.render/ai)`. Are the only rows for substrate-shipped
+   front-block entities plus runtime `:seon.eval` / `:seon.message` /
+   `:seon.async-result`? (Tee'd `:seon.fn` / `:seon.schema` /
+   `:seon.ns` MUST be absent.)
+2. **Cold-start**: a fresh agent, no chats. Does `(d/datoms db
+   :aevt :seon.render/ai)` return the front-block entity count
+   (system-prompt, conventions, core schemas, core fns, home-ns,
+   example handler, example message pair) — and no more?
+3. **Stamp idempotency**: re-run `start-agent!` against an existing
+   agent's DB. Does the stamp count stay constant? (No re-stamping
+   on resume.)
+
+### Phase 2
+
+1. **Eval render**: paste the rendered text for a single `:seon.eval`
+   entity into a `.clj` buffer and run Clojure's reader. Does it
+   parse without errors? (Read OK is required; eval is not.)
+2. **Message render**: same test for `:seon.message` — does the
+   `(comment #:seon.message{…})` block read?
+3. **Fn enrichment**: when a Var (`#'seon.db/query`) is the result of
+   an eval, does the rendered output include the
+   `;; ↳ <pointer>` enrichment line?
+
+### Phase 3
+
+1. **Front-block determinism**: boot two fresh agents
+   back-to-back. Do their front blocks render identically (modulo
+   agent id)?
+2. **Boot order**: is the rendered text in this order — system-prompt,
+   conventions, schemas, fns, home-ns, example handler, example
+   message pair? (Sort by tx-time should yield this.)
+3. **Cache stability**: after one chat turn, has the prefix (first N
+   bytes of rendered text up to the front-block boundary) changed at
+   all? It must not.
+
+### Phase 4
+
+1. **Strategy switch**: transact `:seon.agent/ctx-render-fn 'foo`
+   pointing at a fn that returns a constant string. Does the next
+   `assemble-ai-context` return that string?
+2. **Discovery**: define a new strategy in the agent's home ns
+   (`defn` with the right `:malli/schema`). Does `list-strategies`
+   include it within one tx?
+3. **Broadcast deletion**: grep the live pod's process for the
+   `seon.web.broadcast` ns. Is it absent (the file is gone)? Does the
+   inspector still update on every tx?
+
+### Phase 5
+
+1. **Strategy differentiation**: spawn three agents with three
+   different strategies, send the same prompt. Do the rendered
+   contexts differ in entity order or truncation?
+2. **No new attrs**: query the schema registry post-Phase-5. Are
+   `:seon.fn/use-count` and `:seon.fn/last-used-at` absent? (They
+   should be — strategies 2/3 derive these at run-time.)
+3. **Shape-matching agent**: in an agent with `:seon.email.message`
+   entities but no `:seon.trading.*` entities, does the
+   `data-shape-matching` rendered output include email-related fns
+   at full and omit trading fns entirely?
+
+---
+
+## 11. Open questions for Sean
+
+Three only. The rest are decided in this doc.
+
+1. **Elided-body sentinel.** `(defn foo [x])` is invalid Clojure
+   (defn requires a body). Options: (a) ship real bodies in the
+   front block (token cost), (b) emit `(defn foo [x] ::elided)` (ugly
+   but valid), (c) accept that the front block reads but does not
+   eval — document the rough-fidelity contract. **Recommendation: (c).**
+   The hard property is "the reader accepts it"; eval-ability is
+   rough by design.
+2. **Shape-graph reachability from CLJS (Phase 5 strategy 4).**
+   Port the JVM-side shape graph to CLJS, or expose a
+   `/shape-graph/query` HTTP endpoint the pod hits? Port is cleaner;
+   HTTP is faster to build and leaves the JVM authoritative.
+3. **`#'self` in rendered messages.** Worked-example message pairs
+   use `[#'self]` for `:seon.message/to`, which needs a dynamic var
+   bound at the agent's turn. Alternative: substitute the literal
+   `[:seon.agent/id "XAR-…"]` lookup ref (noisier but resolvable in a
+   fresh REPL). **Recommendation: keep `#'self`; document the
+   binding.** Same rough-fidelity contract as Q1.
+
+---
+
+## Cross-references
+
+- `docs/prds/agent-runtime/codebase-audit-and-cleanup-plan-2026-05-26.md`
+  — canonical for cleanup-task tracking (NOT superseded; it tracks
+  what to delete and is referenced from this PRD).
+- `docs/prds/agent-runtime/research/repl-session-context-template-2026-05-26.md`
+  — superseded for design decisions; retained for history.
+- `docs/prds/agent-runtime/research/agent-loop-pattern-survey-2026-05-25.md`
+  — superseded for design decisions; retained for history.
+- `docs/prds/agent-runtime/research/re-frame-vs-roll-own-2026-05-25.md`
+  — superseded for design decisions; retained for history.
+- `src/seon/render.cljs` — `assemble-ai-context` is the dispatch
+  point Phase 4 rewrites.
+- `src/seon/handlers/{eval,message,fn,schema,ns}.cljs` — Phase 2
+  rewrite targets.
+- `MEMORY.md` "three-tier storage rule" — the storage-discipline
+  rule §2 codifies.
+- `CLAUDE.md` "Data Rules" — the namespaced-keyword discipline this
+  PRD assumes.

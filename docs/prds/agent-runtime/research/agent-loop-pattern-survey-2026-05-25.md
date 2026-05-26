@@ -4,6 +4,8 @@ status: draft
 tags: [research, agent, architecture]
 ---
 
+> **SUPERSEDED for design decisions** by `architecture/ctx-render-strategies-prd.md` (2026-05-26 revision). Retained for history; do not use as the current spec.
+
 # Agent-loop pattern survey — what well-studied primitive fits Seon's needs?
 
 ## TL;DR
