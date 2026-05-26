@@ -29,6 +29,8 @@ Plus three concrete questions: (a) ALS replacement; (b) "JVM side breaks"; (c) "
 > **REVISED 2026-05-26 PM — read this first.**
 >
 > The first draft proposed full seon-JVM-as-V2-server integration in one shot (option c). Sean pushed back: "we aren't going to do it right" in one shot. **Revised scope: this is a PLATFORM UPDATE for the MVP, not a full JVM integration.** Parallel systems persist; only the database layer integrates now. Full merge happens later when both sides are stable. See §0b "Revised scope" below for the corrected design.
+>
+> **FURTHER REVISED 2026-05-26 EVE — two-path.** The flow-runtime-update spike (`research/flow-runtime-update-spike-2026-05-26.md`) verified dynamic flow registration works but with real cost (orphans in-flight requests, drops tx-bus subscribers, stales Integrant state). Decision: **MVP doesn't integrate session DBs into the flow at all.** Path A (existing seon.clj through `:seon.db/flow`) is left untouched; Path B (agent session DBs through a direct-conn atom registry) is new. seon.clj is undisturbed throughout MVP. Flow integration deferred to its own future PRD. See `integration-architecture-2026-05-26.md` §1.5.
 
 ## §0 Executive summary
 
