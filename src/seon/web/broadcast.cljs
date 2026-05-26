@@ -1,7 +1,12 @@
 (ns seon.web.broadcast
   "DB tx-listener that pushes per-agent render morphs to all open SSE
-   connections. Per spec-05 §15.4 (watch/diff/push) + §15.4a (per-agent
-   error isolation).
+   connections. Per the watch/diff/push contract (see
+   docs/prds/agent-runtime/) + per-agent error isolation.
+
+   Errors that escape a renderer no longer write to the DB — they
+   flow through `seon.log/error!` (NDJSON-EDN appended to the active
+   log file `seon.log/*log-file*`) and are surfaced back to the agent
+   via `seon.log/tail` (which reads the file) next turn.
 
    Pipeline per tx:
 
@@ -13,10 +18,11 @@
            short-circuits; symbol resolves via globalThis walker).
         c. Render the returned hiccup to an HTML string.
         d. If the per-agent error wraps the body (renderer threw),
-           transact a `:seon.log/level :error` entity AND render the
-           fallback pretty-html with the error visible in the tile —
-           the agent sees its own error next turn, the user sees a
-           red banner this turn.
+           emit a `seon.log/error!` entry (appended to the active log
+           file — NOT a DB tx) AND render the fallback pretty-html
+           with the error visible in the tile. The agent sees its own
+           error next turn via `recent-errors`, which `log/tail`'s the
+           file; the user sees a red banner this turn.
         e. Diff against `!last-rendered` cache; emit
            `datastar-patch-elements` SSE only if changed.
 
@@ -90,41 +96,30 @@
 ;; Tx-listener
 ;; ============================================================
 
-(defn- log-only-tx?
-  "True when every attr touched by the tx is in the `seon.log` namespace.
-   We skip these to break a self-trigger loop: render-agent!'s
-   `log/error!` is itself a tx; if the broken renderer keeps throwing
-   on every listener fire, we'd loop forever transacting new log
-   entries. Log writes never change a tile's render anyway — `recent-errors`
-   is read at next legitimate tx."
-  [attr-index]
-  (let [touched-attrs (keys attr-index)]
-    (and (seq touched-attrs)
-         (every? #(and (keyword? %)
-                       (= "seon.log" (namespace %)))
-                 touched-attrs))))
-
 (defn- broadcast-on-tx
   "Iterate every running agent; emit a `datastar-patch-elements`
-   per-agent only when its rendered HTML differs from the last push."
+   per-agent only when its rendered HTML differs from the last push.
+
+   Note: as of 2026-05-26 log entries no longer write to the DB
+   (they go to the in-memory ring + `logs/pod-events.log`), so the
+   (they go to the active log file via `seon.log/error!`), so the
+   prior log-only-tx skip is no longer needed — render errors no
+   longer cause self-trigger loops."
   [{:seon.db/keys [db attr-index]}]
-  (let [attrs (keys attr-index)
-        log-only (log-only-tx? attr-index)]
-    (log/info-console! "seon.web.broadcast" "tx received"
-                       {:attrs attrs :skip? log-only})
-    (when-not log-only
-      (doseq [ent (default/all-running-agents db)
-              :when (some? ent)
-              :let [aid  (:seon.agent/id ent)
-                    html-str (render-agent! db ent)
-                    prev (get @!last-rendered aid)
-                    diff? (not= prev html-str)]]
-        (log/info-console! "seon.web.broadcast" "agent render"
-                           {:agent aid :diff? diff? :html-len (count html-str)})
-        (when diff?
-          (sse/emit-patch! html-str)
-          (swap! !last-rendered assoc aid html-str)
-          (log/info-console! "seon.web.broadcast" "patch emitted" {:agent aid}))))))
+  (let [attrs (keys attr-index)]
+    (log/info-console! "seon.web.broadcast" "tx received" {:attrs attrs})
+    (doseq [ent (default/all-running-agents db)
+            :when (some? ent)
+            :let [aid  (:seon.agent/id ent)
+                  html-str (render-agent! db ent)
+                  prev (get @!last-rendered aid)
+                  diff? (not= prev html-str)]]
+      (log/info-console! "seon.web.broadcast" "agent render"
+                         {:agent aid :diff? diff? :html-len (count html-str)})
+      (when diff?
+        (sse/emit-patch! html-str)
+        (swap! !last-rendered assoc aid html-str)
+        (log/info-console! "seon.web.broadcast" "patch emitted" {:agent aid})))))
 
 ;; ============================================================
 ;; Install / remove

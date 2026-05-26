@@ -31,6 +31,7 @@
     [cljs.reader :as edn]
     [clojure.string :as str]
     [seon.db :as db]
+    [seon.log :as log]
     [seon.schema :as schema]
     [seon.ui.components :as comp]))
 
@@ -117,29 +118,15 @@
      (->> rows (sort-by second #(compare %2 %1)) (take n) reverse))))
 
 (defn ^:no-doc recent-errors
-  "Return the most-recent `n` undismissed `:seon.log/level :error`
-   entries for `id`, newest-first. Populated by `seon.log/error!`
-   transactions (A-6). Returns `()` when none."
-  ([db id] (recent-errors db id 10))
-  ([db id n]
-   (let [args  [id]
-         query '[:find ?eid ?at ?msg
-                 :in $ ?aid
-                 :where
-                 [?e :seon.log/level :error]
-                 [?e :seon.log/agent ?aid]
-                 [?e :seon.log/at ?at]
-                 [?e :seon.log/message ?msg]
-                 (not [?e :seon.log/dismissed-at _])
-                 [(identity ?e) ?eid]]
-         rows  (if db
-                 (db/query {:seon.db/db db :seon.db/query query :seon.db/args args})
-                 (db/query {:seon.db/query query :seon.db/args args}))]
-     (->> rows
-          (sort-by second #(compare %2 %1))
-          (take n)
-          (map (fn [[eid _at msg]]
-                 {:db/id eid :seon.log/message msg}))))))
+  "Return the most-recent `n` `:seon.log/level :error` entries for
+   agent `id`, newest-first. Reads the active `seon.log` file
+   (NOT the DB — log entries are no longer persisted as datoms; see
+   seon.log ns docstring). Returns `()` when none."
+  ([_db id] (recent-errors _db id 10))
+  ([_db id n]
+   (log/tail {:seon.log/n     n
+              :seon.log/level :error
+              :seon.log/agent id})))
 
 (defn ^:no-doc all-entities
   "Return the user-data entities of the DB as a vector of maps,
@@ -391,8 +378,8 @@
            "  (none yet)"))))
 
 (defn recent-errors-block
-  "Block: '## Recent errors' pulled from `:seon.log/level :error`
-   entities. Stubbed empty until seon.log/error! lands in A-6."
+  "Block: '## Recent errors' read from the `seon.log` file via
+   [[recent-errors]]. Empty string when none."
   {:malli/schema [:=> [:cat :map] :string]}
   [{:seon.db/keys [db] :seon.agent/keys [id]}]
   (let [errs (recent-errors db id 10)]
@@ -473,9 +460,7 @@
            [:div {:class "flex items-start gap-2 text-xs"}
             [:span {:class "text-error font-bold"} "⚠"]
             [:span {:class "flex-1 text-error font-mono"}
-             (str (:seon.log/message e))]
-            [:button {:class "text-text-400 hover:text-text-100"
-                      :data-on-click__post (str "/log/dismiss?id=" (:db/id e))} "×"]])])
+             (str (:seon.log/message e))]])])
       [:section {:class "flex-1 overflow-auto text-xs font-mono"}
        (if (seq msgs)
          (for [[_at role content] msgs]
