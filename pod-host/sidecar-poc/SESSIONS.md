@@ -6,12 +6,22 @@ tags: [architecture, agent, database]
 
 # Sessions — user-facing isolation in the platform
 
-A **session** is a user-facing secure namespace owned by the platform host on
-behalf of one user (or one experiment). N agents collaborate inside a single
-session against the same unified database. Agents don't switch sessions — an
-agent has **one** continuous, evolving session, and the agent IS that session
-over time. Cross-session is physically impossible: separate processes,
-sockets, files, in-process state.
+> **REVISED 2026-05-26 PM.** Original design assumed N JVM processes (one per
+> session). New design: **ONE JVM owns all sessions** as separate datahike DBs.
+> Isolation is per-DB inside the same JVM, not per-process. See
+> `docs/prds/agent-runtime/integration-architecture-2026-05-26.md` for the
+> authoritative current shape. This file kept for the conceptual model;
+> file-layout and lifecycle sections supersede below.
+
+A **session** is a user-facing secure namespace owned by the JVM on behalf of
+one user (or one experiment). N agents collaborate inside a single session
+against the same unified database. Agents don't switch sessions — an agent
+has **one** continuous, evolving session, and the agent IS that session over
+time. Cross-session isolation: separate datahike DBs in the same JVM,
+separate konserve stores, separate tx broadcast channels.
+
+DB name shape: `:seon.session/<name>` (e.g. `:seon.session/alice`). Master
+non-session DB is `:seon`. Agent ids are separately `:seon.agent/<id>`.
 
 ## 1. Concept
 

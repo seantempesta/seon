@@ -6,6 +6,12 @@ tags: [orchestrator, agent, database]
 
 # AGENT.md — sidecar-poc (V2 / Platform track)
 
+> **REVISED 2026-05-26 PM.** Architecture pivoted from "multi-JVM (one per
+> session)" to "**one seon JVM owns all sessions as multi-DB datahike**". This
+> file is being kept for guest-side (wasm CLJS) mental model. For JVM-side
+> integration shape and file layout, **read first**:
+> `docs/prds/agent-runtime/integration-architecture-2026-05-26.md`.
+
 ## TL;DR
 
 You are in `pod-host/sidecar-poc/`. **This is V2 — the future platform**, NOT
