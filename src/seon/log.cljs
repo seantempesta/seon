@@ -33,8 +33,9 @@
 
    The log file path is held in the dynvar [[*log-file*]] (default
    `\"logs/pod-events.log\"`). In the sidecar/WASI pod this will move
-   to `\"/scratch/pod-events.log\"` (the per-session WASI preopen
-   documented in `pod-host/sidecar-poc/README.md`). Override via
+   to `\"/logs/pod-events.log\"` — a dedicated WASI preopen, separate
+   from `/scratch/` so logs can be agent-RO and survive session
+   restarts (scratch is per-session, agent-RW). Override via
    [[configure!]] or by binding [[*log-file*]] in a test.
 
    ## Entry shape
@@ -162,13 +163,13 @@
 ;;
 ;; `*log-file*` is the canonical path. Both writers (`error!`, `info!`,
 ;; ...) and the reader ([[tail]]) resolve through it. To migrate to
-;; the WASI sidecar `/scratch/` preopen, change ONE value:
+;; the WASI sidecar's dedicated `/logs/` preopen, change ONE value:
 ;;
-;;   (binding [seon.log/*log-file* \"/scratch/pod-events.log\"] ...)
+;;   (binding [seon.log/*log-file* \"/logs/pod-events.log\"] ...)
 ;;
 ;; or
 ;;
-;;   (seon.log/configure! {:seon.log/file \"/scratch/pod-events.log\"})
+;;   (seon.log/configure! {:seon.log/file \"/logs/pod-events.log\"})
 ;;
 ;; `:seon.log/file-cap` and `:seon.log/keep` control file-size
 ;; rotation. No ring buffer config — there is no ring buffer.
@@ -177,7 +178,9 @@
 (def ^:dynamic *log-file*
   "Absolute or cwd-relative path to the active log file. The default
    `\"logs/pod-events.log\"` is V0/Node-pod-friendly; the WASI sidecar
-   will rebind this to `\"/scratch/pod-events.log\"`."
+   will rebind this to `\"/logs/pod-events.log\"` (its own preopen,
+   separate from `/scratch/` — logs are agent-RO and persist across
+   session restarts; scratch is per-session agent-RW workspace)."
   "logs/pod-events.log")
 
 (defonce !config

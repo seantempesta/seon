@@ -144,10 +144,15 @@ User pushback: *"tail is not magic — it should literally read the log file."* 
 `seon.log/*log-file*` is a `^:dynamic` var (default `"logs/pod-events.log"`). Both writers and `tail` resolve through it. The WASI sidecar migration is now one line:
 
 ```clojure
-(binding [seon.log/*log-file* "/scratch/pod-events.log"] ...)
+(binding [seon.log/*log-file* "/logs/pod-events.log"] ...)
 ;; or
-(seon.log/configure! {:seon.log/file "/scratch/pod-events.log"})
+(seon.log/configure! {:seon.log/file "/logs/pod-events.log"})
 ```
+
+The sidecar pod will get a dedicated `/logs/` WASI preopen — separate
+from `/scratch/`. Reasons: logs want agent-RO + persistence across
+session restarts; scratch is agent-RW + per-session-ephemeral. Conflating
+the two in one mount would force the same RW semantics on both.
 
 `configure!` does `set! *log-file*` on the root binding, mirroring the existing pattern in `seon.client` (`set! db/*conn* conn`). No literal `"logs/pod-events.log"` strings sprinkled anywhere else.
 
@@ -179,4 +184,4 @@ Tradeoff is intentional: making `tail` glue the rotated files together would re-
 
 ### Agent-readable verified
 
-`seon.fs/read-file` returns the exact bytes `log/error!` wrote. The fs allowlist enforcement still applies — the consumer overlay (or `bin/seon` boot) must `seon.fs/configure!` the log directory as an allowed root, or the WASI pod's `/scratch` preopen takes care of it natively.
+`seon.fs/read-file` returns the exact bytes `log/error!` wrote. The fs allowlist enforcement still applies — the consumer overlay (or `bin/seon` boot) must `seon.fs/configure!` the log directory as an allowed root. In the WASI sidecar pod, the dedicated `/logs/` preopen handles this natively — mount as RO from the guest's perspective so agents can read but never overwrite the log file.
