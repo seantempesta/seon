@@ -1206,6 +1206,35 @@ You must then either:
       (log-error "Cannot connect to orchestrator on port" orchestrator-port ":" (.getMessage e))
       false)))
 
+(defn- start-parent-watchdog!
+  "Exit if the parent process (Claude Code) is gone.
+
+   The MCP protocol is stdio. When Claude Code crashes / closes a session
+   without clean shutdown, we orphan with stdin/stdout dangling. We capture
+   the parent PID at startup; this future checks every 5 seconds whether
+   that PID is still alive, and exits cleanly if not. Without this guard,
+   N stale MCP servers accumulate over time and confuse fresh sessions.
+
+   Reads `parent-pid` (top-level), checks `ProcessHandle/of pid` for
+   `isAlive`. If the PID is reused by an unrelated process the worst
+   case is we keep running (false positive); the typical case is the
+   PID slot is free and we exit."
+  []
+  (when parent-pid
+    (future
+      (try
+        (loop []
+          (Thread/sleep 5000)
+          (let [handle (java.lang.ProcessHandle/of parent-pid)]
+            (if (and (.isPresent handle)
+                     (.isAlive (.get handle)))
+              (recur)
+              (do
+                (log-info "Parent" parent-pid "is gone — exiting to avoid orphaning.")
+                (System/exit 0)))))
+        (catch Exception e
+          (log-error "Watchdog crashed:" (.getMessage e)))))))
+
 (defn -main
   "Main entry point. Read JSON-RPC from stdin, process, write to stdout.
 
@@ -1217,6 +1246,10 @@ You must then either:
    brick the entire MCP server."
   []
   (log-info "MCP Server v0.5.0 starting (async mode)...")
+
+  ;; Watchdog: exit cleanly if the parent (Claude Code) process is gone.
+  ;; Prevents stale MCP servers accumulating across sessions.
+  (start-parent-watchdog!)
 
   ;; Init orchestrator session in background with retry — don't block the message loop.
   ;; handle-initialize responds without needing nREPL. Tools that need it

@@ -485,8 +485,33 @@
       (log-error "handler exception:" (.getMessage e))
       (when id (send-result id (mcp-error (.getMessage e)))))))
 
+(def parent-pid
+  (let [parent (.parent (java.lang.ProcessHandle/current))]
+    (when (.isPresent parent)
+      (.pid (.get parent)))))
+
+(defn- start-parent-watchdog!
+  "Exit if the parent process (Claude Code) is gone. Prevents stale MCP
+   servers accumulating across sessions when stdio is left dangling."
+  []
+  (when parent-pid
+    (future
+      (try
+        (loop []
+          (Thread/sleep 5000)
+          (let [handle (java.lang.ProcessHandle/of parent-pid)]
+            (if (and (.isPresent handle)
+                     (.isAlive (.get handle)))
+              (recur)
+              (do
+                (log-info "Parent" parent-pid "is gone — exiting to avoid orphaning.")
+                (System/exit 0)))))
+        (catch Exception e
+          (log-error "Watchdog crashed:" (.getMessage e)))))))
+
 (defn -main []
   (log-info "seon-cljs MCP server starting; project=" project-root)
+  (start-parent-watchdog!)
   (let [reader (BufferedReader. *in*)]
     (loop []
       (when-let [line (.readLine reader)]
