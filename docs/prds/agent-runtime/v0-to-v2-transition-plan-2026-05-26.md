@@ -26,12 +26,41 @@ Plus three concrete questions: (a) ALS replacement; (b) "JVM side breaks"; (c) "
 
 ---
 
+> **REVISED 2026-05-26 PM — read this first.**
+>
+> The first draft proposed full seon-JVM-as-V2-server integration in one shot (option c). Sean pushed back: "we aren't going to do it right" in one shot. **Revised scope: this is a PLATFORM UPDATE for the MVP, not a full JVM integration.** Parallel systems persist; only the database layer integrates now. Full merge happens later when both sides are stable. See §0b "Revised scope" below for the corrected design.
+
 ## §0 Executive summary
 
-- **TL;DR (three bullets).**
-  1. **Final shape: option (c) — the existing seon JVM IS the V2 server.** Merge `pod-host/sidecar-poc/jvm-writer/` into `src/seon/server/` reusing `seon.db`, `seon.schema`, and the existing Integrant lifecycle. The seon JVM (`bin/run`) becomes the single backend for everything: Datahike, HTTP/SSE/UI, the wire server for wasm guests. Rust host becomes a **child process** the JVM spawns when wasm guests are needed (or that the JVM never spawns at all if the user is in JVM-REPL-only mode).
-  2. **ALS goes away entirely in V2.** The V0 reasoning for ALS — *multi-agent fibers in one Node process* — does not exist on the V2 platform. Each wasm guest is one Store = one fiber; JVM threads use `^:dynamic` Vars + the existing `:seon.db/*tx-context*` JVM-side pattern. The `seon.agents/!instances` atom from the atom-state PRD becomes the per-agent state surface. No `node:async_hooks` is shipped to wasm.
-  3. **Phasing in 9 phases, ~62-92 hours of focused work.** Phase 0 cleanup → Phase 1 directory rename → Phase 2 JVM merge (the big one — the JVM database upgrade the user is nervous about) → Phase 3 atom-pattern → Phase 4 file migration (Bucket B/C) → Phase 5 real-V0-turn-in-guest → Phase 6 cutover → Phase 7 cleanup → Phase 8 Tauri (deferred). Phases 2, 5, 6 are the load-bearing risk points; the rest are mechanical.
+- **TL;DR (three bullets, post-revision).**
+  1. **MVP-scoped platform update — parallel systems preserved.** The ONLY thing integrating now is the datahike database layer per Platform V2's multi-database plan. The seon JVM keeps its own DB and can additionally host other agents' DBs (shared or separate). Everything else stays as CLJS recreations in the pod: HTTP server, render pipeline, inspector, web UI, agent loop. Full seon-JVM-as-V2-server merge is deferred until both sides are stable and ready.
+  2. **ALS goes away entirely.** Per Sean: switching to separate agents per instance (one wasm Store = one agent process = one fiber). No thread/concurrency issues. Runtime state injected into the session lives in a SINGLE ATOM (`seon.agents/!self`, not the multi-agent `!instances` map from the original atom-state PRD draft). One atom is defined per-process so dev iteration in shadow-cljs single-instance works AND it transparently works inside the wasm container (because each Store IS a single instance). `node:async_hooks` is not shipped to wasm; `^:dynamic` Vars work fine on the single-fiber model.
+  3. **Revised phasing in fewer phases.** Phase 0 cleanup → Phase 1 directory rename → Phase 2 database-layer integration (multi-DB datahike in JVM, CLJS pod becomes a client) → Phase 3 single-atom runtime state → Phase 4 CLJS file relocation (move not merge) → Phase 5 multi-agent smoke against the integrated DB → Phase 6 cutover → Phase 7 cleanup. Phase 8 (full JVM merge) and Phase 9 (Tauri) explicitly deferred. Phases 2, 5, 6 are the load-bearing risk points; the rest are mechanical.
+
+## §0b Revised scope (2026-05-26 PM)
+
+**What integrates now (Phase 2):**
+- Datahike database layer. The JVM exposes a multi-DB datahike per Platform V2's plan. CLJS pod connects as a client (via wire protocol over UDS or HTTP). Multiple DBs supported: seon JVM keeps its own, and the same JVM can host N more for agents — either shared or separate per agent.
+
+**What stays as parallel CLJS recreations (NOT merged):**
+- HTTP server: CLJS pod owns its loopback HTTP + SSE inspector. The JVM has its own `seon.web.*` for the JVM's UI. They coexist on different ports.
+- Render pipeline: CLJS pod owns its renderer + inspector + chat UI. Same.
+- Agent loop: lives in the CLJS pod. Wake handlers, `run-agentic-loop!`, `eval-batch!`, detect-and-tee — all CLJS.
+- Schema registry: stays in `seon.schema.cljc` (CLJC, shared by both sides via reader conditionals).
+- Test runner: `seon.test.runner.cljs` stays in the pod for agent-authored tests; JVM keeps its own JVM-side test runner.
+
+**Why parallel:** rushing the full JVM merge risks breaking the JVM's production substrate (web UI, Datastar SSE, dev hook, agent JVM pool, orchestrator sessions) while we're still iterating on agent-runtime design. Merge later when both sides have stopped moving.
+
+**Eventual full merge (Phase 8+):** when V2 is stable and CLJS surface has settled, do the option-(c) merge — JVM IS the V2 server, single HTTP, single inspector. That work is its own PRD, not this one.
+
+**Hard preserve (don't touch in MVP):** seon JVM concepts stay untouched. `:seon.db/flow` (core.async.flow process around the conn), Integrant lifecycle, agent JVM pool, dev hook, orchestrator sessions, web UI, inspector — none of these are touched by this plan. The only seon JVM change is: convert single-DB datahike to multi-DB, point all existing seon CLJ references at a single "master seon database" (one named DB), and add a wire-server component that lets CLJS clients connect to JVM-hosted DBs (master or per-agent).
+
+**Real work in the database-layer integration:**
+- (a) JVM multi-DB datahike — Platform already solved this. Install their system.
+- (b) Multi-CLJS-agent shared-DB read/write — Platform already solved this. Install their system.
+- (c) seon CLJ code converts to using `(db/transact! :seon …)` style with the named master DB. Most call sites likely already do this; some may need explicit qualification.
+
+**Temporary CLJ breakage is OK.** Platform's install may break the existing seon CLJ side while routes/refs settle. We accept that, fix it after the install lands, do NOT slow Platform down with compatibility constraints during their work. The seon CLJ web UI / dev hook / agent JVM pool / orchestrator sessions can be temporarily non-functional; cutover criterion is that they come back to green AFTER the install, not that they never break.
 
 - **Total estimated effort.** **62-92 hours** of focused work (one engineer-equivalent). Spread across calendar time the user prefers. See §6 per-phase breakdowns.
 
@@ -98,6 +127,17 @@ Total LOC across `.clj`+`.cljc`: ~25,000. Anchor namespaces:
 
 The JVM system is the **production backbone** today. Web UI, HTTP, datastar SSE, agent JVM pool, orchestrator sessions all live here. The user is right to be nervous — touching the Integrant graph or `seon.db.datahike.*` breaks the running app.
 
+### NOTE on §3 buckets below (revised 2026-05-26 PM)
+
+The bucket assignments below were written under the original "JVM IS the server" plan. Under the revised parallel-systems plan:
+
+- Bucket A (replaced by V2 runtime) — UNCHANGED. `db.cljs` / `eval.cljs` / `repl.cljs` still get the overlay treatment because they wrap the database access path.
+- Bucket B (move verbatim) — UNCHANGED. CLJS substrate moves to `pod-host/guest/` but stays CLJS.
+- Bucket C (small adjustments) — `web/inspector.cljs` does NOT delete. The CLJS pod still owns its inspector. Only the path to the database changes (now goes through the wire-server client instead of in-process datahike-cljs).
+- Bucket D (deleted) — does NOT delete `client.cljs` wholesale. The HTTP/web-server bits of `client.cljs` stay; only the in-process datahike init goes away (replaced by wire-server client connect). `web/{serve,broadcast,sse,inspector}.cljs` stay as CLJS.
+
+Re-read each bucket with that lens. A more thorough rewrite of §3 will land alongside Phase 1's directory rename when paths are stable.
+
 ### 1c. V2 sidecar (`pod-host/sidecar-poc/` — Phase D + PF green)
 
 | Subdirectory | Role | LOC | Health |
@@ -124,9 +164,20 @@ Observed gaps (from `CUTOVER.md` blocking list):
 
 ---
 
-## §2 Final target architecture
+## §2 Target architecture (REVISED 2026-05-26 PM)
 
-### 2.1 The decision — option (c): JVM IS the V2 server
+> **Original §2.1 below proposed option (c) — JVM IS the V2 server. That decision is REVERSED per Sean's 2026-05-26 PM steer.** The MVP-scoped target is a hybrid where ONLY the database integrates; HTTP, render, inspector, agent loop all stay as parallel CLJS. Original text retained below for historical context.
+
+### 2.1-revised — hybrid: shared multi-DB datahike, separate everything else
+
+- **Database layer (integrated):** seon JVM hosts multi-DB datahike per Platform V2's plan. Exposes a wire-server (UDS or HTTP) that the CLJS pod connects to as a client. JVM has its own DB; can additionally host any number of agent DBs (shared or separate).
+- **CLJS pod (parallel, unchanged role):** owns its own loopback HTTP server, SSE inspector, chat UI, agent loop, render pipeline, test runner. Talks to the JVM only for database operations. Each pod = one agent instance (one wasm Store).
+- **JVM (parallel, unchanged role):** keeps `seon.web.*` UI on its own port. Keeps Integrant lifecycle. Keeps dev hook. Adds the wire-server component for serving CLJS pod clients.
+- **No HTTP merge.** Two HTTP servers (JVM's on 8080, pod's on its loopback port). User-facing UI happens in whichever is configured per use case.
+- **No inspector merge.** CLJS pod has its CLJS inspector for "what the agent sees." JVM has its JVM inspector for "what the JVM substrate sees." They're different tools serving different audiences.
+- **Full merge deferred** to Phase 8+ when both sides are stable.
+
+### 2.1-original (HISTORICAL) — option (c): JVM IS the V2 server
 
 The user asked: "the seon http server — it can now do the web hosting right?" Yes. The choice between (a) merge, (b) keep separate, (c) JVM-is-the-server is the load-bearing decision and the right answer is **(c)**, with reasoning that follows from the existing inventory:
 
@@ -296,9 +347,11 @@ The user asked: "the seon http server — it can now do the web hosting right?" 
 
 ---
 
-## §4 ALS → atom transition
+## §4 ALS → single atom transition (REVISED 2026-05-26 PM)
 
 This is the load-bearing technical change. The user named it the biggest concern.
+
+> **REVISED scope:** the original draft proposed `seon.agents/!instances` — a multi-agent MAP atom — for V0 with collapse to single-agent on V2. Sean's 2026-05-26 PM steer: **drop the multi-agent map entirely**. Each agent runs in its own process/Store; runtime state lives in ONE atom (`seon.agents/!self`). Defined once per process; works identically in dev (shadow-cljs single-instance watch) and in production (wasm Store, which IS a single instance). No ALS anywhere. `^:dynamic` Vars stay for tx-context + warnings-bucket — they're fine on single-fiber.
 
 ### 4.1 What changes
 
@@ -479,9 +532,11 @@ Each phase: **Goal • Scope • Pre-condition • Done-when • Verification �
 - **Time:** **3-5 hours** (mostly grep-and-replace across 200+ files of paths/namespaces).
 - **MVP-track impact:** None — their files at `src/seon/*.cljs` are untouched. They might need to update one path in any dev script.
 
-### Phase 2 — JVM merge: wire-server INTO the seon JVM (the big one)
+### Phase 2 — Multi-DB datahike + wire-server (DATABASE LAYER ONLY)
 
-- **Goal:** Make the seon JVM the V2 server. Delete `pod-host/sidecar-poc/jvm-writer/`. The wire-server is a new Integrant component using `seon.db/transact!` etc.
+> **REVISED 2026-05-26 PM:** This phase used to be "the big merge" — JVM becomes the V2 server. Now it's scoped to the database layer ONLY. Wire-server lands in the JVM; HTTP/inspector/render do NOT merge. The CLJS pod stays the agent-runtime substrate. See §0b.
+
+- **Goal:** JVM datahike becomes multi-DB. Wire-server lets CLJS pod clients connect to JVM-hosted agent DBs. Delete `pod-host/sidecar-poc/jvm-writer/`. HTTP/inspector/render in JVM stay UNCHANGED — no merge of CLJS web stack into JVM web stack.
 - **Scope:**
   - Create `src/seon/server/{wire,codec,transit,broadcast,session}.clj` (~740 LOC total — porting + adapting `jvm-writer/src/seon/sidecar/*.clj`).
   - Add `:seon.server/wire-server` Integrant init/halt/suspend/resume in `src/seon/system.clj` (~30 LOC).
