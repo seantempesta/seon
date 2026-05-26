@@ -153,27 +153,80 @@
   [db tx-eid]
   (:seon.db/agent-id (d/entity db tx-eid)))
 
-(defn- renderable-entities
-  "Walk the db's AEVT index for `:seon.render/ai` (cheap because
-   datahike maintains an index per attr). Returns a seq of maps:
+(defn- renderable-kinds
+  "Return a seq of `{:kind <kw> :id-attr <kw> :ai <sym> :html <sym>}`
+   for every entity schema registered with both `:seon.render/ai` and
+   `:seon.entity/id-attr` on its properties. The renderer enumerates
+   instances by walking AEVT for each `id-attr`; the render symbols
+   come from the schema's own props (no per-row stamp)."
+  []
+  (->> (schema/registered-schemas)
+       (keep (fn [[k v]]
+               (when-let [props (and (vector? v) (= :map (first v))
+                                     (some (fn [x] (when (map? x) x)) (rest v)))]
+                 (when (and (:seon.render/ai props)
+                            (:seon.entity/id-attr props))
+                   {:kind     k
+                    :id-attr  (:seon.entity/id-attr props)
+                    :ai       (:seon.render/ai props)
+                    :html     (:seon.render/html props)}))))))
 
+(defn- entity-primary-kind
+  "Fingerprint an entity's primary kind by counting attr namespaces.
+   The namespace with the most attrs wins. Returns the kind keyword
+   (e.g. `:seon.eval`) or nil. Robust to multi-kind merges (Phase 1c)
+   — for a single-kind entity the namespace it lives in IS the kind."
+  [entity kinds-by-ns]
+  (let [counts (->> (keys entity)
+                    (filter keyword?)
+                    (keep namespace)
+                    frequencies)]
+    (when (seq counts)
+      (let [top-ns (->> counts (sort-by val >) ffirst)]
+        (kinds-by-ns top-ns)))))
+
+(defn- renderable-entities
+  "Enumerate all renderable entities visible to `agent-id`. Walks
+   `(d/datoms db :aevt <id-attr>)` for each kind whose schema declares
+   `:seon.render/ai`, pulls each, and attaches resolved render symbols.
+
+   Returns a seq of:
      {:eid <entity-id>
       :last-tx <tx-eid>
       :agent-id <string-or-nil>
-      :entity <pulled-entity-map>}
+      :entity <pulled-entity-map>
+      :kind <kw>
+      :render/ai <sym>}
 
-   Filtered by agent scope: substrate (nil agent-id) or matching
-   agent-id are kept; everything else dropped."
+   Per-entity override: if the pulled entity carries its own
+   `:seon.render/ai`, that wins over the kind's default."
   [db agent-id]
-  (let [eids (->> (d/datoms db :aevt :seon.render/ai)
-                  (map (fn [^js d] (.-e d)))
-                  distinct)
+  (let [kinds        (renderable-kinds)
+        kinds-by-ns  (into {} (map (fn [k] [(name (:kind k)) (:kind k)]) kinds))
+        kinds-by-kw  (into {} (map (juxt :kind identity) kinds))
+        ;; Distinct eids across all kind indices (an entity could in
+        ;; principle carry id-attrs for multiple kinds — Phase 1c).
+        eids         (->> kinds
+                          (mapcat (fn [{:keys [id-attr]}]
+                                    (->> (d/datoms db :aevt id-attr)
+                                         (map (fn [^js d] (.-e d))))))
+                          distinct)
         rows (for [eid eids
                    :let [tx     (entity-last-tx db eid)
                          tx-aid (tx-agent-id db tx)
-                         ent    (d/pull db '[*] eid)]
-                   :when (or (nil? tx-aid) (= tx-aid agent-id))]
-               {:eid eid :last-tx tx :agent-id tx-aid :entity ent})]
+                         ent    (d/pull db '[*] eid)
+                         kind   (entity-primary-kind ent kinds-by-ns)
+                         k-info (get kinds-by-kw kind)
+                         ai-sym (or (:seon.render/ai ent)
+                                    (:ai k-info))]
+                   :when (and ai-sym
+                              (or (nil? tx-aid) (= tx-aid agent-id)))]
+               {:eid       eid
+                :last-tx   tx
+                :agent-id  tx-aid
+                :entity    ent
+                :kind      kind
+                :render/ai ai-sym})]
     rows))
 
 (defn- sticky?
@@ -191,16 +244,18 @@
   (sort-by :last-tx rows))
 
 (defn- render-one
-  "Resolve the entity's `:seon.render/ai` symbol and call it with the
-   system-input shape. Falls back to pretty-ai when the symbol misses.
-   Returns the rendered string."
-  [{:seon.db/keys [db] :seon.agent/keys [id]} entity]
-  (let [sym   (:seon.render/ai entity)
-        f     (or (eval/lookup-value sym) default/pretty-ai)
-        input {:seon.db/db    db
-               :seon.agent/id id
-               :seon.render/entity entity}
-        out   (try (f input) (catch :default _ nil))]
+  "Resolve the row's render-ai symbol (entity override or schema-level
+   default — pre-computed in `renderable-entities`) and call it with
+   the system-input shape. Falls back to pretty-ai when the symbol
+   misses. Returns the rendered string."
+  [{:seon.db/keys [db] :seon.agent/keys [id]} row]
+  (let [entity (:entity row)
+        sym    (or (:render/ai row) (:seon.render/ai entity))
+        f      (or (eval/lookup-value sym) default/pretty-ai)
+        input  {:seon.db/db    db
+                :seon.agent/id id
+                :seon.render/entity entity}
+        out    (try (f input) (catch :default _ nil))]
     (or (:seon.render/text out) (str out))))
 
 (schema/register! :seon.render/assemble-ai-request
@@ -243,8 +298,7 @@
         ordered       (concat sticky-sorted window-tail)
         ents          (mapv :entity ordered)
         parts         (->> ordered
-                           (map #(render-one {:seon.db/db db :seon.agent/id id}
-                                              (:entity %)))
+                           (map #(render-one {:seon.db/db db :seon.agent/id id} %))
                            (remove str/blank?))
         text          (str/join "\n\n" parts)
         token-est     (quot (count text) 4)]

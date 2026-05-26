@@ -266,6 +266,46 @@
 (schema/register! :seon.schema/created-at :inst)
 
 ;; ============================================================
+;; Entity-kind `:map` schemas. One per renderable kind. The
+;; `:seon.render/ai` / `:seon.render/html` symbols live on the schema's
+;; own properties — `seon.schema/register!` walks the entries and
+;; auto-derives `:seon.entity/id-attr` from whichever entry carries
+;; `{:seon.db/identity true}`. That id-attr is what the renderer
+;; enumerates in AEVT to find all instances of the kind; the render
+;; symbols are looked up via `(m/properties (m/schema :seon.eval))`
+;; at render time (no per-row stamping).
+;;
+;; These are intentionally MINIMAL — they exist so the renderer's
+;; discovery loop has a schema to consult. Full per-attr lists with
+;; `{:optional true}` flags are a Phase 1b/1c follow-up.
+;; ============================================================
+
+(schema/register! :seon.eval
+  [:map {:seon.render/ai   'seon.handlers.eval/render-ai
+         :seon.render/html 'seon.handlers.eval/render-html}
+   [:seon.eval/id :seon.eval/id]])
+
+(schema/register! :seon.message
+  [:map {:seon.render/ai   'seon.handlers.message/render-ai
+         :seon.render/html 'seon.handlers.message/render-html}
+   [:seon.message/id :seon.message/id]])
+
+(schema/register! :seon.fn
+  [:map {:seon.render/ai   'seon.handlers.fn/render-ai
+         :seon.render/html 'seon.handlers.fn/render-html}
+   [:seon.fn/sym :seon.fn/sym]])
+
+(schema/register! :seon.schema
+  [:map {:seon.render/ai   'seon.handlers.schema/render-ai
+         :seon.render/html 'seon.handlers.schema/render-html}
+   [:seon.schema/key :seon.schema/key]])
+
+(schema/register! :seon.ns
+  [:map {:seon.render/ai   'seon.handlers.ns/render-ai
+         :seon.render/html 'seon.handlers.ns/render-html}
+   [:seon.ns/name :seon.ns/name]])
+
+;; ============================================================
 ;; Home-ns derivation. Per spec-05 §22.5 the agent's home ns is a
 ;; deterministic function of the agent's id — no need to store it
 ;; on the entity.
@@ -449,9 +489,7 @@
                     :seon.message/role    :user
                     :seon.message/content text
                     :seon.message/agent   [:seon.agent/id agent-id]
-                    :seon.message/at      (js/Date.)
-                    :seon.render/ai       'seon.handlers.message/render-ai
-                    :seon.render/html     'seon.handlers.message/render-html}]}))))
+                    :seon.message/at      (js/Date.)}]}))))
     mid))
 
 (defn replies-after
@@ -623,9 +661,7 @@
        :seon.message/role    :assistant
        :seon.message/content reply-text
        :seon.message/agent   [:seon.agent/id id]
-       :seon.message/at      (js/Date.)
-       :seon.render/ai       'seon.handlers.message/render-ai
-       :seon.render/html     'seon.handlers.message/render-html}]
+       :seon.message/at      (js/Date.)}]
      :seon.agent/eval-count (:seon.eval/n-ok batch)}))
 
 (defn ^:async run-turn!

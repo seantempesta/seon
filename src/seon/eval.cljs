@@ -679,25 +679,22 @@
                        :seon.fn/private?   private?
                        :seon.fn/specced?   specced?
                        :seon.fn/created-at at
-                       ;; Inspector renderability — every defined fn
-                       ;; shows up in both the LLM ctx and the human
-                       ;; inspector. Stamped at the WRITE site.
-                       :seon.render/ai     'seon.handlers.fn/render-ai
-                       :seon.render/html   'seon.handlers.fn/render-html})
+                       ;; Renderer dispatch comes from the entity-schema's
+                       ;; `:seon.render/ai` / `:seon.render/html` props
+                       ;; (see seon.agent's :seon.fn registration). The
+                       ;; renderer's discovery walks AEVT for `:seon.fn/sym`
+                       ;; and resolves through the schema; no per-row stamp.
+                       })
         schema-entities (for [k new-schemas]
                           {:seon.schema/key        k
                            :seon.schema/ns         [:seon.ns/name
                                                     (keyword (namespace k))]
                            :seon.schema/source     source
-                           :seon.schema/created-at at
-                           :seon.render/ai         'seon.handlers.schema/render-ai
-                           :seon.render/html       'seon.handlers.schema/render-html})
+                           :seon.schema/created-at at})
         ns-sym      (ns-form-name source)
         ns-entities (when ns-sym
                       [{:seon.ns/name   (keyword (str ns-sym))
-                        :seon.ns/source source
-                        :seon.render/ai   'seon.handlers.ns/render-ai
-                        :seon.render/html 'seon.handlers.ns/render-html}])]
+                        :seon.ns/source source}])]
     (vec (concat ns-entities fn-entities schema-entities))))
 
 (defn ^:async record-eval!
@@ -724,14 +721,12 @@
                           :seon.eval/narration   (or narration "")
                           :seon.eval/source      source
                           :seon.eval/ok?         (boolean (:ok result))
-                          ;; Inspector renderability — every eval is a
-                          ;; renderable entity in both the LLM ctx (the
-                          ;; agent reviewing its own work) and the human
-                          ;; inspector pane. Stamped at the WRITE site so
-                          ;; the responsibility is colocated with the
-                          ;; writer per CLAUDE.md.
-                          :seon.render/ai        'seon.handlers.eval/render-ai
-                          :seon.render/html      'seon.handlers.eval/render-html
+                          ;; Renderer dispatch via entity-schema props
+                          ;; (`:seon.eval` map registration). No per-row
+                          ;; stamp — the renderer enumerates evals by
+                          ;; walking the AEVT index for `:seon.eval/id`
+                          ;; and resolves `:seon.render/ai` through
+                          ;; `(m/schema :seon.eval)`'s properties.
                           ;; v1.md:236 — ending ns. From the eval result
                           ;; on success; from the fold accumulator on
                           ;; failure (last-known-good). Always populated.

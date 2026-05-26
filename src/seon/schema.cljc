@@ -116,6 +116,70 @@
 ;;; Registration API
 ;;; ---------------------------------------------------------------------------
 
+(defn- attr-form-properties
+  "Extract the Malli props map from an attr-schema form. Mirrors
+   `seon.db/form-properties` (we don't depend on db.cljs from here to
+   avoid a require cycle)."
+  [form]
+  (when (vector? form)
+    (some (fn [x] (when (map? x) x)) (rest form))))
+
+(defn- attr-has-identity?
+  "True when the registered attr schema for `attr-key` carries
+   `{:seon.db/identity true}` directly or through one keyword
+   indirection. Covers the three shapes Seon uses today:
+     [:string  {:seon.db/identity true}]
+     [:keyword {:seon.db/identity true}]
+     [:and {:seon.db/identity true} :seon.db/id]"
+  [attr-key]
+  (let [form (get @*schemas attr-key)]
+    (boolean (some-> form attr-form-properties :seon.db/identity))))
+
+(defn- map-shape?
+  "True if `v` looks like a Malli `:map` schema form."
+  [v]
+  (and (vector? v) (= :map (first v))))
+
+(defn- map-entries
+  "Return the entries of a `:map` schema form — vector of
+   `[entry-key (props?) entry-schema]`. Strips the head and the
+   optional schema-level props map."
+  [v]
+  (let [body (rest v)
+        body (if (and (seq body) (map? (first body))) (rest body) body)]
+    (vec body)))
+
+(defn- derive-entity-id-attr
+  "If `v` is a `:map`-shaped schema and any of its entry keys is itself
+   a registered attr carrying `{:seon.db/identity true}`, return that
+   entry-key. Otherwise return nil.
+
+   This makes a registered entity schema self-describing for the
+   renderer's discovery walk (no separate `:seon.entity/kind` stamp
+   needed — the schema's own props point at the attr that identifies
+   instances of that kind)."
+  [v]
+  (when (map-shape? v)
+    (some (fn [entry]
+            (when-let [k (and (vector? entry) (first entry))]
+              (when (attr-has-identity? k) k)))
+          (map-entries v))))
+
+(defn- with-entity-id-attr
+  "Attach `{:seon.entity/id-attr <k>}` to a `:map` schema's properties
+   when one of its entries is an identity attr. Preserves any existing
+   props (including author-declared `:seon.render/ai`, etc)."
+  [v]
+  (if-let [id-attr (derive-entity-id-attr v)]
+    (let [head     (first v)
+          body     (rest v)
+          [props body] (if (and (seq body) (map? (first body)))
+                         [(first body) (rest body)]
+                         [{} body])
+          props'   (assoc props :seon.entity/id-attr id-attr)]
+      (into [head props'] body))
+    v))
+
 (defn register!
   "Register a single schema in the global registry.
 
@@ -126,11 +190,22 @@
    Returns:
      The registered schema keyword.
 
+   When `v` is a `:map`-shaped schema and one of its entries' keys is
+   itself a registered attr carrying `{:seon.db/identity true}`, the
+   stored schema is rewritten to carry `{:seon.entity/id-attr <k>}` in
+   its own properties. This lets the renderer enumerate instances of a
+   kind by walking the AEVT index for that id-attr — no per-row
+   `:seon.entity/kind` stamp required.
+
    Example:
      (register! ::api-key [:string {:min 1}])
-     (register! ::timeout [:int {:min 1000 :max 600000}])"
+     (register! ::timeout [:int {:min 1000 :max 600000}])
+     (register! :seon.eval [:map {:seon.render/ai 'foo}
+                            [:seon.eval/id ...] ...])  ;; →
+       ;; stored with props {:seon.render/ai 'foo
+       ;;                    :seon.entity/id-attr :seon.eval/id}"
   [k v]
-  (swap! *schemas assoc k v)
+  (swap! *schemas assoc k (with-entity-id-attr v))
   k)
 
 (defn current-keys
