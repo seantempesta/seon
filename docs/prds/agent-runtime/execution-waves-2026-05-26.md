@@ -347,7 +347,7 @@ Those are subsequent transition-plan phases, not this execution plan. This plan 
 
 | Wave | Status | Done at | Notes |
 |---|---|---|---|
-| 1a worker | not started | | |
+| 1a worker | done | 2026-05-26 | deps added; `seon.server.store` + `store-test` shipped; REPL probes verified config shapes for :memory/:file/:sqlite. REPL wedged late (`in-ns` left eval-wrapper in bad state) — stopped per rule 1. Hook reload + lint clean on both files. See worker report. |
 | 1b verifier | not started | | |
 | 2a worker | not started | | |
 | 2b verifier | not started | | |

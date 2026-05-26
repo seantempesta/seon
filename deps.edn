@@ -36,6 +36,13 @@
         ;; Fast serialization (used by seon.db.relay + seon.flow.harness)
         com.taoensso/nippy {:mvn/version "3.4.2"}
 
+        ;; konserve-jdbc + sqlite-jdbc — backing store for V2 sidecar
+        ;; per-session datahike DBs. See seon.server.store. Versions
+        ;; match pod-host/sidecar-poc/jvm-writer/deps.edn.
+        io.replikativ/konserve-jdbc {:mvn/version "0.2.91"
+                                     :exclusions [io.replikativ/konserve]}
+        org.xerial/sqlite-jdbc {:mvn/version "3.46.1.0"}
+
         ;; HTML templating (compile-time Hiccup)
         dev.onionpancakes/chassis {:mvn/version "1.0.365"}
 
