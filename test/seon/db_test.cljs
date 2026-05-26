@@ -162,34 +162,79 @@
             (is (pos? (count (:tx-data tx-report)))))))
       done)))
 
-(deftest transact!-throws-synchronously-on-unregistered-attr
+(deftest transact!-returns-envelope-on-unregistered-attr
+  ;; ENVELOPE CONTRACT: validation failures NEVER throw into the calling
+  ;; agent's eval — they come back as ::db/ok? false with ::db/error
+  ;; tagged :user-input.
   (async done
     (with-conn
       (fn [conn]
         (go
-          (let [ex (try
-                     (db/transact! {::db/tx-data [{:seon.nope/x 1}]
-                                    ::db/conn    conn})
-                     nil
-                     (catch :default e e))]
-            (is (some? ex) "should throw before reaching datahike")
+          (let [{::db/keys [ok? error tx-report]}
+                (a/<! (db/transact! {::db/tx-data [{:seon.nope/x 1}]
+                                     ::db/conn    conn}))]
+            (is (false? ok?) "validation failure → ok? false envelope")
+            (is (nil? tx-report) "no tx-report on failure")
+            (is (some? error))
+            (is (string? (:seon.error/message error)))
+            (is (= :user-input (:seon.error/kind (:seon.error/data error)))
+                "unregistered attr is a :user-input class error")
             (is (= :seon.db/unregistered-attrs
-                   (::db/error (ex-data ex)))))))
+                   (:seon.db/error (:seon.error/data error)))))))
       done)))
 
-(deftest transact!-throws-synchronously-on-bad-value
+(deftest transact!-returns-envelope-on-bad-value
   (async done
     (with-conn
       (fn [conn]
         (go
-          (let [ex (try
-                     (db/transact! {::db/tx-data [{::name 42}]
-                                    ::db/conn    conn})
-                     nil
-                     (catch :default e e))]
-            (is (some? ex) "string schema, int value — must throw")
-            (is (= :seon.db/invalid-value (::db/error (ex-data ex))))
-            (is (= ::name (::db/attr (ex-data ex)))))))
+          (let [{::db/keys [ok? error]}
+                (a/<! (db/transact! {::db/tx-data [{::name 42}]
+                                     ::db/conn    conn}))]
+            (is (false? ok?) "string schema, int value → envelope")
+            (is (some? error))
+            (is (= :user-input (:seon.error/kind (:seon.error/data error))))
+            (is (= :seon.db/invalid-value
+                   (:seon.db/error (:seon.error/data error))))
+            (is (= ::name (:seon.db/attr (:seon.error/data error)))))))
+      done)))
+
+(deftest transact!-returns-envelope-on-bad-invocation-shape
+  ;; Pre-validation guard — calling positionally or with bare keys must
+  ;; still return an envelope, not crash the eval loop.
+  (async done
+    (with-conn
+      (fn [conn]
+        (go
+          (let [{::db/keys [ok? error]}
+                (a/<! (db/transact! "not-a-map"))]
+            (is (false? ok?))
+            (is (= :user-input (:seon.error/kind (:seon.error/data error))))
+            (is (= :seon.db/invalid-invocation-shape
+                   (:seon.db/error (:seon.error/data error)))))
+          ;; Missing required key
+          (let [{::db/keys [ok? error]}
+                (a/<! (db/transact! {:tx-data [{::name "Bob"}]
+                                     ::db/conn conn}))]
+            (is (false? ok?))
+            (is (= :user-input (:seon.error/kind (:seon.error/data error))))
+            (is (= :seon.db/invalid-invocation-shape
+                   (:seon.db/error (:seon.error/data error)))))))
+      done)))
+
+(deftest transact!-pod-stays-alive-after-bad-input
+  ;; Regression check: after a failure envelope, the conn is still
+  ;; usable for follow-up writes. The substrate didn't crash.
+  (async done
+    (with-conn
+      (fn [conn]
+        (go
+          (let [bad (a/<! (db/transact! {::db/tx-data [{::name 42}]
+                                         ::db/conn    conn}))]
+            (is (false? (::db/ok? bad))))
+          (let [good (a/<! (db/transact! {::db/tx-data [{::name "Alpha"}]
+                                          ::db/conn    conn}))]
+            (is (true? (::db/ok? good)) "conn still alive after rejection"))))
       done)))
 
 (deftest transact!-allows-system-attrs-for-schema-definitions

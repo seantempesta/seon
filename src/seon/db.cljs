@@ -40,8 +40,10 @@
    to declare the datahike schema itself bypass the gate. Vector tuples
    (`[:db/add e a v]`, `[:db/retract e a v]`) flow through, but only
    their attribute is checked — entity-map values are what get full
-   Malli validation. Validation errors throw synchronously; you don't
-   have to thread them through the async channel.
+   Malli validation. `transact!` never throws into your eval — every
+   failure (invocation shape, unregistered attr, bad value, datahike
+   commit explosion) comes back as `{::db/ok? false ::db/error …}` with
+   `:seon.error/kind` tagged `:user-input` vs `:substrate-bug`.
 
    ## Reads are synchronous, writes return a channel
 
@@ -63,10 +65,11 @@
          (handle-success tx-report)
          (handle-failure error)))
 
-   The envelope keeps commit failures (datahike-side, returned as values
-   per spec-02 §2.5 safe-by-default — `error` is a `seon.error/->map`)
-   distinct from validation failures (which throw synchronously because
-   they're local programmer-mistakes the agent's eval boundary catches).
+   The envelope is the ONLY return shape — both validation failures
+   and datahike-side commit failures land as `::db/ok? false` with
+   `:seon.error/kind` (`:user-input` vs `:substrate-bug`) in the
+   error's `:seon.error/data`. The agent eval boundary is never asked
+   to catch a throw from this surface (spec-02 §2.5 safe-by-default).
 
    ## Reactions: register a listener with a key
 
@@ -230,15 +233,50 @@
    [::opts    {:optional true} ::opts]
    [::conn    {:optional true} ::conn]])
 
+;; ---------------------------------------------------------------------------
+;; Envelope contract (locked 2026-05-26).
+;;
+;; `transact!` NEVER throws into the calling agent's eval context. Every
+;; failure path — invocation-shape guard, unregistered-attr gate, Malli
+;; value validation, datahike commit explosion — is caught at the boundary
+;; and returned as data.
+;;
+;; The agent's eval surface generates malformed tx-data routinely (LLM
+;; hallucinations, partial-typed maps, refs to entities that don't exist).
+;; Throwing from `db/transact!` would crash the eval loop and leave the
+;; agent unable to recover its own state. Returning an envelope keeps the
+;; pod alive and lets downstream code (renderers, retry logic, the agent
+;; itself) inspect the failure as just another map.
+;;
+;; The envelope distinguishes two error kinds via `:seon.error/data`:
+;;   :user-input   — caller-fault: bad shape, unregistered attr, value
+;;                    fails its Malli schema, invalid invocation. The agent
+;;                    should fix its tx-data and retry.
+;;   :substrate-bug — anything else (typically a throw from datahike's
+;;                    internals). The pod recovered; the substrate didn't.
+;;                    Worth surfacing to ops tooling, not retrying blindly.
+;; ---------------------------------------------------------------------------
+
+(schema/register!
+  ::error
+  [:map
+   [:seon.error/message :string]
+   [:seon.error/data    {:optional true} :map]
+   [:seon.error/ex-data {:optional true} :map]
+   [:seon.error/stack   {:optional true} :string]
+   [:seon.error/cause   {:optional true} :map]
+   [:seon.error/raw     {:optional true} :any]
+   [:seon.error/truncated {:optional true} :boolean]])
+
 (schema/register!
   ::transact-response
-  [:map
-   [::ok?       :boolean]
-   [::tx-report {:optional true} :any]
-   [::error     {:optional true}
-                [:map
-                 [::msg  :string]
-                 [::data {:optional true} :any]]]])
+  [:or
+   [:map
+    [::ok?       [:= true]]
+    [::tx-report :any]]
+   [:map
+    [::ok?   [:= false]]
+    [::error ::error]]])
 
 (schema/register!
   ::query-request
@@ -577,8 +615,9 @@
       (throw (ex-info (str "Unregistered attributes in transaction: "
                            (pr-str unregistered)
                            ". Register them with seon.schema/register! first.")
-                      {::error         :seon.db/unregistered-attrs
-                       ::unregistered  unregistered})))))
+                      {::error            :seon.db/unregistered-attrs
+                       ::unregistered     unregistered
+                       :seon.error/kind   :user-input})))))
 
 (defn- truncate-value
   "Truncate a value's `pr-str` representation to 100 chars for error
@@ -648,7 +687,8 @@
                     {::error              :seon.db/invalid-ref-child
                      ::attr               parent-attr
                      ::actual-value       child
-                     ::malli-explanation  (m/explain :seon.db/ref child)}))))
+                     ::malli-explanation  (m/explain :seon.db/ref child)
+                     :seon.error/kind     :user-input}))))
 
 (defn- validate-entity-values!
   "Validate each `[attr v]` pair in an entity map against its registered
@@ -690,7 +730,8 @@
                                ::attr              attr
                                ::expected-schema   schema-form
                                ::actual-value      val
-                               ::malli-explanation (m/explain :seon.db/ref val)}))))
+                               ::malli-explanation (m/explain :seon.db/ref val)
+                               :seon.error/kind    :user-input}))))
 
           ;; Many-card ref slot — iterate children, each may be a
           ;; map (nested entity), eid, or lookup tuple.
@@ -709,7 +750,8 @@
                              ::attr               attr
                              ::expected-schema    schema-form
                              ::actual-value       val
-                             ::malli-explanation  (m/explain attr val)}))))))))
+                             ::malli-explanation  (m/explain attr val)
+                             :seon.error/kind     :user-input}))))))))
 
 (defn- validate-values!
   "Walk tx-data and validate every entity map. Vector tuple forms
@@ -733,7 +775,8 @@
                (str "seon.db: *conn* is unbound and no :seon.db/conn was "
                     "passed. Bind via session-flow setup, or pass "
                     "::db/conn explicitly.")
-               {::error :seon.db/no-conn}))))
+               {::error          :seon.db/no-conn
+                :seon.error/kind :substrate-bug}))))
 
 ;; ---------------------------------------------------------------------------
 ;; Public write path
@@ -756,9 +799,10 @@
                   "`:seon.db/tx-data`. Got: " (truncate-value arg)
                   " — did you call positionally? "
                   "Use {::db/tx-data […]} or {:seon.db/tx-data […]}.")
-             {::error :seon.db/invalid-invocation-shape
-              ::actual-shape (type arg)
-              ::actual-value arg}))
+             {::error            :seon.db/invalid-invocation-shape
+              ::actual-shape     (type arg)
+              ::actual-value     arg
+              :seon.error/kind   :user-input}))
 
     (not (contains? arg ::tx-data))
     (let [unqualified-tx-data (get arg :tx-data ::not-present)
@@ -769,9 +813,10 @@
                (str "seon.db/transact!: missing `:seon.db/tx-data` key."
                     hint
                     " Got keys: " (pr-str (vec (keys arg))))
-               {::error :seon.db/invalid-invocation-shape
-                ::missing :seon.db/tx-data
-                ::actual-keys (vec (keys arg))})))))
+               {::error            :seon.db/invalid-invocation-shape
+                ::missing          :seon.db/tx-data
+                ::actual-keys      (vec (keys arg))
+                :seon.error/kind   :user-input})))))
 
 (defn- merge-tx-context-into-opts
   "Merge `(current-tx-context)` AND `(current-agent-id)` into
@@ -798,63 +843,103 @@
       :else                              (update (or opts {}) :tx-meta
                                                  #(merge merged %)))))
 
+(defn- error-envelope
+  "Build a `{::ok? false ::error <error-map>}` failure envelope from a
+   thrown error. Ensures `:seon.error/data` carries a `:seon.error/kind`
+   tag (defaulting to `:substrate-bug` when the throw didn't ship one).
+   `:user-input` is reserved for caller-fault paths — invocation shape,
+   unregistered attr, value Malli failure. Anything else (datahike
+   internals, store I/O, schema bridge bug) defaults to `:substrate-bug`."
+  [e]
+  (let [emap (error/->map e)
+        data (or (:seon.error/data emap) {})
+        kind (:seon.error/kind data :substrate-bug)
+        emap (assoc emap :seon.error/data (assoc data :seon.error/kind kind))]
+    {::ok? false ::error emap}))
+
 (defn ^:async transact!
   "Commit tx-data to the agent's conn. Map-in / map-out.
 
-   Validates synchronously BEFORE reaching datahike:
+   ## Safe-by-default — never throws into agent eval
+
+   Every failure path returns an envelope; the agent's eval loop never
+   sees a thrown exception from this surface. Validation failures,
+   invocation-shape errors, and datahike commit explosions are all
+   caught at the boundary and shipped back as data.
+
+   Validates BEFORE reaching datahike:
      1. invocation shape is `{:seon.db/tx-data […] …}` (KI-1 guard).
      2. every non-`:db/*` attribute in tx-data is registered;
      3. every value in an entity-map form satisfies its attribute's
         registered Malli schema.
-
-   Validation failures throw `ex-info` immediately (these are local
-   programmer-mistakes the agent boundary catches separately).
 
    ## Auto-merged tx-meta (v1.md §2.3)
 
    If a `(seon.db/with-tx-context {…} f)` scope is active when this
    call fires, the active context map is merged into `opts.:tx-meta`.
    Explicit `:tx-meta` keys on the call site win per-key. The merged
-   bundle reaches datahike via `(d/transact! conn tx-data opts)`,
-   landing every key as a datom on the tx entity (requires
-   `:keep-history? true` on the conn — see `assert-preconditions!`).
+   bundle reaches datahike via `(d/transact! conn arg-map)`, landing
+   every key as a datom on the tx entity (requires `:keep-history? true`
+   on the conn — see `assert-preconditions!`).
 
-   Returns a Promise resolving to:
-     {:seon.db/ok? true  :seon.db/tx-report <datahike report>}   ; ok
-     {:seon.db/ok? false :seon.db/error <seon.error/->map e>}    ; fail
+   Returns a Promise resolving to one of:
 
-   Datahike-side commit failures come back as `:ok? false`, never thrown —
-   this is the boundary layer (spec-02 §2.5 safe-by-default).
+     {:seon.db/ok? true  :seon.db/tx-report <datahike report>}      ; ok
+     {:seon.db/ok? false :seon.db/error <seon.error/->map e>}       ; fail
+
+   The error envelope's `:seon.error/data` map carries
+   `:seon.error/kind`:
+
+     :user-input    — caller-fault: bad invocation shape, unregistered
+                      attr, value fails its Malli schema. Fix tx-data
+                      and retry.
+     :substrate-bug — datahike internals or other unexpected throw. The
+                      pod is still alive; the substrate didn't deliver
+                      the commit. Worth surfacing to ops, not retrying
+                      blindly.
 
    Example:
 
      (require '[seon.db :as db] '[seon.schema :as schema])
      (schema/register! ::name :string)
      (schema/register! ::rank :int)
-     (let [r (await (db/transact! {::db/tx-data [{::name \"Alpha\" ::rank 1}]}))]
-       (println r))"
-  {:malli/schema [:=> [:cat ::transact-request] [:fn some?]]}
+     (let [{::db/keys [ok? tx-report error]}
+           (await (db/transact! {::db/tx-data [{::name \"Alpha\" ::rank 1}]}))]
+       (if ok?
+         (process tx-report)
+         (handle error)))"
+  {:malli/schema [:=> [:cat ::transact-request] ::transact-response]}
   [arg]
-  (assert-invocation-shape! arg)
-  (let [{::keys [tx-data opts conn] :or {conn *conn*}} arg
-        c           (resolve-conn conn)
-        attrs       (extract-tx-attrs tx-data)
-        merged-opts (merge-tx-context-into-opts opts)]
-    (validate-attrs! attrs)
-    (validate-values! tx-data)
-    (try
-      ;; Datahike-cljs `d/transact!` takes one arg-map combining
-      ;; `:tx-data` + `:tx-meta` (see datahike.api.impl/transact! L29-41).
-      ;; The previous shape `(d/transact! c tx-data opts)` passed opts
-      ;; as a third arg that datahike silently ignored — so user
-      ;; tx-meta NEVER reached the db before this fix. The single
-      ;; arg-map shape is the only supported call path.
-      (let [arg-map (merge {:tx-data tx-data} merged-opts)
-            report  (await (d/transact! c arg-map))]
-        {::ok? true ::tx-report report})
-      (catch :default e
-        {::ok?  false
-         ::error (error/->map e)}))))
+  (try
+    (assert-invocation-shape! arg)
+    (let [{::keys [tx-data opts conn] :or {conn *conn*}} arg
+          c           (resolve-conn conn)
+          attrs       (extract-tx-attrs tx-data)
+          merged-opts (merge-tx-context-into-opts opts)]
+      (validate-attrs! attrs)
+      (validate-values! tx-data)
+      (try
+        ;; Datahike-cljs `d/transact!` takes one arg-map combining
+        ;; `:tx-data` + `:tx-meta` (see datahike.api.impl/transact! L29-41).
+        ;; The previous shape `(d/transact! c tx-data opts)` passed opts
+        ;; as a third arg that datahike silently ignored — so user
+        ;; tx-meta NEVER reached the db before this fix. The single
+        ;; arg-map shape is the only supported call path.
+        (let [arg-map (merge {:tx-data tx-data} merged-opts)
+              report  (await (d/transact! c arg-map))]
+          {::ok? true ::tx-report report})
+        (catch :default e
+          ;; Datahike-side / async commit failure. Default kind is
+          ;; :substrate-bug; specific schema-rejection throws from
+          ;; datahike's internals may want a more nuanced classification
+          ;; in the future, but for now anything past the gate that
+          ;; explodes is a substrate concern.
+          (error-envelope e))))
+    (catch :default e
+      ;; Pre-commit failures (invocation shape, unregistered attr, bad
+      ;; value, unbound *conn*). The throwing helpers tagged their
+      ;; ex-data with `:seon.error/kind`; `error-envelope` preserves it.
+      (error-envelope e))))
 
 ;; ---------------------------------------------------------------------------
 ;; Malli → datahike schema bridge.
