@@ -222,6 +222,45 @@
                    (:seon.db/error (:seon.error/data error)))))))
       done)))
 
+(deftest transact!-envelopes-non-sequential-tx-data
+  ;; task 9b finding 2 regression. `:seon.db/tx-data` MUST be a sequential
+  ;; collection. Strings, JS objects, numbers, nil — non-sequential values
+  ;; used to slip past `assert-invocation-shape!` and fail deep inside
+  ;; `extract-tx-attrs`, getting misclassified as `:substrate-bug`. The
+  ;; sequential? check in the shape guard catches them at the boundary
+  ;; and tags `:user-input`.
+  (async done
+    (with-conn
+      (fn [conn]
+        (go
+          ;; string
+          (let [{::db/keys [ok? error]}
+                (a/<! (db/transact! {::db/tx-data "not-a-list"
+                                     ::db/conn    conn}))]
+            (is (false? ok?))
+            (is (= :user-input (:seon.error/kind (:seon.error/data error)))
+                "string tx-data → :user-input, not :substrate-bug")
+            (is (= :seon.db/invalid-invocation-shape
+                   (:seon.db/error (:seon.error/data error)))))
+          ;; integer
+          (let [{::db/keys [ok? error]}
+                (a/<! (db/transact! {::db/tx-data 42 ::db/conn conn}))]
+            (is (false? ok?))
+            (is (= :user-input (:seon.error/kind (:seon.error/data error)))))
+          ;; nil
+          (let [{::db/keys [ok? error]}
+                (a/<! (db/transact! {::db/tx-data nil ::db/conn conn}))]
+            (is (false? ok?))
+            (is (= :user-input (:seon.error/kind (:seon.error/data error)))))
+          ;; JS exotic object (parses through js-obj literal)
+          (let [{::db/keys [ok? error]}
+                (a/<! (db/transact! {::db/tx-data #js {:foo 1}
+                                     ::db/conn    conn}))]
+            (is (false? ok?))
+            (is (= :user-input (:seon.error/kind (:seon.error/data error)))
+                "JS object tx-data → :user-input"))))
+      done)))
+
 (deftest transact!-pod-stays-alive-after-bad-input
   ;; Regression check: after a failure envelope, the conn is still
   ;; usable for follow-up writes. The substrate didn't crash.

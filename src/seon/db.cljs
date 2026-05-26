@@ -816,7 +816,25 @@
                {::error            :seon.db/invalid-invocation-shape
                 ::missing          :seon.db/tx-data
                 ::actual-keys      (vec (keys arg))
-                :seon.error/kind   :user-input})))))
+                :seon.error/kind   :user-input})))
+
+    ;; tx-data must be a sequential collection. Strings, JS objects,
+    ;; numbers, nil — anything non-sequential — is a caller fault
+    ;; (LLM hallucination, wrong-shape eval). Catch it here at the
+    ;; shape guard so it's classified `:user-input`. Without this
+    ;; check, the value flows into `extract-tx-attrs`/`mapcat` which
+    ;; throws an opaque "X is not ISeqable" → outer catch tags it
+    ;; `:substrate-bug`. That misclassification was task-9b finding 2.
+    (not (sequential? (::tx-data arg)))
+    (throw (ex-info
+             (str "seon.db/transact!: `:seon.db/tx-data` must be a "
+                  "sequential collection (vector or seq) of entity "
+                  "maps or [:db/add ...] tuples. Got: "
+                  (truncate-value (::tx-data arg)))
+             {::error            :seon.db/invalid-invocation-shape
+              ::actual-value     (::tx-data arg)
+              ::actual-shape     (type (::tx-data arg))
+              :seon.error/kind   :user-input}))))
 
 (defn- merge-tx-context-into-opts
   "Merge `(current-tx-context)` AND `(current-agent-id)` into

@@ -543,6 +543,8 @@
         input (ai-render-input sym @db/*conn* agent-id ent)]
     (or (:seon.render/text (render/ai-render sym input)) "")))
 
+(declare with-turn-body!)
+
 (defn ^:async with-turn!
   "Bracketing combinator. Opens a `:seon.turn` on the given session
    with `prompt-text` already attached, flips agent state to
@@ -558,16 +560,33 @@
     :seon.session/keys [id-of-session]
     :seon.turn/keys [id-of-turn prompt-text]}
    body-fn]
-  (await
-    (db/transact!
-      {:seon.db/tx-data
-       [{:seon.session/id id-of-session
-         :seon.session/turns
-         [{:seon.turn/id          id-of-turn
-           :seon.turn/at          (js/Date.)
-           :seon.turn/status      :running
-           :seon.turn/prompt-text prompt-text}]}
-        {:seon.agent/id id :seon.agent/state :running}]}))
+  ;; Short-circuit on open-turn failure (task 9b finding 3). If the
+  ;; open-tx returns `{::ok? false}`, there is NO turn entity in the
+  ;; DB — calling `body-fn` (the LLM) would run a turn that has no
+  ;; trace, and the close-tx + error-tx below would silently fail
+  ;; against the missing entity. Bail with the envelope so the caller
+  ;; sees the same shape it sees from any other transact failure.
+  (let [open-result
+        (await
+          (db/transact!
+            {:seon.db/tx-data
+             [{:seon.session/id id-of-session
+               :seon.session/turns
+               [{:seon.turn/id          id-of-turn
+                 :seon.turn/at          (js/Date.)
+                 :seon.turn/status      :running
+                 :seon.turn/prompt-text prompt-text}]}
+              {:seon.agent/id id :seon.agent/state :running}]}))]
+    (if (false? (:seon.db/ok? open-result))
+      open-result
+      (with-turn-body! id id-of-turn body-fn))))
+
+(defn ^:async ^:private with-turn-body!
+  "Internal — the body of `with-turn!` after the open-tx succeeded.
+   Split out so the open-tx envelope short-circuit at the call site
+   stays readable. Maintains the same behavior the inlined version had:
+   await body-fn, close the turn on success, flip to :error on throw."
+  [id id-of-turn body-fn]
   (try
     (let [result (await (body-fn))]
       (await
