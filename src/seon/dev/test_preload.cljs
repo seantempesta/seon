@@ -20,6 +20,8 @@
     ;; Self-test for the runner itself + the synthetic probes it drives.
     [seon.test.runner-probes]
     [seon.test.runner-test]
+    [seon.test.fixture-support-probes]
+    [seon.test.fixture-support-test]
     ;; Platform tests that exercise the runner end-to-end against
     ;; real production namespaces.
     [seon.db-test]

@@ -310,6 +310,67 @@
 
           :else (resolve nil))))))
 
+(defn- lookup-fixtures
+  "Return the vector of fixture maps registered by `cljs.test/use-fixtures`
+   for the given ns symbol + kind (`:once` or `:each`).
+
+   The `use-fixtures` macro defs `cljs-test-once-fixtures` /
+   `cljs-test-each-fixtures` (Var-less in our self-host path — they're
+   plain vars on the ns object). We fetch via the munged ns object on
+   globalThis. Returns nil when no fixture of that kind was registered.
+
+   Only the MAP fixture form (`{:before fn :after fn}`) is supported.
+   The fn-wrapping form (`(defn my-fixture [f] … (f) …)`) is
+   incompatible with async tests per cljs.test docs and irrelevant for
+   our seon-authored tests."
+  [ns-sym kind]
+  (let [sym  (case kind
+               :once "cljs_test_once_fixtures"
+               :each "cljs_test_each_fixtures")
+        path (str (cljs.core/munge (str ns-sym)) "." sym)
+        v    (try (js/goog.getObjectByName path)
+                  (catch :default _ nil))]
+    (when (and v (sequential? v))
+      (vec v))))
+
+(defn- await-maybe-thenable
+  "Return a Promise that resolves when `v` (a fixture's return value)
+   has settled. Sync fixtures return a non-thenable → resolved immediately."
+  [v]
+  (if (thenable? v)
+    (js/Promise.resolve v)
+    (js/Promise.resolve nil)))
+
+(defn- run-fixture-fn!
+  "Invoke a single fixture map's slot (`:before` or `:after`) if present.
+   Returns a Promise that resolves after the slot has finished (sync or
+   async). Errors inside the fixture surface as `:error` events and the
+   promise still resolves so the batch continues."
+  [fixture-map slot ns-sym]
+  (js/Promise.
+    (fn [resolve _reject]
+      (if-let [f (get fixture-map slot)]
+        (let [r (try (f)
+                     (catch :default e
+                       (t/do-report {:type :error
+                                     :message (str "Uncaught exception in "
+                                                   ns-sym " " slot " fixture.")
+                                     :expected nil
+                                     :actual e})
+                       ::fixture-error))]
+          (if (and (not= r ::fixture-error) (thenable? r))
+            (-> (await-maybe-thenable r)
+                (.then (fn [_] (resolve nil)))
+                (.catch (fn [e]
+                          (t/do-report {:type :error
+                                        :message (str "Async fixture rejected in "
+                                                      ns-sym " " slot ".")
+                                        :expected nil
+                                        :actual e})
+                          (resolve nil))))
+            (resolve nil)))
+        (resolve nil)))))
+
 (defn ^:async run-vars
   "Run the given fully-qualified test-var symbols, return events +
    summary as data.
@@ -318,6 +379,16 @@
    lives in the env under `::!builder` so the per-event defmethods
    close-over nothing. After the run, the builder is reified to an
    immutable vector and returned.
+
+   Fixtures: vars are grouped by ns; for each ns we look up the
+   `cljs-test-once-fixtures` and `cljs-test-each-fixtures` vectors
+   that `use-fixtures` registered (see `lookup-fixtures`) and walk
+   them per the cljs.test contract — `:once :before` once for the ns,
+   then for each test var `:each :before` → body → `:each :after`,
+   finally `:once :after`. We can't route through `cljs.test/test-vars`
+   because that requires real `Var` instances which self-host CLJS
+   can't synthesize; we replicate the fixture-walk ourselves and keep
+   the synthetic `#js {:sym sym}` testing-var stand-in.
 
    `^:async` since 2026-05-25: the body awaits each test fn so that
    `(async done …)` tests AND `^:async` (Promise-returning) test bodies
@@ -333,9 +404,13 @@
                      (assoc ::!builder !builder
                             :report-counters {:test 0 :pass 0 :fail 0 :error 0}))
         resolved (for [sym vars]
-                   {:sym sym :fn (resolve-test-fn sym)})
+                   {:sym sym :fn (resolve-test-fn sym)
+                    :ns (when (namespace sym) (symbol (namespace sym)))})
         missing  (filter (complement :fn) resolved)
-        present  (filter :fn resolved)]
+        present  (filter :fn resolved)
+        ;; Stable per-ns groupings preserve the input ordering of vars
+        ;; within a ns (group-by is stable in Clojure).
+        by-ns    (group-by :ns present)]
     (binding [t/*current-env* env]
       (doseq [{:keys [sym]} missing]
         (t/update-current-env! [:report-counters :test] inc)
@@ -343,17 +418,30 @@
                       :message (str "Unresolved test var: " sym)
                       :expected sym
                       :actual nil}))
-      ;; resolve-test-fn returns the :test body (not the public fn),
-      ;; so we own the bracketing here. drive-test-fn! awaits both
-      ;; thenables and cljs.test IAsyncTest CPS objects.
-      (doseq [{:keys [sym fn]} present]
-        (t/update-current-env! [:testing-vars]
-                               conj #js {:sym sym})
-        (t/update-current-env! [:report-counters :test] inc)
-        (t/do-report {:type :begin-test-var :var #js {:sym sym}})
-        (await (drive-test-fn! sym fn))
-        (t/do-report {:type :end-test-var :var #js {:sym sym}})
-        (t/update-current-env! [:testing-vars] rest))
+      (doseq [[ns-sym ns-vars] by-ns]
+        (let [once-fxs (lookup-fixtures ns-sym :once)
+              each-fxs (lookup-fixtures ns-sym :each)]
+          ;; :once :before — once per ns, in registration order.
+          (doseq [fx once-fxs]
+            (await (run-fixture-fn! fx :before ns-sym)))
+          (doseq [{:keys [sym fn]} ns-vars]
+            ;; :each :before — registration order, before each test.
+            (doseq [fx each-fxs]
+              (await (run-fixture-fn! fx :before ns-sym)))
+            (t/update-current-env! [:testing-vars]
+                                   conj #js {:sym sym})
+            (t/update-current-env! [:report-counters :test] inc)
+            (t/do-report {:type :begin-test-var :var #js {:sym sym}})
+            (await (drive-test-fn! sym fn))
+            (t/do-report {:type :end-test-var :var #js {:sym sym}})
+            (t/update-current-env! [:testing-vars] rest)
+            ;; :each :after — REVERSE registration order, after each test
+            ;; (matches cljs.test's wrap-map-fixtures, which `reverse`s :after).
+            (doseq [fx (reverse each-fxs)]
+              (await (run-fixture-fn! fx :after ns-sym))))
+          ;; :once :after — reverse order, after all vars in the ns.
+          (doseq [fx (reverse once-fxs)]
+            (await (run-fixture-fn! fx :after ns-sym)))))
       (let [counters (:report-counters (t/get-current-env))]
         (t/do-report (assoc counters :type :summary))))
     (let [events  (persistent! @!builder)
