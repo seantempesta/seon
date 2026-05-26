@@ -19,7 +19,7 @@ use tokio::runtime::Handle;
 use tokio::sync::broadcast;
 use wasmtime::component::{Component, HasSelf, Linker, ResourceTable};
 use wasmtime::{Config, Engine, Store};
-use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
+use wasmtime_wasi::{DirPerms, FilePerms, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 use wasmtime_wasi_http::p2::body::HyperOutgoingBody;
 use wasmtime_wasi_http::p2::types::{HostFutureIncomingResponse, OutgoingRequestConfig};
 use wasmtime_wasi_http::p2::{
@@ -92,18 +92,75 @@ impl WasiHttpHooks for NoopHttpHooks {
     }
 }
 
+/// One WASI preopen entry. host_path on the outside (real filesystem) becomes
+/// guest_path inside the wasm guest. `read_only=true` constrains DirPerms +
+/// FilePerms to READ only — write attempts return EROFS/permission errors
+/// inside the guest.
+#[derive(Clone, Debug)]
+pub struct MountSpec {
+    pub host_path: PathBuf,
+    pub guest_path: String,
+    pub read_only: bool,
+}
+
+impl MountSpec {
+    pub fn ro(host_path: impl Into<PathBuf>, guest_path: impl Into<String>) -> Self {
+        Self {
+            host_path: host_path.into(),
+            guest_path: guest_path.into(),
+            read_only: true,
+        }
+    }
+    pub fn rw(host_path: impl Into<PathBuf>, guest_path: impl Into<String>) -> Self {
+        Self {
+            host_path: host_path.into(),
+            guest_path: guest_path.into(),
+            read_only: false,
+        }
+    }
+}
+
 impl GuestStore {
+    #[allow(dead_code)]
     fn new(db: DbHandle) -> Self {
-        Self::with_env(db, &[])
+        Self::build(db, &[], &[]).expect("default GuestStore build")
     }
 
-    fn with_env(db: DbHandle, env_vars: &[(String, String)]) -> Self {
+    /// Build a GuestStore with env vars and an optional set of preopened
+    /// directories. Each MountSpec becomes a WASI preopen; `read_only` mounts
+    /// get `DirPerms::READ + FilePerms::READ`, RW mounts get `::all()` for
+    /// both. Returns an error if any host_path can't be opened (e.g. missing
+    /// directory — the caller is expected to mkdir -p RW mounts beforehand).
+    fn build(
+        db: DbHandle,
+        env_vars: &[(String, String)],
+        mounts: &[MountSpec],
+    ) -> Result<Self> {
         let mut builder = WasiCtxBuilder::new();
         builder.inherit_stdio();
         for (k, v) in env_vars {
             builder.env(k, v);
         }
-        Self {
+        for m in mounts {
+            let (dperms, fperms) = if m.read_only {
+                (DirPerms::READ, FilePerms::READ)
+            } else {
+                (DirPerms::all(), FilePerms::all())
+            };
+            builder
+                .preopened_dir(&m.host_path, &m.guest_path, dperms, fperms)
+                .map_err(|e| anyhow::anyhow!(
+                    "preopened_dir failed: host={:?} guest={:?} ro={}: {}",
+                    m.host_path, m.guest_path, m.read_only, e
+                ))?;
+            tracing::info!(
+                host = %m.host_path.display(),
+                guest = %m.guest_path,
+                ro = m.read_only,
+                "wasi preopen mounted"
+            );
+        }
+        Ok(Self {
             wasi:  builder.build(),
             http:  WasiHttpCtx::new(),
             table: ResourceTable::new(),
@@ -112,7 +169,7 @@ impl GuestStore {
             sub_counter: Arc::new(AtomicU32::new(1)),
             subs: Arc::new(StdMutex::new(HashMap::new())),
             agent_id: Arc::new(StdMutex::new(String::new())),
-        }
+        })
     }
 }
 
@@ -516,14 +573,25 @@ pub struct Guest {
 }
 
 impl Guest {
+    #[allow(dead_code)]
     pub async fn load(wasm_path: PathBuf, db: DbHandle) -> Result<Self> {
-        Self::load_with_env(wasm_path, db, &[]).await
+        Self::load_with_env_and_mounts(wasm_path, db, &[], &[]).await
     }
 
+    #[allow(dead_code)]
     pub async fn load_with_env(
         wasm_path: PathBuf,
         db: DbHandle,
         env_vars: &[(String, String)],
+    ) -> Result<Self> {
+        Self::load_with_env_and_mounts(wasm_path, db, env_vars, &[]).await
+    }
+
+    pub async fn load_with_env_and_mounts(
+        wasm_path: PathBuf,
+        db: DbHandle,
+        env_vars: &[(String, String)],
+        mounts: &[MountSpec],
     ) -> Result<Self> {
         let mut config = Config::new();
         config.wasm_component_model(true);
@@ -540,7 +608,7 @@ impl Guest {
         db_iface::add_to_linker::<_, HasSelf<GuestStore>>(&mut linker, |s| s)?;
         wasi_logging::add_to_linker::<_, HasSelf<GuestStore>>(&mut linker, |s| s)?;
 
-        let store_data = GuestStore::with_env(db, env_vars);
+        let store_data = GuestStore::build(db, env_vars, mounts)?;
         let mut store = Store::new(&engine, store_data);
         let bindings = SidecarGuest::instantiate_async(&mut store, &component, &linker).await?;
 

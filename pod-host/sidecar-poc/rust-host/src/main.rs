@@ -32,6 +32,8 @@ use tokio::time::sleep;
 
 mod guest;
 
+use guest::MountSpec;
+
 // ---------------- CBOR value type ----------------
 
 /// CBOR maps come in with string keys; we keep them in a BTreeMap of
@@ -1327,6 +1329,98 @@ struct Args {
     /// with 3+ the pattern is writer/reader/mixed/writer/...
     #[arg(long, default_value_t = 2u32)]
     agents_per_session: u32,
+
+    /// Host path to mount read-only at `/seon-src` inside every guest. The
+    /// agent can read Seon source files through `node:fs`. Empty string
+    /// disables. Defaults to `~/src/seon`.
+    #[arg(long, default_value = "")]
+    seon_src: String,
+
+    /// Disable the default `/seon-src` mount. Overrides --seon-src.
+    #[arg(long, default_value_t = false)]
+    no_seon_src: bool,
+
+    /// Extra read-only mount, as `host_path:guest_path`. May be repeated.
+    #[arg(long = "mount-ro")]
+    mount_ro: Vec<String>,
+
+    /// Extra read-write mount, as `host_path:guest_path`. May be repeated.
+    /// The host path is created (mkdir -p) on first use if missing.
+    #[arg(long = "mount-rw")]
+    mount_rw: Vec<String>,
+
+    /// Single-agent role for `--guest-wasm` runs. When set, the host calls
+    /// `run_agent(role)` instead of `run_smoke()`. Useful values include
+    /// "fs-smoke" and "learn" (no duration; sync roles). Leave empty for
+    /// the default smoke run.
+    #[arg(long, default_value = "")]
+    agent_role: String,
+}
+
+// ---------------- Mount resolution ----------------
+//
+// Centralized so every guest-launch path (single-agent smoke, multi-agent,
+// multi-session) gets the same defaults: ~/src/seon read-only at /seon-src,
+// per-session scratch RW at /scratch.
+
+fn parse_mount_arg(s: &str, read_only: bool) -> Result<MountSpec> {
+    let (host, guest) = s.split_once(':').ok_or_else(|| {
+        anyhow!("mount must be host:guest (got {:?})", s)
+    })?;
+    let host_pb = PathBuf::from(host);
+    Ok(MountSpec {
+        host_path: host_pb,
+        guest_path: guest.to_string(),
+        read_only,
+    })
+}
+
+/// Build the mount list for one guest in one session, applying defaults +
+/// any extra mounts from the Args.
+fn build_mounts_for_session(
+    args: &Args,
+    session_name: &str,
+) -> Result<Vec<MountSpec>> {
+    let mut mounts = Vec::new();
+
+    // Default: ~/src/seon read-only at /seon-src, unless --no-seon-src.
+    if !args.no_seon_src {
+        let host: PathBuf = if !args.seon_src.is_empty() {
+            PathBuf::from(&args.seon_src)
+        } else {
+            // Resolve ~/src/seon
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
+            PathBuf::from(home).join("src").join("seon")
+        };
+        if host.exists() {
+            mounts.push(MountSpec::ro(host, "/seon-src"));
+        } else {
+            tracing::warn!(
+                path = %host.display(),
+                "default --seon-src path does not exist, skipping /seon-src mount"
+            );
+        }
+    }
+
+    // Default: per-session scratch RW at /scratch
+    let scratch = args.data_dir.join("sessions").join(session_name).join("scratch");
+    std::fs::create_dir_all(&scratch).with_context(|| {
+        format!("creating per-session scratch dir {:?}", scratch)
+    })?;
+    mounts.push(MountSpec::rw(scratch, "/scratch"));
+
+    // Extra mounts.
+    for s in &args.mount_ro {
+        mounts.push(parse_mount_arg(s, true)?);
+    }
+    for s in &args.mount_rw {
+        let m = parse_mount_arg(s, false)?;
+        std::fs::create_dir_all(&m.host_path).with_context(|| {
+            format!("creating RW mount host dir {:?}", m.host_path)
+        })?;
+        mounts.push(m);
+    }
+    Ok(mounts)
 }
 
 // ---------------- Pretty-print a Cbor value (for the REPL) ----------------
@@ -1550,6 +1644,7 @@ async fn run_multi_agent(
     duration_ms: u32,
     bench_mode: String,
     cache_batch: u32,
+    mounts: Vec<MountSpec>,
 ) -> Result<()> {
     println!(
         "--- Phase D multi-agent smoke (N=3, duration_ms={}, bench_mode={}, cache_batch={}) ---",
@@ -1594,9 +1689,10 @@ async fn run_multi_agent(
         let dur = duration_ms;
         let bench_mode = bench_mode.clone();
         let cache_batch = cache_batch;
+        let mounts = mounts.clone();
         async move {
             let t0 = Instant::now();
-            let mut g = guest::Guest::load_with_env(
+            let mut g = guest::Guest::load_with_env_and_mounts(
                 wasm_path,
                 db,
                 &[
@@ -1606,6 +1702,7 @@ async fn run_multi_agent(
                     ("SIDECAR_BENCH_MODE".to_string(), bench_mode.clone()),
                     ("SIDECAR_CACHE_BATCH".to_string(), cache_batch.to_string()),
                 ],
+                &mounts,
             )
             .await?;
             let loaded = t0.elapsed();
@@ -1709,6 +1806,7 @@ async fn run_multi_session(
     duration_ms: u32,
     bench_mode: String,
     cache_batch: u32,
+    mounts_per_session: std::collections::HashMap<String, Vec<MountSpec>>,
 ) -> Result<()> {
     println!(
         "--- Phase PF multi-session smoke (sessions={:?}, agents-per-session={}, duration_ms={}) ---",
@@ -1752,9 +1850,10 @@ async fn run_multi_session(
         let dur = duration_ms;
         let bench_mode = bench_mode.clone();
         let cache_batch = cache_batch;
+        let mounts = mounts_per_session.get(&session_name).cloned().unwrap_or_default();
         async move {
             let t0 = Instant::now();
-            let mut g = guest::Guest::load_with_env(
+            let mut g = guest::Guest::load_with_env_and_mounts(
                 wasm_path,
                 db,
                 &[
@@ -1765,6 +1864,7 @@ async fn run_multi_session(
                     ("SIDECAR_BENCH_MODE".to_string(),         bench_mode.clone()),
                     ("SIDECAR_CACHE_BATCH".to_string(),        cache_batch.to_string()),
                 ],
+                &mounts,
             ).await?;
             let loaded = t0.elapsed();
             println!("[{}/{}/{}] guest loaded in {:?}", session_name, agent_id, role, loaded);
@@ -1888,6 +1988,10 @@ async fn main() -> Result<()> {
         if session_names.is_empty() {
             bail!("--sessions must list at least one session name");
         }
+        let mut mounts_per_session = std::collections::HashMap::new();
+        for s in &session_names {
+            mounts_per_session.insert(s.clone(), build_mounts_for_session(&args, s)?);
+        }
         run_multi_session(
             registry.clone(),
             wasm_path,
@@ -1896,6 +2000,7 @@ async fn main() -> Result<()> {
             args.multi_duration_ms,
             args.bench_mode.clone(),
             args.cache_batch,
+            mounts_per_session,
         ).await?;
         return Ok(());
     }
@@ -1911,26 +2016,46 @@ async fn main() -> Result<()> {
         if args.multi_agent {
             // Phase D — N=3 multi-agent inside ONE session.
             install_phase_d_schema(&db).await;
+            let mounts = build_mounts_for_session(&args, "default")?;
             run_multi_agent(
                 wasm_path,
                 db.clone(),
                 args.multi_duration_ms,
                 args.bench_mode.clone(),
                 args.cache_batch,
+                mounts,
             )
             .await?;
         } else {
             println!("--- Phase 3 wasm guest run ---");
             let t0 = Instant::now();
-            let mut g = guest::Guest::load(wasm_path, db.clone()).await?;
+            let mounts = build_mounts_for_session(&args, "default")?;
+            let env_vars: Vec<(String, String)> = if !args.agent_role.is_empty() {
+                vec![
+                    ("SIDECAR_AGENT_ID".to_string(), "single".to_string()),
+                    ("SIDECAR_AGENT_ROLE".to_string(), args.agent_role.clone()),
+                    ("SIDECAR_AGENT_DURATION_MS".to_string(),
+                     args.multi_duration_ms.to_string()),
+                ]
+            } else {
+                vec![]
+            };
+            let mut g = guest::Guest::load_with_env_and_mounts(
+                wasm_path, db.clone(), &env_vars, &mounts,
+            ).await?;
             let load_dur = t0.elapsed();
             println!("guest loaded in {:?}", load_dur);
             let t0 = Instant::now();
-            let r = g.run_smoke().await?;
+            let r = if !args.agent_role.is_empty() {
+                println!("invoking run_agent role={}", args.agent_role);
+                g.run_agent("single", &args.agent_role, args.multi_duration_ms).await?
+            } else {
+                g.run_smoke().await?
+            };
             let run_dur = t0.elapsed();
             match r {
-                Ok(s) => println!("guest run-smoke ok ({:?}): {}", run_dur, s),
-                Err(e) => println!("guest run-smoke ERR ({:?}): {}", run_dur, e),
+                Ok(s) => println!("guest run ok ({:?}): {}", run_dur, s),
+                Err(e) => println!("guest run ERR ({:?}): {}", run_dur, e),
             }
             let v = db
                 .q(

@@ -1,0 +1,358 @@
+;; Bootstrap knowledge for an agent learning about Seon.
+;;
+;; Every fact carries a real source citation pointing inside the
+;; /seon-src mount (the host's ~/src/seon read-only mount). An agent
+;; can verify any fact by reading the cited file.
+;;
+;; Seeded by sidecar-poc.seed-facts (idempotent via :fact/id upsert).
+[
+ ;; --- thesis / vision -----------------------------------------------
+ {:fact/id "seon-thesis-1"
+  :fact/subject :seon/project
+  :fact/predicate :thesis
+  :fact/object   "\"Infrastructure for AI agents to write reliable software.\""
+  :fact/source   "/seon-src/CLAUDE.md"
+  :fact/recorded-by :seed/v1
+  :fact/recorded-at #inst "2026-05-26T00:00:00Z"
+  :fact/confidence 100
+  :fact/tags #{:vision :seed}}
+
+ {:fact/id "seon-name-meaning"
+  :fact/subject :seon/project
+  :fact/predicate :name-meaning
+  :fact/object   "\"from the archaic 'to see', and inspired by the Seons of Brandon Sanderson's Elantris: sentient, luminous beings that serve and assist their bonded humans\""
+  :fact/source   "/seon-src/CLAUDE.md"
+  :fact/recorded-by :seed/v1
+  :fact/recorded-at #inst "2026-05-26T00:00:00Z"
+  :fact/confidence 100
+  :fact/tags #{:vision :seed}}
+
+ ;; --- core libraries ------------------------------------------------
+ {:fact/id "seon-uses-datahike"
+  :fact/subject :seon/project
+  :fact/predicate :uses-library
+  :fact/object   ":datahike"
+  :fact/source   "/seon-src/CLAUDE.md"
+  :fact/recorded-by :seed/v1
+  :fact/recorded-at #inst "2026-05-26T00:00:00Z"
+  :fact/confidence 100
+  :fact/tags #{:infrastructure :seed}}
+
+ {:fact/id "datahike-role"
+  :fact/subject :datahike
+  :fact/predicate :role
+  :fact/object   "\"Embedded Datalog database on LMDB. EAV datoms, Datomic-compatible queries, ACID transactions, bitemporal history.\""
+  :fact/source   "/seon-src/CLAUDE.md"
+  :fact/recorded-by :seed/v1
+  :fact/recorded-at #inst "2026-05-26T00:00:00Z"
+  :fact/confidence 100
+  :fact/tags #{:infrastructure :seed}}
+
+ {:fact/id "seon-uses-malli"
+  :fact/subject :seon/project
+  :fact/predicate :uses-library
+  :fact/object   ":malli"
+  :fact/source   "/seon-src/CLAUDE.md"
+  :fact/recorded-by :seed/v1
+  :fact/recorded-at #inst "2026-05-26T00:00:00Z"
+  :fact/confidence 100
+  :fact/tags #{:infrastructure :seed}}
+
+ {:fact/id "malli-role"
+  :fact/subject :malli
+  :fact/predicate :role
+  :fact/object   "\"Schema validation, generative testing, function contracts. The type system agents actually use.\""
+  :fact/source   "/seon-src/CLAUDE.md"
+  :fact/recorded-by :seed/v1
+  :fact/recorded-at #inst "2026-05-26T00:00:00Z"
+  :fact/confidence 100
+  :fact/tags #{:infrastructure :seed}}
+
+ {:fact/id "seon-uses-integrant"
+  :fact/subject :seon/project
+  :fact/predicate :uses-library
+  :fact/object   ":integrant"
+  :fact/source   "/seon-src/CLAUDE.md"
+  :fact/recorded-by :seed/v1
+  :fact/recorded-at #inst "2026-05-26T00:00:00Z"
+  :fact/confidence 100
+  :fact/tags #{:infrastructure :seed}}
+
+ {:fact/id "seon-uses-datastar"
+  :fact/subject :seon/project
+  :fact/predicate :uses-library
+  :fact/object   ":datastar"
+  :fact/source   "/seon-src/CLAUDE.md"
+  :fact/recorded-by :seed/v1
+  :fact/recorded-at #inst "2026-05-26T00:00:00Z"
+  :fact/confidence 100
+  :fact/tags #{:infrastructure :seed}}
+
+ ;; --- language ------------------------------------------------------
+ {:fact/id "seon-language"
+  :fact/subject :seon/project
+  :fact/predicate :language
+  :fact/object   ":clojure"
+  :fact/source   "/seon-src/CLAUDE.md"
+  :fact/recorded-by :seed/v1
+  :fact/recorded-at #inst "2026-05-26T00:00:00Z"
+  :fact/confidence 100
+  :fact/tags #{:language :seed}}
+
+ {:fact/id "clojure-rationale-stable-apis"
+  :fact/subject :clojure
+  :fact/predicate :rationale
+  :fact/object   "\"10-year-old documentation is still valid. Agents don't need to track API churn.\""
+  :fact/source   "/seon-src/CLAUDE.md"
+  :fact/recorded-by :seed/v1
+  :fact/recorded-at #inst "2026-05-26T00:00:00Z"
+  :fact/confidence 100
+  :fact/tags #{:language :seed}}
+
+ ;; --- architecture --------------------------------------------------
+ {:fact/id "seon-substrate-v0"
+  :fact/subject :seon.substrate/v0
+  :fact/predicate :description
+  :fact/object   "\"long-running Node process that hosts the agent loop, datahike-cljs, the bootstrap CLJS compiler, and a loopback HTTP+SSE server\""
+  :fact/source   "/seon-src/CLAUDE.md"
+  :fact/recorded-by :seed/v1
+  :fact/recorded-at #inst "2026-05-26T00:00:00Z"
+  :fact/confidence 100
+  :fact/tags #{:architecture :seed}}
+
+ {:fact/id "seon-substrate-v0-entry"
+  :fact/subject :seon.substrate/v0
+  :fact/predicate :entry-point
+  :fact/object   "\"node out/client/main.js after clj -M:cljs compile client\""
+  :fact/source   "/seon-src/CLAUDE.md"
+  :fact/recorded-by :seed/v1
+  :fact/recorded-at #inst "2026-05-26T00:00:00Z"
+  :fact/confidence 100
+  :fact/tags #{:architecture :seed}}
+
+ {:fact/id "seon-substrate-v2-direction"
+  :fact/subject :seon.substrate/v2
+  :fact/predicate :description
+  :fact/object   "\"WASM-Tauri containment. The seon CLJS pod runs as a wasm32-wasip2 Component (via wasm-rquickjs) inside wasmtime, embedded in a Tauri Rust process.\""
+  :fact/source   "/seon-src/CLAUDE.md"
+  :fact/recorded-by :seed/v1
+  :fact/recorded-at #inst "2026-05-26T00:00:00Z"
+  :fact/confidence 100
+  :fact/tags #{:architecture :seed}}
+
+ ;; --- principles ----------------------------------------------------
+ {:fact/id "principle-slow-is-fast"
+  :fact/subject :seon/principle
+  :fact/predicate :name
+  :fact/object   ":slow-is-fast"
+  :fact/source   "/seon-src/CLAUDE.md"
+  :fact/recorded-by :seed/v1
+  :fact/recorded-at #inst "2026-05-26T00:00:00Z"
+  :fact/confidence 100
+  :fact/tags #{:principle :seed}}
+
+ {:fact/id "principle-slow-is-fast-rule"
+  :fact/subject :seon.principle/slow-is-fast
+  :fact/predicate :rule
+  :fact/object   "\"Charging forward and declaring victory is worse than pausing to verify. Three agents 'fixing' the same bug is more expensive than one agent understanding the problem first.\""
+  :fact/source   "/seon-src/CLAUDE.md"
+  :fact/recorded-by :seed/v1
+  :fact/recorded-at #inst "2026-05-26T00:00:00Z"
+  :fact/confidence 100
+  :fact/tags #{:principle :seed}}
+
+ {:fact/id "principle-no-dumbass-v2"
+  :fact/subject :seon.principle/dont-be-a-dumbass
+  :fact/predicate :rule
+  :fact/object   "\"Whenever you feel like you should re-create a second version of something when we are clearly trying to fix the original — stop and think: am I being a dumbass?\""
+  :fact/source   "/seon-src/CLAUDE.md"
+  :fact/recorded-by :seed/v1
+  :fact/recorded-at #inst "2026-05-26T00:00:00Z"
+  :fact/confidence 100
+  :fact/tags #{:principle :seed}}
+
+ {:fact/id "principle-reactive-context"
+  :fact/subject :seon.principle/reactive-context
+  :fact/predicate :rule
+  :fact/object   "\"Agents see derived views of the database, not accumulated state. Sections are functions of the DB at render time.\""
+  :fact/source   "/seon-src/CLAUDE.md"
+  :fact/recorded-by :seed/v1
+  :fact/recorded-at #inst "2026-05-26T00:00:00Z"
+  :fact/confidence 100
+  :fact/tags #{:principle :seed}}
+
+ ;; --- conventions ---------------------------------------------------
+ {:fact/id "convention-namespaced-keys"
+  :fact/subject :seon.convention/namespaced-keys
+  :fact/predicate :rule
+  :fact/object   "\"Maps with namespaced keywords. Every key. No exceptions.\""
+  :fact/source   "/seon-src/CLAUDE.md"
+  :fact/recorded-by :seed/v1
+  :fact/recorded-at #inst "2026-05-26T00:00:00Z"
+  :fact/confidence 100
+  :fact/tags #{:convention :seed}}
+
+ {:fact/id "convention-map-in-map-out"
+  :fact/subject :seon.convention/map-in-map-out
+  :fact/predicate :rule
+  :fact/object   "\"Every public function takes one map and returns one map. Every key in both maps is fully namespaced.\""
+  :fact/source   "/seon-src/CLAUDE.md"
+  :fact/recorded-by :seed/v1
+  :fact/recorded-at #inst "2026-05-26T00:00:00Z"
+  :fact/confidence 100
+  :fact/tags #{:convention :seed}}
+
+ {:fact/id "convention-no-any"
+  :fact/subject :seon.convention/no-any
+  :fact/predicate :rule
+  :fact/object   "\"No :any in Malli — considered a code smell. All data must be fully typed.\""
+  :fact/source   "/seon-src/CLAUDE.md"
+  :fact/recorded-by :seed/v1
+  :fact/recorded-at #inst "2026-05-26T00:00:00Z"
+  :fact/confidence 100
+  :fact/tags #{:convention :seed}}
+
+ {:fact/id "convention-absent-not-nil"
+  :fact/subject :seon.convention/absent-not-nil
+  :fact/predicate :rule
+  :fact/object   "\"Optional = absent. Use {:optional true} for fields that may not be present. Never store nil.\""
+  :fact/source   "/seon-src/CLAUDE.md"
+  :fact/recorded-by :seed/v1
+  :fact/recorded-at #inst "2026-05-26T00:00:00Z"
+  :fact/confidence 100
+  :fact/tags #{:convention :seed}}
+
+ {:fact/id "convention-ref-type"
+  :fact/subject :seon.convention/ref-type
+  :fact/predicate :rule
+  :fact/object   "\":seon.db/ref is the canonical reference shape, lives in seon.schema.\""
+  :fact/source   "/seon-src/CLAUDE.md"
+  :fact/recorded-by :seed/v1
+  :fact/recorded-at #inst "2026-05-26T00:00:00Z"
+  :fact/confidence 100
+  :fact/tags #{:convention :schema :seed}}
+
+ ;; --- components / files --------------------------------------------
+ {:fact/id "component-seon-db-role"
+  :fact/subject :seon.db
+  :fact/predicate :role
+  :fact/object   "\"seon.db is the SOLE database API. Everything else uses db/transact!, db/query, db/pull-by-name, etc.\""
+  :fact/source   "/seon-src/CLAUDE.md"
+  :fact/recorded-by :seed/v1
+  :fact/recorded-at #inst "2026-05-26T00:00:00Z"
+  :fact/confidence 100
+  :fact/tags #{:component :seed}}
+
+ {:fact/id "component-seon-db-cljs"
+  :fact/subject :seon.db.cljs
+  :fact/predicate :location
+  :fact/object   "\"/seon-src/src/seon/db.cljs\""
+  :fact/source   "/seon-src/src/seon/db.cljs"
+  :fact/recorded-by :seed/v1
+  :fact/recorded-at #inst "2026-05-26T00:00:00Z"
+  :fact/confidence 100
+  :fact/tags #{:component :seed}}
+
+ {:fact/id "component-seon-agent-cljs"
+  :fact/subject :seon.agent
+  :fact/predicate :location
+  :fact/object   "\"/seon-src/src/seon/agent.cljs\""
+  :fact/source   "/seon-src/src/seon/agent.cljs"
+  :fact/recorded-by :seed/v1
+  :fact/recorded-at #inst "2026-05-26T00:00:00Z"
+  :fact/confidence 100
+  :fact/tags #{:component :agent :seed}}
+
+ {:fact/id "component-seon-eval-cljs"
+  :fact/subject :seon.eval
+  :fact/predicate :location
+  :fact/object   "\"/seon-src/src/seon/eval.cljs\""
+  :fact/source   "/seon-src/src/seon/eval.cljs"
+  :fact/recorded-by :seed/v1
+  :fact/recorded-at #inst "2026-05-26T00:00:00Z"
+  :fact/confidence 100
+  :fact/tags #{:component :seed}}
+
+ {:fact/id "component-seon-client-cljs"
+  :fact/subject :seon.client
+  :fact/predicate :location
+  :fact/object   "\"/seon-src/src/seon/client.cljs\""
+  :fact/source   "/seon-src/src/seon/client.cljs"
+  :fact/recorded-by :seed/v1
+  :fact/recorded-at #inst "2026-05-26T00:00:00Z"
+  :fact/confidence 100
+  :fact/tags #{:component :seed}}
+
+ {:fact/id "component-seon-schema-cljc"
+  :fact/subject :seon.schema
+  :fact/predicate :location
+  :fact/object   "\"/seon-src/src/seon/schema.cljc\""
+  :fact/source   "/seon-src/src/seon/schema.cljc"
+  :fact/recorded-by :seed/v1
+  :fact/recorded-at #inst "2026-05-26T00:00:00Z"
+  :fact/confidence 100
+  :fact/tags #{:component :schema :seed}}
+
+ ;; --- directories ---------------------------------------------------
+ {:fact/id "dir-src-seon"
+  :fact/subject :seon.dir/src
+  :fact/predicate :path
+  :fact/object   "\"/seon-src/src/seon/\""
+  :fact/source   "/seon-src/src/seon"
+  :fact/recorded-by :seed/v1
+  :fact/recorded-at #inst "2026-05-26T00:00:00Z"
+  :fact/confidence 100
+  :fact/tags #{:directory :seed}}
+
+ {:fact/id "dir-docs"
+  :fact/subject :seon.dir/docs
+  :fact/predicate :path
+  :fact/object   "\"/seon-src/docs/\""
+  :fact/source   "/seon-src/docs"
+  :fact/recorded-by :seed/v1
+  :fact/recorded-at #inst "2026-05-26T00:00:00Z"
+  :fact/confidence 100
+  :fact/tags #{:directory :seed}}
+
+ {:fact/id "dir-pod-host"
+  :fact/subject :seon.dir/pod-host
+  :fact/predicate :path
+  :fact/object   "\"/seon-src/pod-host/\""
+  :fact/source   "/seon-src/pod-host"
+  :fact/recorded-by :seed/v1
+  :fact/recorded-at #inst "2026-05-26T00:00:00Z"
+  :fact/confidence 100
+  :fact/tags #{:directory :wasm :seed}}
+
+ {:fact/id "dir-reference-code"
+  :fact/subject :seon.dir/reference-code
+  :fact/predicate :path
+  :fact/object   "\"/seon-src/reference-code/\""
+  :fact/source   "/seon-src/reference-code"
+  :fact/recorded-by :seed/v1
+  :fact/recorded-at #inst "2026-05-26T00:00:00Z"
+  :fact/confidence 100
+  :fact/tags #{:directory :seed}}
+
+ ;; --- testing -------------------------------------------------------
+ {:fact/id "testing-run-tests"
+  :fact/subject :seon.testing/repl
+  :fact/predicate :command
+  :fact/object   "\"(user/run-tests) for all, (user/run-tests 'ns) for one. Never clj -M:test.\""
+  :fact/source   "/seon-src/CLAUDE.md"
+  :fact/recorded-by :seed/v1
+  :fact/recorded-at #inst "2026-05-26T00:00:00Z"
+  :fact/confidence 100
+  :fact/tags #{:testing :seed}}
+
+ ;; --- active focus --------------------------------------------------
+ {:fact/id "focus-active-branch"
+  :fact/subject :seon/focus
+  :fact/predicate :branch
+  :fact/object   "\"feature/agent-runtime\""
+  :fact/source   "/seon-src/CLAUDE.md"
+  :fact/recorded-by :seed/v1
+  :fact/recorded-at #inst "2026-05-26T00:00:00Z"
+  :fact/confidence 100
+  :fact/tags #{:focus :seed}}
+]

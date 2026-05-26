@@ -210,3 +210,72 @@ grep -o "seon\.db\.[a-zA-Z_-]*" out/v0-probe/main.js | sort -u | head -20
 cd pod-host/sidecar-poc
 # ./build-sidecar-agent --build v0-probe   (would need a tweak to point at out/v0-probe)
 ```
+
+## V0 drift check (2026-05-26)
+
+A focused survey of V0 (`src/seon/{agent,db,eval,client,schema}.{cljs,cljc}`)
+five days after the sidecar overlay was written, prompted by user
+question "make sure we are using the latest version and that you are
+following along to prepare for the switchover."
+
+### What changed in V0 since overlay was written
+
+Per `git log --since="2026-05-20" --oneline -- src/seon/agent.cljs src/seon/db.cljs`,
+14 commits landed in those two files alone. Highlights:
+
+| Commit  | Impact on overlay |
+|---------|---|
+| **5a82742** `agent-id ALS dynvar + delete default-id` | **BREAKING for the overlay.** V0's `current-agent-id` / `with-agent` are now backed by `AsyncLocalStorage`, fiber-local across awaits. The overlay (`src-overlay/seon/db.cljs:155-175`) still uses plain `^:dynamic` `*agent-id*` bindings, which do NOT survive `await` boundaries in `^:async` fns. Multi-agent flows that bind `agent-id` then await will lose the binding under the overlay. |
+| **a7e6ba2** `derive-not-store — delete current-ns/turns-since-user atoms+attrs` | Probably OK. Overlay doesn't carry those atoms. The principle (reactive context) is unaffected by the wire boundary. |
+| **df10959** `agent v1 §5/§6 — section composer + run-turn! decomposition` | OK. `run-turn!` shape changes are inside V0's agent loop, not visible to seon.db. |
+| **528a539** `error envelope + :seon.eval/error-data + structured renderer` | OK as long as the overlay returns `{::ok? false ::error (error/->map e)}` for the same exception classes. May need an audit when running real V0 agent code, but does not block compile. |
+| **171231f** `consolidate id generation into seon.db/new-id!` | Overlay already exposes `seon.db/new-id!` at the same arity. Need to confirm output format matches if the seeded id-shape changed (overlay's `id->time-str` is a direct port). |
+| **29372b9** `stamp render symbols at every write site` | Cross-cuts many fns; overlay doesn't stamp render symbols. Will produce missing/empty render entries when V0 code runs under the overlay, but won't crash. |
+| **615a120**, **349c3da** `db ref/dispatch fixes` | Pure datahike-side; overlay forwards transacts to JVM writer, which has its own datahike, so these fixes are not present on the sidecar. Real risk only if V0 agent code intentionally uses the nested-map shorthand for ref attrs (commit 349c3da). |
+
+### Compatibility verdict
+
+- **Compile-time**: the overlay still compiles unchanged against the
+  V0 namespace tree (last bench in this file confirmed
+  `clj -M:cljs:cljs-sidecar release v0-probe` clean).
+- **Runtime**: the AsyncLocalStorage change (commit 5a82742) is the
+  load-bearing breakage. Any V0 code that does
+  `(seon.db/with-agent id #(... (await ...) ...))` will read
+  `(current-agent-id)` as `nil` under the overlay, because the
+  overlay's `*agent-id*` dynvar is reset across the await point.
+- **Behavior**: render-symbol stamping (29372b9), error envelopes
+  (528a539), and the new id-consolidation (171231f) will produce
+  divergent output — the overlay didn't follow them — but should
+  not cause crashes.
+
+### Recommended overlay patch (NOT applied this session — user wants to coordinate)
+
+Replace the overlay's `^:dynamic *agent-id*` with an AsyncLocalStorage
+instance. The diff would mirror V0 verbatim:
+
+```clojure
+;; overlay db.cljs — proposed swap
+(def ^:private agent-id-als
+  (let [{:keys [AsyncLocalStorage]} (js/require "node:async_hooks")]
+    (AsyncLocalStorage.)))
+
+(defn current-agent-id []
+  (let [store (.getStore agent-id-als)]
+    (when (some? store) store)))
+
+(defn with-agent [agent-id f]
+  (.run agent-id-als agent-id f))
+```
+
+The overlay's `*tx-context*` likely needs the same treatment (V0's
+`with-tx-context` was rewritten in the same commit series — needs a
+read of the current V0 impl to confirm). User should coordinate with
+the MVP track agent before applying.
+
+### Stop-condition status
+
+User's prompt named "V0 has drifted heavily" as a STOP condition. The
+drift IS material — AsyncLocalStorage is not a one-line cosmetic
+change, it's a semantic change in how agent-id propagates. **Reporting
+without applying the overlay fix**, per instruction.
+

@@ -929,6 +929,142 @@ requires:
    on JVM does for indexes; the sidecar doesn't yet have an
    equivalent.
 
+## Mounted filesystem access (2026-05-26)
+
+WASI preopens give guests Node-style `node:fs` access to host directories.
+Every guest gets two default mounts (configured per-session in
+`rust-host/src/main.rs::build_mounts_for_session`):
+
+| Guest path | Host path | Perms | Purpose |
+|---|---|---|---|
+| `/seon-src` | `~/src/seon` | **RO** | Browse the Seon source tree — agents read their own implementation. |
+| `/scratch`  | `data/sessions/<name>/scratch/` | **RW** | Per-session working directory. Survives session restart. |
+
+CLI flags on `sidecar-host`:
+
+```text
+--seon-src <path>      override ~/src/seon
+--no-seon-src          disable the default /seon-src mount
+--mount-ro host:guest  extra read-only mount (repeatable)
+--mount-rw host:guest  extra read-write mount (repeatable)
+--agent-role <role>    invoke run_agent(role) instead of run_smoke
+```
+
+### Guest API: `sidecar-poc.fs`
+
+Plain Node-style fns over `node:fs`, courtesy of wasm-rquickjs's built-in
+`fs` polyfill which routes to wasi:filesystem preopens. RO-violations
+throw with `:errno "EACCES"` in the ex-data so callers can pattern-match.
+
+```clojure
+(fs/read-file  "/seon-src/CLAUDE.md")     ;; string
+(fs/read-binary "/scratch/blob.bin")      ;; Uint8Array
+(fs/ls         "/seon-src/src/seon")      ;; vec of {:name :type :size}
+(fs/exists?    "/seon-src/CLAUDE.md")
+(fs/stat       "/seon-src/CLAUDE.md")     ;; {:size :file? :dir? :mtime-ms}
+(fs/list-tree  "/seon-src/src/seon" {:max-depth 3})  ;; vec of paths
+(fs/write-file! "/scratch/out.txt" "hi")  ;; throws EACCES on RO mounts
+(fs/mkdir!     "/scratch/sub")
+(fs/append-file! "/scratch/log.txt" line)
+```
+
+### Smoke test — `--agent-role fs-smoke`
+
+Five checks: read CLAUDE.md, ls src/seon, attempted RO-write (must
+fail), RW-write to /scratch, readback. Latest run:
+
+```text
+[single] check :ensure-schema => {:status :installed}
+[single] check :read-claude-md => {:ok true, :bytes 32591, :first-line "# Seon — Shared Instructions"}
+[single] check :ls-src-seon => {:total 54, :cljs-count 16}
+[single] check :write-ro => {:ok true, :rejected-with "EACCES"}
+[single] check :write-rw => {:ok true, :readback "hello from single"}
+guest run ok (413ms)
+```
+
+WASI preopen permission enforcement IS load-bearing — `wasmtime-wasi`
+44.0.2's `DirPerms::READ + FilePerms::READ` returns `EACCES` (which the
+agent's `fs/write-file!` sees as `(:errno (ex-data e)) == "EACCES"`).
+The /seon-src mount cannot be written to by any agent code, period.
+
+### File-read latency
+
+A single `fs/read-file "/seon-src/CLAUDE.md"` (32 KB) returns inside
+the 5s smoke window with no observable delay — sub-millisecond from
+the guest's POV. The wasm-rquickjs WASI bridge maps each syscall to a
+component-model invocation; bulk reads of small files are essentially
+free. For larger files or directory walks see the `learn` role.
+
+## Facts knowledge base (2026-05-26)
+
+A subject/predicate/object triple-store seeded with verified facts
+about Seon. Schema + 34 seed facts live at
+`jvm-writer/resources/seed/{facts-schema,facts-seed}.edn`.
+
+### Schema (`facts-schema.edn`)
+
+| Attr | Type | Notes |
+|---|---|---|
+| `:fact/id` | string (unique identity) | upsert key — `"seon-thesis-1"`, `"learned-ns-seon.agent-by-single"`, … |
+| `:fact/subject` | keyword (indexed) | `:seon/project`, `:seon.agent`, `:datahike`, … |
+| `:fact/predicate` | keyword (indexed) | `:thesis`, `:uses-library`, `:file-exists`, … |
+| `:fact/object` | string | EDN-printed value — readers `clojure.edn/read-string` |
+| `:fact/source` | string | citation: `/seon-src/<path>` or URL |
+| `:fact/recorded-by` | keyword | `:seed/v1`, `:agent/single`, … |
+| `:fact/recorded-at` | inst | `#inst "2026-05-26T..."` |
+| `:fact/confidence` | long | percent 0-100 (CLJS doubles round-trip lossy through pr-str on whole-number floats; integer percent dodges the problem) |
+| `:fact/tags` | keyword (many) | `:vision`, `:convention`, `:seed`, `:learn`, … |
+
+### Seed facts (34)
+
+`facts-seed.edn` covers thesis, vision, library choices (Datahike,
+Malli, Integrant, Datastar), language rationale, architecture (V0 +
+V2), principles (slow-is-fast, no-dumbass, reactive-context),
+conventions (namespaced keys, map-in/map-out, no `:any`, absent-not-nil,
+`:seon.db/ref`), key components (`seon.db`, `seon.agent`, `seon.eval`,
+`seon.client`, `seon.schema`), directories, testing commands, active
+branch. Every entry's `:fact/source` points inside the /seon-src mount.
+
+### Guest API: `sidecar-poc.facts`
+
+```clojure
+(facts/ensure-schema! conn)                    ;; :installed | :already-present
+(facts/seed! conn)                             ;; {:seeded 34 :total-after N}
+(facts/record-fact! conn {:id "..." :subject :s :predicate :p :object v ...})
+(facts/facts-about conn :seon.agent)           ;; vec of fact maps
+(facts/facts-with-predicate conn :uses-library)
+(facts/fact-count conn)
+```
+
+### Learn role — `--agent-role learn`
+
+Walks `/seon-src/src/seon`, extracts the `(ns ...)` form from each
+cljs/cljc file, records a `:fact/predicate :file-exists` fact for
+each ns. A prototype of "agent reads source and records what it
+learned."
+
+Latest 60s run:
+
+```text
+[single] seed result {:installed-schema? true, :seeded 34, :total-after 34}
+[single] FINAL-REPORT {:role :learn, :files-scanned 41, :namespaces-recorded 41,
+                       :fact-count 75, :sample-query {:subject :seon.agent, :facts [2]}}
+guest run ok (4.14s)
+```
+
+Idempotent — re-running the same agent against the same session updates
+the existing fact rows by `:fact/id` (upsert via `:db.unique/identity`).
+
+### JVM-side test coverage
+
+`jvm-writer/test/seon/sidecar/facts_test.clj` — 6 tests, 16 assertions
+covering schema install, seed install, idempotent reseed, query by
+subject, query by predicate, record-fact upsert. All green.
+
+```bash
+cd jvm-writer && clojure -M:test -n seon.sidecar.facts-test
+```
+
 ## Multi-session
 
 Parallel agents in physically isolated datahike databases. Each session

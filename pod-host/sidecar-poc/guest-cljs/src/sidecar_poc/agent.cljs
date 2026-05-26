@@ -15,6 +15,8 @@
    on real architectural problems (race/dedup/listener fanout), not on
    the agent's own complexity."
   (:require [sidecar-poc.datahike :as d]
+            [sidecar-poc.fs       :as fs]
+            [sidecar-poc.facts    :as facts]
             [clojure.string :as str]))
 
 ;; ---------------------------------------------------------------------------
@@ -272,6 +274,134 @@
      :cas-conflicts @cas-conflicts}))
 
 ;; ---------------------------------------------------------------------------
+;; fs-smoke — exercise WASI preopens.
+;; ---------------------------------------------------------------------------
+
+(defn run-fs-smoke [agent-id conn _duration-ms]
+  (let [checks (atom [])
+        push!  (fn [name result]
+                 (swap! checks conj {:check name :result result})
+                 (log agent-id "check" name "=>" (pr-str result)))]
+    ;; 0. Make sure facts schema exists so record-fact! calls below work.
+    (try
+      (let [s (facts/ensure-schema! conn)]
+        (push! :ensure-schema {:status s}))
+      (catch :default e
+        (push! :ensure-schema {:ok false :error (or (.-message e) (str e))})))
+
+    ;; 1. Read CLAUDE.md.
+    (try
+      (let [c (fs/read-file "/seon-src/CLAUDE.md")
+            line1 (-> c (str/split #"\n") first)]
+        (push! :read-claude-md
+               {:ok true :bytes (count c) :first-line line1})
+        (try
+          (facts/record-fact! conn
+                              {:id        (str "fs-probe-" agent-id "-claude-md")
+                               :subject   :seon/project
+                               :predicate :has-claude-md
+                               :object    true
+                               :source    "/seon-src/CLAUDE.md"
+                               :recorded-by (keyword "agent" agent-id)
+                               :confidence  100
+                               :tags       #{:fs-smoke :probe}})
+          (catch :default e
+            (push! :record-fact-error (or (.-message e) (str e))))))
+      (catch :default e
+        (push! :read-claude-md {:ok false :error (or (.-message e) (str e))})))
+
+    ;; 2. ls /seon-src/src/seon
+    (try
+      (let [entries (fs/ls "/seon-src/src/seon")
+            cljs-files (filterv (fn [{:keys [name type]}]
+                                  (and (= type :file) (str/ends-with? name ".cljs")))
+                                entries)]
+        (push! :ls-src-seon
+               {:total (count entries) :cljs-count (count cljs-files)})
+        (try
+          (facts/record-fact! conn
+                              {:id        (str "fs-probe-" agent-id "-cljs-count")
+                               :subject   :seon.dir/src-seon
+                               :predicate :cljs-file-count
+                               :object    (count cljs-files)
+                               :source    "/seon-src/src/seon"
+                               :recorded-by (keyword "agent" agent-id)
+                               :confidence  100
+                               :tags       #{:fs-smoke :probe}})
+          (catch :default _ nil)))
+      (catch :default e
+        (push! :ls-src-seon {:ok false :error (or (.-message e) (str e))})))
+
+    ;; 3. Attempt write to RO mount (should fail).
+    (try
+      (fs/write-file! "/seon-src/test-from-agent.txt" "hi")
+      (push! :write-ro {:ok false :note "EXPECTED EROFS BUT WRITE SUCCEEDED!"})
+      (catch :default e
+        (let [errno (or (some-> (ex-data e) :errno) "unknown")]
+          (push! :write-ro {:ok true :rejected-with errno}))))
+
+    ;; 4. Write to RW scratch.
+    (try
+      (fs/write-file! "/scratch/agent-test.txt" (str "hello from " agent-id))
+      (let [readback (fs/read-file "/scratch/agent-test.txt")]
+        (push! :write-rw {:ok true :readback readback}))
+      (catch :default e
+        (push! :write-rw {:ok false :error (or (.-message e) (str e))})))
+
+    {:role :fs-smoke :agent-id agent-id :checks @checks}))
+
+;; ---------------------------------------------------------------------------
+;; learn — read source under /seon-src, extract ns forms, record facts.
+;; ---------------------------------------------------------------------------
+
+(defn- extract-ns [src]
+  ;; Very simple regex — finds the first `(ns symbol` form. Good enough for
+  ;; the synthetic learn loop. Real agents would use rewrite-clj or similar.
+  (when-let [m (re-find #"\(ns\s+([a-zA-Z0-9.\-_!?*]+)" (or src ""))]
+    (second m)))
+
+(defn run-learn [agent-id conn _duration-ms]
+  ;; Ensure schema + seed first.
+  (log agent-id "seeding facts...")
+  (let [seed-result (facts/seed! conn)]
+    (log agent-id "seed result" (pr-str seed-result))
+    ;; Walk /seon-src/src/seon for .cljs files; for each, extract ns + record.
+    (let [files (fs/list-tree "/seon-src/src/seon" {:max-depth 3})
+          cljs  (filterv #(or (str/ends-with? % ".cljs")
+                              (str/ends-with? % ".cljc")) files)
+          learned (atom 0)]
+      (doseq [path cljs]
+        (try
+          (let [head (->> (str/split (fs/read-file path) #"\n")
+                          (take 10)
+                          (str/join "\n"))
+                ns-name (extract-ns head)]
+            (when ns-name
+              (facts/record-fact! conn
+                                  {:id        (str "learned-ns-" ns-name "-by-" agent-id)
+                                   :subject   (keyword ns-name)
+                                   :predicate :file-exists
+                                   :object    path
+                                   :source    path
+                                   :recorded-by (keyword "agent" agent-id)
+                                   :confidence  100
+                                   :tags       #{:learn :auto-extracted}})
+              (swap! learned inc)))
+          (catch :default e
+            (log agent-id "skip" path (or (.-message e) (str e))))))
+      ;; Demo query: facts about seon.agent.
+      (let [agent-facts (facts/facts-about conn :seon.agent)]
+        (log agent-id "facts-about :seon.agent ->" (count agent-facts) "facts")
+        {:role        :learn
+         :agent-id    agent-id
+         :seed        seed-result
+         :files-scanned (count cljs)
+         :namespaces-recorded @learned
+         :fact-count  (facts/fact-count conn)
+         :sample-query {:subject :seon.agent
+                        :facts   agent-facts}}))))
+
+;; ---------------------------------------------------------------------------
 ;; Entry — exported via globalThis for the ESM shim.
 ;; ---------------------------------------------------------------------------
 
@@ -287,15 +417,19 @@
                    (env "SIDECAR_AGENT_ROLE" "writer"))]
       (let [mode (env "SIDECAR_BENCH_MODE" "default")]
         (log aid "starting" {:role rol :duration-ms dur :bench-mode mode})
-        (let [report (await
-                      (case [mode rol]
-                        ["default" "writer"]        (run-writer aid conn dur)
-                        ["default" "reader"]        (run-reader aid conn dur)
-                        ["default" "mixed"]         (run-mixed  aid conn dur)
-                        ["cache-friendly" "writer"] (run-writer aid conn dur)
-                        ["cache-friendly" "reader"] (run-reader-cf aid conn dur)
-                        ["cache-friendly" "mixed"]  (run-mixed-cf  aid conn dur)
-                        (throw (js/Error. (str "unknown mode/role: " mode "/" rol)))))]
+        (let [report (cond
+                       (= rol "fs-smoke") (run-fs-smoke aid conn dur)
+                       (= rol "learn")    (run-learn    aid conn dur)
+                       :else
+                       (await
+                        (case [mode rol]
+                          ["default" "writer"]        (run-writer aid conn dur)
+                          ["default" "reader"]        (run-reader aid conn dur)
+                          ["default" "mixed"]         (run-mixed  aid conn dur)
+                          ["cache-friendly" "writer"] (run-writer aid conn dur)
+                          ["cache-friendly" "reader"] (run-reader-cf aid conn dur)
+                          ["cache-friendly" "mixed"]  (run-mixed-cf  aid conn dur)
+                          (throw (js/Error. (str "unknown mode/role: " mode "/" rol))))))]
           (log aid "role-done — stopping conn")
           (d/stop! conn)
           (log aid "FINAL-REPORT" (pr-str report))
