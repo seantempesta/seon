@@ -14,6 +14,11 @@
         ;; CBOR codec — jackson cbor (available on JVM, no native deps).
         com.fasterxml.jackson.dataformat/jackson-dataformat-cbor {:mvn/version "2.18.2"}
 
+        ;; Transit-JSON codec for value payloads (keywords, sets, instants,
+        ;; ratios, BigInt). Control envelope is CBOR; value-carrying fields
+        ;; (result, tempids, tx-meta, datom v/a) are Transit-JSON strings.
+        com.cognitect/transit-clj {:mvn/version "1.0.333"}
+
         ;; nREPL for inspection while it runs (optional)
         nrepl/nrepl               {:mvn/version "1.3.0"}
 

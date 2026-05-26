@@ -2,17 +2,20 @@
   "Sidecar JVM writer: owns the single Datahike connection and answers requests
    over a UDS socket. Broadcasts tx events on a separate UDS socket.
 
-   Run with:
-     clj -M:writer
-   or
-     clj -M:writer --backend memory
-     clj -M:writer --backend sqlite --path data/seon-poc.sqlite
-     clj -M:writer --req-sock /tmp/seon-poc-req.sock --pub-sock /tmp/seon-poc-pub.sock"
+   Wire protocol:
+   - Control envelope: CBOR map with string keys (op, ok, basis-t, ...)
+   - Value payloads (query/pull results, tx-data values, tx-meta, tempids,
+     query args, selectors, eids): Transit-JSON strings inside the envelope.
+   - Datom shape: [e a-transit v-transit t op] — a and v are Transit-JSON
+     strings; e, t are ints; op is bool.
+
+   See PROTOCOL.md for the full surface."
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
             [datahike.api :as d]
             [konserve-jdbc.core]
             [seon.sidecar.codec :as codec]
+            [seon.sidecar.transit :as transit]
             [seon.sidecar.broadcast :as bcast])
   (:import [java.net StandardProtocolFamily UnixDomainSocketAddress]
            [java.nio.channels ServerSocketChannel SocketChannel Channels]
@@ -48,7 +51,6 @@
 
     "file"
     (let [^File f (java.io.File. ^String (:path opts))]
-      ;; Datahike's create-database makes the dir; only mkdirs the PARENT.
       (when-let [parent (.getParentFile f)] (.mkdirs parent))
       {:store {:backend :file
                :path (:path opts)
@@ -59,10 +61,6 @@
     "sqlite"
     (let [^File f (java.io.File. ^String (:path opts))]
       (when-let [parent (.getParentFile f)] (.mkdirs parent))
-      ;; NOTE: konserve-jdbc 0.2.91 was built against konserve 0.8.x and does
-      ;; not register the :jdbc backend with konserve 0.9.346. Phase 1 deferred
-      ;; konserve-jdbc per the PRD contingency. Use --backend file for
-      ;; persistence in the meantime.
       {:store {:backend :jdbc
                :dbtype "sqlite"
                :dbname (:path opts)
@@ -78,91 +76,125 @@
     (d/create-database cfg))
   (d/connect cfg))
 
-;; ---------- Request handling ----------
+;; ---------- Response helpers ----------
 
 (defn- ok [m] (assoc m "ok" true))
 (defn- err [kind msg]
   {"ok" false "error" msg "error-kind" kind})
 
 (defn- basis-t-of [db]
-  ;; datahike: (:max-tx db) is the post-commit basis-t
   (some-> db :max-tx))
 
-(defn- cbor-safe
-  "Some datahike results contain Datom records, sets, keywords, java.util.Date,
-   etc. Walk it to a plain CBOR-compatible shape."
-  [x]
-  (cond
-    (nil? x)                                              nil
-    (keyword? x)                                          (str (when-let [n (namespace x)] (str n "/")) (name x))
-    (symbol? x)                                           (str x)
-    (instance? datahike.datom.Datom x)                    (let [^datahike.datom.Datom d x]
-                                                           [(cbor-safe (.-e d))
-                                                            (cbor-safe (.-a d))
-                                                            (cbor-safe (.-v d))
-                                                            (cbor-safe (.-tx d))
-                                                            (boolean (:added d))])
-    (map? x)                                              (into {} (for [[k v] x] [(cbor-safe k) (cbor-safe v)]))
-    (set? x)                                              (mapv cbor-safe x)
-    (sequential? x)                                       (mapv cbor-safe x)
-    (or (string? x) (boolean? x) (integer? x) (double? x)
-        (float? x))                                       x
-    (instance? java.util.Date x)                          x
-    :else                                                 (str x)))
+;; ---------- Transit value payloads ----------
+;;
+;; Anything carrying a Clojure value across the wire is Transit-JSON. The
+;; control envelope (op, ok, basis-t, error-kind, handle, applied, total,
+;; failed-at, datoms-added, datoms-retracted, request-id, db-name, event)
+;; is plain CBOR.
 
-(defn- tx-data->wire
-  "Convert a tx-report :tx-data seq (Datom records) to the wire vector shape
-   [[e a v t op] ...]. Same shape datahike.core/listen! callbacks receive on
-   the JVM, modulo CBOR-native keyword encoding."
-  [tx-data]
-  (mapv (fn [^datahike.datom.Datom d]
-          [(cbor-safe (.-e d))
-           (cbor-safe (.-a d))
-           (cbor-safe (.-v d))
-           (cbor-safe (.-tx d))
-           (boolean (:added d))])
-        tx-data))
+(defn- T
+  "Transit-JSON encode."
+  [v]
+  (transit/write-str v))
+
+(defn- read-T
+  "Decode a value-payload string. Production callers (CLJS guest via WIT)
+   send Transit-JSON. The Rust diagnostic harness (smoke driver, REPL,
+   multi-agent seeds) sends EDN strings as a transitional convenience.
+
+   Disambiguation: try Transit first; if that fails, try EDN. nil/empty
+   string → nil. The EDN fallback will be removed once the host
+   diagnostic harness is migrated to Transit."
+  [s]
+  (when (and s (not= "" s))
+    (try
+      (transit/read-str s)
+      (catch Throwable _transit-failed
+        (edn/read-string s)))))
+
+;; ---------- Datom wire shape ----------
+
+(defn- datom->wire
+  "Convert a datahike Datom record to [e a-transit v-transit t op]. a and v
+   are Transit-JSON strings; the keyword attribute is encoded as a Transit
+   keyword (~:ns/name); the value can be any Clojure value (Transit handles
+   instants, keywords, BigInts, etc.)."
+  [^datahike.datom.Datom d]
+  [(.-e d)
+   (T (.-a d))
+   (T (.-v d))
+   (.-tx d)
+   (boolean (:added d))])
+
+(defn- tx-data->wire [tx-data]
+  (mapv datom->wire tx-data))
+
+;; ---------- Schema-driven type coercion ----------
+;;
+;; JS Numbers don't distinguish 1 from 1.0. Transit-cljs writes both as ~i1
+;; on read-side and a plain JSON number on write-side. To preserve the
+;; double-typed nature of attrs whose schema declares :db.type/float or
+;; :db.type/double, we coerce ints → doubles for those attrs before
+;; transacting. Read-side: (double v) is already a Double, Transit-clj
+;; serializes it with the appropriate type tag, and the guest gets a JS
+;; Number back (the truth lives in the DB).
+
+(defn- schema-of [conn]
+  (-> (d/db conn) :schema))
+
+(defn- valueType-of [schema attr]
+  (when (keyword? attr)
+    (get-in schema [attr :db/valueType])))
+
+(defn- coerce-value-for-attr
+  "If schema says attr is float/double and v is an integer, coerce to double.
+   Otherwise return v unchanged."
+  [schema attr v]
+  (let [vt (valueType-of schema attr)]
+    (cond
+      (and (or (= vt :db.type/double) (= vt :db.type/float))
+           (integer? v))                              (double v)
+      :else                                            v)))
+
+(defn- coerce-tx-data-for-schema
+  "Walk a tx-data vector and coerce values that should be doubles. Handles
+   the two common shapes: maps ({:attr v ...}) and 5-vectors ([:db/add e a v]
+   or [:db/retract e a v])."
+  [schema tx-data]
+  (mapv
+    (fn [item]
+      (cond
+        (map? item)
+        (reduce-kv
+          (fn [m k v]
+            (assoc m k (coerce-value-for-attr schema k v)))
+          {}
+          item)
+
+        (and (vector? item) (#{:db/add :db/retract} (first item)) (= 4 (count item)))
+        (let [[op e a v] item]
+          [op e a (coerce-value-for-attr schema a v)])
+
+        :else item))
+    tx-data))
 
 ;; ---------- Filtered-db handle registry ----------
-;;
-;; `d/filter` in Datahike takes a `(fn [db datom] -> bool)` predicate. We can't
-;; ship guest closures across the wire, so the sidecar protocol takes a
-;; **predicate query** (an EDN datalog query) that returns the set of eids
-;; to retain; the writer compiles it into a datom-level predicate at
-;; handle-creation time, caches the filtered db, and hands the guest an
-;; integer handle for use in subsequent `q-filtered` / `pull-filtered` calls.
-;;
-;; This is a deliberate departure from native `d/filter` — see PROTOCOL.md.
 
-(defonce ^:private filtered-dbs (atom {}))   ; {handle -> {:db filtered-db :basis-t Long}}
+(defonce ^:private filtered-dbs (atom {}))
 (defonce ^:private filter-counter (atom 0))
 
-(defn- register-filtered-db!
-  "Cache a FilteredDB under a fresh handle. We also capture the source db's
-   basis-t at handle creation; FilteredDB itself disables `valAt`, so we read
-   basis-t from the unfiltered db."
-  [filtered-db source-bt]
+(defn- register-filtered-db! [filtered-db source-bt]
   (let [h (swap! filter-counter inc)]
     (swap! filtered-dbs assoc h {:db filtered-db :basis-t source-bt})
     h))
 
-(defn- resolve-db-with-basis-t
-  "Returns a db value pinned to `basis-t` if provided, else current db.
-   Uses `d/as-of` for snapshot reads."
-  [conn basis-t-or-nil]
+(defn- resolve-db-with-basis-t [conn basis-t-or-nil]
   (let [db (d/db conn)]
-    (if basis-t-or-nil
+    (if (and basis-t-or-nil (pos? (long basis-t-or-nil)))
       (d/as-of db basis-t-or-nil)
       db)))
 
-(defn- read-edn-eid
-  "An eid on the wire may be an int (CBOR integer) OR a string carrying an
-   EDN lookup-ref like `[:person/name \"alice\"]`. Normalize."
-  [eid]
-  (cond
-    (integer? eid) eid
-    (string? eid)  (edn/read-string eid)
-    :else          eid))
+;; ---------- Request handlers ----------
 
 (defmulti handle-op (fn [_conn req] (get req "op")))
 
@@ -173,108 +205,136 @@
   (ok {"pong" true}))
 
 (defmethod handle-op "q" [conn req]
-  (let [query   (edn/read-string (get req "query"))
-        args    (mapv identity (get req "args" []))
+  (let [query   (read-T (get req "query"))
+        args    (mapv read-T (get req "args" []))
         basis-t (get req "basis-t")
         db      (resolve-db-with-basis-t conn basis-t)
         result  (apply d/q query db args)]
     (ok {"basis-t" (basis-t-of db)
-         "result"  (cbor-safe result)})))
+         "result"  (T result)})))
+
+(defn- tx-report->ok-map
+  [report request-id]
+  (let [db        (:db-after report)
+        db-before (:db-before report)
+        tx-data   (:tx-data report)
+        wire-data (tx-data->wire tx-data)
+        added     (count (filter :added tx-data))
+        retracted (count (remove :added tx-data))
+        bt        (basis-t-of db)
+        bt-before (basis-t-of db-before)
+        tempids   (dissoc (:tempids report) :db/current-tx)
+        tx-meta   (:tx-meta report)]
+    {:wire-data  wire-data
+     :added      added
+     :retracted  retracted
+     :bt         bt
+     :bt-before  bt-before
+     :tempids    tempids
+     :tx-meta    tx-meta
+     :request-id request-id}))
+
+(defn- ok-event-from-report [{:keys [wire-data added retracted bt bt-before
+                                     tx-meta request-id]}]
+  (cond-> {"event" "tx"
+           "basis-t" bt
+           "basis-t-before" bt-before
+           "db-name" "default"
+           "tx-data" wire-data
+           "datoms-added" added
+           "datoms-retracted" retracted
+           "tx-meta" (T tx-meta)}
+    request-id (assoc "request-id" request-id)))
+
+(defn- ok-response-from-report [{:keys [wire-data added retracted bt bt-before
+                                        tempids tx-meta request-id]}]
+  ;; Two forms in one envelope:
+  ;; - Structured fields (basis-t, tx-data, etc.) for tests and the Rust
+  ;;   host's pub/cache machinery that needs to read basis-t, datoms-added,
+  ;;   etc. without parsing Transit.
+  ;; - "payload": a single Transit-JSON string of the full Clojure-side
+  ;;   response map. The CLJS guest reads this one field with one Transit
+  ;;   decode — no per-field assembly across the boundary.
+  (cond-> {"basis-t"           bt
+           "basis-t-before"    bt-before
+           "tempids"           (T tempids)
+           "tx-data"           wire-data
+           "tx-meta"           (T tx-meta)
+           "datoms-added"      added
+           "datoms-retracted"  retracted
+           "payload"
+           (T (cond-> {:basis-t           bt
+                       :basis-t-before    bt-before
+                       :tempids           tempids
+                       :datoms-added      added
+                       :datoms-retracted  retracted
+                       :tx-meta           tx-meta}
+                request-id (assoc :request-id request-id)))}
+    request-id (assoc "request-id" request-id)))
 
 (defmethod handle-op "transact" [conn req]
-  (let [tx         (edn/read-string (get req "tx-data"))
-        tx-meta-in (when-let [s (get req "tx-meta")] (edn/read-string s))
-        request-id (get req "request-id")
+  (let [tx         (read-T (get req "tx-data"))
+        tx-meta-in (read-T (get req "tx-meta"))
+        request-id (let [r (get req "request-id")] (when (and r (not= "" r)) r))
+        schema     (schema-of conn)
+        tx*        (coerce-tx-data-for-schema schema tx)
         report     (if tx-meta-in
-                     (d/transact conn {:tx-data tx :tx-meta tx-meta-in})
-                     (d/transact conn tx))
-        db         (:db-after report)
-        db-before  (:db-before report)
-        tx-data    (:tx-data report)
-        wire-data  (tx-data->wire tx-data)
-        added      (count (filter :added tx-data))
-        retracted  (count (remove :added tx-data))
-        bt         (basis-t-of db)
-        bt-before  (basis-t-of db-before)
-        ;; gap #1: full tx-report shape on the pub event so listeners can
-        ;; reason about specific changes, not just counts.
-        event      (cond-> {"event" "tx"
-                            "basis-t" bt
-                            "basis-t-before" bt-before
-                            "db-name" "default"
-                            "tx-data" wire-data
-                            "datoms-added" added
-                            "datoms-retracted" retracted
-                            "tx-meta" (cbor-safe (:tx-meta report))}
-                     request-id (assoc "request-id" request-id))]
+                     (d/transact conn {:tx-data tx* :tx-meta tx-meta-in})
+                     (d/transact conn tx*))
+        r          (tx-report->ok-map report request-id)
+        event      (ok-event-from-report r)]
     (try (bcast/broadcast! event) (catch Throwable _))
-    (ok (cond-> {"basis-t" bt
-                 "basis-t-before" bt-before
-                 "tempids" (cbor-safe (dissoc (:tempids report) :db/current-tx))
-                 "tx-data" wire-data
-                 "tx-meta" (cbor-safe (:tx-meta report))
-                 "datoms-added" added
-                 "datoms-retracted" retracted}
-          request-id (assoc "request-id" request-id)))))
+    (ok (ok-response-from-report r))))
+
+(defn- report->clj
+  "Plain Clojure value of a tx report, for embedding in :reports inside the
+   Transit-encoded payload. Keeps native keywords/instants/etc. — Transit
+   handles them on the wire."
+  [{:keys [bt bt-before tempids added retracted tx-meta request-id]
+    :as r}]
+  (let [tx-data (->> (:tx-data-raw r)
+                     (mapv (fn [^datahike.datom.Datom d]
+                             [(.-e d) (.-a d) (.-v d) (.-tx d)
+                              (boolean (:added d))])))]
+    (cond-> {:basis-t          bt
+             :basis-t-before   bt-before
+             :tempids          tempids
+             :tx-data          tx-data
+             :tx-meta          tx-meta
+             :datoms-added     added
+             :datoms-retracted retracted}
+      request-id (assoc :request-id request-id))))
 
 (defmethod handle-op "transact-batch" [conn req]
-  ;; Apply a list of tx-data vectors in order, each as its own datahike
-  ;; commit. Emits one pub event per individual tx (matching d/listen
-  ;; semantics). Returns a vector of per-tx reports in matching order.
-  ;;
-  ;; On any single failure: stops processing, returns partial results
-  ;; with the failing index. Subsequent entries are NOT applied. The
-  ;; caller decides what to do with them.
-  ;;
-  ;; Ordering guarantee: each entry is committed sequentially in the
-  ;; same thread before this fn returns. Listeners across all
-  ;; subscribers observe events in this order.
-  (let [tx-data-list (mapv edn/read-string (get req "tx-data-list"))
-        tx-meta-list (when-let [ms (get req "tx-meta-list")]
-                       (mapv #(when % (edn/read-string %)) ms))
+  (let [tx-data-list (mapv read-T (get req "tx-data-list"))
+        tx-meta-list (when-let [ms (get req "tx-meta-list")] (mapv read-T ms))
         request-ids  (get req "request-ids")
         n            (count tx-data-list)
+        schema       (schema-of conn)
         per-tx-report
         (fn [idx tx tx-meta-in request-id]
-          (let [report (if tx-meta-in
-                         (d/transact conn {:tx-data tx :tx-meta tx-meta-in})
-                         (d/transact conn tx))
-                db        (:db-after report)
-                db-before (:db-before report)
-                tx-data   (:tx-data report)
-                wire-data (tx-data->wire tx-data)
-                added     (count (filter :added tx-data))
-                retracted (count (remove :added tx-data))
-                bt        (basis-t-of db)
-                bt-before (basis-t-of db-before)
-                event     (cond-> {"event" "tx"
-                                   "basis-t" bt
-                                   "basis-t-before" bt-before
-                                   "db-name" "default"
-                                   "tx-data" wire-data
-                                   "datoms-added" added
-                                   "datoms-retracted" retracted
-                                   "tx-meta" (cbor-safe (:tx-meta report))}
-                            request-id (assoc "request-id" request-id))]
+          (let [tx*    (coerce-tx-data-for-schema schema tx)
+                report (if tx-meta-in
+                         (d/transact conn {:tx-data tx* :tx-meta tx-meta-in})
+                         (d/transact conn tx*))
+                r      (assoc (tx-report->ok-map report request-id)
+                              :tx-data-raw (:tx-data report))
+                event  (ok-event-from-report r)]
             (try (bcast/broadcast! event) (catch Throwable _))
-            (cond-> {"basis-t" bt
-                     "basis-t-before" bt-before
-                     "tempids" (cbor-safe (dissoc (:tempids report) :db/current-tx))
-                     "tx-data" wire-data
-                     "tx-meta" (cbor-safe (:tx-meta report))
-                     "datoms-added" added
-                     "datoms-retracted" retracted
-                     "index" idx}
-              request-id (assoc "request-id" request-id))))]
-    (loop [idx     0
-           reports (transient [])]
+            {:wire (assoc (ok-response-from-report r) "index" idx)
+             :clj  (assoc (report->clj r) :index idx)}))]
+    (loop [idx 0 wire-reports (transient []) clj-reports (transient [])]
       (if (>= idx n)
-        (ok {"reports" (persistent! reports)
-             "applied" idx
-             "total"   n})
+        (let [wreps (persistent! wire-reports)
+              creps (persistent! clj-reports)]
+          (ok {"reports" wreps
+               "applied" idx
+               "total"   n
+               "payload" (T {:applied idx :total n :reports creps})}))
         (let [tx         (nth tx-data-list idx)
               tx-meta-in (some-> tx-meta-list (nth idx nil))
-              request-id (some-> request-ids (nth idx nil))]
+              request-id (let [r (some-> request-ids (nth idx nil))]
+                           (when (and r (not= "" r)) r))]
           (let [result (try
                          {:ok (per-tx-report idx tx tx-meta-in request-id)}
                          (catch clojure.lang.ExceptionInfo e
@@ -284,33 +344,34 @@
                            {:err {:kind "internal"
                                   :msg  (.toString t)}}))]
             (if-let [ok-rep (:ok result)]
-              (recur (inc idx) (conj! reports ok-rep))
-              (let [{:keys [kind msg]} (:err result)]
-                ;; Partial success: return accumulated reports + the failure
-                (ok {"reports"     (persistent! reports)
-                     "applied"     idx
-                     "total"       n
-                     "failed-at"   idx
-                     "error"       msg
-                     "error-kind"  kind})))))))))
+              (recur (inc idx)
+                     (conj! wire-reports (:wire ok-rep))
+                     (conj! clj-reports (:clj ok-rep)))
+              (let [{:keys [kind msg]} (:err result)
+                    wreps (persistent! wire-reports)
+                    creps (persistent! clj-reports)]
+                (ok {"reports"    wreps
+                     "applied"    idx
+                     "total"      n
+                     "failed-at"  idx
+                     "error"      msg
+                     "error-kind" kind
+                     "payload"    (T {:applied    idx
+                                      :total      n
+                                      :reports    creps
+                                      :failed-at  idx
+                                      :error      msg
+                                      :error-kind kind})})))))))))
 
 (defmethod handle-op "pull" [conn req]
-  (let [selector (edn/read-string (get req "selector"))
-        eid      (read-edn-eid (get req "eid"))
+  (let [selector (read-T (get req "selector"))
+        eid      (read-T (get req "eid"))
         basis-t  (get req "basis-t")
         db       (resolve-db-with-basis-t conn basis-t)]
     (ok {"basis-t" (basis-t-of db)
-         "result"  (cbor-safe (d/pull db selector eid))})))
+         "result"  (T (d/pull db selector eid))})))
 
-;; ---------- New ops (Phase B.1) ----------
-
-(defn- expand-component-refs
-  "Walk a pulled entity map; for any value that is itself a map (because we
-   used `'[*]` on a component-ref attr, Datahike eagerly realizes it), recurse
-   one level. For attr values that are pulled as eids (non-component refs with
-   `'[*]` selector), we leave them as-is — guests can pull again if needed.
-   Depth defaults to 1 to mirror `d/entity` shallow access."
-  [m depth]
+(defn- expand-component-refs [m depth]
   (if (or (nil? m) (zero? depth) (not (map? m)))
     m
     (into {}
@@ -322,17 +383,9 @@
                  :else            v)]))))
 
 (defmethod handle-op "entity-pull" [conn req]
-  ;; Eager `d/entity` replacement. Selector defaults to `'[*]`; an optional
-  ;; `depth` controls how deep we recursively realize component-ref maps
-  ;; (default 1 — matches the V0 usage audit).
-  ;;
-  ;; A missing lookup-ref is NOT an error — V0's `d/entity` returns nil for a
-  ;; missing entity, and the audit's call sites rely on that. We catch
-  ;; Datahike's "missing lookup ref" exception and surface it as `result=nil`.
-  (let [eid      (read-edn-eid (get req "ref"))
-        selector (if-let [s (get req "selector")]
-                   (edn/read-string s)
-                   '[*])
+  (let [eid      (read-T (get req "ref"))
+        sel-raw  (read-T (get req "selector"))
+        selector (or sel-raw '[*])
         depth    (long (or (get req "depth") 1))
         basis-t  (get req "basis-t")
         db       (resolve-db-with-basis-t conn basis-t)
@@ -344,34 +397,29 @@
                        (throw e))))
         result   (when raw (expand-component-refs raw depth))]
     (ok {"basis-t" (basis-t-of db)
-         "result"  (cbor-safe result)})))
+         "result"  (T result)})))
 
 (defmethod handle-op "pull-many" [conn req]
-  (let [selector (edn/read-string (get req "selector"))
-        eids     (->> (get req "eids")
-                      (mapv read-edn-eid))
+  (let [selector (read-T (get req "selector"))
+        eids     (mapv read-T (get req "eids"))
         basis-t  (get req "basis-t")
         db       (resolve-db-with-basis-t conn basis-t)]
     (ok {"basis-t" (basis-t-of db)
-         "result"  (cbor-safe (d/pull-many db selector eids))})))
+         "result"  (T (d/pull-many db selector eids))})))
 
 (defmethod handle-op "schema" [conn _req]
   (let [db (d/db conn)]
     (ok {"basis-t" (basis-t-of db)
-         "result"  (cbor-safe (:schema db))})))
+         "result"  (T (:schema db))})))
 
 (defmethod handle-op "reverse-schema" [conn _req]
   (let [db (d/db conn)]
     (ok {"basis-t" (basis-t-of db)
-         "result"  (cbor-safe (:rschema db))})))
+         "result"  (T (:rschema db))})))
 
 (defmethod handle-op "db-filter" [conn req]
-  ;; Build a filtered-db handle. The wire shape is a predicate **query** —
-  ;; a Datalog query that returns a relation of `[?e]` rows. We turn that
-  ;; into a set of eids, then materialize a `d/filter` that retains only
-  ;; datoms whose entity is in the set.
-  (let [pred-query (edn/read-string (get req "pred-query"))
-        args       (mapv identity (get req "args" []))
+  (let [pred-query (read-T (get req "pred-query"))
+        args       (mapv read-T (get req "args" []))
         db         (d/db conn)
         rows       (apply d/q pred-query db args)
         keep-eids  (into #{} (map first) rows)
@@ -386,16 +434,15 @@
 
 (defmethod handle-op "q-filtered" [_conn req]
   (let [handle  (long (get req "handle"))
-        query   (edn/read-string (get req "query"))
-        args    (mapv identity (get req "args" []))]
+        query   (read-T (get req "query"))
+        args    (mapv read-T (get req "args" []))]
     (if-let [entry (get @filtered-dbs handle)]
       (let [db (:db entry)]
         (ok {"basis-t" (:basis-t entry)
-             "result"  (cbor-safe (apply d/q query db args))}))
+             "result"  (T (apply d/q query db args))}))
       (err "not-found" (str "no filtered-db handle: " handle)))))
 
 (defmethod handle-op "filter-release" [_conn req]
-  ;; Drop a filtered-db handle. Always succeeds (idempotent).
   (let [handle (long (get req "handle"))]
     (swap! filtered-dbs dissoc handle)
     (ok {"released" true "handle" handle})))
@@ -462,5 +509,4 @@
         _    (println "[writer] req socket:" (:req-sock opts))]
     (reset! state {:conn conn :req-server req-server :pub-server pub-server})
     (println "[writer] ready. PID=" (.pid (java.lang.ProcessHandle/current)))
-    ;; Block forever. Shutdown by SIGTERM.
     (.. (Thread/currentThread) join)))

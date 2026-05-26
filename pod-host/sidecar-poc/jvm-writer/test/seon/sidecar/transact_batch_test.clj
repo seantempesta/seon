@@ -6,7 +6,8 @@
    Each test spawns its own JVM writer subprocess (memory backend) and
    tears it down. Same fixture pattern as protocol_extensions_test."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
-            [seon.sidecar.client :as client])
+            [seon.sidecar.client :as client]
+            [seon.sidecar.transit :as transit])
   (:import [java.io File]))
 
 (set! *warn-on-reflection* true)
@@ -63,6 +64,9 @@
   (with-open [ch (client/connect (:req-sock *ctx*))]
     (client/call! ch (merge {"op" op} extra))))
 
+(defn- result-of [resp] (transit/read-str (get resp "result")))
+(defn- meta-of   [rep]  (transit/read-str (get rep  "tx-meta")))
+
 (defn- install-schema! []
   (req! "transact"
         {"tx-data"
@@ -107,7 +111,7 @@
             "[{:item/id \"z\" :item/n 30}]"]})
     (let [r (req! "q" {"query" "[:find ?id ?n :where [?e :item/id ?id] [?e :item/n ?n]]"
                        "args"  []})
-          result (get r "result")
+          result (result-of r)
           by-id  (into {} (mapv (fn [[id n]] [id n]) result))]
       (is (= true (get r "ok")))
       (is (= {"x" 10 "y" 20 "z" 30} by-id)))))
@@ -126,13 +130,13 @@
       (is (= true (get r "ok")))
       (is (nil? (get r "failed-at")))
       (let [reports (get r "reports")
-            metas   (mapv #(get % "tx-meta") reports)]
+            metas   (mapv meta-of reports)]
         (is (= 2 (count metas)))
         (doseq [m metas]
-          (is (contains? m "db/txInstant"))
-          (is (contains? m "db/commitId")))
+          (is (contains? m :db/txInstant))
+          (is (contains? m :db/commitId)))
         ;; All commitIds must be distinct (each tx is a separate commit)
-        (is (= 2 (count (into #{} (map #(get % "db/commitId")) metas))))))))
+        (is (= 2 (count (into #{} (map :db/commitId) metas))))))))
 
 (deftest test-batch-partial-failure-stops-after-bad-entry
   (testing "entry 1 references an unknown attr — entries 0 applies, 1 fails, 2 NOT applied"
@@ -150,7 +154,7 @@
       (is (= 1 (count (get r "reports"))))
       ;; entry 2 must NOT be in the DB
       (let [q (req! "q" {"query" "[:find ?id :where [?e :item/id ?id]]" "args" []})
-            ids (into #{} (map first) (get q "result"))]
+            ids (into #{} (map first) (result-of q))]
         (is (contains? ids "good-a"))
         (is (not (contains? ids "good-c")) "entry after the failure must not be applied")
         (is (not (contains? ids "bad-b")))))))

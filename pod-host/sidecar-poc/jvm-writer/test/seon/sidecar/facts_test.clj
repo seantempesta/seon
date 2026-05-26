@@ -12,7 +12,8 @@
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
-            [seon.sidecar.client :as client])
+            [seon.sidecar.client :as client]
+            [seon.sidecar.transit :as transit])
   (:import [java.io File]))
 
 (set! *warn-on-reflection* true)
@@ -71,6 +72,8 @@
   (with-open [ch (client/connect (:req-sock *ctx*))]
     (client/call! ch (merge {"op" op} extra))))
 
+(defn- result-of [resp] (transit/read-str (get resp "result")))
+
 ;; ---------- Loaders ----------
 
 (def schema-path "resources/seed/facts-schema.edn")
@@ -116,29 +119,26 @@
           q   (req! "q" {"query" "[:find (count ?e) . :where [?e :fact/id _]]"
                          "args"  []})]
       (is (= true (get q "ok")))
-      (is (= (count raw) (get q "result"))
+      (is (= (count raw) (result-of q))
           "all seed facts present"))))
 
 (deftest test-seed-idempotent
   (testing "re-running the seed is a no-op (upsert by :fact/id)"
     (install-schema!)
     (transact-seed!)
-    (let [first-count (-> (req! "q" {"query" "[:find (count ?e) . :where [?e :fact/id _]]"
-                                     "args"  []})
-                          (get "result"))]
+    (let [first-count (result-of (req! "q" {"query" "[:find (count ?e) . :where [?e :fact/id _]]"
+                                             "args"  []}))]
       (transact-seed!)
       (transact-seed!)
-      (let [final-count (-> (req! "q" {"query" "[:find (count ?e) . :where [?e :fact/id _]]"
-                                       "args"  []})
-                            (get "result"))]
+      (let [final-count (result-of (req! "q" {"query" "[:find (count ?e) . :where [?e :fact/id _]]"
+                                               "args"  []}))]
         (is (= first-count final-count)
             "re-seeding did not duplicate facts")))))
 
 (deftest test-query-by-subject
   (testing "query facts by :fact/subject returns all facts about that subject.
-            NOTE: the PoC wire protocol passes args as CBOR strings (not
-            EDN-typed values), so for typed-keyword filters we inline the
-            keyword into the query rather than parameterizing."
+            With the Transit wire format, keywords round-trip as keywords:
+            no more string coercion at the boundary."
     (install-schema!)
     (transact-seed!)
     (let [q (req! "q" {"query" "[:find ?id ?p
@@ -148,13 +148,12 @@
                                   [?e :fact/predicate ?p]]"
                         "args" []})]
       (is (= true (get q "ok")))
-      (let [rows (get q "result")]
+      (let [rows (result-of q)]
         (is (pos? (count rows))
             "at least one fact about :seon/project")
-        ;; CBOR-roundtrip strips keyword type → strings on the wire.
         (let [predicates (set (map second rows))]
-          (is (contains? predicates "thesis"))
-          (is (contains? predicates "uses-library")))))))
+          (is (contains? predicates :thesis))
+          (is (contains? predicates :uses-library)))))))
 
 (deftest test-query-by-predicate
   (testing "query facts by :fact/predicate returns all facts with that predicate"
@@ -167,12 +166,11 @@
                                   [?e :fact/subject ?s]]"
                         "args" []})]
       (is (= true (get q "ok")))
-      (let [rows (get q "result")]
+      (let [rows (result-of q)]
         (is (pos? (count rows))
             "at least one :uses-library fact")
-        ;; Every fact has :seon/project as subject. CBOR-roundtrip
-        ;; converts the namespaced keyword to a string "seon/project".
-        (is (every? #(= "seon/project" (second %)) rows))))))
+        ;; With Transit, keywords round-trip as keywords.
+        (is (every? #(= :seon/project (second %)) rows))))))
 
 (deftest test-record-fact-upsert
   (testing "transacting a fact with an existing :fact/id updates rather than duplicating"
@@ -193,7 +191,7 @@
                                     [?e :fact/object ?o]
                                     [?e :fact/confidence ?c]]"
                          "args" []})
-            rows (get q "result")]
+            rows (result-of q)]
         (is (= 1 (count rows))
             "exactly one fact entity with the id")
         (let [[o c] (first rows)]

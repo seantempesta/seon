@@ -17,11 +17,14 @@
      value into multiple reads still works — we return the wrapped conn
      itself, and `query`/`pull`/`entity` accept it transparently.
 
-   - `with-tx-context` / `with-agent` use plain `^:dynamic` binding
-     instead of `node:async_hooks/AsyncLocalStorage`. Under wasm-rquickjs
-     `node:async_hooks` is not available, and the guest event loop is a
-     single QuickJS fiber per Store anyway — there's no concurrent-await
-     fan-out for a Var to clobber across.
+   - `with-tx-context` / `with-agent` route through
+     `sidecar-poc.als` — a userland AsyncLocalStorage equivalent built
+     on a snapshot-and-restore atom. wasm-rquickjs doesn't expose
+     `node:async_hooks`, so we can't use V0's
+     `AsyncLocalStorage.run`. The guest event loop is a single QuickJS
+     fiber per Store, so `with-context` matches V0's binding semantics
+     for sequential await chains. `with-context-async` is the escape
+     hatch for parallel-Promise scenarios.
 
    - The Malli→datahike schema bridge is not reproduced here. The
      sidecar writer owns schema installation; the guest just calls
@@ -37,6 +40,7 @@
      sidecar pub event doesn't deliver a pre-commit db handle.
      `:datoms` are decoded from `tx-data` shipped on the pub event."
   (:require
+    [sidecar-poc.als :as als]
     [sidecar-poc.datahike :as sd]
     [malli.core :as m]
     [seon.error :as error]
@@ -149,26 +153,29 @@
    the wrapper itself transparently."
   nil)
 
-(def ^:dynamic ^:private *tx-context* nil)
-(def ^:dynamic ^:private *agent-id*   nil)
+;; Userland AsyncLocalStorage keys. The values live in `sidecar-poc.als`'s
+;; current context map; we just namespace the keys so multiple consumers
+;; coexist.
+(def ^:private ALS-TX-CONTEXT ::tx-context)
+(def ^:private ALS-AGENT-ID   ::agent-id)
 
-(defn current-tx-context [] *tx-context*)
-(defn current-agent-id   [] *agent-id*)
+(defn current-tx-context [] (als/current-value ALS-TX-CONTEXT))
+(defn current-agent-id   [] (als/current-value ALS-AGENT-ID))
 
 (defn with-agent
-  "V0 takes a 0-arg thunk; we do the same. Promise return value carries the
-   binding through `await` because of `binding-frame` snapshotting added by
-   the partial-cps fork of CLJS — verified in V0 probe 14."
+  "Bind the agent-id for the dynamic extent of `(f)`. Mirrors V0's
+   `(.run agent-id-als ...)` shape — `(f)` is a 0-arg thunk; whatever it
+   returns is returned by `with-agent`. For sync `f` this is trivial; for
+   `f` that returns a Promise, see `with-agent-async`."
   [agent-id f]
-  (binding [*agent-id* agent-id] (f)))
+  (als/with-context ALS-AGENT-ID agent-id f))
 
 (defn with-tx-context
-  "Merge `ctx-map` on top of the existing tx-context for the dynamic extent
-   of `f`. Returns whatever `f` returns; carries through awaits like
-   `with-agent`."
+  "Merge `ctx-map` on top of the active tx-context for the dynamic extent
+   of `(f)`. Mirrors V0's `.run` binding shape."
   [ctx-map f]
-  (let [merged (merge *tx-context* ctx-map)]
-    (binding [*tx-context* merged] (f))))
+  (let [merged (merge (current-tx-context) ctx-map)]
+    (als/with-context ALS-TX-CONTEXT merged f)))
 
 ;; ---------------------------------------------------------------------------
 ;; Validation gate — borrowed verbatim from V0. Pure CLJS, no Node deps.
@@ -239,8 +246,8 @@
                      ::missing :seon.db/tx-data}))))
 
 (defn- merge-tx-context-into-opts [opts]
-  (let [ctx       *tx-context*
-        agent-id  *agent-id*
+  (let [ctx       (current-tx-context)
+        agent-id  (current-agent-id)
         als-meta  (cond-> {}
                     agent-id (assoc ::agent-id agent-id))
         merged    (merge als-meta ctx)]

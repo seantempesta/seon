@@ -10,7 +10,8 @@
      - Reason C (basis-t threading): multi-query snapshot consistency
      - Reason D (unlisten local): subscribe + tx event shape sufficient"
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
-            [seon.sidecar.client :as client])
+            [seon.sidecar.client :as client]
+            [seon.sidecar.transit :as transit])
   (:import [java.io File]))
 
 (set! *warn-on-reflection* true)
@@ -67,6 +68,9 @@
   (with-open [ch (client/connect (:req-sock *ctx*))]
     (client/call! ch (merge {"op" op} extra))))
 
+(defn- result-of [resp] (transit/read-str (get resp "result")))
+(defn- meta-of   [resp] (transit/read-str (get resp "tx-meta")))
+
 ;; ---------- Helpers ----------
 
 (defn- install-msg-schema! []
@@ -104,11 +108,11 @@
           r-b (req! "q" {"query" q-shape "args" [] "basis-t" bt1})
           r-now (req! "q" {"query" q-shape "args" []})]
 
-      (is (= 1 (get r-a "result"))
+      (is (= 1 (result-of r-a))
           "query at bt1 sees one message")
-      (is (= 1 (get r-b "result"))
+      (is (= 1 (result-of r-b))
           "second query at same basis-t sees the same one")
-      (is (= 3 (get r-now "result"))
+      (is (= 3 (result-of r-now))
           "query without basis-t sees all three"))))
 
 ;; ---------- Reason A — Date comparison without a guest fn ----------
@@ -145,7 +149,7 @@
                                        [(pos? ?c)]]"
           r (req! "q" {"query" q-literal "args" []})]
       (is (= true (get r "ok")))
-      (let [rows (get r "result")
+      (let [rows (result-of r)
             texts (set (map first rows))]
         (is (= #{"newer"} texts) "only the 2026-06 message is after 2026-05-01")))))
 
@@ -176,16 +180,16 @@
                                {:session/at #inst \"2026-05-10\"}]}]"})
     (let [r (req! "entity-pull" {"ref" "[:agent/id \"alpha\"]"})]
       (is (= true (get r "ok")))
-      (let [m (get r "result")
-            sessions (get m "agent/sessions")]
-        (is (= "alpha" (get m "agent/id")))
+      (let [m (result-of r)
+            sessions (get m :agent/sessions)]
+        (is (= "alpha" (get m :agent/id)))
         (is (vector? sessions))
         (is (= 3 (count sessions)))
         ;; Each session map has the :session/at attr realized.
-        (is (every? #(contains? % "session/at") sessions))
+        (is (every? #(contains? % :session/at) sessions))
         ;; Sort host-side, same as agent.cljs:494 pattern.
-        (let [sorted (sort-by #(get % "session/at") sessions)
-              last-at (get (last sorted) "session/at")]
+        (let [sorted (sort-by #(get % :session/at) sessions)
+              last-at (get (last sorted) :session/at)]
           (is (some? last-at) "shallow access on the realized component map works"))))))
 
 ;; ---------- Reason D — listener tx-data fanout shape ----------
@@ -211,7 +215,7 @@
           (is (integer? (get ev "basis-t")))
           (is (integer? (get ev "basis-t-before")))
           (is (vector? (get ev "tx-data")))
-          (is (map? (get ev "tx-meta")))
+          (is (map? (meta-of ev)))
           (is (= rid (get ev "request-id"))
               "request-id round-trips end-to-end (overlay uses for own-tx dedup)")
           ;; Datom shape matches what the overlay's handler decoder expects.
@@ -245,5 +249,5 @@
                     {"handle" h
                      "query" "[:find ?n :where [?e :person/name ?n]]"
                      "args" []})
-            names (set (map first (get r "result")))]
+            names (set (map first (result-of r)))]
         (is (= #{"alice" "carol"} names) "filtered db only exposes admins")))))

@@ -10,7 +10,8 @@
    Each test spawns its own JVM writer subprocess (in-memory backend) and
    tears it down. Shape mirrors `protocol_integration_test.clj`."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
-            [seon.sidecar.client :as client])
+            [seon.sidecar.client :as client]
+            [seon.sidecar.transit :as transit])
   (:import [java.io File]))
 
 (set! *warn-on-reflection* true)
@@ -71,6 +72,9 @@
   (with-open [ch (client/connect (:req-sock *ctx*))]
     (client/call! ch (merge {"op" op} extra))))
 
+(defn- result-of [resp]
+  (transit/read-str (get resp "result")))
+
 (defn- install-team-schema! []
   ;; Schema with one component-ref attr to exercise the entity-pull recursion.
   (req! "transact"
@@ -104,25 +108,25 @@
 (deftest test-entity-pull-by-eid
   (testing "entity-pull with a numeric eid returns the realized entity map"
     (seed!)
-    (let [;; look up alice's eid via q
+    (let [;; look up alice's eid via q (find .)
           q-resp (req! "q" {"query" "[:find ?e . :where [?e :person/name \"alice\"]]"
                             "args"  []})
-          alice-eid (get q-resp "result")
+          alice-eid (result-of q-resp)
           r (req! "entity-pull" {"ref" (str alice-eid)})]
       (is (= true (get r "ok")))
-      (let [m (get r "result")]
+      (let [m (result-of r)]
         (is (map? m))
-        (is (= "alice" (get m "person/name")))
-        (is (= 33 (get m "person/age")))))))
+        (is (= "alice" (get m :person/name)))
+        (is (= 33 (get m :person/age)))))))
 
 (deftest test-entity-pull-by-lookup-ref
   (testing "entity-pull accepts an EDN lookup-ref string for `ref`"
     (seed!)
     (let [r (req! "entity-pull" {"ref" "[:person/name \"bob\"]"})]
       (is (= true (get r "ok")))
-      (let [m (get r "result")]
-        (is (= "bob" (get m "person/name")))
-        (is (= 41 (get m "person/age")))))))
+      (let [m (result-of r)]
+        (is (= "bob" (get m :person/name)))
+        (is (= 41 (get m :person/age)))))))
 
 (deftest test-entity-pull-expands-component-refs
   (testing "entity-pull eagerly realizes component refs to depth 1.
@@ -131,13 +135,13 @@
     (seed!)
     (let [r (req! "entity-pull" {"ref" "[:team/name \"alpha\"]"})]
       (is (= true (get r "ok")))
-      (let [m (get r "result")
-            members (get m "team/members")]
-        (is (= "alpha" (get m "team/name")))
+      (let [m (result-of r)
+            members (get m :team/members)]
+        (is (= "alpha" (get m :team/name)))
         (is (vector? members) "members is a vector of pulled component maps")
         (is (= 2 (count members)))
         (is (every? map? members) "each member is a realized map, not an eid")
-        (let [names (set (map #(get % "person/name") members))]
+        (let [names (set (map #(get % :person/name) members))]
           (is (= #{"alice" "bob"} names)))))))
 
 (deftest test-entity-pull-not-found
@@ -146,7 +150,7 @@
     (let [r (req! "entity-pull" {"ref" "[:person/name \"ghost\"]"})]
       ;; Datahike returns nil for a missing entity pull; ok=true, result=nil.
       (is (= true (get r "ok")))
-      (is (nil? (get r "result"))))))
+      (is (nil? (result-of r))))))
 
 ;; ---------- pull-many ----------
 
@@ -158,11 +162,11 @@
                    "eids"     ["[:person/name \"alice\"]"
                                "[:person/name \"bob\"]"]})]
       (is (= true (get r "ok")))
-      (let [xs (get r "result")]
+      (let [xs (result-of r)]
         (is (vector? xs))
         (is (= 2 (count xs)))
-        (is (= "alice" (get (first xs) "person/name")))
-        (is (= "bob"   (get (second xs) "person/name")))))))
+        (is (= "alice" (get (first xs) :person/name)))
+        (is (= "bob"   (get (second xs) :person/name)))))))
 
 ;; ---------- schema / reverse-schema ----------
 
@@ -171,29 +175,26 @@
     (install-team-schema!)
     (let [r (req! "schema" {})]
       (is (= true (get r "ok")))
-      (let [s (get r "result")]
+      (let [s (result-of r)]
         (is (map? s))
-        ;; The schema map's keys are :db/ident -> attr-schema. With our cbor walker, keys come back as strings.
+        ;; Keys are now native keywords (Transit preserves the type).
         (let [idents (set (keys s))]
-          (is (contains? idents "person/name"))
-          (is (contains? idents "person/age"))
-          (is (contains? idents "team/name"))
-          (is (contains? idents "team/members")))))))
+          (is (contains? idents :person/name))
+          (is (contains? idents :person/age))
+          (is (contains? idents :team/name))
+          (is (contains? idents :team/members)))))))
 
 (deftest test-reverse-schema-read
   (testing "reverse-schema op returns the rschema indexed by property"
     (install-team-schema!)
     (let [r (req! "reverse-schema" {})]
       (is (= true (get r "ok")))
-      (let [rs (get r "result")]
+      (let [rs (result-of r)]
         (is (map? rs))
-        ;; rschema keys are property keywords (e.g. :db.unique/identity, :db/index).
-        ;; After cbor-safe walking, they're "ns/name" strings.
+        ;; rschema keys are native property keywords (Transit-preserved).
         (let [props (set (keys rs))]
-          ;; At minimum, we expect db.unique/identity (we installed identity attrs)
-          ;; and db.cardinality/many (team/members).
-          (is (some #(re-find #"unique" %) props)
-              (str "expected a unique-* key, got " (pr-str props))))))))
+          (is (some #(and (keyword? %) (re-find #"unique" (str %))) props)
+              (str "expected a unique-* keyword key, got " (pr-str props))))))))
 
 ;; ---------- db-filter / q-filtered / filter-release ----------
 
@@ -214,7 +215,7 @@
                         "query"  "[:find ?n :where [?e :person/name ?n]]"
                         "args"   []})]
           (is (= true (get r2 "ok")))
-          (let [names (set (map first (get r2 "result")))]
+          (let [names (set (map first (result-of r2)))]
             (is (= #{"bob"} names) "filtered db only exposes bob")))
         ;; Release is idempotent
         (let [r3 (req! "filter-release" {"handle" handle})]
@@ -246,8 +247,8 @@
                            "args"  []})]
       (is (= true (get r-old "ok")))
       (is (= true (get r-now "ok")))
-      (let [old-names (set (map first (get r-old "result")))
-            now-names (set (map first (get r-now "result")))]
+      (let [old-names (set (map first (result-of r-old)))
+            now-names (set (map first (result-of r-now)))]
         (is (= #{"alice"} old-names) "snapshot at bt1 only sees alice")
         (is (= #{"alice" "bob"} now-names) "current snapshot sees both")))))
 
@@ -262,5 +263,5 @@
                               "basis-t"  bt1})
           r-now (req! "pull" {"selector" "[:person/name :person/age]"
                               "eid"      "[:person/name \"alice\"]"})]
-      (is (= 33 (get (get r-old "result") "person/age")) "old snapshot age")
-      (is (= 99 (get (get r-now "result") "person/age")) "new age"))))
+      (is (= 33 (get (result-of r-old) :person/age)) "old snapshot age")
+      (is (= 99 (get (result-of r-now) :person/age)) "new age"))))

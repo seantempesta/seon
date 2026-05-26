@@ -194,11 +194,23 @@ impl WasiHttpView for GuestStore {
 // the shared DbHandle.
 // ---------------------------------------------------------------------------
 
-/// Pull `"result"` out of a writer response and pretty-print it as an EDN-ish
-/// string suitable for return to the wasm guest. We DON'T try to faithfully
-/// reproduce Clojure's `pr-str` here — the guest just gets a readable
-/// representation. A real protocol would have the JVM writer return EDN
-/// strings to start with; this is a PoC.
+/// Extract a string field from the response, assuming the JVM has already
+/// Transit-JSON-encoded it. If the field is not a string (shouldn't happen
+/// in the new wire protocol), fall back to the old CBOR→EDN-ish formatter
+/// for diagnostic resilience.
+fn resp_field_str(resp: &Cbor, k: &str) -> String {
+    match cbor_field(resp, k) {
+        Some(Cbor::Text(s)) => s.clone(),
+        Some(other) => cbor_to_edn(other),
+        None => "null".to_string(),
+    }
+}
+
+/// Legacy CBOR→EDN-ish formatter. Retained ONLY as a fallback for control
+/// fields that the JVM writer accidentally returns as raw CBOR (e.g.
+/// `error`, `basis-t`, `handle` when probing). New code returning a value
+/// payload to the guest MUST go through a Transit-JSON string (see
+/// `resp_field_str`).
 fn cbor_to_edn(v: &Cbor) -> String {
     match v {
         Cbor::Null => "nil".into(),
@@ -262,11 +274,15 @@ impl wasi_logging::Host for GuestStore {
     }
 }
 
-/// Pull "result" out of a writer response as an EDN-ish string.
+/// Pull "result" out of a writer response. With the Transit-JSON wire
+/// format the JVM has already encoded the value as a string; we just
+/// forward it. Returns Transit-JSON `null` literal when absent.
 fn resp_result_edn(resp: &Cbor) -> String {
-    cbor_field(resp, "result")
-        .map(cbor_to_edn)
-        .unwrap_or_else(|| "nil".to_string())
+    match cbor_field(resp, "result") {
+        Some(Cbor::Text(s)) => s.clone(),
+        Some(other) => cbor_to_edn(other),
+        None => "null".to_string(),
+    }
 }
 
 impl db_iface::Host for GuestStore {
@@ -298,15 +314,7 @@ impl db_iface::Host for GuestStore {
         let tx_meta_opt = if tx_meta.is_empty() { None } else { Some(tx_meta.as_str()) };
         let req_id_opt = if request_id.is_empty() { None } else { Some(request_id.as_str()) };
         match self.db.transact_full(&tx_data, tx_meta_opt, req_id_opt).await {
-            Ok(resp) if is_ok(&resp) => {
-                let bt = cbor_field(&resp, "basis-t").map(cbor_to_edn).unwrap_or("nil".into());
-                let added = cbor_field(&resp, "datoms-added").map(cbor_to_edn).unwrap_or("0".into());
-                let retr = cbor_field(&resp, "datoms-retracted").map(cbor_to_edn).unwrap_or("0".into());
-                Ok(Ok(format!(
-                    "{{:basis-t {} :datoms-added {} :datoms-retracted {}}}",
-                    bt, added, retr
-                )))
-            }
+            Ok(resp) if is_ok(&resp) => Ok(Ok(resp_field_str(&resp, "payload"))),
             Ok(resp) => Ok(Err(db_iface::DbError::Internal(err_string(&resp)))),
             Err(e) => Ok(Err(db_iface::DbError::Internal(format!("transact failed: {e}")))),
         }
@@ -347,27 +355,7 @@ impl db_iface::Host for GuestStore {
                 request_ids.len(), n))));
         };
         match self.db.transact_batch(tx_data_list, tx_meta_opt, rid_opt).await {
-            Ok(resp) if is_ok(&resp) => {
-                // Build an EDN-ish map carrying applied/total/failed-at + the
-                // per-tx reports. Mirrors the wire shape so the CLJS overlay
-                // can read it back with edn/read-string.
-                let applied = cbor_field(&resp, "applied").map(cbor_to_edn).unwrap_or("0".into());
-                let total = cbor_field(&resp, "total").map(cbor_to_edn).unwrap_or("0".into());
-                let reports_edn = cbor_field(&resp, "reports").map(cbor_to_edn).unwrap_or("[]".into());
-                let failed_at = cbor_field(&resp, "failed-at");
-                let mut out = format!(
-                    "{{:applied {} :total {} :reports {}",
-                    applied, total, reports_edn
-                );
-                if let Some(fa) = failed_at {
-                    out.push_str(&format!(" :failed-at {}", cbor_to_edn(fa)));
-                    if let Some(err) = cbor_field(&resp, "error") {
-                        out.push_str(&format!(" :error {}", cbor_to_edn(err)));
-                    }
-                }
-                out.push('}');
-                Ok(Ok(out))
-            }
+            Ok(resp) if is_ok(&resp) => Ok(Ok(resp_field_str(&resp, "payload"))),
             Ok(resp) => Ok(Err(db_iface::DbError::Internal(err_string(&resp)))),
             Err(e) => Ok(Err(db_iface::DbError::Internal(format!("transact-batch failed: {e}")))),
         }
@@ -539,7 +527,6 @@ impl db_iface::Host for GuestStore {
 /// EDN-string in/out.
 fn tx_event_to_wit(ev: &TxEvent) -> db_iface::TxEvent {
     let tx_data: Vec<db_iface::WireDatom> = ev.tx_data.iter().map(wire_to_wit_datom).collect();
-    let tx_meta_str = cbor_to_edn(&ev.tx_meta);
     db_iface::TxEvent {
         basis_t:           ev.basis_t,
         basis_t_before:    ev.basis_t_before,
@@ -547,7 +534,8 @@ fn tx_event_to_wit(ev: &TxEvent) -> db_iface::TxEvent {
         datoms_added:      ev.datoms_added,
         datoms_retracted:  ev.datoms_retracted,
         tx_data,
-        tx_meta:           tx_meta_str,
+        // Transit-JSON string from the JVM, forwarded as-is.
+        tx_meta:           ev.tx_meta.clone(),
         request_id:        ev.request_id.clone().unwrap_or_default(),
     }
 }
@@ -555,8 +543,11 @@ fn tx_event_to_wit(ev: &TxEvent) -> db_iface::TxEvent {
 fn wire_to_wit_datom(d: &WireDatom) -> db_iface::WireDatom {
     db_iface::WireDatom {
         e:     d.e,
+        // Both `a` and `v` are Transit-JSON strings — the host never
+        // decodes them. The CLJS guest's wit.cljs / datahike overlay
+        // reads them with cognitect.transit.
         a:     d.a.clone(),
-        v:     cbor_to_edn(&d.v),
+        v:     d.v.clone(),
         t:     d.t,
         added: d.added,
     }

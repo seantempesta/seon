@@ -11,8 +11,12 @@
    WIT result<T, E> shows up on the JS side as: success returns T directly;
    error throws a JS value whose `.tag` is the variant name (`internal`,
    `protocol`, `not-found`, `invalid-query`) and whose `.val` is the message.
-   We catch + re-throw as ex-info with `:seon.sidecar/error-kind`."
-  (:require [clojure.edn :as edn]))
+   We catch + re-throw as ex-info with `:seon.sidecar/error-kind`.
+
+   Wire format: every value crossing the boundary (query, args, tx-data,
+   selectors, eids, results, tempids, tx-meta, datom v/a fields) is a
+   Transit-JSON string. See `sidecar-poc.transit`."
+  (:require [sidecar-poc.transit :as transit]))
 
 ;; The shadow-cljs build is responsible for declaring this module as an
 ;; external import so the generated JS uses the WIT-bound name verbatim.
@@ -83,10 +87,21 @@
       (catch :default e
         (wit-throw! op-name e)))))
 
-(defn- read-edn [s]
-  (if (or (nil? s) (= "" s) (= "nil" s))
-    nil
-    (edn/read-string s)))
+(defn- read-payload
+  "Decode a Transit-JSON value payload from the host. The host returns a
+   Transit-JSON string for every value-carrying field (result, payload).
+   Empty / nil / the legacy 'null' literal all read as nil."
+  [s]
+  (cond
+    (nil? s)        nil
+    (= "" s)        nil
+    (= "null" s)    nil
+    :else           (transit/read-str s)))
+
+(defn- write-payload
+  "Encode a Clojure value as a Transit-JSON string for the wire."
+  [v]
+  (transit/write-str v))
 
 ;; ---------- Wrapped imports ----------
 ;;
@@ -105,61 +120,84 @@
     (identical? "bigint" (js* "typeof ~{}" n)) n
     :else                  (js/BigInt n)))
 
-(defn q-call [query-edn args basis-t]
-  ;; args: vector of EDN-string-coerced values
-  (let [args-arr (clj->js (mapv #(if (string? %) % (pr-str %)) args))]
-    (read-edn (invoke "q" query-edn args-arr (->bigint basis-t)))))
+(defn q-call
+  "Run a Datalog query. `query` is any Clojure value (a quoted vector
+   form); `args` is a Clojure vector of input values. Both are encoded
+   to Transit-JSON before crossing the WIT boundary; the result is
+   Transit-decoded back to native Clojure."
+  [query args basis-t]
+  (let [query-str (write-payload query)
+        args-arr  (clj->js (mapv write-payload args))]
+    (read-payload (invoke "q" query-str args-arr (->bigint basis-t)))))
 
-(defn transact-call [tx-data-edn tx-meta-edn request-id]
-  ;; All three args are strings; "" means omitted.
-  (read-edn (invoke "transact"
-                    tx-data-edn
-                    (or tx-meta-edn "")
-                    (or request-id ""))))
+(defn transact-call
+  "tx-data is a Clojure vector (of maps or 5-vecs). tx-meta optional.
+   request-id is a string or nil."
+  [tx-data tx-meta request-id]
+  (let [tx-str   (write-payload tx-data)
+        meta-str (if (nil? tx-meta) "" (write-payload tx-meta))]
+    (read-payload (invoke "transact"
+                          tx-str
+                          meta-str
+                          (or request-id "")))))
 
 (defn transact-batch-call
-  "Submit N tx-datas in one wire call. `tx-data-edns` is a vector of EDN
-   strings. `tx-meta-edns` and `request-ids` are either nil (= 'none for
-   any entry') or vectors of length N — per-entry nil/\"\" means 'absent'.
-   Returns the parsed reports map."
-  [tx-data-edns tx-meta-edns request-ids]
-  (let [n            (count tx-data-edns)
-        ->arr        (fn [xs] (clj->js (mapv #(or % "") xs)))
-        tx-data-arr  (clj->js (vec tx-data-edns))
-        tx-meta-arr  (if (seq tx-meta-edns) (->arr tx-meta-edns) (clj->js []))
-        req-id-arr   (if (seq request-ids)  (->arr request-ids)  (clj->js []))]
-    (when (and (seq tx-meta-edns) (not= (count tx-meta-edns) n))
+  "Submit N tx-datas in one wire call. Each arg is a Clojure vector of
+   length N (or empty/nil for omitted optional lists). Per-entry nil
+   inside a metas or ids list means 'absent for that entry'."
+  [tx-datas tx-metas request-ids]
+  (let [n            (count tx-datas)
+        tx-data-arr  (clj->js (mapv write-payload tx-datas))
+        tx-meta-arr  (if (seq tx-metas)
+                       (clj->js (mapv #(if (nil? %) "" (write-payload %)) tx-metas))
+                       (clj->js []))
+        req-id-arr   (if (seq request-ids)
+                       (clj->js (mapv #(or % "") request-ids))
+                       (clj->js []))]
+    (when (and (seq tx-metas) (not= (count tx-metas) n))
       (throw (ex-info "transact-batch: tx-meta-list length mismatch"
-                      {:expected n :got (count tx-meta-edns)})))
+                      {:expected n :got (count tx-metas)})))
     (when (and (seq request-ids) (not= (count request-ids) n))
       (throw (ex-info "transact-batch: request-ids length mismatch"
                       {:expected n :got (count request-ids)})))
-    (read-edn (invoke "transact-batch" tx-data-arr tx-meta-arr req-id-arr))))
+    (read-payload (invoke "transact-batch" tx-data-arr tx-meta-arr req-id-arr))))
 
-(defn pull-call [selector-edn eid-edn basis-t]
-  (read-edn (invoke "pull" selector-edn eid-edn (->bigint basis-t))))
+(defn pull-call
+  "selector is a Clojure value (pull pattern). eid is an int or a
+   lookup-ref vector. Both encoded as Transit."
+  [selector eid basis-t]
+  (read-payload (invoke "pull"
+                        (write-payload selector)
+                        (write-payload eid)
+                        (->bigint basis-t))))
 
-(defn entity-pull-call [ref-edn selector-edn depth basis-t]
-  (read-edn (invoke "entity-pull"
-                    ref-edn
-                    (or selector-edn "")
-                    (or depth 1)
-                    (->bigint basis-t))))
+(defn entity-pull-call [reference selector depth basis-t]
+  (read-payload (invoke "entity-pull"
+                        (write-payload reference)
+                        (if (nil? selector) "" (write-payload selector))
+                        (or depth 1)
+                        (->bigint basis-t))))
 
-(defn pull-many-call [selector-edn eids basis-t]
-  (let [eids-arr (clj->js (mapv #(if (string? %) % (pr-str %)) eids))]
-    (read-edn (invoke "pull-many" selector-edn eids-arr (->bigint basis-t)))))
+(defn pull-many-call [selector eids basis-t]
+  (let [eids-arr (clj->js (mapv write-payload eids))]
+    (read-payload (invoke "pull-many"
+                          (write-payload selector)
+                          eids-arr
+                          (->bigint basis-t)))))
 
-(defn schema-call [] (read-edn (invoke "schema")))
-(defn reverse-schema-call [] (read-edn (invoke "reverse-schema")))
+(defn schema-call [] (read-payload (invoke "schema")))
+(defn reverse-schema-call [] (read-payload (invoke "reverse-schema")))
 
-(defn db-filter-call [pred-query-edn args]
-  (let [args-arr (clj->js (mapv #(if (string? %) % (pr-str %)) args))]
-    (invoke "db-filter" pred-query-edn args-arr)))
+(defn db-filter-call [pred-query args]
+  (let [args-arr (clj->js (mapv write-payload args))]
+    (invoke "db-filter" (write-payload pred-query) args-arr)))
 
-(defn q-filtered-call [handle query-edn args]
-  (let [args-arr (clj->js (mapv #(if (string? %) % (pr-str %)) args))]
-    (read-edn (invoke "q-filtered" handle query-edn args-arr))))
+(defn q-filtered-call [handle query args]
+  (let [args-arr (clj->js (mapv write-payload args))]
+    (read-payload (invoke "q-filtered"
+                          handle
+                          (write-payload query)
+                          args-arr))))
 
 (defn filter-release-call [handle]
   (invoke "filter-release" handle))
@@ -179,11 +217,11 @@
 (defn next-tx-event-call
   "Blocks on the host's broadcast channel for the next tx event. Returns a
    native map shaped like the pub event ({:basis-t :basis-t-before :tx-data
-   :tx-meta :request-id ...})."
+   :tx-meta :request-id ...}). The WIT record carries `a` and `v` as
+   Transit-JSON strings; we decode them here so callers see native
+   keywords/values."
   [handle]
   (let [ev (invoke "next-tx-event" handle)]
-    ;; The host returns a WIT record with kebab-case JS properties. s64
-    ;; fields arrive as BigInts; coerce to Number for downstream usage.
     {:basis-t          (bigint->num (.-basisT ev))
      :basis-t-before   (bigint->num (.-basisTBefore ev))
      :db-name          (.-dbName ev)
@@ -191,11 +229,11 @@
      :datoms-retracted (bigint->num (.-datomsRetracted ev))
      :tx-data          (mapv (fn [d]
                                [(bigint->num (.-e d))
-                                (.-a d)
-                                (read-edn (.-v d))
+                                (read-payload (.-a d))
+                                (read-payload (.-v d))
                                 (bigint->num (.-t d))
                                 (.-added d)])
                              (.-txData ev))
-     :tx-meta          (read-edn (.-txMeta ev))
+     :tx-meta          (read-payload (.-txMeta ev))
      :request-id       (let [r (.-requestId ev)]
                          (when (and r (not= "" r)) r))}))

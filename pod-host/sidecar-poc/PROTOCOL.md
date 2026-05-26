@@ -33,6 +33,78 @@ deployments used `/tmp/seon-poc-req.sock` and `/tmp/seon-poc-pub.sock`
 directly. The default session's sockets are now
 `/tmp/seon-poc-default-{req,pub}.sock`.
 
+## Wire type preservation — design (2026-05-26)
+
+Two-layer encoding:
+
+1. **Control envelope** — CBOR. Carries control fields (`op`, `ok`, `error`,
+   `error-kind`, `basis-t`, `handle`, `applied`, `total`, `failed-at`,
+   `datoms-added`, `datoms-retracted`, `request-id`, `db-name`, `event`).
+   String keys throughout. CBOR remains because Jackson + ciborium ship
+   it natively and pydatahike compatibility wants it.
+
+2. **Value payloads** — **Transit-JSON strings** inside the envelope.
+   Every field carrying a Clojure value crosses as Transit:
+   - Inputs: `query`, `args[]`, `tx-data`, `tx-meta`, `selector`, `eid`,
+     `eids[]`, `pred-query`, `tx-data-list[]`, `tx-meta-list[]`
+   - Outputs: `result`, `tempids`, `tx-meta`, `payload`, per-datom `a`
+     and `v` fields in `tx-data` arrays
+   - Pub events: full tx-meta + per-datom a/v as Transit strings
+
+Why Transit-JSON for values:
+
+- **First-class fidelity**: keywords, symbols, sets, instants (`#inst`),
+  ratios, BigInts, `nil`, doubles vs ints — no custom readers needed.
+- **Cognitect-blessed**: `com.cognitect/transit-clj` 1.0.x (JVM) and
+  `com.cognitect/transit-cljs` 0.8.x (CLJS) are the canonical libs.
+- **Rust host never decodes values**. It forwards Transit-JSON strings
+  between the JVM writer and the CLJS guest as opaque blobs (`Cbor::Text`
+  on the wire, `String` in Rust structs). A `transit-rs` library is not
+  needed because the host has nothing to interpret.
+
+### `payload` field — single-decode response
+
+Every op that produces a structured response also includes a top-level
+`payload` field: a Transit-JSON string of the complete response map.
+The CLJS guest decodes ONE field and gets a native Clojure map.
+
+For tests that inspect the response directly (the JVM integration test
+suite), the structured CBOR fields (`basis-t`, `tx-data`, etc.) are also
+populated so tests don't need a Transit reader for control assertions.
+
+### Datom wire shape: `[e a-transit v-transit t op]`
+
+- `e` — entity id (CBOR integer)
+- `a` — attribute keyword, **Transit-JSON string** (e.g. `"~:person/name"`)
+- `v` — value, **Transit-JSON string** of any Clojure value
+- `t` — tx-id (CBOR integer)
+- `op` — boolean: `true` for add, `false` for retract
+
+### Schema-driven JVM-side coercion (float-vs-int)
+
+JS `Number` doesn't distinguish `1` from `1.0`. When CLJS encodes `1.0`
+via Transit, it goes out as a plain JSON number `1` (Transit-cljs does
+not have a separate JS double type to tag). On read, the JVM gets the
+integer `1`.
+
+**Fix**: the JVM writer coerces ints → doubles before transacting when
+the attribute's schema declares `:db.type/float` or `:db.type/double`.
+See `seon.sidecar.writer/coerce-tx-data-for-schema`. Read-side returns
+real `Double` instances which Transit serializes natively.
+
+### EDN-input fallback (transitional)
+
+The JVM writer's `read-T` tries Transit-JSON first; on failure falls
+back to `clojure.edn/read-string`. This is a transitional accommodation
+for the Rust diagnostic harness (REPL, smoke driver, multi-agent seed
+code) that constructs EDN string literals directly. Production callers
+(the CLJS guest via WIT) send only Transit. The EDN fallback will be
+removed once the Rust diagnostic code migrates.
+
+**Outputs are strictly Transit.** Nothing leaves the writer as EDN.
+
+## Framing
+
 Both sockets carry **CBOR-encoded** messages with a 4-byte big-endian length
 prefix on the wire:
 
@@ -47,12 +119,10 @@ CBOR is chosen because:
 - First-class support in JVM (jackson-cbor) and Rust (`ciborium`, `serde_cbor`).
 - Already used by upstream `pydatahike`.
 
-CBOR carries the same value space as EDN modulo:
-- Datahike keywords are encoded as **tagged strings** `tag 39 "namespace/name"`.
-  (CBOR tag 39 = "identifier" per RFC 8746 conventions used here.) The writer
-  recovers `:kw` from any tagged string. For the PoC, the smoke client may also
-  send plain strings prefixed with `:` and the writer normalizes.
-- `#inst` instants are CBOR tag 0 strings (RFC 3339).
+The CBOR envelope itself carries only primitive control fields (strings,
+ints, booleans, arrays, maps with string keys). Rich Clojure types
+(keywords, instants, sets, ratios, BigInts) live inside the **Transit-JSON
+value payloads** described above, never in the bare CBOR envelope.
 
 ## Request messages (req socket)
 
@@ -296,14 +366,10 @@ reconnects — late subscribers see only events that arrive after they
 connect (pub-sub-only semantics, matching kabel). See the kabel-vs-sidecar
 research for the gap list (request-id dedup, tx-log catch-up).
 
-## EDN-as-string vs full CBOR datoms
+## Value encoding (Transit-JSON)
 
-For the PoC, queries and tx-data are passed as **EDN strings** so the writer
-parses them with `clojure.edn/read-string`. This avoids hand-rolling the
-keyword/symbol/regex CBOR mappings on the client side. Results come back as
-CBOR-native values (vectors, maps, ints, strings) — readable from any client
-without an EDN parser.
-
-This means the wire is asymmetric (string-in, structured-out) which is a
-deliberate PoC simplification. A v1 protocol would either commit to a single
-representation everywhere or split read / write APIs.
+Superseded by the Transit-JSON design section at the top of this file
+(2026-05-26). Summary: queries, tx-data, results, tempids, tx-meta, and
+all per-datom `a`/`v` fields are Transit-JSON strings inside the CBOR
+envelope. The Rust host treats them as opaque blobs; the JVM writer and
+CLJS guest are the two endpoints that encode/decode.

@@ -60,8 +60,15 @@ pod-host/sidecar-poc/
   loop per connected client.
 - **CBOR codec** (`seon.sidecar.codec`) via jackson-cbor; 4-byte BE length
   prefix; Clojure → Java conversion for keywords/sets/etc.
-- **EDN-string passthrough for queries and tx-data**. Documented in
-  `PROTOCOL.md` as a deliberate PoC simplification.
+- **Transit-JSON value payloads** (2026-05-26). Inputs and outputs that
+  carry Clojure values (queries, tx-data, results, tempids, tx-meta,
+  per-datom a/v) are Transit-JSON strings inside the CBOR envelope. The
+  Rust host treats them as opaque blobs — only the JVM writer and CLJS
+  guest encode/decode. Transit gives first-class fidelity for keywords,
+  instants, sets, ratios, doubles vs ints, BigInts. See `PROTOCOL.md`
+  "Wire type preservation — design" section. EDN string inputs are
+  still accepted as a transitional convenience for the Rust REPL/smoke
+  diagnostic harness (Transit-then-EDN fallback in `read-T`).
 - **Tx broadcast** (`seon.sidecar.broadcast`) — every successful transact
   pushes `{"event": "tx", "basis-t": N, "datoms-added": N, "datoms-retracted": N}`
   to every connected subscriber.

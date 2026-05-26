@@ -155,8 +155,11 @@ async fn run_writer_actor(stream: UnixStream, mut rx: mpsc::Receiver<WriterReque
 #[allow(dead_code)]
 pub struct WireDatom {
     pub e: i64,
+    /// Transit-JSON-encoded attribute keyword (e.g. `"~:person/name"`).
+    /// The Rust host never decodes this — it forwards to the CLJS guest.
     pub a: String,
-    pub v: Cbor,
+    /// Transit-JSON-encoded value. Same forwarding contract as `a`.
+    pub v: String,
     pub t: i64,
     pub added: bool,
 }
@@ -173,9 +176,9 @@ pub struct TxEvent {
     /// shipped a pre-gap-1 event (compatibility); current writers always
     /// populate this.
     pub tx_data: Vec<WireDatom>,
-    /// `tx-meta` map verbatim (CBOR). Includes `db/txInstant` and
-    /// `db/commitId` for datahike-issued txes.
-    pub tx_meta: Cbor,
+    /// Transit-JSON-encoded `tx-meta` map. Decoded by the CLJS guest;
+    /// the Rust host doesn't introspect it.
+    pub tx_meta: String,
     /// Optional caller-supplied request-id for own-tx dedup. None if the
     /// originating transact didn't include one. Gap-2 will start populating
     /// these end-to-end; gap-1 ships the field through.
@@ -189,7 +192,7 @@ fn decode_wire_datom(v: &Cbor) -> Option<WireDatom> {
     }
     let e = cbor_as_i64(&xs[0])?;
     let a = if let Cbor::Text(s) = &xs[1] { s.clone() } else { return None };
-    let v = xs[2].clone();
+    let v = if let Cbor::Text(s) = &xs[2] { s.clone() } else { return None };
     let t = cbor_as_i64(&xs[3])?;
     let added = matches!(xs[4], Cbor::Bool(b) if b) || matches!(xs[4], Cbor::Bool(true));
     Some(WireDatom { e, a, v, t, added })
@@ -217,7 +220,10 @@ async fn run_pub_subscriber(stream: UnixStream, tx: broadcast::Sender<TxEvent>) 
                     Some(Cbor::Array(xs)) => xs.iter().filter_map(decode_wire_datom).collect(),
                     _ => Vec::new(),
                 };
-                let tx_meta = cbor_map_get(&ev, "tx-meta").cloned().unwrap_or(Cbor::Null);
+                let tx_meta = match cbor_map_get(&ev, "tx-meta") {
+                    Some(Cbor::Text(s)) => s.clone(),
+                    _ => String::new(),
+                };
                 let request_id = cbor_map_get(&ev, "request-id").and_then(|v| {
                     if let Cbor::Text(s) = v {
                         Some(s.clone())
@@ -1531,7 +1537,7 @@ async fn smoke_test(db: &DbHandle) -> Result<()> {
         ev.tx_data.len(), ev.request_id,
     );
     for d in &ev.tx_data {
-        println!("    {} {} {} t={} added={}", d.e, d.a, cbor_to_string(&d.v), d.t, d.added);
+        println!("    {} {} {} t={} added={}", d.e, d.a, d.v, d.t, d.added);
     }
 
     // After tx, prior cache entry is invalidated.

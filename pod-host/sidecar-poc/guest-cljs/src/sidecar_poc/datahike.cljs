@@ -88,25 +88,24 @@
 
 (defn- normalize-tx
   "Accepts either (transact! conn tx-data) or (transact! conn arg-map)
-   where arg-map is {:tx-data ... :tx-meta ...}.  Returns
-   `[tx-data-edn tx-meta-edn]`."
+   where arg-map is {:tx-data ... :tx-meta ...}. Returns
+   `[tx-data-value tx-meta-value-or-nil]` — both native Clojure values
+   (wit/transact-call Transit-encodes them)."
   [arg]
   (if (and (map? arg) (contains? arg :tx-data))
-    [(pr-str (:tx-data arg))
-     (when-let [m (:tx-meta arg)] (pr-str m))]
-    [(pr-str arg) nil]))
+    [(:tx-data arg) (:tx-meta arg)]
+    [arg nil]))
 
 (defn transact!
   "Transact tx-data. Returns the parsed tx-report map; bumps the conn's
    basis-t atom so subsequent `(db conn)` snapshots see the new state."
   ([conn tx-data] (transact! conn tx-data nil))
   ([conn tx-data tx-meta]
-   (let [[tx-edn _]    (normalize-tx tx-data)
-         tx-meta-edn   (or (when tx-meta (pr-str tx-meta))
-                           (second (normalize-tx tx-data)))
-         request-id    (str (random-uuid))
-         report        (wit/transact-call tx-edn (or tx-meta-edn "") request-id)
-         new-bt        (:basis-t report)]
+   (let [[tx-val map-meta] (normalize-tx tx-data)
+         meta-val          (or tx-meta map-meta)
+         request-id        (str (random-uuid))
+         report            (wit/transact-call tx-val meta-val request-id)
+         new-bt            (:basis-t report)]
      (when new-bt (reset! (:basis-t conn) new-bt))
      (assoc report :request-id request-id))))
 
@@ -139,22 +138,18 @@
    (let [n        (count tx-data-list)
          ;; Each entry may itself be a tx-data vector or a `{:tx-data :tx-meta}` map.
          pairs    (mapv normalize-tx tx-data-list)
-         tx-edns  (mapv first pairs)
+         tx-vals  (mapv first pairs)
          ;; Prefer explicit tx-meta-list, fall back to per-entry tx-meta from
          ;; the map shape (second of normalize-tx).
-         meta-edns
-         (cond
-           (some? tx-meta-list)
-           (mapv #(when % (pr-str %)) tx-meta-list)
-           (some second pairs)
-           (mapv second pairs)
-           :else nil)
-         result   (wit/transact-batch-call tx-edns meta-edns request-ids)
+         metas    (cond
+                    (some? tx-meta-list) (vec tx-meta-list)
+                    (some second pairs)  (mapv second pairs)
+                    :else                nil)
+         result   (wit/transact-batch-call tx-vals metas request-ids)
          reports  (:reports result)
          last-bt  (some-> reports last :basis-t)]
      (when (and last-bt (pos? last-bt))
        (reset! (:basis-t conn) last-bt))
-     ;; Echo `:total n` even when result lacked it (defensive).
      (cond-> result
        (not (:total result)) (assoc :total n)))))
 
@@ -165,39 +160,25 @@
    snapshot) or a conn (queries against the current basis-t)."
   [query db-or-conn & args]
   (let [bt (basis-t-of db-or-conn)]
-    (wit/q-call (pr-str query) (vec args) bt)))
+    (wit/q-call query (vec args) bt)))
 
 ;; ---------- pull / pull-many / entity ----------
-
-(defn- eid->edn
-  "Coerce an eid to the EDN-string the writer expects. Ints stay ints
-   (their pr-str is just the int); lookup-refs (vectors) get pr-str'd;
-   strings pass through."
-  [eid]
-  (cond
-    (string? eid) eid
-    :else         (pr-str eid)))
 
 (defn pull
   ([db selector eid] (pull db selector eid {}))
   ([db selector eid _opts]
-   (wit/pull-call (pr-str selector) (eid->edn eid) (basis-t-of db))))
+   (wit/pull-call selector eid (basis-t-of db))))
 
 (defn pull-many [db selector eids]
-  (wit/pull-many-call (pr-str selector)
-                      (mapv eid->edn eids)
-                      (basis-t-of db)))
+  (wit/pull-many-call selector eids (basis-t-of db)))
 
 (defn entity
   "Eager entity replacement for datahike's lazy `d/entity`. Returns the
-   realized map (with component refs expanded to depth 1) or nil if missing.
-   This matches V0's call sites that read 1-2 scalar attrs or shallow
-   component-ref vectors (see audit Reason B)."
+   realized map (with component refs expanded to depth 1) or nil if missing."
   ([db ref] (entity db ref {}))
   ([db ref {:keys [selector depth]
-            :or {selector "" depth 1}}]
-   (let [sel (if (= selector "") "" (pr-str selector))]
-     (wit/entity-pull-call (eid->edn ref) sel depth (basis-t-of db)))))
+            :or {depth 1}}]
+   (wit/entity-pull-call ref selector depth (basis-t-of db))))
 
 ;; ---------- schema / reverse-schema ----------
 
@@ -218,7 +199,7 @@
    predicate's result would have changed, the caller must rebuild the
    filtered db."
   [db pred-query & args]
-  (let [handle (wit/db-filter-call (pr-str pred-query) (vec args))]
+  (let [handle (wit/db-filter-call pred-query (vec args))]
     {:filtered? true
      :handle    handle
      :basis-t   (basis-t-of db)
@@ -233,7 +214,7 @@
   "Like `q` but routes through `q-filtered` when given a filtered-db. Most
    call sites should use `q`; this is the explicit form."
   [query filtered-db & args]
-  (wit/q-filtered-call (:handle filtered-db) (pr-str query) (vec args)))
+  (wit/q-filtered-call (:handle filtered-db) query (vec args)))
 
 ;; ---------- listen! / unlisten! ----------
 ;;

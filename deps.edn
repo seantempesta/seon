@@ -183,7 +183,12 @@
                          org.clojure/core.async               {:mvn/version "1.10.870-alpha2"}
                          thheller/shadow-cljs                 {:mvn/version "3.4.10"}
                          org.replikativ/datahike              {:mvn/version "0.8.1681"}
-                         org.replikativ/persistent-sorted-set {:mvn/version "0.4.122"}}
+                         org.replikativ/persistent-sorted-set {:mvn/version "0.4.122"}
+                         ;; Transit-JSON for sidecar wire value payloads
+                         ;; (keywords, sets, instants, ratios) crossing the
+                         ;; CLJS guest <-> JVM writer boundary. Mirrored by
+                         ;; com.cognitect/transit-clj in the jvm-writer.
+                         com.cognitect/transit-cljs           {:mvn/version "0.8.280"}}
          ;; Spec-02 §5.2 — point datahike at the patched fork (selective
          ;; Promise wrap driven by :referentially-transparent?) and
          ;; partial-cps at the cps-probe-safety patch (transitive via

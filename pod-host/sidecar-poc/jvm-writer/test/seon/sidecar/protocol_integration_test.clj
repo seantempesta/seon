@@ -16,7 +16,8 @@
    `(use-fixtures :each ...)` and killed in teardown."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.string :as str]
-            [seon.sidecar.client :as client])
+            [seon.sidecar.client :as client]
+            [seon.sidecar.transit :as transit])
   (:import [java.io File]
            [java.util UUID]))
 
@@ -91,6 +92,29 @@
 (defn- req! [op extra]
   (with-open [ch (client/connect (:req-sock *ctx*))]
     (client/call! ch (merge {"op" op} extra))))
+
+(defn- T [v] (transit/write-str v))
+(defn- decode-payload
+  "Decode the Transit `payload` field if present."
+  [resp]
+  (transit/read-str (get resp "payload")))
+
+(defn- decode-tx-data
+  "Decode the `a` and `v` Transit strings of every datom in a tx-data
+   wire array, returning [e a v t op] with native Clojure values."
+  [tx-data]
+  (mapv (fn [[e a v t op]]
+          [e (transit/read-str a) (transit/read-str v) t op])
+        tx-data))
+
+(defn- attrs-of [tx-data]
+  (set (map #(nth % 1) (decode-tx-data tx-data))))
+
+(defn- decode-tx-meta [resp-or-ev]
+  (transit/read-str (get resp-or-ev "tx-meta")))
+
+(defn- decode-tempids [resp]
+  (transit/read-str (get resp "tempids")))
 
 (defn- install-person-schema! []
   (req! "transact"
@@ -171,20 +195,20 @@
           (is (= 1 (count @events)) "one event for one tx")
           (is (vector? tx-data) "tx-data is a vector")
           (is (>= (count tx-data) 3) "at least txInstant + name + age datoms")
-          ;; Every datom is a 5-vector.
           (is (every? #(= 5 (count %)) tx-data)
               "datom on the wire is [e a v t op]")
-          ;; Attribute is a namespace/name string.
+          ;; `a` is a Transit-JSON string of a keyword; `v` is Transit-JSON
+          ;; of any value. Both decode via seon.sidecar.transit/read-str.
           (is (every? #(string? (nth % 1)) tx-data)
-              "attr is encoded as 'namespace/name' string")
+              "attr is a (transit-encoded) string")
+          (is (every? #(string? (nth % 2)) tx-data)
+              "value is a (transit-encoded) string")
           (is (every? #(boolean? (nth % 4)) tx-data)
               "op is a boolean")
-          ;; The added datoms include person/name and person/age.
-          (let [attrs (set (map #(nth % 1) tx-data))]
-            (is (contains? attrs "person/name") "name datom present")
-            (is (contains? attrs "person/age") "age datom present")
-            (is (contains? attrs "db/txInstant") "tx datom present (datahike convention)"))
-          ;; Response carries the same tx-data shape.
+          (let [attrs (attrs-of tx-data)]
+            (is (contains? attrs :person/name) "name datom present")
+            (is (contains? attrs :person/age) "age datom present")
+            (is (contains? attrs :db/txInstant) "tx datom present"))
           (is (= tx-data (get r "tx-data"))
               "response tx-data matches pub event tx-data"))
         (finally (.close pub-ch))))))
@@ -224,16 +248,18 @@
       (try
         (let [r (req! "transact" {"tx-data" "[{:person/name \"alex\"}]"})
               _ (Thread/sleep 250)
-              ev (first @events)]
-          (is (contains? (get r "tx-meta") "db/txInstant")
-              "response tx-meta has db/txInstant")
-          (is (contains? (get r "tx-meta") "db/commitId")
-              "response tx-meta has db/commitId")
-          (is (contains? (get ev "tx-meta") "db/txInstant")
-              "pub event tx-meta has db/txInstant")
-          (is (contains? (get ev "tx-meta") "db/commitId")
-              "pub event tx-meta has db/commitId")
-          (is (= (get r "tx-meta") (get ev "tx-meta"))
+              ev (first @events)
+              r-meta  (decode-tx-meta r)
+              ev-meta (decode-tx-meta ev)]
+          (is (contains? r-meta :db/txInstant)
+              "response tx-meta has :db/txInstant")
+          (is (contains? r-meta :db/commitId)
+              "response tx-meta has :db/commitId")
+          (is (contains? ev-meta :db/txInstant)
+              "pub event tx-meta has :db/txInstant")
+          (is (contains? ev-meta :db/commitId)
+              "pub event tx-meta has :db/commitId")
+          (is (= r-meta ev-meta)
               "response and pub event carry identical tx-meta"))
         (finally (.close pub-ch))))))
 
@@ -288,10 +314,10 @@
         (Thread/sleep 250)
         (let [ev (first @events)
               tx-data (get ev "tx-data")
-              attrs (set (map #(nth % 1) tx-data))]
-          (is (contains? attrs "db/ident") "schema tx includes :db/ident datoms")
-          (is (contains? attrs "db/valueType") "schema tx includes :db/valueType")
-          (is (contains? attrs "db/cardinality") "schema tx includes :db/cardinality"))
+              attrs (attrs-of tx-data)]
+          (is (contains? attrs :db/ident) "schema tx includes :db/ident datoms")
+          (is (contains? attrs :db/valueType) "schema tx includes :db/valueType")
+          (is (contains? attrs :db/cardinality) "schema tx includes :db/cardinality"))
         (finally (.close pub-ch))))))
 
 (deftest test-tempids-round-trip
@@ -299,11 +325,12 @@
     (install-person-schema!)
     (let [r (req! "transact"
                   {"tx-data" "[{:db/id -1 :person/name \"alice\" :person/age 33}]"})
-          tempids (get r "tempids")]
+          tempids (decode-tempids r)]
       (is (= true (get r "ok")))
       (is (map? tempids) "tempids is a map")
-      ;; -1 should resolve to a positive eid
-      (let [eid (get tempids "-1")]
-        (is (some? eid) "tempid -1 was assigned")
+      ;; With Transit, the tempid key stays the integer -1 (was stringified
+      ;; under the old CBOR walker).
+      (let [eid (or (get tempids -1) (get tempids "-1"))]
+        (is (some? eid) (str "tempid -1 was assigned; tempids=" (pr-str tempids)))
         (is (integer? eid))
         (is (pos? eid))))))
