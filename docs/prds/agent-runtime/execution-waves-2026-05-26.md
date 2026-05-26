@@ -17,6 +17,28 @@ tags: [prd, agent, database]
 4. **Targeted tests only per wave.** Run only the tests affected by what you just changed. **Full suite runs ONCE per wave at the very end of the worker pass**, not after every edit.
 5. **All findings on disk.** Update the wave's status section in this doc when done. Don't summarize in chat only.
 6. **Smaller chunks beat heroic completion.** If a wave hits an unexpected scope, STOP at the seam and report.
+7. **Testing focus: CLJS integration over CLJ regression.** Write end-to-end tests from the CLJS guest's perspective (real wire calls into the seon JVM, real datoms, real tx events). Do NOT spend time fixing CLJ tests that we know will break in this transition (specifically: `test/seon/session_test.clj` for the old `seon.session`). **Disable them with `#_` or move them to `test/seon/_disabled/` with a one-line note. Coverage audit comes later if needed.**
+
+## Testing strategy
+
+The point of this transition is to ship Path B (the new wire-server + registry). The CLJ-side tests on Path A (web, render, ai, ns, dev hook, agent JVM pool) shouldn't break — Path A is untouched. The only known-breakage CLJ test surface is the old `seon.session` namespace's tests (Wave 3 replaces the file). **Disable them, don't fix them.**
+
+Instead, the verification we want is **end-to-end integration tests from the CLJS guest's perspective.** What an actual agent will do is:
+
+1. Connect via WIT → Rust host → UDS → seon JVM wire-server → registry → datahike.
+2. `ensure-db!` a session, transact, query, listen, get tx events.
+3. Multi-agent sharing one session DB.
+4. Per-agent isolated sessions.
+
+These are the tests that prove the platform works. They live in `pod-host/sidecar-poc/jvm-writer/test/seon/sidecar/` today (47/189 green, single-conn only) and get extended across Waves 4 + 6.
+
+| Surface | Where | Strategy |
+|---|---|---|
+| **CLJS integration tests (PRIMARY)** | `test/seon/server/integration/**/*.clj` (new, Wave 4 + 6) | End-to-end from the guest's POV. Real UDS, real Transit, real wire-server, real datahike. Multi-DB scenarios, multi-agent scenarios, tx-event subscription. **This is what we invest in.** |
+| **CLJ Path A tests** (existing JVM seat) | `test/seon/**/*.clj` (not server/) | Should NOT break. Run full suite ONCE per wave end as regression net. If something breaks, the wave touched something it shouldn't have — STOP, report, don't chase the failure. |
+| **CLJ Path B unit tests** (small) | `test/seon/server/**/*.clj` (not integration/) | Just enough unit coverage for the new namespaces (store, session registry, codec, transit). Already partially shipped in Wave 1a. |
+| **OLD `seon.session` CLJ tests** | `test/seon/session_test.clj` if present | **Disable in Wave 3.** Move to `test/seon/_disabled/session_test.clj.disabled` or wrap in `#_`. Note in commit what was disabled. Audit later. |
+| **CLJS pod tests** | `src/seon/dev/test_preload.cljs` + tests under V0 source | Untouched by this execution plan. CLJS-test migration is a later transition phase, not Waves 1-7. |
 
 ## Wave overview
 
@@ -139,8 +161,12 @@ All three should produce valid datahike cfg maps. Worker actually calls `(d/data
 
 **Goal:** Use `git mv` to rename `src/seon/orchestrator/session.clj` → `src/seon/session.clj` (preserving git history). The existing `src/seon/session.clj` (472 LOC) is replaced by the orchestrator's richer 609-LOC version. Add `::backend` and `::path` attrs to the schema. Update all `(:require [seon.orchestrator.session ...])` callsites to `(:require [seon.session ...])`.
 
+**Disable old tests, don't fix them.** Before the rename: check whether `test/seon/session_test.clj` exists. If yes, move it to `test/seon/_disabled/session_test.clj.disabled` (or wrap every form in `#_`). Note in the commit message what was disabled. The orchestrator's existing session tests (whatever's at `test/seon/orchestrator/session_test.clj` if present) move with the file rename.
+
 **Files touched:**
 - `git mv src/seon/orchestrator/session.clj src/seon/session.clj` (deletes the old `seon.session`)
+- `git mv test/seon/orchestrator/session_test.clj test/seon/session_test.clj` (if present)
+- `git mv test/seon/session_test.clj test/seon/_disabled/session_test.clj.disabled` (BEFORE the orchestrator test moves in, if the old file exists)
 - All callers of `seon.orchestrator.session` — update requires
 - `src/seon/schema.cljc` — add `::backend`, `::path`
 
