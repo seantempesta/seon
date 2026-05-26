@@ -25,6 +25,22 @@ WASM-Tauri containment. The seon CLJS pod runs as a `wasm32-wasip2` Component (v
 
 ---
 
+## Two-platform reality (2026-05-26)
+
+Seon is mid-migration to a new sidecar architecture:
+
+- **V1 / MVP track**: `src/seon/*.cljs` — single-process Node CLJS pod
+  with in-process datahike-cljs. Active LLM agent work happens here.
+- **V2 / Platform track**: `pod-host/sidecar-poc/` — multi-session
+  sidecar with wasm guests, JVM datahike, Transit wire. Being built
+  to replace V1 once cutover criteria are met.
+
+If you're working on V2: read `pod-host/sidecar-poc/AGENT.md` first.
+If you're working on V1: leave `pod-host/sidecar-poc/` alone.
+Cutover progress: `pod-host/sidecar-poc/CUTOVER.md`.
+
+---
+
 ## Agent Model Policy
 
 **Never use haiku for coding tasks.** Only use haiku for quick file reads or context gathering. All implementation, bug fixes, and verification that involves writing code must use opus 4.6 (default model).
