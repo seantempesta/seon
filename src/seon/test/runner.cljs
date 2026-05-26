@@ -39,6 +39,10 @@
    [:message  {:optional true} :string]
    [:file     {:optional true} :string]
    [:line     {:optional true} :int]
+   ;; :var is a CLJS Symbol (cljs.core/Symbol). It is NOT a JS object —
+   ;; `(.-sym v)` returns nil. Use `(name v)` / `(namespace v)` / `(str v)`.
+   ;; The verifier's `(some-> e :var (.-sym) str)` returns nil for this
+   ;; reason; that's a consumer bug, not a schema bug.
    [:var      {:optional true} :symbol]
    [:ns       {:optional true} :symbol]
    [:test     {:optional true} :int]
@@ -408,8 +412,14 @@
                     :ns (when (namespace sym) (symbol (namespace sym)))})
         missing  (filter (complement :fn) resolved)
         present  (filter :fn resolved)
-        ;; Stable per-ns groupings preserve the input ordering of vars
-        ;; within a ns (group-by is stable in Clojure).
+        ;; group-by preserves WITHIN-ns ordering (vars stay in input
+        ;; order inside each bucket). ACROSS-ns ordering is stable only
+        ;; up to ~8 nses — CLJS group-by returns a PersistentArrayMap
+        ;; that flips to PersistentHashMap (hash-iteration order) past
+        ;; that threshold. Single-ns is the common case via `run-ns!`;
+        ;; multi-ns batches with >8 nses will iterate nses in
+        ;; non-deterministic order. Fix when a use case demands it
+        ;; (reduce into a sorted-map or insertion-ordered accumulator).
         by-ns    (group-by :ns present)]
     (binding [t/*current-env* env]
       (doseq [{:keys [sym]} missing]

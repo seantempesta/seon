@@ -22,6 +22,8 @@
     [seon.test.runner-test]
     [seon.test.fixture-support-probes]
     [seon.test.fixture-support-test]
+    [seon.test.async-fixture-probes]
+    [seon.test.async-fixture-test]
     ;; Platform tests that exercise the runner end-to-end against
     ;; real production namespaces.
     [seon.db-test]
