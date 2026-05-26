@@ -1010,7 +1010,7 @@ impl DbHandle {
 
 struct JvmSupervisor {
     /// Kept alive so the Child's `kill_on_drop(true)` fires when the
-    /// supervisor (and thus the World) is dropped.
+    /// supervisor (and thus the Session) is dropped.
     #[allow(dead_code)]
     child: Mutex<Option<Child>>,
 }
@@ -1077,37 +1077,37 @@ impl JvmSupervisor {
     }
 }
 
-// ---------------- World + WorldRegistry ----------------
+// ---------------- Session + SessionRegistry ----------------
 //
-// A world = its own JVM writer, sockets, snapshot cache, broadcast channel,
-// transact batcher. Multi-world isolation is by construction: zero shared
-// mutable state across worlds, separate processes/sockets/files.
+// A session = its own JVM writer, sockets, snapshot cache, broadcast channel,
+// transact batcher. Multi-session isolation is by construction: zero shared
+// mutable state across sessions, separate processes/sockets/files.
 //
-// The "default" world is just a world. It's spawned by the registry on first
-// `get_or_spawn("default")` call. Single-guest, smoke, and REPL paths all
-// route through the default world.
+// The "default" session is just a session. It's spawned by the registry on
+// first `get_or_spawn("default")` call. Single-guest, smoke, and REPL paths
+// all route through the default session.
 
-/// A world owns one JVM writer + its sockets/cache/broadcast. Cloning a
-/// `DbHandle` (cheap — internally Arcs) gives any caller a per-world db
+/// A session owns one JVM writer + its sockets/cache/broadcast. Cloning a
+/// `DbHandle` (cheap — internally Arcs) gives any caller a per-session db
 /// handle. Drop semantics: the underlying `JvmSupervisor` kills the child
-/// JVM when the last Arc to the World goes away.
-struct World {
+/// JVM when the last Arc to the Session goes away.
+struct Session {
     name: String,
     db: DbHandle,
-    /// Kept alive for as long as the World exists. The Child is killed
+    /// Kept alive for as long as the Session exists. The Child is killed
     /// on Drop via `kill_on_drop(true)`.
     _supervisor: Arc<JvmSupervisor>,
     /// JoinHandles for the writer-actor + pub-subscriber + cache-listener
     /// + batcher tasks. We don't await them; they live until the JVM dies
-    /// or the runtime shuts down. Held here so they're tied to the World
+    /// or the runtime shuts down. Held here so they're tied to the Session
     /// lifetime (currently not awaited on drop — best-effort).
     #[allow(dead_code)]
     _tasks: Vec<tokio::task::JoinHandle<()>>,
 }
 
-impl World {
-    /// Spawn a JVM writer for this world, connect to its sockets, build
-    /// the batcher/cache/latency/broadcast plumbing, return the World.
+impl Session {
+    /// Spawn a JVM writer for this session, connect to its sockets, build
+    /// the batcher/cache/latency/broadcast plumbing, return the Session.
     async fn spawn(
         name: String,
         writer_dir: &PathBuf,
@@ -1115,14 +1115,14 @@ impl World {
         base_data_dir: &PathBuf,
         sock_base: &str,
     ) -> Result<Arc<Self>> {
-        let store_path = base_data_dir.join("worlds").join(&name).join("store");
+        let store_path = base_data_dir.join("sessions").join(&name).join("store");
         // Ensure parent exists so the JVM's File.mkdirs has somewhere to plant.
         if let Some(p) = store_path.parent() {
             let _ = tokio::fs::create_dir_all(p).await;
         }
         let store_path_str = store_path
             .to_str()
-            .ok_or_else(|| anyhow!("world store path not UTF-8: {:?}", store_path))?
+            .ok_or_else(|| anyhow!("session store path not UTF-8: {:?}", store_path))?
             .to_string();
         let req_sock = format!("{}-{}-req.sock", sock_base, name);
         let pub_sock = format!("{}-{}-pub.sock", sock_base, name);
@@ -1137,7 +1137,7 @@ impl World {
         .await?;
         let supervisor = Arc::new(supervisor);
 
-        tracing::info!(world = %name, "waiting for world sockets");
+        tracing::info!(session = %name, "waiting for session sockets");
         JvmSupervisor::wait_for_socket(&req_sock, Duration::from_secs(60)).await?;
         JvmSupervisor::wait_for_socket(&pub_sock, Duration::from_secs(60)).await?;
 
@@ -1156,11 +1156,11 @@ impl World {
         let cache_task = {
             let cache = cache.clone();
             let mut rx = evt_tx.subscribe();
-            let world_name = name.clone();
+            let session_name = name.clone();
             tokio::spawn(async move {
                 while let Ok(ev) = rx.recv().await {
                     cache.on_tx(ev.basis_t);
-                    tracing::debug!(world = %world_name, basis_t = ev.basis_t, "pub tx invalidate");
+                    tracing::debug!(session = %session_name, basis_t = ev.basis_t, "pub tx invalidate");
                 }
             })
         };
@@ -1168,7 +1168,7 @@ impl World {
         let latency = Arc::new(LatencyTracker::new());
         let writer = WriterClient { tx: req_tx };
 
-        // Per-world transact batcher.
+        // Per-session transact batcher.
         let (batch_tx, batch_rx) = mpsc::channel::<TransactItem>(256);
         let batcher_task = {
             let writer = writer.clone();
@@ -1187,7 +1187,7 @@ impl World {
 
         // Ping to confirm liveness.
         let pong = db.ping().await?;
-        tracing::info!(world = %name, ?pong, "world writer ping ok");
+        tracing::info!(session = %name, ?pong, "session writer ping ok");
 
         Ok(Arc::new(Self {
             name,
@@ -1202,18 +1202,18 @@ impl World {
     }
 }
 
-/// Registry that lazily spawns worlds by name. Concurrent `get_or_spawn`
+/// Registry that lazily spawns sessions by name. Concurrent `get_or_spawn`
 /// calls for the same name are serialized by an inner mutex; the slow
 /// spawn happens exactly once per name.
-struct WorldRegistry {
+struct SessionRegistry {
     writer_dir: PathBuf,
     backend: String,
     base_data_dir: PathBuf,
     sock_base: String,
-    worlds: tokio::sync::Mutex<std::collections::HashMap<String, Arc<World>>>,
+    sessions: tokio::sync::Mutex<std::collections::HashMap<String, Arc<Session>>>,
 }
 
-impl WorldRegistry {
+impl SessionRegistry {
     fn new(
         writer_dir: PathBuf,
         backend: String,
@@ -1225,20 +1225,20 @@ impl WorldRegistry {
             backend,
             base_data_dir,
             sock_base,
-            worlds: tokio::sync::Mutex::new(std::collections::HashMap::new()),
+            sessions: tokio::sync::Mutex::new(std::collections::HashMap::new()),
         }
     }
 
-    async fn get_or_spawn(&self, name: &str) -> Result<Arc<World>> {
+    async fn get_or_spawn(&self, name: &str) -> Result<Arc<Session>> {
         // Hold the registry lock across the spawn so a second concurrent
         // call for the same name waits and reuses the result. For multi-
-        // world parallel spawn use the explicit `spawn_many` below.
-        let mut worlds = self.worlds.lock().await;
-        if let Some(w) = worlds.get(name) {
-            return Ok(w.clone());
+        // session parallel spawn use the explicit `spawn_many` below.
+        let mut sessions = self.sessions.lock().await;
+        if let Some(s) = sessions.get(name) {
+            return Ok(s.clone());
         }
-        tracing::info!(world = %name, "spawning new world");
-        let w = World::spawn(
+        tracing::info!(session = %name, "spawning new session");
+        let s = Session::spawn(
             name.to_string(),
             &self.writer_dir,
             &self.backend,
@@ -1246,13 +1246,13 @@ impl WorldRegistry {
             &self.sock_base,
         )
         .await?;
-        worlds.insert(name.to_string(), w.clone());
-        Ok(w)
+        sessions.insert(name.to_string(), s.clone());
+        Ok(s)
     }
 
     #[allow(dead_code)]
-    async fn list(&self) -> Vec<Arc<World>> {
-        self.worlds.lock().await.values().cloned().collect()
+    async fn list(&self) -> Vec<Arc<Session>> {
+        self.sessions.lock().await.values().cloned().collect()
     }
 }
 
@@ -1269,12 +1269,12 @@ struct Args {
     #[arg(long, default_value = "file")]
     backend: String,
 
-    /// Base data dir. Each world gets its own subdir at
-    /// `<data_dir>/worlds/<name>/store/`.
+    /// Base data dir. Each session gets its own subdir at
+    /// `<data_dir>/sessions/<name>/store/`.
     #[arg(long, default_value = "../data")]
     data_dir: PathBuf,
 
-    /// Base path/prefix for per-world UDS sockets. World `alpha` gets
+    /// Base path/prefix for per-session UDS sockets. Session `alpha` gets
     /// `<sock_base>-alpha-req.sock` and `<sock_base>-alpha-pub.sock`.
     #[arg(long, default_value = "/tmp/seon-poc")]
     sock_base: String,
@@ -1309,22 +1309,24 @@ struct Args {
     #[arg(long, default_value_t = 100u32)]
     cache_batch: u32,
 
-    /// Phase PF — multi-world smoke. Spawns N worlds in parallel, each
-    /// with its own JVM writer + sockets + store, and runs --agents-per-world
-    /// guest instances inside each. Use --worlds to name them.
+    /// Phase PF — multi-session smoke. Spawns N sessions in parallel, each
+    /// with its own JVM writer + sockets + store, and runs
+    /// --agents-per-session guest instances inside each. Use --sessions to
+    /// name them.
     #[arg(long, default_value_t = false)]
-    multi_world: bool,
+    multi_session: bool,
 
-    /// Comma-separated world names for --multi-world. Default: "alpha,beta".
+    /// Comma-separated session names for --multi-session. Default:
+    /// "alpha,beta".
     #[arg(long, default_value = "alpha,beta")]
-    worlds: String,
+    sessions: String,
 
-    /// Agents per world for --multi-world. Each gets a writer/reader/mixed
-    /// role cycling through the three. With 1 agent per world the role is
-    /// "writer"; with 2 agents the second is "reader"; with 3+ the
-    /// pattern is writer/reader/mixed/writer/...
+    /// Agents per session for --multi-session. Each gets a
+    /// writer/reader/mixed role cycling through the three. With 1 agent per
+    /// session the role is "writer"; with 2 agents the second is "reader";
+    /// with 3+ the pattern is writer/reader/mixed/writer/...
     #[arg(long, default_value_t = 2u32)]
-    agents_per_world: u32,
+    agents_per_session: u32,
 }
 
 // ---------------- Pretty-print a Cbor value (for the REPL) ----------------
@@ -1697,56 +1699,56 @@ async fn install_phase_d_schema(db: &DbHandle) {
     }
 }
 
-/// Phase PF — multi-world smoke. Spawns N worlds in parallel, each with
-/// `agents_per_world` guest instances. Returns when all worlds complete.
-async fn run_multi_world(
-    registry: Arc<WorldRegistry>,
+/// Phase PF — multi-session smoke. Spawns N sessions in parallel, each with
+/// `agents_per_session` guest instances. Returns when all sessions complete.
+async fn run_multi_session(
+    registry: Arc<SessionRegistry>,
     wasm_path: PathBuf,
-    world_names: Vec<String>,
-    agents_per_world: u32,
+    session_names: Vec<String>,
+    agents_per_session: u32,
     duration_ms: u32,
     bench_mode: String,
     cache_batch: u32,
 ) -> Result<()> {
     println!(
-        "--- Phase PF multi-world smoke (worlds={:?}, agents-per-world={}, duration_ms={}) ---",
-        world_names, agents_per_world, duration_ms
+        "--- Phase PF multi-session smoke (sessions={:?}, agents-per-session={}, duration_ms={}) ---",
+        session_names, agents_per_session, duration_ms
     );
 
     let t_start = Instant::now();
 
-    // Spawn all worlds in parallel. Each get_or_spawn holds the registry
+    // Spawn all sessions in parallel. Each get_or_spawn holds the registry
     // mutex briefly during its own slot insert; the heavy work (JVM boot)
-    // happens before that, so worlds boot concurrently.
-    let spawn_futs: Vec<_> = world_names.iter().map(|name| {
+    // happens before that, so sessions boot concurrently.
+    let spawn_futs: Vec<_> = session_names.iter().map(|name| {
         let registry = registry.clone();
         let name = name.clone();
         async move { registry.get_or_spawn(&name).await }
     }).collect();
-    let worlds: Vec<Arc<World>> = futures::future::try_join_all(spawn_futs).await?;
-    println!("all {} worlds booted in {:?}", worlds.len(), t_start.elapsed());
+    let sessions: Vec<Arc<Session>> = futures::future::try_join_all(spawn_futs).await?;
+    println!("all {} sessions booted in {:?}", sessions.len(), t_start.elapsed());
 
-    // Install the phase-D schema in every world (per-world isolated DBs).
-    for w in &worlds {
-        install_phase_d_schema(&w.db()).await;
+    // Install the phase-D schema in every session (per-session isolated DBs).
+    for s in &sessions {
+        install_phase_d_schema(&s.db()).await;
     }
 
-    // Build (world, agent_id, role) tasks. Role cycles writer/reader/mixed.
+    // Build (session, agent_id, role) tasks. Role cycles writer/reader/mixed.
     let roles = ["writer", "reader", "mixed"];
-    let mut agent_specs: Vec<(Arc<World>, String, String)> = Vec::new();
-    for w in &worlds {
-        for i in 0..agents_per_world {
+    let mut agent_specs: Vec<(Arc<Session>, String, String)> = Vec::new();
+    for s in &sessions {
+        for i in 0..agents_per_session {
             let role = roles[(i as usize) % roles.len()].to_string();
-            let agent_id = format!("{}-{}-{}", w.name, role, i);
-            agent_specs.push((w.clone(), agent_id, role));
+            let agent_id = format!("{}-{}-{}", s.name, role, i);
+            agent_specs.push((s.clone(), agent_id, role));
         }
     }
 
     use futures::future::join_all;
-    let agent_futures: Vec<_> = agent_specs.into_iter().map(|(world, agent_id, role)| {
+    let agent_futures: Vec<_> = agent_specs.into_iter().map(|(session, agent_id, role)| {
         let wasm_path = wasm_path.clone();
-        let world_name = world.name.clone();
-        let db = world.db();
+        let session_name = session.name.clone();
+        let db = session.db();
         let dur = duration_ms;
         let bench_mode = bench_mode.clone();
         let cache_batch = cache_batch;
@@ -1756,7 +1758,7 @@ async fn run_multi_world(
                 wasm_path,
                 db,
                 &[
-                    ("SIDECAR_WORLD".to_string(),              world_name.clone()),
+                    ("SIDECAR_SESSION".to_string(),            session_name.clone()),
                     ("SIDECAR_AGENT_ID".to_string(),           agent_id.clone()),
                     ("SIDECAR_AGENT_ROLE".to_string(),         role.clone()),
                     ("SIDECAR_AGENT_DURATION_MS".to_string(),  dur.to_string()),
@@ -1765,16 +1767,16 @@ async fn run_multi_world(
                 ],
             ).await?;
             let loaded = t0.elapsed();
-            println!("[{}/{}/{}] guest loaded in {:?}", world_name, agent_id, role, loaded);
+            println!("[{}/{}/{}] guest loaded in {:?}", session_name, agent_id, role, loaded);
             let t0 = Instant::now();
             let bound = Duration::from_millis((dur as u64) + 3000);
             let r = tokio::time::timeout(bound, g.run_agent(&agent_id, &role, dur)).await;
             let run = t0.elapsed();
             match r {
-                Ok(Ok(Ok(s))) => println!("[{}/{}/{}] DONE in {:?}: {}", world_name, agent_id, role, run, s),
-                Ok(Ok(Err(e))) => println!("[{}/{}/{}] ERR in {:?}: {}", world_name, agent_id, role, run, e),
-                Ok(Err(e)) => println!("[{}/{}/{}] HOST-ERR in {:?}: {}", world_name, agent_id, role, run, e),
-                Err(_) => println!("[{}/{}/{}] TIMEOUT-CLEAN-EXIT in {:?}", world_name, agent_id, role, run),
+                Ok(Ok(Ok(s))) => println!("[{}/{}/{}] DONE in {:?}: {}", session_name, agent_id, role, run, s),
+                Ok(Ok(Err(e))) => println!("[{}/{}/{}] ERR in {:?}: {}", session_name, agent_id, role, run, e),
+                Ok(Err(e)) => println!("[{}/{}/{}] HOST-ERR in {:?}: {}", session_name, agent_id, role, run, e),
+                Err(_) => println!("[{}/{}/{}] TIMEOUT-CLEAN-EXIT in {:?}", session_name, agent_id, role, run),
             }
             drop(g);
             Ok::<_, anyhow::Error>(())
@@ -1783,49 +1785,49 @@ async fn run_multi_world(
     let _ = join_all(agent_futures).await;
     let wall = t_start.elapsed();
 
-    // Per-world aggregates (each world has independent DB state).
-    println!("--- Phase PF per-world results ---");
+    // Per-session aggregates (each session has independent DB state).
+    println!("--- Phase PF per-session results ---");
     let pending_q = "[:find (count ?e) :where [?e :task/status :pending]]";
     let inprog_q  = "[:find (count ?e) :where [?e :task/status :in-progress]]";
     let done_q    = "[:find (count ?e) :where [?e :task/status :done]]";
     let total_q   = "[:find (count ?e) :where [?e :task/id _]]";
     let results_q = "[:find (count ?e) :where [?e :result/blob _]]";
-    for w in &worlds {
-        let db = w.db();
+    for s in &sessions {
+        let db = s.db();
         let p     = db.q(pending_q, vec![]).await?;
         let ip    = db.q(inprog_q,  vec![]).await?;
         let d     = db.q(done_q,    vec![]).await?;
         let total = db.q(total_q,   vec![]).await?;
         let rc    = db.q(results_q, vec![]).await?;
-        println!("[world={}] total={} pending={} in-progress={} done={} results={}",
-                 w.name,
+        println!("[session={}] total={} pending={} in-progress={} done={} results={}",
+                 s.name,
                  cbor_to_string(&total),
                  cbor_to_string(&p),
                  cbor_to_string(&ip),
                  cbor_to_string(&d),
                  cbor_to_string(&rc));
-        println!("[world={}] cache: {:?}", w.name, db.cache.stats());
-        println!("[world={}] {}", w.name, db.latency.report());
+        println!("[session={}] cache: {:?}", s.name, db.cache.stats());
+        println!("[session={}] {}", s.name, db.latency.report());
     }
 
-    // Cross-contamination check: pick any two worlds' :task/id sets and
-    // assert they are disjoint. Also verify each world only sees its own
+    // Cross-contamination check: pick any two sessions' :task/id sets and
+    // assert they are disjoint. Also verify each session only sees its own
     // agents (via :task/created-by ns prefix).
-    if worlds.len() >= 2 {
+    if sessions.len() >= 2 {
         println!("--- cross-contamination check ---");
-        for (i, wa) in worlds.iter().enumerate() {
-            for wb in worlds.iter().skip(i + 1) {
-                let ids_a = wa.db().q("[:find ?id :where [?e :task/id ?id]]", vec![]).await?;
-                let ids_b = wb.db().q("[:find ?id :where [?e :task/id ?id]]", vec![]).await?;
+        for (i, sa) in sessions.iter().enumerate() {
+            for sb in sessions.iter().skip(i + 1) {
+                let ids_a = sa.db().q("[:find ?id :where [?e :task/id ?id]]", vec![]).await?;
+                let ids_b = sb.db().q("[:find ?id :where [?e :task/id ?id]]", vec![]).await?;
                 let set_a: std::collections::HashSet<String> = extract_task_id_set(&ids_a);
                 let set_b: std::collections::HashSet<String> = extract_task_id_set(&ids_b);
                 let inter: Vec<&String> = set_a.intersection(&set_b).collect();
                 if inter.is_empty() {
                     println!("[{} ∩ {}] disjoint OK  (|{}|={}, |{}|={})",
-                             wa.name, wb.name, wa.name, set_a.len(), wb.name, set_b.len());
+                             sa.name, sb.name, sa.name, set_a.len(), sb.name, set_b.len());
                 } else {
                     println!("[{} ∩ {}] CROSS-CONTAMINATION: {} shared ids ({:?})",
-                             wa.name, wb.name, inter.len(), inter);
+                             sa.name, sb.name, inter.len(), inter);
                 }
             }
         }
@@ -1867,30 +1869,30 @@ async fn main() -> Result<()> {
         .canonicalize()
         .unwrap_or(args.writer_dir.clone());
 
-    let registry = Arc::new(WorldRegistry::new(
+    let registry = Arc::new(SessionRegistry::new(
         writer_dir.clone(),
         args.backend.clone(),
         args.data_dir.clone(),
         args.sock_base.clone(),
     ));
 
-    // Multi-world path.
-    if args.multi_world {
+    // Multi-session path.
+    if args.multi_session {
         let wasm_path = args.guest_wasm.clone()
-            .ok_or_else(|| anyhow!("--multi-world requires --guest-wasm"))?;
-        let world_names: Vec<String> = args.worlds
+            .ok_or_else(|| anyhow!("--multi-session requires --guest-wasm"))?;
+        let session_names: Vec<String> = args.sessions
             .split(',')
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect();
-        if world_names.is_empty() {
-            bail!("--worlds must list at least one world name");
+        if session_names.is_empty() {
+            bail!("--sessions must list at least one session name");
         }
-        run_multi_world(
+        run_multi_session(
             registry.clone(),
             wasm_path,
-            world_names,
-            args.agents_per_world,
+            session_names,
+            args.agents_per_session,
             args.multi_duration_ms,
             args.bench_mode.clone(),
             args.cache_batch,
@@ -1898,15 +1900,16 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    // Single-world (default) path. The default world is just another world.
-    let world = registry.get_or_spawn("default").await?;
-    let db = world.db();
+    // Single-session (default) path. The default session is just another
+    // session.
+    let session = registry.get_or_spawn("default").await?;
+    let db = session.db();
     install_person_schema(&db).await;
 
     // Phase 3 — wasm guest run (single-agent smoke), if requested.
     if let Some(wasm_path) = args.guest_wasm.clone() {
         if args.multi_agent {
-            // Phase D — N=3 multi-agent inside ONE world.
+            // Phase D — N=3 multi-agent inside ONE session.
             install_phase_d_schema(&db).await;
             run_multi_agent(
                 wasm_path,

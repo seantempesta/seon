@@ -47,7 +47,7 @@ pod-host/sidecar-poc/
 | **PC — shadow-cljs build + real CLJS agent guest** | **GREEN** | CLJS agent compiled to wasm32-wasip2 via shadow-cljs `:sidecar-agent` build + `build-sidecar-agent` script; `next-tx-event` wired host-to-guest (non-blocking try_recv + setTimeout-based polling in overlay); CAS + tx-data scanning end-to-end. |
 | **PD — N=3 multi-agent smoke**  | **GREEN** | 300s run: writer 752 commits / reader 1827 events / mixed 1828 events + 538 completed CAS-to-done cycles; 0 out-of-order events, 0 CAS conflicts, 0 errors. |
 | **PE — tx batcher + cache fix**  | **GREEN** | Opportunistic Rust-host transact batcher (2ms / 32-item window, mpsc-FIFO, singleton fast-path); JVM `transact-batch` op wired end-to-end. Cache `q_at` insert path fixed — was using response basis-t which collapsed pinned entries; now uses requested basis-t. **Hit rate 0.97% → 99.1%** on cache-friendly workload; q-hit p50=0us; tx p50 124→86ms. See `bench/tx-batcher-and-cache-fix-2026-05-25.md`. |
-| **PF — multi-world isolation** | **GREEN** | N parallel JVM writers, one per world. Agents partitioned by world via WASI env. Lazy-spawn from `WorldRegistry::get_or_spawn`. 2x2x30s + 3x1x60s smokes both isolate cleanly — disjoint task-id sets, 0 cross-world events, 0 out-of-order. See [WORLDS.md](WORLDS.md). |
+| **PF — multi-session isolation** | **GREEN** | N parallel JVM writers, one per session. Agents partitioned by session via WASI env. Lazy-spawn from `SessionRegistry::get_or_spawn`. 2x2x30s + 3x1x60s smokes both isolate cleanly — disjoint task-id sets, 0 cross-session events, 0 out-of-order. See [SESSIONS.md](SESSIONS.md). |
 | P5 — wire a real Seon agent     | not started | V0 substrate compiles into the guest (Phase B v0-probe; see `bench/v0-port-survey.md`). Sub-goal-2 work (WASI preopen for bootstrap caches + LLM stub + V0 turn driver) NOT shipped this session; budget consumed by 3b + 4. |
 | P6 — run a compiled tauri wasm pod | not started | |
 | P7 — multi-pod stress           | not started | |
@@ -929,72 +929,74 @@ requires:
    on JVM does for indexes; the sidecar doesn't yet have an
    equivalent.
 
-## Multi-world
+## Multi-session
 
-Parallel agents in physically isolated datahike databases. Each world owns
-its own JVM writer, sockets, store, snapshot cache, and broadcast channel.
-Lazily spawned from `WorldRegistry::get_or_spawn(name)`. See
-[WORLDS.md](WORLDS.md) for the architecture, isolation guarantees, and
+Parallel agents in physically isolated datahike databases. Each session
+owns its own JVM writer, sockets, store, snapshot cache, and broadcast
+channel. Lazily spawned from `SessionRegistry::get_or_spawn(name)`. See
+[SESSIONS.md](SESSIONS.md) for the architecture, isolation guarantees, and
 trade-offs.
 
 ```bash
 cd pod-host/sidecar-poc/rust-host
 cargo run --release -- \
   --guest-wasm ../guest/sidecar-agent-build/target/wasm32-wasip2/release/sidecar_guest.wasm \
-  --multi-world --worlds alpha,beta --agents-per-world 2 --multi-duration-ms 30000
+  --multi-session --sessions alpha,beta --agents-per-session 2 --multi-duration-ms 30000
 ```
 
-## Phase PF — multi-world smoke (2026-05-25, GREEN)
+## Phase PF — multi-session smoke (2026-05-26, GREEN post-rename)
 
-Two runs, both clean:
+Two runs after the world→session rename. Both clean, isolation preserved.
 
-### 2 worlds × 2 agents × 30s
+### 2 sessions × 2 agents × 30s
 
-```
-worlds:                 alpha, beta
-agents:                 writer + reader per world
-boot:                   34.9s for both JVMs in parallel
-wall:                   49.1s
+```text
+sessions:               alpha, beta
+agents:                 writer + reader per session
+wall:                   53.1s
 
-[world=alpha] total=22 pending=22 in-progress=0 done=0 results=0
-[world=alpha] cache: entries=26 hits=107 misses=27 invalidations=1
-[world=alpha] tx     : n=23  p50=120932us  p95=335074us  p99=1719033us
-[world=beta]  total=21 pending=21 in-progress=0 done=0 results=0
-[world=beta]  cache: entries=26 hits=106 misses=27 invalidations=1
-[world=beta]  tx     : n=22  p50=118483us  p95=173884us  p99=1705757us
+[session=alpha] total=108  basis-t=536871021
+[session=alpha] cache: entries=113 hits=461 misses=114 invalidations=1
+[session=alpha] tx     : n=109  p50=70720us  p95=107895us  p99=123364us
+[session=alpha] q-hit  : n=461  p50=1us  p95=2us  p99=5us
+[session=beta]  total=108  basis-t=536871021
+[session=beta]  cache: entries=113 hits=460 misses=114 invalidations=1
+[session=beta]  tx     : n=109  p50=68571us  p95=109156us  p99=119279us
+[session=beta]  q-hit  : n=460  p50=1us  p95=2us  p99=6us
 
 --- cross-contamination check ---
-[alpha ∩ beta] disjoint OK  (|alpha|=22, |beta|=21)
+[alpha ∩ beta] disjoint OK  (|alpha|=108, |beta|=108)
 ```
 
-Per-world reader `out-of-order` events: **0** in both. Each world's
-reader saw exactly its own world's writer commits (21 events each in
-alpha+beta — no cross-bleed).
+Per-session reader `out-of-order` events: **0** in both. Each session's
+reader saw exactly its own session's writer commits (108 events each in
+alpha + beta — no cross-bleed).
 
-### 3 worlds × 1 agent × 60s
+### 3 sessions × 1 agent × 60s
 
-```
-worlds:                 alpha, beta, gamma
-agents:                 writer per world
-wall:                   97.2s
+```text
+sessions:               alpha, beta, gamma
+agents:                 writer per session
+wall:                   93.5s
 
-[world=alpha] total=114  basis-t=536871027  tx p50=169661us
-[world=beta]  total=114  basis-t=536871027  tx p50=165890us
-[world=gamma] total=112  basis-t=536871025  tx p50=175047us
+[session=alpha] total=185  basis-t=536871098  tx p50=97616us
+[session=beta]  total=186  basis-t=536871099  tx p50=103224us
+[session=gamma] total=186  basis-t=536871099  tx p50=101894us
 
 --- cross-contamination check ---
-[alpha ∩ beta]  disjoint OK  (|alpha|=114, |beta|=114)
-[alpha ∩ gamma] disjoint OK  (|alpha|=114, |gamma|=112)
-[beta ∩ gamma]  disjoint OK  (|beta|=114, |gamma|=112)
+[alpha ∩ beta]  disjoint OK  (|alpha|=185, |beta|=186)
+[alpha ∩ gamma] disjoint OK  (|alpha|=185, |gamma|=186)
+[beta ∩ gamma]  disjoint OK  (|beta|=186, |gamma|=186)
 ```
 
-Three independent basis-t lines. Each world progressed at ~2 commits/sec
-through its own JVM writer, with zero cross-world coupling.
+Three independent basis-t lines. Each session progressed at ~3
+commits/sec through its own JVM writer, with zero cross-session
+coupling.
 
 ### Isolation claim
 
 Verified by construction (separate processes + sockets + on-disk stores
-+ in-process broadcast channels — see WORLDS.md) and by empirical check
-(disjoint task-id sets across every world pair; 0 out-of-order events
-per world's reader). Adding worlds is constant cost per world (JVM
-boot + tokio plumbing); the host scales linearly.
++ in-process broadcast channels — see SESSIONS.md) and by empirical
+check (disjoint task-id sets across every session pair; 0 out-of-order
+events per session's reader). Adding sessions is constant cost per
+session (JVM boot + tokio plumbing); the host scales linearly.
