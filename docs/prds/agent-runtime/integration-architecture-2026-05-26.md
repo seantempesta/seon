@@ -9,14 +9,19 @@ tags: [architecture, agent, database, platform]
 **Date:** 2026-05-26 PM
 **Scope:** This doc supersedes the file-layout + naming sections of `pod-host/sidecar-poc/SESSIONS.md` and `pod-host/sidecar-poc/AGENT.md`. The phased transition plan at `v0-to-v2-transition-plan-2026-05-26.md` references this doc for the target architecture.
 
+**Revised 2026-05-26 PM (post-audit):** This doc was initially written assuming several pieces would be built from scratch. The anti-rewrite audit at `integration-anti-rewrite-audit-2026-05-26.md` found that ~50% of those pieces already exist. This doc has been updated to reflect reuse-first paths. The "Anti-rewrite manifest" §7 below is now the authoritative reuse list.
+
 ## 0. TL;DR
 
 - **One JVM** owns all datahike DBs (not multi-JVM like the V2 PoC did).
-- **Master `:seon` DB** holds all existing CLJ code's data, unchanged.
+- **Master `:seon.runtime` DB** is promoted as the master (existing db-name; already in production use by seon.runtime/register-flow! etc.). No new `:seon` db-name is introduced.
 - **Per-session DBs** `:seon.session/<name>` are created at runtime; agents (wasm guests) connect to them.
 - **N agents can share one session** (collaborate via one DB) or each have their own (isolation).
 - Wire-server bridges CLJS guests to JVM-hosted DBs. **Raw datahike access, bypassing flow, for MVP.** Flow integration is later.
-- **konserve-sqlite-cljs already exists** at `src/konserve_sqlite_cljs/core.cljs` (438 LOC). JVM equivalent does NOT exist yet — porting it is the only "new" storage code.
+- **SQLite backend already works on JVM** via konserve-jdbc + xerial/sqlite-jdbc — V2 PoC `jvm-writer/` uses it today. NO new konserve-sqlite-JVM port is needed. Just add deps + a `:sqlite` arm in `seon.db.datahike.flow/namespace-config`.
+- **Wire-server foundation already exists** at `src/seon/db/relay.clj` (339 LOC, op-dispatch by db-name + length-framed socket). Adapt it: TCP → UDS, Nippy → CBOR control + Transit-JSON values. ~150 LOC of touch-ups, not ~500 of fresh port.
+- **Session entity schema already exists** at `src/seon/orchestrator/session.clj` (609 LOC). Rename → `src/seon/session.clj` (consolidating with the existing 472-LOC `seon.session` — orchestrator's version is the richer one). Extend with `::backend` and `::path`.
+- **The one genuinely new piece**: dynamic conn-process registration on the running flow. Today the flow is built monolithically at boot. Need a `(db/ensure-db! …)` runtime API. **Requires a focused spike** on `core.async.flow` internals before committing the API shape.
 - We accept temporary breakage of existing seon.clj code during integration; restored after install.
 
 ## 1. Conceptual model
@@ -24,13 +29,17 @@ tags: [architecture, agent, database, platform]
 ```
 ┌─ One JVM ──────────────────────────────────────────────────────────┐
 │                                                                    │
-│   :seon                  master DB — existing CLJ code uses this   │
+│   :seon.runtime          master DB (existing) — runtime registry,  │
+│                          orchestrator entities, session entities,  │
+│                          inspector data                            │
 │   :seon.session/default  default session DB                        │
 │   :seon.session/alice    named session for "alice"                 │
 │   :seon.session/bob      named session for "bob"                   │
 │   :seon.session/tmp-XYZ  ephemeral (:memory) — for tests           │
 │                                                                    │
-│   seon.server.wire (UDS server) ──► routes CLJS requests to DB    │
+│   seon.db.relay (existing 339 LOC) ──► adapted to UDS + CBOR for   │
+│                                       CLJS guests; routes by      │
+│                                       :db-name to datahike conn   │
 │                                                                    │
 └────────────────┬───────────────────────────────────────────────────┘
                  │ UDS (CBOR control + Transit-JSON values)
@@ -50,7 +59,7 @@ Agent C is isolated in bob's DB.
 |---|---|---|
 | **Session** | One datahike DB + its konserve store. The unit of data sharing. One session can hold N agents. Persistent by default. | `:seon.session/<name>` keyword |
 | **Agent** | One wasm runtime instance that joins a session. Has identity, can transact, can subscribe to tx events. | `:seon.agent/<id>` keyword |
-| **Master DB** | The single `:seon` DB. Holds all existing seon CLJ code's data. Not a session, just the JVM's own DB. | `:seon` (unchanged) |
+| **Master DB** | `:seon.runtime` (existing). Hosts runtime registry, orchestrator entities, session-entity records, inspector data. Not a session, just the JVM's own primary DB. | `:seon.runtime` (existing) |
 
 **The DB doesn't know about agents directly.** The session is the storage unit. Agent identity is metadata on datoms (e.g., `:seon.db/agent-id` stamps via tx-context).
 
@@ -59,8 +68,8 @@ Agent C is isolated in bob's DB.
 ```
 seon/data/                                ← project-local; gitignored
 │
-├── seon/                                 ← master :seon DB
-│   └── store.sqlite                      ← konserve-sqlite (when JVM port lands)
+├── seon.runtime/                         ← master :seon.runtime DB
+│   └── store.sqlite                      ← konserve-jdbc:sqlite (existing dep path)
 │   (or store/ tree if file backend during transition)
 │
 ├── sessions/
@@ -81,7 +90,7 @@ seon/data/                                ← project-local; gitignored
 
 | Use case | Default backend | Reason |
 |---|---|---|
-| Master `:seon` | `:sqlite` (preferred) or `:file` (transitional) | Production data; long-lived |
+| Master `:seon.runtime` | `:sqlite` (preferred) or `:file` (transitional) | Production data; long-lived |
 | Named session `:seon.session/<name>` | `:sqlite` (preferred) or `:file` (transitional) | Persistent by default; named = caller cares |
 | Auto-id ephemeral session `:seon.session/tmp-<uuid>` | `:memory` | Tests only |
 
@@ -89,18 +98,21 @@ seon/data/                                ← project-local; gitignored
 
 ## 5. Session registration
 
-**Where**: as entities in the master `:seon` DB. NOT in an in-memory atom (that would lose registrations on restart).
+**Where**: as entities in the master `:seon.runtime` DB. Extends the **existing** `seon.orchestrator.session` schema (609 LOC, in production) — NOT a new parallel `:seon.session/*` entity set. The existing schema already has `::db-name` (orchestrator/session.clj:59), `start-agent-session!`, `stop-agent-session!`, `list-agent-sessions`, and a live-vs-persistent state pattern.
+
+**Phase task**: rename `src/seon/orchestrator/session.clj` → `src/seon/session.clj` (consolidating with the existing 472-LOC `seon.session`, replacing it with the richer orchestrator version). Extend the schema with two new attrs: `::backend` (`:enum [:sqlite :file :memory]`) and `::path` (`:string`). All existing schema + lifecycle fns survive.
 
 ```clojure
-;; entities in :seon DB:
+;; entities in :seon.runtime DB (existing schema + 2 new attrs):
 {:seon.session/name       :alice
- :seon.session/backend    :sqlite
- :seon.session/path       "data/sessions/alice/store.sqlite"
+ :seon.session/db-name    :seon.session/alice  ;; already exists in orchestrator/session.clj:59
+ :seon.session/backend    :sqlite              ;; NEW
+ :seon.session/path       "data/sessions/alice/store.sqlite"  ;; NEW
  :seon.session/created-at #inst "2026-05-26T..."
- :seon.session/state      :active}  ;; or :archived, :gc'd
+ :seon.session/state      :active}  ;; existing :state enum
 ```
 
-**Why in the master DB**: discoverable via the existing seon.web inspector, queryable, render-able via the existing render pipeline, survives restart, single source of truth.
+**Why in the master DB**: discoverable via the existing seon.web inspector (already wired for :seon.runtime entities), queryable, render-able via the existing render pipeline, survives restart, single source of truth.
 
 **Lifecycle**:
 - `(db/ensure-db! :seon.session/alice)` → if a `:seon.session/name :alice` entity exists, reuse the conn (or spawn if dead). If not, transact the entity + spawn the conn. Idempotent.
@@ -174,16 +186,28 @@ This is the **anti-rewrite manifest**. Other agents working on this should READ 
 | Test runner for JVM | `seon.test-utils` + `bin/test` | EXISTS, in production |
 | Test runner for CLJS | `seon.test.runner` (the gold-standard three-tier example) | EXISTS, in production |
 
-### What does NOT exist (the actually-new work)
+### What does NOT exist (the actually-new work, post-audit)
 
-| Thing | Why needed |
-|---|---|
-| `seon.db.datahike.konserve-sqlite` (JVM-side) | konserve-jdbc 0.2.91 is built against konserve 0.8.x; datahike 0.8.1681 pulls 0.9.x. The CLJS adapter exists but is node-sqlite3-wasm. Port the CLJS adapter to JVM using `org.xerial/sqlite-jdbc`. ~400-500 LOC. |
-| Dynamic session registration | `(db/ensure-db! :seon.session/<name>)` to spawn a conn-process at runtime. Lifecycle pieces exist in the flow; expose as runtime API. ~100-150 LOC. |
-| Wire-server that routes by db-name to existing seon.db conns | Port `jvm-writer/writer.clj` handlers; rewrite to look up the conn from a session registry instead of using its own private conn. ~400-500 LOC. |
-| Session entity schema in master `:seon` DB | `:seon.session/{name,backend,path,created-at,state}` Malli schemas. ~30 LOC. |
+| Thing | Why needed | Estimate |
+|---|---|---|
+| **`:sqlite` arm in `seon.db.datahike.flow/namespace-config`** + 2 deps (`io.replikativ/konserve-jdbc`, `org.xerial/sqlite-jdbc`) | konserve-jdbc:sqlite already works on JVM (V2 PoC uses it). Just expose the choice in the existing flow's config. | ~30 LOC, 2h |
+| **Dynamic conn-process registration** — `(db/ensure-db! :seon.session/<name>)` runtime API | Flow today is built monolithically at boot. This is THE one genuinely hard piece; needs a focused spike on `core.async.flow` internals BEFORE the API shape is committed. | ~120-200 LOC, 4-8h after spike |
+| **UDS + CBOR/Transit adaptation of `seon.db.relay`** | `seon.db.relay` (339 LOC) already does op-dispatch by db-name + length-framed sockets, but uses TCP + Nippy. Swap transport (TCP → UDS) + codec (Nippy → CBOR control + Transit-JSON values). | ~150 LOC, 3-4h |
+| **Two new attrs on the existing session schema** | `seon.session/backend` (`:enum [:sqlite :file :memory]`) + `seon.session/path` (`:string`). Existing `seon.orchestrator.session` schema gets these + the rename to `seon.session`. | ~30 LOC, 1h |
+| **System.edn config arm + Integrant wiring for the wire-server** | New `:seon.server/wire` component init/halt. | ~50 LOC, 1h |
 
-**Estimated total new code: ~1000-1200 LOC**, mostly mechanical translations of code that already exists in either V2 PoC (jvm-writer) or CLJS adapter form.
+**Estimated total new code: ~330-460 LOC** (down from ~1000-1200). **Estimated time: 11-16h** (similar to prior estimate; the dynamic flow registration got harder, but everything else got smaller).
+
+### The dynamic flow registration spike (pre-requisite)
+
+Before committing to a runtime `ensure-db!` API, run a ~2-3h focused spike:
+
+1. Read `reference-code/core.async/src/main/clojure/clojure/core/async/flow*` end-to-end (it's not huge).
+2. Determine: can processes be added to a running flow? If yes, what's the API + cost? If no, what workarounds?
+3. Probes in the REPL against the running `:seon.db/flow` — test the answer experimentally.
+4. Output: a small markdown doc + a recommended `ensure-db!` implementation shape.
+
+Until this spike lands, the integration's "runtime DB creation" semantics aren't pinned down. Sessions could be statically declared at boot in the worst case (works, but ergonomically poor for the "agent gets its own DB at runtime" use case).
 
 ## 8. Naming conventions (locked)
 
@@ -197,16 +221,17 @@ This is the **anti-rewrite manifest**. Other agents working on this should READ 
 
 The dot-namespace + slash distinguishes db-names from agent ids and from concept namespaces.
 
-## 9. Migration sequence (small, ordered)
+## 9. Migration sequence (revised post-audit)
 
-1. **Write `seon.db.datahike.konserve-sqlite`** — port from `src/konserve_sqlite_cljs/core.cljs`. Same protocol shape, JVM threads instead of node-sqlite3-wasm. Verify by writing on JVM, reading file from CLJS, identical datoms.
-2. **Add `(db/ensure-db! :seon.session/<name>)` + `(db/remove-db! ...)`** — runtime API on the existing flow. Idempotent. Lazy.
-3. **Write session-entity Malli schemas** — `:seon.session/{name,backend,path,...}`.
-4. **Port wire-server from `jvm-writer/writer.clj`** to `src/seon/server/wire.clj`. Rewrite handlers to look up conn from db-name (raw datahike access). Reuse the existing codec/transit/broadcast helpers verbatim.
-5. **Add `:seon.server/wire` Integrant component** wiring it into the seon JVM lifecycle.
-6. **Update Rust host** to connect to the existing seon JVM's wire-server instead of spawning its own JVM writers. Drop the `JvmSupervisor` code path; keep the sessions API but make sessions = db-name strings.
-7. **Update CLJS guest's `sidecar-poc.datahike` overlay** if needed — likely no change since the wire format is identical.
-8. **Smoke**: Phase D + PF against the seon JVM. Should be identical to before, just routed through a different JVM.
+1. **SPIKE: dynamic flow registration.** Read `reference-code/core.async/` flow source. REPL-probe against running JVM. Determine ensure-db! API shape. ~2-3h. Output: a small spike doc. **Gates the rest.**
+2. **`:sqlite` backend in `seon.db.datahike.flow/namespace-config`.** Add 2 deps, add the case arm. ~2h. (No new namespace; konserve-jdbc:sqlite already works.)
+3. **Consolidate sessions namespace.** Rename `src/seon/orchestrator/session.clj` → `src/seon/session.clj` (replacing the existing 472-LOC `seon.session` with orchestrator's richer 609-LOC version). Extend schema with `::backend` and `::path`. Adjust call sites. ~2h.
+4. **Implement `(db/ensure-db! …)` / `(db/remove-db! …)`** per the spike output. Idempotent. Lazy. ~4-8h.
+5. **Adapt `seon.db.relay` to UDS + CBOR + Transit.** Reuse op-dispatch shape; swap transport + codec. New file at `src/seon/server/wire.clj`. ~3-4h.
+6. **`:seon.server/wire` Integrant component.** Add to `src/seon/system.clj` + `resources/system.edn`. ~1h.
+7. **Update Rust host** to connect to the seon JVM's wire-server instead of spawning its own. Drop `JvmSupervisor`. Keep the sessions API; sessions = db-name strings. ~3h.
+8. **Update CLJS guest overlay** if needed — likely no change since the wire format adaption is server-side only. ~0-1h.
+9. **Smoke**: Phase D + PF against the seon JVM. Should be identical to before, just routed through the real seon JVM. ~1h.
 
 ## 10. Open / deferred
 
