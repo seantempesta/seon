@@ -64,7 +64,7 @@
   [ms]
   (reset! !timeout-ms ms))
 
-(def ^:private default-system-prompt
+(def default-system-prompt
   "You are a Clojure-fluent agent running inside a CLJS pod on Node.
 
 # Output format — read carefully

@@ -84,6 +84,10 @@
     [seon.handlers.fn]
     [seon.handlers.schema]
     [seon.handlers.ns]
+    ;; P2 substrate seed — renderers + entity-shape schemas for the
+    ;; sticky preamble entities (`:seon.system-prompt`, `:seon.conventions`).
+    ;; `seed-substrate!` below transacts the actual rows.
+    [seon.handlers.system-prompt]
     ;; Substrate handler registration — `wake-on-message`. Required so
     ;; start-agent! can call `handler/register!` + `wake/bootstrap-schema!`
     ;; at boot. Without this, the inspector header shows "0 handlers"
@@ -338,6 +342,18 @@
    ;; broke pod boot; removing them resolves the boot error AND aligns
    ;; with the no-transient-data-in-DB rule.
 
+   ;; --- Sticky preamble (P2 substrate seed, 2026-05-27). ---
+   ;; `:seon.sticky/*` already declared (registered in seon.render).
+   ;; The two preamble kinds carry id + content; the renderer pins them
+   ;; to the front of every context via :seon.sticky/position :prefix.
+   :seon.sticky/position
+   :seon.sticky/order
+   :seon.sticky/id
+   :seon.system-prompt/id
+   :seon.system-prompt/content
+   :seon.conventions/id
+   :seon.conventions/content
+
    ;; --- Test (Phase 2 — test capture as data) ---
    :seon.test/sym
    :seon.test/last-passed-at
@@ -515,6 +531,152 @@
          :seon.client/replay-n-ok    @!n-ok
          :seon.client/replay-n-fail  @!n-fail}))))
 
+;; ---------------------------------------------------------------------------
+;; Substrate boot seed (P2, 2026-05-27)
+;;
+;; Per docs/prds/agent-runtime/mvp-completion-plan-2026-05-27.md §Phase 2
+;; + research/repl-session-context-template-2026-05-26.md §5: the substrate
+;; transacts a deterministic sticky preamble (system-prompt + conventions)
+;; plus a curated set of core fns at boot, BEFORE any agent turn. This
+;; gives the chronological renderer a stable cacheable prefix and means
+;; replay-from-tx-0 starts on a fully-seeded substrate, not mid-air.
+;;
+;; Tx-ordering at boot (in start-agent!):
+;;   1. Entity-schema decomposition (schema/all-entity-schemas-tx-data)
+;;      — already shipped, Item 4 commit 35035d8.
+;;   2. seed-substrate!   — sticky preamble (system-prompt + conventions)
+;;   3. seed-core-fns!    — curated :seon.ns + :seon.fn rows for core API
+;;
+;; Each transact carries `:seon.db/origin :substrate-seed` in tx-meta so
+;; audit queries can isolate seed datoms from agent-produced ones.
+;; ---------------------------------------------------------------------------
+
+(def ^:private default-conventions
+  "Substrate conventions the agent must know. Lives as a `:seon.conventions`
+   entity so it's queryable + rendered into every turn's context as a
+   stable cached prefix. Compact deliberately — full conventions live in
+   `docs/conventions.md` and the agent can ask for them."
+  "Conventions for the substrate:
+
+- Every public fn takes ONE map and returns ONE map. All keys are fully
+  namespaced (`:seon.db/query`, never `:query`).
+- Use `:malli/schema` metadata. Request + response are registered Malli
+  schemas (`::foo-request` + `::foo-response`).
+- Concrete types only. No `:any`. Use `{:optional true}` for absent
+  fields — never store nil.
+- Retraction is explicit: `[:db/retract eid :attr]`.
+- One mechanism for storing program-graph entities: the analyzer plus
+  a source string. Don't reparse with rewrite-clj; don't write parallel
+  v1/v2 versions of fns.
+- The DB is the source of truth. Don't cache atom-state that's
+  derivable from datoms.")
+
+(defn seed-substrate!
+  "Tx-data for the sticky preamble: system-prompt + conventions.
+
+   Both carry `:seon.sticky/position :prefix` so the chronological
+   renderer pins them to the front regardless of tx-time ordering.
+   Identity upsert on `:seon.system-prompt/id` and `:seon.conventions/id`
+   — re-running is cheap.
+
+   Pure fn. Caller transacts via `db/transact!` with
+   `:seon.db/origin :substrate-seed`."
+  []
+  [{:seon.system-prompt/id      "default"
+    :seon.system-prompt/content deepseek/default-system-prompt
+    :seon.sticky/position       :prefix
+    :seon.sticky/order          0}
+   {:seon.conventions/id      "default"
+    :seon.conventions/content default-conventions
+    :seon.sticky/position     :prefix
+    :seon.sticky/order        1}])
+
+;; Curated table of substrate fns the agent should see at boot.
+;; Each entry: {:sym FQ-symbol :arglists "[(...) ...]" :doc "..."}
+;; The source is synthesized as a faithful `(defn …)` shell with a
+;; placeholder `,,,` body — substrate fns ship pre-compiled in
+;; `out/client/main.js`, so the source string isn't replayable.
+;; Downstream tools (inspector pills, drill-in) read the arglists +
+;; doc directly off the entity. Analyzer-cache lookup is preferred
+;; when available (only `seon.schema` is in `out/bootstrap` today);
+;; otherwise we fall back to this curated table.
+;;
+;; Start tiny per the orchestrator's MVP scope reduction; agents add
+;; more by transacting their own.
+(def ^:private core-fn-curated
+  [{:sym 'seon.db/transact!
+    :arglists "([{:seon.db/keys [tx-data opts conn] :as arg}])"
+    :doc "Datalog transact against the agent's conn. Map-in, map-out.
+Validates tx-data attrs against the registered Malli schemas BEFORE
+reaching datahike. Returns `{:seon.db/ok? true :seon.db/tx-report _}`
+on success or `{:seon.db/ok? false :seon.db/error _}` on failure —
+never throws into agent eval."}
+   {:sym 'seon.db/query
+    :arglists "([{:seon.db/keys [query args] :as arg}])"
+    :doc "Datalog `:find` query against `@*conn*`. Map-in, map-out.
+Returns `{:seon.db/ok? true :seon.db/rows <set>}` or an error envelope."}
+   {:sym 'seon.db/pull
+    :arglists "([{:seon.db/keys [pattern eid] :as arg}])"
+    :doc "Datahike pull against `@*conn*`. Map-in, map-out.
+Returns `{:seon.db/ok? true :seon.db/entity <map>}` or an error envelope."}
+   {:sym 'seon.schema/register!
+    :arglists "([k v])"
+    :doc "Register a Malli schema in the global registry. Returns the
+schema keyword. Use `::name` for auto-namespacing."}
+   {:sym 'seon.test.runner/run!
+    :arglists "([{:seon.test/keys [syms] :as arg}])"
+    :doc "Run the named `cljs.test/deftest` vars and record results as
+`:seon.test` entities. Map-in, map-out."}])
+
+(defn- synthesize-fn-source
+  "Build a `(defn …)` source-string shell from arglists + doc. The body
+   is `,,,` (a no-op placeholder) — substrate fns ship pre-compiled,
+   so the source isn't replayable. What IS faithful: the sym, arglists,
+   docstring. The agent reads the entity via `(seon.db/pull …)` to see
+   the full set of attrs."
+  [fq-sym arglists-str doc]
+  (let [doc-line (when (seq doc)
+                   (str "  \"" (str/replace doc "\"" "\\\"") "\""))
+        body     (str "  " arglists-str " ,,,")]
+    (str/join "\n"
+              (cond-> [(str "(defn " (name fq-sym))]
+                doc-line (conj doc-line)
+                :always  (conj body)
+                :always  (conj ")")))))
+
+(defn seed-core-fns!
+  "Tx-data for substrate `:seon.ns` + `:seon.fn` rows. For each fn in
+   `core-fn-curated`, emit a `:seon.fn` entity with synthesized source
+   + arglists + doc. Also emit a `:seon.ns/name` row per owning ns so
+   the `[:seon.ns/name <kw>]` lookup-ref on `:seon.fn/ns` resolves.
+
+   `compile-state` is accepted for future use (when more substrate
+   nses land in `out/bootstrap` we'll prefer the analyzer projection
+   over the curated table) but unused today — only `seon.schema` is
+   currently in the bootstrap analyzer cache, the others live only in
+   the pre-compiled pod JS at `out/client/main.js`.
+
+   Returns the tx-data vector. Caller transacts."
+  [_compile-state]
+  (let [now     (js/Date.)
+        ns-syms (into #{} (map (fn [{:keys [sym]}] (symbol (namespace sym))))
+                      core-fn-curated)
+        ns-rows (for [ns-sym ns-syms]
+                  {:seon.ns/name   (keyword (str ns-sym))
+                   :seon.ns/source (str "(ns " ns-sym ")")})
+        fn-rows (for [{:keys [sym arglists doc]} core-fn-curated
+                      :let [ns-sym (symbol (namespace sym))]]
+                  {:seon.fn/sym        (str sym)
+                   :seon.fn/ns         [:seon.ns/name (keyword (str ns-sym))]
+                   :seon.fn/source     (synthesize-fn-source sym arglists doc)
+                   :seon.fn/fn-var?    true
+                   :seon.fn/arglists   arglists
+                   :seon.fn/doc        doc
+                   :seon.fn/private?   false
+                   :seon.fn/specced?   false
+                   :seon.fn/created-at now})]
+    (vec (concat ns-rows fn-rows))))
+
 (defn- stub-llm
   "A fake LLM that demonstrates the REPL-as-harness response shape: a
    `;; narration` line then a real `seon.db/transact!` form, then
@@ -633,8 +795,33 @@
                 ;; so the renderer's kind-lookup can query via datalog
                 ;; (no in-memory atom walk on the hot path). Identity
                 ;; upsert on :seon.schema/key — re-running is cheap.
-                _ (await (db/transact!
-                           {:seon.db/tx-data (schema/all-entity-schemas-tx-data)}))
+                ;; P2 substrate seed — three transacts under one
+                ;; `:seon.db/origin :substrate-seed` tx-meta scope so
+                ;; audit queries can isolate seed datoms. Order is
+                ;; load-bearing for replay-from-tx-0:
+                ;;   1. entity-schema decomposition (Item 4) — must
+                ;;      land first so subsequent entities reference
+                ;;      registered shapes.
+                ;;   2. sticky preamble (system-prompt + conventions)
+                ;;      — pinned to context-front via
+                ;;      `:seon.sticky/position :prefix`.
+                ;;   3. curated core-fn entities — `:seon.ns` +
+                ;;      `:seon.fn` rows synthesized from the analyzer's
+                ;;      compile-state.
+                ;; Each transact is its own tx so the substrate prefix
+                ;; remains a stable cacheable sequence of tx-times.
+                _ (await
+                    (db/with-tx-context
+                      {:seon.db/origin :substrate-seed}
+                      (fn ^:async seed! []
+                        (await (db/transact!
+                                 {:seon.db/tx-data
+                                  (schema/all-entity-schemas-tx-data)}))
+                        (await (db/transact!
+                                 {:seon.db/tx-data (seed-substrate!)}))
+                        (await (db/transact!
+                                 {:seon.db/tx-data
+                                  (seed-core-fns! compile-state)})))))
                 ;; Install the per-agent inspector tx-listener. Pushes
                 ;; morphs for the agent-view inspector page (/agent/<id>).
                 _ (seon.web.inspector/install!)]
