@@ -311,6 +311,16 @@
    :seon.schema/ns
    :seon.schema/source
    :seon.schema/created-at
+   ;; Meta-schema attrs (schemas-as-queryable-data, 2026-05-27). Every
+   ;; entity-shape :map schema is decomposed at boot into a :seon.schema
+   ;; entity carrying these. The renderer's kind-lookup queries them via
+   ;; datalog instead of walking the in-memory *schemas atom.
+   ;; :seon.schema/required-attrs is :db.cardinality/many keyword via
+   ;; the [:vector :keyword] Malli bridge.
+   :seon.schema/required-attrs
+   :seon.schema/id-attr
+   :seon.schema/render-fn
+   :seon.schema/render-html-fn
 
    ;; --- Log (A-6) ---
    ;; REMOVED 2026-05-27 per storage discipline rule (Sean): logs are

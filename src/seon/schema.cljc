@@ -132,6 +132,8 @@
   (swap! *schemas assoc :seon.schema/id-attr :keyword))
 (defonce ^:private _schema-render-fn
   (swap! *schemas assoc :seon.schema/render-fn :symbol))
+(defonce ^:private _schema-render-html-fn
+  (swap! *schemas assoc :seon.schema/render-html-fn :symbol))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Registration API
@@ -322,9 +324,10 @@
   [k]
   (let [v (get @*schemas k)]
     (when (and v (map-shape? v))
-      (let [props    (schema-properties v)
-            id-attr  (:seon.entity/id-attr props)
-            render   (:seon.render/ai props)]
+      (let [props       (schema-properties v)
+            id-attr     (:seon.entity/id-attr props)
+            render-ai   (:seon.render/ai props)
+            render-html (:seon.render/html props)]
         (when id-attr
           (let [reqs (vec (remove #{id-attr} (map-required-attrs v)))
                 ;; id-attr is always required — listed separately so it's
@@ -332,12 +335,12 @@
                 reqs (vec (distinct (cons id-attr reqs)))
                 tid  (str "schema-" (name k))]
             (swap! *schema-required-counts assoc k (count reqs))
-            (into [[:db/add tid :seon.schema/key k]
-                   [:db/add tid :seon.schema/id-attr id-attr]
-                   (when render [:db/add tid :seon.schema/render-fn render])]
-                  (->> reqs
-                       (map (fn [r] [:db/add tid :seon.schema/required-attrs r])))
-                  )))))))
+            (cond-> [[:db/add tid :seon.schema/key k]
+                     [:db/add tid :seon.schema/id-attr id-attr]]
+              render-ai   (conj [:db/add tid :seon.schema/render-fn render-ai])
+              render-html (conj [:db/add tid :seon.schema/render-html-fn render-html])
+              :always     (into (map (fn [r] [:db/add tid :seon.schema/required-attrs r]))
+                                reqs))))))))
 
 (defn entity-schema-keys
   "Snapshot of every registered keyword pointing at an entity-shape
