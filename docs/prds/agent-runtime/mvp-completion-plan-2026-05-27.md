@@ -215,13 +215,34 @@ out of MVP scope per principle 1. The actual `pod-host/sidecar-poc/`
 directory has zero callers from `src/seon/*.cljs`.
 **Action:** KEEP — defer to a future JVM-merge cleanup.
 
-### LP-8. Two HTTP servers (CLJS pod + JVM)
+### LP-8. Two HTTP servers (CLJS pod + JVM) — INTENTIONAL during MVP
 
-**Location:** `src/seon/web/serve.cljs` (424 LOC) +
-`src/seon/web/server.clj` (JVM).
-**Why this is intentional:** v0-to-v2 plan §4 explicitly two
-ports during MVP — different concerns, different runtimes.
-**Action:** KEEP. Not in scope.
+**Location:** `src/seon/web/serve.cljs` (424 LOC, CLJS pod's
+loopback HTTP at port 7890) + `src/seon/web/server.clj` (JVM's
+advanced web server with Caddy-fronted SSL termination at the
+JVM's port).
+
+**Why this is intentional:** Per the revised `v0-to-v2-transition-
+plan-2026-05-26.md` §2.1-revised + §0b, MVP keeps PARALLEL
+systems. The JVM has the production-grade web stack (Caddy proxy
+for SSL, advanced Datastar SSE, full Datahike-backed UI, agent
+JVM pool integration). The CLJS pod's `web/serve.cljs` is its own
+loopback HTTP for the inspector pane. They coexist on different
+ports during MVP. Multi-agent multiplexing across the JVM web
+stack is its own work (deferred).
+
+**Action:** KEEP BOTH. This plan does NOT propose merging the
+HTTP layers or migrating the CLJS pod's web responsibilities into
+the JVM. The full JVM-as-V2-server merge is Phase 8+ in the
+v0-to-v2 plan, after the CLJS MVP is stable.
+
+**For Platform reviewer:** the CLJS pod web stack stays AS-IS
+through this MVP plan. Only the dead-weight parallel-SSE paths
+(`web.broadcast` + `web.sse`, LP-3 above) get deleted. The main
+`web.serve.cljs` + `web.inspector.cljs` stay because they're
+load-bearing for the inspector pane and the chat POST endpoint
+the agent UI uses. The JVM-side advanced web server is untouched
+by this plan.
 
 ### LP-9. Stray `:any` violations
 
