@@ -111,6 +111,15 @@ All three should produce valid datahike cfg maps. Worker actually calls `(d/data
 
 **Output:** thumbs up/down. Report any inconsistency between the worker's claim and observed behavior.
 
+**Status (2026-05-27): RED.** Two bugs in `store/config-for`:
+
+1. `:memory` backend emits `{:backend :mem ...}` but konserve requires `:backend :memory` (the V2 PoC at `pod-host/sidecar-poc/jvm-writer/src/seon/sidecar/writer.clj:48` uses `:memory`). `datahike.api/database-exists?` throws `Unsupported store backend: :mem` for memory cfgs.
+2. `:sqlite` backend emits `{:backend :jdbc ...}` but the konserve-jdbc module isn't being loaded, so konserve throws `Unsupported store backend: :jdbc`. Either the deps didn't pull in the module, or `konserve-jdbc.core` needs an explicit `require` somewhere on the load path.
+
+`:file` backend works (`database-exists?` returns `false` cleanly). Schema registration is clean (all three keys registered). Path A regression query returns 24 — unaffected. Test ns compiles; 7 tests / 28 assertions / 27 pass / 1 error (the `:mem` blow-up). Commit message claims 8 tests; actual is 7.
+
+Worker must fix `:mem` → `:memory` and resolve the konserve-jdbc load path before Wave 1b can be re-verified.
+
 ---
 
 ## Wave 2a — Worker: session registry

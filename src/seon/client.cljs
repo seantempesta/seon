@@ -87,10 +87,6 @@
     ;; per-agent `install-user-trigger!` already wired by agent/boot!.
     [seon.handler :as h]
     [seon.handlers.wake :as wake]
-    ;; Boot-time retro-stamp — adds `:seon.render/ai`/`:html` symbols
-    ;; on entities written before stamping was wired at the write site
-    ;; (commit 29372b9 + follow-ups). Idempotent; no-op on second boot.
-    [seon.handlers.retro-stamp :as retro-stamp]
     ;; Local-machine capability surface — A-9. Required so the agent
     ;; can call (seon.fs/read-file ...) + (seon.platform/host) from
     ;; bootstrap-CLJS eval.
@@ -622,11 +618,6 @@
                                                      :seon.message/to}
                             :seon.handler/fn        'seon.handlers.wake/wake-on-message
                             :seon.handler/on-origin #{:user :agent}}))
-                ;; Retro-stamp existing entities with `:seon.render/ai`/`html`
-                ;; symbols so pre-existing agents render in the inspector.
-                ;; Idempotent — entities already stamped get filtered out
-                ;; by the `(missing? :seon.render/ai)` clause in the query.
-                _ (await (retro-stamp/run!))
                 ;; Install the broadcast tx-listener (A-6).
                 _ (web.broadcast/install!)
                 ;; Install the per-agent inspector tx-listener. Distinct

@@ -343,7 +343,16 @@
   (let [db    (or db @db/*conn*)
         n     (or window-size default-window-size)
         rows  (renderable-entities db id)
+        ;; Subsumption rule (Phase 1c): entities whose primary kind is
+        ;; :seon.fn / :seon.schema / :seon.ns are NOT rendered in the
+        ;; chronological window — they're subsumed by the :seon.eval
+        ;; that created them (the (defn …) / (schema/register! …) /
+        ;; (ns …) source is already shown in the eval card). They DO
+        ;; render when sticky (substrate-shipped at the front) and on
+        ;; agent-side drill-in.
+        subsumed-kinds #{:seon.fn :seon.schema :seon.ns}
         {sticks true window false} (group-by sticky? rows)
+        window (remove #(contains? subsumed-kinds (:kind %)) window)
         sticky-sorted (sort-prefix (or sticks []))
         window-sorted (->> (or window []) sort-window vec)
         window-tail   (vec (take-last n window-sorted))
