@@ -16,7 +16,37 @@ is a database/wire-server host only; full JVM integration is deferred.
 `repl-session-context-template-2026-05-26.md`,
 `schemas-as-queryable-data-2026-05-26.md` (Item 4, in flight).
 
-## TL;DR
+## SHIP STATUS (2026-05-27 — read this first if you are picking up)
+
+**All 6 phases of this plan are SHIPPED.** Plus the prerequisite Item 4 (schemas-as-queryable-data). Branch `feature/agent-runtime`. Full chronological commit list:
+
+| Plan name | What landed | Commit | Net LOC |
+|---|---|---|---|
+| Item 4 part 1+2 | Entity `:map` schemas filled out + decomposition helpers in `seon.schema` | `d8c25ca` | +181 |
+| Item 4 ext | `:seon.schema/render-html-fn` meta-attr | `292682c` | +22 |
+| Item 4 part 4 | Boot wiring — `(db/transact! (schema/all-entity-schemas-tx-data))` in `start-agent!` | `35035d8` | +14 |
+| Item 4 part 3 | Renderer pivot — datalog kind-lookup against `:seon.schema` rows | `68cc872` | +89 |
+| **P1** (plan LP-3 + LP-1) | Delete `web.broadcast` + `web.sse`; fix `log-replay-failure!` to call `log/warn!` (was writing unregistered `:seon.log/*` attrs) | `4f6b258` | **−258** |
+| **P2** (plan Phase 2) | Substrate boot transacts — system-prompt + conventions + core `:seon.fn`/`:seon.ns` rows at lowest tx-times | `edce794` | +280 |
+| **P3** (plan Phase 3) | Auto-instrument + `:malli/schema` value validation in detect-and-tee. New `:seon.fn/schema-error` attr for malformed schemas | `06f0226` | +99 |
+| **P4** (plan Phase 4 data half) | Auto-test-run on `(deftest …)` + fn redefinition. New `:seon.test/source` + `:seon.test/ns` + `:seon.test/created-at` attrs. Substring fn-ref heuristic (v0) | `377df0b` | +136 |
+| **P5** (plan Phase 5) | Hiccup runtime validation via `[:fn valid-hiccup?]` — bypasses Malli's recursive-seqex limitation | `88d3532` | +43 |
+| **P6** (plan Phase 4 renderer half) | Status indicators on `:seon.fn` cards (✓/⚠/✗ for specced/tested/test-passing/schema-error) | `d46a2ea` | +115 |
+
+**Not shipped (carried forward as known follow-ups):**
+
+- **Gap 7 (plan Phase 6) — ALS removal.** Still active in `db.cljs:481-518` (`agent-id-als`, `als-instance`) + `eval.cljs:205-207` (`warnings-als`). Documented in v0-to-v2 plan Phase 3; NOT shipped on CLJS this session. The other 7 gaps closed; this is the largest remaining piece of legacy.
+- **`repl.clj:44`** — last `[:maybe :string]` violation on CLJ side. Deferred until Platform's V2 install settles to avoid conflict.
+- **P2 seed source shells** — substrate-seeded `:seon.fn/source` strings are `(defn foo "doc" [args])` shells. Replay-program-graph! would re-eval them and overwrite the precompiled substrate fns with nil-returning stubs. Mitigation: tag seed evals with `:seon.eval/seed?` and skip in replay, OR pull source from disk via `seon.fs`.
+- **P4 substring fn-ref matching** — fragile (matches `foo` inside `barfoo`). Tighten by walking the deftest body via the analyzer once an `analyzer-info/fn-refs-in-source` helper exists.
+- **P3 `:malli/schema` metadata gap on handler fns** — most handler render fns lack `:malli/schema` on their defn, so `mi/instrument!` doesn't wrap them, so P5's hiccup validator isn't enforced at runtime for those returns. Decorate as a polish task.
+- **`web/inspector.cljs` stale docstring mentions** of `seon.web.broadcast` / `seon.web.sse` (deleted). Doc-only sweep across `render/default.cljs`, `web/serve.cljs`, `web/inspector.cljs`, `web/page.cljc`.
+
+**Platform-side state at session end:** Platform has `src/seon/server/session.clj` + `src/seon/session.clj` uncommitted in the working tree. Their work, not MVP's.
+
+---
+
+## TL;DR (original)
 
 The MVP loop is alive: parse → eval → tee `:seon.fn`/`:seon.schema`/
 `:seon.ns` → render with subsumption → SSE-push to inspector. The

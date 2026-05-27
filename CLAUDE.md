@@ -155,7 +155,7 @@ The whole repo is on a feature branch. Atomic refactors are the cheap option, no
 
 1. **Observe the live system.** Query the REPL. Establish current state with actual data, not assumptions.
 2. **Define what failure looks like.** If you can't articulate how you'd know your change is broken, you don't understand the problem well enough to fix it.
-3. **Read the source.** Read the existing code you're modifying. Read library source in `reference-code/` (Datahike, Malli, Integrant, core.async — they're all there). Agents that guess instead of reading produce confident, wrong answers.
+3. **Read the source.** Read the existing code you're modifying. Read library source in `reference-code/` (Datahike, Malli, Integrant, core.async — they're all there as git submodules). Agents that guess instead of reading produce confident, wrong answers. **Never unzip deployed packages** to inspect a dep — `reference-code/` has the same source already, checked out and grep-able.
 4. **Test assumptions in the REPL.** Before building a function that queries the graph, try the query manually. Before wrapping a library call, call it directly and see what it returns. A 30-second experiment prevents hours of debugging.
 5. **Ask Gemini when stuck.** Two functions, both in the `user` namespace:
    - `(user/search "question" :files ["relevant/file.clj"])` — Gemini with **web access**. Include `:files` so it sees your actual code.
