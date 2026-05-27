@@ -360,7 +360,11 @@
    :seon.test/last-passed-at
    :seon.test/last-failed-at
    :seon.test/last-failure-summary
-   :seon.test/last-run-id])
+   :seon.test/last-run-id
+   ;; Phase 4 (mvp-completion-plan 2026-05-27)
+   :seon.test/source
+   :seon.test/ns
+   :seon.test/created-at])
 
 (defn ^:async open-agent-conn! []
   (let [cfg {:store {:backend :memory :id (random-uuid)}

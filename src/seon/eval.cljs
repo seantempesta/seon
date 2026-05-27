@@ -47,7 +47,8 @@
             [seon.db :as db]
             [seon.error :as error]
             [seon.error.instrument :as einstrument]
-            [seon.schema :as schema]))
+            [seon.schema :as schema]
+            [seon.test.runner :as test-runner]))
 
 ;; ============================================================
 ;; Per-form wall-clock timeout. Stability guard, not a security
@@ -661,6 +662,33 @@
       (mi/instrument! {:report  einstrument/report-fn
                        :filters [(fn [n s _d] (contains? target-set [n s]))]}))))
 
+(defn- collect-auto-test-targets
+  "Phase 4 (mvp-completion-plan 2026-05-27): return the set of FQ test
+   syms to run after a successful eval. Two sources:
+
+   - Tests newly defined in THIS eval (a fresh `(deftest …)` form). The
+     symbol comes from `defs-since` filtered to defs with `:test` meta.
+   - Tests in the DB whose `:seon.test/source` mentions any fn newly
+     defined in THIS eval. Substring match — v0 heuristic, see
+     `seon.test.runner/tests-referring-to`.
+
+   Result is a set so a deftest that also matches the substring scan
+   (the test source mentions its own sym) only runs once."
+  [compile-state defs-before]
+  (let [new-defs    (analyzer-info/defs-since defs-before compile-state)
+        new-tests   (for [{:keys [var-map]} new-defs
+                          :when (some? (:test (:meta var-map)))]
+                      (symbol (str (:name var-map))))
+        new-fn-syms (for [{:keys [var-map]} new-defs
+                          :when (and (:fn-var var-map)
+                                     ;; deftest's public fn ALSO has
+                                     ;; :fn-var true; skip — already
+                                     ;; in new-tests above.
+                                     (nil? (:test (:meta var-map))))]
+                      (symbol (str (:name var-map))))
+        referring   (mapcat test-runner/tests-referring-to new-fn-syms)]
+    (set (concat new-tests referring))))
+
 (defn- collect-instrument-targets
   "From the snapshot diff used by `build-tee-entities`, return the seq of
    `[ns-sym fn-sym schema-form]` triples for newly-defined fns whose
@@ -745,11 +773,23 @@
                                                     (keyword (namespace k))]
                            :seon.schema/source     source
                            :seon.schema/created-at at})
+        ;; Phase 4 (mvp-completion-plan 2026-05-27): deftest defs carry
+        ;; `:test` meta with the test body fn. Each gets a `:seon.test`
+        ;; row keyed on the FQ sym (identity attr). Source is the same
+        ;; form text — `tests-referring-to` later substring-scans it
+        ;; to find tests that mention a redefined fn.
+        test-entities (for [{:keys [ns var-map]} new-defs
+                            :let [{:keys [sym]} (analyzer-info/var-projection var-map)]
+                            :when (some? (:test (:meta var-map)))]
+                        {:seon.test/sym        sym
+                         :seon.test/ns         [:seon.ns/name (keyword (str ns))]
+                         :seon.test/source     source
+                         :seon.test/created-at at})
         ns-sym      (ns-form-name source)
         ns-entities (when ns-sym
                       [{:seon.ns/name   (keyword (str ns-sym))
                         :seon.ns/source source}])]
-    (vec (concat ns-entities fn-entities schema-entities))))
+    (vec (concat ns-entities fn-entities schema-entities test-entities))))
 
 (defn ^:async record-eval!
   "Transact one :seon.eval entity as a component child of its owning
@@ -897,7 +937,14 @@
         eids       (volatile! [])
         n-ok       (volatile! 0)
         n-fail     (volatile! 0)
-        current-ns (volatile! agent-ns-sym)]
+        current-ns (volatile! agent-ns-sym)
+        ;; Phase 4 (mvp-completion-plan 2026-05-27): capture origin
+        ;; BEFORE the per-entry `with-tx-context` overwrites it with
+        ;; `:agent`. If an outer scope (an auto-test-run's
+        ;; `:origin :test-run` wrapper around a test body that itself
+        ;; calls `eval-batch!`) already established `:test-run`, the
+        ;; inner batch must skip auto-test-run to avoid recursion.
+        outer-test-run? (= :test-run (::db/origin (db/current-tx-context)))]
     (doseq [entry parsed]
       (let [eval-id    (db/new-id!)
             tx-context {:seon.db/agent-id agent-id
@@ -994,7 +1041,33 @@
                         (catch :default e
                           (js/console.warn
                             "[seon.eval/eval-batch!] auto-instrument failed:"
-                            (or (.-message e) (str e)))))))
+                            (or (.-message e) (str e)))))
+                      ;; Phase 4 (mvp-completion-plan 2026-05-27) —
+                      ;; auto-test-run. After the tee tx, any new
+                      ;; `:seon.test` rows + any existing `:seon.test`
+                      ;; rows whose source mentions a newly-tee'd fn-sym
+                      ;; are re-run. Wrapped in :origin :test-run so the
+                      ;; loop guard below short-circuits if a test body
+                      ;; itself calls `eval-batch!`. Best-effort: thrown
+                      ;; runner errors don't abort the batch.
+                      (when-not outer-test-run?
+                        (let [targets (collect-auto-test-targets
+                                        compile-state defs-before)]
+                          (when (seq targets)
+                            (try
+                              (await
+                                (db/with-tx-context
+                                  {::db/origin :test-run}
+                                  (fn ^:async run-auto-tests! []
+                                    (await (test-runner/run!
+                                             {:seon.test.runner/vars    (vec targets)
+                                              :seon.test.runner/record? true
+                                              :seon.test.runner/trigger
+                                              :seon.test.runner/on-fn-redef})))))
+                              (catch :default e
+                                (js/console.warn
+                                  "[seon.eval/eval-batch!] auto-test-run failed:"
+                                  (or (.-message e) (str e))))))))))
                   (if (:ok result)
                     (vswap! n-ok   inc)
                     (vswap! n-fail inc)))))))

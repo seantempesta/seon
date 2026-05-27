@@ -18,6 +18,7 @@
    roadmap context."
   (:refer-clojure :exclude [run!])
   (:require [cljs.test :as t]
+            [clojure.string :as str]
             [seon.db :as db]
             [seon.error :as error]
             [seon.schema :as schema]))
@@ -121,6 +122,13 @@
 (schema/register! :seon.test/last-failed-at :inst)
 (schema/register! :seon.test/last-failure-summary :string)
 (schema/register! :seon.test/last-run-id :string)
+;; Phase 4 (mvp-completion-plan 2026-05-27): persist the deftest source
+;; so we can later scan `:seon.test/source` to find tests that reference
+;; a redefined fn (auto-test-on-fn-redef). `:seon.test/ns` is a lookup-ref
+;; for parity with `:seon.fn/ns` and `:seon.schema/ns`.
+(schema/register! :seon.test/source :string)
+(schema/register! :seon.test/ns :seon.db/ref)
+(schema/register! :seon.test/created-at :inst)
 
 ;; ============================================================
 ;; Reporter — defmethods append to the env's volatile builder.
@@ -719,3 +727,31 @@
     (when-let [run-result (fetch-run run-id)]
       {::run-id     run-id
        ::run-result run-result})))
+
+;; ============================================================
+;; Phase 4 (mvp-completion-plan 2026-05-27) — auto-test-on-fn-redef.
+;; Find every `:seon.test` row whose source mentions `fn-sym`. Used
+;; by `seon.eval/eval-batch!` after a `:seon.fn` is teed: any test
+;; that references the just-redefined fn re-runs.
+;;
+;; v0 heuristic: substring match on the source string. Fragile (a fn
+;; named `foo` will match comments / docstrings / unrelated symbols
+;; that share the suffix), but the analyzer doesn't carry per-deftest
+;; body fn-ref data we could query, and writing a fresh walker is more
+;; than this MVP slice. Tighter matching is a Phase 4.1 follow-up.
+;; ============================================================
+
+(defn tests-referring-to
+  "Return the vector of fully-qualified test syms whose
+   `:seon.test/source` mentions `fn-sym` (string or symbol). Pure DB
+   read — safe to call inside an eval-batch! tx scope."
+  [fn-sym]
+  (let [needle (str fn-sym)
+        rows   (db/query
+                 {::db/query '[:find ?sym ?source
+                               :where
+                               [?e :seon.test/sym ?sym]
+                               [?e :seon.test/source ?source]]})]
+    (vec (for [[sym source] rows
+               :when (and source (str/includes? source needle))]
+           (symbol sym)))))

@@ -419,7 +419,7 @@
 (schema/register! ::session-id      :seon.db/id)
 (schema/register! ::turn-id         :seon.db/id)
 (schema/register! ::eval-id         :seon.db/id)
-(schema/register! ::origin          [:enum :user :agent :system :replay :substrate-seed])
+(schema/register! ::origin          [:enum :user :agent :system :replay :substrate-seed :test-run])
 (schema/register! ::replay?         :boolean)
 (schema/register! ::resume-marker?  :boolean)
 

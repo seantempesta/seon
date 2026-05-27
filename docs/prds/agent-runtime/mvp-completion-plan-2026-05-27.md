@@ -494,6 +494,16 @@ no race because cljs.js's eval-str callback runs before
 
 ### Phase 4 — auto-test-run + status attrs + status pills
 
+**Status: PARTIAL (SHIPPED 2026-05-27).** Auto-test-run on `(deftest …)`
+forms and on fn redefs is wired into `seon.eval/eval-batch!` after
+`record-eval!`. Loop guard uses an outer `::origin :test-run` scope
+captured before each batch's per-entry `with-tx-context` overwrite.
+Tests referring to a redefined fn are discovered via substring scan of
+`:seon.test/source` (v0 heuristic; fn-ref walker is a Phase 4.1
+follow-up). Gap 5 (status pills on `:seon.fn` cards) NOT done — that's
+the renderer-side half (acceptance #9); P4's data half (last-passed-at /
+last-failed-at on `:seon.test` rows) is in place and queryable.
+
 **Goal.** Close Gaps 4 + 5. After every `eval-batch!` that produces
 either `:seon.fn` or `:seon.test` entities, find the affected tests
 and run them.

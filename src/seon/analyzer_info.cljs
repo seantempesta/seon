@@ -76,7 +76,13 @@
            (:arglists var-map)
            (:doc m)
            (:private m)
-           (:malli/schema m)])))
+           (:malli/schema m)
+           ;; `:test` meta — cljs.test/deftest puts the test body fn
+           ;; here. Each eval makes a fresh fn object → fresh identity-
+           ;; hash. Including it means re-deftest tees a fresh
+           ;; :seon.test row (Phase 4 mvp-completion-plan 2026-05-27).
+           ;; For non-test defs `:test` is nil; doesn't affect digest.
+           (:test m)])))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Public API
