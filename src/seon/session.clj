@@ -43,7 +43,79 @@
             [seon.flow.pool :as pool]
             [seon.runtime :as runtime]
             [seon.schema :as schema]
+            [seon.server.session :as server.session]
             [taoensso.timbre :as log]))
+
+;;; ---------------------------------------------------------------------------
+;;; Per-agent dynamic bindings (V2 — MCP eval routing by `:seon.agent/<id>`)
+;;; ---------------------------------------------------------------------------
+;;;
+;;; `seon.session/with-agent` binds these for the duration of the body so a
+;;; bare eval like `(d/transact @*conn* ...)` routes to the right session's
+;;; datahike conn without the caller knowing the db-name. Used by
+;;; `bin/mcp-server`'s `:seon.agent/<id>` dispatch branch.
+
+(def ^:dynamic *conn*
+  "Datahike conn for the agent's session, bound by `with-agent`. Nil at
+   the top level of the master REPL — only bound inside `with-agent`."
+  nil)
+
+(def ^:dynamic *current-agent-id*
+  "Opaque agent-id (e.g. the `<id>` part of `:seon.agent/<id>`), bound
+   by `with-agent`. Nil at the top level."
+  nil)
+
+(schema/register! ::resolve-agent-conn-request
+                  [:map [::agent-id :seon.server.session/agent-id]])
+
+(schema/register! ::resolve-agent-conn-response
+                  [:map [::conn :seon.server.session/conn]])
+
+(defn resolve-agent-conn
+  "Look up the datahike conn for `::agent-id` via
+   `seon.server.session/resolve-agent`. Throws clearly if the agent is
+   unknown or its session has been removed. Used by `with-agent`; broken
+   out so the error path is easy to test."
+  {:malli/schema [:=> [:cat ::resolve-agent-conn-request]
+                  ::resolve-agent-conn-response]}
+  [{::keys [agent-id]}]
+  (let [{db-name :seon.server.session/db-name
+         conn    :seon.server.session/conn}
+        (server.session/resolve-agent
+         {:seon.server.session/agent-id agent-id})]
+    (cond
+      (nil? db-name)
+      (throw (ex-info (str "Unknown agent-id: " (pr-str agent-id)
+                           ". Register via seon.server.session/register-agent! first.")
+                      {:agent-id agent-id
+                       :known-agents (mapv :seon.server.session/agent-id
+                                           (:seon.server.session/agents
+                                            (server.session/list-agents {})))}))
+      (nil? conn)
+      (throw (ex-info (str "Agent " (pr-str agent-id) " points at db-name "
+                           (pr-str db-name) " but no conn is registered.")
+                      {:agent-id agent-id :db-name db-name}))
+      :else {::conn conn})))
+
+(defmacro with-agent
+  "Bind `*conn*` and `*current-agent-id*` to the agent's session for the
+   duration of `body`. Resolves `agent-id` → db-name → conn via the
+   `seon.server.session` registry. Throws clearly if the agent-id is not
+   registered.
+
+   Used by `bin/mcp-server` to scope `:seon.agent/<id>` evals; safe to
+   call directly from any REPL.
+
+   ```clojure
+   (with-agent \"a1b2c3d4e5f6a7\"
+     (d/transact *conn* [{:db/ident :hello/world}]))
+   ```"
+  [agent-id & body]
+  `(let [agent-id# ~agent-id
+         conn#     (::conn (resolve-agent-conn {::agent-id agent-id#}))]
+     (binding [*conn*             conn#
+               *current-agent-id* agent-id#]
+       ~@body)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schema Registration

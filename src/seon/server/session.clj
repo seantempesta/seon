@@ -94,10 +94,54 @@
 (schema/register! ::restore-registry-request [:map [::snapshot :map]])
 (schema/register! ::restore-registry-response [:map [::restored? :boolean]])
 
+;; Agent registry — maps `:seon.agent/<id>` (string) to a `db-name`.
+;; A given agent joins exactly one session; a session has N agents.
+;; Used by `seon.session/with-agent` to route MCP eval requests scoped
+;; by agent-id to the correct datahike conn.
+(schema/register! ::agent-id
+                  [:string {:min 1
+                            :description "Opaque agent id (V2 uses 14-char hex)."}])
+
+(schema/register! ::register-agent!-request
+                  [:map
+                   [::agent-id ::agent-id]
+                   [::db-name ::db-name]])
+
+(schema/register! ::register-agent!-response
+                  [:map [::registered? :boolean]])
+
+(schema/register! ::unregister-agent!-request
+                  [:map [::agent-id ::agent-id]])
+
+(schema/register! ::unregister-agent!-response
+                  [:map [::unregistered? :boolean]])
+
+(schema/register! ::resolve-agent-request
+                  [:map [::agent-id ::agent-id]])
+
+(schema/register! ::resolve-agent-response
+                  [:map
+                   [::db-name {:optional true} ::db-name]
+                   [::conn {:optional true} ::conn]])
+
+(schema/register! ::list-agents-request [:map])
+(schema/register! ::list-agents-response
+                  [:map [::agents [:vector [:map
+                                            [::agent-id ::agent-id]
+                                            [::db-name ::db-name]]]]])
+
 ;;; --- Registry --------------------------------------------------------------
 
 (defonce ^:private !registry
   ;; {db-name -> entry-map}
+  (atom {}))
+
+(defonce ^:private !agents
+  ;; {agent-id -> db-name}
+  ;;
+  ;; A given agent joins exactly one session; a session has N agents.
+  ;; This atom is the agent-id → db-name index. Looking up a conn for
+  ;; an agent is `(get @!registry (get @!agents agent-id))`.
   (atom {}))
 
 (defn- summary
@@ -173,6 +217,10 @@
       (do
         (try (d/release conn) (catch Throwable _))
         (swap! !registry dissoc db-name)
+        ;; Drop any agent mappings that pointed at this db-name to
+        ;; avoid dangling agent-id → db-name references.
+        (swap! !agents
+               (fn [m] (into {} (remove (fn [[_ d]] (= d db-name)) m))))
         {::removed? true})
       {::removed? false})))
 
@@ -193,26 +241,86 @@
   {::sessions (mapv (fn [[db-name entry]] (summary db-name entry))
                     @!registry)})
 
+;;; --- Agent registry -------------------------------------------------------
+;;;
+;;; The agent registry maps `:seon.agent/<id>` strings (or any opaque
+;;; agent-id) to a `db-name` in `!registry`. Used by
+;;; `seon.session/with-agent` to bind the right conn for MCP eval routing.
+
+(defn register-agent!
+  "Bind `::agent-id` to `::db-name`. The db-name must already be
+   registered via `ensure-db!`; otherwise this throws. Idempotent —
+   re-registering the same agent-id to the same db-name is a no-op."
+  {:malli/schema [:=> [:cat ::register-agent!-request]
+                  ::register-agent!-response]}
+  [{::keys [agent-id db-name]}]
+  (when-not (contains? @!registry db-name)
+    (throw (ex-info "Cannot register agent: db-name not in registry"
+                    {::agent-id agent-id ::db-name db-name})))
+  (swap! !agents assoc agent-id db-name)
+  {::registered? true})
+
+(defn unregister-agent!
+  "Drop the agent-id mapping. Idempotent — returns
+   `{::unregistered? false}` if the agent was not registered."
+  {:malli/schema [:=> [:cat ::unregister-agent!-request]
+                  ::unregister-agent!-response]}
+  [{::keys [agent-id]}]
+  (if (contains? @!agents agent-id)
+    (do (swap! !agents dissoc agent-id)
+        {::unregistered? true})
+    {::unregistered? false}))
+
+(defn resolve-agent
+  "Return `{::db-name <name> ::conn <conn>}` for the given agent-id,
+   or `{}` if unknown / the underlying session has been removed."
+  {:malli/schema [:=> [:cat ::resolve-agent-request]
+                  ::resolve-agent-response]}
+  [{::keys [agent-id]}]
+  (if-let [db-name (get @!agents agent-id)]
+    (if-let [conn (some-> @!registry (get db-name) ::conn)]
+      {::db-name db-name ::conn conn}
+      {::db-name db-name})
+    {}))
+
+(defn list-agents
+  "Return `{::agents [...]}` — one map per registered agent. Order
+   unspecified."
+  {:malli/schema [:=> [:cat ::list-agents-request] ::list-agents-response]}
+  [{}]
+  {::agents (mapv (fn [[agent-id db-name]]
+                    {::agent-id agent-id ::db-name db-name})
+                  @!agents)})
+
 ;;; --- Test seam -------------------------------------------------------------
 
 (defn ^:no-doc snapshot-registry
-  "Test helper: capture the current registry for restoration. Used by
-   `session_test.clj`'s fixture to isolate test state."
+  "Test helper: capture the current registry + agent map for
+   restoration. Used by `session_test.clj`'s fixture to isolate
+   test state."
   {:malli/schema [:=> [:cat ::snapshot-registry-request] ::snapshot-registry-response]}
   [{}]
-  {::snapshot @!registry})
+  {::snapshot {:registry @!registry :agents @!agents}})
 
 (defn ^:no-doc restore-registry!
-  "Test helper: replace registry contents with `::snapshot`. Releases
-   any conns that were added since the snapshot was taken."
+  "Test helper: replace registry + agent map with `::snapshot`.
+   Releases any conns that were added since the snapshot was taken.
+   Accepts both the new shape (`{:registry ... :agents ...}`) and
+   the legacy bare-map shape for backwards compatibility."
   {:malli/schema [:=> [:cat ::restore-registry-request] ::restore-registry-response]}
   [{::keys [snapshot]}]
   (locking !registry
-    (let [current @!registry
-          extra-names (set/difference (set (keys current))
-                                      (set (keys snapshot)))]
+    (let [;; legacy snapshots were a bare {db-name -> entry} map; new
+          ;; snapshots wrap registry + agents.
+          legacy?       (not (contains? snapshot :registry))
+          registry-snap (if legacy? snapshot (:registry snapshot))
+          agents-snap   (if legacy? {} (:agents snapshot))
+          current       @!registry
+          extra-names   (set/difference (set (keys current))
+                                        (set (keys registry-snap)))]
       (doseq [n extra-names]
         (when-let [{::keys [conn]} (get current n)]
           (try (d/release conn) (catch Throwable _))))
-      (reset! !registry snapshot)
+      (reset! !registry registry-snap)
+      (reset! !agents agents-snap)
       {::restored? true})))

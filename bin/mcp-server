@@ -427,6 +427,38 @@ You must then either:
                     {:session_id session-id}))))
 
 ;;; ---------------------------------------------------------------------------
+;;; V2 agent routing (Wave 4.5 Item E)
+;;;
+;;; `session_id` strings starting with ":seon.agent/" address a V2 agent by
+;;; id. The agent's session DB lives in the seon JVM's
+;;; `seon.server.session` registry; we route to the master nREPL and wrap
+;;; the user code in `(seon.session/with-agent <id> (do <code>))` so the
+;;; eval runs with `*conn*` + `*current-agent-id*` bound to that agent.
+;;; The orchestrator path and the legacy 4-char hex path are unchanged.
+;;; ---------------------------------------------------------------------------
+
+(def agent-session-prefix ":seon.agent/")
+
+(defn agent-session?
+  "True when `session-id` is a V2 agent reference (`:seon.agent/<id>`)."
+  [session-id]
+  (and (string? session-id)
+       (str/starts-with? session-id agent-session-prefix)))
+
+(defn agent-session->id
+  "Strip the `:seon.agent/` prefix and return the bare agent id."
+  [session-id]
+  (subs session-id (count agent-session-prefix)))
+
+(defn wrap-with-agent
+  "Wrap `code` in `(seon.session/with-agent <agent-id> (do <code>))` so
+   the eval runs scoped to that agent's session conn on the master REPL."
+  [agent-id code]
+  (str "(seon.session/with-agent \""
+       (str/replace agent-id "\"" "\\\"")
+       "\" (do " code "\n))"))
+
+;;; ---------------------------------------------------------------------------
 ;;; Tool Execution
 ;;; ---------------------------------------------------------------------------
 
@@ -584,11 +616,21 @@ You must then either:
    user cancels MCP call mid-eval. Returns error if orchestrator already busy."
   [{:keys [session_id code timeout_ms]}]
   ;; Detect #_:full prefix — opt-in to skip truncation
-  (let [full? (str/starts-with? (str/trim (str code)) full-output-prefix)
-        code (if full? (str/replace-first code full-output-prefix "") code)
-        effective-session (or enforced-session-id session_id)]
+  (let [full?           (str/starts-with? (str/trim (str code)) full-output-prefix)
+        code            (if full? (str/replace-first code full-output-prefix "") code)
+        raw-session     (or enforced-session-id session_id)
+        ;; V2 agent routing (Wave 4.5 Item E): `:seon.agent/<id>` session
+        ;; ids route through the master REPL with `(seon.session/with-agent
+        ;; <id> ...)` wrapping the user code. We still use the orchestrator
+        ;; port (master REPL) because that's where datahike + the agent
+        ;; registry live.
+        agent?          (agent-session? raw-session)
+        agent-id        (when agent? (agent-session->id raw-session))
+        code            (if agent? (wrap-with-agent agent-id code) code)
+        effective-session (if agent? "orchestrator" raw-session)]
     (log-debug "execute-eval session:" effective-session
-               "(enforced:" enforced-session-id "provided:" session_id ")"
+               "(enforced:" enforced-session-id "provided:" session_id
+               "agent?:" agent? "agent-id:" agent-id ")"
                "timeout:" timeout_ms)
 
     ;; Guard: if orchestrator init hasn't completed yet, return a clear error
