@@ -40,6 +40,8 @@
             [clojure.set :as set]
             [clojure.string :as str]
             [goog.object :as gobj]
+            [malli.core :as m]
+            [malli.instrument :as mi]
             [shadow.cljs.bootstrap.node :as boot]
             [seon.analyzer-info :as analyzer-info]
             [seon.db :as db]
@@ -634,6 +636,43 @@
 ;; against re-defs — the digest + upsert path does the right thing.
 ;; ============================================================
 
+(defn- instrument-tee-fns!
+  "Phase 3 (mvp-completion-plan 2026-05-27): auto-instrument every
+   newly-tee'd fn whose `:malli/schema` parsed cleanly (i.e. the entity
+   has `:seon.fn/specced? true` and NO `:seon.fn/schema-error`).
+
+   For each, register the function schema in
+   `malli.core/-function-schemas*` (the atom `mi/instrument!` reads),
+   then run `mi/instrument!` filtered to those (ns, sym) pairs only.
+   Calls `(seon.error.instrument/report-fn ...)` on validation failure
+   so the envelope flows through the same record-eval! path that the
+   boot-time instrumentation uses.
+
+   Idempotent: re-registering same key is last-write-wins; re-running
+   `mi/instrument!` against an already-wrapped var replaces the wrapper.
+
+   `targets` — seq of `[ns-sym fn-sym schema-form]` triples."
+  [targets]
+  (when (seq targets)
+    (doseq [[ns-sym fn-sym schema-form] targets]
+      (m/-register-function-schema! ns-sym fn-sym schema-form {}
+                                    :cljs identity))
+    (let [target-set (set (map (fn [[n s _]] [n s]) targets))]
+      (mi/instrument! {:report  einstrument/report-fn
+                       :filters [(fn [n s _d] (contains? target-set [n s]))]}))))
+
+(defn- collect-instrument-targets
+  "From the snapshot diff used by `build-tee-entities`, return the seq of
+   `[ns-sym fn-sym schema-form]` triples for newly-defined fns whose
+   `:malli/schema` metadata parsed cleanly (Phase 3)."
+  [compile-state defs-before]
+  (for [{:keys [ns sym var-map]} (analyzer-info/defs-since defs-before compile-state)
+        :let [schema-form (:malli/schema (:meta var-map))]
+        :when (and schema-form
+                   (try (m/schema schema-form) true
+                        (catch :default _ false)))]
+    [ns sym schema-form]))
+
 (defn- ns-form-name
   "If `source` parses as an `(ns NAME …)` form, return NAME as a
    symbol; otherwise nil. Tolerates leading metadata: `(ns ^:foo bar)`
@@ -662,7 +701,21 @@
         new-schemas (set/difference (schema/current-keys) schemas-before)
         fn-entities (for [{:keys [ns var-map]} new-defs
                           :let [{:keys [sym fn-var? arglists doc private? specced?]}
-                                (analyzer-info/var-projection var-map)]]
+                                (analyzer-info/var-projection var-map)
+                                ;; Phase 3 (mvp-completion-plan 2026-05-27): if
+                                ;; `:malli/schema` metadata is present, validate
+                                ;; it parses via `m/schema`. Unparseable schemas
+                                ;; downgrade `:specced?` to false and stamp
+                                ;; `:seon.fn/schema-error` with the failure
+                                ;; reason. This prevents instrumenting a fn with
+                                ;; a garbage schema (would either throw at
+                                ;; instrument! time or silently no-op).
+                                schema-meta (:malli/schema (:meta var-map))
+                                schema-error (when (and specced? (some? schema-meta))
+                                               (try (m/schema schema-meta) nil
+                                                    (catch :default e
+                                                      (or (.-message e) (str e)))))
+                                effective-specced? (and specced? (nil? schema-error))]]
                       ;; var-projection's `:sym` is already the FQ string
                       ;; (`pr-str` of analyzer's `:name` which carries the
                       ;; ns). v1.md §7 pseudocode shows
@@ -670,21 +723,22 @@
                       ;; double-prefix to "probe.tee/probe.tee/f1"). The
                       ;; spec language is the dumbass-trap; var-projection
                       ;; is canonical.
-                      {:seon.fn/sym        sym
-                       :seon.fn/ns         [:seon.ns/name (keyword (str ns))]
-                       :seon.fn/source     source
-                       :seon.fn/fn-var?    fn-var?
-                       :seon.fn/arglists   arglists
-                       :seon.fn/doc        doc
-                       :seon.fn/private?   private?
-                       :seon.fn/specced?   specced?
-                       :seon.fn/created-at at
-                       ;; Renderer dispatch comes from the entity-schema's
-                       ;; `:seon.render/ai` / `:seon.render/html` props
-                       ;; (see seon.agent's :seon.fn registration). The
-                       ;; renderer's discovery walks AEVT for `:seon.fn/sym`
-                       ;; and resolves through the schema; no per-row stamp.
-                       })
+                      (cond-> {:seon.fn/sym        sym
+                               :seon.fn/ns         [:seon.ns/name (keyword (str ns))]
+                               :seon.fn/source     source
+                               :seon.fn/fn-var?    fn-var?
+                               :seon.fn/arglists   arglists
+                               :seon.fn/doc        doc
+                               :seon.fn/private?   private?
+                               :seon.fn/specced?   effective-specced?
+                               :seon.fn/created-at at}
+                        schema-error (assoc :seon.fn/schema-error schema-error)
+                        ;; Renderer dispatch comes from the entity-schema's
+                        ;; `:seon.render/ai` / `:seon.render/html` props
+                        ;; (see seon.agent's :seon.fn registration). The
+                        ;; renderer's discovery walks AEVT for `:seon.fn/sym`
+                        ;; and resolves through the schema; no per-row stamp.
+                        ))
         schema-entities (for [k new-schemas]
                           {:seon.schema/key        k
                            :seon.schema/ns         [:seon.ns/name
@@ -926,7 +980,21 @@
                                           :source      source
                                           :ns          @current-ns
                                           :result      result
-                                          :tee         tee})))
+                                          :tee         tee}))
+                    ;; Phase 3 (mvp-completion-plan 2026-05-27) —
+                    ;; auto-instrument any newly-defined fn whose
+                    ;; `:malli/schema` parsed cleanly. Runs AFTER the tee
+                    ;; tx so the `:seon.fn` row is durable before we
+                    ;; mutate the live var. Best-effort: a thrown
+                    ;; instrument! aborts only this fn, not the batch.
+                    (when (:ok result)
+                      (try
+                        (instrument-tee-fns!
+                          (collect-instrument-targets compile-state defs-before))
+                        (catch :default e
+                          (js/console.warn
+                            "[seon.eval/eval-batch!] auto-instrument failed:"
+                            (or (.-message e) (str e)))))))
                   (if (:ok result)
                     (vswap! n-ok   inc)
                     (vswap! n-fail inc)))))))

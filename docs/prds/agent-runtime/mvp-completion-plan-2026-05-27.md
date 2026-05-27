@@ -457,6 +457,13 @@ no overlap).
 
 ### Phase 3 — schema validation + auto-instrument + schema-error
 
+**Status: SHIPPED 2026-05-27.** REPL-verified — well-formed
+`:malli/schema` auto-instruments (calls with bad inputs surface
+the `:seon.error.kind/malli-instrument-input` envelope in
+`:seon.eval/error-data`); malformed schemas land
+`:seon.fn/specced? false` + `:seon.fn/schema-error` and are NOT
+instrumented.
+
 **Goal.** Close Gaps 2 + 3 together — they share the
 `detect-and-tee` write site.
 **Scope.**

@@ -317,6 +317,7 @@
    :seon.fn/doc
    :seon.fn/private?
    :seon.fn/specced?
+   :seon.fn/schema-error
    :seon.fn/created-at
    :seon.schema/key
    :seon.schema/ns

@@ -258,6 +258,11 @@
 (schema/register! :seon.fn/doc        :string)
 (schema/register! :seon.fn/private?   :boolean)
 (schema/register! :seon.fn/specced?   :boolean)
+;; Set when `:malli/schema` metadata is present but the value fails to
+;; parse via `malli.core/schema`. Companion of `:seon.fn/specced?` —
+;; when this is set, `:specced?` is forced to false (we will not
+;; instrument an unparseable schema). Phase 3 of mvp-completion-plan.
+(schema/register! :seon.fn/schema-error :string)
 (schema/register! :seon.fn/created-at :inst)
 
 (schema/register! :seon.schema/key        [:keyword {:seon.db/identity true}])
@@ -337,6 +342,7 @@
    [:seon.fn/doc        {:optional true} :seon.fn/doc]
    [:seon.fn/private?   {:optional true} :seon.fn/private?]
    [:seon.fn/specced?   {:optional true} :seon.fn/specced?]
+   [:seon.fn/schema-error {:optional true} :seon.fn/schema-error]
    [:seon.fn/created-at {:optional true} :seon.fn/created-at]])
 
 (schema/register! :seon.schema
