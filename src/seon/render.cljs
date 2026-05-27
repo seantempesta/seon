@@ -165,36 +165,71 @@
   (:seon.db/agent-id (d/entity db tx-eid)))
 
 (defn- renderable-kinds
-  "Return a seq of `{:kind <kw> :id-attr <kw> :ai <sym> :html <sym>}`
-   for every entity schema registered with both `:seon.render/ai` and
-   `:seon.entity/id-attr` on its properties. The renderer enumerates
-   instances by walking AEVT for each `id-attr`; the render symbols
-   come from the schema's own props (no per-row stamp)."
-  []
-  (->> (schema/registered-schemas)
-       (keep (fn [[k v]]
-               (when-let [props (and (vector? v) (= :map (first v))
-                                     (some (fn [x] (when (map? x) x)) (rest v)))]
-                 (when (and (:seon.render/ai props)
-                            (:seon.entity/id-attr props))
-                   {:kind     k
-                    :id-attr  (:seon.entity/id-attr props)
-                    :ai       (:seon.render/ai props)
-                    :html     (:seon.render/html props)}))))))
+  "Datalog-driven enumeration of every entity-shape `:seon.schema` row
+   in the DB. Returns a seq of `{:kind <kw> :id-attr <kw> :ai <sym>
+   :html <sym>}`. Each schema entity is materialized at agent boot
+   from `seon.schema/all-entity-schemas-tx-data` (and on every
+   subsequent `register!`), so the renderer reads schemas from
+   substrate state instead of walking the in-memory
+   `seon.schema/*schemas` atom.
+
+   `:seon.schema/render-fn` and `:seon.schema/render-html-fn` are
+   optional — split into two side queries and merge in Clojure rather
+   than relying on datahike-cljs's `get-else` (avoids per-backend
+   quirks)."
+  [db]
+  (let [base  (d/q '[:find ?key ?id-attr
+                     :where
+                     [?s :seon.schema/key ?key]
+                     [?s :seon.schema/id-attr ?id-attr]]
+                   db)
+        ais   (into {} (d/q '[:find ?key ?ai
+                              :where
+                              [?s :seon.schema/key ?key]
+                              [?s :seon.schema/render-fn ?ai]]
+                            db))
+        htmls (into {} (d/q '[:find ?key ?html
+                              :where
+                              [?s :seon.schema/key ?key]
+                              [?s :seon.schema/render-html-fn ?html]]
+                            db))]
+    (map (fn [[k id-attr]]
+           {:kind    k
+            :id-attr id-attr
+            :ai      (get ais k)
+            :html    (get htmls k)})
+         base)))
 
 (defn- entity-primary-kind
-  "Fingerprint an entity's primary kind by counting attr namespaces.
-   The namespace with the most attrs wins. Returns the kind keyword
-   (e.g. `:seon.eval`) or nil. Robust to multi-kind merges (Phase 1c)
-   — for a single-kind entity the namespace it lives in IS the kind."
-  [entity kinds-by-ns]
-  (let [counts (->> (keys entity)
-                    (filter keyword?)
-                    (keep namespace)
-                    frequencies)]
-    (when (seq counts)
-      (let [top-ns (->> counts (sort-by val >) ffirst)]
-        (kinds-by-ns top-ns)))))
+  "Pick the most-specific `:seon.schema` kind whose required-attrs are
+   ALL present on `entity`. Uses the `:in [?req ...]` collection-
+   binding idiom — the only form that works in datahike-cljs (see
+   docs/prds/agent-runtime/research/schemas-as-queryable-data-2026-05-26.md
+   §C). The natural join on `?req` is implicit: a schema's required
+   attr matches an entity's present attr iff they share a value.
+
+   A schema 'fully matches' when its matched-count equals the cached
+   total required-count (`seon.schema/schema-required-count`). Among
+   full matches, the schema with the most required attrs wins
+   (specificity). Tie-broken alphabetically by `:seon.schema/key` for
+   stable output (research §D)."
+  [db entity]
+  (let [present (vec (filter keyword? (keys entity)))]
+    (when (seq present)
+      (let [matched (d/q '[:find ?key (count ?req)
+                           :in $ [?req ...]
+                           :where
+                           [?s :seon.schema/key ?key]
+                           [?s :seon.schema/required-attrs ?req]]
+                         db present)
+            full    (filter (fn [[k matched-n]]
+                              (= matched-n
+                                 (or (schema/schema-required-count k) 0)))
+                            matched)]
+        (when (seq full)
+          (->> full
+               (sort-by (juxt (comp - second) (comp str first)))
+               ffirst))))))
 
 (defn- renderable-entities
   "Enumerate all renderable entities visible to `agent-id`. Walks
@@ -212,8 +247,7 @@
    Per-entity override: if the pulled entity carries its own
    `:seon.render/ai`, that wins over the kind's default."
   [db agent-id]
-  (let [kinds        (renderable-kinds)
-        kinds-by-ns  (into {} (map (fn [k] [(name (:kind k)) (:kind k)]) kinds))
+  (let [kinds        (renderable-kinds db)
         kinds-by-kw  (into {} (map (juxt :kind identity) kinds))
         ;; Distinct eids across all kind indices (an entity could in
         ;; principle carry id-attrs for multiple kinds — Phase 1c).
@@ -226,7 +260,7 @@
                    :let [tx     (entity-last-tx db eid)
                          tx-aid (tx-agent-id db tx)
                          ent    (d/pull db '[*] eid)
-                         kind   (entity-primary-kind ent kinds-by-ns)
+                         kind   (entity-primary-kind db ent)
                          k-info (get kinds-by-kw kind)
                          ai-sym (or (:seon.render/ai ent)
                                     (:ai k-info))]
@@ -271,25 +305,24 @@
 
 (defn- entity-html-sym
   "Resolve the HTML render symbol for `entity`: per-entity override wins,
-   else look up the schema property for the entity's primary kind. nil
-   if neither path yields a symbol."
-  [entity]
+   else datalog lookup against the entity's primary `:seon.schema`
+   kind. nil if neither path yields a symbol."
+  [db entity]
   (or (:seon.render/html entity)
-      (let [kinds       (renderable-kinds)
-            kinds-by-ns (into {} (map (fn [k] [(name (:kind k)) (:kind k)]) kinds))
-            kinds-by-kw (into {} (map (juxt :kind identity) kinds))
-            kind        (entity-primary-kind entity kinds-by-ns)]
+      (let [kinds-by-kw (into {} (map (juxt :kind identity)
+                                      (renderable-kinds db)))
+            kind        (entity-primary-kind db entity)]
         (some-> kinds-by-kw kind :html))))
 
 (defn- entity-ai-sym
   "Resolve the AI render symbol for `entity`: per-entity override wins,
-   else schema property for the entity's primary kind."
-  [entity]
+   else datalog lookup against the entity's primary `:seon.schema`
+   kind."
+  [db entity]
   (or (:seon.render/ai entity)
-      (let [kinds       (renderable-kinds)
-            kinds-by-ns (into {} (map (fn [k] [(name (:kind k)) (:kind k)]) kinds))
-            kinds-by-kw (into {} (map (juxt :kind identity) kinds))
-            kind        (entity-primary-kind entity kinds-by-ns)]
+      (let [kinds-by-kw (into {} (map (juxt :kind identity)
+                                      (renderable-kinds db)))
+            kind        (entity-primary-kind db entity)]
         (some-> kinds-by-kw kind :ai))))
 
 (defn render-entity-html
@@ -303,11 +336,12 @@
       :seon.agent/id <agent-id>
       :seon.render/entity <entity-map>}"
   {:malli/schema [:=> [:cat :map] [:maybe :any]]}
-  [{:seon.render/keys [entity] :as input}]
-  (when-let [sym (entity-html-sym entity)]
-    (try
-      (:seon.render/hiccup (html-render sym input))
-      (catch :default _ nil))))
+  [{:seon.db/keys [db] :seon.render/keys [entity] :as input}]
+  (let [db (or db @db/*conn*)]
+    (when-let [sym (entity-html-sym db entity)]
+      (try
+        (:seon.render/hiccup (html-render sym input))
+        (catch :default _ nil)))))
 
 (defn render-entity-ai
   "Render `entity` to text via its resolved `:seon.render/ai` symbol.
@@ -315,11 +349,12 @@
    primary kind. Returns nil if no symbol resolves OR the fn returns
    nil. Mirror of `render-entity-html` for the AI path."
   {:malli/schema [:=> [:cat :map] [:maybe :string]]}
-  [{:seon.render/keys [entity] :as input}]
-  (when-let [sym (entity-ai-sym entity)]
-    (try
-      (:seon.render/text (ai-render sym input))
-      (catch :default _ nil))))
+  [{:seon.db/keys [db] :seon.render/keys [entity] :as input}]
+  (let [db (or db @db/*conn*)]
+    (when-let [sym (entity-ai-sym db entity)]
+      (try
+        (:seon.render/text (ai-render sym input))
+        (catch :default _ nil)))))
 
 (schema/register! :seon.render/assemble-ai-request
   [:map
