@@ -954,7 +954,7 @@
   "Called by clj-reload after reloading. Resets generated-ids (negligible collision
    risk for 6-char base62) and re-populates flow-handles from Integrant system."
   []
-  (reset! generated-ids #{})
+  (swap! !state assoc ::generated-ids #{})
   ;; Re-populate flow-handles from Integrant if system is running
   (try
     (require 'integrant.repl.state)
@@ -982,7 +982,7 @@
   {:malli/schema [:=> [:cat ::reset-registry-request] ::reset-registry-response]}
   [_request]
   (swap! !state assoc ::registry-cache {})
-  (reset! generated-ids #{})
+  (swap! !state assoc ::generated-ids #{})
   (swap! !state assoc ::flow-handles {})
   {::reset true})
 

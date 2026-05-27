@@ -1,13 +1,31 @@
 (ns seon.session
-  "Agent session management — the high-level API for agent lifecycle.
+  "Agent session ENTITY layer — the canonical session-as-datom record.
 
-  Persistent fields (id, namespace, status, port, started-at, stopped-at,
-  db-name, nrepl-session-id, last-activity-at, eval-count) live in the
-  `:seon.orchestrator` datahike DB via `seon.db/transact!` and `query`.
+  Owns the `:seon.session/*` entity schema + the `start-agent-session!` /
+  `stop-agent-session!` / `list-agent-sessions` lifecycle. Persists to the
+  `:seon.orchestrator` datahike DB via `seon.db/transact!` + `query` (Path
+  A — goes through `:seon.db/flow`). Live JVM-only handles (atoms, pool
+  refs) live in a small in-process map keyed by session-id; these are
+  resource handles the DB can't store.
 
-  Live JVM-only handles (`::ctx-atom`, `::pool`, `::ns-db-name`,
-  `::current-eval`) live in a small in-process map keyed by session-id.
-  These are resource handles — the DB can't store an atom or a pool ref.
+  **Renamed 2026-05-27** from `seon.orchestrator.session` (Wave 3a). The
+  richer 609-LOC orchestrator version replaced the older 472-LOC
+  `seon.session` from before the migration.
+
+  ## Sibling NS: `seon.server.session`
+
+  `seon.server.session` (Wave 2, Path B) is a SEPARATE namespace and
+  separate concern. It owns the in-process atom REGISTRY of
+  `{db-name -> {::conn ::backend ::path ::pub-chan}}` that the wire-
+  server uses to route wasm-guest requests to the right datahike conn.
+  No flow, no persistent entity — it's the live runtime mapping.
+
+  - **`seon.session`** (this ns)        → entity (datoms in `:seon.orchestrator`)
+  - **`seon.server.session`** (Wave 2)  → runtime (atom of live conns)
+
+  Don't confuse them. Both can exist for the same logical session: the
+  ENTITY records its identity + lifecycle metadata; the REGISTRY holds
+  the live conn for wire-server routing.
 
   ## Usage
 

@@ -1,16 +1,32 @@
 (ns seon.server.session
-  "Path B session registry — atom of `{db-name -> entry}` where each
-   entry is `{::conn <datahike-conn> ::backend kw ::path str-or-nil
+  "Path B session RUNTIME registry — atom of `{db-name -> entry}` where
+   each entry is `{::conn <datahike-conn> ::backend kw ::path str-or-nil
    ::pub-chan core.async-chan-or-nil}`.
 
-   Direct `datahike.api/connect`. No flow. The wire-server (Wave 4)
-   will look up conns here on every request. Multiple sessions, one
-   process, all in-memory atoms — no coordination overhead.
+   Direct `datahike.api/connect`. No flow. The wire-server looks up
+   conns here on every request. Multiple sessions, one process, all
+   in-memory atoms — no coordination overhead.
 
-   Idempotent semantics: `ensure-db!` on an existing db-name returns
-   the same entry (identical? conn). `remove-db!` on an absent name
-   is a no-op returning `{::removed? false}`. Concurrent ensures on
-   the same name race exactly once — losers see the winner's conn.
+   ## Sibling NS: `seon.session`
+
+   `seon.session` (Wave 3a, Path A) is a SEPARATE namespace and separate
+   concern. It owns the canonical session-as-entity record + the
+   start/stop/list lifecycle that persists to the `:seon.orchestrator`
+   DB via `seon.db/transact!` (goes through `:seon.db/flow`).
+
+   - **`seon.session`** (other ns)       → entity (datoms in `:seon.orchestrator`)
+   - **`seon.server.session`** (this ns) → runtime (atom of live conns)
+
+   Don't confuse them. Both can exist for the same logical session: the
+   ENTITY records identity + lifecycle metadata; the REGISTRY (here)
+   holds the live conn for wire-server routing.
+
+   ## Idempotent semantics
+
+   `ensure-db!` on an existing db-name returns the same entry (identical?
+   conn). `remove-db!` on an absent name is a no-op returning
+   `{::removed? false}`. Concurrent ensures on the same name race
+   exactly once — losers see the winner's conn.
 
    See `docs/prds/agent-runtime/integration-architecture-2026-05-26.md`
    §1.5 (Path B) and §5 (session registration). Lifecycle shape lifted
