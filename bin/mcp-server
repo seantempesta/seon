@@ -462,12 +462,19 @@ You must then either:
   (subs session-id (count agent-session-prefix)))
 
 (defn wrap-with-agent
-  "Wrap `code` in `(seon.session/with-agent <agent-id> (do <code>))` so
-   the eval runs scoped to that agent's session conn on the master REPL."
+  "Wrap `code` in `(seon.session/with-agent-load-string <agent-id> <code-string>)`
+   so the eval runs scoped to that agent's session conn on the master REPL.
+
+   We pass user code as a STRING (via `pr-str`) and `load-string` reads it
+   form-by-form inside the binding scope. This preserves multi-form alias
+   resolution — `(require '[x :as y])` then `(y/foo)` in one submission
+   works because `load-string` reads + evals one form at a time. A single
+   `(do ...)` wrap would analyze the whole body before evaluating, breaking
+   alias resolution."
   [agent-id code]
-  (str "(seon.session/with-agent \""
+  (str "(seon.session/with-agent-load-string \""
        (str/replace agent-id "\"" "\\\"")
-       "\" (do " code "\n))"))
+       "\" " (pr-str code) ")"))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Tool Execution
@@ -501,13 +508,30 @@ You must then either:
       (str (subs s 0 max-len) "...")
       s)))
 
-(defn- wrap-code-with-autosave
-  "Wrap user code so the result is auto-saved to user/*repl-<session>* atom.
-   Returns {:wrapped-code <str> :result-key <str> :var-name <str>}."
+(defn- autosave-keys
+  "Compute the autosave storage location for a given user code string and
+   session. Returns {:result-key <str> :var-name <str>}.
+
+   The result-key is hash-derived so repeated identical evals reuse the
+   same slot in the per-session atom (no churn)."
   [code effective-session]
   (let [hash-val (Math/abs (hash code))
         result-key (str ":r-" (subs (str hash-val) 0 (min 4 (count (str hash-val)))))
         var-name (str "user/repl-" effective-session)]
+    {:result-key result-key
+     :var-name var-name}))
+
+(defn- wrap-code-with-autosave
+  "Legacy single-message wrap (used by the 4-char-hex agent-pool route).
+
+   Per-eval-session routes use the two-message approach via
+   `autosave-of-*1-code` instead — see `execute-eval`. This wrap is fine
+   for the legacy path because those sessions persist across calls, so
+   alias-establishing requires from a previous call are already visible.
+
+   Returns {:wrapped-code <str> :result-key <str> :var-name <str>}."
+  [code effective-session]
+  (let [{:keys [result-key var-name]} (autosave-keys code effective-session)]
     {:wrapped-code (str "(let [__r (do " code "\n)]"
                         " (defonce " var-name " (atom {}))"
                         " (let [__prev (get @" var-name " " result-key ")]"
@@ -516,6 +540,28 @@ You must then either:
                         " __r)")
      :result-key result-key
      :var-name var-name}))
+
+(defn- autosave-of-*1-code
+  "Return the autosave form to send as a SECOND nREPL message on the
+   same cloned session after the user code runs.
+
+   Reads `*1` (the value of the last form from the previous eval message
+   on this session — verified to persist across messages via
+   `tmp/mcp-multiform-test.bb`) and stashes it in `user/repl-<session>`.
+
+   Why a second message: collapsing user code + autosave into one
+   `(do ...)` form analyzes the whole body before evaluating, which
+   breaks `(require '[x :as y])` + `(y/foo)` because `y/foo` is resolved
+   at analyze-time before the runtime `require` runs. Two messages let
+   nREPL evaluate user forms one-at-a-time (aliases work) AND still
+   capture the final value (`*1`)."
+  [{:keys [result-key var-name]}]
+  (str "(let [__r *1]"
+       " (defonce " var-name " (atom {}))"
+       " (let [__prev (get @" var-name " " result-key ")]"
+       "   (when-not (= __prev __r)"
+       "     (swap! " var-name " assoc " result-key " __r)))"
+       " __r)"))
 
 (defn- truncate-stdout
   "Truncate stdout to last N chars, keeping the tail (most recent output).
@@ -667,13 +713,23 @@ You must then either:
                       {:initializing true
                        :preflight-error @preflight-error})))
 
-    (let [{:keys [wrapped-code result-key var-name]}
-          (wrap-code-with-autosave code effective-session)
-
+    (let [{:keys [result-key var-name]} (autosave-keys code effective-session)
           effective-timeout (or timeout_ms default-timeout-ms)]
 
       (if per-eval-route?
         ;; ---- Per-eval-session path (orchestrator + V2 agents) ----
+        ;;
+        ;; Two nREPL messages on the same cloned session:
+        ;;   1. User code (raw, or wrapped in `with-agent-load-string` for
+        ;;      :seon.agent/<id> routes). nREPL reads + evaluates top-level
+        ;;      forms one at a time, so `(require '[x :as y])` in form 1
+        ;;      establishes the alias before form 2 is analyzed.
+        ;;   2. `(let [__r *1] ...)` — reads the last form's value (verified
+        ;;      to persist across messages on the same session by
+        ;;      `tmp/mcp-multiform-test.bb`) and stashes it for autosave.
+        ;;
+        ;; Single-message `(do ...)` wrap was the b2b2681 regression: the
+        ;; analyzer resolves `y/foo` before runtime `require` runs.
         (let [;; Clone a fresh session so this eval's *ns*, dynamic
               ;; bindings, and any (in-ns ...) wedge cannot leak.
               ephemeral-session (nrepl-clone-session orchestrator-port)]
@@ -682,7 +738,8 @@ You must then either:
              (str "Failed to clone nREPL session on port " orchestrator-port "."
                   (when @preflight-error (str "\nPre-flight: " @preflight-error))))
             (try
-              (let [result (nrepl-eval orchestrator-port wrapped-code
+              (let [;; Message 1: user code (multi-form aliases work)
+                    result (nrepl-eval orchestrator-port code
                                        effective-timeout ephemeral-session)]
                 ;; On timeout, interrupt before we close — closing a
                 ;; session that still has a running eval can hang the
@@ -694,17 +751,31 @@ You must then either:
                 (if (:ex result)
                   (mcp-error (or (:err result)
                                  (str "eval failed: " (:ex result))))
-                  (let [ai-render (when-not full?
-                                    (try-ai-render orchestrator-port
-                                                   ephemeral-session
-                                                   (:value result)))]
-                    (mcp-success (format-eval-output result result-key
-                                                     var-name full? ai-render)))))
+                  (do
+                    ;; Message 2: autosave-of-*1. Best-effort — the user
+                    ;; got their value either way; autosave is a
+                    ;; convenience. 5s budget is plenty for an atom swap.
+                    (try
+                      (nrepl-eval orchestrator-port
+                                  (autosave-of-*1-code {:result-key result-key
+                                                        :var-name var-name})
+                                  5000 ephemeral-session)
+                      (catch Exception e
+                        (log-debug "Autosave failed (non-fatal):" (.getMessage e))))
+                    (let [ai-render (when-not full?
+                                      (try-ai-render orchestrator-port
+                                                     ephemeral-session
+                                                     (:value result)))]
+                      (mcp-success (format-eval-output result result-key
+                                                       var-name full? ai-render))))))
               (finally
                 ;; Always close — the whole point of per-eval sessions.
                 (nrepl-close-session orchestrator-port ephemeral-session)))))
 
         ;; ---- Legacy 4-char hex agent-pool path (unchanged behavior) ----
+        ;; Uses the old single-message wrap because these sessions persist
+        ;; across calls, so alias-establishing requires don't need to be
+        ;; in the same message.
         (let [_ (validate-session-id! effective-session)
               info (get-session-info effective-session)
               _ (when-not info
@@ -713,6 +784,7 @@ You must then either:
                                   {:session_id effective-session})))
               port (:port info)
               nrepl-session-id (:nrepl-session-id info)
+              {:keys [wrapped-code]} (wrap-code-with-autosave code effective-session)
               do-eval (fn [port sid]
                         (record-activity! effective-session :start code)
                         (let [result (nrepl-eval port wrapped-code

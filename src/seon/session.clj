@@ -71,6 +71,9 @@
 (schema/register! ::resolve-agent-conn-response
                   [:map [::conn :seon.server.session/conn]])
 
+(schema/register! ::code-string
+                  [:string {:description "Clojure source as a string (multi-form OK)"}])
+
 (defn resolve-agent-conn
   "Look up the datahike conn for `::agent-id` via
    `seon.server.session/resolve-agent`. Throws clearly if the agent is
@@ -116,6 +119,26 @@
      (binding [*conn*             conn#
                *current-agent-id* agent-id#]
        ~@body)))
+
+(defn with-agent-load-string
+  "Bind `*conn*` and `*current-agent-id*` to the agent's session and
+   `load-string` the given code string under that binding scope.
+
+   `load-string` reads + evaluates top-level forms one at a time, so a
+   `(require '[x :as y])` in form 1 establishes the alias before form 2
+   is read — the same form-by-form semantics that nREPL gives to a
+   raw multi-form `eval` message. Returns the value of the last form.
+
+   This is the MCP-path equivalent of `with-agent` (a macro), used by
+   `bin/mcp-server`'s `:seon.agent/<id>` route: nREPL receives ONE
+   `(with-agent-load-string \"<id>\" \"<user-code>\")` form, the
+   binding scope spans every form inside the string, and aliases
+   resolve form-by-form. Macros can't take a string body without
+   eval-ing it themselves, hence the fn variant — but the body
+   delegates to `with-agent` so binding behavior stays in one place."
+  [agent-id code-string]
+  (with-agent agent-id
+    (load-string code-string)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schema Registration
