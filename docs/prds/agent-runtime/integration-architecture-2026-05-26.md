@@ -13,6 +13,16 @@ tags: [architecture, agent, database]
 
 **Revised 2026-05-26 EVE (two-path decision):** The flow-runtime-update spike (`research/flow-runtime-update-spike-2026-05-26.md`) found that dynamic flow registration works but with non-trivial cost (in-flight requests orphan on swap, tx-bus subscribers lost, integrant state stale). Decision: **MVP ships two-path** — Path A (existing seon.clj through `:seon.db/flow`) is left undisturbed; Path B (agent session DBs through a direct-conn registry, no flow) is new. They coexist in one JVM. Flow integration is deferred until we want remote-host session DBs or seon.clj is otherwise stable enough to refactor. See §1.5.
 
+**Locked 2026-05-27 (post-wave-4a):** Terminology, replay model, and runtime-atom consolidation locked after user direction. Notable updates folded in below:
+
+- Backend reality: `:sqlite` is **deferred from MVP** — konserve-jdbc 0.2.91 does not register on konserve 0.9.340's dispatch multimethod. MVP uses `:file`; `:memory` for tests only. See §4.
+- Replay model: **dumb per-form replay** is the MVP gate. Smart ns-batched replay via the analyzer + substrate-source seeding are deferred follow-ups. See §12.
+- One Integrant component (`:seon.server.session/registry`) manages N sessions via the atom. NOT N components, NOT a separate `:seon.server/wire` component — the registry IS the wire-bearing component. See §5 and Wave 5 in `execution-waves-2026-05-26.md`.
+- `:agent` deps alias renamed to `:agent-jvm-pool` (legacy, opt-in). Callsites updated.
+- `seon.runtime`'s three private atoms (`generated-ids`, `registry-cache`, `flow-handles`) collapse into one `seon.runtime/!self` atom with three keys. See §13.
+- Multi-host topology: MVP = one host, N wasm guests. Tauri shell = one-host-per-user. Scale-out to N hosts via TCP swap is deferred (no work in MVP).
+- Wave 4a moved wire-server **verbatim** (Option B: socket-per-session routing, NOT per-request). The registry owns the socket↔conn pair; handlers stay single-conn at runtime. Multi-session = multiple wire-server instances managed by the registry.
+
 ## 0. TL;DR
 
 - **One JVM** owns all datahike DBs (not multi-JVM like the V2 PoC did).
@@ -94,13 +104,22 @@ Agent C is isolated in bob's DB.
 
 **Convergence later**: when seon.clj is stable enough to refactor AND we want remote-host session DBs, we plumb Path B through flow (or rip flow and unify on direct-conn). That's a separate PRD; not blocking V2.
 
-## 2. Definitions (precise)
+## 2. Definitions (precise — locked 2026-05-27)
 
 | Term | Meaning | Identifier |
 |---|---|---|
-| **Session** | One datahike DB + its konserve store. The unit of data sharing. One session can hold N agents. Persistent by default. | `:seon.session/<name>` keyword |
-| **Agent** | One wasm runtime instance that joins a session. Has identity, can transact, can subscribe to tx events. | `:seon.agent/<id>` keyword |
-| **Master DB** | `:seon.runtime` (existing). Hosts runtime registry, orchestrator entities, session-entity records, inspector data. Not a session, just the JVM's own primary DB. | `:seon.runtime` (existing) |
+| **session** | One DB + konserve store + wire-server socket pair. The unit of data sharing. Persistent (file/sqlite) or ephemeral (memory). Named via the existing ID generator; no hardcoded names except `:seon.runtime` master. One session can hold N agents. | `:seon.session/<name>` keyword |
+| **agent** | One wasm runtime joining a session. N agents per session = collaboration; 1 agent per session = isolation. | `:seon.agent/<id>` (14-char hex) |
+| **seon** | THE seon JVM Clojure system (the server). Canonical name. | n/a |
+| **wire-server** | UDS server in the seon JVM that handles wasm guest requests. Lives at `src/seon/server/`. Wave 4 landed it. | n/a |
+| **guest-cljs** | CLJS source compiled to `wasm32-wasip2` via `wasm-rquickjs`. Future siblings: `guest-python/`, etc. | n/a |
+| **host** | Rust binary (was "rust-host", "wasmtime-host"). Loads wasm components, manages session→socket routing. Wrapped by `shell` for product builds. Lives at `host/` (rename from `pod-host/sidecar-poc/rust-host/` due in Wave 6). | n/a |
+| **shell** | Tauri packaging that wraps `host` for desktop distribution. Not built yet. | n/a |
+| **master DB** | `:seon.runtime` (existing). Path A. Hosts runtime registry, orchestrator entities, session-entity records, inspector data. Not a session — the JVM's own primary DB. | `:seon.runtime` |
+
+**Retired terms** (do not use in new docs): "sidecar", "PoC", "pod" (V0-only; retire at cutover), "platform" (as a directory name), "jvm-writer", "rust-host".
+
+**The DB doesn't know about agents directly.** The session is the storage unit. Agent identity is metadata on datoms (e.g., `:seon.db/agent-id` stamps via tx-context).
 
 **The DB doesn't know about agents directly.** The session is the storage unit. Agent identity is metadata on datoms (e.g., `:seon.db/agent-id` stamps via tx-context).
 
@@ -128,15 +147,17 @@ seon/data/                                ← project-local; gitignored
 - `:memory` backend never creates a directory.
 - Directory presence on disk does NOT auto-register the session — registration happens via the API (see §5).
 
-## 4. Backend defaults
+## 4. Backend defaults (revised 2026-05-27)
 
-| Use case | Default backend | Reason |
-|---|---|---|
-| Master `:seon.runtime` | `:sqlite` (preferred) or `:file` (transitional) | Production data; long-lived |
-| Named session `:seon.session/<name>` | `:sqlite` (preferred) or `:file` (transitional) | Persistent by default; named = caller cares |
-| Auto-id ephemeral session `:seon.session/tmp-<uuid>` | `:memory` | Tests only |
+| Use case | MVP backend | Eventual | Reason |
+|---|---|---|---|
+| Master `:seon.runtime` | `:file` | `:sqlite` | Production data; long-lived |
+| Named session `:seon.session/<name>` | `:file` | `:sqlite` | Persistent by default; named = caller cares |
+| Auto-id ephemeral session `:seon.session/tmp-<uuid>` | `:memory` | `:memory` | Tests only |
 
-**Memory backend is for testing ONLY.** Anything that persists data uses sqlite (preferred long-term) or file (acceptable transitional). The user's words: "Everything else should be sqlite or file if the code isn't already written. I want sqlite eventually."
+**`:sqlite` deferred from MVP.** Wave 1a discovered that `io.replikativ/konserve-jdbc 0.2.91` does not register on `io.replikativ/konserve 0.9.340`'s `konserve.protocols/-PEDNKeyValueStore` dispatch multimethod — `(d/create-database {:store {:backend :jdbc ...}})` throws `Unsupported store backend: :jdbc`. The fix is either a konserve version alignment or an explicit `(require 'konserve-jdbc.core)` on the load path; deferred until needed. There is a TODO comment in `src/seon/server/store.clj`.
+
+**`:memory` backend is for testing ONLY.** Anything that needs to persist data uses `:file` for now and `:sqlite` once the dependency mismatch is resolved. The earlier note that "SQLite backend already works on JVM via konserve-jdbc + xerial/sqlite-jdbc" referred to the V2 PoC's `jvm-writer/writer.clj:61-70`; that pattern works there but does NOT round-trip through `datahike.api/create-database` on the current `deps.edn` pin. See `pod-host/sidecar-poc/jvm-writer/deps.edn` for the working coords if/when we revisit.
 
 ## 5. Session registration
 
@@ -180,10 +201,21 @@ Atomic, idempotent, cheap. Direct datahike — no flow, no orphan risk. The wire
 
 **Why in the master DB**: discoverable via the existing seon.web inspector (already wired for :seon.runtime entities), queryable, render-able via the existing render pipeline, survives restart, single source of truth.
 
-**Lifecycle**:
-- `(db/ensure-db! :seon.session/alice)` → if a `:seon.session/name :alice` entity exists, reuse the conn (or spawn if dead). If not, transact the entity + spawn the conn. Idempotent.
-- `(db/remove-db! :seon.session/alice)` → close conn, mark entity `:seon.session/state :archived`. Filesystem dir is kept by default (configurable flag for hard delete).
+**Lifecycle (locked 2026-05-27)**:
+
+```clojure
+(seon.session/create!  {::name :alice ::backend :file ::path "..."}) ; throws if exists
+(seon.session/start!   {::name :alice})                              ; throws if absent
+(seon.session/ensure!  {::name :alice ::backend :file})              ; auto-detect: create-if-absent + start
+(seon.session/stop!    {::name :alice})                              ; halt wire-server; DB stays on disk
+(seon.session/destroy! {::name :alice ::confirm :yes-really})        ; DELETE everything
+```
+
+- `ensure!` is the workhorse for agent callers; `create!`/`start!`/`stop!`/`destroy!` are the explicit verbs for orchestrator + UI.
 - JVM boot → query `[?s :seon.session/state :active]`, lazy-register conns on first reference (no eager re-open).
+- `stop!` halts the wire-server socket pair; the on-disk store survives. `destroy!` is the only thing that touches the filesystem.
+
+**One Integrant component manages N sessions.** `:seon.server.session/registry` IS the wire-bearing component — it owns the atom AND spawns/halts per-session wire-server sockets. There is NO separate `:seon.server/wire` component. The original sketch (one `:seon.server/wire` listening on a single fixed socket pair) doesn't compose with Option B socket-per-session routing locked in Wave 4a; the registry took that role.
 
 **Comparison to V2 PoC**: there the Rust host kept a `SessionRegistry` HashMap in Rust memory. In V2-PoC, "the session existed if a JVM process was running for it." Lost on host restart unless the agent re-referenced.
 
@@ -307,7 +339,40 @@ CLJS guest overlay needs no change — wire format is unchanged.
 - Tauri packaging: out of scope.
 - Multi-tenancy hardening: PoC quality; production hardening is a separate pass.
 
-## 11. Doc cross-references
+## 11. Replay model (locked 2026-05-27)
+
+**MVP gate: dumb per-form replay** of `:seon.fn` / `:seon.ns` / `:seon.schema` entities. This is what V0 has via `replay-program-graph!` and what V2 inherits. Smart ns-batched replay via the analyzer is a **deferred optimization**, not an MVP blocker.
+
+**Hard rule for V2 session DBs:**
+
+> Every state-changing thing must transact a datom or be reconstructable from one.
+
+Agent runtime atom state (e.g., `seon.agents/!self`) is NOT serialized directly — it is reconstructed by replaying datoms on resume. The pattern is "datoms are the log; atoms are the projection." This matches the three-tier storage rule in MEMORY.md.
+
+**Substrate-source seeding deferred.** Substrate code (the seon namespaces themselves) lives in the compiled bundle and is loaded the normal way at JVM/pod boot. Only AGENT-defined code (forms the agent wrote at runtime via `eval`) is replayed from datoms. Smart substrate-seeding — where the substrate itself comes from a datom corpus visible to the agent — is item 9 in `v2-open-questions-investigation-2026-05-27.md` (~150 LOC) and is queued AFTER V2 cutover, not before.
+
+This split keeps the MVP scope tight: V2 cutover = "agent can run, transact, query, resume with its own definitions intact." Smart seeding = "agent can see and modify the substrate's own definitions" — a follow-up capability, not a prerequisite.
+
+## 12. Runtime atom consolidation (locked 2026-05-27)
+
+`src/seon/runtime.clj` currently has three private atoms at lines 295, 330, 883:
+
+- `generated-ids` — set, for ID dedup
+- `registry-cache` — cache
+- `flow-handles` — map of flow component handles
+
+These collapse into ONE atom with three keys, matching `atom-state-system-2026-05-26.md`'s "one substrate atom per concern" pattern:
+
+```clojure
+(defonce !self
+  (atom {::generated-ids #{}
+         ::registry-cache {}
+         ::flow-handles {}}))
+```
+
+Small refactor (~50 LOC of edits). Listed as **Item D** in Wave 4.5 of the execution plan. The investigation report already noted these are all the same concern (`seon.runtime`'s own state); collapsing them is consistency hygiene, not new capability.
+
+## 13. Doc cross-references
 
 - `pod-host/sidecar-poc/SESSIONS.md` — original session concept; this doc supersedes the file-layout sections
 - `pod-host/sidecar-poc/AGENT.md` — agent mental model; still valid for V2 guest-side
@@ -315,3 +380,6 @@ CLJS guest overlay needs no change — wire format is unchanged.
 - `docs/prds/agent-runtime/v0-to-v2-transition-plan-2026-05-26.md` — phased plan; §2 now points here
 - `docs/prds/agent-runtime/atom-state-system-2026-05-26.md` — atom-based runtime state; complementary
 - `pod-host/sidecar-poc/bench/v0-port-survey.md` — V0 API coverage; relevant for migration
+- `docs/prds/agent-runtime/v2-open-questions-investigation-2026-05-27.md` — pre-Wave-5 sweep that fed the 2026-05-27 locks above
+- `docs/prds/agent-runtime/RESUME-2026-05-27.md` — session handoff; entry point for next agent
+- `docs/prds/agent-runtime/execution-waves-2026-05-26.md` — wave-by-wave status

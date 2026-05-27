@@ -52,13 +52,16 @@ These are the tests that prove the platform works. They live in `pod-host/sideca
 | 3b | Verifier | `(user/reset)` clean + session tests | 15min | report |
 | 4a | Worker | Port wire-server: codec/transit/broadcast verbatim; rewrite writer handlers to use registry | 3-4h | wire tests pass |
 | 4b | Verifier | Send raw bytes to UDS, verify roundtrip | 30min | report |
-| 5a | Worker | `:seon.server/wire` Integrant component + system.edn wiring | 1h | reset cycles clean |
+| 4.5 | Worker | Pre-Wave-5 cleanup (items A/B/C/D — see below) | 2-3h | each item gated separately |
+| 5a | Worker | `:seon.server.session/registry` as the wire-bearing Integrant component + system.edn wiring | 1h | reset cycles clean |
 | 5b | Verifier | 10× `(user/reset)`, Path A still working | 15min | report |
-| 6a | Worker | Rust host trim — drop JvmSupervisor, connect to seon JVM | 3h | cargo build clean |
+| 6a | Worker | Rust host trim — drop JvmSupervisor, connect to seon JVM. Rename `pod-host/sidecar-poc/rust-host/` → `host/` | 3h | cargo build clean |
 | 6b | Verifier | Phase D smoke (3 guests × 60s) against seon JVM | 30min | report |
 | 7 | Cleanup | Delete `pod-host/sidecar-poc/jvm-writer/`, update docs | 30min | final commit |
 
-Total: ~14-17h of agent time across ~12 agent invocations.
+Total: ~16-20h of agent time across ~14 agent invocations.
+
+**Note on Wave 5 (locked 2026-05-27):** The original sketch had a standalone `:seon.server/wire` Integrant component listening on a fixed socket pair. That does NOT compose with Option B socket-per-session routing locked in Wave 4a. The registry IS the wire-bearing component — `:seon.server.session/registry` owns the atom AND spawns/halts per-session wire-server sockets via a single init-key/halt-key pair. There is no separate `:seon.server/wire`. See `integration-architecture-2026-05-26.md` §5.
 
 ---
 
@@ -296,14 +299,75 @@ NS rename map (5 source nss; 6 test nss followed the `seon.sidecar.X-test → se
 
 ---
 
+## Wave 4.5 — Pre-Wave-5 cleanup (locked 2026-05-27)
+
+Surfaced by `v2-open-questions-investigation-2026-05-27.md` + user direction same day. Four items; each is independently committable. Do A first (unblocks Wave 5 wiring); B/C/D are parallel-safe.
+
+### Item A — Session namespace consolidation
+
+**Status:** decision locked; Wave 3a already partially landed the rename.
+
+The three namespaces that touch "session":
+
+| NS | Role | Disposition |
+|---|---|---|
+| `seon.session` (renamed from `seon.orchestrator.session`, 609 LOC version) | Session ENTITY schema + lifecycle API (`create!`/`start!`/`stop!`/`destroy!`/`pause!`/`resume!`) | KEEP; extend with new lifecycle verbs |
+| `seon.server.session` (Wave 2's atom registry, ~200 LOC) | Pure RUNTIME registry (atom of `db-name → {conn,backend,path,pub-chan}`) | KEEP; direct datahike, no flow |
+| `seon.orchestrator.session` (predecessor of `seon.session`) | DELETED by Wave 3a rename | n/a |
+
+Clear split: **entities** vs **runtime**. The investigation report's "three-way collision" is resolved by recognizing these are sibling concerns, not duplicates. Document the split in the `seon.session` and `seon.server.session` docstrings. ~30 min.
+
+### Item B — Substrate-source seeding scope
+
+**Decision:** DEFER from MVP. V0's `replay-program-graph!` continues to replay agent-defined code from `:seon.fn`/`:seon.ns`/`:seon.schema` entities; substrate code (the `seon.*` namespaces themselves) comes from the compiled bundle at process start. Smart substrate-seeding is item 9 in the investigation report (~150 LOC) and queues AFTER V2 cutover.
+
+Document explicitly in the RESUME doc and the architecture doc §11. No code; ~15 min of doc.
+
+### Item C — Ship `bin/test-cljs`
+
+Today `bin/test` runs only JVM kaocha (cold ~2min). Need a separate `bin/test-cljs` that runs shadow-cljs tests via Node. The MCP REPL has wedged twice (Waves 1a + 2a per the status table) — bin scripts are insurance.
+
+**Files touched:**
+- `bin/test-cljs` (new, ~50 LOC bash)
+- `bin/test-clj` (new, ~5 LOC wrapper renamed from current `bin/test`)
+- `bin/test` (rewritten to call both)
+- `shadow-cljs.edn` (add `:node-test` build, ~10 LOC)
+
+~1h. See `v2-open-questions-investigation-2026-05-27.md` Q7 for the target shape.
+
+### Item D — Consolidate `seon.runtime` atoms
+
+Three private atoms in `src/seon/runtime.clj` at lines 295/330/883:
+
+- `generated-ids` (set, ID dedup)
+- `registry-cache` (cache mirror of `:seon.runtime` entities)
+- `flow-handles` (map of live core.async flow handles)
+
+Collapse into ONE atom matching atom PRD's "one substrate atom per concern":
+
+```clojure
+(defonce !self
+  (atom {::generated-ids #{}
+         ::registry-cache {}
+         ::flow-handles {}}))
+```
+
+Refactor scope: rewire callsites within `runtime.clj` only (the atoms are private). ~50 LOC of edits. ~1h. Targeted tests on `seon.runtime` only.
+
+### Wave 4.5 gate
+
+All four items committed independently. Path A regression intact. `bin/test-cljs` exits 0 on a no-op CLJS suite (proves the wire). Then Wave 5 proceeds.
+
+---
+
 ## Wave 5a — Worker: Integrant wiring
 
-**Goal:** Add `:seon.server/wire` Integrant init/halt to `src/seon/system.clj`. Add config to `resources/system.edn`. Wire-server starts at boot, alongside the existing `:seon.db/flow`, on its own sockets.
+**Goal:** Add `:seon.server.session/registry` Integrant init/halt to `src/seon/system.clj`. Add config to `resources/system.edn`. The registry IS the wire-bearing component — it owns the atom AND spawns/halts per-session wire-server sockets via Option B socket-per-session routing. **There is NO standalone `:seon.server/wire` component** (locked 2026-05-27 — see architecture doc §5).
 
 **Files touched:**
 - `src/seon/system.clj` (~30 LOC added)
 - `resources/system.edn` (~10 LOC added)
-- `src/seon/server/wire.clj` — `start!`/`stop!` may need adjustment to fit Integrant's init-key/halt-key shape.
+- `src/seon/server/session.clj` — `init-key`/`halt-key!`/`suspend-key!`/`resume-key` on the registry. On halt: `(doseq [{::keys [conn pub-chan]} (vals @registry)] (close-socket-pair! ...) (d/release conn))`.
 
 **Verification:**
 
@@ -338,14 +402,15 @@ NS rename map (5 source nss; 6 test nss followed the `seon.sidecar.X-test → se
 
 ---
 
-## Wave 6a — Worker: Rust host trim
+## Wave 6a — Worker: Rust host trim + rename
 
-**Goal:** Update `pod-host/sidecar-poc/rust-host/src/main.rs` to NOT spawn its own JVM writer. Drop `JvmSupervisor`. Connect to `/tmp/seon-poc-req.sock` + `/tmp/seon-poc-pub.sock` (the seon JVM's wire-server sockets — configurable via CLI flag). Sessions are db-name strings; the registry is server-side now.
+**Goal:** Update the Rust host to NOT spawn its own JVM writer. Drop `JvmSupervisor`. Connect to the seon JVM's wire-server sockets (configurable via CLI flag). Sessions are db-name strings; the registry is server-side now. **Also rename the directory** `pod-host/sidecar-poc/rust-host/` → `host/` (terminology lock 2026-05-27 — drop "sidecar"/"PoC"/"rust-host" prefixes).
 
 **Files touched:**
-- `pod-host/sidecar-poc/rust-host/src/main.rs` — drop `JvmSupervisor`, `Session.jvm`, etc.
-- `pod-host/sidecar-poc/rust-host/src/guest.rs` — minor; session env var unchanged
-- `pod-host/sidecar-poc/rust-host/Cargo.toml` — possibly drop `tokio::process` deps no longer needed
+- `git mv pod-host/sidecar-poc/rust-host/ host/`
+- `host/src/main.rs` — drop `JvmSupervisor`, `Session.jvm`, etc.
+- `host/src/guest.rs` — minor; session env var unchanged
+- `host/Cargo.toml` — possibly drop `tokio::process` deps no longer needed
 
 **No code in `src/seon/server/` changes here.** All Rust-side only.
 
@@ -375,10 +440,10 @@ Then via MCP eval, ensure the seon JVM is up + the wire-server's sockets are lis
 
 ```bash
 # Acceptable Bash (Rust binary launch):
-cd pod-host/sidecar-poc/rust-host
+cd host
 cargo run --release -- \
   --connect-existing-jvm \
-  --guest-wasm ../guest/sidecar-agent-build/target/wasm32-wasip2/release/sidecar_guest.wasm \
+  --guest-wasm ../pod-host/sidecar-poc/guest/sidecar-agent-build/target/wasm32-wasip2/release/sidecar_guest.wasm \
   --multi-agent --multi-duration-ms 60000
 
 ```
@@ -415,18 +480,24 @@ Those are subsequent transition-plan phases, not this execution plan. This plan 
 
 ## Status — to be updated by agents as they go
 
-| Wave | Status | Done at | Notes |
+| Wave | Status | Commit | Notes |
 |---|---|---|---|
-| 1a worker | done | 2026-05-26 | deps added; `seon.server.store` + `store-test` shipped; REPL probes verified config shapes for :memory/:file/:sqlite. REPL wedged late (`in-ns` left eval-wrapper in bad state) — stopped per rule 1. Hook reload + lint clean on both files. See worker report. |
-| 1b verifier | not started | | |
-| 2a worker | code-shipped-tests-unrun | 2026-05-27 | `src/seon/server/session.clj` (~200 LOC) + `test/seon/server/session_test.clj` (~120 LOC, 7 deftests) shipped. Compliance check green. Smoke test via REPL did NOT complete: orchestrator session wedged when the worker `(in-ns 'seon.server.session)`'d to test with `::` keywords (same wedge mode flagged in Wave 1a). STOPPED per hard rule 4 before running the test suite. Needs verifier (Wave 2b) to run tests in a fresh session. |
-| 2b verifier | not started | | |
-| 3a worker | not started | | |
-| 3b verifier | not started | | |
-| 4a worker | not started | | |
-| 4b verifier | not started | | |
-| 5a worker | not started | | |
-| 5b verifier | not started | | |
-| 6a worker | not started | | |
-| 6b verifier | not started | | |
-| 7 cleanup | not started | | |
+| 1a worker | DONE | `91cac41` + `2d6955e` | Foundation deps + store config builder. `:mem`→`:memory` fix + `:sqlite` deferred to follow-up landed in `2d6955e`. 7 tests / 28 assertions. |
+| 1b verifier | DONE (subsumed by `2d6955e`) | `2d6955e` | RED flagged the `:mem` bug and konserve-jdbc load path; both addressed. `:sqlite` formally deferred (see architecture doc §4). |
+| 2a worker | DONE | `c42bb2a` | `seon.server.session` registry — Path B core. 7 tests / 20 assertions. |
+| 2b verifier | DONE (post-3a) | folded into `060fd15` | Once `seon.session` rename landed, tests ran clean. |
+| 3a worker | DONE | `060fd15` + `3350f2e` | Schema attrs + test require fix. 14 tests / 57 assertions on the consolidated `seon.session` namespace. |
+| 3b verifier | not run as separate pass | — | Subsumed by `3350f2e` and Wave 4a static check. No full-suite gate run. |
+| 4a worker | DONE | `3350f2e` | Wave 4a — port wire-server (Option B verbatim). 11/11 files moved; namespaces load clean. REPL gate deferred to Wave 5 (REPL was wedged on pre-existing branch breakage unrelated to 4a). |
+| 4b verifier | PENDING | — | V2 PoC tests spawn writer subprocess via `clojure -M:writer` (doesn't exist in seon JVM). ~30 min fix — rewrite fixture to start `seon.server.wire/start!` in-process. Folded into Wave 4.5 work. |
+| 4.5 — A | DONE (mostly) | covered by `060fd15` + `3350f2e` | Session ns consolidation. Docstrings still to be updated. |
+| 4.5 — B | DONE (doc-only) | this doc | Substrate-source seeding deferred. Documented. |
+| 4.5 — C | not started | — | `bin/test-cljs` to ship. ~1h. |
+| 4.5 — D | not started | — | `seon.runtime` atom consolidation. ~1h. |
+| 5a worker | not started | — | Integrant wiring (registry IS the component). |
+| 5b verifier | not started | — | |
+| 6a worker | not started | — | Rust host trim + rename `pod-host/sidecar-poc/rust-host/` → `host/`. |
+| 6b verifier | not started | — | |
+| 7 cleanup | not started | — | Delete `pod-host/sidecar-poc/jvm-writer/`. |
+
+`c896ffd` (`:agent` → `:agent-jvm-pool` deps rename) landed alongside Wave 4a; not part of any specific wave but documented in architecture doc §0.
