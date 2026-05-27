@@ -11,7 +11,7 @@
   when the pool assigns the JVM to a session (see pool.clj:claim!).
 
   Usage:
-    clj -M:agent -m seon.flow.agent-runner --port 7890 --namespace seon.test.hello"
+    clj -M:agent-jvm-pool -m seon.flow.agent-runner --port 7890 --namespace seon.test.hello"
   (:require [nrepl.server :as nrepl]
             [taoensso.timbre :as log]
             [clojure.core.async :as async]

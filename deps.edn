@@ -133,9 +133,14 @@
   ;; Development nREPL - starts nREPL on port 7888 with user namespace loaded
   ;; Usage: clj -M:dev:nrepl
   ;; Then connect and use (go) to start the Integrant system
-  ;; Isolated agent JVM - minimal deps
-  ;; Usage: clj -M:agent -m seon.flow.agent-runner --port 7890 --namespace seon.test.hello
-  :agent {:replace-deps {org.clojure/clojure {:mvn/version "1.12.0"}
+  ;;
+  ;; CLJ agent JVM pool (V0/legacy) — pre-V2 pattern where each agent ran in
+  ;; its own out-of-process JVM. V2 replaces this with CLJS agents in wasm
+  ;; sandboxes (see :cljs alias). This pool is NOT auto-started by the
+  ;; running system; only spawned explicitly when something needs an
+  ;; isolated CLJ JVM. Retire entirely once V2 cutover is complete.
+  ;; Usage: clj -M:agent-jvm-pool -m seon.flow.agent-runner --port 7890 --namespace seon.test.hello
+  :agent-jvm-pool {:replace-deps {org.clojure/clojure {:mvn/version "1.12.0"}
                          org.clojure/core.async {:mvn/version "1.9.829-alpha2"}
                          metosin/malli {:mvn/version "0.20.0"}
                          nrepl/nrepl {:mvn/version "1.3.0"}

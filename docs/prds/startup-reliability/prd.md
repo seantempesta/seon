@@ -245,7 +245,7 @@ Agent JVMs have 256MB heap + 64MB metaspace. After AGENT_READY, `instrumentation
 Run manually and watch stderr:
 
 ```bash
-clojure -M:agent --port 7900 --namespace seon.pool.warm \
+clojure -M:agent-jvm-pool --port 7900 --namespace seon.pool.warm \
   --datalevin-uri "dtlv://datalevin:datalevin@127.0.0.1:8898/agent-7900" 2>&1 | tee /tmp/agent-crash.log
 
 ```
