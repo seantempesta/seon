@@ -55,6 +55,13 @@
     ;; `seon.repl/ensure-bootstrap!` rather than holding a second
     ;; copy here. See compile-state-lifecycle research note.
     [seon.repl :as repl]
+    ;; Schemas-as-queryable-data (research file
+    ;; schemas-as-queryable-data-2026-05-26.md). At boot,
+    ;; start-agent! decomposes every entity-shape :map schema into
+    ;; a :seon.schema entity carrying its required-attrs / id-attr /
+    ;; render symbols. Renderer kind-lookup queries these via
+    ;; datalog instead of walking the in-memory *schemas atom.
+    [seon.schema :as schema]
     ;; Phase 2 — test capture as data. Required so the bundle
     ;; includes the runner; agent code reaches it from
     ;; bootstrap-CLJS eval via the analyzer's globalThis fallback
@@ -621,6 +628,13 @@
                                                      :seon.message/to}
                             :seon.handler/fn        'seon.handlers.wake/wake-on-message
                             :seon.handler/on-origin #{:user :agent}}))
+                ;; Schemas-as-queryable-data: decompose every registered
+                ;; entity-shape :map schema into a :seon.schema DB entity
+                ;; so the renderer's kind-lookup can query via datalog
+                ;; (no in-memory atom walk on the hot path). Identity
+                ;; upsert on :seon.schema/key — re-running is cheap.
+                _ (await (db/transact!
+                           {:seon.db/tx-data (schema/all-entity-schemas-tx-data)}))
                 ;; Install the per-agent inspector tx-listener. Pushes
                 ;; morphs for the agent-view inspector page (/agent/<id>).
                 _ (seon.web.inspector/install!)]
