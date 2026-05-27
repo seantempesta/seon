@@ -292,7 +292,16 @@
   "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")
 
 ;; In-memory set of generated IDs for collision checking
-(defonce ^:private generated-ids (atom #{}))
+;; Substrate state — ONE atom per the atom-state PRD's
+;; "one substrate atom per concern" principle (Wave 4.5 item D, 2026-05-27).
+;; Keys:
+;;   ::generated-ids  — set of generated IDs for collision checking
+;;   ::registry-cache — cache of runtime registry entries (mirror of DB)
+;;   ::flow-handles   — map of {flow-id -> integrant handle}
+(defonce ^:private !state
+  (atom {::generated-ids  #{}
+         ::registry-cache {}
+         ::flow-handles   {}}))
 
 (defn generate-id
   "Generate a 6-character base62 instance ID, optionally prefixed.
@@ -310,16 +319,16 @@
   (loop [attempts 0]
     (when (>= attempts 100)
       (throw (ex-info "Failed to generate unique ID after 100 attempts"
-                      {:generated-count (count @generated-ids)})))
+                      {:generated-count (count (::generated-ids @!state))})))
     (let [sb (StringBuilder. 6)
           _ (dotimes [_ 6]
               (.append sb (.charAt base62-chars (.nextInt secure-random 62))))
           raw-id (str sb)
           full-id (if prefix (str prefix "-" raw-id) raw-id)]
-      (if (contains? @generated-ids raw-id)
+      (if (contains? (::generated-ids @!state) raw-id)
         (recur (inc attempts))
         (do
-          (swap! generated-ids conj raw-id)
+          (swap! !state update ::generated-ids conj raw-id)
           {::id full-id})))))
 
 ;;; ---------------------------------------------------------------------------
@@ -327,7 +336,6 @@
 ;;; ---------------------------------------------------------------------------
 
 ;; Map of namespace-string -> instance-map
-(defonce ^:private registry-cache (atom {}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Persistence
@@ -403,7 +411,7 @@
                    nrepl-port (assoc ::nrepl-port nrepl-port)
                    component-key (assoc ::component-key component-key))]
     ;; Update in-memory cache
-    (swap! registry-cache assoc ns-str inst-map)
+    (swap! !state update ::registry-cache assoc ns-str inst-map)
     ;; Persist to Datahike
     (persist-instance! inst-map)
     (log/debug "Registered runtime instance" {:namespace ns-str
@@ -425,13 +433,13 @@
   {:malli/schema [:=> [:cat ::unregister-request] ::unregister-response]}
   [request]
   (let [ns-str (::namespace request)]
-    (if-let [inst-map (get @registry-cache ns-str)]
+    (if-let [inst-map (get (::registry-cache @!state) ns-str)]
       (let [now (java.util.Date.)
             updated (assoc inst-map
                            ::status :stopped
                            ::stopped-at now)]
         ;; Update in-memory cache
-        (swap! registry-cache assoc ns-str updated)
+        (swap! !state update ::registry-cache assoc ns-str updated)
         ;; Persist to Datahike
         (persist-instance! updated)
         (log/debug "Unregistered runtime instance" {:namespace ns-str})
@@ -452,7 +460,7 @@
      The instance map, or nil if not found."
   {:malli/schema [:=> [:cat ::instance-request] [:maybe ::instance-response]]}
   [request]
-  (get @registry-cache (::namespace request)))
+  (get (::registry-cache @!state) (::namespace request)))
 
 (defn instances
   "List all registered instances.
@@ -464,7 +472,7 @@
      Vector of instance maps from in-memory cache."
   {:malli/schema [:=> [:cat ::instances-request] ::instances-response]}
   [_request]
-  (vec (vals @registry-cache)))
+  (vec (vals (::registry-cache @!state))))
 
 (defn running-sessions
   "All external running instances from the in-memory cache.
@@ -478,7 +486,7 @@
      Vector of instance maps matching external + running."
   {:malli/schema [:=> [:cat ::running-sessions-request] ::running-sessions-response]}
   [_request]
-  (->> (vals @registry-cache)
+  (->> (vals (::registry-cache @!state))
        (filter #(and (= :external (::location %))
                      (= :running (::status %))))
        vec))
@@ -603,7 +611,7 @@
       (when (pos? skipped)
         (log/warn "Skipped stale runtime entities missing required fields"
                   {:skipped skipped}))
-      (reset! registry-cache cache-map)
+      (swap! !state assoc ::registry-cache cache-map)
       (log/info "Hydrated runtime cache" {:count (count cache-map)})
       {::hydrated-count (count cache-map)})
     (catch Exception e
@@ -880,7 +888,6 @@
 
 ;; Map of flow-id (keyword) -> {:flow flow-obj :chans chans-map :label string}
 ;; Flow objects are opaque and not serializable, so this is in-memory only.
-(defonce ^:private flow-handles (atom {}))
 
 (defn register-flow!
   "Register a flow handle (in-memory only -- flow objects aren't serializable).
@@ -897,7 +904,7 @@
   [{::keys [flow-id flow chans label]}]
   (let [now (java.time.Instant/now)
         handle {:flow flow :chans chans :label label :started-at now}]
-    (swap! flow-handles assoc flow-id handle)
+    (swap! !state update ::flow-handles assoc flow-id handle)
     ;; Also register in runtime registry for Datahike persistence
     (register! {::namespace (str "flow." (name flow-id))
                 ::status :running
@@ -912,8 +919,8 @@
 
    Returns the removed handle, or nil if not found."
   [{::keys [flow-id]}]
-  (let [removed (get @flow-handles flow-id)]
-    (swap! flow-handles dissoc flow-id)
+  (let [removed (get (::flow-handles @!state) flow-id)]
+    (swap! !state update ::flow-handles dissoc flow-id)
     (unregister! {::namespace (str "flow." (name flow-id))})
     removed))
 
@@ -925,19 +932,19 @@
 
    Returns the handle map or nil."
   [{::keys [flow-id]}]
-  (get @flow-handles flow-id))
+  (get (::flow-handles @!state) flow-id))
 
 (defn list-flows
   "List all registered flow handles.
 
    Returns map of flow-id -> handle."
   [_request]
-  @flow-handles)
+  (::flow-handles @!state))
 
 (defn clear-flows!
   "Remove all flow handles. For testing only."
   []
-  (reset! flow-handles {}))
+  (swap! !state assoc ::flow-handles {}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Lifecycle Hooks
@@ -956,7 +963,7 @@
         (let [flow-id :seon.flow/infrastructure
               handle {:flow flow :chans chans :label "infrastructure"
                       :started-at (java.time.Instant/now)}]
-          (swap! flow-handles assoc flow-id handle))))
+          (swap! !state update ::flow-handles assoc flow-id handle))))
     (catch Exception e
       (log/debug "Could not re-populate flow-handles from Integrant" {:error (.getMessage e)}))))
 
@@ -974,9 +981,9 @@
      ::reset - true if reset succeeded"
   {:malli/schema [:=> [:cat ::reset-registry-request] ::reset-registry-response]}
   [_request]
-  (reset! registry-cache {})
+  (swap! !state assoc ::registry-cache {})
   (reset! generated-ids #{})
-  (reset! flow-handles {})
+  (swap! !state assoc ::flow-handles {})
   {::reset true})
 
 ;;; ---------------------------------------------------------------------------
@@ -992,6 +999,6 @@
 
   ;; Generate IDs
   (generate-id {})
-  (count @generated-ids)
+  (count (::generated-ids @!state))
 
   nil)
