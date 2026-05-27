@@ -199,6 +199,25 @@
                       :optimizations     :simple
                       :externs           ["externs/node_fs.js"]}}
 
+  ;; CLJS test runner — shadow's :node-test target. Compiles every
+  ;; namespace matching `-test$` under the source paths into a single
+  ;; Node-runnable artifact at `out/test/test.js`. Invoked by
+  ;; `bin/test-cljs` (Wave 4.5 item C — Platform track).
+  ;;
+  ;; The V0 CLJS tests use plain `cljs.test/deftest`, so they're
+  ;; compatible with `:node-test` without modification. Tests that
+  ;; need a live pod (seon.test.runner-based) are excluded by living
+  ;; in a non-`-test$` ns or being preloaded only on `:client`.
+  ;;
+  ;; Build + run: `bin/test-cljs`
+  :test
+  {:target    :node-test
+   :output-to "out/test/test.js"
+   :ns-regexp "-test$"
+   :compiler-options {:warnings-as-errors false
+                      :optimizations      :simple
+                      :externs            ["externs/node_fs.js"]}}
+
   ;; Build: `clj -M:cljs compile bootstrap`   (or release)
   ;; Output: out/bootstrap/  — index.transit.json + per-ns .js
   :bootstrap

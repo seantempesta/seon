@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# bin/test-cljs — CLJS test runner via shadow-cljs :node-test target.
+#
+# Usage:
+#   bin/test-cljs                 # compile + run all CLJS tests (~-test$ ns regexp)
+#   bin/test-cljs --no-build      # skip compile; just run out/test/test.js
+#   bin/test-cljs --watch         # shadow-cljs watch + auto-rerun (TODO: detached path)
+#
+# Exit codes: 0 = pass, 1 = fail, 2 = compile/build error
+#
+# Output: out/test/test.js (intermediate)
+#         tmp/test-cljs-<timestamp>.log (full transcript, tmp/test-cljs-latest.log symlinked)
+#
+# Wave 4.5 item C — Platform track. Gates Wave 4b verification.
+
+set -uo pipefail
+cd "$(dirname "$0")/.."
+
+BUILD=1
+
+for arg in "$@"; do
+  case "$arg" in
+    --no-build) BUILD=0 ;;
+    --help|-h)
+      sed -n '2,11p' "$0"
+      exit 0
+      ;;
+    *) echo "Unknown arg: $arg"; exit 2 ;;
+  esac
+done
+
+mkdir -p tmp out/test
+TMPOUT="tmp/test-cljs-$(date +%Y%m%d-%H%M%S)-$$.log"
+
+START=$(date +%s)
+
+if [ "$BUILD" = "1" ]; then
+  echo "== Compiling :test build (shadow-cljs) =="
+  if ! clojure -M:cljs release test 2>&1 | tee "$TMPOUT"; then
+    echo ""
+    echo "========================================"
+    echo "COMPILE FAIL"
+    echo "Full output: $TMPOUT"
+    echo "========================================"
+    exit 2
+  fi
+fi
+
+if [ ! -f "out/test/test.js" ]; then
+  echo "out/test/test.js missing — build step skipped or failed"
+  exit 2
+fi
+
+echo ""
+echo "== Running tests (node out/test/test.js) =="
+node out/test/test.js 2>&1 | tee -a "$TMPOUT"
+EXIT_CODE=${PIPESTATUS[0]}
+
+END=$(date +%s)
+ELAPSED=$((END - START))
+
+echo ""
+echo "========================================"
+if [ $EXIT_CODE -eq 0 ]; then
+  echo "PASS (${ELAPSED}s)"
+else
+  echo "FAIL (${ELAPSED}s)"
+  echo ""
+  echo "Failing assertions:"
+  grep -E "FAIL|ERROR" "$TMPOUT" | head -20 || true
+fi
+echo "========================================"
+
+ln -sf "$(basename "$TMPOUT")" tmp/test-cljs-latest.log
+echo "Full output: $TMPOUT (or tmp/test-cljs-latest.log)"
+
+exit $EXIT_CODE
