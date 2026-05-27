@@ -64,7 +64,11 @@
 
 ;; Hiccup data shape — recursive vector starting with keyword, optional
 ;; attrs map, children. Defined via Malli local registry so the
-;; recursive ref resolves.
+;; recursive ref resolves. Kept registered for documentation purposes;
+;; instrumentation uses `valid-hiccup?` below (a `[:fn ...]` predicate)
+;; because Malli's recursive seqex schemas trip
+;; `:malli.core/potentially-recursive-seqex` when referenced inside a
+;; function schema.
 (schema/register! :seon.render/hiccup
   [:schema {:registry {::elem [:or :string :int :nil ::node]
                        ::node [:cat :keyword
@@ -72,18 +76,49 @@
                                     [:* [:ref ::elem]]]}}
    ::elem])
 
+(declare valid-hiccup?)
+
+(defn- valid-hiccup-elem?
+  "True if `x` is a valid hiccup ELEMENT — string, int, nil, or a
+   nested vector that starts with a keyword. Mirrors the recursive
+   `::elem` shape in the :seon.render/hiccup schema."
+  [x]
+  (or (string? x)
+      (int? x)
+      (nil? x)
+      (valid-hiccup? x)))
+
+(defn valid-hiccup?
+  "True if `x` is a valid hiccup VECTOR: starts with a keyword tag,
+   optional second-position attrs map, zero or more children where
+   each child is a valid hiccup element. Non-recursive Malli idiom —
+   handles arbitrary-depth nesting without :malli.core/potentially-
+   recursive-seqex.
+
+   Used as the [:fn valid-hiccup?] validator on
+   `:seon.render/html-response` since Malli's recursive seqex
+   schemas don't compose with instrumentation."
+  [x]
+  (and (vector? x)
+       (keyword? (first x))
+       (let [rest-x (rest x)
+             [_maybe-attrs children]
+             (if (map? (first rest-x))
+               [(first rest-x) (rest rest-x)]
+               [nil rest-x])]
+         (every? valid-hiccup-elem? children))))
+
 ;; Renderer return shapes — map-in / map-out per seon house rule.
 (schema/register! :seon.render/ai-response
   [:map [:seon.render/text :string]])
 
+;; `[:fn valid-hiccup?]` bypasses Malli's recursive-seqex limitation by
+;; using a Clojure predicate — composes with fn-schema instrumentation.
+;; `:nil` accepts render fns that explicitly return
+;; `{:seon.render/hiccup nil}` to mean "render nothing"
+;; (entity-html-sym callers already handle nil via `or`).
 (schema/register! :seon.render/html-response
-  ;; :seon.render/hiccup IS a registered recursive seqex schema, but
-  ;; referencing it here triggers Malli's :malli.core/potentially-
-  ;; recursive-seqex error at instrumentation time (recursive regex
-  ;; schemas can't be used inside fn schemas). Kept as :any with the
-  ;; understanding that the recursive shape lives in the registered
-  ;; :seon.render/hiccup definition for documentation purposes.
-  [:map [:seon.render/hiccup :any]])
+  [:map [:seon.render/hiccup [:or :nil [:fn valid-hiccup?]]]])
 
 ;; System renderer input — for `seon.render.default/*` and other
 ;; non-agent-namespaced fns. Doesn't know which agent ahead of time;
