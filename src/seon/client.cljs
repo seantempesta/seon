@@ -316,13 +316,13 @@
    :seon.schema/created-at
 
    ;; --- Log (A-6) ---
-   :seon.log/at
-   :seon.log/level
-   :seon.log/source
-   :seon.log/agent
-   :seon.log/message
-   :seon.log/stack
-   :seon.log/dismissed-at
+   ;; REMOVED 2026-05-27 per storage discipline rule (Sean): logs are
+   ;; transient data, do NOT persist as DB datoms. seon.log uses an
+   ;; in-process ring buffer + logs/pod-events.log file destination.
+   ;; The :seon.log/* attrs above (at/level/source/agent/message/stack/
+   ;; dismissed-at) referenced un-registered :seon.log/dismissed-at and
+   ;; broke pod boot; removing them resolves the boot error AND aligns
+   ;; with the no-transient-data-in-DB rule.
 
    ;; --- Test (Phase 2 — test capture as data) ---
    :seon.test/sym

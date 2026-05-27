@@ -77,7 +77,13 @@
   [:map [:seon.render/text :string]])
 
 (schema/register! :seon.render/html-response
-  [:map [:seon.render/hiccup :seon.render/hiccup]])
+  ;; :seon.render/hiccup IS a registered recursive seqex schema, but
+  ;; referencing it here triggers Malli's :malli.core/potentially-
+  ;; recursive-seqex error at instrumentation time (recursive regex
+  ;; schemas can't be used inside fn schemas). Kept as :any with the
+  ;; understanding that the recursive shape lives in the registered
+  ;; :seon.render/hiccup definition for documentation purposes.
+  [:map [:seon.render/hiccup :any]])
 
 ;; System renderer input — for `seon.render.default/*` and other
 ;; non-agent-namespaced fns. Doesn't know which agent ahead of time;
