@@ -83,31 +83,23 @@
                   :seon.agent/turn-count turns})))))
 
 (defn- render-entity-hiccup
-  "Resolve the entity's `:seon.render/html` slot (if any) and return its
-   hiccup. Falls back to rendering the AI text (if any) in a <pre>.
-   Returns nil when neither slot is present (caller filters)."
+  "Render `entity` to hiccup. Resolves the render symbol via
+   `seon.render/render-entity-html` (per-entity override OR entity-kind
+   schema property — Phase 1 pattern, commit d7e3185). Falls back to
+   `render-entity-ai` text in a <pre> when html resolution yields nil.
+   Returns nil if neither path renders (caller filters)."
   [db agent-id entity]
-  (let [html-slot (:seon.render/html entity)
-        ai-slot   (:seon.render/ai   entity)
-        input     {:seon.db/db db
-                   :seon.agent/id agent-id
-                   :seon.render/entity entity}]
-    (cond
-      html-slot
+  (let [input {:seon.db/db db
+               :seon.agent/id agent-id
+               :seon.render/entity entity}]
+    (or
       (try
-        (let [{:seon.render/keys [hiccup]} (render/html-render html-slot input)]
-          hiccup)
+        (render/render-entity-html input)
         (catch :default e
           [:div {:class "text-error text-xs font-mono"}
            "render error: " (or (.-message e) (str e))]))
-
-      ai-slot
-      (let [text (try
-                   (:seon.render/text (render/ai-render ai-slot input))
-                   (catch :default e (str "render error: " e)))]
-        [:pre {:class "text-xs font-mono whitespace-pre-wrap text-text-200"} text])
-
-      :else nil)))
+      (when-let [text (render/render-entity-ai input)]
+        [:pre {:class "text-xs font-mono whitespace-pre-wrap text-text-200"} text]))))
 
 (defn- snapshot
   "Compute one render snapshot for `agent-id`:

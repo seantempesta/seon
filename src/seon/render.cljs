@@ -258,6 +258,58 @@
         out    (try (f input) (catch :default _ nil))]
     (or (:seon.render/text out) (str out))))
 
+(defn- entity-html-sym
+  "Resolve the HTML render symbol for `entity`: per-entity override wins,
+   else look up the schema property for the entity's primary kind. nil
+   if neither path yields a symbol."
+  [entity]
+  (or (:seon.render/html entity)
+      (let [kinds       (renderable-kinds)
+            kinds-by-ns (into {} (map (fn [k] [(name (:kind k)) (:kind k)]) kinds))
+            kinds-by-kw (into {} (map (juxt :kind identity) kinds))
+            kind        (entity-primary-kind entity kinds-by-ns)]
+        (some-> kinds-by-kw kind :html))))
+
+(defn- entity-ai-sym
+  "Resolve the AI render symbol for `entity`: per-entity override wins,
+   else schema property for the entity's primary kind."
+  [entity]
+  (or (:seon.render/ai entity)
+      (let [kinds       (renderable-kinds)
+            kinds-by-ns (into {} (map (fn [k] [(name (:kind k)) (:kind k)]) kinds))
+            kinds-by-kw (into {} (map (juxt :kind identity) kinds))
+            kind        (entity-primary-kind entity kinds-by-ns)]
+        (some-> kinds-by-kw kind :ai))))
+
+(defn render-entity-html
+  "Render `entity` to hiccup via its resolved `:seon.render/html` symbol.
+   Per-entity override wins; else falls back to the entity-kind schema's
+   default html symbol (Phase 1 schema-property pattern). Returns nil
+   when no symbol resolves OR the resolved fn returns nil.
+
+   `input` is the system-input shape every render fn receives:
+     {:seon.db/db    <db>
+      :seon.agent/id <agent-id>
+      :seon.render/entity <entity-map>}"
+  {:malli/schema [:=> [:cat :map] [:maybe :any]]}
+  [{:seon.render/keys [entity] :as input}]
+  (when-let [sym (entity-html-sym entity)]
+    (try
+      (:seon.render/hiccup (html-render sym input))
+      (catch :default _ nil))))
+
+(defn render-entity-ai
+  "Render `entity` to text via its resolved `:seon.render/ai` symbol.
+   Per-entity override wins; else schema property for the entity's
+   primary kind. Returns nil if no symbol resolves OR the fn returns
+   nil. Mirror of `render-entity-html` for the AI path."
+  {:malli/schema [:=> [:cat :map] [:maybe :string]]}
+  [{:seon.render/keys [entity] :as input}]
+  (when-let [sym (entity-ai-sym entity)]
+    (try
+      (:seon.render/text (ai-render sym input))
+      (catch :default _ nil))))
+
 (schema/register! :seon.render/assemble-ai-request
   [:map
    [:seon.agent/id        :string]
