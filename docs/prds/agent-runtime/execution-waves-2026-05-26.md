@@ -521,6 +521,7 @@ Those are subsequent transition-plan phases, not this execution plan. This plan 
 | 4.5 — B | DONE (doc-only) | this doc | Substrate-source seeding deferred. Documented. |
 | 4.5 — C | not started | — | `bin/test-cljs` to ship. ~1h. |
 | 4.5 — D | not started | — | `seon.runtime` atom consolidation. ~1h. |
+| 4.5 — E worker | DONE | `882276e` | `seon.session/with-agent` + agent registry in `seon.server.session` + `bin/mcp-server` `:seon.agent/<id>` dispatch. 5 tests / 15 assertions. End-to-end smoke (2 sessions × 2 agents) green. **Requires `bin/mcp-server` restart** to pick up the new dispatch branch — it's a bb script, not hot-reloadable. |
 | 5a worker | not started | — | Integrant wiring (registry IS the component). |
 | 5b verifier | not started | — | |
 | 6a worker | not started | — | Rust host trim + rename `pod-host/sidecar-poc/rust-host/` → `host/`. |
