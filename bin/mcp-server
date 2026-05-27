@@ -40,17 +40,16 @@
                   (when (.isPresent parent)
                     (.pid (.get parent)))))
 
-;; Track orchestrator eval state to detect concurrent calls.
-;; When non-nil, contains {:started-at <ms> :code-preview <str>}
-(def orchestrator-eval-state (atom nil))
-
-;; Persistent orchestrator nREPL session ID for interrupt support.
-;; Cloned at startup so we can interrupt stuck orchestrator evals.
-(def orchestrator-nrepl-session (atom nil))
-
 ;; Whether the orchestrator init (nREPL connectivity + session clone) has completed.
 ;; Tools that need the orchestrator session check this before proceeding.
 (def orchestrator-init-ready? (atom false))
+
+;; Last pre-flight error (if any) — surfaced in tool responses when the
+;; orchestrator nREPL is unreachable or returned an unexpected response.
+;; Wave 4a hit `FileNotFoundException: seon/orchestrator/session__init.class`
+;; from sibling-worktree breakage; the original `(+ 1 1)` preflight obscured
+;; that with "REPL broken" — we now capture the actual exception text.
+(def preflight-error (atom nil))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Async Request Processing (Phase 1 - MCP Resilience)
@@ -300,6 +299,18 @@ You must then either:
     (catch Exception e
       (log-error "Failed to interrupt session:" (.getMessage e))
       {:error (.getMessage e)})))
+
+(defn nrepl-close-session
+  "Close an nREPL session. Best-effort; logs failure but never throws."
+  [port nrepl-session-id]
+  (when nrepl-session-id
+    (try
+      (with-open [sock (connect-with-timeout "localhost" port connect-timeout-ms)]
+        (nrepl-send-recv sock {"op" "close" "session" nrepl-session-id})
+        nil)
+      (catch Exception e
+        (log-debug "Failed to close nREPL session" nrepl-session-id ":" (.getMessage e))
+        nil))))
 
 (defn nrepl-eval
   "Evaluate code via nREPL using bencode. Returns {:value :ns :err :out :ex}
@@ -606,14 +617,22 @@ You must then either:
 
 (defn execute-eval
   "Execute the eval tool. Returns MCP result format.
-   For agent sessions (not orchestrator), tracks activity for observability (Phase 4c).
-   Uses persistent nREPL session ID for *1/*2/*3 support.
+
+   Session routing:
+   - `orchestrator` and `:seon.agent/<id>` route to the master nREPL (port
+     7888). Each eval clones a FRESH nREPL session, runs under a deadline,
+     and closes the session in `finally`. `*ns*`, dynamic bindings, and any
+     wedge from `(in-ns ...)` are all call-local — they cannot leak across
+     evals or sticky-wedge the master REPL.
+   - 4-char hex agent-pool sessions retain the legacy persistent-session
+     behavior (their isolated JVM owns the session lifecycle).
 
    When SEON_SESSION_ID env var is set, session_id param is ignored and the
    enforced session is used instead (agent isolation).
 
-   For orchestrator session: detects concurrent evals to prevent lockup when
-   user cancels MCP call mid-eval. Returns error if orchestrator already busy."
+   Timeout: defaults to `default-timeout-ms` (30s). Callers can override via
+   `timeout_ms`. On timeout we send `:interrupt` to the per-eval session and
+   then close it — the master REPL stays responsive."
   [{:keys [session_id code timeout_ms]}]
   ;; Detect #_:full prefix — opt-in to skip truncation
   (let [full?           (str/starts-with? (str/trim (str code)) full-output-prefix)
@@ -627,100 +646,90 @@ You must then either:
         agent?          (agent-session? raw-session)
         agent-id        (when agent? (agent-session->id raw-session))
         code            (if agent? (wrap-with-agent agent-id code) code)
-        effective-session (if agent? "orchestrator" raw-session)]
+        effective-session (if agent? "orchestrator" raw-session)
+        ;; Per-eval-session routes: orchestrator + V2 agent routing. Each
+        ;; eval gets a fresh clone+close. Legacy 4-char hex sessions retain
+        ;; the persistent-session path.
+        per-eval-route? (= effective-session "orchestrator")]
     (log-debug "execute-eval session:" effective-session
                "(enforced:" enforced-session-id "provided:" session_id
-               "agent?:" agent? "agent-id:" agent-id ")"
+               "agent?:" agent? "agent-id:" agent-id
+               "per-eval?:" per-eval-route? ")"
                "timeout:" timeout_ms)
 
-    ;; Guard: if orchestrator init hasn't completed yet, return a clear error
-    ;; rather than hanging on a potentially slow nREPL connection
-    (when (and (= effective-session "orchestrator")
+    ;; Guard: if orchestrator init hasn't completed yet, surface the actual
+    ;; pre-flight error if we have one, otherwise a generic "still
+    ;; initializing" message.
+    (when (and per-eval-route?
                (not @orchestrator-init-ready?))
-      (throw (ex-info "Seon server is still initializing, please retry in a few seconds"
-                      {:initializing true})))
+      (throw (ex-info (or @preflight-error
+                          "Seon server is still initializing, please retry in a few seconds")
+                      {:initializing true
+                       :preflight-error @preflight-error})))
 
-    ;; For orchestrator: atomically check-and-set eval state to prevent race conditions
-    (when (= effective-session "orchestrator")
-      (let [new-state {:started-at (System/currentTimeMillis)
-                       :code-preview (truncate-code-preview code 50)}]
-        (when-not (compare-and-set! orchestrator-eval-state nil new-state)
-          ;; Failed to set - another eval is running
-          (let [running @orchestrator-eval-state
-                elapsed-sec (quot (- (System/currentTimeMillis) (:started-at running)) 1000)
-                warning (when (> elapsed-sec 120)
-                          " WARNING: Running >2min - may be stuck.")]
-            (throw (ex-info (str "Orchestrator busy (running for " elapsed-sec "s)." warning "\n"
-                                 "Code: `" (:code-preview running) "`\n"
-                                 "Options:\n"
-                                 "  1. Wait for completion\n"
-                                 "  2. interrupt_eval(session_id=\"orchestrator\") to unblock\n"
-                                 "  3. Restart server if interrupt fails")
-                            {:busy true :elapsed-sec elapsed-sec}))))))
-
-    (let [resolve-port-and-session
-          (fn []
-            (if (= effective-session "orchestrator")
-              [orchestrator-port @orchestrator-nrepl-session]
-              (do
-                (validate-session-id! effective-session)
-                (if-let [info (get-session-info effective-session)]
-                  [(:port info) (:nrepl-session-id info)]
-                  (throw (ex-info (str "Session not found or not running: " effective-session)
-                                  {:session_id effective-session}))))))
-
-          {:keys [wrapped-code result-key var-name]}
+    (let [{:keys [wrapped-code result-key var-name]}
           (wrap-code-with-autosave code effective-session)
 
-          do-eval
-          (fn [port nrepl-session-id]
-            (record-activity! effective-session :start code)
-            (let [result (nrepl-eval port wrapped-code (or timeout_ms default-timeout-ms) nrepl-session-id)]
-              (log-debug "Eval result:" (pr-str result))
+          effective-timeout (or timeout_ms default-timeout-ms)]
 
-              ;; Auto-interrupt on timeout
-              (when (and (= (:ex result) "timeout") nrepl-session-id)
-                (log-debug "Timeout detected, sending interrupt to session:" nrepl-session-id)
-                (nrepl-interrupt port nrepl-session-id))
+      (if per-eval-route?
+        ;; ---- Per-eval-session path (orchestrator + V2 agents) ----
+        (let [;; Clone a fresh session so this eval's *ns*, dynamic
+              ;; bindings, and any (in-ns ...) wedge cannot leak.
+              ephemeral-session (nrepl-clone-session orchestrator-port)]
+          (if-not ephemeral-session
+            (mcp-error
+             (str "Failed to clone nREPL session on port " orchestrator-port "."
+                  (when @preflight-error (str "\nPre-flight: " @preflight-error))))
+            (try
+              (let [result (nrepl-eval orchestrator-port wrapped-code
+                                       effective-timeout ephemeral-session)]
+                ;; On timeout, interrupt before we close — closing a
+                ;; session that still has a running eval can hang the
+                ;; close op briefly.
+                (when (= (:ex result) "timeout")
+                  (log-info "Per-eval timeout after" effective-timeout
+                            "ms, interrupting session" ephemeral-session)
+                  (nrepl-interrupt orchestrator-port ephemeral-session))
+                (if (:ex result)
+                  (mcp-error (or (:err result)
+                                 (str "eval failed: " (:ex result))))
+                  (let [ai-render (when-not full?
+                                    (try-ai-render orchestrator-port
+                                                   ephemeral-session
+                                                   (:value result)))]
+                    (mcp-success (format-eval-output result result-key
+                                                     var-name full? ai-render)))))
+              (finally
+                ;; Always close — the whole point of per-eval sessions.
+                (nrepl-close-session orchestrator-port ephemeral-session)))))
 
-              (record-activity! effective-session :complete nil)
-              result))
-
-          [port nrepl-session-id] (resolve-port-and-session)]
-
-      (try
-        (let [result (do-eval port nrepl-session-id)]
-          ;; Self-heal: if nREPL session expired (server restarted), re-clone and retry
-          (if (= (:ex result) "unknown-session")
-            (do
-              (log-info "nREPL session expired, re-cloning...")
-              (if (= effective-session "orchestrator")
-                ;; Re-clone orchestrator session
-                (if-let [new-session (nrepl-clone-session orchestrator-port)]
-                  (do
-                    (reset! orchestrator-nrepl-session new-session)
-                    (log-info "Re-cloned orchestrator session:" new-session)
-                    (let [retry-result (do-eval orchestrator-port new-session)]
-                      (if (:ex retry-result)
-                        (mcp-error (:err retry-result))
-                        (let [ai-render (when-not full?
-                                          (try-ai-render orchestrator-port new-session (:value retry-result)))]
-                          (mcp-success (format-eval-output retry-result result-key var-name full? ai-render))))))
-                  (mcp-error "Failed to re-clone orchestrator nREPL session. Is the server running?"))
-                ;; Agent session - just report the error
-                (mcp-error (:err result))))
-
-            ;; Normal path
-            (if (:ex result)
-              (mcp-error (:err result))
-              (let [ai-render (when-not full?
-                                (try-ai-render port nrepl-session-id (:value result)))]
-                (mcp-success (format-eval-output result result-key var-name full? ai-render))))))
-
-        (finally
-          ;; Always clear orchestrator state when done
-          (when (= effective-session "orchestrator")
-            (reset! orchestrator-eval-state nil)))))))
+        ;; ---- Legacy 4-char hex agent-pool path (unchanged behavior) ----
+        (let [_ (validate-session-id! effective-session)
+              info (get-session-info effective-session)
+              _ (when-not info
+                  (throw (ex-info (str "Session not found or not running: "
+                                       effective-session)
+                                  {:session_id effective-session})))
+              port (:port info)
+              nrepl-session-id (:nrepl-session-id info)
+              do-eval (fn [port sid]
+                        (record-activity! effective-session :start code)
+                        (let [result (nrepl-eval port wrapped-code
+                                                 effective-timeout sid)]
+                          (log-debug "Eval result:" (pr-str result))
+                          (when (and (= (:ex result) "timeout") sid)
+                            (log-debug "Timeout, interrupting session:" sid)
+                            (nrepl-interrupt port sid))
+                          (record-activity! effective-session :complete nil)
+                          result))
+              result (do-eval port nrepl-session-id)]
+          (if (:ex result)
+            (mcp-error (:err result))
+            (let [ai-render (when-not full?
+                              (try-ai-render port nrepl-session-id (:value result)))]
+              (mcp-success (format-eval-output result result-key
+                                               var-name full? ai-render)))))))))
 
 (defn execute-create-session
   "Execute the create_session tool.
@@ -805,17 +814,17 @@ You must then either:
       (reset! running-eval nil))))
 
 (defn- interrupt-orchestrator
-  "Interrupt the orchestrator nREPL session. Returns MCP result."
+  "Per-eval-session architecture: each orchestrator/V2-agent eval clones
+   its own short-lived nREPL session that auto-times-out and is closed in
+   `finally`. There is no longer a persistent orchestrator session to
+   interrupt. This stub is kept so older callers don't 404; it reports
+   the new behavior."
   []
-  (if-let [nrepl-session-id @orchestrator-nrepl-session]
-    (let [result (nrepl-interrupt orchestrator-port nrepl-session-id)]
-      ;; Clear the eval state since we're interrupting
-      (reset! orchestrator-eval-state nil)
-      (if (:error result)
-        (mcp-error (str "interrupting orchestrator: " (:error result)))
-        (mcp-success (str "Orchestrator interrupt sent. Status: " (pr-str (:status result))
-                          ". The REPL should be responsive now."))))
-    (mcp-error "No orchestrator nREPL session available. MCP server may need restart.")))
+  (mcp-success
+   (str "interrupt_eval is a no-op for `orchestrator` / `:seon.agent/<id>` "
+        "evals — each runs in its own per-eval nREPL session with a "
+        "hard timeout. If a single eval is hung, it will self-clear "
+        "when its deadline expires.")))
 
 (defn- interrupt-agent-session
   "Interrupt an agent nREPL session. Returns MCP result."
@@ -1219,33 +1228,48 @@ You must then either:
           (send-result id result))))))
 
 (defn- init-orchestrator-session!
-  "Initialize connection to orchestrator and clone a persistent nREPL session.
-   Returns true if successful, false otherwise.
-   Uses a 5s timeout for the connectivity check (not the default 30s)."
+  "Pre-flight: verify the orchestrator nREPL is reachable and responds to
+   `(+ 1 1)`. Captures the actual exception/err text into `preflight-error`
+   so tool responses can surface it instead of opaque \"REPL broken\". The
+   per-eval-session architecture means we no longer need a persistent
+   orchestrator session — `nrepl-eval` clones a fresh one per request — so
+   success here is purely a health check.
+
+   Returns true on success, false otherwise. Uses a 5s timeout."
   []
   (try
     (let [result (nrepl-eval orchestrator-port "(+ 1 1)" 5000)]
-      (if (= "2" (:value result))
+      (cond
+        (= "2" (:value result))
         (do
+          (reset! preflight-error nil)
+          (reset! orchestrator-init-ready? true)
           (log-debug "Orchestrator connection verified")
-          ;; Clone a persistent session for interrupt support
-          (if-let [session-id (nrepl-clone-session orchestrator-port)]
-            (do
-              (reset! orchestrator-nrepl-session session-id)
-              (reset! orchestrator-init-ready? true)
-              (log-debug "Cloned orchestrator nREPL session:" session-id)
-              true)
-            (do
-              (log-error "Failed to clone orchestrator nREPL session - interrupts won't work")
-              ;; Still mark as ready - eval works without a cloned session,
-              ;; only interrupts are affected
-              (reset! orchestrator-init-ready? true)
-              false)))
+          true)
+
+        ;; nREPL responded but with an error — capture the actual text
+        (or (:ex result) (:err result))
         (do
-          (log-error "Orchestrator connection test failed:" result)
+          (reset! preflight-error
+                  (str "Pre-flight `(+ 1 1)` failed on orchestrator nREPL "
+                       "(port " orchestrator-port "): "
+                       (or (:err result) (:ex result))
+                       (when (:value result) (str " | value=" (:value result)))))
+          (log-error "Orchestrator pre-flight error:" @preflight-error)
+          false)
+
+        :else
+        (do
+          (reset! preflight-error
+                  (str "Pre-flight `(+ 1 1)` returned unexpected value: "
+                       (pr-str result)))
+          (log-error @preflight-error)
           false)))
     (catch Exception e
-      (log-error "Cannot connect to orchestrator on port" orchestrator-port ":" (.getMessage e))
+      (reset! preflight-error
+              (str "Cannot connect to orchestrator nREPL on port "
+                   orchestrator-port ": " (.getMessage e)))
+      (log-error @preflight-error)
       false)))
 
 (defn- start-parent-watchdog!
