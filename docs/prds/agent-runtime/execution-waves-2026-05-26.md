@@ -354,9 +354,36 @@ Collapse into ONE atom matching atom PRD's "one substrate atom per concern":
 
 Refactor scope: rewire callsites within `runtime.clj` only (the atoms are private). ~50 LOC of edits. ~1h. Targeted tests on `seon.runtime` only.
 
+### Item E — MCP eval routing by agent-id (**PRIORITY — gates testing**)
+
+**Status:** scoped 2026-05-27 (user direction). Not started. Treat as Wave 4.5 final gate alongside items A-D.
+
+**Why this is priority:** without it, you can't query/inspect a running agent's state from outside. The MCP server today only knows `"orchestrator"` (master nREPL) and 4-char hex (legacy agent-pool sessions). It has no way to address a V2 agent or a V2 session. Result: no way to verify multi-agent + multi-session behavior end-to-end without reading raw DB rows.
+
+**The model.** Agent is the unique key, not session. Reasoning:
+
+- An agent has exactly one session by construction.
+- A session has N agents — "eval into session X" is ambiguous (which agent's POV?).
+- Agent-id is globally unique; session-id is a group identifier.
+
+So `mcp__seon__eval session_id=":seon.agent/<id>"` means: evaluate the supplied Clojure on the seon master JVM, with the current binding context set to that agent's session (`*conn*` bound to the session's datahike conn, `*current-agent-id*` bound to the agent). The eval runs in the JVM — the wasm guest hosting the agent is undisturbed.
+
+**Wasm-guest eval is out of scope for MVP.** Connecting MCP eval INTO the wasm runtime (CLJS code inside the wasm guest) is a separate harder problem (WIT export from guest, host-side dispatch). For MVP, "eval at an agent" means "eval against that agent's JVM-side world (its session's DB)." That's enough for inspection + testing.
+
+**Scope:**
+
+- New JVM helper `seon.session/with-agent` that binds `*conn*` and `*current-agent-id*` for the duration of a body, given an agent-id. Resolves agent-id → session-id → conn from the registry. ~30 LOC.
+- `bin/mcp-server` learns a third routing branch: `:seon.agent/<id>` → wraps user code in `(seon.session/with-agent <id> (do <user-code>))` → forwards to master nREPL on port 7888. ~40 LOC.
+- The orchestrator session_id stays as-is (master REPL, no agent context). Legacy 4-char hex stays for agent-jvm-pool until that retires.
+- Tests: end-to-end smoke that creates two sessions × two agents, runs an eval scoped to each agent-id, verifies datoms are written to the correct session.
+
+**Total:** ~80 LOC + tests + doc. ~1.5-2h.
+
+**Where to dispatch:** scope is small enough to inline once Wave 4b is done; or as the first work in a fresh session if context is low. It is NOT a separate wave because it doesn't require Integrant wiring or Rust changes — just the helper + MCP server route + tests.
+
 ### Wave 4.5 gate
 
-All four items committed independently. Path A regression intact. `bin/test-cljs` exits 0 on a no-op CLJS suite (proves the wire). Then Wave 5 proceeds.
+All five items (A-E) committed independently. Path A regression intact. `bin/test-cljs` exits 0 on a no-op CLJS suite (proves the wire). Item E end-to-end smoke: two-agents-in-different-sessions, eval to each, datoms route correctly. Then Wave 5 proceeds.
 
 ---
 

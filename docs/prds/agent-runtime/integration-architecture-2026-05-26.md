@@ -372,7 +372,25 @@ These collapse into ONE atom with three keys, matching `atom-state-system-2026-0
 
 Small refactor (~50 LOC of edits). Listed as **Item D** in Wave 4.5 of the execution plan. The investigation report already noted these are all the same concern (`seon.runtime`'s own state); collapsing them is consistency hygiene, not new capability.
 
-## 13. Doc cross-references
+## 13. MCP eval routing by agent-id (locked 2026-05-27)
+
+For external inspection + testing, MCP `eval` needs to address a specific V2 agent. The locked model: **agent-id is the unique routing key**, not session-id.
+
+| MCP `session_id` | Routes to | Context |
+|---|---|---|
+| `"orchestrator"` | master nREPL on port 7888 | no agent context; bare REPL |
+| `:seon.agent/<id>` | master nREPL, wrapped via `(seon.session/with-agent <id> …)` | `*conn*` bound to agent's session conn; `*current-agent-id*` bound to id |
+| 4-char hex (legacy) | agent-jvm-pool session | retiring with V2 cutover; do not extend |
+
+**Why agent-id**: each agent has exactly one session by construction; each session has N agents. Routing by session is ambiguous (which agent's POV?); routing by agent is unique.
+
+**JVM-side only**: the eval runs in the master JVM. The wasm guest hosting the agent is undisturbed. Eval INTO the wasm guest (CLJS in wasm) is a separate harder problem — WIT export from guest, host-side dispatch — and is **deferred from MVP**. For MVP, "eval at an agent" means "eval against its session's DB on the JVM."
+
+**Tests required** (Wave 4.5 item E): two sessions × two agents; eval scoped to each agent-id; verify datoms land in the correct session's DB. This is the gate that lets us properly verify multi-session + multi-agent behavior end-to-end.
+
+Spec lives in `execution-waves-2026-05-26.md` § "Item E — MCP eval routing by agent-id".
+
+## 14. Doc cross-references
 
 - `pod-host/sidecar-poc/SESSIONS.md` — original session concept; this doc supersedes the file-layout sections
 - `pod-host/sidecar-poc/AGENT.md` — agent mental model; still valid for V2 guest-side
