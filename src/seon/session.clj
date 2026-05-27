@@ -1,472 +1,617 @@
 (ns seon.session
-  "Owner of `:seon.session` — the canonical agent session registry.
+  "Agent session management — the high-level API for agent lifecycle.
 
-   One row per running agent JVM: id, namespace, port, status, ctx checkpoint.
+  Persistent fields (id, namespace, status, port, started-at, stopped-at,
+  db-name, nrepl-session-id, last-activity-at, eval-count) live in the
+  `:seon.orchestrator` datahike DB via `seon.db/transact!` and `query`.
 
-   Phase 3 step 2 adds the agent-launch demo target: `launch!`, `checkpoint!`,
-   and `stop!` give the orchestrator a clean lifecycle for spawning an agent
-   JVM, evaluating forms in it, persisting `*ctx*` to `:seon.session`, and
-   shutting it down.
+  Live JVM-only handles (`::ctx-atom`, `::pool`, `::ns-db-name`,
+  `::current-eval`) live in a small in-process map keyed by session-id.
+  These are resource handles — the DB can't store an atom or a pool ref.
 
-   The implementation deliberately bypasses `seon.flow.pool` because the pool
-   itself is disabled (its health-checker SIGKILLs idle JVMs). We reuse the
-   pool's spawn + nrepl-eval primitives but own the session lifecycle here."
-  (:require [clojure.edn :as edn]
+  ## Usage
+
+  ```clojure
+  (def s (start-agent-session! {::namespace 'seon.trading}))
+  ;; => {::id \"acdb\" ::namespace 'seon.trading ::status :running ...}
+
+  (start-agent-session! {::namespace 'seon.trading ::resume? true})
+  (stop-agent-session! {::id \"acdb\"})
+  (list-agent-sessions {})
+  ```"
+  (:require [seon.ctx :as ctx]
             [seon.db :as db]
-            [seon.db.relay :as relay]
             [seon.db.schema :as db-schema]
             [seon.flow.pool :as pool]
-            [seon.orchestrator.session :as orch]
             [seon.runtime :as runtime]
             [seon.schema :as schema]
             [taoensso.timbre :as log]))
 
 ;;; ---------------------------------------------------------------------------
-;;; Attribute Schemas
+;;; Schema Registration
 ;;; ---------------------------------------------------------------------------
 
-(schema/register! ::agent
-                  [:string {:min 1
-                            :seon.db/identity true
-                            :description "Session id (e.g. \"a5ba3e\")"}])
-
-(schema/register! ::namespace
-                  [:symbol {:description "Agent namespace symbol (e.g. seon.apps.demo)"}])
-
-(schema/register! ::port
-                  [:int {:min 1 :max 65535
-                         :description "nREPL port the agent JVM is listening on"}])
-
-(schema/register! ::pid
-                  [:int {:min 1 :description "Operating-system process id of the agent JVM"}])
-
-(schema/register! ::started-at
-                  [:inst {:description "Wall-clock time the session started"}])
-
-(schema/register! ::stopped-at
-                  [:inst {:description "Wall-clock time the session stopped"}])
-
-(schema/register! ::checkpointed-at
-                  [:inst {:description "Wall-clock time the ctx checkpoint was last written"}])
-
-(schema/register! ::status
-                  [:enum :starting :running :idle :stopping :stopped :crashed :merged])
-
-(schema/register! ::ctx
-                  [:string {:description "Serialized ctx checkpoint blob (Nippy/pr-str)"}])
-
-(schema/register! ::checkpoint-interval-ms
-                  [:int {:min 0
-                         :description "Auto-checkpoint poll interval in ms. 0 disables. Default 1000."}])
-
-;;; ---------------------------------------------------------------------------
-;;; Entity Schema
-;;; ---------------------------------------------------------------------------
-
-(def agent-entity-schema
-  "Malli :map schema for an agent session row, installed on the
-   `:seon.session` datahike DB via `:seon.db/flow`'s `:namespace-schemas`."
-  [:map
-   [::agent ::agent]
-   [::namespace ::namespace]
-   [::port {:optional true} ::port]
-   [::pid {:optional true} ::pid]
-   [::started-at ::started-at]
-   [::stopped-at {:optional true} ::stopped-at]
-   [::status ::status]
-   [::ctx {:optional true} ::ctx]])
-
-(db-schema/register-entity-schema! "seon.session/agent" agent-entity-schema)
-
-;;; ---------------------------------------------------------------------------
-;;; Request / Response Schemas
-;;; ---------------------------------------------------------------------------
-
-(schema/register! ::session-id
+(schema/register! ::id
                   [:string {:min 4 :max 6
                             :pattern "^[A-Za-z0-9]{4,6}$"
-                            :description "6-char base62 session id"}])
+                            :seon.db/identity true
+                            :description "Base62 session ID, 4-6 chars"}])
 
-(schema/register! ::launch-request
+(schema/register! ::namespace
+                  [:or {:seon.db/value-type :db.type/string
+                        :description "Agent namespace — accepts symbol or string at the API boundary; coerced to string for persistence via `->ns-string`."}
+                   [:string {:min 1}]
+                   :symbol])
+
+(schema/register! ::status
+                  [:enum :running :stopped :error])
+
+(schema/register! ::nrepl-port
+                  [:int {:min 7889 :max 7999
+                         :description "nREPL port for this session"}])
+
+(schema/register! ::started-at
+                  [:inst {:description "When the session was started"}])
+
+(schema/register! ::stopped-at
+                  [:inst {:description "When the session was stopped"}])
+
+(schema/register! ::db-name
+                  [:string {:description "Database name for the namespace"}])
+
+(schema/register! ::backend
+                  [:enum {:description "Datahike store backend for session DB."}
+                   :memory :file :sqlite])
+
+(schema/register! ::path
+                  [:string {:description "On-disk path for :file/:sqlite backends. Nil for :memory."
+                            :min 1}])
+
+(schema/register! ::resume?
+                  [:boolean {:description "Whether to resume previous ctx state"}])
+
+(schema/register! ::error
+                  [:string {:description "Error message if session failed"}])
+
+(schema/register! ::nrepl-session-id
+                  [:string {:description "Persistent nREPL session ID for *1/*2/*3 and interrupt support"}])
+
+;;; Observability schemas (Phase 4c)
+
+(schema/register! ::last-activity-at
+                  [:inst {:description "When the last eval completed"}])
+
+(schema/register! ::eval-count
+                  [:int {:min 0 :description "Total evals in this session"}])
+
+(schema/register! ::current-eval
+                  [:maybe [:map
+                           [::code :string]
+                           [::started-at inst?]]])
+
+;;; Request/Response Schemas
+
+(schema/register! ::pool
+                  [:any {:description "Agent JVM pool (optional)"
+                         :gen/fmap (fn [_] (throw (ex-info "Cannot generate pool"
+                                                           {:type :malli.generator/no-generator})))}])
+
+(schema/register! ::start-agent-session-request
                   [:map
-                   {:gen/fmap (fn [_]
-                                (throw (ex-info "launch-request not generatable: spawns a JVM"
-                                                {:type :malli.generator/no-generator})))}
                    [::namespace ::namespace]
-                   [::checkpoint-interval-ms {:optional true} ::checkpoint-interval-ms]])
+                   [::resume? {:optional true} ::resume?]
+                   [::pool {:optional true} ::pool]])
 
-(schema/register! ::launch-response
+(schema/register! ::start-agent-session-response
                   [:map
-                   [::session-id ::session-id]
-                   [::nrepl-port ::port]
-                   [::pid ::pid]])
+                   [::id ::id]
+                   [::namespace ::namespace]
+                   [::status ::status]
+                   [::nrepl-port {:optional true} [:maybe ::nrepl-port]]
+                   [::started-at {:optional true} ::started-at]
+                   [::db-name {:optional true} ::db-name]
+                   [::error {:optional true} ::error]])
 
-(schema/register! ::checkpoint-request
+(schema/register! ::stop-agent-session-request
                   [:map
-                   [::session-id ::session-id]])
+                   [::id ::id]])
 
-(schema/register! ::checkpoint-response
+(schema/register! ::stop-agent-session-response
                   [:map
-                   [::session-id ::session-id]
-                   [::checkpointed-at ::checkpointed-at]])
+                   [::id ::id]
+                   [::status ::status]
+                   [::stopped-at {:optional true} ::stopped-at]
+                   [::error {:optional true} ::error]])
 
-(schema/register! ::stop-request
+(schema/register! ::get-agent-session-request
                   [:map
-                   [::session-id ::session-id]])
+                   [::id ::id]])
 
-(schema/register! ::stop-response
+(schema/register! ::get-agent-session-response
                   [:map
-                   [::session-id ::session-id]
-                   [::status [:enum :stopped]]])
+                   [::id {:optional true} ::id]
+                   [::namespace {:optional true} ::namespace]
+                   [::status {:optional true} ::status]
+                   [::nrepl-port {:optional true} [:maybe ::nrepl-port]]
+                   [::started-at {:optional true} ::started-at]
+                   [::db-name {:optional true} ::db-name]
+                   ;; Persistent nREPL session (for *1/*2/*3 and interrupt)
+                   [::nrepl-session-id {:optional true} ::nrepl-session-id]
+                   ;; Observability fields (Phase 4c)
+                   [::last-activity-at {:optional true} ::last-activity-at]
+                   [::eval-count {:optional true} ::eval-count]
+                   [::current-eval {:optional true} ::current-eval]])
+
+(schema/register! ::list-agent-sessions-request
+                  [:map])
+
+(schema/register! ::list-agent-sessions-response
+                  [:vector ::get-agent-session-response])
+
+(schema/register! ::get-session-port-request
+                  [:map
+                   [::id ::id]])
+
+(schema/register! ::get-session-port-response
+                  [:map
+                   [::nrepl-port {:optional true} [:maybe ::nrepl-port]]
+                   [::nrepl-session-id {:optional true} [:maybe ::nrepl-session-id]]])
+
+(schema/register! ::recover-sessions-request
+                  [:map])
+
+(schema/register! ::recover-sessions-response
+                  [:map
+                   [::recovered-count :int]])
 
 ;;; ---------------------------------------------------------------------------
-;;; In-process registry
+;;; Persisted Entity Schema (datahike)
 ;;; ---------------------------------------------------------------------------
-;;;
-;;; The agent JVM `Process` and `:nrepl-port` live here. The DB row holds the
-;;; canonical, durable view; this map carries the live OS handle that the DB
-;;; can't store. Keyed by session-id (string).
 
-(defonce ^:private live-sessions (atom {}))
+(def session-entity-schema
+  "Malli :map schema for an orchestrator session row. Installed on the
+   `:seon.orchestrator` datahike DB via `:seon.db/flow`'s `:namespace-schemas`
+   (mirror of the entry there)."
+  [:map
+   [::id ::id]
+   [::namespace ::namespace]
+   [::status ::status]
+   [::nrepl-port {:optional true} ::nrepl-port]
+   [::started-at {:optional true} ::started-at]
+   [::stopped-at {:optional true} ::stopped-at]
+   [::db-name {:optional true} ::db-name]
+   [::nrepl-session-id {:optional true} ::nrepl-session-id]
+   [::last-activity-at {:optional true} ::last-activity-at]
+   [::eval-count {:optional true} ::eval-count]])
 
-(defn- live-session [session-id]
-  (get @live-sessions session-id))
-
-;;; ---------------------------------------------------------------------------
-;;; Auto-checkpoint scheduler
-;;; ---------------------------------------------------------------------------
-;;;
-;;; One shared ScheduledExecutorService (daemon) runs all per-session
-;;; checkpoint pollers. Each tick reads `@*ctx-version*` from the agent JVM;
-;;; if it advanced past the last-checkpointed version, we call `checkpoint!`
-;;; and update the marker. Failed ticks are logged but never propagate, so
-;;; the scheduler thread stays alive and the session keeps polling.
-
-(def ^:private default-checkpoint-interval-ms 1000)
-
-(defonce ^:private checkpoint-scheduler
-  (java.util.concurrent.Executors/newSingleThreadScheduledExecutor
-   (reify java.util.concurrent.ThreadFactory
-     (newThread [_ r]
-       (doto (Thread. ^Runnable r "seon-session-checkpoint")
-         (.setDaemon true))))))
-
-(declare checkpoint!)
-
-(defn- run-checkpoint-tick!
-  "One scheduler tick for `session-id`. Reads `@*ctx-version*` from the
-   agent JVM and calls `checkpoint!` if it has advanced. Swallows any
-   exception (logged) so the scheduled task never aborts."
-  [session-id]
-  (try
-    (when-let [entry (live-session session-id)]
-      (let [{::keys [port last-checkpoint-version]} entry
-            printed (pool/nrepl-eval! port "@*ctx-version*")
-            version (Long/parseLong printed)]
-        (when (> version (or last-checkpoint-version 0))
-          (checkpoint! {::session-id session-id})
-          (swap! live-sessions
-                 (fn [m]
-                   (if (contains? m session-id)
-                     (assoc-in m [session-id ::last-checkpoint-version] version)
-                     m))))))
-    (catch Exception e
-      (log/warn "Auto-checkpoint tick failed"
-                {:session-id session-id :error (.getMessage e)}))))
-
-(defn- schedule-checkpoint-task!
-  "Schedule a periodic auto-checkpoint task for `session-id`. Returns the
-   ScheduledFuture, which the caller stores in `live-sessions`."
-  [session-id interval-ms]
-  (when (and interval-ms (pos? interval-ms))
-    (.scheduleAtFixedRate
-     ^java.util.concurrent.ScheduledExecutorService checkpoint-scheduler
-     ^Runnable (fn [] (run-checkpoint-tick! session-id))
-     (long interval-ms)
-     (long interval-ms)
-     java.util.concurrent.TimeUnit/MILLISECONDS)))
-
-(defn- cancel-checkpoint-task!
-  "Cancel the scheduled checkpoint task on a live-sessions entry, if any."
-  [entry]
-  (when-let [^java.util.concurrent.ScheduledFuture fut (::checkpoint-future entry)]
-    (try (.cancel fut false) (catch Exception _))))
+(db-schema/register-entity-schema! "seon.orchestrator/session" session-entity-schema)
 
 ;;; ---------------------------------------------------------------------------
-;;; Bridge to the orchestrator's session registry (mcp__seon__eval lookup)
+;;; Session ID Generation
 ;;; ---------------------------------------------------------------------------
-;;;
-;;; mcp__seon__eval routes by session-id via
-;;;   (seon.orchestrator.session/get-session-port {::id <id>})
-;;; which reads from the `:seon.orchestrator` datahike DB. We persist the row
-;;; via orch/register-external-session! / unregister-external-session! so MCP
-;;; eval routing finds sessions launched here.
 
-(defn- register-with-orchestrator!
-  [session-id namespace port started-at]
-  (orch/register-external-session!
-   {:seon.orchestrator.session/id session-id
-    :seon.orchestrator.session/namespace (str namespace)
-    :seon.orchestrator.session/nrepl-port port
-    :seon.orchestrator.session/started-at started-at
-    :seon.orchestrator.session/db-name (str namespace)}))
+(defn- generate-session-id
+  "Generate a 6-character hex session ID.
 
-(defn- unregister-from-orchestrator! [session-id]
-  (orch/unregister-external-session!
-   {:seon.orchestrator.session/id session-id}))
-
-;;; ---------------------------------------------------------------------------
-;;; Port allocation
-;;; ---------------------------------------------------------------------------
-;;;
-;;; The pool reserves 7900–7999. We pick from 7980–7999, which is outside the
-;;; default pool size (3 JVMs starting at 7900) but still in the agent range
-;;; that other tooling (`bin/agent-eval`, MCP) recognises.
-
-(def ^:private launch-port-min 7980)
-(def ^:private launch-port-max 7999)
-
-(def ^:private port-allocation-lock (Object.))
-(defonce ^:private reserved-ports (atom #{}))
-
-(defn- find-free-port!
-  "Pick a port in the launch range that is neither TCP-bound, nor already
-   tracked in `live-sessions`, nor reserved by a concurrent in-flight launch.
-   Synchronised so two callers can't both pick the same port before either
-   has spawned a JVM on it."
+   Delegates to seon.runtime/generate-id for unified ID generation
+   with collision checking."
   []
-  (locking port-allocation-lock
-    (let [taken (into #{} (map ::port) (vals @live-sessions))
-          reserved @reserved-ports
-          port (or (first (filter #(and (not (contains? taken %))
-                                        (not (contains? reserved %))
-                                        (not (#'pool/port-bound? %)))
-                                  (range launch-port-min (inc launch-port-max))))
-                   (throw (ex-info "No free agent port in launch range"
-                                   {:range [launch-port-min launch-port-max]})))]
-      (swap! reserved-ports conj port)
-      port)))
-
-(defn- release-reserved-port! [port]
-  (swap! reserved-ports disj port))
+  (::runtime/id (runtime/generate-id {})))
 
 ;;; ---------------------------------------------------------------------------
-;;; Agent JVM bootstrap
+;;; Live state (per-JVM, ephemeral)
+;;; ---------------------------------------------------------------------------
+;;;
+;;; Holds resource handles that don't fit in datahike: `::ctx-atom`, `::pool`,
+;;; `::ns-db-name`, and the transient `::current-eval` map. Keyed by session-id.
+;;; All persistent fields live in the `:seon.orchestrator` datahike DB.
+
+(defonce ^:private live-state (atom {}))
+
+(defn- live [id] (get @live-state id))
+
+;;; ---------------------------------------------------------------------------
+;;; Pool reference (set via init! from Integrant)
 ;;; ---------------------------------------------------------------------------
 
-(defn- agent-bootstrap-code
-  "Code evaluated inside the agent JVM after spawn. Creates the requested
-   namespace, interns a `*ctx*` atom there, and also interns it into `user`
-   so `mcp__seon__eval` (which evaluates in `user` regardless of any
-   `(in-ns ...)` form because nREPL's :ns header is per-message) can refer
-   to `*ctx*` without qualification.
+(defonce ^:private agent-pool (atom nil))
 
-   When `relay-port` is non-nil, also requires `seon.db.relay` and connects
-   it back to the orchestrator, so agent-side `seon.db/transact!`,
-   `seon.db/query`, `seon.db/pull-by-name`, `seon.db/pull-many-by-name`
-   transparently route through the relay (Phase 3 step 9).
+;;; ---------------------------------------------------------------------------
+;;; Datahike helpers
+;;; ---------------------------------------------------------------------------
 
-   We `intern` + `setDynamic` instead of `(def ^:dynamic *ctx* ...)` because
-   `nrepl-eval!` treats stderr warnings (\"name suggests dynamic\") as errors."
-  [ns-sym & {:keys [watch? relay-port]}]
-  (str "(do "
-       (when relay-port
-         (str "(require '[seon.db.relay :as seon.db.relay]) "
-              "(seon.db.relay/connect! "
-              "  {:seon.db.relay/host \"127.0.0.1\" "
-              "   :seon.db.relay/port " relay-port "}) "))
-       "(create-ns '" ns-sym ") "
-       "(in-ns '" ns-sym ") "
-       "(clojure.core/refer-clojure) "
-       "(let [a (atom {}) "
-       "      v (atom 0)] "
-       "  (intern '" ns-sym " '*ctx* a) "
-       "  (intern 'user '*ctx* a) "
-       "  (intern '" ns-sym " '*ctx-version* v) "
-       "  (intern 'user '*ctx-version* v) "
-       (when watch?
-         (str "  (add-watch a :seon.session/version "
-              "    (fn [_k# _r# _o# _n#] (swap! v inc))) "))
-       "  nil) "
-       "(.setDynamic (resolve (symbol \"" ns-sym "\" \"*ctx*\")) true) "
-       "(.setDynamic (resolve (symbol \"user\" \"*ctx*\")) true) "
-       "(.setDynamic (resolve (symbol \"" ns-sym "\" \"*ctx-version*\")) true) "
-       "(.setDynamic (resolve (symbol \"user\" \"*ctx-version*\")) true) "
-       ":ok)"))
+(defn- pull-row
+  "Pull the full session row from datahike. Returns nil when not found."
+  [id]
+  (try
+    (let [row (db/pull-by-name :seon.orchestrator '[*] [::id id])]
+      (when (and row (::id row)) row))
+    (catch Exception _ nil)))
 
-(defn- bind-namespace!
-  "Switch the agent JVM's nREPL evaluator to `ns-sym` for subsequent evals.
-   Returns nil; throws on nREPL error."
-  [port ns-sym]
-  (pool/nrepl-eval! port (str "(in-ns '" ns-sym ")"))
-  nil)
+(defn- running-rows
+  "Query datahike for all sessions with :running status. Returns a vector of
+   row maps (no live `::current-eval` merged in)."
+  []
+  (try
+    (let [eids (->> (db/query :seon.orchestrator
+                              '[:find ?e
+                                :where [?e :seon.session/status :running]])
+                    (map first))]
+      (vec (keep #(db/pull-by-name :seon.orchestrator '[*] %) eids)))
+    (catch Exception _ [])))
+
+;;; ---------------------------------------------------------------------------
+;;; Initialization
+;;; ---------------------------------------------------------------------------
+
+(defn init!
+  "Initialize orchestrator sessions with optional agent pool.
+   Called by Integrant during system startup."
+  [_mgr & {:keys [pool]}]
+  (when pool
+    (reset! agent-pool pool))
+  (log/info "Orchestrator sessions initialized" {:pool (some? pool)}))
+
+;;; ---------------------------------------------------------------------------
+;;; Lifecycle Hooks
+;;; ---------------------------------------------------------------------------
+
+(defn after-ns-reload
+  "Called by clj-reload after reloading. Re-wires agent-pool from Integrant system."
+  []
+  (try
+    (require 'integrant.repl.state)
+    (when-let [sys @(resolve 'integrant.repl.state/system)]
+      (when-let [{:keys [pool]} (:seon.orchestrator/sessions sys)]
+        (when pool
+          (reset! agent-pool pool))))
+    (catch Exception e
+      (log/debug "Could not re-wire agent-pool from Integrant" {:error (.getMessage e)}))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Public API
 ;;; ---------------------------------------------------------------------------
 
-(defn launch!
-  "Spawn an agent JVM, register the session, and inject `*ctx*` into the
-   requested namespace.
+(defn- ->ns-string
+  "Coerce a namespace input (symbol or string) to its canonical string form."
+  [ns-input]
+  (cond
+    (string? ns-input) ns-input
+    (symbol? ns-input) (str ns-input)
+    :else (str ns-input)))
+
+(defn- public-view
+  "Strip DB-internal keys and merge the live `::current-eval` (if any) into a
+   persisted row, producing a public response map."
+  [row]
+  (let [id (::id row)
+        live-eval (some-> (live id) ::current-eval)]
+    (cond-> (dissoc row :db/id)
+      live-eval (assoc ::current-eval live-eval))))
+
+(defn start-agent-session!
+  "Start a new agent session, persisting the row to `:seon.orchestrator` and
+   stashing live JVM-only handles in the in-process live-state map.
 
    Request keys:
-     ::namespace - Symbol. Clojure namespace the agent JVM should evaluate in.
+     ::namespace - Required. Clojure namespace (symbol or string).
+     ::resume?   - Optional. If true, load previous ctx state (default: true).
+     ::pool      - Optional. Agent pool (falls back to init!-provided pool).
 
-   Response keys:
-     ::session-id - 6-char base62 id (also written to `:seon.session/agent`).
-     ::nrepl-port - Port the agent JVM's nREPL is listening on.
-     ::pid        - OS pid of the agent JVM."
-  {:malli/schema [:=> [:cat ::launch-request] ::launch-response]}
-  [{::keys [namespace checkpoint-interval-ms]}]
-  (let [session-id (::runtime/id (runtime/generate-id {}))
-        started-at (java.util.Date.)
-        port (find-free-port!)
-        interval-ms (if (nil? checkpoint-interval-ms)
-                      default-checkpoint-interval-ms
-                      checkpoint-interval-ms)
-        watch? (pos? interval-ms)
-        scheduled-fut (atom nil)
-        ;; One TCP relay server per agent. Created before the spawn so the
-        ;; bootstrap code can hand the agent a valid port to connect back to.
-        relay-handle (relay/start-server! {})
-        relay-port (:seon.db.relay/port relay-handle)]
-    ;; Persist :starting before the (slow) spawn so the row is visible.
-    (db/transact! :seon.session
-                  [{::agent session-id
-                    ::namespace namespace
-                    ::started-at started-at
-                    ::status :starting}])
-    (let [jvm (try (#'pool/spawn-agent-jvm! port)
-                   (catch Exception spawn-err
-                     (release-reserved-port! port)
-                     (relay/stop-server! relay-handle)
-                     (try (db/transact! :seon.session
-                                        [{::agent session-id ::status :crashed}])
-                          (catch Exception _))
-                     (throw spawn-err)))
-          ^Process proc (:seon.flow.pool/process jvm)
-          pid (:seon.flow.pool/pid jvm)]
-      ;; JVM is bound to the port; reservation no longer needed.
-      (release-reserved-port! port)
-      (try
-        (pool/nrepl-eval! port (agent-bootstrap-code namespace
-                                                     :watch? watch?
-                                                     :relay-port relay-port))
-        (bind-namespace! port namespace)
-        (swap! live-sessions assoc session-id
-               {::session-id session-id
-                ::namespace namespace
-                ::port port
-                ::pid pid
-                ::last-checkpoint-version 0
-                ::relay-handle relay-handle
-                :process proc})
-        (register-with-orchestrator! session-id namespace port started-at)
-        (db/transact! :seon.session
-                      [{::agent session-id
-                        ::port port
-                        ::pid pid
-                        ::status :running}])
-        (when watch?
-          (let [fut (schedule-checkpoint-task! session-id interval-ms)]
-            (reset! scheduled-fut fut)
-            (swap! live-sessions assoc-in
-                   [session-id ::checkpoint-future] fut)))
-        (log/info "Launched agent session"
-                  {:session-id session-id :namespace namespace
-                   :port port :pid pid
-                   :checkpoint-interval-ms (when watch? interval-ms)})
-        {::session-id session-id
-         ::nrepl-port port
-         ::pid pid}
-        (catch Exception setup-err
-          (log/error "Failed to set up agent session, killing JVM"
-                     {:session-id session-id :namespace namespace
-                      :error (.getMessage setup-err)})
-          (when-let [^java.util.concurrent.ScheduledFuture fut @scheduled-fut]
-            (try (.cancel fut false) (catch Exception _)))
-          (try (.destroy proc) (catch Exception _))
-          (try (relay/stop-server! relay-handle) (catch Exception _))
-          (swap! live-sessions dissoc session-id)
-          (unregister-from-orchestrator! session-id)
-          (try (db/transact! :seon.session
-                             [{::agent session-id ::status :crashed}])
-               (catch Exception _))
-          (throw setup-err))))))
-
-(defn checkpoint!
-  "Read `@*ctx*` from the agent JVM, serialize it (pr-str), and persist it
-   to the session row's `:seon.session/ctx`.
-
-   Request keys:
-     ::session-id - The id returned by `launch!`.
-
-   Response keys:
-     ::session-id      - Echo of the input id.
-     ::checkpointed-at - Wall-clock time of the write."
-  {:malli/schema [:=> [:cat ::checkpoint-request] ::checkpoint-response]}
-  [{::keys [session-id]}]
-  (let [{::keys [port]} (or (live-session session-id)
-                            (throw (ex-info "Unknown session id"
-                                            {:session-id session-id})))
-        ;; nrepl-eval! returns the *printed form* of the value. The agent
-        ;; evaluates `(pr-str @*ctx*)` -> string S, then nREPL prints S,
-        ;; producing `"\"…\""`. read-string once to peel that outer layer
-        ;; so we store the pr-str blob itself, not its escaped print form.
-        printed (pool/nrepl-eval! port "(pr-str @*ctx*)")
-        blob (edn/read-string printed)
-        checkpointed-at (java.util.Date.)]
-    (db/transact! :seon.session
-                  [{::agent session-id
-                    ::ctx blob}])
-    {::session-id session-id
-     ::checkpointed-at checkpointed-at}))
-
-(defn stop!
-  "Auto-checkpoint, terminate the agent JVM, and mark the session row stopped.
-
-   Request keys:
-     ::session-id - The id returned by `launch!`.
-
-   Response keys:
-     ::session-id - Echo of the input id.
-     ::status     - Always :stopped on success."
-  {:malli/schema [:=> [:cat ::stop-request] ::stop-response]}
-  [{::keys [session-id]}]
-  (let [entry (or (live-session session-id)
-                  (throw (ex-info "Unknown session id"
-                                  {:session-id session-id})))
-        ^Process proc (:process entry)]
-    ;; Cancel auto-checkpoint scheduler first so it can't race with shutdown.
-    (cancel-checkpoint-task! entry)
-    ;; Best-effort checkpoint before halting so postmortem inspection works.
-    (try (checkpoint! {::session-id session-id})
-         (catch Exception e
-           (log/warn "Pre-stop checkpoint failed"
-                     {:session-id session-id :error (.getMessage e)})))
+   Response keys: ::id ::namespace ::status ::nrepl-port ::started-at ::db-name
+   (or ::error on failure)."
+  {:malli/schema [:=> [:cat ::start-agent-session-request] ::start-agent-session-response]}
+  [{::keys [namespace resume? pool] :as request}]
+  (let [resume? (if (nil? resume?) true resume?)
+        pool (if (contains? request ::pool) pool @agent-pool)
+        ns-string (->ns-string namespace)
+        session-id (generate-session-id)
+        db-name ns-string
+        started-at (java.util.Date.)]
     (try
-      (.destroy proc)
-      (.waitFor proc 5 java.util.concurrent.TimeUnit/SECONDS)
+      (let [ctx-atom (ctx/create!
+                      {::ctx/instance-id session-id
+                       ::ctx/namespace namespace
+                       ::ctx/db-name nil
+                       ::ctx/persist? false
+                       ::ctx/sse-push? false
+                       ::ctx/validate? true
+                       ::ctx/debounce-ms 1000
+                       ::ctx/reserved-keys {:seon.agent/namespace namespace
+                                            :seon.agent/db nil}})
+            ctx-value @ctx-atom
+            jvm-handle (when pool
+                         (pool/claim! pool
+                                      {::pool/session-id session-id
+                                       ::pool/namespace namespace
+                                       ::pool/ctx-value ctx-value}))
+            _ (when (and pool (nil? jvm-handle))
+                (throw (ex-info "No pool JVM available"
+                                {:session-id session-id :namespace ns-string})))
+            nrepl-port (when jvm-handle (::pool/port jvm-handle))
+            persisted (cond-> {::id session-id
+                               ::namespace ns-string
+                               ::status :running
+                               ::started-at started-at
+                               ::db-name db-name
+                               ::last-activity-at started-at
+                               ::eval-count 0}
+                        nrepl-port (assoc ::nrepl-port nrepl-port))]
+        (db/transact! :seon.orchestrator [persisted])
+        (swap! live-state assoc session-id
+               {::ctx-atom ctx-atom
+                ::pool pool})
+        (runtime/register! (cond-> {::runtime/namespace ns-string
+                                    ::runtime/status :running
+                                    ::runtime/location :external
+                                    ::runtime/session-id session-id
+                                    ::runtime/started-at started-at}
+                             nrepl-port (assoc ::runtime/nrepl-port nrepl-port)))
+        (log/info "Started agent session"
+                  {:session-id session-id :namespace ns-string :port nrepl-port})
+        {::id session-id
+         ::namespace ns-string
+         ::status :running
+         ::nrepl-port nrepl-port
+         ::started-at started-at
+         ::db-name db-name})
       (catch Exception e
-        (log/warn "Agent JVM did not exit cleanly"
-                  {:session-id session-id :error (.getMessage e)})))
-    ;; Tear down the per-agent relay server now that the JVM is gone.
-    (when-let [rh (::relay-handle entry)]
-      (try (relay/stop-server! rh) (catch Exception _)))
-    (swap! live-sessions dissoc session-id)
-    (unregister-from-orchestrator! session-id)
-    (db/transact! :seon.session
-                  [{::agent session-id
-                    ::status :stopped
-                    ::stopped-at (java.util.Date.)}])
-    (log/info "Stopped agent session" {:session-id session-id})
-    {::session-id session-id
-     ::status :stopped}))
+        (log/error "Failed to start agent session"
+                   {:namespace ns-string :error (.getMessage e)})
+        {::id session-id
+         ::namespace ns-string
+         ::status :error
+         ::error (.getMessage e)}))))
+
+(defn stop-agent-session!
+  "Stop an agent session, flushing ctx, releasing the pool JVM, and marking
+   the row :stopped in datahike.
+
+   Request keys: ::id
+
+   Response keys: ::id ::status ::stopped-at (or ::error)."
+  {:malli/schema [:=> [:cat ::stop-agent-session-request] ::stop-agent-session-response]}
+  [{::keys [id]}]
+  (let [row (pull-row id)
+        live-entry (live id)]
+    (if (or row live-entry)
+      (try
+        (log/info "Stopping agent session"
+                  {:session-id id :namespace (::namespace row)})
+        (when-let [p (::pool live-entry)]
+          (log/debug "Releasing pool JVM" {:session-id id})
+          (pool/release-session! p id))
+        (log/debug "Destroying ctx" {:session-id id})
+        (ctx/destroy! {::ctx/instance-id id})
+        (let [stopped-at (java.util.Date.)]
+          (db/transact! :seon.orchestrator
+                        [{::id id ::status :stopped ::stopped-at stopped-at}])
+          (swap! live-state dissoc id)
+          (when-let [ns-string (::namespace row)]
+            (runtime/unregister! {::runtime/namespace ns-string}))
+          (log/info "Stopped agent session" {:session-id id})
+          {::id id ::status :stopped ::stopped-at stopped-at})
+        (catch Exception e
+          (log/error "Error stopping session" {:session-id id :error (.getMessage e)})
+          {::id id ::status :error ::error (.getMessage e)}))
+      (do
+        (log/warn "Session not found" {:session-id id})
+        {::id id ::status :error ::error "Session not found"}))))
+
+(def ^:private public-session-keys
+  "Keys to include in public session info responses."
+  [::id ::namespace ::status ::nrepl-port ::started-at ::db-name
+   ::nrepl-session-id ::last-activity-at ::eval-count ::current-eval])
+
+(defn get-agent-session
+  "Get information about a specific running agent session.
+   Returns an empty map if not found or stopped."
+  {:malli/schema [:=> [:cat ::get-agent-session-request] ::get-agent-session-response]}
+  [{::keys [id]}]
+  (if-let [row (pull-row id)]
+    (if (= :running (::status row))
+      (select-keys (public-view row) public-session-keys)
+      {})
+    {}))
+
+(defn list-agent-sessions
+  "List all running agent sessions."
+  {:malli/schema [:=> [:cat ::list-agent-sessions-request] ::list-agent-sessions-response]}
+  [{}]
+  (vec (for [row (running-rows)]
+         (select-keys (public-view row) public-session-keys))))
+
+(defn get-session-port
+  "Get the nREPL port and persistent nREPL session ID for a session."
+  {:malli/schema [:=> [:cat ::get-session-port-request] ::get-session-port-response]}
+  [{::keys [id]}]
+  (let [session (get-agent-session {::id id})]
+    {::nrepl-port (::nrepl-port session)
+     ::nrepl-session-id (::nrepl-session-id session)}))
+
+;;; ---------------------------------------------------------------------------
+;;; External-session bridge (used by `seon.session/launch!`)
+;;; ---------------------------------------------------------------------------
+
+(schema/register! ::register-external-session-request
+                  [:map
+                   [::id ::id]
+                   [::namespace ::namespace]
+                   [::nrepl-port {:optional true} ::nrepl-port]
+                   [::started-at {:optional true} ::started-at]
+                   [::db-name {:optional true} ::db-name]])
+
+(schema/register! ::register-external-session-response
+                  [:map [::registered :boolean]])
+
+(schema/register! ::unregister-external-session-request
+                  [:map [::id ::id]])
+
+(schema/register! ::unregister-external-session-response
+                  [:map [::unregistered :boolean]])
+
+(defn register-external-session!
+  "Register a session that was launched outside `start-agent-session!`
+   (e.g. by `seon.session/launch!`) so MCP eval routing can find it.
+   Persists a `:running` row to `:seon.orchestrator`."
+  {:malli/schema [:=> [:cat ::register-external-session-request]
+                  ::register-external-session-response]}
+  [{::keys [id namespace nrepl-port started-at db-name]}]
+  (let [now (java.util.Date.)
+        ns-string (->ns-string namespace)
+        row (cond-> {::id id
+                     ::namespace ns-string
+                     ::status :running
+                     ::started-at (or started-at now)
+                     ::db-name (or db-name ns-string)
+                     ::last-activity-at now
+                     ::eval-count 0}
+              nrepl-port (assoc ::nrepl-port nrepl-port))]
+    (db/transact! :seon.orchestrator [row])
+    {::registered true}))
+
+(defn unregister-external-session!
+  "Mark an externally-launched session as :stopped in `:seon.orchestrator`.
+   No-op when the row does not exist."
+  {:malli/schema [:=> [:cat ::unregister-external-session-request]
+                  ::unregister-external-session-response]}
+  [{::keys [id]}]
+  (if (pull-row id)
+    (do
+      (db/transact! :seon.orchestrator
+                    [{::id id
+                      ::status :stopped
+                      ::stopped-at (java.util.Date.)}])
+      {::unregistered true})
+    {::unregistered false}))
+
+;;; ---------------------------------------------------------------------------
+;;; nREPL Session ID Management
+;;; ---------------------------------------------------------------------------
+
+(schema/register! ::set-nrepl-session-id-request
+                  [:map
+                   [::id ::id]
+                   [::nrepl-session-id ::nrepl-session-id]])
+
+(schema/register! ::set-nrepl-session-id-response
+                  [:map
+                   [::set :boolean]])
+
+(defn set-nrepl-session-id!
+  "Set the persistent nREPL session ID for a session in datahike."
+  {:malli/schema [:=> [:cat ::set-nrepl-session-id-request] ::set-nrepl-session-id-response]}
+  [{::keys [id nrepl-session-id]}]
+  (if (pull-row id)
+    (do
+      (db/transact! :seon.orchestrator
+                    [{::id id ::nrepl-session-id nrepl-session-id}])
+      {::set true})
+    {::set false}))
+
+;;; ---------------------------------------------------------------------------
+;;; Activity Tracking (Phase 4c)
+;;; ---------------------------------------------------------------------------
+;;;
+;;; `::current-eval` is transient and stays in live-state. `::eval-count` and
+;;; `::last-activity-at` persist to datahike.
+
+(schema/register! ::record-eval-start-request
+                  [:map
+                   [::id ::id]
+                   [::code :string]])
+
+(schema/register! ::record-eval-start-response
+                  [:map [::recorded :boolean]])
+
+(schema/register! ::record-eval-complete-request
+                  [:map [::id ::id]])
+
+(schema/register! ::record-eval-complete-response
+                  [:map [::recorded :boolean]])
+
+(defn record-eval-start!
+  "Record that an eval has started. The transient `::current-eval` lives in
+   the in-process live-state."
+  {:malli/schema [:=> [:cat ::record-eval-start-request] ::record-eval-start-response]}
+  [{::keys [id code]}]
+  (if (pull-row id)
+    (do
+      (swap! live-state assoc-in [id ::current-eval]
+             {::code code ::started-at (java.util.Date.)})
+      {::recorded true})
+    {::recorded false}))
+
+(defn record-eval-complete!
+  "Record that an eval has completed. Clears `::current-eval` from live-state
+   and bumps `::eval-count` + `::last-activity-at` in datahike."
+  {:malli/schema [:=> [:cat ::record-eval-complete-request] ::record-eval-complete-response]}
+  [{::keys [id]}]
+  (if-let [row (pull-row id)]
+    (do
+      (swap! live-state update id dissoc ::current-eval)
+      (db/transact! :seon.orchestrator
+                    [{::id id
+                      ::eval-count (inc (or (::eval-count row) 0))
+                      ::last-activity-at (java.util.Date.)}])
+      {::recorded true})
+    {::recorded false}))
+
+;;; ---------------------------------------------------------------------------
+;;; Session Recovery (on system restart)
+;;; ---------------------------------------------------------------------------
+
+(defn recover-sessions!
+  "Recover sessions on system restart.
+
+   Queries the runtime registry for external running instances (which are
+   orphaned since pool JVMs are gone after restart) and marks them as stopped.
+
+   Sessions can be resumed via start-agent-session! with ::resume? true.
+
+   Called during system startup.
+
+   Request keys:
+     (none - empty map for consistency)
+
+   Response keys:
+     ::recovered-count - Number of sessions marked as stopped
+
+   Example:
+     (recover-sessions! {})"
+  {:malli/schema [:=> [:cat ::recover-sessions-request] ::recover-sessions-response]}
+  [{}]
+  (log/info "Recovering sessions from previous run")
+  (let [all-instances (runtime/instances {})
+        orphaned (->> all-instances
+                      (filter #(and (= :external (::runtime/location %))
+                                    (= :running (::runtime/status %)))))]
+    (doseq [inst orphaned]
+      (log/info "Marking orphaned session as stopped"
+                {:namespace (::runtime/namespace inst)
+                 :session-id (::runtime/session-id inst)})
+      (runtime/unregister! {::runtime/namespace (::runtime/namespace inst)}))
+    {::recovered-count (count orphaned)}))
 
 (comment
-  ;; Demo: launch -> eval -> checkpoint -> stop
-  (def res (launch! {::namespace 'seon.apps.demo}))
-  (checkpoint! {::session-id (::session-id res)})
-  (stop! {::session-id (::session-id res)})
-  (orch-registry)
+  ;; REPL exploration
+
+  ;; Start a session
+  (def s (start-agent-session! {::namespace 'test.agent}))
+
+  ;; Check session info
+  (get-agent-session {::id (::id s)})
+
+  ;; List all sessions
+  (list-agent-sessions {})
+
+  ;; Get port for agent-eval
+  (get-session-port {::id (::id s)})
+
+  ;; Stop the session
+  (stop-agent-session! {::id (::id s)})
+
+  ;; Resume a session (loads previous ctx state)
+  (start-agent-session! {::namespace 'test.agent ::resume? true})
+
   nil)

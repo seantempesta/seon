@@ -1,181 +1,339 @@
 (ns seon.session-test
-  "Integration test for the agent-launch demo target.
+  "Tests for agent session management.
 
-   Exercises the full Phase 3 lifecycle: spawn an agent JVM, eval forms in
-   it, swap! its `*ctx*`, persist the ctx blob to `:seon.session`, and stop.
+  Tests session lifecycle, ctx persistence, and recovery functionality.
+  Note: nREPL integration tests that require a live pool are in pool_test.clj.
+  These tests verify the session layer works correctly without a pool (port=nil).
 
-   Spawns a real JVM on a port outside the pool's default range (7900-7902)
-   and inside its agent range (7980-7999). Slow but deterministic — the only
-   way to verify the cross-JVM nREPL plumbing actually works.
+  Uses `tu/with-test-db-fixture` to route `:seon.orchestrator` writes/queries
+  through an isolated datahike `:memory` flow per test — keeps the live
+  orchestrator DB clean. See `docs/prds/datahike-migration/test-fixture-design.md`."
+  (:require [clojure.test :refer [deftest testing is use-fixtures]]
+            [seon.orchestrator.session :as session]
+            [seon.runtime :as runtime]
+            [seon.schema :as schema]
+            [seon.test-utils :as tu]))
 
-   Marked `^:integration`: requires the live system (`:seon.db/flow` with
-   `:seon.session` registered, `seon.flow/pool` for agent spawning, free
-   ports in 7980-7999). Excluded from `bin/test --unit`; run via
-   `bin/test --all` or `clj -M:test -m kaocha.runner integration`."
-  (:require [clojure.test :refer [deftest is testing]]
-            [seon.db :as db]
-            [seon.flow.pool :as pool]
-            [seon.session :as session]))
+;;; ---------------------------------------------------------------------------
+;;; Test Fixtures
+;;; ---------------------------------------------------------------------------
 
-(defn- safe-stop! [session-id]
-  (try (session/stop! {::session/session-id session-id})
-       (catch Exception _)))
+(defn- reset-process-state
+  "Reset live-state + runtime registry between tests. Per-test DB isolation
+   is handled by `with-test-db-fixture`; this resets the JVM-process state
+   that lives outside the datahike DB."
+  [f]
+  (runtime/reset-registry! {})
+  (reset! @#'seon.orchestrator.session/live-state {})
+  (try
+    (f)
+    (finally
+      (reset! @#'seon.orchestrator.session/live-state {})
+      (runtime/reset-registry! {}))))
 
-(defn- poll-row
-  "Poll `:seon.session` for `session-id` until `pred` matches or `timeout-ms`
-   elapses. Returns the matching row, or the last-seen row if it timed out."
-  [session-id pred timeout-ms]
-  (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
-    (loop [row (db/pull-by-name :seon.session '[*]
-                                [:seon.session/agent session-id])]
-      (cond
-        (pred row) row
-        (>= (System/currentTimeMillis) deadline) row
-        :else (do (Thread/sleep 50)
-                  (recur (db/pull-by-name :seon.session '[*]
-                                          [:seon.session/agent session-id])))))))
+(use-fixtures :each
+  (tu/with-test-db-fixture
+    {::tu/namespaces [:seon.orchestrator]
+     ::tu/schemas    {:seon.orchestrator session/session-entity-schema}})
+  reset-process-state)
 
-(deftest ^:integration launch-eval-checkpoint-stop-roundtrip
-  (testing "end-to-end agent JVM lifecycle"
-    (let [launched (atom nil)]
-      (try
-        ;; 1. Launch -- spawns a JVM, writes a :running row.
-        (let [{::session/keys [session-id nrepl-port pid] :as res}
-              (session/launch! {::session/namespace 'seon.session-test.agent})]
-          (reset! launched session-id)
-          (is (string? session-id) "launch! returns a session id")
-          (is (re-matches #"[A-Za-z0-9]{4,6}" session-id)
-              "session id is a base62 token")
-          (is (<= 7980 nrepl-port 7999)
-              "port is allocated from the launch range")
-          (is (pos-int? pid))
+;;; ---------------------------------------------------------------------------
+;;; Test Schema Registration (for agent-side validation)
+;;; ---------------------------------------------------------------------------
 
-          ;; 2. Eval forms in the agent JVM via the pool's nREPL primitive
-          ;;    (this is what mcp__seon__eval does under the hood).
-          (is (= "{:scratch 42}"
-                 (pool/nrepl-eval! nrepl-port "(swap! *ctx* assoc :scratch 42)"))
-              "agent can swap! its *ctx* atom")
-          (pool/nrepl-eval! nrepl-port
-                            "(defn double-scratch [] (* 2 (:scratch @*ctx*)))")
-          (is (= "84" (pool/nrepl-eval! nrepl-port "(double-scratch)"))
-              "agent can call functions defined in its own namespace")
+(schema/register! :test.session/value
+                  [:int {:min 0 :description "A test integer value"}])
 
-          ;; 3. Row is visible from the orchestrator before checkpoint.
-          (let [row (db/pull-by-name :seon.session '[*]
-                                     [:seon.session/agent session-id])]
-            (is (= :running (:seon.session/status row)))
-            (is (= 'seon.session-test.agent (:seon.session/namespace row)))
-            (is (nil? (:seon.session/ctx row))
-                "ctx is absent until checkpoint! runs"))
+(schema/register! :test.session/name
+                  [:string {:min 1 :description "A test string name"}])
 
-          ;; 4. Checkpoint -- pulls @*ctx* via nREPL, persists pr-str blob.
-          (let [{::session/keys [checkpointed-at]}
-                (session/checkpoint! {::session/session-id session-id})]
-            (is (inst? checkpointed-at)))
-          (let [row (db/pull-by-name :seon.session '[*]
-                                     [:seon.session/agent session-id])]
-            (is (= "{:scratch 42}" (:seon.session/ctx row))
-                "ctx is persisted as the agent's pr-str of @*ctx*"))
+;;; ---------------------------------------------------------------------------
+;;; Session ID Tests
+;;; ---------------------------------------------------------------------------
 
-          ;; 5. Stop -- terminates JVM, marks :stopped, sets :stopped-at.
-          (let [{::session/keys [status]}
-                (session/stop! {::session/session-id session-id})]
-            (is (= :stopped status)))
-          (reset! launched nil)
-          (let [row (db/pull-by-name :seon.session '[*]
-                                     [:seon.session/agent session-id])]
-            (is (= :stopped (:seon.session/status row)))
-            (is (inst? (:seon.session/stopped-at row)))))
-        (finally
-          (when-let [sid @launched]
-            (safe-stop! sid)))))))
+(deftest session-id-format-test
+  (testing "session IDs are 6 hex characters"
+    (let [result (session/start-agent-session!
+                   {::session/namespace 'test.id.format
+                    ::session/pool nil})]
+      (is (= :running (::session/status result)))
+      (is (string? (::session/id result)))
+      (is (= 6 (count (::session/id result))))
+      (is (re-matches #"[A-Za-z0-9]{6}" (::session/id result))))))
 
-(deftest ^:integration agent-jvm-relays-seon-db-to-orchestrator
-  (testing "agent JVM -> relay -> orchestrator -> datahike round-trip"
-    (let [launched (atom nil)
-          test-id "rly001"]
-      (try
-        (let [{::session/keys [session-id nrepl-port]}
-              (session/launch! {::session/namespace 'seon.session-test.relay})]
-          (reset! launched session-id)
+;;; ---------------------------------------------------------------------------
+;;; Session Lifecycle Tests
+;;; ---------------------------------------------------------------------------
 
-          ;; 1. Agent transacts a row into :seon.orchestrator via the relay.
-          (let [tx-result-str
-                (pool/nrepl-eval!
-                 nrepl-port
-                 (str "(seon.db/transact! :seon.orchestrator "
-                      "[{:seon.orchestrator.session/id \"" test-id "\""
-                      " :seon.orchestrator.session/namespace \"relay-test\""
-                      " :seon.orchestrator.session/status :running}])"))]
-            (is (re-find #":tx-data" (str tx-result-str))
-                "agent-side transact! returned a tx report (not an error)"))
+(deftest start-agent-session-test
+  (testing "starts a session (no pool = nil port)"
+    (let [result (session/start-agent-session!
+                   {::session/namespace 'test.start
+                    ::session/pool nil})]
+      (is (= :running (::session/status result)))
+      (is (some? (::session/id result)))
+      (is (= "test.start" (::session/namespace result)))
+      ;; No pool in tests, so port is nil
+      (is (nil? (::session/nrepl-port result)))
+      (is (inst? (::session/started-at result)))
+      (is (= "test.start" (::session/db-name result))))))
 
-          ;; 2. Orchestrator-side query sees the row the agent wrote.
-          (let [q '[:find ?ns ?status
-                    :in $ ?id
-                    :where
-                    [?e :seon.orchestrator.session/id ?id]
-                    [?e :seon.orchestrator.session/namespace ?ns]
-                    [?e :seon.orchestrator.session/status ?status]]
-                rows (db/query :seon.orchestrator q test-id)]
-            (is (= #{["relay-test" :running]} rows)
-                "orchestrator sees the agent's write through datahike"))
+(deftest stop-agent-session-test
+  (testing "stops a running session"
+    (let [started (session/start-agent-session!
+                    {::session/namespace 'test.stop
+                     ::session/pool nil})
+          session-id (::session/id started)]
+      (is (= :running (::session/status started)))
 
-          ;; 3. Agent reads the same row back via pull-by-name (also through
-          ;; the relay), proving the read path round-trips.
-          (let [pulled-str
-                (pool/nrepl-eval!
-                 nrepl-port
-                 (str "(seon.db/pull-by-name :seon.orchestrator '[*] "
-                      "[:seon.orchestrator.session/id \"" test-id "\"])"))]
-            (is (re-find #"relay-test" pulled-str))
-            (is (re-find #":running" pulled-str)
-                "agent's read sees its own earlier write")))
-        (finally
-          (when-let [sid @launched]
-            (safe-stop! sid))
-          ;; Clean the row regardless of outcome.
-          (try
-            (db/transact! :seon.orchestrator
-                          [[:db/retractEntity
-                            [:seon.orchestrator.session/id test-id]]])
-            (catch Exception _)))))))
+      (let [stopped (session/stop-agent-session!
+                      {::session/id session-id})]
+        (is (= :stopped (::session/status stopped)))
+        (is (= session-id (::session/id stopped)))
+        (is (inst? (::session/stopped-at stopped))))))
 
-(deftest ^:integration auto-checkpoint-on-ctx-change
-  (testing "launch! schedules a watcher that auto-checkpoints on *ctx* change"
-    (let [launched (atom nil)]
-      (try
-        (let [{::session/keys [session-id nrepl-port]}
-              (session/launch! {::session/namespace 'seon.session-test.autockpt
-                                ::session/checkpoint-interval-ms 200})]
-          (reset! launched session-id)
-          ;; Sanity: pre-swap, no ctx is persisted yet.
-          (let [row (db/pull-by-name :seon.session '[*]
-                                     [:seon.session/agent session-id])]
-            (is (nil? (:seon.session/ctx row))))
-          ;; Swap *ctx* in the agent JVM. The :seon.session/version watcher
-          ;; should bump *ctx-version*; within ~200ms the scheduler should
-          ;; observe the bump and persist the blob.
-          (pool/nrepl-eval! nrepl-port "(swap! *ctx* assoc :hello :world)")
-          (let [row (poll-row session-id
-                              #(= "{:hello :world}" (:seon.session/ctx %))
-                              2000)]
-            (is (= "{:hello :world}" (:seon.session/ctx row))
-                "auto-checkpoint persisted the ctx within 2s of the swap!"))
-          ;; A second swap! triggers a second checkpoint with new contents.
-          (pool/nrepl-eval! nrepl-port "(swap! *ctx* assoc :phase 3)")
-          (let [row (poll-row session-id
-                              #(re-find #":phase 3" (or (:seon.session/ctx %) ""))
-                              2000)]
-            (is (re-find #":hello :world" (:seon.session/ctx row)))
-            (is (re-find #":phase 3" (:seon.session/ctx row))
-                "second swap! triggered another auto-checkpoint"))
-          ;; stop! cancels the scheduled task and clears the live-sessions slot.
-          (session/stop! {::session/session-id session-id})
-          (reset! launched nil)
-          (let [live @@(resolve 'seon.session/live-sessions)]
-            (is (not (contains? live session-id))
-                "stop! removed the live-sessions entry (and cancelled future)")))
-        (finally
-          (when-let [sid @launched]
-            (safe-stop! sid)))))))
+  (testing "returns error for non-existent session"
+    (let [result (session/stop-agent-session!
+                   {::session/id "dead00"})]
+      (is (= :error (::session/status result)))
+      (is (= "Session not found" (::session/error result))))))
+
+;;; ---------------------------------------------------------------------------
+;;; Session Query Tests
+;;; ---------------------------------------------------------------------------
+
+(deftest get-agent-session-test
+  (testing "returns session info for running session"
+    (let [started (session/start-agent-session!
+                    {::session/namespace 'test.get
+                     ::session/pool nil})
+          session-id (::session/id started)
+          retrieved (session/get-agent-session
+                      {::session/id session-id})]
+      (is (= session-id (::session/id retrieved)))
+      (is (= "test.get" (::session/namespace retrieved)))
+      (is (= :running (::session/status retrieved)))))
+
+  (testing "returns empty map for non-existent session"
+    (let [result (session/get-agent-session
+                   {::session/id "dead00"})]
+      (is (= {} result)))))
+
+(deftest list-agent-sessions-test
+  (testing "returns empty list when no sessions"
+    (is (empty? (session/list-agent-sessions {}))))
+
+  (testing "lists all active sessions"
+    (session/start-agent-session!
+      {::session/namespace 'test.list1
+       ::session/pool nil})
+    (session/start-agent-session!
+      {::session/namespace 'test.list2
+       ::session/pool nil})
+
+    (let [sessions (session/list-agent-sessions {})]
+      (is (= 2 (count sessions)))
+      (is (every? #(contains? % ::session/id) sessions))
+      (is (every? #(contains? % ::session/namespace) sessions))
+      (is (every? #(= :running (::session/status %)) sessions)))))
+
+(deftest get-session-port-test
+  (testing "returns nil port when no pool (no pool in tests)"
+    (let [started (session/start-agent-session!
+                    {::session/namespace 'test.port
+                     ::session/pool nil})
+          session-id (::session/id started)
+          result (session/get-session-port
+                   {::session/id session-id})]
+      (is (nil? (::session/nrepl-port result)))))
+
+  (testing "returns nil port for non-existent session"
+    (let [result (session/get-session-port
+                   {::session/id "dead00"})]
+      (is (nil? (::session/nrepl-port result))))))
+
+;;; ---------------------------------------------------------------------------
+;;; Recovery Tests
+;;; ---------------------------------------------------------------------------
+
+(deftest recover-sessions-test
+  (testing "recover-sessions! marks orphaned external running instances as stopped"
+    ;; Register an external running instance in the runtime registry
+    ;; (simulating a session that was running before crash)
+    (runtime/register! {::runtime/namespace "test.orphan"
+                        ::runtime/status :running
+                        ::runtime/location :external
+                        ::runtime/session-id "orph00"})
+
+    (let [result (session/recover-sessions! {})]
+      (is (= 1 (::session/recovered-count result)))
+
+      ;; Verify status was updated to stopped in runtime registry
+      (let [inst (runtime/instance {::runtime/namespace "test.orphan"})]
+        (is (= :stopped (::runtime/status inst)))))))
+
+;;; ---------------------------------------------------------------------------
+;;; Activity Tracking Tests (Phase 4c)
+;;; ---------------------------------------------------------------------------
+
+(deftest activity-tracking-test
+  (testing "sessions track eval activity"
+    (let [started (session/start-agent-session!
+                    {::session/namespace 'test.activity
+                     ::session/pool nil})
+          session-id (::session/id started)]
+
+      ;; Initial state: 0 evals, no current eval
+      (let [info (session/get-agent-session
+                   {::session/id session-id})]
+        (is (= 0 (::session/eval-count info)))
+        (is (nil? (::session/current-eval info))))
+
+      ;; Record start of an eval
+      (session/record-eval-start!
+        {::session/id session-id
+         ::session/code "(+ 1 2)"})
+
+      ;; Should have current-eval set
+      (let [info (session/get-agent-session
+                   {::session/id session-id})]
+        (is (some? (::session/current-eval info)))
+        (is (= "(+ 1 2)" (::session/code (::session/current-eval info)))))
+
+      ;; Record completion
+      (session/record-eval-complete!
+        {::session/id session-id})
+
+      ;; Should have incremented count and cleared current-eval
+      (let [info (session/get-agent-session
+                   {::session/id session-id})]
+        (is (= 1 (::session/eval-count info)))
+        (is (nil? (::session/current-eval info)))
+        (is (some? (::session/last-activity-at info)))))))
+
+(deftest activity-tracking-nonexistent-session-test
+  (testing "activity tracking returns false for non-existent sessions"
+    (let [start-result (session/record-eval-start!
+                         {::session/id "dead00"
+                          ::session/code "(+ 1 2)"})
+          complete-result (session/record-eval-complete!
+                            {::session/id "dead00"})]
+      (is (false? (::session/recorded start-result)))
+      (is (false? (::session/recorded complete-result))))))
+
+(deftest list-sessions-includes-observability-test
+  (testing "list-agent-sessions includes observability fields"
+    (let [started (session/start-agent-session!
+                    {::session/namespace 'test.obs
+                     ::session/pool nil})
+          session-id (::session/id started)]
+
+      ;; Do some evals
+      (session/record-eval-start! {::session/id session-id ::session/code "(+ 1 2)"})
+      (session/record-eval-complete! {::session/id session-id})
+
+      (let [sessions (session/list-agent-sessions {})
+            session (first (filter #(= session-id (::session/id %)) sessions))]
+        (is (some? session))
+        (is (= 1 (::session/eval-count session)))
+        (is (some? (::session/last-activity-at session)))
+        (is (nil? (::session/current-eval session)))))))
+
+;;; ---------------------------------------------------------------------------
+;;; nREPL Session ID Tests
+;;; ---------------------------------------------------------------------------
+
+(deftest set-nrepl-session-id-test
+  (testing "can set nREPL session ID for existing session"
+    (let [started (session/start-agent-session!
+                    {::session/namespace 'test.nrepl.sid
+                     ::session/pool nil})
+          session-id (::session/id started)
+          nrepl-sid "test-nrepl-session-123"]
+
+      ;; Set the nREPL session ID
+      (let [result (session/set-nrepl-session-id!
+                     {::session/id session-id
+                      ::session/nrepl-session-id nrepl-sid})]
+        (is (true? (::session/set result))))
+
+      ;; Verify it's stored
+      (let [info (session/get-session-port
+                   {::session/id session-id})]
+        (is (= nrepl-sid (::session/nrepl-session-id info))))))
+
+  (testing "returns false for non-existent session"
+    (let [result (session/set-nrepl-session-id!
+                   {::session/id "dead00"
+                    ::session/nrepl-session-id "test-123"})]
+      (is (false? (::session/set result))))))
+
+(deftest get-session-port-includes-nrepl-session-id-test
+  (testing "get-session-port returns nrepl-session-id when set"
+    (let [started (session/start-agent-session!
+                    {::session/namespace 'test.port.sid
+                     ::session/pool nil})
+          session-id (::session/id started)
+          nrepl-sid "my-nrepl-session-456"]
+
+      ;; Initially nil
+      (let [info (session/get-session-port
+                   {::session/id session-id})]
+        (is (nil? (::session/nrepl-session-id info))))
+
+      ;; Set it
+      (session/set-nrepl-session-id!
+        {::session/id session-id
+         ::session/nrepl-session-id nrepl-sid})
+
+      ;; Now returned
+      (let [info (session/get-session-port
+                   {::session/id session-id})]
+        (is (= nrepl-sid (::session/nrepl-session-id info)))))))
+
+;;; ---------------------------------------------------------------------------
+;;; Runtime Registry Integration Tests (Phase 2)
+;;; ---------------------------------------------------------------------------
+
+(deftest start-session-registers-in-runtime-test
+  (testing "start-agent-session! registers instance in runtime registry"
+    (let [result (session/start-agent-session!
+                   {::session/namespace 'test.runtime.start
+                    ::session/pool nil})
+          session-id (::session/id result)
+          instances (runtime/instances {})]
+      (is (= 1 (count instances)))
+      (let [inst (first instances)]
+        (is (= "test.runtime.start" (::runtime/namespace inst)))
+        (is (= :running (::runtime/status inst)))
+        (is (= :external (::runtime/location inst)))
+        (is (= session-id (::runtime/session-id inst)))
+        (is (inst? (::runtime/started-at inst)))
+        ;; No pool in tests, so no nrepl-port
+        (is (nil? (::runtime/nrepl-port inst)))))))
+
+(deftest stop-session-unregisters-from-runtime-test
+  (testing "stop-agent-session! sets runtime status to :stopped"
+    (let [started (session/start-agent-session!
+                    {::session/namespace 'test.runtime.stop
+                     ::session/pool nil})
+          session-id (::session/id started)]
+      ;; Verify running first
+      (let [inst (runtime/instance {::runtime/namespace "test.runtime.stop"})]
+        (is (= :running (::runtime/status inst))))
+
+      ;; Stop it
+      (session/stop-agent-session! {::session/id session-id})
+
+      ;; Verify stopped in runtime
+      (let [inst (runtime/instance {::runtime/namespace "test.runtime.stop"})]
+        (is (= :stopped (::runtime/status inst)))
+        (is (inst? (::runtime/stopped-at inst)))))))
+
+(comment
+  ;; Run all tests
+  (clojure.test/run-tests 'seon.session-test)
+
+  ;; Run specific test
+  (clojure.test/test-var #'start-agent-session-test)
+  (clojure.test/test-var #'activity-tracking-test))

@@ -30,7 +30,6 @@
             [seon.session]
             [seon.repl]
             [seon.flow.trace]
-            [seon.orchestrator.session]
             [seon.phase2.demo]))
 
 ;;; ---------------------------------------------------------------------------
@@ -154,8 +153,8 @@
 (defmethod ig/init-key :seon.orchestrator/sessions
   [_ {:keys [connection-manager pool]}]
   (log/info "Initializing orchestrator sessions...")
-  (require 'seon.orchestrator.session)
-  ((resolve 'seon.orchestrator.session/init!) connection-manager :pool pool)
+  (require 'seon.session)
+  ((resolve 'seon.session/init!) connection-manager :pool pool)
   (log/info "Orchestrator sessions initialized")
   {:connection-manager connection-manager :pool pool})
 
@@ -171,8 +170,8 @@
     (do
       ;; Re-wire pool atom — defonce atoms survive reload but init! may not
       ;; have been called if resume short-circuited on a previous cycle
-      (require 'seon.orchestrator.session)
-      ((resolve 'seon.orchestrator.session/init!)
+      (require 'seon.session)
+      ((resolve 'seon.session/init!)
        (:connection-manager opts) :pool (:pool opts))
       old-state)
     (do (ig/halt-key! :seon.orchestrator/sessions old-state)

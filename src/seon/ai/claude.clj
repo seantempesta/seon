@@ -45,7 +45,7 @@
    [seon.ai.agent :as agent]
    [seon.ai.agent.log :as agent-log]
    [seon.ai.claude.sdk :as sdk]
-   [seon.orchestrator.session :as session]
+   [seon.session :as session]
    [seon.render.code :as render-code]
    [seon.runtime :as runtime]
    [seon.system :as sys]
