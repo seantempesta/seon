@@ -63,9 +63,6 @@
     ;; Pod HTTP+SSE server — A-5. Required here so the build includes
     ;; it; start-agent! calls (web.serve/start!) at boot.
     [seon.web.serve :as web.serve]
-    ;; Broadcast tx-listener — A-6. Required here so the build includes
-    ;; it; start-agent! calls (web.broadcast/install!) at boot.
-    [seon.web.broadcast :as web.broadcast]
     ;; Per-agent inspector UI (/agent/<id>) — installs its own
     ;; tx-listener that pushes morphs to that page's SSE stream.
     [seon.web.inspector]
@@ -451,15 +448,11 @@
 (defn ^:async ^:private log-replay-failure!
   [agent-id {:keys [kind ident]} {:keys [error stack]}]
   (await
-    (db/transact!
-      {:seon.db/tx-data
-       [{:seon.log/at      (js/Date.)
-         :seon.log/level   :warn
-         :seon.log/source  "seon.client/replay-program-graph!"
-         :seon.log/agent   [:seon.agent/id agent-id]
-         :seon.log/message (str "replay of " (name kind) " "
-                                (pr-str ident) " failed: " error)
-         :seon.log/stack   stack}]})))
+    (log/warn! {:seon.log/source  ::log-replay-failure!
+                :seon.log/agent   agent-id
+                :seon.log/message (str "replay of " (name kind) " "
+                                       (pr-str ident) " failed: " error)
+                :seon.log/stack   (or stack "")})))
 
 (defn ^:async replay-program-graph!
   "Re-eval every :seon.ns / :seon.fn / :seon.schema entity's persisted
@@ -618,11 +611,8 @@
                                                      :seon.message/to}
                             :seon.handler/fn        'seon.handlers.wake/wake-on-message
                             :seon.handler/on-origin #{:user :agent}}))
-                ;; Install the broadcast tx-listener (A-6).
-                _ (web.broadcast/install!)
-                ;; Install the per-agent inspector tx-listener. Distinct
-                ;; from broadcast — it pushes morphs for the agent-view
-                ;; inspector page (/agent/<id>), not the legacy tile grid.
+                ;; Install the per-agent inspector tx-listener. Pushes
+                ;; morphs for the agent-view inspector page (/agent/<id>).
                 _ (seon.web.inspector/install!)]
             (log/info-console! "seon.client" "agent started"
                                {:agent id :ns (str ns) :port port :port-file port-file})
