@@ -112,6 +112,27 @@
 (defonce ^:private _id-type
   (swap! *schemas assoc :seon.db/id [:string {:min 14 :max 14}]))
 
+;; --- Schemas-as-queryable-data meta-schema (research:
+;; docs/prds/agent-runtime/research/schemas-as-queryable-data-2026-05-26.md).
+;;
+;; Every entity-shape `:map` schema registered via `register!` (i.e. one
+;; that has a derived `:seon.entity/id-attr`) ALSO transacts a
+;; `:seon.schema` entity carrying its required-attrs set, id-attr, and
+;; the symbol naming its AI render fn. Kind-lookup in `seon.render`
+;; queries those entities via datalog — the schema registry becomes
+;; queryable substrate state.
+;;
+;; These attrs are leaf scalars; they have no chicken-and-egg with the
+;; entity-shape :seon.schema map (which references :seon.schema/key as
+;; an identity entry). Registered here in seon.schema so they exist
+;; before any entity ns loads.
+(defonce ^:private _schema-required-attrs
+  (swap! *schemas assoc :seon.schema/required-attrs [:vector :keyword]))
+(defonce ^:private _schema-id-attr
+  (swap! *schemas assoc :seon.schema/id-attr :keyword))
+(defonce ^:private _schema-render-fn
+  (swap! *schemas assoc :seon.schema/render-fn :symbol))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Registration API
 ;;; ---------------------------------------------------------------------------
@@ -164,6 +185,34 @@
             (when-let [k (and (vector? entry) (first entry))]
               (when (attr-has-identity? k) k)))
           (map-entries v))))
+
+(defn- map-required-attrs
+  "Return the set of `[entry-key ...]` whose props do NOT carry
+   `{:optional true}`. Used by schemas-as-queryable-data to compute
+   the required-attrs index entry for an entity-shape :map. Excludes
+   the special `::m/default` Malli sentinel if it shows up."
+  [v]
+  (when (map-shape? v)
+    (into []
+          (keep (fn [entry]
+                  (when (vector? entry)
+                    (let [k     (first entry)
+                          props (let [p (second entry)]
+                                  (when (map? p) p))]
+                      (when (and (keyword? k)
+                                 (not= k :malli.core/default)
+                                 (not (:optional props)))
+                        k)))))
+          (map-entries v))))
+
+(defn- schema-properties
+  "Return the :map schema's properties map (the optional second slot
+   between the head and the entries), or nil."
+  [v]
+  (when (map-shape? v)
+    (let [body (rest v)]
+      (when (and (seq body) (map? (first body)))
+        (first body)))))
 
 (defn- with-entity-id-attr
   "Attach `{:seon.entity/id-attr <k>}` to a `:map` schema's properties
@@ -238,6 +287,85 @@
     (doseq [[k v] pairs]
       (register! k v))
     (set (map first pairs))))
+
+;;; ---------------------------------------------------------------------------
+;;; Schemas-as-queryable-data — entity-schema decomposition into DB datoms.
+;;;
+;;; Every entity-shape `:map` schema with a derived `:seon.entity/id-attr`
+;;; ALSO becomes a `:seon.schema` entity carrying:
+;;;   :seon.schema/key            <kw>       (identity)
+;;;   :seon.schema/required-attrs [<kw> ...] (cardinality-many keyword)
+;;;   :seon.schema/id-attr        <kw>
+;;;   :seon.schema/render-fn      <symbol>   (the :seon.render/ai symbol)
+;;;
+;;; A process-local atom caches the required-count per kind for
+;;; specificity scoring in `entity-primary-kind` — derived deterministically
+;;; from the registry at decomposition time.
+;;;
+;;; This namespace MUST NOT require seon.db (cycle: db→schema). Instead,
+;;; we expose `entity-schema-tx-data` that returns the tx-data vector;
+;;; the conn-owning caller (seon.client/start-agent!) transacts via
+;;; seon.db/transact! after the conn is bound.
+;;; ---------------------------------------------------------------------------
+
+;; Cache of {schema-key required-attr-count} populated alongside the
+;; tx-data produced by `entity-schema-tx-data`. Read by render's
+;; kind-lookup for specificity scoring.
+(defonce *schema-required-counts (atom {}))
+
+(defn entity-schema-tx-data
+  "Return the tx-data vector (one :db/add per required-attr, plus the
+   key/id-attr/render-fn datoms) for one entity-shape `:map` schema.
+   Caller transacts via `seon.db/transact!`. Side-effect: caches the
+   required-count in `*schema-required-counts`. Returns `nil` when
+   `k` does not refer to an entity-shape :map (no id-attr derivable)."
+  [k]
+  (let [v (get @*schemas k)]
+    (when (and v (map-shape? v))
+      (let [props    (schema-properties v)
+            id-attr  (:seon.entity/id-attr props)
+            render   (:seon.render/ai props)]
+        (when id-attr
+          (let [reqs (vec (remove #{id-attr} (map-required-attrs v)))
+                ;; id-attr is always required — listed separately so it's
+                ;; not duplicated when the entry has no {:optional true}.
+                reqs (vec (distinct (cons id-attr reqs)))
+                tid  (str "schema-" (name k))]
+            (swap! *schema-required-counts assoc k (count reqs))
+            (into [[:db/add tid :seon.schema/key k]
+                   [:db/add tid :seon.schema/id-attr id-attr]
+                   (when render [:db/add tid :seon.schema/render-fn render])]
+                  (->> reqs
+                       (map (fn [r] [:db/add tid :seon.schema/required-attrs r])))
+                  )))))))
+
+(defn entity-schema-keys
+  "Snapshot of every registered keyword pointing at an entity-shape
+   `:map` schema (i.e. one with a derived `:seon.entity/id-attr`).
+   Iteration order is deterministic by sort. Used by
+   `seon.client/start-agent!` to seed `:seon.schema` entities at boot."
+  []
+  (->> @*schemas
+       (keep (fn [[k v]]
+               (when (and (map-shape? v) (:seon.entity/id-attr (schema-properties v)))
+                 k)))
+       sort
+       vec))
+
+(defn all-entity-schemas-tx-data
+  "Tx-data vector for every currently-registered entity-shape :map
+   schema. Concatenates `entity-schema-tx-data` over `entity-schema-keys`.
+   Idempotent — identity-attr upsert on `:seon.schema/key` replaces
+   prior decompositions in place."
+  []
+  (into [] (mapcat entity-schema-tx-data) (entity-schema-keys)))
+
+(defn schema-required-count
+  "Look up the cached required-attr count for `k`. Returns nil if `k`
+   was never decomposed (e.g. not an entity-shape :map). Populated as
+   a side-effect of `entity-schema-tx-data`."
+  [k]
+  (get @*schema-required-counts k))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Introspection

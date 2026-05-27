@@ -280,30 +280,78 @@
 ;; `{:optional true}` flags are a Phase 1b/1c follow-up.
 ;; ============================================================
 
+;; Required attrs reflect what every writer of the kind populates
+;; unconditionally — derived empirically from the write sites:
+;;   :seon.eval   — `record-eval!` (eval.cljs)
+;;   :seon.message — `chat` + assistant-msg writer (agent.cljs)
+;;   :seon.fn     — `build-tee-entities` (eval.cljs)
+;;   :seon.schema — `build-tee-entities` (eval.cljs)
+;;   :seon.ns     — `build-tee-entities` (eval.cljs)
+;;
+;; Anything written conditionally (errors only on failure, result only
+;; on success, projections that may be nil) is `{:optional true}` per
+;; CLAUDE.md "Optional = absent" rule. Never `[:maybe X]`.
+;;
+;; These required-sets feed schemas-as-queryable-data: at boot,
+;; `seon.client/start-agent!` decomposes each :map into a `:seon.schema`
+;; entity whose `:seon.schema/required-attrs` is the set computed from
+;; entries without `{:optional true}`. Kind-lookup in `seon.render`
+;; queries those entities via datalog.
+
 (schema/register! :seon.eval
   [:map {:seon.render/ai   'seon.handlers.eval/render-ai
          :seon.render/html 'seon.handlers.eval/render-html}
-   [:seon.eval/id :seon.eval/id]])
+   [:seon.eval/id          :seon.eval/id]
+   [:seon.eval/source      :seon.eval/source]
+   [:seon.eval/ok?         :seon.eval/ok?]
+   [:seon.eval/at          :seon.eval/at]
+   [:seon.eval/duration-ms {:optional true} :seon.eval/duration-ms]
+   [:seon.eval/narration   {:optional true} :seon.eval/narration]
+   [:seon.eval/ns          {:optional true} :seon.eval/ns]
+   [:seon.eval/result-edn  {:optional true} :seon.eval/result-edn]
+   [:seon.eval/error       {:optional true} :seon.eval/error]
+   [:seon.eval/error-data  {:optional true} :seon.eval/error-data]])
 
 (schema/register! :seon.message
   [:map {:seon.render/ai   'seon.handlers.message/render-ai
          :seon.render/html 'seon.handlers.message/render-html}
-   [:seon.message/id :seon.message/id]])
+   [:seon.message/id      :seon.message/id]
+   [:seon.message/role    :seon.message/role]
+   [:seon.message/content :seon.message/content]
+   [:seon.message/at      :seon.message/at]
+   [:seon.message/agent {:optional true} :seon.message/agent]
+   [:seon.message/from  {:optional true} :seon.message/from]
+   [:seon.message/to    {:optional true} :seon.message/to]])
 
 (schema/register! :seon.fn
   [:map {:seon.render/ai   'seon.handlers.fn/render-ai
          :seon.render/html 'seon.handlers.fn/render-html}
-   [:seon.fn/sym :seon.fn/sym]])
+   [:seon.fn/sym    :seon.fn/sym]
+   [:seon.fn/ns     :seon.fn/ns]
+   [:seon.fn/source :seon.fn/source]
+   ;; analyzer projections — present when the eval defined a var; null
+   ;; on schema-only registrations. Optional rather than always-present
+   ;; because var-projection returns nil for non-var defs.
+   [:seon.fn/fn-var?    {:optional true} :seon.fn/fn-var?]
+   [:seon.fn/arglists   {:optional true} :seon.fn/arglists]
+   [:seon.fn/doc        {:optional true} :seon.fn/doc]
+   [:seon.fn/private?   {:optional true} :seon.fn/private?]
+   [:seon.fn/specced?   {:optional true} :seon.fn/specced?]
+   [:seon.fn/created-at {:optional true} :seon.fn/created-at]])
 
 (schema/register! :seon.schema
   [:map {:seon.render/ai   'seon.handlers.schema/render-ai
          :seon.render/html 'seon.handlers.schema/render-html}
-   [:seon.schema/key :seon.schema/key]])
+   [:seon.schema/key    :seon.schema/key]
+   [:seon.schema/source :seon.schema/source]
+   [:seon.schema/ns         {:optional true} :seon.schema/ns]
+   [:seon.schema/created-at {:optional true} :seon.schema/created-at]])
 
 (schema/register! :seon.ns
   [:map {:seon.render/ai   'seon.handlers.ns/render-ai
          :seon.render/html 'seon.handlers.ns/render-html}
-   [:seon.ns/name :seon.ns/name]])
+   [:seon.ns/name   :seon.ns/name]
+   [:seon.ns/source :seon.ns/source]])
 
 ;; ============================================================
 ;; Home-ns derivation. Per spec-05 §22.5 the agent's home ns is a
