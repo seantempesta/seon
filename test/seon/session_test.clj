@@ -9,7 +9,7 @@
   through an isolated datahike `:memory` flow per test — keeps the live
   orchestrator DB clean. See `docs/prds/datahike-migration/test-fixture-design.md`."
   (:require [clojure.test :refer [deftest testing is use-fixtures]]
-            [seon.orchestrator.session :as session]
+            [seon.session :as session]
             [seon.runtime :as runtime]
             [seon.schema :as schema]
             [seon.test-utils :as tu]))
@@ -24,11 +24,11 @@
    that lives outside the datahike DB."
   [f]
   (runtime/reset-registry! {})
-  (reset! @#'seon.orchestrator.session/live-state {})
+  (reset! @#'seon.session/live-state {})
   (try
     (f)
     (finally
-      (reset! @#'seon.orchestrator.session/live-state {})
+      (reset! @#'seon.session/live-state {})
       (runtime/reset-registry! {}))))
 
 (use-fixtures :each
