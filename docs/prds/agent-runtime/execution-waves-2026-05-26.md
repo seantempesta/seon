@@ -384,7 +384,7 @@ Those are subsequent transition-plan phases, not this execution plan. This plan 
 |---|---|---|---|
 | 1a worker | done | 2026-05-26 | deps added; `seon.server.store` + `store-test` shipped; REPL probes verified config shapes for :memory/:file/:sqlite. REPL wedged late (`in-ns` left eval-wrapper in bad state) — stopped per rule 1. Hook reload + lint clean on both files. See worker report. |
 | 1b verifier | not started | | |
-| 2a worker | not started | | |
+| 2a worker | code-shipped-tests-unrun | 2026-05-27 | `src/seon/server/session.clj` (~200 LOC) + `test/seon/server/session_test.clj` (~120 LOC, 7 deftests) shipped. Compliance check green. Smoke test via REPL did NOT complete: orchestrator session wedged when the worker `(in-ns 'seon.server.session)`'d to test with `::` keywords (same wedge mode flagged in Wave 1a). STOPPED per hard rule 4 before running the test suite. Needs verifier (Wave 2b) to run tests in a fresh session. |
 | 2b verifier | not started | | |
 | 3a worker | not started | | |
 | 3b verifier | not started | | |
