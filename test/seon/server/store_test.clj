@@ -22,7 +22,7 @@
   (testing ":memory cfg shape"
     (let [cfg (store/config-for {:seon.server.store/db-name :test/m
                                  :seon.server.store/backend :memory})]
-      (is (= :mem (get-in cfg [:store :backend])))
+      (is (= :memory (get-in cfg [:store :backend])))
       (is (uuid? (get-in cfg [:store :id])))
       (is (= "true" (str (:keep-history? cfg))))
       (is (= :write (:schema-flexibility cfg)))

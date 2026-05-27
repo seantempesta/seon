@@ -30,6 +30,18 @@
   (:import [java.io File]
            [java.util UUID]))
 
+;; NOTE on :sqlite backend (2026-05-27): konserve 0.9.340's dispatch
+;; multimethods (-connect-store, -create-store, -store-exists? in
+;; konserve/store.cljc) only ship :memory, :file, and :tiered. The
+;; konserve-jdbc 0.2.91 dep on the classpath exposes its own
+;; `connect-store` fn but does NOT register `:jdbc` as a backend on
+;; the datahike-facing multimethods. Therefore {:backend :jdbc ...}
+;; in a datahike config currently throws "Unsupported store backend".
+;; For MVP we ship :memory + :file only. :sqlite is left wired but
+;; throws a clear "not yet supported" error — TODO: write a small
+;; konserve dispatch shim that adapts konserve-jdbc's standalone API
+;; to the -connect-store / -create-store multimethod expectations.
+
 ;;; --- Schemas ---------------------------------------------------------------
 
 (schema/register! ::db-name :keyword)
@@ -101,7 +113,7 @@
   (let [id   (name->uuid db-name)
         nm   (str db-name)
         store (case backend
-                :memory {:backend :mem :id id}
+                :memory {:backend :memory :id id}
                 :file   {:backend :file
                          :path    (or path (default-path db-name :file))
                          :id      id}
