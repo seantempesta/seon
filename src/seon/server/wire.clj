@@ -1,4 +1,4 @@
-(ns seon.sidecar.writer
+(ns seon.server.wire
   "Sidecar JVM writer: owns the single Datahike connection and answers requests
    over a UDS socket. Broadcasts tx events on a separate UDS socket.
 
@@ -14,9 +14,9 @@
             [clojure.string :as str]
             [datahike.api :as d]
             [konserve-jdbc.core]
-            [seon.sidecar.codec :as codec]
-            [seon.sidecar.transit :as transit]
-            [seon.sidecar.broadcast :as bcast])
+            [seon.server.codec :as codec]
+            [seon.server.transit :as transit]
+            [seon.server.broadcast :as bcast])
   (:import [java.net StandardProtocolFamily UnixDomainSocketAddress]
            [java.nio.channels ServerSocketChannel SocketChannel Channels]
            [java.io File])

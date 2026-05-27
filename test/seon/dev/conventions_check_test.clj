@@ -17,7 +17,6 @@
   "Namespaces created or substantially rewritten during Phase 3 of the
    datahike migration. These are the surfaces we want to keep clean."
   '[seon.session
-    seon.orchestrator.session
     seon.flow.status
     seon.db.relay])
 
@@ -82,15 +81,14 @@
   (testing "namespaces that completed the atoms→flow migration carry no defonce atoms"
     (let [migrated->files
           {'seon.flow.status            "src/seon/flow/status.clj"
-           'seon.orchestrator.session   "src/seon/orchestrator/session.clj"
            'seon.session                "src/seon/session.clj"}
           ;; Allowlist patterns that are NOT app state (per-JVM caches,
           ;; resource maps, etc.). Keep this list short and justified.
           allowed-defonces
           {'seon.session              #{"reserved-ports"   ; port-allocation cache
                                         "live-sessions"    ; per-JVM JVM handles
-                                        "checkpoint-scheduler"} ; daemon executor
-           'seon.orchestrator.session #{"live-state"        ; per-JVM JVM handles
+                                        "checkpoint-scheduler" ; daemon executor
+                                        "live-state"        ; per-JVM JVM handles
                                         "agent-pool"}       ; Integrant ref
            'seon.flow.status          #{}}]
       (doseq [[ns-sym path] migrated->files]

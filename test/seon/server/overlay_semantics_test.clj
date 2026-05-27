@@ -1,4 +1,4 @@
-(ns seon.sidecar.overlay-semantics-test
+(ns seon.server.overlay-semantics-test
   "JVM-side verification of the wire-protocol semantics the CLJS overlay
    namespace `sidecar-poc.datahike` depends on. These tests do not load
    the CLJS overlay itself — that needs the wasm32-wasip2 build (Phase C).
@@ -10,8 +10,8 @@
      - Reason C (basis-t threading): multi-query snapshot consistency
      - Reason D (unlisten local): subscribe + tx event shape sufficient"
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
-            [seon.sidecar.client :as client]
-            [seon.sidecar.transit :as transit])
+            [seon.server.client :as client]
+            [seon.server.transit :as transit])
   (:import [java.io File]))
 
 (set! *warn-on-reflection* true)

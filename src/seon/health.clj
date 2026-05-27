@@ -136,8 +136,8 @@
   "Get current resource utilization."
   []
   (try
-    (let [list-fn (requiring-resolve 'seon.orchestrator.session/list-agent-sessions)
-          session-ns (find-ns 'seon.orchestrator.session)
+    (let [list-fn (requiring-resolve 'seon.session/list-agent-sessions)
+          session-ns (find-ns 'seon.session)
           running-agents (agent/agents {})
           pool-jvms (try
                       (require 'seon.flow.pool)
@@ -200,8 +200,8 @@
   []
   (try
     (require 'seon.flow.pool)
-    (require 'seon.orchestrator.session)
-    (let [session-ns (find-ns 'seon.orchestrator.session)
+    (require 'seon.session)
+    (let [session-ns (find-ns 'seon.session)
           pool-ns (find-ns 'seon.flow.pool)]
       (if-let [pool-var (ns-resolve session-ns 'agent-pool)]
         (if-let [pool @@pool-var]

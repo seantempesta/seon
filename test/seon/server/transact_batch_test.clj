@@ -1,4 +1,4 @@
-(ns seon.sidecar.transact-batch-test
+(ns seon.server.transact-batch-test
   "Integration tests for `transact-batch`: ordered multi-tx commit
    with one pub event per individual tx. Matches d/listen semantics
    exactly.
@@ -6,8 +6,8 @@
    Each test spawns its own JVM writer subprocess (memory backend) and
    tears it down. Same fixture pattern as protocol_extensions_test."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
-            [seon.sidecar.client :as client]
-            [seon.sidecar.transit :as transit])
+            [seon.server.client :as client]
+            [seon.server.transit :as transit])
   (:import [java.io File]))
 
 (set! *warn-on-reflection* true)

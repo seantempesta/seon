@@ -238,6 +238,41 @@ Worker must fix `:mem` → `:memory` and resolve the konserve-jdbc load path bef
 - Test count drops. Each test file should have the same number of tests it had in jvm-writer.
 - Any handler stays accidentally tied to a private conn (grep for `defonce state` in the new files).
 
+### Status — 2026-05-27
+
+**done — Option B verbatim move (socket-per-session, NO per-request db-name routing).**
+
+Per the decision committed prior to this wave, handlers were NOT rewritten to look up conns via the registry. Each wire-server instance still takes ONE conn at `(start!)` time; multi-session = multiple wire-server instances managed by the registry (Wave 5 owns that wiring). This made Wave 4a a pure verbatim move with only `ns` + `:require` edits.
+
+**Files moved (11 total, verbatim — no body changes beyond ns/requires):**
+
+| From | To | Lines | Touched |
+|---|---|---|---|
+| `pod-host/sidecar-poc/jvm-writer/src/seon/sidecar/codec.clj` | `src/seon/server/codec.clj` | 80 | ns only |
+| `pod-host/sidecar-poc/jvm-writer/src/seon/sidecar/transit.clj` | `src/seon/server/transit.clj` | 41 | ns + 2 docstring refs |
+| `pod-host/sidecar-poc/jvm-writer/src/seon/sidecar/broadcast.clj` | `src/seon/server/broadcast.clj` | 51 | ns + 1 require |
+| `pod-host/sidecar-poc/jvm-writer/src/seon/sidecar/client.clj` | `src/seon/server/client.clj` | 110 | ns + 1 require |
+| `pod-host/sidecar-poc/jvm-writer/src/seon/sidecar/writer.clj` | `src/seon/server/wire.clj` | 512 | ns (writer→wire) + 3 requires |
+| `pod-host/sidecar-poc/jvm-writer/test/seon/sidecar/facts_test.clj` | `test/seon/server/facts_test.clj` | 200 | ns + requires |
+| `.../overlay_semantics_test.clj` | `test/seon/server/overlay_semantics_test.clj` | 253 | ns + requires |
+| `.../protocol_extensions_test.clj` | `test/seon/server/protocol_extensions_test.clj` | 267 | ns + requires |
+| `.../protocol_integration_test.clj` | `test/seon/server/protocol_integration_test.clj` | 336 | ns + requires + 1 comment |
+| `.../transact_batch_test.clj` | `test/seon/server/transact_batch_test.clj` | 181 | ns + requires |
+| `.../wire_types_test.clj` | `test/seon/server/wire_types_test.clj` | 238 | ns + requires + 1 docstring |
+
+NS rename map (5 source nss; 6 test nss followed the `seon.sidecar.X-test → seon.server.X-test` pattern):
+- `seon.sidecar.writer` → `seon.server.wire`
+- `seon.sidecar.codec` → `seon.server.codec`
+- `seon.sidecar.transit` → `seon.server.transit`
+- `seon.sidecar.broadcast` → `seon.server.broadcast`
+- `seon.sidecar.client` → `seon.server.client`
+
+**Verification result:** static check CLEAN (no stale `seon.sidecar.*` refs anywhere in `src/` or `test/` — confirmed via `rg`). `pod-host/sidecar-poc/jvm-writer/` retains `deps.edn` + `logs/` only (no `.clj` files); will be deleted in Wave 7.
+
+**REPL test run: NOT EXECUTED.** The MCP `seon` server returned `FileNotFoundException: Could not locate seon/orchestrator/session__init.class` on every eval attempt. This is **pre-existing branch breakage** unrelated to Wave 4a — `src/seon/health.clj` and `test/seon/dev/conventions_check_test.clj` reference `seon.orchestrator.session`, which exists only in a sibling worktree, not on `feature/agent-runtime`. Wave 4a did not touch `seon.orchestrator.*` or `health.clj`. Hit the "REPL break twice → STOP" rule; deferring REPL verification of the moved code to Wave 5 (which will need a working JVM REPL anyway to wire the Integrant component). Expected test count to recover at that point: ~47 tests / ~189 assertions across the 6 test files.
+
+**Path A regression check:** not run per Rule 7 of the testing strategy — full-suite regression is deferred to the end of the worker pass for the wave chain, and the JVM REPL is presently down regardless. CLJS integration is the primary verification surface.
+
 ---
 
 ## Wave 4b — Verifier

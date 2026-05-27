@@ -1,4 +1,4 @@
-(ns seon.sidecar.wire-types-test
+(ns seon.server.wire-types-test
   "Type-fidelity tests for the Transit-JSON wire format.
 
    Every Clojure type that we expect callers to use across the sidecar
@@ -20,8 +20,8 @@
    declared :db.type/double accepts an integer on the wire and stores it
    as a Double; the query result comes back as a Double."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
-            [seon.sidecar.client :as client]
-            [seon.sidecar.transit :as transit])
+            [seon.server.client :as client]
+            [seon.server.transit :as transit])
   (:import [java.io File]))
 
 (set! *warn-on-reflection* true)
@@ -163,7 +163,7 @@
 (deftest test-double-whole-coerces-from-int
   (testing "writing 1 (long) to a :db.type/double attr is coerced to 1.0
             (double) before transact. Schema-driven coercion in
-            seon.sidecar.writer/coerce-tx-data-for-schema."
+            seon.server.wire/coerce-tx-data-for-schema."
     (install-typed-schema!)
     (put! "a" :thing/dbl 1)
     (let [v (get-attr "a" :thing/dbl)]

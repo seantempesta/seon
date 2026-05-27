@@ -1,4 +1,4 @@
-(ns seon.sidecar.facts-test
+(ns seon.server.facts-test
   "Tests for the facts knowledge base schema + seed data.
 
    Verifies:
@@ -12,8 +12,8 @@
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
-            [seon.sidecar.client :as client]
-            [seon.sidecar.transit :as transit])
+            [seon.server.client :as client]
+            [seon.server.transit :as transit])
   (:import [java.io File]))
 
 (set! *warn-on-reflection* true)

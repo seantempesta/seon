@@ -1,4 +1,4 @@
-(ns seon.sidecar.protocol-extensions-test
+(ns seon.server.protocol-extensions-test
   "Integration tests for Phase B.1 protocol extensions:
      - entity-pull (eager `d/entity` replacement)
      - pull-many   (batched pull)
@@ -10,8 +10,8 @@
    Each test spawns its own JVM writer subprocess (in-memory backend) and
    tears it down. Shape mirrors `protocol_integration_test.clj`."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
-            [seon.sidecar.client :as client]
-            [seon.sidecar.transit :as transit])
+            [seon.server.client :as client]
+            [seon.server.transit :as transit])
   (:import [java.io File]))
 
 (set! *warn-on-reflection* true)

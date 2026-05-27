@@ -1,4 +1,4 @@
-(ns seon.sidecar.codec
+(ns seon.server.codec
   "CBOR codec + length-framed I/O.
 
    Wire format: 4-byte big-endian length + CBOR payload.

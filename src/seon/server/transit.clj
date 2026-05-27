@@ -1,7 +1,7 @@
-(ns seon.sidecar.transit
+(ns seon.server.transit
   "Transit-JSON codec used for value payloads on the sidecar wire.
 
-   The wire control envelope is CBOR (see seon.sidecar.codec). Inside the
+   The wire control envelope is CBOR (see seon.server.codec). Inside the
    envelope, every field that carries a CLOJURE VALUE (query results,
    tempids, tx-meta, datom v/a fields, query args, tx-data, selectors)
    is a Transit-JSON STRING.
@@ -17,7 +17,7 @@
 
    Float-vs-int caveat: JS Numbers don't distinguish 1 from 1.0. Schema-
    driven coercion happens JVM-side in handle-op 'transact' (see
-   seon.sidecar.writer/coerce-tx-data-for-schema)."
+   seon.server.wire/coerce-tx-data-for-schema)."
   (:require [cognitect.transit :as t])
   (:import [java.io ByteArrayInputStream ByteArrayOutputStream]))
 

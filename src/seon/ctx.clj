@@ -8,14 +8,14 @@
    seon.web.sse, seon.web.reactive.transform, dev.onionpancakes.chassis.core.
 
    Depended on by: seon.ns.lifecycle (primary), seon.ns.routes, seon.web.browser,
-   seon.orchestrator.session, seon.agent.env.
+   seon.session, seon.agent.env.
 
    Consumers:
    - seon.ns.lifecycle: Creates instances, uses resolve-instance to query by
      namespace (not duplication — load! only supports instance-id lookup). Clean.
    - seon.ns.routes: Heaviest user. Uses get-entry to access ::render-fn and ::atom
      directly — acceptable, these are the interface points for SSE push.
-   - seon.orchestrator.session: Creates ctx with reserved-keys for agent isolation.
+   - seon.session: Creates ctx with reserved-keys for agent isolation.
    - seon.web.browser: Uses clients-for-namespace for push targeting. Clean.
 
    Watch out for:

@@ -1,11 +1,11 @@
-(ns seon.sidecar.broadcast
+(ns seon.server.broadcast
   "Pub-socket fanout. The writer thread calls (broadcast! event) after every
    committed transact. We hold a set of OutputStreams for connected subscribers;
    on write failure we drop the subscriber.
 
    Multi-threaded: subscriber accept loop runs on its own thread; broadcast! is
    called from the writer-thread."
-  (:require [seon.sidecar.codec :as codec])
+  (:require [seon.server.codec :as codec])
   (:import [java.net StandardProtocolFamily UnixDomainSocketAddress]
            [java.nio.channels ServerSocketChannel SocketChannel Channels]
            [java.io OutputStream]))

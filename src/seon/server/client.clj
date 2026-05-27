@@ -1,11 +1,11 @@
-(ns seon.sidecar.client
+(ns seon.server.client
   "Tiny smoke client. Connects to the writer's req socket and runs a sequence
    of operations; also connects to the pub socket and prints tx events.
 
    Run with:
      clj -M:client
      clj -M:client --req-sock /tmp/seon-poc-req.sock --pub-sock /tmp/seon-poc-pub.sock"
-  (:require [seon.sidecar.codec :as codec])
+  (:require [seon.server.codec :as codec])
   (:import [java.net StandardProtocolFamily UnixDomainSocketAddress]
            [java.nio.channels SocketChannel Channels])
   (:gen-class))

@@ -1,7 +1,7 @@
-(ns seon.sidecar.protocol-integration-test
+(ns seon.server.protocol-integration-test
   "Integration tests for the sidecar wire protocol. Each test spawns its own
    JVM writer subprocess against an in-memory store, drives it via the
-   client API in `seon.sidecar.client`, and asserts on response + pub event
+   client API in `seon.server.client`, and asserts on response + pub event
    shapes.
 
    Borrowed-and-adapted from upstream datahike:
@@ -16,8 +16,8 @@
    `(use-fixtures :each ...)` and killed in teardown."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.string :as str]
-            [seon.sidecar.client :as client]
-            [seon.sidecar.transit :as transit])
+            [seon.server.client :as client]
+            [seon.server.transit :as transit])
   (:import [java.io File]
            [java.util UUID]))
 
@@ -198,7 +198,7 @@
           (is (every? #(= 5 (count %)) tx-data)
               "datom on the wire is [e a v t op]")
           ;; `a` is a Transit-JSON string of a keyword; `v` is Transit-JSON
-          ;; of any value. Both decode via seon.sidecar.transit/read-str.
+          ;; of any value. Both decode via seon.server.transit/read-str.
           (is (every? #(string? (nth % 1)) tx-data)
               "attr is a (transit-encoded) string")
           (is (every? #(string? (nth % 2)) tx-data)
