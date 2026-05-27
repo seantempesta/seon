@@ -145,7 +145,7 @@
    [:seon.log/agent   {:optional true} :string]
    [:seon.log/message :string]
    [:seon.log/stack   {:optional true} :string]
-   [:seon.log/data    {:optional true} :any]])
+   [:seon.log/data    {:optional true} :seon.log/data]])
 
 (schema/register! :seon.log/n     :int)
 (schema/register! :seon.log/tail-request
@@ -309,7 +309,7 @@
                              [:seon.log/message :string]
                              [:seon.log/agent {:optional true} :string]
                              [:seon.log/stack {:optional true} :string]
-                             [:seon.log/data {:optional true} :any]]]
+                             [:seon.log/data {:optional true} :seon.log/data]]]
                   :any]}
   [data] (log! :error data))
 

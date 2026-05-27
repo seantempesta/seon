@@ -40,8 +40,13 @@
 ;; Schemas — every shape this surface reads or writes (spec-05 §15.1).
 ;; ============================================================
 
-;; Datahike db snapshot — opaque to validation; the renderer body uses it.
-(schema/register! :seon.db/db :any)
+;; Datahike db snapshot + conn handle — both opaque to validation
+;; (genuinely runtime-opaque values; `:any` is the canonical Malli
+;; idiom for "I am a runtime handle, validate by presence only").
+;; Registered in ONE place so every reference is `:seon.db/db` or
+;; `:seon.db/conn` instead of inlined `:any`.
+(schema/register! :seon.db/db   :any)
+(schema/register! :seon.db/conn :any)
 
 ;; :seon.render/ai is SYMBOL-ONLY at storage (literal strings would
 ;; deprive the agent of dynamic ctx — current convo, recent evals,
@@ -72,14 +77,14 @@
   [:map [:seon.render/text :string]])
 
 (schema/register! :seon.render/html-response
-  [:map [:seon.render/hiccup :any]])
+  [:map [:seon.render/hiccup :seon.render/hiccup]])
 
 ;; System renderer input — for `seon.render.default/*` and other
 ;; non-agent-namespaced fns. Doesn't know which agent ahead of time;
 ;; carries `:seon.agent/id` and pulls the entity itself.
 (schema/register! :seon.render/system-input
   [:map
-   [:seon.db/db    :any]
+   [:seon.db/db    :seon.db/db]
    [:seon.agent/id :string]])
 
 ;; ============================================================

@@ -35,8 +35,8 @@
 
    Map-in, map-out (returns the db value under `:seon.db/db`)."
   {:malli/schema [:=> [:cat [:map [:seon.agent/id :string]
-                                  [:seon.db/conn {:optional true} :any]]]
-                       [:map [:seon.db/db :any]]]}
+                                  [:seon.db/conn {:optional true} :seon.db/conn]]]
+                       [:map [:seon.db/db :seon.db/db]]]}
   [{:seon.agent/keys [id] :seon.db/keys [conn]}]
   (let [c    (or conn db/*conn*)
         base @c

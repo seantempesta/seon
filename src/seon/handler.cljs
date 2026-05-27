@@ -18,6 +18,7 @@
    install the dispatcher (the v0 scenario — manual fire from the
    REPL); that's a feature, not a bug."
   (:require
+    [datahike.api :as d]
     [seon.db :as db]
     [seon.schema :as schema]))
 
@@ -101,7 +102,7 @@
 (schema/register! :seon.handler/register!-response
   [:map
    [:seon.handler/registered? :boolean]
-   [:seon.handler/key         {:optional true} [:tuple :keyword [:maybe :any]]]])
+   [:seon.handler/key         {:optional true} [:tuple :keyword [:maybe :seon.db/ref]]]])
 
 ;; ============================================================
 ;; Bootstrap — declare the composite-tuple identity directly to
@@ -146,7 +147,7 @@
                 :db/tupleAttrs  [:seon.handler/name :seon.handler/agent]
                 :db/cardinality :db.cardinality/one
                 :db/unique      :db.unique/identity}]]
-    (await (datahike.api/transact! conn {:tx-data attrs}))
+    (await (d/transact! conn {:tx-data attrs}))
     {:seon.handler/bootstrapped? true}))
 
 ;; ============================================================
@@ -208,7 +209,7 @@
    Sorted by `:seon.handler/priority` descending so the caller can
    walk in dispatch order without re-sorting."
   {:malli/schema [:=> [:cat [:map [:seon.agent/id {:optional true} :string]
-                                  [:seon.db/db   {:optional true} :any]]]
+                                  [:seon.db/db   {:optional true} :seon.db/db]]]
                       [:vector :map]]}
   [{:seon.db/keys [db] :seon.agent/keys [id]}]
   (let [conn-or-db (or db @db/*conn*)
