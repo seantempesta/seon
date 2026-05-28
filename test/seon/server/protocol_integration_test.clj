@@ -16,76 +16,16 @@
    `(use-fixtures :each ...)` and killed in teardown."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.string :as str]
+            [seon.server.test-util :as tu :refer [*ctx*]]
             [seon.server.client :as client]
             [seon.server.transit :as transit])
-  (:import [java.io File]
-           [java.util UUID]))
+  (:import [java.util UUID]))
 
 (set! *warn-on-reflection* true)
 
-;; ---------- Fixture: spawn a fresh writer per test ----------
+;; ---------- Fixture (shared in-process writer, see seon.server.test-util) ----------
 
-(def ^:dynamic *ctx* nil)
-
-(defn- unique-sock [prefix]
-  (str "/tmp/seon-poc-test-" prefix "-" (System/nanoTime) ".sock"))
-
-(defn- writer-ready?
-  "Poll: is there a process accepting connections on this UDS?"
-  [path]
-  (try
-    (with-open [ch (client/connect path)]
-      (.isConnected ch))
-    (catch Throwable _ false)))
-
-(defn- wait-for-socket! [path timeout-ms]
-  (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
-    (loop []
-      (cond
-        (writer-ready? path) :ok
-        (> (System/currentTimeMillis) deadline)
-        (throw (ex-info "writer never came up" {:path path}))
-        :else (do (Thread/sleep 200) (recur))))))
-
-(defn- spawn-writer!
-  "Spawn `clojure -M:writer` in a child process pointed at unique sockets.
-   Returns a map `{:req-sock, :pub-sock, :process}`."
-  []
-  (let [req-sock (unique-sock "req")
-        pub-sock (unique-sock "pub")
-        ;; In-memory backend — tests don't need persistence
-        cmd ["clojure" "-M:writer"
-             "--backend" "memory"
-             "--req-sock" req-sock
-             "--pub-sock" pub-sock]
-        pb (doto (ProcessBuilder. ^java.util.List cmd)
-             ;; Inherit so we see errors during dev; redirect to file would be
-             ;; cleaner long-term.
-             (.redirectErrorStream true)
-             (.redirectOutput (java.lang.ProcessBuilder$Redirect/to
-                               (File. (str "logs/writer-test-" (System/nanoTime) ".log")))))
-        ;; Run from this project root (test runner is invoked here too)
-        _ (.mkdirs (File. "logs"))
-        proc (.start pb)]
-    (wait-for-socket! req-sock 60000)
-    (wait-for-socket! pub-sock 60000)
-    {:req-sock req-sock
-     :pub-sock pub-sock
-     :process proc}))
-
-(defn- teardown-writer! [{:keys [^Process process req-sock pub-sock]}]
-  (try (.destroy process) (catch Throwable _))
-  (try (.waitFor process) (catch Throwable _))
-  (try (.delete (File. ^String req-sock)) (catch Throwable _))
-  (try (.delete (File. ^String pub-sock)) (catch Throwable _)))
-
-(defn- with-fresh-writer [tfn]
-  (let [ctx (spawn-writer!)]
-    (try
-      (binding [*ctx* ctx] (tfn))
-      (finally (teardown-writer! ctx)))))
-
-(use-fixtures :each with-fresh-writer)
+(use-fixtures :each tu/with-fresh-writer)
 
 ;; ---------- Helpers ----------
 

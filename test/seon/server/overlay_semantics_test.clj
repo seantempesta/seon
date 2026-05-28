@@ -10,63 +10,15 @@
      - Reason C (basis-t threading): multi-query snapshot consistency
      - Reason D (unlisten local): subscribe + tx event shape sufficient"
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
+            [seon.server.test-util :as tu :refer [*ctx*]]
             [seon.server.client :as client]
-            [seon.server.transit :as transit])
-  (:import [java.io File]))
+            [seon.server.transit :as transit]))
 
 (set! *warn-on-reflection* true)
 
-(def ^:dynamic *ctx* nil)
+(use-fixtures :each tu/with-fresh-writer)
 
-(defn- unique-sock [prefix]
-  (str "/tmp/seon-poc-test-" prefix "-" (System/nanoTime) ".sock"))
-
-(defn- writer-ready? [path]
-  (try (with-open [ch (client/connect path)] (.isConnected ch))
-       (catch Throwable _ false)))
-
-(defn- wait-for-socket! [path timeout-ms]
-  (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
-    (loop []
-      (cond
-        (writer-ready? path) :ok
-        (> (System/currentTimeMillis) deadline)
-        (throw (ex-info "writer never came up" {:path path}))
-        :else (do (Thread/sleep 200) (recur))))))
-
-(defn- spawn-writer! []
-  (let [req-sock (unique-sock "req")
-        pub-sock (unique-sock "pub")
-        cmd ["clojure" "-M:writer"
-             "--backend" "memory"
-             "--req-sock" req-sock
-             "--pub-sock" pub-sock]
-        pb (doto (ProcessBuilder. ^java.util.List cmd)
-             (.redirectErrorStream true)
-             (.redirectOutput (java.lang.ProcessBuilder$Redirect/to
-                                (File. (str "logs/writer-test-" (System/nanoTime) ".log")))))
-        _ (.mkdirs (File. "logs"))
-        proc (.start pb)]
-    (wait-for-socket! req-sock 60000)
-    (wait-for-socket! pub-sock 60000)
-    {:req-sock req-sock :pub-sock pub-sock :process proc}))
-
-(defn- teardown-writer! [{:keys [^Process process req-sock pub-sock]}]
-  (try (.destroy process) (catch Throwable _))
-  (try (.waitFor process) (catch Throwable _))
-  (try (.delete (File. ^String req-sock)) (catch Throwable _))
-  (try (.delete (File. ^String pub-sock)) (catch Throwable _)))
-
-(defn- with-fresh-writer [tfn]
-  (let [ctx (spawn-writer!)]
-    (try (binding [*ctx* ctx] (tfn))
-         (finally (teardown-writer! ctx)))))
-
-(use-fixtures :each with-fresh-writer)
-
-(defn- req! [op extra]
-  (with-open [ch (client/connect (:req-sock *ctx*))]
-    (client/call! ch (merge {"op" op} extra))))
+(defn- req! [op extra] (tu/req! op extra))
 
 (defn- result-of [resp] (transit/read-str (get resp "result")))
 (defn- meta-of   [resp] (transit/read-str (get resp "tx-meta")))

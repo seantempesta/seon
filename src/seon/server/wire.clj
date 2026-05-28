@@ -16,10 +16,10 @@
             [konserve-jdbc.core]
             [seon.server.codec :as codec]
             [seon.server.transit :as transit]
+            [seon.server.store :as store]
             [seon.server.broadcast :as bcast])
   (:import [java.net StandardProtocolFamily UnixDomainSocketAddress]
-           [java.nio.channels ServerSocketChannel SocketChannel Channels]
-           [java.io File])
+           [java.nio.channels ServerSocketChannel SocketChannel Channels])
   (:gen-class))
 
 (set! *warn-on-reflection* true)
@@ -36,38 +36,28 @@
          xs args]
     (case (first xs)
       "--backend"   (recur (assoc acc :backend (second xs)) (drop 2 xs))
+      "--db-name"   (recur (assoc acc :db-name (second xs)) (drop 2 xs))
       "--path"      (recur (assoc acc :path (second xs)) (drop 2 xs))
       "--req-sock"  (recur (assoc acc :req-sock (second xs)) (drop 2 xs))
       "--pub-sock"  (recur (assoc acc :pub-sock (second xs)) (drop 2 xs))
       nil acc
       (do (println "Unknown arg:" (first xs)) (System/exit 2)))))
 
-(defn- store-config [opts]
-  (case (:backend opts)
-    "memory"
-    {:store {:backend :memory :id #uuid "00000000-0000-0000-0000-000000000001"}
-     :keep-history? true
-     :schema-flexibility :write}
-
-    "file"
-    (let [^File f (java.io.File. ^String (:path opts))]
-      (when-let [parent (.getParentFile f)] (.mkdirs parent))
-      {:store {:backend :file
-               :path (:path opts)
-               :id #uuid "11111111-1111-1111-1111-111111111111"}
-       :keep-history? true
-       :schema-flexibility :write})
-
-    "sqlite"
-    (let [^File f (java.io.File. ^String (:path opts))]
-      (when-let [parent (.getParentFile f)] (.mkdirs parent))
-      {:store {:backend :jdbc
-               :dbtype "sqlite"
-               :dbname (:path opts)
-               :table "store"
-               :id #uuid "11111111-1111-1111-1111-111111111111"}
-       :keep-history? true
-       :schema-flexibility :write})))
+(defn- opts->config-for-request
+  "Translate CLI opts (string backend, optional :db-name/:path) into the
+   namespaced map `seon.server.store/config-for` expects. Derives a
+   default db-name from the req-sock basename when --db-name is absent,
+   so two standalone wire-servers on different sockets get distinct
+   per-name stores. Omits ::path when nil/for :memory (the schema is
+   [:string {:min 1}], so passing nil would fail instrumentation)."
+  [{:keys [backend db-name path req-sock]}]
+  (let [db-name-kw (keyword (or db-name
+                                (str "seon.server/"
+                                     (.getName (java.io.File. ^String req-sock)))))]
+    (cond-> {:seon.server.store/db-name db-name-kw
+             :seon.server.store/backend (keyword backend)}
+      (and path (not= "memory" backend))
+      (assoc :seon.server.store/path path))))
 
 ;; ---------- DB lifecycle ----------
 
@@ -499,7 +489,7 @@
 
 (defn -main [& args]
   (let [opts (parse-args args)
-        cfg  (store-config opts)
+        cfg  (store/config-for (opts->config-for-request opts))
         _    (println "[writer] starting with" opts)
         conn (ensure-db! cfg)
         _    (println "[writer] datahike ready; basis-t=" (basis-t-of (d/db conn)))
