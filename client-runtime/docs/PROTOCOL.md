@@ -4,9 +4,9 @@ status: draft
 tags: [reference, agent, database]
 ---
 
-# Sidecar wire protocol (PoC)
+# client-runtime wire protocol
 
-The wire protocol is **per-session**. A session is a complete sidecar
+The wire protocol is **per-session**. A session is a complete client-runtime
 instance — its own JVM writer, its own konserve store, its own pair of UDS
 sockets, its own broadcast channel, its own snapshot cache. The default
 deployment is a single session named `"default"`. Multi-session
@@ -17,7 +17,7 @@ below over its own sockets.
 The Rust host hides the per-session socket selection from guests: a guest
 is bound to a session at instantiation time (via
 `SessionRegistry::get_or_spawn`) and never sees the underlying socket
-paths. The `seon:sidecar/db` WIT interface routes through the session's
+paths. The `seon:client-runtime/db` WIT interface routes through the session's
 `DbHandle` automatically.
 
 Two Unix domain sockets between the **client** (Rust host / smoke driver) and the
@@ -28,10 +28,10 @@ Two Unix domain sockets between the **client** (Rust host / smoke driver) and th
 | `<sock-base>-<session>-req.sock`  | client → writer, length-framed req/resp | one request → one response |
 | `<sock-base>-<session>-pub.sock`  | writer → all subscribers, length-framed pub | server pushes tx events |
 
-The default `<sock-base>` is `/tmp/seon-poc`; legacy single-session
-deployments used `/tmp/seon-poc-req.sock` and `/tmp/seon-poc-pub.sock`
+The default `<sock-base>` is `tmp/seon-client-runtime`; legacy single-session
+deployments used `tmp/seon-client-runtime-req.sock` and `tmp/seon-client-runtime-pub.sock`
 directly. The default session's sockets are now
-`/tmp/seon-poc-default-{req,pub}.sock`.
+`tmp/seon-client-runtime-default-{req,pub}.sock`.
 
 ## Wire type preservation — design (2026-05-26)
 
@@ -89,7 +89,7 @@ integer `1`.
 
 **Fix**: the JVM writer coerces ints → doubles before transacting when
 the attribute's schema declares `:db.type/float` or `:db.type/double`.
-See `seon.sidecar.writer/coerce-tx-data-for-schema`. Read-side returns
+See `seon.server.wire/coerce-tx-data-for-schema`. Read-side returns
 real `Double` instances which Transit serializes natively.
 
 ### EDN-input fallback (transitional)
@@ -269,7 +269,7 @@ Response: `{"ok": true, "basis-t": <int>, "result": <cbor-map>}`.
 
 Build a filtered-db handle. **This is a deliberate departure from native
 `d/filter`** — which takes a host fn `(fn [db datom] -> bool)` that the
-sidecar can't transport across the wire. Instead, the wire shape is a
+the wire can't transport across the wire. Instead, the wire shape is a
 **predicate query**: an EDN Datalog query that returns rows of `[?e]` (the
 eids to retain). The writer runs the query against the current db,
 materializes a `d/filter` whose predicate is `(contains? keep-eid-set

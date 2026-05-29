@@ -4,7 +4,7 @@ status: active
 tags: [orchestrator, agent, database]
 ---
 
-# AGENT.md — sidecar-poc (V2 / Platform track)
+# AGENT.md — client-runtime (V2 / Platform track)
 
 > **REVISED 2026-05-26 PM.** Architecture pivoted from "multi-JVM (one per
 > session)" to "**one seon JVM owns all sessions as multi-DB datahike**". This
@@ -14,7 +14,7 @@ tags: [orchestrator, agent, database]
 
 ## TL;DR
 
-You are in `pod-host/sidecar-poc/`. **This is V2 — the future platform**, NOT
+You are in `client-runtime/`. **This is V2 — the future platform**, NOT
 the MVP. The MVP (V1) lives at `src/seon/*.cljs` and is where active LLM agent
 work happens. Do not touch V1 from a V2 task and do not touch V2 from a V1
 task. If your task is in this directory, read this file end-to-end before
@@ -26,7 +26,7 @@ editing anything. Cutover progress: [CUTOVER.md](CUTOVER.md). Full status:
 | Track | Path | What it is | Owner |
 |---|---|---|---|
 | **V1 / MVP** | `src/seon/*.cljs` | Single-process Node CLJS pod. In-process datahike-cljs. Real LLM agent loop, deepseek HTTP client, bootstrap CLJS compiler, loopback HTTP+SSE. Run via `node out/client/main.js`. | MVP-track agents |
-| **V2 / Platform** | `pod-host/sidecar-poc/` | Multi-session sidecar. JVM datahike writer per session + Rust host + wasm32-wasip2 CLJS guests. Transit-JSON values inside CBOR envelopes over UDS. | Platform-track agents (you, if you're reading this) |
+| **V2 / Platform** | `client-runtime/` | Multi-session client-runtime. JVM datahike writer per session + Rust host + wasm32-wasip2 CLJS guests. Transit-JSON values inside CBOR envelopes over UDS. | Platform-track agents (you, if you're reading this) |
 
 There is **one git tree** and **one feature branch (`feature/agent-runtime`)**.
 Both tracks evolve in parallel and we will retire V1 when the V2 cutover
@@ -45,10 +45,10 @@ checklist is green. Until then: stay in your lane.
   round-trip cleanly between CLJS guest and JVM writer. Rust host treats
   values as opaque blobs.
 - **WASI-sandboxed FS.** Guests get scoped read-only and read-write preopens
-  per session via `sidecar-poc.fs`. RO violations return EACCES.
+  per session via `seon.client-runtime.fs`. RO violations return EACCES.
 - **Multi-agent fanout.** N wasm guests per session, all listening on one
   broadcast channel. Phase D N=3 / 300s smoke: 0 out-of-order, 0 errors.
-- **Per-session WASI env.** `SIDECAR_SESSION=<name>` plumbed to every guest.
+- **Per-session WASI env.** `SEON_AGENT_SESSION=<name>` plumbed to every guest.
 
 ## What V1 has that V2 doesn't (yet)
 
@@ -84,13 +84,13 @@ Tauri integration is out of scope for cutover.
 code into a guest, place it under `guest-cljs/src-overlay/seon/` (see
 "Where things live"). The overlay namespace declares the same `seon.foo`
 ns names V0 uses, but its `:require` graph points at
-`sidecar-poc.datahike` instead of `datahike.api`. **Never** copy a `.cljs`
+`seon.client-runtime.datahike` instead of `datahike.api`. **Never** copy a `.cljs`
 file from `src/seon/` and edit it in place inside `guest-cljs/src/`; the
 overlay system exists precisely so V0 and V2 can diverge cleanly.
 
 **Always namespace your sockets and stores by session.** `default` is a
-session like any other. Do not hardcode `/tmp/seon-poc-req.sock`; use the
-session-suffixed forms `/tmp/seon-poc-<session>-req.sock`.
+session like any other. Do not hardcode `tmp/seon-client-runtime-req.sock`; use the
+session-suffixed forms `tmp/seon-client-runtime-<session>-req.sock`.
 
 ## Where things live
 
@@ -100,50 +100,49 @@ session-suffixed forms `/tmp/seon-poc-<session>-req.sock`.
 | `CUTOVER.md` | Cutover checklist V1 → V2. |
 | `SESSIONS.md` | Session concept, isolation guarantees, CLI usage. |
 | `PROTOCOL.md` | Wire protocol — CBOR envelope + Transit-JSON values. |
-| `RECOMMENDATION.md` | Phase D recommendation + V0 → sidecar migration plan. |
-| `jvm-writer/` | JVM Clojure writer subprocess. `deps.edn`, `src/seon/sidecar/`, `test/`. |
-| `jvm-writer/resources/seed/` | `facts-schema.edn` + `facts-seed.edn` — knowledge base seed. |
-| `rust-host/` | Rust host. `src/main.rs` (Session, registry, REPL, smokes), `src/guest.rs` (wasm bridge), `wit/sidecar.wit`. |
-| `rust-host/target/` | gitignored build artifacts. |
-| `guest-cljs/src/` | Overlay-side support code (`sidecar_poc/{wit,datahike,agent,fs,facts}.cljs`). |
+| `src/seon/server/` | The JVM wire-server (sole datahike master). `codec`, `wire`, `broadcast`, `store`, `session`, `transit`; `test/seon/server/`. |
+| `resources/seed/` | `facts-schema.edn` + `facts-seed.edn` — knowledge base seed. |
+| `client-runtime/host/` | Rust host. `src/main.rs` (Session, registry, REPL, smokes), `src/guest.rs` (wasm bridge), `wit/db.wit`. |
+| `client-runtime/host/target/` | gitignored build artifacts. |
+| `guest-cljs/src/` | Overlay-side support code (`seon/client_runtime/{wit,datahike,agent,fs,facts}.cljs`). |
 | `guest-cljs/src-overlay/seon/` | **Overlay namespaces** — V0 ns shadows that route through the overlay's WIT/db surface. Add new ports here. |
 | `guest-cljs/test/` | CLJS tests for guest code. |
 | `guest/guest.mjs` | Legacy JS-only smoke guest (Phase 3). |
-| `guest/sidecar-agent.mjs` | ESM shim that imports the WIT host module + the CLJS bundle. |
-| `guest/build/` | gitignored wasm-rquickjs wrapper crate for `guest.mjs`. |
-| `guest/sidecar-agent-build/` | gitignored wasm-rquickjs wrapper crate for the CLJS agent. |
+| `guest/agent.mjs` | ESM shim that imports the WIT host module + the CLJS bundle. |
+| `guest-cljs/build/crate/` | gitignored wasm-rquickjs wrapper crate for `guest.mjs`. |
+| `guest-cljs/build/crate/` | gitignored wasm-rquickjs wrapper crate for the CLJS agent. |
 | `bench/` | Bench reports — `tx-batcher-and-cache-fix-*.md`, `v0-port-survey.md`. |
 | `data/` | gitignored. Per-session konserve stores (`data/sessions/<name>/store/`) + scratch mounts. |
 | `data/phase-*-*.log` | Smoke run output. |
 | `smoke/` | Driver scripts. |
-| `build-sidecar-agent` | One-shot script: builds CLJS bundle + wasm component, optional `--run`. |
+| `build-guest` | One-shot script: builds CLJS bundle + wasm component, optional `--run`. |
 
 ## Build commands
 
 ```bash
 # (a) Build the CLJS guest (shadow-cljs + wasm-rquickjs + cargo).
-cd /Users/sean/src/seon/pod-host/sidecar-poc
-./build-sidecar-agent
+cd /Users/sean/src/seon/client-runtime
+./build-guest
 
 # (b) Build the Rust host alone.
-cd /Users/sean/src/seon/pod-host/sidecar-poc/rust-host
+cd /Users/sean/src/seon/client-runtime/host
 cargo build --release
 
 # (c) Run the Phase D N=3 multi-agent smoke (300s).
-./build-sidecar-agent --run --duration-ms=300000
+./build-guest --run --duration-ms=300000
 
 # (c') Or short iteration (15s).
-./build-sidecar-agent --run --duration-ms=15000
+./build-guest --run --duration-ms=15000
 
 # (d) Run JVM-side tests.
-cd /Users/sean/src/seon/pod-host/sidecar-poc/jvm-writer
+cd /Users/sean/src/seon/src/seon/server
 clojure -M:test
 # 25 tests / 105 assertions expected green (+ 6 facts tests / 16 assertions).
 
 # (e) Multi-session smoke (Phase PF).
-cd /Users/sean/src/seon/pod-host/sidecar-poc/rust-host
+cd /Users/sean/src/seon/client-runtime/host
 cargo run --release -- \
-  --guest-wasm ../guest/sidecar-agent-build/target/wasm32-wasip2/release/sidecar_guest.wasm \
+  --guest-wasm ../guest-cljs/build/crate/target/wasm32-wasip2/release/guest.wasm \
   --multi-session --sessions alpha,beta --agents-per-session 2 --multi-duration-ms 30000
 ```
 
@@ -183,10 +182,10 @@ no session parameter and a guest cannot reach another session. See
    process, but cross-await context isolation under `AsyncLocalStorage` is
    NOT yet smoked. If you wire new async paths in the host, assume the
    isolation contract is not yet enforced — add a smoke before claiming it.
-3. **Build artifacts are gitignored.** `rust-host/target/`, `guest/build/`,
-   `guest/sidecar-agent-build/`, `data/` — never commit these. Source of
+3. **Build artifacts are gitignored.** `client-runtime/host/target/`, `guest-cljs/build/crate/`,
+   `guest-cljs/build/crate/`, `data/` — never commit these. Source of
    truth for build inputs is `shadow-cljs.edn` (root) + `Cargo.toml` +
-   `wit/sidecar.wit` + the CLJS sources.
+   `wit/db.wit` + the CLJS sources.
 4. **`(d/db conn)` basis-t.** The cache-friendly workload didn't deliver
    hits as designed (README Phase D'). Hypothesis: the snapshot's basis-t
    silently coerces to 0 on the WIT boundary. If you touch overlay's
@@ -197,7 +196,7 @@ no session parameter and a guest cannot reach another session. See
    do not "improve" this by blocking the host call.
 6. **BigInt coercion at the WIT boundary.** WIT `s64` ↔ JS BigInt. Passing
    a `Number` throws `Error converting from js 'int' into type 'big_int'`.
-   Overlay's `sidecar-poc.wit` handles this; new wrappers must too.
+   Overlay's `seon.client-runtime.wit` handles this; new wrappers must too.
 7. **wstd `block_on` requires an empty task queue to settle.** Listener
    loops must terminate via `stop!` when the agent's work completes,
    otherwise the wasm export call hangs.

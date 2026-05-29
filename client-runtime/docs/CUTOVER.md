@@ -9,7 +9,7 @@ tags: [prd, agent, database]
 ## Goal
 
 Retire the V1 / MVP CLJS pod (`src/seon/*.cljs`, in-process Node datahike-cljs)
-and use V2 / Platform sidecar (`pod-host/sidecar-poc/`) as the **single
+and use V2 / Platform client-runtime (`client-runtime/`) as the **single
 platform**. After cutover, V1 source is deleted; V2 is what ships.
 
 ## Why
@@ -21,7 +21,7 @@ platform**. After cutover, V1 source is deleted; V2 is what ships.
   port and inherits cljs.core's limits.
 - **WASI-sandboxed agents** — guests run in wasm32-wasip2 with WIT-typed
   imports. Capability surface is enforced by wasmtime, not trust.
-- **Performance ceiling** — Rust-host snapshot cache delivers sub-microsecond
+- **Performance ceiling** — Rust host snapshot cache delivers sub-microsecond
   warm reads. The V0 in-process path is fast but does not isolate.
 - **Training-data capture** — every session's tx-log IS the training data;
   per-session bitemporal history is automatic.
@@ -37,7 +37,7 @@ platform**. After cutover, V1 source is deleted; V2 is what ships.
 | `next-tx-event` host → guest, listener fan-out | green | Phase C, non-blocking try_recv + setTimeout yield. |
 | N=3 multi-agent stress | green | Phase D, 300s, 0 errors, 0 out-of-order. |
 | Multi-session isolation | green | Phase PF, 2×2 + 3×1 smokes, cross-contamination disjoint. |
-| WASI preopen filesystem (`sidecar-poc.fs`) | green | RO `/seon-src` + RW `/scratch`, EACCES enforced. |
+| WASI preopen filesystem (`seon.client-runtime.fs`) | green | RO `/seon-src` + RW `/scratch`, EACCES enforced. |
 | Facts knowledge base + `learn` role | green | 34 seed facts, 6 tests / 16 assertions. |
 | Real V0 agent turn in a wasm guest | **red** | Workload guests + smokes only. No LLM-driven turn yet. |
 | LLM HTTP capability through WIT | **red** | deepseek client is V1-only. Needs WIT shape or Rust-proxied. |
@@ -67,7 +67,7 @@ cutover.** Yellow items are nice-to-have; non-blocking.
       (two concurrent host calls in flight don't bleed AsyncLocalStorage
       state into each other).
 - [ ] LLM HTTP capability available to guests, either via WIT
-      (`seon:capabilities/http` style) or via Rust-host-proxied
+      (`seon:capabilities/http` style) or via Rust host-proxied
       `deepseek-chat` op. Must work under WASI without leaking the host's
       network capability beyond declared endpoints.
 - [ ] Drop EDN fallback in JVM writer's `read-T` (verify no production
@@ -160,8 +160,8 @@ cutover. At that point:
 
 1. V2 becomes the default `bin/run` / `node out/...` entry point.
 2. V1 sources at `src/seon/*.cljs` are deleted (one commit, atomic).
-3. CLAUDE.md's "Current focus" section updates to "V2 / sidecar".
-4. `pod-host/sidecar-poc/` is moved out of the PoC namespace and into
+3. CLAUDE.md's "Current focus" section updates to "V2 / client-runtime".
+4. `client-runtime/` is moved out of the PoC namespace and into
    `pod-host/platform/` (or whatever final name), with frontmatter
    `status: active`, not `draft`.
 5. This CUTOVER.md is archived.

@@ -1269,8 +1269,10 @@ impl SessionRegistry {
 #[derive(Parser, Debug)]
 #[command(version, about)]
 struct Args {
-    /// Path to the JVM writer project (defaults relative to this binary)
-    #[arg(long, default_value = "../jvm-writer")]
+    /// Path to the seon project root, where the JVM wire-server is launched
+    /// via `clojure -M:writer` (defaults to the repo root relative to
+    /// client-runtime/host/).
+    #[arg(long, default_value = "../..")]
     writer_dir: PathBuf,
 
     /// Store backend: memory | file

@@ -46,10 +46,10 @@ Seon has two tracks running in parallel right now:
   in-process datahike-cljs, living at `src/seon/*.cljs`. Other agents are
   evolving this for LLM integration. The MVP track does **not** have
   per-user sessions today; it's a single-tenant agent loop.
-- **Platform track (V2, this PoC)** — a multi-session sidecar. A Tauri
+- **Platform track (V2, this PoC)** — a multi-session client-runtime. A Tauri
   Rust host owns N JVM datahike-writer processes (one per session) and
   embeds wasm CLJS agents (multiple per session). This document is for
-  the V2 track and lives entirely under `pod-host/sidecar-poc/`.
+  the V2 track and lives entirely under `client-runtime/`.
 
 The platform track is where multi-tenancy, training-data capture, and
 parallel experiment infrastructure live. The MVP track ships the agent
@@ -64,9 +64,9 @@ data/sessions/
 ├── bob/store/
 └── alpha/store/
 
-/tmp/seon-poc-default-req.sock   /tmp/seon-poc-default-pub.sock
-/tmp/seon-poc-alice-req.sock     /tmp/seon-poc-alice-pub.sock
-/tmp/seon-poc-bob-req.sock       /tmp/seon-poc-bob-pub.sock
+tmp/seon-client-runtime-default-req.sock   tmp/seon-client-runtime-default-pub.sock
+tmp/seon-client-runtime-alice-req.sock     tmp/seon-client-runtime-alice-pub.sock
+tmp/seon-client-runtime-bob-req.sock       tmp/seon-client-runtime-bob-pub.sock
 ...
 ```
 
@@ -95,19 +95,19 @@ Each wasm guest is bound to a session at instantiation time. The host:
 1. Resolves the session from the registry: `registry.get_or_spawn(name)` —
    lazily spawns the JVM writer if this is the first reference.
 2. Builds a `GuestStore` carrying that session's `DbHandle` clone.
-3. Sets WASI environment variable `SIDECAR_SESSION=<name>` so the guest
+3. Sets WASI environment variable `SEON_AGENT_SESSION=<name>` so the guest
    can inspect its own session (currently informational only — the
    binding is already physical via the `DbHandle`).
 4. Instantiates the wasm component against that store.
 
-All `seon:sidecar/db` host imports (`q`, `transact`, `pull`,
+All `seon:client-runtime/db` host imports (`q`, `transact`, `pull`,
 `subscribe-tx`, etc.) thus forward to the session's writer. There is no way
 for a guest to address another session's writer — the WIT surface has no
 session parameter.
 
 ### Why env-based selection (v1)
 
-`SIDECAR_SESSION` is plumbed end-to-end but the WIT contract does NOT yet
+`SEON_AGENT_SESSION` is plumbed end-to-end but the WIT contract does NOT yet
 carry a session parameter on `connect`. The binding is established before
 the wasm component instantiates, so the guest never needs to negotiate it
 at runtime. This is a deliberate v1 simplification:
@@ -199,9 +199,9 @@ from the map AND all wasm guests bound to it terminating).
 Single-session (the default; "default" session is just a session):
 
 ```bash
-./target/release/sidecar-host                    # REPL, default session
-./target/release/sidecar-host --smoke            # one-shot smoke, default session
-./target/release/sidecar-host \
+./target/release/client-runtime-host                    # REPL, default session
+./target/release/client-runtime-host --smoke            # one-shot smoke, default session
+./target/release/client-runtime-host \
   --guest-wasm <wasm> --multi-agent --multi-duration-ms 30000
 # 3 agents (writer/reader/mixed) in default session
 ```
@@ -209,7 +209,7 @@ Single-session (the default; "default" session is just a session):
 Multi-session:
 
 ```bash
-./target/release/sidecar-host \
+./target/release/client-runtime-host \
   --guest-wasm <wasm> --multi-session \
   --sessions alpha,beta \
   --agents-per-session 2 \
@@ -249,14 +249,14 @@ path overrides, agent role mix, per-user metadata). Not implemented in v1
 
 ## Implementation pointers
 
-- `rust-host/src/main.rs` — `Session`, `SessionRegistry`,
+- `client-runtime/host/src/main.rs` — `Session`, `SessionRegistry`,
   `run_multi_session`.
-- `rust-host/src/guest.rs` — `GuestStore::with_env` accepts arbitrary
-  WASI env vars; the host sets `SIDECAR_SESSION=<name>` when
+- `client-runtime/host/src/guest.rs` — `GuestStore::with_env` accepts arbitrary
+  WASI env vars; the host sets `SEON_AGENT_SESSION=<name>` when
   instantiating a guest for a session.
-- `pod-host/sidecar-poc/jvm-writer/src/seon/sidecar/writer.clj` —
+- `src/seon/server/src/seon/server/writer.clj` —
   `--path` and `--req-sock` / `--pub-sock` flags already parameterize
   the writer; no per-session changes needed inside the JVM.
-- `pod-host/sidecar-poc/guest-cljs/src/sidecar_poc/agent.cljs` — agent
+- `guest-cljs/src/seon/client_runtime/agent.cljs` — agent
   unchanged; sees its session through the WASI env if it cares. The
   binding is established by the host before the agent runs.

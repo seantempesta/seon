@@ -4,35 +4,45 @@ status: active
 tags: [prd, agent, database]
 ---
 
-# Sidecar PoC — multi-agent shared-database architecture
+# client-runtime — the wasm-agent DB runtime
 
-A proof-of-concept of the JVM-writer-sidecar architecture described in
+The client-runtime hosts language guests (CLJS today; other languages later)
+in wasm32-wasip2 sandboxes and connects them to the seon JVM's datahike over
+the wire-server. A single JVM datahike master serves N wasm-guest agents via
+UDS+CBOR, with a shared snapshot cache in the Rust host. Guests do all DB ops
+(transact / q / pull / entity / listen / transact-batch) via sync WIT calls
+(`seon:client-runtime/db`); the JVM is the sole datahike master.
+
+The design lineage is in
 `docs/prds/agent-runtime/research/datahike-wasm-writer-split-2026-05-24.md`.
+A JVM master (rather than libdatahike-native) is deliberate: it is
+REPL-friendly, hot-reloadable, and faster to iterate against.
 
-**Goal:** prove that a single JVM Datahike writer can serve N wasm-guest agents
-via UDS+CBOR, with a shared snapshot cache in a Rust host. This PoC
-deliberately uses a JVM writer instead of libdatahike-native because the JVM
-writer is REPL-friendly, hot-reloadable, and faster to iterate against.
-
-This PoC **does not** touch `src/seon/*.cljs`, `pod-host/wasm-tauri/`, or
-`pod-host/libdatahike-cljs/`. It is a parallel workspace.
+The client-runtime **does not** touch `src/seon/*.cljs` (the V0/MVP pod),
+`pod-host/wasm-tauri/` (the cljs.js eval-smoke + Tauri shell), or
+`pod-host/libdatahike-cljs/`. It is the platform-track DB-access workspace;
+its server half lives in `src/seon/server/`.
 
 ## Layout
 
 ```
-pod-host/sidecar-poc/
-├── README.md            (this file)
-├── PROTOCOL.md          wire format
-├── jvm-writer/          JVM Clojure writer subprocess
-│   ├── deps.edn
-│   └── src/seon/sidecar/
-│       ├── codec.clj    CBOR + length-framed I/O
-│       ├── broadcast.clj  pub-socket fanout
-│       ├── writer.clj   main; opens DB, listens UDS, serves req/resp
-│       └── client.clj   smoke client
-├── rust-host/           (Phase 2 — Rust host that spawns writer + wasm guests)
-├── guest/               (Phase 3 — minimal CLJS-in-wasm guest)
-└── smoke/               (driver scripts)
+client-runtime/
+├── docs/                 README (this file), PROTOCOL, SESSIONS, AGENT, CUTOVER
+├── host/                 Rust host — spawns the JVM wire-server + wasm guests
+│   ├── Cargo.toml        (binary: client-runtime-host)
+│   ├── wit/db.wit        the seon:client-runtime/db WIT contract
+│   └── src/{main,guest}.rs
+├── bench/                benchmark notes
+└── build-guest           builds the CLJS guest → wasm32-wasip2 component
+
+guest-cljs/               the CLJS guest (sibling of client-runtime/)
+├── src/seon/client_runtime/   agent, db (wire client), wit, als, fs, facts, transit
+├── src-overlay/seon/     V0 namespace shims (seon.db wire-client flavor)
+└── build/                agent.mjs / guest.mjs ESM shims + generated crate/
+
+src/seon/server/          the JVM wire-server (sole datahike master) — the SERVER
+                          half; codec, wire, broadcast, store, session, transit
+
 ```
 
 ## Status
@@ -41,12 +51,12 @@ pod-host/sidecar-poc/
 |---|---|---|
 | **P1 — JVM writer in isolation** | **GREEN** | smoke client + persistence across restart confirmed |
 | **P2 — Rust host + snapshot cache** | **GREEN** | end-to-end via UDS; cache delivers ~500ns warm reads vs ~1-20ms cold; pub tx events fan out in <1µs |
-| **P3 — wasm guest via WIT**     | **GREEN** | wasm32-wasip2 component loaded in wasmtime; guest's `seon:sidecar/db` imports forward to JVM writer via Phase-2 WriterClient; transact + q + subscribe end-to-end through WIT |
+| **P3 — wasm guest via WIT**     | **GREEN** | wasm32-wasip2 component loaded in wasmtime; guest's `seon:client-runtime/db` imports forward to JVM writer via Phase-2 WriterClient; transact + q + subscribe end-to-end through WIT |
 | **P4 — d/listen equivalence across wasm guests** | **in progress** | gap #1 (full tx-data + tx-meta + basis-t-before on pub event) GREEN; protocol integration tests added |
-| **PB — protocol overlay surface complete** | **GREEN** | entity-pull, pull-many, schema, reverse-schema, db-filter/q-filtered/filter-release, basis-t threading on q/pull, lookup-ref support, next-tx-event WIT method. JVM-side covered by 25 tests / 105 assertions. CLJS overlay namespace at `guest-cljs/src/sidecar_poc/datahike.cljs`. |
-| **PC — shadow-cljs build + real CLJS agent guest** | **GREEN** | CLJS agent compiled to wasm32-wasip2 via shadow-cljs `:sidecar-agent` build + `build-sidecar-agent` script; `next-tx-event` wired host-to-guest (non-blocking try_recv + setTimeout-based polling in overlay); CAS + tx-data scanning end-to-end. |
+| **PB — protocol overlay surface complete** | **GREEN** | entity-pull, pull-many, schema, reverse-schema, db-filter/q-filtered/filter-release, basis-t threading on q/pull, lookup-ref support, next-tx-event WIT method. JVM-side covered by 25 tests / 105 assertions. CLJS overlay namespace at `guest-cljs/src/seon/client_runtime/db.cljs`. |
+| **PC — shadow-cljs build + real CLJS agent guest** | **GREEN** | CLJS agent compiled to wasm32-wasip2 via shadow-cljs `:guest-agent` build + `build-guest` script; `next-tx-event` wired host-to-guest (non-blocking try_recv + setTimeout-based polling in overlay); CAS + tx-data scanning end-to-end. |
 | **PD — N=3 multi-agent smoke**  | **GREEN** | 300s run: writer 752 commits / reader 1827 events / mixed 1828 events + 538 completed CAS-to-done cycles; 0 out-of-order events, 0 CAS conflicts, 0 errors. |
-| **PE — tx batcher + cache fix**  | **GREEN** | Opportunistic Rust-host transact batcher (2ms / 32-item window, mpsc-FIFO, singleton fast-path); JVM `transact-batch` op wired end-to-end. Cache `q_at` insert path fixed — was using response basis-t which collapsed pinned entries; now uses requested basis-t. **Hit rate 0.97% → 99.1%** on cache-friendly workload; q-hit p50=0us; tx p50 124→86ms. See `bench/tx-batcher-and-cache-fix-2026-05-25.md`. |
+| **PE — tx batcher + cache fix**  | **GREEN** | Opportunistic Rust host transact batcher (2ms / 32-item window, mpsc-FIFO, singleton fast-path); JVM `transact-batch` op wired end-to-end. Cache `q_at` insert path fixed — was using response basis-t which collapsed pinned entries; now uses requested basis-t. **Hit rate 0.97% → 99.1%** on cache-friendly workload; q-hit p50=0us; tx p50 124→86ms. See `bench/tx-batcher-and-cache-fix-2026-05-25.md`. |
 | **PF — multi-session isolation** | **GREEN** | N parallel JVM writers, one per session. Agents partitioned by session via WASI env. Lazy-spawn from `SessionRegistry::get_or_spawn`. 2x2x30s + 3x1x60s smokes both isolate cleanly — disjoint task-id sets, 0 cross-session events, 0 out-of-order. See [SESSIONS.md](SESSIONS.md). |
 | P5 — wire a real Seon agent     | not started | V0 substrate compiles into the guest (Phase B v0-probe; see `bench/v0-port-survey.md`). Sub-goal-2 work (WASI preopen for bootstrap caches + LLM stub + V0 turn driver) NOT shipped this session; budget consumed by 3b + 4. |
 | P6 — run a compiled tauri wasm pod | not started | |
@@ -54,11 +64,11 @@ pod-host/sidecar-poc/
 
 ## Phase 1 — what was built
 
-- **JVM writer subprocess** (`seon.sidecar.writer`) that owns a single Datahike
+- **JVM writer subprocess** (`seon.server.wire`) that owns a single Datahike
   connection. Listens on two UDS sockets — one for length-framed CBOR
   request/response, one for tx pub fanout. Multi-threaded accept; one request
   loop per connected client.
-- **CBOR codec** (`seon.sidecar.codec`) via jackson-cbor; 4-byte BE length
+- **CBOR codec** (`seon.server.codec`) via jackson-cbor; 4-byte BE length
   prefix; Clojure → Java conversion for keywords/sets/etc.
 - **Transit-JSON value payloads** (2026-05-26). Inputs and outputs that
   carry Clojure values (queries, tx-data, results, tempids, tx-meta,
@@ -69,7 +79,7 @@ pod-host/sidecar-poc/
   "Wire type preservation — design" section. EDN string inputs are
   still accepted as a transitional convenience for the Rust REPL/smoke
   diagnostic harness (Transit-then-EDN fallback in `read-T`).
-- **Tx broadcast** (`seon.sidecar.broadcast`) — every successful transact
+- **Tx broadcast** (`seon.server.broadcast`) — every successful transact
   pushes `{"event": "tx", "basis-t": N, "datoms-added": N, "datoms-retracted": N}`
   to every connected subscriber.
 - **Smoke client** that does `ping`, schema install, transact, q, pull, and
@@ -79,20 +89,21 @@ pod-host/sidecar-poc/
 
 ```bash
 # Terminal 1 — start the writer with the on-disk konserve-file backend
-cd pod-host/sidecar-poc/jvm-writer
-clojure -M:writer --backend file --path ../data/seon-poc-store
+cd src/seon/server
+clojure -M:writer --backend file --path ../data/seon-client-runtime-store
 
 # (or in-memory: clojure -M:writer --backend memory)
 
 # Terminal 2 — run the smoke client
-cd pod-host/sidecar-poc/jvm-writer
+cd src/seon/server
 clojure -M:client
+
 ```
 
 ### Observed smoke output
 
 ```
-[client] connecting {:req-sock /tmp/seon-poc-req.sock, :pub-sock /tmp/seon-poc-pub.sock}
+[client] connecting {:req-sock tmp/seon-client-runtime-req.sock, :pub-sock tmp/seon-client-runtime-pub.sock}
 ping                           {"pong" true, "ok" true}
 schema install                 {"basis-t" 536870913, "tempids" {}, "datoms-added" 8, "datoms-retracted" 0, "ok" true}
 [pub-event] {"event" "tx", "basis-t" 536870913, "datoms-added" 8, "datoms-retracted" 0}
@@ -100,6 +111,7 @@ transact alice                 {"basis-t" 536870914, "tempids" {}, "datoms-added
 [pub-event] {"event" "tx", "basis-t" 536870914, "datoms-added" 3, "datoms-retracted" 0}
 q alice                        {"basis-t" 536870914, "result" [[3 "alice" 33]], "ok" true}
 pull alice                     {"basis-t" 536870914, "result" {"db/id" 3, "person/name" "alice", "person/age" 33}, "ok" true}
+
 ```
 
 ### Persistence verified
@@ -117,7 +129,7 @@ preserved across process restarts.
   The error is `Unsupported store backend: :jdbc`. Per the PRD contingency
   ("Don't sink time into konserve config"), Phase 1 fell back to the built-in
   `konserve-file` backend, which IS persistent (one `.ksv` file per konserve
-  key, see `data/seon-poc-store/`) and was sufficient to prove the IPC
+  key, see `data/seon-client-runtime-store/`) and was sufficient to prove the IPC
   protocol.
 
   **For Phase 2/3:** keep `konserve-file` as the backend until SQLite is
@@ -148,10 +160,10 @@ timestamps and are NOT decision-grade.
 
 ## Phase 2 — what was built
 
-A Rust binary `sidecar-host` at `pod-host/sidecar-poc/rust-host/` that:
+A Rust binary `client-runtime-host` at `client-runtime/host/` that:
 
 - Spawns the JVM writer as a child subprocess (`clojure -M:writer --backend
-  file --path ../data/seon-poc-store --req-sock ... --pub-sock ...`).
+  file --path ../data/seon-client-runtime-store --req-sock ... --pub-sock ...`).
 - Waits for the two UDS sockets to come up (poll-then-connect, up to 60s for the
   JVM cold start).
 - Connects to the req/resp socket and wraps it in a tokio mpsc actor
@@ -171,9 +183,10 @@ A Rust binary `sidecar-host` at `pod-host/sidecar-poc/rust-host/` that:
 ### Run
 
 ```bash
-cd pod-host/sidecar-poc/rust-host
+cd client-runtime/host
 cargo run --release -- --smoke           # automated smoke run
 cargo run --release                      # interactive REPL
+
 ```
 
 The Rust host spawns the JVM writer itself; no need to start it separately.
@@ -230,23 +243,23 @@ Rust (the tx event is dispatched from the writer-thread before the
 ## Phase 3 — what was built
 
 A complete wasm32-wasip2 guest component loaded into the Phase-2 Rust host,
-talking to the JVM writer via a WIT-bound `seon:sidecar/db` interface.
+talking to the JVM writer via a WIT-bound `seon:client-runtime/db` interface.
 
 ### Pieces
 
-- **WIT contract**: `rust-host/wit/sidecar.wit` declaring `interface db {
-  q, transact, pull, subscribe-tx }` plus a `sidecar-guest` world with the
+- **WIT contract**: `client-runtime/host/wit/db.wit` declaring `interface db {
+  q, transact, pull, subscribe-tx }` plus a `client-runtime-guest` world with the
   full wasi:0.2.3 import set + `wasi:logging/logging` (wasm-rquickjs's
   `console.*` funnels there) + the `db` interface.
 - **Guest** at `guest/guest.mjs` — minimal JS module (no CLJS yet — see
   "Notes" below) that imports `q / transact / subscribeTx` from
-  `seon:sidecar/db@0.1.0`, calls each once on `run-smoke`, returns an EDN
+  `seon:client-runtime/db@0.1.0`, calls each once on `run-smoke`, returns an EDN
   report string.
-- **Generated wasm-rquickjs wrapper crate** at `guest/build/` (regenerated by
+- **Generated wasm-rquickjs wrapper crate** at `guest-cljs/build/crate/` (regenerated by
   `wasm-rquickjs generate-wrapper-crate`, gitignored). Compiles to
-  `guest/build/target/wasm32-wasip2/release/sidecar_guest.wasm` (5.3 MB
+  `guest-cljs/build/crate/target/wasm32-wasip2/release/guest.wasm` (5.3 MB
   release).
-- **Host wasm bridge** at `rust-host/src/guest.rs` — wasmtime + wasmtime-wasi
+- **Host wasm bridge** at `client-runtime/host/src/guest.rs` — wasmtime + wasmtime-wasi
   + wasmtime-wasi-http linker; `bindgen!` from the same WIT; `db_iface::Host`
   impl on `GuestStore` forwards each call into the existing `DbHandle`.
   `wasi:logging/logging` writes guest stderr to host stderr.
@@ -255,18 +268,19 @@ talking to the JVM writer via a WIT-bound `seon:sidecar/db` interface.
 
 ```bash
 # 1. Generate + build the guest .wasm (one time, ~2-3 min cold, ~30s incremental).
-cd pod-host/sidecar-poc/guest
+cd guest-cljs/build
 wasm-rquickjs generate-wrapper-crate \
-  --js guest.mjs --wit ../rust-host/wit \
-  --output build --world sidecar-guest
+  --js guest.mjs --wit ../client-runtime/host/wit \
+  --output guest-cljs/build/crate --world client-runtime-guest
 (cd build && cargo build --release --target wasm32-wasip2)
 
 # 2. Build the Rust host (one time).
-cd ../rust-host
+cd ../host
 cargo build --release
 
 # 3. Run end-to-end with the guest.
-cargo run --release -- --guest-wasm ../guest/build/target/wasm32-wasip2/release/sidecar_guest.wasm --smoke
+cargo run --release -- --guest-wasm ../guest-cljs/build/crate/target/wasm32-wasip2/release/guest.wasm --smoke
+
 ```
 
 ### Phase 3 numbers (release, M1)
@@ -328,26 +342,27 @@ values ready for Phase-4 guest fanout.
 ### Integration tests (Part 2)
 
 10 borrowed-and-adapted tests at
-`jvm-writer/test/seon/sidecar/protocol_integration_test.clj`, including
+`src/seon/server/test/seon/server/protocol_integration_test.clj`, including
 direct adaptations of `datahike.test.listen-test/test-listen!`. All 40
 assertions pass. Each test spawns its own in-memory writer subprocess.
 
 ```bash
-cd jvm-writer && clojure -M:test
+clojure -M:test
+
 ```
 
 ### Open Phase-4 work (handed forward)
 
 Building on top of the gap-#1 wire shape:
 
-- **WIT polling primitive** — extend `seon:sidecar/db` with
+- **WIT polling primitive** — extend `seon:client-runtime/db` with
   `next-tx-event(handle: u32) -> result<tx-event, db-error>` that the
   host blocks on (Rust-side `broadcast::Receiver::recv().await`) and
   returns the next event. Guest spins a listener loop draining events
   and dispatching to callbacks.
   - Alternative: host→guest callback via a guest-exported `on-tx`. Cleaner
     but unproven against wasm-rquickjs; falls back to polling on failure.
-- **CLJS guest namespace `sidecar-poc.db`** exposing `q/transact/pull/listen!`
+- **CLJS guest namespace `seon.client-runtime.db`** exposing `q/transact/pull/listen!`
   with the same shape as `datahike.core/listen!`. Build chain: lift
   `pod-host/wasm-tauri/eval-smoke-build` shadow-cljs config; output drives
   `wasm-rquickjs generate-wrapper-crate --js <bundle>`.
@@ -382,6 +397,7 @@ channel.
      pull: func(selector: string, eid: value) -> result<value, db-error>;
      // pub events delivered via a subscribe-tx callback or polling
    }
+
    ```
 
    But `value` is the hard part — WIT doesn't have a CBOR-any type. Either
@@ -394,7 +410,7 @@ channel.
 ## Phase B — what was built (2026-05-25)
 
 The protocol overlay surface needed to drop V0's `datahike.api` calls and use
-the sidecar instead. Driven by `docs/prds/agent-runtime/sidecar-poc/coverage-audit.md`.
+the client-runtime instead. Driven by `client-runtime/bench (historical coverage audit)`.
 
 ### Protocol additions (PROTOCOL.md + WIT)
 
@@ -419,7 +435,7 @@ the sidecar instead. Driven by `docs/prds/agent-runtime/sidecar-poc/coverage-aud
 
 ### CLJS overlay namespace
 
-`pod-host/sidecar-poc/guest-cljs/src/sidecar_poc/datahike.cljs` exposes the
+`guest-cljs/src/seon/client_runtime/db.cljs` exposes the
 9 APIs the V0 audit identified — `create-database / connect / transact! / q /
 pull / entity / listen! / unlisten! / db` — plus bonus `pull-many / schema /
 reverse-schema / filter / release-filter! / q-on`. Backed by the thin WIT
@@ -435,9 +451,10 @@ tests (see below).
 ### Tests
 
 ```bash
-cd jvm-writer && clojure -M:test
+clojure -M:test
 # Ran 25 tests containing 105 assertions.
 # 0 failures, 0 errors.
+
 ```
 
 - `protocol_integration_test.clj` — 10 tests, 40 assertions (Phase 4 gap #1
@@ -453,20 +470,20 @@ cd jvm-writer && clojure -M:test
 
 ### Files
 
-- `rust-host/wit/sidecar.wit` — full rewrite for Phase B
-- `rust-host/src/main.rs` — new `DbHandle` methods: `transact_full`, `q_at`,
+- `client-runtime/host/wit/db.wit` — full rewrite for Phase B
+- `client-runtime/host/src/main.rs` — new `DbHandle` methods: `transact_full`, `q_at`,
   `pull_edn`, `entity_pull`, `pull_many`, `schema`, `reverse_schema`,
   `db_filter`, `q_filtered`, `filter_release`
-- `rust-host/src/guest.rs` — `db_iface::Host` impl extended to match the
+- `client-runtime/host/src/guest.rs` — `db_iface::Host` impl extended to match the
   new WIT. Cleanly builds in release mode.
-- `jvm-writer/src/seon/sidecar/writer.clj` — new ops in `handle-op`
+- `src/seon/server/src/seon/server/writer.clj` — new ops in `handle-op`
   multimethod; basis-t-pinned reads via `(d/as-of db basis-t)`; filtered-db
   handle registry; eager component-ref expansion in `entity-pull`.
 - `guest/guest.mjs` — updated to new WIT signatures (q with basis-t,
   transact with tx-meta + request-id, pull as EDN string, entity-pull
   + schema demo). **Wrapper-crate has NOT been regenerated** — see
   Phase C handoff.
-- `guest-cljs/src/sidecar_poc/{wit,datahike}.cljs` — overlay (source-level
+- `guest-cljs/src/seon/client_runtime/{wit,datahike}.cljs` — overlay (source-level
   complete; needs shadow-cljs build in Phase C)
 - `PROTOCOL.md` — fully updated; the protocol is now described as the
   surface, not a snapshot
@@ -504,21 +521,21 @@ all met by Phase B:
    can ingest. The output bundle is the JS that `wasm-rquickjs
    generate-wrapper-crate --js <bundle>` consumes.
 
-2. **Regenerate the wrapper crate** in `guest/build/`:
+2. **Regenerate the wrapper crate** in `guest-cljs/build/crate/`:
 
-       cd pod-host/sidecar-poc/guest
+       cd guest-cljs/build
        wasm-rquickjs generate-wrapper-crate \
          --js <shadow-cljs-bundle.mjs> \
-         --wit ../rust-host/wit \
-         --output build --world sidecar-guest
+         --wit ../client-runtime/host/wit \
+         --output guest-cljs/build/crate --world client-runtime-guest
        (cd build && cargo build --release --target wasm32-wasip2)
 
 3. **Run the existing host smoke** to confirm the new wasm component
    loads + executes against the new WIT:
 
-       cd pod-host/sidecar-poc/rust-host
+       cd client-runtime/host
        cargo run --release -- \
-         --guest-wasm ../guest/build/target/wasm32-wasip2/release/sidecar_guest.wasm \
+         --guest-wasm ../guest-cljs/build/crate/target/wasm32-wasip2/release/guest.wasm \
          --smoke
 
    The guest.mjs at `guest/guest.mjs` is already updated to call the new
@@ -526,7 +543,7 @@ all met by Phase B:
    should pass.
 
 4. **Port a real V0 agent excerpt** into
-   `guest-cljs/src/sidecar_poc/agents/v0_excerpt.cljs`. Audit's refactor list:
+   `guest-cljs/src/seon/client_runtime/agents/v0_excerpt.cljs`. Audit's refactor list:
    - `agent.cljs:445-464` `?->ms` site — compute ms before the query and
      pass as `:in` arg, drop the fn binding.
    - `agent.cljs:1029-1099` warnings composer — thread basis-t through
@@ -606,60 +623,61 @@ Rust host. The chain:
 
 ```
 .cljs sources  →  shadow-cljs :node-script (CJS) bundle  →  ESM shim
-  (sidecar-poc.agent +     (out/sidecar-agent/main.js   (guest/sidecar-agent.mjs;
-   sidecar-poc.datahike     ~50KB; includes :simple        imports WIT host fns
-   + sidecar-poc.wit)        + cljs.core + clojure.string) and re-exposes them
+  (seon.client-runtime.agent +     (out/guest-agent/main.js   (guest/agent.mjs;
+   seon.client-runtime.datahike     ~50KB; includes :simple        imports WIT host fns
+   + seon.client-runtime.wit)        + cljs.core + clojure.string) and re-exposes them
                                                           on globalThis)
                                                                   ↓
                                        wasm-rquickjs generate-wrapper-crate
-                                       embeds the bundle as `sidecar/main`
+                                       embeds the bundle as `client-runtime/main`
                                                                   ↓
                                        cargo build --release --target wasm32-wasip2
                                        --no-default-features --features="lite,
                                        node-http,crypto,zlib,encoding,logging"
                                                                   ↓
-                                       guest/sidecar-agent-build/target/
-                                         wasm32-wasip2/release/sidecar_guest.wasm
+                                       guest-cljs/build/crate/target/
+                                         wasm32-wasip2/release/guest.wasm
                                          (~6.8 MB)
                                                                   ↓
                                        wasmtime in pod-host (Phase 2 binary)
+
 ```
 
 ### Pieces
 
-- **`seon` shadow-cljs build `:sidecar-agent`** in the root
+- **`seon` shadow-cljs build `:guest-agent`** in the root
   `shadow-cljs.edn`, alongside `:client` / `:smoke` / `:eval-smoke`.
-  Source lives under `pod-host/sidecar-poc/guest-cljs/src/` (added to
+  Source lives under `guest-cljs/src/` (added to
   the `:cljs` alias `:extra-paths` in `deps.edn`).
-- **`sidecar-poc.agent`** — synthetic workload agent. Three roles
+- **`seon.client-runtime.agent`** — synthetic workload agent. Three roles
   driven by WIT-passed args: `writer` transacts a new `:task` every
   200ms; `reader` listens + queries pending counts; `mixed` listens,
   picks a pending task, CAS-transitions it to `:in-progress`, "works"
   100ms, transacts `:done` + a `:result` entity.
-- **`sidecar-poc.datahike`** — the overlay (already written in Phase
+- **`seon.client-runtime.datahike`** — the overlay (already written in Phase
   B, refined in Phase C). The listener loop is the load-bearing piece:
   one upstream `subscribe-tx` per `conn`, a JS Promise chain polling
   `next-tx-event` non-blockingly with a 25ms setTimeout yield between
   empty polls. `stop!` signals the loop to terminate so wstd's
   `block_on` can settle when the agent finishes.
-- **`sidecar-poc.wit`** — the boundary. Lazy resolution of the host
-  module (prefers `globalThis.__seon_sidecar_db` set by the ESM shim,
+- **`seon.client-runtime.wit`** — the boundary. Lazy resolution of the host
+  module (prefers `globalThis.__seon_client_runtime_db` set by the ESM shim,
   falls back to `js/require` for Node-REPL tests). BigInt coercion on
   `s64` arguments and return values (`basis-t`, datom `e`/`t`).
-- **`guest/sidecar-agent.mjs`** — the ESM shim. Imports the WIT-bound
-  `seon:sidecar/db@0.1.0` module, stashes its exports on
-  `globalThis.__seon_sidecar_db`, then imports the CLJS bundle as
-  `sidecar/main`. Exports `runAgent(agent-id, role, duration-ms)` and
+- **`guest/agent.mjs`** — the ESM shim. Imports the WIT-bound
+  `seon:client-runtime/db@0.1.0` module, stashes its exports on
+  `globalThis.__seon_client_runtime_db`, then imports the CLJS bundle as
+  `client-runtime/main`. Exports `runAgent(agent-id, role, duration-ms)` and
   `runSmoke()` as the world's WIT exports.
-- **`rust-host/wit/sidecar.wit`** — added `run-agent` export alongside
+- **`client-runtime/host/wit/db.wit`** — added `run-agent` export alongside
   `run-smoke`.
-- **`rust-host/src/guest.rs`** — `next-tx-event` host impl is now
+- **`client-runtime/host/src/guest.rs`** — `next-tx-event` host impl is now
   fully wired. Each `subscribe-tx` records a fresh
   `broadcast::Receiver` in a per-`GuestStore` HashMap. `next-tx-event`
   is **strictly non-blocking** (`try_recv` + return a
   `Protocol("no-event")` sentinel on empty); see "Architectural notes"
   below. `GuestStore::with_env` wires WASI env vars per instance.
-- **`rust-host/src/main.rs`** — `--multi-agent` + `--multi-duration-ms`
+- **`client-runtime/host/src/main.rs`** — `--multi-agent` + `--multi-duration-ms`
   flags, `run_multi_agent` orchestrator using `futures::join_all`.
   Phase-D schema (`:task/id`, `:task/status`, `:result/of`, etc.) is
   installed before the guests load. Aggregate stats query the DB
@@ -668,9 +686,10 @@ Rust host. The chain:
 ### Build
 
 ```bash
-cd pod-host/sidecar-poc
-./build-sidecar-agent          # builds the CLJS bundle + wasm component
-./build-sidecar-agent --run    # also runs the 5-min multi-agent smoke
+cd client-runtime
+./build-guest          # builds the CLJS bundle + wasm component
+./build-guest --run    # also runs the 5-min multi-agent smoke
+
 ```
 
 ### Architectural notes
@@ -692,10 +711,11 @@ cd pod-host/sidecar-poc
 ## Phase D — N=3 multi-agent smoke (2026-05-25, GREEN)
 
 ```bash
-cd pod-host/sidecar-poc/rust-host
+cd client-runtime/host
 cargo run --release -- \
-  --guest-wasm ../guest/sidecar-agent-build/target/wasm32-wasip2/release/sidecar_guest.wasm \
+  --guest-wasm ../guest-cljs/build/crate/target/wasm32-wasip2/release/guest.wasm \
   --multi-agent --multi-duration-ms 300000
+
 ```
 
 Three wasm guest instances, each on its own `wasmtime::Store<GuestStore>`,
@@ -728,6 +748,7 @@ agent-m report: {:role :mixed :events 1828 :completed 538 :cas-conflicts 0}
 
 cache stats:   entries=5 hits=0 misses=2214 invalidations=2
                high_water=536872742
+
 ```
 
 Math check: reader/mixed each saw ~1828 tx events = 752 writer commits +
@@ -748,20 +769,21 @@ populate; the architecture handles it correctly.
 
 ```bash
 # One-shot build + run (5 minutes):
-cd pod-host/sidecar-poc
-./build-sidecar-agent --run --duration-ms=300000
+cd client-runtime
+./build-guest --run --duration-ms=300000
 
 # Or with shorter duration for iteration:
-./build-sidecar-agent --run --duration-ms=15000
+./build-guest --run --duration-ms=15000
 
 # Manual:
-clj -M:cljs release sidecar-agent                            # CLJS bundle
-./build-sidecar-agent                                        # wasm component
-cd rust-host && cargo build --release                        # host
-rm -rf ../data/seon-poc-store /tmp/seon-poc-*.sock           # clean slate
+clj -M:cljs release guest-agent                            # CLJS bundle
+./build-guest                                        # wasm component
+cd host && cargo build --release                        # host
+rm -rf ../data/seon-client-runtime-store tmp/seon-client-runtime-*.sock           # clean slate
 cargo run --release --quiet -- \
-  --guest-wasm ../guest/sidecar-agent-build/target/wasm32-wasip2/release/sidecar_guest.wasm \
+  --guest-wasm ../guest-cljs/build/crate/target/wasm32-wasip2/release/guest.wasm \
   --multi-agent --multi-duration-ms 300000
+
 ```
 
 ### Cache hit rate caveat
@@ -795,20 +817,20 @@ entries dropped, high-water tracks the latest basis-t (536872742).
 
 A re-run of Phase D with a workload designed to exercise the snapshot
 cache. Reader and mixed agents capture `(d/db conn)` once and run
-`SIDECAR_CACHE_BATCH=100` queries against the pinned snapshot before
+`SEON_AGENT_CACHE_BATCH=100` queries against the pinned snapshot before
 refreshing. Identical `(basis-t, query, args)` tuples are intended to
 hit the snapshot cache in the Rust host.
 
 ### Changes made for this run
 
-1. **Agent** (`guest-cljs/src/sidecar_poc/agent.cljs`): added
+1. **Agent** (`guest-cljs/src/seon/client_runtime/agent.cljs`): added
    `run-reader-cf` and `run-mixed-cf` variants dispatched by
-   `SIDECAR_BENCH_MODE=cache-friendly` env var. Each variant pins
+   `SEON_AGENT_BENCH_MODE=cache-friendly` env var. Each variant pins
    `(d/db conn)` once per outer loop and runs `:cache-batch`
    queries against the pinned snapshot. A guard skips the inner
    loop when `@(:basis-t conn)` is still 0 (cold-start race before
    the listener has observed any tx event).
-2. **Rust host** (`rust-host/src/main.rs`): added `--bench-mode` +
+2. **Rust host** (`client-runtime/host/src/main.rs`): added `--bench-mode` +
    `--cache-batch` CLI flags. Added per-op `LatencyTracker` (p50/p95/p99
    in microseconds for q-hit, q-miss, tx). Added `pinned: bool` flag
    on `CacheEntry`: entries inserted by `q_at` / `pull_edn` / `entity_pull`
@@ -818,20 +840,21 @@ hit the snapshot cache in the Rust host.
 ### Reproduce
 
 ```bash
-cd pod-host/sidecar-poc
-./build-sidecar-agent              # CLJS + wasm rebuild
-cd rust-host && cargo build --release
-cd .. && rm -rf data/seon-poc-store /tmp/seon-poc-*.sock
-cd rust-host && ./target/release/sidecar-host \
-  --guest-wasm ../guest/sidecar-agent-build/target/wasm32-wasip2/release/sidecar_guest.wasm \
+cd client-runtime
+./build-guest              # CLJS + wasm rebuild
+cd host && cargo build --release
+cd .. && rm -rf data/seon-client-runtime-store tmp/seon-client-runtime-*.sock
+cd host && ./target/release/client-runtime-host \
+  --guest-wasm ../guest-cljs/build/crate/target/wasm32-wasip2/release/guest.wasm \
   --multi-agent --multi-duration-ms 300000 \
   --bench-mode cache-friendly --cache-batch 100
+
 ```
 
 ### Results — 300s run with cache fix (2026-05-25)
 
 Raw log: `data/phase-d-prime-prefix-2026-05-25.log` (pre-fix) and
-`/tmp/sidecar-cf-300s-fix.log` (post-fix; 30s shorter rerun at
+`tmp/client-runtime-cf-300s-fix.log` (post-fix; 30s shorter rerun at
 `/tmp/sc-cf-30s.log`).
 
 | Run | Duration | hits | misses | hit rate | entries | invalidations |
@@ -866,6 +889,7 @@ Root cause not yet identified. Hypotheses:
 q-hit  : n=   397  p50=       0us  p95=       0us  p99=       1us  min=       0us  max=       2us
 q-miss : n= 40402  p50=     898us  p95=   49619us  p99=  128862us  min=     102us  max=  258133us
 tx     : n=  1211  p50=  124494us  p95=  196528us  p99=  230896us  min=   35245us  max=  257353us
+
 ```
 
 - **q-hit**: sub-microsecond p50/p95 — the cache-served path is
@@ -917,7 +941,7 @@ the bulk of the in-batch hits.
 
 ### Architectural takeaway
 
-The Rust-host snapshot cache **is** sub-microsecond when it hits,
+The Rust host snapshot cache **is** sub-microsecond when it hits,
 but the cache invalidation model + the cache key shape together
 make it brittle on a continuous-write workload. The real win
 requires:
@@ -933,21 +957,21 @@ requires:
 3. Or: shed reads from the JVM entirely by caching per-attribute
    shapes (e.g. all `[?e :task/status ?v]` results) and updating
    incrementally from tx-data. This is what `datahike.tools.datalog`
-   on JVM does for indexes; the sidecar doesn't yet have an
+   on JVM does for indexes; the client-runtime doesn't yet have an
    equivalent.
 
 ## Mounted filesystem access (2026-05-26)
 
 WASI preopens give guests Node-style `node:fs` access to host directories.
 Every guest gets two default mounts (configured per-session in
-`rust-host/src/main.rs::build_mounts_for_session`):
+`client-runtime/host/src/main.rs::build_mounts_for_session`):
 
 | Guest path | Host path | Perms | Purpose |
 |---|---|---|---|
 | `/seon-src` | `~/src/seon` | **RO** | Browse the Seon source tree — agents read their own implementation. |
 | `/scratch`  | `data/sessions/<name>/scratch/` | **RW** | Per-session working directory. Survives session restart. |
 
-CLI flags on `sidecar-host`:
+CLI flags on `client-runtime-host`:
 
 ```text
 --seon-src <path>      override ~/src/seon
@@ -955,9 +979,10 @@ CLI flags on `sidecar-host`:
 --mount-ro host:guest  extra read-only mount (repeatable)
 --mount-rw host:guest  extra read-write mount (repeatable)
 --agent-role <role>    invoke run_agent(role) instead of run_smoke
+
 ```
 
-### Guest API: `sidecar-poc.fs`
+### Guest API: `seon.client-runtime.fs`
 
 Plain Node-style fns over `node:fs`, courtesy of wasm-rquickjs's built-in
 `fs` polyfill which routes to wasi:filesystem preopens. RO-violations
@@ -973,6 +998,7 @@ throw with `:errno "EACCES"` in the ex-data so callers can pattern-match.
 (fs/write-file! "/scratch/out.txt" "hi")  ;; throws EACCES on RO mounts
 (fs/mkdir!     "/scratch/sub")
 (fs/append-file! "/scratch/log.txt" line)
+
 ```
 
 ### Smoke test — `--agent-role fs-smoke`
@@ -987,6 +1013,7 @@ fail), RW-write to /scratch, readback. Latest run:
 [single] check :write-ro => {:ok true, :rejected-with "EACCES"}
 [single] check :write-rw => {:ok true, :readback "hello from single"}
 guest run ok (413ms)
+
 ```
 
 WASI preopen permission enforcement IS load-bearing — `wasmtime-wasi`
@@ -1006,7 +1033,7 @@ free. For larger files or directory walks see the `learn` role.
 
 A subject/predicate/object triple-store seeded with verified facts
 about Seon. Schema + 34 seed facts live at
-`jvm-writer/resources/seed/{facts-schema,facts-seed}.edn`.
+`src/seon/server/resources/seed/{facts-schema,facts-seed}.edn`.
 
 ### Schema (`facts-schema.edn`)
 
@@ -1032,7 +1059,7 @@ conventions (namespaced keys, map-in/map-out, no `:any`, absent-not-nil,
 `seon.client`, `seon.schema`), directories, testing commands, active
 branch. Every entry's `:fact/source` points inside the /seon-src mount.
 
-### Guest API: `sidecar-poc.facts`
+### Guest API: `seon.client-runtime.facts`
 
 ```clojure
 (facts/ensure-schema! conn)                    ;; :installed | :already-present
@@ -1041,6 +1068,7 @@ branch. Every entry's `:fact/source` points inside the /seon-src mount.
 (facts/facts-about conn :seon.agent)           ;; vec of fact maps
 (facts/facts-with-predicate conn :uses-library)
 (facts/fact-count conn)
+
 ```
 
 ### Learn role — `--agent-role learn`
@@ -1057,6 +1085,7 @@ Latest 60s run:
 [single] FINAL-REPORT {:role :learn, :files-scanned 41, :namespaces-recorded 41,
                        :fact-count 75, :sample-query {:subject :seon.agent, :facts [2]}}
 guest run ok (4.14s)
+
 ```
 
 Idempotent — re-running the same agent against the same session updates
@@ -1064,12 +1093,13 @@ the existing fact rows by `:fact/id` (upsert via `:db.unique/identity`).
 
 ### JVM-side test coverage
 
-`jvm-writer/test/seon/sidecar/facts_test.clj` — 6 tests, 16 assertions
+`src/seon/server/test/seon/server/facts_test.clj` — 6 tests, 16 assertions
 covering schema install, seed install, idempotent reseed, query by
 subject, query by predicate, record-fact upsert. All green.
 
 ```bash
-cd jvm-writer && clojure -M:test -n seon.sidecar.facts-test
+clojure -M:test -n seon.server.facts-test
+
 ```
 
 ## Multi-session
@@ -1081,10 +1111,11 @@ channel. Lazily spawned from `SessionRegistry::get_or_spawn(name)`. See
 trade-offs.
 
 ```bash
-cd pod-host/sidecar-poc/rust-host
+cd client-runtime/host
 cargo run --release -- \
-  --guest-wasm ../guest/sidecar-agent-build/target/wasm32-wasip2/release/sidecar_guest.wasm \
+  --guest-wasm ../guest-cljs/build/crate/target/wasm32-wasip2/release/guest.wasm \
   --multi-session --sessions alpha,beta --agents-per-session 2 --multi-duration-ms 30000
+
 ```
 
 ## Phase PF — multi-session smoke (2026-05-26, GREEN post-rename)
@@ -1109,6 +1140,7 @@ wall:                   53.1s
 
 --- cross-contamination check ---
 [alpha ∩ beta] disjoint OK  (|alpha|=108, |beta|=108)
+
 ```
 
 Per-session reader `out-of-order` events: **0** in both. Each session's
@@ -1130,6 +1162,7 @@ wall:                   93.5s
 [alpha ∩ beta]  disjoint OK  (|alpha|=185, |beta|=186)
 [alpha ∩ gamma] disjoint OK  (|alpha|=185, |gamma|=186)
 [beta ∩ gamma]  disjoint OK  (|beta|=186, |gamma|=186)
+
 ```
 
 Three independent basis-t lines. Each session progressed at ~3
