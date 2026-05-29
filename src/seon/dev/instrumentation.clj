@@ -323,6 +323,25 @@
 ;;; Lifecycle
 ;;; ---------------------------------------------------------------------------
 
+(defn- prune-ghost-schemas!
+  "Drop collected function-schema entries for namespaces that no longer
+   exist (renamed or deleted). Malli's `-function-schemas*` registry is a
+   global atom that accumulates across reloads — when a namespace is
+   renamed (e.g. `seon.orchestrator.session` -> `seon.session` in Wave 3),
+   its old fn entries linger. `mi/instrument!` then calls `find-var` on
+   every collected entry and throws `No such namespace` on the ghost,
+   aborting ALL instrumentation. Pruning ghosts first makes startup robust
+   to any rename/delete. Returns the seq of pruned [lang ns] pairs."
+  []
+  (let [reg-atom @#'m/-function-schemas*
+        ghosts (for [[lang nses] @reg-atom
+                     [ns-sym _] nses
+                     :when (and (symbol? ns-sym) (nil? (find-ns ns-sym)))]
+                 [lang ns-sym])]
+    (doseq [[lang ns-sym] ghosts]
+      (swap! reg-atom update lang dissoc ns-sym))
+    ghosts))
+
 (defn start!
   "Collect function schemas from all loaded namespaces and instrument them.
    Per-namespace error catching ensures one broken schema doesn't block all.
@@ -338,6 +357,10 @@
           (swap! errors conj {:ns (str ns) :error (.getMessage e)})
           (log/debug "Skipping schema collection for namespace"
                      {:ns (str ns) :error (.getMessage e)}))))
+    ;; Drop ghost-namespace entries so instrument! doesn't throw on them
+    (let [pruned (prune-ghost-schemas!)]
+      (when (seq pruned)
+        (log/info "Pruned ghost function-schemas" {:namespaces (mapv (comp str second) pruned)})))
     ;; Instrument all collected schemas
     (let [instrumented (count (mi/instrument! {:report agent-reporter}))
           error-count (count @errors)]

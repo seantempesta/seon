@@ -40,7 +40,7 @@
                   [:keyword {:description "Database name keyword, e.g. :seon.runtime"}])
 
 (schema/register! ::available-keys
-                  [:set :keyword {:description "Set of available data keys"}])
+                  [:set {:description "Set of available data keys"} :keyword])
 
 (schema/register! ::output-filter
                   [:keyword {:description "Only return fns whose output contains this key"}])

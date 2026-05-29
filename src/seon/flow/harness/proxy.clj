@@ -39,8 +39,8 @@
                                            :description "Override fully-qualified fn name for remote call"}]]])
 
 (schema/register! ::functions
-  [:map-of :string ::fn-meta
-   {:description "Map of function-name -> metadata for the remote namespace"}])
+  [:map-of {:description "Map of function-name -> metadata for the remote namespace"}
+   :string ::fn-meta])
 
 ;;; ---------------------------------------------------------------------------
 ;;; Proxy Function Construction

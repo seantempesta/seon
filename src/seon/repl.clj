@@ -23,8 +23,8 @@
                   [:string {:min 1 :description "Clojure source form string"}])
 
 (schema/register! ::namespace
-                  [:or :symbol :string
-                   {:description "Clojure namespace for form evaluation"}])
+                  [:or {:description "Clojure namespace for form evaluation"}
+                   :symbol :string])
 
 (schema/register! ::agent-id
                   [:string {:min 1 :description "Agent session ID"}])
@@ -41,7 +41,7 @@
                    {:description "Classified form type"}])
 
 (schema/register! ::form-name
-                  [:maybe :string {:description "Name extracted from form (nil for expressions)"}])
+                  [:string {:description "Name extracted from form. Absent (no key) for expressions/requires — never nil."}])
 
 (schema/register! ::version
                   [:int {:min 1 :description "Form version number"}])

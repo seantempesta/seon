@@ -102,8 +102,8 @@
                    {:description "Agent JVM lifecycle status"}])
 
 (schema/register! ::namespace
-                  [:or :symbol :string
-                   {:description "Clojure namespace assigned to agent JVM"}])
+                  [:or {:description "Clojure namespace assigned to agent JVM"}
+                   :symbol :string])
 
 (schema/register! ::size
                   [:int {:min 1 :max 50
