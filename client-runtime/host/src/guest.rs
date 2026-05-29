@@ -1,8 +1,8 @@
 //! Phase 3 — wasm guest hosting.
 //!
-//! Loads a compiled wasm32-wasip2 component (the sidecar-guest produced by
+//! Loads a compiled wasm32-wasip2 component (the client-runtime guest produced by
 //! wasm-rquickjs), instantiates it, and exposes one entry point: `run_smoke`.
-//! The guest's `seon:sidecar/db` imports are satisfied by forwarding into
+//! The guest's `seon:client-runtime/db` imports are satisfied by forwarding into
 //! the existing Phase-2 [`crate::DbHandle`] — every `q` / `transact` / `pull`
 //! call from inside wasm round-trips to the JVM writer via the same WriterClient.
 //!
@@ -30,13 +30,13 @@ use wasmtime_wasi_http::WasiHttpCtx;
 use crate::{DbHandle, TxEvent, WireDatom};
 
 // ---------------------------------------------------------------------------
-// Generated bindings for the sidecar-guest world. See ../wit/sidecar.wit.
+// Generated bindings for the client-runtime-guest world. See ../wit/db.wit.
 // `wasi:*` imports delegate to wasmtime-wasi's existing generated bindings.
-// `seon:sidecar/db` is host-impl'd below on [`GuestStore`].
+// `seon:client-runtime/db` is host-impl'd below on [`GuestStore`].
 // ---------------------------------------------------------------------------
 wasmtime::component::bindgen!({
     path: "wit",
-    world: "sidecar-guest",
+    world: "client-runtime-guest",
     imports: { default: async | trappable },
     exports: { default: async },
     with: {
@@ -48,14 +48,14 @@ wasmtime::component::bindgen!({
     },
 });
 
-use seon::sidecar::db as db_iface;
+use seon::client_runtime::db as db_iface;
 use wasi::logging::logging as wasi_logging;
 
 /// Per-instance store data. Owns WASI + http contexts (wasm-rquickjs's
 /// default `normal` feature tier includes `fetch`, which pulls wasi:http
 /// from the runtime; we have to wire it on the linker side too), the
 /// resource table, and a clone of the [`DbHandle`] used to satisfy
-/// `seon:sidecar/db` imports.
+/// `seon:client-runtime/db` imports.
 pub struct GuestStore {
     wasi:  WasiCtx,
     http:  WasiHttpCtx,
@@ -190,7 +190,7 @@ impl WasiHttpView for GuestStore {
 }
 
 // ---------------------------------------------------------------------------
-// seon:sidecar/db — host impl. Forwards each call into the JVM writer via
+// seon:client-runtime/db — host impl. Forwards each call into the JVM writer via
 // the shared DbHandle.
 // ---------------------------------------------------------------------------
 
@@ -560,7 +560,7 @@ fn wire_to_wit_datom(d: &WireDatom) -> db_iface::WireDatom {
 pub struct Guest {
     engine:   Engine,
     store:    Store<GuestStore>,
-    bindings: SidecarGuest,
+    bindings: ClientRuntimeGuest,
 }
 
 impl Guest {
@@ -601,7 +601,7 @@ impl Guest {
 
         let store_data = GuestStore::build(db, env_vars, mounts)?;
         let mut store = Store::new(&engine, store_data);
-        let bindings = SidecarGuest::instantiate_async(&mut store, &component, &linker).await?;
+        let bindings = ClientRuntimeGuest::instantiate_async(&mut store, &component, &linker).await?;
 
         Ok(Self { engine, store, bindings })
     }

@@ -1,10 +1,10 @@
 [package]
-name = "sidecar-host"
+name = "client-runtime-host"
 version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "sidecar-host"
+name = "client-runtime-host"
 path = "src/main.rs"
 
 [dependencies]

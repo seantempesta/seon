@@ -49,4 +49,4 @@
    :db-loaded?        (some? db/transact!)
    :log-loaded?       (some? log/info!)})
 
-(set! (.-sidecarBootstrapProbe js/globalThis) probe-info)
+(set! (.-clientRuntimeBootstrapProbe js/globalThis) probe-info)

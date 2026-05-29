@@ -1,8 +1,8 @@
-// sidecar.wit — Phase B WIT contract for the sidecar PoC.
+// db.wit — the client-runtime DB-access WIT contract.
 //
-// The wasm guest imports `seon:sidecar/db` (and nothing else from us; WASI
+// The wasm guest imports `seon:client-runtime/db` (and nothing else from us; WASI
 // imports come through wasm-rquickjs's standard set). All db calls fan out to
-// the JVM writer via the Rust-host WriterClient.
+// the JVM wire-server (sole datahike master) via the Rust host WriterClient.
 //
 // EDN-string in / EDN-string out keeps the WIT surface tiny. CBOR is the wire
 // format between the Rust host and the JVM writer; it doesn't need to leak to
@@ -16,7 +16,7 @@
 //     lookup-refs, and `:db/ident` keywords as EDN strings)
 //   - next-tx-event for polling tx events (Phase 4 host→guest delivery)
 
-package seon:sidecar@0.1.0;
+package seon:client-runtime@0.1.0;
 
 interface db {
   variant db-error {
@@ -120,7 +120,7 @@ interface db {
   next-tx-event: func(handle: u32) -> result<tx-event, db-error>;
 }
 
-world sidecar-guest {
+world client-runtime-guest {
   import db;
   // Standard WASI imports the wasm-rquickjs runtime expects.
   import wasi:clocks/monotonic-clock@0.2.3;

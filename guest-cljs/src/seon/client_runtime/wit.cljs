@@ -1,5 +1,5 @@
 (ns seon.client-runtime.wit
-  "Thin boundary that turns WIT-bound JS imports from `seon:sidecar/db@0.1.0`
+  "Thin boundary that turns WIT-bound JS imports from `seon:client-runtime/db@0.1.0`
    into Clojure-friendly fns. All overlay calls funnel through here so the
    rest of the overlay is pure CLJS.
 
@@ -20,22 +20,22 @@
 
 ;; The shadow-cljs build is responsible for declaring this module as an
 ;; external import so the generated JS uses the WIT-bound name verbatim.
-;; In dev (Node REPL), a stub at `node_modules/seon:sidecar/db@0.1.0` can
+;; In dev (Node REPL), a stub at `node_modules/seon:client-runtime/db@0.1.0` can
 ;; mirror the surface for unit testing.
 (defn- resolve-wit-mod []
   ;; Resolution order:
-  ;; (a) `globalThis.__seon_sidecar_db` set by an ESM shim that imported
+  ;; (a) `globalThis.__seon_client_runtime_db` set by an ESM shim that imported
   ;;     the WIT module and re-exposed its fns. This is how wasm-rquickjs
   ;;     bundles get their host imports — the JS shim does the ES
-  ;;     `import { q, transact, ... } from "seon:sidecar/db@0.1.0"`
+  ;;     `import { q, transact, ... } from "seon:client-runtime/db@0.1.0"`
   ;;     and stashes the namespace on globalThis BEFORE the CLJS bundle
   ;;     is imported (ES dep-graph order guarantees this).
   ;; (b) `js/require` for Node-REPL / JVM-driven unit tests where the WIT
   ;;     module is mocked as a CommonJS module.
   ;; (c) Empty object — caller will get a clear "WIT import missing" error
   ;;     on first invoke.
-  (or (.-__seon_sidecar_db js/globalThis)
-      (try (js/require "seon:sidecar/db@0.1.0")
+  (or (.-__seon_client_runtime_db js/globalThis)
+      (try (js/require "seon:client-runtime/db@0.1.0")
            (catch :default _ nil))
       #js {}))
 

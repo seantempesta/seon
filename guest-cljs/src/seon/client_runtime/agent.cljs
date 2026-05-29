@@ -1,6 +1,6 @@
 (ns seon.client-runtime.agent
   "Synthetic agent for Phase D multi-agent smoke. Reads its identity + role
-   from the wasi env (SIDECAR_AGENT_ID, SIDECAR_AGENT_ROLE, SIDECAR_AGENT_DURATION_MS),
+   from the wasi env (SEON_AGENT_ID, SEON_AGENT_ROLE, SEON_AGENT_DURATION_MS),
    then runs one of three workload loops against the shared wire DB:
 
    - writer : transacts a new :task entity every 200ms
@@ -104,13 +104,13 @@
 ;; Reader-CF and Mixed-CF capture (d/db conn) once and run K read cycles
 ;; against that *pinned* basis-t before refreshing. Identical (basis-t,
 ;; query, args) tuples hit the snapshot cache in the Rust host. K is read
-;; from env SIDECAR_CACHE_BATCH (default 100). Pinned reads also use 3
+;; from env SEON_AGENT_CACHE_BATCH (default 100). Pinned reads also use 3
 ;; different query shapes per cycle to demonstrate that the cache keys
 ;; correctly differentiate.
 
 (defn- ^:async run-reader-cf [agent-id conn duration-ms]
   (let [end        (+ (now-ms) duration-ms)
-        batch      (or (some-> (env "SIDECAR_CACHE_BATCH" nil) js/parseInt) 100)
+        batch      (or (some-> (env "SEON_AGENT_CACHE_BATCH" nil) js/parseInt) 100)
         events     (atom 0)
         queries    (atom 0)
         snap-rolls (atom 0)
@@ -217,7 +217,7 @@
 
 (defn- ^:async run-mixed-cf [agent-id conn duration-ms]
   (let [end (+ (now-ms) duration-ms)
-        batch (or (some-> (env "SIDECAR_CACHE_BATCH" nil) js/parseInt) 100)
+        batch (or (some-> (env "SEON_AGENT_CACHE_BATCH" nil) js/parseInt) 100)
         events (atom 0)
         completed (atom 0)
         cas-conflicts (atom 0)
@@ -409,13 +409,13 @@
   (try
     (let [conn (d/connect {})
           dur  (or duration-ms
-                   (some-> (env "SIDECAR_AGENT_DURATION_MS" nil) js/parseInt)
+                   (some-> (env "SEON_AGENT_DURATION_MS" nil) js/parseInt)
                    30000)
           aid  (or agent-id
-                   (env "SIDECAR_AGENT_ID" "agent-unknown"))
+                   (env "SEON_AGENT_ID" "agent-unknown"))
           rol  (or role
-                   (env "SIDECAR_AGENT_ROLE" "writer"))]
-      (let [mode (env "SIDECAR_BENCH_MODE" "default")]
+                   (env "SEON_AGENT_ROLE" "writer"))]
+      (let [mode (env "SEON_AGENT_BENCH_MODE" "default")]
         (log aid "starting" {:role rol :duration-ms dur :bench-mode mode})
         (let [report (cond
                        (= rol "fs-smoke") (run-fs-smoke aid conn dur)
@@ -455,7 +455,7 @@
     (catch :default e
       (pr-str {:ok false :error (or (.-message e) (str e))}))))
 
-(set! (.-sidecarAgentRun js/globalThis) run-agent!)
-(set! (.-sidecarAgentSmoke js/globalThis) run-smoke!)
+(set! (.-clientRuntimeAgentRun js/globalThis) run-agent!)
+(set! (.-clientRuntimeAgentSmoke js/globalThis) run-smoke!)
 
 (defn -main [& _args] nil)

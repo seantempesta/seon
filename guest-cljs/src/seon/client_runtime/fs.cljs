@@ -3,7 +3,7 @@
    wasm-rquickjs's built-in `fs` polyfill maps onto wasi:filesystem preopens
    configured by the Rust host).
 
-   Two default mounts every guest gets (see `rust-host/src/main.rs`
+   Two default mounts every guest gets (see `client-runtime/host/src/main.rs`
    `build_mounts_for_session`):
 
    - `/seon-src`  — host `~/src/seon`, READ-ONLY. Browse / read project

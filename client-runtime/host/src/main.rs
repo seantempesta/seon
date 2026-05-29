@@ -1,4 +1,4 @@
-//! Sidecar Rust host — Phase 2.
+//! client-runtime Rust host — the wasm-agent runtime supervisor.
 //!
 //! Spawns the JVM writer subprocess, connects to its two UDS sockets
 //! (req/resp + pub), wraps the req/resp client in a tokio mpsc actor, maintains
@@ -1284,14 +1284,14 @@ struct Args {
 
     /// Base path/prefix for per-session UDS sockets. Session `alpha` gets
     /// `<sock_base>-alpha-req.sock` and `<sock_base>-alpha-pub.sock`.
-    #[arg(long, default_value = "/tmp/seon-poc")]
+    #[arg(long, default_value = "tmp/seon-client-runtime")]
     sock_base: String,
 
     /// Run an automated smoke test after startup and exit.
     #[arg(long, default_value_t = false)]
     smoke: bool,
 
-    /// Path to a wasm32-wasip2 guest component (sidecar-guest). When given,
+    /// Path to a wasm32-wasip2 guest component (client-runtime guest). When given,
     /// loads the guest, calls its `run-smoke` export, prints the result.
     #[arg(long)]
     guest_wasm: Option<PathBuf>,
@@ -1307,13 +1307,13 @@ struct Args {
     multi_duration_ms: u32,
 
     /// Phase D' — bench mode selector passed to the guest via
-    /// SIDECAR_BENCH_MODE. "default" (existing Phase D workload) or
+    /// SEON_AGENT_BENCH_MODE. "default" (existing Phase D workload) or
     /// "cache-friendly" (reader/mixed pin snapshots for batched reads).
     #[arg(long, default_value = "default")]
     bench_mode: String,
 
     /// Phase D' — number of pinned-snapshot read cycles per snapshot roll
-    /// (cache-friendly mode). Passed to the guest via SIDECAR_CACHE_BATCH.
+    /// (cache-friendly mode). Passed to the guest via SEON_AGENT_CACHE_BATCH.
     #[arg(long, default_value_t = 100u32)]
     cache_batch: u32,
 
@@ -1702,11 +1702,11 @@ async fn run_multi_agent(
                 wasm_path,
                 db,
                 &[
-                    ("SIDECAR_AGENT_ID".to_string(), agent_id.clone()),
-                    ("SIDECAR_AGENT_ROLE".to_string(), role.clone()),
-                    ("SIDECAR_AGENT_DURATION_MS".to_string(), dur.to_string()),
-                    ("SIDECAR_BENCH_MODE".to_string(), bench_mode.clone()),
-                    ("SIDECAR_CACHE_BATCH".to_string(), cache_batch.to_string()),
+                    ("SEON_AGENT_ID".to_string(), agent_id.clone()),
+                    ("SEON_AGENT_ROLE".to_string(), role.clone()),
+                    ("SEON_AGENT_DURATION_MS".to_string(), dur.to_string()),
+                    ("SEON_AGENT_BENCH_MODE".to_string(), bench_mode.clone()),
+                    ("SEON_AGENT_CACHE_BATCH".to_string(), cache_batch.to_string()),
                 ],
                 &mounts,
             )
@@ -1863,12 +1863,12 @@ async fn run_multi_session(
                 wasm_path,
                 db,
                 &[
-                    ("SIDECAR_SESSION".to_string(),            session_name.clone()),
-                    ("SIDECAR_AGENT_ID".to_string(),           agent_id.clone()),
-                    ("SIDECAR_AGENT_ROLE".to_string(),         role.clone()),
-                    ("SIDECAR_AGENT_DURATION_MS".to_string(),  dur.to_string()),
-                    ("SIDECAR_BENCH_MODE".to_string(),         bench_mode.clone()),
-                    ("SIDECAR_CACHE_BATCH".to_string(),        cache_batch.to_string()),
+                    ("SEON_AGENT_SESSION".to_string(),            session_name.clone()),
+                    ("SEON_AGENT_ID".to_string(),           agent_id.clone()),
+                    ("SEON_AGENT_ROLE".to_string(),         role.clone()),
+                    ("SEON_AGENT_DURATION_MS".to_string(),  dur.to_string()),
+                    ("SEON_AGENT_BENCH_MODE".to_string(),         bench_mode.clone()),
+                    ("SEON_AGENT_CACHE_BATCH".to_string(),        cache_batch.to_string()),
                 ],
                 &mounts,
             ).await?;
@@ -2038,9 +2038,9 @@ async fn main() -> Result<()> {
             let mounts = build_mounts_for_session(&args, "default")?;
             let env_vars: Vec<(String, String)> = if !args.agent_role.is_empty() {
                 vec![
-                    ("SIDECAR_AGENT_ID".to_string(), "single".to_string()),
-                    ("SIDECAR_AGENT_ROLE".to_string(), args.agent_role.clone()),
-                    ("SIDECAR_AGENT_DURATION_MS".to_string(),
+                    ("SEON_AGENT_ID".to_string(), "single".to_string()),
+                    ("SEON_AGENT_ROLE".to_string(), args.agent_role.clone()),
+                    ("SEON_AGENT_DURATION_MS".to_string(),
                      args.multi_duration_ms.to_string()),
                 ]
             } else {
