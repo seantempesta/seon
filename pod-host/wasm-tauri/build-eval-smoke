@@ -13,7 +13,7 @@
 #      init-bootstrap then a couple of canned eval-form calls.
 #
 # Output:
-#   eval-smoke-build/target/wasm32-wasip2/release/seon_eval_smoke.wasm
+#   pod-build/target/wasm32-wasip2/release/eval_smoke.wasm
 
 set -euo pipefail
 
@@ -88,9 +88,9 @@ echo "▸ Compiling to wasm32-wasip2 (release)…"
   --no-default-features \
   --features="lite,node-http,crypto,zlib,encoding")
 
-POD_WASM="pod-build/target/wasm32-wasip2/release/seon_eval_smoke.wasm"
+POD_WASM="pod-build/target/wasm32-wasip2/release/eval_smoke.wasm"
 test -f "$POD_WASM" \
-  || { echo "✗ seon_eval_smoke.wasm not produced at $POD_WASM"; exit 1; }
+  || { echo "✗ eval_smoke.wasm not produced at $POD_WASM"; exit 1; }
 echo "✓ eval-smoke wasm built: $POD_WASM"
 
 # ----- 4. wasmtime smoke run -----------------------------------------------

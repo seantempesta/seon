@@ -26,20 +26,34 @@
 
    ## What's in the bundle besides cljs.js / boot
 
-   - `datahike.api` — so the agent's confidence-run tests can exercise
-     real DB behavior under wasmtime, same as on Node. The M1 datahike
-     smoke already proved the lib loads here; we just keep the require
-     so the eval-batch surface can run datahike-using deftests without
-     a separate build flavor.
    - `cljs.test` — so deftest / is / run-tests work inside eval'd
      source. The agent writes test forms, evals via eval-batch, and
-     reads pass/fail counts from the returned EDN."
+     reads pass/fail counts from the returned EDN.
+
+   ## Why datahike.api is NOT required here (2026-05-29)
+
+   `datahike.api` pulls in `cljs.core.async` transitively. core.async's
+   dispatcher (`cljs.core.async.impl.dispatch`) drives task delivery via
+   `goog.async.nextTick`, which under wasm-rquickjs resolves to
+   `setImmediate` → `scheduleTimeout(cb, 0)` → `wstd::task::sleep(0)`.
+   That registers a `wasi:clocks/monotonic-clock` pollable in wstd's
+   reactor. Under wasmtime 44 + wstd 0.6.5, `wstd::runtime::block_on`
+   parks in `block_on_pollables()` waiting on that timer pollable and its
+   waker never fires — so `init-bootstrap`/`eval-form` hang at ~0% CPU
+   (and a partially-drained variant trips `block_on`'s
+   `unreachable!(\"ready list empty\")` panic — the require hard-panic).
+   The only async machinery the bootstrap/require load path otherwise
+   uses is microtask-based (`fs.readFile`'s `queueMicrotask`, native
+   CLJS `^:async`/`await`), which the rquickjs runtime drains via
+   `rt.idle()` WITHOUT any timer pollable — so removing core.async makes
+   a fresh rebuild eval cleanly. Datahike-in-wasm needs a core.async-free
+   delivery path (the seantempesta fork's Promise-wrap) before it can
+   share this bundle; until then it stays out of eval-smoke."
   (:require
     [cljs.js :as cljs]
     [cljs.test]
     [cljs.tools.reader :as r]
     [cljs.tools.reader.reader-types :as rt]
-    [datahike.api]
     [shadow.cljs.bootstrap.node :as boot]))
 
 (defonce !compile-state (atom nil))
