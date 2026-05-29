@@ -1,6 +1,6 @@
 // guest.mjs — Phase 3 minimal wasm guest.
 //
-// Imports the host-provided `seon:sidecar/db` interface and exports
+// Imports the host-provided `seon:client-runtime/db` interface and exports
 // `runSmoke` (kebab `run-smoke`). When the Rust host calls `run-smoke`,
 // the guest fires one transact + one query against the JVM writer via
 // the WIT bridge and returns an EDN-ish report string.
@@ -26,7 +26,7 @@ import {
   schema,
   reverseSchema,
   subscribeTx,
-} from "seon:sidecar/db@0.1.0";
+} from "seon:client-runtime/db@0.1.0";
 
 export const runSmoke = () => {
   const log = [];

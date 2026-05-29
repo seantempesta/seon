@@ -1,14 +1,14 @@
-// sidecar-agent.mjs — Phase D ESM shim for the CLJS sidecar agent.
+// agent.mjs — ESM shim for the client-runtime CLJS guest agent.
 //
 // Two responsibilities:
-// 1. Import the WIT-bound `seon:sidecar/db@0.1.0` host fns and stash them on
-//    `globalThis.__seon_sidecar_db` so the CLJS overlay (sidecar-poc.wit)
+// 1. Import the WIT-bound `seon:client-runtime/db@0.1.0` host fns and stash them on
+//    `globalThis.__seon_client_runtime_db` so the CLJS overlay (seon.client-runtime.wit)
 //    finds them via its globalThis fallback path (the overlay's primary
 //    `js/require` path doesn't work under wasm-rquickjs because the WIT
 //    module isn't a CommonJS module).
 // 2. Import the seon CLJS bundle (registered as the virtual module
-//    `sidecar/main`), which installs `globalThis.sidecarAgentRun` and
-//    `globalThis.sidecarAgentSmoke` as a side effect.
+//    `client-runtime/main`), which installs `globalThis.clientRuntimeAgentRun` and
+//    `globalThis.clientRuntimeAgentSmoke` as a side effect.
 //
 // Exports:
 //   - runAgent(agentId, role, durationMs) -> Promise<string>  ; WIT run-agent
@@ -29,12 +29,12 @@ import {
   subscribeTx,
   unsubscribeTx,
   nextTxEvent,
-} from "seon:sidecar/db@0.1.0";
+} from "seon:client-runtime/db@0.1.0";
 
 // Stash on globalThis. The overlay's wit-mod fallback reads from
-// `globalThis.__seon_sidecar_db`, so this must be assigned before any CLJS
-// code that requires sidecar-poc.wit runs.
-globalThis.__seon_sidecar_db = {
+// `globalThis.__seon_client_runtime_db`, so this must be assigned before any CLJS
+// code that requires seon.client-runtime.wit runs.
+globalThis.__seon_client_runtime_db = {
   q,
   transact,
   pull,
@@ -52,11 +52,11 @@ globalThis.__seon_sidecar_db = {
 
 // Minimal Node globals shadow-cljs's :node-script wrapper probes at load.
 globalThis.__dirname = "/";
-globalThis.__filename = "/sidecar-agent.js";
+globalThis.__filename = "/agent.js";
 if (typeof globalThis.process === "undefined") {
   globalThis.process = { env: {}, argv: [], platform: "wasi" };
 }
-// Bridge wasi env into process.env so the agent can read SIDECAR_AGENT_ID etc.
+// Bridge wasi env into process.env so the agent can read SEON_AGENT_ID etc.
 // wasm-rquickjs's `process` shim normally does this when the `process` feature
 // is enabled, but our --no-default-features build disables that to avoid the
 // wasi:logging linker pull. The host already wires wasi:cli/environment via
@@ -82,14 +82,14 @@ if (
 
 // Step 2 — import the CLJS bundle. ES dep-graph order guarantees the
 // globalThis assignments above run first.
-import "sidecar/main";
+import "client-runtime/main";
 
 export const runAgent = async (agentId, role, durationMs) => {
-  if (typeof globalThis.sidecarAgentRun !== "function") {
-    return `{:ok false :error "globalThis.sidecarAgentRun missing, got ${typeof globalThis.sidecarAgentRun}"}`;
+  if (typeof globalThis.clientRuntimeAgentRun !== "function") {
+    return `{:ok false :error "globalThis.clientRuntimeAgentRun missing, got ${typeof globalThis.clientRuntimeAgentRun}"}`;
   }
   try {
-    return await globalThis.sidecarAgentRun(agentId, role, durationMs);
+    return await globalThis.clientRuntimeAgentRun(agentId, role, durationMs);
   } catch (e) {
     const msg = e && e.message ? e.message : String(e);
     return `{:ok false :error ${JSON.stringify(msg)}}`;
@@ -97,11 +97,11 @@ export const runAgent = async (agentId, role, durationMs) => {
 };
 
 export const runSmoke = async () => {
-  if (typeof globalThis.sidecarAgentSmoke !== "function") {
-    return `{:ok false :error "globalThis.sidecarAgentSmoke missing"}`;
+  if (typeof globalThis.clientRuntimeAgentSmoke !== "function") {
+    return `{:ok false :error "globalThis.clientRuntimeAgentSmoke missing"}`;
   }
   try {
-    return await globalThis.sidecarAgentSmoke();
+    return await globalThis.clientRuntimeAgentSmoke();
   } catch (e) {
     const msg = e && e.message ? e.message : String(e);
     return `{:ok false :error ${JSON.stringify(msg)}}`;
