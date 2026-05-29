@@ -1,7 +1,7 @@
 (ns seon.repl
   "Sidecar overlay for V0's `seon.repl`. The V0 version requires
    `datahike.api` for its `dev-init!` path (which opens an in-memory
-   datahike conn). Under the sidecar, the conn is JVM-owned; the guest
+   datahike conn). Under the client-runtime, the conn is JVM-owned; the guest
    never opens a local datahike conn. This overlay drops the
    `datahike.api` require + the `ensure-conn!` plumbing while keeping
    the compile-state / bootstrap-init surface that `seon.agent`,
@@ -10,7 +10,7 @@
    Public surface kept (used by V0 substrate):
      - !compile-state    (defonce atom)
      - !init-version     (defonce atom)
-     - !conn             (defonce atom, will hold the sidecar conn)
+     - !conn             (defonce atom, will hold the wire conn)
      - ensure-bootstrap! (async, returns compile-state)
      - parse-forms       (re-exported from seon.parse)
 
@@ -39,8 +39,8 @@
       state)))
 
 (defn ^:async dev-init!
-  "STUB — `dev-init!` under sidecar is just `ensure-bootstrap!`.
-   The conn comes from the sidecar wiring, not from a local
+  "STUB — `dev-init!` under client-runtime is just `ensure-bootstrap!`.
+   The conn comes from the client-runtime wiring, not from a local
    datahike instance."
   []
   (await (ensure-bootstrap!)))

@@ -1,6 +1,6 @@
 (ns seon.db
   "Sidecar overlay for V0's `seon.db`. Shadows `src/seon/db.cljs` when
-   the `:cljs-sidecar` alias's `src-overlay` path is on the classpath
+   the `:cljs-guest` alias's `src-overlay` path is on the classpath
    ahead of `src/`.
 
    Surface compatibility: maintains the V0 public API shape — map-in /
@@ -11,7 +11,7 @@
 
    Differences from V0 (documented honestly):
 
-   - `*conn*` is a single guest-wide handle wrapping the sidecar
+   - `*conn*` is a single guest-wide handle wrapping the client-runtime
      connection (created lazily by `connect!`); it does NOT carry a
      datahike conn atom. Code that derefs `@*conn*` and threads the db
      value into multiple reads still works — we return the wrapped conn
@@ -27,17 +27,17 @@
      hatch for parallel-Promise scenarios.
 
    - The Malli→datahike schema bridge is not reproduced here. The
-     sidecar writer owns schema installation; the guest just calls
+     wire-server owns schema installation; the guest just calls
      `transact!` with already-installed attrs. V0 code paths that
      install schemas at boot via `assert-preconditions!` are not
-     exercised under the sidecar today — schema is JVM-installed.
+     exercised under the client-runtime today — schema is JVM-installed.
 
    - Listener handler input keys MATCH V0's `:seon.db/db`,
      `:seon.db/db-before`, `:seon.db/datoms`, `:seon.db/attr-index`,
      `:seon.db/tx-report`. The `:db` value is the wrapped conn (not a
      datahike db value); the overlay's `query` treats this as
      'current snapshot at call time'. `:db-before` is nil today — the
-     sidecar pub event doesn't deliver a pre-commit db handle.
+     wire pub event doesn't deliver a pre-commit db handle.
      `:datoms` are decoded from `tx-data` shipped on the pub event."
   (:require
     [seon.client-runtime.als :as als]
@@ -207,7 +207,7 @@
                       {::error        :seon.db/unregistered-attrs
                        ::unregistered unregistered})))))
 
-;; Minimal validate-values! — skip ref-arity branch checking (the sidecar
+;; Minimal validate-values! — skip ref-arity branch checking (the client-runtime
 ;; writer will catch ref-type mismatches at JVM tx time anyway, and we'd
 ;; pull in the bulk of V0's bridge to do it locally).
 (defn- validate-values! [tx-data]
@@ -216,7 +216,7 @@
       (doseq [[attr v] datum]
         (when (and (not (system-attr? attr))
                    (schema/registered? attr)
-                   ;; ref-typed attrs: skip — sidecar resolves these
+                   ;; ref-typed attrs: skip — wire-server resolves these
                    ;; server-side via tempids/lookup-refs/nested maps.
                    (not (and (vector? v) (every? some? v)))
                    (not (map? v)))
@@ -296,7 +296,7 @@
     (sd/pull c pull-pattern ref)))
 
 (defn entity
-  "Returns an EAGER realized map (sidecar `entity-pull` to depth 1).
+  "Returns an EAGER realized map (wire `entity-pull` to depth 1).
    V0's `d/entity` was lazy; the audit confirmed all 15 V0 call sites
    read shallow attrs only, so eager is behavior-equivalent."
   {:malli/schema [:=> [:cat ::entity-request] :any]}
@@ -305,11 +305,11 @@
     (sd/entity c ref)))
 
 ;; ---------------------------------------------------------------------------
-;; Listener machinery — fan out from sidecar tx events.
+;; Listener machinery — fan out from wire tx events.
 ;; ---------------------------------------------------------------------------
 
 (defn- datom->map [d]
-  ;; sidecar tx-data is [e a v t op] vectors; `a` is a string like
+  ;; wire tx-data is [e a v t op] vectors; `a` is a string like
   ;; "task/id" (the EDN keyword printer's stringification). We rebuild as
   ;; a keyword to match V0's `::a :keyword` shape.
   (let [[e a v t op] d
@@ -320,7 +320,7 @@
   (let [datoms (mapv datom->map (:tx-data ev))]
     {::tx-report  ev
      ::db         conn          ; pass conn through; downstream uses sync overlay
-     ::db-before  nil           ; sidecar pub event doesn't ship db-before
+     ::db-before  nil           ; wire pub event doesn't ship db-before
      ::datoms     datoms
      ::attr-index (group-by ::a datoms)}))
 
@@ -358,21 +358,21 @@
 ;; ---------------------------------------------------------------------------
 
 (defn malli->datahike-attr
-  "STUB — under the sidecar, schema installation happens JVM-side via
+  "STUB — under the client-runtime, schema installation happens JVM-side via
    the writer. The overlay does not synthesize datahike attr maps locally."
   [_attr]
-  (throw (ex-info "malli->datahike-attr not supported under sidecar overlay; install schema JVM-side."
+  (throw (ex-info "malli->datahike-attr not supported under client-runtime overlay; install schema JVM-side."
                   {::error :seon.db/bridge-stub})))
 
 (defn malli->datahike-schema [_attrs]
-  (throw (ex-info "malli->datahike-schema not supported under sidecar overlay."
+  (throw (ex-info "malli->datahike-schema not supported under client-runtime overlay."
                   {::error :seon.db/bridge-stub})))
 
 (defn tx-meta-datahike-schema []
-  ;; Used by V0's boot to install tx-meta attrs JVM-side. No-op under sidecar.
+  ;; Used by V0's boot to install tx-meta attrs JVM-side. No-op under client-runtime.
   nil)
 
 (defn assert-preconditions!
-  "STUB — the sidecar writer enforces preconditions JVM-side."
+  "STUB — the wire-server enforces preconditions JVM-side."
   ([_conn] true)
   ([_conn _opts] true))

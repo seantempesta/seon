@@ -51,7 +51,7 @@
 ;; ---------- create-database / connect ----------
 
 (defn create-database
-  "On the sidecar, the writer subprocess creates the DB at startup; the guest's
+  "On the client-runtime, the writer subprocess creates the DB at startup; the guest's
    `create-database` is informational. We return the cfg so callers that thread
    it into `connect` still work."
   [cfg]
@@ -59,9 +59,9 @@
 
 (defn connect
   "Return a logical connection wrapper. The cfg argument is ignored — the
-   sidecar host already wired this guest to its writer.
+   client-runtime host already wired this guest to its writer.
 
-   Optional opts (currently none honored on the sidecar; reserved for future
+   Optional opts (currently none honored on the client-runtime; reserved for future
    use such as filtered subscriptions)."
   ([cfg] (connect cfg {}))
   ([_cfg _opts]

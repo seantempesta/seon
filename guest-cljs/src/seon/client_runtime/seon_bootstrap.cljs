@@ -1,6 +1,6 @@
 (ns seon.client-runtime.seon-bootstrap
   "Probe namespace — requires a growing set of V0 substrate namespaces to
-   validate the sidecar overlay build. Each require here is a probe; the
+   validate the client-runtime overlay build. Each require here is a probe; the
    namespace either compiles cleanly under wasm32-wasip2 + the overlay or
    it doesn't.
 
@@ -10,7 +10,7 @@
    2. `seon.error`   — pure CLJS, .cljs, ex-info walking. SHOULD compile.
    3. `seon.parse`   — pure CLJS, .cljc, reader. SHOULD compile.
    4. `seon.code`    — pure CLJC. SHOULD compile.
-   5. `seon.db` (OVERLAY) — sidecar-flavored. SHOULD compile.
+   5. `seon.db` (OVERLAY) — wire-client-flavored. SHOULD compile.
    6. `seon.log`     — requires seon.db + seon.schema. SHOULD compile w/
                        overlay.
    7. `seon.platform`— host detection (no requires). SHOULD compile.
@@ -19,7 +19,7 @@
    9. `seon.agent`   — requires seon.db + seon.eval + seon.render + ...
                        LIKELY BLOCKED.
 
-   Run via `clj -M:cljs:cljs-sidecar release sidecar-agent` (alias
+   Run via `clj -M:cljs:cljs-guest release guest-agent` (alias
    stacking ensures `src-overlay` is on the classpath).
 
    When a layer fails to compile, comment out the offending require and

@@ -22,7 +22,7 @@
 
 (defn- fs
   "Lazy resolve of node:fs. The guest's `js/require` is wasm-rquickjs's
-   built-in fs polyfill (see guest/sidecar-agent-build/src/builtin/fs.rs).
+   built-in fs polyfill (see guest-cljs/build (generated) src/builtin/fs.rs).
    Defonce'd so repeated calls don't pay the resolve cost."
   []
   (js/require "node:fs"))

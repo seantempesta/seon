@@ -1,7 +1,7 @@
 (ns seon.client-runtime.transit
-  "Transit-JSON codec for sidecar wire value payloads.
+  "Transit-JSON codec for client-runtime wire value payloads.
 
-   Mirrors seon.sidecar.transit on the JVM side. Encodes Clojure values as
+   Mirrors seon.server.transit on the JVM side. Encodes Clojure values as
    Transit-JSON strings — keywords, sets, instants, BigInts, ratios all
    preserved. The Rust host treats these strings as opaque blobs; only the
    CLJS guest and the JVM writer interpret them."

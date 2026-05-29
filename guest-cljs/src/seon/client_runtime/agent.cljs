@@ -1,7 +1,7 @@
 (ns seon.client-runtime.agent
   "Synthetic agent for Phase D multi-agent smoke. Reads its identity + role
    from the wasi env (SIDECAR_AGENT_ID, SIDECAR_AGENT_ROLE, SIDECAR_AGENT_DURATION_MS),
-   then runs one of three workload loops against the shared sidecar DB:
+   then runs one of three workload loops against the shared wire DB:
 
    - writer : transacts a new :task entity every 200ms
    - reader : listens for tx events, periodically queries pending counts
