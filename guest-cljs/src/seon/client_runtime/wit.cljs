@@ -1,4 +1,4 @@
-(ns sidecar-poc.wit
+(ns seon.client-runtime.wit
   "Thin boundary that turns WIT-bound JS imports from `seon:sidecar/db@0.1.0`
    into Clojure-friendly fns. All overlay calls funnel through here so the
    rest of the overlay is pure CLJS.
@@ -6,17 +6,17 @@
    The WIT bridge is JS-resident — wasm-rquickjs imports a JS module that
    re-exports the host fns under names matching the WIT contract. The host's
    wasmtime linker satisfies those imports via `db_iface::Host` in
-   `rust-host/src/guest.rs`.
+   `client-runtime/host/src/guest.rs`.
 
    WIT result<T, E> shows up on the JS side as: success returns T directly;
    error throws a JS value whose `.tag` is the variant name (`internal`,
    `protocol`, `not-found`, `invalid-query`) and whose `.val` is the message.
-   We catch + re-throw as ex-info with `:seon.sidecar/error-kind`.
+   We catch + re-throw as ex-info with `:seon.client-runtime/error-kind`.
 
    Wire format: every value crossing the boundary (query, args, tx-data,
    selectors, eids, results, tempids, tx-meta, datom v/a fields) is a
-   Transit-JSON string. See `sidecar-poc.transit`."
-  (:require [sidecar-poc.transit :as transit]))
+   Transit-JSON string. See `seon.client-runtime.transit`."
+  (:require [seon.client-runtime.transit :as transit]))
 
 ;; The shadow-cljs build is responsible for declaring this module as an
 ;; external import so the generated JS uses the WIT-bound name verbatim.
@@ -50,21 +50,21 @@
 
 (defn- ->kind [tag]
   (case tag
-    "internal"      :seon.sidecar/internal
-    "protocol"      :seon.sidecar/protocol
-    "not-found"     :seon.sidecar/not-found
-    "invalid-query" :seon.sidecar/invalid-query
-    :seon.sidecar/unknown))
+    "internal"      :seon.client-runtime/internal
+    "protocol"      :seon.client-runtime/protocol
+    "not-found"     :seon.client-runtime/not-found
+    "invalid-query" :seon.client-runtime/invalid-query
+    :seon.client-runtime/unknown))
 
 (defn- wit-throw! [op e]
   (let [tag (some-> e .-tag)
         val (some-> e .-val)
         msg (or val (some-> e .-message) (str e))]
     (throw
-     (ex-info (str "sidecar " op " failed: " msg)
-              {:seon.sidecar/op         op
-               :seon.sidecar/error-kind (->kind tag)
-               :seon.sidecar/message    msg}))))
+     (ex-info (str "wire " op " failed: " msg)
+              {:seon.client-runtime/op         op
+               :seon.client-runtime/error-kind (->kind tag)
+               :seon.client-runtime/message    msg}))))
 
 (defn- invoke
   "Call a WIT-bound host fn by JS export name. Args are passed through as
@@ -81,7 +81,7 @@
                            " (have keys: "
                            (try (js/Object.keys m) (catch :default _ "<?>"))
                            ")")
-                      {:seon.sidecar/op op-name})))
+                      {:seon.client-runtime/op op-name})))
     (try
       (apply f args)
       (catch :default e

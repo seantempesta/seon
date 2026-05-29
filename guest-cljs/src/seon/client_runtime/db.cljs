@@ -1,12 +1,12 @@
-(ns sidecar-poc.datahike
+(ns seon.client-runtime.db
   "In-guest overlay that mirrors `datahike.api` for the 9 APIs the V0 audit
    identified: create-database / connect / transact! / q / pull / entity /
    listen! / unlisten! / @conn-deref + schema / reverse-schema / pull-many /
    filter as bonus capabilities.
 
-   Agent code under wasm requires this namespace as `[sidecar-poc.datahike :as d]`
+   Agent code under wasm requires this namespace as `[seon.client-runtime.db :as d]`
    and reads/writes through a familiar shape; every call routes through the
-   WIT bridge in `sidecar-poc.wit` to the JVM writer.
+   WIT bridge in `seon.client-runtime.wit` to the JVM writer.
 
    Semantic notes:
 
@@ -25,7 +25,7 @@
      polls `next-tx-event` and dispatches into the local listener map. On a
      guest that supports host-initiated callbacks (Phase 4 design option (a)),
      this loop is unnecessary; the fan-out shape is identical."
-  (:require [sidecar-poc.wit :as wit]))
+  (:require [seon.client-runtime.wit :as wit]))
 
 ;; ---------- db values ----------
 

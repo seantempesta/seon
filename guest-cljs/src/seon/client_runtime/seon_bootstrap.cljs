@@ -1,4 +1,4 @@
-(ns sidecar-poc.seon-bootstrap
+(ns seon.client-runtime.seon-bootstrap
   "Probe namespace — requires a growing set of V0 substrate namespaces to
    validate the sidecar overlay build. Each require here is a probe; the
    namespace either compiles cleanly under wasm32-wasip2 + the overlay or

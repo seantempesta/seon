@@ -1,4 +1,4 @@
-(ns sidecar-poc.fs
+(ns seon.client-runtime.fs
   "Node-style filesystem access for guests, routed through `node:fs` (which
    wasm-rquickjs's built-in `fs` polyfill maps onto wasi:filesystem preopens
    configured by the Rust host).

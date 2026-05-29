@@ -1,4 +1,4 @@
-(ns sidecar-poc.facts
+(ns seon.client-runtime.facts
   "Facts knowledge base API.
 
    A 'fact' is a subject/predicate/object triple plus provenance:
@@ -16,11 +16,11 @@
    back.
 
    Schema + seed data live at
-   `/seon-src/pod-host/sidecar-poc/jvm-writer/resources/seed/`
+   `/seon-src/resources/seed/`
    (also reachable via the host filesystem; the seeder reads them through
    the /seon-src WASI preopen)."
-  (:require [sidecar-poc.datahike :as d]
-            [sidecar-poc.fs       :as fs]
+  (:require [seon.client-runtime.db :as d]
+            [seon.client-runtime.fs       :as fs]
             [clojure.edn          :as edn]
             [clojure.string       :as str]))
 
@@ -38,7 +38,7 @@
    schema text lives next to the seed data, not duplicated in the bundle."
   [conn]
   (let [schema-edn (fs/read-file
-                    "/seon-src/pod-host/sidecar-poc/jvm-writer/resources/seed/facts-schema.edn")]
+                    "/seon-src/resources/seed/facts-schema.edn")]
     ;; Transact the raw EDN string — the JVM writer parses it.
     (d/transact! conn (edn/read-string schema-edn))))
 
@@ -156,7 +156,7 @@
   [conn]
   (let [schema-status (ensure-schema! conn)
         seed-edn      (fs/read-file
-                       "/seon-src/pod-host/sidecar-poc/jvm-writer/resources/seed/facts-seed.edn")
+                       "/seon-src/resources/seed/facts-seed.edn")
         raw-facts     (edn/read-string seed-edn)
         facts-vec     (mapv normalize-seed-fact raw-facts)]
     ;; Transact in one big batch.

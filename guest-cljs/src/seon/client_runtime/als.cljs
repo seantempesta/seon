@@ -1,4 +1,4 @@
-(ns sidecar-poc.als
+(ns seon.client-runtime.als
   "Userland AsyncLocalStorage equivalent for the wasm-rquickjs guest.
 
    wasm-rquickjs does NOT expose `node:async_hooks`. V0's `seon.db` uses

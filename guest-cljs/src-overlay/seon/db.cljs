@@ -7,7 +7,7 @@
    map-out, `:seon.db/*` namespaced keys, `*conn*` dynamic binding,
    `with-tx-context`, `with-agent`, transact/query/pull/entity/listen/
    unlisten. Underneath, every operation routes through
-   `sidecar-poc.datahike` to the JVM writer via WIT.
+   `seon.client-runtime.db` to the JVM writer via WIT.
 
    Differences from V0 (documented honestly):
 
@@ -18,7 +18,7 @@
      itself, and `query`/`pull`/`entity` accept it transparently.
 
    - `with-tx-context` / `with-agent` route through
-     `sidecar-poc.als` — a userland AsyncLocalStorage equivalent built
+     `seon.client-runtime.als` — a userland AsyncLocalStorage equivalent built
      on a snapshot-and-restore atom. wasm-rquickjs doesn't expose
      `node:async_hooks`, so we can't use V0's
      `AsyncLocalStorage.run`. The guest event loop is a single QuickJS
@@ -40,8 +40,8 @@
      sidecar pub event doesn't deliver a pre-commit db handle.
      `:datoms` are decoded from `tx-data` shipped on the pub event."
   (:require
-    [sidecar-poc.als :as als]
-    [sidecar-poc.datahike :as sd]
+    [seon.client-runtime.als :as als]
+    [seon.client-runtime.db :as sd]
     [malli.core :as m]
     [seon.error :as error]
     [seon.schema :as schema]))
@@ -148,12 +148,12 @@
 
 (def ^:dynamic *conn*
   "The agent's connection. Bound by the boot pipeline (or by ad-hoc test
-   code) to a `sidecar-poc.datahike` conn wrapper. Reads default to
+   code) to a `seon.client-runtime.db` conn wrapper. Reads default to
    `(query @*conn*)` but the overlay's `query`/`pull`/`entity` accept
    the wrapper itself transparently."
   nil)
 
-;; Userland AsyncLocalStorage keys. The values live in `sidecar-poc.als`'s
+;; Userland AsyncLocalStorage keys. The values live in `seon.client-runtime.als`'s
 ;; current context map; we just namespace the keys so multiple consumers
 ;; coexist.
 (def ^:private ALS-TX-CONTEXT ::tx-context)
@@ -279,7 +279,7 @@
         {::ok? false ::error (error/->map e)}))))
 
 ;; ---------------------------------------------------------------------------
-;; Public read path — sync calls through sidecar-poc.datahike (sync against
+;; Public read path — sync calls through seon.client-runtime.db (sync against
 ;; latest writer-known basis-t).
 ;; ---------------------------------------------------------------------------
 

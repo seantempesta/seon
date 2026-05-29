@@ -1,4 +1,4 @@
-(ns sidecar-poc.agent
+(ns seon.client-runtime.agent
   "Synthetic agent for Phase D multi-agent smoke. Reads its identity + role
    from the wasi env (SIDECAR_AGENT_ID, SIDECAR_AGENT_ROLE, SIDECAR_AGENT_DURATION_MS),
    then runs one of three workload loops against the shared sidecar DB:
@@ -14,9 +14,9 @@
    The agent is intentionally tiny so the Phase D smoke turns yellow only
    on real architectural problems (race/dedup/listener fanout), not on
    the agent's own complexity."
-  (:require [sidecar-poc.datahike :as d]
-            [sidecar-poc.fs       :as fs]
-            [sidecar-poc.facts    :as facts]
+  (:require [seon.client-runtime.db :as d]
+            [seon.client-runtime.fs       :as fs]
+            [seon.client-runtime.facts    :as facts]
             [clojure.string :as str]))
 
 ;; ---------------------------------------------------------------------------

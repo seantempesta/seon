@@ -1,4 +1,4 @@
-(ns sidecar-poc.transit
+(ns seon.client-runtime.transit
   "Transit-JSON codec for sidecar wire value payloads.
 
    Mirrors seon.sidecar.transit on the JVM side. Encodes Clojure values as
