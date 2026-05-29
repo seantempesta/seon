@@ -26,12 +26,12 @@
  ;; `:main` — test namespaces are unreachable from `:client`,
  ;; `:smoke`, and `:eval-smoke`, so they don't bloat release output
  ;; or break smoke targets.
- ;; Adds the sidecar-poc guest-cljs tree so the :sidecar-agent build below
- ;; can compile `sidecar-poc.agent` + `sidecar-poc.datahike` +
- ;; `sidecar-poc.wit` without those files needing to move into src/.
- ;; The overlay path is listed FIRST so the sidecar-agent build picks up
- ;; `pod-host/sidecar-poc/guest-cljs/src-overlay/seon/db.cljs` (the
- ;; sidecar-flavored shim) AHEAD of the real V0 `src/seon/db.cljs`.
+ ;; Adds the guest-cljs tree so the :guest-agent build below
+ ;; can compile `seon.client-runtime.agent` + `seon.client-runtime.db` +
+ ;; `seon.client-runtime.wit` without those files needing to move into src/.
+ ;; The overlay path is listed FIRST so the guest-agent build picks up
+ ;; `guest-cljs/src-overlay/seon/db.cljs` (the
+ ;; wire-client shim) AHEAD of the real V0 `src/seon/db.cljs`.
  ;; CAVEAT: other CLJS builds in this file (:client, :smoke, :eval-smoke)
  ;; will ALSO see the overlay if they transitively require `seon.db`.
  ;; :client / :smoke / :eval-smoke do NOT touch seon.db today
@@ -39,8 +39,8 @@
  ;; via direct datahike.api use — but client.cljs requires seon.client
  ;; which transitively requires seon.db). DO NOT build :client with the
  ;; overlay path present; revert this change first.
- :source-paths ["pod-host/sidecar-poc/guest-cljs/src-overlay"
-                "src" "test" "pod-host/sidecar-poc/guest-cljs/src"]
+ :source-paths ["guest-cljs/src-overlay"
+                "src" "test" "guest-cljs/src"]
 
  :builds
  {;; The V0 pod entry. One long-running Node process; stays alive via
@@ -162,38 +162,38 @@
   ;; ships there. The bootstrap bundle only provides the
   ;; analysis-cache cljs.js consumes at eval time.
   ;;
-  ;; Phase D sidecar agent bundle. Compiles the synthetic agent at
-  ;; pod-host/sidecar-poc/guest-cljs/src/sidecar_poc/agent.cljs together with
-  ;; the wit + datahike overlay. The output is loaded by the ESM shim at
-  ;; pod-host/sidecar-poc/guest/sidecar-agent.mjs, wrapped into a
+  ;; Guest agent bundle. Compiles the synthetic agent at
+  ;; guest-cljs/src/seon/client_runtime/agent.cljs together with
+  ;; the wit + db wire-client overlay. The output is loaded by the ESM shim at
+  ;; guest-cljs/build/agent.mjs, wrapped into a
   ;; wasm32-wasip2 component via wasm-rquickjs, and instantiated 3x by the
   ;; Rust host for the multi-agent smoke.
   ;;
-  ;; Build: `clj -M:cljs release sidecar-agent`
-  ;; Output: out/sidecar-agent/main.js (CJS, :node-script target)
-  :sidecar-agent
+  ;; Build: `clj -M:cljs release guest-agent`
+  ;; Output: out/guest-agent/main.js (CJS, :node-script target)
+  :guest-agent
   {:target           :node-script
-   :output-to        "out/sidecar-agent/main.js"
-   :main             sidecar-poc.agent/-main
+   :output-to        "out/guest-agent/main.js"
+   :main             seon.client-runtime.agent/-main
    :devtools         {:enabled false}
    :compiler-options {:warnings-as-errors false
                       :optimizations     :simple
                       :externs           ["externs/node_fs.js"]}}
 
   ;; V0-port probe build. Pulls in V0 substrate namespaces through the
-  ;; sidecar overlay (seon.db is the sidecar shim from src-overlay) so
+  ;; guest overlay (seon.db is the wire-client shim from src-overlay) so
   ;; we can measure how much V0 code compiles unchanged inside the
-  ;; sidecar guest. Each successful require demonstrates one more layer
+  ;; guest. Each successful require demonstrates one more layer
   ;; of V0 working in wasm.
   ;;
-  ;; Build: `clj -M:cljs:cljs-sidecar release v0-probe`
-  ;;        (cljs-sidecar alias adds src-overlay to extra-paths so the
+  ;; Build: `clj -M:cljs:cljs-guest release v0-probe`
+  ;;        (cljs-guest alias adds src-overlay to extra-paths so the
   ;;        overlay seon.db is reachable on the classpath)
   ;; Output: out/v0-probe/main.js
   :v0-probe
   {:target           :node-script
    :output-to        "out/v0-probe/main.js"
-   :main             sidecar-poc.seon-bootstrap/probe-info
+   :main             seon.client-runtime.seon-bootstrap/probe-info
    :devtools         {:enabled false}
    :compiler-options {:warnings-as-errors false
                       :optimizations     :simple

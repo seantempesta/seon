@@ -30,9 +30,9 @@
 
 (defn- parse-args [args]
   (loop [acc {:backend "memory"
-              :path "data/seon-poc.sqlite"
-              :req-sock "/tmp/seon-poc-req.sock"
-              :pub-sock "/tmp/seon-poc-pub.sock"}
+              :path "data/seon-client-runtime.sqlite"
+              :req-sock "tmp/seon-client-runtime-req.sock"
+              :pub-sock "tmp/seon-client-runtime-pub.sock"}
          xs args]
     (case (first xs)
       "--backend"   (recur (assoc acc :backend (second xs)) (drop 2 xs))
@@ -152,21 +152,21 @@
    or [:db/retract e a v])."
   [schema tx-data]
   (mapv
-    (fn [item]
-      (cond
-        (map? item)
-        (reduce-kv
-          (fn [m k v]
-            (assoc m k (coerce-value-for-attr schema k v)))
-          {}
-          item)
+   (fn [item]
+     (cond
+       (map? item)
+       (reduce-kv
+        (fn [m k v]
+          (assoc m k (coerce-value-for-attr schema k v)))
+        {}
+        item)
 
-        (and (vector? item) (#{:db/add :db/retract} (first item)) (= 4 (count item)))
-        (let [[op e a v] item]
-          [op e a (coerce-value-for-attr schema a v)])
+       (and (vector? item) (#{:db/add :db/retract} (first item)) (= 4 (count item)))
+       (let [[op e a v] item]
+         [op e a (coerce-value-for-attr schema a v)])
 
-        :else item))
-    tx-data))
+       :else item))
+   tx-data))
 
 ;; ---------- Filtered-db handle registry ----------
 
@@ -453,34 +453,34 @@
         server (ServerSocketChannel/open StandardProtocolFamily/UNIX)]
     (.bind server addr)
     (doto (Thread. ^Runnable
-                   (fn []
-                     (try
-                       (loop []
-                         (let [^SocketChannel ch (.accept server)
-                               in  (Channels/newInputStream ch)
-                               out (Channels/newOutputStream ch)]
-                           (doto (Thread. ^Runnable
-                                          (fn []
-                                            (try
-                                              (loop []
-                                                (when-let [req (codec/read-frame in)]
-                                                  (let [resp (handle-req conn req)]
-                                                    (codec/write-frame! out resp))
-                                                  (recur)))
-                                              (catch Throwable t
-                                                (binding [*out* *err*]
-                                                  (println "[req-conn] died:" (.getMessage t))))
-                                              (finally
-                                                (try (.close ch) (catch Throwable _)))))
-                                          "sidecar-req-conn")
-                             (.setDaemon true)
-                             (.start)))
-                         (recur))
-                       (catch java.nio.channels.AsynchronousCloseException _ nil)
-                       (catch Throwable t
-                         (binding [*out* *err*]
-                           (println "[req-accept] died:" (.getMessage t))))))
-                   "sidecar-req-accept")
+           (fn []
+             (try
+               (loop []
+                 (let [^SocketChannel ch (.accept server)
+                       in  (Channels/newInputStream ch)
+                       out (Channels/newOutputStream ch)]
+                   (doto (Thread. ^Runnable
+                          (fn []
+                            (try
+                              (loop []
+                                (when-let [req (codec/read-frame in)]
+                                  (let [resp (handle-req conn req)]
+                                    (codec/write-frame! out resp))
+                                  (recur)))
+                              (catch Throwable t
+                                (binding [*out* *err*]
+                                  (println "[req-conn] died:" (.getMessage t))))
+                              (finally
+                                (try (.close ch) (catch Throwable _)))))
+                                  "wire-req-conn")
+                     (.setDaemon true)
+                     (.start)))
+                 (recur))
+               (catch java.nio.channels.AsynchronousCloseException _ nil)
+               (catch Throwable t
+                 (binding [*out* *err*]
+                   (println "[req-accept] died:" (.getMessage t))))))
+                   "wire-req-accept")
       (.setDaemon true)
       (.start))
     server))

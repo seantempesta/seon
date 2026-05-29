@@ -4,7 +4,7 @@
 
    Run with:
      clj -M:client
-     clj -M:client --req-sock /tmp/seon-poc-req.sock --pub-sock /tmp/seon-poc-pub.sock"
+     clj -M:client --req-sock tmp/seon-client-runtime-req.sock --pub-sock tmp/seon-client-runtime-pub.sock"
   (:require [seon.server.codec :as codec])
   (:import [java.net StandardProtocolFamily UnixDomainSocketAddress]
            [java.nio.channels SocketChannel Channels])
@@ -13,8 +13,8 @@
 (set! *warn-on-reflection* true)
 
 (defn- parse-args [args]
-  (loop [acc {:req-sock "/tmp/seon-poc-req.sock"
-              :pub-sock "/tmp/seon-poc-pub.sock"}
+  (loop [acc {:req-sock "tmp/seon-client-runtime-req.sock"
+              :pub-sock "tmp/seon-client-runtime-pub.sock"}
          xs args]
     (case (first xs)
       "--req-sock" (recur (assoc acc :req-sock (second xs)) (drop 2 xs))
@@ -49,14 +49,14 @@
    (let [ch (connect path)
          in (Channels/newInputStream ch)]
      (doto (Thread. ^Runnable
-                    (fn []
-                      (try
-                        (loop []
-                          (when-let [ev (codec/read-frame in)]
-                            (swap! events conj ev)
-                            (when on-event (try (on-event ev) (catch Throwable _)))
-                            (recur)))
-                        (catch Throwable _)))
+            (fn []
+              (try
+                (loop []
+                  (when-let [ev (codec/read-frame in)]
+                    (swap! events conj ev)
+                    (when on-event (try (on-event ev) (catch Throwable _)))
+                    (recur)))
+                (catch Throwable _)))
                     "client-pub-collector")
        (.setDaemon true)
        (.start))

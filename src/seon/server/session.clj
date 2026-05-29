@@ -29,9 +29,8 @@
    exactly once — losers see the winner's conn.
 
    See `docs/prds/agent-runtime/integration-architecture-2026-05-26.md`
-   §1.5 (Path B) and §5 (session registration). Lifecycle shape lifted
-   from `pod-host/sidecar-poc/jvm-writer/src/seon/sidecar/writer.clj:74-77`
-   (V2 PoC), generalized from one conn to N.
+   §1.5 (Path B) and §5 (session registration). Lifecycle is the
+   wire-server's per-session connection registry, one conn to N.
 
    The `::pub-chan` slot is wired for Wave 4 (broadcast subscription)
    but populated as `nil` in Wave 2. Tx-event broadcast is not this

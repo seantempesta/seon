@@ -1,5 +1,5 @@
 (ns seon.server.store
-  "Build datahike config maps for the V2 sidecar's per-session DBs.
+  "Build datahike config maps for the wire-server's per-session DBs.
 
    Path B (no flow): each session in `seon.server.session/registry` calls
    `(datahike.api/connect cfg)` with one of these maps. Three backends
@@ -17,8 +17,7 @@
    where `<short>` is the name portion of the db-name keyword. Caller may
    override via `::path`.
 
-   Config shape lifted from `pod-host/sidecar-poc/jvm-writer/src/seon/
-   sidecar/writer.clj:45-70` (in production for Phase D).
+   Config shape is the wire-server's per-session datahike store config.
 
    `config-for` is a pure function — no filesystem side effects. The
    caller (the session registry, Wave 2) is responsible for invoking

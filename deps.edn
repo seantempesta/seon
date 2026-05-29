@@ -36,9 +36,8 @@
         ;; Fast serialization (used by seon.db.relay + seon.flow.harness)
         com.taoensso/nippy {:mvn/version "3.4.2"}
 
-        ;; konserve-jdbc + sqlite-jdbc — backing store for V2 sidecar
-        ;; per-session datahike DBs. See seon.server.store. Versions
-        ;; match pod-host/sidecar-poc/jvm-writer/deps.edn.
+        ;; konserve-jdbc + sqlite-jdbc — backing store for the wire-server's
+        ;; per-session datahike DBs. See seon.server.store.
         io.replikativ/konserve-jdbc {:mvn/version "0.2.91"
                                      :exclusions [io.replikativ/konserve]}
         org.xerial/sqlite-jdbc {:mvn/version "3.46.1.0"}
@@ -174,32 +173,32 @@
   ;;   - partial-cps: fix/ioc-await-probe-safety — defensive try/catch
   ;;     around the three macro-probe sites in ioc.clj so CLJS 1.12.145's
   ;;     cljs.core/await doesn't crash the CPS transformer.
-  ;; Sidecar-overlay alias — opt-in V0 namespace shadowing for the
-  ;; sidecar-agent build. Adds `src-overlay/` AHEAD of `src/` so that
-  ;; `seon.db` etc. resolve to the sidecar-flavored copies. NEVER
+  ;; Guest-overlay alias — opt-in V0 namespace shadowing for the
+  ;; guest-agent build. Adds `src-overlay/` AHEAD of `src/` so that
+  ;; `seon.db` etc. resolve to the wire-client copies. NEVER
   ;; activate alongside `:client` — that build needs the real V0
-  ;; `seon.db`. Use: `clj -M:cljs:cljs-sidecar release sidecar-agent`.
-  :cljs-sidecar {:extra-paths ["pod-host/sidecar-poc/guest-cljs/src-overlay"]}
+  ;; `seon.db`. Use: `clj -M:cljs:cljs-guest release guest-agent`.
+  :cljs-guest {:extra-paths ["guest-cljs/src-overlay"]}
 
-  :cljs {;; Phase D — sidecar-poc guest-cljs lives outside src/; add as an
+  :cljs {;; guest-cljs lives outside src/; add as an
          ;; extra-path so shadow-cljs's classpath picker finds
-         ;; sidecar-poc.* namespaces during the :sidecar-agent build.
+         ;; seon.client-runtime.* namespaces during the :guest-agent build.
          ;; `test` is on shadow-cljs.edn :source-paths but must ALSO appear
          ;; here so shadow's JVM classpath actually sees the test files
          ;; — without it, `seon.test.runner-test` and friends resolve to
          ;; "not available" even though the .cljs files exist on disk.
          ;; The `seon.dev.test-preload` namespace requires the platform
          ;; CLJS tests so they're reachable from the live `:client` pod.
-         :extra-paths   ["pod-host/sidecar-poc/guest-cljs/src" "test"]
+         :extra-paths   ["guest-cljs/src" "test"]
          :extra-deps    {org.clojure/clojurescript            {:mvn/version "1.12.145"}
                          org.clojure/core.async               {:mvn/version "1.10.870-alpha2"}
                          thheller/shadow-cljs                 {:mvn/version "3.4.10"}
                          org.replikativ/datahike              {:mvn/version "0.8.1681"}
                          org.replikativ/persistent-sorted-set {:mvn/version "0.4.122"}
-                         ;; Transit-JSON for sidecar wire value payloads
+                         ;; Transit-JSON for wire value payloads
                          ;; (keywords, sets, instants, ratios) crossing the
-                         ;; CLJS guest <-> JVM writer boundary. Mirrored by
-                         ;; com.cognitect/transit-clj in the jvm-writer.
+                         ;; CLJS guest <-> JVM wire-server boundary. Mirrored by
+                         ;; com.cognitect/transit-clj on the server (seon.server.transit).
                          com.cognitect/transit-cljs           {:mvn/version "0.8.280"}}
          ;; Spec-02 §5.2 — point datahike at the patched fork (selective
          ;; Promise wrap driven by :referentially-transparent?) and

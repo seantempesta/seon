@@ -45,7 +45,7 @@
                        (catch Throwable t
                          (binding [*out* *err*]
                            (println "[pub] accept loop died:" (.getMessage t))))))
-                   "sidecar-pub-accept")
+                   "wire-pub-accept")
       (.setDaemon true)
       (.start))
     server))

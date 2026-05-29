@@ -1,5 +1,5 @@
 (ns seon.server.transit
-  "Transit-JSON codec used for value payloads on the sidecar wire.
+  "Transit-JSON codec used for value payloads on the client-runtime wire.
 
    The wire control envelope is CBOR (see seon.server.codec). Inside the
    envelope, every field that carries a CLOJURE VALUE (query results,
