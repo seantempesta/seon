@@ -5,7 +5,7 @@
      1. stdout/stderr via `console!` (captured by the supervisor into
         `logs/pod.log` as raw text — human-readable, grep-friendly).
      2. An NDJSON-EDN file (default `logs/pod-events.log`, configurable
-        — see [[*log-file*]]). One `pr-str`'d entry map per line.
+        via `:seon.log/file` in [[!config]]). One `pr-str`'d entry map per line.
         Size-rotated (5 MB cap, last 3 kept). Agents read this via
         `seon.fs/read-file` as a normal file.
 
@@ -31,12 +31,15 @@
 
    ## Path configuration — single source of truth
 
-   The log file path is held in the dynvar [[*log-file*]] (default
-   `\"logs/pod-events.log\"`). In the sidecar/WASI pod this will move
-   to `\"/logs/pod-events.log\"` — a dedicated WASI preopen, separate
-   from `/scratch/` so logs can be agent-RO and survive session
-   restarts (scratch is per-session, agent-RW). Override via
-   [[configure!]] or by binding [[*log-file*]] in a test.
+   The log file path is held in [[!config]] under `:seon.log/file`
+   (default `\"logs/pod-events.log\"`). In the sidecar/WASI pod this
+   will move to `\"/logs/pod-events.log\"` — a dedicated WASI preopen,
+   separate from `/scratch/` so logs can be agent-RO and survive
+   session restarts (scratch is per-session, agent-RW). Override via
+   [[configure!]]. (Was a `^:dynamic` Var in Phase 1.5 but dynvars
+   don't reliably survive `await` boundaries in CLJS over Promises;
+   app-wide config belongs in the atom alongside `:seon.log/file-cap`
+   and `:seon.log/keep`.)
 
    ## Entry shape
 
@@ -161,50 +164,44 @@
 ;; ============================================================
 ;; Configuration — single source of truth for the log file path.
 ;;
-;; `*log-file*` is the canonical path. Both writers (`error!`, `info!`,
-;; ...) and the reader ([[tail]]) resolve through it. To migrate to
-;; the WASI sidecar's dedicated `/logs/` preopen, change ONE value:
-;;
-;;   (binding [seon.log/*log-file* \"/logs/pod-events.log\"] ...)
-;;
-;; or
+;; [[!config]] holds the canonical path under `:seon.log/file`. Both
+;; writers (`error!`, `info!`, ...) and the reader ([[tail]]) resolve
+;; through it. To migrate to the WASI sidecar's dedicated `/logs/`
+;; preopen, change ONE value:
 ;;
 ;;   (seon.log/configure! {:seon.log/file \"/logs/pod-events.log\"})
 ;;
 ;; `:seon.log/file-cap` and `:seon.log/keep` control file-size
 ;; rotation. No ring buffer config — there is no ring buffer.
+;;
+;; (Was a `^:dynamic` Var in Phase 1.5; moved into the atom because
+;; dynvars don't reliably survive `await` boundaries in CLJS over
+;; Promises, and the log file path is app-wide config, not per-agent
+;; runtime state — same shape as `seon.fs/!config`.)
 ;; ============================================================
 
-(def ^:dynamic *log-file*
-  "Absolute or cwd-relative path to the active log file. The default
-   `\"logs/pod-events.log\"` is V0/Node-pod-friendly; the WASI sidecar
-   will rebind this to `\"/logs/pod-events.log\"` (its own preopen,
-   separate from `/scratch/` — logs are agent-RO and persist across
-   session restarts; scratch is per-session agent-RW workspace)."
-  "logs/pod-events.log")
-
 (defonce !config
-  (atom {:seon.log/file-cap (* 5 1024 1024)
+  (atom {:seon.log/file     "logs/pod-events.log"
+         :seon.log/file-cap (* 5 1024 1024)
          :seon.log/keep     3}))
 
 (defn configure!
   "Merge `updates` into the active log config. Recognized keys:
-     :seon.log/file     — path to the active log file (also sets the
-                          root binding of [[*log-file*]] for callers
-                          that don't bind it explicitly).
+     :seon.log/file     — path to the active log file. Default
+                          `\"logs/pod-events.log\"`; the WASI sidecar
+                          will set this to `\"/logs/pod-events.log\"`
+                          (its own preopen, separate from `/scratch/`).
      :seon.log/file-cap — file size cap in bytes; rotation triggers
                           when the file exceeds this on append.
      :seon.log/keep     — number of rotated files retained.
 
-   Returns the new config (without `:seon.log/file` — that lives in
-   the dynvar)."
+   Returns the new config map."
   {:malli/schema [:=> [:cat :map] :map]}
   [updates]
-  (when-let [file (:seon.log/file updates)]
-    (set! *log-file* file))
   (let [next (merge @!config
                     (select-keys updates
-                                 [:seon.log/file-cap
+                                 [:seon.log/file
+                                  :seon.log/file-cap
                                   :seon.log/keep]))]
     (reset! !config next)
     next))
@@ -214,7 +211,7 @@
 ;; ============================================================
 
 (defn- event-file-path []
-  *log-file*)
+  (:seon.log/file @!config))
 
 (defn- ensure-dir! [path]
   (try
@@ -303,7 +300,8 @@
 
    Side effects (best-effort, never throws):
      1. stderr line via console.error
-     2. append NDJSON-EDN line to the active log file ([[*log-file*]])."
+     2. append NDJSON-EDN line to the active log file
+        (`:seon.log/file` in [[!config]])."
   {:malli/schema [:=> [:cat [:map
                              [:seon.log/source :keyword]
                              [:seon.log/message :string]
@@ -346,8 +344,8 @@
 
 (defn tail
   "Return the most-recent log entries from the active log file
-   ([[*log-file*]]), newest first. Reads the file each call — there
-   is no in-memory buffer.
+   (`:seon.log/file` in [[!config]]), newest first. Reads the file
+   each call — there is no in-memory buffer.
 
    Filter opts (all optional):
 

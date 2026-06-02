@@ -5,7 +5,7 @@
      - NDJSON-EDN file write + readability
      - tail with N less than total
      - file rotation at file-cap
-     - tail still works after a simulated pod restart (binding rebind
+     - tail still works after a simulated pod restart (reconfiguring
        to a new file is the same as restarting against the same path)
 
    Run interactively via MCP eval:
@@ -21,9 +21,15 @@
     [seon.log :as log]))
 
 ;; ============================================================
-;; Per-test isolation — each test runs against a fresh tmp file via
-;; `binding` on `seon.log/*log-file*` so we don't collide with the
-;; live pod's log.
+;; Per-test isolation — each test runs against a fresh tmp file by
+;; swapping `:seon.log/file` in `seon.log/!config` so we don't collide
+;; with the live pod's log.
+;;
+;; The log file path used to be a `^:dynamic` Var, but dynvars don't
+;; reliably survive `await` boundaries in CLJS over Promises (the
+;; runtime is Promise-based; binding frames are not preserved across
+;; microtasks). It now lives in the !config atom alongside
+;; :seon.log/file-cap and :seon.log/keep. See task-17 handoff doc.
 ;; ============================================================
 
 (defn- tmp-dir []
@@ -42,6 +48,19 @@
   (log/configure! {:seon.log/file-cap (* 5 1024 1024)
                    :seon.log/keep     3}))
 
+(defn- with-log-file*
+  "Test helper — set `:seon.log/file` to `path` in !config, run `f`,
+   then restore the prior value. Replaces the pre-2026-05-27
+   `(binding [log/*log-file* path] ...)` idiom, which no longer works
+   now that the path lives in !config (the dynvar was removed because
+   it didn't survive `await` boundaries)."
+  [path f]
+  (let [old (:seon.log/file @log/!config)]
+    (try
+      (log/configure! {:seon.log/file path})
+      (f)
+      (finally (log/configure! {:seon.log/file old})))))
+
 ;; ============================================================
 ;; Tests
 ;; ============================================================
@@ -50,106 +69,113 @@
   (let [path (tmp-file)]
     (try
       (reset-config!)
-      (binding [log/*log-file* path]
-        (log/info! {:seon.log/source ::probe :seon.log/message "one"})
-        (log/info! {:seon.log/source ::probe :seon.log/message "two"})
-        (log/info! {:seon.log/source ::probe :seon.log/message "three"})
-        (let [out (log/tail {:seon.log/n 10})]
-          (is (= 3 (count out)) "all three written entries visible")
-          (is (= "three" (:seon.log/message (first out))) "newest first")
-          (is (= "one"   (:seon.log/message (last out))) "oldest last")))
+      (with-log-file* path
+        (fn []
+          (log/info! {:seon.log/source ::probe :seon.log/message "one"})
+          (log/info! {:seon.log/source ::probe :seon.log/message "two"})
+          (log/info! {:seon.log/source ::probe :seon.log/message "three"})
+          (let [out (log/tail {:seon.log/n 10})]
+            (is (= 3 (count out)) "all three written entries visible")
+            (is (= "three" (:seon.log/message (first out))) "newest first")
+            (is (= "one"   (:seon.log/message (last out))) "oldest last"))))
       (finally (cleanup! path)))))
 
 (deftest tail-with-n-less-than-total
   (let [path (tmp-file)]
     (try
       (reset-config!)
-      (binding [log/*log-file* path]
-        (dotimes [i 10]
-          (log/info! {:seon.log/source ::probe
-                      :seon.log/message (str "msg " i)}))
-        (let [out (log/tail {:seon.log/n 3})]
-          (is (= 3 (count out)) "limited to N")
-          (is (= "msg 9" (:seon.log/message (first out))) "newest first")
-          (is (= "msg 7" (:seon.log/message (last out))) "third-newest last")))
+      (with-log-file* path
+        (fn []
+          (dotimes [i 10]
+            (log/info! {:seon.log/source ::probe
+                        :seon.log/message (str "msg " i)}))
+          (let [out (log/tail {:seon.log/n 3})]
+            (is (= 3 (count out)) "limited to N")
+            (is (= "msg 9" (:seon.log/message (first out))) "newest first")
+            (is (= "msg 7" (:seon.log/message (last out))) "third-newest last"))))
       (finally (cleanup! path)))))
 
 (deftest tail-filters-by-level
   (let [path (tmp-file)]
     (try
       (reset-config!)
-      (binding [log/*log-file* path]
-        (log/info!  {:seon.log/source ::p :seon.log/message "i1"})
-        (log/error! {:seon.log/source ::p :seon.log/message "e1"})
-        (log/info!  {:seon.log/source ::p :seon.log/message "i2"})
-        (log/error! {:seon.log/source ::p :seon.log/message "e2"})
-        (is (= 2 (count (log/tail {:seon.log/level :error}))))
-        (is (= 2 (count (log/tail {:seon.log/level :info}))))
-        (is (= "e2" (-> (log/tail {:seon.log/level :error}) first :seon.log/message))))
+      (with-log-file* path
+        (fn []
+          (log/info!  {:seon.log/source ::p :seon.log/message "i1"})
+          (log/error! {:seon.log/source ::p :seon.log/message "e1"})
+          (log/info!  {:seon.log/source ::p :seon.log/message "i2"})
+          (log/error! {:seon.log/source ::p :seon.log/message "e2"})
+          (is (= 2 (count (log/tail {:seon.log/level :error}))))
+          (is (= 2 (count (log/tail {:seon.log/level :info}))))
+          (is (= "e2" (-> (log/tail {:seon.log/level :error}) first :seon.log/message)))))
       (finally (cleanup! path)))))
 
 (deftest tail-filters-by-agent
   (let [path (tmp-file)]
     (try
       (reset-config!)
-      (binding [log/*log-file* path]
-        (log/error! {:seon.log/source ::p :seon.log/message "m1"})
-        (log/error! {:seon.log/source ::p :seon.log/agent "a1" :seon.log/message "m2"})
-        (log/error! {:seon.log/source ::p :seon.log/agent "a2" :seon.log/message "m3"})
-        (let [a1 (log/tail {:seon.log/agent "a1"})
-              a2 (log/tail {:seon.log/agent "a2"})]
-          (is (= 1 (count a1)))
-          (is (= "m2" (:seon.log/message (first a1))))
-          (is (= 1 (count a2)))
-          (is (= "m3" (:seon.log/message (first a2))))))
+      (with-log-file* path
+        (fn []
+          (log/error! {:seon.log/source ::p :seon.log/message "m1"})
+          (log/error! {:seon.log/source ::p :seon.log/agent "a1" :seon.log/message "m2"})
+          (log/error! {:seon.log/source ::p :seon.log/agent "a2" :seon.log/message "m3"})
+          (let [a1 (log/tail {:seon.log/agent "a1"})
+                a2 (log/tail {:seon.log/agent "a2"})]
+            (is (= 1 (count a1)))
+            (is (= "m2" (:seon.log/message (first a1))))
+            (is (= 1 (count a2)))
+            (is (= "m3" (:seon.log/message (first a2)))))))
       (finally (cleanup! path)))))
 
 (deftest tail-filters-by-source
   (let [path (tmp-file)]
     (try
       (reset-config!)
-      (binding [log/*log-file* path]
-        (log/info! {:seon.log/source ::alpha :seon.log/message "a"})
-        (log/info! {:seon.log/source ::beta  :seon.log/message "b"})
-        (let [out (log/tail {:seon.log/source ::beta})]
-          (is (= 1 (count out)))
-          (is (= "b" (:seon.log/message (first out))))))
+      (with-log-file* path
+        (fn []
+          (log/info! {:seon.log/source ::alpha :seon.log/message "a"})
+          (log/info! {:seon.log/source ::beta  :seon.log/message "b"})
+          (let [out (log/tail {:seon.log/source ::beta})]
+            (is (= 1 (count out)))
+            (is (= "b" (:seon.log/message (first out)))))))
       (finally (cleanup! path)))))
 
 (deftest file-write-is-ndjson-edn
   (let [path (tmp-file)]
     (try
       (reset-config!)
-      (binding [log/*log-file* path]
-        (log/info!  {:seon.log/source ::probe :seon.log/message "line one"})
-        (log/error! {:seon.log/source ::probe :seon.log/message "line two"})
-        (let [content (.readFileSync fs path "utf-8")
-              lines   (->> (str/split content #"\n")
-                           (remove str/blank?))
-              parsed  (map edn/read-string lines)]
-          (is (= 2 (count lines)))
-          (is (every? map? parsed) "every line is a readable edn map")
-          (is (= "line one" (:seon.log/message (first parsed))))
-          (is (= :error    (:seon.log/level   (second parsed))))
-          (is (every? #(instance? js/Date (:seon.log/at %)) parsed)
-              ":seon.log/at deserializes as js/Date via #inst")))
+      (with-log-file* path
+        (fn []
+          (log/info!  {:seon.log/source ::probe :seon.log/message "line one"})
+          (log/error! {:seon.log/source ::probe :seon.log/message "line two"})
+          (let [content (.readFileSync fs path "utf-8")
+                lines   (->> (str/split content #"\n")
+                             (remove str/blank?))
+                parsed  (map edn/read-string lines)]
+            (is (= 2 (count lines)))
+            (is (every? map? parsed) "every line is a readable edn map")
+            (is (= "line one" (:seon.log/message (first parsed))))
+            (is (= :error    (:seon.log/level   (second parsed))))
+            (is (every? #(instance? js/Date (:seon.log/at %)) parsed)
+                ":seon.log/at deserializes as js/Date via #inst"))))
       (finally (cleanup! path)))))
 
 (deftest file-rotates-at-cap
   (let [path (tmp-file)]
     (try
-      (binding [log/*log-file* path]
-        ;; Tiny cap so a handful of entries triggers rotation.
-        (log/configure! {:seon.log/file-cap 512 :seon.log/keep 3})
-        (let [big (apply str (repeat 200 "X"))]
-          (dotimes [i 8]
-            (log/info! {:seon.log/source ::probe
-                        :seon.log/message (str "msg " i " " big)}))
-          (is (.existsSync fs path)
-              "current event file exists")
-          (is (or (.existsSync fs (str path ".1"))
-                  (.existsSync fs (str path ".2")))
-              "at least one rotation occurred")))
+      (with-log-file* path
+        (fn []
+          ;; Tiny cap so a handful of entries triggers rotation.
+          (log/configure! {:seon.log/file-cap 512 :seon.log/keep 3})
+          (let [big (apply str (repeat 200 "X"))]
+            (dotimes [i 8]
+              (log/info! {:seon.log/source ::probe
+                          :seon.log/message (str "msg " i " " big)}))
+            (is (.existsSync fs path)
+                "current event file exists")
+            (is (or (.existsSync fs (str path ".1"))
+                    (.existsSync fs (str path ".2")))
+                "at least one rotation occurred"))))
       (reset-config!)
       (finally (cleanup! path)))))
 
@@ -158,38 +184,56 @@
   ;; starts against the same on-disk log file. There is no in-memory
   ;; ring buffer to lose — `tail` reads the file each call, so the new
   ;; process sees every entry the old one wrote. We simulate by
-  ;; rebinding `*log-file*` to the SAME path under a fresh dynamic
-  ;; scope (no ring buffer means there's nothing else to reset).
+  ;; reconfiguring `:seon.log/file` to the SAME path (no ring buffer
+  ;; means there's nothing else to reset).
   (let [path (tmp-file)]
     (try
       (reset-config!)
-      (binding [log/*log-file* path]
-        (log/info! {:seon.log/source ::pre  :seon.log/message "pre-restart"}))
-      ;; "Restart" — entirely new binding scope.
-      (binding [log/*log-file* path]
-        (log/info! {:seon.log/source ::post :seon.log/message "post-restart"})
-        (let [out (log/tail {:seon.log/n 10})]
-          (is (= 2 (count out)) "both pre- and post-restart entries visible")
-          (is (= "post-restart" (:seon.log/message (first out))))
-          (is (= "pre-restart"  (:seon.log/message (last out))))))
+      (with-log-file* path
+        (fn []
+          (log/info! {:seon.log/source ::pre :seon.log/message "pre-restart"})))
+      ;; "Restart" — entirely new configure! call.
+      (with-log-file* path
+        (fn []
+          (log/info! {:seon.log/source ::post :seon.log/message "post-restart"})
+          (let [out (log/tail {:seon.log/n 10})]
+            (is (= 2 (count out)) "both pre- and post-restart entries visible")
+            (is (= "post-restart" (:seon.log/message (first out))))
+            (is (= "pre-restart"  (:seon.log/message (last out)))))))
       (finally (cleanup! path)))))
 
 (deftest log-bang-never-throws
   (let [path (tmp-file)]
     (try
       (reset-config!)
-      (binding [log/*log-file* path]
-        ;; Even with weird data shapes, log! should soft-fail.
-        (is (some? (log/info! {:seon.log/source ::probe
-                               :seon.log/message "ok"
-                               :seon.log/data    {:nested {:circular "fine"}}}))))
+      (with-log-file* path
+        (fn []
+          ;; Even with weird data shapes, log! should soft-fail.
+          (is (some? (log/info! {:seon.log/source ::probe
+                                 :seon.log/message "ok"
+                                 :seon.log/data    {:nested {:circular "fine"}}})))))
       (finally (cleanup! path)))))
 
 (deftest tail-empty-when-no-file
   (let [path (tmp-file)]
     (try
       (reset-config!)
-      (binding [log/*log-file* path]
-        ;; Don't write anything — file doesn't exist yet.
-        (is (= [] (log/tail {:seon.log/n 50}))))
+      (with-log-file* path
+        (fn []
+          ;; Don't write anything — file doesn't exist yet.
+          (is (= [] (log/tail {:seon.log/n 50})))))
       (finally (cleanup! path)))))
+
+(deftest configure-bang-updates-file-key
+  ;; Direct contract test for the new behavior — :seon.log/file lives
+  ;; in !config, not in a dynvar. This is the regression guard for the
+  ;; Phase 1.5 -> Phase 2 migration.
+  (let [old  (:seon.log/file @log/!config)
+        path "logs/configure-bang-probe.log"]
+    (try
+      (log/configure! {:seon.log/file path})
+      (is (= path (:seon.log/file @log/!config))
+          ":seon.log/file is read from !config")
+      (is (contains? @log/!config :seon.log/file-cap)
+          "configure! preserves other keys")
+      (finally (log/configure! {:seon.log/file old})))))
