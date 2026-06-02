@@ -83,6 +83,30 @@
       :sqlite (str "data/sessions/" seg "/store.sqlite")
       :memory nil)))
 
+(defn- bare-name?
+  "True if `p` is a non-absolute path with no directory component — it
+   would create its konserve store directly in the process CWD (the repo
+   root). Stray bare-path stores (e.g. `:path \"Bh\"`) polluted the repo
+   root for weeks; we re-root them under `data/`."
+  [p]
+  (let [f (File. ^String p)]
+    (and (not (.isAbsolute f))
+         (nil? (.getParent f)))))
+
+(defn- harden-path
+  "Guard against the repo-root-pollution footgun. A bare path (no
+   directory component, not absolute) would plant the store in CWD;
+   re-root it under `data/sessions/` using the same layout as
+   `default-path`. Paths that already carry a directory (`tmp/...`,
+   `data/...`) or are absolute pass through unchanged."
+  [backend p]
+  (if (bare-name? p)
+    (case backend
+      :file   (str "data/sessions/" p "/store")
+      :sqlite (str "data/sessions/" p "/store.sqlite")
+      p)
+    p))
+
 (defn- name->uuid
   "Deterministic UUID derived from a db-name keyword. konserve uses a
    `:id` UUID to namespace stored data; deriving from the db-name means
@@ -114,11 +138,11 @@
         store (case backend
                 :memory {:backend :memory :id id}
                 :file   {:backend :file
-                         :path    (or path (default-path db-name :file))
+                         :path    (harden-path :file (or path (default-path db-name :file)))
                          :id      id}
                 :sqlite {:backend :jdbc
                          :dbtype  "sqlite"
-                         :dbname  (or path (default-path db-name :sqlite))
+                         :dbname  (harden-path :sqlite (or path (default-path db-name :sqlite)))
                          :table   "store"
                          :id      id})]
     (assoc base-cfg :store store :name nm)))

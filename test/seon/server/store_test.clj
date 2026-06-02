@@ -50,7 +50,18 @@
     (let [cfg (store/config-for {:seon.server.store/db-name :test/f
                                  :seon.server.store/backend :file
                                  :seon.server.store/path "tmp/test-override"})]
-      (is (= "tmp/test-override" (get-in cfg [:store :path]))))))
+      (is (= "tmp/test-override" (get-in cfg [:store :path])))))
+  (testing "bare :file path is re-rooted under data/sessions/ (no repo-root pollution)"
+    (let [cfg (store/config-for {:seon.server.store/db-name :test/f
+                                 :seon.server.store/backend :file
+                                 :seon.server.store/path "Bh"})]
+      (is (= "data/sessions/Bh/store" (get-in cfg [:store :path]))
+          "a bare path with no directory component must not land in CWD")))
+  (testing "absolute :file path passes through unchanged"
+    (let [cfg (store/config-for {:seon.server.store/db-name :test/f
+                                 :seon.server.store/backend :file
+                                 :seon.server.store/path "/tmp/abs-store"})]
+      (is (= "/tmp/abs-store" (get-in cfg [:store :path]))))))
 
 (deftest config-for-sqlite
   (testing ":sqlite cfg shape with default path"
@@ -65,7 +76,12 @@
     (let [cfg (store/config-for {:seon.server.store/db-name :test/s
                                  :seon.server.store/backend :sqlite
                                  :seon.server.store/path "tmp/test-store.sqlite"})]
-      (is (= "tmp/test-store.sqlite" (get-in cfg [:store :dbname]))))))
+      (is (= "tmp/test-store.sqlite" (get-in cfg [:store :dbname])))))
+  (testing "bare :sqlite path is re-rooted under data/sessions/"
+    (let [cfg (store/config-for {:seon.server.store/db-name :test/s
+                                 :seon.server.store/backend :sqlite
+                                 :seon.server.store/path "Bh"})]
+      (is (= "data/sessions/Bh/store.sqlite" (get-in cfg [:store :dbname]))))))
 
 (deftest namespaced-db-name-yields-name-segment
   (testing "namespace portion of db-name is stripped for path segment"
