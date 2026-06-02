@@ -43,38 +43,48 @@ logs/
 ├── pod-events.log.1     ← rotated, most recent
 ├── pod-events.log.2
 └── pod-events.log.3
+
 ```
 
 Sample line:
 
 ```edn
 {:seon.log/source :cljs.user/probe, :seon.log/message "test 1", :seon.log/at #inst "2026-05-26T08:31:15.956-00:00", :seon.log/level :error}
+
 ```
 
 ## REPL verification (all passing)
 
 1. **Basic tail with filters** (3 entries: error, info, error+agent):
+
    ```clojure
    {:total 3, :only-error 2, :only-a1 1, :newest "test 3"}
+
    ```
 
 2. **NDJSON-EDN file parses cleanly**:
+
    ```clojure
    {:line-count 3,
     :first-line-parses {:seon.log/source :cljs.user/probe,
                         :seon.log/message "test 1",
                         :seon.log/at #inst "2026-05-26T08:31:15.956-00:00",
                         :seon.log/level :error}}
+
    ```
 
 3. **Ring cap (write 1500 with cap=1000)**:
+
    ```clojure
    {:count 1000, :newest "burst 1499"}
+
    ```
 
 4. **Rotation (file-cap=512, keep=3, write 12 large entries)**:
+
    ```clojure
    ("rot.log" "rot.log.1" "rot.log.2" "rot.log.3")
+
    ```
 
 5. **Self-tests** (`seon.test.runner-test` + `seon.test.fixture-support-test` + `seon.test.async-fixture-test`):
@@ -147,6 +157,7 @@ User pushback: *"tail is not magic — it should literally read the log file."* 
 (binding [seon.log/*log-file* "/logs/pod-events.log"] ...)
 ;; or
 (seon.log/configure! {:seon.log/file "/logs/pod-events.log"})
+
 ```
 
 The sidecar pod will get a dedicated `/logs/` WASI preopen — separate
@@ -172,6 +183,7 @@ the two in one mount would force the same RW semantics on both.
 (fs/configure! {:seon.fs/allowed-roots [(dirname probe-path)]})
 (:seon.fs/content (fs/read-file {:seon.fs/path probe-path}))
 ; → "{:seon.log/source :seon.log-test/probe ...}\n..."   ← 3 NDJSON lines
+
 ```
 
 All 10 tests in `seon.log-test` pass (27 assertions, 0 failures). The `tail-survives-simulated-pod-restart` test exercises the key claim: with no in-memory ring, a fresh dynamic-binding scope (the V0 simulation of a process restart) sees every entry the prior scope wrote, because the file IS the buffer.
@@ -185,3 +197,35 @@ Tradeoff is intentional: making `tail` glue the rotated files together would re-
 ### Agent-readable verified
 
 `seon.fs/read-file` returns the exact bytes `log/error!` wrote. The fs allowlist enforcement still applies — the consumer overlay (or `bin/seon` boot) must `seon.fs/configure!` the log directory as an allowed root. In the WASI sidecar pod, the dedicated `/logs/` preopen handles this natively — mount as RO from the guest's perspective so agents can read but never overwrite the log file.
+
+## Revision — dynvar → !config (2026-05-27)
+
+The `^:dynamic *log-file*` Var from the previous revision was the wrong primitive. CLJS dynvars don't reliably survive `await` boundaries — the runtime is Promise-based and binding frames are not preserved across microtasks. Once anything in the log path awaited (the file-write side-effect doesn't, but any future async logger would), the binding would be lost and writes would land in the default `logs/pod-events.log` instead of the test's tmp path.
+
+Per `/Users/sean/src/seon/docs/prds/agent-runtime/atom-state-system-2026-05-26.md`: the log file path is **app-wide config, not per-agent runtime state**, so it does NOT belong in `seon.agents/*ctx*`. It belongs in the existing `seon.log/!config` atom alongside `:seon.log/file-cap` and `:seon.log/keep` — the same shape `seon.fs/!config` already uses.
+
+### Files touched
+
+| File | Change |
+|------|--------|
+| `src/seon/log.cljs` | Deleted `^:dynamic *log-file*`. Added `:seon.log/file "logs/pod-events.log"` to the `(defonce !config (atom ...))` initial value. `configure!` now `select-keys` includes `:seon.log/file` and no longer calls `(set! *log-file* file)`. `event-file-path` reads from `(:seon.log/file @!config)`. Path-config docstring section and `tail`/`error!` docstrings updated to point at `:seon.log/file` in `!config`. |
+| `test/seon/log_test.cljs` | Added a `with-log-file*` helper that snapshots the current `:seon.log/file`, calls `configure!` to swap it, runs the body, restores in `finally`. All 9 `(binding [log/*log-file* path] ...)` call sites converted to `(with-log-file* path (fn [] ...))`. Added a `configure-bang-updates-file-key` regression test that asserts `:seon.log/file` lives in `!config` (the contract guard against another dynvar regression). |
+
+### Test-helper choice: fn-passing, not a macro
+
+Considered three shapes:
+
+1. **Inline `let` + `try/finally` at each call site.** Rejected — 9 copies of the same 4-line snippet is exactly the duplication the spec asked us to avoid.
+2. **`with-log-file` macro.** Tempting, but CLJS macros need a separate `.clj` file (or `:require-macros`) and adding build plumbing for a 6-line test helper is overkill.
+3. **`with-log-file*` taking a thunk (chosen).** Same ergonomics as the macro form for the caller (`(with-log-file* path (fn [] ...))`), zero build complexity, works in pure `.cljs`. The `*` suffix matches the Clojure convention for the fn-version of a macro.
+
+The thunk version adds one extra line of nesting per test (the `(fn [] ...)` wrapper) but that's the only cost.
+
+### Verification
+
+- `grep -n '\*log-file\*' src/ test/` → only one match, in a code comment in `log_test.cljs` documenting the migration. Zero code references.
+- `grep -n ':seon.log/file' src/seon/log.cljs test/seon/log_test.cljs` → references in the atom default, `configure!`'s `select-keys`, `event-file-path`'s deref, the docstrings, and every test helper / regression test.
+- `clj-kondo --lint src/seon/log.cljs test/seon/log_test.cljs` → 0 errors. 3 warnings, all pre-existing (`next` and `keep` shadows in `configure!` / `rotate-if-needed!`; unused `testing` referral in the test ns) — none introduced by this revision.
+- Each test assertion re-read mentally: every one still validates the same thing it did under the dynvar (newest-first ordering, level/agent/source filters, NDJSON-EDN file shape, rotation trigger, "restart" simulation via re-configure, soft-fail on weird data, empty-file tail). The migration is mechanical — same observable behavior, different mutation primitive.
+
+Live verification awaits the pod restart (seon-cljs MCP currently disconnected); the static evidence above is sufficient to land the commit.
