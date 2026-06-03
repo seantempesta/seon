@@ -38,23 +38,30 @@ mkdir -p "$PROC_DIR" "$LOG_DIR"
 
 process_command() {
   case "$1" in
-    pod)        echo "node out/client/main.js" ;;
-    cljs-watch) echo "clj -M:cljs watch client" ;;
-    jvm)        echo "./bin/run" ;;
+    pod)         echo "node out/client/main.js" ;;
+    cljs-watch)  echo "clj -M:cljs watch client" ;;
+    jvm)         echo "./bin/run" ;;
+    # V2 platform Host — JVM datahike wire-server (single-DB today).
+    # Socket/path strings use "cluster" naming for the eventual multi-DB
+    # layout (P1); they're CLI args, not code identifiers. The --repl-port
+    # opens a loopback-only socket REPL on 127.0.0.1 for diagnostics, and
+    # the chosen port is written to tmp/seon-writer-repl-port.
+    wire-server) echo "clojure -M:writer --backend file --path data/clusters/default/store --req-sock tmp/seon-cluster-default-req.sock --pub-sock tmp/seon-cluster-default-pub.sock --repl-port 7891" ;;
     *) return 1 ;;
   esac
 }
 
 process_ready_hint() {
   case "$1" in
-    pod)        echo "  ready: tmp/seon-port exists (HTTP+SSE loopback bound)" ;;
-    cljs-watch) echo "  ready: 'Build completed' appears in logs/cljs-watch.log" ;;
-    jvm)        echo "  ready: logs/app.log shows 'Server started'" ;;
+    pod)         echo "  ready: tmp/seon-port exists (HTTP+SSE loopback bound)" ;;
+    cljs-watch)  echo "  ready: 'Build completed' appears in logs/cljs-watch.log" ;;
+    jvm)         echo "  ready: logs/app.log shows 'Server started'" ;;
+    wire-server) echo "  ready: '[writer] ready' appears in logs/wire-server.log; REPL on 127.0.0.1:7891 (tmp/seon-writer-repl-port)" ;;
     *) echo "" ;;
   esac
 }
 
-all_processes() { echo "pod cljs-watch jvm"; }
+all_processes() { echo "pod cljs-watch jvm wire-server"; }
 
 # ============================================================
 # State file paths.
@@ -329,6 +336,8 @@ Processes (registered in script):
   pod          node out/client/main.js
   cljs-watch   clj -M:cljs watch client
   jvm          ./bin/run
+  wire-server  clojure -M:writer ... (V2 platform Host: single-DB datahike
+               wire-server; loopback REPL on 127.0.0.1:7891)
 
 Examples:
   bin/seon start pod && bin/seon tail pod
