@@ -1,0 +1,85 @@
+(ns seon.server.reactive-test
+  "M1 engine tests. The harness `with-engine` is the same setup we use live in the
+  REPL: a fresh :memory conn + the engine wired as a ::reactive listener with a
+  capturing emit!. Tests hunt the four failure modes (over-match, under-match,
+  spurious emit, missed emit) via a brute-force `emit-iff-result-changed` oracle."
+  (:require [clojure.test :refer [deftest is testing]]
+            [datahike.api :as d]
+            [datahike.core :as dc]
+            [seon.server.reactive :as reactive]))
+
+(defn with-engine
+  "Fresh :memory conn + engine wired as a ::reactive listener with a capturing
+  emit. Returns {:conn :emitted (atom []) :state}. Identical to the REPL setup."
+  []
+  (let [cfg {:store {:backend :memory :id (java.util.UUID/randomUUID)}
+             :schema-flexibility :read :keep-history? false}
+        _ (d/create-database cfg)
+        conn (d/connect cfg)
+        emitted (atom [])
+        state (reactive/new-engine-state "test-db")]
+    (dc/listen! conn ::reactive
+                (fn [report]
+                  (reactive/on-tx! {:db-name "test-db" :conn conn :state state
+                                    :emit! (fn [ev] (swap! emitted conj ev))}
+                                   report)))
+    {:conn conn :emitted emitted :state state}))
+
+(def units-query
+  '[:find ?n ?p :where [?e :unit/name ?n] [?e :unit/pos ?p]])
+
+(deftest pattern-extraction
+  (is (= [['_ :unit/name '_] ['_ :unit/pos '_]]
+         (reactive/query->patterns units-query)))
+  (testing "literals in e/v positions are kept"
+    (is (= [['_ :unit/pos "river"]]
+           (reactive/query->patterns '[:find ?e :where [?e :unit/pos "river"]]))))
+  (testing "reads from a source string too (code-as-data)"
+    (is (= [['_ :unit/name '_]]
+           (reactive/query->patterns "[:find ?n :where [?e :unit/name ?n]]")))))
+
+(deftest two-gate-dispatch
+  (let [{:keys [conn emitted state]} (with-engine)]
+    (d/transact conn [{:db/id -1 :unit/name "A" :unit/pos "x"}
+                      {:db/id -2 :unit/name "B" :unit/pos "y"}])
+    (reactive/register-sub! state conn "s1" units-query)
+    (let [run (fn [tx] (reset! emitted []) (d/transact conn tx) (count @emitted))]
+      (testing "relevant + result changes → emit"
+        (is (= 1 (run [{:db/id 1 :unit/pos "z"}]))))
+      (testing "relevant attr but same value → no emit (change gate)"
+        (is (= 0 (run [{:db/id 1 :unit/pos "z"}]))))
+      (testing "irrelevant attr → no emit (cheap gate, no query run)"
+        (is (= 0 (run [{:db/id 1 :supply/ammo 9}]))))
+      (testing "new matching entity → emit"
+        (is (= 1 (run [{:db/id -9 :unit/name "C" :unit/pos "w"}])))))))
+
+(deftest emit-iff-result-changed
+  ;; THE property (falsification): for ANY tx, the engine emits iff the query
+  ;; result actually moved. Oracle = brute-force (d/q before) vs (d/q after).
+  (let [{:keys [conn emitted state]} (with-engine)]
+    (d/transact conn (for [i (range 5)]
+                       {:db/id (- (inc i)) :unit/name (str "U" i) :unit/pos (str "p" i)}))
+    (reactive/register-sub! state conn "s" units-query)
+    (doseq [tx [[{:db/id 1 :unit/pos "moved"}]                       ; change
+                [{:db/id 1 :unit/pos "moved"}]                       ; same value
+                [{:db/id 1 :supply/ammo 3}]                          ; irrelevant
+                [{:db/id -99 :unit/name "New" :unit/pos "q"}]        ; add
+                [[:db/retractEntity 2]]                              ; retract a unit
+                [{:db/id 3 :morale 7}]]]                             ; irrelevant
+      (let [before (d/q units-query (d/db conn))]
+        (reset! emitted [])
+        (d/transact conn tx)
+        (let [after (d/q units-query (d/db conn))
+              should-emit? (not= before after)]
+          (is (= should-emit? (boolean (seq @emitted)))
+              (str "tx=" (pr-str tx) " before=" before " after=" after)))))))
+
+(deftest per-conn-isolation
+  (let [a (with-engine) b (with-engine)]
+    (d/transact (:conn a) [{:db/id -1 :unit/name "A" :unit/pos "x"}])
+    (reactive/register-sub! (:state a) (:conn a) "sa" units-query)
+    (reset! (:emitted a) [])
+    (reset! (:emitted b) [])
+    (d/transact (:conn a) [{:db/id 1 :unit/pos "y"}])
+    (is (= 1 (count @(:emitted a))) "engine A fires")
+    (is (= 0 (count @(:emitted b))) "engine B untouched — per-conn isolation")))
