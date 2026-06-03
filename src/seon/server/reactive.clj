@@ -257,3 +257,58 @@
                             changed)}
                request-id (assoc :seon.server.reactive/request-id request-id))))
     changed))
+
+;; ---------------------------------------------------------------------------
+;; M3 wire handlers (the data boundary, the handshake with platform).
+;; Platform's thin `handle-op` wrappers resolve the conn (registry) + the per-db
+;; engine `state`, Transit-decode the request, and delegate to these. The
+;; request/response are REGISTERED schemas; the query rides as a SOURCE STRING.
+;; (state, conn) are runtime context — positional.
+;;
+;;   CONTRACT (fixed signatures platform binds to):
+;;     (register-subscription   state conn request) -> response
+;;     (unregister-subscription state conn request) -> response
+;; ---------------------------------------------------------------------------
+
+(schema/register! :seon.subscription/query :string)        ; source string (code-as-data)
+(schema/register! :seon.subscription/active? :boolean)
+
+(schema/register! :seon.server.reactive/register-subscription-request
+                  [:map
+                   [:seon.server.reactive/sub-id :seon.subscription/id]
+                   [:seon.server.reactive/query  :seon.subscription/query]])  ; source string
+(schema/register! :seon.server.reactive/register-subscription-response
+                  [:map
+                   [:seon.subscription/id        :seon.subscription/id]
+                   [:seon.server.reactive/basis-t :seon.server.reactive/basis-t]
+                   [:seon.server.reactive/rows   :seon.server.reactive/rows]])
+
+(defn register-subscription
+  "M3 wire handler. Persists the subscription datom + registers it in the
+  cache+index (after the tx returns, so the registration tx doesn't self-route),
+  and returns the initial rows. The request's `query` is a SOURCE STRING. Pure
+  over a resolved conn + the per-db engine `state`."
+  [state conn {:seon.server.reactive/keys [sub-id query]}]
+  (let [entry (register-subscription! state conn sub-id (edn/read-string query))]
+    {:seon.subscription/id         sub-id
+     :seon.server.reactive/basis-t (:max-tx (d/db conn))
+     :seon.server.reactive/rows    (vec (:last-result entry))}))
+
+(schema/register! :seon.server.reactive/unregister-subscription-request
+                  [:map [:seon.server.reactive/sub-id :seon.subscription/id]])
+(schema/register! :seon.server.reactive/unregister-subscription-response
+                  [:map
+                   [:seon.subscription/id      :seon.subscription/id]
+                   [:seon.subscription/active? :seon.subscription/active?]])
+
+(defn unregister-subscription
+  "M3 wire handler. Retracts :active? on the subscription datom (found by id — so
+  it works under :schema-flexibility :read and :write) and drops it from the
+  cache+index. Pure over a resolved conn + the per-db engine `state`."
+  [state conn {:seon.server.reactive/keys [sub-id]}]
+  (when-let [eid (ffirst (d/q '[:find ?e :in $ ?id
+                                :where [?e :seon.subscription/id ?id]]
+                              (d/db conn) sub-id))]
+    (d/transact conn [[:db/retract eid :seon.subscription/active? true]]))
+  (unregister-sub! state sub-id)
+  {:seon.subscription/id sub-id :seon.subscription/active? false})

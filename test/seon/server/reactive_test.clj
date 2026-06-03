@@ -146,3 +146,48 @@
         (is (= #{:seon.subscription/id :seon.server.reactive/rows}
                (set (keys (first (:seon.server.reactive/changed ev))))))
         (is (vector? (:seon.server.reactive/rows (first (:seon.server.reactive/changed ev)))))))))
+
+(deftest request-id-rides-the-event
+  ;; R1 reactive-side: the engine surfaces the tx's request-id on the
+  ;; changed-summaries event so a guest can dedup its own writeback (review issue 1).
+  (let [{:keys [conn emitted state]} (with-engine)]
+    (d/transact conn [{:db/id -1 :unit/name "A" :unit/pos "x"}])
+    (reactive/register-sub! state conn "s1" units-query)
+    (reset! emitted [])
+    (d/transact conn {:tx-data [{:db/id 1 :unit/pos "y"}]
+                      :tx-meta {:seon.db/request-id "r-123"}})
+    (is (= "r-123" (:seon.server.reactive/request-id (first @emitted)))
+        "on-tx! surfaces the tx's :seon.db/request-id on the event")))
+
+(deftest register-subscription-handler
+  (let [{:keys [conn emitted state]} (with-engine)]
+    (d/transact conn [{:db/id -1 :unit/name "A" :unit/pos "x"}])
+    (reset! emitted [])
+    (let [req  {:seon.server.reactive/sub-id "s1"
+                :seon.server.reactive/query (pr-str units-query)}
+          resp (reactive/register-subscription state conn req)]
+      (testing "request + response validate against the registered schemas"
+        (is (m/validate :seon.server.reactive/register-subscription-request req))
+        (is (m/validate :seon.server.reactive/register-subscription-response resp)))
+      (testing "response carries the id + initial rows (as a vector)"
+        (is (= "s1" (:seon.subscription/id resp)))
+        (is (vector? (:seon.server.reactive/rows resp))))
+      (testing "persisted + live + the registration tx did not self-route"
+        (is (= 0 (count @emitted)))
+        (d/transact conn [{:db/id 1 :unit/pos "y"}])
+        (is (= 1 (count @emitted)))))))
+
+(deftest unregister-subscription-handler
+  (let [{:keys [conn emitted state]} (with-engine)]
+    (d/transact conn [{:db/id -1 :unit/name "A" :unit/pos "x"}])
+    (reactive/register-subscription state conn
+                                    {:seon.server.reactive/sub-id "s1"
+                                     :seon.server.reactive/query (pr-str units-query)})
+    (let [resp (reactive/unregister-subscription state conn
+                                                 {:seon.server.reactive/sub-id "s1"})]
+      (is (m/validate :seon.server.reactive/unregister-subscription-response resp))
+      (is (false? (:seon.subscription/active? resp)))
+      (testing "no longer wakes after unregister"
+        (reset! emitted [])
+        (d/transact conn [{:db/id 1 :unit/pos "y"}])
+        (is (= 0 (count @emitted)))))))
