@@ -19,6 +19,7 @@
             [seon.server.codec :as codec]
             [seon.server.transit :as transit]
             [seon.server.store :as store]
+            [seon.server.registry :as registry]
             [seon.server.broadcast :as bcast])
   (:import [java.net StandardProtocolFamily UnixDomainSocketAddress]
            [java.nio.channels ServerSocketChannel SocketChannel Channels])
@@ -64,10 +65,33 @@
 
 ;; ---------- DB lifecycle ----------
 
-(defn- ensure-db! [cfg]
+(declare raw-broadcast-listener-fn)
+
+(defn- seed-base-schema!
+  "Install wire-server base-schema attrs that every conn needs regardless of
+   the agent's domain schema. Currently just `:seon.db/request-id` — required
+   so `:schema-flexibility :write` accepts request-id in tx-meta (the channel
+   that carries it to the ::raw-broadcast listener thread). Idempotent: a
+   re-seed transacts the same :db/ident, a no-op datahike upsert."
+  [conn]
+  (d/transact conn [{:db/ident       :seon.db/request-id
+                     :db/valueType   :db.type/string
+                     :db/cardinality :db.cardinality/one}]))
+
+(defn- ensure-db!
+  "Open (creating if needed) the conn for `cfg`, seed the wire base-schema,
+   and register the per-conn `::raw-broadcast` `d/listen!` that emits the raw
+   db-name-tagged tx event on every commit. db-name is derived from cfg's
+   `:name` (the single-DB / test path); the multi-DB registry path installs
+   the same listener via the on-ensure-db hook with its real db-name."
+  [cfg]
   (when-not (d/database-exists? cfg)
     (d/create-database cfg))
-  (d/connect cfg))
+  (let [conn    (d/connect cfg)
+        db-name (or (:name cfg) "default")]
+    (seed-base-schema! conn)
+    (d/listen conn ::raw-broadcast (raw-broadcast-listener-fn db-name))
+    conn))
 
 ;; ---------- Response helpers ----------
 
@@ -197,6 +221,25 @@
 (defmethod handle-op "ping" [_ _]
   (ok {"pong" true}))
 
+(defmethod handle-op "ensure-db" [_conn req]
+  ;; Materialize (or look up) a cluster's DB. Idempotent — a re-ensure of the
+  ;; same db-name returns the existing conn's current basis-t without
+  ;; reseeding. db-name is a keyword on the wire; default backend :memory for
+  ;; testability, override via \"backend\". On open, registry's on-ensure-db
+  ;; hook installs this conn's ::raw-broadcast listener (+ any ::reactive one).
+  (let [db-name (some-> (get req "db-name") keyword)
+        backend (some-> (get req "backend") keyword)
+        path    (get req "path")]
+    (if-not db-name
+      (err "protocol" "ensure-db requires \"db-name\"")
+      (let [entry (registry/ensure-db!
+                   (cond-> {:seon.server.registry/db-name db-name
+                            :seon.server.registry/backend (or backend :memory)}
+                     path (assoc :seon.server.registry/path path)))
+            conn  (:seon.server.registry/conn entry)]
+        (ok {"db-name" (subs (str db-name) 1)
+             "basis-t" (basis-t-of (d/db conn))})))))
+
 (defmethod handle-op "q" [conn req]
   (let [query   (read-T (get req "query"))
         args    (mapv read-T (get req "args" []))
@@ -227,17 +270,59 @@
      :tx-meta    tx-meta
      :request-id request-id}))
 
-(defn- ok-event-from-report [{:keys [wire-data added retracted bt bt-before
-                                     tx-meta request-id]}]
+(defn- ok-event-from-report
+  "Build the raw `tx` broadcast event. `db-name` is the committing conn's real
+   db-name string (no more hardcoded \"default\"). `request-id` comes from the
+   commit's tx-meta (`:seon.db/request-id`) so it survives the async hop to the
+   `::raw-broadcast` listener thread — the listener, not the request handler,
+   emits the event now (see `raw-broadcast-listener-fn`)."
+  [db-name {:keys [wire-data added retracted bt bt-before tx-meta request-id]}]
   (cond-> {"event" "tx"
            "basis-t" bt
            "basis-t-before" bt-before
-           "db-name" "default"
+           "db-name" db-name
            "tx-data" wire-data
            "datoms-added" added
            "datoms-retracted" retracted
            "tx-meta" (T tx-meta)}
     request-id (assoc "request-id" request-id)))
+
+;; ---------- ::raw-broadcast listener (the P1 hook) ----------
+;;
+;; Broadcast is no longer imperative at the transact call sites. Each conn
+;; carries a `d/listen!`-registered `::raw-broadcast` callback that fires
+;; synchronously on every commit and emits the db-name-tagged `tx` event. This
+;; is the seam the reactive engine plugs a SECOND listener (`::reactive`) into
+;; — distinct keys, both fire off the same TxReport. request-id rides tx-meta
+;; (`:seon.db/request-id`) because the listener runs on the writer thread.
+
+(defn raw-broadcast-listener-fn
+  "Return a `d/listen!` callback `(fn [tx-report])` that emits the raw
+   db-name-tagged `tx` event for `db-name` via `bcast/broadcast!`. READ-ONLY;
+   never transacts. Exceptions are swallowed so a broadcast failure can't wedge
+   the writer."
+  [db-name]
+  (let [db-name-str (if (keyword? db-name) (subs (str db-name) 1) (str db-name))]
+    (fn [report]
+      (try
+        (let [request-id (:seon.db/request-id (:tx-meta report))
+              r          (assoc (tx-report->ok-map report nil) :request-id request-id)]
+          (bcast/broadcast! (ok-event-from-report db-name-str r)))
+        (catch Throwable _)))))
+
+;; Register the wire-server's ::raw-broadcast listener as an on-ensure-db hook,
+;; so EVERY conn the registry opens gets broadcast wired — without the registry
+;; requiring this ns. The reactive engine registers its own ::reactive hook the
+;; same way. Registered once at ns load; idempotent guard prevents dupes on
+;; reload (the hook vector would otherwise accumulate copies).
+(defonce ^:private raw-broadcast-hook-installed?
+  (do (registry/register-on-ensure-db-hook!
+       (fn [conn db-name]
+         (try
+           (seed-base-schema! conn)
+           (d/listen conn ::raw-broadcast (raw-broadcast-listener-fn db-name))
+           (catch Throwable _))))
+      true))
 
 (defn- ok-response-from-report [{:keys [wire-data added retracted bt bt-before
                                         tempids tx-meta request-id]}]
@@ -271,12 +356,20 @@
         request-id (let [r (get req "request-id")] (when (and r (not= "" r)) r))
         schema     (schema-of conn)
         tx*        (coerce-tx-data-for-schema schema tx)
-        report     (if tx-meta-in
-                     (d/transact conn {:tx-data tx* :tx-meta tx-meta-in})
+        ;; Carry request-id through tx-meta so the per-conn ::raw-broadcast
+        ;; listener emits it on the pub event (the listener fires on the
+        ;; writer thread, after this request thread). ensure-db! seeds the
+        ;; :seon.db/request-id attr so :schema-flexibility :write accepts it.
+        tx-meta*   (cond-> (or tx-meta-in {})
+                     request-id (assoc :seon.db/request-id request-id))
+        report     (if (seq tx-meta*)
+                     (d/transact conn {:tx-data tx* :tx-meta tx-meta*})
                      (d/transact conn tx*))
-        r          (tx-report->ok-map report request-id)
-        event      (ok-event-from-report r)]
-    (try (bcast/broadcast! event) (catch Throwable _))
+        r          (tx-report->ok-map report request-id)]
+    ;; Broadcast is NOT imperative here anymore: the per-conn
+    ;; `::raw-broadcast` `d/listen!` (installed by the on-ensure-db hook /
+    ;; start-req-server!) fires synchronously on commit and emits the
+    ;; db-name-tagged tx event. See `raw-broadcast-listener-fn`.
     (ok (ok-response-from-report r))))
 
 (defn- report->clj
@@ -306,14 +399,19 @@
         schema       (schema-of conn)
         per-tx-report
         (fn [idx tx tx-meta-in request-id]
-          (let [tx*    (coerce-tx-data-for-schema schema tx)
-                report (if tx-meta-in
-                         (d/transact conn {:tx-data tx* :tx-meta tx-meta-in})
-                         (d/transact conn tx*))
-                r      (assoc (tx-report->ok-map report request-id)
-                              :tx-data-raw (:tx-data report))
-                event  (ok-event-from-report r)]
-            (try (bcast/broadcast! event) (catch Throwable _))
+          (let [tx*      (coerce-tx-data-for-schema schema tx)
+                ;; Carry request-id through tx-meta so the per-conn
+                ;; ::raw-broadcast listener emits it on the pub event (it
+                ;; fires on the writer thread, after the request thread).
+                tx-meta* (cond-> (or tx-meta-in {})
+                           request-id (assoc :seon.db/request-id request-id))
+                report   (if (seq tx-meta*)
+                           (d/transact conn {:tx-data tx* :tx-meta tx-meta*})
+                           (d/transact conn tx*))
+                r        (assoc (tx-report->ok-map report request-id)
+                                :tx-data-raw (:tx-data report))]
+            ;; Broadcast is NOT imperative here — the ::raw-broadcast listener
+            ;; fires per commit. Response-side request-id flows via r.
             {:wire (assoc (ok-response-from-report r) "index" idx)
              :clj  (assoc (report->clj r) :index idx)}))]
     (loop [idx 0 wire-reports (transient []) clj-reports (transient [])]
@@ -440,9 +538,35 @@
     (swap! filtered-dbs dissoc handle)
     (ok {"released" true "handle" handle})))
 
+(defn- resolve-conn-for-req
+  "Resolve the target conn for a request from the registry by `agent-id` /
+   `db-name`. Returns `{:conn <c>}` on success, `{:conn ambient}` when neither
+   key is present (single-DB back-compat), or `{:error <env>}` for an unknown
+   agent-id/db-name (typed `not-found`, matching the existing error envelope)."
+  [ambient-conn req]
+  (let [agent-id (let [a (get req "agent-id")] (when (and a (not= "" a)) a))
+        db-name  (some-> (get req "db-name") keyword)
+        res      (registry/resolve-conn
+                  (cond-> {}
+                    agent-id (assoc :seon.agent/id agent-id)
+                    db-name  (assoc :seon.server.registry/db-name db-name)))]
+    (cond
+      (:seon.server.registry/conn res) {:conn (:seon.server.registry/conn res)}
+      (:seon.server.registry/error-kind res)
+      {:error (err (:seon.server.registry/error-kind res)
+                   (:seon.server.registry/error res))}
+      ;; ::unresolved? — neither key present → ambient single-DB conn.
+      :else {:conn ambient-conn})))
+
 (defn- handle-req [conn req]
   (try
-    (handle-op conn req)
+    ;; `ensure-db` is a cluster-lifecycle op with no pre-existing target conn —
+    ;; it resolves/creates its own conn from the registry. Everything else
+    ;; routes to a conn resolved by agent-id/db-name (or the ambient conn).
+    (if (= "ensure-db" (get req "op"))
+      (handle-op conn req)
+      (let [{:keys [conn error]} (resolve-conn-for-req conn req)]
+        (or error (handle-op conn req))))
     (catch clojure.lang.ExceptionInfo e
       (err "datahike" (str (.getMessage e) " " (pr-str (ex-data e)))))
     (catch Throwable t

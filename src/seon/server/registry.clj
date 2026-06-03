@@ -1,7 +1,6 @@
 (ns seon.server.registry
-  "Path B session RUNTIME registry — atom of `{db-name -> entry}` where
-   each entry is `{::conn <datahike-conn> ::backend kw ::path str-or-nil
-   ::pub-chan core.async-chan-or-nil}`.
+  "Path B cluster RUNTIME registry — atom of `{db-name -> entry}` where
+   each entry is `{::conn <datahike-conn> ::backend kw ::path str-or-nil}`.
 
    Direct `datahike.api/connect`. No flow. The wire-server looks up
    conns here on every request. Multiple sessions, one process, all
@@ -30,11 +29,18 @@
 
    See `docs/prds/agent-runtime/integration-architecture-2026-05-26.md`
    §1.5 (Path B) and §5 (session registration). Lifecycle is the
-   wire-server's per-session connection registry, one conn to N.
+   wire-server's per-cluster connection registry, one conn to N.
 
-   The `::pub-chan` slot is wired for Wave 4 (broadcast subscription)
-   but populated as `nil` in Wave 2. Tx-event broadcast is not this
-   ns's job."
+   ## On-ensure-db extension point (the reactive seam)
+
+   `ensure-db!` invokes a per-conn extension point — an atom of
+   `(fn [conn db-name])` hooks registered via `register-on-ensure-db-hook!`
+   — after opening (and BEFORE handing back) a conn. The wire-server
+   registers its own `::raw-broadcast` `d/listen!` here; the reactive
+   engine registers its `::reactive` `d/listen!` here too, WITHOUT this ns
+   (or `wire.clj`) requiring `seon.server.reactive`. See
+   `docs/prds/agent-runtime/clusters-and-multi-db-wiring-2026-06-03.md` §5
+   and the platform-review hook-mechanism section."
   (:require [clojure.set :as set]
             [datahike.api :as d]
             [seon.schema :as schema]
@@ -50,17 +56,11 @@
 ;; type). We don't constrain its shape; the registry hands it out as-is.
 (schema/register! ::conn [:fn some?])
 
-;; Optional core.async pub-chan reserved for Wave 4 broadcast wiring.
-;; Always nil in Wave 2; Wave 4 will narrow this to a real channel
-;; type check via `instance?` once the broadcast wiring lands.
-(schema/register! ::pub-chan [:fn nil?])
-
 (schema/register! ::entry
                   [:map
                    [::conn ::conn]
                    [::backend ::backend]
-                   [::path {:optional true} ::path]
-                   [::pub-chan {:optional true} ::pub-chan]])
+                   [::path {:optional true} ::path]])
 
 (schema/register! ::ensure-db!-request
                   [:map
@@ -93,30 +93,31 @@
 (schema/register! ::restore-registry-request [:map [::snapshot :map]])
 (schema/register! ::restore-registry-response [:map [::restored? :boolean]])
 
-;; Agent registry — maps `:seon.agent/<id>` (string) to a `db-name`.
-;; A given agent joins exactly one session; a session has N agents.
-;; Used by `seon.session/with-agent` to route MCP eval requests scoped
-;; by agent-id to the correct datahike conn.
-(schema/register! ::agent-id
-                  [:string {:min 1
-                            :description "Opaque agent id (V2 uses 14-char hex)."}])
+;; Shared agent-id shape. Platform registers it ONCE here (during the
+;; session→registry rename); the reactive engine and any other consumer
+;; REFERENCE `:seon.agent/id` rather than re-registering. It is the
+;; agent entity's identity attr and the registry's `{agent-id → db-name}`
+;; key. A given agent joins exactly one cluster; a cluster has N agents.
+;; See clusters-and-multi-db-wiring §"What to build" item 1 +
+;; reactive-interface-platform-review coordination item 1.
+(schema/register! :seon.agent/id [:string {:min 1 :seon.db/identity true}])
 
 (schema/register! ::register-agent!-request
                   [:map
-                   [::agent-id ::agent-id]
+                   [:seon.agent/id :seon.agent/id]
                    [::db-name ::db-name]])
 
 (schema/register! ::register-agent!-response
                   [:map [::registered? :boolean]])
 
 (schema/register! ::unregister-agent!-request
-                  [:map [::agent-id ::agent-id]])
+                  [:map [:seon.agent/id :seon.agent/id]])
 
 (schema/register! ::unregister-agent!-response
                   [:map [::unregistered? :boolean]])
 
 (schema/register! ::resolve-agent-request
-                  [:map [::agent-id ::agent-id]])
+                  [:map [:seon.agent/id :seon.agent/id]])
 
 (schema/register! ::resolve-agent-response
                   [:map
@@ -126,8 +127,30 @@
 (schema/register! ::list-agents-request [:map])
 (schema/register! ::list-agents-response
                   [:map [::agents [:vector [:map
-                                            [::agent-id ::agent-id]
+                                            [:seon.agent/id :seon.agent/id]
                                             [::db-name ::db-name]]]]])
+
+;; --- Conn resolution (wire-server per-request routing) ---------------------
+;;
+;; The wire envelope optionally carries `agent-id` and/or `db-name`. The
+;; request-server resolves the conn here BEFORE calling handle-op. Resolution
+;; order: agent-id (→ db-name → conn), then explicit db-name (→ conn). On
+;; success → {::conn ::db-name}; on failure (unknown agent-id/db-name) →
+;; {::error-kind "not-found" ::error <msg>}; on neither key present →
+;; {::unresolved? true} so the caller can fall back to its ambient conn
+;; (single-DB back-compat).
+(schema/register! ::resolve-conn-request
+                  [:map
+                   [:seon.agent/id {:optional true} :seon.agent/id]
+                   [::db-name {:optional true} ::db-name]])
+
+(schema/register! ::resolve-conn-response
+                  [:map
+                   [::conn {:optional true} ::conn]
+                   [::db-name {:optional true} ::db-name]
+                   [::unresolved? {:optional true} :boolean]
+                   [::error-kind {:optional true} :string]
+                   [::error {:optional true} :string]])
 
 ;;; --- Registry --------------------------------------------------------------
 
@@ -169,9 +192,40 @@
       (d/create-database cfg))
     (let [conn (d/connect cfg)]
       (cond-> {::conn conn
-               ::backend backend
-               ::pub-chan nil}
+               ::backend backend}
         store-path (assoc ::path store-path)))))
+
+;;; --- On-ensure-db extension point ------------------------------------------
+;;;
+;;; A vector of `(fn [conn db-name])` hooks invoked by `ensure-db!` exactly
+;;; once per newly-opened conn, after `d/connect` and before the entry is
+;;; handed back. The wire-server registers its `::raw-broadcast` `d/listen!`
+;;; here; the reactive engine registers its `::reactive` `d/listen!` here too.
+;;; This is the seam that lets `wire.clj` install broadcast without requiring
+;;; `seon.server.reactive`, and lets the reactive track plug in WITHOUT
+;;; `wire.clj` (or this ns) requiring it. Hooks fire on the create-winner's
+;;; thread, under the `!registry` lock — idempotent ensures fire hooks ONCE.
+
+(defonce ^:private !on-ensure-db-hooks (atom []))
+
+(defn register-on-ensure-db-hook!
+  "Register a `(fn [conn db-name])` invoked once per newly-opened conn by
+   `ensure-db!`. Returns the new hook count. Hooks run in registration order.
+   A hook typically calls `(d/listen! conn <key> <callback>)` under its own
+   distinct key (`::raw-broadcast`, `::reactive`, ...) — datahike fires every
+   distinct-keyed listener. Hook exceptions are swallowed so one bad hook can't
+   wedge `ensure-db!` for the rest."
+  [f]
+  (count (swap! !on-ensure-db-hooks conj f)))
+
+(defn ^:no-doc reset-on-ensure-db-hooks!
+  "Test seam: drop all on-ensure-db hooks."
+  []
+  (reset! !on-ensure-db-hooks []))
+
+(defn- run-on-ensure-db-hooks! [conn db-name]
+  (doseq [f @!on-ensure-db-hooks]
+    (try (f conn db-name) (catch Throwable _))))
 
 ;;; --- Public API ------------------------------------------------------------
 
@@ -201,6 +255,12 @@
         (or (get @!registry db-name)
             (let [entry (create-entry! db-name backend path)]
               (swap! !registry assoc db-name entry)
+              ;; Fire the extension point ONCE for this newly-opened conn —
+              ;; inside the lock + create branch, so an idempotent re-ensure
+              ;; (fast path above) never re-runs hooks. This is where the
+              ;; wire-server's ::raw-broadcast and the reactive engine's
+              ;; ::reactive listeners get installed.
+              (run-on-ensure-db-hooks! (::conn entry) db-name)
               entry)))))
 
 (defn remove-db!
@@ -247,16 +307,16 @@
 ;;; `seon.session/with-agent` to bind the right conn for MCP eval routing.
 
 (defn register-agent!
-  "Bind `::agent-id` to `::db-name`. The db-name must already be
+  "Bind `:seon.agent/id` to `::db-name`. The db-name must already be
    registered via `ensure-db!`; otherwise this throws. Idempotent —
    re-registering the same agent-id to the same db-name is a no-op."
   {:malli/schema [:=> [:cat ::register-agent!-request]
                   ::register-agent!-response]}
-  [{::keys [agent-id db-name]}]
+  [{:seon.agent/keys [id] ::keys [db-name]}]
   (when-not (contains? @!registry db-name)
     (throw (ex-info "Cannot register agent: db-name not in registry"
-                    {::agent-id agent-id ::db-name db-name})))
-  (swap! !agents assoc agent-id db-name)
+                    {:seon.agent/id id ::db-name db-name})))
+  (swap! !agents assoc id db-name)
   {::registered? true})
 
 (defn unregister-agent!
@@ -264,19 +324,19 @@
    `{::unregistered? false}` if the agent was not registered."
   {:malli/schema [:=> [:cat ::unregister-agent!-request]
                   ::unregister-agent!-response]}
-  [{::keys [agent-id]}]
-  (if (contains? @!agents agent-id)
-    (do (swap! !agents dissoc agent-id)
+  [{:seon.agent/keys [id]}]
+  (if (contains? @!agents id)
+    (do (swap! !agents dissoc id)
         {::unregistered? true})
     {::unregistered? false}))
 
 (defn resolve-agent
   "Return `{::db-name <name> ::conn <conn>}` for the given agent-id,
-   or `{}` if unknown / the underlying session has been removed."
+   or `{}` if unknown / the underlying cluster has been removed."
   {:malli/schema [:=> [:cat ::resolve-agent-request]
                   ::resolve-agent-response]}
-  [{::keys [agent-id]}]
-  (if-let [db-name (get @!agents agent-id)]
+  [{:seon.agent/keys [id]}]
+  (if-let [db-name (get @!agents id)]
     (if-let [conn (some-> @!registry (get db-name) ::conn)]
       {::db-name db-name ::conn conn}
       {::db-name db-name})
@@ -287,9 +347,42 @@
    unspecified."
   {:malli/schema [:=> [:cat ::list-agents-request] ::list-agents-response]}
   [{}]
-  {::agents (mapv (fn [[agent-id db-name]]
-                    {::agent-id agent-id ::db-name db-name})
+  {::agents (mapv (fn [[id db-name]]
+                    {:seon.agent/id id ::db-name db-name})
                   @!agents)})
+
+(defn resolve-conn
+  "Resolve a wire request's target conn from the registry. Resolution order:
+
+   1. `:seon.agent/id` present → `{agent-id → db-name → conn}`. Unknown
+      agent-id (or its cluster removed) → `{::error-kind \"not-found\" ...}`.
+   2. else `::db-name` present → `{db-name → conn}`. Unknown db-name →
+      `{::error-kind \"not-found\" ...}`.
+   3. else neither key → `{::unresolved? true}` — the caller falls back to
+      its single ambient conn (single-DB back-compat / degenerate cluster).
+
+   Success → `{::conn <conn> ::db-name <name>}`."
+  {:malli/schema [:=> [:cat ::resolve-conn-request] ::resolve-conn-response]}
+  [{:seon.agent/keys [id] ::keys [db-name]}]
+  (cond
+    id
+    (if-let [resolved-name (get @!agents id)]
+      (if-let [conn (some-> @!registry (get resolved-name) ::conn)]
+        {::conn conn ::db-name resolved-name}
+        {::error-kind "not-found"
+         ::error (str "agent " id " maps to db-name " resolved-name
+                      " which is not registered")})
+      {::error-kind "not-found"
+       ::error (str "unknown agent-id: " id)})
+
+    db-name
+    (if-let [conn (some-> @!registry (get db-name) ::conn)]
+      {::conn conn ::db-name db-name}
+      {::error-kind "not-found"
+       ::error (str "unknown db-name: " db-name)})
+
+    :else
+    {::unresolved? true}))
 
 ;;; --- Test seam -------------------------------------------------------------
 
