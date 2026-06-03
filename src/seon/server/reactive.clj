@@ -17,7 +17,37 @@
   M1 scope: routing + change-detection + the index. The full `changed-summaries`
   entry (agent-id, rows, render) lands at M3/M4; basis-t catch-up at M4."
   (:require [clojure.edn :as edn]
-            [datahike.api :as d]))
+            [datahike.api :as d]
+            [seon.schema :as schema]))
+
+;; ---------------------------------------------------------------------------
+;; data-boundary schemas. Registered under :seon.server.reactive/* (this code
+;; ns) — NOT bare :seon.reactive/* (that belongs to seon.web.reactive). The
+;; durable subscription id is :seon.subscription/*. The full subscription entity
+;; + :seon.agent/id + render-fn refs land at M3 (need registry's :seon.agent/id).
+;; The engine emits the changed-summaries event in this exact registered shape —
+;; no translation layer.
+;; ---------------------------------------------------------------------------
+
+(schema/register! :seon.subscription/id [:string {:min 1 :seon.db/identity true}])
+(schema/register! :seon.server.reactive/db-name :string)
+(schema/register! :seon.server.reactive/basis-t [:int {:min 0}])
+(schema/register! :seon.server.reactive/request-id :string)
+(schema/register! :seon.server.reactive/scalar
+                  [:or :string :int :boolean :keyword :inst :uuid :double])
+(schema/register! :seon.server.reactive/rows
+                  [:vector [:vector :seon.server.reactive/scalar]])  ; result tuples (set → vec)
+(schema/register! :seon.server.reactive/changed-entry
+                  [:map
+                   [:seon.subscription/id      :seon.subscription/id]
+                   [:seon.server.reactive/rows :seon.server.reactive/rows]])
+                  ;; + :seon.agent/id + :seon.render/* at M3
+(schema/register! :seon.server.reactive/changed-summaries-event
+                  [:map
+                   [:seon.server.reactive/db-name    :seon.server.reactive/db-name]
+                   [:seon.server.reactive/basis-t    :seon.server.reactive/basis-t]
+                   [:seon.server.reactive/request-id {:optional true} :seon.server.reactive/request-id]
+                   [:seon.server.reactive/changed    [:vector :seon.server.reactive/changed-entry]]])
 
 ;; ---------------------------------------------------------------------------
 ;; e/a/v datom matcher  (ported from posh.lib.datom-matcher — no dependency)
@@ -53,10 +83,12 @@
 
 (defn- clause->pattern [clause]
   (when (and (vector? clause)
-             (<= 2 (count clause) 3)
+             (>= (count clause) 2)
              (not (coll? (first clause))))         ; skip [(pred ...)] / fn clauses
-    (let [[e a v] clause]
-      [(pos->pat e) (pos->pat a) (pos->pat (when (= 3 (count clause)) v))])))
+    (let [[e a v] clause]                           ; e/a/v are positions 0-2; 4-/5-elem
+      [(pos->pat e)                                 ; datom clauses [e a v tx added] still index by a
+       (pos->pat a)
+       (pos->pat (when (>= (count clause) 3) v))])))
 
 (defn query->patterns
   "Derive the e/a/v wake-patterns from a datalog query (a form, or its source
@@ -197,14 +229,14 @@
         basis-t (:max-tx db)
         request-id (:seon.db/request-id (:tx-meta report))   ; nil until M3 wires it
         snapshot @state
+        ;; internal: [sub-id new-result] tuples for the subs whose result moved
         changed (reduce
                  (fn [acc sub-id]
                    (let [{:keys [query patterns last-result]} (get-in snapshot [:subs sub-id])]
                      (if (any-datoms-match? patterns datoms)           ; GATE 1 (cheap, confirms index)
                        (let [new-result (d/q query db)]
                          (if (not= new-result last-result)             ; GATE 2 (real change)
-                           (conj acc {:seon.reactive/sub-id sub-id
-                                      :seon.reactive/result new-result})
+                           (conj acc [sub-id new-result])
                            acc))
                        acc)))
                  []
@@ -212,11 +244,16 @@
     (when (seq changed)
       ;; one swap! advances every moved sub's :last-result (no atom thrashing)
       (swap! state update :subs
-             (fn [subs] (reduce (fn [m {:seon.reactive/keys [sub-id result]}]
-                                  (assoc-in m [sub-id :last-result] result))
+             (fn [subs] (reduce (fn [m [sub-id result]] (assoc-in m [sub-id :last-result] result))
                                 subs changed)))
-      (emit! (cond-> {:seon.reactive/db-name db-name
-                      :seon.reactive/basis-t basis-t
-                      :seon.reactive/changed changed}
-               request-id (assoc :seon.reactive/request-id request-id))))
+      ;; emit the canonical changed-summaries event directly (the registered
+      ;; :seon.server.reactive/changed-summaries-event shape — no translation layer)
+      (emit! (cond-> {:seon.server.reactive/db-name db-name
+                      :seon.server.reactive/basis-t basis-t
+                      :seon.server.reactive/changed
+                      (mapv (fn [[sub-id result]]
+                              {:seon.subscription/id sub-id
+                               :seon.server.reactive/rows (vec result)})
+                            changed)}
+               request-id (assoc :seon.server.reactive/request-id request-id))))
     changed))

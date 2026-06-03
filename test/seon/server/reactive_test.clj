@@ -6,6 +6,7 @@
   (:require [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [datahike.core :as dc]
+            [malli.core :as m]
             [seon.server.reactive :as reactive]))
 
 (defn with-engine
@@ -129,3 +130,19 @@
             cands  (#'reactive/candidate-subs (:index @state) datoms)]
         (is (= #{"units"} (set cands))
             "the 20 noise subs are excluded by the index, never scanned")))))
+
+(deftest emit-conforms-to-registered-event-schema
+  (let [{:keys [conn emitted state]} (with-engine)]
+    (d/transact conn [{:db/id -1 :unit/name "A" :unit/pos "x"}])
+    (reactive/register-sub! state conn "s1" units-query)
+    (reset! emitted [])
+    (d/transact conn [{:db/id 1 :unit/pos "y"}])
+    (let [ev (first @emitted)]
+      (is (some? ev) "an event was emitted")
+      (is (m/validate :seon.server.reactive/changed-summaries-event ev)
+          (str "explain: "
+               (pr-str (m/explain :seon.server.reactive/changed-summaries-event ev))))
+      (testing "the changed-entry has exactly the canonical keys (rows is a vector, not a set)"
+        (is (= #{:seon.subscription/id :seon.server.reactive/rows}
+               (set (keys (first (:seon.server.reactive/changed ev))))))
+        (is (vector? (:seon.server.reactive/rows (first (:seon.server.reactive/changed ev)))))))))
