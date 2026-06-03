@@ -83,3 +83,34 @@
     (d/transact (:conn a) [{:db/id 1 :unit/pos "y"}])
     (is (= 1 (count @(:emitted a))) "engine A fires")
     (is (= 0 (count @(:emitted b))) "engine B untouched — per-conn isolation")))
+
+(deftest persistence-and-register-after-tx
+  (let [{:keys [conn emitted state]} (with-engine)]
+    (d/transact conn [{:db/id -1 :unit/name "A" :unit/pos "x"}])
+    (reset! emitted [])
+    (reactive/register-subscription! state conn "s1" units-query)
+    (testing "the subscription is persisted as a durable datom (query as string)"
+      (is (= #{["s1" (pr-str units-query)]}
+             (d/q '[:find ?id ?q
+                    :where [?s :seon.subscription/id ?id]
+                           [?s :seon.subscription/query ?q]]
+                  (d/db conn)))))
+    (testing "the registration tx did NOT self-route (register-after-transact)"
+      (is (= 0 (count @emitted))))
+    (testing "the sub is live afterward"
+      (reset! emitted [])
+      (d/transact conn [{:db/id 1 :unit/pos "y"}])
+      (is (= 1 (count @emitted))))))
+
+(deftest cache-rebuild-from-datoms
+  (let [{:keys [conn state]} (with-engine)]
+    (d/transact conn [{:db/id -1 :unit/name "A" :unit/pos "x"}])
+    (reactive/register-subscription! state conn "s1" units-query)
+    (reactive/register-subscription! state conn "s2" '[:find ?n :where [?e :unit/name ?n]])
+    (testing "a fresh (empty) engine rebuilds its cache from the active sub datoms"
+      (let [fresh (reactive/new-engine-state "test-db")]
+        (is (= 0 (count (:subs @fresh))) "fresh cache starts empty")
+        (is (= 2 (reactive/rebuild! fresh conn)) "rebuilds 2 subs from datoms")
+        (is (= #{"s1" "s2"} (set (keys (:subs @fresh)))))
+        (testing "rebuilt cache (patterns + last-result) is identical to the live cache"
+          (is (= (:subs @state) (:subs @fresh))))))))

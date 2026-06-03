@@ -84,6 +84,39 @@
   nil)
 
 ;; ---------------------------------------------------------------------------
+;; persistence + rebuild (bootstrap-from-DB)
+;; a subscription is a durable datom; the cache is derived from it.
+;; ---------------------------------------------------------------------------
+
+(defn register-subscription!
+  "Transact the subscription as a durable datom (query stored as SOURCE STRING —
+  code-as-data), THEN register it in the engine cache. The cache registration runs
+  AFTER the transact returns, so the registration tx itself does not route to the
+  brand-new sub."
+  [state conn sub-id query]
+  (d/transact conn [{:seon.subscription/id sub-id
+                     :seon.subscription/query (pr-str query)
+                     :seon.subscription/active? true}])
+  (register-sub! state conn sub-id query))
+
+(defn rebuild!
+  "Reconstitute the in-memory cache from the active subscription datoms — nothing
+  in the cache is authoritative, the datoms are. Re-derives patterns and seeds
+  :last-result from the CURRENT db (seed-to-current). Basis-t catch-up for changes
+  missed during downtime is M4, once writebacks persist :seon.subscription/basis-t.
+  Returns the number of subscriptions rebuilt."
+  [state conn]
+  (let [db (d/db conn)
+        subs (d/q '[:find ?id ?q
+                    :where [?s :seon.subscription/id ?id]
+                           [?s :seon.subscription/active? true]
+                           [?s :seon.subscription/query ?q]]
+                  db)]
+    (doseq [[sub-id qstr] subs]
+      (register-sub! state conn sub-id (edn/read-string qstr)))
+    (count (:subs @state))))
+
+;; ---------------------------------------------------------------------------
 ;; the d/listen! callback — two-gate dispatch, READ-ONLY, emits via emit!
 ;; ---------------------------------------------------------------------------
 
