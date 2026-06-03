@@ -358,22 +358,43 @@ subscription references it; the **guest** resolves and runs it. There is **no
 `:seon.render/kind` enum** — the render is a function reference (or, trivially, a
 literal); the runtime that holds it resolves by shape.
 
-Render functions are **CLJS** (authored by the agent, run in the guest), so they
-are owned by the **CLJS-side code-indexing/storage system** — *not* the JVM
-`graph`/`render.clj` machinery. They are separate code systems that persist code
-entities to the *same shared database*. The JVM Host **stores only the reference**
-and **ships rows**; it never resolves or runs the render fn. This is exactly why
-the read-only-Host / CLJS-render-default decisions fit — the Host never touches
-render code.
+Render functions are **CLJS** (authored by the agent, run in the guest), owned by
+the **CLJS-side code-indexing/storage system** — *not* the JVM `graph`/`render.clj`
+machinery. That system already exists: `build-tee-entities` (`src/seon/eval.cljs:715`)
+tees every agent-defined `defn` into a **`:seon.fn` entity** on each eval — keyed
+by `:seon.fn/sym` (the FQ name, the identity attr) with **`:seon.fn/source`
+holding the form itself** (code-as-data) — automatically, no publish step. In V2
+the guest is **wire-only against the single JVM datahike**, so these `:seon.fn`
+datoms transact *over the wire into the one shared CLJ DB* — which is what makes
+the subscription's render-fn ref both valid and visible to the engine.
+
+**Reuse the existing `:seon.fn` schema** (don't invent a render-fn schema). The
+only wrinkle: `:seon.fn` is registered CLJS-side today (`agent.cljs:248`); in V2
+it must *also* be registered server-side so the JVM validates the transacted
+datoms (it sits on the fresh-schema boundary — agent/subscription/summary are
+fresh; `:seon.fn` is the existing code-system schema we reference).
 
 ```clojure
-;; the subscription references the persisted render fn (a code entity in the
-;; shared DB, managed by the CLJS code system). The guest resolves + runs it.
-(schema/register! :seon.subscription/render-fn :seon.db/ref) ; → the render fn entity
+;; the subscription references the persisted render fn by its :seon.fn/sym
+;; identity. The JVM stores only this ref + ships rows; the guest resolves+runs.
+(schema/register! :seon.subscription/render-fn :seon.db/ref) ; → a :seon.fn,
+                                                ; e.g. [:seon.fn/sym "my.ns/render-summary"]
 
 ;; the render fn is, by contract, a pure function of the subscription's query
 ;; rows: (fn [rows] {:seon.render/ai "…" :seon.render/html […]}).
 ```
+
+**Resolution (guest-side, always recoverable):** `eval/lookup-value`
+(`src/seon/eval.cljs:279`) returns the live callable in steady state
+(`render.cljs:136` `ai-render` already does this — look up the symbol, call it);
+on a cold resume the runtime re-evals `:seon.fn/source` from the DB first, then
+`lookup-value` resolves. The DB is the source of truth — "on resume we only pull
+from the database." **One gap to build (CLJS-side):** the code system does not yet
+stamp which `:seon.fn` entities are render functions (it stores source but does
+not analyze `:seon.render/ai`/`:seon.render/html` output the way JVM `render.clj`
+does). The subscription names its render fn explicitly via `render-fn`, so MVP
+does not need render-discovery — but if we later want to *find* an agent's render
+fn by output, that stamp (`build-tee-entities` detecting render output) is new.
 
 A literal-render (the trivial "static" case the user noted) is the degenerate
 form: the subscription carries the render value directly instead of a `render-fn`
