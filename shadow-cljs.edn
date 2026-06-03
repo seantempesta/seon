@@ -78,6 +78,25 @@
    :compiler-options {:warnings-as-errors false
                       :externs           ["externs/node_fs.js"]}}
 
+  ;; Multi-runtime MCP-eval probe build (go/no-go for "N agents you can
+  ;; REPL into by id"). ONE :node-script build, run as N Node processes →
+  ;; N distinct shadow runtimes under one worker. `:devtools {:enabled true}`
+  ;; (default for :node-script, explicit here) so the watcher injects the
+  ;; websocket client that registers each process as a runtime. Source lives
+  ;; under src/ so it's on the ALREADY-RUNNING watcher's classpath — add +
+  ;; `watch node-agent` with no server restart.
+  ;;
+  ;; Build:  clj -M:cljs watch node-agent
+  ;; Run:    node out/node-agent/main.js --agent-id a1
+  ;; Output: out/node-agent/main.js
+  :node-agent
+  {:target           :node-script
+   :output-to        "out/node-agent/main.js"
+   :main             seon.dev.node-agent/-main
+   :devtools         {:enabled true}
+   :compiler-options {:warnings-as-errors false
+                      :externs           ["externs/node_fs.js"]}}
+
   ;; Milestone-1 WASM smoke build. Minimal CLJS bundle that exposes
   ;; `datahike-smoke-test!` (inlined) on globalThis.seonSmoke for the
   ;; wasm-rquickjs ESM shim. Deliberately doesn't require seon.client
