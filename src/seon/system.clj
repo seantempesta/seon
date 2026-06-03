@@ -150,7 +150,7 @@
 ;;; arg is retained on the init key for backwards compatibility; system.edn no
 ;;; longer supplies it, and `init!` already ignored it.
 
-(defmethod ig/init-key :seon.orchestrator/sessions
+#_(defmethod ig/init-key :seon.orchestrator/sessions
   [_ {:keys [connection-manager pool]}]
   (log/info "Initializing orchestrator sessions...")
   (require 'seon.session)
@@ -158,13 +158,13 @@
   (log/info "Orchestrator sessions initialized")
   {:connection-manager connection-manager :pool pool})
 
-(defmethod ig/halt-key! :seon.orchestrator/sessions
+#_(defmethod ig/halt-key! :seon.orchestrator/sessions
   [_ _]
   (log/info "Orchestrator sessions shutdown"))
 
-(defmethod ig/suspend-key! :seon.orchestrator/sessions [_ state] state)
+#_(defmethod ig/suspend-key! :seon.orchestrator/sessions [_ state] state)
 
-(defmethod ig/resume-key :seon.orchestrator/sessions
+#_(defmethod ig/resume-key :seon.orchestrator/sessions
   [_ opts old-opts old-state]
   (if (= opts old-opts)
     (do
@@ -194,7 +194,7 @@
 ;;; later. Database writes are owned by per-namespace conn-processes in
 ;;; `:seon.db/flow`.
 
-(defmethod ig/init-key :seon.flow/infrastructure
+#_(defmethod ig/init-key :seon.flow/infrastructure
   [_ _opts]
   (log/info "Starting infrastructure flow...")
   (let [result (topology/build-infrastructure! {})]
@@ -202,7 +202,7 @@
               {:flow-id (::topology/flow-id result)})
     result))
 
-(defmethod ig/halt-key! :seon.flow/infrastructure
+#_(defmethod ig/halt-key! :seon.flow/infrastructure
   [_ state]
   (when-let [fl (::topology/flow state)]
     (log/info "Stopping infrastructure flow...")
@@ -233,9 +233,9 @@
 ;; Always halt+init on resume. Flow objects are immutable — if code has been
 ;; reloaded and build-infrastructure! now includes new processes (e.g. repl-step
 ;; added after initial build), the old flow object won't have them.
-(defmethod ig/suspend-key! :seon.flow/infrastructure [_ state] state)
+#_(defmethod ig/suspend-key! :seon.flow/infrastructure [_ state] state)
 
-(defmethod ig/resume-key :seon.flow/infrastructure
+#_(defmethod ig/resume-key :seon.flow/infrastructure
   [_ opts _old-opts old-state]
   (ig/halt-key! :seon.flow/infrastructure old-state)
   (ig/init-key :seon.flow/infrastructure opts))

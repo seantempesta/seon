@@ -844,7 +844,10 @@
 ;;; Integrant Component
 ;;; ---------------------------------------------------------------------------
 
-(defmethod ig/init-key :seon.flow/pool
+;; DISABLED 2026-06-03 — agent JVM pool not needed until JVM-agent phase.
+;; #_ discards this defmethod → Integrant default-inits :seon.flow/pool to its
+;; config value (no JVMs spawned). Re-enable: delete the #_.
+#_(defmethod ig/init-key :seon.flow/pool
   [_ {:keys [size base-port enabled?]
       :or {size default-pool-size
            base-port default-base-port
@@ -858,16 +861,16 @@
       (log/info "Agent pool disabled for this profile")
       nil)))
 
-(defmethod ig/halt-key! :seon.flow/pool
+#_(defmethod ig/halt-key! :seon.flow/pool
   [_ pool]
   (when pool
     (log/info "Stopping agent pool component")
     (shutdown! pool)))
 
 ;; Keep pool alive during (reset) -- JVMs are expensive to spawn
-(defmethod ig/suspend-key! :seon.flow/pool [_ pool] pool)
+#_(defmethod ig/suspend-key! :seon.flow/pool [_ pool] pool)
 
-(defmethod ig/resume-key :seon.flow/pool
+#_(defmethod ig/resume-key :seon.flow/pool
   [key opts old-opts old-pool]
   (if (and (= (:size opts) (:size old-opts))
            (= (:base-port opts) (:base-port old-opts)))

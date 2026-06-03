@@ -49,7 +49,10 @@
 ;;; Integrant key
 ;;; ---------------------------------------------------------------------------
 
-(defmethod ig/init-key :seon.db/flow
+;; DISABLED 2026-06-03 — datahike flow not needed until JVM-agent phase.
+;; #_ discards this defmethod → Integrant default-inits :seon.db/flow to its
+;; config value (no conn-process / schema build). Re-enable: delete the #_.
+#_(defmethod ig/init-key :seon.db/flow
   [_ {:keys [namespaces backend data-root namespace-schemas]}]
   (log/info "Starting datahike flow"
             {:namespaces namespaces :backend backend})
@@ -61,7 +64,7 @@
     (reset! current-flow state)
     state))
 
-(defmethod ig/halt-key! :seon.db/flow
+#_(defmethod ig/halt-key! :seon.db/flow
   [_ state]
   (log/info "Stopping datahike flow")
   (reset! current-flow nil)
@@ -70,10 +73,10 @@
 ;; Flow objects are not reusable across restarts (channels bound at start),
 ;; so suspend/resume = full halt + init. Keeps the contract clean.
 
-(defmethod ig/suspend-key! :seon.db/flow
+#_(defmethod ig/suspend-key! :seon.db/flow
   [k state]
   (ig/halt-key! k state))
 
-(defmethod ig/resume-key :seon.db/flow
+#_(defmethod ig/resume-key :seon.db/flow
   [k opts _old-opts _old-state]
   (ig/init-key k opts))
