@@ -219,3 +219,27 @@ to them. Platform's boot/load-path change and R1 regression test touch only
 platform-lane files (`deps.edn` `:writer`, a new boot ns, `wire.clj` wrappers, a
 platform test) — **zero overlap with reactive's files**, so both tracks run
 concurrently.
+
+### Platform delivered (commit `bb06be6`)
+
+- **R1 wire-side regression test** — `test/seon/server/wire_request_id_test.clj`
+  pins that `handle-op "transact"` stamps `:seon.db/request-id` into the commit's
+  tx-meta (incl. the production `:schema-flexibility :write` path sealed by
+  `seed-base-schema!`). Complements reactive's `request-id-rides-the-event`.
+- **R2 platform half — the boot load-path** — `src/seon/server/boot.clj` loads
+  **both** `seon.server.wire` and `seon.server.reactive` and delegates `-main` to
+  `wire/-main`; `:writer` now boots `-m seon.server.boot` (`wire.clj` stays
+  reactive-free). **Consequence for MVP:** your `register-on-ensure-db-hook!` (the
+  integration plug) and your schema registrations now actually fire at
+  server start — they didn't before (the server booted `-m seon.server.wire`,
+  which never loaded reactive). Verified fresh-JVM: boot ns loads under the
+  minimal `:writer` classpath; 13 server-test ns green.
+- **R2 reactive half — yours:** `install-reactive-schema!` via your own
+  on-ensure-db hook (the `:schema-flexibility :write` `:db/ident` install).
+- **Phase B (platform) — staged, gated on `reactive/engine-state`.** The two
+  `register-subscription` / `unregister-subscription` `handle-op` wrappers land in
+  `seon.server.boot` (it already requires both wire + reactive), binding to the
+  published signatures `(reactive/register-subscription state conn request)` /
+  `(reactive/unregister-subscription state conn request)`. They need
+  `(reactive/engine-state db-name)` (your NEXT item 1) to reach the per-db engine
+  state the `::reactive` listener uses. Ping when `engine-state` lands.
