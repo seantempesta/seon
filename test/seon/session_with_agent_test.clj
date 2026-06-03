@@ -47,7 +47,7 @@
                     ["wa-B1" :test.with-agent/sB]
                     ["wa-B2" :test.with-agent/sB]]]
     (server.session/register-agent!
-     {:seon.server.registry/agent-id aid
+     {:seon.agent/id aid
       :seon.server.registry/db-name  db}))
   (let [cA (:seon.server.registry/conn
             (server.session/get-conn

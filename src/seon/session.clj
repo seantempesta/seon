@@ -66,7 +66,7 @@
   nil)
 
 (schema/register! ::resolve-agent-conn-request
-                  [:map [::agent-id :seon.server.registry/agent-id]])
+                  [:map [::agent-id :seon.agent/id]])
 
 (schema/register! ::resolve-agent-conn-response
                   [:map [::conn :seon.server.registry/conn]])
@@ -85,13 +85,13 @@
   (let [{db-name :seon.server.registry/db-name
          conn    :seon.server.registry/conn}
         (server.session/resolve-agent
-         {:seon.server.registry/agent-id agent-id})]
+         {:seon.agent/id agent-id})]
     (cond
       (nil? db-name)
       (throw (ex-info (str "Unknown agent-id: " (pr-str agent-id)
                            ". Register via seon.server.registry/register-agent! first.")
                       {:agent-id agent-id
-                       :known-agents (mapv :seon.server.registry/agent-id
+                       :known-agents (mapv :seon.agent/id
                                            (:seon.server.registry/agents
                                             (server.session/list-agents {})))}))
       (nil? conn)
