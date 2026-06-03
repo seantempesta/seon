@@ -85,3 +85,9 @@
 [submodule "reference-code/hermes-agent"]
 	path = reference-code/hermes-agent
 	url = https://github.com/nousresearch/hermes-agent
+[submodule "reference-code/posh"]
+	path = reference-code/posh
+	url = https://github.com/mpdairy/posh.git
+[submodule "reference-code/shadow-cljs"]
+	path = reference-code/shadow-cljs
+	url = https://github.com/thheller/shadow-cljs.git
