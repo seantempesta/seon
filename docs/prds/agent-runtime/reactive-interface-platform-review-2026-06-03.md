@@ -136,3 +136,86 @@ ops plug into platform's hook + registry).
 two-gate dispatch, 4/4 cases correct, against real JVM datahike inside a real
 `d/listen!`. Next: wrap into `src/seon/server/reactive.clj` (proper `on-tx!`
 signature, fully-namespaced schemas, per-conn state) + tests.
+
+## Platform response (2026-06-03, after commit `019d594`)
+
+> Platform read of the **live** code, reconciling
+> [m3-prep](m3-prep-2026-06-03.md)'s R1–R4. m3-prep was snapshotted *"as of
+> commit `03f5135`"*; commit `019d594` ("conn-routing + listen! hook + per-DB
+> broadcast") landed **after** it, so several "gated on platform" items are
+> already done. Verified against `wire.clj`, `reactive.clj`, `store.clj`,
+> `registry.clj`, `broadcast.clj`, `deps.edn`.
+
+### Already done in live code (m3-prep listed as gated — now closed)
+
+- **Conn-resolution wired into `wire.clj`.** `resolve-conn-for-req` +
+  `handle-req` route every op by `agent-id`/`db-name` (`wire.clj:541-573`).
+- **`d/listen!` + `::raw-broadcast` listener per conn.** Installed via the
+  on-ensure-db hook (`wire.clj:318-325`), read-only, emits the db-name-tagged
+  raw `tx` event (`raw-broadcast-listener-fn`, `wire.clj:299-311`).
+- **Real `db-name` on the event** (no more `"default"`) — `wire.clj:280-288`.
+
+### R1 — request-id on single `transact`: **DONE, not open.**
+
+The single `transact` handler stamps `:seon.db/request-id` into tx-meta
+(`wire.clj:363-367`), mirroring `transact-batch`; `seed-base-schema!`
+(`wire.clj:70-79`) installs that attr so `:schema-flexibility :write` accepts it;
+`on-tx!` reads it (`reactive.clj:230`). The own-tx-dedup chain (review issue 1)
+is intact end-to-end. **Platform action:** add a regression test pinning
+request-id → tx-meta → `changed-summaries` (it was fixed without one, and it's
+load-bearing). No production change.
+
+### R2 — `:schema-flexibility :write` install seam: **the real open item.**
+
+`store.clj:121` opens every cluster conn `:schema-flexibility :write`, so
+datahike rejects any attr lacking an installed `:db/ident`. `seed-base-schema!`
+installs only `:seon.db/request-id` — **not** reactive's `:seon.subscription/*`
+/ `:seon.fn/*` / `:seon.render/ai`, so a live `register-subscription!`
+(`reactive.clj:192`) would fail against a real cluster conn (tests dodge it with
+`:schema-flexibility :read`, `reactive_test.clj:17`). Resolution, in two parts:
+
+- **Reactive lane:** install your own attrs via your **own** on-ensure-db hook,
+  mirroring platform's `raw-broadcast-hook-installed?` (`wire.clj:318-325`).
+  Platform will **not** add reactive attrs to `seed-base-schema!` — that would
+  recouple platform → reactive and defeat the extension point. (Platform can
+  expose a tiny `install-schema!` helper if you'd rather derive the `:db/ident`
+  vector from the registered malli than hand-write it — say the word.)
+- **Platform lane (the genuine deliverable):** the wire-server boots via
+  `:writer` → `-m seon.server.wire` (`deps.edn:140`), which **never loads**
+  `seon.server.reactive` (wire.clj doesn't `require` it, by design). So at
+  runtime reactive's schema registrations **and** its on-ensure-db hook never
+  fire — this is also coordination-item-2 (`:seon.fn` on the load path).
+  Platform adds a thin boot entry that loads **both** `wire` and `reactive`
+  while keeping `wire.clj` itself decoupled, and points `:writer` at it. Done by
+  the orchestrator directly (shared boot seam), kaocha-verified.
+
+### `register-subscription` / `unregister-subscription` ops — ownership
+
+These `handle-op` methods land in `wire.clj` (platform's file) but are M3
+reactive logic. **Decision: platform writes the thin wrappers** (resolve conn
+via registry, Transit-decode, look up the per-db engine state, delegate to
+reactive's pure fns); **reactive owns the pure logic in `reactive.clj`**
+(m3-prep 2d). The wrappers are written against the agreed pure-fn signatures, so
+reactive's `handle-register-subscription` / `handle-unregister-subscription` /
+event-builder land first (or in parallel against a fixed signature).
+
+### db-name keys — confirmed distinct, no unification
+
+Three intentionally separate keys, no reuse: `:seon.server.reactive/db-name`
+(string, the wire event), `:seon.server.store/db-name` (keyword, store config),
+`:seon.server.registry/db-name` (keyword, routing). The reactive wire event's
+db-name being a string is correct. ✓
+
+### What MVP can resume NOW
+
+All of m3-prep §2 (2a–2e) is headless and lives in reactive-lane files
+(`reactive.clj` + `reactive_test.clj`) — **it never blocked on platform and can
+proceed immediately**: register the subscription, `changed-summaries`,
+`:seon.fn`, and summary schemas; write the `register/unregister-subscription`
+**pure fns** and the event-builder with direct-call tests; and build the `:schema-flexibility
+:write` install seam (your own on-ensure-db hook). The only ordering touchpoint:
+publish the pure-fn signatures (2d) so platform's thin `handle-op` wrappers bind
+to them. Platform's boot/load-path change and R1 regression test touch only
+platform-lane files (`deps.edn` `:writer`, a new boot ns, `wire.clj` wrappers, a
+platform test) — **zero overlap with reactive's files**, so both tracks run
+concurrently.
