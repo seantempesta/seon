@@ -67,6 +67,19 @@ datoms and rebuilt from them on Host restart. Notifications carry no
 authoritative information; a dropped one loses nothing because the data is in the
 database (recover via basis-t catch-up).
 
+**Dependency stance.** Posh stays a *vendored reference* (`reference-code/posh`),
+**not** a classpath dependency (fewer-dependencies rule). We port the one small
+hard piece — the e/a/v datom matcher (~15 lines, `datom_matcher.cljc`) — and
+write our own where-clause pattern extraction (attribute + literal precision for
+MVP, which is the `:simple-patterns` level posh itself uses for `q`) and engine
+loop directly against datahike. **No posh on the classpath, no
+`clojure.core.match`** (which posh's `q_analyze` pulls in), and **no `dcfg`
+indirection** (that abstraction existed only so posh could target datascript *or*
+datomic; we are datahike-only and call `datahike.query/q` directly). Posh's
+`q_analyze` is consulted as the reference for *entity-precise* pattern derivation
+if/when we want tighter-than-attribute routing (a later optimization, §3) — we'd
+port that piece too, never depend on the library.
+
 This PRD answers, in order: how the render is produced (§2), how routing scales
 (§3, the inverted index), the entity schema (§4), the wire surface (§5), the
 `listen!` hook contract (§6), platform fit (§7), milestones (§8), risks (§9), and
@@ -337,19 +350,26 @@ Shared shapes registered once and referenced (the `:seon.db/ref` discipline).
 (schema/register! :seon.subscription/patterns [:vector [:vector :any]])
 ```
 
-### 4.2 The render function is a `:seon.fn` (code-as-data)
+### 4.2 The render function is a code entity (code-as-data)
 
 The producer is a function, stored as data like every function in the substrate
 ([code-as-data-runtime](../../seon/concepts/code-as-data-runtime.md)). The
-subscription references it; the guest resolves and runs it. There is **no
+subscription references it; the **guest** resolves and runs it. There is **no
 `:seon.render/kind` enum** — the render is a function reference (or, trivially, a
-literal); the runtime resolves by shape.
+literal); the runtime that holds it resolves by shape.
+
+Render functions are **CLJS** (authored by the agent, run in the guest), so they
+are owned by the **CLJS-side code-indexing/storage system** — *not* the JVM
+`graph`/`render.clj` machinery. They are separate code systems that persist code
+entities to the *same shared database*. The JVM Host **stores only the reference**
+and **ships rows**; it never resolves or runs the render fn. This is exactly why
+the read-only-Host / CLJS-render-default decisions fit — the Host never touches
+render code.
 
 ```clojure
-;; reuse the existing :seon.fn machinery: a render fn is a persisted function
-;; whose body is data and whose :malli/schema output declares :seon.render/ai
-;; and/or :seon.render/html (Seon's render-discovery already keys on these).
-(schema/register! :seon.subscription/render-fn :seon.db/ref) ; → a :seon.fn entity
+;; the subscription references the persisted render fn (a code entity in the
+;; shared DB, managed by the CLJS code system). The guest resolves + runs it.
+(schema/register! :seon.subscription/render-fn :seon.db/ref) ; → the render fn entity
 
 ;; the render fn is, by contract, a pure function of the subscription's query
 ;; rows: (fn [rows] {:seon.render/ai "…" :seon.render/html […]}).
@@ -654,12 +674,13 @@ direct `handle-op` calls before then.
 
 Aligned to the topology doc's numbering; this PRD owns 3–4 and refines 1.
 
-1. **Headless posh-on-datahike proof** (refine of topology M1; ~1 day). A
-   `seon.server.reactive` with a datahike `dcfg` + the posh engine driven by a
-   real `d/listen!` on the JVM Host. Prove: a subscription's cheap gate fires
-   *only* on relevant txns; `:changed` only when the result actually moves. No
-   LLM, no wire, no render — capturing `emit!`. **No index yet** (stock scanning)
-   — establish correctness first.
+1. **Headless reactive engine on datahike** (refine of topology M1; ~1 day). A
+   `seon.server.reactive` with a ported datom-matcher + our own where-clause
+   pattern extraction + engine loop (no posh dependency, no `dcfg` — see §1
+   dependency stance), driven by a real `d/listen!` on the JVM Host. Prove: a
+   subscription's cheap gate fires *only* on relevant txns; `:changed` only when
+   the result actually moves. No LLM, no wire, no render — capturing `emit!`.
+   **No index yet** (stock scanning) — establish correctness first.
 2. **Prerequisite gaps** = platform P1 (registry wired into `wire.clj`, real
    db-name on events, per-DB broadcast, the `listen!` hook). Owned by platform
    track. **Blocking** for §5 guest-facing ops.
