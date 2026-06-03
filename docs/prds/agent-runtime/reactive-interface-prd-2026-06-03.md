@@ -327,11 +327,11 @@ Shared shapes registered once and referenced (the `:seon.db/ref` discipline).
 ### 4.1 Shared shapes (register once)
 
 ```clojure
-;; The agent id is one shape, referenced everywhere (promote session.clj's
-;; ::agent-id to a shared shape so wire + reactive agree).
-(schema/register! :seon.agent/id
-  [:string {:min 1 :seon.db/identity true
-            :description "Opaque agent id (V2 uses 14-char hex)."}])
+;; The agent id is registered PLATFORM-SIDE (seon.server.registry, as part of the
+;; session→registry rename, replacing :seon.server.session/agent-id) — the registry
+;; is foundational and lands first (P1) and needs it for routing. The reactive
+;; schema REFERENCES it; one registration, no instrumentation fight.
+;;   (registered by platform) :seon.agent/id [:string {:min 1 :seon.db/identity true}]
 
 (schema/register! :seon.subscription/id
   [:string {:min 1 :seon.db/identity true}])
@@ -339,15 +339,11 @@ Shared shapes registered once and referenced (the `:seon.db/ref` discipline).
 ;; basis-t: datahike's monotonic clock. One shape; reused by sub + summary.
 (schema/register! :seon.reactive/basis-t [:int {:min 0}])
 
-;; A datalog query, stored as data (code-as-data). Concrete (a vector); we don't
-;; deep-schema the datalog AST — it is validated by being runnable, and the
-;; patterns are derived from it. The element schema is the datalog-clause shape
-;; (a flagged coarse spot — see §9), NOT bare :any.
-(schema/register! :seon.subscription/query [:vector :seon.subscription/clause])
-(schema/register! :seon.subscription/clause [:or :keyword :symbol [:vector :any]])
-
-;; e/a/v patterns derived from the query (posh shape).
-(schema/register! :seon.subscription/patterns [:vector [:vector :any]])
+;; The subscription's query is stored as SOURCE (a string) — code-as-data, exactly
+;; like :seon.fn/source. This removes the `:any`: a query is validated by being
+;; readable/runnable, not deep-schema'd, and patterns are DERIVED from it (and not
+;; persisted — see §4.3/§4.5, they rebuild from the query, so no pattern schema).
+(schema/register! :seon.subscription/query :string)
 ```
 
 ### 4.2 The render function is a code entity (code-as-data)
@@ -413,15 +409,16 @@ just shipped or recomputed).
    [:seon.subscription/agent     :seon.subscription/agent]
    [:seon.subscription/query     :seon.subscription/query]
    [:seon.subscription/render-fn :seon.subscription/render-fn]
-   [:seon.subscription/patterns  {:optional true} :seon.subscription/patterns]
    [:seon.subscription/active?   :boolean]
    [:seon.subscription/basis-t   {:optional true} :seon.reactive/basis-t]])
 ```
 
-`:patterns` and `:basis-t` are `{:optional true}` because they are *derived* and
-*advance over time*: the Host fills `:patterns` when it analyzes the query and
-updates `:basis-t` to the commit at which it last re-derived. They are persisted
-(so the engine cache is rebuildable on restart) but absent at registration time.
+**Patterns are NOT persisted** — they live only in the engine cache and are
+re-derived from `:seon.subscription/query` (which IS persisted) whenever the cache
+is built. That removes the `[:vector :any]` pattern schema entirely (the patterns
+never round-trip through a datom). `:basis-t` is `{:optional true}` because it is
+derived and advances over time: the Host updates it to the commit at which it last
+re-derived, absent at registration.
 
 ### 4.4 The summary, on the agent's own entity
 
@@ -456,6 +453,13 @@ rebuilds the index. **The bootstrap-from-DB pattern**: nothing in the cache is
 authoritative; the datoms are. This is also how it survives a crash — no separate
 persistence of engine state.
 
+**The cache + index are PER-CONN (per-cluster), never global** (platform issue,
+2026-06-03). One JVM hosts many clusters; a global cache would cross-contaminate.
+Engine state is keyed by `db-name` — `on-tx!`'s `ctx` carries `::db-name`/`::conn`,
+and `ensure-db` builds one engine state per conn. The whole engine is "one
+subscription manager per database," which is also exactly what makes the
+multi-cluster model (P1) and the experiment populations fall out for free.
+
 ## 5. The wire surface
 
 New ops/events fitting the existing `wire.clj` `handle-op` multimethod and the
@@ -479,12 +483,25 @@ op = "register-subscription"
 }
 ```
 
+**Precondition — the agent must already be bound to a cluster** (platform issue,
+2026-06-03). `register-subscription` resolves the conn by `agent-id` via the
+registry's `{agent-id → db-name}` index, which is populated by **`register-agent!`
+— platform-owned** (the Host binds an agent to a cluster when a guest joins). So
+the ordering is **`ensure-db` (cluster conn) → `register-agent!` (bind
+`agent-id → db-name`) → `register-subscription`**. The bind itself is a platform
+lane (a `register-agent` op / cluster-config, likely P2); this PRD *assumes* the
+agent is bound and does not define the bind. The agent *entity* datom
+(`:seon.agent/id` + `:seon.render/*`) is guest-transacted (reactive lane) — same
+id value, two different concerns: routing (platform) vs the agent record
+(reactive).
+
 Handler: read the entity, analyze the query → patterns, **transact the
-subscription as a datom** (it is durable — §4), register it in the engine cache +
-inverted index, run the initial query, and return the first rows (the guest does
-the initial render + writeback, like any change). The subscription tx itself goes
-through the same `d/transact` → `listen!` path (self-consistent: registering a
-subscription is a fact).
+subscription as a datom** (it is durable — §4), run the initial query, return the
+first rows (the guest does the initial render + writeback, like any change), and
+**register it in the engine cache + index *after* the transact returns** (issue,
+2026-06-03) — so the registration tx itself does not route to the brand-new
+subscription. The subscription tx goes through the same `d/transact` → `listen!`
+path (self-consistent: registering a subscription is a fact).
 
 `unregister-subscription` (op `"unregister-subscription"`, `subscription-id`)
 retracts `:seon.subscription/active?` (or the whole entity), drops it from the
@@ -500,8 +517,11 @@ re-renders and writes back.
 
 ```text
 event = "changed-summaries"
-  "db-name"  : string            ; the committing conn's db-name (P1 tagging)
-  "basis-t"  : int               ; the commit's basis-t  (the pinned snapshot)
+  "db-name"    : string          ; the committing conn's db-name (P1 tagging)
+  "basis-t"    : int             ; the commit's basis-t  (the pinned snapshot)
+  "request-id" : string          ; the committing tx's request-id (from tx-meta),
+                                 ; OPTIONAL — present iff the commit carried one.
+                                 ; LOAD-BEARING for dedup (see §5.3 / issue below).
   "changed"  : [ {                ; one entry per really-changed subscription
      "agent-id"        : string
      "subscription-id" : string
@@ -529,8 +549,17 @@ Malli for the event payload (registered, validated at the boundary):
   [:map
    [:seon.server.store/db-name :seon.server.store/db-name]
    [:seon.reactive/basis-t     :seon.reactive/basis-t]
+   [:seon.reactive/request-id  {:optional true} :string]   ; from the tx's tx-meta
    [:seon.reactive/changed     [:vector :seon.reactive/changed-entry]]])
 ```
+
+**Why `request-id` rides this event (platform issue, 2026-06-03):** `::raw-broadcast`
+and `::reactive` are *independent* datahike listeners, so datahike fires them in
+**nondeterministic order** — a guest can receive `changed-summaries` *before* the
+raw `tx` event for the same commit. So the guest cannot reliably dedup its own
+writeback against the raw event; it must dedup against the `request-id` carried on
+the `changed-summaries` event *itself*. `on-tx!` reads it from the TxReport's
+`tx-meta` (one commit → one event) and stamps it here.
 
 **Crucial invariant:** the event carries *already-transacted-or-derivable* data
 only. `rows` are the query result (derivable by re-querying at basis-t). `ai`/`html`
@@ -544,10 +573,12 @@ A guest holds, per subscription it owns: `{subscription-id → {render-fn,
 last-basis-t}}`. On `changed-summaries`:
 
 1. **Dedup against own tx.** If the change was caused by this guest's own
-   writeback (it just transacted its own `:seon.render/*`), ignore — recognized
-   by `request-id` correlation carried on the raw `tx` event (existing mechanism)
-   or by basis-t ≤ its own last writeback. This is why the raw `tx` event is
-   kept.
+   writeback (it just transacted its own `:seon.render/*`), ignore — recognized by
+   the `request-id` carried on the **`changed-summaries` event itself** (§5.2),
+   matched against the guest's recent outstanding write ids. (Dedup must be on the
+   changed event, not the raw `tx` event, because the two listeners fire in
+   nondeterministic order — §5.2.) Basis-t ≤ own-last-writeback is a fallback for
+   commits with no request-id.
 2. **Owner entries (the common case).** The guest's own subscription is among
    `changed` → run its render function (the `:seon.fn`, CLJS) over the entry's
    `rows`, producing realized `:seon.render/ai`/`:seon.render/html`, and transact
@@ -592,21 +623,29 @@ This PRD specifies what runs inside it.
   ...)
 ```
 
-Registration in the P1 hook:
+**Registration via an extension point (decouples the lanes, platform proposal
+2026-06-03).** P1's `ensure-db` registers its own `::raw-broadcast` listener *and*
+exposes a small per-conn **extension point** — an atom of `(fn [conn db-name])`
+hooks that `ensure-db` invokes per conn. `seon.server.reactive` registers its
+`::reactive` listener *through* that extension point. So **P1 does not hard-depend
+on the reactive ns** — the `::reactive` wire-up is the reactive track's one-line
+plug at M3 convergence:
 
 ```clojure
-;; in ensure-db, per conn:
-(d/listen! conn ::reactive
-  (fn [tx-report]
-    (reactive/on-tx! {::reactive/db-name db-name
-                      ::reactive/conn    conn
-                      ::reactive/emit!   bcast/broadcast!} tx-report)))
+;; reactive track, at load, plugs into the platform extension point:
+(registry/add-ensure-db-hook!
+  (fn [conn db-name]
+    (d/listen! conn ::reactive
+      (fn [tx-report]
+        (reactive/on-tx! {::reactive/db-name db-name
+                          ::reactive/conn    conn
+                          ::reactive/emit!   bcast/broadcast!} tx-report)))))
 ```
 
-The platform track's default hook (raw `broadcast!`) stays under its own key;
-`on-tx!` *additionally* emits `changed-summaries`. Both events flow. `on-tx!`
-receives the emit fn so it is decoupled from `broadcast.clj` (testable in
-isolation — Milestone 1 drives it with a capturing `emit!`).
+Both listeners (`::raw-broadcast`, `::reactive`) fire off the same `TxReport` in
+nondeterministic order (hence §5.2's request-id-on-the-event). `on-tx!` receives
+the emit fn so it is decoupled from `broadcast.clj` (testable in isolation —
+Milestone 1 drives it with a capturing `emit!`).
 
 ### 6.2 Read-only invariant (load-bearing, and now natural)
 
@@ -738,12 +777,20 @@ Aligned to the topology doc's numbering; this PRD owns 3–4 and refines 1.
   render/auto-lift), deferred. The "JVM does the heavy lifting" claim holds
   regardless: the JVM does all the routing + querying (the expensive-at-scale
   part); the guest only formats rows it is handed.
-- **Hiccup typing.** `:seon.render/html` and the event's `html`/`rows` carry
-  hiccup / heterogeneous datalog rows, which resist a precise Malli schema.
-  Seon's existing `render.clj` already registers `:seon.render/html` (coarsely);
-  this PRD **reuses that registration rather than introducing a new smell**, and
-  the datalog-clause shape (§4.1) is a real `[:or …]`, not bare `:any`. A precise
-  hiccup-with-references grammar is its own project; tracked, not blocking.
+- **The `:any` decision (banked for Sean, platform issue 2026-06-03).** The
+  persisted-datom `:any`s are **gone**: `:seon.subscription/query` is now a
+  `:string` (source, code-as-data), and patterns are no longer persisted (§4.3).
+  Two `:any`s remain, both *outside* persisted reactive datoms:
+  (a) **`:seon.render/html`** (hiccup) — this is `render.clj`'s *existing*
+  registration; we reuse it rather than introduce a new smell, and a precise
+  hiccup-with-references grammar is its own project (tracked there).
+  (b) **the event's `rows`** (`[:vector :any]`) — an *ephemeral wire payload*, not
+  a datom; query results are heterogeneous tuples. Options for Sean: accept the
+  ephemeral coarse type (strict-no-`:any` is a *persisted-schema* rule), or tighten
+  to `[:vector [:vector :seon.reactive/scalar]]` with a scalar union
+  (`[:or :string :int :boolean :keyword :inst :uuid :double]`) for the non-pull
+  case. Recommend the scalar-union form; pull-shaped rows would need a recursive
+  shape (defer). **Not a blocker — a decision to bank.**
 - **Posh `Datom` seq-access on datahike.** posh's matcher does `(first datom)` /
   `(rest datom)` over datoms; datahike `Datom` is a record with `.-e/.-a/.-v`. The
   matcher needs datahike datoms seq-accessible as `[e a v …]` (or an adapter).
@@ -766,6 +813,22 @@ Aligned to the topology doc's numbering; this PRD owns 3–4 and refines 1.
   path. Make the absence structural.
 
 ## 10. Questions for the platform track
+
+> **Resolved by the platform review (2026-06-03).** All five answered, all
+> compatible. **Q1** — yes, registry-into-`wire.clj` (item 1) + the `listen!` hook
+> (item 5) land together; conn-resolution first if anything slips. **Q2** —
+> `::pub-chan` is *removed* (dead forced-nil placeholder), not widened; per-DB
+> broadcast is an OutputStream subscriber-set in `broadcast.clj` keyed by db-name.
+> **Q3** — confirmed: summaries are persisted `:seon.render/*` datoms read by plain
+> `pull`/`q`, no recompute-on-read. **Q4** — yes, `changed-summaries` carries the
+> committing tx's `request-id` (now §5.2, and load-bearing). **Q5** — confirmed:
+> raw broadcast under `::raw-broadcast`, engine under `::reactive`, both moved to
+> listeners off the same TxReport. The five refinements (request-id-on-event,
+> per-conn cache, the bind precondition, the `:any` decision, register-after-tx)
+> are folded into §4–§6 above. The verbatim review lives in the decisions-record
+> note alongside this PRD.
+
+The original questions, for the record:
 
 1. **Registry wire-up timing (P1 item 1).** Will `ensure-db` + `handle-op` route
    by `agent-id`/`db-name` through `seon.server.registry` in the same P1 drop that
