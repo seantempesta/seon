@@ -1,16 +1,21 @@
 (ns seon.server.reactive
   "Per-conn reactive engine. Routes each datahike commit to the subscriptions it
-  could affect (a cheap e/a/v pattern gate, no query run), re-runs the candidates'
-  queries, and emits one `changed-summaries` event per commit carrying the subs
-  whose result actually moved.
+  could affect (an inverted index → a cheap e/a/v pattern gate, no query run for
+  the rest), re-runs the candidates' queries, and emits one `changed-summaries`
+  event per commit carrying the subs whose result actually moved.
 
   Runs inside `d/listen!` on the writer thread — READ-ONLY: it never transacts.
   Engine state is per-conn (per-cluster): one `(new-engine-state db-name)` per
   datahike connection, never global. Posh is a vendored reference only — the
   matcher here is a ~15-line port, no dependency, no core.async, no core.match.
 
-  M1 scope: routing + change-detection. The full `changed-summaries` entry
-  (agent-id, rows, render) and the inverted index land at M3/M6."
+  These engine fns are runtime plumbing over opaque artifacts (a conn, an atom,
+  a TxReport), so they take positional args rather than the map-in/map-out data
+  convention; the DATA boundary (the subscription entity + the changed-summaries
+  event) gets its registered Malli schemas at M3, through seon.db.
+
+  M1 scope: routing + change-detection + the index. The full `changed-summaries`
+  entry (agent-id, rows, render) lands at M3/M4; basis-t catch-up at M4."
   (:require [clojure.edn :as edn]
             [datahike.api :as d]))
 
@@ -49,38 +54,96 @@
 (defn- clause->pattern [clause]
   (when (and (vector? clause)
              (<= 2 (count clause) 3)
-             (not (seq? (first clause))))          ; skip [(pred ...)] / fn clauses
+             (not (coll? (first clause))))         ; skip [(pred ...)] / fn clauses
     (let [[e a v] clause]
       [(pos->pat e) (pos->pat a) (pos->pat (when (= 3 (count clause)) v))])))
 
 (defn query->patterns
   "Derive the e/a/v wake-patterns from a datalog query (a form, or its source
-  string). Reads the :where clauses; qvars/_ → wildcard, literals kept."
+  string). Walks the :where clauses RECURSIVELY, so clauses nested inside
+  not/or/and/*-join are still indexed — missing one would silently under-match
+  and drop wakes. qvars/_ → wildcard, literals kept. Over-collecting is safe
+  (the cheap gate + result-diff confirm); under-collecting is not."
   [query]
-  (let [q (if (string? query) (edn/read-string query) query)]
-    (into [] (keep clause->pattern) (->> q (drop-while #(not= :where %)) rest))))
+  (let [q (if (string? query) (edn/read-string query) query)
+        where (->> q (drop-while #(not= :where %)) rest)]
+    (into [] (keep clause->pattern) (tree-seq coll? seq where))))
+
+;; ---------------------------------------------------------------------------
+;; inverted index over subscriptions  {attr|entity -> #{sub-id}} + match-all.
+;; turns per-tx routing from O(all subs) into O(subs touching the tx's attrs).
+;; a SUPERSET filter — candidates are confirmed by the cheap gate in on-tx!.
+;; ---------------------------------------------------------------------------
+
+(defn- pattern-index-key
+  "Where a [e a v] pattern indexes: by its attribute (most selective), else by a
+  concrete entity, else the match-everything bucket (:all)."
+  [[e a _v]]
+  (cond
+    (keyword? a)               [:by-attr a]
+    (and (= '_ a) (not= '_ e)) [:by-entity e]
+    :else                      :all))
+
+(defn- index-update [index f sub-id patterns]
+  (reduce (fn [idx pat]
+            (let [k (pattern-index-key pat)]
+              (if (= :all k)
+                (update idx :all f sub-id)
+                (update-in idx k (fnil f #{}) sub-id))))
+          index patterns))
+
+(defn- index-add    [index sub-id patterns] (index-update index conj sub-id patterns))
+(defn- index-remove [index sub-id patterns] (index-update index disj sub-id patterns))
+
+(defn- candidate-subs
+  "The subscriptions a commit COULD affect: those indexed under any modified
+  attribute or touched entity, plus the match-everything bucket. A superset of
+  the true matches — on-tx!'s cheap gate confirms the precise e/a/v."
+  [index datoms]
+  (into (:all index)
+        (concat (mapcat #(get-in index [:by-attr (second %)]) datoms)
+                (mapcat #(get-in index [:by-entity (first %)]) datoms))))
 
 ;; ---------------------------------------------------------------------------
 ;; per-conn engine state
-;; {:db-name s :subs {sub-id {:query q :patterns [...] :last-result <result>}}}
+;; {:db-name s
+;;  :subs   {sub-id {:query q :patterns [...] :last-result <result>}}
+;;  :index  {:by-attr {a #{sub-id}} :by-entity {e #{sub-id}} :all #{sub-id}}}
 ;; ---------------------------------------------------------------------------
 
-(defn new-engine-state [db-name]
-  (atom {:db-name db-name :subs {}}))
+(defn new-engine-state
+  "Fresh per-conn (per-cluster) engine state: an atom holding the subscription
+  cache and the inverted index. Never share one across conns."
+  [db-name]
+  (atom {:db-name db-name :subs {} :index {:by-attr {} :by-entity {} :all #{}}}))
 
-(defn register-sub!
-  "Register a subscription: derive its patterns, run the initial query, cache it.
-  Call AFTER the subscription datom's own transact returns, so the registration
-  tx does not route to the brand-new sub. Returns the cached entry."
-  [state conn sub-id query]
-  (let [entry {:query query
-               :patterns (query->patterns query)
-               :last-result (d/q query (d/db conn))}]
-    (swap! state assoc-in [:subs sub-id] entry)
+(defn- register-sub*
+  "Register a subscription against a GIVEN db value: derive patterns, seed the
+  initial result, add to the cache AND the inverted index."
+  [state db sub-id query]
+  (let [patterns (query->patterns query)
+        entry {:query query :patterns patterns :last-result (d/q query db)}]
+    (swap! state (fn [s] (-> s
+                             (assoc-in [:subs sub-id] entry)
+                             (update :index index-add sub-id patterns))))
     entry))
 
-(defn unregister-sub! [state sub-id]
-  (swap! state update :subs dissoc sub-id)
+(defn register-sub!
+  "Register a subscription in the engine cache + index. Call AFTER the
+  subscription datom's own transact returns, so the registration tx does not
+  route to the brand-new sub. Returns the cached entry."
+  [state conn sub-id query]
+  (register-sub* state (d/db conn) sub-id query))
+
+(defn unregister-sub!
+  "Drop a subscription from both the cache and the inverted index (so its id
+  doesn't leak in the index sets)."
+  [state sub-id]
+  (swap! state (fn [s]
+                 (let [patterns (get-in s [:subs sub-id :patterns])]
+                   (-> s
+                       (update :subs dissoc sub-id)
+                       (update :index index-remove sub-id patterns)))))
   nil)
 
 ;; ---------------------------------------------------------------------------
@@ -90,9 +153,9 @@
 
 (defn register-subscription!
   "Transact the subscription as a durable datom (query stored as SOURCE STRING —
-  code-as-data), THEN register it in the engine cache. The cache registration runs
-  AFTER the transact returns, so the registration tx itself does not route to the
-  brand-new sub."
+  code-as-data), THEN register it in the engine cache + index. The cache
+  registration runs AFTER the transact returns, so the registration tx itself
+  does not route to the brand-new sub."
   [state conn sub-id query]
   (d/transact conn [{:seon.subscription/id sub-id
                      :seon.subscription/query (pr-str query)
@@ -100,11 +163,11 @@
   (register-sub! state conn sub-id query))
 
 (defn rebuild!
-  "Reconstitute the in-memory cache from the active subscription datoms — nothing
-  in the cache is authoritative, the datoms are. Re-derives patterns and seeds
-  :last-result from the CURRENT db (seed-to-current). Basis-t catch-up for changes
-  missed during downtime is M4, once writebacks persist :seon.subscription/basis-t.
-  Returns the number of subscriptions rebuilt."
+  "Reconstitute the in-memory cache + index from the active subscription datoms —
+  nothing in the cache is authoritative, the datoms are. Captures the db once,
+  re-derives patterns, and seeds :last-result from the CURRENT db (seed-to-current;
+  basis-t catch-up for changes missed during downtime is M4, once writebacks
+  persist :seon.subscription/basis-t). Returns the number of subscriptions rebuilt."
   [state conn]
   (let [db (d/db conn)
         subs (d/q '[:find ?id ?q
@@ -113,7 +176,7 @@
                            [?s :seon.subscription/query ?q]]
                   db)]
     (doseq [[sub-id qstr] subs]
-      (register-sub! state conn sub-id (edn/read-string qstr)))
+      (register-sub* state db sub-id (edn/read-string qstr)))   ; db captured once
     (count (:subs @state))))
 
 ;; ---------------------------------------------------------------------------
@@ -124,29 +187,34 @@
   (mapv (fn [d] [(:e d) (:a d) (:v d)]) (:tx-data report)))
 
 (defn on-tx!
-  "datahike `d/listen!` callback. Routes the commit to affected subscriptions
-  (cheap gate), re-runs the candidates, and emits ONE event per commit carrying
-  the subs whose result really moved. READ-ONLY — never transacts.
-
-  ctx = {:db-name :conn :state :emit!}. Returns the changed entries (for tests)."
+  "datahike `d/listen!` callback. Routes the commit to candidate subscriptions
+  (inverted index → cheap gate confirms), re-runs the candidates, and emits ONE
+  event per commit carrying the subs whose result really moved. READ-ONLY — never
+  transacts. ctx = {:db-name :conn :state :emit!}. Returns the changed entries."
   [{:keys [db-name state emit!]} report]
   (let [datoms (report->datoms report)
         db (:db-after report)
         basis-t (:max-tx db)
         request-id (:seon.db/request-id (:tx-meta report))   ; nil until M3 wires it
+        snapshot @state
         changed (reduce
-                 (fn [acc [sub-id {:keys [query patterns last-result]}]]
-                   (if (any-datoms-match? patterns datoms)            ; GATE 1 (cheap)
-                     (let [new-result (d/q query db)]
-                       (if (not= new-result last-result)              ; GATE 2 (change)
-                         (do (swap! state assoc-in [:subs sub-id :last-result] new-result)
-                             (conj acc {:seon.reactive/sub-id sub-id
-                                        :seon.reactive/result new-result}))
-                         acc))
-                     acc))
+                 (fn [acc sub-id]
+                   (let [{:keys [query patterns last-result]} (get-in snapshot [:subs sub-id])]
+                     (if (any-datoms-match? patterns datoms)           ; GATE 1 (cheap, confirms index)
+                       (let [new-result (d/q query db)]
+                         (if (not= new-result last-result)             ; GATE 2 (real change)
+                           (conj acc {:seon.reactive/sub-id sub-id
+                                      :seon.reactive/result new-result})
+                           acc))
+                       acc)))
                  []
-                 (:subs @state))]
+                 (candidate-subs (:index snapshot) datoms))]   ; candidates only, not all N
     (when (seq changed)
+      ;; one swap! advances every moved sub's :last-result (no atom thrashing)
+      (swap! state update :subs
+             (fn [subs] (reduce (fn [m {:seon.reactive/keys [sub-id result]}]
+                                  (assoc-in m [sub-id :last-result] result))
+                                subs changed)))
       (emit! (cond-> {:seon.reactive/db-name db-name
                       :seon.reactive/basis-t basis-t
                       :seon.reactive/changed changed}

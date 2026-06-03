@@ -114,3 +114,18 @@
         (is (= #{"s1" "s2"} (set (keys (:subs @fresh)))))
         (testing "rebuilt cache (patterns + last-result) is identical to the live cache"
           (is (= (:subs @state) (:subs @fresh))))))))
+
+(deftest inverted-index-narrows-candidates
+  (let [{:keys [conn state]} (with-engine)]
+    (d/transact conn [{:db/id -1 :unit/name "A" :unit/pos "x"}])
+    ;; 20 subs on disjoint "noise" attributes + one on units
+    (doseq [k (range 20)]
+      (reactive/register-sub! state conn (str "noise-" k)
+                              [:find '?e :where ['?e (keyword "noise" (str k)) '?v]]))
+    (reactive/register-sub! state conn "units" units-query)
+    (testing "a tx touching only :unit/pos yields ONLY the units sub as candidate"
+      (let [r      (d/transact conn [{:db/id 1 :unit/pos "y"}])
+            datoms (#'reactive/report->datoms r)
+            cands  (#'reactive/candidate-subs (:index @state) datoms)]
+        (is (= #{"units"} (set cands))
+            "the 20 noise subs are excluded by the index, never scanned")))))
