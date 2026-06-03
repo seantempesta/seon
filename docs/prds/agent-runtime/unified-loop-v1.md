@@ -1,7 +1,7 @@
 ---
 type: prd
 status: draft
-tags: [prd, agent, runtime]
+tags: [prd, agent]
 ---
 
 # Unified agent runtime loop — handlers, render-on-entity, request-turn events
@@ -92,6 +92,7 @@ schemas use:
 
 (schema/register! :seon.handler/register!-response
   [:map [:seon.handler/registered? :boolean]])
+
 ```
 
 Defaults: `:on-origin` omitted ⇒ `#{:user :agent :system}` (skip
@@ -147,6 +148,7 @@ turn that emitted at least one form (i.e., did real work), the
 {:seon.turn-request/id    "<id>"
  :seon.turn-request/agent [:seon.agent/id <id>]
  :seon.turn-request/at    (js/Date.)}
+
 ```
 
 A substrate handler `process-turn-request` matches
@@ -207,6 +209,7 @@ finishes), it transacts:
  :seon.render/ai           'seon.async-result/render-ai
  :seon.render/html         'seon.async-result/render-html
  :seon.ctx/updated-at      #inst ...}
+
 ```
 
 A substrate handler `route-async-result` matches
@@ -269,6 +272,7 @@ direct consequence.
   {:seon.handler/name  :seon.handler/surface-system-error
    :seon.handler/match {:seon.handler.match/attr :seon.system/error}
    :seon.handler/fn    'seon.runtime/surface-system-error})
+
 ```
 
 No per-agent copies — substrate handlers carry `:agent nil` and the

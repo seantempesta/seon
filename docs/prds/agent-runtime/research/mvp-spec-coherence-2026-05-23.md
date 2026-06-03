@@ -204,6 +204,7 @@ The example uses `[:db/retract [:seon.agent/id agent-id] :seon.agent/ctx]` — a
         pulled (db/pull {:seon.db/pull-pattern '[:seon.fn/sym {:seon.fn/ns [*]}]
                          :seon.db/ref [:seon.fn/sym "seon.r3probe/foo"]})]
     …))
+
 ```
 
 Result (from `logs/pod.log`):
@@ -226,6 +227,7 @@ ERROR [seon.client] unhandled promise rejection #error
                        :type :malli.core/invalid-type})}}}
   at seon$db$validate_ref_child_BANG_ (src/seon/db.cljs:543)
   at seon$db$validate_entity_values_BANG_ (src/seon/db.cljs:578)
+
 ```
 
 **Probe 2 — bypass validator, call `datahike.api/transact!` directly**:
@@ -245,6 +247,7 @@ ERROR [seon.client] unhandled promise rejection #error
                  '[:seon.fn/sym {:seon.fn/ns [:seon.ns/name :seon.ns/source]}]
                  [:seon.fn/sym "seon.r3probe3/foo"])]
     …))
+
 ```
 
 Result (from `logs/pod.log`):
@@ -254,6 +257,7 @@ Result (from `logs/pod.log`):
 R3-OK: {:seon.fn/sym "seon.r3probe3/foo",
         :seon.fn/ns {:seon.ns/name :seon.r3probe3,
                      :seon.ns/source "(ns seon.r3probe3)"}}
+
 ```
 
 ### Verdict
@@ -345,6 +349,7 @@ in the bootstrap-emit ship.
      :seon.warning/text
      (str "failed eval " (:seon.eval/id e)
           " — " (subs (or (:seon.eval/error e) "") 0 120))}))
+
 ```
 
 Costs essentially nothing — same query shape as `slow-eval-warning`,
@@ -377,6 +382,7 @@ through `seon.db/transact!` as values of single-card ref attrs like
      (sequential? val))
 (doseq [child val]
   (validate-ref-child! attr child))
+
 ```
 
 `sequential?` matches a literal lookup-ref tuple `[:seon.ns/name
@@ -406,6 +412,7 @@ Suggested guard:
   ;; ... continue to the many-card branch only when the registered
   ;; schema's HEAD is :vector/:set ...
 )
+
 ```
 
 **File:line refs:** `src/seon/db.cljs:551–602` (the validator),

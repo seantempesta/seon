@@ -1,7 +1,7 @@
 ---
 type: research
 status: active
-tags: [research, prior-art, milestone]
+tags: [research, milestone]
 ---
 
 # Milestone Prior Work — Evidence Audit
@@ -82,7 +82,7 @@ roundtrip tests.
 - Current `seon` repo / `main`: `src/seon/schema.cljc` is the single
   registration point (`schema/register!`). `src/seon/db.clj` validates every
   transaction via Malli before handing to Datahike. `test/seon/db/pipeline_test.clj`
-  + `test/seon/db/validation_test.clj` are the generative roundtrip tests
+  - `test/seon/db/validation_test.clj` are the generative roundtrip tests
   (Phase 1–4 of the schema-unification project — see memory pointer
   `Schema Unification Progress`).
 - Nippy wire protocol on inter-JVM TCP: `src/seon/flow/harness/channel.clj`
@@ -367,6 +367,7 @@ composes itself.
   management.
 - **Predecessor `seon-biff/src/seon/agent.clj` `development-loop`**
   (lines 372–392) — the autonomous loop in its earliest form:
+
   ```clojure
   (defn development-loop
     ([] (development-loop @system-ctx))
@@ -377,6 +378,7 @@ composes itself.
          (reset! system-ctx next-ctx)
          (if (= (:state next-ctx) :terminated) ...)
          (recur next-ctx (inc iterations))))))
+
   ```
   Drives the FSM (gather requirements → generate spec → execute → retry →
   generate function → execute → finalize) entirely from an `initialize`
@@ -416,6 +418,7 @@ Paste this into the README in place of the current Status table:
 | [M6: Eval pipeline](docs/seon/vision/m6-eval-pipeline.md)                      | prototyped — `feature/super-repl` + `repl/graduate.clj` + CLJS pod `eval.cljs`/`repl.cljs` all working; constraint-fn discovery not yet wired |
 | [M7: Namespace as living process](docs/seon/vision/m7-namespace-as-process.md) | prototyped — default `namespace-step` + ctx atoms + flow topology in production; custom step-fn discovery and feeds/subscriptions remain |
 | [M8: Autonomous agents](docs/seon/vision/m8-autonomous-agents.md)              | prototyped — single-agent `run-agentic-loop!` working in CLJS pod (`src/seon/agent.cljs`); typed notifications + inter-agent messaging remain |
+
 ```
 
 Vocabulary key:

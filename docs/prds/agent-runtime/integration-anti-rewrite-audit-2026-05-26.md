@@ -1,7 +1,7 @@
 ---
 type: research
 status: active
-tags: [research, agent, database, platform]
+tags: [research, agent, database]
 ---
 
 # Integration Anti-Rewrite Audit
@@ -43,10 +43,12 @@ all have substantial existing pieces in `src/seon/` that the plan does not credi
 ### 1. konserve-sqlite for JVM
 
 - **Existing:** YES — `pod-host/sidecar-poc/jvm-writer/deps.edn:11-12` pins `io.replikativ/konserve-jdbc {:mvn/version "0.2.91" :exclusions [io.replikativ/konserve]}` plus `org.xerial/sqlite-jdbc {:mvn/version "3.46.1.0"}`. Wired in `pod-host/sidecar-poc/jvm-writer/src/seon/sidecar/writer.clj:61-70`:
+
   ```clojure
   "sqlite"
   {:store {:backend :jdbc :dbtype "sqlite" :dbname (:path opts) :table "store" :id ...}
    :keep-history? true :schema-flexibility :write}
+
   ```
   This is exercised by the 47-test / 189-assertion protocol integration suite that ships green.
 - **Konserve version pin** (line 10 of that deps.edn): `org.replikativ/konserve {:mvn/version "0.9.346"}` — newer than what konserve-jdbc 0.2.91 requests; exclusion strips konserve-jdbc's transitive pull. **The "konserve-jdbc is built against 0.8.x; datahike pulls 0.9.x" claim in `integration-architecture-2026-05-26.md` §7 is wrong; the actual collision is resolvable with the exact pin already in jvm-writer.**
@@ -179,6 +181,7 @@ wc -l src/konserve_sqlite_cljs/core.cljs reference-code/konserve-lmdb/src/konser
   → 438 + 2129 LOC; konserve-lmdb is NOT the right analog given konserve-jdbc exists
 grep -n 'handle-op' writer.clj → 1 defmulti + 12 defmethods + 1 caller
 cat .gitmodules | head → konserve-lmdb is a submodule under reference-code/
+
 ```
 
 ---

@@ -6,7 +6,7 @@ tags: [research, pod, cljs]
 
 # Eval error envelope — why it nests deeply, and how to flatten
 
-Triage notes for KI-3 in [[../agent-repl-mvp#known-issues]].
+Triage notes for KI-3 in [[agent-repl-mvp-pre-2026-05-22#known-issues]].
 Captured 2026-05-22 while implementing the fix.
 
 ## TL;DR
@@ -158,7 +158,7 @@ conflict in practice.
 - `seon.eval/eval` returns `{:ok false :error <map>}` where the
   map gains a `:seon.error/data` key carrying the merged ex-data.
 - Renderers (the recent-evals tile, the warnings tile per
-  [[../agent-repl-mvp#recent-evals-tile]]) read
+  [[agent-repl-mvp-pre-2026-05-22#recent-evals-tile]]) read
   `(get-in r [:seon.error/data :seon.eval/warning-type])` instead
   of walking causes.
 - Existing `:seon.error/ex-data` per-level keys stay — they're
@@ -179,7 +179,7 @@ Both worth flagging in the PR, not blocking this fix.
 
 ## Reference
 
-- KI-3 framing: [[../agent-repl-mvp#known-issues]] §KI-3
+- KI-3 framing: [[agent-repl-mvp-pre-2026-05-22#known-issues]] §KI-3
 - cljs.js wrap source: `~/src/clojurescript/src/main/cljs/cljs/js.cljs:126-127, :815-817, :841-847`
 - Existing `->map`: `src/seon/error.cljs:19-35`
 - Reject path that avoids the wraps:

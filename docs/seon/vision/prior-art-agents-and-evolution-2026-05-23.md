@@ -1,7 +1,7 @@
 ---
 type: research
 status: active
-tags: [research, vision, prior-art, llm, agents]
+tags: [research, vision]
 ---
 
 # Prior Art: Agents, Evolution, and Self-Improving AI
@@ -152,13 +152,13 @@ Same LLM produces an output, critiques it, and refines it. Roughly +20% across s
 
 ### Significant Gravitas (Toran Bruce Richards) — AutoGPT (March 2023)
 
-> AutoGPT public release, 30 March 2023. https://github.com/Significant-Gravitas/AutoGPT
+> AutoGPT public release, 30 March 2023. <https://github.com/Significant-Gravitas/AutoGPT>
 
 The first widely-used autonomous-agent product. Demonstrated the basic loop — goal → subgoals → tool use → reflection → repeat — at a level the broader developer community could run. Fastest-growing project in GitHub history at the time.
 
 ### Yohei Nakajima — BabyAGI (April 2023)
 
-> Nakajima, Y. (2023). BabyAGI. https://github.com/yoheinakajima/babyagi
+> Nakajima, Y. (2023). BabyAGI. <https://github.com/yoheinakajima/babyagi>
 
 105 lines of Python that orchestrate a task-creation/execution/reprioritization loop backed by a vector store. Stripped-down enough to read in one sitting and clarified the *shape* of an autonomous-agent loop for thousands of subsequent developers.
 
@@ -374,7 +374,7 @@ Production-side patterns for forcing LLMs to emit JSON conforming to a Pydantic 
 
 ### Microsoft TypeChat (2023)
 
-> Microsoft (2023). TypeChat. https://microsoft.github.io/TypeChat/
+> Microsoft (2023). TypeChat. <https://microsoft.github.io/TypeChat/>
 
 Constraint: the LLM must emit TypeScript code that type-checks against a given interface. Tight type-system-as-prompt-spec is the mechanism.
 

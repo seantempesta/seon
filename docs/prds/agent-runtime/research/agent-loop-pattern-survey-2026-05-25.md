@@ -225,6 +225,7 @@ What we KEEP from the trigger sketch:
 
 ;; Agent state enum gains :paused (per turn-as-unit-2026-05-25 §Q5).
 ::seon.agent/state            [:enum :idle :running :paused]
+
 ```
 
 No match-spec on the handler; the handler fn itself decides whether the tx is interesting to it. `:event-kind` is a coarse pre-filter that lives in code (the dispatcher's `case` on `:kind`) — handler entities for a given kind get called in priority order.
@@ -250,6 +251,7 @@ The per-agent dispatcher (replaces `user-message-handler`) registered once per a
       (when (seq effects) (run-effects! input effects))
       (when (and wake? (not= :running (current-state db id)))
         (js/setTimeout #(db/with-agent id (fn [] (run-agentic-loop! input))) 0)))))
+
 ```
 
 `extract-events` is pure: scans `attr-index` for added datoms of known kinds (`:seon.message/role`, `:seon.async-result/kind`, etc.), returns a normalized seq of `{:event/kind … :event/eid …}`. Maps directly onto the existing pattern at agent.cljs:339-341 — just generalized beyond `:seon.message/role`.

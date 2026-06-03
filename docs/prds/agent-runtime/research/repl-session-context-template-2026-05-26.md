@@ -1,7 +1,7 @@
 ---
 type: research
 status: draft
-tags: [research, agent, render, repl, template]
+tags: [research, agent]
 ---
 
 > **SUPERSEDED for design decisions** by `architecture/ctx-render-strategies-prd.md` (2026-05-26 revision). Retained for history; do not use as the current spec.
@@ -65,6 +65,7 @@ prose, the parser ignores it.
 ;; Your home namespace is shown at the top of this file as
 ;; `(ns seon.agent.XAR-…)`. defn / def into it freely.
 ;; ============================================================
+
 ```
 
 Concise = same text truncated to the first N chars (PRD's fallback).
@@ -84,6 +85,7 @@ forms inside an eval batch are subsumed (§4).
 (ns seon.db
   "Datalog reads + writes. The sole DB API.")
 ;; #'seon.db
+
 ```
 
 Handle: `#'seon.db` — the symbol; the agent evals it to drill in.
@@ -102,6 +104,7 @@ shape is large, concise truncates the vector with ` … ]`.
    [:seon.handler.match/attr :keyword]
    [:seon.handler.match/value? {:optional true} :seon.handler.match/value?]])
 ;; :seon.schema/key :seon.message/content
+
 ```
 
 Handle: the schema key keyword itself. The agent evals
@@ -129,6 +132,7 @@ plus docstring:
   [{:seon.db/keys [query args]}]
   (apply d/q query @*conn* args))
 ;; #'seon.db/query
+
 ```
 
 Handle: `#'seon.db/query`. The agent can eval that symbol bare and get
@@ -148,6 +152,7 @@ subsequent agent-registered handlers render concisely.
    :seon.handler/match {:seon.handler.match/attr :seon.message/to}
    :seon.handler/fn    'seon.handlers.wake/wake-on-message})
 ;; #'seon.handler/wake-on-message
+
 ```
 
 Handle: `#'seon.handler/wake-on-message` (the keyword name resolved
@@ -165,6 +170,7 @@ but readable:
                  :from :user
                  :at #inst "2026-05-26T10:00:00.000Z"
                  :content "build a calculator with add"})
+
 ```
 
 Concise truncates `:content`. Handle: the message id, but the agent
@@ -187,6 +193,7 @@ what the agent did. Renders as:
 (defn add [x y] (+ x y))
 ;; => #'seon.agent.XAR-2605251544/add
 ;; #seon.eval/id "ev-1"
+
 ```
 
 For a failed eval:
@@ -195,6 +202,7 @@ For a failed eval:
 (throw (ex-info "test" {}))
 ;; ! :seon.error/message "test"
 ;; #seon.eval/id "ev-fail-1"
+
 ```
 
 For a multi-form eval batch (one LLM turn produced N forms), each
@@ -221,6 +229,7 @@ between two evals — a foreign event the agent watched land:
                       :ok? true
                       :value "(brief textual summary)"
                       :at #inst "2026-05-25T12:00:04.000Z"})
+
 ```
 
 The leading `;; --- async result arrived ---` comment is the only
@@ -276,6 +285,7 @@ The worked example, rendered:
                  :to [:user]
                  :at #inst "2026-05-26T09:00:00.500Z"
                  :content "pong"})
+
 ```
 
 **Justification**: Option (a) alone undertrains — the agent sees user
@@ -423,6 +433,7 @@ A literal sample of the first 40 lines:
                  :content "pong"
                  :at #inst "2026-05-26T09:00:00.500Z"})
 ;; ════════════════════════════════════════════════════════════════
+
 ```
 
 After the `════` line, everything is chronological tail.
@@ -594,6 +605,7 @@ it, user asks to make it variadic, agent redefines + tests.
                    :at #inst "2026-05-26T10:00:31.000Z"}]})
 ;; => {:tempids {} :tx-data [,,,]}
 ;; #seon.eval/id "ev-7"
+
 ```
 
 **Line count**: ~100 lines including blanks. **Character count**:

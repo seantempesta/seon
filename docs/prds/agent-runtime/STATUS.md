@@ -38,7 +38,7 @@ spec content.**
 - **Platform track**: multi-DB JVM wire-server + Node-first agents (V2.0),
   hardening to WASM-Tauri containment (V2.1) — design in
   [platform.md](platform.md) + the 2026-06-03 plan docs. Capability hardening
-  + Phase 2 test infra shipped 2026-05-22 (below).
+  - Phase 2 test infra shipped 2026-05-22 (below).
 
 ## Sean's locked-in decisions (2026-05-24) + revised migration plan
 
@@ -141,11 +141,11 @@ green.
      `analyzer-info/var-projection` directly so the rename lives
      in one place.
    - Research file's reference impl used `cljs.analyzer.api/find-ns`
-     + `ns-resolve` — neither exists in self-host CLJS. Module
+     - `ns-resolve` — neither exists in self-host CLJS. Module
      reads `(:cljs.analyzer/namespaces @compile-state)` directly.
    - `seon.client/!compile-state` defonce (dead since
      compile-state-lifecycle research 2026-05-22) deleted. Item 10
-     + Phase C/D should consume `seon.repl/!compile-state` or the
+     - Phase C/D should consume `seon.repl/!compile-state` or the
      inner atom threaded through `eval-batch!`.
 10. ✅ `eval-batch!` detect-and-tee using analyzer diff + registry-atom
     diff. Writes `:seon.fn` (with `:fn-var?`, `:arglists`, `:doc`,

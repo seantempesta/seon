@@ -1,7 +1,7 @@
 ---
 type: research
 status: draft
-tags: [research, malli, datahike, schema, entity-kind]
+tags: [research, schema]
 ---
 
 # Entity Kind Discrimination + `:any`/`:maybe` Audit
@@ -40,17 +40,21 @@ fn for each entity.
 ### Option A — Explicit `:seon.entity/kind` attr per entity
 
 **Shape.**
+
 ```clojure
 (schema/register! :seon.entity/kind :keyword)
 ;; write site:
 (record-eval! {:seon.eval/id ... :seon.entity/kind :seon.eval ...})
+
 ```
 
 **Discovery query (renderer):**
+
 ```clojure
 (->> (d/datoms db :aevt :seon.entity/kind)
      (group-by #(.-v %))  ; group by kind keyword
      (map-vals (fn [ds] (map #(.-e %) ds))))
+
 ```
 
 **Storage cost.** One indexed keyword datom per entity. Datahike stores
@@ -121,6 +125,7 @@ Read of `reference-code/datahike/src/datahike/schema.cljc:65`:
   #{:db/id :db/ident :db/isComponent :db/noHistory :db/valueType
     :db/cardinality :db/unique :db/index :db.install/_attribute
     :db/doc :db/tupleAttrs :db/tupleType :db/tupleTypes})
+
 ```
 
 No native `:db/entityType` or kind attribute. Datahike inherits Datomic's
@@ -132,6 +137,7 @@ Datahike DOES ship **entity specs** (`reference-code/datahike/doc/entity_spec.md
 ```clojure
 ;; example from doc/entity_spec.md:67
 (d/transact conn {:tx-data [(assoc valid-account :db/ensure :person/guard)]})
+
 ```
 
 These are validation hooks (`:db.entity/attrs`, `:db.entity/preds`) you attach
@@ -149,6 +155,7 @@ Register the attr in `seon.schema` once:
 (schema/register! :seon.entity/kind
   [:keyword {:db/index true
              :description "Discriminator for per-kind dispatch."}])
+
 ```
 
 Stamp at the writer boundary in `seon.db/transact!`: if an entity map has an
@@ -163,6 +170,7 @@ Renderer becomes:
   (->> (d/datoms db :aevt :seon.entity/kind)
        (filter (fn [d] (get-in @schemas [(.-v d) :seon.render/ai])))
        (map (fn [d] {:eid (.-e d) :kind (.-v d)}))))
+
 ```
 
 Schema-level lookup replaces per-row symbol storage. Migration is a one-shot
@@ -227,6 +235,7 @@ where a concrete type exists.
    + (schema/register! :seon.log/data    :string)
    - [:seon.log/data    {:optional true} :any]
    + [:seon.log/data    {:optional true} :string]
+
    ```
 
 2. **`src/seon/repl.clj:44` — `[:maybe :string]` violates "no `:maybe`".**
@@ -239,6 +248,7 @@ where a concrete type exists.
    -                   [:maybe :string {:description "..."}])
    + (schema/register! ::form-name
    +                   [:string {:description "..."}])
+
    ```
 
 3. **`src/seon/repl.clj:50` — `::result :any`.** This is the nREPL eval
@@ -258,13 +268,16 @@ where a concrete type exists.
    + [:seon.db/conn {:optional true} :seon.db/conn]
    - [:map [:seon.db/db :any]]
    + [:map [:seon.db/db :seon.db/db]]
+
    ```
 
    Add to `seon.schema`:
+
    ```
    + (schema/register! :seon.db/conn
    +   [:fn {:error/message "must be a Datahike conn (atom)"}
    +        #(satisfies? IDeref %)])
+
    ```
 
 5. **`src/seon/render.cljs:75` — `[:map [:seon.render/hiccup :any]]`
@@ -276,14 +289,17 @@ where a concrete type exists.
    -   [:map [:seon.render/hiccup :any]])
    + (schema/register! :seon.render/html-response
    +   [:map [:seon.render/hiccup :seon.render/hiccup]])
+
    ```
 
    And tighten the `:seon.render/hiccup` registration itself
    (`render.cljs:63`):
+
    ```
    - (schema/register! :seon.render/hiccup ...)  ; currently :any-ish
    + (schema/register! :seon.render/hiccup
    +   [:or :string :int [:vector :any] [:sequential :any]])
+
    ```
    (leaves stay `:any` since hiccup is recursively polymorphic).
 
@@ -354,10 +370,10 @@ convention: explicit `:type` attr. Asami (an open-source EAV) uses
 convention is unanimous: explicit kind/type attr per entity**.
 
 **Sources (URLs):**
-- Datomic Schema docs: https://docs.datomic.com/cloud/schema/schema-reference.html
+- Datomic Schema docs: <https://docs.datomic.com/cloud/schema/schema-reference.html>
 - Datomic mailing list canonical thread on `:entity/type` (2015-2017,
   searchable): groups.google.com/g/datomic search "entity type"
-- XTDB 2.x reference: https://docs.xtdb.com/reference/main/data-types
+- XTDB 2.x reference: <https://docs.xtdb.com/reference/main/data-types>
 - Datascript wiki / Datalevin docs (similar): github.com/tonsky/datascript
 
 Validation: Sean's instinct toward Option A is consistent with the

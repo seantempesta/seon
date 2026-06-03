@@ -41,6 +41,7 @@ Schemas use `::` (namespace-local) keywords. Identity keys have `{:seon.db/ident
 
 (schema/register! ::screen
   [:enum {:default :home} :home :active :history])
+
 ```
 
 These are normal [[components/schema-system|Malli schemas]] registered via `schema/register!`. The properties (`:seon.db/identity`, `:default/fn`, `:default`) are standard Malli properties — the same mechanism used by [[architecture/decisions/004-schema-unification|`:seon.db/identity` in the database bridge]].
@@ -57,6 +58,7 @@ Functions are classified by their specs — the agent doesn't choose a category:
                       [:map [::volume :double]]]}
   [{::keys [weight reps]}]
   {::volume (* weight (double reps))})
+
 ```
 
 **Stateful** — identity key in input AND output. Reads from and writes to an entity.
@@ -73,6 +75,7 @@ Functions are classified by their specs — the agent doesn't choose a category:
   [{::keys [ns-id workouts exercise weight reps]}]
   {::ns-id ns-id
    ::workouts (conj workouts {::exercise exercise ::weight weight ::reps reps})})
+
 ```
 
 The function doesn't know about Datahike. It receives a map, returns a map.
@@ -109,6 +112,7 @@ Step 4: REACTIVE CASCADE (automatic via tx-bus)
   → returns {::ns-id "..." ::weekly-volume 500.0 ::weekly-sets 1}
   → transact → report → shape graph → suggest-next-weight → ...
   → cycle prevention stops when a function would be called twice
+
 ```
 
 ### 4. Consumer Pruning
@@ -125,6 +129,7 @@ Not all downstream functions fire. The system checks if anyone wants their outpu
 ;; Now: update-weekly-volume fires (::weekly-volume is consumed)
 ;; Now: suggest-next-weight fires (::suggestions is consumed)
 ;; If nobody consumed these keys, they'd be pruned
+
 ```
 
 State updates (functions with identity key in output) always fire — they're modifying the entity, not just computing data. Consumer pruning only applies to non-identity output keys.
@@ -157,6 +162,7 @@ The per-db conn-process flow exposes a tx-bus — every successful `d/transact` 
     ;; Filter by consumer pruning
     ;; Dispatch each matching function
     ))
+
 ```
 
 The tx-bus delivers reports synchronously on the conn-process thread, so recursive reactive chains work naturally — each downstream transact publishes again on the same bus.
@@ -170,6 +176,7 @@ Tracks active consumers (REPL sessions, browser tabs, agent connections):
  ::conn-type :browser          ;; :repl, :browser, :agent
  ::render-key :seon.render/html ;; what output format
  ::consuming-keys #{::volume ::weekly-volume}}  ;; what data this connection wants
+
 ```
 
 `active-consumers` returns the union of all `::consuming-keys` across connections. The reactive chain uses this for pruning.
@@ -188,6 +195,7 @@ The atom holds the result of a recursive pull:
  ::bodyweight 85.0
  ::workouts [{:db/id 1 ::workout-id "w-001" ::exercise "Squat" ::weight 100.0 ::reps 5}
              {:db/id 2 ::workout-id "w-002" ::exercise "Bench" ::weight 80.0 ::reps 8}]}
+
 ```
 
 When the agent does `(swap! *ctx* assoc-in [::workouts 0 ::weight] 120.0)`:
@@ -245,6 +253,7 @@ This is correct for add/remove operations (which DO change the `::workouts` ref)
                        ::render-key :seon.render/ai
                        ::consuming-keys #{::volume}})
 (unregister-connection! {::conn-id "repl-1"})
+
 ```
 
 ## Related

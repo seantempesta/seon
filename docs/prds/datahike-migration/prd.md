@@ -93,6 +93,7 @@ Datahike with `:writer :self` + konserve's pluggable backends collapses this. Em
 │   └── seon.city/                                                 │
 │  (optional) git init data/ → time-travel code + data             │
 └──────────────────────────────────────────────────────────────────┘
+
 ```
 
 ### Key Components
@@ -115,6 +116,7 @@ Datahike with `:writer :self` + konserve's pluggable backends collapses this. Em
 (d/pull      :seon.weather '[*] [:seon.weather/id id])
 (d/pull-deep :seon.weather '[*] [:seon.weather/id id])  ;; new — follows refs across DBs
 (d/listen!   :seon.weather ::my-key (fn [tx-report] ...))
+
 ```
 
 ### Schema (Malli remains source of truth)
@@ -137,6 +139,7 @@ Single EDN config. Per-namespace stores are declared once; profiles select the b
 {:seon.db/data-root #or [#env SEON_DATA_ROOT "data"]
  :seon.db/namespaces [:seon.weather :seon.user :seon.city :seon.runtime :seon.ai]
  :seon.db/backend    #profile {:dev :file, :test :memory}}
+
 ```
 
 Per-namespace store config is derived from `:seon.db/data-root`, the namespace keyword, and the backend. The Integrant key set is built programmatically from `:seon.db/namespaces`.

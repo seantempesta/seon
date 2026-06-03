@@ -1,7 +1,7 @@
 ---
 type: research
 status: active
-tags: [research, schema, state, malli, datahike, agent, audit]
+tags: [research, schema, agent]
 ---
 
 # Schema, state, and identity audit — CLJS pod (2026-05-23)
@@ -11,7 +11,7 @@ tags: [research, schema, state, malli, datahike, agent, audit]
 The Seon CLJS pod is on the cusp of a clean, repeatable schema architecture
 — most of the load-bearing pieces are already there. The in-flight Platform
 refactor solved 80% of the "shape duplication" problem (`:seon.db/id` canonical
-+ `[:and {:seon.db/identity true} :seon.db/id]` reference pattern), but the
+- `[:and {:seon.db/identity true} :seon.db/id]` reference pattern), but the
 agent-identity change papered over the actual question rather than answering
 it. The right shape for v1: **agent identity lives in the DB; there is no
 `default-id`; every "the current agent" call-site is rewritten to either (a)
@@ -115,6 +115,7 @@ is **always**:
 ;; RIGHT — current X is a query
 (defn current-x [] (db/query …))
 (defn doit [{:keys [x] :or {x (current-x)}}] …)
+
 ```
 
 The `:or` default becomes a function call, not an atom deref. The
@@ -191,6 +192,7 @@ shape `[:vector {:seon.db/component true} :seon.db/ref]`:
 
 ;; In seon.agent:
 (schema/register! :seon.session/turns :seon.db/component-many)
+
 ```
 
 **Verdict:** marginal. The pattern is short enough to inline; the
@@ -401,6 +403,7 @@ Concrete win: register
 (schema/register! :seon.eval/id [:and {:seon.db/identity true
                                        :default/fn (fn [_ _] (db/new-id!))}
                                   :seon.db/id])
+
 ```
 
 Then `db/transact!` decodes tx-data with the default-value-transformer
@@ -425,7 +428,7 @@ introspection grows.
 ### 6.3 Generative-testing surface
 
 Memory: *"Generative tests for type boundaries — use Malli generators
-+ property-based tests at system boundaries."*
+- property-based tests at system boundaries."*
 
 The pod has **zero** generative tests in CLJS. `seon.flow/dynamic` has a
 `:type-properties {:gen/schema …}` registered but nothing in CLJS lane
@@ -481,7 +484,7 @@ against pod usage.)
 ### 7.1 Already-used
 
 - `:tx-meta` + `:keep-history? true` — fully wired via `with-tx-context`
-  + ALS + `merge-tx-context-into-opts` in `db/transact!`. Excellent.
+  - ALS + `merge-tx-context-into-opts` in `db/transact!`. Excellent.
 - `:db/isComponent` — used on `:seon.agent/sessions`, `:seon.session/turns`,
   `:seon.turn/{messages,evals}`, `:seon.agent/ctx`. Cascade-retract works.
 - `:db/unique :db.unique/identity` — used via `{:seon.db/identity true}`
@@ -703,6 +706,7 @@ validation failures during instrumentation bring-up).
 
 ```bash
 grep -rn "schema/register!" src/seon/ --include="*.cljs" --include="*.cljc"
+
 ```
 
 ## Appendix B — full defonce inventory
@@ -711,6 +715,7 @@ grep -rn "schema/register!" src/seon/ --include="*.cljs" --include="*.cljc"
 
 ```bash
 grep -rn "^(defonce\|^(def \^" src/seon/ --include="*.cljs" --include="*.cljc"
+
 ```
 
 ## Appendix C — files read for this audit

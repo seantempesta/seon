@@ -23,6 +23,7 @@ clj -M:cljs watch client
 
 # Terminal 2 — Node host loads the compiled bundle
 node out/client/main.js
+
 ```
 
 The watcher pins shadow nREPL to **`:7889`**. The Node host writes its
@@ -49,6 +50,7 @@ mcp__seon_cljs__eval { code: "@seon.client/!state" }
 mcp__seon_cljs__eval { code: "(seon.fs/configure!
                                   {:seon.fs/allowed-roots [\"/Users/me/work\"]
                                    :seon.fs/read-only? false})" }
+
 ```
 
 ### Iteration surface — `seon.repl/dev-init!`
@@ -69,6 +71,7 @@ mcp__seon_cljs__eval { code: "(.then (seon.repl/dev-init!) prn)" }
 ;; After init:
 ;;   @seon.repl/!compile-state  — bootstrap-CLJS compile-state
 ;;   @seon.repl/!conn           — :memory datahike conn (:keep-history? true)
+
 ```
 
 ### Two eval surfaces — pick the one matching your question
@@ -94,6 +97,7 @@ mcp__seon_cljs__eval { code:
 mcp__seon_cljs__eval { code:
   "(.then (seon.eval/eval @seon.repl/!compile-state \"Let\")
           (fn [r] (js/console.log (pr-str r))))" }
+
 ```
 
 `seon.repl/!compile-state` is nil until `dev-init!` runs. Call it
@@ -145,6 +149,7 @@ component. Confidence-run shape:
 (run-tests)
 ;; stdout: "Ran 1 tests containing 1 assertions. 0 failures, 0 errors."
 ;; return: nil
+
 ```
 
 Avoid `(with-out-str (run-tests))` inside eval-str — that combo
@@ -188,6 +193,7 @@ DATA (not parsed from stdout), use `seon.test.runner`. Same
 ;; on globalThis, NOT in the DB.
 (result "Ab12Cd34Ef")
 ;; => {:seon.test.runner/events [...] :seon.test.runner/summary {...}}
+
 ```
 
 **Storage model.** The full result lives on the agent's ns (via
@@ -250,6 +256,7 @@ wasmtime run -S http=y \
   --dir /Users/sean/src/seon/out/bootstrap::bootstrap \
   --invoke 'eval-batch("(require ...) (deftest ...) (run-tests)")' \
   eval-smoke-build/target/wasm32-wasip2/release/eval_smoke.wasm
+
 ```
 
 ### Hot reload
@@ -269,6 +276,7 @@ namespaces re-load; `^:dev/after-load` rewires.
 ```sh
 pkill -f "clj.*shadow.cljs.devtools.cli watch"
 pkill -f "node out/client/main.js"
+
 ```
 
 ### Common failure modes
@@ -293,6 +301,7 @@ Tauri host's IPC.
                                                                 interrupt
                                                                 query
                                                                 inspect-agent
+
 ```
 
 No raw nREPL — that contradicts the WASM containment story. The

@@ -1,7 +1,7 @@
 ---
 type: research
 status: completed
-tags: [research, agent, comparison]
+tags: [research, agent]
 ---
 
 # Hermes Agent vs Seon — architectural comparison (2026-05-25)

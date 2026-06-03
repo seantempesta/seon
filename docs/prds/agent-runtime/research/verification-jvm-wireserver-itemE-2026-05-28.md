@@ -39,6 +39,7 @@ The `clojure -M:writer` subprocess alias is GONE (folded into
 (def conn (#'wire/ensure-db! cfg))                      ; private, line 74
 (def pub  (bcast/start-pub-server! pub-sock))           ; public,  broadcast.clj:28
 (def req  (#'wire/start-req-server! conn req-sock))     ; private, line 460
+
 ```
 
 - `store-config` and `ensure-db!` and `start-req-server!` are all `defn-`
@@ -136,6 +137,7 @@ for `:seon.agent/agent-2`:
 
 ```
 (seon.session/with-agent-load-string "agent-2" "(datahike.api/q '[...] (datahike.api/db seon.session/*conn*))")
+
 ```
 
 `load-string`'d on the master REPL (exactly as nREPL does) → returned

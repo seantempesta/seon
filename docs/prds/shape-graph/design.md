@@ -37,6 +37,7 @@ Every `:map` schema (whether named or inline) becomes a shape entity.
 :seon.shape/spec-key    [:keyword {:optional true}]          ;; if from register!, e.g. ::ctx
 :seon.shape/namespace   :string                              ;; owning namespace
 :seon.shape/entries     [:vector :seon.db/ref]               ;; refs to entry entities
+
 ```
 
 ### Entry Entity
@@ -50,6 +51,7 @@ Each key in a map schema becomes an entry entity.
 :seon.entry/value-type  :keyword                              ;; :string, :int, :double, :keyword, :enum, :vector, :map, :fn, etc.
 :seon.entry/value-shape [:seon.db/ref {:optional true}]       ;; if value is a :map, ref to its shape entity
 :seon.entry/collection  [:keyword {:optional true}]           ;; :vector or :set if collection of shapes
+
 ```
 
 ### Function Spec Links
@@ -57,6 +59,7 @@ Each key in a map schema becomes an entry entity.
 ```clojure
 :seon.fn/input-shape    [:seon.db/ref {:optional true}]      ;; ref to input shape entity
 :seon.fn/output-shape   [:seon.db/ref {:optional true}]      ;; ref to output shape entity
+
 ```
 
 ### Example: `add-workout!`
@@ -83,6 +86,7 @@ Shape ::workout-set (id: "shape-seon.test.bootstrap/workout-set"):
     {key: ::exercise, optional: false, value-type: :string}
     {key: ::weight,   optional: false, value-type: :double}
     {key: ::reps,     optional: false, value-type: :int}
+
 ```
 
 ### Named vs Inline: Same Shape
@@ -96,6 +100,7 @@ Shape ::workout-set (id: "shape-seon.test.bootstrap/workout-set"):
 [:map [::ctx ::ctx] [::exercise ::exercise]]
 ;; → shape entity, :seon.shape/spec-key absent
 ;; entries have the same structure
+
 ```
 
 Both are queryable the same way. The spec-key is a bonus for display/debugging, not for matching.
@@ -121,6 +126,7 @@ Both are queryable the same way. The spec-key is a bonus for display/debugging, 
  ;; Key is either in data OR injectable (has default/fn on its schema)
  (or [(?data-keys ?k)]
      [... check if schema for ?k has :default/fn ...])]
+
 ```
 
 For recursive matching (nested maps), use Datalevin's pull with depth:
@@ -130,6 +136,7 @@ For recursive matching (nested maps), use Datalevin's pull with depth:
 (d/pull db '[* {:seon.shape/entries
                 [* {:seon.entry/value-shape ...}]}]  ;; recursive pull
         shape-eid)
+
 ```
 
 ### "What does this function produce?"
@@ -142,6 +149,7 @@ For recursive matching (nested maps), use Datalevin's pull with depth:
  [?fn :seon.fn/output-shape ?shape]
  [?shape :seon.shape/entries ?entry]
  [?entry :seon.entry/key ?key]]
+
 ```
 
 ### Loop Detection
@@ -155,6 +163,7 @@ Since shapes reference other shapes via `:seon.entry/value-shape`, cycles are po
     (let [entries (get-entries shape-id)
           nested (keep :seon.entry/value-shape entries)]
       (mapcat #(detect-cycles % (conj visited shape-id)) nested))))
+
 ```
 
 ## Building the Shape Graph
@@ -183,6 +192,7 @@ New:
   2. Walk all fn-schemas, create shape entities for inline :map types
   3. Deduplicate shapes by structure
   4. Link functions to input/output shapes
+
 ```
 
 ### Migration: Backward Compatible
@@ -232,6 +242,7 @@ Execute (topological order):
   1. add-workout! → {::ctx updated} → apply to atom
   2. update-weekly-volume → {::ctx updated} → apply to atom → STOP (cycle boundary)
   3. total-volume → {::volume 500.0 ::sets 1} → SSE push to browser
+
 ```
 
 ### No Execution = No Cost
@@ -296,6 +307,7 @@ If no browser is connected and no downstream function is subscribed, data that o
 ;; => {:results [["add-workout!" ...] ["total-volume" {::volume 500.0}]
 ;;               ["update-weekly-volume" {::weekly-volume 500.0}]]
 ;;     :state {::workouts [{...}]}}
+
 ```
 
 ### Phase 3b: Generative Tests -- DONE

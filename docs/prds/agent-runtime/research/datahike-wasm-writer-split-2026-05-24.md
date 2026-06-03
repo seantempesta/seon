@@ -79,6 +79,7 @@ libdatahike/
     │   ├── LibDatahikeBase.java        # 214 lines, hand-written infrastructure (codecs, isolate)
     │   └── libdatahike.clj             # 60 lines, EDN/JSON/CBOR codec glue + JSON tx-coercion
     └── test_cpp.cpp                    # 61 lines, C++ smoke harness (creates DB, transacts, queries)
+
 ```
 
 **Build flow** (`bb ni-compile` in `bb.edn` + `bb/src/tools/build.clj/native-compile`):
@@ -89,6 +90,7 @@ libdatahike/
 3. bb ni-ccompile       # AOT-compile Clojure namespaces for native-image
 4. bb ni-uber           # build native-shared-library uberjar
 5. bb ni-compile        # native-image --shared → libdatahike.so / .dylib + libdatahike.h
+
 ```
 
 **Native-image flags actually used** (verbatim from `build.clj`):
@@ -106,6 +108,7 @@ libdatahike/
 --no-fallback
 --no-server
 -J-Xmx5g
+
 ```
 
 **Notable absences** (Agent 2, verified by searching the repo for native-image config files — empty results): no `reflect-config.json`, no `resource-config.json`, no `native-image.properties`, no `jni-config.json`, no `proxy-config.json`. Datahike's codebase has been refactored to native-image-clean. **Agent 2's claim: this is the single biggest de-risk vs. the 2025 spike.** The Web Image / Guava-stub struggles do not apply to this build configuration.
@@ -120,6 +123,7 @@ bb/resources/native-image-tests/
 ├── run-bb-pod-tests.clj        # babashka-pod variant
 ├── testconfig.edn              # { :store {:backend :file ...} :keep-history? true ... }
 └── testconfig.attr-refs.edn
+
 ```
 
 libdatahike is not a side project — it's first-class with CI coverage.
@@ -181,6 +185,7 @@ def make_callback(output_format):
         if exception: raise exception
         return result
     return CALLBACK_FUNC(callback), get_result
+
 ```
 
 Lazy-init isolate once, every call passes the stored isolate thread, callback writes into a nonlocal slot, caller reads it back. **Single-threaded by construction at the Python level** — GIL serializes everything. For Rust + tokio this is where design gets more interesting (§2.1.4); Gemini-B independently flags it as the load-bearing reason to put libdatahike in a separate process rather than in-host.
@@ -212,6 +217,7 @@ Tauri Rust host process
 ├── libdatahike.dylib (loaded via libloading at startup)
 │   └── single GraalVM isolate, dedicated single-threaded blocking worker
 └── tokio runtime (async I/O for HTTP, MCP, etc.)
+
 ```
 
 **Engineering cost: moderate (~2-3 weeks).**
@@ -262,6 +268,7 @@ fn main() {
     // wasmtime invoke again after libdatahike call
     // confirm trap handling still works in both
 }
+
 ```
 
 **Mitigation if conflict:** GraalVM supports custom signal handler init via build flags. Worst case: fall back to option (b) — both Geminis pre-empted this fall-back by recommending (b) as the primary.
@@ -303,6 +310,7 @@ pub async fn q(&self, query: &str, inputs: &[Input]) -> Result<Bytes> {
     });
     rx.await?
 }
+
 ```
 
 Critical: the `isolate_thread` is bound to a specific OS thread (GraalVM constraint). Generic `tokio::spawn_blocking` is WRONG because it can run on any worker. Instead: a single dedicated executor thread that owns the isolate, fed work via an `mpsc::channel`. pydatahike sidesteps this with the GIL; Rust needs the explicit pinning.
@@ -338,6 +346,7 @@ sequenceDiagram
     Tauri-->>Pod: Broadcast "db-updated" (commit-id)
     Note over Pod: Fetch new branch root :db from SQLite
     Pod->>Pod: (reset! conn-atom new-db)
+
 ```
 
 **Storage backend choices** (Agent 1, two clean shapes):
@@ -433,6 +442,7 @@ datahike.writing/commit!  ──  writing.cljc:301
 konserve.core (k/assoc, k/multi-assoc)
    ▼
 konserve store implementation — :memory | konserve.fs | konserve-jdbc | konserve-lmdb | …
+
 ```
 
 **What the committed form in konserve looks like** (Agent 1): `(:branch config)` → a `stored-db?` map with keys `[:eavt-key :aevt-key :avet-key :config :max-tx :max-eid :op-count :hash :meta]` plus temporal-* keys (`writing.cljc:25`). The `*-key` values are **konserve addresses pointing at flushed hitchhiker-tree nodes** — not datoms. A reader that opens this store calls `dsi/stored->db` (`connector.cljc:75`), reads the branch key, then loads the index trees lazily on query. **None of that works if the writer only persisted a flat datom log.**
@@ -498,6 +508,7 @@ Gemini-B's full blueprint (verbatim):
    - Runs an event loop listening on a Unix Domain Socket (or Named Pipe).
    - Maintains the active libdatahike database connection and handles transactions sequentially (single-writer safety).
    - Runs queries on its native thread pool and returns serialized outputs.
+
 ```
 
 **Transaction flow (Gemini-B, verbatim):**
@@ -605,6 +616,7 @@ I've stored the final structured analysis in:
 *   [datahike_architecture_opinion.md](file:///Users/sean/.gemini/antigravity-cli/brain/671173d4-bb1d-4df6-9650-939a4506d14e/datahike_architecture_opinion.md)
 
 Let me know if you would like me to draft an initial prototype for Option B (IPC bridge to the host JVM transactor), or if we should explore any of the other sections of the PRD/MVP specification (e.g., `v1.md`).
+
 ```
 
 #### Gemini-A full artifact (preserved from local brain cache, may be ephemeral)
@@ -636,6 +648,7 @@ graph TD
     H --> I[Write Pending KVs to Konserve]
     I --> J[Update Branch Pointer key :db]
     J --> K[Run Online GC to prune orphaned nodes]
+
 ```
 
 ### What is lost if the writer is replaced with a flat log?
@@ -695,6 +708,7 @@ sequenceDiagram
     Tauri-->>Pod: Broadcast "db-updated" (commit-id)
     Note over Pod: Fetch new branch root :db from SQLite
     Pod->>Pod: (reset! conn-atom new-db)
+
 ```
 
 This ensures readers reload the database root map immediately, preserving cache locality since unchanged nodes are loaded from the reader's local memory cache.
@@ -710,6 +724,7 @@ graph TD
     Start[Choose Storage Path] --> Budget{Development Budget}
     Budget -->|2 Weeks| OptionB_Short[Option B: Host JVM Transactor + CLJS WASM Readers]
     Budget -->|2 Months| OptionB_Long[Option B: Native-Image Host Binary + Upstream patches]
+
 ```
 
 ### The 2-Week Plan (Option B via JVM Host)
@@ -725,6 +740,7 @@ graph TD
 4. **Online GC Tuning:** Configure background online-gc runs to minimize write-lock durations on the SQLite file.
 
 **Verdict:** Do not write a custom transactor in Rust. Do not try to solve GraalVM WASM thread compilation. **Option B (Out-of-process Host Transactor with CLJS WASM Readers) is the only path that respects "Slow is Fast" and keeps the system atomic and robust.**
+
 ````
 
 **Note on Gemini-A's framing:** its "2-Month Plan" — *"Compile the Clojure transactor into a native host binary (using GraalVM targeting the host OS — no WASM constraints)"* — is **exactly what libdatahike already is**. Upstream did the 2-month plan already. This collapses Gemini-A's 2-week/2-month dichotomy into one path: use libdatahike as the writer process today (which is what Gemini-B independently recommended with the upstream knowledge in its prompt context).
@@ -740,6 +756,7 @@ graph TD
 2. Rank 2: Option (a) — libdatahike as an Embedded Native Library
 3. Rank 3: Option (c) — Rewrite the Transactor in Rust (Engineering Trap)
 4. Rank 4: Option (d) — Status quo (Pure-CLJS datahike-cljs in QuickJS-WASM)
+
 ```
 
 #### Rationale (verbatim)
@@ -794,6 +811,7 @@ unsafe extern "C" fn rust_output_reader_callback(
     // Complete the Rust future
     let _ = tx.send(result_str);
 }
+
 ```
 
 *"While this works, you must manually manage the safety of the raw pointer `ctx`. If the native image library panics or returns early without executing the callback, the `Sender` is leaked forever, causing the async task to hang indefinitely."*
@@ -833,6 +851,7 @@ graph TD
     Wasmtime -.->|Guest Isolation| WASM Guest
     IPCClient <-->|Local IPC: Unix Domain Sockets| IPCServer
     LibDH <-->|Direct File I/O| Database
+
 ```
 
 Full Gemini-B response saved to: `/tmp/datahike-gemini-response-2026-05-24.txt`.

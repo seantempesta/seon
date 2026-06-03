@@ -1,7 +1,7 @@
 ---
 type: research
 status: completed
-tags: [research, agent, derive-not-store, design]
+tags: [research, agent]
 ---
 
 # Derive-not-store survey + detect-and-tee wire pattern — 2026-05-23
@@ -18,7 +18,7 @@ cljs-watch up) on `feature/agent-runtime` @ `abc236c` + uncommitted
   Live derivation says 2, stored value says 4 on the live agent's
   session `0VKRcO4p2HZQ`. Two independent writers (kick handler
   resets to 0, `with-turn!` increments) racing across `setTimeout`
-  + Promise chains. Delete the attr; derive at read time. Cost: 6ms
+  - Promise chains. Delete the attr; derive at read time. Cost: 6ms
   vs 3.5ms for the stored read — within noise.
 - **`:seon.agent/current-ns` is a dead attr.** Registered at
   `agent.cljs:233`, read in three section fns, NEVER WRITTEN by any
@@ -191,6 +191,7 @@ Probe on the live agent (`agent-id "seon"`):
 ;; Live result (no :seon.eval/ns datoms yet — attr does not exist):
 ;; => {:n-evals 12, :latest-ns nil, :home-ns "seon.agent.seon"}
 ;; Cost of the full 12-eval query: 1.7ms.
+
 ```
 
 12 evals scanned in 1.7ms. Adding `:seon.eval/ns` indexing will
@@ -239,6 +240,7 @@ make this a single bound-attr lookup (`(d/q '[:find ?ns :where
             last
             second)
        (home-ns id))))
+
 ```
 
 ### Recommendation
@@ -283,6 +285,7 @@ make this a single bound-attr lookup (`(d/q '[:find ?ns :where
    :derive-ms 6.0
    :stored-read-ms 3.5})
 ;; => stored=4, derived=2.   STORED IS WRONG by 2.
+
 ```
 
 The bug the orchestrator was chasing IS REAL and IS PERSISTED
@@ -317,6 +320,7 @@ on the live conn right now. Two writers (kick-handler reset to 0,
        (count turns)
        (count (filter #(pos? (compare (:seon.turn/at %) last-user-at))
                       turns))))))
+
 ```
 
 Cost: 6ms on the live conn vs 3.5ms for stored. Both noise — sub-form-eval-cost by 2 orders of magnitude.
@@ -402,6 +406,7 @@ attr.
 
 ```clojure
 (schema/register! :seon.agent/warning-predicates [:vector :symbol])
+
 ```
 
 ```clojure
@@ -418,6 +423,7 @@ attr.
                 {:seon.db/tx-data
                  [{:seon.agent/id id
                    :seon.agent/warning-predicates (conj current sym)}]}))))))
+
 ```
 
 (`unregister-warning!` mirrors via `(remove #{sym} current)`.)
@@ -432,6 +438,7 @@ attr.
            [])
        distinct
        (keep seval/lookup-value)))
+
 ```
 
 `warnings-section` already receives `:seon.agent/id` in its
@@ -509,6 +516,7 @@ Brief findings beyond Q1's table:
  {:seon.fn/sym    "alice.foo/bar"
   :seon.fn/ns     [:seon.ns/name :alice.foo]
   :seon.fn/source "(defn bar [...] ...)"}]
+
 ```
 
 Worked end-to-end. Intra-tx lookup-ref `[:seon.ns/name :alice.foo]`
@@ -544,6 +552,7 @@ map AND the optional tee map and produces ONE tx. Sketch:
                            :seon.turn/evals [eval-map]}]
                    tee (conj tee))]
     (await (db/transact! {:seon.db/tx-data tx-data}))))
+
 ```
 
 ### Question 3: where do the extractors run?
@@ -581,6 +590,7 @@ Sketch:
 
             :else nil)]
   ...)
+
 ```
 
 Notes:
@@ -608,6 +618,7 @@ Notes:
                                            (:seon.schema/ns tee))]
                           {:seon.ns/name (second ref)}))]
       [eval-tx tee ns-target]))    ;; ;; 3-entry tx-data when ns wasn't already explicit
+
   ```
 
   Datahike will upsert-by-identity if `:seon.ns/name` already
@@ -695,6 +706,7 @@ PLATFORM-FLAG needed for the combined tx shape.
                       :ns next-ns
                       :tee tee}))
             [(if (:ok result) :ok :fail) next-ns]))))))
+
 ```
 
 The `doseq` over `parsed` becomes a `reduce` accumulating
@@ -831,6 +843,7 @@ Two minor calls worth pinging on:
 ;;            :seon.fn/ns {:seon.ns/name :probe.foo
 ;;                          :seon.ns/source "(ns probe.foo)"}}
 ;; tx-ok? true
+
 ```
 
 ### Probe TEE2 — upsert idempotency
@@ -846,6 +859,7 @@ Two minor calls worth pinging on:
      :seon.fn/source "(defn bar [] 100)"}]})
 ;; n-fn-entities 1   n-ns-entities 1
 ;; :seon.fn/source replaced; old retained in history.
+
 ```
 
 ### Probe TEE3 — combined eval entity + tee in ONE tx
@@ -867,6 +881,7 @@ Two minor calls worth pinging on:
      :seon.fn/ns     [:seon.ns/name :probe.foo]
      :seon.fn/source "(defn baz [] :baz)"}]})
 ;; tx OK; eval entity, ns entity, fn entity all queryable post-tx.
+
 ```
 
 ### Probe TSU — derive vs stored on live agent
@@ -879,6 +894,7 @@ Two minor calls worth pinging on:
  :derive-ms 6.0
  :stored-read-ms 3.5}
 ;; Two independent writers race; the stored value drifted to +2.
+
 ```
 
 ### Probe DERIVE-NS — current-ns query cost (no :seon.eval/ns datoms yet)
@@ -887,6 +903,7 @@ Two minor calls worth pinging on:
 {:n-ok-evals 7 :query-ms 1.7}
 ;; 12-eval scan, no index on :seon.eval/ns (attr not in schema yet).
 ;; Once the attr is registered datahike indexes it; lookup becomes O(1).
+
 ```
 
 ## Cross-references

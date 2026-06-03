@@ -778,5 +778,3 @@ The README should either (a) update the list to include the Primer (with the
 caveat that it lives on a different branch), or (b) reframe "domains" as
 "applications that prove the substrate." The current "trading / health /
 finance" enumeration reads as the *complete* set, which is wrong.
-
-

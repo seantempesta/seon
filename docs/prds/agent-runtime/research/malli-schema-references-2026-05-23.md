@@ -1,7 +1,7 @@
 ---
 type: research
 status: active
-tags: [research, schema, malli, db]
+tags: [research, schema]
 ---
 
 # Malli schema references for identity attrs (id-shape unification)
@@ -52,6 +52,7 @@ Read `/Users/sean/src/seon/reference-code/malli/src/malli/core.cljc`:
 ;; => {:seon.db/identity true}
 (m/validate    [:and {:seon.db/identity true} :probe/id] "12345678901234") ; => true
 (m/validate    [:and {:seon.db/identity true} :probe/id] "short")          ; => false
+
 ```
 
 Conclusion: for attaching extra properties to a referenced schema, the supported forms are `:ref`, `:schema`, or `:and`. Bare-keyword wrapping does not exist as syntax.
@@ -89,6 +90,7 @@ Read `src/seon/db.cljs:803-1015`. Relevant functions:
 ;;     :db/valueType   :db.type/string
 ;;     :db/cardinality :db.cardinality/one
 ;;     :db/unique      :db.unique/identity}     ;; <-- IDENTITY PROPERLY DERIVED
+
 ```
 
 End-to-end with `seon.db/malli->datahike-schema` + real datahike `:memory` store: schema vector installs, upsert via `:probe.thing/id` works correctly (two transacts with the same id mutate one entity, not create two).
@@ -106,6 +108,7 @@ End-to-end with `seon.db/malli->datahike-schema` + real datahike `:memory` store
 
 ;; identity attr — DOES NOT WORK
 (schema/register! :seon.agent/id :seon.db/id)        ;; type ok, but no identity flag
+
 ```
 
 - **Pro:** zero ceremony for the tx-meta cases.
@@ -117,6 +120,7 @@ End-to-end with `seon.db/malli->datahike-schema` + real datahike `:memory` store
 (schema/register! :seon.db/id    [:string {:min 14 :max 14}])
 (schema/register! ::agent-id     :seon.db/id)
 (schema/register! :seon.agent/id [:and {:seon.db/identity true} :seon.db/id])
+
 ```
 
 - **Pro:** works today (bridge already handles `:and`); validation is strict; identity prop flows through; pattern is uniform with the existing `:seon.db/ref` reference style for non-identity cases.
@@ -126,6 +130,7 @@ End-to-end with `seon.db/malli->datahike-schema` + real datahike `:memory` store
 
 ```clojure
 (schema/register! :seon.agent/id [:and :seon.db/id [:string {:seon.db/identity true}]])
+
 ```
 
 - **Pro:** no bridge change needed (bridge takes first child for type).
@@ -138,6 +143,7 @@ Add two clauses to `form->datahike-value-type`:
 ```clojure
 (#{:ref :schema} head)
 (form->datahike-value-type (resolve-malli-form (first (form-children resolved-form))))
+
 ```
 
 This would enable `[:ref {:seon.db/identity true} :seon.db/id]` and `[:schema {:seon.db/identity true} :seon.db/id]` as additional patterns. Both already work for `form-properties` (outer-prop reading) and `m/validate` (correct strictness).
@@ -165,12 +171,14 @@ The `:and` head reads as "intersection of constraints," not "alias with property
    Expands to [:and {:seon.db/identity true} shape-key]."
   [shape-key]
   [:and {:seon.db/identity true} shape-key])
+
 ```
 
 Then identity attr sites become:
 
 ```clojure
 (schema/register! :seon.agent/id (schema/identity-of :seon.db/id))
+
 ```
 
 The helper is optional; if Sean prefers the literal `:and` form everywhere for transparency, omit the helper and write the vector directly.
@@ -195,6 +203,7 @@ Insert after the `:seon.db/ref` registration block (line 97) and before the "Reg
 ;; reading outer-form properties for `:seon.db/identity`.
 (defonce ^:private _id-type
   (swap! *schemas assoc :seon.db/id [:string {:min 14 :max 14}]))
+
 ```
 
 ### Step 2 — Optional helper in `src/seon/schema.cljc`
@@ -211,6 +220,7 @@ After `register-all!` (line 142), add:
      (register! :seon.agent/id [:and {:seon.db/identity true} :seon.db/id])"
   [shape-key]
   [:and {:seon.db/identity true} shape-key])
+
 ```
 
 ### Step 3 — Update `src/seon/db.cljs` lines 377-385
@@ -224,6 +234,7 @@ Before:
 (schema/register! ::session-id      [:string {:min 14 :max 14}])
 (schema/register! ::turn-id         [:string {:min 14 :max 14}])
 (schema/register! ::eval-id         [:string {:min 14 :max 14}])
+
 ```
 
 After:
@@ -235,6 +246,7 @@ After:
 (schema/register! ::session-id :seon.db/id)
 (schema/register! ::turn-id    :seon.db/id)
 (schema/register! ::eval-id    :seon.db/id)
+
 ```
 
 ### Step 4 — Update `src/seon/agent.cljs` lines 108, 133, 145, 192, 199
@@ -247,6 +259,7 @@ Before (5 sites):
 (schema/register! :seon.eval/id    [:string {:min 14 :max 14 :seon.db/identity true}])
 (schema/register! :seon.session/id [:string {:min 14 :max 14 :seon.db/identity true}])
 (schema/register! :seon.turn/id    [:string {:min 14 :max 14 :seon.db/identity true}])
+
 ```
 
 After:
@@ -257,6 +270,7 @@ After:
 (schema/register! :seon.eval/id    [:and {:seon.db/identity true} :seon.db/id])
 (schema/register! :seon.session/id [:and {:seon.db/identity true} :seon.db/id])
 (schema/register! :seon.turn/id    [:and {:seon.db/identity true} :seon.db/id])
+
 ```
 
 (or use the `identity-of` helper if added in Step 2.)
@@ -292,6 +306,7 @@ In the live pod:
 (m/validate :seon.agent/id "short")          ; => false
 
 ;; Existing test suites for agent / db should pass without changes.
+
 ```
 
 To change the id length later (the original motivation): edit `:seon.db/id` in `seon.schema.cljc`. All 9 sites pick it up on reload.

@@ -150,6 +150,7 @@ wasm-rquickjs generate-wrapper-crate  →  pod-build/  (Rust crate)
 cargo build --target wasm32-wasip2 --release  →  pod.wasm
                               ↓
                        [wasmtime CLI OR Tauri-embedded wasmtime]
+
 ```
 
 That's four build steps per change. Tolerable for releases, painful for
@@ -188,6 +189,7 @@ fswatch src/ | while read; do
     && cargo build --target wasm32-wasip2 \
     && wasmtime serve --reload pod.wasm
 done
+
 ```
 
 Rough cycle time per change: 8s (CLJS compile) + 2s (crate gen) + 15-30s
@@ -269,6 +271,7 @@ interface eval {
   /// can drop the running call frame).
   interrupt: func(eval-id: string) -> bool;
 }
+
 ```
 
 The Tauri host exposes this as a Tauri command:
@@ -278,6 +281,7 @@ The Tauri host exposes this as a Tauri command:
 async fn seon_eval(state: State<'_, PodState>, form: String) -> Result<EvalResult> {
     state.pod.eval_form(&form).await
 }
+
 ```
 
 And the host exposes it to editors / MCP via a stdio JSON-RPC bridge.
@@ -400,6 +404,7 @@ world pod {
   export get-ui-port: func() -> u16    // pod's loopback HTTP for Tauri WebView
   export shutdown: func()
 }
+
 ```
 
 Consumer overlays (product-specific UI, integration with a specific

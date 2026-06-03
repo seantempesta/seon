@@ -7,7 +7,7 @@ tags: [research, agent, cljs]
 # V0 Implementation State vs MVP Spec — 2026-05-22
 
 Survey of the V0 CLJS pod against the
-[[agent-repl-mvp]] spec. Goal: identify what exists in code, what is
+[[agent-repl-mvp-pre-2026-05-22]] spec. Goal: identify what exists in code, what is
 spec-only, and the smallest set of additions needed to drive the agent
 loop end-to-end against a real LLM (deepseek).
 
@@ -41,7 +41,7 @@ spec was verified against, not the conn the agent actually runs on.
 
 ## 1. Agent entity
 
-**SPEC** ([[agent-repl-mvp]] §"Agent record is the hub"):
+**SPEC** ([[agent-repl-mvp-pre-2026-05-22]] §"Agent record is the hub"):
 `:seon.agent/id` (12-char `:seon.id/id`),
 `:seon.agent/state` `[:enum :idle :running]`,
 `:seon.agent/turn-count :int`,
@@ -100,7 +100,7 @@ The spec should adopt this shape rather than redefine it.
 
 ## 3. Eval entity
 
-**SPEC** ([[agent-repl-mvp]] §"Eval log"): nine attrs including
+**SPEC** ([[agent-repl-mvp-pre-2026-05-22]] §"Eval log"): nine attrs including
 `:seon.eval/turn :long`, `:seon.eval/at :long` (epoch-ms),
 `:seon.eval/duration-ms :long`, `:seon.eval/ns :keyword`,
 `:seon.eval/narration`, `:seon.eval/source`, `:seon.eval/ok?`,
@@ -154,7 +154,7 @@ for the tx-meta trick to point at.
 
 ## 4. Section / ctx entity & the composer
 
-**SPEC** ([[agent-repl-mvp]] §"Rendering — sections compose strings",
+**SPEC** ([[agent-repl-mvp-pre-2026-05-22]] §"Rendering — sections compose strings",
 §"Initial default context"): section entities carry `:seon.ctx/name`,
 `:seon.ctx/priority`, `:seon.ctx/fn` (qualified symbol). The composer
 queries `[?e :seon.ctx/name _]`, sorts by priority, resolves each
@@ -196,7 +196,7 @@ multi-ref is also missing. Replace
 
 ## 5. Persistent entities (`:seon.fn`, `:seon.schema`, `:seon.test`, `:seon.ns`)
 
-**SPEC** ([[agent-repl-mvp]] §"Persistent entities"): the database IS
+**SPEC** ([[agent-repl-mvp-pre-2026-05-22]] §"Persistent entities"): the database IS
 the program. Every `(defn ...)`, `(schema/register! ...)`,
 `(deftest ...)`, `(ns ...)` form the agent emits transacts an entity
 with its source text. Replay rebuilds runtime vars from these
@@ -241,7 +241,7 @@ work doesn't survive a pod restart even in principle.
 
 ## 6. Bootstrap + resume
 
-**SPEC** ([[agent-repl-mvp]] §"Boot sequence"): `init-bootstrap!` →
+**SPEC** ([[agent-repl-mvp-pre-2026-05-22]] §"Boot sequence"): `init-bootstrap!` →
 `bootstrap-phase!` (only if DB empty) → `resume-phase!` → render. The
 bootstrap reads `resources/seon/bootstrap.edn` (a build-time emitted
 ordered vector of substrate entities) and transacts it. Resume walks
@@ -274,7 +274,7 @@ load is the one piece that IS in place.
 
 ## 7. History on the agent DB
 
-**SPEC** ([[agent-repl-mvp]] §"What's NOT in the model"): "the default
+**SPEC** ([[agent-repl-mvp-pre-2026-05-22]] §"What's NOT in the model"): "the default
 V0.5 conn uses `:keep-history? false`; turning history on for the
 agent DB is a prerequisite for [the tx-meta-IS-eval-id model]".
 
@@ -295,7 +295,7 @@ tx-meta writes, §5 has no entities to tx-meta about).
 
 ## 8. The harness loop
 
-**SPEC** ([[agent-repl-mvp]] §"Goal"): one turn = rendered ctx → LLM
+**SPEC** ([[agent-repl-mvp-pre-2026-05-22]] §"Goal"): one turn = rendered ctx → LLM
 → parse → eval-batch.
 
 **CODE**: This works end-to-end TODAY.

@@ -104,6 +104,7 @@ Two listing/selection fns (`api.clj:223-235`):
 ```clojure
 (shadow/repl-runtimes :client)              ; => [{:client-id 1 :host :node :desc … :build-id …} …]
 (shadow/repl-runtime-select :client 2)      ; sets worker's :default-runtime-id to 2 (process-global)
+
 ```
 
 `repl-runtime-select` changes the **worker-global default** — wrong for our
@@ -137,6 +138,7 @@ Inside `do-repl` (`repl_impl.clj:140`):
   (if-not runtime-id
     (repl-stderr … "No available JS runtime.")
     (>!! to-relay {:op :cljs-eval :to runtime-id :input {…}})))
+
 ```
 
 If the pinned runtime-id points at a now-dead client, the relay replies
@@ -209,6 +211,7 @@ preloads / overlay hazards):
  :devtools  {:enabled true}      ; redundant for :node-script but explicit
  :compiler-options {:warnings-as-errors false
                     :externs ["externs/node_fs.js"]}}
+
 ```
 
 (For Friday you can reuse `:client` directly — it already injects the REPL under
@@ -221,6 +224,7 @@ clj -M:cljs watch agent           # compiles once + hosts relay+nREPL; stays up
 node out/agent/main.js --agent-id a1 --db cluster/alpha &   # runtime 1
 node out/agent/main.js --agent-id a2 --db cluster/alpha &   # runtime 2
 node out/agent/main.js --agent-id a3 --db cluster/beta  &   # runtime 3
+
 ```
 
 Note the **single global `:source-paths`** caveat in `shadow-cljs.edn`: the
@@ -295,6 +299,7 @@ boot. No shadow patching.
 
 ```text
 mcp__seon_cljs__eval  { code, agent_id, timeout_ms }     # agent_id NEW, optional
+
 ```
 
 `execute-eval` flow:
@@ -312,6 +317,7 @@ mcp__seon_cljs__eval  { code, agent_id, timeout_ms }     # agent_id NEW, optiona
             10000)
           (let [s {:nrepl-session nsid :client-id cid :created-at …}]
             (swap! sessions assoc agent-id s) s)))))
+
 ```
 
 On `stale-runtime?` (the existing detector): drop that agent's pinned session,

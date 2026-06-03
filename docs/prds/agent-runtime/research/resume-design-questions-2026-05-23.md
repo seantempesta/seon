@@ -1,7 +1,7 @@
 ---
 type: research
 status: draft
-tags: [research, pod, cljs, agent, datahike]
+tags: [research, pod, cljs, agent]
 ---
 
 # Resume phase — design questions to answer BEFORE implementation
@@ -147,12 +147,14 @@ Plus our own:
 File: `/Users/sean/src/seon/docs/prds/agent-runtime/research/resume-findings-<date>.md`
 
 Frontmatter:
+
 ```yaml
 ---
 type: research
 status: active
 tags: [research, pod, cljs, agent, datahike]
 ---
+
 ```
 
 Sections:
@@ -253,6 +255,7 @@ file. File format, sections, frontmatter all spelled out there.
 
 Chat reply: ~300-500 words summarizing the recommendation. Full
 reasoning in the file.
+
 ```
 
 ---

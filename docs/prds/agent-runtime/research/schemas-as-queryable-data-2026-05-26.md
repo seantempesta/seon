@@ -1,7 +1,7 @@
 ---
 type: research
 status: draft
-tags: [research, malli, datahike, schema, query]
+tags: [research, schema]
 ---
 
 # Schemas as queryable Datahike entities — validate or revise
@@ -88,6 +88,7 @@ when set, nil otherwise.
               (update acc :required conj k)))
           {:required #{} :optional #{}}
           (m/children map-schema)))
+
 ```
 
 REPL-probed (pod, session default):
@@ -103,6 +104,7 @@ REPL-probed (pod, session default):
                          [:outer/nested [:map [:inner/x :string]
                                               [:inner/y {:optional true} :int]]]])
 ;; => {:required #{:outer/id :outer/nested}, :optional #{}}
+
 ```
 
 Both confirmations from this probe. `m/children` does not descend into nested
@@ -173,6 +175,7 @@ at our actual sizes); the underlying index is AEVT not AVET unless we mark
          (sort-by second >)
          first
          first)))
+
 ```
 
 The clever bit: `:in $ [?req ...]` binds the caller's attr-set as a relation
@@ -230,6 +233,7 @@ yet. Order:
 1. **Load `seon.schema`** — registers `:seon.db/ref`, `:seon.db/id`, etc.
 2. **Load `seon.db`** — registers `:seon.db/tx-data` etc. Imports `:seon.schema`.
 3. **`register!` augments to write schema entities.** It does:
+
    ```clojure
    (defn register! [k v]
      (swap! *schemas assoc k (with-entity-id-attr v))
@@ -242,6 +246,7 @@ yet. Order:
                   (for [r reqs]
                     [:db/add -1 :seon.schema/required-attrs r]))})))
      k)
+
    ```
 4. **Pre-conn registrations are queued.** Until `seon.db/*conn*` is bound,
    buffer the `:seon.schema` writes in an atom and flush them at session
@@ -265,6 +270,7 @@ REPL-verified shape (tested above):
  [:db/add -1 :seon.schema/required-attrs :seon.eval/id]
  [:db/add -1 :seon.schema/required-attrs :seon.eval/source]
  [:db/add -1 :seon.schema/required-attrs :seon.eval/ok?]]
+
 ```
 
 One entity per kind, multiple `:seon.schema/required-attrs` datoms via
@@ -276,6 +282,7 @@ required?") falls out trivially:
        :where [?s :seon.schema/required-attrs ?attr]
               [?s :seon.schema/key ?k]]
      @conn :seon.eval/id)
+
 ```
 
 Useful for the agent: "what kinds use this attr?" — discoverability win.

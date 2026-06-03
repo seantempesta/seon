@@ -1,7 +1,7 @@
 ---
 type: research
 status: active
-tags: [research, pod, cljs, agent, datahike]
+tags: [research, pod, cljs, agent]
 ---
 
 # Resume phase — research findings (2026-05-23)
@@ -29,6 +29,7 @@ Three concrete recommendations:
 ```clojure
 '[:find ?e ?source ?tx
   :where (or [?e :seon.ns/source ?source ?tx] ...)]
+
 ```
 
 bound against `@conn` (not `(d/history db)`) returns ONE row per current entity (with the CURRENT `:source` value and the tx-id of the MOST RECENT upsert). That's almost what we want — except the tx-id is then "tx of the latest redefine", not "tx of original creation". For dependency ordering, the latest tx-id is actually MORE correct: if `alice/foo` was redefined to reference a newer `bob/bar`, replaying in latest-tx order is what reflects the current code shape. So the sketch's query is fine; just must run against `@conn`, not `(d/history db)`. Document this clearly in code comments.
@@ -88,6 +89,7 @@ Actually re-reading the boot sequence: `setup-agent-ns!` itself emits `(def !ses
 4. resume-program-graph!      ; re-eval agent's persisted :source
 5. setup-agent-ns!            ; substrate atoms last (defensive)
 6. agent/boot!                ; run-turn-once! + kick listener
+
 ```
 
 ### Q5. Tx-meta on replay txes
@@ -117,6 +119,7 @@ The log table is already in `agent-bootstrap-attrs` (client.cljs:268-274) and su
  :seon.log/agent   [:seon.agent/id agent-id]
  :seon.log/message (str "replay of " entity-kind " " entity-key " failed: " err-msg)
  :seon.log/stack   err-stack}
+
 ```
 
 The agent's next turn renders the warnings tile and sees the failure. No schema changes needed.
@@ -253,6 +256,7 @@ Tx-id order naturally handles this: schema MUST be registered before a defn can 
 ;;   (await (replay-program-graph! {:conn conn
 ;;                                  :compile-state compile-state
 ;;                                  :agent-id agent/default-id}))
+
 ```
 
 **Same-pod-session test pattern** (no SQLite needed):
@@ -275,6 +279,7 @@ Tx-id order naturally handles this: schema MUST be registered before a defn can 
 ;;   3. (js-delete (gobj/get js/globalThis "alice") "foo")
 ;;   4. (replay-program-graph! ...)
 ;;   5. (seon.eval/lookup-value 'alice/foo) => should be the fn, not nil
+
 ```
 
 ## SQLite backend recommendation
@@ -295,6 +300,7 @@ The flip is one config in `open-agent-conn!`:
               :schema-flexibility :write
               :keep-history?      true}]
     ...))
+
 ```
 
 ### Versioned directory layout
@@ -311,6 +317,7 @@ The flip is one config in `open-agent-conn!`:
         program.db
       current -> v1         ; symlink (or a small marker file) for "which
                             ; version this agent is currently using"
+
 ```
 
 Helper: `(defn agent-db-path [agent-id schema-version] (str (os-home) "/.seon/agents/" agent-id "/v" schema-version "/program.db"))`. Ensure parent dirs exist before passing to `Database. path` (the konserve adapter doesn't mkdir — it'll throw `SQLITE_CANTOPEN`).
@@ -364,6 +371,7 @@ Ship the SQLite flip behind a small refactor of `open-agent-conn!`:
                     :schema-flexibility :write
                     :keep-history? true}]
      ...)))
+
 ```
 
 Tests + smoke-test stay `:memory`. Default for the pod is `:sqlite`. `SEON_DB_BACKEND=memory` for cases where you want ephemeral. This is testable as a same-pod-session before the SQLite flip, and as a real cross-restart test after.

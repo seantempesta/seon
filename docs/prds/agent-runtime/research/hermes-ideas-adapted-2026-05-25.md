@@ -1,7 +1,7 @@
 ---
 type: research
 status: completed
-tags: [research, agent, design]
+tags: [research, agent]
 ---
 
 # Hermes ideas adapted — what to port and how it manifests in Seon (2026-05-25)
@@ -43,6 +43,7 @@ But there's a job that needs an LLM, not a query: deciding *why* a fn is stale. 
    archival is a derived state (no consumer of the section sees them)."
   {:malli/schema [:=> [:cat ::curate-tick-request] ::curate-tick-response]}
   [...])
+
 ```
 
 Three principles distinguish this from Hermes' curator:
@@ -84,6 +85,7 @@ Three principles distinguish this from Hermes' curator:
     :seon.agent/keys [ctx-entity]}]
   (let [target (:seon.ctx/fn-target ctx-entity)]
     (str "<fn-source sym=\"" target "\">" ...source... "</fn-source>")))
+
 ```
 
 The expansion mechanism is itself reactive-context: the agent transacts `{:seon.ctx/name :inspect-fn :seon.ctx/fn-target "seon.agent.X/bar"}` to "open" a body; it transacts a retract to close it. No `skill_view` tool call needed — the section composer already runs every turn and picks up the new ctx entity.
@@ -131,6 +133,7 @@ Critically: **no sessions means the "self-observation" surface cannot be "search
    joined to the fn-eval that triggered it. The agent can see which
    capabilities its specialized sub-roles rely on most heavily."
   ...)
+
 ```
 
 These get rendered as a section that the agent can choose to include in its ctx by transacting a `:seon.ctx` entity pointing at them. The default render is collapsed ("you've called `weather/forecast` 47 times this week, peak ns: `seon.agent.X.morning`"); the agent expands by transacting interest in the underlying entity, same progressive-disclosure mechanism as §2.

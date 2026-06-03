@@ -1,7 +1,7 @@
 ---
 type: prd
 status: draft
-tags: [prd, schema, malli, registry, instrumentation, resume, bootstrap]
+tags: [prd, schema]
 ---
 
 # Schema + runtime unification — PRD draft (v2, post-review-of-existing-spec)
@@ -80,6 +80,7 @@ v1.md §7 lays out boot/bootstrap/resume cleanly, but three gaps remain:
                   │   eval-batch, fails to        │
                   │   :seon.log                   │
                   └──────────────────────────────┘
+
 ```
 
 Three invariants:
@@ -113,6 +114,7 @@ Per the schema-registry research §6 rule 3. Repeated here for clarity:
                     [{:seon.schema/key    k
                       :seon.schema/source (pr-str schema)
                       :seon.schema/ns     [:seon.ns/name (keyword (namespace k))]}]))))
+
 ```
 
 What we are NOT doing:
@@ -166,6 +168,7 @@ Per the analyzer research Q9(a) detect-and-tee sketch, with one addition:
                   :seon.transient/ns          [:seon.ns/name (keyword (str ns))]
                   :seon.transient/kind        :other
                   :seon.transient/declared-by :agent}]))
+
 ```
 
 No changes to the eval-failure path: instrumentation throws → `eval`'s catch → `seon.error/->map` → `:ok false :error <map>`. The reporter's ex-data lands in `:seon.error/data` automatically.
@@ -190,6 +193,7 @@ Adopts the resume-findings Q4 recommended sequence + adds instrumentation start.
 12. start-session!                        ; v1.md §7.5
 13. start-server!                         ; HTTP + SSE
 14. start-agent-loop!                     ; ready
+
 ```
 
 The instrument-before-replay ordering matters: when replay re-evals a `:seon.fn/source` containing `:malli/schema` metadata, the per-form analyzer-diff (we should run detect-and-tee on replay too, IF the source carries new schemas not yet in the registry — but per resume-findings §Q5 replay bypasses eval-batch and thus bypasses detect-and-tee). So **on resume, detect-and-tee does NOT fire**; instead, the function-schemas seed in step 7 + instrument in step 8 covers all persisted fns; step 9 just rebinds globalThis. Open question (§9) for whether per-replay-fn instrumentation needs explicit re-application.
@@ -231,6 +235,7 @@ Per schema-registry research Q5. Schemas + curated `resources/seon/transient.edn
 
 (schema/register! :seon.schema/substrate? :boolean)
 (schema/register! :seon.schema/at         :inst)
+
 ```
 
 After the migration in §7 step 5 lands, these are ALL persisted by detect-and-tee; v1.md §7.3 emitter populates substrate entries with `:substrate? true`.

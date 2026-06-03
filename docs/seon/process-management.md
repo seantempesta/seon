@@ -29,6 +29,7 @@ bin/seon status [name]      Show one or all (omitted = all)
 bin/seon tail <name>        tail -f logs/<name>.log  (Ctrl-C to exit)
 bin/seon logs <name> [n]    Last n lines (default 200)
 bin/seon adopt <name> <pid> Register a manually-started PID under <name>
+
 ```
 
 ## Registered processes
@@ -50,6 +51,7 @@ Recovery if a manual `compile` has overwritten the bundle:
 ```bash
 bin/seon restart cljs-watch  # forces full rebuild with ws client
 bin/seon restart pod         # pod loads the REPL-able bundle
+
 ```
 
 Full root-cause analysis: [[../prds/agent-runtime/research/shadow-node-runtime-2026-05-23]].
@@ -75,6 +77,7 @@ tmp/proc/<name>/
 ├── cmd           Exact command launched (forensics)
 ├── started-at    UTC ISO timestamp of start
 └── lock/         Mutex directory (briefly held during operations)
+
 ```
 
 PID + start-at survive across `bin/seon` invocations. They're cleared by `stop`.
@@ -95,18 +98,21 @@ The pod's `seon.web.serve` HTTP loopback also writes to `tmp/seon-port`; `bin/se
 
 ```bash
 bin/seon start pod      # idempotent
+
 ```
 
 **Agent B wants to watch what the pod is doing:**
 
 ```bash
 bin/seon tail pod       # safe to run alongside any number of agents
+
 ```
 
 **Agent A wants a clean pod after changing substrate code:**
 
 ```bash
 bin/seon restart pod    # stop + start, atomic from caller's view
+
 ```
 
 **Agent B was tailing while A restarted:**
@@ -121,6 +127,7 @@ bin/seon status
 # ○ cljs-watch  (not running)
 # ○ jvm  (not running)
 #   pod port: 7890  →  http://127.0.0.1:7890
+
 ```
 
 ## Adoption — manually started processes
@@ -136,6 +143,7 @@ If `bin/seon` itself is SIGKILLed mid-operation, the lock dir may persist. The s
 
 ```bash
 rm -rf tmp/proc/<name>/lock
+
 ```
 
 This should be rare. Normal Ctrl-C and most other signals trigger the trap that cleans up.

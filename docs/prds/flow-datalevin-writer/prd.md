@@ -329,7 +329,7 @@ All 5 assumptions verified in REPL (original agent + verification agent):
 
 **Verification:**
 
-- `curl http://localhost:8080/api/health` includes writer status
+- `curl <http://localhost:8080/api/health`> includes writer status
 - Writer metrics visible after a few test writes
 
 **Dependencies:** Phase 6

@@ -1,7 +1,7 @@
 ---
 type: research
 status: draft
-tags: [research, malli, schema, render]
+tags: [research, schema]
 ---
 
 # Malli schema properties + defaults — canonical patterns for Seon
@@ -32,6 +32,7 @@ Malli reserves no property keys for its own use beyond a documented set (`:regis
 ;; From tips.md "Trimming strings" example
 (let [{:string/keys [trim]} (m/properties schema)]
   (when trim #(cond-> % (string? %) str/trim)))
+
 ```
 
 The `:string/trim` key is application-defined; Malli neither knows nor cares. Same shape works for `:seon.render/ai`.
@@ -49,6 +50,7 @@ Seon's `register!` (`src/seon/schema.cljc:119-134`) is `(swap! *schemas assoc k 
    [::id ::id]
    [::source :string]
    ...])
+
 ```
 
 No changes to `register!` required. The properties travel with the schema.
@@ -67,6 +69,7 @@ No changes to `register!` required. The properties travel with the schema.
                                         (some-> more-props (find key)))]
                           (constantly (val e))
                           (some->> schema m/type (get defaults) (#(constantly (% schema)))))))
+
 ```
 
 Reading priority is (a) `:default/fn` on the value-schema (b) `:default/fn` on the entry properties (c) the configured `:default` key (default `:default`) on the value-schema (d) the entry's `:default` (e) a type-keyed fallback table passed as `:defaults`.
@@ -90,6 +93,7 @@ Crucially: **defaults fill only when the key is missing.** Present-with-value en
 ;; Default that depends on other keys (sibling values) — requires the
 ;; dependent-default-transformer from tips.md, NOT the stock one
 [::cost {:default-fn '(fn [m] (* (:qty m) (:price m)))} number?]
+
 ```
 
 `:default/fn` values go through `m/eval` (see line 488), which in JVM is `sci`-or-`clojure.core/eval` and in CLJS is `sci`. The fn body must be a quoted form (sci-evalable) or a symbol that resolves in the eval registry — same constraint Seon already accepts for `:seon.render/ai 'foo` (symbol stored, resolved via `seon.eval/lookup-value`).
@@ -108,6 +112,7 @@ No. The render-time codepath in `src/seon/render.cljs:198` already reads the sym
 (let [sym (:seon.render/ai entity)
       f   (or (eval/lookup-value sym) default/pretty-ai)
       ...])
+
 ```
 
 Adding a one-step fallback to the schema is trivial:
@@ -117,6 +122,7 @@ Adding a one-step fallback to the schema is trivial:
               (some-> (entity-kind entity) m/schema m/properties :seon.render/ai))
       f   (or (eval/lookup-value sym) default/pretty-ai)
       ...])
+
 ```
 
 Where `entity-kind` picks the kind keyword (e.g. presence of `:seon.eval/id` → `:seon.eval`). This is strictly cheaper than `(m/decode entity-schema entity (mt/default-value-transformer))` per render call (transformer compile is cached, but the per-row walk still happens), and stores LESS data — the symbol isn't duplicated across 10,000 eval rows in the DB.
@@ -179,6 +185,7 @@ For Seon, the resolution chain at render time is:
             :seon.render/html 'seon.handlers.eval/render-html}
       [:seon.eval/id ...]
       ...])
+
    ```
 
    Stop stamping these on each row (the five sites in section D).

@@ -1,7 +1,7 @@
 ---
 type: research
 status: active
-tags: [research, eval, cljs, pod, agent]
+tags: [research, cljs, pod, agent]
 ---
 
 # eval-batch! fragility deep-dive — concerns (a) and (c) (2026-05-23)
@@ -35,6 +35,7 @@ The relevant code is `src/seon/eval.cljs:296-354`. Specifically:
         (fn [{:keys [error value ns]}]
           (set! ana/*cljs-warning-handlers* prev-h)      ; restore
           ...)))))
+
 ```
 
 The var being mutated is `cljs.analyzer/*cljs-warning-handlers*`, defined at `cljs/analyzer.cljc:494-495`:
@@ -42,6 +43,7 @@ The var being mutated is `cljs.analyzer/*cljs-warning-handlers*`, defined at `cl
 ```clojure
 (def ^:dynamic *cljs-warning-handlers*
   [default-warning-handler])
+
 ```
 
 It's used by every analyzer warning emission point — `analyzer.cljc:765-767`:
@@ -50,6 +52,7 @@ It's used by every analyzer warning emission point — `analyzer.cljc:765-767`:
 (defn warning [warning-type env extra]
   (doseq [handler *cljs-warning-handlers*]
     (handler warning-type env extra)))
+
 ```
 
 ### Semantics of `set!` on a CLJS dynamic var
@@ -113,6 +116,7 @@ Replace `set!`-per-eval with a one-time `set!` at compile-state init that instal
               (fn [{:keys [error value ns]}]
                 ;; @warnings now holds ONLY warnings from this fiber's eval
                 (cond ...)))))))))
+
 ```
 
 **Why this works.** `AsyncLocalStorage` is fiber-local across `await` — Sean's memory note confirms this for `with-tx-context`, and `seon.db.cljs:391-393` proves it's already wired. The cljs.js callback runs inside the `.run` scope (callbacks scheduled via Node's microtask queue inherit the ALS context); analyzer warnings emitted from cljs.js's analyze pass run inside the same context (the trampoline doesn't break it because trampoline is synchronous — ALS context is preserved across `setTimeout`/microtask/promise boundaries by V8's `AsyncContext` instrumentation).
@@ -259,6 +263,7 @@ Concrete `pause-and-reload!` sketch:
                {:timeout-ms 10000 :interval-ms 100})
   (user/reload)
   (seon.agent/resume!))
+
 ```
 
 Effort: ~1 hour. Ship after walker, after detect-and-tee. No blocker for either.

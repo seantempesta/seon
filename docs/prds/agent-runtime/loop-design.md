@@ -1,7 +1,7 @@
 ---
 type: prd
 status: draft
-tags: [prd, agent, runtime]
+tags: [prd, agent]
 ---
 
 # Agent runtime loop — dispatcher + handlers + effects
@@ -150,6 +150,7 @@ rules hold.
 
 (schema/register! :seon.eval/from-message :seon.db/ref) ; → :seon.message of :role :assistant
 ;; All other :seon.eval/* attrs from v1.md §2.1 unchanged.
+
 ```
 
 `:seon.match/attr` + optional `:seon.match/value` is intentionally
@@ -313,6 +314,7 @@ transacts anything else:
                           :seon.match/value :failed}
      :seon.handler/fn    'my.handlers/rerun-failed-test
      :seon.handler/priority 50}]})
+
 ```
 
 The handler-index cache invalidates on `:seon.handler` writes; the

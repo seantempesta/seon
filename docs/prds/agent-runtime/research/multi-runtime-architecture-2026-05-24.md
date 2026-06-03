@@ -1,7 +1,7 @@
 ---
 type: research
 status: active
-tags: [research, agent, runtime, wasm, ipc, datahike, performance, architecture]
+tags: [research, agent, wasm, architecture]
 ---
 
 # Multi-runtime agent architecture (in progress)
@@ -52,6 +52,7 @@ pub async fn call_trigger_turn_async(&mut self, agent_id: &str) -> ...
 pub async fn call_inject_message_async(&mut self, agent_id: &str, content: &str, role) -> ...
 pub async fn call_inspect_agent_async(&mut self, agent_id: &str) -> ...
 pub async fn call_interrupt_async(&mut self, agent_id: &str) -> ...
+
 ```
 
 **The architecture as wired today routes N agents through ONE wasm Component instance**, with the guest CLJS dispatching internally by `agent-id`. This is the opposite of the "one runtime per agent" hypothesis. The host is already designed for fan-out by id, not fan-out by instance.
@@ -126,6 +127,7 @@ Three concurrent wasmtime processes running init-bootstrap on the same `.cwasm`:
  4600  87.8 MB wasmtime ... eval_smoke.cwasm
  4601  87.3 MB wasmtime ...
  4602  87.7 MB wasmtime ...
+
 ```
 
 **Each process: ~87 MB RSS, independent.** As separate OS processes the kernel can page-share the AOT code (since the .cwasm file maps read-only into all three), but the QuickJS heap, linear memory, and per-Component metadata are private. **Linear scaling: N processes ≈ N × 84 MB.**
@@ -246,6 +248,7 @@ Pod::new(wasm)
   .with_preopen_dir("~/seon-workspace", "/workspace")
   .with_http_allow_host("api.deepseek.com")
   .start_async().await
+
 ```
 
 **This is granularity-per-instance.** All agents in the same instance share the same allowlist, same preopens, same MCP servers.
@@ -310,6 +313,7 @@ If we use **one wasm Component, one QuickJS loop, agents are cooperative corouti
 `seon.eval`'s `!timeout-ms` (default 5 seconds) currently uses a setTimeout race in CLJS — it returns a sentinel but the underlying QuickJS computation continues consuming CPU. **Wasmtime epoch interruption is the right primitive to actually preempt** a runaway eval. Host implementation: tick the epoch every 100 ms; guest's `cljs.js/eval-str` is wrapped to set a per-call deadline; when exceeded, wasmtime traps and the host catches it. This is independent of the multi-runtime question — it's an upgrade to the eval timeout regardless.
 
 ## 6. Scheduling — time-slice vs parallel
+
 (in progress)
 
 ## 7. Recommended architecture
@@ -351,6 +355,7 @@ If we use **one wasm Component, one QuickJS loop, agents are cooperative corouti
                  │   fs preopens, HTTP allowlist,   │
                  │   MCP registry, capability prompt│
                  └──────────────────────────────────┘
+
 ```
 
 - **One pod = one wasm Component instance = one QuickJS event loop = one datahike conn.**
@@ -635,6 +640,7 @@ For Sean to read and pre-design against. Not buildable today; concrete enough to
        │ MCP bridge — `select-agent <id>; eval-form <form>` │
        │ Editor / Claude Code connects here                  │
        └────────────────────────────────────────────────────┘
+
 ```
 
 ### 13.B — Per-agent Component lifecycle
@@ -699,6 +705,7 @@ impl AgentPool {
         Ok(report)
     }
 }
+
 ```
 
 Two critical properties:
@@ -720,6 +727,7 @@ pub struct AgentCapabilities {
     fuel_per_turn: Option<u64>,                      // wasmtime fuel cap
     epoch_deadline_ms: Option<u64>,                  // wall-clock cap per turn
 }
+
 ```
 
 Stored in the canonical DB as `:seon.agent/capabilities` (a component-ref to a `:seon.capabilities` entity); orchestrator can transact updates to a task agent's capabilities, host re-reads on next agent spawn or via a `revoke-capability` WIT export that takes effect immediately.
@@ -737,6 +745,7 @@ inspect-agent <id>   -> snapshot (any agent, no selection needed)
 interrupt-agent <id> -> ok (epoch-trap that agent's in-flight turn)
 spawn-agent {kind caps}  -> {:agent-id "agt_…"} (orchestrator-cap only)
 respawn-agent <id>   -> ok (drop the Component, re-instantiate from snapshot)
+
 ```
 
 From the editor side: connect once to the MCP bridge, then `(select-agent "agt_task-3"); (eval-form "(seon.agent/recent-messages)")` evaluates inside task-3's Component, sees its compile-state, its globalThis, its datahike replica. Switch agents = switch contexts. Same UX as the JVM nREPL-per-process pattern, lighter weight.
@@ -802,6 +811,7 @@ pod.call_X(agent_id, ...)        ← WIT call carries agent_id across boundary
        ▼
 all downstream CLJS reads (current-agent-id)
 including cljs.js/eval-str of agent-emitted forms
+
 ```
 
 1. **`(defonce default-id …)` MUST go** (per `schema-state-architecture-audit-2026-05-23.md` §2). Replace with explicit `:seon.agent/id` at every call site. Web handlers default to a `(current-agent-id)` DB query.
@@ -891,6 +901,7 @@ wasmtime compile -o /tmp/eval_smoke.cwasm \
 # In-process Rust harness (placeholder pod, fresh JIT): 0.34s total
 cd pod-host/wasm-tauri && cargo test --release \
   --package seon-tauri placeholder_pod_returns_ui_port
+
 ```
 
 Memory numbers are macOS RSS via `/usr/bin/time -l` — physical resident set, NOT virtual. Cycles/instructions are CPU performance counters. Wall clock is the user-time line.

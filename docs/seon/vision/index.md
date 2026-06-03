@@ -4,6 +4,7 @@ tags: [vision, index]
 status: active
 ---
 	B
+
 # Seon Vision
 
 **A personal AI that can do anything for you, because it can write code.**
@@ -190,4 +191,3 @@ A vision document with no honest accounting of what is shipped versus what is as
 ## The bet, restated
 
 The bet is that hand-curating an agent's surface is the new hand-curating features, and that the same Bitter Lesson that applied to every previous generation of feature engineering will apply to the current generation of agent frameworks. The bet is that the right shape for an AI to write reliable software for its bonded human is a Lisp running inside a graph database inside a capability-gated WebAssembly boundary, with the REPL as the only interface and the schema registry as the discovery key. The bet is that one developer with eighteen months of accumulated experiments and a clear architectural thesis can build something useful here before the question of what a personal AI's home should look like becomes obvious. If the bet is wrong, this becomes an interesting Clojure project with an unusually disciplined architecture and a working renderer-discovery system. If the bet is right, the work will be ready when somebody needs it.
-

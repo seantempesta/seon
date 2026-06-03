@@ -1,7 +1,7 @@
 ---
 type: research
 status: draft
-tags: [research, vision, prior-art]
+tags: [research, vision]
 ---
 
 # Prior Art Credits for Seon

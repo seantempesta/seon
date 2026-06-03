@@ -55,6 +55,7 @@ agent
 ├── :seon.agent/state        ; [:enum :idle :running :paused]   (+ :paused, see Q5)
 ├── :seon.agent/turns        ; [:vector {:component true} :ref]  → :seon.turn (append-only)
 └── :seon.agent/ctx          ; (unchanged)
+
 ```
 
 Per-site translation table:
@@ -190,6 +191,7 @@ The working-tree diff on `client.cljs` adds new `:seon.fn/*` projection attrs an
 :seon.session/at
 :seon.session/turns
 :seon.agent/sessions
+
 ```
 DELETE these four lines; add `:seon.agent/turns`.
 

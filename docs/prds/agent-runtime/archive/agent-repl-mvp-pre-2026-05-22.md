@@ -99,6 +99,7 @@ a Malli schema and referenced from each identity attr:
 (schema/register! :seon.message/id [:seon.id/id {:seon.db/identity true}])
 (schema/register! :seon.agent/id   [:seon.id/id {:seon.db/identity true}])
 (schema/register! :seon.log/id     [:seon.id/id {:seon.db/identity true}])
+
 ```
 
 No per-kind variants of the generator. Agent home-ns is
@@ -166,7 +167,7 @@ above; the detail blocks below are kept as design archaeology.
   tests).
 - **[[#^d3]]** — Detect `(def …)` via rewrite-clj AST (no regex).
 - **[[#^d4]]** — Targeted test auto-run wiring + warning predicate
-  + runtime-var stash. Use `d/listen!` for the trigger — no custom
+  - runtime-var stash. Use `d/listen!` for the trigger — no custom
   hook system (see `research/datahike-capabilities-2026-05-22.md`
   §3).
 - **[[#^d5]]** — `(forget!)` for whole namespaces. Implementation:
@@ -188,7 +189,7 @@ above; the detail blocks below are kept as design archaeology.
   tx-id; see Resume phase.)
 - **D12 (new)** — Blob GC / retention policy. Deferred to V2; v1 lets
   the blob store grow unbounded. Sweep design: retract blob metadata
-  + delete file when no entity refs the hash.
+  - delete file when no entity refs the hash.
 - **D13 (new)** — WASM-boundary survival of `seon.db/*tx-context*`
   dynvar. Risk: if a tx is enqueued in one "thread" and applied on
   another (flow message-passing model in wasm32), the binding may
@@ -290,6 +291,7 @@ ever seen, said, or done is one nested pull away.**
 ;;       [{:seon.ctx/name :system        :seon.ctx/priority 10 :seon.ctx/fn 'seon.agent/system-section}
 ;;        {:seon.ctx/name :current-ns    :seon.ctx/priority 30 :seon.ctx/fn 'seon.agent/current-ns-section}
 ;;        ...]}
+
 ```
 
 The forward-ref chain Agent → Sessions → Turns → Messages/Evals is
@@ -328,6 +330,7 @@ their own record:
   {:seon.db/tx-data [[:db/retract [:seon.agent/id <id>] :seon.agent/ctx]
                      {:seon.agent/id <id>
                       :seon.agent/ctx <default-component-maps>}]})
+
 ```
 
 The explicit retract precedes the add — cardinality-many ref
@@ -373,6 +376,7 @@ each form's eval. Inside agent code, no id-threading required.
 ;; Explicit override — every accessor accepts {:seon.agent/id "other"} as a
 ;; second-arg map for inspecting another agent (or in tests).
 (seon.agent/messages {:n 10 :seon.agent/id "other-agent-id"})
+
 ```
 
 The bodies are short (mostly 2–3 lines wrapping `d/pull` with a
@@ -498,6 +502,7 @@ The agent record is the root. Pulling it walks the world.
 ::seon.eval/result-edn    :string {:optional true}                           ; pr-str of result, TRUNCATED (2 KB) for renderer display
 ::seon.eval/result-blob   :seon.db/ref {:optional true}                      ; → :seon.blob — full untruncated result (when result-edn was truncated)
 ::seon.eval/error         :string {:optional true}                           ; pr-str of error payload on failure
+
 ```
 
 **One pull walks the whole agent.**
@@ -512,6 +517,7 @@ The agent record is the root. Pulling it walks the world.
            :seon.turn/evals    [*]}]}]}
     {:seon.agent/ctx [*]}]
   [:seon.agent/id "AbCdEfGh1234"])
+
 ```
 
 Components inline (not `{:db/id N}` placeholders), so the result is a
@@ -560,6 +566,7 @@ are one reverse-ref pull.
 ::seon.test/ns        :seon.db/ref                      ; → :seon.ns
 ::seon.test/target    :seon.db/ref                      ; → :seon.fn (the fn this test exercises)
 ::seon.test/source    :string
+
 ```
 
 **Discovery via reverse-ref pulls.** Everything an ns owns is one pull
@@ -572,10 +579,11 @@ from the ns entity:
      :seon.schema/_ns [:seon.schema/key :seon.schema/source]
      :seon.test/_ns   [:seon.test/sym :seon.test/source :seon.test/target]}]
   [:seon.ns/name :seon.trading])
+
 ```
 
 This replaces the current `current-ns-section`'s three datalog queries
-+ filter-by-string-prefix passes with a single pull. The `_ns` prefix
+- filter-by-string-prefix passes with a single pull. The `_ns` prefix
 is the reverse-ref selector; datahike handles it natively (see
 `research/datahike-capabilities-2026-05-22.md` §2).
 
@@ -598,6 +606,7 @@ single history query:
        :where [?tx :seon.eval/test ?test]
               [?tx :seon.eval/ok? true]]
      (d/history db) [:seon.test/sym "seon.trading/analyze-test"])
+
 ```
 
 Three denormalized fields collapse to zero stored state.
@@ -631,6 +640,7 @@ on every tx automatically, via the `seon.db/*tx-context*` dynvar:
 ::seon.db/replay?      :boolean {:optional true}                  ; true during resume-phase replay
 ::seon.db/resume-marker? :boolean {:optional true}                ; true on the first tx of a resume phase
 ::seon.eval/test       :seon.db/ref {:optional true}              ; on test-run txs: → :seon.test (gives "latest pass" via history)
+
 ```
 
 **Every tx-meta key MUST be a registered schema attribute.** Datahike
@@ -662,6 +672,7 @@ PDFs, CSVs). These share a single content-addressed primitive.
 ::seon.blob/size    :long                                ; bytes, uncompressed
 ::seon.blob/mime    :string {:optional true}             ; "text/plain" / "application/edn" / "application/pdf" / etc.
 ::seon.blob/at      :inst                                ; first-write timestamp (= :db/txInstant of the create-blob tx)
+
 ```
 
 **Bytes live on disk** at `<pod-data>/blobs/<hash[:2]>/<hash>.zst`,
@@ -685,6 +696,7 @@ applies once we cut over to the Phase 3 pod.
 ;; error to surface, not paper over.
 
 (seon.blob/ref-by hash)   ; => [:seon.blob/hash "..."] lookup ref ready to drop in a transact
+
 ```
 
 **Where v1 uses it:**
@@ -741,6 +753,7 @@ reads them on every turn.
        :in $ ?tx
        :where [?e ?a ?v ?tx ?op]]
      (d/history db) [:seon.eval/id "K9p2x4nB7q"])
+
 ```
 
 The four primitives behind these (wildcard `*`, ref recursion via
@@ -837,6 +850,7 @@ returns the reader. rewrite-clj is the right tool here.)
  {:kind :form    :form  '(defn analyze …) :source "(defn analyze …)"}
  {:kind :comment :text "Sanity-check it returns the right shape:"}
  {:kind :form    :form  'analyze :source "analyze"}]
+
 ```
 
 Notice the last entry: a bare symbol `analyze`. **Bare symbols are
@@ -854,6 +868,7 @@ just multiple `;;` lines in a row:
 ;; 1. Register the ticker schema
 ;; 2. Build analyze
 ;; 3. Verify by evaling `analyze`
+
 ```
 
 The reader sees these as four/five consecutive comments. The pairer
@@ -901,6 +916,7 @@ another transact under the same binding.
   ;; form eval + record-eval! run here; every transact() inside
   ;; carries the bundle automatically.
   ...)
+
 ```
 
 For each entry classified as a form:
@@ -928,6 +944,7 @@ For each entry classified as a form:
    2 KB display version. If the truncator actually clipped (i.e.
    `(not= full truncated)`), write the full string as a blob and
    capture the hash:
+
    ```clojure
    (let [full-edn (pr-str raw-result)
          display  (truncate-edn full-edn)]
@@ -937,6 +954,7 @@ For each entry classified as a form:
               (seon.blob/ref-by
                 (seon.blob/put! {:seon.blob/content full-edn
                                  :seon.blob/mime    "application/edn"})))))
+
    ```
 7. **Tag the tx with the eval-id** *(automatic via `*tx-context*`)*.
    The eval entity, any persistent-entity datoms produced by the
@@ -990,6 +1008,7 @@ a `cljs.analyzer/*cljs-warning-handlers*` binding that throws on
                        {:kind :compile
                         :seon.eval/warning-type type
                         :seon.eval/extra extra}))))])
+
 ```
 
 cljs.js wraps the throw as `{:tag :cljs/analysis-error}` and returns
@@ -1091,6 +1110,7 @@ the DB at any point in the future.
      :seon.turn/prompt-blob (seon.blob/ref-by
                               (seon.blob/put! {:seon.blob/content text
                                                :seon.blob/mime    "text/plain"}))}))
+
 ```
 
 The composer is the only piece that knows about "sections". Section
@@ -1156,6 +1176,7 @@ the agent is the namespace that owns rendering.
 {:seon.ctx/name :warnings      :seon.ctx/priority 40 :seon.ctx/fn 'seon.agent/warnings-section}
 {:seon.ctx/name :recent-evals  :seon.ctx/priority 50 :seon.ctx/fn 'seon.agent/recent-evals-section}
 {:seon.ctx/name :prompt        :seon.ctx/priority 99 :seon.ctx/fn 'seon.agent/prompt-section}
+
 ```
 
 ```clojure
@@ -1289,6 +1310,7 @@ the agent is the namespace that owns rendering.
         ns    (agent-current-ns agent)
         turn  (-> agent :seon.agent/sessions last :seon.session/turn-count (or 0))]
     (str ns "=>  ; turn " turn)))
+
 ```
 
 That's the whole default surface: 6 section entities + 6 section
@@ -1348,7 +1370,7 @@ it writes the same. The XML is the scaffolding around the Clojure;
 the Clojure is the content.
 
 Exception: the per-eval row in recent-evals uses bash-style `> form`
-+ `; # eval-id  Nms` because that's what a real REPL transcript
+- `; # eval-id  Nms` because that's what a real REPL transcript
 looks like. No XML around each row — too noisy.
 
 ## Harness — the turn cycle
@@ -1433,6 +1455,7 @@ message → run eval-batch → close turn.
                                       :seon.db/turn-id turn-id}}})]
     ;; Return the closed turn entity for the caller (harness UI / test).
     (seon.db/pull-by-name {:seon.turn/id turn-id})))
+
 ```
 
 ### Playback — "show me turn N"
@@ -1448,6 +1471,7 @@ turn entity, **one pull reconstructs everything**:
     {:seon.turn/messages    [:seon.message/role :seon.message/content :seon.message/at]}
     {:seon.turn/evals       [* {:seon.eval/result-blob [:seon.blob/hash]}]}]
   [:seon.turn/id "T1aaaaa1111"])
+
 ```
 
 Fetch the prompt-blob bytes via `(seon.blob/get hash)` and you have
@@ -1582,11 +1606,13 @@ depending on whether the entry has a form or is thinking-only:
 ```text
 > (form-source-as-typed)
 result-rendered    ; # eval-id  4ms
+
 ```
 
 ```text
 ;; thinking: <narration text, indented as a markdown block>
                                 ; # eval-id
+
 ```
 
 The trailing `<n>ms` on a form row is `:seon.eval/duration-ms`
@@ -1680,6 +1706,7 @@ recent-evals tile to one line per eval.
 (db/transact! {:seon.db/tx-data
                [{:seon.ctx/name :recent-evals
                  :seon.ctx/fn 'my.work/compact-recent-evals}]})
+
 ```
 
 If the new function throws or returns a non-string, `pretty-ai` takes
@@ -1716,6 +1743,7 @@ fn — substrate AND agent-authored — flows through this seam, because
 ;; … do work …
 (seon.perf/set-enabled! false)
 (seon.perf/last-stats)   ; the accumulated stats since enable
+
 ```
 
 Off by default because `tufte/p` at ~50ns per call adds up in tight
@@ -1734,6 +1762,7 @@ at a problem.
       (str "<perf>\n" (tufte/format-pstats stats {:columns [:n :sum :mean :p90]})
            "\n</perf>")
       "")))
+
 ```
 
 The agent enables this tile when they're optimizing; disables it
@@ -1799,6 +1828,7 @@ agent can pull the section entity to find out which function ran:
 ;; => {:seon.ctx/name :recent-evals
 ;;     :seon.ctx/priority 50
 ;;     :seon.ctx/fn 'seon.render.default/recent-evals-section}
+
 ```
 
 For "what did this function emit?" the agent simply calls the section
@@ -1884,6 +1914,7 @@ the current db only.
   (throw (ex-info "Agent conn opened with :keep-history? false — the entire tx-meta causality mechanic is dead."
                   {:kind :seon.boot/precondition-failed
                    :fix  "Open the conn with :keep-history? true in seon.client/open-agent-conn!"})))
+
 ```
 
 **2. tx-meta schema attrs are registered.** Datahike `flush-tx-meta`
@@ -1900,6 +1931,7 @@ and `:seon.eval/test` BEFORE the first tx-meta-carrying tx fires.
   (when-not (schema/registered? attr)
     (throw (ex-info (str "tx-meta attr " attr " not registered before first transact")
                     {:kind :seon.boot/precondition-failed :attr attr}))))
+
 ```
 
 Both checks are cheap, run once at boot, and prevent multi-hour
@@ -2046,6 +2078,7 @@ pod run and appends it to `:seon.agent/sessions`:
    :seon.db/opts {:tx-meta {:seon.db/origin           :system
                             :seon.db/resume-marker?   true
                             :seon.db/agent-id         <agent-id>}}})
+
 ```
 
 `:seon.db/resume-marker? true` on this tx makes "evals since the
@@ -2376,6 +2409,7 @@ already gives us the form structurally, the check is:
   (and (seq? parsed-form)
        (= 'def (first parsed-form))
        (symbol? (second parsed-form))))
+
 ```
 
 That's it. `def` as the head symbol, a symbol as the name. `defn`
@@ -2481,6 +2515,7 @@ warning) when the removal would break invariants.
 
 (seon.repl/remove-test {:seon.test/sym "seon.trading/analyze-example"})
 ;; -- retract the :seon.test entity, ns-unmap the deftest var.
+
 ```
 
 Explicit verbs are clearer to the agent and easier to teach in the
@@ -2517,6 +2552,7 @@ path. The pattern is:
   (is (= {:seon.trading/signal :hold
           :seon.trading/confidence 0.5}
          (analyze {:seon.trading/ticker "AAPL"}))))
+
 ```
 
 Why `-example`: it's a documented use-case the agent (and future
@@ -2541,6 +2577,7 @@ Confirming the schema shape:
 
 ;; Test entity already has
 ::seon.test/target     :seon.db/ref                          ; → :seon.fn entity
+
 ```
 
 `:seon.fn/refs` is populated at define-time by the analyzer walk:
@@ -2556,6 +2593,7 @@ schemas. New attr:
 
 ```clojure
 ::seon.schema/refs  [:vector :seon.db/ref] {:optional true}  ; other :seon.schema entities this schema uses
+
 ```
 
 The reference graph is what makes the targeted-test auto-run
@@ -2639,6 +2677,7 @@ recursive pull on the agent inlines the ctx entity maps (not just
 ::seon.ctx/name      :keyword              ; :system / :recent-evals / etc.
 ::seon.ctx/priority  :long
 ::seon.ctx/fn        :symbol               ; ns-qualified, resolves to a section fn
+
 ```
 
 Why this shape:
@@ -2679,6 +2718,7 @@ agent at agent-create-time:
   {:seon.ctx/name :warnings      :seon.ctx/priority 40 :seon.ctx/fn 'seon.agent/warnings-section}
   {:seon.ctx/name :recent-evals  :seon.ctx/priority 50 :seon.ctx/fn 'seon.agent/recent-evals-section}
   {:seon.ctx/name :prompt        :seon.ctx/priority 99 :seon.ctx/fn 'seon.agent/prompt-section}]}
+
 ```
 
 Agent customizes by writing their own fn in `seon.agent.<id>`
@@ -2705,6 +2745,7 @@ old ctx entity by id first, then add the new one:
        [{:seon.ctx/name :recent-evals
          :seon.ctx/priority 50
          :seon.ctx/fn 'seon.agent.AbCdEfGh1234/compact-evals-section}]}]}))
+
 ```
 
 #### V1 default — section fn signature
@@ -2716,6 +2757,7 @@ db handle and the agent id; the agent id is also available via the
 ```clojure
 {:seon.db/db    <datahike db>
  :seon.agent/id <agent-id string>}
+
 ```
 
 Section fn handles the rest (queries DB, formats, returns string).
@@ -2759,6 +2801,7 @@ argument with namespaced keys. The common-mistake forms
 (seon.db/transact! @conn {:tx-data ...})       ; positional — crashes inside seon.db with
                                                ; "ILookup$_lookup$arity$3 is not a function"
 (seon.db/transact! {:conn @conn :tx-data ...}) ; unqualified keys — "no conversion to symbol"
+
 ```
 
 both fail badly. The correct call is
@@ -2766,6 +2809,7 @@ both fail badly. The correct call is
 ```clojure
 (seon.db/transact! {:seon.db/conn @conn
                     :seon.db/tx-data [...]})
+
 ```
 
 …OR rely on the dynamic `seon.db/*conn*` and omit `:conn`. The
@@ -2810,6 +2854,7 @@ levels deep:
     :seon.error/cause
       :seon.error/message  "undeclared-var: cljs.user/Let"
       :seon.error/ex-data  {:kind :compile, :seon.eval/warning-type :undeclared-var}
+
 ```
 
 The actionable info (`:seon.eval/warning-type`,

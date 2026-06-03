@@ -272,6 +272,7 @@ of a not-pre-warmed ns return cleanly. Proven empirically (verbatim below).
 cljs.core.async.impl.dispatch/queue-dispatcher
   -> goog.async.nextTick(process_messages)
        -> goog.global.setImmediate(cb)            ;; nextTick prefers setImmediate
+
 ```
 
 Under wasm-rquickjs, `setImmediate` is wired (builtin/timeout.js:154) to:
@@ -280,6 +281,7 @@ Under wasm-rquickjs, `setImmediate` is wired (builtin/timeout.js:154) to:
 setImmediate(cb) -> scheduleTimeout(cb, 0) -> timeoutNative.schedule(cb, 0, …)
   -> (builtin/timeout.rs:34) ctx.spawn(scheduled_task)
        -> (timeout.rs:101) wstd::task::sleep(Duration::from_millis(0)).await
+
 ```
 
 `wstd::task::sleep` registers a `wasi:clocks/monotonic-clock` pollable in wstd's
@@ -296,6 +298,7 @@ loop {
 }
 // after break:
 match root_task.poll(noop) { Ready(r)=>r, Pending=>unreachable!("ready list empty…") }
+
 ```
 
 - **Symptom A (hang, ~1.25s CPU / 180s wall):** the spawned 0ms timer leaves a
@@ -361,6 +364,7 @@ cargo build, 0 warnings in CLJS), with `datahike.api` removed:
 "ok"
 ▸ wasmtime --invoke eval-form("(+ 1 2)")…
 "{:ok true, :value-edn \"3\", :ns cljs.user}"
+
 ```
 
 Additional bounded checks on the same binary (`timeout 40 wasmtime …`):

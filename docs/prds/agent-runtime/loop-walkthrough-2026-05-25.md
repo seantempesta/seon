@@ -1,7 +1,7 @@
 ---
 type: prd
 status: draft
-tags: [prd, agent, runtime]
+tags: [prd, agent]
 ---
 
 # Agent runtime loop — four scenarios as literal data
@@ -47,6 +47,7 @@ initial state, omitted from the per-scenario block for brevity:
   :seon.handler/fn    'seon.runtime/surface-system-error
   :seon.handler/on-origin #{:user :agent :system}
   :seon.handler/priority 0}]
+
 ```
 
 Stable `:seon.ctx/*` entities are also baseline. The default ones
@@ -68,6 +69,7 @@ Stable `:seon.ctx/*` entities are also baseline. The default ones
   :seon.ctx/updated-at #inst "2026-05-25T10:00:00.000Z"
   :seon.render/ai     'seon.render.default/schema-reference
   :seon.render/html   'seon.render.default/pretty-html}]
+
 ```
 
 Volatile ctx (conversation, recent evals, async results) is produced
@@ -88,6 +90,7 @@ Volatile ctx (conversation, recent evals, async results) is produced
  :seon.render/ai         'seon.render.default/ctx
  :seon.render/html       'seon.render.default/view}
 ;; + the three stable ctx entities above, scoped to "A-abc123def456".
+
 ```
 
 ### Stimulus
@@ -103,6 +106,7 @@ User types "what's 2+2" in the loopback UI. Web handler calls
   :seon.message/to      [[:seon.agent/id "A-abc123def456"]]
   :seon.message/content "what's 2+2"
   :seon.message/at      #inst "2026-05-25T10:00:00.000Z"}]
+
 ```
 
 ### Step-by-step
@@ -112,6 +116,7 @@ User types "what's 2+2" in the loopback UI. Web handler calls
 
 ```clojure
 {:effects [{:effect/type :wake :agent "A-abc123def456"}]}
+
 ```
 
 **Step 2.** `:wake` interpreter checks state `:stopped` → flips
@@ -120,6 +125,7 @@ User types "what's 2+2" in the loopback UI. Web handler calls
 ```clojure
 ^{:seon.db/origin :handler}
 [[:db/add [:seon.agent/id "A-abc123def456"] :seon.agent/state :running]]
+
 ```
 
 `process-turn-request` does not match (attr is `:seon.agent/state`, not
@@ -130,7 +136,7 @@ anyway.
 calls the LLM (Promise resolves in 800ms with `";; addition\n(+ 2 2)"`).
 `ask-and-eval!` writes the assistant message + eval entities + a
 `:seon.ctx.recent-eval` entity (the volatile ctx for the eval result)
-+ a `:seon.turn-request` (form-count is 1):
+- a `:seon.turn-request` (form-count is 1):
 
 ```clojure
 ^{:seon.db/origin :agent}
@@ -160,6 +166,7 @@ calls the LLM (Promise resolves in 800ms with `";; addition\n(+ 2 2)"`).
  {:seon.turn-request/id    "tr-1"
   :seon.turn-request/agent [:seon.agent/id "A-abc123def456"]
   :seon.turn-request/at    #inst "2026-05-25T10:00:00.821Z"}]
+
 ```
 
 **Step 4.** Dispatcher walks the new datoms. `:seon.turn-request/agent`
@@ -169,6 +176,7 @@ reads `step-count 0`, `max-steps 8` → emits:
 ```clojure
 {:tx [[:db/add [:seon.agent/id "A-abc123def456"] :seon.agent/step-count 1]]
  :effects [{:effect/type :wake :agent "A-abc123def456"}]}
+
 ```
 
 `:wake` finds state already `:running` → no-op. The recursive
@@ -191,6 +199,7 @@ because form-count is 0 does **not** transact a `:seon.turn-request`:
   :seon.message/at      #inst "2026-05-25T10:00:01.620Z"}
  {:seon.ctx/id         "ctx-conversation-A-abc123def456"
   :seon.ctx/updated-at #inst "2026-05-25T10:00:01.620Z"}]
+
 ```
 
 **Step 6.** `run-turn!`'s wrapper sees zero forms → transacts:
@@ -198,6 +207,7 @@ because form-count is 0 does **not** transact a `:seon.turn-request`:
 ```clojure
 ^{:seon.db/origin :system}
 [[:db/add [:seon.agent/id "A-abc123def456"] :seon.agent/state :stopped]]
+
 ```
 
 ### Final state
@@ -209,6 +219,7 @@ because form-count is 0 does **not** transact a `:seon.turn-request`:
  :evals    1
  :turn-requests 1 ; tr-1
  :ctx entities    ; 3 stable + recent-eval + conversation = 5}
+
 ```
 
 ### Next-render `assemble-ai-context`
@@ -236,6 +247,7 @@ Rows 1-3 are the cache-stable prefix. Rows 4-5 are the dynamic tail.
 ;; form whose eval issued an :effect/type :spawn-agent.
 {:seon.agent/id "A-aaa111aaa111" :seon.agent/state :running ...}
 ;; B does not exist yet.
+
 ```
 
 ### Stimulus
@@ -258,6 +270,7 @@ The `:spawn-agent` effect interpreter runs:
   :seon.message/content "Validate this datom: [42 :foo/bar \"x\"]"
   :seon.message/refs    [[:seon.datom/id "datom-1"]]   ; a ref into A's workspace
   :seon.message/at      #inst "2026-05-25T11:00:00.000Z"}]
+
 ```
 
 ### Step-by-step
@@ -267,6 +280,7 @@ The `:spawn-agent` effect interpreter runs:
 
 ```clojure
 {:effects [{:effect/type :wake :agent "B-bbb222bbb222"}]}
+
 ```
 
 **Step 2.** `:wake` flips B to `:running`, invokes B's `run-agent-loop!`.
@@ -275,6 +289,7 @@ Transacts:
 ```clojure
 ^{:seon.db/origin :handler}
 [[:db/add [:seon.agent/id "B-bbb222bbb222"] :seon.agent/state :running]]
+
 ```
 
 **Step 3.** B's first turn. `assemble-ai-context` for B includes the
@@ -298,6 +313,7 @@ default ctx renderer also walks `:seon.message/refs` and pulls
  {:seon.turn-request/id "tr-b-1"
   :seon.turn-request/agent [:seon.agent/id "B-bbb222bbb222"]
   :seon.turn-request/at #inst "2026-05-25T11:00:01.221Z"}]
+
 ```
 
 **Step 4.** Two handlers fire on this tx:
@@ -330,6 +346,7 @@ A and B both `:stopped`. Messages form a two-way thread via
               :seon.message/_to   [*]}]
          [:seon.agent/id "A-aaa111aaa111"])
 ;; shows both A→B and B→A messages.
+
 ```
 
 ### Next-render `assemble-ai-context` for A
@@ -352,6 +369,7 @@ reply appears.
  :seon.agent/max-steps 8 ...}
 ;; Agent has been working on a query; just emitted a form that called
 ;; (seon.llm/ask-async {:prompt "..."}).
+
 ```
 
 ### Stimulus
@@ -360,6 +378,7 @@ The agent's eval batch executes:
 
 ```clojure
 (seon.llm/ask-async {:prompt "summarize the eval log"})
+
 ```
 
 …which the `seon.llm/ask-async` fn implements by emitting an effect:
@@ -369,6 +388,7 @@ The agent's eval batch executes:
  :agent       "A-aaa333aaa333"
  :corr        "corr-llm-99"
  :request     {:model "..." :messages [...]}}
+
 ```
 
 The effect is queued; the fn returns a sentinel `:seon.llm/pending`.
@@ -387,6 +407,7 @@ is transacted:
   :seon.eval/result-edn ":seon.llm/pending" ...}
  {:seon.turn-request/id "tr-async-1"
   :seon.turn-request/agent [:seon.agent/id "A-aaa333aaa333"] ...}]
+
 ```
 
 **Step 2.** `process-turn-request` bumps step-count to 3, emits `:wake`.
@@ -396,6 +417,7 @@ async summary"). Zero forms → stop. Transacts:
 ```clojure
 ^{:seon.db/origin :system}
 [[:db/add [:seon.agent/id "A-aaa333aaa333"] :seon.agent/state :stopped]]
+
 ```
 
 **Step 3.** 3 seconds elapse (10:00:04). The `:run-llm` Promise (queued
@@ -412,6 +434,7 @@ back in Step 1) resolves. The interpreter transacts:
   :seon.render/ai          'seon.async-result/render-ai
   :seon.render/html        'seon.async-result/render-html
   :seon.ctx/updated-at     #inst "2026-05-25T12:00:04.000Z"}]
+
 ```
 
 **Step 4.** Dispatcher: `:seon.async-result/agent` matches
@@ -419,6 +442,7 @@ back in Step 1) resolves. The interpreter transacts:
 
 ```clojure
 {:effects [{:effect/type :wake :agent "A-aaa333aaa333"}]}
+
 ```
 
 **Step 5.** `:wake` finds `:stopped` → flips `:running` and invokes
@@ -444,6 +468,7 @@ catches and transacts:
   :seon.async-result/at    #inst "2026-05-25T12:00:04.000Z"
   :seon.render/ai          'seon.async-result/render-ai
   :seon.ctx/updated-at     #inst "2026-05-25T12:00:04.000Z"}]
+
 ```
 
 Same path. The agent's renderer surfaces the error envelope; the agent
@@ -466,6 +491,7 @@ out of scope).
  :seon.agent/state :running
  :seon.agent/step-count 0 ...}
 ;; No agent-scoped handlers yet.
+
 ```
 
 ### Stimulus (turn 1)
@@ -480,6 +506,7 @@ LLM emits this form during a turn:
                         :seon.handler.match/value? false}
    :seon.handler/fn    'seon.agent.A-aaa444aaa444/auto-rerun
    :seon.handler/priority 50})
+
 ```
 
 …and also `defn`s `seon.agent.A-aaa444aaa444/auto-rerun` in the same
@@ -501,6 +528,7 @@ is now resolvable via `lookup-value`).
   :seon.handler/on-origin #{:user :agent :system}
   :seon.handler/priority  50
   :seon.handler/updated-at #inst "2026-05-25T13:00:00.000Z"}]
+
 ```
 
 **Step 2.** Dispatcher walks this tx. The added datoms are
@@ -513,6 +541,7 @@ failing eval:
 
 ```clojure
 (throw (ex-info "test failure" {}))
+
 ```
 
 `record-eval!` transacts:
@@ -525,6 +554,7 @@ failing eval:
   :seon.eval/ok?    false
   :seon.eval/error  "test failure"
   :seon.eval/at     #inst "2026-05-25T13:00:00.100Z"}]
+
 ```
 
 **Step 4.** Dispatcher walks. `:seon.eval/ok?` with value `false`
@@ -540,6 +570,7 @@ written by the agent to do this:
          :seon.message/to   [[:seon.agent/id "A-aaa444aaa444"]]
          :seon.message/content "An eval just failed. Auto-rerun handler fired."
          :seon.message/at   (js/Date.)}]})
+
 ```
 
 **Step 5.** Handler returns `{:tx [...]}`. Dispatcher transacts:
@@ -547,6 +578,7 @@ written by the agent to do this:
 ```clojure
 ^{:seon.db/origin :handler}
 [{:seon.message/id "msg-sys-rerun-1" ...}]
+
 ```
 
 **Step 6.** New tx with `:seon.message/to` value pointing at A —
@@ -562,6 +594,7 @@ current turn).
 {:handler entities  1 substrate × 4 + agent-scoped × 1 = 5
  :messages           includes the auto-generated system message
  :evals              ev-fail-1 (the failure)}
+
 ```
 
 ### Next-render `assemble-ai-context` for A

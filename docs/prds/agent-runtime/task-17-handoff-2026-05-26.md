@@ -1,7 +1,7 @@
 ---
 type: prd
 status: completed
-tags: [prd, agent, log, pod, cljs]
+tags: [prd, agent, pod, cljs]
 ---
 
 # task-17 handoff — seon.log: file logging + ring buffer + tail

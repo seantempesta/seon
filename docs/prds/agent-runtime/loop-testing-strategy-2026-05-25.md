@@ -1,7 +1,7 @@
 ---
 type: prd
 status: draft
-tags: [prd, agent, testing]
+tags: [prd, agent]
 ---
 
 # Agent runtime loop — testing strategy
@@ -44,6 +44,7 @@ writes inside the fn; no Promises; no globals beyond schema lookup.
                   :seon.agent/id "A-test"})]
     (is (= [{:effect/type :wake :agent "A-test"}] (:effects result)))
     (is (empty? (:tx result)))))
+
 ```
 
 **Generative variant.** Each handler's `:match` shape is a Malli
@@ -66,7 +67,7 @@ returned `:effects` queued. Plus the origin-skip and depth-cap rules.
 **Pattern.**
 
 1. `with-test-pod` macro (defined below) gives a fresh datahike conn
-   + the four substrate handlers loaded + `install-dispatcher!` run.
+   - the four substrate handlers loaded + `install-dispatcher!` run.
 2. Transact a stimulus via `transact-and-tick!` which commits AND
    drains the dispatcher synchronously (uses a deterministic scheduler
    instead of `js/setTimeout 0`).
@@ -81,6 +82,7 @@ returned `:effects` queued. Plus the origin-skip and depth-cap rules.
         :seon.message/content "hi" :seon.message/at (synth-inst)}])
     (is (= :running (agent-state pod "A")))
     (is (= [{:effect/type :wake :agent "A"}] (recorded-effects pod)))))
+
 ```
 
 **Cycle-guard test.** Register a synthetic handler matching
@@ -126,6 +128,7 @@ one automated test.
     (is (= 1              (eval-count pod "A-abc123def456")))
     (is (= [:stable :stable :stable :recent-eval :conversation]
            (ctx-order pod "A-abc123def456")))))
+
 ```
 
 The four scenarios → four tests. The error-variant of Scenario 3 is a
@@ -163,6 +166,7 @@ fifth test (same setup, LLM stub rejects).
     (is (= :running (agent-state pod "A")))   ; wake fired
     (is (interrupt-message-present? pod "A"))
     (is (contains-ctx? pod "A" :seon.ctx.interrupt))))
+
 ```
 
 **Timing.** Assert boot-to-wake under 200ms for an agent population of
@@ -194,6 +198,7 @@ timestamps, which the test clock pins).
     (let [db1 (run-stimuli-to-fixpoint stimuli)
           db2 (replay-tx-log (tx-log db1))]
       (db-equal? db1 db2))))
+
 ```
 
 A second property: **idempotence of handler-emitted tx** — replaying
@@ -221,6 +226,7 @@ The fixtures the layers above lean on:
      (seon.runtime/install-dispatcher! ~pod-sym)
      (try ~@body
           (finally (datahike.api/release conn#)))))
+
 ```
 
 Gives every test:

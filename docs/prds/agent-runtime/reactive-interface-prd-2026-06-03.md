@@ -49,6 +49,7 @@ external effects (web, email, MCP, timers, user)
            summary — by running its render function (a :seon.fn, CLJS) over the
            new query rows — and transacts :seon.render/ai + :seon.render/html
            back as a NEW tx. The Host never writes; the guest does.
+
 ```
 
 Everything in this loop is a datom in the database:
@@ -128,6 +129,7 @@ RENDER (rows → ai/html)          → the holder of the render fn:
                                      · agent CLJS render fn  → the guest
                                      · a literal / a Host-resolvable fn → the Host
 WRITEBACK (:seon.render/ai,html) → the guest, as a new transaction.
+
 ```
 
 The render function is a **pure function of the subscription's query rows**:
@@ -144,6 +146,7 @@ this:
 f_i(D, E)  ⇝  render-fn  (a :seon.fn, pure over rows)   summary = render-fn(rows)
                                           ▲ fast loop: cheap, runs in the guest on change
 LLM recompile (rare, expensive) ──────────┘ slow loop: rewrites the render-fn (a new :seon.fn datom)
+
 ```
 
 The fast loop re-runs the render function (cheap CLJS in the guest — **not** an
@@ -196,6 +199,7 @@ Posh's engine walks **every registered item** per commit. From
                           tx)                         ; ← cheap gate, per item
                      ((:reload-fn current-analysis) posh-tree storage-key))
           ...])))
+
 ```
 
 and `after-transact` reduces `cache-changes` across the graph's items. The cheap
@@ -213,6 +217,7 @@ gate is `dm/any-datoms-match?` — a pure pattern match, no query run
   (case patterns
     nil nil, [] nil, [[]] true
     (some #(datom-match? patterns %) datoms)))
+
 ```
 
 So per commit the cost is **O(N subscriptions × P patterns × D tx-datoms)** for
@@ -244,6 +249,7 @@ modified-attrs (into #{}
                            (map (fn [a] (if (and rim (number? a)) (get rim a a) a))))
                      tx-data)
 (dq/propagate-query-cache old db modified-attrs)
+
 ```
 
 and `propagate-query-cache` (`query.cljc:2296`) evicts exactly those cache
@@ -266,6 +272,7 @@ manager.")
 
 ;; plus a small "match-everything" set: subscriptions with [[]] patterns
 ;; (rare; e.g. a "watch the whole DB" debug sub). Always candidates.
+
 ```
 
 Building it is mechanical: a subscription's `:reload-patterns` is a vector of
@@ -289,6 +296,7 @@ on-tx!(tx-report):
                                                             ; superset filter
      if confirmed: re-run query; keep if really-changed
   emit changed-summaries for the really-changed set
+
 ```
 
 **Complexity.** Per-tx cost becomes **O(|modified-attrs| + |candidates| × P × D)**
@@ -344,6 +352,7 @@ Shared shapes registered once and referenced (the `:seon.db/ref` discipline).
 ;; readable/runnable, not deep-schema'd, and patterns are DERIVED from it (and not
 ;; persisted — see §4.3/§4.5, they rebuild from the query, so no pattern schema).
 (schema/register! :seon.subscription/query :string)
+
 ```
 
 ### 4.2 The render function is a code entity (code-as-data)
@@ -378,6 +387,7 @@ fresh; `:seon.fn` is the existing code-system schema we reference).
 
 ;; the render fn is, by contract, a pure function of the subscription's query
 ;; rows: (fn [rows] {:seon.render/ai "…" :seon.render/html […]}).
+
 ```
 
 **Resolution (guest-side, always recoverable):** `eval/lookup-value`
@@ -411,6 +421,7 @@ just shipped or recomputed).
    [:seon.subscription/render-fn :seon.subscription/render-fn]
    [:seon.subscription/active?   :boolean]
    [:seon.subscription/basis-t   {:optional true} :seon.server.reactive/basis-t]])
+
 ```
 
 **Patterns are NOT persisted** — they live only in the engine cache and are
@@ -436,6 +447,7 @@ output, written by the guest onto the agent:
    [:seon.agent/launched-by {:optional true} :seon.db/ref] ; the subagent relation
    [:seon.render/ai    {:optional true} :seon.render/ai]
    [:seon.render/html  {:optional true} :seon.render/html]])
+
 ```
 
 `:seon.agent/launched-by` is the *only* schema distinction between an agent and a
@@ -481,6 +493,7 @@ op = "register-subscription"
   "patterns"        : Transit string of derived patterns (for guest visibility)
   "rows"            : Transit string of the initial query rows
 }
+
 ```
 
 **Precondition — the agent must already be bound to a cluster** (platform issue,
@@ -532,6 +545,7 @@ event = "changed-summaries"
      "ai"              : Transit string (optional)
      "html"            : Transit string (optional)
   } ... ]
+
 ```
 
 Malli for the event payload (registered, validated at the boundary):
@@ -561,6 +575,7 @@ Malli for the event payload (registered, validated at the boundary):
 ;; NOTE (2026-06-03): the engine emits this EXACT registered shape — no
 ;; translation layer (decided). M1 entries are {:seon.subscription/id,
 ;; :seon.server.reactive/rows}; :seon.agent/id + render land at M3.
+
 ```
 
 **Why `request-id` rides this event (platform issue, 2026-06-03):** `::raw-broadcast`
@@ -631,6 +646,7 @@ This PRD specifies what runs inside it.
    raw-tx broadcast proceed). READ-ONLY: it must not transact."
   [{:keys [::db-name ::conn ::emit!] :as ctx} ^datahike.db.TxReport tx-report]
   ...)
+
 ```
 
 **Registration via an extension point (decouples the lanes, platform proposal
@@ -650,6 +666,7 @@ plug at M3 convergence:
         (reactive/on-tx! {::reactive/db-name db-name
                           ::reactive/conn    conn
                           ::reactive/emit!   bcast/broadcast!} tx-report)))))
+
 ```
 
 Both listeners (`::raw-broadcast`, `::reactive`) fire off the same `TxReport` in
@@ -666,6 +683,7 @@ writer thread inside the commit path
 ```clojure
 (doseq [[_ callback] (some-> (:listeners (meta connection)) (deref))]
   (callback tx-report))
+
 ```
 
 Transacting from inside the callback would re-enter the writer (re-entrancy

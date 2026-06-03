@@ -64,6 +64,7 @@ So `(reset! current-flow new-state)` after a `(stop)` + `(build)` cycle achieves
   {:state-keys (keys state)
    :pids (:seon.db.datahike.flow/pids state)
    :backend (:seon.db.datahike.flow/backend state)})
+
 ```
 
 Output (abbrev):
@@ -76,6 +77,7 @@ Output (abbrev):
        :seon.runtime :seon.db.datahike.conn/seon.runtime
        :seon.phase2.demo :seon.db.datahike.conn/seon.phase2.demo}
 :backend :memory
+
 ```
 
 All 6 conn-processes ping `:running` with `:tx-count 0`. The running JVM is on `:memory` backend.
@@ -84,6 +86,7 @@ All 6 conn-processes ping `:running` with `:tx-count 0`. The running JVM is on `
 
 ```clojure
 @(flow/inject fl [:seon.db.datahike.conn/does-not-exist :seon.db.datahike/request] [{:hello :world}])
+
 ```
 
 Result:
@@ -91,6 +94,7 @@ Result:
 ```
 {:ex-class "clojure.lang.ExceptionInfo"
  :msg "can't resolve channel with coord"}
+
 ```
 
 Confirms: the running flow has a closed channel set; you cannot route to a pid that wasn't in the original `create-flow` config.
@@ -106,6 +110,7 @@ Confirms: the running flow has a closed channel set; you cannot route to a pid t
    :old-still-running? ...
    :new-running? ...
    :current-flow-atom-unchanged? (identical? old @current-flow)})
+
 ```
 
 Result:
@@ -116,6 +121,7 @@ Result:
  :old-fl-still-running? true
  :new-fl-running? true
  :current-flow-atom-unchanged? true}
+
 ```
 
 Two completely independent flows can coexist. `build-datahike-flow!` is a constructor, NOT a mutator of the existing flow.
@@ -133,6 +139,7 @@ Two completely independent flows can coexist. `build-datahike-flow!` is a constr
       after (req b :seon.spike.foo3 :q '[:find ?p . :where [_ :spike/probe3 ?p]])
       new-write (req b :seon.spike.bar3 :transact! [schema])]
   {...})
+
 ```
 
 Result:
@@ -142,6 +149,7 @@ Result:
  :after :alpha
  :data-survived? true
  :new-ns-works? :ok}
+
 ```
 
 **Data survived the swap.** Even on `:memory` backend — because konserve memory store is a process-global atom keyed by the stable UUID derived from db-name. For `:file` backend, the on-disk LMDB store is obviously persistent.
@@ -155,12 +163,14 @@ Result:
       t1 (System/nanoTime)
       _ (stop-datahike-flow! st)
       t2 (System/nanoTime)])
+
 ```
 
 Result:
 
 ```
 {:build-ms 21.2 :stop-ms 0.5 :total-ms 21.7}
+
 ```
 
 ~22 ms total for a 6-namespace stop+build on `:memory`. Stop is essentially free (channel close). `:file` build would be slower (each `d/connect` touches LMDB) but not by orders of magnitude.
@@ -203,6 +213,7 @@ Two viable shapes; pick by how often namespaces appear and what the user-facing 
                                                    ; resolution gets the new
                                                    ; flow, not a dead one
               new-state)))))))
+
 ```
 
 Key shape decisions:
@@ -229,6 +240,7 @@ You COULD run independent flows per db-name and dispatch in `db/get-datahike-flo
   (when schema (register-schema! db-name schema))
   ;; ... swap pattern using @known-schemas for the new build's namespace-schemas
   )
+
 ```
 
 ## Cost / cleanup

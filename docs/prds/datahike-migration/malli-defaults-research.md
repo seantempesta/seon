@@ -47,6 +47,7 @@ definition lives at `reference-code/malli/src/malli/transform.cljc:484-520`:
                    :default-encoder set-default}
                   {:decoders {:map add-defaults}
                    :encoders {:map add-defaults}}))))
+
 ```
 
 Supported today (CHANGELOG line 52, PR #1209): **`:default/fn` works both as
@@ -90,6 +91,7 @@ surrounding map.
            {:default-fn (fn [schema v] {:saw-schema (m/form schema) :inner v})}))
 ;; => {:other "X", :foo {:saw-schema [:map [:foo #:default{...} :any]] :inner :inner}}
 ;; The schema seen is the OUTER :map schema, not the entity instance.
+
 ```
 
 **Conclusion**: Malli supports literal and 0-arity computed defaults at
@@ -111,6 +113,7 @@ Three options ranked by build cost:
 
    ```clojure
    [k (fn [x] (f x))]   ;; instead of (fn [] (f))
+
    ```
 
    Declare via a seon-side property key (e.g. `:seon.render/default-fn`)
@@ -140,6 +143,7 @@ goes away. A user-message schema is just:
    [:seon.user-message/from :string]
    [:seon.render/ai   {:seon.render/default-fn 'my.ns/render-user-message-ai}   :string]
    [:seon.render/html {:seon.render/default-fn 'my.ns/render-user-message-html} :seon.render/hiccup]])
+
 ```
 
 `schema/register!` stays single-arity. At the boundary:
@@ -167,6 +171,7 @@ A plausible recursive Malli definition (matching Datastar/Hiccup convention):
                                 :nil
                                 [:cat :keyword [:? :map] [:* [:ref ::node]]]]}}
    [:ref ::node]])
+
 ```
 
 Refining this against the actual `seon.web.reactive.transform/transform-hiccup`

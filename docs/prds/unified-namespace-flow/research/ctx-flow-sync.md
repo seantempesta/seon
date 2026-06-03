@@ -280,6 +280,7 @@ Writer received persist event: YES
 Browser-1 received render: YES
 Browser-2 received render: YES
 Reply delivered: YES
+
 ```
 
 **Test 2: External ctx update (simulating REPL swap!)**
@@ -288,6 +289,7 @@ Reply delivered: YES
 inject :ctx-updated -> step updates internal ctx -> emits :render (no :persist)
 Both browsers received render: YES
 Writer persist count unchanged: YES (correct -- external updates persist when step emits :persist on ctx change)
+
 ```
 
 **Test 3: Concurrent stress (20 fn-calls + 20 external updates)**
@@ -296,6 +298,7 @@ Writer persist count unchanged: YES (correct -- external updates persist when st
 40 concurrent operations, all serialized through flow step.
 Both browsers: 42 renders (40 + 2 from prior tests)
 Writer: 21 persists (20 fn-calls + 1 from test 1)
+
 ```
 
 **Test 4: Flush-based debounced persistence (superseded by sliding-buffer)**
@@ -307,6 +310,7 @@ These results validated the flush-timer approach. The sliding-buffer pattern ach
   Renders emitted: 50 (every state change renders)
   Persists received by writer: 2 (first + last -- backpressure coalesced the rest)
   Final state persisted correctly: YES
+
 ```
 
 **Test 5: Burst pattern with sliding-buffer**
@@ -315,6 +319,7 @@ These results validated the flush-timer approach. The sliding-buffer pattern ach
 Burst pattern (10 rapid, pause, 10 rapid) with sliding-buffer-1:
   20 calls -> 4 writes [1, 10, 11, 20]
   Natural coalescing via writer backpressure
+
 ```
 
 **Test 6: Connection fan-out via out-ports**
@@ -323,6 +328,7 @@ Burst pattern (10 rapid, pause, 10 rapid) with sliding-buffer-1:
 Render events delivered to out-port channel -> mult -> per-connection taps.
 Dynamic connection add (async/tap): new connection immediately receives next render.
 Dynamic connection remove (async/untap): clean disconnect, no flow rebuild.
+
 ```
 
 ### Watch Migration Plan (Revised)
@@ -353,6 +359,7 @@ core.async.flow does not support dynamic process addition. Browser tabs connect 
 Browser connects (SSE request) -> async/tap on render mult -> channel created
 Browser disconnects              -> async/untap -> channel closed
 Tab reconnects                   -> new tap on same mult
+
 ```
 
 This was validated in the REPL prototype -- dynamically adding a third connection via `async/tap` immediately started receiving render events without any flow topology changes.
@@ -362,6 +369,7 @@ This was validated in the REPL prototype -- dynamically adding a third connectio
 ```
 fn-call → flow namespace step → :persist output (every change) → sliding-buffer 1 → writer step → d/transact!
 REPL swap! → ::flow-sync watch → inject :ctx-updated → step emits :persist → sliding-buffer 1 → writer
+
 ```
 
 Both paths converge at the step's `:persist` output. The `sliding-buffer 1` on the channel to the writer naturally debounces: while the writer is busy with Datalevin I/O, only the latest persist event survives. The existing infrastructure writer step (`seon.db.datalevin.writer/infra-writer-step`) handles the `d/transact!` call with connection pooling, retry logic, and timeout protection.
@@ -371,6 +379,7 @@ Both paths converge at the step's `:persist` output. The `sliding-buffer 1` on t
 ```
 fn-call → flow namespace step → :render out-port → async/mult → per-connection channels → SSE push
 REPL swap! → ::flow-sync watch → inject :ctx-updated → step → :render out-port → same path
+
 ```
 
 Both paths converge at the step's `:render` output. The connection manager (outside the flow) handles rendering ctx to HTML and pushing via http-kit's `send!`.
@@ -445,6 +454,7 @@ core.async.flow's `chan-opts` allows configuring channels between processes:
 ```clojure
 :chan-opts {:input-name {:buf-or-n (async/sliding-buffer 1)
                          :xform (map transform-fn)}}
+
 ```
 
 - **`buf-or-n`** -- accepts integers (fixed buffer), `sliding-buffer`, or `dropping-buffer` objects

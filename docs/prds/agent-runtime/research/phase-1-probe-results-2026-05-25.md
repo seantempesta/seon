@@ -1,7 +1,7 @@
 ---
 type: research
 status: draft
-tags: [research, testing, agent]
+tags: [research, agent]
 ---
 
 # Phase 1 Probe Results — 2026-05-25
@@ -33,6 +33,7 @@ bootstrap compile-state obtained via `seon.repl/ensure-bootstrap!`.
 (-> (r/ensure-bootstrap!) (.then (fn [cs] (reset! !cs cs))))
 ;; !cs holds the canonical compile-state, ~47 nses loaded into analyzer
 ;; cache (cljs.core, cljs.test, cljs.test$macros, etc. — full out/bootstrap/ana set)
+
 ```
 
 Probes are wrapped in a `run-probe-serial!` helper that chains
@@ -55,6 +56,7 @@ visible to form N+1.
 {:test (get (meta #'cljs.user/probe-1-test) :test nil)
  :truthy? (boolean (:test (meta #'cljs.user/probe-1-test)))
  :keys (vec (keys (meta #'cljs.user/probe-1-test)))}
+
 ```
 
 ### Output
@@ -98,6 +100,7 @@ it doesn't require resolving each candidate var.
   (with-redefs [probe-2 (fn [] :redef)]
     (reset! seen (probe-2)))
   {:during @seen :after (probe-2)})
+
 ```
 
 ### Output
@@ -128,6 +131,7 @@ Fallback (dynvar-based stubbing helper) is not needed.
 (cljs.test/run-tests 'cljs.user)
 ;; wait 300ms, then:
 @order
+
 ```
 
 ### Output
@@ -190,6 +194,7 @@ code can `(require '[malli.instrument])` cleanly.
        {:type (-> e ex-data :type str)
         :msg (.-message e)
         :data-keys (when-let [d (ex-data e)] (vec (keys d)))}))
+
 ```
 
 ### Output
@@ -200,9 +205,11 @@ Pre-instrument call returned `{:probe-4/n2 ##NaN}` — confirming the fn
 was unwrapped before, then wrapped after.
 
 The registration table also confirmed:
+
 ```
 {:cljs {... cljs.user {probe-4 {:schema [:=> [:cat :probe-4/probe-4-in] :probe-4/probe-4-out]
                                 :ns cljs.user :name probe-4}}}}
+
 ```
 
 ### Verdict — PASS (with caveats)
@@ -260,6 +267,7 @@ Used `(random-uuid)` instead.
      @conn
      '[[(depends ?x ?y) [?x :probe/requires ?y]]
        [(depends ?x ?y) [?x :probe/requires ?z] (depends ?z ?y)]])
+
 ```
 
 ### Output

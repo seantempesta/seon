@@ -1,7 +1,7 @@
 ---
 type: research
 status: draft
-tags: [research, testing, agent, platform, prd]
+tags: [research, agent, prd]
 ---
 
 # Testing infra realignment — failure triage + direction critique (2026-05-26)
@@ -207,6 +207,7 @@ suite** sits between current Phase 2 (reactive spine) and Phase 3
         (good? path) (string? r)
         :else        (and (instance? js/Error r)
                           (= :seon.fs/forbidden (-> r ex-data :seon.fs/error)))))))
+
 ```
 
 Sizing: probably 1-2 days of test authoring + harness tweaks. Pays
@@ -271,6 +272,7 @@ Sketch:
     (let [b-eval (await (eval/eval-batch! {:seon.agent/id (:seon.agent/id b)
                                             :seon.eval/forms ["(try secret (catch :default _ :not-visible))]"}))]
       (is (= :not-visible (-> b-eval :seon.eval/results first :seon.eval/value))))))
+
 ```
 
 The `with-shared-substrate` flavour the prompt asks about is the
@@ -345,6 +347,7 @@ Sketch:
   ;; collect run-results; rank by score-fn; pin winner to DB
   ;; under :seon.experiment/* schema.
   ...)
+
 ```
 
 Render: the warnings tile can show top-2 variants

@@ -1,7 +1,7 @@
 ---
 type: prd
 status: draft
-tags: [prd, agent, runtime, render, architecture]
+tags: [prd, agent, architecture]
 ---
 
 # Agent-context render — the consolidated PRD
@@ -128,6 +128,7 @@ once at boot. Not drillable.
 ;; binds to the form that follows; form N+1 runs even if N failed.
 ;; Your home namespace is `(ns seon.agent.XAR-…)`.
 ;; ============================================================
+
 ```
 
 ### 4.2 `:seon.ns`
@@ -137,6 +138,7 @@ opener. Per-eval `ns` forms are subsumed by their producing eval.
 
 ```clojure
 (ns seon.db "Datalog reads + writes. The sole DB API.")
+
 ```
 
 Drill-in: `seon.db` evaluates to the namespace; agent can pull
@@ -149,6 +151,7 @@ subsumed by their producing eval. Rendered as the literal call:
 
 ```clojure
 (seon.schema/register! :seon.message/content :string)
+
 ```
 
 Drill-in: keyword evaluates to itself; **no auto-enrichment**. Agent
@@ -167,6 +170,7 @@ body:
   "Datalog query. Map-in, map-out."
   {:malli/schema [:=> [:cat :seon.db/query-request] :seon.db/query-response]}
   [{:seon.db/keys [query args]}])
+
 ```
 
 The body is elided — the form **reads** as valid Clojure but **does
@@ -186,6 +190,7 @@ by overlap with the rendered fn's symbol):
   (testing "round-trip"
     (is (= [[1]] (q '[:find ?x :where [?x :a 1]] db)))))
 ;; ↳ :last-passed-at #inst "2026-05-26T09:00:00Z"
+
 ```
 
 ### 4.5 `:seon.message`
@@ -198,6 +203,7 @@ Rendered as a namespaced map literal inside `(comment …)`:
                  :from :user
                  :at #inst "2026-05-26T10:00:00Z"
                  :content "build a calculator with add"})
+
 ```
 
 Drill-in: keywords (`:seon.message/role`) evaluate to themselves; **no
@@ -218,6 +224,7 @@ literal source → `;; => result` (or `;; ! error`) → handle.
 (add 2 3)
 ;; => 5
 ;; #:seon.eval{:id "ev-2"}
+
 ```
 
 Failure:
@@ -226,6 +233,7 @@ Failure:
 (throw (ex-info "boom" {}))
 ;; ! #:seon.eval/error{:cause "boom"}
 ;; #:seon.eval{:id "ev-3"}
+
 ```
 
 If the eval result is a Var with a DB hit, the renderer appends
@@ -249,6 +257,7 @@ expresses "something happened while you were stopped":
                       :ok? true
                       :value "(brief textual summary)"
                       :at #inst "2026-05-26T12:00:04Z"})
+
 ```
 
 Drill-in via correlation id.
@@ -265,6 +274,7 @@ their tx-time):
   {:seon.handler/name  :seon.handler/wake-on-message
    :seon.handler/match {:seon.handler.match/attr :seon.message/to}
    :seon.handler/fn    'seon.handlers.wake/wake-on-message})
+
 ```
 
 ### 4.9 Subsumption rule (decisive)

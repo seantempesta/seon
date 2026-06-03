@@ -1,7 +1,7 @@
 ---
 type: research
 status: active
-tags: [research, id, agent, schema, design]
+tags: [research, agent, schema]
 ---
 
 # Unified Id Generator — Design for LLM-as-Primary-Reader
@@ -155,6 +155,7 @@ Stay with base62, just fix the two bugs narrowly (rotate to letter alphabet for 
   [id]
   (when (and (string? id) (>= (count id) 4) (= \_ (nth id 3)))
     (some (fn [[k p]] (when (= p (subs id 0 3)) k)) kinds)))
+
 ```
 
 **Why this and not the others:**
@@ -233,8 +234,10 @@ Grep `rg '"[A-Za-z0-9]{12}"' test/` and `rg ':min 12' test/` to find hardcoded 1
 ## 7. Open questions
 
 1. **Does ClojureScript `cljs.js/eval` actually accept `seon.agent.agt_MfKpQrTvXb7y` as a valid namespace symbol?** The Clojure reader accepts ns segments matching `[a-zA-Z][a-zA-Z0-9*+!_'?<>=.-]*`. Underscore is permitted **inside** but not as the first char. `agt_…` satisfies that (starts with `a`). Worth a 30-second REPL check during implementation:
+
    ```clojure
    (cljs.js/eval cs '(ns seon.agent.agt_MfKpQrTvXb7y) {} (fn [r] (prn r)))
+
    ```
 2. **Should the prefix be `kind_` or `kind-`?** Underscore is more conventional in id formats (Stripe `cus_…`, GitHub `gho_…`, ULID extensions); also distinguishes the prefix-sep from the kebab in `agent-id`. **Underscore.**
 3. **Crockford-style ambiguous-char exclusion?** Skip — LLMs don't confuse `0`/`O` and the base52 alphabet has no digits anyway. Keeping the full A-Za-z range maximizes density.

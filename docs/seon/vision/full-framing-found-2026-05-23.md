@@ -258,7 +258,7 @@ This is closer to Framing 4 than the live README, with the verbs more active.
 
 > Presentation-grade, data-driven visualizations that explain Seon's architecture and design ideas. ... Audience: technical peers, stakeholders, meetup attendees, and collaborators evaluating Seon's direction.
 
-Scope: a React+Vite visualization deck explaining Spec-first development, contract enforcement, generative testing, namespace ownership, accretive growth, local-vs-shared persistence. Useful **as content** for the README — there are scenes documented under `docs/` that visualize the substrate's claims. **Worth a single link** in the README's "Where to read next" section: "Visual explanations of these concepts: https://github.com/seantempesta/seon-visualizations".
+Scope: a React+Vite visualization deck explaining Spec-first development, contract enforcement, generative testing, namespace ownership, accretive growth, local-vs-shared persistence. Useful **as content** for the README — there are scenes documented under `docs/` that visualize the substrate's claims. **Worth a single link** in the README's "Where to read next" section: "Visual explanations of these concepts: <https://github.com/seantempesta/seon-visualizations>".
 
 ### 5.5 `~/src/seon-gsap/README.md` — spatial multi-session UX, January 2025
 

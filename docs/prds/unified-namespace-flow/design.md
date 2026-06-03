@@ -62,6 +62,7 @@ Types are registered via `schema/register!` ([[components/schema-system]]). All 
    [::screen [:enum :home :active :history]]
    [::current-workout {:optional true} ::workout]
    [::history [:vector ::workout]]])
+
 ```
 
 ### 2. Initialize State
@@ -75,6 +76,7 @@ The system detects initializers by spec: input does NOT contain `::ctx`, output 
   [_]
   {::screen  :home
    ::history []})
+
 ```
 
 The system calls `(initial-ctx {})` at namespace startup, then merges any persisted state from Datalevin over the result.
@@ -115,6 +117,7 @@ All public functions follow map-in/map-out with `:malli/schema`. If `::ctx` appe
                  (mapcat ::exercises)
                  (mapcat ::sets)
                  (reduce (fn [acc s] (+ acc (* (::weight s) (::reps s)))) 0.0))})
+
 ```
 
 ### 4. Render
@@ -196,6 +199,7 @@ Hiccup composition uses Reagent-style `[fn {args}]` vectors. The system walks th
    (str (count (::history ctx)) " past workouts"
         (when-let [w (::current-workout ctx)]
           (str ", active: " (count (::exercises w)) " exercises")))})
+
 ```
 
 Note: render-page uses the existing `transform.clj` conventions (`:on:click`, `:on:submit:form`, `:field`) — NOT raw Datastar attributes. The transform layer converts these to Datastar directives. This is already working in the current codebase.
@@ -238,6 +242,7 @@ Note: render-page uses the existing `transform.clj` conventions (`:on:click`, `:
 (dispatch/send! {:seon.flow.dispatch/to #{:seon.trading/on-health-update
                                      :seon.health.nutrition/on-workout-done}
                  :seon.health/workout-completed true})
+
 ```
 
 `:seon.flow.dispatch/to` accepts:
@@ -265,6 +270,7 @@ Any public function whose input spec matches incoming data is a subscriber ([[co
   {::ctx (update ctx ::suggested-times conj
            {::reason (str "Market closed: " reason)
             ::suggested-at (java.util.Date.)})})
+
 ```
 
 Subscription routing is **opt-in via metadata** to prevent accidental matches:
@@ -274,6 +280,7 @@ Subscription routing is **opt-in via metadata** to prevent accidental matches:
   {:malli/schema [...]
    :seon.flow.dispatch/subscribe true}  ;; required for subscription routing
   ...)
+
 ```
 
 Without `:seon.flow.dispatch/subscribe true`, the function is only callable via direct call or targeted `send!`. This prevents a function from accidentally matching broadcast data just because its spec happens to overlap.
@@ -300,6 +307,7 @@ Without `:seon.flow.dispatch/subscribe true`, the function is only callable via 
      │ → call function │              │ → proxy function │
      │ → return result │              │ → return result  │
      └─────────────────┘              └──────────────────┘
+
 ```
 
 Both paths go through the same dispatch layer. The dispatch layer handles:
@@ -326,6 +334,7 @@ The [[components/runtime]] registry (`seon.runtime`) tracks each namespace's loc
 {:seon.runtime/namespace "seon.trading.strategy"
  :seon.runtime/location  :external
  :seon.runtime/jvm-id    "jvm-001"}
+
 ```
 
 ### Agent Transparency
@@ -375,6 +384,7 @@ Route result keys:
   - REPL connection → return raw data
   - AI connection → find AI renderer → return formatted text
   - Subscribers → find functions matching result keys → call them
+
 ```
 
 ### Specificity Resolution (Generalized)
@@ -391,6 +401,7 @@ Currently proven in [[components/renderer|render.clj]] for finding renderers ([[
                                   [::target-ns {:optional true} :string]]]
                       [:map [::qualified-name {:optional true} :string]]]}
   ...)
+
 ```
 
 Resolution algorithm (unchanged from `render.clj`):
@@ -427,6 +438,7 @@ The ctx injection layer ([[components/context]]) reads a function's Malli schema
      (not= new-ctx ctx)
      (assoc :render [{:ctx new-ctx}]                    ;; SSE push via flow
             :persist [{:ctx new-ctx}]))])                ;; always emit, sliding-buffer debounces
+
 ```
 
 The atom is updated as a side-effect (for fast in-process reads) but is not the source of truth -- the step state is. See [[research/ctx-flow-sync]] for the full flow-first architecture and REPL prototype results.
@@ -454,6 +466,7 @@ The rendering fallback chain, triggered after every ctx change (function call or
 
 ```
 namespace step -> :render out-port -> async/mult -> per-connection channels -> SSE push
+
 ```
 
 The namespace step emits `:render` events to an out-port channel whenever ctx changes. An `async/mult` fans the event to all connected browser tabs. Each connection's rendering loop calls `render-and-push!` (render function -> hiccup -> transform -> HTML -> SSE event).
@@ -497,6 +510,7 @@ Every external connection is described by the same shape:
    [:seon.conn/instance-id {:optional true} :string]
    [:seon.conn/buffer :seon.conn/buffer]
    [:seon.conn/buffer-size :int]])
+
 ```
 
 | Origin | Buffer | Why |
@@ -517,6 +531,7 @@ namespace step -> :render out-port (channel) -> async/mult
                                           |        |        |
                                      [browser-1] [browser-2] [REPL]
                                      sliding(1)  sliding(1)  blocking(64)
+
 ```
 
 **Dynamic lifecycle:**
@@ -628,6 +643,7 @@ Functions can specify how they receive subscription data:
  :seon.flow.dispatch/queue :sliding        ;; :immediate (default), :sliding, :dropping, :batch
  :seon.flow.dispatch/queue-size 10         ;; for :sliding/:dropping
  :seon.flow.dispatch/batch-interval-ms 60000}  ;; for :batch — flush every 60s
+
 ```
 
 This is metadata on the var, not part of the Malli schema. All queue keywords live in `seon.flow.dispatch` — the code that processes them.
@@ -662,6 +678,7 @@ Outputs:
 
 Side-effect:
   Reset! atom with new ctx (sentinel-guarded to prevent watch loop)
+
 ```
 
 ### Custom Namespace Step Functions
@@ -686,6 +703,7 @@ The system detects custom flow functions via var metadata:
   ([args] ...)
   ([state transition] ...)
   ([state input-id msg] ...))
+
 ```
 
 The topology builder scans namespace vars for `:seon.flow/step` metadata. If found, it uses the custom step instead of the default namespace step. The custom step is responsible for its own I/O contract (inputs, outputs, state management).
@@ -884,6 +902,7 @@ seon.web.routes                     — route dispatch
 seon.web.sse                        — SSE infrastructure
 seon.web.components                 — reusable UI components
 seon.web.html                       — HTML generation utilities
+
 ```
 
 ### Keyword Namespace Changes
@@ -1183,6 +1202,7 @@ This shows the full agent experience — a namespace author writes only domain l
    (str (count (::history ctx)) " past workouts"
         (when-let [w (::current-workout ctx)]
           (str ", active: " (count (::exercises w)) " exercises")))})
+
 ```
 
 ### Cross-Namespace Usage
@@ -1204,6 +1224,7 @@ This shows the full agent experience — a namespace author writes only domain l
 (dispatch/send! {:seon.trading/market-closed true
              :seon.trading/reason "Holiday"})
 ;; workout/on-market-closed is called because its input spec matches
+
 ```
 
 ### Browser Interaction Loop
@@ -1228,6 +1249,7 @@ User fills form, clicks "Log Set"
   → POST with form data {::exercise-name "Squat" ::weight 225.0 ::reps 1}
   → dispatch: coerce types via Malli, inject ::ctx, call log-set!
   → same render chain → browser updates
+
 ```
 
 ---

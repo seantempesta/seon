@@ -81,6 +81,7 @@ Query:    { op: "q",        query: <edn-str>, inputs: [...], basis: <"db"|"as-of
 Transact: { op: "transact", tx-data: <...>, tx-meta: {...} }
 Pull:     { op: "pull",     selector: <edn>, eid: <...>, basis: <...> }
 TxEvent:  { op: "tx",       basis-t: <int>, commit-id: <uuid> }   // sidecar→host push
+
 ```
 
 The first three are request/response (synchronous from the guest's POV — the guest awaits an `^:async/await` Promise that resolves when CBOR comes back). `TxEvent` is a sidecar-initiated push on a separate stream, **not** a reply to a request. The host fans it out as a WIT event so the guest's snapshot cache can invalidate any entries older than the new basis-t.
@@ -102,6 +103,7 @@ interface datahike {
   record tx-event   { basis-t: u64, commit-id: string }
   variant db-error  { unavailable, query-error(string), tx-error(string), serialization(string) }
 }
+
 ```
 
 `bytes` carries CBOR payloads. Query/input/selector strings remain EDN for readability and to match libdatahike's existing `query_edn` / `selector_edn` arg types.

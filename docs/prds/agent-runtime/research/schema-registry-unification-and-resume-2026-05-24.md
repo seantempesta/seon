@@ -1,7 +1,7 @@
 ---
 type: research
 status: completed
-tags: [research, schema, malli, registry, instrumentation, resume, bootstrap]
+tags: [research, schema]
 ---
 
 # Schema registry unification + bootstrap-from-DB resume
@@ -40,6 +40,7 @@ The unified design: **`seon.schema/register!` keeps its current signature** (so 
                                     (str/starts-with? (namespace %) "seon."))
                               (keys (mr/schemas reg))))})
 ;; => {:total 268, :seon-count 124}
+
 ```
 
 ### How the composite is wired
@@ -54,6 +55,7 @@ The unified design: **`seon.schema/register!` keeps its current signature** (so 
    (mr/composite-registry
     (m/default-schemas)
     (mr/mutable-registry *schemas))))
+
 ```
 
 What `set-default-registry!` does (from `reference-code/malli/src/malli/registry.cljc:40-46`): mutates a private `registry*` atom inside malli.registry. All schema lookups go through `(m/-registry)`, which returns a `custom-default-registry` view that dereferences that atom. So there is exactly one "current registry" pointer at any time.
@@ -64,6 +66,7 @@ What `set-default-registry!` does (from `reference-code/malli/src/malli/registry
 (identical? mr/*registry* (m/-registry)) ;; => false  (different objects)
 (pr-str mr/*registry*)                    ;; => "{}"   (empty dynamic var, unused)
 (count (mr/schemas (m/-registry)))        ;; => 268   (the real registry)
+
 ```
 
 ### What gets registered
@@ -99,6 +102,7 @@ When you write:
 (defn do-thing
   {:malli/schema [:=> [:cat ::request] ::response]}
   [m] ...)
+
 ```
 
 … the CLJS compiler attaches `:malli/schema` to the var's metadata. REPL-confirmed in the prior analyzer research:
@@ -107,6 +111,7 @@ When you write:
 (get-in @!compile-state [:cljs.analyzer/namespaces 'probe.variants :defs 'with-attr :meta])
 ;; => {:doc "docs" :arglists '([x])
 ;;     :malli/schema [:=> [:cat :int] :int]}     ← preserved verbatim
+
 ```
 
 ### What does NOT happen today in CLJS
@@ -121,6 +126,7 @@ REPL-verified zero instrumentation:
 
 ```clojure
 (malli.core/function-schemas :cljs) ;; => {}  (count 0)
+
 ```
 
 ### What does happen on JVM today
@@ -145,6 +151,7 @@ Three pieces, all already-built in malli:
      (mi/instrument! {:filters [(mi/-filter-var
                                   (fn [v] (= (symbol (str ns-sym) (str sym))
                                              (.-sym v))))]}))
+
    ```
 
    The agent's `(defn analyze {:malli/schema [...]} [...])` now produces an instrumented runtime fn. Next call to `(analyze {…})` validates.
@@ -188,6 +195,7 @@ Sean's vision: a single bootstrap pass populates the DB from a precomputed sourc
 Build-time: a CLJ macro (or build script) walks every `seon.*` namespace via the host analyzer, extracts every `schema/register!` call, reads `:malli/schema` metadata from every public defn, and emits two things:
 
 1. **A `bootstrap.edn` checked into source** — a vector of tx-data maps:
+
    ```clojure
    [{:seon.schema/key :seon.agent/id
      :seon.schema/source "[:and {:seon.db/identity true} :seon.db/id]"
@@ -203,14 +211,17 @@ Build-time: a CLJ macro (or build script) walks every `seon.*` namespace via the
      :seon.fn/substrate? true
      :seon.fn/at #inst "..."}
     ;; ...]
+
    ```
 
 2. **An EDN list of `:seon.ns` entities** — for resume's topo-sort input (other research note Q5):
+
    ```clojure
    {:seon.ns/name :seon.db
     :seon.ns/source "(ns seon.db ...)"
     :seon.ns/requires [:seon.schema :seon.error :malli.core ...]
     :seon.ns/substrate? true}
+
    ```
 
 `:seon.{schema,fn,ns}/substrate? true` distinguishes "shipped with the pod" from "written by an agent". Substrate entities don't get re-evaled on resume (their JS is already in the bundle); they just need to land in the registry so agent code can see them. Agent entities do get re-evaled.
@@ -231,6 +242,7 @@ Build-time: a CLJ macro (or build script) walks every `seon.*` namespace via the
       schema/register! and update *schemas), then its :seon.fn/source entries.
    d. (instrument!) — read (m/function-schemas :cljs), patch globalThis.
    e. start agent loop.
+
 ```
 
 After step c, the pod is byte-for-byte equivalent to "fresh boot + every agent eval ever applied", but executed in topo order from a clean state.
@@ -252,6 +264,7 @@ The tx-listener replaces today's load-time `register!` side effects:
         (let [k (:seon.schema/key (d/pull db-after [:seon.schema/key] e))
               schema (edn/read-string v)]
           (swap! *schemas assoc k schema))))))
+
 ```
 
 This is the "decode-IS-dispatch" pattern Sean mentioned (`project_malli_decode_dispatch.md` from memory). The DB IS the source of truth; the in-process atom is a derived cache. When `:seon.schema/source` changes (agent re-defines a schema), the listener re-eval's it and `swap!`s the atom. The "two source-of-truth" problem disappears.
@@ -341,6 +354,7 @@ RESUME:
           fresh one. Decision: mark :error + log; agent decides what to do.
         - Otherwise: idle. Wait for next user message.
      i. Start HTTP+SSE server; reconnect tx-listener kick handlers.
+
 ```
 
 Steps b-g are deterministic and depend only on DB content. Step h is the one "policy" decision.
@@ -379,6 +393,7 @@ A registered list of "this is process-state, NOT persistent state" entries. Sean
 (schema/register! :seon.transient/kind        [:enum :cache :connection :timer :counter :other])
 (schema/register! :seon.transient/description :string)
 (schema/register! :seon.transient/declared-by [:enum :substrate :agent])
+
 ```
 
 For substrate: source-of-truth is a checked-in EDN file (`resources/seon/transient.edn`) listing each defonce + why + kind. Loaded at boot, transacted as `:seon.transient` entities. Identity upserts on sym.
@@ -441,6 +456,7 @@ Some agent atoms ARE the right design — e.g. an agent's local cache of compute
                   │   reads schemas/calls fns     │
                   │   detect-and-tee on success   │
                   └──────────────────────────────┘
+
 ```
 
 ### Rules
@@ -448,6 +464,7 @@ Some agent atoms ARE the right design — e.g. an agent's local cache of compute
 1. **DB is the source of truth.** All schemas (substrate + agent), all fn schemas, all transient declarations live as datoms.
 2. **Registry + function-schemas atom are derived caches.** Populated by tx-listeners on `:seon.schema/source` and `:seon.fn/malli-schema` attr writes. Never written to directly outside the bootstrap-load + tx-listener path.
 3. **`schema/register!` keeps its current signature** (zero migration cost for agents and existing substrate code), but its body becomes:
+
    ```clojure
    (defn register! [k schema-form]
      (let [ctx (current-tx-context)]            ; ALS lookup
@@ -459,6 +476,7 @@ Some agent atoms ARE the right design — e.g. an agent's local cache of compute
                        [{:seon.schema/key    k
                          :seon.schema/source (pr-str schema-form)
                          :seon.schema/ns     [:seon.ns/name (ns-of k)]}]))))
+
    ```
 4. **`:malli/schema` metadata is the universal declaration.** Both substrate `(defn x {:malli/schema ...})` and agent eval'd `(defn x {:malli/schema ...})` flow through the same detect-and-tee → register-function-schema → instrument! pipeline.
 5. **Instrumentation is always on.** No "dev mode" toggle — the validation IS the contract. Agent-eval failures land in `:seon.eval/error` via the existing error envelope. Reporter is a single fn at the boundary.

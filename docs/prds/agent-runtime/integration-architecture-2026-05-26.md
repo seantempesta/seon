@@ -94,6 +94,7 @@ Agent C is isolated in bob's DB.
 │  inspector (via tx events). They do NOT share conns or routing.     │
 │                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
+
 ```
 
 **Why two paths instead of integrating session DBs into the flow:** the spike (`research/flow-runtime-update-spike-2026-05-26.md`) verified that flow rebuilds work but orphan in-flight `pending-promises`, drop tx-bus subscribers, and stale Integrant state on every dynamic registration. For agent runtimes making many concurrent DB calls, the cost is real. The direct-conn registry in Path B has none of that — `(swap! sessions assoc db-name (d/connect cfg))` is atomic, idempotent, cheap.
@@ -180,6 +181,7 @@ seon/data/                                ← project-local; gitignored
         ;; durable side-effect: transact session-entity into master DB
         (record-session-entity! db-name entry)
         entry)))
+
 ```
 
 Atomic, idempotent, cheap. Direct datahike — no flow, no orphan risk. The wire-server handlers look up the conn via `(:conn (get @registry db-name))` per request.
@@ -209,6 +211,7 @@ Atomic, idempotent, cheap. Direct datahike — no flow, no orphan risk. The wire
 (seon.session/ensure!  {::name :alice ::backend :file})              ; auto-detect: create-if-absent + start
 (seon.session/stop!    {::name :alice})                              ; halt wire-server; DB stays on disk
 (seon.session/destroy! {::name :alice ::confirm :yes-really})        ; DELETE everything
+
 ```
 
 - `ensure!` is the workhorse for agent callers; `create!`/`start!`/`stop!`/`destroy!` are the explicit verbs for orchestrator + UI.
@@ -263,7 +266,7 @@ This is the **anti-rewrite manifest**. Other agents working on this should READ 
 | konserve-sqlite-cljs (the CLJS adapter) | `src/konserve_sqlite_cljs/core.cljs` (438 LOC) + dup at `pod-host/libdatahike-cljs/src/konserve_sqlite_cljs/core.cljs` | EXISTS, used by the bench harness |
 | Bench harness across konserve backends | `pod-host/libdatahike-cljs/src/seon/podhost/libdatahike/bench.cljs` | EXISTS, 1015 LOC |
 | Multi-reader spike (RED result) | `pod-host/libdatahike-cljs/spikes/multi-reader/` | EXISTS, documents the failure mode |
-| Datahike fork with CLJS analyzer fixes | `https://github.com/seantempesta/datahike` SHA `01ba3f18` | pinned via `deps.edn :override-deps` |
+| Datahike fork with CLJS analyzer fixes | `<https://github.com/seantempesta/datahike`> SHA `01ba3f18` | pinned via `deps.edn :override-deps` |
 
 ### Wire protocol / serialization
 
@@ -368,6 +371,7 @@ These collapse into ONE atom with three keys, matching `atom-state-system-2026-0
   (atom {::generated-ids #{}
          ::registry-cache {}
          ::flow-handles {}}))
+
 ```
 
 Small refactor (~50 LOC of edits). Listed as **Item D** in Wave 4.5 of the execution plan. The investigation report already noted these are all the same concern (`seon.runtime`'s own state); collapsing them is consistency hygiene, not new capability.

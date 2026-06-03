@@ -45,6 +45,7 @@ Both POST and GET routes exist on the same URL pattern:
 ```
 POST /ns/:namespace/:function  -> function-call-handler (mutations)
 GET  /ns/:namespace/:function  -> function-get-handler  (reads)
+
 ```
 
 The GET handler parses qualified keyword params from the query string and returns EDN. The POST handler parses form body data and returns JSON `{"success":true}`. Both share `resolve-and-call` for dispatch.
@@ -73,6 +74,7 @@ The official Clojure SDK provides `sse-get`, `sse-post`, `sse-put`, `sse-patch`,
 
 (d*/sse-post "/endpoint" "{contentType:'form'}")
 ;; => "@post('/endpoint', {contentType:'form'})"
+
 ```
 
 ### What Datastar Considers Idiomatic
@@ -117,6 +119,7 @@ Functions should opt-in to browser callability via metadata:
    :seon/browser true}  ;; callable from browser
   [{::keys [ctx]}]
   ...)
+
 ```
 
 Without `:seon/browser true`, the function is only callable from REPL, agent code, or `seon/send!`. This is analogous to `:seon/subscribe true` for broadcast routing.
@@ -149,6 +152,7 @@ Without `:seon/browser true`, the function is only callable from REPL, agent cod
 [:button {:on:click :total-volume} "Show Volume"]
 ;; Transform produces (no ! -> GET):
 [:button {:data-on:click "@get('/ns/seon.health.workout/total-volume')"} "Show Volume"]
+
 ```
 
 **Rule:** If the function name (keyword value) ends in `!`, emit `@post`. Otherwise, emit `@get`.
@@ -175,6 +179,7 @@ Without `:seon/browser true`, the function is only callable from REPL, agent cod
 [:form {:data-on:submit "@get('/ns/seon.health.workout/search-history', {contentType:'form'})"}
   [:input {:name ":seon.health.workout/query"}]
   [:button {:type "submit"} "Search"]]
+
 ```
 
 #### Explicit Method Override
@@ -191,6 +196,7 @@ For rare cases where the convention is wrong:
 [:button {:on:click [:post :expensive-query]} "Run"]
 ;; Transform produces:
 [:button {:data-on:click "@post('/ns/seon.foo/expensive-query')"} "Run"]
+
 ```
 
 **Rule:** If the value is a vector `[method fn-name]`, use the explicit method. If it is a keyword, infer from `!` suffix.
@@ -202,6 +208,7 @@ For rare cases where the convention is wrong:
 [:button {:on:click :seon.trading/refresh-positions!} "Refresh Trading"]
 ;; Transform produces:
 [:button {:data-on:click "@post('/ns/seon.trading/refresh-positions!')"} "Refresh Trading"]
+
 ```
 
 **Rule:** If the keyword is qualified (has a namespace), use that namespace in the URL. If unqualified, use the current namespace from the transform context.
@@ -213,6 +220,7 @@ For cases where a button needs to pass a value (e.g., which item to delete):
 ```clojure
 [:button {:on:click :remove-item!
           :data-item-id (str id)} "Delete"]
+
 ```
 
 This already works today -- Datastar signals include `data-*` attributes. The server receives them as part of the signals JSON. No DSL change needed.
@@ -223,6 +231,7 @@ This already works today -- Datastar signals include `data-*` attributes. The se
 [:input {:field ::weight :type "number" :step "2.5"}]
 ;; Transform produces:
 [:input {:name ":seon.health.workout/weight" :type "number" :step "2.5"}]
+
 ```
 
 No change from current behavior. The `::` keyword expands to the current namespace, which is correct.

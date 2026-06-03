@@ -1,7 +1,7 @@
 ---
 type: research
 status: completed
-tags: [research, testing, agent]
+tags: [research, agent]
 ---
 
 # CLJS testing infrastructure — Phase 1 handoff (2026-05-25)
@@ -55,6 +55,7 @@ All commands run via `mcp__seon_cljs__eval` against pid 19360 (pod restarted wit
 (r/run! {:seon.test.runner/vars
          '[seon.test.runner-test/vars-in-ns-discovers-probe-tests]})
 ;; → {:type :summary, :test 1, :pass 3, :fail 0, :error 0}
+
 ```
 
 The 10 fails + 51 errors in `seon.db-test` are NOT runner bugs — they're the current state of the db-test code itself (pre-existing). The runner faithfully surfaces them via the captured-as-data pipeline.

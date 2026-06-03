@@ -1,7 +1,7 @@
 ---
 type: research
 status: draft
-tags: [research, agent, async, cljs]
+tags: [research, agent, cljs]
 ---
 
 # Porting `clojure.core.async.flow` to ClojureScript — feasibility
@@ -44,6 +44,7 @@ Reading `flow.clj` end-to-end, the **user-facing** public surface is small:
 That's the whole API. There is **one protocol the impl depends on internally** — `spi/ProcLauncher` (`describe`, `start`) plus `spi/Resolver` (`get-write-chan`, `get-exec`). 95 LOC, **no JVM imports**, ports as-is to `.cljc`.
 
 ### Concepts that survive translation (data + protocol, no platform deps)
+
 - The flow config map shape `{:procs {pid {:proc ... :args ... :chan-opts ...}} :conns [[[from-pid outid] [to-pid inid]] ...]}` is pure data.
 - The 4-arity step-fn contract (describe / init / transition / transform) is just a function; nothing JVM about it.
 - Control message envelopes (`#::flow{:command ::flow/ping :to ::flow/all :reply-chan c}`) are maps.
@@ -52,6 +53,7 @@ That's the whole API. There is **one protocol the impl depends on internally** �
 - `cast` (broadcast to signal-selecting procs) is pure channel routing on already-built `castees` map.
 
 ### Concepts that need platform substitution
+
 - `ExecutorService` for workload tiers (`:mixed`, `:io`, `:compute`) — see §4.
 - `ReentrantLock` around start/stop — replace with atom CAS or a Promise serialization queue (Node is single-threaded; the lock only matters to prevent concurrent `start`/`stop` calls overlapping, which in JS only happens if both are awaited concurrently).
 - `Future` returned by `inject` and `futurize` — replace with `js/Promise`.
@@ -59,6 +61,7 @@ That's the whole API. There is **one protocol the impl depends on internally** �
 - The blocking `alts!!`/`>!!` calls in the proc loop — see §4.
 
 ### Hard blockers
+
 - **None at the design level.** Flow does not depend on JVM-specific guarantees (thread monitors, intrinsic locks, `Var` bindings across thread boundaries, `volatile!` semantics, finalization). It does depend on **"there exists a thread that can block"**, which CLJS doesn't have — but this is solvable by replacing the blocking loop with an async pull loop. See §4 detailed walkthrough.
 
 ---
@@ -100,6 +103,7 @@ Read `cljs/core/async/impl/dispatch.cljs` (the whole file is 45 lines):
 
 (defn queue-delay [f delay]
   (js/setTimeout f delay))
+
 ```
 
 The **main scheduler** (`run`, used by every `put!`/`take!`/`go`) uses `goog.async.nextTick`, which under Node compiles to `process.nextTick` → a **microtask**, not a macrotask. Microtasks pump on any I/O return, and wasmtime/wstd executes them at the same drain points it executes Promise `.then` callbacks. **There is no setTimeout dependency in the main path.**
@@ -132,6 +136,7 @@ impl/timers.cljs         180 lines  — skiplist-backed timeout channels
 async.clj                           — `go`, `go-loop`, `alt!` macros
 macros.clj                          — old `cljs.core.async.macros` shim
 interop.{clj,cljs}                  — `<p!` for awaiting Promises inside `go`
+
 ```
 
 The CLJS `go` macro (in `cljs/core/async.clj:12`) expands to:
@@ -146,6 +151,7 @@ The CLJS `go` macro (in `cljs/core/async.clj:12`) expands to:
                          (ioc/aset-all! ...impl.ioc-helpers/USER-START-IDX c#))]
           (cljs.core.async.impl.ioc-helpers/run-state-machine-wrapped state#))))
      c#))
+
 ```
 
 **It does NOT use native `^:async`.** It uses the same IOC state machine as the JVM, scheduled via `dispatch/run` → `goog.async.nextTick`. This works today in Node and would work under wasmtime-wstd modulo the timeout caveat above.
@@ -221,6 +227,7 @@ Translation to CLJS as `^:async`:
                   [nstatus nstate (inc count) ...]))))]
       (when-not (= nstatus :exit)
         (recur nstatus nstate ncount nread-ins)))))
+
 ```
 
 This works because:
@@ -301,12 +308,14 @@ Monadic effect plumbing. Adds vocabulary without removing concurrency complexity
 **Option B: port flow's design to CLJS with primitive substitution.**
 
 ### Why
+
 1. **Symmetry with the JVM side.** Seon already uses flow as the topology backbone on the JVM (`seon.db/datahike/flow`, `seon.web/sse/flow`, `seon.system`'s flow components, `seon.db/datahike/tx_bus`). If the V0 pod uses a *different* substrate, every cross-process abstraction we want to share — including the spec-01 `topology/request!` model — needs two implementations and a bridge. One substrate, two backends (one with real threads, one cooperative) gives us a `.cljc` future.
 2. **The hard blocker is mythical.** The "core.async hangs under wstd" claim turns out to be specifically about `(async/timeout)` and the workload-tiered `ExecutorService`-based proc loop. Both are surgical to replace, and the second one we'd replace *anyway* because flow's proc loop has no async variant.
 3. **Pattern is already proven in Seon.** `agent.cljs:663` `run-agentic-loop!` is a working example of the exact `^:async loop`/`await`/`recur` shape the proc loop needs. We're not inventing.
 4. **Effort is bounded.** 784 LOC of flow, ~250 LOC of which is the proc loop. v0.1 ships in a week of agent-time; v0.2 (handle `:compute` workload via host-provided thread/Worker capability) ships later if needed.
 
 ### What v0.1 ships
+
 - `src/seon/flow.cljc` — public API mirroring `clojure.core.async.flow` exactly (`create-flow`, `start`, `stop`, `pause`, `resume`, `ping`, `inject`, `process`, `map->step`, `lift1->step`).
 - `src/seon/flow/impl.cljs` — CLJS-only proc impl using `^:async` loop.
 - `src/seon/flow/impl.clj` — JVM-only impl that just delegates to `clojure.core.async.flow/*` (zero-cost passthrough).
@@ -315,6 +324,7 @@ Monadic effect plumbing. Adds vocabulary without removing concurrency complexity
 - Tests adapted from `test/clojure/clojure/core/async/flow/` running under shadow-cljs+Node.
 
 ### What v0.1 does NOT ship
+
 - `:compute` workload with real preemption (waits for wasmtime epoch interruption — `multi-runtime-architecture-2026-05-24.md:310`).
 - The `out-ports`/`in-ports` external-channel facility (we don't use it yet).
 - Worker-thread offload (one JS thread is fine until profiling says otherwise).

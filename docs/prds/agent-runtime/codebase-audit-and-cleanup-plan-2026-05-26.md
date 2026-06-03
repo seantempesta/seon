@@ -1,7 +1,7 @@
 ---
 type: research
 status: draft
-tags: [research, agent, runtime, web, cleanup]
+tags: [research, agent, web]
 ---
 
 # Agent-runtime + inspector + render: codebase audit and cleanup plan (2026-05-26)
@@ -211,6 +211,7 @@ Sequenced. Each action has acceptance criterion.
 (schema/register! :seon.render.section/order     :int)                ; stable position in the prefix
 (schema/register! :seon.render.section/detail    [:enum :full :compact :hidden])
 (schema/register! :seon.render.section/budget    {:optional true} :int)
+
 ```
 
 Composite identity on `[:seon.render.section/name :seon.render.section/agent]`. ~80 LOC plus the schema bridge.
@@ -234,6 +235,7 @@ Each section returns a vec of `{:seon.render/entity <eid-or-map> :seon.render/de
   {:full    'seon.handlers.message/render-ai-full
    :compact 'seon.handlers.message/render-ai-compact
    :hidden  nil})
+
 ```
 
 Resolution: section's chosen detail → kind's map → symbol → call. ~50 LOC plus updates to the 4 handler files.
@@ -247,6 +249,7 @@ Resolution: section's chosen detail → kind's map → symbol → call. ~50 LOC 
    :seon.render.section/fn    'seon.agent.DEy-2605251730/my-related-ns-fns
    :seon.render.section/order 20
    :seon.render.section/detail :full})
+
 ```
 
 This is the same verb the substrate calls. Composite identity upserts: re-registering with new fn replaces. ~0 LOC (already supported by B/C1 if implemented right). Acceptance: an agent evals one form and its next render uses the new section.
@@ -316,6 +319,7 @@ A1 → A2 → A3 → A4 → B1 → B2 → C1 → C3 → C2 → C4 → C5 → B3 
 ;; 4. Render each entry per its detail level (resolved through kind-config).
 ;; 5. Concatenate with section dividers.
 ;; 6. Sections with :budget enforce char limits before returning, oldest-first truncation.
+
 ```
 
 ---

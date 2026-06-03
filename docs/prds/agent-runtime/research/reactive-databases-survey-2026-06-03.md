@@ -288,12 +288,14 @@ The defining equation (verbatim):
 
 ```
 Collection[t] = sum_{s <= t} Difference[s]
+
 ```
 
 and the inverse, which is how an operator computes *only* its output change:
 
 ```
 Difference[t] = Collection[t] - sum_{s < t} Difference[s]
+
 ```
 
 **How it answers "which outputs changed without recomputing everything":** the computation is a
@@ -359,6 +361,7 @@ each clause compiles to operators — a triple-pattern `[?e :name ?name]` become
   [{:Join [{:HasAttr [?e :name ?name]}
            {:HasAttr [?e :age ?age]} ?e]}
    [?e ?name ?age]]}
+
 ```
 
 > "Differential dataflow ... allows us to express incremental computations ... using the familiar

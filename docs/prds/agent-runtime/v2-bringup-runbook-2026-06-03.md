@@ -34,6 +34,7 @@ multi-agent-safe (same mutex/logging pattern as `pod` / `cljs-watch` / `jvm`):
 bin/seon start wire-server      # idempotent — no-op if already running
 bin/seon tail wire-server       # watch the boot log (Ctrl-C to exit)
 bin/seon status                 # all processes, PIDs
+
 ```
 
 Underlying launch command (registered in `bin/seon`):
@@ -45,6 +46,7 @@ clojure -M:writer \
   --req-sock tmp/seon-cluster-default-req.sock \
   --pub-sock tmp/seon-cluster-default-pub.sock \
   --repl-port 7891
+
 ```
 
 Ready signal — `logs/wire-server.log` ends with:
@@ -56,6 +58,7 @@ Ready signal — `logs/wire-server.log` ends with:
 [writer] req socket: tmp/seon-cluster-default-req.sock
 [writer] dev REPL (127.0.0.1): 7891
 [writer] ready. PID= <pid>
+
 ```
 
 The shadow watcher (`cljs-watch`) and the MVP `:client` pod (`pod`) are
@@ -86,6 +89,7 @@ it by switching into the ns (the var is `^:private`):
                    :db/cardinality :db.cardinality/one}])
 (d/transact conn [{:wire.smoke/probe "hello"}])
 (d/q '[:find ?v :where [?e :wire.smoke/probe ?v]] (d/db conn))
+
 ```
 
 Verified round-trip 2026-06-03: basis-t advanced `536870912 → 536870913 →
@@ -106,6 +110,7 @@ clj -M:cljs watch node-agent           # output: out/node-agent/main.js
 # Spawn agents (one process per agent-id):
 node out/node-agent/main.js --agent-id a1
 node out/node-agent/main.js --agent-id a2
+
 ```
 
 Each prints a greppable ready line: `node-agent ready: agent-id=a1 pid=<pid>`.
@@ -117,6 +122,7 @@ chosen runtime. Eval-by-agent-id uses the `agent_id` param:
 
 ```text
 mcp__seon_cljs__eval  { code, agent_id, timeout_ms }      # agent_id selects the agent
+
 ```
 
 The server resolves `agent_id → current client-id` per call (self-heals across
@@ -163,6 +169,7 @@ agent-id; no MCP restart needed). Per-agent churn already works.
 bin/seon restart wire-server    # stop + start (atomic from other agents' POV)
 bin/seon stop wire-server       # SIGTERM, then SIGKILL after 2.5s
 bin/seon logs wire-server 200   # last 200 log lines
+
 ```
 
 Do NOT `bin/seon restart cljs-watch` or restart the MCP server as part of V2

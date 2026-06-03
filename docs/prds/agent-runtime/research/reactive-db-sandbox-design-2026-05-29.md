@@ -164,7 +164,7 @@ mechanism:
   toolchain. To JS, every WIT import is a synchronous blocking call.
 
 - **But the host fn can still block cooperatively.** The host is wasmtime-`async`
-  + `#[tokio::main]`, and every db import is already an `async fn` (guest.rs).
+  - `#[tokio::main]`, and every db import is already an `async fn` (guest.rs).
   The proven pattern (wasi:http, `capability-surface-2026-05-22.md:166`) is: the
   host fn runs `wstd::block_on` over a bounded future that **cooperates with
   QuickJS's microtask loop** — the wasm fiber suspends, tokio runs other work,
@@ -407,7 +407,7 @@ within the actual toolchain (no async-import support needed).
 - **Reads:** cache-hit p50 = 0µs, p95 = 0µs (host basis-t snapshot cache);
   cache-miss p50 ~0.9–1.4ms. Reactivity does not gate on reads.
 - **Writes:** p50 86–124ms against `:file`; dominated by durable konserve commit
-  + JVM GC. Reducible to single-digit ms with `:memory`/`:tiered` or async-ack.
+  - JVM GC. Reducible to single-digit ms with `:memory`/`:tiered` or async-ack.
   **Not on the reactive critical path** (broadcast fires right after `d/transact`).
 - **Reactive (current):** commit→handler = `[0, 25ms]` poll-interval-bound,
   ~12.5ms mean — *if it ran in wasm at all* (it relies on setTimeout, which hangs).

@@ -1,7 +1,7 @@
 ---
 type: research
 status: completed
-tags: [research, agent, cljs, resume, analyzer]
+tags: [research, agent, cljs]
 ---
 
 # Resume as bulk file-load (vs per-entity replay)
@@ -43,6 +43,7 @@ Sean's analogy: CIDER/Calva ctrl+enter sends the whole file. The analyzer ingest
 ```clojure
 (seval/eval !state "(ns probe.bulk1) (defn foo [] 1) (defn bar [] 2) (foo)" {:analyze-deps? true})
 ;; => {:ok true, :value 1, :ns probe.bulk1}
+
 ```
 
 `:value` is the value of the LAST form (`(foo)` returned 1). `:ns` is the ending ns. Both defns landed in the analyzer (`:defs #{bar foo}`) and on globalThis (`(seval/lookup-value 'probe.bulk1/foo)` resolves).
@@ -59,6 +60,7 @@ After Q1.1:
  :bar-call ((seval/lookup-value 'probe.bulk1/bar))}
 ;; => {:defs #{bar foo}, :foo-resolves true, :bar-resolves true,
 ;;     :foo-call 1, :bar-call 2}
+
 ```
 
 ### Q1.3 — runtime throw mid-string: subsequent forms NOT executed
@@ -70,6 +72,7 @@ After Q1.1:
 ;; => {:ok false, :error {:seon.error/message "ERROR" ...}}
 ;; before-resolves: true   ; form 1 did execute
 ;; after-resolves: false   ; form 3 did NOT execute
+
 ```
 
 This is the critical correctness property: **when the JS emitted for the whole string is run, execution proceeds form-by-form in order. A runtime throw on form N halts execution of forms N+1, N+2, ... but forms 1..N-1's side effects persist** (`before` is defined on globalThis, atoms have been swapped, schemas have been registered, etc.).
@@ -84,6 +87,7 @@ This is the critical correctness property: **when the JS emitted for the whole s
 ;; ok-fn-resolves: false   ; form 1 made it into :defs but NOT onto globalThis
 ;; after-resolves: false
 ;; analyzer :defs: (ok-fn)  ; only the form before the error landed in analyzer
+
 ```
 
 When the **compile phase** fails on a form, `cljs.js/eval-str` doesn't emit any JS for the string at all (or emits but doesn't execute). `:defs` may have stale entries from the partial analysis pass, but globalThis has nothing. This is well-behaved for resume: a compile error in a reconstituted file ⇒ that ns fails to load atomically; dependents skipped; rest of resume continues.
@@ -96,6 +100,7 @@ When the **compile phase** fails on a form, `cljs.js/eval-str` doesn't emit any 
   {:analyze-deps? true})
 ;; => {:ok true, :value #'probe.bulk4/after}
 ;; after-resolves: true; !state is an atom with value 1
+
 ```
 
 Note: in `seon.eval`'s docstring, "bare value-def reads don't resolve across eval-str calls" — but `swap!` on the just-defined atom IN THE SAME eval-str works fine. The cross-eval-str limitation is about reads from a SUBSEQUENT call.
@@ -116,6 +121,7 @@ Note: in `seon.eval`'s docstring, "bare value-def reads don't resolve across eva
     (assoc :op "eval", :code file, :transport wrapped-t, :file file-path
            ::eval/stop-on-error true
            ::eval/bindings (per-file-bindings msg)))
+
 ```
 
 `interruptible-eval` then uses a `PushbackReader` (`reference-code/nrepl/src/clojure/nrepl/middleware/interruptible_eval.clj:83`):
@@ -123,6 +129,7 @@ Note: in `seon.eval`'s docstring, "bare value-def reads don't resolve across eva
 ```clojure
 (let [reader (source-logging-pushback-reader code line column)]
   #(read-fn {:read-cond read-cond :eof eof} reader))
+
 ```
 
 → read one form, eval one form, repeat. On error with `::stop-on-error`, bail.
@@ -144,6 +151,7 @@ For CLJS (bootstrap), `cljs.js/eval-str` is the equivalent primitive but works a
   "(ns probe.fwd1) (defn bar [] (foo)) (defn foo [] 42) (bar)"
   {:analyze-deps? true})
 ;; => {:ok true, :value 42, :ns probe.fwd1}
+
 ```
 
 ### Q3.2 — same, with `:analyze-deps? false` (the mode `eval-batch!` uses)
@@ -153,6 +161,7 @@ For CLJS (bootstrap), `cljs.js/eval-str` is the equivalent primitive but works a
   "(ns probe.fwd2) (defn bar [] (foo)) (defn foo [] 99) (bar)"
   {:analyze-deps? false})
 ;; => {:ok true, :value 99}
+
 ```
 
 ### Q3.4 — confirm the analyzer DID warn
@@ -162,6 +171,7 @@ Reproduced via direct `cljs.js/eval-str` with a custom warning-handler:
 ```text
 warnings: 1
   :undeclared-var {:prefix probe.fwd5, :suffix foo}
+
 ```
 
 So: warnings DID fire at compile-time. They're handled by `raw-eval`'s callback check, which queries globalThis post-execution. By then `foo` exists. `truly-undeclared?` returns false. No escalation. `:ok true`.
@@ -195,6 +205,7 @@ If we wanted to be paranoid, the reconstituted file could start with `(declare f
 (let [vm (get-in @!state [:cljs.analyzer/namespaces 'probe.s2 :defs 'add-one])]
   (:malli/schema (:meta vm)))
 ;; => [:=> [:cat :probe.s2/n] :probe.s2/n]   ; preserved verbatim
+
 ```
 
 The schema key `:probe.s2/n` is undefined at eval time; the metadata still attaches cleanly. Instrumentation that runs LATER will fail to resolve the key — but that's instrumentation's failure mode, not the eval pipeline's. Resume can safely emit defns before schema/register! calls within an ns.
@@ -218,6 +229,7 @@ after bulk reload, probe.bulk1 :defs = #{foo bar baz}
 foo new?: :new-foo
 bar still on globalThis?: true
 baz?: :baz
+
 ```
 
 `bar` was NOT wiped from analyzer or runtime. `foo` was redefined to the new body. `baz` was added. **The bulk-load is purely additive** for analyzer state. (Runtime is always additive — globalThis vars only get clobbered when explicitly redefined.)
@@ -233,6 +245,7 @@ baz?: :baz
             {:analyze-deps? true})
 ;; defs after: #{a b}   ; still preserved
 ;; requires: {s clojure.string, ...}   ; requires updated
+
 ```
 
 The prior research's "destructive wipe" claim doesn't reproduce in current code. Possibly mode-specific to a different `:analyze-deps?` setting or a different cljs.js invocation path. Either way: **for our bulk-load case, `(ns foo ...)` at line 1 followed by defs is structurally safe**.
@@ -273,6 +286,7 @@ The wall-clock parity tells us the analyzer pass per form dominates whether we b
 ;;   constant :fn-var? nil :has-meta? true
 ;;   fn-here :fn-var? true :has-meta? true
 ;; All three resolve on globalThis.
+
 ```
 
 Detect-and-tee's analyzer-diff approach (snapshot `:defs` keys before/after; new keys are tee'd) **automatically picks up `def`s alongside `defn`s** because the analyzer puts them in the same `:defs` map. The `:fn-var?` flag distinguishes them.
@@ -369,6 +383,7 @@ Agents that need durable state put it in datahike; atoms are session-local scrat
                           :seon.eval/ok?         false
                           :seon.eval/error       (pr-str (:error r))
                           :seon.eval/duration-ms 0}]})))))))))
+
 ```
 
 ### Toy version verified

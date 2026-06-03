@@ -1,7 +1,7 @@
 ---
 type: research
 status: active
-tags: [research, platform, mvp, handoff, instrumentation, eval]
+tags: [research]
 ---
 
 # Platform Phase 0 + Phase A — handoff brief for implementation agent
@@ -57,6 +57,7 @@ The ALS-survives-Promise probe was done 2026-05-22, captured in [[impl-finding-t
    detect-and-tee in eval-batch! for atom-diff schema detection."
   []
   (set (keys @*schemas)))
+
 ```
 
 Test: `(count (seon.schema/current-keys))` returns the current registration count.

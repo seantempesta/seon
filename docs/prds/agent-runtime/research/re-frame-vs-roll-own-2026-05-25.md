@@ -1,7 +1,7 @@
 ---
 type: research
 status: draft
-tags: [research, agent, runtime]
+tags: [research, agent]
 ---
 
 > **SUPERSEDED for design decisions** by `architecture/ctx-render-strategies-prd.md` (2026-05-26 revision). Retained for history; do not use as the current spec.
@@ -109,6 +109,7 @@ Mirroring `schema/register!`:
 (schema/register! ::msg-content :string)                 ; existing
 (handler/register! ::wake-on-message {:attr :seon.message/to}
                    #'my.ns/wake-on-message-fn)           ; new
+
 ```
 
 Three params:
@@ -164,4 +165,4 @@ reject its event queue, its co-effect injection, its interceptors, and its
 - `docs/prds/agent-runtime/research/gemini-clojure-pattern-survey-2026-05-25.md` — confirms no production backend re-frame
 - `src/seon/schema.cljc` — the `register!` pattern we mirror
 - `src/seon/render.cljs` — the existing renderer dispatch we leverage
-- re-frame docs — https://github.com/day8/re-frame (Sections 1-7 of the docs/)
+- re-frame docs — <https://github.com/day8/re-frame> (Sections 1-7 of the docs/)

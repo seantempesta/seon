@@ -114,6 +114,7 @@ broadcast.clj  (per-DB routed)
    │
    ▼
 Rust host pub demux → per-cluster broadcast::Sender → guests
+
 ```
 
 Contract I provide / they consume:

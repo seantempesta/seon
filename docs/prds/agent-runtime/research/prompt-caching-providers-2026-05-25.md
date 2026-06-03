@@ -1,7 +1,7 @@
 ---
 type: research
 status: completed
-tags: [research, performance, caching]
+tags: [research]
 ---
 
 # Prompt caching across Claude, Gemini, and DeepSeek
@@ -80,6 +80,7 @@ Concrete (per 1M tokens):
     "ephemeral_1h_input_tokens": 100
   }
 }
+
 ```
 
 Critical subtlety: `input_tokens` is **only the tokens after the last cache breakpoint**, not total uncached. `total = cache_read + cache_creation + input_tokens`.
@@ -270,6 +271,7 @@ Structure every prompt as:
   5. Reactive DB-derived sections (live state, warnings)
   6. Recent eval log (appended turn-by-turn)
   7. Current user turn
+
 ```
 
 Place an Anthropic `cache_control` breakpoint at the end of the stable zone (= maximum cacheable prefix). Optionally one earlier breakpoint after tools to survive 20-block-lookback drift.

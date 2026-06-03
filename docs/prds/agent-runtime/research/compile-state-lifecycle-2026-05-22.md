@@ -6,7 +6,7 @@ tags: [research, pod, cljs, agent]
 
 # `!compile-state` lifecycle — actual shape vs spec framing
 
-Triage notes for KI-2 + KI-5 in [[../agent-repl-mvp#known-issues]].
+Triage notes for KI-2 + KI-5 in [[agent-repl-mvp-pre-2026-05-22#known-issues]].
 Captured 2026-05-22 while implementing the fix.
 
 ## TL;DR
@@ -41,6 +41,7 @@ Captured 2026-05-22 while implementing the fix.
 ```
 src/seon/repl.cljs:158:   (defonce !compile-state (atom nil))
 src/seon/client.cljs:170: (defonce !compile-state (atom nil))
+
 ```
 
 The `seon.repl/!compile-state` doc strings (`repl.cljs:14-50`)
@@ -58,6 +59,7 @@ Both are written by independent code paths:
         (let [state (await (seval/init-bootstrap!))]
           (reset! !compile-state state)
           state)))
+
   ```
 
 - `seon.client/start-agent!` (`client.cljs:338-348`):
@@ -68,6 +70,7 @@ Both are written by independent code paths:
                       (reset! !compile-state s)
                       (render/use-compile-state! !compile-state)
                       s))
+
   ```
 
 The `@!compile-state` inside each ns resolves to that ns's own var,
@@ -85,6 +88,7 @@ _ (await (seval/setup-agent-ns!
           compile-state         ;; ← from @seon.client/!compile-state
           agent/default-ns
           agent/default-id))
+
 ```
 
 `dev-init!` does NOT call `setup-agent-ns!` — it stops at bootstrap.
@@ -110,7 +114,7 @@ this fix.
 
 ## Why KI-5's spec framing reads wrong
 
-[[../agent-repl-mvp#known-issues]] §KI-5 says:
+[[agent-repl-mvp-pre-2026-05-22#known-issues]] §KI-5 says:
 
 > The pod's `seon.client/start-agent!` runs at module load and uses
 > its own init path. If an iteration session wants a clean
@@ -175,6 +179,7 @@ reload cache benefit:
       (let [state (await (seval/init-bootstrap!))]
         (reset! !compile-state state)
         state))))
+
 ```
 
 Trade-off: a hot-reload of `seon.eval`'s `init-bootstrap!` body
@@ -220,7 +225,7 @@ makes it cheap to re-run.
 
 ## Reference
 
-- KI-2 / KI-5 framing: [[../agent-repl-mvp#known-issues]]
+- KI-2 / KI-5 framing: [[agent-repl-mvp-pre-2026-05-22#known-issues]]
 - "Where state goes" rubric: [[../platform#where-state-goes-pick-the-narrowest-scope-that-fits]]
 - Iteration surface intent: `src/seon/repl.cljs:13-50` docstring
 - Three-atom inventory:

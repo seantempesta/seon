@@ -1,7 +1,7 @@
 ---
 type: prd
 status: draft
-tags: [prd, agent, database, platform, migration]
+tags: [prd, agent, database]
 ---
 
 # V0 → V2 Transition Plan — Single Substrate, Phased
@@ -235,6 +235,7 @@ The user asked: "the seon http server — it can now do the web hosting right?" 
                   │   one Store = one fiber         │
                   │   ALS-free                      │
                   └────────────────────────────────┘
+
 ```
 
 ### 2.3 Resolved questions
@@ -395,6 +396,7 @@ This is the load-bearing technical change. The user named it the biggest concern
    [::home-ns              {:optional true} ::home-ns]])
 
 (schema/register! :seon.agents/instances [:map-of ::id ::instance])
+
 ```
 
 ### 4.3 Migration sequence per call site (file:line)
@@ -408,10 +410,12 @@ For each V0 ALS call site, the exact change:
 - `db.cljs:516-518` (`agent-id-als` defonce): **DELETE**.
 - `db.cljs:520-528` (`current-agent-id`): replace with `(deref seon.agents/!my-agent-id)`.
 - `db.cljs:530-544` (`with-agent`): becomes:
+
   ```clojure
   (defn with-agent [agent-id f]
     (reset! seon.agents/!my-agent-id agent-id)  ; per-Store, so this is safe
     (f))
+
   ```
   No try/finally needed — agent-id is the Store's identity for its whole lifetime.
 - `db.cljs:546+` (`with-tx-context`): replace `.run` of als-instance with `(binding [*tx-context* (merge *tx-context* ctx-map)] (f))`.
@@ -445,6 +449,7 @@ Reconstructed from DB facts at boot (per atom-state PRD §7):
     (reset! seon.agents/!instances
             (into {} (for [[id state booted-at] agents]
                        [id {::id id ::state state ::booted-at booted-at}])))))
+
 ```
 
 Called from `agent_boot.cljs` after `replay-program-graph!`. Volatile keys (compile-state, llm-fn) re-seeded by per-agent init.
@@ -496,12 +501,14 @@ Each phase: **Goal • Scope • Pre-condition • Done-when • Verification �
 - **Pre-condition:** Branch as found 2026-05-26 (the 9 modified files + 8 untracked research files in git status).
 - **Done-when:** `git status` shows only intentional new files; `(user/run-tests)` green on the JVM; `clj -M:cljs:cljs-sidecar release v0-probe` green; sidecar Phase D 15s smoke green.
 - **Verification:**
+
   ```bash
   (user/run-tests)                         # JVM tests
   clj -M:cljs release client               # V0 pod build (no overlay)
   clj -M:cljs:cljs-sidecar release v0-probe # overlay build
   cd pod-host/sidecar-poc && ./build-sidecar-agent --run --duration-ms=15000
   cd jvm-writer && clojure -M:test         # 25 tests, 105 assertions
+
   ```
 - **Rollback:** N/A (cleanup commits; revert individually if any specific fix is wrong).
 - **Time:** **2-4 hours.**
@@ -523,12 +530,14 @@ Each phase: **Goal • Scope • Pre-condition • Done-when • Verification �
 - **Pre-condition:** Phase 0 green.
 - **Done-when:** All sidecar-poc smokes still pass at their new paths; V0 `:client` build still green; `:v0-probe` build still green.
 - **Verification:**
+
   ```bash
   clj -M:cljs release client                              # V0 unchanged
   clj -M:cljs:cljs-guest release v0-probe                 # renamed alias
   cd pod-host && ./build-guest --run --duration-ms=15000  # Phase D smoke
   cd pod-host/sidecar-poc/jvm-writer && clojure -M:test
   cd pod-host/host && cargo build --release
+
   ```
 - **Rollback:** `git checkout` the rename commit. Single atomic rename commit, easy revert.
 - **Time:** **3-5 hours** (mostly grep-and-replace across 200+ files of paths/namespaces).
@@ -551,6 +560,7 @@ Each phase: **Goal • Scope • Pre-condition • Done-when • Verification �
 - **Pre-condition:** Phase 1 green.
 - **Done-when:** Phase D smoke (N=3 guests, 300s) green against the seon JVM's wire-server. `(user/reset)` cycles cleanly with the wire-server up. JVM test suite green.
 - **Verification:**
+
   ```bash
   # Start seon JVM (wire-server starts as Integrant component)
   ./bin/run &
@@ -565,6 +575,7 @@ Each phase: **Goal • Scope • Pre-condition • Done-when • Verification �
     --connect-existing-jvm  # NEW flag: don't spawn JVM, connect to seon JVM
   # Smoke: reset cycles
   # In REPL: 10× (user/reset) — wire-server stays up, broadcast subscribers unaffected
+
   ```
 - **Rollback:** `git revert` the Phase 2 commit. The Rust host's old PoC mode (spawn its own JVM writer) is preserved as `--spawn-own-jvm` flag for emergency fallback; remove in Phase 7.
 - **Time:** **18-25 hours.** Biggest phase.
@@ -586,12 +597,14 @@ Each phase: **Goal • Scope • Pre-condition • Done-when • Verification �
 - **Pre-condition:** Phase 2 green (wire-server up).
 - **Done-when:** Phase D smoke still passes. Multi-agent guests use the atom pattern. `@seon.agents/!instances` from any guest's REPL returns the current state.
 - **Verification:**
+
   ```bash
   cd pod-host && ./build-guest --run --duration-ms=300000
   # Plus: a new ALS-replacement test
   cd pod-host/host
   cargo run --release -- --guest-wasm ... --multi-agent
   # Add a test that spawns 3 guests, each sets a per-agent key, asserts isolation
+
   ```
 - **Rollback:** Revert Phase 3 commit; overlay reverts to pre-atom-pattern state.
 - **Time:** **6-9 hours.**
@@ -614,10 +627,12 @@ Each phase: **Goal • Scope • Pre-condition • Done-when • Verification �
 - **Pre-condition:** Phase 3 green. MVP track schema-freeze window communicated (48 hours).
 - **Done-when:** Phase 5 spike (next phase) starts cleanly. Tests pass. Guest builds clean.
 - **Verification:**
+
   ```bash
   clj -M:cljs:cljs-guest release v0-probe       # still green
   cd pod-host && ./build-guest                  # CLJS bundle builds
   cd pod-host && ./build-guest --run --duration-ms=30000  # Phase D smoke
+
   ```
 - **Rollback:** Revert the migration commit. ONE atomic commit covering all 24 files.
 - **Time:** **10-14 hours.** Mechanical moves are fast; Bucket C edits + the `client.cljs` extraction take most of the time.
@@ -635,6 +650,7 @@ Each phase: **Goal • Scope • Pre-condition • Done-when • Verification �
 - **Pre-condition:** Phase 4 green.
 - **Done-when:** One `seon.agent/run-turn!` completes end-to-end in a wasm guest. Persists `:seon.turn`, `:seon.message`, `:seon.eval` entities via the wire-server. Emits tx events.
 - **Verification:**
+
   ```bash
   cd pod-host && ./build-guest
   cd pod-host/host
@@ -648,6 +664,7 @@ Each phase: **Goal • Scope • Pre-condition • Done-when • Verification �
                                 [?m :seon.message/role ?role]
                                 [?m :seon.message/content ?content]])
   ;; Expect: [user, "hello, world"], [assistant, "..."]
+
   ```
 - **Rollback:** Revert; Phase 4 state remains the working baseline.
 - **Time:** **12-18 hours.** WASI capabilities + first-real-turn debugging.
@@ -666,12 +683,14 @@ Each phase: **Goal • Scope • Pre-condition • Done-when • Verification �
 - **Pre-condition:** Phase 5 green. User explicit sign-off ("V2 is the default now").
 - **Done-when:** A fresh git clone + `bin/run` boots V2 end-to-end. Browser hits the seon JVM port, sees the inspector. Agent created, chat works.
 - **Verification:**
+
   ```bash
   git clean -fdx                       # fresh tree
   bin/run                              # JVM boots
   cd pod-host && ./build-guest         # guest builds
   # Open http://localhost:8080         # inspector renders
   # Send a chat                        # agent responds
+
   ```
 - **Rollback:** Revert the cutover commit. V0 `:client` build returns. Heavy commit; revert is messy but possible.
 - **Time:** **4-6 hours.**
@@ -733,6 +752,7 @@ bin/run                     # JVM starts cleanly; no errors in logs/app.log
 curl -s http://localhost:8080/ | head -5    # HTML response, not 500
 # Browser smoke
 # Open http://localhost:8080 in a browser; observe inspector renders
+
 ```
 
 ### Phase-specific gates
@@ -745,7 +765,7 @@ curl -s http://localhost:8080/ | head -5    # HTML response, not 500
 | **3** | Multi-agent ALS-replacement test: 3 guests, each sets a per-agent atom key, assert isolation across the 3 keys. |
 | **4** | Same Phase D smoke; plus: every Bucket C edit smoke (fs preopen test, log path test, eval bootstrap path test). |
 | **5** | The PROOF: one real LLM turn end-to-end. Persist + observe a `:seon.turn` entity. |
-| **6** | Fresh-clone smoke: `git clean -fdx && bin/run && ./build-guest && open http://localhost:8080`. |
+| **6** | Fresh-clone smoke: `git clean -fdx && bin/run && ./build-guest && open <http://localhost:8080`.> |
 | **7** | Code review pass. |
 
 ### Test suite runs
@@ -843,6 +863,7 @@ seon/
 ├── bin/seon                        ← supervisor
 ├── docs/seon/                      ← knowledge base (mostly unchanged)
 └── CLAUDE.md                       ← updated to reflect V2 as the substrate
+
 ```
 
 ### Build commands (post-cutover)
@@ -860,6 +881,7 @@ cd pod-host && ./build-guest --run --duration-ms=300000
 # REPL development
 # JVM REPL: nREPL at :7888
 # CLJS REPL: when wasm guests are connected
+
 ```
 
 ### Where each runtime starts
@@ -876,7 +898,7 @@ cd pod-host && ./build-guest --run --duration-ms=300000
 
 ### How a new agent joins the system
 
-- User hits `http://localhost:8080/agents/new` or calls a JVM REPL fn → JVM creates an `:seon.agent` entity in the DB, spawns a wasm guest via the Rust host bound to that agent-id → guest seeds its `seon.agents/!instances` slot → starts the turn loop.
+- User hits `<http://localhost:8080/agents/new`> or calls a JVM REPL fn → JVM creates an `:seon.agent` entity in the DB, spawns a wasm guest via the Rust host bound to that agent-id → guest seeds its `seon.agents/!instances` slot → starts the turn loop.
 
 ---
 

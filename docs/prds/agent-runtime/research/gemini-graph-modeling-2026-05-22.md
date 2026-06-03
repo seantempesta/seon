@@ -79,6 +79,7 @@ All data flowing through Seon must be safe at every boundary: Malli validation, 
 (schema/register! ::parent :seon.db/ref)
 
 (db/transact! :seon [{::id "abc" ::name "hello"}])
+
 ```
 
 See `/datalevin` skill for bridge details, persistence properties, refs, and banned types.
@@ -110,7 +111,7 @@ the project back up.
 ## Tracks
 
 - **MVP track** (this session's owner): the agent eval surface — design
-  in [[agent-repl-mvp]]. Currently in REPL-verification phase against
+  in [[agent-repl-mvp-pre-2026-05-22]]. Currently in REPL-verification phase against
   the V0 CLJS pod (Node, not WASM yet).
 - **Platform track**: the WASM-Tauri containment — design in
   [[platform]]. Owned by the platform agent.
@@ -119,7 +120,7 @@ the project back up.
 
 ### Spec status
 
-[[agent-repl-mvp]] has a "Verified live in the V0 pod" section listing
+[[agent-repl-mvp-pre-2026-05-22]] has a "Verified live in the V0 pod" section listing
 what's been REPL-confirmed end-to-end. As of this checkpoint:
 
 - ✅ rewrite-clj parses comments + forms as ordered nodes
@@ -200,12 +201,12 @@ when integrating.
 
 The MVP and Platform tracks share infrastructure. Coordination points:
 
-- **Eval surface contract.** [[agent-repl-mvp]]'s spec describes what
+- **Eval surface contract.** [[agent-repl-mvp-pre-2026-05-22]]'s spec describes what
   `eval` returns; [[platform]] §"Eval surface" wires it into the WIT
   `eval-form` export. Changes to error envelope shape (KI-3) affect
   both.
 - **tx-meta as eval-id pointer.** Verified in the V0 Node pod
-  ([[agent-repl-mvp]]). Platform agent needs to confirm it still
+  ([[agent-repl-mvp-pre-2026-05-22]]). Platform agent needs to confirm it still
   works under wasmtime + the WIT shim.
 - **Analyzer-cache load.** V0 pod loads from `out/bootstrap/ana/`.
   Platform's WASM build needs the same caches packaged into the
@@ -254,7 +255,7 @@ tags: [research, agent, cljs]
 # V0 Implementation State vs MVP Spec — 2026-05-22
 
 Survey of the V0 CLJS pod against the
-[[agent-repl-mvp]] spec. Goal: identify what exists in code, what is
+[[agent-repl-mvp-pre-2026-05-22]] spec. Goal: identify what exists in code, what is
 spec-only, and the smallest set of additions needed to drive the agent
 loop end-to-end against a real LLM (deepseek).
 
@@ -288,7 +289,7 @@ spec was verified against, not the conn the agent actually runs on.
 
 ## 1. Agent entity
 
-**SPEC** ([[agent-repl-mvp]] §"Agent record is the hub"):
+**SPEC** ([[agent-repl-mvp-pre-2026-05-22]] §"Agent record is the hub"):
 `:seon.agent/id` (12-char `:seon.id/id`),
 `:seon.agent/state` `[:enum :idle :running]`,
 `:seon.agent/turn-count :int`,
@@ -347,7 +348,7 @@ The spec should adopt this shape rather than redefine it.
 
 ## 3. Eval entity
 
-**SPEC** ([[agent-repl-mvp]] §"Eval log"): nine attrs including
+**SPEC** ([[agent-repl-mvp-pre-2026-05-22]] §"Eval log"): nine attrs including
 `:seon.eval/turn :long`, `:seon.eval/at :long` (epoch-ms),
 `:seon.eval/duration-ms :long`, `:seon.eval/ns :keyword`,
 `:seon.eval/narration`, `:seon.eval/source`, `:seon.eval/ok?`,
@@ -401,7 +402,7 @@ for the tx-meta trick to point at.
 
 ## 4. Section / ctx entity & the composer
 
-**SPEC** ([[agent-repl-mvp]] §"Rendering — sections compose strings",
+**SPEC** ([[agent-repl-mvp-pre-2026-05-22]] §"Rendering — sections compose strings",
 §"Initial default context"): section entities carry `:seon.ctx/name`,
 `:seon.ctx/priority`, `:seon.ctx/fn` (qualified symbol). The composer
 queries `[?e :seon.ctx/name _]`, sorts by priority, resolves each
@@ -443,7 +444,7 @@ multi-ref is also missing. Replace
 
 ## 5. Persistent entities (`:seon.fn`, `:seon.schema`, `:seon.test`, `:seon.ns`)
 
-**SPEC** ([[agent-repl-mvp]] §"Persistent entities"): the database IS
+**SPEC** ([[agent-repl-mvp-pre-2026-05-22]] §"Persistent entities"): the database IS
 the program. Every `(defn ...)`, `(schema/register! ...)`,
 `(deftest ...)`, `(ns ...)` form the agent emits transacts an entity
 with its source text. Replay rebuilds runtime vars from these
@@ -488,7 +489,7 @@ work doesn't survive a pod restart even in principle.
 
 ## 6. Bootstrap + resume
 
-**SPEC** ([[agent-repl-mvp]] §"Boot sequence"): `init-bootstrap!` →
+**SPEC** ([[agent-repl-mvp-pre-2026-05-22]] §"Boot sequence"): `init-bootstrap!` →
 `bootstrap-phase!` (only if DB empty) → `resume-phase!` → render. The
 bootstrap reads `resources/seon/bootstrap.edn` (a build-time emitted
 ordered vector of substrate entities) and transacts it. Resume walks
@@ -521,7 +522,7 @@ load is the one piece that IS in place.
 
 ## 7. History on the agent DB
 
-**SPEC** ([[agent-repl-mvp]] §"What's NOT in the model"): "the default
+**SPEC** ([[agent-repl-mvp-pre-2026-05-22]] §"What's NOT in the model"): "the default
 V0.5 conn uses `:keep-history? false`; turning history on for the
 agent DB is a prerequisite for [the tx-meta-IS-eval-id model]".
 
@@ -542,7 +543,7 @@ tx-meta writes, §5 has no entities to tx-meta about).
 
 ## 8. The harness loop
 
-**SPEC** ([[agent-repl-mvp]] §"Goal"): one turn = rendered ctx → LLM
+**SPEC** ([[agent-repl-mvp-pre-2026-05-22]] §"Goal"): one turn = rendered ctx → LLM
 → parse → eval-batch.
 
 **CODE**: This works end-to-end TODAY.
@@ -801,6 +802,7 @@ a Malli schema and referenced from each identity attr:
 (schema/register! :seon.message/id [:seon.id/id {:seon.db/identity true}])
 (schema/register! :seon.agent/id   [:seon.id/id {:seon.db/identity true}])
 (schema/register! :seon.log/id     [:seon.id/id {:seon.db/identity true}])
+
 ```
 
 No per-kind variants of the generator. Agent home-ns is
@@ -934,6 +936,7 @@ The library is built around serving agents. The mental model is
 ;;     :seon.agent/ctx         [<ctx-ref> <ctx-ref> ...]
 ;;     ;; …other scalars
 ;;     }
+
 ```
 
 What an agent owns and where it lives:
@@ -972,6 +975,7 @@ their own record:
 (seon.db/transact!
   {:seon.db/tx-data [{:seon.agent/id <my-id>
                       :seon.agent/ctx <default-refs>}]})
+
 ```
 
 The default ctx refs all point at `seon.agent/*` fns (substrate-
@@ -993,6 +997,7 @@ to know datahike idioms. (V1 surface; expand later as needed.)
 
 (seon.agent/reset-my-ctx!)     ; revert ctx to substrate defaults
 (seon.agent/update-my-ctx! f)  ; transact (f current-ctx) onto my record
+
 ```
 
 These are taught in the system-section ctx so the agent learns them
@@ -1245,6 +1250,7 @@ returns the reader. rewrite-clj is the right tool here.)
  {:kind :form    :form  '(defn analyze …) :source "(defn analyze …)"}
  {:kind :comment :text "Sanity-check it returns the right shape:"}
  {:kind :form    :form  'analyze :source "analyze"}]
+
 ```
 
 Notice the last entry: a bare symbol `analyze`. **Bare symbols are
@@ -1262,6 +1268,7 @@ just multiple `;;` lines in a row:
 ;; 1. Register the ticker schema
 ;; 2. Build analyze
 ;; 3. Verify by evaling `analyze`
+
 ```
 
 The reader sees these as four/five consecutive comments. The pairer
@@ -1356,6 +1363,7 @@ a `cljs.analyzer/*cljs-warning-handlers*` binding that throws on
                        {:kind :compile
                         :seon.eval/warning-type type
                         :seon.eval/extra extra}))))])
+
 ```
 
 cljs.js wraps the throw as `{:tag :cljs/analysis-error}` and returns
@@ -1634,7 +1642,7 @@ them by transacting different attrs on the same entity (lookup by
                              '[:find [(pull ?e [*]) ...]
                                :in $ ?aid
                                :where [?e :seon.eval/agent ?aid]]
-                             :seon.db/args [[:seon.agent/id id]]})
+                             :seon.db/args [ [:seon.agent/id id]]})
                   (sort-by :seon.eval/id)
                   (take-last 20))]
     (if (seq rows)
@@ -1809,11 +1817,13 @@ depending on whether the entry has a form or is thinking-only:
 ```text
 > (form-source-as-typed)
 result-rendered    ; # eval-id  4ms
+
 ```
 
 ```text
 ;; thinking: <narration text, indented as a markdown block>
                                 ; # eval-id
+
 ```
 
 The trailing `<n>ms` on a form row is `:seon.eval/duration-ms`
@@ -1907,6 +1917,7 @@ recent-evals tile to one line per eval.
 (db/transact! {:seon.db/tx-data
                [{:seon.ctx/name :recent-evals
                  :seon.ctx/fn 'my.work/compact-recent-evals}]})
+
 ```
 
 If the new function throws or returns a non-string, `pretty-ai` takes
@@ -1943,6 +1954,7 @@ fn — substrate AND agent-authored — flows through this seam, because
 ;; … do work …
 (seon.perf/set-enabled! false)
 (seon.perf/last-stats)   ; the accumulated stats since enable
+
 ```
 
 Off by default because `tufte/p` at ~50ns per call adds up in tight
@@ -1961,6 +1973,7 @@ at a problem.
       (str "<perf>\n" (tufte/format-pstats stats {:columns [:n :sum :mean :p90]})
            "\n</perf>")
       "")))
+
 ```
 
 The agent enables this tile when they're optimizing; disables it
@@ -2026,6 +2039,7 @@ agent can pull the section entity to find out which function ran:
 ;; => {:seon.ctx/name :recent-evals
 ;;     :seon.ctx/priority 50
 ;;     :seon.ctx/fn 'seon.render.default/recent-evals-section}
+
 ```
 
 For "what did this function emit?" the agent simply calls the section
@@ -2486,6 +2500,7 @@ already gives us the form structurally, the check is:
   (and (seq? parsed-form)
        (= 'def (first parsed-form))
        (symbol? (second parsed-form))))
+
 ```
 
 That's it. `def` as the head symbol, a symbol as the name. `defn`
@@ -2591,6 +2606,7 @@ warning) when the removal would break invariants.
 
 (seon.repl/remove-test {:seon.test/sym "seon.trading/analyze-example"})
 ;; -- retract the :seon.test entity, ns-unmap the deftest var.
+
 ```
 
 Explicit verbs are clearer to the agent and easier to teach in the
@@ -2627,6 +2643,7 @@ path. The pattern is:
   (is (= {:seon.trading/signal :hold
           :seon.trading/confidence 0.5}
          (analyze {:seon.trading/ticker "AAPL"}))))
+
 ```
 
 Why `-example`: it's a documented use-case the agent (and future
@@ -2651,6 +2668,7 @@ Confirming the schema shape:
 
 ;; Test entity already has
 ::seon.test/target     :seon.db/ref                          ; → :seon.fn entity
+
 ```
 
 `:seon.fn/refs` is populated at define-time by the analyzer walk:
@@ -2666,6 +2684,7 @@ schemas. New attr:
 
 ```clojure
 ::seon.schema/refs  [:vector :seon.db/ref] {:optional true}  ; other :seon.schema entities this schema uses
+
 ```
 
 The reference graph is what makes the targeted-test auto-run
@@ -2746,6 +2765,7 @@ is reverse-implied by the ref direction.
 ;; on the ctx entity (no :agent attr — it's owned via the back-ref)
 ::seon.ctx/priority  :long
 ::seon.ctx/fn        :symbol                ; ns-qualified, resolves to a section fn
+
 ```
 
 Why this shape:
@@ -2783,6 +2803,7 @@ per agent at agent-create-time:
  {:seon.ctx/priority 50 :seon.ctx/fn 'seon.agent/recent-evals-section}
  {:seon.ctx/priority 99 :seon.ctx/fn 'seon.agent/prompt-section}]
 ;; agent gets {:seon.agent/ctx [<ref> <ref> <ref> <ref> <ref> <ref>]}
+
 ```
 
 Agent customizes by writing their own fn in `seon.agent.<id>`
@@ -2798,6 +2819,7 @@ Agent customizes by writing their own fn in `seon.agent.<id>`
    [{:seon.agent/id "AbCdEfGh1234"
      :seon.agent/ctx [<refs to all but recent-evals>
                       <ref to new section with :seon.ctx/fn 'seon.agent.AbCdEfGh1234/my-compact-evals>]}]})
+
 ```
 
 #### V1 default — section fn signature
@@ -2808,6 +2830,7 @@ agent's `:seon.render/system-input` (no change from earlier spec):
 ```clojure
 {:seon.db/db    <datahike db>
  :seon.agent/id <agent-id string>}
+
 ```
 
 Section fn handles the rest (queries DB, formats, returns string).
@@ -2848,6 +2871,7 @@ argument with namespaced keys. The common-mistake forms
 (seon.db/transact! @conn {:tx-data ...})       ; positional — crashes inside seon.db with
                                                ; "ILookup$_lookup$arity$3 is not a function"
 (seon.db/transact! {:conn @conn :tx-data ...}) ; unqualified keys — "no conversion to symbol"
+
 ```
 
 both fail badly. The correct call is
@@ -2855,6 +2879,7 @@ both fail badly. The correct call is
 ```clojure
 (seon.db/transact! {:seon.db/conn @conn
                     :seon.db/tx-data [...]})
+
 ```
 
 …OR rely on the dynamic `seon.db/*conn*` and omit `:conn`. The
@@ -2899,6 +2924,7 @@ levels deep:
     :seon.error/cause
       :seon.error/message  "undeclared-var: cljs.user/Let"
       :seon.error/ex-data  {:kind :compile, :seon.eval/warning-type :undeclared-var}
+
 ```
 
 The actionable info (`:seon.eval/warning-type`,
@@ -2998,6 +3024,7 @@ Prefer fewer entities with more refs over many narrow entities.
 What would a junior Datomic modeler do wrong here that we should explicitly forbid in writing?
 List 5–10 anti-patterns specific to this codebase (not generic database advice). Each should
 include: the bad pattern, why it bites in this context, and the correct alternative.
+
 ````
 
 ## Gemini's raw response (verbatim, no editing)
@@ -3010,22 +3037,22 @@ I have completed the review of the `agent-runtime` data model. The following cri
 
 The current spec and V0 implementation treat the database as a **side-effect log** (SQL-flavored) rather than a **connected program graph** (Datomic-flavored).
 
-1.  **Composite Strings vs. Entity Nodes:** 
+1.  **Composite Strings vs. Entity Nodes:**
     *   **The Problem:** Attributes like `:seon.fn/sym "seon.trading/analyze"` use string-concatenation for namespacing. This forces the agent to use regex or string-prefix matching to find "all functions in this namespace."
     *   **The Fix:** Model **Namespaces** as first-class entities (`:seon.ns/name`). A function entity should have a `:seon.fn/ns` ref to a namespace entity and a `:seon.fn/name` symbol. This allows joining on the namespace node to find dependencies, metadata, and documentation in one recursive pull.
 2.  **The "Turn" as a Scalar, not an Entity:**
     *   **The Problem:** The "turn" currently exists only as an integer counter on the agent and a field on the eval. It has no identity.
     *   **The Fix:** A **Turn** is a load-bearing lifecycle event. It is the container for "what the agent saw" (prompt), "what the agent thought" (narration), and "what the agent did" (messages/evals). Without a `:seon.turn` entity, you cannot "Pull Turn 5" to see the causality bundle.
 3.  **Bag-of-Attributes for Agent State:**
-    *   **The Problem:** `turn-count` and `turns-since-user` are scalars on the agent record. 
+    *   **The Problem:** `turn-count` and `turns-since-user` are scalars on the agent record.
     *   **The Fix:** These are transient properties of the **current session**. Moving them to a `:seon.agent.session` entity prevents the agent record from becoming a dumping ground for transient counters.
 
 ## b) Observability / playback gaps
 
 To "play back turn N," we must be able to reconstruct the exact state of the agent's context at that moment.
 
-1.  **The "Ghost" Prompt (Highest Priority):** 
-    *   The current spec derives the rendered context at turn start but **never persists it**. If the agent updates a rendering function in Turn 6, re-playing Turn 5 by re-running the renderer will produce a *different* string (or fail if the new code references data that didn't exist yet). 
+1.  **The "Ghost" Prompt (Highest Priority):**
+    *   The current spec derives the rendered context at turn start but **never persists it**. If the agent updates a rendering function in Turn 6, re-playing Turn 5 by re-running the renderer will produce a *different* string (or fail if the new code references data that didn't exist yet).
     *   **Fix:** Every `:seon.turn` entity MUST persist its `:seon.turn/rendered-context` as a string. This is the literal "what did the LLM see?" snapshot.
 2.  **Causality Disconnection:**
     *   Currently, if an eval in Turn 5 transacts data, and `record-eval!` separately transacts the log entry, they land in **two different transactions**. There is no hard link between the "side-effect data" and the "log data."
@@ -3035,11 +3062,11 @@ To "play back turn N," we must be able to reconstruct the exact state of the age
 
 The current spec relies heavily on **backrefs** (`:seon.message/agent`). While Datalog can query these via `_agent`, it is an anti-pattern for agent discovery.
 
-1.  **Discovery via Forward Walk:** 
+1.  **Discovery via Forward Walk:**
     *   Senior Datomic perspective: If you want an agent to "immediately learn the right patterns," make the data reachable by **walking forward**.
     *   **Fix:** The Agent entity should have a cardinality-many ref to its **Sessions**. A Session has a cardinality-many ref to its **Turns**. A Turn has refs to its **Messages** and **Evals**.
     *   **Benefit:** An agent can type `(db/pull {::db/ref [:seon.agent/id "alpha"] ::db/pull-pattern '[{:seon.agent/sessions [{:seon.session/turns [*]}]}]})` and see their entire history as a nested map. This is 10x more intuitive for an LLM than writing a `:where [?m :seon.message/agent ?a]` join.
-2.  **The "Tails" Problem:** 
+2.  **The "Tails" Problem:**
     *   Cardinality-many refs can grow too large. Use a **Session** entity to bound the history. An agent doesn't need to pull *all* messages ever; it needs to pull the *current session's* turns.
 
 ## d) Helper-function inflation
@@ -3058,7 +3085,7 @@ The user wants to avoid "helper-fn-per-thing." The current set of `seon.agent/my
 The "symbols in slots" model is excellent for runtime dispatch but incomplete for persistence.
 
 1.  **Derivation vs. Snapshot:**
-    *   **Opinion:** Rendering should remain functional at runtime (symbols in slots), but the **output** of the composer must be persisted to the `:seon.turn` entity. 
+    *   **Opinion:** Rendering should remain functional at runtime (symbols in slots), but the **output** of the composer must be persisted to the `:seon.turn` entity.
     *   **Rationale:** In a graph DB, "playback" is a data walk. If you have to "re-run code" to see what happened, you have a debugger, not an observability log.
 2.  **Section Entities as Data:**
     *   The spec's idea of `:seon.ctx` section entities is correct. It makes the "layout" of the prompt something the agent can query and edit as data, rather than a hard-coded list of fns.
@@ -3129,6 +3156,7 @@ This schema replaces the loose attributes in the spec with a hierarchical, fully
 (schema/register! :seon.ctx/name            [:keyword {:seon.db/identity true}])
 (schema/register! :seon.ctx/priority        :int)
 (schema/register! :seon.ctx/fn              :symbol) ; 'seon.render.default/system-section
+
 ```
 
 ## h) Anti-patterns to forbid
@@ -3157,6 +3185,7 @@ This schema replaces the loose attributes in the spec with a hierarchical, fully
     *   **Bad:** Teaching agents to find their evals via `[:seon.eval/_agent]`.
     *   **Why:** High cognitive load for LLMs; reverse syntax is error-prone.
     *   **Alternative:** Provide forward ref vectors (`:seon.agent/sessions`) for natural walks.
+
 ````
 
 ## Synthesis: design directives we should adopt
@@ -3207,4 +3236,3 @@ Priority order — top items unblock the spec rewrite the most.
 3. **Tx-meta auto-tagging via dynamic var — does this survive the WASM boundary cleanly?** `binding` inside CLJS works, but if a transaction is enqueued and applied on a different "thread" (we don't really have threads in wasm32, but the flow message-passing model fakes it), the binding may not propagate. Worth a spike before committing.
 4. **Do we keep `seon.agent/my-messages` and friends as thin shims for backward compat with already-written agent prompts, or rip-and-replace now while no agent has memorized them?** User's "no legacy code" memory leans rip-and-replace, but worth confirming.
 5. **Is `:seon.eval/result-edn` as a truncated string the right model, or do we want `:seon.eval/result-ref` pointing at a `:seon.blob` so we can preserve the full result?** Gemini chose truncation; the user's "DB must capture EVERYTHING" goal argues for full preservation.
-

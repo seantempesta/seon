@@ -1,7 +1,7 @@
 ---
 type: research
 status: completed
-tags: [research, cljs, agent, async]
+tags: [research, cljs, agent]
 ---
 
 # CLJS `run-turn!` simplification — 2026-05-23
@@ -76,6 +76,7 @@ datahike at `/Users/sean/src/seon/reference-code/datahike/`.
 (core/defmacro await [expr]
   (core/assert (:async &env) "await can only be used in async contexts")
   (core/list 'js* "(await ~{})" expr))
+
 ```
 
 `(:async &env)` is set ONLY by the `fn*` analyzer. From
@@ -88,6 +89,7 @@ async (or
        (:async (meta name))
        (:async (meta (first form))))
 env (assoc env :async async)
+
 ```
 
 Three potential sources, **only two live**:
@@ -107,6 +109,7 @@ Three potential sources, **only two live**:
 ;; AssertionError: Assert failed: await can only be used in async contexts
 ;; (:async &env)
 ;;   cljs.core/await (core.cljc:976)
+
 ```
 
 **Probe 2 — `(fn ^:async my-name [] …)`** (named inline async fn):
@@ -115,6 +118,7 @@ Three potential sources, **only two live**:
 (let [f (fn ^:async my-async-fn [] (await (.resolve js/Promise 42)))]
   (f))
 ;; ✓ => #object [Promise [object Promise]]
+
 ```
 
 **Probe 3 — `^:async (fn [] …)`** (metadata on form):
@@ -123,6 +127,7 @@ Three potential sources, **only two live**:
 (let [f ^:async (fn [] (await (.resolve js/Promise 42)))]
   (f))
 ;; ✗ COMPILE FAIL — identical error to Probe 1
+
 ```
 
 **Probe 4 — `defn ^:async name`**:
@@ -131,6 +136,7 @@ Three potential sources, **only two live**:
 (defn ^:async my-async-helper [] (await (.resolve js/Promise 42)))
 (my-async-helper)
 ;; ✓ => #object [Promise [object Promise]]
+
 ```
 
 ### Verdict
@@ -165,6 +171,7 @@ detail was that the `^:async` must precede a name, not the arglist.
   (let [current (current-tx-context)
         merged  (merge current ctx-map)]
     (.run als-instance merged f)))
+
 ```
 
 `f` is a **plain 0-arg fn**. `.run` invokes it once, captures its
@@ -194,6 +201,7 @@ value) — and any awaiting downstream observes the context.
            (fn [] (my-async-body)))))      ;; <-- plain (fn []) NO ^:async
 
 (.then (run-it) #(js/console.log "PROBE5-RESULT:" (pr-str %)))
+
 ```
 
 Pod log:
@@ -201,6 +209,7 @@ Pod log:
 ```
 PROBE5-RESULT: {:after-await-ctx  {:seon.db/agent-id "probe-agent", :seon.db/origin :system},
                 :before-await-ctx {:seon.db/agent-id "probe-agent", :seon.db/origin :system}}
+
 ```
 
 The context is identical before AND after the `await` — even though
@@ -224,6 +233,7 @@ context across.
              ;; ^ careful: if you want sequential, await it. The
              ;;   thunk's return value is what flows back to caller.
              ))))
+
 ```
 
 If the thunk body is `(do (do-step-1!) (do-step-2!) (do-step-3!))`,
@@ -271,6 +281,7 @@ The shape that ships in production today:
     {:seon.eval/ids    @eids
      :seon.eval/n-ok   @n-ok
      :seon.eval/n-fail @n-fail}))
+
 ```
 
 ### Key observations
@@ -299,7 +310,7 @@ The shape that ships in production today:
 ### Pattern Sean's `run-turn!` should mimic
 
 - Open ONE outer `with-tx-context` scope with `agent-id` + `session-id`
-  + `turn-id` + `origin :system`.
+  - `turn-id` + `origin :system`.
 - Body of the thunk is a `defn ^:async`-defined helper that does the
   7 steps in sequence with awaits.
 - Each step's transact is a one-liner — `(db/transact! {:seon.db/tx-data
@@ -403,6 +414,7 @@ Yes — that's the cleanest shape. Sketch:
                 [{:seon.turn/id turn-id :seon.turn/status :error}
                  {:seon.agent/id agent-id :seon.agent/state :idle}]}))
       (throw e))))
+
 ```
 
 ### Target shape sketch (illustrative — NOT production code)
@@ -458,6 +470,7 @@ Yes — that's the cleanest shape. Sketch:
                                     :prompt-text prompt
                                     :llm-fn llm-fn
                                     :compile-state compile-state})))))))))))
+
 ```
 
 Top-level body of `run-turn!` is now ~12 lines. Two nested
@@ -529,6 +542,7 @@ clean up beyond the `run-turn!` reshaping above.
 :db/cas (compare-and-swap db report op-vec)
 :db.fn/call (let [[_ f & args] op-vec]
               [report (apply f db args)])
+
 ```
 
 The transaction op handler is in `.cljc` and works in both JVM and
@@ -552,6 +566,7 @@ had written it directly).
 (.then (go) #(...))
 ;; TXFN2-RESULT: true
 ;; PULL: {:seon.ns/name :seon.txfn-test, :seon.ns/source "(ns seon.txfn-test) ; via tx-fn"}
+
 ```
 
 Tx-fns work. The fn ran inside the writer, produced one entity map,
@@ -594,7 +609,7 @@ and that entity is queryable post-tx.
   plumbing is "intentionally absent" pending Platform's Phase 3a.
   Per the prior research (mvp-spec-coherence-2026-05-23.md
   PLATFORM-FLAG 3), this is already shipped (`db.cljs:677–688`
-  + `db.cljs:735`). Remove the comment when the rewrite lands.
+  - `db.cljs:735`). Remove the comment when the rewrite lands.
 - **`agent.cljs:508`** — `(:seon.session/id (current-session id))`
   is re-derived after `(when-not (current-session id) (await
   (start-session! id)))`. Two reads of the same session entity.

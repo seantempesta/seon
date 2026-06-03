@@ -32,6 +32,7 @@ It does **almost nothing on its own**. `:devtools :enabled` is checked by `share
   (:worker-info state)
   (shared/inject-node-repl config)
   ...)
+
 ```
 
 `:worker-info` is set in `shadow/cljs/devtools/server/worker/impl.clj:170-197` — it's a record of the running watch worker, attached only when the build state is created by a worker. Plain `compile` (via `api/compile* → util/new-build → build/configure`, `api.clj:293-299`) does NOT carry `:worker-info`. So `clj -M:cljs compile client` produces a bundle without `shadow.cljs.devtools.client.node` even with `:devtools {:enabled true}`.
@@ -65,6 +66,7 @@ There is no explicit `init` — `shadow.cljs.devtools.client.node` registers its
   (extend-type cljs-shared/Runtime ...)
   (cljs-shared/add-plugin! ...)
   (cljs-shared/init-runtime! client-info start send stop))
+
 ```
 
 `env/worker-client-id` is a closure-define injected by `repl-defines` (shared.clj:175+). When the namespace is `:require`d into the bundle, the top-level `when` runs at module-load time → opens a websocket to `(env/get-ws-relay-url)` and registers the runtime.
@@ -104,6 +106,7 @@ If the user wants a release-style bundle that's still REPL-able, the answer is *
 {:nrepl {:port 7889}
  :repl  {:runtime-select :latest}   ;; <— add
  :source-paths ...}
+
 ```
 
 This makes `add-runtime` always set `:default-runtime-id` to the newest connected runtime. With this set, after `bin/seon restart pod`, the next MCP eval that picks default (not cached) will route to the new pod.
@@ -136,6 +139,7 @@ In `execute-eval` (`mcp-server-cljs:259-265`), check the result for evidence of 
                               "Then retry."))
               (render-eval-result result' sid))))
       (render-eval-result result sid))))
+
 ```
 
 This makes the failure mode self-healing for the common case (pod just restarted, MCP still has old session) AND surfaces a clear actionable message when no runtime is present at all.

@@ -1,7 +1,7 @@
 ---
 type: research
 status: active
-tags: [research, error, log, agent, web]
+tags: [research, agent, web]
 ---
 
 # Error envelope unification + `bin/seon log-stream`
@@ -186,6 +186,7 @@ Examples:
   bin/seon log-stream --replay 200 --level error      # see what's been failing
   bin/seon log-stream | jq -c 'select(.source == "seon.web.serve")'
                                                      # post-filter with jq
+
 ```
 
 Output (`--format edn`, one entry per line):
@@ -199,6 +200,7 @@ Output (`--format edn`, one entry per line):
                  :seon.error/data {:seon.eval/warning-type :undeclared-var
                                    :seon.eval/undeclared "agent.foo/missing"}
                  :seon.error/stack "..."}}
+
 ```
 
 ### Transport choice — SSE over HTTP, NOT logs/pod.log tail
@@ -282,6 +284,7 @@ New endpoint in `seon.web.serve`:
                      :when (match? entry)]
                (emit! entry))))})
       (.on req "close" (fn [] (db/unlisten! {:seon.db/key key}))))))
+
 ```
 
 ### Client-side `bin/seon log-stream`
@@ -300,6 +303,7 @@ cmd_log_stream() {
   exec curl -sN --no-buffer "http://127.0.0.1:${port}/log-stream${qs}" \
     | sed -nE 's/^data: //p'
 }
+
 ```
 
 `build_log_stream_qs` URL-encodes per arg; bash-native (no python).

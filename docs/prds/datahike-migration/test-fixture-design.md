@@ -157,6 +157,7 @@ covers both.
   └── finally
         stop-datahike-flow! → flow/pause → flow/ping → flow/stop
           per-conn-process :stop transition releases datahike conn
+
 ```
 
 What's released:
@@ -233,6 +234,7 @@ Numbers captured in the orchestrator REPL against the running flow.
 
 ;; Two-namespace flow, both with schema, with cross-ns isolation check:
 {:build-ms 26, :tx-a-ms 1, :q-a 1, :q-b nil, :isolated? true}
+
 ```
 
 ### Full fixture API (build + body + teardown)
@@ -245,6 +247,7 @@ Numbers captured in the orchestrator REPL against the running flow.
 ;; 10 sequential with-test-db-fixture runs (per-test cost in clojure.test loop):
 {:per-instance-ms [13 10 7 7 6 6 5 6 5 5]
  :median 6, :max 13, :sum 70}
+
 ```
 
 **Steady-state cost: 5–7 ms per fixture instantiation.** Well under the
@@ -317,6 +320,7 @@ APIs which (today) try to resolve through the conn-manager.
   (tu/with-test-db-fixture
     {:seon.test-utils/namespaces [:seon.runtime]
      :seon.test-utils/schemas {:seon.runtime <runtime-merged-malli-schema>}}))
+
 ```
 
 Replace `(d/transact! *conn* (vec (::extract/specs graph)))` with
@@ -349,6 +353,7 @@ fixture against `:seon.orchestrator`, drop `with-test-node` and
   (tu/with-test-db-fixture
     {:seon.test-utils/namespaces [:seon.orchestrator]
      :seon.test-utils/schemas {:seon.orchestrator <session-malli-schema>}}))
+
 ```
 
 Then strip `::session/node *test-node*` from every request map (it's
@@ -474,6 +479,7 @@ The original primitive probes that the design was built on:
     (finally
       (seon.db.datahike.flow/stop-datahike-flow! ...))))
 ;; => 42  (build-ms=9, tx-ms=1)
+
 ```
 
 Both probes pass. **Design verified end-to-end against the running

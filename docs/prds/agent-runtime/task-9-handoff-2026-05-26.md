@@ -1,7 +1,7 @@
 ---
 type: research
 status: completed
-tags: [research, agent, db, prd]
+tags: [research, agent, prd]
 ---
 
 # Task 9 handoff — `db/transact!` envelope contract (2026-05-26)
@@ -24,6 +24,7 @@ loose `[:map [::ok? :boolean] [::tx-report {:optional true} :any] …]`):
 [:or
  [:map [::ok? [:= true]]  [::tx-report :any]]
  [:map [::ok? [:= false]] [::error ::error]]]
+
 ```
 
 `:seon.db/error` is a new registered schema that mirrors the `seon.error/->map`
@@ -89,6 +90,7 @@ query syntax. The pattern is now established; copy-paste.
 
 ;; (4) Test suite
 {:type :summary :test 24 :pass 220 :fail 0 :error 0}
+
 ```
 
 ## Tests changed

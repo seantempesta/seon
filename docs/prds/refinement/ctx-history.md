@@ -244,7 +244,7 @@ Each delta becomes one entity: `entry-id = "{instance-id}-{seq}"`.
 - Navigate to any namespace page with history enabled
 - Make changes, see breadcrumb update
 - Click back/forward, see state change
-- Browser: `curl http://localhost:8080/ns/seon.health.workout` should show history bar
+- Browser: `curl <http://localhost:8080/ns/seon.health.workout`> should show history bar
 
 ---
 
@@ -268,7 +268,7 @@ Each delta becomes one entity: `entry-id = "{instance-id}-{seq}"`.
 
 **Verification:**
 
-- `curl http://localhost:8080/ns/seon.health.workout?t=2` shows state at T2
+- `curl <http://localhost:8080/ns/seon.health.workout?t=2`> shows state at T2
 - Clicking timeline dot navigates browser to `?t=N`
 - Browser back button returns to previous `?t=` view
 

@@ -1,7 +1,7 @@
 ---
 type: research
 status: draft
-tags: [research, datahike, testing, agent]
+tags: [research, agent]
 ---
 
 # Datahike query capabilities for reactive testing infrastructure
@@ -43,6 +43,7 @@ Given schema (paraphrased from the seon style):
 ```clojure
 (schema/register! :seon.ns/name      [:keyword {:seon.db/identity true}])
 (schema/register! :seon.ns/requires  [:vector :seon.db/ref])
+
 ```
 
 The transitive-reachability rule:
@@ -61,6 +62,7 @@ The transitive-reachability rule:
         [?n :seon.ns/requires ?mid]
         (depends-on ?mid ?dep)]]
      :seon.agent.loop)
+
 ```
 
 And the **reverse** direction — "which namespaces depend on this one transitively" (the one you actually want for affected-tests):
@@ -78,6 +80,7 @@ And the **reverse** direction — "which namespaces depend on this one transitiv
         [?n :seon.ns/requires ?mid)
         (depends-on ?mid ?dep)]]
      :seon.db)
+
 ```
 
 Notes & caveats:
@@ -102,6 +105,7 @@ This is **only useful for transitive walks along a single ref attr**, not joins.
 ;;     :seon.ns/requires [{:seon.ns/name :seon.db
 ;;                         :seon.ns/requires [...]}
 ;;                        ...]}
+
 ```
 
 For "which namespaces are reachable" you'd then flatten the result — but the rule version above is the cleaner shape if you just want a `[...]` set.
@@ -158,6 +162,7 @@ The only practical CLJS caveat I can find is at `writer.cljc:74`/`writer.cljc:24
 (d/listen conn (fn [tx-report] ...))       ;; auto-generated key
 (d/listen conn :my-key (fn [tx-report] ...)) ;; named key (idempotent re-register)
 (d/unlisten conn :my-key)
+
 ```
 
 Returns the registration key.
@@ -178,6 +183,7 @@ Listeners fire on the **writer go-block thread**, synchronously in a `doseq`, **
             (callback tx-report)))            ;; <-- synchronous, on writer go-block
         (#?(:clj deliver :cljs put!) p tx-report)))
     p))
+
 ```
 
 Same pattern at `writer.cljc:262-277` for `merge-db!`. **Listener callbacks run sequentially, in registration order (whatever `(deref atom)` gives — undefined ordering, treat as set).** A slow callback delays the caller's promise resolution.
@@ -209,6 +215,7 @@ For the seon plan: the auto-run-tests-on-fn-change listener should use `d/transa
 (defn- -missing?
   [db e a]
   (nil? (get (de/entity db e) a)))
+
 ```
 
 Registered as `'missing?` in the predicate table at `query.cljc:548`. Available in both `:clj` and `:cljs` — pure Clojure code.
@@ -229,6 +236,7 @@ Usage: `[(missing? $ ?e :seon.test/last-passed-at)]`.
 '[and *] ;; (and ...)
 (let [[_ & clauses] clause]
   ...)
+
 ```
 
 The `or` arm calls `resolve-clause` on each branch. Each branch is itself a clause, and `resolve-clause` dispatches via `condp looks-like?` — which has an arm for `'[and *]`. So a branch shaped like `(and [?e :attr ?p] [(< ?p ?f)])` resolves as an `and`-grouped sub-clause. **The plan's query as written should run.**
@@ -242,6 +250,7 @@ Plan's warnings query, validated:
 (or [(missing? $ ?e :seon.test/last-passed-at)]
     (and [?e :seon.test/last-passed-at ?p]
          [(< ?p ?f)]))
+
 ```
 
 Both branches "bind" nothing new (predicates), filter `?e`. Should work. If the engine ever complains about var balance, the `or-join` form is:
@@ -251,6 +260,7 @@ Both branches "bind" nothing new (predicates), filter `?e`. Should work. If the 
   [(missing? $ ?e :seon.test/last-passed-at)]
   (and [?e :seon.test/last-passed-at ?p]
        [(< ?p ?f)]))
+
 ```
 
 ---
@@ -273,6 +283,7 @@ Datahike does **not** index every attribute by default. From `src/datahike/db.cl
 ```clojure
 (when-not (dbu/indexing? db attr)
   (log/raise "Attribute" attr "should be marked as :db/index true" {}))
+
 ```
 
 This is in `-index-range`. AVET is only populated for attributes with `:db/index true` OR `:db/unique` set (search `:db/index` in `db.cljc:867-869`, `922-923`). Practical guidance:
@@ -307,6 +318,7 @@ So the agent flow works exactly as the plan needs:
 ;; Subsequent transacts can use the attr immediately:
 (d/transact conn [[:db/add [:seon.fn/sym 'seon.foo/bar]
                    :seon.test/last-passed-at #inst "2026-05-25"]])
+
 ```
 
 `schema-flexibility :write` (`db/transaction.cljc:42-49`) means "the schema is checked on every tx, and unknown attrs raise unless they're being declared in the same tx". The validation is in `validate-val`, which is called per-datom; `update-schema` runs first when `:db/ident` datoms appear, so schema-decl + first-use can even share a tx.
@@ -325,6 +337,7 @@ So the agent flow works exactly as the plan needs:
 '[[(depends-on ?n ?dep) [?n :seon.ns/requires ?dep]]
   [(depends-on ?n ?dep) [?n :seon.ns/requires ?mid]
                         (depends-on ?mid ?dep)]]
+
 ```
 
 Use pull recursion (`{:seon.ns/requires ...}`) when you want a nested tree result; use the rule when you want a flat set of dependents (the warnings/affected-tests case). Rule direction matters: write `depended-on-by` if you query "which dependents are affected by this change" hot-path. Mark `:seon.fn/sym` and `:seon.ns/name` as identity attrs (auto-indexed). One **open uncertainty**: the `some-of` macro in `query.cljc` is JVM-only (`#?(:clj defmacro)`) and is used by `expand-rule` — needs a REPL probe in the V0 self-hosted CLJS pod to confirm recursive rules don't blow up under bootstrapped compilation.

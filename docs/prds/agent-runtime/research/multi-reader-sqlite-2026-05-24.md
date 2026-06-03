@@ -32,6 +32,7 @@ cd pod-host/libdatahike-cljs
 npm install                                # node-sqlite3-wasm 0.8.57
 npx shadow-cljs compile spike-multireader  # 11s, 0 warnings
 ./spikes/multi-reader/run.sh               # driver
+
 ```
 
 Build target added: `:spike-multireader` in `shadow-cljs.edn`, output
@@ -47,6 +48,7 @@ $ node out/spike-multireader.js writer tmp/multi-reader/store.sqlite
 [writer pid=41248 ...] creating fresh store at tmp/multi-reader/store.sqlite
 [writer pid=41248 ...] DONE basis-t= 536870914  entity-count= 100
 exit=0
+
 ```
 
 GREEN. Schema + 100 entities, basis-t advances to `536870914`. Inspect the
@@ -56,6 +58,7 @@ on-disk artefacts:
 $ ls -la tmp/multi-reader/
 -rw-------    1 sean  staff  49152 May 24 14:20 store.sqlite
 drwxr-xr-x    2 sean  staff     64 May 24 14:20 store.sqlite.lock   ← !!!
+
 ```
 
 Note the **leftover `store.sqlite.lock` directory**. The writer called
@@ -73,6 +76,7 @@ $ node ...reader... > /tmp/r1.log & P1=$!
 $ node ...reader... > /tmp/r2.log & P2=$!
 $ wait $P1; wait $P2
 exits=0,2
+
 ```
 
 `/tmp/r1.log`:
@@ -81,6 +85,7 @@ exits=0,2
 [reader pid=41575 ...] opening store at tmp/multi-reader/store.sqlite
 [reader pid=41575 ...] basis-t= 536870914  result-count= 100
                       first3= (["ent-0" 0] ["ent-1" 1] ["ent-2" 2])
+
 ```
 
 `/tmp/r2.log`:
@@ -92,6 +97,7 @@ exits=0,2
                        :data {},
                        :cause #object[SQLite3Error SQLite3Error:
                                       database is locked]}
+
 ```
 
 **One wins, one fails.** The two processes raced for `mkdir
@@ -141,6 +147,7 @@ processes in flight.
     }
     ...
   }
+
   ```
 
   This runs on **every** lock-state transition (NONE → SHARED → RESERVED →

@@ -69,6 +69,7 @@ x (seon.orchestrator.session/start-agent-session! #:seon.orchestrator.session{:n
 
 -- What went wrong --
   Arg 0 > :seon.orchestrator.session/namespace — expected [:string {:min 1, ...}], got test.nrepl.sid (symbol)
+
 ```
 
 **Note:** `session.clj` lines 272–365 explicitly contain a `coerce-namespace` helper (docstring: "Coerce a namespace input (symbol or string) to its canonical string form."). The schema was tightened to `:string`-only after the coercion was either removed or moved downstream of the instrumentation guard. Tests are the canary, not the bug; either the schema should accept symbol-or-string, the tests should pre-coerce, or the coercion should sit upstream of instrumentation.
@@ -81,6 +82,7 @@ Not obviously related to the datalevin→datahike migration on its face, but wor
 clojure.lang.ExceptionInfo: Lookup ref attribute should be marked as :db/unique:
   [:QAC3 "YGp34hvbzBku6DuJFkLsrGMtecyg6f"]
   {:error :lookup-ref/unique, :entity-id [:QAC3 "YGp34hvbzBku6DuJFkLsrGMtecyg6f"]}
+
 ```
 
 Throws from `db.clj:769`. This is the kind of failure most directly in the datahike-migration line of fire: datahike enforces `:db/unique` on lookup-ref attributes (datalevin's enforcement may have been more permissive, or `:QAC3` may have lost a schema attribute somewhere in the migration). High suspicion this is a real migration regression — investigate first when picking up datahike cleanup.
@@ -91,6 +93,7 @@ Throws from `db.clj:769`. This is the kind of failure most directly in the datah
 clojure.lang.ExceptionInfo: Nothing found for entity id
   [:seon.shape/id "shape:seon.health.workout/add-set-request"]
   {:error :entity-id/missing, :entity-id [:seon.shape/id "shape:seon.health.workout/add-set-request"]}
+
 ```
 
 Throws from `db.clj:791`. The test expects a `seon.shape/id` entity that doesn't exist in the test DB. Either (a) the shape is no longer registered under that name, (b) the test fixture isn't loading the workout namespace's schema, or (c) the migration changed how `:seon.shape/id` is indexed. The error path is the same `db.clj` neighborhood as cluster 2 — both probably share machinery worth eyeballing together.
@@ -117,4 +120,5 @@ Throws from `db.clj:791`. The test expects a `seon.shape/id` entity that doesn't
 (user/run-tests 'seon.db.pipeline-test)
 (user/run-tests 'seon.health.workout-test)
 (user/run-tests 'seon.orchestrator.session-test)
+
 ```

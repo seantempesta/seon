@@ -30,6 +30,7 @@ Kabel itself is not in `reference-code/`; the datahike repo embeds five `.cljc` 
 (peer/server-peer S http-kit-handler server-id
                   (comp (sync/server-middleware) remote-middleware)
                   datahike-fressian-middleware)
+
 ```
 
 A peer is an atom containing:
@@ -80,6 +81,7 @@ The architecture is a **two-stream replication**: pubsub carries tx-reports (sem
    {:pre [(conn? conn) (atom? (:listeners (meta conn)))]}
    (swap! (:listeners (meta conn)) assoc key callback)
    key))
+
 ```
 
 The `:listeners` atom lives in `(meta conn)` and is created in `->Connection (atom db :meta {:listeners (atom {})})` (`connector.cljc:84`, `kabel/connector.cljc:251`).
@@ -87,16 +89,20 @@ The `:listeners` atom lives in `(meta conn)` and is created in `->Connection (at
 **Where the callback fires:**
 
 - `:self` (local) writer: in `datahike.writer/transact!` after dispatch returns, before delivering the promise (`writer.cljc:247-248`):
+
   ```clojure
   (doseq [[_ callback] (some-> (:listeners (meta connection)) (deref))]
     (callback tx-report))
+
   ```
   Same pattern in `merge-db!` (`writer.cljc:274-275`). Listeners receive the **live** tx-report (live `db-before` + `db-after` because the writer is in-process).
 - `:kabel` (remote) writer: in `KabelWriter -dispatch!`, the `finalize-and-return!` closure (writer.cljc:115-121):
+
   ```clojure
   (doseq [callback @listeners]
     (try (callback final-tx-report)
       (catch ... e (log/error "Error in listen! callback" e))))
+
   ```
   Note: this listener set is on the **writer** (`KabelWriter.listeners`), not the connection's `(:listeners (meta conn))`. **This is asymmetric with the local writer.** A caller doing `(d/listen! conn ...)` against a KabelWriter would set the *conn meta* atom, but the writer fires the *writer* atom — so the canonical `d/listen!` doesn't fire on a `:kabel` writer unless someone bridges them. There's `add-listener!`/`remove-listener!` helpers in `kabel/writer.cljc:244-253` but they're not called from `datahike.core/listen!`. **This looks like an open bug or intentional split — flagged in §7.**
 - `:datahike-server` HTTP RPC: `listen!` is **explicitly unsupported**. From `doc/distributed.md:250`: *"All functionality except `listen!` and `with` is supported"*. The HTTP server has no push channel; clients would have to poll.

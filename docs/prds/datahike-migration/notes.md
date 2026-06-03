@@ -44,6 +44,7 @@ Separate multi-JVM architecture test (not on v1 roadmap but validated for future
 ;;   Forces deref-conn to reread konserve root on every @conn
 {:store  {:backend :file :path "shared/data"}
  :writer {:backend :datahike-server :url "..."}}
+
 ```
 
 Source: `reference-code/datahike/src/datahike/connector.cljc:69-79` and `src/datahike/http/writer.clj:30`.
@@ -77,6 +78,7 @@ Source: `reference-code/datahike/src/datahike/connector.cljc:69-79` and `src/dat
 (let [conn (d/connect cfg)]
   (d/q '[:find ?n :where [?e :name ?n]] @conn))
 ;; => #{[Alice]}   ; Bob is gone
+
 ```
 
 Caveat: high-churn DBs accumulate many small files, putting pressure on filesystem inode tables and git object counts. Run `gc-storage!` periodically.
@@ -98,6 +100,7 @@ Caveat: high-churn DBs accumulate many small files, putting pressure on filesyst
  :seon.weather/at-city
  {:seon.db/namespace :seon.city                   ;; nested type
   :seon.city/name "NYC"}}
+
 ```
 
 ### Learning 5: `d/filter` gives normal-DB-looking security views
@@ -116,6 +119,7 @@ Caveat: high-churn DBs accumulate many small files, putting pressure on filesyst
 
 (d/q '[:find ?e :where [?e :seon.db/namespace _]] public-db)
 ;; => set without :seon.user entities — they're just not there
+
 ```
 
 Source: `reference-code/datahike/src/datahike/core.cljc:114-122`.
@@ -220,6 +224,7 @@ Details in Decision 9 (`decisions.md`).
 ;; Listen (subscribes to tx-bus filtered by db-name)
 (d/listen! :seon.weather ::repl-watch
            (fn [tx-report] (prn :weather-changed (:tx-data tx-report))))
+
 ```
 
 ### Integrant lifecycle tests (integration)
@@ -245,6 +250,7 @@ Details in Decision 9 (`decisions.md`).
     ;; SIGTERM mid-tx, restart, verify last-committed intact
     ;; (separate process test, uses java/exec)
     ))
+
 ```
 
 ### Crash-recovery manual test
@@ -261,6 +267,7 @@ pkill -TERM -f seon.runner
 # Terminal 1 again
 ./bin/run
 # In REPL: count entities — should equal last committed count, not lose data
+
 ```
 
 ---

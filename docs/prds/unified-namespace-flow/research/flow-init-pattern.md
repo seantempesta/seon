@@ -38,6 +38,7 @@ Here is the exact code path from `impl.clj` line 153:
 
 ;; In proc (impl.clj:261):
 (let [... state (step args) ...]  ;; <-- init arity called with the args map
+
 ```
 
 And `args` originates from the flow config (impl.clj line 36):
@@ -46,6 +47,7 @@ And `args` originates from the flow config (impl.clj line 36):
 (defn prep-proc [ret pid {:keys [proc, args, chan-opts] ...}]
   ...
   (assoc ret pid {:pid pid :proc proc ... :args args ...}))
+
 ```
 
 Which comes from `create-flow`'s config:
@@ -53,6 +55,7 @@ Which comes from `create-flow`'s config:
 ```clojure
 {:procs {:my-proc {:proc (flow/process #'my-step-fn)
                    :args {:some-param "value"}}}}
+
 ```
 
 **Key insight:** The `:args` map in the flow config is the **params** mechanism. The describe arity declares what params the step expects (`:params` key), and the flow config supplies them via `:args`. The system merges `::flow/pid` into this map before passing it to init.
@@ -67,12 +70,14 @@ The describe arity can return a `:params` map (keyword -> docstring), which decl
      :params {::namespace "Namespace string"
               ::queue-cap "Max pending requests (default 32)"}
      :workload :io})
+
 ```
 
 The flow library asserts that if `:params` is declared, `:args` must be provided (impl.clj line 255):
 
 ```clojure
 (assert (or (not params) args) "must provide :args if :params")
+
 ```
 
 This is a declaration + validation pattern: the step declares what it needs, the topology config provides it, the library validates the contract.
@@ -88,6 +93,7 @@ All four existing step functions take `args` in their init arity:
  {::connection-manager connection-manager
   ::owned-conns {}
   ::total-writes 0 ...})
+
 ```
 
 Config wiring:
@@ -95,6 +101,7 @@ Config wiring:
 ```clojure
 :seon.flow/writer {:proc (flow/process #'writer/infra-writer-step)
                    :args {::writer/connection-manager connection-manager}}
+
 ```
 
 **infra-reader-step** -- same pattern, receives `::connection-manager`.
@@ -110,6 +117,7 @@ Config wiring:
    (cond-> {::namespace ns-str ::queue-cap cap ...}
      in-ports (assoc :clojure.core.async.flow/in-ports in-ports)
      out-ports (assoc :clojure.core.async.flow/out-ports out-ports))))
+
 ```
 
 **reply-router-step, event-sink-step, error-sink-step** -- ignore args (`[_args]`), return hardcoded initial state. No `:params` declared in describe.
@@ -147,6 +155,7 @@ Flow provides `map->step` (flow.clj lines 286-304) for composing step logic from
   :init     (fn [arg-map] ...)
   :transition (fn [state trans] ...)
   :transform  (fn [state input msg] ...)})
+
 ```
 
 The `:init` key is explicitly optional: "optional, but should be provided if describe returns :params." When omitted, `map->step` generates `([arg-map] (when init (init arg-map)))` -- returning nil state.
@@ -181,12 +190,14 @@ The `initial-ctx` function should take a map argument, consistent with flow's in
 
     ;; Or config from runtime registry
     (initial-ctx {:seon.runtime/config {:poll-interval-ms 5000}})
+
     ```
 
 3. **Spec-driven detection still works.** The PRD's initializer detection rule (input spec lacks `::ctx`, output spec has `::ctx`) is orthogonal to whether the input map is empty or populated. The schema is:
 
     ```clojure
     {:malli/schema [:=> [:cat :map] ::ctx]}
+
     ```
 
     The `:map` input spec contains no `::ctx` key, so the system detects it as an initializer. The caller can pass `{}` or a map with system keys -- the function destructures what it needs.
@@ -205,6 +216,7 @@ The `initial-ctx` function should take a map argument, consistent with flow's in
   [_]
   {::screen  :home
    ::history []})
+
 ```
 
 The `_` parameter communicates that the function currently ignores the input. The system calls `(initial-ctx {})` at startup. If the function later needs system-injected data (persisted state, config), it destructures from the map without a signature change.

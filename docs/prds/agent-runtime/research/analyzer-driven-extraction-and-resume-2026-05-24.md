@@ -1,7 +1,7 @@
 ---
 type: research
 status: completed
-tags: [research, agent, cljs, analyzer, resume]
+tags: [research, agent, cljs]
 ---
 
 # Analyzer-driven extraction + resume
@@ -11,8 +11,6 @@ tags: [research, agent, cljs, analyzer, resume]
 **Use the analyzer for `defn`/`ns`. Use registry-atom-diff for `schema/register!`. Both work today via globalThis; expand `:bootstrap :entries` to make the analyzer authoritative for the substrate the agent calls daily.**
 
 Sean correction integrated: the pod's bootstrap classpath is OUR config (`:bootstrap :entries` in `shadow-cljs.edn`). The narrow current set is intentional but trivially expandable. Adding `seon.schema`, `malli.core`, `malli.registry`, `cljs.analyzer.api` lets the agent `(require …)` them from inside `cljs.js/eval-str`. Live-confirmed already today: `(seon.schema/register! :probe.schema/ticker :string)` from agent eval succeeded (returns `:ok true`, registry-count went 265→266) — the runtime path works via globalThis; expansion just adds the analyzer story alongside.
-
-
 
 Concrete findings from probing the live pod:
 
@@ -41,6 +39,7 @@ Concrete findings from probing the live pod:
 ```
 (require '[seon.repl :as repl] '[seon.eval :as seval])
 (.then (repl/dev-init!) (fn [_] ...))
+
 ```
 
 `@@repl/!compile-state` is a map with top-level keys:
@@ -58,6 +57,7 @@ Eval'd: `(ns probe.demo) (defn analyze [{:keys [ticker]}] {:signal :hold})`
 [:protocol-inline :meta :name :file :end-column :method-params :protocol-impl
  :arglists-meta :column :variadic? :line :ret-tag :end-line :max-fixed-arity
  :fn-var :arglists]
+
 ```
 
 Concrete values:
@@ -72,6 +72,7 @@ Concrete values:
  :meta {:file seon.dynamic :line 1 :column 23
         :end-line 1 :end-column ...
         :arglists (quote ([{:keys [ticker]}]))}}
+
 ```
 
 Note `:meta :file` is `seon.dynamic` — the fixed filename `seon.eval/raw-eval` passes to `cljs.js/eval-str`. So `:meta :line` / `:column` are per-form-string, not per-file. Acceptable for our use.
@@ -93,6 +94,7 @@ Results:
                     :meta {:file seon.dynamic :line 1 :column 203 ...}}
                    ; NO :fn-var, NO :arglists → it's a def, not a defn
  :async-fn-meta    {:async true :arglists '([x])}}
+
 ```
 
 **Key takeaways:**
@@ -111,6 +113,7 @@ before: #{private-fn with-attr multi-arity some-val async-fn}
 eval:   (defn newly-added [x] (inc x))   ; in :ns 'probe.variants
 after:  #{... newly-added}
 diff:   #{newly-added}                    ; → the new var(s)
+
 ```
 
 **This is the canonical detect-and-tee primitive.** Snapshot `(set (keys defs))` before each form, diff after.
@@ -122,9 +125,11 @@ Edge case: a single form can introduce N defs (e.g. `(do (defn a [] 1) (defn b [
 Eval'd a second `(ns probe.demo (:require [clojure.string :as str])) (defn analyze …)` after probe.demo already had `analyze` defined.
 
 After:
+
 ```
 {:defs [analyze]                  ; ← only analyze, the prior probe.variants defs are wiped
  :requires {str clojure.string clojure.string clojure.string}}
+
 ```
 
 **The `(ns foo ...)` form RESETS `[:cljs.analyzer/namespaces foo]` to a fresh ns analysis with only `:defs` from forms eval'd after it in the same eval string.** So if the agent does `(ns alice.foo (:require [bar]))` after previously defining `alice.foo/baz`, the analyzer forgets `baz`. (The compiled JS at globalThis is unaffected — `baz` still resolves at runtime.) Implication for resume below in Q5.
@@ -148,6 +153,7 @@ Live-probed via mcp:
          (fn [_]
            (set/difference (set (keys (mr/schemas (m/-registry)))) before))))
 ;; => #{:probe.schema/volume :probe.schema/price}
+
 ```
 
 **Atom-diff handles every case `extract-schema-key` can't**: multi-register-per-form, `register-all!`, computed keys, future programmatic registration. The registry atom is the runtime equivalent of "what new defs landed".
@@ -160,6 +166,7 @@ Eval'd: `(ns probe.schema (:require [seon.schema :as schema])) (schema/register!
 {:has-ns? true
  :defs []                          ; ← nothing — fn calls don't add :defs
  :requires {schema seon.schema seon.schema seon.schema}}
+
 ```
 
 **Confirmed: `schema/register!` leaves zero analyzer fingerprint.** It's a fn call, not a def. The schema goes into seon.schema's `*schemas` defonce atom at runtime — which Probe 5 showed IS observable. Atom-diff is the right primitive for schemas; analyzer-diff is the right primitive for defns.
@@ -195,6 +202,7 @@ Public CLJS-available read API (`:clj` vs `:cljs` clauses checked):
 (get-var state ns-sym sym)       ; → var-map or nil
 (ns-deps state ns-sym)           ; → #{ns-sym ...} from :requires + :uses
 (diff-defs before-snapshot state ns-sym)  ; → {:added [...] :changed [...]}
+
 ```
 
 Wraps `cljs.analyzer.api/*` where it exists, falls back to `get-in` where it doesn't.
@@ -281,6 +289,7 @@ probe.norm   :requires {clojure.set   clojure.set
                         clojure.string clojure.string
                         clojure.walk  clojure.walk}
              :uses     {postwalk clojure.walk}
+
 ```
 
 Edges = `(set (vals requires))` ∪ `(set (vals uses))`, minus the ns itself and minus `clojure.*` / `cljs.*` (which are always pre-loaded). For probe.norm: `#{clojure.set clojure.string clojure.walk}` → all pre-loaded → no agent-ns edges.
@@ -305,6 +314,7 @@ Edges = `(set (vals requires))` ∪ `(set (vals uses))`, minus the ns itself and
                          [(:seon.ns/name e) (ns-deps e known)]))
         ;; Standard Kahn ...
         ])
+
 ```
 
 (Implementation is ~30 lines. The interesting bit is the data, not the algorithm.)
@@ -346,6 +356,7 @@ Today's `:bootstrap :entries` in `shadow-cljs.edn`:
 ```
 :entries [cljs.core cljs.test clojure.set clojure.string clojure.walk]
 :macros  [cljs.core cljs.test]
+
 ```
 
 The config explicitly says "Add more per agent vocabulary growth once measured." That's now. **For analyzer-authoritative detect-and-tee + cross-ns reference resolution, expand to include the substrate the agent legitimately calls:**
@@ -364,6 +375,7 @@ The config explicitly says "Add more per agent vocabulary growth once measured."
           ;; Other agent-vocabulary as needed (seon.fs, seon.id, …)
           ]
 :macros  [cljs.core cljs.test malli.core]   ; malli.core has :require-macros for the schema DSL
+
 ```
 
 ### What this buys
@@ -542,6 +554,7 @@ Inside `seon.eval/eval-batch!`'s per-form body, replace the current `code/extrac
                              tee-schema-entities
                              tee-ns-entities
                              [eval-entity])))
+
 ```
 
 **Verified pieces from REPL probes:**
@@ -562,6 +575,7 @@ Inside `seon.eval/eval-batch!`'s per-form body, replace the current `code/extrac
   {:malli/schema [:=> [:cat] [:set :qualified-keyword]]}
   []
   (set (keys @*schemas)))
+
 ```
 
 After that, schema tee is just `(set/difference (schema/current-keys) before)` — no source parsing, handles every register-call shape.
@@ -622,6 +636,7 @@ After that, schema tee is just `(set/difference (schema/current-keys) before)` �
         (doseq [fn-ent (sort-by :seon.fn/created-at (db/query ... ns-kw))]
           (await (seval/eval compile-state (:seon.fn/source fn-ent)
                              {:ns (symbol (name ns-kw))})))))))
+
 ```
 
 REPL-tested the toy version of `parse-ns-requires` against probe.norm's source — extracted `#{clojure.set clojure.string clojure.walk}` correctly. Topo on a 3-ns toy graph with one fan-in trivially.
@@ -680,6 +695,7 @@ The shipped module (`src/seon/analyzer_info.cljs`):
    :doc       (or (:doc meta) "")
    :private?  (boolean (:private meta))
    :specced?  (some? (:malli/schema meta))})
+
 ```
 
 Both detect-and-tee and resume verification call into this — single

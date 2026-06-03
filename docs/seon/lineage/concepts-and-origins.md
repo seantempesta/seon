@@ -1,7 +1,7 @@
 ---
 type: reference
 status: active
-tags: [reference, prior-art, lineage]
+tags: [reference]
 ---
 
 <!-- STATUS: complete; cross-cutting + coverage notes filled -->

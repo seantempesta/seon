@@ -1,7 +1,7 @@
 ---
 type: prd
 status: draft
-tags: [prd, agent, runtime]
+tags: [prd, agent]
 ---
 
 # Tx-log-as-context — alternative agent-render model
@@ -77,6 +77,7 @@ The renderer query becomes:
        [(get-else $ ?tx :seon.db/agent-id :substrate) ?owner]
        [(or (= ?owner ?agent) (= ?owner :substrate))]]
      db agent-id)
+
 ```
 
 **What this reuses:** `:seon.db/agent-id` (tx-meta), `:seon.render/ai`
@@ -129,6 +130,7 @@ same result; the indexed scan is cheaper.
 (schema/register! :seon.agent/window-skip  [:set :keyword])
 ;; e.g. #{:seon.eval :seon.async-result} — kinds to exclude from the
 ;; window. The renderer filters before the take-last.
+
 ```
 
 `:seon.agent/window-skip` is the agent's way to say "I'm in a tight
@@ -160,6 +162,7 @@ explicit anchoring (§4.2) is the real prefix mechanism.
 
 ```clojure
 (schema/register! :seon.sticky/position [:enum :prefix :suffix])
+
 ```
 
 An entity carrying `:seon.sticky/position :prefix` is **always**
@@ -168,6 +171,7 @@ The renderer query is now a union:
 
 ```
 (prefix-sticky entities) ∪ (last-N renderable, non-prefix-sticky)
+
 ```
 
 Both sets are sorted by tx-time of latest assertion. Prefix-sticky
@@ -210,6 +214,7 @@ So the final sticky shape:
 ```clojure
 (schema/register! :seon.sticky/position [:enum :prefix :suffix])
 (schema/register! :seon.sticky/order    {:optional true} :int)
+
 ```
 
 `:order` only meaningful when `:position` is set; missing ⇒ 0
@@ -318,6 +323,7 @@ is different.
   :seon.sticky/order     3
   :seon.render/ai        'seon.runtime/handlers-list
   :seon.render/html      'seon.runtime/pretty-html}]
+
 ```
 
 `sticky-handlers-list` is interesting: it queries `:seon.handler`
@@ -340,6 +346,7 @@ current truth."
   :seon.message/at      #inst "2026-05-25T10:00:00.000Z"
   :seon.render/ai       'seon.runtime/render-message
   :seon.render/html     'seon.runtime/render-message-html}]
+
 ```
 
 The user-message tx is tagged with the recipient agent id (web
@@ -366,6 +373,7 @@ transact — either way, the tx-meta carries it).
  {:seon.turn-request/id    "tr-1"
   :seon.turn-request/agent [:seon.agent/id "A-abc123def456"]
   :seon.turn-request/at    #inst "2026-05-25T10:00:00.821Z"}]
+
 ```
 
 Note what's **not here**: no `:seon.ctx.recent-eval` mirror entity,
@@ -405,6 +413,7 @@ LLM returns `";; 2+2 = 4"`. `ask-and-eval!` writes:
   :seon.message/at #inst "2026-05-25T10:00:01.620Z"
   :seon.render/ai 'seon.runtime/render-message
   :seon.render/html 'seon.runtime/render-message-html}]
+
 ```
 
 No `:seon.turn-request`. `run-turn!` close-path transacts
@@ -504,6 +513,7 @@ Yes. `assemble-ai-context` is callable from agent code:
 (seon.render/assemble-ai-context
   {:seon.db/db @conn :seon.agent/id "A-..."})
 ;; => {:seon.render/text "..." :seon.render/entities [...]}
+
 ```
 
 The `:entities` key in the return is the **list of entity refs the

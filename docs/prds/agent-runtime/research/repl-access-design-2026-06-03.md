@@ -164,6 +164,7 @@ is a function call:
 
 ;; what is agent X bound to?
 (seon.server.session/resolve-agent {:seon.server.session/agent-id "a1b2c3…"})
+
 ```
 
 No special API is needed — `get-conn` / `resolve-agent` hand back the live
@@ -238,6 +239,7 @@ behavior up to the moment it wedged.
               [?e :seon.eval/source ?src]]
             db)
        (sort-by first) (take-last 10)))
+
 ```
 
 ### 2.2 Liveness signal — make "stuck" a query
@@ -451,6 +453,7 @@ let engine = Engine::new(&config)?;
 // per agent, before call_run_agent:
 store.set_epoch_deadline(routine_ticks);
 store.epoch_deadline_async_yield_and_update(routine_ticks); // yield, don't starve siblings
+
 ```
 
 Fuel was considered and rejected (Gemini Q3): per-instruction fuel decrement

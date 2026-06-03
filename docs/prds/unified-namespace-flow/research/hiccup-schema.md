@@ -33,6 +33,7 @@ Malli natively supports recursive schemas via `:schema` with a local `:registry`
               ;; Fragment — sequence of hiccup (from map/for at top level)
               [:and seq? [:sequential [:schema [:ref "hiccup"]]]]]}}
    "hiccup"])
+
 ```
 
 ## How It Works
@@ -92,6 +93,7 @@ Malli's `gen/recursive-gen` handles recursive schemas automatically. However, th
   :gen/fmap (fn [k] [k "generated"])}
  vector?
  [:cat keyword? ...]]
+
 ```
 
 This produces simple but valid hiccup for generative tests. In practice, hiccup is an *output* type -- render functions produce it, nothing consumes generated hiccup as input -- so generation quality matters less than validation accuracy.
@@ -118,6 +120,7 @@ Seon does **not** currently use `[component-fn {args}]` Reagent-style references
 ```clojure
 ;; NOT needed now, but for reference:
 [:component [:cat fn? [:? :map] [:* [:ref "hiccup"]]]]
+
 ```
 
 Since `fn?` values cannot be serialized or validated structurally, validating post-resolution hiccup (current approach) is the right call.

@@ -1,7 +1,7 @@
 ---
 type: research
 status: in-progress
-tags: [research, agent, malli, instrumentation, error]
+tags: [research, agent]
 ---
 
 # Instrumentation error envelope — what to hand the agent
@@ -55,6 +55,7 @@ The reporter is called from `malli.core/-instrument-f` as `(report ::invalid-inp
 ;;            :value  "1bad"
 ;;            :args   [1 "bad"]
 ;;            :schema [:=> [:cat :int :int] :int]}}
+
 ```
 
 Note: with `:scope #{:input :output}` and an input-bad call, output validation fires too (because the wrapped fn still ran and returned `"1bad"`). For `::invalid-input` to fire instead we'd need to short-circuit — Malli reports input first (line 2215) but doesn't `throw`, just calls `report` and continues. The default `:report` is `m/-fail!` (line 3128), which DOES throw, so under normal use only ONE report ever fires per failed call.
@@ -66,6 +67,7 @@ Note: with `:scope #{:input :output}` and an input-bad call, output validation f
 ```clojure
 ;; from instrument.cljc:30
 (update :report (fn [r] (fn [t data] (r t (assoc data :fn-name (symbol (name n) (name s)))))))
+
 ```
 
 So when wiring our reporter we should expect `:fn-name 'seon.db/transact!` on every payload — we DON'T have to manage that.
@@ -129,6 +131,7 @@ The envelope nests under `:seon.error/data` (Sean's existing `seon.error/->map` 
  ;; ::invalid-arity only:
  :seon.error.malli/arity     3
  :seon.error.malli/arities   #{{:min 1 :max 2}}}
+
 ```
 
 **Why these field choices:**
@@ -161,6 +164,7 @@ The envelope nests under `:seon.error/data` (Sean's existing `seon.error/->map` 
 (schema/register! :seon.error.malli/return-value-edn {:optional true} :string)
 (schema/register! :seon.error.malli/arity {:optional true} :int)
 (schema/register! :seon.error.malli/arities {:optional true} [:set :map])
+
 ```
 
 (Caveat: substrate doesn't allow standalone `{:optional true}` on `register!` — `:optional` is only meaningful inside a parent `:map`. So we'd register these as plain types and the optionality is enforced via map-schema membership at the consumer. Same pattern as existing `:seon.message/agent`.)
@@ -177,6 +181,7 @@ This lands as `:seon.eval/error` on the failed eval and renders inside `recent-e
 ;; got        {:seon.db/typo true}         (cljs.core/PersistentArrayMap)
 ;; reason     missing required key
 ;; hint       did you mean :seon.db/tx-data?
+
 ```
 
 For an output failure on a fn that returned the wrong shape:
@@ -186,6 +191,7 @@ For an output failure on a fn that returned the wrong shape:
 ;; expected   :int                          at  []
 ;; got        "42"                          (string)
 ;; reason     should be an integer
+
 ```
 
 For an arity failure:
@@ -194,6 +200,7 @@ For an arity failure:
 ;; ERROR  malli/instrument-arity  seon.user/foo  arity 3
 ;; expected   arity 1..2  (schema [:=> [:cat :int :int] :int])
 ;; got        (1 2 3)
+
 ```
 
 **Why this layout:**
@@ -211,6 +218,7 @@ For **multi-leaf errors** (`{:name 42 :age "x"}` failing both keys), render one 
 ;; ERROR  malli/instrument-input  seon.foo/bar  arg 0
 ;; expected   :string    at  [:name]    got  42         (number)    reason  should be a string
 ;; expected   :int       at  [:age]     got  "x"        (string)    reason  should be an integer
+
 ```
 
 (Compressed to one line per leaf when total chars < ~120; multi-line otherwise.)
@@ -245,6 +253,7 @@ The agent reads structured errors via the existing `result` verb (which returns 
 
     ;; fallback
     {:unknown-kind (:seon.error/kind err)}))
+
 ```
 
 This makes the error **programmable**: an agent can write its own diagnostic functions, can grep its own eval log for a specific `fn-sym`, can build a fix-suggestion loop. The substrate hands the LLM a typed shape — the LLM doesn't have to parse a free-form string to act on it.
@@ -260,6 +269,7 @@ This makes the error **programmable**: an agent can write its own diagnostic fun
                      {:seon.db/tx-datas []})]
   (-> exp me/with-spell-checking me/humanize))
 ;; => {:seon.db/tx-datas ["should be spelled :seon.db/tx-data"]}
+
 ```
 
 On **open maps** the spell-check is a no-op:
@@ -268,6 +278,7 @@ On **open maps** the spell-check is a no-op:
 (let [exp (m/explain [:map [:seon.db/tx-data :any]] {:seon.db/tx-datas []})]
   (-> exp me/with-spell-checking me/humanize))
 ;; => {:seon.db/tx-data ["missing required key"]}   ; doesn't notice :tx-datas exists
+
 ```
 
 This means we get hint-for-free **only if Seon's input schemas are closed**, which they should be anyway for `transact!`/`query`/etc. (a typo'd key is a bug, not future-proofing). For open maps we run our OWN spell-check by adding `{:closed true}` to the explain-pass temporarily, OR by writing a tiny similarity check using `me/-most-similar-to`.
@@ -309,6 +320,7 @@ For uninspectable values (functions, opaque JS objects):
     (= "object" (goog/typeOf v)) (str "#js[" (.. v -constructor -name) "]")
     :else           (let [s (pr-str v)]
                       (if (> (count s) 200) (str (subs s 0 197) "...") s))))
+
 ```
 
 `got-type` uses `(if (some? v) (.. v -constructor -name) "nil")` (CLJS) or `(.-name (type v))` — gives `"PersistentArrayMap"`, `"String"`, etc. **Don't** use `(type v)` directly in pr-str because it produces unhelpful function-printable output.
@@ -475,6 +487,7 @@ A single namespace, `seon.error.instrument`, with two public fns: `report-fn` (t
                hint       (conj (str ";; " (pad "hint" 10) hint))
                arities    (conj (str ";; " (pad "expected" 10) "arities " (pr-str arities))))]
     (str/join "\n" body)))
+
 ```
 
 **Wiring into `format-eval-row`** (`seon.agent`):
@@ -485,6 +498,7 @@ A single namespace, `seon.error.instrument`, with two public fns: `report-fn` (t
 ;; :seon.error/kind starting with :seon.error.kind/malli-instrument-,
 ;; route through render-malli-error; otherwise fall through to the
 ;; existing (str ";; ERROR " err) plain path.
+
 ```
 
 Because `:seon.eval/error` is `:string` today, the envelope has to be `pr-str`'d at write time and `read-string`'d at render time. Two options: (a) keep `:seon.eval/error` as `:string` but pr-str the envelope into it, (b) add a new `:seon.eval/error-data :map` attr and render from it directly. **(b) is cleaner** — agents can `(:seon.eval/error-data eval)` programmatically without a `read-string` round-trip. The existing `:seon.eval/error :string` can become the rendered string (denormalized for cheap display); both populated from the envelope at write time.
@@ -519,6 +533,7 @@ Because `:seon.eval/error` is `:string` today, the envelope has to be `pr-str`'d
                :schema [:=> [:cat] :int]})]
     (is (= :seon.error.kind/malli-instrument-output (:seon.error/kind env)))
     (is (= "\"42\"" (:seon.error.malli/return-value-edn env)))))
+
 ```
 
 ---

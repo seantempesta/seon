@@ -81,6 +81,7 @@ T+20 : A's promise resolves. A reads *p* → :B      ; WRONG
 T+20 : A's binding finally → set *p* = nil         ; clobbers B's binding
 T+105: B's promise resolves. B reads *p* → nil     ; WRONG
 T+105: B's finally → set *p* = :A                  ; leaves stale value
+
 ```
 
 Concurrent `binding` of the same Var across async yields **silently
@@ -108,6 +109,7 @@ fiber-local scoping because Vars are JS globals.
 (.run als #js {:label "B"} work-B)
 ;; A returns {:before "A" :after "A"}; B returns {:before "B" :after "B"}
 ;; Even under the same adversarial timing that broke probe 13.
+
 ```
 
 ALS is implemented in V8 via `async_hooks` — it instruments the
@@ -240,6 +242,7 @@ Reproducer for probe 13 (the dealbreaker):
 ;; Start both. A's await is shorter; A resumes WHILE B still bound.
 (.then (fn-A-tight) #(prn :A-saw %))  ;; prints :A-saw :B  ← WRONG
 (.then (fn-B-tight) #(prn :B-saw %))  ;; prints :B-saw nil ← WRONG
+
 ```
 
 Reproducer for probe 14 (the fix):
@@ -258,6 +261,7 @@ Reproducer for probe 14 (the fix):
 
 (.then (.run als #js {:label "A"} work-A) #(prn :A-saw %))  ;; :A-saw "A" ✅
 (.then (.run als #js {:label "B"} work-B) #(prn :B-saw %))  ;; :B-saw "B" ✅
+
 ```
 
 ## Files touched

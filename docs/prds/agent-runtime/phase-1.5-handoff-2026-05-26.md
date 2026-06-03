@@ -1,7 +1,7 @@
 ---
 type: prd
 status: completed
-tags: [prd, agent, testing]
+tags: [prd, agent]
 ---
 
 # Phase 1.5 handoff — fixture-walking in run-vars (2026-05-26)
@@ -37,11 +37,12 @@ After (this patch):
 ```clojure
 (:seon.test.runner/summary dbr)
 ;=> {:type :summary, :test 26, :pass 220, :fail 5, :error 0}
+
 ```
 
 26 tests, 220 passing assertions, 5 failing assertions across **2
 deftest vars** (`transact!-throws-synchronously-on-unregistered-attr`
-+ `transact!-throws-synchronously-on-bad-value`). Both are the
+- `transact!-throws-synchronously-on-bad-value`). Both are the
 throw-vs-envelope contract drift documented as BLOCKED in the audit
 (rows 5 + 6 of §2): `db/transact!` was made `^:async` at commit
 `ed72acb` and returns an `{:seon.db/ok? false :seon.db/error …}`

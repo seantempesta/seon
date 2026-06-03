@@ -110,7 +110,6 @@ Grouped by what the user gets:
 
 This list deliberately leaves out the partner WebAssembly track — covered in §4 as a pillar, not a capability.
 
-
 ## 2. The Product Framing
 
 _pending_
@@ -259,7 +258,6 @@ This naming/lore line is in CLAUDE.md but absent from the public README. It is e
 
 Contains the original "schema-first / generators built-in / capabilities pattern" explanation. The capabilities pattern is mostly obsolete in current code, but the line *"Schema-first design - entities defined before code"* is a clean one-liner that the README could borrow as a tagline for the contracts pillar.
 
-
 ## 5. Older README Candidates
 
 _pending_
@@ -339,7 +337,6 @@ Headings + one-line intent each (no prose):
 11. **Lineage** — Current table + the one-line story "this is the shape that survived 18 months of experiments." Keep the RFC 3161 timestamping note.
 12. **Where to read next** — Pointers: `docs/seon/vision/index.md`, `docs/seon/_dashboard.md`, `docs/prds/agent-runtime/v1.md`, `CLAUDE.md`.
 13. **Status, License, Contributing, Contact** — Keep current sections verbatim.
-
 
 ## 8. What's Missing From the Current README
 

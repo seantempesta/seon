@@ -75,6 +75,7 @@ Tracked overlaps: `seon.ns.view` (multimethod-based, parallel system per `overla
    [:seon.render/html
     {:default 'my.ns/render-user-message-html}
     [:or :seon.render/hiccup :symbol]]])
+
 ```
 
 The `:seon.render/ai` value is **either** a literal string (pre-rendered) **or** a symbol pointing at a render fn. Same for `:seon.render/html` — hiccup-or-symbol. The schema's `:default` is a literal symbol (the most common shape; agents who want a custom literal pre-populate the key).
@@ -87,6 +88,7 @@ The `:seon.render/ai` value is **either** a literal string (pre-rendered) **or**
   {:malli/schema [:=> [:cat :seon.user-message/message] :string]}
   [{:keys [:seon.user-message/from :seon.user-message/text]}]
   (str from ": " text))
+
 ```
 
 Takes the entity, returns the rendered string. Standard map-in/map-out fn.
@@ -103,6 +105,7 @@ At the boundary:
    - string?  → use directly.
    - symbol?  → (requiring-resolve sym) → call with entity → string.
 3. Same for :seon.render/html (hiccup or symbol).
+
 ```
 
 No custom seon transformer. No semantic hijack of `:default/fn`. The polymorphism — declared, typed, finite — lives in the schema's value-type. The boundary handles the disjunction in a few lines.
@@ -118,6 +121,7 @@ Sean's framing: "a nice shorthand for the agent to transact messages to the user
     :seon.message/text "Here's the result of your query."
     :seon.render/html  'my.ns/format-as-card    ;; agent chose this renderer
     :seon.render/ai    'my.ns/format-as-line}]) ;; and this AI representation
+
 ```
 
 The transaction listener detects the new message → emits to user's browser (via the `:seon.render/html` resolved+called). Agent can override default render per-message without committing to a particular pre-rendered form at write time. If the renderer fn evolves later, prior messages re-render with the new logic.
@@ -136,6 +140,7 @@ Original proposal had `:seon.render/example` as a separate map-entry slot for ag
  :seon.user-message/from "seon"
  :seon.render/ai   "alice (custom): hi"            ;; literal string
  :seon.render/html 'my.ns/render-as-callout-card}  ;; symbol → resolved + called
+
 ```
 
 Boundary algorithm at the dispatch step (§E):
@@ -169,6 +174,7 @@ Existing local def at `src/seon/web/reactive/transform.clj:33-40` already shapes
                                [:sequential [:ref ::hiccup]]
                                [:vector [:cat :keyword [:? :map] [:* [:ref ::hiccup]]]]]}}
  [:ref ::hiccup]]
+
 ```
 
 R1 promotes this to a global registration:
@@ -179,6 +185,7 @@ R1 promotes this to a global registration:
                                [:sequential [:ref ::node]]
                                [:vector [:cat :keyword [:? :map] [:* [:ref ::node]]]]]}}
    [:ref ::node]])
+
 ```
 
 `seon.web.reactive.transform`'s local def becomes a re-export of the registered name. One source of truth. Future Datastar-safety refinements (forbid `:script` tags? require `data-*` attrs? etc.) live in the registered schema.
@@ -198,6 +205,7 @@ At every MCP eval result that's a map:
 4. Nothing renderable → return nil → mcp-server prints the "No AI renderer"
    hint AND (if suggest-on-nil enabled, see §G) inlines a short
    "functions that accept these keys" list.
+
 ```
 
 Schema detection: the result needs a `:seon/schema` reference to know which schema to decode against. Two mechanisms:
@@ -226,6 +234,7 @@ Today the MCP server reads `:value` from nREPL (a string), edn-reads it, then se
   {:malli/schema [:=> [:cat :seon.session/id] :seon.render/hiccup]}
   [session-id]
   [:div.hud ...])
+
 ```
 
 A HUD render fn signature is `(fn [session-id] -> hiccup)` — takes the agent's session id, reads whatever it needs from datahike, returns the rendered view. The agent customizes:
@@ -234,6 +243,7 @@ A HUD render fn signature is `(fn [session-id] -> hiccup)` — takes the agent's
 (seon.session/set-hud-renderer!
   {:seon.session/id "a5ba3e"
    :seon.session/hud-renderer 'my.ns/my-custom-hud})
+
 ```
 
 Same render machinery powers both surfaces:
@@ -266,6 +276,7 @@ Today's `gq/functions-with-output-key` finds fns whose **output** carries a key 
 ;;      :seon.fn/doc "Records a workout set to the database"
 ;;      :required-keys #{...}, :optional-keys #{...}
 ;;      :seon.render/example {::exercise "Squat" ...}}]   ; pulled from schema affordances
+
 ```
 
 Surface format at the REPL boundary (when the agent calls `(suggest x)` or types help, or — opt-in — every time `try-render` returns no-renderer): a markdown comment block under the result:
@@ -277,6 +288,7 @@ Surface format at the REPL boundary (when the agent calls `(suggest x)` or types
 ;; - seon.health.workout.render/workout-set — Renders a workout set for HTML+AI
 ;;     example: see above
 ;; - seon.health.workout/total-volume    — Sum total kg lifted across sets
+
 ```
 
 **Resolved**: ship as always-on with a per-session toggle to silence. Sean's stated direction ("default harness env should always be surfacing relevant fns") wins over the noise concern. The toggle lives on `:seon.session/suggest-on-nil?` (boolean, defaults to true). Agents that find the surface noisy disable it for their session.

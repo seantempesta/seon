@@ -36,6 +36,7 @@ All 12 failing test sites pass symbols:
   {::session/node *test-node*
    ::session/namespace 'test.start          ;; symbol
    ::session/pool nil})
+
 ```
 
 Verified in-REPL (`(seon.schema/schema-definition :seon.orchestrator.session/namespace)` returns `[:string {:min 1, ...}]`; a fresh `(user/run-tests 'seon.orchestrator.session-test)` produced 12 errors with the exact `expected [:string {:min 1, ...}], got test.nrepl.sid (symbol)` shape).
@@ -73,6 +74,7 @@ The test (`pipeline_test.clj:730-743`) builds `schema-without-refs` by removing 
 [:seon.fn/output-spec {:optional true} :seon.db/ref]
 [:seon.fn/input-shape {:optional true} :seon.db/ref]
 [:seon.fn/output-shape {:optional true} :seon.db/ref]
+
 ```
 
 The last two were added in `b534279` (Mar 2026 "feat: shape graph phase 1+2") — same commit that added the shape graph at all. The test filter wasn't updated.
@@ -106,6 +108,7 @@ Independent — can land without cluster 1 or 3.
 ```
 ::ns-name ::namespaces ::functions ::specs ::vars
 ::call-edges ::ns-deps ::shapes ::entries
+
 ```
 
 The fixture (`workout_test.clj:191-197`) transacts only `::specs` and `::functions`:
@@ -113,6 +116,7 @@ The fixture (`workout_test.clj:191-197`) transacts only `::specs` and `::functio
 ```clojure
 (d/transact! *conn* (vec (::extract/specs graph)))
 (d/transact! *conn* (vec (::extract/functions graph)))
+
 ```
 
 Each function entity now carries `:seon.fn/input-shape [:seon.shape/id "shape:..."]` and `:seon.fn/output-shape [:seon.shape/id "shape:..."]` lookup-refs (added by `b534279`). The shape entities are present in `(::extract/shapes graph)` but never transacted. Datalevin can't resolve the lookup-ref → "Nothing found for entity id [:seon.shape/id ...]" at `datalevin.db/entid_strict` (`db.clj:791`).
@@ -132,6 +136,7 @@ Transact `(::extract/entries graph)` and `(::extract/shapes graph)` before the f
 (d/transact! *conn* (vec (::extract/entries graph)))   ;; shapes ref entries
 (d/transact! *conn* (vec (::extract/shapes graph)))    ;; functions ref shapes
 (d/transact! *conn* (vec (::extract/functions graph)))
+
 ```
 
 Order matters because shapes contain entry-refs and functions contain shape-refs. Worth confirming entry/shape internal ordering by re-running the test after the change.

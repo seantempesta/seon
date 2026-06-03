@@ -1,7 +1,7 @@
 ---
 type: research
 status: completed
-tags: [research, cleanup]
+tags: [research]
 ---
 
 # Datalevin → Datahike cleanup log (2026-05-23)

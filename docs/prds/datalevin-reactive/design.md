@@ -75,6 +75,7 @@ Each namespace has ONE state entity, identified by `::ns-id`:
  ::workouts [{...} {...}]
  ::bodyweight 85.0
  ::weekly-volume 500.0}
+
 ```
 
 ### Domain Entities
@@ -87,6 +88,7 @@ Namespaces can also manage collections of domain entities:
  ::weight 100.0
  ::reps 5
  ::date #inst "2026-03-18"}
+
 ```
 
 ### Identity Key Convention
@@ -106,6 +108,7 @@ The identity key in a function's input spec tells the system which entity to ope
   [{::keys [ns-id workouts exercise weight reps]}]
   {::ns-id ns-id
    ::workouts (conj workouts {::exercise exercise ::weight weight ::reps reps})})
+
 ```
 
 ### Default for Namespace Identity
@@ -114,6 +117,7 @@ The identity key in a function's input spec tells the system which entity to ope
 (schema/register! ::ns-id
   [:string {:seon.db/identity true
             :default/fn (fn [] "seon.test.bootstrap-v2")}])
+
 ```
 
 Agent calls `(add-workout! {::exercise "Squat" ::weight 100.0 ::reps 5})` — `::ns-id` defaults, `::workouts` pulled from entity. Clean.
@@ -148,6 +152,7 @@ Agent calls `(add-workout! {::exercise "Squat" ::weight 100.0 ::reps 5})` — `:
    → ...chain continues until no more matches
 
 8. Return accumulated results to REPL
+
 ```
 
 ## Implementation
@@ -173,6 +178,7 @@ All code in one file. Uses embedded Datalevin (same pattern as v1).
   [:enum {:default :home} :home :active :history])
 
 ;; ... other schemas with defaults for initial state
+
 ```
 
 ### Part 2: Pure Functions (~20 lines)
@@ -183,6 +189,7 @@ All code in one file. Uses embedded Datalevin (same pattern as v1).
                       [:map [::volume :double]]]}
   [{::keys [weight reps]}]
   {::volume (* weight reps)})
+
 ```
 
 ### Part 3: Stateful Functions (~40 lines)
@@ -214,6 +221,7 @@ Functions with identity keys in input AND output specs:
                             [::weekly-volume :double]
                             [::weekly-sets :int]]]}
   ...)
+
 ```
 
 ### Part 4: Entity-Aware Dispatch (~60 lines)
@@ -244,6 +252,7 @@ Functions with identity keys in input AND output specs:
         result (fn-var decoded)]
     (apply-result! {:conn conn :result result})
     result))
+
 ```
 
 ### Part 5: Transaction Listener (~40 lines)
@@ -263,6 +272,7 @@ Functions with identity keys in input AND output specs:
         ;; Recursive: this transact triggers another on-transaction!
         ;; visited set prevents cycles
         ))))
+
 ```
 
 ### Part 6: Tests (~60 lines)
@@ -288,6 +298,7 @@ Functions with identity keys in input AND output specs:
   ;; Verify all chains complete
   ;; Measure transaction throughput
   )
+
 ```
 
 ## What This Proves vs v1
@@ -322,6 +333,7 @@ Shape graph lookups are **code-time data** — they only change when code is rel
         (let [result (functions-matching-data {...})]
           (swap! shape-match-cache assoc key result)
           result))))
+
 ```
 
 **Invalidation:** `graph/ingest/ingest-namespace!` already calls `render/invalidate-render-cache!`. Add `invalidate-shape-match-cache!` alongside it. Same trigger, same lifecycle.
@@ -334,6 +346,7 @@ Datalevin supports `d/transact-async` — returns a future, batches writes, 100k
 ;; Fast path: fire-and-forget downstream reactions
 (d/transact-async conn tx-data)
 ;; Only use sync d/transact! when the next step needs to read the result
+
 ```
 
 ### Transaction Listeners
@@ -344,6 +357,7 @@ Datalevin supports `d/transact-async` — returns a future, batches writes, 100k
 (d/listen! conn :reactive-dispatch
   (fn [tx-report]
     (on-transaction! {:conn conn :tx-report tx-report})))
+
 ```
 
 This replaces the manual "transact then check" pattern. The listener fires automatically.

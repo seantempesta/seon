@@ -484,7 +484,7 @@ Phases 8-10 are a new axis: how the agent reaches users on devices that aren't t
 Scope:
 
 - Add `tauri 2.x` + `tauri-build` as real deps in `src-tauri/Cargo.toml`. The workspace `Cargo.toml` already declares them at the workspace level; today's `src-tauri/` binary is wasmtime-only and doesn't pull them in yet.
-- `main.rs` setup hook boots wasmtime + pod in a Tokio task; webview opens to `http://127.0.0.1:<pod-port>` — **the pod's own HTTP+SSE loopback server** (`seon.web.serve`, started by `seon.client/main!` at `client.cljs:493`). The pod already serves the agent UI today via `seon.web.broadcast`'s tx-listener → per-agent tile morphs over `datastar-patch-elements` SSE events; the Tauri webview is just one more HTTP client. The JVM Datastar dashboard is a separate process on a different port reading a different datahike — not what Phase 8 targets.
+- `main.rs` setup hook boots wasmtime + pod in a Tokio task; webview opens to `<http://127.0.0.1:><pod-port>` — **the pod's own HTTP+SSE loopback server** (`seon.web.serve`, started by `seon.client/main!` at `client.cljs:493`). The pod already serves the agent UI today via `seon.web.broadcast`'s tx-listener → per-agent tile morphs over `datastar-patch-elements` SSE events; the Tauri webview is just one more HTTP client. The JVM Datastar dashboard is a separate process on a different port reading a different datahike — not what Phase 8 targets.
 - Auto-port-discovery via `tmp/seon-port` (shipped Phase 1).
 - Platform bundling: DMG on macOS, MSI on Windows, AppImage on Linux. Code-signing + notarization is a follow-on.
 

@@ -17,6 +17,7 @@ Phase 1 ✅ shipped    v1  📝 spec draft (see v1.md) — implementation NOT st
 Phase 2 ✅ shipped    v2  📝 stub (see v2.md) — deferred from v1
 Phase 3 🚧 active     v3  📝 stub (see v3.md) — deferred from v2
 Phase 4–10 designed
+
 ```
 
 "Shipped" means code in `src/seon/` (Platform track). "Spec
@@ -53,6 +54,7 @@ docs/prds/agent-runtime/
 │   └── m2-findings-2026-05-21.md
 └── archive/
     └── agent-repl-mvp-pre-2026-05-22.md   ← prior monolithic spec; superseded by v1.md
+
 ```
 
 ## Version dependency graph
@@ -108,6 +110,7 @@ v3 (cross-agent + cross-pod)
 │        D12 blob GC / retention,
 │        cross-pod blob sharing (S3-backed seon.blob/*config*),
 │        replay UI
+
 ```
 
 **v1 → v2 → v3 transitions are clean breaks.** New schemas, fresh

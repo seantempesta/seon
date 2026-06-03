@@ -70,6 +70,7 @@ The database is a single value on a monotonic clock — datahike's `basis-t`:
 
 ```text
 D_0 --Δ_1--> D_1 --Δ_2--> D_2 --> ...     t in ℕ
+
 ```
 
 Each transaction `Δ` has a **write-set** `W(Δ) ⊆ Attrs` (the attributes it
@@ -83,6 +84,7 @@ Attrs`. The incremental-view-maintenance fact:
 
 ```text
 f_i(D_t) ≠ f_i(D_{t-1})  ⟹  W(Δ_t) ∩ R(f_i) ≠ ∅
+
 ```
 
 So a subscription has **patterns** `I_i` (derived from its query) and wakes iff
@@ -101,6 +103,7 @@ external world `E` (email, web, MCP):
 
 ```text
 s_i = f_i(D, E)        D = (⋃_i s_i) ∪ (external-ingested data)
+
 ```
 
 i.e. `D = F(D, E)`. Reactivity is the system relaxing toward a fixpoint as `E`
@@ -125,6 +128,7 @@ onto two timescales:
 
 ```text
 f_i(D, E)  ⇝  g_i  (a pure D → V)        summary value = g_i(D_current)
+
 ```
 
 The LLM is a **compiler** from "messy world + goal" to "cheap reactive
@@ -166,6 +170,7 @@ can and damp the rest with the change-gate.
 
 ```text
 Cost = Σ_i (recompile-rate_i · c_i)   subject to   staleness_i ≤ bound_i
+
 ```
 
 Debounce falls out of the lossy-stream model: an agent samples `D` at its own

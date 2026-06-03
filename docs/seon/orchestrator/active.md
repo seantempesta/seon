@@ -82,6 +82,7 @@ Test baseline: **4054 pass / 0 fail / 2 errors**. The 2 errors are pre-existing 
 
 (ses/stop! {::ses/session-id (::ses/session-id res)})
 ;; status :stopped, :stopped-at populated
+
 ```
 
 ## Operational Gotchas

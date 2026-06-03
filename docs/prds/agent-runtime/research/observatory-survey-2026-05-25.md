@@ -1,7 +1,7 @@
 ---
 type: research
 status: draft
-tags: [research, agent, web, observatory]
+tags: [research, agent, web]
 ---
 # Observatory pattern survey for the CLJS inspector
 

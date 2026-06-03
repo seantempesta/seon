@@ -1,7 +1,7 @@
 ---
 type: research
 status: draft
-tags: [research, testing, agent, prd]
+tags: [research, agent, prd]
 ---
 
 # CLJS testing infrastructure — research + plan
@@ -210,6 +210,7 @@ New file `src/seon/test/suite.cljs`:
                           (catch :default _ nil))]
           :when (and var-obj (:test (meta var-obj)))]
       (symbol (str ns-sym) (str name-sym)))))
+
 ```
 
 **Required by `seon.client/-main`** so the test nses get loaded into
@@ -230,6 +231,7 @@ the convention-driven `foo` ↔ `foo-test` sibling resolution):
 ```clojure
 (schema/register! :seon.fn/test?         :boolean)
 (schema/register! :seon.fn/test-targets  [:vector :symbol])
+
 ```
 
 `:seon.fn/source` already holds the form text. `:seon.fn/created-at`
@@ -243,6 +245,7 @@ Discovery for `run-all!` queries one shape:
                           :where
                           [?e :seon.fn/sym ?sym]
                           [?e :seon.fn/test? true]]}))
+
 ```
 
 Platform tests (loaded by `seon.test.suite` requires) also land as
@@ -325,6 +328,7 @@ New file `src/seon/test/fixtures.cljs`:
   (let [conn (await (empty-db {}))]
     (binding [db/*conn* conn]
       (await (thunk)))))
+
 ```
 
 Usage:
@@ -338,6 +342,7 @@ Usage:
               (a/<! (db/transact! {::db/tx-data [{::name "Alpha"}]}))
               (is (= 1 (count (db/query {::db/query '[:find ?e :where [?e ::name]]})))))})
         (.then done))))
+
 ```
 
 A macro `with-test-conn-async` wraps the boilerplate:
@@ -348,6 +353,7 @@ A macro `with-test-conn-async` wraps the boilerplate:
      (-> (fixtures/with-test-conn
            {::fixtures/thunk #(let [~bind-sym db/*conn*] (do ~@body))})
          (.then done#))))
+
 ```
 
 Most tests get one-line setup. `:shared-conn?` flag in the request
@@ -387,6 +393,7 @@ Re-runs would silently see previous data; harder to reason about.
       (t/do-report {:type :error :message "..." :actual e})))
   (t/do-report {:type :end-test-var :var #js {:sym sym}})
   (t/update-current-env! [:testing-vars] rest))
+
 ```
 
 That requires `run-vars` itself to become `^:async`. Callers
@@ -406,6 +413,7 @@ the driver awaits**:
         (= v :cljs.test/async-stub) (await done-promise)
         (and (some? v) (fn? (.-then v))) (await v)
         :else nil))))
+
 ```
 
 cljs.test's `async` macro pushes the test into a "wait for done" mode;
@@ -456,6 +464,7 @@ multi-ns runs).
 ;; references it. The shape includes ::run-id, ::selected-vars,
 ;; ::recorded?, ::recorded-syms (the union of what older drafts
 ;; previously defined here and in §4.H).
+
 ```
 
 The five entrypoints:
@@ -505,6 +514,7 @@ The five entrypoints:
   [_]
   (when-let [run-id (last-run-id-from-db)]
     {::run-id run-id ::run-result (fetch-run run-id)}))
+
 ```
 
 The existing `run-vars`, `stash-run!`, `record-run!`, `run-and-record!`
@@ -529,6 +539,7 @@ add a layer.
   ;;   (or [(missing? $ ?r :seon.test/last-passed-at)]
   ;;       [(and [?r :seon.test/last-passed-at ?p] [(< ?p ?f)])])
   ...)
+
 ```
 
 ### F. The `(user/run-tests)` equivalent
@@ -541,6 +552,7 @@ CLJS, the equivalent lives **inside the pod**, called over MCP:
 (seon.test.runner/run! {::ns 'seon.db-test ::record? true})
 ;; Pretty-printed for humans:
 (seon.test.render/summary (seon.test.runner/run! {::ns 'seon.db-test}))
+
 ```
 
 A tiny `seon.client` REPL helper `(seon.test/run)` (no args = `run-all!`,
@@ -556,6 +568,7 @@ once Phase 3 lands):
 (seon.test.runner/run!
   {::ns 'seon.db-test
    ::record? true})
+
 ```
 
 Wait for the reply, print `seon.test.render/cli-summary` of the result,
@@ -589,6 +602,7 @@ package (adds a JS dep tree to a Clojure pipeline); `clojure -X`
     (doseq [ev (filter #(#{:fail :error} (:type %)) (:seon.test.runner/events result))]
       (println " " (:sym ev) "—" (or (:message ev) (:actual ev)))))
   (System/exit (if (zero? (+ fail error)) 0 1)))
+
 ```
 
 Wire in `bin/seon` after the `process_command` case statement:
@@ -600,6 +614,7 @@ Wire in `bin/seon` after the `process_command` case statement:
     *)   echo "usage: bin/seon test pod [ns]" >&2; exit 2 ;;
   esac
   ;;
+
 ```
 
 The pod must already be running (`bin/seon start pod`) — the shim
@@ -655,6 +670,7 @@ counterpart, fire the test.
       {:tx []
        :effects [{:effect/type :run-tests
                   :seon.test/vars (vec vs)}]})))
+
 ```
 
 The `:run-tests` effect interpreter is one line:
@@ -662,6 +678,7 @@ The `:run-tests` effect interpreter is one line:
 ```clojure
 (defmethod run-effect! :run-tests [{:seon.test/keys [vars]}]
   (run! {::vars vars ::record? true}))
+
 ```
 
 **Test counterpart resolution:**
@@ -717,6 +734,7 @@ no notification, no acknowledgement. **Reactive context principle.**
 
 (schema/register! ::last-result-response
   [:maybe [:map [::run-id ::run-id] [::run-result ::run-result]]])
+
 ```
 
 Every entrypoint is `[:=> [:cat ::run-request] ::run-result]` (or the
@@ -740,6 +758,7 @@ Pure data is already the bottom layer. Add a thin formatter:
 (defn ::tile-hiccup
   "Hiccup for the recent-evals tile — feeds `seon.render/html-render`."
   ...)
+
 ```
 
 `record-run!` already lands the projection in the DB. The
@@ -846,6 +865,7 @@ bad inputs to assert the error envelope (e.g.
       (is (thrown-with-msg? :seon.error.kind/malli-instrument-input
             #"::name must be string"
             (foo/bar {::name 42}))))))
+
 ```
 
 Implementation: temporarily `mi/unstrument!` for those syms, call
@@ -969,6 +989,7 @@ adjacency map, not a recursive Datalog rule.
                    [?fn :seon.fn/sym ?sym]
                    [?fn :seon.fn/test? true]]
           db all-affected)))
+
 ```
 
 **Indexing note (cross-ref audit §5):** the bound-arg lookups above
@@ -1025,6 +1046,7 @@ existing `:seon.fn/*` attrs in `src/seon/agent.cljs:251-261`):
   (await (runner/run! {::runner/vars vars
                        ::runner/record? true
                        ::runner/trigger trigger})))
+
 ```
 
 **Why this is reactive-context-correct** (CLAUDE.md
@@ -1089,6 +1111,7 @@ Added field on `::run-request`:
     [::timeout-ms   {:optional true} :int]               ; ← new
     [::conn         {:optional true} :seon.db/ref]]
    ...])
+
 ```
 
 `::trigger` lands on the `:seon.test/last-*` projection so the
@@ -1125,6 +1148,7 @@ expected shape of a passing result, and the fallback if it fails.
       (get 'probe-1-test)
       :meta
       :test))
+
 ```
 
 - **Expected:** truthy (the gensym fn the `deftest` macro stores in
@@ -1144,6 +1168,7 @@ expected shape of a passing result, and the fallback if it fails.
     (with-redefs [probe-2 (fn [] :redef)]
       (reset! seen (probe-2)))
     {:during @seen :after (probe-2)}))
+
 ```
 
 - **Expected:** `{:during :redef, :after :original}`.
@@ -1169,6 +1194,7 @@ expected shape of a passing result, and the fallback if it fails.
   (t/run-tests)
   ;; after run completes:
   @order)
+
 ```
 
 - **Expected:** `[:before :body :after]` (in that order).
@@ -1196,6 +1222,7 @@ expected shape of a passing result, and the fallback if it fails.
   (try (probe-4 {::probe-4/n "not-an-int"})
        :no-throw
        (catch :default e (-> e ex-data :type))))
+
 ```
 
 - **Expected:** a Malli instrumentation error type (the exact
@@ -1233,6 +1260,7 @@ recursive rules, this is a hard gate on Phase 2.
      '[[(depends ?x ?y) [?x :probe/requires ?y]]
        [(depends ?x ?y) [?x :probe/requires ?z] (depends ?z ?y)]])
 ;; Expected: ("b" "c")
+
 ```
 
 - **Expected:** `("b" "c")` (order-insensitive).
@@ -1275,6 +1303,7 @@ it's invisible to every query that matters.
   [?r  :seon.test/last-failure-summary ?summary]
   (or [(missing? $ ?r :seon.test/last-passed-at)]
       [(and [?r :seon.test/last-passed-at ?p] [(< ?p ?f)])])]
+
 ```
 
 This matches the reactive-context principle exactly — no
@@ -1323,6 +1352,7 @@ concern, not a correctness issue.
    [::recorded?      {:optional true} :boolean]
    [::recorded-syms  {:optional true} [:vector :string]]
    [::trigger        {:optional true} ::trigger]])
+
 ```
 
 The five entrypoints, all in `src/seon/test/runner.cljs`:
@@ -1508,6 +1538,7 @@ Agent eval-batch:
   {:seon.agent/id "a1"
    :seon.eval/forms ["(defn foo [x] (* x 2))"
                      "(deftest foo-test (is (= 4 (foo 2))))"]})
+
 ```
 
 What happens inside the pod:
@@ -1532,6 +1563,7 @@ What happens inside the pod:
      :seon.fn/test?   true                                      ; ← Phase 2 attr
      :seon.fn/arglists "([])"
      :seon.fn/created-at #inst "2026-05-25T18:00:00Z"}]
+
    ```
 
 3. Datahike commits. tx-listener fires. The `::affected-tests`
@@ -1553,6 +1585,7 @@ What happens inside the pod:
    [{:seon.test/sym "seon.user.a1/foo-test"
      :seon.test/last-passed-at #inst "..."
      :seon.test/last-run-id    "<id>"}]
+
    ```
 
 7. The warnings-tile section function queries
@@ -1566,6 +1599,7 @@ What happens inside the pod:
 (seon.eval/eval-batch!
   {:seon.agent/id "a1"
    :seon.eval/forms ["(defn foo [x] (* x 3))"]})
+
 ```
 
 1. `cljs.js/eval-str` replaces `seon.user.a1$foo` on globalThis. The
@@ -1589,6 +1623,7 @@ What happens inside the pod:
        "FAIL seon.user.a1/foo-test  expected: 4  actual: 6"
      :seon.test/last-run-id "<new-id>"
      :seon.test/trigger ::on-fn-redef}]
+
    ```
 
    Crucially, `:seon.test/last-passed-at` is **not** updated; it
@@ -1617,12 +1652,14 @@ The warnings-tile section function:
       [:div.warning
        [:span.dot "●"] " " sym " " summary
        [:span.subtle " (via " (name trigger) ")"]])))
+
 ```
 
 Returns one row for `foo-test`. The tile renders:
 
 ```
 ● seon.user.a1/foo-test  FAIL expected: 4 actual: 6 (via on-fn-redef)
+
 ```
 
 The next prompt the agent gets includes this tile in its ctx — **the
@@ -1636,6 +1673,7 @@ Just derived context.
 (seon.eval/eval-batch!
   {:seon.agent/id "a1"
    :seon.eval/forms ["(defn foo [x] (* x 2))"]})
+
 ```
 
 Same loop. Handler fires. `foo-test` runs. Passes.
@@ -1747,7 +1785,7 @@ principle — no clear, no ack, no notification queue.**
   writing many tests and friction shows up.)
 - Worth noting: expectations' "side-effects-explicit" pattern (a
   `:before`/`:after` map per test) mirrors our `use-fixtures :each`
-  + `with-test-conn` design.
+  - `with-test-conn` design.
 
 ### `reference-code/test.check/`
 

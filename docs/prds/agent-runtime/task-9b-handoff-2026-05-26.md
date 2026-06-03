@@ -1,7 +1,7 @@
 ---
 type: research
 status: completed
-tags: [research, agent, db, handoff]
+tags: [research, agent]
 ---
 
 # Task 9b handoff — envelope contract extensions (2026-05-26)
@@ -69,6 +69,7 @@ task spec still throw:
 (db/query {:seon.db/query "bad"})            ; still throws
 (db/query {:seon.db/query '[:find ?e :where [bogus]]}) ; still throws
 (db/pull {:seon.db/pull-pattern '[*] :seon.db/ref :nope}) ; depends on input
+
 ```
 
 This is honest reporting per CLAUDE.md "Honesty > completion" — surfacing
@@ -115,6 +116,7 @@ throw an `ex-info` tagged `:seon.error/kind :user-input`, which
 ;;                                       :seon.db/actual-shape #object [String]}
 ;;                    :seon.error/message "seon.db/transact!: `:seon.db/tx-data` must be a sequential collection …"}}
 ;; Same shape for 42, nil, #js {:foo 1}.
+
 ```
 
 All four cases classified `:user-input` (previously all `:substrate-bug`).
@@ -168,6 +170,7 @@ if (new cljs.core.Keyword("seon.db","ok?",…).cljs$core$IFn$_invoke$arity$1(ope
 } else {
   return seon.agent.with_turn_body_BANG_(id, id_of_turn, body_fn);
 }
+
 ```
 
 Short-circuit branch is in place. Behavioral test against a forced

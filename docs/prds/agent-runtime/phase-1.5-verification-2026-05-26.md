@@ -1,7 +1,7 @@
 ---
 type: research
 status: completed
-tags: [research, testing, verification]
+tags: [research]
 ---
 
 # Phase 1.5 Verification — fixture-walking in run-vars (2026-05-26)
@@ -21,6 +21,7 @@ PASS. Live run: `{:test 26 :pass 220 :fail 5 :error 0}`. Fail correlation:
 ```
 seon.db-test/transact!-throws-synchronously-on-unregistered-attr  — 2 fails
 seon.db-test/transact!-throws-synchronously-on-bad-value          — 3 fails
+
 ```
 
 Exactly 2 vars, matching the audit's rows 5+6. Claim is true.
@@ -53,6 +54,7 @@ fixtures) and `seon.test.fixture-support-probes` (has `:once`/`:each`):
 ```
 lifecycle: [:once-before :each-before :probe-a-body :each-after :once-after]
 summary:   {:test 3 :pass 2 :fail 1 :error 0}
+
 ```
 
 Fixtures fired only for `fixture-support-probes`. Runner-probes syms ran
@@ -79,6 +81,7 @@ produces the correct event sequence:
 
 ```
 [:begin-test-var :pass :end-test-var :begin-test-var :pass :end-test-var :summary]
+
 ```
 
 `:var` on each event is a proper CLJS symbol (`seon.test.fixture-support-probes/probe-a`).
@@ -113,6 +116,7 @@ PersistentHashMap hash-iteration order applies:
 ;; 10 nses → non-insertion order confirmed live:
 ["ns-zeta" "ns-delta" "ns-gamma" "ns-iota" "ns-beta"
  "ns-epsilon" "ns-kappa" "ns-alpha" "ns-eta" "ns-theta"]
+
 ```
 
 The comment on line 413 ("Stable per-ns groupings preserve the input ordering

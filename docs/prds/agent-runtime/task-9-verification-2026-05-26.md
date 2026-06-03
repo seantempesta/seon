@@ -1,7 +1,7 @@
 ---
 type: research
 status: completed
-tags: [research, agent, db, verification]
+tags: [research, agent]
 ---
 
 # Task 9 verification — `db/transact!` envelope contract (2026-05-26)
@@ -223,9 +223,11 @@ Severity: **blocker** relative to the personal-AI platform guarantee, but
 **not a regression** from task 9 (acknowledged in the handoff).
 
 Repro:
+
 ```clojure
 (db/query {:seon.db/query "bad"})   ; throws synchronously
 (db/query {:seon.db/query '[:find ?e :where [bogus]]})  ; throws
+
 ```
 
 Next step: Task 10 prerequisite or immediate follow-up task wrapping

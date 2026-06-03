@@ -774,7 +774,7 @@ caddy run            # Reverse proxy (port 3030)
 
 ```
 
-**Update:** Access dashboard at `https://localhost:3030` instead of `http://localhost:8080`.
+**Update:** Access dashboard at `<https://localhost:3030`> instead of `<http://localhost:8080`.>
 
 #### 2. Virtual Thread Configuration (Priority: Medium)
 

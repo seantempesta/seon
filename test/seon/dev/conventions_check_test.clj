@@ -29,7 +29,13 @@
     "after-ns-reload"
     "before-ns-unload"
     ;; core.async.flow step-fn: multi-arity (describe / init / transition / transform)
-    "collector-step"})
+    "collector-step"
+    ;; nREPL wire-shaped entry point: bin/mcp-server emits a literal
+    ;; positional form `(with-agent-load-string "<id>" "<code>")` over the
+    ;; nREPL channel for the :seon.agent/<id> eval route. The two-positional
+    ;; signature is dictated by that wire form (a string body that must be
+    ;; load-string'd inside the binding scope, so it can't be a map arg).
+    "with-agent-load-string"})
 
 (defn- non-allowlisted-violations
   "Filter compliance violations to drop those for allowlisted framework

@@ -49,6 +49,7 @@ All keys are `::` (namespace-local). When we refactor, we change the namespace, 
 (m/decode ::system {::ns-key ::bootstrap ::resume? true}
           (dependent-default-transformer))
 ;; => same but ::ctx restored from Datalevin
+
 ```
 
 ## Implementation
@@ -68,6 +69,7 @@ From `reference-code/malli/docs/tips.md`. `:default/fn` receives the map being b
 
 (defn dependent-default-transformer [] ...)
 ;; Key difference: (f acc) not (f), passes current map to default/fn
+
 ```
 
 ### Part 2: Schemas (~30 lines)
@@ -91,6 +93,7 @@ All `::` — local to this namespace.
 (schema/register! ::screen [:enum :home :active :history])
 (schema/register! ::ctx
   [:map [::screen ::screen] [::workouts ::workouts]])
+
 ```
 
 ### Part 3: Infrastructure Functions (~50 lines)
@@ -139,6 +142,7 @@ Every function specced, map-in/map-out.
         persisted (when resume?
                     (::data (restore-ctx m)))]
     {::ctx (merge defaults persisted)}))
+
 ```
 
 ### Part 4: System Schema (~15 lines)
@@ -156,6 +160,7 @@ The seed + system schema IS the wiring. Entry order = dependency order. No expli
    [::ctx {:default/fn '(fn [m] (::ctx (init-ctx! m)))} ::ctx]])
 
 (def seed {::ns-key ::bootstrap})
+
 ```
 
 ### Part 5: Domain Functions (~20 lines)
@@ -176,6 +181,7 @@ Pure data-in/data-out.
   [{::keys [ctx exercise weight reps]}]
   {::ctx (update ctx ::workouts conj
            {::exercise exercise ::weight weight ::reps reps})})
+
 ```
 
 ### Part 6: Dispatch + Atom (~20 lines)
@@ -198,6 +204,7 @@ Pure data-in/data-out.
       (when (not= old new)
         (persist-ctx! {::conn conn ::ns-key ns-key ::data new}))))
   {::wired true})
+
 ```
 
 ### Part 7: Tests (~70 lines)
@@ -250,6 +257,7 @@ Pure data-in/data-out.
             (is (= 1 (count (-> sys2 ::ctx ::workouts)))))
           (finally (close-conn! sys2))))
       (catch Exception e (throw e)))))
+
 ```
 
 ## What This Proves
@@ -286,6 +294,7 @@ Caller: (total-volume {})
   → ::ctx missing → :default/fn fires → @*state → injected
   → calls total-volume with {::ctx <live state>}
   → returns {::volume 500.0}
+
 ```
 
 **Implementation:** Wrap specced functions via `alter-var-root`. For each function with `:malli/schema` whose input spec has entries with `:default/fn`, wrap it:
@@ -309,6 +318,7 @@ Caller: (total-volume {})
             (when-let [new-ctx (::ctx result)]
               (reset! *state new-ctx))
             (dissoc result ::ctx)))))))
+
 ```
 
 After `(instrument-with-decode! {::fn-var #'total-volume})`, any caller gets transparent injection. The atom watch handles persist.
@@ -326,6 +336,7 @@ Data arrives: {::exercise "Squat" ::weight 100.0 ::reps 5}
   → decode fills ::ctx from atom
   → call add-workout!
   → result has ::ctx → atom updates → persist watch fires
+
 ```
 
 **Implementation:** Needs the code graph indexed for this namespace. Use existing scanner/ingest infrastructure to populate our embedded Datalevin with function+spec entities. Then query with the same pattern as `gq/functions-with-output-key` but matching on input keys.
@@ -349,6 +360,7 @@ Data arrives: {::exercise "Squat" ::weight 100.0 ::reps 5}
       (reset! *state new-ctx))
     {::result (dissoc result ::ctx)
      ::fn-called (:seon.fn/qualified-name best)}))
+
 ```
 
 ### What Both Paths Share
@@ -362,6 +374,7 @@ The core pipeline is identical:
 4. Call function (pure data-in/data-out)
 5. If result has ::ctx → reset! atom (triggers persist watch)
 6. Return result without ::ctx
+
 ```
 
 Steps 2-6 are the same function. Path A and Path B only differ in step 1.
@@ -396,6 +409,7 @@ Steps 2-6 are the same function. Path A and Path B only differ in step 1.
           (is (= 1 (count (::workouts @*state))))))
 
       (finally (close-conn! system)))))
+
 ```
 
 ### Graph Indexing in Local Datalevin

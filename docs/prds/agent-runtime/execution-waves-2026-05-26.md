@@ -350,6 +350,7 @@ Collapse into ONE atom matching atom PRD's "one substrate atom per concern":
   (atom {::generated-ids #{}
          ::registry-cache {}
          ::flow-handles {}}))
+
 ```
 
 Refactor scope: rewire callsites within `runtime.clj` only (the atoms are private). ~50 LOC of edits. ~1h. Targeted tests on `seon.runtime` only.

@@ -63,6 +63,7 @@ Example — a warnings section that surfaces problems anywhere in the system:
            (count failed) " failed evals across agents since latest user msg\n"
            "</warnings>")
       "")))
+
 ```
 
 When the agent (or another agent) fixes the form and re-evals, the failed entity stays in history but no new failed evals exist past the latest user message — the query returns empty — the section renders blank — the warning is invisible. No acknowledgement, no clearing, no notification. **The system is self-healing because nothing was ever stored.**

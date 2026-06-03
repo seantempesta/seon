@@ -106,6 +106,7 @@ unsubscribe-tx: func(handle: u32) -> result<bool, db-error>;
 // Also: relax `pull`'s eid type:
 pull: func(selector: string, eid: string) -> result<string, db-error>;
 // (was eid: s64; must accept lookup-refs as EDN strings)
+
 ```
 
 JVM writer additions (PROTOCOL.md):
