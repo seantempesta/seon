@@ -6,12 +6,38 @@ tags: [prd, agent, database]
 
 # client-runtime — the wasm-agent DB runtime
 
+> **SUPERSEDED / current shape (2026-06-03).** Authoritative plan:
+> [platform-v2-node-first-plan-2026-06-03](../../docs/prds/agent-runtime/platform-v2-node-first-plan-2026-06-03.md)
+> (+ [clusters-and-multi-db-wiring-2026-06-03](../../docs/prds/agent-runtime/clusters-and-multi-db-wiring-2026-06-03.md)).
+> Two locked decisions reshape this doc:
+>
+> 1. **One JVM, many DBs.** A *cluster* = one datahike DB + N agents + a task +
+>    metrics; a *session* = one cluster's DB (the isolation boundary).
+>    Cross-cluster isolation is per-DB inside ONE JVM (the JVM only runs
+>    datahike — pure queries). The earlier "N JVM writers, one per session"
+>    shape is the LATER process-split crash-isolation option, kept free as the
+>    degenerate single-DB case.
+> 2. **Node-first (V2.0), then wasm (V2.1).** Agents run as **Node CLJS
+>    processes** against the wire-server first (no wasm sandbox; native `fetch`
+>    LLM HTTP; trusted/single-user posture) — this is the convergence of the
+>    MVP track's real agent loop with the Platform track's multi-DB server.
+>    Wasm32-wasip2 guests + WIT-typed capabilities arrive in V2.1, sequenced
+>    after the Node POC (not cancelled).
+>
+> The phase notes below (P1–PF) are the historical wasm-guest + spawn-per-session
+> record and remain useful as proven plumbing — the wire protocol, overlay,
+> snapshot cache, and DB-op surface all carry forward to the Node runtime
+> unchanged. Where the phases say "wasm guest" / "JVM writer per session," read
+> per the current shape above.
+
 The client-runtime hosts language guests (CLJS today; other languages later)
-in wasm32-wasip2 sandboxes and connects them to the seon JVM's datahike over
-the wire-server. A single JVM datahike master serves N wasm-guest agents via
-UDS+CBOR, with a shared snapshot cache in the Rust host. Guests do all DB ops
-(transact / q / pull / entity / listen / transact-batch) via sync WIT calls
-(`seon:client-runtime/db`); the JVM is the sole datahike master.
+in wasm32-wasip2 sandboxes (V2.1; in V2.0 the CLJS agent runs as a Node
+process) and connects them to the seon JVM's datahike over the wire-server. A
+single JVM datahike master serves N agents via UDS+CBOR, with a shared snapshot
+cache in the Rust host. Guests do all DB ops (transact / q / pull / entity /
+listen / transact-batch) via the wire protocol (sync WIT calls
+`seon:client-runtime/db` in the wasm runtime; a CLJS wire client in the Node
+runtime); the JVM is the sole datahike master.
 
 The design lineage is in
 `docs/prds/agent-runtime/research/datahike-wasm-writer-split-2026-05-24.md`.
@@ -88,15 +114,16 @@ src/seon/server/          the JVM wire-server (sole datahike master) — the SER
 ### Run commands (Phase 1)
 
 ```bash
-# Terminal 1 — start the writer with the on-disk konserve-file backend
-cd src/seon/server
-clojure -M:writer --backend file --path ../data/seon-client-runtime-store
+# NOTE (2026-06-03): the :writer alias is in the ROOT deps.edn (run from the
+# repo ROOT, NOT `cd src/seon/server` — there is no src/seon/server/deps.edn).
+# It boots `-m seon.server.wire`. There is no `:client` smoke alias anymore;
+# the JVM smoke client lives under src/seon/server as the `:client` test path,
+# and the server tests run via the project test runner (see AGENT.md (d)).
+
+# Terminal 1 — start the writer with the on-disk konserve-file backend (repo root)
+clojure -M:writer --backend file --path data/seon-client-runtime-store
 
 # (or in-memory: clojure -M:writer --backend memory)
-
-# Terminal 2 — run the smoke client
-cd src/seon/server
-clojure -M:client
 
 ```
 

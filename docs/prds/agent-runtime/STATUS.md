@@ -6,6 +6,24 @@ tags: [reference, prd]
 
 # agent-runtime — recent ships + cross-track coordination
 
+> **SUPERSEDED / current shape (2026-06-03).** The "Tracks" framing below
+> (Platform track == "WASM-Tauri containment") predates two decisions locked
+> with Sean. Authoritative plan:
+> [platform-v2-node-first-plan-2026-06-03](platform-v2-node-first-plan-2026-06-03.md)
+> (+ [clusters-and-multi-db-wiring-2026-06-03](clusters-and-multi-db-wiring-2026-06-03.md)).
+>
+> 1. **One JVM, many DBs.** A *cluster* = one datahike DB + N agents + task +
+>    metrics; a *session* = one cluster's DB. Cross-cluster isolation is per-DB
+>    inside one JVM; process-split is a later crash-isolation option.
+> 2. **Node-first.** V2.0 runs agents as **Node CLJS processes** against the
+>    multi-DB JVM wire-server (the convergence of the MVP agent loop with the
+>    Platform server); wasm + WIT capabilities are **V2.1**, sequenced after.
+>    So "WASM-Tauri containment" is the V2.1 destination, not the V2.0 shape.
+>
+> The program-graph storage / eval / schema / resume / instrumentation
+> decisions recorded below (Sean's 2026-05-24 list, the 16-item migration plan,
+> the recent ships) are NOT affected by these two decisions and still hold.
+
 This file is for time-sensitive coordination: what shipped this week,
 what's in flight, what's needed across the MVP↔Platform boundary,
 and how to iterate. **Design lives in [README.md](README.md) and the
@@ -17,9 +35,10 @@ spec content.**
 - **MVP track**: agent eval surface — design in [v1.md](v1.md).
   Currently in implementation against the V0 CLJS pod (Node, not
   WASM yet).
-- **Platform track**: WASM-Tauri containment — design in
-  [platform.md](platform.md). Capability hardening + Phase 2 test
-  infra shipped 2026-05-22 (below).
+- **Platform track**: multi-DB JVM wire-server + Node-first agents (V2.0),
+  hardening to WASM-Tauri containment (V2.1) — design in
+  [platform.md](platform.md) + the 2026-06-03 plan docs. Capability hardening
+  + Phase 2 test infra shipped 2026-05-22 (below).
 
 ## Sean's locked-in decisions (2026-05-24) + revised migration plan
 
@@ -507,6 +526,7 @@ bin/seon start pod         # idempotent
 bin/seon status            # which procs alive, PIDs, pod port + URL
 bin/seon tail pod          # tail -f logs/pod.log (any number of agents OK)
 bin/seon restart cljs-watch
+
 ```
 
 Registered: `pod`, `cljs-watch`, `jvm`. State at `tmp/proc/<name>/`, logs at `logs/<name>.log`. Full protocol: [[../../seon/process-management]]. CLAUDE.md "Surgical Process Management" section also rewritten to point at the supervisor.

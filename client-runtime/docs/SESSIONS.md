@@ -6,12 +6,31 @@ tags: [architecture, agent, database]
 
 # Sessions — user-facing isolation in the platform
 
-> **REVISED 2026-05-26 PM.** Original design assumed N JVM processes (one per
-> session). New design: **ONE JVM owns all sessions** as separate datahike DBs.
-> Isolation is per-DB inside the same JVM, not per-process. See
-> `docs/prds/agent-runtime/integration-architecture-2026-05-26.md` for the
-> authoritative current shape. This file kept for the conceptual model;
-> file-layout and lifecycle sections supersede below.
+> **SUPERSEDED / current shape (2026-06-03).** Two decisions locked with Sean
+> on 2026-06-03 (authoritative plan:
+> [platform-v2-node-first-plan-2026-06-03](../../docs/prds/agent-runtime/platform-v2-node-first-plan-2026-06-03.md),
+> plumbing: [clusters-and-multi-db-wiring-2026-06-03](../../docs/prds/agent-runtime/clusters-and-multi-db-wiring-2026-06-03.md)):
+>
+> 1. **One JVM, many DBs — NOT one JVM/OS-process per session.** A *cluster* =
+>    one datahike DB + N agents + a task + metrics; a *session* = the
+>    DB-isolation boundary (one cluster's DB). Cross-cluster isolation is
+>    **per-DB inside one JVM** (the JVM only runs datahike — pure queries).
+>    Process/instance-split is a LATER option for crash blast-radius, kept free
+>    as the degenerate single-DB case. Concurrency = per-conn datahike write
+>    serialization + parallel immutable-value reads (thread-per-request by
+>    db-name); the wire-server is flow-free, no core.async time-slicing.
+> 2. **Node-first (V2.0), then wasm (V2.1).** Agents run as **Node CLJS
+>    processes** (no wasm sandbox; trusted/single-user posture) against the JVM
+>    multi-DB wire-server in V2.0. Wasm + WIT-typed capabilities arrive in V2.1.
+>
+> Everything below that says "separate OS process / JVM writer per session,"
+> "separate sockets / broadcast channel per session," or frames the agent as a
+> wasm guest reflects the OLDER spawn-per-session + wasm-only design and is now
+> false for V2.0. The session-as-namespace **concept**, the agent→session
+> binding being lifetime-fixed, and the use-cases all still hold; the physical
+> isolation is per-DB-in-one-JVM, and the agent runtime is a Node process. An
+> earlier (2026-05-26) revision already retired the multi-JVM framing; this note
+> updates it further to Node-first.
 
 A **session** is a user-facing secure namespace owned by the JVM on behalf of
 one user (or one experiment). N agents collaborate inside a single session
@@ -46,10 +65,13 @@ Seon has two tracks running in parallel right now:
   in-process datahike-cljs, living at `src/seon/*.cljs`. Other agents are
   evolving this for LLM integration. The MVP track does **not** have
   per-user sessions today; it's a single-tenant agent loop.
-- **Platform track (V2, this PoC)** — a multi-session client-runtime. A Tauri
-  Rust host owns N JVM datahike-writer processes (one per session) and
-  embeds wasm CLJS agents (multiple per session). This document is for
-  the V2 track and lives entirely under `client-runtime/`.
+- **Platform track (V2, this PoC)** — a multi-DB client-runtime. **Current
+  (2026-06-03) shape:** one JVM hosts many datahike DBs (one per cluster);
+  agents run as Node CLJS processes (V2.0) bound to a cluster's DB over the
+  wire-server. (The original PoC text below — "N JVM datahike-writer processes,
+  one per session" + "wasm CLJS agents" — describes the superseded
+  spawn-per-session + wasm-only design; see the top-of-file note.) This document
+  is for the V2 track and lives entirely under `client-runtime/`.
 
 The platform track is where multi-tenancy, training-data capture, and
 parallel experiment infrastructure live. The MVP track ships the agent
@@ -144,7 +166,15 @@ would explicitly opt that one orchestrator out of single-session safety.
 
 ## 6. Isolation guarantees
 
-**Physical, by construction:**
+> **Current (2026-06-03):** isolation is **per-DB inside one JVM**, not
+> per-OS-process. The list below describes the superseded spawn-per-session
+> model where each session had its own JVM writer process. In the current shape
+> the guarantees come from separate datahike conns / on-disk stores / per-DB
+> broadcast routing inside a single JVM (see clusters-and-multi-db-wiring P1).
+> Process-per-cluster (separate OS processes) is retained as a LATER option for
+> crash blast-radius.
+
+**Physical, by construction (superseded spawn-per-session model):**
 
 - Separate OS processes (the JVM writers) — no shared memory, no shared
   in-process locks.

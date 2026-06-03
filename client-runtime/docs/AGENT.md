@@ -6,11 +6,27 @@ tags: [orchestrator, agent, database]
 
 # AGENT.md — client-runtime (V2 / Platform track)
 
-> **REVISED 2026-05-26 PM.** Architecture pivoted from "multi-JVM (one per
-> session)" to "**one seon JVM owns all sessions as multi-DB datahike**". This
-> file is being kept for guest-side (wasm CLJS) mental model. For JVM-side
-> integration shape and file layout, **read first**:
-> `docs/prds/agent-runtime/integration-architecture-2026-05-26.md`.
+> **SUPERSEDED / current shape (2026-06-03).** Read the authoritative plan
+> FIRST: [platform-v2-node-first-plan-2026-06-03](../../docs/prds/agent-runtime/platform-v2-node-first-plan-2026-06-03.md)
+> (+ [clusters-and-multi-db-wiring-2026-06-03](../../docs/prds/agent-runtime/clusters-and-multi-db-wiring-2026-06-03.md)).
+> Two locked decisions change this file's assumptions:
+>
+> 1. **One JVM, many DBs** — a *cluster* = one DB + N agents + task + metrics;
+>    a *session* = one cluster's DB (the isolation boundary). Cross-cluster
+>    isolation is per-DB inside ONE JVM, not one JVM/OS-process per session.
+>    Process-split is a LATER crash-isolation option.
+> 2. **Node-first.** In **V2.0** agents run as **Node CLJS processes** (no wasm
+>    sandbox; trusted/single-user) against the JVM multi-DB wire-server — this
+>    is the convergence of the MVP track's real agent loop with the Platform
+>    track's multi-DB server. **V2.1** swaps Node→wasm + WIT-typed capabilities.
+>    The wasm work is sequenced after the Node POC, not cancelled.
+>
+> Below, wherever this file says "wasm guest," "JVM writer per session," or
+> "separate process per session," read it as the V2.1 (wasm) / superseded
+> (per-process) design. The overlay mechanism, wire protocol, and DB-op surface
+> all carry forward to the Node runtime unchanged. An earlier 2026-05-26
+> revision already retired the multi-JVM framing; this note updates it to
+> Node-first.
 
 ## TL;DR
 
@@ -63,10 +79,13 @@ checklist is green. Until then: stay in your lane.
 ## Cutover state
 
 See [CUTOVER.md](CUTOVER.md) for the full checklist. High-level:
-through Phase PF (multi-session isolation) — GREEN. The next-blocking item
-is porting a real V0 agent turn into a wasm guest with a stubbed LLM (the
-WASI preopen for bootstrap caches + the deepseek stub + V0 turn driver).
-Tauri integration is out of scope for cutover.
+through Phase PF (multi-session isolation) — GREEN. **Current (2026-06-03):**
+the next-blocking item is the V2.0 work — repoint the real V0 agent loop at a
+**Node** wire client against the JVM multi-DB wire-server (native `fetch` LLM
+HTTP, no capability work), proving the architecture end to end. The wasm port
+(real agent turn in a wasm guest, LLM HTTP through WIT) moves to **V2.1**,
+sequenced after the Node POC — not the immediate blocker. Tauri integration is
+out of scope for cutover.
 
 ## Hard rules for agents working in V2
 
@@ -134,10 +153,11 @@ cargo build --release
 # (c') Or short iteration (15s).
 ./build-guest --run --duration-ms=15000
 
-# (d) Run JVM-side tests.
-cd /Users/sean/src/seon/src/seon/server
-clojure -M:test
-# 25 tests / 105 assertions expected green (+ 6 facts tests / 16 assertions).
+# (d) Run JVM wire-server tests. From the REPL: (user/run-tests 'seon.server.<ns>-test)
+#     or the whole server suite via the project test runner. The server tests
+#     live at test/seon/server/ under the repo root (NOT a separate
+#     src/seon/server/deps.edn — there is none; the :writer alias is in the
+#     ROOT deps.edn). Latest green: 61 tests / 237 assertions for seon.server.*.
 
 # (e) Multi-session smoke (Phase PF).
 cd /Users/sean/src/seon/client-runtime/host

@@ -6,11 +6,24 @@ tags: [prd, agent, database]
 
 # CUTOVER.md — V1 → V2 retirement plan
 
-## Goal
-
-Retire the V1 / MVP CLJS pod (`src/seon/*.cljs`, in-process Node datahike-cljs)
-and use V2 / Platform client-runtime (`client-runtime/`) as the **single
-platform**. After cutover, V1 source is deleted; V2 is what ships.
+> **SUPERSEDED / current shape (2026-06-03).** Authoritative plan:
+> [platform-v2-node-first-plan-2026-06-03](../../docs/prds/agent-runtime/platform-v2-node-first-plan-2026-06-03.md).
+> The V1→V2 retirement still happens, but the cutover is now reframed in two
+> stages:
+>
+> - **V2.0 (prove the architecture) — Node-first.** Repoint the real V0 agent
+>   loop at a **Node** wire client against the **one-JVM-many-DBs** wire-server.
+>   No wasm sandbox; native `fetch` for LLM HTTP; trusted/single-user posture.
+>   This is the convergence of the MVP track (real agent loop) and the Platform
+>   track (multi-DB server), and it is the prove-the-architecture milestone.
+> - **V2.1 (harden the boundary) — wasm.** Swap Node→wasm32-wasip2 + WIT-typed
+>   capabilities. Same wire protocol, same agent CLJS, same multi-DB server.
+>
+> Effect on the checklist below: the blocking items framed as "real agent turn
+> in a **wasm guest**" and "**LLM HTTP through WIT**" are **V2.1** items, NOT
+> the immediate POC. For V2.0 the equivalent blocking item is "real V0 agent
+> turn in a **Node process** with native-`fetch` LLM." The wasm/WIT/ALS/blob
+> items move to V2.1 hardening. Read the per-item annotations added below.
 
 ## Why
 
@@ -39,9 +52,9 @@ platform**. After cutover, V1 source is deleted; V2 is what ships.
 | Multi-session isolation | green | Phase PF, 2×2 + 3×1 smokes, cross-contamination disjoint. |
 | WASI preopen filesystem (`seon.client-runtime.fs`) | green | RO `/seon-src` + RW `/scratch`, EACCES enforced. |
 | Facts knowledge base + `learn` role | green | 34 seed facts, 6 tests / 16 assertions. |
-| Real V0 agent turn in a wasm guest | **red** | Workload guests + smokes only. No LLM-driven turn yet. |
-| LLM HTTP capability through WIT | **red** | deepseek client is V1-only. Needs WIT shape or Rust-proxied. |
-| ALS / async-context parallel-agent smoke | **red** | Multi-agent N=3 ran, but cross-await context isolation not separately verified. |
+| Real V0 agent turn (V2.0 = **Node process**) | **red** | Workload guests + smokes only. No LLM-driven turn yet. V2.0 target is a Node process; the wasm-guest turn is V2.1. |
+| LLM HTTP (V2.0 = native `fetch`) | **red** | deepseek client is V1-only; runs natively in Node (V2.0). The WIT-typed HTTP capability is V2.1 hardening. |
+| ALS / async-context parallel-agent smoke | **red** | Multi-agent N=3 ran, but cross-await context isolation not separately verified. V2.1 concern (separate Node processes sidestep it in V2.0). |
 | EDN fallback removed | yellow | Transit is canonical; EDN string input still accepted for the smoke/REPL diagnostic path. |
 | Blob capability (artifacts / large content) | **red** | Three-tier storage rule says blobs ≠ datoms ≠ globalThis. WIT shape TBD. |
 | `sessions.edn` declarative config | yellow | CLI flags + lazy spawn cover v1; declarative config deferred. |
@@ -56,25 +69,21 @@ cutover-blocking. **red** = blocking. **not started** = explicitly deferred.
 Each item is done/not-done. **All "blocking" items must be done before
 cutover.** Yellow items are nice-to-have; non-blocking.
 
-### Blocking
+### Blocking — V2.0 (Node, prove-the-architecture)
 
 - [ ] Phase D + PF smokes re-verified on the post-2026-05-26 Transit wire
       (re-run after any wire change; both are currently green).
-- [ ] Real V0 agent turn runs inside a V2 guest with a stubbed LLM
-      (WASI preopen for bootstrap caches + deepseek stub + V0 turn driver
-      → completes one full turn, persists turn-log datoms, emits tx events).
-- [ ] ALS parallel-agent smoke proves cross-await context isolation
-      (two concurrent host calls in flight don't bleed AsyncLocalStorage
-      state into each other).
-- [ ] LLM HTTP capability available to guests, either via WIT
-      (`seon:capabilities/http` style) or via Rust host-proxied
-      `deepseek-chat` op. Must work under WASI without leaking the host's
-      network capability beyond declared endpoints.
+- [ ] **One JVM, many DBs wired** — wire-server resolves conn-per-request via
+      `session.clj` `!registry`, real db-name on broadcast, per-DB routing,
+      per-conn `listen!` hook; two DBs in one process with zero cross-bleed.
+      (This is clusters-and-multi-db-wiring P1 — the shared seam.)
+- [ ] **Real V0 agent turn runs in a Node process** against the wire-server:
+      the MVP agent loop (`agent.cljs`/`eval.cljs`/deepseek) with its `seon.db`
+      repointed at a Node wire client over a socket; native `fetch` for LLM
+      HTTP (no capability work in V2.0) → completes one full turn, persists
+      turn-log datoms, emits tx events.
 - [ ] Drop EDN fallback in JVM writer's `read-T` (verify no production
       caller relies on it; smoke + REPL harness migrate to Transit).
-- [ ] Blob WIT capability for artifacts/results/large content
-      (three-tier storage rule: datoms = projections, blobs = persistent
-      full content, globalThis = volatile session). Shape + smoke.
 - [ ] V1 / V2 parity matrix: every user-reachable entry point in V1 has
       an equivalent in V2. Concretely: every `src/seon/*.cljs` namespace
       with a public API has either (a) an overlay shadow at
@@ -83,6 +92,29 @@ cutover.** Yellow items are nice-to-have; non-blocking.
 - [ ] Migration plan for live V1 sessions: either export-and-replay
       (V1 datahike-cljs store → V2 konserve store) OR a "drop them"
       declaration with the user's sign-off.
+
+### Blocking — V2.1 (wasm, harden-the-boundary)
+
+These were previously framed as cutover-blocking but are now the **V2.1**
+hardening step, sequenced AFTER the Node POC proves the architecture.
+
+- [ ] Real V0 agent turn runs inside a **wasm guest** (WASI preopen for
+      bootstrap caches + V0 turn driver under wasm32-wasip2). The Node turn
+      (V2.0) proves the loop; this re-proves it under the sandbox.
+- [ ] **LLM HTTP capability through WIT** (`seon:capabilities/http` style) or
+      Rust host-proxied `deepseek-chat` op — without leaking the host's network
+      capability beyond declared endpoints. (V2.0 uses native `fetch`; the WIT
+      capability is the sandbox-hardening replacement.)
+- [ ] ALS parallel-agent smoke proves cross-await context isolation in the
+      wasm runtime (two concurrent host calls in flight don't bleed
+      AsyncLocalStorage state). Less pressing under Node-first (separate OS
+      processes); relevant when agents share a host runtime.
+- [ ] Blob WIT capability for artifacts/results/large content
+      (three-tier storage rule: datoms = projections, blobs = persistent
+      full content, globalThis = volatile session). Shape + smoke.
+- [ ] In-guest REPL + host watchdog (epoch interruption + import timeouts +
+      Store teardown) per `research/repl-access-design-2026-06-03.md` — the
+      wasm-specific diagnostic story (trivial/free in the Node runtime).
 
 ### Non-blocking (do during, or right after, cutover)
 
@@ -107,11 +139,13 @@ cutover.** Yellow items are nice-to-have; non-blocking.
 
 ## Open risks
 
-- **No LLM-driven turn in a guest yet.** This is the single largest unknown.
-  V0 has the agent loop; porting it to V2 means landing the overlay-shadow
-  ports for every `seon.*` namespace the agent loop touches, AND fitting an
-  LLM HTTP capability through the WIT boundary, AND verifying WASI preopens
-  satisfy the bootstrap-cache path. Allocate one full session for the spike.
+- **No LLM-driven turn yet.** This is the single largest unknown. V0 has the
+  agent loop; the **V2.0** path repoints it at a Node wire client (native
+  `fetch` LLM, no WIT capability work) and lands the overlay-shadow ports for
+  every `seon.*` namespace the loop touches. The wasm-specific work (LLM HTTP
+  through WIT, WASI bootstrap-cache preopens) defers to **V2.1**, so the Node
+  POC de-risks the architecture before the sandbox quirks. Allocate one full
+  session for the Node spike.
 - **Cache hit rate on real workloads is unproven.** The cache-friendly
   synthetic workload hit 99.1% (post tx-batcher fix), but Phase D''s
   attempt at a realistic agent pattern landed at <1% — likely because
