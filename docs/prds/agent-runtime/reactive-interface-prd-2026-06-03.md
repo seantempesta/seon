@@ -337,7 +337,7 @@ Shared shapes registered once and referenced (the `:seon.db/ref` discipline).
   [:string {:min 1 :seon.db/identity true}])
 
 ;; basis-t: datahike's monotonic clock. One shape; reused by sub + summary.
-(schema/register! :seon.reactive/basis-t [:int {:min 0}])
+(schema/register! :seon.server.reactive/basis-t [:int {:min 0}])
 
 ;; The subscription's query is stored as SOURCE (a string) — code-as-data, exactly
 ;; like :seon.fn/source. This removes the `:any`: a query is validated by being
@@ -410,7 +410,7 @@ just shipped or recomputed).
    [:seon.subscription/query     :seon.subscription/query]
    [:seon.subscription/render-fn :seon.subscription/render-fn]
    [:seon.subscription/active?   :boolean]
-   [:seon.subscription/basis-t   {:optional true} :seon.reactive/basis-t]])
+   [:seon.subscription/basis-t   {:optional true} :seon.server.reactive/basis-t]])
 ```
 
 **Patterns are NOT persisted** — they live only in the engine cache and are
@@ -537,20 +537,30 @@ event = "changed-summaries"
 Malli for the event payload (registered, validated at the boundary):
 
 ```clojure
-(schema/register! :seon.reactive/changed-entry
-  [:map
-   [:seon.agent/id          :seon.agent/id]
-   [:seon.subscription/id   :seon.subscription/id]
-   [:seon.reactive/rows     [:vector :any]]              ; the render input
-   [:seon.render/ai   {:optional true} :seon.render/ai]  ; Host-resolved (opt)
-   [:seon.render/html {:optional true} :any]])           ; hiccup (see §9)
+;; rows: scalar-union (decided 2026-06-03) — ephemeral wire payload, not a datom
+(schema/register! :seon.server.reactive/scalar
+  [:or :string :int :boolean :keyword :inst :uuid :double])
+(schema/register! :seon.server.reactive/rows
+  [:vector [:vector :seon.server.reactive/scalar]])
 
-(schema/register! :seon.reactive/changed-summaries-event
+(schema/register! :seon.server.reactive/changed-entry
   [:map
-   [:seon.server.store/db-name :seon.server.store/db-name]
-   [:seon.reactive/basis-t     :seon.reactive/basis-t]
-   [:seon.reactive/request-id  {:optional true} :string]   ; from the tx's tx-meta
-   [:seon.reactive/changed     [:vector :seon.reactive/changed-entry]]])
+   [:seon.subscription/id      :seon.subscription/id]
+   [:seon.server.reactive/rows :seon.server.reactive/rows]
+   ;; :seon.agent/id + :seon.render/* added at M3 (need registry's :seon.agent/id)
+   [:seon.agent/id  {:optional true} :seon.agent/id]
+   [:seon.render/ai {:optional true} :seon.render/ai]])
+
+(schema/register! :seon.server.reactive/changed-summaries-event
+  [:map
+   [:seon.server.reactive/db-name    :seon.server.reactive/db-name]
+   [:seon.server.reactive/basis-t    :seon.server.reactive/basis-t]
+   [:seon.server.reactive/request-id {:optional true} :seon.server.reactive/request-id]
+   [:seon.server.reactive/changed    [:vector :seon.server.reactive/changed-entry]]])
+
+;; NOTE (2026-06-03): the engine emits this EXACT registered shape — no
+;; translation layer (decided). M1 entries are {:seon.subscription/id,
+;; :seon.server.reactive/rows}; :seon.agent/id + render land at M3.
 ```
 
 **Why `request-id` rides this event (platform issue, 2026-06-03):** `::raw-broadcast`
@@ -777,20 +787,18 @@ Aligned to the topology doc's numbering; this PRD owns 3–4 and refines 1.
   render/auto-lift), deferred. The "JVM does the heavy lifting" claim holds
   regardless: the JVM does all the routing + querying (the expensive-at-scale
   part); the guest only formats rows it is handed.
-- **The `:any` decision (banked for Sean, platform issue 2026-06-03).** The
-  persisted-datom `:any`s are **gone**: `:seon.subscription/query` is now a
-  `:string` (source, code-as-data), and patterns are no longer persisted (§4.3).
-  Two `:any`s remain, both *outside* persisted reactive datoms:
-  (a) **`:seon.render/html`** (hiccup) — this is `render.clj`'s *existing*
-  registration; we reuse it rather than introduce a new smell, and a precise
-  hiccup-with-references grammar is its own project (tracked there).
-  (b) **the event's `rows`** (`[:vector :any]`) — an *ephemeral wire payload*, not
-  a datom; query results are heterogeneous tuples. Options for Sean: accept the
-  ephemeral coarse type (strict-no-`:any` is a *persisted-schema* rule), or tighten
-  to `[:vector [:vector :seon.reactive/scalar]]` with a scalar union
-  (`[:or :string :int :boolean :keyword :inst :uuid :double]`) for the non-pull
-  case. Recommend the scalar-union form; pull-shaped rows would need a recursive
-  shape (defer). **Not a blocker — a decision to bank.**
+- **The `:any` decision (RESOLVED 2026-06-03).** The persisted-datom `:any`s are
+  **gone**: `:seon.subscription/query` is a `:string` (source, code-as-data), and
+  patterns are not persisted (§4.3). For the remaining two:
+  (a) **`:seon.render/html`** (hiccup) — reuse `render.clj`'s *existing*
+  registration; a precise hiccup grammar is its own project (tracked there).
+  (b) **the event's `rows`** — **RESOLVED: scalar-union.** Typed as
+  `:seon.server.reactive/rows` = `[:vector [:vector :seon.server.reactive/scalar]]`
+  with `:seon.server.reactive/scalar` = `[:or :string :int :boolean :keyword :inst
+  :uuid :double]` (§5.2). It is an *ephemeral wire payload*, not a datom. Pull-shaped
+  rows (maps/nested) are deferred — extend if a real query row fails validation.
+  Applied + validated in `reactive.clj` (the `emit-conforms-to-registered-event-schema`
+  test).
 - **Posh `Datom` seq-access on datahike.** posh's matcher does `(first datom)` /
   `(rest datom)` over datoms; datahike `Datom` is a record with `.-e/.-a/.-v`. The
   matcher needs datahike datoms seq-accessible as `[e a v …]` (or an adapter).
