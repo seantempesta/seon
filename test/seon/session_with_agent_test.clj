@@ -16,19 +16,19 @@
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [datahike.api :as d]
             [seon.session :as session]
-            [seon.server.session :as server.session]))
+            [seon.server.registry :as server.session]))
 
 (defn ^:private clean-registry [t]
-  (let [{snap :seon.server.session/snapshot}
+  (let [{snap :seon.server.registry/snapshot}
         (server.session/snapshot-registry {})]
     (try
       ;; Start from a clean slate so prior test pollution can't leak in.
       (server.session/restore-registry!
-       {:seon.server.session/snapshot {:registry {} :agents {}}})
+       {:seon.server.registry/snapshot {:registry {} :agents {}}})
       (t)
       (finally
         (server.session/restore-registry!
-         {:seon.server.session/snapshot snap})))))
+         {:seon.server.registry/snapshot snap})))))
 
 (use-fixtures :each clean-registry)
 
@@ -37,24 +37,24 @@
    minimal `:who` schema on each conn. Returns the conns + agent-ids."
   []
   (server.session/ensure-db!
-   {:seon.server.session/db-name :test.with-agent/sA
-    :seon.server.session/backend :memory})
+   {:seon.server.registry/db-name :test.with-agent/sA
+    :seon.server.registry/backend :memory})
   (server.session/ensure-db!
-   {:seon.server.session/db-name :test.with-agent/sB
-    :seon.server.session/backend :memory})
+   {:seon.server.registry/db-name :test.with-agent/sB
+    :seon.server.registry/backend :memory})
   (doseq [[aid db] [["wa-A1" :test.with-agent/sA]
                     ["wa-A2" :test.with-agent/sA]
                     ["wa-B1" :test.with-agent/sB]
                     ["wa-B2" :test.with-agent/sB]]]
     (server.session/register-agent!
-     {:seon.server.session/agent-id aid
-      :seon.server.session/db-name  db}))
-  (let [cA (:seon.server.session/conn
+     {:seon.server.registry/agent-id aid
+      :seon.server.registry/db-name  db}))
+  (let [cA (:seon.server.registry/conn
             (server.session/get-conn
-             {:seon.server.session/db-name :test.with-agent/sA}))
-        cB (:seon.server.session/conn
+             {:seon.server.registry/db-name :test.with-agent/sA}))
+        cB (:seon.server.registry/conn
             (server.session/get-conn
-             {:seon.server.session/db-name :test.with-agent/sB}))]
+             {:seon.server.registry/db-name :test.with-agent/sB}))]
     (d/transact cA [{:db/ident :who
                      :db/valueType :db.type/string
                      :db/cardinality :db.cardinality/one}])
@@ -117,7 +117,7 @@
   (testing "if the agent's session was removed, throw a clear error"
     (setup-fixture!)
     (server.session/remove-db!
-     {:seon.server.session/db-name :test.with-agent/sA})
+     {:seon.server.registry/db-name :test.with-agent/sA})
     ;; remove-db! also drops agent mappings, so this is just 'unknown agent'
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"Unknown agent-id"

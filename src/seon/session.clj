@@ -12,16 +12,16 @@
   richer 609-LOC orchestrator version replaced the older 472-LOC
   `seon.session` from before the migration.
 
-  ## Sibling NS: `seon.server.session`
+  ## Sibling NS: `seon.server.registry`
 
-  `seon.server.session` (Wave 2, Path B) is a SEPARATE namespace and
+  `seon.server.registry` (Wave 2, Path B) is a SEPARATE namespace and
   separate concern. It owns the in-process atom REGISTRY of
   `{db-name -> {::conn ::backend ::path ::pub-chan}}` that the wire-
   server uses to route wasm-guest requests to the right datahike conn.
   No flow, no persistent entity — it's the live runtime mapping.
 
   - **`seon.session`** (this ns)        → entity (datoms in `:seon.orchestrator`)
-  - **`seon.server.session`** (Wave 2)  → runtime (atom of live conns)
+  - **`seon.server.registry`** (Wave 2)  → runtime (atom of live conns)
 
   Don't confuse them. Both can exist for the same logical session: the
   ENTITY records its identity + lifecycle metadata; the REGISTRY holds
@@ -43,7 +43,7 @@
             [seon.flow.pool :as pool]
             [seon.runtime :as runtime]
             [seon.schema :as schema]
-            [seon.server.session :as server.session]
+            [seon.server.registry :as server.session]
             [taoensso.timbre :as log]))
 
 ;;; ---------------------------------------------------------------------------
@@ -66,33 +66,33 @@
   nil)
 
 (schema/register! ::resolve-agent-conn-request
-                  [:map [::agent-id :seon.server.session/agent-id]])
+                  [:map [::agent-id :seon.server.registry/agent-id]])
 
 (schema/register! ::resolve-agent-conn-response
-                  [:map [::conn :seon.server.session/conn]])
+                  [:map [::conn :seon.server.registry/conn]])
 
 (schema/register! ::code-string
                   [:string {:description "Clojure source as a string (multi-form OK)"}])
 
 (defn resolve-agent-conn
   "Look up the datahike conn for `::agent-id` via
-   `seon.server.session/resolve-agent`. Throws clearly if the agent is
+   `seon.server.registry/resolve-agent`. Throws clearly if the agent is
    unknown or its session has been removed. Used by `with-agent`; broken
    out so the error path is easy to test."
   {:malli/schema [:=> [:cat ::resolve-agent-conn-request]
                   ::resolve-agent-conn-response]}
   [{::keys [agent-id]}]
-  (let [{db-name :seon.server.session/db-name
-         conn    :seon.server.session/conn}
+  (let [{db-name :seon.server.registry/db-name
+         conn    :seon.server.registry/conn}
         (server.session/resolve-agent
-         {:seon.server.session/agent-id agent-id})]
+         {:seon.server.registry/agent-id agent-id})]
     (cond
       (nil? db-name)
       (throw (ex-info (str "Unknown agent-id: " (pr-str agent-id)
-                           ". Register via seon.server.session/register-agent! first.")
+                           ". Register via seon.server.registry/register-agent! first.")
                       {:agent-id agent-id
-                       :known-agents (mapv :seon.server.session/agent-id
-                                           (:seon.server.session/agents
+                       :known-agents (mapv :seon.server.registry/agent-id
+                                           (:seon.server.registry/agents
                                             (server.session/list-agents {})))}))
       (nil? conn)
       (throw (ex-info (str "Agent " (pr-str agent-id) " points at db-name "
@@ -103,7 +103,7 @@
 (defmacro with-agent
   "Bind `*conn*` and `*current-agent-id*` to the agent's session for the
    duration of `body`. Resolves `agent-id` → db-name → conn via the
-   `seon.server.session` registry. Throws clearly if the agent-id is not
+   `seon.server.registry` registry. Throws clearly if the agent-id is not
    registered.
 
    Used by `bin/mcp-server` to scope `:seon.agent/<id>` evals; safe to

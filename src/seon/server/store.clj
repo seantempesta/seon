@@ -1,7 +1,7 @@
 (ns seon.server.store
   "Build datahike config maps for the wire-server's per-session DBs.
 
-   Path B (no flow): each session in `seon.server.session/registry` calls
+   Path B (no flow): each session in `seon.server.registry/registry` calls
    `(datahike.api/connect cfg)` with one of these maps. Three backends
    supported:
 
@@ -67,7 +67,7 @@
 
 (defn- name-segment
   "Filesystem-safe segment derived from a db-name keyword. `(name kw)`
-   already drops the namespace portion, so `:seon.session/alice` and
+   already drops the namespace portion, so `:seon.cluster/alice` and
    `:alice` both yield `\"alice\"`. Hostile chars are replaced with `_`."
   [db-name]
   (str/replace (name db-name) #"[^A-Za-z0-9._-]" "_"))
@@ -126,7 +126,7 @@
   "Build a datahike config map for a session DB. Pure — no I/O.
 
    Required:
-     ::db-name — keyword identifying the session (e.g. :seon.session/alice).
+     ::db-name — keyword identifying the session (e.g. :seon.cluster/alice).
      ::backend — :memory | :file | :sqlite.
 
    Optional:

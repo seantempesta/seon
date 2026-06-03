@@ -1,4 +1,4 @@
-(ns seon.server.session
+(ns seon.server.registry
   "Path B session RUNTIME registry — atom of `{db-name -> entry}` where
    each entry is `{::conn <datahike-conn> ::backend kw ::path str-or-nil
    ::pub-chan core.async-chan-or-nil}`.
@@ -15,7 +15,7 @@
    DB via `seon.db/transact!` (goes through `:seon.db/flow`).
 
    - **`seon.session`** (other ns)       → entity (datoms in `:seon.orchestrator`)
-   - **`seon.server.session`** (this ns) → runtime (atom of live conns)
+   - **`seon.server.registry`** (this ns) → runtime (atom of live conns)
 
    Don't confuse them. Both can exist for the same logical session: the
    ENTITY records identity + lifecycle metadata; the REGISTRY (here)

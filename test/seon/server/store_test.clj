@@ -85,7 +85,7 @@
 
 (deftest namespaced-db-name-yields-name-segment
   (testing "namespace portion of db-name is stripped for path segment"
-    (let [cfg (store/config-for {:seon.server.store/db-name :seon.session/alice
+    (let [cfg (store/config-for {:seon.server.store/db-name :seon.cluster/alice
                                  :seon.server.store/backend :sqlite})]
       (is (= "data/sessions/alice/store.sqlite"
              (get-in cfg [:store :dbname]))))))

@@ -1,5 +1,5 @@
-(ns seon.server.session-test
-  "Tests for seon.server.session — Path B registry.
+(ns seon.server.registry-test
+  "Tests for seon.server.registry — Path B registry.
 
    All tests use the `:memory` backend exclusively. `:file`/`:sqlite`
    exercise the same code paths via store/config-for; the registry's
@@ -10,7 +10,7 @@
    test get released by `restore-registry!`."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [datahike.api :as d]
-            [seon.server.session :as ss]))
+            [seon.server.registry :as ss]))
 
 ;;; --- Fixture ---------------------------------------------------------------
 
