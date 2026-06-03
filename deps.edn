@@ -119,6 +119,26 @@
                    "-XX:MaxGCPauseMillis=200"
                    "-XX:TieredStopAtLevel=1"]}
 
+  ;; Platform-track (V2) JVM wire-server / datahike writer.
+  ;; Launched by the Rust host (client-runtime/host/src/main.rs) as:
+  ;;   clojure -M:writer --backend <b> --path <p> --req-sock <s> --pub-sock <s>
+  ;; from the repo root. Boots seon.server.wire/-main: owns the single
+  ;; datahike connection, serves requests over a UDS req socket, and
+  ;; broadcasts tx events over a UDS pub socket. Prints `[writer] ready`.
+  ;;
+  ;; Self-contained on purpose: the wire-server's core deps (datahike,
+  ;; transit-clj for value payloads, jackson-dataformat-cbor for the
+  ;; control envelope) are pinned here rather than relied on transitively,
+  ;; so the launch is reproducible regardless of base-dep churn. datahike
+  ;; version mirrors :test (0.8.1671). `src` + `resources` give the
+  ;; seon.server.* sources and seed resources; konserve-jdbc / sqlite-jdbc
+  ;; come from the base :deps.
+  :writer {:extra-deps {org.replikativ/datahike {:mvn/version "0.8.1671"}
+                        com.cognitect/transit-clj {:mvn/version "1.0.333"}
+                        com.fasterxml.jackson.dataformat/jackson-dataformat-cbor
+                        {:mvn/version "2.17.0"}}
+           :main-opts ["-m" "seon.server.wire"]}
+
   :build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.5"}}
           :ns-default build}
 

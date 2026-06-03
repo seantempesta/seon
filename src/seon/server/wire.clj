@@ -10,7 +10,9 @@
      strings; e, t are ints; op is bool.
 
    See PROTOCOL.md for the full surface."
-  (:require [clojure.edn :as edn]
+  (:require [clojure.core.server :as srv]
+            [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [datahike.api :as d]
             [konserve-jdbc.core]
@@ -40,6 +42,7 @@
       "--path"      (recur (assoc acc :path (second xs)) (drop 2 xs))
       "--req-sock"  (recur (assoc acc :req-sock (second xs)) (drop 2 xs))
       "--pub-sock"  (recur (assoc acc :pub-sock (second xs)) (drop 2 xs))
+      "--repl-port" (recur (assoc acc :repl-port (Long/parseLong (second xs))) (drop 2 xs))
       nil acc
       (do (println "Unknown arg:" (first xs)) (System/exit 2)))))
 
@@ -485,6 +488,29 @@
       (.start))
     server))
 
+;; ---------- Dev socket REPL ----------
+;;
+;; Opt-in diagnostic plane. OFF by default — only starts when `--repl-port N`
+;; is passed (the Rust host does NOT pass it; it's a dev-only escape hatch).
+;; Binds 127.0.0.1 ONLY (loopback) so the REPL is never reachable off-host.
+;; Writes the chosen port to a file (like the sockets) so a connecting tool
+;; can discover it. One REPL reaches the live `state` atom / conn(s).
+
+(def ^:private repl-port-file "tmp/seon-writer-repl-port")
+
+(defn- start-repl-server!
+  "Start a loopback-only Clojure socket REPL on `port`. Returns the
+   server-socket so it can be closed on shutdown."
+  [port]
+  (let [server (srv/start-server
+                {:name "seon-writer-repl"
+                 :address "127.0.0.1"
+                 :port port
+                 :accept 'clojure.core.server/repl})]
+    (spit (io/file repl-port-file) (str port))
+    (.deleteOnExit (io/file repl-port-file))
+    server))
+
 ;; ---------- Main ----------
 
 (defn -main [& args]
@@ -496,7 +522,12 @@
         pub-server (bcast/start-pub-server! (:pub-sock opts))
         _    (println "[writer] pub socket:" (:pub-sock opts))
         req-server (start-req-server! conn (:req-sock opts))
-        _    (println "[writer] req socket:" (:req-sock opts))]
-    (reset! state {:conn conn :req-server req-server :pub-server pub-server})
+        _    (println "[writer] req socket:" (:req-sock opts))
+        repl-server (when-let [p (:repl-port opts)]
+                      (let [s (start-repl-server! p)]
+                        (println "[writer] dev REPL (127.0.0.1):" p)
+                        s))]
+    (reset! state {:conn conn :req-server req-server :pub-server pub-server
+                   :repl-server repl-server})
     (println "[writer] ready. PID=" (.pid (java.lang.ProcessHandle/current)))
     (.. (Thread/currentThread) join)))
