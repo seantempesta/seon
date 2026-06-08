@@ -13,13 +13,31 @@ The current substrate is the **V0 CLJS pod** at `src/seon/*.cljs` — a long-run
 - Phase 1 (stability + accident-prevention) shipped 2026-05-20: default-deny `seon.fs` allowlist with path-traversal-proof normalization, per-form eval timeout (`seon.eval/budget` for one-shot overrides), AbortController HTTP timeout in `seon.ai.deepseek`, project-local `tmp/seon-port`, hot-reload hygiene on broadcast + agent listeners. All seon CLJS builds: **0 warnings**.
 - The CLJS sandbox layer is **NOT a security boundary** — the agent's `cljs.js` eval can mutate the `!config` atoms or `(js/require "node:fs")` directly. It catches LLM hallucinations, not adversarial code.
 
-**Where we're going (Phase 3 — alpha-blocking):**
+**Where we're going (Phase 3 — alpha-blocking) — OPEN CHOICES (2026-06-08):**
 
-WASM-Tauri containment. The seon CLJS pod runs as a `wasm32-wasip2` Component (via wasm-rquickjs) inside wasmtime, embedded in a Tauri Rust process. The capability surface is WIT-typed: `fs`, `http`, `mcp`, `capability-prompt`, `eval`. The Rust host decides what to grant. The agent's CLJS code cannot reach beyond the WIT imports — wasmtime enforces.
+Two architecture decisions are now PROVISIONAL, not settled. Don't assume the
+old answers; see `docs/prds/agent-runtime/RESUME-2026-06-08.md` ("Architecture:
+provisional choices + pivot triggers").
 
-- **Spike report (authoritative design):** `docs/seon/pod/wasm-spike-2026-05-20.md`
-- **Pod-host workspace** (Rust + WIT, imported 2026-05-20): `pod-host/wasm-tauri/`
-- **First milestone:** `cljs.js` smoke test under `wasmtime` CLI — go/no-go for the whole approach.
+- **Containment is UNDECIDED: secured-Node OR WASM.** The original plan was
+  WASM-Tauri containment (CLJS pod as a `wasm32-wasip2` Component via
+  wasm-rquickjs inside wasmtime, embedded in a Tauri Rust process; WIT-typed
+  capability surface `fs`/`http`/`mcp`/`capability-prompt`/`eval`, Rust host
+  decides grants, wasmtime enforces). That is NO LONGER certain — secured Node
+  runtimes (Node's permission model / hardened Node) are being evaluated as an
+  easier path to the same controls. Treat WASM-Tauri as one candidate, not the
+  mandate. WASM design of record (if pursued): `docs/seon/pod/wasm-spike-2026-05-20.md`;
+  workspace `pod-host/wasm-tauri/`; first milestone = `cljs.js` smoke test under `wasmtime`.
+- **datahike-cljs is PROVISIONAL.** All current V0 work runs on in-process
+  datahike-cljs. If we hit trouble ROOTED IN datahike-cljs (correctness, perf,
+  multi-conn limits, ALS-across-`await` fragility, missing features) → PIVOT,
+  don't keep pushing. Pivot target: a centralized CLJ datahike reader/writer
+  (single JVM datahike the pod talks to over the wire) — the V2 wire idea
+  reframed as a fallback adopted ON TROUBLE, not a mandated port.
+- **Multi-agent can be CLJS-ONLY** (one Node pod): per-agent `home-ns` + ALS
+  isolation, agent-scoped shared datahike-cljs DB, async-interleaved loops. The
+  JVM/WASM track is for HARD isolation + scale, NOT a prerequisite for
+  multi-agent itself.
 
 **Hard rule:** seon is the substrate. Consumer-product code (specific UI, vendor integrations, custom domain models) lives in downstream repos. No consumer-specific references in `src/`, `docs/`, or `pod-host/`.
 
@@ -27,13 +45,17 @@ WASM-Tauri containment. The seon CLJS pod runs as a `wasm32-wasip2` Component (v
 
 ## Two-platform reality (2026-05-26)
 
-Seon is mid-migration to a new sidecar architecture:
+Seon has two tracks. As of 2026-06-08 the relationship is reframed: V1 is the
+active substrate; V2 is a FALLBACK we adopt on trouble, not a mandated port (see
+the provisional-choices note above).
 
 - **V1 / MVP track**: `src/seon/*.cljs` — single-process Node CLJS pod
-  with in-process datahike-cljs. Active LLM agent work happens here.
+  with in-process datahike-cljs. Active LLM agent work happens here. This is
+  where the agent-runtime MVP is being built.
 - **V2 / Platform track**: `pod-host/sidecar-poc/` — multi-session
-  sidecar with wasm guests, JVM datahike, Transit wire. Being built
-  to replace V1 once cutover criteria are met.
+  sidecar with wasm guests, JVM datahike, Transit wire. The centralized-CLJ-
+  datahike pieces here are the PIVOT TARGET if datahike-cljs proves
+  insufficient — not an inevitability on a fixed cutover clock.
 
 If you're working on V2: read `pod-host/sidecar-poc/AGENT.md` first.
 If you're working on V1: leave `pod-host/sidecar-poc/` alone.
