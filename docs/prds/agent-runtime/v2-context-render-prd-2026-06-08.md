@@ -145,3 +145,79 @@ they are testable against the live agent — then port. Files:
   (regression test green) — context never depends on stored config.
 - No `:seon.agent/ctx` lookup is required for context to render.
 - Public fns map-in/out with registered schemas; full suite green; 0 warnings.
+
+---
+
+## Phase 2 — default namespace rendering + context layout (MVP, demo 2026-06-12)
+
+> Phase 1 (the divergence fix + caps) is DONE: commits `5f2a564`, `03d2294`,
+> `448d936`. Phase 2 builds the DEFAULT context every agent gets — efficient
+> namespace rendering + a static→dynamic layout — so a fresh agent dropped in a
+> near-empty namespace operates from its REQUIRED namespaces' rendered context.
+> Agents do NOT manage their own context yet (per-agent override is a later
+> phase); we ship ONE good default in `seon.agent` for all agents.
+
+### Principles (user, 2026-06-08)
+
+- **Default now, override later.** One good default in `seon.agent`.
+- **Order most-static → most-dynamic** (prompt-cache friendly).
+- **Agents don't fiddle with context** — they `require` what they need, we
+  re-render those namespaces next turn, it's just there. They focus on working.
+- **No invented verbs.** It's a REPL: `(result <id>)` returns the value; agents
+  use normal Clojure (`get-in`/`filter`/…) to inspect. Custom
+  `seon.db/query`/`pull` is for novel USER questions (no existing fn) —
+  clip-guarded.
+- **They are a ClojureSCRIPT agent in a Node pod**, not JVM Clojure — say so +
+  flag platform-access differences (`js/` interop, node requires, no `java.*`).
+
+### The context layout (static → dynamic)
+
+| # | Section | Source | Cache |
+| --- | --- | --- | --- |
+| 1 | System prompt | CLJS-in-Node + conventions + REPL contract | static |
+| 2 | Capabilities | core API worked examples (call → result → recovery) | static |
+| 3 | Namespace context | `render-namespace` of required nses (depth 1, prepended) + own ns | mostly static (busts on ns edit) |
+| 4 | Transcript | messages+evals interleaved; user input as REPL events | dynamic |
+| 5 | Prompt line | `seon.agent.<id>=> ; turn N` | always changing |
+
+`root-pull` DELETED. `current-turn`/`current-session` sections folded into the
+prompt line (a REPL already shows your ns; only the turn count changes).
+
+### `render-namespace` — the foundational fn (`seon.agent`)
+
+`(render-namespace {:seon.ns/name <kw> :seon.render/depth <int=1> :seon.render/format :ai|:html}) → text|hiccup`
+
+- Renders: ns source + each `:seon.fn` (sym, arglist, doc) + each `:seon.schema`
+  (key, form) + each `:seon.test`, grouped + readable.
+- **Recursive on requires:** parse the ns's `(:require …)`, render required nses
+  FIRST (prepended, so references resolve), to `:depth` (default 1). Dedup,
+  bound depth.
+- **AI (text) + HTML (hiccup)** forms. Reuse the per-kind renders where sensible;
+  surfaces the missing `:seon.test` kind.
+- Bounded per-member; the clip guardrail (T7) backstops.
+
+### Default verbs (composable, bounded — `seon.agent`)
+
+`agent-entity` (own scalar attrs), `messages {:n}`, `evals {:n}` (clipped result
+inline), `current-turn`/`current-session`/`current-ns`, `result <id>` (live
+value; drill with normal Clojure). NO `root-pull`, NO `probe`.
+
+### Work cycle (toward 2026-06-12) — serialize (all touch `agent.cljs`)
+
+- **T4** `render-namespace` (AI+HTML, recursive requires) — DEMO-CRITICAL, foundation
+- **T5** context reorg + transcript + prompt line + DELETE `root-pull` — DEMO-CRITICAL
+- **T6** system-prompt rewrite (CLJS-in-Node + motivated examples, no "DO NOT" blocks) — DEMO-CRITICAL
+- **T7** clip guardrail on `query`/`pull`/eval output (guiding messages) — DEMO-CRITICAL (stability)
+- **T8** demo loop: fs → shared read-only folder, drive a fresh agent from the webview end-to-end — DEMO-CRITICAL
+- **T9** `:seon.test` entity kind + render; (later) per-agent context override — DEFERRED
+
+Each step: implement (`seon-agent`) → verify live → commit.
+
+### Demo definition (2026-06-12)
+
+A fresh single agent boots into its namespace, receives rich default context
+(system + capabilities + its required namespaces rendered + transcript), is
+driven by typing in the webview, explores a shared read-only folder + composes a
+DB query for a question we didn't pre-build a function for, and we watch its
+`:seon.render/ai` + `:seon.render/html` views update live — stable, no
+OOM/flood.
