@@ -1,7 +1,7 @@
 (ns seon.agent-context-test
   "Guard tests for the context-render refactor (context-refactor-spec
-   2026-06-08). These pin the invariants that the prior live bug
-   violated:
+   2026-06-08) + the api-discoverability fix (capabilities-section).
+   These pin the invariants that the prior live bugs violated:
 
      (a) an agent with NO stored `:seon.agent/ctx` still gets the FULL
          default context — the regression that started this. Context is
@@ -11,9 +11,9 @@
          (`inspect/ctx-preview`) ≡ the would-be persisted
          `:seon.turn/prompt-text` for the same (db,id) — ONE composer,
          divergence impossible.
-     (c) each of the six section fns renders non-blank given seeded
-         data (would have caught `current-ns-section` silently
-         returning \"\" when data IS present).
+     (c) each section fn renders non-blank given seeded data (would have
+         caught `current-ns-section` silently returning \"\" when data
+         IS present).
      (d) the composed context contains the section markers when the
          underlying sections have content.
      (e) bounded-context guard — a single eval with a multi-MB result
@@ -21,6 +21,10 @@
          (and therefore `render-prompt`) stays under a sane bound. This
          is the context-SAFETY invariant: no single entity may dominate
          the context.
+     (f) capabilities-section — the `## What you can do` worked-examples
+         block is in the default ctx, renders the map-in call shapes, and
+         is DERIVED from the persisted core `:seon.fn` arglists (not a
+         hardcoded blob).
 
    All tests open a FRESH `:memory` datahike conn (via
    `seon.client/open-agent-conn!`, the same boot helper the pod uses)
@@ -54,57 +58,66 @@
    turns. Turn 1: a user message + a FAILED eval (drives warnings).
    Turn 2: a successful eval in ns `:seon.agent.ctxtest` plus a
    `:seon.ns`/`:seon.fn` for that ns (drives current-ns). `extra-evals`
-   lets a test append big-result evals to turn 2."
+   lets a test append big-result evals to turn 2.
+
+   The curated core-fn `:seon.ns`/`:seon.fn` rows
+   (`seon.client/seed-core-fns!`) are appended INTO the same tx-vector —
+   the SAME data the pod seeds at boot — so `capabilities-section` has
+   the persisted entities it derives the `## What you can do` block from
+   (no parallel hardcoded fixture)."
   [extra-evals]
   (let [now (js/Date.)
         t   (fn [ms] (js/Date. (+ (.getTime now) ms)))]
-    [{:seon.agent/id agent-id
-      :seon.agent/state :idle
-      :seon.agent/sessions
-      [{:seon.session/id "SESctxtest0001"
-        :seon.session/at (t 0)
-        :seon.session/turns
-        [{:seon.turn/id "TRNctxtest0001"
-          :seon.turn/at (t 10)
-          :seon.turn/status :done
-          :seon.turn/messages
-          [{:seon.message/id "MSGctxtest0001"
-            :seon.message/role :user
-            :seon.message/content "build me a thing"
-            :seon.message/agent [:seon.agent/id agent-id]
-            :seon.message/at (t 11)}
-           {:seon.message/id "MSGctxtest0002"
-            :seon.message/role :assistant
-            :seon.message/content "on it"
-            :seon.message/agent [:seon.agent/id agent-id]
-            :seon.message/at (t 12)}]
-          :seon.turn/evals
-          [{:seon.eval/id "EVLctxtestF001"
-            :seon.eval/at (t 13)
-            :seon.eval/duration-ms 5
-            :seon.eval/source "(seon.db/query [:bad])"
-            :seon.eval/ok? false
-            :seon.eval/error "boom — bad query"
-            :seon.eval/ns :seon.agent.ctxtest}]}
-         {:seon.turn/id "TRNctxtest0002"
-          :seon.turn/at (t 20)
-          :seon.turn/status :done
-          :seon.turn/evals
-          (into [{:seon.eval/id "EVLctxtestK001"
-                  :seon.eval/at (t 21)
-                  :seon.eval/duration-ms 3
-                  :seon.eval/source "(defn greet [] :hi)"
-                  :seon.eval/ok? true
-                  :seon.eval/result-edn "#'seon.agent.ctxtest/greet"
-                  :seon.eval/ns :seon.agent.ctxtest}]
-                extra-evals)}]}]}
-     ;; Program-graph entities for the agent's current ns so
-     ;; current-ns-section has source to render.
-     {:seon.ns/name :seon.agent.ctxtest
-      :seon.ns/source "(ns seon.agent.ctxtest)"}
-     {:seon.fn/sym "seon.agent.ctxtest/greet"
-      :seon.fn/ns [:seon.ns/name :seon.agent.ctxtest]
-      :seon.fn/source "(defn greet [] :hi)"}]))
+    (into
+      [{:seon.agent/id agent-id
+        :seon.agent/state :idle
+        :seon.agent/sessions
+        [{:seon.session/id "SESctxtest0001"
+          :seon.session/at (t 0)
+          :seon.session/turns
+          [{:seon.turn/id "TRNctxtest0001"
+            :seon.turn/at (t 10)
+            :seon.turn/status :done
+            :seon.turn/messages
+            [{:seon.message/id "MSGctxtest0001"
+              :seon.message/role :user
+              :seon.message/content "build me a thing"
+              :seon.message/agent [:seon.agent/id agent-id]
+              :seon.message/at (t 11)}
+             {:seon.message/id "MSGctxtest0002"
+              :seon.message/role :assistant
+              :seon.message/content "on it"
+              :seon.message/agent [:seon.agent/id agent-id]
+              :seon.message/at (t 12)}]
+            :seon.turn/evals
+            [{:seon.eval/id "EVLctxtestF001"
+              :seon.eval/at (t 13)
+              :seon.eval/duration-ms 5
+              :seon.eval/source "(seon.db/query [:bad])"
+              :seon.eval/ok? false
+              :seon.eval/error "boom — bad query"
+              :seon.eval/ns :seon.agent.ctxtest}]}
+           {:seon.turn/id "TRNctxtest0002"
+            :seon.turn/at (t 20)
+            :seon.turn/status :done
+            :seon.turn/evals
+            (into [{:seon.eval/id "EVLctxtestK001"
+                    :seon.eval/at (t 21)
+                    :seon.eval/duration-ms 3
+                    :seon.eval/source "(defn greet [] :hi)"
+                    :seon.eval/ok? true
+                    :seon.eval/result-edn "#'seon.agent.ctxtest/greet"
+                    :seon.eval/ns :seon.agent.ctxtest}]
+                  extra-evals)}]}]}
+       ;; Program-graph entities for the agent's current ns so
+       ;; current-ns-section has source to render.
+       {:seon.ns/name :seon.agent.ctxtest
+        :seon.ns/source "(ns seon.agent.ctxtest)"}
+       {:seon.fn/sym "seon.agent.ctxtest/greet"
+        :seon.fn/ns [:seon.ns/name :seon.agent.ctxtest]
+        :seon.fn/source "(defn greet [] :hi)"}]
+      ;; the curated core-fn :seon.ns + :seon.fn rows (drives capabilities)
+      (client/seed-core-fns! nil))))
 
 (defn- with-seeded-conn
   "Open a fresh conn, seed it (optionally with `extra-evals` on turn 2),
@@ -150,9 +163,11 @@
                   (agent/assemble-context {:seon.db/db db :seon.agent/id agent-id})]
               (is (pos? (count text))
                   "no :seon.agent/ctx → STILL non-empty (code default, not 0)")
-              (is (= [:system :messages :current-ns :warnings :recent-evals :prompt]
+              (is (= [:system :capabilities :messages :current-ns
+                      :warnings :recent-evals :prompt]
                      sections)
-                  "the six substrate-default section names, in order"))))
+                  "the substrate-default section names, in order — :capabilities
+                   slots right after :system"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -191,7 +206,7 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ---------------------------------------------------------------------------
-;; (c) Each of the six section fns renders non-blank given seeded data.
+;; (c) Each section fn renders non-blank given seeded data.
 ;; ---------------------------------------------------------------------------
 
 (deftest each-section-renders-non-blank
@@ -201,6 +216,8 @@
             (let [db    @conn
                   input {:seon.db/db db :seon.agent/id agent-id}]
               (is (not (str/blank? (agent/system-section input))) "system")
+              (is (not (str/blank? (agent/capabilities-section input)))
+                  "capabilities — non-blank because core :seon.fn rows are seeded")
               (is (not (str/blank? (agent/messages-section input))) "messages")
               (is (not (str/blank? (agent/current-ns-section input)))
                   "current-ns — non-blank because a :seon.ns + :seon.fn exist")
@@ -231,6 +248,54 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ---------------------------------------------------------------------------
+;; (f) capabilities-section — the "## What you can do" worked-examples block.
+;;     Guards the api-discoverability bug: the section must be in the default
+;;     ctx, render the map-in call shapes, and be DERIVED from the persisted
+;;     core :seon.fn arglists (not a hardcoded blob).
+;; ---------------------------------------------------------------------------
+
+(deftest substrate-default-ctx-includes-capabilities-after-system
+  (let [names (mapv :seon.ctx/name (agent/substrate-default-ctx))]
+    (is (some #{:capabilities} names)
+        "substrate-default-ctx contains the :capabilities section")
+    (is (= [:system :capabilities]
+           (vec (take 2 names)))
+        ":capabilities renders right after :system (priority 15)")))
+
+(deftest capabilities-section-renders-worked-call-shapes
+  (async done
+    (-> (with-seeded-conn
+          (fn [conn]
+            (let [db    @conn
+                  input {:seon.db/db db :seon.agent/id agent-id}
+                  cap   (agent/capabilities-section input)
+                  ;; the WHOLE assembled context, not just the section,
+                  ;; so we prove the worked shapes reach the agent.
+                  full  (:seon.render/text
+                          (agent/assemble-context
+                            {:seon.db/db db :seon.agent/id agent-id}))]
+              (is (not (str/blank? cap)) "capabilities-section non-blank")
+              (is (str/includes? full "## What you can do")
+                  "the promised heading is present in assembled context")
+              ;; map-in shapes — the exact mistakes we observed live.
+              (is (str/includes? full ":seon.db/tx-data")
+                  "transact! map-in key shown — positional call impossible")
+              (is (str/includes? full "(seon.db/query {")
+                  "query shown as map-in, not positional")
+              (is (str/includes? full "(seon.db/current-agent-id)")
+                  "current-agent-id shown — no seon.agent/current-agent-id guess")
+              ;; DERIVED from persisted :seon.fn arglists, not hardcoded:
+              ;; the rendered text must contain the real arglist string from
+              ;; the seeded entity (the map-in destructure).
+              (is (str/includes? cap "[tx-data opts conn]")
+                  "transact! arglist comes from the persisted :seon.fn entity")
+              ;; bounded — the section is the curated core API only, not a dump.
+              (is (< (count cap) 4000)
+                  (str "capabilities-section bounded — got " (count cap))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
 ;; (e) Bounded-context guard — one huge eval result does NOT blow context.
 ;; ---------------------------------------------------------------------------
 
@@ -245,7 +310,7 @@
                             {:seon.db/db db :seon.agent/id agent-id})
                     full  (agent/render-prompt agent-id)
                     ;; Comfortable ceiling: a handful of capped rows +
-                    ;; the other five sections. Far below the 5 MB blob.
+                    ;; the other sections. Far below the 5 MB blob.
                     ceil  50000]
                 (is (< (count re) ceil)
                     (str "recent-evals bounded despite " big-n

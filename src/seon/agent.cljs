@@ -1125,6 +1125,80 @@
          "    (seon.agent/reset-ctx! id)   ; restore substrate defaults\n"
          "</system>")))
 
+;; ------------------------------------------------------------
+;; capabilities-section — the "## What you can do" worked-examples
+;; block the system-prompt sticky promises. DERIVED, never hardcoded:
+;; the core seon.db API fns are persisted as :seon.fn entities
+;; (seeded by seon.client/seed-core-fns!), each carrying the real
+;; :seon.fn/sym + :seon.fn/arglists + :seon.fn/doc. We render those
+;; rows so the agent sees the exact MAP-IN call shape — the mistake
+;; we observed (calling transact!/query positionally, hallucinating
+;; seon.agent/current-agent-id) becomes impossible to make from
+;; context. Bounded: the curated core API only (~5 fns), NOT every
+;; registered :seon.fn — never the unbounded fn dump.
+;; ------------------------------------------------------------
+
+;; Render order + which core fns appear. These are exactly the syms
+;; seon.client/seed-core-fns! persists; we pull them by identity so
+;; the rendered shape is the SAME data the agent reads via
+;; (seon.db/pull [:seon.fn/sym …]) — one source, no divergence.
+(def ^:private capability-syms
+  ["seon.db/transact!"
+   "seon.db/query"
+   "seon.db/pull"
+   "seon.db/entity"
+   "seon.db/current-agent-id"])
+
+(defn- first-doc-line
+  "First non-blank line of a docstring — the one-liner for the
+   capabilities cheat-sheet. Full doc stays on the :seon.fn entity."
+  [doc]
+  (->> (str/split-lines (or doc ""))
+       (map str/trim)
+       (remove str/blank?)
+       first))
+
+(defn capabilities-section
+  "Render the `## What you can do` block the system-prompt sticky
+   promises. DERIVED from the persisted core `:seon.fn` entities —
+   each fn's `:seon.fn/sym` + `:seon.fn/arglists` (the map-in shape) +
+   a one-line `:seon.fn/doc`. Includes one fully-worked `transact!`
+   example so the positional-call mistake is impossible to make from
+   context. Bounded to the curated core API (`capability-syms`)."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [{:seon.db/keys [db]}]
+  (let [rows  (->> capability-syms
+                   (keep (fn [sym]
+                           (let [e (db/entity {:seon.db/db db
+                                               :seon.db/ref [:seon.fn/sym sym]})]
+                             (when e
+                               {:sym      (:seon.fn/sym e)
+                                :arglists (:seon.fn/arglists e)
+                                :doc      (first-doc-line (:seon.fn/doc e))})))))
+        lines (for [{:keys [sym arglists doc]} rows]
+                (str "  (" sym " " arglists ")"
+                     (when (seq doc) (str "\n      ; " doc))))]
+    (if (seq rows)
+      (str "## What you can do\n\n"
+           "These are the core APIs. EVERY one is MAP-IN: you pass ONE\n"
+           "map with fully-namespaced keys, never positional args.\n\n"
+           (str/join "\n" lines)
+           "\n\n"
+           "Worked example — reply to the user AND save a fact in one tx\n"
+           "(note :seon.db/tx-data is a VECTOR of entity maps):\n\n"
+           "  (seon.db/transact!\n"
+           "    {:seon.db/tx-data\n"
+           "     [{:seon.message/id      (seon.db/new-id!)\n"
+           "       :seon.message/role    :assistant\n"
+           "       :seon.message/content \"on it — here's what I found\"\n"
+           "       :seon.message/agent   [:seon.agent/id (seon.db/current-agent-id)]\n"
+           "       :seon.message/at      (js/Date.)}]})\n\n"
+           "  (seon.db/query {:seon.db/query\n"
+           "                  '[:find ?content\n"
+           "                    :where [?m :seon.message/role :user]\n"
+           "                           [?m :seon.message/content ?content]]})")
+      "")))
+
 (defn messages-section
   "Recent user/assistant conversation. Reads :seon.agent/n from the
    ctx-entity if present, else defaults to 50."
@@ -1392,11 +1466,15 @@
 ;; ------------------------------------------------------------
 
 (defn substrate-default-ctx
-  "The six default :seon.ctx maps that ship with every fresh agent
-   (v1.md §5.2). Smallest priority first."
+  "The default :seon.ctx maps that ship with every fresh agent
+   (v1.md §5.2). Smallest priority first. `:capabilities` (the
+   `## What you can do` worked-examples block) renders right after
+   `:system` so the agent sees the core map-in call shapes up front."
   []
   [{:seon.ctx/name :system       :seon.ctx/priority 10
     :seon.ctx/fn   'seon.agent/system-section}
+   {:seon.ctx/name :capabilities :seon.ctx/priority 15
+    :seon.ctx/fn   'seon.agent/capabilities-section}
    {:seon.ctx/name :messages     :seon.ctx/priority 20
     :seon.ctx/fn   'seon.agent/messages-section}
    {:seon.ctx/name :current-ns   :seon.ctx/priority 30

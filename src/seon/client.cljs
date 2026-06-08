@@ -621,9 +621,17 @@ never throws into agent eval."}
     :doc "Datalog `:find` query against `@*conn*`. Map-in, map-out.
 Returns `{:seon.db/ok? true :seon.db/rows <set>}` or an error envelope."}
    {:sym 'seon.db/pull
-    :arglists "([{:seon.db/keys [pattern eid] :as arg}])"
-    :doc "Datahike pull against `@*conn*`. Map-in, map-out.
-Returns `{:seon.db/ok? true :seon.db/entity <map>}` or an error envelope."}
+    :arglists "([{:seon.db/keys [pull-pattern ref] :as arg}])"
+    :doc "Datahike pull by ref using the given pull pattern. Map-in, map-out.
+Returns the pulled entity map, or nil if `:seon.db/ref` doesn't resolve."}
+   {:sym 'seon.db/entity
+    :arglists "([{:seon.db/keys [ref] :as arg}])"
+    :doc "Look up an entity by eid or lookup-ref. Map-in. Returns a
+datahike entity (lazy map-like), or nil if `:seon.db/ref` doesn't resolve."}
+   {:sym 'seon.db/current-agent-id
+    :arglists "([])"
+    :doc "Return the active agent-id (string) for the current turn. Zero-arg.
+The substrate binds it for the duration of your turn."}
    {:sym 'seon.schema/register!
     :arglists "([k v])"
     :doc "Register a Malli schema in the global registry. Returns the

@@ -89,6 +89,11 @@ INCORRECT (do not do this):
     (defn square [x] (* x x))
     ```
 
+Do NOT use inline backticks (`) in narration either — a backtick is
+the syntax-quote reader macro, so prose like `:some/keyword` makes the
+reader throw \"Invalid character: ` found while reading keyword\". Write
+keywords and code plainly in comments: ;; the :seon.db/tx-data key.
+
 Use `;` line comments for narration. Each contiguous block of
 `;` comments is associated with the form that follows; every form
 is evaluated in your personal namespace (shown at the top of every
