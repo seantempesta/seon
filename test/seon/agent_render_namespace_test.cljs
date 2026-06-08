@@ -1,0 +1,232 @@
+(ns seon.agent-render-namespace-test
+  "Tests for `seon.agent/render-namespace` (v2-context-render PRD Phase 2,
+   T4) — the foundational whole-namespace render that becomes the core of
+   every agent's default context.
+
+   `render-namespace` renders ONE namespace (its `(ns …)` source + every
+   `:seon.fn` / `:seon.schema` / `:seon.test` it owns) in either `:ai`
+   text or `:html` hiccup, recursing into the namespaces it `(:require …)`s.
+   These tests pin the contract:
+
+     - both formats render non-blank, with fn syms + arglists + schema keys
+     - depth 1 PREPENDS a required ns's content before the requiring ns
+     - depth 0 = just the ns; high depth + a cycle does NOT infinite-loop
+       (each ns rendered exactly once)
+     - a required ns with no `:seon.ns` entity is NOTED, not errored
+     - :ai → string under `:seon.render/text`; :html → hiccup vector under
+       `:seon.render/hiccup`
+
+   All tests open a FRESH `:memory` datahike conn (via
+   `seon.client/open-agent-conn!`, the same boot helper the pod uses) and
+   seed `:seon.ns` / `:seon.fn` / `:seon.schema` rows directly — nothing
+   here touches the live agent.
+
+   Run interactively via MCP eval:
+     (require 'seon.agent-render-namespace-test :reload)
+     (cljs.test/run-tests 'seon.agent-render-namespace-test)"
+  (:require
+    [clojure.string :as str]
+    [cljs.test :as t :refer [deftest is testing async]]
+    [seon.agent :as agent]
+    [seon.client :as client]
+    [seon.db :as db]
+    [seon.render :as render]))
+
+;; ---------------------------------------------------------------------------
+;; Fixture — fresh conn seeded with a small ns graph:
+;;   test.parent  — a fn (greet) + a schema (:test.parent/name), no requires
+;;   test.child   — requires [test.parent] and [test.missing] (the latter has
+;;                  NO :seon.ns entity, so it must be NOTED not errored)
+;;   cyc.a / cyc.b — require each other (cycle guard)
+;; The seed is one tx; tests pick the ns they care about.
+;; ---------------------------------------------------------------------------
+
+(def ^:private seed-tx
+  [{:seon.ns/name :test.parent
+    :seon.ns/source "(ns test.parent)"}
+   {:seon.fn/sym "test.parent/greet"
+    :seon.fn/ns [:seon.ns/name :test.parent]
+    :seon.fn/arglists "([x])"
+    :seon.fn/doc "Greets x with a friendly prefix."
+    :seon.fn/source "(defn greet [x] (str \"hi \" x))"
+    :seon.fn/private? false
+    :seon.fn/specced? false}
+   {:seon.schema/key :test.parent/name
+    :seon.schema/ns [:seon.ns/name :test.parent]
+    :seon.schema/source "(seon.schema/register! :test.parent/name :string)"}
+   {:seon.ns/name :test.child
+    :seon.ns/source
+    "(ns test.child (:require [test.parent :as p] [test.missing :as m]))"}
+   {:seon.ns/name :cyc.a
+    :seon.ns/source "(ns cyc.a (:require [cyc.b]))"}
+   {:seon.ns/name :cyc.b
+    :seon.ns/source "(ns cyc.b (:require [cyc.a]))"}])
+
+(defn- with-seeded-conn
+  "Open a fresh conn, seed the ns graph, and run `body` (1-arg `conn`)
+   with `db/*conn*` bound for the SYNC extent of `body` (so a
+   `render-namespace` call with no explicit `:seon.db/db` still resolves
+   a conn). Returns a Promise."
+  [body]
+  (-> (client/open-agent-conn!)
+      (.then (fn [conn]
+               (binding [db/*conn* conn]
+                 (-> (db/transact! {:seon.db/tx-data seed-tx})
+                     (.then (fn [_]
+                              (binding [db/*conn* conn]
+                                (body conn))))))))))
+
+;; ---------------------------------------------------------------------------
+;; :ai form — renders the ns + its members, non-blank, with the right shapes.
+;; ---------------------------------------------------------------------------
+
+(deftest ai-render-of-ns-lists-fns-and-schemas
+  (async done
+    (-> (with-seeded-conn
+          (fn [conn]
+            (let [db   @conn
+                  res  (agent/render-namespace
+                         {:seon.db/db db :seon.ns/name :test.parent
+                          :seon.render/depth 0 :seon.render/format :ai})
+                  text (:seon.render/text res)]
+              (is (string? text) ":ai form is a string")
+              (is (pos? (count text)) "non-blank")
+              (is (str/includes? text "test.parent/greet") "fn sym present")
+              (is (str/includes? text "(test.parent/greet [x])") "fn signature present")
+              (is (str/includes? text "Greets x") "fn doc present")
+              (is (str/includes? text ":test.parent/name") "schema key present")
+              (is (str/includes? text "<namespace name=\"test.parent\">")
+                  "ns wrapper marker present"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; :html form — hiccup vector, valid, mentions the fn sym.
+;; ---------------------------------------------------------------------------
+
+(deftest html-render-of-ns-is-valid-hiccup
+  (async done
+    (-> (with-seeded-conn
+          (fn [conn]
+            (let [db     @conn
+                  res    (agent/render-namespace
+                           {:seon.db/db db :seon.ns/name :test.parent
+                            :seon.render/depth 0 :seon.render/format :html})
+                  hiccup (:seon.render/hiccup res)]
+              (is (vector? hiccup) ":html form is a hiccup vector")
+              (is (= :div (first hiccup)) "outer container is a :div")
+              (is (render/valid-hiccup? hiccup) "passes valid-hiccup?")
+              (is (str/includes? (pr-str hiccup) "test.parent/greet")
+                  "fn sym appears somewhere in the hiccup"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; Depth 1 — a required ns's content is PREPENDED before the requiring ns.
+;; ---------------------------------------------------------------------------
+
+(deftest depth-1-prepends-required-ns
+  (async done
+    (-> (with-seeded-conn
+          (fn [conn]
+            (let [db   @conn
+                  text (:seon.render/text
+                         (agent/render-namespace
+                           {:seon.db/db db :seon.ns/name :test.child
+                            :seon.render/depth 1 :seon.render/format :ai}))
+                  parent-at (.indexOf text "name=\"test.parent\"")
+                  child-at  (.indexOf text "name=\"test.child\"")]
+              (is (str/includes? text "name=\"test.parent\"")
+                  "required ns rendered")
+              (is (str/includes? text "name=\"test.child\"")
+                  "requiring ns rendered")
+              (is (str/includes? text "test.parent/greet")
+                  "required ns's fn brought into view")
+              (is (and (>= parent-at 0) (< parent-at child-at))
+                  "required ns is PREPENDED before the requiring ns"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; Depth 0 — just the ns itself, no requires followed.
+;; ---------------------------------------------------------------------------
+
+(deftest depth-0-renders-only-the-ns
+  (async done
+    (-> (with-seeded-conn
+          (fn [conn]
+            (let [db   @conn
+                  text (:seon.render/text
+                         (agent/render-namespace
+                           {:seon.db/db db :seon.ns/name :test.child
+                            :seon.render/depth 0 :seon.render/format :ai}))]
+              (is (str/includes? text "name=\"test.child\"") "the ns itself renders")
+              (is (not (str/includes? text "name=\"test.parent\""))
+                  "depth 0 does NOT render the required parent BLOCK")
+              (is (not (str/includes? text "test.parent/greet"))
+                  "depth 0 does NOT pull the parent's fns"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; Missing required ns — noted on one line, not errored.
+;; ---------------------------------------------------------------------------
+
+(deftest missing-required-ns-is-noted-not-errored
+  (async done
+    (-> (with-seeded-conn
+          (fn [conn]
+            (let [db   @conn
+                  text (:seon.render/text
+                         (agent/render-namespace
+                           {:seon.db/db db :seon.ns/name :test.child
+                            :seon.render/depth 1 :seon.render/format :ai}))]
+              (is (str/includes? text "test.missing (not in db)")
+                  "a required ns with no :seon.ns entity is NOTED, not errored")
+              (is (str/includes? text "name=\"test.child\"")
+                  "rendering still completes for the requiring ns"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; Cycle — mutual requires at high depth render each ns exactly once.
+;; ---------------------------------------------------------------------------
+
+(deftest mutual-require-cycle-renders-each-ns-once
+  (async done
+    (-> (with-seeded-conn
+          (fn [conn]
+            (let [db    @conn
+                  text  (:seon.render/text
+                          (agent/render-namespace
+                            {:seon.db/db db :seon.ns/name :cyc.a
+                             :seon.render/depth 10 :seon.render/format :ai}))
+                  ;; count whole-ns block markers
+                  occ   (fn [sub] (count (re-seq (re-pattern sub) text)))]
+              (is (= 1 (occ "name=\\\"cyc.a\\\"")) "cyc.a rendered exactly once")
+              (is (= 1 (occ "name=\\\"cyc.b\\\"")) "cyc.b rendered exactly once")
+              (is (< (count text) 2000)
+                  "bounded — the cycle did not blow up the render"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; Default depth (1) — when :seon.render/depth is omitted, requires ARE
+;; followed one level (the agent-context use case: dropped into a near-empty
+;; ns that requires a parent, the parent's content is just there).
+;; ---------------------------------------------------------------------------
+
+(deftest default-depth-follows-requires-one-level
+  (async done
+    (-> (with-seeded-conn
+          (fn [conn]
+            (let [db   @conn
+                  text (:seon.render/text
+                         (agent/render-namespace
+                           {:seon.db/db db :seon.ns/name :test.child}))]
+              (is (str/includes? text "name=\"test.parent\"")
+                  "default depth 1 follows requires one level")
+              (is (str/includes? text "test.parent/greet")
+                  "the required ns's fns are in view by default"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))

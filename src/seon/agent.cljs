@@ -97,6 +97,9 @@
     [seon.db :as db]
     [seon.error.instrument :as einstrument]
     [seon.eval :as seval]
+    [seon.handlers.fn :as h-fn]
+    [seon.handlers.ns :as h-ns]
+    [seon.handlers.schema :as h-schema]
     [seon.log :as seon-log]
     [seon.render :as render]
     [seon.repl :as repl]
@@ -1244,6 +1247,279 @@
            (str/join "\n\n" parts)
            "\n</current-namespace>")
       "")))
+
+;; ============================================================
+;; render-namespace — the foundational whole-namespace render.
+;;
+;; Renders ONE namespace (ns source + its fns + schemas + tests) in
+;; either :ai text or :html hiccup, recursing into the namespaces it
+;; `(:require …)`s. Required nses render FIRST (prepended) so that, read
+;; top-to-bottom, a reference resolves before its use. The default
+;; context an agent receives is built from this: drop an agent into a
+;; near-empty ns that requires a parent agent ns, and depth-1 brings the
+;; parent's fns/schemas into view.
+;;
+;; Pure function of the DB — stores nothing. Per-member output is bounded
+;; here (signature + doc by default, full source only for small fns); the
+;; clip guardrail is a later backstop, not a crutch.
+;; ============================================================
+
+(def ^:private fn-source-inline-threshold
+  "Fns whose `:seon.fn/source` is at or under this many chars render
+   their full source in the :ai form; larger fns show signature + doc
+   only. Keeps a whole-ns render bounded to a few KB."
+  240)
+
+(def ^:private member-doc-clip
+  "Max chars of a fn docstring surfaced per member in the :ai form."
+  280)
+
+(defn- clip
+  "Clip `s` to `n` chars with an ellipsis marker. nil-safe."
+  [s n]
+  (let [s (str s)]
+    (if (> (count s) n) (str (subs s 0 n) " …") s)))
+
+(defn- parse-require-syms
+  "Parse an `(ns … (:require …))` source string and return the vector of
+   required namespace symbols (in declaration order, deduped). Handles
+   bare-symbol specs (`a.b`) and vector specs (`[a.b :as c :refer […]]`).
+   Returns [] on any parse failure or when there's no `(ns …)` form —
+   recursion simply stops rather than erroring."
+  [src]
+  (if (or (nil? src) (str/blank? src))
+    []
+    (try
+      (let [form (edn/read-string src)]
+        (if (and (seq? form) (= 'ns (first form)))
+          (->> (rest form)
+               (filter #(and (seq? %) (= :require (first %))))
+               (mapcat rest)
+               (keep (fn [spec]
+                       (cond
+                         (symbol? spec)     spec
+                         (sequential? spec) (first spec)
+                         :else              nil)))
+               (filter symbol?)
+               distinct
+               vec)
+          []))
+      (catch :default _ []))))
+
+(defn- pull-ns-data
+  "Reverse-ref pull of everything one `:seon.ns` owns: its source plus
+   every `:seon.fn` / `:seon.schema` / `:seon.test` whose `:ns` points at
+   it. Returns nil when no `:seon.ns` entity exists for `ns-kw` (the
+   caller renders a one-line 'not in db' note instead). `:seon.test` is a
+   deferred entity kind — the pull simply yields nil for it until it
+   ships, and the render skips cleanly.
+
+   Guarded by an `entity` existence check first: `db/pull` throws on an
+   unresolved lookup-ref, so we confirm presence before pulling."
+  [db ns-kw]
+  (when (db/entity {:seon.db/db db :seon.db/ref [:seon.ns/name ns-kw]})
+    (let [core (db/pull {:seon.db/db db
+                         :seon.db/ref [:seon.ns/name ns-kw]
+                         :seon.db/pull-pattern
+                         '[:seon.ns/source
+                           {:seon.fn/_ns     [:seon.fn/sym :seon.fn/arglists
+                                              :seon.fn/doc :seon.fn/source
+                                              :seon.fn/private? :seon.fn/specced?
+                                              :seon.fn/schema-error]
+                            :seon.schema/_ns [:seon.schema/key :seon.schema/source]}]})
+          ;; :seon.test is a deferred entity kind (T9). Pull it in a
+          ;; SEPARATE guarded call: a reverse-ref pull on `:seon.test/_ns`
+          ;; throws when `:seon.test/ns` isn't in the conn's schema (which
+          ;; it isn't yet). Skip cleanly when absent; merge in when present.
+          tests (try
+                  (-> (db/pull {:seon.db/db db
+                                :seon.db/ref [:seon.ns/name ns-kw]
+                                :seon.db/pull-pattern
+                                '[{:seon.test/_ns [:seon.test/sym :seon.test/source]}]})
+                      :seon.test/_ns)
+                  (catch :default _ nil))]
+      (cond-> core
+        (seq tests) (assoc :seon.test/_ns tests)))))
+
+(defn- fn-block-ai
+  "One fn rendered for the :ai form: `(sym arglists)` header, clipped
+   doc, and full source only when small. Reuses the conventional
+   signature shape via `seon.handlers.fn/render-ai` is overkill here
+   (that fn also runs test-status queries); we render flat + bounded."
+  [{:seon.fn/keys [sym arglists doc source private? specced? schema-error]}]
+  (let [sig    (when (and arglists (not (str/blank? arglists)))
+                 (let [a (str/trim arglists)]
+                   (if (and (str/starts-with? a "(") (str/ends-with? a ")"))
+                     (str "(" sym " " (subs a 1 (dec (count a))) ")")
+                     (str "(" sym " " a ")"))))
+        flags  (cond-> []
+                 private?      (conj ":private")
+                 (not specced?) (conj ":unspecced")
+                 schema-error  (conj (str ":schema-error " (clip schema-error 80))))
+        header (str "[fn " sym "]"
+                    (when sig (str "  " sig))
+                    (when (seq flags) (str "  " (str/join " " flags))))
+        small? (and source (<= (count source) fn-source-inline-threshold))
+        lines  (cond-> [header]
+                 (and doc (not (str/blank? doc)))
+                 (conj (str ";; " (clip (first (str/split-lines doc)) member-doc-clip)))
+                 small?
+                 (conj (str/trim source)))]
+    (str/join "\n" lines)))
+
+(defn- schema-block-ai
+  "One schema rendered for the :ai form: `[schema :ns/key]  <malli form>`.
+   Pulls the live shape from the registry; falls back to the persisted
+   `:seon.schema/source` when the registry has no entry."
+  [{:seon.schema/keys [key source]}]
+  (let [shape (when (keyword? key)
+                (try (schema/schema-definition key) (catch :default _ nil)))
+        form  (cond
+                shape                       (clip (pr-str shape) 200)
+                (not (str/blank? source))   (clip (str/trim source) 200)
+                :else                       "<not registered>")]
+    (str "[schema " (pr-str key) "]  " form)))
+
+(defn- test-block-ai
+  "One test rendered for the :ai form. The `:seon.test` kind is deferred
+   (T9); this renders gracefully if rows ever appear."
+  [{:seon.test/keys [sym source]}]
+  (str "[test " sym "]"
+       (when (and source (not (str/blank? source)))
+         (str "\n" (clip (str/trim source) fn-source-inline-threshold)))))
+
+(defn- render-one-ns-ai
+  "Render a single namespace block to text. `ns-kw` is the namespace
+   keyword; `data` is the `pull-ns-data` result (or nil = not in db)."
+  [ns-kw data]
+  (if (nil? data)
+    (str ";; requires: " (name ns-kw) " (not in db)")
+    (let [src     (:seon.ns/source data)
+          fns     (->> (:seon.fn/_ns data)     (sort-by :seon.fn/sym))
+          schemas (->> (:seon.schema/_ns data) (sort-by (comp str :seon.schema/key)))
+          tests   (->> (:seon.test/_ns data)   (sort-by :seon.test/sym))
+          body    (cond-> []
+                    (and src (not (str/blank? src)))
+                    (conj (str/trim src))
+                    (seq fns)
+                    (into (map fn-block-ai fns))
+                    (seq schemas)
+                    (into (map schema-block-ai schemas))
+                    (seq tests)
+                    (into (map test-block-ai tests)))]
+      (str "<namespace name=\"" (name ns-kw) "\">\n"
+           (if (seq body) (str/join "\n\n" body) ";; (no recorded source/fns/schemas)")
+           "\n</namespace>"))))
+
+(defn- render-one-ns-html
+  "Render a single namespace block to hiccup. Reuses the per-kind
+   `seon.handlers.{ns,fn,schema}/render-html` for each member so the
+   webview card styling stays consistent with the inspector panes."
+  [db ns-kw data]
+  (if (nil? data)
+    [:div {:class "py-1 text-xs font-mono text-text-500 italic"}
+     (str "requires: " (name ns-kw) " (not in db)")]
+    (let [fns     (->> (:seon.fn/_ns data)     (sort-by :seon.fn/sym))
+          schemas (->> (:seon.schema/_ns data) (sort-by (comp str :seon.schema/key)))
+          ns-ent  {:seon.ns/name ns-kw}]
+      (into
+        [:section {:class "py-1 border-l-2 border-base-700 pl-2"}
+         (:seon.render/hiccup (h-ns/render-html {:seon.db/db db :seon.render/entity ns-ent}))]
+        (concat
+          (for [f fns]
+            (:seon.render/hiccup
+              (h-fn/render-html {:seon.db/db db :seon.render/entity f})))
+          (for [s schemas]
+            (:seon.render/hiccup
+              (h-schema/render-html {:seon.db/db db :seon.render/entity s}))))))))
+
+(defn- collect-ns-order
+  "Compute the ordered, deduped list of namespace keywords to render —
+   required nses FIRST (prepended), then the ns itself, recursing to
+   `depth`. Cycle- and revisit-safe: a ns already in the accumulator is
+   never expanded or re-added. depth 0 = just `ns-kw` (no requires).
+
+   Returns `[ordered-kws data-by-kw]` where `data-by-kw` caches each
+   ns's `pull-ns-data` result (possibly nil for not-in-db requires)."
+  [db ns-kw depth]
+  (let [data-by-kw (atom {})
+        seen       (atom #{})
+        order      (atom [])
+        ;; memoized pull
+        data-for   (fn [k]
+                     (if (contains? @data-by-kw k)
+                       (@data-by-kw k)
+                       (let [d (pull-ns-data db k)]
+                         (swap! data-by-kw assoc k d)
+                         d)))
+        walk       (fn walk [k d]
+                     (when-not (contains? @seen k)
+                       (swap! seen conj k)
+                       (let [data (data-for k)
+                             reqs (when (and data (pos? d))
+                                    (->> (parse-require-syms (:seon.ns/source data))
+                                         (map keyword)))]
+                         ;; required nses first (prepended), then self
+                         (doseq [r reqs] (walk r (dec d)))
+                         (swap! order conj k))))]
+    (walk ns-kw depth)
+    [@order @data-by-kw]))
+
+(schema/register! :seon.render/depth :int)
+(schema/register! :seon.render/format [:enum :ai :html])
+
+(schema/register! ::render-namespace-request
+  [:map
+   [:seon.ns/name        :seon.ns/name]
+   [:seon.render/depth   {:optional true} :seon.render/depth]
+   [:seon.render/format  {:optional true} :seon.render/format]
+   [:seon.db/db          {:optional true} :seon.db/db]])
+
+(schema/register! ::render-namespace-response
+  [:map
+   [:seon.render/text   {:optional true} :string]
+   [:seon.render/hiccup {:optional true} [:fn render/valid-hiccup?]]])
+
+(defn render-namespace
+  "Render a WHOLE namespace — its `(ns …)` source plus every `:seon.fn`,
+   `:seon.schema`, and (when the kind exists) `:seon.test` it owns — in
+   either `:ai` text or `:html` hiccup, recursing into the namespaces it
+   `(:require …)`s.
+
+   Required namespaces render FIRST (prepended), then the namespace
+   itself, to `:seon.render/depth` (default 1 = the ns + its direct
+   requires). Recursion is deduped (each ns rendered once) and cycle-safe.
+   A required ns with no `:seon.ns` entity is noted on a single line
+   (`requires: x.y (not in db)`), never errored.
+
+   Map-in / map-out:
+
+     {:seon.ns/name <keyword>
+      :seon.render/depth  <int, default 1>
+      :seon.render/format <:ai | :html, default :ai>
+      :seon.db/db <db value, optional — defaults to @*conn*>}
+
+   → {:seon.render/text <string>}     for :ai
+   → {:seon.render/hiccup <hiccup>}   for :html
+
+   This is the foundation of every agent's default context; the section
+   that surfaces the agent's namespaces resolves to it (T5)."
+  {:malli/schema [:=> [:cat ::render-namespace-request] ::render-namespace-response]}
+  [{ns-name :seon.ns/name
+    :seon.render/keys [depth format]
+    :seon.db/keys [db]
+    :or {depth 1 format :ai}}]
+  (let [db    (or db @db/*conn*)
+        ns-kw (if (keyword? ns-name) ns-name (keyword (str ns-name)))
+        [order data-by-kw] (collect-ns-order db ns-kw (max 0 depth))]
+    (if (= format :html)
+      {:seon.render/hiccup
+       (into [:div {:class "flex flex-col gap-2"}]
+             (for [k order]
+               (render-one-ns-html db k (data-by-kw k))))}
+      {:seon.render/text
+       (str/join "\n\n" (for [k order]
+                          (render-one-ns-ai k (data-by-kw k))))})))
 
 (defn warnings-section
   "Survey the DB for current problems and render them as a single
