@@ -791,6 +791,38 @@
                         :seon.ns/source source}])]
     (vec (concat ns-entities fn-entities schema-entities test-entities))))
 
+(def store-edn-cap
+  "Store-time char cap for any pr-str'd string persisted as a datom
+   (`:seon.eval/result-edn`, `:seon.eval/error`, `:seon.turn/prompt-text`).
+
+   MEMORY-SAFETY invariant: the DB must never hold a multi-MB blob in a
+   single datom. A 9.7M-char `pull [*]` result once landed verbatim as
+   `:seon.eval/result-edn`; a later whole-DB `[?e ?a ?v]` scan
+   materialized every bloated datom at once and OOM-killed the Node pod
+   (losing the in-RAM `:memory` DB). This cap bounds each persisted
+   string so a whole-DB scan stays bounded by `N * store-edn-cap`.
+
+   16k is ~10x the render cap (`seon.agent/eval-render-cap`, 1500) — the
+   LLM never sees beyond the render cap anyway, so the extra headroom is
+   purely for direct datom inspection/debugging while staying ~600x below
+   the 9.7M blob that caused the OOM. The FULL value remains available
+   in-session via the globalThis live-result stash (`(result <id>)`,
+   `stash-result-raw!`) — that path is NOT capped."
+  16384)
+
+(defn cap-edn
+  "Truncate an already-stringified (pr-str'd) value to `store-edn-cap`,
+   appending an elision marker reporting how many chars were dropped.
+   Nil-safe. Mirrors `seon.agent/cap-result` but applies the larger
+   store-time cap at the persistence boundary."
+  ([s] (cap-edn s store-edn-cap))
+  ([s limit]
+   (let [s (str s)
+         n (count s)]
+     (if (> n limit)
+       (str (subs s 0 limit) " …⟨" (- n limit) " chars elided⟩")
+       s))))
+
 (defn ^:async record-eval!
   "Transact one :seon.eval entity as a component child of its owning
    turn (per v1.md §2.1 — `:seon.turn/evals` is component-many). The
@@ -830,15 +862,21 @@
                           :seon.eval/ns          (if (keyword? ns)
                                                    ns
                                                    (keyword (str ns)))}
+                   ;; Cap the PERSISTED string (`cap-edn`) so the DB never
+                   ;; holds a multi-MB blob (MEMORY-SAFETY). The FULL value
+                   ;; is already in the globalThis live-result stash (set by
+                   ;; eval-batch! before this call) and is NOT capped.
                    (:ok result)
                    (assoc :seon.eval/result-edn
-                          (try (pr-str (:value result))
-                               (catch :default _ (str (:value result)))))
+                          (cap-edn
+                            (try (pr-str (:value result))
+                                 (catch :default _ (str (:value result))))))
 
                    (not (:ok result))
                    (assoc :seon.eval/error
-                          (try (pr-str (:error result))
-                               (catch :default _ (str (:error result)))))
+                          (cap-edn
+                            (try (pr-str (:error result))
+                                 (catch :default _ (str (:error result))))))
 
                    ;; Phase A item 8 — when the error carries a Malli
                    ;; instrumentation envelope (flattened into

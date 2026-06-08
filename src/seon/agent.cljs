@@ -668,7 +668,11 @@
                [{:seon.turn/id          id-of-turn
                  :seon.turn/at          (js/Date.)
                  :seon.turn/status      :running
-                 :seon.turn/prompt-text prompt-text}]}
+                 ;; Cap the PERSISTED prompt (MEMORY-SAFETY) so a huge
+                 ;; prompt can't bloat the datom and OOM a later whole-DB
+                 ;; scan. The render cap bounds what's normally IN
+                 ;; prompt-text; this is the defensive store-time bound.
+                 :seon.turn/prompt-text (seval/cap-edn prompt-text)}]}
               {:seon.agent/id id :seon.agent/state :running}]}))]
     (if (false? (:seon.db/ok? open-result))
       open-result
